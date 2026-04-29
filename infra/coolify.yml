@@ -1,19 +1,7 @@
-# PocketBase använder SQLite för lagring på UpCloud.
-# Databasfilen hålls i ./backend/pocketbase-data i denna struktur.
+# Coolify används endast för PocketBase-schema/hook-synk.
+# Frontend deployas separat till Vercel från `apps/web`.
 version: "1.0"
 services:
-  frontend:
-    name: platform-frontend
-    image: node:20
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: npm install && npm run build && npm run start
-    ports:
-      - 3000:3000
-    env:
-      - NEXT_PUBLIC_POCKETBASE_URL
-
   pocketbase:
     name: platform-pocketbase
     image: pocketbase/pocketbase:latest

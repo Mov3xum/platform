@@ -1,6 +1,7 @@
 # PocketBase-schema för Moveum Inkubatorplattform
 
 Det här katalogen innehåller startpunkter för PocketBase-schemats samlingar.
+Det är inte en separat applikation som deployas. Den här mappen används för PocketBase-schema och hook-konfigurationer som sedan synkas till din UpCloud-hostade PocketBase-instans.
 PocketBase körs mot en SQLite-databas på UpCloud, där databasfilen kan ligga i `backend/pocketbase-data`.
 
 ## Rekommenderade samlingar

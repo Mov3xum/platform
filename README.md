@@ -3,17 +3,17 @@
 Det här repot innehåller en grundstruktur för en modulär inkubatorplattform med startup-fokus.
 Plattformen är tänkt att drivas med:
 
-- Frontend: Next.js (Vercel)
+- Frontend: Next.js på Vercel
 - Backend/data: PocketBase på UpCloud med SQLite-lagring
-- Deployment-hantering: Coolify
+- Deployment-hantering: Coolify endast för PocketBase-schema/hook-synk
 - Gemensamt integrationsbibliotek för RBAC och startup-moduler
 
 ## Arkitektur
 
-- `apps/web`: frontend-portal för inkubatorn
+- `apps/web`: frontend-portal för inkubatorn (deployas till Vercel)
 - `packages/shared`: gemensamt integrationsbibliotek med roller, typer och PocketBase-klient
-- `backend/pocketbase-schema`: beskriver PocketBase-samlingar och schema
-- `infra/coolify.yml`: startpunkt för Coolify-konfiguration
+- `backend/pocketbase-schema`: beskriver PocketBase-samlingar och schema, inte en separat app
+- `infra/coolify.yml`: valfri Coolify-konfiguration för PocketBase-setup
 
 ## Roller
 
@@ -46,6 +46,6 @@ Plattformen är designad för att samla data i den gemensamma startup-modulen:
 
 - implementera PocketBase-samlingarna i `backend/pocketbase-schema`
 - koppla frontend till PocketBase via `packages/shared`
-- skapa Coolify-pipeline i `infra/coolify.yml`
+- deploya frontend `apps/web` till Vercel med rotmapp `apps/web`
 - konfigurera SQLite-lagring för PocketBase på UpCloud
 - bygga in startupkompassen, utbildningsmoduler och digital onboarding
