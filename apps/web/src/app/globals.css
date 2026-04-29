@@ -1,0 +1,29 @@
+@import "tailwindcss";
+@import "./fonts.css";
+@import "@platform/shared/design/tokens.css";
+
+@theme {
+  --color-primary: oklch(55% 0.2 270);
+  --color-surface: oklch(25% 0.02 200);
+  --color-success: oklch(70% 0.2 130);
+  --color-warning: oklch(75% 0.2 70);
+  --color-error: oklch(60% 0.25 20);
+  --color-accent: oklch(65% 0.18 300);
+  
+  --font-sans: "Inter Variable", system-ui, sans-serif;
+  --font-serif: "Fraunces Variable", Georgia, serif;
+  --font-mono: "JetBrains Mono Variable", monospace;
+}
+
+@layer base {
+  html {
+    @apply antialiased;
+    color-scheme: light;
+  }
+  
+  html.dark {
+    color-scheme: dark;
+  }
+}
+
+@custom-variant dark (&:is(.dark *));
