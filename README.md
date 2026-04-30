@@ -1,51 +1,103 @@
 # Moveum Inkubatorplattform
 
-Det här repot innehåller en grundstruktur för en modulär inkubatorplattform med startup-fokus.
-Plattformen är tänkt att drivas med:
+Modulär inkubatorplattform för Movexum/Moveum med extension-point-arkitektur och EU-suveränitet.
 
-- Frontend: Next.js på Vercel
-- Backend/data: PocketBase på UpCloud med SQLite-lagring
-- Deployment-hantering: Coolify endast för PocketBase-schema/hook-synk
-- Gemensamt integrationsbibliotek för RBAC och startup-moduler
+## Teknologi
+
+- **Frontend**: Next.js 15 + React 19 (App Router, Server Components)
+- **Styling**: Tailwind v4 med OKLCH-tokens, inga externe CDN-anrop
+- **Komponenter**: shadcn/ui-forking, cmdk, sonner
+- **Backend**: PocketBase 0.22+ (självhostad)
+- **Deployment**: Coolify containers på UpCloud (ej Vercel)
+- **Design-system**: OKLCH-tokens, selvhostade fonter (Inter, Fraunces, JetBrains Mono variable)
 
 ## Arkitektur
 
-- `apps/web`: frontend-portal för inkubatorn (deployas till Vercel)
-- `packages/shared`: gemensamt integrationsbibliotek med roller, typer och PocketBase-klient
-- `backend/pocketbase-schema`: beskriver PocketBase-samlingar och schema, inte en separat app
-- `infra/coolify.yml`: valfri Coolify-konfiguration för PocketBase-setup
+```
+apps/web/              # Next.js-app (Server Components first)
+  ├── src/
+  │   ├── app/         # App Router (layout + routes)
+  │   ├── components/  # UI-komponenter
+  │   ├── lib/         # Auth, PB, registry, utilities
+  │   └── modules/     # Moduler (startups, coaching, o.s.v.)
+  └── public/fonts/    # Selvhostade fonter (WOFF2)
 
-## Roller
-
-Systemet stöder upp till fem roller enligt RBAC:
-
-1. `admin`
-2. `incubator_lead`
-3. `mentor`
-4. `startup`
-5. `observer`
+packages/shared/       # Gemensamt library
+  ├── src/
+  │   ├── design/      # Tokens (TS + CSS)
+  │   └── types/       # Gemensamma typer
+```
 
 ## Moduler
 
-Plattformen är designad för att samla data i den gemensamma startup-modulen:
+Plattformen använder extension-point-mönstret. Moduler registreras och kan bidra med:
 
-- startup-översikt
-- IRL-faser
-- aktiviteter & nästa steg
-- dokumentation från möten
-- personer i bolaget
-- signerade avtal (NDA etc.)
-- onboarding och avtalshantering
+- **Navigation items** (sidomeny)
+- **Dashboard widgets**
+- **Startup-flikar** (Overview, Team, Milestones, Notes)
+- **Search providers** (command palette)
+- **Global commands**
+
+### Befintliga moduler
+
+- `startups` — Bolagöversikt, fas-tidslinje, team, milstolpar, anteckningar
+- `coaching` (coming_soon)
+- `programs` (coming_soon)
+- `funding` (coming_soon)
+- ... 8 fler skisser
+
+## Roller & Behörigheter
+
+5 roller: `admin`, `incubator_lead`, `mentor`, `startup`, `observer`
+
+Moduler definierar `requiredRoles` — användare måste ha minst en av rollerna.
 
 ## Kom igång
 
-1. `npm install`
-2. `npm run dev`
+```bash
+npm install
+npm run dev
+```
+
+Öppna http://localhost:3000.
+
+## Designbeslut
+
+| Aspekt | Val |
+|---|---|
+| Routing | Tunna shims i `app/(app)/` importerar från `modules/` |
+| Styling | Tailwind v4 + OKLCH CSS custom props |
+| Fonter | Selvhostade WOFF2 (`/public/fonts`) |
+| Dark mode | Klassbaserat (`.dark` på `<html>`) |
+| Auth-token | httpOnly-cookie via middleware |
+| Realtime | PocketBase-prenumeration (minimal v1) |
+| Hosting | Coolify containers (no vendor lock-in) |
+| i18n | Modul som andra moduler (`LocalizedText { sv, en }`) |
+
+## PocketBase-schema
+
+Migrations under `backend/pocketbase-schema/migrations/`:
+
+- `users` — admin role + roles[] + linked_startup
+- `startups` — fase, namn, beskrivning, coaches[]
+- `startup_team_members` — relation
+- `startup_milestones` — aktiviteter & måltal
+- `startup_tags` — kategorisering
+
+Starta local dev:
+```bash
+pocketbase serve --http=localhost:8080
+```
 
 ## Nästa steg
 
-- implementera PocketBase-samlingarna i `backend/pocketbase-schema`
-- koppla frontend till PocketBase via `packages/shared`
-- deploya frontend `apps/web` till Vercel med rotmapp `apps/web`
-- konfigurera SQLite-lagring för PocketBase på UpCloud
+1. Ladda ner och placera fonter i `apps/web/public/fonts/`
+2. Implementera PocketBase-migrations
+3. Starta `npm run dev` — Tailwind-tokens & layout bör renderas
+4. Deploytesterna i Coolify när repot är ready
+
+---
+
+**Repo:** Moveum/platform  
+**Maintainers:** Hampusgranstrom (with admin access via hampus@boxmeal)
 - bygga in startupkompassen, utbildningsmoduler och digital onboarding
