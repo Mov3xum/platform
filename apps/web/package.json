@@ -6,20 +6,30 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "14.2.5",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "pocketbase": "^0.15.0"
+    "next": "15.0.3",
+    "react": "19.0.0-rc.0",
+    "react-dom": "19.0.0-rc.0",
+    "pocketbase": "^0.22.0",
+    "@platform/shared": "workspace:*",
+    "cmdk": "^0.2.1",
+    "sonner": "^1.7.2",
+    "lucide-react": "^0.469.0",
+    "cva": "^1.0.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^20.14.2",
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.3",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "eslint": "^8.57.0",
-    "eslint-config-next": "14.2.5",
-    "typescript": "^5.5.4"
+    "eslint-config-next": "15.0.3",
+    "typescript": "^5.5.4",
+    "tailwindcss": "^4.0.0"
   }
 }
