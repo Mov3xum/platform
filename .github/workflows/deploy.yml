@@ -2,7 +2,9 @@ name: Deploy to Coolify
 
 on:
   push:
-    branches: [staging]
+    branches:
+      - staging
+      - main
 
 jobs:
   deploy:
@@ -11,15 +13,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy to Coolify
+      - name: Install Coolify CLI
+        run: npm install -g @coolify/cli
+
+      - name: Deploy staging to Coolify
+        if: github.ref_name == 'staging'
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_PROJECT_ID: ${{ secrets.COOLIFY_PROJECT_ID }}
         run: |
-          # Install Coolify CLI
-          npm install -g @coolify/cli
-          
-          # Authenticate and deploy (replace with your actual values)
-          # coolify login --token ${{ secrets.COOLIFY_TOKEN }}
-          # coolify deploy --project your-project-uuid --env staging
-          
-          # Placeholder - replace with actual Coolify CLI commands
-          echo "Deployment would trigger here for branch: ${{ github.ref_name }}"
-          echo "Commit: ${{ github.sha }}"
+          coolify login --token "$COOLIFY_TOKEN"
+          coolify deploy --project "$COOLIFY_PROJECT_ID" --env staging
+
+      - name: Deploy production to Coolify
+        if: github.ref_name == 'main'
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_PROJECT_ID: ${{ secrets.COOLIFY_PROJECT_ID }}
+        run: |
+          coolify login --token "$COOLIFY_TOKEN"
+          coolify deploy --project "$COOLIFY_PROJECT_ID" --env production
