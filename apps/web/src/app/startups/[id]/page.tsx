@@ -1,0 +1,374 @@
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { getOneForTenant } from '@/lib/pb.server';
+import { getServerPb, requireUser } from '@/lib/auth.server';
+import { hasRole } from '@/lib/rbac';
+import { PhaseBadge, StatusBadge } from '@/components/Badges';
+import { NoteForm } from '@/components/NoteForm';
+import {
+  activityStatusLabels,
+  activityTypeLabels,
+  agreementKindLabels,
+  agreementStatusLabels,
+  milestoneCategoryLabels,
+  milestoneStatusLabels,
+  type ActivityStatus,
+  type ActivityType,
+  type AgreementKind,
+  type AgreementStatus,
+  type MilestoneCategory,
+  type MilestoneStatus,
+  type StartupStatus
+} from '@/lib/labels';
+import type { StartupPhase } from '@platform/shared';
+
+interface StartupRecord {
+  id: string;
+  tenant: string;
+  name: string;
+  description: string;
+  phase: StartupPhase;
+  status: StartupStatus;
+  irl_level?: number;
+  next_step?: string;
+  tags?: string;
+  created: string;
+  updated: string;
+}
+
+interface NoteRecord {
+  id: string;
+  body: string;
+  author: string;
+  confidential: boolean;
+  created: string;
+  expand?: { author?: { id: string; display_name?: string; email: string } };
+}
+
+interface MilestoneRecord {
+  id: string;
+  title: string;
+  description?: string;
+  category: MilestoneCategory;
+  status: MilestoneStatus;
+  target_date?: string;
+  achieved_at?: string;
+}
+
+interface ActivityRecord {
+  id: string;
+  title: string;
+  type: ActivityType;
+  status: ActivityStatus;
+  due_date?: string;
+  description?: string;
+}
+
+interface AgreementRecord {
+  id: string;
+  title: string;
+  kind: AgreementKind;
+  status: AgreementStatus;
+  signed_at?: string;
+  expires_at?: string;
+}
+
+interface TeamMemberRecord {
+  id: string;
+  name: string;
+  role_title?: string;
+  email?: string;
+  is_founder?: boolean;
+}
+
+interface PartnerEngagementRecord {
+  id: string;
+  engagement_type: string;
+  started_at?: string;
+  amount_sek?: number;
+  expand?: { partner?: { id: string; name: string; type: string } };
+}
+
+export default async function StartupDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const user = await requireUser();
+  const canEdit = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
+
+  let startup: StartupRecord;
+  try {
+    startup = await getOneForTenant<StartupRecord>('startups', id);
+  } catch {
+    notFound();
+  }
+
+  const pb = await getServerPb();
+
+  const [team, milestones, activities, notes, agreements, engagements] = await Promise.all([
+    pb.collection('startup_team_members').getList<TeamMemberRecord>(1, 50, {
+      filter: `startup = "${id}"`,
+      sort: '-is_founder,name'
+    }),
+    pb.collection('milestones').getList<MilestoneRecord>(1, 50, {
+      filter: `startup = "${id}"`,
+      sort: 'target_date'
+    }),
+    pb.collection('activities').getList<ActivityRecord>(1, 50, {
+      filter: `startup = "${id}"`,
+      sort: '-due_date'
+    }),
+    pb.collection('notes').getList<NoteRecord>(1, 50, {
+      filter: `startup = "${id}"`,
+      sort: '-created',
+      expand: 'author'
+    }),
+    pb.collection('agreements').getList<AgreementRecord>(1, 50, {
+      filter: `startup = "${id}"`,
+      sort: '-signed_at'
+    }),
+    pb.collection('partner_engagements').getList<PartnerEngagementRecord>(1, 50, {
+      filter: `startup = "${id}"`,
+      sort: '-started_at',
+      expand: 'partner'
+    })
+  ]);
+
+  return (
+    <main className="mx-auto max-w-6xl px-6 py-10 lg:px-8">
+      <div className="mb-6">
+        <Link href="/startups" className="text-sm text-slate-600 hover:text-slate-950">
+          ← Alla bolag
+        </Link>
+      </div>
+
+      <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="mb-3 flex items-center gap-2">
+            <PhaseBadge phase={startup.phase} />
+            <StatusBadge status={startup.status} />
+            {startup.irl_level ? (
+              <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
+                IRL {startup.irl_level}
+              </span>
+            ) : null}
+          </div>
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{startup.name}</h1>
+          {startup.next_step ? (
+            <p className="mt-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-700">Nästa steg:</span> {startup.next_step}
+            </p>
+          ) : null}
+        </div>
+        {canEdit && (
+          <Link
+            href={`/startups/${id}/edit`}
+            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Redigera
+          </Link>
+        )}
+      </header>
+
+      <nav className="mb-8 flex flex-wrap gap-3 text-sm">
+        {[
+          ['#overview', 'Översikt'],
+          ['#team', `Team (${team.totalItems})`],
+          ['#milestones', `Milstolpar (${milestones.totalItems})`],
+          ['#activities', `Aktiviteter (${activities.totalItems})`],
+          ['#notes', `Anteckningar (${notes.totalItems})`],
+          ['#agreements', `Avtal (${agreements.totalItems})`],
+          ['#partners', `Partners (${engagements.totalItems})`]
+        ].map(([href, label]) => (
+          <a
+            key={href}
+            href={href}
+            className="rounded-full border border-slate-200 bg-white px-3 py-1 font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            {label}
+          </a>
+        ))}
+      </nav>
+
+      <div className="space-y-8">
+        <Section id="overview" title="Översikt">
+          {startup.description ? (
+            <div className="prose prose-slate max-w-none text-sm" dangerouslySetInnerHTML={{ __html: startup.description }} />
+          ) : (
+            <Empty>Ingen beskrivning än.</Empty>
+          )}
+          {startup.tags ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {startup.tags.split(',').map((t) => t.trim()).filter(Boolean).map((tag) => (
+                <span key={tag} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </Section>
+
+        <Section id="team" title="Team">
+          {team.items.length === 0 ? (
+            <Empty>Inga teammedlemmar registrerade.</Empty>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {team.items.map((m) => (
+                <li key={m.id} className="flex items-center justify-between py-3">
+                  <div>
+                    <p className="font-medium text-slate-950">
+                      {m.name} {m.is_founder ? <span className="ml-1 text-xs text-cyan-700">(grundare)</span> : null}
+                    </p>
+                    {m.role_title ? <p className="text-sm text-slate-600">{m.role_title}</p> : null}
+                  </div>
+                  {m.email ? <a href={`mailto:${m.email}`} className="text-sm text-cyan-700 hover:underline">{m.email}</a> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section id="milestones" title="Milstolpar">
+          {milestones.items.length === 0 ? (
+            <Empty>Inga milstolpar registrerade.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {milestones.items.map((m) => (
+                <li key={m.id} className="rounded-2xl border border-slate-100 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-slate-950">{m.title}</p>
+                      <p className="text-xs text-slate-500">
+                        {milestoneCategoryLabels[m.category]} ·{' '}
+                        {m.target_date ? new Date(m.target_date).toLocaleDateString('sv-SE') : 'Inget måldatum'}
+                      </p>
+                    </div>
+                    <StatusPill label={milestoneStatusLabels[m.status]} variant={m.status === 'achieved' ? 'success' : m.status === 'missed' ? 'danger' : 'neutral'} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section id="activities" title="Aktiviteter">
+          {activities.items.length === 0 ? (
+            <Empty>Inga aktiviteter registrerade.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {activities.items.map((a) => (
+                <li key={a.id} className="rounded-2xl border border-slate-100 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-slate-950">{a.title}</p>
+                      <p className="text-xs text-slate-500">
+                        {activityTypeLabels[a.type]} ·{' '}
+                        {a.due_date ? new Date(a.due_date).toLocaleDateString('sv-SE') : 'Inget datum'}
+                      </p>
+                    </div>
+                    <StatusPill label={activityStatusLabels[a.status]} variant={a.status === 'done' ? 'success' : a.status === 'cancelled' ? 'neutral' : 'info'} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section id="notes" title="Anteckningar">
+          <div className="mb-6 rounded-2xl border border-slate-100 bg-slate-50/50 p-4">
+            <NoteForm startupId={id} />
+          </div>
+          {notes.items.length === 0 ? (
+            <Empty>Inga anteckningar än.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {notes.items.map((n) => (
+                <li key={n.id} className="rounded-2xl border border-slate-100 p-4">
+                  <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
+                    <span>
+                      {n.expand?.author?.display_name || n.expand?.author?.email || 'Okänd'} ·{' '}
+                      {new Date(n.created).toLocaleString('sv-SE')}
+                    </span>
+                    {n.confidential ? (
+                      <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">
+                        Konfidentiell
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="prose prose-slate prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: n.body }} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section id="agreements" title="Avtal">
+          {agreements.items.length === 0 ? (
+            <Empty>Inga avtal registrerade.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {agreements.items.map((a) => (
+                <li key={a.id} className="flex items-center justify-between rounded-2xl border border-slate-100 p-4">
+                  <div>
+                    <p className="font-medium text-slate-950">{a.title}</p>
+                    <p className="text-xs text-slate-500">
+                      {agreementKindLabels[a.kind]} ·{' '}
+                      {a.signed_at ? `signerat ${new Date(a.signed_at).toLocaleDateString('sv-SE')}` : 'osignerat'}
+                    </p>
+                  </div>
+                  <StatusPill label={agreementStatusLabels[a.status]} variant={a.status === 'signed' ? 'success' : a.status === 'expired' || a.status === 'terminated' ? 'danger' : 'info'} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section id="partners" title="Partners">
+          {engagements.items.length === 0 ? (
+            <Empty>Inga partner-engagement.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {engagements.items.map((e) => (
+                <li key={e.id} className="flex items-center justify-between rounded-2xl border border-slate-100 p-4">
+                  <div>
+                    <p className="font-medium text-slate-950">{e.expand?.partner?.name || 'Okänd partner'}</p>
+                    <p className="text-xs text-slate-500">
+                      {e.engagement_type}
+                      {e.amount_sek ? ` · ${e.amount_sek.toLocaleString('sv-SE')} SEK` : ''}
+                      {e.started_at ? ` · sedan ${new Date(e.started_at).toLocaleDateString('sv-SE')}` : ''}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      </div>
+    </main>
+  );
+}
+
+function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
+  return (
+    <section id={id} className="scroll-mt-24 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-900/5">
+      <h2 className="mb-4 text-lg font-semibold text-slate-950">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return <p className="text-sm text-slate-500">{children}</p>;
+}
+
+function StatusPill({ label, variant }: { label: string; variant: 'success' | 'danger' | 'info' | 'neutral' }) {
+  const classes = {
+    success: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    danger: 'bg-red-50 text-red-700 ring-red-200',
+    info: 'bg-cyan-50 text-cyan-700 ring-cyan-200',
+    neutral: 'bg-slate-100 text-slate-700 ring-slate-200'
+  }[variant];
+  return (
+    <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classes}`}>
+      {label}
+    </span>
+  );
+}

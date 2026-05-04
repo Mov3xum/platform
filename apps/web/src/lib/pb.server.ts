@@ -1,6 +1,6 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
-import type { ListResult, RecordModel } from 'pocketbase';
+import type { ListResult } from 'pocketbase';
 import { getServerPb, requireUser, type SessionUser } from './auth.server';
 
 export interface TenantQuery {
@@ -33,7 +33,7 @@ function withTenantFilter(tenantId: string, filter?: string, tenantField = 'tena
  * Server-side rules also enforce tenant isolation — this is a defense-in-depth
  * convenience that keeps app code from accidentally querying across tenants.
  */
-export async function listForTenant<T extends RecordModel = RecordModel>(
+export async function listForTenant<T = Record<string, unknown>>(
   collection: string,
   options: ListOptions & { tenantField?: string } = {}
 ): Promise<ListResult<T>> {
@@ -47,7 +47,7 @@ export async function listForTenant<T extends RecordModel = RecordModel>(
   });
 }
 
-export async function getOneForTenant<T extends RecordModel = RecordModel>(
+export async function getOneForTenant<T = Record<string, unknown>>(
   collection: string,
   id: string,
   options: { expand?: string; tenantField?: string } = {}
