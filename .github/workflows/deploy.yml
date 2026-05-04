@@ -13,11 +13,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web app
+        run: npm run build --workspace=@platform/web
+
       - name: Install Coolify CLI
         run: npm install -g @coolify/cli
 
       - name: Deploy staging to Coolify
-        if: github.ref_name == 'staging'
+        if: github.ref == 'refs/heads/staging'
         env:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
           COOLIFY_PROJECT_ID: ${{ secrets.COOLIFY_PROJECT_ID }}
@@ -26,7 +38,7 @@ jobs:
           coolify deploy --project "$COOLIFY_PROJECT_ID" --env staging
 
       - name: Deploy production to Coolify
-        if: github.ref_name == 'main'
+        if: github.ref == 'refs/heads/main'
         env:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
           COOLIFY_PROJECT_ID: ${{ secrets.COOLIFY_PROJECT_ID }}
