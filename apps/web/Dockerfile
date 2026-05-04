@@ -17,7 +17,7 @@ RUN apk add --no-cache libc6-compat
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-RUN yarn build --workspace=@platform/web
+RUN yarn workspace @platform/web build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
@@ -32,4 +32,4 @@ COPY --from=builder /app .
 USER nextjs
 EXPOSE 3000
 
-CMD ["yarn", "workspace", "@platform/web", "start", "-p", "3000", "-H", "0.0.0.0"]
+CMD ["yarn", "workspace", "@platform/web", "start", "--", "-p", "3000", "-H", "0.0.0.0"]
