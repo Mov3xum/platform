@@ -30,7 +30,7 @@ jobs:
       - name: Deploy to Coolify staging
         env:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
-          COOLIFY_PROJECT_ID: ${{ secrets.COOLIFY_PROJECT_ID }}
+          COOLIFY_PROJECT_ID: ${{ secrets.COOLIFY_PROJECT_ID_STAGING }}
         run: |
           coolify login --token "$COOLIFY_TOKEN"
           coolify deploy --project "$COOLIFY_PROJECT_ID" --env staging
