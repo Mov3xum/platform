@@ -29,7 +29,7 @@ jobs:
         env:
           COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
-          COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID_STAGING }}
+          COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID_STAGING || secrets.COOLIFY_PROJECT_ID_STAGING }}
           COOLIFY_DEPLOY_WEBHOOK: ${{ secrets.COOLIFY_DEPLOY_WEBHOOK_STAGING }}
         run: |
           set -euo pipefail
@@ -41,6 +41,11 @@ jobs:
               -H "Accept: application/json" \
               "$COOLIFY_DEPLOY_WEBHOOK"
             exit 0
+          fi
+
+          if [ -z "${COOLIFY_APP_UUID:-}" ]; then
+            echo "Missing Coolify app UUID. Set COOLIFY_APP_UUID_STAGING (or legacy COOLIFY_PROJECT_ID_STAGING) in GitHub Secrets."
+            exit 1
           fi
 
           deploy_v4="$COOLIFY_BASE_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID&force=false"
