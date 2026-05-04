@@ -29,7 +29,7 @@ jobs:
         env:
           COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
-          COOLIFY_APP_UUID: ${{ secrets.COOLIFY_PROJECT_ID_STAGING }}
+          COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID_STAGING }}
           COOLIFY_DEPLOY_WEBHOOK: ${{ secrets.COOLIFY_DEPLOY_WEBHOOK_STAGING }}
         run: |
           set -euo pipefail
@@ -84,5 +84,5 @@ jobs:
             exit 0
           fi
 
-          echo "Both Coolify deploy endpoints returned 404. Verify COOLIFY_BASE_URL and that COOLIFY_PROJECT_ID_STAGING contains the Coolify app UUID."
+          echo "Both Coolify deploy endpoints returned 404. Verify COOLIFY_BASE_URL and that COOLIFY_APP_UUID_STAGING contains the Coolify app UUID."
           exit 1
