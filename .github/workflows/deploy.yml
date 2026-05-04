@@ -48,7 +48,13 @@ jobs:
             exit 1
           fi
 
-          deploy_v4="$COOLIFY_BASE_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID&force=false"
+          encoded_identifier=$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "$COOLIFY_APP_UUID")
+          deploy_param="uuid"
+          if [[ "$COOLIFY_APP_UUID" == *:* ]]; then
+            deploy_param="tag"
+          fi
+
+          deploy_v4="$COOLIFY_BASE_URL/api/v1/deploy?$deploy_param=$encoded_identifier&force=false"
           deploy_v1="$COOLIFY_BASE_URL/api/v1/applications/$COOLIFY_APP_UUID/start?force=false"
 
           try_deploy() {
