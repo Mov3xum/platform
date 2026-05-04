@@ -24,8 +24,23 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
 
   try {
     await pb.collection('users').authWithPassword(email, password, { expand: 'tenant' });
-  } catch {
-    return { error: 'Felaktig e-post eller lösenord.' };
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string; data?: { message?: string } };
+    console.error('login failed', { status: e.status, message: e.message, data: e.data });
+
+    if (e.status === 400) {
+      return { error: 'Fel e-post eller lösenord.' };
+    }
+    if (e.status === 403) {
+      return { error: 'Kontot är ej verifierat eller saknar behörighet.' };
+    }
+    if (e.status === 404) {
+      return { error: 'Users-collectionen saknas i PocketBase — har migrationerna körts?' };
+    }
+    if (!e.status) {
+      return { error: 'Kunde inte nå PocketBase. Kontrollera NEXT_PUBLIC_POCKETBASE_URL.' };
+    }
+    return { error: e.data?.message || e.message || 'Inloggning misslyckades. Försök igen.' };
   }
 
   const payload = JSON.stringify({

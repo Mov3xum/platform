@@ -13,7 +13,7 @@
     "next": "15.0.3",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "pocketbase": "^0.22.0",
+    "pocketbase": "^0.25.0",
     "@platform/shared": "*",
     "cmdk": "^0.2.1",
     "sonner": "^1.7.2",

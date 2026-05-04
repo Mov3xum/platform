@@ -2,38 +2,35 @@
 
 const ANY_AUTH = '@request.auth.id != ""';
 const TENANT_MATCH = '@request.auth.tenant = startup.tenant';
-// Notes are visible to staff + the author. Confidential notes only to staff.
 const STAFF_ROLES =
   '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "mentor")';
 
 migrate(
-  (db) => {
+  (app) => {
+    const usersCol = app.findCollectionByNameOrId('users');
+
     const collection = new Collection({
       id: 'notes_collection',
       name: 'notes',
       type: 'base',
-      schema: [
+      fields: [
         {
           name: 'startup',
           type: 'relation',
           required: true,
-          options: {
-            collectionId: 'startups_collection',
-            cascadeDelete: true,
-            minSelect: 1,
-            maxSelect: 1
-          }
+          collectionId: 'startups_collection',
+          cascadeDelete: true,
+          minSelect: 1,
+          maxSelect: 1
         },
         {
           name: 'author',
           type: 'relation',
           required: true,
-          options: {
-            collectionId: '_pb_users_auth_',
-            cascadeDelete: false,
-            minSelect: 1,
-            maxSelect: 1
-          }
+          collectionId: usersCol.id,
+          cascadeDelete: false,
+          minSelect: 1,
+          maxSelect: 1
         },
         {
           name: 'body',
@@ -57,11 +54,10 @@ migrate(
       deleteRule: `${ANY_AUTH} && (@request.auth.id = author || @request.auth.roles ?= "admin")`
     });
 
-    return Dao(db).saveCollection(collection);
+    return app.save(collection);
   },
-  (db) => {
-    const dao = new Dao(db);
-    const collection = dao.findCollectionByNameOrId('notes');
-    return dao.deleteCollection(collection);
+  (app) => {
+    const collection = app.findCollectionByNameOrId('notes');
+    return app.delete(collection);
   }
 );

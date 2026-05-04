@@ -6,45 +6,44 @@ const STAFF_ROLES =
   '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach")';
 
 migrate(
-  (db) => {
+  (app) => {
+    const usersCol = app.findCollectionByNameOrId('users');
+
     const collection = new Collection({
       id: 'startup_team_members_collection',
       name: 'startup_team_members',
       type: 'base',
-      schema: [
+      fields: [
         {
           name: 'startup',
           type: 'relation',
           required: true,
-          options: {
-            collectionId: 'startups_collection',
-            cascadeDelete: true,
-            minSelect: 1,
-            maxSelect: 1
-          }
+          collectionId: 'startups_collection',
+          cascadeDelete: true,
+          minSelect: 1,
+          maxSelect: 1
         },
         {
           name: 'user',
           type: 'relation',
           required: false,
-          options: {
-            collectionId: '_pb_users_auth_',
-            cascadeDelete: false,
-            minSelect: 0,
-            maxSelect: 1
-          }
+          collectionId: usersCol.id,
+          cascadeDelete: false,
+          minSelect: 0,
+          maxSelect: 1
         },
         {
           name: 'name',
           type: 'text',
           required: true,
-          options: { min: 1, max: 200 }
+          min: 1,
+          max: 200
         },
         {
           name: 'role_title',
           type: 'text',
           required: false,
-          options: { max: 200 }
+          max: 200
         },
         {
           name: 'email',
@@ -60,7 +59,8 @@ migrate(
           name: 'equity_pct',
           type: 'number',
           required: false,
-          options: { min: 0, max: 100 }
+          min: 0,
+          max: 100
         }
       ],
       indexes: ['CREATE INDEX idx_team_members_startup ON startup_team_members (startup)'],
@@ -71,11 +71,10 @@ migrate(
       deleteRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${STAFF_ROLES}`
     });
 
-    return Dao(db).saveCollection(collection);
+    return app.save(collection);
   },
-  (db) => {
-    const dao = new Dao(db);
-    const collection = dao.findCollectionByNameOrId('startup_team_members');
-    return dao.deleteCollection(collection);
+  (app) => {
+    const collection = app.findCollectionByNameOrId('startup_team_members');
+    return app.delete(collection);
   }
 );

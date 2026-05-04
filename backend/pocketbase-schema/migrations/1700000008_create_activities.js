@@ -6,37 +6,36 @@ const STAFF_OR_OWNER =
   '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.id = owner)';
 
 migrate(
-  (db) => {
+  (app) => {
+    const usersCol = app.findCollectionByNameOrId('users');
+
     const collection = new Collection({
       id: 'activities_collection',
       name: 'activities',
       type: 'base',
-      schema: [
+      fields: [
         {
           name: 'startup',
           type: 'relation',
           required: true,
-          options: {
-            collectionId: 'startups_collection',
-            cascadeDelete: true,
-            minSelect: 1,
-            maxSelect: 1
-          }
+          collectionId: 'startups_collection',
+          cascadeDelete: true,
+          minSelect: 1,
+          maxSelect: 1
         },
         {
           name: 'type',
           type: 'select',
           required: true,
-          options: {
-            maxSelect: 1,
-            values: ['meeting', 'call', 'email', 'task', 'workshop', 'other']
-          }
+          maxSelect: 1,
+          values: ['meeting', 'call', 'email', 'task', 'workshop', 'other']
         },
         {
           name: 'title',
           type: 'text',
           required: true,
-          options: { min: 1, max: 200 }
+          min: 1,
+          max: 200
         },
         {
           name: 'description',
@@ -47,10 +46,8 @@ migrate(
           name: 'status',
           type: 'select',
           required: true,
-          options: {
-            maxSelect: 1,
-            values: ['planned', 'in_progress', 'done', 'cancelled']
-          }
+          maxSelect: 1,
+          values: ['planned', 'in_progress', 'done', 'cancelled']
         },
         {
           name: 'due_date',
@@ -66,12 +63,10 @@ migrate(
           name: 'owner',
           type: 'relation',
           required: false,
-          options: {
-            collectionId: '_pb_users_auth_',
-            cascadeDelete: false,
-            minSelect: 0,
-            maxSelect: 1
-          }
+          collectionId: usersCol.id,
+          cascadeDelete: false,
+          minSelect: 0,
+          maxSelect: 1
         }
       ],
       indexes: [
@@ -86,11 +81,10 @@ migrate(
       deleteRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${STAFF_OR_OWNER}`
     });
 
-    return Dao(db).saveCollection(collection);
+    return app.save(collection);
   },
-  (db) => {
-    const dao = new Dao(db);
-    const collection = dao.findCollectionByNameOrId('activities');
-    return dao.deleteCollection(collection);
+  (app) => {
+    const collection = app.findCollectionByNameOrId('activities');
+    return app.delete(collection);
   }
 );
