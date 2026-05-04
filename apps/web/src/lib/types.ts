@@ -1,21 +1,15 @@
-export type Role = 'admin' | 'incubator_lead' | 'mentor' | 'startup' | 'observer';
+export type {
+  Role,
+  StartupPhase,
+  TenantType,
+  Tenant,
+  UserProfile,
+  Startup,
+  Partner,
+  ModuleDefinition
+} from '@platform/shared';
 
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: Role;
-}
-
-export interface Startup {
-  id: string;
-  name: string;
-  description: string;
-  innovationReadinessLevel: number;
-  nextStep: string;
-  documentsSigned: number;
-  teamMembers: number;
-}
+export { ALL_ROLES, ALL_PHASES, coreModules } from '@platform/shared';
 
 export interface ModuleCardProps {
   title: string;
