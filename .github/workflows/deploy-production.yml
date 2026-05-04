@@ -1,9 +1,9 @@
-name: Deploy to Coolify Staging
+name: Deploy to Coolify Production
 
 on:
   push:
     branches:
-      - staging
+      - main
 
 jobs:
   deploy:
@@ -27,10 +27,10 @@ jobs:
       - name: Install Coolify CLI
         run: npm install -g @coolify/cli
 
-      - name: Deploy to Coolify staging
+      - name: Deploy to Coolify production
         env:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
           COOLIFY_PROJECT_ID: ${{ secrets.COOLIFY_PROJECT_ID }}
         run: |
           coolify login --token "$COOLIFY_TOKEN"
-          coolify deploy --project "$COOLIFY_PROJECT_ID" --env staging
+          coolify deploy --project "$COOLIFY_PROJECT_ID" --env production
