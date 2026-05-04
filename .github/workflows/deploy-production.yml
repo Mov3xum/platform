@@ -19,10 +19,13 @@ jobs:
           cache: 'yarn'
 
       - name: Install dependencies
-        run: yarn install
+        run: yarn install --frozen-lockfile
+
+      - name: Typecheck
+        run: yarn typecheck
 
       - name: Build web app
-        run: yarn build --workspace=@platform/web
+        run: yarn build
 
       - name: Deploy to Coolify production
         env:
