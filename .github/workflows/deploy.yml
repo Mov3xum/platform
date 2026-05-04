@@ -25,13 +25,18 @@ jobs:
       - name: Build web app
         run: yarn build --workspace=@platform/web
 
-      - name: Install Coolify CLI
-        run: npm install -g @coolify/cli
-
       - name: Deploy to Coolify staging
         env:
+          COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
-          COOLIFY_PROJECT_ID: ${{ secrets.COOLIFY_PROJECT_ID_STAGING }}
+          COOLIFY_APP_UUID: ${{ secrets.COOLIFY_PROJECT_ID_STAGING }}
         run: |
-          coolify login --token "$COOLIFY_TOKEN"
-          coolify deploy --project "$COOLIFY_PROJECT_ID" --env staging
+          response=$(curl --fail-with-body -sS -X POST \
+            -H "Authorization: Bearer $COOLIFY_TOKEN" \
+            -H "Accept: application/json" \
+            "$COOLIFY_BASE_URL/api/v1/applications/$COOLIFY_APP_UUID/start?force=false")
+
+          echo "$response"
+
+          deployment_uuid=$(node -e "const data = JSON.parse(process.argv[1]); if (!data.deployment_uuid) process.exit(1); process.stdout.write(data.deployment_uuid);" "$response")
+          echo "Queued Coolify deployment: $deployment_uuid"
