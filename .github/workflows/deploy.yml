@@ -31,12 +31,48 @@ jobs:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
           COOLIFY_APP_UUID: ${{ secrets.COOLIFY_PROJECT_ID_STAGING }}
         run: |
-          response=$(curl --fail-with-body -sS -X POST \
-            -H "Authorization: Bearer $COOLIFY_TOKEN" \
-            -H "Accept: application/json" \
-            "$COOLIFY_BASE_URL/api/v1/applications/$COOLIFY_APP_UUID/start?force=false")
+          set -euo pipefail
 
-          echo "$response"
+          deploy_v4="$COOLIFY_BASE_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID&force=false"
+          deploy_v1="$COOLIFY_BASE_URL/api/v1/applications/$COOLIFY_APP_UUID/start?force=false"
 
-          deployment_uuid=$(node -e "const data = JSON.parse(process.argv[1]); if (!data.deployment_uuid) process.exit(1); process.stdout.write(data.deployment_uuid);" "$response")
-          echo "Queued Coolify deployment: $deployment_uuid"
+          try_deploy() {
+            local endpoint="$1"
+            echo "Trying Coolify endpoint: $endpoint"
+
+            local http_code
+            http_code=$(curl -sS -X POST \
+              -H "Authorization: Bearer $COOLIFY_TOKEN" \
+              -H "Accept: application/json" \
+              -o /tmp/coolify-response.json \
+              -w "%{http_code}" \
+              "$endpoint")
+
+            if [ "$http_code" = "404" ]; then
+              return 2
+            fi
+
+            if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+              cat /tmp/coolify-response.json
+              return 0
+            fi
+
+            echo "Coolify deploy failed with HTTP $http_code"
+            cat /tmp/coolify-response.json
+            return 1
+          }
+
+          if try_deploy "$deploy_v4"; then
+            exit 0
+          elif [ $? -eq 2 ]; then
+            echo "Endpoint not found, trying legacy path..."
+          else
+            exit 1
+          fi
+
+          if try_deploy "$deploy_v1"; then
+            exit 0
+          fi
+
+          echo "Both Coolify deploy endpoints returned 404. Verify COOLIFY_BASE_URL and app UUID."
+          exit 1
