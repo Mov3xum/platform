@@ -1,0 +1,25 @@
+name: Deploy to Coolify
+
+on:
+  push:
+    branches: [staging]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Coolify
+        run: |
+          # Install Coolify CLI
+          npm install -g @coolify/cli
+          
+          # Authenticate and deploy (replace with your actual values)
+          # coolify login --token ${{ secrets.COOLIFY_TOKEN }}
+          # coolify deploy --project your-project-uuid --env staging
+          
+          # Placeholder - replace with actual Coolify CLI commands
+          echo "Deployment would trigger here for branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
