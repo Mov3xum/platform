@@ -1,11 +1,8 @@
-import { Navbar } from "@/components/Navbar";
-
 export default function Home() {
   return (
     <main className="relative overflow-hidden bg-slate-50">
       <div className="absolute inset-x-0 top-0 h-80 bg-[radial-gradient(circle_at_top_left,_rgba(17,97,238,0.14),_transparent_35%),linear-gradient(180deg,_rgba(14,116,144,0.08),_transparent_70%)] pointer-events-none" />
       <div className="relative z-10">
-        <Navbar />
         <section className="mx-auto flex min-h-[calc(100vh-80px)] max-w-7xl flex-col justify-center px-6 py-10 lg:px-8">
           <div className="grid gap-12 lg:grid-cols-[1.1fr_minmax(280px,0.9fr)] lg:items-center">
             <div className="space-y-8">
