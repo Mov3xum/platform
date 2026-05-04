@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - staging
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -16,13 +17,13 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: 'yarn'
 
       - name: Install dependencies
-        run: npm install
+        run: yarn install
 
       - name: Build web app
-        run: npm run build --workspace=@platform/web
+        run: yarn build --workspace=@platform/web
 
       - name: Install Coolify CLI
         run: npm install -g @coolify/cli
