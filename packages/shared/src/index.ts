@@ -1,32 +1,77 @@
-export type Role = 'admin' | 'incubator_lead' | 'mentor' | 'startup' | 'observer';
+export type Role =
+  | 'admin'
+  | 'incubator_lead'
+  | 'coach'
+  | 'mentor'
+  | 'partner'
+  | 'startup_member'
+  | 'observer';
 
-export const Roles: Role[] = ['admin', 'incubator_lead', 'mentor', 'startup', 'observer'];
+export const ALL_ROLES: Role[] = [
+  'admin',
+  'incubator_lead',
+  'coach',
+  'mentor',
+  'partner',
+  'startup_member',
+  'observer'
+];
 
-export type TenantCategory = 'startup' | 'incubator' | 'mentor' | 'external';
+export type StartupPhase =
+  | 'idea'
+  | 'pre_revenue'
+  | 'early_revenue'
+  | 'growth'
+  | 'scale'
+  | 'exit';
 
-export interface StartupProfile {
+export const ALL_PHASES: StartupPhase[] = [
+  'idea',
+  'pre_revenue',
+  'early_revenue',
+  'growth',
+  'scale',
+  'exit'
+];
+
+export type TenantType = 'incubator' | 'partner_org';
+
+export interface Tenant {
   id: string;
   name: string;
-  description: string;
-  innovationReadinessLevel: number;
-  nextStep?: string;
-  activePrograms?: string[];
+  slug: string;
+  type: TenantType;
 }
 
 export interface UserProfile {
   id: string;
+  tenant: string;
   name: string;
   email: string;
-  role: Role;
-  tenant: TenantCategory;
+  roles: Role[];
+  linked_startups: string[];
 }
 
-export interface AgreementDocument {
+export interface Startup {
   id: string;
-  startupId: string;
-  title: string;
-  signedAt?: string;
-  fileUrl?: string;
+  tenant: string;
+  name: string;
+  description: string;
+  phase: StartupPhase;
+  irl_level: number;
+  next_step?: string;
+  owner?: string;
+  coaches: string[];
+  status: 'active' | 'alumni' | 'paused' | 'rejected';
+}
+
+export interface Partner {
+  id: string;
+  tenant: string;
+  name: string;
+  type: 'investor' | 'corporate' | 'public' | 'academic' | 'other';
+  contact_user?: string;
+  notes?: string;
 }
 
 export interface ModuleDefinition {
@@ -39,31 +84,38 @@ export interface ModuleDefinition {
 
 export const coreModules: ModuleDefinition[] = [
   {
-    id: 'startups',
-    title: 'Startup-översikt',
-    description: 'Samla all startupdata, IRL-faser, avtal och kontakter.',
-    rolesAllowed: ['admin', 'incubator_lead', 'mentor', 'observer', 'startup'],
-    route: '/startups'
-  },
-  {
-    id: 'onboarding',
-    title: 'Digital onboarding',
-    description: 'Onboarding för bolag med registrering, avtal och NDA.',
-    rolesAllowed: ['admin', 'incubator_lead', 'startup'],
-    route: '/onboarding'
-  },
-  {
     id: 'dashboard',
-    title: 'Inkubatorn Dashboard',
-    description: 'Rollspecifik vy med aktiviteter, nästa steg och status.',
-    rolesAllowed: ['admin', 'incubator_lead', 'mentor', 'observer', 'startup'],
+    title: 'Dashboard',
+    description: 'Rollanpassad översikt med aktiviteter och status.',
+    rolesAllowed: ALL_ROLES,
     route: '/dashboard'
   },
   {
+    id: 'startups',
+    title: 'Startups',
+    description: 'Bolagöversikt: profil, fas, team, milstolpar, avtal.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
+    route: '/startups'
+  },
+  {
+    id: 'partners',
+    title: 'Partners',
+    description: 'Partner-organisationer och deras engagemang i bolag.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'partner'],
+    route: '/partners'
+  },
+  {
+    id: 'onboarding',
+    title: 'Onboarding',
+    description: 'Digital onboarding för nya bolag i inkubatorn.',
+    rolesAllowed: ['admin', 'incubator_lead', 'startup_member'],
+    route: '/onboarding'
+  },
+  {
     id: 'education',
-    title: 'Utbildningsmoduler',
-    description: 'Finansiering, hållbarhet och internationalisering för bolag.',
-    rolesAllowed: ['admin', 'incubator_lead', 'mentor', 'startup'],
+    title: 'Utbildning',
+    description: 'Kurser och resurser för finansiering, hållbarhet, internationalisering.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'startup_member'],
     route: '/education'
   }
 ];

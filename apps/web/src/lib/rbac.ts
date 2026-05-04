@@ -1,21 +1,20 @@
-import type { Role } from './types';
+import { ALL_ROLES, coreModules, type Role } from '@platform/shared';
 
-export const availableRoles: Role[] = ['admin', 'incubator_lead', 'mentor', 'startup', 'observer'];
+export { ALL_ROLES };
 
-export interface RoleAccess {
-  role: Role;
-  modules: string[];
-}
+export const hasRole = (userRoles: Role[] | undefined, allowed: Role[]): boolean => {
+  if (!userRoles || userRoles.length === 0) return false;
+  return userRoles.some((r) => allowed.includes(r));
+};
 
-export const roleAccessMap: RoleAccess[] = [
-  { role: 'admin', modules: ['dashboard', 'startups', 'onboarding', 'education'] },
-  { role: 'incubator_lead', modules: ['dashboard', 'startups', 'onboarding', 'education'] },
-  { role: 'mentor', modules: ['dashboard', 'startups', 'education'] },
-  { role: 'startup', modules: ['dashboard', 'startups', 'onboarding', 'education'] },
-  { role: 'observer', modules: ['dashboard', 'startups'] }
-];
+export const canAccessModule = (userRoles: Role[] | undefined, moduleId: string): boolean => {
+  const mod = coreModules.find((m) => m.id === moduleId);
+  if (!mod) return false;
+  return hasRole(userRoles, mod.rolesAllowed);
+};
 
-export const canAccessModule = (role: Role, moduleId: string) => {
-  const record = roleAccessMap.find((item) => item.role === role);
-  return record?.modules.includes(moduleId) ?? false;
+export const requireRole = (userRoles: Role[] | undefined, allowed: Role[]): void => {
+  if (!hasRole(userRoles, allowed)) {
+    throw new Error('Forbidden: missing required role');
+  }
 };

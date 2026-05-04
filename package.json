@@ -7,9 +7,11 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=@platform/web",
-    "build": "npm run build --workspace=@platform/web",
-    "start": "npm run start --workspace=@platform/web",
-    "lint": "npm run lint --workspace=@platform/web"
-  }
+    "dev": "yarn workspace @platform/web dev",
+    "build": "yarn workspace @platform/web build",
+    "start": "yarn workspace @platform/web start",
+    "lint": "yarn workspace @platform/web lint",
+    "typecheck": "yarn workspace @platform/web typecheck"
+  },
+  "packageManager": "yarn@1.22.22"
 }
