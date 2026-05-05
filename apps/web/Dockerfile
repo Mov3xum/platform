@@ -19,17 +19,26 @@ COPY . .
 
 RUN yarn workspace @platform/web build
 
+# Minimal runtime image: copies only the standalone Next.js output
+# (~50MB) instead of the full builder /app (~1GB+). Avoids OOM/disk
+# issues during the COPY step on Coolify hosts.
 FROM node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 
 RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 
-COPY --from=builder /app .
+# standalone bundles only the node_modules actually needed at runtime
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
+# static assets aren't included in standalone — copy them separately
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
+# public assets (fonts, brand SVGs etc.)
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
 
 USER nextjs
 EXPOSE 3000
 
-CMD ["yarn", "workspace", "@platform/web", "start", "--", "-p", "3000", "-H", "0.0.0.0"]
+CMD ["node", "apps/web/server.js"]
