@@ -1,17 +1,27 @@
+/*
+ * Movexum brand-typsnitt:
+ *   - Sora (rubriker)
+ *   - Nunito Sans (brödtext)
+ *
+ * Inter/Fraunces/JetBrains finns kvar för bakåtkompatibilitet under
+ * migreringen, men Sora + Nunito Sans är de enda godkända varianterna
+ * enligt grafiska profilen.
+ */
+
 @font-face {
-  font-family: "Inter Variable";
+  font-family: "Sora Variable";
   font-style: normal;
-  font-weight: 100 900;
+  font-weight: 100 800;
   font-display: swap;
-  src: url("/fonts/inter-variable.woff2") format("woff2");
+  src: url("/fonts/sora-variable.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "Fraunces Variable";
+  font-family: "Nunito Sans Variable";
   font-style: normal;
-  font-weight: 100 900;
+  font-weight: 200 900;
   font-display: swap;
-  src: url("/fonts/fraunces-variable.woff2") format("woff2");
+  src: url("/fonts/nunito-sans-variable.woff2") format("woff2");
 }
 
 @font-face {

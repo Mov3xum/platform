@@ -1,18 +1,29 @@
 export default function EducationPage() {
   return (
-    <section>
-      <h1>Utbildningsplattform</h1>
-      <p>Moduler för finansiering, hållbarhet, internationalisering och teamutveckling.</p>
-      <div style={{ marginTop: 24, display: 'grid', gap: 16 }}>
-        <article style={{ border: '1px solid #d1d5db', borderRadius: 12, padding: 20, background: '#ffffff' }}>
-          <h2>Finansiering</h2>
-          <p>Kurser, checklistor och verktyg för kapital, pitch och investerarrelationer.</p>
+    <main className="mx-auto max-w-7xl px-6 py-10 lg:px-8">
+      <header className="mb-8">
+        <p className="text-sm font-medium text-link">Utbildning</p>
+        <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
+          Utbildningsplattform
+        </h1>
+        <p className="mt-2 text-base text-foreground-muted">
+          Moduler för finansiering, hållbarhet, internationalisering och teamutveckling.
+        </p>
+      </header>
+      <div className="grid gap-4 md:grid-cols-2">
+        <article className="rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
+          <h2 className="text-lg font-semibold text-foreground">Finansiering</h2>
+          <p className="mt-2 text-sm text-foreground-muted">
+            Kurser, checklistor och verktyg för kapital, pitch och investerarrelationer.
+          </p>
         </article>
-        <article style={{ border: '1px solid #d1d5db', borderRadius: 12, padding: 20, background: '#ffffff' }}>
-          <h2>Hållbarhet</h2>
-          <p>Innehål som hjälper startupbolag att bygga långsiktig hållbarhet i kärnverksamheten.</p>
+        <article className="rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
+          <h2 className="text-lg font-semibold text-foreground">Hållbarhet</h2>
+          <p className="mt-2 text-sm text-foreground-muted">
+            Innehåll som hjälper startupbolag att bygga långsiktig hållbarhet i kärnverksamheten.
+          </p>
         </article>
       </div>
-    </section>
+    </main>
   );
 }

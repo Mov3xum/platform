@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 140" role="img" aria-label="Movexum">
+  <title>Movexum</title>
+  <style>
+    .wordmark {
+      font-family: "Sora Variable", "Sora", system-ui, sans-serif;
+      font-weight: 800;
+      font-size: 110px;
+      letter-spacing: -2px;
+      fill: #f2f2f2;
+    }
+  </style>
+  <text x="0" y="108" class="wordmark">movexum</text>
+</svg>

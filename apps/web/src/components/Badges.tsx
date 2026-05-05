@@ -4,7 +4,7 @@ import { phaseLabels, phaseTokens, statusLabels, type StartupStatus } from '@/li
 export function PhaseBadge({ phase }: { phase: StartupPhase }) {
   return (
     <span
-      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700"
+      className="inline-flex items-center gap-2 rounded-full border border-default bg-surface px-3 py-1 text-xs font-medium text-foreground-muted"
       title={phaseLabels[phase]}
     >
       <span
@@ -16,11 +16,22 @@ export function PhaseBadge({ phase }: { phase: StartupPhase }) {
   );
 }
 
+/**
+ * StatusBadge använder Movexums brand-färger:
+ *   active   → grön (Movexum gron)
+ *   alumni   → neutral
+ *   paused   → gul (Movexum gul)
+ *   rejected → orange (Movexum orange)
+ */
 const statusClasses: Record<StartupStatus, string> = {
-  active: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  alumni: 'bg-slate-100 text-slate-700 ring-slate-200',
-  paused: 'bg-amber-50 text-amber-700 ring-amber-200',
-  rejected: 'bg-red-50 text-red-700 ring-red-200'
+  active:
+    'bg-movexum-pastell-gron text-movexum-morkgron ring-movexum-ljusgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron dark:ring-movexum-gron',
+  alumni:
+    'bg-canvas-subtle text-foreground-muted ring-default',
+  paused:
+    'bg-movexum-pastell-gul text-movexum-morkgul ring-movexum-gul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul dark:ring-movexum-morkgul',
+  rejected:
+    'bg-movexum-pastell-orange text-movexum-morkorange ring-movexum-orange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange dark:ring-movexum-orange',
 };
 
 export function StatusBadge({ status }: { status: StartupStatus }) {

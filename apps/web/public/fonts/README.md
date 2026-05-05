@@ -1,32 +1,24 @@
 # Fonts Directory
 
-This directory contains self-hosted font files in WOFF2 format. No Google Fonts CDN calls are made.
+Self-hosted variable fonts (WOFF2) – inga CDN-anrop.
 
-## Required Fonts
+## Movexum brand-typsnitt (grafisk profil)
 
-Download these variable fonts and place them in this directory:
-
-1. **Inter Variable** → `inter-variable.woff2`
-   - Source: https://github.com/rsms/inter/releases
-   - Variable font (100-900 weights)
-
-2. **Fraunces Variable** → `fraunces-variable.woff2`
-   - Source: https://github.com/undercasetype/Fraunces/releases
-   - Variable font (100-900 weights)
-
-3. **JetBrains Mono Variable** → `jetbrains-mono-variable.woff2`
+1. **Sora Variable** → `sora-variable.woff2` (rubriker, alla weights 100–800)
+   - Source: https://fonts.google.com/specimen/Sora
+2. **Nunito Sans Variable** → `nunito-sans-variable.woff2` (brödtext, 200–900)
+   - Source: https://fonts.google.com/specimen/Nunito+Sans
+3. **JetBrains Mono Variable** → `jetbrains-mono-variable.woff2` (kod/teknik)
    - Source: https://www.jetbrains.com/lp/mono/
-   - Variable font (100-800 weights)
 
-## Instructions
+## Instruktioner
 
-1. Download each font's variable WOFF2 file
-2. Rename to match the names above
-3. Place in this directory
-4. No additional configuration needed — fonts load via `/src/app/fonts.css`
+1. Ladda ner variable WOFF2 för respektive typsnitt
+2. Döp om enligt namnen ovan och placera i denna mapp
+3. Inga ytterligare steg – fonterna laddas via `apps/web/src/app/fonts.css`
 
-## Why Self-Hosted?
+## Varför self-hosted?
 
-- EU sovereignty (no external CDN calls)
-- Better performance (fonts loaded from same origin)
-- Privacy (no Google tracking)
+- EU-suveränitet (inga externa CDN-anrop)
+- Bättre prestanda (samma origin)
+- Integritet (ingen Google-tracking)

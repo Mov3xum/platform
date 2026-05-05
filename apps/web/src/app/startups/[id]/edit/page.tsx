@@ -39,17 +39,17 @@ export default async function EditStartupPage({ params }: { params: Promise<{ id
   return (
     <main className="mx-auto max-w-3xl px-6 py-10 lg:px-8">
       <div className="mb-6">
-        <Link href={`/startups/${id}`} className="text-sm text-slate-600 hover:text-slate-950">
+        <Link href={`/startups/${id}`} className="text-sm text-foreground-muted hover:text-foreground">
           ← Tillbaka till {startup.name}
         </Link>
       </div>
 
       <header className="mb-8">
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Redigera bolag</h1>
-        <p className="mt-2 text-sm text-slate-600">{startup.name}</p>
+        <h1 className="text-3xl font-semibold tracking-tight text-foreground">Redigera bolag</h1>
+        <p className="mt-2 text-sm text-foreground-muted">{startup.name}</p>
       </header>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm shadow-slate-900/5">
+      <div className="rounded-3xl border border-default bg-surface p-8 shadow-sm shadow-movexum-svart/5">
         <StartupForm
           action={boundAction}
           submitLabel="Spara ändringar"

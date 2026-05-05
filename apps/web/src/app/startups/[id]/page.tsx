@@ -135,7 +135,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10 lg:px-8">
       <div className="mb-6">
-        <Link href="/startups" className="text-sm text-slate-600 hover:text-slate-950">
+        <Link href="/startups" className="text-sm text-foreground-muted hover:text-foreground">
           ← Alla bolag
         </Link>
       </div>
@@ -146,22 +146,22 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
             <PhaseBadge phase={startup.phase} />
             <StatusBadge status={startup.status} />
             {startup.irl_level ? (
-              <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
+              <span className="inline-flex items-center rounded-full bg-canvas-subtle px-2.5 py-0.5 text-xs font-medium text-foreground-muted">
                 IRL {startup.irl_level}
               </span>
             ) : null}
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{startup.name}</h1>
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">{startup.name}</h1>
           {startup.next_step ? (
-            <p className="mt-2 text-sm text-slate-600">
-              <span className="font-medium text-slate-700">Nästa steg:</span> {startup.next_step}
+            <p className="mt-2 text-sm text-foreground-muted">
+              <span className="font-medium text-foreground-muted">Nästa steg:</span> {startup.next_step}
             </p>
           ) : null}
         </div>
         {canEdit && (
           <Link
             href={`/startups/${id}/edit`}
-            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-5 py-2.5 text-sm font-semibold text-foreground-muted transition hover:bg-canvas-subtle"
           >
             Redigera
           </Link>
@@ -181,7 +181,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           <a
             key={href}
             href={href}
-            className="rounded-full border border-slate-200 bg-white px-3 py-1 font-medium text-slate-700 transition hover:bg-slate-50"
+            className="rounded-full border border-default bg-surface px-3 py-1 font-medium text-foreground-muted transition hover:bg-canvas-subtle"
           >
             {label}
           </a>
@@ -191,14 +191,14 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       <div className="space-y-8">
         <Section id="overview" title="Översikt">
           {startup.description ? (
-            <div className="prose prose-slate max-w-none text-sm" dangerouslySetInnerHTML={{ __html: startup.description }} />
+            <div className="prose max-w-none text-sm text-foreground-muted dark:prose-invert" dangerouslySetInnerHTML={{ __html: startup.description }} />
           ) : (
             <Empty>Ingen beskrivning än.</Empty>
           )}
           {startup.tags ? (
             <div className="mt-4 flex flex-wrap gap-2">
               {startup.tags.split(',').map((t) => t.trim()).filter(Boolean).map((tag) => (
-                <span key={tag} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                <span key={tag} className="rounded-full bg-canvas-subtle px-3 py-1 text-xs font-medium text-foreground-muted">
                   #{tag}
                 </span>
               ))}
@@ -210,16 +210,16 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           {team.items.length === 0 ? (
             <Empty>Inga teammedlemmar registrerade.</Empty>
           ) : (
-            <ul className="divide-y divide-slate-100">
+            <ul className="divide-y divide-default">
               {team.items.map((m) => (
                 <li key={m.id} className="flex items-center justify-between py-3">
                   <div>
-                    <p className="font-medium text-slate-950">
-                      {m.name} {m.is_founder ? <span className="ml-1 text-xs text-cyan-700">(grundare)</span> : null}
+                    <p className="font-medium text-foreground">
+                      {m.name} {m.is_founder ? <span className="ml-1 text-xs text-link">(grundare)</span> : null}
                     </p>
-                    {m.role_title ? <p className="text-sm text-slate-600">{m.role_title}</p> : null}
+                    {m.role_title ? <p className="text-sm text-foreground-muted">{m.role_title}</p> : null}
                   </div>
-                  {m.email ? <a href={`mailto:${m.email}`} className="text-sm text-cyan-700 hover:underline">{m.email}</a> : null}
+                  {m.email ? <a href={`mailto:${m.email}`} className="text-sm text-link hover:underline">{m.email}</a> : null}
                 </li>
               ))}
             </ul>
@@ -232,11 +232,11 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ) : (
             <ul className="space-y-3">
               {milestones.items.map((m) => (
-                <li key={m.id} className="rounded-2xl border border-slate-100 p-4">
+                <li key={m.id} className="rounded-2xl border border-default p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="font-medium text-slate-950">{m.title}</p>
-                      <p className="text-xs text-slate-500">
+                      <p className="font-medium text-foreground">{m.title}</p>
+                      <p className="text-xs text-foreground-subtle">
                         {milestoneCategoryLabels[m.category]} ·{' '}
                         {m.target_date ? new Date(m.target_date).toLocaleDateString('sv-SE') : 'Inget måldatum'}
                       </p>
@@ -255,11 +255,11 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ) : (
             <ul className="space-y-3">
               {activities.items.map((a) => (
-                <li key={a.id} className="rounded-2xl border border-slate-100 p-4">
+                <li key={a.id} className="rounded-2xl border border-default p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="font-medium text-slate-950">{a.title}</p>
-                      <p className="text-xs text-slate-500">
+                      <p className="font-medium text-foreground">{a.title}</p>
+                      <p className="text-xs text-foreground-subtle">
                         {activityTypeLabels[a.type]} ·{' '}
                         {a.due_date ? new Date(a.due_date).toLocaleDateString('sv-SE') : 'Inget datum'}
                       </p>
@@ -273,7 +273,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
         </Section>
 
         <Section id="notes" title="Anteckningar">
-          <div className="mb-6 rounded-2xl border border-slate-100 bg-slate-50/50 p-4">
+          <div className="mb-6 rounded-2xl border border-default bg-canvas-subtle/50 p-4">
             <NoteForm startupId={id} />
           </div>
           {notes.items.length === 0 ? (
@@ -281,19 +281,19 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ) : (
             <ul className="space-y-3">
               {notes.items.map((n) => (
-                <li key={n.id} className="rounded-2xl border border-slate-100 p-4">
-                  <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
+                <li key={n.id} className="rounded-2xl border border-default p-4">
+                  <div className="mb-2 flex items-center justify-between text-xs text-foreground-subtle">
                     <span>
                       {n.expand?.author?.display_name || n.expand?.author?.email || 'Okänd'} ·{' '}
                       {new Date(n.created).toLocaleString('sv-SE')}
                     </span>
                     {n.confidential ? (
-                      <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">
+                      <span className="rounded-full bg-movexum-pastell-gul px-2 py-0.5 font-medium text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
                         Konfidentiell
                       </span>
                     ) : null}
                   </div>
-                  <div className="prose prose-slate prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: n.body }} />
+                  <div className="prose prose-sm max-w-none text-foreground-muted dark:prose-invert" dangerouslySetInnerHTML={{ __html: n.body }} />
                 </li>
               ))}
             </ul>
@@ -306,10 +306,10 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ) : (
             <ul className="space-y-3">
               {agreements.items.map((a) => (
-                <li key={a.id} className="flex items-center justify-between rounded-2xl border border-slate-100 p-4">
+                <li key={a.id} className="flex items-center justify-between rounded-2xl border border-default p-4">
                   <div>
-                    <p className="font-medium text-slate-950">{a.title}</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="font-medium text-foreground">{a.title}</p>
+                    <p className="text-xs text-foreground-subtle">
                       {agreementKindLabels[a.kind]} ·{' '}
                       {a.signed_at ? `signerat ${new Date(a.signed_at).toLocaleDateString('sv-SE')}` : 'osignerat'}
                     </p>
@@ -327,10 +327,10 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ) : (
             <ul className="space-y-3">
               {engagements.items.map((e) => (
-                <li key={e.id} className="flex items-center justify-between rounded-2xl border border-slate-100 p-4">
+                <li key={e.id} className="flex items-center justify-between rounded-2xl border border-default p-4">
                   <div>
-                    <p className="font-medium text-slate-950">{e.expand?.partner?.name || 'Okänd partner'}</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="font-medium text-foreground">{e.expand?.partner?.name || 'Okänd partner'}</p>
+                    <p className="text-xs text-foreground-subtle">
                       {e.engagement_type}
                       {e.amount_sek ? ` · ${e.amount_sek.toLocaleString('sv-SE')} SEK` : ''}
                       {e.started_at ? ` · sedan ${new Date(e.started_at).toLocaleDateString('sv-SE')}` : ''}
@@ -348,23 +348,27 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
-    <section id={id} className="scroll-mt-24 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-900/5">
-      <h2 className="mb-4 text-lg font-semibold text-slate-950">{title}</h2>
+    <section id={id} className="scroll-mt-24 rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
+      <h2 className="mb-4 text-lg font-semibold text-foreground">{title}</h2>
       {children}
     </section>
   );
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="text-sm text-slate-500">{children}</p>;
+  return <p className="text-sm text-foreground-subtle">{children}</p>;
 }
 
 function StatusPill({ label, variant }: { label: string; variant: 'success' | 'danger' | 'info' | 'neutral' }) {
   const classes = {
-    success: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-    danger: 'bg-red-50 text-red-700 ring-red-200',
-    info: 'bg-cyan-50 text-cyan-700 ring-cyan-200',
-    neutral: 'bg-slate-100 text-slate-700 ring-slate-200'
+    success:
+      'bg-movexum-pastell-gron text-movexum-morkgron ring-movexum-ljusgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron dark:ring-movexum-gron',
+    danger:
+      'bg-movexum-pastell-orange text-movexum-morkorange ring-movexum-orange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange dark:ring-movexum-orange',
+    info:
+      'bg-movexum-pastell-bla text-movexum-morkbla ring-movexum-bla dark:bg-movexum-morkbla/60 dark:text-movexum-pastell-bla dark:ring-movexum-djupbla',
+    neutral:
+      'bg-canvas-subtle text-foreground-muted ring-default'
   }[variant];
   return (
     <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classes}`}>

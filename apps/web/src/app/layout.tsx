@@ -1,10 +1,11 @@
 import type { Metadata } from 'next';
 import { Navbar } from '@/components/Navbar';
+import { ThemeScript } from '@/components/ThemeProvider';
 import { getCurrentUser } from '@/lib/auth.server';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Moveum Incubator Platform',
+  title: 'Movexum Inkubatorplattform',
   description: 'Modulär plattform för Movexums inkubatorer'
 };
 
@@ -17,7 +18,10 @@ export default async function RootLayout({
 
   return (
     <html lang="sv" suppressHydrationWarning>
-      <body className="min-h-screen bg-slate-50 text-slate-950 antialiased">
+      <head>
+        <ThemeScript />
+      </head>
+      <body className="min-h-screen bg-canvas text-foreground antialiased">
         <Navbar user={user} />
         {children}
       </body>
