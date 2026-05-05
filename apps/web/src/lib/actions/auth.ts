@@ -1,11 +1,17 @@
 'use server';
 
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE } from '@/lib/auth.server';
 
 const PB_URL = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'http://localhost:8080';
+
+async function isHttpsRequest(): Promise<boolean> {
+  const h = await headers();
+  const proto = h.get('x-forwarded-proto') || h.get('x-forwarded-protocol');
+  return proto === 'https';
+}
 
 export type LoginState = {
   error?: string;
@@ -51,7 +57,9 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   const store = await cookies();
   store.set(AUTH_COOKIE, payload, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    // Only set secure when the request actually came over HTTPS — sslip.io
+    // staging domains often run over HTTP and would silently drop the cookie.
+    secure: await isHttpsRequest(),
     sameSite: 'lax',
     path: '/',
     // 14 days; PB tokens themselves expire per collection settings
