@@ -1,26 +1,30 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// Seeds the default Movexum incubator tenant.
+// Seedar Movexum-tenanten — idempotent, hoppar över om den redan finns.
 migrate(
-  (db) => {
-    const dao = new Dao(db);
-    const collection = dao.findCollectionByNameOrId('tenants');
+  (app) => {
+    try {
+      app.findFirstRecordByFilter('tenants', 'slug = "movexum"');
+      return; // already exists
+    } catch (e) {
+      // not found — create
+    }
 
+    const collection = app.findCollectionByNameOrId('tenants');
     const record = new Record(collection, {
       name: 'Movexum',
       slug: 'movexum',
       type: 'incubator'
     });
 
-    return dao.saveRecord(record);
+    return app.save(record);
   },
-  (db) => {
-    const dao = new Dao(db);
+  (app) => {
     try {
-      const record = dao.findFirstRecordByFilter('tenants', 'slug = "movexum"');
-      if (record) dao.deleteRecord(record);
+      const record = app.findFirstRecordByFilter('tenants', 'slug = "movexum"');
+      if (record) app.delete(record);
     } catch (e) {
-      // ignore — record may already be gone
+      // ignore
     }
   }
 );

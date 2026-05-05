@@ -6,42 +6,36 @@ const STAFF_ROLES =
   '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach")';
 
 migrate(
-  (db) => {
+  (app) => {
     const collection = new Collection({
       id: 'partner_engagements_collection',
       name: 'partner_engagements',
       type: 'base',
-      schema: [
+      fields: [
         {
           name: 'partner',
           type: 'relation',
           required: true,
-          options: {
-            collectionId: 'partners_collection',
-            cascadeDelete: true,
-            minSelect: 1,
-            maxSelect: 1
-          }
+          collectionId: 'partners_collection',
+          cascadeDelete: true,
+          minSelect: 1,
+          maxSelect: 1
         },
         {
           name: 'startup',
           type: 'relation',
           required: true,
-          options: {
-            collectionId: 'startups_collection',
-            cascadeDelete: true,
-            minSelect: 1,
-            maxSelect: 1
-          }
+          collectionId: 'startups_collection',
+          cascadeDelete: true,
+          minSelect: 1,
+          maxSelect: 1
         },
         {
           name: 'engagement_type',
           type: 'select',
           required: true,
-          options: {
-            maxSelect: 1,
-            values: ['investment', 'pilot', 'mentorship', 'customer', 'loi', 'other']
-          }
+          maxSelect: 1,
+          values: ['investment', 'pilot', 'mentorship', 'customer', 'loi', 'other']
         },
         {
           name: 'started_at',
@@ -57,7 +51,7 @@ migrate(
           name: 'amount_sek',
           type: 'number',
           required: false,
-          options: { min: 0 }
+          min: 0
         },
         {
           name: 'notes',
@@ -76,11 +70,10 @@ migrate(
       deleteRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${STAFF_ROLES}`
     });
 
-    return Dao(db).saveCollection(collection);
+    return app.save(collection);
   },
-  (db) => {
-    const dao = new Dao(db);
-    const collection = dao.findCollectionByNameOrId('partner_engagements');
-    return dao.deleteCollection(collection);
+  (app) => {
+    const collection = app.findCollectionByNameOrId('partner_engagements');
+    return app.delete(collection);
   }
 );
