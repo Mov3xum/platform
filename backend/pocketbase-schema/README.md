@@ -1,14 +1,28 @@
 # PocketBase-schema för Moveum-plattformen
 
-JS-migrations som körs automatiskt vid PocketBase-start. Mappstrukturen mountas in i containern via `infra/coolify.yml`:
+JS-migrations som körs automatiskt vid PocketBase-start. Migrationerna och hooks **bakas in i Docker-image:n** via `Dockerfile` i denna mapp — de mountas alltså inte som volym, utan följer med koden.
 
 ```
 backend/pocketbase-schema/
-├── migrations/   → /pb_migrations  (kör automatiskt vid start)
-└── hooks/        → /pb_hooks       (JS event-hooks, valfritt)
+├── Dockerfile         # bygger PB-image med pocketbase-binär + migrations + hooks
+├── migrations/        # JS-migrations, körs i ordning vid första start
+└── hooks/             # JS event-hooks (valfritt)
 ```
 
-PocketBase-data (SQLite) skrivs till `/pb_data` i containern. Mounten i Coolify pekar på en namnad volym (`pb_data`).
+PocketBase-data (SQLite) skrivs till `/pb_data` i containern. **Endast** `/pb_data` behöver persistent volym — migrations + hooks är redan i image:n.
+
+## Deploy via Coolify
+
+1. Skapa en **Application**-resurs i Coolify (typ: **Dockerfile**)
+2. **Git Source:** peka på `Mov3xum/platform`-repot, gren `staging`
+3. **Base Directory:** `backend/pocketbase-schema`
+4. **Persistent Storage:** mounta volym → `/pb_data`
+5. **Environment Variables** (Secrets):
+   - `APP_ADMIN_INITIAL_PASSWORD` — sätts vid första deploy så `hampus@movexum.se` seedas. Töm efter första lyckad login.
+   - `POCKETBASE_ENCRYPTION_KEY` — valfritt, krypterar känsliga PB-fält
+6. **Redeploy** → migrationerna körs automatiskt → schema + Movexum-tenant + (om secret är satt) Hampus app-admin skapas
+
+Koden i web-appen behöver `NEXT_PUBLIC_POCKETBASE_URL` pekande på PB:s publika domän.
 
 ## Datamodell
 
@@ -72,18 +86,21 @@ Skrivåtkomst per roll (uttryck via `@request.auth.roles ?= "rolename"`):
 ## Lokal körning
 
 ```bash
-docker compose -f infra/coolify.yml up pocketbase
-# eller direkt:
-pocketbase serve --http=0.0.0.0:8080 --dir=./pb_data --migrationsDir=./backend/pocketbase-schema/migrations
+# Bygg image från denna mapp och kör
+docker build -t moveum-pocketbase backend/pocketbase-schema
+docker run --rm -p 8080:8080 \
+  -v moveum-pb-data:/pb_data \
+  -e APP_ADMIN_INITIAL_PASSWORD=test1234 \
+  moveum-pocketbase
+
+# Eller hela stacken (PB + Next.js)
+APP_ADMIN_INITIAL_PASSWORD=test1234 docker compose -f infra/coolify.yml up
 ```
 
-Första uppstart kör alla migrations, inklusive seed av tenant `movexum`.
+Vid första uppstart kör PB alla 13 migrations i ordning. Sista migrationen seedar `hampus@movexum.se` i `users` om `APP_ADMIN_INITIAL_PASSWORD` är satt.
 
 ## Lägga till en migration
 
-PocketBase kan generera migrations från ändringar i admin-UI:
-```bash
-pocketbase migrate collections
-```
+Skriv för hand: filnamn `<unix-ts>_<beskrivning>.js`, exportera `migrate(up, down)` i v0.23+ syntax (`app` som första parameter, `app.save()`, `fields:[...]`).
 
-Eller skriv för hand: filnamn `<unix-ts>_<beskrivning>.js`, exportera `migrate(up, down)`.
+Eftersom migrationerna bakas in i image:n krävs **redeploy av PB-resursen** för att nya migrations ska köras.
