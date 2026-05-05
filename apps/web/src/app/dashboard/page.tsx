@@ -21,6 +21,15 @@ export default async function DashboardPage() {
         </p>
       </header>
 
+      <div className="mb-6">
+        <button
+          type="button"
+          className="rounded-full bg-movexum-bla px-5 py-2.5 text-sm font-semibold text-movexum-vit shadow-sm shadow-movexum-svart/10 transition hover:bg-movexum-djupbla focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+        >
+          testar
+        </button>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {isStaff && (
           <Card title="Portfölj" description="Aktiva bolag i tenanten, fördelat per fas. (Kommer i Fas 3)" />
