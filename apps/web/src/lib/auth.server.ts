@@ -1,5 +1,6 @@
 import 'server-only';
 import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import PocketBase from 'pocketbase';
 import type { Role } from '@platform/shared';
 
@@ -41,13 +42,6 @@ export async function getServerPb(): Promise<PocketBase> {
   const payload = readCookiePayload(store.get(AUTH_COOKIE)?.value);
   if (payload) {
     pb.authStore.save(payload.token, payload.model as never);
-    if (pb.authStore.isValid) {
-      try {
-        await pb.collection('users').authRefresh({ expand: 'tenant' });
-      } catch {
-        pb.authStore.clear();
-      }
-    }
   }
 
   return pb;
@@ -79,7 +73,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
 export async function requireUser(): Promise<SessionUser> {
   const user = await getCurrentUser();
   if (!user) {
-    throw new Error('Unauthorized');
+    redirect('/login');
   }
   return user;
 }
