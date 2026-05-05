@@ -104,3 +104,25 @@ Vid första uppstart kör PB alla 13 migrations i ordning. Sista migrationen see
 Skriv för hand: filnamn `<unix-ts>_<beskrivning>.js`, exportera `migrate(up, down)` i v0.23+ syntax (`app` som första parameter, `app.save()`, `fields:[...]`).
 
 Eftersom migrationerna bakas in i image:n krävs **redeploy av PB-resursen** för att nya migrations ska köras.
+
+## Bootstrap utan PB-redeploy (`scripts/setup-via-api.mjs`)
+
+Om PB redan körs (t.ex. från en raw `pocketbase/pocketbase`-image utan vår Dockerfile) och du inte kan reconfigura/redeploya den just nu, kan du seeda hela schemat + Hampus app-user via API istället.
+
+Kräver att du har en PocketBase superuser (`_superusers`-rad) — den skapas vid första `/_/`-besök på en fresh PB.
+
+```bash
+# Kör från repo-roten
+PB_URL='https://pocketbase-r10nkich8dkune7s0flczb89.212.147.227.223.sslip.io' \
+PB_SU_EMAIL='hampus@movexum.se' \
+PB_SU_PASSWORD='<ditt PB-superuser-lösen>' \
+APP_USER_PASSWORD='<lösen för login i webappen>' \
+node backend/pocketbase-schema/scripts/setup-via-api.mjs
+```
+
+Skriptet är idempotent — om en collection eller record redan finns hoppas den över. Efter körning:
+- 10 collections (`tenants`, `users` utökad, `startups`, `partners`, `startup_team_members`, `partner_engagements`, `activities`, `notes`, `agreements`, `milestones`)
+- 1 tenant: `Movexum`
+- 1 app-user: `hampus@movexum.se` med `roles=["admin"]`
+
+Du kan nu logga in på `<din-web-url>/login` med Hampus-credentials.
