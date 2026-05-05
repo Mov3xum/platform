@@ -1,9 +1,10 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth.server';
+import { Logo } from '@/components/Logo';
 import { LoginForm } from './LoginForm';
 
 export const metadata = {
-  title: 'Logga in — Moveum'
+  title: 'Logga in — Movexum'
 };
 
 export default async function LoginPage({
@@ -20,14 +21,12 @@ export default async function LoginPage({
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
-      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-xl shadow-slate-900/5">
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-600 text-lg font-semibold text-white">
-            M
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-950">Logga in</h1>
-          <p className="mt-2 text-sm text-slate-600">Moveum inkubatorplattform</p>
+    <main className="flex min-h-screen items-center justify-center bg-canvas px-6">
+      <div className="w-full max-w-md rounded-3xl border border-default bg-surface p-8 shadow-xl shadow-movexum-svart/5">
+        <div className="mb-8 flex flex-col items-center text-center">
+          <Logo href="/" className="mb-6" />
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Logga in</h1>
+          <p className="mt-2 text-sm text-foreground-muted">Movexum inkubatorplattform</p>
         </div>
         <LoginForm next={next} />
       </div>

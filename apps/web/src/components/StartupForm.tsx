@@ -22,7 +22,7 @@ export interface StartupFormProps {
 }
 
 const inputClass =
-  'block w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100';
+  'block w-full rounded-xl border border-default bg-surface px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-brand focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
 
 export function StartupForm({ action, initial = {}, submitLabel }: StartupFormProps) {
   const [state, formAction, pending] = useActionState(action, initialState);
@@ -92,14 +92,14 @@ export function StartupForm({ action, initial = {}, submitLabel }: StartupFormPr
       </Field>
 
       {state.error ? (
-        <p className="rounded-xl bg-red-50 px-4 py-2.5 text-sm text-red-700">{state.error}</p>
+        <p className="rounded-xl bg-error-50 px-4 py-2.5 text-sm text-error-700">{state.error}</p>
       ) : null}
 
       <div className="flex justify-end gap-3 pt-2">
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex items-center justify-center rounded-full bg-slate-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+          className="inline-flex items-center justify-center rounded-full bg-brand px-6 py-3 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:opacity-60"
         >
           {pending ? 'Sparar…' : submitLabel}
         </button>
@@ -121,12 +121,12 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-slate-700">
+      <span className="mb-1.5 block text-sm font-medium text-foreground-muted">
         {label}
-        {required ? <span className="ml-1 text-red-500">*</span> : null}
+        {required ? <span className="ml-1 text-error-500">*</span> : null}
       </span>
       {children}
-      {error ? <span className="mt-1 block text-xs text-red-600">{error}</span> : null}
+      {error ? <span className="mt-1 block text-xs text-error-700">{error}</span> : null}
     </label>
   );
 }

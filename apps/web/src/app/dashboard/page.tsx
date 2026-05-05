@@ -10,13 +10,13 @@ export default async function DashboardPage() {
   return (
     <main className="mx-auto max-w-7xl px-6 py-10 lg:px-8">
       <header className="mb-8">
-        <p className="text-sm font-medium text-cyan-700">
+        <p className="text-sm font-medium text-link">
           {user.tenantName || 'Movexum'}
         </p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">
+        <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
           Hej {user.name.split(' ')[0] || user.email}
         </h1>
-        <p className="mt-2 text-base text-slate-600">
+        <p className="mt-2 text-base text-foreground-muted">
           Rollanpassad översikt baserat på dina behörigheter: {user.roles.join(', ')}
         </p>
       </header>
@@ -49,9 +49,9 @@ export default async function DashboardPage() {
 
 function Card({ title, description }: { title: string; description: string }) {
   return (
-    <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-900/5">
-      <h2 className="text-lg font-semibold text-slate-950">{title}</h2>
-      <p className="mt-2 text-sm text-slate-600">{description}</p>
+    <article className="rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
+      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+      <p className="mt-2 text-sm text-foreground-muted">{description}</p>
     </article>
   );
 }
