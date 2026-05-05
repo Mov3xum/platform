@@ -49,9 +49,33 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     return { error: e.data?.message || e.message || 'Inloggning misslyckades. Försök igen.' };
   }
 
+  // Trim down the cookie payload to just what getCurrentUser needs.
+  // The full PB user record with expanded tenant can easily exceed the 4KB
+  // browser cookie limit, which silently drops the cookie and creates a
+  // login → /dashboard → /login redirect loop with no error.
+  const m = pb.authStore.model as Record<string, unknown> | null;
+  const expandTenant =
+    (m?.expand as { tenant?: { id: string; name: string; slug: string } } | undefined)?.tenant;
+  const compactModel = m
+    ? {
+        id: m.id,
+        email: m.email,
+        collectionId: m.collectionId,
+        collectionName: m.collectionName,
+        verified: m.verified,
+        tenant: m.tenant,
+        roles: m.roles,
+        display_name: m.display_name,
+        linked_startups: m.linked_startups,
+        expand: expandTenant
+          ? { tenant: { id: expandTenant.id, name: expandTenant.name, slug: expandTenant.slug } }
+          : undefined
+      }
+    : null;
+
   const payload = JSON.stringify({
     token: pb.authStore.token,
-    model: pb.authStore.model
+    model: compactModel
   });
 
   const store = await cookies();
