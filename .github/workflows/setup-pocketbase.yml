@@ -1,0 +1,48 @@
+name: Setup PocketBase (one-shot bootstrap)
+
+# Manuellt triggad workflow som bootstrap:ar en redan körande PB-instans:
+# skapar alla 10 collections, Movexum-tenant och hampus@movexum.se app-user.
+#
+# Kör en gång efter att PB är uppe. Idempotent — säker att köra igen.
+#
+# Krav på repo-secrets:
+#   PB_URL                — t.ex. https://pocketbase-r10nkich8dkune7s0flczb89.212.147.227.223.sslip.io
+#   PB_SU_PASSWORD        — lösen till PB:s superuser hampus@movexum.se (det du satte i /_/-UI:t)
+#   APP_USER_PASSWORD     — det lösen Hampus ska använda i Next.js-appens /login
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'yarn'
+
+      - name: Install deps
+        run: yarn install --frozen-lockfile
+
+      - name: Bootstrap PocketBase
+        env:
+          PB_URL: ${{ secrets.PB_URL }}
+          PB_SU_EMAIL: hampus@movexum.se
+          PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD }}
+          APP_USER_PASSWORD: ${{ secrets.APP_USER_PASSWORD }}
+        run: node backend/pocketbase-schema/scripts/setup-via-api.mjs
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "## ✓ PocketBase bootstrappad" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Logga in på Next.js-appens \`/login\` med:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- E-post: \`hampus@movexum.se\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Lösen: värdet på \`APP_USER_PASSWORD\`-secret:en" >> $GITHUB_STEP_SUMMARY
