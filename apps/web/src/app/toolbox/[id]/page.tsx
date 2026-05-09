@@ -90,7 +90,7 @@ export default async function ToolDetailPage({
       </header>
 
       <div className="grid gap-8 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-6">
+        <div className="space-y-6 lg:col-span-2">
           {/* Run form */}
           {canRun ? (
             <section className="rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">

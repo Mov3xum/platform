@@ -20,7 +20,7 @@ migrate(
       name: 'tool',
       type: 'relation',
       required: false,
-      collectionId: 'tools_collection',
+      collectionId: app.findCollectionByNameOrId('tools').id,
       cascadeDelete: false,
       minSelect: 0,
       maxSelect: 1
@@ -31,7 +31,7 @@ migrate(
       name: 'tool_run',
       type: 'relation',
       required: false,
-      collectionId: 'tool_runs_collection',
+      collectionId: app.findCollectionByNameOrId('tool_runs').id,
       cascadeDelete: false,
       minSelect: 0,
       maxSelect: 1

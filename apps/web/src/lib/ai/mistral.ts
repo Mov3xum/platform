@@ -10,6 +10,11 @@ export interface MistralMessage {
 
 export interface MistralResponse {
   text: string;
+  /**
+   * Token usage from the API response.
+   * - prompt_tokens: input tokens (used for cost estimation as tokensIn)
+   * - completion_tokens: output tokens (used for cost estimation as tokensOut)
+   */
   usage: {
     prompt_tokens: number;
     completion_tokens: number;
