@@ -13,8 +13,29 @@ async function isHttpsRequest(): Promise<boolean> {
   return proto === 'https';
 }
 
+type PbError = {
+  status?: number;
+  message?: string;
+  data?: { data?: Record<string, { message?: string }>; message?: string };
+};
+
 export type LoginState = {
   error?: string;
+};
+
+export type RegisterState = {
+  error?: string;
+  success?: boolean;
+};
+
+export type ResetPasswordState = {
+  error?: string;
+  success?: boolean;
+};
+
+export type ConfirmResetState = {
+  error?: string;
+  success?: boolean;
 };
 
 export async function loginAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
@@ -31,7 +52,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   try {
     await pb.collection('users').authWithPassword(email, password, { expand: 'tenant' });
   } catch (err: unknown) {
-    const e = err as { status?: number; message?: string; data?: { message?: string } };
+    const e = err as PbError;
     console.error('login failed', { status: e.status, message: e.message, data: e.data });
 
     if (e.status === 400) {
@@ -97,4 +118,112 @@ export async function logoutAction(): Promise<void> {
   const store = await cookies();
   store.delete(AUTH_COOKIE);
   redirect('/login');
+}
+
+export async function registerAction(
+  _prev: RegisterState,
+  formData: FormData
+): Promise<RegisterState> {
+  const email = String(formData.get('email') || '').trim();
+  const password = String(formData.get('password') || '');
+  const passwordConfirm = String(formData.get('passwordConfirm') || '');
+  const displayName = String(formData.get('displayName') || '').trim();
+
+  if (!email || !password || !passwordConfirm) {
+    return { error: 'Alla fält är obligatoriska.' };
+  }
+  if (password !== passwordConfirm) {
+    return { error: 'Lösenorden matchar inte.' };
+  }
+  if (password.length < 8) {
+    return { error: 'Lösenordet måste vara minst 8 tecken.' };
+  }
+
+  const pb = new PocketBase(PB_URL);
+
+  try {
+    await pb.collection('users').create({
+      email,
+      password,
+      passwordConfirm,
+      display_name: displayName || ''
+    });
+    // Send verification email
+    await pb.collection('users').requestVerification(email);
+  } catch (err: unknown) {
+    const e = err as PbError;
+    if (e.status === 400) {
+      // Try to extract a field-level error from PocketBase
+      const fieldErrors = e.data?.data;
+      if (fieldErrors) {
+        const first = Object.values(fieldErrors)[0];
+        if (first?.message) return { error: first.message };
+      }
+      return { error: e.data?.message || 'Ogiltig data. Kontrollera fälten.' };
+    }
+    return { error: e.message || 'Registrering misslyckades. Försök igen.' };
+  }
+
+  return { success: true };
+}
+
+export async function requestPasswordResetAction(
+  _prev: ResetPasswordState,
+  formData: FormData
+): Promise<ResetPasswordState> {
+  const email = String(formData.get('email') || '').trim();
+
+  if (!email) {
+    return { error: 'E-post krävs.' };
+  }
+
+  const pb = new PocketBase(PB_URL);
+
+  try {
+    await pb.collection('users').requestPasswordReset(email);
+  } catch (err: unknown) {
+    const e = err as PbError;
+    if (!e.status) {
+      return { error: 'Kunde inte nå servern. Försök igen senare.' };
+    }
+    // Do not reveal whether the email exists — always return success to the user
+  }
+
+  return { success: true };
+}
+
+export async function confirmPasswordResetAction(
+  _prev: ConfirmResetState,
+  formData: FormData
+): Promise<ConfirmResetState> {
+  const token = String(formData.get('token') || '').trim();
+  const password = String(formData.get('password') || '');
+  const passwordConfirm = String(formData.get('passwordConfirm') || '');
+
+  if (!token) {
+    return { error: 'Återställningslänken är ogiltig eller har gått ut.' };
+  }
+  if (!password || !passwordConfirm) {
+    return { error: 'Alla fält är obligatoriska.' };
+  }
+  if (password !== passwordConfirm) {
+    return { error: 'Lösenorden matchar inte.' };
+  }
+  if (password.length < 8) {
+    return { error: 'Lösenordet måste vara minst 8 tecken.' };
+  }
+
+  const pb = new PocketBase(PB_URL);
+
+  try {
+    await pb.collection('users').confirmPasswordReset(token, password, passwordConfirm);
+  } catch (err: unknown) {
+    const e = err as PbError;
+    if (e.status === 400) {
+      return { error: 'Återställningslänken är ogiltig eller har gått ut.' };
+    }
+    return { error: e.message || 'Återställning misslyckades. Försök igen.' };
+  }
+
+  return { success: true };
 }
