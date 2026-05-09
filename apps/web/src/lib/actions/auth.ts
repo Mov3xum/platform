@@ -4,6 +4,8 @@ import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE } from '@/lib/auth.server';
+import { generateVerificationToken, parseVerificationToken } from '@/lib/verification-token';
+import { sendVerificationEmail } from '@/lib/email';
 
 const PB_URL = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'http://localhost:8080';
 
@@ -34,6 +36,11 @@ export type ResetPasswordState = {
 };
 
 export type ConfirmResetState = {
+  error?: string;
+  success?: boolean;
+};
+
+export type VerifyEmailState = {
   error?: string;
   success?: boolean;
 };
@@ -141,15 +148,15 @@ export async function registerAction(
 
   const pb = new PocketBase(PB_URL);
 
+  let userId: string;
   try {
-    await pb.collection('users').create({
+    const record = await pb.collection('users').create({
       email,
       password,
       passwordConfirm,
       display_name: displayName || ''
     });
-    // Send verification email
-    await pb.collection('users').requestVerification(email);
+    userId = record.id;
   } catch (err: unknown) {
     const e = err as PbError;
     if (e.status === 400) {
@@ -162,6 +169,29 @@ export async function registerAction(
       return { error: e.data?.message || 'Ogiltig data. Kontrollera fälten.' };
     }
     return { error: e.message || 'Registrering misslyckades. Försök igen.' };
+  }
+
+  // Skicka verifieringsmail via Resend
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const token = generateVerificationToken(userId);
+  const verificationUrl = `${appUrl}/verify-email?token=${encodeURIComponent(token)}`;
+
+  try {
+    await sendVerificationEmail(email, verificationUrl);
+  } catch (emailErr) {
+    // Radera användaren om mailet misslyckas så att re-registrering möjliggörs
+    console.error('[register] E-post misslyckades — tar bort ofullständigt konto', emailErr);
+    try {
+      await pb.collection('users').delete(userId);
+    } catch {
+      // Ignorera borttagningsfel — superuser behövs för delete men kontot är overifierat
+    }
+    return {
+      error:
+        emailErr instanceof Error
+          ? emailErr.message
+          : 'Kunde inte skicka verifieringsmail. Försök igen.'
+    };
   }
 
   return { success: true };
@@ -226,4 +256,40 @@ export async function confirmPasswordResetAction(
   }
 
   return { success: true };
+}
+
+/**
+ * Verifierar ett e-posttoken och markerar användaren som verified i PocketBase.
+ * Används av /verify-email-sidan när användaren klickar på länken i mailet.
+ * Kräver POCKETBASE_SUPERUSER_EMAIL och POCKETBASE_SUPERUSER_PASSWORD i miljön.
+ */
+export async function verifyEmailAction(token: string): Promise<VerifyEmailState> {
+  const parsed = parseVerificationToken(token);
+  if (!parsed) {
+    return { error: 'Verifieringslänken är ogiltig eller har gått ut. Be om ett nytt konto.' };
+  }
+
+  const superuserEmail = process.env.POCKETBASE_SUPERUSER_EMAIL;
+  const superuserPassword = process.env.POCKETBASE_SUPERUSER_PASSWORD;
+
+  if (!superuserEmail || !superuserPassword) {
+    console.error('[verify-email] POCKETBASE_SUPERUSER_EMAIL/PASSWORD saknas i miljön');
+    return { error: 'Serverfel: kan inte verifiera kontot just nu. Kontakta administratören.' };
+  }
+
+  const pb = new PocketBase(PB_URL);
+
+  try {
+    // Autentisera som PocketBase-superuser för att kunna uppdatera verified-fältet
+    await pb.collection('_superusers').authWithPassword(superuserEmail, superuserPassword);
+    await pb.collection('users').update(parsed.userId, { verified: true });
+    return { success: true };
+  } catch (err: unknown) {
+    const e = err as PbError;
+    console.error('[verify-email] Kunde inte verifiera användare:', e.status, e.message);
+    if (e.status === 404) {
+      return { error: 'Kontot hittades inte. Det kan ha tagits bort.' };
+    }
+    return { error: 'Verifieringen misslyckades. Försök igen eller kontakta administratören.' };
+  }
 }
