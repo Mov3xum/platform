@@ -4,6 +4,8 @@ import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE } from '@/lib/auth.server';
+import { generateVerificationToken, parseVerificationToken } from '@/lib/verification-token';
+import { sendVerificationEmail } from '@/lib/email';
 
 const PB_URL = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'http://localhost:8080';
 
@@ -34,6 +36,11 @@ export type ResetPasswordState = {
 };
 
 export type ConfirmResetState = {
+  error?: string;
+  success?: boolean;
+};
+
+export type VerifyEmailState = {
   error?: string;
   success?: boolean;
 };
@@ -141,15 +148,15 @@ export async function registerAction(
 
   const pb = new PocketBase(PB_URL);
 
+  let userId: string;
   try {
-    await pb.collection('users').create({
+    const record = await pb.collection('users').create({
       email,
       password,
       passwordConfirm,
       display_name: displayName || ''
     });
-    // Send verification email
-    await pb.collection('users').requestVerification(email);
+    userId = record.id;
   } catch (err: unknown) {
     const e = err as PbError;
     if (e.status === 400) {
@@ -162,6 +169,30 @@ export async function registerAction(
       return { error: e.data?.message || 'Ogiltig data. Kontrollera fälten.' };
     }
     return { error: e.message || 'Registrering misslyckades. Försök igen.' };
+  }
+
+  // Skicka verifieringsmail via Resend
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const token = generateVerificationToken(userId);
+  const verificationUrl = `${appUrl}/verify-email?token=${encodeURIComponent(token)}`;
+
+  try {
+    await sendVerificationEmail(email, verificationUrl);
+  } catch (emailErr) {
+    // Radera användaren om mailet misslyckas så att re-registrering möjliggörs
+    console.error('[register] Email sending failed — removing incomplete account', emailErr);
+    try {
+      await pb.collection('users').delete(userId);
+    } catch (deleteErr) {
+      // Log but do not propagate — user remains unverified and cannot log in
+      console.error('[register] Failed to clean up unverified user after email error:', deleteErr);
+    }
+    return {
+      error:
+        emailErr instanceof Error
+          ? emailErr.message
+          : 'Kunde inte skicka verifieringsmail. Försök igen.'
+    };
   }
 
   return { success: true };
@@ -226,4 +257,40 @@ export async function confirmPasswordResetAction(
   }
 
   return { success: true };
+}
+
+/**
+ * Verifies an email token and marks the user as verified in PocketBase.
+ * Used by the /verify-email page when a user clicks the link in the email.
+ * Requires POCKETBASE_SUPERUSER_EMAIL and POCKETBASE_SUPERUSER_PASSWORD in the environment.
+ */
+export async function verifyEmailAction(token: string): Promise<VerifyEmailState> {
+  const parsed = parseVerificationToken(token);
+  if (!parsed) {
+    return { error: 'Verifieringslänken är ogiltig eller har gått ut. Registrera dig igen med samma e-postadress.' };
+  }
+
+  const superuserEmail = process.env.POCKETBASE_SUPERUSER_EMAIL;
+  const superuserPassword = process.env.POCKETBASE_SUPERUSER_PASSWORD;
+
+  if (!superuserEmail || !superuserPassword) {
+    console.error('[verify-email] POCKETBASE_SUPERUSER_EMAIL/PASSWORD missing in environment');
+    return { error: 'Serverfel: kan inte verifiera kontot just nu. Kontakta administratören.' };
+  }
+
+  const pb = new PocketBase(PB_URL);
+
+  try {
+    // Authenticate as PocketBase superuser to update the verified field
+    await pb.collection('_superusers').authWithPassword(superuserEmail, superuserPassword);
+    await pb.collection('users').update(parsed.userId, { verified: true });
+    return { success: true };
+  } catch (err: unknown) {
+    const e = err as PbError;
+    console.error('[verify-email] Could not verify user:', e.status, e.message);
+    if (e.status === 404) {
+      return { error: 'Kontot hittades inte. Det kan ha tagits bort.' };
+    }
+    return { error: 'Verifieringen misslyckades. Försök igen eller kontakta administratören.' };
+  }
 }

@@ -1,12 +1,18 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = ['/', '/login'];
+const PUBLIC_PATHS = ['/', '/login', '/register', '/reset-password', '/verify-email'];
 const AUTH_COOKIE = 'pb_auth';
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  if (PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/_next') || pathname.startsWith('/api/health')) {
+  const isPublic =
+    PUBLIC_PATHS.includes(pathname) ||
+    pathname.startsWith('/reset-password/') ||
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/api/health');
+
+  if (isPublic) {
     return NextResponse.next();
   }
 
