@@ -13,6 +13,12 @@ async function isHttpsRequest(): Promise<boolean> {
   return proto === 'https';
 }
 
+type PbError = {
+  status?: number;
+  message?: string;
+  data?: { data?: Record<string, { message?: string }>; message?: string };
+};
+
 export type LoginState = {
   error?: string;
 };
@@ -46,7 +52,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   try {
     await pb.collection('users').authWithPassword(email, password, { expand: 'tenant' });
   } catch (err: unknown) {
-    const e = err as { status?: number; message?: string; data?: { message?: string } };
+    const e = err as PbError;
     console.error('login failed', { status: e.status, message: e.message, data: e.data });
 
     if (e.status === 400) {
@@ -140,12 +146,12 @@ export async function registerAction(
       email,
       password,
       passwordConfirm,
-      display_name: displayName || email.split('@')[0]
+      display_name: displayName || ''
     });
     // Send verification email
     await pb.collection('users').requestVerification(email);
   } catch (err: unknown) {
-    const e = err as { status?: number; message?: string; data?: { data?: Record<string, { message?: string }>; message?: string } };
+    const e = err as PbError;
     if (e.status === 400) {
       // Try to extract a field-level error from PocketBase
       const fieldErrors = e.data?.data;
@@ -176,7 +182,7 @@ export async function requestPasswordResetAction(
   try {
     await pb.collection('users').requestPasswordReset(email);
   } catch (err: unknown) {
-    const e = err as { status?: number; message?: string };
+    const e = err as PbError;
     if (!e.status) {
       return { error: 'Kunde inte nå servern. Försök igen senare.' };
     }
@@ -212,7 +218,7 @@ export async function confirmPasswordResetAction(
   try {
     await pb.collection('users').confirmPasswordReset(token, password, passwordConfirm);
   } catch (err: unknown) {
-    const e = err as { status?: number; message?: string };
+    const e = err as PbError;
     if (e.status === 400) {
       return { error: 'Återställningslänken är ogiltig eller har gått ut.' };
     }
