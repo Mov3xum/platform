@@ -46,79 +46,95 @@ export type VerifyEmailState = {
 };
 
 export async function loginAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
-  const email = String(formData.get('email') || '').trim();
-  const password = String(formData.get('password') || '');
-  const next = String(formData.get('next') || '/dashboard');
-
-  if (!email || !password) {
-    return { error: 'E-post och lösenord krävs.' };
-  }
-
-  const pb = new PocketBase(PB_URL);
-
   try {
-    await pb.collection('users').authWithPassword(email, password, { expand: 'tenant' });
-  } catch (err: unknown) {
-    const e = err as PbError;
-    console.error('login failed', { status: e.status, message: e.message, data: e.data });
+    const email = String(formData.get('email') || '').trim();
+    const password = String(formData.get('password') || '');
+    const next = String(formData.get('next') || '/dashboard');
 
-    if (e.status === 400) {
-      return { error: 'Fel e-post eller lösenord.' };
+    if (!email || !password) {
+      return { error: 'E-post och lösenord krävs.' };
     }
-    if (e.status === 403) {
-      return { error: 'Kontot är ej verifierat eller saknar behörighet.' };
-    }
-    if (e.status === 404) {
-      return { error: 'Users-collectionen saknas i PocketBase — har migrationerna körts?' };
-    }
-    if (!e.status) {
-      return { error: 'Kunde inte nå PocketBase. Kontrollera NEXT_PUBLIC_POCKETBASE_URL.' };
-    }
-    return { error: e.data?.message || e.message || 'Inloggning misslyckades. Försök igen.' };
-  }
 
-  // Trim down the cookie payload to just what getCurrentUser needs.
-  // The full PB user record with expanded tenant can easily exceed the 4KB
-  // browser cookie limit, which silently drops the cookie and creates a
-  // login → /dashboard → /login redirect loop with no error.
-  const m = pb.authStore.model as Record<string, unknown> | null;
-  const expandTenant =
-    (m?.expand as { tenant?: { id: string; name: string; slug: string } } | undefined)?.tenant;
-  const compactModel = m
-    ? {
-        id: m.id,
-        email: m.email,
-        collectionId: m.collectionId,
-        collectionName: m.collectionName,
-        verified: m.verified,
-        tenant: m.tenant,
-        roles: m.roles,
-        display_name: m.display_name,
-        linked_startups: m.linked_startups,
-        expand: expandTenant
-          ? { tenant: { id: expandTenant.id, name: expandTenant.name, slug: expandTenant.slug } }
-          : undefined
+    const pb = new PocketBase(PB_URL);
+
+    try {
+      await pb.collection('users').authWithPassword(email, password, { expand: 'tenant' });
+    } catch (err: unknown) {
+      const e = err as PbError;
+      console.error('[loginAction] PocketBase auth failed', { status: e.status, message: e.message, data: e.data });
+
+      if (e.status === 400) {
+        return { error: 'Fel e-post eller lösenord.' };
       }
-    : null;
+      if (e.status === 403) {
+        return { error: 'Kontot är ej verifierat eller saknar behörighet.' };
+      }
+      if (e.status === 404) {
+        return { error: 'Users-collectionen saknas i PocketBase — har migrationerna körts?' };
+      }
+      if (!e.status) {
+        return { error: `Kunde inte nå PocketBase (${PB_URL}). Kontrollera NEXT_PUBLIC_POCKETBASE_URL.` };
+      }
+      return { error: e.data?.message || e.message || 'Inloggning misslyckades. Försök igen.' };
+    }
 
-  const payload = JSON.stringify({
-    token: pb.authStore.token,
-    model: compactModel
-  });
+    // Trim down the cookie payload to just what getCurrentUser needs.
+    // The full PB user record with expanded tenant can easily exceed the 4KB
+    // browser cookie limit, which silently drops the cookie and creates a
+    // login → /dashboard → /login redirect loop with no error.
+    const m = pb.authStore.model as Record<string, unknown> | null;
+    const expandTenant =
+      (m?.expand as { tenant?: { id: string; name: string; slug: string } } | undefined)?.tenant;
+    const compactModel = m
+      ? {
+          id: m.id,
+          email: m.email,
+          collectionId: m.collectionId,
+          collectionName: m.collectionName,
+          verified: m.verified,
+          tenant: m.tenant,
+          roles: m.roles,
+          display_name: m.display_name,
+          linked_startups: m.linked_startups,
+          expand: expandTenant
+            ? { tenant: { id: expandTenant.id, name: expandTenant.name, slug: expandTenant.slug } }
+            : undefined
+        }
+      : null;
 
-  const store = await cookies();
-  store.set(AUTH_COOKIE, payload, {
-    httpOnly: true,
-    // Only set secure when the request actually came over HTTPS — sslip.io
-    // staging domains often run over HTTP and would silently drop the cookie.
-    secure: await isHttpsRequest(),
-    sameSite: 'lax',
-    path: '/',
-    // 14 days; PB tokens themselves expire per collection settings
-    maxAge: 60 * 60 * 24 * 14
-  });
+    const payload = JSON.stringify({
+      token: pb.authStore.token,
+      model: compactModel
+    });
 
-  redirect(next);
+    const store = await cookies();
+    store.set(AUTH_COOKIE, payload, {
+      httpOnly: true,
+      // Only set secure when the request actually came over HTTPS — sslip.io
+      // staging domains often run over HTTP and would silently drop the cookie.
+      secure: await isHttpsRequest(),
+      sameSite: 'lax',
+      path: '/',
+      // 14 days; PB tokens themselves expire per collection settings
+      maxAge: 60 * 60 * 24 * 14
+    });
+
+    redirect(next);
+  } catch (outerErr: unknown) {
+    // Re-throw NEXT_REDIRECT so Next.js can process the redirect normally.
+    if (
+      outerErr != null &&
+      typeof outerErr === 'object' &&
+      'digest' in outerErr &&
+      typeof (outerErr as { digest: unknown }).digest === 'string' &&
+      (outerErr as { digest: string }).digest.startsWith('NEXT_REDIRECT')
+    ) {
+      throw outerErr;
+    }
+    console.error('[loginAction] Unexpected error', outerErr);
+    const msg = outerErr instanceof Error ? outerErr.message : String(outerErr);
+    return { error: `Oväntat serverfel: ${msg}` };
+  }
 }
 
 export async function logoutAction(): Promise<void> {
