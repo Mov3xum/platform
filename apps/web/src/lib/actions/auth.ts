@@ -183,8 +183,9 @@ export async function registerAction(
     console.error('[register] Email sending failed — removing incomplete account', emailErr);
     try {
       await pb.collection('users').delete(userId);
-    } catch {
-      // Ignore deletion error — superuser needed for delete but account is unverified
+    } catch (deleteErr) {
+      // Log but do not propagate — user remains unverified and cannot log in
+      console.error('[register] Failed to clean up unverified user after email error:', deleteErr);
     }
     return {
       error:
@@ -266,7 +267,7 @@ export async function confirmPasswordResetAction(
 export async function verifyEmailAction(token: string): Promise<VerifyEmailState> {
   const parsed = parseVerificationToken(token);
   if (!parsed) {
-    return { error: 'Verifieringslänken är ogiltig eller har gått ut. Be om ett nytt konto.' };
+    return { error: 'Verifieringslänken är ogiltig eller har gått ut. Registrera dig igen med samma e-postadress.' };
   }
 
   const superuserEmail = process.env.POCKETBASE_SUPERUSER_EMAIL;

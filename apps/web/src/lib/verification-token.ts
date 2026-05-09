@@ -1,16 +1,18 @@
 import 'server-only';
 import { createHmac } from 'crypto';
 
-const SECRET = process.env.VERIFICATION_SECRET;
-if (!SECRET) {
+const rawSecret = process.env.VERIFICATION_SECRET;
+if (!rawSecret) {
   // Fail fast at startup — never silently use a predictable default in any environment.
   throw new Error('VERIFICATION_SECRET environment variable is not set. Set it to a random string of at least 32 characters.');
 }
+// Reassign with a known string type so TypeScript can narrow it below.
+const SECRET: string = rawSecret;
 
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function hmac(data: string): string {
-  return createHmac('sha256', SECRET as string).update(data).digest('base64url');
+  return createHmac('sha256', SECRET).update(data).digest('base64url');
 }
 
 /**
