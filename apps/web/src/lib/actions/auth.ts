@@ -180,11 +180,11 @@ export async function registerAction(
     await sendVerificationEmail(email, verificationUrl);
   } catch (emailErr) {
     // Radera användaren om mailet misslyckas så att re-registrering möjliggörs
-    console.error('[register] E-post misslyckades — tar bort ofullständigt konto', emailErr);
+    console.error('[register] Email sending failed — removing incomplete account', emailErr);
     try {
       await pb.collection('users').delete(userId);
     } catch {
-      // Ignorera borttagningsfel — superuser behövs för delete men kontot är overifierat
+      // Ignore deletion error — superuser needed for delete but account is unverified
     }
     return {
       error:
@@ -259,9 +259,9 @@ export async function confirmPasswordResetAction(
 }
 
 /**
- * Verifierar ett e-posttoken och markerar användaren som verified i PocketBase.
- * Används av /verify-email-sidan när användaren klickar på länken i mailet.
- * Kräver POCKETBASE_SUPERUSER_EMAIL och POCKETBASE_SUPERUSER_PASSWORD i miljön.
+ * Verifies an email token and marks the user as verified in PocketBase.
+ * Used by the /verify-email page when a user clicks the link in the email.
+ * Requires POCKETBASE_SUPERUSER_EMAIL and POCKETBASE_SUPERUSER_PASSWORD in the environment.
  */
 export async function verifyEmailAction(token: string): Promise<VerifyEmailState> {
   const parsed = parseVerificationToken(token);
@@ -273,20 +273,20 @@ export async function verifyEmailAction(token: string): Promise<VerifyEmailState
   const superuserPassword = process.env.POCKETBASE_SUPERUSER_PASSWORD;
 
   if (!superuserEmail || !superuserPassword) {
-    console.error('[verify-email] POCKETBASE_SUPERUSER_EMAIL/PASSWORD saknas i miljön');
+    console.error('[verify-email] POCKETBASE_SUPERUSER_EMAIL/PASSWORD missing in environment');
     return { error: 'Serverfel: kan inte verifiera kontot just nu. Kontakta administratören.' };
   }
 
   const pb = new PocketBase(PB_URL);
 
   try {
-    // Autentisera som PocketBase-superuser för att kunna uppdatera verified-fältet
+    // Authenticate as PocketBase superuser to update the verified field
     await pb.collection('_superusers').authWithPassword(superuserEmail, superuserPassword);
     await pb.collection('users').update(parsed.userId, { verified: true });
     return { success: true };
   } catch (err: unknown) {
     const e = err as PbError;
-    console.error('[verify-email] Kunde inte verifiera användare:', e.status, e.message);
+    console.error('[verify-email] Could not verify user:', e.status, e.message);
     if (e.status === 404) {
       return { error: 'Kontot hittades inte. Det kan ha tagits bort.' };
     }

@@ -1,16 +1,21 @@
 import 'server-only';
 import { createHmac } from 'crypto';
 
-const SECRET = process.env.VERIFICATION_SECRET ?? 'dev-secret-change-me-in-production';
-const TTL_MS = 24 * 60 * 60 * 1000; // 24 timmar
+const SECRET = process.env.VERIFICATION_SECRET;
+if (!SECRET) {
+  // Fail fast at startup — never silently use a predictable default in any environment.
+  throw new Error('VERIFICATION_SECRET environment variable is not set. Set it to a random string of at least 32 characters.');
+}
+
+const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function hmac(data: string): string {
-  return createHmac('sha256', SECRET).update(data).digest('base64url');
+  return createHmac('sha256', SECRET as string).update(data).digest('base64url');
 }
 
 /**
- * Genererar ett HMAC-SHA256-signerat verifieringstoken för given userId.
- * Formatet är: base64url(payload).base64url(signature)
+ * Generates an HMAC-SHA256 signed verification token for the given userId.
+ * Format: base64url(payload).base64url(signature)
  */
 export function generateVerificationToken(userId: string): string {
   const payload = Buffer.from(
@@ -21,8 +26,8 @@ export function generateVerificationToken(userId: string): string {
 }
 
 /**
- * Verifierar och parsar ett verifieringstoken.
- * Returnerar { userId } om giltigt, annars null.
+ * Verifies and parses a verification token.
+ * Returns { userId } if valid, otherwise null.
  */
 export function parseVerificationToken(token: string): { userId: string } | null {
   const dotIndex = token.lastIndexOf('.');
@@ -32,7 +37,7 @@ export function parseVerificationToken(token: string): { userId: string } | null
   const sig = token.slice(dotIndex + 1);
   const expected = hmac(payload);
 
-  // Manuell constant-time-jämförelse (undviker timing-attacker)
+  // Manual constant-time comparison to prevent timing attacks
   if (sig.length !== expected.length) return null;
   const sigBytes = Buffer.from(sig);
   const expBytes = Buffer.from(expected);
