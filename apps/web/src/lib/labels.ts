@@ -80,3 +80,33 @@ export const milestoneStatusLabels: Record<MilestoneStatus, string> = {
   achieved: 'Uppnådd',
   missed: 'Missad'
 };
+
+export type ToolCategory =
+  | 'ai_per_startup'
+  | 'ai_system_wide'
+  | 'education'
+  | 'template'
+  | 'checklist';
+
+export const toolCategoryLabels: Record<ToolCategory, string> = {
+  ai_per_startup: 'AI per bolag',
+  ai_system_wide: 'AI portfölj',
+  education: 'Utbildning',
+  template: 'Mall',
+  checklist: 'Checklista'
+};
+
+export type ToolRunStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+
+export const toolRunStatusLabels: Record<ToolRunStatus, string> = {
+  queued: 'I kö',
+  running: 'Kör',
+  succeeded: 'Klar',
+  failed: 'Misslyckad'
+};
+
+export type ActivityKind = 'manual' | 'tool_run';
+export const activityKindLabels: Record<ActivityKind, string> = {
+  manual: 'Manuell',
+  tool_run: 'Verktygskörning'
+};

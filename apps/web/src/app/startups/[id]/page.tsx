@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { getOneForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { PhaseBadge, StatusBadge } from '@/components/Badges';
+import { PhaseBadge, StatusBadge, ToolCategoryBadge, ToolRunStatusBadge } from '@/components/Badges';
 import { NoteForm } from '@/components/NoteForm';
 import {
   activityStatusLabels,
@@ -12,13 +12,15 @@ import {
   agreementStatusLabels,
   milestoneCategoryLabels,
   milestoneStatusLabels,
+  toolRunStatusLabels,
   type ActivityStatus,
   type ActivityType,
   type AgreementKind,
   type AgreementStatus,
   type MilestoneCategory,
   type MilestoneStatus,
-  type StartupStatus
+  type StartupStatus,
+  type ToolRunStatus
 } from '@/lib/labels';
 import type { StartupPhase } from '@platform/shared';
 
@@ -60,8 +62,15 @@ interface ActivityRecord {
   title: string;
   type: ActivityType;
   status: ActivityStatus;
+  kind?: string;
+  tool?: string;
+  tool_run?: string;
   due_date?: string;
   description?: string;
+  expand?: {
+    tool?: { id: string; name: string; icon?: string; category: string };
+    tool_run?: { id: string; status: string };
+  };
 }
 
 interface AgreementRecord {
@@ -89,6 +98,22 @@ interface PartnerEngagementRecord {
   expand?: { partner?: { id: string; name: string; type: string } };
 }
 
+interface ToolActivityRecord {
+  id: string;
+  title: string;
+  type: ActivityType;
+  status: ActivityStatus;
+  kind?: string;
+  tool?: string;
+  tool_run?: string;
+  due_date?: string;
+  created: string;
+  expand?: {
+    tool?: { id: string; name: string; icon?: string; category: string };
+    tool_run?: { id: string; status: string };
+  };
+}
+
 export default async function StartupDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
@@ -103,7 +128,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
 
   const pb = await getServerPb();
 
-  const [team, milestones, activities, notes, agreements, engagements] = await Promise.all([
+  const [team, milestones, activities, notes, agreements, engagements, toolActivities] = await Promise.all([
     pb.collection('startup_team_members').getList<TeamMemberRecord>(1, 50, {
       filter: `startup = "${id}"`,
       sort: '-is_founder,name'
@@ -114,7 +139,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     }),
     pb.collection('activities').getList<ActivityRecord>(1, 50, {
       filter: `startup = "${id}"`,
-      sort: '-due_date'
+      sort: '-due_date',
+      expand: 'tool,tool_run'
     }),
     pb.collection('notes').getList<NoteRecord>(1, 50, {
       filter: `startup = "${id}"`,
@@ -129,6 +155,11 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       filter: `startup = "${id}"`,
       sort: '-started_at',
       expand: 'partner'
+    }),
+    pb.collection('activities').getList<ToolActivityRecord>(1, 50, {
+      filter: `startup = "${id}" && kind = "tool_run"`,
+      sort: '-created',
+      expand: 'tool,tool_run'
     })
   ]);
 
@@ -176,7 +207,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ['#activities', `Aktiviteter (${activities.totalItems})`],
           ['#notes', `Anteckningar (${notes.totalItems})`],
           ['#agreements', `Avtal (${agreements.totalItems})`],
-          ['#partners', `Partners (${engagements.totalItems})`]
+          ['#partners', `Partners (${engagements.totalItems})`],
+          ['#tools', `Verktyg (${toolActivities.totalItems})`]
         ].map(([href, label]) => (
           <a
             key={href}
@@ -335,6 +367,69 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                       {e.amount_sek ? ` · ${e.amount_sek.toLocaleString('sv-SE')} SEK` : ''}
                       {e.started_at ? ` · sedan ${new Date(e.started_at).toLocaleDateString('sv-SE')}` : ''}
                     </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section id="tools" title="Verktyg">
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-sm text-foreground-muted">
+              Verktygskörningar kopplade till detta bolag.
+            </p>
+            <Link
+              href={`/toolbox?startup=${id}`}
+              className="inline-flex items-center rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
+            >
+              + Kör verktyg
+            </Link>
+          </div>
+          {toolActivities.items.length === 0 ? (
+            <Empty>Inga verktygskörningar än.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {toolActivities.items.map((a) => (
+                <li key={a.id} className="rounded-2xl border border-default p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      {a.expand?.tool?.icon && (
+                        <span className="text-lg">{a.expand.tool.icon}</span>
+                      )}
+                      <div>
+                        <p className="font-medium text-foreground">
+                          {a.tool_run ? (
+                            <Link
+                              href={`/toolbox/runs/${a.tool_run}`}
+                              className="hover:text-brand hover:underline"
+                            >
+                              {a.title}
+                            </Link>
+                          ) : (
+                            a.title
+                          )}
+                        </p>
+                        <p className="text-xs text-foreground-subtle">
+                          {new Date(a.created).toLocaleString('sv-SE')}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {a.expand?.tool && (
+                        <ToolCategoryBadge category={a.expand.tool.category as never} />
+                      )}
+                      {a.expand?.tool_run ? (
+                        <ToolRunStatusBadge
+                          status={a.expand.tool_run.status as ToolRunStatus}
+                        />
+                      ) : (
+                        <StatusPill
+                          label={activityStatusLabels[a.status]}
+                          variant={a.status === 'done' ? 'success' : 'info'}
+                        />
+                      )}
+                    </div>
                   </div>
                 </li>
               ))}
