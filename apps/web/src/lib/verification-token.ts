@@ -59,8 +59,8 @@ export function parseVerificationToken(token: string): { userId: string } | null
 
   // Manual constant-time comparison to prevent timing attacks
   if (sig.length !== expected.length) return null;
-  const sigBytes = Buffer.from(sig);
-  const expBytes = Buffer.from(expected);
+  const sigBytes = Buffer.from(sig, 'ascii');
+  const expBytes = Buffer.from(expected, 'ascii');
   let diff = 0;
   for (let i = 0; i < sigBytes.length; i++) {
     diff |= sigBytes[i] ^ expBytes[i];

@@ -1,17 +1,21 @@
 import 'server-only';
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = 'Movexum <noreply@movexum.se>';
+
+function getResendApiKey(): string {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) {
+    throw new Error('E-posttjänsten är inte konfigurerad. Kontakta administratören.');
+  }
+  return key;
+}
 
 /**
  * Sends a verification email to a newly registered user via the Resend API.
  * Requires RESEND_API_KEY to be set in the environment.
  */
 export async function sendVerificationEmail(to: string, verificationUrl: string): Promise<void> {
-  if (!RESEND_API_KEY) {
-    console.error('[email] RESEND_API_KEY missing — verification email cannot be sent');
-    throw new Error('E-posttjänsten är inte konfigurerad. Kontakta administratören.');
-  }
+  const apiKey = getResendApiKey();
 
   const html = `<!DOCTYPE html>
 <html lang="sv">
@@ -77,7 +81,7 @@ export async function sendVerificationEmail(to: string, verificationUrl: string)
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${RESEND_API_KEY}`
+      Authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify({
       from: FROM_EMAIL,
