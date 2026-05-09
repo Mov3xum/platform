@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useActionState } from 'react';
 import { loginAction, type LoginState } from '@/lib/actions/auth';
 
@@ -24,7 +25,12 @@ export function LoginForm({ next }: { next: string }) {
       </label>
 
       <label className="block">
-        <span className="mb-1.5 block text-sm font-medium text-foreground-muted">Lösenord</span>
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="block text-sm font-medium text-foreground-muted">Lösenord</span>
+          <Link href="/reset-password" className="text-xs text-link hover:underline">
+            Glömt lösenord?
+          </Link>
+        </div>
         <input
           type="password"
           name="password"
@@ -35,7 +41,7 @@ export function LoginForm({ next }: { next: string }) {
       </label>
 
       {state?.error ? (
-        <p className="rounded-xl bg-error-50 px-4 py-2.5 text-sm text-error-700">{state.error}</p>
+        <p className="rounded-xl bg-movexum-pastell-orange px-4 py-2.5 text-sm text-movexum-morkorange">{state.error}</p>
       ) : null}
 
       <button
@@ -45,6 +51,13 @@ export function LoginForm({ next }: { next: string }) {
       >
         {pending ? 'Loggar in…' : 'Logga in'}
       </button>
+
+      <p className="text-center text-sm text-foreground-muted">
+        Inget konto?{' '}
+        <Link href="/register" className="font-medium text-link hover:underline">
+          Skapa konto
+        </Link>
+      </p>
     </form>
   );
 }
