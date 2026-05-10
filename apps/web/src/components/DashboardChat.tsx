@@ -35,7 +35,8 @@ export default function DashboardChat() {
       if (result.error) {
         setError(result.error);
       } else if (result.text) {
-        setMessages((prev) => [...prev, { role: 'assistant', content: result.text! }]);
+        const assistantText = result.text;
+        setMessages((prev) => [...prev, { role: 'assistant', content: assistantText }]);
         scrollToBottom();
       }
     });
