@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { ToolRunStatusBadge, WorkshopAssignmentStatusBadge } from '@/components/Badges';
+import DashboardChat from '@/components/DashboardChat';
 import type { ToolRun, ToolRunStatus, WorkshopAssignment } from '@platform/shared';
 
 export default async function DashboardPage() {
@@ -67,6 +68,8 @@ export default async function DashboardPage() {
           Rollanpassad översikt baserat på dina behörigheter: {user.roles.join(', ')}
         </p>
       </header>
+
+      <DashboardChat />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {isStaff && (
