@@ -429,7 +429,7 @@ export async function completeWorkshopAction(
         content:
           `Generera en strukturerad workshop-rapport på svenska för ${startupName}.\n\n` +
           `Workshop: ${workshopTitle}\n` +
-          `Mål: ${workshop?.goal ?? ''}\n\n` +
+          `Mål: ${sanitizeForPrompt(workshop?.goal ?? '')}\n\n` +
           `Startup-kontext: ${JSON.stringify(startupContext, null, 2)}\n\n` +
           `Workshopsvar:\n${answersText}\n\n` +
           `Rapporten ska innehålla: sammanfattning, nyckelinsikter, prioriterade åtgärder och nästa steg. ` +
@@ -478,7 +478,7 @@ export async function completeWorkshopAction(
     console.error('[workshops] report generation failed', {
       assignmentId,
       workshop: workshopTitle,
-      error: err instanceof Error ? err.message : String(err)
+      errorType: err instanceof Error ? err.constructor.name : typeof err
     });
     // Report generation is best-effort; set flag so admins can see it failed
     reportMd = '';
