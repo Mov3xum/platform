@@ -23,6 +23,14 @@ const nextConfig = {
     // Ensure all dependencies are traced correctly in monorepo with path aliases
     esmExternals: true,
   },
+  webpack: (config) => {
+    // Make @-alias resolution explicit in all environments (including Docker/Coolify)
+    config.resolve.alias = {
+      ...(config.resolve.alias || {}),
+      '@': join(__dirname, 'src'),
+    };
+    return config;
+  },
 };
 
 export default nextConfig;
