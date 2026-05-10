@@ -38,6 +38,12 @@ export function WorkshopRunner({ assignment, modules }: WorkshopRunnerProps) {
 
   const allBlocks = useMemo(() => modules.flatMap((m) => m.blocks), [modules]);
 
+  function normalizeAnswerArray(value: unknown): string[] {
+    if (Array.isArray(value)) return value.map(String);
+    if (typeof value === 'string' && value) return [value];
+    return [];
+  }
+
   const completedRequired = useMemo(() => {
     const requiredBlocks = allBlocks.filter((block) => block.required);
     if (requiredBlocks.length === 0) return true;
@@ -48,8 +54,7 @@ export function WorkshopRunner({ assignment, modules }: WorkshopRunnerProps) {
         return aiThreadCount > 0 || Boolean(answers[`${block.id}__ai_done`]);
       }
       if (block.type === 'test') {
-        const val = answers[block.id];
-        return Array.isArray(val) ? val.length > 0 : (typeof val === 'string' && val.length > 0);
+        return normalizeAnswerArray(answers[block.id]).length > 0;
       }
       const value = answers[block.id];
       return typeof value === 'string' && value.trim().length > 0;
@@ -66,8 +71,7 @@ export function WorkshopRunner({ assignment, modules }: WorkshopRunnerProps) {
           return !(aiThreadCount > 0 || Boolean(answers[`${block.id}__ai_done`]));
         }
         if (block.type === 'test') {
-          const val = answers[block.id];
-          return Array.isArray(val) ? val.length === 0 : !(typeof val === 'string' && val.length > 0);
+          return normalizeAnswerArray(answers[block.id]).length === 0;
         }
         const value = answers[block.id];
         return !(typeof value === 'string' && value.trim().length > 0);
@@ -223,24 +227,18 @@ export function WorkshopRunner({ assignment, modules }: WorkshopRunnerProps) {
                     ) : (
                       (block.options ?? []).map((opt) => {
                         const isMultiple = block.question_type === 'multiple';
-                        const currentAnswers = Array.isArray(answers[block.id])
-                          ? (answers[block.id] as string[])
-                          : answers[block.id]
-                            ? [String(answers[block.id])]
-                            : [];
+                        const currentAnswers = normalizeAnswerArray(answers[block.id]);
                         const isChecked = currentAnswers.includes(opt.id);
 
                         const handleChange = (checked: boolean) => {
                           if (isMultiple) {
                             setAnswers((prev) => {
-                              const prev_arr = Array.isArray(prev[block.id])
-                                ? (prev[block.id] as string[])
-                                : prev[block.id] ? [String(prev[block.id])] : [];
+                              const prevArr = normalizeAnswerArray(prev[block.id]);
                               return {
                                 ...prev,
                                 [block.id]: checked
-                                  ? [...prev_arr, opt.id]
-                                  : prev_arr.filter((id) => id !== opt.id)
+                                  ? [...prevArr, opt.id]
+                                  : prevArr.filter((id) => id !== opt.id)
                               };
                             });
                           } else {

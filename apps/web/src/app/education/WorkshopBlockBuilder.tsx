@@ -18,6 +18,9 @@ const BLOCK_TYPE_MAP = Object.fromEntries(BLOCK_TYPES.map((b) => [b.type, b]));
 
 let _idSeq = 0;
 function uid(prefix: string) {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+  }
   return `${prefix}_${Date.now()}_${++_idSeq}`;
 }
 

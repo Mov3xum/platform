@@ -373,7 +373,9 @@ export async function completeWorkshopAction(
 
   const now = new Date().toISOString();
   const workshop = assignment.expand?.workshop as Workshop | undefined;
-  const workshopTitle = workshop?.title ?? 'Workshop';
+  // Sanitize strings before interpolation into AI prompts (prevent prompt injection via field values)
+  const sanitizeForPrompt = (s: string) => s.replace(/[<>]/g, '').slice(0, 200);
+  const workshopTitle = sanitizeForPrompt(workshop?.title ?? 'Workshop');
 
   // Build a readable summary of all answers for report generation
   const answers = (assignment.answers_json as Record<string, unknown>) || {};
@@ -412,7 +414,7 @@ export async function completeWorkshopAction(
   }
 
   const answersText = answerLines.join('\n');
-  const startupName = assignment.expand?.startup?.name ?? 'Startup';
+  const startupName = sanitizeForPrompt(assignment.expand?.startup?.name ?? 'Startup');
 
   let reportMd = '';
   try {
@@ -473,13 +475,18 @@ export async function completeWorkshopAction(
       due_date: now.slice(0, 10)
     });
   } catch (err) {
-    console.error('[workshops] report generation failed', err);
-    // Report generation is best-effort; continue with completion
+    console.error('[workshops] report generation failed', {
+      assignmentId,
+      workshop: workshopTitle,
+      error: err instanceof Error ? err.message : String(err)
+    });
+    // Report generation is best-effort; set flag so admins can see it failed
     reportMd = '';
   }
 
   const takeaway = {
     report_md: reportMd,
+    report_generation_failed: !reportMd,
     generated_at: now,
     startup: startupName,
     workshop: workshopTitle
