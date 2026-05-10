@@ -5,7 +5,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { buildStartupContext } from '@/lib/ai/context';
 import { callMistral, estimateCostUsd } from '@/lib/ai/mistral';
-import type { Role, WorkshopAssignment, Workshop, WorkshopBlock } from '@platform/shared';
+import type { Role, WorkshopAssignment, Workshop, WorkshopBlock, WorkshopModule, WorkshopBlockOption } from '@platform/shared';
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 const DEFAULT_WORKSHOP_SYSTEM_PROMPT =
@@ -16,6 +16,7 @@ export type WorkshopActionState = {
   assignmentId?: string;
   workshopId?: string;
   runId?: string;
+  reportMd?: string;
 };
 
 function toWorkshopBlocks(value: unknown): WorkshopBlock[] {
@@ -23,16 +24,43 @@ function toWorkshopBlocks(value: unknown): WorkshopBlock[] {
   return value
     .map((item, index) => {
       const obj = item as Record<string, unknown>;
+      const options = Array.isArray(obj.options)
+        ? (obj.options as Array<Record<string, unknown>>).map((o, oi) => ({
+            id: String(o.id || `opt_${oi}`),
+            text: String(o.text || ''),
+            isCorrect: o.isCorrect === true
+          } satisfies WorkshopBlockOption))
+        : undefined;
       return {
         id: String(obj.id || `block_${index + 1}`),
         type: (obj.type || 'exercise') as WorkshopBlock['type'],
         title: String(obj.title || `Moment ${index + 1}`),
         instructions: obj.instructions ? String(obj.instructions) : undefined,
         video_url: obj.video_url ? String(obj.video_url) : undefined,
+        image_url: obj.image_url ? String(obj.image_url) : undefined,
+        desired_result: obj.desired_result ? String(obj.desired_result) : undefined,
+        question_type:
+          obj.question_type === 'multiple' ? ('multiple' as const) : ('single' as const),
+        options,
         required: obj.required === true
-      };
+      } satisfies WorkshopBlock;
     })
     .filter((b) => b.title.trim().length > 0);
+}
+
+function toWorkshopModules(value: unknown): WorkshopModule[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item, index) => {
+      const obj = item as Record<string, unknown>;
+      return {
+        id: String(obj.id || `module_${index + 1}`),
+        title: String(obj.title || `Modul ${index + 1}`),
+        description: obj.description ? String(obj.description) : undefined,
+        blocks: toWorkshopBlocks(obj.blocks)
+      } satisfies WorkshopModule;
+    })
+    .filter((m) => m.title.trim().length > 0);
 }
 
 async function loadAssignmentWithAccessCheck(assignmentId: string) {
@@ -77,17 +105,30 @@ export async function createWorkshopAction(
   const version = String(formData.get('version') || '1.0.0').trim();
   const aiSystemPrompt = String(formData.get('ai_system_prompt') || '').trim();
   const outputRequirements = String(formData.get('output_requirements') || '').trim();
+  const modulesRaw = String(formData.get('modules_json') || '[]').trim();
   const contentBlocksRaw = String(formData.get('content_blocks_json') || '[]').trim();
   const audienceRoles = formData.getAll('audience_roles').map(String);
   const active = formData.get('active') === 'on';
 
   if (!key || !title) return { error: 'Nyckel och titel är obligatoriska.' };
 
+  let modules: WorkshopModule[] = [];
   let contentBlocks: WorkshopBlock[] = [];
-  try {
-    contentBlocks = toWorkshopBlocks(JSON.parse(contentBlocksRaw));
-  } catch {
-    return { error: 'Content blocks måste vara giltig JSON.' };
+
+  // Prefer modules_json (from interactive builder) over legacy content_blocks_json
+  if (modulesRaw !== '[]') {
+    try {
+      modules = toWorkshopModules(JSON.parse(modulesRaw));
+      contentBlocks = modules.flatMap((m) => m.blocks);
+    } catch {
+      return { error: 'Modulerna innehåller ogiltig data.' };
+    }
+  } else if (contentBlocksRaw !== '[]') {
+    try {
+      contentBlocks = toWorkshopBlocks(JSON.parse(contentBlocksRaw));
+    } catch {
+      return { error: 'Content blocks måste vara giltig JSON.' };
+    }
   }
 
   try {
@@ -102,6 +143,7 @@ export async function createWorkshopAction(
       audience_roles: audienceRoles,
       ai_system_prompt: aiSystemPrompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT,
       output_requirements: outputRequirements,
+      modules,
       content_blocks: contentBlocks,
       active,
       created_by: user.id
@@ -323,23 +365,127 @@ export async function runWorkshopAiChatAction(
 }
 
 export async function completeWorkshopAction(
-  assignmentId: string,
-  payload: { summary: string; keyInsights: string; prioritizedActions: string; artifacts?: string }
+  assignmentId: string
 ): Promise<WorkshopActionState> {
   const loaded = await loadAssignmentWithAccessCheck(assignmentId);
   if ('error' in loaded) return { error: loaded.error };
-  const { pb, assignment } = loaded;
+  const { pb, user, assignment } = loaded;
 
   const now = new Date().toISOString();
+  const workshop = assignment.expand?.workshop as Workshop | undefined;
+  const workshopTitle = workshop?.title ?? 'Workshop';
+
+  // Build a readable summary of all answers for report generation
+  const answers = (assignment.answers_json as Record<string, unknown>) || {};
+  const modules = Array.isArray(workshop?.modules) && (workshop?.modules as WorkshopModule[]).length > 0
+    ? (workshop.modules as WorkshopModule[])
+    : (workshop?.content_blocks || []).length > 0
+      ? [{ id: 'main', title: workshopTitle, blocks: toWorkshopBlocks(workshop?.content_blocks) }]
+      : [];
+
+  const answerLines: string[] = [];
+  for (const mod of modules) {
+    answerLines.push(`\n## ${mod.title}`);
+    if (mod.description) answerLines.push(mod.description);
+    for (const block of mod.blocks) {
+      answerLines.push(`\n### ${block.title} (${block.type})`);
+      if (block.instructions) answerLines.push(`_${block.instructions}_`);
+      if (block.desired_result) answerLines.push(`Önskat resultat: ${block.desired_result}`);
+      const answer = answers[block.id];
+      if (answer && typeof answer === 'string' && answer.trim()) {
+        answerLines.push(`Svar: ${answer.trim()}`);
+      } else if (block.type === 'test' && answer) {
+        const selected = String(answer);
+        const option = (block.options ?? []).find((o) => o.id === selected);
+        answerLines.push(`Valt svar: ${option?.text ?? selected}`);
+      }
+    }
+  }
+
+  const aiThread = Array.isArray(assignment.ai_thread_json) ? assignment.ai_thread_json : [];
+  if (aiThread.length > 0) {
+    answerLines.push('\n## AI-chattlogg');
+    for (const entry of aiThread as Array<Record<string, unknown>>) {
+      answerLines.push(`**Fråga:** ${String(entry.question ?? '')}`);
+      answerLines.push(`**Svar:** ${String(entry.answer ?? '')}`);
+    }
+  }
+
+  const answersText = answerLines.join('\n');
+  const startupName = assignment.expand?.startup?.name ?? 'Startup';
+
+  let reportMd = '';
+  try {
+    const startupContext = await buildStartupContext(pb, String(assignment.startup), user.tenant);
+    const result = await callMistral('mistral-medium-latest', [
+      {
+        role: 'system',
+        content: workshop?.ai_system_prompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT
+      },
+      {
+        role: 'user',
+        content:
+          `Generera en strukturerad workshop-rapport på svenska för ${startupName}.\n\n` +
+          `Workshop: ${workshopTitle}\n` +
+          `Mål: ${workshop?.goal ?? ''}\n\n` +
+          `Startup-kontext: ${JSON.stringify(startupContext, null, 2)}\n\n` +
+          `Workshopsvar:\n${answersText}\n\n` +
+          `Rapporten ska innehålla: sammanfattning, nyckelinsikter, prioriterade åtgärder och nästa steg. ` +
+          `Formatera med tydliga rubriker och punktlistor. Max 600 ord.`
+      }
+    ]);
+    reportMd = result.text;
+
+    // Log the report-generation run
+    const runStart = now;
+    const run = await pb.collection('workshop_runs').create({
+      tenant: user.tenant,
+      assignment: assignment.id,
+      workshop: assignment.workshop,
+      startup: assignment.startup,
+      triggered_by: user.id,
+      status: 'succeeded',
+      input: { type: 'report_generation' },
+      output_md: reportMd,
+      model: 'mistral-medium-latest',
+      tokens_in: result.usage.prompt_tokens,
+      tokens_out: result.usage.completion_tokens,
+      cost_estimate_usd: estimateCostUsd(
+        'mistral-medium-latest',
+        result.usage.prompt_tokens,
+        result.usage.completion_tokens
+      ),
+      started_at: runStart,
+      completed_at: now
+    });
+
+    await pb.collection('activities').create({
+      startup: assignment.startup,
+      type: 'workshop',
+      title: `${workshopTitle} – rapport genererad`,
+      status: 'done',
+      kind: 'workshop_run',
+      workshop: assignment.workshop,
+      workshop_assignment: assignment.id,
+      workshop_run: run.id,
+      owner: user.id,
+      completed_at: now,
+      due_date: now.slice(0, 10)
+    });
+  } catch (err) {
+    console.error('[workshops] report generation failed', err);
+    // Report generation is best-effort; continue with completion
+    reportMd = '';
+  }
+
   const takeaway = {
-    summary: payload.summary.trim(),
-    keyInsights: payload.keyInsights.trim(),
-    prioritizedActions: payload.prioritizedActions.trim(),
-    artifacts: payload.artifacts?.trim() || ''
+    report_md: reportMd,
+    generated_at: now,
+    startup: startupName,
+    workshop: workshopTitle
   };
 
   try {
-    const workshopTitle = assignment.expand?.workshop?.title ?? 'Workshop';
     await pb.collection('workshop_assignments').update(assignmentId, {
       status: 'done',
       takeaway_json: takeaway,
@@ -373,7 +519,7 @@ export async function completeWorkshopAction(
     revalidatePath('/dashboard');
     revalidatePath('/aktivitet');
     if (assignment.startup) revalidatePath(`/startups/${assignment.startup}`);
-    return { assignmentId };
+    return { assignmentId, reportMd };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte slutföra workshop.' };
   }
