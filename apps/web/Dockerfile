@@ -18,6 +18,12 @@ RUN apk add --no-cache libc6-compat
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+RUN echo "=== DEBUG: Listing actions dir ===" && \
+    ls -la apps/web/src/lib/actions/ && \
+    echo "=== DEBUG: Listing src/lib ===" && \
+    ls -la apps/web/src/lib/ && \
+    echo "=== END DEBUG ==="
+
 RUN cd apps/web && yarn build
 
 # Minimal runtime image: copies only the standalone Next.js output
