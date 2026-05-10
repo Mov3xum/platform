@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ComponentType } from 'react';
-import { Building2, Compass, FolderKanban, GraduationCap, Home, Menu, Sparkles, X } from 'lucide-react';
+import { Building2, Compass, FolderKanban, GraduationCap, Home, Menu, Plug2, Sparkles, X } from 'lucide-react';
 import { coreModules, type Role } from '@platform/shared';
 import { canAccessModule } from '@/lib/rbac';
 import { Logo } from './Logo';
@@ -22,6 +22,7 @@ const iconByModule: Record<string, ComponentType<{ className?: string }>> = {
   education: GraduationCap,
   toolbox: Sparkles,
   activity_feed: Compass,
+  integrationer: Plug2,
 };
 
 function isRouteActive(currentPath: string, route: string) {

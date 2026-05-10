@@ -193,5 +193,12 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Global feed med alla aktiviteter och verktygskörningar.',
     rolesAllowed: ALL_ROLES,
     route: '/aktivitet'
+  },
+  {
+    id: 'integrationer',
+    title: 'Integrationer',
+    description: 'Anslut externa tjänster och bygg din organisations unika digitala miljö.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'startup_member'],
+    route: '/integrationer'
   }
 ];
