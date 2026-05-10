@@ -1,5 +1,6 @@
 import { type Role } from '@platform/shared';
 import type { SessionUser } from '@/lib/auth.server';
+import { getServerPb } from '@/lib/auth.server';
 import { ThemeToggle } from './ThemeProvider';
 import { Logo } from './Logo';
 import { LogoutButton } from './LogoutButton';
@@ -10,8 +11,22 @@ type AppShellProps = {
   children: React.ReactNode;
 };
 
-export function AppShell({ user, children }: AppShellProps) {
+export async function AppShell({ user, children }: AppShellProps) {
   const roles = user.roles as Role[];
+  let assignedWorkshopCount = 0;
+
+  if (roles.includes('startup_member') && user.linkedStartups.length > 0) {
+    try {
+      const pb = await getServerPb();
+      const linkedFilter = user.linkedStartups.map((id) => `startup = "${id}"`).join(' || ');
+      const result = await pb.collection('workshop_assignments').getList(1, 1, {
+        filter: `tenant = "${user.tenant}" && status != "done" && (${linkedFilter})`
+      });
+      assignedWorkshopCount = result.totalItems;
+    } catch {
+      assignedWorkshopCount = 0;
+    }
+  }
 
   return (
     <div className="min-h-screen bg-canvas">
@@ -22,7 +37,7 @@ export function AppShell({ user, children }: AppShellProps) {
           </div>
 
           <div className="flex-1 px-4 py-5">
-            <DesktopNavigation roles={roles} />
+            <DesktopNavigation roles={roles} assignedWorkshopCount={assignedWorkshopCount} />
           </div>
 
           <div className="border-t border-default px-6 py-5">
@@ -36,7 +51,7 @@ export function AppShell({ user, children }: AppShellProps) {
         <div className="flex min-h-screen flex-1 flex-col">
           <header className="sticky top-0 z-20 border-b border-default bg-surface/85 px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-8">
             <div className="flex items-center gap-3">
-              <MobileNavigation roles={roles} />
+              <MobileNavigation roles={roles} assignedWorkshopCount={assignedWorkshopCount} />
               <div className="lg:hidden">
                 <Logo href="/dashboard" />
               </div>

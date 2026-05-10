@@ -12,6 +12,7 @@ import { Logo } from './Logo';
 
 type NavProps = {
   roles: Role[];
+  assignedWorkshopCount?: number;
 };
 
 const iconByModule: Record<string, ComponentType<{ className?: string }>> = {
@@ -29,7 +30,11 @@ function isRouteActive(currentPath: string, route: string) {
   return currentPath === route || currentPath.startsWith(route + '/');
 }
 
-function NavLinks({ roles, closeOnNavigate = false }: NavProps & { closeOnNavigate?: boolean }) {
+function NavLinks({
+  roles,
+  assignedWorkshopCount = 0,
+  closeOnNavigate = false
+}: NavProps & { closeOnNavigate?: boolean }) {
   const pathname = usePathname();
   const modules = coreModules.filter((module) => canAccessModule(roles, module.id));
 
@@ -54,6 +59,11 @@ function NavLinks({ roles, closeOnNavigate = false }: NavProps & { closeOnNaviga
                 >
                   <Icon className={active ? 'h-4 w-4' : 'h-4 w-4 text-foreground-subtle group-hover:text-foreground'} />
                   <span>{module.title}</span>
+                  {module.id === 'education' && assignedWorkshopCount > 0 ? (
+                    <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-movexum-orange px-1.5 py-0.5 text-[10px] font-semibold text-brand-foreground">
+                      {assignedWorkshopCount}
+                    </span>
+                  ) : null}
                 </Link>
               </Dialog.Close>
             ) : (
@@ -68,6 +78,11 @@ function NavLinks({ roles, closeOnNavigate = false }: NavProps & { closeOnNaviga
               >
                 <Icon className={active ? 'h-4 w-4' : 'h-4 w-4 text-foreground-subtle group-hover:text-foreground'} />
                 <span>{module.title}</span>
+                {module.id === 'education' && assignedWorkshopCount > 0 ? (
+                  <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-movexum-orange px-1.5 py-0.5 text-[10px] font-semibold text-brand-foreground">
+                    {assignedWorkshopCount}
+                  </span>
+                ) : null}
               </Link>
             )}
           </li>
@@ -77,11 +92,11 @@ function NavLinks({ roles, closeOnNavigate = false }: NavProps & { closeOnNaviga
   );
 }
 
-export function DesktopNavigation({ roles }: NavProps) {
-  return <NavLinks roles={roles} />;
+export function DesktopNavigation({ roles, assignedWorkshopCount = 0 }: NavProps) {
+  return <NavLinks roles={roles} assignedWorkshopCount={assignedWorkshopCount} />;
 }
 
-export function MobileNavigation({ roles }: NavProps) {
+export function MobileNavigation({ roles, assignedWorkshopCount = 0 }: NavProps) {
   return (
     <Dialog.Root>
       <Dialog.Trigger asChild>
@@ -119,7 +134,11 @@ export function MobileNavigation({ roles }: NavProps) {
               </div>
 
               <nav className="flex-1">
-                <NavLinks roles={roles} closeOnNavigate />
+                <NavLinks
+                  roles={roles}
+                  assignedWorkshopCount={assignedWorkshopCount}
+                  closeOnNavigate
+                />
               </nav>
             </div>
           </motion.aside>

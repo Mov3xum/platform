@@ -105,8 +105,24 @@ export const toolRunStatusLabels: Record<ToolRunStatus, string> = {
   failed: 'Misslyckad'
 };
 
-export type ActivityKind = 'manual' | 'tool_run';
+export type ActivityKind = 'manual' | 'tool_run' | 'workshop_assignment' | 'workshop_run';
 export const activityKindLabels: Record<ActivityKind, string> = {
   manual: 'Manuell',
-  tool_run: 'Verktygskörning'
+  tool_run: 'Verktygskörning',
+  workshop_assignment: 'Workshoptilldelning',
+  workshop_run: 'Workshop AI-körning'
+};
+
+export type WorkshopStatus = 'draft' | 'active' | 'archived';
+export const workshopStatusLabels: Record<WorkshopStatus, string> = {
+  draft: 'Utkast',
+  active: 'Aktiv',
+  archived: 'Arkiverad'
+};
+
+export type WorkshopAssignmentStatus = 'planned' | 'in_progress' | 'done';
+export const workshopAssignmentStatusLabels: Record<WorkshopAssignmentStatus, string> = {
+  planned: 'Planerad',
+  in_progress: 'Pågår',
+  done: 'Klar'
 };

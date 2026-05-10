@@ -12,7 +12,16 @@ export type {
   ToolOutputFormat,
   ToolRunStatus,
   Tool,
-  ToolRun
+  ToolRun,
+  WorkshopStatus,
+  WorkshopAudience,
+  WorkshopBlockType,
+  WorkshopBlock,
+  Workshop,
+  WorkshopAssignmentStatus,
+  WorkshopAssignment,
+  WorkshopRunStatus,
+  WorkshopRun
 } from '@platform/shared';
 
 export { ALL_ROLES, ALL_PHASES, coreModules } from '@platform/shared';

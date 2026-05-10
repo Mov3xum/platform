@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { ToolRunStatusBadge } from '@/components/Badges';
-import type { ToolRun, ToolRunStatus } from '@platform/shared';
+import { ToolRunStatusBadge, WorkshopAssignmentStatusBadge } from '@/components/Badges';
+import type { ToolRun, ToolRunStatus, WorkshopAssignment } from '@platform/shared';
 
 export default async function DashboardPage() {
   const user = await requireUser();
@@ -16,6 +16,8 @@ export default async function DashboardPage() {
   // if permissions/collection state differs between environments.
   let recentRuns: ToolRun[] = [];
   let recentRunsLoadFailed = false;
+  let assignedWorkshops: WorkshopAssignment[] = [];
+  let workshopLoadFailed = false;
   try {
     const recentRunsResult = await pb.collection('tool_runs').getList<ToolRun>(1, 5, {
       filter: `tenant = "${user.tenant}"`,
@@ -30,6 +32,26 @@ export default async function DashboardPage() {
       userId: user.id,
       error
     });
+  }
+
+  if (isStartup && user.linkedStartups.length > 0) {
+    try {
+      const linkedFilter = user.linkedStartups.map((id) => `startup = "${id}"`).join(' || ');
+      assignedWorkshops = (
+        await pb.collection('workshop_assignments').getList<WorkshopAssignment>(1, 5, {
+          filter: `tenant = "${user.tenant}" && (${linkedFilter}) && status != "done"`,
+          sort: 'due_date,created',
+          expand: 'workshop,startup'
+        })
+      ).items;
+    } catch (error) {
+      workshopLoadFailed = true;
+      console.error('[dashboard] failed to load workshop assignments widget', {
+        tenant: user.tenant,
+        userId: user.id,
+        error
+      });
+    }
   }
 
   return (
@@ -66,8 +88,62 @@ export default async function DashboardPage() {
             }
           />
         )}
+        {isStartup && (
+          <Card
+            title="Tilldelade workshops"
+            description={
+              assignedWorkshops.length > 0
+                ? `${assignedWorkshops.length} pågående workshop${assignedWorkshops.length > 1 ? 's' : ''}`
+                : 'Inga pågående workshops'
+            }
+          />
+        )}
         <Card title="Avtal" description="Status på NDA, inkubatoravtal m.m." />
       </div>
+
+      {isStartup && (
+        <section className="mt-8">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-foreground">Mina workshops</h2>
+            <Link href="/education" className="text-sm font-medium text-link hover:underline">
+              Visa alla →
+            </Link>
+          </div>
+          {workshopLoadFailed ? (
+            <div className="rounded-3xl border border-default bg-surface/50 p-8 text-center">
+              <p className="text-sm text-foreground-muted">Kunde inte ladda workshops just nu.</p>
+            </div>
+          ) : assignedWorkshops.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-strong bg-surface/50 p-8 text-center">
+              <p className="text-sm text-foreground-muted">Du har inga tilldelade workshops.</p>
+            </div>
+          ) : (
+            <ul className="space-y-3">
+              {assignedWorkshops.map((assignment) => (
+                <li key={assignment.id}>
+                  <Link
+                    href={`/education/assignments/${assignment.id}`}
+                    className="flex items-center justify-between rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5 transition hover:border-strong"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">
+                        {(assignment.expand as any)?.workshop?.title ?? 'Workshop'}
+                      </p>
+                      <p className="text-xs text-foreground-subtle">
+                        {(assignment.expand as any)?.startup?.name ?? 'Bolag'} ·{' '}
+                        {assignment.due_date
+                          ? `Deadline ${new Date(assignment.due_date).toLocaleDateString('sv-SE')}`
+                          : 'Ingen deadline'}
+                      </p>
+                    </div>
+                    <WorkshopAssignmentStatusBadge status={assignment.status as any} />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {/* Recent tool runs widget */}
       <section className="mt-8">

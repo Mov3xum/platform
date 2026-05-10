@@ -3,7 +3,13 @@ import { notFound } from 'next/navigation';
 import { getOneForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { PhaseBadge, StatusBadge, ToolCategoryBadge, ToolRunStatusBadge } from '@/components/Badges';
+import {
+  PhaseBadge,
+  StatusBadge,
+  ToolCategoryBadge,
+  ToolRunStatusBadge,
+  WorkshopAssignmentStatusBadge
+} from '@/components/Badges';
 import { NoteForm } from '@/components/NoteForm';
 import {
   activityStatusLabels,
@@ -114,6 +120,24 @@ interface ToolActivityRecord {
   };
 }
 
+interface WorkshopAssignmentRecord {
+  id: string;
+  status: 'planned' | 'in_progress' | 'done';
+  due_date?: string;
+  takeaway_json?: {
+    summary?: string;
+    keyInsights?: string;
+    prioritizedActions?: string;
+    artifacts?: string;
+  };
+  created: string;
+  completed_at?: string;
+  expand?: {
+    workshop?: { id: string; title: string; version?: string };
+    assigned_by?: { id: string; display_name?: string; email: string };
+  };
+}
+
 export default async function StartupDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
@@ -136,7 +160,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     notesResult,
     agreementsResult,
     engagementsResult,
-    toolActivitiesResult
+    toolActivitiesResult,
+    workshopAssignmentsResult
   ] = await Promise.allSettled([
     pb.collection('startup_team_members').getList<TeamMemberRecord>(1, 50, {
       filter: `startup = "${id}"`,
@@ -169,6 +194,11 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       filter: `startup = "${id}" && kind = "tool_run"`,
       sort: '-created',
       expand: 'tool,tool_run'
+    }),
+    pb.collection('workshop_assignments').getList<WorkshopAssignmentRecord>(1, 50, {
+      filter: `startup = "${id}" && tenant = "${user.tenant}"`,
+      sort: '-created',
+      expand: 'workshop,assigned_by'
     })
   ]);
 
@@ -179,6 +209,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   const agreements = agreementsResult.status === 'fulfilled' ? agreementsResult.value : emptyList;
   const engagements = engagementsResult.status === 'fulfilled' ? engagementsResult.value : emptyList;
   const toolActivities = toolActivitiesResult.status === 'fulfilled' ? toolActivitiesResult.value : emptyList;
+  const workshopAssignments =
+    workshopAssignmentsResult.status === 'fulfilled' ? workshopAssignmentsResult.value : emptyList;
 
   const sectionLoadFailed = [
     teamResult,
@@ -187,7 +219,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     notesResult,
     agreementsResult,
     engagementsResult,
-    toolActivitiesResult
+    toolActivitiesResult,
+    workshopAssignmentsResult
   ].some((result) => result.status === 'rejected');
 
   if (sectionLoadFailed) {
@@ -243,7 +276,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ['#notes', `Anteckningar (${notes.totalItems})`],
           ['#agreements', `Avtal (${agreements.totalItems})`],
           ['#partners', `Partners (${engagements.totalItems})`],
-          ['#tools', `Verktyg (${toolActivities.totalItems})`]
+          ['#tools', `Verktyg (${toolActivities.totalItems})`],
+          ['#workshops', `Workshops (${workshopAssignments.totalItems})`]
         ].map(([href, label]) => (
           <a
             key={href}
@@ -474,6 +508,78 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                   </div>
                 </li>
               ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section id="workshops" title="Workshops">
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-sm text-foreground-muted">
+              Tilldelade workshops och takeaways som lagrats direkt på bolagskortet.
+            </p>
+            <Link
+              href={`/education`}
+              className="inline-flex items-center rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
+            >
+              Hantera workshops
+            </Link>
+          </div>
+          {workshopAssignments.items.length === 0 ? (
+            <Empty>Inga workshoptilldelningar än.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {workshopAssignments.items.map((assignment) => {
+                const takeaway = assignment.takeaway_json || {};
+                return (
+                  <li key={assignment.id} className="rounded-2xl border border-default p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-foreground">
+                          <Link
+                            href={`/education/assignments/${assignment.id}`}
+                            className="hover:text-brand hover:underline"
+                          >
+                            {assignment.expand?.workshop?.title || 'Workshop'}
+                          </Link>
+                        </p>
+                        <p className="text-xs text-foreground-subtle">
+                          Tilldelad av{' '}
+                          {assignment.expand?.assigned_by?.display_name ||
+                            assignment.expand?.assigned_by?.email ||
+                            'Okänd'}{' '}
+                          · {new Date(assignment.created).toLocaleString('sv-SE')}
+                        </p>
+                        {assignment.due_date ? (
+                          <p className="text-xs text-foreground-subtle">
+                            Deadline: {new Date(assignment.due_date).toLocaleDateString('sv-SE')}
+                          </p>
+                        ) : null}
+                      </div>
+                      <WorkshopAssignmentStatusBadge status={assignment.status as any} />
+                    </div>
+                    {takeaway.summary ? (
+                      <div className="mt-3 rounded-xl border border-default bg-canvas-subtle/40 p-3 text-sm text-foreground-muted">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-foreground-subtle">
+                          Takeaway
+                        </p>
+                        <p className="mt-1">{takeaway.summary}</p>
+                        {takeaway.keyInsights ? (
+                          <p className="mt-2 whitespace-pre-wrap text-xs text-foreground-subtle">
+                            <span className="font-medium text-foreground-muted">Nyckelinsikter:</span>{' '}
+                            {takeaway.keyInsights}
+                          </p>
+                        ) : null}
+                        {takeaway.prioritizedActions ? (
+                          <p className="mt-2 whitespace-pre-wrap text-xs text-foreground-subtle">
+                            <span className="font-medium text-foreground-muted">Prioriterade actions:</span>{' '}
+                            {takeaway.prioritizedActions}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Section>
