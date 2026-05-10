@@ -19,6 +19,10 @@ const nextConfig = {
       },
     ],
   },
+  experimental: {
+    // Ensure all dependencies are traced correctly in monorepo with path aliases
+    esmExternals: true,
+  },
 };
 
 export default nextConfig;
