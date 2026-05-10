@@ -12,12 +12,25 @@ export default async function DashboardPage() {
 
   const pb = await getServerPb();
 
-  // Load recent tool runs for the widget
-  const recentRunsResult = await pb.collection('tool_runs').getList<ToolRun>(1, 5, {
-    filter: `tenant = "${user.tenant}"`,
-    sort: '-created',
-    expand: 'tool,startup'
-  });
+  // Load recent tool runs for the widget without crashing the whole page
+  // if permissions/collection state differs between environments.
+  let recentRuns: ToolRun[] = [];
+  let recentRunsLoadFailed = false;
+  try {
+    const recentRunsResult = await pb.collection('tool_runs').getList<ToolRun>(1, 5, {
+      filter: `tenant = "${user.tenant}"`,
+      sort: '-created',
+      expand: 'tool,startup'
+    });
+    recentRuns = recentRunsResult.items;
+  } catch (error) {
+    recentRunsLoadFailed = true;
+    console.error('[dashboard] failed to load tool_runs widget', {
+      tenant: user.tenant,
+      userId: user.id,
+      error
+    });
+  }
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-10 lg:px-8">
@@ -67,7 +80,17 @@ export default async function DashboardPage() {
             Visa alla →
           </Link>
         </div>
-        {recentRunsResult.items.length === 0 ? (
+        {recentRunsLoadFailed ? (
+          <div className="rounded-3xl border border-default bg-surface/50 p-8 text-center">
+            <p className="text-sm text-foreground-muted">Kunde inte ladda verktygskorningar just nu.</p>
+            <Link
+              href="/toolbox"
+              className="mt-3 inline-flex items-center text-sm font-medium text-link hover:underline"
+            >
+              Ga till verktygsladan -&gt;
+            </Link>
+          </div>
+        ) : recentRuns.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-strong bg-surface/50 p-8 text-center">
             <p className="text-sm text-foreground-muted">Inga verktygskörningar än.</p>
             <Link
@@ -79,7 +102,7 @@ export default async function DashboardPage() {
           </div>
         ) : (
           <ul className="space-y-3">
-            {recentRunsResult.items.map((run) => {
+            {recentRuns.map((run) => {
               const tool = (run.expand as any)?.tool;
               const startup = (run.expand as any)?.startup;
               return (
