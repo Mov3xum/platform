@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import type { Partner } from '@platform/shared';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { hasRole } from '@/lib/rbac';
+import { canAccessModule } from '@/lib/rbac';
 
 export default async function PartnersPage() {
   const user = await requireUser();
 
-  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'partner'])) {
+  if (!canAccessModule(user.roles, 'partners')) {
     return (
       <main className="mx-auto max-w-4xl px-6 py-10 lg:px-8">
         <div className="rounded-3xl border border-default bg-surface p-8 text-center">

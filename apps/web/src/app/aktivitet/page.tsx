@@ -1,6 +1,8 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { listForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { canAccessModule } from '@/lib/rbac';
 import {
   ToolCategoryBadge,
   ToolRunStatusBadge,
@@ -50,6 +52,7 @@ export default async function AktivitetPage({
 }) {
   const { kind } = await searchParams;
   const user = await requireUser();
+  if (!canAccessModule(user.roles, 'activity_feed')) redirect('/dashboard');
   const pb = await getServerPb();
 
   const filterParts: string[] = [];

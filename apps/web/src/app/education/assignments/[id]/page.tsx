@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { hasRole } from '@/lib/rbac';
+import { canAccessModule, hasRole } from '@/lib/rbac';
 import { WorkshopAssignmentStatusBadge } from '@/components/Badges';
 import { WorkshopRunner } from '../../WorkshopRunner';
 import type { WorkshopAssignment, WorkshopBlock, WorkshopModule } from '@platform/shared';
@@ -13,6 +13,7 @@ export default async function WorkshopAssignmentPage({
 }) {
   const { id } = await params;
   const user = await requireUser();
+  if (!canAccessModule(user.roles, 'education')) notFound();
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
 

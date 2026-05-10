@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth.server';
-import { hasRole } from '@/lib/rbac';
+import { canAccessModule, hasRole } from '@/lib/rbac';
 import { WorkshopCreateForm } from '../WorkshopCreateForm';
 
 export default async function NewWorkshopPage() {
   const user = await requireUser();
+  if (!canAccessModule(user.roles, 'education')) redirect('/dashboard');
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) {
     redirect('/education');
   }

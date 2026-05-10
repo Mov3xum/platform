@@ -1,4 +1,11 @@
-export default function OnboardingPage() {
+import { redirect } from 'next/navigation';
+import { requireUser } from '@/lib/auth.server';
+import { canAccessModule } from '@/lib/rbac';
+
+export default async function OnboardingPage() {
+  const user = await requireUser();
+  if (!canAccessModule(user.roles, 'onboarding')) redirect('/dashboard');
+
   return (
     <section>
       <h1>Digital onboarding</h1>

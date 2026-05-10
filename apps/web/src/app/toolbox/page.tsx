@@ -1,7 +1,8 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { listForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { hasRole, canRunTool } from '@/lib/rbac';
+import { canAccessModule, hasRole, canRunTool } from '@/lib/rbac';
 import { ToolCategoryBadge } from '@/components/Badges';
 import { toolCategoryLabels, type ToolCategory } from '@/lib/labels';
 import type { Tool } from '@platform/shared';
@@ -29,6 +30,7 @@ export default async function ToolboxPage({
   const categoryFilter = isToolCategory(params.category) ? params.category : undefined;
 
   const user = await requireUser();
+  if (!canAccessModule(user.roles, 'toolbox')) redirect('/dashboard');
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
   const pb = await getServerPb();
 
