@@ -7,7 +7,10 @@ import { AUTH_COOKIE } from '@/lib/auth.server';
 import { generateVerificationToken, parseVerificationToken } from '@/lib/verification-token';
 import { sendVerificationEmail } from '@/lib/email';
 
-const PB_URL = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'http://localhost:8080';
+const PB_URL =
+  process.env.POCKETBASE_URL ||
+  process.env.NEXT_PUBLIC_POCKETBASE_URL ||
+  (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080');
 
 async function isHttpsRequest(): Promise<boolean> {
   const h = await headers();
@@ -73,7 +76,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
         return { error: 'Users-collectionen saknas i PocketBase — har migrationerna körts?' };
       }
       if (!e.status) {
-        return { error: `Kunde inte nå PocketBase (${PB_URL}). Kontrollera NEXT_PUBLIC_POCKETBASE_URL.` };
+        return { error: `Kunde inte nå PocketBase (${PB_URL}). Kontrollera POCKETBASE_URL/NEXT_PUBLIC_POCKETBASE_URL.` };
       }
       return { error: e.data?.message || e.message || 'Inloggning misslyckades. Försök igen.' };
     }
