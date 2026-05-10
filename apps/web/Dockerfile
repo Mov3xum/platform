@@ -8,7 +8,9 @@ COPY package.json yarn.lock ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared/package.json packages/shared/package.json
 
-RUN yarn install --frozen-lockfile
+# Build stage needs devDependencies (Tailwind/PostCSS plugins) even if
+# deployment environment exports NODE_ENV=production.
+RUN yarn install --frozen-lockfile --production=false
 
 FROM node:20-alpine AS builder
 WORKDIR /app
