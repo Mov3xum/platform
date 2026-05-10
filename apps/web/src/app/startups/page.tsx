@@ -1,7 +1,8 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { listForTenant } from '@/lib/pb.server';
 import { requireUser } from '@/lib/auth.server';
-import { hasRole } from '@/lib/rbac';
+import { canAccessModule, hasRole } from '@/lib/rbac';
 import { ALL_PHASES, type StartupPhase } from '@platform/shared';
 import { phaseLabels, statusLabels, type StartupStatus } from '@/lib/labels';
 import { PhaseBadge, StatusBadge } from '@/components/Badges';
@@ -33,6 +34,7 @@ export default async function StartupsPage({
   searchParams: Promise<{ q?: string; phase?: string; status?: string }>;
 }) {
   const user = await requireUser();
+  if (!canAccessModule(user.roles, 'startups')) redirect('/dashboard');
   const params = await searchParams;
   const canCreate = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
 

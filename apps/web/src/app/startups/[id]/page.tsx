@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getOneForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { hasRole } from '@/lib/rbac';
+import { canAccessModule, hasRole } from '@/lib/rbac';
 import {
   PhaseBadge,
   StatusBadge,
@@ -141,6 +141,7 @@ interface WorkshopAssignmentRecord {
 export default async function StartupDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
+  if (!canAccessModule(user.roles, 'startups')) notFound();
   const canEdit = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
 
   let startup: StartupRecord;

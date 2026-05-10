@@ -1,4 +1,6 @@
+import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth.server';
+import { canAccessModule } from '@/lib/rbac';
 import { IntegrationActivateButton } from './IntegrationActivateButton';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -241,7 +243,8 @@ const CATEGORY_ORDER: IntegrationCategory[] = [
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function IntegrationerPage() {
-  await requireUser();
+  const user = await requireUser();
+  if (!canAccessModule(user.roles, 'integrationer')) redirect('/dashboard');
 
   const byCategory = CATEGORY_ORDER.reduce<Record<IntegrationCategory, Integration[]>>(
     (acc, cat) => {

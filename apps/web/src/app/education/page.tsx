@@ -1,11 +1,13 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { hasRole } from '@/lib/rbac';
+import { canAccessModule, hasRole } from '@/lib/rbac';
 import { WorkshopAssignmentStatusBadge, WorkshopStatusBadge } from '@/components/Badges';
 import type { Workshop, WorkshopAssignment } from '@platform/shared';
 
 export default async function EducationPage() {
   const user = await requireUser();
+  if (!canAccessModule(user.roles, 'education')) redirect('/dashboard');
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
   const isStartupMember = hasRole(user.roles, ['startup_member']);

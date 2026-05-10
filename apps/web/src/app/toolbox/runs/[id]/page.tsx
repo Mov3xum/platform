@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { canAccessModule } from '@/lib/rbac';
 import { ToolRunStatusBadge } from '@/components/Badges';
 import type { ToolRun, ToolRunStatus } from '@platform/shared';
 
@@ -11,6 +12,7 @@ export default async function ToolRunDetailPage({
 }) {
   const { id } = await params;
   const user = await requireUser();
+  if (!canAccessModule(user.roles, 'toolbox')) notFound();
   const pb = await getServerPb();
 
   let run: ToolRun;

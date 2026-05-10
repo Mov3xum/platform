@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { hasRole, canRunTool } from '@/lib/rbac';
+import { canAccessModule, hasRole, canRunTool } from '@/lib/rbac';
 import { ToolCategoryBadge, ToolRunStatusBadge } from '@/components/Badges';
 import { toolCategoryLabels, type ToolRunStatus } from '@/lib/labels';
 import { RunToolForm } from '../RunToolForm';
@@ -17,6 +17,7 @@ export default async function ToolDetailPage({
   const { id } = await params;
   const { startup: defaultStartupId } = await searchParams;
   const user = await requireUser();
+  if (!canAccessModule(user.roles, 'toolbox')) notFound();
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
 
