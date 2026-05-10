@@ -238,6 +238,21 @@ const CATEGORY_ORDER: IntegrationCategory[] = [
   'productivity'
 ];
 
+const VALUE_PROPS = [
+  {
+    title: 'Per konto',
+    description: 'Varje organisation konfigurerar sina egna integrationer. Inget delat, inget läckage.'
+  },
+  {
+    title: 'EU-suveränt',
+    description: 'Alla integrationer auditeras mot Movexums dataskyddspolicy. Ingen data lämnar EU.'
+  },
+  {
+    title: 'En miljö',
+    description: 'Era verktyg pratar med plattformen — inte tvärtom. Ni väljer vad som visas var.'
+  }
+];
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function IntegrationerPage() {
@@ -269,21 +284,14 @@ export default async function IntegrationerPage() {
 
       {/* ── Value proposition banner ── */}
       <div className="mb-10 grid gap-4 sm:grid-cols-3">
-        <ValueProp
-          placeholder="01"
-          title="Per konto"
-          description="Varje organisation konfigurerar sina egna integrationer. Inget delat, inget läckage."
-        />
-        <ValueProp
-          placeholder="02"
-          title="EU-suveränt"
-          description="Alla integrationer auditeras mot Movexums dataskyddspolicy. Ingen data lämnar EU."
-        />
-        <ValueProp
-          placeholder="03"
-          title="En miljö"
-          description="Era verktyg pratar med plattformen — inte tvärtom. Ni väljer vad som visas var."
-        />
+        {VALUE_PROPS.map((prop, idx) => (
+          <ValueProp
+            key={prop.title}
+            placeholder={String(idx + 1).padStart(2, '0')}
+            title={prop.title}
+            description={prop.description}
+          />
+        ))}
       </div>
 
       {/* ── Integration categories ── */}
@@ -322,7 +330,7 @@ export default async function IntegrationerPage() {
       {/* ── Request integration footer ── */}
       <div className="mt-14 rounded-3xl border border-dashed border-strong bg-surface/50 px-8 py-10 text-center">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-default bg-canvas-subtle text-xs font-semibold tracking-[0.08em] text-foreground-muted">
-          04
+          {String(VALUE_PROPS.length + 1).padStart(2, '0')}
         </div>
         <h3 className="mt-3 text-lg font-semibold text-foreground">
           Saknar du en integration?
@@ -393,8 +401,9 @@ function IntegrationCard({
         {/* Feature list */}
         <ul className="space-y-1.5">
           {integration.features.map((feature) => (
-            <li key={feature} className="border-l-2 border-default pl-3 text-xs text-foreground-muted">
-              {feature}
+            <li key={feature} className="flex items-start gap-2 text-xs text-foreground-muted">
+              <span className="mt-0.5 text-foreground-subtle" aria-hidden="true">—</span>
+              <span>{feature}</span>
             </li>
           ))}
         </ul>

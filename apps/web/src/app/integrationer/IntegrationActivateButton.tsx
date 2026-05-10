@@ -81,7 +81,6 @@ export function IntegrationActivateButton({ integrationName, providerPlaceholder
                   <Dialog.Close asChild>
                     <button
                       type="button"
-                      aria-label="Stäng"
                       className="absolute right-4 top-4 inline-flex items-center justify-center rounded-xl border border-default bg-surface/80 px-2.5 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle hover:text-foreground"
                     >
                       Stäng
@@ -117,7 +116,7 @@ export function IntegrationActivateButton({ integrationName, providerPlaceholder
                   {/* Coming soon notice */}
                   <div className="mt-2 rounded-2xl border border-movexum-gul/40 bg-movexum-pastell-gul px-4 py-3 dark:border-movexum-morkgul/50 dark:bg-movexum-morkgul/20">
                     <div className="flex items-start gap-2">
-                      <div className="mt-0.5 h-4 w-4 shrink-0 rounded-full border border-movexum-morkgul/50 bg-movexum-pastell-gul dark:border-movexum-gul/60 dark:bg-movexum-morkgul/30" />
+                      <div aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 rounded-full border border-movexum-morkgul/50 bg-movexum-pastell-gul dark:border-movexum-gul/60 dark:bg-movexum-morkgul/30" />
                       <p className="text-xs text-movexum-morkgul dark:text-movexum-pastell-gul">
                         <span className="font-semibold">Kommer snart.</span>{' '}
                         Integrationer är under aktiv utveckling. Anmäl ert intresse så prioriterar vi er konfiguration.
