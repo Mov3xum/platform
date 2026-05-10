@@ -6,6 +6,7 @@ import { Camera, Check, Eye, EyeOff, KeyRound, User } from 'lucide-react';
 import {
   changePasswordAction,
   updateProfileAction,
+  MAX_AVATAR_BYTES,
   type ChangePasswordState,
   type UpdateProfileState
 } from '@/lib/actions/account';
@@ -41,6 +42,9 @@ export function ProfileForm({
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (preview && preview.startsWith('blob:')) {
+      URL.revokeObjectURL(preview);
+    }
     const url = URL.createObjectURL(file);
     setPreview(url);
   }

@@ -20,10 +20,12 @@ const nextConfig = {
       {
         protocol: 'http',
         hostname: 'localhost',
+        port: '8080',
       },
       {
         protocol: 'http',
         hostname: 'pocketbase',
+        port: '8080',
       },
     ],
   },

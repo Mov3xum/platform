@@ -22,6 +22,8 @@ async function isHttpsRequest(): Promise<boolean> {
   return proto === 'https';
 }
 
+export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+
 export type UpdateProfileState = {
   error?: string;
   success?: boolean;
@@ -47,7 +49,7 @@ export async function updateProfileAction(
     updateData.append('display_name', displayName);
   }
   if (avatarFile && avatarFile.size > 0) {
-    if (avatarFile.size > 5 * 1024 * 1024) {
+    if (avatarFile.size > MAX_AVATAR_BYTES) {
       return { error: 'Profilbilden får inte vara större än 5 MB.' };
     }
     updateData.append('avatar', avatarFile);
