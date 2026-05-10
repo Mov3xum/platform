@@ -17,6 +17,16 @@ const nextConfig = {
         protocol: 'https',
         hostname: '**',
       },
+      {
+        protocol: 'http',
+        hostname: 'localhost',
+        port: '8080',
+      },
+      {
+        protocol: 'http',
+        hostname: 'pocketbase',
+        port: '8080',
+      },
     ],
   },
   experimental: {
