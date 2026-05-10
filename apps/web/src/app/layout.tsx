@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Navbar } from '@/components/Navbar';
 import { ThemeScript } from '@/components/ThemeProvider';
+import { AppShell } from '@/components/AppShell';
 import { getCurrentUser } from '@/lib/auth.server';
 import './globals.css';
 
@@ -22,8 +23,14 @@ export default async function RootLayout({
         <ThemeScript />
       </head>
       <body className="min-h-screen bg-canvas text-foreground antialiased">
-        <Navbar user={user} />
-        {children}
+        {user ? (
+          <AppShell user={user}>{children}</AppShell>
+        ) : (
+          <>
+            <Navbar user={null} />
+            {children}
+          </>
+        )}
       </body>
     </html>
   );
