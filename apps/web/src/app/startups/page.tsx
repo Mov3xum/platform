@@ -17,11 +17,13 @@ interface StartupRecord {
   tags?: string;
 }
 
+const ALLOWED_STATUS = new Set(Object.keys(statusLabels));
+
 function buildFilter(search?: string, phase?: string, status?: string): string | undefined {
   const parts: string[] = [];
   if (search) parts.push(`name ~ "${search.replace(/"/g, '\\"')}"`);
   if (phase && ALL_PHASES.includes(phase as StartupPhase)) parts.push(`phase = "${phase}"`);
-  if (status) parts.push(`status = "${status}"`);
+  if (status && ALLOWED_STATUS.has(status)) parts.push(`status = "${status}"`);
   return parts.length > 0 ? parts.join(' && ') : undefined;
 }
 
@@ -34,11 +36,24 @@ export default async function StartupsPage({
   const params = await searchParams;
   const canCreate = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
 
-  const result = await listForTenant<StartupRecord>('startups', {
-    filter: buildFilter(params.q, params.phase, params.status),
-    sort: '-created',
-    perPage: 100
-  });
+  let result: { items: StartupRecord[]; totalItems: number } = { items: [], totalItems: 0 };
+  let loadFailed = false;
+
+  try {
+    result = await listForTenant<StartupRecord>('startups', {
+      filter: buildFilter(params.q, params.phase, params.status),
+      sort: '-created',
+      perPage: 100
+    });
+  } catch (error) {
+    loadFailed = true;
+    console.error('[startups] failed to load startup list', {
+      tenant: user.tenant,
+      userId: user.id,
+      params,
+      error
+    });
+  }
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-10 lg:px-8">
@@ -60,6 +75,12 @@ export default async function StartupsPage({
       </header>
 
       <FilterBar current={params} />
+
+      {loadFailed ? (
+        <div className="mb-6 rounded-2xl border border-default bg-surface p-4 text-sm text-foreground-muted">
+          Kunde inte ladda bolagslistan just nu. Forsok igen om en stund.
+        </div>
+      ) : null}
 
       {result.items.length === 0 ? (
         <EmptyState canCreate={canCreate} hasFilters={Boolean(params.q || params.phase || params.status)} />
