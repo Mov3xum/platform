@@ -14,7 +14,7 @@ interface Integration {
   id: string;
   name: string;
   category: IntegrationCategory;
-  icon: string;
+  placeholder: string;
   tagline: string;
   description: string;
   features: string[];
@@ -28,7 +28,7 @@ const INTEGRATIONS: Integration[] = [
     id: 'teams',
     name: 'Microsoft Teams',
     category: 'microsoft365',
-    icon: '🟦',
+    placeholder: 'MT',
     tagline: 'Realtidskommunikation & möten',
     description:
       'Anslut Teams för att synka möten, kanaler och filer direkt med startup-profiler och aktivitetsfeeden. Få notiser i Teams när milstolpar loggas eller mötesprotokoll skapas.',
@@ -43,7 +43,7 @@ const INTEGRATIONS: Integration[] = [
     id: 'sharepoint',
     name: 'SharePoint',
     category: 'microsoft365',
-    icon: '🟩',
+    placeholder: 'SP',
     tagline: 'Dokumenthantering & intranät',
     description:
       'Koppla era SharePoint-bibliotek till plattformens projektrum. Avtal, presentationer och rapporter blir automatiskt tillgängliga under rätt startup utan manuell uppladdning.',
@@ -58,7 +58,7 @@ const INTEGRATIONS: Integration[] = [
     id: 'outlook',
     name: 'Outlook & Kalender',
     category: 'microsoft365',
-    icon: '📧',
+    placeholder: 'OK',
     tagline: 'E-post, kalender & bokning',
     description:
       'Synka kalender och e-post automatiskt. Bokade möten med bolag dyker upp i aktivitetsfeeden och coacher kan se alla schemalagda sessions utan att lämna plattformen.',
@@ -75,7 +75,7 @@ const INTEGRATIONS: Integration[] = [
     id: 'klang',
     name: 'Klang AI',
     category: 'ai',
-    icon: '🎵',
+    placeholder: 'KA',
     tagline: 'Kommunikationsanalys & teamdynamik',
     description:
       'Klang AI kartlägger stämning, engagemang och kommunikationsmönster i realtid. Identifiera tidiga signaler på friktion eller drivkraft i bolagsteam innan de eskalerar.',
@@ -92,7 +92,7 @@ const INTEGRATIONS: Integration[] = [
     id: 'miro',
     name: 'Miro',
     category: 'collaboration',
-    icon: '🟡',
+    placeholder: 'MI',
     tagline: 'Digital whiteboard & workshops',
     description:
       'Länka Miro-tavlor direkt till startup-profiler. Workshops, business model canvases och roadmaps är alltid ett klick bort från bolagskortet — och visas i aktivitetsfeeden.',
@@ -107,7 +107,7 @@ const INTEGRATIONS: Integration[] = [
     id: 'notion',
     name: 'Notion',
     category: 'collaboration',
-    icon: '⬛',
+    placeholder: 'NO',
     tagline: 'Kunskapsbas & projektdokumentation',
     description:
       'Synka Notion-sidor med plattformens dokumentsektion. Intern wiki, processdokumentation och projektplaner visas automatiskt under rätt bolag eller inkubatorresurs.',
@@ -124,7 +124,7 @@ const INTEGRATIONS: Integration[] = [
     id: 'slack',
     name: 'Slack',
     category: 'communication',
-    icon: '💬',
+    placeholder: 'SL',
     tagline: 'Kanalbaserad teamkommunikation',
     description:
       'Automatiska notiser från plattformen hamnar i rätt Slack-kanal. Milstolpar, dokumentuppladdningar och AI-rapporter skickas dit teamet redan är — utan att man behöver logga in.',
@@ -139,7 +139,7 @@ const INTEGRATIONS: Integration[] = [
     id: 'zoom',
     name: 'Zoom',
     category: 'communication',
-    icon: '📹',
+    placeholder: 'ZO',
     tagline: 'Videokonferenser & inspelningar',
     description:
       'Boka Zoom-möten direkt från bolagskortet. Inspelningar och transkriptioner sparas automatiskt under rätt startup i aktivitetsfeeden och kan processas av AI-verktygen.',
@@ -156,7 +156,7 @@ const INTEGRATIONS: Integration[] = [
     id: 'google',
     name: 'Google Workspace',
     category: 'productivity',
-    icon: '🔵',
+    placeholder: 'GW',
     tagline: 'Gmail, Drive & Docs',
     description:
       'Välj Google Workspace som alternativ till Microsoft 365. Gmail, Drive, Docs och Kalender synkas med plattformen — samma kraftfulla integration, er valfria ekosystem.',
@@ -171,7 +171,7 @@ const INTEGRATIONS: Integration[] = [
     id: 'github',
     name: 'GitHub',
     category: 'productivity',
-    icon: '🐙',
+    placeholder: 'GH',
     tagline: 'Kodbaser, issues & CI/CD',
     description:
       'Länka GitHub-repositories till startup-profiler. Pull requests, releases och issues dyker upp i aktivitetsfeeden och ger coacher och investerare teknisk insyn utan att öppna GitHub.',
@@ -270,17 +270,17 @@ export default async function IntegrationerPage() {
       {/* ── Value proposition banner ── */}
       <div className="mb-10 grid gap-4 sm:grid-cols-3">
         <ValueProp
-          icon="🔌"
+          placeholder="01"
           title="Per konto"
           description="Varje organisation konfigurerar sina egna integrationer. Inget delat, inget läckage."
         />
         <ValueProp
-          icon="🔒"
+          placeholder="02"
           title="EU-suveränt"
           description="Alla integrationer auditeras mot Movexums dataskyddspolicy. Ingen data lämnar EU."
         />
         <ValueProp
-          icon="⚡"
+          placeholder="03"
           title="En miljö"
           description="Era verktyg pratar med plattformen — inte tvärtom. Ni väljer vad som visas var."
         />
@@ -321,7 +321,9 @@ export default async function IntegrationerPage() {
 
       {/* ── Request integration footer ── */}
       <div className="mt-14 rounded-3xl border border-dashed border-strong bg-surface/50 px-8 py-10 text-center">
-        <p className="text-2xl">🧩</p>
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-default bg-canvas-subtle text-xs font-semibold tracking-[0.08em] text-foreground-muted">
+          04
+        </div>
         <h3 className="mt-3 text-lg font-semibold text-foreground">
           Saknar du en integration?
         </h3>
@@ -342,10 +344,12 @@ export default async function IntegrationerPage() {
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
-function ValueProp({ icon, title, description }: { icon: string; title: string; description: string }) {
+function ValueProp({ placeholder, title, description }: { placeholder: string; title: string; description: string }) {
   return (
     <div className="flex gap-4 rounded-2xl border border-default bg-surface p-5 shadow-sm shadow-movexum-svart/5">
-      <span className="text-2xl">{icon}</span>
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-default bg-canvas-subtle text-xs font-semibold tracking-[0.08em] text-foreground-muted">
+        {placeholder}
+      </div>
       <div>
         <p className="text-sm font-semibold text-foreground">{title}</p>
         <p className="mt-0.5 text-xs text-foreground-muted">{description}</p>
@@ -367,7 +371,9 @@ function IntegrationCard({
       <div className={`${config.cardAccent} px-6 py-4`}>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="text-3xl">{integration.icon}</span>
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-default bg-surface text-xs font-semibold tracking-[0.08em] text-foreground-muted">
+              {integration.placeholder}
+            </div>
             <div>
               <h3 className="text-sm font-semibold text-foreground">{integration.name}</h3>
               <p className="text-xs text-foreground-muted">{integration.tagline}</p>
@@ -387,8 +393,7 @@ function IntegrationCard({
         {/* Feature list */}
         <ul className="space-y-1.5">
           {integration.features.map((feature) => (
-            <li key={feature} className="flex items-start gap-2 text-xs text-foreground-muted">
-              <span className="mt-0.5 text-movexum-gron dark:text-movexum-ljusgron">✓</span>
+            <li key={feature} className="border-l-2 border-default pl-3 text-xs text-foreground-muted">
               {feature}
             </li>
           ))}
@@ -398,7 +403,7 @@ function IntegrationCard({
         <div className="mt-auto pt-2">
           <IntegrationActivateButton
             integrationName={integration.name}
-            providerIcon={integration.icon}
+            providerPlaceholder={integration.placeholder}
             accentClass={config.cardAccent}
           />
         </div>
