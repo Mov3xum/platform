@@ -18,7 +18,7 @@ RUN apk add --no-cache libc6-compat
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-RUN yarn workspace @platform/web build
+RUN cd apps/web && yarn build
 
 # Minimal runtime image: copies only the standalone Next.js output
 # (~50MB) instead of the full builder /app (~1GB+). Avoids OOM/disk
