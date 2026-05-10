@@ -128,7 +128,16 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
 
   const pb = await getServerPb();
 
-  const [team, milestones, activities, notes, agreements, engagements, toolActivities] = await Promise.all([
+  const emptyList = { items: [], totalItems: 0 };
+  const [
+    teamResult,
+    milestonesResult,
+    activitiesResult,
+    notesResult,
+    agreementsResult,
+    engagementsResult,
+    toolActivitiesResult
+  ] = await Promise.allSettled([
     pb.collection('startup_team_members').getList<TeamMemberRecord>(1, 50, {
       filter: `startup = "${id}"`,
       sort: '-is_founder,name'
@@ -162,6 +171,32 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       expand: 'tool,tool_run'
     })
   ]);
+
+  const team = teamResult.status === 'fulfilled' ? teamResult.value : emptyList;
+  const milestones = milestonesResult.status === 'fulfilled' ? milestonesResult.value : emptyList;
+  const activities = activitiesResult.status === 'fulfilled' ? activitiesResult.value : emptyList;
+  const notes = notesResult.status === 'fulfilled' ? notesResult.value : emptyList;
+  const agreements = agreementsResult.status === 'fulfilled' ? agreementsResult.value : emptyList;
+  const engagements = engagementsResult.status === 'fulfilled' ? engagementsResult.value : emptyList;
+  const toolActivities = toolActivitiesResult.status === 'fulfilled' ? toolActivitiesResult.value : emptyList;
+
+  const sectionLoadFailed = [
+    teamResult,
+    milestonesResult,
+    activitiesResult,
+    notesResult,
+    agreementsResult,
+    engagementsResult,
+    toolActivitiesResult
+  ].some((result) => result.status === 'rejected');
+
+  if (sectionLoadFailed) {
+    console.error('[startup/detail] one or more sections failed to load', {
+      tenant: user.tenant,
+      userId: user.id,
+      startupId: id
+    });
+  }
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10 lg:px-8">
@@ -221,6 +256,12 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       </nav>
 
       <div className="space-y-8">
+        {sectionLoadFailed ? (
+          <div className="rounded-2xl border border-default bg-surface p-4 text-sm text-foreground-muted">
+            Vissa delar av bolagssidan kunde inte laddas just nu.
+          </div>
+        ) : null}
+
         <Section id="overview" title="Översikt">
           {startup.description ? (
             <div className="prose max-w-none text-sm text-foreground-muted dark:prose-invert" dangerouslySetInnerHTML={{ __html: startup.description }} />

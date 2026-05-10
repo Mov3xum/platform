@@ -44,24 +44,45 @@ export default async function AktivitetPage({
   if (kind === 'tool_run') filterParts.push('kind = "tool_run"');
   if (kind === 'manual') filterParts.push('(kind = "manual" || kind = "")');
 
-  // Load activities (startup-linked)
-  const activitiesResult = await listForTenant<ActivityRecord>('activities', {
-    filter: filterParts.length > 0 ? filterParts.join(' && ') : undefined,
-    sort: '-created',
-    expand: 'startup,tool,tool_run,owner',
-    tenantField: 'startup.tenant',
-    perPage: 50
-  });
+  let activitiesResult: { items: ActivityRecord[] } = { items: [] };
+  let activitiesLoadFailed = false;
+  try {
+    activitiesResult = await listForTenant<ActivityRecord>('activities', {
+      filter: filterParts.length > 0 ? filterParts.join(' && ') : undefined,
+      sort: '-created',
+      expand: 'startup,tool,tool_run,owner',
+      tenantField: 'startup.tenant',
+      perPage: 50
+    });
+  } catch (error) {
+    activitiesLoadFailed = true;
+    console.error('[aktivitet] failed to load activities', {
+      tenant: user.tenant,
+      userId: user.id,
+      kind,
+      error
+    });
+  }
 
-  // Load system-wide tool runs (no startup)
-  const systemRunsResult =
-    !kind || kind === 'tool_run'
-      ? await pb.collection('tool_runs').getList<ToolRun>(1, 20, {
-          filter: `tenant = "${user.tenant}" && startup = ""`,
-          sort: '-created',
-          expand: 'tool,triggered_by'
-        })
-      : null;
+  let systemRunsResult: { items: ToolRun[] } | null = null;
+  let systemRunsLoadFailed = false;
+  if (!kind || kind === 'tool_run') {
+    try {
+      systemRunsResult = await pb.collection('tool_runs').getList<ToolRun>(1, 20, {
+        filter: `tenant = "${user.tenant}" && startup = ""`,
+        sort: '-created',
+        expand: 'tool,triggered_by'
+      });
+    } catch (error) {
+      systemRunsLoadFailed = true;
+      console.error('[aktivitet] failed to load system tool runs', {
+        tenant: user.tenant,
+        userId: user.id,
+        kind,
+        error
+      });
+    }
+  }
 
   // Merge and sort by created desc
   type FeedItem =
@@ -124,6 +145,12 @@ export default async function AktivitetPage({
           Verktygskörningar
         </Link>
       </div>
+
+      {(activitiesLoadFailed || systemRunsLoadFailed) && (
+        <div className="mb-6 rounded-2xl border border-default bg-surface p-4 text-sm text-foreground-muted">
+          Vissa aktiviteter kunde inte laddas just nu. Forsok igen om en stund.
+        </div>
+      )}
 
       {feed.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-strong bg-surface/50 p-12 text-center">

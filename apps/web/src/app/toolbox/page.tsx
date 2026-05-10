@@ -18,11 +18,22 @@ export default async function ToolboxPage() {
   const user = await requireUser();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
 
-  const result = await listForTenant<Tool>('tools', {
-    filter: 'active = true',
-    sort: 'category,name',
-    perPage: 200
-  });
+  let result: { items: Tool[] } = { items: [] };
+  let loadFailed = false;
+  try {
+    result = await listForTenant<Tool>('tools', {
+      filter: 'active = true',
+      sort: 'category,name',
+      perPage: 200
+    });
+  } catch (error) {
+    loadFailed = true;
+    console.error('[toolbox] failed to load tools', {
+      tenant: user.tenant,
+      userId: user.id,
+      error
+    });
+  }
 
   const visibleTools = result.items.filter((tool) =>
     canRunTool(user.roles, tool, { isLinkedStartup: false })
@@ -66,6 +77,12 @@ export default async function ToolboxPage() {
       </div>
 
       <div className="space-y-10">
+        {loadFailed && (
+          <div className="rounded-2xl border border-default bg-surface p-4 text-sm text-foreground-muted">
+            Verktygslistan kunde inte laddas just nu. Forsok igen om en stund.
+          </div>
+        )}
+
         {CATEGORIES.map((category) => {
           const tools = byCategory[category];
           if (tools.length === 0) return null;

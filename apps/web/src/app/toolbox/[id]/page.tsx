@@ -36,26 +36,49 @@ export default async function ToolDetailPage({
 
   // Load startups for the selector
   let startups: Array<{ id: string; name: string }> = [];
+  let startupsLoadFailed = false;
   if (tool.requires_startup) {
-    const result = await pb.collection('startups').getList<{ id: string; name: string }>(1, 200, {
-      filter: `tenant = "${user.tenant}" && status = "active"`,
-      sort: 'name',
-      fields: 'id,name'
-    });
-    startups = result.items;
+    try {
+      const result = await pb.collection('startups').getList<{ id: string; name: string }>(1, 200, {
+        filter: `tenant = "${user.tenant}" && status = "active"`,
+        sort: 'name',
+        fields: 'id,name'
+      });
+      startups = result.items;
 
-    // startup_member: only linked startups
-    if (hasRole(user.roles, ['startup_member']) && !isStaff) {
-      startups = startups.filter((s) => user.linkedStartups.includes(s.id));
+      // startup_member: only linked startups
+      if (hasRole(user.roles, ['startup_member']) && !isStaff) {
+        startups = startups.filter((s) => user.linkedStartups.includes(s.id));
+      }
+    } catch (error) {
+      startupsLoadFailed = true;
+      console.error('[toolbox/detail] failed to load startups selector', {
+        tenant: user.tenant,
+        userId: user.id,
+        toolId: id,
+        error
+      });
     }
   }
 
   // Recent runs for this tool
-  const runsResult = await pb.collection('tool_runs').getList<ToolRun>(1, 10, {
-    filter: `tool = "${id}" && tenant = "${user.tenant}"`,
-    sort: '-created',
-    expand: 'startup,triggered_by'
-  });
+  let runsResult: { items: ToolRun[] } = { items: [] };
+  let runsLoadFailed = false;
+  try {
+    runsResult = await pb.collection('tool_runs').getList<ToolRun>(1, 10, {
+      filter: `tool = "${id}" && tenant = "${user.tenant}"`,
+      sort: '-created',
+      expand: 'startup,triggered_by'
+    });
+  } catch (error) {
+    runsLoadFailed = true;
+    console.error('[toolbox/detail] failed to load recent runs', {
+      tenant: user.tenant,
+      userId: user.id,
+      toolId: id,
+      error
+    });
+  }
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10 lg:px-8">
@@ -95,6 +118,11 @@ export default async function ToolDetailPage({
           {canRun ? (
             <section className="rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
               <h2 className="mb-4 text-lg font-semibold text-foreground">Kör verktyg</h2>
+              {startupsLoadFailed && tool.requires_startup ? (
+                <div className="mb-4 rounded-2xl border border-default bg-surface p-3 text-xs text-foreground-muted">
+                  Kunde inte ladda bolagslistan for val just nu.
+                </div>
+              ) : null}
               <div className="mb-4 rounded-2xl border border-movexum-bla/30 bg-movexum-pastell-bla px-4 py-3 dark:border-movexum-djupbla/50 dark:bg-movexum-morkbla/30">
                 <p className="text-xs text-movexum-morkbla dark:text-movexum-pastell-bla">
                   ⚠️ Genererat av AI – verifiera innan delning. Konfidentiella anteckningar
@@ -117,6 +145,11 @@ export default async function ToolDetailPage({
           )}
 
           {/* Recent runs */}
+          {runsLoadFailed && (
+            <div className="rounded-2xl border border-default bg-surface p-4 text-sm text-foreground-muted">
+              Kunde inte ladda senaste körningar just nu.
+            </div>
+          )}
           {runsResult.items.length > 0 && (
             <section className="rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
               <h2 className="mb-4 text-lg font-semibold text-foreground">Senaste körningar</h2>
