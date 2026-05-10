@@ -236,13 +236,20 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
 
       <nav className="mb-8 flex flex-wrap gap-3 text-sm">
         {[
-          ['#overview', 'Översikt'],
-          ['#team', `Team (${team.totalItems})`],
-          ['#milestones', `Milstolpar (${milestones.totalItems})`],
-          ['#activities', `Aktiviteter (${activities.totalItems})`],
+          ['#overview', 'Info'],
           ['#notes', `Anteckningar (${notes.totalItems})`],
+          ['#activities', `Aktiviteter (${activities.totalItems})`],
+          ['#documents', 'Dokument'],
+          ['#team', `Personer (${team.totalItems})`],
+          ['#milestones', `Inkubatorprocess (${milestones.totalItems})`],
+          ['#readiness', 'Bolagsfas & Readiness'],
+          ['#partners', `Kapital (${engagements.totalItems})`],
           ['#agreements', `Avtal (${agreements.totalItems})`],
-          ['#partners', `Partners (${engagements.totalItems})`],
+          ['#ipr', 'IPR'],
+          ['#worktime', 'Arbetstid'],
+          ['#actionplan', 'Handlingsplan'],
+          ['#goals', 'Globala målen'],
+          ['#metrics', 'Mätetal'],
           ['#tools', `Verktyg (${toolActivities.totalItems})`]
         ].map(([href, label]) => (
           <a
@@ -277,6 +284,45 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               ))}
             </div>
           ) : null}
+
+          <div className="mt-5 rounded-2xl border border-default bg-canvas-subtle/40 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-foreground-subtle">Verktygskoppling</p>
+            <p className="mt-1 text-sm text-foreground-muted">Kör startup-specifika verktyg med förvalt bolag för snabbare analys och dokumentation.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link
+                href={`/toolbox?startup=${id}&category=ai_per_startup`}
+                className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle"
+              >
+                AI per bolag
+              </Link>
+              <Link
+                href={`/toolbox?startup=${id}&category=template`}
+                className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle"
+              >
+                Mallar
+              </Link>
+              <Link
+                href={`/toolbox?startup=${id}&category=checklist`}
+                className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle"
+              >
+                Checklistor
+              </Link>
+            </div>
+          </div>
+        </Section>
+
+        <Section id="documents" title="Dokument">
+          <p className="text-sm text-foreground-muted">
+            Samlad yta för avtal, verktygsutdata och dokumentation kopplad till bolaget.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <a href="#agreements" className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
+              Visa avtal
+            </a>
+            <a href="#tools" className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
+              Visa verktygskörningar
+            </a>
+          </div>
         </Section>
 
         <Section id="team" title="Team">
@@ -320,6 +366,23 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               ))}
             </ul>
           )}
+        </Section>
+
+        <Section id="readiness" title="Bolagsfas & Readiness">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-default bg-surface p-4">
+              <p className="text-xs text-foreground-subtle">Fas</p>
+              <div className="mt-2"><PhaseBadge phase={startup.phase} /></div>
+            </div>
+            <div className="rounded-2xl border border-default bg-surface p-4">
+              <p className="text-xs text-foreground-subtle">Status</p>
+              <div className="mt-2"><StatusBadge status={startup.status} /></div>
+            </div>
+            <div className="rounded-2xl border border-default bg-surface p-4">
+              <p className="text-xs text-foreground-subtle">IRL / Readiness</p>
+              <p className="mt-2 text-sm font-semibold text-foreground">{startup.irl_level ? `IRL ${startup.irl_level}` : 'Ej satt'}</p>
+            </div>
+          </div>
         </Section>
 
         <Section id="activities" title="Aktiviteter">
@@ -394,7 +457,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           )}
         </Section>
 
-        <Section id="partners" title="Partners">
+        <Section id="partners" title="Kapital">
           {engagements.items.length === 0 ? (
             <Empty>Inga partner-engagement.</Empty>
           ) : (
@@ -413,6 +476,77 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               ))}
             </ul>
           )}
+        </Section>
+
+        <Section id="ipr" title="IPR">
+          <p className="text-sm text-foreground-muted">
+            IPR-spårning aktiveras via verktygsmallar och checklistor tills dedikerad datamodell är på plats.
+          </p>
+          <div className="mt-3">
+            <Link
+              href={`/toolbox?startup=${id}&category=template`}
+              className="inline-flex rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle"
+            >
+              Öppna relevanta verktyg
+            </Link>
+          </div>
+        </Section>
+
+        <Section id="worktime" title="Arbetstid">
+          <p className="text-sm text-foreground-muted">
+            Arbetstid kan dokumenteras via aktiviteter och notes tills separat tidloggningsmodul aktiveras.
+          </p>
+          <div className="mt-3">
+            <a href="#activities" className="inline-flex rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
+              Gå till aktiviteter
+            </a>
+          </div>
+        </Section>
+
+        <Section id="actionplan" title="Handlingsplan">
+          {startup.next_step ? (
+            <p className="text-sm text-foreground-muted">
+              Nästa steg: <span className="font-medium text-foreground">{startup.next_step}</span>
+            </p>
+          ) : (
+            <Empty>Ingen handlingsplan definierad ännu.</Empty>
+          )}
+          <div className="mt-3">
+            <a href="#milestones" className="inline-flex rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
+              Knyt till milstolpar
+            </a>
+          </div>
+        </Section>
+
+        <Section id="goals" title="Globala målen">
+          <p className="text-sm text-foreground-muted">
+            Målspårning mot globala målen kan knytas via mallar/checklistor i verktygslådan.
+          </p>
+          <div className="mt-3">
+            <Link
+              href={`/toolbox?startup=${id}&category=checklist`}
+              className="inline-flex rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle"
+            >
+              Öppna checklista-verktyg
+            </Link>
+          </div>
+        </Section>
+
+        <Section id="metrics" title="Mätetal">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-default bg-surface p-4">
+              <p className="text-xs text-foreground-subtle">Aktiviteter</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">{activities.totalItems}</p>
+            </div>
+            <div className="rounded-2xl border border-default bg-surface p-4">
+              <p className="text-xs text-foreground-subtle">Milstolpar</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">{milestones.totalItems}</p>
+            </div>
+            <div className="rounded-2xl border border-default bg-surface p-4">
+              <p className="text-xs text-foreground-subtle">Verktygskörningar</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">{toolActivities.totalItems}</p>
+            </div>
+          </div>
         </Section>
 
         <Section id="tools" title="Verktyg">
