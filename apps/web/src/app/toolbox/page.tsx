@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { listForTenant } from '@/lib/pb.server';
-import { requireUser } from '@/lib/auth.server';
+import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole, canRunTool } from '@/lib/rbac';
 import { ToolCategoryBadge } from '@/components/Badges';
 import { toolCategoryLabels, type ToolCategory } from '@/lib/labels';
@@ -14,9 +14,37 @@ const CATEGORIES: ToolCategory[] = [
   'checklist'
 ];
 
-export default async function ToolboxPage() {
+function isToolCategory(value: string | undefined): value is ToolCategory {
+  if (!value) return false;
+  return (CATEGORIES as string[]).includes(value);
+}
+
+export default async function ToolboxPage({
+  searchParams
+}: {
+  searchParams: Promise<{ startup?: string; category?: string }>;
+}) {
+  const params = await searchParams;
+  const startupId = params.startup?.trim() || '';
+  const categoryFilter = isToolCategory(params.category) ? params.category : undefined;
+
   const user = await requireUser();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
+  const pb = await getServerPb();
+
+  let selectedStartupName: string | null = null;
+  if (startupId) {
+    try {
+      const startup = await pb.collection('startups').getOne<{ id: string; name: string; tenant: string }>(startupId, {
+        fields: 'id,name,tenant'
+      });
+      if (startup.tenant === user.tenant) {
+        selectedStartupName = startup.name;
+      }
+    } catch {
+      selectedStartupName = null;
+    }
+  }
 
   let result: { items: Tool[] } = { items: [] };
   let loadFailed = false;
@@ -39,9 +67,13 @@ export default async function ToolboxPage() {
     canRunTool(user.roles, tool, { isLinkedStartup: false })
   );
 
+  const filteredVisibleTools = categoryFilter
+    ? visibleTools.filter((tool) => tool.category === categoryFilter)
+    : visibleTools;
+
   const byCategory = CATEGORIES.reduce<Record<ToolCategory, Tool[]>>(
     (acc, cat) => {
-      acc[cat] = visibleTools.filter((t) => t.category === cat);
+      acc[cat] = filteredVisibleTools.filter((t) => t.category === cat);
       return acc;
     },
     {} as Record<ToolCategory, Tool[]>
@@ -53,7 +85,7 @@ export default async function ToolboxPage() {
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">Verktygslåda</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            {visibleTools.length} tillgängliga verktyg
+            {filteredVisibleTools.length} tillgängliga verktyg
           </p>
         </div>
         {isStaff && (
@@ -76,6 +108,24 @@ export default async function ToolboxPage() {
         </p>
       </div>
 
+      {(selectedStartupName || categoryFilter) && (
+        <div className="mb-6 flex flex-wrap items-center gap-2 rounded-2xl border border-default bg-surface p-4 text-sm text-foreground-muted">
+          {selectedStartupName ? (
+            <span>
+              Kontext: <span className="font-semibold text-foreground">{selectedStartupName}</span>
+            </span>
+          ) : null}
+          {categoryFilter ? (
+            <span>
+              Kategori: <span className="font-semibold text-foreground">{toolCategoryLabels[categoryFilter]}</span>
+            </span>
+          ) : null}
+          <Link href="/toolbox" className="ml-auto text-link hover:underline">
+            Rensa filter
+          </Link>
+        </div>
+      )}
+
       <div className="space-y-10">
         {loadFailed && (
           <div className="rounded-2xl border border-default bg-surface p-4 text-sm text-foreground-muted">
@@ -93,14 +143,14 @@ export default async function ToolboxPage() {
               </h2>
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {tools.map((tool) => (
-                  <ToolCard key={tool.id} tool={tool} />
+                  <ToolCard key={tool.id} tool={tool} startupId={startupId || undefined} />
                 ))}
               </div>
             </section>
           );
         })}
 
-        {visibleTools.length === 0 && (
+        {filteredVisibleTools.length === 0 && (
           <div className="rounded-3xl border border-dashed border-strong bg-surface/50 p-12 text-center">
             <p className="text-foreground-muted">Inga tillgängliga verktyg.</p>
           </div>
@@ -110,10 +160,14 @@ export default async function ToolboxPage() {
   );
 }
 
-function ToolCard({ tool }: { tool: Tool }) {
+function ToolCard({ tool, startupId }: { tool: Tool; startupId?: string }) {
+  const href = startupId
+    ? `/toolbox/${tool.id}?startup=${encodeURIComponent(startupId)}`
+    : `/toolbox/${tool.id}`;
+
   return (
     <Link
-      href={`/toolbox/${tool.id}`}
+      href={href}
       className="group flex flex-col rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5 transition hover:border-strong hover:shadow-md"
     >
       <div className="mb-3 flex items-start justify-between gap-3">
