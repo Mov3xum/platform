@@ -1,3 +1,4 @@
+ARG BUILD_TIME
 FROM node:20-alpine AS deps
 WORKDIR /app
 
