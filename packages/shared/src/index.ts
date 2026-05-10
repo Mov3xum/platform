@@ -144,6 +144,106 @@ export interface ToolRun {
   };
 }
 
+export type WorkshopStatus = 'draft' | 'active' | 'archived';
+
+export type WorkshopAudience =
+  | 'admin'
+  | 'incubator_lead'
+  | 'coach'
+  | 'mentor'
+  | 'startup_member'
+  | 'observer';
+
+export type WorkshopBlockType = 'exercise' | 'video' | 'question' | 'ai_chat' | 'summary';
+
+export interface WorkshopBlock {
+  id: string;
+  type: WorkshopBlockType;
+  title: string;
+  instructions?: string;
+  video_url?: string;
+  required?: boolean;
+}
+
+export interface Workshop {
+  id: string;
+  tenant: string;
+  key: string;
+  title: string;
+  goal?: string;
+  instructions?: string;
+  status: WorkshopStatus;
+  version: string;
+  audience_roles: WorkshopAudience[];
+  ai_system_prompt?: string;
+  output_requirements?: string;
+  content_blocks: WorkshopBlock[];
+  source_tool?: string;
+  created_by?: string;
+  active: boolean;
+  created: string;
+  updated: string;
+}
+
+export type WorkshopAssignmentStatus = 'planned' | 'in_progress' | 'done';
+
+export interface WorkshopAssignment {
+  id: string;
+  tenant: string;
+  workshop: string;
+  startup: string;
+  assigned_by: string;
+  owner?: string;
+  status: WorkshopAssignmentStatus;
+  due_date?: string;
+  activity?: string;
+  progress_json?: Record<string, unknown>;
+  answers_json?: Record<string, unknown>;
+  takeaway_json?: Record<string, unknown>;
+  artifacts_json?: Record<string, unknown>;
+  ai_thread_json?: Array<Record<string, unknown>>;
+  started_at?: string;
+  completed_at?: string;
+  last_saved_at?: string;
+  created: string;
+  updated: string;
+  expand?: {
+    workshop?: Workshop;
+    startup?: { id: string; name: string };
+    assigned_by?: { id: string; display_name?: string; email: string };
+    owner?: { id: string; display_name?: string; email: string };
+  };
+}
+
+export type WorkshopRunStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+
+export interface WorkshopRun {
+  id: string;
+  tenant: string;
+  assignment: string;
+  workshop: string;
+  startup: string;
+  triggered_by: string;
+  status: WorkshopRunStatus;
+  input?: Record<string, unknown>;
+  output_md?: string;
+  model?: string;
+  tokens_in?: number;
+  tokens_out?: number;
+  cost_estimate_usd?: number;
+  error?: string;
+  started_at?: string;
+  completed_at?: string;
+  created: string;
+  updated: string;
+  expand?: {
+    assignment?: WorkshopAssignment;
+    workshop?: Workshop;
+    startup?: { id: string; name: string };
+    triggered_by?: { id: string; display_name?: string; email: string };
+  };
+}
+
 export const coreModules: ModuleDefinition[] = [
   {
     id: 'dashboard',
