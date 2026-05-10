@@ -81,6 +81,7 @@ export function IntegrationActivateButton({ integrationName, providerPlaceholder
                   <Dialog.Close asChild>
                     <button
                       type="button"
+                      aria-label="Stäng dialog"
                       className="absolute right-4 top-4 inline-flex items-center justify-center rounded-xl border border-default bg-surface/80 px-2.5 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle hover:text-foreground"
                     >
                       Stäng
