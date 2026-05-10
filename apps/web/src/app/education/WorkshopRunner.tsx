@@ -31,6 +31,9 @@ export function WorkshopRunner({ assignment, blocks }: WorkshopRunnerProps) {
   );
   const [aiQuestion, setAiQuestion] = useState('');
   const [aiAnswer, setAiAnswer] = useState('');
+  const [aiThreadCount, setAiThreadCount] = useState(
+    Array.isArray(assignment.ai_thread_json) ? assignment.ai_thread_json.length : 0
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingSave, startSave] = useTransition();
@@ -44,20 +47,39 @@ export function WorkshopRunner({ assignment, blocks }: WorkshopRunnerProps) {
       if (block.type === 'video') {
         return artifacts[`video_ack_${block.id}`] === true;
       }
+      if (block.type === 'ai_chat') {
+        return aiThreadCount > 0 || Boolean(answers[`${block.id}__ai_done`]);
+      }
       const value = answers[block.id];
       return typeof value === 'string' && value.trim().length > 0;
     });
-  }, [answers, artifacts, blocks]);
+  }, [answers, artifacts, blocks, aiThreadCount]);
 
   const remainingCount = useMemo(
     () =>
       blocks.filter((block) => {
         if (block.type === 'video') return artifacts[`video_ack_${block.id}`] !== true;
+        if (block.type === 'ai_chat') {
+          return !(aiThreadCount > 0 || Boolean(answers[`${block.id}__ai_done`]));
+        }
         const value = answers[block.id];
         return !(typeof value === 'string' && value.trim().length > 0);
       }).length,
-    [answers, artifacts, blocks]
+    [answers, artifacts, blocks, aiThreadCount]
   );
+
+  const saveProgress = async () => {
+    const progress = {
+      completedRequired,
+      remainingCount,
+      updatedAt: new Date().toISOString()
+    };
+    return saveWorkshopProgressAction(assignment.id, {
+      progress,
+      answers,
+      artifacts
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -135,6 +157,11 @@ export function WorkshopRunner({ assignment, blocks }: WorkshopRunnerProps) {
                       return;
                     }
                     setAiAnswer(result.answer || '');
+                    setAiThreadCount((prev) => prev + 1);
+                    setAnswers((prev) => ({
+                      ...prev,
+                      [`${block.id}__ai_done`]: 'done'
+                    }));
                     setMessage('AI-svar sparat på workshopen.');
                     setAiQuestion('');
                   });
@@ -205,16 +232,7 @@ export function WorkshopRunner({ assignment, blocks }: WorkshopRunnerProps) {
             setError(null);
             setMessage(null);
             startSave(async () => {
-              const progress = {
-                completedRequired,
-                remainingCount,
-                updatedAt: new Date().toISOString()
-              };
-              const result = await saveWorkshopProgressAction(assignment.id, {
-                progress,
-                answers,
-                artifacts
-              });
+              const result = await saveProgress();
               if (result.error) {
                 setError(result.error);
                 return;
@@ -233,15 +251,7 @@ export function WorkshopRunner({ assignment, blocks }: WorkshopRunnerProps) {
             setError(null);
             setMessage(null);
             startComplete(async () => {
-              const saveResult = await saveWorkshopProgressAction(assignment.id, {
-                progress: {
-                  completedRequired,
-                  remainingCount,
-                  updatedAt: new Date().toISOString()
-                },
-                answers,
-                artifacts
-              });
+              const saveResult = await saveProgress();
               if (saveResult.error) {
                 setError(saveResult.error);
                 return;

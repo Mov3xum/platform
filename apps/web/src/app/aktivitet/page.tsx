@@ -1,7 +1,11 @@
 import Link from 'next/link';
 import { listForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { ToolCategoryBadge, ToolRunStatusBadge } from '@/components/Badges';
+import {
+  ToolCategoryBadge,
+  ToolRunStatusBadge,
+  WorkshopAssignmentStatusBadge
+} from '@/components/Badges';
 import {
   activityTypeLabels,
   activityStatusLabels,
@@ -33,8 +37,8 @@ interface ActivityRecord {
     tool?: { id: string; name: string; icon?: string; category: string };
     tool_run?: { id: string; status: string };
     workshop?: { id: string; title: string };
-    workshop_assignment?: { id: string; status: string };
-    workshop_run?: { id: string; status: string };
+    workshop_assignment?: { id: string; status: 'planned' | 'in_progress' | 'done' };
+    workshop_run?: { id: string; status: 'queued' | 'running' | 'succeeded' | 'failed' };
     owner?: { id: string; display_name?: string; email: string };
   };
 }
@@ -50,7 +54,8 @@ export default async function AktivitetPage({
 
   const filterParts: string[] = [];
   if (kind === 'tool_run') filterParts.push('kind = "tool_run"');
-  if (kind === 'workshop') filterParts.push('(kind = "workshop_assignment" || kind = "workshop_run")');
+  if (kind === 'workshop_assignment') filterParts.push('kind = "workshop_assignment"');
+  if (kind === 'workshop_run') filterParts.push('kind = "workshop_run"');
   if (kind === 'manual') filterParts.push('(kind = "manual" || kind = "")');
 
   let activitiesResult: { items: ActivityRecord[] } = { items: [] };
@@ -154,14 +159,24 @@ export default async function AktivitetPage({
           Verktygskörningar
         </Link>
         <Link
-          href="/aktivitet?kind=workshop"
+          href="/aktivitet?kind=workshop_assignment"
           className={`rounded-full border px-4 py-1.5 text-sm font-medium transition ${
-            kind === 'workshop'
+            kind === 'workshop_assignment'
               ? 'border-brand bg-brand text-brand-foreground'
               : 'border-default bg-surface text-foreground-muted hover:bg-canvas-subtle'
           }`}
         >
-          Workshops
+          Workshop tilldelning
+        </Link>
+        <Link
+          href="/aktivitet?kind=workshop_run"
+          className={`rounded-full border px-4 py-1.5 text-sm font-medium transition ${
+            kind === 'workshop_run'
+              ? 'border-brand bg-brand text-brand-foreground'
+              : 'border-default bg-surface text-foreground-muted hover:bg-canvas-subtle'
+          }`}
+        >
+          Workshop AI
         </Link>
       </div>
 
@@ -250,13 +265,11 @@ export default async function AktivitetPage({
                           status={a.expand.tool_run.status as ToolRunStatus}
                         />
                       ) : isWorkshop && a.expand?.workshop_assignment ? (
-                        <span className="inline-flex items-center rounded-full bg-canvas-subtle px-2.5 py-0.5 text-xs font-medium text-foreground-muted ring-1 ring-default">
-                          {a.expand.workshop_assignment.status}
-                        </span>
+                        <WorkshopAssignmentStatusBadge
+                          status={a.expand.workshop_assignment.status}
+                        />
                       ) : isWorkshop && a.expand?.workshop_run ? (
-                        <span className="inline-flex items-center rounded-full bg-canvas-subtle px-2.5 py-0.5 text-xs font-medium text-foreground-muted ring-1 ring-default">
-                          {a.expand.workshop_run.status}
-                        </span>
+                        <ToolRunStatusBadge status={a.expand.workshop_run.status as ToolRunStatus} />
                       ) : (
                         <span className="inline-flex items-center rounded-full bg-canvas-subtle px-2.5 py-0.5 text-xs font-medium text-foreground-muted ring-1 ring-default">
                           {activityStatusLabels[a.status]}

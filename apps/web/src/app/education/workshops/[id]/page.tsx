@@ -62,7 +62,7 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
 
       <header className="mb-8 rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
         <div className="mb-3 flex items-center gap-3">
-          <WorkshopStatusBadge status={workshop.status as any} />
+          <WorkshopStatusBadge status={workshop.status} />
           <span className="text-xs text-foreground-subtle">Version {workshop.version}</span>
         </div>
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">{workshop.title}</h1>
@@ -124,7 +124,7 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
                     >
                       <div>
                         <p className="text-sm font-medium text-foreground">
-                          {(assignment.expand as any)?.startup?.name ?? 'Bolag'}
+                          {assignment.expand?.startup?.name ?? 'Bolag'}
                         </p>
                         <p className="text-xs text-foreground-subtle">
                           {new Date(assignment.created).toLocaleString('sv-SE')}

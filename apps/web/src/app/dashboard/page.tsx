@@ -127,16 +127,16 @@ export default async function DashboardPage() {
                   >
                     <div>
                       <p className="text-sm font-semibold text-foreground">
-                        {(assignment.expand as any)?.workshop?.title ?? 'Workshop'}
+                        {assignment.expand?.workshop?.title ?? 'Workshop'}
                       </p>
                       <p className="text-xs text-foreground-subtle">
-                        {(assignment.expand as any)?.startup?.name ?? 'Bolag'} ·{' '}
+                        {assignment.expand?.startup?.name ?? 'Bolag'} ·{' '}
                         {assignment.due_date
                           ? `Deadline ${new Date(assignment.due_date).toLocaleDateString('sv-SE')}`
                           : 'Ingen deadline'}
                       </p>
                     </div>
-                    <WorkshopAssignmentStatusBadge status={assignment.status as any} />
+                    <WorkshopAssignmentStatusBadge status={assignment.status} />
                   </Link>
                 </li>
               ))}
@@ -177,10 +177,10 @@ export default async function DashboardPage() {
             </Link>
           </div>
         ) : (
-          <ul className="space-y-3">
-            {recentRuns.map((run) => {
-              const tool = (run.expand as any)?.tool;
-              const startup = (run.expand as any)?.startup;
+            <ul className="space-y-3">
+              {recentRuns.map((run) => {
+              const tool = run.expand?.tool;
+              const startup = run.expand?.startup;
               return (
                 <li key={run.id}>
                   <Link

@@ -5,6 +5,34 @@ import { useRouter } from 'next/navigation';
 import { createWorkshopAction, type WorkshopActionState } from '@/lib/actions/workshops';
 
 const initialState: WorkshopActionState = {};
+const DEFAULT_CONTENT_BLOCKS_TEMPLATE = `[
+  {
+    "id": "intro",
+    "type": "summary",
+    "title": "Introduktion",
+    "instructions": "Beskriv workshopens mål"
+  },
+  {
+    "id": "exercise_1",
+    "type": "exercise",
+    "title": "Övning 1",
+    "instructions": "Genomför övningen och skriv ert svar",
+    "required": true
+  },
+  {
+    "id": "qa_1",
+    "type": "question",
+    "title": "Reflektionsfråga",
+    "instructions": "Vad tar ni med er?",
+    "required": true
+  },
+  {
+    "id": "coach_ai",
+    "type": "ai_chat",
+    "title": "AI-coach",
+    "instructions": "Ställ en fråga till AI"
+  }
+]`;
 
 export function WorkshopCreateForm() {
   const router = useRouter();
@@ -101,34 +129,7 @@ export function WorkshopCreateForm() {
           name="content_blocks_json"
           rows={10}
           className={`${inputClass} font-mono text-xs`}
-          defaultValue={`[
-  {
-    "id": "intro",
-    "type": "summary",
-    "title": "Introduktion",
-    "instructions": "Beskriv workshopens mål"
-  },
-  {
-    "id": "exercise_1",
-    "type": "exercise",
-    "title": "Övning 1",
-    "instructions": "Genomför övningen och skriv ert svar",
-    "required": true
-  },
-  {
-    "id": "qa_1",
-    "type": "question",
-    "title": "Reflektionsfråga",
-    "instructions": "Vad tar ni med er?",
-    "required": true
-  },
-  {
-    "id": "coach_ai",
-    "type": "ai_chat",
-    "title": "AI-coach",
-    "instructions": "Ställ en fråga till AI"
-  }
-]`}
+          defaultValue={DEFAULT_CONTENT_BLOCKS_TEMPLATE}
         />
       </div>
       <label className="flex items-center gap-2 text-sm text-foreground-muted">

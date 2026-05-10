@@ -555,7 +555,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                           </p>
                         ) : null}
                       </div>
-                      <WorkshopAssignmentStatusBadge status={assignment.status as any} />
+                      <WorkshopAssignmentStatusBadge status={assignment.status} />
                     </div>
                     {takeaway.summary ? (
                       <div className="mt-3 rounded-xl border border-default bg-canvas-subtle/40 p-3 text-sm text-foreground-muted">

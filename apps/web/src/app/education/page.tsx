@@ -98,17 +98,15 @@ export default async function EducationPage() {
                     className="flex items-center justify-between rounded-2xl border border-default p-4 transition hover:bg-canvas-subtle"
                   >
                     <div>
-                      <p className="font-medium text-foreground">
-                        {(assignment.expand as any)?.workshop?.title ?? 'Workshop'}
-                      </p>
+                      <p className="font-medium text-foreground">{assignment.expand?.workshop?.title ?? 'Workshop'}</p>
                       <p className="text-xs text-foreground-subtle">
-                        {(assignment.expand as any)?.startup?.name ?? 'Bolag'} ·{' '}
+                        {assignment.expand?.startup?.name ?? 'Bolag'} ·{' '}
                         {assignment.due_date
                           ? `Deadline ${new Date(assignment.due_date).toLocaleDateString('sv-SE')}`
                           : 'Ingen deadline'}
                       </p>
                     </div>
-                    <WorkshopAssignmentStatusBadge status={assignment.status as any} />
+                    <WorkshopAssignmentStatusBadge status={assignment.status} />
                   </Link>
                 </li>
               ))}
@@ -133,7 +131,7 @@ export default async function EducationPage() {
               >
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <h3 className="font-semibold text-foreground">{workshop.title}</h3>
-                  <WorkshopStatusBadge status={workshop.status as any} />
+                  <WorkshopStatusBadge status={workshop.status} />
                 </div>
                 {workshop.goal ? (
                   <p className="line-clamp-3 text-sm text-foreground-muted">{workshop.goal}</p>

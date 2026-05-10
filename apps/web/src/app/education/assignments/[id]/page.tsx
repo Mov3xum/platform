@@ -47,7 +47,7 @@ export default async function WorkshopAssignmentPage({
 
       <header className="mb-8 rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
         <div className="mb-3 flex flex-wrap items-center gap-3">
-          <WorkshopAssignmentStatusBadge status={assignment.status as any} />
+          <WorkshopAssignmentStatusBadge status={assignment.status} />
           {assignment.due_date ? (
             <span className="text-xs text-foreground-subtle">
               Deadline: {new Date(assignment.due_date).toLocaleDateString('sv-SE')}

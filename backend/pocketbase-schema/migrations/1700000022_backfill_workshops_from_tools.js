@@ -68,7 +68,7 @@ migrate(
     }
   },
   (app) => {
-    const records = app.findRecordsByFilter('workshops', 'key ~ "from_tool_"');
+    const records = app.findRecordsByFilter('workshops', 'key ~ "from_tool_" && source_tool != ""');
     for (const record of records) {
       app.delete(record);
     }
