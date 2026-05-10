@@ -29,7 +29,13 @@ interface CookiePayload {
 function readCookiePayload(raw: string | undefined): CookiePayload | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as CookiePayload;
+    let value = raw;
+    // New format: payload is URL-encoded before being written to cookie.
+    // Keep backward compatibility with old raw JSON cookies.
+    if (value.startsWith('%7B')) {
+      value = decodeURIComponent(value);
+    }
+    const parsed = JSON.parse(value) as CookiePayload;
     if (!parsed?.token) return null;
     return parsed;
   } catch {

@@ -105,10 +105,10 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
         }
       : null;
 
-    const payload = JSON.stringify({
+    const payload = encodeURIComponent(JSON.stringify({
       token: pb.authStore.token,
       model: compactModel
-    });
+    }));
 
     const store = await cookies();
     store.set(AUTH_COOKIE, payload, {
