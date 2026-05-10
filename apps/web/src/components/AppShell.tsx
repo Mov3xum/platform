@@ -47,7 +47,7 @@ export async function AppShell({ user, children }: AppShellProps) {
   return (
     <div className="min-h-screen bg-canvas">
       <div className="mx-auto flex min-h-screen max-w-[1600px]">
-        <aside className="sticky top-0 hidden h-screen w-72 flex-col border-r border-default bg-surface lg:flex">
+        <aside className="sticky top-0 hidden h-screen w-64 flex-col border-r border-default bg-surface lg:flex">
           <div className="border-b border-default px-6 py-5">
             <Logo href="/dashboard" />
           </div>
@@ -65,7 +65,7 @@ export async function AppShell({ user, children }: AppShellProps) {
         </aside>
 
         <div className="flex min-h-screen flex-1 flex-col">
-          <header className="sticky top-0 z-20 border-b border-default bg-surface/85 px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-8">
+          <header className="sticky top-0 z-20 border-b border-default bg-surface/85 px-4 py-3 backdrop-blur-xl sm:px-6 lg:hidden">
             <div className="flex items-center gap-3">
               <MobileNavigation roles={roles} assignedWorkshopCount={assignedWorkshopCount} />
               <div className="lg:hidden">
