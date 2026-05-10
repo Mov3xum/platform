@@ -19,6 +19,7 @@ export interface SessionUser {
   tenantSlug?: string;
   tenantName?: string;
   linkedStartups: string[];
+  avatarUrl?: string;
 }
 
 interface CookiePayload {
@@ -67,6 +68,11 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   const tenantId = (m.tenant as string) || '';
   const tenant = m.expand?.tenant;
 
+  const avatarFilename = m.avatar as string | undefined;
+  const avatarUrl = avatarFilename
+    ? `${PB_URL}/api/files/users/${m.id as string}/${avatarFilename}`
+    : undefined;
+
   return {
     id: m.id as string,
     email: (m.email as string) || '',
@@ -75,7 +81,8 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     tenant: tenantId,
     tenantSlug: tenant?.slug,
     tenantName: tenant?.name,
-    linkedStartups: (m.linked_startups as string[]) || []
+    linkedStartups: (m.linked_startups as string[]) || [],
+    avatarUrl
   };
 }
 

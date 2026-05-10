@@ -98,6 +98,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
           tenant: m.tenant,
           roles: m.roles,
           display_name: m.display_name,
+          avatar: m.avatar,
           linked_startups: m.linked_startups,
           expand: expandTenant
             ? { tenant: { id: expandTenant.id, name: expandTenant.name, slug: expandTenant.slug } }
