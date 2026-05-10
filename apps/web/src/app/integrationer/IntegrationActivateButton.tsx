@@ -103,7 +103,7 @@ export function IntegrationActivateButton({ integrationName, providerIcon, accen
                               <Icon className="h-4 w-4" />
                             </div>
                             {idx < STEPS.length - 1 && (
-                              <div className="mt-1 h-full w-px bg-border-default" />
+                              <div className="mt-1 h-full w-px bg-default" />
                             )}
                           </div>
                           <div className="pb-4">

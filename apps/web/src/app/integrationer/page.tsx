@@ -326,11 +326,11 @@ export default async function IntegrationerPage() {
           Saknar du en integration?
         </h3>
         <p className="mt-2 max-w-sm mx-auto text-sm text-foreground-muted">
-          Berättar du vilket verktyg ni vill ansluta prioriterar vi det i utvecklingsroadmapen.
+          Berättar du vilket verktyg ni vill ansluta så prioriterar vi det i utvecklingsroadmapen.
           Vi bygger integrationer baserade på era faktiska behov.
         </p>
         <a
-          href="mailto:hampus@boxmeal"
+          href="mailto:hampus@boxmeal.se"
           className="mt-5 inline-flex items-center justify-center rounded-full border border-default bg-surface px-6 py-2.5 text-sm font-semibold text-foreground transition hover:bg-canvas-subtle"
         >
           Begär integration →
