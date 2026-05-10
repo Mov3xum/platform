@@ -252,6 +252,7 @@ const VALUE_PROPS = [
     description: 'Era verktyg pratar med plattformen — inte tvärtom. Ni väljer vad som visas var.'
   }
 ];
+const FOOTER_PLACEHOLDER_NUMBER = String(VALUE_PROPS.length + 1).padStart(2, '0');
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -330,7 +331,7 @@ export default async function IntegrationerPage() {
       {/* ── Request integration footer ── */}
       <div className="mt-14 rounded-3xl border border-dashed border-strong bg-surface/50 px-8 py-10 text-center">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-default bg-canvas-subtle text-xs font-semibold tracking-[0.08em] text-foreground-muted">
-          {String(VALUE_PROPS.length + 1).padStart(2, '0')}
+          {FOOTER_PLACEHOLDER_NUMBER}
         </div>
         <h3 className="mt-3 text-lg font-semibold text-foreground">
           Saknar du en integration?
