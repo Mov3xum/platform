@@ -4,7 +4,18 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { WorkshopAssignForm } from '../../WorkshopAssignForm';
 import { WorkshopStatusBadge } from '@/components/Badges';
-import type { Workshop, WorkshopAssignment, WorkshopBlock } from '@platform/shared';
+import type { Workshop, WorkshopAssignment, WorkshopBlock, WorkshopModule } from '@platform/shared';
+
+const BLOCK_TYPE_EMOJIS: Record<string, string> = {
+  question: '❓',
+  exercise: '✏️',
+  instruction: '📖',
+  video: '🎬',
+  image: '🖼️',
+  ai_chat: '🤖',
+  test: '📝',
+  summary: '📊'
+};
 
 export default async function WorkshopDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -20,9 +31,21 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
   }
   if (workshop.tenant !== user.tenant) notFound();
 
-  const blocks = Array.isArray(workshop.content_blocks)
+  // Resolve modules (prefer new structure, fall back to flat blocks)
+  const rawModules = Array.isArray(workshop.modules) && (workshop.modules as WorkshopModule[]).length > 0
+    ? (workshop.modules as WorkshopModule[])
+    : [];
+  const rawBlocks = Array.isArray(workshop.content_blocks)
     ? (workshop.content_blocks as WorkshopBlock[])
     : [];
+  const modules: WorkshopModule[] =
+    rawModules.length > 0
+      ? rawModules
+      : rawBlocks.length > 0
+        ? [{ id: 'main', title: 'Workshop', blocks: rawBlocks }]
+        : [];
+
+  const totalBlocks = modules.reduce((acc, m) => acc + m.blocks.length, 0);
 
   let startups: Array<{ id: string; name: string }> = [];
   let recentAssignments: WorkshopAssignment[] = [];
@@ -72,43 +95,88 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
             {workshop.instructions}
           </div>
         ) : null}
+        <p className="mt-3 text-xs text-foreground-subtle">
+          {modules.length} modul{modules.length !== 1 ? 'er' : ''} · {totalBlocks} block
+        </p>
       </header>
 
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="space-y-5 lg:col-span-2">
           <section className="rounded-3xl border border-default bg-surface p-6">
             <h2 className="mb-4 text-lg font-semibold text-foreground">Workshopmoment</h2>
-            {blocks.length === 0 ? (
-              <p className="text-sm text-foreground-subtle">Inga moment definierade.</p>
+            {modules.length === 0 ? (
+              <p className="text-sm text-foreground-subtle">Inga moduler definierade.</p>
             ) : (
-              <ol className="space-y-3">
-                {blocks.map((block, index) => (
-                  <li key={block.id} className="rounded-2xl border border-default p-4">
-                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                      <span className="inline-flex rounded-full bg-canvas-subtle px-2 py-0.5 text-xs font-medium text-foreground-muted">
-                        {index + 1}
+              <div className="space-y-5">
+                {modules.map((mod, modIdx) => (
+                  <div key={mod.id}>
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-bold text-brand-foreground">
+                        {modIdx + 1}
                       </span>
-                      <span className="inline-flex rounded-full bg-movexum-pastell-bla px-2 py-0.5 text-xs font-medium text-movexum-morkbla dark:bg-movexum-morkbla/60 dark:text-movexum-pastell-bla">
-                        {block.type}
-                      </span>
+                      <h3 className="font-semibold text-foreground">{mod.title}</h3>
+                      {mod.description ? (
+                        <span className="text-xs text-foreground-subtle">— {mod.description}</span>
+                      ) : null}
                     </div>
-                    <p className="font-medium text-foreground">{block.title}</p>
-                    {block.instructions ? (
-                      <p className="mt-1 text-sm text-foreground-muted">{block.instructions}</p>
-                    ) : null}
-                    {block.video_url ? (
-                      <a
-                        href={block.video_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-2 inline-flex text-xs font-medium text-link hover:underline"
-                      >
-                        Öppna video →
-                      </a>
-                    ) : null}
-                  </li>
+                    {mod.blocks.length === 0 ? (
+                      <p className="ml-8 text-sm text-foreground-subtle">Inga block.</p>
+                    ) : (
+                      <ol className="ml-8 space-y-2">
+                        {mod.blocks.map((block, blockIdx) => (
+                          <li key={block.id} className="rounded-2xl border border-default p-3">
+                            <div className="mb-1 flex flex-wrap items-center gap-2">
+                              <span className="text-xs text-foreground-subtle">
+                                {modIdx + 1}.{blockIdx + 1}
+                              </span>
+                              <span className="text-sm">
+                                {BLOCK_TYPE_EMOJIS[block.type] ?? '▪️'}
+                              </span>
+                              <span className="inline-flex rounded-full bg-movexum-pastell-bla px-2 py-0.5 text-xs font-medium text-movexum-morkbla dark:bg-movexum-morkbla/60 dark:text-movexum-pastell-bla">
+                                {block.type}
+                              </span>
+                              {block.required ? (
+                                <span className="text-xs text-movexum-morkorange">obligatorisk</span>
+                              ) : null}
+                            </div>
+                            <p className="font-medium text-foreground">{block.title}</p>
+                            {block.instructions ? (
+                              <p className="mt-0.5 text-sm text-foreground-muted line-clamp-2">
+                                {block.instructions}
+                              </p>
+                            ) : null}
+                            {block.desired_result ? (
+                              <p className="mt-0.5 text-xs text-foreground-subtle">
+                                Mål: {block.desired_result}
+                              </p>
+                            ) : null}
+                            {block.video_url ? (
+                              <a
+                                href={block.video_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="mt-1 inline-flex text-xs font-medium text-link hover:underline"
+                              >
+                                Öppna video →
+                              </a>
+                            ) : null}
+                            {block.type === 'test' && (block.options ?? []).length > 0 ? (
+                              <ul className="mt-1 space-y-0.5">
+                                {(block.options ?? []).map((opt) => (
+                                  <li key={opt.id} className="flex items-center gap-1.5 text-xs text-foreground-muted">
+                                    <span>{opt.isCorrect ? '✓' : '○'}</span>
+                                    {opt.text}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
                 ))}
-              </ol>
+              </div>
             )}
           </section>
 
@@ -144,12 +212,6 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
             <h3 className="mb-2 text-sm font-semibold text-foreground">AI-inställning</h3>
             <p className="text-xs text-foreground-muted">
               {workshop.ai_system_prompt || 'Ingen systemprompt satt.'}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-default bg-surface p-4">
-            <h3 className="mb-2 text-sm font-semibold text-foreground">Outputkrav</h3>
-            <p className="text-xs text-foreground-muted">
-              {workshop.output_requirements || 'Inga outputkrav satta.'}
             </p>
           </div>
           {isStaff ? <WorkshopAssignForm workshopId={id} startups={startups} /> : null}

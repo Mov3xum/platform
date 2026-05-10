@@ -154,7 +154,21 @@ export type WorkshopAudience =
   | 'startup_member'
   | 'observer';
 
-export type WorkshopBlockType = 'exercise' | 'video' | 'question' | 'ai_chat' | 'summary';
+export type WorkshopBlockType =
+  | 'exercise'
+  | 'video'
+  | 'question'
+  | 'ai_chat'
+  | 'summary'
+  | 'image'
+  | 'test'
+  | 'instruction';
+
+export interface WorkshopBlockOption {
+  id: string;
+  text: string;
+  isCorrect?: boolean;
+}
 
 export interface WorkshopBlock {
   id: string;
@@ -162,7 +176,18 @@ export interface WorkshopBlock {
   title: string;
   instructions?: string;
   video_url?: string;
+  image_url?: string;
+  desired_result?: string;
+  question_type?: 'single' | 'multiple';
+  options?: WorkshopBlockOption[];
   required?: boolean;
+}
+
+export interface WorkshopModule {
+  id: string;
+  title: string;
+  description?: string;
+  blocks: WorkshopBlock[];
 }
 
 export interface Workshop {
@@ -177,6 +202,7 @@ export interface Workshop {
   audience_roles: WorkshopAudience[];
   ai_system_prompt?: string;
   output_requirements?: string;
+  modules?: WorkshopModule[];
   content_blocks: WorkshopBlock[];
   source_tool?: string;
   created_by?: string;

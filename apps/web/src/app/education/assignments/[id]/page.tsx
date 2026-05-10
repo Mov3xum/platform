@@ -4,7 +4,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { WorkshopAssignmentStatusBadge } from '@/components/Badges';
 import { WorkshopRunner } from '../../WorkshopRunner';
-import type { WorkshopAssignment, WorkshopBlock } from '@platform/shared';
+import type { WorkshopAssignment, WorkshopBlock, WorkshopModule } from '@platform/shared';
 
 export default async function WorkshopAssignmentPage({
   params
@@ -33,9 +33,20 @@ export default async function WorkshopAssignmentPage({
 
   const workshop = assignment.expand?.workshop;
   const startup = assignment.expand?.startup;
-  const blocks = Array.isArray(workshop?.content_blocks)
-    ? (workshop?.content_blocks as WorkshopBlock[])
+
+  // Resolve modules: prefer workshop.modules, fall back to synthesising from content_blocks
+  const rawModules = Array.isArray(workshop?.modules) && (workshop.modules as WorkshopModule[]).length > 0
+    ? (workshop.modules as WorkshopModule[])
     : [];
+  const rawBlocks = Array.isArray(workshop?.content_blocks)
+    ? (workshop.content_blocks as WorkshopBlock[])
+    : [];
+  const modules: WorkshopModule[] =
+    rawModules.length > 0
+      ? rawModules
+      : rawBlocks.length > 0
+        ? [{ id: 'module_main', title: workshop?.title ?? 'Workshop', blocks: rawBlocks }]
+        : [];
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-10 lg:px-8">
@@ -70,7 +81,14 @@ export default async function WorkshopAssignmentPage({
         {workshop?.goal ? <p className="mt-3 text-sm text-foreground-muted">{workshop.goal}</p> : null}
       </header>
 
-      <WorkshopRunner assignment={assignment} blocks={blocks} />
+      <div className="mb-6 rounded-2xl border border-movexum-bla/30 bg-movexum-pastell-bla px-4 py-3 dark:border-movexum-djupbla/50 dark:bg-movexum-morkbla/30">
+        <p className="text-xs text-movexum-morkbla dark:text-movexum-pastell-bla">
+          🔒 AI-verktyg drivs av <strong>Mistral / Le Chat</strong> (Frankrike, EU-suveränt).
+          Konfidentiella anteckningar exkluderas alltid.
+        </p>
+      </div>
+
+      <WorkshopRunner assignment={assignment} modules={modules} />
     </main>
   );
 }
