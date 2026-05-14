@@ -1,3 +1,4 @@
+import React from 'react';
 import Link from 'next/link';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
@@ -576,5 +577,3 @@ function KpiCard({
   return href ? <Link href={href}>{inner}</Link> : <div>{inner}</div>;
 }
 
-// React import needed for JSX in sub-components defined in this module
-import React from 'react';
