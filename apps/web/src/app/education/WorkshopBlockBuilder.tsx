@@ -15,6 +15,12 @@ const BLOCK_TYPES: { type: WorkshopBlockType; label: string; emoji: string }[] =
 ];
 
 const BLOCK_TYPE_MAP = Object.fromEntries(BLOCK_TYPES.map((b) => [b.type, b]));
+const MAX_IMAGE_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_VIDEO_FILE_BYTES = 20 * 1024 * 1024;
+
+function formatMbLimit(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
 
 let _idSeq = 0;
 function uid(prefix: string) {
@@ -35,6 +41,15 @@ function defaultBlock(type: WorkshopBlockType): WorkshopBlock {
   };
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(new Error('Kunde inte läsa filen.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 interface WorkshopBlockBuilderProps {
   initialModules?: WorkshopModule[];
 }
@@ -46,6 +61,12 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
   });
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
   const [addingBlockFor, setAddingBlockFor] = useState<string | null>(null);
+  const [uploadingByBlockId, setUploadingByBlockId] = useState<Record<string, boolean>>({});
+  const [uploadErrorByBlockId, setUploadErrorByBlockId] = useState<Record<string, string>>({});
+  const mediaLabel = (title?: string, unnamedLabel?: string) => {
+    const trimmed = title?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : unnamedLabel || 'Media utan titel';
+  };
 
   const toggleBlock = (blockId: string) =>
     setExpandedBlocks((prev) => {
@@ -119,6 +140,63 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
           : m
       )
     );
+
+  const setUploadError = (blockId: string, message?: string) =>
+    setUploadErrorByBlockId((prev) => {
+      const next = { ...prev };
+      if (message) next[blockId] = message;
+      else delete next[blockId];
+      return next;
+    });
+
+  const setUploading = (blockId: string, uploading: boolean) =>
+    setUploadingByBlockId((prev) => ({ ...prev, [blockId]: uploading }));
+
+  const handleMediaUpload = async (moduleId: string, block: WorkshopBlock, file: File | null) => {
+    if (!file || (block.type !== 'video' && block.type !== 'image')) return;
+
+    const isImage = block.type === 'image';
+    const expectedType = isImage ? 'image/' : 'video/';
+    const maxBytes = isImage ? MAX_IMAGE_FILE_BYTES : MAX_VIDEO_FILE_BYTES;
+
+    if (!file.type.startsWith(expectedType)) {
+      setUploadError(
+        block.id,
+        isImage ? 'Välj en bildfil (PNG, JPG, WEBP, GIF).' : 'Välj en videofil (MP4, WebM m.fl.).'
+      );
+      return;
+    }
+    if (file.size > maxBytes) {
+      setUploadError(
+        block.id,
+        isImage
+          ? `Bildfilen är för stor (max ${formatMbLimit(MAX_IMAGE_FILE_BYTES)}).`
+          : `Videofilen är för stor (max ${formatMbLimit(MAX_VIDEO_FILE_BYTES)}).`
+      );
+      return;
+    }
+
+    setUploadError(block.id);
+    setUploading(block.id, true);
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      updateBlock(moduleId, block.id, isImage ? { image_url: dataUrl } : { video_url: dataUrl });
+    } catch (err) {
+      const details = err instanceof Error && err.message ? `: ${err.message}` : '';
+      setUploadError(block.id, `Uppladdningen misslyckades${details}`);
+    } finally {
+      setUploading(block.id, false);
+    }
+  };
+
+  const handleMediaInputChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    moduleId: string,
+    block: WorkshopBlock
+  ) => {
+    void handleMediaUpload(moduleId, block, e.target.files?.[0] ?? null);
+    e.target.value = '';
+  };
 
   // ── Option operations (for test blocks) ──────────────────────────────────
 
@@ -352,35 +430,86 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                         />
                       </div>
 
-                      {/* Video URL */}
+                      {/* Video upload */}
                       {block.type === 'video' && (
-                        <div>
-                          <label className={labelClass}>Video-URL</label>
-                          <input
-                            type="url"
-                            value={block.video_url ?? ''}
-                            onChange={(e) =>
-                              updateBlock(mod.id, block.id, { video_url: e.target.value })
-                            }
-                            placeholder="https://www.youtube.com/watch?v=…"
-                            className={inputClass}
-                          />
+                        <div className="space-y-2">
+                          <label className={labelClass}>Video</label>
+                          <label
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              void handleMediaUpload(mod.id, block, e.dataTransfer.files?.[0] ?? null);
+                            }}
+                            className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-default bg-surface px-4 py-4 text-center text-xs text-foreground-muted transition hover:border-brand hover:bg-canvas-subtle"
+                          >
+                            <span>Dra och släpp video här</span>
+                            <span className="text-foreground-subtle">
+                              eller klicka för att välja fil (max {formatMbLimit(MAX_VIDEO_FILE_BYTES)})
+                            </span>
+                            <input
+                              type="file"
+                              accept="video/*"
+                              className="hidden"
+                              onChange={(e) => handleMediaInputChange(e, mod.id, block)}
+                            />
+                          </label>
+                          {block.video_url ? (
+                            <video
+                              controls
+                              src={block.video_url}
+                              aria-label={`Förhandsvisning av video för blocket ${mediaLabel(block.title, 'Video utan titel')}`}
+                              className="max-h-72 w-full rounded-xl border border-default"
+                            />
+                          ) : null}
+                          {uploadingByBlockId[block.id] ? (
+                            <p className="text-xs text-foreground-subtle">Laddar upp video…</p>
+                          ) : null}
+                          {uploadErrorByBlockId[block.id] ? (
+                            <p role="alert" aria-live="assertive" className="text-xs text-movexum-morkorange">
+                              {uploadErrorByBlockId[block.id]}
+                            </p>
+                          ) : null}
                         </div>
                       )}
 
-                      {/* Image URL */}
+                      {/* Image upload */}
                       {block.type === 'image' && (
-                        <div>
-                          <label className={labelClass}>Bild-URL</label>
-                          <input
-                            type="url"
-                            value={block.image_url ?? ''}
-                            onChange={(e) =>
-                              updateBlock(mod.id, block.id, { image_url: e.target.value })
-                            }
-                            placeholder="https://example.com/bild.png"
-                            className={inputClass}
-                          />
+                        <div className="space-y-2">
+                          <label className={labelClass}>Bild</label>
+                          <label
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              void handleMediaUpload(mod.id, block, e.dataTransfer.files?.[0] ?? null);
+                            }}
+                            className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-default bg-surface px-4 py-4 text-center text-xs text-foreground-muted transition hover:border-brand hover:bg-canvas-subtle"
+                          >
+                            <span>Dra och släpp bild här</span>
+                            <span className="text-foreground-subtle">
+                              eller klicka för att välja fil (max {formatMbLimit(MAX_IMAGE_FILE_BYTES)})
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => handleMediaInputChange(e, mod.id, block)}
+                            />
+                          </label>
+                          {block.image_url ? (
+                            <img
+                              src={block.image_url}
+                              alt={mediaLabel(block.title, 'Bild utan beskrivning')}
+                              className="max-h-72 max-w-full rounded-xl border border-default object-contain"
+                            />
+                          ) : null}
+                          {uploadingByBlockId[block.id] ? (
+                            <p className="text-xs text-foreground-subtle">Laddar upp bild…</p>
+                          ) : null}
+                          {uploadErrorByBlockId[block.id] ? (
+                            <p role="alert" aria-live="assertive" className="text-xs text-movexum-morkorange">
+                              {uploadErrorByBlockId[block.id]}
+                            </p>
+                          ) : null}
                         </div>
                       )}
 
