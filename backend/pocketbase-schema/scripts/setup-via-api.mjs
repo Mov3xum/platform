@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 /**
  * One-shot setup script: connects to a running PocketBase v0.23+ instance
- * as superuser and creates all 10 collections, the Movexum tenant, and the
+ * as superuser and creates all collections, the Movexum tenant, and the
  * Hampus app-user. Use this when migrations can't run via PB's startup
  * (e.g. PB is deployed from a raw image without the migrations Dockerfile).
+ *
+ * Covers migrations 1–21 (tenants, users, startups, partners,
+ * startup_team_members, partner_engagements, activities, notes, agreements,
+ * milestones, tools, tool_runs, workshops, workshop_assignments,
+ * workshop_runs and the activities extensions for tools + workshops).
  *
  * Idempotent: skips collections/records that already exist.
  *
@@ -65,6 +70,38 @@ async function patchUsersCollection(addFields, ruleUpdates = {}) {
     ...ruleUpdates
   });
   ok(`users uppdaterad (+${newFields.length} fält${Object.keys(ruleUpdates).length ? ', regler' : ''})`);
+}
+
+async function patchActivitiesCollection(addFields) {
+  const activities = await pb.collections.getOne('activities');
+  const existingNames = new Set((activities.fields || []).map((f) => f.name));
+  const newFields = addFields.filter((f) => !existingNames.has(f.name));
+  if (newFields.length === 0) {
+    warn('activities-collectionen redan utökad — hoppar över');
+    return;
+  }
+  await pb.collections.update('activities', {
+    fields: [...activities.fields, ...newFields]
+  });
+  ok(`activities uppdaterad (+${newFields.length} fält)`);
+}
+
+async function patchActivitiesKindValues(addValues) {
+  const activities = await pb.collections.getOne('activities');
+  const kindField = (activities.fields || []).find((f) => f.name === 'kind');
+  if (!kindField) {
+    warn('activities "kind"-fält saknas — hoppar över kind-patch');
+    return;
+  }
+  const existing = new Set(kindField.values || []);
+  const toAdd = addValues.filter((v) => !existing.has(v));
+  if (toAdd.length === 0) {
+    warn('activities "kind"-värden redan uppdaterade — hoppar över');
+    return;
+  }
+  kindField.values = [...(kindField.values || []), ...toAdd];
+  await pb.collections.update('activities', { fields: activities.fields });
+  ok(`activities "kind" uppdaterad (+${toAdd.join(', ')})`);
 }
 
 async function ensureRecord(collection, filter, data) {
@@ -347,14 +384,202 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`
 });
 
-// 12. seed Movexum tenant ---------------------------------------------------
+// 12. tools -----------------------------------------------------------------
+await ensureCollection({
+  id: 'tools_collection',
+  name: 'tools',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'key', type: 'text', required: true, min: 1, max: 100 },
+    { name: 'name', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'description', type: 'editor', required: false },
+    { name: 'category', type: 'select', required: true, maxSelect: 1, values: ['ai_per_startup', 'ai_system_wide', 'education', 'template', 'checklist'] },
+    { name: 'icon', type: 'text', required: false, max: 50 },
+    { name: 'prompt_template', type: 'editor', required: false },
+    { name: 'model', type: 'select', required: false, maxSelect: 1, values: ['mistral-large-latest', 'mistral-medium-latest', 'mistral-small-latest'] },
+    { name: 'requires_startup', type: 'bool', required: false },
+    { name: 'roles_allowed', type: 'select', required: false, maxSelect: 10, values: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer'] },
+    { name: 'output_format', type: 'select', required: false, maxSelect: 1, values: ['markdown', 'json', 'text'] },
+    { name: 'active', type: 'bool', required: false },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_tools_tenant_key ON tools (tenant, key)',
+    'CREATE INDEX idx_tools_tenant_category ON tools (tenant, category)',
+    'CREATE INDEX idx_tools_tenant_active ON tools (tenant, active)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
+});
+
+// 13. tool_runs -------------------------------------------------------------
+await ensureCollection({
+  id: 'tool_runs_collection',
+  name: 'tool_runs',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'tool', type: 'relation', required: true, collectionId: 'tools_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'activity', type: 'relation', required: false, collectionId: 'activities_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'triggered_by', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['queued', 'running', 'succeeded', 'failed'] },
+    { name: 'input', type: 'json', required: false },
+    { name: 'output_md', type: 'editor', required: false },
+    { name: 'output_json', type: 'json', required: false },
+    { name: 'model', type: 'text', required: false, max: 100 },
+    { name: 'tokens_in', type: 'number', required: false, min: 0 },
+    { name: 'tokens_out', type: 'number', required: false, min: 0 },
+    { name: 'cost_estimate_usd', type: 'number', required: false, min: 0 },
+    { name: 'error', type: 'text', required: false, max: 1000 },
+    { name: 'started_at', type: 'date', required: false },
+    { name: 'completed_at', type: 'date', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_tool_runs_tenant ON tool_runs (tenant)',
+    'CREATE INDEX idx_tool_runs_startup ON tool_runs (startup)',
+    'CREATE INDEX idx_tool_runs_tool ON tool_runs (tool)',
+    'CREATE INDEX idx_tool_runs_triggered_by ON tool_runs (triggered_by)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = triggered_by`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = triggered_by`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
+});
+
+// 14. extend activities for tools (kind, tool, tool_run) -------------------
+await patchActivitiesCollection([
+  { name: 'kind', type: 'select', required: false, maxSelect: 1, values: ['manual', 'tool_run'] },
+  { name: 'tool', type: 'relation', required: false, collectionId: 'tools_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+  { name: 'tool_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+]);
+
+// 15. workshops -------------------------------------------------------------
+await ensureCollection({
+  id: 'workshops_collection',
+  name: 'workshops',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'key', type: 'text', required: true, min: 1, max: 100 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'goal', type: 'editor', required: false },
+    { name: 'instructions', type: 'editor', required: false },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft', 'active', 'archived'] },
+    { name: 'version', type: 'text', required: true, min: 1, max: 20 },
+    { name: 'audience_roles', type: 'select', required: false, maxSelect: 10, values: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer'] },
+    { name: 'ai_system_prompt', type: 'editor', required: false },
+    { name: 'output_requirements', type: 'editor', required: false },
+    { name: 'content_blocks', type: 'json', required: false },
+    { name: 'modules', type: 'json', required: false },
+    { name: 'source_tool', type: 'relation', required: false, collectionId: 'tools_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'active', type: 'bool', required: false },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_workshops_tenant_key ON workshops (tenant, key)',
+    'CREATE INDEX idx_workshops_tenant_status ON workshops (tenant, status)',
+    'CREATE INDEX idx_workshops_tenant_active ON workshops (tenant, active)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
+// 16. workshop_assignments --------------------------------------------------
+await ensureCollection({
+  id: 'workshop_assignments_collection',
+  name: 'workshop_assignments',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'workshop', type: 'relation', required: true, collectionId: 'workshops_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'assigned_by', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'owner', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'activity', type: 'relation', required: false, collectionId: 'activities_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['planned', 'in_progress', 'done'] },
+    { name: 'due_date', type: 'date', required: false },
+    { name: 'progress_json', type: 'json', required: false },
+    { name: 'answers_json', type: 'json', required: false },
+    { name: 'takeaway_json', type: 'json', required: false },
+    { name: 'artifacts_json', type: 'json', required: false },
+    { name: 'ai_thread_json', type: 'json', required: false },
+    { name: 'started_at', type: 'date', required: false },
+    { name: 'completed_at', type: 'date', required: false },
+    { name: 'last_saved_at', type: 'date', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_workshop_assignments_tenant ON workshop_assignments (tenant)',
+    'CREATE INDEX idx_workshop_assignments_startup ON workshop_assignments (startup)',
+    'CREATE INDEX idx_workshop_assignments_workshop ON workshop_assignments (workshop)',
+    'CREATE INDEX idx_workshop_assignments_status ON workshop_assignments (status)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR} && @request.auth.id = assigned_by`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
+// 17. workshop_runs ---------------------------------------------------------
+await ensureCollection({
+  id: 'workshop_runs_collection',
+  name: 'workshop_runs',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'assignment', type: 'relation', required: true, collectionId: 'workshop_assignments_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'workshop', type: 'relation', required: true, collectionId: 'workshops_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'triggered_by', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['queued', 'running', 'succeeded', 'failed'] },
+    { name: 'input', type: 'json', required: false },
+    { name: 'output_md', type: 'editor', required: false },
+    { name: 'model', type: 'text', required: false, max: 100 },
+    { name: 'tokens_in', type: 'number', required: false, min: 0 },
+    { name: 'tokens_out', type: 'number', required: false, min: 0 },
+    { name: 'cost_estimate_usd', type: 'number', required: false, min: 0 },
+    { name: 'error', type: 'text', required: false, max: 1000 },
+    { name: 'started_at', type: 'date', required: false },
+    { name: 'completed_at', type: 'date', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_workshop_runs_tenant ON workshop_runs (tenant)',
+    'CREATE INDEX idx_workshop_runs_assignment ON workshop_runs (assignment)',
+    'CREATE INDEX idx_workshop_runs_startup ON workshop_runs (startup)',
+    'CREATE INDEX idx_workshop_runs_workshop ON workshop_runs (workshop)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = triggered_by`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = triggered_by`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
+// 18. extend activities for workshops (workshop, workshop_assignment, workshop_run + kind values)
+await patchActivitiesCollection([
+  { name: 'workshop', type: 'relation', required: false, collectionId: 'workshops_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+  { name: 'workshop_assignment', type: 'relation', required: false, collectionId: 'workshop_assignments_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+  { name: 'workshop_run', type: 'relation', required: false, collectionId: 'workshop_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+]);
+await patchActivitiesKindValues(['workshop_assignment', 'workshop_run']);
+
+// 19. seed Movexum tenant ---------------------------------------------------
 const tenant = await ensureRecord('tenants', 'slug = "movexum"', {
   name: 'Movexum',
   slug: 'movexum',
   type: 'incubator'
 });
 
-// 13. seed Hampus app-user --------------------------------------------------
+// 20. seed Hampus app-user --------------------------------------------------
 await ensureRecord('users', `email = "${APP_USER_EMAIL}"`, {
   email: APP_USER_EMAIL,
   emailVisibility: true,

@@ -121,7 +121,7 @@ node backend/pocketbase-schema/scripts/setup-via-api.mjs
 ```
 
 Skriptet är idempotent — om en collection eller record redan finns hoppas den över. Efter körning:
-- 10 collections (`tenants`, `users` utökad, `startups`, `partners`, `startup_team_members`, `partner_engagements`, `activities`, `notes`, `agreements`, `milestones`)
+- 17 collections (`tenants`, `users` utökad, `startups`, `partners`, `startup_team_members`, `partner_engagements`, `activities` (utökad med tools + workshops), `notes`, `agreements`, `milestones`, `tools`, `tool_runs`, `workshops`, `workshop_assignments`, `workshop_runs`)
 - 1 tenant: `Movexum`
 - 1 app-user: `hampus@movexum.se` med `roles=["admin"]`
 
