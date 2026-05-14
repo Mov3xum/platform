@@ -16,7 +16,11 @@ const BLOCK_TYPES: { type: WorkshopBlockType; label: string; emoji: string }[] =
 
 const BLOCK_TYPE_MAP = Object.fromEntries(BLOCK_TYPES.map((b) => [b.type, b]));
 const MAX_IMAGE_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_VIDEO_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_VIDEO_FILE_BYTES = 20 * 1024 * 1024;
+
+function formatMbLimit(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
 
 let _idSeq = 0;
 function uid(prefix: string) {
@@ -59,6 +63,10 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
   const [addingBlockFor, setAddingBlockFor] = useState<string | null>(null);
   const [uploadingByBlockId, setUploadingByBlockId] = useState<Record<string, boolean>>({});
   const [uploadErrorByBlockId, setUploadErrorByBlockId] = useState<Record<string, string>>({});
+  const mediaLabel = (title?: string, unnamedLabel?: string) => {
+    const trimmed = title?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : unnamedLabel || 'Media utan titel';
+  };
 
   const toggleBlock = (blockId: string) =>
     setExpandedBlocks((prev) => {
@@ -161,7 +169,9 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
     if (file.size > maxBytes) {
       setUploadError(
         block.id,
-        isImage ? 'Bildfilen är för stor (max 10 MB).' : 'Videofilen är för stor (max 100 MB).'
+        isImage
+          ? `Bildfilen är för stor (max ${formatMbLimit(MAX_IMAGE_FILE_BYTES)}).`
+          : `Videofilen är för stor (max ${formatMbLimit(MAX_VIDEO_FILE_BYTES)}).`
       );
       return;
     }
@@ -171,11 +181,21 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
     try {
       const dataUrl = await readFileAsDataUrl(file);
       updateBlock(moduleId, block.id, isImage ? { image_url: dataUrl } : { video_url: dataUrl });
-    } catch {
-      setUploadError(block.id, 'Uppladdningen misslyckades. Försök igen.');
+    } catch (err) {
+      const details = err instanceof Error && err.message ? `: ${err.message}` : '';
+      setUploadError(block.id, `Uppladdningen misslyckades${details}`);
     } finally {
       setUploading(block.id, false);
     }
+  };
+
+  const handleMediaInputChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    moduleId: string,
+    block: WorkshopBlock
+  ) => {
+    void handleMediaUpload(moduleId, block, e.target.files?.[0] ?? null);
+    e.target.value = '';
   };
 
   // ── Option operations (for test blocks) ──────────────────────────────────
@@ -423,25 +443,31 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                             className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-default bg-surface px-4 py-4 text-center text-xs text-foreground-muted transition hover:border-brand hover:bg-canvas-subtle"
                           >
                             <span>Dra och släpp video här</span>
-                            <span className="text-foreground-subtle">eller klicka för att välja fil (max 100 MB)</span>
+                            <span className="text-foreground-subtle">
+                              eller klicka för att välja fil (max {formatMbLimit(MAX_VIDEO_FILE_BYTES)})
+                            </span>
                             <input
                               type="file"
                               accept="video/*"
                               className="hidden"
-                              onChange={(e) => {
-                                void handleMediaUpload(mod.id, block, e.target.files?.[0] ?? null);
-                                e.target.value = '';
-                              }}
+                              onChange={(e) => handleMediaInputChange(e, mod.id, block)}
                             />
                           </label>
                           {block.video_url ? (
-                            <video controls src={block.video_url} className="max-h-72 w-full rounded-xl border border-default" />
+                            <video
+                              controls
+                              src={block.video_url}
+                              aria-label={`Förhandsvisning av video för blocket ${mediaLabel(block.title, 'Video utan titel')}`}
+                              className="max-h-72 w-full rounded-xl border border-default"
+                            />
                           ) : null}
                           {uploadingByBlockId[block.id] ? (
                             <p className="text-xs text-foreground-subtle">Laddar upp video…</p>
                           ) : null}
                           {uploadErrorByBlockId[block.id] ? (
-                            <p className="text-xs text-movexum-morkorange">{uploadErrorByBlockId[block.id]}</p>
+                            <p role="alert" aria-live="assertive" className="text-xs text-movexum-morkorange">
+                              {uploadErrorByBlockId[block.id]}
+                            </p>
                           ) : null}
                         </div>
                       )}
@@ -459,21 +485,20 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                             className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-default bg-surface px-4 py-4 text-center text-xs text-foreground-muted transition hover:border-brand hover:bg-canvas-subtle"
                           >
                             <span>Dra och släpp bild här</span>
-                            <span className="text-foreground-subtle">eller klicka för att välja fil (max 10 MB)</span>
+                            <span className="text-foreground-subtle">
+                              eller klicka för att välja fil (max {formatMbLimit(MAX_IMAGE_FILE_BYTES)})
+                            </span>
                             <input
                               type="file"
                               accept="image/*"
                               className="hidden"
-                              onChange={(e) => {
-                                void handleMediaUpload(mod.id, block, e.target.files?.[0] ?? null);
-                                e.target.value = '';
-                              }}
+                              onChange={(e) => handleMediaInputChange(e, mod.id, block)}
                             />
                           </label>
                           {block.image_url ? (
                             <img
                               src={block.image_url}
-                              alt={block.title || 'Uppladdad bild'}
+                              alt={mediaLabel(block.title, 'Bild utan beskrivning')}
                               className="max-h-72 max-w-full rounded-xl border border-default object-contain"
                             />
                           ) : null}
@@ -481,7 +506,9 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                             <p className="text-xs text-foreground-subtle">Laddar upp bild…</p>
                           ) : null}
                           {uploadErrorByBlockId[block.id] ? (
-                            <p className="text-xs text-movexum-morkorange">{uploadErrorByBlockId[block.id]}</p>
+                            <p role="alert" aria-live="assertive" className="text-xs text-movexum-morkorange">
+                              {uploadErrorByBlockId[block.id]}
+                            </p>
                           ) : null}
                         </div>
                       )}
