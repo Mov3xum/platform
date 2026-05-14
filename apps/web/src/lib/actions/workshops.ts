@@ -110,7 +110,7 @@ export async function createWorkshopAction(
   const audienceRoles = formData.getAll('audience_roles').map(String);
   const active = formData.get('active') === 'on';
 
-  if (!key || !title) return { error: 'Nyckel och titel är obligatoriska.' };
+  if (!key || !title) return { error: 'Unikt ID och titel är obligatoriska.' };
 
   let modules: WorkshopModule[] = [];
   let contentBlocks: WorkshopBlock[] = [];

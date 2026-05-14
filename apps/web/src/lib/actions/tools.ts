@@ -230,7 +230,7 @@ export async function createToolAction(
   };
 
   if (!data.key || !data.name || !data.category) {
-    return { error: 'Nyckel, namn och kategori är obligatoriska.' };
+    return { error: 'Unikt ID, namn och kategori är obligatoriska.' };
   }
 
   try {
