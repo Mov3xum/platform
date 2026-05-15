@@ -60,17 +60,39 @@ function normalizeSelectFields(fields, context = 'collection') {
 }
 
 async function ensureCollection(definition) {
+  const normalizedDefinition = {
+    ...definition,
+    fields: normalizeSelectFields(definition.fields, definition.name)
+  };
+
   try {
-    await pb.collections.getOne(definition.name);
+    const existing = await pb.collections.getOne(definition.name);
+    const desiredRules = {
+      listRule: normalizedDefinition.listRule ?? null,
+      viewRule: normalizedDefinition.viewRule ?? null,
+      createRule: normalizedDefinition.createRule ?? null,
+      updateRule: normalizedDefinition.updateRule ?? null,
+      deleteRule: normalizedDefinition.deleteRule ?? null
+    };
+    const needsRuleSync =
+      (existing.listRule ?? null) !== desiredRules.listRule ||
+      (existing.viewRule ?? null) !== desiredRules.viewRule ||
+      (existing.createRule ?? null) !== desiredRules.createRule ||
+      (existing.updateRule ?? null) !== desiredRules.updateRule ||
+      (existing.deleteRule ?? null) !== desiredRules.deleteRule;
+
+    if (needsRuleSync) {
+      await pb.collections.update(definition.name, desiredRules);
+      ok(`collection "${definition.name}" finns redan — regler synkade`);
+      return;
+    }
+
     warn(`collection "${definition.name}" finns redan — hoppar över`);
     return;
   } catch (e) {
     if (e?.status !== 404) throw e;
   }
-  const normalizedDefinition = {
-    ...definition,
-    fields: normalizeSelectFields(definition.fields, definition.name)
-  };
+
   await pb.collections.create(normalizedDefinition);
   ok(`collection "${definition.name}" skapad`);
 }
@@ -187,8 +209,8 @@ async function ensureAppUser(tenantId) {
 // Common rule expressions
 // ----------------------------------------------------------------------------
 const ANY_AUTH = '@request.auth.id != ""';
-const TENANT_DIRECT = '@request.auth.tenant = tenant';
-const TENANT_VIA_STARTUP = '@request.auth.tenant = startup.tenant';
+const TENANT_DIRECT = '(@request.auth.tenant = tenant || @request.auth.tenant ?= tenant)';
+const TENANT_VIA_STARTUP = '(@request.auth.tenant = startup.tenant || @request.auth.tenant ?= startup.tenant)';
 const STAFF_ROLES =
   '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach")';
 const STAFF_OR_LEAD =
