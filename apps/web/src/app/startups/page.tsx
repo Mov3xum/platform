@@ -149,7 +149,7 @@ function StartupCard({ startup }: { startup: StartupRecord }) {
       className="group flex flex-col rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5 transition hover:border-strong hover:shadow-md"
     >
       <div className="mb-3 flex items-start justify-between gap-3">
-        <h2 className="text-lg font-semibold text-foreground">
+        <h2 className="text-lg font-semibold text-foreground transition group-hover:text-link">
           {startup.name}
         </h2>
       </div>
