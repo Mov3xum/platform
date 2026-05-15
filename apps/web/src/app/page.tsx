@@ -20,10 +20,10 @@ export default function Home() {
               </div>
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                 <a
-                  href="/dashboard"
+                  href="/idag"
                   className="inline-flex items-center justify-center rounded-full bg-brand px-6 py-3 text-sm font-semibold text-brand-foreground shadow-lg shadow-movexum-lila/20 transition hover:bg-brand-hover"
                 >
-                  Öppna dashboard
+                  Öppna Movexum OS
                 </a>
                 <a
                   href="/startups"

@@ -19,6 +19,8 @@ export default async function EditToolPage({ params }: { params: Promise<{ id: s
 
   if (tool.tenant !== user.tenant) notFound();
 
+  const canEditPrompt = hasRole(user.roles, ['admin']);
+
   return (
     <main className="mx-auto max-w-3xl px-6 py-10 lg:px-8">
       <div className="mb-6">
@@ -29,7 +31,14 @@ export default async function EditToolPage({ params }: { params: Promise<{ id: s
       <h1 className="mb-8 text-3xl font-semibold tracking-tight text-foreground">
         Redigera verktyg
       </h1>
-      <ToolForm mode="edit" tool={tool} />
+      {!canEditPrompt && (
+        <div className="mb-6 rounded-2xl border border-default bg-movexum-pastell-lila p-4 text-sm text-movexum-morklila dark:bg-movexum-morklila/20 dark:text-movexum-ljuslila">
+          <strong>OBS:</strong> Systemprompt och modellval styrs av admin och är låsta för
+          incubator-lead-/coach-roller. Du kan ändra namn, beskrivning, kategori, roller och
+          aktiveringsstatus.
+        </div>
+      )}
+      <ToolForm mode="edit" tool={tool} canEditPrompt={canEditPrompt} />
     </main>
   );
 }

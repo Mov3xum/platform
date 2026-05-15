@@ -37,9 +37,15 @@ const ALL_ROLES: Array<{ value: Role; label: string }> = [
 interface ToolFormProps {
   mode: 'create' | 'edit';
   tool?: Tool;
+  /**
+   * Endast admin får redigera systemprompt och modellval. Om false renderas
+   * fälten som readonly (eller döljs på create) — defense-in-depth ihop med
+   * server-side guards i actions/tools.ts.
+   */
+  canEditPrompt?: boolean;
 }
 
-export function ToolForm({ mode, tool }: ToolFormProps) {
+export function ToolForm({ mode, tool, canEditPrompt = false }: ToolFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -145,12 +151,18 @@ export function ToolForm({ mode, tool }: ToolFormProps) {
       <div>
         <label htmlFor="model" className={labelClass}>
           AI-modell (lämna tomt för icke-AI-verktyg)
+          {!canEditPrompt && (
+            <span className="ml-2 inline-block rounded-full bg-movexum-pastell-lila px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-movexum-lila dark:bg-movexum-morklila/40 dark:text-movexum-ljuslila">
+              Endast admin
+            </span>
+          )}
         </label>
         <select
           id="model"
           name="model"
           defaultValue={tool?.model ?? ''}
-          className={`mt-1 ${inputClass}`}
+          disabled={!canEditPrompt}
+          className={`mt-1 ${inputClass} ${!canEditPrompt ? 'cursor-not-allowed opacity-60' : ''}`}
         >
           <option value="">-- Ingen (icke-AI) --</option>
           {MODELS.map((m) => (
@@ -195,20 +207,39 @@ export function ToolForm({ mode, tool }: ToolFormProps) {
 
       <div>
         <label htmlFor="prompt_template" className={labelClass}>
-          Promptmall / Statiskt innehåll
+          Systemprompt / Statiskt innehåll
+          {!canEditPrompt && (
+            <span className="ml-2 inline-block rounded-full bg-movexum-pastell-lila px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-movexum-lila dark:bg-movexum-morklila/40 dark:text-movexum-ljuslila">
+              Endast admin
+            </span>
+          )}
         </label>
         <textarea
           id="prompt_template"
           name="prompt_template"
           rows={8}
           defaultValue={tool?.prompt_template}
-          placeholder="Skriv promptmallen här. Använd {{startup.name}}, {{milestones}}, {{portfolio}} etc. för substitution."
-          className={`mt-1 font-mono text-xs ${inputClass}`}
+          readOnly={!canEditPrompt}
+          placeholder={
+            canEditPrompt
+              ? 'Skriv systempromptmallen här. Använd {{startup.name}}, {{milestones}}, {{portfolio}} etc. för substitution.'
+              : 'Endast admin kan redigera systemprompt.'
+          }
+          className={`mt-1 font-mono text-xs ${inputClass} ${!canEditPrompt ? 'cursor-not-allowed bg-canvas-subtle opacity-70' : ''}`}
         />
         <p className="mt-1 text-xs text-foreground-subtle">
-          Placeholders: <code>{'{{startup}}'}</code>, <code>{'{{milestones}}'}</code>,{' '}
-          <code>{'{{activities}}'}</code>, <code>{'{{notes}}'}</code>,{' '}
-          <code>{'{{portfolio}}'}</code>
+          {canEditPrompt ? (
+            <>
+              Placeholders: <code>{'{{startup}}'}</code>, <code>{'{{milestones}}'}</code>,{' '}
+              <code>{'{{activities}}'}</code>, <code>{'{{notes}}'}</code>,{' '}
+              <code>{'{{portfolio}}'}</code>
+            </>
+          ) : (
+            <>
+              Systemprompten styr hur AI-agenten beter sig och kan endast ändras av admin för att
+              skydda mot prompt injection och bevara modellbeteendet.
+            </>
+          )}
         </p>
       </div>
 
