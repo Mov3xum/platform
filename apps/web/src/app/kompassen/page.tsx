@@ -78,7 +78,10 @@ export default async function KompassenPage({
   let startups: StartupWithSprint[] = [];
   try {
     const sRes = await pb.collection('startups').getList<StartupWithSprint>(1, 100, {
-      filter: `tenant = "${user.tenant}" && status = "active"`,
+      filter: pb.filter('tenant = {:tenant} && status = {:status}', {
+        tenant: user.tenant,
+        status: 'active'
+      }),
       sort: 'name'
     });
     startups = sRes.items;

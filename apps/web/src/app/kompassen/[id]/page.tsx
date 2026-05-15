@@ -111,7 +111,10 @@ export default async function KompassenStartupPage({
     const res = await pb
       .collection(PB_COLLECTIONS.sprintXCheckins)
       .getList<SprintXCheckin>(1, 50, {
-        filter: `tenant = "${user.tenant}" && startup = "${id}"`,
+        filter: pb.filter('tenant = {:tenant} && startup = {:startup}', {
+          tenant: user.tenant,
+          startup: id
+        }),
         sort: '-created',
         expand: 'logged_by'
       });

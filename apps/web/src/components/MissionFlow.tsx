@@ -232,9 +232,7 @@ export function MissionFlow({ mission, currentUserId, canAdvance }: {
                     <Icon name="external" size={12} />
                   </a>
                 ) : (
-                  <button className="mx-btn mx-sm mx-ghost" disabled>
-                    <Icon name="download" size={12} />
-                  </button>
+                  <span className="mx-mono mx-t-xs mx-muted">Ingen länk</span>
                 )}
               </div>
             ))}
@@ -277,13 +275,8 @@ export function MissionFlow({ mission, currentUserId, canAdvance }: {
           <div className="mx-t-13 mx-fw-6 mx-mb-2" style={{ color: '#0e3b44' }}>
             Uppdraget är försenat. Skicka påminnelse till mottagarna eller flytta deadline?
           </div>
-          <div className="mx-flex mx-gap-2">
-            <button className="mx-btn mx-primary mx-sm" disabled>
-              Skicka påminnelse
-            </button>
-            <button className="mx-btn mx-sm" disabled>
-              Avvisa
-            </button>
+          <div className="mx-muted mx-t-13">
+            Uppdatera deadline eller status nedan för att få uppdraget tillbaka i plan.
           </div>
         </div>
       )}

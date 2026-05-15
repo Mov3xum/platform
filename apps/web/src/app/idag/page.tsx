@@ -68,7 +68,10 @@ export default async function IdagPage() {
 
   try {
     const sRes = await pb.collection('startups').getList<StartupWithSprint>(1, 50, {
-      filter: `tenant = "${user.tenant}" && status = "active"`,
+      filter: pb.filter('tenant = {:tenant} && status = {:status}', {
+        tenant: user.tenant,
+        status: 'active'
+      }),
       sort: '-created'
     });
     startups = sRes.items;
@@ -79,7 +82,11 @@ export default async function IdagPage() {
 
   try {
     const mRes = await pb.collection(PB_COLLECTIONS.missions).getList<Mission>(1, 6, {
-      filter: `tenant = "${user.tenant}" && status != "done" && status != "archived"`,
+      filter: pb.filter('tenant = {:tenant} && status != {:done} && status != {:archived}', {
+        tenant: user.tenant,
+        done: 'done',
+        archived: 'archived'
+      }),
       sort: '-updated',
       expand: 'issuer,recipients,startup'
     });
@@ -93,7 +100,10 @@ export default async function IdagPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const r = await pb.collection('tool_runs').getList(1, 1, {
-      filter: `tenant = "${user.tenant}" && created >= "${today.toISOString()}"`,
+      filter: pb.filter('tenant = {:tenant} && created >= {:createdFrom}', {
+        tenant: user.tenant,
+        createdFrom: today.toISOString()
+      }),
       fields: 'id'
     });
     toolRunsToday = r.totalItems;
@@ -103,7 +113,10 @@ export default async function IdagPage() {
 
   try {
     const rRes = await pb.collection(PB_COLLECTIONS.reports).getList<IncubatorReport>(1, 1, {
-      filter: `tenant = "${user.tenant}" && status = "draft_ai"`,
+      filter: pb.filter('tenant = {:tenant} && status = {:status}', {
+        tenant: user.tenant,
+        status: 'draft_ai'
+      }),
       sort: '-updated'
     });
     report = rRes.items[0] || null;
@@ -113,7 +126,7 @@ export default async function IdagPage() {
 
   try {
     const runRes = await pb.collection('tool_runs').getList<ToolRun>(1, 6, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: pb.filter('tenant = {:tenant}', { tenant: user.tenant }),
       sort: '-created',
       expand: 'tool,startup'
     });
@@ -126,7 +139,11 @@ export default async function IdagPage() {
     const evRes = await pb
       .collection(PB_COLLECTIONS.events)
       .getList<IncubatorEvent>(1, 4, {
-        filter: `tenant = "${user.tenant}" && (status = "planned" || status = "live")`,
+        filter: pb.filter('tenant = {:tenant} && (status = {:planned} || status = {:live})', {
+          tenant: user.tenant,
+          planned: 'planned',
+          live: 'live'
+        }),
         sort: 'starts_at'
       });
     upcomingEvents = evRes.items;
@@ -136,25 +153,18 @@ export default async function IdagPage() {
 
   const firstName = user.name.split(' ')[0] || user.email;
   const today = new Date();
+  const aiDraftCount = report ? 1 : 0;
 
   return (
     <div className="mx-view-pad">
       <PageHead
         crumb="Hemmaplan / Idag"
         title={`${greeting()}, ${firstName}.`}
-        subtitle={`${fmtDate(today)}. ${activeMissionsCount} aktiva uppdrag och AI har förberett ${report ? '2' : '1'} utkast.`}
+        subtitle={`${fmtDate(today)}. ${activeMissionsCount} aktiva uppdrag och AI har förberett ${aiDraftCount} utkast.`}
         actions={
-          <>
-            <button className="mx-btn">
-              <Icon name="filter" size={13} /> Filter
-            </button>
-            <button className="mx-btn">
-              <Icon name="calendar" size={13} /> Vecka
-            </button>
-            <Link href="/uppdrag" className="mx-btn mx-primary">
-              <Icon name="plus" size={13} /> Nytt uppdrag
-            </Link>
-          </>
+          <Link href="/uppdrag" className="mx-btn mx-primary">
+            <Icon name="plus" size={13} /> Nytt uppdrag
+          </Link>
         }
       />
 
