@@ -467,7 +467,7 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
                         <p className="rounded-xl bg-movexum-pastell-orange px-3 py-2 text-sm text-movexum-morkorange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange">
                           ↩ Returnerad av coach – revidera och skicka på nytt.
                         </p>
-                        {Boolean(artifacts.coach_notes) ? (
+                        {artifacts.coach_notes ? (
                           <div className="rounded-2xl border border-default bg-canvas-subtle/60 p-4">
                             <p className="mb-1 text-xs font-medium text-foreground-subtle">Coach-anteckningar</p>
                             <p className="text-sm text-foreground-muted">{String(artifacts.coach_notes)}</p>
