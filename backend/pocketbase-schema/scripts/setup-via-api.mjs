@@ -16,6 +16,7 @@
  *   PB_URL='https://your-pb-domain' \
  *   PB_SU_EMAIL='hampus@movexum.se' \
  *   PB_SU_PASSWORD='<your superuser password>' \
+ *   # Optional when app-user already exists:
  *   APP_USER_PASSWORD='<password for app login (required only if user is missing)>' \
  *   node backend/pocketbase-schema/scripts/setup-via-api.mjs
  *
