@@ -137,94 +137,19 @@ html.dark {
 .mx-rail-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px 16px;
+  justify-content: center;
+  padding: 18px 16px;
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
-.mx-rail-logo {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: white;
-  display: grid;
-  place-items: center;
-  font-family: var(--mx-display);
-  font-weight: 600;
-  font-size: 15px;
-  color: #002c40;
-  letter-spacing: -.5px;
-  flex-shrink: 0;
-}
-
-.mx-rail-wordmark {
-  font-family: var(--mx-display);
-  font-weight: 500;
-  font-size: 16px;
-  color: white;
-  letter-spacing: -.3px;
-  line-height: 1.1;
-}
-
-.mx-rail-wordmark small {
+.mx-rail-brand img {
   display: block;
-  font-family: var(--mx-mono);
-  font-size: 9px;
-  font-weight: 500;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: rgba(255,255,255,.4);
-  margin-top: 2px;
-}
-
-.mx-rail-tenant {
-  margin: 12px 12px 8px;
-  padding: 10px 12px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.mx-rail-tenant .mx-ten-av {
-  width: 26px; height: 26px;
-  border-radius: 8px;
-  background: #00a8de; /* Movexum blå */
-  color: white;
-  display: grid; place-items: center;
-  font-family: var(--mx-display);
-  font-weight: 600;
-  font-size: 11px;
-  flex-shrink: 0;
-}
-
-.mx-rail-tenant .mx-ten-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: white;
-  display: block;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mx-rail-tenant .mx-ten-sub {
-  font-family: var(--mx-mono);
-  font-size: 9px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: rgba(255,255,255,.45);
-  display: block;
-  margin-top: 2px;
 }
 
 .mx-rail-nav {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 8px 12px;
+  padding: 8px 8px 12px;
   scrollbar-width: none;
 }
 
@@ -417,48 +342,6 @@ html.dark {
   border-radius: 4px;
   color: var(--mx-ink-soft);
 }
-
-.mx-save-indicator {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--mx-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--mx-muted);
-}
-
-.mx-save-indicator .mx-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--mx-st-active);
-}
-
-.mx-role-pill {
-  background: var(--mx-paper);
-  border: 1px solid var(--mx-line);
-  color: var(--mx-ink);
-  padding: 4px 10px 4px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  font-family: var(--mx-mono);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.mx-role-pill .mx-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: #00a8de;
-}
-
-.mx-role-pill:hover { border-color: var(--mx-ink-3); }
 
 .mx-icon-btn {
   width: 32px; height: 32px;

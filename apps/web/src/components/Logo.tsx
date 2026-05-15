@@ -13,31 +13,63 @@ type LogoProps = {
   className?: string;
   width?: number;
   height?: number;
+  variant?: 'auto' | 'light' | 'dark' | 'flex';
 };
 
-export function Logo({ href = '/', className = '', width = 140, height = 32 }: LogoProps) {
+export function Logo({
+  href = '/',
+  className = '',
+  width = 140,
+  height = 32,
+  variant = 'auto'
+}: LogoProps) {
   return (
     <Link
       href={href}
       aria-label="Movexum – startsida"
       className={'inline-flex items-center ' + className}
     >
-      {/* Light mode: svart wordmark */}
-      <img
-        src="/brand/movexum-wordmark-light.svg"
-        alt="Movexum"
-        width={width}
-        height={height}
-        className="block dark:hidden"
-      />
-      {/* Dark mode: vit wordmark */}
-      <img
-        src="/brand/movexum-wordmark-dark.svg"
-        alt="Movexum"
-        width={width}
-        height={height}
-        className="hidden dark:block"
-      />
+      {variant === 'auto' ? (
+        <>
+          {/* Light mode: svart wordmark */}
+          <img
+            src="/brand/movexum-wordmark-light.svg"
+            alt="Movexum"
+            width={width}
+            height={height}
+            className="block dark:hidden"
+          />
+          {/* Dark mode: vit wordmark */}
+          <img
+            src="/brand/movexum-wordmark-dark.svg"
+            alt="Movexum"
+            width={width}
+            height={height}
+            className="hidden dark:block"
+          />
+        </>
+      ) : variant === 'light' ? (
+        <img
+          src="/brand/movexum-wordmark-light.svg"
+          alt="Movexum"
+          width={width}
+          height={height}
+        />
+      ) : variant === 'dark' ? (
+        <img
+          src="/brand/movexum-wordmark-dark.svg"
+          alt="Movexum"
+          width={width}
+          height={height}
+        />
+      ) : (
+        <img
+          src="/brand/movexum-wordmark.svg"
+          alt="Movexum"
+          width={width}
+          height={height}
+        />
+      )}
     </Link>
   );
 }

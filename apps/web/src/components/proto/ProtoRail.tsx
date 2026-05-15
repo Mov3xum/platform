@@ -3,6 +3,7 @@ import { Icon } from './Icon';
 import { coreModules, RAIL_GROUPS, type Role } from '@platform/shared';
 import { canAccessModule } from '@/lib/rbac';
 import { ModuleNavItem } from './ModuleNavItem';
+import { Logo } from '@/components/Logo';
 
 const moduleIcons: Record<string, string> = {
   idag: 'home',
@@ -27,15 +28,10 @@ interface ProtoRailProps {
     avatarUrl?: string;
     roles: Role[];
   };
-  tenant: {
-    short: string;
-    name: string;
-    region?: string;
-  };
   counts?: Record<string, number>;
 }
 
-export function ProtoRail({ user, tenant, counts = {} }: ProtoRailProps) {
+export function ProtoRail({ user, counts = {} }: ProtoRailProps) {
   const initial =
     (user.name || user.email)
       .split(' ')
@@ -47,20 +43,13 @@ export function ProtoRail({ user, tenant, counts = {} }: ProtoRailProps) {
   return (
     <aside className="mx-rail">
       <div className="mx-rail-head">
-        <div className="mx-rail-logo">M</div>
-        <div className="mx-rail-wordmark">
-          movexum
-          <small>OS · v0.4</small>
-        </div>
-      </div>
-
-      <div className="mx-rail-tenant" title="Tenant">
-        <div className="mx-ten-av">{tenant.short}</div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <span className="mx-ten-name">{tenant.name}</span>
-          {tenant.region && <span className="mx-ten-sub">{tenant.region}</span>}
-        </div>
-        <Icon name="chevdown" size={12} style={{ marginLeft: 'auto', opacity: 0.4 }} />
+        <Logo
+          href="/idag"
+          variant="dark"
+          width={168}
+          height={40}
+          className="mx-rail-brand"
+        />
       </div>
 
       <nav className="mx-rail-nav">
