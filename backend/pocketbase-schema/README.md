@@ -22,6 +22,17 @@ PocketBase-data (SQLite) skrivs till `/pb_data` i containern. **Endast** `/pb_da
    - `POCKETBASE_ENCRYPTION_KEY` — valfritt, krypterar känsliga PB-fält
 6. **Redeploy** → migrationerna körs automatiskt → schema + Movexum-tenant + (om secret är satt) Hampus app-admin skapas
 
+### Staging via GitHub Actions
+
+Workflowen `.github/workflows/deploy.yml` kör nu även en idempotent PocketBase-bootstrap efter staging-deploy för att säkerställa att workshops- och toolbox-collections finns.
+
+Sätt följande repo-secrets för staging:
+
+- `PB_URL_STAGING` (fallback: `PB_URL`)
+- `PB_SU_PASSWORD_STAGING` (fallback: `PB_SU_PASSWORD`)
+- `PB_SU_EMAIL_STAGING` (valfritt, default `hampus@movexum.se`)
+- `APP_USER_PASSWORD_STAGING` (valfritt om app-user redan finns)
+
 Koden i web-appen behöver `NEXT_PUBLIC_POCKETBASE_URL` pekande på PB:s publika domän.
 
 ## Datamodell
@@ -116,7 +127,7 @@ Kräver att du har en PocketBase superuser (`_superusers`-rad) — den skapas vi
 PB_URL='https://pocketbase-r10nkich8dkune7s0flczb89.212.147.227.223.sslip.io' \
 PB_SU_EMAIL='hampus@movexum.se' \
 PB_SU_PASSWORD='<ditt PB-superuser-lösen>' \
-APP_USER_PASSWORD='<lösen för login i webappen>' \
+APP_USER_PASSWORD='<lösen för login i webappen (krävs bara om app-user saknas)>' \
 node backend/pocketbase-schema/scripts/setup-via-api.mjs
 ```
 
