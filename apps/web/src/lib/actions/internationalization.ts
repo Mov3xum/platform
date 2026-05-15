@@ -647,12 +647,15 @@ export async function runQuarterlyRecalibrationAction(
 
   // Determine quarter number from existing revisions
   let quarterNumber = 1;
-  const escapedStrategyId = strategyId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const revisionsFilter = pb.filter(
+    'strategy = {:strategyId} && revision_type = {:revisionType}',
+    { strategyId, revisionType: 'quarterly' }
+  );
   try {
     const revisions = await pb
       .collection(PB_COLLECTIONS.strategyRevisions)
       .getList<StrategyRevision & Record<string, unknown>>(1, 100, {
-        filter: `strategy = "${escapedStrategyId}" && revision_type = "quarterly"`,
+        filter: revisionsFilter,
         sort: '-quarter_number'
       });
     if (revisions.items.length > 0) {
