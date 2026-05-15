@@ -11,6 +11,8 @@ const BLOCK_TYPES: { type: WorkshopBlockType; label: string; emoji: string }[] =
   { type: 'image', label: 'Bild', emoji: '🖼️' },
   { type: 'ai_chat', label: 'AI-chatt', emoji: '🤖' },
   { type: 'ai_pipeline', label: 'AI-pipeline', emoji: '🧠' },
+  { type: 'coach_review', label: 'Coach-granskning', emoji: '🎓' },
+  { type: 'commit_document', label: 'Commit dokument', emoji: '📌' },
   { type: 'test', label: 'Test/Quiz', emoji: '📝' },
   { type: 'summary', label: 'Sammanfattning', emoji: '📊' }
 ];

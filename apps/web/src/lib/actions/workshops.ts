@@ -733,3 +733,164 @@ export async function runPipelineBlockAction(
     return { error: err instanceof Error ? err.message : 'Pipeline-anropet misslyckades.' };
   }
 }
+
+// ── Generic coach review + commit flow ────────────────────────────────────────
+// Works for ANY workshop that has coach_review and commit_document block types.
+// Internationalisering, hållbarhet, finansiering – same framework, different content.
+
+export async function submitForCoachReviewAction(
+  assignmentId: string
+): Promise<WorkshopActionState> {
+  const loaded = await loadAssignmentWithAccessCheck(assignmentId);
+  if ('error' in loaded) return { error: loaded.error };
+  const { pb, user, assignment } = loaded;
+
+  const artifacts = (assignment.artifacts_json as Record<string, unknown>) || {};
+  const now = new Date().toISOString();
+  await pb.collection(PB_COLLECTIONS.workshopAssignments).update(assignmentId, {
+    artifacts_json: { ...artifacts, coach_review_submitted_at: now, coach_decision: null },
+    status: assignment.status === 'planned' ? 'in_progress' : assignment.status,
+    last_saved_at: now
+  });
+
+  const workshop = assignment.expand?.workshop as Workshop | undefined;
+  await pb.collection('activities').create({
+    startup: assignment.startup,
+    type: 'workshop',
+    title: `${workshop?.title ?? 'Workshop'} – skickad till coach`,
+    status: 'in_progress',
+    kind: 'workshop_assignment',
+    workshop: assignment.workshop,
+    workshop_assignment: assignment.id,
+    owner: user.id,
+    due_date: now.slice(0, 10)
+  });
+
+  revalidatePath(`/education/assignments/${assignmentId}`);
+  return { assignmentId };
+}
+
+export async function coachReviewDecisionAction(
+  assignmentId: string,
+  decision: 'approved' | 'returned',
+  coachNotes: string
+): Promise<WorkshopActionState> {
+  const loaded = await loadAssignmentWithAccessCheck(assignmentId);
+  if ('error' in loaded) return { error: loaded.error };
+  const { pb, user, assignment } = loaded;
+
+  if (!hasRole(user.roles, STAFF_ROLES)) {
+    return { error: 'Bara coach eller incubator-personal kan granska.' };
+  }
+
+  const artifacts = (assignment.artifacts_json as Record<string, unknown>) || {};
+  const now = new Date().toISOString();
+  await pb.collection(PB_COLLECTIONS.workshopAssignments).update(assignmentId, {
+    artifacts_json: {
+      ...artifacts,
+      coach_decision: decision,
+      coach_notes: coachNotes.trim().slice(0, 4000),
+      coach_reviewed_by: user.id,
+      coach_reviewed_at: now
+    },
+    last_saved_at: now
+  });
+
+  revalidatePath(`/education/assignments/${assignmentId}`);
+  return { assignmentId };
+}
+
+export async function commitWorkshopDocumentAction(
+  assignmentId: string
+): Promise<WorkshopActionState & { documentUrl?: string }> {
+  const loaded = await loadAssignmentWithAccessCheck(assignmentId);
+  if ('error' in loaded) return { error: loaded.error };
+  const { pb, user, assignment } = loaded;
+
+  const artifacts = (assignment.artifacts_json as Record<string, unknown>) || {};
+  const answers = (assignment.answers_json as Record<string, unknown>) || {};
+  const workshop = assignment.expand?.workshop as Workshop | undefined;
+  const now = new Date().toISOString();
+  let documentUrl = `/education/assignments/${assignmentId}`;
+  let strategyId: string | undefined;
+
+  // Workshop-key-based document type.
+  // Add new cases here when new document-producing workshops are built.
+  // Default: the assignment itself is the document.
+  if (workshop?.key === 'intl_strategy_18m') {
+    const modules = Array.isArray(workshop.modules) ? (workshop.modules as WorkshopModule[]) : [];
+    const diagnosticOutput = String(artifacts.diagnostic_output ?? '');
+    const scenariosOutput = String(artifacts.scenarios_output ?? '');
+    const chosenScenario = String(answers.da_chosen_scenario ?? '').toLowerCase();
+    const band = chosenScenario.includes('execution')
+      ? 'execution'
+      : chosenScenario.includes('discovery')
+        ? 'discovery'
+        : 'wait';
+
+    const milestonesMatch = scenariosOutput.match(/Kvartalsmilstolpar[\s\S]*?(?=###|Kill criteria|$)/i);
+    const killMatch = scenariosOutput.match(/Kill criteria[\s\S]*?(?=---|\n##|$)/i);
+    const sanitize = (s: string) => s.replace(/[<>]/g, '').slice(0, 200);
+    const startupName = sanitize(assignment.expand?.startup?.name ?? 'Startup');
+
+    const rec = await pb.collection(PB_COLLECTIONS.strategies).create({
+      tenant: user.tenant,
+      startup: assignment.startup,
+      workshop_assignment: assignment.id,
+      status: 'committed',
+      recommended_band: band,
+      position_assessment: diagnosticOutput.slice(0, 8000),
+      recommendation: scenariosOutput.slice(0, 8000),
+      reasoning: String(artifacts.devils_advocate_output ?? '').slice(0, 8000),
+      quarterly_milestones: milestonesMatch ? milestonesMatch[0].trim().slice(0, 4000) : '',
+      kill_criteria: killMatch ? killMatch[0].trim().slice(0, 2000) : '',
+      scenarios_json: {
+        raw_output: scenariosOutput,
+        chosen: answers.da_chosen_scenario,
+        da_response: String(answers.da_response ?? ''),
+        modules_snapshot: modules.map((m) => m.title)
+      },
+      committed_at: now,
+      next_recalibration_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      gdpr_legal_basis: 'legitimate_interest'
+    });
+    strategyId = String(rec.id);
+    documentUrl = `/education/strategies/${strategyId}`;
+
+    await pb.collection(PB_COLLECTIONS.strategyRevisions).create({
+      tenant: user.tenant,
+      strategy: strategyId,
+      startup: assignment.startup,
+      revision_type: 'initial',
+      snapshot_json: { band, committed_at: now },
+      change_summary: `Initialt commit av ${startupName}`,
+      triggered_by: user.id,
+      quarter_number: 1
+    });
+  }
+
+  await pb.collection(PB_COLLECTIONS.workshopAssignments).update(assignmentId, {
+    artifacts_json: {
+      ...artifacts,
+      committed_at: now,
+      document_url: documentUrl,
+      ...(strategyId ? { strategy_id: strategyId } : {})
+    },
+    status: 'done',
+    completed_at: now,
+    last_saved_at: now
+  });
+
+  if (assignment.activity) {
+    await pb.collection('activities').update(String(assignment.activity), {
+      status: 'done',
+      title: `${workshop?.title ?? 'Workshop'} – committad`,
+      completed_at: now
+    });
+  }
+
+  revalidatePath(`/education/assignments/${assignmentId}`);
+  revalidatePath('/education');
+  if (assignment.startup) revalidatePath(`/startups/${assignment.startup}`);
+  return { assignmentId, documentUrl };
+}

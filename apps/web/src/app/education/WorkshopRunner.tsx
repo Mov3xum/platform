@@ -5,16 +5,20 @@ import {
   completeWorkshopAction,
   runPipelineBlockAction,
   runWorkshopAiChatAction,
-  saveWorkshopProgressAction
+  saveWorkshopProgressAction,
+  submitForCoachReviewAction,
+  coachReviewDecisionAction,
+  commitWorkshopDocumentAction
 } from '@/lib/actions/workshops';
 import type { WorkshopAssignment, WorkshopModule } from '@platform/shared';
 
 interface WorkshopRunnerProps {
   assignment: WorkshopAssignment;
   modules: WorkshopModule[];
+  isStaff?: boolean;
 }
 
-export function WorkshopRunner({ assignment, modules }: WorkshopRunnerProps) {
+export function WorkshopRunner({ assignment, modules, isStaff = false }: WorkshopRunnerProps) {
   const [answers, setAnswers] = useState<Record<string, unknown>>(
     (assignment.answers_json as Record<string, unknown>) || {}
   );
@@ -28,13 +32,28 @@ export function WorkshopRunner({ assignment, modules }: WorkshopRunnerProps) {
   );
   const [pendingPipelineBlockId, setPendingPipelineBlockId] = useState<string | null>(null);
   const [pipelineOutputs, setPipelineOutputs] = useState<Record<string, string>>(
-    // Pre-populate from existing artifacts
     Object.fromEntries(
       Object.entries((assignment.artifacts_json as Record<string, unknown>) || {})
         .filter(([, v]) => typeof v === 'string')
         .map(([k, v]) => [k, v as string])
     )
   );
+
+  // Coach review + commit state (for coach_review / commit_document block types)
+  const initArtifacts = (assignment.artifacts_json as Record<string, unknown>) || {};
+  const [coachReviewSubmitted, setCoachReviewSubmitted] = useState(
+    Boolean(initArtifacts.coach_review_submitted_at)
+  );
+  const [coachDecision, setCoachDecision] = useState<'approved' | 'returned' | null>(
+    (initArtifacts.coach_decision as 'approved' | 'returned' | null) ?? null
+  );
+  const [coachNotesInput, setCoachNotesInput] = useState('');
+  const [documentUrl, setDocumentUrl] = useState<string | null>(
+    (initArtifacts.document_url as string | null)
+      ?? (initArtifacts.strategy_id ? `/education/strategies/${initArtifacts.strategy_id}` : null)
+  );
+  const [pendingCoach, startCoach] = useTransition();
+  const [pendingCommit, startCommit] = useTransition();
   const [generatedReport, setGeneratedReport] = useState<string | null>(
     typeof (assignment.takeaway_json as Record<string, unknown> | undefined)?.report_md === 'string'
       ? String((assignment.takeaway_json as Record<string, unknown>).report_md)
@@ -429,6 +448,159 @@ export function WorkshopRunner({ assignment, modules }: WorkshopRunnerProps) {
                       </div>
                     ) : null}
                   </div>
+                ) : block.type === 'coach_review' ? (
+                  // Generic coach review block: works for ANY workshop
+                  <div className="mt-4 space-y-4">
+                    {documentUrl ? (
+                      <p className="rounded-xl bg-movexum-pastell-gron px-3 py-2 text-sm font-medium text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron">
+                        ✓ Committad.{' '}
+                        <a href={documentUrl} className="font-semibold underline">
+                          Visa dokument →
+                        </a>
+                      </p>
+                    ) : coachDecision === 'approved' ? (
+                      <p className="rounded-xl bg-movexum-pastell-gron px-3 py-2 text-sm text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron">
+                        ✓ Godkänt av coach. Gå vidare och commita.
+                      </p>
+                    ) : coachDecision === 'returned' ? (
+                      <div className="space-y-2">
+                        <p className="rounded-xl bg-movexum-pastell-orange px-3 py-2 text-sm text-movexum-morkorange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange">
+                          ↩ Returnerad av coach – revidera och skicka på nytt.
+                        </p>
+                        {artifacts.coach_notes && (
+                          <div className="rounded-2xl border border-default bg-canvas-subtle/60 p-4">
+                            <p className="mb-1 text-xs font-medium text-foreground-subtle">Coach-anteckningar</p>
+                            <p className="text-sm text-foreground-muted">{String(artifacts.coach_notes)}</p>
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          disabled={pendingCoach || isDone}
+                          onClick={() => {
+                            startCoach(async () => {
+                              const res = await submitForCoachReviewAction(assignment.id);
+                              if (res.error) { setError(res.error); return; }
+                              setCoachReviewSubmitted(true);
+                              setCoachDecision(null);
+                              setMessage('Skickat till coach igen.');
+                            });
+                          }}
+                          className="inline-flex items-center rounded-full border border-default bg-surface px-4 py-2 text-sm font-semibold text-foreground-muted transition hover:bg-canvas-subtle disabled:opacity-50"
+                        >
+                          {pendingCoach ? 'Skickar…' : 'Skicka på nytt till coach'}
+                        </button>
+                      </div>
+                    ) : coachReviewSubmitted ? (
+                      <p className="rounded-xl bg-movexum-pastell-bla px-3 py-2 text-sm text-movexum-morkbla dark:bg-movexum-morkbla/40 dark:text-movexum-pastell-bla">
+                        ⏳ Skickad till coach – inväntar granskning.
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={pendingCoach || isDone}
+                        onClick={() => {
+                          startCoach(async () => {
+                            const res = await submitForCoachReviewAction(assignment.id);
+                            if (res.error) { setError(res.error); return; }
+                            setCoachReviewSubmitted(true);
+                            setMessage('Skickat till coach för granskning.');
+                          });
+                        }}
+                        className="inline-flex items-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:opacity-50"
+                      >
+                        {pendingCoach ? 'Skickar…' : 'Skicka till coach för granskning'}
+                      </button>
+                    )}
+
+                    {/* Staff coach review form */}
+                    {isStaff && coachReviewSubmitted && !documentUrl && (
+                      <div className="mt-4 space-y-3 rounded-2xl border border-movexum-lila/30 bg-movexum-pastell-lila/40 p-4 dark:border-movexum-morklila/30 dark:bg-movexum-morklila/10">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-movexum-lila dark:text-movexum-ljuslila">
+                          🎓 Coach-granskning
+                        </p>
+                        <textarea
+                          value={coachNotesInput}
+                          onChange={(e) => setCoachNotesInput(e.target.value)}
+                          rows={4}
+                          placeholder="Kommentar till bolaget (visas vid godkännande och returnering)…"
+                          className={textareaClass}
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={pendingCoach}
+                            onClick={() => {
+                              startCoach(async () => {
+                                const res = await coachReviewDecisionAction(assignment.id, 'approved', coachNotesInput);
+                                if (res.error) { setError(res.error); return; }
+                                setCoachDecision('approved');
+                                setMessage('Strategi godkänd.');
+                              });
+                            }}
+                            className="inline-flex items-center rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:opacity-50"
+                          >
+                            {pendingCoach ? '…' : '✓ Godkänn'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={pendingCoach}
+                            onClick={() => {
+                              startCoach(async () => {
+                                const res = await coachReviewDecisionAction(assignment.id, 'returned', coachNotesInput);
+                                if (res.error) { setError(res.error); return; }
+                                setCoachDecision('returned');
+                                setMessage('Returnerad för revidering.');
+                              });
+                            }}
+                            className="inline-flex items-center rounded-full border border-default bg-surface px-4 py-2 text-sm font-semibold text-foreground-muted transition hover:bg-canvas-subtle disabled:opacity-50"
+                          >
+                            {pendingCoach ? '…' : '↩ Returnera'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                ) : block.type === 'commit_document' ? (
+                  // Generic commit block: locks workshop into a committed living document
+                  <div className="mt-4 space-y-3">
+                    {documentUrl ? (
+                      <div className="space-y-3">
+                        <p className="rounded-xl bg-movexum-pastell-gron px-3 py-2 text-sm font-medium text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron">
+                          ✓ Committad – levande dokument skapat.
+                        </p>
+                        <a
+                          href={documentUrl}
+                          className="inline-flex items-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
+                        >
+                          Öppna dokument →
+                        </a>
+                      </div>
+                    ) : coachDecision !== 'approved' ? (
+                      <div className="rounded-2xl border border-default bg-canvas-subtle/60 px-4 py-3">
+                        <p className="text-sm text-foreground-subtle">
+                          🔒 Coach måste granska och godkänna (steg ovan) innan commit.
+                        </p>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={pendingCommit || isDone}
+                        onClick={() => {
+                          startCommit(async () => {
+                            const res = await commitWorkshopDocumentAction(assignment.id);
+                            if (res.error) { setError(res.error); return; }
+                            setDocumentUrl(res.documentUrl ?? `/education/assignments/${assignment.id}`);
+                            setMessage('Committad! Levande dokument skapat.');
+                          });
+                        }}
+                        className="inline-flex items-center rounded-full bg-brand px-6 py-3 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:opacity-50"
+                      >
+                        {pendingCommit ? 'Skapar dokument…' : '📌 Förbind er till detta dokument'}
+                      </button>
+                    )}
+                  </div>
+
                 ) : (
                   // exercise, question, summary – free text
                   <textarea

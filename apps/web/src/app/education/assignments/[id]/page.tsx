@@ -5,7 +5,6 @@ import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { canAccessModule, hasRole } from '@/lib/rbac';
 import { WorkshopAssignmentStatusBadge } from '@/components/Badges';
 import { WorkshopRunner } from '../../WorkshopRunner';
-import { IntlWorkshopRunner } from '../../IntlWorkshopRunner';
 import type { WorkshopAssignment, WorkshopBlock, WorkshopModule } from '@platform/shared';
 
 export default async function WorkshopAssignmentPage({
@@ -91,11 +90,7 @@ export default async function WorkshopAssignmentPage({
         </p>
       </div>
 
-      {workshop?.key === 'intl_strategy_18m' ? (
-        <IntlWorkshopRunner assignment={assignment} modules={modules} isStaff={isStaff} />
-      ) : (
-        <WorkshopRunner assignment={assignment} modules={modules} />
-      )}
+      <WorkshopRunner assignment={assignment} modules={modules} isStaff={isStaff} />
     </main>
   );
 }

@@ -160,6 +160,8 @@ export type WorkshopBlockType =
   | 'question'
   | 'ai_chat'
   | 'ai_pipeline'
+  | 'coach_review'
+  | 'commit_document'
   | 'summary'
   | 'image'
   | 'test'
