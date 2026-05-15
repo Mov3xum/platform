@@ -14,11 +14,27 @@ const DEFAULT_WORKSHOP_SYSTEM_PROMPT =
 
 function toCreateWorkshopError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err ?? '');
-  const normalized = message.toLowerCase();
-  if (normalized.includes('missing or invalid collection context')) {
+  const normalizedMessage = message.toLowerCase();
+  const details =
+    typeof err === 'object' && err !== null && 'response' in err
+      ? JSON.stringify((err as { response?: unknown }).response ?? {})
+      : '';
+  const normalizedDetails = details.toLowerCase();
+  const isMissingCollectionContext =
+    (normalizedMessage.includes('missing or invalid collection context') ||
+      normalizedDetails.includes('missing or invalid collection context') ||
+      normalizedDetails.includes('no rows in result set')) &&
+    ((typeof err === 'object' && err !== null && 'status' in err
+      ? (err as { status?: number }).status
+      : undefined) === 404 ||
+      normalizedMessage.includes('missing or invalid collection context'));
+  if (isMissingCollectionContext) {
     return 'Det går inte att spara workshop just nu eftersom workshop-schemat saknas i PocketBase. Kör schema-bootstrap/redeploy av PocketBase och försök igen.';
   }
-  if (normalized.includes('idx_workshops_tenant_key') || normalized.includes('unique')) {
+  if (
+    normalizedMessage.includes('idx_workshops_tenant_key') ||
+    normalizedMessage.includes('unique constraint')
+  ) {
     return 'En workshop med samma nyckel finns redan i denna tenant. Välj en annan nyckel.';
   }
   if (message.trim().length > 0) return message;
