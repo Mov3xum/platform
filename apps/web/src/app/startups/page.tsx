@@ -5,7 +5,6 @@ import { requireUser } from '@/lib/auth.server';
 import { canAccessModule, hasRole } from '@/lib/rbac';
 import { ALL_PHASES, type StartupPhase } from '@platform/shared';
 import { phaseLabels, statusLabels, type StartupStatus } from '@/lib/labels';
-import { PhaseBadge, StatusBadge } from '@/components/Badges';
 
 interface StartupRecord {
   id: string;
@@ -150,21 +149,18 @@ function StartupCard({ startup }: { startup: StartupRecord }) {
       className="group flex flex-col rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5 transition hover:border-strong hover:shadow-md"
     >
       <div className="mb-3 flex items-start justify-between gap-3">
-        <h2 className="text-lg font-semibold text-foreground transition group-hover:text-brand">
+        <h2 className="text-lg font-semibold text-foreground">
           {startup.name}
         </h2>
-        <StatusBadge status={startup.status} />
       </div>
       {startup.description && (
         <p className="mb-4 line-clamp-3 text-sm text-foreground-muted">{startup.description}</p>
       )}
-      <div className="mt-auto flex flex-wrap items-center gap-2 text-xs text-foreground-subtle">
-        <PhaseBadge phase={startup.phase} />
-        {startup.irl_level ? (
-          <span className="inline-flex items-center rounded-full bg-canvas-subtle px-2.5 py-0.5 font-medium text-foreground-muted">
-            IRL {startup.irl_level}
-          </span>
-        ) : null}
+      <div className="mt-auto flex flex-wrap items-center gap-2 text-xs text-foreground-muted">
+        <span>Status: {statusLabels[startup.status]}</span>
+        <span>•</span>
+        <span>Fas: {phaseLabels[startup.phase]}</span>
+        {startup.irl_level ? <span>• IRL {startup.irl_level}</span> : null}
       </div>
     </Link>
   );

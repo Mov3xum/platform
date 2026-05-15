@@ -1,15 +1,10 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect, useMemo } from 'react';
 import { Icon } from './Icon';
 import { coreModules } from '@platform/shared';
 import { Cmdk } from './Cmdk';
-
-interface Props {
-  user: { name: string; roles: string[] };
-}
 
 function buildCrumbs(pathname: string): { label: string; href: string; now: boolean }[] {
   if (pathname === '/' || pathname === '/idag') {
@@ -37,11 +32,10 @@ function buildCrumbs(pathname: string): { label: string; href: string; now: bool
   return crumbs;
 }
 
-export function ProtoTopBar({ user }: Props) {
+export function ProtoTopBar() {
   const pathname = usePathname();
   const crumbs = useMemo(() => buildCrumbs(pathname), [pathname]);
   const [cmdkOpen, setCmdkOpen] = useState(false);
-  const [savedTime, setSavedTime] = useState<string | null>(null);
 
   // ⌘K / Ctrl+K
   useEffect(() => {
@@ -55,14 +49,6 @@ export function ProtoTopBar({ user }: Props) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [cmdkOpen]);
-
-  // Synkad-indikator visar aktuell tid
-  useEffect(() => {
-    const d = new Date();
-    setSavedTime(
-      d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
-    );
-  }, [pathname]);
 
   return (
     <>
@@ -80,27 +66,11 @@ export function ProtoTopBar({ user }: Props) {
 
         <div className="mx-topbar-spacer" />
 
-        {savedTime && (
-          <div className="mx-save-indicator">
-            <span className="mx-dot" /> Synkad · {savedTime}
-          </div>
-        )}
-
         <button className="mx-topbar-search" type="button" onClick={() => setCmdkOpen(true)}>
           <Icon name="search" size={13} />
           <span>Hoppa, hitta, kör…</span>
           <kbd>⌘K</kbd>
         </button>
-
-        <div className="mx-role-pill" title={user.roles.join(', ')}>
-          <span className="mx-dot" />
-          {(user.roles[0] || 'user').replace('_', ' ').toUpperCase()}
-        </div>
-
-        <Link href="/aktivitet" className="mx-icon-btn" title="Aktivitet & notiser">
-          <Icon name="bell" size={15} />
-          <span className="mx-dot" />
-        </Link>
       </div>
       <Cmdk open={cmdkOpen} onClose={() => setCmdkOpen(false)} />
     </>
