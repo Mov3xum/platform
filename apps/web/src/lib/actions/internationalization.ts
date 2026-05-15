@@ -509,7 +509,7 @@ export async function commitIntlStrategyAction(
       change_summary: 'Initial strategi committad',
       ai_output: String(artifacts.scenarios_output || ''),
       triggered_by: user.id,
-      quarter_number: 0
+      quarter_number: 1
     });
   } catch {
     // Revision snapshot is best-effort

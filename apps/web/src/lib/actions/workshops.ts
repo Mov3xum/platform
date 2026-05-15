@@ -830,8 +830,8 @@ export async function commitWorkshopDocumentAction(
 
     const milestonesMatch = scenariosOutput.match(/Kvartalsmilstolpar[\s\S]*?(?=###|Kill criteria|$)/i);
     const killMatch = scenariosOutput.match(/Kill criteria[\s\S]*?(?=---|\n##|$)/i);
-    const sanitize = (s: string) => s.replace(/[<>]/g, '').slice(0, 200);
-    const startupName = sanitize(assignment.expand?.startup?.name ?? 'Startup');
+    const truncateForLog = (s: string) => s.replace(/[<>]/g, '').slice(0, 200);
+    const startupName = truncateForLog(assignment.expand?.startup?.name ?? 'Startup');
 
     const rec = await pb.collection(PB_COLLECTIONS.strategies).create({
       tenant: user.tenant,

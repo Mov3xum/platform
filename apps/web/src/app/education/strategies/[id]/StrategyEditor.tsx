@@ -27,7 +27,7 @@ const BAND_OPTIONS = [
   }
 ] as const;
 
-const taClass =
+const textareaClass =
   'mt-1.5 w-full rounded-2xl border border-default bg-canvas px-4 py-3 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
 
 export function StrategyEditor({ strategy, isStaff }: StrategyEditorProps) {
@@ -208,7 +208,7 @@ export function StrategyEditor({ strategy, isStaff }: StrategyEditorProps) {
           value={positionAssessment}
           onChange={(e) => setPositionAssessment(e.target.value)}
           rows={8}
-          className={taClass}
+          className={textareaClass}
         />
       </section>
 
@@ -222,7 +222,7 @@ export function StrategyEditor({ strategy, isStaff }: StrategyEditorProps) {
           value={recommendation}
           onChange={(e) => setRecommendation(e.target.value)}
           rows={10}
-          className={taClass}
+          className={textareaClass}
         />
       </section>
 
@@ -236,7 +236,7 @@ export function StrategyEditor({ strategy, isStaff }: StrategyEditorProps) {
           value={milestones}
           onChange={(e) => setMilestones(e.target.value)}
           rows={8}
-          className={taClass}
+          className={textareaClass}
         />
       </section>
 
@@ -250,7 +250,7 @@ export function StrategyEditor({ strategy, isStaff }: StrategyEditorProps) {
           value={killCriteria}
           onChange={(e) => setKillCriteria(e.target.value)}
           rows={4}
-          className={taClass}
+          className={textareaClass}
         />
       </section>
 
@@ -265,7 +265,7 @@ export function StrategyEditor({ strategy, isStaff }: StrategyEditorProps) {
             onChange={(e) => setCoachNotes(e.target.value)}
             rows={4}
             placeholder="Anteckningar och utmaningar från coach till bolaget…"
-            className={taClass}
+            className={textareaClass}
           />
         </section>
       )}
