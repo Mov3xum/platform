@@ -65,7 +65,7 @@ migrate(
           name: 'audience_roles',
           type: 'select',
           required: false,
-          maxSelect: 10,
+          maxSelect: 7,
           values: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer']
         },
         {

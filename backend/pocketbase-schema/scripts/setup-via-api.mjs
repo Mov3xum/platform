@@ -46,6 +46,19 @@ const log = (...a) => console.log('•', ...a);
 const ok = (...a) => console.log('✓', ...a);
 const warn = (...a) => console.log('!', ...a);
 
+function normalizeSelectFields(fields, context = 'collection') {
+  return (fields || []).map((field) => {
+    if (field?.type !== 'select') return field;
+    const valuesCount = Array.isArray(field.values) ? field.values.length : 0;
+    if (typeof field.maxSelect !== 'number' || valuesCount === 0) return field;
+    if (field.maxSelect <= valuesCount) return field;
+    warn(
+      `${context}.${field.name}: maxSelect=${field.maxSelect} > values=${valuesCount} — justerar maxSelect till ${valuesCount}`
+    );
+    return { ...field, maxSelect: valuesCount };
+  });
+}
+
 async function ensureCollection(definition) {
   try {
     await pb.collections.getOne(definition.name);
@@ -54,7 +67,11 @@ async function ensureCollection(definition) {
   } catch (e) {
     if (e?.status !== 404) throw e;
   }
-  await pb.collections.create(definition);
+  const normalizedDefinition = {
+    ...definition,
+    fields: normalizeSelectFields(definition.fields, definition.name)
+  };
+  await pb.collections.create(normalizedDefinition);
   ok(`collection "${definition.name}" skapad`);
 }
 
@@ -67,7 +84,7 @@ async function patchUsersCollection(addFields, ruleUpdates = {}) {
     return;
   }
   await pb.collections.update('users', {
-    fields: [...users.fields, ...newFields],
+    fields: normalizeSelectFields([...users.fields, ...newFields], 'users'),
     ...ruleUpdates
   });
   ok(`users uppdaterad (+${newFields.length} fält${Object.keys(ruleUpdates).length ? ', regler' : ''})`);
@@ -82,7 +99,7 @@ async function patchActivitiesCollection(addFields) {
     return;
   }
   await pb.collections.update('activities', {
-    fields: [...activities.fields, ...newFields]
+    fields: normalizeSelectFields([...activities.fields, ...newFields], 'activities')
   });
   ok(`activities uppdaterad (+${newFields.length} fält)`);
 }
@@ -429,7 +446,7 @@ await ensureCollection({
     { name: 'prompt_template', type: 'editor', required: false },
     { name: 'model', type: 'select', required: false, maxSelect: 1, values: ['mistral-large-latest', 'mistral-medium-latest', 'mistral-small-latest'] },
     { name: 'requires_startup', type: 'bool', required: false },
-    { name: 'roles_allowed', type: 'select', required: false, maxSelect: 10, values: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer'] },
+    { name: 'roles_allowed', type: 'select', required: false, maxSelect: 7, values: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer'] },
     { name: 'output_format', type: 'select', required: false, maxSelect: 1, values: ['markdown', 'json', 'text'] },
     { name: 'active', type: 'bool', required: false },
     { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
@@ -502,7 +519,7 @@ await ensureCollection({
     { name: 'instructions', type: 'editor', required: false },
     { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft', 'active', 'archived'] },
     { name: 'version', type: 'text', required: true, min: 1, max: 20 },
-    { name: 'audience_roles', type: 'select', required: false, maxSelect: 10, values: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer'] },
+    { name: 'audience_roles', type: 'select', required: false, maxSelect: 7, values: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer'] },
     { name: 'ai_system_prompt', type: 'editor', required: false },
     { name: 'output_requirements', type: 'editor', required: false },
     { name: 'content_blocks', type: 'json', required: false },
