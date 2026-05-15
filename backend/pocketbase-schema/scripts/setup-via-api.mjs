@@ -16,11 +16,12 @@
  *   PB_URL='https://your-pb-domain' \
  *   PB_SU_EMAIL='hampus@movexum.se' \
  *   PB_SU_PASSWORD='<your superuser password>' \
- *   APP_USER_PASSWORD='<password for app login>' \
+ *   # Optional when app-user already exists:
+ *   APP_USER_PASSWORD='<password for app login (required only if user is missing)>' \
  *   node backend/pocketbase-schema/scripts/setup-via-api.mjs
  *
  * After it finishes you can log into the Next.js app at /login with
- * hampus@movexum.se + APP_USER_PASSWORD.
+ * hampus@movexum.se + APP_USER_PASSWORD (om kontot behöver skapas).
  */
 
 import PocketBase from 'pocketbase';
@@ -33,8 +34,8 @@ const APP_USER_PASSWORD = process.env.APP_USER_PASSWORD;
 const APP_USER_EMAIL = 'hampus@movexum.se';
 const APP_USER_NAME = 'Hampus Granström';
 
-if (!PB_URL || !SU_EMAIL || !SU_PASSWORD || !APP_USER_PASSWORD) {
-  console.error('Missing env vars. Required: PB_URL, PB_SU_EMAIL, PB_SU_PASSWORD, APP_USER_PASSWORD');
+if (!PB_URL || !SU_EMAIL || !SU_PASSWORD) {
+  console.error('Missing env vars. Required: PB_URL, PB_SU_EMAIL, PB_SU_PASSWORD');
   process.exit(1);
 }
 
@@ -114,6 +115,35 @@ async function ensureRecord(collection, filter, data) {
   }
   const created = await pb.collection(collection).create(data);
   ok(`record skapad i "${collection}"`);
+  return created;
+}
+
+async function ensureAppUser(tenantId) {
+  try {
+    const existing = await pb.collection('users').getFirstListItem(`email = "${APP_USER_EMAIL}"`);
+    warn(`app-user "${APP_USER_EMAIL}" finns redan — hoppar över`);
+    return existing;
+  } catch (e) {
+    if (e?.status !== 404) throw e;
+  }
+
+  if (!APP_USER_PASSWORD) {
+    throw new Error(
+      `APP_USER_PASSWORD saknas och app-user "${APP_USER_EMAIL}" finns inte. Ange APP_USER_PASSWORD för att skapa kontot.`
+    );
+  }
+
+  const created = await pb.collection('users').create({
+    email: APP_USER_EMAIL,
+    emailVisibility: true,
+    verified: true,
+    password: APP_USER_PASSWORD,
+    passwordConfirm: APP_USER_PASSWORD,
+    tenant: tenantId,
+    roles: ['admin'],
+    display_name: APP_USER_NAME
+  });
+  ok(`app-user "${APP_USER_EMAIL}" skapad`);
   return created;
 }
 
@@ -580,17 +610,12 @@ const tenant = await ensureRecord('tenants', 'slug = "movexum"', {
 });
 
 // 20. seed Hampus app-user --------------------------------------------------
-await ensureRecord('users', `email = "${APP_USER_EMAIL}"`, {
-  email: APP_USER_EMAIL,
-  emailVisibility: true,
-  verified: true,
-  password: APP_USER_PASSWORD,
-  passwordConfirm: APP_USER_PASSWORD,
-  tenant: tenant.id,
-  roles: ['admin'],
-  display_name: APP_USER_NAME
-});
+await ensureAppUser(tenant.id);
 
 console.log('\n✓ Klart. Logga in på <din-web-url>/login med:');
 console.log(`  E-post:   ${APP_USER_EMAIL}`);
-console.log(`  Lösen:    ${APP_USER_PASSWORD}`);
+if (APP_USER_PASSWORD) {
+  console.log('  Lösen:    [värdet i APP_USER_PASSWORD]');
+} else {
+  console.log('  Lösen:    [oförändrat - kontot fanns redan]');
+}

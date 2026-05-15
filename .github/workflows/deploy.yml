@@ -22,11 +22,11 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
-      - name: Typecheck
-        run: yarn typecheck
-
       - name: Build web app
         run: yarn build
+
+      - name: Typecheck
+        run: yarn typecheck
 
       - name: Deploy to Coolify staging
         env:
@@ -100,3 +100,20 @@ jobs:
 
           echo "Both Coolify deploy endpoints returned 404. Verify COOLIFY_BASE_URL and that COOLIFY_APP_UUID_STAGING contains the Coolify app UUID."
           exit 1
+
+      - name: Bootstrap PocketBase schema for staging
+        env:
+          PB_URL: ${{ secrets.PB_URL_STAGING || secrets.PB_URL }}
+          PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL_STAGING || 'hampus@movexum.se' }}
+          PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD_STAGING || secrets.PB_SU_PASSWORD }}
+          APP_USER_PASSWORD: ${{ secrets.APP_USER_PASSWORD_STAGING || secrets.APP_USER_PASSWORD }}
+          NODE_TLS_REJECT_UNAUTHORIZED: '0'
+        run: |
+          set -euo pipefail
+
+          if [ -z "${PB_URL:-}" ] || [ -z "${PB_SU_PASSWORD:-}" ]; then
+            echo "Missing PocketBase bootstrap secrets. Set PB_URL_STAGING/PB_SU_PASSWORD_STAGING (or PB_URL/PB_SU_PASSWORD)."
+            exit 1
+          fi
+
+          node backend/pocketbase-schema/scripts/setup-via-api.mjs
