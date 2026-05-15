@@ -543,7 +543,77 @@ export async function commitIntlStrategyAction(
   return { strategyId };
 }
 
-// ── 6. Kvartalsvis omkalibrering ──────────────────────────────────────────────
+// ── 7. Uppdatera strategi (bolaget kan alltid redigera) ───────────────────────
+
+export type StrategyPatch = {
+  recommended_band?: 'wait' | 'discovery' | 'execution';
+  position_assessment?: string;
+  recommendation?: string;
+  quarterly_milestones?: string;
+  kill_criteria?: string;
+  coach_notes?: string;
+  change_summary?: string;
+};
+
+export async function updateStrategyAction(
+  strategyId: string,
+  patch: StrategyPatch
+): Promise<IntlActionState> {
+  const user = await requireUser();
+  const pb = await getServerPb();
+  const isStaff = hasRole(user.roles, [...STAFF_ROLES]);
+
+  let strategy: Strategy & Record<string, unknown>;
+  try {
+    strategy = await pb
+      .collection(PB_COLLECTIONS.strategies)
+      .getOne<Strategy & Record<string, unknown>>(strategyId);
+  } catch {
+    return { error: 'Strategin hittades inte.' };
+  }
+
+  if (strategy.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+  const isLinked = user.linkedStartups.includes(String(strategy.startup));
+  if (!isStaff && !isLinked) return { error: 'Åtkomst nekad.' };
+
+  // coach_notes only editable by staff
+  const updateData: Record<string, unknown> = {};
+  const s = (v: unknown, max = 6000) => String(v ?? '').slice(0, max);
+
+  if (patch.recommended_band !== undefined) updateData.recommended_band = patch.recommended_band;
+  if (patch.position_assessment !== undefined) updateData.position_assessment = s(patch.position_assessment);
+  if (patch.recommendation !== undefined) updateData.recommendation = s(patch.recommendation);
+  if (patch.quarterly_milestones !== undefined) updateData.quarterly_milestones = s(patch.quarterly_milestones);
+  if (patch.kill_criteria !== undefined) updateData.kill_criteria = s(patch.kill_criteria);
+  if (isStaff && patch.coach_notes !== undefined) updateData.coach_notes = s(patch.coach_notes, 2000);
+
+  if (Object.keys(updateData).length === 0) return { strategyId };
+
+  try {
+    await pb.collection(PB_COLLECTIONS.strategies).update(strategyId, updateData);
+
+    // Revision snapshot
+    const changeSummary = patch.change_summary?.trim() || 'Manuell revidering';
+    await pb.collection(PB_COLLECTIONS.strategyRevisions).create({
+      tenant: user.tenant,
+      strategy: strategyId,
+      startup: strategy.startup,
+      revision_type: 'manual',
+      snapshot_json: {
+        ...updateData,
+        revised_by_role: isStaff ? 'staff' : 'startup_member'
+      },
+      change_summary: changeSummary,
+      triggered_by: user.id
+    });
+
+    revalidatePath(`/education/strategies/${strategyId}`);
+    return { strategyId };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte spara ändringen.' };
+  }
+}
+
 
 export async function runQuarterlyRecalibrationAction(
   strategyId: string

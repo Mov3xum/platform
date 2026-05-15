@@ -3,11 +3,8 @@
 import { useState, useTransition, useMemo } from 'react';
 import Link from 'next/link';
 import type { WorkshopAssignment, WorkshopModule } from '@platform/shared';
-import { saveWorkshopProgressAction, runWorkshopAiChatAction } from '@/lib/actions/workshops';
+import { saveWorkshopProgressAction, runWorkshopAiChatAction, runPipelineBlockAction } from '@/lib/actions/workshops';
 import {
-  runIntlDiagnosticAction,
-  runIntlScenariosAction,
-  runIntlDevilsAdvocateAction,
   submitForCoachReviewAction,
   coachReviewDecisionAction,
   commitIntlStrategyAction
@@ -86,9 +83,8 @@ export function IntlWorkshopRunner({ assignment, modules, isStaff }: IntlWorksho
   const [error, setError] = useState<string | null>(null);
 
   const [pendingSave, startSave] = useTransition();
-  const [pendingDiag, startDiag] = useTransition();
-  const [pendingScenarios, startScenarios] = useTransition();
-  const [pendingDA, startDA] = useTransition();
+  const [pendingPipelineBlockId, setPendingPipelineBlockId] = useState<string | null>(null);
+  const [pendingPipeline, startPipeline] = useTransition();
   const [pendingBaseRate, startBaseRate] = useTransition();
   const [pendingCoach, startCoach] = useTransition();
   const [pendingCommit, startCommit] = useTransition();
@@ -146,62 +142,27 @@ export function IntlWorkshopRunner({ assignment, modules, isStaff }: IntlWorksho
     });
   };
 
-  // ── Diagnostic pipeline ──────────────────────────────────────────────────────
+  // ── Generic pipeline block runner (diagnostic, scenarios, da) ───────────────
 
-  const handleDiagnostic = () => {
+  const handlePipelineBlock = (blockId: string, outputKey: string) => {
     clearNotice();
-    startDiag(async () => {
-      // Auto-save intake answers first
+    setPendingPipelineBlockId(blockId);
+    startPipeline(async () => {
+      // Auto-save answers before running pipeline so latest answers are included
       await saveWorkshopProgressAction(assignment.id, {
         answers: answers as Record<string, unknown>,
         artifacts: artifacts
       });
-      const res = await runIntlDiagnosticAction(assignment.id);
+      const res = await runPipelineBlockAction(assignment.id, blockId);
+      setPendingPipelineBlockId(null);
       if (res.error) { notify(res.error, true); return; }
       setArtifacts((prev) => ({
         ...prev,
-        diagnostic_output: res.output,
-        diagnostic_run_id: res.runId,
-        diagnostic_at: new Date().toISOString()
+        [outputKey]: res.output,
+        [`${outputKey}_run_id`]: res.runId,
+        [`${outputKey}_at`]: new Date().toISOString()
       }));
-      notify('Diagnostisk analys klar.');
-    });
-  };
-
-  // ── Scenarios pipeline ───────────────────────────────────────────────────────
-
-  const handleScenarios = () => {
-    clearNotice();
-    startScenarios(async () => {
-      const res = await runIntlScenariosAction(assignment.id);
-      if (res.error) { notify(res.error, true); return; }
-      setArtifacts((prev) => ({
-        ...prev,
-        scenarios_output: res.output,
-        scenarios_run_id: res.runId,
-        scenarios_at: new Date().toISOString()
-      }));
-      notify('Scenariogenerering klar.');
-    });
-  };
-
-  // ── Devil's advocate pipeline ────────────────────────────────────────────────
-
-  const handleDevilsAdvocate = () => {
-    clearNotice();
-    startDA(async () => {
-      await saveWorkshopProgressAction(assignment.id, {
-        answers: answers as Record<string, unknown>
-      });
-      const res = await runIntlDevilsAdvocateAction(assignment.id);
-      if (res.error) { notify(res.error, true); return; }
-      setArtifacts((prev) => ({
-        ...prev,
-        devils_advocate_output: res.output,
-        devils_advocate_run_id: res.runId,
-        devils_advocate_at: new Date().toISOString()
-      }));
-      notify('Devil\'s advocate-analys klar.');
+      notify('Analys klar.');
     });
   };
 
@@ -341,93 +302,56 @@ export function IntlWorkshopRunner({ assignment, modules, isStaff }: IntlWorksho
                   </p>
                 )}
 
-                {/* ── Specialized pipeline blocks ── */}
+                {/* ── Block type renderers ── */}
 
-                {block.id === 'diagnostic_run' ? (
-                  <div className="mt-4 space-y-3">
-                    {hasDiagnostic ? (
-                      <AiOutputBox>{String(artifacts.diagnostic_output)}</AiOutputBox>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={pendingDiag || isDone}
-                        onClick={handleDiagnostic}
-                        className={btnPrimary}
-                      >
-                        {pendingDiag ? 'Analyserar…' : 'Kör diagnostisk analys'}
-                      </button>
-                    )}
-                    {hasDiagnostic && !isDone && (
-                      <button
-                        type="button"
-                        disabled={pendingDiag}
-                        onClick={handleDiagnostic}
-                        className={btnSecondary}
-                      >
-                        {pendingDiag ? 'Analyserar…' : 'Kör om analys'}
-                      </button>
-                    )}
-                  </div>
-                ) : block.id === 'scenarios_run' ? (
-                  <div className="mt-4 space-y-3">
-                    {!hasDiagnostic ? (
-                      <LockedOverlay reason="Kör diagnostisk analys (steg 2) för att låsa upp scenariogenerering." />
-                    ) : hasScenarios ? (
-                      <>
-                        <AiOutputBox>{String(artifacts.scenarios_output)}</AiOutputBox>
-                        {!isDone && (
+                {block.type === 'ai_pipeline' ? (
+                  /* Generic ai_pipeline: uses block.pipeline_output_key / pipeline_requires_key */
+                  (() => {
+                    const outputKey = block.pipeline_output_key ?? `pipeline_${block.id}`;
+                    const existingOutput = artifacts[outputKey]
+                      ? String(artifacts[outputKey])
+                      : '';
+                    // UI-level prerequisite (additional check for da_run: also needs chosen scenario)
+                    const prereqKey = block.pipeline_requires_key;
+                    const prereqMet = prereqKey ? Boolean(artifacts[prereqKey]) : true;
+                    const extraLock =
+                      block.id === 'da_run' && !hasChosenScenario
+                        ? 'Fyll i "Vilket scenario väljer ni?" ovan.'
+                        : null;
+                    const isPending = pendingPipelineBlockId === block.id;
+                    return (
+                      <div className="mt-4 space-y-3">
+                        {!prereqMet ? (
+                          <LockedOverlay reason={`Slutför föregående analys-steg (${prereqKey}) för att låsa upp detta block.`} />
+                        ) : extraLock ? (
+                          <LockedOverlay reason={extraLock} />
+                        ) : existingOutput ? (
+                          <>
+                            <AiOutputBox>{existingOutput}</AiOutputBox>
+                            {!isDone && (
+                              <button
+                                type="button"
+                                disabled={isPending || pendingPipeline}
+                                onClick={() => handlePipelineBlock(block.id, outputKey)}
+                                className={btnSecondary}
+                              >
+                                {isPending ? 'Analyserar…' : 'Kör om analys'}
+                              </button>
+                            )}
+                          </>
+                        ) : (
                           <button
                             type="button"
-                            disabled={pendingScenarios}
-                            onClick={handleScenarios}
-                            className={btnSecondary}
+                            disabled={isPending || pendingPipeline || isDone}
+                            onClick={() => handlePipelineBlock(block.id, outputKey)}
+                            className={btnPrimary}
                           >
-                            {pendingScenarios ? 'Genererar…' : 'Generera om scenarier'}
+                            {isPending ? 'Analyserar…' : `Kör ${block.title}`}
                           </button>
                         )}
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={pendingScenarios || isDone}
-                        onClick={handleScenarios}
-                        className={btnPrimary}
-                      >
-                        {pendingScenarios ? 'Genererar scenarier…' : 'Kör scenariogenerering'}
-                      </button>
-                    )}
-                  </div>
-                ) : block.id === 'da_run' ? (
-                  <div className="mt-4 space-y-3">
-                    {!hasChosenScenario ? (
-                      <LockedOverlay reason="Fyll i 'Vilket scenario väljer ni?' ovan för att låsa upp devil's advocate." />
-                    ) : !hasScenarios ? (
-                      <LockedOverlay reason="Kör scenariogenerering (steg 4) för att låsa upp devil's advocate." />
-                    ) : hasDevilsAdvocate ? (
-                      <>
-                        <AiOutputBox>{String(artifacts.devils_advocate_output)}</AiOutputBox>
-                        {!isDone && (
-                          <button
-                            type="button"
-                            disabled={pendingDA}
-                            onClick={handleDevilsAdvocate}
-                            className={btnSecondary}
-                          >
-                            {pendingDA ? 'Analyserar…' : 'Kör om devil\'s advocate'}
-                          </button>
-                        )}
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={pendingDA || isDone}
-                        onClick={handleDevilsAdvocate}
-                        className={btnPrimary}
-                      >
-                        {pendingDA ? 'Analyserar…' : 'Kör devil\'s advocate'}
-                      </button>
-                    )}
-                  </div>
+                      </div>
+                    );
+                  })()
                 ) : block.id === 'coach_submission' ? (
                   <div className="mt-4 space-y-4">
                     {strategyId ? (

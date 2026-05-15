@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { canAccessModule, hasRole } from '@/lib/rbac';
+import { StrategyEditor } from './StrategyEditor';
 import { QuarterlyRecalibrationButton } from './QuarterlyRecalibrationButton';
 import type { Strategy, StrategyRevision } from '@platform/shared';
 
@@ -131,47 +132,12 @@ export default async function StrategyPage({
         </p>
       </div>
 
-      {/* 1. Position idag */}
-      <section className="mb-6 rounded-3xl border border-default bg-surface p-6">
-        <h2 className="mb-4 text-xl font-semibold text-foreground">Position idag</h2>
-        <pre className="whitespace-pre-wrap text-sm leading-relaxed text-foreground-muted">
-          {strategy.position_assessment || 'Inga data.'}
-        </pre>
-      </section>
-
-      {/* 2. Rekommenderad bana */}
-      <section className="mb-6 rounded-3xl border border-default bg-surface p-6">
-        <h2 className="mb-4 text-xl font-semibold text-foreground">Rekommenderad bana</h2>
-        <pre className="whitespace-pre-wrap text-sm leading-relaxed text-foreground-muted">
-          {strategy.recommendation || 'Inga data.'}
-        </pre>
-      </section>
-
-      {/* 3. Kvartalsmilstolpar med kill criteria */}
-      <section className="mb-6 rounded-3xl border border-default bg-surface p-6">
-        <h2 className="mb-4 text-xl font-semibold text-foreground">
-          Kvartalsmilstolpar &amp; kill criteria
-        </h2>
-        <pre className="whitespace-pre-wrap text-sm leading-relaxed text-foreground-muted">
-          {strategy.quarterly_milestones || 'Inga data.'}
-        </pre>
-      </section>
-
-      {/* Coach notes */}
-      {strategy.coach_notes && (
-        <section className="mb-6 rounded-3xl border border-movexum-lila/30 bg-movexum-pastell-lila/30 p-6 dark:border-movexum-morklila/30 dark:bg-movexum-morklila/10">
-          <h2 className="mb-3 text-base font-semibold text-movexum-lila dark:text-movexum-ljuslila">
-            Coach-anteckningar
-          </h2>
-          <p className="whitespace-pre-line text-sm text-foreground-muted">
-            {strategy.coach_notes}
-          </p>
-        </section>
-      )}
+      {/* Editable strategy sections */}
+      <StrategyEditor strategy={strategy} isStaff={isStaff} />
 
       {/* Quarterly recalibration (staff only) */}
       {isStaff && strategy.status === 'committed' && (
-        <div className="mb-6">
+        <div className="mt-6">
           <QuarterlyRecalibrationButton strategyId={id} />
         </div>
       )}
