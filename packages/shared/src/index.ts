@@ -159,6 +159,9 @@ export type WorkshopBlockType =
   | 'video'
   | 'question'
   | 'ai_chat'
+  | 'ai_pipeline'
+  | 'coach_review'
+  | 'commit_document'
   | 'summary'
   | 'image'
   | 'test'
@@ -181,6 +184,11 @@ export interface WorkshopBlock {
   question_type?: 'single' | 'multiple';
   options?: WorkshopBlockOption[];
   required?: boolean;
+  // ai_pipeline-specific fields — set by coach in WorkshopBlockBuilder
+  pipeline_system_prompt?: string;
+  pipeline_model?: string;
+  pipeline_output_key?: string;
+  pipeline_requires_key?: string;
 }
 
 export interface WorkshopModule {
@@ -265,6 +273,61 @@ export interface WorkshopRun {
   expand?: {
     assignment?: WorkshopAssignment;
     workshop?: Workshop;
+    startup?: { id: string; name: string };
+    triggered_by?: { id: string; display_name?: string; email: string };
+  };
+}
+
+export type StrategyBand = 'wait' | 'discovery' | 'execution';
+
+export type StrategyStatus = 'draft' | 'coach_review' | 'committed' | 'archived';
+
+export interface Strategy {
+  id: string;
+  tenant: string;
+  startup: string;
+  workshop_assignment: string;
+  status: StrategyStatus;
+  recommended_band: StrategyBand;
+  position_assessment: string;
+  recommendation: string;
+  reasoning: string;
+  quarterly_milestones: string;
+  kill_criteria: string;
+  scenarios_json: Record<string, unknown>;
+  coach_notes?: string;
+  coach_approved_by?: string;
+  coach_approved_at?: string;
+  committed_at?: string;
+  next_recalibration_at?: string;
+  gdpr_legal_basis: string;
+  deleted_at?: string;
+  created: string;
+  updated: string;
+  expand?: {
+    startup?: { id: string; name: string };
+    workshop_assignment?: WorkshopAssignment;
+    coach_approved_by?: { id: string; display_name?: string; email: string };
+  };
+}
+
+export type StrategyRevisionType = 'initial' | 'quarterly' | 'coach_override' | 'manual';
+
+export interface StrategyRevision {
+  id: string;
+  tenant: string;
+  strategy: string;
+  startup: string;
+  revision_type: StrategyRevisionType;
+  snapshot_json: Record<string, unknown>;
+  change_summary: string;
+  ai_output?: string;
+  triggered_by: string;
+  quarter_number?: number;
+  created: string;
+  updated: string;
+  expand?: {
+    strategy?: Strategy;
     startup?: { id: string; name: string };
     triggered_by?: { id: string; display_name?: string; email: string };
   };

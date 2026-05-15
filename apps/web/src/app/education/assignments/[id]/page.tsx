@@ -90,7 +90,7 @@ export default async function WorkshopAssignmentPage({
         </p>
       </div>
 
-      <WorkshopRunner assignment={assignment} modules={modules} />
+      <WorkshopRunner assignment={assignment} modules={modules} isStaff={isStaff} />
     </main>
   );
 }
