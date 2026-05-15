@@ -474,7 +474,7 @@ export interface Deal {
   updated: string;
   expand?: {
     startup?: { id: string; name: string };
-    investor?: Investor;
+    investor?: { id: string; name: string; warmth?: InvestorWarmth };
   };
 }
 
@@ -675,5 +675,43 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Moduler, tenants, integrationer och infrastruktur.',
     rolesAllowed: ['admin', 'incubator_lead'],
     route: '/installningar'
+  },
+  // ── Legacy-alias för bakåtkompatibilitet — visas EJ i rail. ──────────────
+  // Existerande sidor använder dessa IDs i `canAccessModule(roles, 'toolbox')`,
+  // så vi behåller dem som dolda entries.
+  {
+    id: 'dashboard',
+    title: 'Dashboard',
+    description: 'Legacy redirect till /idag.',
+    rolesAllowed: ALL_ROLES,
+    route: '/idag'
+  },
+  {
+    id: 'toolbox',
+    title: 'Verktygslåda',
+    description: 'Legacy alias för AI-agenter.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'startup_member'],
+    route: '/toolbox'
+  },
+  {
+    id: 'onboarding',
+    title: 'Onboarding',
+    description: 'Digital onboarding för nya bolag i inkubatorn.',
+    rolesAllowed: ['admin', 'incubator_lead', 'startup_member'],
+    route: '/onboarding'
+  },
+  {
+    id: 'activity_feed',
+    title: 'Aktivitetsfeed',
+    description: 'Global feed med alla aktiviteter och verktygskörningar.',
+    rolesAllowed: ALL_ROLES,
+    route: '/aktivitet'
+  },
+  {
+    id: 'partners',
+    title: 'Partners',
+    description: 'Partner-organisationer och deras engagemang.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'partner'],
+    route: '/partners'
   }
 ];

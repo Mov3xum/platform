@@ -52,7 +52,7 @@ export default async function AktivitetPage({
 }) {
   const { kind } = await searchParams;
   const user = await requireUser();
-  if (!canAccessModule(user.roles, 'activity_feed')) redirect('/dashboard');
+  if (!canAccessModule(user.roles, 'activity_feed')) redirect('/idag');
   const pb = await getServerPb();
 
   const filterParts: string[] = [];

@@ -202,7 +202,11 @@ export async function assignToolToStartupAction(
 }
 
 /**
- * Creates a new tool in the registry (staff only).
+ * Creates a new tool in the registry.
+ *
+ * Endast admin får sätta systemprompten (`prompt_template`) och modellen
+ * (`model`). Incubator_lead och coach kan skapa verktyg men prompten lämnas
+ * tom — den måste sedan fyllas i av admin.
  */
 export async function createToolAction(
   _prev: ToolActionState,
@@ -211,23 +215,32 @@ export async function createToolAction(
   const user = await requireUser();
   requireRole(user.roles, ['admin', 'incubator_lead']);
 
+  const isAdmin = hasRole(user.roles, ['admin']);
+
   const pb = await getServerPb();
 
-  const data = {
+  const data: Record<string, unknown> = {
     tenant: user.tenant,
     key: String(formData.get('key') || '').trim(),
     name: String(formData.get('name') || '').trim(),
     description: String(formData.get('description') || '').trim(),
     category: String(formData.get('category') || ''),
     icon: String(formData.get('icon') || '').trim(),
-    prompt_template: String(formData.get('prompt_template') || '').trim(),
-    model: String(formData.get('model') || '') || null,
     requires_startup: formData.get('requires_startup') === 'on',
     roles_allowed: formData.getAll('roles_allowed').map(String),
     output_format: String(formData.get('output_format') || 'markdown'),
     active: formData.get('active') === 'on',
     created_by: user.id
   };
+
+  if (isAdmin) {
+    // Admin sätter systemprompt och modell.
+    data.prompt_template = String(formData.get('prompt_template') || '').trim();
+    data.model = String(formData.get('model') || '') || null;
+  } else {
+    // Övriga staff: prompten lämnas tom (måste fyllas av admin senare).
+    data.prompt_template = '';
+  }
 
   if (!data.key || !data.name || !data.category) {
     return { error: 'Unikt ID, namn och kategori är obligatoriska.' };
@@ -243,7 +256,13 @@ export async function createToolAction(
 }
 
 /**
- * Updates an existing tool (staff only).
+ * Updates an existing tool.
+ *
+ * - Admin: kan ändra ALLT, inklusive systemprompt och modell.
+ * - Incubator_lead: kan ändra metadata (namn, beskrivning, ikon, kategori,
+ *   roles_allowed, active, requires_startup, output_format) men INTE
+ *   systemprompten eller modellvalet.
+ * - Coach och övriga: får inte ändra verktyg alls.
  */
 export async function updateToolAction(
   toolId: string,
@@ -252,6 +271,8 @@ export async function updateToolAction(
 ): Promise<ToolActionState> {
   const user = await requireUser();
   requireRole(user.roles, ['admin', 'incubator_lead']);
+
+  const isAdmin = hasRole(user.roles, ['admin']);
 
   const pb = await getServerPb();
 
@@ -264,18 +285,28 @@ export async function updateToolAction(
 
   if (tool.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
 
-  const data = {
+  const data: Record<string, unknown> = {
     name: String(formData.get('name') || '').trim(),
     description: String(formData.get('description') || '').trim(),
     category: String(formData.get('category') || ''),
     icon: String(formData.get('icon') || '').trim(),
-    prompt_template: String(formData.get('prompt_template') || '').trim(),
-    model: String(formData.get('model') || '') || null,
     requires_startup: formData.get('requires_startup') === 'on',
     roles_allowed: formData.getAll('roles_allowed').map(String),
     output_format: String(formData.get('output_format') || 'markdown'),
     active: formData.get('active') === 'on'
   };
+
+  // Endast admin kan uppdatera systemprompt och modell.
+  if (isAdmin) {
+    if (formData.has('prompt_template')) {
+      data.prompt_template = String(formData.get('prompt_template') || '').trim();
+    }
+    if (formData.has('model')) {
+      data.model = String(formData.get('model') || '') || null;
+    }
+  }
+  // Övriga staff: ignorerar tysta eventuella inskickade prompt_template/model
+  // i payload (defense-in-depth om någon spoofar formuläret).
 
   try {
     await pb.collection('tools').update(toolId, data);
@@ -285,6 +316,14 @@ export async function updateToolAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera verktyget.' };
   }
+}
+
+/**
+ * Helper för UI: kan användaren redigera systemprompten?
+ */
+export async function canEditToolPrompt(): Promise<boolean> {
+  const user = await requireUser();
+  return hasRole(user.roles, ['admin']);
 }
 
 /**
