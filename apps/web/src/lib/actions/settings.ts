@@ -25,8 +25,11 @@ export async function saveModuleTogglesAction(
   const raw = formData.get('disabled_modules');
   let disabledModules: string[] = [];
   try {
-    disabledModules = raw ? (JSON.parse(String(raw)) as string[]) : [];
-    if (!Array.isArray(disabledModules)) disabledModules = [];
+    const parsed = raw ? (JSON.parse(String(raw)) as unknown) : [];
+    if (!Array.isArray(parsed)) {
+      return { error: 'Ogiltigt format på moduldata.' };
+    }
+    disabledModules = parsed.filter((v): v is string => typeof v === 'string');
   } catch {
     return { error: 'Ogiltigt format på moduldata.' };
   }
@@ -41,8 +44,7 @@ export async function saveModuleTogglesAction(
     return { error: 'Kunde inte spara inställningar. Försök igen.' };
   }
 
-  revalidatePath('/installningar');
-  revalidatePath('/idag');
+  revalidatePath('/', 'layout');
 
   return { success: true };
 }

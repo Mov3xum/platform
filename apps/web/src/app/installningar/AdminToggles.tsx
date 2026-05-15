@@ -73,7 +73,7 @@ export function AdminToggles({ modules }: AdminTogglesProps) {
           }}
         >
           {result?.error && (
-            <span className="mx-t-12" style={{ color: 'var(--mx-orange)' }}>
+            <span className="mx-t-12" style={{ color: 'var(--mx-copper)' }}>
               {result.error}
             </span>
           )}
