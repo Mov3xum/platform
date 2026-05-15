@@ -27,6 +27,7 @@ interface ProtoRailProps {
     email: string;
     avatarUrl?: string;
     roles: Role[];
+    disabledModules?: string[];
   };
   counts?: Record<string, number>;
 }
@@ -56,7 +57,12 @@ export function ProtoRail({ user, counts = {} }: ProtoRailProps) {
         {RAIL_GROUPS.map((group) => {
           const groupModules = group.modules
             .map((id) => coreModules.find((m) => m.id === id))
-            .filter((m) => m !== undefined && canAccessModule(user.roles, m.id));
+            .filter(
+              (m) =>
+                m !== undefined &&
+                canAccessModule(user.roles, m.id) &&
+                !(user.disabledModules ?? []).includes(m.id)
+            );
 
           if (groupModules.length === 0) return null;
 

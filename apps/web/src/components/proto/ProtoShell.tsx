@@ -17,7 +17,8 @@ export function ProtoShell({ user, children, counts }: Props) {
           name: user.name,
           email: user.email,
           avatarUrl: user.avatarUrl,
-          roles: user.roles
+          roles: user.roles,
+          disabledModules: user.disabledModules
         }}
         counts={counts}
       />
