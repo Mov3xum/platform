@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import {
   completeWorkshopAction,
+  runPipelineBlockAction,
   runWorkshopAiChatAction,
   saveWorkshopProgressAction
 } from '@/lib/actions/workshops';
@@ -24,6 +25,15 @@ export function WorkshopRunner({ assignment, modules }: WorkshopRunnerProps) {
   const [aiAnswers, setAiAnswers] = useState<Record<string, string>>({});
   const [aiThreadCount, setAiThreadCount] = useState(
     Array.isArray(assignment.ai_thread_json) ? assignment.ai_thread_json.length : 0
+  );
+  const [pendingPipelineBlockId, setPendingPipelineBlockId] = useState<string | null>(null);
+  const [pipelineOutputs, setPipelineOutputs] = useState<Record<string, string>>(
+    // Pre-populate from existing artifacts
+    Object.fromEntries(
+      Object.entries((assignment.artifacts_json as Record<string, unknown>) || {})
+        .filter(([, v]) => typeof v === 'string')
+        .map(([k, v]) => [k, v as string])
+    )
   );
   const [generatedReport, setGeneratedReport] = useState<string | null>(
     typeof (assignment.takeaway_json as Record<string, unknown> | undefined)?.report_md === 'string'
@@ -53,13 +63,17 @@ export function WorkshopRunner({ assignment, modules }: WorkshopRunnerProps) {
       if (block.type === 'ai_chat') {
         return aiThreadCount > 0 || Boolean(answers[`${block.id}__ai_done`]);
       }
+      if (block.type === 'ai_pipeline') {
+        const key = block.pipeline_output_key ?? `pipeline_${block.id}`;
+        return Boolean(pipelineOutputs[key] || artifacts[key]);
+      }
       if (block.type === 'test') {
         return normalizeAnswerArray(answers[block.id]).length > 0;
       }
       const value = answers[block.id];
       return typeof value === 'string' && value.trim().length > 0;
     });
-  }, [answers, artifacts, allBlocks, aiThreadCount]);
+  }, [answers, artifacts, allBlocks, aiThreadCount, pipelineOutputs]);
 
   const remainingCount = useMemo(
     () =>
@@ -70,13 +84,17 @@ export function WorkshopRunner({ assignment, modules }: WorkshopRunnerProps) {
         if (block.type === 'ai_chat') {
           return !(aiThreadCount > 0 || Boolean(answers[`${block.id}__ai_done`]));
         }
+        if (block.type === 'ai_pipeline') {
+          const key = block.pipeline_output_key ?? `pipeline_${block.id}`;
+          return !Boolean(pipelineOutputs[key] || artifacts[key]);
+        }
         if (block.type === 'test') {
           return normalizeAnswerArray(answers[block.id]).length === 0;
         }
         const value = answers[block.id];
         return !(typeof value === 'string' && value.trim().length > 0);
       }).length,
-    [answers, artifacts, allBlocks, aiThreadCount]
+    [answers, artifacts, allBlocks, aiThreadCount, pipelineOutputs]
   );
 
   const saveProgress = async () => {
@@ -264,6 +282,106 @@ export function WorkshopRunner({ assignment, modules }: WorkshopRunnerProps) {
                       })
                     )}
                   </div>
+                ) : block.type === 'ai_pipeline' ? (
+                  (() => {
+                    const outputKey = block.pipeline_output_key ?? `pipeline_${block.id}`;
+                    const existingOutput = pipelineOutputs[outputKey] ?? String(artifacts[outputKey] ?? '');
+                    const isLocked =
+                      block.pipeline_requires_key
+                        ? !Boolean(
+                            pipelineOutputs[block.pipeline_requires_key] ||
+                              artifacts[block.pipeline_requires_key]
+                          )
+                        : false;
+                    const isPending = pendingPipelineBlockId === block.id;
+                    return (
+                      <div className="mt-4 space-y-3">
+                        {isLocked ? (
+                          <div className="rounded-2xl border border-default bg-canvas-subtle/60 px-4 py-3">
+                            <p className="text-sm text-foreground-subtle">
+                              🔒 Slutför föregående analys-steg för att låsa upp detta block.
+                            </p>
+                          </div>
+                        ) : existingOutput ? (
+                          <>
+                            <div className="rounded-2xl border border-movexum-bla/30 bg-movexum-pastell-bla p-5 dark:border-movexum-djupbla/50 dark:bg-movexum-morkbla/20">
+                              <p className="mb-2 text-xs font-medium text-movexum-morkbla dark:text-movexum-pastell-bla">
+                                Genererat av AI – verifiera innan delning
+                              </p>
+                              <pre className="whitespace-pre-wrap text-sm leading-relaxed text-foreground-muted">
+                                {existingOutput}
+                              </pre>
+                            </div>
+                            {!isDone && (
+                              <button
+                                type="button"
+                                disabled={isPending}
+                                onClick={() => {
+                                  setError(null);
+                                  setMessage(null);
+                                  setPendingPipelineBlockId(block.id);
+                                  startAi(async () => {
+                                    const res = await runPipelineBlockAction(
+                                      assignment.id,
+                                      block.id
+                                    );
+                                    setPendingPipelineBlockId(null);
+                                    if (res.error) { setError(res.error); return; }
+                                    if (res.output) {
+                                      setPipelineOutputs((prev) => ({
+                                        ...prev,
+                                        [outputKey]: res.output!
+                                      }));
+                                      setArtifacts((prev) => ({
+                                        ...prev,
+                                        [outputKey]: res.output
+                                      }));
+                                    }
+                                    setMessage('Analys klar.');
+                                  });
+                                }}
+                                className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-4 py-2 text-sm font-semibold text-foreground-muted transition hover:bg-canvas-subtle disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {isPending ? 'Analyserar…' : 'Kör om analys'}
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={isPending || isDone}
+                            onClick={() => {
+                              setError(null);
+                              setMessage(null);
+                              setPendingPipelineBlockId(block.id);
+                              startAi(async () => {
+                                const res = await runPipelineBlockAction(
+                                  assignment.id,
+                                  block.id
+                                );
+                                setPendingPipelineBlockId(null);
+                                if (res.error) { setError(res.error); return; }
+                                if (res.output) {
+                                  setPipelineOutputs((prev) => ({
+                                    ...prev,
+                                    [outputKey]: res.output!
+                                  }));
+                                  setArtifacts((prev) => ({
+                                    ...prev,
+                                    [outputKey]: res.output
+                                  }));
+                                }
+                                setMessage('Analys klar.');
+                              });
+                            }}
+                            className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {isPending ? 'Analyserar…' : `Kör ${block.title}`}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()
                 ) : block.type === 'ai_chat' ? (
                   <div className="mt-4 space-y-3">
                     <textarea

@@ -590,3 +590,146 @@ export async function completeWorkshopAction(
     return { error: err instanceof Error ? err.message : 'Kunde inte slutföra workshop.' };
   }
 }
+
+// ── Generic AI pipeline block runner ─────────────────────────────────────────
+// Runs any ai_pipeline block using the block's own pipeline_system_prompt and
+// pipeline_model. Stores output in artifacts_json[block.pipeline_output_key].
+// Used by WorkshopRunner for all ai_pipeline blocks, and by IntlWorkshopRunner
+// for the DA/diagnostic/scenarios blocks that are now ai_pipeline typed.
+
+export async function runPipelineBlockAction(
+  assignmentId: string,
+  blockId: string
+): Promise<WorkshopActionState & { output?: string }> {
+  const loaded = await loadAssignmentWithAccessCheck(assignmentId);
+  if ('error' in loaded) return { error: loaded.error };
+  const { pb, user, assignment } = loaded;
+
+  const workshop = assignment.expand?.workshop as Workshop | undefined;
+  if (!workshop) return { error: 'Workshop saknas på tilldelningen.' };
+
+  // Find the block in all modules
+  const allModules: WorkshopModule[] =
+    Array.isArray(workshop.modules) && (workshop.modules as WorkshopModule[]).length > 0
+      ? (workshop.modules as WorkshopModule[])
+      : [];
+  const block = allModules.flatMap((m) => m.blocks).find((b) => b.id === blockId);
+  if (!block) return { error: `Blocket "${blockId}" hittades inte i workshopen.` };
+  if (block.type !== 'ai_pipeline') return { error: 'Blocket är inte av typen ai_pipeline.' };
+  if (!block.pipeline_system_prompt?.trim()) {
+    return { error: 'AI-pipeline-blocket saknar system-prompt. Konfigurera det i byggaren.' };
+  }
+
+  const outputKey = block.pipeline_output_key ?? `pipeline_${blockId}`;
+  const model = (block.pipeline_model ?? 'mistral-medium-latest') as string;
+  const answers = (assignment.answers_json as Record<string, unknown>) || {};
+  const artifacts = (assignment.artifacts_json as Record<string, unknown>) || {};
+
+  // Check prerequisite
+  if (block.pipeline_requires_key) {
+    const prereq = artifacts[block.pipeline_requires_key];
+    if (!prereq || String(prereq).trim().length === 0) {
+      return {
+        error: `Slutför föregående steg (nyckel: ${block.pipeline_requires_key}) innan du kör detta block.`
+      };
+    }
+  }
+
+  // Build structured user content from answers + previous pipeline outputs + startup context
+  const s = (v: unknown, max = 2000) =>
+    String(v ?? '(ej angivet)').replace(/[<>]/g, '').slice(0, max);
+
+  let startupContext: Record<string, unknown> = {};
+  try {
+    startupContext = (await buildStartupContext(
+      pb,
+      String(assignment.startup),
+      user.tenant
+    )) as unknown as Record<string, unknown>;
+  } catch {
+    startupContext = {};
+  }
+
+  // Format answers keyed by block ID → readable text
+  const answerLines: string[] = ['## Svar från workshopen'];
+  for (const mod of allModules) {
+    answerLines.push(`\n### ${mod.title}`);
+    for (const b of mod.blocks) {
+      const val = answers[b.id];
+      if (val && typeof val === 'string' && val.trim()) {
+        answerLines.push(`**${b.title}:** ${s(val)}`);
+      }
+    }
+  }
+
+  // Include previous pipeline outputs as context
+  const prevOutputLines: string[] = [];
+  for (const mod of allModules) {
+    for (const b of mod.blocks) {
+      if (b.type === 'ai_pipeline' && b.pipeline_output_key && b.id !== blockId) {
+        const prevOut = artifacts[b.pipeline_output_key];
+        if (prevOut && String(prevOut).trim()) {
+          prevOutputLines.push(`\n## ${b.title} (tidigare analys)\n${s(prevOut, 3000)}`);
+        }
+      }
+    }
+  }
+
+  const userContent = [
+    `## Startup-kontext\n${JSON.stringify(startupContext, null, 2)}`,
+    answerLines.join('\n'),
+    ...prevOutputLines
+  ].join('\n\n');
+
+  const now = new Date().toISOString();
+  const run = await pb.collection(PB_COLLECTIONS.workshopRuns).create({
+    tenant: user.tenant,
+    assignment: assignment.id,
+    workshop: assignment.workshop,
+    startup: assignment.startup,
+    triggered_by: user.id,
+    status: 'running',
+    input: { type: 'pipeline', block_id: blockId, output_key: outputKey },
+    started_at: now
+  });
+
+  try {
+    const result = await callMistral(model, [
+      { role: 'system', content: block.pipeline_system_prompt },
+      { role: 'user', content: userContent }
+    ]);
+
+    const completedAt = new Date().toISOString();
+    await pb.collection(PB_COLLECTIONS.workshopRuns).update(String(run.id), {
+      status: 'succeeded',
+      output_md: result.text,
+      model,
+      tokens_in: result.usage.prompt_tokens,
+      tokens_out: result.usage.completion_tokens,
+      cost_estimate_usd: estimateCostUsd(model, result.usage.prompt_tokens, result.usage.completion_tokens),
+      completed_at: completedAt
+    });
+
+    await pb.collection(PB_COLLECTIONS.workshopAssignments).update(assignmentId, {
+      artifacts_json: {
+        ...artifacts,
+        [outputKey]: result.text,
+        [`${outputKey}_run_id`]: String(run.id),
+        [`${outputKey}_at`]: completedAt
+      },
+      status: assignment.status === 'planned' ? 'in_progress' : assignment.status,
+      started_at: (assignment as Record<string, unknown>).started_at || now,
+      last_saved_at: completedAt
+    });
+
+    revalidatePath(`/education/assignments/${assignmentId}`);
+    return { assignmentId, runId: String(run.id), output: result.text };
+  } catch (err) {
+    await pb.collection(PB_COLLECTIONS.workshopRuns).update(String(run.id), {
+      status: 'failed',
+      error: err instanceof Error ? err.message : 'Okänt fel',
+      completed_at: new Date().toISOString()
+    });
+    return { error: err instanceof Error ? err.message : 'Pipeline-anropet misslyckades.' };
+  }
+}

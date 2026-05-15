@@ -159,6 +159,7 @@ export type WorkshopBlockType =
   | 'video'
   | 'question'
   | 'ai_chat'
+  | 'ai_pipeline'
   | 'summary'
   | 'image'
   | 'test'
@@ -181,6 +182,11 @@ export interface WorkshopBlock {
   question_type?: 'single' | 'multiple';
   options?: WorkshopBlockOption[];
   required?: boolean;
+  // ai_pipeline-specific fields — set by coach in WorkshopBlockBuilder
+  pipeline_system_prompt?: string;
+  pipeline_model?: string;
+  pipeline_output_key?: string;
+  pipeline_requires_key?: string;
 }
 
 export interface WorkshopModule {
