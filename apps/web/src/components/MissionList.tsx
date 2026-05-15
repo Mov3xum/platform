@@ -68,8 +68,6 @@ export function MissionList({
     <div className="mx-card" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <div className="mx-card-head">
         <span className="mx-lab">{missions.length} uppdrag</span>
-        <span className="mx-grow" />
-        <span className="mx-chip mx-mono">⌘N</span>
       </div>
       <div style={{ overflowY: 'auto', flex: 1 }}>
         {missions.length === 0 ? (

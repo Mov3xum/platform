@@ -30,7 +30,7 @@ function initials(name?: string) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-export function MissionKanban({ missions }: { missions: Mission[] }) {
+export function MissionKanban({ missions, canCreate = false }: { missions: Mission[]; canCreate?: boolean }) {
   return (
     <div
       style={{
@@ -60,9 +60,11 @@ export function MissionKanban({ missions }: { missions: Mission[] }) {
               <span className="mx-mono mx-t-xs mx-t-up mx-fw-6">{col.label}</span>
               <span className="mx-mono mx-t-xs mx-muted">{items.length}</span>
               <span className="mx-grow" />
-              <Link href="/uppdrag/new" className="mx-btn mx-sm mx-ghost" style={{ padding: '2px 6px' }}>
-                <Icon name="plus" size={12} />
-              </Link>
+              {canCreate && (
+                <Link href="/uppdrag/new" className="mx-btn mx-sm mx-ghost" style={{ padding: '2px 6px' }}>
+                  <Icon name="plus" size={12} />
+                </Link>
+              )}
             </div>
             {items.length === 0 ? (
               <div className="mx-t-xs mx-muted" style={{ textAlign: 'center', padding: 16 }}>

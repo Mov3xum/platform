@@ -29,92 +29,6 @@ const FILTER_OPTIONS: Array<{ key: 'all' | 'open' | MissionStatus; label: string
   { key: 'done', label: 'Klart' }
 ];
 
-function demoMissions(tenant: string, userId: string): Mission[] {
-  const today = new Date();
-  const inDays = (n: number) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() + n);
-    return d.toISOString();
-  };
-  return [
-    {
-      id: 'demo_m1',
-      tenant,
-      title: 'Klimatkompass · Q2-uppföljning',
-      type: 'workshop',
-      status: 'in_progress',
-      issuer: userId,
-      recipients: [userId],
-      mentor: undefined,
-      startup: undefined,
-      due_date: inDays(7),
-      description: 'Genomför kompassmöte och dokumentera insikter.',
-      accent: 'purple',
-      stages_json: [
-        { id: 'assigned', label: 'Tilldelat', done: true, time: '2026-05-08 09:14' },
-        { id: 'received', label: 'Mottaget', done: true, time: '2026-05-09 10:02' },
-        { id: 'in_progress', label: 'Utförs', done: false },
-        { id: 'submission', label: 'Inlämning', done: false }
-      ],
-      artifacts_json: [
-        { id: 'a1', name: 'Klimatkompass-mall.pdf', size: '420 KB', created: inDays(-2) }
-      ],
-      created: inDays(-7),
-      updated: inDays(-1),
-      expand: {
-        issuer: { id: userId, display_name: 'Demo Issuer', email: 'demo@movexum.se' }
-      }
-    },
-    {
-      id: 'demo_m2',
-      tenant,
-      title: 'Sprint X · självskattning juni',
-      type: 'sprint_x',
-      status: 'preparation',
-      issuer: userId,
-      recipients: [userId],
-      due_date: inDays(14),
-      description: 'Kvartalsvis Sprint X-checkin.',
-      accent: 'copper',
-      stages_json: [
-        { id: 'assigned', label: 'Tilldelat', done: true, time: '2026-05-10 14:00' },
-        { id: 'self_assessment', label: 'Självskattning', done: false },
-        { id: 'review', label: 'Coach-granskning', done: false },
-        { id: 'commit', label: 'Commit', done: false }
-      ],
-      artifacts_json: [],
-      created: inDays(-3),
-      updated: inDays(-1),
-      expand: {
-        issuer: { id: userId, display_name: 'Demo Issuer', email: 'demo@movexum.se' }
-      }
-    },
-    {
-      id: 'demo_m3',
-      tenant,
-      title: 'Onboarding · Narva Health',
-      type: 'onboarding',
-      status: 'draft',
-      issuer: userId,
-      recipients: [],
-      due_date: inDays(21),
-      description: 'Kickoff och första uppdrag för nytt bolag.',
-      accent: 'brown',
-      stages_json: [
-        { id: 'kickoff', label: 'Kickoff', done: false },
-        { id: 'profile', label: 'Profil ifylld', done: false },
-        { id: 'first_mission', label: 'Första uppdrag', done: false }
-      ],
-      artifacts_json: [],
-      created: inDays(-1),
-      updated: inDays(-1),
-      expand: {
-        issuer: { id: userId, display_name: 'Demo Issuer', email: 'demo@movexum.se' }
-      }
-    }
-  ];
-}
-
 type SearchParams = { view?: string; status?: string; m?: string };
 
 export default async function UppdragPage({
@@ -132,18 +46,13 @@ export default async function UppdragPage({
   let missions: Mission[] = [];
   try {
     const res = await pb.collection(PB_COLLECTIONS.missions).getList<Mission>(1, 100, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: pb.filter('tenant = {:tenant}', { tenant: user.tenant }),
       sort: '-updated',
       expand: 'issuer,recipients,mentor,startup'
     });
     missions = res.items;
   } catch {
-    /* ignore — fall back to demo */
-  }
-
-  // Mock-fallback so empty-state isn't broken
-  if (missions.length === 0) {
-    missions = demoMissions(user.tenant, user.id);
+    /* ignore */
   }
 
   // Apply status filter
@@ -250,7 +159,7 @@ export default async function UppdragPage({
           )}
         </div>
       ) : (
-        <MissionKanban missions={filtered} />
+        <MissionKanban missions={filtered} canCreate={isStaff} />
       )}
 
       <div className="mx-action-bar" style={{ marginLeft: -24, marginRight: -24 }}>
