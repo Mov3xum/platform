@@ -647,13 +647,19 @@ export async function runQuarterlyRecalibrationAction(
 
   // Determine quarter number from existing revisions
   let quarterNumber = 1;
+  const revisionsFilter = pb.filter(
+    'strategy = {:strategyId} && revision_type = {:revisionType}',
+    { strategyId, revisionType: 'quarterly' }
+  );
   try {
-    const revisions = await pb.collection(PB_COLLECTIONS.strategyRevisions).getList(1, 100, {
-      filter: `strategy = "${strategyId}" && revision_type = "quarterly"`,
-      sort: '-quarter_number'
-    });
+    const revisions = await pb
+      .collection(PB_COLLECTIONS.strategyRevisions)
+      .getList<StrategyRevision & Record<string, unknown>>(1, 100, {
+        filter: revisionsFilter,
+        sort: '-quarter_number'
+      });
     if (revisions.items.length > 0) {
-      const latest = revisions.items[0] as StrategyRevision & Record<string, unknown>;
+      const latest = revisions.items[0];
       quarterNumber = (Number(latest.quarter_number) || 0) + 1;
     }
   } catch {
