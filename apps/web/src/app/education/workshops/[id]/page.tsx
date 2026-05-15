@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModule, hasRole } from '@/lib/rbac';
+import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { WorkshopAssignForm } from '../../WorkshopAssignForm';
 import { WorkshopStatusBadge } from '@/components/Badges';
 import type { Workshop, WorkshopAssignment, WorkshopBlock, WorkshopModule } from '@platform/shared';
@@ -26,7 +27,7 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
 
   let workshop: Workshop;
   try {
-    workshop = await pb.collection('workshops').getOne<Workshop>(id);
+    workshop = await pb.collection(PB_COLLECTIONS.workshops).getOne<Workshop>(id);
   } catch {
     notFound();
   }
@@ -66,7 +67,7 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
 
   try {
     recentAssignments = (
-      await pb.collection('workshop_assignments').getList<WorkshopAssignment>(1, 10, {
+      await pb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopAssignment>(1, 10, {
         filter: `tenant = "${user.tenant}" && workshop = "${id}"`,
         sort: '-created',
         expand: 'startup'

@@ -2,6 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
+import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { ToolRunStatusBadge, WorkshopAssignmentStatusBadge } from '@/components/Badges';
 import DashboardChat from '@/components/DashboardChat';
 import type { ToolRun, ToolRunStatus, WorkshopAssignment } from '@platform/shared';
@@ -66,7 +67,7 @@ export default async function DashboardPage() {
     try {
       const linkedFilter = user.linkedStartups.map((id) => `startup = "${id}"`).join(' || ');
       assignedWorkshops = (
-        await pb.collection('workshop_assignments').getList<WorkshopAssignment>(1, 5, {
+        await pb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopAssignment>(1, 5, {
           filter: `tenant = "${user.tenant}" && (${linkedFilter}) && status != "done"`,
           sort: 'due_date,created',
           expand: 'workshop,startup'
@@ -102,11 +103,11 @@ export default async function DashboardPage() {
 
     // Workshop completion stats
     try {
-      const totalResult = await pb.collection('workshop_assignments').getList(1, 1, {
+      const totalResult = await pb.collection(PB_COLLECTIONS.workshopAssignments).getList(1, 1, {
         filter: `tenant = "${user.tenant}"`,
         fields: 'id'
       });
-      const doneResult = await pb.collection('workshop_assignments').getList(1, 1, {
+      const doneResult = await pb.collection(PB_COLLECTIONS.workshopAssignments).getList(1, 1, {
         filter: `tenant = "${user.tenant}" && status = "done"`,
         fields: 'id'
       });
@@ -576,4 +577,3 @@ function KpiCard({
   );
   return href ? <Link href={href}>{inner}</Link> : <div>{inner}</div>;
 }
-

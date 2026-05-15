@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { canAccessModule, hasRole } from '@/lib/rbac';
 import { WorkshopAssignmentStatusBadge } from '@/components/Badges';
 import { WorkshopRunner } from '../../WorkshopRunner';
@@ -19,7 +20,7 @@ export default async function WorkshopAssignmentPage({
 
   let assignment: WorkshopAssignment;
   try {
-    assignment = await pb.collection('workshop_assignments').getOne<WorkshopAssignment>(id, {
+    assignment = await pb.collection(PB_COLLECTIONS.workshopAssignments).getOne<WorkshopAssignment>(id, {
       expand: 'workshop,startup,assigned_by,owner'
     });
   } catch {

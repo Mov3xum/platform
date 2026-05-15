@@ -1,6 +1,7 @@
 import { type Role } from '@platform/shared';
 import type { SessionUser } from '@/lib/auth.server';
 import { getServerPb } from '@/lib/auth.server';
+import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { unstable_cache } from 'next/cache';
 import { ThemeToggle } from './ThemeProvider';
 import { Logo } from './Logo';
@@ -22,7 +23,7 @@ const getAssignedWorkshopCount = unstable_cache(
 
     const pb = await getServerPb();
     const linkedFilter = linkedStartups.map((id) => `startup = "${id}"`).join(' || ');
-    const result = await pb.collection('workshop_assignments').getList(1, 1, {
+    const result = await pb.collection(PB_COLLECTIONS.workshopAssignments).getList(1, 1, {
       filter: `tenant = "${tenant}" && status != "done" && (${linkedFilter})`
     });
     return result.totalItems;

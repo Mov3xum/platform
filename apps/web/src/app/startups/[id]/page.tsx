@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getOneForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { canAccessModule, hasRole } from '@/lib/rbac';
 import {
   PhaseBadge,
@@ -196,7 +197,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       sort: '-created',
       expand: 'tool,tool_run'
     }),
-    pb.collection('workshop_assignments').getList<WorkshopAssignmentRecord>(1, 50, {
+    pb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopAssignmentRecord>(1, 50, {
       filter: `startup = "${id}" && tenant = "${user.tenant}"`,
       sort: '-created',
       expand: 'workshop,assigned_by'
