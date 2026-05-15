@@ -23,6 +23,26 @@ function toPbErrorLike(err: unknown): PbErrorLike {
   return {};
 }
 
+function detectMissingSchemaError(
+  normalizedMessage: string,
+  normalizedDetails: string,
+  statusCode?: number
+): boolean {
+  const hasMissingContextMarker =
+    normalizedMessage.includes('missing or invalid collection context') ||
+    normalizedDetails.includes('missing or invalid collection context');
+  const hasNoRowsMarker = normalizedDetails.includes('no rows in result set');
+  // PocketBase may return "missing collection context" explicitly, or as 404 with SQL "no rows".
+  return hasMissingContextMarker || (statusCode === 404 && hasNoRowsMarker);
+}
+
+function detectDuplicateKeyError(normalizedMessage: string): boolean {
+  return (
+    normalizedMessage.includes(WORKSHOP_KEY_UNIQUE_INDEX) ||
+    normalizedMessage.includes('unique constraint')
+  );
+}
+
 function toCreateWorkshopError(err: unknown): string {
   const pbError = toPbErrorLike(err);
   const message = err instanceof Error ? err.message : String(err ?? '');
@@ -30,23 +50,20 @@ function toCreateWorkshopError(err: unknown): string {
   const details = JSON.stringify(pbError.response ?? {});
   const normalizedDetails = details.toLowerCase();
   const statusCode = pbError.status;
-  const hasMissingContextMarker =
-    normalizedMessage.includes('missing or invalid collection context') ||
-    normalizedDetails.includes('missing or invalid collection context');
-  const hasNoRowsMarker = normalizedDetails.includes('no rows in result set');
-  // PocketBase may return "missing collection context" explicitly, or as 404 with SQL "no rows".
-  const isMissingCollectionContext = hasMissingContextMarker || (statusCode === 404 && hasNoRowsMarker);
+  const isMissingCollectionContext = detectMissingSchemaError(
+    normalizedMessage,
+    normalizedDetails,
+    statusCode
+  );
   if (isMissingCollectionContext) {
     console.error('[workshops] missing workshop schema while creating workshop', {
       statusCode,
-      message
+      message,
+      response: pbError.response ?? null
     });
     return 'Det går inte att spara workshop just nu på grund av en serverkonfiguration. Kontakta administratör och försök igen.';
   }
-  if (
-    normalizedMessage.includes(WORKSHOP_KEY_UNIQUE_INDEX) ||
-    normalizedMessage.includes('unique constraint')
-  ) {
+  if (detectDuplicateKeyError(normalizedMessage)) {
     return 'En workshop med samma nyckel finns redan i denna tenant. Välj en annan nyckel.';
   }
   if (message.trim().length > 0) return message;
