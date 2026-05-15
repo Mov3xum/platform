@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "./fonts.css";
 @import "@platform/shared/design/tokens.css";
+@import "./prototype.css";
 
 /*
  * Tailwind v4 @theme exposes brand-färger som utility-klasser.
