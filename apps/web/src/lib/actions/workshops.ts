@@ -16,7 +16,7 @@ function toCreateWorkshopError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err ?? '');
   const normalized = message.toLowerCase();
   if (normalized.includes('missing or invalid collection context')) {
-    return 'Det går inte att spara workshop just nu eftersom workshops-collection saknas i PocketBase. Kör schema-bootstrap/redeploy av PocketBase och försök igen.';
+    return 'Det går inte att spara workshop just nu eftersom workshop-schemat saknas i PocketBase. Kör schema-bootstrap/redeploy av PocketBase och försök igen.';
   }
   if (normalized.includes('idx_workshops_tenant_key') || normalized.includes('unique')) {
     return 'En workshop med samma nyckel finns redan i denna tenant. Välj en annan nyckel.';
