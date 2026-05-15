@@ -138,7 +138,26 @@ async function ensureRecord(collection, filter, data) {
 async function ensureAppUser(tenantId) {
   try {
     const existing = await pb.collection('users').getFirstListItem(`email = "${APP_USER_EMAIL}"`);
-    warn(`app-user "${APP_USER_EMAIL}" finns redan — hoppar över`);
+    const currentRoles = Array.isArray(existing.roles) ? existing.roles : [];
+    const nextRoles = currentRoles.includes('admin') ? currentRoles : [...currentRoles, 'admin'];
+    const needsUpdate =
+      existing.tenant !== tenantId ||
+      !currentRoles.includes('admin') ||
+      existing.display_name !== APP_USER_NAME;
+
+    if (needsUpdate) {
+      await pb.collection('users').update(existing.id, {
+        tenant: tenantId,
+        roles: nextRoles,
+        display_name: APP_USER_NAME,
+        verified: true
+      });
+      ok(`app-user "${APP_USER_EMAIL}" uppdaterad (tenant/roller/profil)`);
+      const refreshed = await pb.collection('users').getOne(existing.id);
+      return refreshed;
+    }
+
+    warn(`app-user "${APP_USER_EMAIL}" finns redan och är korrekt — hoppar över`);
     return existing;
   } catch (e) {
     if (e?.status !== 404) throw e;
