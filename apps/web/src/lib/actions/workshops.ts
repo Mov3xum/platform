@@ -20,16 +20,21 @@ function toCreateWorkshopError(err: unknown): string {
       ? JSON.stringify((err as { response?: unknown }).response ?? {})
       : '';
   const normalizedDetails = details.toLowerCase();
-  const isMissingCollectionContext =
-    (normalizedMessage.includes('missing or invalid collection context') ||
-      normalizedDetails.includes('missing or invalid collection context') ||
-      normalizedDetails.includes('no rows in result set')) &&
-    ((typeof err === 'object' && err !== null && 'status' in err
+  const statusCode =
+    typeof err === 'object' && err !== null && 'status' in err
       ? (err as { status?: number }).status
-      : undefined) === 404 ||
-      normalizedMessage.includes('missing or invalid collection context'));
+      : undefined;
+  const hasMissingContextMarker =
+    normalizedMessage.includes('missing or invalid collection context') ||
+    normalizedDetails.includes('missing or invalid collection context');
+  const hasNoRowsMarker = normalizedDetails.includes('no rows in result set');
+  const isMissingCollectionContext = hasMissingContextMarker || (statusCode === 404 && hasNoRowsMarker);
   if (isMissingCollectionContext) {
-    return 'Det går inte att spara workshop just nu eftersom workshop-schemat saknas i PocketBase. Kör schema-bootstrap/redeploy av PocketBase och försök igen.';
+    console.error('[workshops] missing workshop schema while creating workshop', {
+      statusCode,
+      message
+    });
+    return 'Det går inte att spara workshop just nu på grund av en serverkonfiguration. Kontakta administratör och försök igen.';
   }
   if (
     normalizedMessage.includes('idx_workshops_tenant_key') ||
