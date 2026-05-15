@@ -26,7 +26,7 @@ export function WorkshopCreateForm() {
         <h2 className="text-base font-semibold text-foreground">Grundinformation</h2>
         <div>
           <label htmlFor="key" className={labelClass}>
-            Nyckel *
+            Unikt ID *
           </label>
           <input id="key" name="key" required className={inputClass} placeholder="t.ex. workshop_pitch_story" />
         </div>

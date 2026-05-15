@@ -74,7 +74,7 @@ export function ToolForm({ mode, tool }: ToolFormProps) {
       {mode === 'create' && (
         <div>
           <label htmlFor="key" className={labelClass}>
-            Nyckel (unik per tenant) *
+            Unikt ID *
           </label>
           <input
             id="key"
