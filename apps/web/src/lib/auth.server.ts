@@ -61,9 +61,23 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   const pb = await getServerPb();
   if (!pb.authStore.isValid || !pb.authStore.model) return null;
 
-  const m = pb.authStore.model as Record<string, unknown> & {
+  const authModel = pb.authStore.model as Record<string, unknown> & {
     expand?: { tenant?: { id: string; name: string; slug: string } };
   };
+
+  let m = authModel;
+
+  // Refresh from PocketBase to avoid stale cookie model after role/tenant updates.
+  // If refresh fails (network/rule issues), fall back to authStore model.
+  const authUserId = typeof authModel.id === 'string' ? authModel.id : '';
+  if (authUserId) {
+    try {
+      const fresh = await pb.collection('users').getOne(authUserId, { expand: 'tenant' });
+      m = fresh as typeof m;
+    } catch {
+      // Keep authModel fallback.
+    }
+  }
 
   const tenantId = (m.tenant as string) || '';
   const tenant = m.expand?.tenant;
