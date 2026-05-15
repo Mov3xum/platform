@@ -153,14 +153,14 @@ export default async function IdagPage() {
 
   const firstName = user.name.split(' ')[0] || user.email;
   const today = new Date();
-  const aiDraftCount = report ? 1 : 0;
+  const aiDraftsAvailable = Boolean(report);
 
   return (
     <div className="mx-view-pad">
       <PageHead
         crumb="Hemmaplan / Idag"
         title={`${greeting()}, ${firstName}.`}
-        subtitle={`${fmtDate(today)}. ${activeMissionsCount} aktiva uppdrag och AI har förberett ${aiDraftCount} utkast.`}
+        subtitle={`${fmtDate(today)}. ${activeMissionsCount} aktiva uppdrag och AI har förberett ${aiDraftsAvailable ? 'ett' : 'inga'} utkast.`}
         actions={
           <Link href="/uppdrag" className="mx-btn mx-primary">
             <Icon name="plus" size={13} /> Nytt uppdrag
