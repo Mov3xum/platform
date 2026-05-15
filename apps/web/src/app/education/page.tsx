@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModule, hasRole } from '@/lib/rbac';
+import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { WorkshopAssignmentStatusBadge, WorkshopStatusBadge } from '@/components/Badges';
 import type { Workshop, WorkshopAssignment } from '@platform/shared';
 
@@ -16,7 +17,7 @@ export default async function EducationPage() {
   let assignments: WorkshopAssignment[] = [];
 
   try {
-    const workshopsResult = await pb.collection('workshops').getList<Workshop>(1, 200, {
+    const workshopsResult = await pb.collection(PB_COLLECTIONS.workshops).getList<Workshop>(1, 200, {
       filter: `tenant = "${user.tenant}" && active = true`,
       sort: 'title'
     });
@@ -31,7 +32,7 @@ export default async function EducationPage() {
         ? user.linkedStartups.map((id) => `startup = "${id}"`).join(' || ')
         : '';
     assignments = (
-      await pb.collection('workshop_assignments').getList<WorkshopAssignment>(1, 100, {
+      await pb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopAssignment>(1, 100, {
         filter: `tenant = "${user.tenant}"${linkedFilter ? ` && (${linkedFilter})` : ''}`,
         sort: '-created',
         expand: 'workshop,startup'
