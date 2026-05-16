@@ -61,7 +61,7 @@ export async function saveModuleTogglesAction(
     disabledModules = parsed
       .filter((v): v is string => typeof v === 'string')
       .filter((id) => ALLOWED_MODULE_IDS.has(id));
-  } catch {
+  } catch (err) {
     console.error('[settings] saveModuleToggles parse failed', {
       tenantId: user.tenant,
       error: err
