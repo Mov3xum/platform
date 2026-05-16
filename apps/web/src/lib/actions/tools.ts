@@ -214,7 +214,7 @@ export async function createToolAction(
   const user = await requireUser();
   requireRole(user.roles, ['admin', 'incubator_lead']);
 
-  const canEditPrompt = hasRole(user.roles, ['admin', 'incubator_lead']);
+  const canEditAgentConfig = hasRole(user.roles, ['admin', 'incubator_lead']);
 
   const pb = await getServerPb();
 
@@ -232,7 +232,7 @@ export async function createToolAction(
     created_by: user.id
   };
 
-  if (canEditPrompt) {
+  if (canEditAgentConfig) {
     // Movexum staff (admin/incubator_lead) sätter systemprompt och modell.
     data.prompt_template = String(formData.get('prompt_template') || '').trim();
     data.model = String(formData.get('model') || '') || null;
@@ -268,7 +268,7 @@ export async function updateToolAction(
   const user = await requireUser();
   requireRole(user.roles, ['admin', 'incubator_lead']);
 
-  const canEditPrompt = hasRole(user.roles, ['admin', 'incubator_lead']);
+  const canEditAgentConfig = hasRole(user.roles, ['admin', 'incubator_lead']);
 
   const pb = await getServerPb();
 
@@ -293,7 +293,7 @@ export async function updateToolAction(
   };
 
   // Movexum staff (admin/incubator_lead) kan uppdatera systemprompt och modell.
-  if (canEditPrompt) {
+  if (canEditAgentConfig) {
     if (formData.has('prompt_template')) {
       data.prompt_template = String(formData.get('prompt_template') || '').trim();
     }

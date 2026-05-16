@@ -79,8 +79,17 @@ export function ToolForm({ mode, tool, canEditPrompt = false }: ToolFormProps) {
         </p>
         <ol className="mt-2 list-decimal space-y-1 pl-4 text-sm text-foreground-muted">
           <li>Döp agenten och välj kategori.</li>
-          <li>Sätt systemprompt och modell.</li>
-          <li>Välj roller och aktivera agenten.</li>
+          {canEditPrompt ? (
+            <>
+              <li>Sätt systemprompt och modell.</li>
+              <li>Välj roller och aktivera agenten.</li>
+            </>
+          ) : (
+            <>
+              <li>Välj roller och aktivera agenten.</li>
+              <li>Spara och be admin/incubator_lead komplettera prompt/modell vid behov.</li>
+            </>
+          )}
         </ol>
       </div>
 
