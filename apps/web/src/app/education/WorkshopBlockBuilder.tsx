@@ -390,7 +390,7 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                       className="shrink-0 text-sm text-foreground-muted"
                       title={meta?.label}
                       role="img"
-                      aria-label={meta?.label ?? 'Blocktyp'}
+                      aria-label={meta?.label ?? 'Workshopblock'}
                     >
                       {meta?.iconId ? BLOCK_ICON_TEXT[meta.iconId] : 'BL'}
                     </span>
