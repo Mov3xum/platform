@@ -98,45 +98,6 @@ export default async function InvesterarePage() {
     return Date.now() - t < 31 * 24 * 60 * 60 * 1000;
   }).length;
 
-  // Build mock fallback when DB is empty so layout still renders
-  const showMock = deals.length === 0 && investors.length === 0;
-  const mockDeals: DealWithExpand[] = showMock
-    ? [
-        {
-          id: 'mock-1',
-          tenant: user.tenant,
-          startup: 'mock-s1',
-          investor: 'mock-i1',
-          stage: 'intro',
-          amount: 1_500_000,
-          last_activity: new Date().toISOString(),
-          created: new Date().toISOString(),
-          updated: new Date().toISOString(),
-          expand: {
-            startup: { id: 'mock-s1', name: 'Exempel AB' },
-            investor: { id: 'mock-i1', name: 'Norrlands Ventures' }
-          }
-        },
-        {
-          id: 'mock-2',
-          tenant: user.tenant,
-          startup: 'mock-s2',
-          investor: 'mock-i2',
-          stage: 'meeting',
-          amount: 4_000_000,
-          last_activity: new Date(Date.now() - 86400000 * 3).toISOString(),
-          created: new Date().toISOString(),
-          updated: new Date().toISOString(),
-          expand: {
-            startup: { id: 'mock-s2', name: 'Beta Tech' },
-            investor: { id: 'mock-i2', name: 'Almi Invest' }
-          }
-        }
-      ]
-    : [];
-
-  const renderDeals = showMock ? mockDeals : deals;
-
   const investorDealCount = new Map<string, number>();
   for (const d of deals) {
     if (d.stage !== 'close') {
@@ -172,23 +133,14 @@ export default async function InvesterarePage() {
         right={<Chip mono>Dra kort för att flytta steg</Chip>}
       />
 
-      {renderDeals.length === 0 ? (
+      {deals.length === 0 ? (
         <Card style={{ padding: 24, textAlign: 'center' }}>
           <div className="mx-muted mx-t-13">
             Inga deals registrerade ännu. Logga ett intro för att komma igång.
           </div>
         </Card>
       ) : (
-        <DealFlowBoard deals={renderDeals} />
-      )}
-
-      {showMock && (
-        <div
-          className="mx-mono mx-t-xs mx-muted"
-          style={{ marginTop: 8, fontStyle: 'italic' }}
-        >
-          Exempeldata visas — inga deals i databasen.
-        </div>
+        <DealFlowBoard deals={deals} />
       )}
 
       {/* ── Investerare ──────────────────────────────────── */}
