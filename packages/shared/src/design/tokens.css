@@ -133,12 +133,14 @@
   --color-ring: #002c40;
 
   /* === Startup-faser (mappade mot brand) =========================== */
-  --color-phase-idea: #8e6fd6;          /* Ljuslila */
-  --color-phase-pre-revenue: #f0d22e;   /* Movexum gul */
-  --color-phase-early-revenue: #4a7d4a; /* Movexum grön */
-  --color-phase-growth: #00a8de;        /* Movexum blå */
-  --color-phase-scale: #d67e47;         /* Movexum orange */
-  --color-phase-exit: #5d5d5d;          /* Neutral */
+  --color-phase-paus: #5d5d5d;            /* Neutral */
+  --color-phase-inflode: #005470;         /* Djupblå */
+  --color-phase-lead: #6138b5;            /* Movexum lila */
+  --color-phase-boost-chamber: #4a7d4a;   /* Movexum grön */
+  --color-phase-incubation: #f0d22e;      /* Movexum gul */
+  --color-phase-prescale: #d67e47;        /* Movexum orange */
+  --color-phase-acceleration: #00a8de;    /* Movexum blå */
+  --color-phase-alumni: #5d5d5d;          /* Neutral */
 }
 
 /* === Dark mode (klassbaserat på <html>) ============================= */

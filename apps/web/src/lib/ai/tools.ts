@@ -43,7 +43,7 @@ export function buildChatTools(collections: ExposedCollection[]): MistralToolDef
               type: 'string',
               description:
                 'PocketBase-filteruttryck (utan tenant — det läggs till automatiskt). ' +
-                'Exempel: `name ~ "Enava"`, `phase = "growth" && irl_level >= 5`. ' +
+                'Exempel: `name ~ "Enava"`, `phase = "incubation" && irl_level >= 5`. ' +
                 'Lämna tomt för alla rader (max 50).'
             },
             sort: {

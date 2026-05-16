@@ -46,7 +46,7 @@ export function StartupForm({ action, initial = {}, submitLabel }: StartupFormPr
 
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Fas" error={fe.phase} required>
-          <select name="phase" defaultValue={initial.phase ?? 'idea'} className={inputClass} required>
+          <select name="phase" defaultValue={initial.phase ?? 'inflode'} className={inputClass} required>
             {ALL_PHASES.map((p) => (
               <option key={p} value={p}>
                 {phaseLabels[p]}
