@@ -1,12 +1,14 @@
 /*
  * Movexum-logotyp.
  *
- * Renderar wordmark "movexum" som inline HTML-text med Sora Variable.
+ * Renderar wordmark "movexum" som inline HTML-text med Sora Variable,
+ * eller en anpassad tenant-logotyp om logoLightUrl/logoDarkUrl är satta.
  * Self-hosted fonten laddas via fonts.css, vilket garanterar korrekt
  * rendering oavsett kontext.
  */
 
 import Link from 'next/link';
+import Image from 'next/image';
 
 type LogoProps = {
   href?: string;
@@ -14,6 +16,8 @@ type LogoProps = {
   width?: number;
   height?: number;
   variant?: 'auto' | 'light' | 'dark' | 'flex';
+  logoLightUrl?: string;
+  logoDarkUrl?: string;
 };
 
 export function Logo({
@@ -21,7 +25,9 @@ export function Logo({
   className = '',
   width = 140,
   height = 32,
-  variant = 'auto'
+  variant = 'auto',
+  logoLightUrl,
+  logoDarkUrl
 }: LogoProps) {
   // Scale font-size from the height prop (wordmark text sits ~70% of height)
   const fontSize = Math.round(height * 0.72);
@@ -38,6 +44,19 @@ export function Logo({
     minWidth: width ? `${width}px` : undefined,
   };
 
+  const imgStyle: React.CSSProperties = {
+    width: 'auto',
+    maxWidth: `${width}px`,
+    maxHeight: `${height}px`,
+    objectFit: 'contain',
+    display: 'block',
+  };
+
+  // Precompute per-variant image sources to avoid non-null assertions in JSX
+  const lightSrc = logoLightUrl || logoDarkUrl || '';
+  const darkSrc = logoDarkUrl || logoLightUrl || '';
+  const flexSrc = logoLightUrl || logoDarkUrl || '';
+
   return (
     <Link
       href={href}
@@ -47,22 +66,77 @@ export function Logo({
     >
       {variant === 'auto' ? (
         <>
-          {/* Light mode: svart wordmark */}
-          <span style={{ ...baseStyle, color: '#121212' }} className="block dark:hidden">
-            movexum
+          {/* Light mode */}
+          <span className="block dark:hidden">
+            {logoLightUrl ? (
+              <Image
+                src={logoLightUrl}
+                alt="Logotyp"
+                width={width}
+                height={height}
+                style={imgStyle}
+                unoptimized
+              />
+            ) : (
+              <span style={{ ...baseStyle, color: '#121212' }}>movexum</span>
+            )}
           </span>
-          {/* Dark mode: vit wordmark */}
-          <span style={{ ...baseStyle, color: '#f2f2f2' }} className="hidden dark:block">
-            movexum
+          {/* Dark mode */}
+          <span className="hidden dark:block">
+            {darkSrc ? (
+              <Image
+                src={darkSrc}
+                alt="Logotyp"
+                width={width}
+                height={height}
+                style={imgStyle}
+                unoptimized
+              />
+            ) : (
+              <span style={{ ...baseStyle, color: '#f2f2f2' }}>movexum</span>
+            )}
           </span>
         </>
       ) : variant === 'light' ? (
-        <span style={{ ...baseStyle, color: '#121212' }}>movexum</span>
+        lightSrc ? (
+          <Image
+            src={lightSrc}
+            alt="Logotyp"
+            width={width}
+            height={height}
+            style={imgStyle}
+            unoptimized
+          />
+        ) : (
+          <span style={{ ...baseStyle, color: '#121212' }}>movexum</span>
+        )
       ) : variant === 'dark' ? (
-        <span style={{ ...baseStyle, color: '#f2f2f2' }}>movexum</span>
+        darkSrc ? (
+          <Image
+            src={darkSrc}
+            alt="Logotyp"
+            width={width}
+            height={height}
+            style={imgStyle}
+            unoptimized
+          />
+        ) : (
+          <span style={{ ...baseStyle, color: '#f2f2f2' }}>movexum</span>
+        )
       ) : (
         /* flex — currentColor */
-        <span style={{ ...baseStyle, color: 'currentColor' }}>movexum</span>
+        flexSrc ? (
+          <Image
+            src={flexSrc}
+            alt="Logotyp"
+            width={width}
+            height={height}
+            style={imgStyle}
+            unoptimized
+          />
+        ) : (
+          <span style={{ ...baseStyle, color: 'currentColor' }}>movexum</span>
+        )
       )}
     </Link>
   );

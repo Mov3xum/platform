@@ -20,6 +20,8 @@ export interface SessionUser {
   tenantName?: string;
   linkedStartups: string[];
   avatarUrl?: string;
+  tenantLogoLightUrl?: string;
+  tenantLogoDarkUrl?: string;
   disabledModules: string[];
 }
 
@@ -86,11 +88,22 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     name: string;
     slug: string;
     disabled_modules?: unknown;
+    logo_light?: string;
+    logo_dark?: string;
   }) | undefined;
 
   const avatarFilename = m.avatar as string | undefined;
   const avatarUrl = avatarFilename
     ? `${PUBLIC_PB_URL}/api/files/users/${m.id as string}/${avatarFilename}`
+    : undefined;
+
+  const logoLightFilename = tenant?.logo_light;
+  const logoDarkFilename = tenant?.logo_dark;
+  const tenantLogoLightUrl = logoLightFilename
+    ? `${PUBLIC_PB_URL}/api/files/tenants/${tenantId}/${logoLightFilename}`
+    : undefined;
+  const tenantLogoDarkUrl = logoDarkFilename
+    ? `${PUBLIC_PB_URL}/api/files/tenants/${tenantId}/${logoDarkFilename}`
     : undefined;
 
   // Hämta disabled_modules från tenant + user (user har företräde som extra avstängningar).
@@ -117,6 +130,8 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     tenantName: tenant?.name,
     linkedStartups: (m.linked_startups as string[]) || [],
     avatarUrl,
+    tenantLogoLightUrl,
+    tenantLogoDarkUrl,
     disabledModules
   };
 }
