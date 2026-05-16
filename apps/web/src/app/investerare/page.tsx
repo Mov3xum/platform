@@ -106,7 +106,7 @@ export default async function InvesterarePage() {
   }
 
   return (
-    <div className="mx-view-pad mx-wide" style={{ padding: '20px 24px 80px' }}>
+    <div className="mx-view-pad mx-wide">
       <PageHead
         crumb="Hemmaplan / Investerarrelationer"
         title="Investerarrelationer"

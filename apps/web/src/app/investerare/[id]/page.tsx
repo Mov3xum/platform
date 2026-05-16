@@ -96,7 +96,7 @@ export default async function InvestorDetailPage({
   const totalKr = deals.reduce((s, d) => s + (d.amount || 0), 0);
 
   return (
-    <div className="mx-view-pad mx-wide" style={{ padding: '20px 24px 80px' }}>
+    <div className="mx-view-pad mx-wide">
       <PageHead
         crumb={`Hemmaplan / Investerarrelationer / ${investor.name}`}
         title={investor.name}
