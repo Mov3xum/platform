@@ -110,25 +110,27 @@
   --color-neutral-900: #121212;
 
   /* === Semantic surface tokens (light mode) ========================
-   * Dessa är de tokens som ALL UI ska använda så att dark mode
-   * fungerar utan att lägga till `dark:`-varianter överallt.
+   * Movexum OS · Startupkompass-skiftet (2026-05):
+   * Canvas är ren vit, paper-ytor neutrala (ingen blå-cast), ljusblå
+   * reserveras för information/länkar. Mörkblå (#002c40) är signatur-
+   * och brand-färg — lila finns kvar som sekundär accent.
    */
-  --color-canvas: #f2f2f2;            /* Vit */
-  --color-canvas-subtle: #ebfafc;     /* Pastell blå */
-  --color-canvas-muted: #e4dbfe;      /* Pastell lila */
+  --color-canvas: #ffffff;            /* Ren vit */
+  --color-canvas-subtle: #fafafa;     /* Paper — neutral */
+  --color-canvas-muted: #f4f4f5;      /* Paper-deep — neutral */
   --color-surface: #ffffff;
   --color-surface-elevated: #ffffff;
-  --color-border-default: #e6e6e6;
-  --color-border-strong: #cccccc;
-  --color-foreground: #121212;        /* Svart */
-  --color-foreground-muted: #404040;
-  --color-foreground-subtle: #5d5d5d;
-  --color-foreground-inverse: #f2f2f2;
-  --color-brand: #6138b5;             /* Movexum lila */
-  --color-brand-hover: #532ea0;
-  --color-brand-foreground: #f2f2f2;
+  --color-border-default: #e5e5e5;
+  --color-border-strong: #d4d4d4;
+  --color-foreground: #0a0a0a;        /* Ink */
+  --color-foreground-muted: #3f3f3f;
+  --color-foreground-subtle: #737373;
+  --color-foreground-inverse: #fafafa;
+  --color-brand: #002c40;             /* Movexum mörkblå — primär */
+  --color-brand-hover: #003b54;
+  --color-brand-foreground: #ffffff;
   --color-link: #005470;              /* Djupblå */
-  --color-ring: #6138b5;
+  --color-ring: #002c40;
 
   /* === Startup-faser (mappade mot brand) =========================== */
   --color-phase-idea: #8e6fd6;          /* Ljuslila */
@@ -141,22 +143,22 @@
 
 /* === Dark mode (klassbaserat på <html>) ============================= */
 .dark {
-  --color-canvas: #121212;            /* Svart */
-  --color-canvas-subtle: #1c1c1c;
-  --color-canvas-muted: #2a2a2a;
-  --color-surface: #1c1c1c;
-  --color-surface-elevated: #2a2a2a;
+  --color-canvas: #0a0a0a;
+  --color-canvas-subtle: #161616;
+  --color-canvas-muted: #1f1f1f;
+  --color-surface: #161616;
+  --color-surface-elevated: #1f1f1f;
   --color-border-default: #2a2a2a;
-  --color-border-strong: #404040;
-  --color-foreground: #f2f2f2;        /* Vit */
+  --color-border-strong: #3a3a3a;
+  --color-foreground: #f5f5f5;
   --color-foreground-muted: #cccccc;
-  --color-foreground-subtle: #a8a8a8;
-  --color-foreground-inverse: #121212;
-  --color-brand: #8e6fd6;             /* Ljuslila — bättre kontrast på svart */
-  --color-brand-hover: #a98ce8;
-  --color-brand-foreground: #121212;
-  --color-link: #00a8de;              /* Movexum blå */
-  --color-ring: #8e6fd6;
+  --color-foreground-subtle: #a3a3a3;
+  --color-foreground-inverse: #0a0a0a;
+  --color-brand: #4fc4ea;             /* Ljusare blå — kontrast på svart */
+  --color-brand-hover: #8fdcf2;
+  --color-brand-foreground: #002c40;
+  --color-link: #4fc4ea;
+  --color-ring: #4fc4ea;
 
   /* Spegelvänd extremerna i skalorna så `bg-primary-50` etc. förblir
      en "subtle" yta även i dark mode. */

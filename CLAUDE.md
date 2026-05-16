@@ -105,16 +105,28 @@ i UI och bevara minst 16 px luft runtomkring.
 
 ### 2.3 Roller per färg
 
-- **Movexum lila (`#6138b5`)** är primär brand. Används för CTA, fokus
-  och accenter i light mode.
-- **Ljuslila (`#8e6fd6`)** är primär i dark mode (bättre kontrast på svart).
-- **Movexum blå (`#00a8de`)** används för länkar / informationsaccent.
+> **Startupkompass-skiftet (2026-05).** Movexum OS har bytt visuellt
+> uttryck till Startupkompassens paper/ink-känsla: ren vit canvas,
+> mörkblå (`#002c40`) som signaturfärg, neutrala paper-ytor, ljusblå
+> reserverad för länkar/info. Mörkblå är ny primär brand-färg; lila
+> blir sekundär accent.
+
+- **Mörkblå (`#002c40`)** är primär brand. CTA, fokusring, rail,
+  knappar, top-of-page-accent. I dark mode lyfts den till ljusblå
+  (`#4fc4ea`) för kontrast.
 - **Djupblå (`#005470`)** används för länkar i light mode.
+- **Movexum blå (`#00a8de`)** används som info-accent och länkfärg i
+  dark mode. **Aldrig som stor bakgrundsyta.**
+- **Movexum lila (`#6138b5`)** är nu sekundär accent — avatars, chips,
+  utbildningsmoduler. **Inte** standard-CTA längre.
+- **Ljuslila (`#8e6fd6`)** är sekundär accent i dark mode.
 - **Movexum grön / Pastell grön** = positiv status (active, achieved).
 - **Movexum gul / Mörkgul** = varning / paused.
 - **Movexum orange / Mörkorange** = error / rejected (vi använder INTE
   vanlig "röd" — Movexums profil saknar röd helt).
-- **Pasteller** används som lugn yta i light mode (bg-canvas-subtle, bg-tags m.m.).
+- **Pasteller** används sparsamt — bara på små tags/chips, aldrig
+  fyllande på stora kort eller canvas. Pastell-blå är särskilt
+  återhållsam efter skiftet.
 - **Mörka tonerna** används som accenter i dark mode.
 
 ### 2.4 Typografi (BINDANDE)
@@ -167,15 +179,15 @@ exponerar två sorters tokens:
 
 | Semantisk token         | Light mode                     | Dark mode                      |
 | ----------------------- | ------------------------------ | ------------------------------ |
-| `--color-canvas`        | Vit `#f2f2f2`                  | Svart `#121212`                |
-| `--color-canvas-subtle` | Pastell blå `#ebfafc`          | `#1c1c1c`                      |
-| `--color-canvas-muted`  | Pastell lila `#e4dbfe`         | `#2a2a2a`                      |
-| `--color-surface`       | Vit `#ffffff`                  | `#1c1c1c`                      |
-| `--color-foreground`    | Svart `#121212`                | Vit `#f2f2f2`                  |
-| `--color-foreground-muted` | `#404040`                   | `#cccccc`                      |
-| `--color-brand`         | Movexum lila `#6138b5`         | Ljuslila `#8e6fd6`             |
-| `--color-brand-foreground` | Vit `#f2f2f2`               | Svart `#121212`                |
-| `--color-link`          | Djupblå `#005470`              | Movexum blå `#00a8de`          |
+| `--color-canvas`        | Ren vit `#ffffff`              | `#0a0a0a`                      |
+| `--color-canvas-subtle` | Paper `#fafafa` (neutral)      | `#161616`                      |
+| `--color-canvas-muted`  | Paper-deep `#f4f4f5` (neutral) | `#1f1f1f`                      |
+| `--color-surface`       | Vit `#ffffff`                  | `#161616`                      |
+| `--color-foreground`    | Ink `#0a0a0a`                  | `#f5f5f5`                      |
+| `--color-foreground-muted` | `#3f3f3f`                   | `#cccccc`                      |
+| `--color-brand`         | Mörkblå `#002c40`              | Ljusblå `#4fc4ea`              |
+| `--color-brand-foreground` | Vit `#ffffff`               | Mörkblå `#002c40`              |
+| `--color-link`          | Djupblå `#005470`              | Ljusblå `#4fc4ea`              |
 
 ### 3.3 Tailwind utility-klasser
 
