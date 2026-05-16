@@ -89,15 +89,15 @@
 }
 
 html.dark {
-  --mx-canvas:     #0a0a0a;
-  --mx-paper:      #161616;
-  --mx-paper-2:    #1f1f1f;
-  --mx-paper-3:    #262626;
-  --mx-line:       #2a2a2a;
-  --mx-line-soft:  #1f1f1f;
-  --mx-line-strong:#3a3a3a;
-  --mx-muted:      #a3a3a3;
-  --mx-muted-2:    #888;
+  --mx-canvas:     #000000;
+  --mx-paper:      #0a0a0a;
+  --mx-paper-2:    #111111;
+  --mx-paper-3:    #181818;
+  --mx-line:       #1e1e1e;
+  --mx-line-soft:  #141414;
+  --mx-line-strong:#2d2d2d;
+  --mx-muted:      #888888;
+  --mx-muted-2:    #555555;
   --mx-ink:        #f5f5f5;
   --mx-ink-2:      #d4d4d4;
   --mx-ink-3:      #b3b3b3;
@@ -126,8 +126,8 @@ html.dark {
    ============================================================ */
 
 .mx-rail {
-  background: #002c40; /* Movexum Mörkblå - alltid */
-  color: rgba(255, 255, 255, 0.78);
+  background: #000000;
+  color: rgba(255, 255, 255, 0.72);
   display: flex;
   flex-direction: column;
   position: sticky;
@@ -135,6 +135,7 @@ html.dark {
   height: 100vh;
   z-index: 30;
   overflow: hidden;
+  border-right: 1px solid rgba(141, 111, 214, 0.12);
 }
 
 .mx-rail-head {
@@ -145,7 +146,7 @@ html.dark {
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
-.mx-rail-brand img {
+.mx-rail-brand {
   display: block;
 }
 
@@ -190,7 +191,7 @@ html.dark {
 }
 
 .mx-rail-item.active {
-  background: rgba(255,255,255,0.1);
+  background: rgba(141, 111, 214, 0.12);
   color: white;
 }
 
@@ -201,8 +202,9 @@ html.dark {
   top: 6px;
   bottom: 6px;
   width: 3px;
-  background: #f0d22e; /* Movexum gul som live-indikator */
+  background: #8e6fd6;
   border-radius: 0 3px 3px 0;
+  box-shadow: 0 0 10px #8e6fd6, 0 0 20px rgba(141, 111, 214, 0.5);
 }
 
 .mx-rail-item .mx-ico { opacity: .65; flex-shrink: 0; }
@@ -220,8 +222,8 @@ html.dark {
 }
 
 .mx-rail-item.active .mx-count {
-  background: rgba(240, 210, 46, 0.18);
-  color: #f0d22e;
+  background: rgba(141, 111, 214, 0.22);
+  color: #c9b6fb;
 }
 
 .mx-rail-foot {
@@ -368,8 +370,9 @@ html.dark {
   top: 6px; right: 6px;
   width: 6px; height: 6px;
   border-radius: 50%;
-  background: #d67e47;
+  background: #8e6fd6;
   border: 1.5px solid var(--mx-canvas);
+  box-shadow: 0 0 6px rgba(141, 111, 214, 0.8);
 }
 
 /* ============================================================
@@ -492,6 +495,9 @@ html.dark {
   background: #002c40;
   border-color: #002c40;
   color: white;
+  border-radius: 999px;
+  padding-left: 18px;
+  padding-right: 18px;
 }
 
 .mx-btn.mx-primary:hover { background: #003b54; border-color: #003b54; }
@@ -500,6 +506,9 @@ html.dark {
   background: #6138b5;
   border-color: #6138b5;
   color: white;
+  border-radius: 999px;
+  padding-left: 18px;
+  padding-right: 18px;
 }
 
 .mx-btn.mx-brand:hover { background: #452e75; border-color: #452e75; }
@@ -574,8 +583,8 @@ select.mx-input {
 .mx-textarea:focus,
 select.mx-input:focus {
   outline: none;
-  border-color: #002c40;
-  box-shadow: 0 0 0 3px rgba(0, 44, 64, .12);
+  border-color: #6138b5;
+  box-shadow: 0 0 0 3px rgba(97, 56, 181, .14);
 }
 
 .mx-label {
@@ -688,7 +697,7 @@ select.mx-input:focus {
 
 .mx-cmdk-shade {
   position: fixed; inset: 0;
-  background: rgba(0,44,64,.4);
+  background: rgba(10, 0, 30, 0.6);
   backdrop-filter: blur(8px);
   display: grid; place-items: start center;
   padding-top: 12vh;
@@ -848,8 +857,8 @@ select.mx-input:focus {
 .mx-field input:focus,
 .mx-field textarea:focus,
 .mx-field select:focus {
-  border-color: var(--mx-ink-3);
-  box-shadow: 0 0 0 3px rgba(31,123,140,.12);
+  border-color: #6138b5;
+  box-shadow: 0 0 0 3px rgba(97, 56, 181, .12);
 }
 
 .mx-field textarea { min-height: 80px; resize: vertical; }
@@ -914,11 +923,11 @@ select.mx-input:focus {
 .mx-view::-webkit-scrollbar { width: 10px; height: 10px; }
 .mx-view::-webkit-scrollbar-track { background: transparent; }
 .mx-view::-webkit-scrollbar-thumb {
-  background: rgba(0,44,64,.12);
+  background: rgba(97, 56, 181, 0.2);
   border-radius: 999px;
   border: 2px solid var(--mx-canvas);
 }
-.mx-view::-webkit-scrollbar-thumb:hover { background: rgba(0,44,64,.2); }
+.mx-view::-webkit-scrollbar-thumb:hover { background: rgba(97, 56, 181, 0.35); }
 
 /* ============================================================
    Mobile menu button + backdrop
@@ -1299,4 +1308,165 @@ body.mx-rail-locked {
     transform: none;
     box-shadow: none;
   }
+}
+
+/* ============================================================
+   Dark mode — Rankad-inspirerad visuell förstärkning
+   Svart canvas, lila accenter, punktmönster, glöd
+   ============================================================ */
+
+html.dark .mx-rail {
+  border-right-color: rgba(141, 111, 214, 0.15);
+}
+
+/* Subtle lila glow at top of rail */
+html.dark .mx-rail-head {
+  background: linear-gradient(180deg, rgba(97, 56, 181, 0.08) 0%, transparent 100%);
+  border-bottom-color: rgba(141, 111, 214, 0.1);
+}
+
+/* Cards get lila border tint in dark */
+html.dark .mx-card {
+  border-color: rgba(141, 111, 214, 0.1);
+}
+
+html.dark .mx-hover-card:hover {
+  border-color: rgba(141, 111, 214, 0.25);
+  box-shadow: 0 0 0 1px rgba(141, 111, 214, 0.12), 0 8px 32px rgba(97, 56, 181, 0.12);
+}
+
+/* Ink card in dark = lila-dark bg */
+html.dark .mx-card.mx-ink-card {
+  background: #1a0f30;
+  border-color: rgba(141, 111, 214, 0.25);
+}
+
+/* Pill CTA buttons: lila in dark mode with glow */
+html.dark .mx-btn.mx-primary {
+  background: #6138b5;
+  border-color: #6138b5;
+  color: #fff;
+  box-shadow: 0 0 18px rgba(97, 56, 181, 0.35), 0 2px 8px rgba(97, 56, 181, 0.25);
+}
+
+html.dark .mx-btn.mx-primary:hover {
+  background: #7040d0;
+  border-color: #7040d0;
+  box-shadow: 0 0 24px rgba(97, 56, 181, 0.5), 0 2px 8px rgba(97, 56, 181, 0.3);
+}
+
+html.dark .mx-btn.mx-brand {
+  background: #8e6fd6;
+  border-color: #8e6fd6;
+  color: #000;
+  box-shadow: 0 0 18px rgba(141, 111, 214, 0.4), 0 2px 8px rgba(141, 111, 214, 0.25);
+}
+
+html.dark .mx-btn.mx-brand:hover {
+  background: #a98ce8;
+  border-color: #a98ce8;
+  box-shadow: 0 0 26px rgba(141, 111, 214, 0.55), 0 2px 8px rgba(141, 111, 214, 0.3);
+}
+
+/* Regular buttons darker in dark mode */
+html.dark .mx-btn {
+  background: #111111;
+  border-color: rgba(255,255,255,0.1);
+  color: #e0e0e0;
+}
+
+html.dark .mx-btn:hover {
+  background: #1a1a1a;
+  border-color: rgba(141, 111, 214, 0.3);
+}
+
+/* Input focus with lila glow in dark */
+html.dark .mx-input:focus,
+html.dark .mx-textarea:focus,
+html.dark select.mx-input:focus,
+html.dark .mx-field input:focus,
+html.dark .mx-field textarea:focus,
+html.dark .mx-field select:focus {
+  border-color: #8e6fd6;
+  box-shadow: 0 0 0 3px rgba(141, 111, 214, 0.18);
+}
+
+/* Topbar search pill in dark */
+html.dark .mx-topbar-search {
+  background: #0a0a0a;
+  border-color: rgba(255,255,255,0.07);
+}
+
+html.dark .mx-topbar-search:hover {
+  border-color: rgba(141, 111, 214, 0.3);
+}
+
+html.dark .mx-topbar-search kbd {
+  background: #111;
+  border-color: rgba(255,255,255,0.1);
+}
+
+/* Topbar background */
+html.dark .mx-topbar {
+  background: rgba(0, 0, 0, 0.9);
+  border-bottom-color: rgba(141, 111, 214, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+/* Avatar background: lila gradient in dark */
+html.dark .mx-rail-user-av {
+  background: linear-gradient(135deg, #6138b5 0%, #8e6fd6 100%);
+  box-shadow: 0 0 10px rgba(141, 111, 214, 0.4);
+}
+
+/* Status chips get subtle glow when active in dark */
+html.dark .mx-chip.mx-active {
+  background: rgba(74, 125, 74, 0.15);
+  color: #88b48b;
+  border-color: rgba(74, 125, 74, 0.25);
+}
+
+html.dark .mx-chip.mx-purple {
+  background: rgba(97, 56, 181, 0.18);
+  color: #c9b6fb;
+}
+
+html.dark .mx-chip.mx-ink-chip {
+  background: rgba(141, 111, 214, 0.18);
+  color: #c9b6fb;
+}
+
+/* Dot pattern on main canvas in dark */
+html.dark .mx-main-col {
+  background-image: radial-gradient(rgba(141, 111, 214, 0.06) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-attachment: local;
+}
+
+/* Rail foot separator */
+html.dark .mx-rail-foot {
+  border-top-color: rgba(141, 111, 214, 0.1);
+}
+
+/* Ghost button in dark */
+html.dark .mx-btn.mx-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: rgba(255,255,255,0.65);
+}
+
+html.dark .mx-btn.mx-ghost:hover {
+  background: rgba(141, 111, 214, 0.1);
+  border-color: transparent;
+  color: white;
+}
+
+/* Page head border in dark */
+html.dark .mx-page-head {
+  border-bottom-color: rgba(141, 111, 214, 0.1);
+}
+
+/* Section head h2 color */
+html.dark .mx-page-head h1 {
+  color: #f0f0f0;
 }
