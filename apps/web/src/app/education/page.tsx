@@ -191,7 +191,7 @@ export default async function EducationPage() {
           trackId={track.id}
           trackLabel={track.label}
           accent={track.accent}
-          modules={trackBuckets[track.id]}
+          modules={track.modules}
         />
       ))}
 
