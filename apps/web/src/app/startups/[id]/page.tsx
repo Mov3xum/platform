@@ -12,6 +12,7 @@ import {
   WorkshopAssignmentStatusBadge
 } from '@/components/Badges';
 import { NoteForm } from '@/components/NoteForm';
+import { StartupDetailDashboard } from '@/components/StartupDetailDashboard';
 import {
   activityStatusLabels,
   activityTypeLabels,
@@ -29,7 +30,7 @@ import {
   type StartupStatus,
   type ToolRunStatus
 } from '@/lib/labels';
-import type { StartupPhase } from '@platform/shared';
+import type { StartupPhase, SprintXScore } from '@platform/shared';
 
 interface StartupRecord {
   id: string;
@@ -41,6 +42,8 @@ interface StartupRecord {
   irl_level?: number;
   next_step?: string;
   tags?: string;
+  sprint_x_json?: SprintXScore;
+  coaches?: string[];
   created: string;
   updated: string;
 }
@@ -269,7 +272,20 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
         )}
       </header>
 
-      <nav className="mb-8 flex flex-wrap gap-3 text-sm">
+      <StartupDetailDashboard
+        startup={startup}
+        metrics={{
+          activitiesCount: activities.totalItems,
+          notesCount: notes.totalItems,
+          milestonesCount: milestones.totalItems,
+          agreementsCount: agreements.totalItems,
+          teamMembersCount: team.totalItems,
+          workshopsCount: workshopAssignments.totalItems,
+          toolRunsCount: toolActivities.totalItems
+        }}
+      />
+
+      <nav className="mb-8 mt-8 flex flex-wrap gap-3 text-sm">
         {[
           ['#overview', 'Info'],
           ['#notes', `Anteckningar (${notes.totalItems})`],
@@ -398,23 +414,6 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               ))}
             </ul>
           )}
-        </Section>
-
-        <Section id="readiness" title="Bolagsfas & Readiness">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-default bg-surface p-4">
-              <p className="text-xs text-foreground-subtle">Fas</p>
-              <div className="mt-2"><PhaseBadge phase={startup.phase} /></div>
-            </div>
-            <div className="rounded-2xl border border-default bg-surface p-4">
-              <p className="text-xs text-foreground-subtle">Status</p>
-              <div className="mt-2"><StatusBadge status={startup.status} /></div>
-            </div>
-            <div className="rounded-2xl border border-default bg-surface p-4">
-              <p className="text-xs text-foreground-subtle">IRL / Readiness</p>
-              <p className="mt-2 text-sm font-semibold text-foreground">{startup.irl_level ? `IRL ${startup.irl_level}` : 'Ej satt'}</p>
-            </div>
-          </div>
         </Section>
 
         <Section id="activities" title="Aktiviteter">

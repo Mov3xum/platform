@@ -3,11 +3,13 @@ import { redirect } from 'next/navigation';
 import { listForTenant } from '@/lib/pb.server';
 import { requireUser } from '@/lib/auth.server';
 import { canAccessModule, hasRole } from '@/lib/rbac';
-import { ALL_PHASES, type StartupPhase } from '@platform/shared';
+import { ALL_PHASES, type StartupPhase, type SprintXScore } from '@platform/shared';
 import { phaseLabels, statusLabels, type StartupStatus } from '@/lib/labels';
+import { StartupListDashboard } from '@/components/StartupListDashboard';
 
 interface StartupRecord {
   id: string;
+  tenant: string;
   name: string;
   description: string;
   phase: StartupPhase;
@@ -15,6 +17,8 @@ interface StartupRecord {
   irl_level?: number;
   next_step?: string;
   tags?: string;
+  sprint_x_json?: SprintXScore;
+  coaches?: string[];
 }
 
 const ALLOWED_STATUS = new Set(Object.keys(statusLabels));
@@ -56,6 +60,53 @@ export default async function StartupsPage({
     });
   }
 
+  // Calculate dashboard metrics
+  const metrics = {
+    totalStartups: result.totalItems,
+    activeStartups: result.items.filter((s) => s.status === 'active').length,
+    byPhase: result.items.reduce(
+      (acc, s) => {
+        acc[s.phase] = (acc[s.phase] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    ),
+    byStatus: result.items.reduce(
+      (acc, s) => {
+        acc[s.status] = (acc[s.status] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    ),
+    avgIRLLevel:
+      result.items.filter((s) => s.irl_level).length > 0
+        ? result.items.reduce((sum, s) => sum + (s.irl_level || 0), 0) /
+          result.items.filter((s) => s.irl_level).length
+        : 0,
+    avgSprintX: {
+      funding:
+        result.items.filter((s) => s.sprint_x_json?.funding).length > 0
+          ? result.items.reduce((sum, s) => sum + (s.sprint_x_json?.funding || 0), 0) /
+            result.items.filter((s) => s.sprint_x_json?.funding).length
+          : 0,
+      intl:
+        result.items.filter((s) => s.sprint_x_json?.intl).length > 0
+          ? result.items.reduce((sum, s) => sum + (s.sprint_x_json?.intl || 0), 0) /
+            result.items.filter((s) => s.sprint_x_json?.intl).length
+          : 0,
+      sustain:
+        result.items.filter((s) => s.sprint_x_json?.sustain).length > 0
+          ? result.items.reduce((sum, s) => sum + (s.sprint_x_json?.sustain || 0), 0) /
+            result.items.filter((s) => s.sprint_x_json?.sustain).length
+          : 0,
+      team:
+        result.items.filter((s) => s.sprint_x_json?.team).length > 0
+          ? result.items.reduce((sum, s) => sum + (s.sprint_x_json?.team || 0), 0) /
+            result.items.filter((s) => s.sprint_x_json?.team).length
+          : 0
+    }
+  };
+
   return (
     <main className="mx-auto max-w-7xl px-6 py-10 lg:px-8">
       <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
@@ -74,6 +125,10 @@ export default async function StartupsPage({
           </Link>
         )}
       </header>
+
+      {!loadFailed && result.items.length > 0 && (
+        <StartupListDashboard startups={result.items} metrics={metrics} />
+      )}
 
       <FilterBar current={params} />
 
