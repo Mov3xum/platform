@@ -1,9 +1,9 @@
 /*
  * Movexum-logotyp.
  *
- * Båda dark/light-varianterna finns som SVG i `/public/brand`. Vi använder
- * dem via separata <img>-element som visas/döljs med dark-variant — så
- * att rätt färgad bild används utan färgglapp vid theme-switch.
+ * Renderar wordmark "movexum" som inline HTML-text med Sora Variable.
+ * Self-hosted fonten laddas via fonts.css, vilket garanterar korrekt
+ * rendering oavsett kontext.
  */
 
 import Link from 'next/link';
@@ -23,52 +23,46 @@ export function Logo({
   height = 32,
   variant = 'auto'
 }: LogoProps) {
+  // Scale font-size from the height prop (wordmark text sits ~70% of height)
+  const fontSize = Math.round(height * 0.72);
+
+  const baseStyle: React.CSSProperties = {
+    fontFamily: 'var(--font-heading, "Sora Variable", Sora, system-ui, sans-serif)',
+    fontWeight: 700,
+    fontSize: `${fontSize}px`,
+    letterSpacing: '-0.025em',
+    lineHeight: 1,
+    display: 'block',
+    userSelect: 'none',
+    // Reserve horizontal space so layout stays stable if font hasn't loaded
+    minWidth: width ? `${width}px` : undefined,
+  };
+
   return (
     <Link
       href={href}
       aria-label="Movexum – startsida"
       className={'inline-flex items-center ' + className}
+      style={{ textDecoration: 'none' }}
     >
       {variant === 'auto' ? (
         <>
           {/* Light mode: svart wordmark */}
-          <img
-            src="/brand/movexum-wordmark-light.svg"
-            alt="Movexum"
-            width={width}
-            height={height}
-            className="block dark:hidden"
-          />
+          <span style={{ ...baseStyle, color: '#121212' }} className="block dark:hidden">
+            movexum
+          </span>
           {/* Dark mode: vit wordmark */}
-          <img
-            src="/brand/movexum-wordmark-dark.svg"
-            alt="Movexum"
-            width={width}
-            height={height}
-            className="hidden dark:block"
-          />
+          <span style={{ ...baseStyle, color: '#f2f2f2' }} className="hidden dark:block">
+            movexum
+          </span>
         </>
       ) : variant === 'light' ? (
-        <img
-          src="/brand/movexum-wordmark-light.svg"
-          alt="Movexum"
-          width={width}
-          height={height}
-        />
+        <span style={{ ...baseStyle, color: '#121212' }}>movexum</span>
       ) : variant === 'dark' ? (
-        <img
-          src="/brand/movexum-wordmark-dark.svg"
-          alt="Movexum"
-          width={width}
-          height={height}
-        />
+        <span style={{ ...baseStyle, color: '#f2f2f2' }}>movexum</span>
       ) : (
-        <img
-          src="/brand/movexum-wordmark.svg"
-          alt="Movexum"
-          width={width}
-          height={height}
-        />
+        /* flex — currentColor */
+        <span style={{ ...baseStyle, color: 'currentColor' }}>movexum</span>
       )}
     </Link>
   );

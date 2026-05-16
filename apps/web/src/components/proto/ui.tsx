@@ -219,9 +219,9 @@ export function MiniRadar({ score, size = 44 }: { score: SprintXScore; size?: nu
       <circle cx={cx} cy={cy} r={r * 0.5} fill="none" stroke="var(--mx-line-soft)" strokeWidth="1" />
       <polygon
         points={pts}
-        fill="#002c40"
-        fillOpacity="0.12"
-        stroke="#002c40"
+        fill="#6138b5"
+        fillOpacity="0.14"
+        stroke="#8e6fd6"
         strokeWidth="1.2"
       />
       {SPRINT_X_AXES.map((a, i) => {
@@ -281,9 +281,9 @@ export function BigRadar({ score, size = 360 }: { score: SprintXScore; size?: nu
       })}
       <polygon
         points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
-        fill="#002c40"
+        fill="#6138b5"
         fillOpacity="0.14"
-        stroke="#002c40"
+        stroke="#8e6fd6"
         strokeWidth="2"
       />
       {pts.map((p, i) => (
@@ -337,7 +337,7 @@ export function BigRadar({ score, size = 360 }: { score: SprintXScore; size?: nu
 
 export function ProgressBar({ pct, accent = 'ink' }: { pct: number; accent?: string }) {
   const colorMap: Record<string, string> = {
-    ink: '#002c40',
+    ink: '#6138b5',
     green: '#4a7d4a',
     purple: '#6138b5',
     brown: '#4b2718',
@@ -400,7 +400,7 @@ export function Toggle({
         width: 32,
         height: 18,
         borderRadius: 999,
-        background: checked ? '#002c40' : 'var(--mx-line)',
+        background: checked ? '#6138b5' : 'var(--mx-line)',
         position: 'relative',
         flexShrink: 0,
         transition: 'background .15s',
