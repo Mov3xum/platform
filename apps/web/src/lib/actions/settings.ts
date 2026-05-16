@@ -32,7 +32,7 @@ async function getSuperuserPb(): Promise<PocketBase | null> {
   try {
     await pb.collection('_superusers').authWithPassword(email, password);
     return pb;
-  } catch {
+  } catch (err) {
     console.error('[settings] superuser auth failed');
     return null;
   }
