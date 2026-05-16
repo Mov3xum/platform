@@ -183,16 +183,11 @@ export default async function EducationPage() {
         title="Utbildning"
         subtitle="Spår per Sprint X-axel. Workshop-matcharen föreslår nästa modul baserat på var bolaget står."
         actions={
-          <>
-            <button className="mx-btn" type="button">
-              <Icon name="filter" size={13} /> Bolag
-            </button>
-            {isStaff && (
-              <Link href="/education/new" className="mx-btn mx-primary">
-                <Icon name="plus" size={13} /> Skapa modul
-              </Link>
-            )}
-          </>
+          isStaff ? (
+            <Link href="/education/new" className="mx-btn mx-primary">
+              <Icon name="plus" size={13} /> Skapa modul
+            </Link>
+          ) : null
         }
       />
 
@@ -241,7 +236,6 @@ export default async function EducationPage() {
         />
       ))}
 
-      {/* TODO: workshops utan tydlig spår-tillhörighet — visa i en extra lane */}
       {unclassified.length > 0 && (
         <Card style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
           <div className="mx-card-head">

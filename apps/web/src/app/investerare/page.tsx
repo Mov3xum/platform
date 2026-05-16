@@ -111,19 +111,7 @@ export default async function InvesterarePage() {
         crumb="Hemmaplan / Investerarrelationer"
         title="Investerarrelationer"
         subtitle="Deal flow + investerarkort med fokus, ticket size och historik. Synkat med Sprint X-finansiering."
-        actions={
-          <>
-            <button className="mx-btn">
-              <Icon name="filter" size={13} /> Stadium
-            </button>
-            <button className="mx-btn">
-              <Icon name="download" size={13} /> Exportera
-            </button>
-            <button className="mx-btn mx-primary">
-              <Icon name="plus" size={13} /> Logga intro
-            </button>
-          </>
-        }
+        actions={null}
       />
 
       {/* ── Deal flow ────────────────────────────────────── */}

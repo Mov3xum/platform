@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { redirect } from 'next/navigation';
@@ -5,6 +6,7 @@ import { PageHead, Card, Chip, SectionHead, Icon } from '@/components/proto';
 import { coreModules } from '@platform/shared';
 import { AdminToggles, type ModuleToggleItem } from './AdminToggles';
 import { UserModuleToggles } from './UserModuleToggles';
+import { getInfraHealth, healthChipVariant, healthStateLabel } from '@/lib/health';
 
 interface TenantRecord {
   id: string;
@@ -29,46 +31,15 @@ interface UserRecord {
   disabled_modules?: unknown;
 }
 
-interface InfraCard {
-  name: string;
-  sub: string;
-  state: string;
-  accent: 'cyan' | 'green' | 'purple' | 'brown';
-}
-
-const INFRA: InfraCard[] = [
-  {
-    name: 'UpCloud',
-    sub: 'Stockholm primär · Helsingfors backup',
-    state: 'Drift',
-    accent: 'cyan'
-  },
-  {
-    name: 'PocketBase',
-    sub: 'Multi-tenant DB · auth · realtime',
-    state: 'Drift',
-    accent: 'green'
-  },
-  {
-    name: 'Coolify',
-    sub: 'Self-hosted PaaS',
-    state: 'Drift',
-    accent: 'purple'
-  },
-  {
-    name: 'Mistral Le Chat',
-    sub: 'EU-suverän LLM',
-    state: 'Drift',
-    accent: 'brown'
-  }
-];
-
 export default async function InstallningarPage() {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
     redirect('/idag');
   }
   const pb = await getServerPb();
+
+  // ── Hämta verklig infra-status ─────────────────────────────────
+  const infra = await getInfraHealth();
 
   // ── Hämta tenants ───────────────────────────────────────────────
   // Admin-användare kan se alla tenants; incubator_lead ser bara den egna.
@@ -184,7 +155,7 @@ export default async function InstallningarPage() {
       />
 
       {/* ── Infrastruktur ─────────────────────────────────────── */}
-      <SectionHead title="Infrastruktur" label="EU-suverän stack" />
+      <SectionHead title="Infrastruktur" label="EU-suverän stack · live status" />
       <div
         style={{
           display: 'grid',
@@ -192,19 +163,24 @@ export default async function InstallningarPage() {
           gap: 12
         }}
       >
-        {INFRA.map((p) => (
+        {infra.map((p) => (
           <Card key={p.name} style={{ padding: 14 }}>
             <div className="mx-flex mx-items-c mx-gap-2 mx-mb-2">
               <Chip variant={p.accent} mono>
                 EU
               </Chip>
               <span className="mx-grow" />
-              <Chip variant="active" mono dot>
-                {p.state}
+              <Chip variant={healthChipVariant(p.state)} mono dot>
+                {healthStateLabel(p.state)}
               </Chip>
             </div>
             <div className="mx-disp mx-fw-6 mx-t-13 mx-mb-1">{p.name}</div>
             <div className="mx-t-12 mx-muted">{p.sub}</div>
+            {p.detail && (
+              <div className="mx-t-xs mx-muted mx-mt-1" style={{ fontStyle: 'italic' }}>
+                {p.detail}
+              </div>
+            )}
           </Card>
         ))}
       </div>
@@ -239,9 +215,9 @@ export default async function InstallningarPage() {
               Granskningsbart audit-log per tenant.
             </div>
           </div>
-          <button className="mx-btn" type="button">
+          <Link href="/aktivitet" className="mx-btn">
             Audit-log →
-          </button>
+          </Link>
         </div>
       </Card>
 
@@ -279,13 +255,12 @@ export default async function InstallningarPage() {
                 <th style={{ textAlign: 'right' }}>Bolag</th>
                 <th style={{ textAlign: 'right' }}>Användare</th>
                 <th>Status</th>
-                <th style={{ width: 60 }} />
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="mx-muted mx-t-13" style={{ padding: 18 }}>
+                  <td colSpan={5} className="mx-muted mx-t-13" style={{ padding: 18 }}>
                     Inga tenants hittades.
                   </td>
                 </tr>
@@ -306,11 +281,6 @@ export default async function InstallningarPage() {
                       <Chip variant="active" mono>
                         {r.tenant.status || 'Drift'}
                       </Chip>
-                    </td>
-                    <td>
-                      <button className="mx-btn mx-sm" type="button">
-                        →
-                      </button>
                     </td>
                   </tr>
                 ))
