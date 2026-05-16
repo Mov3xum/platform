@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from 'react';
 import { sendChatMessage, type ChatMessage } from '@/lib/actions/chat';
 
-export default function DashboardChat() {
+export default function DashboardChat({ className = 'mt-8' }: { className?: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [includeWebContext, setIncludeWebContext] = useState(false);
@@ -44,12 +44,12 @@ export default function DashboardChat() {
   }
 
   return (
-    <section className="rounded-3xl border border-default bg-surface shadow-sm shadow-movexum-svart/5">
+    <section className={`${className} rounded-3xl border border-default bg-surface shadow-sm shadow-movexum-svart/5`}>
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-default px-5 py-4">
         <span className="text-xl" aria-hidden>💬</span>
         <div>
-          <h2 className="text-base font-semibold text-foreground">Fråga databasen</h2>
+          <h2 className="text-base font-semibold text-foreground">Fråga plattformen</h2>
           <p className="text-xs text-foreground-subtle">
             Mistral via plattformen med tenant-isolerad PocketBase-kontext
           </p>

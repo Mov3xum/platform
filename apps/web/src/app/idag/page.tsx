@@ -52,6 +52,10 @@ function fmtDate(d: Date) {
   return `${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]}`;
 }
 
+function svCount(n: number, singular: string, plural: string): string {
+  return `${n} ${n === 1 ? singular : plural}`;
+}
+
 export default async function IdagPage() {
   const user = await requireUser();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
@@ -231,7 +235,7 @@ export default async function IdagPage() {
       <PageHead
         crumb="Hemmaplan / Idag"
         title={`${greeting()}, ${firstName}.`}
-        subtitle={`${fmtDate(today)}. Du har ${myOpenMissionsCount} öppna uppdrag, ${myFollowupsTodayCount} uppföljningar idag och AI har förberett ${aiDraftsAvailable ? 'ett' : 'inga'} utkast.`}
+        subtitle={`${fmtDate(today)}. Du har ${svCount(myOpenMissionsCount, 'öppet uppdrag', 'öppna uppdrag')}, ${svCount(myFollowupsTodayCount, 'uppföljning', 'uppföljningar')} idag och AI har förberett ${aiDraftsAvailable ? 'ett' : 'inga'} utkast.`}
         actions={
           <Link href="/uppdrag" className="mx-btn mx-primary">
             <Icon name="plus" size={13} /> Nytt uppdrag
@@ -453,7 +457,7 @@ export default async function IdagPage() {
 
         {/* Sido-kolumn */}
         <div className="mx-flex mx-col mx-gap-4">
-          <DashboardChat />
+          <DashboardChat className="mt-0" />
 
           {/* AI-kommittén */}
           <Card ink style={{ overflow: 'hidden', padding: 0 }}>
