@@ -195,7 +195,7 @@ export default async function EducationPage() {
         />
       ))}
 
-      {/* TODO: workshops utan tydlig spår-tillhörighet — visa i en extra lane */}
+      {/* TODO: workshops utan tydlig spårtillhörighet — visa i en extra lane */}
       {unclassified.length > 0 && (
         <Card style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
           <div className="mx-card-head">

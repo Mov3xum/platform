@@ -3,18 +3,45 @@
 import { useState } from 'react';
 import type { WorkshopModule, WorkshopBlock, WorkshopBlockType, WorkshopBlockOption } from '@platform/shared';
 
-const BLOCK_TYPES: { type: WorkshopBlockType; label: string; icon: string }[] = [
-  { type: 'question', label: 'Fråga', icon: '?' },
-  { type: 'exercise', label: 'Övning', icon: '✎' },
-  { type: 'instruction', label: 'Instruktion', icon: '≡' },
-  { type: 'video', label: 'Film', icon: '▶' },
-  { type: 'image', label: 'Bild', icon: '▣' },
-  { type: 'ai_chat', label: 'AI-chatt', icon: 'AI' },
-  { type: 'ai_pipeline', label: 'AI-pipeline', icon: '◇' },
-  { type: 'coach_review', label: 'Coach-granskning', icon: '✓' },
-  { type: 'commit_document', label: 'Commit dokument', icon: '↗' },
-  { type: 'test', label: 'Test/Quiz', icon: '☑' },
-  { type: 'summary', label: 'Sammanfattning', icon: 'Σ' }
+type BlockIconId =
+  | 'question'
+  | 'exercise'
+  | 'instruction'
+  | 'video'
+  | 'image'
+  | 'ai_chat'
+  | 'ai_pipeline'
+  | 'coach_review'
+  | 'commit_document'
+  | 'test'
+  | 'summary';
+
+const BLOCK_ICON_TEXT: Record<BlockIconId, string> = {
+  question: 'Q',
+  exercise: 'EX',
+  instruction: 'IN',
+  video: 'VD',
+  image: 'IM',
+  ai_chat: 'AI',
+  ai_pipeline: 'PI',
+  coach_review: 'CR',
+  commit_document: 'CM',
+  test: 'T',
+  summary: 'SM'
+};
+
+const BLOCK_TYPES: { type: WorkshopBlockType; label: string; iconId: BlockIconId }[] = [
+  { type: 'question', label: 'Fråga', iconId: 'question' },
+  { type: 'exercise', label: 'Övning', iconId: 'exercise' },
+  { type: 'instruction', label: 'Instruktion', iconId: 'instruction' },
+  { type: 'video', label: 'Film', iconId: 'video' },
+  { type: 'image', label: 'Bild', iconId: 'image' },
+  { type: 'ai_chat', label: 'AI-chatt', iconId: 'ai_chat' },
+  { type: 'ai_pipeline', label: 'AI-pipeline', iconId: 'ai_pipeline' },
+  { type: 'coach_review', label: 'Coach-granskning', iconId: 'coach_review' },
+  { type: 'commit_document', label: 'Commit dokument', iconId: 'commit_document' },
+  { type: 'test', label: 'Test/Quiz', iconId: 'test' },
+  { type: 'summary', label: 'Sammanfattning', iconId: 'summary' }
 ];
 
 const BLOCK_TYPE_MAP = Object.fromEntries(BLOCK_TYPES.map((b) => [b.type, b]));
@@ -360,7 +387,7 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                   {/* Block header row */}
                   <div className="flex items-center gap-2 p-3">
                     <span className="shrink-0 text-sm text-foreground-muted" title={meta?.label}>
-                      {meta?.icon}
+                      {meta?.iconId ? BLOCK_ICON_TEXT[meta.iconId] : 'BL'}
                     </span>
                     <input
                       type="text"
@@ -688,14 +715,14 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                   Välj blocktyp att lägga till:
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {BLOCK_TYPES.map(({ type, label, icon }) => (
+                  {BLOCK_TYPES.map(({ type, label, iconId }) => (
                     <button
                       key={type}
                       type="button"
                       onClick={() => addBlock(mod.id, type)}
                       className="inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:border-brand hover:bg-canvas-subtle hover:text-foreground"
                     >
-                      <span className="text-xs text-foreground-subtle">{icon}</span>
+                      <span className="text-xs text-foreground-subtle">{BLOCK_ICON_TEXT[iconId]}</span>
                       {label}
                     </button>
                   ))}
