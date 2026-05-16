@@ -124,7 +124,7 @@ export default async function AktivitetPage({
       <header className="mb-8">
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">Aktivitetsfeed</h1>
         <p className="mt-1 text-sm text-foreground-muted">
-          Alla aktiviteter och verktygskörningar i{' '}
+          Alla aktiviteter och agentkörningar i{' '}
           <span className="font-medium">{user.tenantName || 'tenanten'}</span>
         </p>
       </header>

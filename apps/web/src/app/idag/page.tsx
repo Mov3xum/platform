@@ -327,7 +327,7 @@ export default async function IdagPage() {
           <div style={{ padding: '4px 8px' }}>
             {recentRuns.length === 0 && recentMissions.length === 0 ? (
               <div className="mx-muted mx-t-13" style={{ padding: 24, textAlign: 'center' }}>
-                Inget händer just nu. Skapa ditt första uppdrag eller kör ett AI-verktyg.
+                Inget händer just nu. Skapa ditt första uppdrag eller kör en AI-agent.
               </div>
             ) : (
               <>

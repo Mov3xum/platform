@@ -117,10 +117,7 @@ export default async function ToolboxPage({
   const categoryFilter = isToolCategory(params.category) ? params.category : undefined;
 
   const user = await requireUser();
-  if (
-    !canAccessModuleForUser(user.roles, 'agenter', user.disabledModules) &&
-    !canAccessModuleForUser(user.roles, 'toolbox', user.disabledModules)
-  ) {
+  if (!canAccessModuleForUser(user.roles, 'agenter', user.disabledModules)) {
     redirect('/idag');
   }
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
@@ -188,7 +185,7 @@ export default async function ToolboxPage({
     /* ignore */
   }
 
-  // Hämta totalsumma per verktyg (utan tidsfilter) — vi visar dessa på korten.
+  // Hämta totalsumma per agent (utan tidsfilter) — vi visar dessa på korten.
   const totalRunsByTool = new Map<string, { count: number; latest?: string }>();
   try {
     const allRuns = await pb.collection('tool_runs').getList<ToolRun>(1, 500, {
@@ -207,10 +204,10 @@ export default async function ToolboxPage({
 
   return (
     <div className="mx-view-pad mx-wide">
-      <PageHead
-        crumb="Hemmaplan / Verktygslåda"
-        title="Verktygslåda"
-        subtitle="Interna och externa verktyg — AI-agenter, mallar och checklistor. Kör på Mistral Le Chat · EU-suverän stack. Alla körningar loggas."
+        <PageHead
+        crumb="Hemmaplan / AI-agenter"
+        title="AI-agenter"
+        subtitle="Interna AI-agenter, mallar och checklistor. Kör på Mistral Le Chat · EU-suverän stack. Alla körningar loggas."
         actions={
           isStaff ? (
             <Link href="/toolbox/new" className="mx-btn mx-primary">
@@ -239,7 +236,7 @@ export default async function ToolboxPage({
             <Icon name="shield" size={11} /> Fri från US CLOUD Act
           </Chip>
           <Chip variant="purple" mono>
-            <Icon name="shield" size={11} /> Systemprompts: admin-only
+            <Icon name="shield" size={11} /> Systemprompts: staff-styrt
           </Chip>
           <span className="mx-grow" />
           <span className="mx-mono mx-t-xs mx-muted">

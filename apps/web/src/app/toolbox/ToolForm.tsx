@@ -37,11 +37,7 @@ const ALL_ROLES: Array<{ value: Role; label: string }> = [
 interface ToolFormProps {
   mode: 'create' | 'edit';
   tool?: Tool;
-  /**
-   * Endast admin får redigera systemprompt och modellval. Om false renderas
-   * fälten som readonly (eller döljs på create) — defense-in-depth ihop med
-   * server-side guards i actions/tools.ts.
-   */
+  /** Admin och incubator_lead får redigera prompt + modell. */
   canEditPrompt?: boolean;
 }
 
@@ -77,10 +73,33 @@ export function ToolForm({ mode, tool, canEditPrompt = false }: ToolFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      <section
+        aria-label="Enkel setup för AI-agent"
+        className="rounded-2xl border border-default bg-canvas-subtle p-4"
+      >
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-foreground-subtle">
+          Enkel setup
+        </p>
+        <ol className="mt-2 list-decimal space-y-1 pl-4 text-sm text-foreground-muted">
+          <li>Döp agenten och välj kategori.</li>
+          {canEditPrompt ? (
+            <>
+              <li>Sätt systemprompt och modell.</li>
+              <li>Välj roller och aktivera agenten.</li>
+            </>
+          ) : (
+            <>
+              <li>Välj roller och aktivera agenten.</li>
+              <li>Spara och be admin/incubator_lead komplettera prompt/modell vid behov.</li>
+            </>
+          )}
+        </ol>
+      </section>
+
       {mode === 'create' && (
         <div>
           <label htmlFor="key" className={labelClass}>
-            Unikt ID *
+            Unikt agent-ID *
           </label>
           <input
             id="key"
@@ -150,10 +169,10 @@ export function ToolForm({ mode, tool, canEditPrompt = false }: ToolFormProps) {
 
       <div>
         <label htmlFor="model" className={labelClass}>
-          AI-modell (lämna tomt för icke-AI-verktyg)
+          AI-modell (lämna tomt för statisk agent)
           {!canEditPrompt && (
             <span className="ml-2 inline-block rounded-full bg-movexum-pastell-lila px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-movexum-lila dark:bg-movexum-morklila/40 dark:text-movexum-ljuslila">
-              Endast admin
+              Endast admin/incubator_lead
             </span>
           )}
         </label>
@@ -200,7 +219,7 @@ export function ToolForm({ mode, tool, canEditPrompt = false }: ToolFormProps) {
           name="description"
           rows={3}
           defaultValue={tool?.description}
-          placeholder="Kort beskrivning av vad verktyget gör…"
+          placeholder="Kort beskrivning av vad agenten gör…"
           className={`mt-1 ${inputClass}`}
         />
       </div>
@@ -210,7 +229,7 @@ export function ToolForm({ mode, tool, canEditPrompt = false }: ToolFormProps) {
           Systemprompt / Statiskt innehåll
           {!canEditPrompt && (
             <span className="ml-2 inline-block rounded-full bg-movexum-pastell-lila px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-movexum-lila dark:bg-movexum-morklila/40 dark:text-movexum-ljuslila">
-              Endast admin
+              Endast admin/incubator_lead
             </span>
           )}
         </label>
@@ -223,7 +242,7 @@ export function ToolForm({ mode, tool, canEditPrompt = false }: ToolFormProps) {
           placeholder={
             canEditPrompt
               ? 'Skriv systempromptmallen här. Använd {{startup.name}}, {{milestones}}, {{portfolio}} etc. för substitution.'
-              : 'Endast admin kan redigera systemprompt.'
+              : 'Endast admin/incubator_lead kan redigera systemprompt.'
           }
           className={`mt-1 font-mono text-xs ${inputClass} ${!canEditPrompt ? 'cursor-not-allowed bg-canvas-subtle opacity-70' : ''}`}
         />
@@ -236,8 +255,8 @@ export function ToolForm({ mode, tool, canEditPrompt = false }: ToolFormProps) {
             </>
           ) : (
             <>
-              Systemprompten styr hur AI-agenten beter sig och kan endast ändras av admin för att
-              skydda mot prompt injection och bevara modellbeteendet.
+              Systemprompten styr hur AI-agenten beter sig och kan endast ändras av
+              admin/incubator_lead för att bevara säker och konsekvent drift.
             </>
           )}
         </p>
@@ -295,7 +314,7 @@ export function ToolForm({ mode, tool, canEditPrompt = false }: ToolFormProps) {
           disabled={isPending}
           className="inline-flex items-center justify-center rounded-full bg-brand px-6 py-2.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:opacity-50"
         >
-          {isPending ? 'Sparar…' : mode === 'create' ? 'Skapa verktyg' : 'Spara ändringar'}
+          {isPending ? 'Sparar…' : mode === 'create' ? 'Skapa agent' : 'Spara ändringar'}
         </button>
         <a
           href="/toolbox"

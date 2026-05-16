@@ -4,6 +4,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole, canRunTool } from '@/lib/rbac';
 import { ToolCategoryBadge, ToolRunStatusBadge } from '@/components/Badges';
 import { toolCategoryLabels, type ToolRunStatus } from '@/lib/labels';
+import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
 import { RunToolForm } from '../RunToolForm';
 import type { Tool, ToolRun } from '@platform/shared';
 
@@ -17,7 +18,7 @@ export default async function ToolDetailPage({
   const { id } = await params;
   const { startup: defaultStartupId } = await searchParams;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'toolbox', user.disabledModules)) notFound();
+  if (!canAccessModuleForUser(user.roles, 'agenter', user.disabledModules)) notFound();
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
 
@@ -85,7 +86,7 @@ export default async function ToolDetailPage({
     <main className="mx-auto max-w-4xl px-6 py-10 lg:px-8">
       <div className="mb-6">
         <Link href="/toolbox" className="text-sm text-foreground-muted hover:text-foreground">
-          ← Verktygslådan
+          ← AI-agenter
         </Link>
       </div>
 
@@ -118,16 +119,15 @@ export default async function ToolDetailPage({
           {/* Run form */}
           {canRun ? (
             <section className="rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
-              <h2 className="mb-4 text-lg font-semibold text-foreground">Kör verktyg</h2>
+              <h2 className="mb-4 text-lg font-semibold text-foreground">Kör agent</h2>
               {startupsLoadFailed && tool.requires_startup ? (
                 <div className="mb-4 rounded-2xl border border-default bg-surface p-3 text-xs text-foreground-muted">
                   Kunde inte ladda bolagslistan for val just nu.
                 </div>
               ) : null}
-              <div className="mb-4 rounded-2xl border border-movexum-bla/30 bg-movexum-pastell-bla px-4 py-3 dark:border-movexum-djupbla/50 dark:bg-movexum-morkbla/30">
-                <p className="text-xs text-movexum-morkbla dark:text-movexum-pastell-bla">
-                  ⚠️ Genererat av AI – verifiera innan delning. Konfidentiella anteckningar
-                  exkluderas automatiskt.
+                <div className="mb-4 rounded-2xl border border-movexum-bla/30 bg-movexum-pastell-bla px-4 py-3 dark:border-movexum-djupbla/50 dark:bg-movexum-morkbla/30">
+                  <p className="text-xs text-movexum-morkbla dark:text-movexum-pastell-bla">
+                    ⚠️ {AI_OUTPUT_WARNING_TEXT}. Konfidentiella anteckningar exkluderas automatiskt.
                 </p>
               </div>
               <RunToolForm
@@ -140,7 +140,7 @@ export default async function ToolDetailPage({
           ) : (
             <div className="rounded-3xl border border-default bg-surface p-6">
               <p className="text-sm text-foreground-muted">
-                Du har inte behörighet att köra detta verktyg.
+                Du har inte behörighet att köra denna agent.
               </p>
             </div>
           )}
@@ -187,7 +187,7 @@ export default async function ToolDetailPage({
               href={`/toolbox/${id}/edit`}
               className="block rounded-2xl border border-default bg-surface p-4 text-center text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
             >
-              ✏️ Redigera verktyg
+              ✏️ Redigera agent
             </Link>
           )}
 
