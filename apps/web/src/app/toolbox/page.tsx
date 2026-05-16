@@ -117,10 +117,7 @@ export default async function ToolboxPage({
   const categoryFilter = isToolCategory(params.category) ? params.category : undefined;
 
   const user = await requireUser();
-  if (
-    !canAccessModuleForUser(user.roles, 'agenter', user.disabledModules) &&
-    !canAccessModuleForUser(user.roles, 'toolbox', user.disabledModules)
-  ) {
+  if (!canAccessModuleForUser(user.roles, 'agenter', user.disabledModules)) {
     redirect('/idag');
   }
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);

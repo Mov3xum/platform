@@ -18,7 +18,7 @@ const ACTIONS: CmdkItem[] = [
   { kind: 'act', label: 'Skapa nytt uppdrag', hint: '⌘N', href: '/uppdrag' },
   { kind: 'act', label: 'Onboarda nytt bolag', hint: '⌘I', href: '/startups/new' },
   { kind: 'act', label: 'Ny rapport', hint: 'Auto', href: '/rapporter' },
-  { kind: 'act', label: 'Skapa AI-agent', hint: 'Verktyg', href: '/toolbox/new' },
+  { kind: 'act', label: 'Skapa AI-agent', hint: 'AI-agenter', href: '/toolbox/new' },
   { kind: 'act', label: 'Logga Sprint X-checkin', hint: 'Compass', href: '/kompassen' }
 ];
 

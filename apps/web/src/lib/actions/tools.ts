@@ -35,7 +35,7 @@ export async function runToolAction(
   try {
     tool = await pb.collection('tools').getOne<Tool & Record<string, unknown>>(toolId);
   } catch {
-    return { error: 'Verktyget hittades inte.' };
+    return { error: 'Agenten hittades inte.' };
   }
 
   if (tool.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
@@ -176,7 +176,7 @@ export async function assignToolToStartupAction(
   try {
     tool = await pb.collection('tools').getOne<Tool & Record<string, unknown>>(toolId);
   } catch {
-    return { error: 'Verktyget hittades inte.' };
+    return { error: 'Agenten hittades inte.' };
   }
 
   if (tool.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
@@ -193,7 +193,7 @@ export async function assignToolToStartupAction(
       due_date: new Date().toISOString().slice(0, 10)
     });
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Kunde inte tilldela verktyget.' };
+    return { error: err instanceof Error ? err.message : 'Kunde inte tilldela agenten.' };
   }
 
   revalidatePath(`/startups/${startupId}`);
@@ -276,7 +276,7 @@ export async function updateToolAction(
   try {
     tool = await pb.collection('tools').getOne(toolId);
   } catch {
-    return { error: 'Verktyget hittades inte.' };
+    return { error: 'Agenten hittades inte.' };
   }
 
   if (tool.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
@@ -335,7 +335,7 @@ export async function deactivateToolAction(toolId: string): Promise<ToolActionSt
   try {
     tool = await pb.collection('tools').getOne(toolId);
   } catch {
-    return { error: 'Verktyget hittades inte.' };
+    return { error: 'Agenten hittades inte.' };
   }
 
   if (tool.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
