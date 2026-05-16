@@ -350,6 +350,17 @@ export async function assignWorkshopToStartupAction(
   }
 }
 
+export async function assignWorkshopFromHubAction(
+  startupId: string,
+  _prev: WorkshopActionState,
+  formData: FormData
+): Promise<WorkshopActionState> {
+  const workshopId = String(formData.get('workshop_id') || '').trim();
+  const dueDate = String(formData.get('due_date') || '').trim();
+  if (!workshopId) return { error: 'Välj en övning.' };
+  return assignWorkshopToStartupAction(workshopId, startupId, dueDate || undefined);
+}
+
 export async function saveWorkshopProgressAction(
   assignmentId: string,
   payload: {

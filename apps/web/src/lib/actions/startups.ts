@@ -128,6 +128,46 @@ export async function createStartupAction(
   redirect(`/startups/${createdId}`);
 }
 
+export type HubActivityFormState = { error?: string };
+
+export async function createHubActivityAction(
+  startupId: string,
+  _prev: HubActivityFormState,
+  formData: FormData
+): Promise<HubActivityFormState> {
+  const user = await requireUser();
+
+  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) {
+    return { error: 'Du saknar behörighet att skapa aktiviteter.' };
+  }
+
+  const title = String(formData.get('title') || '').trim();
+  const type = String(formData.get('type') || 'task');
+  const dueDate = String(formData.get('due_date') || '').trim();
+  const description = String(formData.get('description') || '').trim();
+
+  if (!title) return { error: 'Titel krävs.' };
+
+  const pb = await getServerPb();
+  try {
+    await pb.collection('activities').create({
+      startup: startupId,
+      type,
+      title,
+      description: description || null,
+      status: 'planned',
+      kind: 'manual',
+      owner: user.id,
+      due_date: dueDate || null
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte skapa aktiviteten.' };
+  }
+
+  revalidatePath(`/startups/${startupId}`);
+  return {};
+}
+
 export async function updateStartupAction(
   id: string,
   _prev: StartupFormState,
