@@ -4,19 +4,19 @@ const ANY_AUTH = '@request.auth.id != ""';
 const TENANT_MATCH = '@request.auth.tenant = tenant';
 const STAFF_ROLES =
   '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "mentor")';
+const WORKSHOP_AREA_INDEX = 'CREATE INDEX idx_workshops_tenant_area ON workshops (tenant, area)';
 
 migrate(
   (app) => {
     // Idempotent: skip if the collection already exists (e.g. created by setup-via-api.mjs).
-    let areasAlreadyExist = false;
+    let existingAreasCollection = null;
     try {
-      app.findCollectionByNameOrId('workshop_areas');
-      areasAlreadyExist = true;
+      existingAreasCollection = app.findCollectionByNameOrId('workshop_areas');
     } catch {
       // Collection doesn't exist yet — proceed to create.
     }
 
-    if (!areasAlreadyExist) {
+    if (!existingAreasCollection) {
       const areasCollection = new Collection({
         id: 'workshop_areas_collection',
         name: 'workshop_areas',
@@ -61,8 +61,8 @@ migrate(
         maxSelect: 1
       });
     }
-    if (!workshopsCollection.indexes.includes('CREATE INDEX idx_workshops_tenant_area ON workshops (tenant, area)')) {
-      workshopsCollection.indexes.push('CREATE INDEX idx_workshops_tenant_area ON workshops (tenant, area)');
+    if (!workshopsCollection.indexes.includes(WORKSHOP_AREA_INDEX)) {
+      workshopsCollection.indexes.push(WORKSHOP_AREA_INDEX);
     }
     app.save(workshopsCollection);
   },
@@ -70,9 +70,7 @@ migrate(
     const workshopsCollection = app.findCollectionByNameOrId('workshops');
     const areaField = workshopsCollection.fields.getByName('area');
     if (areaField) workshopsCollection.fields.remove(areaField);
-    workshopsCollection.indexes = workshopsCollection.indexes.filter(
-      (idx) => idx !== 'CREATE INDEX idx_workshops_tenant_area ON workshops (tenant, area)'
-    );
+    workshopsCollection.indexes = workshopsCollection.indexes.filter((idx) => idx !== WORKSHOP_AREA_INDEX);
     app.save(workshopsCollection);
 
     try {
@@ -83,3 +81,4 @@ migrate(
     }
   }
 );
+
