@@ -32,11 +32,8 @@ async function getSuperuserPb(): Promise<PocketBase | null> {
   try {
     await pb.collection('_superusers').authWithPassword(email, password);
     return pb;
-  } catch (err) {
-    console.error(
-      '[settings] superuser auth failed',
-      err instanceof Error ? err.message : String(err)
-    );
+  } catch {
+    console.error('[settings] superuser auth failed');
     return null;
   }
 }
@@ -64,7 +61,7 @@ export async function saveModuleTogglesAction(
     disabledModules = parsed
       .filter((v): v is string => typeof v === 'string')
       .filter((id) => ALLOWED_MODULE_IDS.has(id));
-  } catch (err) {
+  } catch {
     console.error('[settings] saveModuleToggles parse failed', {
       tenantId: user.tenant,
       error: err
@@ -78,9 +75,14 @@ export async function saveModuleTogglesAction(
       disabled_modules: disabledModules
     });
   } catch (err) {
+    if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+      console.error('[settings] saveModuleToggles failed', { tenantId: user.tenant });
+      return { error: 'Kunde inte spara inställningar. Försök igen.' };
+    }
+
     const superuserPb = await getSuperuserPb();
     if (!superuserPb) {
-      console.error('[settings] saveModuleToggles failed', { tenantId: user.tenant, err });
+      console.error('[settings] saveModuleToggles failed', { tenantId: user.tenant });
       return { error: 'Kunde inte spara inställningar. Försök igen.' };
     }
 
@@ -88,12 +90,8 @@ export async function saveModuleTogglesAction(
       await superuserPb.collection('tenants').update(user.tenant, {
         disabled_modules: disabledModules
       });
-    } catch (fallbackErr) {
-      console.error('[settings] saveModuleToggles failed (fallback)', {
-        tenantId: user.tenant,
-        error: err instanceof Error ? err.message : String(err),
-        fallbackError: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
-      });
+    } catch {
+      console.error('[settings] saveModuleToggles failed (fallback)', { tenantId: user.tenant });
       return { error: 'Kunde inte spara inställningar. Försök igen.' };
     }
   }
