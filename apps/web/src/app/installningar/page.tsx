@@ -257,8 +257,8 @@ export default async function InstallningarPage() {
           {userModuleRows.length > 0 ? (
             <UserModuleToggles users={userModuleRows} modules={moduleItems} />
           ) : (
-            <Card style={{ padding: 16 }}>
-              <div className="mx-t-13 mx-muted">Inga användare hittades i tenanten.</div>
+            <Card className="p-4">
+              <div className="mx-t-13 mx-muted">Inga användare hittades för din tenant.</div>
             </Card>
           )}
         </div>

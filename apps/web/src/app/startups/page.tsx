@@ -22,6 +22,7 @@ interface StartupRecord {
 }
 
 const ALLOWED_STATUS = new Set(Object.keys(statusLabels));
+const EMPTY_RESULT_FILTER = 'id = ""';
 
 function buildFilter(search?: string, phase?: string, status?: string): string | undefined {
   const parts: string[] = [];
@@ -33,7 +34,7 @@ function buildFilter(search?: string, phase?: string, status?: string): string |
 
 function buildScopedFilter(baseFilter: string | undefined, linkedStartups: string[]): string | undefined {
   if (linkedStartups.length === 0) {
-    return 'id = ""';
+    return EMPTY_RESULT_FILTER;
   }
   const scope = linkedStartups.map((id) => `id = "${id}"`).join(' || ');
   return baseFilter ? `(${scope}) && (${baseFilter})` : scope;

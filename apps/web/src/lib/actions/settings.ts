@@ -37,7 +37,11 @@ export async function saveModuleTogglesAction(
       return { error: 'Ogiltigt format på moduldata.' };
     }
     disabledModules = parsed.filter((v): v is string => typeof v === 'string');
-  } catch {
+  } catch (err) {
+    console.error('[settings] saveModuleToggles parse failed', {
+      tenantId: user.tenant,
+      error: err
+    });
     return { error: 'Ogiltigt format på moduldata.' };
   }
 
@@ -78,7 +82,8 @@ export async function saveUserModuleTogglesAction(
     disabledModules = parsed
       .filter((v): v is string => typeof v === 'string')
       .filter((id) => ALLOWED_MODULE_IDS.has(id));
-  } catch {
+  } catch (err) {
+    console.error('[settings] saveUserModuleToggles parse failed', { userId, error: err });
     return { error: 'Ogiltigt format på moduldata.' };
   }
 

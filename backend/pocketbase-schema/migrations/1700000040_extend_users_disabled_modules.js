@@ -1,6 +1,7 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// Lägger till disabled_modules (JSON array) på users så admin kan styra modulvisning per användare.
+// Lägger till disabled_modules (JSON-värde, används som array i appen) på users
+// så admin kan styra modulvisning per användare.
 migrate(
   (app) => {
     const users = app.findCollectionByNameOrId('users');

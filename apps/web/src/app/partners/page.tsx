@@ -3,6 +3,12 @@ import type { Partner } from '@platform/shared';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 
+const EMPTY_RESULT_FILTER = 'id = ""';
+
+function sanitizeRecordIds(ids: string[]): string[] {
+  return ids.filter((id) => /^[a-zA-Z0-9_-]{6,64}$/.test(id));
+}
+
 export default async function PartnersPage() {
   const user = await requireUser();
 
@@ -37,27 +43,34 @@ export default async function PartnersPage() {
       if (user.linkedStartups.length === 0) {
         scopedPartnerIds = [];
       } else {
-        const linkedFilter = user.linkedStartups.map((id) => `startup = "${id}"`).join(' || ');
-        const engagements = await pb.collection('partner_engagements').getList<{ partner?: string }>(1, 500, {
-          filter: `tenant = "${user.tenant}" && (${linkedFilter})`,
-          fields: 'partner'
-        });
-        scopedPartnerIds = Array.from(
-          new Set(
-            engagements.items
-              .map((item) => (typeof item.partner === 'string' ? item.partner : ''))
-              .filter(Boolean)
-          )
-        );
+        const linkedStartupIds = sanitizeRecordIds(user.linkedStartups);
+        if (linkedStartupIds.length === 0) {
+          scopedPartnerIds = [];
+        } else {
+          const linkedFilter = linkedStartupIds.map((id) => `startup = "${id}"`).join(' || ');
+          const engagements = await pb.collection('partner_engagements').getFullList<{ partner?: string }>({
+            filter: `tenant = "${user.tenant}" && (${linkedFilter})`,
+            fields: 'partner'
+          });
+          scopedPartnerIds = Array.from(
+            new Set(
+              engagements
+                .map((item) => (typeof item.partner === 'string' ? item.partner : ''))
+                .filter(Boolean)
+            )
+          );
+        }
       }
     }
 
-    const partnerFilter =
-      scopedPartnerIds === null
-        ? `tenant = "${user.tenant}"`
-        : scopedPartnerIds.length > 0
-          ? `tenant = "${user.tenant}" && (${scopedPartnerIds.map((id) => `id = "${id}"`).join(' || ')})`
-          : `tenant = "${user.tenant}" && id = ""`;
+    let partnerFilter = `tenant = "${user.tenant}"`;
+    if (scopedPartnerIds !== null) {
+      if (scopedPartnerIds.length === 0) {
+        partnerFilter = `tenant = "${user.tenant}" && ${EMPTY_RESULT_FILTER}`;
+      } else {
+        partnerFilter = `tenant = "${user.tenant}" && (${scopedPartnerIds.map((id) => `id = "${id}"`).join(' || ')})`;
+      }
+    }
 
     const result = await pb.collection('partners').getList<Partner>(1, 50, {
       filter: partnerFilter,
