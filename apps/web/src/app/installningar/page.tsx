@@ -106,12 +106,31 @@ export default async function InstallningarPage() {
   }
 
   // ── Modules-list för toggles ─────────────────────────────────
-  const moduleItems: ModuleToggleItem[] = coreModules.map((m) => ({
-    id: m.id,
-    name: m.title,
-    description: m.description,
-    defaultOn: true
-  }));
+  // Hämta aktuellt sparade disabled_modules för tenanten
+  let disabledModules: string[] = [];
+  try {
+    const tenantRecord = await pb.collection('tenants').getOne<{ disabled_modules?: unknown }>(
+      user.tenant
+    );
+    const raw = tenantRecord.disabled_modules;
+    if (Array.isArray(raw)) {
+      disabledModules = raw.filter((v): v is string => typeof v === 'string');
+    }
+  } catch {
+    // Om fältet ännu inte finns eller annan fel — visa alla moduler
+  }
+
+  // Filtrera bort legacy/dolda moduler som inte ska hanteras manuellt
+  const HIDDEN_MODULE_IDS = ['dashboard', 'toolbox', 'onboarding', 'activity_feed', 'partners'];
+
+  const moduleItems: ModuleToggleItem[] = coreModules
+    .filter((m) => !HIDDEN_MODULE_IDS.includes(m.id))
+    .map((m) => ({
+      id: m.id,
+      name: m.title,
+      description: m.description,
+      defaultOn: !disabledModules.includes(m.id)
+    }));
 
   return (
     <div className="mx-view-pad mx-narrow">

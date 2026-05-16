@@ -20,6 +20,7 @@ export interface SessionUser {
   tenantName?: string;
   linkedStartups: string[];
   avatarUrl?: string;
+  disabledModules: string[];
 }
 
 interface CookiePayload {
@@ -80,12 +81,20 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   }
 
   const tenantId = (m.tenant as string) || '';
-  const tenant = m.expand?.tenant;
+  const tenant = m.expand?.tenant as (Record<string, unknown> & { id: string; name: string; slug: string; disabled_modules?: unknown }) | undefined;
 
   const avatarFilename = m.avatar as string | undefined;
   const avatarUrl = avatarFilename
     ? `${PUBLIC_PB_URL}/api/files/users/${m.id as string}/${avatarFilename}`
     : undefined;
+
+  // Hämta disabled_modules från tenant (finns som fält sedan migration 1700000038).
+  // Fallback till tom array om fältet saknas (äldre schema).
+  let disabledModules: string[] = [];
+  const rawDisabled = tenant?.disabled_modules;
+  if (Array.isArray(rawDisabled)) {
+    disabledModules = rawDisabled.filter((v): v is string => typeof v === 'string');
+  }
 
   return {
     id: m.id as string,
@@ -96,7 +105,8 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     tenantSlug: tenant?.slug,
     tenantName: tenant?.name,
     linkedStartups: (m.linked_startups as string[]) || [],
-    avatarUrl
+    avatarUrl,
+    disabledModules
   };
 }
 
