@@ -8,77 +8,10 @@ import {
   EducationTrackLane,
   type TrackModule
 } from '@/components/EducationTrackLane';
-import type { Workshop, WorkshopAssignment } from '@platform/shared';
+import type { Workshop, WorkshopArea, WorkshopAssignment } from '@platform/shared';
 
 type Accent = 'yellow' | 'green' | 'cyan' | 'purple';
-
-interface TrackDef {
-  id: 'funding' | 'sustain' | 'intl' | 'team';
-  label: string;
-  accent: Accent;
-  keywords: string[]; // för fallback-matching mot workshop.title
-}
-
-const TRACKS: TrackDef[] = [
-  {
-    id: 'funding',
-    label: 'Kapitalanskaffning',
-    accent: 'yellow',
-    keywords: [
-      'kapital',
-      'finans',
-      'investerar',
-      'pitch',
-      'term sheet',
-      'cap table',
-      'due diligence',
-      'dd',
-      'fund'
-    ]
-  },
-  {
-    id: 'sustain',
-    label: 'Hållbarhet',
-    accent: 'green',
-    keywords: ['hållbar', 'sustain', 'csrd', 'klimat', 'lca', 'cirkul']
-  },
-  {
-    id: 'intl',
-    label: 'Internationalisering',
-    accent: 'cyan',
-    keywords: [
-      'internation',
-      'export',
-      'marknad',
-      'tysk',
-      'eu-stöd',
-      'distribution',
-      'global'
-    ]
-  },
-  {
-    id: 'team',
-    label: 'Team & ledarskap',
-    accent: 'purple',
-    keywords: [
-      'team',
-      'ledar',
-      'rekryt',
-      'aktieägar',
-      'options',
-      'kultur',
-      'styrelse'
-    ]
-  }
-];
-
-function classifyWorkshop(workshop: Workshop): TrackDef['id'] | null {
-  const title = workshop.title.toLowerCase();
-  for (const t of TRACKS) {
-    if (t.keywords.some((k) => title.includes(k))) return t.id;
-  }
-  return null;
-}
+const TRACK_ACCENTS: Accent[] = ['yellow', 'green', 'cyan', 'purple'];
 
 export default async function EducationPage() {
   const user = await requireUser();
@@ -88,6 +21,7 @@ export default async function EducationPage() {
   const isStartupMember = hasRole(user.roles, ['startup_member']);
 
   let workshops: Workshop[] = [];
+  let areas: WorkshopArea[] = [];
   let assignments: WorkshopAssignment[] = [];
 
   try {
@@ -95,11 +29,27 @@ export default async function EducationPage() {
       .collection(PB_COLLECTIONS.workshops)
       .getList<Workshop>(1, 200, {
         filter: `tenant = "${user.tenant}" && active = true`,
-        sort: 'title'
+        sort: 'title',
+        expand: 'area'
       });
     workshops = workshopsResult.items;
   } catch (error) {
     console.error('[education] failed to load workshops', {
+      tenant: user.tenant,
+      userId: user.id,
+      error
+    });
+  }
+
+  try {
+    areas = (
+      await pb.collection(PB_COLLECTIONS.workshopAreas).getList<WorkshopArea>(1, 200, {
+        filter: `tenant = "${user.tenant}"`,
+        sort: 'name'
+      })
+    ).items;
+  } catch (error) {
+    console.error('[education] failed to load workshop areas', {
       tenant: user.tenant,
       userId: user.id,
       error
@@ -140,37 +90,48 @@ export default async function EducationPage() {
     }
   }
 
-  // ── Bygg lane-data per spår ────────────────────────────────────
-  const trackBuckets: Record<TrackDef['id'], TrackModule[]> = {
-    funding: [],
-    sustain: [],
-    intl: [],
-    team: []
-  };
+  // ── Bygg lane-data per område ───────────────────────────────────
+  const areaBuckets = new Map<string, TrackModule[]>(
+    areas.map((area) => [area.id, []] as const)
+  );
   const unclassified: Workshop[] = [];
 
   for (const w of workshops) {
-    const trackId = classifyWorkshop(w);
     const status = statusByWorkshop.get(w.id) || 'not_started';
     const blocks = (w.content_blocks || []).length;
     const lengthLabel = blocks > 0 ? `${blocks * 15} min` : `v${w.version}`;
     const item: TrackModule = { workshop: w, status, lengthLabel };
-    if (trackId) {
-      trackBuckets[trackId].push(item);
+    const areaId = typeof w.area === 'string' ? w.area : '';
+    if (areaId && areaBuckets.has(areaId)) {
+      areaBuckets.get(areaId)?.push(item);
     } else {
+      if (areaId) {
+        console.warn('[education] workshop references missing area', {
+          workshopId: w.id,
+          areaId,
+          tenant: user.tenant
+        });
+      }
       unclassified.push(w);
     }
   }
 
-  // ── Workshop-matcharens förslag (heuristik: visa "Pågående" eller "Ej startad" per spår) ─
-  const matcherSuggestions: { trackLabel: string; workshopTitle: string }[] = [];
-  for (const t of TRACKS) {
+  const lanes = areas.map((area, index) => ({
+    id: area.id,
+    label: area.name,
+    accent: TRACK_ACCENTS[index % TRACK_ACCENTS.length],
+    modules: areaBuckets.get(area.id) || []
+  }));
+
+  // ── Workshop-matcharens förslag (visa "Pågående" eller "Ej startad" per område) ─
+  const matcherSuggestions: { areaLabel: string; workshopTitle: string }[] = [];
+  for (const lane of lanes) {
     const next =
-      trackBuckets[t.id].find((m) => m.status === 'in_progress') ||
-      trackBuckets[t.id].find((m) => m.status === 'not_started');
+      lane.modules.find((m) => m.status === 'in_progress') ||
+      lane.modules.find((m) => m.status === 'not_started');
     if (next) {
       matcherSuggestions.push({
-        trackLabel: t.label,
+        areaLabel: lane.label,
         workshopTitle: next.workshop.title
       });
     }
@@ -212,7 +173,7 @@ export default async function EducationPage() {
             <span className="mx-t-13" style={{ color: '#0e3b44' }}>
               {matcherSuggestions
                 .slice(0, 4)
-                .map((s) => `${s.trackLabel} → ${s.workshopTitle}`)
+                .map((s) => `${s.areaLabel} → ${s.workshopTitle}`)
                 .join(' · ')}
             </span>
             <span className="mx-grow" />
@@ -226,13 +187,13 @@ export default async function EducationPage() {
       )}
 
       {/* Lanes */}
-      {TRACKS.map((track) => (
+      {lanes.map((track) => (
         <EducationTrackLane
           key={track.id}
           trackId={track.id}
           trackLabel={track.label}
           accent={track.accent}
-          modules={trackBuckets[track.id]}
+          modules={track.modules}
         />
       ))}
 

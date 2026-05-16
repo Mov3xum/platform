@@ -3,11 +3,12 @@
 import { useActionState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createWorkshopAction, type WorkshopActionState } from '@/lib/actions/workshops';
+import type { WorkshopArea } from '@platform/shared';
 import { WorkshopBlockBuilder } from './WorkshopBlockBuilder';
 
 const initialState: WorkshopActionState = {};
 
-export function WorkshopCreateForm() {
+export function WorkshopCreateForm({ areas }: { areas: WorkshopArea[] }) {
   const router = useRouter();
   const [state, formAction, pending] = useActionState(createWorkshopAction, initialState);
 
@@ -67,6 +68,19 @@ export function WorkshopCreateForm() {
           </div>
         </div>
         <div>
+          <label htmlFor="area" className={labelClass}>
+            Område
+          </label>
+          <select id="area" name="area" defaultValue="" className={inputClass}>
+            <option value="">Välj område (valfritt)</option>
+            {areas.map((area) => (
+              <option key={area.id} value={area.id}>
+                {area.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
           <p className={labelClass}>Målgrupp</p>
           <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-foreground-muted">
             {[
@@ -122,4 +136,3 @@ export function WorkshopCreateForm() {
     </form>
   );
 }
-
