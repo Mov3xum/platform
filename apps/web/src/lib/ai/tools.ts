@@ -1,7 +1,6 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import {
-  EXPOSED_COLLECTIONS,
   composeFilter,
   getExposedCollection,
   maskRecord,
@@ -15,91 +14,95 @@ const MAX_FILTER_LENGTH = 500;
 const MAX_SORT_LENGTH = 200;
 const MAX_EXPAND_LENGTH = 200;
 
-const COLLECTION_NAMES = EXPOSED_COLLECTIONS.map((c) => c.name);
-
 /**
- * Tool definitions sent to Mistral. Two generic tools cover all whitelisted
- * collections — adding a new collection requires no change here.
+ * Builds Mistral tool definitions for the current set of exposed collections.
+ * The collection enum is generated from the live discovery so new
+ * PocketBase tables show up automatically.
  */
-export const CHAT_TOOLS: MistralToolDefinition[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'query_collection',
-      description:
-        'Frågar en PocketBase-kollektion. Tenant-scope läggs till automatiskt server-side. ' +
-        'Filter använder PocketBase-syntax: `field = "x"`, `field > 5`, `field ~ "sök"` (innehåller), ' +
-        '`field ?= "x"` (matchar något i multi-relation), `relation.field = "x"`, kombinera med && och ||.',
-      parameters: {
-        type: 'object',
-        properties: {
-          collection: {
-            type: 'string',
-            enum: COLLECTION_NAMES,
-            description: 'Namn på kollektionen att fråga'
+export function buildChatTools(collections: ExposedCollection[]): MistralToolDefinition[] {
+  const collectionNames = collections.map((c) => c.name);
+
+  return [
+    {
+      type: 'function',
+      function: {
+        name: 'query_collection',
+        description:
+          'Frågar en PocketBase-kollektion. Tenant-scope läggs till automatiskt server-side. ' +
+          'Filter använder PocketBase-syntax: `field = "x"`, `field > 5`, `field ~ "sök"` (innehåller), ' +
+          '`field ?= "x"` (matchar något i multi-relation), `relation.field = "x"`, kombinera med && och ||.',
+        parameters: {
+          type: 'object',
+          properties: {
+            collection: {
+              type: 'string',
+              enum: collectionNames,
+              description: 'Namn på kollektionen att fråga'
+            },
+            filter: {
+              type: 'string',
+              description:
+                'PocketBase-filteruttryck (utan tenant — det läggs till automatiskt). ' +
+                'Exempel: `name ~ "Enava"`, `phase = "growth" && irl_level >= 5`. ' +
+                'Lämna tomt för alla rader (max 50).'
+            },
+            sort: {
+              type: 'string',
+              description:
+                'Sortering, t.ex. `-created` eller `name,phase`. Prefix `-` = fallande.'
+            },
+            limit: {
+              type: 'integer',
+              description: `Max antal rader (1-${MAX_RESULT_ROWS}, default 20)`,
+              minimum: 1,
+              maximum: MAX_RESULT_ROWS
+            },
+            fields: {
+              type: 'string',
+              description:
+                'Komma-separerad lista av fält att hämta. Lämna tomt för alla. ' +
+                'Använd `expand.relation.field` för utökade relationer.'
+            },
+            expand: {
+              type: 'string',
+              description:
+                'Komma-separerade relationer att expandera, t.ex. `startup,investor`.'
+            }
           },
-          filter: {
-            type: 'string',
-            description:
-              'PocketBase-filteruttryck (utan tenant — det läggs till automatiskt). ' +
-              'Exempel: `name ~ "Enava"`, `phase = "growth" && irl_level >= 5`. ' +
-              'Lämna tomt för alla rader (max 50).'
+          required: ['collection']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'count_collection',
+        description:
+          'Räknar antalet rader i en kollektion som matchar ett filter. Tenant-scope läggs till automatiskt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            collection: {
+              type: 'string',
+              enum: collectionNames,
+              description: 'Namn på kollektionen'
+            },
+            filter: {
+              type: 'string',
+              description: 'PocketBase-filteruttryck (tenant läggs till automatiskt)'
+            }
           },
-          sort: {
-            type: 'string',
-            description:
-              'Sortering, t.ex. `-created` eller `name,phase`. Prefix `-` = fallande.'
-          },
-          limit: {
-            type: 'integer',
-            description: `Max antal rader (1-${MAX_RESULT_ROWS}, default 20)`,
-            minimum: 1,
-            maximum: MAX_RESULT_ROWS
-          },
-          fields: {
-            type: 'string',
-            description:
-              'Komma-separerad lista av fält att hämta. Lämna tomt för alla. ' +
-              'Använd `expand.relation.field` för utökade relationer.'
-          },
-          expand: {
-            type: 'string',
-            description:
-              'Komma-separerade relationer att expandera, t.ex. `startup,investor`.'
-          }
-        },
-        required: ['collection']
+          required: ['collection']
+        }
       }
     }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'count_collection',
-      description:
-        'Räknar antalet rader i en kollektion som matchar ett filter. Tenant-scope läggs till automatiskt.',
-      parameters: {
-        type: 'object',
-        properties: {
-          collection: {
-            type: 'string',
-            enum: COLLECTION_NAMES,
-            description: 'Namn på kollektionen'
-          },
-          filter: {
-            type: 'string',
-            description: 'PocketBase-filteruttryck (tenant läggs till automatiskt)'
-          }
-        },
-        required: ['collection']
-      }
-    }
-  }
-];
+  ];
+}
 
 interface ToolDispatchContext {
   pb: PocketBase;
   tenantId: string;
+  collections: ExposedCollection[];
 }
 
 export interface ToolResult {
@@ -108,10 +111,6 @@ export interface ToolResult {
   error?: string;
 }
 
-/**
- * Validates that a model-supplied filter doesn't try to break out of
- * tenant scope or call PB internals.
- */
 function validateFilter(filter: string): string | null {
   if (filter.length > MAX_FILTER_LENGTH) return 'Filter för långt.';
   if (/@request\b/i.test(filter)) return 'Filter får inte innehålla @request.';
@@ -141,11 +140,12 @@ async function runQueryCollection(
   ctx: ToolDispatchContext
 ): Promise<ToolResult> {
   const collectionName = String(args.collection ?? '');
-  const collection = getExposedCollection(collectionName);
+  const collection = getExposedCollection(ctx.collections, collectionName);
   if (!collection) {
+    const available = ctx.collections.map((c) => c.name).join(', ');
     return {
       ok: false,
-      error: `Kollektion '${collectionName}' är inte exponerad. Välj från: ${COLLECTION_NAMES.join(', ')}`
+      error: `Kollektion '${collectionName}' är inte exponerad. Välj från: ${available}`
     };
   }
 
@@ -203,11 +203,12 @@ async function runCountCollection(
   ctx: ToolDispatchContext
 ): Promise<ToolResult> {
   const collectionName = String(args.collection ?? '');
-  const collection = getExposedCollection(collectionName);
+  const collection = getExposedCollection(ctx.collections, collectionName);
   if (!collection) {
+    const available = ctx.collections.map((c) => c.name).join(', ');
     return {
       ok: false,
-      error: `Kollektion '${collectionName}' är inte exponerad. Välj från: ${COLLECTION_NAMES.join(', ')}`
+      error: `Kollektion '${collectionName}' är inte exponerad. Välj från: ${available}`
     };
   }
 
@@ -236,10 +237,6 @@ async function runCountCollection(
   }
 }
 
-/**
- * Dispatches a single tool call from Mistral. Returns a JSON-serializable
- * result object (always a plain object — never throws).
- */
 export async function dispatchToolCall(
   call: MistralToolCall,
   ctx: ToolDispatchContext

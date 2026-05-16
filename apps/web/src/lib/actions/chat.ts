@@ -3,8 +3,8 @@
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { callMistral, type MistralMessage } from '@/lib/ai/mistral';
 import { buildStartupContext } from '@/lib/ai/context';
-import { buildSchemaSummary } from '@/lib/ai/schema';
-import { CHAT_TOOLS, dispatchToolCall } from '@/lib/ai/tools';
+import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
+import { buildChatTools, dispatchToolCall } from '@/lib/ai/tools';
 import { hasRole } from '@/lib/rbac';
 
 export interface ChatMessage {
@@ -152,12 +152,20 @@ async function runStaffChatWithTools(
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
   webBlock: string
 ): Promise<ChatActionResult> {
+  let collections: Awaited<ReturnType<typeof getExposedCollections>> = [];
   let schemaSummary = '';
   try {
-    schemaSummary = await buildSchemaSummary(pb, user.tenant);
+    collections = await getExposedCollections();
+    schemaSummary = buildSchemaSummary(collections);
   } catch (err) {
     console.error('[chat] schema introspection failed', { tenant: user.tenant, error: err });
   }
+
+  if (collections.length === 0) {
+    return { error: 'Inga kollektioner exponerade — kontrollera POCKETBASE_SUPERUSER_EMAIL/PASSWORD.' };
+  }
+
+  const tools = buildChatTools(collections);
 
   const today = new Date().toISOString().slice(0, 10);
   const identityBlock =
@@ -178,7 +186,7 @@ async function runStaffChatWithTools(
   try {
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       const result = await callMistral(STAFF_MODEL, conversation, {
-        tools: CHAT_TOOLS,
+        tools,
         toolChoice: 'auto'
       });
 
@@ -193,7 +201,11 @@ async function runStaffChatWithTools(
       });
 
       for (const call of result.toolCalls) {
-        const toolResult = await dispatchToolCall(call, { pb, tenantId: user.tenant });
+        const toolResult = await dispatchToolCall(call, {
+          pb,
+          tenantId: user.tenant,
+          collections
+        });
         conversation.push({
           role: 'tool',
           tool_call_id: call.id,
