@@ -111,7 +111,7 @@ export default async function EventDetailPage({
   const maxCount = Math.max(1, ...funnelData.map((f) => f.count));
 
   return (
-    <div className="mx-view-pad mx-wide" style={{ padding: '20px 24px 80px' }}>
+    <div className="mx-view-pad mx-wide">
       <PageHead
         crumb={`Hemmaplan / Events / ${event.name}`}
         title={event.name}

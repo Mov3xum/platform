@@ -45,7 +45,8 @@ export const ICON_PATHS: Record<string, string> = {
   trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
   copy: 'M8 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z M16 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h2',
   chevron: 'M9 6l6 6-6 6',
-  chevdown: 'M6 9l6 6 6-6'
+  chevdown: 'M6 9l6 6 6-6',
+  menu: 'M4 6h16 M4 12h16 M4 18h16'
 };
 
 export type IconName = keyof typeof ICON_PATHS | string;

@@ -42,7 +42,7 @@ export function ProtoRail({ user, counts = {} }: ProtoRailProps) {
       .toUpperCase() || '??';
 
   return (
-    <aside className="mx-rail">
+    <aside id="mx-rail" className="mx-rail" aria-label="Huvudnavigation">
       <div className="mx-rail-head">
         <Logo
           href="/idag"

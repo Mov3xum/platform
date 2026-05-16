@@ -55,7 +55,7 @@ export default async function NewMissionPage() {
   }
 
   return (
-    <div className="mx-view-pad mx-narrow" style={{ padding: '20px 24px' }}>
+    <div className="mx-view-pad mx-narrow">
       <PageHead
         crumb="Hemmaplan / Uppdrag & flöden / Nytt"
         title="Nytt uppdrag"

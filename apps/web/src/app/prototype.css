@@ -920,14 +920,383 @@ select.mx-input:focus {
 }
 .mx-view::-webkit-scrollbar-thumb:hover { background: rgba(0,44,64,.2); }
 
-/* Mobile rail collapse */
+/* ============================================================
+   Mobile menu button + backdrop
+   ============================================================ */
+
+.mx-mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin: 0 -4px 0 -8px;
+  border: 0;
+  background: transparent;
+  color: var(--mx-ink);
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mx-mobile-menu-btn:hover,
+.mx-mobile-menu-btn:focus-visible {
+  background: var(--mx-paper-2);
+  outline: none;
+}
+
+.mx-topbar-search-mobile {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-right: -4px;
+  border: 0;
+  background: transparent;
+  color: var(--mx-ink-soft);
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mx-topbar-search-mobile:hover,
+.mx-topbar-search-mobile:focus-visible {
+  background: var(--mx-paper-2);
+  color: var(--mx-ink);
+  outline: none;
+}
+
+.mx-rail-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+  z-index: 60;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.mx-rail-backdrop.mx-on {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body.mx-rail-locked {
+  overflow: hidden;
+}
+
+/* ============================================================
+   Tablet — collapse rail entirely; turn into drawer
+   ============================================================ */
+
 @media (max-width: 1024px) {
-  .mx-app { grid-template-columns: 1fr; }
-  .mx-rail { display: none; }
-  .mx-rail.mx-rail-open {
-    display: flex;
+  .mx-app {
+    grid-template-columns: 1fr;
+  }
+
+  .mx-mobile-menu-btn {
+    display: inline-flex;
+  }
+
+  .mx-rail {
     position: fixed;
-    inset: 0 auto 0 0;
-    width: var(--mx-rail-w);
+    top: 0;
+    left: 0;
+    height: 100dvh;
+    width: 280px;
+    max-width: 84vw;
+    transform: translateX(-100%);
+    transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1),
+                visibility 220ms;
+    z-index: 70;
+    box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.5);
+    will-change: transform;
+    visibility: hidden;
+  }
+
+  .mx-app.mx-rail-is-open .mx-rail {
+    transform: translateX(0);
+    visibility: visible;
+  }
+
+  .mx-rail-backdrop {
+    display: block;
+  }
+
+  /* Make rail items more tap-friendly on touch */
+  .mx-rail-item {
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  .mx-rail-head {
+    padding: 16px 16px;
+  }
+
+  .mx-rail-foot {
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (min-width: 1025px) {
+  .mx-rail-backdrop {
+    display: none !important;
+  }
+}
+
+/* ============================================================
+   Tablet+phone — topbar / view
+   ============================================================ */
+
+@media (max-width: 1024px) {
+  .mx-topbar {
+    padding: 0 14px;
+    gap: 8px;
+  }
+
+  .mx-topbar-search {
+    width: auto;
+    flex: 1;
+    min-width: 0;
+    max-width: 340px;
+  }
+
+  .mx-topbar-search kbd {
+    display: none;
+  }
+
+  .mx-view-pad {
+    padding: 18px 18px 64px;
+  }
+
+  .mx-page-head {
+    gap: 16px;
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+  }
+
+  .mx-page-head h1 {
+    font-size: 23px;
+    line-height: 1.18;
+  }
+
+  /* Hide hover-only column from the topbar search where we have separate icon button */
+  .mx-topbar-search-label {
+    display: inline;
+  }
+}
+
+/* ============================================================
+   Phones — < 768px
+   ============================================================ */
+
+@media (max-width: 768px) {
+  :root {
+    --mx-topbar-h: 56px;
+  }
+
+  .mx-topbar {
+    padding: 0 12px;
+    gap: 6px;
+  }
+
+  .mx-topbar-search {
+    display: none;
+  }
+
+  .mx-topbar-search-mobile {
+    display: inline-flex;
+  }
+
+  .mx-crumb {
+    font-size: 13px;
+    overflow: hidden;
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* On small screens show only the last crumb segment to save space */
+  .mx-crumb > span:not(:last-child) {
+    display: none;
+  }
+  .mx-crumb > span:last-child .mx-sep {
+    display: none;
+  }
+  .mx-crumb .mx-seg {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--mx-ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .mx-view-pad {
+    padding: 14px 14px 72px;
+  }
+  .mx-view-pad.mx-narrow,
+  .mx-view-pad.mx-wide {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .mx-page-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+  }
+
+  .mx-page-head h1 {
+    font-size: 20px;
+    letter-spacing: -0.2px;
+  }
+
+  .mx-page-head .mx-sub {
+    font-size: 13px;
+    margin-top: 4px;
+  }
+
+  .mx-page-head .mx-actions {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .mx-page-head .mx-actions > * {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .mx-section-head {
+    gap: 8px;
+    margin: 18px 0 10px;
+  }
+
+  .mx-section-head h2 {
+    font-size: 16px;
+  }
+
+  /* Make ALL inline-grid layouts on pages stack on phones */
+  .mx-view-pad [style*="grid-template-columns"],
+  .mx-view-pad [style*="gridTemplateColumns"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Cards / card-heads tighter */
+  .mx-card-head {
+    padding: 10px 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  /* Forms: prevent iOS zoom on focus by raising base font-size to 16px */
+  .mx-input,
+  .mx-textarea,
+  select.mx-input,
+  .mx-field input,
+  .mx-field textarea,
+  .mx-field select,
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="number"],
+  input[type="url"],
+  input[type="tel"],
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  /* Buttons: hit-target ≥ 40px */
+  .mx-btn {
+    padding: 9px 14px;
+    font-size: 13px;
+    min-height: 40px;
+  }
+
+  .mx-btn.mx-sm {
+    padding: 6px 10px;
+    font-size: 11.5px;
+    min-height: 32px;
+  }
+
+  .mx-icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Tables: scroll horizontally on phones */
+  .mx-tbl,
+  .mx-card .mx-tbl {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+
+  /* Action bar respects iOS bottom inset */
+  .mx-action-bar {
+    padding-left: 14px;
+    padding-right: 14px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* Command palette */
+  .mx-cmdk-shade {
+    padding-top: 6vh;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .mx-cmdk {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .mx-cmdk-input {
+    padding: 14px 16px;
+    font-size: 16px;
+  }
+}
+
+/* ============================================================
+   Very small phones — < 380px
+   ============================================================ */
+
+@media (max-width: 380px) {
+  .mx-view-pad {
+    padding: 12px 12px 64px;
+  }
+  .mx-page-head h1 { font-size: 19px; }
+  .mx-rail { width: 260px; }
+}
+
+/* ============================================================
+   Touch device polish
+   ============================================================ */
+
+@media (hover: none) and (pointer: coarse) {
+  .mx-rail-item,
+  .mx-btn,
+  .mx-icon-btn,
+  .mx-cmdk-item {
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mx-hover-card:hover {
+    transform: none;
+    box-shadow: none;
   }
 }
