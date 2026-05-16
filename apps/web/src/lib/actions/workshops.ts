@@ -247,6 +247,10 @@ export async function createWorkshopAreaAction(
     if (normalized.includes('unique') || normalized.includes('idx_workshop_areas_tenant_name')) {
       return { error: 'Det finns redan ett område med samma namn.' };
     }
+    if (detectMissingSchemaError(normalized, normalized, pbError.status)) {
+      console.error('[workshops] missing workshop_areas schema', { message, response: pbError.response ?? null });
+      return { error: 'Serverfel: workshop_areas-samlingen saknas. Kontakta administratör.' };
+    }
     return { error: 'Kunde inte skapa område.' };
   }
 }
