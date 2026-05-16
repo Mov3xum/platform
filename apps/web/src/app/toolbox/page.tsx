@@ -205,9 +205,9 @@ export default async function ToolboxPage({
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb="Hemmaplan / AI-agenter"
-        title="AI-agenter"
-        subtitle="Aktiveras per profil. Kör på Mistral Le Chat · EU-suverän stack. Alla körningar loggas."
+        crumb="Hemmaplan / Verktygslåda"
+        title="Verktygslåda"
+        subtitle="Interna och externa verktyg — AI-agenter, mallar och checklistor. Kör på Mistral Le Chat · EU-suverän stack. Alla körningar loggas."
         actions={
           <>
             <button className="mx-btn" type="button">
