@@ -180,9 +180,6 @@ export function ReportDetail({
           )}
         </Card>
         <div className="mx-flex mx-gap-2 mx-mt-3">
-          <button type="button" className="mx-btn">
-            <Icon name="pencil" size={12} /> Redigera
-          </button>
           <form action={regenerate} style={{ display: 'inline' }}>
             <button type="submit" className="mx-btn">
               <Icon name="sparkle" size={12} /> Regenerera

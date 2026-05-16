@@ -133,16 +133,7 @@ export default async function EventsPage() {
         crumb="Hemmaplan / Events"
         title="Events"
         subtitle="Spåra inflöde i realtid. Vilka events ger oss bolag?"
-        actions={
-          <>
-            <button className="mx-btn">
-              <Icon name="calendar" size={13} /> Kalendervy
-            </button>
-            <button className="mx-btn mx-primary">
-              <Icon name="plus" size={13} /> Nytt event
-            </button>
-          </>
-        }
+        actions={null}
       />
 
       {/* ── Live banner ────────────────────────────────────── */}
