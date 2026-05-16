@@ -12,7 +12,7 @@ export default async function NewToolPage() {
     <main className="mx-auto max-w-3xl px-6 py-10 lg:px-8">
       <div className="mb-6">
         <a href="/toolbox" className="text-sm text-foreground-muted hover:text-foreground">
-          ← AI-agenter
+          ← Tillbaka till AI-agenter
         </a>
       </div>
       <h1 className="mb-8 text-3xl font-semibold tracking-tight text-foreground">Ny AI-agent</h1>

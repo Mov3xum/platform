@@ -73,7 +73,10 @@ export function ToolForm({ mode, tool, canEditPrompt = false }: ToolFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="rounded-2xl border border-default bg-canvas-subtle p-4">
+      <section
+        aria-label="Enkel setup för AI-agent"
+        className="rounded-2xl border border-default bg-canvas-subtle p-4"
+      >
         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-foreground-subtle">
           Enkel setup
         </p>
@@ -91,7 +94,7 @@ export function ToolForm({ mode, tool, canEditPrompt = false }: ToolFormProps) {
             </>
           )}
         </ol>
-      </div>
+      </section>
 
       {mode === 'create' && (
         <div>

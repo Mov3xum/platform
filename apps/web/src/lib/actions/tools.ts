@@ -204,8 +204,9 @@ export async function assignToolToStartupAction(
 /**
  * Creates a new tool in the registry.
  *
- * Admin och incubator_lead kan sätta systemprompt (`prompt_template`) och modell
- * (`model`) för att möjliggöra komplett agent-setup för Movexums personal.
+ * Admin och incubator_lead kan sätta systemprompt (`prompt_template`) och modell (`model`).
+ * Detta var tidigare admin-only; utökningen är säker eftersom vi fortfarande kräver staff-roll,
+ * tenant-matchning och server-side filtrering av payloadfält.
  */
 export async function createToolAction(
   _prev: ToolActionState,
