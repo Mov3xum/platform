@@ -242,7 +242,7 @@ await ensureCollection({
   listRule: ANY_AUTH,
   viewRule: ANY_AUTH,
   createRule: null,
-  updateRule: null,
+  updateRule: `${ANY_AUTH} && (@request.auth.roles ?= "admin" || (@request.auth.roles ?= "incubator_lead" && @request.auth.tenant = id))`,
   deleteRule: null
 });
 
