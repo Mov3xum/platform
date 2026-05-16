@@ -20,24 +20,20 @@ function previewParagraphs(md: string | undefined): string[] {
 }
 
 export function ReportDetail({
-  report,
-  demo
+  report
 }: {
   report: IncubatorReport;
-  demo?: boolean;
 }) {
   const sections = Array.isArray(report.sections_json) ? report.sections_json : [];
   const paragraphs = previewParagraphs(report.preview_md);
 
   async function regenerate() {
     'use server';
-    if (demo) return;
     await generateAiDraftAction(report.id);
   }
 
   async function send() {
     'use server';
-    if (demo) return;
     await sendReportAction(report.id);
   }
 
@@ -184,11 +180,11 @@ export function ReportDetail({
           )}
         </Card>
         <div className="mx-flex mx-gap-2 mx-mt-3">
-          <button type="button" className="mx-btn" disabled={demo}>
+          <button type="button" className="mx-btn">
             <Icon name="pencil" size={12} /> Redigera
           </button>
           <form action={regenerate} style={{ display: 'inline' }}>
-            <button type="submit" className="mx-btn" disabled={demo}>
+            <button type="submit" className="mx-btn">
               <Icon name="sparkle" size={12} /> Regenerera
             </button>
           </form>
@@ -197,21 +193,13 @@ export function ReportDetail({
             <button
               type="submit"
               className="mx-btn mx-primary"
-              disabled={demo || report.status === 'sent'}
+              disabled={report.status === 'sent'}
             >
               <Icon name="upload" size={12} />{' '}
               {RECIPIENT_TO_SEND_LABEL[report.recipient] || 'Skicka rapport'}
             </button>
           </form>
         </div>
-        {demo && (
-          <div
-            className="mx-mono mx-t-xs mx-muted mx-mt-2"
-            style={{ fontStyle: 'italic' }}
-          >
-            Åtgärder är inaktiva eftersom detta är demo-data.
-          </div>
-        )}
       </div>
     </Card>
   );
