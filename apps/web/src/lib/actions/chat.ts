@@ -93,10 +93,10 @@ export async function sendChatMessage(
   }
 
   // Limit history to prevent token explosion (keep last 20 messages)
-  const limitedMessages = messages
+  const limitedMessages: Array<{ role: 'user' | 'assistant'; content: string }> = messages
     .slice(-20)
     .map((m) => ({
-      role: m.role === 'assistant' ? 'assistant' : 'user',
+      role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
       content: String(m.content || '').trim().slice(0, 2000)
     }))
     .filter((m) => m.content.length > 0);
