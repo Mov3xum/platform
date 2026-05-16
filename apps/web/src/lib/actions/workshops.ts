@@ -221,6 +221,83 @@ export async function createWorkshopAction(
   }
 }
 
+export async function updateWorkshopAction(
+  _prev: WorkshopActionState,
+  formData: FormData
+): Promise<WorkshopActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+
+  const pb = await getServerPb();
+  const workshopId = String(formData.get('workshop_id') || '').trim();
+  if (!workshopId) return { error: 'Workshop-ID saknas.' };
+
+  // Verify ownership
+  let existing: Workshop & Record<string, unknown>;
+  try {
+    existing = await pb.collection(PB_COLLECTIONS.workshops).getOne<Workshop & Record<string, unknown>>(workshopId);
+  } catch {
+    return { error: 'Workshopen hittades inte.' };
+  }
+  if (existing.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  const title = String(formData.get('title') || '').trim();
+  const goal = String(formData.get('goal') || '').trim();
+  const instructions = String(formData.get('instructions') || '').trim();
+  const status = String(formData.get('status') || 'draft');
+  const version = String(formData.get('version') || '1.0.0').trim();
+  const aiSystemPrompt = String(formData.get('ai_system_prompt') || '').trim();
+  const outputRequirements = String(formData.get('output_requirements') || '').trim();
+  const area = String(formData.get('area') || '').trim();
+  const modulesRaw = String(formData.get('modules_json') || '[]').trim();
+  const contentBlocksRaw = String(formData.get('content_blocks_json') || '[]').trim();
+  const audienceRoles = formData.getAll('audience_roles').map(String);
+  const active = formData.get('active') === 'on';
+
+  if (!title) return { error: 'Titel är obligatorisk.' };
+
+  let modules: WorkshopModule[] = [];
+  let contentBlocks: WorkshopBlock[] = [];
+
+  if (modulesRaw !== '[]') {
+    try {
+      modules = toWorkshopModules(JSON.parse(modulesRaw));
+      contentBlocks = modules.flatMap((m) => m.blocks);
+    } catch {
+      return { error: 'Modulerna innehåller ogiltig data.' };
+    }
+  } else if (contentBlocksRaw !== '[]') {
+    try {
+      contentBlocks = toWorkshopBlocks(JSON.parse(contentBlocksRaw));
+    } catch {
+      return { error: 'Content blocks måste vara giltig JSON.' };
+    }
+  }
+
+  try {
+    await pb.collection(PB_COLLECTIONS.workshops).update(workshopId, {
+      area: area || null,
+      title,
+      goal,
+      instructions,
+      status,
+      version: version || '1.0.0',
+      audience_roles: audienceRoles,
+      ai_system_prompt: aiSystemPrompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT,
+      output_requirements: outputRequirements,
+      modules,
+      content_blocks: contentBlocks,
+      active
+    });
+    revalidatePath('/education');
+    revalidatePath(`/education/workshops/${workshopId}`);
+    return { workshopId };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Kunde inte uppdatera workshop.';
+    return { error: message };
+  }
+}
+
 export async function createWorkshopAreaAction(
   _prev: WorkshopAreaActionState,
   formData: FormData
