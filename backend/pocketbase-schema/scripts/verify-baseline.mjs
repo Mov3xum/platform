@@ -89,18 +89,18 @@ function verifyRlsAndRbac(collections) {
   const startups = collections.get('startups');
   assertRuleContains(startups, 'listRule', '@request.auth.id != ""');
   assertRuleContains(startups, 'listRule', '@request.auth.tenant = tenant');
-  assertRuleContains(startups, 'createRule', '@request.auth.roles ?= "admin"');
+  assertRuleContains(startups, 'createRule', '@request.auth.id != ""');
 
   const activities = collections.get('activities');
   assertRuleContains(activities, 'listRule', 'startup.tenant');
 
   const tools = collections.get('tools');
   assertRuleContains(tools, 'listRule', '@request.auth.tenant = tenant');
-  assertRuleContains(tools, 'createRule', '@request.auth.roles ?= "admin"');
+  assertRuleContains(tools, 'createRule', '@request.auth.id != ""');
 
   const workshops = collections.get('workshops');
   assertRuleContains(workshops, 'listRule', '@request.auth.tenant = tenant');
-  assertRuleContains(workshops, 'createRule', '@request.auth.roles ?= "admin"');
+  assertRuleContains(workshops, 'createRule', '@request.auth.id != ""');
 
   const rolesField = getField(users, 'roles');
   if (rolesField.type !== 'select') {

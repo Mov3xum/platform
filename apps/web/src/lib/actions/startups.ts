@@ -94,29 +94,15 @@ export async function createStartupAction(
   formData: FormData
 ): Promise<StartupFormState> {
   const user = await requireUser();
-  const pb = await getServerPb();
 
-  let liveTenant = user.tenant;
-  let liveRoles = user.roles;
-  try {
-    const liveUser = await pb.collection('users').getOne(user.id);
-    const rolesRaw = (liveUser as Record<string, unknown>).roles;
-    const tenantRaw = (liveUser as Record<string, unknown>).tenant;
-    liveRoles = Array.isArray(rolesRaw) ? (rolesRaw as typeof user.roles) : [];
-    liveTenant = Array.isArray(tenantRaw)
-      ? String(tenantRaw[0] || '')
-      : String(tenantRaw || '');
-  } catch {
-    return { error: 'Kunde inte verifiera användarbehörighet mot PocketBase.' };
-  }
-
-  if (!hasRole(liveRoles, ['admin', 'incubator_lead', 'coach'])) {
+  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
     return { error: 'Du saknar behörighet att skapa bolag.' };
   }
-  if (!liveTenant) {
+  if (!user.tenant) {
     return { error: 'Ditt konto saknar tenant-koppling. Kontakta administratör.' };
   }
 
+  const pb = await getServerPb();
   const parsed = parseFormData(formData);
   if (!parsed.ok) return parsed.state;
   const data = parsed.data;
@@ -124,7 +110,7 @@ export async function createStartupAction(
   let createdId: string | undefined;
   try {
     const record = await pb.collection('startups').create({
-      tenant: liveTenant,
+      tenant: user.tenant,
       name: data.name,
       description: data.description,
       phase: data.phase,
@@ -148,21 +134,12 @@ export async function updateStartupAction(
   formData: FormData
 ): Promise<StartupFormState> {
   const user = await requireUser();
-  const pb = await getServerPb();
 
-  let liveRoles = user.roles;
-  try {
-    const liveUser = await pb.collection('users').getOne(user.id);
-    const rolesRaw = (liveUser as Record<string, unknown>).roles;
-    liveRoles = Array.isArray(rolesRaw) ? (rolesRaw as typeof user.roles) : [];
-  } catch {
-    return { error: 'Kunde inte verifiera användarbehörighet mot PocketBase.' };
-  }
-
-  if (!hasRole(liveRoles, ['admin', 'incubator_lead', 'coach'])) {
+  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
     return { error: 'Du saknar behörighet att uppdatera bolag.' };
   }
 
+  const pb = await getServerPb();
   const parsed = parseFormData(formData);
   if (!parsed.ok) return parsed.state;
   const data = parsed.data;

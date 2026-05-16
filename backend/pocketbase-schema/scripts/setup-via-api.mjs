@@ -209,8 +209,8 @@ async function ensureAppUser(tenantId) {
 // Common rule expressions
 // ----------------------------------------------------------------------------
 const ANY_AUTH = '@request.auth.id != ""';
-const TENANT_DIRECT = '(@request.auth.tenant = tenant || @request.auth.tenant ?= tenant)';
-const TENANT_VIA_STARTUP = '(@request.auth.tenant = startup.tenant || @request.auth.tenant ?= startup.tenant)';
+const TENANT_DIRECT = '@request.auth.tenant = tenant';
+const TENANT_VIA_STARTUP = '@request.auth.tenant = startup.tenant';
 const STAFF_ROLES =
   '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach")';
 const STAFF_OR_LEAD =
@@ -296,8 +296,8 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${STAFF_ROLES}`,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_ROLES}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
 });
 
@@ -325,8 +325,8 @@ await ensureCollection({
   indexes: ['CREATE INDEX idx_partners_tenant ON partners (tenant)'],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${STAFF_ROLES}`,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_ROLES}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
 });
 
@@ -347,8 +347,8 @@ await ensureCollection({
   indexes: ['CREATE INDEX idx_team_members_startup ON startup_team_members (startup)'],
   listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  createRule: `${ANY_AUTH} && ${STAFF_ROLES}`,
-  updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`
 });
 
@@ -372,8 +372,8 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  createRule: `${ANY_AUTH} && ${STAFF_ROLES}`,
-  updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`
 });
 
@@ -445,8 +445,8 @@ await ensureCollection({
   indexes: ['CREATE INDEX idx_agreements_startup ON agreements (startup)'],
   listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  createRule: `${ANY_AUTH} && ${STAFF_OR_LEAD}`,
-  updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_LEAD}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && @request.auth.roles ?= "admin"`
 });
 
@@ -467,8 +467,8 @@ await ensureCollection({
   indexes: ['CREATE INDEX idx_milestones_startup ON milestones (startup)'],
   listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  createRule: `${ANY_AUTH} && ${STAFF_ROLES}`,
-  updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`
 });
 
@@ -499,8 +499,8 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${STAFF_OR_LEAD}`,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
 });
 
@@ -537,7 +537,7 @@ await ensureCollection({
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   createRule: `${ANY_AUTH} && @request.auth.id = triggered_by`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = triggered_by`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
 });
 
 // 14. extend activities for tools (kind, tool, tool_run) -------------------
@@ -576,9 +576,9 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
 });
 
 // 16. workshop_assignments --------------------------------------------------
@@ -612,9 +612,9 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
-  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR} && @request.auth.id = assigned_by`,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+  createRule: `${ANY_AUTH} && @request.auth.id = assigned_by`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
 });
 
 // 17. workshop_runs ---------------------------------------------------------
@@ -649,7 +649,7 @@ await ensureCollection({
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
   createRule: `${ANY_AUTH} && @request.auth.id = triggered_by`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = triggered_by`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
 });
 
 // 18. extend activities for workshops (workshop, workshop_assignment, workshop_run + kind values)
