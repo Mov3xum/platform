@@ -8,11 +8,11 @@ export default function Home() {
           backgroundImage: 'radial-gradient(rgba(141,111,214,0.06) 1px, transparent 1px)',
           backgroundSize: '28px 28px'
         }}
-        aria-hidden
+        aria-hidden="true"
       />
       {/* Radial glow anchors */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-96 bg-[radial-gradient(ellipse_at_top_left,_rgba(97,56,181,0.15),_transparent_50%)] dark:bg-[radial-gradient(ellipse_at_top_left,_rgba(142,111,214,0.22),_transparent_50%)]" aria-hidden />
-      <div className="pointer-events-none absolute -right-40 top-20 hidden h-[500px] w-[500px] rounded-full dark:block" style={{ background: 'radial-gradient(circle, rgba(97,56,181,0.14) 0%, transparent 65%)', filter: 'blur(60px)' }} aria-hidden />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-96 bg-[radial-gradient(ellipse_at_top_left,_rgba(97,56,181,0.15),_transparent_50%)] dark:bg-[radial-gradient(ellipse_at_top_left,_rgba(142,111,214,0.22),_transparent_50%)]" aria-hidden="true" />
+      <div className="pointer-events-none absolute -right-40 top-20 hidden h-[500px] w-[500px] rounded-full dark:block" style={{ background: 'radial-gradient(circle, rgba(97,56,181,0.14) 0%, transparent 65%)', filter: 'blur(60px)' }} aria-hidden="true" />
 
       <div className="relative z-10">
         <section className="mx-auto flex min-h-[calc(100svh-80px)] max-w-7xl flex-col justify-center px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
@@ -46,8 +46,8 @@ export default function Home() {
               </div>
             </div>
             <div className="relative isolate overflow-hidden rounded-3xl border border-default bg-surface p-6 shadow-2xl shadow-movexum-lila/10 dark:border-[rgba(141,111,214,0.15)] dark:shadow-movexum-lila/30 sm:rounded-[2rem] sm:p-8">
-              <div className="pointer-events-none absolute -right-12 top-10 h-48 w-48 rounded-full" style={{ background: 'radial-gradient(circle, rgba(141,111,214,0.3) 0%, transparent 65%)', filter: 'blur(30px)' }} aria-hidden />
-              <div className="pointer-events-none absolute bottom-8 left-4 h-32 w-32 rounded-full" style={{ background: 'radial-gradient(circle, rgba(0,168,222,0.15) 0%, transparent 65%)', filter: 'blur(20px)' }} aria-hidden />
+              <div className="pointer-events-none absolute -right-12 top-10 h-48 w-48 rounded-full" style={{ background: 'radial-gradient(circle, rgba(141,111,214,0.3) 0%, transparent 65%)', filter: 'blur(30px)' }} aria-hidden="true" />
+              <div className="pointer-events-none absolute bottom-8 left-4 h-32 w-32 rounded-full" style={{ background: 'radial-gradient(circle, rgba(0,168,222,0.15) 0%, transparent 65%)', filter: 'blur(20px)' }} aria-hidden="true" />
               <div className="relative flex h-full flex-col justify-between gap-6">
                 <div className="space-y-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-link sm:text-sm">Movexum</p>

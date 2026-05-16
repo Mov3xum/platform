@@ -23,7 +23,7 @@ export function Logo({
   height = 32,
   variant = 'auto'
 }: LogoProps) {
-  // Scale font-size from the height prop (wordmark text sits ~70 % of height)
+  // Scale font-size from the height prop (wordmark text sits ~70% of height)
   const fontSize = Math.round(height * 0.72);
 
   const baseStyle: React.CSSProperties = {

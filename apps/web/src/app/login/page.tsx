@@ -29,7 +29,7 @@ export default async function LoginPage({
           backgroundImage: 'radial-gradient(rgba(141,111,214,0.07) 1px, transparent 1px)',
           backgroundSize: '28px 28px'
         }}
-        aria-hidden
+        aria-hidden="true"
       />
       {/* Lila radial glow behind the card (dark only) */}
       <div
@@ -38,7 +38,7 @@ export default async function LoginPage({
           background: 'radial-gradient(circle, rgba(97,56,181,0.18) 0%, transparent 65%)',
           filter: 'blur(40px)'
         }}
-        aria-hidden
+        aria-hidden="true"
       />
 
       <div className="relative w-full max-w-md rounded-3xl border border-default bg-surface p-6 shadow-2xl shadow-black/30 dark:border-[rgba(141,111,214,0.15)] dark:bg-[#0a0a0a] sm:p-8">
