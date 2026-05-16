@@ -250,7 +250,9 @@ await ensureCollection({
   fields: [
     { name: 'name', type: 'text', required: true, min: 2, max: 200 },
     { name: 'slug', type: 'text', required: true, min: 2, max: 64, pattern: '^[a-z0-9-]+$' },
-    { name: 'type', type: 'select', required: true, maxSelect: 1, values: ['incubator', 'partner_org'] }
+    { name: 'type', type: 'select', required: true, maxSelect: 1, values: ['incubator', 'partner_org'] },
+    { name: 'logo_light', type: 'file', required: false, maxSelect: 1, maxSize: 2097152, mimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'] },
+    { name: 'logo_dark', type: 'file', required: false, maxSelect: 1, maxSize: 2097152, mimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'] }
   ],
   indexes: ['CREATE UNIQUE INDEX idx_tenants_slug ON tenants (slug)'],
   listRule: ANY_AUTH,

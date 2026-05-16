@@ -10,11 +10,19 @@ export type SaveModuleTogglesState = {
   success?: boolean;
 };
 
+export type UploadTenantLogoState = {
+  error?: string;
+  success?: boolean;
+};
+
 const HIDDEN_MODULE_IDS = ['dashboard', 'toolbox', 'onboarding', 'activity_feed', 'partners'];
 
 const ALLOWED_MODULE_IDS = new Set(
   coreModules.filter((m) => !HIDDEN_MODULE_IDS.includes(m.id)).map((m) => m.id)
 );
+
+export const MAX_TENANT_LOGO_BYTES = 2 * 1024 * 1024; // 2 MB
+const ALLOWED_LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
 
 /**
  * Sparar listan av avaktiverade moduler för inloggad användares tenant.
@@ -101,6 +109,87 @@ export async function saveUserModuleTogglesAction(
   } catch (err) {
     console.error('[settings] saveUserModuleToggles failed', { userId, tenantId: user.tenant, err });
     return { error: 'Kunde inte spara användarinställningar. Försök igen.' };
+  }
+
+  revalidatePath('/', 'layout');
+  revalidatePath('/installningar');
+
+  return { success: true };
+}
+
+/**
+ * Laddar upp en logotyp (light eller dark mode) för inloggad användares tenant.
+ * Kräver admin- eller incubator_lead-roll.
+ */
+export async function uploadTenantLogoAction(
+  _prev: UploadTenantLogoState,
+  formData: FormData
+): Promise<UploadTenantLogoState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+    return { error: 'Åtkomst nekad.' };
+  }
+
+  const mode = String(formData.get('mode') || '');
+  if (mode !== 'light' && mode !== 'dark') {
+    return { error: 'Ogiltigt läge. Välj light eller dark.' };
+  }
+
+  const logoFile = formData.get('logo') as File | null;
+  if (!logoFile || logoFile.size === 0) {
+    return { error: 'Ingen fil vald.' };
+  }
+  if (logoFile.size > MAX_TENANT_LOGO_BYTES) {
+    return { error: 'Logotypfilen får inte vara större än 2 MB.' };
+  }
+  if (!ALLOWED_LOGO_TYPES.includes(logoFile.type)) {
+    return { error: 'Endast PNG, JPG, WEBP och SVG stöds.' };
+  }
+
+  const pb = await getServerPb();
+  const fieldName = mode === 'light' ? 'logo_light' : 'logo_dark';
+  const uploadData = new FormData();
+  uploadData.append(fieldName, logoFile);
+
+  try {
+    await pb.collection('tenants').update(user.tenant, uploadData);
+  } catch (err) {
+    console.error('[settings] uploadTenantLogo failed', { tenantId: user.tenant, mode, err });
+    return { error: 'Kunde inte spara logotypen. Försök igen.' };
+  }
+
+  revalidatePath('/', 'layout');
+  revalidatePath('/installningar');
+
+  return { success: true };
+}
+
+/**
+ * Tar bort logotyp (light eller dark mode) för inloggad användares tenant.
+ * Kräver admin- eller incubator_lead-roll.
+ */
+export async function deleteTenantLogoAction(
+  _prev: UploadTenantLogoState,
+  formData: FormData
+): Promise<UploadTenantLogoState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+    return { error: 'Åtkomst nekad.' };
+  }
+
+  const mode = String(formData.get('mode') || '');
+  if (mode !== 'light' && mode !== 'dark') {
+    return { error: 'Ogiltigt läge.' };
+  }
+
+  const fieldName = mode === 'light' ? 'logo_light' : 'logo_dark';
+  const pb = await getServerPb();
+
+  try {
+    await pb.collection('tenants').update(user.tenant, { [fieldName]: null });
+  } catch (err) {
+    console.error('[settings] deleteTenantLogo failed', { tenantId: user.tenant, mode, err });
+    return { error: 'Kunde inte ta bort logotypen. Försök igen.' };
   }
 
   revalidatePath('/', 'layout');

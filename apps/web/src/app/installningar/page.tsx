@@ -6,6 +6,7 @@ import { PageHead, Card, Chip, SectionHead, Icon } from '@/components/proto';
 import { coreModules } from '@platform/shared';
 import { AdminToggles, type ModuleToggleItem } from './AdminToggles';
 import { UserModuleToggles } from './UserModuleToggles';
+import { TenantLogoUpload } from './TenantLogoUpload';
 import { getInfraHealth, healthChipVariant, healthStateLabel } from '@/lib/health';
 
 interface TenantRecord {
@@ -220,6 +221,20 @@ export default async function InstallningarPage() {
           </Link>
         </div>
       </Card>
+
+      {/* ── Logotyp ───────────────────────────────────────────── */}
+      <div className="mx-mt-6">
+        <SectionHead
+          title="Logotyp"
+          label="Ladda upp din logotyp för light och dark mode"
+        />
+        <Card style={{ padding: 20 }}>
+          <TenantLogoUpload
+            logoLightUrl={user.tenantLogoLightUrl}
+            logoDarkUrl={user.tenantLogoDarkUrl}
+          />
+        </Card>
+      </div>
 
       {/* ── Moduler ───────────────────────────────────────────── */}
       <div className="mx-mt-6">

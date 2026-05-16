@@ -26,6 +26,8 @@ interface ProtoRailProps {
     name: string;
     email: string;
     avatarUrl?: string;
+    tenantLogoLightUrl?: string;
+    tenantLogoDarkUrl?: string;
     roles: Role[];
     disabledModules?: string[];
   };
@@ -50,6 +52,8 @@ export function ProtoRail({ user, counts = {} }: ProtoRailProps) {
           width={168}
           height={40}
           className="mx-rail-brand"
+          logoLightUrl={user.tenantLogoLightUrl}
+          logoDarkUrl={user.tenantLogoDarkUrl}
         />
       </div>
 
