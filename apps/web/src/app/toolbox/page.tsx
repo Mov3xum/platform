@@ -209,13 +209,11 @@ export default async function ToolboxPage({
         title="AI-agenter"
         subtitle="Interna AI-agenter, mallar och checklistor. Kör på Mistral Le Chat · EU-suverän stack. Alla körningar loggas."
         actions={
-          <>
-            {isStaff && (
-              <Link href="/toolbox/new" className="mx-btn mx-primary">
-              <Icon name="plus" size={13} /> Skapa agent
-              </Link>
-            )}
-          </>
+          isStaff ? (
+            <Link href="/toolbox/new" className="mx-btn mx-primary">
+              <Icon name="plus" size={13} /> Skapa egen agent
+            </Link>
+          ) : null
         }
       />
 

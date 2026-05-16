@@ -3,18 +3,45 @@
 import { useState } from 'react';
 import type { WorkshopModule, WorkshopBlock, WorkshopBlockType, WorkshopBlockOption } from '@platform/shared';
 
-const BLOCK_TYPES: { type: WorkshopBlockType; label: string; emoji: string }[] = [
-  { type: 'question', label: 'Fråga', emoji: '❓' },
-  { type: 'exercise', label: 'Övning', emoji: '✏️' },
-  { type: 'instruction', label: 'Instruktion', emoji: '📖' },
-  { type: 'video', label: 'Film', emoji: '🎬' },
-  { type: 'image', label: 'Bild', emoji: '🖼️' },
-  { type: 'ai_chat', label: 'AI-chatt', emoji: '🤖' },
-  { type: 'ai_pipeline', label: 'AI-pipeline', emoji: '🧠' },
-  { type: 'coach_review', label: 'Coach-granskning', emoji: '🎓' },
-  { type: 'commit_document', label: 'Commit dokument', emoji: '📌' },
-  { type: 'test', label: 'Test/Quiz', emoji: '📝' },
-  { type: 'summary', label: 'Sammanfattning', emoji: '📊' }
+type BlockIconId =
+  | 'question'
+  | 'exercise'
+  | 'instruction'
+  | 'video'
+  | 'image'
+  | 'ai_chat'
+  | 'ai_pipeline'
+  | 'coach_review'
+  | 'commit_document'
+  | 'test'
+  | 'summary';
+
+const BLOCK_ICON_TEXT: Record<BlockIconId, string> = {
+  question: 'Q',
+  exercise: 'EX',
+  instruction: 'IN',
+  video: 'VD',
+  image: 'IM',
+  ai_chat: 'AI',
+  ai_pipeline: 'PI',
+  coach_review: 'CR',
+  commit_document: 'CM',
+  test: 'T',
+  summary: 'SM'
+};
+
+const BLOCK_TYPES: { type: WorkshopBlockType; label: string; iconId: BlockIconId }[] = [
+  { type: 'question', label: 'Fråga', iconId: 'question' },
+  { type: 'exercise', label: 'Övning', iconId: 'exercise' },
+  { type: 'instruction', label: 'Instruktion', iconId: 'instruction' },
+  { type: 'video', label: 'Film', iconId: 'video' },
+  { type: 'image', label: 'Bild', iconId: 'image' },
+  { type: 'ai_chat', label: 'AI-chatt', iconId: 'ai_chat' },
+  { type: 'ai_pipeline', label: 'AI-pipeline', iconId: 'ai_pipeline' },
+  { type: 'coach_review', label: 'Coach-granskning', iconId: 'coach_review' },
+  { type: 'commit_document', label: 'Commit dokument', iconId: 'commit_document' },
+  { type: 'test', label: 'Test/Quiz', iconId: 'test' },
+  { type: 'summary', label: 'Sammanfattning', iconId: 'summary' }
 ];
 
 const BLOCK_TYPE_MAP = Object.fromEntries(BLOCK_TYPES.map((b) => [b.type, b]));
@@ -359,8 +386,13 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                 >
                   {/* Block header row */}
                   <div className="flex items-center gap-2 p-3">
-                    <span className="shrink-0 text-base" title={meta?.label}>
-                      {meta?.emoji}
+                    <span
+                      className="shrink-0 text-sm text-foreground-muted"
+                      title={meta?.label}
+                      role="img"
+                      aria-label={meta?.label ?? 'Workshopblock'}
+                    >
+                      {meta?.iconId ? BLOCK_ICON_TEXT[meta.iconId] : 'BL'}
                     </span>
                     <input
                       type="text"
@@ -588,7 +620,7 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                       {block.type === 'ai_pipeline' && (
                         <div className="space-y-3 rounded-2xl border border-movexum-lila/30 bg-movexum-pastell-lila/20 p-3 dark:border-movexum-morklila/30 dark:bg-movexum-morklila/10">
                           <p className="text-xs font-semibold uppercase tracking-wide text-movexum-lila dark:text-movexum-ljuslila">
-                            🧠 AI-pipeline-konfiguration
+                            AI-pipeline-konfiguration
                           </p>
                           <div>
                             <label className={labelClass}>
@@ -688,14 +720,21 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                   Välj blocktyp att lägga till:
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {BLOCK_TYPES.map(({ type, label, emoji }) => (
+                  {BLOCK_TYPES.map(({ type, label, iconId }) => (
                     <button
                       key={type}
                       type="button"
                       onClick={() => addBlock(mod.id, type)}
                       className="inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:border-brand hover:bg-canvas-subtle hover:text-foreground"
                     >
-                      <span>{emoji}</span>
+                      <span
+                        className="text-xs text-foreground-subtle"
+                        title={label}
+                        role="img"
+                        aria-label={label}
+                      >
+                        {BLOCK_ICON_TEXT[iconId]}
+                      </span>
                       {label}
                     </button>
                   ))}

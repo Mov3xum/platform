@@ -6,6 +6,12 @@ export { ProtoTopBar } from './ProtoTopBar';
 export { Cmdk } from './Cmdk';
 export { ModuleNavItem } from './ModuleNavItem';
 export {
+  MobileRailProvider,
+  MobileRailBackdrop,
+  MobileMenuButton,
+  useMobileRail
+} from './MobileRail';
+export {
   PageHead,
   IdTag,
   Card,

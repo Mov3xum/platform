@@ -54,14 +54,9 @@ export default async function RapporterPage({
         title="Rapportering"
         subtitle="Vinnova, Tillväxtverket och regionala rapporter — fylls automatiskt från portföljen. Granska, justera, skicka."
         actions={
-          <>
-            <button type="button" className="mx-btn">
-              <Icon name="copy" size={13} /> Mallar
-            </button>
-            <Link href="/rapporter?new=1" className="mx-btn mx-primary">
-              <Icon name="plus" size={13} /> Ny rapport
-            </Link>
-          </>
+          <Link href="/rapporter?new=1" className="mx-btn mx-primary">
+            <Icon name="plus" size={13} /> Ny rapport
+          </Link>
         }
       />
 

@@ -143,42 +143,42 @@
 
 /* === Dark mode (klassbaserat på <html>) ============================= */
 .dark {
-  --color-canvas: #0a0a0a;
-  --color-canvas-subtle: #161616;
-  --color-canvas-muted: #1f1f1f;
-  --color-surface: #161616;
-  --color-surface-elevated: #1f1f1f;
-  --color-border-default: #2a2a2a;
-  --color-border-strong: #3a3a3a;
-  --color-foreground: #f5f5f5;
-  --color-foreground-muted: #cccccc;
-  --color-foreground-subtle: #a3a3a3;
-  --color-foreground-inverse: #0a0a0a;
-  --color-brand: #4fc4ea;             /* Ljusare blå — kontrast på svart */
-  --color-brand-hover: #8fdcf2;
-  --color-brand-foreground: #002c40;
-  --color-link: #4fc4ea;
-  --color-ring: #4fc4ea;
+  --color-canvas: #000000;
+  --color-canvas-subtle: #0a0a0a;
+  --color-canvas-muted: #111111;
+  --color-surface: #0a0a0a;
+  --color-surface-elevated: #141414;
+  --color-border-default: #1f1f1f;
+  --color-border-strong: #2d2d2d;
+  --color-foreground: #f0f0f0;
+  --color-foreground-muted: #c0c0c0;
+  --color-foreground-subtle: #808080;
+  --color-foreground-inverse: #000000;
+  --color-brand: #8e6fd6;             /* Ljuslila — synlig på svart */
+  --color-brand-hover: #a98ce8;
+  --color-brand-foreground: #000000;
+  --color-link: #8e6fd6;
+  --color-ring: #6138b5;
 
   /* Spegelvänd extremerna i skalorna så `bg-primary-50` etc. förblir
      en "subtle" yta även i dark mode. */
-  --color-primary-50: #221339;
-  --color-primary-100: #36215a;
+  --color-primary-50: #1a0f30;
+  --color-primary-100: #2d1f50;
   --color-primary-900: #f3eefe;
-  --color-accent-50: #002c40;
-  --color-accent-100: #003d54;
+  --color-accent-50: #001825;
+  --color-accent-100: #002535;
   --color-accent-900: #ebfafc;
-  --color-success-50: #112112;
-  --color-success-100: #1d3a1f;
+  --color-success-50: #0d1a0e;
+  --color-success-100: #152916;
   --color-success-900: #d9eddd;
-  --color-warning-50: #2e160d;
-  --color-warning-100: #4b2718;
+  --color-warning-50: #1a0b05;
+  --color-warning-100: #2e150a;
   --color-warning-900: #f8f1da;
-  --color-neutral-50: #121212;
-  --color-neutral-100: #1c1c1c;
-  --color-neutral-200: #2a2a2a;
-  --color-neutral-300: #404040;
-  --color-neutral-700: #cccccc;
-  --color-neutral-800: #e6e6e6;
-  --color-neutral-900: #f2f2f2;
+  --color-neutral-50: #0a0a0a;
+  --color-neutral-100: #111111;
+  --color-neutral-200: #1f1f1f;
+  --color-neutral-300: #2d2d2d;
+  --color-neutral-700: #c0c0c0;
+  --color-neutral-800: #d8d8d8;
+  --color-neutral-900: #f0f0f0;
 }

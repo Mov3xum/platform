@@ -89,15 +89,15 @@
 }
 
 html.dark {
-  --mx-canvas:     #0a0a0a;
-  --mx-paper:      #161616;
-  --mx-paper-2:    #1f1f1f;
-  --mx-paper-3:    #262626;
-  --mx-line:       #2a2a2a;
-  --mx-line-soft:  #1f1f1f;
-  --mx-line-strong:#3a3a3a;
-  --mx-muted:      #a3a3a3;
-  --mx-muted-2:    #888;
+  --mx-canvas:     #000000;
+  --mx-paper:      #0a0a0a;
+  --mx-paper-2:    #111111;
+  --mx-paper-3:    #181818;
+  --mx-line:       #1e1e1e;
+  --mx-line-soft:  #141414;
+  --mx-line-strong:#2d2d2d;
+  --mx-muted:      #888888;
+  --mx-muted-2:    #555555;
   --mx-ink:        #f5f5f5;
   --mx-ink-2:      #d4d4d4;
   --mx-ink-3:      #b3b3b3;
@@ -126,8 +126,8 @@ html.dark {
    ============================================================ */
 
 .mx-rail {
-  background: #002c40; /* Movexum Mörkblå - alltid */
-  color: rgba(255, 255, 255, 0.78);
+  background: #000000;
+  color: rgba(255, 255, 255, 0.72);
   display: flex;
   flex-direction: column;
   position: sticky;
@@ -135,6 +135,7 @@ html.dark {
   height: 100vh;
   z-index: 30;
   overflow: hidden;
+  border-right: 1px solid rgba(141, 111, 214, 0.12);
 }
 
 .mx-rail-head {
@@ -145,7 +146,7 @@ html.dark {
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
-.mx-rail-brand img {
+.mx-rail-brand {
   display: block;
 }
 
@@ -190,7 +191,7 @@ html.dark {
 }
 
 .mx-rail-item.active {
-  background: rgba(255,255,255,0.1);
+  background: rgba(141, 111, 214, 0.12);
   color: white;
 }
 
@@ -201,8 +202,9 @@ html.dark {
   top: 6px;
   bottom: 6px;
   width: 3px;
-  background: #f0d22e; /* Movexum gul som live-indikator */
+  background: #8e6fd6;
   border-radius: 0 3px 3px 0;
+  box-shadow: 0 0 10px #8e6fd6, 0 0 20px rgba(141, 111, 214, 0.5);
 }
 
 .mx-rail-item .mx-ico { opacity: .65; flex-shrink: 0; }
@@ -220,8 +222,8 @@ html.dark {
 }
 
 .mx-rail-item.active .mx-count {
-  background: rgba(240, 210, 46, 0.18);
-  color: #f0d22e;
+  background: rgba(141, 111, 214, 0.22);
+  color: #c9b6fb;
 }
 
 .mx-rail-foot {
@@ -368,8 +370,9 @@ html.dark {
   top: 6px; right: 6px;
   width: 6px; height: 6px;
   border-radius: 50%;
-  background: #d67e47;
+  background: #8e6fd6;
   border: 1.5px solid var(--mx-canvas);
+  box-shadow: 0 0 6px rgba(141, 111, 214, 0.8);
 }
 
 /* ============================================================
@@ -492,6 +495,9 @@ html.dark {
   background: #002c40;
   border-color: #002c40;
   color: white;
+  border-radius: 999px;
+  padding-left: 18px;
+  padding-right: 18px;
 }
 
 .mx-btn.mx-primary:hover { background: #003b54; border-color: #003b54; }
@@ -500,6 +506,9 @@ html.dark {
   background: #6138b5;
   border-color: #6138b5;
   color: white;
+  border-radius: 999px;
+  padding-left: 18px;
+  padding-right: 18px;
 }
 
 .mx-btn.mx-brand:hover { background: #452e75; border-color: #452e75; }
@@ -574,8 +583,8 @@ select.mx-input {
 .mx-textarea:focus,
 select.mx-input:focus {
   outline: none;
-  border-color: #002c40;
-  box-shadow: 0 0 0 3px rgba(0, 44, 64, .12);
+  border-color: #6138b5;
+  box-shadow: 0 0 0 3px rgba(97, 56, 181, .14);
 }
 
 .mx-label {
@@ -688,7 +697,7 @@ select.mx-input:focus {
 
 .mx-cmdk-shade {
   position: fixed; inset: 0;
-  background: rgba(0,44,64,.4);
+  background: rgba(10, 0, 30, 0.6);
   backdrop-filter: blur(8px);
   display: grid; place-items: start center;
   padding-top: 12vh;
@@ -848,8 +857,8 @@ select.mx-input:focus {
 .mx-field input:focus,
 .mx-field textarea:focus,
 .mx-field select:focus {
-  border-color: var(--mx-ink-3);
-  box-shadow: 0 0 0 3px rgba(31,123,140,.12);
+  border-color: #6138b5;
+  box-shadow: 0 0 0 3px rgba(97, 56, 181, .12);
 }
 
 .mx-field textarea { min-height: 80px; resize: vertical; }
@@ -914,20 +923,550 @@ select.mx-input:focus {
 .mx-view::-webkit-scrollbar { width: 10px; height: 10px; }
 .mx-view::-webkit-scrollbar-track { background: transparent; }
 .mx-view::-webkit-scrollbar-thumb {
-  background: rgba(0,44,64,.12);
+  background: rgba(97, 56, 181, 0.2);
   border-radius: 999px;
   border: 2px solid var(--mx-canvas);
 }
-.mx-view::-webkit-scrollbar-thumb:hover { background: rgba(0,44,64,.2); }
+.mx-view::-webkit-scrollbar-thumb:hover { background: rgba(97, 56, 181, 0.35); }
 
-/* Mobile rail collapse */
+/* ============================================================
+   Mobile menu button + backdrop
+   ============================================================ */
+
+.mx-mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin: 0 -4px 0 -8px;
+  border: 0;
+  background: transparent;
+  color: var(--mx-ink);
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mx-mobile-menu-btn:hover,
+.mx-mobile-menu-btn:focus-visible {
+  background: var(--mx-paper-2);
+  outline: none;
+}
+
+.mx-topbar-search-mobile {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-right: -4px;
+  border: 0;
+  background: transparent;
+  color: var(--mx-ink-soft);
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mx-topbar-search-mobile:hover,
+.mx-topbar-search-mobile:focus-visible {
+  background: var(--mx-paper-2);
+  color: var(--mx-ink);
+  outline: none;
+}
+
+.mx-rail-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+  z-index: 60;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.mx-rail-backdrop.mx-on {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body.mx-rail-locked {
+  overflow: hidden;
+}
+
+/* ============================================================
+   Tablet — collapse rail entirely; turn into drawer
+   ============================================================ */
+
 @media (max-width: 1024px) {
-  .mx-app { grid-template-columns: 1fr; }
-  .mx-rail { display: none; }
-  .mx-rail.mx-rail-open {
-    display: flex;
-    position: fixed;
-    inset: 0 auto 0 0;
-    width: var(--mx-rail-w);
+  .mx-app {
+    grid-template-columns: 1fr;
   }
+
+  .mx-mobile-menu-btn {
+    display: inline-flex;
+  }
+
+  .mx-rail {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100dvh;
+    width: 280px;
+    max-width: 84vw;
+    transform: translateX(-100%);
+    transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1),
+                visibility 220ms;
+    z-index: 70;
+    box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.5);
+    will-change: transform;
+    visibility: hidden;
+  }
+
+  .mx-app.mx-rail-is-open .mx-rail {
+    transform: translateX(0);
+    visibility: visible;
+  }
+
+  .mx-rail-backdrop {
+    display: block;
+  }
+
+  /* Make rail items more tap-friendly on touch */
+  .mx-rail-item {
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  .mx-rail-head {
+    padding: 16px 16px;
+  }
+
+  .mx-rail-foot {
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (min-width: 1025px) {
+  .mx-rail-backdrop {
+    display: none !important;
+  }
+}
+
+/* ============================================================
+   Tablet+phone — topbar / view
+   ============================================================ */
+
+@media (max-width: 1024px) {
+  .mx-topbar {
+    padding: 0 14px;
+    gap: 8px;
+  }
+
+  .mx-topbar-search {
+    width: auto;
+    flex: 1;
+    min-width: 0;
+    max-width: 340px;
+  }
+
+  .mx-topbar-search kbd {
+    display: none;
+  }
+
+  .mx-view-pad {
+    padding: 18px 18px 64px;
+  }
+
+  .mx-page-head {
+    gap: 16px;
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+  }
+
+  .mx-page-head h1 {
+    font-size: 23px;
+    line-height: 1.18;
+  }
+
+  /* Hide hover-only column from the topbar search where we have separate icon button */
+  .mx-topbar-search-label {
+    display: inline;
+  }
+}
+
+/* ============================================================
+   Phones — < 768px
+   ============================================================ */
+
+@media (max-width: 768px) {
+  :root {
+    --mx-topbar-h: 56px;
+  }
+
+  .mx-topbar {
+    padding: 0 12px;
+    gap: 6px;
+  }
+
+  .mx-topbar-search {
+    display: none;
+  }
+
+  .mx-topbar-search-mobile {
+    display: inline-flex;
+  }
+
+  .mx-crumb {
+    font-size: 13px;
+    overflow: hidden;
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* On small screens show only the last crumb segment to save space */
+  .mx-crumb > span:not(:last-child) {
+    display: none;
+  }
+  .mx-crumb > span:last-child .mx-sep {
+    display: none;
+  }
+  .mx-crumb .mx-seg {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--mx-ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .mx-view-pad {
+    padding: 14px 14px 72px;
+  }
+  .mx-view-pad.mx-narrow,
+  .mx-view-pad.mx-wide {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .mx-page-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+  }
+
+  .mx-page-head h1 {
+    font-size: 20px;
+    letter-spacing: -0.2px;
+  }
+
+  .mx-page-head .mx-sub {
+    font-size: 13px;
+    margin-top: 4px;
+  }
+
+  .mx-page-head .mx-actions {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .mx-page-head .mx-actions > * {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .mx-section-head {
+    gap: 8px;
+    margin: 18px 0 10px;
+  }
+
+  .mx-section-head h2 {
+    font-size: 16px;
+  }
+
+  /* Make ALL inline-grid layouts on pages stack on phones */
+  .mx-view-pad [style*="grid-template-columns"],
+  .mx-view-pad [style*="gridTemplateColumns"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Cards / card-heads tighter */
+  .mx-card-head {
+    padding: 10px 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  /* Forms: prevent iOS zoom on focus by raising base font-size to 16px */
+  .mx-input,
+  .mx-textarea,
+  select.mx-input,
+  .mx-field input,
+  .mx-field textarea,
+  .mx-field select,
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="number"],
+  input[type="url"],
+  input[type="tel"],
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  /* Buttons: hit-target ≥ 40px */
+  .mx-btn {
+    padding: 9px 14px;
+    font-size: 13px;
+    min-height: 40px;
+  }
+
+  .mx-btn.mx-sm {
+    padding: 6px 10px;
+    font-size: 11.5px;
+    min-height: 32px;
+  }
+
+  .mx-icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Tables: scroll horizontally on phones */
+  .mx-tbl,
+  .mx-card .mx-tbl {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+
+  /* Action bar respects iOS bottom inset */
+  .mx-action-bar {
+    padding-left: 14px;
+    padding-right: 14px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* Command palette */
+  .mx-cmdk-shade {
+    padding-top: 6vh;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .mx-cmdk {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .mx-cmdk-input {
+    padding: 14px 16px;
+    font-size: 16px;
+  }
+}
+
+/* ============================================================
+   Very small phones — < 380px
+   ============================================================ */
+
+@media (max-width: 380px) {
+  .mx-view-pad {
+    padding: 12px 12px 64px;
+  }
+  .mx-page-head h1 { font-size: 19px; }
+  .mx-rail { width: 260px; }
+}
+
+/* ============================================================
+   Touch device polish
+   ============================================================ */
+
+@media (hover: none) and (pointer: coarse) {
+  .mx-rail-item,
+  .mx-btn,
+  .mx-icon-btn,
+  .mx-cmdk-item {
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mx-hover-card:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+/* ============================================================
+   Dark mode — Rankad-inspirerad visuell förstärkning
+   Svart canvas, lila accenter, punktmönster, glöd
+   ============================================================ */
+
+html.dark .mx-rail {
+  border-right-color: rgba(141, 111, 214, 0.15);
+}
+
+/* Subtle lila glow at top of rail */
+html.dark .mx-rail-head {
+  background: linear-gradient(180deg, rgba(97, 56, 181, 0.08) 0%, transparent 100%);
+  border-bottom-color: rgba(141, 111, 214, 0.1);
+}
+
+/* Cards get lila border tint in dark */
+html.dark .mx-card {
+  border-color: rgba(141, 111, 214, 0.1);
+}
+
+html.dark .mx-hover-card:hover {
+  border-color: rgba(141, 111, 214, 0.25);
+  box-shadow: 0 0 0 1px rgba(141, 111, 214, 0.12), 0 8px 32px rgba(97, 56, 181, 0.12);
+}
+
+/* Ink card in dark = lila-dark bg */
+html.dark .mx-card.mx-ink-card {
+  background: #1a0f30;
+  border-color: rgba(141, 111, 214, 0.25);
+}
+
+/* Pill CTA buttons: lila in dark mode with glow */
+html.dark .mx-btn.mx-primary {
+  background: #6138b5;
+  border-color: #6138b5;
+  color: #fff;
+  box-shadow: 0 0 18px rgba(97, 56, 181, 0.35), 0 2px 8px rgba(97, 56, 181, 0.25);
+}
+
+html.dark .mx-btn.mx-primary:hover {
+  background: #7040d0;
+  border-color: #7040d0;
+  box-shadow: 0 0 24px rgba(97, 56, 181, 0.5), 0 2px 8px rgba(97, 56, 181, 0.3);
+}
+
+html.dark .mx-btn.mx-brand {
+  background: #8e6fd6;
+  border-color: #8e6fd6;
+  color: #000;
+  box-shadow: 0 0 18px rgba(141, 111, 214, 0.4), 0 2px 8px rgba(141, 111, 214, 0.25);
+}
+
+html.dark .mx-btn.mx-brand:hover {
+  background: #a98ce8;
+  border-color: #a98ce8;
+  box-shadow: 0 0 26px rgba(141, 111, 214, 0.55), 0 2px 8px rgba(141, 111, 214, 0.3);
+}
+
+/* Regular buttons darker in dark mode */
+html.dark .mx-btn {
+  background: #111111;
+  border-color: rgba(255,255,255,0.1);
+  color: #e0e0e0;
+}
+
+html.dark .mx-btn:hover {
+  background: #1a1a1a;
+  border-color: rgba(141, 111, 214, 0.3);
+}
+
+/* Input focus with lila glow in dark */
+html.dark .mx-input:focus,
+html.dark .mx-textarea:focus,
+html.dark select.mx-input:focus,
+html.dark .mx-field input:focus,
+html.dark .mx-field textarea:focus,
+html.dark .mx-field select:focus {
+  border-color: #8e6fd6;
+  box-shadow: 0 0 0 3px rgba(141, 111, 214, 0.18);
+}
+
+/* Topbar search pill in dark */
+html.dark .mx-topbar-search {
+  background: #0a0a0a;
+  border-color: rgba(255,255,255,0.07);
+}
+
+html.dark .mx-topbar-search:hover {
+  border-color: rgba(141, 111, 214, 0.3);
+}
+
+html.dark .mx-topbar-search kbd {
+  background: #111;
+  border-color: rgba(255,255,255,0.1);
+}
+
+/* Topbar background */
+html.dark .mx-topbar {
+  background: rgba(0, 0, 0, 0.9);
+  border-bottom-color: rgba(141, 111, 214, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+/* Avatar background: lila gradient in dark */
+html.dark .mx-rail-user-av {
+  background: linear-gradient(135deg, #6138b5 0%, #8e6fd6 100%);
+  box-shadow: 0 0 10px rgba(141, 111, 214, 0.4);
+}
+
+/* Status chips get subtle glow when active in dark */
+html.dark .mx-chip.mx-active {
+  background: rgba(74, 125, 74, 0.15);
+  color: #88b48b;
+  border-color: rgba(74, 125, 74, 0.25);
+}
+
+html.dark .mx-chip.mx-purple {
+  background: rgba(97, 56, 181, 0.18);
+  color: #c9b6fb;
+}
+
+html.dark .mx-chip.mx-ink-chip {
+  background: rgba(141, 111, 214, 0.18);
+  color: #c9b6fb;
+}
+
+/* Dot pattern on main canvas in dark */
+html.dark .mx-main-col {
+  background-image: radial-gradient(rgba(141, 111, 214, 0.06) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-attachment: local;
+}
+
+/* Rail foot separator */
+html.dark .mx-rail-foot {
+  border-top-color: rgba(141, 111, 214, 0.1);
+}
+
+/* Ghost button in dark */
+html.dark .mx-btn.mx-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: rgba(255,255,255,0.65);
+}
+
+html.dark .mx-btn.mx-ghost:hover {
+  background: rgba(141, 111, 214, 0.1);
+  border-color: transparent;
+  color: white;
+}
+
+/* Page head border in dark */
+html.dark .mx-page-head {
+  border-bottom-color: rgba(141, 111, 214, 0.1);
+}
+
+/* Section head h2 color */
+html.dark .mx-page-head h1 {
+  color: #f0f0f0;
 }

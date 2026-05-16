@@ -2,7 +2,9 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
+import { listWorkshopAreasForTenant } from '@/lib/actions/workshops';
 import { WorkshopCreateForm } from '../WorkshopCreateForm';
+import { WorkshopAreaManager } from '../WorkshopAreaManager';
 
 export default async function NewWorkshopPage() {
   const user = await requireUser();
@@ -10,6 +12,7 @@ export default async function NewWorkshopPage() {
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) {
     redirect('/education');
   }
+  const areas = await listWorkshopAreasForTenant();
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10 lg:px-8">
@@ -24,7 +27,10 @@ export default async function NewWorkshopPage() {
           Definiera mål, block, AI-systemprompt och outputkrav.
         </p>
       </header>
-      <WorkshopCreateForm />
+      <div className="space-y-6">
+        <WorkshopAreaManager areas={areas} />
+        <WorkshopCreateForm areas={areas} />
+      </div>
     </main>
   );
 }

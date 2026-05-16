@@ -6,6 +6,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Icon } from './Icon';
 import { coreModules } from '@platform/shared';
 import { Cmdk } from './Cmdk';
+import { MobileMenuButton } from './MobileRail';
 
 function buildCrumbs(pathname: string): { label: string; href: string; now: boolean }[] {
   if (pathname === '/' || pathname === '/idag') {
@@ -54,6 +55,7 @@ export function ProtoTopBar() {
   return (
     <>
       <div className="mx-topbar">
+        <MobileMenuButton />
         <div className="mx-crumb">
           {crumbs.map((c, i) => (
             <span key={c.href + i} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -69,8 +71,16 @@ export function ProtoTopBar() {
 
         <button className="mx-topbar-search" type="button" onClick={() => setCmdkOpen(true)}>
           <Icon name="search" size={13} />
-          <span>Hoppa, hitta, kör…</span>
+          <span className="mx-topbar-search-label">Hoppa, hitta, kör…</span>
           <kbd>⌘K</kbd>
+        </button>
+        <button
+          className="mx-topbar-search-mobile"
+          type="button"
+          onClick={() => setCmdkOpen(true)}
+          aria-label="Sök"
+        >
+          <Icon name="search" size={18} />
         </button>
       </div>
       <Cmdk open={cmdkOpen} onClose={() => setCmdkOpen(false)} />

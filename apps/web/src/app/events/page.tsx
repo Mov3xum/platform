@@ -128,21 +128,12 @@ export default async function EventsPage() {
   const cac = admittedTotal > 0 ? Math.round(100_000 / admittedTotal) : null;
 
   return (
-    <div className="mx-view-pad mx-wide" style={{ padding: '20px 24px 80px' }}>
+    <div className="mx-view-pad mx-wide">
       <PageHead
         crumb="Hemmaplan / Events"
         title="Events"
         subtitle="Spåra inflöde i realtid. Vilka events ger oss bolag?"
-        actions={
-          <>
-            <button className="mx-btn">
-              <Icon name="calendar" size={13} /> Kalendervy
-            </button>
-            <button className="mx-btn mx-primary">
-              <Icon name="plus" size={13} /> Nytt event
-            </button>
-          </>
-        }
+        actions={null}
       />
 
       {/* ── Live banner ────────────────────────────────────── */}

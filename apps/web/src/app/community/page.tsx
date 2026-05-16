@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
@@ -181,16 +182,11 @@ export default async function CommunityPage() {
         title="Community & alumni"
         subtitle="Mentorer, alumni och nätverk. Egna inloggningar — kan bjudas in till uppdrag och events."
         actions={
-          <>
-            <button type="button" className="mx-btn">
-              <Icon name="filter" size={13} /> Grupp
-            </button>
-            {isStaff && (
-              <button type="button" className="mx-btn mx-primary">
-                <Icon name="plus" size={13} /> Bjud in
-              </button>
-            )}
-          </>
+          isStaff ? (
+            <Link href="/installningar" className="mx-btn mx-primary">
+              <Icon name="plus" size={13} /> Bjud in
+            </Link>
+          ) : null
         }
       />
 
@@ -225,14 +221,7 @@ export default async function CommunityPage() {
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16 }}>
         {/* Community-flöde */}
         <Card style={{ padding: 0, overflow: 'hidden' }}>
-          <CardHead
-            label="Community-flöde"
-            right={
-              <button type="button" className="mx-btn mx-sm mx-ghost">
-                <Icon name="filter" size={12} />
-              </button>
-            }
-          />
+          <CardHead label="Community-flöde" />
           <div style={{ padding: '4px 16px 12px' }}>
             {feed.length === 0 ? (
               <div className="mx-muted mx-t-13" style={{ padding: '16px 0', textAlign: 'center' }}>
@@ -259,9 +248,6 @@ export default async function CommunityPage() {
                       </div>
                       <div className="mx-mono mx-t-xs mx-muted mx-t-up">{relativeTime(it.at)}</div>
                     </div>
-                    <button type="button" className="mx-btn mx-sm mx-ghost">
-                      <Icon name="chevron" size={12} />
-                    </button>
                   </div>
                 );
               })
@@ -271,10 +257,7 @@ export default async function CommunityPage() {
 
         {/* Alumni · top mentorer */}
         <Card style={{ padding: 0, overflow: 'hidden' }}>
-          <CardHead
-            label="Alumni · top mentorer"
-            right={<button type="button" className="mx-btn mx-sm mx-ghost">Alla →</button>}
-          />
+          <CardHead label="Alumni · top mentorer" />
           <div style={{ padding: '4px 16px 12px' }}>
             {mentorsFallback.length === 0 ? (
               <div className="mx-muted mx-t-13" style={{ padding: '16px 0', textAlign: 'center' }}>

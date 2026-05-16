@@ -7,8 +7,8 @@ export const metadata = {
 
 export default function ResetPasswordPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-canvas px-6">
-      <div className="w-full max-w-md rounded-3xl border border-default bg-surface p-8 shadow-xl shadow-movexum-svart/5">
+    <main className="flex min-h-[100svh] items-center justify-center bg-canvas px-4 py-6 sm:px-6">
+      <div className="w-full max-w-md rounded-3xl border border-default bg-surface p-6 shadow-xl shadow-movexum-svart/5 sm:p-8">
         <div className="mb-8 flex flex-col items-center text-center">
           <Logo href="/" className="mb-6" />
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
