@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { canAccessModule } from '@/lib/rbac';
+import { canAccessModuleForUser } from '@/lib/rbac';
 import type { SessionUser } from '@/lib/auth.server';
 import { LogoutButton } from './LogoutButton';
 import { Logo } from './Logo';
@@ -8,7 +8,7 @@ import { coreModules } from '@platform/shared';
 
 export function Navbar({ user }: { user: SessionUser | null }) {
   const visibleModules = user
-    ? coreModules.filter((m) => canAccessModule(user.roles, m.id))
+    ? coreModules.filter((m) => canAccessModuleForUser(user.roles, m.id, user.disabledModules))
     : [];
 
   return (

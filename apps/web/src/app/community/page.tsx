@@ -15,6 +15,11 @@ import type { Alumni, AlumniTag, Partner } from '@platform/shared';
 type AvatarAccent = 'ink' | 'green' | 'purple' | 'brown' | 'copper' | 'yellow' | 'cyan';
 
 const ACCENT_CYCLE: AvatarAccent[] = ['brown', 'green', 'cyan', 'yellow', 'purple', 'copper'];
+const EMPTY_RESULT_FILTER = 'id = ""';
+
+function sanitizeRecordIds(ids: string[]): string[] {
+  return ids.filter((id) => /^[a-zA-Z0-9_-]{6,64}$/.test(id));
+}
 
 function alumniTagChip(tag: AlumniTag): { variant: 'done' | 'green' | 'active' | 'review' | 'archive'; label: string } {
   switch (tag) {
@@ -69,6 +74,9 @@ export default async function CommunityPage() {
   const user = await requireUser();
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
+  const isScopedViewer =
+    hasRole(user.roles, ['startup_member', 'partner']) &&
+    !hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
 
   // Hämta alumni
   let alumni: Alumni[] = [];
@@ -109,6 +117,14 @@ export default async function CommunityPage() {
   // Hämta senaste aktiviteter
   let activities: ActivityRecord[] = [];
   try {
+    let linkedFilter = '';
+    if (isScopedViewer) {
+      const linkedStartupIds = sanitizeRecordIds(user.linkedStartups);
+      linkedFilter =
+        linkedStartupIds.length > 0
+          ? ` && (${linkedStartupIds.map((id) => `startup = "${id}"`).join(' || ')})`
+          : ` && ${EMPTY_RESULT_FILTER}`;
+    }
     const aRes = await pb.collection('activities').getList<ActivityRecord>(1, 12, {
       filter: pb.filter('startup.tenant = {:tenant}', { tenant: user.tenant }),
       sort: '-created',

@@ -14,6 +14,17 @@ export const canAccessModule = (userRoles: Role[] | undefined, moduleId: string)
   return hasRole(userRoles, mod.rolesAllowed);
 };
 
+export const canAccessModuleForUser = (
+  userRoles: Role[] | undefined,
+  moduleId: string,
+  disabledModules: string[] | undefined
+): boolean => {
+  if (Array.isArray(disabledModules) && disabledModules.includes(moduleId)) {
+    return false;
+  }
+  return canAccessModule(userRoles, moduleId);
+};
+
 export const requireRole = (userRoles: Role[] | undefined, allowed: Role[]): void => {
   if (!hasRole(userRoles, allowed)) {
     throw new Error('Forbidden: missing required role');
@@ -50,4 +61,3 @@ export const canRunTool = (
 
   return true;
 };
-

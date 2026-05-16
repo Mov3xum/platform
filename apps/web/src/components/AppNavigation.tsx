@@ -7,11 +7,12 @@ import { usePathname } from 'next/navigation';
 import type { ComponentType } from 'react';
 import { Building2, Compass, FolderKanban, GraduationCap, Home, Menu, Plug2, Sparkles, X } from 'lucide-react';
 import { coreModules, type Role } from '@platform/shared';
-import { canAccessModule } from '@/lib/rbac';
+import { canAccessModuleForUser } from '@/lib/rbac';
 import { Logo } from './Logo';
 
 type NavProps = {
   roles: Role[];
+  disabledModules?: string[];
   assignedWorkshopCount?: number;
 };
 
@@ -33,11 +34,14 @@ function isRouteActive(currentPath: string, route: string) {
 
 function NavLinks({
   roles,
+  disabledModules,
   assignedWorkshopCount = 0,
   closeOnNavigate = false
 }: NavProps & { closeOnNavigate?: boolean }) {
   const pathname = usePathname();
-  const modules = coreModules.filter((module) => canAccessModule(roles, module.id));
+  const modules = coreModules.filter((module) =>
+    canAccessModuleForUser(roles, module.id, disabledModules)
+  );
 
   return (
     <ul className="space-y-1">
@@ -93,11 +97,13 @@ function NavLinks({
   );
 }
 
-export function DesktopNavigation({ roles, assignedWorkshopCount = 0 }: NavProps) {
-  return <NavLinks roles={roles} assignedWorkshopCount={assignedWorkshopCount} />;
+export function DesktopNavigation({ roles, disabledModules, assignedWorkshopCount = 0 }: NavProps) {
+  return (
+    <NavLinks roles={roles} disabledModules={disabledModules} assignedWorkshopCount={assignedWorkshopCount} />
+  );
 }
 
-export function MobileNavigation({ roles, assignedWorkshopCount = 0 }: NavProps) {
+export function MobileNavigation({ roles, disabledModules, assignedWorkshopCount = 0 }: NavProps) {
   return (
     <Dialog.Root>
       <Dialog.Trigger asChild>
@@ -137,6 +143,7 @@ export function MobileNavigation({ roles, assignedWorkshopCount = 0 }: NavProps)
               <nav className="flex-1">
                 <NavLinks
                   roles={roles}
+                  disabledModules={disabledModules}
                   assignedWorkshopCount={assignedWorkshopCount}
                   closeOnNavigate
                 />
