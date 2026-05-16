@@ -1,6 +1,7 @@
 import type { SessionUser } from '@/lib/auth.server';
 import { ProtoRail } from './ProtoRail';
 import { ProtoTopBar } from './ProtoTopBar';
+import { MobileRailProvider, MobileRailBackdrop } from './MobileRail';
 
 interface Props {
   user: SessionUser;
@@ -10,7 +11,7 @@ interface Props {
 
 export function ProtoShell({ user, children, counts }: Props) {
   return (
-    <div className="mx-app">
+    <MobileRailProvider>
       <ProtoRail
         user={{
           id: user.id,
@@ -22,10 +23,11 @@ export function ProtoShell({ user, children, counts }: Props) {
         }}
         counts={counts}
       />
+      <MobileRailBackdrop />
       <div className="mx-main-col">
         <ProtoTopBar />
         <main className="mx-view">{children}</main>
       </div>
-    </div>
+    </MobileRailProvider>
   );
 }

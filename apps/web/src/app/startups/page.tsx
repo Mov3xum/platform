@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { listForTenant } from '@/lib/pb.server';
 import { requireUser } from '@/lib/auth.server';
-import { canAccessModule, hasRole } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { ALL_PHASES, type StartupPhase, type SprintXScore } from '@platform/shared';
 import { phaseLabels, statusLabels, type StartupStatus } from '@/lib/labels';
 import { StartupListDashboard } from '@/components/StartupListDashboard';
@@ -22,6 +22,7 @@ interface StartupRecord {
 }
 
 const ALLOWED_STATUS = new Set(Object.keys(statusLabels));
+const EMPTY_RESULT_FILTER = 'id = ""';
 
 function buildFilter(search?: string, phase?: string, status?: string): string | undefined {
   const parts: string[] = [];
@@ -31,22 +32,35 @@ function buildFilter(search?: string, phase?: string, status?: string): string |
   return parts.length > 0 ? parts.join(' && ') : undefined;
 }
 
+function buildScopedFilter(baseFilter: string | undefined, linkedStartups: string[]): string | undefined {
+  if (linkedStartups.length === 0) {
+    return EMPTY_RESULT_FILTER;
+  }
+  const scope = linkedStartups.map((id) => `id = "${id}"`).join(' || ');
+  return baseFilter ? `(${scope}) && (${baseFilter})` : scope;
+}
+
 export default async function StartupsPage({
   searchParams
 }: {
   searchParams: Promise<{ q?: string; phase?: string; status?: string }>;
 }) {
   const user = await requireUser();
-  if (!canAccessModule(user.roles, 'startups')) redirect('/dashboard');
+  if (!canAccessModuleForUser(user.roles, 'startups', user.disabledModules)) redirect('/dashboard');
   const params = await searchParams;
   const canCreate = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
+  const isScopedViewer =
+    hasRole(user.roles, ['startup_member', 'partner']) &&
+    !hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
 
   let result: { items: StartupRecord[]; totalItems: number } = { items: [], totalItems: 0 };
   let loadFailed = false;
 
   try {
+    const baseFilter = buildFilter(params.q, params.phase, params.status);
+    const finalFilter = isScopedViewer ? buildScopedFilter(baseFilter, user.linkedStartups) : baseFilter;
     result = await listForTenant<StartupRecord>('startups', {
-      filter: buildFilter(params.q, params.phase, params.status),
+      filter: finalFilter,
       sort: 'name',
       perPage: 100
     });

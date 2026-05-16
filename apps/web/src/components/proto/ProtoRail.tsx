@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Icon } from './Icon';
 import { coreModules, RAIL_GROUPS, type Role } from '@platform/shared';
-import { canAccessModule } from '@/lib/rbac';
+import { canAccessModuleForUser } from '@/lib/rbac';
 import { ModuleNavItem } from './ModuleNavItem';
 import { Logo } from '@/components/Logo';
 
@@ -42,7 +42,7 @@ export function ProtoRail({ user, counts = {} }: ProtoRailProps) {
       .toUpperCase() || '??';
 
   return (
-    <aside className="mx-rail">
+    <aside id="mx-rail" className="mx-rail" aria-label="Huvudnavigation">
       <div className="mx-rail-head">
         <Logo
           href="/idag"
@@ -57,12 +57,11 @@ export function ProtoRail({ user, counts = {} }: ProtoRailProps) {
         {RAIL_GROUPS.map((group) => {
           const groupModules = group.modules
             .map((id) => coreModules.find((m) => m.id === id))
-            .filter(
-              (m) =>
-                m !== undefined &&
-                canAccessModule(user.roles, m.id) &&
-                !(user.disabledModules ?? []).includes(m.id)
-            );
+              .filter(
+                (m) =>
+                  m !== undefined &&
+                  canAccessModuleForUser(user.roles, m.id, user.disabledModules)
+              );
 
           if (groupModules.length === 0) return null;
 

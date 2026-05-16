@@ -81,19 +81,30 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   }
 
   const tenantId = (m.tenant as string) || '';
-  const tenant = m.expand?.tenant as (Record<string, unknown> & { id: string; name: string; slug: string; disabled_modules?: unknown }) | undefined;
+  const tenant = m.expand?.tenant as (Record<string, unknown> & {
+    id: string;
+    name: string;
+    slug: string;
+    disabled_modules?: unknown;
+  }) | undefined;
 
   const avatarFilename = m.avatar as string | undefined;
   const avatarUrl = avatarFilename
     ? `${PUBLIC_PB_URL}/api/files/users/${m.id as string}/${avatarFilename}`
     : undefined;
 
-  // Hämta disabled_modules från tenant (finns som fält sedan migration 1700000038).
-  // Fallback till tom array om fältet saknas (äldre schema).
+  // Hämta disabled_modules från tenant + user (user har företräde som extra avstängningar).
   let disabledModules: string[] = [];
-  const rawDisabled = tenant?.disabled_modules;
-  if (Array.isArray(rawDisabled)) {
-    disabledModules = rawDisabled.filter((v): v is string => typeof v === 'string');
+  const tenantDisabled = tenant?.disabled_modules;
+  const userDisabled = m.disabled_modules;
+  const tenantList = Array.isArray(tenantDisabled)
+    ? tenantDisabled.filter((v): v is string => typeof v === 'string')
+    : [];
+  const userList = Array.isArray(userDisabled)
+    ? userDisabled.filter((v): v is string => typeof v === 'string')
+    : [];
+  if (tenantList.length > 0 || userList.length > 0) {
+    disabledModules = Array.from(new Set([...tenantList, ...userList]));
   }
 
   return {

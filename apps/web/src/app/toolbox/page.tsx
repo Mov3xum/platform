@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { listForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { canAccessModule, hasRole, canRunTool } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole, canRunTool } from '@/lib/rbac';
 import { PageHead, Card, Chip, Icon, Toggle } from '@/components/proto';
 import { toolCategoryLabels, type ToolCategory } from '@/lib/labels';
 import type { Tool, ToolRun, Role } from '@platform/shared';
@@ -117,7 +117,10 @@ export default async function ToolboxPage({
   const categoryFilter = isToolCategory(params.category) ? params.category : undefined;
 
   const user = await requireUser();
-  if (!canAccessModule(user.roles, 'agenter') && !canAccessModule(user.roles, 'toolbox')) {
+  if (
+    !canAccessModuleForUser(user.roles, 'agenter', user.disabledModules) &&
+    !canAccessModuleForUser(user.roles, 'toolbox', user.disabledModules)
+  ) {
     redirect('/idag');
   }
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
@@ -209,16 +212,11 @@ export default async function ToolboxPage({
         title="Verktygslåda"
         subtitle="Interna och externa verktyg — AI-agenter, mallar och checklistor. Kör på Mistral Le Chat · EU-suverän stack. Alla körningar loggas."
         actions={
-          <>
-            <button className="mx-btn" type="button">
-              <Icon name="filter" size={13} /> Profil
-            </button>
-            {isStaff && (
-              <Link href="/toolbox/new" className="mx-btn mx-primary">
-                <Icon name="plus" size={13} /> Skapa egen agent
-              </Link>
-            )}
-          </>
+          isStaff ? (
+            <Link href="/toolbox/new" className="mx-btn mx-primary">
+              <Icon name="plus" size={13} /> Skapa egen agent
+            </Link>
+          ) : null
         }
       />
 

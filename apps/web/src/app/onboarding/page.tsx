@@ -1,10 +1,10 @@
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth.server';
-import { canAccessModule } from '@/lib/rbac';
+import { canAccessModuleForUser } from '@/lib/rbac';
 
 export default async function OnboardingPage() {
   const user = await requireUser();
-  if (!canAccessModule(user.roles, 'onboarding')) redirect('/dashboard');
+  if (!canAccessModuleForUser(user.roles, 'onboarding', user.disabledModules)) redirect('/dashboard');
 
   return (
     <section>

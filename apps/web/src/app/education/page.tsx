@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { canAccessModule, hasRole } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { PageHead, Card, Icon, Chip } from '@/components/proto';
 import {
@@ -15,7 +15,7 @@ const TRACK_ACCENTS: Accent[] = ['yellow', 'green', 'cyan', 'purple'];
 
 export default async function EducationPage() {
   const user = await requireUser();
-  if (!canAccessModule(user.roles, 'education')) redirect('/idag');
+  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) redirect('/idag');
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
   const isStartupMember = hasRole(user.roles, ['startup_member']);
@@ -144,16 +144,11 @@ export default async function EducationPage() {
         title="Utbildning"
         subtitle="Spår per Sprint X-axel. Workshop-matcharen föreslår nästa modul baserat på var bolaget står."
         actions={
-          <>
-            <button className="mx-btn" type="button">
-              <Icon name="filter" size={13} /> Bolag
-            </button>
-            {isStaff && (
-              <Link href="/education/new" className="mx-btn mx-primary">
-                <Icon name="plus" size={13} /> Skapa modul
-              </Link>
-            )}
-          </>
+          isStaff ? (
+            <Link href="/education/new" className="mx-btn mx-primary">
+              <Icon name="plus" size={13} /> Skapa modul
+            </Link>
+          ) : null
         }
       />
 
@@ -202,7 +197,6 @@ export default async function EducationPage() {
         />
       ))}
 
-      {/* TODO: workshops utan tydlig spårtillhörighet — visa i en extra lane */}
       {unclassified.length > 0 && (
         <Card style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
           <div className="mx-card-head">

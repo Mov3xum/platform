@@ -1,14 +1,14 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth.server';
-import { canAccessModule, hasRole } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { listWorkshopAreasForTenant } from '@/lib/actions/workshops';
 import { WorkshopCreateForm } from '../WorkshopCreateForm';
 import { WorkshopAreaManager } from '../WorkshopAreaManager';
 
 export default async function NewWorkshopPage() {
   const user = await requireUser();
-  if (!canAccessModule(user.roles, 'education')) redirect('/dashboard');
+  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) redirect('/dashboard');
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) {
     redirect('/education');
   }

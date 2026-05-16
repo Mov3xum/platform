@@ -1,19 +1,20 @@
 import Link from 'next/link';
-import { canAccessModule } from '@/lib/rbac';
+import { canAccessModuleForUser } from '@/lib/rbac';
 import type { SessionUser } from '@/lib/auth.server';
 import { LogoutButton } from './LogoutButton';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeProvider';
+import { NavbarMobileMenu } from './NavbarMobileMenu';
 import { coreModules } from '@platform/shared';
 
 export function Navbar({ user }: { user: SessionUser | null }) {
   const visibleModules = user
-    ? coreModules.filter((m) => canAccessModule(user.roles, m.id))
+    ? coreModules.filter((m) => canAccessModuleForUser(user.roles, m.id, user.disabledModules))
     : [];
 
   return (
     <nav className="sticky top-0 z-30 border-b border-default bg-surface/80 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-6 py-4 lg:px-8">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:gap-6 sm:px-6 sm:py-4 lg:px-8">
         <Logo href={user ? '/dashboard' : '/'} />
 
         {user ? (
@@ -30,7 +31,7 @@ export function Navbar({ user }: { user: SessionUser | null }) {
           </div>
         ) : null}
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <ThemeToggle />
           {user ? (
             <>
@@ -40,12 +41,18 @@ export function Navbar({ user }: { user: SessionUser | null }) {
                   {user.tenantName || user.tenantSlug || ''} · {user.roles.join(', ')}
                 </p>
               </div>
-              <LogoutButton />
+              <div className="hidden md:block">
+                <LogoutButton />
+              </div>
+              <NavbarMobileMenu
+                user={{ name: user.name, email: user.email, tenantName: user.tenantName, tenantSlug: user.tenantSlug, roles: user.roles }}
+                modules={visibleModules.map((m) => ({ id: m.id, title: m.title, route: m.route }))}
+              />
             </>
           ) : (
             <Link
               href="/login"
-              className="inline-flex rounded-full bg-brand px-5 py-2 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
+              className="inline-flex rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover sm:px-5"
             >
               Logga in
             </Link>

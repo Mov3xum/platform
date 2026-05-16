@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
@@ -15,66 +16,11 @@ import type { Alumni, AlumniTag, Partner } from '@platform/shared';
 type AvatarAccent = 'ink' | 'green' | 'purple' | 'brown' | 'copper' | 'yellow' | 'cyan';
 
 const ACCENT_CYCLE: AvatarAccent[] = ['brown', 'green', 'cyan', 'yellow', 'purple', 'copper'];
+const EMPTY_RESULT_FILTER = 'id = ""';
 
-const DEMO_ALUMNI: Alumni[] = [
-  {
-    id: 'demo-bjorn',
-    tenant: 'demo',
-    name: 'Björn Lund',
-    company: 'Geocode → Bolaget såldes 2023',
-    exit_year: 2023,
-    tag: 'exit',
-    active_mentor: true,
-    accent: 'brown',
-    created: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000).toISOString(),
-    updated: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: 'demo-sara',
-    tenant: 'demo',
-    name: 'Sara Tegnér',
-    company: 'Klimatika → Exit 2024',
-    exit_year: 2024,
-    tag: 'exit',
-    active_mentor: true,
-    accent: 'green',
-    created: new Date(Date.now() - 25 * 24 * 60 * 60 * 1000).toISOString(),
-    updated: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: 'demo-erik',
-    tenant: 'demo',
-    name: 'Erik Holmström',
-    company: 'Norrkraft (scale 2025)',
-    tag: 'scale',
-    active_mentor: true,
-    accent: 'cyan',
-    created: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
-    updated: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: 'demo-linn',
-    tenant: 'demo',
-    name: 'Linn Wikström',
-    company: 'Solva (i drift)',
-    tag: 'active',
-    active_mentor: true,
-    accent: 'yellow',
-    created: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
-    updated: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: 'demo-daniel',
-    tenant: 'demo',
-    name: 'Daniel Friberg',
-    company: 'Backenta (i drift)',
-    tag: 'active',
-    active_mentor: false,
-    accent: 'purple',
-    created: new Date(Date.now() - 110 * 24 * 60 * 60 * 1000).toISOString(),
-    updated: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString()
-  }
-];
+function sanitizeRecordIds(ids: string[]): string[] {
+  return ids.filter((id) => /^[a-zA-Z0-9_-]{6,64}$/.test(id));
+}
 
 function alumniTagChip(tag: AlumniTag): { variant: 'done' | 'green' | 'active' | 'review' | 'archive'; label: string } {
   switch (tag) {
@@ -129,37 +75,33 @@ export default async function CommunityPage() {
   const user = await requireUser();
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
+  const isScopedViewer =
+    hasRole(user.roles, ['startup_member', 'partner']) &&
+    !hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
 
   // Hämta alumni
   let alumni: Alumni[] = [];
-  let usingDemoAlumni = false;
   try {
     const aRes = await pb.collection(PB_COLLECTIONS.alumni).getList<Alumni>(1, 100, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: pb.filter('tenant = {:tenant}', { tenant: user.tenant }),
       sort: '-created'
     });
     alumni = aRes.items;
   } catch {
-    /* ignore */
-  }
-
-  if (alumni.length === 0) {
-    alumni = DEMO_ALUMNI;
-    usingDemoAlumni = true;
+    /* collection may not exist yet */
   }
 
   // Hämta partners (KPI-räknare)
   let partnersCount = 0;
   try {
     const pRes = await pb.collection('partners').getList<Partner>(1, 1, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: pb.filter('tenant = {:tenant}', { tenant: user.tenant }),
       fields: 'id'
     });
     partnersCount = pRes.totalItems;
   } catch {
     /* ignore */
   }
-  if (partnersCount === 0 && usingDemoAlumni) partnersCount = 14;
 
   // KPIer
   const alumniCount = alumni.length;
@@ -176,8 +118,16 @@ export default async function CommunityPage() {
   // Hämta senaste aktiviteter
   let activities: ActivityRecord[] = [];
   try {
+    let linkedFilter = '';
+    if (isScopedViewer) {
+      const linkedStartupIds = sanitizeRecordIds(user.linkedStartups);
+      linkedFilter =
+        linkedStartupIds.length > 0
+          ? ` && (${linkedStartupIds.map((id) => `startup = "${id}"`).join(' || ')})`
+          : ` && ${EMPTY_RESULT_FILTER}`;
+    }
     const aRes = await pb.collection('activities').getList<ActivityRecord>(1, 12, {
-      filter: `startup.tenant = "${user.tenant}"`,
+      filter: pb.filter('startup.tenant = {:tenant}', { tenant: user.tenant }),
       sort: '-created',
       expand: 'owner,startup'
     });
@@ -221,34 +171,6 @@ export default async function CommunityPage() {
     .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
     .slice(0, 8);
 
-  // Fallback för flöde
-  const feedFallback: FeedEntry[] =
-    feed.length > 0
-      ? feed
-      : [
-          {
-            key: 'demo-bjorn',
-            who: 'Björn Lund',
-            accent: 'brown',
-            text: 'Bjöd in 2 till Sommarmingel · Alumni.',
-            at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-          },
-          {
-            key: 'demo-maja',
-            who: 'Maja Sundberg',
-            accent: 'green',
-            text: 'Postade tråd: "Term sheet-fallgropar 2026".',
-            at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()
-          },
-          {
-            key: 'demo-lars',
-            who: 'Lars Holm',
-            accent: 'green',
-            text: 'Slutförde mentorskap för Skogsnod.',
-            at: new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString()
-          }
-        ];
-
   const topMentors = alumni.filter((a) => a.active_mentor).slice(0, 5);
   const mentorsFallback: Alumni[] =
     topMentors.length > 0 ? topMentors : alumni.slice(0, 5);
@@ -260,16 +182,11 @@ export default async function CommunityPage() {
         title="Community & alumni"
         subtitle="Mentorer, alumni och nätverk. Egna inloggningar — kan bjudas in till uppdrag och events."
         actions={
-          <>
-            <button type="button" className="mx-btn">
-              <Icon name="filter" size={13} /> Grupp
-            </button>
-            {isStaff && (
-              <button type="button" className="mx-btn mx-primary">
-                <Icon name="plus" size={13} /> Bjud in
-              </button>
-            )}
-          </>
+          isStaff ? (
+            <Link href="/installningar" className="mx-btn mx-primary">
+              <Icon name="plus" size={13} /> Bjud in
+            </Link>
+          ) : null
         }
       />
 
@@ -304,54 +221,47 @@ export default async function CommunityPage() {
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16 }}>
         {/* Community-flöde */}
         <Card style={{ padding: 0, overflow: 'hidden' }}>
-          <CardHead
-            label="Community-flöde"
-            right={
-              <button type="button" className="mx-btn mx-sm mx-ghost">
-                <Icon name="filter" size={12} />
-              </button>
-            }
-          />
+          <CardHead label="Community-flöde" />
           <div style={{ padding: '4px 16px 12px' }}>
-            {feedFallback.map((it, i) => {
-              const firstName = it.who.split(' ')[0];
-              return (
-                <div
-                  key={it.key}
-                  className="mx-flex mx-gap-3 mx-items-c"
-                  style={{
-                    padding: '12px 0',
-                    borderBottom:
-                      i < feedFallback.length - 1 ? '1px solid var(--mx-line-soft)' : 'none'
-                  }}
-                >
-                  <Avatar initial={initials(it.who)} size="sm" accent={it.accent} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="mx-t-13">
-                      <span className="mx-fw-6">{firstName}</span>{' '}
-                      <span className="mx-muted">{it.text}</span>
+            {feed.length === 0 ? (
+              <div className="mx-muted mx-t-13" style={{ padding: '16px 0', textAlign: 'center' }}>
+                Inga aktiviteter ännu — bjud in alumni och starta uppdrag för att se flödet.
+              </div>
+            ) : (
+              feed.map((it, i) => {
+                const firstName = it.who.split(' ')[0];
+                return (
+                  <div
+                    key={it.key}
+                    className="mx-flex mx-gap-3 mx-items-c"
+                    style={{
+                      padding: '12px 0',
+                      borderBottom:
+                        i < feed.length - 1 ? '1px solid var(--mx-line-soft)' : 'none'
+                    }}
+                  >
+                    <Avatar initial={initials(it.who)} size="sm" accent={it.accent} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="mx-t-13">
+                        <span className="mx-fw-6">{firstName}</span>{' '}
+                        <span className="mx-muted">{it.text}</span>
+                      </div>
+                      <div className="mx-mono mx-t-xs mx-muted mx-t-up">{relativeTime(it.at)}</div>
                     </div>
-                    <div className="mx-mono mx-t-xs mx-muted mx-t-up">{relativeTime(it.at)}</div>
                   </div>
-                  <button type="button" className="mx-btn mx-sm mx-ghost">
-                    <Icon name="chevron" size={12} />
-                  </button>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </Card>
 
         {/* Alumni · top mentorer */}
         <Card style={{ padding: 0, overflow: 'hidden' }}>
-          <CardHead
-            label="Alumni · top mentorer"
-            right={<button type="button" className="mx-btn mx-sm mx-ghost">Alla →</button>}
-          />
+          <CardHead label="Alumni · top mentorer" />
           <div style={{ padding: '4px 16px 12px' }}>
             {mentorsFallback.length === 0 ? (
               <div className="mx-muted mx-t-13" style={{ padding: '16px 0', textAlign: 'center' }}>
-                Inga mentorer ännu — bjud in alumni för att börja.
+                Inga alumni ännu — bjud in din första alumnus för att börja.
               </div>
             ) : (
               mentorsFallback.map((a, i) => {
@@ -387,15 +297,6 @@ export default async function CommunityPage() {
           </div>
         </Card>
       </div>
-
-      {usingDemoAlumni && (
-        <div
-          className="mx-mono mx-t-xs mx-muted"
-          style={{ marginTop: 12, padding: '0 4px', fontStyle: 'italic' }}
-        >
-          Demo-data visas — bjud in din första alumnus för att se riktig data.
-        </div>
-      )}
     </div>
   );
 }
