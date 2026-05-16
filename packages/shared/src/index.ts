@@ -657,8 +657,8 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'agenter',
-    title: 'AI-agenter',
-    description: 'AI-agenter och verktyg för rapportering, dokumentation och analys.',
+    title: 'Verktygslåda',
+    description: 'Interna och externa verktyg — AI-agenter, mallar och checklistor. Tilldela bolag för att synliggöra rätt verktyg i deras vy.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'startup_member'],
     route: '/toolbox'
   },
