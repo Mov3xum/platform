@@ -51,6 +51,13 @@ export function WorkshopAreaManager({ areas }: { areas: WorkshopArea[] }) {
               <button
                 type="submit"
                 disabled={deleting}
+                onClick={(e) => {
+                  const shouldDelete = window.confirm(
+                    `Ta bort området "${area.name}"? Alla workshops kopplas loss från området.`
+                  );
+                  if (!shouldDelete) e.preventDefault();
+                }}
+                aria-label={`Ta bort området ${area.name} och koppla loss alla workshops`}
                 className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-3 py-1 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Ta bort

@@ -386,7 +386,12 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                 >
                   {/* Block header row */}
                   <div className="flex items-center gap-2 p-3">
-                    <span className="shrink-0 text-sm text-foreground-muted" title={meta?.label}>
+                    <span
+                      className="shrink-0 text-sm text-foreground-muted"
+                      title={meta?.label}
+                      role="img"
+                      aria-label={meta?.label ?? 'Blocktyp'}
+                    >
                       {meta?.iconId ? BLOCK_ICON_TEXT[meta.iconId] : 'BL'}
                     </span>
                     <input
@@ -722,7 +727,14 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                       onClick={() => addBlock(mod.id, type)}
                       className="inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:border-brand hover:bg-canvas-subtle hover:text-foreground"
                     >
-                      <span className="text-xs text-foreground-subtle">{BLOCK_ICON_TEXT[iconId]}</span>
+                      <span
+                        className="text-xs text-foreground-subtle"
+                        title={label}
+                        role="img"
+                        aria-label={label}
+                      >
+                        {BLOCK_ICON_TEXT[iconId]}
+                      </span>
                       {label}
                     </button>
                   ))}

@@ -49,6 +49,9 @@ migrate(
         minSelect: 0,
         maxSelect: 1
       });
+      if (!workshopsCollection.fields.getByName('area')) {
+        throw new Error('Kunde inte lägga till workshops.area i migration 1700000040');
+      }
     }
     if (!workshopsCollection.indexes.includes('CREATE INDEX idx_workshops_tenant_area ON workshops (tenant, area)')) {
       workshopsCollection.indexes.push('CREATE INDEX idx_workshops_tenant_area ON workshops (tenant, area)');

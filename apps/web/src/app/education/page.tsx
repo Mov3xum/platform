@@ -105,6 +105,13 @@ export default async function EducationPage() {
     if (areaId && areaBuckets.has(areaId)) {
       areaBuckets.get(areaId)?.push(item);
     } else {
+      if (areaId) {
+        console.warn('[education] workshop references missing area', {
+          workshopId: w.id,
+          areaId,
+          tenant: user.tenant
+        });
+      }
       unclassified.push(w);
     }
   }
