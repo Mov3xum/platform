@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { canAccessModule, hasRole } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { WorkshopAssignForm } from '../../WorkshopAssignForm';
 import { WorkshopStatusBadge } from '@/components/Badges';
@@ -21,7 +21,7 @@ const BLOCK_TYPE_EMOJIS: Record<string, string> = {
 export default async function WorkshopDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  if (!canAccessModule(user.roles, 'education')) notFound();
+  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) notFound();
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
 

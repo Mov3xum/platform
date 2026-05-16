@@ -306,6 +306,9 @@ await patchUsersCollection([
   {
     name: 'linked_startups', type: 'relation', required: false,
     collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 50
+  },
+  {
+    name: 'disabled_modules', type: 'json', required: false, maxSize: 2000
   }
 ]);
 

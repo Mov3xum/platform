@@ -129,6 +129,9 @@ export default async function CommunityPage() {
   const user = await requireUser();
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
+  const isScopedViewer =
+    hasRole(user.roles, ['startup_member', 'partner']) &&
+    !hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
 
   // Hämta alumni
   let alumni: Alumni[] = [];
@@ -176,8 +179,14 @@ export default async function CommunityPage() {
   // Hämta senaste aktiviteter
   let activities: ActivityRecord[] = [];
   try {
+    const linkedFilter =
+      isScopedViewer && user.linkedStartups.length > 0
+        ? ` && (${user.linkedStartups.map((id) => `startup = "${id}"`).join(' || ')})`
+        : isScopedViewer
+          ? ' && id = ""'
+          : '';
     const aRes = await pb.collection('activities').getList<ActivityRecord>(1, 12, {
-      filter: `startup.tenant = "${user.tenant}"`,
+      filter: `startup.tenant = "${user.tenant}"${linkedFilter}`,
       sort: '-created',
       expand: 'owner,startup'
     });

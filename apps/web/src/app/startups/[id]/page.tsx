@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { getOneForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
-import { canAccessModule, hasRole } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import {
   PhaseBadge,
   StatusBadge,
@@ -145,8 +145,15 @@ interface WorkshopAssignmentRecord {
 export default async function StartupDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  if (!canAccessModule(user.roles, 'startups')) notFound();
+  if (!canAccessModuleForUser(user.roles, 'startups', user.disabledModules)) notFound();
   const canEdit = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
+  const isScopedViewer =
+    hasRole(user.roles, ['startup_member', 'partner']) &&
+    !hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
+
+  if (isScopedViewer && !user.linkedStartups.includes(id)) {
+    notFound();
+  }
 
   let startup: StartupRecord;
   try {

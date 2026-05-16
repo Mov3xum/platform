@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import type { Partner } from '@platform/shared';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { canAccessModule } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 
 export default async function PartnersPage() {
   const user = await requireUser();
 
-  if (!canAccessModule(user.roles, 'partners')) {
+  if (!canAccessModuleForUser(user.roles, 'partners', user.disabledModules)) {
     return (
       <main className="mx-auto max-w-4xl px-6 py-10 lg:px-8">
         <div className="rounded-3xl border border-default bg-surface p-8 text-center">
@@ -27,10 +27,40 @@ export default async function PartnersPage() {
 
   const pb = await getServerPb();
   let partners: Partner[] = [];
+  const isScopedViewer =
+    hasRole(user.roles, ['startup_member', 'partner']) &&
+    !hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
 
   try {
+    let scopedPartnerIds: string[] | null = null;
+    if (isScopedViewer) {
+      if (user.linkedStartups.length === 0) {
+        scopedPartnerIds = [];
+      } else {
+        const linkedFilter = user.linkedStartups.map((id) => `startup = "${id}"`).join(' || ');
+        const engagements = await pb.collection('partner_engagements').getList<{ partner?: string }>(1, 500, {
+          filter: `tenant = "${user.tenant}" && (${linkedFilter})`,
+          fields: 'partner'
+        });
+        scopedPartnerIds = Array.from(
+          new Set(
+            engagements.items
+              .map((item) => (typeof item.partner === 'string' ? item.partner : ''))
+              .filter(Boolean)
+          )
+        );
+      }
+    }
+
+    const partnerFilter =
+      scopedPartnerIds === null
+        ? `tenant = "${user.tenant}"`
+        : scopedPartnerIds.length > 0
+          ? `tenant = "${user.tenant}" && (${scopedPartnerIds.map((id) => `id = "${id}"`).join(' || ')})`
+          : `tenant = "${user.tenant}" && id = ""`;
+
     const result = await pb.collection('partners').getList<Partner>(1, 50, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: partnerFilter,
       sort: 'name'
     });
     partners = result.items;

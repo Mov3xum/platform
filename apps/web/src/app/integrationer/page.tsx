@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth.server';
-import { canAccessModule } from '@/lib/rbac';
+import { canAccessModuleForUser } from '@/lib/rbac';
 import { IntegrationActivateButton } from './IntegrationActivateButton';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -260,7 +260,7 @@ const FOOTER_PLACEHOLDER_NUMBER = String(VALUE_PROPS.length + 1).padStart(2, '0'
 
 export default async function IntegrationerPage() {
   const user = await requireUser();
-  if (!canAccessModule(user.roles, 'integrationer')) redirect('/dashboard');
+  if (!canAccessModuleForUser(user.roles, 'integrationer', user.disabledModules)) redirect('/dashboard');
 
   const byCategory = CATEGORY_ORDER.reduce<Record<IntegrationCategory, Integration[]>>(
     (acc, cat) => {

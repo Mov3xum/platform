@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { PageHead, Card, Chip, SectionHead, Icon } from '@/components/proto';
 import { coreModules } from '@platform/shared';
 import { AdminToggles, type ModuleToggleItem } from './AdminToggles';
+import { UserModuleToggles } from './UserModuleToggles';
 
 interface TenantRecord {
   id: string;
@@ -17,6 +18,15 @@ interface TenantRow {
   tenant: TenantRecord;
   startups: number;
   users: number;
+}
+
+interface UserRecord {
+  id: string;
+  email: string;
+  display_name?: string;
+  roles?: string[];
+  tenant?: string;
+  disabled_modules?: unknown;
 }
 
 interface InfraCard {
@@ -132,6 +142,39 @@ export default async function InstallningarPage() {
       defaultOn: !disabledModules.includes(m.id)
     }));
 
+  let userModuleRows: Array<{
+    id: string;
+    name: string;
+    email: string;
+    roles: string[];
+    disabledModules: string[];
+  }> = [];
+
+  if (isAdmin) {
+    try {
+      const usersRes = await pb.collection('users').getList<UserRecord>(1, 200, {
+        filter: `tenant = "${user.tenant}"`,
+        sort: 'email',
+        fields: 'id,email,display_name,roles,disabled_modules,tenant'
+      });
+      userModuleRows = usersRes.items.map((u) => ({
+        id: u.id,
+        name: u.display_name?.trim() || u.email,
+        email: u.email,
+        roles: Array.isArray(u.roles) ? u.roles.filter((role): role is string => typeof role === 'string') : [],
+        disabledModules: Array.isArray(u.disabled_modules)
+          ? u.disabled_modules.filter((m): m is string => typeof m === 'string')
+          : []
+      }));
+    } catch (error) {
+      console.error('[installningar] failed to load tenant users for module toggles', {
+        tenant: user.tenant,
+        userId: user.id,
+        error
+      });
+    }
+  }
+
   return (
     <div className="mx-view-pad mx-narrow">
       <PageHead
@@ -207,6 +250,19 @@ export default async function InstallningarPage() {
         <SectionHead title="Moduler" label="Aktivera per tenant" />
         <AdminToggles modules={moduleItems} />
       </div>
+
+      {isAdmin && (
+        <div className="mx-mt-6">
+          <SectionHead title="Användarspecifika moduler" label="Admin kan toggla per användare" />
+          {userModuleRows.length > 0 ? (
+            <UserModuleToggles users={userModuleRows} modules={moduleItems} />
+          ) : (
+            <Card style={{ padding: 16 }}>
+              <div className="mx-t-13 mx-muted">Inga användare hittades i tenanten.</div>
+            </Card>
+          )}
+        </div>
+      )}
 
       {/* ── Tenants ──────────────────────────────────────────── */}
       <div className="mx-mt-6">
