@@ -3,18 +3,18 @@
 import { useState } from 'react';
 import type { WorkshopModule, WorkshopBlock, WorkshopBlockType, WorkshopBlockOption } from '@platform/shared';
 
-const BLOCK_TYPES: { type: WorkshopBlockType; label: string; emoji: string }[] = [
-  { type: 'question', label: 'Fråga', emoji: '❓' },
-  { type: 'exercise', label: 'Övning', emoji: '✏️' },
-  { type: 'instruction', label: 'Instruktion', emoji: '📖' },
-  { type: 'video', label: 'Film', emoji: '🎬' },
-  { type: 'image', label: 'Bild', emoji: '🖼️' },
-  { type: 'ai_chat', label: 'AI-chatt', emoji: '🤖' },
-  { type: 'ai_pipeline', label: 'AI-pipeline', emoji: '🧠' },
-  { type: 'coach_review', label: 'Coach-granskning', emoji: '🎓' },
-  { type: 'commit_document', label: 'Commit dokument', emoji: '📌' },
-  { type: 'test', label: 'Test/Quiz', emoji: '📝' },
-  { type: 'summary', label: 'Sammanfattning', emoji: '📊' }
+const BLOCK_TYPES: { type: WorkshopBlockType; label: string; icon: string }[] = [
+  { type: 'question', label: 'Fråga', icon: '?' },
+  { type: 'exercise', label: 'Övning', icon: '✎' },
+  { type: 'instruction', label: 'Instruktion', icon: '≡' },
+  { type: 'video', label: 'Film', icon: '▶' },
+  { type: 'image', label: 'Bild', icon: '▣' },
+  { type: 'ai_chat', label: 'AI-chatt', icon: 'AI' },
+  { type: 'ai_pipeline', label: 'AI-pipeline', icon: '◇' },
+  { type: 'coach_review', label: 'Coach-granskning', icon: '✓' },
+  { type: 'commit_document', label: 'Commit dokument', icon: '↗' },
+  { type: 'test', label: 'Test/Quiz', icon: '☑' },
+  { type: 'summary', label: 'Sammanfattning', icon: 'Σ' }
 ];
 
 const BLOCK_TYPE_MAP = Object.fromEntries(BLOCK_TYPES.map((b) => [b.type, b]));
@@ -359,8 +359,8 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                 >
                   {/* Block header row */}
                   <div className="flex items-center gap-2 p-3">
-                    <span className="shrink-0 text-base" title={meta?.label}>
-                      {meta?.emoji}
+                    <span className="shrink-0 text-sm text-foreground-muted" title={meta?.label}>
+                      {meta?.icon}
                     </span>
                     <input
                       type="text"
@@ -588,7 +588,7 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                       {block.type === 'ai_pipeline' && (
                         <div className="space-y-3 rounded-2xl border border-movexum-lila/30 bg-movexum-pastell-lila/20 p-3 dark:border-movexum-morklila/30 dark:bg-movexum-morklila/10">
                           <p className="text-xs font-semibold uppercase tracking-wide text-movexum-lila dark:text-movexum-ljuslila">
-                            🧠 AI-pipeline-konfiguration
+                            AI-pipeline-konfiguration
                           </p>
                           <div>
                             <label className={labelClass}>
@@ -688,14 +688,14 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                   Välj blocktyp att lägga till:
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {BLOCK_TYPES.map(({ type, label, emoji }) => (
+                  {BLOCK_TYPES.map(({ type, label, icon }) => (
                     <button
                       key={type}
                       type="button"
                       onClick={() => addBlock(mod.id, type)}
                       className="inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:border-brand hover:bg-canvas-subtle hover:text-foreground"
                     >
-                      <span>{emoji}</span>
+                      <span className="text-xs text-foreground-subtle">{icon}</span>
                       {label}
                     </button>
                   ))}

@@ -198,9 +198,18 @@ export interface WorkshopModule {
   blocks: WorkshopBlock[];
 }
 
+export interface WorkshopArea {
+  id: string;
+  tenant: string;
+  name: string;
+  created: string;
+  updated: string;
+}
+
 export interface Workshop {
   id: string;
   tenant: string;
+  area?: string;
   key: string;
   title: string;
   goal?: string;
@@ -217,6 +226,9 @@ export interface Workshop {
   active: boolean;
   created: string;
   updated: string;
+  expand?: {
+    area?: WorkshopArea;
+  };
 }
 
 export type WorkshopAssignmentStatus = 'planned' | 'in_progress' | 'done';

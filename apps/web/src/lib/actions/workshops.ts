@@ -6,7 +6,7 @@ import { hasRole } from '@/lib/rbac';
 import { buildStartupContext } from '@/lib/ai/context';
 import { callMistral, estimateCostUsd } from '@/lib/ai/mistral';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
-import type { Role, WorkshopAssignment, Workshop, WorkshopBlock, WorkshopModule, WorkshopBlockOption } from '@platform/shared';
+import type { Role, WorkshopArea, WorkshopAssignment, Workshop, WorkshopBlock, WorkshopModule, WorkshopBlockOption } from '@platform/shared';
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 const DEFAULT_WORKSHOP_SYSTEM_PROMPT =
@@ -76,6 +76,11 @@ export type WorkshopActionState = {
   workshopId?: string;
   runId?: string;
   reportMd?: string;
+};
+
+export type WorkshopAreaActionState = {
+  error?: string;
+  success?: string;
 };
 
 function toWorkshopBlocks(value: unknown): WorkshopBlock[] {
@@ -164,6 +169,7 @@ export async function createWorkshopAction(
   const version = String(formData.get('version') || '1.0.0').trim();
   const aiSystemPrompt = String(formData.get('ai_system_prompt') || '').trim();
   const outputRequirements = String(formData.get('output_requirements') || '').trim();
+  const area = String(formData.get('area') || '').trim();
   const modulesRaw = String(formData.get('modules_json') || '[]').trim();
   const contentBlocksRaw = String(formData.get('content_blocks_json') || '[]').trim();
   const audienceRoles = formData.getAll('audience_roles').map(String);
@@ -193,6 +199,7 @@ export async function createWorkshopAction(
   try {
     const record = await pb.collection(PB_COLLECTIONS.workshops).create({
       tenant: user.tenant,
+      area: area || null,
       key,
       title,
       goal,
@@ -211,6 +218,76 @@ export async function createWorkshopAction(
     return { workshopId: String(record.id) };
   } catch (err) {
     return { error: toCreateWorkshopError(err) };
+  }
+}
+
+export async function createWorkshopAreaAction(
+  _prev: WorkshopAreaActionState,
+  formData: FormData
+): Promise<WorkshopAreaActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  const pb = await getServerPb();
+  const name = String(formData.get('name') || '').trim();
+  if (!name) return { error: 'Ange ett områdesnamn.' };
+
+  try {
+    await pb.collection(PB_COLLECTIONS.workshopAreas).create({
+      tenant: user.tenant,
+      name
+    });
+    revalidatePath('/education');
+    revalidatePath('/education/new');
+    return { success: 'Område tillagt.' };
+  } catch (err) {
+    const pbError = toPbErrorLike(err);
+    const message = String(err instanceof Error ? err.message : '');
+    const details = JSON.stringify(pbError.response ?? {});
+    const normalized = `${message} ${details}`.toLowerCase();
+    if (normalized.includes('unique') || normalized.includes('idx_workshop_areas_tenant_name')) {
+      return { error: 'Det finns redan ett område med samma namn.' };
+    }
+    return { error: 'Kunde inte skapa område.' };
+  }
+}
+
+export async function deleteWorkshopAreaAction(
+  _prev: WorkshopAreaActionState,
+  formData: FormData
+): Promise<WorkshopAreaActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  const pb = await getServerPb();
+  const areaId = String(formData.get('areaId') || '').trim();
+  if (!areaId) return { error: 'Område saknas.' };
+
+  try {
+    const linkedWorkshops = await pb.collection(PB_COLLECTIONS.workshops).getList<Workshop>(1, 500, {
+      filter: pb.filter('tenant = {:tenant} && area = {:area}', { tenant: user.tenant, area: areaId })
+    });
+    for (const workshop of linkedWorkshops.items) {
+      await pb.collection(PB_COLLECTIONS.workshops).update(workshop.id, { area: null });
+    }
+    await pb.collection(PB_COLLECTIONS.workshopAreas).delete(areaId);
+    revalidatePath('/education');
+    revalidatePath('/education/new');
+    return { success: 'Område borttaget.' };
+  } catch {
+    return { error: 'Kunde inte ta bort område.' };
+  }
+}
+
+export async function listWorkshopAreasForTenant(): Promise<WorkshopArea[]> {
+  const user = await requireUser();
+  const pb = await getServerPb();
+  try {
+    const result = await pb.collection(PB_COLLECTIONS.workshopAreas).getList<WorkshopArea>(1, 200, {
+      filter: pb.filter('tenant = {:tenant}', { tenant: user.tenant }),
+      sort: 'name'
+    });
+    return result.items;
+  } catch {
+    return [];
   }
 }
 
