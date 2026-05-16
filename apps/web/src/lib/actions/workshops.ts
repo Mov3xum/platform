@@ -243,9 +243,15 @@ export async function createWorkshopAreaAction(
     const pbError = toPbErrorLike(err);
     const message = String(err instanceof Error ? err.message : '');
     const details = JSON.stringify(pbError.response ?? {});
-    const normalized = `${message} ${details}`.toLowerCase();
+    const normalizedMessage = message.toLowerCase();
+    const normalizedDetails = details.toLowerCase();
+    const normalized = `${normalizedMessage} ${normalizedDetails}`;
     if (normalized.includes('unique') || normalized.includes('idx_workshop_areas_tenant_name')) {
       return { error: 'Det finns redan ett område med samma namn.' };
+    }
+    if (detectMissingSchemaError(normalizedMessage, normalizedDetails, pbError.status)) {
+      console.error('[workshops] missing workshop_areas schema', { message, response: pbError.response ?? null });
+      return { error: 'Serverfel: workshop_areas-samlingen saknas. Kontakta administratör.' };
     }
     return { error: 'Kunde inte skapa område.' };
   }
