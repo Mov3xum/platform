@@ -26,7 +26,8 @@ const inputClass =
 
 export function StartupForm({ action, initial = {}, submitLabel }: StartupFormProps) {
   const [state, formAction, pending] = useActionState(action, initialState);
-  const fe = state.fieldErrors ?? {};
+  const safeState = state ?? initialState;
+  const fe = safeState.fieldErrors ?? {};
 
   return (
     <form action={formAction} className="space-y-5">
@@ -91,8 +92,8 @@ export function StartupForm({ action, initial = {}, submitLabel }: StartupFormPr
         <input name="next_step" defaultValue={initial.next_step ?? ''} className={inputClass} />
       </Field>
 
-      {state.error ? (
-        <p className="rounded-xl bg-error-50 px-4 py-2.5 text-sm text-error-700">{state.error}</p>
+      {safeState.error ? (
+        <p className="rounded-xl bg-error-50 px-4 py-2.5 text-sm text-error-700">{safeState.error}</p>
       ) : null}
 
       <div className="flex justify-end gap-3 pt-2">

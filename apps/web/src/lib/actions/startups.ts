@@ -26,6 +26,26 @@ interface ParsedFields {
 
 type ParseResult = { ok: true; data: ParsedFields } | { ok: false; state: StartupFormState };
 
+type PbActionError = {
+  message?: string;
+  response?: {
+    message?: string;
+    data?: Record<string, unknown>;
+  };
+};
+
+function formatStartupActionError(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message) {
+    const pbLike = err as PbActionError;
+    const responseMessage = pbLike.response?.message;
+    if (responseMessage && responseMessage !== err.message) {
+      return `${err.message} (${responseMessage})`;
+    }
+    return err.message;
+  }
+  return fallback;
+}
+
 function parseFormData(formData: FormData): ParseResult {
   const name = String(formData.get('name') || '').trim();
   const phase = String(formData.get('phase') || '');
@@ -115,7 +135,7 @@ export async function createStartupAction(
     });
     createdId = record.id;
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Kunde inte skapa bolaget.' };
+    return { error: formatStartupActionError(err, 'Kunde inte skapa bolaget.') };
   }
 
   revalidatePath('/startups');
@@ -158,7 +178,7 @@ export async function updateStartupAction(
       tags: data.tags
     });
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera bolaget.' };
+    return { error: formatStartupActionError(err, 'Kunde inte uppdatera bolaget.') };
   }
 
   revalidatePath('/startups');
