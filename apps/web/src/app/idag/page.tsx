@@ -13,6 +13,7 @@ import {
   KpiBlock,
   Icon
 } from '@/components/proto';
+import DashboardChat from '@/components/DashboardChat';
 import type {
   Startup,
   Mission,
@@ -59,7 +60,10 @@ export default async function IdagPage() {
   // ── Counts ─────────────────────────────────────────────
   let activeStartupsCount = 0;
   let activeMissionsCount = 0;
-  let toolRunsToday = 0;
+  let myOpenMissionsCount = 0;
+  let myFollowupsTodayCount = 0;
+  let myToolRunsTodayCount = 0;
+  let myActiveStartupsCount = 0;
   let report: IncubatorReport | null = null;
   let startups: StartupWithSprint[] = [];
   let recentMissions: Mission[] = [];
@@ -96,19 +100,86 @@ export default async function IdagPage() {
     /* ignore */
   }
 
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
+
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const r = await pb.collection('tool_runs').getList(1, 1, {
-      filter: pb.filter('tenant = {:tenant} && created >= {:createdFrom}', {
-        tenant: user.tenant,
-        createdFrom: today.toISOString()
-      }),
+    const ownRuns = await pb.collection('tool_runs').getList(1, 1, {
+      filter: pb.filter(
+        'tenant = {:tenant} && triggered_by = {:userId} && created >= {:createdFrom} && created < {:createdTo}',
+        {
+          tenant: user.tenant,
+          userId: user.id,
+          createdFrom: dayStart.toISOString(),
+          createdTo: dayEnd.toISOString()
+        }
+      ),
       fields: 'id'
     });
-    toolRunsToday = r.totalItems;
+    myToolRunsTodayCount = ownRuns.totalItems;
   } catch {
     /* ignore */
+  }
+
+  try {
+    const ownMissions = await pb.collection(PB_COLLECTIONS.missions).getList<Mission>(1, 1, {
+      filter: pb.filter(
+        'tenant = {:tenant} && status != {:done} && status != {:archived} && (issuer = {:userId} || recipients ?= {:userId})',
+        {
+          tenant: user.tenant,
+          done: 'done',
+          archived: 'archived',
+          userId: user.id
+        }
+      ),
+      fields: 'id'
+    });
+    myOpenMissionsCount = ownMissions.totalItems;
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const ownActivities = await pb.collection('activities').getList(1, 1, {
+      filter: pb.filter(
+        'startup.tenant = {:tenant} && owner = {:userId} && status != {:done} && status != {:cancelled} && due_date >= {:from} && due_date < {:to}',
+        {
+          tenant: user.tenant,
+          userId: user.id,
+          done: 'done',
+          cancelled: 'cancelled',
+          from: dayStart.toISOString().slice(0, 10),
+          to: dayEnd.toISOString().slice(0, 10)
+        }
+      ),
+      fields: 'id'
+    });
+    myFollowupsTodayCount = ownActivities.totalItems;
+  } catch {
+    /* ignore */
+  }
+
+  if (isStaff) {
+    try {
+      const ownStartups = await pb.collection('startups').getList(1, 1, {
+        filter: pb.filter(
+          'tenant = {:tenant} && status = {:status} && (owner = {:userId} || coaches ?= {:userId})',
+          {
+            tenant: user.tenant,
+            status: 'active',
+            userId: user.id
+          }
+        ),
+        fields: 'id'
+      });
+      myActiveStartupsCount = ownStartups.totalItems;
+    } catch {
+      /* ignore */
+    }
+  } else {
+    myActiveStartupsCount = user.linkedStartups.length;
   }
 
   try {
@@ -160,7 +231,7 @@ export default async function IdagPage() {
       <PageHead
         crumb="Hemmaplan / Idag"
         title={`${greeting()}, ${firstName}.`}
-        subtitle={`${fmtDate(today)}. ${activeMissionsCount} aktiva uppdrag och AI har förberett ${aiDraftsAvailable ? 'ett' : 'inga'} utkast.`}
+        subtitle={`${fmtDate(today)}. Du har ${myOpenMissionsCount} öppna uppdrag, ${myFollowupsTodayCount} uppföljningar idag och AI har förberett ${aiDraftsAvailable ? 'ett' : 'inga'} utkast.`}
         actions={
           <Link href="/uppdrag" className="mx-btn mx-primary">
             <Icon name="plus" size={13} /> Nytt uppdrag
@@ -171,60 +242,60 @@ export default async function IdagPage() {
       {/* ── KPI puls-rad ─────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
         <KpiBlock
-          label="I PROGRAM"
-          value={activeStartupsCount || '—'}
-          hint="startups"
+          label="BOLAG JAG ANSVARAR FÖR"
+          value={myActiveStartupsCount || 0}
+          hint="aktiva bolag"
           spark={
-            activeStartupsCount > 0 ? (
-              <Spark data={[8, 9, 10, 10, 11, 12, 12, 13, activeStartupsCount]} color="#4a7d4a" />
+            myActiveStartupsCount > 0 ? (
+              <Spark data={[2, 2, 3, 3, 4, 4, 5, 5, myActiveStartupsCount]} color="#4a7d4a" />
             ) : null
           }
           foot={
             <Chip variant="green" mono>
-              {activeStartupsCount > 8 ? '+2 denna vecka' : 'Snart fullbokat'}
+              {myActiveStartupsCount > 0 ? 'Pågående coaching' : 'Koppla bolag'}
             </Chip>
           }
         />
         <KpiBlock
-          label="AKTIVA UPPDRAG"
-          value={activeMissionsCount || '—'}
-          hint="över flera vågor"
+          label="MINA ÖPPNA UPPDRAG"
+          value={myOpenMissionsCount || 0}
+          hint="egna ansvar"
           spark={
-            activeMissionsCount > 0 ? (
-              <Spark data={[5, 6, 6, 7, 7, 8, 7, 7, activeMissionsCount]} color="#6138b5" />
+            myOpenMissionsCount > 0 ? (
+              <Spark data={[1, 2, 2, 3, 3, 4, 4, 5, myOpenMissionsCount]} color="#6138b5" />
             ) : null
           }
           foot={
             <span className="mx-t-xs mx-mono mx-muted">
-              {activeMissionsCount} aktiva
+              Fokus idag
             </span>
           }
         />
         <KpiBlock
-          label="AI-KÖRNINGAR IDAG"
-          value={toolRunsToday || '0'}
-          hint="verktyg"
+          label="MINA AI-KÖRNINGAR IDAG"
+          value={myToolRunsTodayCount || 0}
+          hint="mistral"
           foot={
-            <Chip variant="cyan" mono>
+            <Chip variant="purple" mono>
               <Icon name="sparkle" size={10} /> Mistral EU
             </Chip>
           }
         />
         <KpiBlock
-          label={report ? `RAPPORT ${report.recipient_label || ''}` : 'RAPPORTER'}
-          value={report ? `${report.completion || 0}%` : '—'}
-          hint={report ? 'auto-ifyllt' : 'inga utkast'}
+          label="UPPFÖLJNINGAR IDAG"
+          value={myFollowupsTodayCount || 0}
+          hint="ägda aktiviteter"
           spark={
-            report ? <Spark data={[12, 28, 40, 55, 62, 68, 72, 75, report.completion || 0]} color="#4b2718" /> : null
+            myFollowupsTodayCount > 0 ? (
+              <Spark data={[0, 1, 1, 2, 2, 2, 3, 3, myFollowupsTodayCount]} color="#ca9323" />
+            ) : null
           }
           foot={
-            report ? (
-              <Link href={`/rapporter`}>
-                <Chip variant="review" mono>
-                  Granska sektioner
-                </Chip>
-              </Link>
-            ) : null
+            <Link href="/aktivitet">
+              <Chip variant="yellow" mono>
+                Öppna agenda
+              </Chip>
+            </Link>
           }
         />
       </div>
@@ -382,6 +453,8 @@ export default async function IdagPage() {
 
         {/* Sido-kolumn */}
         <div className="mx-flex mx-col mx-gap-4">
+          <DashboardChat />
+
           {/* AI-kommittén */}
           <Card ink style={{ overflow: 'hidden', padding: 0 }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
