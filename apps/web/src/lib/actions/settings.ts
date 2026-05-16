@@ -33,7 +33,10 @@ async function getSuperuserPb(): Promise<PocketBase | null> {
     await pb.collection('_superusers').authWithPassword(email, password);
     return pb;
   } catch (err) {
-    console.error('[settings] superuser auth failed', err);
+    console.error(
+      '[settings] superuser auth failed',
+      err instanceof Error ? err.message : String(err)
+    );
     return null;
   }
 }
@@ -88,8 +91,8 @@ export async function saveModuleTogglesAction(
     } catch (fallbackErr) {
       console.error('[settings] saveModuleToggles failed (fallback)', {
         tenantId: user.tenant,
-        err,
-        fallbackErr
+        error: err instanceof Error ? err.message : String(err),
+        fallbackError: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
       });
       return { error: 'Kunde inte spara inställningar. Försök igen.' };
     }
