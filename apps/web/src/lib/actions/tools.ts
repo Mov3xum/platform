@@ -43,11 +43,11 @@ export async function runToolAction(
   // RBAC check
   const isLinkedStartup = startupId ? user.linkedStartups.includes(startupId) : false;
   if (!canRunTool(user.roles, tool, { isLinkedStartup })) {
-    return { error: 'Du har inte behörighet att köra detta verktyg.' };
+    return { error: 'Du har inte behörighet att köra denna agent.' };
   }
 
   if (tool.requires_startup && !startupId) {
-    return { error: 'Detta verktyg kräver ett valt bolag.' };
+    return { error: 'Denna agent kräver ett valt bolag.' };
   }
 
   // Create tool_run record with status=running
@@ -129,7 +129,7 @@ export async function runToolAction(
       const activityRecord = await pb.collection('activities').create({
         startup: startupId,
         type: 'task',
-        title: `${tool.name} – verktygskörning`,
+        title: `${tool.name} – agentkörning`,
         status: 'done',
         kind: 'tool_run',
         tool: toolId,
@@ -204,9 +204,8 @@ export async function assignToolToStartupAction(
 /**
  * Creates a new tool in the registry.
  *
- * Endast admin får sätta systemprompten (`prompt_template`) och modellen
- * (`model`). Incubator_lead och coach kan skapa verktyg men prompten lämnas
- * tom — den måste sedan fyllas i av admin.
+ * Admin och incubator_lead kan sätta systemprompt (`prompt_template`) och modell
+ * (`model`) för att möjliggöra komplett agent-setup för Movexums personal.
  */
 export async function createToolAction(
   _prev: ToolActionState,
@@ -215,7 +214,7 @@ export async function createToolAction(
   const user = await requireUser();
   requireRole(user.roles, ['admin', 'incubator_lead']);
 
-  const isAdmin = hasRole(user.roles, ['admin']);
+  const canEditPrompt = hasRole(user.roles, ['admin', 'incubator_lead']);
 
   const pb = await getServerPb();
 
@@ -233,12 +232,12 @@ export async function createToolAction(
     created_by: user.id
   };
 
-  if (isAdmin) {
-    // Admin sätter systemprompt och modell.
+  if (canEditPrompt) {
+    // Movexum staff (admin/incubator_lead) sätter systemprompt och modell.
     data.prompt_template = String(formData.get('prompt_template') || '').trim();
     data.model = String(formData.get('model') || '') || null;
   } else {
-    // Övriga staff: prompten lämnas tom (måste fyllas av admin senare).
+    // Övriga: prompten lämnas tom.
     data.prompt_template = '';
   }
 
@@ -251,18 +250,15 @@ export async function createToolAction(
     revalidatePath('/toolbox');
     return { runId: record.id as string };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Kunde inte skapa verktyget.' };
+    return { error: err instanceof Error ? err.message : 'Kunde inte skapa agenten.' };
   }
 }
 
 /**
  * Updates an existing tool.
  *
- * - Admin: kan ändra ALLT, inklusive systemprompt och modell.
- * - Incubator_lead: kan ändra metadata (namn, beskrivning, ikon, kategori,
- *   roles_allowed, active, requires_startup, output_format) men INTE
- *   systemprompten eller modellvalet.
- * - Coach och övriga: får inte ändra verktyg alls.
+ * - Admin/incubator_lead: kan ändra allt, inklusive systemprompt och modell.
+ * - Övriga: får inte ändra agenter.
  */
 export async function updateToolAction(
   toolId: string,
@@ -272,7 +268,7 @@ export async function updateToolAction(
   const user = await requireUser();
   requireRole(user.roles, ['admin', 'incubator_lead']);
 
-  const isAdmin = hasRole(user.roles, ['admin']);
+  const canEditPrompt = hasRole(user.roles, ['admin', 'incubator_lead']);
 
   const pb = await getServerPb();
 
@@ -296,8 +292,8 @@ export async function updateToolAction(
     active: formData.get('active') === 'on'
   };
 
-  // Endast admin kan uppdatera systemprompt och modell.
-  if (isAdmin) {
+  // Movexum staff (admin/incubator_lead) kan uppdatera systemprompt och modell.
+  if (canEditPrompt) {
     if (formData.has('prompt_template')) {
       data.prompt_template = String(formData.get('prompt_template') || '').trim();
     }
@@ -305,7 +301,7 @@ export async function updateToolAction(
       data.model = String(formData.get('model') || '') || null;
     }
   }
-  // Övriga staff: ignorerar tysta eventuella inskickade prompt_template/model
+  // Övriga: ignorerar tysta eventuella inskickade prompt_template/model
   // i payload (defense-in-depth om någon spoofar formuläret).
 
   try {
@@ -314,7 +310,7 @@ export async function updateToolAction(
     revalidatePath(`/toolbox/${toolId}`);
     return {};
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera verktyget.' };
+    return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera agenten.' };
   }
 }
 
@@ -323,7 +319,7 @@ export async function updateToolAction(
  */
 export async function canEditToolPrompt(): Promise<boolean> {
   const user = await requireUser();
-  return hasRole(user.roles, ['admin']);
+  return hasRole(user.roles, ['admin', 'incubator_lead']);
 }
 
 /**
@@ -349,6 +345,6 @@ export async function deactivateToolAction(toolId: string): Promise<ToolActionSt
     revalidatePath('/toolbox');
     return {};
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Kunde inte inaktivera verktyget.' };
+    return { error: err instanceof Error ? err.message : 'Kunde inte inaktivera agenten.' };
   }
 }

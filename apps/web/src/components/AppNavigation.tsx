@@ -22,6 +22,7 @@ const iconByModule: Record<string, ComponentType<{ className?: string }>> = {
   partners: FolderKanban,
   onboarding: Compass,
   education: GraduationCap,
+  agenter: Sparkles,
   toolbox: Sparkles,
   activity_feed: Compass,
   integrationer: Plug2,

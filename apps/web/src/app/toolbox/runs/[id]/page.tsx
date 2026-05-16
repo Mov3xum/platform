@@ -42,7 +42,7 @@ export default async function ToolRunDetailPage({
           href={tool ? `/toolbox/${run.tool}` : '/toolbox'}
           className="text-sm text-foreground-muted hover:text-foreground"
         >
-          ← {tool?.name ?? 'Verktygslådan'}
+          ← {tool?.name ?? 'AI-agenter'}
         </Link>
       </div>
 
@@ -53,7 +53,7 @@ export default async function ToolRunDetailPage({
             <ToolRunStatusBadge status={run.status as ToolRunStatus} />
           </div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            {tool?.name ?? 'Verktygskörning'}
+            {tool?.name ?? 'Agentkörning'}
           </h1>
           {startup && (
             <p className="mt-1 text-sm text-foreground-muted">

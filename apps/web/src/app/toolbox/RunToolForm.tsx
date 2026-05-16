@@ -70,7 +70,7 @@ export function RunToolForm({
         disabled={isPending || (requiresStartup && !startupId)}
         className="inline-flex w-full items-center justify-center rounded-full bg-brand px-6 py-3 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {isPending ? 'Kör…' : 'Kör verktyg'}
+        {isPending ? 'Kör…' : 'Kör agent'}
       </button>
 
       {isPending && (

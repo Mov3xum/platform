@@ -657,8 +657,8 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'agenter',
-    title: 'Verktygslåda',
-    description: 'Interna och externa verktyg — AI-agenter, mallar och checklistor. Tilldela bolag för att synliggöra rätt verktyg i deras vy.',
+    title: 'AI-agenter',
+    description: 'AI-agenter, mallar och checklistor för startupstöd. Tilldela bolag för att synliggöra rätt agent i rätt kontext.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'startup_member'],
     route: '/toolbox'
   },
@@ -688,7 +688,7 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'toolbox',
-    title: 'Verktygslåda',
+    title: 'AI-agenter',
     description: 'Legacy alias för AI-agenter.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'startup_member'],
     route: '/toolbox'
@@ -703,7 +703,7 @@ export const coreModules: ModuleDefinition[] = [
   {
     id: 'activity_feed',
     title: 'Aktivitetsfeed',
-    description: 'Global feed med alla aktiviteter och verktygskörningar.',
+    description: 'Global feed med alla aktiviteter och agentkörningar.',
     rolesAllowed: ALL_ROLES,
     route: '/aktivitet'
   },
