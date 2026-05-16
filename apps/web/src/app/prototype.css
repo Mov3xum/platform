@@ -8,20 +8,23 @@
    ============================================================ */
 
 :root {
-  /* Brand — låsta enligt Movexum grafiska profil */
-  --mx-ink:        #002c40; /* Mörkblå (rail-bakgrund + accenter) */
+  /* Brand — Startupkompass-skiftet (2026-05).
+   * Canvas är ren vit, paper-ytor neutrala. Mörkblå (#002c40) bär
+   * accenter och rail. Ljusblå reserveras för länkar och info-pills,
+   * inte för bakgrundsytor. */
+  --mx-ink:        #002c40; /* Movexum mörkblå (rail + brand) */
   --mx-ink-2:      #003b54;
   --mx-ink-3:      #1d556a;
-  --mx-ink-soft:   #4d6c75;
-  --mx-canvas:     #ebfafc; /* Pastell blå */
+  --mx-ink-soft:   #3f3f3f;
+  --mx-canvas:     #ffffff; /* Ren vit canvas */
   --mx-paper:      #ffffff;
-  --mx-paper-2:    #f6fbfc;
-  --mx-paper-3:    #eef6f8;
-  --mx-line:       #d8e8eb;
-  --mx-line-soft:  #e8f0f2;
-  --mx-line-strong:#b9d2d7;
-  --mx-muted:      #6c8a93;
-  --mx-muted-2:    #87a4ab;
+  --mx-paper-2:    #fafafa; /* Paper-alt — neutral */
+  --mx-paper-3:    #f4f4f5; /* Paper-deep — neutral */
+  --mx-line:       #e5e5e5;
+  --mx-line-soft:  #f0f0f0;
+  --mx-line-strong:#d4d4d4;
+  --mx-muted:      #737373;
+  --mx-muted-2:    #a3a3a3;
 
   /* Module-accenter — Movexums palett */
   --mx-green:      #4a7d4a;       /* Movexum grön */
@@ -44,10 +47,10 @@
   --mx-yellow:     #ca9323;       /* Mörkgul */
   --mx-yellow-tint:#f8f1da;       /* Pastell gul */
 
-  --mx-cyan:       #005470;       /* Djupblå */
-  --mx-cyan-2:     #00a8de;       /* Movexum blå */
-  --mx-cyan-tint:  #ebfafc;       /* Pastell blå */
-  --mx-cyan-tint-2:#d4eef8;
+  --mx-cyan:       #005470;       /* Djupblå — länkar */
+  --mx-cyan-2:     #00a8de;       /* Movexum blå — info */
+  --mx-cyan-tint:  #f4fafc;       /* Mycket dämpad blå — bara för chips */
+  --mx-cyan-tint-2:#e3f1f7;       /* Lättare blå-cast — sällan */
 
   /* Status — semantiska */
   --mx-st-draft:    #87a4ab;
@@ -57,7 +60,7 @@
   --mx-st-review:   #ca9323;
   --mx-st-review-bg:#f8f1da;
   --mx-st-done:     #005470;
-  --mx-st-done-bg:  #d4eef8;
+  --mx-st-done-bg:  #e3f1f7;
   --mx-st-archive:  #6c8a93;
   --mx-st-archive-bg:#eef2f3;
   --mx-st-danger:   #d67e47;
@@ -74,10 +77,10 @@
   --mx-r-lg: 26px;
   --mx-r-pill: 999px;
 
-  /* Skuggor */
-  --mx-sh-1: 0 1px 0 rgba(0,44,64,.04), 0 1px 2px rgba(0,44,64,.04);
-  --mx-sh-2: 0 1px 0 rgba(0,44,64,.04), 0 8px 24px -8px rgba(0,44,64,.12);
-  --mx-sh-3: 0 1px 0 rgba(0,44,64,.05), 0 20px 60px -20px rgba(0,44,64,.25);
+  /* Skuggor — Compass-style (neutral, paper-känsla, ingen blå-cast) */
+  --mx-sh-1: 0 1px 2px 0 rgba(10,10,10,.04), 0 4px 14px -4px rgba(10,10,10,.06);
+  --mx-sh-2: 0 2px 4px 0 rgba(10,10,10,.05), 0 12px 30px -10px rgba(10,10,10,.10);
+  --mx-sh-3: 0 4px 12px -2px rgba(10,10,10,.08), 0 24px 48px -12px rgba(10,10,10,.16);
 
   /* Layout */
   --mx-rail-w: 232px;
@@ -86,20 +89,20 @@
 }
 
 html.dark {
-  --mx-canvas:     #121212;
-  --mx-paper:      #1c1c1c;
-  --mx-paper-2:    #232323;
-  --mx-paper-3:    #2a2a2a;
-  --mx-line:       #2d2d2d;
-  --mx-line-soft:  #232323;
+  --mx-canvas:     #0a0a0a;
+  --mx-paper:      #161616;
+  --mx-paper-2:    #1f1f1f;
+  --mx-paper-3:    #262626;
+  --mx-line:       #2a2a2a;
+  --mx-line-soft:  #1f1f1f;
   --mx-line-strong:#3a3a3a;
   --mx-muted:      #a3a3a3;
   --mx-muted-2:    #888;
-  --mx-ink:        #f2f2f2;
+  --mx-ink:        #f5f5f5;
   --mx-ink-2:      #d4d4d4;
   --mx-ink-3:      #b3b3b3;
   --mx-ink-soft:   #888;
-  /* Rail-bakgrunden är ALLTID Mörkblå även i dark mode */
+  /* Rail-bakgrunden är ALLTID mörkblå även i dark mode */
 }
 
 /* ============================================================
@@ -530,6 +533,61 @@ html.dark {
 
 .mx-card.mx-flat { border-color: var(--mx-line-soft); }
 .mx-card.mx-ink-card { background: #002c40; color: white; border-color: #002c40; }
+
+.mx-hover-card { transition: box-shadow .14s ease, transform .14s ease, border-color .14s ease; }
+.mx-hover-card:hover {
+  box-shadow: var(--mx-sh-2);
+  border-color: var(--mx-line-strong);
+  transform: translateY(-1px);
+}
+
+/* ============================================================
+   Form controls — Compass-känsla, neutrala
+   ============================================================ */
+
+.mx-input,
+.mx-textarea,
+select.mx-input {
+  width: 100%;
+  padding: 7px 12px;
+  border-radius: 10px;
+  background: var(--mx-paper);
+  border: 1px solid var(--mx-line);
+  color: var(--mx-ink);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  transition: border-color .12s ease, box-shadow .12s ease;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.mx-textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.mx-input::placeholder,
+.mx-textarea::placeholder { color: var(--mx-muted-2); }
+
+.mx-input:focus,
+.mx-textarea:focus,
+select.mx-input:focus {
+  outline: none;
+  border-color: #002c40;
+  box-shadow: 0 0 0 3px rgba(0, 44, 64, .12);
+}
+
+.mx-label {
+  display: block;
+  font-family: var(--mx-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--mx-muted);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
 
 .mx-card-head {
   display: flex;

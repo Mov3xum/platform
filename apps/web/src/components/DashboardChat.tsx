@@ -3,9 +3,10 @@
 import { useRef, useState, useTransition } from 'react';
 import { sendChatMessage, type ChatMessage } from '@/lib/actions/chat';
 
-export default function DashboardChat() {
+export default function DashboardChat({ className = 'mt-8' }: { className?: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const [includeWebContext, setIncludeWebContext] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -31,7 +32,7 @@ export default function DashboardChat() {
     scrollToBottom();
 
     startTransition(async () => {
-      const result = await sendChatMessage(nextMessages);
+      const result = await sendChatMessage(nextMessages, { includeWebContext });
       if (result.error) {
         setError(result.error);
       } else if (result.text) {
@@ -43,13 +44,15 @@ export default function DashboardChat() {
   }
 
   return (
-    <section className="mt-8 rounded-3xl border border-default bg-surface shadow-sm shadow-movexum-svart/5">
+    <section className={`${className} rounded-3xl border border-default bg-surface shadow-sm shadow-movexum-svart/5`}>
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-default px-5 py-4">
         <span className="text-xl" aria-hidden>💬</span>
         <div>
           <h2 className="text-base font-semibold text-foreground">Fråga plattformen</h2>
-          <p className="text-xs text-foreground-subtle">AI-assistent med tillgång till din plattformsdata</p>
+          <p className="text-xs text-foreground-subtle">
+            Mistral via plattformen med tenant-isolerad PocketBase-kontext
+          </p>
         </div>
       </div>
 
@@ -121,6 +124,19 @@ export default function DashboardChat() {
           Skicka
         </button>
       </form>
+
+      <div className="flex items-center justify-between gap-3 border-t border-default px-5 py-2">
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground-muted">
+          <input
+            type="checkbox"
+            checked={includeWebContext}
+            onChange={(e) => setIncludeWebContext(e.target.checked)}
+            disabled={isPending}
+            className="h-3.5 w-3.5 rounded border-default text-brand focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+          />
+          Inkludera publika webbkällor i svaret
+        </label>
+      </div>
 
       {/* GDPR notice */}
       <p className="border-t border-default px-5 py-2 text-xs text-foreground-subtle">
