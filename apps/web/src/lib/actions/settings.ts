@@ -1,5 +1,6 @@
 'use server';
 
+import PocketBase from 'pocketbase';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { coreModules } from '@platform/shared';
@@ -15,6 +16,27 @@ const HIDDEN_MODULE_IDS = ['dashboard', 'toolbox', 'onboarding', 'activity_feed'
 const ALLOWED_MODULE_IDS = new Set(
   coreModules.filter((m) => !HIDDEN_MODULE_IDS.includes(m.id)).map((m) => m.id)
 );
+
+const PB_URL =
+  process.env.POCKETBASE_URL ||
+  (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080');
+
+async function getSuperuserPb(): Promise<PocketBase | null> {
+  const email = process.env.POCKETBASE_SUPERUSER_EMAIL;
+  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD;
+  if (!email || !password) return null;
+
+  const pb = new PocketBase(PB_URL);
+  pb.autoCancellation(false);
+
+  try {
+    await pb.collection('_superusers').authWithPassword(email, password);
+    return pb;
+  } catch (err) {
+    console.error('[settings] superuser auth failed', err);
+    return null;
+  }
+}
 
 /**
  * Sparar listan av avaktiverade moduler för inloggad användares tenant.
@@ -36,7 +58,9 @@ export async function saveModuleTogglesAction(
     if (!Array.isArray(parsed)) {
       return { error: 'Ogiltigt format på moduldata.' };
     }
-    disabledModules = parsed.filter((v): v is string => typeof v === 'string');
+    disabledModules = parsed
+      .filter((v): v is string => typeof v === 'string')
+      .filter((id) => ALLOWED_MODULE_IDS.has(id));
   } catch (err) {
     console.error('[settings] saveModuleToggles parse failed', {
       tenantId: user.tenant,
@@ -51,8 +75,24 @@ export async function saveModuleTogglesAction(
       disabled_modules: disabledModules
     });
   } catch (err) {
-    console.error('[settings] saveModuleToggles failed', { tenantId: user.tenant, err });
-    return { error: 'Kunde inte spara inställningar. Försök igen.' };
+    const superuserPb = await getSuperuserPb();
+    if (!superuserPb) {
+      console.error('[settings] saveModuleToggles failed', { tenantId: user.tenant, err });
+      return { error: 'Kunde inte spara inställningar. Försök igen.' };
+    }
+
+    try {
+      await superuserPb.collection('tenants').update(user.tenant, {
+        disabled_modules: disabledModules
+      });
+    } catch (fallbackErr) {
+      console.error('[settings] saveModuleToggles failed (fallback)', {
+        tenantId: user.tenant,
+        err,
+        fallbackErr
+      });
+      return { error: 'Kunde inte spara inställningar. Försök igen.' };
+    }
   }
 
   revalidatePath('/', 'layout');
