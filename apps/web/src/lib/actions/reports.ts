@@ -201,7 +201,7 @@ export async function generateAiDraftAction(reportId: string): Promise<ReportAct
     ]);
     previewMd = result.text;
   } catch (aiErr) {
-    return { error: aiErr instanceof Error ? aiErr.message : 'AI-generering misslyckades.' };
+    return { error: aiErr instanceof Error ? aiErr.message : 'AI-generering misslyckades. Kontrollera MISTRAL_API_KEY och försök igen.' };
   }
 
   const sections = Array.isArray(report.sections_json) ? [...report.sections_json] : [];
