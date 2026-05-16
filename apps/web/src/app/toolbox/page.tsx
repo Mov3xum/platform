@@ -211,7 +211,7 @@ export default async function ToolboxPage({
         actions={
           <>
             <button className="mx-btn" type="button">
-              <Icon name="filter" size={13} /> Profil
+              <Icon name="filter" size={13} /> Filtrera
             </button>
             {isStaff && (
               <Link href="/toolbox/new" className="mx-btn mx-primary">

@@ -4,6 +4,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole, canRunTool } from '@/lib/rbac';
 import { ToolCategoryBadge, ToolRunStatusBadge } from '@/components/Badges';
 import { toolCategoryLabels, type ToolRunStatus } from '@/lib/labels';
+import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
 import { RunToolForm } from '../RunToolForm';
 import type { Tool, ToolRun } from '@platform/shared';
 
@@ -126,8 +127,7 @@ export default async function ToolDetailPage({
               ) : null}
                 <div className="mb-4 rounded-2xl border border-movexum-bla/30 bg-movexum-pastell-bla px-4 py-3 dark:border-movexum-djupbla/50 dark:bg-movexum-morkbla/30">
                   <p className="text-xs text-movexum-morkbla dark:text-movexum-pastell-bla">
-                    ⚠️ Genererat av AI – verifiera innan delning. Konfidentiella anteckningar
-                    exkluderas automatiskt.
+                    ⚠️ {AI_OUTPUT_WARNING_TEXT}. Konfidentiella anteckningar exkluderas automatiskt.
                 </p>
               </div>
               <RunToolForm

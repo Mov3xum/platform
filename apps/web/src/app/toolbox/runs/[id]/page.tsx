@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser } from '@/lib/rbac';
 import { ToolRunStatusBadge } from '@/components/Badges';
+import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
 import type { ToolRun, ToolRunStatus } from '@platform/shared';
 
 export default async function ToolRunDetailPage({
@@ -82,7 +83,7 @@ export default async function ToolRunDetailPage({
                 <h2 className="text-lg font-semibold text-foreground">Resultat</h2>
                 {(run.tokens_in || run.tokens_out) && (
                   <span className="text-xs text-foreground-subtle">
-                    ⚠️ Genererat av AI – verifiera innan delning
+                    ⚠️ {AI_OUTPUT_WARNING_TEXT}
                   </span>
                 )}
               </div>
