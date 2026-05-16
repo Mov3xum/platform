@@ -1,21 +1,25 @@
 import type { StartupPhase } from '@platform/shared';
 
 export const phaseLabels: Record<StartupPhase, string> = {
-  idea: 'Idé',
-  pre_revenue: 'Före intäkter',
-  early_revenue: 'Tidiga intäkter',
-  growth: 'Tillväxt',
-  scale: 'Skalning',
-  exit: 'Exit'
+  paus: 'PAUS',
+  inflode: 'INFLÖDE',
+  lead: 'LEAD',
+  boost_chamber: 'BOOST CHAMBER',
+  incubation: 'INCUBATION',
+  prescale: 'PRESCALE',
+  acceleration: 'ACCELERATION',
+  alumni: 'ALUMNI'
 };
 
 export const phaseTokens: Record<StartupPhase, string> = {
-  idea: 'var(--color-phase-idea)',
-  pre_revenue: 'var(--color-phase-pre-revenue)',
-  early_revenue: 'var(--color-phase-early-revenue)',
-  growth: 'var(--color-phase-growth)',
-  scale: 'var(--color-phase-scale)',
-  exit: 'var(--color-phase-exit)'
+  paus: 'var(--color-phase-paus)',
+  inflode: 'var(--color-phase-inflode)',
+  lead: 'var(--color-phase-lead)',
+  boost_chamber: 'var(--color-phase-boost-chamber)',
+  incubation: 'var(--color-phase-incubation)',
+  prescale: 'var(--color-phase-prescale)',
+  acceleration: 'var(--color-phase-acceleration)',
+  alumni: 'var(--color-phase-alumni)'
 };
 
 export type StartupStatus = 'active' | 'alumni' | 'paused' | 'rejected';

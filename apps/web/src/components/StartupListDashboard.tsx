@@ -34,12 +34,14 @@ export function StartupListDashboard({
   metrics: DashboardMetrics;
 }) {
   const phaseColors: Record<string, string> = {
-    idea: 'bg-movexum-pastell-bla text-movexum-djupbla',
-    pre_revenue: 'bg-movexum-pastell-lila text-movexum-morklila',
-    early_revenue: 'bg-movexum-pastell-gron text-movexum-morkgron',
-    growth: 'bg-movexum-pastell-gul text-movexum-morkgul',
-    scale: 'bg-movexum-pastell-orange text-movexum-morkorange',
-    exit: 'bg-canvas-subtle text-foreground-muted'
+    paus: 'bg-canvas-subtle text-foreground-muted',
+    inflode: 'bg-movexum-pastell-bla text-movexum-djupbla',
+    lead: 'bg-movexum-pastell-lila text-movexum-morklila',
+    boost_chamber: 'bg-movexum-pastell-gron text-movexum-morkgron',
+    incubation: 'bg-movexum-pastell-gul text-movexum-morkgul',
+    prescale: 'bg-movexum-pastell-orange text-movexum-morkorange',
+    acceleration: 'bg-movexum-bla text-movexum-vit',
+    alumni: 'bg-canvas-subtle text-foreground-muted'
   };
 
   return (
@@ -91,7 +93,18 @@ export function StartupListDashboard({
       <div>
         <h3 className="mb-3 text-sm font-semibold text-foreground">Distribution per fas</h3>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {(['idea', 'pre_revenue', 'early_revenue', 'growth', 'scale', 'exit'] as const).map((phase) => {
+          {(
+            [
+              'paus',
+              'inflode',
+              'lead',
+              'boost_chamber',
+              'incubation',
+              'prescale',
+              'acceleration',
+              'alumni'
+            ] as const
+          ).map((phase) => {
             const count = metrics.byPhase[phase] || 0;
             const pct =
               metrics.totalStartups > 0

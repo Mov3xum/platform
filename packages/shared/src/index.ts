@@ -18,20 +18,24 @@ export const ALL_ROLES: Role[] = [
 ];
 
 export type StartupPhase =
-  | 'idea'
-  | 'pre_revenue'
-  | 'early_revenue'
-  | 'growth'
-  | 'scale'
-  | 'exit';
+  | 'paus'
+  | 'inflode'
+  | 'lead'
+  | 'boost_chamber'
+  | 'incubation'
+  | 'prescale'
+  | 'acceleration'
+  | 'alumni';
 
 export const ALL_PHASES: StartupPhase[] = [
-  'idea',
-  'pre_revenue',
-  'early_revenue',
-  'growth',
-  'scale',
-  'exit'
+  'paus',
+  'inflode',
+  'lead',
+  'boost_chamber',
+  'incubation',
+  'prescale',
+  'acceleration',
+  'alumni'
 ];
 
 export type TenantType = 'incubator' | 'partner_org';

@@ -135,12 +135,14 @@ export const typography = {
 } as const;
 
 export const startupPhases = {
-  idea: movexumPalette.ljuslila,
-  pre_revenue: movexumPalette.gul,
-  early_revenue: movexumPalette.gron,
-  growth: movexumPalette.bla,
-  scale: movexumPalette.orange,
-  exit: '#5d5d5d',
+  paus: '#5d5d5d',
+  inflode: movexumPalette.djupbla,
+  lead: movexumPalette.lila,
+  boost_chamber: movexumPalette.gron,
+  incubation: movexumPalette.gul,
+  prescale: movexumPalette.orange,
+  acceleration: movexumPalette.bla,
+  alumni: '#5d5d5d',
 } as const;
 
 export const spacing = {

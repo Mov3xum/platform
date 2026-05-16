@@ -36,7 +36,7 @@ migrate(
             id: 'intake_stage',
             type: 'question',
             title: 'Vilken fas är bolaget i?',
-            instructions: 'Välj den fas som bäst beskriver er nuvarande position.\n\n• Idé — ingen produkt eller kunder\n• Pre-revenue — produkt finns, inga betalande kunder\n• Tidig intäkt — 1–10 betalande kunder\n• Tillväxt — bevisad product-market fit, skalbar tillväxt\n• Scale — 10x growth mode\n• Exit/M&A\n\nVara ärlig — det påverkar analyskvaliteten direkt.',
+            instructions: 'Välj den fas som bäst beskriver er nuvarande position.\n\n• PAUS\n• INFLÖDE\n• LEAD\n• BOOST CHAMBER\n• INCUBATION\n• PRESCALE\n• ACCELERATION\n• ALUMNI\n\nVar ärlig — det påverkar analyskvaliteten direkt.',
             desired_result: 'Tydlig fasbeskrivning som stämmer med verkligheten',
             required: true
           },

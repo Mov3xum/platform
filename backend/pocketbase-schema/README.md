@@ -58,7 +58,7 @@ Multi-tenant root. Alla affärsdata-collections har `tenant`-relation.
 | fält | typ |
 |---|---|
 | `tenant`, `name`, `description` | relation, text, editor |
-| `phase` | select: `idea`, `pre_revenue`, `early_revenue`, `growth`, `scale`, `exit` |
+| `phase` | select: `paus`, `inflode`, `lead`, `boost_chamber`, `incubation`, `prescale`, `acceleration`, `alumni` |
 | `irl_level` | number 1–9 |
 | `next_step` | text |
 | `owner` | relation→users (1) |

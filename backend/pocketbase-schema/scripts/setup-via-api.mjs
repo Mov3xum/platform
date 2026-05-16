@@ -295,7 +295,7 @@ await ensureCollection({
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
     { name: 'name', type: 'text', required: true, min: 1, max: 200 },
     { name: 'description', type: 'editor', required: false },
-    { name: 'phase', type: 'select', required: true, maxSelect: 1, values: ['idea', 'pre_revenue', 'early_revenue', 'growth', 'scale', 'exit'] },
+    { name: 'phase', type: 'select', required: true, maxSelect: 1, values: ['paus', 'inflode', 'lead', 'boost_chamber', 'incubation', 'prescale', 'acceleration', 'alumni'] },
     { name: 'irl_level', type: 'number', required: false, min: 1, max: 9 },
     { name: 'next_step', type: 'text', required: false, max: 500 },
     { name: 'owner', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
