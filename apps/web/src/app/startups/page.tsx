@@ -43,7 +43,7 @@ export default async function StartupsPage({
   try {
     result = await listForTenant<StartupRecord>('startups', {
       filter: buildFilter(params.q, params.phase, params.status),
-      sort: '-created',
+      sort: 'name',
       perPage: 100
     });
   } catch (error) {

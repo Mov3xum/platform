@@ -325,7 +325,7 @@ await ensureCollection({
   indexes: ['CREATE INDEX idx_partners_tenant ON partners (tenant)'],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_ROLES}`,
+  createRule: `${ANY_AUTH} && ${STAFF_ROLES}`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_ROLES}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
 });
@@ -347,7 +347,7 @@ await ensureCollection({
   indexes: ['CREATE INDEX idx_team_members_startup ON startup_team_members (startup)'],
   listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  createRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`,
+  createRule: `${ANY_AUTH} && ${STAFF_ROLES}`,
   updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`
 });
@@ -372,7 +372,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  createRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`,
+  createRule: `${ANY_AUTH} && ${STAFF_ROLES}`,
   updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`
 });
@@ -401,7 +401,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  createRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
+  createRule: `${ANY_AUTH}`,
   updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_OWNER}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_OWNER}`
 });
@@ -423,7 +423,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && (confidential = false || ${STAFF_INCL_MENTOR} || @request.auth.id = author)`,
   viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && (confidential = false || ${STAFF_INCL_MENTOR} || @request.auth.id = author)`,
-  createRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && @request.auth.id = author`,
+  createRule: `${ANY_AUTH} && @request.auth.id = author`,
   updateRule: `${ANY_AUTH} && @request.auth.id = author`,
   deleteRule: `${ANY_AUTH} && (@request.auth.id = author || @request.auth.roles ?= "admin")`
 });
@@ -445,7 +445,7 @@ await ensureCollection({
   indexes: ['CREATE INDEX idx_agreements_startup ON agreements (startup)'],
   listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  createRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_LEAD}`,
+  createRule: `${ANY_AUTH} && ${STAFF_OR_LEAD}`,
   updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_LEAD}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && @request.auth.roles ?= "admin"`
 });
@@ -467,7 +467,7 @@ await ensureCollection({
   indexes: ['CREATE INDEX idx_milestones_startup ON milestones (startup)'],
   listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  createRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`,
+  createRule: `${ANY_AUTH} && ${STAFF_ROLES}`,
   updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`
 });
@@ -499,7 +499,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: `${ANY_AUTH} && ${STAFF_OR_LEAD}`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
 });
@@ -535,7 +535,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = triggered_by`,
+  createRule: `${ANY_AUTH} && @request.auth.id = triggered_by`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = triggered_by`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
 });
@@ -576,7 +576,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
 });
@@ -612,7 +612,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR} && @request.auth.id = assigned_by`,
+  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR} && @request.auth.id = assigned_by`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
 });
@@ -647,7 +647,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = triggered_by`,
+  createRule: `${ANY_AUTH} && @request.auth.id = triggered_by`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = triggered_by`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
 });
