@@ -4,10 +4,10 @@ import { redirect } from 'next/navigation';
 import PocketBase from 'pocketbase';
 import type { Role } from '@platform/shared';
 
-const PB_URL =
+const SERVER_PB_URL =
   process.env.POCKETBASE_URL ||
-  process.env.NEXT_PUBLIC_POCKETBASE_URL ||
   (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080');
+const PUBLIC_PB_URL = process.env.NEXT_PUBLIC_POCKETBASE_URL || SERVER_PB_URL;
 export const AUTH_COOKIE = 'pb_auth';
 
 export interface SessionUser {
@@ -45,7 +45,7 @@ function readCookiePayload(raw: string | undefined): CookiePayload | null {
 }
 
 export async function getServerPb(): Promise<PocketBase> {
-  const pb = new PocketBase(PB_URL);
+  const pb = new PocketBase(SERVER_PB_URL);
   pb.autoCancellation(false);
 
   const store = await cookies();
@@ -84,7 +84,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
 
   const avatarFilename = m.avatar as string | undefined;
   const avatarUrl = avatarFilename
-    ? `${PB_URL}/api/files/users/${m.id as string}/${avatarFilename}`
+    ? `${PUBLIC_PB_URL}/api/files/users/${m.id as string}/${avatarFilename}`
     : undefined;
 
   return {

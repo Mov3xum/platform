@@ -9,7 +9,6 @@ import { sendVerificationEmail } from '@/lib/email';
 
 const PB_URL =
   process.env.POCKETBASE_URL ||
-  process.env.NEXT_PUBLIC_POCKETBASE_URL ||
   (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080');
 
 async function isHttpsRequest(): Promise<boolean> {
