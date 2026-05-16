@@ -52,6 +52,11 @@ export function Logo({
     display: 'block',
   };
 
+  // Precompute per-variant image sources to avoid non-null assertions in JSX
+  const lightSrc = logoLightUrl || logoDarkUrl || '';
+  const darkSrc = logoDarkUrl || logoLightUrl || '';
+  const flexSrc = logoLightUrl || logoDarkUrl || '';
+
   return (
     <Link
       href={href}
@@ -78,9 +83,9 @@ export function Logo({
           </span>
           {/* Dark mode */}
           <span className="hidden dark:block">
-            {(logoDarkUrl || logoLightUrl) ? (
+            {darkSrc ? (
               <Image
-                src={logoDarkUrl || logoLightUrl!}
+                src={darkSrc}
                 alt="Logotyp"
                 width={width}
                 height={height}
@@ -93,9 +98,9 @@ export function Logo({
           </span>
         </>
       ) : variant === 'light' ? (
-        (logoLightUrl || logoDarkUrl) ? (
+        lightSrc ? (
           <Image
-            src={logoLightUrl || logoDarkUrl!}
+            src={lightSrc}
             alt="Logotyp"
             width={width}
             height={height}
@@ -106,9 +111,9 @@ export function Logo({
           <span style={{ ...baseStyle, color: '#121212' }}>movexum</span>
         )
       ) : variant === 'dark' ? (
-        (logoDarkUrl || logoLightUrl) ? (
+        darkSrc ? (
           <Image
-            src={logoDarkUrl || logoLightUrl!}
+            src={darkSrc}
             alt="Logotyp"
             width={width}
             height={height}
@@ -120,9 +125,9 @@ export function Logo({
         )
       ) : (
         /* flex — currentColor */
-        (logoLightUrl || logoDarkUrl) ? (
+        flexSrc ? (
           <Image
-            src={logoLightUrl || logoDarkUrl!}
+            src={flexSrc}
             alt="Logotyp"
             width={width}
             height={height}

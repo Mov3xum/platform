@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useActionState, useRef, useState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import { Check, ImageIcon, Trash2, Upload } from 'lucide-react';
 import {
   deleteTenantLogoAction,
@@ -32,6 +32,13 @@ function LogoUploadPanel({
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
 
+  // Revoke blob URL on unmount to avoid memory leaks
+  useEffect(() => {
+    return () => {
+      if (preview?.startsWith('blob:')) URL.revokeObjectURL(preview);
+    };
+  }, [preview]);
+
   const isLight = mode === 'light';
   const label = isLight ? 'Light mode' : 'Dark mode';
   const bgClass = isLight
@@ -44,8 +51,11 @@ function LogoUploadPanel({
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (preview?.startsWith('blob:')) URL.revokeObjectURL(preview);
-    setPreview(URL.createObjectURL(file));
+    const next = URL.createObjectURL(file);
+    setPreview((prev) => {
+      if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev);
+      return next;
+    });
   }
 
   const anyError = uploadState?.error || deleteState?.error;
