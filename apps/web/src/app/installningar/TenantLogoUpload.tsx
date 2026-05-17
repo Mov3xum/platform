@@ -6,9 +6,9 @@ import { Check, ImageIcon, Trash2, Upload } from 'lucide-react';
 import {
   deleteTenantLogoAction,
   uploadTenantLogoAction,
-  MAX_TENANT_LOGO_BYTES,
   type UploadTenantLogoState
 } from '@/lib/actions/settings';
+import { MAX_TENANT_LOGO_BYTES } from '@/lib/settings-constants';
 
 type Mode = 'light' | 'dark';
 

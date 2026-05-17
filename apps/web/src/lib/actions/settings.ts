@@ -5,6 +5,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { coreModules } from '@platform/shared';
 import { revalidatePath } from 'next/cache';
+import { MAX_TENANT_LOGO_BYTES } from '@/lib/settings-constants';
 
 export type SaveModuleTogglesState = {
   error?: string;
@@ -25,6 +26,8 @@ const ALLOWED_MODULE_IDS = new Set(
 const PB_URL =
   process.env.POCKETBASE_URL ||
   (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080');
+
+const ALLOWED_LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
 
 async function getSuperuserPb(): Promise<PocketBase | null> {
   const email = process.env.POCKETBASE_SUPERUSER_EMAIL;
