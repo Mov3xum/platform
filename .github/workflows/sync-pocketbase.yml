@@ -1,0 +1,32 @@
+name: Sync PocketBase schema
+
+on:
+  push:
+    branches: [staging]
+    paths:
+      - 'backend/pocketbase-schema/**'
+      - '.github/workflows/sync-pocketbase.yml'
+  workflow_dispatch: # Tillåter manuell körning från GitHub Actions-fliken
+
+jobs:
+  sync:
+    name: Sync schema to PocketBase
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+
+      - name: Install pocketbase npm-paket
+        run: yarn add pocketbase
+        working-directory: backend/pocketbase-schema/scripts
+
+      - name: Kör setup-via-api.mjs mot befintlig PocketBase
+        env:
+          PB_URL: ${{ secrets.PB_URL }}
+          PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL }}
+          PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD }}
+        run: node backend/pocketbase-schema/scripts/setup-via-api.mjs
