@@ -12,9 +12,8 @@ RUN apk add --no-cache \
     && rm /tmp/pb.zip \
     && chmod +x /pb/pocketbase
 
-COPY migrations /pb/pb_migrations
+COPY backend/pocketbase-schema/migrations /pb/pb_migrations
 RUN mkdir -p /pb/pb_hooks
-COPY hooks /pb/pb_hooks 2>/dev/null || true
 
 EXPOSE 8080
 
