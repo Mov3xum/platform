@@ -22,22 +22,27 @@ type PbErrorLike = {
   response?: unknown;
 };
 
+type SuperuserPbResult =
+  | { ok: true; pb: PocketBase }
+  | { ok: false; reason: 'missing_credentials' | 'auth_failed' };
+
 function toPbErrorLike(err: unknown): PbErrorLike {
   if (typeof err === 'object' && err !== null) return err as PbErrorLike;
   return {};
 }
 
-async function getSuperuserPb(): Promise<PocketBase | null> {
+async function getSuperuserPb(): Promise<SuperuserPbResult> {
   const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
   const password = process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
   if (!email || !password) {
     console.error('[workshops] superuser credentials missing', {
+      pbUrl: PB_URL,
       hasPocketbaseSuperuserEmail: Boolean(process.env.POCKETBASE_SUPERUSER_EMAIL),
       hasPocketbaseSuperuserPassword: Boolean(process.env.POCKETBASE_SUPERUSER_PASSWORD),
       hasPbSuEmail: Boolean(process.env.PB_SU_EMAIL),
       hasPbSuPassword: Boolean(process.env.PB_SU_PASSWORD)
     });
-    return null;
+    return { ok: false, reason: 'missing_credentials' };
   }
 
   const pb = new PocketBase(PB_URL);
@@ -45,13 +50,13 @@ async function getSuperuserPb(): Promise<PocketBase | null> {
 
   try {
     await pb.collection('_superusers').authWithPassword(email, password);
-    return pb;
+    return { ok: true, pb };
   } catch {
     console.error('[workshops] superuser auth failed', {
       email,
       pbUrl: PB_URL
     });
-    return null;
+    return { ok: false, reason: 'auth_failed' };
   }
 }
 
@@ -294,14 +299,27 @@ export async function createWorkshopAreaAction(
     const normalizedMessage = message.toLowerCase();
     const normalizedDetails = details.toLowerCase();
     const normalized = `${normalizedMessage} ${normalizedDetails}`;
+
+    console.error('[workshops] workshop area create failed', {
+      pbUrl: PB_URL,
+      tenantId: user.tenant,
+      userId: user.id,
+      roles: user.roles,
+      payload,
+      statusCode: pbError.status,
+      message,
+      response: pbError.response ?? null
+    });
+
     if (normalized.includes('unique') || normalized.includes('idx_workshop_areas_tenant_name')) {
       return { error: 'Det finns redan ett område med samma namn.' };
     }
+
     if (detectCreateRuleFailure(normalizedMessage, normalizedDetails, pbError.status)) {
-      const superuserPb = await getSuperuserPb();
-      if (superuserPb) {
+      const superuserPbResult = await getSuperuserPb();
+      if (superuserPbResult.ok) {
         try {
-          await superuserPb.collection(PB_COLLECTIONS.workshopAreas).create(payload);
+          await superuserPbResult.pb.collection(PB_COLLECTIONS.workshopAreas).create(payload);
           revalidatePath('/education');
           revalidatePath('/education/new');
           return { success: 'Område tillagt.' };
@@ -315,24 +333,45 @@ export async function createWorkshopAreaAction(
             return { error: 'Det finns redan ett område med samma namn.' };
           }
           console.error('[workshops] workshop area create fallback failed', {
+            pbUrl: PB_URL,
             tenantId: user.tenant,
+            userId: user.id,
+            roles: user.roles,
+            payload,
             message: fallbackMessage,
             response:
               typeof fallbackErr === 'object' && fallbackErr !== null && 'response' in fallbackErr
                 ? (fallbackErr as { response?: unknown }).response
                 : null
           });
-          return { error: 'Kunde inte skapa område. Kontrollera PocketBase superuser-konfigurationen.' };
+          return { error: 'Kunde inte skapa område. Fallback via superuser misslyckades (PB-SU-FAIL).' };
         }
-      } else {
-        return { error: 'Kunde inte skapa område. Kontrollera PocketBase superuser-konfigurationen.' };
       }
+
+      if (superuserPbResult.reason === 'missing_credentials') {
+        return {
+          error:
+            'Kunde inte skapa område. Webbtjänsten saknar superuser-env (POCKETBASE_SUPERUSER_EMAIL/PASSWORD eller PB_SU_EMAIL/PB_SU_PASSWORD).'
+        };
+      }
+
+      return {
+        error:
+          'Kunde inte skapa område. Superuser-inloggning mot PocketBase misslyckades (PB-SU-AUTH). Kontrollera credentials och POCKETBASE_URL.'
+      };
     }
+
     if (detectMissingSchemaError(normalizedMessage, normalizedDetails, pbError.status)) {
-      console.error('[workshops] missing workshop_areas schema', { message, response: pbError.response ?? null });
+      console.error('[workshops] missing workshop_areas schema', {
+        pbUrl: PB_URL,
+        tenantId: user.tenant,
+        message,
+        response: pbError.response ?? null
+      });
       return { error: 'Serverfel: workshop_areas-samlingen saknas. Kontakta administratör.' };
     }
-    return { error: 'Kunde inte skapa område.' };
+
+    return { error: 'Kunde inte skapa område. Se serverloggar för [workshops] workshop area create failed.' };
   }
 }
 
