@@ -60,7 +60,12 @@ async function getSuperuserPb(): Promise<SuperuserPbResult> {
   }
 }
 
-function detectCreateRuleFailure(normalizedMessage: string, normalizedDetails: string, statusCode?: number): boolean {
+function detectCreateRuleFailure(
+  normalizedMessage: string,
+  normalizedDetails: string,
+  statusCode?: number,
+  responseData?: unknown
+): boolean {
   const hasCreateRuleMarker =
     normalizedMessage.includes('create rule failure') ||
     normalizedDetails.includes('create rule failure');
@@ -68,10 +73,32 @@ function detectCreateRuleFailure(normalizedMessage: string, normalizedDetails: s
     normalizedMessage.includes('only superusers can perform this action') ||
     normalizedDetails.includes('only superusers can perform this action');
 
+  // PB v0.23 skickar bara "create rule failure: ..."-frasen till sin egen
+  // serverlogg — API-svaret till klienten har bara "Failed to create record."
+  // med tom data ({}). För att fallback-flödet ska kunna trigga måste vi
+  // upptäcka mönstret: status 400/403 + tom data + generic "failed to"-meddelande.
+  const isGenericCreateFailure =
+    (statusCode === 400 || statusCode === 403) &&
+    normalizedMessage.includes('failed to') &&
+    !hasFieldValidationErrors(responseData);
+
   return (
     ((statusCode === 400 || statusCode === 403) && hasCreateRuleMarker) ||
-    hasSuperuserOnlyMarker
+    hasSuperuserOnlyMarker ||
+    isGenericCreateFailure
   );
+}
+
+function hasFieldValidationErrors(responseData: unknown): boolean {
+  // PB returnerar field-validation errors i response.data som
+  // { fieldName: { code: "...", message: "..." } }. Rule failures
+  // returnerar tom data ({}). Vi kollar att data är ett objekt med nycklar.
+  if (typeof responseData !== 'object' || responseData === null) return false;
+  const obj = responseData as Record<string, unknown>;
+  if (!('data' in obj)) return false;
+  const data = obj.data;
+  if (typeof data !== 'object' || data === null) return false;
+  return Object.keys(data as Record<string, unknown>).length > 0;
 }
 
 function detectMissingSchemaError(
@@ -315,7 +342,7 @@ export async function createWorkshopAreaAction(
       return { error: 'Det finns redan ett område med samma namn.' };
     }
 
-    if (detectCreateRuleFailure(normalizedMessage, normalizedDetails, pbError.status)) {
+    if (detectCreateRuleFailure(normalizedMessage, normalizedDetails, pbError.status, pbError.response)) {
       const superuserPbResult = await getSuperuserPb();
       if (superuserPbResult.ok) {
         try {
