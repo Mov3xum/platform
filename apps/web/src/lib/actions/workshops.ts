@@ -274,9 +274,10 @@ export async function createWorkshopAction(
     }
   }
 
-  const payload = {
+  // PB v0.23 dislikes explicit null på optional relation fields.
+  // Inkludera bara area i payload om värdet är icke-tomt.
+  const payload: Record<string, unknown> = {
     tenant: user.tenant,
-    area: area || null,
     key,
     title,
     goal,
@@ -291,14 +292,15 @@ export async function createWorkshopAction(
     active,
     created_by: user.id
   };
+  if (area) payload.area = area;
 
-  try {
-    const record = await pb.collection(PB_COLLECTIONS.workshops).create(payload);
-    revalidatePath('/education');
-    return { workshopId: String(record.id) };
-  } catch (err) {
+  const logCreateFailure = (label: string, err: unknown) => {
     const pbError = toPbErrorLike(err);
-    console.error('[workshops] workshop create failed', {
+    console.error(`[workshops] ${label}`, {
+      pbUrl: PB_URL,
+      tenantId: user.tenant,
+      userId: user.id,
+      roles: user.roles,
       statusCode: pbError.status,
       message: err instanceof Error ? err.message : String(err),
       response: pbError.response ?? null,
@@ -315,6 +317,42 @@ export async function createWorkshopAction(
         created_by: payload.created_by
       }
     });
+  };
+
+  try {
+    const record = await pb.collection(PB_COLLECTIONS.workshops).create(payload);
+    revalidatePath('/education');
+    return { workshopId: String(record.id) };
+  } catch (err) {
+    const pbError = toPbErrorLike(err);
+    const message = String(err instanceof Error ? err.message : '');
+    const details = JSON.stringify(pbError.response ?? {});
+    const normalizedMessage = message.toLowerCase();
+    const normalizedDetails = details.toLowerCase();
+    logCreateFailure('workshop create failed', err);
+
+    // Fallback till superuser om PB returnerar generic create-rule failure
+    // (PB v0.23-bugg: rule-eval failar för app-user men funkar för superuser).
+    if (detectCreateRuleFailure(normalizedMessage, normalizedDetails, pbError.status, pbError.response)) {
+      const suResult = await getSuperuserPb();
+      if (suResult.ok) {
+        try {
+          const record = await suResult.pb.collection(PB_COLLECTIONS.workshops).create(payload);
+          revalidatePath('/education');
+          return { workshopId: String(record.id) };
+        } catch (fallbackErr) {
+          logCreateFailure('workshop create fallback (superuser) failed', fallbackErr);
+          return { error: toCreateWorkshopError(fallbackErr) };
+        }
+      }
+      if (suResult.reason === 'missing_credentials') {
+        return {
+          error:
+            'Kunde inte skapa workshop. Webbtjänsten saknar superuser-env (POCKETBASE_SUPERUSER_EMAIL/PASSWORD eller PB_SU_EMAIL/PB_SU_PASSWORD).'
+        };
+      }
+    }
+
     return { error: toCreateWorkshopError(err) };
   }
 }
