@@ -89,7 +89,7 @@ migrate(
           name: 'tags',
           type: 'select',
           required: false,
-          maxSelect: 20,
+          maxSelect: 12,
           values: [
             'sustainable',
             'tech',
