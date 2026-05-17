@@ -175,14 +175,76 @@ function verifyRlsAndRbac(collections) {
   const writeCollections = [
     'startups', 'partners', 'startup_team_members', 'partner_engagements',
     'activities', 'notes', 'agreements', 'milestones', 'tools', 'tool_runs',
-    'workshops', 'workshop_assignments', 'workshop_runs'
+    'workshops', 'workshop_areas', 'workshop_assignments', 'workshop_runs'
   ];
+
+  // Dump alla aktuella createRules för diagnostik
+  console.log('\n=== AKTUELLA createRules på live-PB ===');
+  for (const name of writeCollections) {
+    const col = collections.get(name);
+    if (!col) {
+      console.log(`  ${name}: <COLLECTION SAKNAS>`);
+      continue;
+    }
+    console.log(`  ${name}: ${JSON.stringify(col.createRule)}`);
+  }
+  console.log('=======================================\n');
+
   for (const name of writeCollections) {
     const col = collections.get(name);
     if (col) assertCreateRuleDoesNotJoinRecord(col);
   }
 
   ok('RLS/RBAC baseline checks passed (createRules är säkra)');
+}
+
+async function verifyAppUserCanCreate(pb, appUserEmail, appUserPassword) {
+  // End-to-end: kan hampus faktiskt skapa ett workshop_areas-record?
+  // Detta är det enda riktiga testet för att rule-failure är borta.
+  if (!appUserPassword) {
+    log('APP_USER_PASSWORD saknas; hoppar över end-to-end create-test');
+    return;
+  }
+  const userPb = new (await import('pocketbase')).default(PB_URL);
+  userPb.autoCancellation(false);
+  try {
+    await userPb.collection('users').authWithPassword(appUserEmail, appUserPassword, { expand: 'tenant' });
+  } catch (err) {
+    fail(`Kunde inte autentisera ${appUserEmail} för end-to-end test: ${err.message}`);
+  }
+
+  const authUser = userPb.authStore.model;
+  console.log('\n=== Auth user state (för rule-debugging) ===');
+  console.log(`  id: ${authUser.id}`);
+  console.log(`  email: ${authUser.email}`);
+  console.log(`  roles: ${JSON.stringify(authUser.roles)}`);
+  console.log(`  tenant: ${JSON.stringify(authUser.tenant)}`);
+  console.log('============================================\n');
+
+  const probeName = `__verify_baseline_${Date.now()}`;
+  try {
+    const created = await userPb.collection('workshop_areas').create({
+      tenant: authUser.tenant,
+      name: probeName
+    });
+    ok(`End-to-end create-test lyckades (skapade workshop_areas/${created.id})`);
+    // Städa upp
+    try {
+      await userPb.collection('workshop_areas').delete(created.id);
+    } catch {
+      // ignored
+    }
+  } catch (err) {
+    const status = err?.status ?? 'unknown';
+    const responseJson = JSON.stringify(err?.response ?? {});
+    fail(
+      `End-to-end create-test FAILAR fortfarande som ${appUserEmail}:\n` +
+      `  status: ${status}\n` +
+      `  response: ${responseJson}\n` +
+      `  message: ${err?.message}\n` +
+      `Detta är samma fel som drabbar UI:t. Se createRule-dumpen ovan.`
+    );
+  }
 }
 
 async function verifyAppUser() {
@@ -242,6 +304,7 @@ async function main() {
   const collections = await verifyCollectionsExist();
   verifyRlsAndRbac(collections);
   await verifyAppUser();
+  await verifyAppUserCanCreate(pb, APP_USER_EMAIL, APP_USER_PASSWORD);
 
   ok('PocketBase baseline verification completed');
 }
