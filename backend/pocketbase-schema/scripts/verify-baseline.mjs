@@ -81,6 +81,20 @@ async function verifyCollectionsExist() {
 }
 
 function verifyRlsAndRbac(collections) {
+  const tenants = collections.get('tenants');
+  assertRuleContains(tenants, 'updateRule', '@request.auth.roles ?= "admin"');
+  assertRuleContains(tenants, 'updateRule', '@request.auth.roles ?= "incubator_lead"');
+
+  const logoLight = getField(tenants, 'logo_light');
+  if (logoLight.type !== 'file') {
+    fail('tenants.logo_light must be a file field');
+  }
+
+  const logoDark = getField(tenants, 'logo_dark');
+  if (logoDark.type !== 'file') {
+    fail('tenants.logo_dark must be a file field');
+  }
+
   const users = collections.get('users');
   assertRuleContains(users, 'listRule', '@request.auth.tenant = tenant');
   assertRuleContains(users, 'viewRule', '@request.auth.tenant = tenant');

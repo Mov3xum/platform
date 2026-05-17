@@ -5,10 +5,9 @@
  * Hampus app-user. Use this when migrations can't run via PB's startup
  * (e.g. PB is deployed from a raw image without the migrations Dockerfile).
  *
- * Covers migrations 1–21 (tenants, users, startups, partners,
- * startup_team_members, partner_engagements, activities, notes, agreements,
- * milestones, tools, tool_runs, workshops, workshop_assignments,
- * workshop_runs and the activities extensions for tools + workshops).
+ * Covers core schema bootstrap for tenants, users, startups, partners,
+ * activities/tools/workshops and syncs critical tenant fields/rules used by
+ * the web settings pages (e.g. disabled modules and logos).
  *
  * Idempotent: skips collections/records that already exist.
  *
@@ -112,6 +111,21 @@ async function patchUsersCollection(addFields, ruleUpdates = {}) {
   ok(`users uppdaterad (+${newFields.length} fält${Object.keys(ruleUpdates).length ? ', regler' : ''})`);
 }
 
+async function patchTenantsCollection(addFields, ruleUpdates = {}) {
+  const tenants = await pb.collections.getOne('tenants');
+  const existingNames = new Set((tenants.fields || []).map((f) => f.name));
+  const newFields = addFields.filter((f) => !existingNames.has(f.name));
+  if (newFields.length === 0 && Object.keys(ruleUpdates).length === 0) {
+    warn('tenants-collectionen redan utökad — hoppar över');
+    return;
+  }
+  await pb.collections.update('tenants', {
+    fields: normalizeSelectFields([...tenants.fields, ...newFields], 'tenants'),
+    ...ruleUpdates
+  });
+  ok(`tenants uppdaterad (+${newFields.length} fält${Object.keys(ruleUpdates).length ? ', regler' : ''})`);
+}
+
 async function patchActivitiesCollection(addFields) {
   const activities = await pb.collections.getOne('activities');
   const existingNames = new Set((activities.fields || []).map((f) => f.name));
@@ -211,6 +225,8 @@ async function ensureAppUser(tenantId) {
 const ANY_AUTH = '@request.auth.id != ""';
 const TENANT_DIRECT = '@request.auth.tenant = tenant';
 const TENANT_VIA_STARTUP = '@request.auth.tenant = startup.tenant';
+const TENANTS_UPDATE_RULE =
+  '@request.auth.id != "" && (@request.auth.roles ?= "admin" || (@request.auth.roles ?= "incubator_lead" && @request.auth.tenant = id))';
 const STAFF_ROLES =
   '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach")';
 const STAFF_OR_LEAD =
@@ -236,15 +252,61 @@ await ensureCollection({
   fields: [
     { name: 'name', type: 'text', required: true, min: 2, max: 200 },
     { name: 'slug', type: 'text', required: true, min: 2, max: 64, pattern: '^[a-z0-9-]+$' },
-    { name: 'type', type: 'select', required: true, maxSelect: 1, values: ['incubator', 'partner_org'] }
+    { name: 'type', type: 'select', required: true, maxSelect: 1, values: ['incubator', 'partner_org'] },
+    { name: 'disabled_modules', type: 'json', required: false, maxSize: 4000 },
+    {
+      name: 'logo_light',
+      type: 'file',
+      required: false,
+      maxSelect: 1,
+      maxSize: 2097152,
+      mimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'],
+      thumbs: []
+    },
+    {
+      name: 'logo_dark',
+      type: 'file',
+      required: false,
+      maxSelect: 1,
+      maxSize: 2097152,
+      mimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'],
+      thumbs: []
+    }
   ],
   indexes: ['CREATE UNIQUE INDEX idx_tenants_slug ON tenants (slug)'],
   listRule: ANY_AUTH,
   viewRule: ANY_AUTH,
   createRule: null,
-  updateRule: null,
+  updateRule: TENANTS_UPDATE_RULE,
   deleteRule: null
 });
+
+await patchTenantsCollection(
+  [
+    { name: 'disabled_modules', type: 'json', required: false, maxSize: 4000 },
+    {
+      name: 'logo_light',
+      type: 'file',
+      required: false,
+      maxSelect: 1,
+      maxSize: 2097152,
+      mimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'],
+      thumbs: []
+    },
+    {
+      name: 'logo_dark',
+      type: 'file',
+      required: false,
+      maxSelect: 1,
+      maxSize: 2097152,
+      mimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'],
+      thumbs: []
+    }
+  ],
+  {
+    updateRule: TENANTS_UPDATE_RULE
+  }
+);
 
 // 2. users — add tenant, roles, display_name -------------------------------
 await patchUsersCollection(

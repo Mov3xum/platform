@@ -35,7 +35,7 @@ services:
     environment:
       NEXT_PUBLIC_POCKETBASE_URL: http://pocketbase:8080
       NODE_ENV: production
-       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
     depends_on:
       pocketbase:
         condition: service_healthy

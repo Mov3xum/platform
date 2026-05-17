@@ -28,9 +28,17 @@ function toPbErrorLike(err: unknown): PbErrorLike {
 }
 
 async function getSuperuserPb(): Promise<PocketBase | null> {
-  const email = process.env.POCKETBASE_SUPERUSER_EMAIL;
-  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD;
-  if (!email || !password) return null;
+  const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
+  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
+  if (!email || !password) {
+    console.error('[workshops] superuser credentials missing', {
+      hasPocketbaseSuperuserEmail: Boolean(process.env.POCKETBASE_SUPERUSER_EMAIL),
+      hasPocketbaseSuperuserPassword: Boolean(process.env.POCKETBASE_SUPERUSER_PASSWORD),
+      hasPbSuEmail: Boolean(process.env.PB_SU_EMAIL),
+      hasPbSuPassword: Boolean(process.env.PB_SU_PASSWORD)
+    });
+    return null;
+  }
 
   const pb = new PocketBase(PB_URL);
   pb.autoCancellation(false);
@@ -39,15 +47,25 @@ async function getSuperuserPb(): Promise<PocketBase | null> {
     await pb.collection('_superusers').authWithPassword(email, password);
     return pb;
   } catch {
-    console.error('[workshops] superuser auth failed');
+    console.error('[workshops] superuser auth failed', {
+      email,
+      pbUrl: PB_URL
+    });
     return null;
   }
 }
 
 function detectCreateRuleFailure(normalizedMessage: string, normalizedDetails: string, statusCode?: number): boolean {
+  const hasCreateRuleMarker =
+    normalizedMessage.includes('create rule failure') ||
+    normalizedDetails.includes('create rule failure');
+  const hasSuperuserOnlyMarker =
+    normalizedMessage.includes('only superusers can perform this action') ||
+    normalizedDetails.includes('only superusers can perform this action');
+
   return (
-    statusCode === 400 &&
-    (normalizedMessage.includes('create rule failure') || normalizedDetails.includes('create rule failure'))
+    ((statusCode === 400 || statusCode === 403) && hasCreateRuleMarker) ||
+    hasSuperuserOnlyMarker
   );
 }
 
@@ -304,7 +322,10 @@ export async function createWorkshopAreaAction(
                 ? (fallbackErr as { response?: unknown }).response
                 : null
           });
+          return { error: 'Kunde inte skapa område. Kontrollera PocketBase superuser-konfigurationen.' };
         }
+      } else {
+        return { error: 'Kunde inte skapa område. Kontrollera PocketBase superuser-konfigurationen.' };
       }
     }
     if (detectMissingSchemaError(normalizedMessage, normalizedDetails, pbError.status)) {

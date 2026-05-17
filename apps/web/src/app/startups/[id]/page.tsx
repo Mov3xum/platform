@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { getOneForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
-import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
+import { canAccessModule, hasRole } from '@/lib/rbac';
 import {
   PhaseBadge,
   StatusBadge,
@@ -145,15 +145,8 @@ interface WorkshopAssignmentRecord {
 export default async function StartupDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'startups', user.disabledModules)) notFound();
+  if (!canAccessModule(user.roles, 'startups')) notFound();
   const canEdit = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
-  const isScopedViewer =
-    hasRole(user.roles, ['startup_member', 'partner']) &&
-    !hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
-
-  if (isScopedViewer && !user.linkedStartups.includes(id)) {
-    notFound();
-  }
 
   let startup: StartupRecord;
   try {
@@ -341,8 +334,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ) : null}
 
           <div className="mt-5 rounded-2xl border border-default bg-canvas-subtle/40 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-foreground-subtle">Agentkoppling</p>
-            <p className="mt-1 text-sm text-foreground-muted">Kör startup-specifika AI-agenter med förvalt bolag för snabbare analys och dokumentation.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-foreground-subtle">Verktygskoppling</p>
+            <p className="mt-1 text-sm text-foreground-muted">Kör startup-specifika verktyg med förvalt bolag för snabbare analys och dokumentation.</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Link
                 href={`/toolbox?startup=${id}&category=ai_per_startup`}
@@ -367,15 +360,15 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
         </Section>
 
         <Section id="documents" title="Dokument">
-            <p className="text-sm text-foreground-muted">
-            Samlad yta för avtal, agentutdata och dokumentation kopplad till bolaget.
-            </p>
+          <p className="text-sm text-foreground-muted">
+            Samlad yta för avtal, verktygsutdata och dokumentation kopplad till bolaget.
+          </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <a href="#agreements" className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
               Visa avtal
             </a>
             <a href="#tools" className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
-              Visa agentkörningar
+              Visa verktygskörningar
             </a>
           </div>
         </Section>
@@ -517,15 +510,15 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
         </Section>
 
         <Section id="ipr" title="IPR">
-            <p className="text-sm text-foreground-muted">
-            IPR-spårning aktiveras via agentmallar och checklistor tills dedikerad datamodell är på plats.
-            </p>
+          <p className="text-sm text-foreground-muted">
+            IPR-spårning aktiveras via verktygsmallar och checklistor tills dedikerad datamodell är på plats.
+          </p>
           <div className="mt-3">
             <Link
               href={`/toolbox?startup=${id}&category=template`}
               className="inline-flex rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle"
             >
-              Öppna relevanta agenter
+              Öppna relevanta verktyg
             </Link>
           </div>
         </Section>
@@ -557,15 +550,15 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
         </Section>
 
         <Section id="goals" title="Globala målen">
-            <p className="text-sm text-foreground-muted">
-            Målspårning mot globala målen kan knytas via mallar/checklistor i AI-agentflödet.
-            </p>
+          <p className="text-sm text-foreground-muted">
+            Målspårning mot globala målen kan knytas via mallar/checklistor i verktygslådan.
+          </p>
           <div className="mt-3">
             <Link
               href={`/toolbox?startup=${id}&category=checklist`}
               className="inline-flex rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle"
             >
-              Öppna checklista-agenter
+              Öppna checklista-verktyg
             </Link>
           </div>
         </Section>
@@ -581,26 +574,26 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               <p className="mt-1 text-lg font-semibold text-foreground">{milestones.totalItems}</p>
             </div>
             <div className="rounded-2xl border border-default bg-surface p-4">
-               <p className="text-xs text-foreground-subtle">Agentkörningar</p>
+              <p className="text-xs text-foreground-subtle">Verktygskörningar</p>
               <p className="mt-1 text-lg font-semibold text-foreground">{toolActivities.totalItems}</p>
             </div>
           </div>
         </Section>
 
-        <Section id="tools" title="AI-agenter">
+        <Section id="tools" title="Verktyg">
           <div className="mb-4 flex items-center justify-between">
-             <p className="text-sm text-foreground-muted">
-               Agentkörningar kopplade till detta bolag.
-             </p>
+            <p className="text-sm text-foreground-muted">
+              Verktygskörningar kopplade till detta bolag.
+            </p>
             <Link
               href={`/toolbox?startup=${id}`}
               className="inline-flex items-center rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
             >
-               + Kör agent
+              + Kör verktyg
             </Link>
           </div>
           {toolActivities.items.length === 0 ? (
-            <Empty>Inga agentkörningar än.</Empty>
+            <Empty>Inga verktygskörningar än.</Empty>
           ) : (
             <ul className="space-y-3">
               {toolActivities.items.map((a) => (

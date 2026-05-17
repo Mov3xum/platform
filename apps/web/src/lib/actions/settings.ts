@@ -29,10 +29,24 @@ const PB_URL =
 
 const ALLOWED_LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
 
+function buildTenantLogoUploadData(fieldName: 'logo_light' | 'logo_dark', logoFile: File): FormData {
+  const uploadData = new FormData();
+  uploadData.append(fieldName, logoFile);
+  return uploadData;
+}
+
 async function getSuperuserPb(): Promise<PocketBase | null> {
-  const email = process.env.POCKETBASE_SUPERUSER_EMAIL;
-  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD;
-  if (!email || !password) return null;
+  const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
+  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
+  if (!email || !password) {
+    console.error('[settings] superuser credentials missing', {
+      hasPocketbaseSuperuserEmail: Boolean(process.env.POCKETBASE_SUPERUSER_EMAIL),
+      hasPocketbaseSuperuserPassword: Boolean(process.env.POCKETBASE_SUPERUSER_PASSWORD),
+      hasPbSuEmail: Boolean(process.env.PB_SU_EMAIL),
+      hasPbSuPassword: Boolean(process.env.PB_SU_PASSWORD)
+    });
+    return null;
+  }
 
   const pb = new PocketBase(PB_URL);
   pb.autoCancellation(false);
@@ -41,7 +55,10 @@ async function getSuperuserPb(): Promise<PocketBase | null> {
     await pb.collection('_superusers').authWithPassword(email, password);
     return pb;
   } catch (err) {
-    console.error('[settings] superuser auth failed');
+    console.error('[settings] superuser auth failed', {
+      email,
+      pbUrl: PB_URL
+    });
     return null;
   }
 }
@@ -189,14 +206,30 @@ export async function uploadTenantLogoAction(
 
   const pb = await getServerPb();
   const fieldName = mode === 'light' ? 'logo_light' : 'logo_dark';
-  const uploadData = new FormData();
-  uploadData.append(fieldName, logoFile);
+  const uploadData = buildTenantLogoUploadData(fieldName, logoFile);
 
   try {
     await pb.collection('tenants').update(user.tenant, uploadData);
   } catch (err) {
-    console.error('[settings] uploadTenantLogo failed', { tenantId: user.tenant, mode, err });
-    return { error: 'Kunde inte spara logotypen. Försök igen.' };
+    const superuserPb = await getSuperuserPb();
+    if (!superuserPb) {
+      console.error('[settings] uploadTenantLogo failed', { tenantId: user.tenant, mode, err });
+      return { error: 'Kunde inte spara logotypen. Försök igen.' };
+    }
+
+    try {
+      await superuserPb
+        .collection('tenants')
+        .update(user.tenant, buildTenantLogoUploadData(fieldName, logoFile));
+    } catch (fallbackErr) {
+      console.error('[settings] uploadTenantLogo failed (fallback)', {
+        tenantId: user.tenant,
+        mode,
+        err,
+        fallbackErr
+      });
+      return { error: 'Kunde inte spara logotypen. Försök igen.' };
+    }
   }
 
   revalidatePath('/', 'layout');
@@ -229,8 +262,23 @@ export async function deleteTenantLogoAction(
   try {
     await pb.collection('tenants').update(user.tenant, { [fieldName]: null });
   } catch (err) {
-    console.error('[settings] deleteTenantLogo failed', { tenantId: user.tenant, mode, err });
-    return { error: 'Kunde inte ta bort logotypen. Försök igen.' };
+    const superuserPb = await getSuperuserPb();
+    if (!superuserPb) {
+      console.error('[settings] deleteTenantLogo failed', { tenantId: user.tenant, mode, err });
+      return { error: 'Kunde inte ta bort logotypen. Försök igen.' };
+    }
+
+    try {
+      await superuserPb.collection('tenants').update(user.tenant, { [fieldName]: null });
+    } catch (fallbackErr) {
+      console.error('[settings] deleteTenantLogo failed (fallback)', {
+        tenantId: user.tenant,
+        mode,
+        err,
+        fallbackErr
+      });
+      return { error: 'Kunde inte ta bort logotypen. Försök igen.' };
+    }
   }
 
   revalidatePath('/', 'layout');
