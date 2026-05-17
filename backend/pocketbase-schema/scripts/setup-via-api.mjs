@@ -126,20 +126,6 @@ async function patchActivitiesCollection(addFields) {
   ok(`activities uppdaterad (+${newFields.length} fält)`);
 }
 
-async function patchCollectionFields(collectionName, addFields) {
-  const collection = await pb.collections.getOne(collectionName);
-  const existingNames = new Set((collection.fields || []).map((f) => f.name));
-  const newFields = addFields.filter((f) => !existingNames.has(f.name));
-  if (newFields.length === 0) {
-    warn(`${collectionName}-collectionen innehåller redan fälten — hoppar över`);
-    return;
-  }
-  await pb.collections.update(collectionName, {
-    fields: normalizeSelectFields([...collection.fields, ...newFields], collectionName)
-  });
-  ok(`${collectionName} uppdaterad (+${newFields.length} fält)`);
-}
-
 async function patchActivitiesKindValues(addValues) {
   const activities = await pb.collections.getOne('activities');
   const kindField = (activities.fields || []).find((f) => f.name === 'kind');
@@ -250,15 +236,13 @@ await ensureCollection({
   fields: [
     { name: 'name', type: 'text', required: true, min: 2, max: 200 },
     { name: 'slug', type: 'text', required: true, min: 2, max: 64, pattern: '^[a-z0-9-]+$' },
-    { name: 'type', type: 'select', required: true, maxSelect: 1, values: ['incubator', 'partner_org'] },
-    { name: 'logo_light', type: 'file', required: false, maxSelect: 1, maxSize: 2097152, mimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'] },
-    { name: 'logo_dark', type: 'file', required: false, maxSelect: 1, maxSize: 2097152, mimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'] }
+    { name: 'type', type: 'select', required: true, maxSelect: 1, values: ['incubator', 'partner_org'] }
   ],
   indexes: ['CREATE UNIQUE INDEX idx_tenants_slug ON tenants (slug)'],
   listRule: ANY_AUTH,
   viewRule: ANY_AUTH,
   createRule: null,
-  updateRule: `${ANY_AUTH} && (@request.auth.roles ?= "admin" || (@request.auth.roles ?= "incubator_lead" && @request.auth.tenant = id))`,
+  updateRule: null,
   deleteRule: null
 });
 
@@ -297,7 +281,7 @@ await ensureCollection({
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
     { name: 'name', type: 'text', required: true, min: 1, max: 200 },
     { name: 'description', type: 'editor', required: false },
-    { name: 'phase', type: 'select', required: true, maxSelect: 1, values: ['paus', 'inflode', 'lead', 'boost_chamber', 'incubation', 'prescale', 'acceleration', 'alumni'] },
+    { name: 'phase', type: 'select', required: true, maxSelect: 1, values: ['idea', 'pre_revenue', 'early_revenue', 'growth', 'scale', 'exit'] },
     { name: 'irl_level', type: 'number', required: false, min: 1, max: 9 },
     { name: 'next_step', type: 'text', required: false, max: 500 },
     { name: 'owner', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
@@ -322,9 +306,6 @@ await patchUsersCollection([
   {
     name: 'linked_startups', type: 'relation', required: false,
     collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 50
-  },
-  {
-    name: 'disabled_modules', type: 'json', required: false, maxSize: 2000
   }
 ]);
 
@@ -566,31 +547,13 @@ await patchActivitiesCollection([
   { name: 'tool_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
 ]);
 
-// 15. workshop_areas --------------------------------------------------------
-await ensureCollection({
-  id: 'workshop_areas_collection',
-  name: 'workshop_areas',
-  type: 'base',
-  fields: [
-    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
-    { name: 'name', type: 'text', required: true, min: 1, max: 120 }
-  ],
-  indexes: ['CREATE UNIQUE INDEX idx_workshop_areas_tenant_name ON workshop_areas (tenant, name)'],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && @request.auth.tenant != "" && ${STAFF_INCL_MENTOR}`,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
-});
-
-// 16. workshops -------------------------------------------------------------
+// 15. workshops -------------------------------------------------------------
 await ensureCollection({
   id: 'workshops_collection',
   name: 'workshops',
   type: 'base',
   fields: [
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
-    { name: 'area', type: 'relation', required: false, collectionId: 'workshop_areas_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'key', type: 'text', required: true, min: 1, max: 100 },
     { name: 'title', type: 'text', required: true, min: 1, max: 200 },
     { name: 'goal', type: 'editor', required: false },
@@ -604,7 +567,9 @@ await ensureCollection({
     { name: 'modules', type: 'json', required: false },
     { name: 'source_tool', type: 'relation', required: false, collectionId: 'tools_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'active', type: 'bool', required: false },
-    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    // area-fältet (relation till workshop_areas),
+    { name: 'area', type: 'relation', required: false, collectionId: 'workshop_areas_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],
   indexes: [
     'CREATE UNIQUE INDEX idx_workshops_tenant_key ON workshops (tenant, key)',
@@ -619,11 +584,37 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
 });
 
-await patchCollectionFields('workshops', [
-  { name: 'area', type: 'relation', required: false, collectionId: 'workshop_areas_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
-]);
+// 21. workshop_areas --------------------------------------------------------
+// Robust createRule: kräver auth, tenant, och staff-roll. Ger tydligt fel om något saknas.
+const WORKSHOP_AREAS_CREATE_RULE = `
+  @request.auth.id != "" &&
+  @request.auth.tenant != "" &&
+  (
+    @request.auth.roles ?= "admin" ||
+    @request.auth.roles ?= "incubator_lead" ||
+    @request.auth.roles ?= "coach" ||
+    @request.auth.roles ?= "mentor"
+  )
+`;
+await ensureCollection({
+  id: 'workshop_areas_collection',
+  name: 'workshop_areas',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'name', type: 'text', required: true, min: 1, max: 120 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_workshop_areas_tenant_name ON workshop_areas (tenant, name)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: WORKSHOP_AREAS_CREATE_RULE,
+  updateRule: WORKSHOP_AREAS_CREATE_RULE,
+  deleteRule: WORKSHOP_AREAS_CREATE_RULE
+});
 
-// 17. workshop_assignments --------------------------------------------------
+// 16. workshop_assignments --------------------------------------------------
 await ensureCollection({
   id: 'workshop_assignments_collection',
   name: 'workshop_assignments',
@@ -659,7 +650,7 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
 });
 
-// 18. workshop_runs ---------------------------------------------------------
+// 17. workshop_runs ---------------------------------------------------------
 await ensureCollection({
   id: 'workshop_runs_collection',
   name: 'workshop_runs',
@@ -694,7 +685,7 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
 });
 
-// 19. extend activities for workshops (workshop, workshop_assignment, workshop_run + kind values)
+// 18. extend activities for workshops (workshop, workshop_assignment, workshop_run + kind values)
 await patchActivitiesCollection([
   { name: 'workshop', type: 'relation', required: false, collectionId: 'workshops_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
   { name: 'workshop_assignment', type: 'relation', required: false, collectionId: 'workshop_assignments_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
@@ -702,14 +693,14 @@ await patchActivitiesCollection([
 ]);
 await patchActivitiesKindValues(['workshop_assignment', 'workshop_run']);
 
-// 20. seed Movexum tenant ---------------------------------------------------
+// 19. seed Movexum tenant ---------------------------------------------------
 const tenant = await ensureRecord('tenants', 'slug = "movexum"', {
   name: 'Movexum',
   slug: 'movexum',
   type: 'incubator'
 });
 
-// 21. seed Hampus app-user --------------------------------------------------
+// 20. seed Hampus app-user --------------------------------------------------
 await ensureAppUser(tenant.id);
 
 console.log('\n✓ Klart. Logga in på <din-web-url>/login med:');
