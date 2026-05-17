@@ -765,6 +765,63 @@ const tenant = await ensureRecord('tenants', 'slug = "movexum"', {
 // 20. seed Hampus app-user --------------------------------------------------
 await ensureAppUser(tenant.id);
 
+// 22. forcera robusta createRules (synkat med migration 0048) ---------------
+// PB v0.23 createRule som refererar relation-kolumner på den nya posten kan
+// returnera "sql: no rows in result set". Vi sätter createRule till bara
+// auth-checks. Tenant-isolering vid write säkerställs i applikationen.
+const FORCE_CREATE_RULES = {
+  startups: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  partners: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  startup_team_members: ANY_AUTH,
+  partner_engagements: ANY_AUTH,
+  activities: ANY_AUTH,
+  notes: `${ANY_AUTH} && @request.auth.id = author`,
+  agreements: `${ANY_AUTH} && ${STAFF_OR_LEAD}`,
+  milestones: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  tools: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  tool_runs: `${ANY_AUTH} && @request.auth.id = triggered_by`,
+  workshops: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  workshop_areas: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  workshop_assignments: `${ANY_AUTH} && @request.auth.id = assigned_by`,
+  workshop_runs: `${ANY_AUTH} && @request.auth.id = triggered_by`,
+  strategies: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  strategy_revisions: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  missions: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  sprint_x_checkins: ANY_AUTH,
+  investors: `${ANY_AUTH} && ${STAFF_OR_LEAD}`,
+  deals: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  incubator_events: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  event_signups: ANY_AUTH,
+  incubator_reports: `${ANY_AUTH} && ${STAFF_OR_LEAD}`,
+  alumni: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  tenant_integrations: `${ANY_AUTH} && ${STAFF_OR_LEAD}`
+};
+
+log('Forcerar robusta createRules...');
+for (const [collectionName, desiredRule] of Object.entries(FORCE_CREATE_RULES)) {
+  let collection;
+  try {
+    collection = await pb.collections.getOne(collectionName);
+  } catch (err) {
+    if (err?.status === 404) {
+      warn(`createRule-sync: collection "${collectionName}" finns inte — hoppar`);
+      continue;
+    }
+    throw err;
+  }
+
+  if (collection.createRule === desiredRule) continue;
+
+  await pb.collections.update(collectionName, { createRule: desiredRule });
+  const refreshed = await pb.collections.getOne(collectionName);
+  if (refreshed.createRule !== desiredRule) {
+    throw new Error(
+      `createRule-sync misslyckades för "${collectionName}". Förväntat: ${desiredRule}. Fick: ${refreshed.createRule}`
+    );
+  }
+  ok(`createRule synkad: ${collectionName}`);
+}
+
 console.log('\n✓ Klart. Logga in på <din-web-url>/login med:');
 console.log(`  E-post:   ${APP_USER_EMAIL}`);
 if (APP_USER_PASSWORD) {

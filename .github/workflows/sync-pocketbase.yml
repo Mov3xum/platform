@@ -1,16 +1,68 @@
 name: Sync PocketBase schema
 
+# Triggar när migrationer eller setup-scriptet ändras. Två steg:
+#  1. Trigga Coolify-redeploy så hela compose-stacken (PB + web) byggs om.
+#     Nya migrations i backend/pocketbase-schema/migrations/ blir
+#     inbakade i PB-imagen och körs vid PB:s uppstart.
+#  2. Kör setup-via-api.mjs som självläkande regel-sync — försäkrar att
+#     createRules är synkroniserade även om migrations inte körde
+#     (t.ex. om PB redan kände dem som körda).
+#
+# Lägg dessa secrets i repot:
+#   PB_URL, PB_SU_EMAIL, PB_SU_PASSWORD — för API-sync
+#   COOLIFY_BASE_URL, COOLIFY_TOKEN, COOLIFY_DEPLOY_WEBHOOK_STAGING
+#     ELLER COOLIFY_APP_UUID_STAGING — för stack-redeploy
+
 on:
   push:
     branches: [staging]
     paths:
       - 'backend/pocketbase-schema/**'
       - '.github/workflows/sync-pocketbase.yml'
-  workflow_dispatch: # Tillåter manuell körning från GitHub Actions-fliken
+  workflow_dispatch:
 
 jobs:
-  sync:
-    name: Sync schema to PocketBase
+  redeploy-stack:
+    name: Trigger Coolify stack redeploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Coolify deploy webhook
+        env:
+          COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID_STAGING || secrets.COOLIFY_PROJECT_ID_STAGING }}
+          COOLIFY_DEPLOY_WEBHOOK: ${{ secrets.COOLIFY_DEPLOY_WEBHOOK_STAGING }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${COOLIFY_DEPLOY_WEBHOOK:-}" ]; then
+            echo "Trigging Coolify deploy webhook (stack redeploy)..."
+            curl --fail-with-body -sS -X POST \
+              -H "Authorization: Bearer $COOLIFY_TOKEN" \
+              -H "Accept: application/json" \
+              "$COOLIFY_DEPLOY_WEBHOOK"
+            echo
+            echo "✓ Coolify deploy triggered. PB-containern byggs om med nya migrations."
+            exit 0
+          fi
+
+          if [ -z "${COOLIFY_APP_UUID:-}" ]; then
+            echo "::warning::Ingen COOLIFY_DEPLOY_WEBHOOK_STAGING eller COOLIFY_APP_UUID_STAGING — hoppar över stack-redeploy."
+            echo "Sätt en av dem som secret för att automatisera PB-migrations-deployment."
+            exit 0
+          fi
+
+          encoded_identifier=$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "$COOLIFY_APP_UUID")
+          curl --fail-with-body -sS -X POST \
+            -H "Authorization: Bearer $COOLIFY_TOKEN" \
+            -H "Accept: application/json" \
+            "$COOLIFY_BASE_URL/api/v1/deploy?uuid=$encoded_identifier&force=false"
+          echo
+          echo "✓ Coolify deploy triggered via API."
+
+  api-sync:
+    name: Self-healing rule sync via API
+    needs: redeploy-stack
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,9 +76,38 @@ jobs:
         run: yarn add pocketbase
         working-directory: backend/pocketbase-schema/scripts
 
-      - name: Kör setup-via-api.mjs mot befintlig PocketBase
+      - name: Wait for PocketBase to be healthy
+        env:
+          PB_URL: ${{ secrets.PB_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PB_URL:-}" ]; then
+            echo "::error::PB_URL secret saknas."
+            exit 1
+          fi
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS -k "$PB_URL/api/health" > /dev/null; then
+              echo "✓ PocketBase är frisk (försök $attempt)"
+              exit 0
+            fi
+            echo "PB inte redo än, försök $attempt/10, väntar 15s..."
+            sleep 15
+          done
+          echo "::error::PocketBase blev aldrig frisk efter 150s."
+          exit 1
+
+      - name: Kör setup-via-api.mjs mot PocketBase
         env:
           PB_URL: ${{ secrets.PB_URL }}
           PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL }}
           PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD }}
+          NODE_TLS_REJECT_UNAUTHORIZED: '0'
         run: node backend/pocketbase-schema/scripts/setup-via-api.mjs
+
+      - name: Verifiera PocketBase baseline
+        env:
+          PB_URL: ${{ secrets.PB_URL }}
+          PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL }}
+          PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD }}
+          NODE_TLS_REJECT_UNAUTHORIZED: '0'
+        run: node backend/pocketbase-schema/scripts/verify-baseline.mjs

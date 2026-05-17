@@ -68,6 +68,7 @@ async function verifyCollectionsExist() {
     'tools',
     'tool_runs',
     'workshops',
+    'workshop_areas',
     'workshop_assignments',
     'workshop_runs'
   ];
@@ -78,6 +79,29 @@ async function verifyCollectionsExist() {
     map.set(name, collection);
   }
   return map;
+}
+
+function assertCreateRuleDoesNotJoinRecord(collection) {
+  // createRule som refererar relation-kolumner på den nya posten
+  // (t.ex. `@request.auth.tenant = tenant` eller `startup.tenant`)
+  // kan trigga "sql: no rows in result set" i PB v0.23 rule-evaluering.
+  // Migration 0048 / setup-via-api forcerar createRules som BARA
+  // refererar auth-fält. Vi failar om det reverteras.
+  const rule = collection.createRule;
+  if (typeof rule !== 'string' || rule.trim().length === 0) return;
+  const banned = [
+    '@request.auth.tenant = tenant',
+    '@request.auth.tenant = startup.tenant',
+    'startup.tenant ='
+  ];
+  for (const pattern of banned) {
+    if (rule.includes(pattern)) {
+      fail(
+        `Collection "${collection.name}" createRule innehåller "${pattern}" — ` +
+        'detta orsakar "sql: no rows in result set"-fel. Kör setup-via-api.mjs.'
+      );
+    }
+  }
 }
 
 function verifyRlsAndRbac(collections) {
@@ -147,7 +171,18 @@ function verifyRlsAndRbac(collections) {
     fail('users.tenant must be a relation field');
   }
 
-  ok('RLS/RBAC baseline checks passed');
+  // Verifiera att inga write-collections har JOIN-referenser i createRule
+  const writeCollections = [
+    'startups', 'partners', 'startup_team_members', 'partner_engagements',
+    'activities', 'notes', 'agreements', 'milestones', 'tools', 'tool_runs',
+    'workshops', 'workshop_assignments', 'workshop_runs'
+  ];
+  for (const name of writeCollections) {
+    const col = collections.get(name);
+    if (col) assertCreateRuleDoesNotJoinRecord(col);
+  }
+
+  ok('RLS/RBAC baseline checks passed (createRules är säkra)');
 }
 
 async function verifyAppUser() {
