@@ -18,7 +18,9 @@ WORKDIR /app
 RUN apk add --no-cache libc6-compat
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY package.json yarn.lock ./
+COPY apps/web ./apps/web
+COPY packages/shared ./packages/shared
 
 RUN cd apps/web && yarn build
 
