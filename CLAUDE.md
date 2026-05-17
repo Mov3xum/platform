@@ -410,3 +410,195 @@ Alla toolbox-sidor ska visa:
 
 Alla AI-resultatvyer ska visa:
 > "Genererat av AI – verifiera innan delning"
+
+---
+
+## 10. Regelefterlevnad — bindande ramverk
+
+> **Allt vi bygger ska följa dessa fyra ramverk samtidigt.** GDPR och
+> EU AI Act är lagkrav. ISO/IEC 27001 och SOC 2 är affärskritiska för
+> försäljning mot offentlig sektor, större europeiska kunder och
+> amerikanska B2B-köpare. Designa kontrollerna en gång och mappa mot
+> alla fyra — det mesta överlappar.
+
+Innan en feature mergas ska den vara granskad mot checklistan i
+avsnitt 10.5. Om något i listan inte kan uppfyllas måste avvikelsen
+dokumenteras i PR-beskrivningen och godkännas av maintainer.
+
+### 10.1 EU AI Act (förordning 2024/1689)
+
+I kraft sedan 1 augusti 2024, stegvis tillämpning. Huvuddatum för
+majoriteten av reglerna: **2 augusti 2026**. Förbjudna praktiker gäller
+sedan februari 2025. Sanktioner upp till €35M eller 7 % av global
+omsättning.
+
+**Bindande krav på vår kod:**
+
+- **Riskklassificering** — varje AI-funktion (varje rad i `tools`-collection
+  och varje agent i `apps/web/src/lib/ai/`) ska ha dokumenterad riskklass
+  (förbjuden / högrisk / begränsad / minimal). Default antas vara
+  *begränsad risk* tills annat påvisats.
+- **Förbjudna praktiker får aldrig byggas:** social scoring, subliminal
+  manipulation, realtidsbiometri i offentliga rum, känslodetektering på
+  arbetsplats/utbildning, oriktad ansiktsdataskrapning.
+- **Transparens (artikel 50):** användare ska alltid informeras när de
+  interagerar med AI. Vi använder bannern i avsnitt 9.7. AI-genererat
+  innehåll ska märkas (`activities.kind = 'tool_run'` är en del av det).
+- **Teknisk dokumentation (artikel 11):** modellval, systemprompt,
+  träningsdata/källor, riskbedömning och utvärdering ska finnas
+  versionerat i repo för varje verktyg (i `tools.description` + ev.
+  `docs/ai-tools/<id>.md`).
+- **Datagovernance:** indata-/utdata-filter (whitelist-fält,
+  konfidentialitetsfilter i avsnitt 9.3) är obligatoriska.
+- **Mänsklig övervakning:** AI-resultat sparas i `tool_runs` med
+  människa-i-loopen — vi auto-publicerar aldrig AI-output utan
+  granskning.
+- **Robusthet och cybersäkerhet:** se ISO/SOC-avsnitt nedan
+  (rate-limiting, prompt-injection-skydd, loggning).
+- **Post-market monitoring:** `tool_runs` + aktivitetsfeed = telemetri.
+  Avvikande beteende (token-explosion, failure spikes) ska larmas.
+- **Högrisk-system kräver CE-märkning.** Vi bygger ingen Annex III-
+  funktion (biometri, kreditbedömning, anställningsbeslut, utbildnings-
+  bedömning som påverkar individens framtid) utan separat juridisk
+  granskning.
+
+### 10.2 GDPR (förordning 2016/679)
+
+Lagkrav sedan 2018. Sanktioner upp till €20M eller 4 % av global
+omsättning.
+
+**Bindande krav på vår kod:**
+
+- **Privacy by design / by default** är default. Nya fält som lagrar
+  personuppgifter kräver explicit motivering i PR-beskrivning.
+- **Sex principer:** laglighet, ändamålsbegränsning, uppgiftsminimering,
+  korrekthet, lagringsminimering, integritet/konfidentialitet — alla
+  scheman ska bedömas mot dem.
+- **Rättslig grund** ska vara dokumenterad för varje
+  personuppgiftsbehandling (`avtal` för bolagsmedlemmar,
+  `berättigat intresse` för inkubator-administration, `samtycke` för
+  marknadsföring).
+- **Registrerades rättigheter:** information, åtkomst, rättelse,
+  radering, dataportabilitet, invändning. Varje ny entitet med
+  personuppgifter måste ha export- och raderingsflöde (server actions
+  + admin-UI).
+- **Dataminimering i scheman:** lagra aldrig fler fält än vad
+  funktionen kräver. Personuppgifter som e-post exkluderas från
+  AI-prompts (se 9.3).
+- **Pseudonymisering / kryptering:** känsliga fält krypteras at-rest
+  via PocketBase + diskkryptering, in-transit via TLS.
+- **DPIA** krävs vid hög risk (omfattande profilering, känsliga
+  kategorier, storskalig övervakning). Trigger: nya AI-funktioner som
+  bedömer individer eller bolag.
+- **Tredjelandsöverföringar:** alla tjänster måste vara EU-baserade.
+  Inga US-clouds (Vercel, Supabase US, OpenAI, Anthropic-US-only,
+  AWS-US). Mistral (FR) + Coolify/UpCloud (EU) + PocketBase (self-host
+  EU). Schrems II + CLOUD Act är anledningen.
+- **Behandlingsregister + DPA** krävs för varje databehandlare
+  (Mistral, UpCloud m.fl.). Dokumenteras utanför repo (juridik) men
+  refereras här.
+
+### 10.3 ISO/IEC 27001 (ISMS) + 27002/27017/27018/27701
+
+Frivillig men affärskritisk. Krav på vår kod kommer från
+kontrollkatalogen i 27002 (2022, ~93 kontroller).
+
+**Bindande krav på vår kod:**
+
+- **Säker SDLC:** alla ändringar går via PR + review. Direkt-push till
+  `main` är förbjudet. Branch-namn ska följa
+  `claude/<feature>-<id>` eller `feat/<feature>`.
+- **Åtkomstkontroll (A.5.15–A.5.18):** RBAC via `lib/rbac.ts` är enda
+  vägen. Hårdkodade rolltester eller bypass är förbjudna. Minsta
+  behörighet är default — `observer` ärver inget skrivflöde.
+- **Kryptografi (A.8.24):** secrets aldrig i koden. `MISTRAL_API_KEY`,
+  PocketBase admin-credentials, JWT-secrets m.m. läses från env i
+  Coolify. `.env*`-filer är `.gitignore`ade.
+- **Logghantering (A.8.15–A.8.17):** `tool_runs` + `activities` +
+  PocketBase audit logs är vårt loggningsskikt. Logga aldrig
+  personuppgifter eller secrets i klartext. Tidsstämplar i UTC.
+- **Change management (A.8.32):** migrations i `backend/` är
+  versionerade och oföränderliga — aldrig redigera en applied migration,
+  skriv en ny.
+- **Sårbarhetshantering (A.8.8):** beroenden uppdateras minst
+  månadsvis. `yarn audit` / Dependabot-alerts hanteras inom 30 dagar
+  (high/critical inom 7 dagar).
+- **Säker konfiguration (A.8.9):** CSP, HSTS, secure cookies, SameSite,
+  httpOnly är default i `middleware.ts`. Inga `dangerouslySetInnerHTML`
+  med användarinmatning.
+- **Backup (A.8.13):** PocketBase-DB säkerhetskopieras dagligen i
+  Coolify. Restore-rutin ska vara testad kvartalsvis.
+- **Incident response (A.5.24–A.5.27):** loggas i `docs/incidents/`
+  med tidslinje, påverkan, root cause, mitigering.
+- **Leverantörskontroll (A.5.19–A.5.23):** varje extern tjänst
+  (Mistral, UpCloud, m.fl.) ska ha DPA + SLA + säkerhetsbedömning
+  innan integration.
+- **27017/27018 (moln):** containermiljö på UpCloud är dokumenterad i
+  `infra/`. Tenant-isolation verifieras i `buildStartupContext` (se 9.3).
+- **27701 (privacy):** överlappar GDPR-kontrollerna i 10.2.
+
+### 10.4 SOC 2 (Type II) — Trust Services Criteria
+
+Inte certifiering utan revisionsrapport. Vi siktar på **Typ II** över
+6–12 månader. Fem kriterier: **Security** (obligatorisk),
+**Availability**, **Processing Integrity**, **Confidentiality**,
+**Privacy**.
+
+**Bindande krav på vår kod (utöver ISO 27001):**
+
+- **Security:** samma kontroller som 10.3 — fokus på dokumenterad,
+  *effektiv över tid* tillämpning. Varje PR ska visa att kontrollerna
+  inte kringgås.
+- **Availability:** uptime-mål dokumenteras (SLA 99,5 %). Healthchecks
+  i Coolify. Degraderade lägen ska felera tydligt, inte tyst.
+- **Processing Integrity:** server actions ska validera input
+  (zod-scheman eller motsv.), avvisa korrupt data, och vara
+  idempotenta där det är möjligt. Inga "fire-and-forget"-mutationer.
+- **Confidentiality:** klassificera data. `confidential=true`-anteckningar
+  filtreras alltid bort från AI-flöden (se 9.3) och visas bara för
+  behöriga roller.
+- **Privacy:** överlappar GDPR (10.2). SOC 2 kräver dokumenterade
+  policies — finns i `docs/policies/`.
+- **Bevissamling:** alla kontroller måste lämna spår (commits, PR-
+  reviews, audit logs, runbooks). Skippa aldrig pre-commit hooks
+  (`--no-verify` är förbjudet utan explicit godkännande).
+
+### 10.5 PR-checklista — regelefterlevnad
+
+Lägg till motsvarande punkter i avsnitt 4 ovan vid PR-review. En PR är
+inte klar för merge förrän följande är gjort:
+
+1. ✅ **Personuppgifter:** nya fält som lagrar personuppgifter är
+   minimerade, har rättslig grund noterad i PR, och har export/radering.
+2. ✅ **AI-funktioner:** har riskklass i `tools.description`,
+   transparensbanner (9.7), och systemprompt som hanterar prompt
+   injection (9.3).
+3. ✅ **EU-only data:** inga nya beroenden mot icke-EU-tjänster utan
+   maintainer-godkännande.
+4. ✅ **Secrets:** inga nycklar, tokens eller credentials i diff. Sök
+   med `git diff --staged | grep -iE "key|secret|token|password"`.
+5. ✅ **RBAC:** nya endpoints/server actions kör `requireRole` /
+   `canRunTool` eller motsv. — aldrig "if user.role === 'admin'" inline.
+6. ✅ **Logging:** loggar innehåller inga personuppgifter eller secrets
+   i klartext.
+7. ✅ **Input-validering:** server actions validerar input (zod eller
+   motsv.) — ingen blind `formData.get(...)` direkt till DB.
+8. ✅ **Migrations:** ny migration är ett nytt filenummer — befintliga
+   migrations är inte redigerade.
+9. ✅ **Dokumentation:** om PR ändrar dataflöde, riskklass, eller
+   leverantör → uppdatera detta avsnitt i CLAUDE.md i samma PR.
+
+### 10.6 Mappningsmatris
+
+| Kontrollområde            | EU AI Act         | GDPR              | ISO 27001         | SOC 2             |
+| ------------------------- | ----------------- | ----------------- | ----------------- | ----------------- |
+| Riskbedömning             | Art. 9            | Art. 35 (DPIA)    | A.5.4, A.5.7      | CC3.x             |
+| Åtkomstkontroll           | Art. 14           | Art. 32           | A.5.15–A.5.18     | CC6.1–CC6.3       |
+| Datagovernance            | Art. 10           | Art. 5            | A.5.12, A.8.10    | CC3.2, P-kriterier|
+| Logging & monitoring      | Art. 12           | Art. 30, 33       | A.8.15–A.8.17     | CC7.2–CC7.3       |
+| Incident response         | Art. 73           | Art. 33–34        | A.5.24–A.5.27     | CC7.3–CC7.5       |
+| Leverantörskontroll       | Art. 28           | Art. 28 (DPA)     | A.5.19–A.5.23     | CC9.2             |
+| Transparens till användare| Art. 13, 50       | Art. 13–14        | A.5.34            | P1.x              |
+| Cybersäkerhet/robusthet   | Art. 15           | Art. 32           | A.8.x             | CC6.6–CC6.8       |
+| Mänsklig övervakning      | Art. 14           | Art. 22           | A.5.4             | CC1.x             |
+| Post-market monitoring    | Art. 72           | —                 | A.5.36, A.8.16    | CC7.4             |
