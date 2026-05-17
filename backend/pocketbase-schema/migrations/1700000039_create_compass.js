@@ -110,7 +110,7 @@ migrate(
       ],
       indexes: [
         'CREATE INDEX idx_compass_leads_tenant_status ON compass_leads (tenant, status)',
-        'CREATE INDEX idx_compass_leads_tenant_created ON compass_leads (tenant, created)',
+        'CREATE INDEX idx_compass_leads_tenant_name ON compass_leads (tenant, name)',
         'CREATE INDEX idx_compass_leads_tenant_source ON compass_leads (tenant, source_key)'
       ],
       listRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${STAFF_ROLES}`,
@@ -153,7 +153,7 @@ migrate(
         { name: 'status', type: 'select', required: false, maxSelect: 1, values: ['active', 'completed', 'abandoned'] }
       ],
       indexes: [
-        'CREATE INDEX idx_compass_conv_tenant_created ON compass_conversations (tenant, created)',
+        'CREATE INDEX idx_compass_conv_tenant_status ON compass_conversations (tenant, status)',
         'CREATE INDEX idx_compass_conv_lead ON compass_conversations (lead)',
         'CREATE INDEX idx_compass_conv_session ON compass_conversations (session_token)'
       ],
@@ -187,7 +187,7 @@ migrate(
         { name: 'model', type: 'text', required: false, max: 100 }
       ],
       indexes: [
-        'CREATE INDEX idx_compass_msg_conv ON compass_messages (conversation, created)'
+        'CREATE INDEX idx_compass_msg_conv ON compass_messages (conversation)'
       ],
       listRule: `${ANY_AUTH} && ${STAFF_ROLES}`,
       viewRule: `${ANY_AUTH} && ${STAFF_ROLES}`,
@@ -370,7 +370,7 @@ migrate(
         { name: 'ip_hash', type: 'text', required: false, max: 100 }
       ],
       indexes: [
-        'CREATE INDEX idx_compass_sec_tenant_created ON compass_security_events (tenant, created)',
+        'CREATE INDEX idx_compass_sec_tenant_kind ON compass_security_events (tenant, kind)',
         'CREATE INDEX idx_compass_sec_kind ON compass_security_events (kind)'
       ],
       listRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${STAFF_ROLES}`,
