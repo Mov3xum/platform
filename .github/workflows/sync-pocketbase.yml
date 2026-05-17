@@ -56,7 +56,7 @@ jobs:
           curl --fail-with-body -sS -X POST \
             -H "Authorization: Bearer $COOLIFY_TOKEN" \
             -H "Accept: application/json" \
-            "$COOLIFY_BASE_URL/api/v1/deploy?uuid=$encoded_identifier&force=false"
+            "$COOLIFY_BASE_URL/api/v1/deploy?uuid=$encoded_identifier&force=true"
           echo
           echo "✓ Coolify deploy triggered via API."
 
