@@ -9,11 +9,13 @@ migrate(
     const collection = app.findCollectionByNameOrId('workshops');
 
     if (!collection.fields.getByName('modules')) {
-      collection.fields.add({
-        name: 'modules',
-        type: 'json',
-        required: false
-      });
+      collection.fields.add(
+        new Field({
+          name: 'modules',
+          type: 'json',
+          required: false
+        })
+      );
     }
 
     app.save(collection);

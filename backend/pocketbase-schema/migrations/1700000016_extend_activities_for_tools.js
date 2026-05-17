@@ -7,35 +7,41 @@ migrate(
     const collection = app.findCollectionByNameOrId('activities');
 
     // Add kind field
-    collection.fields.add({
-      name: 'kind',
-      type: 'select',
-      required: false,
-      maxSelect: 1,
-      values: ['manual', 'tool_run']
-    });
+    collection.fields.add(
+      new Field({
+        name: 'kind',
+        type: 'select',
+        required: false,
+        maxSelect: 1,
+        values: ['manual', 'tool_run']
+      })
+    );
 
     // Add tool relation field
-    collection.fields.add({
-      name: 'tool',
-      type: 'relation',
-      required: false,
-      collectionId: app.findCollectionByNameOrId('tools').id,
-      cascadeDelete: false,
-      minSelect: 0,
-      maxSelect: 1
-    });
+    collection.fields.add(
+      new Field({
+        name: 'tool',
+        type: 'relation',
+        required: false,
+        collectionId: app.findCollectionByNameOrId('tools').id,
+        cascadeDelete: false,
+        minSelect: 0,
+        maxSelect: 1
+      })
+    );
 
     // Add tool_run relation field
-    collection.fields.add({
-      name: 'tool_run',
-      type: 'relation',
-      required: false,
-      collectionId: app.findCollectionByNameOrId('tool_runs').id,
-      cascadeDelete: false,
-      minSelect: 0,
-      maxSelect: 1
-    });
+    collection.fields.add(
+      new Field({
+        name: 'tool_run',
+        type: 'relation',
+        required: false,
+        collectionId: app.findCollectionByNameOrId('tool_runs').id,
+        cascadeDelete: false,
+        minSelect: 0,
+        maxSelect: 1
+      })
+    );
 
     app.save(collection);
 

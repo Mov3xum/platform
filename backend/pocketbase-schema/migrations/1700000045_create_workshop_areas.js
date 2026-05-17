@@ -51,15 +51,17 @@ migrate(
 
     const workshopsCollection = app.findCollectionByNameOrId('workshops');
     if (!workshopsCollection.fields.getByName('area')) {
-      workshopsCollection.fields.add({
-        name: 'area',
-        type: 'relation',
-        required: false,
-        collectionId: 'workshop_areas_collection',
-        cascadeDelete: false,
-        minSelect: 0,
-        maxSelect: 1
-      });
+      workshopsCollection.fields.add(
+        new Field({
+          name: 'area',
+          type: 'relation',
+          required: false,
+          collectionId: 'workshop_areas_collection',
+          cascadeDelete: false,
+          minSelect: 0,
+          maxSelect: 1
+        })
+      );
     }
     if (!workshopsCollection.indexes.includes(WORKSHOP_AREA_INDEX)) {
       workshopsCollection.indexes.push(WORKSHOP_AREA_INDEX);

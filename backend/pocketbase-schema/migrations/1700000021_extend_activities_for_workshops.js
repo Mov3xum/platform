@@ -15,39 +15,45 @@ migrate(
     }
 
     if (!collection.fields.getByName('workshop')) {
-      collection.fields.add({
-        name: 'workshop',
-        type: 'relation',
-        required: false,
-        collectionId: app.findCollectionByNameOrId('workshops').id,
-        cascadeDelete: false,
-        minSelect: 0,
-        maxSelect: 1
-      });
+      collection.fields.add(
+        new Field({
+          name: 'workshop',
+          type: 'relation',
+          required: false,
+          collectionId: app.findCollectionByNameOrId('workshops').id,
+          cascadeDelete: false,
+          minSelect: 0,
+          maxSelect: 1
+        })
+      );
     }
 
     if (!collection.fields.getByName('workshop_assignment')) {
-      collection.fields.add({
-        name: 'workshop_assignment',
-        type: 'relation',
-        required: false,
-        collectionId: app.findCollectionByNameOrId('workshop_assignments').id,
-        cascadeDelete: false,
-        minSelect: 0,
-        maxSelect: 1
-      });
+      collection.fields.add(
+        new Field({
+          name: 'workshop_assignment',
+          type: 'relation',
+          required: false,
+          collectionId: app.findCollectionByNameOrId('workshop_assignments').id,
+          cascadeDelete: false,
+          minSelect: 0,
+          maxSelect: 1
+        })
+      );
     }
 
     if (!collection.fields.getByName('workshop_run')) {
-      collection.fields.add({
-        name: 'workshop_run',
-        type: 'relation',
-        required: false,
-        collectionId: app.findCollectionByNameOrId('workshop_runs').id,
-        cascadeDelete: false,
-        minSelect: 0,
-        maxSelect: 1
-      });
+      collection.fields.add(
+        new Field({
+          name: 'workshop_run',
+          type: 'relation',
+          required: false,
+          collectionId: app.findCollectionByNameOrId('workshop_runs').id,
+          cascadeDelete: false,
+          minSelect: 0,
+          maxSelect: 1
+        })
+      );
     }
 
     app.save(collection);
