@@ -274,27 +274,47 @@ export async function createWorkshopAction(
     }
   }
 
+  const payload = {
+    tenant: user.tenant,
+    area: area || null,
+    key,
+    title,
+    goal,
+    instructions,
+    status,
+    version: version || '1.0.0',
+    audience_roles: audienceRoles,
+    ai_system_prompt: aiSystemPrompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT,
+    output_requirements: outputRequirements,
+    modules,
+    content_blocks: contentBlocks,
+    active,
+    created_by: user.id
+  };
+
   try {
-    const record = await pb.collection(PB_COLLECTIONS.workshops).create({
-      tenant: user.tenant,
-      area: area || null,
-      key,
-      title,
-      goal,
-      instructions,
-      status,
-      version: version || '1.0.0',
-      audience_roles: audienceRoles,
-      ai_system_prompt: aiSystemPrompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT,
-      output_requirements: outputRequirements,
-      modules,
-      content_blocks: contentBlocks,
-      active,
-      created_by: user.id
-    });
+    const record = await pb.collection(PB_COLLECTIONS.workshops).create(payload);
     revalidatePath('/education');
     return { workshopId: String(record.id) };
   } catch (err) {
+    const pbError = toPbErrorLike(err);
+    console.error('[workshops] workshop create failed', {
+      statusCode: pbError.status,
+      message: err instanceof Error ? err.message : String(err),
+      response: pbError.response ?? null,
+      payloadKeys: Object.keys(payload),
+      payloadPreview: {
+        tenant: payload.tenant,
+        area: payload.area,
+        key: payload.key,
+        status: payload.status,
+        version: payload.version,
+        audience_roles: payload.audience_roles,
+        modules_count: Array.isArray(payload.modules) ? payload.modules.length : null,
+        content_blocks_count: Array.isArray(payload.content_blocks) ? payload.content_blocks.length : null,
+        created_by: payload.created_by
+      }
+    });
     return { error: toCreateWorkshopError(err) };
   }
 }
