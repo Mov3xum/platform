@@ -34,8 +34,15 @@ services:
       - "3000:3000"
     environment:
       NEXT_PUBLIC_POCKETBASE_URL: http://pocketbase:8080
+      POCKETBASE_URL: http://pocketbase:8080
       NODE_ENV: production
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      # Superuser-credentials krävs för fallback-skapande av records när
+      # PB:s createRule failar transient (se workshops.ts). Sätt
+      # POCKETBASE_SUPERUSER_EMAIL/PASSWORD som secrets i Coolify
+      # web-applikationen — INTE i koden.
+      POCKETBASE_SUPERUSER_EMAIL: ${POCKETBASE_SUPERUSER_EMAIL:-}
+      POCKETBASE_SUPERUSER_PASSWORD: ${POCKETBASE_SUPERUSER_PASSWORD:-}
     depends_on:
       pocketbase:
         condition: service_healthy
