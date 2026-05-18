@@ -42,6 +42,24 @@ const log = (...a) => console.log('•', ...a);
 const ok = (...a) => console.log('✓', ...a);
 const warn = (...a) => console.log('!', ...a);
 
+function describeError(err) {
+  if (!err) return 'Unknown error';
+  const parts = [];
+  if (typeof err.status === 'number') {
+    parts.push(`status=${err.status}`);
+  }
+  if (typeof err.message === 'string' && err.message.trim()) {
+    parts.push(err.message.trim());
+  }
+  if (typeof err.response?.message === 'string' && err.response.message.trim()) {
+    parts.push(`response.message=${err.response.message.trim()}`);
+  }
+  if (err.originalError?.message) {
+    parts.push(`cause=${err.originalError.message}`);
+  }
+  return parts.length > 0 ? parts.join(' | ') : String(err);
+}
+
 // PB-instansen på Coolify lyssnar bara på 443. Om PB_URL-secret saknar
 // protokoll eller råkat innehålla http:// hänger anropet på port 80 tills
 // undici timar ut. Normalisera defensivt så att secret-typon inte sänker
