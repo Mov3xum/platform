@@ -302,7 +302,8 @@ export type AiUsageSurface =
   | 'startup_chat'
   | 'intl'
   | 'suggestions'
-  | 'workshop_run';
+  | 'workshop_run'
+  | 'connector_chat';
 
 export interface AiUsageEvent {
   id: string;
