@@ -7,13 +7,11 @@ const MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 1000;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 
-export type MistralContentBlock =
-  | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: string };
-
 export type MistralContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
+
+export type MistralContentBlock = MistralContentPart;
 
 export interface MistralTextMessage {
   role: 'system' | 'user' | 'assistant';

@@ -115,7 +115,7 @@ export async function prepareAttachmentsForModel(
 
     if (isImageMime(mime)) {
       const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
-      imageBlocks.push({ type: 'image_url', image_url: dataUrl });
+      imageBlocks.push({ type: 'image_url', image_url: { url: dataUrl } });
     } else if (mime === 'application/pdf') {
       let raw = '';
       try {
