@@ -6,12 +6,21 @@ import {
   getModuleBySlug,
   listQuestionsForModule
 } from '@/lib/compass/store';
+import type { Attribution } from '@/lib/compass/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface SubmitBody {
   answers: Record<string, string | string[]>;
+  attribution?: Attribution;
+}
+
+function pickString(v: unknown, max: number): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const t = v.trim();
+  if (!t) return undefined;
+  return t.slice(0, max);
 }
 
 /** Tar emot svaren från ModuleWizard och skapar lead + conversation. */
@@ -77,11 +86,29 @@ export async function POST(
     }
   }
 
+  // Attribution — whitelist + längdgränser, ingen blind genomgång.
+  const attr = body.attribution || {};
+  const attribution: Record<string, string> = {};
+  const utmSource = pickString(attr.utm_source, 100);
+  if (utmSource) attribution.utm_source = utmSource;
+  const utmMedium = pickString(attr.utm_medium, 100);
+  if (utmMedium) attribution.utm_medium = utmMedium;
+  const utmCampaign = pickString(attr.utm_campaign, 100);
+  if (utmCampaign) attribution.utm_campaign = utmCampaign;
+  const utmTerm = pickString(attr.utm_term, 100);
+  if (utmTerm) attribution.utm_term = utmTerm;
+  const utmContent = pickString(attr.utm_content, 200);
+  if (utmContent) attribution.utm_content = utmContent;
+  const referrerUrl = pickString(attr.referrer_url, 500);
+  if (referrerUrl) attribution.referrer_url = referrerUrl;
+
   const name = leadPayload.name || 'Anonym';
   const lead = await createLead(pb, user.tenant, {
     ...leadPayload,
+    ...attribution,
     name,
-    source_key: 'web',
+    source_key: utmSource ? 'web' : 'web',
+    landing_module: slug,
     consent_at: new Date().toISOString()
   });
 

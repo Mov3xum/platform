@@ -22,21 +22,35 @@ const PER_PAGE = 30;
 export default async function LeadsPage({
   searchParams
 }: {
-  searchParams?: Promise<{ status?: string; q?: string; src?: string; page?: string }>;
+  searchParams?: Promise<{
+    status?: string;
+    q?: string;
+    src?: string;
+    landing?: string;
+    page?: string;
+  }>;
 }) {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) {
-    redirect('/kompassen');
+    redirect('/inflode');
   }
   const params = (await searchParams) || {};
   const status = isLeadStatus(params.status) ? params.status : undefined;
   const q = params.q?.trim() || undefined;
   const sourceKey = params.src?.trim() || undefined;
+  const landingModule = params.landing?.trim() || undefined;
   const page = Math.max(1, Number(params.page) || 1);
 
   const pb = await getServerPb();
   const [{ items, totalItems, totalPages }, sources] = await Promise.all([
-    listLeads(pb, user.tenant, { status, q, sourceKey, page, perPage: PER_PAGE }),
+    listLeads(pb, user.tenant, {
+      status,
+      q,
+      sourceKey,
+      landingModule,
+      page,
+      perPage: PER_PAGE
+    }),
     listLeadSources(pb)
   ]);
   const sourceByKey = new Map(sources.map((s) => [s.key, s]));
@@ -45,24 +59,30 @@ export default async function LeadsPage({
   if (status) baseQs.set('status', status);
   if (q) baseQs.set('q', q);
   if (sourceKey) baseQs.set('src', sourceKey);
+  if (landingModule) baseQs.set('landing', landingModule);
 
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb="Hemmaplan / Startupkompassen / Leads"
+        crumb="Hemmaplan / Inflöde / Leads"
         title="Leads"
         subtitle={`${totalItems} ${totalItems === 1 ? 'lead' : 'leads'} ${status ? `· ${LEAD_STATUS_LABEL[status]}` : '· alla statusar'}`}
         actions={
-          <Link href="/kompassen" className="mx-btn">
-            <Icon name="arrow" size={13} /> Översikt
-          </Link>
+          <>
+            <Link href="/inflode" className="mx-btn">
+              <Icon name="arrow" size={13} /> Översikt
+            </Link>
+            <Link href="/inflode/leads/new" className="mx-btn mx-primary">
+              <Icon name="plus" size={13} /> Nytt lead
+            </Link>
+          </>
         }
       />
 
       {/* Filter-bar */}
       <Card style={{ padding: 12, marginBottom: 16 }}>
         <form
-          action="/kompassen/leads"
+          action="/inflode/leads"
           method="get"
           className="mx-flex mx-items-c mx-gap-2 mx-wrap"
         >
@@ -99,7 +119,7 @@ export default async function LeadsPage({
       {/* Status-chips quick filter */}
       <div className="mx-flex mx-gap-2 mx-wrap" style={{ marginBottom: 16 }}>
         <Link
-          href="/kompassen/leads"
+          href="/inflode/leads"
           className={`mx-chip mx-mono${!status ? ' mx-ink-chip' : ''}`}
           style={{ textDecoration: 'none' }}
         >
@@ -108,7 +128,7 @@ export default async function LeadsPage({
         {LEAD_STATUS_ORDER.map((s) => (
           <Link
             key={s}
-            href={`/kompassen/leads?status=${s}`}
+            href={`/inflode/leads?status=${s}`}
             className={`mx-chip mx-mono${status === s ? ' mx-ink-chip' : ''}`}
             style={{ textDecoration: 'none' }}
           >
@@ -134,7 +154,7 @@ export default async function LeadsPage({
             return (
               <Link
                 key={lead.id}
-                href={`/kompassen/leads/${lead.id}`}
+                href={`/inflode/leads/${lead.id}`}
                 style={{ textDecoration: 'none', color: 'inherit' }}
               >
                 <Card style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -181,7 +201,7 @@ export default async function LeadsPage({
         <div className="mx-flex mx-items-c mx-gap-2" style={{ marginTop: 16, justifyContent: 'center' }}>
           {page > 1 && (
             <Link
-              href={`/kompassen/leads?${appendPage(baseQs, page - 1)}`}
+              href={`/inflode/leads?${appendPage(baseQs, page - 1)}`}
               className="mx-btn mx-sm"
             >
               ← Föregående
@@ -192,7 +212,7 @@ export default async function LeadsPage({
           </span>
           {page < totalPages && (
             <Link
-              href={`/kompassen/leads?${appendPage(baseQs, page + 1)}`}
+              href={`/inflode/leads?${appendPage(baseQs, page + 1)}`}
               className="mx-btn mx-sm"
             >
               Nästa →

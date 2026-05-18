@@ -1,10 +1,13 @@
 import 'server-only';
 import { callMistral, type MistralMessage } from '@/lib/ai/mistral';
 import {
+  AI_REVIEW_SYSTEM_PROMPT,
   EXTRACTION_SYSTEM_PROMPT,
   INTAKE_SYSTEM_PROMPT,
+  MARKET_SCAN_SYSTEM_PROMPT,
   SCORING_SYSTEM_PROMPT
 } from './prompts';
+import type { AiReview, MarketScan } from './types';
 
 export type CompassChatMessage = { role: 'user' | 'assistant'; content: string };
 
@@ -19,6 +22,7 @@ export interface ExtractedLeadData {
 
 const DEFAULT_MODEL = 'mistral-large-latest';
 const SCORING_MODEL = 'mistral-small-latest';
+const REVIEW_MODEL = 'mistral-medium-latest';
 
 /** Det publika intake-samtalet — assistent-svar via Mistral. */
 export async function intakeReply(
@@ -88,6 +92,91 @@ export async function scoreLead(
   } catch {
     return { score: 50, reasoning: 'Bedömning kunde inte genomföras.' };
   }
+}
+
+/** Strukturerad AI-granskning av idén — beslutsunderlag för Movexum-teamet. */
+export async function reviewLead(
+  data: ExtractedLeadData
+): Promise<AiReview> {
+  const fallback: AiReview = {
+    strengths: [],
+    risks: ['AI-granskningen kunde inte genomföras — kör om eller granska manuellt.'],
+    recommendation: 'maybe',
+    recommendation_reason: 'Otillräckligt beslutsunderlag.',
+    next_steps: ['Be om mer information från leadet.'],
+    generated_at: new Date().toISOString(),
+    model: REVIEW_MODEL
+  };
+  try {
+    const res = await callMistral(REVIEW_MODEL, [
+      { role: 'system', content: AI_REVIEW_SYSTEM_PROMPT },
+      { role: 'user', content: `Idé-data:\n${JSON.stringify(data, null, 2)}` }
+    ]);
+    const match = res.text.match(/\{[\s\S]*\}/);
+    if (!match) return fallback;
+    const parsed = JSON.parse(match[0]) as Partial<AiReview>;
+    return {
+      strengths: arrayOfStrings(parsed.strengths).slice(0, 5),
+      risks: arrayOfStrings(parsed.risks).slice(0, 5),
+      recommendation: validRecommendation(parsed.recommendation),
+      recommendation_reason: (parsed.recommendation_reason ?? '').slice(0, 500),
+      next_steps: arrayOfStrings(parsed.next_steps).slice(0, 4),
+      generated_at: new Date().toISOString(),
+      model: REVIEW_MODEL
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+/** Omvärldsanalys — marknad, konkurrenter, trender, regulering. */
+export async function marketScanLead(
+  data: ExtractedLeadData
+): Promise<MarketScan> {
+  const fallback: MarketScan = {
+    market_size: 'Marknadsdata kunde inte hämtas.',
+    trend: '',
+    competitors: [],
+    differentiators: [],
+    regulation_notes: '',
+    fit_for_movexum: '',
+    generated_at: new Date().toISOString(),
+    model: REVIEW_MODEL
+  };
+  try {
+    const res = await callMistral(REVIEW_MODEL, [
+      { role: 'system', content: MARKET_SCAN_SYSTEM_PROMPT },
+      { role: 'user', content: `Idé:\n${JSON.stringify(data, null, 2)}` }
+    ]);
+    const match = res.text.match(/\{[\s\S]*\}/);
+    if (!match) return fallback;
+    const parsed = JSON.parse(match[0]) as Partial<MarketScan>;
+    return {
+      market_size: (parsed.market_size ?? '').slice(0, 1000),
+      trend: (parsed.trend ?? '').slice(0, 500),
+      competitors: arrayOfStrings(parsed.competitors).slice(0, 6),
+      differentiators: arrayOfStrings(parsed.differentiators).slice(0, 4),
+      regulation_notes: (parsed.regulation_notes ?? '').slice(0, 500),
+      fit_for_movexum: (parsed.fit_for_movexum ?? '').slice(0, 500),
+      generated_at: new Date().toISOString(),
+      model: REVIEW_MODEL
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function arrayOfStrings(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((x): x is string => typeof x === 'string')
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0)
+    .map((x) => x.slice(0, 240));
+}
+
+function validRecommendation(v: unknown): 'pass' | 'maybe' | 'no' {
+  return v === 'pass' || v === 'no' ? v : 'maybe';
 }
 
 function stringOrNull(v: unknown): string | null {

@@ -5,6 +5,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const nextConfig = {
   reactStrictMode: true,
+  async redirects() {
+    return [
+      // Inflöde (tidigare Kompassen). Backkompat för gamla länkar.
+      { source: '/kompassen', destination: '/inflode', permanent: true },
+      { source: '/kompassen/:path*', destination: '/inflode/:path*', permanent: true }
+    ];
+  },
   // Produces a minimal runtime build at .next/standalone with only the
   // node_modules actually used. Cuts the runtime Docker image by ~10x.
   output: 'standalone',

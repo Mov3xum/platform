@@ -1,19 +1,36 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import type { CompassQuestion } from '@/lib/compass/types';
+import { useMemo, useState, type FormEvent } from 'react';
+import type { Attribution, CompassQuestion } from '@/lib/compass/types';
 
 interface Props {
   moduleSlug: string;
   questions: CompassQuestion[];
+  successMessage?: string;
+  redirectUrl?: string;
 }
 
-export function ModuleWizard({ moduleSlug, questions }: Props) {
+function readAttribution(): Attribution {
+  if (typeof window === 'undefined') return {};
+  const params = new URLSearchParams(window.location.search);
+  const get = (k: string) => params.get(k) || undefined;
+  return {
+    utm_source: get('utm_source'),
+    utm_medium: get('utm_medium'),
+    utm_campaign: get('utm_campaign'),
+    utm_term: get('utm_term'),
+    utm_content: get('utm_content'),
+    referrer_url: typeof document !== 'undefined' ? document.referrer || undefined : undefined
+  };
+}
+
+export function ModuleWizard({ moduleSlug, questions, successMessage, redirectUrl }: Props) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const attribution = useMemo(readAttribution, []);
 
   const total = questions.length;
   const q = questions[step];
@@ -33,8 +50,13 @@ export function ModuleWizard({ moduleSlug, questions }: Props) {
           Tack — vi har dina svar.
         </div>
         <p className="mx-muted mx-t-13" style={{ maxWidth: 460, margin: '0 auto' }}>
-          En människa från Movexum tittar på din ansökan och hör av sig inom 3 arbetsdagar.
+          {successMessage || 'En människa från Movexum tittar på din ansökan och hör av sig inom 3 arbetsdagar.'}
         </p>
+        {redirectUrl && (
+          <p className="mx-mono mx-t-xs mx-muted" style={{ marginTop: 12 }}>
+            Du skickas vidare till <a href={redirectUrl}>{redirectUrl}</a>…
+          </p>
+        )}
       </div>
     );
   }
@@ -57,13 +79,18 @@ export function ModuleWizard({ moduleSlug, questions }: Props) {
     // Sista frågan — skicka in
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/compass/m/${encodeURIComponent(moduleSlug)}/submit`, {
+      const res = await fetch(`/api/inflode/m/${encodeURIComponent(moduleSlug)}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers })
+        body: JSON.stringify({ answers, attribution })
       });
       if (!res.ok) throw new Error(`Servern svarade ${res.status}`);
       setDone(true);
+      if (redirectUrl) {
+        setTimeout(() => {
+          window.location.href = redirectUrl;
+        }, 1500);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Något gick fel');
     } finally {

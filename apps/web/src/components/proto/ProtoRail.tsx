@@ -10,7 +10,7 @@ const moduleIcons: Record<string, string> = {
   idag: 'home',
   inkorg: 'inbox',
   uppdrag: 'flow',
-  kompassen: 'compass',
+  inflode: 'spark',
   startups: 'people',
   investerare: 'graph',
   events: 'spark',

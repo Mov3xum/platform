@@ -666,11 +666,11 @@ export const coreModules: ModuleDefinition[] = [
     route: '/uppdrag'
   },
   {
-    id: 'kompassen',
-    title: 'Startupkompassen',
-    description: 'Sprint X-mätning på fyra axlar: finansiering, internationalisering, hållbarhet, team.',
+    id: 'inflode',
+    title: 'Inflöde',
+    description: 'Hjärtat i inkubatorn — fånga, kvalificera och konvertera leads. Deploya formulär, quiz och AI-chattar på egna URL:er och spåra var inflödet kommer ifrån.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
-    route: '/kompassen'
+    route: '/inflode'
   },
   {
     id: 'startups',
