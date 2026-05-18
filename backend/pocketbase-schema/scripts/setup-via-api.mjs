@@ -32,6 +32,8 @@ const APP_USER_PASSWORD = process.env.APP_USER_PASSWORD;
 
 const APP_USER_EMAIL = 'hampus@movexum.se';
 const APP_USER_NAME = 'Hampus Granström';
+const PB_AUTH_RETRY_ATTEMPTS = Number(process.env.PB_AUTH_RETRY_ATTEMPTS || 12);
+const PB_AUTH_RETRY_DELAY_MS = Number(process.env.PB_AUTH_RETRY_DELAY_MS || 5000);
 
 if (!PB_URL_RAW || !SU_EMAIL || !SU_PASSWORD) {
   console.error('Missing env vars. Required: PB_URL, PB_SU_EMAIL, PB_SU_PASSWORD');
@@ -58,6 +60,18 @@ function describeError(err) {
     parts.push(`cause=${err.originalError.message}`);
   }
   return parts.length > 0 ? parts.join(' | ') : String(err);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldRetrySuperuserAuth(err) {
+  const status = Number(err?.status || 0);
+  if ([408, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+
+  const code = String(err?.originalError?.code || err?.cause?.code || '').toUpperCase();
+  return ['ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENOTFOUND', 'ETIMEDOUT'].includes(code);
 }
 
 // PB-instansen på Coolify lyssnar bara på 443. Om PB_URL-secret saknar
@@ -279,11 +293,30 @@ log(`Superuser: ${SU_EMAIL}`);
 
 {
   const authUrl = `${PB_URL.replace(/\/$/, '')}/api/collections/_superusers/auth-with-password`;
-  try {
-    await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
-  } catch (err) {
+  let authError = null;
+
+  for (let attempt = 1; attempt <= PB_AUTH_RETRY_ATTEMPTS; attempt++) {
+    try {
+      await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
+      authError = null;
+      break;
+    } catch (err) {
+      authError = err;
+      const retryable = shouldRetrySuperuserAuth(err);
+      if (!retryable || attempt === PB_AUTH_RETRY_ATTEMPTS) {
+        break;
+      }
+
+      warn(
+        `superuser auth failed (attempt ${attempt}/${PB_AUTH_RETRY_ATTEMPTS}): ${describeError(err)} — retrying in ${PB_AUTH_RETRY_DELAY_MS}ms`
+      );
+      await sleep(PB_AUTH_RETRY_DELAY_MS);
+    }
+  }
+
+  if (authError) {
     console.error(
-      `\n✗ Superuser auth failed for ${SU_EMAIL} at ${authUrl}\n${describeError(err)}\n` +
+      `\n✗ Superuser auth failed for ${SU_EMAIL} at ${authUrl}\n${describeError(authError)}\n` +
       `Check PB_SU_EMAIL/PB_SU_PASSWORD secrets, that PB is reachable, and that PB v0.23+ exposes /api/collections/_superusers/auth-with-password.`
     );
     process.exit(1);
