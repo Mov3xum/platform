@@ -624,6 +624,31 @@ export async function deleteWorkshopAreaAction(
   const areaId = String(formData.get('areaId') || '').trim();
   if (!areaId) return { error: 'Område saknas.' };
 
+  // Verify the area belongs to the caller's tenant before we touch anything.
+  let areaRecord: { id: string; tenant: string } | null = null;
+  try {
+    areaRecord = await pb.collection(PB_COLLECTIONS.workshopAreas).getOne<{ id: string; tenant: string }>(areaId);
+  } catch (err) {
+    const pbError = toPbErrorLike(err);
+    if (pbError.status === 404) return { error: 'Området finns inte längre.' };
+    console.error('[workshops] delete workshop area lookup failed', {
+      pbUrl: PB_URL,
+      tenantId: user.tenant,
+      userId: user.id,
+      areaId,
+      statusCode: pbError.status,
+      message: err instanceof Error ? err.message : String(err ?? ''),
+      response: pbError.response ?? null
+    });
+    return {
+      error:
+        'Kunde inte ta bort område. Se serverloggar för [workshops] delete workshop area lookup failed.'
+    };
+  }
+  if (areaRecord.tenant !== user.tenant) {
+    return { error: 'Området tillhör inte din tenant.' };
+  }
+
   try {
     const linkedWorkshops = await pb.collection(PB_COLLECTIONS.workshops).getList<Workshop>(1, 500, {
       filter: pb.filter('tenant = {:tenant} && area = {:area}', { tenant: user.tenant, area: areaId })
@@ -635,8 +660,85 @@ export async function deleteWorkshopAreaAction(
     revalidatePath('/education');
     revalidatePath('/education/new');
     return { success: 'Område borttaget.' };
-  } catch {
-    return { error: 'Kunde inte ta bort område.' };
+  } catch (err) {
+    const pbError = toPbErrorLike(err);
+    const message = String(err instanceof Error ? err.message : '');
+    const details = JSON.stringify(pbError.response ?? {});
+    const normalizedMessage = message.toLowerCase();
+    const normalizedDetails = details.toLowerCase();
+
+    console.error('[workshops] delete workshop area failed', {
+      pbUrl: PB_URL,
+      tenantId: user.tenant,
+      userId: user.id,
+      roles: user.roles,
+      areaId,
+      statusCode: pbError.status,
+      message,
+      response: pbError.response ?? null
+    });
+
+    if (pbError.status === 404) {
+      revalidatePath('/education');
+      revalidatePath('/education/new');
+      return { success: 'Område borttaget.' };
+    }
+    if (pbError.status === 403) {
+      return { error: 'Behörighet saknas för att ta bort området.' };
+    }
+
+    if (detectCreateRuleFailure(normalizedMessage, normalizedDetails, pbError.status, pbError.response)) {
+      const superuserPbResult = await getSuperuserPb();
+      if (superuserPbResult.ok) {
+        try {
+          const linkedWorkshops = await superuserPbResult.pb
+            .collection(PB_COLLECTIONS.workshops)
+            .getList<Workshop>(1, 500, {
+              filter: superuserPbResult.pb.filter('tenant = {:tenant} && area = {:area}', {
+                tenant: user.tenant,
+                area: areaId
+              })
+            });
+          for (const workshop of linkedWorkshops.items) {
+            await superuserPbResult.pb.collection(PB_COLLECTIONS.workshops).update(workshop.id, { area: null });
+          }
+          await superuserPbResult.pb.collection(PB_COLLECTIONS.workshopAreas).delete(areaId);
+          revalidatePath('/education');
+          revalidatePath('/education/new');
+          return { success: 'Område borttaget.' };
+        } catch (fallbackErr) {
+          const fallbackPbError = toPbErrorLike(fallbackErr);
+          console.error('[workshops] delete workshop area fallback failed', {
+            pbUrl: PB_URL,
+            tenantId: user.tenant,
+            userId: user.id,
+            areaId,
+            statusCode: fallbackPbError.status,
+            message: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr ?? ''),
+            response: fallbackPbError.response ?? null
+          });
+          return { error: 'Kunde inte ta bort område. Fallback via superuser misslyckades (PB-SU-FAIL).' };
+        }
+      }
+
+      if (superuserPbResult.reason === 'missing_credentials') {
+        return {
+          error:
+            'Kunde inte ta bort område. Webbtjänsten saknar superuser-env (POCKETBASE_SUPERUSER_EMAIL/PASSWORD eller PB_SU_EMAIL/PB_SU_PASSWORD).'
+        };
+      }
+
+      return {
+        error:
+          'Kunde inte ta bort område. Superuser-inloggning mot PocketBase misslyckades (PB-SU-AUTH). Kontrollera credentials och POCKETBASE_URL.'
+      };
+    }
+
+    if (detectMissingSchemaError(normalizedMessage, normalizedDetails, pbError.status)) {
+      return { error: 'Serverfel: workshop_areas-samlingen saknas. Kontakta administratör.' };
+    }
+
+    return { error: 'Kunde inte ta bort område. Se serverloggar för [workshops] delete workshop area failed.' };
   }
 }
 
