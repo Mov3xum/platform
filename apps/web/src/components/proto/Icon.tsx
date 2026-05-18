@@ -46,7 +46,30 @@ export const ICON_PATHS: Record<string, string> = {
   copy: 'M8 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z M16 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h2',
   chevron: 'M9 6l6 6-6 6',
   chevdown: 'M6 9l6 6 6-6',
-  menu: 'M4 6h16 M4 12h16 M4 18h16'
+  menu: 'M4 6h16 M4 12h16 M4 18h16',
+  // Intric-stil ikoner
+  send: 'M22 2L11 13 M22 2l-7 20-4-9-9-4z',
+  hourglass:
+    'M6 2h12 M6 22h12 M6 2v4a6 6 0 0 0 6 6 6 6 0 0 0 6-6V2 M6 22v-4a6 6 0 0 1 6-6 6 6 0 0 1 6 6v4',
+  alert: 'M12 3l10 18H2z M12 10v5 M12 18h.01',
+  'badge-check':
+    'M4 8.6a4 4 0 0 1 4.6-4.6 4 4 0 0 1 6.8 0A4 4 0 0 1 20 8.6a4 4 0 0 1 0 6.8 4 4 0 0 1-4.6 4.6 4 4 0 0 1-6.8 0A4 4 0 0 1 4 15.4a4 4 0 0 1 0-6.8z M9 12l2 2 4-4',
+  clock: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z M12 7v5l3 2',
+  sun: 'M12 4V2 M12 22v-2 M4 12H2 M22 12h-2 M6 6L4.5 4.5 M19.5 19.5L18 18 M6 18l-1.5 1.5 M19.5 4.5L18 6 M12 16a4 4 0 1 0-4-4 4 4 0 0 0 4 4z',
+  moon: 'M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z',
+  paperclip: 'M21.4 11l-9 9a5 5 0 1 1-7-7l9-9a3.5 3.5 0 1 1 5 5L10.5 18a2 2 0 1 1-3-3l8-8',
+  'panel-right':
+    'M3 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z M15 4v17',
+  'arrow-up-right': 'M7 17l10-10 M7 7h10v10',
+  mic: 'M9 2h6v12a3 3 0 0 1-6 0z M5 11a7 7 0 0 0 14 0 M12 18v4',
+  bot: 'M4 8h16v10H4z M12 8V4 M9 13h.01 M15 13h.01 M8 18h8',
+  'rotate-ccw': 'M1 4v6h6 M3.5 15a9 9 0 1 0 2.1-9.4L1 10',
+  briefcase: 'M3 8h18v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16',
+  pin: 'M12 17v5 M5 17h14L17 12V5H7v7z',
+  edit3: 'M12 20h9 M16.5 3.5a2 2 0 0 1 3 3L7 19l-4 1 1-4z',
+  x: 'M6 6l12 12 M18 6l-12 12',
+  message: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+  back: 'M19 12H5 M12 19l-7-7 7-7'
 };
 
 export type IconName = keyof typeof ICON_PATHS | string;
