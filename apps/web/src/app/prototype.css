@@ -138,6 +138,8 @@ html.dark {
 .mx-app {
   display: grid;
   grid-template-columns: var(--mx-rail-w) 1fr;
+  gap: 0;
+  padding: 12px 0 12px 12px;
   min-height: 100vh;
   background: var(--mx-canvas);
   color: var(--mx-ink);
@@ -157,18 +159,20 @@ html.dark {
   display: flex;
   flex-direction: column;
   position: sticky;
-  top: 0;
-  height: 100vh;
+  top: 12px;
+  height: calc(100vh - 24px);
   z-index: 30;
   overflow: hidden;
-  border-right: 1px solid var(--mx-rail-divider);
+  border: 1px solid var(--mx-line-soft);
+  border-radius: var(--mx-r-lg);
+  box-shadow: var(--mx-sh-3);
 }
 
 .mx-rail-head {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 18px 16px;
+  padding: 14px 16px 12px;
   border-bottom: 1px solid var(--mx-rail-divider);
 }
 
@@ -897,6 +901,7 @@ body.mx-rail-locked {
 @media (max-width: 1024px) {
   .mx-app {
     grid-template-columns: 1fr;
+    padding: 0;
   }
 
   .mx-mobile-menu-btn {
@@ -914,6 +919,8 @@ body.mx-rail-locked {
     transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1),
                 visibility 220ms;
     z-index: 70;
+    border: 0;
+    border-radius: 0;
     box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.5);
     will-change: transform;
     visibility: hidden;
@@ -1315,13 +1322,15 @@ html.dark .mx-page-head h1 {
   display: grid;
   place-items: center;
   border-radius: 8px;
-  background: #4fc4ea;
-  color: #002c40;
+  background: var(--mx-paper-2);
+  border: 1px solid var(--mx-line);
+  color: var(--mx-ink);
   font-family: var(--mx-mono);
   font-weight: 700;
   font-size: 11px;
   flex-shrink: 0;
   letter-spacing: -0.02em;
+  overflow: hidden;
 }
 
 .mx-switcher-mark.mx-sm {

@@ -53,8 +53,8 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
         <Logo
           href="/idag"
           variant="dark"
-          width={168}
-          height={40}
+          width={120}
+          height={28}
           className="mx-rail-brand"
           logoLightUrl={user.tenantLogoLightUrl}
           logoDarkUrl={user.tenantLogoDarkUrl}
