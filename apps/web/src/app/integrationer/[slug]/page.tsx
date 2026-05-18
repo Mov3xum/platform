@@ -110,8 +110,12 @@ export default async function IntegrationDetailPage({
     tenantIntegration = null;
   }
 
+  const isRegistry = handler?.kind === 'company_registry';
+
   let syncRuns: SyncRunRecord[] = [];
   let recentRecords: IntegrationRecordRow[] = [];
+  let registryStats: { startupsWithOrgNr: number; startupsWithFinancials: number } | null =
+    null;
   if (tenantIntegration && isStaff) {
     try {
       const runs = await pb
@@ -125,7 +129,7 @@ export default async function IntegrationDetailPage({
       /* ignore */
     }
   }
-  if (tenantIntegration) {
+  if (tenantIntegration && !isRegistry) {
     try {
       const recs = await pb
         .collection('integration_records')
@@ -136,6 +140,29 @@ export default async function IntegrationDetailPage({
       recentRecords = recs.items;
     } catch {
       /* ignore */
+    }
+  }
+  if (tenantIntegration && isRegistry) {
+    try {
+      const startupsRes = await pb
+        .collection('startups')
+        .getList(1, 1, {
+          filter: `tenant = "${user.tenant}" && org_nr != ""`,
+          fields: 'id'
+        });
+      const financialsRes = await pb
+        .collection('startup_financials')
+        .getList<{ startup: string }>(1, 500, {
+          filter: `tenant = "${user.tenant}" && source = "allabolag"`,
+          fields: 'startup'
+        });
+      const uniqueStartups = new Set(financialsRes.items.map((r) => r.startup));
+      registryStats = {
+        startupsWithOrgNr: startupsRes.totalItems,
+        startupsWithFinancials: uniqueStartups.size
+      };
+    } catch {
+      registryStats = { startupsWithOrgNr: 0, startupsWithFinancials: 0 };
     }
   }
 
@@ -321,7 +348,39 @@ export default async function IntegrationDetailPage({
           </section>
         )}
 
-        {isConnected && (
+        {isConnected && isRegistry && registryStats && (
+          <section>
+            <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+              Bolagsregister-täckning
+            </h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-default bg-surface px-4 py-3">
+                <p className="text-[11px] text-foreground-subtle">Bolag med org-nr</p>
+                <p className="mt-1 text-lg font-semibold text-foreground">
+                  {registryStats.startupsWithOrgNr}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-default bg-surface px-4 py-3">
+                <p className="text-[11px] text-foreground-subtle">
+                  Bolag med Allabolag-financials
+                </p>
+                <p className="mt-1 text-lg font-semibold text-foreground">
+                  {registryStats.startupsWithFinancials}
+                </p>
+              </div>
+            </div>
+            <p className="mt-3 text-[12px] text-foreground-muted">
+              Bolagsregister-providers skriver direkt till bolagskorten och
+              <code className="mx-1 rounded bg-canvas-subtle px-1 py-0.5 text-[11px]">
+                startup_financials
+              </code>
+              — det finns inga separata "poster" att lista här. Se varje bolags
+              "Finansiell historik"-sektion för detaljer.
+            </p>
+          </section>
+        )}
+
+        {isConnected && !isRegistry && (
           <section>
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">

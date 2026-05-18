@@ -751,9 +751,14 @@ och kan renderas av samma UI oavsett leverantör.
   innehåller den AES-256-GCM-krypterade credential-blobben. En PB-hook
   (`backend/pocketbase-schema/hooks/strip_integration_config.pb.js`)
   stripar `config` från alla API-svar.
-- **`integration_records`** — unified normaliserad datastore.
-  Unique-index `(tenant_integration, record_type, external_id)` ger
-  idempotent upsert.
+- **`integration_records`** — unified normaliserad datastore för
+  `kind: 'records'`-providers (Brevo, Howspace m.fl.). Unique-index
+  `(tenant_integration, record_type, external_id)` ger idempotent
+  upsert. **Bolagsregister-providers** (Allabolag m.fl., `kind:
+  'company_registry'`) skippar `integration_records` helt och skriver
+  direkt till domänkollektionerna `startups` och `startup_financials`
+  — orkestratorn (`sync.ts`) branchar på `handler.kind` och loggar
+  ändå körningen i `integration_sync_runs` för audit.
 - **`integration_sync_runs`** — audit-trail per sync-försök
   (ISO 27001 A.8.15). `error_message` är PII-fri.
 
@@ -763,7 +768,7 @@ och kan renderas av samma UI oavsett leverantör.
 |-----------|-----------|---------------|------------|
 | Brevo     | FR (EU)   | Minimal       | Ingen AI. Endast aggregerade metrics synkas — inga e-postadresser. |
 | Howspace  | FI (EU)   | Begränsad     | AI-insights faller under art. 50 (transparenskrav). Vi synkar bara aggregerad statistik. |
-| Allabolag | SE        | Minimal       | Publik bolagsdata (org-nr, bolagsform, kommun, årsredovisningar). Ingen AI, inga personuppgifter för aktiebolag. För enskild firma exkluderas org-nr från AI-prompts (§ 9.3). **Status: planned** — handler byggs i uppföljande PR; målschema är `startups`-registerfält + `startup_financials`. |
+| Allabolag | SE        | Minimal       | Publik bolagsdata (org-nr, bolagsform, kommun, årsredovisningar). Ingen AI, inga personuppgifter för aktiebolag. För enskild firma exkluderas org-nr från AI-prompts (§ 9.3). **Status: implemented (stub)** — handler-skelettet skriver direkt till `startups`-registerfält och `startup_financials` (idempotent via unique-index `(startup, year)`). Produktion kräver leverantörsval via `MOVEXUM_ALLABOLAG_PROVIDER`-env (`mock`/`bolagsverket`/`roaring`/`creditsafe`); utan satt env returnerar handler ett tydligt fel. |
 
 **Mailchimp avvisad** (CLAUDE.md § 10.2): US-baserad,
 träffar Schrems II + CLOUD Act. Brevo är EU-suveränt alternativ.
@@ -798,11 +803,17 @@ brytande ändringar — datamodellen är redan idempotent.
 1. Skapa `lib/integrations/providers/<slug>/{client,handler,normalize}.ts`.
 2. Implementera `IntegrationHandler` — sätt `residency`, `riskClass`
    och `complianceNote` så transparensbannern blir korrekt.
-3. Whitelista payload-fält i `normalize.ts`. Bolagsregister-providers
-   (typ Allabolag) skriver istället direkt mot `startups`-registerfält
-   + `startup_financials` via en provider-specifik mappning — inte
-   `integration_records`. Idempotens säkras av unique-index `(startup,
-   year)` på financials respektive `(tenant, org_nr)` på startups.
+3. Whitelista payload-fält i `normalize.ts`. För standardprovidrar
+   (`kind: 'records'`, default) returneras `NormalizedRecord[]` som
+   orkestratorn upsertar till `integration_records`. Bolagsregister-
+   providers deklarerar däremot `kind: 'company_registry'` på handler-
+   objektet och implementerar `syncRegistry()` (batch) +
+   `syncSingleStartup()` (per bolag); de skriver direkt mot
+   `startups`-registerfält och `startup_financials` via en provider-
+   specifik mappning — inte `integration_records`. Idempotens säkras
+   av unique-index `(startup, year)` på financials respektive
+   `(tenant, org_nr)` på startups. Race-conditions på financials-
+   upsert hanteras med read-after-write + retry-as-update vid HTTP 400.
 4. Registrera i `registry.ts`.
 5. Seedmigration som upsertar provider i `integration_providers`.
 6. Uppdatera tabellen i 11.3 + ev. ny kategori i `category`-enumet

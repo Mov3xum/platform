@@ -9,7 +9,7 @@ import {
   saveCredentials
 } from '@/lib/integrations/credentials';
 import { getHandler } from '@/lib/integrations/registry';
-import { runSync } from '@/lib/integrations/sync';
+import { runSync, runRegistrySyncForStartup } from '@/lib/integrations/sync';
 import { recordActivity } from './record-activity';
 
 export type IntegrationPilotState = {
@@ -306,6 +306,100 @@ export async function syncIntegrationAction(
     revalidatePath(`/integrationer/${providerSlug}`);
     revalidatePath(`/integrationer/${providerSlug}/poster`);
   }
+  revalidatePath('/aktivitet');
+
+  if (result.status === 'failed') {
+    return { error: summary };
+  }
+  return {
+    summary,
+    recordsCreated: result.recordsCreated,
+    recordsUpdated: result.recordsUpdated
+  };
+}
+
+// Per-startup Allabolag-sync. Triggas från bolagsdetaljvyn när org_nr
+// är ifyllt. Tenant-isolation: verifierar att bolaget tillhör inloggad
+// users tenant via tenant-bunden PB INNAN superuser-skrivningen i
+// runRegistrySyncForStartup (CLAUDE.md § 10.5 punkt 5).
+export async function syncStartupFromAllabolagAction(
+  _prev: IntegrationSyncState,
+  formData: FormData
+): Promise<IntegrationSyncState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+    return { error: 'Endast inkubatorledning kan köra synk.' };
+  }
+
+  const startupId = String(formData.get('startup_id') || '').trim();
+  if (!startupId) return { error: 'Saknad bolags-id.' };
+
+  // Steg 1: tenant-bunden read som verifierar att startupId tillhör
+  // user.tenant. Misslyckas detta får vi inte gå vidare till superuser.
+  const pb = await getServerPb();
+  try {
+    const row = await pb
+      .collection('startups')
+      .getOne<{ tenant: string; org_nr?: string }>(startupId);
+    if (row.tenant !== user.tenant) {
+      return { error: 'Åtkomst nekad.' };
+    }
+    if (!row.org_nr || !row.org_nr.trim()) {
+      return { error: 'Bolaget saknar org-nr. Fyll i innan synk.' };
+    }
+  } catch {
+    return { error: 'Bolaget hittades inte.' };
+  }
+
+  // Steg 2: hitta tenant_integration för allabolag.
+  const adminResult = await getSuperuserPb();
+  if (!adminResult.ok) return { error: 'Serverkonfiguration ofullständig.' };
+
+  let provider: ProviderRow;
+  try {
+    provider = await adminResult.pb
+      .collection('integration_providers')
+      .getFirstListItem<ProviderRow>('slug = "allabolag"');
+  } catch {
+    return { error: 'Allabolag-leverantören saknas i katalogen.' };
+  }
+
+  let tenantIntegration: { id: string; status: string };
+  try {
+    tenantIntegration = await adminResult.pb
+      .collection('tenant_integrations')
+      .getFirstListItem<{ id: string; status: string }>(
+        `tenant = "${user.tenant}" && provider = "${provider.id}"`
+      );
+  } catch {
+    return { error: 'Anslut Allabolag först på /integrationer/allabolag.' };
+  }
+  if (tenantIntegration.status !== 'connected') {
+    return { error: 'Allabolag är inte ansluten för denna tenant.' };
+  }
+
+  const result = await runRegistrySyncForStartup(
+    tenantIntegration.id,
+    startupId,
+    user.id
+  );
+
+  const summary =
+    result.status === 'failed'
+      ? `Synk misslyckades: ${result.errorMessage || 'okänt fel'}`
+      : `Synk klar — ${result.recordsCreated} årsrader uppdaterade.`;
+
+  await recordActivity(pb, {
+    tenant: user.tenant,
+    kind: 'integration_sync',
+    actor: user.id,
+    title: 'Allabolag synkad (per bolag)',
+    meta: summary,
+    startup: startupId
+  });
+
+  revalidatePath(`/startups/${startupId}`);
+  revalidatePath('/integrationer/allabolag');
   revalidatePath('/aktivitet');
 
   if (result.status === 'failed') {
