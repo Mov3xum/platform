@@ -24,6 +24,91 @@ interface RunRow {
   };
 }
 
+function ToolRunSection({ label, items }: { label: string; items: RunRow[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section className="mb-6">
+      <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+        {label} <span className="font-mono normal-case tracking-normal">{items.length}</span>
+      </div>
+      <div className="space-y-2">
+        {items.map((r) => {
+          const days = daysUntil(r.deadline);
+          const overdue = days !== null && days < 0 && r.status !== 'ready_for_review';
+          const status = ASSIGN_STATUS[r.status] || ASSIGN_STATUS.assigned;
+          const startupId = r.startup;
+          const startupName = r.expand?.startup?.name || 'Bolag';
+          const toolName = r.expand?.tool?.name || 'Verktyg';
+          const assignedByName =
+            r.expand?.assigned_by?.display_name ||
+            r.expand?.assigned_by?.email?.split('@')[0] ||
+            'Coach';
+
+          return (
+            <Link
+              key={r.id}
+              href={`/startups/${startupId}/verktyg/${r.id}`}
+              className="block rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5 transition hover:border-brand/40 hover:shadow-md"
+            >
+              <div className="flex items-start gap-4">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-movexum-pastell-lila text-movexum-lila">
+                  <Icon name="sparkle" size={18} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-heading text-[14.5px] font-semibold text-foreground">
+                      {toolName}
+                    </h3>
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium ${status.bgClass} ${status.fgClass}`}
+                    >
+                      <Icon name={status.iconName} size={10} /> {status.label}
+                    </span>
+                    <span className="rounded-md bg-canvas-muted px-1.5 py-0.5 text-[10.5px] text-foreground-muted">
+                      {startupName}
+                    </span>
+                  </div>
+                  {r.instruction && (
+                    <p
+                      className="mt-1.5 line-clamp-2 text-[12.5px] leading-relaxed text-foreground-muted"
+                      dangerouslySetInnerHTML={{
+                        __html: r.instruction.replace(/<script[\s\S]*?<\/script>/gi, '')
+                      }}
+                    />
+                  )}
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-foreground-subtle">
+                    <span className="inline-flex items-center gap-1">
+                      <Icon name="people" size={11} /> från {assignedByName}
+                    </span>
+                    {r.deadline && (
+                      <span
+                        className={`inline-flex items-center gap-1 ${overdue ? 'font-medium text-movexum-orange' : ''}`}
+                      >
+                        <Icon name="calendar" size={11} /> deadline{' '}
+                        {formatDeadline(r.deadline)}
+                        {overdue
+                          ? ' (försenad)'
+                          : days !== null && days >= 0
+                            ? ` · om ${days} dgr`
+                            : ''}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1">
+                      <Icon name="clock" size={11} /> tilldelad{' '}
+                      {formatRelativeDate(r.created)}
+                    </span>
+                  </div>
+                </div>
+                <Icon name="chevron" size={14} className="shrink-0" />
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export default async function InkorgPage() {
   const user = await requireUser();
   const pb = await getServerPb();
@@ -71,90 +156,6 @@ export default async function InkorgPage() {
   const väntar = runs.filter((r) => r.status === 'ready_for_review');
   const unreadCount = notifications.filter((n) => !n.read_at).length;
 
-  function ToolSection({ label, items }: { label: string; items: RunRow[] }) {
-    if (items.length === 0) return null;
-    return (
-      <section className="mb-7">
-        <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
-          {label}{' '}
-          <span className="font-mono normal-case tracking-normal">{items.length}</span>
-        </div>
-        <div className="space-y-2">
-          {items.map((r) => {
-            const days = daysUntil(r.deadline);
-            const isOverdue = days !== null && days < 0 && r.status !== 'ready_for_review';
-            const status = ASSIGN_STATUS[r.status] || ASSIGN_STATUS.assigned;
-            const startupId = r.startup;
-            const startupName = r.expand?.startup?.name || 'Bolag';
-            const toolName = r.expand?.tool?.name || 'Verktyg';
-            const assignedByName =
-              r.expand?.assigned_by?.display_name ||
-              r.expand?.assigned_by?.email?.split('@')[0] ||
-              'Coach';
-
-            return (
-              <Link
-                key={r.id}
-                href={`/startups/${startupId}/verktyg/${r.id}`}
-                className="block rounded-xl border border-default bg-surface p-4 transition hover:border-strong"
-              >
-                <div className="flex items-start gap-4">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas-muted text-foreground-muted">
-                    <Icon name="inbox" size={15} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-[14px] font-semibold text-foreground">{toolName}</h3>
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium ${status.bgClass} ${status.fgClass}`}
-                      >
-                        <Icon name={status.iconName} size={10} /> {status.label}
-                      </span>
-                      <span className="rounded-md bg-canvas-muted px-1.5 py-0.5 text-[10.5px] text-foreground-muted">
-                        {startupName}
-                      </span>
-                    </div>
-                    {r.instruction && (
-                      <p
-                        className="mt-1.5 line-clamp-2 text-[12.5px] leading-relaxed text-foreground-muted"
-                        dangerouslySetInnerHTML={{
-                          __html: r.instruction.replace(/<script[\s\S]*?<\/script>/gi, '')
-                        }}
-                      />
-                    )}
-                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-foreground-subtle">
-                      <span className="inline-flex items-center gap-1">
-                        <Icon name="people" size={11} /> från {assignedByName}
-                      </span>
-                      {r.deadline && (
-                        <span
-                          className={`inline-flex items-center gap-1 ${isOverdue ? 'font-medium text-movexum-orange' : ''}`}
-                        >
-                          <Icon name="calendar" size={11} /> deadline{' '}
-                          {formatDeadline(r.deadline)}
-                          {isOverdue
-                            ? ' (försenad)'
-                            : days !== null && days >= 0
-                              ? ` · om ${days} dgr`
-                              : ''}
-                        </span>
-                      )}
-                      <span className="inline-flex items-center gap-1">
-                        <Icon name="clock" size={11} /> tilldelad{' '}
-                        {formatRelativeDate(r.created)}
-                      </span>
-                    </div>
-                  </div>
-                  <Icon name="chevron" size={14} className="shrink-0" />
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-      </section>
-    );
-  }
-
   const firstName = user.name?.split(' ')[0] || user.name;
   const totalItems = notifications.length + myMissions.length + runs.length;
 
@@ -171,6 +172,7 @@ export default async function InkorgPage() {
           Här samlas dina notiser, projekt du är med i, och uppdrag som väntar
           på dig. Klicka på något för att hoppa rakt in.
         </p>
+      </div>
 
       {totalItems === 0 ? (
         <div className="rounded-2xl border border-dashed border-default p-10 text-center">
@@ -210,9 +212,9 @@ export default async function InkorgPage() {
               <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
                 AI-uppdrag från coach
               </h2>
-              <ToolSection label="Att göra nu" items={todo} />
-              <ToolSection label="Pågående" items={pågående} />
-              <ToolSection label="Inväntar coach" items={väntar} />
+              <ToolRunSection label="Att göra nu" items={todo} />
+              <ToolRunSection label="Pågående" items={pågående} />
+              <ToolRunSection label="Inväntar coach" items={väntar} />
             </>
           )}
         </>
