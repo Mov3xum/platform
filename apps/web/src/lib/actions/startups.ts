@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { ALL_PHASES, type StartupPhase } from '@platform/shared';
+import { updateStartupField, type StartupWritableField } from '@/lib/core/write';
 
 const ALLOWED_STATUS = ['active', 'alumni', 'paused', 'rejected'] as const;
 type Status = (typeof ALLOWED_STATUS)[number];
@@ -144,18 +145,36 @@ export async function updateStartupAction(
   if (!parsed.ok) return parsed.state;
   const data = parsed.data;
 
-  try {
-    await pb.collection('startups').update(id, {
-      name: data.name,
-      description: data.description,
-      phase: data.phase,
-      status: data.status,
-      irl_level: data.irl_level ?? null,
-      next_step: data.next_step,
-      tags: data.tags
+  // Skrivvägen går via det delade kärnlagret (lib/core/write). Samma kod
+  // anropas av AI-agentens verktyg med actor.kind = 'agent', vilket
+  // garanterar att UI och agent följer identiska regler för whitelist,
+  // validering och audit (symmetri människa ↔ agent).
+  const actor = {
+    kind: 'user' as const,
+    id: user.id,
+    tenant: user.tenant,
+    roles: user.roles
+  };
+
+  const fieldUpdates: Array<{ field: StartupWritableField; value: unknown }> = [
+    { field: 'name', value: data.name },
+    { field: 'description', value: data.description },
+    { field: 'phase', value: data.phase },
+    { field: 'status', value: data.status },
+    { field: 'irl_level', value: data.irl_level },
+    { field: 'next_step', value: data.next_step },
+    { field: 'tags', value: data.tags }
+  ];
+
+  for (const { field, value } of fieldUpdates) {
+    const result = await updateStartupField(pb, actor, {
+      startupId: id,
+      field,
+      value
     });
-  } catch (err) {
-    return { error: formatStartupActionError(err, 'Kunde inte uppdatera bolaget.') };
+    if (!result.ok) {
+      return { error: result.error };
+    }
   }
 
   revalidatePath('/startups');

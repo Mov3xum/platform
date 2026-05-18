@@ -13,6 +13,8 @@ import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
 import { buildChatTools, dispatchToolCall } from '@/lib/ai/tools';
 import { hasRole } from '@/lib/rbac';
 import { logAiUsage } from '@/lib/ai/usage';
+import type { Actor } from '@/lib/core/write';
+import type { Role } from '@platform/shared';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -114,14 +116,28 @@ const STYLE_REMINDER =
   '("först X, sedan Y, och slutligen Z") eller med ett tankestreck per ny rad.';
 
 const STAFF_TOOL_GUIDANCE =
-  '\n\nDu har tillgång till verktygen `query_collection` och `count_collection` för att läsa ' +
-  'från PocketBase live. Använd dem ALLTID när användaren frågar om konkreta data — gissa aldrig. ' +
-  'Tenant-scope läggs till automatiskt server-side; du behöver inte (och kan inte) sätta tenant själv.\n\n' +
+  '\n\nDu har tillgång till verktyg för att både LÄSA och SKRIVA i plattformen:\n' +
+  '- `query_collection` / `count_collection`: läs data live från PocketBase. ' +
+  'Använd ALLTID när användaren frågar om konkreta data — gissa aldrig. ' +
+  'Tenant-scope läggs till automatiskt server-side.\n' +
+  '- `update_startup_field`: uppdatera ETT skrivbart fält på en startup ' +
+  '(t.ex. `next_step` eller `irl_level`). Använd när användaren ber dig ' +
+  'notera nästa steg, justera mognadsnivå eller liknande.\n' +
+  '- `create_startup_activity`: logga en anteckning, ett möte eller en manuell ' +
+  'aktivitet kopplat till ett bolag.\n\n' +
+  'Skrivregler:\n' +
+  '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
+  'efterfrågad ("uppdatera Acmes next_step till X" är otvetydigt; "vad ska Acme göra härnäst?" är inte det).\n' +
+  '- Slå alltid upp bolagets id med `query_collection` först om du inte redan har det.\n' +
+  '- Varje skrivning loggas i `agent_actions` och kan rullas tillbaka av staff — ' +
+  'var ändå försiktig och föredra små, tydliga ändringar.\n' +
+  '- Försök inte skriva fält som inte finns i verktygets `field`-enum — du får ' +
+  'felmeddelande och behöver be användaren använda formuläret istället.\n\n' +
   'Arbetsmönster:\n' +
   '1. Identifiera vilken/vilka kollektioner som behövs utifrån schemat nedan.\n' +
   '2. Sök först brett (t.ex. `name ~ "Enava"`) för att hitta rätt id.\n' +
   '3. Följ upp med riktade queries via id eller relationer.\n' +
-  '4. Korsreferera flera kollektioner när det krävs (t.ex. startups + deals + startup_team_members).\n' +
+  '4. Korsreferera flera kollektioner när det krävs.\n' +
   '5. Om en kollektion saknar data eller fält som efterfrågas — säg det rakt, hitta inte på.\n\n' +
   'OBS: Plattformen spårar IRL (Investment Readiness Level, fältet `irl_level` 1-9) — INTE TRL. ' +
   'Om användaren frågar om TRL, svara med IRL och förklara skillnaden kort.';
@@ -331,7 +347,15 @@ export async function sendChatMessage(
   }
 
   if (isStaff) {
-    return runStaffChatWithTools(pb, user, limitedMessages, webBlock, agentBlock, att.images);
+    return runStaffChatWithTools(
+      pb,
+      user,
+      limitedMessages,
+      webBlock,
+      agentBlock,
+      att.images,
+      options.agentId
+    );
   }
 
   if (isStartup && user.linkedStartups.length > 0) {
@@ -370,7 +394,8 @@ async function runStaffChatWithTools(
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
   webBlock: string,
   agentBlock: string,
-  images: Array<{ dataUrl: string }>
+  images: Array<{ dataUrl: string }>,
+  agentId?: string
 ): Promise<ChatActionResult> {
   let collections: Awaited<ReturnType<typeof getExposedCollections>> = [];
   let schemaSummary = '';
@@ -385,7 +410,19 @@ async function runStaffChatWithTools(
     return { error: 'Inga kollektioner exponerade — kontrollera POCKETBASE_SUPERUSER_EMAIL/PASSWORD.' };
   }
 
-  const tools = buildChatTools(collections);
+  // Actor för det delade skrivlagret. Vi sätter `kind: 'agent'` när
+  // staff-chatten kör tool-loopen — det aktiverar agentens
+  // skriv-whitelist (next_step, irl_level, create_startup_activity).
+  // Audit-raderna får actor=user.id så vi kan spåra vem som triggade.
+  const actor: Actor = {
+    kind: 'agent',
+    id: user.id,
+    tenant: user.tenant,
+    roles: user.roles as Role[],
+    agentId
+  };
+
+  const tools = buildChatTools(collections, { actor });
 
   const today = new Date().toISOString().slice(0, 10);
   const identityBlock =
@@ -437,7 +474,8 @@ async function runStaffChatWithTools(
         const toolResult = await dispatchToolCall(call, {
           pb,
           tenantId: user.tenant,
-          collections
+          collections,
+          actor
         });
         conversation.push({
           role: 'tool',
