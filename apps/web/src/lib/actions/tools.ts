@@ -9,7 +9,13 @@ import {
   buildPortfolioContext,
   renderPromptTemplate
 } from '@/lib/ai/context';
-import type { Tool, ToolRunThreadEntry, KnowledgeSourceRef } from '@platform/shared';
+import { fetchWebContext, type WebFetchResult } from '@/lib/ai/web';
+import type {
+  Tool,
+  ToolRunThreadEntry,
+  KnowledgeSourceRef,
+  WebSourceKey
+} from '@platform/shared';
 import { recordActivity } from './record-activity';
 
 const SYSTEM_PROMPT =
@@ -30,6 +36,55 @@ const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+/**
+ * Bygger context för en AI-körning. Inkluderar startup-/portfölj-data och,
+ * om verktyget definierar `web_sources`, hämtar live-data från whitelistade
+ * EU-källor parallellt.
+ *
+ * Returnerar både det renderbara context-objektet (för prompten) och
+ * själva web-resultaten (för loggning i `tool_runs.input` per AI Act art. 13).
+ */
+async function buildToolContext(
+  pb: import('pocketbase').default,
+  tool: Tool & Record<string, unknown>,
+  tenantId: string,
+  startupId: string | undefined
+): Promise<{
+  contextObj: Record<string, unknown>;
+  webResults: WebFetchResult[];
+}> {
+  const webSources = Array.isArray(tool.web_sources)
+    ? (tool.web_sources as WebSourceKey[])
+    : [];
+
+  const [baseContext, webMap] = await Promise.all([
+    tool.category === 'ai_per_startup' && startupId
+      ? buildStartupContext(pb, startupId, tenantId).then(
+          (ctx) => ctx as unknown as Record<string, unknown>
+        )
+      : buildPortfolioContext(pb, tenantId).then(
+          (ctx) => ctx as unknown as Record<string, unknown>
+        ),
+    webSources.length > 0
+      ? fetchWebContext(pb, webSources)
+      : Promise.resolve({} as Record<string, WebFetchResult>)
+  ]);
+
+  // Flatten web-map till en prompt-vänlig form: {{web.<key>}} -> body
+  const webForPrompt: Record<string, string> = {};
+  const webResults: WebFetchResult[] = [];
+  for (const key of Object.keys(webMap)) {
+    const r = webMap[key];
+    webForPrompt[key] = r.body || (r.ok ? '' : `(källan ${r.label} kunde inte hämtas)`);
+    webResults.push(r);
+  }
+
+  return {
+    contextObj: { ...baseContext, web: webForPrompt },
+    webResults
+  };
 }
 
 async function getRunForMutation(
@@ -136,16 +191,15 @@ export async function startRunAction(runId: string): Promise<ToolActionState> {
     let tokensOut = 0;
     const isAi = tool.category === 'ai_per_startup' || tool.category === 'ai_system_wide';
 
+    let webResults: WebFetchResult[] = [];
     if (isAi && tool.prompt_template && tool.model) {
-      let contextObj: Record<string, unknown>;
-      if (tool.category === 'ai_per_startup' && startupId) {
-        const ctx = await buildStartupContext(pb, startupId, user.tenant);
-        contextObj = ctx as unknown as Record<string, unknown>;
-      } else {
-        const ctx = await buildPortfolioContext(pb, user.tenant);
-        contextObj = ctx as unknown as Record<string, unknown>;
-      }
-      const userContent = renderPromptTemplate(tool.prompt_template as string, contextObj);
+      const built = await buildToolContext(pb, tool, user.tenant, startupId);
+      webResults = built.webResults;
+
+      const userContent = renderPromptTemplate(
+        tool.prompt_template as string,
+        built.contextObj
+      );
       const result = await callMistral(tool.model as string, [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userContent }
@@ -153,6 +207,24 @@ export async function startRunAction(runId: string): Promise<ToolActionState> {
       outputMd = result.text;
       tokensIn = result.usage.prompt_tokens;
       tokensOut = result.usage.completion_tokens;
+
+      if (webResults.length > 0) {
+        const existingInput =
+          (run.input as Record<string, unknown> | undefined) || {};
+        await pb.collection('tool_runs').update(runId, {
+          input: {
+            ...existingInput,
+            web_sources: webResults.map((r) => ({
+              source: r.source,
+              label: r.label,
+              fetched_at: r.fetched_at,
+              cached: r.cached,
+              ok: r.ok,
+              error: r.error
+            }))
+          }
+        });
+      }
     } else if (!isAi && tool.prompt_template) {
       outputMd = (tool.prompt_template as string)
         .replace(/<[^>]*>/g, '')
@@ -404,20 +476,15 @@ export async function runToolAction(
     const isAiTool =
       tool.category === 'ai_per_startup' || tool.category === 'ai_system_wide';
 
+    let webResults: WebFetchResult[] = [];
     if (isAiTool && tool.prompt_template && tool.model) {
-      // Build context
-      let contextObj: Record<string, unknown>;
-      if (tool.category === 'ai_per_startup' && startupId) {
-        const ctx = await buildStartupContext(pb, startupId, user.tenant);
-        contextObj = ctx as unknown as Record<string, unknown>;
-      } else {
-        const ctx = await buildPortfolioContext(pb, user.tenant);
-        contextObj = ctx as unknown as Record<string, unknown>;
-      }
+      // Build context (startup/portfolio + ev. web-sources parallellt)
+      const built = await buildToolContext(pb, tool, user.tenant, startupId);
+      webResults = built.webResults;
 
       const userContent = renderPromptTemplate(
         tool.prompt_template as string,
-        contextObj
+        built.contextObj
       );
 
       // Call Mistral
@@ -429,6 +496,24 @@ export async function runToolAction(
       outputMd = result.text;
       tokensIn = result.usage.prompt_tokens;
       tokensOut = result.usage.completion_tokens;
+
+      // Logga vilka web-källor som användes (transparenskrav, AI Act art. 13)
+      if (webResults.length > 0) {
+        await pb.collection('tool_runs').update(runId, {
+          input: {
+            startupId,
+            extraInputs,
+            web_sources: webResults.map((r) => ({
+              source: r.source,
+              label: r.label,
+              fetched_at: r.fetched_at,
+              cached: r.cached,
+              ok: r.ok,
+              error: r.error
+            }))
+          }
+        });
+      }
     } else if (!isAiTool && tool.prompt_template) {
       // Non-AI tool: use prompt_template as static output
       outputMd = (tool.prompt_template as string)
