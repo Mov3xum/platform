@@ -12,6 +12,7 @@ import {
   WorkshopAssignmentStatusBadge
 } from '@/components/Badges';
 import { NoteForm } from '@/components/NoteForm';
+import { NoteItem } from '@/components/NoteItem';
 import { StartupDetailDashboard } from '@/components/StartupDetailDashboard';
 import {
   activityStatusLabels,
@@ -460,7 +461,12 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                       </span>
                     ) : null}
                   </div>
-                  <div className="prose prose-sm max-w-none text-foreground-muted dark:prose-invert" dangerouslySetInnerHTML={{ __html: n.body }} />
+                  <NoteItem
+                    noteId={n.id}
+                    body={n.body}
+                    confidential={n.confidential}
+                    isAuthor={n.author === user.id}
+                  />
                 </li>
               ))}
             </ul>

@@ -22,7 +22,7 @@ COPY package.json yarn.lock ./
 COPY apps/web ./apps/web
 COPY packages/shared ./packages/shared
 
-RUN cd apps/web && yarn build
+RUN cd apps/web && NODE_OPTIONS="--max-old-space-size=3072" yarn build
 
 # Minimal runtime image: copies only the standalone Next.js output
 # (~50MB) instead of the full builder /app (~1GB+). Avoids OOM/disk

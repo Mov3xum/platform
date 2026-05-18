@@ -51,8 +51,25 @@ const FILTERS: { id: string; label: string; href: string }[] = [
   { id: 'manual', label: 'Manuella', href: '/aktivitet?kind=manual' },
   { id: 'tool_run', label: 'Verktygskörningar', href: '/aktivitet?kind=tool_run' },
   { id: 'workshop_assignment', label: 'Workshop tilldelning', href: '/aktivitet?kind=workshop_assignment' },
-  { id: 'workshop_run', label: 'Workshop AI', href: '/aktivitet?kind=workshop_run' }
+  { id: 'workshop_run', label: 'Workshop AI', href: '/aktivitet?kind=workshop_run' },
+  { id: 'integration_sync', label: 'Integrationssynk', href: '/aktivitet?kind=integration_sync' }
 ];
+
+interface IntegrationSyncRunRow {
+  id: string;
+  provider_slug: string;
+  status: 'started' | 'success' | 'failed' | 'partial';
+  started_at: string;
+  finished_at?: string;
+  records_created?: number;
+  records_updated?: number;
+  records_skipped?: number;
+  error_message?: string;
+  created: string;
+  expand?: {
+    triggered_by?: { id: string; display_name?: string; email: string };
+  };
+}
 
 export default async function AktivitetPage({
   searchParams
@@ -110,9 +127,32 @@ export default async function AktivitetPage({
     }
   }
 
+  let syncRunsResult: { items: IntegrationSyncRunRow[] } | null = null;
+  let syncRunsLoadFailed = false;
+  if (!kind || kind === 'integration_sync') {
+    try {
+      syncRunsResult = await pb
+        .collection('integration_sync_runs')
+        .getList<IntegrationSyncRunRow>(1, 20, {
+          filter: `tenant = "${user.tenant}"`,
+          sort: '-started_at',
+          expand: 'triggered_by'
+        });
+    } catch (error) {
+      syncRunsLoadFailed = true;
+      console.error('[aktivitet] failed to load integration sync runs', {
+        tenant: user.tenant,
+        userId: user.id,
+        kind,
+        error
+      });
+    }
+  }
+
   type FeedItem =
     | { type: 'activity'; item: ActivityRecord; created: string }
-    | { type: 'system_run'; item: ToolRun; created: string };
+    | { type: 'system_run'; item: ToolRun; created: string }
+    | { type: 'sync_run'; item: IntegrationSyncRunRow; created: string };
 
   const feed: FeedItem[] = [
     ...activitiesResult.items.map((item) => ({
@@ -124,6 +164,11 @@ export default async function AktivitetPage({
       type: 'system_run' as const,
       item,
       created: item.created
+    })) ?? []),
+    ...(syncRunsResult?.items.map((item) => ({
+      type: 'sync_run' as const,
+      item,
+      created: item.started_at
     })) ?? [])
   ].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
 
@@ -173,7 +218,7 @@ export default async function AktivitetPage({
       rightPanel={rail}
     >
       <div className="mx-auto w-full max-w-4xl py-6">
-        {(activitiesLoadFailed || systemRunsLoadFailed) && (
+        {(activitiesLoadFailed || systemRunsLoadFailed || syncRunsLoadFailed) && (
           <div className="mb-5 rounded-xl border border-default bg-surface p-3 text-[13px] text-foreground-muted">
             Vissa aktiviteter kunde inte laddas just nu. Försök igen om en stund.
           </div>
@@ -275,39 +320,93 @@ export default async function AktivitetPage({
                 );
               }
 
-              const run = entry.item;
-              const tool = run.expand?.tool;
-              const triggeredBy = run.expand?.triggered_by;
+              if (entry.type === 'system_run') {
+                const run = entry.item;
+                const tool = run.expand?.tool;
+                const triggeredBy = run.expand?.triggered_by;
+                return (
+                  <li
+                    key={`run-${run.id}`}
+                    className="rounded-xl border border-default bg-surface p-4"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        {tool?.icon && <span className="mt-0.5 text-base">{tool.icon}</span>}
+                        <div>
+                          <p className="text-[13.5px] font-medium text-foreground">
+                            <Link href={`/toolbox/runs/${run.id}`} className="hover:underline">
+                              {tool?.name ?? 'Portföljkörning'}
+                            </Link>
+                          </p>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px] text-foreground-subtle">
+                            <span className="font-medium text-link">Portfölj</span>
+                            <span>·</span>
+                            <span className="font-mono">
+                              {new Date(run.created).toLocaleString('sv-SE')}
+                            </span>
+                            <span>·</span>
+                            <span>{triggeredBy?.display_name ?? triggeredBy?.email ?? 'Okänd'}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {tool?.category && (
+                          <ToolCategoryBadge category={tool.category as never} />
+                        )}
+                        <ToolRunStatusBadge status={run.status as ToolRunStatus} />
+                      </div>
+                    </div>
+                  </li>
+                );
+              }
+
+              const sync = entry.item;
+              const created = sync.records_created ?? 0;
+              const updated = sync.records_updated ?? 0;
+              const syncBy = sync.expand?.triggered_by;
+              const statusBadge: Record<IntegrationSyncRunRow['status'], string> = {
+                started: 'bg-canvas-muted text-foreground-muted',
+                success:
+                  'bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron',
+                partial:
+                  'bg-movexum-pastell-gul text-movexum-morkgul dark:bg-movexum-morkgul/40 dark:text-movexum-pastell-gul',
+                failed:
+                  'bg-movexum-pastell-orange text-movexum-morkorange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange'
+              };
               return (
                 <li
-                  key={`run-${run.id}`}
+                  key={`sync-${sync.id}`}
                   className="rounded-xl border border-default bg-surface p-4"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex items-start gap-3">
-                      {tool?.icon && <span className="mt-0.5 text-base">{tool.icon}</span>}
-                      <div>
-                        <p className="text-[13.5px] font-medium text-foreground">
-                          <Link href={`/toolbox/runs/${run.id}`} className="hover:underline">
-                            {tool?.name ?? 'Portföljkörning'}
-                          </Link>
-                        </p>
-                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px] text-foreground-subtle">
-                          <span className="font-medium text-link">Portfölj</span>
-                          <span>·</span>
-                          <span className="font-mono">
-                            {new Date(run.created).toLocaleString('sv-SE')}
-                          </span>
-                          <span>·</span>
-                          <span>{triggeredBy?.display_name ?? triggeredBy?.email ?? 'Okänd'}</span>
-                        </div>
+                    <div>
+                      <p className="text-[13.5px] font-medium text-foreground">
+                        <Link
+                          href={`/integrationer/${sync.provider_slug}`}
+                          className="hover:underline"
+                        >
+                          {sync.provider_slug} – integrationssynk
+                        </Link>
+                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px] text-foreground-subtle">
+                        <span>
+                          {created} nya · {updated} uppdaterade
+                          {sync.error_message ? ` · ${sync.error_message}` : ''}
+                        </span>
+                        <span>·</span>
+                        <span className="font-mono">
+                          {new Date(sync.started_at).toLocaleString('sv-SE')}
+                        </span>
+                        <span>·</span>
+                        <span>{syncBy?.display_name ?? syncBy?.email ?? 'System'}</span>
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      {tool?.category && (
-                        <ToolCategoryBadge category={tool.category as never} />
-                      )}
-                      <ToolRunStatusBadge status={run.status as ToolRunStatus} />
+                      <span
+                        className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium ${statusBadge[sync.status]}`}
+                      >
+                        {sync.status}
+                      </span>
                     </div>
                   </div>
                 </li>

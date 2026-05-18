@@ -1,10 +1,30 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { canAccessModuleForUser } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole, canRunTool } from '@/lib/rbac';
 import { ToolRunStatusBadge } from '@/components/Badges';
 import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
-import type { ToolRun, ToolRunStatus } from '@platform/shared';
+import { isAllowedModel } from '@/lib/ai/models';
+import { MessageList, legacyMessagesFromRun } from './MessageList';
+import { ContinueChatForm } from './ContinueChatForm';
+import type {
+  Tool,
+  ToolModel,
+  ToolRun,
+  ToolRunMessage,
+  ToolRunStatus
+} from '@platform/shared';
+
+const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
+
+interface RunWebSource {
+  source: string;
+  label: string;
+  fetched_at: string;
+  cached: boolean;
+  ok: boolean;
+  error?: string;
+}
 
 export default async function ToolRunDetailPage({
   params
@@ -35,6 +55,38 @@ export default async function ToolRunDetailPage({
     run.started_at && run.completed_at
       ? new Date(run.completed_at).getTime() - new Date(run.started_at).getTime()
       : null;
+
+  const webSources: RunWebSource[] = Array.isArray(
+    (run.input as Record<string, unknown> | undefined)?.web_sources
+  )
+    ? ((run.input as { web_sources: RunWebSource[] }).web_sources)
+    : [];
+
+  // Chatt-läge: bara AI-verktyg får fortsätta. Skribent eller staff,
+  // och canRunTool (skydd mot rollnedgradering mid-chat).
+  const isAiTool =
+    tool?.category === 'ai_per_startup' || tool?.category === 'ai_system_wide';
+  const isStaff = hasRole(user.roles, [...STAFF_ROLES]);
+  const isAuthor = run.triggered_by === user.id;
+  const isLinkedStartup = run.startup
+    ? user.linkedStartups.includes(run.startup)
+    : false;
+  const stillHasRunPermission = tool
+    ? canRunTool(user.roles, tool as Tool, { isLinkedStartup })
+    : false;
+  let canContinue = false;
+  let disabledReason: string | undefined;
+  if (!isAiTool) {
+    disabledReason = 'Detta är inte ett AI-verktyg.';
+  } else if (!isAuthor && !isStaff) {
+    disabledReason = 'Endast den som startade chatten — eller staff — kan fortsätta.';
+  } else if (!stillHasRunPermission) {
+    disabledReason = 'Du har inte längre behörighet att köra denna agent.';
+  } else if (run.status === 'failed') {
+    disabledReason = 'Den här körningen misslyckades.';
+  } else {
+    canContinue = true;
+  }
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10 lg:px-8">
@@ -77,19 +129,66 @@ export default async function ToolRunDetailPage({
             </div>
           )}
 
-          {run.output_md ? (
-            <section className="rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-foreground">Resultat</h2>
-                {(run.tokens_in || run.tokens_out) && (
-                  <span className="text-xs text-foreground-subtle">
-                    ⚠️ {AI_OUTPUT_WARNING_TEXT}
-                  </span>
-                )}
+          {webSources.length > 0 && (
+            <section className="mb-6 rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
+              <h2 className="mb-3 text-sm font-semibold text-foreground">Källor (live)</h2>
+              <ul className="space-y-2 text-xs text-foreground-muted">
+                {webSources.map((s) => (
+                  <li key={`${s.source}-${s.fetched_at}`} className="flex items-baseline justify-between gap-3">
+                    <span className="font-medium text-foreground">
+                      {s.label}
+                      {s.cached && (
+                        <span className="ml-2 text-foreground-subtle">(cache)</span>
+                      )}
+                      {!s.ok && (
+                        <span className="ml-2 text-movexum-morkorange dark:text-movexum-pastell-orange">
+                          – {s.error || 'kunde inte hämtas'}
+                        </span>
+                      )}
+                    </span>
+                    <span className="font-mono text-foreground-subtle">
+                      {new Date(s.fetched_at).toLocaleString('sv-SE')}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-xs text-foreground-subtle">
+                Live-källor är EU-baserade och cachas i 30 min för att inte överbelasta källorna.
+              </p>
+            </section>
+          )}
+
+          {run.output_md || (run.messages && run.messages.length > 0) ? (
+            <section className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-foreground">Chatt</h2>
+                <span className="text-xs text-foreground-subtle">
+                  ⚠️ {AI_OUTPUT_WARNING_TEXT}
+                </span>
               </div>
-              <div className="prose prose-sm max-w-none text-foreground-muted dark:prose-invert">
-                <pre className="whitespace-pre-wrap font-body text-sm">{run.output_md}</pre>
-              </div>
+
+              <MessageList
+                messages={
+                  run.messages && run.messages.length > 0
+                    ? (run.messages as ToolRunMessage[])
+                    : legacyMessagesFromRun(run)
+                }
+              />
+
+              {isAiTool && (
+                <ContinueChatForm
+                  runId={run.id}
+                  defaultModel={
+                    isAllowedModel(run.model)
+                      ? (run.model as ToolModel)
+                      : isAllowedModel(tool?.model)
+                        ? (tool!.model as ToolModel)
+                        : undefined
+                  }
+                  disabled={!canContinue}
+                  disabledReason={disabledReason}
+                />
+              )}
             </section>
           ) : (
             <div className="rounded-3xl border border-dashed border-strong bg-surface/50 p-12 text-center">

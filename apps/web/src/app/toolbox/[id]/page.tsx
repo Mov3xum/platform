@@ -5,8 +5,10 @@ import { canAccessModuleForUser, hasRole, canRunTool } from '@/lib/rbac';
 import { ToolCategoryBadge, ToolRunStatusBadge } from '@/components/Badges';
 import { toolCategoryLabels, type ToolRunStatus } from '@/lib/labels';
 import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
+import { getWebSourceLabel } from '@/lib/ai/web';
 import { RunToolForm } from '../RunToolForm';
-import type { Tool, ToolRun } from '@platform/shared';
+import type { Tool, ToolModel, ToolRun, WebSourceKey } from '@platform/shared';
+import { isAllowedModel } from '@/lib/ai/models';
 
 export default async function ToolDetailPage({
   params,
@@ -128,13 +130,25 @@ export default async function ToolDetailPage({
                 <div className="mb-4 rounded-2xl border border-movexum-bla/30 bg-movexum-pastell-bla px-4 py-3 dark:border-movexum-djupbla/50 dark:bg-movexum-morkbla/30">
                   <p className="text-xs text-movexum-morkbla dark:text-movexum-pastell-bla">
                     ⚠️ {AI_OUTPUT_WARNING_TEXT}. Konfidentiella anteckningar exkluderas automatiskt.
-                </p>
-              </div>
+                  </p>
+                  {Array.isArray(tool.web_sources) && tool.web_sources.length > 0 && (
+                    <p className="mt-2 text-xs text-movexum-morkbla dark:text-movexum-pastell-bla">
+                      📡 Hämtar live från:{' '}
+                      <span className="font-medium">
+                        {(tool.web_sources as WebSourceKey[])
+                          .map((k) => getWebSourceLabel(k))
+                          .join(', ')}
+                      </span>
+                    </p>
+                  )}
+                </div>
               <RunToolForm
                 toolId={id}
                 requiresStartup={tool.requires_startup}
+                isAiTool={tool.category === 'ai_per_startup' || tool.category === 'ai_system_wide'}
                 startups={startups}
                 defaultStartupId={defaultStartupId}
+                defaultModel={isAllowedModel(tool.model) ? (tool.model as ToolModel) : undefined}
               />
             </section>
           ) : (

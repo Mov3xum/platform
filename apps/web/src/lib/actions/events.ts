@@ -191,6 +191,123 @@ async function recomputeEventCounters(
   }
 }
 
+export async function updateEventAction(
+  id: string,
+  _prev: EventActionState,
+  formData: FormData
+): Promise<EventActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  const pb = await getServerPb();
+
+  let event: IncubatorEvent;
+  try {
+    event = await pb.collection(PB_COLLECTIONS.events).getOne<IncubatorEvent>(id);
+  } catch {
+    return { error: 'Event hittades inte.' };
+  }
+  if (event.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  const name = String(formData.get('name') || '').trim();
+  if (!name) return { error: 'Namn krävs.' };
+
+  const typeRaw = String(formData.get('type') || event.type) as EventType;
+  const type = VALID_EVENT_TYPES.includes(typeRaw) ? typeRaw : event.type;
+  const statusRaw = String(formData.get('status') || event.status) as EventStatus;
+  const status = VALID_EVENT_STATUS.includes(statusRaw) ? statusRaw : event.status;
+
+  const startsAtInput = String(formData.get('starts_at') || '').trim();
+  if (!startsAtInput) return { error: 'Startdatum krävs.' };
+  const startsAt = new Date(startsAtInput);
+  if (Number.isNaN(startsAt.getTime())) return { error: 'Ogiltigt datum.' };
+
+  const endsAtInput = String(formData.get('ends_at') || '').trim();
+  const endsAt = endsAtInput ? new Date(endsAtInput) : null;
+  if (endsAt && Number.isNaN(endsAt.getTime())) return { error: 'Ogiltigt slutdatum.' };
+
+  const location = String(formData.get('location') || '').trim();
+  const description = String(formData.get('description') || '').trim();
+  const accent = String(formData.get('accent') || event.accent || 'cyan').trim();
+
+  try {
+    await pb.collection(PB_COLLECTIONS.events).update(id, {
+      name,
+      type,
+      status,
+      starts_at: startsAt.toISOString(),
+      ends_at: endsAt ? endsAt.toISOString() : null,
+      location: location || null,
+      description: description || null,
+      accent
+    });
+    revalidatePath('/events');
+    revalidatePath(`/events/${id}`);
+    return { eventId: id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera event.' };
+  }
+}
+
+export async function deleteEventAction(id: string): Promise<EventActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  const pb = await getServerPb();
+
+  let event: IncubatorEvent;
+  try {
+    event = await pb.collection(PB_COLLECTIONS.events).getOne<IncubatorEvent>(id);
+  } catch {
+    return { error: 'Event hittades inte.' };
+  }
+  if (event.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  try {
+    const signups = await pb.collection(PB_COLLECTIONS.eventSignups).getFullList<EventSignup>({
+      filter: `tenant = "${user.tenant}" && event = "${id}"`,
+      fields: 'id'
+    });
+    for (const s of signups) {
+      await pb.collection(PB_COLLECTIONS.eventSignups).delete(s.id);
+    }
+    await pb.collection(PB_COLLECTIONS.events).delete(id);
+    revalidatePath('/events');
+    return { eventId: id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte radera event.' };
+  }
+}
+
+export async function deleteEventFormAction(formData: FormData): Promise<void> {
+  'use server';
+  const id = String(formData.get('event_id') || '').trim();
+  if (!id) return;
+  await deleteEventAction(id);
+}
+
+export async function deleteEventSignupAction(signupId: string): Promise<EventActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  const pb = await getServerPb();
+
+  let signup: EventSignup;
+  try {
+    signup = await pb.collection(PB_COLLECTIONS.eventSignups).getOne<EventSignup>(signupId);
+  } catch {
+    return { error: 'Anmälan hittades inte.' };
+  }
+  if (signup.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  try {
+    await pb.collection(PB_COLLECTIONS.eventSignups).delete(signupId);
+    await recomputeEventCounters(pb, user.tenant, signup.event);
+    revalidatePath('/events');
+    revalidatePath(`/events/${signup.event}`);
+    return { signupId };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte radera anmälan.' };
+  }
+}
+
 export async function listEvents(): Promise<IncubatorEvent[]> {
   const user = await requireUser();
   const pb = await getServerPb();

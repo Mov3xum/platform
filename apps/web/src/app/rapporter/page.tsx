@@ -78,7 +78,7 @@ export default async function RapporterPage({
 
   const actions = (
     <Link
-      href="/rapporter?new=1"
+      href="/rapporter/new"
       className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
     >
       <Icon name="plus" size={12} /> Ny rapport
@@ -147,7 +147,7 @@ export default async function RapporterPage({
               Skapa din första rapport för Vinnova, Tillväxtverket eller regionen.
             </div>
             <Link
-              href="/rapporter?new=1"
+              href="/rapporter/new"
               className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
             >
               <Icon name="plus" size={12} /> Ny rapport

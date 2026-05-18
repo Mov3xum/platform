@@ -162,3 +162,35 @@ export async function updateStartupAction(
   revalidatePath(`/startups/${id}`);
   redirect(`/startups/${id}`);
 }
+
+export async function deleteStartupAction(id: string): Promise<{ error?: string }> {
+  const user = await requireUser();
+
+  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+    return { error: 'Du saknar behörighet att radera bolag.' };
+  }
+
+  const pb = await getServerPb();
+
+  try {
+    const existing = await pb.collection('startups').getOne<{ tenant: string }>(id, {
+      fields: 'id,tenant'
+    });
+    if (existing.tenant !== user.tenant) {
+      return { error: 'Åtkomst nekad.' };
+    }
+    await pb.collection('startups').delete(id);
+  } catch (err) {
+    return { error: formatStartupActionError(err, 'Kunde inte radera bolaget.') };
+  }
+
+  revalidatePath('/startups');
+  redirect('/startups');
+}
+
+export async function deleteStartupFormAction(formData: FormData): Promise<void> {
+  'use server';
+  const id = String(formData.get('id') || '').trim();
+  if (!id) return;
+  await deleteStartupAction(id);
+}

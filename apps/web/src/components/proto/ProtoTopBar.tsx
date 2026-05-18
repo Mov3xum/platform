@@ -2,10 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, useEffect, useMemo } from 'react';
-import { Icon } from './Icon';
+import { useMemo } from 'react';
 import { coreModules } from '@platform/shared';
-import { Cmdk } from './Cmdk';
 import { MobileMenuButton } from './MobileRail';
 
 function buildCrumbs(pathname: string): { label: string; href: string; now: boolean }[] {
@@ -37,53 +35,22 @@ function buildCrumbs(pathname: string): { label: string; href: string; now: bool
 export function ProtoTopBar() {
   const pathname = usePathname();
   const crumbs = useMemo(() => buildCrumbs(pathname), [pathname]);
-  const [cmdkOpen, setCmdkOpen] = useState(false);
-
-  // ⌘K / Ctrl+K
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setCmdkOpen((v) => !v);
-      }
-      if (e.key === 'Escape' && cmdkOpen) setCmdkOpen(false);
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [cmdkOpen]);
 
   return (
-    <>
-      <div className="mx-topbar">
-        <MobileMenuButton />
-        <div className="mx-crumb">
-          {crumbs.map((c, i) => (
-            <span key={c.href + i} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              {i > 0 && <span className="mx-sep">/</span>}
-              <Link href={c.href} className={`mx-seg${c.now ? ' now' : ''}`}>
-                {c.label}
-              </Link>
-            </span>
-          ))}
-        </div>
-
-        <div className="mx-topbar-spacer" />
-
-        <button className="mx-topbar-search" type="button" onClick={() => setCmdkOpen(true)}>
-          <Icon name="search" size={13} />
-          <span className="mx-topbar-search-label">Hoppa, hitta, kör…</span>
-          <kbd>⌘K</kbd>
-        </button>
-        <button
-          className="mx-topbar-search-mobile"
-          type="button"
-          onClick={() => setCmdkOpen(true)}
-          aria-label="Sök"
-        >
-          <Icon name="search" size={18} />
-        </button>
+    <div className="mx-topbar">
+      <MobileMenuButton />
+      <div className="mx-crumb">
+        {crumbs.map((c, i) => (
+          <span key={c.href + i} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            {i > 0 && <span className="mx-sep">/</span>}
+            <Link href={c.href} className={`mx-seg${c.now ? ' now' : ''}`}>
+              {c.label}
+            </Link>
+          </span>
+        ))}
       </div>
-      <Cmdk open={cmdkOpen} onClose={() => setCmdkOpen(false)} />
-    </>
+
+      <div className="mx-topbar-spacer" />
+    </div>
   );
 }

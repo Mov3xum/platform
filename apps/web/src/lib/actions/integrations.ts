@@ -3,10 +3,30 @@
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { revalidatePath } from 'next/cache';
+import {
+  clearCredentials,
+  getSuperuserPb,
+  saveCredentials
+} from '@/lib/integrations/credentials';
+import { getHandler } from '@/lib/integrations/registry';
+import { runSync } from '@/lib/integrations/sync';
+import { recordActivity } from './record-activity';
 
 export type IntegrationPilotState = {
   error?: string;
   success?: boolean;
+};
+
+export type IntegrationConnectState = {
+  error?: string;
+  success?: boolean;
+};
+
+export type IntegrationSyncState = {
+  error?: string;
+  summary?: string;
+  recordsCreated?: number;
+  recordsUpdated?: number;
 };
 
 interface ExistingTenantIntegration {
@@ -16,10 +36,16 @@ interface ExistingTenantIntegration {
   status: string;
 }
 
+interface ProviderRow {
+  id: string;
+  slug: string;
+  name: string;
+}
+
 // Records (or refreshes) a tenant's intent to pilot a specific
-// integration provider. Until OAuth flows are built, this is the
-// hand-off mechanism — Movexum staff sees the request in tenant_integrations
-// and reaches out manually.
+// integration provider. Used for providers without a handler yet —
+// staff sees the request in tenant_integrations and reaches out
+// manually.
 export async function requestIntegrationPilotAction(
   _prev: IntegrationPilotState,
   formData: FormData
@@ -38,7 +64,6 @@ export async function requestIntegrationPilotAction(
 
   const pb = await getServerPb();
 
-  // Validate provider exists and is not a long-archived stub.
   try {
     await pb.collection('integration_providers').getOne(providerId);
   } catch {
@@ -67,7 +92,6 @@ export async function requestIntegrationPilotAction(
 
   try {
     if (existing) {
-      // Don't downgrade an already-connected tenant.
       if (existing.status === 'connected') {
         return { success: true };
       }
@@ -86,4 +110,210 @@ export async function requestIntegrationPilotAction(
 
   revalidatePath('/integrationer');
   return { success: true };
+}
+
+// Connects an integration by testing + storing encrypted credentials
+// for the current tenant. RBAC: admin + incubator_lead. Credentials
+// arrive as form fields whose keys come from handler.credentialFields.
+export async function connectIntegrationAction(
+  _prev: IntegrationConnectState,
+  formData: FormData
+): Promise<IntegrationConnectState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+    return { error: 'Endast inkubatorledning kan ansluta integrationer.' };
+  }
+
+  const providerSlug = String(formData.get('provider_slug') || '').trim();
+  if (!providerSlug) {
+    return { error: 'Saknad leverantör.' };
+  }
+
+  const handler = getHandler(providerSlug);
+  if (!handler) {
+    return { error: 'Den här leverantören kan inte anslutas automatiskt än.' };
+  }
+
+  const creds: Record<string, string> = {};
+  for (const field of handler.credentialFields) {
+    const value = String(formData.get(field.key) || '').trim();
+    if (field.required && !value) {
+      return { error: `Fältet "${field.label}" är obligatoriskt.` };
+    }
+    if (value) creds[field.key] = value;
+  }
+
+  const test = await handler.testConnection(creds);
+  if (!test.ok) {
+    return { error: test.error || 'Anslutningen kunde inte verifieras.' };
+  }
+
+  const pb = await getServerPb();
+
+  let provider: ProviderRow;
+  try {
+    provider = await pb
+      .collection('integration_providers')
+      .getFirstListItem<ProviderRow>(`slug = "${providerSlug}"`);
+  } catch {
+    return { error: 'Leverantören finns inte i katalogen.' };
+  }
+
+  const filter = `tenant = "${user.tenant}" && provider = "${provider.id}"`;
+  let existing: ExistingTenantIntegration | null = null;
+  try {
+    existing = await pb
+      .collection('tenant_integrations')
+      .getFirstListItem<ExistingTenantIntegration>(filter);
+  } catch {
+    existing = null;
+  }
+
+  let tenantIntegrationId = existing?.id || '';
+  try {
+    if (existing) {
+      await pb.collection('tenant_integrations').update(existing.id, {
+        status: 'connected',
+        connected_at: new Date().toISOString()
+      });
+    } else {
+      const created = await pb.collection('tenant_integrations').create({
+        tenant: user.tenant,
+        provider: provider.id,
+        status: 'connected',
+        connected_at: new Date().toISOString(),
+        requested_by: user.id
+      });
+      tenantIntegrationId = created.id as string;
+    }
+  } catch (error) {
+    console.error('[integrations] failed to upsert tenant_integration', {
+      tenant: user.tenant,
+      providerSlug,
+      error
+    });
+    return { error: 'Kunde inte aktivera integrationen. Försök igen.' };
+  }
+
+  const saved = await saveCredentials(tenantIntegrationId, creds);
+  if (!saved) {
+    return {
+      error:
+        'Krypterad lagring misslyckades — kontrollera MOVEXUM_INTEGRATION_KEY på servern.'
+    };
+  }
+
+  await recordActivity(pb, {
+    tenant: user.tenant,
+    kind: 'integration_sync',
+    actor: user.id,
+    title: `${provider.name} ansluten`,
+    meta: 'Integrationen aktiverad. Klicka "Synka nu" för att hämta data.'
+  });
+
+  revalidatePath('/integrationer');
+  revalidatePath(`/integrationer/${providerSlug}`);
+  return { success: true };
+}
+
+// Disconnects an integration: clears credentials and resets status.
+// Records remain — they can be purged manually if needed (GDPR § 17).
+export async function disconnectIntegrationAction(
+  formData: FormData
+): Promise<{ error?: string; success?: boolean }> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin'])) {
+    return { error: 'Endast admin kan koppla bort integrationer.' };
+  }
+
+  const tenantIntegrationId = String(formData.get('tenant_integration_id') || '').trim();
+  if (!tenantIntegrationId) return { error: 'Saknad integration.' };
+
+  const adminResult = await getSuperuserPb();
+  if (!adminResult.ok) return { error: 'Serverkonfiguration ofullständig.' };
+
+  try {
+    const row = await adminResult.pb
+      .collection('tenant_integrations')
+      .getOne<{ tenant: string }>(tenantIntegrationId);
+    if (row.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+    await adminResult.pb.collection('tenant_integrations').update(tenantIntegrationId, {
+      status: 'available',
+      connected_at: null
+    });
+    await clearCredentials(tenantIntegrationId);
+  } catch (error) {
+    console.error('[integrations] disconnect failed', {
+      tenantIntegrationId,
+      error
+    });
+    return { error: 'Kunde inte koppla bort integrationen.' };
+  }
+
+  revalidatePath('/integrationer');
+  return { success: true };
+}
+
+// Triggers a sync. RBAC: admin + incubator_lead. Wraps runSync()
+// and surfaces the count summary back to the UI.
+export async function syncIntegrationAction(
+  _prev: IntegrationSyncState,
+  formData: FormData
+): Promise<IntegrationSyncState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+    return { error: 'Endast inkubatorledning kan köra synk.' };
+  }
+
+  const tenantIntegrationId = String(formData.get('tenant_integration_id') || '').trim();
+  const providerSlug = String(formData.get('provider_slug') || '').trim();
+  if (!tenantIntegrationId) return { error: 'Saknad integration.' };
+
+  const adminResult = await getSuperuserPb();
+  if (!adminResult.ok) return { error: 'Serverkonfiguration ofullständig.' };
+
+  try {
+    const row = await adminResult.pb
+      .collection('tenant_integrations')
+      .getOne<{ tenant: string; status: string }>(tenantIntegrationId);
+    if (row.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+    if (row.status !== 'connected') {
+      return { error: 'Integrationen är inte ansluten.' };
+    }
+  } catch {
+    return { error: 'Integrationen hittades inte.' };
+  }
+
+  const result = await runSync(tenantIntegrationId, user.id);
+
+  const pb = await getServerPb();
+  const summary =
+    result.status === 'failed'
+      ? `Synk misslyckades: ${result.errorMessage || 'okänt fel'}`
+      : `Synk klar — ${result.recordsCreated} nya, ${result.recordsUpdated} uppdaterade.`;
+
+  await recordActivity(pb, {
+    tenant: user.tenant,
+    kind: 'integration_sync',
+    actor: user.id,
+    title: `${providerSlug || 'Integration'} synkad`,
+    meta: summary
+  });
+
+  revalidatePath('/integrationer');
+  if (providerSlug) {
+    revalidatePath(`/integrationer/${providerSlug}`);
+    revalidatePath(`/integrationer/${providerSlug}/poster`);
+  }
+  revalidatePath('/aktivitet');
+
+  if (result.status === 'failed') {
+    return { error: summary };
+  }
+  return {
+    summary,
+    recordsCreated: result.recordsCreated,
+    recordsUpdated: result.recordsUpdated
+  };
 }

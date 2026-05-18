@@ -124,6 +124,8 @@ export default async function PartnersPage() {
     </>
   );
 
+  const canManage = hasRole(user.roles, ['admin', 'incubator_lead']);
+
   return (
     <PageShell
       title="Partneröversikt"
@@ -131,6 +133,16 @@ export default async function PartnersPage() {
         <span className="text-[12px] text-foreground-subtle">
           {user.tenantName || 'tenanten'}
         </span>
+      }
+      actions={
+        canManage ? (
+          <Link
+            href="/partners/new"
+            className="inline-flex items-center justify-center rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
+          >
+            + Ny partner
+          </Link>
+        ) : undefined
       }
       rightPanel={rail}
     >
@@ -144,9 +156,10 @@ export default async function PartnersPage() {
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {partners.map((partner) => (
-              <article
+              <Link
                 key={partner.id}
-                className="rounded-2xl border border-default bg-surface p-5 transition hover:border-strong"
+                href={`/partners/${partner.id}`}
+                className="block rounded-2xl border border-default bg-surface p-5 transition hover:border-strong"
               >
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-foreground-subtle">
                   {partner.type}
@@ -155,7 +168,7 @@ export default async function PartnersPage() {
                 <p className="mt-3 text-[13px] text-foreground-muted">
                   {partner.notes || 'Ingen extra information tillagd.'}
                 </p>
-              </article>
+              </Link>
             ))}
           </div>
         )}

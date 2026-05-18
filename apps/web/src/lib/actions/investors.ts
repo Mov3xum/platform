@@ -171,6 +171,120 @@ export async function moveDealStageAction(
   }
 }
 
+export async function updateInvestorAction(
+  id: string,
+  _prev: InvestorActionState,
+  formData: FormData
+): Promise<InvestorActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  const pb = await getServerPb();
+
+  let existing: Investor;
+  try {
+    existing = await pb.collection(PB_COLLECTIONS.investors).getOne<Investor>(id);
+  } catch {
+    return { error: 'Investerare hittades inte.' };
+  }
+  if (existing.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  const name = String(formData.get('name') || '').trim();
+  if (!name) return { error: 'Namn är obligatoriskt.' };
+
+  const warmthRaw = String(formData.get('warmth') || existing.warmth) as InvestorWarmth;
+  const warmth = VALID_WARMTH.includes(warmthRaw) ? warmthRaw : existing.warmth;
+
+  const stageFocus = formData
+    .getAll('stage_focus')
+    .map(String)
+    .filter((s): s is InvestorStage => VALID_INVESTOR_STAGES.includes(s as InvestorStage));
+
+  const focus = parseList(formData.get('focus'));
+  const website = String(formData.get('website') || '').trim();
+  const notes = String(formData.get('notes') || '').trim();
+  const ticket_min = parseNumber(formData.get('ticket_min'));
+  const ticket_max = parseNumber(formData.get('ticket_max'));
+
+  try {
+    await pb.collection(PB_COLLECTIONS.investors).update(id, {
+      name,
+      focus,
+      ticket_min: ticket_min ?? null,
+      ticket_max: ticket_max ?? null,
+      warmth,
+      stage_focus: stageFocus,
+      website: website || null,
+      notes: notes || null
+    });
+    revalidatePath('/investerare');
+    revalidatePath(`/investerare/${id}`);
+    return { investorId: id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera investerare.' };
+  }
+}
+
+export async function deleteInvestorAction(id: string): Promise<InvestorActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  const pb = await getServerPb();
+
+  let existing: Investor;
+  try {
+    existing = await pb.collection(PB_COLLECTIONS.investors).getOne<Investor>(id);
+  } catch {
+    return { error: 'Investerare hittades inte.' };
+  }
+  if (existing.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  try {
+    const deals = await pb.collection(PB_COLLECTIONS.deals).getFullList<Deal>({
+      filter: `tenant = "${user.tenant}" && investor = "${id}"`,
+      fields: 'id'
+    });
+    for (const d of deals) {
+      await pb.collection(PB_COLLECTIONS.deals).delete(d.id);
+    }
+    await pb.collection(PB_COLLECTIONS.investors).delete(id);
+    revalidatePath('/investerare');
+    return { investorId: id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte radera investerare.' };
+  }
+}
+
+export async function deleteInvestorFormAction(formData: FormData): Promise<void> {
+  'use server';
+  const id = String(formData.get('investor_id') || '').trim();
+  if (!id) return;
+  const { redirect } = await import('next/navigation');
+  const result = await deleteInvestorAction(id);
+  if (!result.error) redirect('/investerare');
+}
+
+export async function deleteDealAction(dealId: string): Promise<InvestorActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  const pb = await getServerPb();
+
+  let deal: Deal;
+  try {
+    deal = await pb.collection(PB_COLLECTIONS.deals).getOne<Deal>(dealId);
+  } catch {
+    return { error: 'Deal hittades inte.' };
+  }
+  if (deal.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  try {
+    await pb.collection(PB_COLLECTIONS.deals).delete(dealId);
+    revalidatePath('/investerare');
+    revalidatePath(`/investerare/${deal.investor}`);
+    return { dealId };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte radera deal.' };
+  }
+}
+
 export async function getInvestorDeals(investorId: string): Promise<Deal[]> {
   const user = await requireUser();
   const pb = await getServerPb();

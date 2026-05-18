@@ -138,6 +138,8 @@ html.dark {
 .mx-app {
   display: grid;
   grid-template-columns: var(--mx-rail-w) 1fr;
+  gap: 0;
+  padding: 12px 0 12px 12px;
   min-height: 100vh;
   background: var(--mx-canvas);
   color: var(--mx-ink);
@@ -157,18 +159,20 @@ html.dark {
   display: flex;
   flex-direction: column;
   position: sticky;
-  top: 0;
-  height: 100vh;
+  top: 12px;
+  height: calc(100vh - 24px);
   z-index: 30;
   overflow: hidden;
-  border-right: 1px solid var(--mx-rail-divider);
+  border: 1px solid var(--mx-line-soft);
+  border-radius: var(--mx-r-lg);
+  box-shadow: var(--mx-sh-3);
 }
 
 .mx-rail-head {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 18px 16px;
+  padding: 14px 16px 12px;
   border-bottom: 1px solid var(--mx-rail-divider);
 }
 
@@ -343,36 +347,6 @@ html.dark {
 .mx-crumb .mx-sep { color: var(--mx-muted-2); opacity: .5; font-family: var(--mx-mono); }
 
 .mx-topbar-spacer { flex: 1; }
-
-.mx-topbar-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--mx-paper);
-  border: 1px solid var(--mx-line);
-  padding: 6px 10px;
-  border-radius: 8px;
-  color: var(--mx-muted);
-  font-size: 12px;
-  cursor: pointer;
-  width: 280px;
-  transition: border .15s ease;
-  font-family: inherit;
-}
-
-.mx-topbar-search:hover { border-color: var(--mx-ink-3); }
-
-.mx-topbar-search kbd {
-  margin-left: auto;
-  font-family: var(--mx-mono);
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  background: var(--mx-canvas);
-  border: 1px solid var(--mx-line);
-  border-radius: 4px;
-  color: var(--mx-ink-soft);
-}
 
 .mx-icon-btn {
   width: 32px; height: 32px;
@@ -717,89 +691,6 @@ select.mx-input:focus {
 .mx-av-stack .mx-av:first-child { margin-left: 0; }
 
 /* ============================================================
-   Command palette
-   ============================================================ */
-
-.mx-cmdk-shade {
-  position: fixed; inset: 0;
-  background: rgba(10, 0, 30, 0.6);
-  backdrop-filter: blur(8px);
-  display: grid; place-items: start center;
-  padding-top: 12vh;
-  z-index: 90;
-  animation: mx-fadein .12s ease-out;
-}
-
-.mx-cmdk {
-  width: 640px;
-  max-width: 92%;
-  background: var(--mx-paper);
-  border-radius: var(--mx-r-md);
-  box-shadow: var(--mx-sh-3);
-  border: 1px solid var(--mx-line);
-  overflow: hidden;
-}
-
-.mx-cmdk-input {
-  width: 100%;
-  border: 0;
-  outline: 0;
-  padding: 16px 20px;
-  font-size: 16px;
-  font-family: var(--mx-display);
-  font-weight: 400;
-  background: transparent;
-  color: var(--mx-ink);
-}
-
-.mx-cmdk-input::placeholder { color: var(--mx-muted); }
-
-.mx-cmdk-section {
-  padding: 6px 6px 8px;
-  border-top: 1px solid var(--mx-line-soft);
-}
-
-.mx-cmdk-section h6 {
-  font-family: var(--mx-mono);
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  color: var(--mx-muted);
-  padding: 8px 14px 6px;
-}
-
-.mx-cmdk-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  color: var(--mx-ink);
-}
-
-.mx-cmdk-item:hover, .mx-cmdk-item.mx-sel { background: var(--mx-canvas); }
-
-.mx-cmdk-item .mx-ico-bg {
-  width: 24px; height: 24px;
-  border-radius: 6px;
-  background: var(--mx-canvas);
-  display: grid; place-items: center;
-}
-
-.mx-cmdk-item .mx-meta {
-  margin-left: auto;
-  font-family: var(--mx-mono);
-  font-size: 10px;
-  color: var(--mx-muted);
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
-
-/* ============================================================
    Sticky action bar
    ============================================================ */
 
@@ -980,29 +871,6 @@ select.mx-input:focus {
   outline: none;
 }
 
-.mx-topbar-search-mobile {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  margin-right: -4px;
-  border: 0;
-  background: transparent;
-  color: var(--mx-ink-soft);
-  border-radius: 8px;
-  cursor: pointer;
-  flex-shrink: 0;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.mx-topbar-search-mobile:hover,
-.mx-topbar-search-mobile:focus-visible {
-  background: var(--mx-paper-2);
-  color: var(--mx-ink);
-  outline: none;
-}
-
 .mx-rail-backdrop {
   position: fixed;
   inset: 0;
@@ -1033,6 +901,7 @@ body.mx-rail-locked {
 @media (max-width: 1024px) {
   .mx-app {
     grid-template-columns: 1fr;
+    padding: 0;
   }
 
   .mx-mobile-menu-btn {
@@ -1050,6 +919,8 @@ body.mx-rail-locked {
     transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1),
                 visibility 220ms;
     z-index: 70;
+    border: 0;
+    border-radius: 0;
     box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.5);
     will-change: transform;
     visibility: hidden;
@@ -1095,17 +966,6 @@ body.mx-rail-locked {
     gap: 8px;
   }
 
-  .mx-topbar-search {
-    width: auto;
-    flex: 1;
-    min-width: 0;
-    max-width: 340px;
-  }
-
-  .mx-topbar-search kbd {
-    display: none;
-  }
-
   .mx-view-pad {
     padding: 18px 18px 64px;
   }
@@ -1119,11 +979,6 @@ body.mx-rail-locked {
   .mx-page-head h1 {
     font-size: 23px;
     line-height: 1.18;
-  }
-
-  /* Hide hover-only column from the topbar search where we have separate icon button */
-  .mx-topbar-search-label {
-    display: inline;
   }
 }
 
@@ -1139,14 +994,6 @@ body.mx-rail-locked {
   .mx-topbar {
     padding: 0 12px;
     gap: 6px;
-  }
-
-  .mx-topbar-search {
-    display: none;
-  }
-
-  .mx-topbar-search-mobile {
-    display: inline-flex;
   }
 
   .mx-crumb {
@@ -1288,22 +1135,6 @@ body.mx-rail-locked {
     gap: 8px;
   }
 
-  /* Command palette */
-  .mx-cmdk-shade {
-    padding-top: 6vh;
-    padding-left: 12px;
-    padding-right: 12px;
-  }
-
-  .mx-cmdk {
-    width: 100%;
-    max-width: 100%;
-  }
-
-  .mx-cmdk-input {
-    padding: 14px 16px;
-    font-size: 16px;
-  }
 }
 
 /* ============================================================
@@ -1325,8 +1156,7 @@ body.mx-rail-locked {
 @media (hover: none) and (pointer: coarse) {
   .mx-rail-item,
   .mx-btn,
-  .mx-icon-btn,
-  .mx-cmdk-item {
+  .mx-icon-btn {
     -webkit-tap-highlight-color: transparent;
   }
   .mx-hover-card:hover {
@@ -1412,21 +1242,6 @@ html.dark .mx-field select:focus {
   box-shadow: 0 0 0 2px rgba(79, 196, 234, 0.18);
 }
 
-/* Topbar search pill */
-html.dark .mx-topbar-search {
-  background: var(--mx-paper);
-  border-color: var(--mx-line);
-}
-
-html.dark .mx-topbar-search:hover {
-  border-color: var(--mx-line-strong);
-}
-
-html.dark .mx-topbar-search kbd {
-  background: var(--mx-paper-2);
-  border-color: var(--mx-line);
-}
-
 /* Topbar smälter med canvas — ingen blur, ingen lila ton */
 html.dark .mx-topbar {
   background: var(--mx-canvas);
@@ -1507,13 +1322,15 @@ html.dark .mx-page-head h1 {
   display: grid;
   place-items: center;
   border-radius: 8px;
-  background: #4fc4ea;
-  color: #002c40;
+  background: var(--mx-paper-2);
+  border: 1px solid var(--mx-line);
+  color: var(--mx-ink);
   font-family: var(--mx-mono);
   font-weight: 700;
   font-size: 11px;
   flex-shrink: 0;
   letter-spacing: -0.02em;
+  overflow: hidden;
 }
 
 .mx-switcher-mark.mx-sm {
