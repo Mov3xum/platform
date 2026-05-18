@@ -9,6 +9,10 @@ export interface NotificationActionState {
   ok?: boolean;
 }
 
+function isMissingCollection(err: unknown): boolean {
+  return Boolean(err && typeof err === 'object' && (err as { status?: number }).status === 404);
+}
+
 export async function markRead(id: string): Promise<NotificationActionState> {
   const user = await requireUser();
   if (!id) return { error: 'Saknar id.' };
@@ -28,6 +32,9 @@ export async function markRead(id: string): Promise<NotificationActionState> {
     revalidatePath('/inkorg');
     return { ok: true };
   } catch (err) {
+    if (isMissingCollection(err)) {
+      return { ok: true };
+    }
     return { error: err instanceof Error ? err.message : 'Kunde inte markera som läst.' };
   }
 }
@@ -51,6 +58,9 @@ export async function markAllRead(): Promise<NotificationActionState> {
     revalidatePath('/inkorg');
     return { ok: true };
   } catch (err) {
+    if (isMissingCollection(err)) {
+      return { ok: true };
+    }
     return { error: err instanceof Error ? err.message : 'Kunde inte markera alla som lästa.' };
   }
 }

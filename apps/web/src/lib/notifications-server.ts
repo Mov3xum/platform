@@ -13,6 +13,20 @@ export interface NotifyParams {
   payload: NotificationPayload;
 }
 
+// Loggar "collection missing" max en gång per process så vi inte spammar
+// Next-loggen om PB:n körs utan migration 1700000052 applicerad.
+let warnedCollectionMissing = false;
+function isMissingCollection(err: unknown): boolean {
+  return Boolean(err && typeof err === 'object' && (err as { status?: number }).status === 404);
+}
+function warnMissingOnce(): void {
+  if (warnedCollectionMissing) return;
+  warnedCollectionMissing = true;
+  console.warn(
+    '[notifications] collection missing — kör PB-migrationer (1700000052). Returnerar tom data tills vidare.'
+  );
+}
+
 /**
  * Skapar notiser för alla angivna recipients. Hoppar över actor själv
  * (man notiseras inte om sin egen handling). Batchar i chunkar om 5
@@ -60,7 +74,12 @@ export async function getUnreadCount(pb: PocketBase, userId: string): Promise<nu
       fields: 'id'
     });
     return res.totalItems;
-  } catch {
+  } catch (err) {
+    if (isMissingCollection(err)) {
+      warnMissingOnce();
+    } else {
+      console.warn('[notifications] getUnreadCount failed', err);
+    }
     return 0;
   }
 }
@@ -81,7 +100,12 @@ export async function listNotificationsForUser(
       expand: 'actor,mission'
     });
     return res.items;
-  } catch {
+  } catch (err) {
+    if (isMissingCollection(err)) {
+      warnMissingOnce();
+    } else {
+      console.warn('[notifications] listNotificationsForUser failed', err);
+    }
     return [];
   }
 }

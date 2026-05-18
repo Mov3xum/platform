@@ -29,18 +29,35 @@ export default async function ConnectorsPage({
   const pb = await getServerPb();
 
   // Hämta tenantens allowlist och användarens aktiveringar parallellt
-  // med Mistrals connector-lista.
-  const [tenant, activationsList, mistralConnectors] = await Promise.all([
-    pb.collection('tenants').getOne(user.tenant),
-    pb.collection('user_mistral_connectors').getList<ActivationRow>(1, 200, {
-      filter: `user = "${user.id}"`
-    }),
+  // med Mistrals connector-lista. Varje branch är defensiv så att sidan
+  // inte 500:ar om en collection saknas (t.ex. när PB-migrationerna
+  // 1700000064 / 1700000066 inte har applicerats än).
+  const [tenantResult, activationsResult, mistralConnectors] = await Promise.all([
+    pb
+      .collection('tenants')
+      .getOne<{ allowed_mistral_connectors?: unknown }>(user.tenant)
+      .catch((err: unknown) => {
+        console.warn('[connectors] tenants.getOne failed', err);
+        return null;
+      }),
+    pb
+      .collection('user_mistral_connectors')
+      .getList<ActivationRow>(1, 200, {
+        filter: `user = "${user.id}"`
+      })
+      .catch((err: unknown) => {
+        console.warn('[connectors] user_mistral_connectors.getList failed', err);
+        return null;
+      }),
     listActiveConnectors()
   ]);
 
-  const tenantAllowlist: string[] = Array.isArray(tenant.allowed_mistral_connectors)
-    ? (tenant.allowed_mistral_connectors as string[])
-    : [];
+  const degraded = tenantResult === null || activationsResult === null;
+  const activationsList = activationsResult ?? { items: [] as ActivationRow[] };
+  const tenantAllowlist: string[] =
+    tenantResult && Array.isArray(tenantResult.allowed_mistral_connectors)
+      ? (tenantResult.allowed_mistral_connectors as string[])
+      : [];
 
   const statusIndex = new Map<string, Status>();
   for (const row of activationsList.items) {
@@ -57,6 +74,14 @@ export default async function ConnectorsPage({
         {params.error && (
           <div className="mb-6 rounded-2xl bg-movexum-pastell-orange px-5 py-4 text-[13px] text-movexum-morkorange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange">
             {params.error}
+          </div>
+        )}
+
+        {degraded && (
+          <div className="mb-6 rounded-2xl bg-movexum-pastell-gul px-5 py-4 text-[13px] text-movexum-morkgul dark:bg-movexum-morkgul/40 dark:text-movexum-pastell-gul">
+            Vissa data kunde inte laddas (PocketBase-collections för
+            connectors saknas — kör pending migrationer och starta om
+            PocketBase). Visar built-ins med default-status så länge.
           </div>
         )}
 
