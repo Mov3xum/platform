@@ -1,8 +1,19 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 
-// Whitelist of startup fields allowed in portfolio context (no PII)
-const STARTUP_PORTFOLIO_FIELDS = ['name', 'phase', 'irl_level', 'status', 'next_step'] as const;
+// Whitelist of startup fields allowed in portfolio context (no PII).
+// org_nr/intagsdatum/avslutsdatum hålls utanför här — de behövs inte för
+// AI-resonemang och respekterar dataminimering (CLAUDE.md § 9.3, § 10.2).
+const STARTUP_PORTFOLIO_FIELDS = [
+  'name',
+  'phase',
+  'irl_level',
+  'status',
+  'next_step',
+  'kommun',
+  'industri',
+  'bolag_status'
+] as const;
 
 interface StartupPortfolioEntry {
   name: string;
@@ -10,6 +21,17 @@ interface StartupPortfolioEntry {
   irl_level?: number;
   status: string;
   next_step?: string;
+  kommun?: string;
+  industri?: string;
+  bolag_status?: string;
+}
+
+interface FinancialsEntry {
+  year: number;
+  employees?: number;
+  revenue_sek?: number;
+  personnel_cost_sek?: number;
+  corporate_tax_sek?: number;
 }
 
 interface MilestoneEntry {
@@ -42,10 +64,17 @@ export interface StartupContext {
     next_step?: string;
     description?: string;
     tags?: string;
+    kommun?: string;
+    industri?: string;
+    bolagsform?: string;
+    bolag_status?: string;
+    intagsdatum?: string;
+    avslutsdatum?: string;
   };
   milestones: MilestoneEntry[];
   activities: ActivityEntry[];
   notes: NoteEntry[];
+  financials?: FinancialsEntry[];
 }
 
 export interface PortfolioContext {
@@ -83,14 +112,23 @@ export async function buildStartupContext(
     throw new Error('Cross-tenant access denied');
   }
 
-  const startup = {
+  // Org-nr för enskild firma = personnummer → exkluderas alltid från
+  // AI-prompts (CLAUDE.md § 10.2, GDPR art. 5). För aktiebolag är org-nr
+  // inte PII men exponeras ändå inte här — agenterna behöver det inte.
+  const startup: StartupContext['startup'] = {
     name: startupRecord.name as string,
     phase: startupRecord.phase as string,
     irl_level: startupRecord.irl_level as number | undefined,
     status: startupRecord.status as string,
     next_step: startupRecord.next_step as string | undefined,
     description: stripHtml(startupRecord.description as string | undefined),
-    tags: startupRecord.tags as string | undefined
+    tags: startupRecord.tags as string | undefined,
+    kommun: (startupRecord.kommun as string | undefined) || undefined,
+    industri: (startupRecord.industri as string | undefined) || undefined,
+    bolagsform: (startupRecord.bolagsform as string | undefined) || undefined,
+    bolag_status: (startupRecord.bolag_status as string | undefined) || undefined,
+    intagsdatum: (startupRecord.intagsdatum as string | undefined) || undefined,
+    avslutsdatum: (startupRecord.avslutsdatum as string | undefined) || undefined
   };
 
   const milestones: MilestoneEntry[] = milestonesResult.items.map((m) => ({
@@ -114,7 +152,53 @@ export async function buildStartupContext(
     created: n.created as string
   }));
 
-  return { startup, milestones, activities, notes };
+  const financials = await buildFinancialsContext(pb, startupId, tenantId);
+
+  return { startup, milestones, activities, notes, financials };
+}
+
+/**
+ * Returns the last N years of annual financials for a startup, sorted
+ * oldest → newest. Tenant-scoped. Returns undefined when no rows exist
+ * so the AI prompt can omit the section cleanly.
+ */
+export async function buildFinancialsContext(
+  pb: PocketBase,
+  startupId: string,
+  tenantId: string,
+  lastNYears = 5
+): Promise<FinancialsEntry[] | undefined> {
+  let result;
+  try {
+    result = await pb.collection('startup_financials').getList(1, lastNYears, {
+      filter: `startup = "${startupId}" && tenant = "${tenantId}"`,
+      sort: '-year'
+    });
+  } catch (e) {
+    // Collection may not yet exist on older deployments — fail soft.
+    return undefined;
+  }
+
+  if (!result.items.length) return undefined;
+
+  return result.items
+    .map((r) => {
+      const entry: FinancialsEntry = { year: r.year as number };
+      if (r.employees !== undefined && r.employees !== null) {
+        entry.employees = r.employees as number;
+      }
+      if (r.revenue_sek !== undefined && r.revenue_sek !== null) {
+        entry.revenue_sek = r.revenue_sek as number;
+      }
+      if (r.personnel_cost_sek !== undefined && r.personnel_cost_sek !== null) {
+        entry.personnel_cost_sek = r.personnel_cost_sek as number;
+      }
+      if (r.corporate_tax_sek !== undefined && r.corporate_tax_sek !== null) {
+        entry.corporate_tax_sek = r.corporate_tax_sek as number;
+      }
+      return entry;
+    })
+    .sort((a, b) => a.year - b.year);
 }
 
 /**
@@ -141,6 +225,9 @@ export async function buildPortfolioContext(
     if (s.next_step) {
       entry.next_step = s.next_step as string;
     }
+    if (s.kommun) entry.kommun = s.kommun as string;
+    if (s.industri) entry.industri = s.industri as string;
+    if (s.bolag_status) entry.bolag_status = s.bolag_status as string;
     return entry;
   });
 
