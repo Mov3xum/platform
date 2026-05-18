@@ -16,6 +16,8 @@ const ACCEPT_TEXT = ['text/plain', 'text/markdown', 'text/csv', 'application/csv
 const ACCEPT_PDF = ['application/pdf'];
 const ACCEPT_ATTR =
   'image/png,image/jpeg,image/webp,text/plain,text/markdown,text/csv,application/pdf,.md,.csv,.txt,.pdf';
+const ACCEPT_TEXT_ATTR = ACCEPT_ATTR;
+const ACCEPT_IMAGE_ATTR = ACCEPT_IMAGE.join(',');
 
 interface UploadedFile extends ChatAttachment {
   uid: string;
@@ -326,6 +328,10 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
 
   function openFilePicker() {
     fileInputRef.current?.click();
+  }
+
+  function openImagePicker() {
+    imageInputRef.current?.click();
   }
 
   const canSubmit =
