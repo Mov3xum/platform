@@ -43,8 +43,12 @@ export default function DashboardChat({ className = 'mt-8' }: { className?: stri
     });
   }
 
+  const isFullHeight = className?.includes('h-full');
+
   return (
-    <section className={`${className} rounded-3xl border border-default bg-surface shadow-sm shadow-movexum-svart/5`}>
+    <section
+      className={`${className} flex flex-col rounded-3xl border border-default bg-surface shadow-sm shadow-movexum-svart/5`}
+    >
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-default px-5 py-4">
         <span className="text-xl" aria-hidden>💬</span>
@@ -57,7 +61,9 @@ export default function DashboardChat({ className = 'mt-8' }: { className?: stri
       </div>
 
       {/* Messages */}
-      <div className="flex h-72 flex-col gap-3 overflow-y-auto px-5 py-4">
+      <div
+        className={`flex flex-col gap-3 overflow-y-auto px-5 py-4 ${isFullHeight ? 'flex-1 min-h-0' : 'h-72'}`}
+      >
         {messages.length === 0 && (
           <div className="flex h-full items-center justify-center">
             <p className="max-w-xs text-center text-sm text-foreground-muted">

@@ -100,7 +100,30 @@ export type ToolModel =
 
 export type ToolOutputFormat = 'markdown' | 'json' | 'text';
 
-export type ToolRunStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+export type ToolRunStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'assigned'
+  | 'in_progress'
+  | 'ready_for_review'
+  | 'approved'
+  | 'rejected';
+
+export interface ToolRunThreadEntry {
+  user: string;
+  role: 'coach' | 'founder' | 'system';
+  at: string;
+  text: string;
+}
+
+export type KnowledgeSourceKind = 'note' | 'file' | 'compass' | 'irl' | 'milestone';
+
+export interface KnowledgeSourceRef {
+  kind: KnowledgeSourceKind;
+  id: string;
+}
 
 export interface Tool {
   id: string;
@@ -139,12 +162,25 @@ export interface ToolRun {
   error?: string;
   started_at?: string;
   completed_at?: string;
+  // Assignment-fält (1700000049)
+  assigned_to?: string;
+  assigned_by?: string;
+  deadline?: string;
+  instruction?: string;
+  knowledge_sources?: KnowledgeSourceRef[];
+  thread?: ToolRunThreadEntry[];
+  // Versionering
+  parent_run?: string;
+  version?: number;
   created: string;
   updated: string;
   expand?: {
     tool?: Tool;
     startup?: { id: string; name: string };
     triggered_by?: { id: string; display_name?: string; email: string };
+    assigned_to?: { id: string; display_name?: string; email: string };
+    assigned_by?: { id: string; display_name?: string; email: string };
+    parent_run?: ToolRun;
   };
 }
 
@@ -601,10 +637,10 @@ export interface ModuleGroup {
 }
 
 export const RAIL_GROUPS: ModuleGroup[] = [
-  { label: 'Översikt', modules: ['idag', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['inflode', 'startups', 'investerare', 'events', 'community'] },
+  { label: 'Översikt', modules: ['idag', 'inkorg', 'uppdrag'] },
+  { label: 'Portfölj', modules: ['kompassen', 'startups', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'integrationer', 'installningar'] }
+  { label: 'System', modules: ['agenter', 'insights', 'integrationer', 'installningar'] }
 ];
 
 export const coreModules: ModuleDefinition[] = [
@@ -614,6 +650,13 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Hemmaplan — KPI-puls, aktivitetsström, agenda och AI-kommittén.',
     rolesAllowed: ALL_ROLES,
     route: '/idag'
+  },
+  {
+    id: 'inkorg',
+    title: 'Min inkorg',
+    description: 'Uppdrag som tilldelats dig — kör verktyget och skicka för granskning.',
+    rolesAllowed: ['startup_member'],
+    route: '/inkorg'
   },
   {
     id: 'uppdrag',
@@ -677,6 +720,14 @@ export const coreModules: ModuleDefinition[] = [
     description: 'AI-agenter, mallar och checklistor för startupstöd. Tilldela bolag för att synliggöra rätt agent i rätt kontext.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'startup_member'],
     route: '/toolbox'
+  },
+  {
+    id: 'insights',
+    title: 'Usage insights',
+    description:
+      'Spåra hur AI och plattformen används i din organisation — identifiera värdedrivare och adoption per modul.',
+    rolesAllowed: ['admin', 'incubator_lead'],
+    route: '/insights'
   },
   {
     id: 'integrationer',

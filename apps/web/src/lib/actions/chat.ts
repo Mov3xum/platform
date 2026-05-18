@@ -227,6 +227,82 @@ async function runStaffChatWithTools(
   }
 }
 
+/**
+ * Skickar ett chat-meddelande scope:at till ett specifikt bolag. För
+ * Intric-stil per-bolag chat (ChatTab i StartupWorkspaceShell). Staff
+ * får skriva om vilket bolag de har access till; founders får bara om
+ * sina linkedStartups.
+ */
+export async function sendStartupChatMessage(
+  messages: ChatMessage[],
+  startupId: string
+): Promise<ChatActionResult> {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return { error: 'Ogiltigt meddelande.' };
+  }
+  if (!startupId) return { error: 'Inget bolag valt.' };
+
+  const limited: Array<{ role: 'user' | 'assistant'; content: string }> = messages
+    .slice(-20)
+    .map((m) => {
+      if (m.role !== 'user' && m.role !== 'assistant') return null;
+      return {
+        role: m.role,
+        content: String(m.content || '').trim().slice(0, 2000)
+      };
+    })
+    .filter((m): m is { role: 'user' | 'assistant'; content: string } => Boolean(m?.content));
+  if (limited.length === 0) return { error: 'Meddelandet är tomt.' };
+
+  const user = await requireUser();
+  const pb = await getServerPb();
+
+  const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
+  const isFounderOfStartup = user.linkedStartups.includes(startupId);
+
+  if (!isStaff && !isFounderOfStartup) {
+    return { error: 'Åtkomst nekad.' };
+  }
+
+  let contextBlock = '';
+  try {
+    const ctx = await buildStartupContext(pb, startupId, user.tenant);
+    contextBlock =
+      'BOLAG:\n' +
+      JSON.stringify(ctx.startup, null, 2) +
+      '\n\nMILSTOLPAR:\n' +
+      JSON.stringify(ctx.milestones, null, 2) +
+      '\n\nAKTIVITETER (senaste 90 dgr):\n' +
+      JSON.stringify(ctx.activities, null, 2) +
+      '\n\nANTECKNINGAR (ej konfidentiella):\n' +
+      JSON.stringify(ctx.notes, null, 2);
+  } catch (err) {
+    console.error('[startup-chat] context failed', {
+      tenant: user.tenant,
+      startupId,
+      error: err
+    });
+    return { error: 'Kunde inte ladda bolagets kontext.' };
+  }
+
+  const systemContent = `${BASE_SYSTEM_PROMPT}\n\n---\nKONTEXT:\n${contextBlock}\n---`;
+
+  try {
+    const result = await callMistral(STARTUP_MODEL, [
+      { role: 'system', content: systemContent },
+      ...limited
+    ]);
+    return { text: result.text };
+  } catch (err) {
+    console.error('[startup-chat] mistral error', {
+      tenant: user.tenant,
+      startupId,
+      error: err
+    });
+    return { error: err instanceof Error ? err.message : 'Något gick fel med AI-anropet.' };
+  }
+}
+
 async function runStartupChat(
   pb: import('pocketbase').default,
   user: { tenant: string; linkedStartups: string[] },

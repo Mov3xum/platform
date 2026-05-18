@@ -765,10 +765,13 @@ const tenant = await ensureRecord('tenants', 'slug = "movexum"', {
 // 20. seed Hampus app-user --------------------------------------------------
 await ensureAppUser(tenant.id);
 
-// 22. forcera robusta createRules (synkat med migration 0048) ---------------
-// PB v0.23 createRule som refererar relation-kolumner på den nya posten kan
-// returnera "sql: no rows in result set". Vi sätter createRule till bara
-// auth-checks. Tenant-isolering vid write säkerställs i applikationen.
+// 22. forcera robusta createRules (synkat med migration 0049) ---------------
+// PB v0.23 ?= -operatorn mot multi-select fields (auth.roles) failar
+// intermittent med "Failed to create record." (400, tomt data) eller
+// "sql: no rows in result set". Vi tar bort ALLA roll-checks från
+// createRules och låter applikationen göra `hasRole(...)` innan create.
+// Tenant-isolering på write säkerställs av server actions som alltid
+// sätter tenant=user.tenant i payloaden.
 const FORCE_CREATE_RULES = {
   startups: `${ANY_AUTH} && @request.auth.tenant != ""`,
   partners: `${ANY_AUTH} && @request.auth.tenant != ""`,
@@ -776,25 +779,25 @@ const FORCE_CREATE_RULES = {
   partner_engagements: ANY_AUTH,
   activities: ANY_AUTH,
   notes: `${ANY_AUTH} && @request.auth.id = author`,
-  agreements: `${ANY_AUTH} && ${STAFF_OR_LEAD}`,
-  milestones: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  agreements: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  milestones: `${ANY_AUTH} && @request.auth.tenant != ""`,
   tools: `${ANY_AUTH} && @request.auth.tenant != ""`,
   tool_runs: `${ANY_AUTH} && @request.auth.id = triggered_by`,
-  workshops: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
-  workshop_areas: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  workshops: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  workshop_areas: `${ANY_AUTH} && @request.auth.tenant != ""`,
   workshop_assignments: `${ANY_AUTH} && @request.auth.id = assigned_by`,
   workshop_runs: `${ANY_AUTH} && @request.auth.id = triggered_by`,
-  strategies: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
-  strategy_revisions: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
-  missions: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  strategies: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  strategy_revisions: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  missions: `${ANY_AUTH} && @request.auth.tenant != ""`,
   sprint_x_checkins: ANY_AUTH,
-  investors: `${ANY_AUTH} && ${STAFF_OR_LEAD}`,
-  deals: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
-  incubator_events: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  investors: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  deals: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  incubator_events: `${ANY_AUTH} && @request.auth.tenant != ""`,
   event_signups: ANY_AUTH,
-  incubator_reports: `${ANY_AUTH} && ${STAFF_OR_LEAD}`,
-  alumni: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
-  tenant_integrations: `${ANY_AUTH} && ${STAFF_OR_LEAD}`
+  incubator_reports: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  alumni: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  tenant_integrations: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
 log('Forcerar robusta createRules...');
