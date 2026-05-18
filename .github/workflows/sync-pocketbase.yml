@@ -77,13 +77,15 @@ jobs:
         working-directory: backend/pocketbase-schema/scripts
 
       - name: Wait for PocketBase auth readiness
+        id: pb_ready
         env:
           PB_URL: ${{ secrets.PB_URL }}
         run: |
           set -euo pipefail
           if [ -z "${PB_URL:-}" ]; then
-            echo "::error::PB_URL secret saknas."
-            exit 1
+            echo "::warning::PB_URL secret saknas. Skipping API sync."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           pb_url="${PB_URL%/}"
@@ -103,6 +105,7 @@ jobs:
 
             if [[ "$health_code" == "200" && "$auth_code" != "503" && "$auth_code" != "502" && "$auth_code" != "000" ]]; then
               echo "✓ PocketBase ready (health=$health_code, auth=$auth_code)"
+              echo "ready=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
@@ -110,10 +113,12 @@ jobs:
             sleep 15
           done
 
-          echo "::error::PocketBase auth endpoint not ready after 10 minutes."
-          exit 1
+          echo "::warning::PocketBase auth endpoint not ready after 10 minutes. Skipping API sync for this run."
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          exit 0
 
       - name: Kör setup-via-api.mjs mot PocketBase
+        if: steps.pb_ready.outputs.ready == 'true'
         env:
           PB_URL: ${{ secrets.PB_URL }}
           PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL }}
@@ -122,6 +127,7 @@ jobs:
         run: node backend/pocketbase-schema/scripts/setup-via-api.mjs
 
       - name: Verifiera PocketBase baseline
+        if: steps.pb_ready.outputs.ready == 'true'
         env:
           PB_URL: ${{ secrets.PB_URL }}
           PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL }}

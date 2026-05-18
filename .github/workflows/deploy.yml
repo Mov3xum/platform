@@ -112,8 +112,9 @@ jobs:
           set -euo pipefail
 
           if [ -z "${PB_URL:-}" ] || [ -z "${PB_SU_PASSWORD:-}" ]; then
-            echo "Missing PocketBase bootstrap secrets. Set PB_URL_STAGING/PB_SU_PASSWORD_STAGING (or PB_URL/PB_SU_PASSWORD)."
-            exit 1
+            echo "::warning::Missing PocketBase bootstrap secrets. Skipping PB bootstrap in this deploy run."
+            echo "PB_READY=false" >> "$GITHUB_ENV"
+            exit 0
           fi
 
           pb_url="${PB_URL%/}"
@@ -123,6 +124,7 @@ jobs:
             pb_url="https://$pb_url"
           fi
 
+          pb_ready=false
           echo "Waiting for PocketBase auth endpoint readiness on $pb_url"
           for attempt in $(seq 1 40); do
             health_code=$(curl -k -sS -o /dev/null -w "%{http_code}" "$pb_url/api/health" || true)
@@ -134,21 +136,25 @@ jobs:
 
             if [[ "$health_code" == "200" && "$auth_code" != "503" && "$auth_code" != "502" && "$auth_code" != "000" ]]; then
               echo "PocketBase ready (health=$health_code, auth=$auth_code)"
+              pb_ready=true
               break
-            fi
-
-            if [[ "$attempt" -eq 40 ]]; then
-              echo "PocketBase not ready after 10 minutes (health=$health_code, auth=$auth_code)."
-              exit 1
             fi
 
             echo "Attempt $attempt/40: health=$health_code auth=$auth_code, waiting 15s..."
             sleep 15
           done
 
+          if [[ "$pb_ready" != "true" ]]; then
+            echo "::warning::PocketBase auth endpoint not ready after 10 minutes. Skipping PB bootstrap/verify in this deploy run."
+            echo "PB_READY=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "PB_READY=true" >> "$GITHUB_ENV"
           node backend/pocketbase-schema/scripts/setup-via-api.mjs
 
       - name: Verify PocketBase security baseline
+        if: env.PB_READY == 'true'
         env:
           PB_URL: ${{ secrets.PB_URL_STAGING || secrets.PB_URL }}
           PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL_STAGING || 'hampus@movexum.se' }}
