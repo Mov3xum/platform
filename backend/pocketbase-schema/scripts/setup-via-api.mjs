@@ -45,6 +45,43 @@ const log = (...a) => console.log('•', ...a);
 const ok = (...a) => console.log('✓', ...a);
 const warn = (...a) => console.log('!', ...a);
 
+// PocketBase ClientResponseError throws away most useful context when
+// only `.message` is logged. Surface url/status/response so CI logs
+// are actionable.
+function describeError(err) {
+  if (!err) return 'unknown error (null/undefined)';
+  const parts = [];
+  parts.push(`message: ${err.message || '(none)'}`);
+  if (err.url) parts.push(`url: ${err.url}`);
+  if (err.status !== undefined) parts.push(`status: ${err.status}`);
+  if (err.response !== undefined) {
+    try {
+      parts.push(`response: ${JSON.stringify(err.response)}`);
+    } catch {
+      parts.push(`response: ${String(err.response)}`);
+    }
+  }
+  if (err.originalError && err.originalError !== err) {
+    const oe = err.originalError;
+    parts.push(
+      `originalError: ${oe?.name || ''} ${oe?.code || ''} ${oe?.message || String(oe)}`.trim()
+    );
+  }
+  if (err.stack) parts.push(`stack: ${err.stack.split('\n').slice(0, 5).join(' | ')}`);
+  return parts.map((p) => `  ${p}`).join('\n');
+}
+
+process.on('unhandledRejection', (reason) => {
+  console.error('\n✗ PocketBase bootstrap failed (unhandled rejection)');
+  if (reason instanceof Error) {
+    console.error(reason.message);
+    console.error(describeError(reason));
+  } else {
+    console.error(String(reason));
+  }
+  process.exit(1);
+});
+
 function normalizeSelectFields(fields, context = 'collection') {
   return (fields || []).map((field) => {
     if (field?.type !== 'select') return field;
@@ -241,7 +278,18 @@ const STAFF_INCL_MENTOR =
 log(`PB: ${PB_URL}`);
 log(`Superuser: ${SU_EMAIL}`);
 
-await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
+{
+  const authUrl = `${PB_URL.replace(/\/$/, '')}/api/collections/_superusers/auth-with-password`;
+  try {
+    await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
+  } catch (err) {
+    console.error(
+      `\n✗ Superuser auth failed for ${SU_EMAIL} at ${authUrl}\n${describeError(err)}\n` +
+      `Check PB_SU_EMAIL/PB_SU_PASSWORD secrets, that PB is reachable, and that PB v0.23+ exposes /api/collections/_superusers/auth-with-password.`
+    );
+    process.exit(1);
+  }
+}
 ok('inloggad som superuser');
 
 // 1. tenants ----------------------------------------------------------------
