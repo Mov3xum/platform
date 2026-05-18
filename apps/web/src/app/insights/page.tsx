@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
-import { PageHead, Card, SectionHead, Chip, KpiBlock, Spark } from '@/components/proto';
+import { PageShell } from '@/components/PageShell';
+import { RailSection, RailItem, RailStat, RailEmpty } from '@/components/PageRail';
 import {
   toolCategoryLabels,
   toolRunStatusLabels,
@@ -21,9 +22,9 @@ const RANGE_DAYS: Record<RangeKey, number> = {
 };
 
 const RANGE_LABELS: Record<RangeKey, string> = {
-  '7d': 'Senaste 7 dagar',
-  '30d': 'Senaste 30 dagar',
-  '90d': 'Senaste 90 dagar'
+  '7d': '7 dagar',
+  '30d': '30 dagar',
+  '90d': '90 dagar'
 };
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -258,6 +259,8 @@ export default async function InsightsPage({
     .sort((a, b) => b.count - a.count)
     .slice(0, 8);
 
+  const topToolsRail = topTools.slice(0, 6);
+
   // ── Runs by category ────────────────────────────────────────────────
   const runsByCategory = new Map<ToolCategory, number>();
   for (const r of runs) {
@@ -350,581 +353,442 @@ export default async function InsightsPage({
     activities.map((a) => a.startup).filter((s): s is string => Boolean(s))
   ).size;
 
-  const trendColor = totalRuns >= previousRunsCount ? 'var(--mx-green-ink)' : 'var(--mx-brown-ink)';
-
-  return (
-    <div className="mx-view-pad mx-wide">
-      <PageHead
-        crumb="System / Usage insights"
-        title="Usage insights"
-        subtitle="Spåra hur AI och plattformen används i din organisation. Identifiera värdedrivare, upptäck behov i tid — inga gissningar."
-        actions={
-          <div className="mx-flex mx-gap-2">
-            {(Object.keys(RANGE_DAYS) as RangeKey[]).map((r) => (
-              <Link
-                key={r}
-                href={`/insights?range=${r}`}
-                className={`mx-btn mx-sm ${r === range ? 'mx-primary' : 'mx-ghost'}`}
-              >
-                {r === '7d' ? '7 dagar' : r === '30d' ? '30 dagar' : '90 dagar'}
-              </Link>
-            ))}
-          </div>
-        }
-      />
-
-      <Card
-        style={{
-          padding: 14,
-          background: 'var(--mx-paper-3)',
-          borderColor: 'var(--mx-line-soft)'
-        }}
-      >
-        <div className="mx-flex mx-items-c mx-gap-3 mx-wrap">
-          <span className="mx-mono mx-t-xs mx-t-up mx-fw-6">Period</span>
-          <Chip variant="ink-chip" mono>
-            {RANGE_LABELS[range]}
-          </Chip>
-          <Chip mono>Tenant-isolerad</Chip>
-          <Chip variant="purple" mono>
-            EU AI Act · post-market monitoring
-          </Chip>
-          <span className="mx-grow" />
-          <span className="mx-mono mx-t-xs mx-muted">
-            {formatNumber(totalRuns)} AI-körningar · {formatNumber(totalActivities)}{' '}
-            aktiviteter
-          </span>
-        </div>
-      </Card>
-
-      {runsLoadFailed && (
-        <Card style={{ padding: 16, marginTop: 16 }}>
-          <span className="mx-t-13 mx-muted">
-            Kunde inte ladda agentkörningar. Försök igen om en stund.
-          </span>
-        </Card>
-      )}
-
-      {/* ── Top KPI row ─────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: 12,
-          marginTop: 16
-        }}
-      >
-        <KpiBlock
-          label="AI-körningar"
-          value={formatNumber(totalRuns)}
-          hint={
-            previousRunsCount > 0 || totalRuns > 0
-              ? `${deltaRunsPct >= 0 ? '+' : ''}${(deltaRunsPct * 100).toFixed(0)}% mot föregående`
-              : undefined
-          }
-          spark={trend.some((v) => v > 0) ? <Spark data={trend} color={trendColor} /> : undefined}
-          foot={
-            <span className="mx-mono mx-t-xs mx-muted">
-              {formatNumber(succeededRuns)} klara · {formatNumber(failedRuns)} fel ·{' '}
-              {formatNumber(runningRuns)} kör
-            </span>
-          }
-        />
-        <KpiBlock
-          label="Lyckandegrad"
-          value={totalRuns > 0 ? formatPercent(successRate) : '—'}
-          foot={
-            <span className="mx-mono mx-t-xs mx-muted">
-              Avg svarstid:{' '}
-              {avgDurationSec > 0 ? `${avgDurationSec.toFixed(1)} s` : '—'}
-            </span>
-          }
-        />
-        <KpiBlock
-          label="Tokens förbrukade"
-          value={formatNumber(totalTokens)}
-          foot={
-            <span className="mx-mono mx-t-xs mx-muted">
-              {formatNumber(totalTokensIn)} in · {formatNumber(totalTokensOut)} ut
-            </span>
-          }
-        />
-        <KpiBlock
-          label="Uppskattad kostnad"
-          value={formatCostUsd(totalCostUsd)}
-          foot={
-            <span className="mx-mono mx-t-xs mx-muted">
-              Mistral · EU. Pris ungefärligt.
-            </span>
-          }
-        />
-      </div>
-
-      {/* ── Daily trend ─────────────────────────────────────────────── */}
-      <Card style={{ padding: 16, marginTop: 16 }}>
-        <SectionHead
-          title="Körningar per dag"
-          label={`${days} dagar`}
-          right={
-            <span className="mx-mono mx-t-xs mx-muted">
-              Topp: {formatNumber(trendMax)} / dag
-            </span>
-          }
-        />
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(${buckets.length}, 1fr)`,
-            alignItems: 'end',
-            gap: 2,
-            height: 120,
-            marginTop: 12
-          }}
-        >
-          {buckets.map((b, i) => {
-            const value = trend[i];
-            const heightPct = trendMax > 0 ? (value / trendMax) * 100 : 0;
-            return (
-              <div
-                key={b.key}
-                title={`${b.key}: ${value} körningar`}
-                style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
-              >
-                <div
-                  style={{
-                    width: '100%',
-                    height: `${Math.max(value > 0 ? 4 : 0, heightPct)}%`,
-                    background:
-                      value > 0 ? 'var(--mx-cyan-ink, #002c40)' : 'var(--mx-paper-3)',
-                    borderRadius: 3,
-                    transition: 'height .2s'
-                  }}
-                />
-              </div>
-            );
-          })}
-        </div>
-        <div
-          className="mx-mono mx-t-xs mx-muted"
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            marginTop: 6
-          }}
-        >
-          <span>{buckets[0]?.label}</span>
-          {buckets.length > 14 && (
-            <span>{buckets[Math.floor(buckets.length / 2)]?.label}</span>
-          )}
-          <span>{buckets[buckets.length - 1]?.label}</span>
-        </div>
-      </Card>
-
-      {/* ── Top tools + Category mix ───────────────────────────────── */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '2fr 1fr',
-          gap: 12,
-          marginTop: 16
-        }}
-      >
-        <Card style={{ padding: 16 }}>
-          <SectionHead
-            title="Mest använda agenter"
-            label="topp 8"
-            right={
-              <Link href="/toolbox" className="mx-btn mx-sm mx-ghost">
-                Till verktygslådan
-              </Link>
+  // ── Right rail ──────────────────────────────────────────────────────
+  const rail = (
+    <>
+      <RailSection label="Översikt">
+        <div className="grid grid-cols-2 gap-2 px-2">
+          <RailStat
+            label="Körningar"
+            value={formatNumber(totalRuns)}
+            hint={
+              previousRunsCount > 0 || totalRuns > 0
+                ? `${deltaRunsPct >= 0 ? '+' : ''}${(deltaRunsPct * 100).toFixed(0)}% mot föregående`
+                : undefined
             }
           />
-          {topTools.length === 0 ? (
-            <div className="mx-t-13 mx-muted" style={{ marginTop: 12 }}>
-              Inga körningar i den här perioden.
-            </div>
-          ) : (
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {topTools.map((row) => {
-                const max = topTools[0]?.count || 1;
-                const pct = (row.count / max) * 100;
-                return (
-                  <div key={row.toolId}>
-                    <div
-                      className="mx-flex mx-items-c mx-gap-2"
-                      style={{ marginBottom: 4 }}
-                    >
-                      <span className="mx-t-13 mx-fw-6 mx-truncate">
-                        {row.tool?.icon ? `${row.tool.icon} ` : ''}
-                        {row.tool?.name || 'Borttagen agent'}
-                      </span>
-                      {row.tool ? (
-                        <Chip mono>{toolCategoryLabels[row.tool.category]}</Chip>
-                      ) : null}
-                      <span className="mx-grow" />
-                      <span className="mx-mono mx-t-xs mx-muted">
-                        {formatNumber(row.count)} körningar
-                        {row.cost > 0 ? ` · ${formatCostUsd(row.cost)}` : ''}
-                        {row.failed > 0 ? ` · ${row.failed} fel` : ''}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        height: 6,
-                        background: 'var(--mx-paper-3)',
-                        borderRadius: 4,
-                        overflow: 'hidden'
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${pct}%`,
-                          height: '100%',
-                          background: 'var(--mx-cyan-ink, #002c40)'
-                        }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
+          <RailStat
+            label="Lyckandegrad"
+            value={totalRuns > 0 ? formatPercent(successRate) : '—'}
+            hint={avgDurationSec > 0 ? `${avgDurationSec.toFixed(1)} s avg` : undefined}
+          />
+          <RailStat
+            label="Tokens"
+            value={formatNumber(totalTokens)}
+            hint={`${formatNumber(totalTokensIn)} in · ${formatNumber(totalTokensOut)} ut`}
+          />
+          <RailStat
+            label="Kostnad"
+            value={formatCostUsd(totalCostUsd)}
+            hint="ungefärlig"
+          />
+        </div>
+      </RailSection>
 
-        <Card style={{ padding: 16 }}>
-          <SectionHead title="Kategori" label="andel" />
-          {totalRuns === 0 ? (
-            <div className="mx-t-13 mx-muted" style={{ marginTop: 12 }}>
-              Inga data.
-            </div>
-          ) : (
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {(Object.keys(toolCategoryLabels) as ToolCategory[]).map((cat) => {
-                const count = runsByCategory.get(cat) || 0;
-                if (count === 0) return null;
-                const pct = (count / totalRuns) * 100;
-                return (
-                  <div key={cat}>
-                    <div
-                      className="mx-flex mx-justify-b mx-items-c"
-                      style={{ marginBottom: 4 }}
-                    >
-                      <span className="mx-t-12 mx-fw-6">{toolCategoryLabels[cat]}</span>
-                      <span className="mx-mono mx-t-xs mx-muted">
-                        {formatNumber(count)} · {pct.toFixed(0)}%
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        height: 6,
-                        background: 'var(--mx-paper-3)',
-                        borderRadius: 4,
-                        overflow: 'hidden'
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${pct}%`,
-                          height: '100%',
-                          background: 'var(--mx-purple-ink, #6138b5)'
-                        }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      </div>
+      <RailSection label="Periodval">
+        {(Object.keys(RANGE_DAYS) as RangeKey[]).map((r) => (
+          <RailItem
+            key={r}
+            icon={r === range ? 'check' : 'dot'}
+            iconTone={r === range ? 'brand' : 'neutral'}
+            title={RANGE_LABELS[r]}
+            href={`/insights?range=${r}`}
+          />
+        ))}
+      </RailSection>
 
-      {/* ── Model usage + Status breakdown ─────────────────────────── */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '2fr 1fr',
-          gap: 12,
-          marginTop: 16
-        }}
+      <RailSection
+        label="Topp verktyg"
+        action={
+          <Link
+            href="/toolbox"
+            className="text-[11px] text-foreground-subtle hover:text-foreground"
+          >
+            Alla
+          </Link>
+        }
       >
-        <Card style={{ padding: 16 }}>
-          <SectionHead title="Modell-mix" label="Mistral · EU-suveränt" />
-          {modelRows.length === 0 ? (
-            <div className="mx-t-13 mx-muted" style={{ marginTop: 12 }}>
-              Inga AI-körningar.
-            </div>
-          ) : (
-            <div style={{ overflowX: 'auto', marginTop: 12 }}>
-              <table className="mx-t-13" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr className="mx-mono mx-t-xs mx-muted mx-t-up">
-                    <th style={{ textAlign: 'left', padding: '6px 8px' }}>Modell</th>
-                    <th style={{ textAlign: 'right', padding: '6px 8px' }}>Körningar</th>
-                    <th style={{ textAlign: 'right', padding: '6px 8px' }}>Tokens</th>
-                    <th style={{ textAlign: 'right', padding: '6px 8px' }}>Kostnad</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {modelRows.map((row) => (
-                    <tr key={row.model} style={{ borderTop: '1px solid var(--mx-line-soft)' }}>
-                      <td className="mx-mono" style={{ padding: '8px' }}>
-                        {row.model}
-                      </td>
-                      <td style={{ textAlign: 'right', padding: '8px' }}>
-                        {formatNumber(row.count)}
-                      </td>
-                      <td style={{ textAlign: 'right', padding: '8px' }}>
-                        {formatNumber(row.tokens)}
-                      </td>
-                      <td
-                        className="mx-mono"
-                        style={{ textAlign: 'right', padding: '8px' }}
-                      >
-                        {formatCostUsd(row.cost)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
+        {topToolsRail.length === 0 ? (
+          <RailEmpty>Inga körningar i perioden.</RailEmpty>
+        ) : (
+          topToolsRail.map((row) => (
+            <RailItem
+              key={row.toolId}
+              icon="sparkle"
+              iconTone="accent"
+              title={row.tool?.name || 'Borttagen agent'}
+              meta={`${formatNumber(row.count)} körningar${row.cost > 0 ? ` · ${formatCostUsd(row.cost)}` : ''}`}
+              href={row.tool ? `/toolbox/${row.toolId}` : undefined}
+            />
+          ))
+        )}
+      </RailSection>
+    </>
+  );
 
-        <Card style={{ padding: 16 }}>
-          <SectionHead title="Status" />
-          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {(['succeeded', 'failed', 'running', 'queued'] as ToolRunStatus[]).map(
-              (status) => {
-                const count = runs.filter((r) => r.status === status).length;
-                const pct = totalRuns > 0 ? (count / totalRuns) * 100 : 0;
-                const color =
-                  status === 'succeeded'
-                    ? 'var(--mx-green-ink, #1d3a1f)'
-                    : status === 'failed'
-                      ? 'var(--mx-brown-ink, #4b2718)'
-                      : 'var(--mx-purple-ink, #6138b5)';
-                return (
-                  <div key={status}>
-                    <div
-                      className="mx-flex mx-justify-b mx-items-c"
-                      style={{ marginBottom: 4 }}
-                    >
-                      <span className="mx-t-12 mx-fw-6">
-                        {toolRunStatusLabels[status]}
-                      </span>
-                      <span className="mx-mono mx-t-xs mx-muted">
-                        {formatNumber(count)}{' '}
-                        {totalRuns > 0 ? `· ${pct.toFixed(0)}%` : ''}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        height: 6,
-                        background: 'var(--mx-paper-3)',
-                        borderRadius: 4,
-                        overflow: 'hidden'
-                      }}
-                    >
-                      <div
-                        style={{ width: `${pct}%`, height: '100%', background: color }}
-                      />
-                    </div>
-                  </div>
-                );
-              }
-            )}
+  return (
+    <PageShell
+      title="Insights"
+      meta={
+        <span className="text-[12px] text-foreground-subtle">
+          {RANGE_LABELS[range]} · {formatNumber(totalRuns)} körningar
+        </span>
+      }
+      rightPanel={rail}
+    >
+      <div className="flex flex-col gap-4">
+        {runsLoadFailed && (
+          <div className="rounded-2xl border border-default bg-surface p-4 text-[13px] text-foreground-muted">
+            Kunde inte ladda agentkörningar. Försök igen om en stund.
           </div>
-        </Card>
-      </div>
+        )}
 
-      {/* ── Top users + Role attribution ─────────────────────────── */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 12,
-          marginTop: 16
-        }}
-      >
-        <Card style={{ padding: 16 }}>
-          <SectionHead title="Mest aktiva användare" label="topp 8" />
-          {topUsers.length === 0 ? (
-            <div className="mx-t-13 mx-muted" style={{ marginTop: 12 }}>
-              Inga körningar i den här perioden.
+        {/* ── Daily trend ─────────────────────────────────────────── */}
+        <section className="rounded-2xl border border-default bg-surface p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h2 className="text-[14px] font-semibold text-foreground">
+                Körningar per dag
+              </h2>
+              <p className="text-[11px] text-foreground-subtle">{days} dagar</p>
             </div>
-          ) : (
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {topUsers.map((u) => (
-                <div
-                  key={u.userId}
-                  className="mx-flex mx-items-c mx-gap-2"
-                  style={{
-                    padding: '8px 10px',
-                    borderRadius: 8,
-                    background: 'var(--mx-paper-3)'
-                  }}
-                >
-                  <span className="mx-t-13 mx-fw-6 mx-truncate" style={{ flex: 1 }}>
-                    {u.name}
-                  </span>
-                  {u.roles.slice(0, 2).map((r) => (
-                    <Chip key={r} mono>
-                      {ROLE_LABELS[r] || r}
-                    </Chip>
-                  ))}
-                  <span className="mx-mono mx-t-xs mx-muted">
-                    {formatNumber(u.count)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-
-        <Card style={{ padding: 16 }}>
-          <SectionHead title="Per roll" label="primär roll/körning" />
-          {roleRows.length === 0 ? (
-            <div className="mx-t-13 mx-muted" style={{ marginTop: 12 }}>
-              Ingen rolldata.
-            </div>
-          ) : (
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {roleRows.map((row) => {
-                const pct = totalRuns > 0 ? (row.count / totalRuns) * 100 : 0;
-                const label = ROLE_LABELS[row.role as Role] || row.role;
-                return (
-                  <div key={row.role}>
-                    <div
-                      className="mx-flex mx-justify-b mx-items-c"
-                      style={{ marginBottom: 4 }}
-                    >
-                      <span className="mx-t-12 mx-fw-6">{label}</span>
-                      <span className="mx-mono mx-t-xs mx-muted">
-                        {formatNumber(row.count)} · {pct.toFixed(0)}%
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        height: 6,
-                        background: 'var(--mx-paper-3)',
-                        borderRadius: 4,
-                        overflow: 'hidden'
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${pct}%`,
-                          height: '100%',
-                          background: 'var(--mx-cyan-ink, #002c40)'
-                        }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      </div>
-
-      {/* ── Module adoption ─────────────────────────────────────────── */}
-      <Card style={{ padding: 16, marginTop: 16 }}>
-        <SectionHead
-          title="Modul-adoption"
-          label="aktiviteter i perioden"
-          right={
-            <span className="mx-mono mx-t-xs mx-muted">
-              {formatNumber(distinctActiveStartups)} aktiva bolag
+            <span className="text-[11px] text-foreground-subtle tabular-nums">
+              Topp: {formatNumber(trendMax)} / dag
             </span>
-          }
-        />
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: 12,
-            marginTop: 12
-          }}
-        >
-          {moduleStats.map((m) => {
-            const share =
-              totalActivities > 0 ? (m.activityCount / totalActivities) * 100 : 0;
-            return (
-              <div
-                key={m.module}
-                style={{
-                  padding: 14,
-                  border: '1px solid var(--mx-line-soft)',
-                  borderRadius: 'var(--mx-r-md)',
-                  background: 'var(--mx-paper)'
-                }}
-              >
-                <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6">
-                  {m.label}
-                </div>
+          </div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${buckets.length}, 1fr)`,
+              alignItems: 'end',
+              gap: 2,
+              height: 120
+            }}
+          >
+            {buckets.map((b, i) => {
+              const value = trend[i];
+              const heightPct = trendMax > 0 ? (value / trendMax) * 100 : 0;
+              return (
                 <div
-                  className="mx-disp"
+                  key={b.key}
+                  title={`${b.key}: ${value} körningar`}
                   style={{
-                    fontSize: 28,
-                    fontWeight: 500,
-                    letterSpacing: -0.5,
-                    lineHeight: 1.1,
-                    marginTop: 4
-                  }}
-                >
-                  {formatNumber(m.activityCount)}
-                </div>
-                <div className="mx-mono mx-t-xs mx-muted" style={{ marginTop: 4 }}>
-                  {formatNumber(m.distinctStartups)} bolag · {share.toFixed(0)}% av flödet
-                </div>
-                <div
-                  style={{
-                    height: 6,
-                    background: 'var(--mx-paper-3)',
-                    borderRadius: 4,
-                    overflow: 'hidden',
-                    marginTop: 10
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'flex-end'
                   }}
                 >
                   <div
+                    className={value > 0 ? 'bg-brand' : 'bg-canvas-muted'}
                     style={{
-                      width: `${share}%`,
-                      height: '100%',
-                      background: 'var(--mx-purple-ink, #6138b5)'
+                      width: '100%',
+                      height: `${Math.max(value > 0 ? 4 : 0, heightPct)}%`,
+                      borderRadius: 3,
+                      transition: 'height .2s'
                     }}
                   />
                 </div>
-              </div>
-            );
-          })}
-        </div>
-        <p
-          className="mx-t-xs mx-muted"
-          style={{ marginTop: 12, lineHeight: 1.5 }}
-        >
-          Adoption baseras på aktivitetsflödet (kind=tool_run, workshop_*, manual). Aktiva
-          bolag = distinkta startups som genererat minst en aktivitet i perioden.
-        </p>
-      </Card>
+              );
+            })}
+          </div>
+          <div className="mt-2 flex justify-between text-[11px] text-foreground-subtle tabular-nums">
+            <span>{buckets[0]?.label}</span>
+            {buckets.length > 14 && (
+              <span>{buckets[Math.floor(buckets.length / 2)]?.label}</span>
+            )}
+            <span>{buckets[buckets.length - 1]?.label}</span>
+          </div>
+        </section>
 
-      <Card
-        style={{
-          padding: 14,
-          marginTop: 16,
-          background: 'var(--mx-paper-3)',
-          borderColor: 'var(--mx-line-soft)'
-        }}
-      >
-        <div className="mx-flex mx-items-c mx-gap-3 mx-wrap">
-          <Chip variant="purple" mono>
-            Endast aggregerade data
-          </Chip>
-          <span className="mx-t-xs mx-muted">
-            Innehåll i prompts och konfidentiella anteckningar visas aldrig här. Detta är
-            telemetri för EU AI Act art. 72 (post-market monitoring) och SOC 2 CC7.x.
-          </span>
+        {/* ── Top tools + Category mix ───────────────────────────── */}
+        <div className="grid gap-4 lg:grid-cols-3">
+          <section className="rounded-2xl border border-default bg-surface p-5 lg:col-span-2">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[14px] font-semibold text-foreground">
+                Mest använda verktyg
+              </h2>
+              <Link
+                href="/toolbox"
+                className="text-[11px] text-foreground-subtle hover:text-foreground"
+              >
+                Till verktygslådan
+              </Link>
+            </div>
+            {topTools.length === 0 ? (
+              <div className="text-[13px] text-foreground-muted">
+                Inga körningar i den här perioden.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                {topTools.map((row) => {
+                  const max = topTools[0]?.count || 1;
+                  const pct = (row.count / max) * 100;
+                  return (
+                    <div key={row.toolId} className="rounded-xl px-2 py-1.5">
+                      <div className="mb-1 flex items-center gap-2">
+                        <span className="truncate text-[13px] font-medium text-foreground">
+                          {row.tool?.name || 'Borttagen agent'}
+                        </span>
+                        {row.tool ? (
+                          <span className="rounded-md bg-canvas-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-foreground-subtle">
+                            {toolCategoryLabels[row.tool.category]}
+                          </span>
+                        ) : null}
+                        <span className="flex-1" />
+                        <span className="text-[11px] text-foreground-subtle tabular-nums">
+                          {formatNumber(row.count)} körningar
+                          {row.cost > 0 ? ` · ${formatCostUsd(row.cost)}` : ''}
+                          {row.failed > 0 ? ` · ${row.failed} fel` : ''}
+                        </span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded bg-canvas-muted">
+                        <div
+                          className="h-full bg-brand"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-default bg-surface p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[14px] font-semibold text-foreground">Kategori</h2>
+              <span className="text-[11px] text-foreground-subtle">andel</span>
+            </div>
+            {totalRuns === 0 ? (
+              <div className="text-[13px] text-foreground-muted">Inga data.</div>
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                {(Object.keys(toolCategoryLabels) as ToolCategory[]).map((cat) => {
+                  const count = runsByCategory.get(cat) || 0;
+                  if (count === 0) return null;
+                  const pct = (count / totalRuns) * 100;
+                  return (
+                    <div key={cat}>
+                      <div className="mb-1 flex items-center justify-between">
+                        <span className="text-[12px] font-medium text-foreground">
+                          {toolCategoryLabels[cat]}
+                        </span>
+                        <span className="text-[11px] text-foreground-subtle tabular-nums">
+                          {formatNumber(count)} · {pct.toFixed(0)}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded bg-canvas-muted">
+                        <div
+                          className="h-full bg-movexum-lila"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         </div>
-      </Card>
-    </div>
+
+        {/* ── Model usage + Status breakdown ────────────────────── */}
+        <div className="grid gap-4 lg:grid-cols-3">
+          <section className="rounded-2xl border border-default bg-surface p-5 lg:col-span-2">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[14px] font-semibold text-foreground">Modell-mix</h2>
+              <span className="text-[11px] text-foreground-subtle">
+                kostnad per modell
+              </span>
+            </div>
+            {modelRows.length === 0 ? (
+              <div className="text-[13px] text-foreground-muted">Inga körningar.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-wider text-foreground-subtle">
+                      <th className="px-2 py-1.5 text-left font-semibold">Modell</th>
+                      <th className="px-2 py-1.5 text-right font-semibold">Körningar</th>
+                      <th className="px-2 py-1.5 text-right font-semibold">Tokens</th>
+                      <th className="px-2 py-1.5 text-right font-semibold">Kostnad</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modelRows.map((row) => (
+                      <tr key={row.model} className="border-t border-default">
+                        <td className="px-2 py-2 font-mono text-foreground">{row.model}</td>
+                        <td className="px-2 py-2 text-right tabular-nums text-foreground">
+                          {formatNumber(row.count)}
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums text-foreground">
+                          {formatNumber(row.tokens)}
+                        </td>
+                        <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground">
+                          {formatCostUsd(row.cost)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-default bg-surface p-5">
+            <h2 className="mb-3 text-[14px] font-semibold text-foreground">Status</h2>
+            <div className="flex flex-col gap-2.5">
+              {(['succeeded', 'failed', 'running', 'queued'] as ToolRunStatus[]).map(
+                (status) => {
+                  const count = runs.filter((r) => r.status === status).length;
+                  const pct = totalRuns > 0 ? (count / totalRuns) * 100 : 0;
+                  const barClass =
+                    status === 'succeeded'
+                      ? 'bg-movexum-gron'
+                      : status === 'failed'
+                        ? 'bg-movexum-orange'
+                        : 'bg-movexum-lila';
+                  return (
+                    <div key={status}>
+                      <div className="mb-1 flex items-center justify-between">
+                        <span className="text-[12px] font-medium text-foreground">
+                          {toolRunStatusLabels[status]}
+                        </span>
+                        <span className="text-[11px] text-foreground-subtle tabular-nums">
+                          {formatNumber(count)}
+                          {totalRuns > 0 ? ` · ${pct.toFixed(0)}%` : ''}
+                        </span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded bg-canvas-muted">
+                        <div className={`h-full ${barClass}`} style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                }
+              )}
+            </div>
+          </section>
+        </div>
+
+        {/* ── Top users + Role attribution ──────────────────────── */}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <section className="rounded-2xl border border-default bg-surface p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[14px] font-semibold text-foreground">
+                Mest aktiva användare
+              </h2>
+              <span className="text-[11px] text-foreground-subtle">topp 8</span>
+            </div>
+            {topUsers.length === 0 ? (
+              <div className="text-[13px] text-foreground-muted">
+                Inga körningar i den här perioden.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                {topUsers.map((u) => (
+                  <div
+                    key={u.userId}
+                    className="flex items-center gap-2 rounded-xl bg-canvas-subtle px-3 py-2"
+                  >
+                    <span className="flex-1 truncate text-[13px] font-medium text-foreground">
+                      {u.name}
+                    </span>
+                    {u.roles.slice(0, 2).map((r) => (
+                      <span
+                        key={r}
+                        className="rounded-md bg-canvas-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-foreground-subtle"
+                      >
+                        {ROLE_LABELS[r] || r}
+                      </span>
+                    ))}
+                    <span className="text-[11px] tabular-nums text-foreground-subtle">
+                      {formatNumber(u.count)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-default bg-surface p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[14px] font-semibold text-foreground">Per roll</h2>
+              <span className="text-[11px] text-foreground-subtle">
+                primär roll / körning
+              </span>
+            </div>
+            {roleRows.length === 0 ? (
+              <div className="text-[13px] text-foreground-muted">Ingen rolldata.</div>
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                {roleRows.map((row) => {
+                  const pct = totalRuns > 0 ? (row.count / totalRuns) * 100 : 0;
+                  const label = ROLE_LABELS[row.role as Role] || row.role;
+                  return (
+                    <div key={row.role}>
+                      <div className="mb-1 flex items-center justify-between">
+                        <span className="text-[12px] font-medium text-foreground">
+                          {label}
+                        </span>
+                        <span className="text-[11px] text-foreground-subtle tabular-nums">
+                          {formatNumber(row.count)} · {pct.toFixed(0)}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded bg-canvas-muted">
+                        <div className="h-full bg-brand" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </div>
+
+        {/* ── Module adoption ─────────────────────────────────────── */}
+        <section className="rounded-2xl border border-default bg-surface p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h2 className="text-[14px] font-semibold text-foreground">
+                Modul-adoption
+              </h2>
+              <p className="text-[11px] text-foreground-subtle">
+                aktiviteter i perioden
+              </p>
+            </div>
+            <span className="text-[11px] text-foreground-subtle tabular-nums">
+              {formatNumber(distinctActiveStartups)} aktiva bolag
+            </span>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {moduleStats.map((m) => {
+              const share =
+                totalActivities > 0 ? (m.activityCount / totalActivities) * 100 : 0;
+              return (
+                <div
+                  key={m.module}
+                  className="rounded-xl border border-default bg-canvas-subtle p-4"
+                >
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
+                    {m.label}
+                  </div>
+                  <div className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
+                    {formatNumber(m.activityCount)}
+                  </div>
+                  <div className="mt-1 text-[11px] text-foreground-subtle tabular-nums">
+                    {formatNumber(m.distinctStartups)} bolag · {share.toFixed(0)}% av flödet
+                  </div>
+                  <div className="mt-3 h-1.5 overflow-hidden rounded bg-canvas-muted">
+                    <div
+                      className="h-full bg-movexum-lila"
+                      style={{ width: `${share}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+    </PageShell>
   );
 }

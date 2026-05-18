@@ -3,14 +3,9 @@ import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
-import {
-  PageHead,
-  Card,
-  CardHead,
-  Chip,
-  ProgressBar,
-  Icon
-} from '@/components/proto';
+import { Chip, ProgressBar, Icon } from '@/components/proto';
+import { PageShell } from '@/components/PageShell';
+import { RailSection, RailStat } from '@/components/PageRail';
 import type { IncubatorReport } from '@platform/shared';
 import { ReportDetail } from './ReportDetail';
 import { statusChipVariant, statusLabel } from './report-utils';
@@ -35,75 +30,73 @@ export default async function RapporterPage({
     });
     reports = res.items;
   } catch {
-    /* collection may not exist yet — render empty state below */
+    /* collection may not exist yet */
   }
 
   const selectedId = selectedFromQuery || reports[0]?.id;
   const selected = reports.find((r) => r.id === selectedId) || reports[0] || null;
 
-  // Tidsbesparing: härled timmar från completion% av draft_ai-rapporter
-  const draftAi = reports.filter((r) => r.status === 'draft_ai');
-  const totalCompletion = draftAi.reduce((sum, r) => sum + (r.completion || 0), 0);
-  const hoursSaved = Math.round((totalCompletion / 100) * 18); // ~18h per full rapport
-  const topDraft = draftAi[0];
+  const byStatus = reports.reduce<Record<string, number>>((acc, r) => {
+    acc[r.status] = (acc[r.status] || 0) + 1;
+    return acc;
+  }, {});
+
+  const rail = (
+    <>
+      <RailSection label="Översikt">
+        <div className="grid grid-cols-2 gap-2 px-2">
+          <RailStat label="Rapporter" value={reports.length} />
+          <RailStat label="Utkast" value={byStatus.draft_ai || 0} />
+          <RailStat label="Klara" value={byStatus.sent || 0} />
+          <RailStat label="Granskas" value={byStatus.review || 0} />
+        </div>
+      </RailSection>
+
+      <RailSection label="Senast uppdaterade">
+        {reports.slice(0, 5).map((r) => (
+          <Link
+            key={r.id}
+            href={`/rapporter/${r.id}`}
+            className="flex items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-canvas-muted"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-canvas-muted text-foreground-muted">
+              <Icon name="doc" size={13} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[12.5px] font-medium text-foreground">
+                {r.title}
+              </span>
+              <span className="block truncate font-mono text-[10.5px] uppercase text-foreground-subtle">
+                {r.recipient_label} · {r.completion || 0}%
+              </span>
+            </span>
+          </Link>
+        ))}
+      </RailSection>
+    </>
+  );
+
+  const actions = (
+    <Link
+      href="/rapporter?new=1"
+      className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
+    >
+      <Icon name="plus" size={12} /> Ny rapport
+    </Link>
+  );
 
   return (
-    <div className="mx-view-pad mx-wide">
-      <PageHead
-        crumb="Hemmaplan / Rapportering"
-        title="Rapportering"
-        subtitle="Vinnova, Tillväxtverket och regionala rapporter — fylls automatiskt från portföljen. Granska, justera, skicka."
-        actions={
-          <Link href="/rapporter?new=1" className="mx-btn mx-primary">
-            <Icon name="plus" size={13} /> Ny rapport
-          </Link>
-        }
-      />
-
-      {/* Tidsbesparings-banner — visas bara när det finns faktiska AI-utkast */}
-      {hoursSaved > 0 && (
-        <Card
-          style={{
-            padding: 14,
-            background: 'var(--mx-brown-tint)',
-            borderColor: 'transparent',
-            marginBottom: 16
-          }}
-        >
-          <div className="mx-flex mx-items-c mx-gap-3">
-            <Icon name="sparkle" size={16} style={{ color: 'var(--mx-brown)' }} />
-            <div style={{ flex: 1 }}>
-              <div
-                className="mx-mono mx-t-xs mx-t-up mx-fw-6"
-                style={{ color: 'var(--mx-brown-ink)' }}
-              >
-                Tidsbesparing
-              </div>
-              <div className="mx-t-13 mx-fw-6" style={{ color: 'var(--mx-brown-ink)' }}>
-                {topDraft
-                  ? `Rapportskrivaren har fyllt ${topDraft.completion}% av ${topDraft.recipient_label} automatiskt — sparade ca ${hoursSaved} timmars manuellt arbete.`
-                  : `Rapportskrivaren har sparat ca ${hoursSaved} timmars manuellt arbete denna månad.`}
-              </div>
-            </div>
-            <span
-              className="mx-disp mx-fw-6"
-              style={{ fontSize: 28, color: 'var(--mx-brown-ink)' }}
-            >
-              −{hoursSaved}h
+    <PageShell title="Rapportering" actions={actions} rightPanel={rail}>
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 py-5 lg:grid-cols-[320px_1fr]">
+        <div className="rounded-2xl border border-default bg-surface">
+          <div className="flex items-center justify-between border-b border-default px-4 py-3">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+              Rapporter
             </span>
+            <span className="font-mono text-[11px] text-foreground-subtle">{reports.length}</span>
           </div>
-        </Card>
-      )}
-
-      <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 16 }}>
-        {/* Vänster lista */}
-        <Card style={{ padding: 0, overflow: 'hidden' }}>
-          <CardHead
-            label="Rapporter"
-            right={<span className="mx-mono mx-t-xs mx-muted">{reports.length}</span>}
-          />
           {reports.length === 0 ? (
-            <div className="mx-muted mx-t-13" style={{ padding: '24px 16px', textAlign: 'center' }}>
+            <div className="px-4 py-8 text-center text-[13px] text-foreground-muted">
               Inga rapporter ännu.
             </div>
           ) : (
@@ -114,50 +107,54 @@ export default async function RapporterPage({
                   <Link
                     key={r.id}
                     href={`/rapporter/${r.id}`}
-                    style={{
-                      display: 'block',
-                      padding: '12px 16px',
-                      borderBottom: '1px solid var(--mx-line-soft)',
-                      background: isSel ? 'var(--mx-paper-3)' : 'transparent',
-                      borderLeft: isSel ? '3px solid var(--mx-ink)' : '3px solid transparent',
-                      textDecoration: 'none',
-                      color: 'inherit'
-                    }}
+                    className={`block border-b border-default px-4 py-3 transition last:border-b-0 ${
+                      isSel ? 'bg-canvas-muted' : 'hover:bg-canvas-subtle'
+                    }`}
                   >
-                    <div className="mx-flex mx-items-c mx-gap-2 mx-mb-2">
-                      <span className="mx-mono mx-t-xs mx-muted mx-t-up">{r.recipient_label}</span>
-                      <span className="mx-grow" />
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className="font-mono text-[10.5px] uppercase text-foreground-subtle">
+                        {r.recipient_label}
+                      </span>
+                      <span className="flex-1" />
                       <Chip variant={statusChipVariant(r.status)} mono>
                         {statusLabel(r.status)}
                       </Chip>
                     </div>
-                    <div className="mx-t-13 mx-fw-6 mx-mb-1">{r.title}</div>
-                    <div className="mx-flex mx-items-c mx-gap-2">
+                    <div className="mb-1 text-[13px] font-semibold text-foreground">
+                      {r.title}
+                    </div>
+                    <div className="flex items-center gap-2">
                       <ProgressBar pct={r.completion || 0} accent={r.accent || 'ink'} />
-                      <span className="mx-mono mx-t-xs mx-muted">{r.completion || 0}%</span>
+                      <span className="font-mono text-[10.5px] text-foreground-subtle">
+                        {r.completion || 0}%
+                      </span>
                     </div>
                   </Link>
                 );
               })}
             </div>
           )}
-        </Card>
+        </div>
 
-        {/* Höger detalj */}
         {selected ? (
           <ReportDetail report={selected} />
         ) : (
-          <Card style={{ padding: 32, textAlign: 'center' }}>
-            <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6 mx-mb-2">Inga rapporter</div>
-            <div className="mx-t-13 mx-muted mx-mb-3">
+          <div className="rounded-2xl border border-default bg-surface p-10 text-center">
+            <div className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.16em] text-foreground-subtle">
+              Inga rapporter
+            </div>
+            <div className="mb-4 text-[13px] text-foreground-muted">
               Skapa din första rapport för Vinnova, Tillväxtverket eller regionen.
             </div>
-            <Link href="/rapporter?new=1" className="mx-btn mx-primary" style={{ display: 'inline-flex' }}>
-              <Icon name="plus" size={13} /> Ny rapport
+            <Link
+              href="/rapporter?new=1"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
+            >
+              <Icon name="plus" size={12} /> Ny rapport
             </Link>
-          </Card>
+          </div>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }

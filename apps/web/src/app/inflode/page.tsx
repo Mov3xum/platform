@@ -1,17 +1,11 @@
 // Inflöde — översikt
-// Hjärtat i inkubatorn: KPI-puls, funnel, source-attribution, modul-katalog,
-// kampanjbrytning och de senaste leadsen.
 
 import Link from 'next/link';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import {
-  PageHead,
-  SectionHead,
-  Card,
-  Chip,
-  Icon
-} from '@/components/proto';
+import { Chip, Icon } from '@/components/proto';
+import { PageShell } from '@/components/PageShell';
+import { RailSection, RailItem, RailStat } from '@/components/PageRail';
 import {
   countLeadsByStatus,
   getLeadAnalytics,
@@ -55,430 +49,308 @@ export default async function InflödePage() {
       (statusCounts.evaluating || 0)
     : 0;
   const conversionRate =
-    statusCounts && total > 0
-      ? Math.round((100 * (statusCounts.accepted || 0)) / total)
-      : 0;
+    statusCounts && total > 0 ? Math.round((100 * (statusCounts.accepted || 0)) / total) : 0;
 
   const sourceByKey = new Map(sources.map((s) => [s.key, s]));
   const moduleBySlug = new Map(modules.map((m) => [m.slug, m]));
 
-  return (
-    <div className="mx-view-pad mx-wide">
-      <PageHead
-        crumb="Hemmaplan / Inflöde"
-        title="Inflöde"
-        subtitle="Hjärtat i inkubatorn. Fånga, kvalificera och konvertera idéer till bolag. Deploya formulär, quiz och AI-chattar på egna URL:er och spåra var inflödet kommer ifrån."
-        actions={
-          <>
-            <Link href="/inflode/chat" className="mx-btn">
-              <Icon name="sparkle" size={13} /> Öppna AI-intag
-            </Link>
-            {isStaff && (
-              <>
-                <Link href="/inflode/leads/new" className="mx-btn">
-                  <Icon name="plus" size={13} /> Nytt lead
-                </Link>
-                <Link href="/inflode/leads" className="mx-btn mx-primary">
-                  <Icon name="people" size={13} /> Alla leads
-                </Link>
-              </>
-            )}
-          </>
-        }
-      />
-
-      {/* Compliance-banner */}
-      <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-paper-2)' }}>
-        <div className="mx-flex mx-items-c mx-gap-2 mx-t-12 mx-muted">
-          <Icon name="shield" size={13} />
-          <span>
-            AI-intaget drivs av Mistral / Le Chat (Frankrike, EU-suveränt). Konfidentiella
-            anteckningar och personuppgifter exkluderas alltid från modellanrop.
-            Riskklass: <strong>begränsad</strong> · Människan tar alltid det slutgiltiga beslutet.
-          </span>
-        </div>
-      </Card>
-
-      {/* KPI-strip */}
-      {isStaff && statusCounts && analytics && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            gap: 12,
-            marginBottom: 22
-          }}
-        >
-          <KpiTile label="Totalt" value={total} hint="leads i inflöde" />
-          <KpiTile label="I tratt" value={inFunnel} hint="ej beslutade" />
-          <KpiTile
-            label="Accepterade"
-            value={statusCounts.accepted || 0}
-            hint="redo att onboardas"
-          />
-          <KpiTile
-            label="Konvertering"
-            value={`${conversionRate}%`}
-            hint="accept / totalt"
-          />
-          <KpiTile
-            label="Konverterade bolag"
-            value={analytics.converted}
-            hint={`senaste ${ANALYTICS_WINDOW_DAYS} dagarna`}
-          />
-        </div>
+  const rail = (
+    <>
+      {isStaff && statusCounts && (
+        <RailSection label="Pipeline">
+          <div className="grid grid-cols-2 gap-2 px-2">
+            <RailStat label="Totalt" value={total} />
+            <RailStat label="I tratt" value={inFunnel} />
+            <RailStat label="Accepterade" value={statusCounts.accepted || 0} />
+            <RailStat label="Konvertering" value={`${conversionRate}%`} />
+          </div>
+        </RailSection>
       )}
 
-      {/* Funnel */}
-      {isStaff && statusCounts && (
-        <Card style={{ padding: 16, marginBottom: 16 }}>
-          <div
-            className="mx-flex mx-items-c mx-gap-3"
-            style={{ marginBottom: 10 }}
-          >
-            <span className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6">
-              Funnel · klicka för att filtrera
-            </span>
-            <span className="mx-grow" />
-            <span className="mx-mono mx-t-xs mx-muted">
-              Antal per status
-            </span>
+      {isStaff && analytics && analytics.bySource.length > 0 && (
+        <RailSection label={`Källor · ${ANALYTICS_WINDOW_DAYS} dgr`}>
+          {analytics.bySource.slice(0, 6).map((s) => {
+            const src = sourceByKey.get(s.source_key);
+            const convPct = s.total > 0 ? Math.round((100 * s.accepted) / s.total) : 0;
+            return (
+              <Link
+                key={s.source_key}
+                href={`/inflode/leads?src=${encodeURIComponent(s.source_key)}`}
+                className="flex items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-canvas-muted"
+              >
+                <span
+                  className="h-2 w-2 shrink-0 rounded-sm"
+                  style={{ background: src?.color || '#002c40' }}
+                />
+                <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-foreground">
+                  {src?.label || s.source_key}
+                </span>
+                <span className="font-mono text-[11px] text-foreground">{s.total}</span>
+                <span className="font-mono text-[10.5px] text-foreground-subtle">
+                  {convPct}%
+                </span>
+              </Link>
+            );
+          })}
+        </RailSection>
+      )}
+
+      <RailSection label="Moduler">
+        {modules.length === 0 ? (
+          <div className="px-2 py-4 text-center text-[12px] text-foreground-subtle">
+            Inga publicerade moduler.
           </div>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(6, 1fr)',
-              gap: 8
-            }}
-          >
-            {LEAD_STATUS_ORDER.map((status) => {
-              const n = statusCounts[status] || 0;
-              const pct = total > 0 ? Math.round((100 * n) / total) : 0;
-              return (
-                <Link
-                  key={status}
-                  href={`/inflode/leads?status=${encodeURIComponent(status)}`}
-                  style={{ textDecoration: 'none', color: 'inherit' }}
-                >
-                  <div
-                    style={{
-                      padding: 10,
-                      borderRadius: 'var(--mx-r-md)',
-                      background: 'var(--mx-paper-2)',
-                      border: '1px solid var(--mx-line-soft)',
-                      cursor: 'pointer'
-                    }}
+        ) : (
+          modules.slice(0, 5).map((m) => (
+            <RailItem
+              key={m.id}
+              icon={m.flow_type === 'chat' ? 'sparkle' : 'doc'}
+              iconTone={m.flow_type === 'chat' ? 'accent' : 'brand'}
+              title={m.name}
+              meta={FLOW_TYPE_LABEL[m.flow_type]}
+              href={`/inflode/m/${m.slug}`}
+            />
+          ))
+        )}
+      </RailSection>
+    </>
+  );
+
+  const actions = (
+    <>
+      <Link
+        href="/inflode/chat"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-default bg-surface px-3 py-1.5 text-[12.5px] font-medium text-foreground transition hover:bg-canvas-muted"
+      >
+        Öppna intag
+      </Link>
+      {isStaff && (
+        <Link
+          href="/inflode/leads"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
+        >
+          <Icon name="people" size={12} /> Alla leads
+        </Link>
+      )}
+    </>
+  );
+
+  return (
+    <PageShell title="Inflöde" actions={actions} rightPanel={rail}>
+      <div className="space-y-6 py-6">
+        {isStaff && statusCounts && (
+          <section className="rounded-2xl border border-default bg-surface">
+            <div className="flex items-center justify-between border-b border-default px-5 py-3">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                Funnel · klicka för att filtrera
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 p-4 md:grid-cols-6">
+              {LEAD_STATUS_ORDER.map((status) => {
+                const n = statusCounts[status] || 0;
+                const pct = total > 0 ? Math.round((100 * n) / total) : 0;
+                return (
+                  <Link
+                    key={status}
+                    href={`/inflode/leads?status=${encodeURIComponent(status)}`}
+                    className="rounded-xl border border-default bg-canvas-subtle px-3 py-3 transition hover:border-strong"
                   >
-                    <div
-                      className="mx-mono mx-t-xs mx-t-up mx-muted"
-                      style={{ marginBottom: 4 }}
-                    >
+                    <div className="mb-1 font-mono text-[10.5px] uppercase tracking-wide text-foreground-subtle">
                       {LEAD_STATUS_LABEL[status]}
                     </div>
-                    <div className="mx-disp" style={{ fontSize: 24, fontWeight: 600 }}>
-                      {n}
-                    </div>
-                    <div className="mx-t-xs mx-muted">{pct}%</div>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        </Card>
-      )}
-
-      {/* Var kommer leads ifrån + kampanjer (90 dagar) */}
-      {isStaff && analytics && analytics.total > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 22 }}>
-          <Card style={{ padding: 16 }}>
-            <div className="mx-flex mx-items-c mx-gap-2" style={{ marginBottom: 12 }}>
-              <span className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6">Källor</span>
-              <span className="mx-grow" />
-              <span className="mx-mono mx-t-xs mx-muted">{ANALYTICS_WINDOW_DAYS} dagar</span>
+                    <div className="text-2xl font-semibold text-foreground tabular-nums">{n}</div>
+                    <div className="text-[11px] text-foreground-subtle">{pct}%</div>
+                  </Link>
+                );
+              })}
             </div>
-            {analytics.bySource.length === 0 ? (
-              <div className="mx-muted mx-t-13">Inga leads i perioden.</div>
+          </section>
+        )}
+
+        {isStaff && analytics && analytics.byCampaign.length > 0 && (
+          <section className="rounded-2xl border border-default bg-surface">
+            <div className="flex items-center justify-between border-b border-default px-5 py-3">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                Kampanjer · UTM
+              </span>
+              <span className="font-mono text-[11px] text-foreground-subtle">
+                {analytics.byCampaign.length} aktiva
+              </span>
+            </div>
+            <div className="space-y-1 p-4">
+              {analytics.byCampaign.slice(0, 8).map((c) => (
+                <div
+                  key={c.campaign}
+                  className="flex items-center gap-2 rounded-lg px-2 py-1.5"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
+                    {c.campaign}
+                  </span>
+                  {c.source && (
+                    <Chip variant="cyan" mono>
+                      {c.source}
+                    </Chip>
+                  )}
+                  <span className="w-10 text-right font-mono text-[12px] font-semibold">
+                    {c.total}
+                  </span>
+                  <span className="w-16 text-right font-mono text-[10.5px] text-foreground-subtle">
+                    {c.accepted} accept.
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {modules.length > 0 && (
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                Intag-flöden
+              </h2>
+              {isStaff && (
+                <Link
+                  href="/inflode/admin/modules"
+                  className="text-[12px] text-foreground-muted hover:text-foreground"
+                >
+                  Hantera
+                </Link>
+              )}
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {modules.map((m) => {
+                const metrics = analytics?.byModule.find((x) => x.slug === m.slug);
+                return (
+                  <div
+                    key={m.id}
+                    className="flex h-full flex-col gap-2 rounded-2xl border border-default bg-surface p-4"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Chip variant={m.flow_type === 'chat' ? 'cyan' : 'default'} mono>
+                        {FLOW_TYPE_LABEL[m.flow_type].toUpperCase()}
+                      </Chip>
+                      {m.public_url_enabled && (
+                        <Chip variant="active" mono>
+                          PUBLIK
+                        </Chip>
+                      )}
+                      {!m.is_active && (
+                        <Chip variant="draft" mono>
+                          UTKAST
+                        </Chip>
+                      )}
+                    </div>
+                    <div className="text-[15px] font-semibold text-foreground">{m.name}</div>
+                    <div className="text-[12.5px] leading-relaxed text-foreground-muted">
+                      {m.description ||
+                        'Starta modulen för att beskriva idén och få nästa steg.'}
+                    </div>
+                    <span className="flex-1" />
+                    {isStaff && metrics && (
+                      <div className="font-mono text-[11px] text-foreground-subtle">
+                        <span className="font-semibold text-foreground">{metrics.total}</span>{' '}
+                        leads ·{' '}
+                        <span className="font-semibold text-foreground">{metrics.accepted}</span>{' '}
+                        accept. ·{' '}
+                        <span className="font-semibold text-foreground">{metrics.converted}</span>{' '}
+                        bolag
+                      </div>
+                    )}
+                    <div className="mt-1 flex items-center gap-2">
+                      <Link
+                        href={`/inflode/m/${m.slug}`}
+                        className="rounded-lg border border-default bg-canvas-muted px-3 py-1.5 text-[12px] text-foreground hover:bg-canvas-subtle"
+                      >
+                        Starta →
+                      </Link>
+                      {isStaff && (
+                        <Link
+                          href={`/inflode/admin/modules/${m.slug}`}
+                          className="rounded-lg px-3 py-1.5 text-[12px] text-foreground-muted hover:text-foreground"
+                        >
+                          Redigera
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {isStaff && (
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                Senaste leads
+              </h2>
+              <Link
+                href="/inflode/leads"
+                className="text-[12px] text-foreground-muted hover:text-foreground"
+              >
+                Visa alla →
+              </Link>
+            </div>
+            {recent.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-default p-10 text-center text-[13px] text-foreground-muted">
+                Inga leads har skapats ännu.
+              </div>
             ) : (
-              <div style={{ display: 'grid', gap: 8 }}>
-                {analytics.bySource.slice(0, 6).map((s) => {
-                  const src = sourceByKey.get(s.source_key);
-                  const pct = analytics.total > 0 ? Math.round((100 * s.total) / analytics.total) : 0;
-                  const convPct = s.total > 0 ? Math.round((100 * s.accepted) / s.total) : 0;
+              <div className="space-y-2">
+                {recent.map((lead) => {
+                  const source = sourceByKey.get(lead.source_key);
+                  const landingMod = lead.landing_module
+                    ? moduleBySlug.get(lead.landing_module)
+                    : undefined;
                   return (
                     <Link
-                      key={s.source_key}
-                      href={`/inflode/leads?src=${encodeURIComponent(s.source_key)}`}
-                      style={{ textDecoration: 'none', color: 'inherit' }}
+                      key={lead.id}
+                      href={`/inflode/leads/${lead.id}`}
+                      className="block rounded-xl border border-default bg-surface p-4 transition hover:border-strong"
                     >
-                      <div
-                        className="mx-flex mx-items-c mx-gap-2"
-                        style={{ padding: '6px 0' }}
-                      >
-                        <span
-                          style={{
-                            width: 10,
-                            height: 10,
-                            borderRadius: 2,
-                            background: src?.color || '#002c40',
-                            flexShrink: 0
-                          }}
-                        />
-                        <span className="mx-t-13 mx-fw-6" style={{ minWidth: 110 }}>
-                          {src?.label || s.source_key}
-                        </span>
-                        <div
-                          style={{
-                            flex: 1,
-                            height: 6,
-                            background: 'var(--mx-line-soft)',
-                            borderRadius: 3,
-                            overflow: 'hidden'
-                          }}
-                        >
-                          <div
-                            style={{
-                              height: '100%',
-                              width: `${pct}%`,
-                              background: src?.color || '#002c40'
-                            }}
-                          />
+                      <div className="flex items-center gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="truncate text-[13.5px] font-semibold text-foreground">
+                              {lead.name || 'Anonym'}
+                            </span>
+                            <Chip variant={statusChipVariant(lead.status)} mono>
+                              {LEAD_STATUS_LABEL[lead.status]}
+                            </Chip>
+                            {lead.converted_startup && (
+                              <Chip variant="active" mono>
+                                KONVERTERAT
+                              </Chip>
+                            )}
+                          </div>
+                          <div className="mt-1 truncate text-[12px] text-foreground-muted">
+                            {lead.idea_summary || lead.email || lead.organization || '—'}
+                          </div>
                         </div>
-                        <span className="mx-mono mx-t-xs mx-fw-6" style={{ minWidth: 32, textAlign: 'right' }}>
-                          {s.total}
-                        </span>
-                        <span className="mx-mono mx-t-xs mx-muted" style={{ minWidth: 48, textAlign: 'right' }}>
-                          {convPct}% konv
-                        </span>
+                        <div className="shrink-0 text-right">
+                          <div className="font-mono text-[10.5px] uppercase text-foreground-subtle">
+                            {source?.label || lead.source_key}
+                            {landingMod && ` · ${landingMod.name}`}
+                            {lead.utm_campaign && ` · ${lead.utm_campaign}`}
+                          </div>
+                          {typeof lead.score === 'number' && (
+                            <div className="mt-1 font-mono text-[11px] font-semibold text-foreground">
+                              {lead.score} p
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </Link>
                   );
                 })}
               </div>
             )}
-          </Card>
-
-          <Card style={{ padding: 16 }}>
-            <div className="mx-flex mx-items-c mx-gap-2" style={{ marginBottom: 12 }}>
-              <span className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6">Kampanjer · UTM</span>
-              <span className="mx-grow" />
-              <span className="mx-mono mx-t-xs mx-muted">{analytics.byCampaign.length} aktiva</span>
-            </div>
-            {analytics.byCampaign.length === 0 ? (
-              <div className="mx-muted mx-t-13">
-                Inga UTM-spårade leads ännu. Lägg <code className="mx-mono">?utm_source=...&amp;utm_campaign=...</code> på modul-URL:er för att mäta kampanjer.
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gap: 6 }}>
-                {analytics.byCampaign.slice(0, 6).map((c) => (
-                  <div
-                    key={c.campaign}
-                    className="mx-flex mx-items-c mx-gap-2"
-                    style={{ padding: '4px 0' }}
-                  >
-                    <span className="mx-t-13 mx-fw-6 mx-truncate" style={{ flex: 1, minWidth: 0 }}>
-                      {c.campaign}
-                    </span>
-                    {c.source && (
-                      <Chip variant="cyan" mono>
-                        {c.source}
-                      </Chip>
-                    )}
-                    <span className="mx-mono mx-t-xs mx-fw-6" style={{ minWidth: 32, textAlign: 'right' }}>
-                      {c.total}
-                    </span>
-                    <span className="mx-mono mx-t-xs mx-muted" style={{ minWidth: 64, textAlign: 'right' }}>
-                      {c.accepted} accept.
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </div>
-      )}
-
-      {/* Modul-katalog */}
-      <SectionHead
-        title="Intag-flöden"
-        label={`${modules.length} ${modules.length === 1 ? 'modul' : 'moduler'} · publicerade på egna URL:er`}
-        right={
-          isStaff ? (
-            <Link href="/inflode/admin/modules" className="mx-btn mx-sm">
-              <Icon name="gear" size={12} /> Hantera moduler
-            </Link>
-          ) : null
-        }
-      />
-      {modules.length === 0 ? (
-        <Card style={{ padding: 24, textAlign: 'center', marginBottom: 22 }}>
-          <div className="mx-disp mx-fw-6" style={{ fontSize: 16, marginBottom: 6 }}>
-            Inga intag-moduler publicerade
-          </div>
-          <div className="mx-muted mx-t-13" style={{ marginBottom: 16 }}>
-            {isStaff
-              ? 'Skapa en modul (formulär, quiz eller AI-chatt) för att börja samla in leads från event, webb eller kampanjer.'
-              : 'Be inkubatorteamet aktivera ett intag-flöde.'}
-          </div>
-          {isStaff && (
-            <Link href="/inflode/admin/modules/new" className="mx-btn mx-primary">
-              <Icon name="plus" size={13} /> Skapa modul
-            </Link>
-          )}
-        </Card>
-      ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-            gap: 12,
-            marginBottom: 22
-          }}
-        >
-          {modules.map((m) => {
-            const isChat = m.flow_type === 'chat';
-            const metrics = analytics?.byModule.find((x) => x.slug === m.slug);
-            return (
-              <Card
-                key={m.id}
-                ink={isChat}
-                style={{
-                  padding: 16,
-                  height: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 10
-                }}
-              >
-                <div className="mx-flex mx-items-c mx-gap-2">
-                  <Chip variant={isChat ? 'cyan' : 'default'} mono>
-                    {FLOW_TYPE_LABEL[m.flow_type].toUpperCase()}
-                  </Chip>
-                  {m.public_url_enabled && (
-                    <Chip variant="active" mono>
-                      PUBLIK
-                    </Chip>
-                  )}
-                  <span className="mx-grow" />
-                  {!m.is_active && (
-                    <Chip variant="draft" mono>
-                      UTKAST
-                    </Chip>
-                  )}
-                </div>
-                <div className="mx-disp" style={{ fontSize: 18, fontWeight: 600 }}>
-                  {m.name}
-                </div>
-                <div className="mx-t-13 mx-muted" style={{ lineHeight: 1.4 }}>
-                  {m.description || 'Starta modulen för att beskriva idén och få nästa steg.'}
-                </div>
-                <div className="mx-grow" />
-                {isStaff && metrics && (
-                  <div className="mx-flex mx-items-c mx-gap-2 mx-mono mx-t-xs mx-muted">
-                    <span className="mx-fw-6 mx-ink-soft">{metrics.total}</span> leads
-                    <span>·</span>
-                    <span className="mx-fw-6 mx-ink-soft">{metrics.accepted}</span> accept.
-                    <span>·</span>
-                    <span className="mx-fw-6 mx-ink-soft">{metrics.converted}</span> bolag
-                  </div>
-                )}
-                <div className="mx-flex mx-items-c mx-gap-2">
-                  <Link href={`/inflode/m/${m.slug}`} className="mx-btn mx-sm">
-                    Starta →
-                  </Link>
-                  {isStaff && (
-                    <Link
-                      href={`/inflode/admin/modules/${m.slug}`}
-                      className="mx-btn mx-sm mx-ghost"
-                    >
-                      <Icon name="gear" size={12} /> Redigera
-                    </Link>
-                  )}
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Senaste leads */}
-      {isStaff && (
-        <>
-          <SectionHead
-            title="Senaste leads"
-            label={recent.length === 0 ? 'inga ännu' : `${recent.length} senaste`}
-            right={
-              <Link href="/inflode/leads" className="mx-btn mx-sm">
-                Visa alla →
-              </Link>
-            }
-          />
-          {recent.length === 0 ? (
-            <Card style={{ padding: 24, textAlign: 'center' }}>
-              <div className="mx-muted mx-t-13">
-                Inga leads har skapats ännu. Aktivera en intag-modul eller skapa ett lead manuellt.
-              </div>
-            </Card>
-          ) : (
-            <div style={{ display: 'grid', gap: 8 }}>
-              {recent.map((lead) => {
-                const source = sourceByKey.get(lead.source_key);
-                const landingMod = lead.landing_module
-                  ? moduleBySlug.get(lead.landing_module)
-                  : undefined;
-                return (
-                  <Link
-                    key={lead.id}
-                    href={`/inflode/leads/${lead.id}`}
-                    style={{ textDecoration: 'none', color: 'inherit' }}
-                  >
-                    <Card style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="mx-flex mx-items-c mx-gap-2">
-                          <span className="mx-disp mx-fw-6 mx-t-13 mx-truncate">
-                            {lead.name || 'Anonym'}
-                          </span>
-                          <Chip variant={statusChipVariant(lead.status)} mono>
-                            {LEAD_STATUS_LABEL[lead.status]}
-                          </Chip>
-                          {lead.converted_startup && (
-                            <Chip variant="active" mono>
-                              KONVERTERAT
-                            </Chip>
-                          )}
-                        </div>
-                        <div className="mx-t-12 mx-muted mx-truncate" style={{ marginTop: 4 }}>
-                          {lead.idea_summary || lead.email || lead.organization || '—'}
-                        </div>
-                      </div>
-                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div className="mx-mono mx-t-xs mx-muted mx-t-up">
-                          {source?.label || lead.source_key}
-                          {landingMod && ` · ${landingMod.name}`}
-                          {lead.utm_campaign && ` · ${lead.utm_campaign}`}
-                        </div>
-                        {typeof lead.score === 'number' && (
-                          <div className="mx-mono mx-t-xs mx-fw-6" style={{ marginTop: 2 }}>
-                            {lead.score} p
-                          </div>
-                        )}
-                      </div>
-                    </Card>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
-
-      <div
-        className="mx-mt-6 mx-muted mx-t-xs mx-mono"
-        style={{ textAlign: 'center', marginTop: 32 }}
-      >
-        Genererat av AI – verifiera innan delning. Konfidentiella anteckningar exkluderas
-        alltid från Mistral-anrop.
+          </section>
+        )}
       </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -498,23 +370,4 @@ function statusChipVariant(status: LeadStatus): React.ComponentProps<typeof Chip
     default:
       return 'default';
   }
-}
-
-function KpiTile({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
-  return (
-    <Card style={{ padding: 16 }}>
-      <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6">{label}</div>
-      <div
-        className="mx-disp"
-        style={{ fontSize: 32, fontWeight: 600, lineHeight: 1.1, marginTop: 4 }}
-      >
-        {value}
-      </div>
-      {hint && (
-        <div className="mx-t-xs mx-muted" style={{ marginTop: 4 }}>
-          {hint}
-        </div>
-      )}
-    </Card>
-  );
 }

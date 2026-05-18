@@ -74,14 +74,15 @@ export default async function InkorgPage() {
   function ToolSection({ label, items }: { label: string; items: RunRow[] }) {
     if (items.length === 0) return null;
     return (
-      <section className="mb-6">
+      <section className="mb-7">
         <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
-          {label} <span className="font-mono normal-case tracking-normal">{items.length}</span>
+          {label}{' '}
+          <span className="font-mono normal-case tracking-normal">{items.length}</span>
         </div>
         <div className="space-y-2">
           {items.map((r) => {
             const days = daysUntil(r.deadline);
-            const overdue = days !== null && days < 0 && r.status !== 'ready_for_review';
+            const isOverdue = days !== null && days < 0 && r.status !== 'ready_for_review';
             const status = ASSIGN_STATUS[r.status] || ASSIGN_STATUS.assigned;
             const startupId = r.startup;
             const startupName = r.expand?.startup?.name || 'Bolag';
@@ -95,17 +96,15 @@ export default async function InkorgPage() {
               <Link
                 key={r.id}
                 href={`/startups/${startupId}/verktyg/${r.id}`}
-                className="block rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5 transition hover:border-brand/40 hover:shadow-md"
+                className="block rounded-xl border border-default bg-surface p-4 transition hover:border-strong"
               >
                 <div className="flex items-start gap-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-movexum-pastell-lila text-movexum-lila">
-                    <Icon name="sparkle" size={18} />
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas-muted text-foreground-muted">
+                    <Icon name="inbox" size={15} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-heading text-[14.5px] font-semibold text-foreground">
-                        {toolName}
-                      </h3>
+                      <h3 className="text-[14px] font-semibold text-foreground">{toolName}</h3>
                       <span
                         className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium ${status.bgClass} ${status.fgClass}`}
                       >
@@ -129,11 +128,11 @@ export default async function InkorgPage() {
                       </span>
                       {r.deadline && (
                         <span
-                          className={`inline-flex items-center gap-1 ${overdue ? 'font-medium text-movexum-orange' : ''}`}
+                          className={`inline-flex items-center gap-1 ${isOverdue ? 'font-medium text-movexum-orange' : ''}`}
                         >
                           <Icon name="calendar" size={11} /> deadline{' '}
                           {formatDeadline(r.deadline)}
-                          {overdue
+                          {isOverdue
                             ? ' (försenad)'
                             : days !== null && days >= 0
                               ? ` · om ${days} dgr`
@@ -172,7 +171,6 @@ export default async function InkorgPage() {
           Här samlas dina notiser, projekt du är med i, och uppdrag som väntar
           på dig. Klicka på något för att hoppa rakt in.
         </p>
-      </div>
 
       {totalItems === 0 ? (
         <div className="rounded-2xl border border-dashed border-default p-10 text-center">
