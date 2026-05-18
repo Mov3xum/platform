@@ -400,6 +400,18 @@ export async function updateStartupAction(
     roles: user.roles
   };
 
+  let priorPhase: string | undefined;
+  let priorTenant: string | undefined;
+  try {
+    const existing = await pb.collection('startups').getOne<{ tenant: string; phase: string }>(id, {
+      fields: 'id,tenant,phase'
+    });
+    priorPhase = existing.phase;
+    priorTenant = existing.tenant;
+  } catch {
+    // fortsätt — update får ge sitt eget fel
+  }
+
   const fieldUpdates: Array<{ field: StartupWritableField; value: unknown }> = [
     { field: 'name', value: data.name },
     { field: 'description', value: data.description },
@@ -421,11 +433,11 @@ export async function updateStartupAction(
     }
   }
 
-  if (previousPhase && tenantId && previousPhase !== data.phase) {
+  if (priorPhase && priorTenant && priorPhase !== data.phase) {
     await recordPhaseTransition({
-      tenant: tenantId,
+      tenant: priorTenant,
       startupId: id,
-      fromPhase: previousPhase,
+      fromPhase: priorPhase,
       toPhase: data.phase,
       userId: user.id
     });
