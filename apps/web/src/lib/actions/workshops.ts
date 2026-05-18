@@ -274,27 +274,85 @@ export async function createWorkshopAction(
     }
   }
 
-  try {
-    const record = await pb.collection(PB_COLLECTIONS.workshops).create({
-      tenant: user.tenant,
-      area: area || null,
-      key,
-      title,
-      goal,
-      instructions,
-      status,
-      version: version || '1.0.0',
-      audience_roles: audienceRoles,
-      ai_system_prompt: aiSystemPrompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT,
-      output_requirements: outputRequirements,
-      modules,
-      content_blocks: contentBlocks,
-      active,
-      created_by: user.id
+  // PB v0.23 dislikes explicit null på optional relation fields.
+  // Inkludera bara area i payload om värdet är icke-tomt.
+  const payload: Record<string, unknown> = {
+    tenant: user.tenant,
+    key,
+    title,
+    goal,
+    instructions,
+    status,
+    version: version || '1.0.0',
+    audience_roles: audienceRoles,
+    ai_system_prompt: aiSystemPrompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT,
+    output_requirements: outputRequirements,
+    modules,
+    content_blocks: contentBlocks,
+    active,
+    created_by: user.id
+  };
+  if (area) payload.area = area;
+
+  const logCreateFailure = (label: string, err: unknown) => {
+    const pbError = toPbErrorLike(err);
+    console.error(`[workshops] ${label}`, {
+      pbUrl: PB_URL,
+      tenantId: user.tenant,
+      userId: user.id,
+      roles: user.roles,
+      statusCode: pbError.status,
+      message: err instanceof Error ? err.message : String(err),
+      response: pbError.response ?? null,
+      payloadKeys: Object.keys(payload),
+      payloadPreview: {
+        tenant: payload.tenant,
+        area: payload.area,
+        key: payload.key,
+        status: payload.status,
+        version: payload.version,
+        audience_roles: payload.audience_roles,
+        modules_count: Array.isArray(payload.modules) ? payload.modules.length : null,
+        content_blocks_count: Array.isArray(payload.content_blocks) ? payload.content_blocks.length : null,
+        created_by: payload.created_by
+      }
     });
+  };
+
+  try {
+    const record = await pb.collection(PB_COLLECTIONS.workshops).create(payload);
     revalidatePath('/education');
     return { workshopId: String(record.id) };
   } catch (err) {
+    const pbError = toPbErrorLike(err);
+    const message = String(err instanceof Error ? err.message : '');
+    const details = JSON.stringify(pbError.response ?? {});
+    const normalizedMessage = message.toLowerCase();
+    const normalizedDetails = details.toLowerCase();
+    logCreateFailure('workshop create failed', err);
+
+    // Fallback till superuser om PB returnerar generic create-rule failure
+    // (PB v0.23-bugg: rule-eval failar för app-user men funkar för superuser).
+    if (detectCreateRuleFailure(normalizedMessage, normalizedDetails, pbError.status, pbError.response)) {
+      const suResult = await getSuperuserPb();
+      if (suResult.ok) {
+        try {
+          const record = await suResult.pb.collection(PB_COLLECTIONS.workshops).create(payload);
+          revalidatePath('/education');
+          return { workshopId: String(record.id) };
+        } catch (fallbackErr) {
+          logCreateFailure('workshop create fallback (superuser) failed', fallbackErr);
+          return { error: toCreateWorkshopError(fallbackErr) };
+        }
+      }
+      if (suResult.reason === 'missing_credentials') {
+        return {
+          error:
+            'Kunde inte skapa workshop. Webbtjänsten saknar superuser-env (POCKETBASE_SUPERUSER_EMAIL/PASSWORD eller PB_SU_EMAIL/PB_SU_PASSWORD).'
+        };
+      }
+    }
+
     return { error: toCreateWorkshopError(err) };
   }
 }

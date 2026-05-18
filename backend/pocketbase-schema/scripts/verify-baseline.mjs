@@ -205,6 +205,32 @@ async function verifyAppUserCanCreate(pb, appUserEmail, appUserPassword) {
     log('APP_USER_PASSWORD saknas; hoppar över end-to-end create-test');
     return;
   }
+
+  // Diagnostik 1: dumpa users-collection schema, särskilt roles-fältet.
+  // Om roles INTE är type=select med maxSelect>1, så fungerar ?= inte.
+  try {
+    const usersCol = await pb.collection('_collections').getOne('_pb_users_auth_').catch(async () => {
+      // PB v0.23: fetch via /api/collections/users
+      return pb.send('/api/collections/users', { method: 'GET' });
+    });
+    const rolesField = (usersCol?.fields ?? usersCol?.schema ?? []).find(
+      (f) => f.name === 'roles'
+    );
+    console.log('\n=== users.roles field-definition ===');
+    console.log(`  type: ${rolesField?.type}`);
+    console.log(`  maxSelect: ${rolesField?.maxSelect}`);
+    console.log(`  values: ${JSON.stringify(rolesField?.values)}`);
+    console.log('====================================\n');
+    if (rolesField && (rolesField.type !== 'select' || (rolesField.maxSelect ?? 1) <= 1)) {
+      console.log(
+        `WARN: roles-fältet är inte multi-select (type=${rolesField.type}, maxSelect=${rolesField.maxSelect}). ` +
+          `?= -operatorn fungerar inte korrekt.`
+      );
+    }
+  } catch (err) {
+    console.log(`KUNDE INTE läsa users-collection schema: ${err.message}`);
+  }
+
   const userPb = new (await import('pocketbase')).default(PB_URL);
   userPb.autoCancellation(false);
   try {
@@ -237,12 +263,38 @@ async function verifyAppUserCanCreate(pb, appUserEmail, appUserPassword) {
   } catch (err) {
     const status = err?.status ?? 'unknown';
     const responseJson = JSON.stringify(err?.response ?? {});
+    console.log(`\nAS-APP-USER CREATE FAIL: status=${status} response=${responseJson} msg=${err?.message}`);
+
+    // Diagnostik 2: försök samma create som SUPERUSER (rules bypassas).
+    // - Om superuser-create lyckas: regeln (eller dess utvärdering) blockar.
+    // - Om superuser-create FAILAR: schema/validering är problemet.
+    console.log('\n=== Försöker samma create som SUPERUSER (bypassar rules) ===');
+    try {
+      const created = await pb.collection('workshop_areas').create({
+        tenant: authUser.tenant,
+        name: `${probeName}_su`
+      });
+      console.log(`  SUPERUSER lyckades skapa workshop_areas/${created.id}`);
+      console.log('  → SLUTSATS: schema är OK, rules/rule-eval blockar app-user');
+      try {
+        await pb.collection('workshop_areas').delete(created.id);
+      } catch {
+        // ignored
+      }
+    } catch (suErr) {
+      const suStatus = suErr?.status ?? 'unknown';
+      const suResp = JSON.stringify(suErr?.response ?? {});
+      console.log(`  SUPERUSER OCKSÅ FAILED: status=${suStatus} response=${suResp} msg=${suErr?.message}`);
+      console.log('  → SLUTSATS: schema/validation är problemet (rule är inte boven)');
+    }
+    console.log('============================================================\n');
+
     fail(
       `End-to-end create-test FAILAR fortfarande som ${appUserEmail}:\n` +
       `  status: ${status}\n` +
       `  response: ${responseJson}\n` +
       `  message: ${err?.message}\n` +
-      `Detta är samma fel som drabbar UI:t. Se createRule-dumpen ovan.`
+      `Se diagnostik ovan för att avgöra rule vs. schema.`
     );
   }
 }
