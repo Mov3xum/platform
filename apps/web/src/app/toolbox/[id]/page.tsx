@@ -7,7 +7,8 @@ import { toolCategoryLabels, type ToolRunStatus } from '@/lib/labels';
 import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
 import { getWebSourceLabel } from '@/lib/ai/web';
 import { RunToolForm } from '../RunToolForm';
-import type { Tool, ToolRun, WebSourceKey } from '@platform/shared';
+import type { Tool, ToolModel, ToolRun, WebSourceKey } from '@platform/shared';
+import { isAllowedModel } from '@/lib/ai/models';
 
 export default async function ToolDetailPage({
   params,
@@ -144,8 +145,10 @@ export default async function ToolDetailPage({
               <RunToolForm
                 toolId={id}
                 requiresStartup={tool.requires_startup}
+                isAiTool={tool.category === 'ai_per_startup' || tool.category === 'ai_system_wide'}
                 startups={startups}
                 defaultStartupId={defaultStartupId}
+                defaultModel={isAllowedModel(tool.model) ? (tool.model as ToolModel) : undefined}
               />
             </section>
           ) : (

@@ -1,4 +1,5 @@
 import 'server-only';
+import { getModelMeta } from './models';
 
 const MISTRAL_API_URL = 'https://api.mistral.ai/v1/chat/completions';
 const MAX_TOKENS = 4000;
@@ -6,9 +7,13 @@ const MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 1000;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 
+export type MistralContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: string };
+
 export interface MistralTextMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | MistralContentBlock[];
 }
 
 export interface MistralAssistantWithToolCalls {
@@ -264,21 +269,17 @@ export async function callMistralWithFallback(
 }
 
 /**
- * Estimates cost in USD based on Mistral pricing (approximate).
- * mistral-large-latest: $2/1M in, $6/1M out
- * mistral-medium-latest: $0.4/1M in, $1.2/1M out
- * mistral-small-latest: $0.1/1M in, $0.3/1M out
+ * Estimates cost in USD using the central model registry (lib/ai/models.ts).
+ * Unknown models default to the Large-tier pricing.
  */
 export function estimateCostUsd(
   model: string,
   tokensIn: number,
   tokensOut: number
 ): number {
-  const pricing: Record<string, [number, number]> = {
-    'mistral-large-latest': [2.0, 6.0],
-    'mistral-medium-latest': [0.4, 1.2],
-    'mistral-small-latest': [0.1, 0.3]
-  };
-  const [inPrice, outPrice] = pricing[model] ?? [2.0, 6.0];
-  return (tokensIn / 1_000_000) * inPrice + (tokensOut / 1_000_000) * outPrice;
+  const meta = getModelMeta(model);
+  return (
+    (tokensIn / 1_000_000) * meta.priceInPerMillion +
+    (tokensOut / 1_000_000) * meta.priceOutPerMillion
+  );
 }

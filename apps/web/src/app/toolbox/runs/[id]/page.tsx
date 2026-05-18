@@ -1,10 +1,21 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { canAccessModuleForUser } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole, canRunTool } from '@/lib/rbac';
 import { ToolRunStatusBadge } from '@/components/Badges';
 import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
-import type { ToolRun, ToolRunStatus } from '@platform/shared';
+import { isAllowedModel } from '@/lib/ai/models';
+import { MessageList, legacyMessagesFromRun } from './MessageList';
+import { ContinueChatForm } from './ContinueChatForm';
+import type {
+  Tool,
+  ToolModel,
+  ToolRun,
+  ToolRunMessage,
+  ToolRunStatus
+} from '@platform/shared';
+
+const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
 
 interface RunWebSource {
   source: string;
@@ -50,6 +61,32 @@ export default async function ToolRunDetailPage({
   )
     ? ((run.input as { web_sources: RunWebSource[] }).web_sources)
     : [];
+
+  // Chatt-läge: bara AI-verktyg får fortsätta. Skribent eller staff,
+  // och canRunTool (skydd mot rollnedgradering mid-chat).
+  const isAiTool =
+    tool?.category === 'ai_per_startup' || tool?.category === 'ai_system_wide';
+  const isStaff = hasRole(user.roles, [...STAFF_ROLES]);
+  const isAuthor = run.triggered_by === user.id;
+  const isLinkedStartup = run.startup
+    ? user.linkedStartups.includes(run.startup)
+    : false;
+  const stillHasRunPermission = tool
+    ? canRunTool(user.roles, tool as Tool, { isLinkedStartup })
+    : false;
+  let canContinue = false;
+  let disabledReason: string | undefined;
+  if (!isAiTool) {
+    disabledReason = 'Detta är inte ett AI-verktyg.';
+  } else if (!isAuthor && !isStaff) {
+    disabledReason = 'Endast den som startade chatten — eller staff — kan fortsätta.';
+  } else if (!stillHasRunPermission) {
+    disabledReason = 'Du har inte längre behörighet att köra denna agent.';
+  } else if (run.status === 'failed') {
+    disabledReason = 'Den här körningen misslyckades.';
+  } else {
+    canContinue = true;
+  }
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10 lg:px-8">
@@ -121,19 +158,37 @@ export default async function ToolRunDetailPage({
             </section>
           )}
 
-          {run.output_md ? (
-            <section className="rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-foreground">Resultat</h2>
-                {(run.tokens_in || run.tokens_out) && (
-                  <span className="text-xs text-foreground-subtle">
-                    ⚠️ {AI_OUTPUT_WARNING_TEXT}
-                  </span>
-                )}
+          {run.output_md || (run.messages && run.messages.length > 0) ? (
+            <section className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-foreground">Chatt</h2>
+                <span className="text-xs text-foreground-subtle">
+                  ⚠️ {AI_OUTPUT_WARNING_TEXT}
+                </span>
               </div>
-              <div className="prose prose-sm max-w-none text-foreground-muted dark:prose-invert">
-                <pre className="whitespace-pre-wrap font-body text-sm">{run.output_md}</pre>
-              </div>
+
+              <MessageList
+                messages={
+                  run.messages && run.messages.length > 0
+                    ? (run.messages as ToolRunMessage[])
+                    : legacyMessagesFromRun(run)
+                }
+              />
+
+              {isAiTool && (
+                <ContinueChatForm
+                  runId={run.id}
+                  defaultModel={
+                    isAllowedModel(run.model)
+                      ? (run.model as ToolModel)
+                      : isAllowedModel(tool?.model)
+                        ? (tool!.model as ToolModel)
+                        : undefined
+                  }
+                  disabled={!canContinue}
+                  disabledReason={disabledReason}
+                />
+              )}
             </section>
           ) : (
             <div className="rounded-3xl border border-dashed border-strong bg-surface/50 p-12 text-center">
