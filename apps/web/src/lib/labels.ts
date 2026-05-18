@@ -123,12 +123,18 @@ export const toolRunStatusLabels: Record<ToolRunStatus, string> = {
   rejected: 'Begärt ändring'
 };
 
-export type ActivityKind = 'manual' | 'tool_run' | 'workshop_assignment' | 'workshop_run';
+export type ActivityKind =
+  | 'manual'
+  | 'tool_run'
+  | 'workshop_assignment'
+  | 'workshop_run'
+  | 'integration_sync';
 export const activityKindLabels: Record<ActivityKind, string> = {
   manual: 'Manuell',
   tool_run: 'Verktygskörning',
   workshop_assignment: 'Workshoptilldelning',
-  workshop_run: 'Workshop AI-körning'
+  workshop_run: 'Workshop AI-körning',
+  integration_sync: 'Integrationssynk'
 };
 
 export type WorkshopStatus = 'draft' | 'active' | 'archived';

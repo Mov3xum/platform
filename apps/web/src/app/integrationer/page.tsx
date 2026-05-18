@@ -3,6 +3,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailStat } from '@/components/PageRail';
+import { hasHandler as hasIntegrationHandler } from '@/lib/integrations/registry';
 import { IntegrationActivateButton } from './IntegrationActivateButton';
 
 type IntegrationCategory =
@@ -10,7 +11,9 @@ type IntegrationCategory =
   | 'ai'
   | 'collaboration'
   | 'communication'
-  | 'productivity';
+  | 'productivity'
+  | 'marketing'
+  | 'learning';
 
 type Availability = 'planned' | 'beta' | 'available';
 type TenantStatus = 'available' | 'pilot_requested' | 'connected' | 'disabled';
@@ -53,10 +56,14 @@ const CATEGORY_LABEL: Record<IntegrationCategory, string> = {
   ai: 'AI & analys',
   collaboration: 'Samarbete',
   communication: 'Kommunikation',
-  productivity: 'Produktivitet'
+  productivity: 'Produktivitet',
+  marketing: 'Marknadsföring',
+  learning: 'Lärande & program'
 };
 
 const CATEGORY_ORDER: IntegrationCategory[] = [
+  'marketing',
+  'learning',
   'microsoft365',
   'ai',
   'collaboration',
@@ -304,11 +311,13 @@ function IntegrationCard({
         <div className="mt-auto pt-2">
           <IntegrationActivateButton
             providerId={integration.id}
+            providerSlug={integration.slug}
             integrationName={integration.name}
             providerPlaceholder={integration.placeholder}
             availability={integration.availability}
             tenantStatus={integration.tenantStatus}
             canRequest={canRequest}
+            hasHandler={hasIntegrationHandler(integration.slug)}
             accentClass="bg-canvas-muted"
           />
         </div>
