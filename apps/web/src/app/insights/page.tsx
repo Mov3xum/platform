@@ -177,14 +177,24 @@ export default async function InsightsPage({
   let runsLoadFailed = false;
   let runsLoadError: string | undefined;
   try {
-    const current = await pb.collection('tool_runs').getList<ToolRun>(1, 1000, {
-      filter: `tenant = "${user.tenant}" && created >= "${sinceIso}"`,
+    const current = await pb.collection('tool_runs').getList<ToolRun>(1, 500, {
+      filter: pb.filter('tenant = {:tenant} && created >= {:since}', {
+        tenant: user.tenant,
+        since: sinceIso
+      }),
       sort: '-created'
     });
     runs = current.items;
 
-    const previous = await pb.collection('tool_runs').getList<ToolRun>(1, 1000, {
-      filter: `tenant = "${user.tenant}" && created >= "${previousSinceIso}" && created < "${sinceIso}"`,
+    const previous = await pb.collection('tool_runs').getList<ToolRun>(1, 500, {
+      filter: pb.filter(
+        'tenant = {:tenant} && created >= {:prevSince} && created < {:since}',
+        {
+          tenant: user.tenant,
+          prevSince: previousSinceIso,
+          since: sinceIso
+        }
+      ),
       sort: '-created'
     });
     previousPeriodRuns = previous.items;
@@ -204,16 +214,26 @@ export default async function InsightsPage({
   try {
     const current = await pb
       .collection('ai_usage_events')
-      .getList<AiUsageEvent>(1, 2000, {
-        filter: `tenant = "${user.tenant}" && created >= "${sinceIso}"`,
+      .getList<AiUsageEvent>(1, 500, {
+        filter: pb.filter('tenant = {:tenant} && created >= {:since}', {
+          tenant: user.tenant,
+          since: sinceIso
+        }),
         sort: '-created'
       });
     events = current.items;
 
     const previous = await pb
       .collection('ai_usage_events')
-      .getList<AiUsageEvent>(1, 2000, {
-        filter: `tenant = "${user.tenant}" && created >= "${previousSinceIso}" && created < "${sinceIso}"`,
+      .getList<AiUsageEvent>(1, 500, {
+        filter: pb.filter(
+          'tenant = {:tenant} && created >= {:prevSince} && created < {:since}',
+          {
+            tenant: user.tenant,
+            prevSince: previousSinceIso,
+            since: sinceIso
+          }
+        ),
         sort: '-created'
       });
     previousPeriodEvents = previous.items;
@@ -230,7 +250,7 @@ export default async function InsightsPage({
   let tools: Tool[] = [];
   try {
     const list = await pb.collection('tools').getList<Tool>(1, 500, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: pb.filter('tenant = {:tenant}', { tenant: user.tenant }),
       sort: 'name'
     });
     tools = list.items;
@@ -242,8 +262,8 @@ export default async function InsightsPage({
   // ── Load activities for module-adoption signal ──────────────────────
   let activities: ActivityRecord[] = [];
   try {
-    const list = await pb.collection('activities').getList<ActivityRecord>(1, 1000, {
-      filter: `created >= "${sinceIso}"`,
+    const list = await pb.collection('activities').getList<ActivityRecord>(1, 500, {
+      filter: pb.filter('created >= {:since}', { since: sinceIso }),
       sort: '-created'
     });
     activities = list.items;
