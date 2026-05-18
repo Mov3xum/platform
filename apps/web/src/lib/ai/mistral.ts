@@ -285,7 +285,7 @@ export function estimateCostUsd(
     'mistral-large-latest': [2.0, 6.0],
     'mistral-medium-latest': [0.4, 1.2],
     'mistral-small-latest': [0.1, 0.3],
-    'pixtral-12b-latest': [0.15, 0.15]
+    'pixtral-large-latest': [0.15, 0.15]
   };
   const [inPrice, outPrice] = pricing[model] ?? [2.0, 6.0];
   return (tokensIn / 1_000_000) * inPrice + (tokensOut / 1_000_000) * outPrice;

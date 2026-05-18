@@ -11,7 +11,13 @@ import {
   type ToolRunStatus
 } from '@/lib/labels';
 import { estimateCostUsd } from '@/lib/ai/mistral';
-import type { Tool, ToolRun, Role } from '@platform/shared';
+import type {
+  Tool,
+  ToolRun,
+  Role,
+  AiUsageEvent,
+  AiUsageSurface
+} from '@platform/shared';
 
 type RangeKey = '7d' | '30d' | '90d';
 
@@ -25,6 +31,16 @@ const RANGE_LABELS: Record<RangeKey, string> = {
   '7d': '7 dagar',
   '30d': '30 dagar',
   '90d': '90 dagar'
+};
+
+const SURFACE_LABELS: Record<AiUsageSurface, string> = {
+  toolbox: 'Verktyg (Toolbox)',
+  tool_chat: 'Verktygschatt',
+  dashboard_chat: 'Dashboard-chatt',
+  startup_chat: 'Bolagschatt',
+  intl: 'Översättning',
+  suggestions: 'Förslag',
+  workshop_run: 'Workshop'
 };
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -150,6 +166,33 @@ export default async function InsightsPage({
     });
   }
 
+  // ── Load ai_usage_events (källa av sanning för tokens + kostnad) ────
+  let events: AiUsageEvent[] = [];
+  let previousPeriodEvents: AiUsageEvent[] = [];
+  try {
+    const current = await pb
+      .collection('ai_usage_events')
+      .getList<AiUsageEvent>(1, 2000, {
+        filter: `tenant = "${user.tenant}" && created >= "${sinceIso}"`,
+        sort: '-created'
+      });
+    events = current.items;
+
+    const previous = await pb
+      .collection('ai_usage_events')
+      .getList<AiUsageEvent>(1, 2000, {
+        filter: `tenant = "${user.tenant}" && created >= "${previousSinceIso}" && created < "${sinceIso}"`,
+        sort: '-created'
+      });
+    previousPeriodEvents = previous.items;
+  } catch (error) {
+    // Fail-soft: collectionen kan saknas på äldre PB-instanser.
+    console.warn('[insights] ai_usage_events unavailable', {
+      tenant: user.tenant,
+      error
+    });
+  }
+
   // ── Load tools (registry) ───────────────────────────────────────────
   let tools: Tool[] = [];
   try {
@@ -199,23 +242,39 @@ export default async function InsightsPage({
   ).length;
   const successRate = totalRuns > 0 ? succeededRuns / totalRuns : 0;
 
-  const totalTokensIn = runs.reduce((acc, r) => acc + (r.tokens_in || 0), 0);
-  const totalTokensOut = runs.reduce((acc, r) => acc + (r.tokens_out || 0), 0);
+  // Tokens & kostnad: single source of truth = ai_usage_events.
+  // Fallback till tool_runs om events-collectionen är tom/saknas på
+  // äldre PB-instanser så vi aldrig visar nollor när det finns data.
+  const eventsHaveData = events.length > 0;
+  const totalTokensIn = eventsHaveData
+    ? events.reduce((acc, e) => acc + (e.tokens_in || 0), 0)
+    : runs.reduce((acc, r) => acc + (r.tokens_in || 0), 0);
+  const totalTokensOut = eventsHaveData
+    ? events.reduce((acc, e) => acc + (e.tokens_out || 0), 0)
+    : runs.reduce((acc, r) => acc + (r.tokens_out || 0), 0);
   const totalTokens = totalTokensIn + totalTokensOut;
 
-  const totalCostUsd = runs.reduce((acc, r) => {
-    if (r.cost_estimate_usd && r.cost_estimate_usd > 0) return acc + r.cost_estimate_usd;
-    if (r.model) {
-      return acc + estimateCostUsd(r.model, r.tokens_in || 0, r.tokens_out || 0);
-    }
-    return acc;
-  }, 0);
+  const totalCostUsd = eventsHaveData
+    ? events.reduce((acc, e) => acc + (e.cost_estimate_usd || 0), 0)
+    : runs.reduce((acc, r) => {
+        if (r.cost_estimate_usd && r.cost_estimate_usd > 0)
+          return acc + r.cost_estimate_usd;
+        if (r.model) {
+          return acc + estimateCostUsd(r.model, r.tokens_in || 0, r.tokens_out || 0);
+        }
+        return acc;
+      }, 0);
 
-  const previousRunsCount = previousPeriodRuns.length;
+  // Aktivitet inkluderar både toolbox-runs och övriga chatt-anrop.
+  const totalAiCalls = events.length || runs.length;
+  const previousAiCalls = previousPeriodEvents.length || previousPeriodRuns.length;
+
+  // Föregående-period-delta utgår från total AI-aktivitet (alla ytor)
+  // när vi har events; annars från toolbox-runs som fallback.
   const deltaRunsPct =
-    previousRunsCount > 0
-      ? (totalRuns - previousRunsCount) / previousRunsCount
-      : totalRuns > 0
+    previousAiCalls > 0
+      ? (totalAiCalls - previousAiCalls) / previousAiCalls
+      : totalAiCalls > 0
         ? 1
         : 0;
 
@@ -269,21 +328,51 @@ export default async function InsightsPage({
     runsByCategory.set(tool.category, (runsByCategory.get(tool.category) || 0) + 1);
   }
 
-  // ── Runs by model ───────────────────────────────────────────────────
-  const runsByModel = new Map<string, { count: number; cost: number; tokens: number }>();
-  for (const r of runs) {
-    const key = r.model || '—';
-    const entry = runsByModel.get(key) || { count: 0, cost: 0, tokens: 0 };
-    entry.count += 1;
-    entry.tokens += (r.tokens_in || 0) + (r.tokens_out || 0);
-    if (r.cost_estimate_usd) entry.cost += r.cost_estimate_usd;
-    else if (r.model)
-      entry.cost += estimateCostUsd(r.model, r.tokens_in || 0, r.tokens_out || 0);
-    runsByModel.set(key, entry);
+  // ── Calls by model (från ai_usage_events, eller fallback till tool_runs) ──
+  const modelMap = new Map<string, { count: number; cost: number; tokens: number }>();
+  if (eventsHaveData) {
+    for (const e of events) {
+      const key = e.model || '—';
+      const entry = modelMap.get(key) || { count: 0, cost: 0, tokens: 0 };
+      entry.count += 1;
+      entry.tokens += (e.tokens_in || 0) + (e.tokens_out || 0);
+      entry.cost += e.cost_estimate_usd || 0;
+      modelMap.set(key, entry);
+    }
+  } else {
+    for (const r of runs) {
+      const key = r.model || '—';
+      const entry = modelMap.get(key) || { count: 0, cost: 0, tokens: 0 };
+      entry.count += 1;
+      entry.tokens += (r.tokens_in || 0) + (r.tokens_out || 0);
+      if (r.cost_estimate_usd) entry.cost += r.cost_estimate_usd;
+      else if (r.model)
+        entry.cost += estimateCostUsd(r.model, r.tokens_in || 0, r.tokens_out || 0);
+      modelMap.set(key, entry);
+    }
   }
-  const modelRows = Array.from(runsByModel.entries())
+  const modelRows = Array.from(modelMap.entries())
     .map(([model, m]) => ({ model, ...m }))
     .sort((a, b) => b.count - a.count);
+
+  // ── Calls by surface (visar var AI-spendet faktiskt ligger) ─────────
+  const surfaceMap = new Map<
+    AiUsageSurface,
+    { count: number; cost: number; tokens: number }
+  >();
+  for (const e of events) {
+    const entry =
+      surfaceMap.get(e.surface) || { count: 0, cost: 0, tokens: 0 };
+    entry.count += 1;
+    entry.tokens += (e.tokens_in || 0) + (e.tokens_out || 0);
+    entry.cost += e.cost_estimate_usd || 0;
+    surfaceMap.set(e.surface, entry);
+  }
+  const surfaceRows = Array.from(surfaceMap.entries())
+    .map(([surface, m]) => ({ surface, ...m }))
+    .sort((a, b) => b.count - a.count);
+  const surfaceCountTotal =
+    surfaceRows.reduce((acc, row) => acc + row.count, 0) || 1;
 
   // ── Runs by user / role ─────────────────────────────────────────────
   const runsByUser = new Map<string, number>();
@@ -359,10 +448,10 @@ export default async function InsightsPage({
       <RailSection label="Översikt">
         <div className="grid grid-cols-2 gap-2 px-2">
           <RailStat
-            label="Körningar"
-            value={formatNumber(totalRuns)}
+            label="AI-anrop"
+            value={formatNumber(totalAiCalls)}
             hint={
-              previousRunsCount > 0 || totalRuns > 0
+              previousAiCalls > 0 || totalAiCalls > 0
                 ? `${deltaRunsPct >= 0 ? '+' : ''}${(deltaRunsPct * 100).toFixed(0)}% mot föregående`
                 : undefined
             }
@@ -431,7 +520,7 @@ export default async function InsightsPage({
       title="Insights"
       meta={
         <span className="text-[12px] text-foreground-subtle">
-          {RANGE_LABELS[range]} · {formatNumber(totalRuns)} körningar
+          {RANGE_LABELS[range]} · {formatNumber(totalAiCalls)} AI-anrop
         </span>
       }
       rightPanel={rail}
@@ -636,6 +725,9 @@ export default async function InsightsPage({
 
           <section className="rounded-2xl border border-default bg-surface p-5">
             <h2 className="mb-3 text-[14px] font-semibold text-foreground">Status</h2>
+            <p className="-mt-2 mb-3 text-[11px] text-foreground-subtle">
+              endast toolbox
+            </p>
             <div className="flex flex-col gap-2.5">
               {(['succeeded', 'failed', 'running', 'queued'] as ToolRunStatus[]).map(
                 (status) => {
@@ -668,6 +760,65 @@ export default async function InsightsPage({
             </div>
           </section>
         </div>
+
+        {/* ── Per yta (dashboard-chatt vs toolbox vs workshop) ─── */}
+        <section className="rounded-2xl border border-default bg-surface p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h2 className="text-[14px] font-semibold text-foreground">Per yta</h2>
+              <p className="text-[11px] text-foreground-subtle">
+                var AI-anropen sker · källa: ai_usage_events
+              </p>
+            </div>
+            <span className="text-[11px] text-foreground-subtle tabular-nums">
+              {formatNumber(events.length)} anrop
+            </span>
+          </div>
+          {surfaceRows.length === 0 ? (
+            <div className="text-[13px] text-foreground-muted">
+              Inga AI-anrop loggade i perioden. Kör en agent eller skicka ett
+              chatt-meddelande för att börja samla data.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wider text-foreground-subtle">
+                    <th className="px-2 py-1.5 text-left font-semibold">Yta</th>
+                    <th className="px-2 py-1.5 text-right font-semibold">Anrop</th>
+                    <th className="px-2 py-1.5 text-right font-semibold">Andel</th>
+                    <th className="px-2 py-1.5 text-right font-semibold">Tokens</th>
+                    <th className="px-2 py-1.5 text-right font-semibold">Kostnad</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {surfaceRows.map((row) => {
+                    const pct = (row.count / surfaceCountTotal) * 100;
+                    return (
+                      <tr key={row.surface} className="border-t border-default">
+                        <td className="px-2 py-2 text-foreground">
+                          {SURFACE_LABELS[row.surface]}
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums text-foreground">
+                          {formatNumber(row.count)}
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums text-foreground-subtle">
+                          {pct.toFixed(0)}%
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums text-foreground">
+                          {formatNumber(row.tokens)}
+                        </td>
+                        <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground">
+                          {formatCostUsd(row.cost)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
 
         {/* ── Top users + Role attribution ──────────────────────── */}
         <div className="grid gap-4 lg:grid-cols-2">
