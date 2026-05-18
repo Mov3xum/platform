@@ -56,6 +56,8 @@ export interface UserProfile {
   linked_startups: string[];
 }
 
+export type FounderGender = 'kvinna' | 'man' | 'icke_binar' | 'uppger_ej';
+
 export interface Startup {
   id: string;
   tenant: string;
@@ -67,6 +69,71 @@ export interface Startup {
   owner?: string;
   coaches: string[];
   status: 'active' | 'alumni' | 'paused' | 'rejected';
+  // Befintliga PB-fält (saknades tidigare i TS-typen)
+  tags?: string;
+  sprint_x_json?: SprintXScore;
+  sector?: string;
+  pitch?: string;
+  team_size?: number;
+  next_milestone?: string;
+  accent?: string;
+  org_nr?: string;
+  kommun?: string;
+  bolagsform?: string;
+  industri?: string;
+  intagsdatum?: string;
+  avslutsdatum?: string;
+  bolag_status?: string;
+  // Movexum Bolagslista-fält (migration 1700000061)
+  idea_name?: string;
+  case_type?: string;
+  status_completion_pct?: number;
+  company_registered_at?: string;
+  contacted_at?: string;
+  /** PII — får aldrig finnas med i AI-prompts (CLAUDE.md § 9.3). */
+  phone?: string;
+  signed_incubator_agreement?: boolean;
+  signed_incubator_agreement_at?: string;
+  signed_nda?: boolean;
+  signed_nda_at?: string;
+  /** GDPR art. 9 särskild kategori — ej i AI-prompts. */
+  founder_gender?: FounderGender;
+  potential_bc_case?: boolean;
+  /** GDPR art. 9 särskild kategori — ej i AI-prompts. */
+  founder_identifies_as?: string;
+  signed_bc_agreement?: boolean;
+  signed_bc_agreement_at?: string;
+  preliminary_exit?: string;
+  is_deeptech?: boolean;
+  meets_excellence_criteria?: boolean;
+  inflow_source?: string;
+  approved_state_aid_art22?: boolean;
+  area?: string;
+  signed_vinnova_incubation_approval?: boolean;
+  signed_vinnova_incubation_approval_at?: string;
+  approved_de_minimis?: boolean;
+  sent_to?: string;
+  register_notes?: string;
+  is_regional?: boolean;
+  signed_partner_agreement?: boolean;
+  signed_partner_agreement_at?: string;
+}
+
+export interface StartupPhaseHistory {
+  id: string;
+  tenant: string;
+  startup: string;
+  phase: StartupPhase;
+  entered_at: string;
+  exited_at?: string;
+  note?: string;
+  created_by?: string;
+  created: string;
+  updated: string;
+  expand?: {
+    startup?: { id: string; name: string };
+    created_by?: { id: string; display_name?: string; email: string };
+  };
 }
 
 export interface Partner {

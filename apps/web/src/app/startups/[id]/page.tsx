@@ -14,6 +14,10 @@ import {
 import { NoteForm } from '@/components/NoteForm';
 import { NoteItem } from '@/components/NoteItem';
 import { StartupDetailDashboard } from '@/components/StartupDetailDashboard';
+import {
+  StartupPhaseHistoryList,
+  type PhaseHistoryItem
+} from '@/components/StartupPhaseHistoryList';
 import { AllabolagSyncButton } from './AllabolagSyncButton';
 import {
   activityStatusLabels,
@@ -51,8 +55,46 @@ interface StartupRecord {
   bolagsform?: string;
   industri?: string;
   bolag_status?: string;
+  intagsdatum?: string;
+  avslutsdatum?: string;
+  // Movexum Bolagslista (1700000061)
+  idea_name?: string;
+  case_type?: string;
+  status_completion_pct?: number;
+  company_registered_at?: string;
+  contacted_at?: string;
+  signed_incubator_agreement?: boolean;
+  signed_incubator_agreement_at?: string;
+  signed_nda?: boolean;
+  signed_nda_at?: string;
+  potential_bc_case?: boolean;
+  signed_bc_agreement?: boolean;
+  signed_bc_agreement_at?: string;
+  preliminary_exit?: string;
+  is_deeptech?: boolean;
+  meets_excellence_criteria?: boolean;
+  inflow_source?: string;
+  approved_state_aid_art22?: boolean;
+  area?: string;
+  signed_vinnova_incubation_approval?: boolean;
+  signed_vinnova_incubation_approval_at?: string;
+  approved_de_minimis?: boolean;
+  sent_to?: string;
+  register_notes?: string;
+  is_regional?: boolean;
+  signed_partner_agreement?: boolean;
+  signed_partner_agreement_at?: string;
   created: string;
   updated: string;
+}
+
+interface PhaseHistoryRecord {
+  id: string;
+  phase: StartupPhase;
+  entered_at: string;
+  exited_at?: string;
+  note?: string;
+  expand?: { created_by?: { id: string; display_name?: string; email: string } };
 }
 
 type FinancialsSource = 'manual' | 'import_excel' | 'allabolag' | 'other';
@@ -187,7 +229,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     engagementsResult,
     toolActivitiesResult,
     workshopAssignmentsResult,
-    financialsResult
+    financialsResult,
+    phaseHistoryResult
   ] = await Promise.allSettled([
     pb.collection('startup_team_members').getList<TeamMemberRecord>(1, 50, {
       filter: `startup = "${id}"`,
@@ -229,6 +272,11 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     pb.collection('startup_financials').getList<FinancialsRow>(1, 5, {
       filter: `startup = "${id}"`,
       sort: '-year'
+    }),
+    pb.collection('startup_phase_history').getList<PhaseHistoryRecord>(1, 50, {
+      filter: `startup = "${id}"`,
+      sort: '-entered_at',
+      expand: 'created_by'
     })
   ]);
 
@@ -243,6 +291,20 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     workshopAssignmentsResult.status === 'fulfilled' ? workshopAssignmentsResult.value : emptyList;
   const financials =
     financialsResult.status === 'fulfilled' ? financialsResult.value : emptyList;
+  const phaseHistory =
+    phaseHistoryResult.status === 'fulfilled' ? phaseHistoryResult.value : emptyList;
+
+  const phaseHistoryItems: PhaseHistoryItem[] = phaseHistory.items.map((row) => ({
+    id: row.id,
+    phase: row.phase,
+    entered_at: row.entered_at,
+    exited_at: row.exited_at,
+    note: row.note,
+    authorLabel:
+      row.expand?.created_by?.display_name ||
+      row.expand?.created_by?.email ||
+      undefined
+  }));
 
   const sectionLoadFailed = [
     teamResult,
@@ -253,7 +315,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     engagementsResult,
     toolActivitiesResult,
     workshopAssignmentsResult,
-    financialsResult
+    financialsResult,
+    phaseHistoryResult
   ].some((result) => result.status === 'rejected');
 
   if (sectionLoadFailed) {
@@ -316,6 +379,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       <nav className="mb-8 mt-8 flex flex-wrap gap-3 text-sm">
         {[
           ['#overview', 'Info'],
+          ['#phase-history', `Fashistorik (${phaseHistory.totalItems})`],
+          ['#kunskap', 'Kunskap'],
           ['#notes', `Anteckningar (${notes.totalItems})`],
           ['#activities', `Aktiviteter (${activities.totalItems})`],
           ['#documents', 'Dokument'],
@@ -386,6 +451,57 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               </Link>
             </div>
           </div>
+        </Section>
+
+        <Section id="phase-history" title="Fashistorik">
+          <StartupPhaseHistoryList
+            startupId={id}
+            items={phaseHistoryItems}
+            canEdit={canEdit}
+            canDelete={hasRole(user.roles, ['admin'])}
+          />
+        </Section>
+
+        <Section id="kunskap" title="Kunskap">
+          <p className="mb-4 text-sm text-foreground-muted">
+            Signerade avtal, godkännanden och status för inkubator­stöd. Datum
+            registreras via Redigera.
+          </p>
+          <ul className="divide-y divide-default">
+            <KnowledgeRow
+              label="Inkubatoravtal"
+              signed={startup.signed_incubator_agreement}
+              date={startup.signed_incubator_agreement_at}
+            />
+            <KnowledgeRow
+              label="Sekretessavtal (NDA)"
+              signed={startup.signed_nda}
+              date={startup.signed_nda_at}
+            />
+            <KnowledgeRow
+              label="Boost Chamber-avtal"
+              signed={startup.signed_bc_agreement}
+              date={startup.signed_bc_agreement_at}
+            />
+            <KnowledgeRow
+              label="Godkännande av inkubationsstöd från Vinnova"
+              signed={startup.signed_vinnova_incubation_approval}
+              date={startup.signed_vinnova_incubation_approval_at}
+            />
+            <KnowledgeRow
+              label="Partneravtal"
+              signed={startup.signed_partner_agreement}
+              date={startup.signed_partner_agreement_at}
+            />
+            <KnowledgeRow
+              label="Godkänd för statsstöd artikel 22"
+              signed={startup.approved_state_aid_art22}
+            />
+            <KnowledgeRow
+              label="Godkänd för de minimis"
+              signed={startup.approved_de_minimis}
+            />
+          </ul>
         </Section>
 
         <Section id="documents" title="Dokument">
@@ -821,6 +937,38 @@ function Section({ id, title, children }: { id: string; title: string; children:
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <p className="text-sm text-foreground-subtle">{children}</p>;
+}
+
+function KnowledgeRow({
+  label,
+  signed,
+  date
+}: {
+  label: string;
+  signed?: boolean;
+  date?: string;
+}) {
+  return (
+    <li className="flex items-center justify-between gap-3 py-3 text-sm">
+      <span className="font-medium text-foreground">{label}</span>
+      <span className="flex items-center gap-2">
+        {date ? (
+          <span className="text-xs text-foreground-subtle">
+            {new Date(date).toLocaleDateString('sv-SE')}
+          </span>
+        ) : null}
+        {signed ? (
+          <span className="rounded-full bg-movexum-pastell-gron px-2.5 py-0.5 text-xs font-medium text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron">
+            Signerat / godkänt
+          </span>
+        ) : (
+          <span className="rounded-full bg-canvas-subtle px-2.5 py-0.5 text-xs font-medium text-foreground-muted">
+            Ej signerat
+          </span>
+        )}
+      </span>
+    </li>
+  );
 }
 
 function formatSek(value?: number): string {

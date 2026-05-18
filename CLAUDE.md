@@ -367,9 +367,20 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
 - **Personuppgifter:** e-post och teammedlemsfält exkluderas från alla
   prompts (defense-in-depth)
 - **Portföljkontext:** whitelist-fält: `name, phase, irl_level, status,
-  next_step, kommun, industri, bolag_status`. Bolagsregister-fälten
+  next_step, kommun, industri, bolag_status, idea_name, case_type, area,
+  is_deeptech, is_regional, company_registered_at`. Bolagsregister-fälten
   (`org_nr`, `intagsdatum`, `avslutsdatum`) ingår **inte** i AI-prompts —
   de behövs inte för resonemang och hålls dataminimerade.
+- **Per-bolag kontext (`buildStartupContext`):** utöver portföljfälten
+  exponeras avtals- och godkännandestatus (`signed_incubator_agreement`
+  m.fl. inkl. `_at`-datum), `status_completion_pct`, `preliminary_exit`,
+  `register_notes`, `sent_to`, `inflow_source`, `contacted_at`,
+  `meets_excellence_criteria`, `potential_bc_case`, `approved_state_aid_art22`,
+  `approved_de_minimis` samt senaste 5 raderna i `startup_phase_history`.
+- **Explicit svartlista i AI-kontext (får ALDRIG till prompten):**
+  `phone` (PII), `founder_gender` och `founder_identifies_as` (GDPR
+  art. 9 särskild kategori — kan avslöja etnicitet/läggning), `owner`,
+  `coaches`, e-postadresser, teammedlemmar, personnummer (lagras ej).
 - **Org-nr som PII:** för aktiebolag är organisationsnummer inte
   personuppgift (GDPR skäl 14). För enskild firma motsvarar org-nr
   personnummer → exkluderas alltid (defense-in-depth).
@@ -387,10 +398,28 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
 - `startups` — utöver kärnfälten (phase, irl_level, status, next_step,
   sector, pitch, team_size, sprint_x_json) innehåller bolagsregister-
   fält: `org_nr`, `kommun`, `bolagsform`, `industri`, `intagsdatum`,
-  `avslutsdatum`, `bolag_status` (1700000058). `status` = relation till
+  `avslutsdatum`, `bolag_status` (1700000058). Movexum Bolagslista-
+  fält (1700000061): `idea_name`, `case_type`, `status_completion_pct`,
+  `company_registered_at`, `contacted_at`, `phone` (PII),
+  `signed_incubator_agreement` (+`_at`), `signed_nda` (+`_at`),
+  `founder_gender` (art. 9), `potential_bc_case`,
+  `founder_identifies_as` (art. 9), `signed_bc_agreement` (+`_at`),
+  `preliminary_exit`, `is_deeptech`, `meets_excellence_criteria`,
+  `inflow_source`, `approved_state_aid_art22`, `area`,
+  `signed_vinnova_incubation_approval` (+`_at`),
+  `approved_de_minimis`, `sent_to`, `register_notes`, `is_regional`,
+  `signed_partner_agreement` (+`_at`). `status` = relation till
   inkubator (active/alumni/paused/rejected). `bolag_status` =
   bolagets operationella status (aktiv/vilande/konkurs/likvidering/
-  avregistrerat).
+  avregistrerat). "Antagen till BC" härleds från
+  `startup_phase_history` (rad med `phase='boost_chamber'`) —
+  inget eget fält. Person nr lagras ALDRIG.
+- `startup_phase_history` (1700000062) — en rad per gång bolaget gick
+  in i en fas (`tenant`, `startup` cascadeDelete, `phase`, `entered_at`,
+  `exited_at`, `note`, `created_by`). Skrivs automatiskt av
+  `updateStartupAction`/`createStartupAction` vid fas-byte; kan också
+  läggas till manuellt av staff via UI. Backfillas av migration
+  1700000063. Senaste 5 raderna exponeras för AI-agenter.
 - `startup_financials` — en rad per (`startup`, `year`) med årsmetrics:
   `employees`, `revenue_sek`, `personnel_cost_sek`, `corporate_tax_sek`,
   `source` (manual / import_excel / allabolag / other), `synced_at`.
@@ -601,6 +630,16 @@ omsättning.
 - **DPIA** krävs vid hög risk (omfattande profilering, känsliga
   kategorier, storskalig övervakning). Trigger: nya AI-funktioner som
   bedömer individer eller bolag.
+- **Särskild kategori (art. 9) i `startups`:** fälten `founder_gender`
+  och `founder_identifies_as` kan avslöja etnicitet, läggning eller
+  liknande. Rättslig grund = berättigat intresse (Vinnova-statistik
+  för könsfördelning i statsstödsprogram) + uttryckligt samtycke vid
+  intag. DPIA krävs och refereras i `docs/privacy/dpia-startups.md`.
+  Fälten är frivilliga, visas endast för admin/incubator_lead/coach,
+  loggas aldrig i klartext och exkluderas från ALL AI-kontext (se
+  `apps/web/src/lib/ai/context.ts` svartlista). Person nr lagras inte
+  alls — om Vinnova-rapportering kräver det i framtiden skapas separat
+  flöde med separat DPIA.
 - **Tredjelandsöverföringar:** alla tjänster måste vara EU-baserade.
   Inga US-clouds (Vercel, Supabase US, OpenAI, Anthropic-US-only,
   AWS-US). Mistral (FR) + Coolify/UpCloud (EU) + PocketBase (self-host
@@ -698,6 +737,9 @@ inte klar för merge förrän följande är gjort:
    migrations är inte redigerade.
 9. ✅ **Dokumentation:** om PR ändrar dataflöde, riskklass, eller
    leverantör → uppdatera detta avsnitt i CLAUDE.md i samma PR.
+10. ✅ **AI-kontext-whitelist:** alla nya fält som AI-agenter ska kunna
+    läsa är explicit whitelistade i `apps/web/src/lib/ai/context.ts`;
+    PII och GDPR art. 9-fält är explicit svartlistade där (se § 9.3).
 
 ### 10.6 Mappningsmatris
 
