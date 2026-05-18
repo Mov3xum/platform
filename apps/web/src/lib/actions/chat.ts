@@ -1,7 +1,11 @@
 'use server';
 
 import { requireUser, getServerPb } from '@/lib/auth.server';
-import { callMistral, type MistralMessage } from '@/lib/ai/mistral';
+import {
+  callMistralWithFallback,
+  MistralError,
+  type MistralMessage
+} from '@/lib/ai/mistral';
 import { buildStartupContext } from '@/lib/ai/context';
 import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
 import { buildChatTools, dispatchToolCall } from '@/lib/ai/tools';
@@ -21,9 +25,25 @@ export interface ChatOptions {
   includeWebContext?: boolean;
 }
 
-const STAFF_MODEL = 'mistral-small-latest';
-const STARTUP_MODEL = 'mistral-small-latest';
+const CHAT_FALLBACK_MODELS = [
+  'mistral-small-latest',
+  'mistral-medium-latest',
+  'mistral-large-latest'
+];
 const MAX_TOOL_ITERATIONS = 4;
+
+function chatErrorMessage(err: unknown): string {
+  if (err instanceof MistralError) {
+    if (err.status === 429) {
+      return 'AI-tjänsten är tillfälligt överbelastad. Försök igen om någon minut. (Detta är en gräns hos Mistral, inte plattformen.)';
+    }
+    if (err.status === 401 || err.status === 403) {
+      return 'AI-tjänsten är inte korrekt konfigurerad — kontakta administratören.';
+    }
+    return 'Kunde inte hämta svar just nu — försök igen.';
+  }
+  return 'Kunde inte hämta svar just nu — försök igen.';
+}
 
 const BASE_SYSTEM_PROMPT =
   'Du är en intelligent assistent för inkubatorplattformen Movexum. ' +
@@ -185,7 +205,7 @@ async function runStaffChatWithTools(
 
   try {
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const result = await callMistral(STAFF_MODEL, conversation, {
+      const result = await callMistralWithFallback(CHAT_FALLBACK_MODELS, conversation, {
         tools,
         toolChoice: 'auto'
       });
@@ -215,7 +235,9 @@ async function runStaffChatWithTools(
       }
     }
 
-    const finalCall = await callMistral(STAFF_MODEL, conversation, { toolChoice: 'none' });
+    const finalCall = await callMistralWithFallback(CHAT_FALLBACK_MODELS, conversation, {
+      toolChoice: 'none'
+    });
     return {
       text:
         finalCall.text ||
@@ -223,7 +245,7 @@ async function runStaffChatWithTools(
     };
   } catch (err) {
     console.error('[chat] mistral tool loop error', { tenant: user.tenant, error: err });
-    return { error: err instanceof Error ? err.message : 'Något gick fel med AI-anropet.' };
+    return { error: chatErrorMessage(err) };
   }
 }
 
@@ -288,7 +310,7 @@ export async function sendStartupChatMessage(
   const systemContent = `${BASE_SYSTEM_PROMPT}\n\n---\nKONTEXT:\n${contextBlock}\n---`;
 
   try {
-    const result = await callMistral(STARTUP_MODEL, [
+    const result = await callMistralWithFallback(CHAT_FALLBACK_MODELS, [
       { role: 'system', content: systemContent },
       ...limited
     ]);
@@ -299,7 +321,7 @@ export async function sendStartupChatMessage(
       startupId,
       error: err
     });
-    return { error: err instanceof Error ? err.message : 'Något gick fel med AI-anropet.' };
+    return { error: chatErrorMessage(err) };
   }
 }
 
@@ -330,14 +352,14 @@ async function runStartupChat(
     : `${BASE_SYSTEM_PROMPT}${webBlock ? `\n\n---\n${webBlock}\n---` : ''}`;
 
   try {
-    const result = await callMistral(STARTUP_MODEL, [
+    const result = await callMistralWithFallback(CHAT_FALLBACK_MODELS, [
       { role: 'system', content: systemContent },
       ...userMessages
     ]);
     return { text: result.text };
   } catch (err) {
     console.error('[chat] mistral error', { tenant: user.tenant, error: err });
-    return { error: err instanceof Error ? err.message : 'Något gick fel med AI-anropet.' };
+    return { error: chatErrorMessage(err) };
   }
 }
 
@@ -350,13 +372,13 @@ async function runPlainChat(
     ? `${BASE_SYSTEM_PROMPT}\n\n---\n${webBlock}\n---`
     : BASE_SYSTEM_PROMPT;
   try {
-    const result = await callMistral(STARTUP_MODEL, [
+    const result = await callMistralWithFallback(CHAT_FALLBACK_MODELS, [
       { role: 'system', content: systemContent },
       ...userMessages
     ]);
     return { text: result.text };
   } catch (err) {
     console.error('[chat] mistral error', { tenant: user.tenant, error: err });
-    return { error: err instanceof Error ? err.message : 'Något gick fel med AI-anropet.' };
+    return { error: chatErrorMessage(err) };
   }
 }
