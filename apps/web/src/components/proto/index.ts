@@ -3,7 +3,6 @@ export type { IconName } from './Icon';
 export { ProtoShell } from './ProtoShell';
 export { ProtoRail } from './ProtoRail';
 export { ProtoTopBar } from './ProtoTopBar';
-export { Cmdk } from './Cmdk';
 export { ModuleNavItem } from './ModuleNavItem';
 export {
   MobileRailProvider,
