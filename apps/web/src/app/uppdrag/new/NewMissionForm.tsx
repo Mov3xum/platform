@@ -1,11 +1,11 @@
 'use client';
 
-// Movexum OS — Formulär för nytt uppdrag.
-// Klientkomponent för useFormState + multi-select av mottagare.
+// Movexum OS — Formulär för nytt projekt/uppdrag.
+// Klientkomponent för useFormState + multi-select av deltagare och bolag.
 
-import { useActionState, useState } from 'react';
+import { useActionState, useMemo, useState } from 'react';
 import { Card, Icon } from '@/components/proto';
-import type { MissionType } from '@platform/shared';
+import type { MissionParticipantRole, MissionType, MissionVisibility } from '@platform/shared';
 import type { MissionActionState } from '@/lib/actions/missions';
 
 interface UserOption {
@@ -18,6 +18,7 @@ interface StartupOption {
 }
 
 const TYPE_OPTIONS: Array<{ value: MissionType; label: string; hint: string }> = [
+  { value: 'project', label: 'Projekt', hint: 'Kickoff → Planera → Genomför → Uppföljning' },
   { value: 'workshop', label: 'Workshop', hint: 'Tilldelat → Mottaget → Utförs → Inlämning' },
   { value: 'sprint_x', label: 'Sprint X', hint: 'Tilldelat → Självskattning → Granskning → Commit' },
   { value: 'community', label: 'Community', hint: 'Utlyst → RSVP → Närvaro' },
@@ -35,6 +36,17 @@ const ACCENT_OPTIONS = [
   { value: 'yellow', label: 'Gul' }
 ];
 
+const ROLE_LABELS: Record<MissionParticipantRole, string> = {
+  lead: 'Ansvarig',
+  contributor: 'Deltagare',
+  observer: 'Observatör'
+};
+
+interface ParticipantDraft {
+  user_id: string;
+  role: MissionParticipantRole;
+}
+
 export function NewMissionForm({
   action,
   users,
@@ -47,17 +59,41 @@ export function NewMissionForm({
   currentUserId: string;
 }) {
   const [state, formAction, pending] = useActionState(action, {} as MissionActionState);
-  const [type, setType] = useState<MissionType>('workshop');
-  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
+  const [type, setType] = useState<MissionType>('project');
+  const [visibility, setVisibility] = useState<MissionVisibility>('tenant');
+  const [selectedStartups, setSelectedStartups] = useState<string[]>([]);
+  const [participants, setParticipants] = useState<ParticipantDraft[]>([]);
 
-  const toggleRecipient = (id: string) => {
-    setSelectedRecipients((prev) =>
-      prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]
-    );
-  };
+  const userById = useMemo(() => {
+    const map = new Map<string, UserOption>();
+    for (const u of users) map.set(u.id, u);
+    return map;
+  }, [users]);
 
   const otherUsers = users.filter((u) => u.id !== currentUserId);
+  const remaining = otherUsers.filter((u) => !participants.some((p) => p.user_id === u.id));
+
   const typeHint = TYPE_OPTIONS.find((t) => t.value === type)?.hint;
+
+  const toggleStartup = (id: string) => {
+    setSelectedStartups((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
+  };
+
+  const addParticipant = (id: string) => {
+    setParticipants((prev) => [...prev, { user_id: id, role: 'contributor' }]);
+  };
+  const removeParticipant = (id: string) => {
+    setParticipants((prev) => prev.filter((p) => p.user_id !== id));
+  };
+  const setRole = (id: string, role: MissionParticipantRole) => {
+    setParticipants((prev) => prev.map((p) => (p.user_id === id ? { ...p, role } : p)));
+  };
+
+  // Skicka full participants_json inkl. utfärdaren som lead
+  const submittedParticipants: ParticipantDraft[] = [
+    { user_id: currentUserId, role: 'lead' },
+    ...participants
+  ];
 
   return (
     <form action={formAction} className="mx-mt-4" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -132,6 +168,21 @@ export function NewMissionForm({
               </select>
             </div>
           </div>
+
+          <div className="mx-field">
+            <label className="mx-label" htmlFor="visibility">
+              Synlighet
+            </label>
+            <select
+              id="visibility"
+              name="visibility"
+              value={visibility}
+              onChange={(e) => setVisibility(e.target.value as MissionVisibility)}
+            >
+              <option value="tenant">Hela organisationen kan se</option>
+              <option value="participants">Endast deltagarna</option>
+            </select>
+          </div>
         </div>
       </Card>
 
@@ -139,73 +190,118 @@ export function NewMissionForm({
         <div className="mx-flex mx-col mx-gap-3">
           <div>
             <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6 mx-mb-2">
-              Mottagare ({selectedRecipients.length})
+              Bolag ({selectedStartups.length})
             </div>
-            {otherUsers.length === 0 ? (
-              <div className="mx-muted mx-t-13">
-                Inga andra användare i din tenant. Du kan ändå skapa uppdraget och lägga till mottagare senare.
-              </div>
+            {startups.length === 0 ? (
+              <div className="mx-muted mx-t-13">Inga bolag i din tenant ännu.</div>
             ) : (
-              <div
-                className="mx-flex mx-gap-2 mx-wrap"
-                style={{ maxHeight: 220, overflowY: 'auto' }}
-              >
-                {otherUsers.map((u) => {
-                  const selected = selectedRecipients.includes(u.id);
+              <div className="mx-flex mx-gap-2 mx-wrap" style={{ maxHeight: 160, overflowY: 'auto' }}>
+                {startups.map((s) => {
+                  const selected = selectedStartups.includes(s.id);
                   return (
                     <button
                       type="button"
-                      key={u.id}
-                      onClick={() => toggleRecipient(u.id)}
+                      key={s.id}
+                      onClick={() => toggleStartup(s.id)}
                       className={`mx-chip mx-mono ${selected ? 'mx-active' : ''}`}
                       style={{
                         cursor: 'pointer',
-                        border: selected ? '1px solid #1d3a1f' : '1px solid var(--mx-line)'
+                        border: selected ? '1px solid #002c40' : '1px solid var(--mx-line)'
                       }}
                     >
                       {selected ? <Icon name="check" size={10} /> : <Icon name="plus" size={10} />}
-                      {u.label}
+                      {s.name}
                     </button>
                   );
                 })}
               </div>
             )}
-            {/* Hidden inputs for selected recipients (server reads via formData.getAll) */}
-            {selectedRecipients.map((id) => (
-              <input key={id} type="hidden" name="recipients" value={id} />
+            {selectedStartups.map((id) => (
+              <input key={id} type="hidden" name="startups" value={id} />
             ))}
           </div>
 
-          <div
-            className="mx-flex mx-gap-4 mx-wrap"
-            style={{ alignItems: 'flex-start' }}
-          >
-            <div className="mx-field" style={{ flex: 1, minWidth: 220 }}>
-              <label className="mx-label" htmlFor="mentor">
-                Mentor (valfri)
-              </label>
-              <select id="mentor" name="mentor" defaultValue="">
-                <option value="">Ingen</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.label}
-                  </option>
-                ))}
-              </select>
+          <div>
+            <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6 mx-mb-2">
+              Deltagare ({participants.length + 1})
             </div>
-            <div className="mx-field" style={{ flex: 1, minWidth: 220 }}>
-              <label className="mx-label" htmlFor="startup">
-                Koppla till bolag (valfri)
-              </label>
-              <select id="startup" name="startup" defaultValue="">
-                <option value="">Inget</option>
-                {startups.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+            <div className="mx-t-12 mx-muted mx-mb-2">
+              Du läggs till automatiskt som ansvarig. Lägg till fler kollegor och välj roll.
             </div>
+            {participants.length > 0 && (
+              <ul className="mx-flex mx-col mx-gap-1 mx-mb-2">
+                {participants.map((p) => {
+                  const u = userById.get(p.user_id);
+                  return (
+                    <li
+                      key={p.user_id}
+                      className="mx-flex mx-items-c mx-gap-2"
+                      style={{
+                        padding: '6px 10px',
+                        background: 'var(--mx-paper-3)',
+                        borderRadius: 8
+                      }}
+                    >
+                      <span className="mx-t-13 mx-fw-6" style={{ flex: 1, minWidth: 0 }}>
+                        {u?.label || p.user_id}
+                      </span>
+                      <select
+                        value={p.role}
+                        onChange={(e) => setRole(p.user_id, e.target.value as MissionParticipantRole)}
+                        style={{
+                          background: 'var(--mx-paper)',
+                          border: '1px solid var(--mx-line)',
+                          borderRadius: 6,
+                          padding: '2px 6px',
+                          fontSize: 11
+                        }}
+                      >
+                        {(['contributor', 'lead', 'observer'] as const).map((r) => (
+                          <option key={r} value={r}>
+                            {ROLE_LABELS[r]}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => removeParticipant(p.user_id)}
+                        className="mx-btn mx-sm mx-ghost"
+                        aria-label="Ta bort"
+                      >
+                        <Icon name="close" size={11} />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {remaining.length > 0 ? (
+              <div
+                className="mx-flex mx-gap-2 mx-wrap"
+                style={{ maxHeight: 160, overflowY: 'auto' }}
+              >
+                {remaining.map((u) => (
+                  <button
+                    type="button"
+                    key={u.id}
+                    onClick={() => addParticipant(u.id)}
+                    className="mx-chip mx-mono"
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <Icon name="plus" size={10} /> {u.label}
+                  </button>
+                ))}
+              </div>
+            ) : otherUsers.length === 0 ? (
+              <div className="mx-muted mx-t-13">Inga andra användare i din tenant.</div>
+            ) : (
+              <div className="mx-muted mx-t-12">Alla kollegor är redan tillagda.</div>
+            )}
+            <input
+              type="hidden"
+              name="participants_json"
+              value={JSON.stringify(submittedParticipants)}
+            />
           </div>
         </div>
       </Card>
@@ -233,7 +329,7 @@ export function NewMissionForm({
           </a>
           <button type="submit" className="mx-btn mx-primary" disabled={pending}>
             <Icon name="plus" size={13} />
-            {pending ? 'Skapar…' : 'Skapa uppdrag'}
+            {pending ? 'Skapar…' : 'Skapa projekt'}
           </button>
         </div>
       </div>

@@ -3,6 +3,7 @@ import type { SessionUser } from '@/lib/auth.server';
 import { getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { getUnreadCount } from '@/lib/notifications-server';
 import { unstable_cache } from 'next/cache';
 import { ProtoShell } from './proto/ProtoShell';
 import type { SwitchableStartup } from './proto/StartupSwitcher';
@@ -91,10 +92,18 @@ export async function AppShell({ user, children }: AppShellProps) {
 
   const switchableStartups = await loadSwitchableStartups(user);
 
+  let inkorgUnread = 0;
+  try {
+    const pb = await getServerPb();
+    inkorgUnread = await getUnreadCount(pb, user.id);
+  } catch {
+    inkorgUnread = 0;
+  }
+
   return (
     <ProtoShell
       user={user}
-      counts={{ education: assignedWorkshopCount }}
+      counts={{ education: assignedWorkshopCount, inkorg: inkorgUnread }}
       switchableStartups={switchableStartups}
     >
       {children}

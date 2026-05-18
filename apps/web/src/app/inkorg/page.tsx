@@ -1,9 +1,12 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { Icon } from '@/components/proto/Icon';
-import type { ToolRunStatus } from '@platform/shared';
+import { NotificationList } from '@/components/inkorg/NotificationList';
+import { MissionInboxList } from '@/components/inkorg/MissionInboxList';
+import { listNotificationsForUser } from '@/lib/notifications-server';
+import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import type { ToolRunStatus, Mission } from '@platform/shared';
 import { ASSIGN_STATUS, formatDeadline, formatRelativeDate, daysUntil } from '@/components/intric/constants';
 
 interface RunRow {
@@ -23,37 +26,55 @@ interface RunRow {
 
 export default async function InkorgPage() {
   const user = await requireUser();
+  const pb = await getServerPb();
+  const isFounder = hasRole(user.roles, ['startup_member']);
 
-  // Staff har inget i sin egen inkorg via founder-modellen — skicka dem till Idag.
-  if (hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) {
-    redirect('/idag');
+  // ── Notiser ───────────────────────────────────────────────
+  const notifications = await listNotificationsForUser(pb, user.id, { limit: 50 });
+
+  // ── Mina projekt/uppdrag (där jag är deltagare) ───────────
+  let myMissions: Mission[] = [];
+  try {
+    const res = await pb.collection(PB_COLLECTIONS.missions).getList<Mission>(1, 50, {
+      filter: pb.filter(
+        '(issuer = {:u} || recipients = {:u} || mentor = {:u}) && status != "done" && status != "archived"',
+        { u: user.id }
+      ),
+      sort: '-updated',
+      expand: 'startup'
+    });
+    myMissions = res.items;
+  } catch {
+    myMissions = [];
   }
 
-  const pb = await getServerPb();
-
+  // ── Tool-runs för founders (behåll befintligt) ────────────
   let runs: RunRow[] = [];
-  try {
-    const res = await pb.collection('tool_runs').getList<RunRow>(1, 100, {
-      filter: pb.filter(
-        'tenant = {:tenant} && assigned_to = {:userId} && (status = "assigned" || status = "in_progress" || status = "ready_for_review")',
-        { tenant: user.tenant, userId: user.id }
-      ),
-      sort: 'deadline',
-      expand: 'tool,startup,assigned_by'
-    });
-    runs = res.items;
-  } catch {
-    runs = [];
+  if (isFounder) {
+    try {
+      const res = await pb.collection('tool_runs').getList<RunRow>(1, 100, {
+        filter: pb.filter(
+          'tenant = {:tenant} && assigned_to = {:userId} && (status = "assigned" || status = "in_progress" || status = "ready_for_review")',
+          { tenant: user.tenant, userId: user.id }
+        ),
+        sort: 'deadline',
+        expand: 'tool,startup,assigned_by'
+      });
+      runs = res.items;
+    } catch {
+      runs = [];
+    }
   }
 
   const todo = runs.filter((r) => r.status === 'assigned');
   const pågående = runs.filter((r) => r.status === 'in_progress');
   const väntar = runs.filter((r) => r.status === 'ready_for_review');
+  const unreadCount = notifications.filter((n) => !n.read_at).length;
 
-  function Section({ label, items }: { label: string; items: RunRow[] }) {
+  function ToolSection({ label, items }: { label: string; items: RunRow[] }) {
     if (items.length === 0) return null;
     return (
-      <section className="mb-8">
+      <section className="mb-6">
         <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
           {label} <span className="font-mono normal-case tracking-normal">{items.length}</span>
         </div>
@@ -66,7 +87,9 @@ export default async function InkorgPage() {
             const startupName = r.expand?.startup?.name || 'Bolag';
             const toolName = r.expand?.tool?.name || 'Verktyg';
             const assignedByName =
-              r.expand?.assigned_by?.display_name || r.expand?.assigned_by?.email || 'Coach';
+              r.expand?.assigned_by?.display_name ||
+              r.expand?.assigned_by?.email?.split('@')[0] ||
+              'Coach';
 
             return (
               <Link
@@ -133,6 +156,9 @@ export default async function InkorgPage() {
     );
   }
 
+  const firstName = user.name?.split(' ')[0] || user.name;
+  const totalItems = notifications.length + myMissions.length + runs.length;
+
   return (
     <div className="mx-view-pad mx-narrow">
       <div className="mb-8">
@@ -140,28 +166,57 @@ export default async function InkorgPage() {
           Min inkorg
         </div>
         <h1 className="mt-1 font-heading text-[28px] font-semibold tracking-tight text-foreground">
-          Hej {user.name.split(' ')[0]}.
+          Hej {firstName || 'där'}.
         </h1>
         <p className="mt-2 max-w-[60ch] text-[14px] text-foreground-muted">
-          Det här är vad din coach har bett dig att fokusera på. Klicka på ett uppdrag för att se
-          instruktionen och köra verktyget — output sparas tillbaka på bolaget.
+          Här samlas dina notiser, projekt du är med i, och uppdrag som väntar
+          på dig. Klicka på något för att hoppa rakt in.
         </p>
       </div>
 
-      {runs.length === 0 ? (
+      {totalItems === 0 ? (
         <div className="rounded-2xl border border-dashed border-default p-10 text-center">
           <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-canvas-muted text-foreground-subtle">
             <Icon name="check" size={18} />
           </div>
           <p className="text-[13px] text-foreground-subtle">
-            Inga aktiva uppdrag just nu. Allt klart.
+            Inga notiser eller pågående uppdrag just nu. Allt klart.
           </p>
         </div>
       ) : (
         <>
-          <Section label="Att göra nu" items={todo} />
-          <Section label="Pågående" items={pågående} />
-          <Section label="Inväntar coach" items={väntar} />
+          <section className="mb-8">
+            <div className="mb-3 flex items-center gap-2">
+              <h2 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+                Notiser
+              </h2>
+              {unreadCount > 0 && (
+                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1.5 text-[10px] font-semibold text-brand-foreground">
+                  {unreadCount}
+                </span>
+              )}
+            </div>
+            <NotificationList notifications={notifications} />
+          </section>
+
+          <section className="mb-8">
+            <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+              Mina projekt & uppdrag{' '}
+              <span className="font-mono normal-case tracking-normal">{myMissions.length}</span>
+            </h2>
+            <MissionInboxList missions={myMissions} />
+          </section>
+
+          {isFounder && runs.length > 0 && (
+            <>
+              <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+                AI-uppdrag från coach
+              </h2>
+              <ToolSection label="Att göra nu" items={todo} />
+              <ToolSection label="Pågående" items={pågående} />
+              <ToolSection label="Inväntar coach" items={väntar} />
+            </>
+          )}
         </>
       )}
     </div>
