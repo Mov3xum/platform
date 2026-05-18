@@ -13,7 +13,8 @@ export type ActivityKind =
   | 'kompass'
   | 'note'
   | 'onboarding'
-  | 'chat';
+  | 'chat'
+  | 'integration_sync';
 
 export interface RecordActivityParams {
   tenant: string;

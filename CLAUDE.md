@@ -602,3 +602,92 @@ inte klar för merge förrän följande är gjort:
 | Cybersäkerhet/robusthet   | Art. 15           | Art. 32           | A.8.x             | CC6.6–CC6.8       |
 | Mänsklig övervakning      | Art. 14           | Art. 22           | A.5.4             | CC1.x             |
 | Post-market monitoring    | Art. 72           | —                 | A.5.36, A.8.16    | CC7.4             |
+
+---
+
+## 11. Integrationsramverket
+
+### 11.1 Översikt
+
+Externa integrationer som faktiskt hämtar data från en leverantör
+implementeras genom **Integration-handler-modulen** i
+`apps/web/src/lib/integrations/`. Ramverket är leverantörsagnostiskt:
+varje provider implementerar `IntegrationHandler` (`types.ts`) och
+mappar leverantörens entiteter till `NormalizedRecord`. Resultatet
+sparas i den unified normaliserade datastore (`integration_records`)
+och kan renderas av samma UI oavsett leverantör.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `apps/web/src/lib/integrations/types.ts` | `IntegrationHandler`, `NormalizedRecord`, `SyncResult` |
+| `apps/web/src/lib/integrations/http.ts` | Generisk fetch-klient (timeout + retry på 429/5xx) |
+| `apps/web/src/lib/integrations/crypto.ts` | AES-256-GCM-kryptering av credentials |
+| `apps/web/src/lib/integrations/credentials.ts` | PB superuser-klient för config-läsning |
+| `apps/web/src/lib/integrations/registry.ts` | Slug → handler-mappning |
+| `apps/web/src/lib/integrations/sync.ts` | Orkestrator (`runSync`) |
+| `apps/web/src/lib/integrations/providers/<slug>/{client,handler,normalize}.ts` | En per provider |
+| `apps/web/src/lib/actions/integrations.ts` | Connect/disconnect/sync server actions |
+| `apps/web/src/app/integrationer/[slug]/page.tsx` | Detaljsida (anslut + synka) |
+| `apps/web/src/app/integrationer/[slug]/poster/page.tsx` | Records-lista |
+
+### 11.2 Datamodell
+
+- **`integration_providers`** — global katalog (10 stubs + brevo +
+  howspace med handler).
+- **`tenant_integrations`** — per-tenant koppling. `config`-fältet
+  innehåller den AES-256-GCM-krypterade credential-blobben. En PB-hook
+  (`backend/pocketbase-schema/hooks/strip_integration_config.pb.js`)
+  stripar `config` från alla API-svar.
+- **`integration_records`** — unified normaliserad datastore.
+  Unique-index `(tenant_integration, record_type, external_id)` ger
+  idempotent upsert.
+- **`integration_sync_runs`** — audit-trail per sync-försök
+  (ISO 27001 A.8.15). `error_message` är PII-fri.
+
+### 11.3 Riskklassificering (EU AI Act art. 11)
+
+| Provider  | Residency | Riskklass     | Anteckning |
+|-----------|-----------|---------------|------------|
+| Brevo     | FR (EU)   | Minimal       | Ingen AI. Endast aggregerade metrics synkas — inga e-postadresser. |
+| Howspace  | FI (EU)   | Begränsad     | AI-insights faller under art. 50 (transparenskrav). Vi synkar bara aggregerad statistik. |
+
+**Mailchimp avvisad** (CLAUDE.md § 10.2): US-baserad,
+träffar Schrems II + CLOUD Act. Brevo är EU-suveränt alternativ.
+
+### 11.4 Dataminimering (GDPR § 5)
+
+Varje providers `normalize.ts` definierar en whitelist över vilka
+fält som hamnar i `integration_records.payload`. Aldrig:
+
+- E-postadresser (Brevo contacts → endast aggregerade `totalSubscribers`)
+- Deltagarnamn (Howspace → endast `total`, `active`-räkningar)
+- Post-innehåll (Howspace → endast metadata om workspace)
+
+Vid PR-review: kontrollera att payload-mappers håller sig till
+denna princip.
+
+### 11.5 Kryptering & secrets
+
+- Env: `MOVEXUM_INTEGRATION_KEY` (32 bytes base64) — sätts i Coolify,
+  aldrig i kod (ISO 27001 A.8.24).
+- Algoritm: AES-256-GCM (12-byte IV + 16-byte auth tag).
+- Dekryptering sker endast i `sync.ts`-orkestratorn via PB superuser.
+
+### 11.6 Sync-cadence
+
+MVP: endast manuell sync via "Synka nu"-knapp på `/integrationer/<slug>`.
+Webhooks och PocketBase cron-hooks kan adderas senare utan
+brytande ändringar — datamodellen är redan idempotent.
+
+### 11.7 Lägga till en ny provider
+
+1. Skapa `lib/integrations/providers/<slug>/{client,handler,normalize}.ts`.
+2. Implementera `IntegrationHandler` — sätt `residency`, `riskClass`
+   och `complianceNote` så transparensbannern blir korrekt.
+3. Whitelista payload-fält i `normalize.ts`.
+4. Registrera i `registry.ts`.
+5. Seedmigration som upsertar provider i `integration_providers`.
+6. Uppdatera tabellen i 11.3 + ev. ny kategori i 1700000053-migrationen.
+7. PR-checklista § 10.5 punkt 9: dokumentera dataflödet här.

@@ -2,6 +2,7 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { motion, AnimatePresence } from 'framer-motion';
+import Link from 'next/link';
 import { useActionState, useEffect, useState } from 'react';
 import {
   requestIntegrationPilotAction,
@@ -13,11 +14,13 @@ type TenantStatus = 'available' | 'pilot_requested' | 'connected' | 'disabled';
 
 interface Props {
   providerId: string;
+  providerSlug: string;
   integrationName: string;
   providerPlaceholder: string;
   availability: Availability;
   tenantStatus: TenantStatus;
   canRequest: boolean;
+  hasHandler: boolean;
   accentClass: string;
 }
 
@@ -43,11 +46,13 @@ const initialState: IntegrationPilotState = {};
 
 export function IntegrationActivateButton({
   providerId,
+  providerSlug,
   integrationName,
   providerPlaceholder,
   availability,
   tenantStatus,
   canRequest,
+  hasHandler,
   accentClass
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -65,6 +70,24 @@ export function IntegrationActivateButton({
 
   const isConnected = tenantStatus === 'connected';
   const isRequested = tenantStatus === 'pilot_requested';
+
+  // Providers with a real sync handler skip the pilot-request flow
+  // entirely and link to the detail page where credentials are
+  // configured and "Sync now" lives.
+  if (hasHandler) {
+    return (
+      <Link
+        href={`/integrationer/${providerSlug}`}
+        className={`inline-flex w-full items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-movexum-pastell-lila dark:focus-visible:ring-movexum-morklila ${
+          isConnected
+            ? 'bg-movexum-pastell-gron text-movexum-morkgron hover:bg-movexum-pastell-gron/80 dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron'
+            : 'bg-brand text-brand-foreground hover:bg-brand-hover'
+        }`}
+      >
+        {isConnected ? 'Hantera koppling' : 'Konfigurera'}
+      </Link>
+    );
+  }
 
   let buttonLabel = 'Begär pilot';
   if (isConnected) buttonLabel = 'Ansluten';
