@@ -25,7 +25,7 @@
 
 import PocketBase from 'pocketbase';
 
-const PB_URL = process.env.PB_URL;
+const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
 const SU_PASSWORD = process.env.PB_SU_PASSWORD;
 const APP_USER_PASSWORD = process.env.APP_USER_PASSWORD;
@@ -33,17 +33,35 @@ const APP_USER_PASSWORD = process.env.APP_USER_PASSWORD;
 const APP_USER_EMAIL = 'hampus@movexum.se';
 const APP_USER_NAME = 'Hampus Granström';
 
-if (!PB_URL || !SU_EMAIL || !SU_PASSWORD) {
+if (!PB_URL_RAW || !SU_EMAIL || !SU_PASSWORD) {
   console.error('Missing env vars. Required: PB_URL, PB_SU_EMAIL, PB_SU_PASSWORD');
   process.exit(1);
 }
 
-const pb = new PocketBase(PB_URL);
-pb.autoCancellation(false);
-
 const log = (...a) => console.log('•', ...a);
 const ok = (...a) => console.log('✓', ...a);
 const warn = (...a) => console.log('!', ...a);
+
+// PB-instansen på Coolify lyssnar bara på 443. Om PB_URL-secret saknar
+// protokoll eller råkat innehålla http:// hänger anropet på port 80 tills
+// undici timar ut. Normalisera defensivt så att secret-typon inte sänker
+// hela bootstrappen.
+function normalizePbUrl(raw) {
+  let url = String(raw).trim().replace(/\/+$/, '');
+  if (/^http:\/\//i.test(url)) {
+    warn('forcing HTTPS — PB lyssnar bara på 443 (PB_URL hade http://)');
+    url = url.replace(/^http:\/\//i, 'https://');
+  } else if (!/^https:\/\//i.test(url)) {
+    warn('PB_URL saknar protokoll — prependar https://');
+    url = 'https://' + url;
+  }
+  return url;
+}
+
+const PB_URL = normalizePbUrl(PB_URL_RAW);
+
+const pb = new PocketBase(PB_URL);
+pb.autoCancellation(false);
 
 function normalizeSelectFields(fields, context = 'collection') {
   return (fields || []).map((field) => {
@@ -241,7 +259,26 @@ const STAFF_INCL_MENTOR =
 log(`PB: ${PB_URL}`);
 log(`Superuser: ${SU_EMAIL}`);
 
-await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
+// Retry bara connect-timeouts. 4xx (fel lösen, fel collection) kastas
+// direkt så att vi inte sitter i 5 min på en felinmatad secret.
+async function authWithRetry({ maxAttempts = 5, baseDelayMs = 2000 } = {}) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
+    } catch (err) {
+      const isLast = attempt === maxAttempts;
+      const isConnectTimeout =
+        err?.originalError?.cause?.code === 'UND_ERR_CONNECT_TIMEOUT' ||
+        err?.status === 0;
+      if (isLast || !isConnectTimeout) throw err;
+      const delay = baseDelayMs * 2 ** (attempt - 1);
+      warn(`auth misslyckades (försök ${attempt}/${maxAttempts}), retry om ${delay} ms`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
+await authWithRetry();
 ok('inloggad som superuser');
 
 // 1. tenants ----------------------------------------------------------------
