@@ -14,5 +14,7 @@ export const PB_COLLECTIONS = {
   events: 'incubator_events_collection',
   eventSignups: 'event_signups_collection',
   reports: 'incubator_reports_collection',
-  alumni: 'alumni_collection'
+  alumni: 'alumni_collection',
+  missionComments: 'mission_comments_collection',
+  notifications: 'notifications_collection'
 } as const;
