@@ -418,7 +418,7 @@ async function runStaffChatWithTools(
         tenant: user.tenant,
         userId: user.id,
         surface: 'dashboard_chat',
-        model,
+        model: result.modelUsed,
         tokensIn: result.usage.prompt_tokens,
         tokensOut: result.usage.completion_tokens
       });
