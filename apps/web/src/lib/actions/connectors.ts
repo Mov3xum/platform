@@ -189,14 +189,23 @@ export async function activateConnectorAction(input: {
     status: 'active',
     activated_at: new Date().toISOString()
   };
-  if (existing) {
-    await pb.collection('user_mistral_connectors').update(existing.id, payload);
-  } else {
-    await pb.collection('user_mistral_connectors').create(payload);
+  try {
+    if (existing) {
+      await pb.collection('user_mistral_connectors').update(existing.id, payload);
+    } else {
+      await pb.collection('user_mistral_connectors').create(payload);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Okänt fel.';
+    return {
+      error: msg.includes('not found')
+        ? 'Kollektionen user_mistral_connectors saknas — starta om PocketBase för att applicera migrationen.'
+        : `Kunde inte aktivera connectorn: ${msg}`
+    };
   }
 
-  revalidatePath('/toolbox/connectors');
-  revalidatePath('/toolbox');
+  revalidatePath('/integrationer/connectors');
+  revalidatePath('/integrationer');
   return {};
 }
 
@@ -219,21 +228,29 @@ export async function deactivateConnectorAction(input: {
     status: 'disabled'
   });
 
-  revalidatePath('/toolbox/connectors');
+  revalidatePath('/integrationer/connectors');
   return {};
 }
 
 /**
  * Form-wrappers så <form action={…}> i UI kan binda mot dem utan att
- * varje sida behöver client-component-handlers.
+ * varje sida behöver client-component-handlers. Vid fel redirectas
+ * användaren tillbaka till listsidan med ?error=… så att den server-
+ * renderade sidan visar meddelandet (vanlig <form>-flows har ingen
+ * client-side state).
  */
 export async function activateConnectorFormAction(formData: FormData): Promise<void> {
   'use server';
   const kind = String(formData.get('kind') || '') as 'builtin' | 'mcp';
   const connectorId = String(formData.get('connectorId') || '').trim();
-  if ((kind !== 'builtin' && kind !== 'mcp') || !connectorId) return;
+  if ((kind !== 'builtin' && kind !== 'mcp') || !connectorId) {
+    redirect('/integrationer/connectors?error=' + encodeURIComponent('Ogiltig connector.'));
+  }
   const result = await activateConnectorAction({ kind, connectorId });
   if (result.redirectTo) redirect(result.redirectTo);
+  if (result.error) {
+    redirect('/integrationer/connectors?error=' + encodeURIComponent(result.error));
+  }
 }
 
 export async function deactivateConnectorFormAction(formData: FormData): Promise<void> {
@@ -241,7 +258,10 @@ export async function deactivateConnectorFormAction(formData: FormData): Promise
   const kind = String(formData.get('kind') || '') as 'builtin' | 'mcp';
   const connectorId = String(formData.get('connectorId') || '').trim();
   if ((kind !== 'builtin' && kind !== 'mcp') || !connectorId) return;
-  await deactivateConnectorAction({ kind, connectorId });
+  const result = await deactivateConnectorAction({ kind, connectorId });
+  if (result.error) {
+    redirect('/integrationer/connectors?error=' + encodeURIComponent(result.error));
+  }
 }
 
 // ── Admin: tenant-allowlist ─────────────────────────────────────────────
@@ -261,7 +281,7 @@ export async function setTenantAllowedConnectorsAction(
     allowed_mistral_connectors: sanitized
   });
 
-  revalidatePath('/toolbox/connectors');
+  revalidatePath('/integrationer/connectors');
   return {};
 }
 
@@ -509,7 +529,7 @@ export async function runConnectorTurnAction(formData: FormData): Promise<Connec
     toolRunId: runId
   });
 
-  revalidatePath(`/toolbox/connectors/${kind}/${connectorId}`);
+  revalidatePath(`/integrationer/connectors/${kind}/${connectorId}`);
   return { runId };
 }
 

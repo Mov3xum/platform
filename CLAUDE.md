@@ -940,7 +940,7 @@ i `tool_runs` + `activities` + `ai_usage_events`.
 ### 13.1 Översikt
 
 Movexum exponerar Mistrals connector-lager som en egen verktygskategori
-i `/toolbox/connectors`. Två typer stöds:
+i `/integrationer/connectors`. Två typer stöds:
 
 1. **Built-in tools** (`web_search`, `code_interpreter`, `image_generation`,
    `document_library`) — Mistrals first-party-verktyg som skickas inline i
@@ -962,8 +962,8 @@ lever i `user_mistral_connectors` (vår DB) eftersom vår Mistral-API-nyckel
 | `apps/web/src/lib/ai/connector-state.ts` | HMAC-signering/parsing av OAuth-state + token-persistens (AES-256-GCM) |
 | `apps/web/src/lib/actions/connectors.ts` | Server actions: activate/deactivate/run-turn/set-allowlist |
 | `apps/web/src/app/api/integrations/mistral/oauth-callback/route.ts` | OAuth return-URL, verifierar state och växlar code mot token |
-| `apps/web/src/app/toolbox/connectors/page.tsx` | Listsida med "Aktivera"-kort |
-| `apps/web/src/app/toolbox/connectors/[kind]/[id]/page.tsx` | Per-connector chat-vy |
+| `apps/web/src/app/integrationer/connectors/page.tsx` | Listsida med "Aktivera"-kort |
+| `apps/web/src/app/integrationer/connectors/[kind]/[id]/page.tsx` | Per-connector chat-vy |
 | `apps/web/src/components/ConnectorCard.tsx` | Återanvändbart kort |
 
 ### 13.2 Datamodell
