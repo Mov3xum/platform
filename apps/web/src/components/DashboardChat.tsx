@@ -6,14 +6,16 @@ import {
   type ChatAttachment,
   type ChatMessage
 } from '@/lib/actions/chat';
+import { extractPdfFromDataUrlAction } from '@/lib/actions/chat-attachments';
 import { Icon } from '@/components/proto/Icon';
 
 const MAX_ATTACHMENTS = 5;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const ACCEPT_IMAGE = ['image/png', 'image/jpeg', 'image/webp'];
 const ACCEPT_TEXT = ['text/plain', 'text/markdown', 'text/csv', 'application/csv'];
-const ACCEPT_IMAGE_ATTR = 'image/png,image/jpeg,image/webp';
-const ACCEPT_TEXT_ATTR = 'text/plain,text/markdown,text/csv,.md,.csv,.txt';
+const ACCEPT_PDF = ['application/pdf'];
+const ACCEPT_ATTR =
+  'image/png,image/jpeg,image/webp,text/plain,text/markdown,text/csv,application/pdf,.md,.csv,.txt,.pdf';
 
 interface UploadedFile extends ChatAttachment {
   uid: string;
@@ -22,12 +24,13 @@ interface UploadedFile extends ChatAttachment {
 
 function detectMime(file: File): string | null {
   const mime = (file.type || '').toLowerCase();
-  if (mime && [...ACCEPT_IMAGE, ...ACCEPT_TEXT].includes(mime)) return mime;
-  // Fallback via extension för md/csv/txt utan korrekt mime
+  if (mime && [...ACCEPT_IMAGE, ...ACCEPT_TEXT, ...ACCEPT_PDF].includes(mime)) return mime;
+  // Fallback via extension för md/csv/txt/pdf utan korrekt mime
   const ext = file.name.toLowerCase().split('.').pop();
   if (ext === 'md' || ext === 'markdown') return 'text/markdown';
   if (ext === 'csv') return 'text/csv';
   if (ext === 'txt') return 'text/plain';
+  if (ext === 'pdf') return 'application/pdf';
   return null;
 }
 
@@ -134,6 +137,7 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -174,47 +178,67 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
       setError(`Endast ${remaining} fil(er) till — max ${MAX_ATTACHMENTS} totalt.`);
     }
 
-    const next: UploadedFile[] = [];
-    for (const file of accepted) {
-      const mime = detectMime(file);
-      if (!mime) {
-        setError(`${file.name}: filformatet stöds inte.`);
-        continue;
-      }
-      if (file.size > MAX_FILE_BYTES) {
-        setError(`${file.name} är större än 10 MB.`);
-        continue;
-      }
-      try {
-        if (ACCEPT_IMAGE.includes(mime)) {
-          const { dataUrl, size } = await compressImage(file);
-          // Vid kompression encodas alltid som JPEG; reflektera det i mime.
-          const effectiveMime = size < file.size ? 'image/jpeg' : mime;
-          next.push({
-            uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-            name: file.name,
-            mime: effectiveMime,
-            kind: 'image',
-            size,
-            dataUrl
-          });
-        } else {
-          const text = await readAsText(file);
-          next.push({
-            uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-            name: file.name,
-            mime,
-            kind: 'text',
-            size: file.size,
-            text
-          });
+    setIsProcessingFiles(true);
+    try {
+      const next: UploadedFile[] = [];
+      for (const file of accepted) {
+        const mime = detectMime(file);
+        if (!mime) {
+          setError(`${file.name}: filformatet stöds inte.`);
+          continue;
         }
-      } catch (err) {
-        setError(`${file.name}: kunde inte läsa filen.`);
-        console.error('[DashboardChat] file read failed', err);
+        if (file.size > MAX_FILE_BYTES) {
+          setError(`${file.name} är större än 10 MB.`);
+          continue;
+        }
+        try {
+          if (ACCEPT_IMAGE.includes(mime)) {
+            const { dataUrl, size } = await compressImage(file);
+            // Vid kompression encodas alltid som JPEG; reflektera det i mime.
+            const effectiveMime = size < file.size ? 'image/jpeg' : mime;
+            next.push({
+              uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              name: file.name,
+              mime: effectiveMime,
+              kind: 'image',
+              size,
+              dataUrl
+            });
+          } else if (mime === 'application/pdf') {
+            const dataUrl = await readAsDataUrl(file);
+            const result = await extractPdfFromDataUrlAction(dataUrl, file.name);
+            if (result.error || !result.text) {
+              setError(result.error || `${file.name}: kunde inte läsa PDF.`);
+              continue;
+            }
+            next.push({
+              uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              name: file.name,
+              mime: 'application/pdf',
+              kind: 'text',
+              size: file.size,
+              text: result.text
+            });
+          } else {
+            const text = await readAsText(file);
+            next.push({
+              uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              name: file.name,
+              mime,
+              kind: 'text',
+              size: file.size,
+              text
+            });
+          }
+        } catch (err) {
+          setError(`${file.name}: kunde inte läsa filen.`);
+          console.error('[DashboardChat] file read failed', err);
+        }
       }
+      if (next.length > 0) setAttachments((prev) => [...prev, ...next]);
+    } finally {
+      setIsProcessingFiles(false);
     }
-    if (next.length > 0) setAttachments((prev) => [...prev, ...next]);
   }
 
   function removeAttachment(uid: string) {
@@ -304,11 +328,8 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
     fileInputRef.current?.click();
   }
 
-  function openImagePicker() {
-    imageInputRef.current?.click();
-  }
-
-  const canSubmit = !isPending && (input.trim().length > 0 || attachments.length > 0);
+  const canSubmit =
+    !isPending && !isProcessingFiles && (input.trim().length > 0 || attachments.length > 0);
 
   const inputPill = (
     <div className="rounded-2xl border border-default bg-surface px-4 py-3 shadow-sm shadow-movexum-svart/5 transition focus-within:border-strong focus-within:ring-2 focus-within:ring-movexum-pastell-lila dark:focus-within:ring-movexum-morklila">
@@ -379,22 +400,39 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
         accept={ACCEPT_IMAGE_ATTR}
         className="hidden"
         onChange={(e) => {
-          if (e.target.files && e.target.files.length > 0) addFiles(e.target.files);
+          const target = e.target;
+          const files = target.files;
+          if (files && files.length > 0) {
+            void addFiles(files).finally(() => {
+              target.value = '';
+            });
+          } else {
+            target.value = '';
+          }
         }}
       />
+
+      {error && (
+        <div className="mt-2 rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange">
+          {error}
+        </div>
+      )}
 
       <div className="mt-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={openFilePicker}
-            disabled={isPending || attachments.length >= MAX_ATTACHMENTS}
+            disabled={isPending || isProcessingFiles || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            title={`Bifoga fil (TXT, MD, CSV · max ${MAX_ATTACHMENTS} bilagor · 10 MB/fil)`}
+            title={`Bifoga fil (PNG, JPG, WebP, PDF, TXT, MD, CSV · max ${MAX_ATTACHMENTS} filer · 10 MB/fil)`}
             aria-label="Bifoga fil"
           >
             <Icon name="paperclip" size={14} />
           </button>
+          {isProcessingFiles && (
+            <span className="text-[11.5px] text-foreground-subtle">Läser fil…</span>
+          )}
           <button
             type="button"
             onClick={openImagePicker}
@@ -577,12 +615,6 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '150ms' }} />
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '300ms' }} />
                   </div>
-                </div>
-              )}
-
-              {error && (
-                <div className="rounded-2xl bg-movexum-pastell-orange px-4 py-2 text-[13px] text-movexum-morkorange">
-                  {error}
                 </div>
               )}
 
