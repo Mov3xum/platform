@@ -2,9 +2,11 @@
 
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import {
+  callMistral,
   callMistralWithFallback,
   MistralError,
-  type MistralMessage
+  type MistralMessage,
+  type MistralContentPart
 } from '@/lib/ai/mistral';
 import { buildStartupContext } from '@/lib/ai/context';
 import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
@@ -51,6 +53,19 @@ const CHAT_FALLBACK_MODELS = [
   'mistral-large-latest'
 ];
 const MAX_TOOL_ITERATIONS = 4;
+
+const STAFF_MODEL = CHAT_FALLBACK_MODELS[0];
+const VISION_MODEL = 'pixtral-12b-latest';
+const MAX_ATTACHMENTS = 5;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_TEXT_CHARS = 200_000;
+const ALLOWED_TEXT_MIMES = new Set([
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/csv'
+]);
+const ALLOWED_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 function chatErrorMessage(err: unknown): string {
   if (err instanceof MistralError) {
