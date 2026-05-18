@@ -2,7 +2,7 @@ import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { PageShell } from '@/components/PageShell';
-import { MessageList } from '../../../runs/[id]/MessageList';
+import { MessageList } from '../../../../toolbox/runs/[id]/MessageList';
 import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
 import { ConnectorChatForm } from './ConnectorChatForm';
 import { getBuiltin } from '@/lib/ai/builtins';
@@ -49,7 +49,7 @@ export default async function ConnectorChatPage({
 
   if (activationList.totalItems === 0 || activationList.items[0].status !== 'active') {
     redirect(
-      `/toolbox/connectors?error=${encodeURIComponent(
+      `/integrationer/connectors?error=${encodeURIComponent(
         'Aktivera connectorn först innan du kan chatta med den.'
       )}`
     );
@@ -107,7 +107,7 @@ export default async function ConnectorChatPage({
             </p>
           </div>
           <Link
-            href="/toolbox/connectors"
+            href="/integrationer/connectors"
             className="text-[12px] text-foreground-subtle underline-offset-2 hover:text-foreground hover:underline"
           >
             ← Alla connectors

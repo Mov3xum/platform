@@ -221,26 +221,6 @@ export default async function ToolboxPage({
           </div>
         )}
 
-        <Link
-          href="/toolbox/connectors"
-          className="mb-5 flex items-center justify-between gap-3 rounded-2xl border border-default bg-surface p-4 transition hover:border-strong"
-        >
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-canvas-muted text-base">
-              🔌
-            </div>
-            <div>
-              <div className="text-[14px] font-semibold text-foreground">
-                Mistral-connectors
-              </div>
-              <div className="text-[12px] text-foreground-muted">
-                Aktivera web-search, code-interpreter och anpassade MCP-verktyg.
-              </div>
-            </div>
-          </div>
-          <Icon name="chevron" size={14} />
-        </Link>
-
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {filteredVisibleTools.map((tool) => {
             const metrics = totalRunsByTool.get(tool.id) || { count: 0 };

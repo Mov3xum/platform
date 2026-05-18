@@ -37,7 +37,7 @@ export function ConnectorCard({
   const isActive = status === 'active';
   const isPending = status === 'oauth_pending';
 
-  const chatHref = `/toolbox/connectors/${kind}/${encodeURIComponent(connectorId)}`;
+  const chatHref = `/integrationer/connectors/${kind}/${encodeURIComponent(connectorId)}`;
 
   return (
     <div className="flex flex-col rounded-2xl border border-default bg-surface p-4">
