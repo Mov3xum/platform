@@ -604,7 +604,7 @@ export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['idag', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'integrationer', 'installningar'] }
+  { label: 'System', modules: ['agenter', 'insights', 'integrationer', 'installningar'] }
 ];
 
 export const coreModules: ModuleDefinition[] = [
@@ -677,6 +677,14 @@ export const coreModules: ModuleDefinition[] = [
     description: 'AI-agenter, mallar och checklistor för startupstöd. Tilldela bolag för att synliggöra rätt agent i rätt kontext.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'startup_member'],
     route: '/toolbox'
+  },
+  {
+    id: 'insights',
+    title: 'Usage insights',
+    description:
+      'Spåra hur AI och plattformen används i din organisation — identifiera värdedrivare och adoption per modul.',
+    rolesAllowed: ['admin', 'incubator_lead'],
+    route: '/insights'
   },
   {
     id: 'integrationer',

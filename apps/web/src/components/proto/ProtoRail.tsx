@@ -16,6 +16,7 @@ const moduleIcons: Record<string, string> = {
   education: 'cap',
   rapporter: 'doc',
   agenter: 'bolt',
+  insights: 'graph',
   integrationer: 'link',
   installningar: 'gear'
 };

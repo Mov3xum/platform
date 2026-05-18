@@ -5,7 +5,18 @@ import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ComponentType } from 'react';
-import { Building2, Compass, FolderKanban, GraduationCap, Home, Menu, Plug2, Sparkles, X } from 'lucide-react';
+import {
+  BarChart3,
+  Building2,
+  Compass,
+  FolderKanban,
+  GraduationCap,
+  Home,
+  Menu,
+  Plug2,
+  Sparkles,
+  X
+} from 'lucide-react';
 import { coreModules, type Role } from '@platform/shared';
 import { canAccessModuleForUser } from '@/lib/rbac';
 import { Logo } from './Logo';
@@ -25,6 +36,7 @@ const iconByModule: Record<string, ComponentType<{ className?: string }>> = {
   agenter: Sparkles,
   toolbox: Sparkles,
   activity_feed: Compass,
+  insights: BarChart3,
   integrationer: Plug2,
 };
 
