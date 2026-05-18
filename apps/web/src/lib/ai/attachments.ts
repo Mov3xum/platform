@@ -53,7 +53,7 @@ function isTextMime(mime: string): boolean {
   return mime === 'text/plain' || mime === 'text/markdown' || mime === 'text/csv';
 }
 
-async function extractPdfText(buffer: Buffer): Promise<string> {
+export async function extractPdfText(buffer: Buffer): Promise<string> {
   // Dynamisk import för att hålla pdf-parse Node-only och utanför edge-bundles.
   // pdf-parse/lib/pdf-parse.js bypasser modulens debug-mode som annars vill
   // läsa en test-PDF vid import.

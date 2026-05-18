@@ -77,6 +77,16 @@ function dateKey(iso: string): string {
 }
 
 /**
+ * Konverterar JS ISO-datetime (`2026-04-18T16:07:58.324Z`) till PB:s
+ * filter-vänliga format (`2026-04-18 16:07:58.324Z`). PocketBase 0.23
+ * datetime-parsern accepterar inte `T`-separatorn i filter-literaler
+ * och returnerar HTTP 400 om man försöker.
+ */
+function pbDate(iso: string): string {
+  return iso.replace('T', ' ');
+}
+
+/**
  * Plockar ut den mest informativa felsträngen från en PB-SDK-error.
  * PB SDK-fel kommer med shape: { status, url, response: { code, message, data } }.
  */
@@ -177,14 +187,24 @@ export default async function InsightsPage({
   let runsLoadFailed = false;
   let runsLoadError: string | undefined;
   try {
-    const current = await pb.collection('tool_runs').getList<ToolRun>(1, 1000, {
-      filter: `tenant = "${user.tenant}" && created >= "${sinceIso}"`,
+    const current = await pb.collection('tool_runs').getList<ToolRun>(1, 500, {
+      filter: pb.filter('tenant = {:tenant} && created >= {:since}', {
+        tenant: user.tenant,
+        since: pbDate(sinceIso)
+      }),
       sort: '-created'
     });
     runs = current.items;
 
-    const previous = await pb.collection('tool_runs').getList<ToolRun>(1, 1000, {
-      filter: `tenant = "${user.tenant}" && created >= "${previousSinceIso}" && created < "${sinceIso}"`,
+    const previous = await pb.collection('tool_runs').getList<ToolRun>(1, 500, {
+      filter: pb.filter(
+        'tenant = {:tenant} && created >= {:prevSince} && created < {:since}',
+        {
+          tenant: user.tenant,
+          prevSince: pbDate(previousSinceIso),
+          since: pbDate(sinceIso)
+        }
+      ),
       sort: '-created'
     });
     previousPeriodRuns = previous.items;
@@ -204,16 +224,26 @@ export default async function InsightsPage({
   try {
     const current = await pb
       .collection('ai_usage_events')
-      .getList<AiUsageEvent>(1, 2000, {
-        filter: `tenant = "${user.tenant}" && created >= "${sinceIso}"`,
+      .getList<AiUsageEvent>(1, 500, {
+        filter: pb.filter('tenant = {:tenant} && created >= {:since}', {
+          tenant: user.tenant,
+          since: pbDate(sinceIso)
+        }),
         sort: '-created'
       });
     events = current.items;
 
     const previous = await pb
       .collection('ai_usage_events')
-      .getList<AiUsageEvent>(1, 2000, {
-        filter: `tenant = "${user.tenant}" && created >= "${previousSinceIso}" && created < "${sinceIso}"`,
+      .getList<AiUsageEvent>(1, 500, {
+        filter: pb.filter(
+          'tenant = {:tenant} && created >= {:prevSince} && created < {:since}',
+          {
+            tenant: user.tenant,
+            prevSince: pbDate(previousSinceIso),
+            since: pbDate(sinceIso)
+          }
+        ),
         sort: '-created'
       });
     previousPeriodEvents = previous.items;
@@ -230,7 +260,7 @@ export default async function InsightsPage({
   let tools: Tool[] = [];
   try {
     const list = await pb.collection('tools').getList<Tool>(1, 500, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: pb.filter('tenant = {:tenant}', { tenant: user.tenant }),
       sort: 'name'
     });
     tools = list.items;
@@ -242,8 +272,8 @@ export default async function InsightsPage({
   // ── Load activities for module-adoption signal ──────────────────────
   let activities: ActivityRecord[] = [];
   try {
-    const list = await pb.collection('activities').getList<ActivityRecord>(1, 1000, {
-      filter: `created >= "${sinceIso}"`,
+    const list = await pb.collection('activities').getList<ActivityRecord>(1, 500, {
+      filter: pb.filter('created >= {:since}', { since: pbDate(sinceIso) }),
       sort: '-created'
     });
     activities = list.items;
@@ -612,8 +642,8 @@ export default async function InsightsPage({
               </dd>
             </div>
             <div className="flex justify-between gap-3 rounded-lg bg-canvas-subtle px-3 py-2">
-              <dt className="text-foreground-muted">Sedan (sinceIso)</dt>
-              <dd className="font-mono text-foreground">{sinceIso}</dd>
+              <dt className="text-foreground-muted">Sedan (PB-format)</dt>
+              <dd className="font-mono text-foreground">{pbDate(sinceIso)}</dd>
             </div>
             <div className="flex justify-between gap-3 rounded-lg bg-canvas-subtle px-3 py-2">
               <dt className="text-foreground-muted">PB-filter</dt>

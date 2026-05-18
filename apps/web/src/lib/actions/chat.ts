@@ -72,7 +72,8 @@ const ALLOWED_TEXT_MIMES = new Set([
   'text/plain',
   'text/markdown',
   'text/csv',
-  'application/csv'
+  'application/csv',
+  'application/pdf'
 ]);
 const ALLOWED_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 

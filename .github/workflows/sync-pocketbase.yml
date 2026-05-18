@@ -95,9 +95,14 @@ jobs:
             pb_url="https://$pb_url"
           fi
 
-          for attempt in $(seq 1 40); do
-            health_code=$(curl -k -sS -o /dev/null -w "%{http_code}" "$pb_url/api/health" || true)
-            auth_code=$(curl -k -sS -o /dev/null -w "%{http_code}" \
+          max_attempts=20
+          sleep_seconds=15
+          consecutive_503=0
+          consecutive_503_limit=12
+
+          for attempt in $(seq 1 "$max_attempts"); do
+            health_code=$(curl -k -sS --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "$pb_url/api/health" || true)
+            auth_code=$(curl -k -sS --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" \
               -H "Content-Type: application/json" \
               -X POST \
               "$pb_url/api/collections/_superusers/auth-with-password" \
@@ -109,11 +114,22 @@ jobs:
               exit 0
             fi
 
-            echo "PB not ready yet (attempt $attempt/40): health=$health_code auth=$auth_code"
-            sleep 15
+            if [[ "$health_code" == "503" && "$auth_code" == "503" ]]; then
+              consecutive_503=$((consecutive_503 + 1))
+            else
+              consecutive_503=0
+            fi
+
+            if [[ "$consecutive_503" -ge "$consecutive_503_limit" ]]; then
+              echo "Persistent 503 from health/auth for $consecutive_503 consecutive attempts. Breaking early."
+              break
+            fi
+
+            echo "PB not ready yet (attempt $attempt/$max_attempts): health=$health_code auth=$auth_code"
+            sleep "$sleep_seconds"
           done
 
-          echo "::warning::PocketBase auth endpoint not ready after 10 minutes. Skipping API sync for this run."
+          echo "::warning::PocketBase auth endpoint not ready in time. Skipping API sync for this run."
           echo "ready=false" >> "$GITHUB_OUTPUT"
           exit 0
 

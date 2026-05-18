@@ -1,4 +1,4 @@
-import type { StartupPhase } from '@platform/shared';
+import type { FounderGender, StartupPhase } from '@platform/shared';
 
 export const phaseLabels: Record<StartupPhase, string> = {
   paus: 'PAUS',
@@ -149,4 +149,13 @@ export const workshopAssignmentStatusLabels: Record<WorkshopAssignmentStatus, st
   planned: 'Planerad',
   in_progress: 'Pågår',
   done: 'Klar'
+};
+
+// GDPR art. 9 särskild kategori — visas bara i admin/staff-UI och loggas
+// aldrig till AI-prompt (CLAUDE.md § 9.3, § 10.2).
+export const founderGenderLabels: Record<FounderGender, string> = {
+  kvinna: 'Kvinna',
+  man: 'Man',
+  icke_binar: 'Icke-binär',
+  uppger_ej: 'Uppger ej'
 };
