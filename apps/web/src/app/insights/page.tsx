@@ -76,6 +76,35 @@ function dateKey(iso: string): string {
   return iso.slice(0, 10);
 }
 
+/**
+ * Plockar ut den mest informativa felsträngen från en PB-SDK-error.
+ * PB SDK-fel kommer med shape: { status, url, response: { code, message, data } }.
+ */
+function formatPbError(err: unknown): string {
+  if (!err || typeof err !== 'object') return String(err);
+  const anyErr = err as Record<string, unknown>;
+  const status = anyErr.status as number | undefined;
+  const url = anyErr.url as string | undefined;
+  const response = anyErr.response as Record<string, unknown> | undefined;
+  const responseMessage =
+    response && typeof response.message === 'string'
+      ? (response.message as string)
+      : undefined;
+  const responseData =
+    response && typeof response.data === 'object'
+      ? JSON.stringify(response.data)
+      : undefined;
+  const baseMessage =
+    typeof anyErr.message === 'string' ? (anyErr.message as string) : 'Okänt fel';
+  const parts: string[] = [];
+  if (status) parts.push(`HTTP ${status}`);
+  if (responseMessage) parts.push(responseMessage);
+  else parts.push(baseMessage);
+  if (responseData && responseData !== '{}') parts.push(responseData);
+  if (url) parts.push(`url=${url}`);
+  return parts.join(' · ');
+}
+
 function buildDailyBuckets(days: number): { key: string; label: string }[] {
   const out: { key: string; label: string }[] = [];
   const today = new Date();
@@ -146,6 +175,7 @@ export default async function InsightsPage({
   let runs: ToolRun[] = [];
   let previousPeriodRuns: ToolRun[] = [];
   let runsLoadFailed = false;
+  let runsLoadError: string | undefined;
   try {
     const current = await pb.collection('tool_runs').getList<ToolRun>(1, 1000, {
       filter: `tenant = "${user.tenant}" && created >= "${sinceIso}"`,
@@ -160,6 +190,7 @@ export default async function InsightsPage({
     previousPeriodRuns = previous.items;
   } catch (error) {
     runsLoadFailed = true;
+    runsLoadError = formatPbError(error);
     console.error('[insights] failed to load tool_runs', {
       tenant: user.tenant,
       error
@@ -169,6 +200,7 @@ export default async function InsightsPage({
   // ── Load ai_usage_events (källa av sanning för tokens + kostnad) ────
   let events: AiUsageEvent[] = [];
   let previousPeriodEvents: AiUsageEvent[] = [];
+  let eventsLoadError: string | undefined;
   try {
     const current = await pb
       .collection('ai_usage_events')
@@ -186,6 +218,7 @@ export default async function InsightsPage({
       });
     previousPeriodEvents = previous.items;
   } catch (error) {
+    eventsLoadError = formatPbError(error);
     // Fail-soft: collectionen kan saknas på äldre PB-instanser.
     console.warn('[insights] ai_usage_events unavailable', {
       tenant: user.tenant,
@@ -528,9 +561,76 @@ export default async function InsightsPage({
       <div className="flex flex-col gap-4">
         {runsLoadFailed && (
           <div className="rounded-2xl border border-default bg-surface p-4 text-[13px] text-foreground-muted">
-            Kunde inte ladda agentkörningar. Försök igen om en stund.
+            <div className="font-medium text-foreground">
+              Kunde inte ladda agentkörningar.
+            </div>
+            {runsLoadError && (
+              <div className="mt-1 break-all font-mono text-[11px] text-foreground-subtle">
+                {runsLoadError}
+              </div>
+            )}
           </div>
         )}
+
+        {/* ── Diagnos (synlig för admin/incubator_lead) ───────────── */}
+        <section className="rounded-2xl border border-default bg-surface p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-[14px] font-semibold text-foreground">
+              Diagnos
+            </h2>
+            <span className="text-[11px] text-foreground-subtle">
+              endast staff · hjälper felsöka tomma vyer
+            </span>
+          </div>
+          <dl className="grid grid-cols-1 gap-2 text-[12px] md:grid-cols-2">
+            <div className="flex justify-between gap-3 rounded-lg bg-canvas-subtle px-3 py-2">
+              <dt className="text-foreground-muted">Tenant-id</dt>
+              <dd className="font-mono text-foreground">
+                {user.tenant || '(saknas)'}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3 rounded-lg bg-canvas-subtle px-3 py-2">
+              <dt className="text-foreground-muted">Roller</dt>
+              <dd className="font-mono text-foreground">
+                {user.roles.join(', ') || '(inga)'}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3 rounded-lg bg-canvas-subtle px-3 py-2">
+              <dt className="text-foreground-muted">tool_runs status</dt>
+              <dd className="font-mono text-foreground">
+                {runsLoadFailed
+                  ? `FEL (${runsLoadError ?? 'okänt'})`
+                  : `OK · ${runs.length} rader`}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3 rounded-lg bg-canvas-subtle px-3 py-2">
+              <dt className="text-foreground-muted">ai_usage_events status</dt>
+              <dd className="font-mono text-foreground">
+                {eventsLoadError
+                  ? `FEL (${eventsLoadError})`
+                  : `OK · ${events.length} rader`}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3 rounded-lg bg-canvas-subtle px-3 py-2">
+              <dt className="text-foreground-muted">Sedan (sinceIso)</dt>
+              <dd className="font-mono text-foreground">{sinceIso}</dd>
+            </div>
+            <div className="flex justify-between gap-3 rounded-lg bg-canvas-subtle px-3 py-2">
+              <dt className="text-foreground-muted">PB-filter</dt>
+              <dd className="break-all font-mono text-foreground-subtle">
+                tenant = &quot;{user.tenant}&quot;
+              </dd>
+            </div>
+          </dl>
+          {eventsLoadError &&
+            eventsLoadError.includes('404') && (
+              <p className="mt-3 text-[11px] text-movexum-morkorange">
+                💡 ai_usage_events-collectionen saknas — kör migrationen
+                (redeploy PocketBase-bilden så plockas
+                1700000058_create_ai_usage_events.js upp på startup).
+              </p>
+            )}
+        </section>
 
         {/* ── Daily trend ─────────────────────────────────────────── */}
         <section className="rounded-2xl border border-default bg-surface p-5">
