@@ -1,5 +1,9 @@
 import 'server-only';
-import { callMistral, type MistralMessage } from '@/lib/ai/mistral';
+import {
+  callMistral,
+  callMistralWithFallback,
+  type MistralMessage
+} from '@/lib/ai/mistral';
 import {
   AI_REVIEW_SYSTEM_PROMPT,
   EXTRACTION_SYSTEM_PROMPT,
@@ -20,27 +24,36 @@ export interface ExtractedLeadData {
   idea_category: string | null;
 }
 
-const DEFAULT_MODEL = 'mistral-large-latest';
 const SCORING_MODEL = 'mistral-small-latest';
 const REVIEW_MODEL = 'mistral-medium-latest';
+
+// Fallback-kedja för intake — large är förstaval (kvalitet), faller
+// tillbaka på medium/small om large är kapacitetsbegränsad hos Mistral.
+const INTAKE_FALLBACK_MODELS = [
+  'mistral-large-latest',
+  'mistral-medium-latest',
+  'mistral-small-latest'
+];
 
 /** Det publika intake-samtalet — assistent-svar via Mistral. */
 export async function intakeReply(
   history: CompassChatMessage[],
   options: { model?: string; systemPrompt?: string } = {}
 ): Promise<{ text: string; tokensIn: number; tokensOut: number; model: string }> {
-  const model = options.model || DEFAULT_MODEL;
   const messages: MistralMessage[] = [
     { role: 'system', content: options.systemPrompt || INTAKE_SYSTEM_PROMPT },
     ...history.map<MistralMessage>((m) => ({ role: m.role, content: m.content }))
   ];
 
-  const res = await callMistral(model, messages);
+  // Om anroparen tvingar en specifik modell, försök bara den. Annars
+  // gå fallback-kedjan.
+  const chain = options.model ? [options.model] : INTAKE_FALLBACK_MODELS;
+  const res = await callMistralWithFallback(chain, messages);
   return {
     text: res.text,
     tokensIn: res.usage.prompt_tokens,
     tokensOut: res.usage.completion_tokens,
-    model
+    model: res.modelUsed
   };
 }
 
