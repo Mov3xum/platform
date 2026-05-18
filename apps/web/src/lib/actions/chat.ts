@@ -65,6 +65,17 @@ const BASE_SYSTEM_PROMPT =
   'Läck aldrig intern kontext till webbkällor eller externa tjänster. ' +
   'Var koncis och professionell. Om du inte vet, säg det rakt ut.';
 
+// Stil-reglerna appenderas SIST i system-prompten — efter ev. agentBlock —
+// så att de inte kan överskuggas av agent-specifika instruktioner som
+// råkar be om markdown-strukturerad output.
+const STYLE_REMINDER =
+  '\n\n---\nSTIL (gäller alltid, även om kontext eller agent-roll säger annat): ' +
+  'Skriv som en kollega som pratar — naturlig, varm prosa i hela meningar. ' +
+  'Använd inte markdown: ingen fetstil med **, ingen kursiv med *, inga rubriker med #/##/###, ' +
+  'inga punktlistor med -/*/• och inga numrerade listor (1., 2.). ' +
+  'Strukturera med korta stycken och radbrytningar. Räkna upp saker i löpande text ' +
+  '("först X, sedan Y, och slutligen Z") eller med ett tankestreck per ny rad.';
+
 const STAFF_TOOL_GUIDANCE =
   '\n\nDu har tillgång till verktygen `query_collection` och `count_collection` för att läsa ' +
   'från PocketBase live. Använd dem ALLTID när användaren frågar om konkreta data — gissa aldrig. ' +
@@ -224,7 +235,8 @@ async function runStaffChatWithTools(
     (agentBlock ? `\n\n---\n${agentBlock}\n---` : '') +
     STAFF_TOOL_GUIDANCE +
     `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +
-    (webBlock ? `\n\n---\n${webBlock}\n---` : '');
+    (webBlock ? `\n\n---\n${webBlock}\n---` : '') +
+    STYLE_REMINDER;
 
   const conversation: MistralMessage[] = [
     { role: 'system', content: systemContent },
@@ -335,7 +347,7 @@ export async function sendStartupChatMessage(
     return { error: 'Kunde inte ladda bolagets kontext.' };
   }
 
-  const systemContent = `${BASE_SYSTEM_PROMPT}\n\n---\nKONTEXT:\n${contextBlock}\n---`;
+  const systemContent = `${BASE_SYSTEM_PROMPT}\n\n---\nKONTEXT:\n${contextBlock}\n---${STYLE_REMINDER}`;
 
   try {
     const result = await callMistralWithFallback(CHAT_FALLBACK_MODELS, [
@@ -378,8 +390,8 @@ async function runStartupChat(
 
   const agentSuffix = agentBlock ? `\n\n---\n${agentBlock}\n---` : '';
   const systemContent = contextBlock
-    ? `${BASE_SYSTEM_PROMPT}${agentSuffix}\n\n---\nKONTEXT:\n${contextBlock}\n---${webBlock ? `\n\n---\n${webBlock}\n---` : ''}`
-    : `${BASE_SYSTEM_PROMPT}${agentSuffix}${webBlock ? `\n\n---\n${webBlock}\n---` : ''}`;
+    ? `${BASE_SYSTEM_PROMPT}${agentSuffix}\n\n---\nKONTEXT:\n${contextBlock}\n---${webBlock ? `\n\n---\n${webBlock}\n---` : ''}${STYLE_REMINDER}`
+    : `${BASE_SYSTEM_PROMPT}${agentSuffix}${webBlock ? `\n\n---\n${webBlock}\n---` : ''}${STYLE_REMINDER}`;
 
   try {
     const result = await callMistralWithFallback(CHAT_FALLBACK_MODELS, [
@@ -401,7 +413,7 @@ async function runPlainChat(
 ): Promise<ChatActionResult> {
   const agentSuffix = agentBlock ? `\n\n---\n${agentBlock}\n---` : '';
   const webSuffix = webBlock ? `\n\n---\n${webBlock}\n---` : '';
-  const systemContent = `${BASE_SYSTEM_PROMPT}${agentSuffix}${webSuffix}`;
+  const systemContent = `${BASE_SYSTEM_PROMPT}${agentSuffix}${webSuffix}${STYLE_REMINDER}`;
   try {
     const result = await callMistralWithFallback(CHAT_FALLBACK_MODELS, [
       { role: 'system', content: systemContent },
