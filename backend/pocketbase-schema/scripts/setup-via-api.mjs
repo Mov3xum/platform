@@ -25,7 +25,7 @@
 
 import PocketBase from 'pocketbase';
 
-const PB_URL = process.env.PB_URL;
+const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
 const SU_PASSWORD = process.env.PB_SU_PASSWORD;
 const APP_USER_PASSWORD = process.env.APP_USER_PASSWORD;
@@ -33,54 +33,35 @@ const APP_USER_PASSWORD = process.env.APP_USER_PASSWORD;
 const APP_USER_EMAIL = 'hampus@movexum.se';
 const APP_USER_NAME = 'Hampus Granström';
 
-if (!PB_URL || !SU_EMAIL || !SU_PASSWORD) {
+if (!PB_URL_RAW || !SU_EMAIL || !SU_PASSWORD) {
   console.error('Missing env vars. Required: PB_URL, PB_SU_EMAIL, PB_SU_PASSWORD');
   process.exit(1);
 }
-
-const pb = new PocketBase(PB_URL);
-pb.autoCancellation(false);
 
 const log = (...a) => console.log('•', ...a);
 const ok = (...a) => console.log('✓', ...a);
 const warn = (...a) => console.log('!', ...a);
 
-// PocketBase ClientResponseError throws away most useful context when
-// only `.message` is logged. Surface url/status/response so CI logs
-// are actionable.
-function describeError(err) {
-  if (!err) return 'unknown error (null/undefined)';
-  const parts = [];
-  parts.push(`message: ${err.message || '(none)'}`);
-  if (err.url) parts.push(`url: ${err.url}`);
-  if (err.status !== undefined) parts.push(`status: ${err.status}`);
-  if (err.response !== undefined) {
-    try {
-      parts.push(`response: ${JSON.stringify(err.response)}`);
-    } catch {
-      parts.push(`response: ${String(err.response)}`);
-    }
+// PB-instansen på Coolify lyssnar bara på 443. Om PB_URL-secret saknar
+// protokoll eller råkat innehålla http:// hänger anropet på port 80 tills
+// undici timar ut. Normalisera defensivt så att secret-typon inte sänker
+// hela bootstrappen.
+function normalizePbUrl(raw) {
+  let url = String(raw).trim().replace(/\/+$/, '');
+  if (/^http:\/\//i.test(url)) {
+    warn('forcing HTTPS — PB lyssnar bara på 443 (PB_URL hade http://)');
+    url = url.replace(/^http:\/\//i, 'https://');
+  } else if (!/^https:\/\//i.test(url)) {
+    warn('PB_URL saknar protokoll — prependar https://');
+    url = 'https://' + url;
   }
-  if (err.originalError && err.originalError !== err) {
-    const oe = err.originalError;
-    parts.push(
-      `originalError: ${oe?.name || ''} ${oe?.code || ''} ${oe?.message || String(oe)}`.trim()
-    );
-  }
-  if (err.stack) parts.push(`stack: ${err.stack.split('\n').slice(0, 5).join(' | ')}`);
-  return parts.map((p) => `  ${p}`).join('\n');
+  return url;
 }
 
-process.on('unhandledRejection', (reason) => {
-  console.error('\n✗ PocketBase bootstrap failed (unhandled rejection)');
-  if (reason instanceof Error) {
-    console.error(reason.message);
-    console.error(describeError(reason));
-  } else {
-    console.error(String(reason));
-  }
-  process.exit(1);
-});
+const PB_URL = normalizePbUrl(PB_URL_RAW);
+
+const pb = new PocketBase(PB_URL);
+pb.autoCancellation(false);
 
 function normalizeSelectFields(fields, context = 'collection') {
   return (fields || []).map((field) => {
