@@ -172,6 +172,35 @@ export default async function IntegrationerPage() {
   return (
     <PageShell title="Integrationer" rightPanel={rail}>
       <div className="space-y-8 py-6">
+        {isStaff && (
+          <section>
+            <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+              Manuella importer
+            </h2>
+            <a
+              href="/admin/import-bolagslista"
+              className="block rounded-2xl border border-default bg-surface p-5 transition hover:bg-canvas-subtle"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-foreground">
+                    Bolagslista (Excel)
+                  </div>
+                  <p className="mt-1 text-[13px] text-foreground-muted">
+                    Ladda upp Movexums Bolagslista och fyll på{' '}
+                    <code className="font-mono text-xs">startups</code> +{' '}
+                    <code className="font-mono text-xs">startup_financials</code>{' '}
+                    idempotent. Underlag för AI-agenterna.
+                  </p>
+                </div>
+                <span className="rounded-full bg-movexum-pastell-gron px-3 py-1 text-xs font-medium text-movexum-morkgron">
+                  Tillgänglig
+                </span>
+              </div>
+            </a>
+          </section>
+        )}
+
         {views.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-default p-12 text-center">
             <h3 className="text-base font-semibold text-foreground">
