@@ -1,9 +1,9 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { Icon } from '@/components/proto/Icon';
 import DashboardChat from '@/components/DashboardChat';
+import { PageShell } from '@/components/PageShell';
+import { RailSection, RailItem, RailEmpty } from '@/components/PageRail';
 
 interface ToolRow {
   id: string;
@@ -26,10 +26,20 @@ function greeting() {
   return 'God kväll';
 }
 
+function formatRel(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.round(diff / 60_000);
+  const hr = Math.round(diff / 3_600_000);
+  const day = Math.round(diff / 86_400_000);
+  if (min < 60) return `${min} min sedan`;
+  if (hr < 24) return `${hr} tim sedan`;
+  if (day < 7) return `${day} dgr sedan`;
+  return new Date(iso).toLocaleDateString('sv-SE');
+}
+
 export default async function IdagPage() {
   const user = await requireUser();
 
-  // Founders har en egen inkorg som sin "Idag"
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
   if (!isStaff && hasRole(user.roles, ['startup_member'])) {
     redirect('/inkorg');
@@ -55,7 +65,6 @@ export default async function IdagPage() {
   const tools = toolsRes.status === 'fulfilled' ? toolsRes.value.items : [];
   const runs = runsRes.status === 'fulfilled' ? runsRes.value.items : [];
 
-  // Räkna körningar per verktyg och välj mina mest använda
   const runCount = new Map<string, { count: number; last: string }>();
   for (const r of runs) {
     const e = runCount.get(r.tool) || { count: 0, last: r.created };
@@ -64,93 +73,77 @@ export default async function IdagPage() {
     runCount.set(r.tool, e);
   }
 
+  const toolById = new Map(tools.map((t) => [t.id, t]));
+
   const myAssistants = tools
     .filter((t) => t.category === 'ai_per_startup' || t.category === 'ai_system_wide')
     .map((t) => ({ ...t, runs: runCount.get(t.id)?.count || 0 }))
     .sort((a, b) => b.runs - a.runs)
     .slice(0, 6);
 
+  const recentRuns = runs.slice(0, 5);
+
   const firstName = user.name.split(' ')[0] || user.email;
 
-  return (
-    <div className="mx-view-pad mx-narrow flex h-full flex-col">
-      <div className="mb-6">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
-          Idag
-        </div>
-        <h1 className="mt-1 font-heading text-[32px] font-semibold tracking-tight text-foreground lg:text-[40px]">
-          {greeting()}, {firstName}.
-        </h1>
-        <p className="mt-2 max-w-[60ch] text-[14px] text-foreground-muted">
-          Ställ en fråga om portföljen, eller starta en av dina sparade assistenter. Välj ett bolag i
-          railen till vänster för att gå djupare.
-        </p>
-      </div>
-
-      {/* Chat-ruta — huvudvyn */}
-      <div className="flex-1 min-h-0">
-        <DashboardChat className="h-full" />
-      </div>
-
-      {/* Sparade assistenter */}
-      <section className="mt-6">
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
-              Dina assistenter
-            </div>
-            <h2 className="mt-1 font-heading text-[18px] font-semibold text-foreground">
-              Snabbstart
-            </h2>
-          </div>
-          <Link
+  const rail = (
+    <>
+      <RailSection
+        label="Assistenter"
+        action={
+          <a
             href="/toolbox"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-default px-3 py-1.5 text-[12px] text-foreground-muted hover:bg-canvas-muted"
+            className="text-[11px] text-foreground-subtle hover:text-foreground"
           >
-            Alla verktyg <Icon name="chevron" size={12} />
-          </Link>
-        </div>
-
+            Alla
+          </a>
+        }
+      >
         {myAssistants.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-default p-8 text-center">
-            <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-canvas-muted text-foreground-subtle">
-              <Icon name="sparkle" size={18} />
-            </div>
-            <p className="text-[13px] text-foreground-subtle">
-              Inga AI-assistenter aktiverade ännu.{' '}
-              <Link href="/toolbox" className="text-brand underline">
-                Skapa eller aktivera verktyg
-              </Link>{' '}
-              i verktygslådan.
-            </p>
-          </div>
+          <RailEmpty>Inga assistenter aktiverade.</RailEmpty>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {myAssistants.map((a) => (
-              <Link
-                key={a.id}
-                href={`/toolbox/${a.id}`}
-                className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5 transition hover:-translate-y-0.5 hover:shadow-md"
-              >
-                <div className="mb-2 flex items-start justify-between">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-movexum-pastell-lila text-movexum-lila">
-                    <Icon name="sparkle" size={16} />
-                  </div>
-                  <span className="font-mono text-[10.5px] text-foreground-subtle">
-                    {a.runs} körningar
-                  </span>
-                </div>
-                <h3 className="font-heading text-[14px] font-semibold text-foreground">{a.name}</h3>
-                {a.description && (
-                  <p className="mt-1 line-clamp-2 text-[12px] text-foreground-muted">
-                    {a.description}
-                  </p>
-                )}
-              </Link>
-            ))}
-          </div>
+          myAssistants.map((a) => (
+            <RailItem
+              key={a.id}
+              icon="sparkle"
+              iconTone="accent"
+              title={a.name}
+              meta={a.runs ? `${a.runs} körningar` : 'Ingen aktivitet'}
+              href={`/toolbox/${a.id}`}
+            />
+          ))
         )}
-      </section>
-    </div>
+      </RailSection>
+
+      {recentRuns.length > 0 && (
+        <RailSection label="Senaste körningar">
+          {recentRuns.map((r) => {
+            const t = toolById.get(r.tool);
+            return (
+              <RailItem
+                key={r.id}
+                icon="dot"
+                iconTone="neutral"
+                title={t?.name || 'Körning'}
+                meta={formatRel(r.created)}
+                href={t ? `/toolbox/${t.id}` : undefined}
+              />
+            );
+          })}
+        </RailSection>
+      )}
+    </>
+  );
+
+  return (
+    <PageShell title={`${greeting()}, ${firstName}.`} rightPanel={rail} scroll={false} noPad>
+      <div className="flex min-h-0 flex-1 flex-col px-6 py-5 lg:px-10 lg:py-8">
+        <p className="mb-5 max-w-[60ch] text-[13.5px] text-foreground-muted">
+          Ställ en fråga om portföljen, eller starta en assistent från panelen till höger.
+        </p>
+        <div className="min-h-0 flex-1">
+          <DashboardChat className="h-full" />
+        </div>
+      </div>
+    </PageShell>
   );
 }

@@ -3,7 +3,9 @@ import { redirect } from 'next/navigation';
 import { listForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole, canRunTool } from '@/lib/rbac';
-import { PageHead, Card, Chip, Icon, Toggle } from '@/components/proto';
+import { Chip, Icon } from '@/components/proto';
+import { PageShell } from '@/components/PageShell';
+import { RailSection, RailItem, RailStat } from '@/components/PageRail';
 import { toolCategoryLabels, type ToolCategory } from '@/lib/labels';
 import type { Tool, ToolRun, Role } from '@platform/shared';
 
@@ -18,65 +20,6 @@ const CATEGORIES: ToolCategory[] = [
 function isToolCategory(value: string | undefined): value is ToolCategory {
   if (!value) return false;
   return (CATEGORIES as string[]).includes(value);
-}
-
-type AvatarAccent = 'ink' | 'green' | 'purple' | 'brown' | 'copper' | 'yellow' | 'cyan';
-
-function accentForTool(tool: Tool, index: number): AvatarAccent {
-  // Stabil färg per kategori — passar Movexum-paletten.
-  switch (tool.category) {
-    case 'ai_per_startup':
-      return 'cyan';
-    case 'ai_system_wide':
-      return 'purple';
-    case 'education':
-      return 'green';
-    case 'template':
-      return 'brown';
-    case 'checklist':
-      return 'copper';
-    default: {
-      const accents: AvatarAccent[] = ['ink', 'cyan', 'green', 'purple', 'copper', 'yellow', 'brown'];
-      return accents[index % accents.length];
-    }
-  }
-}
-
-function tintBg(accent: AvatarAccent): string {
-  switch (accent) {
-    case 'green':
-      return 'var(--mx-green-tint)';
-    case 'purple':
-      return 'var(--mx-purple-tint)';
-    case 'brown':
-      return 'var(--mx-brown-tint)';
-    case 'copper':
-      return 'var(--mx-copper-tint)';
-    case 'yellow':
-      return 'var(--mx-yellow-tint)';
-    case 'cyan':
-      return 'var(--mx-cyan-tint-2)';
-    default:
-      return 'var(--mx-paper-3)';
-  }
-}
-
-function tintInk(accent: AvatarAccent): string {
-  switch (accent) {
-    case 'green':
-      return 'var(--mx-green-ink)';
-    case 'purple':
-      return 'var(--mx-purple-ink)';
-    case 'brown':
-    case 'copper':
-      return 'var(--mx-brown-ink)';
-    case 'yellow':
-      return '#4a3500';
-    case 'cyan':
-      return '#002c40';
-    default:
-      return 'var(--mx-ink)';
-  }
 }
 
 function relTime(iso: string): string {
@@ -163,8 +106,7 @@ export default async function ToolboxPage({
     ? visibleTools.filter((tool) => tool.category === categoryFilter)
     : visibleTools;
 
-  // ── Run metrics per tool (senaste körningar / totalt) ──────────────
-  const runsByTool = new Map<string, { count: number; latest?: string }>();
+  const totalRunsByTool = new Map<string, { count: number; latest?: string }>();
   let runsLast24h = 0;
   let failsLast24h = 0;
   try {
@@ -175,18 +117,9 @@ export default async function ToolboxPage({
     });
     runsLast24h = recent.totalItems;
     failsLast24h = recent.items.filter((r) => r.status === 'failed').length;
-    for (const r of recent.items) {
-      const entry = runsByTool.get(r.tool) || { count: 0 };
-      entry.count += 1;
-      if (!entry.latest || r.created > entry.latest) entry.latest = r.created;
-      runsByTool.set(r.tool, entry);
-    }
   } catch {
     /* ignore */
   }
-
-  // Hämta totalsumma per agent (utan tidsfilter) — vi visar dessa på korten.
-  const totalRunsByTool = new Map<string, { count: number; latest?: string }>();
   try {
     const allRuns = await pb.collection('tool_runs').getList<ToolRun>(1, 500, {
       filter: `tenant = "${user.tenant}"`,
@@ -202,184 +135,152 @@ export default async function ToolboxPage({
     /* ignore */
   }
 
-  return (
-    <div className="mx-view-pad mx-wide">
-        <PageHead
-        crumb="Hemmaplan / AI-agenter"
-        title="AI-agenter"
-        subtitle="Interna AI-agenter, mallar och checklistor. Kör på Mistral Le Chat · EU-suverän stack. Alla körningar loggas."
-        actions={
-          isStaff ? (
-            <Link href="/toolbox/new" className="mx-btn mx-primary">
-              <Icon name="plus" size={13} /> Skapa egen agent
-            </Link>
-          ) : null
-        }
-      />
+  const byCategory = visibleTools.reduce<Record<string, number>>((acc, t) => {
+    acc[t.category] = (acc[t.category] || 0) + 1;
+    return acc;
+  }, {});
 
-      {/* Stack info banner */}
-      <Card
-        style={{
-          padding: 14,
-          background: 'var(--mx-paper-3)',
-          borderColor: 'var(--mx-line-soft)'
-        }}
-      >
-        <div className="mx-flex mx-items-c mx-gap-3 mx-wrap">
-          <span className="mx-mono mx-t-xs mx-t-up mx-fw-6">Stack</span>
-          <Chip variant="ink-chip" mono>
-            <Icon name="cloud" size={11} /> Mistral Le Chat · EU
-          </Chip>
-          <Chip mono>PocketBase</Chip>
-          <Chip mono>UpCloud · Stockholm</Chip>
-          <Chip variant="green" mono>
-            <Icon name="shield" size={11} /> Fri från US CLOUD Act
-          </Chip>
-          <Chip variant="purple" mono>
-            <Icon name="shield" size={11} /> Systemprompts: staff-styrt
-          </Chip>
-          <span className="mx-grow" />
-          <span className="mx-mono mx-t-xs mx-muted">
-            Senaste 24h: {runsLast24h} körningar · {failsLast24h} fel
-          </span>
+  const rail = (
+    <>
+      <RailSection label="Sammanfattning">
+        <div className="grid grid-cols-2 gap-2 px-2">
+          <RailStat label="Verktyg" value={visibleTools.length} />
+          <RailStat label="24h körn." value={runsLast24h} hint={failsLast24h ? `${failsLast24h} fel` : undefined} />
         </div>
-      </Card>
+      </RailSection>
 
-      {(selectedStartupName || categoryFilter) && (
-        <div
-          className="mx-flex mx-items-c mx-gap-2 mx-wrap mx-mt-4"
-          style={{
-            padding: '10px 14px',
-            border: '1px solid var(--mx-line)',
-            borderRadius: 'var(--mx-r-md)',
-            background: 'var(--mx-paper)'
-          }}
+      <RailSection label="Kategorier">
+        <Link
+          href="/toolbox"
+          className={`flex items-center justify-between rounded-xl px-3 py-2 text-[13px] transition ${
+            !categoryFilter
+              ? 'bg-canvas-muted font-medium text-foreground'
+              : 'text-foreground-muted hover:bg-canvas-muted hover:text-foreground'
+          }`}
         >
-          {selectedStartupName ? (
-            <span className="mx-t-13">
-              Kontext: <span className="mx-fw-6">{selectedStartupName}</span>
-            </span>
-          ) : null}
-          {categoryFilter ? (
-            <Chip mono>{toolCategoryLabels[categoryFilter]}</Chip>
-          ) : null}
-          <Link href="/toolbox" className="mx-btn mx-sm mx-ghost" style={{ marginLeft: 'auto' }}>
-            Rensa filter
-          </Link>
-        </div>
-      )}
-
-      {loadFailed && (
-        <Card style={{ padding: 16, marginTop: 16 }}>
-          <span className="mx-t-13 mx-muted">
-            Agenterna kunde inte laddas just nu. Försök igen om en stund.
+          Alla
+          <span className="font-mono text-[11px] text-foreground-subtle">
+            {visibleTools.length}
           </span>
-        </Card>
-      )}
-
-      {/* Agentkort */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 12,
-          marginTop: 16
-        }}
-      >
-        {filteredVisibleTools.map((tool, i) => {
-          const metrics = totalRunsByTool.get(tool.id) || { count: 0 };
+        </Link>
+        {CATEGORIES.map((c) => {
+          const active = categoryFilter === c;
           return (
-            <AgentCard
-              key={tool.id}
-              tool={tool}
-              accent={accentForTool(tool, i)}
-              runs={metrics.count}
-              lastRun={metrics.latest ? relTime(metrics.latest) : '—'}
-              startupId={startupId || undefined}
-            />
+            <Link
+              key={c}
+              href={`/toolbox?category=${c}`}
+              className={`flex items-center justify-between rounded-xl px-3 py-2 text-[13px] transition ${
+                active
+                  ? 'bg-canvas-muted font-medium text-foreground'
+                  : 'text-foreground-muted hover:bg-canvas-muted hover:text-foreground'
+              }`}
+            >
+              {toolCategoryLabels[c]}
+              <span className="font-mono text-[11px] text-foreground-subtle">
+                {byCategory[c] || 0}
+              </span>
+            </Link>
           );
         })}
-      </div>
+      </RailSection>
 
-      {filteredVisibleTools.length === 0 && !loadFailed && (
-        <Card style={{ padding: 32, marginTop: 16, textAlign: 'center' }}>
-          <span className="mx-t-13 mx-muted">Inga tillgängliga agenter.</span>
-        </Card>
+      {selectedStartupName && (
+        <RailSection label="Kontext">
+          <RailItem
+            icon="target"
+            iconTone="brand"
+            title={selectedStartupName}
+            href={`/startups/${startupId}`}
+          />
+          <Link
+            href={categoryFilter ? `/toolbox?category=${categoryFilter}` : '/toolbox'}
+            className="mt-1 inline-flex items-center gap-1 px-3 text-[11px] text-foreground-subtle hover:text-foreground"
+          >
+            <Icon name="close" size={10} /> Rensa
+          </Link>
+        </RailSection>
       )}
-    </div>
+    </>
   );
-}
 
-function AgentCard({
-  tool,
-  accent,
-  runs,
-  lastRun,
-  startupId
-}: {
-  tool: Tool;
-  accent: AvatarAccent;
-  runs: number;
-  lastRun: string;
-  startupId?: string;
-}) {
-  const href = startupId
-    ? `/toolbox/${tool.id}?startup=${encodeURIComponent(startupId)}`
-    : `/toolbox/${tool.id}`;
-  const description = tool.description ? tool.description.replace(/<[^>]+>/g, '') : '';
+  const actions = isStaff ? (
+    <Link
+      href="/toolbox/new"
+      className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
+    >
+      <Icon name="plus" size={12} /> Skapa verktyg
+    </Link>
+  ) : null;
 
   return (
-    <Card style={{ padding: 16 }}>
-      <Link
-        href={href}
-        style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
-      >
-        <div className="mx-flex mx-items-c mx-gap-2 mx-mb-3">
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              background: tintBg(accent),
-              color: tintInk(accent),
-              display: 'grid',
-              placeItems: 'center',
-              flexShrink: 0
-            }}
-          >
-            {tool.icon ? (
-              <span style={{ fontSize: 16 }}>{tool.icon}</span>
-            ) : (
-              <Icon name="sparkle" size={16} />
-            )}
+    <PageShell title="Verktyg & agenter" actions={actions} rightPanel={rail}>
+      <div className="py-6">
+        {loadFailed && (
+          <div className="mb-5 rounded-xl border border-default bg-surface p-4 text-[13px] text-foreground-muted">
+            Verktygen kunde inte laddas just nu. Försök igen om en stund.
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="mx-disp mx-fw-6 mx-t-13 mx-truncate">{tool.name}</div>
-            <div className="mx-mono mx-t-xs mx-muted">
-              {runs} körningar · {lastRun}
-            </div>
+        )}
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {filteredVisibleTools.map((tool) => {
+            const metrics = totalRunsByTool.get(tool.id) || { count: 0 };
+            const href = startupId
+              ? `/toolbox/${tool.id}?startup=${encodeURIComponent(startupId)}`
+              : `/toolbox/${tool.id}`;
+            const description = tool.description
+              ? tool.description.replace(/<[^>]+>/g, '')
+              : '';
+
+            return (
+              <Link
+                key={tool.id}
+                href={href}
+                className="block rounded-2xl border border-default bg-surface p-4 transition hover:border-strong"
+              >
+                <div className="mb-3 flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas-muted text-foreground-muted">
+                    {tool.icon ? (
+                      <span className="text-base">{tool.icon}</span>
+                    ) : (
+                      <Icon name="sparkle" size={15} />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[14px] font-semibold text-foreground">
+                      {tool.name}
+                    </div>
+                    <div className="font-mono text-[11px] text-foreground-subtle">
+                      {metrics.count} körningar
+                      {metrics.latest ? ` · ${relTime(metrics.latest)}` : ''}
+                    </div>
+                  </div>
+                </div>
+                <div className="line-clamp-2 min-h-[34px] text-[12.5px] leading-relaxed text-foreground-muted">
+                  {description || toolCategoryLabels[tool.category]}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(tool.roles_allowed || []).slice(0, 4).map((role) => (
+                    <Chip key={role} mono>
+                      {ROLE_LABELS[role] || role}
+                    </Chip>
+                  ))}
+                  {tool.requires_startup && (
+                    <Chip variant="cyan" mono>
+                      Bolagskontext
+                    </Chip>
+                  )}
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+
+        {filteredVisibleTools.length === 0 && !loadFailed && (
+          <div className="rounded-2xl border border-dashed border-default p-12 text-center text-[13px] text-foreground-muted">
+            Inga tillgängliga verktyg i den här kategorin.
           </div>
-          <Toggle checked={tool.active} disabled />
-        </div>
-        <div
-          className="mx-t-12 mx-muted-2"
-          style={{ lineHeight: 1.4, minHeight: 34 }}
-        >
-          {description || toolCategoryLabels[tool.category]}
-        </div>
-        <div className="mx-flex mx-gap-2 mx-mt-3 mx-wrap">
-          {(tool.roles_allowed || []).slice(0, 4).map((role) => (
-            <Chip key={role} mono>
-              {ROLE_LABELS[role] || role}
-            </Chip>
-          ))}
-          {tool.requires_startup && (
-            <Chip variant="cyan" mono>
-              Bolags-kontext
-            </Chip>
-          )}
-        </div>
-      </Link>
-    </Card>
+        )}
+      </div>
+    </PageShell>
   );
 }

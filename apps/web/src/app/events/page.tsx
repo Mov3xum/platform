@@ -3,14 +3,9 @@ import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
-import {
-  PageHead,
-  Card,
-  CardHead,
-  Chip,
-  Icon,
-  SectionHead
-} from '@/components/proto';
+import { Chip } from '@/components/proto';
+import { PageShell } from '@/components/PageShell';
+import { RailSection, RailStat, RailItem } from '@/components/PageRail';
 import type { EventSignup, EventSignupStage, IncubatorEvent } from '@platform/shared';
 
 const STAGE_ORDER: EventSignupStage[] = [
@@ -72,7 +67,6 @@ export default async function EventsPage() {
     /* ignore */
   }
 
-  // Fetch signups for the funnel target (latest live or upcoming)
   const liveEvent = events.find((e) => e.status === 'live') || null;
   const now = Date.now();
   const upcoming = events
@@ -98,7 +92,6 @@ export default async function EventsPage() {
     }
   }
 
-  // Build funnel counts
   const stageCounts: Record<EventSignupStage, number> = {
     signup: 0,
     attended: 0,
@@ -107,7 +100,6 @@ export default async function EventsPage() {
     admitted: 0
   };
   for (const s of allSignups) {
-    // count cumulative: signup counts everyone, attended counts attended+down etc
     const idx = STAGE_ORDER.indexOf(s.stage);
     for (let i = 0; i <= idx; i++) {
       stageCounts[STAGE_ORDER[i]] += 1;
@@ -121,294 +113,153 @@ export default async function EventsPage() {
     color: STAGE_ACCENT[stage]
   }));
   const maxCount = Math.max(1, ...funnelData.map((f) => f.count));
-
-  // Estimated CAC: total tenant event cost is unknown — use a per-event nominal of 100 000 kr
-  // divided by admitted, or — if 0 admitted — show "—"
   const admittedTotal = funnelData[funnelData.length - 1].count;
   const cac = admittedTotal > 0 ? Math.round(100_000 / admittedTotal) : null;
 
-  return (
-    <div className="mx-view-pad mx-wide">
-      <PageHead
-        crumb="Hemmaplan / Events"
-        title="Events"
-        subtitle="Spåra inflöde i realtid. Vilka events ger oss bolag?"
-        actions={null}
-      />
+  const totalLeads = events.reduce((s, e) => s + (e.leads_count || 0), 0);
+  const totalAdmitted = events.reduce((s, e) => s + (e.admitted_count || 0), 0);
 
-      {/* ── Live banner ────────────────────────────────────── */}
+  const rail = (
+    <>
+      <RailSection label="Översikt">
+        <div className="grid grid-cols-2 gap-2 px-2">
+          <RailStat label="Events" value={events.length} />
+          <RailStat label="Kommande" value={upcoming.length} />
+          <RailStat label="Leads totalt" value={totalLeads} />
+          <RailStat label="Antagna" value={totalAdmitted} />
+        </div>
+      </RailSection>
+
       {liveEvent && (
-        <Card
-          ink
-          style={{
-            padding: 16,
-            marginBottom: 16
-          }}
-        >
-          <div className="mx-flex mx-items-c mx-gap-3">
-            <div style={{ position: 'relative', width: 10, height: 10 }}>
-              <span
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  borderRadius: 999,
-                  background: '#88b48b'
-                }}
-              />
-              <span
-                style={{
-                  position: 'absolute',
-                  inset: -4,
-                  borderRadius: 999,
-                  background: '#88b48b',
-                  opacity: 0.35
-                }}
-              />
-            </div>
-            <span
-              className="mx-mono mx-t-xs mx-t-up mx-fw-6"
-              style={{ color: '#88b48b' }}
-            >
-              LIVE NU
-            </span>
-            <span
-              className="mx-disp mx-fw-6"
-              style={{ fontSize: 15, color: 'white' }}
-            >
-              {liveEvent.name} · {liveEvent.signups_count ?? 0} anmälda ·{' '}
-              {liveEvent.attended_count ?? 0} incheckade
-            </span>
-            <span className="mx-grow" />
-            <Link
-              href={`/events/${liveEvent.id}`}
-              className="mx-btn mx-sm"
-              style={{
-                background: 'rgba(255,255,255,.1)',
-                borderColor: 'transparent',
-                color: 'white'
-              }}
-            >
-              Öppna eventyta →
-            </Link>
-          </div>
-        </Card>
+        <RailSection label="Live nu">
+          <RailItem
+            icon="spark"
+            iconTone="success"
+            title={liveEvent.name}
+            meta={`${liveEvent.signups_count ?? 0} anmälda · ${liveEvent.attended_count ?? 0} incheckade`}
+            href={`/events/${liveEvent.id}`}
+          />
+        </RailSection>
       )}
 
-      <div
-        style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, marginTop: 12 }}
-      >
-        {/* ── Kommande timeline ──────────────────────────── */}
-        <Card style={{ padding: 0, overflow: 'hidden' }}>
-          <CardHead
-            label="Kommande"
-            right={<span className="mx-mono mx-t-xs mx-muted">{upcoming.length} planerade</span>}
-          />
-          <div style={{ padding: '4px 16px 12px' }}>
-            {upcoming.length === 0 ? (
-              <div
-                className="mx-muted mx-t-13"
-                style={{ padding: 24, textAlign: 'center' }}
-              >
-                Inga kommande events. Skapa det första.
-              </div>
-            ) : (
-              upcoming.map((e, i) => {
-                const d = new Date(e.starts_at);
-                return (
-                  <Link
-                    key={e.id}
-                    href={`/events/${e.id}`}
-                    className="mx-flex mx-gap-3 mx-items-c"
-                    style={{
-                      padding: '14px 0',
-                      borderBottom:
-                        i < upcoming.length - 1 ? '1px solid var(--mx-line-soft)' : 'none',
-                      textDecoration: 'none',
-                      color: 'inherit'
-                    }}
-                  >
-                    <div style={{ width: 56, textAlign: 'center' }}>
-                      <div className="mx-mono mx-t-xs mx-muted mx-t-up">
-                        {shortMonth(d).toUpperCase()}
-                      </div>
-                      <div
-                        className="mx-disp mx-fw-6"
-                        style={{ fontSize: 24, lineHeight: 1 }}
-                      >
-                        {d.getDate().toString().padStart(2, '0')}
-                      </div>
-                    </div>
-                    <div
-                      style={{
-                        width: 3,
-                        height: 36,
-                        background: `var(--mx-${e.accent || 'cyan'}, #00a8de)`,
-                        borderRadius: 3
-                      }}
-                    />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="mx-flex mx-items-c mx-gap-2">
-                        <span className="mx-disp mx-fw-6 mx-t-13 mx-truncate">{e.name}</span>
-                        {e.status === 'live' && (
-                          <Chip variant="active" mono dot>
-                            LIVE
-                          </Chip>
-                        )}
-                      </div>
-                      <div className="mx-mono mx-t-xs mx-muted mx-t-up">{e.type}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div className="mx-disp mx-fw-6 mx-t-13">{e.signups_count ?? 0}</div>
-                      <div className="mx-mono mx-t-xs mx-muted">ANMÄLDA</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div
-                        className="mx-disp mx-fw-6 mx-t-13"
-                        style={{
-                          color: (e.leads_count ?? 0) > 0 ? 'var(--mx-green)' : 'var(--mx-muted-2)'
-                        }}
-                      >
-                        {e.leads_count ?? 0}
-                      </div>
-                      <div className="mx-mono mx-t-xs mx-muted">LEADS</div>
-                    </div>
-                  </Link>
-                );
-              })
-            )}
-          </div>
-        </Card>
-
-        {/* ── Funnel card ──────────────────────────────── */}
-        <Card style={{ padding: 0, overflow: 'hidden' }}>
-          <CardHead
-            label={funnelEvent ? `${funnelEvent.name} · funnel` : 'Konverteringstratt'}
-            right={<span className="mx-mono mx-t-xs mx-muted">denna period</span>}
-          />
-          <div style={{ padding: 20 }}>
-            {!funnelEvent ? (
-              <div className="mx-muted mx-t-13" style={{ textAlign: 'center', padding: 12 }}>
-                Inget aktivt event att visa.
-              </div>
-            ) : (
-              <>
-                {funnelData.map((f, i) => {
-                  const widthPct = (f.count / maxCount) * 100;
-                  const conv =
-                    i === 0 || funnelData[i - 1].count === 0
-                      ? null
-                      : Math.round((f.count / funnelData[i - 1].count) * 100);
-                  return (
-                    <div key={f.stage} style={{ marginBottom: 14 }}>
-                      <div className="mx-flex mx-items-c mx-justify-b mx-mb-1">
-                        <span className="mx-t-13 mx-fw-6">{f.label}</span>
-                        <div className="mx-flex mx-gap-2 mx-items-c">
-                          {conv != null && <Chip mono>{conv}%</Chip>}
-                          <span className="mx-disp mx-fw-6 mx-t-15">{f.count}</span>
-                        </div>
-                      </div>
-                      <div
-                        style={{
-                          width: '100%',
-                          height: 24,
-                          background: 'var(--mx-paper-3, #f4f4f4)',
-                          borderRadius: 6,
-                          overflow: 'hidden'
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: `${widthPct}%`,
-                            height: '100%',
-                            background: f.color,
-                            borderRadius: 6,
-                            transition: 'width .3s'
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-                <div
-                  style={{
-                    marginTop: 16,
-                    paddingTop: 14,
-                    borderTop: '1px solid var(--mx-line-soft)'
-                  }}
-                >
-                  <div className="mx-flex mx-items-c mx-justify-b">
-                    <span className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6">
-                      CAC per antaget bolag
-                    </span>
-                    <span className="mx-disp mx-fw-6 mx-t-15">
-                      {cac ? `~ ${cac.toLocaleString('sv-SE')} kr` : '—'}
-                    </span>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </Card>
-      </div>
-
-      {/* ── ROI table ─────────────────────────────────── */}
-      <SectionHead title="Vilka events ger oss bolag?" label="senaste 12 mån · alla källor" />
-      <Card style={{ padding: 0, overflow: 'hidden' }}>
-        {past.length === 0 ? (
-          <div className="mx-muted mx-t-13" style={{ padding: 24, textAlign: 'center' }}>
-            Inga avslutade events att rapportera än.
+      <RailSection label="Kommande">
+        {upcoming.length === 0 ? (
+          <div className="px-2 py-4 text-center text-[12px] text-foreground-subtle">
+            Inga kommande events.
           </div>
         ) : (
-          <table className="mx-tbl" style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', padding: '10px 16px' }}>Event</th>
-                <th style={{ width: 90, textAlign: 'right', padding: '10px 8px' }}>Anmälda</th>
-                <th style={{ width: 80, textAlign: 'right', padding: '10px 8px' }}>Leads</th>
-                <th style={{ width: 90, textAlign: 'right', padding: '10px 8px' }}>Antagna</th>
-                <th style={{ width: 80, textAlign: 'right', padding: '10px 8px' }}>CR</th>
-                <th style={{ width: 120, padding: '10px 16px' }}>Senast</th>
-              </tr>
-            </thead>
-            <tbody>
-              {past.map((e) => {
-                const s = e.signups_count || 0;
-                const adm = e.admitted_count || 0;
-                const cr = s > 0 ? Math.round((adm / s) * 100) : 0;
+          upcoming.slice(0, 4).map((e) => (
+            <RailItem
+              key={e.id}
+              icon="calendar"
+              iconTone="brand"
+              title={e.name}
+              meta={`${shortMonth(new Date(e.starts_at))} ${new Date(e.starts_at).getDate()} · ${e.signups_count ?? 0} anmälda`}
+              href={`/events/${e.id}`}
+            />
+          ))
+        )}
+      </RailSection>
+    </>
+  );
+
+  return (
+    <PageShell title="Events" rightPanel={rail}>
+      <div className="space-y-6 py-6">
+        {funnelEvent && (
+          <section className="rounded-2xl border border-default bg-surface">
+            <div className="flex items-center justify-between border-b border-default px-5 py-3">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                {funnelEvent.name} — konverteringstratt
+              </span>
+              <span className="font-mono text-[11px] text-foreground-subtle">
+                {cac ? `CAC ~ ${cac.toLocaleString('sv-SE')} kr` : '—'}
+              </span>
+            </div>
+            <div className="space-y-3 p-5">
+              {funnelData.map((f, i) => {
+                const widthPct = (f.count / maxCount) * 100;
+                const conv =
+                  i === 0 || funnelData[i - 1].count === 0
+                    ? null
+                    : Math.round((f.count / funnelData[i - 1].count) * 100);
                 return (
-                  <tr key={e.id} style={{ borderTop: '1px solid var(--mx-line-soft)' }}>
-                    <td style={{ padding: '10px 16px' }} className="mx-fw-6">
-                      <Link
-                        href={`/events/${e.id}`}
-                        style={{ color: 'inherit', textDecoration: 'none' }}
-                      >
-                        {e.name}
-                      </Link>
-                    </td>
-                    <td style={{ textAlign: 'right', padding: '10px 8px' }} className="mx-mono">
-                      {s}
-                    </td>
-                    <td style={{ textAlign: 'right', padding: '10px 8px' }} className="mx-mono">
-                      {e.leads_count || 0}
-                    </td>
-                    <td style={{ textAlign: 'right', padding: '10px 8px' }} className="mx-mono">
-                      <Chip variant="green" mono>
-                        {adm}
-                      </Chip>
-                    </td>
-                    <td style={{ textAlign: 'right', padding: '10px 8px' }} className="mx-mono">
-                      {cr}%
-                    </td>
-                    <td style={{ padding: '10px 16px' }} className="mx-muted mx-mono mx-t-xs">
-                      {ageString(e.starts_at)}
-                    </td>
-                  </tr>
+                  <div key={f.stage}>
+                    <div className="mb-1 flex items-center justify-between">
+                      <span className="text-[13px] font-medium text-foreground">{f.label}</span>
+                      <div className="flex items-center gap-2">
+                        {conv != null && <Chip mono>{conv}%</Chip>}
+                        <span className="font-mono text-[13px] font-semibold text-foreground tabular-nums">
+                          {f.count}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-canvas-muted">
+                      <div
+                        className="h-full transition-all"
+                        style={{ width: `${widthPct}%`, background: f.color }}
+                      />
+                    </div>
+                  </div>
                 );
               })}
-            </tbody>
-          </table>
+            </div>
+          </section>
         )}
-      </Card>
-    </div>
+
+        <section>
+          <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+            Vilka events ger oss bolag?
+          </h2>
+          <div className="rounded-2xl border border-default bg-surface">
+            {past.length === 0 ? (
+              <div className="px-5 py-8 text-center text-[13px] text-foreground-muted">
+                Inga avslutade events att rapportera än.
+              </div>
+            ) : (
+              <table className="w-full text-[13px]">
+                <thead className="text-left">
+                  <tr className="text-[10.5px] font-semibold uppercase tracking-wide text-foreground-subtle">
+                    <th className="px-5 py-3">Event</th>
+                    <th className="px-2 py-3 text-right">Anmälda</th>
+                    <th className="px-2 py-3 text-right">Leads</th>
+                    <th className="px-2 py-3 text-right">Antagna</th>
+                    <th className="px-2 py-3 text-right">CR</th>
+                    <th className="px-5 py-3">Senast</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {past.map((e) => {
+                    const s = e.signups_count || 0;
+                    const adm = e.admitted_count || 0;
+                    const cr = s > 0 ? Math.round((adm / s) * 100) : 0;
+                    return (
+                      <tr key={e.id} className="border-t border-default">
+                        <td className="px-5 py-3 font-medium text-foreground">
+                          <Link href={`/events/${e.id}`} className="hover:underline">
+                            {e.name}
+                          </Link>
+                        </td>
+                        <td className="px-2 py-3 text-right font-mono">{s}</td>
+                        <td className="px-2 py-3 text-right font-mono">{e.leads_count || 0}</td>
+                        <td className="px-2 py-3 text-right">
+                          <Chip variant="green" mono>
+                            {adm}
+                          </Chip>
+                        </td>
+                        <td className="px-2 py-3 text-right font-mono">{cr}%</td>
+                        <td className="px-5 py-3 font-mono text-[11px] text-foreground-subtle">
+                          {ageString(e.starts_at)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
+      </div>
+    </PageShell>
   );
 }

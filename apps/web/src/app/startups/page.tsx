@@ -6,6 +6,9 @@ import { canAccessModule, hasRole } from '@/lib/rbac';
 import { ALL_PHASES, type StartupPhase, type SprintXScore } from '@platform/shared';
 import { phaseLabels, statusLabels, type StartupStatus } from '@/lib/labels';
 import { StartupListDashboard } from '@/components/StartupListDashboard';
+import { PageShell } from '@/components/PageShell';
+import { RailSection, RailStat } from '@/components/PageRail';
+import { Icon } from '@/components/proto';
 
 interface StartupRecord {
   id: string;
@@ -60,7 +63,18 @@ export default async function StartupsPage({
     });
   }
 
-  // Calculate dashboard metrics
+  const irlSamples = result.items.filter((s) => s.irl_level);
+  const avgIRL = irlSamples.length
+    ? irlSamples.reduce((sum, s) => sum + (s.irl_level || 0), 0) / irlSamples.length
+    : 0;
+
+  const sxAvg = (key: keyof SprintXScore) => {
+    const list = result.items.filter((s) => s.sprint_x_json?.[key]);
+    return list.length
+      ? list.reduce((sum, s) => sum + (s.sprint_x_json?.[key] || 0), 0) / list.length
+      : 0;
+  };
+
   const metrics = {
     totalStartups: result.totalItems,
     activeStartups: result.items.filter((s) => s.status === 'active').length,
@@ -78,76 +92,90 @@ export default async function StartupsPage({
       },
       {} as Record<string, number>
     ),
-    avgIRLLevel:
-      result.items.filter((s) => s.irl_level).length > 0
-        ? result.items.reduce((sum, s) => sum + (s.irl_level || 0), 0) /
-          result.items.filter((s) => s.irl_level).length
-        : 0,
+    avgIRLLevel: avgIRL,
     avgSprintX: {
-      funding:
-        result.items.filter((s) => s.sprint_x_json?.funding).length > 0
-          ? result.items.reduce((sum, s) => sum + (s.sprint_x_json?.funding || 0), 0) /
-            result.items.filter((s) => s.sprint_x_json?.funding).length
-          : 0,
-      intl:
-        result.items.filter((s) => s.sprint_x_json?.intl).length > 0
-          ? result.items.reduce((sum, s) => sum + (s.sprint_x_json?.intl || 0), 0) /
-            result.items.filter((s) => s.sprint_x_json?.intl).length
-          : 0,
-      sustain:
-        result.items.filter((s) => s.sprint_x_json?.sustain).length > 0
-          ? result.items.reduce((sum, s) => sum + (s.sprint_x_json?.sustain || 0), 0) /
-            result.items.filter((s) => s.sprint_x_json?.sustain).length
-          : 0,
-      team:
-        result.items.filter((s) => s.sprint_x_json?.team).length > 0
-          ? result.items.reduce((sum, s) => sum + (s.sprint_x_json?.team || 0), 0) /
-            result.items.filter((s) => s.sprint_x_json?.team).length
-          : 0
+      funding: sxAvg('funding'),
+      intl: sxAvg('intl'),
+      sustain: sxAvg('sustain'),
+      team: sxAvg('team')
     }
   };
 
-  return (
-    <main className="mx-auto max-w-7xl px-6 py-10 lg:px-8">
-      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Startups</h1>
-          <p className="mt-1 text-sm text-foreground-muted">
-            {result.totalItems} bolag i {user.tenantName || 'din tenant'}
-          </p>
+  const rail = (
+    <>
+      <RailSection label="Bolag">
+        <div className="grid grid-cols-2 gap-2 px-2">
+          <RailStat label="Totalt" value={result.totalItems} />
+          <RailStat label="Aktiva" value={metrics.activeStartups} />
+          <RailStat label="∅ IRL" value={avgIRL ? avgIRL.toFixed(1) : '—'} />
+          <RailStat label="Faser" value={Object.keys(metrics.byPhase).length} />
         </div>
-        {canCreate && (
+      </RailSection>
+
+      <RailSection label="Per fas">
+        {ALL_PHASES.filter((p) => metrics.byPhase[p]).map((p) => (
           <Link
-            href="/startups/new"
-            className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
+            key={p}
+            href={`/startups?phase=${p}`}
+            className="flex items-center justify-between rounded-xl px-3 py-2 text-[13px] text-foreground-muted hover:bg-canvas-muted hover:text-foreground"
           >
-            + Nytt bolag
+            {phaseLabels[p]}
+            <span className="font-mono text-[11px] text-foreground-subtle">
+              {metrics.byPhase[p]}
+            </span>
           </Link>
+        ))}
+      </RailSection>
+    </>
+  );
+
+  const actions = canCreate ? (
+    <Link
+      href="/startups/new"
+      className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
+    >
+      <Icon name="plus" size={12} /> Nytt bolag
+    </Link>
+  ) : null;
+
+  return (
+    <PageShell
+      title="Bolag"
+      meta={
+        <span className="text-[12px] text-foreground-subtle">
+          {result.totalItems} i {user.tenantName || 'tenanten'}
+        </span>
+      }
+      actions={actions}
+      rightPanel={rail}
+    >
+      <div className="py-6">
+        {!loadFailed && result.items.length > 0 && (
+          <StartupListDashboard startups={result.items} metrics={metrics} />
         )}
-      </header>
 
-      {!loadFailed && result.items.length > 0 && (
-        <StartupListDashboard startups={result.items} metrics={metrics} />
-      )}
+        <FilterBar current={params} />
 
-      <FilterBar current={params} />
+        {loadFailed ? (
+          <div className="rounded-xl border border-default bg-surface p-4 text-[13px] text-foreground-muted">
+            Kunde inte ladda bolagslistan just nu. Försök igen om en stund.
+          </div>
+        ) : null}
 
-      {loadFailed ? (
-        <div className="mb-6 rounded-2xl border border-default bg-surface p-4 text-sm text-foreground-muted">
-          Kunde inte ladda bolagslistan just nu. Forsok igen om en stund.
-        </div>
-      ) : null}
-
-      {result.items.length === 0 ? (
-        <EmptyState canCreate={canCreate} hasFilters={Boolean(params.q || params.phase || params.status)} />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {result.items.map((s) => (
-            <StartupCard key={s.id} startup={s} />
-          ))}
-        </div>
-      )}
-    </main>
+        {result.items.length === 0 ? (
+          <EmptyState
+            canCreate={canCreate}
+            hasFilters={Boolean(params.q || params.phase || params.status)}
+          />
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {result.items.map((s) => (
+              <StartupCard key={s.id} startup={s} />
+            ))}
+          </div>
+        )}
+      </div>
+    </PageShell>
   );
 }
 
@@ -155,18 +183,18 @@ function FilterBar({ current }: { current: { q?: string; phase?: string; status?
   return (
     <form
       method="get"
-      className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-default bg-surface p-3"
+      className="mb-5 flex flex-wrap items-center gap-2 rounded-xl border border-default bg-surface p-2.5"
     >
       <input
         name="q"
         defaultValue={current.q ?? ''}
         placeholder="Sök bolag…"
-        className="min-w-[180px] flex-1 rounded-full border border-default bg-surface px-4 py-2 text-sm text-foreground outline-none transition focus:border-brand focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+        className="min-w-[180px] flex-1 rounded-lg border border-default bg-canvas-subtle px-3 py-1.5 text-[13px] text-foreground outline-none transition focus:border-brand"
       />
       <select
         name="phase"
         defaultValue={current.phase ?? ''}
-        className="rounded-full border border-default bg-surface px-3 py-2 text-sm text-foreground"
+        className="rounded-lg border border-default bg-canvas-subtle px-3 py-1.5 text-[13px] text-foreground"
       >
         <option value="">Alla faser</option>
         {ALL_PHASES.map((p) => (
@@ -178,7 +206,7 @@ function FilterBar({ current }: { current: { q?: string; phase?: string; status?
       <select
         name="status"
         defaultValue={current.status ?? ''}
-        className="rounded-full border border-default bg-surface px-3 py-2 text-sm text-foreground"
+        className="rounded-lg border border-default bg-canvas-subtle px-3 py-1.5 text-[13px] text-foreground"
       >
         <option value="">Alla statusar</option>
         {(Object.keys(statusLabels) as Array<keyof typeof statusLabels>).map((s) => (
@@ -189,7 +217,7 @@ function FilterBar({ current }: { current: { q?: string; phase?: string; status?
       </select>
       <button
         type="submit"
-        className="rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition hover:bg-brand-hover"
+        className="rounded-lg border border-default bg-canvas-muted px-3 py-1.5 text-[13px] font-medium text-foreground hover:bg-canvas-subtle"
       >
         Filtrera
       </button>
@@ -201,21 +229,26 @@ function StartupCard({ startup }: { startup: StartupRecord }) {
   return (
     <Link
       href={`/startups/${startup.id}`}
-      className="group flex flex-col rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5 transition hover:border-strong hover:shadow-md"
+      className="group flex flex-col rounded-2xl border border-default bg-surface p-5 transition hover:border-strong"
     >
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <h2 className="text-lg font-semibold text-foreground transition group-hover:text-link">
-          {startup.name}
-        </h2>
-      </div>
+      <h2 className="mb-2 text-[15px] font-semibold text-foreground transition group-hover:text-link">
+        {startup.name}
+      </h2>
       {startup.description && (
-        <p className="mb-4 line-clamp-3 text-sm text-foreground-muted">{startup.description}</p>
+        <p className="mb-4 line-clamp-3 text-[13px] text-foreground-muted">
+          {startup.description}
+        </p>
       )}
-      <div className="mt-auto flex flex-wrap items-center gap-2 text-xs text-foreground-muted">
-        <span>Status: {statusLabels[startup.status]}</span>
-        <span>•</span>
-        <span>Fas: {phaseLabels[startup.phase]}</span>
-        {startup.irl_level ? <span>• IRL {startup.irl_level}</span> : null}
+      <div className="mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-foreground-subtle">
+        <span>{statusLabels[startup.status]}</span>
+        <span>·</span>
+        <span>{phaseLabels[startup.phase]}</span>
+        {startup.irl_level ? (
+          <>
+            <span>·</span>
+            <span className="font-mono">IRL {startup.irl_level}</span>
+          </>
+        ) : null}
       </div>
     </Link>
   );
@@ -223,11 +256,11 @@ function StartupCard({ startup }: { startup: StartupRecord }) {
 
 function EmptyState({ canCreate, hasFilters }: { canCreate: boolean; hasFilters: boolean }) {
   return (
-    <div className="rounded-3xl border border-dashed border-strong bg-surface/50 p-12 text-center">
-      <h2 className="text-lg font-semibold text-foreground">
+    <div className="rounded-2xl border border-dashed border-default p-12 text-center">
+      <h2 className="text-base font-semibold text-foreground">
         {hasFilters ? 'Inga bolag matchar filtret' : 'Inga bolag än'}
       </h2>
-      <p className="mt-2 text-sm text-foreground-muted">
+      <p className="mt-2 text-[13px] text-foreground-muted">
         {hasFilters
           ? 'Prova att ta bort filter eller söka på något annat.'
           : 'Skapa ett första bolag för att komma igång.'}
@@ -235,7 +268,7 @@ function EmptyState({ canCreate, hasFilters }: { canCreate: boolean; hasFilters:
       {canCreate && !hasFilters && (
         <Link
           href="/startups/new"
-          className="mt-6 inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
+          className="mt-5 inline-flex items-center justify-center rounded-lg bg-brand px-4 py-2 text-[13px] font-medium text-brand-foreground hover:bg-brand-hover"
         >
           + Nytt bolag
         </Link>

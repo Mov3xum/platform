@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 import { listForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser } from '@/lib/rbac';
+import { PageShell } from '@/components/PageShell';
+import { RailSection, RailItem, RailStat } from '@/components/PageRail';
 import {
   ToolCategoryBadge,
   ToolRunStatusBadge,
@@ -11,7 +13,6 @@ import {
 import {
   activityTypeLabels,
   activityStatusLabels,
-  toolRunStatusLabels,
   activityKindLabels,
   type ActivityType,
   type ActivityStatus,
@@ -44,6 +45,14 @@ interface ActivityRecord {
     owner?: { id: string; display_name?: string; email: string };
   };
 }
+
+const FILTERS: { id: string; label: string; href: string }[] = [
+  { id: '', label: 'Allt', href: '/aktivitet' },
+  { id: 'manual', label: 'Manuella', href: '/aktivitet?kind=manual' },
+  { id: 'tool_run', label: 'Verktygskörningar', href: '/aktivitet?kind=tool_run' },
+  { id: 'workshop_assignment', label: 'Workshop tilldelning', href: '/aktivitet?kind=workshop_assignment' },
+  { id: 'workshop_run', label: 'Workshop AI', href: '/aktivitet?kind=workshop_run' }
+];
 
 export default async function AktivitetPage({
   searchParams
@@ -101,7 +110,6 @@ export default async function AktivitetPage({
     }
   }
 
-  // Merge and sort by created desc
   type FeedItem =
     | { type: 'activity'; item: ActivityRecord; created: string }
     | { type: 'system_run'; item: ToolRun; created: string };
@@ -119,217 +127,195 @@ export default async function AktivitetPage({
     })) ?? [])
   ].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
 
+  const last24 = feed.filter(
+    (e) => Date.now() - new Date(e.created).getTime() < 24 * 60 * 60 * 1000
+  ).length;
+
+  const rail = (
+    <>
+      <RailSection label="Översikt">
+        <div className="grid grid-cols-2 gap-2 px-2">
+          <RailStat label="I urval" value={feed.length} />
+          <RailStat label="24 tim" value={last24} />
+        </div>
+      </RailSection>
+
+      <RailSection label="Filtrera">
+        {FILTERS.map((f) => {
+          const active = (f.id || '') === (kind || '');
+          return (
+            <Link
+              key={f.id || 'all'}
+              href={f.href}
+              className={`flex items-center justify-between rounded-xl px-3 py-2 text-[13px] transition ${
+                active
+                  ? 'bg-canvas-muted font-medium text-foreground'
+                  : 'text-foreground-muted hover:bg-canvas-muted hover:text-foreground'
+              }`}
+            >
+              {f.label}
+              {active && <span className="text-[11px] text-foreground-subtle">aktiv</span>}
+            </Link>
+          );
+        })}
+      </RailSection>
+    </>
+  );
+
   return (
-    <main className="mx-auto max-w-4xl px-6 py-10 lg:px-8">
-      <header className="mb-8">
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground">Aktivitetsfeed</h1>
-        <p className="mt-1 text-sm text-foreground-muted">
-          Alla aktiviteter och agentkörningar i{' '}
-          <span className="font-medium">{user.tenantName || 'tenanten'}</span>
-        </p>
-      </header>
+    <PageShell
+      title="Aktivitetsfeed"
+      meta={
+        <span className="text-[12px] text-foreground-subtle">
+          {user.tenantName || 'tenanten'}
+        </span>
+      }
+      rightPanel={rail}
+    >
+      <div className="mx-auto w-full max-w-4xl py-6">
+        {(activitiesLoadFailed || systemRunsLoadFailed) && (
+          <div className="mb-5 rounded-xl border border-default bg-surface p-3 text-[13px] text-foreground-muted">
+            Vissa aktiviteter kunde inte laddas just nu. Försök igen om en stund.
+          </div>
+        )}
 
-      {/* Filter bar */}
-      <div className="mb-6 flex flex-wrap gap-2">
-        <Link
-          href="/aktivitet"
-          className={`rounded-full border px-4 py-1.5 text-sm font-medium transition ${
-            !kind
-              ? 'border-brand bg-brand text-brand-foreground'
-              : 'border-default bg-surface text-foreground-muted hover:bg-canvas-subtle'
-          }`}
-        >
-          Alla
-        </Link>
-        <Link
-          href="/aktivitet?kind=manual"
-          className={`rounded-full border px-4 py-1.5 text-sm font-medium transition ${
-            kind === 'manual'
-              ? 'border-brand bg-brand text-brand-foreground'
-              : 'border-default bg-surface text-foreground-muted hover:bg-canvas-subtle'
-          }`}
-        >
-          Manuella
-        </Link>
-        <Link
-          href="/aktivitet?kind=tool_run"
-          className={`rounded-full border px-4 py-1.5 text-sm font-medium transition ${
-            kind === 'tool_run'
-              ? 'border-brand bg-brand text-brand-foreground'
-              : 'border-default bg-surface text-foreground-muted hover:bg-canvas-subtle'
-          }`}
-        >
-          Verktygskörningar
-        </Link>
-        <Link
-          href="/aktivitet?kind=workshop_assignment"
-          className={`rounded-full border px-4 py-1.5 text-sm font-medium transition ${
-            kind === 'workshop_assignment'
-              ? 'border-brand bg-brand text-brand-foreground'
-              : 'border-default bg-surface text-foreground-muted hover:bg-canvas-subtle'
-          }`}
-        >
-          Workshop tilldelning
-        </Link>
-        <Link
-          href="/aktivitet?kind=workshop_run"
-          className={`rounded-full border px-4 py-1.5 text-sm font-medium transition ${
-            kind === 'workshop_run'
-              ? 'border-brand bg-brand text-brand-foreground'
-              : 'border-default bg-surface text-foreground-muted hover:bg-canvas-subtle'
-          }`}
-        >
-          Workshop AI
-        </Link>
-      </div>
+        {feed.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-default p-12 text-center text-foreground-muted">
+            Inga aktiviteter att visa.
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {feed.map((entry) => {
+              if (entry.type === 'activity') {
+                const a = entry.item;
+                const isToolRun = a.kind === 'tool_run';
+                const isWorkshop = a.kind === 'workshop_assignment' || a.kind === 'workshop_run';
+                return (
+                  <li
+                    key={`activity-${a.id}`}
+                    className="rounded-xl border border-default bg-surface p-4"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        {a.expand?.tool?.icon && (
+                          <span className="mt-0.5 text-base">{a.expand.tool.icon}</span>
+                        )}
+                        <div>
+                          <p className="text-[13.5px] font-medium text-foreground">
+                            {isToolRun && a.expand?.tool_run ? (
+                              <Link
+                                href={`/toolbox/runs/${a.tool_run}`}
+                                className="hover:underline"
+                              >
+                                {a.title}
+                              </Link>
+                            ) : (
+                              <>
+                                {a.title}
+                                {isWorkshop && a.expand?.workshop?.title ? (
+                                  <span className="ml-1 text-[11px] font-normal text-foreground-subtle">
+                                    ({a.expand.workshop.title})
+                                  </span>
+                                ) : null}
+                              </>
+                            )}
+                          </p>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px] text-foreground-subtle">
+                            {a.expand?.startup && (
+                              <Link
+                                href={`/startups/${a.expand.startup.id}`}
+                                className="font-medium text-link hover:underline"
+                              >
+                                {a.expand.startup.name}
+                              </Link>
+                            )}
+                            <span>·</span>
+                            <span className="font-mono">
+                              {new Date(a.created).toLocaleString('sv-SE')}
+                            </span>
+                            {!isToolRun && !isWorkshop && (
+                              <>
+                                <span>·</span>
+                                <span>{activityTypeLabels[a.type]}</span>
+                              </>
+                            )}
+                            {isWorkshop && (
+                              <>
+                                <span>·</span>
+                                <span>{activityKindLabels[a.kind as ActivityKind]}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {isToolRun && a.expand?.tool ? (
+                          <ToolCategoryBadge category={a.expand.tool.category as never} />
+                        ) : null}
+                        {isToolRun && a.expand?.tool_run ? (
+                          <ToolRunStatusBadge
+                            status={a.expand.tool_run.status as ToolRunStatus}
+                          />
+                        ) : isWorkshop && a.expand?.workshop_assignment ? (
+                          <WorkshopAssignmentStatusBadge
+                            status={a.expand.workshop_assignment.status}
+                          />
+                        ) : isWorkshop && a.expand?.workshop_run ? (
+                          <ToolRunStatusBadge
+                            status={a.expand.workshop_run.status as ToolRunStatus}
+                          />
+                        ) : (
+                          <span className="inline-flex items-center rounded-md bg-canvas-muted px-2 py-0.5 text-[11px] font-medium text-foreground-muted">
+                            {activityStatusLabels[a.status]}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                );
+              }
 
-      {(activitiesLoadFailed || systemRunsLoadFailed) && (
-        <div className="mb-6 rounded-2xl border border-default bg-surface p-4 text-sm text-foreground-muted">
-          Vissa aktiviteter kunde inte laddas just nu. Forsok igen om en stund.
-        </div>
-      )}
-
-      {feed.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-strong bg-surface/50 p-12 text-center">
-          <p className="text-foreground-muted">Inga aktiviteter att visa.</p>
-        </div>
-      ) : (
-        <ul className="space-y-3">
-          {feed.map((entry) => {
-            if (entry.type === 'activity') {
-              const a = entry.item;
-              const isToolRun = a.kind === 'tool_run';
-              const isWorkshop = a.kind === 'workshop_assignment' || a.kind === 'workshop_run';
+              const run = entry.item;
+              const tool = run.expand?.tool;
+              const triggeredBy = run.expand?.triggered_by;
               return (
                 <li
-                  key={`activity-${a.id}`}
-                  className="rounded-3xl border border-default bg-surface p-5 shadow-sm shadow-movexum-svart/5"
+                  key={`run-${run.id}`}
+                  className="rounded-xl border border-default bg-surface p-4"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="flex items-start gap-3">
-                      {a.expand?.tool?.icon && (
-                        <span className="mt-0.5 text-xl">{a.expand.tool.icon}</span>
-                      )}
-                      {!a.expand?.tool?.icon && isWorkshop && (
-                        <span className="mt-0.5 text-xl">🧩</span>
-                      )}
+                      {tool?.icon && <span className="mt-0.5 text-base">{tool.icon}</span>}
                       <div>
-                        <p className="font-semibold text-foreground">
-                          {isToolRun && a.expand?.tool_run ? (
-                            <Link
-                              href={`/toolbox/runs/${a.tool_run}`}
-                              className="hover:underline"
-                            >
-                              {a.title}
-                            </Link>
-                          ) : (
-                            <>
-                              {a.title}
-                              {isWorkshop && a.expand?.workshop?.title ? (
-                                <span className="ml-1 text-xs font-normal text-foreground-subtle">
-                                  ({a.expand.workshop.title})
-                                </span>
-                              ) : null}
-                            </>
-                          )}
+                        <p className="text-[13.5px] font-medium text-foreground">
+                          <Link href={`/toolbox/runs/${run.id}`} className="hover:underline">
+                            {tool?.name ?? 'Portföljkörning'}
+                          </Link>
                         </p>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-foreground-subtle">
-                          {a.expand?.startup && (
-                            <Link
-                              href={`/startups/${a.expand.startup.id}`}
-                              className="font-medium text-link hover:underline"
-                            >
-                              {a.expand.startup.name}
-                            </Link>
-                          )}
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px] text-foreground-subtle">
+                          <span className="font-medium text-link">Portfölj</span>
                           <span>·</span>
-                          <span>{new Date(a.created).toLocaleString('sv-SE')}</span>
-                          {!isToolRun && !isWorkshop && (
-                            <>
-                              <span>·</span>
-                              <span>{activityTypeLabels[a.type]}</span>
-                            </>
-                          )}
-                          {isWorkshop && (
-                            <>
-                              <span>·</span>
-                              <span>{activityKindLabels[a.kind as ActivityKind]}</span>
-                            </>
-                          )}
+                          <span className="font-mono">
+                            {new Date(run.created).toLocaleString('sv-SE')}
+                          </span>
+                          <span>·</span>
+                          <span>{triggeredBy?.display_name ?? triggeredBy?.email ?? 'Okänd'}</span>
                         </div>
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      {isToolRun && a.expand?.tool ? (
-                        <ToolCategoryBadge category={a.expand.tool.category as never} />
-                      ) : null}
-                      {isToolRun && a.expand?.tool_run ? (
-                        <ToolRunStatusBadge
-                          status={a.expand.tool_run.status as ToolRunStatus}
-                        />
-                      ) : isWorkshop && a.expand?.workshop_assignment ? (
-                        <WorkshopAssignmentStatusBadge
-                          status={a.expand.workshop_assignment.status}
-                        />
-                      ) : isWorkshop && a.expand?.workshop_run ? (
-                        <ToolRunStatusBadge status={a.expand.workshop_run.status as ToolRunStatus} />
-                      ) : (
-                        <span className="inline-flex items-center rounded-full bg-canvas-subtle px-2.5 py-0.5 text-xs font-medium text-foreground-muted ring-1 ring-default">
-                          {activityStatusLabels[a.status]}
-                        </span>
+                      {tool?.category && (
+                        <ToolCategoryBadge category={tool.category as never} />
                       )}
+                      <ToolRunStatusBadge status={run.status as ToolRunStatus} />
                     </div>
                   </div>
                 </li>
               );
-            }
-
-            // system_run
-            const run = entry.item;
-            const tool = run.expand?.tool;
-            const triggeredBy = run.expand?.triggered_by;
-            return (
-              <li
-                key={`run-${run.id}`}
-                className="rounded-3xl border border-movexum-bla/30 bg-movexum-pastell-bla/50 p-5 shadow-sm shadow-movexum-svart/5 dark:border-movexum-djupbla/40 dark:bg-movexum-morkbla/20"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    {tool?.icon && <span className="mt-0.5 text-xl">{tool.icon}</span>}
-                    <div>
-                      <p className="font-semibold text-foreground">
-                        <Link href={`/toolbox/runs/${run.id}`} className="hover:underline">
-                          {tool?.name ?? 'Portföljkörning'}
-                        </Link>
-                        <span className="ml-2 text-xs font-normal text-foreground-subtle">
-                          (system-bred)
-                        </span>
-                      </p>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-foreground-subtle">
-                        <span className="font-medium text-movexum-djupbla dark:text-movexum-bla">
-                          Portfölj
-                        </span>
-                        <span>·</span>
-                        <span>{new Date(run.created).toLocaleString('sv-SE')}</span>
-                        <span>·</span>
-                        <span>
-                          {triggeredBy?.display_name ?? triggeredBy?.email ?? 'Okänd'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {tool?.category && (
-                      <ToolCategoryBadge category={tool.category as never} />
-                    )}
-                    <ToolRunStatusBadge status={run.status as ToolRunStatus} />
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </main>
+            })}
+          </ul>
+        )}
+      </div>
+    </PageShell>
   );
 }
