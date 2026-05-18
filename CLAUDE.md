@@ -366,9 +366,15 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
 - **Konfidentiella anteckningar:** filtreras alltid ut (`confidential=false`)
 - **Personuppgifter:** e-post och teammedlemsfält exkluderas från alla
   prompts (defense-in-depth)
-- **Portföljkontext:** whitelist-fält: `name, phase, irl_level, status, next_step`
+- **Portföljkontext:** whitelist-fält: `name, phase, irl_level, status,
+  next_step, kommun, industri, bolag_status`. Bolagsregister-fälten
+  (`org_nr`, `intagsdatum`, `avslutsdatum`) ingår **inte** i AI-prompts —
+  de behövs inte för resonemang och hålls dataminimerade.
+- **Org-nr som PII:** för aktiebolag är organisationsnummer inte
+  personuppgift (GDPR skäl 14). För enskild firma motsvarar org-nr
+  personnummer → exkluderas alltid (defense-in-depth).
 - **Tenant-isolation:** `buildStartupContext` / `buildPortfolioContext`
-  verifierar alltid tenant-ID
+  / `buildFinancialsContext` verifierar alltid tenant-ID.
 
 ### 9.4 Datamodell
 
@@ -378,6 +384,19 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
   `attachments` (uppladdade filer), `output_md` (senaste assistant-svar,
   bakåtkompatibelt), `model` (senaste modell), tokens, kostnad och status
 - `activities.kind` — utökad med `manual | tool_run` (backfillad)
+- `startups` — utöver kärnfälten (phase, irl_level, status, next_step,
+  sector, pitch, team_size, sprint_x_json) innehåller bolagsregister-
+  fält: `org_nr`, `kommun`, `bolagsform`, `industri`, `intagsdatum`,
+  `avslutsdatum`, `bolag_status` (1700000058). `status` = relation till
+  inkubator (active/alumni/paused/rejected). `bolag_status` =
+  bolagets operationella status (aktiv/vilande/konkurs/likvidering/
+  avregistrerat).
+- `startup_financials` — en rad per (`startup`, `year`) med årsmetrics:
+  `employees`, `revenue_sek`, `personnel_cost_sek`, `corporate_tax_sek`,
+  `source` (manual / import_excel / allabolag / other), `synced_at`.
+  Unique-index på (startup, year) ger idempotent upsert vid sync från
+  allabolag-providern. Modellerar Movexums Bolagslista-Excel
+  (1700000059).
 
 **Verktygskategorier:**
 - `ai_per_startup` — AI för enskilt bolag (quarterly report etc.)
@@ -744,6 +763,7 @@ och kan renderas av samma UI oavsett leverantör.
 |-----------|-----------|---------------|------------|
 | Brevo     | FR (EU)   | Minimal       | Ingen AI. Endast aggregerade metrics synkas — inga e-postadresser. |
 | Howspace  | FI (EU)   | Begränsad     | AI-insights faller under art. 50 (transparenskrav). Vi synkar bara aggregerad statistik. |
+| Allabolag | SE        | Minimal       | Publik bolagsdata (org-nr, bolagsform, kommun, årsredovisningar). Ingen AI, inga personuppgifter för aktiebolag. För enskild firma exkluderas org-nr från AI-prompts (§ 9.3). **Status: planned** — handler byggs i uppföljande PR; målschema är `startups`-registerfält + `startup_financials`. |
 
 **Mailchimp avvisad** (CLAUDE.md § 10.2): US-baserad,
 träffar Schrems II + CLOUD Act. Brevo är EU-suveränt alternativ.
@@ -778,8 +798,13 @@ brytande ändringar — datamodellen är redan idempotent.
 1. Skapa `lib/integrations/providers/<slug>/{client,handler,normalize}.ts`.
 2. Implementera `IntegrationHandler` — sätt `residency`, `riskClass`
    och `complianceNote` så transparensbannern blir korrekt.
-3. Whitelista payload-fält i `normalize.ts`.
+3. Whitelista payload-fält i `normalize.ts`. Bolagsregister-providers
+   (typ Allabolag) skriver istället direkt mot `startups`-registerfält
+   + `startup_financials` via en provider-specifik mappning — inte
+   `integration_records`. Idempotens säkras av unique-index `(startup,
+   year)` på financials respektive `(tenant, org_nr)` på startups.
 4. Registrera i `registry.ts`.
 5. Seedmigration som upsertar provider i `integration_providers`.
-6. Uppdatera tabellen i 11.3 + ev. ny kategori i 1700000053-migrationen.
+6. Uppdatera tabellen i 11.3 + ev. ny kategori i `category`-enumet
+   (se 1700000053 och 1700000060 för exempel på enum-utökning).
 7. PR-checklista § 10.5 punkt 9: dokumentera dataflödet här.
