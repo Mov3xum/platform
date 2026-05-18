@@ -16,5 +16,6 @@ export const PB_COLLECTIONS = {
   reports: 'incubator_reports_collection',
   alumni: 'alumni_collection',
   missionComments: 'mission_comments_collection',
-  notifications: 'notifications_collection'
+  notifications: 'notifications_collection',
+  startupPhaseHistory: 'startup_phase_history_collection'
 } as const;

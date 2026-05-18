@@ -1,9 +1,17 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 
-// Whitelist of startup fields allowed in portfolio context (no PII).
-// org_nr/intagsdatum/avslutsdatum hålls utanför här — de behövs inte för
-// AI-resonemang och respekterar dataminimering (CLAUDE.md § 9.3, § 10.2).
+// Whitelist av startup-fält som får skickas till AI-prompten. Allt utanför
+// listan måste vägras (CLAUDE.md § 9.3, § 10.2).
+//
+// EXPLICIT SVARTLISTAD — får ALDRIG hamna i AI-kontext:
+//   • phone                  (PII)
+//   • founder_gender         (GDPR art. 9 särskild kategori)
+//   • founder_identifies_as  (GDPR art. 9 särskild kategori)
+//   • Personnummer           (lagras inte i schemat)
+//   • owner, coaches, e-postadresser, teammedlemmar (PII)
+//
+// org_nr exkluderas också (för enskild firma = personnummer; defense-in-depth).
 const STARTUP_PORTFOLIO_FIELDS = [
   'name',
   'phase',
@@ -12,7 +20,14 @@ const STARTUP_PORTFOLIO_FIELDS = [
   'next_step',
   'kommun',
   'industri',
-  'bolag_status'
+  'bolag_status',
+  // Movexum Bolagslista-fält som är säkra för portföljen
+  'idea_name',
+  'case_type',
+  'area',
+  'is_deeptech',
+  'is_regional',
+  'company_registered_at'
 ] as const;
 
 interface StartupPortfolioEntry {
@@ -24,6 +39,12 @@ interface StartupPortfolioEntry {
   kommun?: string;
   industri?: string;
   bolag_status?: string;
+  idea_name?: string;
+  case_type?: string;
+  area?: string;
+  is_deeptech?: boolean;
+  is_regional?: boolean;
+  company_registered_at?: string;
 }
 
 interface FinancialsEntry {
@@ -55,6 +76,13 @@ interface NoteEntry {
   created: string;
 }
 
+interface PhaseHistoryEntry {
+  phase: string;
+  entered_at: string;
+  exited_at?: string;
+  note?: string;
+}
+
 export interface StartupContext {
   startup: {
     name: string;
@@ -70,11 +98,39 @@ export interface StartupContext {
     bolag_status?: string;
     intagsdatum?: string;
     avslutsdatum?: string;
+    // Movexum Bolagslista (1700000061) — AI-säkra fält
+    idea_name?: string;
+    case_type?: string;
+    status_completion_pct?: number;
+    company_registered_at?: string;
+    contacted_at?: string;
+    area?: string;
+    inflow_source?: string;
+    is_deeptech?: boolean;
+    meets_excellence_criteria?: boolean;
+    is_regional?: boolean;
+    potential_bc_case?: boolean;
+    preliminary_exit?: string;
+    approved_state_aid_art22?: boolean;
+    approved_de_minimis?: boolean;
+    sent_to?: string;
+    register_notes?: string;
+    signed_incubator_agreement?: boolean;
+    signed_incubator_agreement_at?: string;
+    signed_nda?: boolean;
+    signed_nda_at?: string;
+    signed_bc_agreement?: boolean;
+    signed_bc_agreement_at?: string;
+    signed_vinnova_incubation_approval?: boolean;
+    signed_vinnova_incubation_approval_at?: string;
+    signed_partner_agreement?: boolean;
+    signed_partner_agreement_at?: string;
   };
   milestones: MilestoneEntry[];
   activities: ActivityEntry[];
   notes: NoteEntry[];
   financials?: FinancialsEntry[];
+  phase_history?: PhaseHistoryEntry[];
 }
 
 export interface PortfolioContext {
@@ -115,20 +171,63 @@ export async function buildStartupContext(
   // Org-nr för enskild firma = personnummer → exkluderas alltid från
   // AI-prompts (CLAUDE.md § 10.2, GDPR art. 5). För aktiebolag är org-nr
   // inte PII men exponeras ändå inte här — agenterna behöver det inte.
+  //
+  // GDPR art. 9-fält (founder_gender, founder_identifies_as) och PII
+  // (phone) plockas ALDRIG ut från startupRecord nedan.
+  const r = startupRecord as Record<string, unknown>;
+  const optStr = (key: string): string | undefined => {
+    const v = r[key];
+    return typeof v === 'string' && v.length > 0 ? v : undefined;
+  };
+  const optNum = (key: string): number | undefined => {
+    const v = r[key];
+    return typeof v === 'number' ? v : undefined;
+  };
+  const optBool = (key: string): boolean | undefined => {
+    const v = r[key];
+    return typeof v === 'boolean' ? v : undefined;
+  };
+
   const startup: StartupContext['startup'] = {
-    name: startupRecord.name as string,
-    phase: startupRecord.phase as string,
-    irl_level: startupRecord.irl_level as number | undefined,
-    status: startupRecord.status as string,
-    next_step: startupRecord.next_step as string | undefined,
-    description: stripHtml(startupRecord.description as string | undefined),
-    tags: startupRecord.tags as string | undefined,
-    kommun: (startupRecord.kommun as string | undefined) || undefined,
-    industri: (startupRecord.industri as string | undefined) || undefined,
-    bolagsform: (startupRecord.bolagsform as string | undefined) || undefined,
-    bolag_status: (startupRecord.bolag_status as string | undefined) || undefined,
-    intagsdatum: (startupRecord.intagsdatum as string | undefined) || undefined,
-    avslutsdatum: (startupRecord.avslutsdatum as string | undefined) || undefined
+    name: r.name as string,
+    phase: r.phase as string,
+    irl_level: optNum('irl_level'),
+    status: r.status as string,
+    next_step: optStr('next_step'),
+    description: stripHtml(r.description as string | undefined),
+    tags: optStr('tags'),
+    kommun: optStr('kommun'),
+    industri: optStr('industri'),
+    bolagsform: optStr('bolagsform'),
+    bolag_status: optStr('bolag_status'),
+    intagsdatum: optStr('intagsdatum'),
+    avslutsdatum: optStr('avslutsdatum'),
+    idea_name: optStr('idea_name'),
+    case_type: optStr('case_type'),
+    status_completion_pct: optNum('status_completion_pct'),
+    company_registered_at: optStr('company_registered_at'),
+    contacted_at: optStr('contacted_at'),
+    area: optStr('area'),
+    inflow_source: optStr('inflow_source'),
+    is_deeptech: optBool('is_deeptech'),
+    meets_excellence_criteria: optBool('meets_excellence_criteria'),
+    is_regional: optBool('is_regional'),
+    potential_bc_case: optBool('potential_bc_case'),
+    preliminary_exit: optStr('preliminary_exit'),
+    approved_state_aid_art22: optBool('approved_state_aid_art22'),
+    approved_de_minimis: optBool('approved_de_minimis'),
+    sent_to: optStr('sent_to'),
+    register_notes: stripHtml(r.register_notes as string | undefined) || undefined,
+    signed_incubator_agreement: optBool('signed_incubator_agreement'),
+    signed_incubator_agreement_at: optStr('signed_incubator_agreement_at'),
+    signed_nda: optBool('signed_nda'),
+    signed_nda_at: optStr('signed_nda_at'),
+    signed_bc_agreement: optBool('signed_bc_agreement'),
+    signed_bc_agreement_at: optStr('signed_bc_agreement_at'),
+    signed_vinnova_incubation_approval: optBool('signed_vinnova_incubation_approval'),
+    signed_vinnova_incubation_approval_at: optStr('signed_vinnova_incubation_approval_at'),
+    signed_partner_agreement: optBool('signed_partner_agreement'),
+    signed_partner_agreement_at: optStr('signed_partner_agreement_at')
   };
 
   const milestones: MilestoneEntry[] = milestonesResult.items.map((m) => ({
@@ -152,9 +251,12 @@ export async function buildStartupContext(
     created: n.created as string
   }));
 
-  const financials = await buildFinancialsContext(pb, startupId, tenantId);
+  const [financials, phase_history] = await Promise.all([
+    buildFinancialsContext(pb, startupId, tenantId),
+    buildPhaseHistoryContext(pb, startupId, tenantId)
+  ]);
 
-  return { startup, milestones, activities, notes, financials };
+  return { startup, milestones, activities, notes, financials, phase_history };
 }
 
 /**
@@ -202,6 +304,37 @@ export async function buildFinancialsContext(
 }
 
 /**
+ * Hämtar senaste 5 fashistorikraderna (yngst först). Tenant-scoped.
+ * Fail-soft: returnerar undefined om collectionen ej finns ännu.
+ */
+export async function buildPhaseHistoryContext(
+  pb: PocketBase,
+  startupId: string,
+  tenantId: string,
+  limit = 5
+): Promise<PhaseHistoryEntry[] | undefined> {
+  let result;
+  try {
+    result = await pb.collection('startup_phase_history').getList(1, limit, {
+      filter: `startup = "${startupId}" && tenant = "${tenantId}"`,
+      sort: '-entered_at'
+    });
+  } catch {
+    return undefined;
+  }
+  if (!result.items.length) return undefined;
+  return result.items.map((r) => {
+    const entry: PhaseHistoryEntry = {
+      phase: r.phase as string,
+      entered_at: r.entered_at as string
+    };
+    if (r.exited_at) entry.exited_at = r.exited_at as string;
+    if (r.note) entry.note = r.note as string;
+    return entry;
+  });
+}
+
+/**
  * Builds portfolio context for all active startups in the tenant.
  * Only includes whitelisted fields — no PII, no notes, no agreements.
  */
@@ -228,6 +361,14 @@ export async function buildPortfolioContext(
     if (s.kommun) entry.kommun = s.kommun as string;
     if (s.industri) entry.industri = s.industri as string;
     if (s.bolag_status) entry.bolag_status = s.bolag_status as string;
+    if (s.idea_name) entry.idea_name = s.idea_name as string;
+    if (s.case_type) entry.case_type = s.case_type as string;
+    if (s.area) entry.area = s.area as string;
+    if (typeof s.is_deeptech === 'boolean') entry.is_deeptech = s.is_deeptech;
+    if (typeof s.is_regional === 'boolean') entry.is_regional = s.is_regional;
+    if (s.company_registered_at) {
+      entry.company_registered_at = s.company_registered_at as string;
+    }
     return entry;
   });
 
