@@ -7,6 +7,7 @@ import { toolCategoryLabels, type ToolRunStatus } from '@/lib/labels';
 import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
 import { getWebSourceLabel } from '@/lib/ai/web';
 import { RunToolForm } from '../RunToolForm';
+import { ScheduleEditor } from '@/components/ScheduleEditor';
 import type { Tool, ToolModel, ToolRun, WebSourceKey } from '@platform/shared';
 import { isAllowedModel } from '@/lib/ai/models';
 
@@ -84,6 +85,45 @@ export default async function ToolDetailPage({
     });
   }
 
+  // Schemaläggning — bara staff får se & hantera. Endast tillgängligt för
+  // AI-verktyg som inte kräver ett valt bolag (portfölj-agenter).
+  const isAiTool =
+    tool.category === 'ai_per_startup' || tool.category === 'ai_system_wide';
+  const canSchedule =
+    isStaff &&
+    isAiTool &&
+    !tool.requires_startup &&
+    Boolean(tool.prompt_template) &&
+    Boolean(tool.model);
+
+  let existingSchedule:
+    | {
+        id: string;
+        enabled: boolean;
+        cron_expression: string;
+        timezone?: string;
+        next_run_at?: string;
+        last_run_at?: string;
+      }
+    | null = null;
+  if (canSchedule) {
+    try {
+      const rec = await pb
+        .collection('tool_schedules')
+        .getFirstListItem(`tool = "${id}" && tenant = "${user.tenant}"`);
+      existingSchedule = {
+        id: rec.id as string,
+        enabled: Boolean(rec.enabled),
+        cron_expression: (rec.cron_expression as string) || '',
+        timezone: (rec.timezone as string) || undefined,
+        next_run_at: (rec.next_run_at as string) || undefined,
+        last_run_at: (rec.last_run_at as string) || undefined
+      };
+    } catch {
+      /* no schedule yet — keep null */
+    }
+  }
+
   return (
     <main className="mx-auto max-w-4xl px-6 py-10 lg:px-8">
       <div className="mb-6">
@@ -157,6 +197,27 @@ export default async function ToolDetailPage({
                 Du har inte behörighet att köra denna agent.
               </p>
             </div>
+          )}
+
+          {/* Schemaläggning — bara staff och bara för portfölj-agenter */}
+          {canSchedule && (
+            <section className="rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
+              <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-lg font-semibold text-foreground">Schemaläggning</h2>
+                <span className="text-xs text-foreground-subtle">
+                  Kör verktyget automatiskt enligt valt intervall.
+                </span>
+              </div>
+              <ScheduleEditor
+                toolId={id}
+                scheduleId={existingSchedule?.id}
+                enabled={existingSchedule?.enabled ?? false}
+                cronExpression={existingSchedule?.cron_expression ?? '0 7 * * *'}
+                timezone={existingSchedule?.timezone ?? 'Europe/Stockholm'}
+                lastRunAt={existingSchedule?.last_run_at}
+                nextRunAt={existingSchedule?.next_run_at}
+              />
+            </section>
           )}
 
           {/* Recent runs */}

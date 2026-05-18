@@ -769,6 +769,7 @@ och kan renderas av samma UI oavsett leverantör.
 | Brevo     | FR (EU)   | Minimal       | Ingen AI. Endast aggregerade metrics synkas — inga e-postadresser. |
 | Howspace  | FI (EU)   | Begränsad     | AI-insights faller under art. 50 (transparenskrav). Vi synkar bara aggregerad statistik. |
 | Allabolag | SE        | Minimal       | Publik bolagsdata (org-nr, bolagsform, kommun, årsredovisningar). Ingen AI, inga personuppgifter för aktiebolag. För enskild firma exkluderas org-nr från AI-prompts (§ 9.3). **Status: implemented (stub)** — handler-skelettet skriver direkt till `startups`-registerfält och `startup_financials` (idempotent via unique-index `(startup, year)`). Produktion kräver leverantörsval via `MOVEXUM_ALLABOLAG_PROVIDER`-env (`mock`/`bolagsverket`/`roaring`/`creditsafe`); utan satt env returnerar handler ett tydligt fel. |
+| Breakit   | SE        | Minimal       | Provider-stub för framtida Premium-paywall. **Status: stub** — själva morgonagenten (`ai_breakit_morning`) använder den publika RSS-feeden via `web.ts`-whitelisten och behöver ingen credential. Premium-aktivering kräver kommersiellt avtal med Breakit + cookie-/session-stöd i `web.ts`. |
 
 **Mailchimp avvisad** (CLAUDE.md § 10.2): US-baserad,
 träffar Schrems II + CLOUD Act. Brevo är EU-suveränt alternativ.
@@ -819,3 +820,73 @@ brytande ändringar — datamodellen är redan idempotent.
 6. Uppdatera tabellen i 11.3 + ev. ny kategori i `category`-enumet
    (se 1700000053 och 1700000060 för exempel på enum-utökning).
 7. PR-checklista § 10.5 punkt 9: dokumentera dataflödet här.
+
+---
+
+## 12. Schemaläggning av AI-agenter
+
+### 12.1 Översikt
+
+AI-agenter med `category=ai_system_wide` (portfölj-verktyg utan
+obligatoriskt bolag) kan schemaläggas att köras automatiskt enligt
+ett valbart cron-uttryck per tenant. Använder samma core-flöde som
+manuella körningar — samma RBAC, samma context-bygge, samma logging
+i `tool_runs` + `activities` + `ai_usage_events`.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000061_create_tool_schedules.js` | Collection `tool_schedules` |
+| `backend/pocketbase-schema/hooks/schedule_tick.pb.js` | PB JSVM-cron, tickar varje minut |
+| `apps/web/src/lib/scheduling/cron.ts` | Cron-parser + `computeNextRunAt(expr, tz)` (ingen npm-dep) |
+| `apps/web/src/lib/scheduling/runner.ts` | `runScheduledTool(scheduleId)` — core-körning + next_run_at-uppdatering |
+| `apps/web/src/lib/actions/schedules.ts` | Server actions (upsert/disable/delete) |
+| `apps/web/src/app/api/internal/run-schedule/route.ts` | Intern endpoint som PB-hooken POSTar till |
+| `apps/web/src/components/ScheduleEditor.tsx` | UI-komponent på toolbox-detaljsidan |
+
+### 12.2 Flöde
+
+1. Staff (admin/incubator_lead) öppnar `/toolbox/<id>` och aktiverar
+   ett schema. `upsertScheduleAction` validerar cron, beräknar
+   `next_run_at` och skriver `tool_schedules`-rad.
+2. PB JSVM-hooken `schedule_tick` kör varje minut, hittar rader där
+   `enabled=true && next_run_at <= now`. För varje:
+   - Sätter provisorisk lock (`next_run_at = now + 1h`) så ett tick
+     inte triggar samma rad två gånger om endpointen svarar långsamt.
+   - POSTar `{ scheduleId }` till `/api/internal/run-schedule` med
+     `x-movexum-schedule-secret`-header.
+3. Endpointen verifierar secret (timing-safe), anropar
+   `runScheduledTool(scheduleId)` som kör `callMistral` och skriver
+   `tool_runs`, `activities`, `ai_usage_events`. Räknar ut nästa
+   slot via `computeNextRunAt` och skriver `next_run_at` +
+   `last_run_at` + `last_run` på schedule-raden.
+
+### 12.3 Säkerhet och regelefterlevnad
+
+- **Shared secret** (`MOVEXUM_SCHEDULE_SECRET`) sätts i Coolify env,
+  aldrig i kod (CLAUDE.md § 10.3 A.8.24). Header-jämförelse är
+  timing-safe.
+- **RBAC-revalidering**: runner verifierar att `created_by`-användaren
+  fortfarande har staff-roll och `canRunTool` mot parent tool —
+  rollnedgradering blockerar nästa schemalagda körning (defense-in-
+  depth mot § 9.9-mönstret).
+- **Audit trail**: alla körningar loggas i `tool_runs` med
+  `input.mode='scheduled'`, syns i `/aktivitet` som `tool_run`.
+- **Tenant-isolation**: schedule, tool, tenant och creator
+  korsverifieras i runner-funktionen.
+- **EU AI Act art. 13**: `web_sources` loggas i `tool_runs.input` för
+  schemalagda körningar precis som för manuella.
+
+### 12.4 Begränsningar
+
+- Bara portfölj-agenter (`requires_startup=false`) kan schemaläggas.
+  Per-startup-agenter skulle behöva en startup-relation på schemat
+  och en per-bolag-loop i runnern — inte i scope för MVP.
+- Cron-parsern stödjer 5-fält standard-syntax med `*`, tal, listor,
+  intervall och stegvärden. Inga makron (`@daily` etc.), inga
+  L/W/#-tillägg.
+- DST-övergångar i `Europe/Stockholm` kan i värsta fall ge en extra
+  eller saknad körning på övergångsdagen — best-effort approximation
+  via `Intl.DateTimeFormat` istället för full tzdata-dep.
+- POST-fel mot endpointen ger 1h delay innan retry (provisorisk lock).
