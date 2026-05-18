@@ -436,7 +436,19 @@ export type MissionType =
   | 'community'
   | 'report'
   | 'onboarding'
-  | 'custom';
+  | 'custom'
+  | 'project';
+
+export type MissionParticipantRole = 'lead' | 'contributor' | 'observer';
+
+export interface MissionParticipant {
+  user_id: string;
+  role: MissionParticipantRole;
+  added_at: string;
+  added_by: string;
+}
+
+export type MissionVisibility = 'tenant' | 'participants';
 
 export interface MissionStage {
   id: string;
@@ -466,6 +478,9 @@ export interface Mission {
   recipients: string[]; // user ids
   mentor?: string;
   startup?: string;
+  startups?: string[];
+  participants_json?: MissionParticipant[];
+  visibility?: MissionVisibility;
   due_date?: string;
   description?: string;
   stages_json: MissionStage[];
@@ -478,6 +493,59 @@ export interface Mission {
     recipients?: Array<{ id: string; display_name?: string; email: string }>;
     mentor?: { id: string; display_name?: string; email: string };
     startup?: { id: string; name: string };
+    startups?: Array<{ id: string; name: string }>;
+  };
+}
+
+// ─── Kommentarer & notiser för samarbete ─────────────────────────────────────
+
+export interface MissionComment {
+  id: string;
+  tenant: string;
+  mission: string;
+  author: string;
+  body: string;
+  mentions: string[];
+  parent?: string;
+  edited_at?: string;
+  deleted?: boolean;
+  created: string;
+  updated: string;
+  expand?: {
+    author?: { id: string; display_name?: string; email: string };
+    mentions?: Array<{ id: string; display_name?: string; email: string }>;
+  };
+}
+
+export type NotificationKind =
+  | 'comment'
+  | 'mention'
+  | 'assigned'
+  | 'status_change'
+  | 'stage_advance'
+  | 'due_soon';
+
+export interface NotificationPayload {
+  title: string;
+  snippet?: string;
+  href: string;
+}
+
+export interface Notification {
+  id: string;
+  tenant: string;
+  user: string;
+  kind: NotificationKind;
+  mission?: string;
+  actor?: string;
+  comment?: string;
+  payload_json: NotificationPayload;
+  read_at?: string;
+  created: string;
+  updated: string;
+  expand?: {
+    actor?: { id: string; display_name?: string; email: string };
+    mission?: { id: string; title: string; type: MissionType };
   };
 }
 
@@ -654,15 +722,15 @@ export const coreModules: ModuleDefinition[] = [
   {
     id: 'inkorg',
     title: 'Min inkorg',
-    description: 'Uppdrag som tilldelats dig — kör verktyget och skicka för granskning.',
-    rolesAllowed: ['startup_member'],
+    description: 'Notiser, mentions och uppdrag som väntar på dig.',
+    rolesAllowed: ALL_ROLES,
     route: '/inkorg'
   },
   {
     id: 'uppdrag',
-    title: 'Uppdrag & flöden',
-    description: 'Tilldela, följa och dokumentera uppdrag mellan Movexum, startups, partners och community.',
-    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member'],
+    title: 'Projekt & uppdrag',
+    description: 'Skapa och samarbeta på projekt och uppdrag — bjud in roller, kommentera och följ flöden.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer'],
     route: '/uppdrag'
   },
   {
