@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useRef, useState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import {
   previewImportBolagslistaAction,
   commitImportBolagslistaAction,
@@ -20,7 +20,8 @@ export function ImportForm() {
   const commitFormRef = useRef<HTMLFormElement>(null);
   const previewFileRef = useRef<HTMLInputElement>(null);
   const commitFileRef = useRef<HTMLInputElement>(null);
-  const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const selectedName = selectedFile?.name ?? null;
 
   const [previewState, previewAction, previewPending] = useActionState(
     previewImportBolagslistaAction,
@@ -32,15 +33,19 @@ export function ImportForm() {
   );
 
   const handlePreviewFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0] ?? null;
-    setSelectedName(f?.name ?? null);
-    // Synka samma fil till commit-formen så den är redo direkt
-    if (f && commitFileRef.current) {
-      const dt = new DataTransfer();
-      dt.items.add(f);
-      commitFileRef.current.files = dt.files;
-    }
+    setSelectedFile(e.target.files?.[0] ?? null);
   };
+
+  // Synka vald fil till commit-formens dolda input. Effekten kör om när
+  // previewState går till 'ok' (då commit-formen monteras), så vi missar
+  // inte synken om filen valdes innan commit-formen fanns i DOM.
+  useEffect(() => {
+    const input = commitFileRef.current;
+    if (!input || !selectedFile) return;
+    const dt = new DataTransfer();
+    dt.items.add(selectedFile);
+    input.files = dt.files;
+  }, [selectedFile, previewState.status]);
 
   const inputClass =
     'block w-full rounded-2xl border border-default bg-surface px-4 py-2.5 text-sm text-foreground file:mr-3 file:rounded-xl file:border-0 file:bg-brand file:px-4 file:py-2 file:text-sm file:font-medium file:text-brand-foreground hover:file:bg-brand-hover focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
@@ -57,7 +62,7 @@ export function ImportForm() {
             Välj Bolagslista (.xlsx)
           </label>
           <p className="mt-1 text-xs text-foreground-subtle">
-            Max 5 MB. Filen måste innehålla en flik som heter Bolagslista
+            Max 25 MB. Filen måste innehålla en flik som heter Bolagslista
             med headers Bolag / Org.nr / Kommun / Status / Intagsdatum /
             Avslutsdatum på rad 3, följt av 14 år × 4 kolumner (Antal anställda,
             Omsättning, Personalkostnad, Bolagsskatt).

@@ -41,7 +41,7 @@ const nextConfig = {
     esmExternals: true,
     // Chat-bilagor (bilder base64-encoded + textfiler) — default 1 MB räcker inte
     serverActions: {
-      bodySizeLimit: '8mb'
+      bodySizeLimit: '32mb'
     }
   },
   webpack: (config) => {
