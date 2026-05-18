@@ -303,15 +303,3 @@ export async function updateReportFormAction(formData: FormData): Promise<void> 
   if (!result.error) redirect(`/rapporter/${id}`);
 }
 
-export async function createReportAndRedirectAction(formData: FormData): Promise<void> {
-  const recipient = (String(formData.get('recipient') || 'vinnova') as ReportRecipient);
-  const result = await createReportAction({
-    title: String(formData.get('title') || ''),
-    recipient,
-    period_label: String(formData.get('period_label') || ''),
-    period_start: String(formData.get('period_start') || new Date().toISOString().slice(0, 10)),
-    period_end: String(formData.get('period_end') || new Date().toISOString().slice(0, 10)),
-    accent: recipient === 'tillvaxtverket' ? 'copper' : recipient === 'region' ? 'green' : 'brown'
-  });
-  if (result.reportId) redirect(`/rapporter/${result.reportId}`);
-}

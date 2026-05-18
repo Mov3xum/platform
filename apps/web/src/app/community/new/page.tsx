@@ -14,7 +14,7 @@ async function createAndRedirect(
 ): Promise<CommunityActionState> {
   'use server';
   const result = await inviteAlumniFromFormAction({}, formData);
-  if (result.alumniId) redirect('/community');
+  if (result.alumniId) redirect(`/community/${result.alumniId}`);
   return result;
 }
 

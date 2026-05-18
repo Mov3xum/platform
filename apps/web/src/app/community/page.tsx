@@ -182,7 +182,11 @@ export default async function CommunityPage() {
           mentorsFallback.map((a, i) => {
             const chip = alumniTagChip(a.tag);
             return (
-              <div key={a.id} className="flex items-center gap-3 rounded-xl px-2 py-2">
+              <Link
+                key={a.id}
+                href={`/community/${a.id}`}
+                className="flex items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-canvas-muted"
+              >
                 <Avatar
                   initial={initials(a.name)}
                   size="sm"
@@ -199,7 +203,7 @@ export default async function CommunityPage() {
                 <Chip variant={chip.variant} mono>
                   {chip.label}
                 </Chip>
-              </div>
+              </Link>
             );
           })
         )}

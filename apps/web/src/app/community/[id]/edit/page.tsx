@@ -34,7 +34,7 @@ export default async function EditAlumniPage({ params }: { params: Promise<{ id:
   ): Promise<CommunityActionState> {
     'use server';
     const result = await updateAlumniFromFormAction(id, {}, formData);
-    if (!result.error) redirect('/community');
+    if (!result.error) redirect(`/community/${id}`);
     return result;
   }
 
