@@ -76,7 +76,7 @@ jobs:
         run: yarn add pocketbase
         working-directory: backend/pocketbase-schema/scripts
 
-      - name: Wait for PocketBase to be healthy
+      - name: Wait for PocketBase auth readiness
         env:
           PB_URL: ${{ secrets.PB_URL }}
         run: |
@@ -85,15 +85,32 @@ jobs:
             echo "::error::PB_URL secret saknas."
             exit 1
           fi
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -fsS -k "$PB_URL/api/health" > /dev/null; then
-              echo "✓ PocketBase är frisk (försök $attempt)"
+
+          pb_url="${PB_URL%/}"
+          if [[ "$pb_url" == http://* ]]; then
+            pb_url="https://${pb_url#http://}"
+          elif [[ "$pb_url" != https://* ]]; then
+            pb_url="https://$pb_url"
+          fi
+
+          for attempt in $(seq 1 40); do
+            health_code=$(curl -k -sS -o /dev/null -w "%{http_code}" "$pb_url/api/health" || true)
+            auth_code=$(curl -k -sS -o /dev/null -w "%{http_code}" \
+              -H "Content-Type: application/json" \
+              -X POST \
+              "$pb_url/api/collections/_superusers/auth-with-password" \
+              --data '{"identity":"readiness-probe","password":"readiness-probe"}' || true)
+
+            if [[ "$health_code" == "200" && "$auth_code" != "503" && "$auth_code" != "502" && "$auth_code" != "000" ]]; then
+              echo "✓ PocketBase ready (health=$health_code, auth=$auth_code)"
               exit 0
             fi
-            echo "PB inte redo än, försök $attempt/10, väntar 15s..."
+
+            echo "PB not ready yet (attempt $attempt/40): health=$health_code auth=$auth_code"
             sleep 15
           done
-          echo "::error::PocketBase blev aldrig frisk efter 150s."
+
+          echo "::error::PocketBase auth endpoint not ready after 10 minutes."
           exit 1
 
       - name: Kör setup-via-api.mjs mot PocketBase

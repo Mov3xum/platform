@@ -29,20 +29,42 @@ jobs:
       - name: Install deps
         run: yarn install --frozen-lockfile
 
-      - name: Wait for PocketBase
+      - name: Wait for PocketBase auth readiness
         env:
           PB_URL: ${{ secrets.PB_URL }}
         run: |
-          set -eu
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -fsS -k "$PB_URL/api/health" > /dev/null; then
-              echo "PB online"
+          set -euo pipefail
+
+          if [ -z "${PB_URL:-}" ]; then
+            echo "PB_URL saknas i secrets."
+            exit 1
+          fi
+
+          pb_url="${PB_URL%/}"
+          if [[ "$pb_url" == http://* ]]; then
+            pb_url="https://${pb_url#http://}"
+          elif [[ "$pb_url" != https://* ]]; then
+            pb_url="https://$pb_url"
+          fi
+
+          for attempt in $(seq 1 40); do
+            health_code=$(curl -k -sS -o /dev/null -w "%{http_code}" "$pb_url/api/health" || true)
+            auth_code=$(curl -k -sS -o /dev/null -w "%{http_code}" \
+              -H "Content-Type: application/json" \
+              -X POST \
+              "$pb_url/api/collections/_superusers/auth-with-password" \
+              --data '{"identity":"readiness-probe","password":"readiness-probe"}' || true)
+
+            if [[ "$health_code" == "200" && "$auth_code" != "503" && "$auth_code" != "502" && "$auth_code" != "000" ]]; then
+              echo "PB online and auth endpoint ready (health=$health_code, auth=$auth_code)"
               exit 0
             fi
-            echo "Försök $attempt: ingen kontakt, väntar 15 s…"
+
+            echo "Attempt $attempt/40: health=$health_code auth=$auth_code, waiting 15s..."
             sleep 15
           done
-          echo "PB svarar inte efter 150 s — avbryter."
+
+          echo "PB auth endpoint was not ready after 10 minutes."
           exit 1
 
       - name: Bootstrap PocketBase
