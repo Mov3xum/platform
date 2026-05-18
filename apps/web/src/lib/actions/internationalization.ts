@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { callMistral, estimateCostUsd } from '@/lib/ai/mistral';
+import { logAiUsage } from '@/lib/ai/usage';
 import { buildStartupContext } from '@/lib/ai/context';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import {
@@ -124,6 +125,15 @@ export async function runIntlDiagnosticAction(
       { role: 'user', content: userPrompt }
     ]);
 
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'workshop_run',
+      model: INTL_MODEL,
+      tokensIn: result.usage.prompt_tokens,
+      tokensOut: result.usage.completion_tokens
+    });
+
     const now = new Date().toISOString();
     await pb.collection(PB_COLLECTIONS.workshopRuns).update(String(run.id), {
       status: 'succeeded',
@@ -207,6 +217,15 @@ export async function runIntlScenariosAction(
       { role: 'system', content: PRESCRIPTIVE_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt }
     ]);
+
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'workshop_run',
+      model: INTL_MODEL,
+      tokensIn: result.usage.prompt_tokens,
+      tokensOut: result.usage.completion_tokens
+    });
 
     const now = new Date().toISOString();
     await pb.collection(PB_COLLECTIONS.workshopRuns).update(String(run.id), {
@@ -316,6 +335,15 @@ Utmana det valda scenariot från fyra vinklar.`;
       { role: 'system', content: daSystemPrompt },
       { role: 'user', content: daUserPrompt }
     ]);
+
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'workshop_run',
+      model: INTL_MODEL,
+      tokensIn: result.usage.prompt_tokens,
+      tokensOut: result.usage.completion_tokens
+    });
 
     const now = new Date().toISOString();
     await pb.collection(PB_COLLECTIONS.workshopRuns).update(String(run.id), {
@@ -692,6 +720,15 @@ export async function runQuarterlyRecalibrationAction(
       { role: 'system', content: TRACKING_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt }
     ]);
+
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'workshop_run',
+      model: INTL_MODEL,
+      tokensIn: result.usage.prompt_tokens,
+      tokensOut: result.usage.completion_tokens
+    });
 
     const now = new Date().toISOString();
     await pb.collection(PB_COLLECTIONS.workshopRuns).update(String(run.id), {

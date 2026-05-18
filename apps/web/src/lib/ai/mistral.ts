@@ -7,11 +7,11 @@ const MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 1000;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 
-// Mistrals API accepterar både string- och objektformen för `image_url`.
-// Vi exponerar en typ som täcker bägge och två alias för bakåtkompatibilitet.
 export type MistralContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: string | { url: string } };
+
+export type MistralContentBlock = MistralContentPart;
 
 export type MistralContentBlock = MistralContentPart;
 
@@ -285,7 +285,7 @@ export function estimateCostUsd(
     'mistral-large-latest': [2.0, 6.0],
     'mistral-medium-latest': [0.4, 1.2],
     'mistral-small-latest': [0.1, 0.3],
-    'pixtral-12b-2409': [0.15, 0.15]
+    'pixtral-large-latest': [0.15, 0.15]
   };
   const [inPrice, outPrice] = pricing[model] ?? [2.0, 6.0];
   return (tokensIn / 1_000_000) * inPrice + (tokensOut / 1_000_000) * outPrice;

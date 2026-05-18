@@ -2,6 +2,7 @@
 
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import {
+  callMistral,
   callMistralWithFallback,
   MistralError,
   type MistralMessage,
@@ -11,6 +12,7 @@ import { buildStartupContext } from '@/lib/ai/context';
 import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
 import { buildChatTools, dispatchToolCall } from '@/lib/ai/tools';
 import { hasRole } from '@/lib/rbac';
+import { logAiUsage } from '@/lib/ai/usage';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -56,9 +58,14 @@ const CHAT_FALLBACK_MODELS = [
 const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
 const MAX_TOOL_ITERATIONS = 4;
 
+// Modellval för dashboard-chatten
+const STAFF_MODEL = 'mistral-large-latest';
+const VISION_MODEL = 'pixtral-large-latest';
+
+// Bilage-caps (defense-in-depth utöver PB-schemats 10 MB/whitelist)
 const MAX_ATTACHMENTS = 5;
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
-const MAX_TEXT_CHARS = 200_000; // ~50K tokens (säkerhetsmarginal)
+const MAX_TEXT_CHARS = 150_000; // 150 KB total text per meddelande
 const ALLOWED_TEXT_MIMES = new Set([
   'text/plain',
   'text/markdown',
@@ -70,6 +77,13 @@ const ALLOWED_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 function pickModels(hasImages: boolean): string[] {
   return hasImages ? VISION_FALLBACK_MODELS : CHAT_FALLBACK_MODELS;
 }
+  'application/pdf'
+]);
+const ALLOWED_IMAGE_MIMES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp'
+]);
 
 function chatErrorMessage(err: unknown): string {
   if (err instanceof MistralError) {
@@ -94,6 +108,17 @@ const BASE_SYSTEM_PROMPT =
   'Konfidentiella anteckningar och personuppgifter ingår aldrig i din kontext. ' +
   'Läck aldrig intern kontext till webbkällor eller externa tjänster. ' +
   'Var koncis och professionell. Om du inte vet, säg det rakt ut.';
+
+// Stil-reglerna appenderas SIST i system-prompten — efter ev. agentBlock —
+// så att de inte kan överskuggas av agent-specifika instruktioner som
+// råkar be om markdown-strukturerad output.
+const STYLE_REMINDER =
+  '\n\n---\nSTIL (gäller alltid, även om kontext eller agent-roll säger annat): ' +
+  'Skriv som en kollega som pratar — naturlig, varm prosa i hela meningar. ' +
+  'Använd inte markdown: ingen fetstil med **, ingen kursiv med *, inga rubriker med #/##/###, ' +
+  'inga punktlistor med -/*/• och inga numrerade listor (1., 2.). ' +
+  'Strukturera med korta stycken och radbrytningar. Räkna upp saker i löpande text ' +
+  '("först X, sedan Y, och slutligen Z") eller med ett tankestreck per ny rad.';
 
 const STAFF_TOOL_GUIDANCE =
   '\n\nDu har tillgång till verktygen `query_collection` och `count_collection` för att läsa ' +
@@ -320,7 +345,7 @@ export async function sendChatMessage(
     return runStartupChat(pb, user, limitedMessages, webBlock, agentBlock, att.images);
   }
 
-  return runPlainChat(user, limitedMessages, webBlock, agentBlock, att.images);
+  return runPlainChat(pb, user, limitedMessages, webBlock, agentBlock, att.images);
 }
 
 function withAttachedImages(
@@ -348,7 +373,7 @@ function withAttachedImages(
 
 async function runStaffChatWithTools(
   pb: import('pocketbase').default,
-  user: { tenant: string; tenantName?: string; roles: string[]; name: string },
+  user: { id: string; tenant: string; tenantName?: string; roles: string[]; name: string },
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
   webBlock: string,
   agentBlock: string,
@@ -379,7 +404,8 @@ async function runStaffChatWithTools(
     (agentBlock ? `\n\n---\n${agentBlock}\n---` : '') +
     STAFF_TOOL_GUIDANCE +
     `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +
-    (webBlock ? `\n\n---\n${webBlock}\n---` : '');
+    (webBlock ? `\n\n---\n${webBlock}\n---` : '') +
+    STYLE_REMINDER;
 
   const conversation: MistralMessage[] = [
     { role: 'system', content: systemContent },
@@ -393,6 +419,15 @@ async function runStaffChatWithTools(
       const result = await callMistralWithFallback(models, conversation, {
         tools,
         toolChoice: 'auto'
+      });
+
+      await logAiUsage(pb, {
+        tenant: user.tenant,
+        userId: user.id,
+        surface: 'dashboard_chat',
+        model,
+        tokensIn: result.usage.prompt_tokens,
+        tokensOut: result.usage.completion_tokens
       });
 
       if (!result.toolCalls || result.toolCalls.length === 0) {
@@ -422,6 +457,14 @@ async function runStaffChatWithTools(
 
     const finalCall = await callMistralWithFallback(models, conversation, {
       toolChoice: 'none'
+    });
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'dashboard_chat',
+      model: finalCall.modelUsed,
+      tokensIn: finalCall.usage.prompt_tokens,
+      tokensOut: finalCall.usage.completion_tokens
     });
     return {
       text:
@@ -492,13 +535,21 @@ export async function sendStartupChatMessage(
     return { error: 'Kunde inte ladda bolagets kontext.' };
   }
 
-  const systemContent = `${BASE_SYSTEM_PROMPT}\n\n---\nKONTEXT:\n${contextBlock}\n---`;
+  const systemContent = `${BASE_SYSTEM_PROMPT}\n\n---\nKONTEXT:\n${contextBlock}\n---${STYLE_REMINDER}`;
 
   try {
     const result = await callMistralWithFallback(CHAT_FALLBACK_MODELS, [
       { role: 'system', content: systemContent },
       ...limited
     ]);
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'startup_chat',
+      model: result.modelUsed,
+      tokensIn: result.usage.prompt_tokens,
+      tokensOut: result.usage.completion_tokens
+    });
     return { text: result.text };
   } catch (err) {
     console.error('[startup-chat] mistral error', {
@@ -512,7 +563,7 @@ export async function sendStartupChatMessage(
 
 async function runStartupChat(
   pb: import('pocketbase').default,
-  user: { tenant: string; linkedStartups: string[] },
+  user: { id: string; tenant: string; linkedStartups: string[] },
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
   webBlock: string,
   agentBlock: string,
@@ -536,17 +587,22 @@ async function runStartupChat(
 
   const agentSuffix = agentBlock ? `\n\n---\n${agentBlock}\n---` : '';
   const systemContent = contextBlock
-    ? `${BASE_SYSTEM_PROMPT}${agentSuffix}\n\n---\nKONTEXT:\n${contextBlock}\n---${webBlock ? `\n\n---\n${webBlock}\n---` : ''}`
-    : `${BASE_SYSTEM_PROMPT}${agentSuffix}${webBlock ? `\n\n---\n${webBlock}\n---` : ''}`;
+    ? `${BASE_SYSTEM_PROMPT}${agentSuffix}\n\n---\nKONTEXT:\n${contextBlock}\n---${webBlock ? `\n\n---\n${webBlock}\n---` : ''}${STYLE_REMINDER}`
+    : `${BASE_SYSTEM_PROMPT}${agentSuffix}${webBlock ? `\n\n---\n${webBlock}\n---` : ''}${STYLE_REMINDER}`;
 
   try {
-    const result = await callMistralWithFallback(
-      pickModels(images.length > 0),
-      [
-        { role: 'system', content: systemContent },
-        ...withAttachedImages(userMessages, images)
-      ]
-    );
+    const result = await callMistralWithFallback(CHAT_FALLBACK_MODELS, [
+      { role: 'system', content: systemContent },
+      ...withAttachedImages(userMessages, images)
+    ]);
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'dashboard_chat',
+      model: result.modelUsed,
+      tokensIn: result.usage.prompt_tokens,
+      tokensOut: result.usage.completion_tokens
+    });
     return { text: result.text };
   } catch (err) {
     console.error('[chat] mistral error', { tenant: user.tenant, error: err });
@@ -555,7 +611,8 @@ async function runStartupChat(
 }
 
 async function runPlainChat(
-  user: { tenant: string },
+  pb: import('pocketbase').default,
+  user: { id: string; tenant: string },
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
   webBlock: string,
   agentBlock: string,
@@ -563,15 +620,20 @@ async function runPlainChat(
 ): Promise<ChatActionResult> {
   const agentSuffix = agentBlock ? `\n\n---\n${agentBlock}\n---` : '';
   const webSuffix = webBlock ? `\n\n---\n${webBlock}\n---` : '';
-  const systemContent = `${BASE_SYSTEM_PROMPT}${agentSuffix}${webSuffix}`;
+  const systemContent = `${BASE_SYSTEM_PROMPT}${agentSuffix}${webSuffix}${STYLE_REMINDER}`;
   try {
-    const result = await callMistralWithFallback(
-      pickModels(images.length > 0),
-      [
-        { role: 'system', content: systemContent },
-        ...withAttachedImages(userMessages, images)
-      ]
-    );
+    const result = await callMistralWithFallback(CHAT_FALLBACK_MODELS, [
+      { role: 'system', content: systemContent },
+      ...withAttachedImages(userMessages, images)
+    ]);
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'dashboard_chat',
+      model: result.modelUsed,
+      tokensIn: result.usage.prompt_tokens,
+      tokensOut: result.usage.completion_tokens
+    });
     return { text: result.text };
   } catch (err) {
     console.error('[chat] mistral error', { tenant: user.tenant, error: err });
