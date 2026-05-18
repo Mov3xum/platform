@@ -85,6 +85,10 @@ export const canActivateConnector = (
 
   if (connector.kind === 'mcp') return true;
 
+  // Staff (admin/incubator_lead) får testa alla built-ins utan att
+  // först sätta upp tenant-allowlistan — speglar `canRunTool`-mönstret.
+  if (hasRole(userRoles, STAFF_ROLES)) return true;
+
   if (Array.isArray(tenantAllowlist) && tenantAllowlist.length > 0) {
     return tenantAllowlist.includes(connector.id);
   }

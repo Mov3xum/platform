@@ -53,7 +53,16 @@ function getClient() {
  * Listar aktiva connectors i vårt Mistral-workspace. Cachas 5 min för
  * att inte spamma Mistral vid varje sidladdning. Fail-soft: vid fel
  * returneras tom array — UI:t fortsätter visa built-ins.
+ *
+ * Mistrals API tar filtret som `query_filters` (JSON-objekt), inte
+ * som top-level query-param. Utan korrekt filter returneras hela
+ * workspacets connector-register inklusive de användaren disablat i
+ * Le Chat. Paginering: { items, pagination: { next_cursor } } — vi
+ * loopar tills cursor är null eller taket nås.
  */
+const MAX_CONNECTORS = 200;
+const PAGE_SIZE = 50;
+
 export async function listActiveConnectors(): Promise<MistralConnector[]> {
   const now = Date.now();
   if (listCache && now - listCache.fetchedAt < LIST_CACHE_TTL_MS) {
@@ -62,31 +71,49 @@ export async function listActiveConnectors(): Promise<MistralConnector[]> {
 
   try {
     const client = getClient();
-    const response = await client<{
-      data?: MistralConnector[];
-      items?: MistralConnector[];
-    }>('/v1/connectors', { query: { active: 'true' } });
+    const filter = JSON.stringify({ active: true });
+    const collected: MistralConnector[] = [];
+    let cursor: string | undefined = undefined;
 
-    // Mistral kan returnera antingen { data: [...] } eller { items: [...] }
-    // beroende på endpoint-version — hantera båda defensivt.
-    const items = response.data ?? response.items ?? [];
-    const normalized = items
-      .filter((c) => c.active !== false)
-      .map((c) => ({
-        ...c,
-        requires_auth: c.requires_auth === true
-      }));
+    for (let page = 0; page < 10; page++) {
+      const response: {
+        data?: MistralConnector[];
+        items?: MistralConnector[];
+        pagination?: { next_cursor?: string | null };
+        next_cursor?: string | null;
+      } = await client('/v1/connectors', {
+        query: {
+          query_filters: filter,
+          page_size: PAGE_SIZE,
+          ...(cursor ? { page_cursor: cursor } : {})
+        }
+      });
 
-    listCache = { fetchedAt: now, value: normalized };
-    return normalized;
+      const items = response.data ?? response.items ?? [];
+      for (const c of items) {
+        if (c.active === false) continue;
+        collected.push({
+          ...c,
+          requires_auth: c.requires_auth === true
+        });
+        if (collected.length >= MAX_CONNECTORS) break;
+      }
+
+      const next = response.pagination?.next_cursor ?? response.next_cursor ?? null;
+      if (!next || collected.length >= MAX_CONNECTORS) break;
+      cursor = next;
+    }
+
+    listCache = { fetchedAt: now, value: collected };
+    return collected;
   } catch (err) {
     if (err instanceof IntegrationFetchError) {
-      console.warn('[mistral/connectors] list failed', {
+      console.error('[mistral/connectors] list failed', {
         status: err.status,
         body: err.bodySnippet
       });
     } else {
-      console.warn('[mistral/connectors] list failed', err);
+      console.error('[mistral/connectors] list failed', err);
     }
     return [];
   }

@@ -92,12 +92,16 @@ export const DEFAULT_ALLOWED_BUILTINS: BuiltinId[] = ['web_search'];
 export function isConnectorAllowedForTenant(
   connectorKind: 'builtin' | 'mcp',
   connectorId: string,
-  tenantAllowlist: string[] | null | undefined
+  tenantAllowlist: string[] | null | undefined,
+  options: { isStaff?: boolean } = {}
 ): boolean {
   // MCP-connectors är alltid tillåtna om de finns i workspacet — vi kan
   // inte påtvinga policys på custom MCPs här. Admin styr via Mistral-
   // workspacet vilka MCPs som är aktiva.
   if (connectorKind === 'mcp') return true;
+
+  // Staff får testa alla built-ins även när allowlistan inte är satt.
+  if (options.isStaff) return true;
 
   if (Array.isArray(tenantAllowlist) && tenantAllowlist.length > 0) {
     return tenantAllowlist.includes(connectorId);
