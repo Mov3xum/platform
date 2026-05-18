@@ -14,6 +14,7 @@ import {
 import { NoteForm } from '@/components/NoteForm';
 import { NoteItem } from '@/components/NoteItem';
 import { StartupDetailDashboard } from '@/components/StartupDetailDashboard';
+import { AllabolagSyncButton } from './AllabolagSyncButton';
 import {
   activityStatusLabels,
   activityTypeLabels,
@@ -45,8 +46,26 @@ interface StartupRecord {
   tags?: string;
   sprint_x_json?: SprintXScore;
   coaches?: string[];
+  org_nr?: string;
+  kommun?: string;
+  bolagsform?: string;
+  industri?: string;
+  bolag_status?: string;
   created: string;
   updated: string;
+}
+
+type FinancialsSource = 'manual' | 'import_excel' | 'allabolag' | 'other';
+
+interface FinancialsRow {
+  id: string;
+  year: number;
+  employees?: number;
+  revenue_sek?: number;
+  personnel_cost_sek?: number;
+  corporate_tax_sek?: number;
+  source: FinancialsSource;
+  synced_at?: string;
 }
 
 interface NoteRecord {
@@ -167,7 +186,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     agreementsResult,
     engagementsResult,
     toolActivitiesResult,
-    workshopAssignmentsResult
+    workshopAssignmentsResult,
+    financialsResult
   ] = await Promise.allSettled([
     pb.collection('startup_team_members').getList<TeamMemberRecord>(1, 50, {
       filter: `startup = "${id}"`,
@@ -205,6 +225,10 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       filter: `startup = "${id}" && tenant = "${user.tenant}"`,
       sort: '-created',
       expand: 'workshop,assigned_by'
+    }),
+    pb.collection('startup_financials').getList<FinancialsRow>(1, 5, {
+      filter: `startup = "${id}"`,
+      sort: '-year'
     })
   ]);
 
@@ -217,6 +241,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   const toolActivities = toolActivitiesResult.status === 'fulfilled' ? toolActivitiesResult.value : emptyList;
   const workshopAssignments =
     workshopAssignmentsResult.status === 'fulfilled' ? workshopAssignmentsResult.value : emptyList;
+  const financials =
+    financialsResult.status === 'fulfilled' ? financialsResult.value : emptyList;
 
   const sectionLoadFailed = [
     teamResult,
@@ -226,7 +252,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     agreementsResult,
     engagementsResult,
     toolActivitiesResult,
-    workshopAssignmentsResult
+    workshopAssignmentsResult,
+    financialsResult
   ].some((result) => result.status === 'rejected');
 
   if (sectionLoadFailed) {
@@ -298,6 +325,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ['#partners', `Kapital (${engagements.totalItems})`],
           ['#agreements', `Avtal (${agreements.totalItems})`],
           ['#partners', `Partners (${engagements.totalItems})`],
+          ['#financials', `Finansiell historik (${financials.totalItems})`],
           ['#tools', `Verktyg (${toolActivities.totalItems})`],
           ['#workshops', `Workshops (${workshopAssignments.totalItems})`]
         ].map(([href, label]) => (
@@ -586,6 +614,63 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           </div>
         </Section>
 
+        <Section id="financials" title="Finansiell historik">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-foreground-muted">
+              Årsvis nyckeltal från årsredovisningar och manuella inlägg. Källa
+              visas per rad.
+            </p>
+            {canEdit && startup.org_nr ? (
+              <AllabolagSyncButton startupId={id} />
+            ) : null}
+          </div>
+          {!startup.org_nr ? (
+            <Empty>
+              Fyll i organisationsnummer under "Redigera" för att aktivera
+              Allabolag-synk.
+            </Empty>
+          ) : financials.items.length === 0 ? (
+            <Empty>Inga årsrader registrerade än.</Empty>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-default">
+              <table className="w-full text-sm">
+                <thead className="bg-canvas-subtle text-left text-xs uppercase tracking-wider text-foreground-subtle">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">År</th>
+                    <th className="px-3 py-2 font-medium">Omsättning</th>
+                    <th className="px-3 py-2 font-medium">Anställda</th>
+                    <th className="px-3 py-2 font-medium">Personalkostnad</th>
+                    <th className="px-3 py-2 font-medium">Bolagsskatt</th>
+                    <th className="px-3 py-2 font-medium">Källa</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {financials.items.map((row) => (
+                    <tr key={row.id} className="border-t border-default">
+                      <td className="px-3 py-2 font-medium text-foreground">{row.year}</td>
+                      <td className="px-3 py-2 text-foreground-muted">
+                        {formatSek(row.revenue_sek)}
+                      </td>
+                      <td className="px-3 py-2 text-foreground-muted">
+                        {row.employees ?? '–'}
+                      </td>
+                      <td className="px-3 py-2 text-foreground-muted">
+                        {formatSek(row.personnel_cost_sek)}
+                      </td>
+                      <td className="px-3 py-2 text-foreground-muted">
+                        {formatSek(row.corporate_tax_sek)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <SourceBadge source={row.source} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+
         <Section id="tools" title="Verktyg">
           <div className="mb-4 flex items-center justify-between">
             <p className="text-sm text-foreground-muted">
@@ -736,6 +821,41 @@ function Section({ id, title, children }: { id: string; title: string; children:
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <p className="text-sm text-foreground-subtle">{children}</p>;
+}
+
+function formatSek(value?: number): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '–';
+  return `${value.toLocaleString('sv-SE')} kr`;
+}
+
+function SourceBadge({ source }: { source: FinancialsSource }) {
+  // Movexum-paletten: manual = neutral, import_excel = subtle muted,
+  // allabolag = brand-accent (mörkblå/ljusblå), other = neutral.
+  const cfg: Record<FinancialsSource, { label: string; className: string }> = {
+    manual: {
+      label: 'Manuell',
+      className: 'bg-canvas-subtle text-foreground-muted'
+    },
+    import_excel: {
+      label: 'Excel',
+      className: 'bg-canvas-muted text-foreground-muted'
+    },
+    allabolag: {
+      label: 'Allabolag',
+      className:
+        'bg-movexum-pastell-bla text-movexum-morkbla dark:bg-movexum-morkbla/60 dark:text-movexum-pastell-bla'
+    },
+    other: {
+      label: 'Övrigt',
+      className: 'bg-canvas-subtle text-foreground-muted'
+    }
+  };
+  const c = cfg[source] || cfg.other;
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${c.className}`}>
+      {c.label}
+    </span>
+  );
 }
 
 function StatusPill({ label, variant }: { label: string; variant: 'success' | 'danger' | 'info' | 'neutral' }) {
