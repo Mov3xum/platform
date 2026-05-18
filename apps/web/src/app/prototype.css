@@ -11,7 +11,12 @@
   /* Brand — Startupkompass-skiftet (2026-05).
    * Canvas är ren vit, paper-ytor neutrala. Mörkblå (#002c40) bär
    * accenter och rail. Ljusblå reserveras för länkar och info-pills,
-   * inte för bakgrundsytor. */
+   * inte för bakgrundsytor.
+   *
+   * Visuell princip (2026-05-18): rail + topbar + canvas + right-rail
+   * delar samma bakgrund. Avgränsare är hyper-subtila linjer, inga
+   * färgskillnader. Mörkblå tint ligger i dark mode-tonerna men ska
+   * vara så svag att den nästan inte syns — bara en "kall" känsla. */
   --mx-ink:        #002c40; /* Movexum mörkblå (rail + brand) */
   --mx-ink-2:      #003b54;
   --mx-ink-3:      #1d556a;
@@ -20,11 +25,21 @@
   --mx-paper:      #ffffff;
   --mx-paper-2:    #fafafa; /* Paper-alt — neutral */
   --mx-paper-3:    #f4f4f5; /* Paper-deep — neutral */
-  --mx-line:       #e5e5e5;
-  --mx-line-soft:  #f0f0f0;
-  --mx-line-strong:#d4d4d4;
+  --mx-line:       #ececec;
+  --mx-line-soft:  #f5f5f5;
+  --mx-line-strong:#dcdcdc;
   --mx-muted:      #737373;
   --mx-muted-2:    #a3a3a3;
+
+  /* Rail/topbar — delas med canvas så att hela ytan smälter samman. */
+  --mx-rail-bg:    var(--mx-canvas);
+  --mx-rail-fg:    var(--mx-ink-soft);
+  --mx-rail-fg-strong: var(--mx-ink);
+  --mx-rail-fg-mute:   var(--mx-muted-2);
+  --mx-rail-active-bg: rgba(0, 44, 64, 0.06);
+  --mx-rail-hover-bg:  rgba(0, 0, 0, 0.035);
+  --mx-rail-divider:   rgba(0, 0, 0, 0.05);
+  --mx-rail-accent:    #002c40;
 
   /* Module-accenter — Movexums palett */
   --mx-green:      #4a7d4a;       /* Movexum grön */
@@ -89,20 +104,31 @@
 }
 
 html.dark {
-  --mx-canvas:     #000000;
-  --mx-paper:      #0a0a0a;
-  --mx-paper-2:    #111111;
-  --mx-paper-3:    #181818;
-  --mx-line:       #1e1e1e;
-  --mx-line-soft:  #141414;
-  --mx-line-strong:#2d2d2d;
-  --mx-muted:      #888888;
-  --mx-muted-2:    #555555;
-  --mx-ink:        #f5f5f5;
-  --mx-ink-2:      #d4d4d4;
-  --mx-ink-3:      #b3b3b3;
-  --mx-ink-soft:   #888;
-  /* Rail-bakgrunden är ALLTID mörkblå även i dark mode */
+  /* Mörk canvas med hyper-subtil mörkblå nyans (#04070a är nästan svart
+   * men med en aning kall ton). Rail + topbar + content delar exakt
+   * samma bakgrund så att hela ytan ser ut som en enda yta. */
+  --mx-canvas:     #050608;
+  --mx-paper:      #0a0c0f;
+  --mx-paper-2:    #0e1014;
+  --mx-paper-3:    #14171c;
+  --mx-line:       rgba(255, 255, 255, 0.05);
+  --mx-line-soft:  rgba(255, 255, 255, 0.025);
+  --mx-line-strong:rgba(255, 255, 255, 0.10);
+  --mx-muted:      #8a8f96;
+  --mx-muted-2:    #5a5f66;
+  --mx-ink:        #ececec;
+  --mx-ink-2:      #c8ccd1;
+  --mx-ink-3:      #aab0b7;
+  --mx-ink-soft:   #8a8f96;
+
+  --mx-rail-bg:    var(--mx-canvas);
+  --mx-rail-fg:    #b6bbc1;
+  --mx-rail-fg-strong: #f0f2f5;
+  --mx-rail-fg-mute:   #6c7178;
+  --mx-rail-active-bg: rgba(79, 196, 234, 0.07);
+  --mx-rail-hover-bg:  rgba(255, 255, 255, 0.035);
+  --mx-rail-divider:   rgba(255, 255, 255, 0.045);
+  --mx-rail-accent:    #4fc4ea;
 }
 
 /* ============================================================
@@ -126,8 +152,8 @@ html.dark {
    ============================================================ */
 
 .mx-rail {
-  background: #000000;
-  color: rgba(255, 255, 255, 0.72);
+  background: var(--mx-rail-bg);
+  color: var(--mx-rail-fg);
   display: flex;
   flex-direction: column;
   position: sticky;
@@ -135,7 +161,7 @@ html.dark {
   height: 100vh;
   z-index: 30;
   overflow: hidden;
-  border-right: 1px solid rgba(141, 111, 214, 0.12);
+  border-right: 1px solid var(--mx-rail-divider);
 }
 
 .mx-rail-head {
@@ -143,7 +169,7 @@ html.dark {
   align-items: center;
   justify-content: center;
   padding: 18px 16px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid var(--mx-rail-divider);
 }
 
 .mx-rail-brand {
@@ -165,7 +191,7 @@ html.dark {
   font-weight: 600;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  color: rgba(255,255,255,.35);
+  color: var(--mx-rail-fg-mute);
   padding: 16px 12px 6px;
 }
 
@@ -175,7 +201,7 @@ html.dark {
   gap: 10px;
   padding: 7px 10px 7px 12px;
   border-radius: 8px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--mx-rail-fg);
   font-size: 13px;
   font-weight: 500;
   position: relative;
@@ -186,49 +212,49 @@ html.dark {
 }
 
 .mx-rail-item:hover {
-  background: rgba(255,255,255,0.06);
-  color: white;
+  background: var(--mx-rail-hover-bg);
+  color: var(--mx-rail-fg-strong);
 }
 
 .mx-rail-item.active {
-  background: rgba(141, 111, 214, 0.12);
-  color: white;
+  background: var(--mx-rail-active-bg);
+  color: var(--mx-rail-fg-strong);
 }
 
 .mx-rail-item.active::before {
   content: '';
   position: absolute;
   left: -8px;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  background: #8e6fd6;
-  border-radius: 0 3px 3px 0;
-  box-shadow: 0 0 10px #8e6fd6, 0 0 20px rgba(141, 111, 214, 0.5);
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  background: var(--mx-rail-accent);
+  border-radius: 0 2px 2px 0;
+  opacity: 0.85;
 }
 
-.mx-rail-item .mx-ico { opacity: .65; flex-shrink: 0; }
-.mx-rail-item.active .mx-ico { opacity: 1; }
+.mx-rail-item .mx-ico { opacity: .6; flex-shrink: 0; }
+.mx-rail-item.active .mx-ico { opacity: 1; color: var(--mx-rail-accent); }
 
 .mx-rail-item .mx-count {
   margin-left: auto;
   font-family: var(--mx-mono);
   font-size: 10px;
   font-weight: 600;
-  background: rgba(255,255,255,0.08);
+  background: var(--mx-rail-hover-bg);
   padding: 1px 6px;
   border-radius: 4px;
-  color: rgba(255,255,255,.6);
+  color: var(--mx-rail-fg);
 }
 
 .mx-rail-item.active .mx-count {
-  background: rgba(141, 111, 214, 0.22);
-  color: #c9b6fb;
+  background: var(--mx-rail-active-bg);
+  color: var(--mx-rail-accent);
 }
 
 .mx-rail-foot {
   padding: 10px 12px 14px;
-  border-top: 1px solid rgba(255,255,255,0.06);
+  border-top: 1px solid var(--mx-rail-divider);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -237,8 +263,8 @@ html.dark {
 .mx-rail-user-av {
   width: 28px; height: 28px;
   border-radius: 50%;
-  background: #6138b5; /* Movexum lila */
-  color: white;
+  background: var(--mx-rail-accent);
+  color: var(--mx-rail-bg);
   display: grid; place-items: center;
   font-weight: 700;
   font-size: 11px;
@@ -249,7 +275,7 @@ html.dark {
 .mx-rail-user-name {
   font-size: 12px;
   font-weight: 600;
-  color: white;
+  color: var(--mx-rail-fg-strong);
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -261,7 +287,7 @@ html.dark {
   font-size: 9px;
   letter-spacing: 1px;
   text-transform: uppercase;
-  color: rgba(255,255,255,.45);
+  color: var(--mx-rail-fg-mute);
   margin-top: 2px;
 }
 
@@ -283,7 +309,7 @@ html.dark {
   gap: 12px;
   padding: 0 20px;
   background: var(--mx-canvas);
-  border-bottom: 1px solid var(--mx-line);
+  border-bottom: 1px solid var(--mx-rail-divider);
   position: sticky;
   top: 0;
   z-index: 20;
@@ -370,9 +396,8 @@ html.dark {
   top: 6px; right: 6px;
   width: 6px; height: 6px;
   border-radius: 50%;
-  background: #8e6fd6;
+  background: var(--mx-rail-accent);
   border: 1.5px solid var(--mx-canvas);
-  box-shadow: 0 0 6px rgba(141, 111, 214, 0.8);
 }
 
 /* ============================================================
@@ -923,11 +948,11 @@ select.mx-input:focus {
 .mx-view::-webkit-scrollbar { width: 10px; height: 10px; }
 .mx-view::-webkit-scrollbar-track { background: transparent; }
 .mx-view::-webkit-scrollbar-thumb {
-  background: rgba(97, 56, 181, 0.2);
+  background: var(--mx-line-strong);
   border-radius: 999px;
   border: 2px solid var(--mx-canvas);
 }
-.mx-view::-webkit-scrollbar-thumb:hover { background: rgba(97, 56, 181, 0.35); }
+.mx-view::-webkit-scrollbar-thumb:hover { background: var(--mx-muted-2); }
 
 /* ============================================================
    Mobile menu button + backdrop
@@ -1311,141 +1336,118 @@ body.mx-rail-locked {
 }
 
 /* ============================================================
-   Dark mode — Rankad-inspirerad visuell förstärkning
-   Svart canvas, lila accenter, punktmönster, glöd
+   Dark mode — Minimalistisk fade.
+   Black canvas med en aning kall ton. Rail, topbar och content
+   delar samma bakgrund. Inga glöd, inga lila pattern — bara djup
+   genom mjuka skuggor och nästan osynliga linjer.
    ============================================================ */
 
-html.dark .mx-rail {
-  border-right-color: rgba(141, 111, 214, 0.15);
-}
-
-/* Subtle lila glow at top of rail */
-html.dark .mx-rail-head {
-  background: linear-gradient(180deg, rgba(97, 56, 181, 0.08) 0%, transparent 100%);
-  border-bottom-color: rgba(141, 111, 214, 0.1);
-}
-
-/* Cards get lila border tint in dark */
+/* Soft elevated cards in dark — fade istället för färgad border */
 html.dark .mx-card {
-  border-color: rgba(141, 111, 214, 0.1);
+  background: var(--mx-paper);
+  border-color: var(--mx-line);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.015),
+    0 8px 24px -8px rgba(0, 0, 0, 0.45);
 }
 
 html.dark .mx-hover-card:hover {
-  border-color: rgba(141, 111, 214, 0.25);
-  box-shadow: 0 0 0 1px rgba(141, 111, 214, 0.12), 0 8px 32px rgba(97, 56, 181, 0.12);
+  border-color: var(--mx-line-strong);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.02),
+    0 12px 32px -10px rgba(0, 0, 0, 0.6);
 }
 
-/* Ink card in dark = lila-dark bg */
+/* Ink card = något ljusare paper i dark mode (subtil lyft) */
 html.dark .mx-card.mx-ink-card {
-  background: #1a0f30;
-  border-color: rgba(141, 111, 214, 0.25);
+  background: var(--mx-paper-2);
+  border-color: var(--mx-line);
 }
 
-/* Pill CTA buttons: lila in dark mode with glow */
+/* Primär CTA — mörkblå/ljusblå brand, inga lila glow */
 html.dark .mx-btn.mx-primary {
-  background: #6138b5;
-  border-color: #6138b5;
-  color: #fff;
-  box-shadow: 0 0 18px rgba(97, 56, 181, 0.35), 0 2px 8px rgba(97, 56, 181, 0.25);
+  background: #002c40;
+  border-color: #003b54;
+  color: #ecf6fa;
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset;
 }
 
 html.dark .mx-btn.mx-primary:hover {
-  background: #7040d0;
-  border-color: #7040d0;
-  box-shadow: 0 0 24px rgba(97, 56, 181, 0.5), 0 2px 8px rgba(97, 56, 181, 0.3);
+  background: #003b54;
+  border-color: #1d556a;
 }
 
 html.dark .mx-btn.mx-brand {
-  background: #8e6fd6;
-  border-color: #8e6fd6;
-  color: #000;
-  box-shadow: 0 0 18px rgba(141, 111, 214, 0.4), 0 2px 8px rgba(141, 111, 214, 0.25);
+  background: #4fc4ea;
+  border-color: #4fc4ea;
+  color: #001825;
 }
 
 html.dark .mx-btn.mx-brand:hover {
-  background: #a98ce8;
-  border-color: #a98ce8;
-  box-shadow: 0 0 26px rgba(141, 111, 214, 0.55), 0 2px 8px rgba(141, 111, 214, 0.3);
+  background: #6fd1ee;
+  border-color: #6fd1ee;
 }
 
-/* Regular buttons darker in dark mode */
+/* Sekundära knappar — bara en aning lyft från canvas */
 html.dark .mx-btn {
-  background: #111111;
-  border-color: rgba(255,255,255,0.1);
-  color: #e0e0e0;
+  background: var(--mx-paper);
+  border-color: var(--mx-line);
+  color: var(--mx-ink-2);
 }
 
 html.dark .mx-btn:hover {
-  background: #1a1a1a;
-  border-color: rgba(141, 111, 214, 0.3);
+  background: var(--mx-paper-2);
+  border-color: var(--mx-line-strong);
+  color: var(--mx-ink);
 }
 
-/* Input focus with lila glow in dark */
+/* Focus-ring — diskret ljusblå (matchar dark mode brand) */
 html.dark .mx-input:focus,
 html.dark .mx-textarea:focus,
 html.dark select.mx-input:focus,
 html.dark .mx-field input:focus,
 html.dark .mx-field textarea:focus,
 html.dark .mx-field select:focus {
-  border-color: #8e6fd6;
-  box-shadow: 0 0 0 3px rgba(141, 111, 214, 0.18);
+  border-color: #4fc4ea;
+  box-shadow: 0 0 0 2px rgba(79, 196, 234, 0.18);
 }
 
-/* Topbar search pill in dark */
+/* Topbar search pill */
 html.dark .mx-topbar-search {
-  background: #0a0a0a;
-  border-color: rgba(255,255,255,0.07);
+  background: var(--mx-paper);
+  border-color: var(--mx-line);
 }
 
 html.dark .mx-topbar-search:hover {
-  border-color: rgba(141, 111, 214, 0.3);
+  border-color: var(--mx-line-strong);
 }
 
 html.dark .mx-topbar-search kbd {
-  background: #111;
-  border-color: rgba(255,255,255,0.1);
+  background: var(--mx-paper-2);
+  border-color: var(--mx-line);
 }
 
-/* Topbar background */
+/* Topbar smälter med canvas — ingen blur, ingen lila ton */
 html.dark .mx-topbar {
-  background: rgba(0, 0, 0, 0.9);
-  border-bottom-color: rgba(141, 111, 214, 0.08);
-  backdrop-filter: blur(12px);
+  background: var(--mx-canvas);
+  border-bottom-color: var(--mx-rail-divider);
 }
 
-/* Avatar background: lila gradient in dark */
-html.dark .mx-rail-user-av {
-  background: linear-gradient(135deg, #6138b5 0%, #8e6fd6 100%);
-  box-shadow: 0 0 10px rgba(141, 111, 214, 0.4);
-}
-
-/* Status chips get subtle glow when active in dark */
+/* Status chips — fortfarande färgade men med dämpad bakgrund */
 html.dark .mx-chip.mx-active {
-  background: rgba(74, 125, 74, 0.15);
+  background: rgba(136, 180, 139, 0.10);
   color: #88b48b;
-  border-color: rgba(74, 125, 74, 0.25);
+  border-color: rgba(136, 180, 139, 0.20);
 }
 
 html.dark .mx-chip.mx-purple {
-  background: rgba(97, 56, 181, 0.18);
+  background: rgba(142, 111, 214, 0.12);
   color: #c9b6fb;
 }
 
 html.dark .mx-chip.mx-ink-chip {
-  background: rgba(141, 111, 214, 0.18);
-  color: #c9b6fb;
-}
-
-/* Dot pattern on main canvas in dark */
-html.dark .mx-main-col {
-  background-image: radial-gradient(rgba(141, 111, 214, 0.06) 1px, transparent 1px);
-  background-size: 28px 28px;
-  background-attachment: local;
-}
-
-/* Rail foot separator */
-html.dark .mx-rail-foot {
-  border-top-color: rgba(141, 111, 214, 0.1);
+  background: rgba(79, 196, 234, 0.10);
+  color: #8fdcf2;
 }
 
 /* Ghost button in dark */
@@ -1456,19 +1458,17 @@ html.dark .mx-btn.mx-ghost {
 }
 
 html.dark .mx-btn.mx-ghost:hover {
-  background: rgba(141, 111, 214, 0.1);
+  background: var(--mx-rail-hover-bg);
   border-color: transparent;
-  color: white;
+  color: var(--mx-ink);
 }
 
-/* Page head border in dark */
 html.dark .mx-page-head {
-  border-bottom-color: rgba(141, 111, 214, 0.1);
+  border-bottom-color: var(--mx-rail-divider);
 }
 
-/* Section head h2 color */
 html.dark .mx-page-head h1 {
-  color: #f0f0f0;
+  color: var(--mx-ink);
 }
 
 /* ============================================================
@@ -1680,8 +1680,8 @@ html.dark .mx-page-head h1 {
 }
 
 .mx-workspace-aside {
-  border-left: 1px solid var(--mx-line);
-  background: var(--mx-paper);
+  border-left: 1px solid var(--mx-rail-divider);
+  background: var(--mx-canvas);
   overflow-y: auto;
   min-height: 0;
 }
@@ -1692,6 +1692,73 @@ html.dark .mx-page-head h1 {
   }
   .mx-workspace-aside {
     display: none;
+  }
+}
+
+/* ============================================================
+   PageShell — generisk topp-nivå-sidlayout med valfri höger-rail.
+   Speglar .mx-workspace men för icke-bolagsspecifika sidor.
+   ============================================================ */
+
+.mx-page {
+  display: grid;
+  grid-template-columns: 1fr;
+  height: calc(100vh - var(--mx-topbar-h));
+  min-height: 0;
+}
+
+.mx-page.mx-with-right {
+  grid-template-columns: 1fr 320px;
+}
+
+.mx-page-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mx-page-shell-head {
+  padding: 18px 24px 0;
+  border-bottom: 1px solid var(--mx-rail-divider);
+  background: var(--mx-canvas);
+  flex-shrink: 0;
+}
+
+.mx-page-shell-head-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+}
+
+.mx-page-shell-title {
+  font-family: var(--mx-display);
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: -.4px;
+  color: var(--mx-ink);
+  margin: 0;
+}
+
+.mx-page-body {
+  padding: 22px 28px 80px;
+}
+
+@media (max-width: 1023px) {
+  .mx-page.mx-with-right {
+    grid-template-columns: 1fr;
+  }
+  .mx-page-shell-head {
+    padding: 14px 18px 0;
+  }
+  .mx-page-shell-title {
+    font-size: 18px;
+  }
+  .mx-page-body {
+    padding: 16px 18px 60px;
   }
 }
 

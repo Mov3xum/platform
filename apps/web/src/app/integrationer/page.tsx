@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
+import { PageShell } from '@/components/PageShell';
+import { RailSection, RailStat } from '@/components/PageRail';
 import { IntegrationActivateButton } from './IntegrationActivateButton';
 
 type IntegrationCategory =
@@ -46,59 +48,12 @@ interface ProviderView {
   tenantStatus: TenantStatus;
 }
 
-const CATEGORIES: Record<
-  IntegrationCategory,
-  {
-    label: string;
-    description: string;
-    accentBg: string;
-    badgeClass: string;
-    cardAccent: string;
-  }
-> = {
-  microsoft365: {
-    label: 'Microsoft 365',
-    description:
-      'Teams, SharePoint och Outlook för organisationer i Microsoft-ekosystemet.',
-    accentBg: 'bg-movexum-pastell-bla dark:bg-movexum-morkbla/30',
-    badgeClass:
-      'bg-movexum-pastell-bla text-movexum-morkbla ring-movexum-bla dark:bg-movexum-morkbla/50 dark:text-movexum-pastell-bla dark:ring-movexum-djupbla',
-    cardAccent: 'bg-movexum-pastell-bla dark:bg-movexum-morkbla/40'
-  },
-  ai: {
-    label: 'AI & Analys',
-    description: 'EU-suveräna AI-tjänster för djupare insikt om era bolag och team.',
-    accentBg: 'bg-movexum-pastell-lila dark:bg-movexum-morklila/30',
-    badgeClass:
-      'bg-movexum-pastell-lila text-movexum-morklila ring-movexum-ljuslila dark:bg-movexum-morklila/40 dark:text-movexum-pastell-lila dark:ring-movexum-lila',
-    cardAccent: 'bg-movexum-pastell-lila dark:bg-movexum-morklila/40'
-  },
-  collaboration: {
-    label: 'Samarbete & Whiteboarding',
-    description: 'Visuella samarbetsverktyg och kunskapsbaser för era startup-team.',
-    accentBg: 'bg-movexum-pastell-gul dark:bg-movexum-morkgul/20',
-    badgeClass:
-      'bg-movexum-pastell-gul text-movexum-morkgul ring-movexum-gul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul dark:ring-movexum-morkgul',
-    cardAccent: 'bg-movexum-pastell-gul dark:bg-movexum-morkgul/30'
-  },
-  communication: {
-    label: 'Kommunikation',
-    description:
-      'Synka er kommunikationsplattform och håll alla uppdaterade utan extraarbete.',
-    accentBg: 'bg-movexum-pastell-gron dark:bg-movexum-morkgron/30',
-    badgeClass:
-      'bg-movexum-pastell-gron text-movexum-morkgron ring-movexum-ljusgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron dark:ring-movexum-gron',
-    cardAccent: 'bg-movexum-pastell-gron dark:bg-movexum-morkgron/40'
-  },
-  productivity: {
-    label: 'Produktivitet & Utveckling',
-    description:
-      'Kodbaser, arbetsytor och alternativa kontorspaketen för er teknikdrivna verksamhet.',
-    accentBg: 'bg-movexum-pastell-orange dark:bg-movexum-morkorange/30',
-    badgeClass:
-      'bg-movexum-pastell-orange text-movexum-morkorange ring-movexum-orange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange dark:ring-movexum-orange',
-    cardAccent: 'bg-movexum-pastell-orange dark:bg-movexum-morkorange/40'
-  }
+const CATEGORY_LABEL: Record<IntegrationCategory, string> = {
+  microsoft365: 'Microsoft 365',
+  ai: 'AI & analys',
+  collaboration: 'Samarbete',
+  communication: 'Kommunikation',
+  productivity: 'Produktivitet'
 };
 
 const CATEGORY_ORDER: IntegrationCategory[] = [
@@ -107,23 +62,6 @@ const CATEGORY_ORDER: IntegrationCategory[] = [
   'collaboration',
   'communication',
   'productivity'
-];
-
-const VALUE_PROPS = [
-  {
-    title: 'Per konto',
-    description:
-      'Varje organisation konfigurerar sina egna integrationer. Inget delat, inget läckage.'
-  },
-  {
-    title: 'EU-suveränt',
-    description:
-      'Alla integrationer auditeras mot Movexums dataskyddspolicy. Ingen data lämnar EU.'
-  },
-  {
-    title: 'En miljö',
-    description: 'Era verktyg pratar med plattformen — inte tvärtom. Ni väljer vad som visas var.'
-  }
 ];
 
 function toFeatures(raw: unknown): string[] {
@@ -139,7 +77,6 @@ export default async function IntegrationerPage() {
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
   const pb = await getServerPb();
 
-  // ── Hämta provider-katalog ────────────────────────────────────
   let providers: ProviderRecord[] = [];
   try {
     const res = await pb
@@ -153,7 +90,6 @@ export default async function IntegrationerPage() {
     console.error('[integrationer] failed to load providers', { error });
   }
 
-  // ── Hämta tenant-status för respektive provider ───────────────
   const statusByProviderId = new Map<string, TenantStatus>();
   try {
     const res = await pb
@@ -193,125 +129,96 @@ export default async function IntegrationerPage() {
     {} as Record<IntegrationCategory, ProviderView[]>
   );
 
-  const footerNumber = String(VALUE_PROPS.length + 1).padStart(2, '0');
+  const connected = views.filter((v) => v.tenantStatus === 'connected').length;
+  const pilots = views.filter((v) => v.tenantStatus === 'pilot_requested').length;
+  const available = views.filter((v) => v.availability === 'available').length;
+
+  const rail = (
+    <>
+      <RailSection label="Översikt">
+        <div className="grid grid-cols-2 gap-2 px-2">
+          <RailStat label="Totalt" value={views.length} />
+          <RailStat label="Anslutna" value={connected} />
+          <RailStat label="Pilot" value={pilots} />
+          <RailStat label="Tillgängliga" value={available} />
+        </div>
+      </RailSection>
+
+      <RailSection label="Kategorier">
+        {CATEGORY_ORDER.map((cat) => {
+          const count = byCategory[cat]?.length || 0;
+          if (count === 0) return null;
+          return (
+            <div
+              key={cat}
+              className="flex items-center justify-between rounded-xl px-3 py-2 text-[13px]"
+            >
+              <span className="text-foreground">{CATEGORY_LABEL[cat]}</span>
+              <span className="font-mono text-[11px] text-foreground-subtle">{count}</span>
+            </div>
+          );
+        })}
+      </RailSection>
+    </>
+  );
 
   return (
-    <main className="mx-auto max-w-7xl px-6 py-10 lg:px-8">
-      <header className="mb-10">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-link">
-          Plattformsinställningar
-        </p>
-        <h1 className="mt-2 text-4xl font-bold tracking-tight text-foreground">
-          Integrationer
-        </h1>
-        <p className="mt-3 max-w-2xl text-base text-foreground-muted">
-          Anslut de verktyg ni redan använder och bygg er organisations unika digitala
-          miljö. Varje konto konfigureras separat — ni bestämmer exakt vad som synkas och för
-          vilka bolag.
-        </p>
-      </header>
-
-      <div className="mb-10 grid gap-4 sm:grid-cols-3">
-        {VALUE_PROPS.map((prop, idx) => (
-          <ValueProp
-            key={prop.title}
-            placeholder={String(idx + 1).padStart(2, '0')}
-            title={prop.title}
-            description={prop.description}
-          />
-        ))}
-      </div>
-
-      {views.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-strong bg-surface/50 px-8 py-16 text-center">
-          <h3 className="text-lg font-semibold text-foreground">
-            Inga integrationer tillgängliga
-          </h3>
-          <p className="mt-2 text-sm text-foreground-muted">
-            Katalogen är tom. Kontakta Movexum för att komma igång.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-12">
-          {CATEGORY_ORDER.map((cat) => {
-            const config = CATEGORIES[cat];
+    <PageShell title="Integrationer" rightPanel={rail}>
+      <div className="space-y-8 py-6">
+        {views.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-default p-12 text-center">
+            <h3 className="text-base font-semibold text-foreground">
+              Inga integrationer tillgängliga
+            </h3>
+            <p className="mt-2 text-[13px] text-foreground-muted">
+              Katalogen är tom. Kontakta Movexum för att komma igång.
+            </p>
+          </div>
+        ) : (
+          CATEGORY_ORDER.map((cat) => {
             const integrations = byCategory[cat];
             if (integrations.length === 0) return null;
 
             return (
               <section key={cat}>
-                <div className="mb-5 flex flex-wrap items-end gap-3">
-                  <div>
-                    <h2 className="text-xl font-semibold text-foreground">{config.label}</h2>
-                    <p className="mt-0.5 text-sm text-foreground-muted">
-                      {config.description}
-                    </p>
-                  </div>
-                  <span
-                    className={`ml-auto rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${config.badgeClass}`}
-                  >
-                    {integrations.length}{' '}
-                    {integrations.length === 1 ? 'integration' : 'integrationer'}
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                    {CATEGORY_LABEL[cat]}
+                  </h2>
+                  <span className="font-mono text-[11px] text-foreground-subtle">
+                    {integrations.length}
                   </span>
                 </div>
-
-                <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {integrations.map((integration) => (
                     <IntegrationCard
                       key={integration.id}
                       integration={integration}
-                      config={config}
                       canRequest={isStaff}
                     />
                   ))}
                 </div>
               </section>
             );
-          })}
-        </div>
-      )}
+          })
+        )}
 
-      <div className="mt-14 rounded-3xl border border-dashed border-strong bg-surface/50 px-8 py-10 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-default bg-canvas-subtle text-xs font-semibold tracking-[0.08em] text-foreground-muted">
-          {footerNumber}
+        <div className="rounded-2xl border border-dashed border-default p-8 text-center">
+          <h3 className="text-base font-semibold text-foreground">
+            Saknar du en integration?
+          </h3>
+          <p className="mx-auto mt-2 max-w-sm text-[13px] text-foreground-muted">
+            Berätta vilket verktyg ni vill ansluta så prioriterar vi det i roadmapen.
+          </p>
+          <a
+            href="mailto:hampus@boxmeal.se"
+            className="mt-4 inline-flex items-center justify-center rounded-lg border border-default bg-surface px-4 py-2 text-[13px] font-medium text-foreground transition hover:bg-canvas-muted"
+          >
+            Begär integration →
+          </a>
         </div>
-        <h3 className="mt-3 text-lg font-semibold text-foreground">
-          Saknar du en integration?
-        </h3>
-        <p className="mt-2 max-w-sm mx-auto text-sm text-foreground-muted">
-          Berättar du vilket verktyg ni vill ansluta så prioriterar vi det i
-          utvecklingsroadmapen. Vi bygger integrationer baserade på era faktiska behov.
-        </p>
-        <a
-          href="mailto:hampus@boxmeal.se"
-          className="mt-5 inline-flex items-center justify-center rounded-full border border-default bg-surface px-6 py-2.5 text-sm font-semibold text-foreground transition hover:bg-canvas-subtle"
-        >
-          Begär integration →
-        </a>
       </div>
-    </main>
-  );
-}
-
-function ValueProp({
-  placeholder,
-  title,
-  description
-}: {
-  placeholder: string;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="flex gap-4 rounded-2xl border border-default bg-surface p-5 shadow-sm shadow-movexum-svart/5">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-default bg-canvas-subtle text-xs font-semibold tracking-[0.08em] text-foreground-muted">
-        {placeholder}
-      </div>
-      <div>
-        <p className="text-sm font-semibold text-foreground">{title}</p>
-        <p className="mt-0.5 text-xs text-foreground-muted">{description}</p>
-      </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -324,27 +231,27 @@ function StatusBadge({
 }) {
   if (tenantStatus === 'connected') {
     return (
-      <span className="shrink-0 rounded-full bg-movexum-pastell-gron px-2.5 py-0.5 text-xs font-medium text-movexum-morkgron ring-1 ring-movexum-ljusgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron dark:ring-movexum-gron">
+      <span className="shrink-0 rounded-md bg-movexum-pastell-gron px-2 py-0.5 text-[11px] font-medium text-movexum-morkgron dark:bg-[#152916] dark:text-[#88b48b]">
         Ansluten
       </span>
     );
   }
   if (tenantStatus === 'pilot_requested') {
     return (
-      <span className="shrink-0 rounded-full bg-movexum-pastell-gul px-2.5 py-0.5 text-xs font-medium text-movexum-morkgul ring-1 ring-movexum-gul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
+      <span className="shrink-0 rounded-md bg-movexum-pastell-gul px-2 py-0.5 text-[11px] font-medium text-movexum-morkgul dark:bg-[#2e150a] dark:text-[#ca9323]">
         Pilot begärd
       </span>
     );
   }
   if (availability === 'beta') {
     return (
-      <span className="shrink-0 rounded-full bg-movexum-pastell-lila px-2.5 py-0.5 text-xs font-medium text-movexum-morklila ring-1 ring-movexum-ljuslila dark:bg-movexum-morklila/40 dark:text-movexum-pastell-lila">
-        Beta — pilot
+      <span className="shrink-0 rounded-md bg-movexum-pastell-lila px-2 py-0.5 text-[11px] font-medium text-movexum-morklila dark:bg-[#1f1a3d] dark:text-[#c9b6fb]">
+        Beta
       </span>
     );
   }
   return (
-    <span className="shrink-0 rounded-full bg-canvas-subtle px-2.5 py-0.5 text-xs font-medium text-foreground-muted ring-1 ring-default">
+    <span className="shrink-0 rounded-md bg-canvas-muted px-2 py-0.5 text-[11px] font-medium text-foreground-muted">
       På roadmap
     </span>
   );
@@ -352,24 +259,22 @@ function StatusBadge({
 
 function IntegrationCard({
   integration,
-  config,
   canRequest
 }: {
   integration: ProviderView;
-  config: typeof CATEGORIES[IntegrationCategory];
   canRequest: boolean;
 }) {
   return (
-    <article className="flex flex-col overflow-hidden rounded-3xl border border-default bg-surface shadow-sm shadow-movexum-svart/5 transition hover:border-strong hover:shadow-md">
-      <div className={`${config.cardAccent} px-6 py-4`}>
+    <article className="flex flex-col rounded-2xl border border-default bg-surface transition hover:border-strong">
+      <div className="border-b border-default px-5 py-4">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-default bg-surface text-xs font-semibold tracking-[0.08em] text-foreground-muted">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-default bg-canvas-subtle text-[10.5px] font-semibold tracking-[0.08em] text-foreground-muted">
               {integration.placeholder}
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-foreground">{integration.name}</h3>
-              <p className="text-xs text-foreground-muted">{integration.tagline}</p>
+              <h3 className="text-[14px] font-semibold text-foreground">{integration.name}</h3>
+              <p className="text-[11.5px] text-foreground-subtle">{integration.tagline}</p>
             </div>
           </div>
           <StatusBadge
@@ -379,22 +284,22 @@ function IntegrationCard({
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-4 px-6 py-5">
-        <p className="text-sm text-foreground-muted">{integration.description}</p>
+      <div className="flex flex-1 flex-col gap-3 px-5 py-4">
+        <p className="text-[13px] text-foreground-muted">{integration.description}</p>
 
-        <ul className="space-y-1.5">
-          {integration.features.map((feature) => (
-            <li
-              key={feature}
-              className="flex items-start gap-2 text-xs text-foreground-muted"
-            >
-              <span className="mt-0.5 text-foreground-subtle" aria-hidden="true">
-                —
-              </span>
-              <span>{feature}</span>
-            </li>
-          ))}
-        </ul>
+        {integration.features.length > 0 && (
+          <ul className="space-y-1">
+            {integration.features.map((feature) => (
+              <li
+                key={feature}
+                className="flex items-start gap-2 text-[11.5px] text-foreground-muted"
+              >
+                <span className="mt-0.5 text-foreground-subtle">—</span>
+                <span>{feature}</span>
+              </li>
+            ))}
+          </ul>
+        )}
 
         <div className="mt-auto pt-2">
           <IntegrationActivateButton
@@ -404,7 +309,7 @@ function IntegrationCard({
             availability={integration.availability}
             tenantStatus={integration.tenantStatus}
             canRequest={canRequest}
-            accentClass={config.cardAccent}
+            accentClass="bg-canvas-muted"
           />
         </div>
       </div>

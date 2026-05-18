@@ -3,14 +3,9 @@ import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
-import {
-  PageHead,
-  Card,
-  Chip,
-  Avatar,
-  Icon,
-  SectionHead
-} from '@/components/proto';
+import { Avatar, Chip } from '@/components/proto';
+import { PageShell } from '@/components/PageShell';
+import { RailSection, RailStat } from '@/components/PageRail';
 import { DealFlowBoard } from '@/components/DealFlowBoard';
 import type { Deal, Investor, InvestorWarmth } from '@platform/shared';
 
@@ -105,97 +100,124 @@ export default async function InvesterarePage() {
     }
   }
 
+  const byWarmth = investors.reduce<Record<string, number>>((acc, i) => {
+    acc[i.warmth] = (acc[i.warmth] || 0) + 1;
+    return acc;
+  }, {});
+
+  const rail = (
+    <>
+      <RailSection label="Pipeline">
+        <div className="grid grid-cols-2 gap-2 px-2">
+          <RailStat label="Aktiva deals" value={deals.length} />
+          <RailStat label="Mkr i pipe" value={totalMkr} />
+          <RailStat label="Investerare" value={investors.length} />
+          <RailStat label="Close 30 dgr" value={closeThisMonth} />
+        </div>
+      </RailSection>
+
+      <RailSection label="Värme">
+        {(['hot', 'active', 'tracking', 'later'] as InvestorWarmth[]).map((w) => (
+          <div
+            key={w}
+            className="flex items-center justify-between rounded-xl px-3 py-2 text-[13px]"
+          >
+            <span className="text-foreground">{WARMTH_LABEL[w]}</span>
+            <span className="font-mono text-[11px] text-foreground-subtle">
+              {byWarmth[w] || 0}
+            </span>
+          </div>
+        ))}
+      </RailSection>
+    </>
+  );
+
   return (
-    <div className="mx-view-pad mx-wide">
-      <PageHead
-        crumb="Hemmaplan / Investerarrelationer"
-        title="Investerarrelationer"
-        subtitle="Deal flow + investerarkort med fokus, ticket size och historik. Synkat med Sprint X-finansiering."
-        actions={null}
-      />
-
-      {/* ── Deal flow ────────────────────────────────────── */}
-      <SectionHead
-        title="Deal flow"
-        label={`${deals.length} aktiva${closeThisMonth ? ` · ${closeThisMonth} close denna månad` : ''} · ${totalMkr} Mkr i pipeline`}
-        right={<Chip mono>Dra kort för att flytta steg</Chip>}
-      />
-
-      {deals.length === 0 ? (
-        <Card style={{ padding: 24, textAlign: 'center' }}>
-          <div className="mx-muted mx-t-13">
-            Inga deals registrerade ännu. Logga ett intro för att komma igång.
+    <PageShell title="Investerarrelationer" rightPanel={rail}>
+      <div className="space-y-8 py-6">
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+              Deal flow
+            </h2>
+            <span className="text-[11px] text-foreground-subtle">
+              Dra kort för att flytta steg
+            </span>
           </div>
-        </Card>
-      ) : (
-        <DealFlowBoard deals={deals} />
-      )}
+          {deals.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-default p-10 text-center text-[13px] text-foreground-muted">
+              Inga deals registrerade ännu. Logga ett intro för att komma igång.
+            </div>
+          ) : (
+            <DealFlowBoard deals={deals} />
+          )}
+        </section>
 
-      {/* ── Investerare ──────────────────────────────────── */}
-      <SectionHead
-        title="Investerare"
-        label={`${investors.length} i nätverket`}
-      />
-
-      {investors.length === 0 ? (
-        <Card style={{ padding: 24, textAlign: 'center' }}>
-          <div className="mx-muted mx-t-13">
-            Inga investerare i nätverket ännu. Lägg till ditt första kontaktnät.
-          </div>
-        </Card>
-      ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-            gap: 12
-          }}
-        >
-          {investors.map((inv) => {
-            const active = investorDealCount.get(inv.id) || 0;
-            return (
-              <Card key={inv.id} style={{ padding: 16 }}>
-                <div className="mx-flex mx-items-c mx-gap-2 mx-mb-3">
-                  <Avatar
-                    initial={inv.name.slice(0, 2).toUpperCase()}
-                    accent={accentFor(inv.id)}
-                  />
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="mx-disp mx-fw-6 mx-t-13 mx-truncate">{inv.name}</div>
-                    <div className="mx-mono mx-t-xs mx-muted">
-                      {formatTicketRange(inv.ticket_min, inv.ticket_max)}
+        <section>
+          <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+            Investerare
+          </h2>
+          {investors.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-default p-10 text-center text-[13px] text-foreground-muted">
+              Inga investerare i nätverket ännu.
+            </div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {investors.map((inv) => {
+                const active = investorDealCount.get(inv.id) || 0;
+                return (
+                  <div
+                    key={inv.id}
+                    className="rounded-2xl border border-default bg-surface p-4"
+                  >
+                    <div className="mb-3 flex items-center gap-3">
+                      <Avatar
+                        initial={inv.name.slice(0, 2).toUpperCase()}
+                        accent={accentFor(inv.id)}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[14px] font-semibold text-foreground">
+                          {inv.name}
+                        </div>
+                        <div className="font-mono text-[11px] text-foreground-subtle">
+                          {formatTicketRange(inv.ticket_min, inv.ticket_max)}
+                        </div>
+                      </div>
+                      <Chip variant={WARMTH_VARIANT[inv.warmth]} mono>
+                        {WARMTH_LABEL[inv.warmth]}
+                      </Chip>
+                    </div>
+                    <div className="mb-3 flex flex-wrap gap-1.5">
+                      {(inv.focus || []).slice(0, 5).map((f) => (
+                        <Chip key={f} mono>
+                          {f}
+                        </Chip>
+                      ))}
+                      {(!inv.focus || inv.focus.length === 0) && (
+                        <span className="text-[11px] text-foreground-subtle">
+                          Inga fokusområden
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between text-[12px]">
+                      <span className="text-foreground-muted">
+                        Aktiva deals:{' '}
+                        <span className="font-semibold text-foreground">{active}</span>
+                      </span>
+                      <Link
+                        href={`/investerare/${inv.id}`}
+                        className="text-link hover:underline"
+                      >
+                        Profil →
+                      </Link>
                     </div>
                   </div>
-                  <Chip variant={WARMTH_VARIANT[inv.warmth]} mono>
-                    {WARMTH_LABEL[inv.warmth]}
-                  </Chip>
-                </div>
-                <div
-                  className="mx-flex mx-gap-2 mx-mb-3"
-                  style={{ flexWrap: 'wrap' }}
-                >
-                  {(inv.focus || []).slice(0, 5).map((f) => (
-                    <Chip key={f} mono>
-                      {f}
-                    </Chip>
-                  ))}
-                  {(!inv.focus || inv.focus.length === 0) && (
-                    <span className="mx-muted mx-t-xs">Inga fokusområden</span>
-                  )}
-                </div>
-                <div className="mx-flex mx-items-c mx-gap-2 mx-t-12">
-                  <span className="mx-muted">Aktiva deals:</span>
-                  <span className="mx-fw-6">{active}</span>
-                  <span className="mx-grow" />
-                  <Link href={`/investerare/${inv.id}`} className="mx-btn mx-sm">
-                    Profil →
-                  </Link>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-      )}
-    </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+    </PageShell>
   );
 }

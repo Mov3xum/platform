@@ -3,8 +3,15 @@ import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { Icon } from '@/components/proto/Icon';
+import { PageShell } from '@/components/PageShell';
+import { RailSection, RailStat, RailEmpty } from '@/components/PageRail';
 import type { ToolRunStatus } from '@platform/shared';
-import { ASSIGN_STATUS, formatDeadline, formatRelativeDate, daysUntil } from '@/components/intric/constants';
+import {
+  ASSIGN_STATUS,
+  formatDeadline,
+  formatRelativeDate,
+  daysUntil
+} from '@/components/intric/constants';
 
 interface RunRow {
   id: string;
@@ -24,7 +31,6 @@ interface RunRow {
 export default async function InkorgPage() {
   const user = await requireUser();
 
-  // Staff har inget i sin egen inkorg via founder-modellen — skicka dem till Idag.
   if (hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) {
     redirect('/idag');
   }
@@ -49,18 +55,23 @@ export default async function InkorgPage() {
   const todo = runs.filter((r) => r.status === 'assigned');
   const pågående = runs.filter((r) => r.status === 'in_progress');
   const väntar = runs.filter((r) => r.status === 'ready_for_review');
+  const overdue = runs.filter((r) => {
+    const d = daysUntil(r.deadline);
+    return d !== null && d < 0 && r.status !== 'ready_for_review';
+  });
 
   function Section({ label, items }: { label: string; items: RunRow[] }) {
     if (items.length === 0) return null;
     return (
-      <section className="mb-8">
+      <section className="mb-7">
         <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
-          {label} <span className="font-mono normal-case tracking-normal">{items.length}</span>
+          {label}{' '}
+          <span className="font-mono normal-case tracking-normal">{items.length}</span>
         </div>
         <div className="space-y-2">
           {items.map((r) => {
             const days = daysUntil(r.deadline);
-            const overdue = days !== null && days < 0 && r.status !== 'ready_for_review';
+            const isOverdue = days !== null && days < 0 && r.status !== 'ready_for_review';
             const status = ASSIGN_STATUS[r.status] || ASSIGN_STATUS.assigned;
             const startupId = r.startup;
             const startupName = r.expand?.startup?.name || 'Bolag';
@@ -72,17 +83,15 @@ export default async function InkorgPage() {
               <Link
                 key={r.id}
                 href={`/startups/${startupId}/verktyg/${r.id}`}
-                className="block rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5 transition hover:border-brand/40 hover:shadow-md"
+                className="block rounded-xl border border-default bg-surface p-4 transition hover:border-strong"
               >
                 <div className="flex items-start gap-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-movexum-pastell-lila text-movexum-lila">
-                    <Icon name="sparkle" size={18} />
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas-muted text-foreground-muted">
+                    <Icon name="inbox" size={15} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-heading text-[14.5px] font-semibold text-foreground">
-                        {toolName}
-                      </h3>
+                      <h3 className="text-[14px] font-semibold text-foreground">{toolName}</h3>
                       <span
                         className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium ${status.bgClass} ${status.fgClass}`}
                       >
@@ -106,11 +115,11 @@ export default async function InkorgPage() {
                       </span>
                       {r.deadline && (
                         <span
-                          className={`inline-flex items-center gap-1 ${overdue ? 'font-medium text-movexum-orange' : ''}`}
+                          className={`inline-flex items-center gap-1 ${isOverdue ? 'font-medium text-movexum-orange' : ''}`}
                         >
                           <Icon name="calendar" size={11} /> deadline{' '}
                           {formatDeadline(r.deadline)}
-                          {overdue
+                          {isOverdue
                             ? ' (försenad)'
                             : days !== null && days >= 0
                               ? ` · om ${days} dgr`
@@ -133,37 +142,44 @@ export default async function InkorgPage() {
     );
   }
 
-  return (
-    <div className="mx-view-pad mx-narrow">
-      <div className="mb-8">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
-          Min inkorg
+  const rail = (
+    <>
+      <RailSection label="Översikt">
+        <div className="grid grid-cols-2 gap-2 px-2">
+          <RailStat label="Att göra" value={todo.length} />
+          <RailStat label="Pågående" value={pågående.length} />
+          <RailStat label="Inväntar" value={väntar.length} />
+          <RailStat label="Försenade" value={overdue.length} />
         </div>
-        <h1 className="mt-1 font-heading text-[28px] font-semibold tracking-tight text-foreground">
-          Hej {user.name.split(' ')[0]}.
-        </h1>
-        <p className="mt-2 max-w-[60ch] text-[14px] text-foreground-muted">
-          Det här är vad din coach har bett dig att fokusera på. Klicka på ett uppdrag för att se
-          instruktionen och köra verktyget — output sparas tillbaka på bolaget.
-        </p>
-      </div>
+      </RailSection>
+    </>
+  );
 
-      {runs.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-default p-10 text-center">
-          <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-canvas-muted text-foreground-subtle">
-            <Icon name="check" size={18} />
+  return (
+    <PageShell title={`Hej ${user.name.split(' ')[0]}.`} rightPanel={rail}>
+      <div className="mx-auto w-full max-w-3xl py-6">
+        <p className="mb-6 max-w-[60ch] text-[13.5px] text-foreground-muted">
+          Det här är vad din coach har bett dig att fokusera på. Klicka på ett uppdrag för att se
+          instruktionen — output sparas tillbaka på bolaget.
+        </p>
+
+        {runs.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-default p-10 text-center">
+            <div className="mx-auto mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-canvas-muted text-foreground-subtle">
+              <Icon name="check" size={16} />
+            </div>
+            <p className="text-[13px] text-foreground-subtle">
+              Inga aktiva uppdrag just nu. Allt klart.
+            </p>
           </div>
-          <p className="text-[13px] text-foreground-subtle">
-            Inga aktiva uppdrag just nu. Allt klart.
-          </p>
-        </div>
-      ) : (
-        <>
-          <Section label="Att göra nu" items={todo} />
-          <Section label="Pågående" items={pågående} />
-          <Section label="Inväntar coach" items={väntar} />
-        </>
-      )}
-    </div>
+        ) : (
+          <>
+            <Section label="Att göra nu" items={todo} />
+            <Section label="Pågående" items={pågående} />
+            <Section label="Inväntar coach" items={väntar} />
+          </>
+        )}
+      </div>
+    </PageShell>
   );
 }

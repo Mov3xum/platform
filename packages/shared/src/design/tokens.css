@@ -143,29 +143,34 @@
   --color-phase-alumni: #5d5d5d;          /* Neutral */
 }
 
-/* === Dark mode (klassbaserat på <html>) ============================= */
+/* === Dark mode (klassbaserat på <html>) =============================
+ * Princip (2026-05-18): mörk canvas med en hyper-subtil kall ton
+ * (mörkblå tint som nästan inte syns). Rail/topbar/canvas delar
+ * samma bakgrund — ytan ska kännas som en enda yta. Linjer är
+ * nästan osynliga, djup skapas av mjuka skuggor istället. Lila
+ * är fortsatt sekundär accent men inte längre den dominerande
+ * brand-färgen i dark mode — ljusblå (#4fc4ea) tar över.
+ */
 .dark {
-  --color-canvas: #000000;
-  --color-canvas-subtle: #0a0a0a;
-  --color-canvas-muted: #111111;
-  --color-surface: #0a0a0a;
-  --color-surface-elevated: #141414;
-  --color-border-default: #1f1f1f;
-  --color-border-strong: #2d2d2d;
-  --color-foreground: #f0f0f0;
-  --color-foreground-muted: #c0c0c0;
-  --color-foreground-subtle: #808080;
-  --color-foreground-inverse: #000000;
-  --color-brand: #8e6fd6;             /* Ljuslila — synlig på svart */
-  --color-brand-hover: #a98ce8;
-  --color-brand-foreground: #000000;
-  --color-link: #8e6fd6;
-  --color-ring: #6138b5;
+  --color-canvas: #050608;
+  --color-canvas-subtle: #0a0c0f;
+  --color-canvas-muted: #0e1014;
+  --color-surface: #0a0c0f;
+  --color-surface-elevated: #14171c;
+  --color-border-default: #1a1d22;
+  --color-border-strong: #262a31;
+  --color-foreground: #ececec;
+  --color-foreground-muted: #b6bbc1;
+  --color-foreground-subtle: #7a7f86;
+  --color-foreground-inverse: #050608;
+  --color-brand: #4fc4ea;             /* Ljusblå — primär i dark mode */
+  --color-brand-hover: #6fd1ee;
+  --color-brand-foreground: #001825;
+  --color-link: #4fc4ea;
+  --color-ring: #4fc4ea;
 
-  /* Spegelvänd extremerna i skalorna så `bg-primary-50` etc. förblir
-     en "subtle" yta även i dark mode. */
-  --color-primary-50: #1a0f30;
-  --color-primary-100: #2d1f50;
+  --color-primary-50: #14102a;
+  --color-primary-100: #1f1a3d;
   --color-primary-900: #f3eefe;
   --color-accent-50: #001825;
   --color-accent-100: #002535;
@@ -176,11 +181,11 @@
   --color-warning-50: #1a0b05;
   --color-warning-100: #2e150a;
   --color-warning-900: #f8f1da;
-  --color-neutral-50: #0a0a0a;
-  --color-neutral-100: #111111;
-  --color-neutral-200: #1f1f1f;
-  --color-neutral-300: #2d2d2d;
-  --color-neutral-700: #c0c0c0;
-  --color-neutral-800: #d8d8d8;
-  --color-neutral-900: #f0f0f0;
+  --color-neutral-50: #0a0c0f;
+  --color-neutral-100: #0e1014;
+  --color-neutral-200: #1a1d22;
+  --color-neutral-300: #262a31;
+  --color-neutral-700: #b6bbc1;
+  --color-neutral-800: #d4d8dd;
+  --color-neutral-900: #ececec;
 }
