@@ -762,3 +762,48 @@ export async function deactivateToolAction(toolId: string): Promise<ToolActionSt
     return { error: err instanceof Error ? err.message : 'Kunde inte inaktivera agenten.' };
   }
 }
+
+/**
+ * Permanently deletes a tool and all its runs (staff only).
+ */
+export async function deleteToolAction(toolId: string): Promise<ToolActionState> {
+  const user = await requireUser();
+  requireRole(user.roles, ['admin', 'incubator_lead']);
+
+  const pb = await getServerPb();
+
+  let tool: Record<string, unknown>;
+  try {
+    tool = await pb.collection('tools').getOne(toolId);
+  } catch {
+    return { error: 'Agenten hittades inte.' };
+  }
+
+  if (tool.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  try {
+    const runs = await pb.collection('tool_runs').getFullList<{ id: string }>({
+      filter: `tenant = "${user.tenant}" && tool = "${toolId}"`,
+      fields: 'id'
+    });
+    for (const r of runs) {
+      await pb.collection('tool_runs').delete(r.id);
+    }
+    await pb.collection('tools').delete(toolId);
+    revalidatePath('/toolbox');
+    return {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte radera agenten.' };
+  }
+}
+
+export async function deleteToolFormAction(formData: FormData): Promise<void> {
+  'use server';
+  const id = String(formData.get('tool_id') || '').trim();
+  if (!id) return;
+  const result = await deleteToolAction(id);
+  if (!result.error) {
+    const { redirect } = await import('next/navigation');
+    redirect('/toolbox');
+  }
+}

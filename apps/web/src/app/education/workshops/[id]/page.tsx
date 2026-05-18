@@ -5,6 +5,8 @@ import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { WorkshopAssignForm } from '../../WorkshopAssignForm';
 import { WorkshopStatusBadge } from '@/components/Badges';
+import { deleteWorkshopFormAction } from '@/lib/actions/workshops';
+import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
 import type { Workshop, WorkshopAssignment, WorkshopBlock, WorkshopModule } from '@platform/shared';
 
 const BLOCK_TYPE_EMOJIS: Record<string, string> = {
@@ -86,9 +88,28 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
       </div>
 
       <header className="mb-8 rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
-        <div className="mb-3 flex items-center gap-3">
-          <WorkshopStatusBadge status={workshop.status} />
-          <span className="text-xs text-foreground-subtle">Version {workshop.version}</span>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <WorkshopStatusBadge status={workshop.status} />
+            <span className="text-xs text-foreground-subtle">Version {workshop.version}</span>
+          </div>
+          {isStaff ? (
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/education/workshops/${id}/edit`}
+                className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-4 py-1.5 text-xs font-semibold text-foreground-muted transition hover:bg-canvas-subtle"
+              >
+                Redigera
+              </Link>
+              <ConfirmDeleteButton
+                action={deleteWorkshopFormAction}
+                hiddenField={{ name: 'workshop_id', value: id }}
+                label="Radera"
+                variant="ghost"
+                description={`Radera "${workshop.title}"? Alla tilldelningar försvinner.`}
+              />
+            </div>
+          ) : null}
         </div>
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">{workshop.title}</h1>
         {workshop.goal ? <p className="mt-3 text-sm text-foreground-muted">{workshop.goal}</p> : null}

@@ -4,6 +4,8 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { PageHead, Icon } from '@/components/proto';
+import { deleteReportFormAction } from '@/lib/actions/reports';
+import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
 import type { IncubatorReport } from '@platform/shared';
 import { ReportDetail } from '../ReportDetail';
 
@@ -36,9 +38,21 @@ export default async function ReportDetailPage({
         title={report.title}
         subtitle={`${report.period_label} — ${report.completion || 0}% ifyllt.`}
         actions={
-          <Link href="/rapporter" className="mx-btn">
-            <Icon name="chevron" size={13} style={{ transform: 'rotate(180deg)' }} /> Tillbaka
-          </Link>
+          <>
+            <Link href="/rapporter" className="mx-btn">
+              <Icon name="chevron" size={13} style={{ transform: 'rotate(180deg)' }} /> Tillbaka
+            </Link>
+            <Link href={`/rapporter/${report.id}/edit`} className="mx-btn">
+              Redigera
+            </Link>
+            <ConfirmDeleteButton
+              action={deleteReportFormAction}
+              hiddenField={{ name: 'report_id', value: report.id }}
+              label="Radera"
+              variant="ghost"
+              description={`Radera rapporten "${report.title}"? Detta går inte att ångra.`}
+            />
+          </>
         }
       />
 

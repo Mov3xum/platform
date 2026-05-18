@@ -11,6 +11,8 @@ import { MissionComments } from '@/components/missions/MissionComments';
 import { ParticipantsPanel } from '@/components/missions/ParticipantsPanel';
 import { MissionStartupsChips } from '@/components/missions/MissionStartupsChips';
 import { getMissionContext, getStartupIds } from '@/lib/missions-server';
+import { deleteMissionFormAction } from '@/lib/actions/missions';
+import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
 import type { Mission, MissionComment, MissionParticipant } from '@platform/shared';
 
 interface UserOption {
@@ -130,6 +132,20 @@ export default async function MissionDetailPage({
             >
               Öppna i flödesvy
             </Link>
+            {ctx.canEdit ? (
+              <>
+                <Link href={`/uppdrag/${mission.id}/edit`} className="mx-btn mx-sm mx-ghost">
+                  Redigera
+                </Link>
+                <ConfirmDeleteButton
+                  action={deleteMissionFormAction}
+                  hiddenField={{ name: 'mission_id', value: mission.id }}
+                  label="Radera"
+                  variant="ghost"
+                  description={`Radera "${mission.title}"? Detta går inte att ångra.`}
+                />
+              </>
+            ) : null}
           </>
         }
       />

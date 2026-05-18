@@ -12,6 +12,9 @@ import {
   Meta,
   SectionHead
 } from '@/components/proto';
+import { deleteEventFormAction } from '@/lib/actions/events';
+import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
+import { SignupDeleteButton } from './SignupDeleteButton';
 import type { EventSignup, EventSignupStage, IncubatorEvent } from '@platform/shared';
 
 const STAGE_ORDER: EventSignupStage[] = [
@@ -127,9 +130,21 @@ export default async function EventDetailPage({
               </Chip>
             )}
             {hasRole(user.roles, ['admin', 'incubator_lead', 'coach']) && (
-              <button className="mx-btn mx-primary">
-                <Icon name="plus" size={13} /> Lägg till anmäld
-              </button>
+              <>
+                <Link href={`/events/${event.id}/edit`} className="mx-btn">
+                  Redigera
+                </Link>
+                <button className="mx-btn mx-primary">
+                  <Icon name="plus" size={13} /> Lägg till anmäld
+                </button>
+                <ConfirmDeleteButton
+                  action={deleteEventFormAction}
+                  hiddenField={{ name: 'event_id', value: event.id }}
+                  label="Radera"
+                  variant="ghost"
+                  description={`Radera "${event.name}"? Alla anmälningar tas också bort.`}
+                />
+              </>
             )}
           </>
         }
@@ -215,6 +230,9 @@ export default async function EventDetailPage({
                   <Chip variant={STAGE_VARIANT[s.stage]} mono>
                     {STAGE_LABEL[s.stage]}
                   </Chip>
+                  {hasRole(user.roles, ['admin', 'incubator_lead', 'coach']) && (
+                    <SignupDeleteButton signupId={s.id} signupName={s.name} />
+                  )}
                 </div>
               ))}
             </div>
