@@ -3,8 +3,9 @@ import { notFound, redirect } from 'next/navigation';
 import { getOneForTenant } from '@/lib/pb.server';
 import { requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { updateStartupAction } from '@/lib/actions/startups';
+import { updateStartupAction, deleteStartupFormAction } from '@/lib/actions/startups';
 import { StartupForm } from '@/components/StartupForm';
+import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
 import type { StartupPhase } from '@platform/shared';
 import type { StartupStatus } from '@/lib/labels';
 
@@ -35,6 +36,7 @@ export default async function EditStartupPage({ params }: { params: Promise<{ id
   }
 
   const boundAction = updateStartupAction.bind(null, id);
+  const canDelete = hasRole(user.roles, ['admin', 'incubator_lead']);
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10 lg:px-8">
@@ -64,6 +66,23 @@ export default async function EditStartupPage({ params }: { params: Promise<{ id
           }}
         />
       </div>
+
+      {canDelete ? (
+        <div className="mt-8 rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
+          <h2 className="text-base font-semibold text-foreground">Farozon</h2>
+          <p className="mt-1 text-sm text-foreground-muted">
+            Raderar bolaget och kopplade poster. Detta går inte att ångra.
+          </p>
+          <div className="mt-4">
+            <ConfirmDeleteButton
+              action={deleteStartupFormAction}
+              hiddenField={{ name: 'id', value: id }}
+              label="Radera bolag"
+              description={`Du raderar "${startup.name}". Alla anteckningar, milstolpar och aktiviteter försvinner.`}
+            />
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

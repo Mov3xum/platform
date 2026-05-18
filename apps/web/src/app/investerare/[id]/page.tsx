@@ -13,6 +13,8 @@ import {
   Meta,
   SectionHead
 } from '@/components/proto';
+import { deleteInvestorFormAction } from '@/lib/actions/investors';
+import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
 import type { Deal, Investor, InvestorWarmth, DealStage } from '@platform/shared';
 import { DEAL_STAGES } from '@platform/shared';
 
@@ -110,9 +112,23 @@ export default async function InvestorDetailPage({
             <Link href="/investerare" className="mx-btn">
               ← Tillbaka
             </Link>
+            {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'partner']) && (
+              <Link href={`/investerare/${investor.id}/edit`} className="mx-btn">
+                Redigera
+              </Link>
+            )}
             <button className="mx-btn mx-primary">
               <Icon name="plus" size={13} /> Logga möte
             </button>
+            {hasRole(user.roles, ['admin', 'incubator_lead']) && (
+              <ConfirmDeleteButton
+                action={deleteInvestorFormAction}
+                hiddenField={{ name: 'investor_id', value: investor.id }}
+                label="Radera"
+                variant="ghost"
+                description={`Radera "${investor.name}" och alla deals?`}
+              />
+            )}
           </>
         }
       />

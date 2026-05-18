@@ -133,7 +133,20 @@ export default async function InvesterarePage() {
   );
 
   return (
-    <PageShell title="Investerarrelationer" rightPanel={rail}>
+    <PageShell
+      title="Investerarrelationer"
+      rightPanel={rail}
+      actions={
+        hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'partner']) ? (
+          <Link
+            href="/investerare/new"
+            className="inline-flex items-center justify-center rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
+          >
+            + Ny investerare
+          </Link>
+        ) : undefined
+      }
+    >
       <div className="space-y-8 py-6">
         <section>
           <div className="mb-3 flex items-center justify-between">

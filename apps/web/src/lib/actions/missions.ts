@@ -482,6 +482,94 @@ export async function updateMissionParticipants(
   }
 }
 
+// ── updateMission (general edit) ────────────────────────────────────────
+
+export async function updateMissionAction(
+  id: string,
+  _prev: MissionActionState,
+  formData: FormData
+): Promise<MissionActionState> {
+  const user = await requireUser();
+  const pb = await getServerPb();
+
+  let mission: Mission;
+  try {
+    mission = await pb.collection(PB_COLLECTIONS.missions).getOne<Mission>(id);
+  } catch {
+    return { error: 'Uppdraget hittades inte.' };
+  }
+  if (mission.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  const ctx = getMissionContext(mission, user.id, user.roles);
+  if (!ctx.canEdit) return { error: 'Du saknar behörighet att redigera uppdraget.' };
+
+  const title = String(formData.get('title') || '').trim();
+  if (title.length < 2) return { error: 'Titel måste vara minst 2 tecken.' };
+  if (title.length > 200) return { error: 'Titel får vara max 200 tecken.' };
+
+  const typeRaw = String(formData.get('type') || mission.type).trim();
+  const type = (VALID_TYPES.includes(typeRaw as MissionType) ? typeRaw : mission.type) as MissionType;
+  const visibilityRaw = String(formData.get('visibility') || mission.visibility || 'tenant') as MissionVisibility;
+  const visibility = VALID_VISIBILITY.includes(visibilityRaw) ? visibilityRaw : 'tenant';
+
+  const dueDate = String(formData.get('due_date') || '').trim();
+  const description = String(formData.get('description') || '').trim();
+  const accent = String(formData.get('accent') || mission.accent || 'purple').trim();
+
+  try {
+    await pb.collection(PB_COLLECTIONS.missions).update(id, {
+      title,
+      type,
+      visibility,
+      due_date: dueDate || null,
+      description,
+      accent
+    });
+    revalidatePath('/uppdrag');
+    revalidatePath(`/uppdrag/${id}`);
+    return { missionId: id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera uppdrag.' };
+  }
+}
+
+// ── deleteMission ───────────────────────────────────────────────────────
+
+export async function deleteMissionAction(id: string): Promise<MissionActionState> {
+  const user = await requireUser();
+  const pb = await getServerPb();
+
+  let mission: Mission;
+  try {
+    mission = await pb.collection(PB_COLLECTIONS.missions).getOne<Mission>(id);
+  } catch {
+    return { error: 'Uppdraget hittades inte.' };
+  }
+  if (mission.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  const ctx = getMissionContext(mission, user.id, user.roles);
+  if (!ctx.canEdit) return { error: 'Du saknar behörighet att radera uppdraget.' };
+
+  try {
+    await pb.collection(PB_COLLECTIONS.missions).delete(id);
+    revalidatePath('/uppdrag');
+    revalidatePath('/idag');
+    revalidatePath('/aktivitet');
+    revalidatePath('/inkorg');
+    return { missionId: id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte radera uppdraget.' };
+  }
+}
+
+export async function deleteMissionFormAction(formData: FormData): Promise<void> {
+  'use server';
+  const id = String(formData.get('mission_id') || '').trim();
+  if (!id) return;
+  const result = await deleteMissionAction(id);
+  if (!result.error) redirect('/uppdrag');
+}
+
 // ── Form-action wrappers (for client form submission) ───────────────────
 
 export async function advanceStageFormAction(formData: FormData): Promise<void> {

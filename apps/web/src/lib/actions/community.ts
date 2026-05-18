@@ -97,3 +97,54 @@ export async function updateAlumniAction(
     return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera alumni.' };
   }
 }
+
+export async function updateAlumniFromFormAction(
+  id: string,
+  _prev: CommunityActionState,
+  formData: FormData
+): Promise<CommunityActionState> {
+  const tagRaw = String(formData.get('tag') || 'active');
+  const validTags: AlumniTag[] = ['exit', 'scale', 'active', 'mentor', 'paused'];
+  const tag = (validTags.includes(tagRaw as AlumniTag) ? tagRaw : 'active') as AlumniTag;
+  const exitYearRaw = String(formData.get('exit_year') || '').trim();
+  const exitYear = exitYearRaw ? Number(exitYearRaw) : undefined;
+
+  return updateAlumniAction(id, {
+    name: String(formData.get('name') || '').trim(),
+    company: String(formData.get('company') || '').trim(),
+    tag,
+    contact_email: String(formData.get('contact_email') || '').trim(),
+    bio: String(formData.get('bio') || '').trim(),
+    exit_year: typeof exitYear === 'number' && !Number.isNaN(exitYear) ? exitYear : undefined,
+    active_mentor: formData.get('active_mentor') === 'on'
+  });
+}
+
+export async function deleteAlumniAction(id: string): Promise<CommunityActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Endast personal kan radera alumni.' };
+  const pb = await getServerPb();
+
+  let existing: Alumni;
+  try {
+    existing = await pb.collection(PB_COLLECTIONS.alumni).getOne<Alumni>(id);
+  } catch {
+    return { error: 'Alumni-posten hittades inte.' };
+  }
+  if (existing.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  try {
+    await pb.collection(PB_COLLECTIONS.alumni).delete(id);
+    revalidatePath('/community');
+    return { alumniId: id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte radera alumni.' };
+  }
+}
+
+export async function deleteAlumniFormAction(formData: FormData): Promise<void> {
+  'use server';
+  const id = String(formData.get('alumni_id') || '').trim();
+  if (!id) return;
+  await deleteAlumniAction(id);
+}

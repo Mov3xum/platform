@@ -357,6 +357,160 @@ export async function createWorkshopAction(
   }
 }
 
+export async function updateWorkshopAction(
+  workshopId: string,
+  _prev: WorkshopActionState,
+  formData: FormData
+): Promise<WorkshopActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+
+  const pb = await getServerPb();
+
+  let existing: Workshop & { tenant: string };
+  try {
+    existing = await pb
+      .collection(PB_COLLECTIONS.workshops)
+      .getOne<Workshop & { tenant: string }>(workshopId);
+  } catch {
+    return { error: 'Workshopen hittades inte.' };
+  }
+  if (existing.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  const title = String(formData.get('title') || '').trim();
+  const goal = String(formData.get('goal') || '').trim();
+  const instructions = String(formData.get('instructions') || '').trim();
+  const status = String(formData.get('status') || 'draft');
+  const version = String(formData.get('version') || '1.0.0').trim();
+  const aiSystemPrompt = String(formData.get('ai_system_prompt') || '').trim();
+  const outputRequirements = String(formData.get('output_requirements') || '').trim();
+  const area = String(formData.get('area') || '').trim();
+  const modulesRaw = String(formData.get('modules_json') || '').trim();
+  const contentBlocksRaw = String(formData.get('content_blocks_json') || '').trim();
+  const audienceRoles = formData.getAll('audience_roles').map(String);
+  const active = formData.get('active') === 'on';
+
+  if (!title) return { error: 'Titel är obligatorisk.' };
+
+  const payload: Record<string, unknown> = {
+    title,
+    goal,
+    instructions,
+    status,
+    version: version || '1.0.0',
+    audience_roles: audienceRoles,
+    ai_system_prompt: aiSystemPrompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT,
+    output_requirements: outputRequirements,
+    active
+  };
+  payload.area = area || null;
+
+  if (modulesRaw && modulesRaw !== '[]') {
+    try {
+      const modules = toWorkshopModules(JSON.parse(modulesRaw));
+      payload.modules = modules;
+      payload.content_blocks = modules.flatMap((m) => m.blocks);
+    } catch {
+      return { error: 'Modulerna innehåller ogiltig data.' };
+    }
+  } else if (contentBlocksRaw && contentBlocksRaw !== '[]') {
+    try {
+      payload.content_blocks = toWorkshopBlocks(JSON.parse(contentBlocksRaw));
+    } catch {
+      return { error: 'Content blocks måste vara giltig JSON.' };
+    }
+  }
+
+  try {
+    await pb.collection(PB_COLLECTIONS.workshops).update(workshopId, payload);
+    revalidatePath('/education');
+    revalidatePath(`/education/workshops/${workshopId}`);
+    return { workshopId };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera workshop.' };
+  }
+}
+
+export async function deleteWorkshopAction(workshopId: string): Promise<WorkshopActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+
+  const pb = await getServerPb();
+
+  let existing: { tenant: string };
+  try {
+    existing = await pb
+      .collection(PB_COLLECTIONS.workshops)
+      .getOne<{ tenant: string }>(workshopId, { fields: 'id,tenant' });
+  } catch {
+    return { error: 'Workshopen hittades inte.' };
+  }
+  if (existing.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  try {
+    const assignments = await pb
+      .collection(PB_COLLECTIONS.workshopAssignments)
+      .getFullList<{ id: string }>({
+        filter: `tenant = "${user.tenant}" && workshop = "${workshopId}"`,
+        fields: 'id'
+      });
+    for (const a of assignments) {
+      await pb.collection(PB_COLLECTIONS.workshopAssignments).delete(a.id);
+    }
+    await pb.collection(PB_COLLECTIONS.workshops).delete(workshopId);
+    revalidatePath('/education');
+    return { workshopId };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte radera workshop.' };
+  }
+}
+
+export async function deleteWorkshopFormAction(formData: FormData): Promise<void> {
+  'use server';
+  const id = String(formData.get('workshop_id') || '').trim();
+  if (!id) return;
+  const result = await deleteWorkshopAction(id);
+  if (!result.error) {
+    const { redirect } = await import('next/navigation');
+    redirect('/education');
+  }
+}
+
+export async function deleteWorkshopAssignmentAction(
+  assignmentId: string
+): Promise<WorkshopActionState> {
+  const loaded = await loadAssignmentWithAccessCheck(assignmentId);
+  if ('error' in loaded) return { error: loaded.error };
+  const { pb, user, assignment } = loaded;
+
+  if (!hasRole(user.roles, STAFF_ROLES)) {
+    return { error: 'Endast personal kan radera tilldelningar.' };
+  }
+
+  try {
+    if (assignment.activity) {
+      try {
+        await pb.collection('activities').delete(String(assignment.activity));
+      } catch {
+        /* ignore */
+      }
+    }
+    await pb.collection(PB_COLLECTIONS.workshopAssignments).delete(assignmentId);
+    revalidatePath('/education');
+    if (assignment.startup) revalidatePath(`/startups/${assignment.startup}`);
+    return { assignmentId };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte radera tilldelningen.' };
+  }
+}
+
+export async function deleteWorkshopAssignmentFormAction(formData: FormData): Promise<void> {
+  'use server';
+  const id = String(formData.get('assignment_id') || '').trim();
+  if (!id) return;
+  await deleteWorkshopAssignmentAction(id);
+}
+
 export async function createWorkshopAreaAction(
   _prev: WorkshopAreaActionState,
   formData: FormData

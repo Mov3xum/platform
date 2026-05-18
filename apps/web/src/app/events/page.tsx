@@ -163,8 +163,23 @@ export default async function EventsPage() {
     </>
   );
 
+  const canManage = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
+
   return (
-    <PageShell title="Events" rightPanel={rail}>
+    <PageShell
+      title="Events"
+      rightPanel={rail}
+      actions={
+        canManage ? (
+          <Link
+            href="/events/new"
+            className="inline-flex items-center justify-center rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
+          >
+            + Nytt event
+          </Link>
+        ) : undefined
+      }
+    >
       <div className="space-y-6 py-6">
         {funnelEvent && (
           <section className="rounded-2xl border border-default bg-surface">

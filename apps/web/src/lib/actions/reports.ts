@@ -243,6 +243,66 @@ export async function sendReportAction(reportId: string): Promise<ReportActionSt
   // unreachable: redirect on success — let caller decide.
 }
 
+export async function updateReportAction(
+  reportId: string,
+  formData: FormData
+): Promise<ReportActionState> {
+  const loaded = await loadReportWithAccess(reportId);
+  if ('error' in loaded) return { error: loaded.error };
+  const { pb, report } = loaded;
+
+  const title = String(formData.get('title') || '').trim() || report.title;
+  const period_label = String(formData.get('period_label') || '').trim() || report.period_label;
+  const period_start = String(formData.get('period_start') || '').trim() || report.period_start;
+  const period_end = String(formData.get('period_end') || '').trim() || report.period_end;
+  const due_date = String(formData.get('due_date') || '').trim() || null;
+
+  try {
+    await pb.collection(PB_COLLECTIONS.reports).update(reportId, {
+      title,
+      period_label,
+      period_start,
+      period_end,
+      due_date
+    });
+    revalidatePath('/rapporter');
+    revalidatePath(`/rapporter/${reportId}`);
+    return { reportId };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera rapport.' };
+  }
+}
+
+export async function deleteReportAction(reportId: string): Promise<ReportActionState> {
+  const loaded = await loadReportWithAccess(reportId);
+  if ('error' in loaded) return { error: loaded.error };
+  const { pb } = loaded;
+
+  try {
+    await pb.collection(PB_COLLECTIONS.reports).delete(reportId);
+    revalidatePath('/rapporter');
+    return { reportId };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte radera rapporten.' };
+  }
+}
+
+export async function deleteReportFormAction(formData: FormData): Promise<void> {
+  'use server';
+  const id = String(formData.get('report_id') || '').trim();
+  if (!id) return;
+  const result = await deleteReportAction(id);
+  if (!result.error) redirect('/rapporter');
+}
+
+export async function updateReportFormAction(formData: FormData): Promise<void> {
+  'use server';
+  const id = String(formData.get('report_id') || '').trim();
+  if (!id) return;
+  const result = await updateReportAction(id, formData);
+  if (!result.error) redirect(`/rapporter/${id}`);
+}
+
 export async function createReportAndRedirectAction(formData: FormData): Promise<void> {
   const recipient = (String(formData.get('recipient') || 'vinnova') as ReportRecipient);
   const result = await createReportAction({
