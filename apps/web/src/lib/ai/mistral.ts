@@ -13,8 +13,6 @@ export type MistralContentPart =
 
 export type MistralContentBlock = MistralContentPart;
 
-export type MistralContentBlock = MistralContentPart;
-
 export interface MistralTextMessage {
   role: 'system' | 'user' | 'assistant';
   content: string | MistralContentPart[];
