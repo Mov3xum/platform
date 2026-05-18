@@ -96,7 +96,8 @@ export type ToolCategory =
 export type ToolModel =
   | 'mistral-large-latest'
   | 'mistral-medium-latest'
-  | 'mistral-small-latest';
+  | 'mistral-small-latest'
+  | 'pixtral-large-latest';
 
 export type ToolOutputFormat = 'markdown' | 'json' | 'text';
 
@@ -126,6 +127,29 @@ export interface ToolRunThreadEntry {
   role: 'coach' | 'founder' | 'system';
   at: string;
   text: string;
+}
+
+// Chat-mode (1700000057): en tool_run = en chatt-session.
+// `messages` lagrar hela samtalet; `output_md` behålls bakåtkompatibelt
+// och speglar senaste assistant-content.
+export interface ToolRunAttachmentRef {
+  pb_file: string; // PocketBase-filnamn (för signerad URL)
+  mime: string;
+  filename: string; // originalnamn för visning
+  size_bytes: number;
+  extracted_text_bytes?: number; // PDF/text — hur mycket text vi matade in i prompten
+}
+
+export interface ToolRunMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  attachments?: ToolRunAttachmentRef[];
+  model?: string; // modell som producerade detta turn (assistant)
+  tokens_in?: number;
+  tokens_out?: number;
+  cost_usd?: number;
+  at: string; // ISO
+  error?: string;
 }
 
 export type KnowledgeSourceKind = 'note' | 'file' | 'compass' | 'irl' | 'milestone';
@@ -185,6 +209,9 @@ export interface ToolRun {
   // Versionering
   parent_run?: string;
   version?: number;
+  // Chat-mode (1700000057)
+  messages?: ToolRunMessage[];
+  attachments?: string[]; // PB-filnamn
   created: string;
   updated: string;
   expand?: {

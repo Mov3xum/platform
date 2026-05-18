@@ -3,7 +3,8 @@
 import { useTransition, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createToolAction, updateToolAction } from '@/lib/actions/tools';
-import type { Tool, ToolCategory, ToolModel, ToolOutputFormat, Role } from '@platform/shared';
+import { AVAILABLE_MODELS } from '@/lib/ai/models';
+import type { Tool, ToolCategory, ToolOutputFormat, Role } from '@platform/shared';
 
 const CATEGORIES: Array<{ value: ToolCategory; label: string }> = [
   { value: 'ai_per_startup', label: 'AI per bolag' },
@@ -13,11 +14,10 @@ const CATEGORIES: Array<{ value: ToolCategory; label: string }> = [
   { value: 'checklist', label: 'Checklista' }
 ];
 
-const MODELS: Array<{ value: ToolModel; label: string }> = [
-  { value: 'mistral-large-latest', label: 'Mistral Large (€2/€6 per 1M tokens)' },
-  { value: 'mistral-medium-latest', label: 'Mistral Medium (€0.4/€1.2 per 1M tokens)' },
-  { value: 'mistral-small-latest', label: 'Mistral Small (€0.1/€0.3 per 1M tokens)' }
-];
+const MODELS = AVAILABLE_MODELS.map((m) => ({
+  value: m.id,
+  label: `${m.label} — ${m.blurb} ($${m.priceInPerMillion}/$${m.priceOutPerMillion} per 1M${m.supportsVision ? ', vision' : ''})`
+}));
 
 const OUTPUT_FORMATS: Array<{ value: ToolOutputFormat; label: string }> = [
   { value: 'markdown', label: 'Markdown' },
