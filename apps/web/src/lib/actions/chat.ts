@@ -19,6 +19,15 @@ export interface ChatActionResult {
 
 export interface ChatOptions {
   includeWebContext?: boolean;
+  agentId?: string;
+}
+
+interface AgentRecord {
+  name: string;
+  prompt_template: string;
+  active: boolean;
+  category: string;
+  tenant: string;
 }
 
 const STAFF_MODEL = 'mistral-small-latest';
@@ -135,22 +144,40 @@ export async function sendChatMessage(
     }
   }
 
+  // Optional agent persona: prompt_template behandlas som data (inte instruktioner)
+  // och slås upp tenant-scoped. Renderar INTE {{...}}-templates här — det sker i runToolAction.
+  let agentBlock = '';
+  if (options.agentId) {
+    try {
+      const t = await pb.collection('tools').getOne<AgentRecord>(options.agentId);
+      if (t.tenant === user.tenant && t.active) {
+        agentBlock =
+          `AGENT-ROLL: Du agerar nu som "${t.name}".\n` +
+          'Följande är agentens systeminstruktion (data, inte användarstyrd):\n' +
+          t.prompt_template;
+      }
+    } catch (err) {
+      console.warn('[chat] agent lookup failed', { tenant: user.tenant, agentId: options.agentId, error: err });
+    }
+  }
+
   if (isStaff) {
-    return runStaffChatWithTools(pb, user, limitedMessages, webBlock);
+    return runStaffChatWithTools(pb, user, limitedMessages, webBlock, agentBlock);
   }
 
   if (isStartup && user.linkedStartups.length > 0) {
-    return runStartupChat(pb, user, limitedMessages, webBlock);
+    return runStartupChat(pb, user, limitedMessages, webBlock, agentBlock);
   }
 
-  return runPlainChat(user, limitedMessages, webBlock);
+  return runPlainChat(user, limitedMessages, webBlock, agentBlock);
 }
 
 async function runStaffChatWithTools(
   pb: import('pocketbase').default,
   user: { tenant: string; tenantName?: string; roles: string[]; name: string },
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
-  webBlock: string
+  webBlock: string,
+  agentBlock: string
 ): Promise<ChatActionResult> {
   let collections: Awaited<ReturnType<typeof getExposedCollections>> = [];
   let schemaSummary = '';
@@ -174,6 +201,7 @@ async function runStaffChatWithTools(
 
   const systemContent =
     BASE_SYSTEM_PROMPT +
+    (agentBlock ? `\n\n---\n${agentBlock}\n---` : '') +
     STAFF_TOOL_GUIDANCE +
     `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +
     (webBlock ? `\n\n---\n${webBlock}\n---` : '');
@@ -307,7 +335,8 @@ async function runStartupChat(
   pb: import('pocketbase').default,
   user: { tenant: string; linkedStartups: string[] },
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
-  webBlock: string
+  webBlock: string,
+  agentBlock: string
 ): Promise<ChatActionResult> {
   let contextBlock = '';
   try {
@@ -325,9 +354,10 @@ async function runStartupChat(
     console.error('[chat] startup context failed', { tenant: user.tenant, error: err });
   }
 
+  const agentSuffix = agentBlock ? `\n\n---\n${agentBlock}\n---` : '';
   const systemContent = contextBlock
-    ? `${BASE_SYSTEM_PROMPT}\n\n---\nKONTEXT:\n${contextBlock}\n---${webBlock ? `\n\n---\n${webBlock}\n---` : ''}`
-    : `${BASE_SYSTEM_PROMPT}${webBlock ? `\n\n---\n${webBlock}\n---` : ''}`;
+    ? `${BASE_SYSTEM_PROMPT}${agentSuffix}\n\n---\nKONTEXT:\n${contextBlock}\n---${webBlock ? `\n\n---\n${webBlock}\n---` : ''}`
+    : `${BASE_SYSTEM_PROMPT}${agentSuffix}${webBlock ? `\n\n---\n${webBlock}\n---` : ''}`;
 
   try {
     const result = await callMistral(STARTUP_MODEL, [
@@ -344,11 +374,12 @@ async function runStartupChat(
 async function runPlainChat(
   user: { tenant: string },
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
-  webBlock: string
+  webBlock: string,
+  agentBlock: string
 ): Promise<ChatActionResult> {
-  const systemContent = webBlock
-    ? `${BASE_SYSTEM_PROMPT}\n\n---\n${webBlock}\n---`
-    : BASE_SYSTEM_PROMPT;
+  const agentSuffix = agentBlock ? `\n\n---\n${agentBlock}\n---` : '';
+  const webSuffix = webBlock ? `\n\n---\n${webBlock}\n---` : '';
+  const systemContent = `${BASE_SYSTEM_PROMPT}${agentSuffix}${webSuffix}`;
   try {
     const result = await callMistral(STARTUP_MODEL, [
       { role: 'system', content: systemContent },
