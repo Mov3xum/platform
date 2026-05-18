@@ -100,6 +100,16 @@ export type ToolModel =
 
 export type ToolOutputFormat = 'markdown' | 'json' | 'text';
 
+// EU-baserade källor som AI-agenter kan hämta live-data från.
+// Whitelisten upprätthålls i `apps/web/src/lib/ai/web.ts`.
+export type WebSourceKey =
+  | 'breakit'
+  | 'sifted'
+  | 'di_digital'
+  | 'vinnova'
+  | 'eic'
+  | 'almi';
+
 export type ToolRunStatus =
   | 'queued'
   | 'running'
@@ -139,6 +149,9 @@ export interface Tool {
   roles_allowed: Role[];
   output_format?: ToolOutputFormat;
   active: boolean;
+  // Live-källor som hämtas in i prompten via {{web.<key>}}-tokens.
+  // Tom array eller saknas = ingen web-fetch (default).
+  web_sources?: WebSourceKey[];
   created_by?: string;
   created: string;
   updated: string;

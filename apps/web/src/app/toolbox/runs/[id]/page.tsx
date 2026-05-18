@@ -6,6 +6,15 @@ import { ToolRunStatusBadge } from '@/components/Badges';
 import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
 import type { ToolRun, ToolRunStatus } from '@platform/shared';
 
+interface RunWebSource {
+  source: string;
+  label: string;
+  fetched_at: string;
+  cached: boolean;
+  ok: boolean;
+  error?: string;
+}
+
 export default async function ToolRunDetailPage({
   params
 }: {
@@ -35,6 +44,12 @@ export default async function ToolRunDetailPage({
     run.started_at && run.completed_at
       ? new Date(run.completed_at).getTime() - new Date(run.started_at).getTime()
       : null;
+
+  const webSources: RunWebSource[] = Array.isArray(
+    (run.input as Record<string, unknown> | undefined)?.web_sources
+  )
+    ? ((run.input as { web_sources: RunWebSource[] }).web_sources)
+    : [];
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10 lg:px-8">
@@ -75,6 +90,35 @@ export default async function ToolRunDetailPage({
                 Fel: {run.error}
               </p>
             </div>
+          )}
+
+          {webSources.length > 0 && (
+            <section className="mb-6 rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
+              <h2 className="mb-3 text-sm font-semibold text-foreground">Källor (live)</h2>
+              <ul className="space-y-2 text-xs text-foreground-muted">
+                {webSources.map((s) => (
+                  <li key={`${s.source}-${s.fetched_at}`} className="flex items-baseline justify-between gap-3">
+                    <span className="font-medium text-foreground">
+                      {s.label}
+                      {s.cached && (
+                        <span className="ml-2 text-foreground-subtle">(cache)</span>
+                      )}
+                      {!s.ok && (
+                        <span className="ml-2 text-movexum-morkorange dark:text-movexum-pastell-orange">
+                          – {s.error || 'kunde inte hämtas'}
+                        </span>
+                      )}
+                    </span>
+                    <span className="font-mono text-foreground-subtle">
+                      {new Date(s.fetched_at).toLocaleString('sv-SE')}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-xs text-foreground-subtle">
+                Live-källor är EU-baserade och cachas i 30 min för att inte överbelasta källorna.
+              </p>
+            </section>
           )}
 
           {run.output_md ? (

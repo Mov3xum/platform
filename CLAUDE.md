@@ -341,6 +341,7 @@ kopplas till bolagskorten och visas i den globala aktivitetsfeeden
 |-----|-------|
 | `apps/web/src/lib/ai/mistral.ts` | Tunn fetch-klient mot Mistral API |
 | `apps/web/src/lib/ai/context.ts` | Kontextbyggare (startup/portfölj) |
+| `apps/web/src/lib/ai/web.ts` | Web-fetch mot EU-källor (RSS, cache, sanering) |
 | `apps/web/src/lib/actions/tools.ts` | Server actions (RBAC, körning, CRUD) |
 | `apps/web/src/app/toolbox/page.tsx` | Verktygslådan översikt |
 | `apps/web/src/app/toolbox/[id]/page.tsx` | Verktygsdetalj + körformulär |
@@ -411,6 +412,37 @@ Alla toolbox-sidor ska visa:
 Alla AI-resultatvyer ska visa:
 > "Genererat av AI – verifiera innan delning"
 
+Agenter med `web_sources` ska dessutom visa:
+> "📡 Hämtar live från: \<källor\>"
+
+i kör-formuläret, och listan över hämtade källor + tidpunkt i körningsvyn.
+
+### 9.8 Web-fetch — live-källor
+
+Vissa agenter (t.ex. `ai_industry_pulse`, `ai_funding_radar`) hämtar
+publika RSS-flöden från EU-källor och bakar in resultatet i Mistral-
+prompten via `{{web.<key>}}`-tokens. Whitelisten finns i
+`apps/web/src/lib/ai/web.ts` (`WEB_SOURCES`):
+
+| Nyckel | Källa | Land |
+| --- | --- | --- |
+| `breakit` | Breakit (svenska startups) | SE |
+| `sifted` | Sifted (EU tech) | EU |
+| `di_digital` | Dagens industri Digital | SE |
+| `vinnova` | Vinnova utlysningar | SE |
+| `eic` | European Innovation Council | EU |
+| `almi` | Almi pressmeddelanden | SE |
+
+**Säkerhet och kostnad:**
+- URL:er utanför whitelisten kan **aldrig** hämtas (SSRF-skydd).
+- Per-källa: timeout 8 s, max 8 KB sanerad text, regex-baserad RSS-
+  parsning utan extern dependency.
+- Per körning: max 32 KB total sammanlagd web-text.
+- Cache 30 min i collectionen `web_cache` (migration 1700000053).
+- Fail-soft: en nedladdning som fallerar blockerar inte de övriga.
+- Hämtade källor + `fetched_at` loggas i `tool_runs.input.web_sources`
+  (krav från EU AI Act art. 13 — transparens om underlag).
+
 ---
 
 ## 10. Regelefterlevnad — bindande ramverk
@@ -461,6 +493,22 @@ omsättning.
   funktion (biometri, kreditbedömning, anställningsbeslut, utbildnings-
   bedömning som påverkar individens framtid) utan separat juridisk
   granskning.
+
+**Riskklasser per seedad agent (versionerad här per Art. 11):**
+
+| Verktyg | Klass | Motivering |
+| --- | --- | --- |
+| `ai_quarterly_report` | begränsad | Beslutsstöd, granskas av människa |
+| `ai_portfolio_overview` | begränsad | Strategisk översikt utan PII |
+| `ai_coach_briefing` | begränsad | Mötesförberedelse, vägledande |
+| `ai_risk_screening` | begränsad | Rankar bolagsentiteter, ej individer; granskas av staff |
+| `ai_pitch_review` | begränsad | Feedback, ej beslut |
+| `ai_next_step_advisor` | begränsad | Rekommendation, coachen avgör |
+| `ai_industry_pulse` | begränsad | Aggregerar publika nyheter, ingen profilering |
+| `ai_funding_radar` | begränsad | Matchar utlysningar mot bolagsfas, vägledande |
+| `ai_portfolio_risk` | begränsad | Bara whitelistade fält, rankar bolag — ej personer |
+| `edu_irl_levels` | minimal | Generellt utbildningsmaterial |
+| `template_pitch_deck` | n/a | Statisk mall, ingen AI-inferens |
 
 ### 10.2 GDPR (förordning 2016/679)
 
