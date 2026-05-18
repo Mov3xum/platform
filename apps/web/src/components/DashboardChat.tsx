@@ -22,8 +22,9 @@ const ACCEPT_XLSX = [
   XLSX_MIME,
   'application/vnd.ms-excel'
 ];
-const ACCEPT_ATTR =
-  'image/png,image/jpeg,image/webp,text/plain,text/markdown,text/csv,application/pdf,' +
+const ACCEPT_IMAGE_ATTR = 'image/png,image/jpeg,image/webp';
+const ACCEPT_TEXT_ATTR =
+  'text/plain,text/markdown,text/csv,application/pdf,' +
   XLSX_MIME +
   ',.md,.csv,.txt,.pdf,.xlsx';
 
@@ -357,6 +358,10 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
 
   function openFilePicker() {
     fileInputRef.current?.click();
+  }
+
+  function openImagePicker() {
+    imageInputRef.current?.click();
   }
 
   const canSubmit =
