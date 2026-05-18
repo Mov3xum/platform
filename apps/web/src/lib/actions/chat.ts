@@ -4,7 +4,8 @@ import { requireUser, getServerPb } from '@/lib/auth.server';
 import {
   callMistralWithFallback,
   MistralError,
-  type MistralMessage
+  type MistralMessage,
+  type MistralContentPart
 } from '@/lib/ai/mistral';
 import { buildStartupContext } from '@/lib/ai/context';
 import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
@@ -50,7 +51,25 @@ const CHAT_FALLBACK_MODELS = [
   'mistral-medium-latest',
   'mistral-large-latest'
 ];
+// När bilder är bifogade måste vi använda en vision-kapabel modell.
+// Pixtral 12B stödjer både vision och function calling.
+const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
 const MAX_TOOL_ITERATIONS = 4;
+
+const MAX_ATTACHMENTS = 5;
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_TEXT_CHARS = 200_000; // ~50K tokens (säkerhetsmarginal)
+const ALLOWED_TEXT_MIMES = new Set([
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/csv'
+]);
+const ALLOWED_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+
+function pickModels(hasImages: boolean): string[] {
+  return hasImages ? VISION_FALLBACK_MODELS : CHAT_FALLBACK_MODELS;
+}
 
 function chatErrorMessage(err: unknown): string {
   if (err instanceof MistralError) {
@@ -304,10 +323,6 @@ export async function sendChatMessage(
   return runPlainChat(user, limitedMessages, webBlock, agentBlock, att.images);
 }
 
-function pickModel(defaultModel: string, hasImages: boolean): string {
-  return hasImages ? VISION_MODEL : defaultModel;
-}
-
 function withAttachedImages(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   images: Array<{ dataUrl: string }>
@@ -371,11 +386,11 @@ async function runStaffChatWithTools(
     ...withAttachedImages(userMessages, images)
   ];
 
-  const model = pickModel(STAFF_MODEL, images.length > 0);
+  const models = pickModels(images.length > 0);
 
   try {
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const result = await callMistral(model, conversation, {
+      const result = await callMistralWithFallback(models, conversation, {
         tools,
         toolChoice: 'auto'
       });
@@ -405,7 +420,7 @@ async function runStaffChatWithTools(
       }
     }
 
-    const finalCall = await callMistralWithFallback(CHAT_FALLBACK_MODELS, conversation, {
+    const finalCall = await callMistralWithFallback(models, conversation, {
       toolChoice: 'none'
     });
     return {
@@ -525,10 +540,13 @@ async function runStartupChat(
     : `${BASE_SYSTEM_PROMPT}${agentSuffix}${webBlock ? `\n\n---\n${webBlock}\n---` : ''}`;
 
   try {
-    const result = await callMistralWithFallback(CHAT_FALLBACK_MODELS, [
-      { role: 'system', content: systemContent },
-      ...withAttachedImages(userMessages, images)
-    ]);
+    const result = await callMistralWithFallback(
+      pickModels(images.length > 0),
+      [
+        { role: 'system', content: systemContent },
+        ...withAttachedImages(userMessages, images)
+      ]
+    );
     return { text: result.text };
   } catch (err) {
     console.error('[chat] mistral error', { tenant: user.tenant, error: err });
@@ -547,10 +565,13 @@ async function runPlainChat(
   const webSuffix = webBlock ? `\n\n---\n${webBlock}\n---` : '';
   const systemContent = `${BASE_SYSTEM_PROMPT}${agentSuffix}${webSuffix}`;
   try {
-    const result = await callMistralWithFallback(CHAT_FALLBACK_MODELS, [
-      { role: 'system', content: systemContent },
-      ...withAttachedImages(userMessages, images)
-    ]);
+    const result = await callMistralWithFallback(
+      pickModels(images.length > 0),
+      [
+        { role: 'system', content: systemContent },
+        ...withAttachedImages(userMessages, images)
+      ]
+    );
     return { text: result.text };
   } catch (err) {
     console.error('[chat] mistral error', { tenant: user.tenant, error: err });
