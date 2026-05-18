@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import type { Attribution } from '@/lib/compass/types';
 
 interface Msg {
   role: 'user' | 'assistant';
@@ -14,8 +15,22 @@ interface Props {
   showAiBadge?: boolean;
 }
 
+function readAttribution(): Attribution {
+  if (typeof window === 'undefined') return {};
+  const params = new URLSearchParams(window.location.search);
+  const get = (k: string) => params.get(k) || undefined;
+  return {
+    utm_source: get('utm_source'),
+    utm_medium: get('utm_medium'),
+    utm_campaign: get('utm_campaign'),
+    utm_term: get('utm_term'),
+    utm_content: get('utm_content'),
+    referrer_url: typeof document !== 'undefined' ? document.referrer || undefined : undefined
+  };
+}
+
 const DEFAULT_GREETING =
-  'Hej! Jag är Startupkompassen, Movexums AI-assistent. Berätta gärna lite om idén du går och funderar på — vad försöker du lösa, och för vem?';
+  'Hej! Jag är Inflöde, Movexums AI-assistent. Berätta gärna lite om idén du går och funderar på — vad försöker du lösa, och för vem?';
 
 export function CompassChat({ initialAssistantMessage, moduleSlug, showAiBadge = true }: Props) {
   const [messages, setMessages] = useState<Msg[]>(() => [
@@ -25,6 +40,7 @@ export function CompassChat({ initialAssistantMessage, moduleSlug, showAiBadge =
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionToken] = useState(() => generateToken());
+  const attribution = useMemo(readAttribution, []);
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -44,13 +60,14 @@ export function CompassChat({ initialAssistantMessage, moduleSlug, showAiBadge =
     setError(null);
 
     try {
-      const res = await fetch('/api/compass/chat', {
+      const res = await fetch('/api/inflode/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: next.map((m) => ({ role: m.role, content: m.content })),
           moduleSlug,
-          sessionToken
+          sessionToken,
+          attribution
         })
       });
       if (!res.ok) throw new Error(`Servern svarade ${res.status}`);
@@ -102,10 +119,10 @@ export function CompassChat({ initialAssistantMessage, moduleSlug, showAiBadge =
             fontSize: 13
           }}
         >
-          K
+          I
         </div>
         <div style={{ minWidth: 0 }}>
-          <div className="mx-disp mx-fw-6 mx-t-13">Startupkompassen</div>
+          <div className="mx-disp mx-fw-6 mx-t-13">Inflöde</div>
           <div className="mx-mono mx-t-xs mx-muted mx-t-up">
             Mistral · Le Chat · EU-suveränt
           </div>

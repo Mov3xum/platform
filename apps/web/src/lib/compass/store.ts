@@ -32,7 +32,14 @@ export async function listLeadSources(pb: PocketBase): Promise<LeadSource[]> {
 export async function listLeads(
   pb: PocketBase,
   tenant: string,
-  options: { status?: LeadStatus; q?: string; sourceKey?: string; page?: number; perPage?: number } = {}
+  options: {
+    status?: LeadStatus;
+    q?: string;
+    sourceKey?: string;
+    landingModule?: string;
+    page?: number;
+    perPage?: number;
+  } = {}
 ): Promise<{ items: Lead[]; totalItems: number; totalPages: number }> {
   const filters: string[] = ['tenant = {:tenant}'];
   const params: Record<string, unknown> = { tenant };
@@ -43,6 +50,10 @@ export async function listLeads(
   if (options.sourceKey) {
     filters.push('source_key = {:src}');
     params.src = options.sourceKey;
+  }
+  if (options.landingModule) {
+    filters.push('landing_module = {:lm}');
+    params.lm = options.landingModule;
   }
   if (options.q) {
     filters.push(
@@ -280,6 +291,161 @@ export async function logSecurity(
     });
   } catch {
     // best-effort
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   Attribution & analytics
+   ──────────────────────────────────────────────────────────────────── */
+
+export interface AttributionBreakdown {
+  source_key: string;
+  total: number;
+  accepted: number;
+  in_funnel: number;
+}
+
+export interface CampaignBreakdown {
+  campaign: string;
+  source?: string;
+  medium?: string;
+  total: number;
+  accepted: number;
+}
+
+export interface ModuleConversion {
+  slug: string;
+  total: number;
+  accepted: number;
+  converted: number;
+}
+
+/** Snabba analytics — räknar leads per dimension från ett enda batch-hämta. */
+export async function getLeadAnalytics(
+  pb: PocketBase,
+  tenant: string,
+  windowDays?: number
+): Promise<{
+  bySource: AttributionBreakdown[];
+  byCampaign: CampaignBreakdown[];
+  byModule: ModuleConversion[];
+  weekly: { week: string; total: number; accepted: number }[];
+  total: number;
+  accepted: number;
+  converted: number;
+}> {
+  try {
+    const filterParts = ['tenant = {:tenant}'];
+    const params: Record<string, unknown> = { tenant };
+    if (windowDays && windowDays > 0) {
+      const cutoff = new Date(Date.now() - windowDays * 86400_000).toISOString();
+      filterParts.push('created >= {:cutoff}');
+      params.cutoff = cutoff;
+    }
+    const leads = await pb.collection('compass_leads').getFullList<Lead>({
+      filter: pb.filter(filterParts.join(' && '), params),
+      fields:
+        'id,status,source_key,utm_source,utm_medium,utm_campaign,landing_module,converted_startup,converted_at,created',
+      batch: 1000
+    });
+
+    const sourceMap = new Map<string, AttributionBreakdown>();
+    const campaignMap = new Map<string, CampaignBreakdown>();
+    const moduleMap = new Map<string, ModuleConversion>();
+    const weekMap = new Map<string, { week: string; total: number; accepted: number }>();
+
+    let accepted = 0;
+    let converted = 0;
+    for (const lead of leads) {
+      const isAccepted = lead.status === 'accepted';
+      const isConverted = !!lead.converted_startup;
+      if (isAccepted) accepted++;
+      if (isConverted) converted++;
+
+      // By source
+      const sourceKey = lead.source_key || 'unknown';
+      let s = sourceMap.get(sourceKey);
+      if (!s) {
+        s = { source_key: sourceKey, total: 0, accepted: 0, in_funnel: 0 };
+        sourceMap.set(sourceKey, s);
+      }
+      s.total++;
+      if (isAccepted) s.accepted++;
+      if (lead.status !== 'declined' && lead.status !== 'accepted') s.in_funnel++;
+
+      // By campaign
+      const campaign = (lead.utm_campaign || '').trim();
+      if (campaign) {
+        let c = campaignMap.get(campaign);
+        if (!c) {
+          c = {
+            campaign,
+            source: lead.utm_source || undefined,
+            medium: lead.utm_medium || undefined,
+            total: 0,
+            accepted: 0
+          };
+          campaignMap.set(campaign, c);
+        }
+        c.total++;
+        if (isAccepted) c.accepted++;
+      }
+
+      // By module
+      const slug = (lead.landing_module || '').trim();
+      if (slug) {
+        let m = moduleMap.get(slug);
+        if (!m) {
+          m = { slug, total: 0, accepted: 0, converted: 0 };
+          moduleMap.set(slug, m);
+        }
+        m.total++;
+        if (isAccepted) m.accepted++;
+        if (isConverted) m.converted++;
+      }
+
+      // Weekly bucket
+      const wkKey = weekKey(lead.created);
+      let w = weekMap.get(wkKey);
+      if (!w) {
+        w = { week: wkKey, total: 0, accepted: 0 };
+        weekMap.set(wkKey, w);
+      }
+      w.total++;
+      if (isAccepted) w.accepted++;
+    }
+
+    return {
+      bySource: [...sourceMap.values()].sort((a, b) => b.total - a.total),
+      byCampaign: [...campaignMap.values()].sort((a, b) => b.total - a.total),
+      byModule: [...moduleMap.values()].sort((a, b) => b.total - a.total),
+      weekly: [...weekMap.values()].sort((a, b) => (a.week > b.week ? 1 : -1)),
+      total: leads.length,
+      accepted,
+      converted
+    };
+  } catch {
+    return {
+      bySource: [],
+      byCampaign: [],
+      byModule: [],
+      weekly: [],
+      total: 0,
+      accepted: 0,
+      converted: 0
+    };
+  }
+}
+
+function weekKey(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const yr = d.getUTCFullYear();
+    const start = new Date(Date.UTC(yr, 0, 1));
+    const week = Math.ceil(((d.getTime() - start.getTime()) / 86400_000 + start.getUTCDay() + 1) / 7);
+    return `${yr}-W${String(week).padStart(2, '0')}`;
+  } catch {
+    return 'okänd';
   }
 }
 

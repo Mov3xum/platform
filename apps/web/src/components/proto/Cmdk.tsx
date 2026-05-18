@@ -19,13 +19,14 @@ const ACTIONS: CmdkItem[] = [
   { kind: 'act', label: 'Onboarda nytt bolag', hint: '⌘I', href: '/startups/new' },
   { kind: 'act', label: 'Ny rapport', hint: 'Auto', href: '/rapporter' },
   { kind: 'act', label: 'Skapa AI-agent', hint: 'AI-agenter', href: '/toolbox/new' },
-  { kind: 'act', label: 'Logga Sprint X-checkin', hint: 'Compass', href: '/kompassen' }
+  { kind: 'act', label: 'Nytt lead manuellt', hint: 'Inflöde', href: '/inflode/leads/new' },
+  { kind: 'act', label: 'Skapa intag-modul', hint: 'Inflöde', href: '/inflode/admin/modules/new' }
 ];
 
 const moduleIcons: Record<string, string> = {
   idag: 'home',
   uppdrag: 'flow',
-  kompassen: 'compass',
+  inflode: 'spark',
   startups: 'people',
   investerare: 'graph',
   events: 'spark',

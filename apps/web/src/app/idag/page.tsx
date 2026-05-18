@@ -506,7 +506,7 @@ export default async function IdagPage() {
                 </Link>
               )}
               <Link
-                href="/kompassen"
+                href="/inflode"
                 style={{
                   display: 'block',
                   padding: '10px 8px',
@@ -621,7 +621,7 @@ export default async function IdagPage() {
               <CardHead
                 label="Portfölj-puls · Sprint X"
                 right={
-                  <Link href="/kompassen" className="mx-btn mx-sm mx-ghost">
+                  <Link href="/inflode" className="mx-btn mx-sm mx-ghost">
                     Alla →
                   </Link>
                 }

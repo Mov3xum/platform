@@ -9,17 +9,17 @@ export const dynamic = 'force-dynamic';
 export default async function BrandPage() {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
-    redirect('/kompassen');
+    redirect('/inflode');
   }
 
   return (
     <div className="mx-view-pad mx-narrow">
       <PageHead
-        crumb="Kompassen / Admin / Brand"
+        crumb="Inflöde / Admin / Brand"
         title="Brand-inställningar"
-        subtitle="Anpassa hur Kompassen presenterar din inkubator för publika intag-flöden."
+        subtitle="Anpassa hur Inflöde presenterar din inkubator för publika intag-flöden."
         actions={
-          <Link href="/kompassen" className="mx-btn">
+          <Link href="/inflode" className="mx-btn">
             <Icon name="arrow" size={13} /> Översikt
           </Link>
         }
@@ -33,7 +33,7 @@ export default async function BrandPage() {
           Tabellen <code className="mx-mono">compass_brand</code> finns redan
           (tenant-scoped key/value). Här ska du framöver kunna ladda upp logo,
           sätta hero-text och välja vilka moduler som syns på landningssidan.
-          Tills dess respekterar Kompassen Movexum-tenantens standard-brand
+          Tills dess respekterar Inflöde Movexum-tenantens standard-brand
           (se <Link href="/installningar" className="mx-fw-6">Inställningar</Link>).
         </div>
       </Card>

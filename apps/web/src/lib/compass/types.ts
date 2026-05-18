@@ -1,6 +1,6 @@
-// Startupkompassen — typer
+// Inflöde — typer
 // Hjälper de andra modul-filerna att hålla sig till PocketBase-schemat
-// från migration 1700000039.
+// från migration 1700000039 + 1700000049.
 
 export type LeadStatus =
   | 'new'
@@ -30,6 +30,12 @@ export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
 
 export type FlowType = 'chat' | 'wizard' | 'quiz';
 
+export const FLOW_TYPE_LABEL: Record<FlowType, string> = {
+  chat: 'AI-chatt',
+  wizard: 'Formulär',
+  quiz: 'Quiz'
+};
+
 export type SecurityEventKind =
   | 'login'
   | 'logout'
@@ -54,6 +60,27 @@ export interface LeadSource {
   sort_order?: number;
 }
 
+export interface AiReview {
+  strengths: string[];
+  risks: string[];
+  recommendation: 'pass' | 'maybe' | 'no';
+  recommendation_reason: string;
+  next_steps: string[];
+  generated_at: string;
+  model: string;
+}
+
+export interface MarketScan {
+  market_size: string;
+  trend: string;
+  competitors: string[];
+  differentiators: string[];
+  regulation_notes: string;
+  fit_for_movexum: string;
+  generated_at: string;
+  model: string;
+}
+
 export interface Lead {
   id: string;
   tenant: string;
@@ -73,6 +100,20 @@ export interface Lead {
   tags?: string[];
   consent_at?: string;
   last_contact_at?: string;
+  // Attribution
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_term?: string;
+  utm_content?: string;
+  referrer_url?: string;
+  landing_module?: string;
+  // AI-analyser
+  ai_review?: AiReview;
+  market_scan?: MarketScan;
+  // Konvertering till startup
+  converted_startup?: string;
+  converted_at?: string;
   created: string;
   updated: string;
 }
@@ -112,6 +153,13 @@ export interface CompassModule {
   is_active?: boolean;
   model?: string;
   sort_order?: number;
+  // Publik publicering
+  public_url_enabled?: boolean;
+  target_audience?: string;
+  success_message?: string;
+  redirect_url?: string;
+  theme_color?: string;
+  intro_message?: string;
   created: string;
   updated: string;
 }
@@ -126,4 +174,14 @@ export interface CompassQuestion {
   choices?: { value: string; label: string }[];
   required?: boolean;
   sort_order?: number;
+}
+
+export interface Attribution {
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_term?: string;
+  utm_content?: string;
+  referrer_url?: string;
+  landing_module?: string;
 }

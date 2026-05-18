@@ -102,8 +102,8 @@ export async function logCheckin(
       /* activity logging is best-effort */
     }
 
-    revalidatePath('/kompassen');
-    revalidatePath(`/kompassen/${startupId}`);
+    revalidatePath('/inflode');
+    revalidatePath(`/inflode/${startupId}`);
     revalidatePath('/aktivitet');
     revalidatePath('/idag');
     revalidatePath(`/startups/${startupId}`);
@@ -147,8 +147,8 @@ export async function updateScores(
     await pb.collection('startups').update(startupId, {
       sprint_x_json: merged
     });
-    revalidatePath('/kompassen');
-    revalidatePath(`/kompassen/${startupId}`);
+    revalidatePath('/inflode');
+    revalidatePath(`/inflode/${startupId}`);
     return {};
   } catch (err) {
     return {

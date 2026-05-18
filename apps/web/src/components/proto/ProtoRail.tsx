@@ -8,7 +8,7 @@ import { Logo } from '@/components/Logo';
 const moduleIcons: Record<string, string> = {
   idag: 'home',
   uppdrag: 'flow',
-  kompassen: 'compass',
+  inflode: 'spark',
   startups: 'people',
   investerare: 'graph',
   events: 'spark',

@@ -11,11 +11,11 @@ export default async function CompassChatPage() {
   return (
     <div className="mx-view-pad mx-narrow">
       <PageHead
-        crumb="Kompassen / AI-intag"
-        title="AI-intag · Startupkompassen"
+        crumb="Inflöde / AI-intag"
+        title="AI-intag · Inflöde"
         subtitle="Test-läge för Movexum-personal. Konversationen lagras i tenant-isolerad logg och dyker upp som lead efter avslut."
         actions={
-          <Link href="/kompassen" className="mx-btn">
+          <Link href="/inflode" className="mx-btn">
             <Icon name="arrow" size={13} /> Översikt
           </Link>
         }

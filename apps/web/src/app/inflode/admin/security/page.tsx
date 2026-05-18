@@ -40,7 +40,7 @@ interface SecurityEvent {
 export default async function SecurityEventsPage() {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
-    redirect('/kompassen');
+    redirect('/inflode');
   }
   const pb = await getServerPb();
   const res = (await listSecurityEvents(pb, user.tenant, { perPage: 80 })) as {
@@ -51,11 +51,11 @@ export default async function SecurityEventsPage() {
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb="Kompassen / Admin / Säkerhet"
+        crumb="Inflöde / Admin / Säkerhet"
         title="Säkerhetshändelser"
         subtitle="Audit-logg för leads, moduler och autentisering. Loggen skrivs server-side och kan inte ändras."
         actions={
-          <Link href="/kompassen" className="mx-btn">
+          <Link href="/inflode" className="mx-btn">
             <Icon name="arrow" size={13} /> Översikt
           </Link>
         }
