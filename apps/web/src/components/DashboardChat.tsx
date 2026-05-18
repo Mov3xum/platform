@@ -12,8 +12,8 @@ const MAX_ATTACHMENTS = 5;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const ACCEPT_IMAGE = ['image/png', 'image/jpeg', 'image/webp'];
 const ACCEPT_TEXT = ['text/plain', 'text/markdown', 'text/csv', 'application/csv'];
-const ACCEPT_ATTR =
-  'image/png,image/jpeg,image/webp,text/plain,text/markdown,text/csv,.md,.csv,.txt';
+const ACCEPT_IMAGE_ATTR = 'image/png,image/jpeg,image/webp';
+const ACCEPT_TEXT_ATTR = 'text/plain,text/markdown,text/csv,.md,.csv,.txt';
 
 interface UploadedFile extends ChatAttachment {
   uid: string;
@@ -137,6 +137,7 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const isActive = messages.length > 0 || isPending;
@@ -244,6 +245,7 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
     }));
     setAttachments([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (imageInputRef.current) imageInputRef.current.value = '';
 
     startTransition(async () => {
       try {
@@ -295,10 +297,15 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
     setInput('');
     setAttachments([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (imageInputRef.current) imageInputRef.current.value = '';
   }
 
   function openFilePicker() {
     fileInputRef.current?.click();
+  }
+
+  function openImagePicker() {
+    imageInputRef.current?.click();
   }
 
   const canSubmit = !isPending && (input.trim().length > 0 || attachments.length > 0);
@@ -358,7 +365,18 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
         ref={fileInputRef}
         type="file"
         multiple
-        accept={ACCEPT_ATTR}
+        accept={ACCEPT_TEXT_ATTR}
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files && e.target.files.length > 0) addFiles(e.target.files);
+        }}
+      />
+
+      <input
+        ref={imageInputRef}
+        type="file"
+        multiple
+        accept={ACCEPT_IMAGE_ATTR}
         className="hidden"
         onChange={(e) => {
           if (e.target.files && e.target.files.length > 0) addFiles(e.target.files);
@@ -372,10 +390,20 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
             onClick={openFilePicker}
             disabled={isPending || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            title={`Bifoga fil (PNG, JPG, WebP, TXT, MD, CSV · max ${MAX_ATTACHMENTS} filer · 10 MB/fil)`}
+            title={`Bifoga fil (TXT, MD, CSV · max ${MAX_ATTACHMENTS} bilagor · 10 MB/fil)`}
             aria-label="Bifoga fil"
           >
             <Icon name="paperclip" size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={openImagePicker}
+            disabled={isPending || attachments.length >= MAX_ATTACHMENTS}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            title={`Bifoga bild (PNG, JPG, WebP · max ${MAX_ATTACHMENTS} bilagor · 10 MB/fil)`}
+            aria-label="Bifoga bild"
+          >
+            <Icon name="image" size={14} />
           </button>
           <button
             type="button"
