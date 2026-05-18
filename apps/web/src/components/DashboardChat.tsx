@@ -6,7 +6,10 @@ import {
   type ChatAttachment,
   type ChatMessage
 } from '@/lib/actions/chat';
-import { extractPdfFromDataUrlAction } from '@/lib/actions/chat-attachments';
+import {
+  extractPdfFromDataUrlAction,
+  extractXlsxFromDataUrlAction
+} from '@/lib/actions/chat-attachments';
 import { Icon } from '@/components/proto/Icon';
 
 const MAX_ATTACHMENTS = 5;
@@ -14,10 +17,16 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const ACCEPT_IMAGE = ['image/png', 'image/jpeg', 'image/webp'];
 const ACCEPT_TEXT = ['text/plain', 'text/markdown', 'text/csv', 'application/csv'];
 const ACCEPT_PDF = ['application/pdf'];
-const ACCEPT_ATTR =
-  'image/png,image/jpeg,image/webp,text/plain,text/markdown,text/csv,application/pdf,.md,.csv,.txt,.pdf';
-const ACCEPT_TEXT_ATTR = ACCEPT_ATTR;
-const ACCEPT_IMAGE_ATTR = ACCEPT_IMAGE.join(',');
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const ACCEPT_XLSX = [
+  XLSX_MIME,
+  'application/vnd.ms-excel'
+];
+const ACCEPT_IMAGE_ATTR = 'image/png,image/jpeg,image/webp';
+const ACCEPT_TEXT_ATTR =
+  'text/plain,text/markdown,text/csv,application/pdf,' +
+  XLSX_MIME +
+  ',.md,.csv,.txt,.pdf,.xlsx';
 
 interface UploadedFile extends ChatAttachment {
   uid: string;
@@ -26,13 +35,19 @@ interface UploadedFile extends ChatAttachment {
 
 function detectMime(file: File): string | null {
   const mime = (file.type || '').toLowerCase();
-  if (mime && [...ACCEPT_IMAGE, ...ACCEPT_TEXT, ...ACCEPT_PDF].includes(mime)) return mime;
-  // Fallback via extension för md/csv/txt/pdf utan korrekt mime
+  if (
+    mime &&
+    [...ACCEPT_IMAGE, ...ACCEPT_TEXT, ...ACCEPT_PDF, ...ACCEPT_XLSX].includes(mime)
+  ) {
+    return mime;
+  }
+  // Fallback via extension för md/csv/txt/pdf/xlsx utan korrekt mime
   const ext = file.name.toLowerCase().split('.').pop();
   if (ext === 'md' || ext === 'markdown') return 'text/markdown';
   if (ext === 'csv') return 'text/csv';
   if (ext === 'txt') return 'text/plain';
   if (ext === 'pdf') return 'application/pdf';
+  if (ext === 'xlsx') return XLSX_MIME;
   return null;
 }
 
@@ -217,6 +232,21 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
               uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
               name: file.name,
               mime: 'application/pdf',
+              kind: 'text',
+              size: file.size,
+              text: result.text
+            });
+          } else if (ACCEPT_XLSX.includes(mime)) {
+            const dataUrl = await readAsDataUrl(file);
+            const result = await extractXlsxFromDataUrlAction(dataUrl, file.name);
+            if (result.error || !result.text) {
+              setError(result.error || `${file.name}: kunde inte läsa Excel-filen.`);
+              continue;
+            }
+            next.push({
+              uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              name: file.name,
+              mime: XLSX_MIME,
               kind: 'text',
               size: file.size,
               text: result.text
@@ -431,7 +461,7 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
             onClick={openFilePicker}
             disabled={isPending || isProcessingFiles || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            title={`Bifoga fil (PNG, JPG, WebP, PDF, TXT, MD, CSV · max ${MAX_ATTACHMENTS} filer · 10 MB/fil)`}
+            title={`Bifoga fil (PNG, JPG, WebP, PDF, XLSX, TXT, MD, CSV · max ${MAX_ATTACHMENTS} filer · 10 MB/fil)`}
             aria-label="Bifoga fil"
           >
             <Icon name="paperclip" size={14} />

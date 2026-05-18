@@ -66,6 +66,50 @@ export async function extractPdfText(buffer: Buffer): Promise<string> {
 }
 
 /**
+ * Konverterar en xlsx-buffer till en kompakt TSV-liknande textrepresentation
+ * (en sektion per sheet, kolumner sorterade A→Z→AA→AB). Tomma efter-rader
+ * trimmas och tomma sheets hoppas över. Anroparen ansvarar för slutgiltig
+ * storlekscap.
+ */
+export async function extractXlsxText(buffer: Buffer): Promise<string> {
+  // Dynamisk import för att hålla xlsx-parsern utanför edge-bundles.
+  const mod = await import('@/lib/import/xlsx');
+  const parsed = mod.parseXlsx(buffer);
+
+  const chunks: string[] = [];
+  for (const [sheetName, rows] of parsed.sheets) {
+    if (!rows || rows.length === 0) continue;
+
+    const columnSet = new Set<string>();
+    for (const row of rows) {
+      for (const col of Object.keys(row)) columnSet.add(col);
+    }
+    if (columnSet.size === 0) continue;
+    const columns = Array.from(columnSet).sort((a, b) => {
+      const la = a.length;
+      const lb = b.length;
+      if (la !== lb) return la - lb;
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+
+    let lastNonEmpty = -1;
+    const renderedRows: string[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const cells = columns.map((c) => (row[c] ?? '').replace(/[\t\r\n]+/g, ' ').trim());
+      if (cells.some((c) => c.length > 0)) lastNonEmpty = i;
+      renderedRows.push(cells.join('\t'));
+    }
+    if (lastNonEmpty < 0) continue;
+
+    const trimmed = renderedRows.slice(0, lastNonEmpty + 1);
+    chunks.push(`# Sheet: ${sheetName}\n${trimmed.join('\n')}`);
+  }
+
+  return chunks.join('\n\n');
+}
+
+/**
  * Validerar och bearbetar uppladdade bilagor inför ett Mistral-anrop.
  * - Bilder konverteras till data-URL och blir image_url-block (vision).
  * - PDF/text extraheras server-side, cappas, och bakas in som textbilaga
