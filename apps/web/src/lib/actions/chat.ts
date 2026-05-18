@@ -77,13 +77,6 @@ const ALLOWED_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 function pickModels(hasImages: boolean): string[] {
   return hasImages ? VISION_FALLBACK_MODELS : CHAT_FALLBACK_MODELS;
 }
-  'application/pdf'
-]);
-const ALLOWED_IMAGE_MIMES = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/webp'
-]);
 
 function chatErrorMessage(err: unknown): string {
   if (err instanceof MistralError) {
