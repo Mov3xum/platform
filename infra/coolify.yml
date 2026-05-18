@@ -1,6 +1,13 @@
 # Coolify-konfiguration för Moveum platform
 # PocketBase: byggs från egen Dockerfile med migrations + hooks inbakade
 # Web: Next.js-app byggd från apps/web/Dockerfile
+#
+# OBS: PocketBase tillämpar JS-migrations i
+# backend/pocketbase-schema/migrations/ automatiskt vid container-start.
+# När en ny migration lagts till MÅSTE pocketbase-containern startas
+# om i Coolify innan web-appen ser den nya collectionen — annars 404:ar
+# nya endpoints (t.ex. notifications_collection / user_mistral_connectors).
+# Verifiera i PB-admin /_/#/collections att senaste migrationen är applicerad.
 
 version: "3.8"
 
