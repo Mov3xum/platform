@@ -141,6 +141,7 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const isActive = messages.length > 0 || isPending;
@@ -268,6 +269,7 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
     }));
     setAttachments([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (imageInputRef.current) imageInputRef.current.value = '';
 
     startTransition(async () => {
       try {
@@ -319,6 +321,7 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
     setInput('');
     setAttachments([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (imageInputRef.current) imageInputRef.current.value = '';
   }
 
   function openFilePicker() {
@@ -383,7 +386,18 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
         ref={fileInputRef}
         type="file"
         multiple
-        accept={ACCEPT_ATTR}
+        accept={ACCEPT_TEXT_ATTR}
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files && e.target.files.length > 0) addFiles(e.target.files);
+        }}
+      />
+
+      <input
+        ref={imageInputRef}
+        type="file"
+        multiple
+        accept={ACCEPT_IMAGE_ATTR}
         className="hidden"
         onChange={(e) => {
           const target = e.target;
@@ -419,6 +433,16 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
           {isProcessingFiles && (
             <span className="text-[11.5px] text-foreground-subtle">Läser fil…</span>
           )}
+          <button
+            type="button"
+            onClick={openImagePicker}
+            disabled={isPending || attachments.length >= MAX_ATTACHMENTS}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            title={`Bifoga bild (PNG, JPG, WebP · max ${MAX_ATTACHMENTS} bilagor · 10 MB/fil)`}
+            aria-label="Bifoga bild"
+          >
+            <Icon name="image" size={14} />
+          </button>
           <button
             type="button"
             onClick={() => setIncludeWebContext((v) => !v)}
