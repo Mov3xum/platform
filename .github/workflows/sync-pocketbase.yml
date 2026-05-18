@@ -95,10 +95,10 @@ jobs:
             pb_url="https://$pb_url"
           fi
 
-          max_attempts=20
-          sleep_seconds=15
+          max_attempts=8
+          sleep_seconds=8
           consecutive_503=0
-          consecutive_503_limit=12
+          consecutive_503_limit=2
 
           for attempt in $(seq 1 "$max_attempts"); do
             health_code=$(curl -k -sS --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "$pb_url/api/health" || true)

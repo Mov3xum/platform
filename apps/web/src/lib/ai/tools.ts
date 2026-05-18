@@ -7,6 +7,15 @@ import {
   type ExposedCollection
 } from './schema';
 import type { MistralToolCall, MistralToolDefinition } from './mistral';
+import {
+  agentWritableFields,
+  agentCreatableCollections,
+  createActivity,
+  updateActivityField,
+  updateStartupField,
+  type Actor,
+  type StartupWritableField
+} from '@/lib/core/write';
 
 const MAX_RESULT_ROWS = 50;
 const MAX_FIELD_LENGTH = 400;
@@ -15,14 +24,27 @@ const MAX_SORT_LENGTH = 200;
 const MAX_EXPAND_LENGTH = 200;
 
 /**
- * Builds Mistral tool definitions for the current set of exposed collections.
- * The collection enum is generated from the live discovery so new
- * PocketBase tables show up automatically.
+ * Bygger Mistral-tool-definitionerna för en chatt-session. Tar emot
+ * vilken actor som ska köra dem så att skrivverktyg bara exponeras
+ * när actor är en agent — och då filtrerade till agentens whitelist
+ * (`lib/core/write/writable-fields.ts`). UI-vägen använder formulär
+ * för skrivning, så `user`-actorn får bara read-only här.
+ *
+ * Det delade skrivlagret är källan av sanning: även om en LLM skulle
+ * gissa fram ett extra fält i `update_startup_field` blockerar kärnan
+ * det innan något skrivs. Tool-schemat är hint för modellen, inte
+ * säkerhetsgränsen.
  */
-export function buildChatTools(collections: ExposedCollection[]): MistralToolDefinition[] {
-  const collectionNames = collections.map((c) => c.name);
+export interface BuildToolsOptions {
+  actor?: Actor;
+}
 
-  return [
+export function buildChatTools(
+  collections: ExposedCollection[],
+  options: BuildToolsOptions = {}
+): MistralToolDefinition[] {
+  const collectionNames = collections.map((c) => c.name);
+  const tools: MistralToolDefinition[] = [
     {
       type: 'function',
       function: {
@@ -97,12 +119,97 @@ export function buildChatTools(collections: ExposedCollection[]): MistralToolDef
       }
     }
   ];
+
+  // Skrivverktyg — bara för agenter. Det delade lagret enforcer:ar
+  // whitelist + validering oavsett vad modellen försöker, men vi
+  // exponerar bara fält som är `allow` så modellen inte ens behöver
+  // gissa.
+  if (options.actor?.kind === 'agent') {
+    const startupFields = agentWritableFields('startups');
+    if (startupFields.length > 0) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'update_startup_field',
+          description:
+            'Uppdaterar ETT fält på en startup. Använd när coachen ber dig ' +
+            'notera nästa steg, justera IRL-nivå eller liknande. Varje skrivning ' +
+            'loggas i agent_actions och kan rullas tillbaka av staff.',
+          parameters: {
+            type: 'object',
+            properties: {
+              startupId: {
+                type: 'string',
+                description: 'PocketBase-id för bolaget (samma som visas i query_collection-svar)'
+              },
+              field: {
+                type: 'string',
+                enum: startupFields,
+                description: 'Vilket fält som ska uppdateras'
+              },
+              value: {
+                description:
+                  'Nytt värde. För `next_step`: kort fritext (max 500 tecken). ' +
+                  'För `irl_level`: heltal 1–9 eller null för att rensa.'
+              }
+            },
+            required: ['startupId', 'field', 'value']
+          }
+        }
+      });
+    }
+
+    if (agentCreatableCollections().includes('activities')) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'create_startup_activity',
+          description:
+            'Skapar en aktivitet (anteckning, möte eller manuellt event) kopplat ' +
+            'till en startup. Använd för att logga en sammanfattning av samtalet, ' +
+            'en planerad åtgärd eller en mötesnotering. Skapas alltid med staff/agent ' +
+            'som ägare och dagens datum.',
+          parameters: {
+            type: 'object',
+            properties: {
+              startupId: {
+                type: 'string',
+                description: 'PocketBase-id för bolaget'
+              },
+              kind: {
+                type: 'string',
+                enum: ['manual', 'note', 'meeting'],
+                description: 'Typ av aktivitet'
+              },
+              title: {
+                type: 'string',
+                description: 'Kort titel (max 200 tecken)'
+              },
+              description: {
+                type: 'string',
+                description: 'Längre brödtext (valfritt, max 2000 tecken)'
+              }
+            },
+            required: ['startupId', 'kind', 'title']
+          }
+        }
+      });
+    }
+  }
+
+  return tools;
 }
 
 interface ToolDispatchContext {
   pb: PocketBase;
   tenantId: string;
   collections: ExposedCollection[];
+  /**
+   * Actor som verktyget körs som. Required när skrivverktyg används —
+   * kärnlagret läser actor.kind för att applicera rätt whitelist. För
+   * read-only-verktyg ignoreras fältet (tenant räcker).
+   */
+  actor?: Actor;
 }
 
 export interface ToolResult {
@@ -253,9 +360,92 @@ export async function dispatchToolCall(
       return runQueryCollection(args, ctx);
     case 'count_collection':
       return runCountCollection(args, ctx);
+    case 'update_startup_field':
+      return runUpdateStartupField(args, ctx);
+    case 'create_startup_activity':
+      return runCreateStartupActivity(args, ctx);
     default:
       return { ok: false, error: `Okänt verktyg: ${call.function.name}` };
   }
+}
+
+function requireAgentActor(ctx: ToolDispatchContext): Actor | { error: string } {
+  if (!ctx.actor || ctx.actor.kind !== 'agent') {
+    return { error: 'Skrivverktyg får bara köras från en agent-kontext.' };
+  }
+  return ctx.actor;
+}
+
+async function runUpdateStartupField(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const startupId = typeof args.startupId === 'string' ? args.startupId.trim() : '';
+  const field = typeof args.field === 'string' ? args.field.trim() : '';
+  if (!startupId) return { ok: false, error: 'startupId saknas.' };
+  if (!field) return { ok: false, error: 'field saknas.' };
+
+  const result = await updateStartupField(ctx.pb, actor, {
+    startupId,
+    field: field as StartupWritableField,
+    value: args.value
+  });
+
+  if (!result.ok) {
+    return { ok: false, error: result.error };
+  }
+  return {
+    ok: true,
+    data: {
+      startupId: result.value.startupId,
+      field: result.value.field,
+      before: result.value.before,
+      after: result.value.after,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateStartupActivity(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const startupId = typeof args.startupId === 'string' ? args.startupId.trim() : '';
+  const kind = typeof args.kind === 'string' ? args.kind.trim() : '';
+  const title = typeof args.title === 'string' ? args.title : '';
+  const description = typeof args.description === 'string' ? args.description : undefined;
+
+  if (!startupId) return { ok: false, error: 'startupId saknas.' };
+
+  // updateActivityField är importerad för framtida UPDATE-verktyg och
+  // för att hålla aktivitets-API:t samlat i en modul.
+  void updateActivityField;
+
+  const result = await createActivity(ctx.pb, actor, {
+    startupId,
+    kind: kind as 'manual' | 'note' | 'meeting',
+    title,
+    description
+  });
+
+  if (!result.ok) {
+    return { ok: false, error: result.error };
+  }
+  return {
+    ok: true,
+    data: {
+      activityId: result.value.activityId,
+      startupId: result.value.startupId,
+      kind: result.value.kind,
+      logged_in: 'agent_actions'
+    }
+  };
 }
 
 export { type ExposedCollection };

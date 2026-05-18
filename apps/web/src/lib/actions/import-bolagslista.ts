@@ -12,7 +12,7 @@ import {
 } from '@/lib/import/bolagslista';
 import { recordActivity } from './record-activity';
 
-const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB
 const ALLOWED_MIMES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-excel',
