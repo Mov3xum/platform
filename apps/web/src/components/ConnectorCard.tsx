@@ -4,11 +4,11 @@ import {
   deactivateConnectorFormAction
 } from '@/lib/actions/connectors';
 import { Chip } from '@/components/proto';
+import { ConnectorLogo } from '@/components/ConnectorLogo';
 
 export interface ConnectorCardProps {
   kind: 'builtin' | 'mcp';
   connectorId: string;
-  icon: string;
   title: string;
   blurb: string;
   riskClass: 'minimal' | 'begränsad' | 'högrisk';
@@ -24,7 +24,6 @@ export interface ConnectorCardProps {
 export function ConnectorCard({
   kind,
   connectorId,
-  icon,
   title,
   blurb,
   riskClass,
@@ -42,8 +41,8 @@ export function ConnectorCard({
   return (
     <div className="flex flex-col rounded-2xl border border-default bg-surface p-4">
       <div className="mb-3 flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas-muted text-base">
-          {icon}
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-canvas-muted text-foreground">
+          <ConnectorLogo kind={kind} connectorId={connectorId} connectorName={title} size={22} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[14px] font-semibold text-foreground">{title}</div>

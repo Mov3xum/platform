@@ -49,7 +49,7 @@ export default async function ConnectorChatPage({
 
   if (activationList.totalItems === 0 || activationList.items[0].status !== 'active') {
     redirect(
-      `/integrationer/connectors?error=${encodeURIComponent(
+      `/integrationer?error=${encodeURIComponent(
         'Aktivera connectorn först innan du kan chatta med den.'
       )}`
     );
@@ -107,10 +107,10 @@ export default async function ConnectorChatPage({
             </p>
           </div>
           <Link
-            href="/integrationer/connectors"
+            href="/integrationer"
             className="text-[12px] text-foreground-subtle underline-offset-2 hover:text-foreground hover:underline"
           >
-            ← Alla connectors
+            ← Integrationer
           </Link>
         </header>
 
