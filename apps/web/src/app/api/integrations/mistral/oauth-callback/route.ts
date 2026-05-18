@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
   if (errorParam) {
     return NextResponse.redirect(
       new URL(
-        `/integrationer/connectors?error=${encodeURIComponent('OAuth-flowet avbröts: ' + errorParam)}`,
+        `/integrationer?error=${encodeURIComponent('OAuth-flowet avbröts: ' + errorParam)}`,
         request.url
       )
     );
@@ -37,14 +37,14 @@ export async function GET(request: NextRequest) {
 
   if (!state || !code) {
     return NextResponse.redirect(
-      new URL('/integrationer/connectors?error=missing-state-or-code', request.url)
+      new URL('/integrationer?error=' + encodeURIComponent('Saknar state eller code i OAuth-callback.'), request.url)
     );
   }
 
   const payload = verifyAndParseOAuthState(state);
   if (!payload) {
     return NextResponse.redirect(
-      new URL('/integrationer/connectors?error=invalid-state', request.url)
+      new URL('/integrationer?error=' + encodeURIComponent('OAuth-state är ogiltig eller har utgått.'), request.url)
     );
   }
 
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
   if (!currentUser || currentUser.id !== payload.uid || currentUser.tenant !== payload.tid) {
     // Förmodligen sessionen utgått eller någon försöker hijacka flowet.
     return NextResponse.redirect(
-      new URL('/login?next=/integrationer/connectors', request.url)
+      new URL('/login?next=/integrationer', request.url)
     );
   }
 
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
     console.error('[oauth-callback] exchange failed', err);
     return NextResponse.redirect(
       new URL(
-        `/integrationer/connectors?error=${encodeURIComponent('Kunde inte växla OAuth-code mot token.')}`,
+        `/integrationer?error=${encodeURIComponent('Kunde inte växla OAuth-code mot token.')}`,
         request.url
       )
     );
@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
     console.error('[oauth-callback] persist failed', err);
     return NextResponse.redirect(
       new URL(
-        `/integrationer/connectors?error=${encodeURIComponent('Kunde inte spara OAuth-token.')}`,
+        `/integrationer?error=${encodeURIComponent('Kunde inte spara OAuth-token.')}`,
         request.url
       )
     );

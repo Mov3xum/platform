@@ -204,7 +204,6 @@ export async function activateConnectorAction(input: {
     };
   }
 
-  revalidatePath('/integrationer/connectors');
   revalidatePath('/integrationer');
   return {};
 }
@@ -228,7 +227,7 @@ export async function deactivateConnectorAction(input: {
     status: 'disabled'
   });
 
-  revalidatePath('/integrationer/connectors');
+  revalidatePath('/integrationer');
   return {};
 }
 
@@ -244,12 +243,12 @@ export async function activateConnectorFormAction(formData: FormData): Promise<v
   const kind = String(formData.get('kind') || '') as 'builtin' | 'mcp';
   const connectorId = String(formData.get('connectorId') || '').trim();
   if ((kind !== 'builtin' && kind !== 'mcp') || !connectorId) {
-    redirect('/integrationer/connectors?error=' + encodeURIComponent('Ogiltig connector.'));
+    redirect('/integrationer?error=' + encodeURIComponent('Ogiltig connector.'));
   }
   const result = await activateConnectorAction({ kind, connectorId });
   if (result.redirectTo) redirect(result.redirectTo);
   if (result.error) {
-    redirect('/integrationer/connectors?error=' + encodeURIComponent(result.error));
+    redirect('/integrationer?error=' + encodeURIComponent(result.error));
   }
 }
 
@@ -260,7 +259,7 @@ export async function deactivateConnectorFormAction(formData: FormData): Promise
   if ((kind !== 'builtin' && kind !== 'mcp') || !connectorId) return;
   const result = await deactivateConnectorAction({ kind, connectorId });
   if (result.error) {
-    redirect('/integrationer/connectors?error=' + encodeURIComponent(result.error));
+    redirect('/integrationer?error=' + encodeURIComponent(result.error));
   }
 }
 
@@ -281,7 +280,7 @@ export async function setTenantAllowedConnectorsAction(
     allowed_mistral_connectors: sanitized
   });
 
-  revalidatePath('/integrationer/connectors');
+  revalidatePath('/integrationer');
   return {};
 }
 
