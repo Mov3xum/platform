@@ -29,6 +29,22 @@ jobs:
       - name: Install deps
         run: yarn install --frozen-lockfile
 
+      - name: Wait for PocketBase
+        env:
+          PB_URL: ${{ secrets.PB_URL }}
+        run: |
+          set -eu
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS -k "$PB_URL/api/health" > /dev/null; then
+              echo "PB online"
+              exit 0
+            fi
+            echo "Försök $attempt: ingen kontakt, väntar 15 s…"
+            sleep 15
+          done
+          echo "PB svarar inte efter 150 s — avbryter."
+          exit 1
+
       - name: Bootstrap PocketBase
         env:
           PB_URL: ${{ secrets.PB_URL }}
