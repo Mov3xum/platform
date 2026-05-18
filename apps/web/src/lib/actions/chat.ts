@@ -71,7 +71,9 @@ const ALLOWED_TEXT_MIMES = new Set([
   'text/markdown',
   'text/csv',
   'application/csv',
-  'application/pdf'
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel'
 ]);
 const ALLOWED_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
