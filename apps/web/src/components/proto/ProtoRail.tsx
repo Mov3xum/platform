@@ -4,9 +4,11 @@ import { coreModules, RAIL_GROUPS, type Role } from '@platform/shared';
 import { canAccessModuleForUser } from '@/lib/rbac';
 import { ModuleNavItem } from './ModuleNavItem';
 import { Logo } from '@/components/Logo';
+import { StartupSwitcher, type SwitchableStartup } from './StartupSwitcher';
 
 const moduleIcons: Record<string, string> = {
   idag: 'home',
+  inkorg: 'inbox',
   uppdrag: 'flow',
   kompassen: 'compass',
   startups: 'people',
@@ -32,9 +34,10 @@ interface ProtoRailProps {
     disabledModules?: string[];
   };
   counts?: Record<string, number>;
+  switchableStartups?: SwitchableStartup[];
 }
 
-export function ProtoRail({ user, counts = {} }: ProtoRailProps) {
+export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoRailProps) {
   const initial =
     (user.name || user.email)
       .split(' ')
@@ -56,6 +59,10 @@ export function ProtoRail({ user, counts = {} }: ProtoRailProps) {
           logoDarkUrl={user.tenantLogoDarkUrl}
         />
       </div>
+
+      {switchableStartups.length > 0 && (
+        <StartupSwitcher startups={switchableStartups} />
+      )}
 
       <nav className="mx-rail-nav">
         {RAIL_GROUPS.map((group) => {

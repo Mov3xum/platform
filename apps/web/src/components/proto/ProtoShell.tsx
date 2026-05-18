@@ -2,14 +2,16 @@ import type { SessionUser } from '@/lib/auth.server';
 import { ProtoRail } from './ProtoRail';
 import { ProtoTopBar } from './ProtoTopBar';
 import { MobileRailProvider, MobileRailBackdrop } from './MobileRail';
+import type { SwitchableStartup } from './StartupSwitcher';
 
 interface Props {
   user: SessionUser;
   children: React.ReactNode;
   counts?: Record<string, number>;
+  switchableStartups?: SwitchableStartup[];
 }
 
-export function ProtoShell({ user, children, counts }: Props) {
+export function ProtoShell({ user, children, counts, switchableStartups }: Props) {
   return (
     <MobileRailProvider>
       <ProtoRail
@@ -24,6 +26,7 @@ export function ProtoShell({ user, children, counts }: Props) {
           disabledModules: user.disabledModules
         }}
         counts={counts}
+        switchableStartups={switchableStartups}
       />
       <MobileRailBackdrop />
       <div className="mx-main-col">

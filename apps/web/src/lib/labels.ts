@@ -100,13 +100,27 @@ export const toolCategoryLabels: Record<ToolCategory, string> = {
   checklist: 'Checklista'
 };
 
-export type ToolRunStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+export type ToolRunStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'assigned'
+  | 'in_progress'
+  | 'ready_for_review'
+  | 'approved'
+  | 'rejected';
 
 export const toolRunStatusLabels: Record<ToolRunStatus, string> = {
   queued: 'I kö',
   running: 'Kör',
   succeeded: 'Klar',
-  failed: 'Misslyckad'
+  failed: 'Misslyckad',
+  assigned: 'Tilldelad',
+  in_progress: 'Pågående',
+  ready_for_review: 'Att granska',
+  approved: 'Godkänt',
+  rejected: 'Begärt ändring'
 };
 
 export type ActivityKind = 'manual' | 'tool_run' | 'workshop_assignment' | 'workshop_run';
