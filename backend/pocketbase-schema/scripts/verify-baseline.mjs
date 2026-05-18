@@ -26,6 +26,33 @@ const fail = (msg) => {
   throw new Error(msg);
 };
 
+// PocketBase ClientResponseError throws away most useful context when
+// only `.message` is logged (often becoming the default "Something went
+// wrong while processing your request." string). This helper dumps the
+// full picture so CI logs are actionable.
+function describeError(err) {
+  if (!err) return 'unknown error (null/undefined)';
+  const parts = [];
+  parts.push(`message: ${err.message || '(none)'}`);
+  if (err.url) parts.push(`url: ${err.url}`);
+  if (err.status !== undefined) parts.push(`status: ${err.status}`);
+  if (err.response !== undefined) {
+    try {
+      parts.push(`response: ${JSON.stringify(err.response)}`);
+    } catch {
+      parts.push(`response: ${String(err.response)}`);
+    }
+  }
+  if (err.originalError && err.originalError !== err) {
+    const oe = err.originalError;
+    parts.push(
+      `originalError: ${oe?.name || ''} ${oe?.code || ''} ${oe?.message || String(oe)}`.trim()
+    );
+  }
+  if (err.stack) parts.push(`stack: ${err.stack.split('\n').slice(0, 5).join(' | ')}`);
+  return parts.map((p) => `  ${p}`).join('\n');
+}
+
 function includesText(value, token) {
   return typeof value === 'string' && value.includes(token);
 }
@@ -303,8 +330,10 @@ async function verifyAppUser() {
   let appUser;
   try {
     appUser = await pb.collection('users').getFirstListItem(`email = "${APP_USER_EMAIL}"`);
-  } catch {
-    fail(`App user not found: ${APP_USER_EMAIL}`);
+  } catch (err) {
+    fail(
+      `App user lookup failed for ${APP_USER_EMAIL} (expected via superuser token):\n${describeError(err)}`
+    );
   }
 
   const roles = Array.isArray(appUser.roles) ? appUser.roles : [];
@@ -350,7 +379,15 @@ async function main() {
   log(`PB: ${PB_URL}`);
   await verifyHealthEndpoint();
 
-  await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
+  const authUrl = `${PB_URL.replace(/\/$/, '')}/api/collections/_superusers/auth-with-password`;
+  try {
+    await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
+  } catch (err) {
+    fail(
+      `Superuser auth failed for ${SU_EMAIL} at ${authUrl}\n${describeError(err)}\n` +
+      `Check PB_SU_EMAIL/PB_SU_PASSWORD secrets, that PB is reachable, and that PB v0.23+ exposes /api/collections/_superusers/auth-with-password.`
+    );
+  }
   ok(`Authenticated as superuser ${SU_EMAIL}`);
 
   const collections = await verifyCollectionsExist();
@@ -363,6 +400,23 @@ async function main() {
 
 main().catch((error) => {
   console.error('\n✗ PocketBase baseline verification failed');
-  console.error(error instanceof Error ? error.message : String(error));
+  if (error instanceof Error) {
+    console.error(error.message);
+    const extra = describeError(error);
+    // Avoid duplicating the message line if describeError already contains it.
+    if (!extra.includes(`message: ${error.message}`)) {
+      console.error(extra);
+    } else {
+      // Strip the redundant "message:" line.
+      console.error(
+        extra
+          .split('\n')
+          .filter((line) => !line.trim().startsWith('message:'))
+          .join('\n')
+      );
+    }
+  } else {
+    console.error(String(error));
+  }
   process.exit(1);
 });

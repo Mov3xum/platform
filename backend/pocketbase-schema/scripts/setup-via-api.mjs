@@ -259,26 +259,18 @@ const STAFF_INCL_MENTOR =
 log(`PB: ${PB_URL}`);
 log(`Superuser: ${SU_EMAIL}`);
 
-// Retry bara connect-timeouts. 4xx (fel lösen, fel collection) kastas
-// direkt så att vi inte sitter i 5 min på en felinmatad secret.
-async function authWithRetry({ maxAttempts = 5, baseDelayMs = 2000 } = {}) {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
-    } catch (err) {
-      const isLast = attempt === maxAttempts;
-      const isConnectTimeout =
-        err?.originalError?.cause?.code === 'UND_ERR_CONNECT_TIMEOUT' ||
-        err?.status === 0;
-      if (isLast || !isConnectTimeout) throw err;
-      const delay = baseDelayMs * 2 ** (attempt - 1);
-      warn(`auth misslyckades (försök ${attempt}/${maxAttempts}), retry om ${delay} ms`);
-      await new Promise((r) => setTimeout(r, delay));
-    }
+{
+  const authUrl = `${PB_URL.replace(/\/$/, '')}/api/collections/_superusers/auth-with-password`;
+  try {
+    await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
+  } catch (err) {
+    console.error(
+      `\n✗ Superuser auth failed for ${SU_EMAIL} at ${authUrl}\n${describeError(err)}\n` +
+      `Check PB_SU_EMAIL/PB_SU_PASSWORD secrets, that PB is reachable, and that PB v0.23+ exposes /api/collections/_superusers/auth-with-password.`
+    );
+    process.exit(1);
   }
 }
-
-await authWithRetry();
 ok('inloggad som superuser');
 
 // 1. tenants ----------------------------------------------------------------
