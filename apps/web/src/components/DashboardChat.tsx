@@ -1,8 +1,59 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
-import { sendChatMessage, type ChatMessage } from '@/lib/actions/chat';
+import {
+  sendChatMessage,
+  type ChatAttachment,
+  type ChatMessage
+} from '@/lib/actions/chat';
 import { Icon } from '@/components/proto/Icon';
+
+const MAX_ATTACHMENTS = 5;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const ACCEPT_IMAGE = ['image/png', 'image/jpeg', 'image/webp'];
+const ACCEPT_TEXT = ['text/plain', 'text/markdown', 'text/csv', 'application/csv'];
+const ACCEPT_ATTR =
+  'image/png,image/jpeg,image/webp,text/plain,text/markdown,text/csv,.md,.csv,.txt';
+
+interface UploadedFile extends ChatAttachment {
+  uid: string;
+  size: number;
+}
+
+function detectMime(file: File): string | null {
+  const mime = (file.type || '').toLowerCase();
+  if (mime && [...ACCEPT_IMAGE, ...ACCEPT_TEXT].includes(mime)) return mime;
+  // Fallback via extension för md/csv/txt utan korrekt mime
+  const ext = file.name.toLowerCase().split('.').pop();
+  if (ext === 'md' || ext === 'markdown') return 'text/markdown';
+  if (ext === 'csv') return 'text/csv';
+  if (ext === 'txt') return 'text/plain';
+  return null;
+}
+
+function readAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onerror = () => reject(r.error || new Error('Kunde inte läsa filen'));
+    r.onload = () => resolve(String(r.result || ''));
+    r.readAsText(file);
+  });
+}
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onerror = () => reject(r.error || new Error('Kunde inte läsa filen'));
+    r.onload = () => resolve(String(r.result || ''));
+    r.readAsDataURL(file);
+  });
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
 
 export interface DashboardAgent {
   id: string;
@@ -37,10 +88,12 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
   const [input, setInput] = useState('');
   const [includeWebContext, setIncludeWebContext] = useState(false);
   const [activeAgent, setActiveAgent] = useState<DashboardAgent | null>(null);
+  const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const isActive = messages.length > 0 || isPending;
@@ -62,11 +115,73 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
     });
   }
 
+  async function addFiles(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    setError(null);
+
+    const remaining = MAX_ATTACHMENTS - attachments.length;
+    if (remaining <= 0) {
+      setError(`Max ${MAX_ATTACHMENTS} bilagor per meddelande.`);
+      return;
+    }
+    const accepted = list.slice(0, remaining);
+    if (list.length > remaining) {
+      setError(`Endast ${remaining} fil(er) till — max ${MAX_ATTACHMENTS} totalt.`);
+    }
+
+    const next: UploadedFile[] = [];
+    for (const file of accepted) {
+      const mime = detectMime(file);
+      if (!mime) {
+        setError(`${file.name}: filformatet stöds inte.`);
+        continue;
+      }
+      if (file.size > MAX_FILE_BYTES) {
+        setError(`${file.name} är större än 10 MB.`);
+        continue;
+      }
+      try {
+        if (ACCEPT_IMAGE.includes(mime)) {
+          const dataUrl = await readAsDataUrl(file);
+          next.push({
+            uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            name: file.name,
+            mime,
+            kind: 'image',
+            size: file.size,
+            dataUrl
+          });
+        } else {
+          const text = await readAsText(file);
+          next.push({
+            uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            name: file.name,
+            mime,
+            kind: 'text',
+            size: file.size,
+            text
+          });
+        }
+      } catch (err) {
+        setError(`${file.name}: kunde inte läsa filen.`);
+        console.error('[DashboardChat] file read failed', err);
+      }
+    }
+    if (next.length > 0) setAttachments((prev) => [...prev, ...next]);
+  }
+
+  function removeAttachment(uid: string) {
+    setAttachments((prev) => prev.filter((a) => a.uid !== uid));
+  }
+
   function submit() {
     const text = input.trim();
-    if (!text || isPending) return;
+    if ((!text && attachments.length === 0) || isPending) return;
 
-    const userMessage: ChatMessage = { role: 'user', content: text };
+    const displayText =
+      text || (attachments.length === 1 ? '(bilaga skickad)' : '(bilagor skickade)');
+    const userMessage: ChatMessage = { role: 'user', content: displayText };
     const nextMessages: ChatMessage[] = [...messages, userMessage];
 
     setMessages(nextMessages);
@@ -75,9 +190,22 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
     scrollToBottom();
 
     const agentId = activeAgent?.id;
+    const sentAttachments: ChatAttachment[] = attachments.map((a) => ({
+      name: a.name,
+      mime: a.mime,
+      kind: a.kind,
+      text: a.text,
+      dataUrl: a.dataUrl
+    }));
+    setAttachments([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
 
     startTransition(async () => {
-      const result = await sendChatMessage(nextMessages, { includeWebContext, agentId });
+      const result = await sendChatMessage(nextMessages, {
+        includeWebContext,
+        agentId,
+        attachments: sentAttachments
+      });
       if (result.error) {
         setError(result.error);
       } else if (result.text) {
@@ -109,10 +237,52 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
     setError(null);
     setActiveAgent(null);
     setInput('');
+    setAttachments([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }
+
+  function openFilePicker() {
+    fileInputRef.current?.click();
+  }
+
+  const canSubmit = !isPending && (input.trim().length > 0 || attachments.length > 0);
 
   const inputPill = (
     <div className="rounded-2xl border border-default bg-surface px-4 py-3 shadow-sm shadow-movexum-svart/5 transition focus-within:border-strong focus-within:ring-2 focus-within:ring-movexum-pastell-lila dark:focus-within:ring-movexum-morklila">
+      {attachments.length > 0 && (
+        <ul className="mb-2 flex flex-wrap gap-2">
+          {attachments.map((a) => (
+            <li
+              key={a.uid}
+              className="group inline-flex items-center gap-2 rounded-xl border border-default bg-canvas-subtle py-1 pl-1.5 pr-2 text-[12px] text-foreground"
+            >
+              {a.kind === 'image' && a.dataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={a.dataUrl}
+                  alt=""
+                  className="h-7 w-7 rounded-lg object-cover"
+                />
+              ) : (
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-movexum-pastell-bla text-movexum-djupbla">
+                  <Icon name="doc" size={13} />
+                </span>
+              )}
+              <span className="max-w-[160px] truncate font-medium">{a.name}</span>
+              <span className="text-foreground-subtle">{formatBytes(a.size)}</span>
+              <button
+                type="button"
+                onClick={() => removeAttachment(a.uid)}
+                className="flex h-5 w-5 items-center justify-center rounded-md text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground"
+                aria-label={`Ta bort ${a.name}`}
+              >
+                <Icon name="x" size={11} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <textarea
         ref={inputRef}
         value={input}
@@ -127,25 +297,49 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
         rows={1}
         className="block w-full resize-none bg-transparent text-[15px] leading-6 text-foreground placeholder:text-foreground-subtle focus:outline-none disabled:opacity-50"
       />
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept={ACCEPT_ATTR}
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files && e.target.files.length > 0) addFiles(e.target.files);
+        }}
+      />
+
       <div className="mt-2 flex items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={() => setIncludeWebContext((v) => !v)}
-          aria-pressed={includeWebContext}
-          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition ${
-            includeWebContext
-              ? 'bg-movexum-pastell-bla text-movexum-djupbla'
-              : 'border border-default text-foreground-subtle hover:text-foreground'
-          }`}
-          title="Inkludera publika webbkällor (Wikipedia, EU)"
-        >
-          <Icon name="globe" size={12} />
-          Webbkällor
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={openFilePicker}
+            disabled={isPending || attachments.length >= MAX_ATTACHMENTS}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            title={`Bifoga fil (PNG, JPG, WebP, TXT, MD, CSV · max ${MAX_ATTACHMENTS} filer · 10 MB/fil)`}
+            aria-label="Bifoga fil"
+          >
+            <Icon name="paperclip" size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setIncludeWebContext((v) => !v)}
+            aria-pressed={includeWebContext}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition ${
+              includeWebContext
+                ? 'bg-movexum-pastell-bla text-movexum-djupbla'
+                : 'border border-default text-foreground-subtle hover:text-foreground'
+            }`}
+            title="Inkludera publika webbkällor (Wikipedia, EU)"
+          >
+            <Icon name="globe" size={12} />
+            Webbkällor
+          </button>
+        </div>
         <button
           type="button"
           onClick={submit}
-          disabled={isPending || !input.trim()}
+          disabled={!canSubmit}
           aria-label="Skicka"
           className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-brand text-brand-foreground transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-40"
         >

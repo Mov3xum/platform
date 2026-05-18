@@ -3,9 +3,13 @@ import 'server-only';
 const MISTRAL_API_URL = 'https://api.mistral.ai/v1/chat/completions';
 const MAX_TOKENS = 4000;
 
+export type MistralContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 export interface MistralTextMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | MistralContentPart[];
 }
 
 export interface MistralAssistantWithToolCalls {
@@ -137,7 +141,8 @@ export function estimateCostUsd(
   const pricing: Record<string, [number, number]> = {
     'mistral-large-latest': [2.0, 6.0],
     'mistral-medium-latest': [0.4, 1.2],
-    'mistral-small-latest': [0.1, 0.3]
+    'mistral-small-latest': [0.1, 0.3],
+    'pixtral-12b-latest': [0.15, 0.15]
   };
   const [inPrice, outPrice] = pricing[model] ?? [2.0, 6.0];
   return (tokensIn / 1_000_000) * inPrice + (tokensOut / 1_000_000) * outPrice;
