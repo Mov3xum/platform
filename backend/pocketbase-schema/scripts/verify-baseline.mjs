@@ -274,55 +274,113 @@ async function verifyAppUserCanCreate(pb, appUserEmail, appUserPassword) {
   console.log(`  tenant: ${JSON.stringify(authUser.tenant)}`);
   console.log('============================================\n');
 
+  // Sweep up any leftover probe rows from previous runs (crashes, aborted
+  // CI jobs, network blips during cleanup) before creating new ones. Names
+  // are matched case-insensitively because PB historically stored some
+  // upper-cased variants.
+  await sweepVerifyBaselineRows(pb, authUser.tenant);
+
   const probeName = `__verify_baseline_${Date.now()}`;
+  let probeId = null;
   try {
-    const created = await userPb.collection('workshop_areas').create({
-      tenant: authUser.tenant,
-      name: probeName
-    });
-    ok(`End-to-end create-test lyckades (skapade workshop_areas/${created.id})`);
-    // Städa upp
     try {
-      await userPb.collection('workshop_areas').delete(created.id);
-    } catch {
-      // ignored
+      const created = await userPb.collection('workshop_areas').create({
+        tenant: authUser.tenant,
+        name: probeName
+      });
+      probeId = created.id;
+      ok(`End-to-end create-test lyckades (skapade workshop_areas/${created.id})`);
+    } catch (err) {
+      const status = err?.status ?? 'unknown';
+      const responseJson = JSON.stringify(err?.response ?? {});
+      console.log(`\nAS-APP-USER CREATE FAIL: status=${status} response=${responseJson} msg=${err?.message}`);
+
+      // Diagnostik 2: försök samma create som SUPERUSER (rules bypassas).
+      // - Om superuser-create lyckas: regeln (eller dess utvärdering) blockar.
+      // - Om superuser-create FAILAR: schema/validering är problemet.
+      console.log('\n=== Försöker samma create som SUPERUSER (bypassar rules) ===');
+      let suProbeId = null;
+      try {
+        try {
+          const created = await pb.collection('workshop_areas').create({
+            tenant: authUser.tenant,
+            name: `${probeName}_su`
+          });
+          suProbeId = created.id;
+          console.log(`  SUPERUSER lyckades skapa workshop_areas/${created.id}`);
+          console.log('  → SLUTSATS: schema är OK, rules/rule-eval blockar app-user');
+        } catch (suErr) {
+          const suStatus = suErr?.status ?? 'unknown';
+          const suResp = JSON.stringify(suErr?.response ?? {});
+          console.log(`  SUPERUSER OCKSÅ FAILED: status=${suStatus} response=${suResp} msg=${suErr?.message}`);
+          console.log('  → SLUTSATS: schema/validation är problemet (rule är inte boven)');
+        }
+      } finally {
+        if (suProbeId) {
+          try {
+            await pb.collection('workshop_areas').delete(suProbeId);
+          } catch (cleanupErr) {
+            console.log(`  WARN: kunde inte städa SUPERUSER-probe ${suProbeId}: ${cleanupErr?.message}`);
+          }
+        }
+      }
+      console.log('============================================================\n');
+
+      fail(
+        `End-to-end create-test FAILAR fortfarande som ${appUserEmail}:\n` +
+        `  status: ${status}\n` +
+        `  response: ${responseJson}\n` +
+        `  message: ${err?.message}\n` +
+        `Se diagnostik ovan för att avgöra rule vs. schema.`
+      );
+    }
+  } finally {
+    if (probeId) {
+      // Try app-user delete first (covers happy path), then fall back to
+      // superuser if the app-user's delete-rule eval is broken — otherwise
+      // these rows would pile up across CI runs.
+      let deleted = false;
+      try {
+        await userPb.collection('workshop_areas').delete(probeId);
+        deleted = true;
+      } catch (cleanupErr) {
+        console.log(`  WARN: app-user kunde inte städa probe ${probeId}: ${cleanupErr?.message}`);
+      }
+      if (!deleted) {
+        try {
+          await pb.collection('workshop_areas').delete(probeId);
+        } catch (cleanupErr) {
+          console.log(`  WARN: superuser kunde inte städa probe ${probeId}: ${cleanupErr?.message}`);
+        }
+      }
+    }
+    // Belt-and-braces: sweep again in case probeId went unset due to
+    // a thrown exception before assignment, or our delete above silently
+    // returned without actually removing the row.
+    await sweepVerifyBaselineRows(pb, authUser.tenant);
+  }
+}
+
+async function sweepVerifyBaselineRows(superuserPb, tenantId) {
+  try {
+    const stale = await superuserPb.collection('workshop_areas').getFullList({
+      filter: superuserPb.filter('tenant = {:tenant} && name ~ {:prefix}', {
+        tenant: tenantId,
+        prefix: '__verify_baseline_'
+      }),
+      $autoCancel: false
+    });
+    if (!stale.length) return;
+    console.log(`  Sweep: rensar ${stale.length} efterlämnad(e) __verify_baseline_*-rad(er)`);
+    for (const row of stale) {
+      try {
+        await superuserPb.collection('workshop_areas').delete(row.id);
+      } catch (delErr) {
+        console.log(`  WARN: sweep kunde inte radera workshop_areas/${row.id}: ${delErr?.message}`);
+      }
     }
   } catch (err) {
-    const status = err?.status ?? 'unknown';
-    const responseJson = JSON.stringify(err?.response ?? {});
-    console.log(`\nAS-APP-USER CREATE FAIL: status=${status} response=${responseJson} msg=${err?.message}`);
-
-    // Diagnostik 2: försök samma create som SUPERUSER (rules bypassas).
-    // - Om superuser-create lyckas: regeln (eller dess utvärdering) blockar.
-    // - Om superuser-create FAILAR: schema/validering är problemet.
-    console.log('\n=== Försöker samma create som SUPERUSER (bypassar rules) ===');
-    try {
-      const created = await pb.collection('workshop_areas').create({
-        tenant: authUser.tenant,
-        name: `${probeName}_su`
-      });
-      console.log(`  SUPERUSER lyckades skapa workshop_areas/${created.id}`);
-      console.log('  → SLUTSATS: schema är OK, rules/rule-eval blockar app-user');
-      try {
-        await pb.collection('workshop_areas').delete(created.id);
-      } catch {
-        // ignored
-      }
-    } catch (suErr) {
-      const suStatus = suErr?.status ?? 'unknown';
-      const suResp = JSON.stringify(suErr?.response ?? {});
-      console.log(`  SUPERUSER OCKSÅ FAILED: status=${suStatus} response=${suResp} msg=${suErr?.message}`);
-      console.log('  → SLUTSATS: schema/validation är problemet (rule är inte boven)');
-    }
-    console.log('============================================================\n');
-
-    fail(
-      `End-to-end create-test FAILAR fortfarande som ${appUserEmail}:\n` +
-      `  status: ${status}\n` +
-      `  response: ${responseJson}\n` +
-      `  message: ${err?.message}\n` +
-      `Se diagnostik ovan för att avgöra rule vs. schema.`
-    );
+    console.log(`  WARN: sweep av __verify_baseline_*-rader failade: ${err?.message}`);
   }
 }
 
