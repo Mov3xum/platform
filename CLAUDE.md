@@ -764,6 +764,7 @@ och kan renderas av samma UI oavsett leverantör.
 | Brevo     | FR (EU)   | Minimal       | Ingen AI. Endast aggregerade metrics synkas — inga e-postadresser. |
 | Howspace  | FI (EU)   | Begränsad     | AI-insights faller under art. 50 (transparenskrav). Vi synkar bara aggregerad statistik. |
 | Allabolag | SE        | Minimal       | Publik bolagsdata (org-nr, bolagsform, kommun, årsredovisningar). Ingen AI, inga personuppgifter för aktiebolag. För enskild firma exkluderas org-nr från AI-prompts (§ 9.3). **Status: planned** — handler byggs i uppföljande PR; målschema är `startups`-registerfält + `startup_financials`. |
+| Bolagslista Excel | Lokalt (internal) | Minimal | Manuell import av Movexums Bolagslista-Excel. Admin/incubator_lead laddar upp filen på `/admin/import-bolagslista`. Parser i `apps/web/src/lib/import/{xlsx,bolagslista}.ts` (pure-Node, ingen extern dep) mappar kolumnerna B–G till `startups`-registerfält och 14 kvartetter (H–BK) till `startup_financials` (en rad per år 2011–2024, värden i tkr × 1000). Idempotent via unique-index `(tenant, org_nr)` på startups och `(startup, year)` på financials. Org-nr utan formatet `XXXXXX-XXXX` (enskild firma m.fl.) hoppas över. Ingen AI, inga personuppgifter. Audit-loggas som `activities.kind='integration_sync'`. |
 
 **Mailchimp avvisad** (CLAUDE.md § 10.2): US-baserad,
 träffar Schrems II + CLOUD Act. Brevo är EU-suveränt alternativ.
