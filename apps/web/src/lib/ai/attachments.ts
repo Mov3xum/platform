@@ -1,7 +1,7 @@
 import 'server-only';
 
 import type { ToolRunAttachmentRef } from '@platform/shared';
-import type { MistralContentBlock } from './mistral';
+import type { MistralContentPart } from './mistral';
 
 // Defense-in-depth caps. PB schema enforces 10 MB/fil och whitelisted mime-types.
 const MAX_FILES_PER_TURN = 5;
@@ -24,7 +24,7 @@ const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 export interface PreparedAttachments {
   uploadedRefs: ToolRunAttachmentRef[];
   pbFiles: File[];
-  imageBlocks: MistralContentBlock[];
+  imageBlocks: MistralContentPart[];
   injectedText: string;
 }
 
@@ -90,7 +90,7 @@ export async function prepareAttachmentsForModel(
   }
 
   const uploadedRefs: ToolRunAttachmentRef[] = [];
-  const imageBlocks: MistralContentBlock[] = [];
+  const imageBlocks: MistralContentPart[] = [];
   const textChunks: string[] = [];
   let totalInjectedBytes = 0;
 

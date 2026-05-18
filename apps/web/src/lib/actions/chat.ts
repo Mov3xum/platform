@@ -12,6 +12,7 @@ import { buildStartupContext } from '@/lib/ai/context';
 import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
 import { buildChatTools, dispatchToolCall } from '@/lib/ai/tools';
 import { hasRole } from '@/lib/rbac';
+import { logAiUsage } from '@/lib/ai/usage';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -54,18 +55,25 @@ const CHAT_FALLBACK_MODELS = [
 ];
 const MAX_TOOL_ITERATIONS = 4;
 
-const STAFF_MODEL = CHAT_FALLBACK_MODELS[0];
-const VISION_MODEL = 'pixtral-12b-latest';
+// Modellval för dashboard-chatten
+const STAFF_MODEL = 'mistral-large-latest';
+const VISION_MODEL = 'pixtral-large-latest';
+
+// Bilage-caps (defense-in-depth utöver PB-schemats 10 MB/whitelist)
 const MAX_ATTACHMENTS = 5;
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_TEXT_CHARS = 200_000;
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_TEXT_CHARS = 150_000; // 150 KB total text per meddelande
 const ALLOWED_TEXT_MIMES = new Set([
   'text/plain',
   'text/markdown',
   'text/csv',
-  'application/csv'
+  'application/pdf'
 ]);
-const ALLOWED_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const ALLOWED_IMAGE_MIMES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp'
+]);
 
 function chatErrorMessage(err: unknown): string {
   if (err instanceof MistralError) {
@@ -327,7 +335,7 @@ export async function sendChatMessage(
     return runStartupChat(pb, user, limitedMessages, webBlock, agentBlock, att.images);
   }
 
-  return runPlainChat(user, limitedMessages, webBlock, agentBlock, att.images);
+  return runPlainChat(pb, user, limitedMessages, webBlock, agentBlock, att.images);
 }
 
 function pickModel(defaultModel: string, hasImages: boolean): string {
@@ -359,7 +367,7 @@ function withAttachedImages(
 
 async function runStaffChatWithTools(
   pb: import('pocketbase').default,
-  user: { tenant: string; tenantName?: string; roles: string[]; name: string },
+  user: { id: string; tenant: string; tenantName?: string; roles: string[]; name: string },
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
   webBlock: string,
   agentBlock: string,
@@ -407,6 +415,15 @@ async function runStaffChatWithTools(
         toolChoice: 'auto'
       });
 
+      await logAiUsage(pb, {
+        tenant: user.tenant,
+        userId: user.id,
+        surface: 'dashboard_chat',
+        model,
+        tokensIn: result.usage.prompt_tokens,
+        tokensOut: result.usage.completion_tokens
+      });
+
       if (!result.toolCalls || result.toolCalls.length === 0) {
         return { text: result.text || 'Inget svar från modellen.' };
       }
@@ -434,6 +451,14 @@ async function runStaffChatWithTools(
 
     const finalCall = await callMistralWithFallback(CHAT_FALLBACK_MODELS, conversation, {
       toolChoice: 'none'
+    });
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'dashboard_chat',
+      model: finalCall.modelUsed,
+      tokensIn: finalCall.usage.prompt_tokens,
+      tokensOut: finalCall.usage.completion_tokens
     });
     return {
       text:
@@ -511,6 +536,14 @@ export async function sendStartupChatMessage(
       { role: 'system', content: systemContent },
       ...limited
     ]);
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'startup_chat',
+      model: result.modelUsed,
+      tokensIn: result.usage.prompt_tokens,
+      tokensOut: result.usage.completion_tokens
+    });
     return { text: result.text };
   } catch (err) {
     console.error('[startup-chat] mistral error', {
@@ -524,7 +557,7 @@ export async function sendStartupChatMessage(
 
 async function runStartupChat(
   pb: import('pocketbase').default,
-  user: { tenant: string; linkedStartups: string[] },
+  user: { id: string; tenant: string; linkedStartups: string[] },
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
   webBlock: string,
   agentBlock: string,
@@ -556,6 +589,14 @@ async function runStartupChat(
       { role: 'system', content: systemContent },
       ...withAttachedImages(userMessages, images)
     ]);
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'dashboard_chat',
+      model: result.modelUsed,
+      tokensIn: result.usage.prompt_tokens,
+      tokensOut: result.usage.completion_tokens
+    });
     return { text: result.text };
   } catch (err) {
     console.error('[chat] mistral error', { tenant: user.tenant, error: err });
@@ -564,7 +605,8 @@ async function runStartupChat(
 }
 
 async function runPlainChat(
-  user: { tenant: string },
+  pb: import('pocketbase').default,
+  user: { id: string; tenant: string },
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
   webBlock: string,
   agentBlock: string,
@@ -578,6 +620,14 @@ async function runPlainChat(
       { role: 'system', content: systemContent },
       ...withAttachedImages(userMessages, images)
     ]);
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'dashboard_chat',
+      model: result.modelUsed,
+      tokensIn: result.usage.prompt_tokens,
+      tokensOut: result.usage.completion_tokens
+    });
     return { text: result.text };
   } catch (err) {
     console.error('[chat] mistral error', { tenant: user.tenant, error: err });

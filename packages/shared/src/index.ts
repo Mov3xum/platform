@@ -224,6 +224,38 @@ export interface ToolRun {
   };
 }
 
+// ── AI usage telemetry (migration 1700000058) ────────────────────────
+// Logg-rad per Mistral-anrop. Aggregeras på /insights för totalt
+// kostnads-/tokenutfall över alla ytor (toolbox, dashboard-chatt,
+// startup-chatt, i18n-pipeline, workshops).
+export type AiUsageSurface =
+  | 'toolbox'
+  | 'tool_chat'
+  | 'dashboard_chat'
+  | 'startup_chat'
+  | 'intl'
+  | 'suggestions'
+  | 'workshop_run';
+
+export interface AiUsageEvent {
+  id: string;
+  tenant: string;
+  user: string;
+  surface: AiUsageSurface;
+  model: string;
+  tokens_in: number;
+  tokens_out: number;
+  cost_estimate_usd: number;
+  tool_run?: string;
+  error?: string;
+  created: string;
+  updated: string;
+  expand?: {
+    user?: { id: string; display_name?: string; email?: string; roles?: string[] };
+    tool_run?: ToolRun;
+  };
+}
+
 export type WorkshopStatus = 'draft' | 'active' | 'archived';
 
 export type WorkshopAudience =
