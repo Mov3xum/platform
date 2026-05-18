@@ -54,6 +54,26 @@ export interface MistralToolDefinition {
   };
 }
 
+// Mistrals first-party "built-in tools" (web_search, code_interpreter,
+// image_generation, document_library) skickas inline i tools-arrayen som
+// {type: '<id>'} utan function-blob. Se lib/ai/builtins.ts.
+export interface MistralBuiltinToolDefinition {
+  type: 'web_search' | 'code_interpreter' | 'image_generation' | 'document_library';
+}
+
+// MCP-connectors aktiverade i workspacet refereras via {type:'mcp', connector_id}.
+// `connector_auth` skickas när connectorn är OAuth-skyddad (dekrypterad blob).
+export interface MistralMcpToolDefinition {
+  type: 'mcp';
+  connector_id: string;
+  connector_auth?: Record<string, unknown>;
+}
+
+export type MistralAnyTool =
+  | MistralToolDefinition
+  | MistralBuiltinToolDefinition
+  | MistralMcpToolDefinition;
+
 export interface MistralResponse {
   text: string;
   toolCalls: MistralToolCall[];
@@ -66,6 +86,9 @@ export interface MistralResponse {
 
 export interface CallMistralOptions {
   tools?: MistralToolDefinition[];
+  // Mistrals first-party built-ins och MCP-connectors appendas till tools-arrayen.
+  builtins?: MistralBuiltinToolDefinition['type'][];
+  connectors?: { connector_id: string; auth?: Record<string, unknown> }[];
   toolChoice?: 'auto' | 'none' | 'any';
   temperature?: number;
   maxTokens?: number;
@@ -157,8 +180,27 @@ export async function callMistral(
     temperature: options.temperature ?? 0.3
   };
 
+  const combinedTools: MistralAnyTool[] = [];
   if (options.tools && options.tools.length > 0) {
-    body.tools = options.tools;
+    combinedTools.push(...options.tools);
+  }
+  if (options.builtins && options.builtins.length > 0) {
+    for (const id of options.builtins) {
+      combinedTools.push({ type: id });
+    }
+  }
+  if (options.connectors && options.connectors.length > 0) {
+    for (const c of options.connectors) {
+      const def: MistralMcpToolDefinition = {
+        type: 'mcp',
+        connector_id: c.connector_id
+      };
+      if (c.auth) def.connector_auth = c.auth;
+      combinedTools.push(def);
+    }
+  }
+  if (combinedTools.length > 0) {
+    body.tools = combinedTools;
     body.tool_choice = options.toolChoice ?? 'auto';
   }
 

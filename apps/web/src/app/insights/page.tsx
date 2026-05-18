@@ -40,7 +40,8 @@ const SURFACE_LABELS: Record<AiUsageSurface, string> = {
   startup_chat: 'Bolagschatt',
   intl: 'Översättning',
   suggestions: 'Förslag',
-  workshop_run: 'Workshop'
+  workshop_run: 'Workshop',
+  connector_chat: 'Connector-chatt'
 };
 
 const ROLE_LABELS: Record<Role, string> = {

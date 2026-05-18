@@ -61,3 +61,33 @@ export const canRunTool = (
 
   return true;
 };
+
+/**
+ * Avgör om en användare får aktivera en Mistral-connector (built-in eller MCP).
+ *
+ * - `observer` är alltid spärrad (read-only) — CLAUDE.md § 9.5.
+ * - Connectorn måste vara i tenantens allowlist
+ *   (`tenants.allowed_mistral_connectors`); MCP-connectors antas alltid
+ *   tillåtna eftersom de redan är aktiverade på workspace-nivå hos Mistral.
+ *
+ * Kostnadskontroll och tenant-isolation görs i `activateConnectorAction`.
+ */
+export const canActivateConnector = (
+  userRoles: Role[] | undefined,
+  connector: {
+    kind: 'builtin' | 'mcp';
+    id: string;
+  },
+  tenantAllowlist: string[] | null | undefined
+): boolean => {
+  if (!userRoles || userRoles.length === 0) return false;
+  if (userRoles.includes('observer') && userRoles.length === 1) return false;
+
+  if (connector.kind === 'mcp') return true;
+
+  if (Array.isArray(tenantAllowlist) && tenantAllowlist.length > 0) {
+    return tenantAllowlist.includes(connector.id);
+  }
+  // Default: bara web_search tillåten utan explicit allowlist.
+  return connector.id === 'web_search';
+};
