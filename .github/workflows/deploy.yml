@@ -125,10 +125,14 @@ jobs:
           fi
 
           pb_ready=false
+          max_attempts=20
+          sleep_seconds=15
+          consecutive_503=0
+          consecutive_503_limit=12
           echo "Waiting for PocketBase auth endpoint readiness on $pb_url"
-          for attempt in $(seq 1 40); do
-            health_code=$(curl -k -sS -o /dev/null -w "%{http_code}" "$pb_url/api/health" || true)
-            auth_code=$(curl -k -sS -o /dev/null -w "%{http_code}" \
+          for attempt in $(seq 1 "$max_attempts"); do
+            health_code=$(curl -k -sS --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "$pb_url/api/health" || true)
+            auth_code=$(curl -k -sS --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" \
               -H "Content-Type: application/json" \
               -X POST \
               "$pb_url/api/collections/_superusers/auth-with-password" \
@@ -140,12 +144,23 @@ jobs:
               break
             fi
 
-            echo "Attempt $attempt/40: health=$health_code auth=$auth_code, waiting 15s..."
-            sleep 15
+            if [[ "$health_code" == "503" && "$auth_code" == "503" ]]; then
+              consecutive_503=$((consecutive_503 + 1))
+            else
+              consecutive_503=0
+            fi
+
+            if [[ "$consecutive_503" -ge "$consecutive_503_limit" ]]; then
+              echo "Persistent 503 from health/auth for $consecutive_503 consecutive attempts. Breaking early and skipping PB bootstrap for this run."
+              break
+            fi
+
+            echo "Attempt $attempt/$max_attempts: health=$health_code auth=$auth_code, waiting ${sleep_seconds}s..."
+            sleep "$sleep_seconds"
           done
 
           if [[ "$pb_ready" != "true" ]]; then
-            echo "::warning::PocketBase auth endpoint not ready after 10 minutes. Skipping PB bootstrap/verify in this deploy run."
+            echo "::warning::PocketBase auth endpoint not ready in time. Skipping PB bootstrap/verify in this deploy run."
             echo "PB_READY=false" >> "$GITHUB_ENV"
             exit 0
           fi
