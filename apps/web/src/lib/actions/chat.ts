@@ -53,6 +53,9 @@ const CHAT_FALLBACK_MODELS = [
   'mistral-medium-latest',
   'mistral-large-latest'
 ];
+// När bilder är bifogade måste vi använda en vision-kapabel modell.
+// Pixtral 12B stödjer både vision och function calling.
+const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
 const MAX_TOOL_ITERATIONS = 4;
 
 // Modellval för dashboard-chatten
@@ -67,6 +70,13 @@ const ALLOWED_TEXT_MIMES = new Set([
   'text/plain',
   'text/markdown',
   'text/csv',
+  'application/csv'
+]);
+const ALLOWED_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+
+function pickModels(hasImages: boolean): string[] {
+  return hasImages ? VISION_FALLBACK_MODELS : CHAT_FALLBACK_MODELS;
+}
   'application/pdf'
 ]);
 const ALLOWED_IMAGE_MIMES = new Set([
@@ -338,10 +348,6 @@ export async function sendChatMessage(
   return runPlainChat(pb, user, limitedMessages, webBlock, agentBlock, att.images);
 }
 
-function pickModel(defaultModel: string, hasImages: boolean): string {
-  return hasImages ? VISION_MODEL : defaultModel;
-}
-
 function withAttachedImages(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   images: Array<{ dataUrl: string }>
@@ -406,11 +412,11 @@ async function runStaffChatWithTools(
     ...withAttachedImages(userMessages, images)
   ];
 
-  const model = pickModel(STAFF_MODEL, images.length > 0);
+  const models = pickModels(images.length > 0);
 
   try {
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const result = await callMistral(model, conversation, {
+      const result = await callMistralWithFallback(models, conversation, {
         tools,
         toolChoice: 'auto'
       });
@@ -449,7 +455,7 @@ async function runStaffChatWithTools(
       }
     }
 
-    const finalCall = await callMistralWithFallback(CHAT_FALLBACK_MODELS, conversation, {
+    const finalCall = await callMistralWithFallback(models, conversation, {
       toolChoice: 'none'
     });
     await logAiUsage(pb, {

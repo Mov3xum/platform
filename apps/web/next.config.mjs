@@ -39,6 +39,10 @@ const nextConfig = {
   experimental: {
     // Ensure all dependencies are traced correctly in monorepo with path aliases
     esmExternals: true,
+    // Chat-bilagor (bilder base64-encoded + textfiler) — default 1 MB räcker inte
+    serverActions: {
+      bodySizeLimit: '8mb'
+    }
   },
   webpack: (config) => {
     // Make @-alias resolution explicit in all environments (including Docker/Coolify)

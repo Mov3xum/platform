@@ -9,7 +9,9 @@ const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 
 export type MistralContentPart =
   | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } };
+  | { type: 'image_url'; image_url: string | { url: string } };
+
+export type MistralContentBlock = MistralContentPart;
 
 export type MistralContentBlock = MistralContentPart;
 

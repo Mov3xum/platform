@@ -40,13 +40,56 @@ function readAsText(file: File): Promise<string> {
   });
 }
 
-function readAsDataUrl(file: File): Promise<string> {
+function readAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onerror = () => reject(r.error || new Error('Kunde inte läsa filen'));
     r.onload = () => resolve(String(r.result || ''));
     r.readAsDataURL(file);
   });
+}
+
+const IMAGE_MAX_DIM = 1600;
+const IMAGE_COMPRESS_THRESHOLD = 700 * 1024;
+
+async function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Kunde inte läsa bilden'));
+    img.src = src;
+  });
+}
+
+async function compressImage(file: File): Promise<{ dataUrl: string; size: number }> {
+  if (file.size <= IMAGE_COMPRESS_THRESHOLD) {
+    const dataUrl = await readAsDataUrl(file);
+    return { dataUrl, size: file.size };
+  }
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const img = await loadImage(objectUrl);
+    const scale = Math.min(1, IMAGE_MAX_DIM / Math.max(img.width, img.height));
+    const w = Math.round(img.width * scale);
+    const h = Math.round(img.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Kunde inte processa bilden');
+    ctx.drawImage(img, 0, 0, w, h);
+    const blob: Blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error('Komprimering misslyckades'))),
+        'image/jpeg',
+        0.85
+      );
+    });
+    const dataUrl = await readAsDataUrl(blob);
+    return { dataUrl, size: blob.size };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 function formatBytes(n: number): string {
@@ -143,13 +186,15 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
       }
       try {
         if (ACCEPT_IMAGE.includes(mime)) {
-          const dataUrl = await readAsDataUrl(file);
+          const { dataUrl, size } = await compressImage(file);
+          // Vid kompression encodas alltid som JPEG; reflektera det i mime.
+          const effectiveMime = size < file.size ? 'image/jpeg' : mime;
           next.push({
             uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
             name: file.name,
-            mime,
+            mime: effectiveMime,
             kind: 'image',
-            size: file.size,
+            size,
             dataUrl
           });
         } else {
@@ -201,16 +246,27 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
     if (fileInputRef.current) fileInputRef.current.value = '';
 
     startTransition(async () => {
-      const result = await sendChatMessage(nextMessages, {
-        includeWebContext,
-        agentId,
-        attachments: sentAttachments
-      });
-      if (result.error) {
-        setError(result.error);
-      } else if (result.text) {
-        setMessages((prev) => [...prev, { role: 'assistant', content: result.text! }]);
-        scrollToBottom();
+      try {
+        const result = await sendChatMessage(nextMessages, {
+          includeWebContext,
+          agentId,
+          attachments: sentAttachments
+        });
+        if (result.error) {
+          setError(result.error);
+        } else if (result.text) {
+          setMessages((prev) => [...prev, { role: 'assistant', content: result.text! }]);
+          scrollToBottom();
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Något gick fel';
+        const bodyLimit = /body|request.*size|payload|too large/i.test(msg);
+        setError(
+          bodyLimit
+            ? 'Bilagorna är för stora för att skickas — försök med färre eller mindre filer.'
+            : msg
+        );
+        console.error('[DashboardChat] submit failed', err);
       }
     });
   }
