@@ -2,6 +2,7 @@ import 'server-only';
 import { getModelMeta } from './models';
 
 const MISTRAL_API_URL = 'https://api.mistral.ai/v1/chat/completions';
+const MISTRAL_CONVERSATIONS_URL = 'https://api.mistral.ai/v1/conversations';
 const MAX_TOKENS = 4000;
 const MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 1000;
@@ -329,4 +330,191 @@ export function estimateCostUsd(
   };
   const [inPrice, outPrice] = pricing[model] ?? [2.0, 6.0];
   return (tokensIn / 1_000_000) * inPrice + (tokensOut / 1_000_000) * outPrice;
+}
+
+// ── /v1/conversations — built-ins och MCP-connectors ────────────────────
+//
+// Mistrals built-in tools (web_search, code_interpreter, image_generation,
+// document_library) och MCP-connectors stöds BARA av /v1/conversations,
+// inte av /v1/chat/completions. Endpoint:s payload-format skiljer sig:
+//   - system-prompt går i `instructions`, inte som message med role=system
+//   - användarmeddelanden går i `inputs` (kan vara string eller array av
+//     MessageInputEntry { role, content })
+//   - tools använder samma type-värden som chat-API:t för function-typer
+//     men `connector` (inte 'mcp') för MCP-connectors
+//   - response har `outputs: [{type:'message.output', role:'assistant',
+//     content: string | TextChunk[]}, ToolExecutionEntry, ...]`
+//
+// Vi exponerar en separat funktion `callMistralConversation()` och låter
+// connector-chat-vägen i `runConnectorTurnAction` använda den. callMistral()
+// (chat.completions) lämnas orörd för alla andra Mistral-anrop.
+
+export interface ConversationConnector {
+  connector_id: string;
+  // OAuth/API-key blob för CustomConnector.authorization. Lämnas
+  // tom om connectorn är pre-auth:ad i Le Chat (vanligaste fallet).
+  auth?: Record<string, unknown>;
+}
+
+export interface CallMistralConversationOptions {
+  builtins?: MistralBuiltinToolDefinition['type'][];
+  connectors?: ConversationConnector[];
+  temperature?: number;
+  maxTokens?: number;
+}
+
+interface ConversationInputEntry {
+  role: 'user' | 'assistant';
+  content: string | MistralContentPart[];
+}
+
+/**
+ * Anropar Mistrals /v1/conversations-endpoint. Använd för chattar som
+ * behöver built-in tools (web_search etc.) eller MCP-connectors.
+ *
+ * @param messages — chat-historik inkl. ev. system-message först.
+ *   System-message extraheras automatiskt och skickas som `instructions`.
+ * @param options.builtins — lista av built-in tool-typer att aktivera.
+ * @param options.connectors — lista av MCP-connectors att aktivera.
+ */
+export async function callMistralConversation(
+  model: string,
+  messages: MistralMessage[],
+  options: CallMistralConversationOptions = {}
+): Promise<MistralResponse> {
+  const apiKey = process.env.MISTRAL_API_KEY;
+  if (!apiKey) {
+    throw new MistralError('MISTRAL_API_KEY saknas i miljövariablerna.', 0);
+  }
+
+  // Plocka ut system-message → instructions. Övriga → inputs.
+  let instructions: string | undefined;
+  const inputs: ConversationInputEntry[] = [];
+  for (const m of messages) {
+    if (m.role === 'system') {
+      if (typeof m.content === 'string') {
+        instructions = instructions ? `${instructions}\n\n${m.content}` : m.content;
+      }
+      continue;
+    }
+    if (m.role === 'user' || m.role === 'assistant') {
+      const textOrParts = (m as MistralTextMessage).content;
+      inputs.push({ role: m.role, content: textOrParts });
+    }
+    // 'tool'-meddelanden ignoreras tills vidare — conversations-API:t
+    // hanterar tool-resultat via ToolExecutionEntry, inte tool-role
+    // messages. Vi gör inte function-calling i connector-chat ändå.
+  }
+
+  // Bygg tools-array i conversations-format.
+  const tools: Record<string, unknown>[] = [];
+  if (options.builtins) {
+    for (const id of options.builtins) {
+      tools.push({ type: id });
+    }
+  }
+  if (options.connectors) {
+    for (const c of options.connectors) {
+      const def: Record<string, unknown> = {
+        type: 'connector',
+        connector_id: c.connector_id
+      };
+      // Authorization-blob (OAuth2TokenAuth eller APIKeyAuth). Om
+      // user har auth:at i Le Chat på workspace-nivå räcker
+      // connector_id ofta — Mistral hanterar tokenet internt då.
+      if (c.auth && Object.keys(c.auth).length > 0) {
+        def.authorization = c.auth;
+      }
+      tools.push(def);
+    }
+  }
+
+  const body: Record<string, unknown> = {
+    model,
+    inputs,
+    store: false
+  };
+  if (instructions) body.instructions = instructions;
+  if (tools.length > 0) body.tools = tools;
+
+  const completionArgs: Record<string, unknown> = {};
+  if (options.temperature !== undefined) completionArgs.temperature = options.temperature;
+  else completionArgs.temperature = 0.3;
+  completionArgs.max_tokens = options.maxTokens ?? MAX_TOKENS;
+  body.completion_args = completionArgs;
+
+  let lastError: MistralError | null = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(MISTRAL_CONVERSATIONS_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(body)
+      });
+    } catch (err) {
+      lastError = new MistralError(
+        err instanceof Error ? err.message : 'Nätverksfel mot AI-tjänsten.',
+        503
+      );
+      if (attempt < MAX_ATTEMPTS) {
+        await sleep(backoffMs(attempt, null));
+        continue;
+      }
+      throw lastError;
+    }
+
+    if (response.ok) {
+      const data = (await response.json()) as {
+        outputs?: Array<{
+          type?: string;
+          role?: string;
+          content?: string | Array<{ type?: string; text?: string }>;
+        }>;
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          total_tokens?: number;
+        };
+      };
+
+      // Extrahera assistent-text från outputs[] (message.output-entries).
+      // ToolExecutionEntry m.fl. ignoreras — vi visar bara modellens text.
+      let text = '';
+      for (const out of data.outputs ?? []) {
+        if (out.type !== 'message.output' || out.role !== 'assistant') continue;
+        if (typeof out.content === 'string') {
+          text += (text ? '\n\n' : '') + out.content;
+        } else if (Array.isArray(out.content)) {
+          for (const chunk of out.content) {
+            if (chunk.type === 'text' && typeof chunk.text === 'string') {
+              text += (text ? '\n\n' : '') + chunk.text;
+            }
+          }
+        }
+      }
+
+      const usage = {
+        prompt_tokens: data.usage?.prompt_tokens ?? 0,
+        completion_tokens: data.usage?.completion_tokens ?? 0
+      };
+
+      return { text, toolCalls: [], finishReason: 'stop', usage };
+    }
+
+    const errorBody = await response.text().catch(() => '');
+    lastError = classifyError(response.status, errorBody);
+
+    if (!RETRYABLE_STATUSES.has(response.status) || attempt >= MAX_ATTEMPTS) {
+      throw lastError;
+    }
+
+    const retryAfter = parseRetryAfter(response.headers.get('retry-after'));
+    await sleep(backoffMs(attempt, retryAfter));
+  }
+
+  throw lastError ?? new MistralError('Okänt fel vid AI-anrop.', 0);
 }
