@@ -960,6 +960,13 @@ await patchTenantsCollection([
   { name: 'allowed_mistral_connectors', type: 'json', required: false, maxSize: 4000 }
 ]);
 
+// Migration 1700000068: user_mistral_connectors.is_pinned — markerar
+// connectors som chips på /idag-dashboarden. Max 6 pinnade per
+// användare hanteras i server action.
+await patchCollection('user_mistral_connectors', [
+  { name: 'is_pinned', type: 'bool', required: false }
+]);
+
 // =========================================================================
 // 18c. Övriga saknade collections (porterade från migrations 24–62)
 // Ordning är dependency-medveten: föräldrar före barn.
