@@ -97,7 +97,8 @@ async function verifyCollectionsExist() {
     'workshops',
     'workshop_areas',
     'workshop_assignments',
-    'workshop_runs'
+    'workshop_runs',
+    'user_mistral_connectors'
   ];
 
   const map = new Map();

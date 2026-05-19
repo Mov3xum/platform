@@ -190,6 +190,46 @@ async function patchActivitiesCollection(addFields) {
   ok(`activities uppdaterad (+${newFields.length} fält)`);
 }
 
+async function patchToolRunsCollection(addFields, fieldUpdates = {}) {
+  // Generic helper for extending tool_runs:
+  //  - addFields: new fields appended if absent (idempotent by name)
+  //  - fieldUpdates: { fieldName: { required?: boolean, ... } } — flips
+  //    properties on existing fields (used to make `tool` optional once
+  //    connector-chats can write rows without a parent tool).
+  const toolRuns = await pb.collections.getOne('tool_runs');
+  const fields = [...(toolRuns.fields || [])];
+  const existingNames = new Set(fields.map((f) => f.name));
+  const newFields = addFields.filter((f) => !existingNames.has(f.name));
+
+  let touched = false;
+  for (const [name, patch] of Object.entries(fieldUpdates)) {
+    const idx = fields.findIndex((f) => f.name === name);
+    if (idx === -1) continue;
+    let changed = false;
+    for (const [k, v] of Object.entries(patch)) {
+      if (fields[idx][k] !== v) {
+        fields[idx] = { ...fields[idx], [k]: v };
+        changed = true;
+      }
+    }
+    if (changed) touched = true;
+  }
+
+  if (newFields.length === 0 && !touched) {
+    warn('tool_runs-collectionen redan utökad — hoppar över');
+    return;
+  }
+
+  await pb.collections.update('tool_runs', {
+    fields: normalizeSelectFields([...fields, ...newFields], 'tool_runs')
+  });
+  ok(
+    `tool_runs uppdaterad (+${newFields.length} fält` +
+      (touched ? `, ${Object.keys(fieldUpdates).length} fält-patches` : '') +
+      ')'
+  );
+}
+
 async function patchActivitiesKindValues(addValues) {
   const activities = await pb.collections.getOne('activities');
   const kindField = (activities.fields || []).find((f) => f.name === 'kind');
@@ -835,6 +875,59 @@ await patchActivitiesCollection([
 ]);
 await patchActivitiesKindValues(['workshop_assignment', 'workshop_run']);
 
+// 18b. Mistral connectors (migrations 1700000064–66) -----------------------
+// Per-användare aktiveringsstatus för Mistral built-ins och MCP-connectors.
+// CLAUDE.md § 13.2 / § 13.4. Standalone-PB:s utan vår custom-image
+// applicerar inte migrationsfilerna automatiskt — denna seed gör samma
+// jobb idempotent via PB-superuser-API.
+await ensureCollection({
+  id: 'user_mistral_connectors_col',
+  name: 'user_mistral_connectors',
+  type: 'base',
+  fields: [
+    { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'connector_kind', type: 'select', required: true, maxSelect: 1, values: ['builtin', 'mcp'] },
+    { name: 'connector_id', type: 'text', required: true, max: 120 },
+    { name: 'label', type: 'text', required: false, max: 200 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['active', 'disabled', 'oauth_pending'] },
+    { name: 'auth_data', type: 'json', required: false, maxSize: 5000 },
+    { name: 'activated_at', type: 'date', required: false },
+    { name: 'last_used_at', type: 'date', required: false },
+    { name: 'monthly_budget_usd', type: 'number', required: false, min: 0 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_umc_unique ON user_mistral_connectors (user, connector_kind, connector_id)',
+    'CREATE INDEX idx_umc_tenant ON user_mistral_connectors (tenant)',
+    'CREATE INDEX idx_umc_user ON user_mistral_connectors (user)'
+  ],
+  // listRule = read-rätt för ägaren eller staff (admin/incubator_lead).
+  // createRule använder ANY_AUTH-only-mönstret (jfr § FORCE_CREATE_RULES
+  // nedan) — tenant/owner verifieras av server actions innan write.
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = user || ${STAFF_ROLES})`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = user || ${STAFF_ROLES})`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = user`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = user`
+});
+
+// Migration 1700000065: tool_runs får valfria connector_kind/connector_id
+// och `tool` flippas till optional så connector-chattar kan skapas utan
+// parent-verktyg.
+await patchToolRunsCollection(
+  [
+    { name: 'connector_kind', type: 'select', required: false, maxSelect: 1, values: ['builtin', 'mcp'] },
+    { name: 'connector_id', type: 'text', required: false, max: 120 }
+  ],
+  { tool: { required: false, minSelect: 0 } }
+);
+
+// Migration 1700000066: tenants.allowed_mistral_connectors — admin-styrd
+// allowlist per tenant. Staff har bypass i koden (canActivateConnector).
+await patchTenantsCollection([
+  { name: 'allowed_mistral_connectors', type: 'json', required: false, maxSize: 4000 }
+]);
+
 // 19. seed Movexum tenant ---------------------------------------------------
 const tenant = await ensureRecord('tenants', 'slug = "movexum"', {
   name: 'Movexum',
@@ -877,7 +970,8 @@ const FORCE_CREATE_RULES = {
   event_signups: ANY_AUTH,
   incubator_reports: `${ANY_AUTH} && @request.auth.tenant != ""`,
   alumni: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  tenant_integrations: `${ANY_AUTH} && @request.auth.tenant != ""`
+  tenant_integrations: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  user_mistral_connectors: ANY_AUTH
 };
 
 log('Forcerar robusta createRules...');

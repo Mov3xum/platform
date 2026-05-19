@@ -116,6 +116,16 @@ Skriv för hand: filnamn `<unix-ts>_<beskrivning>.js`, exportera `migrate(up, do
 
 Eftersom migrationerna bakas in i image:n krävs **redeploy av PB-resursen** för att nya migrations ska köras.
 
+### Standalone PB utan vår custom-image
+
+Om PB körs som en vanlig standalone-container (utan vår Dockerfile som bakar in migrationerna) så applicerar de sig **aldrig** automatiskt. Då måste motsvarande schema-ändring också läggas till i `scripts/setup-via-api.mjs` i samma commit:
+
+- Ny collection → lägg till en `ensureCollection({...})`-anrop med samma fält och regler som migrationen.
+- Nytt fält på befintlig collection → använd matchande patch-helper (`patchTenantsCollection`, `patchUsersCollection`, `patchToolRunsCollection`, `patchActivitiesCollection`).
+- Nytt värde i ett select-fält (t.ex. `activities.kind`) → använd `patchActivitiesKindValues`.
+
+`setup-pocketbase`-workflowen (`.github/workflows/setup-pocketbase.yml`) triggas automatiskt vid push till `staging`/`main` när något i `backend/pocketbase-schema/**` ändras. Den kör `setup-via-api.mjs` mot den PB-instans som är konfigurerad via `PB_URL` repo-secret. Resultatet: schemat hålls i synk med koden oavsett om PB-containern rebuildas eller inte.
+
 ## Bootstrap utan PB-redeploy (`scripts/setup-via-api.mjs`)
 
 Om PB redan körs (t.ex. från en raw `pocketbase/pocketbase`-image utan vår Dockerfile) och du inte kan reconfigura/redeploya den just nu, kan du seeda hela schemat + Hampus app-user via API istället.

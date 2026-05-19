@@ -1,9 +1,16 @@
-name: Setup PocketBase (one-shot bootstrap)
+name: Setup PocketBase (auto + manual bootstrap)
 
-# Manuellt triggad workflow som bootstrap:ar en redan körande PB-instans:
-# skapar alla 10 collections, Movexum-tenant och hampus@movexum.se app-user.
+# Idempotent bootstrap mot en redan körande PB-instans: skapar saknade
+# collections, kör schema-patches på befintliga och seedar Movexum-tenant
+# + hampus@movexum.se app-user.
 #
-# Kör en gång efter att PB är uppe. Idempotent — säker att köra igen.
+# Triggas:
+#   - Automatiskt vid push till staging/main när något i
+#     backend/pocketbase-schema/** ändras. Då stannar schemat alltid i synk
+#     med koden — även om PB-containern inte rebuildas (vilket är fallet
+#     för standalone-PB:s som inte använder vår custom-image).
+#   - Manuellt via workflow_dispatch om man vill köra bootstrap mot t.ex.
+#     en ny miljö eller efter en rollback.
 #
 # Krav på repo-secrets:
 #   PB_URL                — t.ex. https://pocketbase-r10nkich8dkune7s0flczb89.212.147.227.223.sslip.io
@@ -11,6 +18,13 @@ name: Setup PocketBase (one-shot bootstrap)
 #   APP_USER_PASSWORD     — det lösen Hampus ska använda i Next.js-appens /login
 
 on:
+  push:
+    branches:
+      - staging
+      - main
+    paths:
+      - 'backend/pocketbase-schema/**'
+      - '.github/workflows/setup-pocketbase.yml'
   workflow_dispatch:
 
 jobs:
