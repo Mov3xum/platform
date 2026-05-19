@@ -1079,7 +1079,7 @@ await ensureCollection({
     { name: 'deleted', type: 'bool', required: false }
   ],
   indexes: [
-    'CREATE INDEX idx_mission_comments_mission ON mission_comments (mission, created)',
+    'CREATE INDEX idx_mission_comments_mission ON mission_comments (mission)',
     'CREATE INDEX idx_mission_comments_tenant_author ON mission_comments (tenant, author)'
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
@@ -1119,7 +1119,7 @@ await ensureCollection({
     { name: 'read_at', type: 'date', required: false }
   ],
   indexes: [
-    'CREATE INDEX idx_notifications_user_read ON notifications (user, read_at, created)',
+    'CREATE INDEX idx_notifications_user_read ON notifications (user, read_at)',
     'CREATE INDEX idx_notifications_tenant_user ON notifications (tenant, user)'
   ],
   listRule: `${ANY_AUTH} && @request.auth.id = user`,
@@ -1538,7 +1538,7 @@ await ensureCollection({
   indexes: [
     'CREATE INDEX idx_ai_usage_events_tenant ON ai_usage_events (tenant)',
     'CREATE INDEX idx_ai_usage_events_user ON ai_usage_events (user)',
-    'CREATE INDEX idx_ai_usage_events_created ON ai_usage_events (created)'
+    'CREATE INDEX idx_ai_usage_events_tokens_out ON ai_usage_events (tokens_out)'
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
@@ -1595,7 +1595,7 @@ await ensureCollection({
   indexes: [
     'CREATE INDEX idx_agent_actions_tenant ON agent_actions (tenant)',
     'CREATE INDEX idx_agent_actions_record ON agent_actions (collection, record_id)',
-    'CREATE INDEX idx_agent_actions_created ON agent_actions (created)'
+    'CREATE INDEX idx_agent_actions_actor ON agent_actions (actor)'
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD} || @request.auth.id = actor)`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD} || @request.auth.id = actor)`,
