@@ -93,6 +93,8 @@ const PB_URL = normalizePbUrl(PB_URL_RAW);
 const pb = new PocketBase(PB_URL);
 pb.autoCancellation(false);
 
+const relationTargetCache = new Map();
+
 function normalizeSelectFields(fields, context = 'collection') {
   return (fields || []).map((field) => {
     if (field?.type !== 'select') return field;
@@ -106,10 +108,60 @@ function normalizeSelectFields(fields, context = 'collection') {
   });
 }
 
+async function resolveRelationCollectionId(rawTarget, context, fieldName) {
+  if (typeof rawTarget !== 'string' || rawTarget.trim().length === 0) {
+    return rawTarget;
+  }
+
+  if (relationTargetCache.has(rawTarget)) {
+    return relationTargetCache.get(rawTarget);
+  }
+
+  const candidates = [rawTarget];
+  if (rawTarget.endsWith('_collection')) {
+    candidates.push(rawTarget.replace(/_collection$/, ''));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const col = await pb.collections.getOne(candidate);
+      relationTargetCache.set(rawTarget, col.id);
+      if (candidate !== rawTarget) {
+        warn(
+          `${context}.${fieldName}: relation target "${rawTarget}" mapped to existing collection "${col.name}" (${col.id})`
+        );
+      }
+      return col.id;
+    } catch {
+      // try next candidate
+    }
+  }
+
+  warn(`${context}.${fieldName}: kunde inte resolve:a relation target "${rawTarget}"`);
+  return rawTarget;
+}
+
+async function normalizeFields(fields, context = 'collection') {
+  const selected = normalizeSelectFields(fields, context);
+  const resolved = [];
+
+  for (const field of selected) {
+    if (field?.type !== 'relation') {
+      resolved.push(field);
+      continue;
+    }
+
+    const resolvedCollectionId = await resolveRelationCollectionId(field.collectionId, context, field.name);
+    resolved.push({ ...field, collectionId: resolvedCollectionId });
+  }
+
+  return resolved;
+}
+
 async function ensureCollection(definition) {
   const normalizedDefinition = {
     ...definition,
-    fields: normalizeSelectFields(definition.fields, definition.name)
+    fields: await normalizeFields(definition.fields, definition.name)
   };
 
   try {
@@ -129,7 +181,11 @@ async function ensureCollection(definition) {
       (existing.deleteRule ?? null) !== desiredRules.deleteRule;
 
     if (needsRuleSync) {
-      await pb.collections.update(definition.name, desiredRules);
+      try {
+        await pb.collections.update(definition.name, desiredRules);
+      } catch (err) {
+        throw new Error(`collection "${definition.name}" rule-sync failed: ${describeError(err)}`);
+      }
       ok(`collection "${definition.name}" finns redan — regler synkade`);
       return;
     }
@@ -140,7 +196,16 @@ async function ensureCollection(definition) {
     if (e?.status !== 404) throw e;
   }
 
-  await pb.collections.create(normalizedDefinition);
+  try {
+    await pb.collections.create(normalizedDefinition);
+  } catch (err) {
+    console.error(
+      `\n✗ create collection failed: ${definition.name}\n` +
+      `${describeError(err)}\n` +
+      `Relation fields: ${JSON.stringify((normalizedDefinition.fields || []).filter((f) => f?.type === 'relation').map((f) => ({ name: f.name, collectionId: f.collectionId })))}\n`
+    );
+    throw err;
+  }
   ok(`collection "${definition.name}" skapad`);
 }
 
@@ -153,7 +218,7 @@ async function patchUsersCollection(addFields, ruleUpdates = {}) {
     return;
   }
   await pb.collections.update('users', {
-    fields: normalizeSelectFields([...users.fields, ...newFields], 'users'),
+    fields: await normalizeFields([...users.fields, ...newFields], 'users'),
     ...ruleUpdates
   });
   ok(`users uppdaterad (+${newFields.length} fält${Object.keys(ruleUpdates).length ? ', regler' : ''})`);
@@ -168,7 +233,7 @@ async function patchTenantsCollection(addFields, ruleUpdates = {}) {
     return;
   }
   await pb.collections.update('tenants', {
-    fields: normalizeSelectFields([...tenants.fields, ...newFields], 'tenants'),
+    fields: await normalizeFields([...tenants.fields, ...newFields], 'tenants'),
     ...ruleUpdates
   });
   ok(`tenants uppdaterad (+${newFields.length} fält${Object.keys(ruleUpdates).length ? ', regler' : ''})`);
@@ -183,7 +248,7 @@ async function patchActivitiesCollection(addFields) {
     return;
   }
   await pb.collections.update('activities', {
-    fields: normalizeSelectFields([...activities.fields, ...newFields], 'activities')
+    fields: await normalizeFields([...activities.fields, ...newFields], 'activities')
   });
   ok(`activities uppdaterad (+${newFields.length} fält)`);
 }
@@ -219,7 +284,7 @@ async function patchToolRunsCollection(addFields, fieldUpdates = {}) {
   }
 
   await pb.collections.update('tool_runs', {
-    fields: normalizeSelectFields([...fields, ...newFields], 'tool_runs')
+    fields: await normalizeFields([...fields, ...newFields], 'tool_runs')
   });
   ok(
     `tool_runs uppdaterad (+${newFields.length} fält` +
@@ -255,7 +320,7 @@ async function patchCollection(name, addFields = [], fieldUpdates = {}) {
   }
 
   await pb.collections.update(name, {
-    fields: normalizeSelectFields([...fields, ...newFields], name)
+    fields: await normalizeFields([...fields, ...newFields], name)
   });
   ok(`${name} uppdaterad (+${newFields.length} fält, ${Object.keys(fieldUpdates).length} patches)`);
 }
@@ -759,6 +824,32 @@ await patchActivitiesCollection([
   { name: 'tool_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
 ]);
 
+// 14.5 workshop_areas (pre-create for workshops.area relation) -------------
+const WORKSHOP_AREAS_CREATE_RULE =
+  '@request.auth.id != "" && @request.auth.tenant != "" && (' +
+  '@request.auth.roles ?= "admin" || ' +
+  '@request.auth.roles ?= "incubator_lead" || ' +
+  '@request.auth.roles ?= "coach" || ' +
+  '@request.auth.roles ?= "mentor")';
+
+await ensureCollection({
+  id: 'workshop_areas_collection',
+  name: 'workshop_areas',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'name', type: 'text', required: true, min: 1, max: 120 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_workshop_areas_tenant_name ON workshop_areas (tenant, name)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: WORKSHOP_AREAS_CREATE_RULE,
+  updateRule: WORKSHOP_AREAS_CREATE_RULE,
+  deleteRule: WORKSHOP_AREAS_CREATE_RULE
+});
+
 // 15. workshops -------------------------------------------------------------
 await ensureCollection({
   id: 'workshops_collection',
@@ -797,34 +888,8 @@ await ensureCollection({
 });
 
 // 21. workshop_areas --------------------------------------------------------
-// Robust createRule: kräver auth, tenant, och staff-roll. Ger tydligt fel om något saknas.
-const WORKSHOP_AREAS_CREATE_RULE = `
-  @request.auth.id != "" &&
-  @request.auth.tenant != "" &&
-  (
-    @request.auth.roles ?= "admin" ||
-    @request.auth.roles ?= "incubator_lead" ||
-    @request.auth.roles ?= "coach" ||
-    @request.auth.roles ?= "mentor"
-  )
-`;
-await ensureCollection({
-  id: 'workshop_areas_collection',
-  name: 'workshop_areas',
-  type: 'base',
-  fields: [
-    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
-    { name: 'name', type: 'text', required: true, min: 1, max: 120 }
-  ],
-  indexes: [
-    'CREATE UNIQUE INDEX idx_workshop_areas_tenant_name ON workshop_areas (tenant, name)'
-  ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: WORKSHOP_AREAS_CREATE_RULE,
-  updateRule: WORKSHOP_AREAS_CREATE_RULE,
-  deleteRule: WORKSHOP_AREAS_CREATE_RULE
-});
+// workshop_areas säkerställs tidigare (14.5) eftersom workshops.area
+// refererar den relationen vid collection-create.
 
 // 16. workshop_assignments --------------------------------------------------
 await ensureCollection({
