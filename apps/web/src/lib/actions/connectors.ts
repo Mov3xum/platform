@@ -88,6 +88,24 @@ async function findActivationRow(
   }
 }
 
+function isMissingCollectionError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  const status = (err as { status?: number } | null)?.status;
+  const response = (err as { response?: unknown } | null)?.response;
+  const details = response ? JSON.stringify(response).toLowerCase() : '';
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('missing or invalid collection context') ||
+    details.includes('missing or invalid collection context') ||
+    normalized.includes('not found') ||
+    (status === 404 && details.includes('no rows in result set'))
+  );
+}
+
+function schemaMissingMessage(collection: string): string {
+  return `Kollektionen \`${collection}\` saknas i PocketBase — applicera migrationen (starta om PB-containern eller kör pocketbase-bootstrap-workflowen).`;
+}
+
 function publicAppUrl(): string {
   return (
     process.env.NEXT_PUBLIC_APP_URL ||
@@ -177,10 +195,18 @@ export async function activateConnectorAction(input: {
         status: 'oauth_pending',
         activated_at: null
       };
-      if (existing) {
-        await pb.collection('user_mistral_connectors').update(existing.id, payload);
-      } else {
-        await pb.collection('user_mistral_connectors').create(payload);
+      try {
+        if (existing) {
+          await pb.collection('user_mistral_connectors').update(existing.id, payload);
+        } else {
+          await pb.collection('user_mistral_connectors').create(payload);
+        }
+      } catch (err) {
+        if (isMissingCollectionError(err)) {
+          console.error('[connectors] user_mistral_connectors collection missing', { err });
+          return { error: schemaMissingMessage('user_mistral_connectors') };
+        }
+        throw err;
       }
       return { redirectTo: authUrl };
     }
@@ -204,12 +230,12 @@ export async function activateConnectorAction(input: {
       await pb.collection('user_mistral_connectors').create(payload);
     }
   } catch (err) {
+    if (isMissingCollectionError(err)) {
+      console.error('[connectors] user_mistral_connectors collection missing', { err });
+      return { error: schemaMissingMessage('user_mistral_connectors') };
+    }
     const msg = err instanceof Error ? err.message : 'Okänt fel.';
-    return {
-      error: msg.includes('not found')
-        ? 'Kollektionen user_mistral_connectors saknas — starta om PocketBase för att applicera migrationen.'
-        : `Kunde inte aktivera connectorn: ${msg}`
-    };
+    return { error: `Kunde inte aktivera connectorn: ${msg}` };
   }
 
   revalidatePath('/integrationer');
