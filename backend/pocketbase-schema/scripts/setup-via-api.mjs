@@ -207,7 +207,7 @@ async function patchToolRunsCollection(addFields, fieldUpdates = {}) {
     if (idx === -1) continue;
     let changed = false;
     for (const [k, v] of Object.entries(patch)) {
-      if (fields[idx][k] !== v) {
+      if (JSON.stringify(fields[idx][k]) !== JSON.stringify(v)) {
         fields[idx] = { ...fields[idx], [k]: v };
         changed = true;
       }
@@ -228,6 +228,38 @@ async function patchToolRunsCollection(addFields, fieldUpdates = {}) {
       (touched ? `, ${Object.keys(fieldUpdates).length} fält-patches` : '') +
       ')'
   );
+}
+
+// Generic patch helper for any collection. Same shape as
+// patchToolRunsCollection but takes collection name as a parameter.
+// Used by all the *Collection-patches at the bottom of the file.
+async function patchCollection(name, addFields = [], fieldUpdates = {}) {
+  const collection = await pb.collections.getOne(name);
+  const fields = [...(collection.fields || [])];
+  const existingNames = new Set(fields.map((f) => f.name));
+  const newFields = addFields.filter((f) => !existingNames.has(f.name));
+
+  let touched = false;
+  for (const [fname, patch] of Object.entries(fieldUpdates)) {
+    const idx = fields.findIndex((f) => f.name === fname);
+    if (idx === -1) continue;
+    for (const [k, v] of Object.entries(patch)) {
+      if (JSON.stringify(fields[idx][k]) !== JSON.stringify(v)) {
+        fields[idx] = { ...fields[idx], [k]: v };
+        touched = true;
+      }
+    }
+  }
+
+  if (newFields.length === 0 && !touched) {
+    warn(`${name} redan i synk — hoppar över`);
+    return;
+  }
+
+  await pb.collections.update(name, {
+    fields: normalizeSelectFields([...fields, ...newFields], name)
+  });
+  ok(`${name} uppdaterad (+${newFields.length} fält, ${Object.keys(fieldUpdates).length} patches)`);
 }
 
 async function patchActivitiesKindValues(addValues) {
@@ -926,6 +958,726 @@ await patchToolRunsCollection(
 // allowlist per tenant. Staff har bypass i koden (canActivateConnector).
 await patchTenantsCollection([
   { name: 'allowed_mistral_connectors', type: 'json', required: false, maxSize: 4000 }
+]);
+
+// =========================================================================
+// 18c. Övriga saknade collections (porterade från migrations 24–62)
+// Ordning är dependency-medveten: föräldrar före barn.
+// =========================================================================
+
+// Migration 1700000027: missions — uppdrag/leveranser för bolag och team.
+// Innehåller även fält från 1700000050 (samarbete) — slås ihop i en seed.
+await ensureCollection({
+  id: 'missions_collection',
+  name: 'missions',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'type', type: 'select', required: true, maxSelect: 1, values: ['workshop', 'sprint_x', 'community', 'report', 'onboarding', 'custom', 'project'] },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft', 'preparation', 'in_progress', 'review', 'done', 'archived'] },
+    { name: 'issuer', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'recipients', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 50 },
+    { name: 'mentor', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'startups', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 50 },
+    { name: 'participants_json', type: 'json', required: false, maxSize: 50000 },
+    { name: 'visibility', type: 'select', required: false, maxSelect: 1, values: ['tenant', 'participants'] },
+    { name: 'due_date', type: 'date', required: false },
+    { name: 'description', type: 'editor', required: false },
+    { name: 'stages_json', type: 'json', required: false, maxSize: 200000 },
+    { name: 'artifacts_json', type: 'json', required: false, maxSize: 200000 },
+    { name: 'accent', type: 'text', required: false, max: 50 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_missions_tenant ON missions (tenant)',
+    'CREATE INDEX idx_missions_status ON missions (status)',
+    'CREATE INDEX idx_missions_due ON missions (due_date)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+});
+
+// Migration 1700000051: mission_comments — trådad kommentarsfunktion.
+await ensureCollection({
+  id: 'mission_comments_collection',
+  name: 'mission_comments',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'mission', type: 'relation', required: true, collectionId: 'missions_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'author', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'body', type: 'text', required: true, min: 1, max: 4000 },
+    { name: 'mentions', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 25 },
+    { name: 'parent', type: 'relation', required: false, collectionId: 'mission_comments_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'edited_at', type: 'date', required: false },
+    { name: 'deleted', type: 'bool', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_mission_comments_mission ON mission_comments (mission, created)',
+    'CREATE INDEX idx_mission_comments_tenant_author ON mission_comments (tenant, author)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && @request.auth.id = author`,
+  updateRule: `${ANY_AUTH} && @request.auth.id = author`,
+  deleteRule: `${ANY_AUTH} && @request.auth.id = author`
+});
+
+// Migration 1700000052: notifications — in-app-aviseringar för samarbete.
+await ensureCollection({
+  id: 'notifications_collection',
+  name: 'notifications',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['comment', 'mention', 'assigned', 'status_change', 'stage_advance', 'due_soon'] },
+    { name: 'mission', type: 'relation', required: false, collectionId: 'missions_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+    { name: 'actor', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'comment', type: 'relation', required: false, collectionId: 'mission_comments_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+    { name: 'payload_json', type: 'json', required: false, maxSize: 8000 },
+    { name: 'read_at', type: 'date', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_notifications_user_read ON notifications (user, read_at, created)',
+    'CREATE INDEX idx_notifications_tenant_user ON notifications (tenant, user)'
+  ],
+  listRule: `${ANY_AUTH} && @request.auth.id = user`,
+  viewRule: `${ANY_AUTH} && @request.auth.id = user`,
+  createRule: `${ANY_AUTH} && (actor = "" || @request.auth.id = actor)`,
+  updateRule: `${ANY_AUTH} && @request.auth.id = user`,
+  deleteRule: `${ANY_AUTH} && @request.auth.id = user`
+});
+
+// Migration 1700000024: strategies — strategiska planer per bolag.
+await ensureCollection({
+  id: 'strategies_collection',
+  name: 'strategies',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'workshop_assignment', type: 'relation', required: true, collectionId: 'workshop_assignments_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft', 'coach_review', 'committed', 'archived'] },
+    { name: 'recommended_band', type: 'select', required: false, maxSelect: 1, values: ['wait', 'discovery', 'execution'] },
+    { name: 'position_assessment', type: 'editor', required: false },
+    { name: 'recommendation', type: 'editor', required: false },
+    { name: 'reasoning', type: 'editor', required: false },
+    { name: 'quarterly_milestones', type: 'editor', required: false },
+    { name: 'kill_criteria', type: 'editor', required: false },
+    { name: 'scenarios_json', type: 'json', required: false },
+    { name: 'coach_notes', type: 'editor', required: false },
+    { name: 'coach_approved_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'coach_approved_at', type: 'date', required: false },
+    { name: 'committed_at', type: 'date', required: false },
+    { name: 'next_recalibration_at', type: 'date', required: false },
+    { name: 'gdpr_legal_basis', type: 'text', required: true, max: 200 },
+    { name: 'deleted_at', type: 'date', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_strategies_tenant ON strategies (tenant)',
+    'CREATE INDEX idx_strategies_startup ON strategies (startup)',
+    'CREATE INDEX idx_strategies_status ON strategies (status)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
+});
+
+// Migration 1700000025: strategy_revisions — audit-trail för strategiändringar.
+await ensureCollection({
+  id: 'strategy_revisions_collection',
+  name: 'strategy_revisions',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'strategy', type: 'relation', required: true, collectionId: 'strategies_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'revision_type', type: 'select', required: true, maxSelect: 1, values: ['initial', 'quarterly', 'coach_override', 'manual'] },
+    { name: 'snapshot_json', type: 'json', required: false },
+    { name: 'change_summary', type: 'text', required: true, max: 1000 },
+    { name: 'ai_output', type: 'editor', required: false },
+    { name: 'triggered_by', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'quarter_number', type: 'number', required: false, min: 0 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_strategy_revisions_tenant ON strategy_revisions (tenant)',
+    'CREATE INDEX idx_strategy_revisions_strategy ON strategy_revisions (strategy)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
+// Migration 1700000029: sprint_x_checkins — utvecklingsaxlar per bolag.
+await ensureCollection({
+  id: 'sprint_x_checkins_collection',
+  name: 'sprint_x_checkins',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'axis', type: 'select', required: true, maxSelect: 1, values: ['funding', 'intl', 'sustain', 'team'] },
+    { name: 'value_from', type: 'number', required: true, min: 0, max: 100 },
+    { name: 'value_to', type: 'number', required: true, min: 0, max: 100 },
+    { name: 'note', type: 'text', required: false, max: 1000 },
+    { name: 'logged_by', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_sprintx_tenant ON sprint_x_checkins (tenant)',
+    'CREATE INDEX idx_sprintx_startup ON sprint_x_checkins (startup)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+});
+
+// Migration 1700000030: investors — investerarprofiler.
+await ensureCollection({
+  id: 'investors_collection',
+  name: 'investors',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'name', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'focus', type: 'json', required: false, maxSize: 4000 },
+    { name: 'ticket_min', type: 'number', required: false, min: 0 },
+    { name: 'ticket_max', type: 'number', required: false, min: 0 },
+    { name: 'warmth', type: 'select', required: true, maxSelect: 1, values: ['hot', 'active', 'tracking', 'later'] },
+    { name: 'stage_focus', type: 'json', required: false, maxSize: 4000 },
+    { name: 'contact_user', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'website', type: 'url', required: false },
+    { name: 'notes', type: 'editor', required: false },
+    { name: 'accent', type: 'text', required: false, max: 50 }
+  ],
+  indexes: ['CREATE INDEX idx_investors_tenant ON investors (tenant)'],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+});
+
+// Migration 1700000031: deals — investerar-bolag-matchning.
+await ensureCollection({
+  id: 'deals_collection',
+  name: 'deals',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'investor', type: 'relation', required: true, collectionId: 'investors_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'stage', type: 'select', required: true, maxSelect: 1, values: ['intro', 'meeting', 'dd', 'term_sheet', 'close'] },
+    { name: 'amount', type: 'number', required: false, min: 0 },
+    { name: 'notes', type: 'editor', required: false },
+    { name: 'last_activity', type: 'date', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_deals_tenant ON deals (tenant)',
+    'CREATE INDEX idx_deals_stage ON deals (stage)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
+});
+
+// Migration 1700000032: incubator_events — pitch-event, konferenser etc.
+// Inkluderar counter-fält från 1700000067.
+await ensureCollection({
+  id: 'incubator_events_collection',
+  name: 'incubator_events',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'name', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'type', type: 'select', required: true, maxSelect: 1, values: ['pitch', 'conference', 'matching', 'hack', 'mingle', 'workshop', 'other'] },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['planned', 'live', 'completed', 'cancelled'] },
+    { name: 'starts_at', type: 'date', required: true },
+    { name: 'ends_at', type: 'date', required: false },
+    { name: 'location', type: 'text', required: false, max: 200 },
+    { name: 'description', type: 'editor', required: false },
+    { name: 'accent', type: 'text', required: false, max: 50 },
+    { name: 'signups_count', type: 'number', required: false, min: 0 },
+    { name: 'attended_count', type: 'number', required: false, min: 0 },
+    { name: 'leads_count', type: 'number', required: false, min: 0 },
+    { name: 'admitted_count', type: 'number', required: false, min: 0 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_events_tenant ON incubator_events (tenant)',
+    'CREATE INDEX idx_events_starts ON incubator_events (starts_at)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
+});
+
+// Migration 1700000033: event_signups — registreringar för events.
+await ensureCollection({
+  id: 'event_signups_collection',
+  name: 'event_signups',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'event', type: 'relation', required: true, collectionId: 'incubator_events_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'name', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'email', type: 'email', required: false },
+    { name: 'organization', type: 'text', required: false, max: 200 },
+    { name: 'stage', type: 'select', required: true, maxSelect: 1, values: ['signup', 'attended', 'meeting', 'application', 'admitted'] },
+    { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'notes', type: 'text', required: false, max: 1000 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_signups_tenant ON event_signups (tenant)',
+    'CREATE INDEX idx_signups_event ON event_signups (event)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
+});
+
+// Migration 1700000034: incubator_reports — rapporter till Vinnova m.fl.
+await ensureCollection({
+  id: 'incubator_reports_collection',
+  name: 'incubator_reports',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'recipient', type: 'select', required: true, maxSelect: 1, values: ['vinnova', 'tillvaxtverket', 'region', 'kommun', 'other'] },
+    { name: 'recipient_label', type: 'text', required: false, max: 200 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft_ai', 'review', 'sent', 'archived'] },
+    { name: 'period_label', type: 'text', required: false, max: 100 },
+    { name: 'period_start', type: 'date', required: false },
+    { name: 'period_end', type: 'date', required: false },
+    { name: 'due_date', type: 'date', required: false },
+    { name: 'completion', type: 'number', required: false, min: 0, max: 100 },
+    { name: 'sections_json', type: 'json', required: false, maxSize: 1000000 },
+    { name: 'preview_md', type: 'editor', required: false },
+    { name: 'accent', type: 'text', required: false, max: 50 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: ['CREATE INDEX idx_reports_tenant ON incubator_reports (tenant)'],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+});
+
+// Migration 1700000035: alumni — exit-företag och tidigare grundare.
+await ensureCollection({
+  id: 'alumni_collection',
+  name: 'alumni',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'name', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'company', type: 'text', required: false, max: 300 },
+    { name: 'exit_year', type: 'number', required: false, min: 1980, max: 2100 },
+    { name: 'tag', type: 'select', required: true, maxSelect: 1, values: ['exit', 'scale', 'active', 'mentor', 'paused'] },
+    { name: 'bio', type: 'editor', required: false },
+    { name: 'contact_email', type: 'email', required: false },
+    { name: 'contact_user', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'active_mentor', type: 'bool', required: false },
+    { name: 'accent', type: 'text', required: false, max: 50 }
+  ],
+  indexes: ['CREATE INDEX idx_alumni_tenant ON alumni (tenant)'],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+});
+
+// Migration 1700000041: integration_providers — global katalog över leverantörer.
+// Inkluderar utökade kategorier från 1700000053 (marketing, learning).
+await ensureCollection({
+  id: 'integration_providers_col',
+  name: 'integration_providers',
+  type: 'base',
+  fields: [
+    { name: 'slug', type: 'text', required: true, min: 1, max: 60 },
+    { name: 'name', type: 'text', required: true, min: 1, max: 100 },
+    { name: 'category', type: 'select', required: true, maxSelect: 1, values: ['microsoft365', 'ai', 'collaboration', 'communication', 'productivity', 'marketing', 'learning'] },
+    { name: 'placeholder', type: 'text', required: false, max: 8 },
+    { name: 'tagline', type: 'text', required: false, max: 200 },
+    { name: 'description', type: 'text', required: false, max: 2000 },
+    { name: 'features', type: 'json', required: false, maxSize: 4000 },
+    { name: 'availability', type: 'select', required: true, maxSelect: 1, values: ['planned', 'beta', 'available'] },
+    { name: 'sort_order', type: 'number', required: false, min: 0 },
+    { name: 'active', type: 'bool', required: false }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_integration_providers_slug ON integration_providers (slug)',
+    'CREATE INDEX idx_integration_providers_category ON integration_providers (category, sort_order)'
+  ],
+  listRule: ANY_AUTH,
+  viewRule: ANY_AUTH,
+  createRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`,
+  updateRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`,
+  deleteRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`
+});
+
+// Migration 1700000041: tenant_integrations — per-tenant kopplingsstatus.
+// Inkluderar utökade sync-fält från 1700000053.
+await ensureCollection({
+  id: 'tenant_integrations_col',
+  name: 'tenant_integrations',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'provider', type: 'relation', required: true, collectionId: 'integration_providers_col', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['available', 'pilot_requested', 'connected', 'disabled'] },
+    { name: 'requested_message', type: 'text', required: false, max: 2000 },
+    { name: 'requested_at', type: 'date', required: false },
+    { name: 'requested_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'connected_at', type: 'date', required: false },
+    { name: 'config', type: 'json', required: false, maxSize: 50000 },
+    { name: 'last_sync_at', type: 'date', required: false },
+    { name: 'last_sync_status', type: 'select', required: false, maxSelect: 1, values: ['success', 'failed', 'partial'] },
+    { name: 'last_sync_summary', type: 'text', required: false, max: 500 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_tenant_integration_unique ON tenant_integrations (tenant, provider)',
+    'CREATE INDEX idx_tenant_integrations_tenant ON tenant_integrations (tenant)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+});
+
+// Migration 1700000054: integration_records — normaliserad data från syncs.
+await ensureCollection({
+  id: 'integration_records_col',
+  name: 'integration_records',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'tenant_integration', type: 'relation', required: true, collectionId: 'tenant_integrations_col', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'provider_slug', type: 'text', required: true, max: 60 },
+    { name: 'external_id', type: 'text', required: true, max: 200 },
+    { name: 'record_type', type: 'text', required: true, max: 60 },
+    { name: 'title', type: 'text', required: false, max: 300 },
+    { name: 'summary', type: 'text', required: false, max: 1000 },
+    { name: 'url', type: 'text', required: false, max: 1000 },
+    { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'occurred_at', type: 'date', required: false },
+    { name: 'payload', type: 'json', required: false, maxSize: 20000 },
+    { name: 'synced_at', type: 'date', required: true }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_integration_records_unique ON integration_records (tenant_integration, record_type, external_id)',
+    'CREATE INDEX idx_integration_records_tenant ON integration_records (tenant)',
+    'CREATE INDEX idx_integration_records_provider ON integration_records (provider_slug, record_type)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: null,
+  updateRule: null,
+  deleteRule: null
+});
+
+// Migration 1700000054: integration_sync_runs — audit-trail per sync.
+await ensureCollection({
+  id: 'integration_sync_runs_col',
+  name: 'integration_sync_runs',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'tenant_integration', type: 'relation', required: true, collectionId: 'tenant_integrations_col', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'provider_slug', type: 'text', required: true, max: 60 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['started', 'success', 'failed', 'partial'] },
+    { name: 'triggered_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'started_at', type: 'date', required: true },
+    { name: 'finished_at', type: 'date', required: false },
+    { name: 'duration_ms', type: 'number', required: false, min: 0 },
+    { name: 'records_created', type: 'number', required: false, min: 0 },
+    { name: 'records_updated', type: 'number', required: false, min: 0 },
+    { name: 'records_skipped', type: 'number', required: false, min: 0 },
+    { name: 'error_message', type: 'text', required: false, max: 1000 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_integration_sync_runs_tenant ON integration_sync_runs (tenant, started_at)',
+    'CREATE INDEX idx_integration_sync_runs_ti ON integration_sync_runs (tenant_integration, started_at)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: null,
+  updateRule: null,
+  deleteRule: null
+});
+
+// Migration 1700000053: web_cache — sanerad text-cache för web-fetch.
+await ensureCollection({
+  id: 'web_cache_collection',
+  name: 'web_cache',
+  type: 'base',
+  fields: [
+    { name: 'source', type: 'text', required: true, min: 1, max: 60 },
+    { name: 'body', type: 'text', required: false, max: 16000 },
+    { name: 'fetched_at', type: 'date', required: true }
+  ],
+  indexes: ['CREATE INDEX idx_web_cache_source ON web_cache (source, fetched_at)'],
+  listRule: ANY_AUTH,
+  viewRule: ANY_AUTH,
+  createRule: ANY_AUTH,
+  updateRule: ANY_AUTH,
+  deleteRule: ANY_AUTH
+});
+
+// Migration 1700000058: ai_usage_events — central audit-logg för Mistral-anrop.
+await ensureCollection({
+  id: 'ai_usage_events_collection',
+  name: 'ai_usage_events',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'surface', type: 'select', required: true, maxSelect: 1, values: ['toolbox', 'tool_chat', 'dashboard_chat', 'startup_chat', 'intl', 'suggestions', 'workshop_run', 'connector_chat'] },
+    { name: 'model', type: 'text', required: true, max: 100 },
+    { name: 'tokens_in', type: 'number', required: true, min: 0 },
+    { name: 'tokens_out', type: 'number', required: true, min: 0 },
+    { name: 'cost_estimate_usd', type: 'number', required: true, min: 0 },
+    { name: 'tool_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'error', type: 'text', required: false, max: 500 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_ai_usage_events_tenant ON ai_usage_events (tenant)',
+    'CREATE INDEX idx_ai_usage_events_user ON ai_usage_events (user)',
+    'CREATE INDEX idx_ai_usage_events_created ON ai_usage_events (created)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: `${ANY_AUTH} && @request.auth.id = user`,
+  updateRule: null,
+  deleteRule: null
+});
+
+// Migration 1700000059: startup_financials — årsmetrics per bolag.
+await ensureCollection({
+  id: 'startup_financials_col',
+  name: 'startup_financials',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'year', type: 'number', required: true, min: 1980, max: 2100 },
+    { name: 'employees', type: 'number', required: false, min: 0, max: 100000 },
+    { name: 'revenue_sek', type: 'number', required: false },
+    { name: 'personnel_cost_sek', type: 'number', required: false },
+    { name: 'corporate_tax_sek', type: 'number', required: false },
+    { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['manual', 'import_excel', 'allabolag', 'other'] },
+    { name: 'synced_at', type: 'date', required: false }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_financials_startup_year ON startup_financials (startup, year)',
+    'CREATE INDEX idx_financials_tenant ON startup_financials (tenant)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+});
+
+// Migration 1700000061: agent_actions — audit-logg för dataändringar via skrivlager.
+await ensureCollection({
+  id: 'agent_actions_collection',
+  name: 'agent_actions',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'actor', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'actor_kind', type: 'select', required: true, maxSelect: 1, values: ['user', 'agent'] },
+    { name: 'agent', type: 'relation', required: false, collectionId: 'tools_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'tool_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'action_type', type: 'select', required: true, maxSelect: 1, values: ['update', 'create', 'revert'] },
+    { name: 'collection', type: 'text', required: true, max: 64 },
+    { name: 'record_id', type: 'text', required: true, max: 32 },
+    { name: 'field', type: 'text', required: false, max: 64 },
+    { name: 'before_value', type: 'json', required: false },
+    { name: 'after_value', type: 'json', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_agent_actions_tenant ON agent_actions (tenant)',
+    'CREATE INDEX idx_agent_actions_record ON agent_actions (collection, record_id)',
+    'CREATE INDEX idx_agent_actions_created ON agent_actions (created)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD} || @request.auth.id = actor)`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD} || @request.auth.id = actor)`,
+  createRule: `${ANY_AUTH} && @request.auth.id = actor`,
+  updateRule: null,
+  deleteRule: null
+});
+
+// Migration 1700000061: tool_schedules — CRON-schemaläggning för AI-agenter.
+await ensureCollection({
+  id: 'tool_schedules_col',
+  name: 'tool_schedules',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'tool', type: 'relation', required: true, collectionId: 'tools_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'enabled', type: 'bool', required: false },
+    { name: 'cron_expression', type: 'text', required: true, max: 120 },
+    { name: 'timezone', type: 'text', required: false, max: 60 },
+    { name: 'next_run_at', type: 'date', required: false },
+    { name: 'last_run_at', type: 'date', required: false },
+    { name: 'last_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_tool_schedules_unique ON tool_schedules (tenant, tool)',
+    'CREATE INDEX idx_tool_schedules_due ON tool_schedules (enabled, next_run_at)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
+});
+
+// Migration 1700000062: startup_phase_history — historik över faskiften.
+await ensureCollection({
+  id: 'startup_phase_history_collection',
+  name: 'startup_phase_history',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'phase', type: 'select', required: true, maxSelect: 1, values: ['paus', 'inflode', 'lead', 'boost_chamber', 'incubation', 'prescale', 'acceleration', 'alumni'] },
+    { name: 'entered_at', type: 'date', required: true },
+    { name: 'exited_at', type: 'date', required: false },
+    { name: 'note', type: 'text', required: false, max: 500 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_sph_tenant_startup ON startup_phase_history (tenant, startup, entered_at)',
+    'CREATE INDEX idx_sph_startup_phase ON startup_phase_history (startup, phase)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+});
+
+// =========================================================================
+// 18d. Field-patches på befintliga collections (porterade från migrations
+// 43, 49, 54, 56, 57, 58, 61, 67)
+// =========================================================================
+
+// Migration 1700000043: startups.phase använder nya enum-värden.
+// Använder union av gamla + nya values så befintliga rader inte bryts.
+await patchCollection('startups', [], {
+  phase: {
+    values: [
+      'paus', 'inflode', 'lead', 'boost_chamber', 'incubation', 'prescale', 'acceleration', 'alumni',
+      'idea', 'pre_revenue', 'early_revenue', 'growth', 'scale', 'exit'
+    ],
+    maxSelect: 1
+  }
+});
+
+// Migration 1700000049: tool_runs assignment-flow fields + status enum-utökning.
+await patchToolRunsCollection(
+  [
+    { name: 'assigned_to', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'assigned_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'deadline', type: 'date', required: false },
+    { name: 'instruction', type: 'editor', required: false },
+    { name: 'knowledge_sources', type: 'json', required: false },
+    { name: 'thread', type: 'json', required: false },
+    { name: 'parent_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'version', type: 'number', required: false, min: 1 }
+  ],
+  {
+    status: { values: ['queued', 'running', 'succeeded', 'failed', 'assigned', 'in_progress', 'ready_for_review', 'approved', 'rejected'], maxSelect: 1 }
+  }
+);
+
+// Migration 1700000054: tools.web_sources — JSON-array av källnycklar.
+await patchCollection('tools', [
+  { name: 'web_sources', type: 'json', required: false, maxSize: 2000 }
+]);
+
+// Migration 1700000056: activities.kind utökas med integration_sync m.m.
+// Union av alla tidigare värden för att inte bryta historik.
+await patchActivitiesKindValues([
+  'manual', 'tool_run', 'assignment', 'approval', 'meeting', 'milestone',
+  'irl', 'phase', 'kompass', 'note', 'onboarding', 'chat', 'integration_sync',
+  'workshop_assignment', 'workshop_run'
+]);
+
+// Migration 1700000057: tool_runs chat-mode (messages, attachments) + output_md optional.
+await patchToolRunsCollection(
+  [
+    { name: 'messages', type: 'json', required: false, maxSize: 2000000 },
+    { name: 'attachments', type: 'file', required: false, maxSelect: 50, maxSize: 10485760, mimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'application/pdf', 'text/plain', 'text/markdown', 'text/csv'] }
+  ],
+  {
+    output_md: { required: false }
+  }
+);
+
+// Migration 1700000058 + 1700000061: startups bolagsregister-fält.
+await patchCollection('startups', [
+  // Från 1700000058
+  { name: 'org_nr', type: 'text', required: false, max: 12 },
+  { name: 'kommun', type: 'text', required: false, max: 100 },
+  { name: 'bolagsform', type: 'select', required: false, maxSelect: 1, values: ['aktiebolag', 'handelsbolag', 'kommanditbolag', 'enskild_firma', 'ekonomisk_forening', 'ideell_forening', 'annat'] },
+  { name: 'industri', type: 'text', required: false, max: 200 },
+  { name: 'intagsdatum', type: 'date', required: false },
+  { name: 'avslutsdatum', type: 'date', required: false },
+  { name: 'bolag_status', type: 'select', required: false, maxSelect: 1, values: ['aktiv', 'vilande', 'konkurs', 'likvidering', 'avregistrerat'] },
+  // Från 1700000061
+  { name: 'idea_name', type: 'text', required: false, max: 200 },
+  { name: 'case_type', type: 'text', required: false, max: 100 },
+  { name: 'status_completion_pct', type: 'number', required: false, min: 0, max: 100 },
+  { name: 'company_registered_at', type: 'date', required: false },
+  { name: 'contacted_at', type: 'date', required: false },
+  { name: 'phone', type: 'text', required: false, max: 30 },
+  { name: 'signed_incubator_agreement', type: 'bool', required: false },
+  { name: 'signed_incubator_agreement_at', type: 'date', required: false },
+  { name: 'signed_nda', type: 'bool', required: false },
+  { name: 'signed_nda_at', type: 'date', required: false },
+  { name: 'founder_gender', type: 'select', required: false, maxSelect: 1, values: ['kvinna', 'man', 'icke_binar', 'uppger_ej'] },
+  { name: 'potential_bc_case', type: 'bool', required: false },
+  { name: 'founder_identifies_as', type: 'text', required: false, max: 200 },
+  { name: 'signed_bc_agreement', type: 'bool', required: false },
+  { name: 'signed_bc_agreement_at', type: 'date', required: false },
+  { name: 'preliminary_exit', type: 'text', required: false, max: 200 },
+  { name: 'is_deeptech', type: 'bool', required: false },
+  { name: 'meets_excellence_criteria', type: 'bool', required: false },
+  { name: 'inflow_source', type: 'text', required: false, max: 200 },
+  { name: 'approved_state_aid_art22', type: 'bool', required: false },
+  { name: 'area', type: 'text', required: false, max: 200 },
+  { name: 'signed_vinnova_incubation_approval', type: 'bool', required: false },
+  { name: 'signed_vinnova_incubation_approval_at', type: 'date', required: false },
+  { name: 'approved_de_minimis', type: 'bool', required: false },
+  { name: 'sent_to', type: 'text', required: false, max: 200 },
+  { name: 'register_notes', type: 'editor', required: false },
+  { name: 'is_regional', type: 'bool', required: false },
+  { name: 'signed_partner_agreement', type: 'bool', required: false },
+  { name: 'signed_partner_agreement_at', type: 'date', required: false }
 ]);
 
 // 19. seed Movexum tenant ---------------------------------------------------
