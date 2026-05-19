@@ -1046,3 +1046,100 @@ lever i `user_mistral_connectors` (vår DB) eftersom vår Mistral-API-nyckel
   ingen budget-spärr i runtime ännu.
 - Cache av `listActiveConnectors` är 5 min in-memory; vid horisontell
   skalning bör den lyftas till Redis eller PB.
+
+---
+
+## 14. Per-user app-integrationer (egen OAuth)
+
+### 14.1 Översikt
+
+Movexum kör en egen OAuth-stack helt utanför Mistral för
+integrationer som kräver per-användare-auth mot tredjepartstjänster
+(Outlook Calendar, Google Calendar, GitHub osv). Detta är **inte**
+att förväxla med Mistral-connectors (§ 13) — där lagras tokens hos
+Mistral och vi har ingen direkt åtkomst till dem.
+
+Här ansluter användaren sitt eget konto i vår UI:
+1. Klick "Anslut" → Movexum redirectar till providerns auth-URL
+2. Användaren ger consent hos providern
+3. Provider redirectar tillbaka till `/api/app-integrations/<slug>/callback`
+4. Vi växlar code mot tokens, krypterar dem AES-256-GCM och sparar
+   i `user_app_integrations`-kollektionen
+5. Tokens auto-refreshas mid-flight via providers refresh-endpoint
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `apps/web/src/lib/app-integrations/types.ts` | `OAuthProvider`-interface (generiskt) |
+| `apps/web/src/lib/app-integrations/state.ts` | HMAC-signerat OAuth-state |
+| `apps/web/src/lib/app-integrations/oauth.ts` | Code→token, refresh, normalisering |
+| `apps/web/src/lib/app-integrations/storage.ts` | PB-persistens, getActiveTokens (auto-refresh) |
+| `apps/web/src/lib/app-integrations/registry.ts` | provider-slug → handler |
+| `apps/web/src/lib/app-integrations/providers/<slug>/` | Per-provider config + data-fetchers |
+| `apps/web/src/lib/actions/app-integrations.ts` | connect/disconnect server actions |
+| `apps/web/src/app/api/app-integrations/[provider]/callback/route.ts` | Generisk OAuth-callback |
+
+### 14.2 Datamodell
+
+- **`user_app_integrations`** (migration 1700000069): `user`, `tenant`,
+  `provider` (slug), `status` (active/oauth_pending/expired/disabled),
+  `auth_data` (AES-256-GCM EncryptedBlob), `account_label` (frisktext
+  för UI), `connected_at`, `last_sync_at`, `last_error` (PII-fri),
+  `is_pinned`. Unique-index `(user, provider)`.
+
+### 14.3 Riskklass och providers
+
+| Provider | Slug | Residency | Riskklass | OAuth-scopes |
+|---|---|---|---|---|
+| Microsoft Outlook Calendar | `outlook_calendar` | EU (Microsoft Graph hem-tenant region) | begränsad | `User.Read`, `Calendars.Read`, `offline_access` |
+
+Begränsad-klassificering: läsning av personlig kalender möjliggör
+beslutsstöd men granskas av människa i loopen. Ingen profilering av
+individer.
+
+### 14.4 Säkerhet och GDPR
+
+- **OAuth-state:** HMAC-SHA256-signerat med `MOVEXUM_INTEGRATION_KEY`
+  (samma nyckel som `tenant_integrations.config` + Mistral-state).
+  Innehåller `uid, tid, prov, nonce, exp` — 10 min TTL.
+- **Cross-user-skydd:** callback verifierar att inloggad cookie
+  matchar `state.uid` + `state.tid`. Mismatch → redirect till login.
+- **Tokens krypteras** AES-256-GCM via `lib/integrations/crypto.ts`
+  innan write. Klartext ses bara i `getActiveTokens()` (en plats —
+  defense-in-depth).
+- **Refresh-rotation:** om providern roterar refresh_token skrivs
+  den nya direkt; annars behålls den gamla.
+- **Dataminimering:** vi cachar INGA tredjeparts-data i vår DB —
+  vi hämtar live från providern vid varje sidladdning. Bara tokens
+  lagras.
+- **Loggning:** `last_error`-fältet är PII-fritt (vi trimmar och
+  loggar bara `err.message`). console.error inkluderar aldrig
+  tokens eller user PII.
+
+### 14.5 Env-variabler
+
+Per provider, registreras i Coolify (aldrig i kod, ISO 27001 A.8.24):
+
+| Provider | Env-nycklar |
+|---|---|
+| `outlook_calendar` | `MOVEXUM_MICROSOFT_CLIENT_ID`, `MOVEXUM_MICROSOFT_CLIENT_SECRET`, valfri `MOVEXUM_MICROSOFT_TENANT_ID` (default `common`) |
+
+**Azure AD-app setup för Outlook:**
+1. Registrera app i Azure Portal → App registrations
+2. Lägg till redirect URI: `https://<din-domän>/api/app-integrations/outlook_calendar/callback`
+3. API permissions → Microsoft Graph → Delegated:
+   `User.Read`, `Calendars.Read`, `offline_access`
+4. Generera client secret → kopiera till env
+
+### 14.6 Lägga till en ny provider
+
+1. Skapa `lib/app-integrations/providers/<slug>/provider.ts` som
+   exporterar ett `OAuthProvider`-objekt (auth-endpoints, scopes,
+   `buildAuthorizeUrl`, `fetchProfile`).
+2. Lägg till data-fetchers vid behov (`calendar.ts`, `repos.ts` …).
+3. Registrera i `lib/app-integrations/registry.ts`.
+4. Skapa `app/integrationer/<slug>/page.tsx` med UI:t (anslut/koppla
+   bort + live-vy).
+5. Lägg till env-nycklar i 14.5 och risk-klass i 14.3.
+6. PR-checklista § 10.5 punkt 9: dokumentera dataflödet här.

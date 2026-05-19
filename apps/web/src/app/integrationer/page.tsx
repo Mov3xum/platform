@@ -1,4 +1,6 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
+import { ExternalLink, Check } from 'lucide-react';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole, canActivateConnector } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
@@ -6,8 +8,11 @@ import { RailSection, RailStat } from '@/components/PageRail';
 import { hasHandler as hasIntegrationHandler } from '@/lib/integrations/registry';
 import { IntegrationActivateButton } from './IntegrationActivateButton';
 import { ConnectorCard } from '@/components/ConnectorCard';
+import { ConnectorLogo } from '@/components/ConnectorLogo';
 import { BUILTINS, isConnectorAllowedForTenant } from '@/lib/ai/builtins';
 import { listActiveConnectors, type MistralConnector } from '@/lib/ai/connectors';
+import { listAppProviders } from '@/lib/app-integrations/registry';
+import { findIntegrationRow } from '@/lib/app-integrations/storage';
 
 type IntegrationCategory =
   | 'microsoft365'
@@ -168,6 +173,17 @@ export default async function IntegrationerPage({
     listActiveConnectors().catch(() => [] as MistralConnector[])
   ]);
 
+  // ── Per-user app-integrationer (egen OAuth, ej via Mistral) ─────────────
+  // Vi visar EN status per provider på listsidan; detaljerna ligger på
+  // respektive providers detaljsida (länkad från kortet).
+  const appProviders = listAppProviders();
+  const appProviderStates = await Promise.all(
+    appProviders.map(async (p) => ({
+      provider: p,
+      row: await findIntegrationRow(pb, user.id, p.meta.slug)
+    }))
+  );
+
   const tenantAllowlist: string[] =
     tenant && Array.isArray((tenant as Record<string, unknown>).allowed_mistral_connectors)
       ? ((tenant as Record<string, unknown>).allowed_mistral_connectors as string[])
@@ -281,6 +297,82 @@ export default async function IntegrationerPage({
             {params.error}
           </div>
         )}
+        {appProviderStates.length > 0 && (
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                Personliga integrationer
+              </h2>
+              <span className="font-mono text-[11px] text-foreground-subtle">
+                {appProviderStates.length}
+              </span>
+            </div>
+            <p className="mb-4 text-[12.5px] leading-relaxed text-foreground-muted">
+              Koppla dina egna konton (Outlook, Google, GitHub…) via OAuth. Tokens
+              lagras AES-256-GCM-krypterade hos oss på UpCloud (EU). Vi använder
+              dem bara för att hämta data vid sidladdning — inget cachas.
+            </p>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {appProviderStates.map(({ provider, row }) => {
+                const connected = row?.status === 'active';
+                return (
+                  <div
+                    key={provider.meta.slug}
+                    className="flex flex-col rounded-2xl border border-default bg-surface p-4"
+                  >
+                    <div className="mb-3 flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-canvas-muted">
+                        <ConnectorLogo
+                          kind="mcp"
+                          connectorId={provider.meta.slug}
+                          connectorName={provider.meta.title}
+                          size={22}
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[14px] font-semibold text-foreground">
+                          {provider.meta.title}
+                        </div>
+                        <div className="mt-0.5 flex flex-wrap gap-1.5 text-[10.5px] font-mono text-foreground-subtle">
+                          <span>{provider.meta.residency}</span>
+                          <span>· risk: {provider.meta.riskClass}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="mb-4 line-clamp-3 min-h-[3.6em] text-[12.5px] leading-relaxed text-foreground-muted">
+                      {provider.meta.blurb}
+                    </p>
+                    <div className="mt-auto flex items-center justify-between gap-3">
+                      {connected ? (
+                        <>
+                          <Link
+                            href={provider.meta.detailPath}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
+                          >
+                            Öppna
+                          </Link>
+                          <span className="inline-flex items-center gap-1 text-[11.5px] text-foreground-subtle">
+                            <Check className="h-3 w-3 text-movexum-morkgron" />
+                            {row?.account_label || 'Ansluten'}
+                          </span>
+                        </>
+                      ) : (
+                        <Link
+                          href={provider.meta.detailPath}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
+                        >
+                          Anslut
+                          <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
