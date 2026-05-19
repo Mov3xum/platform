@@ -37,28 +37,30 @@ jobs:
             exit 1
           fi
 
-          normalize_url() {
-            local raw="$1"
-            local normalized="${raw%/}"
-            if [[ "$normalized" == http://* ]]; then
-              normalized="https://${normalized#http://}"
-            elif [[ "$normalized" != https://* ]]; then
-              normalized="https://$normalized"
-            fi
-            printf '%s' "$normalized"
+          strip_url() {
+            local raw="${1%/}"
+            raw="${raw#http://}"
+            raw="${raw#https://}"
+            printf '%s' "$raw"
           }
 
-          seed_url=$(normalize_url "$PB_URL_SECRET")
-          alt_url_1="${seed_url/nklch/nkich}"
-          alt_url_2="${seed_url/nkich/nklch}"
+          seed_host=$(strip_url "$PB_URL_SECRET")
+          alt_host_1="${seed_host/nklch/nkich}"
+          alt_host_2="${seed_host/nkich/nklch}"
 
-          candidates=("$seed_url")
-          if [[ "$alt_url_1" != "$seed_url" ]]; then
-            candidates+=("$alt_url_1")
+          hosts=("$seed_host")
+          if [[ "$alt_host_1" != "$seed_host" ]]; then
+            hosts+=("$alt_host_1")
           fi
-          if [[ "$alt_url_2" != "$seed_url" && "$alt_url_2" != "$alt_url_1" ]]; then
-            candidates+=("$alt_url_2")
+          if [[ "$alt_host_2" != "$seed_host" && "$alt_host_2" != "$alt_host_1" ]]; then
+            hosts+=("$alt_host_2")
           fi
+
+          candidates=()
+          for host in "${hosts[@]}"; do
+            candidates+=("http://$host")
+            candidates+=("https://$host")
+          done
 
           max_attempts=60
           sleep_seconds=8

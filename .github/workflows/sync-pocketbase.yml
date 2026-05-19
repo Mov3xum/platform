@@ -87,12 +87,30 @@ jobs:
             exit 1
           fi
 
-          pb_url="${PB_URL%/}"
-          if [[ "$pb_url" == http://* ]]; then
-            pb_url="https://${pb_url#http://}"
-          elif [[ "$pb_url" != https://* ]]; then
-            pb_url="https://$pb_url"
+          strip_url() {
+            local raw="${1%/}"
+            raw="${raw#http://}"
+            raw="${raw#https://}"
+            printf '%s' "$raw"
+          }
+
+          seed_host=$(strip_url "$PB_URL")
+          alt_host_1="${seed_host/nklch/nkich}"
+          alt_host_2="${seed_host/nkich/nklch}"
+
+          hosts=("$seed_host")
+          if [[ "$alt_host_1" != "$seed_host" ]]; then
+            hosts+=("$alt_host_1")
           fi
+          if [[ "$alt_host_2" != "$seed_host" && "$alt_host_2" != "$alt_host_1" ]]; then
+            hosts+=("$alt_host_2")
+          fi
+
+          candidates=()
+          for host in "${hosts[@]}"; do
+            candidates+=("http://$host")
+            candidates+=("https://$host")
+          done
 
           # Vi väntar upp till 8 försök × 8s = ~1 min. Coolify-redeployen
           # ovan kan rebooting:a PB, så ge den lite tid att komma upp.
@@ -104,32 +122,40 @@ jobs:
           consecutive_503_limit=2
 
           for attempt in $(seq 1 "$max_attempts"); do
-            health_code=$(curl -k -sS --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "$pb_url/api/health" || true)
-            auth_code=$(curl -k -sS --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" \
-              -H "Content-Type: application/json" \
-              -X POST \
-              "$pb_url/api/collections/_superusers/auth-with-password" \
-              --data '{"identity":"readiness-probe","password":"readiness-probe"}' || true)
+            matched_503=0
+            for pb_url in "${candidates[@]}"; do
+              health_code=$(curl -k -sS --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "$pb_url/api/health" || true)
+              auth_code=$(curl -k -sS --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" \
+                -H "Content-Type: application/json" \
+                -X POST \
+                "$pb_url/api/collections/_superusers/auth-with-password" \
+                --data '{"identity":"readiness-probe","password":"readiness-probe"}' || true)
 
-            if [[ "$health_code" == "200" && "$auth_code" != "503" && "$auth_code" != "502" && "$auth_code" != "000" ]]; then
-              echo "✓ PocketBase ready (health=$health_code, auth=$auth_code)"
-              exit 0
-            fi
+              if [[ "$health_code" == "200" && "$auth_code" != "503" && "$auth_code" != "502" && "$auth_code" != "000" ]]; then
+                echo "✓ PocketBase ready at $pb_url (health=$health_code, auth=$auth_code)"
+                exit 0
+              fi
 
-            if [[ "$health_code" == "503" && "$auth_code" == "503" ]]; then
+              if [[ "$health_code" == "503" && "$auth_code" == "503" ]]; then
+                matched_503=$((matched_503 + 1))
+              fi
+
+              echo "PB not ready yet (attempt $attempt/$max_attempts, url=$pb_url): health=$health_code auth=$auth_code"
+            done
+
+            if [[ "$matched_503" -eq "${#candidates[@]}" ]]; then
               consecutive_503=$((consecutive_503 + 1))
             else
               consecutive_503=0
             fi
 
             if [[ "$consecutive_503" -ge "$consecutive_503_limit" ]]; then
-              echo "::error::PocketBase returnerar persistent 503 på både /api/health och auth-endpoint."
+              echo "::error::PocketBase returnerar persistent 503 på alla URL-kandidater (http/https + host-variationer)."
               echo "::error::Containern är troligen nere/hängd. SSH:a in på servern, kör 'docker ps' och starta om PB-containern."
               echo "::error::När PB är uppe igen — kör om denna workflow manuellt via 'Run workflow'-knappen."
               exit 1
             fi
 
-            echo "PB not ready yet (attempt $attempt/$max_attempts): health=$health_code auth=$auth_code"
             sleep "$sleep_seconds"
           done
 
