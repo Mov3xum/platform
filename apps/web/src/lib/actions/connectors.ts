@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole, requireRole, canActivateConnector } from '@/lib/rbac';
 import {
-  callMistral,
+  callMistralConversation,
   estimateCostUsd,
   type MistralMessage,
   type MistralContentPart
@@ -478,16 +478,17 @@ export async function runConnectorTurnAction(formData: FormData): Promise<Connec
       : userText + prepared.injectedText;
   mistralMessages.push({ role: 'user', content: userContent });
 
-  // Anropa Mistral med rätt tool.
+  // Anropa Mistral via /v1/conversations — den enda endpoint som stöder
+  // built-in tools och MCP-connectors. /v1/chat/completions avvisar dem
+  // med 422 (literal_error) eller 400 (invalid_tools).
   let result;
   try {
-    result = await callMistral(selectedModel, mistralMessages, {
+    result = await callMistralConversation(selectedModel, mistralMessages, {
       builtins: kind === 'builtin' ? [connectorId as BuiltinId] : undefined,
       connectors:
         kind === 'mcp'
           ? [{ connector_id: connectorId, auth: connectorAuth }]
-          : undefined,
-      toolChoice: 'auto'
+          : undefined
     });
   } catch (err) {
     await pb.collection('tool_runs').update(runId, {
