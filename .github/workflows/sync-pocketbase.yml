@@ -83,9 +83,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${PB_URL:-}" ]; then
-            echo "::warning::PB_URL secret saknas. Skipping API sync."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::error::PB_URL secret saknas. Sätt den i repo-secrets innan workflowen kan köra."
+            exit 1
           fi
 
           pb_url="${PB_URL%/}"
@@ -95,6 +94,10 @@ jobs:
             pb_url="https://$pb_url"
           fi
 
+          # Vi väntar upp till 8 försök × 8s = ~1 min. Coolify-redeployen
+          # ovan kan rebooting:a PB, så ge den lite tid att komma upp.
+          # Två persistent 503 i rad → bedöm som "PB är nere" och faila
+          # hårt med actionable error så devops vet att rycka in.
           max_attempts=8
           sleep_seconds=8
           consecutive_503=0
@@ -110,7 +113,6 @@ jobs:
 
             if [[ "$health_code" == "200" && "$auth_code" != "503" && "$auth_code" != "502" && "$auth_code" != "000" ]]; then
               echo "✓ PocketBase ready (health=$health_code, auth=$auth_code)"
-              echo "ready=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
@@ -121,20 +123,21 @@ jobs:
             fi
 
             if [[ "$consecutive_503" -ge "$consecutive_503_limit" ]]; then
-              echo "Persistent 503 from health/auth for $consecutive_503 consecutive attempts. Breaking early."
-              break
+              echo "::error::PocketBase returnerar persistent 503 på både /api/health och auth-endpoint."
+              echo "::error::Containern är troligen nere/hängd. SSH:a in på servern, kör 'docker ps' och starta om PB-containern."
+              echo "::error::När PB är uppe igen — kör om denna workflow manuellt via 'Run workflow'-knappen."
+              exit 1
             fi
 
             echo "PB not ready yet (attempt $attempt/$max_attempts): health=$health_code auth=$auth_code"
             sleep "$sleep_seconds"
           done
 
-          echo "::warning::PocketBase auth endpoint not ready in time. Skipping API sync for this run."
-          echo "ready=false" >> "$GITHUB_OUTPUT"
-          exit 0
+          echo "::error::PocketBase auth-endpoint blev inte redo efter ${max_attempts} försök."
+          echo "::error::Kolla PB-containerns hälsa på servern och kör om workflowen när den är uppe."
+          exit 1
 
       - name: Kör setup-via-api.mjs mot PocketBase
-        if: steps.pb_ready.outputs.ready == 'true'
         env:
           PB_URL: ${{ secrets.PB_URL }}
           PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL }}
@@ -143,7 +146,6 @@ jobs:
         run: node backend/pocketbase-schema/scripts/setup-via-api.mjs
 
       - name: Verifiera PocketBase baseline
-        if: steps.pb_ready.outputs.ready == 'true'
         env:
           PB_URL: ${{ secrets.PB_URL }}
           PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL }}
