@@ -2,7 +2,6 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { randomBytes } from 'node:crypto';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole, requireRole, canActivateConnector } from '@/lib/rbac';
 import {
@@ -22,11 +21,7 @@ import {
   isBuiltinId,
   type BuiltinId
 } from '@/lib/ai/builtins';
-import {
-  listActiveConnectors,
-  startConnectorOAuth
-} from '@/lib/ai/connectors';
-import { signOAuthState } from '@/lib/ai/connector-state';
+import { listActiveConnectors } from '@/lib/ai/connectors';
 import {
   decryptCredentials,
   isEncryptedBlob,
@@ -51,6 +46,15 @@ const MAX_CHAT_TURNS = 20;
 export type ConnectorActionState = {
   error?: string;
   redirectTo?: string;
+  /**
+   * När satt ska klienten öppna URL:en i en ny flik (`window.open` med
+   * `noopener,noreferrer`) och visa "Klart!"-knappen — användaren bör
+   * autentisera connectorn i Le Chat och sedan komma tillbaka och
+   * bekräfta. Används för MCP-connectors som kräver per-user-auth
+   * eftersom Mistrals `/v1/connectors/{id}/oauth/start` inte är
+   * pålitlig (se anteckning i `activateConnectorAction`).
+   */
+  openInNewTab?: string;
   runId?: string;
 };
 
@@ -106,14 +110,6 @@ function schemaMissingMessage(collection: string): string {
   return `Kollektionen \`${collection}\` saknas i PocketBase — applicera migrationen (starta om PB-containern eller kör pocketbase-bootstrap-workflowen).`;
 }
 
-function publicAppUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.APP_URL ||
-    'http://localhost:3000'
-  );
-}
-
 // ── Public server actions ───────────────────────────────────────────────
 
 /**
@@ -157,60 +153,36 @@ export async function activateConnectorAction(input: {
 
   const existing = await findActivationRow(pb, user.id, input.kind, input.connectorId);
 
-  // OAuth-flow: försök starta hos Mistral. Endpointen
-  // /v1/connectors/{id}/oauth/start är inte dokumenterad publikt och
-  // verkar inte vara aktiv för alla connector-typer — Mistrals
-  // faktiska modell är att slutanvändaren autentiserar i Le Chat.
-  // Fail-soft: vid fel markerar vi connectorn som active ändå och
-  // litar på att Mistral surface:ar auth-fel vid första chat-turn.
+  // MCP-connectors som kräver per-user-auth: skicka användaren till
+  // Le Chats inställningssida i en ny flik. Mistrals OAuth-start-
+  // endpoint är inte dokumenterad publikt och visade sig opålitlig i
+  // tidigare iteration — den enda stabila vägen är att låta
+  // användaren autentisera direkt i Le Chat och sedan komma tillbaka
+  // och bekräfta via `confirmConnectorReadyAction`.
   if (requiresAuth) {
-    const nonce = randomBytes(16).toString('hex');
-    const state = signOAuthState({
-      uid: user.id,
-      tid: user.tenant,
-      cid: input.connectorId,
-      nonce,
-      exp: Date.now() + 10 * 60 * 1000
-    });
-    const returnTo = `${publicAppUrl()}/api/integrations/mistral/oauth-callback`;
-
-    let authUrl: string | null = null;
+    const payload = {
+      user: user.id,
+      tenant: user.tenant,
+      connector_kind: input.kind,
+      connector_id: input.connectorId,
+      label,
+      status: 'oauth_pending',
+      activated_at: null
+    };
     try {
-      const res = await startConnectorOAuth(input.connectorId, returnTo, state);
-      authUrl = res.authorization_url ?? null;
-    } catch (err) {
-      console.warn('[connectors] oauth-start unavailable, falling back to direct activation', {
-        connectorId: input.connectorId,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
-
-    if (authUrl) {
-      const payload = {
-        user: user.id,
-        tenant: user.tenant,
-        connector_kind: input.kind,
-        connector_id: input.connectorId,
-        label,
-        status: 'oauth_pending',
-        activated_at: null
-      };
-      try {
-        if (existing) {
-          await pb.collection('user_mistral_connectors').update(existing.id, payload);
-        } else {
-          await pb.collection('user_mistral_connectors').create(payload);
-        }
-      } catch (err) {
-        if (isMissingCollectionError(err)) {
-          console.error('[connectors] user_mistral_connectors collection missing', { err });
-          return { error: schemaMissingMessage('user_mistral_connectors') };
-        }
-        throw err;
+      if (existing) {
+        await pb.collection('user_mistral_connectors').update(existing.id, payload);
+      } else {
+        await pb.collection('user_mistral_connectors').create(payload);
       }
-      return { redirectTo: authUrl };
+    } catch (err) {
+      if (isMissingCollectionError(err)) {
+        console.error('[connectors] user_mistral_connectors collection missing', { err });
+        return { error: schemaMissingMessage('user_mistral_connectors') };
+      }
+      throw err;
     }
-    // Fall-through till direkt-aktivering nedan.
+    return { openInNewTab: 'https://chat.mistral.ai/settings/connectors' };
   }
 
   // Ingen OAuth: aktivera direkt.
@@ -262,6 +234,35 @@ export async function deactivateConnectorAction(input: {
   });
 
   revalidatePath('/integrationer');
+  return {};
+}
+
+/**
+ * Flippar en connector från `oauth_pending` till `active`. Anropas av
+ * användaren via "Klart!"-knappen efter att de autentiserat connectorn
+ * i Le Chat. Verifierar att raden tillhör den inloggade användaren —
+ * defense-in-depth om någon manipulerar formulär-värden.
+ */
+export async function confirmConnectorReadyAction(input: {
+  kind: 'builtin' | 'mcp';
+  connectorId: string;
+}): Promise<ConnectorActionState> {
+  const user = await requireUser();
+  const pb = await getServerPb();
+
+  const row = await findActivationRow(pb, user.id, input.kind, input.connectorId);
+  if (!row) return { error: 'Aktiveringen hittades inte.' };
+  if (row.status !== 'oauth_pending') {
+    return { error: 'Connectorn väntar inte på bekräftelse.' };
+  }
+
+  await pb.collection('user_mistral_connectors').update(row.id, {
+    status: 'active',
+    activated_at: new Date().toISOString()
+  });
+
+  revalidatePath('/integrationer');
+  revalidatePath('/idag');
   return {};
 }
 
@@ -321,26 +322,13 @@ export async function toggleConnectorPinFormAction(formData: FormData): Promise<
 }
 
 /**
- * Form-wrappers så <form action={…}> i UI kan binda mot dem utan att
- * varje sida behöver client-component-handlers. Vid fel redirectas
- * användaren tillbaka till listsidan med ?error=… så att den server-
- * renderade sidan visar meddelandet (vanlig <form>-flows har ingen
- * client-side state).
+ * Form-wrappers så <form action={…}> i UI kan binda mot server-actions
+ * utan att kortet behöver vara en client-component. Vid fel redirectas
+ * användaren tillbaka till listsidan med ?error=… så den server-
+ * renderade sidan visar meddelandet. Aktivering hanteras däremot av
+ * en client-knapp (ConnectorActivateButton) eftersom vi behöver
+ * öppna chat.mistral.ai i ny flik synkront med klicket.
  */
-export async function activateConnectorFormAction(formData: FormData): Promise<void> {
-  'use server';
-  const kind = String(formData.get('kind') || '') as 'builtin' | 'mcp';
-  const connectorId = String(formData.get('connectorId') || '').trim();
-  if ((kind !== 'builtin' && kind !== 'mcp') || !connectorId) {
-    redirect('/integrationer?error=' + encodeURIComponent('Ogiltig connector.'));
-  }
-  const result = await activateConnectorAction({ kind, connectorId });
-  if (result.redirectTo) redirect(result.redirectTo);
-  if (result.error) {
-    redirect('/integrationer?error=' + encodeURIComponent(result.error));
-  }
-}
-
 export async function deactivateConnectorFormAction(formData: FormData): Promise<void> {
   'use server';
   const kind = String(formData.get('kind') || '') as 'builtin' | 'mcp';

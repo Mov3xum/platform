@@ -1,12 +1,15 @@
 import Link from 'next/link';
 import { Pin, PinOff } from 'lucide-react';
 import {
-  activateConnectorFormAction,
   deactivateConnectorFormAction,
   toggleConnectorPinFormAction
 } from '@/lib/actions/connectors';
 import { Chip } from '@/components/proto';
 import { ConnectorLogo } from '@/components/ConnectorLogo';
+import {
+  ConnectorActivateButton,
+  ConnectorConfirmReadyButton
+} from '@/components/ConnectorActivateControls';
 
 export interface ConnectorCardProps {
   kind: 'builtin' | 'mcp';
@@ -22,8 +25,9 @@ export interface ConnectorCardProps {
   isPinned?: boolean;
 }
 
-// Återanvändbart connector-kort. Action-formulären pekar mot
-// `activateConnectorFormAction` resp. `deactivateConnectorFormAction`.
+// Återanvändbart connector-kort. Aktivering hanteras av en client-
+// component (för att kunna öppna Le Chat i ny flik synkront med
+// klicket). Avaktivering + pin går via vanliga form-actions.
 export function ConnectorCard({
   kind,
   connectorId,
@@ -103,20 +107,20 @@ export function ConnectorCard({
             </div>
           </>
         ) : isPending ? (
-          <span className="text-[12.5px] text-foreground-muted">
-            Väntar på OAuth-samtycke…
-          </span>
+          <div className="flex w-full flex-col gap-2">
+            <span className="text-[12px] text-foreground-muted">
+              Autentisera connectorn i Le Chat — klicka <strong>Klart!</strong> när du är klar.
+            </span>
+            <div className="flex justify-end">
+              <ConnectorConfirmReadyButton kind={kind} connectorId={connectorId} />
+            </div>
+          </div>
         ) : allowed ? (
-          <form action={activateConnectorFormAction}>
-            <input type="hidden" name="kind" value={kind} />
-            <input type="hidden" name="connectorId" value={connectorId} />
-            <button
-              type="submit"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
-            >
-              Aktivera
-            </button>
-          </form>
+          <ConnectorActivateButton
+            kind={kind}
+            connectorId={connectorId}
+            requiresAuth={requiresAuth === true}
+          />
         ) : (
           <span className="text-[12px] text-foreground-subtle">
             {notAllowedReason || 'Inte tillåten i tenanten'}
