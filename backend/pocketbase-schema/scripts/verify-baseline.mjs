@@ -6,16 +6,26 @@
 
 import PocketBase from 'pocketbase';
 
-const PB_URL = process.env.PB_URL;
+const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
 const SU_PASSWORD = process.env.PB_SU_PASSWORD;
 const APP_USER_EMAIL = process.env.APP_USER_EMAIL || 'hampus@movexum.se';
 const APP_USER_PASSWORD = process.env.APP_USER_PASSWORD;
 
-if (!PB_URL || !SU_EMAIL || !SU_PASSWORD) {
+if (!PB_URL_RAW || !SU_EMAIL || !SU_PASSWORD) {
   console.error('Missing env vars. Required: PB_URL, PB_SU_EMAIL, PB_SU_PASSWORD');
   process.exit(1);
 }
+
+function normalizePbUrl(raw) {
+  let url = String(raw).trim().replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(url)) {
+    url = 'http://' + url;
+  }
+  return url;
+}
+
+const PB_URL = normalizePbUrl(PB_URL_RAW);
 
 const pb = new PocketBase(PB_URL);
 pb.autoCancellation(false);

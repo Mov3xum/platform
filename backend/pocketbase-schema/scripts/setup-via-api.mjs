@@ -74,18 +74,16 @@ function shouldRetrySuperuserAuth(err) {
   return ['ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENOTFOUND', 'ETIMEDOUT'].includes(code);
 }
 
-// PB-instansen på Coolify lyssnar bara på 443. Om PB_URL-secret saknar
-// protokoll eller råkat innehålla http:// hänger anropet på port 80 tills
-// undici timar ut. Normalisera defensivt så att secret-typon inte sänker
-// hela bootstrappen.
+// Normalisera defensivt:
+// - Behåll explicit schema (http/https) från PB_URL.
+// - Lägg bara till schema om det saknas.
+// Detta behövs eftersom vissa Coolify-resurser exponeras på http och
+// tidigare tvångskonvertering till https gav falska 503 i CI.
 function normalizePbUrl(raw) {
   let url = String(raw).trim().replace(/\/+$/, '');
-  if (/^http:\/\//i.test(url)) {
-    warn('forcing HTTPS — PB lyssnar bara på 443 (PB_URL hade http://)');
-    url = url.replace(/^http:\/\//i, 'https://');
-  } else if (!/^https:\/\//i.test(url)) {
-    warn('PB_URL saknar protokoll — prependar https://');
-    url = 'https://' + url;
+  if (!/^https?:\/\//i.test(url)) {
+    warn('PB_URL saknar protokoll — prependar http://');
+    url = 'http://' + url;
   }
   return url;
 }
