@@ -139,7 +139,12 @@ export async function activateConnectorAction(input: {
 
   const existing = await findActivationRow(pb, user.id, input.kind, input.connectorId);
 
-  // OAuth-flow: starta hos Mistral, redirect:a användaren.
+  // OAuth-flow: försök starta hos Mistral. Endpointen
+  // /v1/connectors/{id}/oauth/start är inte dokumenterad publikt och
+  // verkar inte vara aktiv för alla connector-typer — Mistrals
+  // faktiska modell är att slutanvändaren autentiserar i Le Chat.
+  // Fail-soft: vid fel markerar vi connectorn som active ändå och
+  // litar på att Mistral surface:ar auth-fel vid första chat-turn.
   if (requiresAuth) {
     const nonce = randomBytes(16).toString('hex');
     const state = signOAuthState({
@@ -151,32 +156,35 @@ export async function activateConnectorAction(input: {
     });
     const returnTo = `${publicAppUrl()}/api/integrations/mistral/oauth-callback`;
 
-    let authUrl: string;
+    let authUrl: string | null = null;
     try {
       const res = await startConnectorOAuth(input.connectorId, returnTo, state);
-      authUrl = res.authorization_url;
+      authUrl = res.authorization_url ?? null;
     } catch (err) {
-      return {
-        error: err instanceof Error ? err.message : 'Kunde inte starta OAuth-flowet mot Mistral.'
+      console.warn('[connectors] oauth-start unavailable, falling back to direct activation', {
+        connectorId: input.connectorId,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
+
+    if (authUrl) {
+      const payload = {
+        user: user.id,
+        tenant: user.tenant,
+        connector_kind: input.kind,
+        connector_id: input.connectorId,
+        label,
+        status: 'oauth_pending',
+        activated_at: null
       };
+      if (existing) {
+        await pb.collection('user_mistral_connectors').update(existing.id, payload);
+      } else {
+        await pb.collection('user_mistral_connectors').create(payload);
+      }
+      return { redirectTo: authUrl };
     }
-
-    const payload = {
-      user: user.id,
-      tenant: user.tenant,
-      connector_kind: input.kind,
-      connector_id: input.connectorId,
-      label,
-      status: 'oauth_pending',
-      activated_at: null
-    };
-    if (existing) {
-      await pb.collection('user_mistral_connectors').update(existing.id, payload);
-    } else {
-      await pb.collection('user_mistral_connectors').create(payload);
-    }
-
-    return { redirectTo: authUrl };
+    // Fall-through till direkt-aktivering nedan.
   }
 
   // Ingen OAuth: aktivera direkt.

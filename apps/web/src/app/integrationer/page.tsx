@@ -7,7 +7,7 @@ import { hasHandler as hasIntegrationHandler } from '@/lib/integrations/registry
 import { IntegrationActivateButton } from './IntegrationActivateButton';
 import { ConnectorCard } from '@/components/ConnectorCard';
 import { BUILTINS, isConnectorAllowedForTenant } from '@/lib/ai/builtins';
-import { listActiveConnectors } from '@/lib/ai/connectors';
+import { listActiveConnectors, type MistralConnector } from '@/lib/ai/connectors';
 
 type IntegrationCategory =
   | 'microsoft365'
@@ -164,7 +164,7 @@ export default async function IntegrationerPage({
         filter: `user = "${user.id}"`
       })
       .catch(() => ({ items: [] as ConnectorActivation[] })),
-    listActiveConnectors().catch(() => [])
+    listActiveConnectors().catch(() => [] as MistralConnector[])
   ]);
 
   const tenantAllowlist: string[] =
@@ -193,7 +193,7 @@ export default async function IntegrationerPage({
   const connectorCards: ConnectorCardData[] = [
     ...BUILTINS.map<ConnectorCardData>((b) => {
       const allowed =
-        isConnectorAllowedForTenant('builtin', b.id, tenantAllowlist) &&
+        isConnectorAllowedForTenant('builtin', b.id, tenantAllowlist, { isStaff }) &&
         canActivateConnector(user.roles, { kind: 'builtin', id: b.id }, tenantAllowlist);
       return {
         kind: 'builtin',
@@ -205,29 +205,34 @@ export default async function IntegrationerPage({
         requiresAuth: false,
         status: activationStatus.get(`builtin:${b.id}`) ?? 'unactivated',
         allowed,
-        notAllowedReason: b.costSensitive
+        notAllowedReason: b.costSensitive && !isStaff
           ? 'Admin måste lägga till i tenant-allowlistan'
           : undefined
       };
     }),
-    ...mistralConnectors.map<ConnectorCardData>((c) => {
-      const allowed = canActivateConnector(
-        user.roles,
-        { kind: 'mcp', id: c.id },
-        tenantAllowlist
-      );
-      return {
-        kind: 'mcp',
-        id: c.id,
-        title: c.name,
-        blurb: c.description || 'Anpassad MCP-connector från ditt Mistral-workspace.',
-        riskClass: 'begränsad',
-        residency: 'FR/EU',
-        requiresAuth: c.requires_auth,
-        status: activationStatus.get(`mcp:${c.id}`) ?? 'unactivated',
-        allowed
-      };
-    })
+    // Defensiv filtrering: skala bort connectors som Mistral av någon
+    // anledning markerar inaktiva — fixen i listActiveConnectors filtrerar
+    // primärt, det här är en backstop.
+    ...mistralConnectors
+      .filter((c) => c.active !== false)
+      .map<ConnectorCardData>((c) => {
+        const allowed = canActivateConnector(
+          user.roles,
+          { kind: 'mcp', id: c.id },
+          tenantAllowlist
+        );
+        return {
+          kind: 'mcp',
+          id: c.id,
+          title: c.name,
+          blurb: c.description || 'Anpassad MCP-connector från ditt Mistral-workspace.',
+          riskClass: 'begränsad',
+          residency: 'FR/EU',
+          requiresAuth: c.requires_auth,
+          status: activationStatus.get(`mcp:${c.id}`) ?? 'unactivated',
+          allowed
+        };
+      })
   ];
 
   const activatedConnectors = connectorCards.filter((c) => c.status === 'active').length;

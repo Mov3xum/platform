@@ -978,8 +978,12 @@ lever i `user_mistral_connectors` (vår DB) eftersom vår Mistral-API-nyckel
   och run:en är en connector-chatt.
 - **`tenants.allowed_mistral_connectors`** (migration 1700000066):
   json-lista av tillåtna built-in-id:n. Tom = bara defaults
-  (`web_search`). Kostnadsdrivande (`code_interpreter`, `image_generation`,
-  `document_library`) måste explicit aktiveras av admin.
+  (`web_search`) för icke-staff. Kostnadsdrivande (`code_interpreter`,
+  `image_generation`, `document_library`) måste explicit aktiveras av
+  admin **för icke-staff-roller**. Staff (admin/incubator_lead) har
+  bypass och får testa alla built-ins även utan satt allowlist —
+  speglar `canRunTool`-mönstret i § 9.5 (`canActivateConnector` i
+  `apps/web/src/lib/rbac.ts`).
 
 ### 13.3 Riskklass (EU AI Act art. 11)
 
@@ -999,9 +1003,21 @@ lever i `user_mistral_connectors` (vår DB) eftersom vår Mistral-API-nyckel
 - **OAuth-state:** HMAC-SHA256-signerad med `MOVEXUM_INTEGRATION_KEY`.
   Innehåller `uid`, `tid`, `cid`, `nonce`, `exp` (10 min). Callback
   korssäkrar att den inloggade användarens cookie matchar `uid`.
+- **OAuth-fallback:** Mistrals `/v1/connectors/{id}/oauth/start` är
+  inte dokumenterad publikt och kan saknas för många MCP-typer (per-
+  user-auth sker i Le Chat). Vid fel i `startConnectorOAuth` markeras
+  connectorn `active` direkt och eventuella auth-fel bubblar upp vid
+  första chat-turn istället (`activateConnectorAction` i
+  `apps/web/src/lib/actions/connectors.ts`).
 - **OAuth-tokens:** AES-256-GCM-krypterade i `user_mistral_connectors.auth_data`
   (samma `MOVEXUM_INTEGRATION_KEY`, samma format som
   `tenant_integrations.config`).
+- **Listning av MCP-connectors:** `listActiveConnectors` i
+  `apps/web/src/lib/ai/connectors.ts` filtrerar via Mistrals
+  `query_filters={"active": true}` (JSON-strängad query-param) +
+  paginering på `pagination.next_cursor`. Top-level `?active=true`
+  ignoreras av Mistral och returnerar då även connectors som
+  användaren disablat i Le Chat.
 - **PII-svartlista (§ 9.3):** Connectors ändrar inte vad
   `lib/ai/context.ts` får skicka in. `phone`, `founder_gender`,
   `founder_identifies_as` exkluderas oförändrat.
