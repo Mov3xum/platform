@@ -1030,6 +1030,38 @@ await patchCollection('user_mistral_connectors', [
   { name: 'is_pinned', type: 'bool', required: false }
 ]);
 
+// Migration 1700000069: user_app_integrations — per-user OAuth-
+// integrationer mot tredjepartstjänster (Outlook Calendar etc.) som
+// vi själva OAuth:ar mot, utan Mistral i loopen. Generisk över
+// providers via `provider`-slug-fältet.
+await ensureCollection({
+  id: 'user_app_integrations_col',
+  name: 'user_app_integrations',
+  type: 'base',
+  fields: [
+    { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'provider', type: 'text', required: true, max: 60 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['active', 'oauth_pending', 'expired', 'disabled'] },
+    { name: 'auth_data', type: 'json', required: false, maxSize: 8000 },
+    { name: 'account_label', type: 'text', required: false, max: 200 },
+    { name: 'connected_at', type: 'date', required: false },
+    { name: 'last_sync_at', type: 'date', required: false },
+    { name: 'last_error', type: 'text', required: false, max: 500 },
+    { name: 'is_pinned', type: 'bool', required: false }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_uai_unique ON user_app_integrations (user, provider)',
+    'CREATE INDEX idx_uai_tenant ON user_app_integrations (tenant)',
+    'CREATE INDEX idx_uai_user ON user_app_integrations (user)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = user || ${STAFF_ROLES})`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = user || ${STAFF_ROLES})`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = user`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = user`
+});
+
 // =========================================================================
 // 18c. Övriga saknade collections (porterade från migrations 24–62)
 // Ordning är dependency-medveten: föräldrar före barn.
