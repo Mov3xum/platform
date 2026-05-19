@@ -1075,7 +1075,6 @@ await ensureCollection({
     { name: 'author', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
     { name: 'body', type: 'text', required: true, min: 1, max: 4000 },
     { name: 'mentions', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 25 },
-    { name: 'parent', type: 'relation', required: false, collectionId: 'mission_comments_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'edited_at', type: 'date', required: false },
     { name: 'deleted', type: 'bool', required: false }
   ],
@@ -1089,6 +1088,20 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && @request.auth.id = author`,
   deleteRule: `${ANY_AUTH} && @request.auth.id = author`
 });
+
+// Self-relation kan inte alltid valideras vid första create i PB API.
+// Lägg till den efter att mission_comments finns.
+await patchCollection('mission_comments', [
+  {
+    name: 'parent',
+    type: 'relation',
+    required: false,
+    collectionId: 'mission_comments_collection',
+    cascadeDelete: false,
+    minSelect: 0,
+    maxSelect: 1
+  }
+]);
 
 // Migration 1700000052: notifications — in-app-aviseringar för samarbete.
 await ensureCollection({
