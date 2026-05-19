@@ -265,6 +265,61 @@ export async function deactivateConnectorAction(input: {
   return {};
 }
 
+const MAX_PINNED_CONNECTORS = 6;
+
+/**
+ * Togglar `is_pinned` på en aktiverad connector. Pinnade connectors
+ * dyker upp som chips under chattrutan på /idag (DashboardChat). Max
+ * 6 pinnade per användare — vid försök att pinna en sjunde returneras
+ * fel istället för att tyst skriva över.
+ */
+export async function toggleConnectorPinAction(input: {
+  kind: 'builtin' | 'mcp';
+  connectorId: string;
+  pinned: boolean;
+}): Promise<ConnectorActionState> {
+  const user = await requireUser();
+  const pb = await getServerPb();
+
+  const row = await findActivationRow(pb, user.id, input.kind, input.connectorId);
+  if (!row) return { error: 'Connectorn är inte aktiverad — aktivera den först.' };
+  if (row.status !== 'active') {
+    return { error: 'Bara aktiverade connectors kan pinnas till sidmenyn.' };
+  }
+
+  if (input.pinned) {
+    const pinnedList = await pb.collection('user_mistral_connectors').getList(1, 50, {
+      filter: `user = "${user.id}" && is_pinned = true`,
+      fields: 'id'
+    });
+    if (pinnedList.totalItems >= MAX_PINNED_CONNECTORS) {
+      return {
+        error: `Max ${MAX_PINNED_CONNECTORS} connectors kan pinnas samtidigt. Lossa en annan först.`
+      };
+    }
+  }
+
+  await pb.collection('user_mistral_connectors').update(row.id, {
+    is_pinned: input.pinned
+  });
+
+  revalidatePath('/integrationer');
+  revalidatePath('/idag');
+  return {};
+}
+
+export async function toggleConnectorPinFormAction(formData: FormData): Promise<void> {
+  'use server';
+  const kind = String(formData.get('kind') || '') as 'builtin' | 'mcp';
+  const connectorId = String(formData.get('connectorId') || '').trim();
+  const pinned = String(formData.get('pinned') || '') === 'true';
+  if ((kind !== 'builtin' && kind !== 'mcp') || !connectorId) return;
+  const result = await toggleConnectorPinAction({ kind, connectorId, pinned });
+  if (result.error) {
+    redirect('/integrationer?error=' + encodeURIComponent(result.error));
+  }
+}
+
 /**
  * Form-wrappers så <form action={…}> i UI kan binda mot dem utan att
  * varje sida behöver client-component-handlers. Vid fel redirectas

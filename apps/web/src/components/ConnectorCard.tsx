@@ -1,7 +1,9 @@
 import Link from 'next/link';
+import { Pin, PinOff } from 'lucide-react';
 import {
   activateConnectorFormAction,
-  deactivateConnectorFormAction
+  deactivateConnectorFormAction,
+  toggleConnectorPinFormAction
 } from '@/lib/actions/connectors';
 import { Chip } from '@/components/proto';
 import { ConnectorLogo } from '@/components/ConnectorLogo';
@@ -17,6 +19,7 @@ export interface ConnectorCardProps {
   allowed: boolean;
   notAllowedReason?: string;
   requiresAuth?: boolean;
+  isPinned?: boolean;
 }
 
 // Återanvändbart connector-kort. Action-formulären pekar mot
@@ -31,7 +34,8 @@ export function ConnectorCard({
   status,
   allowed,
   notAllowedReason,
-  requiresAuth
+  requiresAuth,
+  isPinned = false
 }: ConnectorCardProps) {
   const isActive = status === 'active';
   const isPending = status === 'oauth_pending';
@@ -68,16 +72,35 @@ export function ConnectorCard({
             >
               Öppna chatt
             </Link>
-            <form action={deactivateConnectorFormAction}>
-              <input type="hidden" name="kind" value={kind} />
-              <input type="hidden" name="connectorId" value={connectorId} />
-              <button
-                type="submit"
-                className="text-[12px] text-foreground-subtle underline-offset-2 hover:text-foreground hover:underline"
-              >
-                Avaktivera
-              </button>
-            </form>
+            <div className="flex items-center gap-2">
+              <form action={toggleConnectorPinFormAction}>
+                <input type="hidden" name="kind" value={kind} />
+                <input type="hidden" name="connectorId" value={connectorId} />
+                <input type="hidden" name="pinned" value={isPinned ? 'false' : 'true'} />
+                <button
+                  type="submit"
+                  title={isPinned ? 'Lossa från sidmenyn' : 'Pinna till sidmenyn (max 6)'}
+                  className={
+                    'inline-flex h-7 w-7 items-center justify-center rounded-lg border transition ' +
+                    (isPinned
+                      ? 'border-brand bg-brand/10 text-brand'
+                      : 'border-default text-foreground-subtle hover:bg-canvas-subtle hover:text-foreground')
+                  }
+                >
+                  {isPinned ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5" />}
+                </button>
+              </form>
+              <form action={deactivateConnectorFormAction}>
+                <input type="hidden" name="kind" value={kind} />
+                <input type="hidden" name="connectorId" value={connectorId} />
+                <button
+                  type="submit"
+                  className="text-[12px] text-foreground-subtle underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  Avaktivera
+                </button>
+              </form>
+            </div>
           </>
         ) : isPending ? (
           <span className="text-[12.5px] text-foreground-muted">

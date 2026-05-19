@@ -1,8 +1,13 @@
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import DashboardChat, { type DashboardAgent } from '@/components/DashboardChat';
+import DashboardChat, {
+  type DashboardAgent,
+  type DashboardConnector
+} from '@/components/DashboardChat';
 import { PageShell } from '@/components/PageShell';
+import { getBuiltin } from '@/lib/ai/builtins';
+import { listActiveConnectors } from '@/lib/ai/connectors';
 
 interface ToolRow {
   id: string;
@@ -15,6 +20,13 @@ interface RunRow {
   id: string;
   tool: string;
   created: string;
+}
+
+interface PinnedConnectorRow {
+  id: string;
+  connector_kind: 'builtin' | 'mcp';
+  connector_id: string;
+  label?: string;
 }
 
 function greeting() {
@@ -35,7 +47,7 @@ export default async function IdagPage() {
 
   const pb = await getServerPb();
 
-  const [toolsRes, runsRes] = await Promise.allSettled([
+  const [toolsRes, runsRes, pinnedRes] = await Promise.allSettled([
     pb.collection('tools').getList<ToolRow>(1, 50, {
       filter: pb.filter('tenant = {:tenant} && active = true', { tenant: user.tenant }),
       sort: 'name'
@@ -47,11 +59,45 @@ export default async function IdagPage() {
       }),
       sort: '-created',
       fields: 'id,tool,created'
+    }),
+    pb.collection('user_mistral_connectors').getList<PinnedConnectorRow>(1, 6, {
+      filter: pb.filter('user = {:userId} && status = "active" && is_pinned = true', {
+        userId: user.id
+      }),
+      fields: 'id,connector_kind,connector_id,label'
     })
   ]);
 
   const tools = toolsRes.status === 'fulfilled' ? toolsRes.value.items : [];
   const runs = runsRes.status === 'fulfilled' ? runsRes.value.items : [];
+  const pinnedRows = pinnedRes.status === 'fulfilled' ? pinnedRes.value.items : [];
+
+  // För MCP-connectors slår vi upp namn + beskrivning från Mistral så
+  // chip-titeln matchar /integrationer-vyn. Fail-soft: om Mistral-listan
+  // är otillgänglig faller vi tillbaka till cachad label.
+  const mcpDetails = pinnedRows.some((r) => r.connector_kind === 'mcp')
+    ? await listActiveConnectors().catch(() => [])
+    : [];
+  const mcpByName = new Map(mcpDetails.map((c) => [c.id, c]));
+
+  const connectors: DashboardConnector[] = pinnedRows.map((row) => {
+    if (row.connector_kind === 'builtin') {
+      const meta = getBuiltin(row.connector_id);
+      return {
+        kind: 'builtin',
+        id: row.connector_id,
+        name: meta?.label || row.label || row.connector_id,
+        blurb: meta?.blurb
+      };
+    }
+    const m = mcpByName.get(row.connector_id);
+    return {
+      kind: 'mcp',
+      id: row.connector_id,
+      name: m?.name || row.label || row.connector_id,
+      blurb: m?.description
+    };
+  });
 
   const runCount = new Map<string, number>();
   for (const r of runs) runCount.set(r.tool, (runCount.get(r.tool) || 0) + 1);
@@ -73,7 +119,7 @@ export default async function IdagPage() {
 
   return (
     <PageShell title="" scroll={false} noPad>
-      <DashboardChat greeting={hello} agents={agents} />
+      <DashboardChat greeting={hello} agents={agents} connectors={connectors} />
     </PageShell>
   );
 }

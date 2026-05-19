@@ -154,6 +154,7 @@ export default async function IntegrationerPage({
     connector_kind: 'builtin' | 'mcp';
     connector_id: string;
     status: 'active' | 'disabled' | 'oauth_pending';
+    is_pinned?: boolean;
   };
 
   const [tenant, activationList, mistralConnectors] = await Promise.all([
@@ -173,8 +174,11 @@ export default async function IntegrationerPage({
       : [];
 
   const activationStatus = new Map<string, ConnectorActivation['status']>();
+  const pinnedSet = new Set<string>();
   for (const row of activationList.items) {
-    activationStatus.set(`${row.connector_kind}:${row.connector_id}`, row.status);
+    const key = `${row.connector_kind}:${row.connector_id}`;
+    activationStatus.set(key, row.status);
+    if (row.is_pinned) pinnedSet.add(key);
   }
 
   type ConnectorCardData = {
@@ -188,6 +192,7 @@ export default async function IntegrationerPage({
     status: 'active' | 'disabled' | 'oauth_pending' | 'unactivated';
     allowed: boolean;
     notAllowedReason?: string;
+    isPinned: boolean;
   };
 
   const connectorCards: ConnectorCardData[] = [
@@ -207,7 +212,8 @@ export default async function IntegrationerPage({
         allowed,
         notAllowedReason: b.costSensitive && !isStaff
           ? 'Admin måste lägga till i tenant-allowlistan'
-          : undefined
+          : undefined,
+        isPinned: pinnedSet.has(`builtin:${b.id}`)
       };
     }),
     // Defensiv filtrering: skala bort connectors som Mistral av någon
@@ -230,7 +236,8 @@ export default async function IntegrationerPage({
           residency: 'FR/EU',
           requiresAuth: c.requires_auth,
           status: activationStatus.get(`mcp:${c.id}`) ?? 'unactivated',
-          allowed
+          allowed,
+          isPinned: pinnedSet.has(`mcp:${c.id}`)
         };
       })
   ];
@@ -303,6 +310,7 @@ export default async function IntegrationerPage({
                 allowed={c.allowed}
                 notAllowedReason={c.notAllowedReason}
                 requiresAuth={c.requiresAuth}
+                isPinned={c.isPinned}
               />
             ))}
           </div>

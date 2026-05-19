@@ -126,9 +126,20 @@ export interface DashboardAgent {
   runs?: number;
 }
 
+// Pinnade connectors visas under assistenter-sektionen på /idag.
+// Klick → öppnar connector-chatten i samma layout som vanliga
+// connector-vyer (/integrationer/connectors/<kind>/<id>).
+export interface DashboardConnector {
+  kind: 'builtin' | 'mcp';
+  id: string;
+  name: string;
+  blurb?: string;
+}
+
 interface Props {
   className?: string;
   agents?: DashboardAgent[];
+  connectors?: DashboardConnector[];
   greeting?: string;
 }
 
@@ -146,7 +157,7 @@ function toneFor(id: string) {
   return AGENT_TONES[h % AGENT_TONES.length];
 }
 
-export default function DashboardChat({ className = '', agents = [], greeting }: Props) {
+export default function DashboardChat({ className = '', agents = [], connectors = [], greeting }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [includeWebContext, setIncludeWebContext] = useState(false);
@@ -541,6 +552,42 @@ export default function DashboardChat({ className = '', agents = [], greeting }:
             )}
 
             <div className="mt-6">{inputPill}</div>
+
+            {connectors.length > 0 && (
+              <section className="mt-12">
+                <div className="mb-3 flex items-baseline justify-between">
+                  <h2 className="font-heading text-[13px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
+                    Mina connectors
+                  </h2>
+                  <a
+                    href="/integrationer"
+                    className="text-[12px] text-foreground-subtle transition hover:text-foreground"
+                  >
+                    Hantera
+                  </a>
+                </div>
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
+                  {connectors.slice(0, 6).map((c) => {
+                    const tone = toneFor(`${c.kind}:${c.id}`);
+                    return (
+                      <a
+                        key={`${c.kind}-${c.id}`}
+                        href={`/integrationer/connectors/${c.kind}/${encodeURIComponent(c.id)}`}
+                        className="group flex flex-col items-start gap-2 rounded-2xl border border-default bg-surface p-3 transition hover:-translate-y-0.5 hover:border-strong hover:shadow-sm hover:shadow-movexum-svart/10"
+                        title={c.blurb || c.name}
+                      >
+                        <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${tone.swatch}`}>
+                          <Icon name="sparkle" size={12} />
+                        </span>
+                        <span className="line-clamp-2 font-heading text-[12.5px] font-semibold leading-tight text-foreground">
+                          {c.name}
+                        </span>
+                      </a>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
 
             {agents.length > 0 && (
               <section className="mt-12">
