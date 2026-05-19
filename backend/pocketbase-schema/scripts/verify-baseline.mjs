@@ -98,7 +98,34 @@ async function verifyCollectionsExist() {
     'workshop_areas',
     'workshop_assignments',
     'workshop_runs',
-    'user_mistral_connectors'
+    'user_mistral_connectors',
+    // Integrationer
+    'integration_providers',
+    'tenant_integrations',
+    'integration_records',
+    'integration_sync_runs',
+    // Bolagsutveckling
+    'missions',
+    'mission_comments',
+    'notifications',
+    'strategies',
+    'strategy_revisions',
+    'sprint_x_checkins',
+    'startup_phase_history',
+    'startup_financials',
+    // Investor/event
+    'investors',
+    'deals',
+    'incubator_events',
+    'event_signups',
+    'incubator_reports',
+    'alumni',
+    // AI + scheduling
+    'ai_usage_events',
+    'agent_actions',
+    'tool_schedules',
+    // Övrigt
+    'web_cache'
   ];
 
   const map = new Map();
