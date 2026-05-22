@@ -1143,3 +1143,103 @@ Per provider, registreras i Coolify (aldrig i kod, ISO 27001 A.8.24):
    bort + live-vy).
 5. Lägg till env-nycklar i 14.5 och risk-klass i 14.3.
 6. PR-checklista § 10.5 punkt 9: dokumentera dataflödet här.
+
+---
+
+## 15. CRM-modell (migrerad från Excel-export)
+
+### 15.1 Bakgrund
+
+Movexum migrerade i maj 2026 bort från sitt tidigare Excel/Office-baserade
+CRM. Excel-exporten innehöll 12 ark — företag, personer, aktiviteter,
+deltagare, kapital, IPR, avtal, todo, mätetal m.fl. Plattformen tar nu över
+hela modellen och ersätter Excel:t som källa.
+
+`startups` är primär entitet (= Excel "Företag"). Resterande ark har
+mappats till nya eller utökade kollektioner enligt nedan.
+
+### 15.2 Mappningstabell
+
+| Excel-ark | Kollektion (migration) | Anteckning |
+| --- | --- | --- |
+| Företag | `startups` (1700000003, 1700000058, 1700000061, **1700000070**) | Utökad med `email`, `website`, `city`, `street_address`, `postal_code`. |
+| Personer | **`contacts`** (1700000071) | Externa kontakter, ej Movexum-användare. |
+| Företag-Person | **`startup_contacts`** (1700000072) | M2M med `role` + `is_primary`. |
+| Aktiviteter | `incubator_events` (1700000032 + **1700000073**) | Utökad med organizer, target_audience, owner, event_url, outcome, internal_comment, participant_count. |
+| Deltagare | `event_signups` (1700000033 + **1700000073**) | Utökad med `participant_kind` (person/company) + `contact`-relation. |
+| Kapital | **`capital_rounds`** (1700000074) | Mottaget kapital ≠ deal-pipeline. |
+| IPR | **`intellectual_property`** (1700000075) | Patent/varumärken/design. |
+| Avtal | `agreements` (1700000010 + **1700000076**) | Utökad med partner, country, agreement_date, notes, kind_label. |
+| ToDo | **`tasks`** (1700000077) | Polymorf (startup / contact / event / fristående). |
+| Mätetal | **`startup_kpis`** (1700000078) | Flexibel KPI ≠ `startup_financials` (årsbokslut). |
+| Användare | `users` (1700000002) | Befintlig. |
+| Kontakter per företag | — | View i Excel; representerat av startup + startup_contacts join. |
+
+### 15.3 AI-kontext (CLAUDE.md § 9.3 utökat)
+
+Nya whitelistade fält i `apps/web/src/lib/ai/context.ts`:
+
+- **startups:** `city`, `website` (publik bolagsdata).
+- **`buildCapitalRoundsContext`:** `type`, `source`, `amount_sek`,
+  `received_at` per rad. `notes` exkluderas (kan vara strategiskt).
+- **`buildIPRContext`:** `type`, `status`, `external_reference`,
+  `filed_at`, `response_at`. `notes` exkluderas.
+- **`buildKPIsContext`:** `kpi_name`, `value_text`, `value_numeric`,
+  `unit`, `measured_at`, `is_current` — endast `is_current=true` per
+  default.
+
+**Explicit svartlistade** (utöver befintlig lista i § 9.3):
+
+- `startups.email`, `startups.street_address`, `startups.postal_code`
+  (PII när bolagsformen är enskild firma).
+- `contacts.*` — alla fält på externa kontakter (förnamn, efternamn,
+  e-post, telefon, gender, skills, info) hålls ute från AI-prompts.
+  Endast aggregat ("bolag X har 3 mentor-kontakter") får härledas.
+- `tasks.*` och `tasks.details` — uppgifter kan innehålla privata
+  arbetsanteckningar; inkluderas inte i default-kontexten. Enskilda
+  agenter kan opt-in genom egen helper.
+- `capital_rounds.notes`, `intellectual_property.notes`,
+  `agreements.notes` — strategiska detaljer hålls ute som
+  defense-in-depth.
+
+### 15.4 GDPR-överväganden för `contacts`
+
+- **Rättslig grund:** berättigat intresse (inkubatordrift,
+  mentormatchning) + explicit samtycke vid registrering.
+- **`gdpr_consent` + `gdpr_consent_at`** krävs i UI:t innan rad får
+  skapas (server action validerar — defense-in-depth ovanpå
+  GDPR-godkännandet i Excel-arket "Personen har godkänt lagring...").
+- **`gender`** är art. 9 särskild kategori — svartlistat i AI-kontext
+  (motsvarande `founder_gender` på `startups`).
+- **`phone` + `email`** är PII — exkluderas från ALL AI-kontext.
+- **Radering:** kontakter cascade-deletas inte vid tenant-radering
+  (de är portabla i framtiden). Däremot cascade-deletas
+  `startup_contacts`-rader när startup eller contact tas bort.
+- **Personnummer:** lagras ALDRIG. Om Excel-importen innehåller
+  personnummer i Info-fältet → importen ska sanera bort detta i
+  förbehandling.
+
+### 15.5 RBAC-mönster
+
+- **Staff** (admin/incubator_lead/coach/mentor): full läs/skriv på
+  CRM-tabellerna.
+- **`startup_member`:** läser allt i tenanten, kan skriva `startup_kpis`
+  (för eget bolag — server action validerar via `linkedStartupId`).
+- **`observer`:** read-only.
+- **`tasks`:** ägaren får uppdatera/radera sin egen task även utan
+  staff-roll.
+
+### 15.6 Migration av Excel-data
+
+Excel-importer (om/när de skrivs) ska:
+
+1. Verifiera att `gdpr_consent=true` på Personer-rader innan rad
+   skapas i `contacts`. Rader utan consent skippas och loggas.
+2. Sanera Info-fältet på `contacts` — regex för personnummer
+   (`\d{6,8}-\d{4}`) och blockera/ersätt med `[REDACTED]`.
+3. Normalisera `kommun`-namn mot SCB:s standardlista.
+4. Skriva varje fas-byte (`Inträde Paus`, `Inträde Lead` etc.) som rad
+   i `startup_phase_history` istället för datumkolumner på `startups`.
+5. Loggas i `activities` med `kind='integration_sync'` (analogt
+   med Allabolag-importen, § 11.2).
+

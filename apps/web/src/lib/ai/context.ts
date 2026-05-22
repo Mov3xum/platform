@@ -6,10 +6,14 @@ import type PocketBase from 'pocketbase';
 //
 // EXPLICIT SVARTLISTAD — får ALDRIG hamna i AI-kontext:
 //   • phone                  (PII)
+//   • email                  (PII)
+//   • street_address         (PII när enskild firma)
+//   • postal_code            (PII när enskild firma)
 //   • founder_gender         (GDPR art. 9 särskild kategori)
 //   • founder_identifies_as  (GDPR art. 9 särskild kategori)
 //   • Personnummer           (lagras inte i schemat)
 //   • owner, coaches, e-postadresser, teammedlemmar (PII)
+//   • contacts.*             (alla kontaktdetaljer på externa personer)
 //
 // org_nr exkluderas också (för enskild firma = personnummer; defense-in-depth).
 const STARTUP_PORTFOLIO_FIELDS = [
@@ -19,8 +23,10 @@ const STARTUP_PORTFOLIO_FIELDS = [
   'status',
   'next_step',
   'kommun',
+  'city',
   'industri',
   'bolag_status',
+  'website',
   // Movexum Bolagslista-fält som är säkra för portföljen
   'idea_name',
   'case_type',
@@ -37,8 +43,10 @@ interface StartupPortfolioEntry {
   status: string;
   next_step?: string;
   kommun?: string;
+  city?: string;
   industri?: string;
   bolag_status?: string;
+  website?: string;
   idea_name?: string;
   case_type?: string;
   area?: string;
@@ -83,6 +91,30 @@ interface PhaseHistoryEntry {
   note?: string;
 }
 
+interface CapitalRoundEntry {
+  type: string;
+  source: string;
+  amount_sek: number;
+  received_at: string;
+}
+
+interface IPREntry {
+  type: string;
+  status: string;
+  external_reference?: string;
+  filed_at?: string;
+  response_at?: string;
+}
+
+interface KPIEntry {
+  kpi_name: string;
+  value_text: string;
+  value_numeric?: number;
+  unit?: string;
+  measured_at: string;
+  is_current?: boolean;
+}
+
 export interface StartupContext {
   startup: {
     name: string;
@@ -93,9 +125,11 @@ export interface StartupContext {
     description?: string;
     tags?: string;
     kommun?: string;
+    city?: string;
     industri?: string;
     bolagsform?: string;
     bolag_status?: string;
+    website?: string;
     intagsdatum?: string;
     avslutsdatum?: string;
     // Movexum Bolagslista (1700000061) — AI-säkra fält
@@ -131,6 +165,9 @@ export interface StartupContext {
   notes: NoteEntry[];
   financials?: FinancialsEntry[];
   phase_history?: PhaseHistoryEntry[];
+  capital_rounds?: CapitalRoundEntry[];
+  ipr?: IPREntry[];
+  kpis?: KPIEntry[];
 }
 
 export interface PortfolioContext {
@@ -197,9 +234,11 @@ export async function buildStartupContext(
     description: stripHtml(r.description as string | undefined),
     tags: optStr('tags'),
     kommun: optStr('kommun'),
+    city: optStr('city'),
     industri: optStr('industri'),
     bolagsform: optStr('bolagsform'),
     bolag_status: optStr('bolag_status'),
+    website: optStr('website'),
     intagsdatum: optStr('intagsdatum'),
     avslutsdatum: optStr('avslutsdatum'),
     idea_name: optStr('idea_name'),
@@ -251,12 +290,25 @@ export async function buildStartupContext(
     created: n.created as string
   }));
 
-  const [financials, phase_history] = await Promise.all([
+  const [financials, phase_history, capital_rounds, ipr, kpis] = await Promise.all([
     buildFinancialsContext(pb, startupId, tenantId),
-    buildPhaseHistoryContext(pb, startupId, tenantId)
+    buildPhaseHistoryContext(pb, startupId, tenantId),
+    buildCapitalRoundsContext(pb, startupId, tenantId),
+    buildIPRContext(pb, startupId, tenantId),
+    buildKPIsContext(pb, startupId, tenantId)
   ]);
 
-  return { startup, milestones, activities, notes, financials, phase_history };
+  return {
+    startup,
+    milestones,
+    activities,
+    notes,
+    financials,
+    phase_history,
+    capital_rounds,
+    ipr,
+    kpis
+  };
 }
 
 /**
@@ -335,6 +387,101 @@ export async function buildPhaseHistoryContext(
 }
 
 /**
+ * Hämtar mottagna kapitalrundor (bidrag, equity, lån). Sorterat
+ * nyast → äldst. Bolagsdata, ingen PII. Fail-soft.
+ */
+export async function buildCapitalRoundsContext(
+  pb: PocketBase,
+  startupId: string,
+  tenantId: string,
+  limit = 20
+): Promise<CapitalRoundEntry[] | undefined> {
+  let result;
+  try {
+    result = await pb.collection('capital_rounds').getList(1, limit, {
+      filter: `startup = "${startupId}" && tenant = "${tenantId}"`,
+      sort: '-received_at'
+    });
+  } catch {
+    return undefined;
+  }
+  if (!result.items.length) return undefined;
+  return result.items.map((r) => ({
+    type: r.type as string,
+    source: r.source as string,
+    amount_sek: r.amount_sek as number,
+    received_at: r.received_at as string
+  }));
+}
+
+/**
+ * IPR-aktivitet (patent, varumärken). Bolagsdata, ingen PII. Notes
+ * (kan vara strategiska) inkluderas inte. Fail-soft.
+ */
+export async function buildIPRContext(
+  pb: PocketBase,
+  startupId: string,
+  tenantId: string,
+  limit = 20
+): Promise<IPREntry[] | undefined> {
+  let result;
+  try {
+    result = await pb.collection('intellectual_property').getList(1, limit, {
+      filter: `startup = "${startupId}" && tenant = "${tenantId}"`,
+      sort: '-filed_at'
+    });
+  } catch {
+    return undefined;
+  }
+  if (!result.items.length) return undefined;
+  return result.items.map((r) => {
+    const entry: IPREntry = {
+      type: r.type as string,
+      status: r.status as string
+    };
+    if (r.external_reference) entry.external_reference = r.external_reference as string;
+    if (r.filed_at) entry.filed_at = r.filed_at as string;
+    if (r.response_at) entry.response_at = r.response_at as string;
+    return entry;
+  });
+}
+
+/**
+ * KPI-tracker (Mätetal). Default returneras endast `is_current=true`
+ * rader så agenten ser senaste värdet per nyckeltal. Fail-soft.
+ */
+export async function buildKPIsContext(
+  pb: PocketBase,
+  startupId: string,
+  tenantId: string,
+  limit = 50
+): Promise<KPIEntry[] | undefined> {
+  let result;
+  try {
+    result = await pb.collection('startup_kpis').getList(1, limit, {
+      filter: `startup = "${startupId}" && tenant = "${tenantId}" && is_current = true`,
+      sort: '-measured_at'
+    });
+  } catch {
+    return undefined;
+  }
+  if (!result.items.length) return undefined;
+  return result.items.map((r) => {
+    const entry: KPIEntry = {
+      kpi_name: r.kpi_name as string,
+      value_text: r.value_text as string,
+      measured_at: r.measured_at as string
+    };
+    if (r.value_numeric !== undefined && r.value_numeric !== null) {
+      entry.value_numeric = r.value_numeric as number;
+    }
+    if (r.unit) entry.unit = r.unit as string;
+    if (typeof r.is_current === 'boolean') entry.is_current = r.is_current;
+    return entry;
+  });
+}
+
+/**
  * Builds portfolio context for all active startups in the tenant.
  * Only includes whitelisted fields — no PII, no notes, no agreements.
  */
@@ -359,8 +506,10 @@ export async function buildPortfolioContext(
       entry.next_step = s.next_step as string;
     }
     if (s.kommun) entry.kommun = s.kommun as string;
+    if (s.city) entry.city = s.city as string;
     if (s.industri) entry.industri = s.industri as string;
     if (s.bolag_status) entry.bolag_status = s.bolag_status as string;
+    if (s.website) entry.website = s.website as string;
     if (s.idea_name) entry.idea_name = s.idea_name as string;
     if (s.case_type) entry.case_type = s.case_type as string;
     if (s.area) entry.area = s.area as string;
