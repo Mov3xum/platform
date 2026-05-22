@@ -22,7 +22,12 @@ COPY package.json yarn.lock ./
 COPY apps/web ./apps/web
 COPY packages/shared ./packages/shared
 
-RUN cd apps/web && NODE_OPTIONS="--max-old-space-size=1536" yarn build
+# max-old-space-size must cover both `next build` and the separate
+# trace-collector child process. 1536 MB OOM:ade i "Collecting build
+# traces..." på Coolify-hosten — bumpa till 4096 och exportera så att
+# child-processer ärver gränsen.
+ENV NODE_OPTIONS="--max-old-space-size=4096"
+RUN cd apps/web && yarn build
 
 # Minimal runtime image: copies only the standalone Next.js output
 # (~50MB) instead of the full builder /app (~1GB+). Avoids OOM/disk
