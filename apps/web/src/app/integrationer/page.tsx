@@ -428,27 +428,49 @@ export default async function IntegrationerPage({
             <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
               Manuella importer
             </h2>
-            <a
-              href="/admin/import-bolagslista"
-              className="block rounded-2xl border border-default bg-surface p-5 transition hover:bg-canvas-subtle"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-foreground">
-                    Bolagslista (Excel)
+            <div className="space-y-3">
+              <a
+                href="/admin/import-bolagslista"
+                className="block rounded-2xl border border-default bg-surface p-5 transition hover:bg-canvas-subtle"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">
+                      Bolagslista (Excel)
+                    </div>
+                    <p className="mt-1 text-[13px] text-foreground-muted">
+                      Ladda upp Movexums Bolagslista och fyll på{' '}
+                      <code className="font-mono text-xs">startups</code> +{' '}
+                      <code className="font-mono text-xs">startup_financials</code>{' '}
+                      idempotent. Underlag för AI-agenterna.
+                    </p>
                   </div>
-                  <p className="mt-1 text-[13px] text-foreground-muted">
-                    Ladda upp Movexums Bolagslista och fyll på{' '}
-                    <code className="font-mono text-xs">startups</code> +{' '}
-                    <code className="font-mono text-xs">startup_financials</code>{' '}
-                    idempotent. Underlag för AI-agenterna.
-                  </p>
+                  <span className="rounded-full bg-movexum-pastell-gron px-3 py-1 text-xs font-medium text-movexum-morkgron">
+                    Tillgänglig
+                  </span>
                 </div>
-                <span className="rounded-full bg-movexum-pastell-gron px-3 py-1 text-xs font-medium text-movexum-morkgron">
-                  Tillgänglig
-                </span>
-              </div>
-            </a>
+              </a>
+              <a
+                href="/admin/import-crm"
+                className="block rounded-2xl border border-default bg-surface p-5 transition hover:bg-canvas-subtle"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">
+                      CRM-export (Excel, 12 ark)
+                    </div>
+                    <p className="mt-1 text-[13px] text-foreground-muted">
+                      Migrera hela det tidigare CRM:t — företag, personer,
+                      aktiviteter, kapital, IPR, avtal, todo och mätetal.
+                      GDPR-saneras och skrivs idempotent.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-movexum-pastell-gron px-3 py-1 text-xs font-medium text-movexum-morkgron">
+                    Tillgänglig
+                  </span>
+                </div>
+              </a>
+            </div>
           </section>
         )}
 
