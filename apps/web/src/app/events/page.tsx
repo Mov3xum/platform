@@ -50,7 +50,7 @@ function ageString(iso: string): string {
 export default async function EventsPage() {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'observer'])) {
-    redirect('/idag');
+    redirect('/chatt');
   }
 
   const pb = await getServerPb();

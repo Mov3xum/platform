@@ -17,7 +17,7 @@ const TRACK_ACCENTS: Accent[] = ['yellow', 'green', 'cyan', 'purple'];
 
 export default async function EducationPage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) redirect('/idag');
+  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) redirect('/chatt');
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
   const isStartupMember = hasRole(user.roles, ['startup_member']);

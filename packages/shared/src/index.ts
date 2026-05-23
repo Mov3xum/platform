@@ -878,15 +878,15 @@ export const RAIL_GROUPS: ModuleGroup[] = [
 export const coreModules: ModuleDefinition[] = [
   {
     id: 'idag',
-    title: 'Idag',
-    description: 'Hemmaplan — KPI-puls, aktivitetsström, agenda och AI-kommittén.',
+    title: 'Chatt',
+    description: 'AI-dashboardchatt — fråga, sammanställ och delegera till agenter och connectors.',
     rolesAllowed: ALL_ROLES,
-    route: '/idag'
+    route: '/chatt'
   },
   {
     id: 'inkorg',
-    title: 'Min inkorg',
-    description: 'Notiser, mentions och uppdrag som väntar på dig.',
+    title: 'Min översikt',
+    description: 'Allt som är ditt på ett ställe — uppgifter, aktiviteter, möten och events att planera och följa upp.',
     rolesAllowed: ALL_ROLES,
     route: '/inkorg'
   },
@@ -981,9 +981,9 @@ export const coreModules: ModuleDefinition[] = [
   {
     id: 'dashboard',
     title: 'Dashboard',
-    description: 'Legacy redirect till /idag.',
+    description: 'Legacy redirect till /chatt.',
     rolesAllowed: ALL_ROLES,
-    route: '/idag'
+    route: '/chatt'
   },
   {
     id: 'toolbox',

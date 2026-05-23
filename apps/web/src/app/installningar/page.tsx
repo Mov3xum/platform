@@ -42,7 +42,7 @@ function healthIconTone(state: HealthState): 'success' | 'warning' | 'neutral' {
 export default async function InstallningarPage() {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
-    redirect('/idag');
+    redirect('/chatt');
   }
   const pb = await getServerPb();
 

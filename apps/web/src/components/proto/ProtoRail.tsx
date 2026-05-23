@@ -7,8 +7,8 @@ import { Logo } from '@/components/Logo';
 import { StartupSwitcher, type SwitchableStartup } from './StartupSwitcher';
 
 const moduleIcons: Record<string, string> = {
-  idag: 'home',
-  inkorg: 'inbox',
+  idag: 'message',
+  inkorg: 'home',
   uppdrag: 'flow',
   inflode: 'spark',
   startups: 'people',
@@ -51,7 +51,7 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
     <aside id="mx-rail" className="mx-rail" aria-label="Huvudnavigation">
       <div className="mx-rail-head">
         <Logo
-          href="/idag"
+          href="/chatt"
           variant="dark"
           width={120}
           height={28}

@@ -7,12 +7,12 @@ import { coreModules } from '@platform/shared';
 import { MobileMenuButton } from './MobileRail';
 
 function buildCrumbs(pathname: string): { label: string; href: string; now: boolean }[] {
-  if (pathname === '/' || pathname === '/idag') {
-    return [{ label: 'Hemmaplan', href: '/idag', now: true }];
+  if (pathname === '/' || pathname === '/chatt') {
+    return [{ label: 'Hemmaplan', href: '/chatt', now: true }];
   }
   const seg = pathname.split('/').filter(Boolean);
   const crumbs: { label: string; href: string; now: boolean }[] = [
-    { label: 'Hemmaplan', href: '/idag', now: false }
+    { label: 'Hemmaplan', href: '/chatt', now: false }
   ];
   // first segment = module
   const mod = coreModules.find((m) => m.route === '/' + seg[0]);
