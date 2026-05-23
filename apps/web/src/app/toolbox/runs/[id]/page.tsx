@@ -5,12 +5,13 @@ import { canAccessModuleForUser, hasRole, canRunTool } from '@/lib/rbac';
 import { ToolRunStatusBadge } from '@/components/Badges';
 import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
 import { isAllowedModel } from '@/lib/ai/models';
-import { MessageList, legacyMessagesFromRun } from './MessageList';
+import { MessageList, legacyMessagesFromRun, type MessageFeedbackMap } from './MessageList';
 import { ContinueChatForm } from './ContinueChatForm';
 import type {
   Tool,
   ToolModel,
   ToolRun,
+  ToolRunFeedback,
   ToolRunMessage,
   ToolRunStatus
 } from '@platform/shared';
@@ -86,6 +87,32 @@ export default async function ToolRunDetailPage({
     disabledReason = 'Den här körningen misslyckades.';
   } else {
     canContinue = true;
+  }
+
+  // Kvalitetsfeedback: den som startade chatten — eller staff — får rata
+  // AI-svaren. Kräver inte fortsatt run-behörighet (man får alltid flagga
+  // ett tidigare svar). Laddar bara den inloggades egna rader.
+  const canRate = isAiTool && (isAuthor || isStaff);
+  const feedbackMap: MessageFeedbackMap = {};
+  if (canRate) {
+    try {
+      const fb = await pb
+        .collection('tool_run_feedback')
+        .getList<ToolRunFeedback>(1, 200, {
+          filter: pb.filter('tool_run = {:r} && user = {:u}', {
+            r: run.id,
+            u: user.id
+          })
+        });
+      for (const row of fb.items) {
+        feedbackMap[row.message_index] = {
+          rating: row.rating,
+          reason: row.reason || undefined
+        };
+      }
+    } catch {
+      // Collection saknas på äldre PB-instanser → ingen feedback-UI.
+    }
   }
 
   return (
@@ -173,6 +200,9 @@ export default async function ToolRunDetailPage({
                     ? (run.messages as ToolRunMessage[])
                     : legacyMessagesFromRun(run)
                 }
+                runId={run.id}
+                canRate={canRate}
+                feedback={feedbackMap}
               />
 
               {isAiTool && (

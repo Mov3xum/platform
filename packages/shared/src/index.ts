@@ -324,6 +324,30 @@ export interface AiUsageEvent {
   };
 }
 
+// ── Explicit kvalitetsfeedback (migration 1700000070) ────────────────
+// 👍/👎 + valfri orsak per assistant-turn i en tool_run. Driver
+// förbättrings-loopen (CLAUDE.md §9.10): /insights aggregerar 👎-rate
+// per verktyg och listar senaste 👎 med orsak som review-kö.
+export type ToolRunFeedbackRating = 'up' | 'down';
+
+export interface ToolRunFeedback {
+  id: string;
+  tenant: string;
+  tool_run: string;
+  tool?: string;
+  user: string;
+  message_index: number;
+  rating: ToolRunFeedbackRating;
+  reason?: string;
+  created: string;
+  updated: string;
+  expand?: {
+    tool?: Tool;
+    user?: { id: string; display_name?: string; email?: string };
+    tool_run?: ToolRun;
+  };
+}
+
 export type WorkshopStatus = 'draft' | 'active' | 'archived';
 
 export type WorkshopAudience =

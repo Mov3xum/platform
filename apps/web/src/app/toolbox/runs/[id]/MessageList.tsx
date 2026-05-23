@@ -1,4 +1,14 @@
-import type { ToolRunMessage, ToolRunAttachmentRef } from '@platform/shared';
+import type {
+  ToolRunMessage,
+  ToolRunAttachmentRef,
+  ToolRunFeedbackRating
+} from '@platform/shared';
+import { FeedbackButtons } from './FeedbackButtons';
+
+export type MessageFeedbackMap = Record<
+  number,
+  { rating: ToolRunFeedbackRating; reason?: string }
+>;
 
 function AttachmentChip({ att }: { att: ToolRunAttachmentRef }) {
   const icon = att.mime.startsWith('image/')
@@ -19,12 +29,25 @@ function AttachmentChip({ att }: { att: ToolRunAttachmentRef }) {
   );
 }
 
-function MessageBubble({ message }: { message: ToolRunMessage }) {
+function MessageBubble({
+  message,
+  messageIndex,
+  runId,
+  canRate,
+  feedback
+}: {
+  message: ToolRunMessage;
+  messageIndex: number;
+  runId?: string;
+  canRate?: boolean;
+  feedback?: { rating: ToolRunFeedbackRating; reason?: string };
+}) {
   const isUser = message.role === 'user';
   const alignClass = isUser ? 'justify-end' : 'justify-start';
   const bubbleClass = isUser
     ? 'bg-canvas-subtle text-foreground'
     : 'bg-surface text-foreground border border-default';
+  const isAssistant = message.role === 'assistant';
 
   return (
     <div className={`flex ${alignClass}`}>
@@ -39,7 +62,7 @@ function MessageBubble({ message }: { message: ToolRunMessage }) {
         <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
           <pre className="whitespace-pre-wrap font-body text-sm">{message.content}</pre>
         </div>
-        {message.role === 'assistant' && (message.model || message.tokens_in) && (
+        {isAssistant && (message.model || message.tokens_in) && (
           <p className="mt-2 text-xs text-foreground-subtle">
             {message.model && <span className="font-mono">{message.model}</span>}
             {message.tokens_in !== undefined && (
@@ -52,13 +75,35 @@ function MessageBubble({ message }: { message: ToolRunMessage }) {
             )}
           </p>
         )}
+        {isAssistant && canRate && runId && (
+          <FeedbackButtons
+            runId={runId}
+            messageIndex={messageIndex}
+            initialRating={feedback?.rating ?? null}
+            initialReason={feedback?.reason ?? ''}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-export function MessageList({ messages }: { messages: ToolRunMessage[] }) {
-  const visible = messages.filter((m) => m.role !== 'system');
+export function MessageList({
+  messages,
+  runId,
+  canRate,
+  feedback
+}: {
+  messages: ToolRunMessage[];
+  runId?: string;
+  canRate?: boolean;
+  feedback?: MessageFeedbackMap;
+}) {
+  // Behåll originalindex i hela messages[] (feedback mappas mot det, inte
+  // mot det system-filtrerade indexet).
+  const visible = messages
+    .map((m, idx) => ({ m, idx }))
+    .filter((x) => x.m.role !== 'system');
   if (visible.length === 0) {
     return (
       <div className="rounded-3xl border border-dashed border-strong bg-surface/50 p-12 text-center">
@@ -69,7 +114,7 @@ export function MessageList({ messages }: { messages: ToolRunMessage[] }) {
 
   // Sammanställning av modeller använda i denna chatt
   const modelCounts = new Map<string, number>();
-  for (const m of visible) {
+  for (const { m } of visible) {
     if (m.role === 'assistant' && m.model) {
       modelCounts.set(m.model, (modelCounts.get(m.model) ?? 0) + 1);
     }
@@ -85,8 +130,15 @@ export function MessageList({ messages }: { messages: ToolRunMessage[] }) {
           Modeller använda i denna chatt: <span className="font-mono">{modelSummary}</span>
         </p>
       )}
-      {visible.map((m, i) => (
-        <MessageBubble key={`${m.role}-${i}-${m.at}`} message={m} />
+      {visible.map(({ m, idx }) => (
+        <MessageBubble
+          key={`${m.role}-${idx}-${m.at}`}
+          message={m}
+          messageIndex={idx}
+          runId={runId}
+          canRate={canRate}
+          feedback={feedback?.[idx]}
+        />
       ))}
     </div>
   );
