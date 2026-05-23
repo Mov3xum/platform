@@ -228,7 +228,7 @@ export async function createMissionAction(
   }
 
   revalidatePath('/uppdrag');
-  revalidatePath('/idag');
+  revalidatePath('/chatt');
   revalidatePath('/aktivitet');
   revalidatePath('/inkorg');
   redirect(`/uppdrag/${created.id}`);
@@ -284,7 +284,7 @@ export async function updateMissionStatus(
 
     revalidatePath('/uppdrag');
     revalidatePath(`/uppdrag/${id}`);
-    revalidatePath('/idag');
+    revalidatePath('/chatt');
     revalidatePath('/inkorg');
     return { missionId: id };
   } catch (err) {
@@ -352,7 +352,7 @@ export async function advanceStage(id: string, stageId: string, note?: string): 
 
     revalidatePath('/uppdrag');
     revalidatePath(`/uppdrag/${id}`);
-    revalidatePath('/idag');
+    revalidatePath('/chatt');
     revalidatePath('/aktivitet');
     revalidatePath('/inkorg');
     return { missionId: id };
@@ -553,7 +553,7 @@ export async function deleteMissionAction(id: string): Promise<MissionActionStat
   try {
     await pb.collection(PB_COLLECTIONS.missions).delete(id);
     revalidatePath('/uppdrag');
-    revalidatePath('/idag');
+    revalidatePath('/chatt');
     revalidatePath('/aktivitet');
     revalidatePath('/inkorg');
     return { missionId: id };

@@ -17,7 +17,7 @@ export default async function ReportDetailPage({
   const { id } = await params;
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
-    redirect('/idag');
+    redirect('/chatt');
   }
 
   const pb = await getServerPb();

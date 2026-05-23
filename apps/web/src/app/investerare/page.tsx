@@ -56,7 +56,7 @@ function formatTicketRange(min?: number, max?: number): string {
 export default async function InvesterarePage() {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'partner'])) {
-    redirect('/idag');
+    redirect('/chatt');
   }
 
   const pb = await getServerPb();

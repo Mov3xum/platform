@@ -262,7 +262,7 @@ export async function confirmConnectorReadyAction(input: {
   });
 
   revalidatePath('/integrationer');
-  revalidatePath('/idag');
+  revalidatePath('/chatt');
   return {};
 }
 
@@ -270,7 +270,7 @@ const MAX_PINNED_CONNECTORS = 6;
 
 /**
  * Togglar `is_pinned` på en aktiverad connector. Pinnade connectors
- * dyker upp som chips under chattrutan på /idag (DashboardChat). Max
+ * dyker upp som chips under chattrutan på /chatt (DashboardChat). Max
  * 6 pinnade per användare — vid försök att pinna en sjunde returneras
  * fel istället för att tyst skriva över.
  */
@@ -305,7 +305,7 @@ export async function toggleConnectorPinAction(input: {
   });
 
   revalidatePath('/integrationer');
-  revalidatePath('/idag');
+  revalidatePath('/chatt');
   return {};
 }
 

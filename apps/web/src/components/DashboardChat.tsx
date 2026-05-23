@@ -126,7 +126,7 @@ export interface DashboardAgent {
   runs?: number;
 }
 
-// Pinnade connectors visas under assistenter-sektionen på /idag.
+// Pinnade connectors visas under assistenter-sektionen på /chatt.
 // Klick → öppnar connector-chatten i samma layout som vanliga
 // connector-vyer (/integrationer/connectors/<kind>/<id>).
 export interface DashboardConnector {

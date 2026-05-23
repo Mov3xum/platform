@@ -17,7 +17,7 @@ export default async function RapporterPage({
 }) {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
-    redirect('/idag');
+    redirect('/chatt');
   }
   const { id: selectedFromQuery } = await searchParams;
 

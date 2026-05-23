@@ -61,7 +61,7 @@ export default async function ToolboxPage({
 
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'agenter', user.disabledModules)) {
-    redirect('/idag');
+    redirect('/chatt');
   }
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
   const pb = await getServerPb();

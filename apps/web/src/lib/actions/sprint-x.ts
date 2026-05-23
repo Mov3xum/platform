@@ -105,7 +105,7 @@ export async function logCheckin(
     revalidatePath('/inflode');
     revalidatePath(`/inflode/${startupId}`);
     revalidatePath('/aktivitet');
-    revalidatePath('/idag');
+    revalidatePath('/chatt');
     revalidatePath(`/startups/${startupId}`);
 
     return { checkinId: String(record.id) };

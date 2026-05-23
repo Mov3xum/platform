@@ -69,7 +69,7 @@ export default async function EventDetailPage({
   const { id } = await params;
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'observer'])) {
-    redirect('/idag');
+    redirect('/chatt');
   }
   const pb = await getServerPb();
 

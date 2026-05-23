@@ -170,10 +170,10 @@ export default async function InsightsPage({
 
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'insights', user.disabledModules)) {
-    redirect('/idag');
+    redirect('/chatt');
   }
   if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
-    redirect('/idag');
+    redirect('/chatt');
   }
 
   const pb = await getServerPb();

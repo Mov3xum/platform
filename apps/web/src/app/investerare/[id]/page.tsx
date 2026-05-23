@@ -69,7 +69,7 @@ export default async function InvestorDetailPage({
   const { id } = await params;
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'partner'])) {
-    redirect('/idag');
+    redirect('/chatt');
   }
   const pb = await getServerPb();
 

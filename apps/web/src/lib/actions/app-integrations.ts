@@ -104,7 +104,7 @@ export async function disconnectAppIntegrationAction(input: {
 
   revalidatePath('/integrationer');
   revalidatePath(`/integrationer/${input.provider.replace(/_/g, '-')}`);
-  revalidatePath('/idag');
+  revalidatePath('/chatt');
   return {};
 }
 
