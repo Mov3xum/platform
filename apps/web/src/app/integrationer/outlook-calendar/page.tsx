@@ -14,7 +14,21 @@ import {
 } from '@/lib/app-integrations/storage';
 import { outlookCalendarProvider } from '@/lib/app-integrations/providers/outlook_calendar/provider';
 import { fetchCalendarEvents } from '@/lib/app-integrations/providers/outlook_calendar/calendar';
-import { OutlookCalendarView } from './CalendarView';
+import {
+  matchEventsToContacts,
+  type EmailIndex
+} from '@/lib/app-integrations/providers/outlook_calendar/match';
+import { hasRole } from '@/lib/rbac';
+import { OutlookCalendarView, type CalendarLogTarget } from './CalendarView';
+
+interface StartupContactRow {
+  id: string;
+  startup: string;
+  contact: string;
+  expand?: {
+    contact?: { id: string; first_name?: string; last_name?: string; email?: string };
+  };
+}
 
 const PROVIDER_SLUG = 'outlook_calendar';
 
@@ -29,6 +43,9 @@ export default async function OutlookCalendarPage() {
 
   let events: Awaited<ReturnType<typeof fetchCalendarEvents>> = [];
   let fetchError: string | null = null;
+  let logTargets: Record<string, CalendarLogTarget> = {};
+
+  const canLogMeeting = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
 
   if (isConnected && row) {
     try {
@@ -45,6 +62,48 @@ export default async function OutlookCalendarPage() {
         to: horizon,
         timezone: 'Europe/Stockholm'
       });
+
+      // CLAUDE.md § 14: matcha mötesdeltagare mot tenantens kontakter
+      // (transient, aldrig sparat) så staff kan logga ett möte som uppgift
+      // direkt. Bara kontakter — teammedlemsmatchning sker på bolagskortet.
+      if (canLogMeeting) {
+        try {
+          const links = await pb
+            .collection('startup_contacts')
+            .getList<StartupContactRow>(1, 200, {
+              filter: pb.filter('startup.tenant = {:t}', { t: user.tenant }),
+              expand: 'contact'
+            });
+          const index: EmailIndex = new Map();
+          for (const l of links.items) {
+            const c = l.expand?.contact;
+            const key = c?.email?.trim().toLowerCase();
+            if (!c || !key) continue;
+            const list = index.get(key) ?? [];
+            list.push({
+              kind: 'contact',
+              refId: c.id,
+              name: [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Kontakt',
+              startupId: l.startup
+            });
+            index.set(key, list);
+          }
+          if (index.size > 0) {
+            for (const m of matchEventsToContacts(events, index)) {
+              if (m.startupIds.length === 1) {
+                logTargets[m.event.id] = {
+                  startupId: m.startupIds[0],
+                  contactId: m.contactRefId
+                };
+              } else if (m.startupIds.length > 1) {
+                logTargets[m.event.id] = { ambiguous: true };
+              }
+            }
+          }
+        } catch {
+          /* matchning är best-effort — bryt aldrig kalendervyn */
+        }
+      }
     } catch (err) {
       fetchError = err instanceof Error ? err.message : 'Okänt fel mot Microsoft Graph.';
       await markExpired(pb, row.id, fetchError);
@@ -126,7 +185,7 @@ export default async function OutlookCalendarPage() {
         ) : null}
 
         {isConnected && !fetchError ? (
-          <OutlookCalendarView events={events} />
+          <OutlookCalendarView events={events} logTargets={logTargets} />
         ) : null}
 
         <div className="rounded-xl bg-canvas-subtle p-3 text-[11.5px] text-foreground-subtle">

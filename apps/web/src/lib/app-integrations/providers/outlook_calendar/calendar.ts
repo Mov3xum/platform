@@ -3,8 +3,13 @@ import type { OAuthTokens } from '../../types';
 
 /**
  * Microsoft Graph-klient för kalenderhändelser. Read-only, scope
- * `Calendars.Read`. CLAUDE.md § 10.2: vi loggar aldrig event-bodyn i
- * klartext eller deltagar-listor (PII).
+ * `Calendars.Read` (täcker redan attendees — inget nytt scope behövs).
+ *
+ * CLAUDE.md § 10.2 / § 14: vi loggar/lagrar aldrig event-bodyn eller
+ * deltagar-listor i klartext. Deltagar-/organisatörs-e-post LÄSES dock
+ * transient (i minnet, per request) för att matcha möten mot redan
+ * samtyckta `contacts` på bolagskortet — de persisteras aldrig och når
+ * aldrig AI-kontexten.
  */
 
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
@@ -20,6 +25,9 @@ export interface OutlookEvent {
   webLink?: string;
   isOnline?: boolean;
   bodyPreview?: string;
+  // Transient PII — endast för CRM-matchning, aldrig persisterad/loggad.
+  organizerEmail?: string;
+  attendeeEmails?: string[];
 }
 
 /**
@@ -47,7 +55,7 @@ export async function fetchCalendarEvents(args: {
   url.searchParams.set('$orderby', 'start/dateTime');
   url.searchParams.set(
     '$select',
-    'id,subject,start,end,isAllDay,location,organizer,webLink,isOnlineMeeting,bodyPreview'
+    'id,subject,start,end,isAllDay,location,organizer,webLink,isOnlineMeeting,bodyPreview,attendees'
   );
 
   const headers: Record<string, string> = {
@@ -78,7 +86,9 @@ function toEvent(raw: unknown): OutlookEvent | null {
   const end = readDateTime(r.end);
   if (!id || !start || !end) return null;
   const location = readLocation(r.location);
-  const organizer = readOrganizer(r.organizer);
+  const organizer = readOrganizerName(r.organizer);
+  const organizerEmail = readOrganizerEmail(r.organizer);
+  const attendeeEmails = readAttendeeEmails(r.attendees);
   return {
     id,
     subject,
@@ -89,7 +99,9 @@ function toEvent(raw: unknown): OutlookEvent | null {
     organizer,
     webLink: typeof r.webLink === 'string' ? r.webLink : undefined,
     isOnline: r.isOnlineMeeting === true,
-    bodyPreview: typeof r.bodyPreview === 'string' ? r.bodyPreview.slice(0, 200) : undefined
+    bodyPreview: typeof r.bodyPreview === 'string' ? r.bodyPreview.slice(0, 200) : undefined,
+    organizerEmail,
+    attendeeEmails
   };
 }
 
@@ -105,10 +117,32 @@ function readLocation(v: unknown): string | undefined {
   return typeof dn === 'string' && dn.length > 0 ? dn : undefined;
 }
 
-function readOrganizer(v: unknown): string | undefined {
-  if (!v || typeof v !== 'object') return undefined;
+function readEmailAddress(v: unknown): { name?: string; address?: string } {
+  if (!v || typeof v !== 'object') return {};
   const ea = (v as Record<string, unknown>).emailAddress;
-  if (!ea || typeof ea !== 'object') return undefined;
-  const name = (ea as Record<string, unknown>).name;
-  return typeof name === 'string' ? name : undefined;
+  if (!ea || typeof ea !== 'object') return {};
+  const rec = ea as Record<string, unknown>;
+  return {
+    name: typeof rec.name === 'string' ? rec.name : undefined,
+    address: typeof rec.address === 'string' ? rec.address : undefined
+  };
+}
+
+function readOrganizerName(v: unknown): string | undefined {
+  return readEmailAddress(v).name;
+}
+
+function readOrganizerEmail(v: unknown): string | undefined {
+  const addr = readEmailAddress(v).address;
+  return addr ? addr.toLowerCase() : undefined;
+}
+
+function readAttendeeEmails(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const a of v) {
+    const addr = readEmailAddress(a).address;
+    if (addr) out.push(addr.toLowerCase());
+  }
+  return out;
 }
