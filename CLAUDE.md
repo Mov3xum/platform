@@ -535,6 +535,59 @@ nedgradering mid-chat blockerar nästa svar.
 saknar `messages[]`. UI:t rekonstruerar då en minimal historik från
 `output_md` (`legacyMessagesFromRun`) så chatten kan fortsätta.
 
+### 9.10 Förbättrings-loop — explicit kvalitetsfeedback
+
+Plattformen blir bättre över tid genom en sluten loop: **implicit
+telemetri** (`ai_usage_events` säger VAD som körs) + **explicit
+kvalitetssignal** (`tool_run_feedback` säger OM svaret var bra) →
+**review** (staff i `/insights`) → **promptfix** (`tools.prompt_template`
++ context-byggarna). Vi finjusterar inte modellen (Mistral äger den +
+GDPR ändamålsbegränsning) — rattarna är prompt, kontext och modellval.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000070_create_tool_run_feedback.js` | Collection `tool_run_feedback` |
+| `apps/web/src/lib/actions/feedback.ts` | `submitRunFeedbackAction` (idempotent upsert) |
+| `apps/web/src/app/toolbox/runs/[id]/FeedbackButtons.tsx` | 👍/👎 + valfri orsak (client) |
+| `apps/web/src/app/toolbox/runs/[id]/MessageList.tsx` | Renderar feedback per assistant-turn (opt-in via props) |
+| `apps/web/src/app/insights/page.tsx` | Aggregerar 👎-rate per verktyg + review-kö |
+
+**Datamodell.** `tool_run_feedback` (migration 1700000070): `tenant`,
+`tool_run` (cascadeDelete), `tool` (denormaliserad för aggregering,
+null för connector-chattar), `user`, `message_index` (vilken
+assistant-turn i `messages[]`), `rating` (`up`/`down`), `reason`
+(frivillig fritext, cappad 1000 tecken). Unique-index
+`(user, tool_run, message_index)` → idempotent upsert; en användare
+kan ändra/rensa sin röst utan dubbletter.
+
+**RBAC.** Bara den som startade chatten — eller staff
+(admin/incubator_lead/coach/mentor) — kan rata (samma mönster som
+§9.9). Verifieras i server-actionen och via PB API-regler
+(`@request.auth.id = user` på create/update/delete; staff läser alla i
+tenant för aggregering). Resultatvyn laddar bara den inloggades egna
+rader (varje person ratar oberoende).
+
+**Regelefterlevnad.**
+- **GDPR §5 dataminimering:** bara user-relation, vilken turn, rating
+  och en kort frivillig orsak. `reason` är fritext → cappad; UI
+  uppmanar att inte skriva personuppgifter. Rättslig grund =
+  berättigat intresse (förbättra tjänsten).
+- **GDPR art. 17:** `cascadeDelete` på `tool_run`; user-relationen
+  följer `ai_usage_events`-mönstret (städas i user-erasure-flödet).
+- **EU AI Act art. 72 (post-market monitoring):** 👎-signalen + orsak
+  ÄR vår telemetri för AI-kvalitet (människa-i-loopen rapporterar
+  dåliga svar). `/insights` listar senaste 👎 som review-kö.
+- **Människa-i-loopen bevaras:** feedback styr promptar, inte
+  auto-publicering.
+- **Riskklass:** minimal (intern kvalitetssignal, ingen profilering av
+  individer, ingen AI-inferens).
+
+**Bakåtkompatibilitet.** Legacy-körningar (utan `messages[]`) kan ratas
+på den syntetiserade assistant-turn:en (index 1 från `output_md`);
+server-actionen validerar det specialfallet.
+
 ---
 
 ## 10. Regelefterlevnad — bindande ramverk

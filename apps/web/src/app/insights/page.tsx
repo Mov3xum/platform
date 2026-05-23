@@ -14,6 +14,7 @@ import { estimateCostUsd } from '@/lib/ai/mistral';
 import type {
   Tool,
   ToolRun,
+  ToolRunFeedback,
   Role,
   AiUsageEvent,
   AiUsageSurface
@@ -282,6 +283,29 @@ export default async function InsightsPage({
     /* ignore */
   }
 
+  // ── Load explicit quality feedback (👍/👎) ─────────────────────────
+  let feedback: ToolRunFeedback[] = [];
+  let feedbackLoadError: string | undefined;
+  try {
+    const list = await pb
+      .collection('tool_run_feedback')
+      .getList<ToolRunFeedback>(1, 500, {
+        filter: pb.filter('tenant = {:tenant} && created >= {:since}', {
+          tenant: user.tenant,
+          since: pbDate(sinceIso)
+        }),
+        sort: '-created'
+      });
+    feedback = list.items;
+  } catch (error) {
+    feedbackLoadError = formatPbError(error);
+    // Fail-soft: collectionen kan saknas på äldre PB-instanser.
+    console.warn('[insights] tool_run_feedback unavailable', {
+      tenant: user.tenant,
+      error
+    });
+  }
+
   // ── Load users referenced in runs (for role attribution) ────────────
   const userIds = Array.from(new Set(runs.map((r) => r.triggered_by).filter(Boolean)));
   const usersById = new Map<string, UserRecord>();
@@ -505,6 +529,37 @@ export default async function InsightsPage({
   const distinctActiveStartups = new Set(
     activities.map((a) => a.startup).filter((s): s is string => Boolean(s))
   ).size;
+
+  // ── AI quality feedback (👍/👎) ─────────────────────────────────────
+  const feedbackTotal = feedback.length;
+  const feedbackDown = feedback.filter((f) => f.rating === 'down').length;
+  const feedbackUp = feedbackTotal - feedbackDown;
+  const downRate = feedbackTotal > 0 ? feedbackDown / feedbackTotal : 0;
+
+  const feedbackByTool = new Map<string, { up: number; down: number }>();
+  for (const f of feedback) {
+    const key = f.tool || '—';
+    const entry = feedbackByTool.get(key) || { up: 0, down: 0 };
+    if (f.rating === 'down') entry.down += 1;
+    else entry.up += 1;
+    feedbackByTool.set(key, entry);
+  }
+  const feedbackToolRows = Array.from(feedbackByTool.entries())
+    .map(([toolId, m]) => {
+      const total = m.up + m.down;
+      return {
+        toolId,
+        tool: toolById.get(toolId),
+        up: m.up,
+        down: m.down,
+        total,
+        downRate: total > 0 ? m.down / total : 0
+      };
+    })
+    .sort((a, b) => b.down - a.down || b.total - a.total);
+
+  // Review-kö: senaste 👎 med orsak (människa-i-loopen → promptfix).
+  const recentDowns = feedback.filter((f) => f.rating === 'down').slice(0, 10);
 
   // ── Right rail ──────────────────────────────────────────────────────
   const rail = (
@@ -891,6 +946,132 @@ export default async function InsightsPage({
             </div>
           </section>
         </div>
+
+        {/* ── AI-kvalitet (explicit 👍/👎-feedback) ─────────────── */}
+        <section className="rounded-2xl border border-default bg-surface p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h2 className="text-[14px] font-semibold text-foreground">AI-kvalitet</h2>
+              <p className="text-[11px] text-foreground-subtle">
+                explicit feedback från användare · källa: tool_run_feedback
+              </p>
+            </div>
+            <span className="text-[11px] text-foreground-subtle tabular-nums">
+              {formatNumber(feedbackTotal)} betyg
+            </span>
+          </div>
+
+          {feedbackTotal === 0 ? (
+            <div className="text-[13px] text-foreground-muted">
+              Inga betyg i perioden. Användare kan ge 👍/👎 på AI-svar i
+              resultatvyn — signalen driver promptförbättringar och är vår
+              post-market monitoring (EU AI Act art. 72).
+              {feedbackLoadError && feedbackLoadError.includes('404') && (
+                <p className="mt-3 text-[11px] text-movexum-morkorange dark:text-movexum-pastell-orange">
+                  💡 tool_run_feedback-collectionen saknas — kör migrationen
+                  (redeploy PocketBase så plockas
+                  1700000070_create_tool_run_feedback.js upp på startup).
+                </p>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="mb-4 grid grid-cols-2 gap-2 text-[12px] md:grid-cols-4">
+                <div className="rounded-lg bg-canvas-subtle px-3 py-2">
+                  <div className="text-foreground-subtle">Totalt</div>
+                  <div className="text-[18px] font-semibold tabular-nums text-foreground">
+                    {formatNumber(feedbackTotal)}
+                  </div>
+                </div>
+                <div className="rounded-lg bg-canvas-subtle px-3 py-2">
+                  <div className="text-foreground-subtle">👍 Bra</div>
+                  <div className="text-[18px] font-semibold tabular-nums text-foreground">
+                    {formatNumber(feedbackUp)}
+                  </div>
+                </div>
+                <div className="rounded-lg bg-canvas-subtle px-3 py-2">
+                  <div className="text-foreground-subtle">👎 Dåligt</div>
+                  <div className="text-[18px] font-semibold tabular-nums text-foreground">
+                    {formatNumber(feedbackDown)}
+                  </div>
+                </div>
+                <div className="rounded-lg bg-canvas-subtle px-3 py-2">
+                  <div className="text-foreground-subtle">👎-rate</div>
+                  <div className="text-[18px] font-semibold tabular-nums text-foreground">
+                    {formatPercent(downRate)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                {/* Per verktyg */}
+                <div>
+                  <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-foreground-subtle">
+                    Per verktyg
+                  </h3>
+                  <div className="flex flex-col gap-2.5">
+                    {feedbackToolRows.map((row) => (
+                      <div key={row.toolId}>
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <span className="truncate text-[13px] font-medium text-foreground">
+                            {row.tool?.name || 'Connector / borttagen agent'}
+                          </span>
+                          <span className="text-[11px] text-foreground-subtle tabular-nums">
+                            👍 {row.up} · 👎 {row.down} · {formatPercent(row.downRate)}
+                          </span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded bg-canvas-muted">
+                          <div
+                            className="h-full bg-movexum-orange"
+                            style={{ width: `${row.downRate * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Review-kö: senaste 👎 */}
+                <div>
+                  <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-foreground-subtle">
+                    Senaste 👎 (review-kö)
+                  </h3>
+                  {recentDowns.length === 0 ? (
+                    <div className="text-[13px] text-foreground-muted">
+                      Inga 👎 i perioden. 🎉
+                    </div>
+                  ) : (
+                    <ul className="flex flex-col gap-2">
+                      {recentDowns.map((f) => (
+                        <li
+                          key={f.id}
+                          className="rounded-xl border border-default bg-canvas-subtle px-3 py-2"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <Link
+                              href={`/toolbox/runs/${f.tool_run}`}
+                              className="truncate text-[12px] font-medium text-link hover:underline"
+                            >
+                              {toolById.get(f.tool || '')?.name || 'Agentkörning'}
+                            </Link>
+                            <span className="shrink-0 text-[10px] text-foreground-subtle tabular-nums">
+                              {new Date(f.created).toLocaleDateString('sv-SE')}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-[12px] text-foreground-muted">
+                            {f.reason
+                              ? f.reason
+                              : 'Ingen orsak angiven.'}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </section>
 
         {/* ── Per yta (dashboard-chatt vs toolbox vs workshop) ─── */}
         <section className="rounded-2xl border border-default bg-surface p-5">

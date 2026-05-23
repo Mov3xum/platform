@@ -1062,6 +1062,34 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = user`
 });
 
+// Migration 1700000070: tool_run_feedback — explicit 👍/👎-kvalitetssignal
+// per assistant-turn. Driver förbättrings-loopen (CLAUDE.md §9.10).
+await ensureCollection({
+  id: 'tool_run_feedback_col',
+  name: 'tool_run_feedback',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'tool_run', type: 'relation', required: true, collectionId: 'tool_runs_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'tool', type: 'relation', required: false, collectionId: 'tools_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'message_index', type: 'number', required: true, min: 0, onlyInt: true },
+    { name: 'rating', type: 'select', required: true, maxSelect: 1, values: ['up', 'down'] },
+    { name: 'reason', type: 'text', required: false, max: 1000 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_tool_run_feedback_unique ON tool_run_feedback (user, tool_run, message_index)',
+    'CREATE INDEX idx_tool_run_feedback_tenant ON tool_run_feedback (tenant)',
+    'CREATE INDEX idx_tool_run_feedback_tool ON tool_run_feedback (tool)',
+    'CREATE INDEX idx_tool_run_feedback_rating ON tool_run_feedback (rating)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = user || ${STAFF_OR_LEAD})`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = user || ${STAFF_OR_LEAD})`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = user`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = user`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = user`
+});
+
 // =========================================================================
 // 18c. Övriga saknade collections (porterade från migrations 24–62)
 // Ordning är dependency-medveten: föräldrar före barn.
