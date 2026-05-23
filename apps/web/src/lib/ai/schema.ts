@@ -1,6 +1,7 @@
 import 'server-only';
 import PocketBase from 'pocketbase';
 import type PocketBaseType from 'pocketbase';
+import { escFilter } from '@/lib/pb-filter';
 
 /**
  * Auto-discovery of PocketBase collections for the AI chat.
@@ -327,7 +328,7 @@ export function buildTenantClause(
   tenantId: string
 ): string | null {
   if (!collection.tenantField) return null;
-  const safeTenant = tenantId.replace(/"/g, '\\"');
+  const safeTenant = escFilter(tenantId);
   return `${collection.tenantField} = "${safeTenant}"`;
 }
 

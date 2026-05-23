@@ -726,9 +726,34 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
 - **Sårbarhetshantering (A.8.8):** beroenden uppdateras minst
   månadsvis. `yarn audit` / Dependabot-alerts hanteras inom 30 dagar
   (high/critical inom 7 dagar).
-- **Säker konfiguration (A.8.9):** CSP, HSTS, secure cookies, SameSite,
-  httpOnly är default i `middleware.ts`. Inga `dangerouslySetInnerHTML`
-  med användarinmatning.
+- **Säker konfiguration (A.8.9):** Säkerhetsheaders är uppdelade i två
+  lager. Statiska headers (HSTS, `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy`,
+  `Permissions-Policy`) sätts via `headers()` i
+  `apps/web/next.config.mjs` och gäller alla routes. Den dynamiska,
+  **nonce-baserade `Content-Security-Policy`** sätts i
+  `apps/web/src/middleware.ts` (kräver per-request-nonce):
+  `script-src 'self' 'nonce-…' 'strict-dynamic'` i produktion, relaxad
+  (`unsafe-eval`/`unsafe-inline`) endast i dev för Fast Refresh. Nonce
+  vidarebefordras till `ThemeScript` via `x-nonce`-headern i
+  `app/layout.tsx`.
+- **Auth-cookie:** `httpOnly` + `SameSite=Lax`. `Secure` sätts hårt i
+  produktion (`shouldUseSecureCookie` i `lib/actions/auth.ts`) — inte
+  beroende av `x-forwarded-proto`. Escape-hatch för HTTP-staging:
+  `MOVEXUM_ALLOW_INSECURE_COOKIES=true`.
+- **Brute-force-skydd (A.8.x):** `loginAction` rate-limitar misslyckade
+  försök per IP+e-post (8/15 min) och per IP (40/15 min) via
+  `lib/rate-limit.ts` (in-memory; lyft till Redis/PB vid horisontell
+  skalning).
+- **Output-säkerhet (XSS):** allt användar-/AI-genererat innehåll som
+  renderas via `dangerouslySetInnerHTML` MÅSTE gå genom
+  `apps/web/src/lib/safe-html.ts` (`escapeHtml` / `inlineMarkdown` /
+  `markdownToHtml`). Råinjektion av sträng är förbjuden. CSP-nonce är
+  backstop.
+- **Filter-injection (A.8.9):** dynamiska värden i PocketBase-
+  filtersträngar escapas alltid med `escFilter()` i
+  `apps/web/src/lib/pb-filter.ts` (escapar `\` före `"`). Använd aldrig
+  rå interpolation eller ad-hoc-escapers.
 - **Backup (A.8.13):** PocketBase-DB säkerhetskopieras dagligen i
   Coolify. Restore-rutin ska vara testad kvartalsvis.
 - **Incident response (A.5.24–A.5.27):** loggas i `docs/incidents/`

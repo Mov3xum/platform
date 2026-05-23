@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { headers } from 'next/headers';
 import { Navbar } from '@/components/Navbar';
 import { ThemeScript } from '@/components/ThemeProvider';
 import { AppShell } from '@/components/AppShell';
@@ -27,11 +28,12 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const user = await getCurrentUser();
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
 
   return (
     <html lang="sv" suppressHydrationWarning>
       <head>
-        <ThemeScript />
+        <ThemeScript nonce={nonce} />
       </head>
       <body className="min-h-screen bg-canvas text-foreground antialiased">
         {user ? (

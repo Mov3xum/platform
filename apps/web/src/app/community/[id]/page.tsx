@@ -139,11 +139,9 @@ export default async function AlumniDetailPage({
         <CardHead label="Bio" />
         <div style={{ padding: 16 }}>
           {alumni.bio ? (
-            <div
-              className="mx-t-13"
-              style={{ whiteSpace: 'pre-wrap' }}
-              dangerouslySetInnerHTML={{ __html: alumni.bio }}
-            />
+            <div className="mx-t-13" style={{ whiteSpace: 'pre-wrap' }}>
+              {alumni.bio}
+            </div>
           ) : (
             <div className="mx-muted mx-t-13">Ingen bio tillagd ännu.</div>
           )}

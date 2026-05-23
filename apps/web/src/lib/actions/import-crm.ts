@@ -7,6 +7,7 @@ import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { parseXlsx } from '@/lib/import/xlsx';
 import { parseCrmExport, type CrmParseResult } from '@/lib/import/crm-excel';
 import { recordActivity } from './record-activity';
+import { escFilter as esc } from '@/lib/pb-filter';
 import type PocketBase from 'pocketbase';
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB
@@ -20,12 +21,6 @@ function isZipMagic(buf: Buffer): boolean {
   return (
     buf.length > 4 && buf[0] === 0x50 && buf[1] === 0x4b && (buf[2] === 0x03 || buf[2] === 0x05)
   );
-}
-
-// Escapar värden för PocketBase-filtersträngar (mot filter-injection).
-// PB använder dubbla citattecken som strängavgränsare; vi escapar dem.
-function esc(value: string): string {
-  return value.replace(/"/g, '\\"');
 }
 
 export interface CrmImportSummary {

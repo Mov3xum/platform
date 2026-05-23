@@ -6,15 +6,38 @@ import PocketBase from 'pocketbase';
 import { AUTH_COOKIE } from '@/lib/auth.server';
 import { generateVerificationToken, parseVerificationToken } from '@/lib/verification-token';
 import { sendVerificationEmail } from '@/lib/email';
+import { checkRateLimit, recordFailure, clearFailures } from '@/lib/rate-limit';
 
 const PB_URL =
   process.env.POCKETBASE_URL ||
   (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080');
 
+// Brute-force-skydd: per IP+e-post (riktad gissning) och per IP (spraying).
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_PER_ACCOUNT = 8;
+const LOGIN_MAX_PER_IP = 40;
+
 async function isHttpsRequest(): Promise<boolean> {
   const h = await headers();
   const proto = h.get('x-forwarded-proto') || h.get('x-forwarded-protocol');
   return proto === 'https';
+}
+
+// Secure-flaggan ska aldrig hänga enbart på x-forwarded-proto (kan saknas
+// eller spoofas vid felkonfigurerad proxy). I produktion sätts den hårt,
+// med en uttrycklig escape-hatch för HTTP-staging (sslip.io).
+async function shouldUseSecureCookie(): Promise<boolean> {
+  if (process.env.NODE_ENV === 'production') {
+    return process.env.MOVEXUM_ALLOW_INSECURE_COOKIES !== 'true';
+  }
+  return isHttpsRequest();
+}
+
+async function getClientIp(): Promise<string> {
+  const h = await headers();
+  const xff = h.get('x-forwarded-for');
+  if (xff) return xff.split(',')[0]!.trim();
+  return h.get('x-real-ip') || 'unknown';
 }
 
 type PbError = {
@@ -57,6 +80,17 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
       return { error: 'E-post och lösenord krävs.' };
     }
 
+    const ip = await getClientIp();
+    const accountKey = `login:acct:${ip}:${email.toLowerCase()}`;
+    const ipKey = `login:ip:${ip}`;
+
+    const acctLimit = checkRateLimit(accountKey, LOGIN_MAX_PER_ACCOUNT);
+    const ipLimit = checkRateLimit(ipKey, LOGIN_MAX_PER_IP);
+    if (acctLimit.blocked || ipLimit.blocked) {
+      const retryMin = Math.ceil(Math.max(acctLimit.retryAfterSec, ipLimit.retryAfterSec) / 60);
+      return { error: `För många inloggningsförsök. Försök igen om ca ${retryMin} min.` };
+    }
+
     const pb = new PocketBase(PB_URL);
 
     try {
@@ -64,6 +98,13 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     } catch (err: unknown) {
       const e = err as PbError;
       console.error('[loginAction] PocketBase auth failed', { status: e.status, message: e.message, data: e.data });
+
+      // Räkna bara faktiska autentiseringsfel (fel uppgifter), inte
+      // infrastrukturfel som att PB inte går att nå.
+      if (e.status === 400 || e.status === 403) {
+        recordFailure(accountKey, LOGIN_WINDOW_MS);
+        recordFailure(ipKey, LOGIN_WINDOW_MS);
+      }
 
       if (e.status === 400) {
         return { error: 'Fel e-post eller lösenord.' };
@@ -79,6 +120,10 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
       }
       return { error: e.data?.message || e.message || 'Inloggning misslyckades. Försök igen.' };
     }
+
+    // Lyckad inloggning — nollställ brute-force-räknarna.
+    clearFailures(accountKey);
+    clearFailures(ipKey);
 
     // Trim down the cookie payload to just what getCurrentUser needs.
     // The full PB user record with expanded tenant can easily exceed the 4KB
@@ -114,9 +159,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     const store = await cookies();
     store.set(AUTH_COOKIE, payload, {
       httpOnly: true,
-      // Only set secure when the request actually came over HTTPS — sslip.io
-      // staging domains often run over HTTP and would silently drop the cookie.
-      secure: await isHttpsRequest(),
+      secure: await shouldUseSecureCookie(),
       sameSite: 'lax',
       path: '/',
       // 14 days; PB tokens themselves expire per collection settings

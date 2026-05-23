@@ -69,12 +69,9 @@ function ToolRunSection({ label, items }: { label: string; items: RunRow[] }) {
                     </span>
                   </div>
                   {r.instruction && (
-                    <p
-                      className="mt-1.5 line-clamp-2 text-[12.5px] leading-relaxed text-foreground-muted"
-                      dangerouslySetInnerHTML={{
-                        __html: r.instruction.replace(/<script[\s\S]*?<\/script>/gi, '')
-                      }}
-                    />
+                    <p className="mt-1.5 line-clamp-2 text-[12.5px] leading-relaxed text-foreground-muted">
+                      {r.instruction}
+                    </p>
                   )}
                   <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-foreground-subtle">
                     <span className="inline-flex items-center gap-1">

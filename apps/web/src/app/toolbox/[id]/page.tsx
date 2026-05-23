@@ -6,6 +6,7 @@ import { ToolCategoryBadge, ToolRunStatusBadge } from '@/components/Badges';
 import { toolCategoryLabels, type ToolRunStatus } from '@/lib/labels';
 import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
 import { getWebSourceLabel } from '@/lib/ai/web';
+import { markdownToHtml } from '@/lib/safe-html';
 import { RunToolForm } from '../RunToolForm';
 import { ScheduleEditor } from '@/components/ScheduleEditor';
 import type { Tool, ToolModel, ToolRun, WebSourceKey } from '@platform/shared';
@@ -146,7 +147,7 @@ export default async function ToolDetailPage({
         {tool.description && (
           <div
             className="prose prose-sm mt-3 max-w-none text-foreground-muted dark:prose-invert"
-            dangerouslySetInnerHTML={{ __html: tool.description }}
+            dangerouslySetInnerHTML={{ __html: markdownToHtml(tool.description) }}
           />
         )}
         {tool.model && (

@@ -25,10 +25,7 @@ export function NoteItem({ noteId, body, confidential, isAuthor }: Props) {
   if (!editing) {
     return (
       <div className="space-y-2">
-        <div
-          className="prose prose-sm max-w-none text-foreground-muted dark:prose-invert"
-          dangerouslySetInnerHTML={{ __html: body }}
-        />
+        <div className="whitespace-pre-wrap text-sm text-foreground-muted">{body}</div>
         {isAuthor ? (
           <div className="flex items-center gap-2">
             <button
