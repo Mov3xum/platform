@@ -1,5 +1,10 @@
 import { Clock, MapPin, Video, ExternalLink } from 'lucide-react';
 import type { OutlookEvent } from '@/lib/app-integrations/providers/outlook_calendar/calendar';
+import { LogMeetingButton } from '@/app/startups/[id]/LogMeetingButton';
+
+export type CalendarLogTarget =
+  | { startupId: string; contactId?: string }
+  | { ambiguous: true };
 
 /**
  * Live kalendervy för Outlook. Grupperar händelser per dag, visar
@@ -14,6 +19,7 @@ import type { OutlookEvent } from '@/lib/app-integrations/providers/outlook_cale
 
 interface Props {
   events: OutlookEvent[];
+  logTargets?: Record<string, CalendarLogTarget>;
 }
 
 const DOW = ['söndag', 'måndag', 'tisdag', 'onsdag', 'torsdag', 'fredag', 'lördag'];
@@ -55,7 +61,7 @@ function durationMinutes(startIso: string, endIso: string): number {
   return Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000);
 }
 
-export function OutlookCalendarView({ events }: Props) {
+export function OutlookCalendarView({ events, logTargets }: Props) {
   if (events.length === 0) {
     return (
       <div className="rounded-2xl border border-default bg-surface p-8 text-center">
@@ -84,7 +90,7 @@ export function OutlookCalendarView({ events }: Props) {
           </h2>
           <div className="flex flex-col divide-y divide-default rounded-2xl border border-default bg-surface">
             {list.map((e) => (
-              <EventRow key={e.id} event={e} />
+              <EventRow key={e.id} event={e} logTarget={logTargets?.[e.id]} />
             ))}
           </div>
         </section>
@@ -93,7 +99,7 @@ export function OutlookCalendarView({ events }: Props) {
   );
 }
 
-function EventRow({ event }: { event: OutlookEvent }) {
+function EventRow({ event, logTarget }: { event: OutlookEvent; logTarget?: CalendarLogTarget }) {
   return (
     <div className="flex items-start gap-4 p-4">
       <div className="flex w-20 shrink-0 flex-col text-[12px] text-foreground-muted">
@@ -147,6 +153,23 @@ function EventRow({ event }: { event: OutlookEvent }) {
             </span>
           ) : null}
         </div>
+        {logTarget ? (
+          <div className="mt-2.5">
+            {'ambiguous' in logTarget ? (
+              <span className="text-[11px] text-foreground-subtle">
+                Matchar flera bolag — logga via bolagskortet.
+              </span>
+            ) : (
+              <LogMeetingButton
+                subject={event.subject}
+                startsAt={event.start}
+                endsAt={event.end}
+                startupId={logTarget.startupId}
+                contactId={logTarget.contactId}
+              />
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   );

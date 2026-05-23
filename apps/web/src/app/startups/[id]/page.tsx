@@ -20,6 +20,20 @@ import {
   type PhaseHistoryItem
 } from '@/components/StartupPhaseHistoryList';
 import { AllabolagSyncButton } from './AllabolagSyncButton';
+import { LogMeetingButton } from './LogMeetingButton';
+import {
+  findIntegrationRow,
+  getActiveTokens,
+  markExpired
+} from '@/lib/app-integrations/storage';
+import { outlookCalendarProvider } from '@/lib/app-integrations/providers/outlook_calendar/provider';
+import { fetchCalendarEvents } from '@/lib/app-integrations/providers/outlook_calendar/calendar';
+import {
+  matchEventsToContacts,
+  matchedEventsForStartup,
+  type EmailIndex,
+  type EventMatch
+} from '@/lib/app-integrations/providers/outlook_calendar/match';
 import {
   activityStatusLabels,
   activityTypeLabels,
@@ -163,6 +177,29 @@ interface TeamMemberRecord {
   is_founder?: boolean;
 }
 
+interface StartupContactRecord {
+  id: string;
+  contact: string;
+  role?: string;
+  is_primary?: boolean;
+  expand?: {
+    contact?: { id: string; first_name?: string; last_name?: string; email?: string };
+  };
+}
+
+type TaskKind = 'call' | 'meeting' | 'email' | 'prep' | 'followup' | 'admin' | 'other';
+type TaskStatus = 'open' | 'in_progress' | 'blocked' | 'done' | 'cancelled';
+
+interface TaskRecord {
+  id: string;
+  kind: TaskKind;
+  description: string;
+  starts_at?: string;
+  due_at?: string;
+  completed_at?: string;
+  status: TaskStatus;
+}
+
 interface PartnerEngagementRecord {
   id: string;
   engagement_type: string;
@@ -231,7 +268,9 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     toolActivitiesResult,
     workshopAssignmentsResult,
     financialsResult,
-    phaseHistoryResult
+    phaseHistoryResult,
+    startupContactsResult,
+    tasksResult
   ] = await Promise.allSettled([
     pb.collection('startup_team_members').getList<TeamMemberRecord>(1, 50, {
       filter: `startup = "${id}"`,
@@ -278,6 +317,14 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       filter: `startup = "${id}"`,
       sort: '-entered_at',
       expand: 'created_by'
+    }),
+    pb.collection('startup_contacts').getList<StartupContactRecord>(1, 100, {
+      filter: `startup = "${id}"`,
+      expand: 'contact'
+    }),
+    pb.collection('tasks').getList<TaskRecord>(1, 50, {
+      filter: `startup = "${id}" && tenant = "${user.tenant}"`,
+      sort: '-starts_at'
     })
   ]);
 
@@ -294,6 +341,70 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     financialsResult.status === 'fulfilled' ? financialsResult.value : emptyList;
   const phaseHistory =
     phaseHistoryResult.status === 'fulfilled' ? phaseHistoryResult.value : emptyList;
+  const startupContacts =
+    startupContactsResult.status === 'fulfilled' ? startupContactsResult.value : emptyList;
+  const tasks = tasksResult.status === 'fulfilled' ? tasksResult.value : emptyList;
+
+  // CLAUDE.md § 14: bygg en transient e-post→entitet-index för att matcha
+  // Outlook-möten mot detta bolags kontakter + teammedlemmar. Aldrig sparad.
+  const canLogMeeting = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
+  const emailIndex: EmailIndex = new Map();
+  const addEmail = (
+    email: string | undefined,
+    entry: { kind: 'contact' | 'team'; refId: string; name: string }
+  ) => {
+    const key = email?.trim().toLowerCase();
+    if (!key) return;
+    const list = emailIndex.get(key) ?? [];
+    list.push({ ...entry, startupId: id });
+    emailIndex.set(key, list);
+  };
+  for (const sc of startupContacts.items) {
+    const c = sc.expand?.contact;
+    if (!c) continue;
+    addEmail(c.email, {
+      kind: 'contact',
+      refId: c.id,
+      name: [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Kontakt'
+    });
+  }
+  for (const m of team.items) {
+    addEmail(m.email, { kind: 'team', refId: m.id, name: m.name });
+  }
+
+  // Live Outlook-möten för den inloggade användaren (per-user OAuth), matchade
+  // mot bolagets kontakter. Fail-soft: Graph-fel bryter aldrig sidan.
+  let outlookConnected = false;
+  let outlookMeetings: EventMatch[] = [];
+  let outlookError: string | null = null;
+  if (emailIndex.size > 0) {
+    try {
+      const row = await findIntegrationRow(pb, user.id, 'outlook_calendar');
+      if (row?.status === 'active' && row.auth_data) {
+        outlookConnected = true;
+        const tokens = await getActiveTokens({ pb, row, provider: outlookCalendarProvider });
+        const now = Date.now();
+        const events = await fetchCalendarEvents({
+          tokens,
+          from: new Date(now - 30 * 24 * 60 * 60 * 1000),
+          to: new Date(now + 30 * 24 * 60 * 60 * 1000),
+          timezone: 'Europe/Stockholm'
+        });
+        outlookMeetings = matchedEventsForStartup(
+          matchEventsToContacts(events, emailIndex),
+          id
+        );
+        // Senaste först.
+        outlookMeetings.sort(
+          (a, b) => Date.parse(b.event.start) - Date.parse(a.event.start)
+        );
+      }
+    } catch (err) {
+      outlookError = err instanceof Error ? err.message : 'Okänt fel mot Microsoft Graph.';
+      const row = await findIntegrationRow(pb, user.id, 'outlook_calendar').catch(() => null);
+      if (row) await markExpired(pb, row.id, outlookError);
+    }
+  }
 
   const phaseHistoryItems: PhaseHistoryItem[] = phaseHistory.items.map((row) => ({
     id: row.id,
@@ -317,7 +428,9 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     toolActivitiesResult,
     workshopAssignmentsResult,
     financialsResult,
-    phaseHistoryResult
+    phaseHistoryResult,
+    startupContactsResult,
+    tasksResult
   ].some((result) => result.status === 'rejected');
 
   if (sectionLoadFailed) {
@@ -380,6 +493,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       <nav className="mb-8 mt-8 flex flex-wrap gap-3 text-sm">
         {[
           ['#overview', 'Info'],
+          ['#moten', `Möten & uppgifter (${tasks.totalItems})`],
           ['#phase-history', `Fashistorik (${phaseHistory.totalItems})`],
           ['#kunskap', 'Kunskap'],
           ['#notes', `Anteckningar (${notes.totalItems})`],
@@ -450,6 +564,108 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               >
                 Checklistor
               </Link>
+            </div>
+          </div>
+        </Section>
+
+        <Section id="moten" title="Möten & uppgifter">
+          <div className="space-y-6">
+            <div>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-foreground">Möten från Outlook</h3>
+                {outlookConnected ? (
+                  <span className="text-[11px] uppercase tracking-[0.06em] text-foreground-subtle">
+                    Live · din kalender
+                  </span>
+                ) : null}
+              </div>
+              {!outlookConnected ? (
+                <div className="rounded-2xl border border-dashed border-default bg-canvas-subtle/50 p-4 text-sm text-foreground-muted">
+                  <Link href="/integrationer/outlook-calendar" className="text-link hover:underline">
+                    Anslut din Outlook
+                  </Link>{' '}
+                  för att se möten med detta bolags kontakter direkt här. Read-only,
+                  inget cachas.
+                </div>
+              ) : outlookError ? (
+                <Empty>Kunde inte hämta möten just nu. Koppla om Outlook.</Empty>
+              ) : outlookMeetings.length === 0 ? (
+                <Empty>Inga möten (±30 dagar) med bolagets kontakter i din kalender.</Empty>
+              ) : (
+                <ul className="divide-y divide-default rounded-2xl border border-default">
+                  {outlookMeetings.map((m) => (
+                    <li key={m.event.id} className="flex flex-wrap items-start justify-between gap-3 p-4">
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground">
+                          {m.event.webLink ? (
+                            <a
+                              href={m.event.webLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="hover:text-brand hover:underline"
+                            >
+                              {m.event.subject}
+                            </a>
+                          ) : (
+                            m.event.subject
+                          )}
+                        </p>
+                        <p className="text-xs text-foreground-subtle">
+                          {new Date(m.event.start).toLocaleString('sv-SE', {
+                            dateStyle: 'medium',
+                            timeStyle: 'short'
+                          })}
+                          {m.contactName ? ` · ${m.contactName}` : ''}
+                        </p>
+                      </div>
+                      {canLogMeeting ? (
+                        <LogMeetingButton
+                          subject={m.event.subject}
+                          startsAt={m.event.start}
+                          endsAt={m.event.end}
+                          startupId={id}
+                          contactId={m.contactRefId}
+                        />
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div>
+              <h3 className="mb-3 text-sm font-semibold text-foreground">
+                Uppgifter (CRM)
+              </h3>
+              {tasks.items.length === 0 ? (
+                <Empty>Inga uppgifter registrerade för bolaget.</Empty>
+              ) : (
+                <ul className="space-y-3">
+                  {tasks.items.map((t) => (
+                    <li key={t.id} className="flex items-center justify-between gap-3 rounded-2xl border border-default p-4">
+                      <div>
+                        <p className="font-medium text-foreground">{t.description}</p>
+                        <p className="text-xs text-foreground-subtle">
+                          {taskKindLabels[t.kind]}
+                          {t.starts_at
+                            ? ` · ${new Date(t.starts_at).toLocaleDateString('sv-SE')}`
+                            : ''}
+                        </p>
+                      </div>
+                      <StatusPill
+                        label={taskStatusLabels[t.status]}
+                        variant={
+                          t.status === 'done'
+                            ? 'success'
+                            : t.status === 'cancelled' || t.status === 'blocked'
+                            ? 'neutral'
+                            : 'info'
+                        }
+                      />
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         </Section>
@@ -926,6 +1142,24 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     </main>
   );
 }
+
+const taskKindLabels: Record<TaskKind, string> = {
+  call: 'Samtal',
+  meeting: 'Möte',
+  email: 'E-post',
+  prep: 'Förberedelse',
+  followup: 'Uppföljning',
+  admin: 'Administration',
+  other: 'Övrigt'
+};
+
+const taskStatusLabels: Record<TaskStatus, string> = {
+  open: 'Öppen',
+  in_progress: 'Pågår',
+  blocked: 'Blockerad',
+  done: 'Klar',
+  cancelled: 'Avbruten'
+};
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
