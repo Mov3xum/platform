@@ -499,7 +499,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                 ? 'bg-movexum-pastell-bla text-movexum-djupbla'
                 : 'border border-default text-foreground-subtle hover:text-foreground'
             }`}
-            title="Inkludera publika webbkällor (Wikipedia, EU)"
+            title="Inkludera aktuella publika EU-källor (Breakit, Sifted, Vinnova)"
           >
             <Icon name="globe" size={12} />
             Webbkällor

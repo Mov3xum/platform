@@ -386,6 +386,29 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
   personnummer → exkluderas alltid (defense-in-depth).
 - **Tenant-isolation:** `buildStartupContext` / `buildPortfolioContext`
   / `buildFinancialsContext` verifierar alltid tenant-ID.
+- **Chattens query-verktyg (`lib/ai/schema.ts`):** dashboardchattens
+  (`/idag`) `query_collection`/`count_collection` auto-upptäcker
+  kollektioner men upprätthåller samma exkluderingar som
+  context-byggarna, så verktyget inte kan kringgå svartlistan ovan:
+  - **Denylist** (aldrig exponerade): utöver `users`/`tenants`/token-
+    tabeller även `contacts` (§ 15.3), alla `compass_*`-besökardata
+    (`compass_leads`, `compass_conversations`, `compass_messages`,
+    `compass_responses`, `compass_security_events`), `agent_actions`
+    (mutationsaudit med before/after-värden) samt krypterade
+    credential-/connector-tabeller (`tenant_integrations`,
+    `user_app_integrations`, `user_mistral_connectors`).
+  - **Fältmaskning** (substring, alla kollektioner): täcker GDPR art. 9
+    (`gender`, `identifies_as`), adress (`street_address`,
+    `postal_code`), `org_nr` och `ip_hash` utöver
+    e-post/telefon/personnummer/avatar. `tasks.details` maskas särskilt
+    (privata arbetsanteckningar).
+- **Chattens skrivverktyg:** bara när actor är en agent (staff-chatt)
+  exponeras `update_startup_field` (whitelist: `next_step`, `irl_level`),
+  `create_startup_activity` och `update_activity_field` (`title`,
+  `description`, `status` — t.ex. markera uppgift `done`). Alla går via
+  det delade skrivlagret (`lib/core/write`) som enforce:ar whitelist +
+  tenant + validering och loggar i `agent_actions`. Tool-schemat är hint
+  för modellen, inte säkerhetsgränsen.
 
 ### 9.4 Datamodell
 
@@ -492,6 +515,16 @@ prompten via `{{web.<key>}}`-tokens. Whitelisten finns i
 - Fail-soft: en nedladdning som fallerar blockerar inte de övriga.
 - Hämtade källor + `fetched_at` loggas i `tool_runs.input.web_sources`
   (krav från EU AI Act art. 13 — transparens om underlag).
+
+**Dashboardchatt (`/idag`).** Webbkälle-toggeln i dashboardchatten
+hämtar EU-whitelisten ovan (default `breakit`, `sifted`, `vinnova`) via
+samma cache/SSRF-skydd — Wikipedia (US/Wikimedia) används **inte** längre
+(bröt mot EU-suveränitetspolicyn). När en agent väljs i chatten hämtas
+dessutom agentens egna `web_sources` och dess `prompt_template` renderas
+(mot portföljkontext för `ai_system_wide`-agenter; `{{startup.*}}` blir
+tomt för per-bolag-agenter som istället låter modellen hämta detaljer via
+sina query-verktyg). Samma EU-suveränitets- och transparensgarantier
+gäller alltså som i `/toolbox`.
 
 ### 9.9 Chattläge, modellval och bilagor
 
