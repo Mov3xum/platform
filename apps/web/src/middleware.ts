@@ -16,7 +16,7 @@ const AUTH_COOKIE = 'pb_auth';
  * I utveckling tillåts unsafe-eval/unsafe-inline eftersom React Fast Refresh
  * kräver det.
  */
-function buildCsp(nonce: string | null): string {
+function buildCsp(nonce: string | null, isHttps: boolean): string {
   const isProd = process.env.NODE_ENV === 'production';
   const scriptSrc =
     isProd && nonce
@@ -40,10 +40,13 @@ function buildCsp(nonce: string | null): string {
     `object-src 'none'`,
     `manifest-src 'self'`
   ];
-  // Hoppa över https-uppgradering på HTTP-staging (sslip.io) — annars
-  // bryts subresurser (PB-bilder över http). Samma signal som secure-cookien.
+  // upgrade-insecure-requests tvingar browsern att uppgradera ALLA subresurser
+  // (CSS/JS/fonter/bilder) till https. På en http-serverad deploy (staging utan
+  // TLS, sslip.io) finns ingen https-lyssnare → alla subresurser fallerar och
+  // sidan blir helt ostylad. Lägg därför bara till direktivet när requesten
+  // faktiskt kom in över https. Escape-hatchen behålls för explicit avstängning.
   const allowInsecure = process.env.MOVEXUM_ALLOW_INSECURE_COOKIES === 'true';
-  if (isProd && !allowInsecure) directives.push('upgrade-insecure-requests');
+  if (isProd && isHttps && !allowInsecure) directives.push('upgrade-insecure-requests');
   return directives.join('; ');
 }
 
@@ -62,7 +65,12 @@ export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isProd = process.env.NODE_ENV === 'production';
   const nonce = isProd ? btoa(crypto.randomUUID()) : null;
-  const csp = buildCsp(nonce);
+  // Bakom Coolify-proxyn rapporterar req.nextUrl.protocol ofta http även vid
+  // https → lita på x-forwarded-proto. Saknas signalen antar vi http (säkrare
+  // default: hellre utelämna upgrade-insecure-requests än att bryta sidan).
+  const forwardedProto = req.headers.get('x-forwarded-proto') || req.headers.get('x-forwarded-protocol');
+  const isHttps = (forwardedProto ?? req.nextUrl.protocol.replace(':', '')) === 'https';
+  const csp = buildCsp(nonce, isHttps);
 
   const isPublic =
     PUBLIC_PATHS.includes(pathname) ||
