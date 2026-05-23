@@ -1,6 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '../../credentials';
+import { escFilter } from '../../../pb-filter';
 import type {
   CompanyRegistryHandler,
   RegistrySyncResult,
@@ -27,10 +28,6 @@ interface FinancialsRow {
   id: string;
 }
 
-function escape(value: string): string {
-  return value.replace(/"/g, '\\"');
-}
-
 async function listStartupsWithOrgNr(
   pb: PocketBase,
   tenantId: string
@@ -41,7 +38,7 @@ async function listStartupsWithOrgNr(
     const result = await pb
       .collection('startups')
       .getList<StartupRow>(page, 200, {
-        filter: `tenant = "${escape(tenantId)}" && org_nr != ""`,
+        filter: `tenant = "${escFilter(tenantId)}" && org_nr != ""`,
         sort: 'name',
         fields: 'id,tenant,org_nr'
       });
@@ -59,7 +56,7 @@ async function upsertFinancialsRow(
   row: FinancialsPatch,
   syncedAt: string
 ): Promise<'created' | 'updated'> {
-  const filter = `startup = "${escape(startupId)}" && year = ${row.year}`;
+  const filter = `startup = "${escFilter(startupId)}" && year = ${row.year}`;
   let existing: FinancialsRow | null = null;
   try {
     existing = await pb

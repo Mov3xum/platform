@@ -1,4 +1,5 @@
 import { Icon } from '@/components/proto/Icon';
+import { inlineMarkdown } from '@/lib/safe-html';
 
 export interface ChatBubble {
   role: 'user' | 'assistant';
@@ -6,14 +7,6 @@ export interface ChatBubble {
   at?: string;
   model?: string;
   sources?: string[];
-}
-
-function renderInline(text: string): string {
-  // Lätt markdown: **bold**
-  return text.replace(
-    /\*\*(.*?)\*\*/g,
-    '<strong class="font-semibold text-foreground">$1</strong>'
-  );
 }
 
 export function MessageBubble({ msg }: { msg: ChatBubble }) {
@@ -47,7 +40,7 @@ export function MessageBubble({ msg }: { msg: ChatBubble }) {
           )}
           <p
             className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground"
-            dangerouslySetInnerHTML={{ __html: renderInline(msg.content) }}
+            dangerouslySetInnerHTML={{ __html: inlineMarkdown(msg.content) }}
           />
           {msg.sources && msg.sources.length > 0 && (
             <div className="mt-4 border-t border-default pt-3">

@@ -2,6 +2,7 @@
 
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
+import { escFilter } from '@/lib/pb-filter';
 import { revalidatePath } from 'next/cache';
 import {
   clearCredentials,
@@ -70,7 +71,7 @@ export async function requestIntegrationPilotAction(
     return { error: 'Leverantören finns inte.' };
   }
 
-  const filter = `tenant = "${user.tenant}" && provider = "${providerId}"`;
+  const filter = `tenant = "${escFilter(user.tenant)}" && provider = "${escFilter(providerId)}"`;
 
   let existing: ExistingTenantIntegration | null = null;
   try {
@@ -154,12 +155,12 @@ export async function connectIntegrationAction(
   try {
     provider = await pb
       .collection('integration_providers')
-      .getFirstListItem<ProviderRow>(`slug = "${providerSlug}"`);
+      .getFirstListItem<ProviderRow>(`slug = "${escFilter(providerSlug)}"`);
   } catch {
     return { error: 'Leverantören finns inte i katalogen.' };
   }
 
-  const filter = `tenant = "${user.tenant}" && provider = "${provider.id}"`;
+  const filter = `tenant = "${escFilter(user.tenant)}" && provider = "${escFilter(provider.id)}"`;
   let existing: ExistingTenantIntegration | null = null;
   try {
     existing = await pb

@@ -12,6 +12,7 @@ import {
   addThreadCommentAction
 } from '@/lib/actions/tools';
 import type { ToolRunStatus, ToolRunThreadEntry } from '@platform/shared';
+import { escapeHtml, markdownToHtml } from '@/lib/safe-html';
 import {
   ASSIGN_STATUS,
   daysUntil,
@@ -160,7 +161,7 @@ export function ArtefactView({
             <p
               className="mt-1 max-w-[80ch] text-[12.5px] leading-relaxed text-foreground-muted"
               dangerouslySetInnerHTML={{
-                __html: run.instruction.replace(/<script[\s\S]*?<\/script>/gi, '')
+                __html: escapeHtml(run.instruction)
               }}
             />
           )}
@@ -449,77 +450,3 @@ export function ArtefactView({
   );
 }
 
-/**
- * Mini markdown → HTML för output_md. Stödjer headers, paragrafer,
- * listor och fet text. Tillräckligt för Mistral-output.
- */
-function markdownToHtml(md: string): string {
-  // strip HTML tags (defense)
-  const clean = md.replace(/<script[\s\S]*?<\/script>/gi, '');
-
-  const lines = clean.split('\n');
-  const out: string[] = [];
-  let inList = false;
-
-  for (const raw of lines) {
-    const l = raw.trim();
-    if (!l) {
-      if (inList) {
-        out.push('</ul>');
-        inList = false;
-      }
-      out.push('');
-      continue;
-    }
-    if (l.startsWith('### ')) {
-      if (inList) {
-        out.push('</ul>');
-        inList = false;
-      }
-      out.push(`<h3 class="font-heading font-semibold text-[15px] mt-5 mb-2">${escapeHtml(l.slice(4))}</h3>`);
-    } else if (l.startsWith('## ')) {
-      if (inList) {
-        out.push('</ul>');
-        inList = false;
-      }
-      out.push(`<h2 class="font-heading font-semibold text-[17px] mt-6 mb-2 tracking-tight">${escapeHtml(l.slice(3))}</h2>`);
-    } else if (l.startsWith('# ')) {
-      if (inList) {
-        out.push('</ul>');
-        inList = false;
-      }
-      out.push(`<h1 class="font-heading font-semibold text-[20px] mt-6 mb-3 tracking-tight">${escapeHtml(l.slice(2))}</h1>`);
-    } else if (l.startsWith('- ') || l.startsWith('* ')) {
-      if (!inList) {
-        out.push('<ul class="space-y-1.5 mt-2 mb-3">');
-        inList = true;
-      }
-      out.push(
-        `<li class="flex gap-3 text-foreground-muted"><span class="w-1 h-1 rounded-full bg-brand mt-2.5 shrink-0"></span><span>${inlineMd(l.slice(2))}</span></li>`
-      );
-    } else {
-      if (inList) {
-        out.push('</ul>');
-        inList = false;
-      }
-      out.push(`<p class="leading-relaxed mb-3 text-foreground-muted">${inlineMd(l)}</p>`);
-    }
-  }
-  if (inList) out.push('</ul>');
-  return out.join('\n');
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function inlineMd(s: string): string {
-  return escapeHtml(s).replace(
-    /\*\*(.*?)\*\*/g,
-    '<strong class="font-semibold text-foreground">$1</strong>'
-  );
-}

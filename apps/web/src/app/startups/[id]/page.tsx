@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getOneForTenant } from '@/lib/pb.server';
+import { markdownToHtml } from '@/lib/safe-html';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { canAccessModule, hasRole } from '@/lib/rbac';
@@ -413,7 +414,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
 
         <Section id="overview" title="Översikt">
           {startup.description ? (
-            <div className="prose max-w-none text-sm text-foreground-muted dark:prose-invert" dangerouslySetInnerHTML={{ __html: startup.description }} />
+            <div className="prose max-w-none text-sm text-foreground-muted dark:prose-invert" dangerouslySetInnerHTML={{ __html: markdownToHtml(startup.description) }} />
           ) : (
             <Empty>Ingen beskrivning än.</Empty>
           )}

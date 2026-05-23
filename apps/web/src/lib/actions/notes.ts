@@ -7,6 +7,20 @@ export type NoteFormState = {
   error?: string;
 };
 
+type NoteOwnership = {
+  author: string;
+  startup: string;
+  expand?: { startup?: { tenant?: string } };
+};
+
+// Tenant kan saknas i expand om relationen inte kunde laddas — då faller vi
+// tillbaka på författarkontrollen och PB-collection-regeln, men en känd
+// tenant-mismatch blockeras alltid.
+function noteBelongsToTenant(note: NoteOwnership, tenant: string): boolean {
+  const noteTenant = note.expand?.startup?.tenant;
+  return !noteTenant || noteTenant === tenant;
+}
+
 export async function createNoteAction(
   startupId: string,
   _prev: NoteFormState,
@@ -20,6 +34,20 @@ export async function createNoteAction(
   if (!body) return { error: 'Tom anteckning kan inte sparas.' };
 
   const pb = await getServerPb();
+
+  // Defense-in-depth ovanpå PB-collection-regeln: verifiera i app-lagret att
+  // mål-bolaget tillhör inloggad användares tenant innan vi skriver. Annars
+  // kan en klient-skickad startupId peka på ett bolag i en annan tenant (IDOR).
+  try {
+    const startup = await pb
+      .collection('startups')
+      .getOne<{ tenant: string }>(startupId, { fields: 'id,tenant' });
+    if (startup.tenant !== user.tenant) {
+      return { error: 'Du har inte behörighet till det här bolaget.' };
+    }
+  } catch {
+    return { error: 'Bolaget hittades inte.' };
+  }
 
   try {
     await pb.collection('notes').create({
@@ -48,16 +76,20 @@ export async function updateNoteAction(
 
   const pb = await getServerPb();
 
-  let existing: { author: string; startup: string };
+  let existing: NoteOwnership;
   try {
-    existing = await pb.collection('notes').getOne<{ author: string; startup: string }>(noteId, {
-      fields: 'id,author,startup'
+    existing = await pb.collection('notes').getOne<NoteOwnership>(noteId, {
+      fields: 'id,author,startup,expand.startup.tenant',
+      expand: 'startup'
     });
   } catch {
     return { error: 'Anteckningen hittades inte.' };
   }
   if (existing.author !== user.id) {
     return { error: 'Endast författaren kan redigera anteckningen.' };
+  }
+  if (!noteBelongsToTenant(existing, user.tenant)) {
+    return { error: 'Du har inte behörighet till den här anteckningen.' };
   }
 
   try {
@@ -74,16 +106,20 @@ export async function deleteNoteAction(noteId: string): Promise<{ error?: string
   const user = await requireUser();
   const pb = await getServerPb();
 
-  let existing: { author: string; startup: string };
+  let existing: NoteOwnership;
   try {
-    existing = await pb.collection('notes').getOne<{ author: string; startup: string }>(noteId, {
-      fields: 'id,author,startup'
+    existing = await pb.collection('notes').getOne<NoteOwnership>(noteId, {
+      fields: 'id,author,startup,expand.startup.tenant',
+      expand: 'startup'
     });
   } catch {
     return { error: 'Anteckningen hittades inte.' };
   }
   if (existing.author !== user.id) {
     return { error: 'Endast författaren kan radera anteckningen.' };
+  }
+  if (!noteBelongsToTenant(existing, user.tenant)) {
+    return { error: 'Du har inte behörighet till den här anteckningen.' };
   }
 
   try {
