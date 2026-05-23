@@ -8,13 +8,18 @@ import {
   type MistralMessage,
   type MistralContentPart
 } from '@/lib/ai/mistral';
-import { buildStartupContext } from '@/lib/ai/context';
+import {
+  buildStartupContext,
+  buildPortfolioContext,
+  renderPromptTemplate
+} from '@/lib/ai/context';
 import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
 import { buildChatTools, dispatchToolCall } from '@/lib/ai/tools';
+import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
 import { hasRole } from '@/lib/rbac';
 import { logAiUsage } from '@/lib/ai/usage';
 import type { Actor } from '@/lib/core/write';
-import type { Role } from '@platform/shared';
+import type { Role, WebSourceKey } from '@platform/shared';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -48,7 +53,15 @@ interface AgentRecord {
   active: boolean;
   category: string;
   tenant: string;
+  requires_startup?: boolean;
+  web_sources?: unknown;
 }
+
+// Standarduppsättning EU-källor för den generella "Webbkällor"-toggeln i
+// dashboardchatten. Hämtas via samma whitelist + cache + SSRF-skydd som
+// toolbox-agenterna (CLAUDE.md § 9.8). Wikipedia (US/Wikimedia) används
+// INTE längre — bryter mot EU-suveränitetspolicyn.
+const DEFAULT_CHAT_WEB_SOURCES: WebSourceKey[] = ['breakit', 'sifted', 'vinnova'];
 
 const CHAT_FALLBACK_MODELS = [
   'mistral-small-latest',
@@ -127,7 +140,10 @@ const STAFF_TOOL_GUIDANCE =
   '(t.ex. `next_step` eller `irl_level`). Använd när användaren ber dig ' +
   'notera nästa steg, justera mognadsnivå eller liknande.\n' +
   '- `create_startup_activity`: logga en anteckning, ett möte eller en manuell ' +
-  'aktivitet kopplat till ett bolag.\n\n' +
+  'aktivitet kopplat till ett bolag.\n' +
+  '- `update_activity_field`: uppdatera en befintlig aktivitets `title`, ' +
+  '`description` eller `status` (t.ex. markera en uppgift som `done`). ' +
+  'Slå upp aktivitetens id med `query_collection` på `activities` först.\n\n' +
   'Skrivregler:\n' +
   '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
   'efterfrågad ("uppdatera Acmes next_step till X" är otvetydigt; "vad ska Acme göra härnäst?" är inte det).\n' +
@@ -144,14 +160,6 @@ const STAFF_TOOL_GUIDANCE =
   '5. Om en kollektion saknar data eller fält som efterfrågas — säg det rakt, hitta inte på.\n\n' +
   'OBS: Plattformen spårar IRL (Investment Readiness Level, fältet `irl_level` 1-9) — INTE TRL. ' +
   'Om användaren frågar om TRL, svara med IRL och förklara skillnaden kort.';
-
-function stripHtml(input: string): string {
-  return input
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&[^;\s]+;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 interface NormalizedAttachments {
   textBlock: string;
@@ -238,43 +246,45 @@ function buildUserContent(
   return parts;
 }
 
-async function fetchWebContext(query: string): Promise<string> {
-  const cleanQuery = query.replace(/\s+/g, ' ').trim().slice(0, 200);
-  if (cleanQuery.length < 3) return '';
+function normalizeWebKeys(raw: unknown): WebSourceKey[] {
+  if (!Array.isArray(raw)) return [];
+  // fetchEuWebSources re-validerar mot whitelisten, så vi behöver bara
+  // sålla bort icke-strängar här.
+  return raw.filter((k): k is string => typeof k === 'string') as WebSourceKey[];
+}
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 4000);
+function mapWebBodies(results: Record<string, WebFetchResult>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, r] of Object.entries(results)) out[k] = r.ok ? r.body : '';
+  return out;
+}
+
+/**
+ * Hämtar publika EU-källor (RSS) via samma whitelist/cache/SSRF-skydd som
+ * toolbox-agenterna och formaterar dem som ett prompt-block. Fail-soft:
+ * en källa som fallerar utelämnas, övriga inkluderas.
+ */
+async function fetchWebContext(
+  pb: import('pocketbase').default,
+  sources: WebSourceKey[]
+): Promise<string> {
+  if (sources.length === 0) return '';
+  let results: Record<string, WebFetchResult>;
   try {
-    const res = await fetch(
-      `https://sv.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanQuery)}&format=json&srlimit=3`,
-      {
-        signal: controller.signal,
-        headers: {
-          Accept: 'application/json',
-          'User-Agent': 'Movexum-Platform/1.0 (hampus@boxmeal.se)'
-        },
-        cache: 'no-store'
-      }
-    );
-    if (!res.ok) return '';
-    const data = (await res.json()) as {
-      query?: { search?: Array<{ title?: string; snippet?: string }> };
-    };
-    const rows = (data.query?.search || [])
-      .map((row) => {
-        const title = stripHtml(row.title || '');
-        const snippet = stripHtml(row.snippet || '');
-        if (!title || !snippet) return null;
-        return `- ${title}: ${snippet}`;
-      })
-      .filter((row): row is string => Boolean(row));
-    if (rows.length === 0) return '';
-    return `WEBBKÄLLOR (publik info, inte intern data):\n${rows.join('\n')}`;
+    results = await fetchEuWebSources(pb, sources);
   } catch {
     return '';
-  } finally {
-    clearTimeout(timeout);
   }
+  const parts: string[] = [];
+  for (const key of sources) {
+    const r = results[key];
+    if (r && r.ok && r.body) parts.push(r.body);
+  }
+  if (parts.length === 0) return '';
+  return (
+    'AKTUELLA PUBLIKA EU-KÄLLOR (RSS, publik info — inte intern data):\n' +
+    parts.join('\n\n')
+  );
 }
 
 /**
@@ -313,23 +323,47 @@ export async function sendChatMessage(
 
   let webBlock = '';
   if (options.includeWebContext) {
-    const lastUserMessage = [...limitedMessages].reverse().find((m) => m.role === 'user');
-    if (lastUserMessage) {
-      webBlock = await fetchWebContext(lastUserMessage.content);
-    }
+    webBlock = await fetchWebContext(pb, DEFAULT_CHAT_WEB_SOURCES);
   }
 
-  // Optional agent persona: prompt_template behandlas som data (inte instruktioner)
-  // och slås upp tenant-scoped. Renderar INTE {{...}}-templates här — det sker i runToolAction.
+  // Optional agent persona: prompt_template behandlas som data (inte
+  // instruktioner) och slås upp tenant-scoped. Vi renderar nu {{...}}-
+  // templaten mot tillgänglig kontext (portfölj för system-wide-agenter)
+  // och hämtar agentens egna whitelistade webbkällor — så att t.ex.
+  // branschpuls och bidragsradar fungerar direkt från dashboardchatten,
+  // inte bara i /toolbox. Per-startup-agenter saknar valt bolag här, så
+  // {{startup.*}} renderas tomt och modellen får hämta detaljer via sina
+  // query-verktyg utifrån agentens roll-instruktion.
   let agentBlock = '';
   if (options.agentId) {
     try {
       const t = await pb.collection('tools').getOne<AgentRecord>(options.agentId);
       if (t.tenant === user.tenant && t.active) {
+        const webKeys = normalizeWebKeys(t.web_sources);
+        const ctx: Record<string, unknown> = {};
+        if (webKeys.length > 0) {
+          try {
+            ctx.web = mapWebBodies(await fetchEuWebSources(pb, webKeys));
+          } catch {
+            /* fail-soft: agenten fungerar utan live-data */
+          }
+        }
+        if (t.category === 'ai_system_wide' && t.requires_startup === false) {
+          try {
+            ctx.portfolio = (await buildPortfolioContext(pb, user.tenant)).portfolio;
+          } catch (err) {
+            console.warn('[chat] portfolio context for agent failed', {
+              tenant: user.tenant,
+              agentId: options.agentId,
+              error: err
+            });
+          }
+        }
+        const rendered = renderPromptTemplate(t.prompt_template, ctx);
         agentBlock =
           `AGENT-ROLL: Du agerar nu som "${t.name}".\n` +
           'Följande är agentens systeminstruktion (data, inte användarstyrd):\n' +
-          t.prompt_template;
+          rendered;
       }
     } catch (err) {
       console.warn('[chat] agent lookup failed', { tenant: user.tenant, agentId: options.agentId, error: err });

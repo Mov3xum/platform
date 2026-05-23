@@ -159,6 +159,41 @@ export function buildChatTools(
       });
     }
 
+    const activityFields = agentWritableFields('activities');
+    if (activityFields.length > 0) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'update_activity_field',
+          description:
+            'Uppdaterar ETT fält på en befintlig aktivitet (title, description ' +
+            'eller status). Använd för att t.ex. markera en uppgift som klar ' +
+            '(status="done") eller justera en notering. Varje skrivning loggas ' +
+            'i agent_actions och kan rullas tillbaka av staff.',
+          parameters: {
+            type: 'object',
+            properties: {
+              activityId: {
+                type: 'string',
+                description: 'PocketBase-id för aktiviteten (slå upp via query_collection)'
+              },
+              field: {
+                type: 'string',
+                enum: activityFields,
+                description: 'Vilket fält som ska uppdateras'
+              },
+              value: {
+                description:
+                  'Nytt värde. För `status`: en av planned, in_progress, done, cancelled. ' +
+                  'För `title`: kort text (max 200 tecken). För `description`: text (max 2000 tecken).'
+              }
+            },
+            required: ['activityId', 'field', 'value']
+          }
+        }
+      });
+    }
+
     if (agentCreatableCollections().includes('activities')) {
       tools.push({
         type: 'function',
@@ -364,6 +399,8 @@ export async function dispatchToolCall(
       return runUpdateStartupField(args, ctx);
     case 'create_startup_activity':
       return runCreateStartupActivity(args, ctx);
+    case 'update_activity_field':
+      return runUpdateActivityField(args, ctx);
     default:
       return { ok: false, error: `Okänt verktyg: ${call.function.name}` };
   }
@@ -423,10 +460,6 @@ async function runCreateStartupActivity(
 
   if (!startupId) return { ok: false, error: 'startupId saknas.' };
 
-  // updateActivityField är importerad för framtida UPDATE-verktyg och
-  // för att hålla aktivitets-API:t samlat i en modul.
-  void updateActivityField;
-
   const result = await createActivity(ctx.pb, actor, {
     startupId,
     kind: kind as 'manual' | 'note' | 'meeting',
@@ -443,6 +476,41 @@ async function runCreateStartupActivity(
       activityId: result.value.activityId,
       startupId: result.value.startupId,
       kind: result.value.kind,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runUpdateActivityField(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const activityId = typeof args.activityId === 'string' ? args.activityId.trim() : '';
+  const field = typeof args.field === 'string' ? args.field.trim() : '';
+  if (!activityId) return { ok: false, error: 'activityId saknas.' };
+  if (field !== 'title' && field !== 'description' && field !== 'status') {
+    return { ok: false, error: "field måste vara 'title', 'description' eller 'status'." };
+  }
+
+  const result = await updateActivityField(ctx.pb, actor, {
+    activityId,
+    field: field as 'title' | 'description' | 'status',
+    value: args.value
+  });
+
+  if (!result.ok) {
+    return { ok: false, error: result.error };
+  }
+  return {
+    ok: true,
+    data: {
+      activityId: result.value.activityId,
+      field: result.value.field,
+      before: result.value.before,
+      after: result.value.after,
       logged_in: 'agent_actions'
     }
   };

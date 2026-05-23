@@ -35,16 +35,45 @@ const MAX_RELATION_DEPTH = 3;
 /**
  * Collections that are NEVER exposed to the chat, regardless of who set them
  * up in PB-admin. Internal/auth/PII tables.
+ *
+ * Beyond auth tables we deny:
+ *   • contacts                — externa personers detaljer får inte till
+ *                               AI-prompten (CLAUDE.md § 15.3).
+ *   • compass_*-besökardata   — leads, chatt-sessioner, svar och IP-hash
+ *                               (pre-onboarding PII + separat samtycke).
+ *   • compass_security_events — säkerhetsaudit (ip_hash, actor).
+ *   • agent_actions           — mutationsaudit (before/after-värden kan
+ *                               innehålla godtyckligt fältinnehåll).
+ *   • *_integrations / connectors — krypterade credentials/OAuth-tokens.
+ *
+ * Detta är defense-in-depth: själva fältmaskningen nedan fångar PII per
+ * fältnamn, men dessa kollektioner hålls helt utanför chatten.
  */
 const COLLECTION_DENYLIST = new Set<string>([
   'users',
   'tenants',
   'verification_tokens',
-  'pending_signups'
+  'pending_signups',
+  'contacts',
+  'compass_leads',
+  'compass_conversations',
+  'compass_messages',
+  'compass_responses',
+  'compass_security_events',
+  'agent_actions',
+  'tenant_integrations',
+  'user_app_integrations',
+  'user_mistral_connectors'
 ]);
 
 /**
  * Field names auto-masked across ALL collections (case-insensitive substring).
+ *
+ * Utöver direkt-PII (e-post, telefon, personnummer) maskar vi GDPR art. 9
+ * särskild kategori (`founder_gender`, `founder_identifies_as`, `gender`),
+ * adressfält (PII för enskild firma) samt org-nr och visitor-ip-hash. Detta
+ * speglar svartlistan i `lib/ai/context.ts` så att chattens query-verktyg
+ * inte kan kringgå den (CLAUDE.md § 9.3, § 10.2).
  */
 const PII_FIELD_PATTERNS = [
   'password',
@@ -57,7 +86,15 @@ const PII_FIELD_PATTERNS = [
   'phone',
   'telefon',
   'mobil',
-  'avatar'
+  'avatar',
+  // GDPR art. 9 — särskild kategori
+  'gender',
+  'identifies_as',
+  // PII för enskild firma / pseudonymiserad PII
+  'street_address',
+  'postal_code',
+  'org_nr',
+  'ip_hash'
 ];
 
 /**
@@ -86,6 +123,12 @@ const COLLECTION_OVERRIDES: Record<
   },
   activities: {
     description: 'Aktiviteter, möten och uppgifter per bolag (type, status, due_date, owner)'
+  },
+  tasks: {
+    description:
+      'Uppgifter (kind, status, due_at, owner, länkad startup/kontakt/event). ' +
+      'Fritextfältet `details` exkluderas (kan innehålla privata arbetsanteckningar, CLAUDE.md § 15.3).',
+    maskedFields: ['details']
   }
 };
 
@@ -98,7 +141,17 @@ const STATIC_FALLBACK: ExposedCollection[] = [
     name: 'startups',
     description: 'Idéer och bolag i inkubatorn',
     tenantField: 'tenant',
-    maskedFields: ['person_nr', 'personnummer'],
+    maskedFields: [
+      'person_nr',
+      'personnummer',
+      'founder_gender',
+      'founder_identifies_as',
+      'street_address',
+      'postal_code',
+      'org_nr',
+      'phone',
+      'email'
+    ],
     fields: []
   },
   {
