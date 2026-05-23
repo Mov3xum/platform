@@ -769,7 +769,12 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
   `script-src 'self' 'nonce-…' 'strict-dynamic'` i produktion, relaxad
   (`unsafe-eval`/`unsafe-inline`) endast i dev för Fast Refresh. Nonce
   vidarebefordras till `ThemeScript` via `x-nonce`-headern i
-  `app/layout.tsx`.
+  `app/layout.tsx`. `upgrade-insecure-requests` läggs bara till när
+  requesten faktiskt kom in över https (`x-forwarded-proto`) — annars
+  skulle direktivet tvinga browsern att uppgradera alla subresurser
+  (CSS/JS/fonter/bilder) till https på en http-serverad staging utan
+  TLS, vilket gör sidan helt ostylad. `MOVEXUM_ALLOW_INSECURE_COOKIES`
+  stänger av det explicit.
 - **Auth-cookie:** `httpOnly` + `SameSite=Lax`. `Secure` sätts hårt i
   produktion (`shouldUseSecureCookie` i `lib/actions/auth.ts`) — inte
   beroende av `x-forwarded-proto`. Escape-hatch för HTTP-staging:
