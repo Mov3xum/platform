@@ -1231,15 +1231,51 @@ Nya whitelistade fält i `apps/web/src/lib/ai/context.ts`:
 
 ### 15.6 Migration av Excel-data
 
-Excel-importer (om/när de skrivs) ska:
+**Status: implementerad.** Importen körs av staff (admin/incubator_lead)
+via `/admin/import-crm` (länkad från `/integrationer` under "Manuella
+importer"). Flödet är preview → commit, speglar Bolagslista-importen
+(§ 9.4) och är idempotent.
 
-1. Verifiera att `gdpr_consent=true` på Personer-rader innan rad
-   skapas i `contacts`. Rader utan consent skippas och loggas.
-2. Sanera Info-fältet på `contacts` — regex för personnummer
-   (`\d{6,8}-\d{4}`) och blockera/ersätt med `[REDACTED]`.
-3. Normalisera `kommun`-namn mot SCB:s standardlista.
-4. Skriva varje fas-byte (`Inträde Paus`, `Inträde Lead` etc.) som rad
-   i `startup_phase_history` istället för datumkolumner på `startups`.
-5. Loggas i `activities` med `kind='integration_sync'` (analogt
-   med Allabolag-importen, § 11.2).
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `apps/web/src/lib/import/crm-excel.ts` | Header-driven parser av alla 12 ark → typade rader + PII-sanering |
+| `apps/web/src/lib/actions/import-crm.ts` | Server action: preview + commit med upserts i beroendeordning |
+| `apps/web/src/app/admin/import-crm/page.tsx` | Importsida (RBAC: staff) |
+| `apps/web/src/app/admin/import-crm/ImportForm.tsx` | Preview/commit-UI |
+
+Återanvänder den befintliga dependency-fria XLSX-läsaren
+(`apps/web/src/lib/import/xlsx.ts`).
+
+**Garantier som importen uppfyller:**
+
+1. **GDPR-samtycke:** Personer-rader utan `gdpr_consent=true` skippas
+   och listas som PII-fri varning i preview. `gdpr_consent_at` sätts
+   till importtidpunkten.
+2. **Personnummer-sanering:** kolumnen `Person nr` (Företag) läses
+   ALDRIG in. Info-/anteckningsfält (`contacts.info`,
+   `startups.register_notes`, `capital_rounds.notes`,
+   `intellectual_property.notes`, `agreements.notes`) saneras med
+   regex `\d{6,8}[-+]?\d{4}` → `[REDACTED]`.
+3. **Fashistorik:** varje `Inträde <fas>`-kolumn blir en rad i
+   `startup_phase_history` (dedupe på startup+phase+datum), inte
+   datumkolumner på `startups`.
+4. **Idempotens:** upserts på naturliga nycklar — `startups` på
+   org-nr (annars namn), `contacts` på e-post (annars namn),
+   `incubator_events` på namn+startdatum, övriga på
+   bolagsrelation + nyckelfält. Befintliga rader uppdateras, inga
+   raderas.
+5. **Beroendeordning:** företag → kontakter → kopplingar → events →
+   deltagare → kapital/IPR/avtal/todo/KPI. Korsreferenser löses via
+   en in-memory `Excel-ID → PB-record-ID`-map. Rader vars relation
+   inte kan lösas (t.ex. kontakt skippad pga consent) räknas som
+   "hoppade över", inte fel.
+6. **Filter-injection:** alla värden i PB-filtersträngar escapas
+   (`esc()`), ISO 27001 A.8.9.
+7. **Audit:** loggas i `activities` med `kind='integration_sync'`
+   (PII-fri aggregatrad: antal skapade/uppdaterade per kollektion).
+8. **`kommun`-normalisering mot SCB:s standardlista** är ännu inte
+   implementerad — `kommun` importeras som frisktext. (Framtida
+   förbättring; påverkar inte korrektheten.)
 
