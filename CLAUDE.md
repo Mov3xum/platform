@@ -769,7 +769,12 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
   `script-src 'self' 'nonce-…' 'strict-dynamic'` i produktion, relaxad
   (`unsafe-eval`/`unsafe-inline`) endast i dev för Fast Refresh. Nonce
   vidarebefordras till `ThemeScript` via `x-nonce`-headern i
-  `app/layout.tsx`.
+  `app/layout.tsx`. `upgrade-insecure-requests` läggs bara till när
+  requesten faktiskt kom in över https (`x-forwarded-proto`) — annars
+  skulle direktivet tvinga browsern att uppgradera alla subresurser
+  (CSS/JS/fonter/bilder) till https på en http-serverad staging utan
+  TLS, vilket gör sidan helt ostylad. `MOVEXUM_ALLOW_INSECURE_COOKIES`
+  stänger av det explicit.
 - **Auth-cookie:** `httpOnly` + `SameSite=Lax`. `Secure` sätts hårt i
   produktion (`shouldUseSecureCookie` i `lib/actions/auth.ts`) — inte
   beroende av `x-forwarded-proto`. Escape-hatch för HTTP-staging:
@@ -1224,6 +1229,19 @@ individer.
 - **Dataminimering:** vi cachar INGA tredjeparts-data i vår DB —
   vi hämtar live från providern vid varje sidladdning. Bara tokens
   lagras.
+- **CRM-matchning (Outlook ↔ bolagskort):** mötesdeltagares och
+  organisatörers e-post läses **transient** (i minnet, per request) i
+  `providers/outlook_calendar/{calendar,match}.ts` enbart för att matcha
+  möten mot redan samtyckta `contacts`/`startup_team_members` på
+  `/startups/[id]` och `/integrationer/outlook-calendar`. E-posten
+  **persisteras aldrig, loggas aldrig och når aldrig AI-kontexten**.
+  Täcks av befintligt `Calendars.Read` (inget nytt scope, riskklass kvar
+  *begränsad*). Rättslig grund = berättigat intresse (inkubatordrift,
+  matchning mot samtyckta kontakter). "Logga möte som uppgift"
+  (`logMeetingAsTaskAction`, `lib/actions/tasks.ts`) skapar en
+  `tasks`-rad (`kind='meeting'`) — explicit av staff, människa-i-loopen,
+  ingen autosync. Mötesämnet lagras i `tasks.description` (redan
+  exkluderat ur AI-kontext, § 15.3).
 - **Loggning:** `last_error`-fältet är PII-fritt (vi trimmar och
   loggar bara `err.message`). console.error inkluderar aldrig
   tokens eller user PII.
@@ -1312,6 +1330,10 @@ Nya whitelistade fält i `apps/web/src/lib/ai/context.ts`:
 - `capital_rounds.notes`, `intellectual_property.notes`,
   `agreements.notes` — strategiska detaljer hålls ute som
   defense-in-depth.
+- **Outlook-kalenderdata** — mötesdeltagares/organisatörers e-post (läses
+  transient för CRM-matchning, § 14.4) är PII och når aldrig
+  AI-kontexten. Den lagras inte; endast den resulterande `tasks`-raden
+  finns kvar och `tasks.*` är redan svartlistat ovan.
 
 ### 15.4 GDPR-överväganden för `contacts`
 
