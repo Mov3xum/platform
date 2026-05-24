@@ -9,14 +9,17 @@ import {
   Chip,
   Icon
 } from '@/components/proto';
-import { getLead, listLeadSources, listModules } from '@/lib/compass/store';
+import { getLead, listAssignableStaff, listLeadSources, listModules } from '@/lib/compass/store';
 import {
   LEAD_STATUS_LABEL,
   LEAD_STATUS_ORDER,
   type LeadStatus
 } from '@/lib/compass/types';
+import { type StartupPhase } from '@platform/shared';
+import { phaseLabels } from '@/lib/labels';
 import {
   convertLeadToStartupAction,
+  declineLeadAction,
   deleteLeadAction,
   rescoreLeadAction,
   runAiReviewAction,
@@ -24,6 +27,15 @@ import {
   updateLeadNotesAction,
   updateLeadStatusAction
 } from '@/lib/actions/compass';
+
+const CONVERT_PHASES: StartupPhase[] = [
+  'inflode',
+  'lead',
+  'boost_chamber',
+  'incubation',
+  'prescale',
+  'acceleration'
+];
 
 export const dynamic = 'force-dynamic';
 
@@ -38,10 +50,11 @@ export default async function LeadDetailPage({
     redirect('/inflode');
   }
   const pb = await getServerPb();
-  const [lead, sources, modules] = await Promise.all([
+  const [lead, sources, modules, staff] = await Promise.all([
     getLead(pb, user.tenant, id),
     listLeadSources(pb),
-    listModules(pb, user.tenant)
+    listModules(pb, user.tenant),
+    listAssignableStaff(pb, user.tenant)
   ]);
   if (!lead) notFound();
   const source = sources.find((s) => s.key === lead.source_key);
@@ -436,7 +449,7 @@ export default async function LeadDetailPage({
 
           {!alreadyConverted && canConvert && (
             <Card>
-              <CardHead label="Konvertera till bolag" />
+              <CardHead label="Konvertera till inkubatorn" />
               <form
                 action={convertLeadToStartupAction}
                 style={{ padding: 16, display: 'grid', gap: 10 }}
@@ -452,6 +465,27 @@ export default async function LeadDetailPage({
                     style={{ marginTop: 4 }}
                   />
                 </label>
+                <label className="mx-label">
+                  Startfas
+                  <select name="phase" defaultValue="lead" className="mx-input" style={{ marginTop: 4 }}>
+                    {CONVERT_PHASES.map((p) => (
+                      <option key={p} value={p}>
+                        {phaseLabels[p]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="mx-label">
+                  Coach (valfri)
+                  <select name="coach" defaultValue="" className="mx-input" style={{ marginTop: 4 }}>
+                    <option value="">— Ingen —</option>
+                    {staff.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name || s.email}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button type="submit" className="mx-btn mx-primary">
                   <Icon name="sparkle" size={13} /> Skapa bolag av leadet
                 </button>
@@ -460,6 +494,31 @@ export default async function LeadDetailPage({
                   style={{ textAlign: 'center' }}
                 >
                   Idén och taggarna förs över · status sätts till Accepterad
+                </div>
+              </form>
+            </Card>
+          )}
+
+          {!alreadyConverted && canConvert && lead.status !== 'declined' && (
+            <Card>
+              <CardHead label="Avslå lead" />
+              <form action={declineLeadAction} style={{ padding: 16, display: 'grid', gap: 10 }}>
+                <input type="hidden" name="id" value={lead.id} />
+                <textarea
+                  name="reason"
+                  placeholder="Motivering (valfri) — sparas i interna anteckningar."
+                  className="mx-textarea"
+                  style={{ minHeight: 70 }}
+                />
+                <button
+                  type="submit"
+                  className="mx-btn"
+                  style={{ color: '#4b2718', borderColor: '#d67e47' }}
+                >
+                  <Icon name="close" size={13} /> Avslå leadet
+                </button>
+                <div className="mx-mono mx-t-xs mx-muted" style={{ textAlign: 'center' }}>
+                  Mänskligt beslut · status sätts till Avböjd
                 </div>
               </form>
             </Card>

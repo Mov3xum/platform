@@ -1412,3 +1412,39 @@ importer"). Flödet är preview → commit, speglar Bolagslista-importen
    implementerad — `kommun` importeras som frisktext. (Framtida
    förbättring; påverkar inte korrektheten.)
 
+
+---
+
+## 16. Startups-arbetsyta & inflödeskonvertering
+
+`/startups` är en arbetsyta med horisontell sektionsmeny (`PageShell`-`tabs`):
+
+- **Översikt** (`/startups`) — portföljdashboard (`StartupListDashboard`) +
+  inflödessammanfattning för staff (tratt + senaste inkomna leads).
+- **Inkubator** (`/startups/inkubator`) — bolagskort som kanban per fas eller
+  lista, med sök och fasfilter. `StartupCard` är det delade kortet.
+- **Inflöde** (`/startups/inflode`, staff-only) — triage av inkommande leads
+  (kontakt + idé) med direkt **Konvertera**/**Avslå**, plus modulerna med egen
+  URL och QR. Den fristående `/inflode` (sidomenyn) är fortsatt den
+  kanoniska djupvyn — denna flik kompletterar, ersätter inte.
+
+Den horisontella menyn definieras i `apps/web/src/app/startups/_tabs.ts`.
+`PageShell` markerar den mest specifika (längsta) matchande fliken aktiv så att
+en rot-flik och underflikar inte blir aktiva samtidigt.
+
+**Konvertering (`convertLeadToStartupAction`).** Staff (admin/incubator_lead/
+coach) bekräftar bolagsnamn, väljer startfas (default `lead`) och valfri coach.
+Skapar `startups`-rad, skriver `startup_phase_history`, sätter leadets
+`status='accepted'` + `converted_startup` och landar på bolagskortet. Coach
+korsverifieras mot tenant (defense-in-depth utöver PB-reglerna). Mänskligt
+beslut — sker aldrig automatiskt (EU AI Act art. 14, § 3).
+
+**Avslag (`declineLeadAction`).** Sätter `status='declined'` och kan spara en
+kort motivering i `compass_leads.notes` (konfidentiellt, exkluderas redan från
+AI-kontext). Inga nya personuppgiftsfält. Status-byten loggas i
+`compass_security_events`.
+
+**QR-koder (`components/compass/ShareModule.tsx`).** Genereras lokalt med
+npm-paketet `qrcode` (ren JS, **inga externa anrop** — EU-suveränt enligt
+§ 10.2). Staff kan ladda ner PNG/SVG per modul-URL. Ersatte den tidigare
+platshållaren som hänvisade staff att skapa QR utanför systemet.
