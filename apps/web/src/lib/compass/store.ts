@@ -151,6 +151,37 @@ export async function countLeadsByStatus(
   }
 }
 
+export interface AssignableStaff {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/**
+ * Personal som kan tilldelas som coach vid konvertering av en lead. Endast
+ * inkubatorroller i samma tenant. PII (e-post) returneras bara för intern
+ * staff-UI och loggas aldrig till AI-kontext (CLAUDE.md § 9.3).
+ */
+export async function listAssignableStaff(
+  pb: PocketBase,
+  tenant: string
+): Promise<AssignableStaff[]> {
+  try {
+    const res = await pb.collection('users').getFullList<AssignableStaff>({
+      filter: pb.filter(
+        'tenant = {:tenant} && (roles ~ "admin" || roles ~ "incubator_lead" || roles ~ "coach" || roles ~ "mentor")',
+        { tenant }
+      ),
+      fields: 'id,name,email',
+      sort: 'name',
+      batch: 200
+    });
+    return res;
+  } catch {
+    return [];
+  }
+}
+
 /* ────────────────────────────────────────────────────────────────────
    Conversations & messages
    ──────────────────────────────────────────────────────────────────── */
