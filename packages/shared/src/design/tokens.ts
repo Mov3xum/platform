@@ -1,96 +1,118 @@
-// OKLCH Color Palette
-export const colors = {
-  // Primary colors
-  primary: {
-    50: 'oklch(96.9% 0.04 270)',
-    100: 'oklch(93.9% 0.08 270)',
-    200: 'oklch(85.9% 0.13 270)',
-    300: 'oklch(76.4% 0.17 270)',
-    400: 'oklch(65.6% 0.19 270)',
-    500: 'oklch(55.1% 0.2 270)',
-    600: 'oklch(49.4% 0.18 270)',
-    700: 'oklch(42.2% 0.16 270)',
-    800: 'oklch(35.8% 0.13 270)',
-    900: 'oklch(28.4% 0.11 270)',
-  },
-  
-  // Neutral/Surface
-  neutral: {
-    50: 'oklch(99.5% 0.003 200)',
-    100: 'oklch(97% 0.008 200)',
-    200: 'oklch(92% 0.01 200)',
-    300: 'oklch(85% 0.015 200)',
-    400: 'oklch(75% 0.02 200)',
-    500: 'oklch(65% 0.02 200)',
-    600: 'oklch(50% 0.02 200)',
-    700: 'oklch(35% 0.02 200)',
-    800: 'oklch(25% 0.02 200)',
-    900: 'oklch(15% 0.015 200)',
-  },
-  
-  // Success
-  success: {
-    50: 'oklch(96.9% 0.04 130)',
-    100: 'oklch(93% 0.08 130)',
-    200: 'oklch(85.5% 0.12 130)',
-    300: 'oklch(76% 0.16 130)',
-    400: 'oklch(70.1% 0.18 130)',
-    500: 'oklch(63.7% 0.2 130)',
-    600: 'oklch(56% 0.18 130)',
-    700: 'oklch(47.2% 0.16 130)',
-    800: 'oklch(38.5% 0.13 130)',
-    900: 'oklch(28.6% 0.11 130)',
-  },
-  
-  // Warning
-  warning: {
-    50: 'oklch(97.5% 0.04 70)',
-    100: 'oklch(93.9% 0.08 70)',
-    200: 'oklch(87.9% 0.12 70)',
-    300: 'oklch(79.8% 0.16 70)',
-    400: 'oklch(75.1% 0.18 70)',
-    500: 'oklch(69.9% 0.2 70)',
-    600: 'oklch(62% 0.18 70)',
-    700: 'oklch(53% 0.16 70)',
-    800: 'oklch(42.2% 0.14 70)',
-    900: 'oklch(30.3% 0.12 70)',
-  },
-  
-  // Error/Danger
-  error: {
-    50: 'oklch(97.1% 0.04 20)',
-    100: 'oklch(92.9% 0.08 20)',
-    200: 'oklch(85.8% 0.12 20)',
-    300: 'oklch(77.2% 0.16 20)',
-    400: 'oklch(66.5% 0.2 20)',
-    500: 'oklch(59.7% 0.25 20)',
-    600: 'oklch(52.4% 0.23 20)',
-    700: 'oklch(44.7% 0.2 20)',
-    800: 'oklch(36.8% 0.17 20)',
-    900: 'oklch(28% 0.14 20)',
-  },
-  
-  // Accent
-  accent: {
-    50: 'oklch(96.8% 0.04 300)',
-    100: 'oklch(93% 0.08 300)',
-    200: 'oklch(85.5% 0.12 300)',
-    300: 'oklch(76.5% 0.15 300)',
-    400: 'oklch(70% 0.17 300)',
-    500: 'oklch(64.8% 0.18 300)',
-    600: 'oklch(57% 0.16 300)',
-    700: 'oklch(48.8% 0.15 300)',
-    800: 'oklch(40.2% 0.12 300)',
-    900: 'oklch(30.8% 0.1 300)',
-  },
-};
+/*
+ * Movexum brand tokens i TypeScript.
+ *
+ * Färgvärdena speglar exakt den grafiska profilen och hålls i synk med
+ * `tokens.css`. Hex är källan-av-sanning eftersom profilen anger hex/CMYK/RGB.
+ */
 
-// Typography
+export const movexumPalette = {
+  morkbla: '#002c40',
+  djupbla: '#005470',
+  bla: '#00a8de',
+  pastellBla: '#ebfafc',
+
+  morklila: '#452e75',
+  lila: '#6138b5',
+  ljuslila: '#8e6fd6',
+  pastellLila: '#e4dbfe',
+
+  morkgron: '#1d3a1f',
+  gron: '#4a7d4a',
+  ljusgron: '#88b48b',
+  pastellGron: '#d9eddd',
+
+  morkorange: '#4b2718',
+  orange: '#d67e47',
+  pastellOrange: '#f1e5df',
+
+  morkgul: '#ca9323',
+  gul: '#f0d22e',
+  pastellGul: '#f8f1da',
+
+  svart: '#121212',
+  vit: '#f2f2f2',
+} as const;
+
+export const colors = {
+  primary: {
+    50: '#f3eefe',
+    100: '#e4dbfe',
+    200: '#c9b6fb',
+    300: '#a98ce8',
+    400: '#8e6fd6',
+    500: '#6138b5',
+    600: '#532ea0',
+    700: '#452e75',
+    800: '#36215a',
+    900: '#221339',
+  },
+  accent: {
+    50: '#ebfafc',
+    100: '#c8eef9',
+    200: '#8fdcf2',
+    300: '#4fc4ea',
+    400: '#00a8de',
+    500: '#008abb',
+    600: '#006d96',
+    700: '#005470',
+    800: '#003d54',
+    900: '#002c40',
+  },
+  success: {
+    50: '#d9eddd',
+    100: '#b6dab9',
+    200: '#88b48b',
+    300: '#6a9c6e',
+    400: '#4a7d4a',
+    500: '#3c6a3c',
+    600: '#2f5530',
+    700: '#244524',
+    800: '#1d3a1f',
+    900: '#112112',
+  },
+  warning: {
+    50: '#f8f1da',
+    100: '#f1e5df',
+    200: '#f0d22e',
+    300: '#ca9323',
+    400: '#d67e47',
+    500: '#b86432',
+    600: '#8b4a26',
+    700: '#6b381c',
+    800: '#4b2718',
+    900: '#2e160d',
+  },
+  error: {
+    50: '#f1e5df',
+    100: '#e9c5b3',
+    200: '#d67e47',
+    300: '#b86432',
+    400: '#a04f24',
+    500: '#8b4a26',
+    600: '#6b381c',
+    700: '#4b2718',
+    800: '#36190f',
+    900: '#1f0d07',
+  },
+  neutral: {
+    50: '#f2f2f2',
+    100: '#e6e6e6',
+    200: '#cccccc',
+    300: '#a8a8a8',
+    400: '#828282',
+    500: '#5d5d5d',
+    600: '#404040',
+    700: '#2a2a2a',
+    800: '#1c1c1c',
+    900: '#121212',
+  },
+} as const;
+
 export const typography = {
-  fontSans: 'var(--font-sans, system-ui, sans-serif)',
-  fontSerif: 'var(--font-serif, Georgia, serif)',
-  fontMono: 'var(--font-mono, monospace)',
-  
+  fontHeading: 'var(--font-heading, "Sora Variable", system-ui, sans-serif)',
+  fontBody: 'var(--font-body, "Nunito Sans Variable", system-ui, sans-serif)',
+  fontMono: 'var(--font-mono, "JetBrains Mono Variable", monospace)',
+
   sizes: {
     xs: '0.75rem',
     sm: '0.875rem',
@@ -102,7 +124,7 @@ export const typography = {
     '4xl': '2.25rem',
     '5xl': '3rem',
   },
-  
+
   lineHeights: {
     tight: '1.25',
     snug: '1.375',
@@ -110,19 +132,19 @@ export const typography = {
     relaxed: '1.625',
     loose: '2',
   },
-};
+} as const;
 
-// Startup Phases (colors)
 export const startupPhases = {
-  idea: 'oklch(75% 0.18 300)', // Accent purple
-  pre_revenue: 'oklch(69.9% 0.2 70)', // Warning yellow
-  early_revenue: 'oklch(70.1% 0.18 130)', // Success green
-  growth: 'oklch(55.1% 0.2 270)', // Primary blue
-  scale: 'oklch(59.7% 0.25 20)', // Error red (passionate)
-  exit: 'oklch(50% 0.02 200)', // Neutral dark
-};
+  paus: '#5d5d5d',
+  inflode: movexumPalette.djupbla,
+  lead: movexumPalette.lila,
+  boost_chamber: movexumPalette.gron,
+  incubation: movexumPalette.gul,
+  prescale: movexumPalette.orange,
+  acceleration: movexumPalette.bla,
+  alumni: '#5d5d5d',
+} as const;
 
-// Spacing
 export const spacing = {
   xs: '0.25rem',
   sm: '0.5rem',
@@ -131,4 +153,4 @@ export const spacing = {
   xl: '2rem',
   '2xl': '3rem',
   '3xl': '4rem',
-};
+} as const;

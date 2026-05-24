@@ -1,93 +1,191 @@
+/*
+ * Movexum brand design tokens.
+ *
+ * Färgpaletten följer Movexums grafiska profil exakt.
+ *   - `--movexum-*`     Råa brand-färger (hex). Används där färgen INTE
+ *                       ska ändras mellan light/dark mode (t.ex. logotyp,
+ *                       fasta accentdetaljer).
+ *   - Semantiska tokens (canvas, surface, foreground, brand m.fl.)
+ *     mappas om i `.dark`-blocket. Använd dessa för all UI-yta.
+ */
+
 :root {
-  /* Primary */
-  --color-primary-50: oklch(96.9% 0.04 270);
-  --color-primary-100: oklch(93.9% 0.08 270);
-  --color-primary-200: oklch(85.9% 0.13 270);
-  --color-primary-300: oklch(76.4% 0.17 270);
-  --color-primary-400: oklch(65.6% 0.19 270);
-  --color-primary-500: oklch(55.1% 0.2 270);
-  --color-primary-600: oklch(49.4% 0.18 270);
-  --color-primary-700: oklch(42.2% 0.16 270);
-  --color-primary-800: oklch(35.8% 0.13 270);
-  --color-primary-900: oklch(28.4% 0.11 270);
+  /* === Movexum brand palette (raw hex) ============================== */
+  --movexum-morkbla: #002c40;
+  --movexum-djupbla: #005470;
+  --movexum-bla: #00a8de;
+  --movexum-pastell-bla: #ebfafc;
 
-  /* Neutral */
-  --color-neutral-50: oklch(99.5% 0.003 200);
-  --color-neutral-100: oklch(97% 0.008 200);
-  --color-neutral-200: oklch(92% 0.01 200);
-  --color-neutral-300: oklch(85% 0.015 200);
-  --color-neutral-400: oklch(75% 0.02 200);
-  --color-neutral-500: oklch(65% 0.02 200);
-  --color-neutral-600: oklch(50% 0.02 200);
-  --color-neutral-700: oklch(35% 0.02 200);
-  --color-neutral-800: oklch(25% 0.02 200);
-  --color-neutral-900: oklch(15% 0.015 200);
+  --movexum-morklila: #452e75;
+  --movexum-lila: #6138b5;
+  --movexum-ljuslila: #8e6fd6;
+  --movexum-pastell-lila: #e4dbfe;
 
-  /* Success */
-  --color-success-50: oklch(96.9% 0.04 130);
-  --color-success-100: oklch(93% 0.08 130);
-  --color-success-200: oklch(85.5% 0.12 130);
-  --color-success-300: oklch(76% 0.16 130);
-  --color-success-400: oklch(70.1% 0.18 130);
-  --color-success-500: oklch(63.7% 0.2 130);
-  --color-success-600: oklch(56% 0.18 130);
-  --color-success-700: oklch(47.2% 0.16 130);
-  --color-success-800: oklch(38.5% 0.13 130);
-  --color-success-900: oklch(28.6% 0.11 130);
+  --movexum-morkgron: #1d3a1f;
+  --movexum-gron: #4a7d4a;
+  --movexum-ljusgron: #88b48b;
+  --movexum-pastell-gron: #d9eddd;
 
-  /* Warning */
-  --color-warning-50: oklch(97.5% 0.04 70);
-  --color-warning-100: oklch(93.9% 0.08 70);
-  --color-warning-200: oklch(87.9% 0.12 70);
-  --color-warning-300: oklch(79.8% 0.16 70);
-  --color-warning-400: oklch(75.1% 0.18 70);
-  --color-warning-500: oklch(69.9% 0.2 70);
-  --color-warning-600: oklch(62% 0.18 70);
-  --color-warning-700: oklch(53% 0.16 70);
-  --color-warning-800: oklch(42.2% 0.14 70);
-  --color-warning-900: oklch(30.3% 0.12 70);
+  --movexum-morkorange: #4b2718;
+  --movexum-orange: #d67e47;
+  --movexum-pastell-orange: #f1e5df;
 
-  /* Error */
-  --color-error-50: oklch(97.1% 0.04 20);
-  --color-error-100: oklch(92.9% 0.08 20);
-  --color-error-200: oklch(85.8% 0.12 20);
-  --color-error-300: oklch(77.2% 0.16 20);
-  --color-error-400: oklch(66.5% 0.2 20);
-  --color-error-500: oklch(59.7% 0.25 20);
-  --color-error-600: oklch(52.4% 0.23 20);
-  --color-error-700: oklch(44.7% 0.2 20);
-  --color-error-800: oklch(36.8% 0.17 20);
-  --color-error-900: oklch(28% 0.14 20);
+  --movexum-morkgul: #ca9323;
+  --movexum-gul: #f0d22e;
+  --movexum-pastell-gul: #f8f1da;
 
-  /* Accent */
-  --color-accent-50: oklch(96.8% 0.04 300);
-  --color-accent-100: oklch(93% 0.08 300);
-  --color-accent-200: oklch(85.5% 0.12 300);
-  --color-accent-300: oklch(76.5% 0.15 300);
-  --color-accent-400: oklch(70% 0.17 300);
-  --color-accent-500: oklch(64.8% 0.18 300);
-  --color-accent-600: oklch(57% 0.16 300);
-  --color-accent-700: oklch(48.8% 0.15 300);
-  --color-accent-800: oklch(40.2% 0.12 300);
-  --color-accent-900: oklch(30.8% 0.1 300);
+  --movexum-svart: #121212;
+  --movexum-vit: #f2f2f2;
 
-  /* Startup Phases */
-  --color-phase-idea: oklch(75% 0.18 300);
-  --color-phase-pre-revenue: oklch(69.9% 0.2 70);
-  --color-phase-early-revenue: oklch(70.1% 0.18 130);
-  --color-phase-growth: oklch(55.1% 0.2 270);
-  --color-phase-scale: oklch(59.7% 0.25 20);
-  --color-phase-exit: oklch(50% 0.02 200);
+  /* === Semantic palette — primary (Movexum lila) ==================== */
+  --color-primary-50: #f3eefe;
+  --color-primary-100: #e4dbfe;
+  --color-primary-200: #c9b6fb;
+  --color-primary-300: #a98ce8;
+  --color-primary-400: #8e6fd6;
+  --color-primary-500: #6138b5;
+  --color-primary-600: #532ea0;
+  --color-primary-700: #452e75;
+  --color-primary-800: #36215a;
+  --color-primary-900: #221339;
+
+  /* === Semantic palette — accent (Movexum blå) ====================== */
+  --color-accent-50: #ebfafc;
+  --color-accent-100: #c8eef9;
+  --color-accent-200: #8fdcf2;
+  --color-accent-300: #4fc4ea;
+  --color-accent-400: #00a8de;
+  --color-accent-500: #008abb;
+  --color-accent-600: #006d96;
+  --color-accent-700: #005470;
+  --color-accent-800: #003d54;
+  --color-accent-900: #002c40;
+
+  /* === Semantic palette — success (Movexum grön) ==================== */
+  --color-success-50: #d9eddd;
+  --color-success-100: #b6dab9;
+  --color-success-200: #88b48b;
+  --color-success-300: #6a9c6e;
+  --color-success-400: #4a7d4a;
+  --color-success-500: #3c6a3c;
+  --color-success-600: #2f5530;
+  --color-success-700: #244524;
+  --color-success-800: #1d3a1f;
+  --color-success-900: #112112;
+
+  /* === Semantic palette — warning (Movexum gul/orange) ============== */
+  --color-warning-50: #f8f1da;
+  --color-warning-100: #f1e5df;
+  --color-warning-200: #f0d22e;
+  --color-warning-300: #ca9323;
+  --color-warning-400: #d67e47;
+  --color-warning-500: #b86432;
+  --color-warning-600: #8b4a26;
+  --color-warning-700: #6b381c;
+  --color-warning-800: #4b2718;
+  --color-warning-900: #2e160d;
+
+  /* === Semantic palette — error (varm orange-brun) ================= */
+  --color-error-50: #f1e5df;
+  --color-error-100: #e9c5b3;
+  --color-error-200: #d67e47;
+  --color-error-300: #b86432;
+  --color-error-400: #a04f24;
+  --color-error-500: #8b4a26;
+  --color-error-600: #6b381c;
+  --color-error-700: #4b2718;
+  --color-error-800: #36190f;
+  --color-error-900: #1f0d07;
+
+  /* === Semantic palette — neutral (svart/vit) ====================== */
+  --color-neutral-50: #f2f2f2;
+  --color-neutral-100: #e6e6e6;
+  --color-neutral-200: #cccccc;
+  --color-neutral-300: #a8a8a8;
+  --color-neutral-400: #828282;
+  --color-neutral-500: #5d5d5d;
+  --color-neutral-600: #404040;
+  --color-neutral-700: #2a2a2a;
+  --color-neutral-800: #1c1c1c;
+  --color-neutral-900: #121212;
+
+  /* === Semantic surface tokens (light mode) ========================
+   * Movexum OS · Startupkompass-skiftet (2026-05):
+   * Canvas är ren vit, paper-ytor neutrala (ingen blå-cast), ljusblå
+   * reserveras för information/länkar. Mörkblå (#002c40) är signatur-
+   * och brand-färg — lila finns kvar som sekundär accent.
+   */
+  --color-canvas: #ffffff;            /* Ren vit */
+  --color-canvas-subtle: #fafafa;     /* Paper — neutral */
+  --color-canvas-muted: #f4f4f5;      /* Paper-deep — neutral */
+  --color-surface: #ffffff;
+  --color-surface-elevated: #ffffff;
+  --color-border-default: #e5e5e5;
+  --color-border-strong: #d4d4d4;
+  --color-foreground: #0a0a0a;        /* Ink */
+  --color-foreground-muted: #3f3f3f;
+  --color-foreground-subtle: #737373;
+  --color-foreground-inverse: #fafafa;
+  --color-brand: #002c40;             /* Movexum mörkblå — primär */
+  --color-brand-hover: #003b54;
+  --color-brand-foreground: #ffffff;
+  --color-link: #005470;              /* Djupblå */
+  --color-ring: #002c40;
+
+  /* === Startup-faser (mappade mot brand) =========================== */
+  --color-phase-paus: #5d5d5d;            /* Neutral */
+  --color-phase-inflode: #005470;         /* Djupblå */
+  --color-phase-lead: #6138b5;            /* Movexum lila */
+  --color-phase-boost-chamber: #4a7d4a;   /* Movexum grön */
+  --color-phase-incubation: #f0d22e;      /* Movexum gul */
+  --color-phase-prescale: #d67e47;        /* Movexum orange */
+  --color-phase-acceleration: #00a8de;    /* Movexum blå */
+  --color-phase-alumni: #5d5d5d;          /* Neutral */
 }
 
+/* === Dark mode (klassbaserat på <html>) =============================
+ * Princip (2026-05-18): mörk canvas med en hyper-subtil kall ton
+ * (mörkblå tint som nästan inte syns). Rail/topbar/canvas delar
+ * samma bakgrund — ytan ska kännas som en enda yta. Linjer är
+ * nästan osynliga, djup skapas av mjuka skuggor istället. Lila
+ * är fortsatt sekundär accent men inte längre den dominerande
+ * brand-färgen i dark mode — ljusblå (#4fc4ea) tar över.
+ */
 .dark {
-  /* In dark mode, use darker variants of the same colors */
-  --color-primary-50: oklch(28.4% 0.11 270);
-  --color-primary-100: oklch(35.8% 0.13 270);
-  --color-primary-200: oklch(42.2% 0.16 270);
-  --color-primary-900: oklch(96.9% 0.04 270);
+  --color-canvas: #050608;
+  --color-canvas-subtle: #0a0c0f;
+  --color-canvas-muted: #0e1014;
+  --color-surface: #0a0c0f;
+  --color-surface-elevated: #14171c;
+  --color-border-default: #1a1d22;
+  --color-border-strong: #262a31;
+  --color-foreground: #ececec;
+  --color-foreground-muted: #b6bbc1;
+  --color-foreground-subtle: #7a7f86;
+  --color-foreground-inverse: #050608;
+  --color-brand: #4fc4ea;             /* Ljusblå — primär i dark mode */
+  --color-brand-hover: #6fd1ee;
+  --color-brand-foreground: #001825;
+  --color-link: #4fc4ea;
+  --color-ring: #4fc4ea;
 
-  --color-neutral-50: oklch(15% 0.015 200);
-  --color-neutral-100: oklch(25% 0.02 200);
-  --color-neutral-900: oklch(99.5% 0.003 200);
+  --color-primary-50: #14102a;
+  --color-primary-100: #1f1a3d;
+  --color-primary-900: #f3eefe;
+  --color-accent-50: #001825;
+  --color-accent-100: #002535;
+  --color-accent-900: #ebfafc;
+  --color-success-50: #0d1a0e;
+  --color-success-100: #152916;
+  --color-success-900: #d9eddd;
+  --color-warning-50: #1a0b05;
+  --color-warning-100: #2e150a;
+  --color-warning-900: #f8f1da;
+  --color-neutral-50: #0a0c0f;
+  --color-neutral-100: #0e1014;
+  --color-neutral-200: #1a1d22;
+  --color-neutral-300: #262a31;
+  --color-neutral-700: #b6bbc1;
+  --color-neutral-800: #d4d8dd;
+  --color-neutral-900: #ececec;
 }

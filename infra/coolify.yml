@@ -1,35 +1,39 @@
 # Coolify-konfiguration för Moveum platform
-# PocketBase: selvhostad backend med migrations + hooks
-# Web: Next.js-app (alternativt kan deployas direkt från GitHub)
+# PocketBase: byggs från egen Dockerfile med migrations + hooks inbakade
+# Web: Next.js-app byggd från apps/web/Dockerfile
+#
+# OBS: PocketBase tillämpar JS-migrations i
+# backend/pocketbase-schema/migrations/ automatiskt vid container-start.
+# När en ny migration lagts till MÅSTE pocketbase-containern startas
+# om i Coolify innan web-appen ser den nya collectionen — annars 404:ar
+# nya endpoints (t.ex. notifications_collection / user_mistral_connectors).
+# Verifiera i PB-admin /_/#/collections att senaste migrationen är applicerad.
 
 version: "3.8"
 
 services:
   pocketbase:
-    image: pocketbase/pocketbase:latest
+    build:
+      context: ../backend/pocketbase-schema
     container_name: moveum-pocketbase
-    command: pocketbase serve --http=0.0.0.0:8080
     restart: always
     ports:
       - "8080:8080"
     volumes:
-      # Data
+      # ENDAST data — migrations + hooks är inbakade i image:n
       - pb_data:/pb_data
-      # Migrations (JS)
-      - ./backend/pocketbase-schema/migrations:/pb_migrations
-      # Hooks (JS)
-      - ./backend/pocketbase-schema/hooks:/pb_hooks
     environment:
       POCKETBASE_ENCRYPTION_KEY: ${POCKETBASE_ENCRYPTION_KEY:-}
+      APP_ADMIN_INITIAL_PASSWORD: ${APP_ADMIN_INITIAL_PASSWORD:-}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
 
   web:
     build:
-      context: .
+      context: ..
       dockerfile: apps/web/Dockerfile
     container_name: moveum-web
     restart: always
@@ -37,7 +41,15 @@ services:
       - "3000:3000"
     environment:
       NEXT_PUBLIC_POCKETBASE_URL: http://pocketbase:8080
+      POCKETBASE_URL: http://pocketbase:8080
       NODE_ENV: production
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      # Superuser-credentials krävs för fallback-skapande av records när
+      # PB:s createRule failar transient (se workshops.ts). Sätt
+      # POCKETBASE_SUPERUSER_EMAIL/PASSWORD som secrets i Coolify
+      # web-applikationen — INTE i koden.
+      POCKETBASE_SUPERUSER_EMAIL: ${POCKETBASE_SUPERUSER_EMAIL:-}
+      POCKETBASE_SUPERUSER_PASSWORD: ${POCKETBASE_SUPERUSER_PASSWORD:-}
     depends_on:
       pocketbase:
         condition: service_healthy
@@ -45,4 +57,3 @@ services:
 volumes:
   pb_data:
     driver: local
-

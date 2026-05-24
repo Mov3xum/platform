@@ -1,20 +1,49 @@
-import type { Metadata } from "next";
-import "./globals.css";
+import type { Metadata, Viewport } from 'next';
+import { headers } from 'next/headers';
+import { Navbar } from '@/components/Navbar';
+import { ThemeScript } from '@/components/ThemeProvider';
+import { AppShell } from '@/components/AppShell';
+import { getCurrentUser } from '@/lib/auth.server';
+import './globals.css';
 
 export const metadata: Metadata = {
-  title: "Moveum Incubator Platform",
-  description: "Modulär plattform för Movexums inkubatorer",
+  title: 'Movexum Inkubatorplattform',
+  description: 'Modulär plattform för Movexums inkubatorer'
 };
 
-export default function RootLayout({
-  children,
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#000000' }
+  ]
+};
+
+export default async function RootLayout({
+  children
 }: {
   children: React.ReactNode;
 }) {
+  const user = await getCurrentUser();
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
+
   return (
     <html lang="sv" suppressHydrationWarning>
-      <body>
-        {children}
+      <head>
+        <ThemeScript nonce={nonce} />
+      </head>
+      <body className="min-h-screen bg-canvas text-foreground antialiased">
+        {user ? (
+          <AppShell user={user}>{children}</AppShell>
+        ) : (
+          <>
+            <Navbar user={null} />
+            {children}
+          </>
+        )}
       </body>
     </html>
   );

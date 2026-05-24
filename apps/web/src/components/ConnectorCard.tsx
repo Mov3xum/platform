@@ -1,0 +1,132 @@
+import Link from 'next/link';
+import { Pin, PinOff } from 'lucide-react';
+import {
+  deactivateConnectorFormAction,
+  toggleConnectorPinFormAction
+} from '@/lib/actions/connectors';
+import { Chip } from '@/components/proto';
+import { ConnectorLogo } from '@/components/ConnectorLogo';
+import {
+  ConnectorActivateButton,
+  ConnectorConfirmReadyButton
+} from '@/components/ConnectorActivateControls';
+
+export interface ConnectorCardProps {
+  kind: 'builtin' | 'mcp';
+  connectorId: string;
+  title: string;
+  blurb: string;
+  riskClass: 'minimal' | 'begränsad' | 'högrisk';
+  residency: string;
+  status: 'active' | 'disabled' | 'oauth_pending' | 'unactivated';
+  allowed: boolean;
+  notAllowedReason?: string;
+  requiresAuth?: boolean;
+  isPinned?: boolean;
+}
+
+// Återanvändbart connector-kort. Aktivering hanteras av en client-
+// component (för att kunna öppna Le Chat i ny flik synkront med
+// klicket). Avaktivering + pin går via vanliga form-actions.
+export function ConnectorCard({
+  kind,
+  connectorId,
+  title,
+  blurb,
+  riskClass,
+  residency,
+  status,
+  allowed,
+  notAllowedReason,
+  requiresAuth,
+  isPinned = false
+}: ConnectorCardProps) {
+  const isActive = status === 'active';
+  const isPending = status === 'oauth_pending';
+
+  const chatHref = `/integrationer/connectors/${kind}/${encodeURIComponent(connectorId)}`;
+
+  return (
+    <div className="flex flex-col rounded-2xl border border-default bg-surface p-4">
+      <div className="mb-3 flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-canvas-muted text-foreground">
+          <ConnectorLogo kind={kind} connectorId={connectorId} connectorName={title} size={22} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[14px] font-semibold text-foreground">{title}</div>
+          <div className="mt-0.5 flex flex-wrap gap-1.5">
+            <Chip mono>{kind === 'builtin' ? 'Built-in' : 'MCP'}</Chip>
+            <Chip mono>{residency}</Chip>
+            <Chip mono>{`risk: ${riskClass}`}</Chip>
+            {requiresAuth && <Chip mono>OAuth</Chip>}
+          </div>
+        </div>
+      </div>
+
+      <p className="mb-4 line-clamp-3 min-h-[3.6em] text-[12.5px] leading-relaxed text-foreground-muted">
+        {blurb}
+      </p>
+
+      <div className="mt-auto flex items-center justify-between gap-3">
+        {isActive ? (
+          <>
+            <Link
+              href={chatHref}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
+            >
+              Öppna chatt
+            </Link>
+            <div className="flex items-center gap-2">
+              <form action={toggleConnectorPinFormAction}>
+                <input type="hidden" name="kind" value={kind} />
+                <input type="hidden" name="connectorId" value={connectorId} />
+                <input type="hidden" name="pinned" value={isPinned ? 'false' : 'true'} />
+                <button
+                  type="submit"
+                  title={isPinned ? 'Lossa från sidmenyn' : 'Pinna till sidmenyn (max 6)'}
+                  className={
+                    'inline-flex h-7 w-7 items-center justify-center rounded-lg border transition ' +
+                    (isPinned
+                      ? 'border-brand bg-brand/10 text-brand'
+                      : 'border-default text-foreground-subtle hover:bg-canvas-subtle hover:text-foreground')
+                  }
+                >
+                  {isPinned ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5" />}
+                </button>
+              </form>
+              <form action={deactivateConnectorFormAction}>
+                <input type="hidden" name="kind" value={kind} />
+                <input type="hidden" name="connectorId" value={connectorId} />
+                <button
+                  type="submit"
+                  className="text-[12px] text-foreground-subtle underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  Avaktivera
+                </button>
+              </form>
+            </div>
+          </>
+        ) : isPending ? (
+          <div className="flex w-full flex-col gap-2">
+            <span className="text-[12px] text-foreground-muted">
+              Autentisera connectorn i Le Chat — klicka <strong>Klart!</strong> när du är klar.
+            </span>
+            <div className="flex justify-end">
+              <ConnectorConfirmReadyButton kind={kind} connectorId={connectorId} />
+            </div>
+          </div>
+        ) : allowed ? (
+          <ConnectorActivateButton
+            kind={kind}
+            connectorId={connectorId}
+            requiresAuth={requiresAuth === true}
+          />
+        ) : (
+          <span className="text-[12px] text-foreground-subtle">
+            {notAllowedReason || 'Inte tillåten i tenanten'}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}

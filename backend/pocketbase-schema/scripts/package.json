@@ -1,0 +1,9 @@
+{
+  "name": "pocketbase-setup-scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "pocketbase": "^0.21.0"
+  }
+}
