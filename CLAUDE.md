@@ -1038,9 +1038,11 @@ i `tool_runs` + `activities` + `ai_usage_events`.
 
 ### 12.4 Begränsningar
 
-- Bara portfölj-agenter (`requires_startup=false`) kan schemaläggas.
-  Per-startup-agenter skulle behöva en startup-relation på schemat
-  och en per-bolag-loop i runnern — inte i scope för MVP.
+- **Coordinator fan-out (Fas 5):** både portfölj-agenter (`ai_system_wide`)
+  och per-bolag-agenter (`ai_per_startup`) kan nu schemaläggas. En per-bolag-
+  agent fan-out:as i runnern (`executeScheduledRun` per aktivt bolag, capad
+  till `MAX_FANOUT=50`); en portfölj-agent kör en gång mot portföljkontexten.
+  `next_run_at` beräknas en gång per tick oavsett antal sub-körningar.
 - Cron-parsern stödjer 5-fält standard-syntax med `*`, tal, listor,
   intervall och stegvärden. Inga makron (`@daily` etc.), inga
   L/W/#-tillägg.
@@ -1522,4 +1524,21 @@ requires_startup, output_format).
 - **Begränsning (MVP):** version-pinning per körning (att låsa en run till
   en specifik version för reproducerbarhet) och en historik-vy i UI är
   inte i scope — snapshotten ger redan audit/återställningsunderlaget.
+
+### 16.7 Coordinator fan-out (schemalagda per-bolag-agenter)
+
+Fas 5. `runScheduledTool` (lib/scheduling/runner.ts) är refaktorerad: den
+delar upp en tick i en eller flera `executeScheduledRun`-anrop.
+
+- **Portfölj-agent** (`ai_system_wide`): en körning mot portföljkontexten
+  (som tidigare).
+- **Per-bolag-agent** (`ai_per_startup`): fan-out — en körning per AKTIVT
+  bolag (`status="active"`), capad till `MAX_FANOUT=50`. Varje sub-körning
+  får sin egen `tool_run` med per-bolag-kontext (`buildStartupContext`) och
+  loggas i `activities` + `ai_usage_events`.
+- `next_run_at` skrivs **en gång** per tick (`advanceSchedule`), oavsett
+  antal sub-körningar. Fel i en enskild sub-körning fäller inte hela ticken.
+- Lyfter den tidigare § 12.4-begränsningen; `upsertScheduleAction` tillåter
+  nu per-bolag-agenter (blockerade dem förut via `requires_startup`).
+- Inga skrivverktyg (read-only surface, § 16.3) — människa-i-loopen kvar.
 

@@ -84,12 +84,6 @@ export async function upsertScheduleAction(
   if (!canRunTool(user.roles, tool, { isLinkedStartup: false })) {
     return { error: 'Du saknar behörighet att köra detta verktyg.' };
   }
-  if (tool.requires_startup) {
-    return {
-      error:
-        'Schemaläggning stöds bara för portfölj-agenter (verktyg utan obligatoriskt bolag).'
-    };
-  }
   const isAiTool =
     tool.category === 'ai_per_startup' || tool.category === 'ai_system_wide';
   if (!isAiTool || !tool.prompt_template || !tool.model) {
@@ -97,6 +91,9 @@ export async function upsertScheduleAction(
       error: 'Endast aktiva AI-verktyg med systemprompt och modell kan schemaläggas.'
     };
   }
+  // ai_per_startup schemaläggs som fan-out över aktiva bolag (Fas 5,
+  // runnern förser varje sub-körning med ett bolag); ai_system_wide kör
+  // mot portföljkontexten. `requires_startup` blockerar därför inte längre.
 
   const nextRunAt = input.enabled
     ? computeNextRunAt(cron, new Date(), timezone).toISOString()
