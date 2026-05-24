@@ -143,3 +143,34 @@ export async function requireUser(): Promise<SessionUser> {
   }
   return user;
 }
+
+// Roller som ser staff-skalet (matchar /chatt-sidans staff-check).
+const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
+
+/**
+ * Öppen-redirect-skydd för `next`-parametern. Tillåter bara interna,
+ * absoluta paths — aldrig protokoll-relativa (`//evil.com`) eller externa
+ * URL:er. `next` härstammar från en query-param och är användarstyrd.
+ */
+export function sanitizeInternalPath(path: string | null | undefined): string | null {
+  if (!path || !path.startsWith('/')) return null;
+  if (path.startsWith('//') || path.startsWith('/\\')) return null;
+  return path;
+}
+
+/**
+ * Vart en användare ska landa efter inloggning. Landar ALLTID direkt på en
+ * sida som faktiskt renderar — aldrig på en redirect-shim (`/dashboard`) eller
+ * en sida som i sin tur redirectar för den aktuella rollen. En extra
+ * server-redirect efter login-actionens egen redirect gör att Next.js
+ * client Router Cache återanvänder det gamla utloggade skalet (ingen sidmeny),
+ * och logotyplänken i det skalet skickar tillbaka användaren till /login —
+ * dvs "utloggad". Genom att landa direkt undviker vi hela kedjan.
+ */
+export function postLoginPath(roles: Role[], requestedNext?: string | null): string {
+  const next = sanitizeInternalPath(requestedNext);
+  if (next) return next;
+  const isStaff = roles.some((r) => STAFF_ROLES.includes(r));
+  if (!isStaff && roles.includes('startup_member')) return '/inkorg';
+  return '/chatt';
+}
