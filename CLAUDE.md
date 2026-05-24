@@ -1412,3 +1412,73 @@ importer"). Flödet är preview → commit, speglar Bolagslista-importen
    implementerad — `kommun` importeras som frisktext. (Framtida
    förbättring; påverkar inte korrektheten.)
 
+---
+
+## 16. Agent-runtime (delad exekveringskärna)
+
+### 16.1 Översikt
+
+Tidigare hade AI-agenterna tre divergerande exekveringsvägar (toolbox
+engångsanrop, dashboardchattens tool-loop, schemalagda engångsanrop). De
+är nu unifierade kring **en delad agent-loop** så att samma RBAC,
+skrivgräns, PII-skydd och iterations-/token-skydd gäller överallt.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `apps/web/src/lib/ai/agent-runtime.ts` | `runAgentLoop` (reaktiv tool-use-loop) + `buildReadToolSurface` (read-only verktygsyta för autonoma körningar) |
+| `apps/web/src/lib/ai/tools.ts` | Verktygsdefinitioner + `dispatchToolCall` (read/write/memory) |
+| `apps/web/src/lib/actions/chat.ts` | Dashboardchatten (agent-actor → read+write+memory) |
+| `apps/web/src/lib/actions/tools.ts` | Toolbox-körningar (read-only + ev. memory_read för staff) |
+| `apps/web/src/lib/scheduling/runner.ts` | Schemalagda körningar (read-only + memory_read) |
+
+### 16.2 `runAgentLoop`
+
+Reaktiv loop: modellen får anropa verktyg, resultaten matas tillbaka,
+och loopen fortsätter tills ett textsvar ges eller `maxIterations`
+(default 4) nås — då tvingas ett slutsvar fram utan verktyg. Skyddar mot
+oändliga loopar/token-explosion (§10 robusthet). `conversation` muteras;
+`onUsage` låter varje anropare logga i `ai_usage_events` med rätt
+`surface`.
+
+### 16.3 Verktygsytor per körningstyp (människa-i-loopen)
+
+| Körning | Actor | Verktyg |
+|---|---|---|
+| Dashboardchatt (staff) | `agent` | `query/count_collection`, skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`), `memory_read` + `memory_write` |
+| Toolbox (staff) | — (read-only) | `query/count_collection`, `memory_read` |
+| Toolbox (icke-staff) | — (read-only) | `query/count_collection` |
+| Schemalagd | — (read-only) | `query/count_collection`, `memory_read` |
+
+**Princip (§10):** skrivverktyg exponeras BARA i den interaktiva chatten
+där en människa bekräftar varje åtgärd. Autonoma körningar (toolbox-
+engångskörning, schema) får **aldrig** skriva domändata — de föreslår i
+text. Vision-körningar (pixtral) kör verktygslöst (§13.5). PII-maskning,
+denylist och tenant-scope ärvs oförändrat från `lib/ai/schema.ts`
+(§9.3).
+
+### 16.4 Tvärsessions-minne (`agent_memory`)
+
+Migration `1700000079`. En liten nyckel/innehåll-store per tenant som
+låter agenter minnas slutsatser mellan körningar (motsvarar
+managed-agents memory stores, men EU-suveränt och striktare scope:at).
+
+- **Fält:** `tenant`, `startup` (valfritt per-bolag-scope, cascadeDelete),
+  `key` (≤200), `content` (≤8000), `created_by`/`updated_by`. Unikt index
+  `(tenant, startup, key)` → idempotent upsert.
+- **Verktyg:** `memory_read` (lista/läs) ges till alla staff-drivna
+  körningar; `memory_write` (upsert) kräver agent-actor → bara den
+  interaktiva staff-chatten.
+- **RBAC:** API-regler är staff-only (admin/incubator_lead/coach/mentor)
+  + tenant-match. Verktygen exponeras dessutom bara för staff-drivna
+  körningar (`includeMemory`-flaggan).
+- **GDPR §5:** `content` cappat; verktygsbeskrivningen instruerar
+  modellen att ALDRIG lagra personuppgifter (bara aggregerade
+  observationer). **Denylistad i `lib/ai/schema.ts`** så det generiska
+  `query_collection` aldrig exponerar minnet.
+- **GDPR art. 17:** `cascadeDelete` på `startup`; tenant-relation städas i
+  erasure-flödet (samma mönster som `tool_run_feedback`).
+- **Riskklass:** minimal (intern agent-scratchpad, ingen profilering av
+  individer).
+

@@ -459,7 +459,7 @@ async function runStaffChatWithTools(
     agentId
   };
 
-  const tools = buildChatTools(collections, { actor });
+  const tools = buildChatTools(collections, { actor, includeMemory: true });
 
   const today = new Date().toISOString().slice(0, 10);
   const identityBlock =

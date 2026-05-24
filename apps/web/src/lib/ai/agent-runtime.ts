@@ -167,7 +167,8 @@ export interface ReadToolSurface {
  */
 export async function buildReadToolSurface(
   pb: PocketBase,
-  tenantId: string
+  tenantId: string,
+  options: { includeMemory?: boolean } = {}
 ): Promise<ReadToolSurface | null> {
   let collections: Awaited<ReturnType<typeof getExposedCollections>>;
   try {
@@ -177,8 +178,10 @@ export async function buildReadToolSurface(
   }
   if (collections.length === 0) return null;
 
-  // Ingen actor → buildChatTools ger bara read-only-verktyg.
-  const tools = buildChatTools(collections);
+  // Ingen actor → buildChatTools ger bara read-only-verktyg (inkl.
+  // memory_read när includeMemory är satt; memory_write kräver agent-actor
+  // och ges därför aldrig i en autonom körning).
+  const tools = buildChatTools(collections, { includeMemory: options.includeMemory });
   return {
     tools,
     toolContext: { pb, tenantId, collections },

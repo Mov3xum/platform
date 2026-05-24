@@ -208,7 +208,9 @@ export async function runScheduledTool(
     // Read-only verktygsyta så schemalagda portfölj-agenter kan hämta
     // live-data autonomt (CLAUDE.md § 12). Inga skrivverktyg — autonoma
     // körningar saknar människa-i-loopen (§ 10).
-    const surface = await buildReadToolSurface(pb, schedule.tenant);
+    const surface = await buildReadToolSurface(pb, schedule.tenant, {
+      includeMemory: true
+    });
     const messages: MistralMessage[] = [
       {
         role: 'system',

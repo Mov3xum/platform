@@ -240,7 +240,9 @@ export async function startRunAction(runId: string): Promise<ToolActionState> {
         tool.prompt_template as string,
         built.contextObj
       );
-      const surface = await buildReadToolSurface(pb, user.tenant);
+      const surface = await buildReadToolSurface(pb, user.tenant, {
+        includeMemory: hasRole(user.roles, [...STAFF_ROLES])
+      });
       const loop = await runAgentLoop(
         [
           {
@@ -597,7 +599,9 @@ export async function runToolAction(formData: FormData): Promise<ToolActionState
       // bara LÄSA (ingen människa-i-loopen bekräftar skrivningar här).
       const surface =
         prepared.imageBlocks.length === 0
-          ? await buildReadToolSurface(pb, user.tenant)
+          ? await buildReadToolSurface(pb, user.tenant, {
+              includeMemory: hasRole(user.roles, [...STAFF_ROLES])
+            })
           : null;
 
       const systemContent = surface
