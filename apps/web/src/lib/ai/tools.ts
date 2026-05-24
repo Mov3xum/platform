@@ -235,7 +235,7 @@ export function buildChatTools(
   return tools;
 }
 
-interface ToolDispatchContext {
+export interface ToolDispatchContext {
   pb: PocketBase;
   tenantId: string;
   collections: ExposedCollection[];
