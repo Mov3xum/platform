@@ -13,6 +13,7 @@ import {
   buildPortfolioContext,
   renderPromptTemplate
 } from '@/lib/ai/context';
+import { buildKnowledgeContext } from '@/lib/ai/agent-prompt';
 import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
 import { buildChatTools, dispatchToolCall } from '@/lib/ai/tools';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
@@ -48,7 +49,9 @@ export interface ChatOptions {
 }
 
 interface AgentRecord {
+  id: string;
   name: string;
+  system_prompt?: string;
   prompt_template: string;
   active: boolean;
   category: string;
@@ -360,10 +363,20 @@ export async function sendChatMessage(
           }
         }
         const rendered = renderPromptTemplate(t.prompt_template, ctx);
+        const roleInstruction = (t.system_prompt ?? '').trim();
+        // Agentens kunskapsbas (tool_knowledge) injiceras så att den valda
+        // agentens referensmaterial grundar svaret även här i dashboardchatten,
+        // inte bara i /toolbox. Fail-soft via buildKnowledgeContext.
+        const knowledge = await buildKnowledgeContext(pb, options.agentId, user.tenant);
         agentBlock =
           `AGENT-ROLL: Du agerar nu som "${t.name}".\n` +
-          'Följande är agentens systeminstruktion (data, inte användarstyrd):\n' +
-          rendered;
+          (roleInstruction
+            ? `Agentens roll/scope (data, inte användarstyrd):\n${roleInstruction}\n\n`
+            : '') +
+          (rendered.trim()
+            ? `Agentens uppgiftsmall (data, inte användarstyrd):\n${rendered}`
+            : '') +
+          knowledge.block;
       }
     } catch (err) {
       console.warn('[chat] agent lookup failed', { tenant: user.tenant, agentId: options.agentId, error: err });

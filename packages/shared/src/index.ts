@@ -226,6 +226,36 @@ export interface KnowledgeSourceRef {
   id: string;
 }
 
+// Per-agent kunskapsbas (referensmaterial). En rad = en uppladdad fil knuten
+// till en `tools`-agent. Texten extraheras/sanering/cachas vid uppladdning
+// (`extracted_text`) och injiceras i prompten vid varje körning. Migration
+// 1700000080.
+export interface ToolKnowledge {
+  id: string;
+  tenant: string;
+  tool: string;
+  title?: string;
+  filename: string;
+  mime?: string;
+  size_bytes?: number;
+  file?: string; // PB-filnamn
+  extracted_text?: string;
+  char_count?: number;
+  redacted?: boolean;
+  sort_order?: number;
+  created_by?: string;
+  created: string;
+  updated: string;
+}
+
+// Loggas i tool_runs.input.knowledge_used per körning (EU AI Act art. 13 —
+// transparens om vilket referensmaterial som matade svaret).
+export interface KnowledgeSourceUsed {
+  id: string;
+  title: string;
+  char_count: number;
+}
+
 export interface Tool {
   id: string;
   tenant: string;
@@ -234,6 +264,10 @@ export interface Tool {
   description?: string;
   category: ToolCategory;
   icon?: string;
+  // Agentens roll/scope — går i Mistral SYSTEM-rollen, alltid bakom den
+  // immutabla säkerhetspreamblen. Skilt från prompt_template (datamall i
+  // USER-meddelandet). Bara admin/incubator_lead får sätta det.
+  system_prompt?: string;
   prompt_template?: string;
   model?: ToolModel;
   requires_startup: boolean;
