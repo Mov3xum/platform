@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { getCurrentUser } from '@/lib/auth.server';
+import { getCurrentUser, postLoginPath } from '@/lib/auth.server';
 import { Logo } from '@/components/Logo';
 import { LoginForm } from './LoginForm';
 
@@ -14,10 +14,10 @@ export default async function LoginPage({
 }) {
   const user = await getCurrentUser();
   const params = await searchParams;
-  const next = params.next || '/dashboard';
+  const next = params.next ?? '';
 
   if (user) {
-    redirect(next);
+    redirect(postLoginPath(user.roles, next));
   }
 
   return (
