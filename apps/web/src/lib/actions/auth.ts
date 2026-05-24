@@ -4,8 +4,7 @@ import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import PocketBase from 'pocketbase';
-import type { Role } from '@platform/shared';
-import { AUTH_COOKIE, postLoginPath } from '@/lib/auth.server';
+import { AUTH_COOKIE } from '@/lib/auth.server';
 import { generateVerificationToken, parseVerificationToken } from '@/lib/verification-token';
 import { sendVerificationEmail } from '@/lib/email';
 import { checkRateLimit, recordFailure, clearFailures } from '@/lib/rate-limit';
@@ -76,7 +75,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   try {
     const email = String(formData.get('email') || '').trim();
     const password = String(formData.get('password') || '');
-    const requestedNext = String(formData.get('next') || '');
+    const next = String(formData.get('next') || '/dashboard');
 
     if (!email || !password) {
       return { error: 'E-post och lösenord krävs.' };
@@ -174,15 +173,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     // though the destination page re-renders as authenticated.
     revalidatePath('/', 'layout');
 
-    // Landa direkt på en sida som renderar för rollen — aldrig via en
-    // redirect-shim. En extra redirect efter detta gör att det utloggade
-    // skalet (ingen sidmeny) ligger kvar i client-cachen. postLoginPath
-    // sanerar även `next` (öppen-redirect-skydd).
-    const userRoles = (Array.isArray(m?.roles)
-      ? (m.roles as unknown[]).filter((r): r is string => typeof r === 'string')
-      : []) as Role[];
-
-    redirect(postLoginPath(userRoles, requestedNext));
+    redirect(next);
   } catch (outerErr: unknown) {
     // Re-throw NEXT_REDIRECT so Next.js can process the redirect normally.
     if (
