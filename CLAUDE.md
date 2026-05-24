@@ -1482,3 +1482,23 @@ managed-agents memory stores, men EU-suveränt och striktare scope:at).
 - **Riskklass:** minimal (intern agent-scratchpad, ingen profilering av
   individer).
 
+### 16.5 Kvalitetsverifiering (grader-pass)
+
+Migration `1700000080` lägger `verify_rubric` (text) på `tools`. När en
+agent har en rubrik kör dess autonoma körningar (toolbox + schema)
+`runAgentLoopVerified` i stället för `runAgentLoop`: efter svaret
+poängsätter ett separat Mistral-anrop (`gradeAgainstRubric`) svaret mot
+rubriken, och vid underkänt matas feedbacken tillbaka som en data-turn så
+agenten reviderar (upp till en gång). Run-nivå "continuous improvement",
+motsvarar managed-agents outcomes.
+
+- **Människa-i-loopen:** auto-publicerar aldrig — höjer bara utkastets
+  kvalitet inför mänsklig granskning (CLAUDE.md § 10; EU AI Act art. 72).
+- **Fail-open:** en granskare vars JSON inte kan tolkas blockerar aldrig
+  svaret (returnerar pass).
+- **Kostnad:** grader-anropen räknas in i `ai_usage_events` via samma
+  `onUsage`-hook. Tom rubrik = ingen extra kostnad (default).
+- **Konfiguration:** sätts i agentformuläret (`ToolForm`, bara
+  admin/incubator_lead) eller via PB-admin. Lagras i `tools.verify_rubric`
+  (typad i `@platform/shared`).
+

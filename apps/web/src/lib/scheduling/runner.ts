@@ -2,7 +2,12 @@ import 'server-only';
 import PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { estimateCostUsd, type MistralMessage } from '@/lib/ai/mistral';
-import { runAgentLoop, buildReadToolSurface } from '@/lib/ai/agent-runtime';
+import {
+  runAgentLoop,
+  runAgentLoopVerified,
+  buildReadToolSurface,
+  type AgentLoopUsage
+} from '@/lib/ai/agent-runtime';
 import {
   buildStartupContext,
   buildPortfolioContext,
@@ -221,7 +226,7 @@ export async function runScheduledTool(
 
     let tokensIn = 0;
     let tokensOut = 0;
-    const loop = await runAgentLoop(messages, {
+    const baseLoopOptions = {
       models: [selectedModel],
       tools: surface?.tools,
       toolContext:
@@ -230,11 +235,19 @@ export async function runScheduledTool(
           tenantId: schedule.tenant,
           collections: []
         },
-      onUsage: (u) => {
+      onUsage: (u: AgentLoopUsage) => {
         tokensIn += u.tokensIn;
         tokensOut += u.tokensOut;
       }
-    });
+    };
+    const verifyRubric =
+      typeof tool.verify_rubric === 'string' ? tool.verify_rubric.trim() : '';
+    const loop = verifyRubric
+      ? await runAgentLoopVerified(messages, {
+          ...baseLoopOptions,
+          rubric: verifyRubric
+        })
+      : await runAgentLoop(messages, baseLoopOptions);
     const resultText = loop.text;
     const costUsd = estimateCostUsd(selectedModel, tokensIn, tokensOut);
     const completedAt = new Date().toISOString();

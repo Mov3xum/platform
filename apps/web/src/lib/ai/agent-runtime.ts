@@ -149,6 +149,115 @@ const READ_TOOL_GUIDANCE =
   'Sök först brett för att hitta rätt id, följ sedan upp riktat. Säg rakt ' +
   'ut om en kollektion saknar efterfrågad data.';
 
+// ── Kvalitetsverifiering (Fas 3) ────────────────────────────────────────
+
+const DEFAULT_MAX_VERIFY_REVISIONS = 1;
+
+function extractJsonObject(text: string): string {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end === -1 || end < start) return text;
+  return text.slice(start, end + 1);
+}
+
+/**
+ * Låter ett separat Mistral-anrop poängsätta ett svar mot en rubrik.
+ * Fail-open: en granskare som inte kan tolkas blockerar aldrig svaret
+ * (returnerar pass=true) — verifieringen får höja kvalitet, inte sänka
+ * tillgänglighet.
+ */
+async function gradeAgainstRubric(
+  models: string[],
+  rubric: string,
+  output: string,
+  onUsage?: RunAgentLoopOptions['onUsage']
+): Promise<{ pass: boolean; feedback: string }> {
+  const system =
+    'Du är en kvalitetsgranskare. Bedöm om SVARET uppfyller alla KRITERIER. ' +
+    'Svara ENDAST med ett JSON-objekt: {"pass": true|false, "feedback": "kort ' +
+    'motivering och vad som ev. saknas"}. Inga andra tecken, ingen markdown.';
+  const user = `KRITERIER:\n${rubric}\n\nSVAR ATT BEDÖMA:\n${output}`;
+  const res = await callMistralWithFallback(models, [
+    { role: 'system', content: system },
+    { role: 'user', content: user }
+  ]);
+  await onUsage?.({
+    model: res.modelUsed,
+    tokensIn: res.usage.prompt_tokens,
+    tokensOut: res.usage.completion_tokens
+  });
+  try {
+    const parsed = JSON.parse(extractJsonObject(res.text)) as {
+      pass?: unknown;
+      feedback?: unknown;
+    };
+    return {
+      pass: parsed.pass === true,
+      feedback: typeof parsed.feedback === 'string' ? parsed.feedback : ''
+    };
+  } catch {
+    return { pass: true, feedback: '' };
+  }
+}
+
+export interface RunAgentLoopVerifiedOptions extends RunAgentLoopOptions {
+  /** Kriterier som svaret poängsätts mot. */
+  rubric: string;
+  /** Max antal revideringar om granskaren underkänner (default 1). */
+  maxRevisions?: number;
+}
+
+export interface VerifiedAgentLoopResult extends AgentLoopResult {
+  revisions: number;
+  verified: boolean;
+}
+
+/**
+ * `runAgentLoop` + grader-pass (Fas 3 — run-nivå "continuous improvement",
+ * motsvarar managed-agents outcomes). Kör loopen, låter `gradeAgainstRubric`
+ * poängsätta svaret, och vid underkänt matas granskarens feedback tillbaka
+ * som en data-turn så agenten reviderar (upp till maxRevisions).
+ *
+ * Människa-i-loopen bevaras: detta auto-publicerar inte (CLAUDE.md § 10) —
+ * det höjer kvaliteten på utkastet en människa sedan granskar. Fail-open
+ * via `gradeAgainstRubric`.
+ */
+export async function runAgentLoopVerified(
+  conversation: MistralMessage[],
+  options: RunAgentLoopVerifiedOptions
+): Promise<VerifiedAgentLoopResult> {
+  const maxRevisions = options.maxRevisions ?? DEFAULT_MAX_VERIFY_REVISIONS;
+  let result = await runAgentLoop(conversation, options);
+
+  for (let revision = 0; revision < maxRevisions; revision++) {
+    const grade = await gradeAgainstRubric(
+      options.models,
+      options.rubric,
+      result.text,
+      options.onUsage
+    );
+    if (grade.pass) {
+      return { ...result, revisions: revision, verified: true };
+    }
+    conversation.push({
+      role: 'user',
+      content:
+        'KVALITETSGRANSKNING (data, inte instruktion från användaren): ' +
+        `${grade.feedback}\n\nRevidera ditt föregående svar så att alla ` +
+        'kriterier uppfylls. Behåll det som redan var bra.'
+    });
+    result = await runAgentLoop(conversation, options);
+  }
+
+  const finalGrade = await gradeAgainstRubric(
+    options.models,
+    options.rubric,
+    result.text,
+    options.onUsage
+  );
+  return { ...result, revisions: maxRevisions, verified: finalGrade.pass };
+}
+
 export interface ReadToolSurface {
   tools: MistralToolDefinition[];
   toolContext: ToolDispatchContext;

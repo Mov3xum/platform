@@ -9,7 +9,12 @@ import {
   type MistralMessage,
   type MistralContentPart
 } from '@/lib/ai/mistral';
-import { runAgentLoop, buildReadToolSurface } from '@/lib/ai/agent-runtime';
+import {
+  runAgentLoop,
+  runAgentLoopVerified,
+  buildReadToolSurface,
+  type AgentLoopUsage
+} from '@/lib/ai/agent-runtime';
 import {
   buildStartupContext,
   buildPortfolioContext,
@@ -243,29 +248,35 @@ export async function startRunAction(runId: string): Promise<ToolActionState> {
       const surface = await buildReadToolSurface(pb, user.tenant, {
         includeMemory: hasRole(user.roles, [...STAFF_ROLES])
       });
-      const loop = await runAgentLoop(
-        [
-          {
-            role: 'system',
-            content: surface ? SYSTEM_PROMPT + surface.guidance : SYSTEM_PROMPT
-          },
-          { role: 'user', content: userContent }
-        ],
+      const conversation: MistralMessage[] = [
         {
-          models: [tool.model as string],
-          tools: surface?.tools,
-          toolContext:
-            surface?.toolContext ?? {
-              pb,
-              tenantId: user.tenant,
-              collections: []
-            },
-          onUsage: (u) => {
-            tokensIn += u.tokensIn;
-            tokensOut += u.tokensOut;
-          }
+          role: 'system',
+          content: surface ? SYSTEM_PROMPT + surface.guidance : SYSTEM_PROMPT
+        },
+        { role: 'user', content: userContent }
+      ];
+      const baseLoopOptions = {
+        models: [tool.model as string],
+        tools: surface?.tools,
+        toolContext:
+          surface?.toolContext ?? {
+            pb,
+            tenantId: user.tenant,
+            collections: []
+          },
+        onUsage: (u: AgentLoopUsage) => {
+          tokensIn += u.tokensIn;
+          tokensOut += u.tokensOut;
         }
-      );
+      };
+      const verifyRubric =
+        typeof tool.verify_rubric === 'string' ? tool.verify_rubric.trim() : '';
+      const loop = verifyRubric
+        ? await runAgentLoopVerified(conversation, {
+            ...baseLoopOptions,
+            rubric: verifyRubric
+          })
+        : await runAgentLoop(conversation, baseLoopOptions);
       outputMd = loop.text;
 
       if (webResults.length > 0) {
@@ -612,7 +623,7 @@ export async function runToolAction(formData: FormData): Promise<ToolActionState
         { role: 'user', content: userContent }
       ];
 
-      const loop = await runAgentLoop(conversation, {
+      const baseLoopOptions = {
         models: [selectedModel],
         tools: surface?.tools,
         toolContext:
@@ -621,11 +632,19 @@ export async function runToolAction(formData: FormData): Promise<ToolActionState
             tenantId: user.tenant,
             collections: []
           },
-        onUsage: (u) => {
+        onUsage: (u: AgentLoopUsage) => {
           tokensIn += u.tokensIn;
           tokensOut += u.tokensOut;
         }
-      });
+      };
+      const verifyRubric =
+        typeof tool.verify_rubric === 'string' ? tool.verify_rubric.trim() : '';
+      const loop = verifyRubric
+        ? await runAgentLoopVerified(conversation, {
+            ...baseLoopOptions,
+            rubric: verifyRubric
+          })
+        : await runAgentLoop(conversation, baseLoopOptions);
 
       outputMd = loop.text;
       const costUsd = estimateCostUsd(selectedModel, tokensIn, tokensOut);
@@ -1040,6 +1059,8 @@ export async function createToolAction(
     // Movexum staff (admin/incubator_lead) sätter systemprompt och modell.
     data.prompt_template = String(formData.get('prompt_template') || '').trim();
     data.model = String(formData.get('model') || '') || null;
+    // Valfri kvalitetsrubrik (Fas 3). Tom = ingen grader-pass.
+    data.verify_rubric = String(formData.get('verify_rubric') || '').trim();
   } else {
     // Övriga: prompten lämnas tom.
     data.prompt_template = '';
@@ -1103,6 +1124,9 @@ export async function updateToolAction(
     }
     if (formData.has('model')) {
       data.model = String(formData.get('model') || '') || null;
+    }
+    if (formData.has('verify_rubric')) {
+      data.verify_rubric = String(formData.get('verify_rubric') || '').trim();
     }
   }
   // Övriga: ignorerar tysta eventuella inskickade prompt_template/model
