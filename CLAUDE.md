@@ -1502,3 +1502,24 @@ motsvarar managed-agents outcomes.
   admin/incubator_lead) eller via PB-admin. Lagras i `tools.verify_rubric`
   (typad i `@platform/shared`).
 
+### 16.6 Versionering av agent-konfiguration
+
+Migration `1700000081` skapar `tool_versions` — en **oföränderlig**
+snapshot-historik. `snapshotToolVersion()` (lib/actions/tools.ts) skrivs
+vid varje `createToolAction`/`updateToolAction`: nästa versionsnummer +
+en PII-fri snapshot av konfigurationen (name, category, model,
+prompt_template, verify_rubric, web_sources, roles_allowed,
+requires_startup, output_format).
+
+- **EU AI Act art. 11 / CLAUDE.md § 10.1:** detta ÄR den versionerade
+  tekniska dokumentationen per AI-verktyg (modellval, systemprompt,
+  utvärderingskriterier över tid).
+- **ISO 27001 A.8.32:** raderna är oföränderliga (update/delete =
+  endast superuser) så historiken inte kan skrivas om. Unikt index
+  `(tool, version)`.
+- **Best-effort:** ett versioneringsfel blockerar aldrig spara-flödet
+  (loggas, sväljs).
+- **Begränsning (MVP):** version-pinning per körning (att låsa en run till
+  en specifik version för reproducerbarhet) och en historik-vy i UI är
+  inte i scope — snapshotten ger redan audit/återställningsunderlaget.
+
