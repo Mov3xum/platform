@@ -1,13 +1,22 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState } from 'react';
+import { useActionState, useEffect } from 'react';
 import { loginAction, type LoginState } from '@/lib/actions/auth';
 
 const initialState: LoginState = {};
 
 export function LoginForm({ next }: { next: string }) {
   const [state, formAction, pending] = useActionState(loginAction, initialState);
+
+  // Hård navigering efter lyckad inloggning så att rot-layouten byggs om
+  // från servern (sidmenyn/AppShell dyker upp). En mjuk redirect skulle
+  // återanvända det cachade utloggade skalet.
+  useEffect(() => {
+    if (state?.success && state.redirectTo) {
+      window.location.assign(state.redirectTo);
+    }
+  }, [state]);
 
   return (
     <form action={formAction} className="space-y-5">
@@ -46,10 +55,10 @@ export function LoginForm({ next }: { next: string }) {
 
       <button
         type="submit"
-        disabled={pending}
+        disabled={pending || Boolean(state?.success)}
         className="inline-flex w-full items-center justify-center rounded-full bg-brand px-6 py-3 text-sm font-semibold text-brand-foreground shadow-lg shadow-movexum-lila/20 transition hover:bg-brand-hover dark:shadow-movexum-lila/30 disabled:opacity-60"
       >
-        {pending ? 'Loggar in…' : 'Logga in'}
+        {pending || state?.success ? 'Loggar in…' : 'Logga in'}
       </button>
 
       <p className="text-center text-sm text-foreground-muted">
