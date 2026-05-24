@@ -1,11 +1,8 @@
 import 'server-only';
 import PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
-import {
-  callMistral,
-  estimateCostUsd,
-  type MistralMessage
-} from '@/lib/ai/mistral';
+import { estimateCostUsd, type MistralMessage } from '@/lib/ai/mistral';
+import { runAgentLoop, buildReadToolSurface } from '@/lib/ai/agent-runtime';
 import {
   buildStartupContext,
   buildPortfolioContext,
@@ -208,14 +205,35 @@ export async function runScheduledTool(
       web: webForPrompt
     });
 
+    // Read-only verktygsyta så schemalagda portfölj-agenter kan hämta
+    // live-data autonomt (CLAUDE.md § 12). Inga skrivverktyg — autonoma
+    // körningar saknar människa-i-loopen (§ 10).
+    const surface = await buildReadToolSurface(pb, schedule.tenant);
     const messages: MistralMessage[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      {
+        role: 'system',
+        content: surface ? SYSTEM_PROMPT + surface.guidance : SYSTEM_PROMPT
+      },
       { role: 'user', content: renderedPrompt }
     ];
 
-    const result = await callMistral(selectedModel, messages);
-    const tokensIn = result.usage.prompt_tokens;
-    const tokensOut = result.usage.completion_tokens;
+    let tokensIn = 0;
+    let tokensOut = 0;
+    const loop = await runAgentLoop(messages, {
+      models: [selectedModel],
+      tools: surface?.tools,
+      toolContext:
+        surface?.toolContext ?? {
+          pb,
+          tenantId: schedule.tenant,
+          collections: []
+        },
+      onUsage: (u) => {
+        tokensIn += u.tokensIn;
+        tokensOut += u.tokensOut;
+      }
+    });
+    const resultText = loop.text;
     const costUsd = estimateCostUsd(selectedModel, tokensIn, tokensOut);
     const completedAt = new Date().toISOString();
 
@@ -224,7 +242,7 @@ export async function runScheduledTool(
       { role: 'user', content: renderedPrompt, at: startedAtIso },
       {
         role: 'assistant',
-        content: result.text,
+        content: resultText,
         model: selectedModel,
         tokens_in: tokensIn,
         tokens_out: tokensOut,
@@ -235,7 +253,7 @@ export async function runScheduledTool(
 
     await pb.collection('tool_runs').update(runId, {
       status: 'succeeded',
-      output_md: result.text,
+      output_md: resultText,
       model: selectedModel,
       tokens_in: tokensIn,
       tokens_out: tokensOut,

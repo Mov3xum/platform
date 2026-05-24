@@ -9,6 +9,7 @@ import {
   type MistralMessage,
   type MistralContentPart
 } from '@/lib/ai/mistral';
+import { runAgentLoop, buildReadToolSurface } from '@/lib/ai/agent-runtime';
 import {
   buildStartupContext,
   buildPortfolioContext,
@@ -239,13 +240,31 @@ export async function startRunAction(runId: string): Promise<ToolActionState> {
         tool.prompt_template as string,
         built.contextObj
       );
-      const result = await callMistral(tool.model as string, [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userContent }
-      ]);
-      outputMd = result.text;
-      tokensIn = result.usage.prompt_tokens;
-      tokensOut = result.usage.completion_tokens;
+      const surface = await buildReadToolSurface(pb, user.tenant);
+      const loop = await runAgentLoop(
+        [
+          {
+            role: 'system',
+            content: surface ? SYSTEM_PROMPT + surface.guidance : SYSTEM_PROMPT
+          },
+          { role: 'user', content: userContent }
+        ],
+        {
+          models: [tool.model as string],
+          tools: surface?.tools,
+          toolContext:
+            surface?.toolContext ?? {
+              pb,
+              tenantId: user.tenant,
+              collections: []
+            },
+          onUsage: (u) => {
+            tokensIn += u.tokensIn;
+            tokensOut += u.tokensOut;
+          }
+        }
+      );
+      outputMd = loop.text;
 
       if (webResults.length > 0) {
         const existingInput =
@@ -572,16 +591,39 @@ export async function runToolAction(formData: FormData): Promise<ToolActionState
           ? [{ type: 'text', text: fullUserText }, ...prepared.imageBlocks]
           : fullUserText;
 
-      const mistralMessages: MistralMessage[] = [
-        { role: 'system', content: SYSTEM_PROMPT },
+      // Read-only verktygsyta — bara för text-körningar. Vision-modeller
+      // (pixtral) saknar tillförlitligt verktygsstöd (CLAUDE.md § 13.5),
+      // så bild-körningar kör verktygslöst som tidigare. Agenten får
+      // bara LÄSA (ingen människa-i-loopen bekräftar skrivningar här).
+      const surface =
+        prepared.imageBlocks.length === 0
+          ? await buildReadToolSurface(pb, user.tenant)
+          : null;
+
+      const systemContent = surface
+        ? SYSTEM_PROMPT + surface.guidance
+        : SYSTEM_PROMPT;
+      const conversation: MistralMessage[] = [
+        { role: 'system', content: systemContent },
         { role: 'user', content: userContent }
       ];
 
-      const result = await callMistral(selectedModel, mistralMessages);
+      const loop = await runAgentLoop(conversation, {
+        models: [selectedModel],
+        tools: surface?.tools,
+        toolContext:
+          surface?.toolContext ?? {
+            pb,
+            tenantId: user.tenant,
+            collections: []
+          },
+        onUsage: (u) => {
+          tokensIn += u.tokensIn;
+          tokensOut += u.tokensOut;
+        }
+      });
 
-      outputMd = result.text;
-      tokensIn = result.usage.prompt_tokens;
-      tokensOut = result.usage.completion_tokens;
+      outputMd = loop.text;
       const costUsd = estimateCostUsd(selectedModel, tokensIn, tokensOut);
       const turnIso = new Date().toISOString();
 

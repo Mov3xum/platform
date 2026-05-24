@@ -1,10 +1,12 @@
 import 'server-only';
+import type PocketBase from 'pocketbase';
 import {
   callMistralWithFallback,
   type MistralMessage,
   type MistralToolDefinition
 } from './mistral';
-import { dispatchToolCall, type ToolDispatchContext } from './tools';
+import { buildChatTools, dispatchToolCall, type ToolDispatchContext } from './tools';
+import { buildSchemaSummary, getExposedCollections } from './schema';
 
 // Hur många gånger modellen får anropa verktyg och få tillbaka resultat
 // innan vi tvingar fram ett slutsvar. Skyddar mot oändliga loopar och
@@ -129,5 +131,57 @@ export async function runAgentLoop(
     iterations: maxIterations,
     toolCallsMade,
     hitIterationCap: true
+  };
+}
+
+// Instruktion som beskriver de READ-ONLY-verktygen för autonoma körningar
+// (toolbox-/schemalagda agenter). Till skillnad från dashboardchatten
+// (`STAFF_TOOL_GUIDANCE` i chat.ts) exponeras INGA skrivverktyg här —
+// autonoma körningar saknar människa-i-loopen som bekräftar varje
+// skrivning (CLAUDE.md § 10, människa-i-loopen). De får bara läsa.
+const READ_TOOL_GUIDANCE =
+  '\n\nDu kan LÄSA live-data från plattformen via verktyg:\n' +
+  '- `query_collection`: fråga en PocketBase-kollektion (tenant-scope och ' +
+  'PII-maskning läggs på automatiskt server-side). Använd när du behöver ' +
+  'konkreta aktuella data — gissa aldrig.\n' +
+  '- `count_collection`: räkna rader som matchar ett filter.\n' +
+  'Du kan INTE skriva — föreslå ändringar i text så avgör en människa. ' +
+  'Sök först brett för att hitta rätt id, följ sedan upp riktat. Säg rakt ' +
+  'ut om en kollektion saknar efterfrågad data.';
+
+export interface ReadToolSurface {
+  tools: MistralToolDefinition[];
+  toolContext: ToolDispatchContext;
+  /** Schema-sammanfattning + verktygsinstruktion att appenda i system-prompten. */
+  guidance: string;
+}
+
+/**
+ * Bygger en READ-ONLY-verktygsyta för autonoma agentkörningar: de
+ * exponerade kollektionerna (med PII-maskning/denylist från `schema.ts`),
+ * `query_collection`/`count_collection` (inga skrivverktyg, eftersom
+ * `buildChatTools` utan agent-actor utelämnar dem), samt en
+ * system-prompt-instruktion + schema-sammanfattning. Returnerar null om
+ * inga kollektioner kan exponeras (t.ex. superuser-credentials saknas) —
+ * då faller anroparen tillbaka på en verktygslös körning.
+ */
+export async function buildReadToolSurface(
+  pb: PocketBase,
+  tenantId: string
+): Promise<ReadToolSurface | null> {
+  let collections: Awaited<ReturnType<typeof getExposedCollections>>;
+  try {
+    collections = await getExposedCollections();
+  } catch {
+    return null;
+  }
+  if (collections.length === 0) return null;
+
+  // Ingen actor → buildChatTools ger bara read-only-verktyg.
+  const tools = buildChatTools(collections);
+  return {
+    tools,
+    toolContext: { pb, tenantId, collections },
+    guidance: READ_TOOL_GUIDANCE + `\n\n${buildSchemaSummary(collections)}`
   };
 }
