@@ -375,7 +375,7 @@ export default function DashboardChat({
           <div className="flex items-center justify-between text-[12px] font-medium text-movexum-morklila">
             <span className="inline-flex items-center gap-1.5">
               <Icon name="sparkle" size={12} />
-              Djupt jobb körs — planerar, hämtar data och sammanställer ett utkast…
+              Djupdykning pågår — planerar, hämtar data och sammanställer ett utkast…
             </span>
             <span>{deepProgress}%</span>
           </div>
@@ -421,7 +421,7 @@ export default function DashboardChat({
         onKeyDown={handleKey}
         placeholder={
           deepMode
-            ? 'Beskriv vad det djupa jobbet ska göra (planeras och körs i flera steg)…'
+            ? 'Beskriv vad djupdykningen ska göra (planeras och körs i flera steg)…'
             : activeAgent
               ? `Fråga ${activeAgent.name}…`
               : 'Fråga om portföljen, ett bolag eller en aktivitet…'
@@ -518,10 +518,10 @@ export default function DashboardChat({
                 ? 'bg-movexum-lila text-movexum-vit shadow-sm shadow-movexum-svart/10'
                 : 'border border-default text-foreground-subtle hover:border-strong hover:text-foreground'
             }`}
-            title="Djupt jobb: planerar, hämtar data i flera steg och sammanställer ett utkast (ev. dokument) i tråden"
+            title="Djupdykning: planerar, hämtar data i flera steg och sammanställer ett utkast (ev. dokument) i tråden"
           >
             <Icon name="sparkle" size={12} />
-            Djupt jobb
+            Djupdykning
           </button>
         </div>
         <button

@@ -84,7 +84,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, initialTh
         const msgs = await getThreadMessagesAction(deepJob.threadId);
         if (msgs.messages) setMessages(toUiMessages(msgs.messages));
         await refreshThreads();
-        if (status === 'failed') setError(res.jobError || 'Det djupa jobbet misslyckades.');
+        if (status === 'failed') setError(res.jobError || 'Djupdykningen misslyckades.');
       }
     }, 3000);
     return () => clearInterval(timer);
@@ -93,7 +93,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, initialTh
   async function startDeep(instruction: string) {
     const clean = instruction.trim();
     if (!clean) {
-      setError('Beskriv vad det djupa jobbet ska göra.');
+      setError('Beskriv vad djupdykningen ska göra.');
       return;
     }
     setError(null);
