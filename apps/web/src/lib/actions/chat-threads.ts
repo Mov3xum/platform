@@ -3,19 +3,11 @@
 import { revalidatePath } from 'next/cache';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { estimateCostUsd } from '@/lib/ai/mistral';
-import {
-  runStaffChatTurn,
-  generateChatTitle,
-  buildWebBlock,
-  buildAgentBlock,
-  DEFAULT_CHAT_WEB_SOURCES
-} from '@/lib/ai/staff-chat';
-import { normalizeAttachments, type ChatAttachment } from '@/lib/ai/chat-input';
+import { loadOwnedThread, executeThreadTurn } from '@/lib/ai/thread-turn';
+import type { ChatAttachment } from '@/lib/ai/chat-input';
 import type { ChatThread, ToolRunMessage } from '@platform/shared';
 
 const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
-const MAX_CHAT_TURNS = 20; // max user-turns per tråd
 const MAX_TITLE = 200;
 
 export interface ThreadListItem {
@@ -90,20 +82,9 @@ async function requireStaff() {
   return user;
 }
 
-/** Laddar en tråd och verifierar ägarskap + tenant (defense-in-depth). */
-async function getOwnedThread(
-  pb: import('pocketbase').default,
-  threadId: string,
-  user: { id: string; tenant: string }
-): Promise<ChatThread | null> {
-  try {
-    const t = (await pb.collection('chat_threads').getOne(threadId)) as unknown as ChatThread;
-    if (t.owner !== user.id || t.tenant !== user.tenant || t.deleted_at) return null;
-    return t;
-  } catch {
-    return null;
-  }
-}
+// Ägar-/tenant-verifierad laddning bor i den delade thread-turn-modulen så
+// streaming-endpointen återanvänder exakt samma kontroll.
+const getOwnedThread = loadOwnedThread;
 
 export async function createThreadAction(agentId?: string): Promise<ThreadActionResult> {
   const user = await requireStaff();
@@ -247,10 +228,11 @@ export interface SendThreadOptions {
 }
 
 /**
- * Persistent ersättare för efemära sendChatMessage: kör en staff-chatt-turn
- * och sparar hela samtalet i `chat_threads.messages`. Genererade dokument
- * (generate_document) bifogas assistant-svaret som nedladdnings-chips och
- * sparas i ägarens privata user_files.
+ * Persistent (icke-streamande) chatt-turn. Streaming-vägen
+ * (`/api/chat/stream`) är default i UI:t; denna server-action är fallbacken
+ * (och bakåtkompatibel) och delar exakt samma turn-/persistenslogik via
+ * `executeThreadTurn`. Genererade dokument bifogas svaret som
+ * nedladdnings-chips och sparas i ägarens privata user_files.
  */
 export async function sendThreadMessageAction(
   threadId: string,
@@ -263,94 +245,5 @@ export async function sendThreadMessageAction(
   const t = await getOwnedThread(pb, threadId, user);
   if (!t) return { error: 'Tråden hittades inte.' };
 
-  const existing: ToolRunMessage[] = Array.isArray(t.messages) ? t.messages : [];
-  const userTurns = existing.filter((m) => m.role === 'user').length;
-  if (userTurns >= MAX_CHAT_TURNS) {
-    return { error: `Max ${MAX_CHAT_TURNS} turer per chatt. Starta en ny chatt.` };
-  }
-
-  const att = normalizeAttachments(options.attachments);
-  if (att.error) return { error: att.error };
-
-  const typed = String(userText || '').trim();
-  if (!typed && att.images.length === 0 && !att.textBlock) {
-    return { error: 'Meddelandet är tomt.' };
-  }
-
-  // Historik → user/assistant-turer (systemet byggs färskt i motorn).
-  const history = existing
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content.slice(0, 4000) }));
-
-  const displayText =
-    typed || (att.images.length + (att.textBlock ? 1 : 0) > 1 ? '(bilagor skickade)' : '(bilaga skickad)');
-  // Text-bilagor injiceras i modell-prompten men persisteras inte som filer.
-  const promptText = displayText + att.textBlock;
-  const userMessages = [...history, { role: 'user' as const, content: promptText }];
-
-  const webBlock = options.includeWebContext
-    ? await buildWebBlock(pb, DEFAULT_CHAT_WEB_SOURCES)
-    : '';
-  const agentBlock = t.agent ? await buildAgentBlock(pb, user, t.agent) : '';
-
-  // Sätt en kort, beskrivande titel utifrån första prompten. Körs parallellt
-  // med själva svaret så den inte lägger till serie-latens. generateChatTitle
-  // sväljer egna fel (resolver null) → ingen unhandled rejection vid early return.
-  const needsTitle = !(t.title && t.title.trim());
-  const titlePromise = needsTitle
-    ? generateChatTitle(pb, user, typed || displayText)
-    : Promise.resolve<string | null>(null);
-
-  const turn = await runStaffChatTurn(pb, user, {
-    userMessages,
-    webBlock,
-    agentBlock,
-    images: att.images,
-    agentId: t.agent,
-    includeDocuments: true,
-    ownerUserId: user.id,
-    chatThreadId: threadId,
-    surface: 'dashboard_chat'
-  });
-
-  if (!turn.ok) return { error: turn.error };
-
-  const nowIso = new Date().toISOString();
-  const userMsg: ToolRunMessage = { role: 'user', content: displayText, at: nowIso };
-  const assistantMsg: ToolRunMessage = {
-    role: 'assistant',
-    content: turn.result.text,
-    model: turn.result.model || undefined,
-    tokens_in: turn.result.tokensIn,
-    tokens_out: turn.result.tokensOut,
-    cost_usd: estimateCostUsd(turn.result.model || 'mistral-large-latest', turn.result.tokensIn, turn.result.tokensOut),
-    generated_files: turn.result.generatedFiles.length > 0 ? turn.result.generatedFiles : undefined,
-    at: new Date().toISOString()
-  };
-
-  const updatedMessages = [...existing, userMsg, assistantMsg];
-  let title = t.title && t.title.trim() ? t.title : '';
-  if (needsTitle) {
-    const aiTitle = await titlePromise;
-    const basis = typed || displayText;
-    title = aiTitle || basis.replace(/\s+/g, ' ').trim().slice(0, 80);
-  }
-  if (!title) title = 'Ny chatt';
-
-  try {
-    await pb.collection('chat_threads').update(threadId, {
-      messages: updatedMessages,
-      title,
-      status: 'active',
-      model: turn.result.model || t.model || null,
-      tokens_in: (t.tokens_in || 0) + turn.result.tokensIn,
-      tokens_out: (t.tokens_out || 0) + turn.result.tokensOut,
-      cost_estimate_usd: (t.cost_estimate_usd || 0) + (assistantMsg.cost_usd || 0),
-      last_message_at: new Date().toISOString()
-    });
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Kunde inte spara svaret.' };
-  }
-
-  return { messages: updatedMessages };
+  return executeThreadTurn(pb, user, t, userText, options);
 }
