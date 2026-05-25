@@ -236,6 +236,9 @@ export interface Tool {
   icon?: string;
   prompt_template?: string;
   model?: ToolModel;
+  // Valfri kvalitetsrubrik (Fas 3). När satt grader-poängsätts svaret mot
+  // rubriken och agenten reviderar vid underkänt (människa-i-loopen kvar).
+  verify_rubric?: string;
   requires_startup: boolean;
   roles_allowed: Role[];
   output_format?: ToolOutputFormat;

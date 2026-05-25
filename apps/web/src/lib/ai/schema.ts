@@ -45,6 +45,9 @@ const MAX_RELATION_DEPTH = 3;
  *   • compass_security_events — säkerhetsaudit (ip_hash, actor).
  *   • agent_actions           — mutationsaudit (before/after-värden kan
  *                               innehålla godtyckligt fältinnehåll).
+ *   • agent_memory            — agenternas tvärsessions-minne; nås bara via
+ *                               det dedikerade, staff-gated memory_read-
+ *                               verktyget (Fas 2), aldrig via generisk query.
  *   • *_integrations / connectors — krypterade credentials/OAuth-tokens.
  *
  * Detta är defense-in-depth: själva fältmaskningen nedan fångar PII per
@@ -62,6 +65,7 @@ const COLLECTION_DENYLIST = new Set<string>([
   'compass_responses',
   'compass_security_events',
   'agent_actions',
+  'agent_memory',
   'tenant_integrations',
   'user_app_integrations',
   'user_mistral_connectors'

@@ -262,6 +262,26 @@ export function ToolForm({ mode, tool, canEditPrompt = false }: ToolFormProps) {
         </p>
       </div>
 
+      {canEditPrompt && (
+        <div>
+          <label htmlFor="verify_rubric" className={labelClass}>
+            Kvalitetsrubrik (valfri)
+          </label>
+          <textarea
+            id="verify_rubric"
+            name="verify_rubric"
+            rows={4}
+            defaultValue={tool?.verify_rubric ?? ''}
+            placeholder="Lämna tomt för ingen verifiering. När satt poängsätter en granskar-pass svaret mot dessa kriterier och agenten reviderar vid underkänt. Ex: 'Innehåller konkreta nästa steg. Nämner IRL-nivå. Max 300 ord.'"
+            className={`mt-1 text-xs ${inputClass}`}
+          />
+          <p className="mt-1 text-xs text-foreground-subtle">
+            Kör en grader-pass efter agentens svar (Fas 3). Auto-publicerar
+            inte — höjer bara kvaliteten på utkastet du sedan granskar.
+          </p>
+        </div>
+      )}
+
       <div>
         <p className={labelClass}>Tillåtna roller</p>
         <div className="mt-2 grid grid-cols-2 gap-2">

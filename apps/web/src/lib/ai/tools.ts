@@ -7,6 +7,7 @@ import {
   type ExposedCollection
 } from './schema';
 import type { MistralToolCall, MistralToolDefinition } from './mistral';
+import { escFilter } from '@/lib/pb-filter';
 import {
   agentWritableFields,
   agentCreatableCollections,
@@ -16,6 +17,11 @@ import {
   type Actor,
   type StartupWritableField
 } from '@/lib/core/write';
+
+const AGENT_MEMORY_COLLECTION = 'agent_memory';
+const MAX_MEMORY_KEY = 200;
+const MAX_MEMORY_CONTENT = 8000;
+const MAX_MEMORY_ROWS = 50;
 
 const MAX_RESULT_ROWS = 50;
 const MAX_FIELD_LENGTH = 400;
@@ -37,6 +43,13 @@ const MAX_EXPAND_LENGTH = 200;
  */
 export interface BuildToolsOptions {
   actor?: Actor;
+  /**
+   * Exponera agentens tvärsessions-minne. `memory_read` läggs till när
+   * detta är true; `memory_write` bara när actor dessutom är en agent
+   * (interaktiv staff-chatt). Sätt bara true för staff-drivna körningar —
+   * collectionens API-regler är staff-only (migration 1700000079).
+   */
+  includeMemory?: boolean;
 }
 
 export function buildChatTools(
@@ -232,10 +245,63 @@ export function buildChatTools(
     }
   }
 
+  // Tvärsessions-minne (Fas 2). memory_read är read-only och kan ges till
+  // autonoma staff-körningar; memory_write kräver agent-actor (interaktiv
+  // staff-chatt med människa-i-loopen).
+  if (options.includeMemory) {
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'memory_read',
+        description:
+          'Läser agentens tvärsessions-minne för denna tenant. Utan `key` ' +
+          'listas alla minnesnycklar med innehåll; med `key` returneras just ' +
+          'den noteringen. Använd för att minnas tidigare slutsatser eller ' +
+          'pågående trådar mellan körningar.',
+        parameters: {
+          type: 'object',
+          properties: {
+            key: {
+              type: 'string',
+              description: 'Valfri nyckel att läsa. Lämna tomt för att lista allt.'
+            }
+          }
+        }
+      }
+    });
+    if (options.actor?.kind === 'agent') {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'memory_write',
+          description:
+            'Sparar/uppdaterar en notering i agentens tvärsessions-minne (per ' +
+            'tenant). Använd för slutsatser värda att minnas till nästa körning. ' +
+            'Lagra ALDRIG personuppgifter — bara aggregerade observationer. ' +
+            'Skriver över en befintlig nyckel.',
+          parameters: {
+            type: 'object',
+            properties: {
+              key: {
+                type: 'string',
+                description: 'Kort nyckel/rubrik (max 200 tecken), t.ex. "portfölj/risker".'
+              },
+              content: {
+                type: 'string',
+                description: 'Innehåll att spara (max 8000 tecken).'
+              }
+            },
+            required: ['key', 'content']
+          }
+        }
+      });
+    }
+  }
+
   return tools;
 }
 
-interface ToolDispatchContext {
+export interface ToolDispatchContext {
   pb: PocketBase;
   tenantId: string;
   collections: ExposedCollection[];
@@ -401,8 +467,95 @@ export async function dispatchToolCall(
       return runCreateStartupActivity(args, ctx);
     case 'update_activity_field':
       return runUpdateActivityField(args, ctx);
+    case 'memory_read':
+      return runMemoryRead(args, ctx);
+    case 'memory_write':
+      return runMemoryWrite(args, ctx);
     default:
       return { ok: false, error: `Okänt verktyg: ${call.function.name}` };
+  }
+}
+
+async function runMemoryRead(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const key = typeof args.key === 'string' ? args.key.trim() : '';
+  let filter = `tenant = "${escFilter(ctx.tenantId)}"`;
+  if (key) filter += ` && key = "${escFilter(key)}"`;
+  try {
+    const result = await ctx.pb
+      .collection(AGENT_MEMORY_COLLECTION)
+      .getList(1, MAX_MEMORY_ROWS, {
+        filter,
+        sort: '-updated',
+        fields: 'key,content,updated'
+      });
+    return {
+      ok: true,
+      data: {
+        count: result.totalItems,
+        items: result.items.map((m) => ({
+          key: m.key,
+          content: m.content,
+          updated: m.updated
+        }))
+      }
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte läsa minnet.'
+    };
+  }
+}
+
+async function runMemoryWrite(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const key = typeof args.key === 'string' ? args.key.trim() : '';
+  const content = typeof args.content === 'string' ? args.content : '';
+  if (!key) return { ok: false, error: 'key saknas.' };
+  if (key.length > MAX_MEMORY_KEY) {
+    return { ok: false, error: `key för lång (max ${MAX_MEMORY_KEY} tecken).` };
+  }
+  if (!content.trim()) return { ok: false, error: 'content saknas.' };
+  if (content.length > MAX_MEMORY_CONTENT) {
+    return { ok: false, error: `content för långt (max ${MAX_MEMORY_CONTENT} tecken).` };
+  }
+
+  const filter = `tenant = "${escFilter(ctx.tenantId)}" && key = "${escFilter(key)}"`;
+  try {
+    const existing = await ctx.pb
+      .collection(AGENT_MEMORY_COLLECTION)
+      .getFirstListItem(filter)
+      .catch(() => null);
+    if (existing) {
+      await ctx.pb
+        .collection(AGENT_MEMORY_COLLECTION)
+        .update((existing as { id: string }).id, {
+          content,
+          updated_by: actor.id
+        });
+      return { ok: true, data: { key, action: 'updated' } };
+    }
+    await ctx.pb.collection(AGENT_MEMORY_COLLECTION).create({
+      tenant: ctx.tenantId,
+      key,
+      content,
+      created_by: actor.id,
+      updated_by: actor.id
+    });
+    return { ok: true, data: { key, action: 'created' } };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte spara minnet.'
+    };
   }
 }
 

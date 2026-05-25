@@ -10,6 +10,12 @@ import {
   type MistralContentPart
 } from '@/lib/ai/mistral';
 import {
+  runAgentLoop,
+  runAgentLoopVerified,
+  buildReadToolSurface,
+  type AgentLoopUsage
+} from '@/lib/ai/agent-runtime';
+import {
   buildStartupContext,
   buildPortfolioContext,
   renderPromptTemplate
@@ -34,8 +40,54 @@ import type {
 } from '@platform/shared';
 import { recordActivity } from './record-activity';
 import { logAiUsage } from '@/lib/ai/usage';
+import { escFilter } from '@/lib/pb-filter';
 
 const MAX_CHAT_TURNS = 20; // max user-turns per tool_run
+
+/**
+ * Snapshot:ar en agents nuvarande konfiguration som en ny, oföränderlig
+ * version i `tool_versions` (Fas 4 / EU AI Act art. 11 — versionerad
+ * teknisk dokumentation per AI-verktyg, CLAUDE.md § 10.1). Best-effort:
+ * ett versioneringsfel får aldrig blockera spara-flödet.
+ */
+async function snapshotToolVersion(
+  pb: import('pocketbase').default,
+  toolId: string,
+  tenant: string,
+  userId: string
+): Promise<void> {
+  try {
+    let nextVersion = 1;
+    const latest = await pb.collection('tool_versions').getList(1, 1, {
+      filter: `tool = "${escFilter(toolId)}"`,
+      sort: '-version',
+      fields: 'version'
+    });
+    if (latest.items.length > 0) {
+      nextVersion = ((latest.items[0].version as number) || 0) + 1;
+    }
+    const tool = await pb.collection('tools').getOne(toolId);
+    await pb.collection('tool_versions').create({
+      tenant,
+      tool: toolId,
+      version: nextVersion,
+      snapshot: {
+        name: tool.name,
+        category: tool.category,
+        model: tool.model ?? null,
+        prompt_template: tool.prompt_template ?? '',
+        verify_rubric: tool.verify_rubric ?? '',
+        web_sources: tool.web_sources ?? [],
+        requires_startup: !!tool.requires_startup,
+        roles_allowed: tool.roles_allowed ?? [],
+        output_format: tool.output_format ?? 'markdown'
+      },
+      created_by: userId
+    });
+  } catch (err) {
+    console.error('[snapshotToolVersion] failed (swallowed)', { toolId, err });
+  }
+}
 
 function resolveModel(
   override: string | undefined | null,
@@ -239,13 +291,39 @@ export async function startRunAction(runId: string): Promise<ToolActionState> {
         tool.prompt_template as string,
         built.contextObj
       );
-      const result = await callMistral(tool.model as string, [
-        { role: 'system', content: SYSTEM_PROMPT },
+      const surface = await buildReadToolSurface(pb, user.tenant, {
+        includeMemory: hasRole(user.roles, [...STAFF_ROLES])
+      });
+      const conversation: MistralMessage[] = [
+        {
+          role: 'system',
+          content: surface ? SYSTEM_PROMPT + surface.guidance : SYSTEM_PROMPT
+        },
         { role: 'user', content: userContent }
-      ]);
-      outputMd = result.text;
-      tokensIn = result.usage.prompt_tokens;
-      tokensOut = result.usage.completion_tokens;
+      ];
+      const baseLoopOptions = {
+        models: [tool.model as string],
+        tools: surface?.tools,
+        toolContext:
+          surface?.toolContext ?? {
+            pb,
+            tenantId: user.tenant,
+            collections: []
+          },
+        onUsage: (u: AgentLoopUsage) => {
+          tokensIn += u.tokensIn;
+          tokensOut += u.tokensOut;
+        }
+      };
+      const verifyRubric =
+        typeof tool.verify_rubric === 'string' ? tool.verify_rubric.trim() : '';
+      const loop = verifyRubric
+        ? await runAgentLoopVerified(conversation, {
+            ...baseLoopOptions,
+            rubric: verifyRubric
+          })
+        : await runAgentLoop(conversation, baseLoopOptions);
+      outputMd = loop.text;
 
       if (webResults.length > 0) {
         const existingInput =
@@ -572,16 +650,49 @@ export async function runToolAction(formData: FormData): Promise<ToolActionState
           ? [{ type: 'text', text: fullUserText }, ...prepared.imageBlocks]
           : fullUserText;
 
-      const mistralMessages: MistralMessage[] = [
-        { role: 'system', content: SYSTEM_PROMPT },
+      // Read-only verktygsyta — bara för text-körningar. Vision-modeller
+      // (pixtral) saknar tillförlitligt verktygsstöd (CLAUDE.md § 13.5),
+      // så bild-körningar kör verktygslöst som tidigare. Agenten får
+      // bara LÄSA (ingen människa-i-loopen bekräftar skrivningar här).
+      const surface =
+        prepared.imageBlocks.length === 0
+          ? await buildReadToolSurface(pb, user.tenant, {
+              includeMemory: hasRole(user.roles, [...STAFF_ROLES])
+            })
+          : null;
+
+      const systemContent = surface
+        ? SYSTEM_PROMPT + surface.guidance
+        : SYSTEM_PROMPT;
+      const conversation: MistralMessage[] = [
+        { role: 'system', content: systemContent },
         { role: 'user', content: userContent }
       ];
 
-      const result = await callMistral(selectedModel, mistralMessages);
+      const baseLoopOptions = {
+        models: [selectedModel],
+        tools: surface?.tools,
+        toolContext:
+          surface?.toolContext ?? {
+            pb,
+            tenantId: user.tenant,
+            collections: []
+          },
+        onUsage: (u: AgentLoopUsage) => {
+          tokensIn += u.tokensIn;
+          tokensOut += u.tokensOut;
+        }
+      };
+      const verifyRubric =
+        typeof tool.verify_rubric === 'string' ? tool.verify_rubric.trim() : '';
+      const loop = verifyRubric
+        ? await runAgentLoopVerified(conversation, {
+            ...baseLoopOptions,
+            rubric: verifyRubric
+          })
+        : await runAgentLoop(conversation, baseLoopOptions);
 
-      outputMd = result.text;
-      tokensIn = result.usage.prompt_tokens;
-      tokensOut = result.usage.completion_tokens;
+      outputMd = loop.text;
       const costUsd = estimateCostUsd(selectedModel, tokensIn, tokensOut);
       const turnIso = new Date().toISOString();
 
@@ -994,6 +1105,8 @@ export async function createToolAction(
     // Movexum staff (admin/incubator_lead) sätter systemprompt och modell.
     data.prompt_template = String(formData.get('prompt_template') || '').trim();
     data.model = String(formData.get('model') || '') || null;
+    // Valfri kvalitetsrubrik (Fas 3). Tom = ingen grader-pass.
+    data.verify_rubric = String(formData.get('verify_rubric') || '').trim();
   } else {
     // Övriga: prompten lämnas tom.
     data.prompt_template = '';
@@ -1005,6 +1118,7 @@ export async function createToolAction(
 
   try {
     const record = await pb.collection('tools').create(data);
+    await snapshotToolVersion(pb, record.id as string, user.tenant, user.id);
     revalidatePath('/toolbox');
     return { runId: record.id as string };
   } catch (err) {
@@ -1058,12 +1172,16 @@ export async function updateToolAction(
     if (formData.has('model')) {
       data.model = String(formData.get('model') || '') || null;
     }
+    if (formData.has('verify_rubric')) {
+      data.verify_rubric = String(formData.get('verify_rubric') || '').trim();
+    }
   }
   // Övriga: ignorerar tysta eventuella inskickade prompt_template/model
   // i payload (defense-in-depth om någon spoofar formuläret).
 
   try {
     await pb.collection('tools').update(toolId, data);
+    await snapshotToolVersion(pb, toolId, user.tenant, user.id);
     revalidatePath('/toolbox');
     revalidatePath(`/toolbox/${toolId}`);
     return {};
