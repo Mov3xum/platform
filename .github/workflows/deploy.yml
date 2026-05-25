@@ -29,7 +29,7 @@ jobs:
           zero_sha="0000000000000000000000000000000000000000"
 
           if [ "${{ github.event_name }}" != "push" ] || [ -z "${before_sha:-}" ] || [ "$before_sha" = "$zero_sha" ]; then
-            echo "No comparable push diff is available; defaulting PocketBase sync to false."
+            echo "Manual workflow_dispatch or missing before SHA; skipping automatic PocketBase sync."
             echo "pocketbase_changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
