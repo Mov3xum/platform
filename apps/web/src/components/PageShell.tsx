@@ -25,10 +25,26 @@ interface Props {
   children: ReactNode;
 }
 
-function isTabActive(pathname: string, href: string) {
+function tabMatches(pathname: string, href: string) {
   if (href === pathname) return true;
   if (href === '/') return false;
   return pathname.startsWith(href + '/');
+}
+
+/**
+ * Returnerar den href som ska markeras aktiv. När flera flikar matchar
+ * (t.ex. en rot-flik "/startups" och en underflik "/startups/inkubator")
+ * vinner den mest specifika (längsta) matchningen så att bara en flik blir
+ * aktiv.
+ */
+function resolveActiveTab(pathname: string, tabs: PageTab[]): string | null {
+  let best: string | null = null;
+  for (const t of tabs) {
+    if (tabMatches(pathname, t.href) && (best === null || t.href.length > best.length)) {
+      best = t.href;
+    }
+  }
+  return best;
 }
 
 export function PageShell({
@@ -72,8 +88,10 @@ export function PageShell({
 
             {tabs && tabs.length > 0 && (
               <nav className="mx-startup-tabs" aria-label="Vyer">
-                {tabs.map((t) => {
-                  const active = isTabActive(pathname, t.href);
+                {(() => {
+                  const activeHref = resolveActiveTab(pathname, tabs);
+                  return tabs.map((t) => {
+                  const active = t.href === activeHref;
                   return (
                     <Link
                       key={t.id}
@@ -86,7 +104,8 @@ export function PageShell({
                       ) : null}
                     </Link>
                   );
-                })}
+                  });
+                })()}
               </nav>
             )}
           </header>
