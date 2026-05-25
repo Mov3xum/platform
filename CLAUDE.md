@@ -303,13 +303,18 @@ från modulpaketen.
 PocketBase-instanser. `NODE_ENV` är `production` i båda deploy-containrarna
 och kan inte skilja dem åt, så varje Coolify-web-app sätter `MOVEXUM_ENV`
 (`staging`|`production`). `apps/web/src/lib/pb-url.ts` är **enda källan** för
-URL-resolution (`getServerPbUrl()` / `getPublicPbUrl()`): den väljer
-`POCKETBASE_URL_<MILJÖ>` / `NEXT_PUBLIC_POCKETBASE_URL_<MILJÖ>`, faller
-tillbaka på osuffixad `POCKETBASE_URL` (lokal dev) och slutligen
-`localhost:8080`. Default är **staging** när `MOVEXUM_ENV` saknas (en
-felkonfigurerad deploy pratar då med staging, inte produktionsdata). Lägg
-aldrig tillbaka duplicerad `process.env.POCKETBASE_URL`-logik i enskilda
-filer — använd helpern.
+URL-resolution (`getServerPbUrl()` / `getPublicPbUrl()`): server-URL:en
+väljer `POCKETBASE_URL_<MILJÖ>` → osuffixad `POCKETBASE_URL` (lokal dev) →
+`NEXT_PUBLIC_POCKETBASE_URL_<MILJÖ>` → osuffixad `NEXT_PUBLIC_POCKETBASE_URL`
+→ container-default (`pocketbase:8080` i prod, annars `localhost:8080`). De
+publika fallbacken finns så att en deploy som bara satt den publika
+PocketBase-URL:en (t.ex. via `.env.production`) ändå får server-actions att
+nå PB i stället för att tysta falla till container-defaulten; de dedikerade
+server-varianterna vinner när de är satta. `getPublicPbUrl()` väljer
+`NEXT_PUBLIC_*`-paret och faller annars tillbaka på server-URL:en. Default är
+**staging** när `MOVEXUM_ENV` saknas (en felkonfigurerad deploy pratar då med
+staging, inte produktionsdata). Lägg aldrig tillbaka duplicerad
+`process.env.POCKETBASE_URL`-logik i enskilda filer — använd helpern.
 
 ---
 
