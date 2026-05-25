@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateWorkshopAction, type WorkshopActionState } from '@/lib/actions/workshops';
 import type { Workshop, WorkshopArea, Role } from '@platform/shared';
@@ -24,9 +24,11 @@ export function WorkshopEditForm({ workshop, areas }: Props) {
   const boundAction = updateWorkshopAction.bind(null, workshop.id);
   const [state, formAction, pending] = useActionState(boundAction, {} as WorkshopActionState);
 
-  if (state.workshopId && !pending) {
-    router.push(`/education/workshops/${workshop.id}`);
-  }
+  useEffect(() => {
+    if (state.workshopId && !pending) {
+      router.push(`/education/workshops/${workshop.id}`);
+    }
+  }, [state.workshopId, pending, router, workshop.id]);
 
   const inputClass =
     'mt-1 w-full rounded-2xl border border-default bg-surface px-4 py-2.5 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';

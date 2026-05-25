@@ -3,6 +3,7 @@ import type PocketBase from 'pocketbase';
 import { estimateCostUsd } from './mistral';
 import {
   runStaffChatTurn,
+  generateChatTitle,
   buildWebBlock,
   buildAgentBlock,
   DEFAULT_CHAT_WEB_SOURCES
@@ -93,6 +94,14 @@ export async function executeThreadTurn(
     : '';
   const agentBlock = thread.agent ? await buildAgentBlock(pb, user, thread.agent) : '';
 
+  // Sätt en kort, beskrivande titel utifrån första prompten. Körs parallellt
+  // med själva svaret så den inte lägger till serie-latens. generateChatTitle
+  // sväljer egna fel (returnerar null) → ingen unhandled rejection vid early return.
+  const needsTitle = !(thread.title && thread.title.trim());
+  const titlePromise = needsTitle
+    ? generateChatTitle(pb, user, typed || displayText)
+    : Promise.resolve<string | null>(null);
+
   // Ackumulera verktygsstegen (per tool_call-id) för persistens och forwarda
   // dem live till klienten via options.onStep.
   const stepMap = new Map<string, AgentActivityStep>();
@@ -141,10 +150,13 @@ export async function executeThreadTurn(
   };
 
   const updatedMessages = [...existing, userMsg, assistantMsg];
-  const title =
-    thread.title && thread.title.trim()
-      ? thread.title
-      : displayText.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Ny chatt';
+  let title = thread.title && thread.title.trim() ? thread.title : '';
+  if (needsTitle) {
+    const aiTitle = await titlePromise;
+    const basis = typed || displayText;
+    title = aiTitle || basis.replace(/\s+/g, ' ').trim().slice(0, 80);
+  }
+  if (!title) title = 'Ny chatt';
 
   try {
     await pb.collection('chat_threads').update(thread.id, {
