@@ -321,6 +321,7 @@ export async function createWorkshopAction(
   try {
     const record = await pb.collection(PB_COLLECTIONS.workshops).create(payload);
     revalidatePath('/education');
+    revalidatePath('/education/workshops');
     return { workshopId: String(record.id) };
   } catch (err) {
     const pbError = toPbErrorLike(err);
@@ -338,6 +339,7 @@ export async function createWorkshopAction(
         try {
           const record = await suResult.pb.collection(PB_COLLECTIONS.workshops).create(payload);
           revalidatePath('/education');
+          revalidatePath('/education/workshops');
           return { workshopId: String(record.id) };
         } catch (fallbackErr) {
           logCreateFailure('workshop create fallback (superuser) failed', fallbackErr);
@@ -420,13 +422,65 @@ export async function updateWorkshopAction(
     }
   }
 
+  const revalidateAfterUpdate = () => {
+    revalidatePath('/education');
+    revalidatePath('/education/workshops');
+    revalidatePath(`/education/workshops/${workshopId}`);
+  };
+
   try {
     await pb.collection(PB_COLLECTIONS.workshops).update(workshopId, payload);
-    revalidatePath('/education');
-    revalidatePath(`/education/workshops/${workshopId}`);
+    revalidateAfterUpdate();
     return { workshopId };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera workshop.' };
+    const pbError = toPbErrorLike(err);
+    const message = String(err instanceof Error ? err.message : '');
+    const details = JSON.stringify(pbError.response ?? {});
+    const normalizedMessage = message.toLowerCase();
+    const normalizedDetails = details.toLowerCase();
+
+    console.error('[workshops] workshop update failed', {
+      pbUrl: PB_URL,
+      tenantId: user.tenant,
+      userId: user.id,
+      roles: user.roles,
+      workshopId,
+      statusCode: pbError.status,
+      message,
+      response: pbError.response ?? null
+    });
+
+    if (detectCreateRuleFailure(normalizedMessage, normalizedDetails, pbError.status, pbError.response)) {
+      const suResult = await getSuperuserPb();
+      if (suResult.ok) {
+        try {
+          await suResult.pb.collection(PB_COLLECTIONS.workshops).update(workshopId, payload);
+          revalidateAfterUpdate();
+          return { workshopId };
+        } catch (fallbackErr) {
+          console.error('[workshops] workshop update fallback (superuser) failed', {
+            pbUrl: PB_URL,
+            tenantId: user.tenant,
+            userId: user.id,
+            workshopId,
+            message: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr ?? '')
+          });
+          return { error: 'Kunde inte uppdatera workshop. Fallback via superuser misslyckades (PB-SU-FAIL).' };
+        }
+      }
+      if (suResult.reason === 'missing_credentials') {
+        return {
+          error:
+            'Kunde inte uppdatera workshop. Webbtjänsten saknar superuser-env (POCKETBASE_SUPERUSER_EMAIL/PASSWORD eller PB_SU_EMAIL/PB_SU_PASSWORD).'
+        };
+      }
+      return {
+        error:
+          'Kunde inte uppdatera workshop. Superuser-inloggning mot PocketBase misslyckades (PB-SU-AUTH).'
+      };
+    }
+
+    return { error: message || 'Kunde inte uppdatera workshop.' };
   }
 }
 
@@ -446,21 +500,83 @@ export async function deleteWorkshopAction(workshopId: string): Promise<Workshop
   }
   if (existing.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
 
-  try {
-    const assignments = await pb
+  // Delete linked assignments first, then the workshop itself. Parameterised so
+  // we can retry the whole sequence via superuser when PocketBase's per-request
+  // rule evaluation rejects a staff user (PB v0.23 bug — same as create/area).
+  const runDelete = async (client: PocketBase) => {
+    const assignments = await client
       .collection(PB_COLLECTIONS.workshopAssignments)
       .getFullList<{ id: string }>({
-        filter: `tenant = "${user.tenant}" && workshop = "${workshopId}"`,
+        filter: client.filter('tenant = {:tenant} && workshop = {:workshop}', {
+          tenant: user.tenant,
+          workshop: workshopId
+        }),
         fields: 'id'
       });
     for (const a of assignments) {
-      await pb.collection(PB_COLLECTIONS.workshopAssignments).delete(a.id);
+      await client.collection(PB_COLLECTIONS.workshopAssignments).delete(a.id);
     }
-    await pb.collection(PB_COLLECTIONS.workshops).delete(workshopId);
+    await client.collection(PB_COLLECTIONS.workshops).delete(workshopId);
+  };
+
+  try {
+    await runDelete(pb);
     revalidatePath('/education');
+    revalidatePath('/education/workshops');
     return { workshopId };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Kunde inte radera workshop.' };
+    const pbError = toPbErrorLike(err);
+    const message = String(err instanceof Error ? err.message : '');
+    const details = JSON.stringify(pbError.response ?? {});
+    const normalizedMessage = message.toLowerCase();
+    const normalizedDetails = details.toLowerCase();
+
+    console.error('[workshops] workshop delete failed', {
+      pbUrl: PB_URL,
+      tenantId: user.tenant,
+      userId: user.id,
+      roles: user.roles,
+      workshopId,
+      statusCode: pbError.status,
+      message,
+      response: pbError.response ?? null
+    });
+
+    if (detectCreateRuleFailure(normalizedMessage, normalizedDetails, pbError.status, pbError.response)) {
+      const suResult = await getSuperuserPb();
+      if (suResult.ok) {
+        try {
+          await runDelete(suResult.pb);
+          revalidatePath('/education');
+          revalidatePath('/education/workshops');
+          return { workshopId };
+        } catch (fallbackErr) {
+          const fallbackPbError = toPbErrorLike(fallbackErr);
+          console.error('[workshops] workshop delete fallback (superuser) failed', {
+            pbUrl: PB_URL,
+            tenantId: user.tenant,
+            userId: user.id,
+            workshopId,
+            statusCode: fallbackPbError.status,
+            message: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr ?? ''),
+            response: fallbackPbError.response ?? null
+          });
+          return { error: 'Kunde inte radera workshop. Fallback via superuser misslyckades (PB-SU-FAIL).' };
+        }
+      }
+      if (suResult.reason === 'missing_credentials') {
+        return {
+          error:
+            'Kunde inte radera workshop. Webbtjänsten saknar superuser-env (POCKETBASE_SUPERUSER_EMAIL/PASSWORD eller PB_SU_EMAIL/PB_SU_PASSWORD).'
+        };
+      }
+      return {
+        error:
+          'Kunde inte radera workshop. Superuser-inloggning mot PocketBase misslyckades (PB-SU-AUTH).'
+      };
+    }
+
+    return { error: message || 'Kunde inte radera workshop.' };
   }
 }
 
@@ -471,7 +587,7 @@ export async function deleteWorkshopFormAction(formData: FormData): Promise<void
   const result = await deleteWorkshopAction(id);
   if (!result.error) {
     const { redirect } = await import('next/navigation');
-    redirect('/education');
+    redirect('/education/workshops');
   }
 }
 
@@ -528,6 +644,7 @@ export async function createWorkshopAreaAction(
   try {
     await pb.collection(PB_COLLECTIONS.workshopAreas).create(payload);
     revalidatePath('/education');
+    revalidatePath('/education/areas');
     revalidatePath('/education/new');
     return { success: 'Område tillagt.' };
   } catch (err) {
@@ -559,6 +676,7 @@ export async function createWorkshopAreaAction(
         try {
           await superuserPbResult.pb.collection(PB_COLLECTIONS.workshopAreas).create(payload);
           revalidatePath('/education');
+          revalidatePath('/education/areas');
           revalidatePath('/education/new');
           return { success: 'Område tillagt.' };
         } catch (fallbackErr) {
@@ -657,6 +775,7 @@ export async function deleteWorkshopAreaAction(
     }
     await pb.collection(PB_COLLECTIONS.workshopAreas).delete(areaId);
     revalidatePath('/education');
+    revalidatePath('/education/areas');
     revalidatePath('/education/new');
     return { success: 'Område borttaget.' };
   } catch (err) {
@@ -679,6 +798,7 @@ export async function deleteWorkshopAreaAction(
 
     if (pbError.status === 404) {
       revalidatePath('/education');
+      revalidatePath('/education/areas');
       revalidatePath('/education/new');
       return { success: 'Område borttaget.' };
     }
@@ -703,6 +823,7 @@ export async function deleteWorkshopAreaAction(
           }
           await superuserPbResult.pb.collection(PB_COLLECTIONS.workshopAreas).delete(areaId);
           revalidatePath('/education');
+          revalidatePath('/education/areas');
           revalidatePath('/education/new');
           return { success: 'Område borttaget.' };
         } catch (fallbackErr) {
@@ -738,6 +859,115 @@ export async function deleteWorkshopAreaAction(
     }
 
     return { error: 'Kunde inte ta bort område. Se serverloggar för [workshops] delete workshop area failed.' };
+  }
+}
+
+export async function updateWorkshopAreaAction(
+  _prev: WorkshopAreaActionState,
+  formData: FormData
+): Promise<WorkshopAreaActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  const pb = await getServerPb();
+  const areaId = String(formData.get('areaId') || '').trim();
+  const name = String(formData.get('name') || '').trim();
+  if (!areaId) return { error: 'Område saknas.' };
+  if (!name) return { error: 'Ange ett områdesnamn.' };
+
+  // Verify the area belongs to the caller's tenant before mutating.
+  let areaRecord: { id: string; tenant: string } | null = null;
+  try {
+    areaRecord = await pb
+      .collection(PB_COLLECTIONS.workshopAreas)
+      .getOne<{ id: string; tenant: string }>(areaId);
+  } catch (err) {
+    const pbError = toPbErrorLike(err);
+    if (pbError.status === 404) return { error: 'Området finns inte längre.' };
+    console.error('[workshops] update workshop area lookup failed', {
+      pbUrl: PB_URL,
+      tenantId: user.tenant,
+      userId: user.id,
+      areaId,
+      statusCode: pbError.status,
+      message: err instanceof Error ? err.message : String(err ?? ''),
+      response: pbError.response ?? null
+    });
+    return { error: 'Kunde inte hämta området.' };
+  }
+  if (areaRecord.tenant !== user.tenant) {
+    return { error: 'Området tillhör inte din tenant.' };
+  }
+
+  const payload = { name };
+  const handleDuplicate = (normalized: string): WorkshopAreaActionState | null => {
+    if (normalized.includes('unique') || normalized.includes('idx_workshop_areas_tenant_name')) {
+      return { error: 'Det finns redan ett område med samma namn.' };
+    }
+    return null;
+  };
+
+  try {
+    await pb.collection(PB_COLLECTIONS.workshopAreas).update(areaId, payload);
+    revalidatePath('/education');
+    revalidatePath('/education/areas');
+    return { success: 'Område uppdaterat.' };
+  } catch (err) {
+    const pbError = toPbErrorLike(err);
+    const message = String(err instanceof Error ? err.message : '');
+    const details = JSON.stringify(pbError.response ?? {});
+    const normalizedMessage = message.toLowerCase();
+    const normalizedDetails = details.toLowerCase();
+    const normalized = `${normalizedMessage} ${normalizedDetails}`;
+
+    const duplicate = handleDuplicate(normalized);
+    if (duplicate) return duplicate;
+
+    if (detectCreateRuleFailure(normalizedMessage, normalizedDetails, pbError.status, pbError.response)) {
+      const superuserPbResult = await getSuperuserPb();
+      if (superuserPbResult.ok) {
+        try {
+          await superuserPbResult.pb.collection(PB_COLLECTIONS.workshopAreas).update(areaId, payload);
+          revalidatePath('/education');
+          revalidatePath('/education/areas');
+          return { success: 'Område uppdaterat.' };
+        } catch (fallbackErr) {
+          const fallbackNormalized = String(
+            fallbackErr instanceof Error ? fallbackErr.message : ''
+          ).toLowerCase();
+          const fallbackDuplicate = handleDuplicate(fallbackNormalized);
+          if (fallbackDuplicate) return fallbackDuplicate;
+          console.error('[workshops] update workshop area fallback failed', {
+            pbUrl: PB_URL,
+            tenantId: user.tenant,
+            userId: user.id,
+            areaId,
+            message: fallbackNormalized
+          });
+          return { error: 'Kunde inte uppdatera område. Fallback via superuser misslyckades (PB-SU-FAIL).' };
+        }
+      }
+      if (superuserPbResult.reason === 'missing_credentials') {
+        return {
+          error:
+            'Kunde inte uppdatera område. Webbtjänsten saknar superuser-env (POCKETBASE_SUPERUSER_EMAIL/PASSWORD eller PB_SU_EMAIL/PB_SU_PASSWORD).'
+        };
+      }
+      return {
+        error:
+          'Kunde inte uppdatera område. Superuser-inloggning mot PocketBase misslyckades (PB-SU-AUTH).'
+      };
+    }
+
+    console.error('[workshops] update workshop area failed', {
+      pbUrl: PB_URL,
+      tenantId: user.tenant,
+      userId: user.id,
+      areaId,
+      statusCode: pbError.status,
+      message,
+      response: pbError.response ?? null
+    });
+    return { error: 'Kunde inte uppdatera område.' };
   }
 }
 
