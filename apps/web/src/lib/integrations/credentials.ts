@@ -1,5 +1,6 @@
 import 'server-only';
 import PocketBase from 'pocketbase';
+import { getServerPbUrl } from '@/lib/pb-url';
 import {
   decryptCredentials,
   encryptCredentials,
@@ -14,9 +15,7 @@ import {
 // also uses this client for writes to integration_records and
 // integration_sync_runs (their create/update rules are null).
 
-const PB_URL =
-  process.env.POCKETBASE_URL ||
-  (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080');
+const PB_URL = getServerPbUrl();
 
 export type SuperuserPbResult =
   | { ok: true; pb: PocketBase }

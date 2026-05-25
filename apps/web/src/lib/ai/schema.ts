@@ -2,6 +2,7 @@ import 'server-only';
 import PocketBase from 'pocketbase';
 import type PocketBaseType from 'pocketbase';
 import { escFilter } from '@/lib/pb-filter';
+import { getServerPbUrl } from '@/lib/pb-url';
 
 /**
  * Auto-discovery of PocketBase collections for the AI chat.
@@ -45,6 +46,9 @@ const MAX_RELATION_DEPTH = 3;
  *   • compass_security_events — säkerhetsaudit (ip_hash, actor).
  *   • agent_actions           — mutationsaudit (before/after-värden kan
  *                               innehålla godtyckligt fältinnehåll).
+ *   • agent_memory            — agenternas tvärsessions-minne; nås bara via
+ *                               det dedikerade, staff-gated memory_read-
+ *                               verktyget (Fas 2), aldrig via generisk query.
  *   • *_integrations / connectors — krypterade credentials/OAuth-tokens.
  *
  * Detta är defense-in-depth: själva fältmaskningen nedan fångar PII per
@@ -62,6 +66,7 @@ const COLLECTION_DENYLIST = new Set<string>([
   'compass_responses',
   'compass_security_events',
   'agent_actions',
+  'agent_memory',
   'tenant_integrations',
   'user_app_integrations',
   'user_mistral_connectors'
@@ -204,13 +209,6 @@ interface DiscoveryCacheEntry {
   expires: number;
 }
 let discoveryCache: DiscoveryCacheEntry | null = null;
-
-function getServerPbUrl(): string {
-  return (
-    process.env.POCKETBASE_URL ||
-    (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080')
-  );
-}
 
 async function getAdminPb(): Promise<PocketBaseType | null> {
   const email = process.env.POCKETBASE_SUPERUSER_EMAIL;

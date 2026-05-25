@@ -4,11 +4,9 @@ import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE, getServerPb, requireUser } from '@/lib/auth.server';
+import { getServerPbUrl } from '@/lib/pb-url';
 
-const PB_URL =
-  process.env.POCKETBASE_URL ||
-  process.env.NEXT_PUBLIC_POCKETBASE_URL ||
-  (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080');
+const PB_URL = getServerPbUrl();
 
 type PbError = {
   status?: number;

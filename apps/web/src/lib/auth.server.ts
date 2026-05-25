@@ -3,11 +3,10 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import PocketBase from 'pocketbase';
 import type { Role } from '@platform/shared';
+import { getPublicPbUrl, getServerPbUrl } from '@/lib/pb-url';
 
-const SERVER_PB_URL =
-  process.env.POCKETBASE_URL ||
-  (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080');
-const PUBLIC_PB_URL = process.env.NEXT_PUBLIC_POCKETBASE_URL || SERVER_PB_URL;
+const SERVER_PB_URL = getServerPbUrl();
+const PUBLIC_PB_URL = getPublicPbUrl();
 export const AUTH_COOKIE = 'pb_auth';
 
 export interface SessionUser {
@@ -142,35 +141,4 @@ export async function requireUser(): Promise<SessionUser> {
     redirect('/login');
   }
   return user;
-}
-
-// Roller som ser staff-skalet (matchar /chatt-sidans staff-check).
-const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
-
-/**
- * Öppen-redirect-skydd för `next`-parametern. Tillåter bara interna,
- * absoluta paths — aldrig protokoll-relativa (`//evil.com`) eller externa
- * URL:er. `next` härstammar från en query-param och är användarstyrd.
- */
-export function sanitizeInternalPath(path: string | null | undefined): string | null {
-  if (!path || !path.startsWith('/')) return null;
-  if (path.startsWith('//') || path.startsWith('/\\')) return null;
-  return path;
-}
-
-/**
- * Vart en användare ska landa efter inloggning. Landar ALLTID direkt på en
- * sida som faktiskt renderar — aldrig på en redirect-shim (`/dashboard`) eller
- * en sida som i sin tur redirectar för den aktuella rollen. En extra
- * server-redirect efter login-actionens egen redirect gör att Next.js
- * client Router Cache återanvänder det gamla utloggade skalet (ingen sidmeny),
- * och logotyplänken i det skalet skickar tillbaka användaren till /login —
- * dvs "utloggad". Genom att landa direkt undviker vi hela kedjan.
- */
-export function postLoginPath(roles: Role[], requestedNext?: string | null): string {
-  const next = sanitizeInternalPath(requestedNext);
-  if (next) return next;
-  const isStaff = roles.some((r) => STAFF_ROLES.includes(r));
-  if (!isStaff && roles.includes('startup_member')) return '/inkorg';
-  return '/chatt';
 }

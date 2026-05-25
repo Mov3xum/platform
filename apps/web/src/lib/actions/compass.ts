@@ -15,8 +15,10 @@ import {
   LEAD_STATUS_ORDER,
   type LeadStatus
 } from '@/lib/compass/types';
+import { ALL_PHASES, type StartupPhase } from '@platform/shared';
 
 const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
+const CONVERT_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
 
 function isLeadStatus(v: unknown): v is LeadStatus {
   return typeof v === 'string' && (LEAD_STATUS_ORDER as readonly string[]).includes(v);
@@ -212,20 +214,71 @@ export async function runMarketScanAction(formData: FormData) {
    Konvertera lead → startup
    ──────────────────────────────────────────────────────────────────── */
 
+// Default-fas vid konvertering: leadet kliver in i inkubatorns första
+// riktiga fas. Staff kan välja en annan fas i konverteringsformuläret.
+const DEFAULT_CONVERT_PHASE: StartupPhase = 'lead';
+
+/**
+ * Skriv en fashistorik-rad för det nyskapade bolaget. Fail-soft — får aldrig
+ * blockera själva konverteringen (speglar createStartupAction i
+ * lib/actions/startups.ts).
+ */
+async function writeInitialPhaseHistory(
+  pb: Awaited<ReturnType<typeof getServerPb>>,
+  tenant: string,
+  startupId: string,
+  phase: StartupPhase,
+  userId: string
+): Promise<void> {
+  try {
+    await pb.collection('startup_phase_history').create({
+      tenant,
+      startup: startupId,
+      phase,
+      entered_at: new Date().toISOString().slice(0, 10),
+      created_by: userId
+    });
+  } catch (err) {
+    console.error('[compass] phase-history write failed on convert', {
+      startupId,
+      message: err instanceof Error ? err.message : 'unknown'
+    });
+  }
+}
+
 export async function convertLeadToStartupAction(formData: FormData) {
   const user = await requireUser();
-  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
+  if (!hasRole(user.roles, [...CONVERT_ROLES])) {
     throw new Error('Forbidden — bara staff kan konvertera leads till bolag.');
   }
   const id = String(formData.get('id') || '');
   const overrideName = String(formData.get('name') || '').trim();
+  const phaseRaw = String(formData.get('phase') || '').trim();
+  const coachId = String(formData.get('coach') || '').trim();
   if (!id) throw new Error('Invalid input');
+
+  const phase: StartupPhase = ALL_PHASES.includes(phaseRaw as StartupPhase)
+    ? (phaseRaw as StartupPhase)
+    : DEFAULT_CONVERT_PHASE;
 
   const pb = await getServerPb();
   const lead = await getLead(pb, user.tenant, id);
   if (!lead) throw new Error('Not found');
   if (lead.converted_startup) {
     redirect(`/startups/${lead.converted_startup}`);
+  }
+
+  // Coachen måste tillhöra samma tenant (defense-in-depth utöver PB-reglerna).
+  let coaches: string[] = [];
+  if (coachId) {
+    try {
+      const coach = await pb
+        .collection('users')
+        .getOne<{ tenant: string }>(coachId, { fields: 'id,tenant' });
+      if (coach.tenant === user.tenant) coaches = [coachId];
+    } catch {
+      coaches = [];
+    }
   }
 
   const name = overrideName || lead.organization || lead.name || 'Nytt bolag';
@@ -238,16 +291,19 @@ export async function convertLeadToStartupAction(formData: FormData) {
       tenant: user.tenant,
       name,
       description,
-      phase: 'inflode',
+      phase,
       status: 'active',
       next_step: lead.ai_review?.next_steps?.[0] || 'Boka uppstartsmöte med Movexum.',
-      tags
+      tags,
+      ...(coaches.length > 0 ? { coaches } : {})
     });
     createdId = record.id;
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Kunde inte skapa bolaget.';
     throw new Error(`Konvertering misslyckades: ${msg}`);
   }
+
+  await writeInitialPhaseHistory(pb, user.tenant, createdId, phase, user.id);
 
   await updateLead(pb, user.tenant, id, {
     status: 'accepted',
@@ -259,14 +315,57 @@ export async function convertLeadToStartupAction(formData: FormData) {
     actor: user.id,
     kind: 'module_publish',
     subject: id,
-    meta: { event: 'lead_converted', startup: createdId, name }
+    meta: { event: 'lead_converted', startup: createdId, name, phase }
   });
 
   revalidatePath('/inflode');
   revalidatePath('/inflode/leads');
   revalidatePath(`/inflode/leads/${id}`);
   revalidatePath('/startups');
+  revalidatePath('/startups/inkubator');
+  revalidatePath('/startups/inflode');
   redirect(`/startups/${createdId}`);
+}
+
+/**
+ * Avslå en lead. Sätter status = 'declined' och kan spara en kort motivering
+ * i de interna anteckningarna (konfidentiellt, exkluderas från AI). Mänskligt
+ * beslut — sker aldrig automatiskt (EU AI Act art. 14, CLAUDE.md § 3).
+ */
+export async function declineLeadAction(formData: FormData) {
+  const user = await requireUser();
+  if (!hasRole(user.roles, [...CONVERT_ROLES])) {
+    throw new Error('Forbidden — bara staff kan avslå leads.');
+  }
+  const id = String(formData.get('id') || '');
+  const reason = String(formData.get('reason') || '').trim().slice(0, 1000);
+  if (!id) throw new Error('Invalid input');
+
+  const pb = await getServerPb();
+  const lead = await getLead(pb, user.tenant, id);
+  if (!lead) throw new Error('Not found');
+
+  const stamp = new Date().toLocaleDateString('sv-SE');
+  const note = reason
+    ? `${lead.notes ? `${lead.notes}\n\n` : ''}Avslag (${stamp}): ${reason}`
+    : lead.notes;
+
+  await updateLead(pb, user.tenant, id, {
+    status: 'declined',
+    ...(reason ? { notes: note } : {})
+  });
+
+  await logSecurity(pb, user.tenant, {
+    actor: user.id,
+    kind: 'role_change',
+    subject: id,
+    meta: { event: 'lead_declined', from: lead.status }
+  });
+
+  revalidatePath('/inflode');
+  revalidatePath('/inflode/leads');
+  revalidatePath(`/inflode/leads/${id}`);
+  revalidatePath('/startups/inflode');
 }
 
 /* ────────────────────────────────────────────────────────────────────

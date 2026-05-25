@@ -3,9 +3,9 @@
 // never block page rendering — a timeout is reported as 'unknown' rather
 // than 'down', because the page itself proves networking is up.
 
-const POCKETBASE_URL =
-  process.env.POCKETBASE_URL ||
-  (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080');
+import { getServerPbUrl } from '@/lib/pb-url';
+
+const POCKETBASE_URL = getServerPbUrl();
 
 const MISTRAL_HEALTH_URL = 'https://api.mistral.ai/v1/models';
 

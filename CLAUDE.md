@@ -297,6 +297,19 @@ från modulpaketen.
 | Realtime        | PocketBase-prenumeration                                |
 | Hosting         | Coolify containers på UpCloud                           |
 | i18n            | `LocalizedText { sv, en }`                              |
+| PB-URL / miljö  | `MOVEXUM_ENV` (staging\|production) väljer PB-par; resolution i `apps/web/src/lib/pb-url.ts` |
+
+**PocketBase-URL per miljö.** Staging och production kör separata
+PocketBase-instanser. `NODE_ENV` är `production` i båda deploy-containrarna
+och kan inte skilja dem åt, så varje Coolify-web-app sätter `MOVEXUM_ENV`
+(`staging`|`production`). `apps/web/src/lib/pb-url.ts` är **enda källan** för
+URL-resolution (`getServerPbUrl()` / `getPublicPbUrl()`): den väljer
+`POCKETBASE_URL_<MILJÖ>` / `NEXT_PUBLIC_POCKETBASE_URL_<MILJÖ>`, faller
+tillbaka på osuffixad `POCKETBASE_URL` (lokal dev) och slutligen
+`localhost:8080`. Default är **staging** när `MOVEXUM_ENV` saknas (en
+felkonfigurerad deploy pratar då med staging, inte produktionsdata). Lägg
+aldrig tillbaka duplicerad `process.env.POCKETBASE_URL`-logik i enskilda
+filer — använd helpern.
 
 ---
 
@@ -836,10 +849,14 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
   (CSS/JS/fonter/bilder) till https på en http-serverad staging utan
   TLS, vilket gör sidan helt ostylad. `MOVEXUM_ALLOW_INSECURE_COOKIES`
   stänger av det explicit.
-- **Auth-cookie:** `httpOnly` + `SameSite=Lax`. `Secure` sätts hårt i
-  produktion (`shouldUseSecureCookie` i `lib/actions/auth.ts`) — inte
-  beroende av `x-forwarded-proto`. Escape-hatch för HTTP-staging:
-  `MOVEXUM_ALLOW_INSECURE_COOKIES=true`.
+- **Auth-cookie:** `httpOnly` + `SameSite=Lax`. `Secure` följer det
+  faktiska request-protokollet via `x-forwarded-proto`
+  (`shouldUseSecureCookie` i `lib/actions/auth.ts`): https → `Secure`,
+  http → inte `Secure`. Att tvinga `Secure` på en ren http-anslutning ger
+  ingen säkerhetsvinst (trafiken är redan klartext) men gör att
+  webbläsaren tyst släpper cookien → omöjligt att logga in på http-staging.
+  `MOVEXUM_ALLOW_INSECURE_COOKIES=true` tvingar av `Secure` helt
+  (explicit escape-hatch).
 - **Brute-force-skydd (A.8.x):** `loginAction` rate-limitar misslyckade
   försök per IP+e-post (8/15 min) och per IP (40/15 min) via
   `lib/rate-limit.ts` (in-memory; lyft till Redis/PB vid horisontell
@@ -1099,9 +1116,11 @@ i `tool_runs` + `activities` + `ai_usage_events`.
 
 ### 12.4 Begränsningar
 
-- Bara portfölj-agenter (`requires_startup=false`) kan schemaläggas.
-  Per-startup-agenter skulle behöva en startup-relation på schemat
-  och en per-bolag-loop i runnern — inte i scope för MVP.
+- **Coordinator fan-out (Fas 5):** både portfölj-agenter (`ai_system_wide`)
+  och per-bolag-agenter (`ai_per_startup`) kan nu schemaläggas. En per-bolag-
+  agent fan-out:as i runnern (`executeAgentRun` per aktivt bolag, capad
+  till `MAX_FANOUT=50`); en portfölj-agent kör en gång mot portföljkontexten.
+  `next_run_at` beräknas en gång per tick oavsett antal sub-körningar.
 - Cron-parsern stödjer 5-fält standard-syntax med `*`, tal, listor,
   intervall och stegvärden. Inga makron (`@daily` etc.), inga
   L/W/#-tillägg.
@@ -1472,4 +1491,163 @@ importer"). Flödet är preview → commit, speglar Bolagslista-importen
 8. **`kommun`-normalisering mot SCB:s standardlista** är ännu inte
    implementerad — `kommun` importeras som frisktext. (Framtida
    förbättring; påverkar inte korrektheten.)
+
+---
+
+## 16. Agent-runtime (delad exekveringskärna)
+
+### 16.1 Översikt
+
+Tidigare hade AI-agenterna tre divergerande exekveringsvägar (toolbox
+engångsanrop, dashboardchattens tool-loop, schemalagda engångsanrop). De
+är nu unifierade kring **en delad agent-loop** så att samma RBAC,
+skrivgräns, PII-skydd och iterations-/token-skydd gäller överallt.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `apps/web/src/lib/ai/agent-runtime.ts` | `runAgentLoop` (reaktiv tool-use-loop) + `buildReadToolSurface` (read-only verktygsyta för autonoma körningar) |
+| `apps/web/src/lib/ai/tools.ts` | Verktygsdefinitioner + `dispatchToolCall` (read/write/memory) |
+| `apps/web/src/lib/actions/chat.ts` | Dashboardchatten (agent-actor → read+write+memory) |
+| `apps/web/src/lib/actions/tools.ts` | Toolbox-körningar (read-only + ev. memory_read för staff) |
+| `apps/web/src/lib/scheduling/runner.ts` | Schemalagda körningar (read-only + memory_read) |
+
+### 16.2 `runAgentLoop`
+
+Reaktiv loop: modellen får anropa verktyg, resultaten matas tillbaka,
+och loopen fortsätter tills ett textsvar ges eller `maxIterations`
+(default 4) nås — då tvingas ett slutsvar fram utan verktyg. Skyddar mot
+oändliga loopar/token-explosion (§10 robusthet). `conversation` muteras;
+`onUsage` låter varje anropare logga i `ai_usage_events` med rätt
+`surface`.
+
+### 16.3 Verktygsytor per körningstyp (människa-i-loopen)
+
+| Körning | Actor | Verktyg |
+|---|---|---|
+| Dashboardchatt (staff) | `agent` | `query/count_collection`, skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`), `memory_read` + `memory_write` |
+| Toolbox (staff) | — (read-only) | `query/count_collection`, `memory_read` |
+| Toolbox (icke-staff) | — (read-only) | `query/count_collection` |
+| Schemalagd | — (read-only) | `query/count_collection`, `memory_read` |
+
+**Princip (§10):** skrivverktyg exponeras BARA i den interaktiva chatten
+där en människa bekräftar varje åtgärd. Autonoma körningar (toolbox-
+engångskörning, schema) får **aldrig** skriva domändata — de föreslår i
+text. Vision-körningar (pixtral) kör verktygslöst (§13.5). PII-maskning,
+denylist och tenant-scope ärvs oförändrat från `lib/ai/schema.ts`
+(§9.3).
+
+### 16.4 Tvärsessions-minne (`agent_memory`)
+
+Migration `1700000079`. En liten nyckel/innehåll-store per tenant som
+låter agenter minnas slutsatser mellan körningar (motsvarar
+managed-agents memory stores, men EU-suveränt och striktare scope:at).
+
+- **Fält:** `tenant`, `startup` (valfritt per-bolag-scope, cascadeDelete),
+  `key` (≤200), `content` (≤8000), `created_by`/`updated_by`. Unikt index
+  `(tenant, startup, key)` → idempotent upsert.
+- **Verktyg:** `memory_read` (lista/läs) ges till alla staff-drivna
+  körningar; `memory_write` (upsert) kräver agent-actor → bara den
+  interaktiva staff-chatten.
+- **RBAC:** API-regler är staff-only (admin/incubator_lead/coach/mentor)
+  + tenant-match. Verktygen exponeras dessutom bara för staff-drivna
+  körningar (`includeMemory`-flaggan).
+- **GDPR §5:** `content` cappat; verktygsbeskrivningen instruerar
+  modellen att ALDRIG lagra personuppgifter (bara aggregerade
+  observationer). **Denylistad i `lib/ai/schema.ts`** så det generiska
+  `query_collection` aldrig exponerar minnet.
+- **GDPR art. 17:** `cascadeDelete` på `startup`; tenant-relation städas i
+  erasure-flödet (samma mönster som `tool_run_feedback`).
+- **Riskklass:** minimal (intern agent-scratchpad, ingen profilering av
+  individer).
+
+### 16.5 Kvalitetsverifiering (grader-pass)
+
+Migration `1700000080` lägger `verify_rubric` (text) på `tools`. När en
+agent har en rubrik kör dess autonoma körningar (toolbox + schema)
+`runAgentLoopVerified` i stället för `runAgentLoop`: efter svaret
+poängsätter ett separat Mistral-anrop (`gradeAgainstRubric`) svaret mot
+rubriken, och vid underkänt matas feedbacken tillbaka som en data-turn så
+agenten reviderar (upp till en gång). Run-nivå "continuous improvement",
+motsvarar managed-agents outcomes.
+
+- **Människa-i-loopen:** auto-publicerar aldrig — höjer bara utkastets
+  kvalitet inför mänsklig granskning (CLAUDE.md § 10; EU AI Act art. 72).
+- **Fail-open:** en granskare vars JSON inte kan tolkas blockerar aldrig
+  svaret (returnerar pass).
+- **Kostnad:** grader-anropen räknas in i `ai_usage_events` via samma
+  `onUsage`-hook. Tom rubrik = ingen extra kostnad (default).
+- **Konfiguration:** sätts i agentformuläret (`ToolForm`, bara
+  admin/incubator_lead) eller via PB-admin. Lagras i `tools.verify_rubric`
+  (typad i `@platform/shared`).
+
+### 16.6 Versionering av agent-konfiguration
+
+Migration `1700000081` skapar `tool_versions` — en **oföränderlig**
+snapshot-historik. `snapshotToolVersion()` (lib/actions/tools.ts) skrivs
+vid varje `createToolAction`/`updateToolAction`: nästa versionsnummer +
+en PII-fri snapshot av konfigurationen (name, category, model,
+prompt_template, verify_rubric, web_sources, roles_allowed,
+requires_startup, output_format).
+
+- **EU AI Act art. 11 / CLAUDE.md § 10.1:** detta ÄR den versionerade
+  tekniska dokumentationen per AI-verktyg (modellval, systemprompt,
+  utvärderingskriterier över tid).
+- **ISO 27001 A.8.32:** raderna är oföränderliga (update/delete =
+  endast superuser) så historiken inte kan skrivas om. Unikt index
+  `(tool, version)`.
+- **Best-effort:** ett versioneringsfel blockerar aldrig spara-flödet
+  (loggas, sväljs).
+- **Begränsning (MVP):** version-pinning per körning (att låsa en run till
+  en specifik version för reproducerbarhet) och en historik-vy i UI är
+  inte i scope — snapshotten ger redan audit/återställningsunderlaget.
+
+### 16.7 Coordinator fan-out (schemalagda per-bolag-agenter)
+
+Fas 5. `runScheduledTool` (lib/scheduling/runner.ts) är refaktorerad: den
+delar upp en tick i en eller flera `executeAgentRun`-anrop (den delade,
+exporterade per-körnings-exekveraren som även event-triggers använder).
+
+- **Portfölj-agent** (`ai_system_wide`): en körning mot portföljkontexten
+  (som tidigare).
+- **Per-bolag-agent** (`ai_per_startup`): fan-out — en körning per AKTIVT
+  bolag (`status="active"`), capad till `MAX_FANOUT=50`. Varje sub-körning
+  får sin egen `tool_run` med per-bolag-kontext (`buildStartupContext`) och
+  loggas i `activities` + `ai_usage_events`.
+- `next_run_at` skrivs **en gång** per tick (`advanceSchedule`), oavsett
+  antal sub-körningar. Fel i en enskild sub-körning fäller inte hela ticken.
+- Lyfter den tidigare § 12.4-begränsningen; `upsertScheduleAction` tillåter
+  nu per-bolag-agenter (blockerade dem förut via `requires_startup`).
+- Inga skrivverktyg (read-only surface, § 16.3) — människa-i-loopen kvar.
+
+### 16.8 Händelse-triggers (event-driven agentkörning)
+
+Fas 5. Speglar schemaläggnings-stacken (§12) men triggas av en händelse
+i stället för cron.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000082_create_tool_triggers.js` | Collection `tool_triggers` (tenant, tool, event, enabled, created_by) |
+| `backend/pocketbase-schema/hooks/event_trigger.pb.js` | PB-hook `onRecordAfterCreateSuccess('startups')` → POSTar matchande triggers |
+| `apps/web/src/app/api/internal/run-trigger/route.ts` | Intern endpoint (secret-auth, ackar 202, kör i bakgrunden) |
+| `apps/web/src/lib/triggers/runner.ts` | `runTriggeredTool` — RBAC-revalidering + `executeAgentRun` |
+
+**Flöde:** nytt bolag skapas → hooken hittar aktiverade `tool_triggers`
+med `event="startup_created"` för tenanten → POSTar `{triggerId, startupId}`
+till endpointen (delat secret `MOVEXUM_SCHEDULE_SECRET`, samma som §12.3) →
+endpointen ackar direkt och kör `runTriggeredTool` i bakgrunden så
+bolagsskapandet inte blockeras av AI-körningen.
+
+**Säkerhet/efterlevnad:** samma som schemaläggning — RBAC revalideras mot
+`created_by` (rollnedgradering blockerar), read-only verktygsyta (inga
+skrivningar, människa-i-loopen § 10), allt loggas i tool_runs/activities/
+ai_usage_events. `tool_triggers` är staff-only (API-regler).
+
+**Begränsningar (MVP):** enda händelsen är `startup_created`; triggers
+konfigureras via PB-admin tills en UI finns (collectionen + server-flöden
+är klara). En massimport som skapar många bolag ger en körning per bolag
+per aktiv trigger — aktivera triggers med det i åtanke (kostnad).
 

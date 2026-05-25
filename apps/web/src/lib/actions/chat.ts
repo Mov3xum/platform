@@ -2,12 +2,12 @@
 
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import {
-  callMistral,
   callMistralWithFallback,
   MistralError,
   type MistralMessage,
   type MistralContentPart
 } from '@/lib/ai/mistral';
+import { runAgentLoop } from '@/lib/ai/agent-runtime';
 import {
   buildStartupContext,
   buildPortfolioContext,
@@ -15,7 +15,7 @@ import {
 } from '@/lib/ai/context';
 import { buildKnowledgeContext } from '@/lib/ai/agent-prompt';
 import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
-import { buildChatTools, dispatchToolCall } from '@/lib/ai/tools';
+import { buildChatTools } from '@/lib/ai/tools';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
 import { hasRole } from '@/lib/rbac';
 import { logAiUsage } from '@/lib/ai/usage';
@@ -472,7 +472,7 @@ async function runStaffChatWithTools(
     agentId
   };
 
-  const tools = buildChatTools(collections, { actor });
+  const tools = buildChatTools(collections, { actor, includeMemory: true });
 
   const today = new Date().toISOString().slice(0, 10);
   const identityBlock =
@@ -495,63 +495,22 @@ async function runStaffChatWithTools(
   const models = pickModels(images.length > 0);
 
   try {
-    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const result = await callMistralWithFallback(models, conversation, {
-        tools,
-        toolChoice: 'auto'
-      });
-
-      await logAiUsage(pb, {
-        tenant: user.tenant,
-        userId: user.id,
-        surface: 'dashboard_chat',
-        model: result.modelUsed,
-        tokensIn: result.usage.prompt_tokens,
-        tokensOut: result.usage.completion_tokens
-      });
-
-      if (!result.toolCalls || result.toolCalls.length === 0) {
-        return { text: result.text || 'Inget svar från modellen.' };
-      }
-
-      conversation.push({
-        role: 'assistant',
-        content: result.text || null,
-        tool_calls: result.toolCalls
-      });
-
-      for (const call of result.toolCalls) {
-        const toolResult = await dispatchToolCall(call, {
-          pb,
-          tenantId: user.tenant,
-          collections,
-          actor
-        });
-        conversation.push({
-          role: 'tool',
-          tool_call_id: call.id,
-          name: call.function.name,
-          content: JSON.stringify(toolResult).slice(0, 12000)
-        });
-      }
-    }
-
-    const finalCall = await callMistralWithFallback(models, conversation, {
-      toolChoice: 'none'
+    const result = await runAgentLoop(conversation, {
+      models,
+      tools,
+      toolContext: { pb, tenantId: user.tenant, collections, actor },
+      maxIterations: MAX_TOOL_ITERATIONS,
+      onUsage: (u) =>
+        logAiUsage(pb, {
+          tenant: user.tenant,
+          userId: user.id,
+          surface: 'dashboard_chat',
+          model: u.model,
+          tokensIn: u.tokensIn,
+          tokensOut: u.tokensOut
+        })
     });
-    await logAiUsage(pb, {
-      tenant: user.tenant,
-      userId: user.id,
-      surface: 'dashboard_chat',
-      model: finalCall.modelUsed,
-      tokensIn: finalCall.usage.prompt_tokens,
-      tokensOut: finalCall.usage.completion_tokens
-    });
-    return {
-      text:
-        finalCall.text ||
-        'Frågan krävde fler steg än tillåtet. Prova att bryta ner den i mindre delar.'
-    };
+    return { text: result.text };
   } catch (err) {
     console.error('[chat] mistral tool loop error', { tenant: user.tenant, error: err });
     return { error: chatErrorMessage(err) };
