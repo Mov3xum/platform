@@ -1,6 +1,7 @@
 name: Sync PocketBase schema
 
-# Triggar när migrationer eller setup-scriptet ändras. Två steg:
+# Körs manuellt eller återanvänds från staging-deployen när en merge till
+# staging innehåller PocketBase-påverkande filer. Två steg:
 #  1. Trigga Coolify-redeploy så hela compose-stacken (PB + web) byggs om.
 #     Nya migrations i backend/pocketbase-schema/migrations/ blir
 #     inbakade i PB-imagen och körs vid PB:s uppstart.
@@ -9,16 +10,14 @@ name: Sync PocketBase schema
 #     (t.ex. om PB redan kände dem som körda).
 #
 # Lägg dessa secrets i repot:
-#   PB_URL, PB_SU_EMAIL, PB_SU_PASSWORD — för API-sync
+#   PB_URL_STAGING (fallback: PB_URL)
+#   PB_SU_EMAIL_STAGING (fallback: PB_SU_EMAIL, default hampus@movexum.se)
+#   PB_SU_PASSWORD_STAGING (fallback: PB_SU_PASSWORD) — för API-sync
 #   COOLIFY_BASE_URL, COOLIFY_TOKEN, COOLIFY_DEPLOY_WEBHOOK_STAGING
 #     ELLER COOLIFY_APP_UUID_STAGING — för stack-redeploy
 
 on:
-  push:
-    branches: [staging]
-    paths:
-      - 'backend/pocketbase-schema/**'
-      - '.github/workflows/sync-pocketbase.yml'
+  workflow_call:
   workflow_dispatch:
 
 jobs:
@@ -79,11 +78,11 @@ jobs:
       - name: Wait for PocketBase auth readiness
         id: pb_ready
         env:
-          PB_URL: ${{ secrets.PB_URL }}
+          PB_URL: ${{ secrets.PB_URL_STAGING || secrets.PB_URL }}
         run: |
           set -euo pipefail
           if [ -z "${PB_URL:-}" ]; then
-            echo "::error::PB_URL secret saknas. Sätt den i repo-secrets innan workflowen kan köra."
+            echo "::error::PB_URL_STAGING/PB_URL secret saknas. Sätt den i repo-secrets innan workflowen kan köra."
             exit 1
           fi
 
@@ -167,17 +166,18 @@ jobs:
       - name: Kör setup-via-api.mjs mot PocketBase
         env:
           PB_URL: ${{ steps.pb_ready.outputs.selected_url }}
-          PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL }}
-          PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD }}
+          PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL_STAGING || secrets.PB_SU_EMAIL || 'hampus@movexum.se' }}
+          PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD_STAGING || secrets.PB_SU_PASSWORD }}
+          APP_USER_PASSWORD: ${{ secrets.APP_USER_PASSWORD_STAGING || secrets.APP_USER_PASSWORD }}
           NODE_TLS_REJECT_UNAUTHORIZED: '0'
         run: node backend/pocketbase-schema/scripts/setup-via-api.mjs
 
       - name: Verifiera PocketBase baseline
         env:
           PB_URL: ${{ steps.pb_ready.outputs.selected_url }}
-          PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL }}
-          PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD }}
-          APP_USER_EMAIL: ${{ secrets.APP_USER_EMAIL || secrets.PB_SU_EMAIL }}
-          APP_USER_PASSWORD: ${{ secrets.APP_USER_PASSWORD }}
+          PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL_STAGING || secrets.PB_SU_EMAIL || 'hampus@movexum.se' }}
+          PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD_STAGING || secrets.PB_SU_PASSWORD }}
+          APP_USER_EMAIL: ${{ secrets.APP_USER_EMAIL_STAGING || secrets.APP_USER_EMAIL || secrets.PB_SU_EMAIL_STAGING || secrets.PB_SU_EMAIL || 'hampus@movexum.se' }}
+          APP_USER_PASSWORD: ${{ secrets.APP_USER_PASSWORD_STAGING || secrets.APP_USER_PASSWORD }}
           NODE_TLS_REJECT_UNAUTHORIZED: '0'
         run: node backend/pocketbase-schema/scripts/verify-baseline.mjs

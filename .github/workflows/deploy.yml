@@ -7,7 +7,48 @@ on:
   workflow_dispatch:
 
 jobs:
+  detect-pocketbase-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      pocketbase_changed: ${{ steps.diff.outputs.pocketbase_changed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect PocketBase-affecting changes
+        id: diff
+        run: |
+          set -euo pipefail
+
+          before_sha="${{ github.event.before }}"
+          zero_sha="0000000000000000000000000000000000000000"
+
+          if [ -z "${before_sha:-}" ] || [ "$before_sha" = "$zero_sha" ]; then
+            before_sha="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          fi
+
+          if [ -z "${before_sha:-}" ]; then
+            echo "Could not resolve previous commit; defaulting PocketBase sync to false."
+            echo "pocketbase_changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed_files="$(git diff --name-only "$before_sha" "$GITHUB_SHA")"
+          echo "Changed files since $before_sha:"
+          echo "$changed_files"
+
+          if printf '%s\n' "$changed_files" | grep -Eq '^(backend/pocketbase-schema/|\.github/workflows/(sync-pocketbase\.yml|recover-pocketbase\.yml))'; then
+            echo "PocketBase-affecting changes detected."
+            echo "pocketbase_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No PocketBase-affecting changes detected."
+            echo "pocketbase_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy:
+    needs: detect-pocketbase-changes
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -180,3 +221,12 @@ jobs:
         run: |
           set -euo pipefail
           node backend/pocketbase-schema/scripts/verify-baseline.mjs
+
+  sync-pocketbase:
+    name: Sync PocketBase schema after staging deploy
+    needs:
+      - detect-pocketbase-changes
+      - deploy
+    if: needs.detect-pocketbase-changes.outputs.pocketbase_changed == 'true'
+    uses: ./.github/workflows/sync-pocketbase.yml
+    secrets: inherit
