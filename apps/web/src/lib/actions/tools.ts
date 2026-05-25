@@ -293,10 +293,19 @@ export async function startRunAction(runId: string): Promise<ToolActionState> {
         tool.prompt_template as string,
         built.contextObj
       );
+      const surface = await buildReadToolSurface(pb, user.tenant, {
+        includeMemory: hasRole(user.roles, [
+          'admin',
+          'incubator_lead',
+          'coach',
+          'mentor'
+        ])
+      });
       const systemContent =
         buildAgentSystemPrompt(tool.system_prompt as string | undefined) +
-        built.knowledge.block;
-      const result = await callMistral(tool.model as string, [
+        built.knowledge.block +
+        (surface ? `\n\n${surface.guidance}` : '');
+      const conversation: MistralMessage[] = [
         { role: 'system', content: systemContent },
         { role: 'user', content: userContent }
       ];
@@ -650,9 +659,25 @@ export async function runToolAction(formData: FormData): Promise<ToolActionState
           ? [{ type: 'text', text: fullUserText }, ...prepared.imageBlocks]
           : fullUserText;
 
+      // Vision-körningar (bilder bifogade) kör verktygslöst — pixtral saknar
+      // tool-stöd (CLAUDE.md § 13.5 / § 16.3). Annars ges den read-only
+      // verktygsytan (query/count + memory_read för staff).
+      const surface =
+        prepared.imageBlocks.length === 0
+          ? await buildReadToolSurface(pb, user.tenant, {
+              includeMemory: hasRole(user.roles, [
+                'admin',
+                'incubator_lead',
+                'coach',
+                'mentor'
+              ])
+            })
+          : null;
+
       const systemContent =
         buildAgentSystemPrompt(tool.system_prompt as string | undefined) +
-        built.knowledge.block;
+        built.knowledge.block +
+        (surface ? `\n\n${surface.guidance}` : '');
 
       const mistralMessages: MistralMessage[] = [
         { role: 'system', content: systemContent },
@@ -676,11 +701,11 @@ export async function runToolAction(formData: FormData): Promise<ToolActionState
       const verifyRubric =
         typeof tool.verify_rubric === 'string' ? tool.verify_rubric.trim() : '';
       const loop = verifyRubric
-        ? await runAgentLoopVerified(conversation, {
+        ? await runAgentLoopVerified(mistralMessages, {
             ...baseLoopOptions,
             rubric: verifyRubric
           })
-        : await runAgentLoop(conversation, baseLoopOptions);
+        : await runAgentLoop(mistralMessages, baseLoopOptions);
 
       outputMd = loop.text;
       const costUsd = estimateCostUsd(selectedModel, tokensIn, tokensOut);

@@ -286,15 +286,15 @@ export async function executeAgentRun(
       : [];
 
     const [baseContext, webMap, knowledge] = await Promise.all([
-      tool.category === 'ai_per_startup'
+      p.tool.category === 'ai_per_startup'
         ? Promise.resolve({} as Record<string, unknown>)
-        : buildPortfolioContext(pb, schedule.tenant).then(
+        : buildPortfolioContext(pb, p.tenant).then(
             (ctx) => ctx as unknown as Record<string, unknown>
           ),
       webSources.length > 0
         ? fetchWebContext(pb, webSources)
         : Promise.resolve({} as Record<string, WebFetchResult>),
-      buildKnowledgeContext(pb, tool.id, schedule.tenant)
+      buildKnowledgeContext(pb, p.tool.id, p.tenant)
     ]);
 
     const webForPrompt: Record<string, string> = {};
@@ -311,8 +311,13 @@ export async function executeAgentRun(
       web: webForPrompt
     });
 
+    const surface = await buildReadToolSurface(pb, p.tenant, {
+      includeMemory: true
+    });
     const systemContent =
-      buildAgentSystemPrompt(tool.system_prompt as string | undefined) + knowledge.block;
+      buildAgentSystemPrompt(p.tool.system_prompt as string | undefined) +
+      knowledge.block +
+      (surface ? `\n\n${surface.guidance}` : '');
 
     const messages: MistralMessage[] = [
       { role: 'system', content: systemContent },
