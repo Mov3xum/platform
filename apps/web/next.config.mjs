@@ -55,12 +55,9 @@ const nextConfig = {
         hostname: 'pocketbase',
         port: '8080',
       },
-      {
-        // PocketBase staging/production instances served over http on
-        // Coolify sslip.io hostnames (avatars go through next/image).
-        protocol: 'http',
-        hostname: '**.sslip.io',
-      },
+      // Staging/production PocketBase körs över https på sina sslip.io-hosts
+      // (Let's Encrypt via Coolify, se infra/SSL.md) → avatarer täcks redan av
+      // catch-all https-mönstret ovan. Inget http-sslip.io-undantag behövs.
     ],
   },
   experimental: {

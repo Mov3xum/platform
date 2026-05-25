@@ -659,27 +659,15 @@ export async function runToolAction(formData: FormData): Promise<ToolActionState
           ? [{ type: 'text', text: fullUserText }, ...prepared.imageBlocks]
           : fullUserText;
 
-      // Vision-körningar (bilder bifogade) kör verktygslöst — pixtral saknar
-      // tool-stöd (CLAUDE.md § 13.5 / § 16.3). Annars ges den read-only
-      // verktygsytan (query/count + memory_read för staff).
-      const surface =
-        prepared.imageBlocks.length === 0
-          ? await buildReadToolSurface(pb, user.tenant, {
-              includeMemory: hasRole(user.roles, [
-                'admin',
-                'incubator_lead',
-                'coach',
-                'mentor'
-              ])
-            })
-          : null;
-
+      const surface = await buildReadToolSurface(pb, user.tenant, {
+        includeMemory: hasRole(user.roles, [...STAFF_ROLES])
+      });
       const systemContent =
         buildAgentSystemPrompt(tool.system_prompt as string | undefined) +
         built.knowledge.block +
         (surface ? `\n\n${surface.guidance}` : '');
 
-      const mistralMessages: MistralMessage[] = [
+      const conversation: MistralMessage[] = [
         { role: 'system', content: systemContent },
         { role: 'user', content: userContent }
       ];
