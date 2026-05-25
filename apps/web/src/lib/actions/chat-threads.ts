@@ -6,6 +6,7 @@ import { hasRole } from '@/lib/rbac';
 import { estimateCostUsd } from '@/lib/ai/mistral';
 import {
   runStaffChatTurn,
+  generateChatTitle,
   buildWebBlock,
   buildAgentBlock,
   DEFAULT_CHAT_WEB_SOURCES
@@ -292,6 +293,14 @@ export async function sendThreadMessageAction(
     : '';
   const agentBlock = t.agent ? await buildAgentBlock(pb, user, t.agent) : '';
 
+  // Sätt en kort, beskrivande titel utifrån första prompten. Körs parallellt
+  // med själva svaret så den inte lägger till serie-latens. generateChatTitle
+  // sväljer egna fel (resolver null) → ingen unhandled rejection vid early return.
+  const needsTitle = !(t.title && t.title.trim());
+  const titlePromise = needsTitle
+    ? generateChatTitle(pb, user, typed || displayText)
+    : Promise.resolve<string | null>(null);
+
   const turn = await runStaffChatTurn(pb, user, {
     userMessages,
     webBlock,
@@ -320,8 +329,13 @@ export async function sendThreadMessageAction(
   };
 
   const updatedMessages = [...existing, userMsg, assistantMsg];
-  const title =
-    t.title && t.title.trim() ? t.title : displayText.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Ny chatt';
+  let title = t.title && t.title.trim() ? t.title : '';
+  if (needsTitle) {
+    const aiTitle = await titlePromise;
+    const basis = typed || displayText;
+    title = aiTitle || basis.replace(/\s+/g, ' ').trim().slice(0, 80);
+  }
+  if (!title) title = 'Ny chatt';
 
   try {
     await pb.collection('chat_threads').update(threadId, {

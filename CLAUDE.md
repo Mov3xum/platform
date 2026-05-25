@@ -1750,6 +1750,7 @@ domänmutation) via `buildChatTools({ includeWrites:false, includeDocuments:true
 | --- | --- | --- |
 | `generate_document` | begränsad | Deterministisk rendering av agent-spec; ingen ny dataväg; människa laddar ned/granskar |
 | Djupjobb-planerare/orkestrator | begränsad | Read-only analys-orkestrering; utkast granskas; bundna tak |
+| Auto-titel på tråd (`generateChatTitle`) | minimal | Kort etikett av användarens egen första prompt; ingen profilering, ingen ny dataväg |
 | Trådsammanfattning (reserverat) | minimal | Intern scratchpad, ingen PII |
 
 ### 17.6 Regelefterlevnad
@@ -1774,3 +1775,10 @@ domänmutation) via `buildChatTools({ includeWrites:false, includeDocuments:true
   konversationsminne sker via `agent_memory` (§16.4), inkopplat i trådchatten.
 - Chatt-input-bilagor persisteras inte som filer (injiceras i prompten, som
   förut); genererade dokument persisteras däremot i `user_files`.
+- **Auto-titel:** vid första turen i en tråd sätts en kort, beskrivande titel
+  utifrån första prompten via `generateChatTitle` (`staff-chat.ts`) — ett litet
+  `mistral-small`-anrop som körs parallellt med svaret (ingen serie-latens),
+  fail-soft (faller tillbaka på trunkerad prompt) och loggar tokens i
+  `ai_usage_events` (surface `dashboard_chat`). Prompten behandlas som data, inte
+  instruktioner (§9.3). Titeln kan alltid bytas manuellt via trådens
+  tre-prickar-meny (byt namn/fäst/arkivera/radera).
