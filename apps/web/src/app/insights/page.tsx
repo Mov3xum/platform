@@ -42,7 +42,8 @@ const SURFACE_LABELS: Record<AiUsageSurface, string> = {
   intl: 'Översättning',
   suggestions: 'Förslag',
   workshop_run: 'Workshop',
-  connector_chat: 'Connector-chatt'
+  connector_chat: 'Connector-chatt',
+  deep_chat: 'Djupa jobb'
 };
 
 const ROLE_LABELS: Record<Role, string> = {

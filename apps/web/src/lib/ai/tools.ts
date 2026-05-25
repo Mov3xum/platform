@@ -8,6 +8,7 @@ import {
 } from './schema';
 import type { MistralToolCall, MistralToolDefinition } from './mistral';
 import { escFilter } from '@/lib/pb-filter';
+import type { GeneratedFileRef } from '@platform/shared';
 import {
   agentWritableFields,
   agentCreatableCollections,
@@ -50,6 +51,12 @@ export interface BuildToolsOptions {
    * collectionens API-regler är staff-only (migration 1700000079).
    */
   includeMemory?: boolean;
+  /**
+   * Exponera `generate_document` (PPTX/XLSX/DOCX/PDF). Bara för agent-actor
+   * i en interaktiv yta där en människa laddar ned/granskar utkastet. Filen
+   * sparas i ägarens `user_files` (strikt ägaren-bara) och bifogas svaret.
+   */
+  includeDocuments?: boolean;
 }
 
 export function buildChatTools(
@@ -311,6 +318,18 @@ export interface ToolDispatchContext {
    * read-only-verktyg ignoreras fältet (tenant räcker).
    */
   actor?: Actor;
+  /**
+   * Ägare för genererade filer (`generate_document` → `user_files`). Sätts
+   * av den interaktiva staff-chatten/tråden. Krävs för dokumentverktyget.
+   */
+  ownerUserId?: string;
+  /** Tråd som ett genererat dokument knyts till (för spårbarhet). */
+  chatThreadId?: string;
+  /**
+   * Mutabel sink: `generate_document` pushar genererade fil-referenser hit
+   * så chatt-lagret kan bifoga dem på assistant-svaret (nedladdnings-chip).
+   */
+  generatedFiles?: GeneratedFileRef[];
 }
 
 export interface ToolResult {
