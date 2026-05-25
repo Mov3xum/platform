@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import DashboardChat, {
   type DashboardAgent,
   type DashboardConnector,
+  type LiveStep,
   type UiMessage
 } from '@/components/DashboardChat';
 import { Icon } from '@/components/proto/Icon';
@@ -41,7 +42,8 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
     .map((m) => ({
       role: m.role as 'user' | 'assistant',
       content: m.content,
-      generated_files: m.generated_files
+      generated_files: m.generated_files,
+      steps: m.steps
     }));
 }
 
@@ -52,7 +54,8 @@ export default function ChattWorkspace({ greeting, agents, connectors, initialTh
   const [activeAgent, setActiveAgent] = useState<DashboardAgent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [streaming, setStreaming] = useState(false);
+  const [liveSteps, setLiveSteps] = useState<LiveStep[]>([]);
   const [deepJob, setDeepJob] = useState<{ id: string; threadId: string; status: DeepJobStatus; progress: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -139,20 +142,36 @@ export default function ChattWorkspace({ greeting, agents, connectors, initialTh
     setActiveAgent(res.agent ? agents.find((a) => a.id === res.agent) || null : null);
   }
 
-  function submit(
-    text: string,
-    opts: { includeWebContext: boolean; attachments: ChatAttachment[]; deepJob: boolean }
-  ) {
-    setError(null);
-    if (opts.deepJob) {
-      void startDeep(text);
+  type SubmitOpts = { includeWebContext: boolean; attachments: ChatAttachment[]; deepJob: boolean };
+
+  function applyStep(ev: { phase: 'start' | 'end'; id: string; label: string; ok?: boolean }) {
+    setLiveSteps((prev) => {
+      if (ev.phase === 'start') {
+        if (prev.some((s) => s.id === ev.id)) return prev;
+        return [...prev, { id: ev.id, label: ev.label, running: true }];
+      }
+      return prev.map((s) => (s.id === ev.id ? { ...s, running: false, ok: ev.ok } : s));
+    });
+  }
+
+  // Icke-streamande fallback (server-action) om streaming inte är tillgänglig.
+  async function fallbackTurn(threadId: string, text: string, opts: SubmitOpts) {
+    const res = await sendThreadMessageAction(threadId, text, {
+      includeWebContext: opts.includeWebContext,
+      attachments: opts.attachments
+    });
+    if (res.error) {
+      setError(res.error);
       return;
     }
-    const displayText =
-      text || (opts.attachments.length === 1 ? '(bilaga skickad)' : '(bilagor skickade)');
-    setMessages((prev) => [...prev, { role: 'user', content: displayText }]);
+    if (res.messages) setMessages(toUiMessages(res.messages));
+    await refreshThreads();
+  }
 
-    startTransition(async () => {
+  async function runStreamingTurn(text: string, opts: SubmitOpts) {
+    setStreaming(true);
+    setLiveSteps([]);
+    try {
       let threadId = activeThreadId;
       if (!threadId) {
         const created = await createThreadAction(activeAgent?.id);
@@ -163,17 +182,97 @@ export default function ChattWorkspace({ greeting, agents, connectors, initialTh
         threadId = created.threadId;
         setActiveThreadId(threadId);
       }
-      const res = await sendThreadMessageAction(threadId, text, {
-        includeWebContext: opts.includeWebContext,
-        attachments: opts.attachments
-      });
-      if (res.error) {
-        setError(res.error);
+
+      let res: Response;
+      try {
+        res = await fetch('/api/chat/stream', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            threadId,
+            text,
+            includeWebContext: opts.includeWebContext,
+            attachments: opts.attachments
+          })
+        });
+      } catch {
+        // Nätverks-/uppkopplingsfel → degradera till server-action.
+        await fallbackTurn(threadId, text, opts);
         return;
       }
-      if (res.messages) setMessages(toUiMessages(res.messages));
+
+      if (!res.ok || !res.body) {
+        if (res.status >= 500) {
+          await fallbackTurn(threadId, text, opts);
+        } else {
+          let msg = 'Kunde inte hämta svar just nu — försök igen.';
+          try {
+            const j = (await res.json()) as { error?: string };
+            if (j?.error) msg = j.error;
+          } catch {
+            /* behåll default */
+          }
+          setError(msg);
+        }
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let gotFinal = false;
+      let gotError = false;
+
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line) continue;
+          let ev: Record<string, unknown>;
+          try {
+            ev = JSON.parse(line) as Record<string, unknown>;
+          } catch {
+            continue;
+          }
+          if (ev.type === 'step') {
+            applyStep(ev as unknown as { phase: 'start' | 'end'; id: string; label: string; ok?: boolean });
+          } else if (ev.type === 'final') {
+            gotFinal = true;
+            if (Array.isArray(ev.messages)) setMessages(toUiMessages(ev.messages as ToolRunMessage[]));
+          } else if (ev.type === 'error') {
+            gotError = true;
+            setError(typeof ev.error === 'string' ? ev.error : 'Kunde inte hämta svar just nu — försök igen.');
+          }
+        }
+      }
+
+      // Strömmen stängdes utan ett slutgiltigt meddelande (t.ex. proxy bröt
+      // anslutningen) — turen kan ändå ha sparats server-side, så ladda om.
+      if (!gotFinal && !gotError) {
+        const msgs = await getThreadMessagesAction(threadId);
+        if (msgs.messages) setMessages(toUiMessages(msgs.messages));
+      }
       await refreshThreads();
-    });
+    } finally {
+      setStreaming(false);
+      setLiveSteps([]);
+    }
+  }
+
+  function submit(text: string, opts: SubmitOpts) {
+    setError(null);
+    if (opts.deepJob) {
+      void startDeep(text);
+      return;
+    }
+    const displayText =
+      text || (opts.attachments.length === 1 ? '(bilaga skickad)' : '(bilagor skickade)');
+    setMessages((prev) => [...prev, { role: 'user', content: displayText }]);
+    void runStreamingTurn(text, opts);
   }
 
   async function onDownload(file: GeneratedFileRef) {
@@ -289,11 +388,12 @@ export default function ChattWorkspace({ greeting, agents, connectors, initialTh
           agents={agents}
           connectors={connectors}
           messages={messages}
-          isPending={isPending || deepRunning}
+          isPending={streaming || deepRunning}
           error={error}
           activeAgent={activeAgent}
           deepRunning={deepRunning}
           deepProgress={deepJob?.progress ?? 0}
+          liveSteps={liveSteps}
           onPickAgent={setActiveAgent}
           onReset={newChat}
           onSubmit={submit}

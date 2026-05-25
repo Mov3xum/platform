@@ -1,7 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { MistralError, type MistralMessage } from './mistral';
-import { runAgentLoop } from './agent-runtime';
+import { runAgentLoop, type AgentLoopStep } from './agent-runtime';
 import { buildChatTools } from './tools';
 import { buildSchemaSummary, getExposedCollections } from './schema';
 import { buildPortfolioContext, renderPromptTemplate } from './context';
@@ -85,6 +85,17 @@ const STAFF_TOOL_GUIDANCE =
   'efterfrågad.\n' +
   '- Slå alltid upp bolagets id med `query_collection` först om du inte redan har det.\n' +
   '- Varje skrivning loggas i `agent_actions` och kan rullas tillbaka av staff.\n\n' +
+  'SÅ HÄR ARBETAR DU (viktigt):\n' +
+  '- Du arbetar SYNKRONT i detta svar. Det finns INGEN bakgrundskörning mellan ' +
+  'dina svar — lova därför ALDRIG att leverera något "strax", "i bakgrunden", ' +
+  '"om en stund" eller be användaren "återkomma senare". Allt arbete sker nu.\n' +
+  '- Ska du ta fram ett dokument MÅSTE du anropa `generate_document` i detta ' +
+  'svar och invänta resultatet innan du skriver klart. Påstå aldrig att ett ' +
+  'dokument är på väg, håller på att skapas, eller snart är klart utan att ' +
+  'faktiskt ha anropat verktyget och fått tillbaka filen.\n' +
+  '- Om uppgiften kräver många steg eller längre research: säg det rakt ut och ' +
+  'be användaren använda "Djupdykning"-läget i stället för att låtsas fortsätta ' +
+  'arbeta efter att svaret skickats.\n\n' +
   'OBS: Plattformen spårar IRL (Investment Readiness Level, fältet `irl_level` 1-9) — INTE TRL.';
 
 interface AgentRecord {
@@ -209,6 +220,8 @@ export interface RunStaffChatTurnOptions {
   chatThreadId?: string;
   /** ai_usage_events-surface (default dashboard_chat). */
   surface?: AiUsageSurface;
+  /** Live-callback för verktygssteg (streaming-endpoint). */
+  onStep?: (step: AgentLoopStep) => void;
 }
 
 /**
@@ -296,6 +309,7 @@ export async function runStaffChatTurn(
         generatedFiles
       },
       maxIterations: MAX_TOOL_ITERATIONS,
+      onStep: opts.onStep,
       onUsage: (u) => {
         tokensIn += u.tokensIn;
         tokensOut += u.tokensOut;

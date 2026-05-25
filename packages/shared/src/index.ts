@@ -218,12 +218,24 @@ export interface GeneratedFileRef {
   size_bytes: number;
 }
 
+// Ett verktygssteg agenten utförde under en turn. Live-streamas till UI:t
+// medan turen körs och persisteras på assistant-meddelandet så återöppnade
+// trådar visar vad agenten gjorde. Etiketter är PII-fria (kollektionsnivå /
+// dokumenttyp) — de innehåller aldrig användarvärden, filter eller fältdata.
+export interface AgentActivityStep {
+  tool: string; // funktionsnamn, t.ex. 'query_collection'
+  label: string; // svensk etikett, t.ex. 'Läser bolagsdata'
+  ok?: boolean; // utfall (sätts när steget är klart)
+}
+
 export interface ToolRunMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   attachments?: ToolRunAttachmentRef[];
   // Agent-genererade dokument knutna till detta (assistant-)turn.
   generated_files?: GeneratedFileRef[];
+  // Verktygssteg agenten utförde för detta (assistant-)turn.
+  steps?: AgentActivityStep[];
   model?: string; // modell som producerade detta turn (assistant)
   tokens_in?: number;
   tokens_out?: number;

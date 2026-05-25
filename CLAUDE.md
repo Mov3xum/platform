@@ -1676,8 +1676,10 @@ dokument (PPTX/XLSX/DOCX/PDF), genererade filer landar i en personlig
 |-----|-------|
 | `apps/web/src/lib/ai/staff-chat.ts` | Delad staff-chatt-motor (`runStaffChatTurn`) — efemär chatt OCH trådar delar säkerhetspreamble/verktygsyta |
 | `apps/web/src/lib/ai/chat-input.ts` | Delade bilage-/input-hjälpare (normalisering, vision-multipart) |
-| `apps/web/src/lib/actions/chat-threads.ts` | CRUD + `sendThreadMessageAction` (persistent) |
-| `apps/web/src/app/chatt/ChattWorkspace.tsx` | Trådsidebar + chatt + djupjobb-kontroll (client) |
+| `apps/web/src/lib/ai/thread-turn.ts` | Delad turn-/persistenskärna (`executeThreadTurn` + `loadOwnedThread`) — streaming-endpoint OCH server-action-fallback delar den |
+| `apps/web/src/lib/actions/chat-threads.ts` | CRUD + `sendThreadMessageAction` (icke-streamande fallback) |
+| `apps/web/src/app/api/chat/stream/route.ts` | Streamande chatt-turn (NDJSON) — strömmar agentens verktygssteg live |
+| `apps/web/src/app/chatt/ChattWorkspace.tsx` | Trådsidebar + chatt + djupjobb-kontroll + streaming-klient (client) |
 | `apps/web/src/lib/documents/` | Dokumentlager: `types`, `validate`, `brand`, `render-{pptx,xlsx,docx,pdf}`, `index`, `save` |
 | `apps/web/src/lib/actions/files.ts` | Filer-actions (lista/ladda ned/döp om/radera/ladda upp) |
 | `apps/web/src/app/filer/` | Personlig Filer-yta |
@@ -1765,6 +1767,35 @@ domänmutation) via `buildChatTools({ includeWrites:false, includeDocuments:true
   tenant-synliga `ai_usage_events` + `tool_runs` (sub-körningar).
 - **Delad motor:** `staff-chat.ts` säkrar att efemär chatt och trådar har
   IDENTISK säkerhetspreamble/prompt-injection-skydd (ingen divergerande kopia).
+
+### 17.8 Live-aktivitetsspår (streaming) & ärlig agent
+
+Trådchatten (`/chatt`) kör turen via en streamande route handler
+(`/api/chat/stream`, NDJSON över en `ReadableStream`) i stället för en
+ren server-action. `runAgentLoop` exponerar en `onStep`-callback som fyrar
+runt varje verktygsanrop (`start`/`end`); endpointen forwardar dem live till
+klienten som visar ett aktivitetsspår ("Läser bolagsdata", "Skapar
+PowerPoint"). Stegen persisteras dessutom PII-fritt på assistant-meddelandet
+(`ToolRunMessage.steps`) så återöppnade trådar visar vad agenten gjorde.
+
+- **Delad logik:** transport-laget är tunt — `executeThreadTurn`
+  (`lib/ai/thread-turn.ts`) äger turn-/persistenslogiken och delas av BÅDE
+  streaming-endpointen OCH `sendThreadMessageAction` (icke-streamande
+  fallback). Ingen divergerande kopia.
+- **Säkerhet:** endpointen kör samma RBAC (staff-only) och ägar-/
+  tenant-verifiering (`loadOwnedThread`) som server-actionen, ingen ny
+  dataväg (PII-skydd/whitelist ligger kvar i `staff-chat.ts`/`schema.ts`).
+  Auth-cookien är `SameSite=Lax` → cross-site POST saknar cookie (CSRF-skydd
+  motsvarande server-actions). CSP `connect-src 'self'` tillåter fetchen.
+- **PII (GDPR §5):** stegens etiketter är på kollektions-/dokumenttyp-nivå —
+  aldrig filter, fältvärden eller användarinmatning. `steps` matas ALDRIG
+  tillbaka in i modellprompten (historiken byggs bara från `role`/`content`).
+- **Ärlig agent:** `STAFF_TOOL_GUIDANCE` (i `staff-chat.ts` och `chat.ts`)
+  förbjuder uttryckligen att lova bakgrundsarbete ("strax", "i bakgrunden",
+  "återkom om en stund") — turen är synkron, så ett dokument måste skapas via
+  `generate_document` i samma svar, annars hänvisas till Djupdykning.
+- **Riskklass:** oförändrad (ingen ny AI-funktion — bara transparens om
+  befintliga verktygsanrop, EU AI Act art. 13/50).
 
 ### 17.7 Begränsningar (MVP)
 

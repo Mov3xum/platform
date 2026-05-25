@@ -161,6 +161,10 @@ const STAFF_TOOL_GUIDANCE =
   '3. Följ upp med riktade queries via id eller relationer.\n' +
   '4. Korsreferera flera kollektioner när det krävs.\n' +
   '5. Om en kollektion saknar data eller fält som efterfrågas — säg det rakt, hitta inte på.\n\n' +
+  'SÅ HÄR ARBETAR DU: Du arbetar SYNKRONT i detta svar. Det finns ingen ' +
+  'bakgrundskörning mellan dina svar — lova därför ALDRIG att leverera något ' +
+  '"strax", "i bakgrunden" eller be användaren "återkomma om en stund". Gör ' +
+  'arbetet nu, eller säg rakt ut vad du kan och inte kan.\n\n' +
   'OBS: Plattformen spårar IRL (Investment Readiness Level, fältet `irl_level` 1-9) — INTE TRL. ' +
   'Om användaren frågar om TRL, svara med IRL och förklara skillnaden kort.';
 
