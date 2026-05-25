@@ -1040,7 +1040,7 @@ i `tool_runs` + `activities` + `ai_usage_events`.
 
 - **Coordinator fan-out (Fas 5):** både portfölj-agenter (`ai_system_wide`)
   och per-bolag-agenter (`ai_per_startup`) kan nu schemaläggas. En per-bolag-
-  agent fan-out:as i runnern (`executeScheduledRun` per aktivt bolag, capad
+  agent fan-out:as i runnern (`executeAgentRun` per aktivt bolag, capad
   till `MAX_FANOUT=50`); en portfölj-agent kör en gång mot portföljkontexten.
   `next_run_at` beräknas en gång per tick oavsett antal sub-körningar.
 - Cron-parsern stödjer 5-fält standard-syntax med `*`, tal, listor,
@@ -1528,7 +1528,8 @@ requires_startup, output_format).
 ### 16.7 Coordinator fan-out (schemalagda per-bolag-agenter)
 
 Fas 5. `runScheduledTool` (lib/scheduling/runner.ts) är refaktorerad: den
-delar upp en tick i en eller flera `executeScheduledRun`-anrop.
+delar upp en tick i en eller flera `executeAgentRun`-anrop (den delade,
+exporterade per-körnings-exekveraren som även event-triggers använder).
 
 - **Portfölj-agent** (`ai_system_wide`): en körning mot portföljkontexten
   (som tidigare).
@@ -1541,4 +1542,34 @@ delar upp en tick i en eller flera `executeScheduledRun`-anrop.
 - Lyfter den tidigare § 12.4-begränsningen; `upsertScheduleAction` tillåter
   nu per-bolag-agenter (blockerade dem förut via `requires_startup`).
 - Inga skrivverktyg (read-only surface, § 16.3) — människa-i-loopen kvar.
+
+### 16.8 Händelse-triggers (event-driven agentkörning)
+
+Fas 5. Speglar schemaläggnings-stacken (§12) men triggas av en händelse
+i stället för cron.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000082_create_tool_triggers.js` | Collection `tool_triggers` (tenant, tool, event, enabled, created_by) |
+| `backend/pocketbase-schema/hooks/event_trigger.pb.js` | PB-hook `onRecordAfterCreateSuccess('startups')` → POSTar matchande triggers |
+| `apps/web/src/app/api/internal/run-trigger/route.ts` | Intern endpoint (secret-auth, ackar 202, kör i bakgrunden) |
+| `apps/web/src/lib/triggers/runner.ts` | `runTriggeredTool` — RBAC-revalidering + `executeAgentRun` |
+
+**Flöde:** nytt bolag skapas → hooken hittar aktiverade `tool_triggers`
+med `event="startup_created"` för tenanten → POSTar `{triggerId, startupId}`
+till endpointen (delat secret `MOVEXUM_SCHEDULE_SECRET`, samma som §12.3) →
+endpointen ackar direkt och kör `runTriggeredTool` i bakgrunden så
+bolagsskapandet inte blockeras av AI-körningen.
+
+**Säkerhet/efterlevnad:** samma som schemaläggning — RBAC revalideras mot
+`created_by` (rollnedgradering blockerar), read-only verktygsyta (inga
+skrivningar, människa-i-loopen § 10), allt loggas i tool_runs/activities/
+ai_usage_events. `tool_triggers` är staff-only (API-regler).
+
+**Begränsningar (MVP):** enda händelsen är `startup_created`; triggers
+konfigureras via PB-admin tills en UI finns (collectionen + server-flöden
+är klara). En massimport som skapar många bolag ger en körning per bolag
+per aktiv trigger — aktivera triggers med det i åtanke (kostnad).
 

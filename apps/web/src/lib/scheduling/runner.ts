@@ -81,9 +81,12 @@ interface ScheduleRecord {
   last_run_at?: string;
 }
 
-interface ExecuteRunParams {
+export interface ExecuteRunParams {
   tenant: string;
-  scheduleId: string;
+  /** Vad som triggade körningen — påverkar bara `tool_runs.input`-loggen. */
+  mode: 'scheduled' | 'trigger';
+  /** schedule-id eller trigger-id (loggas i input för audit). */
+  sourceId: string;
   tool: Tool & Record<string, unknown>;
   selectedModel: ToolModel;
   verifyRubric: string;
@@ -222,9 +225,10 @@ export async function runScheduledTool(
   let anyError: string | undefined;
   let okCount = 0;
   for (const startupId of targets) {
-    const res = await executeScheduledRun(pb, {
+    const res = await executeAgentRun(pb, {
       tenant: schedule.tenant,
-      scheduleId: schedule.id,
+      mode: 'scheduled',
+      sourceId: schedule.id,
       tool,
       selectedModel,
       verifyRubric,
@@ -252,11 +256,15 @@ export async function runScheduledTool(
  * tool_run, bygger kontext, kör den delade agent-loopen (ev. med grader),
  * persisterar och loggar. Återanvänds av fan-out-loopen.
  */
-async function executeScheduledRun(
+export async function executeAgentRun(
   pb: PocketBase,
   p: ExecuteRunParams
 ): Promise<{ ok: boolean; runId?: string; error?: string }> {
   const startedAtIso = new Date().toISOString();
+  const sourceInput =
+    p.mode === 'scheduled'
+      ? { mode: 'scheduled' as const, schedule: p.sourceId }
+      : { mode: 'trigger' as const, trigger: p.sourceId };
   let runId: string;
   try {
     const runRecord = await pb.collection('tool_runs').create({
@@ -265,7 +273,7 @@ async function executeScheduledRun(
       startup: p.startupId || null,
       triggered_by: p.creatorId || null,
       status: 'running',
-      input: { mode: 'scheduled', schedule: p.scheduleId },
+      input: sourceInput,
       started_at: startedAtIso
     });
     runId = runRecord.id as string;
@@ -372,8 +380,7 @@ async function executeScheduledRun(
       completed_at: completedAt,
       messages: messagesArr,
       input: {
-        mode: 'scheduled',
-        schedule: p.scheduleId,
+        ...sourceInput,
         startup: p.startupId || undefined,
         web_sources: webResults.map((r) => ({
           source: r.source,
@@ -402,7 +409,7 @@ async function executeScheduledRun(
         startup: p.startupId || undefined,
         kind: 'tool_run',
         actor: p.creatorId,
-        title: `Schemalagd körning: ${p.tool.name}`,
+        title: `${p.mode === 'scheduled' ? 'Schemalagd' : 'Triggad'} körning: ${p.tool.name}`,
         meta: `${p.selectedModel} · ${tokensIn + tokensOut} tokens · ~$${costUsd.toFixed(2)}`,
         tool: p.tool.id,
         tool_run: runId
