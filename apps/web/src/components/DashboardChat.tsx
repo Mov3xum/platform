@@ -148,11 +148,14 @@ interface Props {
   isPending: boolean;
   error: string | null;
   activeAgent: DashboardAgent | null;
+  // Djupt jobb (kontrolleras av ChattWorkspace)
+  deepRunning?: boolean;
+  deepProgress?: number;
   onPickAgent: (a: DashboardAgent | null) => void;
   onReset: () => void;
   onSubmit: (
     text: string,
-    opts: { includeWebContext: boolean; attachments: ChatAttachment[] }
+    opts: { includeWebContext: boolean; attachments: ChatAttachment[]; deepJob: boolean }
   ) => void;
   onDownload: (file: GeneratedFileRef) => void;
 }
@@ -180,6 +183,8 @@ export default function DashboardChat({
   isPending,
   error,
   activeAgent,
+  deepRunning = false,
+  deepProgress = 0,
   onPickAgent,
   onReset,
   onSubmit,
@@ -187,6 +192,7 @@ export default function DashboardChat({
 }: Props) {
   const [input, setInput] = useState('');
   const [includeWebContext, setIncludeWebContext] = useState(false);
+  const [deepMode, setDeepMode] = useState(false);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
@@ -312,22 +318,42 @@ export default function DashboardChat({
     setAttachments((prev) => prev.filter((a) => a.uid !== uid));
   }
 
+  function toggleDeepMode() {
+    setDeepMode((v) => {
+      const next = !v;
+      // Djupa jobb tar bara en instruktion — bilagor/webbkällor gäller inte.
+      if (next) {
+        setAttachments([]);
+        setIncludeWebContext(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        if (imageInputRef.current) imageInputRef.current.value = '';
+      }
+      return next;
+    });
+  }
+
   function submit() {
     const text = input.trim();
-    if ((!text && attachments.length === 0) || isPending) return;
+    // Djupt jobb kräver en instruktion (text); annars krävs text eller bilaga.
+    if (deepMode ? !text : !text && attachments.length === 0) return;
+    if (isPending) return;
     setLocalError(null);
-    const sentAttachments: ChatAttachment[] = attachments.map((a) => ({
-      name: a.name,
-      mime: a.mime,
-      kind: a.kind,
-      text: a.text,
-      dataUrl: a.dataUrl
-    }));
+    const sentAttachments: ChatAttachment[] = deepMode
+      ? []
+      : attachments.map((a) => ({
+          name: a.name,
+          mime: a.mime,
+          kind: a.kind,
+          text: a.text,
+          dataUrl: a.dataUrl
+        }));
+    const wasDeep = deepMode;
     setInput('');
     setAttachments([]);
+    setDeepMode(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (imageInputRef.current) imageInputRef.current.value = '';
-    onSubmit(text, { includeWebContext, attachments: sentAttachments });
+    onSubmit(text, { includeWebContext, attachments: sentAttachments, deepJob: wasDeep });
   }
 
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -338,10 +364,26 @@ export default function DashboardChat({
   }
 
   const canSubmit =
-    !isPending && !isProcessingFiles && (input.trim().length > 0 || attachments.length > 0);
+    !isPending &&
+    !isProcessingFiles &&
+    (deepMode ? input.trim().length > 0 : input.trim().length > 0 || attachments.length > 0);
 
   const inputPill = (
     <div className="rounded-2xl border border-default bg-surface px-4 py-3 shadow-sm shadow-movexum-svart/5 transition focus-within:border-strong focus-within:ring-2 focus-within:ring-movexum-pastell-lila dark:focus-within:ring-movexum-morklila">
+      {deepRunning && (
+        <div className="mb-2 rounded-xl bg-movexum-pastell-lila px-3 py-2">
+          <div className="flex items-center justify-between text-[12px] font-medium text-movexum-morklila">
+            <span className="inline-flex items-center gap-1.5">
+              <Icon name="sparkle" size={12} />
+              Djupdykning pågår — planerar, hämtar data och sammanställer ett utkast…
+            </span>
+            <span>{deepProgress}%</span>
+          </div>
+          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-canvas-muted">
+            <div className="h-full bg-movexum-lila transition-all" style={{ width: `${deepProgress}%` }} />
+          </div>
+        </div>
+      )}
       {attachments.length > 0 && (
         <ul className="mb-2 flex flex-wrap gap-2">
           {attachments.map((a) => (
@@ -378,7 +420,11 @@ export default function DashboardChat({
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKey}
         placeholder={
-          activeAgent ? `Fråga ${activeAgent.name}…` : 'Fråga om portföljen, ett bolag eller en aktivitet…'
+          deepMode
+            ? 'Beskriv vad djupdykningen ska göra (planeras och körs i flera steg)…'
+            : activeAgent
+              ? `Fråga ${activeAgent.name}…`
+              : 'Fråga om portföljen, ett bolag eller en aktivitet…'
         }
         disabled={isPending}
         rows={1}
@@ -426,7 +472,7 @@ export default function DashboardChat({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isPending || isProcessingFiles || attachments.length >= MAX_ATTACHMENTS}
+            disabled={isPending || isProcessingFiles || deepMode || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title={`Bifoga fil (PNG, JPG, WebP, PDF, XLSX, TXT, MD, CSV · max ${MAX_ATTACHMENTS} filer · 10 MB/fil)`}
             aria-label="Bifoga fil"
@@ -439,7 +485,7 @@ export default function DashboardChat({
           <button
             type="button"
             onClick={() => imageInputRef.current?.click()}
-            disabled={isPending || attachments.length >= MAX_ATTACHMENTS}
+            disabled={isPending || deepMode || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title={`Bifoga bild (PNG, JPG, WebP · max ${MAX_ATTACHMENTS} bilagor · 10 MB/fil)`}
             aria-label="Bifoga bild"
@@ -450,7 +496,8 @@ export default function DashboardChat({
             type="button"
             onClick={() => setIncludeWebContext((v) => !v)}
             aria-pressed={includeWebContext}
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition ${
+            disabled={isPending || deepMode}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition disabled:cursor-not-allowed disabled:opacity-40 ${
               includeWebContext
                 ? 'bg-movexum-pastell-bla text-movexum-djupbla'
                 : 'border border-default text-foreground-subtle hover:text-foreground'
@@ -459,6 +506,22 @@ export default function DashboardChat({
           >
             <Icon name="globe" size={12} />
             Webbkällor
+          </button>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={deepMode}
+            onClick={toggleDeepMode}
+            disabled={isPending || deepRunning}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
+              deepMode
+                ? 'bg-movexum-lila text-movexum-vit shadow-sm shadow-movexum-svart/10'
+                : 'border border-default text-foreground-subtle hover:border-strong hover:text-foreground'
+            }`}
+            title="Djupdykning: planerar, hämtar data i flera steg och sammanställer ett utkast (ev. dokument) i tråden"
+          >
+            <Icon name="sparkle" size={12} />
+            Djupdykning
           </button>
         </div>
         <button
