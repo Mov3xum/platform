@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChatAttachment } from '@/lib/actions/chat';
-import type { GeneratedFileRef } from '@platform/shared';
+import type { AgentActivityStep, GeneratedFileRef } from '@platform/shared';
 import {
   extractPdfFromDataUrlAction,
   extractXlsxFromDataUrlAction
@@ -27,11 +27,51 @@ interface UploadedFile extends ChatAttachment {
   size: number;
 }
 
-// Meddelande som visas i UI:t — kan bära agent-genererade filer (chips).
+// Meddelande som visas i UI:t — kan bära agent-genererade filer (chips) och
+// det aktivitetsspår agenten utförde för svaret.
 export interface UiMessage {
   role: 'user' | 'assistant';
   content: string;
   generated_files?: GeneratedFileRef[];
+  steps?: AgentActivityStep[];
+}
+
+// Ett pågående verktygssteg under en streamande turn.
+export interface LiveStep {
+  id: string;
+  label: string;
+  running: boolean;
+  ok?: boolean;
+}
+
+// Kompakt aktivitetsspår ("Läser bolagsdata", "Skapar PowerPoint"). Visas
+// live medan turen körs (running → spinner) och persiterat under färdiga svar.
+function ActivityTrail({
+  items
+}: {
+  items: Array<{ label: string; running?: boolean; ok?: boolean }>;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <ul className="mb-2 flex flex-col gap-1">
+      {items.map((s, i) => (
+        <li
+          key={i}
+          className="inline-flex items-center gap-2 text-[12.5px] text-foreground-subtle"
+        >
+          {s.running ? (
+            <span
+              className="h-3 w-3 shrink-0 animate-spin rounded-full border border-foreground-subtle border-t-transparent"
+              aria-hidden
+            />
+          ) : (
+            <Icon name={s.ok === false ? 'x' : 'check'} size={12} />
+          )}
+          <span>{s.label}</span>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function detectMime(file: File): string | null {
@@ -151,6 +191,8 @@ interface Props {
   // Djupt jobb (kontrolleras av ChattWorkspace)
   deepRunning?: boolean;
   deepProgress?: number;
+  // Live-aktivitetsspår för den pågående turen (streaming).
+  liveSteps?: LiveStep[];
   onPickAgent: (a: DashboardAgent | null) => void;
   onReset: () => void;
   onSubmit: (
@@ -185,6 +227,7 @@ export default function DashboardChat({
   activeAgent,
   deepRunning = false,
   deepProgress = 0,
+  liveSteps = [],
   onPickAgent,
   onReset,
   onSubmit,
@@ -220,7 +263,7 @@ export default function DashboardChat({
     requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     });
-  }, [messages.length, isPending]);
+  }, [messages.length, isPending, liveSteps.length]);
 
   async function addFiles(files: FileList | File[]) {
     const list = Array.from(files);
@@ -712,6 +755,9 @@ export default function DashboardChat({
                 ) : (
                   <div key={i} className="flex justify-start">
                     <div className="max-w-[85%]">
+                      {msg.steps && msg.steps.length > 0 && (
+                        <ActivityTrail items={msg.steps.map((s) => ({ label: s.label, ok: s.ok }))} />
+                      )}
                       <div className="whitespace-pre-wrap text-[14.5px] leading-relaxed text-foreground">
                         {msg.content}
                       </div>
@@ -723,10 +769,15 @@ export default function DashboardChat({
 
               {isPending && (
                 <div className="flex justify-start">
-                  <div className="inline-flex gap-1 text-foreground-subtle" aria-label="Laddar svar">
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '0ms' }} />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '150ms' }} />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '300ms' }} />
+                  <div className="max-w-[85%]">
+                    <ActivityTrail
+                      items={liveSteps.map((s) => ({ label: s.label, running: s.running, ok: s.ok }))}
+                    />
+                    <div className="inline-flex gap-1 text-foreground-subtle" aria-label="Arbetar">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '0ms' }} />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '150ms' }} />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '300ms' }} />
+                    </div>
                   </div>
                 </div>
               )}

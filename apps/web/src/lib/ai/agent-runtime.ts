@@ -5,7 +5,12 @@ import {
   type MistralMessage,
   type MistralToolDefinition
 } from './mistral';
-import { buildChatTools, dispatchToolCall, type ToolDispatchContext } from './tools';
+import {
+  buildChatTools,
+  describeToolCall,
+  dispatchToolCall,
+  type ToolDispatchContext
+} from './tools';
 import { buildSchemaSummary, getExposedCollections } from './schema';
 
 // Hur många gånger modellen får anropa verktyg och få tillbaka resultat
@@ -23,6 +28,19 @@ export interface AgentLoopUsage {
   tokensOut: number;
 }
 
+/**
+ * Ett verktygssteg medan loopen kör. `start` skickas innan verktyget körs
+ * (UI:t visar "Läser …"), `end` när det är klart (markerar utfall). Anroparen
+ * (streaming-endpointen) forwardar dessa live till klienten.
+ */
+export interface AgentLoopStep {
+  phase: 'start' | 'end';
+  id: string; // tool_call-id
+  tool: string;
+  label: string;
+  ok?: boolean; // bara phase === 'end'
+}
+
 export interface RunAgentLoopOptions {
   /** Modellkedja som provas i ordning vid kapacitetstak (429). */
   models: string[];
@@ -38,6 +56,11 @@ export interface RunAgentLoopOptions {
    * exekveringsväg: dashboard_chat / toolbox / scheduled).
    */
   onUsage?: (usage: AgentLoopUsage) => Promise<void> | void;
+  /**
+   * Anropas runt varje verktygsanrop (start + end) så anroparen kan visa ett
+   * live-aktivitetsspår. Synkron — får inte blockera loopen.
+   */
+  onStep?: (step: AgentLoopStep) => void;
 }
 
 export interface AgentLoopResult {
@@ -103,7 +126,16 @@ export async function runAgentLoop(
     });
 
     for (const call of toolCalls) {
+      const desc = describeToolCall(call);
+      options.onStep?.({ phase: 'start', id: call.id, tool: desc.tool, label: desc.label });
       const toolResult = await dispatchToolCall(call, options.toolContext);
+      options.onStep?.({
+        phase: 'end',
+        id: call.id,
+        tool: desc.tool,
+        label: desc.label,
+        ok: toolResult.ok
+      });
       toolCallsMade++;
       conversation.push({
         role: 'tool',

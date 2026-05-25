@@ -435,6 +435,73 @@ export function buildChatTools(
   return tools;
 }
 
+// Människovänliga (svenska) etiketter för live-aktivitetsspåret. Håller sig
+// på kollektions-/dokumenttyp-nivå — aldrig användarvärden eller filter (de
+// kan innehålla namn användaren skrev) → PII-fritt och säkert att persistera.
+const COLLECTION_LABELS: Record<string, string> = {
+  startups: 'bolagsdata',
+  activities: 'aktiviteter',
+  tool_runs: 'AI-körningar',
+  startup_financials: 'bolagens ekonomi',
+  startup_kpis: 'nyckeltal',
+  capital_rounds: 'kapitalrundor',
+  intellectual_property: 'immateriella rättigheter',
+  agreements: 'avtal',
+  incubator_events: 'evenemang',
+  event_signups: 'anmälningar',
+  startup_phase_history: 'fashistorik',
+  ai_usage_events: 'AI-statistik'
+};
+
+const DOC_LABELS: Record<string, string> = {
+  pptx: 'PowerPoint',
+  xlsx: 'Excel-fil',
+  docx: 'Word-dokument',
+  pdf: 'PDF'
+};
+
+function collectionLabel(name: string): string {
+  return COLLECTION_LABELS[name] || name || 'data';
+}
+
+/**
+ * Översätter ett tool-call till en kort svensk etikett för aktivitetsspåret
+ * ("Läser bolagsdata", "Skapar PowerPoint"). PII-fri per design: bara
+ * verktygsnamn + kollektion/dokumenttyp läses, aldrig filter eller värden.
+ */
+export function describeToolCall(call: MistralToolCall): { tool: string; label: string } {
+  let args: Record<string, unknown> = {};
+  try {
+    args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+  } catch {
+    /* etikett faller tillbaka på verktygsnamnet */
+  }
+  const name = call.function.name;
+  const coll = typeof args.collection === 'string' ? args.collection : '';
+  switch (name) {
+    case 'query_collection':
+      return { tool: name, label: `Läser ${collectionLabel(coll)}` };
+    case 'count_collection':
+      return { tool: name, label: `Räknar ${collectionLabel(coll)}` };
+    case 'update_startup_field':
+      return { tool: name, label: 'Uppdaterar bolagsuppgift' };
+    case 'create_startup_activity':
+      return { tool: name, label: 'Loggar aktivitet' };
+    case 'update_activity_field':
+      return { tool: name, label: 'Uppdaterar aktivitet' };
+    case 'memory_read':
+      return { tool: name, label: 'Läser minnet' };
+    case 'memory_write':
+      return { tool: name, label: 'Sparar i minnet' };
+    case 'generate_document': {
+      const kind = typeof args.kind === 'string' ? args.kind : '';
+      return { tool: name, label: `Skapar ${DOC_LABELS[kind] || 'dokument'}` };
+    }
+    default:
+      return { tool: name, label: 'Arbetar' };
+  }
+}
+
 export interface ToolDispatchContext {
   pb: PocketBase;
   tenantId: string;
