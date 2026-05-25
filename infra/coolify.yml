@@ -40,8 +40,19 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_POCKETBASE_URL: http://pocketbase:8080
-      POCKETBASE_URL: http://pocketbase:8080
+      # Miljöväljare per deployment: staging | production. Avgör vilket
+      # _STAGING/_PRODUCTION-PocketBase-par appen pratar med (NODE_ENV är
+      # 'production' i båda containrarna och kan inte skilja dem åt).
+      # Default = staging om osatt (säkrare för data). Sätts i Coolify-UI:t.
+      MOVEXUM_ENV: ${MOVEXUM_ENV:-staging}
+      POCKETBASE_URL_STAGING: ${POCKETBASE_URL_STAGING:-}
+      POCKETBASE_URL_PRODUCTION: ${POCKETBASE_URL_PRODUCTION:-}
+      NEXT_PUBLIC_POCKETBASE_URL_STAGING: ${NEXT_PUBLIC_POCKETBASE_URL_STAGING:-}
+      NEXT_PUBLIC_POCKETBASE_URL_PRODUCTION: ${NEXT_PUBLIC_POCKETBASE_URL_PRODUCTION:-}
+      # Fallback för lokal/intern compose (den inbyggda pocketbase-servicen
+      # nedan). Används bara om varianterna ovan saknas.
+      POCKETBASE_URL: ${POCKETBASE_URL:-http://pocketbase:8080}
+      NEXT_PUBLIC_POCKETBASE_URL: ${NEXT_PUBLIC_POCKETBASE_URL:-http://pocketbase:8080}
       NODE_ENV: production
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
       # Superuser-credentials krävs för fallback-skapande av records när

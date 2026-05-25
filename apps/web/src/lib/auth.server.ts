@@ -3,11 +3,10 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import PocketBase from 'pocketbase';
 import type { Role } from '@platform/shared';
+import { getPublicPbUrl, getServerPbUrl } from '@/lib/pb-url';
 
-const SERVER_PB_URL =
-  process.env.POCKETBASE_URL ||
-  (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080');
-const PUBLIC_PB_URL = process.env.NEXT_PUBLIC_POCKETBASE_URL || SERVER_PB_URL;
+const SERVER_PB_URL = getServerPbUrl();
+const PUBLIC_PB_URL = getPublicPbUrl();
 export const AUTH_COOKIE = 'pb_auth';
 
 export interface SessionUser {

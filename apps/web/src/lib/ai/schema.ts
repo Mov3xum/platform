@@ -2,6 +2,7 @@ import 'server-only';
 import PocketBase from 'pocketbase';
 import type PocketBaseType from 'pocketbase';
 import { escFilter } from '@/lib/pb-filter';
+import { getServerPbUrl } from '@/lib/pb-url';
 
 /**
  * Auto-discovery of PocketBase collections for the AI chat.
@@ -208,13 +209,6 @@ interface DiscoveryCacheEntry {
   expires: number;
 }
 let discoveryCache: DiscoveryCacheEntry | null = null;
-
-function getServerPbUrl(): string {
-  return (
-    process.env.POCKETBASE_URL ||
-    (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080')
-  );
-}
 
 async function getAdminPb(): Promise<PocketBaseType | null> {
   const email = process.env.POCKETBASE_SUPERUSER_EMAIL;

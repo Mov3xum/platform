@@ -55,6 +55,12 @@ const nextConfig = {
         hostname: 'pocketbase',
         port: '8080',
       },
+      {
+        // PocketBase staging/production instances served over http on
+        // Coolify sslip.io hostnames (avatars go through next/image).
+        protocol: 'http',
+        hostname: '**.sslip.io',
+      },
     ],
   },
   experimental: {

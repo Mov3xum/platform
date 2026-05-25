@@ -297,6 +297,19 @@ från modulpaketen.
 | Realtime        | PocketBase-prenumeration                                |
 | Hosting         | Coolify containers på UpCloud                           |
 | i18n            | `LocalizedText { sv, en }`                              |
+| PB-URL / miljö  | `MOVEXUM_ENV` (staging\|production) väljer PB-par; resolution i `apps/web/src/lib/pb-url.ts` |
+
+**PocketBase-URL per miljö.** Staging och production kör separata
+PocketBase-instanser. `NODE_ENV` är `production` i båda deploy-containrarna
+och kan inte skilja dem åt, så varje Coolify-web-app sätter `MOVEXUM_ENV`
+(`staging`|`production`). `apps/web/src/lib/pb-url.ts` är **enda källan** för
+URL-resolution (`getServerPbUrl()` / `getPublicPbUrl()`): den väljer
+`POCKETBASE_URL_<MILJÖ>` / `NEXT_PUBLIC_POCKETBASE_URL_<MILJÖ>`, faller
+tillbaka på osuffixad `POCKETBASE_URL` (lokal dev) och slutligen
+`localhost:8080`. Default är **staging** när `MOVEXUM_ENV` saknas (en
+felkonfigurerad deploy pratar då med staging, inte produktionsdata). Lägg
+aldrig tillbaka duplicerad `process.env.POCKETBASE_URL`-logik i enskilda
+filer — använd helpern.
 
 ---
 

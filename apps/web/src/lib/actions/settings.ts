@@ -2,6 +2,7 @@
 
 import PocketBase from 'pocketbase';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { coreModules } from '@platform/shared';
 import { revalidatePath } from 'next/cache';
@@ -23,9 +24,7 @@ const ALLOWED_MODULE_IDS = new Set(
   coreModules.filter((m) => !HIDDEN_MODULE_IDS.includes(m.id)).map((m) => m.id)
 );
 
-const PB_URL =
-  process.env.POCKETBASE_URL ||
-  (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080');
+const PB_URL = getServerPbUrl();
 
 const ALLOWED_LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
 

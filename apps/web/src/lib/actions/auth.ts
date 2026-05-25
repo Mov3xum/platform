@@ -5,13 +5,12 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE } from '@/lib/auth.server';
+import { getServerPbUrl } from '@/lib/pb-url';
 import { generateVerificationToken, parseVerificationToken } from '@/lib/verification-token';
 import { sendVerificationEmail } from '@/lib/email';
 import { checkRateLimit, recordFailure, clearFailures } from '@/lib/rate-limit';
 
-const PB_URL =
-  process.env.POCKETBASE_URL ||
-  (process.env.NODE_ENV === 'production' ? 'http://pocketbase:8080' : 'http://localhost:8080');
+const PB_URL = getServerPbUrl();
 
 // Brute-force-skydd: per IP+e-post (riktad gissning) och per IP (spraying).
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
