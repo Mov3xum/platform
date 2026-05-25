@@ -207,10 +207,23 @@ export interface ToolRunAttachmentRef {
   extracted_text_bytes?: number; // PDF/text — hur mycket text vi matade in i prompten
 }
 
+// Referens till en agent-genererad fil (PPTX/XLSX/DOCX/PDF) som sparats i
+// ägarens privata `user_files` och bifogats ett assistant-svar. UI:t renderar
+// en nedladdnings-chip; nedladdning sker via en kortlivad fil-token.
+export interface GeneratedFileRef {
+  user_file_id: string;
+  filename: string;
+  mime: string;
+  doc_kind: UserFileDocKind;
+  size_bytes: number;
+}
+
 export interface ToolRunMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   attachments?: ToolRunAttachmentRef[];
+  // Agent-genererade dokument knutna till detta (assistant-)turn.
+  generated_files?: GeneratedFileRef[];
   model?: string; // modell som producerade detta turn (assistant)
   tokens_in?: number;
   tokens_out?: number;
@@ -328,6 +341,93 @@ export interface ToolRun {
   };
 }
 
+// ── Persistenta dashboard-chatt-trådar (migration 1700000083) ─────────
+// Strikt ägaren-bara konversationer på /chatt med CRUD (fäst/arkivera/
+// radera). `messages` återanvänder ToolRunMessage[]. `summary` är ett
+// trådscopat minne som injiceras vid återöppning.
+export type ChatThreadStatus = 'active' | 'archived';
+
+export interface ChatThread {
+  id: string;
+  tenant: string;
+  owner: string;
+  title?: string;
+  status?: ChatThreadStatus;
+  pinned?: boolean;
+  agent?: string;
+  messages?: ToolRunMessage[];
+  summary?: string;
+  last_message_at?: string;
+  model?: string;
+  tokens_in?: number;
+  tokens_out?: number;
+  cost_estimate_usd?: number;
+  deleted_at?: string;
+  created: string;
+  updated: string;
+}
+
+// ── Personliga filer (migration 1700000085) ──────────────────────────
+// Strikt ägaren-bara filarkiv (/filer). Genererade dokument
+// (agent_generated) och egna uppladdningar. Bara ägaren ser raderna.
+export type UserFileSource = 'agent_generated' | 'upload';
+export type UserFileDocKind = 'pptx' | 'xlsx' | 'docx' | 'pdf' | 'other';
+
+export interface UserFile {
+  id: string;
+  tenant: string;
+  owner: string;
+  file?: string; // PB-filnamn
+  filename: string;
+  mime?: string;
+  size_bytes?: number;
+  source: UserFileSource;
+  doc_kind?: UserFileDocKind;
+  chat_thread?: string;
+  tool_run?: string;
+  created: string;
+  updated: string;
+}
+
+// ── Djupa jobb / subagent-orkestrering (migration 1700000084) ─────────
+// Bakgrundskörningar som planerar och fan-out:ar read-only sub-körningar
+// (mirror av §16.7) och syntetiserar ett UTKAST i en chatt-tråd. Aldrig
+// auto-publicering — människa-i-loopen (EU AI Act art. 14).
+export type DeepJobStatus =
+  | 'queued'
+  | 'planning'
+  | 'running'
+  | 'aggregating'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+
+export interface DeepJobSubtask {
+  id: string;
+  goal: string;
+  kind: 'research' | 'compile' | 'document';
+}
+
+export interface DeepJob {
+  id: string;
+  tenant: string;
+  owner: string;
+  thread: string;
+  instruction: string;
+  status: DeepJobStatus;
+  plan?: DeepJobSubtask[];
+  progress?: number;
+  subtask_runs?: string[];
+  tokens_in?: number;
+  tokens_out?: number;
+  cost_estimate_usd?: number;
+  error?: string;
+  started_at?: string;
+  completed_at?: string;
+  created: string;
+  updated: string;
+}
+
 // ── AI usage telemetry (migration 1700000058) ────────────────────────
 // Logg-rad per Mistral-anrop. Aggregeras på /insights för totalt
 // kostnads-/tokenutfall över alla ytor (toolbox, dashboard-chatt,
@@ -340,7 +440,8 @@ export type AiUsageSurface =
   | 'intl'
   | 'suggestions'
   | 'workshop_run'
-  | 'connector_chat';
+  | 'connector_chat'
+  | 'deep_chat';
 
 export interface AiUsageEvent {
   id: string;
@@ -906,7 +1007,7 @@ export interface ModuleGroup {
 }
 
 export const RAIL_GROUPS: ModuleGroup[] = [
-  { label: 'Översikt', modules: ['idag', 'inkorg', 'inflode', 'uppdrag'] },
+  { label: 'Översikt', modules: ['idag', 'inkorg', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'insights', 'integrationer', 'installningar'] }
@@ -926,6 +1027,13 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Allt som är ditt på ett ställe — uppgifter, aktiviteter, möten och events att planera och följa upp.',
     rolesAllowed: ALL_ROLES,
     route: '/inkorg'
+  },
+  {
+    id: 'filer',
+    title: 'Filer',
+    description: 'Dina genererade och uppladdade filer — bara du ser dem.',
+    rolesAllowed: ALL_ROLES,
+    route: '/filer'
   },
   {
     id: 'uppdrag',
@@ -1051,3 +1159,8 @@ export const coreModules: ModuleDefinition[] = [
     route: '/partners'
   }
 ];
+
+// ─── Re-export av brand-tokens (TS-spegel av tokens.css) ─────────────────────
+// Låter server-side dokumentgenerering (lib/documents/brand.ts) hämta
+// brand-färgerna från källan-av-sanning istället för att hårdkoda hex.
+export { movexumPalette, typography as brandTypography } from './design/tokens';

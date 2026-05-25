@@ -1,11 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState, useTransition } from 'react';
-import {
-  sendChatMessage,
-  type ChatAttachment,
-  type ChatMessage
-} from '@/lib/actions/chat';
+import { useEffect, useRef, useState } from 'react';
+import type { ChatAttachment } from '@/lib/actions/chat';
+import type { GeneratedFileRef } from '@platform/shared';
 import {
   extractPdfFromDataUrlAction,
   extractXlsxFromDataUrlAction
@@ -18,10 +15,7 @@ const ACCEPT_IMAGE = ['image/png', 'image/jpeg', 'image/webp'];
 const ACCEPT_TEXT = ['text/plain', 'text/markdown', 'text/csv', 'application/csv'];
 const ACCEPT_PDF = ['application/pdf'];
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const ACCEPT_XLSX = [
-  XLSX_MIME,
-  'application/vnd.ms-excel'
-];
+const ACCEPT_XLSX = [XLSX_MIME, 'application/vnd.ms-excel'];
 const ACCEPT_IMAGE_ATTR = 'image/png,image/jpeg,image/webp';
 const ACCEPT_TEXT_ATTR =
   'text/plain,text/markdown,text/csv,application/pdf,' +
@@ -33,15 +27,18 @@ interface UploadedFile extends ChatAttachment {
   size: number;
 }
 
+// Meddelande som visas i UI:t — kan bära agent-genererade filer (chips).
+export interface UiMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  generated_files?: GeneratedFileRef[];
+}
+
 function detectMime(file: File): string | null {
   const mime = (file.type || '').toLowerCase();
-  if (
-    mime &&
-    [...ACCEPT_IMAGE, ...ACCEPT_TEXT, ...ACCEPT_PDF, ...ACCEPT_XLSX].includes(mime)
-  ) {
+  if (mime && [...ACCEPT_IMAGE, ...ACCEPT_TEXT, ...ACCEPT_PDF, ...ACCEPT_XLSX].includes(mime)) {
     return mime;
   }
-  // Fallback via extension för md/csv/txt/pdf/xlsx utan korrekt mime
   const ext = file.name.toLowerCase().split('.').pop();
   if (ext === 'md' || ext === 'markdown') return 'text/markdown';
   if (ext === 'csv') return 'text/csv';
@@ -118,6 +115,14 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+const DOC_ICON: Record<string, string> = {
+  pptx: 'image',
+  xlsx: 'doc',
+  docx: 'doc',
+  pdf: 'doc',
+  other: 'doc'
+};
+
 export interface DashboardAgent {
   id: string;
   name: string;
@@ -126,9 +131,6 @@ export interface DashboardAgent {
   runs?: number;
 }
 
-// Pinnade connectors visas under assistenter-sektionen på /chatt.
-// Klick → öppnar connector-chatten i samma layout som vanliga
-// connector-vyer (/integrationer/connectors/<kind>/<id>).
 export interface DashboardConnector {
   kind: 'builtin' | 'mcp';
   id: string;
@@ -141,6 +143,18 @@ interface Props {
   agents?: DashboardAgent[];
   connectors?: DashboardConnector[];
   greeting?: string;
+  // Kontrollerade props (ChattWorkspace äger tillståndet)
+  messages: UiMessage[];
+  isPending: boolean;
+  error: string | null;
+  activeAgent: DashboardAgent | null;
+  onPickAgent: (a: DashboardAgent | null) => void;
+  onReset: () => void;
+  onSubmit: (
+    text: string,
+    opts: { includeWebContext: boolean; attachments: ChatAttachment[] }
+  ) => void;
+  onDownload: (file: GeneratedFileRef) => void;
 }
 
 const AGENT_TONES = [
@@ -157,14 +171,24 @@ function toneFor(id: string) {
   return AGENT_TONES[h % AGENT_TONES.length];
 }
 
-export default function DashboardChat({ className = '', agents = [], connectors = [], greeting }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+export default function DashboardChat({
+  className = '',
+  agents = [],
+  connectors = [],
+  greeting,
+  messages,
+  isPending,
+  error,
+  activeAgent,
+  onPickAgent,
+  onReset,
+  onSubmit,
+  onDownload
+}: Props) {
   const [input, setInput] = useState('');
   const [includeWebContext, setIncludeWebContext] = useState(false);
-  const [activeAgent, setActiveAgent] = useState<DashboardAgent | null>(null);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
-  const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -173,6 +197,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const isActive = messages.length > 0 || isPending;
+  const shownError = localError || error;
 
   function autoGrow() {
     const el = inputRef.current;
@@ -185,25 +210,25 @@ export default function DashboardChat({ className = '', agents = [], connectors 
     autoGrow();
   }, [input]);
 
-  function scrollToBottom() {
+  useEffect(() => {
     requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     });
-  }
+  }, [messages.length, isPending]);
 
   async function addFiles(files: FileList | File[]) {
     const list = Array.from(files);
     if (list.length === 0) return;
-    setError(null);
+    setLocalError(null);
 
     const remaining = MAX_ATTACHMENTS - attachments.length;
     if (remaining <= 0) {
-      setError(`Max ${MAX_ATTACHMENTS} bilagor per meddelande.`);
+      setLocalError(`Max ${MAX_ATTACHMENTS} bilagor per meddelande.`);
       return;
     }
     const accepted = list.slice(0, remaining);
     if (list.length > remaining) {
-      setError(`Endast ${remaining} fil(er) till — max ${MAX_ATTACHMENTS} totalt.`);
+      setLocalError(`Endast ${remaining} fil(er) till — max ${MAX_ATTACHMENTS} totalt.`);
     }
 
     setIsProcessingFiles(true);
@@ -212,17 +237,16 @@ export default function DashboardChat({ className = '', agents = [], connectors 
       for (const file of accepted) {
         const mime = detectMime(file);
         if (!mime) {
-          setError(`${file.name}: filformatet stöds inte.`);
+          setLocalError(`${file.name}: filformatet stöds inte.`);
           continue;
         }
         if (file.size > MAX_FILE_BYTES) {
-          setError(`${file.name} är större än 10 MB.`);
+          setLocalError(`${file.name} är större än 10 MB.`);
           continue;
         }
         try {
           if (ACCEPT_IMAGE.includes(mime)) {
             const { dataUrl, size } = await compressImage(file);
-            // Vid kompression encodas alltid som JPEG; reflektera det i mime.
             const effectiveMime = size < file.size ? 'image/jpeg' : mime;
             next.push({
               uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -236,7 +260,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
             const dataUrl = await readAsDataUrl(file);
             const result = await extractPdfFromDataUrlAction(dataUrl, file.name);
             if (result.error || !result.text) {
-              setError(result.error || `${file.name}: kunde inte läsa PDF.`);
+              setLocalError(result.error || `${file.name}: kunde inte läsa PDF.`);
               continue;
             }
             next.push({
@@ -251,7 +275,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
             const dataUrl = await readAsDataUrl(file);
             const result = await extractXlsxFromDataUrlAction(dataUrl, file.name);
             if (result.error || !result.text) {
-              setError(result.error || `${file.name}: kunde inte läsa Excel-filen.`);
+              setLocalError(result.error || `${file.name}: kunde inte läsa Excel-filen.`);
               continue;
             }
             next.push({
@@ -274,7 +298,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
             });
           }
         } catch (err) {
-          setError(`${file.name}: kunde inte läsa filen.`);
+          setLocalError(`${file.name}: kunde inte läsa filen.`);
           console.error('[DashboardChat] file read failed', err);
         }
       }
@@ -291,18 +315,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
   function submit() {
     const text = input.trim();
     if ((!text && attachments.length === 0) || isPending) return;
-
-    const displayText =
-      text || (attachments.length === 1 ? '(bilaga skickad)' : '(bilagor skickade)');
-    const userMessage: ChatMessage = { role: 'user', content: displayText };
-    const nextMessages: ChatMessage[] = [...messages, userMessage];
-
-    setMessages(nextMessages);
-    setInput('');
-    setError(null);
-    scrollToBottom();
-
-    const agentId = activeAgent?.id;
+    setLocalError(null);
     const sentAttachments: ChatAttachment[] = attachments.map((a) => ({
       name: a.name,
       mime: a.mime,
@@ -310,34 +323,11 @@ export default function DashboardChat({ className = '', agents = [], connectors 
       text: a.text,
       dataUrl: a.dataUrl
     }));
+    setInput('');
     setAttachments([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (imageInputRef.current) imageInputRef.current.value = '';
-
-    startTransition(async () => {
-      try {
-        const result = await sendChatMessage(nextMessages, {
-          includeWebContext,
-          agentId,
-          attachments: sentAttachments
-        });
-        if (result.error) {
-          setError(result.error);
-        } else if (result.text) {
-          setMessages((prev) => [...prev, { role: 'assistant', content: result.text! }]);
-          scrollToBottom();
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Något gick fel';
-        const bodyLimit = /body|request.*size|payload|too large/i.test(msg);
-        setError(
-          bodyLimit
-            ? 'Bilagorna är för stora för att skickas — försök med färre eller mindre filer.'
-            : msg
-        );
-        console.error('[DashboardChat] submit failed', err);
-      }
-    });
+    onSubmit(text, { includeWebContext, attachments: sentAttachments });
   }
 
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -345,34 +335,6 @@ export default function DashboardChat({ className = '', agents = [], connectors 
       e.preventDefault();
       submit();
     }
-  }
-
-  function pickAgent(agent: DashboardAgent) {
-    setActiveAgent(agent);
-    setError(null);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }
-
-  function clearAgent() {
-    setActiveAgent(null);
-  }
-
-  function resetConversation() {
-    setMessages([]);
-    setError(null);
-    setActiveAgent(null);
-    setInput('');
-    setAttachments([]);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (imageInputRef.current) imageInputRef.current.value = '';
-  }
-
-  function openFilePicker() {
-    fileInputRef.current?.click();
-  }
-
-  function openImagePicker() {
-    imageInputRef.current?.click();
   }
 
   const canSubmit =
@@ -389,11 +351,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
             >
               {a.kind === 'image' && a.dataUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={a.dataUrl}
-                  alt=""
-                  className="h-7 w-7 rounded-lg object-cover"
-                />
+                <img src={a.dataUrl} alt="" className="h-7 w-7 rounded-lg object-cover" />
               ) : (
                 <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-movexum-pastell-bla text-movexum-djupbla">
                   <Icon name="doc" size={13} />
@@ -420,9 +378,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKey}
         placeholder={
-          activeAgent
-            ? `Fråga ${activeAgent.name}…`
-            : 'Fråga om portföljen, ett bolag eller en aktivitet…'
+          activeAgent ? `Fråga ${activeAgent.name}…` : 'Fråga om portföljen, ett bolag eller en aktivitet…'
         }
         disabled={isPending}
         rows={1}
@@ -459,9 +415,9 @@ export default function DashboardChat({ className = '', agents = [], connectors 
         }}
       />
 
-      {error && (
+      {shownError && (
         <div className="mt-2 rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange">
-          {error}
+          {shownError}
         </div>
       )}
 
@@ -469,7 +425,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={openFilePicker}
+            onClick={() => fileInputRef.current?.click()}
             disabled={isPending || isProcessingFiles || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title={`Bifoga fil (PNG, JPG, WebP, PDF, XLSX, TXT, MD, CSV · max ${MAX_ATTACHMENTS} filer · 10 MB/fil)`}
@@ -482,7 +438,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
           )}
           <button
             type="button"
-            onClick={openImagePicker}
+            onClick={() => imageInputRef.current?.click()}
             disabled={isPending || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title={`Bifoga bild (PNG, JPG, WebP · max ${MAX_ATTACHMENTS} bilagor · 10 MB/fil)`}
@@ -518,6 +474,30 @@ export default function DashboardChat({ className = '', agents = [], connectors 
     </div>
   );
 
+  function renderGeneratedFiles(files?: GeneratedFileRef[]) {
+    if (!files || files.length === 0) return null;
+    return (
+      <ul className="mt-2 flex flex-wrap gap-2">
+        {files.map((f) => (
+          <li key={f.user_file_id}>
+            <button
+              type="button"
+              onClick={() => onDownload(f)}
+              className="inline-flex items-center gap-2 rounded-xl border border-default bg-canvas-subtle py-1.5 pl-2 pr-3 text-[12.5px] text-foreground transition hover:border-strong hover:bg-canvas-muted"
+              title={`Ladda ned ${f.filename}`}
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-movexum-pastell-lila text-movexum-morklila">
+                <Icon name={DOC_ICON[f.doc_kind] || 'doc'} size={13} />
+              </span>
+              <span className="max-w-[200px] truncate font-medium">{f.filename}</span>
+              <Icon name="download" size={13} />
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
   return (
     <div className={`flex min-h-0 flex-1 flex-col ${className}`}>
       {!isActive ? (
@@ -528,9 +508,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                 {greeting}
               </h1>
             )}
-            <p className="mt-2 text-[14px] text-foreground-subtle">
-              Vad kan jag hjälpa dig med idag?
-            </p>
+            <p className="mt-2 text-[14px] text-foreground-subtle">Vad kan jag hjälpa dig med idag?</p>
 
             {activeAgent && (
               <div className="mt-5 flex items-center gap-2">
@@ -541,7 +519,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                   Med {activeAgent.name}
                   <button
                     type="button"
-                    onClick={clearAgent}
+                    onClick={() => onPickAgent(null)}
                     className="text-foreground-subtle transition hover:text-foreground"
                     aria-label="Avsluta agentläge"
                   >
@@ -559,10 +537,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                   <h2 className="font-heading text-[13px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
                     Mina connectors
                   </h2>
-                  <a
-                    href="/integrationer"
-                    className="text-[12px] text-foreground-subtle transition hover:text-foreground"
-                  >
+                  <a href="/integrationer" className="text-[12px] text-foreground-subtle transition hover:text-foreground">
                     Hantera
                   </a>
                 </div>
@@ -595,10 +570,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                   <h2 className="font-heading text-[13px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
                     Assistenter
                   </h2>
-                  <a
-                    href="/toolbox"
-                    className="text-[12px] text-foreground-subtle transition hover:text-foreground"
-                  >
+                  <a href="/toolbox" className="text-[12px] text-foreground-subtle transition hover:text-foreground">
                     Alla
                   </a>
                 </div>
@@ -610,7 +582,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                       <button
                         key={a.id}
                         type="button"
-                        onClick={() => pickAgent(a)}
+                        onClick={() => onPickAgent(a)}
                         className={`group flex flex-col gap-2 rounded-2xl border bg-surface p-4 text-left transition hover:-translate-y-0.5 hover:border-strong hover:shadow-sm hover:shadow-movexum-svart/10 ${
                           selected ? 'border-strong shadow-sm shadow-movexum-svart/10' : 'border-default'
                         }`}
@@ -652,26 +624,18 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                       <Icon name="sparkle" size={9} />
                     </span>
                     Med {activeAgent.name}
-                    <button
-                      type="button"
-                      onClick={clearAgent}
-                      className="text-foreground-subtle transition hover:text-foreground"
-                      aria-label="Avsluta agentläge"
-                    >
-                      <Icon name="x" size={11} />
-                    </button>
                   </span>
                 ) : (
                   <span />
                 )}
                 <button
                   type="button"
-                  onClick={resetConversation}
+                  onClick={onReset}
                   className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] text-foreground-subtle transition hover:text-foreground"
                   title="Börja om"
                 >
                   <Icon name="plus" size={12} />
-                  Ny konversation
+                  Ny chatt
                 </button>
               </div>
 
@@ -684,8 +648,11 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                   </div>
                 ) : (
                   <div key={i} className="flex justify-start">
-                    <div className="max-w-[85%] whitespace-pre-wrap text-[14.5px] leading-relaxed text-foreground">
-                      {msg.content}
+                    <div className="max-w-[85%]">
+                      <div className="whitespace-pre-wrap text-[14.5px] leading-relaxed text-foreground">
+                        {msg.content}
+                      </div>
+                      {renderGeneratedFiles(msg.generated_files)}
                     </div>
                   </div>
                 )
@@ -709,7 +676,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
             <div className="mx-auto w-full max-w-[720px] px-6 py-4">
               {inputPill}
               <p className="mt-2 text-center text-[11px] text-foreground-subtle">
-                AI drivs av Mistral / Le Chat (EU). Konfidentiella anteckningar exkluderas alltid.
+                AI drivs av Mistral / Le Chat (EU). Konfidentiella anteckningar exkluderas alltid. Genererade dokument: verifiera innan delning.
               </p>
             </div>
           </div>

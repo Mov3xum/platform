@@ -69,7 +69,11 @@ const COLLECTION_DENYLIST = new Set<string>([
   'agent_memory',
   'tenant_integrations',
   'user_app_integrations',
-  'user_mistral_connectors'
+  'user_mistral_connectors',
+  // Personliga/innehållstunga kollektioner — aldrig exponerade för agenter.
+  'chat_threads', // privat konversationsinnehåll (1700000083)
+  'user_files', // personliga filer, strikt ägaren-bara (1700000085)
+  'deep_jobs' // intern orkestrering (1700000084)
 ]);
 
 /**

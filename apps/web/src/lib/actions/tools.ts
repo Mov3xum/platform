@@ -294,7 +294,12 @@ export async function startRunAction(runId: string): Promise<ToolActionState> {
         built.contextObj
       );
       const surface = await buildReadToolSurface(pb, user.tenant, {
-        includeMemory: hasRole(user.roles, [...STAFF_ROLES])
+        includeMemory: hasRole(user.roles, [
+          'admin',
+          'incubator_lead',
+          'coach',
+          'mentor'
+        ])
       });
       const systemContent =
         buildAgentSystemPrompt(tool.system_prompt as string | undefined) +
@@ -684,11 +689,11 @@ export async function runToolAction(formData: FormData): Promise<ToolActionState
       const verifyRubric =
         typeof tool.verify_rubric === 'string' ? tool.verify_rubric.trim() : '';
       const loop = verifyRubric
-        ? await runAgentLoopVerified(conversation, {
+        ? await runAgentLoopVerified(mistralMessages, {
             ...baseLoopOptions,
             rubric: verifyRubric
           })
-        : await runAgentLoop(conversation, baseLoopOptions);
+        : await runAgentLoop(mistralMessages, baseLoopOptions);
 
       outputMd = loop.text;
       const costUsd = estimateCostUsd(selectedModel, tokensIn, tokensOut);

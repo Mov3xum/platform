@@ -1,10 +1,12 @@
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import DashboardChat, {
+import {
   type DashboardAgent,
   type DashboardConnector
 } from '@/components/DashboardChat';
+import ChattWorkspace from './ChattWorkspace';
+import { listThreadsAction } from '@/lib/actions/chat-threads';
 import { PageShell } from '@/components/PageShell';
 import { getBuiltin } from '@/lib/ai/builtins';
 import { listActiveConnectors } from '@/lib/ai/connectors';
@@ -117,9 +119,16 @@ export default async function ChattPage() {
   const firstName = user.name.split(' ')[0] || user.email;
   const hello = `${greeting()}, ${firstName}.`;
 
+  const initialThreads = await listThreadsAction();
+
   return (
     <PageShell title="" scroll={false} noPad>
-      <DashboardChat greeting={hello} agents={agents} connectors={connectors} />
+      <ChattWorkspace
+        greeting={hello}
+        agents={agents}
+        connectors={connectors}
+        initialThreads={initialThreads}
+      />
     </PageShell>
   );
 }
