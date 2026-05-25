@@ -126,6 +126,8 @@ Om PB körs som en vanlig standalone-container (utan vår Dockerfile som bakar i
 
 Staging-flödet kör nu PocketBase-sync automatiskt från `.github/workflows/deploy.yml` när en merge till `staging` innehåller PocketBase-påverkande filer (t.ex. `backend/pocketbase-schema/**`). Deploy-workflowen anropar då `.github/workflows/sync-pocketbase.yml`, som först triggar Coolify-redeploy av PB-stacken och sedan kör `setup-via-api.mjs` mot staging-instansen (`PB_URL_STAGING` med fallback till `PB_URL`). Resultatet: schemaändringar från Claude-feature-grenar följer med automatiskt när de mergas till `staging`.
 
+Automatisk sync körs **inte** för vanliga staging-merger utan PB-beröring, och den gäller inte produktion (`main` använder sin separata production-workflow). Om staging-syncen ändå behöver köras manuellt — t.ex. efter sekret- eller driftproblem — använd `Sync PocketBase schema`-workflowen via **Run workflow** i GitHub Actions.
+
 ## Bootstrap utan PB-redeploy (`scripts/setup-via-api.mjs`)
 
 Om PB redan körs (t.ex. från en raw `pocketbase/pocketbase`-image utan vår Dockerfile) och du inte kan reconfigura/redeploya den just nu, kan du seeda hela schemat + Hampus app-user via API istället.

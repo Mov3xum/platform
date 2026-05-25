@@ -6,6 +6,9 @@ on:
       - staging
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   detect-pocketbase-changes:
     runs-on: ubuntu-latest
@@ -36,10 +39,13 @@ jobs:
           fi
 
           changed_files="$(git diff --name-only "$before_sha" "$GITHUB_SHA")"
+          pb_change_pattern='^(backend/pocketbase-schema/|\.github/workflows/(sync-pocketbase\.yml|recover-pocketbase\.yml))'
           echo "Changed files since $before_sha:"
           echo "$changed_files"
 
-          if printf '%s\n' "$changed_files" | grep -Eq '^(backend/pocketbase-schema/|\.github/workflows/(sync-pocketbase\.yml|recover-pocketbase\.yml))'; then
+          # Keep this pattern aligned with files that require a PocketBase stack
+          # redeploy or schema sync after merges to staging.
+          if printf '%s\n' "$changed_files" | grep -Eq "$pb_change_pattern"; then
             echo "PocketBase-affecting changes detected."
             echo "pocketbase_changed=true" >> "$GITHUB_OUTPUT"
           else

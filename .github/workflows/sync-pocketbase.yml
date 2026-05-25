@@ -20,6 +20,9 @@ on:
   workflow_call:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   redeploy-stack:
     name: Trigger Coolify stack redeploy
@@ -166,18 +169,40 @@ jobs:
       - name: Kör setup-via-api.mjs mot PocketBase
         env:
           PB_URL: ${{ steps.pb_ready.outputs.selected_url }}
-          PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL_STAGING || secrets.PB_SU_EMAIL || 'hampus@movexum.se' }}
+          PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL_STAGING || secrets.PB_SU_EMAIL }}
           PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD_STAGING || secrets.PB_SU_PASSWORD }}
           APP_USER_PASSWORD: ${{ secrets.APP_USER_PASSWORD_STAGING || secrets.APP_USER_PASSWORD }}
           NODE_TLS_REJECT_UNAUTHORIZED: '0'
-        run: node backend/pocketbase-schema/scripts/setup-via-api.mjs
+        run: |
+          set -euo pipefail
+
+          if [ -z "${PB_SU_EMAIL:-}" ] || [ -z "${PB_SU_PASSWORD:-}" ]; then
+            echo "::error::PB_SU_EMAIL_STAGING/PB_SU_EMAIL och PB_SU_PASSWORD_STAGING/PB_SU_PASSWORD måste vara satta."
+            exit 1
+          fi
+
+          node backend/pocketbase-schema/scripts/setup-via-api.mjs
 
       - name: Verifiera PocketBase baseline
         env:
           PB_URL: ${{ steps.pb_ready.outputs.selected_url }}
-          PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL_STAGING || secrets.PB_SU_EMAIL || 'hampus@movexum.se' }}
+          PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL_STAGING || secrets.PB_SU_EMAIL }}
           PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD_STAGING || secrets.PB_SU_PASSWORD }}
-          APP_USER_EMAIL: ${{ secrets.APP_USER_EMAIL_STAGING || secrets.APP_USER_EMAIL || secrets.PB_SU_EMAIL_STAGING || secrets.PB_SU_EMAIL || 'hampus@movexum.se' }}
+          APP_USER_EMAIL: ${{ secrets.APP_USER_EMAIL_STAGING || secrets.APP_USER_EMAIL }}
           APP_USER_PASSWORD: ${{ secrets.APP_USER_PASSWORD_STAGING || secrets.APP_USER_PASSWORD }}
           NODE_TLS_REJECT_UNAUTHORIZED: '0'
-        run: node backend/pocketbase-schema/scripts/verify-baseline.mjs
+        run: |
+          set -euo pipefail
+
+          if [ -z "${PB_SU_EMAIL:-}" ] || [ -z "${PB_SU_PASSWORD:-}" ]; then
+            echo "::error::PB_SU_EMAIL_STAGING/PB_SU_EMAIL och PB_SU_PASSWORD_STAGING/PB_SU_PASSWORD måste vara satta."
+            exit 1
+          fi
+
+          app_user_email="${APP_USER_EMAIL:-$PB_SU_EMAIL}"
+          if [ -z "${APP_USER_PASSWORD:-}" ]; then
+            echo "::error::APP_USER_PASSWORD_STAGING/APP_USER_PASSWORD måste vara satt för verify-baseline."
+            exit 1
+          fi
+
+          APP_USER_EMAIL="$app_user_email" node backend/pocketbase-schema/scripts/verify-baseline.mjs
