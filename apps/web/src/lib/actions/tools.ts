@@ -293,10 +293,14 @@ export async function startRunAction(runId: string): Promise<ToolActionState> {
         tool.prompt_template as string,
         built.contextObj
       );
+      const surface = await buildReadToolSurface(pb, user.tenant, {
+        includeMemory: hasRole(user.roles, [...STAFF_ROLES])
+      });
       const systemContent =
         buildAgentSystemPrompt(tool.system_prompt as string | undefined) +
-        built.knowledge.block;
-      const result = await callMistral(tool.model as string, [
+        built.knowledge.block +
+        (surface ? `\n\n${surface.guidance}` : '');
+      const conversation: MistralMessage[] = [
         { role: 'system', content: systemContent },
         { role: 'user', content: userContent }
       ];
@@ -650,11 +654,15 @@ export async function runToolAction(formData: FormData): Promise<ToolActionState
           ? [{ type: 'text', text: fullUserText }, ...prepared.imageBlocks]
           : fullUserText;
 
+      const surface = await buildReadToolSurface(pb, user.tenant, {
+        includeMemory: hasRole(user.roles, [...STAFF_ROLES])
+      });
       const systemContent =
         buildAgentSystemPrompt(tool.system_prompt as string | undefined) +
-        built.knowledge.block;
+        built.knowledge.block +
+        (surface ? `\n\n${surface.guidance}` : '');
 
-      const mistralMessages: MistralMessage[] = [
+      const conversation: MistralMessage[] = [
         { role: 'system', content: systemContent },
         { role: 'user', content: userContent }
       ];
