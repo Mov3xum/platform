@@ -333,10 +333,12 @@ export default function ChattWorkspace({ greeting, agents, connectors, initialTh
         <button
           type="button"
           onClick={() => setMenuFor((cur) => (cur === item.id ? null : item.id))}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-foreground-subtle opacity-60 transition hover:bg-canvas-muted hover:text-foreground group-hover:opacity-100"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-foreground-muted transition hover:bg-canvas-muted hover:text-foreground"
           aria-label="Fler val (byt namn, fäst, arkivera, radera)"
+          aria-haspopup="menu"
+          aria-expanded={menuFor === item.id}
         >
-          <Icon name="more" size={14} />
+          <Icon name="more" size={16} fill="currentColor" />
         </button>
         {menuFor === item.id && (
           <div
