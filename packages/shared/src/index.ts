@@ -1159,3 +1159,8 @@ export const coreModules: ModuleDefinition[] = [
     route: '/partners'
   }
 ];
+
+// ─── Re-export av brand-tokens (TS-spegel av tokens.css) ─────────────────────
+// Låter server-side dokumentgenerering (lib/documents/brand.ts) hämta
+// brand-färgerna från källan-av-sanning istället för att hårdkoda hex.
+export { movexumPalette, typography as brandTypography } from './design/tokens';

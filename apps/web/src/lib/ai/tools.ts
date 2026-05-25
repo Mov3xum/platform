@@ -9,6 +9,8 @@ import {
 import type { MistralToolCall, MistralToolDefinition } from './mistral';
 import { escFilter } from '@/lib/pb-filter';
 import type { GeneratedFileRef } from '@platform/shared';
+import { renderDocument, validateDocumentSpec } from '@/lib/documents';
+import { saveGeneratedFile } from '@/lib/documents/save';
 import {
   agentWritableFields,
   agentCreatableCollections,
@@ -305,6 +307,123 @@ export function buildChatTools(
     }
   }
 
+  // Dokumentgenerering (PPTX/XLSX/DOCX/PDF). Bara agent-actor i en
+  // interaktiv yta där en människa laddar ned/granskar (människa-i-loopen,
+  // § 10). Modellen levererar ett TYPAT spec; servern renderar
+  // deterministiskt → inga hallucinerade siffror.
+  if (options.includeDocuments && options.actor?.kind === 'agent') {
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'generate_document',
+        description:
+          'Skapar ett nedladdningsbart dokument (PowerPoint/Excel/Word/PDF) av ' +
+          'sammanställd data. VIKTIGT: alla siffror och fakta MÅSTE komma från ' +
+          'tidigare query_collection-svar i denna konversation — hitta ALDRIG på ' +
+          'data. Systemet renderar filen deterministiskt från ditt spec och sparar ' +
+          'den i användarens privata Filer samt bifogar den som nedladdning. ' +
+          'Använd `slides` för pptx, `sheets` för xlsx, `sections` för docx/pdf.',
+        parameters: {
+          type: 'object',
+          properties: {
+            kind: {
+              type: 'string',
+              enum: ['pptx', 'xlsx', 'docx', 'pdf'],
+              description: 'Filformat'
+            },
+            title: { type: 'string', description: 'Dokumentets titel (visas på försättssidan)' },
+            subtitle: { type: 'string', description: 'Valfri undertitel' },
+            slides: {
+              type: 'array',
+              description: 'PPTX: en post per slide.',
+              items: {
+                type: 'object',
+                properties: {
+                  layout: { type: 'string', enum: ['title', 'content', 'table', 'chart'] },
+                  heading: { type: 'string' },
+                  subheading: { type: 'string' },
+                  bullets: { type: 'array', items: { type: 'string' } },
+                  table: {
+                    type: 'object',
+                    properties: {
+                      columns: { type: 'array', items: { type: 'string' } },
+                      rows: { type: 'array', items: { type: 'array', items: {} } }
+                    }
+                  },
+                  chart: {
+                    type: 'object',
+                    properties: {
+                      type: { type: 'string', enum: ['bar', 'line', 'pie'] },
+                      categories: { type: 'array', items: { type: 'string' } },
+                      series: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            name: { type: 'string' },
+                            values: { type: 'array', items: { type: 'number' } }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  notes: { type: 'string' }
+                },
+                required: ['layout']
+              }
+            },
+            sheets: {
+              type: 'array',
+              description: 'XLSX: ett blad per post. rows[] är rader med värden i kolumnordning.',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  columns: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        key: { type: 'string' },
+                        label: { type: 'string' },
+                        type: { type: 'string', enum: ['text', 'number', 'currency', 'date'] }
+                      },
+                      required: ['key', 'label']
+                    }
+                  },
+                  rows: { type: 'array', items: { type: 'array', items: {} } },
+                  totals: { type: 'array', items: {} }
+                },
+                required: ['name', 'columns', 'rows']
+              }
+            },
+            sections: {
+              type: 'array',
+              description: 'DOCX/PDF: en post per sektion.',
+              items: {
+                type: 'object',
+                properties: {
+                  heading: { type: 'string' },
+                  level: { type: 'integer', enum: [1, 2, 3] },
+                  paragraphs: { type: 'array', items: { type: 'string' } },
+                  bullets: { type: 'array', items: { type: 'string' } },
+                  table: {
+                    type: 'object',
+                    properties: {
+                      columns: { type: 'array', items: { type: 'string' } },
+                      rows: { type: 'array', items: { type: 'array', items: {} } }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          required: ['kind', 'title']
+        }
+      }
+    });
+  }
+
   return tools;
 }
 
@@ -490,6 +609,8 @@ export async function dispatchToolCall(
       return runMemoryRead(args, ctx);
     case 'memory_write':
       return runMemoryWrite(args, ctx);
+    case 'generate_document':
+      return runGenerateDocument(args, ctx);
     default:
       return { ok: false, error: `Okänt verktyg: ${call.function.name}` };
   }
@@ -574,6 +695,45 @@ async function runMemoryWrite(
     return {
       ok: false,
       error: err instanceof Error ? err.message : 'Kunde inte spara minnet.'
+    };
+  }
+}
+
+async function runGenerateDocument(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  if (!ctx.ownerUserId) {
+    return { ok: false, error: 'Dokumentgenerering kräver en inloggad ägare i kontexten.' };
+  }
+  const v = validateDocumentSpec(args);
+  if (!v.ok) return { ok: false, error: v.error };
+  try {
+    const rendered = await renderDocument(v.spec);
+    const ref = await saveGeneratedFile({
+      pb: ctx.pb,
+      tenant: ctx.tenantId,
+      ownerUserId: ctx.ownerUserId,
+      rendered,
+      docKind: v.spec.kind,
+      chatThreadId: ctx.chatThreadId
+    });
+    if (ctx.generatedFiles) ctx.generatedFiles.push(ref);
+    return {
+      ok: true,
+      data: {
+        user_file_id: ref.user_file_id,
+        filename: ref.filename,
+        kind: v.spec.kind,
+        note: 'Dokumentet renderades, sparades i användarens privata Filer och bifogades svaret som nedladdning. Säg till användaren att det är klart och kan laddas ned — påstå inte att du klistrat in innehållet i chatten.'
+      }
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte generera dokumentet.'
     };
   }
 }
