@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createWorkshopAction, type WorkshopActionState } from '@/lib/actions/workshops';
 import type { WorkshopArea } from '@platform/shared';
@@ -12,9 +12,11 @@ export function WorkshopCreateForm({ areas }: { areas: WorkshopArea[] }) {
   const router = useRouter();
   const [state, formAction, pending] = useActionState(createWorkshopAction, initialState);
 
-  if (state.workshopId) {
-    router.push(`/education/workshops/${state.workshopId}`);
-  }
+  useEffect(() => {
+    if (state.workshopId) {
+      router.push(`/education/workshops/${state.workshopId}`);
+    }
+  }, [state.workshopId, router]);
 
   const inputClass =
     'mt-1 w-full rounded-2xl border border-default bg-surface px-4 py-2.5 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
