@@ -59,6 +59,14 @@ export interface BuildToolsOptions {
    * sparas i ägarens `user_files` (strikt ägaren-bara) och bifogas svaret.
    */
   includeDocuments?: boolean;
+  /**
+   * Exponera domänskriv-verktyg (update_startup_field, create_startup_activity,
+   * update_activity_field). Default: true när actor är en agent (interaktiv
+   * staff-chatt med människa-i-loopen). Sätt false för autonoma körningar
+   * (djupa jobb) som får läsa + generera dokument men ALDRIG mutera domändata
+   * (§ 16.3 människa-i-loopen).
+   */
+  includeWrites?: boolean;
 }
 
 export function buildChatTools(
@@ -142,11 +150,11 @@ export function buildChatTools(
     }
   ];
 
-  // Skrivverktyg — bara för agenter. Det delade lagret enforcer:ar
-  // whitelist + validering oavsett vad modellen försöker, men vi
-  // exponerar bara fält som är `allow` så modellen inte ens behöver
-  // gissa.
-  if (options.actor?.kind === 'agent') {
+  // Skrivverktyg — bara för agenter, och bara när includeWrites inte är
+  // explicit false (autonoma djupa jobb stänger av domänskrivning men
+  // behåller läsning/dokument). Det delade lagret enforcer:ar whitelist +
+  // validering oavsett vad modellen försöker.
+  if (options.actor?.kind === 'agent' && options.includeWrites !== false) {
     const startupFields = agentWritableFields('startups');
     if (startupFields.length > 0) {
       tools.push({
@@ -278,7 +286,7 @@ export function buildChatTools(
         }
       }
     });
-    if (options.actor?.kind === 'agent') {
+    if (options.actor?.kind === 'agent' && options.includeWrites !== false) {
       tools.push({
         type: 'function',
         function: {

@@ -22,6 +22,11 @@ import {
   type ThreadListItem
 } from '@/lib/actions/chat-threads';
 import { getFileDownloadUrlAction } from '@/lib/actions/files';
+import {
+  startDeepJobAction,
+  getDeepJobStatusAction
+} from '@/lib/actions/deep-jobs';
+import type { DeepJobStatus } from '@platform/shared';
 
 interface Props {
   greeting: string;
@@ -48,7 +53,11 @@ export default function ChattWorkspace({ greeting, agents, connectors, initialTh
   const [error, setError] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [deepJob, setDeepJob] = useState<{ id: string; threadId: string; status: DeepJobStatus; progress: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const deepRunning =
+    !!deepJob && !['succeeded', 'failed', 'cancelled'].includes(deepJob.status);
 
   const refreshThreads = useCallback(async () => {
     const next = await listThreadsAction();
@@ -62,6 +71,51 @@ export default function ChattWorkspace({ greeting, agents, connectors, initialTh
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
+
+  // Pollar ett pågående djupt jobb och laddar in utkastet när det är klart.
+  useEffect(() => {
+    if (!deepJob || !deepRunning) return;
+    const timer = setInterval(async () => {
+      const res = await getDeepJobStatusAction(deepJob.id);
+      if (res.error || !res.status) return;
+      const status = res.status;
+      setDeepJob((cur) => (cur ? { ...cur, status, progress: res.progress ?? cur.progress } : cur));
+      if (['succeeded', 'failed', 'cancelled'].includes(status)) {
+        const msgs = await getThreadMessagesAction(deepJob.threadId);
+        if (msgs.messages) setMessages(toUiMessages(msgs.messages));
+        await refreshThreads();
+        if (status === 'failed') setError(res.jobError || 'Det djupa jobbet misslyckades.');
+      }
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [deepJob, deepRunning, refreshThreads]);
+
+  async function startDeep() {
+    const instruction = window.prompt(
+      'Vad ska det djupa jobbet göra? Det planerar, hämtar data i flera steg och sammanställer ett utkast (ev. ett dokument) i tråden.'
+    );
+    if (!instruction || !instruction.trim()) return;
+    setError(null);
+    let threadId = activeThreadId;
+    if (!threadId) {
+      const created = await createThreadAction(activeAgent?.id);
+      if (created.error || !created.threadId) {
+        setError(created.error || 'Kunde inte skapa tråd.');
+        return;
+      }
+      threadId = created.threadId;
+      setActiveThreadId(threadId);
+    }
+    const res = await startDeepJobAction(threadId, instruction);
+    if (res.error || !res.jobId) {
+      setError(res.error || 'Kunde inte starta jobbet.');
+      return;
+    }
+    setDeepJob({ id: res.jobId, threadId, status: 'queued', progress: 0 });
+    const msgs = await getThreadMessagesAction(threadId);
+    if (msgs.messages) setMessages(toUiMessages(msgs.messages));
+    await refreshThreads();
+  }
 
   function newChat() {
     setActiveThreadId(null);
@@ -221,7 +275,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, initialTh
   return (
     <div className="flex min-h-0 flex-1">
       <aside className="hidden w-64 shrink-0 flex-col border-r border-default bg-canvas-subtle md:flex">
-        <div className="p-3">
+        <div className="flex flex-col gap-2 p-3">
           <button
             type="button"
             onClick={newChat}
@@ -230,6 +284,24 @@ export default function ChattWorkspace({ greeting, agents, connectors, initialTh
             <Icon name="plus" size={14} />
             Ny chatt
           </button>
+          <button
+            type="button"
+            onClick={startDeep}
+            disabled={deepRunning}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-movexum-pastell-lila px-3 py-2 text-[13px] font-medium text-movexum-morklila transition hover:brightness-95 disabled:opacity-50"
+            title="Planerar, hämtar data i flera steg och sammanställer ett utkast"
+          >
+            <Icon name="sparkle" size={14} />
+            {deepRunning ? `Djupt jobb… ${deepJob?.progress ?? 0}%` : 'Djupt jobb'}
+          </button>
+          {deepRunning && (
+            <div className="h-1 w-full overflow-hidden rounded-full bg-canvas-muted">
+              <div
+                className="h-full bg-movexum-lila transition-all"
+                style={{ width: `${deepJob?.progress ?? 0}%` }}
+              />
+            </div>
+          )}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
           {!hasThreads ? (
@@ -252,7 +324,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, initialTh
           agents={agents}
           connectors={connectors}
           messages={messages}
-          isPending={isPending}
+          isPending={isPending || deepRunning}
           error={error}
           activeAgent={activeAgent}
           onPickAgent={setActiveAgent}

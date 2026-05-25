@@ -1651,3 +1651,121 @@ konfigureras via PB-admin tills en UI finns (collectionen + server-flöden
 är klara). En massimport som skapar många bolag ger en körning per bolag
 per aktiv trigger — aktivera triggers med det i åtanke (kostnad).
 
+
+---
+
+## 17. Chatt-arbetsyta: persistenta trådar, dokument, Filer & djupa jobb
+
+### 17.1 Översikt
+
+`/chatt` är nu en persistent arbetsyta i stället för en efemär chatt. Varje
+konversation sparas och kan tas upp igen, agenter kan ta fram nedladdningsbara
+dokument (PPTX/XLSX/DOCX/PDF), genererade filer landar i en personlig
+**Filer**-yta (`/filer`), och längre uppgifter kan köras som **djupa jobb**
+(planera → fan-out av read-only sub-körningar → utkast). Cross-session-minnet
+(`agent_memory`, §16.4) är inkopplat i trådchatten.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `apps/web/src/lib/ai/staff-chat.ts` | Delad staff-chatt-motor (`runStaffChatTurn`) — efemär chatt OCH trådar delar säkerhetspreamble/verktygsyta |
+| `apps/web/src/lib/ai/chat-input.ts` | Delade bilage-/input-hjälpare (normalisering, vision-multipart) |
+| `apps/web/src/lib/actions/chat-threads.ts` | CRUD + `sendThreadMessageAction` (persistent) |
+| `apps/web/src/app/chatt/ChattWorkspace.tsx` | Trådsidebar + chatt + djupjobb-kontroll (client) |
+| `apps/web/src/lib/documents/` | Dokumentlager: `types`, `validate`, `brand`, `render-{pptx,xlsx,docx,pdf}`, `index`, `save` |
+| `apps/web/src/lib/actions/files.ts` | Filer-actions (lista/ladda ned/döp om/radera/ladda upp) |
+| `apps/web/src/app/filer/` | Personlig Filer-yta |
+| `apps/web/src/lib/deep-jobs/{planner,runner}.ts` | Djupjobb-planerare + orkestrator |
+| `apps/web/src/lib/actions/deep-jobs.ts` | Starta/avbryt/status för djupa jobb |
+
+### 17.2 Datamodell (nya kollektioner)
+
+- **`chat_threads`** (migration 1700000083) — **STRIKT ägaren-bara**
+  dashboard-trådar. Fält: `tenant`, `owner` (cascadeDelete), `title`,
+  `status` (active/archived), `pinned`, `agent` (valfri persona),
+  `messages` (ToolRunMessage[], 2 MB), `summary` (trådminne, reserverat),
+  `last_message_at`, aggregat (`tokens_*`, `cost_estimate_usd`),
+  `deleted_at` (soft delete). API-regler: owner-only på ALLA operationer
+  (ingen staff-läsning — innehållet är privat).
+- **`user_files`** (migration 1700000085) — **STRIKT ägaren-bara** filarkiv.
+  Fält: `tenant`, `owner` (cascadeDelete), `file` (25 MB, mime-whitelist),
+  `filename`, `mime`, `size_bytes`, `source` (agent_generated/upload),
+  `doc_kind` (pptx/xlsx/docx/pdf/other), `chat_thread`, `tool_run` (ingen
+  cascade — filen överlever tråd/körning). Nedladdning via kortlivad
+  fil-token (`pb.files.getToken()`).
+- **`deep_jobs`** (migration 1700000084) — **STRIKT ägaren-bara**
+  bakgrundsjobb. Fält: `tenant`, `owner`, `thread` (cascade), `instruction`,
+  `status` (queued→planning→running→aggregating→succeeded/failed/cancelled),
+  `plan` (json), `progress`, `subtask_runs` (tool_run-id:n), aggregat,
+  `error` (PII-fri).
+
+Alla tre är **denylistade i `lib/ai/schema.ts`** (aldrig exponerade för
+`query_collection`).
+
+### 17.3 Dokumentgenerering — "inga hallucinerade siffror"
+
+Modellen skriver **aldrig** filformatet. Den producerar ett TYPAT,
+validerat `DocumentSpec`; en deterministisk renderare bygger filen. Siffror
+ska komma från `query_collection`-svar i samma konversation. Verktyget
+`generate_document` exponeras bara för agent-actor i en interaktiv yta
+(`includeDocuments`), sparar i ägarens `user_files` och bifogar en
+`GeneratedFileRef` på assistant-svaret (nedladdnings-chip).
+
+- **Bibliotek (motiverat undantag från dependency-free):** `pptxgenjs`,
+  `exceljs`, `docx`, `pdf-lib` — alla ren JS, inga native-binärer, inga
+  runtime-nätverksanrop → EU-suveränt, körs server-side på UpCloud.
+- **Brand:** färger från `tokens.ts` (källan-av-sanning, `documents/brand.ts`),
+  Sora/Nunito **by-name** (ingen TTF-inbäddning i v1; PDF använder Helvetica),
+  AI-disclaimer-footer i varje dokument (§9.7 / EU AI Act art. 50).
+- **PII:** renderaren är ingen ny dataväg — dokumentet kan bara innehålla
+  data agenten redan såg via `query_collection` (PII-denylist/maskning i
+  `schema.ts` gäller uppströms).
+
+### 17.4 Djupa jobb / subagenter
+
+`startDeepJobAction` skapar ett `deep_jobs` och kör `runDeepJob` i bakgrunden
+(samma persistenta Node-server — ingen HTTP-hop behövs för en
+användartriggad action). Runnern: superuser-pb + **RBAC-revalidering** mot
+ägaren (rollnedgradering blockerar), planerar (`planDeepJob`), fan-out:ar
+**read-only** sub-körningar (`buildReadToolSurface`, var och en loggad i
+`tool_runs` + `ai_usage_events`), och syntetiserar ett **UTKAST** i tråden.
+Bara aggregeringssteget får `generate_document` (artefakt, ingen
+domänmutation) via `buildChatTools({ includeWrites:false, includeDocuments:true })`.
+
+- **Robusthet (EU AI Act art. 15):** `MAX_SUBTASKS=8`, per-subtask
+  `maxIterations=6`, total token-budget 300k, wall-clock 5 min, avbryt-
+  checkpoint.
+- **Människa-i-loopen (art. 14 / §10):** auto-publicerar aldrig — utkast i
+  tråden som granskas. Inga domänskrivningar i autonoma jobb.
+
+### 17.5 Riskklasser (EU AI Act art. 11)
+
+| Verktyg/agent | Klass | Motivering |
+| --- | --- | --- |
+| `generate_document` | begränsad | Deterministisk rendering av agent-spec; ingen ny dataväg; människa laddar ned/granskar |
+| Djupjobb-planerare/orkestrator | begränsad | Read-only analys-orkestrering; utkast granskas; bundna tak |
+| Trådsammanfattning (reserverat) | minimal | Intern scratchpad, ingen PII |
+
+### 17.6 Regelefterlevnad
+
+- **GDPR §5/art.17:** strikt ägar-scope + cascadeDelete på owner/tenant/thread.
+  `error`-fält PII-fria. Filerna kan innehålla sammanställd data men bara
+  sådant agenten lagligt fick läsa.
+- **ISO 27001:** nya migrationer = nya filnummer (1700000083–085, oföränderliga
+  applied migrations). Owner-only API-regler. Allt loggat i
+  tool_runs/ai_usage_events. Inga nya secrets.
+- **Audit-avvägning:** strikt ägaren-bara på `chat_threads`/`user_files`
+  betyder att staff inte ser innehållet; audit av VEM/VAD/kostnad bevaras via
+  tenant-synliga `ai_usage_events` + `tool_runs` (sub-körningar).
+- **Delad motor:** `staff-chat.ts` säkrar att efemär chatt och trådar har
+  IDENTISK säkerhetspreamble/prompt-injection-skydd (ingen divergerande kopia).
+
+### 17.7 Begränsningar (MVP)
+
+- Djupjobb-progress pollas (var 3:e s) i UI:t; PB-realtime kan ersätta det.
+- `chat_threads.summary` (auto-sammanfattning per turn) är reserverat men
+  inte aktiverat (full historik skickas ändå upp till 20 turer); cross-
+  konversationsminne sker via `agent_memory` (§16.4), inkopplat i trådchatten.
+- Chatt-input-bilagor persisteras inte som filer (injiceras i prompten, som
+  förut); genererade dokument persisteras däremot i `user_files`.
