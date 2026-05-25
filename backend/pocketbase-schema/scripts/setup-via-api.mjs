@@ -1745,7 +1745,11 @@ await ensureCollection({
     { name: 'tokens_in', type: 'number', required: false },
     { name: 'tokens_out', type: 'number', required: false },
     { name: 'cost_estimate_usd', type: 'number', required: false },
-    { name: 'deleted_at', type: 'date', required: false }
+    { name: 'deleted_at', type: 'date', required: false },
+    // REST API:t lägger (till skillnad från JSVM-migrationen) inte till
+    // created/updated automatiskt — deklarera dem explicit (appen läser dem).
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
   ],
   indexes: [
     'CREATE INDEX idx_ct_owner ON chat_threads (owner)',
@@ -1779,7 +1783,9 @@ await ensureCollection({
     { name: 'cost_estimate_usd', type: 'number', required: false },
     { name: 'error', type: 'text', required: false, max: 1000 },
     { name: 'started_at', type: 'date', required: false },
-    { name: 'completed_at', type: 'date', required: false }
+    { name: 'completed_at', type: 'date', required: false },
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
   ],
   indexes: [
     'CREATE INDEX idx_dj_owner ON deep_jobs (owner)',
@@ -1824,7 +1830,10 @@ await ensureCollection({
     { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['agent_generated', 'upload'] },
     { name: 'doc_kind', type: 'select', required: false, maxSelect: 1, values: ['pptx', 'xlsx', 'docx', 'pdf', 'other'] },
     { name: 'chat_thread', type: 'relation', required: false, collectionId: 'chat_threads_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
-    { name: 'tool_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+    { name: 'tool_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    // created krävs av (owner, created)-indexet nedan + appen sorterar på det.
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
   ],
   indexes: [
     'CREATE INDEX idx_uf_owner ON user_files (owner)',
@@ -1837,6 +1846,18 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
 });
+
+// Backfill: en tidigare körning hann skapa chat_threads/deep_jobs UTAN
+// created/updated (REST API:t auto-lägger dem inte). ensureCollection
+// synkar bara regler på en befintlig collection, så lägg till de saknade
+// autodate-fälten explicit. Idempotent (hoppar över om de redan finns).
+const AUTODATE_FIELDS = [
+  { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+  { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+];
+await patchCollection('chat_threads', AUTODATE_FIELDS);
+await patchCollection('deep_jobs', AUTODATE_FIELDS);
+await patchCollection('user_files', AUTODATE_FIELDS);
 
 // =========================================================================
 // 18d. Field-patches på befintliga collections (porterade från migrations
