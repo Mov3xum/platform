@@ -24,13 +24,14 @@ async function isHttpsRequest(): Promise<boolean> {
   return proto === 'https';
 }
 
-// Secure-flaggan ska aldrig hänga enbart på x-forwarded-proto (kan saknas
-// eller spoofas vid felkonfigurerad proxy). I produktion sätts den hårt,
-// med en uttrycklig escape-hatch för HTTP-staging (sslip.io).
+// Secure-flaggan följer det faktiska request-protokollet (x-forwarded-proto
+// sätts av Coolify/Traefik-proxyn): https → Secure, http → inte Secure. Att
+// tvinga Secure på en ren http-anslutning ger ingen säkerhetsvinst (trafiken
+// är redan klartext) men gör att webbläsaren tyst SLÄPPER auth-cookien →
+// omöjligt att logga in på http-staging. `MOVEXUM_ALLOW_INSECURE_COOKIES=true`
+// tvingar av Secure helt (explicit escape-hatch).
 async function shouldUseSecureCookie(): Promise<boolean> {
-  if (process.env.NODE_ENV === 'production') {
-    return process.env.MOVEXUM_ALLOW_INSECURE_COOKIES !== 'true';
-  }
+  if (process.env.MOVEXUM_ALLOW_INSECURE_COOKIES === 'true') return false;
   return isHttpsRequest();
 }
 
@@ -49,6 +50,8 @@ type PbError = {
 
 export type LoginState = {
   error?: string;
+  success?: boolean;
+  redirectTo?: string;
 };
 
 export type RegisterState = {
@@ -173,7 +176,16 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     // though the destination page re-renders as authenticated.
     revalidatePath('/', 'layout');
 
-    redirect(next);
+    // Full-document-navigering (klienten gör window.location) så att ROOT-
+    // LAYOUTEN renderas om från servern med den färska auth-cookien. En mjuk
+    // redirect() här lämnar kvar det utloggade skalet (toppnavbar med
+    // "Logga in", ingen sidmeny) i Next.js client Router Cache fastän sidan
+    // renderar inloggad. Sanera next → bara interna paths (öppen-redirect-skydd).
+    const redirectTo =
+      next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\')
+        ? next
+        : '/dashboard';
+    return { success: true, redirectTo };
   } catch (outerErr: unknown) {
     // Re-throw NEXT_REDIRECT so Next.js can process the redirect normally.
     if (
