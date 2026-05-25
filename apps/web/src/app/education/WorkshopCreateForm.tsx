@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useActionState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createWorkshopAction, type WorkshopActionState } from '@/lib/actions/workshops';
@@ -81,6 +82,14 @@ export function WorkshopCreateForm({ areas }: { areas: WorkshopArea[] }) {
               </option>
             ))}
           </select>
+          <p className="mt-1.5 text-xs text-foreground-subtle">
+            {areas.length === 0 ? 'Inga områden ännu. ' : null}
+            Skapa och hantera områden i{' '}
+            <Link href="/education/areas" className="text-link hover:underline">
+              Områden-fliken
+            </Link>
+            .
+          </p>
         </div>
         <div>
           <p className={labelClass}>Målgrupp</p>

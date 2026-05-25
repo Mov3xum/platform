@@ -10,6 +10,7 @@ import {
   EducationTrackLane,
   type TrackModule
 } from '@/components/EducationTrackLane';
+import { EDUCATION_TABS } from './tabs';
 import type { Workshop, WorkshopArea, WorkshopAssignment } from '@platform/shared';
 
 type Accent = 'yellow' | 'green' | 'cyan' | 'purple';
@@ -178,12 +179,12 @@ export default async function EducationPage() {
       href="/education/new"
       className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
     >
-      <Icon name="plus" size={12} /> Skapa modul
+      <Icon name="plus" size={12} /> Skapa workshop
     </Link>
   ) : null;
 
   return (
-    <PageShell title="Utbildning" actions={actions} rightPanel={rail}>
+    <PageShell title="Utbildning" tabs={isStaff ? EDUCATION_TABS : undefined} actions={actions} rightPanel={rail}>
       <div className="space-y-4 py-6">
         {lanes.map((track) => (
           <EducationTrackLane
