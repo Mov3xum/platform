@@ -24,13 +24,14 @@ async function isHttpsRequest(): Promise<boolean> {
   return proto === 'https';
 }
 
-// Secure-flaggan ska aldrig hänga enbart på x-forwarded-proto (kan saknas
-// eller spoofas vid felkonfigurerad proxy). I produktion sätts den hårt,
-// med en uttrycklig escape-hatch för HTTP-staging (sslip.io).
+// Secure-flaggan följer det faktiska request-protokollet (x-forwarded-proto
+// sätts av Coolify/Traefik-proxyn): https → Secure, http → inte Secure. Att
+// tvinga Secure på en ren http-anslutning ger ingen säkerhetsvinst (trafiken
+// är redan klartext) men gör att webbläsaren tyst SLÄPPER auth-cookien →
+// omöjligt att logga in på http-staging. `MOVEXUM_ALLOW_INSECURE_COOKIES=true`
+// tvingar av Secure helt (explicit escape-hatch).
 async function shouldUseSecureCookie(): Promise<boolean> {
-  if (process.env.NODE_ENV === 'production') {
-    return process.env.MOVEXUM_ALLOW_INSECURE_COOKIES !== 'true';
-  }
+  if (process.env.MOVEXUM_ALLOW_INSECURE_COOKIES === 'true') return false;
   return isHttpsRequest();
 }
 

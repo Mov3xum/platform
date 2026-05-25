@@ -775,10 +775,14 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
   (CSS/JS/fonter/bilder) till https på en http-serverad staging utan
   TLS, vilket gör sidan helt ostylad. `MOVEXUM_ALLOW_INSECURE_COOKIES`
   stänger av det explicit.
-- **Auth-cookie:** `httpOnly` + `SameSite=Lax`. `Secure` sätts hårt i
-  produktion (`shouldUseSecureCookie` i `lib/actions/auth.ts`) — inte
-  beroende av `x-forwarded-proto`. Escape-hatch för HTTP-staging:
-  `MOVEXUM_ALLOW_INSECURE_COOKIES=true`.
+- **Auth-cookie:** `httpOnly` + `SameSite=Lax`. `Secure` följer det
+  faktiska request-protokollet via `x-forwarded-proto`
+  (`shouldUseSecureCookie` i `lib/actions/auth.ts`): https → `Secure`,
+  http → inte `Secure`. Att tvinga `Secure` på en ren http-anslutning ger
+  ingen säkerhetsvinst (trafiken är redan klartext) men gör att
+  webbläsaren tyst släpper cookien → omöjligt att logga in på http-staging.
+  `MOVEXUM_ALLOW_INSECURE_COOKIES=true` tvingar av `Secure` helt
+  (explicit escape-hatch).
 - **Brute-force-skydd (A.8.x):** `loginAction` rate-limitar misslyckade
   försök per IP+e-post (8/15 min) och per IP (40/15 min) via
   `lib/rate-limit.ts` (in-memory; lyft till Redis/PB vid horisontell
