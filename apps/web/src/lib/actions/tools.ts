@@ -689,11 +689,11 @@ export async function runToolAction(formData: FormData): Promise<ToolActionState
       const verifyRubric =
         typeof tool.verify_rubric === 'string' ? tool.verify_rubric.trim() : '';
       const loop = verifyRubric
-        ? await runAgentLoopVerified(mistralMessages, {
+        ? await runAgentLoopVerified(conversation, {
             ...baseLoopOptions,
             rubric: verifyRubric
           })
-        : await runAgentLoop(mistralMessages, baseLoopOptions);
+        : await runAgentLoop(conversation, baseLoopOptions);
 
       outputMd = loop.text;
       const costUsd = estimateCostUsd(selectedModel, tokensIn, tokensOut);
