@@ -509,22 +509,18 @@ export default function DashboardChat({
           </button>
           <button
             type="button"
-            role="checkbox"
+            role="switch"
             aria-checked={deepMode}
             onClick={toggleDeepMode}
             disabled={isPending || deepRunning}
-            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] transition disabled:cursor-not-allowed disabled:opacity-40 ${
-              deepMode ? 'bg-movexum-pastell-lila text-movexum-morklila' : 'text-foreground-subtle hover:text-foreground'
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
+              deepMode
+                ? 'bg-movexum-lila text-movexum-vit shadow-sm shadow-movexum-svart/10'
+                : 'border border-default text-foreground-subtle hover:border-strong hover:text-foreground'
             }`}
             title="Djupt jobb: planerar, hämtar data i flera steg och sammanställer ett utkast (ev. dokument) i tråden"
           >
-            <span
-              className={`flex h-4 w-4 items-center justify-center rounded-[5px] border transition ${
-                deepMode ? 'border-movexum-lila bg-movexum-lila text-movexum-vit' : 'border-strong'
-              }`}
-            >
-              {deepMode && <Icon name="check" size={10} />}
-            </span>
+            <Icon name="sparkle" size={12} />
             Djupt jobb
           </button>
         </div>
