@@ -5,22 +5,15 @@ import { Icon } from '@/components/proto/Icon';
 
 export interface KnowledgeItem {
   id: string;
-  kind: 'note' | 'milestone' | 'compass' | 'irl' | 'file';
+  kind: 'note' | 'milestone' | 'compass' | 'irl' | 'file' | 'tool_run';
   name: string;
   meta?: string;
   updated?: string;
-}
-
-export interface AssistantShortcut {
-  id: string;
-  name: string;
-  category?: string;
-  runs?: number;
+  href?: string;
 }
 
 interface Props {
   knowledge: KnowledgeItem[];
-  assistants: AssistantShortcut[];
   startupId: string;
 }
 
@@ -29,10 +22,16 @@ const kindIcon: Record<KnowledgeItem['kind'], string> = {
   milestone: 'check',
   compass: 'compass',
   irl: 'graph',
-  file: 'doc'
+  file: 'doc',
+  tool_run: 'sparkle'
 };
 
-export function RightPanel({ knowledge, assistants, startupId }: Props) {
+const kindIconClass: Partial<Record<KnowledgeItem['kind'], string>> = {
+  tool_run: 'bg-movexum-pastell-lila text-movexum-lila',
+  milestone: 'bg-movexum-pastell-gron text-movexum-gron'
+};
+
+export function RightPanel({ knowledge, startupId }: Props) {
   const [open, setOpen] = useState(true);
 
   if (!open) {
@@ -66,76 +65,57 @@ export function RightPanel({ knowledge, assistants, startupId }: Props) {
         </button>
       </div>
 
+      <p className="px-5 pt-3 text-[11.5px] leading-relaxed text-foreground-subtle">
+        Allt bolaget producerar — AI-resultat, dokument, anteckningar och milstolpar.
+      </p>
+
       <div className="space-y-1 px-3 py-3">
         {knowledge.length === 0 ? (
           <div className="px-2 py-6 text-center text-[12px] text-foreground-subtle">
             Inga kunskaps­källor ännu.
           </div>
         ) : (
-          knowledge.map((k) => (
-            <button
-              key={k.id}
-              type="button"
-              className="flex w-full items-start gap-3 rounded-xl px-2 py-2.5 text-left transition hover:bg-canvas-muted"
-            >
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-default bg-canvas-muted text-foreground-muted">
-                <Icon name={kindIcon[k.kind]} size={14} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[12.5px] font-medium text-foreground">{k.name}</div>
-                {k.meta && (
-                  <div className="truncate text-[11px] text-foreground-subtle">{k.meta}</div>
-                )}
-                {k.updated && (
-                  <div className="mt-0.5 truncate font-mono text-[10.5px] text-foreground-subtle">
-                    {k.updated}
-                  </div>
-                )}
-              </div>
-            </button>
-          ))
+          knowledge.map((k) => {
+            const inner = (
+              <>
+                <div
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-default ${kindIconClass[k.kind] ?? 'bg-canvas-muted text-foreground-muted'}`}
+                >
+                  <Icon name={kindIcon[k.kind]} size={14} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[12.5px] font-medium text-foreground">{k.name}</div>
+                  {k.meta && (
+                    <div className="truncate text-[11px] text-foreground-subtle">{k.meta}</div>
+                  )}
+                  {k.updated && (
+                    <div className="mt-0.5 truncate font-mono text-[10.5px] text-foreground-subtle">
+                      {k.updated}
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+            const cls =
+              'flex w-full items-start gap-3 rounded-xl px-2 py-2.5 text-left transition hover:bg-canvas-muted';
+            return k.href ? (
+              <a key={k.id} href={k.href} className={cls}>
+                {inner}
+              </a>
+            ) : (
+              <button key={k.id} type="button" className={cls}>
+                {inner}
+              </button>
+            );
+          })
         )}
 
-        <button
-          type="button"
+        <a
+          href={`/startups/${startupId}/logg`}
           className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-default px-3 py-2.5 text-[12.5px] text-foreground-muted transition hover:border-brand hover:bg-canvas-muted hover:text-brand"
         >
-          <Icon name="plus" size={14} /> Lägg till
-        </button>
-      </div>
-
-      <div className="mt-2 border-t border-default px-5 pb-2 pt-4">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
-          Assistenter
-        </div>
-      </div>
-      <div className="space-y-1 px-3 py-2">
-        {assistants.length === 0 ? (
-          <div className="px-2 py-4 text-center text-[11px] text-foreground-subtle">
-            Inga assistenter aktiverade.
-          </div>
-        ) : (
-          assistants.slice(0, 5).map((a) => (
-            <a
-              key={a.id}
-              href={`/startups/${startupId}/verktyg`}
-              className="flex items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-canvas-muted"
-            >
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-movexum-pastell-lila text-movexum-lila">
-                <Icon name="sparkle" size={13} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[12.5px] font-medium text-foreground">
-                  {a.name}
-                </span>
-                <span className="block truncate text-[10.5px] text-foreground-subtle">
-                  {[a.category, a.runs ? `${a.runs} körningar` : null].filter(Boolean).join(' · ')}
-                </span>
-              </span>
-              <Icon name="chevron" size={13} />
-            </a>
-          ))
-        )}
+          <Icon name="flow" size={14} /> Visa hela loggen
+        </a>
       </div>
 
       <div className="mt-auto border-t border-default p-4">

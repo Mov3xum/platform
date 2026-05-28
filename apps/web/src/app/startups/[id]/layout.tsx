@@ -3,7 +3,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModule } from '@/lib/rbac';
 import { getOneForTenant } from '@/lib/pb.server';
 import { StartupWorkspaceShell } from '@/components/intric/StartupWorkspaceShell';
-import { RightPanel, type KnowledgeItem, type AssistantShortcut } from '@/components/intric/RightPanel';
+import { RightPanel, type KnowledgeItem } from '@/components/intric/RightPanel';
 import type { StartupPhase } from '@platform/shared';
 
 interface StartupRow {
@@ -102,40 +102,52 @@ export default async function StartupLayout({
   const tools = toolsRes.status === 'fulfilled' ? toolsRes.value.items : [];
   const runs = runsRes.status === 'fulfilled' ? runsRes.value.items : [];
 
-  const knowledge: KnowledgeItem[] = [
-    ...notes.slice(0, 5).map<KnowledgeItem>((n) => ({
-      id: n.id,
-      kind: 'note',
-      name: n.body.replace(/<[^>]*>/g, '').slice(0, 60) || 'Anteckning',
-      meta: 'Anteckning',
-      updated: rel(n.created)
-    })),
-    ...milestones.slice(0, 3).map<KnowledgeItem>((m) => ({
-      id: m.id,
-      kind: 'milestone',
-      name: m.title,
-      meta: `Milstolpe · ${m.status}`,
-      updated: rel(m.updated)
-    }))
-  ];
+  // Kunskap = allt bolaget producerar: AI-resultat, anteckningar, milstolpar.
+  const toolNameById = new Map(tools.map((t) => [t.id, t.name]));
+  const RESULT_STATUSES = new Set(['succeeded', 'approved', 'ready_for_review']);
 
-  // Räkna körningar per verktyg för assistant-shortcuts
-  const runsByTool = new Map<string, number>();
-  for (const r of runs) {
-    runsByTool.set(r.tool, (runsByTool.get(r.tool) || 0) + 1);
-  }
-
-  // Visa de 4 mest använda verktygen
-  const assistants: AssistantShortcut[] = tools
-    .filter((t) => t.category === 'ai_per_startup' || t.category === 'ai_system_wide')
-    .sort((a, b) => (runsByTool.get(b.id) || 0) - (runsByTool.get(a.id) || 0))
-    .slice(0, 5)
-    .map((t) => ({
-      id: t.id,
-      name: t.name,
-      category: t.category === 'ai_per_startup' ? 'Per bolag' : 'Portfölj',
-      runs: runsByTool.get(t.id) || 0
-    }));
+  const knowledge: KnowledgeItem[] = (
+    [
+      ...runs
+        .filter((r) => RESULT_STATUSES.has(r.status))
+        .map((r) => ({
+          item: {
+            id: r.id,
+            kind: 'tool_run' as const,
+            name: toolNameById.get(r.tool) || 'AI-körning',
+            meta: 'AI-resultat',
+            updated: rel(r.created),
+            href: `/toolbox/runs/${r.id}`
+          },
+          ts: r.created
+        })),
+      ...notes.map((n) => ({
+        item: {
+          id: n.id,
+          kind: 'note' as const,
+          name: n.body.replace(/<[^>]*>/g, '').slice(0, 60) || 'Anteckning',
+          meta: 'Anteckning',
+          updated: rel(n.created),
+          href: `/startups/${id}#notes`
+        },
+        ts: n.created
+      })),
+      ...milestones.map((m) => ({
+        item: {
+          id: m.id,
+          kind: 'milestone' as const,
+          name: m.title,
+          meta: `Milstolpe · ${m.status}`,
+          updated: rel(m.updated),
+          href: `/startups/${id}#milestones`
+        },
+        ts: m.updated
+      }))
+    ] satisfies { item: KnowledgeItem; ts: string }[]
+  )
+    .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
+    .slice(0, 14)
+    .map((x) => x.item);
 
   // Räkna aktiva uppdrag för Verktyg-tab-badge
   const activeAssignmentCount = runs.filter(
@@ -153,7 +165,7 @@ export default async function StartupLayout({
         phase: startup.phase
       }}
       rightPanel={
-        <RightPanel knowledge={knowledge} assistants={assistants} startupId={startup.id} />
+        <RightPanel knowledge={knowledge} startupId={startup.id} />
       }
       activeTabBadges={{ verktyg: activeAssignmentCount }}
     >
