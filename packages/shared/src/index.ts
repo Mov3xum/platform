@@ -556,6 +556,7 @@ export interface WorkshopArea {
   id: string;
   tenant: string;
   name: string;
+  image?: string;
   created: string;
   updated: string;
 }
@@ -564,6 +565,7 @@ export interface Workshop {
   id: string;
   tenant: string;
   area?: string;
+  image?: string;
   key: string;
   title: string;
   goal?: string;
@@ -1176,3 +1178,6 @@ export const coreModules: ModuleDefinition[] = [
 // Låter server-side dokumentgenerering (lib/documents/brand.ts) hämta
 // brand-färgerna från källan-av-sanning istället för att hårdkoda hex.
 export { movexumPalette, typography as brandTypography } from './design/tokens';
+
+// ─── Workshop/utbildning-hjälpare (ren logik, enhetstestad) ──────────────────
+export * from './workshop';

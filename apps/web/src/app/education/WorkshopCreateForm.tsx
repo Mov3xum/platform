@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { createWorkshopAction, type WorkshopActionState } from '@/lib/actions/workshops';
 import type { WorkshopArea } from '@platform/shared';
 import { WorkshopBlockBuilder } from './WorkshopBlockBuilder';
+import { ImageUploadField } from '@/components/ImageUploadField';
 
 const initialState: WorkshopActionState = {};
 
@@ -91,6 +92,10 @@ export function WorkshopCreateForm({ areas }: { areas: WorkshopArea[] }) {
             .
           </p>
         </div>
+        <ImageUploadField
+          label="Omslagsbild"
+          hint="Visas på workshopkortet i översikten. PNG, JPG eller WEBP · max 5 MB"
+        />
         <div>
           <p className={labelClass}>Målgrupp</p>
           <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-foreground-muted">

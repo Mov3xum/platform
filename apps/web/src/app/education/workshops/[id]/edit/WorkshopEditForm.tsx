@@ -3,8 +3,10 @@
 import { useActionState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateWorkshopAction, type WorkshopActionState } from '@/lib/actions/workshops';
-import type { Workshop, WorkshopArea, WorkshopBlock, WorkshopModule, Role } from '@platform/shared';
+import type { Workshop, WorkshopArea, WorkshopModule, Role } from '@platform/shared';
+import { normalizeWorkshopModules, normalizeWorkshopBlocks } from '@platform/shared';
 import { WorkshopBlockBuilder } from '../../../WorkshopBlockBuilder';
+import { ImageUploadField } from '@/components/ImageUploadField';
 
 const ROLES: Array<{ value: Role; label: string }> = [
   { value: 'admin', label: 'Admin' },
@@ -18,9 +20,10 @@ const ROLES: Array<{ value: Role; label: string }> = [
 interface Props {
   workshop: Workshop & { area?: string | null };
   areas: WorkshopArea[];
+  imageUrl?: string | null;
 }
 
-export function WorkshopEditForm({ workshop, areas }: Props) {
+export function WorkshopEditForm({ workshop, areas, imageUrl }: Props) {
   const router = useRouter();
   const boundAction = updateWorkshopAction.bind(null, workshop.id);
   const [state, formAction, pending] = useActionState(boundAction, {} as WorkshopActionState);
@@ -39,19 +42,18 @@ export function WorkshopEditForm({ workshop, areas }: Props) {
     ? (workshop.audience_roles as Role[])
     : [];
 
-  const rawModules =
-    Array.isArray(workshop.modules) && (workshop.modules as WorkshopModule[]).length > 0
-      ? (workshop.modules as WorkshopModule[])
-      : [];
-  const rawBlocks = Array.isArray(workshop.content_blocks)
-    ? (workshop.content_blocks as WorkshopBlock[])
-    : [];
-  const initialModules: WorkshopModule[] =
-    rawModules.length > 0
-      ? rawModules
-      : rawBlocks.length > 0
-        ? [{ id: 'main', title: 'Workshop', blocks: rawBlocks }]
-        : [];
+  // Förladda byggaren med befintliga moduler. Äldre workshops som bara har
+  // content_blocks (innan moduler infördes) lyfts in i en enda modul så de
+  // ändå går att redigera i UI:t.
+  const initialModules: WorkshopModule[] | undefined = (() => {
+    const mods = normalizeWorkshopModules(workshop.modules);
+    if (mods.length > 0) return mods;
+    const blocks = normalizeWorkshopBlocks(workshop.content_blocks);
+    if (blocks.length > 0) {
+      return [{ id: 'module_1', title: workshop.title || 'Modul 1', blocks }];
+    }
+    return undefined;
+  })();
 
   return (
     <form action={formAction} className="space-y-6">
@@ -134,6 +136,12 @@ export function WorkshopEditForm({ workshop, areas }: Props) {
           </select>
         </div>
 
+        <ImageUploadField
+          label="Omslagsbild"
+          hint="Visas på workshopkortet i översikten. PNG, JPG eller WEBP · max 5 MB"
+          currentUrl={imageUrl}
+        />
+
         <div>
           <p className={labelClass}>Målgrupp</p>
           <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-foreground-muted">
@@ -193,8 +201,8 @@ export function WorkshopEditForm({ workshop, areas }: Props) {
         <div>
           <h2 className="text-base font-semibold text-foreground">Moduler &amp; block</h2>
           <p className="mt-1 text-sm text-foreground-muted">
-            Lägg till, redigera, flytta och ta bort moduler och block. Ändringarna sparas när du klickar på
-            &quot;Spara ändringar&quot;.
+            Redigera moduler och block direkt här. Ladda upp filmer/bilder, ändra
+            frågor, quiz och AI-block. Ändringarna sparas när du klickar på Spara.
           </p>
         </div>
         <WorkshopBlockBuilder initialModules={initialModules} />

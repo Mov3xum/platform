@@ -8,7 +8,11 @@ import { hasRole } from '@/lib/rbac';
 import { buildStartupContext } from '@/lib/ai/context';
 import { callMistral, estimateCostUsd } from '@/lib/ai/mistral';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
-import type { Role, WorkshopArea, WorkshopAssignment, Workshop, WorkshopBlock, WorkshopModule, WorkshopBlockOption } from '@platform/shared';
+import type { Role, WorkshopArea, WorkshopAssignment, Workshop, WorkshopBlock, WorkshopModule } from '@platform/shared';
+import {
+  normalizeWorkshopBlocks as toWorkshopBlocks,
+  normalizeWorkshopModules as toWorkshopModules
+} from '@platform/shared';
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 const DEFAULT_WORKSHOP_SYSTEM_PROMPT =
@@ -56,6 +60,60 @@ async function getSuperuserPb(): Promise<SuperuserPbResult> {
       pbUrl: PB_URL
     });
     return { ok: false, reason: 'auth_failed' };
+  }
+}
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+function readImageFile(formData: FormData): File | null {
+  const f = formData.get('image');
+  return f instanceof File && f.size > 0 ? f : null;
+}
+
+// Best-effort cover-image write for workshops/areas. Runs after the record has
+// been created/updated, so a failure here never duplicates the parent record.
+// Tries the caller's client first, then falls back to superuser (PB v0.23
+// per-request rule-eval bug, same pattern as the create/update paths).
+async function applyImageUpdate(
+  client: PocketBase,
+  collection: string,
+  recordId: string,
+  imageFile: File | null,
+  removeImage: boolean
+): Promise<void> {
+  let payload: FormData | Record<string, unknown> | null = null;
+  if (imageFile) {
+    const fd = new FormData();
+    fd.append('image', imageFile);
+    payload = fd;
+  } else if (removeImage) {
+    payload = { image: null };
+  }
+  if (!payload) return;
+
+  try {
+    await client.collection(collection).update(recordId, payload);
+    return;
+  } catch (err) {
+    const su = await getSuperuserPb();
+    if (su.ok) {
+      try {
+        await su.pb.collection(collection).update(recordId, payload);
+        return;
+      } catch (fallbackErr) {
+        console.error('[workshops] image update fallback failed', {
+          collection,
+          recordId,
+          message: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr ?? '')
+        });
+        return;
+      }
+    }
+    console.error('[workshops] image update failed', {
+      collection,
+      recordId,
+      message: err instanceof Error ? err.message : String(err ?? '')
+    });
   }
 }
 
@@ -160,50 +218,6 @@ export type WorkshopAreaActionState = {
   success?: string;
 };
 
-function toWorkshopBlocks(value: unknown): WorkshopBlock[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item, index) => {
-      const obj = item as Record<string, unknown>;
-      const options = Array.isArray(obj.options)
-        ? (obj.options as Array<Record<string, unknown>>).map((o, oi) => ({
-            id: String(o.id || `opt_${oi}`),
-            text: String(o.text || ''),
-            isCorrect: o.isCorrect === true
-          } satisfies WorkshopBlockOption))
-        : undefined;
-      return {
-        id: String(obj.id || `block_${index + 1}`),
-        type: (obj.type || 'exercise') as WorkshopBlock['type'],
-        title: String(obj.title || `Moment ${index + 1}`),
-        instructions: obj.instructions ? String(obj.instructions) : undefined,
-        video_url: obj.video_url ? String(obj.video_url) : undefined,
-        image_url: obj.image_url ? String(obj.image_url) : undefined,
-        desired_result: obj.desired_result ? String(obj.desired_result) : undefined,
-        question_type:
-          obj.question_type === 'multiple' ? ('multiple' as const) : ('single' as const),
-        options,
-        required: obj.required === true
-      } satisfies WorkshopBlock;
-    })
-    .filter((b) => b.title.trim().length > 0);
-}
-
-function toWorkshopModules(value: unknown): WorkshopModule[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item, index) => {
-      const obj = item as Record<string, unknown>;
-      return {
-        id: String(obj.id || `module_${index + 1}`),
-        title: String(obj.title || `Modul ${index + 1}`),
-        description: obj.description ? String(obj.description) : undefined,
-        blocks: toWorkshopBlocks(obj.blocks)
-      } satisfies WorkshopModule;
-    })
-    .filter((m) => m.title.trim().length > 0);
-}
-
 async function loadAssignmentWithAccessCheck(assignmentId: string) {
   const user = await requireUser();
   const pb = await getServerPb();
@@ -251,8 +265,12 @@ export async function createWorkshopAction(
   const contentBlocksRaw = String(formData.get('content_blocks_json') || '[]').trim();
   const audienceRoles = formData.getAll('audience_roles').map(String);
   const active = formData.get('active') === 'on';
+  const imageFile = readImageFile(formData);
 
   if (!key || !title) return { error: 'Unikt ID och titel är obligatoriska.' };
+  if (imageFile && imageFile.size > MAX_IMAGE_BYTES) {
+    return { error: 'Bilden får inte vara större än 5 MB.' };
+  }
 
   let modules: WorkshopModule[] = [];
   let contentBlocks: WorkshopBlock[] = [];
@@ -320,6 +338,7 @@ export async function createWorkshopAction(
 
   try {
     const record = await pb.collection(PB_COLLECTIONS.workshops).create(payload);
+    await applyImageUpdate(pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
     revalidatePath('/education');
     revalidatePath('/education/workshops');
     return { workshopId: String(record.id) };
@@ -338,6 +357,7 @@ export async function createWorkshopAction(
       if (suResult.ok) {
         try {
           const record = await suResult.pb.collection(PB_COLLECTIONS.workshops).create(payload);
+          await applyImageUpdate(suResult.pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
           revalidatePath('/education');
           revalidatePath('/education/workshops');
           return { workshopId: String(record.id) };
@@ -390,8 +410,13 @@ export async function updateWorkshopAction(
   const contentBlocksRaw = String(formData.get('content_blocks_json') || '').trim();
   const audienceRoles = formData.getAll('audience_roles').map(String);
   const active = formData.get('active') === 'on';
+  const imageFile = readImageFile(formData);
+  const removeImage = formData.get('remove_image') === 'on';
 
   if (!title) return { error: 'Titel är obligatorisk.' };
+  if (imageFile && imageFile.size > MAX_IMAGE_BYTES) {
+    return { error: 'Bilden får inte vara större än 5 MB.' };
+  }
 
   const payload: Record<string, unknown> = {
     title,
@@ -430,6 +455,7 @@ export async function updateWorkshopAction(
 
   try {
     await pb.collection(PB_COLLECTIONS.workshops).update(workshopId, payload);
+    await applyImageUpdate(pb, PB_COLLECTIONS.workshops, workshopId, imageFile, removeImage);
     revalidateAfterUpdate();
     return { workshopId };
   } catch (err) {
@@ -455,6 +481,7 @@ export async function updateWorkshopAction(
       if (suResult.ok) {
         try {
           await suResult.pb.collection(PB_COLLECTIONS.workshops).update(workshopId, payload);
+          await applyImageUpdate(suResult.pb, PB_COLLECTIONS.workshops, workshopId, imageFile, removeImage);
           revalidateAfterUpdate();
           return { workshopId };
         } catch (fallbackErr) {
@@ -635,6 +662,10 @@ export async function createWorkshopAreaAction(
   const pb = await getServerPb();
   const name = String(formData.get('name') || '').trim();
   if (!name) return { error: 'Ange ett områdesnamn.' };
+  const imageFile = readImageFile(formData);
+  if (imageFile && imageFile.size > MAX_IMAGE_BYTES) {
+    return { error: 'Bilden får inte vara större än 5 MB.' };
+  }
 
   const payload = {
     tenant: user.tenant,
@@ -642,7 +673,8 @@ export async function createWorkshopAreaAction(
   };
 
   try {
-    await pb.collection(PB_COLLECTIONS.workshopAreas).create(payload);
+    const record = await pb.collection(PB_COLLECTIONS.workshopAreas).create(payload);
+    await applyImageUpdate(pb, PB_COLLECTIONS.workshopAreas, String(record.id), imageFile, false);
     revalidatePath('/education');
     revalidatePath('/education/areas');
     revalidatePath('/education/new');
@@ -674,7 +706,14 @@ export async function createWorkshopAreaAction(
       const superuserPbResult = await getSuperuserPb();
       if (superuserPbResult.ok) {
         try {
-          await superuserPbResult.pb.collection(PB_COLLECTIONS.workshopAreas).create(payload);
+          const record = await superuserPbResult.pb.collection(PB_COLLECTIONS.workshopAreas).create(payload);
+          await applyImageUpdate(
+            superuserPbResult.pb,
+            PB_COLLECTIONS.workshopAreas,
+            String(record.id),
+            imageFile,
+            false
+          );
           revalidatePath('/education');
           revalidatePath('/education/areas');
           revalidatePath('/education/new');
@@ -871,8 +910,13 @@ export async function updateWorkshopAreaAction(
   const pb = await getServerPb();
   const areaId = String(formData.get('areaId') || '').trim();
   const name = String(formData.get('name') || '').trim();
+  const imageFile = readImageFile(formData);
+  const removeImage = formData.get('remove_image') === 'on';
   if (!areaId) return { error: 'Område saknas.' };
   if (!name) return { error: 'Ange ett områdesnamn.' };
+  if (imageFile && imageFile.size > MAX_IMAGE_BYTES) {
+    return { error: 'Bilden får inte vara större än 5 MB.' };
+  }
 
   // Verify the area belongs to the caller's tenant before mutating.
   let areaRecord: { id: string; tenant: string } | null = null;
@@ -908,6 +952,7 @@ export async function updateWorkshopAreaAction(
 
   try {
     await pb.collection(PB_COLLECTIONS.workshopAreas).update(areaId, payload);
+    await applyImageUpdate(pb, PB_COLLECTIONS.workshopAreas, areaId, imageFile, removeImage);
     revalidatePath('/education');
     revalidatePath('/education/areas');
     return { success: 'Område uppdaterat.' };
@@ -927,6 +972,13 @@ export async function updateWorkshopAreaAction(
       if (superuserPbResult.ok) {
         try {
           await superuserPbResult.pb.collection(PB_COLLECTIONS.workshopAreas).update(areaId, payload);
+          await applyImageUpdate(
+            superuserPbResult.pb,
+            PB_COLLECTIONS.workshopAreas,
+            areaId,
+            imageFile,
+            removeImage
+          );
           revalidatePath('/education');
           revalidatePath('/education/areas');
           return { success: 'Område uppdaterat.' };

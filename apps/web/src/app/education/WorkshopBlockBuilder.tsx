@@ -2,6 +2,12 @@
 
 import { useState } from 'react';
 import type { WorkshopModule, WorkshopBlock, WorkshopBlockType, WorkshopBlockOption } from '@platform/shared';
+import {
+  MAX_WORKSHOP_IMAGE_BYTES,
+  MAX_WORKSHOP_VIDEO_BYTES,
+  formatMbLimit,
+  validateWorkshopMediaFile
+} from '@platform/shared';
 
 type BlockIconId =
   | 'question'
@@ -45,12 +51,6 @@ const BLOCK_TYPES: { type: WorkshopBlockType; label: string; iconId: BlockIconId
 ];
 
 const BLOCK_TYPE_MAP = Object.fromEntries(BLOCK_TYPES.map((b) => [b.type, b]));
-const MAX_IMAGE_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_VIDEO_FILE_BYTES = 20 * 1024 * 1024;
-
-function formatMbLimit(bytes: number): string {
-  return `${Math.round(bytes / (1024 * 1024))} MB`;
-}
 
 let _idSeq = 0;
 function uid(prefix: string) {
@@ -77,15 +77,6 @@ function defaultBlock(type: WorkshopBlockType): WorkshopBlock {
         }
       : {})
   };
-}
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.onerror = () => reject(new Error('Kunde inte läsa filen.'));
-    reader.readAsDataURL(file);
-  });
 }
 
 interface WorkshopBlockBuilderProps {
@@ -193,32 +184,27 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
   const handleMediaUpload = async (moduleId: string, block: WorkshopBlock, file: File | null) => {
     if (!file || (block.type !== 'video' && block.type !== 'image')) return;
 
-    const isImage = block.type === 'image';
-    const expectedType = isImage ? 'image/' : 'video/';
-    const maxBytes = isImage ? MAX_IMAGE_FILE_BYTES : MAX_VIDEO_FILE_BYTES;
-
-    if (!file.type.startsWith(expectedType)) {
-      setUploadError(
-        block.id,
-        isImage ? 'Välj en bildfil (PNG, JPG, WEBP, GIF).' : 'Välj en videofil (MP4, WebM m.fl.).'
-      );
-      return;
-    }
-    if (file.size > maxBytes) {
-      setUploadError(
-        block.id,
-        isImage
-          ? `Bildfilen är för stor (max ${formatMbLimit(MAX_IMAGE_FILE_BYTES)}).`
-          : `Videofilen är för stor (max ${formatMbLimit(MAX_VIDEO_FILE_BYTES)}).`
-      );
+    const kind = block.type === 'image' ? 'image' : 'video';
+    const validation = validateWorkshopMediaFile({ type: file.type, size: file.size }, kind);
+    if (!validation.ok) {
+      setUploadError(block.id, validation.error);
       return;
     }
 
     setUploadError(block.id);
     setUploading(block.id, true);
     try {
-      const dataUrl = await readFileAsDataUrl(file);
-      updateBlock(moduleId, block.id, isImage ? { image_url: dataUrl } : { video_url: dataUrl });
+      // Ladda upp som riktig fil till PocketBase (route handler) → blocket
+      // lagrar bara en kort URL i stället för base64 i workshop-JSON:en.
+      const fd = new FormData();
+      fd.append('file', file, file.name);
+      fd.append('kind', kind);
+      const res = await fetch('/api/education/media', { method: 'POST', body: fd });
+      const data = (await res.json().catch(() => null)) as { url?: string; error?: string } | null;
+      if (!res.ok || !data?.url) {
+        throw new Error(data?.error || 'Uppladdningen misslyckades.');
+      }
+      updateBlock(moduleId, block.id, kind === 'image' ? { image_url: data.url } : { video_url: data.url });
     } catch (err) {
       const details = err instanceof Error && err.message ? `: ${err.message}` : '';
       setUploadError(block.id, `Uppladdningen misslyckades${details}`);
@@ -487,7 +473,7 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                           >
                             <span>Dra och släpp video här</span>
                             <span className="text-foreground-subtle">
-                              eller klicka för att välja fil (max {formatMbLimit(MAX_VIDEO_FILE_BYTES)})
+                              eller klicka för att välja fil (max {formatMbLimit(MAX_WORKSHOP_VIDEO_BYTES)})
                             </span>
                             <input
                               type="file"
@@ -529,7 +515,7 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                           >
                             <span>Dra och släpp bild här</span>
                             <span className="text-foreground-subtle">
-                              eller klicka för att välja fil (max {formatMbLimit(MAX_IMAGE_FILE_BYTES)})
+                              eller klicka för att välja fil (max {formatMbLimit(MAX_WORKSHOP_IMAGE_BYTES)})
                             </span>
                             <input
                               type="file"

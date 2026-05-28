@@ -1813,3 +1813,60 @@ PowerPoint"). Stegen persisteras dessutom PII-fritt på assistant-meddelandet
   `ai_usage_events` (surface `dashboard_chat`). Prompten behandlas som data, inte
   instruktioner (§9.3). Titeln kan alltid bytas manuellt via trådens
   tre-prickar-meny (byt namn/fäst/arkivera/radera).
+
+---
+
+## 18. Utbildning — block, media-uppladdning och tester
+
+### 18.1 Block-typer
+
+En workshop (`/education`) byggs av moduler som innehåller block. De 11
+blocktyperna (`WorkshopBlockType` i `@platform/shared`): `question`,
+`exercise`, `instruction`, `video`, `image`, `ai_chat`, `ai_pipeline`,
+`coach_review`, `commit_document`, `test` (quiz), `summary`. Byggaren
+(`apps/web/src/app/education/WorkshopBlockBuilder.tsx`) serialiserar modulerna
+till ett dolt `modules_json`-fält; `createWorkshopAction`/`updateWorkshopAction`
+(`lib/actions/workshops.ts`) normaliserar det via
+`normalizeWorkshopModules`/`normalizeWorkshopBlocks`.
+
+**Ren, testad logik.** Normaliseringen + media-validering bor i
+`packages/shared/src/workshop.ts` (React-/server-fri) så den kan delas av
+byggaren, upload-routen och server-actions — och enhetstestas. Testerna ligger
+i `packages/shared/src/workshop.test.ts` (ett test per blocktyp + media-
+validering) och körs med Node:s inbyggda runner, **utan nya beroenden**:
+
+```bash
+yarn test   # node --experimental-strip-types --test packages/shared/src/*.test.ts
+```
+
+### 18.2 Media-uppladdning (film/bild) — riktiga filer, inte base64
+
+Tidigare lästes video/bild in som en **base64 data-URL** och lades i
+`workshops.modules`-JSON:en. Det blåste upp posten ~33 %, och hela
+formulärsubmiten cappades → stora videos fallerade. Nu laddas media upp som
+**riktiga PocketBase-filer** och blocket lagrar bara en kort fil-URL.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000086_create_workshop_media.js` | Collection `workshop_media` (file-fält, maxSize 250 MB) |
+| `apps/web/src/app/api/education/media/route.ts` | Upload-route (staff-only) → returnerar publik fil-URL |
+| `packages/shared/src/workshop.ts` | `validateWorkshopMediaFile` + storleksgränser (bild 15 MB, video 200 MB) |
+
+- **Transport:** byggaren laddar upp filen direkt vid val (POST till
+  `/api/education/media`), inte i den stora form-submiten. Routen är en
+  route handler (inte server action) → inte bunden av
+  `serverActions.bodySizeLimit`, så "rätt stora videos" går igenom.
+- **Filservering:** tokenlös publik URL
+  (`${PB}/api/files/workshop_media/{id}/{filnamn}`), samma mönster som
+  tenant-logos/avatarer i `auth.server.ts` — fungerar direkt i `<video>`/`<img>`.
+- **Säkerhet/RBAC:** upload kräver staff (admin/incubator_lead/coach/mentor) +
+  inloggning; `workshop_media`-`createRule` refererar BARA auth-fält (ingen
+  `= tenant`-join → undviker PB v0.23-rule-buggen, se `verify-baseline.mjs`),
+  tenant sätts i koden och list/view är tenant-scopade. SameSite=Lax-cookien ger
+  CSRF-skydd (§17.8). Mime + storlek valideras både i klient och route.
+- **GDPR/riskklass:** posterna är staff-skapade utbildningsresurser (ej PII,
+  ingen AI-inferens) → minimal risk. Ladda inte upp personuppgifter (filer nås
+  via direktlänk). Bakåtkompatibelt: äldre block med base64-`video_url`/
+  `image_url` renderas fortfarande.

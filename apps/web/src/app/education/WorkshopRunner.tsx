@@ -214,14 +214,11 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
                 ) : block.type === 'video' ? (
                   <div className="mt-4 space-y-3">
                     {block.video_url ? (
-                      <a
-                        href={block.video_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center text-sm font-medium text-link hover:underline"
-                      >
-                        Öppna video →
-                      </a>
+                      <video
+                        controls
+                        src={block.video_url}
+                        className="max-h-96 w-full rounded-2xl border border-default"
+                      />
                     ) : null}
                     <label className="flex items-center gap-2 text-sm text-foreground-muted">
                       <input
