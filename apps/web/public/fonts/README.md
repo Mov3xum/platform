@@ -22,3 +22,25 @@ Self-hosted variable fonts (WOFF2) – inga CDN-anrop.
 - EU-suveränitet (inga externa CDN-anrop)
 - Bättre prestanda (samma origin)
 - Integritet (ingen Google-tracking)
+
+## TTF/OTF för PDF-inbäddning (genererade dokument) — **valfritt men rekommenderat**
+
+WOFF2-filerna ovan används av webben. PDF-renderaren
+(`apps/web/src/lib/documents/render-pdf.ts`) bäddar in brand-typsnitt via
+`@pdf-lib/fontkit`, men **fontkit kan inte läsa WOFF2** (saknar brotli). Lägg
+därför till statiska TTF/OTF-varianter här för att få Sora/Nunito (och korrekta
+svenska tecken) i genererade PDF:er:
+
+| Fil | Typsnitt | Roll i PDF |
+| --- | --- | --- |
+| `Sora-SemiBold.ttf` | Sora SemiBold (600) | Rubriker |
+| `NunitoSans-Regular.ttf` | Nunito Sans Regular (400) | Brödtext |
+| `NunitoSans-Bold.ttf` | Nunito Sans Bold (700) | Fetstil i brödtext |
+
+Ladda ner statiska TTF från Google Fonts (samma familjer som ovan) och döp dem
+exakt enligt tabellen. Saknas de faller PDF:en tillbaka på Helvetica (fortsatt
+snygg layout, men inte brand-typsnittet) — se `assets.ts`.
+
+> **OBS:** PPTX/DOCX/XLSX refererar Sora/Nunito **vid namn** och behöver inga
+> filer här — de renderas korrekt så länge den som öppnar dokumentet har
+> typsnitten installerade. Bara PDF kräver inbäddning.
