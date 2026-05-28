@@ -3,6 +3,16 @@ import PocketBase from 'pocketbase';
 import type PocketBaseType from 'pocketbase';
 import { escFilter } from '@/lib/pb-filter';
 import { getServerPbUrl } from '@/lib/pb-url';
+import {
+  COLLECTION_DENYLIST,
+  autoMaskFields,
+  maskRecord
+} from './redaction';
+
+// Den rena PII-/åtkomstpolicyn (denylist, fältmaskning) bor i `./redaction`
+// så att den kan enhetstestas (se redaction.test.ts). Re-exporteras nedan så
+// befintliga importörer av `maskRecord` från `schema.ts` är opåverkade.
+export { maskRecord };
 
 /**
  * Auto-discovery of PocketBase collections for the AI chat.
@@ -34,78 +44,9 @@ const DISCOVERY_TTL_MS = 5 * 60 * 1000;
 const ADMIN_AUTH_TTL_MS = 25 * 60 * 1000;
 const MAX_RELATION_DEPTH = 3;
 
-/**
- * Collections that are NEVER exposed to the chat, regardless of who set them
- * up in PB-admin. Internal/auth/PII tables.
- *
- * Beyond auth tables we deny:
- *   • contacts                — externa personers detaljer får inte till
- *                               AI-prompten (CLAUDE.md § 15.3).
- *   • compass_*-besökardata   — leads, chatt-sessioner, svar och IP-hash
- *                               (pre-onboarding PII + separat samtycke).
- *   • compass_security_events — säkerhetsaudit (ip_hash, actor).
- *   • agent_actions           — mutationsaudit (before/after-värden kan
- *                               innehålla godtyckligt fältinnehåll).
- *   • agent_memory            — agenternas tvärsessions-minne; nås bara via
- *                               det dedikerade, staff-gated memory_read-
- *                               verktyget (Fas 2), aldrig via generisk query.
- *   • *_integrations / connectors — krypterade credentials/OAuth-tokens.
- *
- * Detta är defense-in-depth: själva fältmaskningen nedan fångar PII per
- * fältnamn, men dessa kollektioner hålls helt utanför chatten.
- */
-const COLLECTION_DENYLIST = new Set<string>([
-  'users',
-  'tenants',
-  'verification_tokens',
-  'pending_signups',
-  'contacts',
-  'compass_leads',
-  'compass_conversations',
-  'compass_messages',
-  'compass_responses',
-  'compass_security_events',
-  'agent_actions',
-  'agent_memory',
-  'tenant_integrations',
-  'user_app_integrations',
-  'user_mistral_connectors',
-  // Personliga/innehållstunga kollektioner — aldrig exponerade för agenter.
-  'chat_threads', // privat konversationsinnehåll (1700000083)
-  'user_files', // personliga filer, strikt ägaren-bara (1700000085)
-  'deep_jobs' // intern orkestrering (1700000084)
-]);
-
-/**
- * Field names auto-masked across ALL collections (case-insensitive substring).
- *
- * Utöver direkt-PII (e-post, telefon, personnummer) maskar vi GDPR art. 9
- * särskild kategori (`founder_gender`, `founder_identifies_as`, `gender`),
- * adressfält (PII för enskild firma) samt org-nr och visitor-ip-hash. Detta
- * speglar svartlistan i `lib/ai/context.ts` så att chattens query-verktyg
- * inte kan kringgå den (CLAUDE.md § 9.3, § 10.2).
- */
-const PII_FIELD_PATTERNS = [
-  'password',
-  'tokenkey',
-  'token_key',
-  'email',
-  'person_nr',
-  'personnummer',
-  'ssn',
-  'phone',
-  'telefon',
-  'mobil',
-  'avatar',
-  // GDPR art. 9 — särskild kategori
-  'gender',
-  'identifies_as',
-  // PII för enskild firma / pseudonymiserad PII
-  'street_address',
-  'postal_code',
-  'org_nr',
-  'ip_hash'
-];
+// COLLECTION_DENYLIST + PII_FIELD_PATTERNS + autoMaskFields + maskRecord
+// bor numera i `./redaction` (ren, testbar policy — se redaction.ts/​.test.ts).
+// Defense-in-depth: speglar svartlistan i `lib/ai/context.ts` (§ 9.3, § 10.2).
 
 /**
  * Per-collection overrides for cases where auto-discovery isn't enough.
@@ -292,17 +233,6 @@ function inferTenantPath(
   return null;
 }
 
-function autoMaskFields(fields: RawField[]): string[] {
-  const masked: string[] = [];
-  for (const f of fields) {
-    const lower = f.name.toLowerCase();
-    if (PII_FIELD_PATTERNS.some((p) => lower.includes(p))) {
-      masked.push(f.name);
-    }
-  }
-  return masked;
-}
-
 function applyOverrides(c: ExposedCollection): ExposedCollection {
   const ov = COLLECTION_OVERRIDES[c.name];
   if (!ov) return c;
@@ -399,19 +329,6 @@ export function composeFilter(
   const trimmed = (modelFilter ?? '').trim();
   if (trimmed) parts.push(`(${trimmed})`);
   return parts.join(' && ');
-}
-
-export function maskRecord(
-  record: Record<string, unknown>,
-  collection: ExposedCollection
-): Record<string, unknown> {
-  if (collection.maskedFields.length === 0) return record;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(record)) {
-    if (collection.maskedFields.includes(k)) continue;
-    out[k] = v;
-  }
-  return out;
 }
 
 /**
