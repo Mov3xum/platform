@@ -59,6 +59,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   const [streaming, setStreaming] = useState(false);
   const [liveSteps, setLiveSteps] = useState<LiveStep[]>([]);
   const [deepJob, setDeepJob] = useState<{ id: string; threadId: string; status: DeepJobStatus; progress: number } | null>(null);
+  const [rightOpen, setRightOpen] = useState(true);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const deepRunning =
@@ -386,7 +387,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
 
   return (
     <div className="flex min-h-0 flex-1">
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="relative flex min-h-0 flex-1 flex-col">
         <DashboardChat
           greeting={greeting}
           agents={agents}
@@ -404,33 +405,55 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           onSubmit={submit}
           onDownload={onDownload}
         />
-      </div>
-
-      <aside className="hidden w-64 shrink-0 flex-col border-l border-default bg-canvas-subtle md:flex">
-        <div className="flex flex-col gap-2 p-3">
+        {!rightOpen && (
           <button
             type="button"
-            onClick={newChat}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-default bg-surface px-3 py-2 text-[13px] font-medium text-foreground transition hover:border-strong hover:shadow-sm hover:shadow-movexum-svart/5"
+            onClick={() => setRightOpen(true)}
+            className="absolute right-3 top-3 z-10 hidden h-8 w-8 items-center justify-center rounded-lg border border-default bg-surface text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground md:flex"
+            title="Visa trådar"
+            aria-label="Visa trådar"
           >
-            <Icon name="plus" size={14} />
-            Ny chatt
+            <Icon name="panel-right" size={14} />
           </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-          {!hasThreads ? (
-            <p className="px-2 py-6 text-center text-[12px] text-foreground-subtle">
-              Inga sparade chattar än. Dina konversationer hamnar här.
-            </p>
-          ) : (
-            <>
-              <Section label="Fäst" items={threads.pinned} />
-              <Section label="Senaste" items={threads.active} />
-              <Section label="Arkiverade" items={threads.archived} />
-            </>
-          )}
-        </div>
-      </aside>
+        )}
+      </div>
+
+      {rightOpen && (
+        <aside className="hidden w-64 shrink-0 flex-col border-l border-default bg-canvas-subtle md:flex">
+          <div className="flex items-center gap-2 p-3">
+            <button
+              type="button"
+              onClick={newChat}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-default bg-surface px-3 py-2 text-[13px] font-medium text-foreground transition hover:border-strong hover:shadow-sm hover:shadow-movexum-svart/5"
+            >
+              <Icon name="plus" size={14} />
+              Ny chatt
+            </button>
+            <button
+              type="button"
+              onClick={() => setRightOpen(false)}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground"
+              title="Stäng"
+              aria-label="Stäng trådar"
+            >
+              <Icon name="x" size={13} />
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+            {!hasThreads ? (
+              <p className="px-2 py-6 text-center text-[12px] text-foreground-subtle">
+                Inga sparade chattar än. Dina konversationer hamnar här.
+              </p>
+            ) : (
+              <>
+                <Section label="Fäst" items={threads.pinned} />
+                <Section label="Senaste" items={threads.active} />
+                <Section label="Arkiverade" items={threads.archived} />
+              </>
+            )}
+          </div>
+        </aside>
+      )}
     </div>
   );
 }

@@ -139,7 +139,7 @@ html.dark {
   display: grid;
   grid-template-columns: var(--mx-rail-w) 1fr;
   gap: 0;
-  padding: 12px 0 12px 12px;
+  padding: 0;
   min-height: 100vh;
   background: var(--mx-canvas);
   color: var(--mx-ink);
@@ -159,13 +159,11 @@ html.dark {
   display: flex;
   flex-direction: column;
   position: sticky;
-  top: 12px;
-  height: calc(100vh - 24px);
+  top: 0;
+  height: 100vh;
   z-index: 30;
   overflow: hidden;
-  border: 1px solid var(--mx-line-soft);
-  border-radius: var(--mx-r-lg);
-  box-shadow: var(--mx-sh-3);
+  border-right: 1px solid var(--mx-line-soft);
 }
 
 .mx-rail-head {
@@ -319,6 +317,10 @@ html.dark {
   z-index: 20;
   font-size: 13px;
   height: var(--mx-topbar-h);
+}
+
+.mx-desktop-rail-btn {
+  display: none;
 }
 
 .mx-crumb {
@@ -953,6 +955,43 @@ body.mx-rail-locked {
 @media (min-width: 1025px) {
   .mx-rail-backdrop {
     display: none !important;
+  }
+
+  /* Desktop rail collapse */
+  .mx-app {
+    transition: grid-template-columns 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .mx-app.mx-rail-desktop-collapsed {
+    grid-template-columns: 0px 1fr;
+  }
+  .mx-rail {
+    transition: opacity 160ms ease, visibility 160ms;
+  }
+  .mx-app.mx-rail-desktop-collapsed .mx-rail {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  /* Toggle button — only on desktop */
+  .mx-desktop-rail-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--mx-r-sm);
+    border: 0;
+    background: none;
+    color: var(--mx-muted);
+    cursor: pointer;
+    transition: background .12s, color .12s;
+    flex-shrink: 0;
+  }
+  .mx-desktop-rail-btn:hover {
+    background: var(--mx-rail-hover-bg);
+    color: var(--mx-ink);
   }
 }
 
