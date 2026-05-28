@@ -3,7 +3,8 @@
 import { useActionState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateWorkshopAction, type WorkshopActionState } from '@/lib/actions/workshops';
-import type { Workshop, WorkshopArea, Role } from '@platform/shared';
+import type { Workshop, WorkshopArea, WorkshopBlock, WorkshopModule, Role } from '@platform/shared';
+import { WorkshopBlockBuilder } from '../../../WorkshopBlockBuilder';
 
 const ROLES: Array<{ value: Role; label: string }> = [
   { value: 'admin', label: 'Admin' },
@@ -38,13 +39,24 @@ export function WorkshopEditForm({ workshop, areas }: Props) {
     ? (workshop.audience_roles as Role[])
     : [];
 
+  const rawModules =
+    Array.isArray(workshop.modules) && (workshop.modules as WorkshopModule[]).length > 0
+      ? (workshop.modules as WorkshopModule[])
+      : [];
+  const rawBlocks = Array.isArray(workshop.content_blocks)
+    ? (workshop.content_blocks as WorkshopBlock[])
+    : [];
+  const initialModules: WorkshopModule[] =
+    rawModules.length > 0
+      ? rawModules
+      : rawBlocks.length > 0
+        ? [{ id: 'main', title: 'Workshop', blocks: rawBlocks }]
+        : [];
+
   return (
     <form action={formAction} className="space-y-6">
       <section className="space-y-5 rounded-3xl border border-default bg-surface p-6">
         <h2 className="text-base font-semibold text-foreground">Grundinformation</h2>
-        <p className="text-xs text-foreground-subtle">
-          Tips: redigera moduler och block via PocketBase eller skapa en ny version. Detta formulär uppdaterar metadata.
-        </p>
 
         <div>
           <label htmlFor="title" className={labelClass}>
@@ -175,6 +187,17 @@ export function WorkshopEditForm({ workshop, areas }: Props) {
           />
           Aktiv (visas i workshopkatalogen)
         </label>
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Moduler &amp; block</h2>
+          <p className="mt-1 text-sm text-foreground-muted">
+            Lägg till, redigera, flytta och ta bort moduler och block. Ändringarna sparas när du klickar på
+            &quot;Spara ändringar&quot;.
+          </p>
+        </div>
+        <WorkshopBlockBuilder initialModules={initialModules} />
       </section>
 
       {state.error ? (
