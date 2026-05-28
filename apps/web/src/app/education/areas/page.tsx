@@ -3,6 +3,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { PageShell } from '@/components/PageShell';
+import { pbFileUrl } from '@/lib/pb-file';
 import { EDUCATION_TABS } from '../tabs';
 import { AreaManager, type AreaWithCount } from './AreaManager';
 import type { Workshop, WorkshopArea } from '@platform/shared';
@@ -46,7 +47,8 @@ export default async function EducationAreasPage() {
   const areasWithCount: AreaWithCount[] = areas.map((a) => ({
     id: a.id,
     name: a.name,
-    workshopCount: counts.get(a.id) ?? 0
+    workshopCount: counts.get(a.id) ?? 0,
+    imageUrl: pbFileUrl('workshop_areas', a.id, a.image, '400x300')
   }));
 
   return (

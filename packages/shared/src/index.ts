@@ -556,6 +556,7 @@ export interface WorkshopArea {
   id: string;
   tenant: string;
   name: string;
+  image?: string;
   created: string;
   updated: string;
 }
@@ -564,6 +565,7 @@ export interface Workshop {
   id: string;
   tenant: string;
   area?: string;
+  image?: string;
   key: string;
   title: string;
   goal?: string;
