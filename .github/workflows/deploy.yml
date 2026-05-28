@@ -6,8 +6,51 @@ on:
       - staging
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
+  detect-pocketbase-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      pocketbase_changed: ${{ steps.diff.outputs.pocketbase_changed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect PocketBase-affecting changes
+        id: diff
+        run: |
+          set -euo pipefail
+
+          before_sha="${{ github.event.before }}"
+          zero_sha="0000000000000000000000000000000000000000"
+
+          if [ "${{ github.event_name }}" != "push" ] || [ -z "${before_sha:-}" ] || [ "$before_sha" = "$zero_sha" ]; then
+            echo "Manual workflow_dispatch or missing before SHA; skipping automatic PocketBase sync."
+            echo "pocketbase_changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed_files="$(git diff --name-only "$before_sha" "$GITHUB_SHA")"
+          pb_change_pattern='^(backend/pocketbase-schema/|\.github/workflows/sync-pocketbase\.yml)'
+          echo "Changed files since $before_sha:"
+          echo "$changed_files"
+
+          # Keep this pattern aligned with files that require a PocketBase stack
+          # redeploy or schema sync after merges to staging.
+          if printf '%s\n' "$changed_files" | grep -Eq "$pb_change_pattern"; then
+            echo "PocketBase-affecting changes detected."
+            echo "pocketbase_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No PocketBase-affecting changes detected."
+            echo "pocketbase_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy:
+    needs: detect-pocketbase-changes
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -180,3 +223,12 @@ jobs:
         run: |
           set -euo pipefail
           node backend/pocketbase-schema/scripts/verify-baseline.mjs
+
+  sync-pocketbase:
+    name: Sync PocketBase schema after staging deploy
+    needs:
+      - detect-pocketbase-changes
+      - deploy
+    if: needs.detect-pocketbase-changes.outputs.pocketbase_changed == 'true'
+    uses: ./.github/workflows/sync-pocketbase.yml
+    secrets: inherit
