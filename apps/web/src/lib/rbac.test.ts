@@ -50,14 +50,17 @@ test('canRunTool: startup_member + requires_startup kräver länkat bolag', () =
   assert.equal(canRunTool(['startup_member'], t), false);
 });
 
-test('canRunTool: observer nekas verktyg som inte listar observer', () => {
-  // OBS (latent gap, flaggat till maintainer): canRunTool hård-blockerar inte
-  // 'observer' — om ett verktyg av misstag listar 'observer' i roles_allowed
-  // skulle hen släppas in. § 9.5-garantin ("observer kör aldrig") förlitar sig
-  // alltså på att inget verktyg konfigureras så. Detta test låser det faktiska
-  // kontraktet (nekas när observer inte är listad); ändra inte koden utan beslut.
+test('canRunTool: enbart-observer kör aldrig (§ 9.5, hård spärr)', () => {
   assert.equal(canRunTool(['observer'], tool({ roles_allowed: ['coach'] })), false);
+  // Hård spärr: nekas ÄVEN om ett verktyg av misstag listar observer.
+  assert.equal(canRunTool(['observer'], tool({ roles_allowed: ['observer'] })), false);
   assert.equal(canRunTool(undefined, tool()), false);
+});
+
+test('canRunTool: multi-roll (coach+observer) kör på sin andra roll', () => {
+  assert.equal(canRunTool(['observer', 'coach'], tool({ roles_allowed: ['coach'] })), true);
+  // Staff + observer påverkas inte av observer-spärren.
+  assert.equal(canRunTool(['observer', 'admin'], tool({ roles_allowed: [] })), true);
 });
 
 test('canActivateConnector: enbart-observer är spärrad', () => {
