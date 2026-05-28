@@ -36,7 +36,7 @@ export default async function EditWorkshopPage({
   const areas = await listWorkshopAreasForTenant();
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10 lg:px-8">
+    <main className="mx-auto max-w-4xl px-6 py-10 lg:px-8">
       <div className="mb-6">
         <Link
           href={`/education/workshops/${id}`}
