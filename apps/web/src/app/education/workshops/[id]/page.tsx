@@ -95,7 +95,7 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
           <img
             src={heroImageUrl}
             alt=""
-            className="-mx-6 -mt-6 mb-5 aspect-[3/1] w-[calc(100%+3rem)] max-w-none object-cover"
+            className="-mx-6 -mt-6 mb-5 aspect-[3/1] w-[calc(100%_+_3rem)] max-w-none object-cover"
           />
         ) : null}
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
