@@ -84,7 +84,13 @@ async function applyImageUpdate(
   let payload: FormData | Record<string, unknown> | null = null;
   if (imageFile) {
     const fd = new FormData();
-    fd.append('image', imageFile);
+    // Materialisera bytes innan vidareskick: en File som plockats ur en
+    // server-actions FormData kan annars skickas med tom body när den
+    // återanvänds i en ny FormData mot PB:s SDK (Node/undici-gotcha) → filen
+    // "laddas upp" men sparas tom och visas aldrig.
+    const bytes = Buffer.from(await imageFile.arrayBuffer());
+    const blob = new Blob([bytes], { type: imageFile.type || 'application/octet-stream' });
+    fd.append('image', blob, imageFile.name || 'image');
     payload = fd;
   } else if (removeImage) {
     payload = { image: null };
