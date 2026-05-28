@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { pbFileUrl } from '@/lib/pb-file';
 import { Icon, Chip } from '@/components/proto';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailItem, RailStat } from '@/components/PageRail';
@@ -103,7 +104,8 @@ export default async function EducationPage() {
     const status = statusByWorkshop.get(w.id) || 'not_started';
     const blocks = (w.content_blocks || []).length;
     const lengthLabel = blocks > 0 ? `${blocks * 15} min` : `v${w.version}`;
-    const item: TrackModule = { workshop: w, status, lengthLabel };
+    const imageUrl = pbFileUrl('workshops', w.id, w.image, '400x300');
+    const item: TrackModule = { workshop: w, status, lengthLabel, imageUrl };
     const areaId = typeof w.area === 'string' ? w.area : '';
     if (areaId && areaBuckets.has(areaId)) {
       areaBuckets.get(areaId)?.push(item);
@@ -123,6 +125,7 @@ export default async function EducationPage() {
     id: area.id,
     label: area.name,
     accent: TRACK_ACCENTS[index % TRACK_ACCENTS.length],
+    imageUrl: pbFileUrl('workshop_areas', area.id, area.image, '400x300'),
     modules: areaBuckets.get(area.id) || []
   }));
 
@@ -192,6 +195,7 @@ export default async function EducationPage() {
             trackId={track.id}
             trackLabel={track.label}
             accent={track.accent}
+            imageUrl={track.imageUrl}
             modules={track.modules}
           />
         ))}
@@ -205,20 +209,40 @@ export default async function EducationPage() {
                 {unclassified.length}
               </span>
             </div>
-            <div className="flex gap-2 overflow-x-auto p-4">
-              {unclassified.map((w) => (
-                <Link
-                  key={w.id}
-                  href={`/education/workshops/${w.id}`}
-                  className="block min-w-[200px] flex-shrink-0 rounded-xl border border-default bg-canvas-subtle p-3 transition hover:border-strong"
-                >
-                  <div className="mb-2 flex items-center gap-2">
-                    <Chip mono>{w.status}</Chip>
-                  </div>
-                  <div className="mb-2 text-[13px] font-semibold text-foreground">{w.title}</div>
-                  <div className="font-mono text-[11px] text-foreground-subtle">v{w.version}</div>
-                </Link>
-              ))}
+            <div className="flex gap-3 overflow-x-auto p-4">
+              {unclassified.map((w) => {
+                const imageUrl = pbFileUrl('workshops', w.id, w.image, '400x300');
+                return (
+                  <Link
+                    key={w.id}
+                    href={`/education/workshops/${w.id}`}
+                    className="group block w-[210px] flex-shrink-0 overflow-hidden rounded-xl border border-default bg-canvas-subtle/40 transition hover:border-strong hover:shadow-sm hover:shadow-movexum-svart/5"
+                  >
+                    <div className="aspect-[16/10] w-full overflow-hidden">
+                      {imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={imageUrl}
+                          alt=""
+                          className="h-full w-full object-cover transition group-hover:scale-[1.02]"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="flex h-full w-full items-center justify-center bg-canvas-muted text-2xl font-semibold text-foreground-subtle">
+                          {w.title.trim().charAt(0).toUpperCase() || 'W'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="space-y-1.5 p-3">
+                      <Chip mono>{w.status}</Chip>
+                      <div className="line-clamp-2 text-[13px] font-semibold leading-snug text-foreground">
+                        {w.title}
+                      </div>
+                      <div className="font-mono text-[11px] text-foreground-subtle">v{w.version}</div>
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           </div>
         )}

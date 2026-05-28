@@ -9,6 +9,7 @@ import {
 } from '@/lib/actions/workshops';
 import { WorkshopEditForm } from './WorkshopEditForm';
 import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
+import { pbFileUrl } from '@/lib/pb-file';
 import type { Workshop } from '@platform/shared';
 
 export default async function EditWorkshopPage({
@@ -34,6 +35,7 @@ export default async function EditWorkshopPage({
   if (workshop.tenant !== user.tenant) notFound();
 
   const areas = await listWorkshopAreasForTenant();
+  const imageUrl = pbFileUrl('workshops', workshop.id, workshop.image);
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10 lg:px-8">
@@ -50,7 +52,7 @@ export default async function EditWorkshopPage({
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">Redigera workshop</h1>
       </header>
 
-      <WorkshopEditForm workshop={workshop} areas={areas} />
+      <WorkshopEditForm workshop={workshop} areas={areas} imageUrl={imageUrl} />
 
       <div className="mt-8 rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
         <h2 className="text-base font-semibold text-foreground">Farozon</h2>
