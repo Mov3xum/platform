@@ -50,8 +50,15 @@ export function StartupSwitcher({ startups, className }: Props) {
     function onClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
     document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
   }, []);
 
   function select(id: string) {
@@ -65,8 +72,13 @@ export function StartupSwitcher({ startups, className }: Props) {
 
   if (startups.length === 0) return null;
 
-  const filtered = q
-    ? startups.filter((s) => s.name.toLowerCase().includes(q.toLowerCase()))
+  const needle = q.trim().toLowerCase();
+  const filtered = needle
+    ? startups.filter((s) =>
+        [s.name, s.phase, s.industry]
+          .filter(Boolean)
+          .some((field) => field!.toLowerCase().includes(needle))
+      )
     : startups;
 
   const labelText = current
@@ -105,6 +117,7 @@ export function StartupSwitcher({ startups, className }: Props) {
               onChange={(e) => setQ(e.target.value)}
               placeholder="Sök bolag…"
             />
+            <span className="mx-switcher-count">{filtered.length}</span>
           </div>
           <div className="mx-switcher-list" role="listbox">
             {filtered.length === 0 ? (
