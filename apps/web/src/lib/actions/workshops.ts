@@ -8,7 +8,11 @@ import { hasRole } from '@/lib/rbac';
 import { buildStartupContext } from '@/lib/ai/context';
 import { callMistral, estimateCostUsd } from '@/lib/ai/mistral';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
-import type { Role, WorkshopArea, WorkshopAssignment, Workshop, WorkshopBlock, WorkshopModule, WorkshopBlockOption } from '@platform/shared';
+import type { Role, WorkshopArea, WorkshopAssignment, Workshop, WorkshopBlock, WorkshopModule } from '@platform/shared';
+import {
+  normalizeWorkshopBlocks as toWorkshopBlocks,
+  normalizeWorkshopModules as toWorkshopModules
+} from '@platform/shared';
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 const DEFAULT_WORKSHOP_SYSTEM_PROMPT =
@@ -213,50 +217,6 @@ export type WorkshopAreaActionState = {
   error?: string;
   success?: string;
 };
-
-function toWorkshopBlocks(value: unknown): WorkshopBlock[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item, index) => {
-      const obj = item as Record<string, unknown>;
-      const options = Array.isArray(obj.options)
-        ? (obj.options as Array<Record<string, unknown>>).map((o, oi) => ({
-            id: String(o.id || `opt_${oi}`),
-            text: String(o.text || ''),
-            isCorrect: o.isCorrect === true
-          } satisfies WorkshopBlockOption))
-        : undefined;
-      return {
-        id: String(obj.id || `block_${index + 1}`),
-        type: (obj.type || 'exercise') as WorkshopBlock['type'],
-        title: String(obj.title || `Moment ${index + 1}`),
-        instructions: obj.instructions ? String(obj.instructions) : undefined,
-        video_url: obj.video_url ? String(obj.video_url) : undefined,
-        image_url: obj.image_url ? String(obj.image_url) : undefined,
-        desired_result: obj.desired_result ? String(obj.desired_result) : undefined,
-        question_type:
-          obj.question_type === 'multiple' ? ('multiple' as const) : ('single' as const),
-        options,
-        required: obj.required === true
-      } satisfies WorkshopBlock;
-    })
-    .filter((b) => b.title.trim().length > 0);
-}
-
-function toWorkshopModules(value: unknown): WorkshopModule[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item, index) => {
-      const obj = item as Record<string, unknown>;
-      return {
-        id: String(obj.id || `module_${index + 1}`),
-        title: String(obj.title || `Modul ${index + 1}`),
-        description: obj.description ? String(obj.description) : undefined,
-        blocks: toWorkshopBlocks(obj.blocks)
-      } satisfies WorkshopModule;
-    })
-    .filter((m) => m.title.trim().length > 0);
-}
 
 async function loadAssignmentWithAccessCheck(assignmentId: string) {
   const user = await requireUser();

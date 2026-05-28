@@ -3,8 +3,10 @@
 import { useActionState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateWorkshopAction, type WorkshopActionState } from '@/lib/actions/workshops';
+import type { Workshop, WorkshopArea, WorkshopModule, Role } from '@platform/shared';
+import { normalizeWorkshopModules, normalizeWorkshopBlocks } from '@platform/shared';
+import { WorkshopBlockBuilder } from '../../../WorkshopBlockBuilder';
 import { ImageUploadField } from '@/components/ImageUploadField';
-import type { Workshop, WorkshopArea, Role } from '@platform/shared';
 
 const ROLES: Array<{ value: Role; label: string }> = [
   { value: 'admin', label: 'Admin' },
@@ -40,13 +42,23 @@ export function WorkshopEditForm({ workshop, areas, imageUrl }: Props) {
     ? (workshop.audience_roles as Role[])
     : [];
 
+  // Förladda byggaren med befintliga moduler. Äldre workshops som bara har
+  // content_blocks (innan moduler infördes) lyfts in i en enda modul så de
+  // ändå går att redigera i UI:t.
+  const initialModules: WorkshopModule[] | undefined = (() => {
+    const mods = normalizeWorkshopModules(workshop.modules);
+    if (mods.length > 0) return mods;
+    const blocks = normalizeWorkshopBlocks(workshop.content_blocks);
+    if (blocks.length > 0) {
+      return [{ id: 'module_1', title: workshop.title || 'Modul 1', blocks }];
+    }
+    return undefined;
+  })();
+
   return (
     <form action={formAction} className="space-y-6">
       <section className="space-y-5 rounded-3xl border border-default bg-surface p-6">
         <h2 className="text-base font-semibold text-foreground">Grundinformation</h2>
-        <p className="text-xs text-foreground-subtle">
-          Tips: redigera moduler och block via PocketBase eller skapa en ny version. Detta formulär uppdaterar metadata.
-        </p>
 
         <div>
           <label htmlFor="title" className={labelClass}>
@@ -183,6 +195,17 @@ export function WorkshopEditForm({ workshop, areas, imageUrl }: Props) {
           />
           Aktiv (visas i workshopkatalogen)
         </label>
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Moduler &amp; block</h2>
+          <p className="mt-1 text-sm text-foreground-muted">
+            Redigera moduler och block direkt här. Ladda upp filmer/bilder, ändra
+            frågor, quiz och AI-block. Ändringarna sparas när du klickar på Spara.
+          </p>
+        </div>
+        <WorkshopBlockBuilder initialModules={initialModules} />
       </section>
 
       {state.error ? (
