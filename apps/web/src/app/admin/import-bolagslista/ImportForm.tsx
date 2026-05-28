@@ -62,10 +62,11 @@ export function ImportForm() {
             Välj Bolagslista (.xlsx)
           </label>
           <p className="mt-1 text-xs text-foreground-subtle">
-            Max 25 MB. Filen måste innehålla en flik som heter Bolagslista
-            med headers Bolag / Org.nr / Kommun / Status / Intagsdatum /
-            Avslutsdatum på rad 3, följt av 14 år × 4 kolumner (Antal anställda,
-            Omsättning, Personalkostnad, Bolagsskatt).
+            Max 25 MB. Antingen den normaliserade exporten med flikarna
+            Bolag (Bolag / Org.nr / Kommun / Status / Intagsdatum /
+            Avslutsdatum) och Ekonomi per år (Bolag / Org.nr / År / Antal
+            anställda / Omsättning / Personalkostnad / Bolagsskatt), eller den
+            breda Bolagslista-fliken (14 år × 4 kolumner).
           </p>
         </div>
         <input

@@ -7,9 +7,12 @@ import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { parseXlsx } from '@/lib/import/xlsx';
 import {
   parseBolagslista,
+  parseBolagslistaNormalized,
+  detectNormalizedSheets,
   type CompanyImport,
   type FinancialRow
 } from '@/lib/import/bolagslista';
+import { escFilter } from '@/lib/pb-filter';
 import { recordActivity } from './record-activity';
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB
@@ -137,8 +140,20 @@ function parseUpload(buf: Buffer): {
       error: err instanceof Error ? err.message : 'Kunde inte läsa XLSX-filen.'
     };
   }
-  // Hitta första sheeten som ser ut som "Bolagslista" — annars använd andra
-  // sheeten (Statistik är ofta första).
+  // Föredra den normaliserade layouten (Bolag- + Ekonomi per år-flikar).
+  // Den bär relationen explicit (org-nr/namn + exakt år per rad), så
+  // bolag utan giltigt org-nr (enskilda firmor) följer med via namn och
+  // ekonomiraderna behåller sina exakta år — inga flytande öar.
+  const normalized = detectNormalizedSheets(xlsx.sheets);
+  if (normalized) {
+    const parsed = parseBolagslistaNormalized(normalized.bolag, normalized.ekonomi);
+    if (parsed.companies.length > 0) {
+      return { parse: parsed };
+    }
+  }
+
+  // Annars: bred/denormaliserad layout. Hitta första sheeten som ser ut
+  // som "Bolagslista" — annars använd den flik som ger flest bolag.
   let rows = xlsx.sheets.get('Bolagslista');
   if (!rows) {
     // Försök alla sheets, ta den som ger flest detekterade bolag.
@@ -219,14 +234,21 @@ export async function commitImportBolagslistaAction(
 
   for (const company of parse.companies) {
     const orgNr = company.startup.org_nr;
-    if (!orgNr) {
+    const name = company.startup.name;
+    if (!orgNr && !name) {
       skipped++;
       continue;
     }
 
-    // Upsert startups-raden (uppslag på tenant + org_nr)
+    // Upsert startups-raden. Uppslag på (tenant, org_nr) när org-nr är
+    // giltigt; annars på (tenant, namn) för enskilda firmor/bolag utan
+    // org-nr — så relationen till financials bevaras i stället för att
+    // raden hoppas över. Det partiella unique-indexet på (tenant,
+    // org_nr) gäller bara org_nr != '', så tomma org-nr kolliderar inte.
     let startupId: string;
-    const filter = `tenant = "${user.tenant}" && org_nr = "${orgNr}"`;
+    const filter = orgNr
+      ? `tenant = "${escFilter(user.tenant)}" && org_nr = "${escFilter(orgNr)}"`
+      : `tenant = "${escFilter(user.tenant)}" && name = "${escFilter(name)}" && org_nr = ""`;
     let existing: { id: string } | null = null;
     try {
       existing = await pb
@@ -238,11 +260,11 @@ export async function commitImportBolagslistaAction(
 
     const startupPayload: Record<string, unknown> = {
       tenant: user.tenant,
-      name: company.startup.name,
-      org_nr: orgNr,
+      name,
       status: company.startup.status,
       phase: 'idea' // default; ändras manuellt av staff vid behov
     };
+    if (orgNr) startupPayload.org_nr = orgNr;
     if (company.startup.kommun) startupPayload.kommun = company.startup.kommun;
     if (company.startup.bolag_status) startupPayload.bolag_status = company.startup.bolag_status;
     if (company.startup.intagsdatum) startupPayload.intagsdatum = company.startup.intagsdatum;
