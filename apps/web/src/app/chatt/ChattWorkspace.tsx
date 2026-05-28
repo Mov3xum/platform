@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import DashboardChat, {
   type DashboardAgent,
   type DashboardConnector,
+  type DashboardActivity,
   type LiveStep,
   type UiMessage
 } from '@/components/DashboardChat';
@@ -33,6 +34,7 @@ interface Props {
   greeting: string;
   agents: DashboardAgent[];
   connectors: DashboardConnector[];
+  activities: DashboardActivity[];
   initialThreads: ThreadListResult;
 }
 
@@ -47,7 +49,7 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
     }));
 }
 
-export default function ChattWorkspace({ greeting, agents, connectors, initialThreads }: Props) {
+export default function ChattWorkspace({ greeting, agents, connectors, activities, initialThreads }: Props) {
   const [threads, setThreads] = useState<ThreadListResult>(initialThreads);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
@@ -389,6 +391,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, initialTh
           greeting={greeting}
           agents={agents}
           connectors={connectors}
+          activities={activities}
           messages={messages}
           isPending={streaming || deepRunning}
           error={error}

@@ -178,10 +178,65 @@ export interface DashboardConnector {
   blurb?: string;
 }
 
+// En händelse i den verksamhetsövergripande aktivitetsloggen. Innehåller bara
+// PII-fri metadata (titel, bolagsnamn, typ, tidpunkt) — samma data som
+// /aktivitet redan visar för behöriga roller.
+export interface DashboardActivity {
+  id: string;
+  title: string;
+  kind?: string;
+  type?: string;
+  created: string;
+  startupName?: string;
+  startupId?: string;
+  toolIcon?: string;
+}
+
+// Relativ, svensk tidsangivelse ("nyss", "2 tim sedan", "igår").
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const diff = Math.max(0, Date.now() - then);
+  const min = Math.round(diff / 60000);
+  if (min < 1) return 'nyss';
+  if (min < 60) return `${min} min sedan`;
+  const hrs = Math.round(min / 60);
+  if (hrs < 24) return `${hrs} tim sedan`;
+  const days = Math.round(hrs / 24);
+  if (days === 1) return 'igår';
+  if (days < 7) return `${days} dgr sedan`;
+  return new Date(iso).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+}
+
+// Ikon + färgton per aktivitetstyp/-sort. Färgerna är Movexum-pasteller (§2.3).
+function activityVisual(act: DashboardActivity): { icon: string; swatch: string } {
+  if (act.kind === 'tool_run')
+    return { icon: 'sparkle', swatch: 'bg-movexum-pastell-lila text-movexum-morklila' };
+  if (act.kind === 'integration_sync')
+    return { icon: 'cloud', swatch: 'bg-movexum-pastell-bla text-movexum-djupbla' };
+  if (act.kind === 'workshop_run' || act.kind === 'workshop_assignment')
+    return { icon: 'cap', swatch: 'bg-movexum-pastell-gron text-movexum-morkgron' };
+  switch (act.type) {
+    case 'meeting':
+      return { icon: 'calendar', swatch: 'bg-movexum-pastell-bla text-movexum-djupbla' };
+    case 'call':
+      return { icon: 'people', swatch: 'bg-movexum-pastell-gron text-movexum-morkgron' };
+    case 'email':
+      return { icon: 'inbox', swatch: 'bg-movexum-pastell-gul text-movexum-morkgul' };
+    case 'task':
+      return { icon: 'check', swatch: 'bg-movexum-pastell-gron text-movexum-morkgron' };
+    case 'workshop':
+      return { icon: 'cap', swatch: 'bg-movexum-pastell-gron text-movexum-morkgron' };
+    default:
+      return { icon: 'dot', swatch: 'bg-canvas-muted text-foreground-subtle' };
+  }
+}
+
 interface Props {
   className?: string;
   agents?: DashboardAgent[];
   connectors?: DashboardConnector[];
+  activities?: DashboardActivity[];
   greeting?: string;
   // Kontrollerade props (ChattWorkspace äger tillståndet)
   messages: UiMessage[];
@@ -220,6 +275,7 @@ export default function DashboardChat({
   className = '',
   agents = [],
   connectors = [],
+  activities = [],
   greeting,
   messages,
   isPending,
@@ -236,6 +292,7 @@ export default function DashboardChat({
   const [input, setInput] = useState('');
   const [includeWebContext, setIncludeWebContext] = useState(false);
   const [deepMode, setDeepMode] = useState(false);
+  const [showAssistants, setShowAssistants] = useState(false);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
@@ -566,6 +623,23 @@ export default function DashboardChat({
             <Icon name="sparkle" size={12} />
             Djupdykning
           </button>
+          {!isActive && agents.length > 0 && (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showAssistants}
+              onClick={() => setShowAssistants((v) => !v)}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium transition ${
+                showAssistants
+                  ? 'bg-movexum-pastell-gron text-movexum-morkgron'
+                  : 'border border-default text-foreground-subtle hover:border-strong hover:text-foreground'
+              }`}
+              title="Visa assistenter — fördefinierade AI-agenter du kan starta en chatt med"
+            >
+              <Icon name="bot" size={12} />
+              Assistenter
+            </button>
+          )}
         </div>
         <button
           type="button"
@@ -670,7 +744,7 @@ export default function DashboardChat({
               </section>
             )}
 
-            {agents.length > 0 && (
+            {showAssistants && agents.length > 0 ? (
               <section className="mt-12">
                 <div className="mb-3 flex items-baseline justify-between">
                   <h2 className="font-heading text-[13px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
@@ -711,6 +785,79 @@ export default function DashboardChat({
                     );
                   })}
                 </div>
+              </section>
+            ) : (
+              <section className="mt-12">
+                <div className="mb-3 flex items-baseline justify-between">
+                  <div>
+                    <h2 className="font-heading text-[13px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
+                      Aktivitet
+                    </h2>
+                    <p className="mt-0.5 text-[12px] text-foreground-subtle">
+                      Senaste händelserna i portföljen
+                    </p>
+                  </div>
+                  <a href="/aktivitet" className="text-[12px] text-foreground-subtle transition hover:text-foreground">
+                    Alla
+                  </a>
+                </div>
+                {activities.length === 0 ? (
+                  <div className="rounded-2xl border border-default bg-surface px-4 py-8 text-center text-[13px] text-foreground-subtle">
+                    Inga händelser än. Aktiviteter från bolagen dyker upp här.
+                  </div>
+                ) : (
+                  <ul className="overflow-hidden rounded-2xl border border-default bg-surface">
+                    {activities.map((act, i) => {
+                      const v = activityVisual(act);
+                      const inner = (
+                        <>
+                          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${v.swatch}`}>
+                            {act.toolIcon ? (
+                              <span className="text-[15px] leading-none">{act.toolIcon}</span>
+                            ) : (
+                              <Icon name={v.icon} size={15} />
+                            )}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[13.5px] font-medium text-foreground">{act.title}</p>
+                            <p className="mt-0.5 flex items-center gap-1.5 text-[12px] text-foreground-subtle">
+                              {act.startupName && (
+                                <>
+                                  <span className="truncate font-medium text-foreground-muted">
+                                    {act.startupName}
+                                  </span>
+                                  <span aria-hidden>·</span>
+                                </>
+                              )}
+                              <span className="shrink-0">{relativeTime(act.created)}</span>
+                            </p>
+                          </div>
+                          {act.startupId && (
+                            <Icon
+                              name="arrow-up-right"
+                              size={14}
+                              className="shrink-0 text-foreground-subtle transition group-hover:text-foreground"
+                            />
+                          )}
+                        </>
+                      );
+                      const rowClass = `group flex items-center gap-3 px-4 py-3 transition ${
+                        i > 0 ? 'border-t border-default' : ''
+                      } ${act.startupId ? 'hover:bg-canvas-subtle' : ''}`;
+                      return (
+                        <li key={act.id}>
+                          {act.startupId ? (
+                            <a href={`/startups/${act.startupId}`} className={rowClass}>
+                              {inner}
+                            </a>
+                          ) : (
+                            <div className={rowClass}>{inner}</div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </section>
             )}
 
