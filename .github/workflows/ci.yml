@@ -57,7 +57,7 @@ jobs:
           echo "Inga förbjudna färgklasser. ✅"
 
   build-and-test:
-    name: Typecheck · Lint · Test · PB-baseline · Build
+    name: Typecheck · Lint · Test · Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -81,8 +81,10 @@ jobs:
       - name: Unit tests (@platform/shared)
         run: yarn test
 
-      - name: PocketBase schema-baseline
-        run: yarn verify:pb-baseline
-
       - name: Production build
         run: yarn build
+
+      # OBS: `yarn verify:pb-baseline` körs INTE här. Den kräver en körande
+      # PocketBase + secrets (PB_URL/PB_SU_EMAIL/PB_SU_PASSWORD) och hör hemma
+      # i deploy-/sync-workflowsen (mot live-instans), inte i en statisk
+      # PR-grind utan databas.
