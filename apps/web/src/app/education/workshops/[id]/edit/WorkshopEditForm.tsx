@@ -3,6 +3,7 @@
 import { useActionState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateWorkshopAction, type WorkshopActionState } from '@/lib/actions/workshops';
+import { ImageUploadField } from '@/components/ImageUploadField';
 import type { Workshop, WorkshopArea, Role } from '@platform/shared';
 
 const ROLES: Array<{ value: Role; label: string }> = [
@@ -17,9 +18,10 @@ const ROLES: Array<{ value: Role; label: string }> = [
 interface Props {
   workshop: Workshop & { area?: string | null };
   areas: WorkshopArea[];
+  imageUrl?: string | null;
 }
 
-export function WorkshopEditForm({ workshop, areas }: Props) {
+export function WorkshopEditForm({ workshop, areas, imageUrl }: Props) {
   const router = useRouter();
   const boundAction = updateWorkshopAction.bind(null, workshop.id);
   const [state, formAction, pending] = useActionState(boundAction, {} as WorkshopActionState);
@@ -121,6 +123,12 @@ export function WorkshopEditForm({ workshop, areas }: Props) {
             ))}
           </select>
         </div>
+
+        <ImageUploadField
+          label="Omslagsbild"
+          hint="Visas på workshopkortet i översikten. PNG, JPG eller WEBP · max 5 MB"
+          currentUrl={imageUrl}
+        />
 
         <div>
           <p className={labelClass}>Målgrupp</p>

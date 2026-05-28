@@ -34,26 +34,39 @@ export function WorkshopAssignForm({ workshopId, startups }: WorkshopAssignFormP
         });
       }}
     >
-      <h3 className="text-sm font-semibold text-foreground">Tilldela startup</h3>
-      <select
-        value={startupId}
-        onChange={(e) => setStartupId(e.target.value)}
-        required
-        className="w-full rounded-xl border border-default bg-surface px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
-      >
-        <option value="">-- Välj bolag --</option>
-        {startups.map((startup) => (
-          <option key={startup.id} value={startup.id}>
-            {startup.name}
-          </option>
-        ))}
-      </select>
-      <input
-        type="date"
-        value={dueDate}
-        onChange={(e) => setDueDate(e.target.value)}
-        className="w-full rounded-xl border border-default bg-surface px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
-      />
+      <div>
+        <h3 className="text-sm font-semibold text-foreground">Tilldela bolag</h3>
+        <p className="mt-0.5 text-xs text-foreground-subtle">
+          Bolaget ser workshopen i sin utbildningsöversikt.
+        </p>
+      </div>
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-foreground-muted">Bolag</span>
+        <select
+          value={startupId}
+          onChange={(e) => setStartupId(e.target.value)}
+          required
+          className="w-full rounded-xl border border-default bg-surface px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+        >
+          <option value="">-- Välj bolag --</option>
+          {startups.map((startup) => (
+            <option key={startup.id} value={startup.id}>
+              {startup.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-foreground-muted">
+          Förfallodatum (valfritt)
+        </span>
+        <input
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          className="w-full rounded-xl border border-default bg-surface px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+        />
+      </label>
       <button
         type="submit"
         disabled={isPending || !startupId}
