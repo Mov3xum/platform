@@ -1720,11 +1720,24 @@ ska komma från `query_collection`-svar i samma konversation. Verktyget
 `GeneratedFileRef` på assistant-svaret (nedladdnings-chip).
 
 - **Bibliotek (motiverat undantag från dependency-free):** `pptxgenjs`,
-  `exceljs`, `docx`, `pdf-lib` — alla ren JS, inga native-binärer, inga
-  runtime-nätverksanrop → EU-suveränt, körs server-side på UpCloud.
-- **Brand:** färger från `tokens.ts` (källan-av-sanning, `documents/brand.ts`),
-  Sora/Nunito **by-name** (ingen TTF-inbäddning i v1; PDF använder Helvetica),
-  AI-disclaimer-footer i varje dokument (§9.7 / EU AI Act art. 50).
+  `exceljs`, `docx`, `pdf-lib` + `@pdf-lib/fontkit` — alla ren JS, inga
+  native-binärer, inga runtime-nätverksanrop → EU-suveränt, körs server-side
+  på UpCloud.
+- **Brand:** ett gemensamt designspråk över alla fyra format
+  (`documents/brand.ts` + `documents/render-*.ts`): brandat omslag i mörkblått
+  med wordmark, accent-detaljer i lila, Sora-rubriker, Nunito-brödtext,
+  zebra-randade tabeller och brandad footer. Färger hämtas från `tokens.ts`
+  (källan-av-sanning). Typsnitt: PPTX/DOCX/XLSX refererar Sora/Nunito
+  **by-name** (renderas om den som öppnar dokumentet har dem). **PDF bäddar in
+  Sora/Nunito** via `@pdf-lib/fontkit` när TTF/OTF finns i `public/fonts`
+  (`Sora-SemiBold.ttf`, `NunitoSans-Regular.ttf`, `NunitoSans-Bold.ttf`),
+  annars Helvetica-fallback. AI-disclaimer-footer i varje dokument (§9.7 /
+  EU AI Act art. 50).
+- **Brand-assets (`documents/assets.ts`, fail-soft):** wordmark-loggor som
+  **PNG** (`public/brand/movexum-wordmark-{light,dark}.png` — SVG kan inte
+  bäddas in) och PDF-typsnitt laddas server-side från disk och cachas.
+  Saknas filerna renderas dokumentet ändå (utan logga / med Helvetica). Se
+  README i `public/brand/` resp. `public/fonts/`.
 - **PII:** renderaren är ingen ny dataväg — dokumentet kan bara innehålla
   data agenten redan såg via `query_collection` (PII-denylist/maskning i
   `schema.ts` gäller uppströms).

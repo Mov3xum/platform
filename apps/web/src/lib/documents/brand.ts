@@ -13,16 +13,31 @@ export const BRAND = {
   // Info/länk.
   info: movexumPalette.bla,
   deep: movexumPalette.djupbla,
-  ink: movexumPalette.svart,
-  paper: movexumPalette.vit,
-  muted: '#5d5d5d',
-  border: '#e5e5e5',
+  ink: '#1a1a1a',
+  // Mjuk brödtext.
+  inkSoft: '#3f3f46',
+  paper: '#ffffff',
+  muted: '#6b6b72',
+  faint: '#9a9aa2',
+  border: '#e6e6ea',
+  hairline: '#f0f0f3',
+  // Zebra-/ytfärg (mycket ljus blå pastell).
+  surface: movexumPalette.pastellBla,
   pastellLila: movexumPalette.pastellLila,
   pastellBla: movexumPalette.pastellBla
 } as const;
 
 export const FONT_HEADING = 'Sora';
 export const FONT_BODY = 'Nunito Sans';
+
+// Aspekt-ratio för wordmark-logotypen (viewBox 600×140). Används för att
+// skala PNG-loggor utan distorsion när renderaren bara känner en dimension.
+export const LOGO_RATIO = 600 / 140;
+
+/** Buffer → data-URI (pptxgenjs `addImage({ data })`). */
+export function pngDataUri(buf: Buffer): string {
+  return `data:image/png;base64,${buf.toString('base64')}`;
+}
 
 // EU AI Act art. 50 / CLAUDE.md § 9.7 — transparensmärkning i varje dokument.
 export const AI_DISCLAIMER = 'Genererat av AI – verifiera innan delning';
