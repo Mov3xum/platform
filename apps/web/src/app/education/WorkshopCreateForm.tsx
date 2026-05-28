@@ -1,10 +1,12 @@
 'use client';
 
-import { useActionState } from 'react';
+import Link from 'next/link';
+import { useActionState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createWorkshopAction, type WorkshopActionState } from '@/lib/actions/workshops';
 import type { WorkshopArea } from '@platform/shared';
 import { WorkshopBlockBuilder } from './WorkshopBlockBuilder';
+import { ImageUploadField } from '@/components/ImageUploadField';
 
 const initialState: WorkshopActionState = {};
 
@@ -12,9 +14,11 @@ export function WorkshopCreateForm({ areas }: { areas: WorkshopArea[] }) {
   const router = useRouter();
   const [state, formAction, pending] = useActionState(createWorkshopAction, initialState);
 
-  if (state.workshopId) {
-    router.push(`/education/workshops/${state.workshopId}`);
-  }
+  useEffect(() => {
+    if (state.workshopId) {
+      router.push(`/education/workshops/${state.workshopId}`);
+    }
+  }, [state.workshopId, router]);
 
   const inputClass =
     'mt-1 w-full rounded-2xl border border-default bg-surface px-4 py-2.5 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
@@ -79,7 +83,19 @@ export function WorkshopCreateForm({ areas }: { areas: WorkshopArea[] }) {
               </option>
             ))}
           </select>
+          <p className="mt-1.5 text-xs text-foreground-subtle">
+            {areas.length === 0 ? 'Inga områden ännu. ' : null}
+            Skapa och hantera områden i{' '}
+            <Link href="/education/areas" className="text-link hover:underline">
+              Områden-fliken
+            </Link>
+            .
+          </p>
         </div>
+        <ImageUploadField
+          label="Omslagsbild"
+          hint="Visas på workshopkortet i översikten. PNG, JPG eller WEBP · max 5 MB"
+        />
         <div>
           <p className={labelClass}>Målgrupp</p>
           <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-foreground-muted">

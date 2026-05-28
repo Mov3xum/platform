@@ -7,6 +7,10 @@ import {
   type ExposedCollection
 } from './schema';
 import type { MistralToolCall, MistralToolDefinition } from './mistral';
+import { escFilter } from '@/lib/pb-filter';
+import type { GeneratedFileRef } from '@platform/shared';
+import { renderDocument, validateDocumentSpec } from '@/lib/documents';
+import { saveGeneratedFile } from '@/lib/documents/save';
 import {
   agentWritableFields,
   agentCreatableCollections,
@@ -16,6 +20,11 @@ import {
   type Actor,
   type StartupWritableField
 } from '@/lib/core/write';
+
+const AGENT_MEMORY_COLLECTION = 'agent_memory';
+const MAX_MEMORY_KEY = 200;
+const MAX_MEMORY_CONTENT = 8000;
+const MAX_MEMORY_ROWS = 50;
 
 const MAX_RESULT_ROWS = 50;
 const MAX_FIELD_LENGTH = 400;
@@ -37,6 +46,27 @@ const MAX_EXPAND_LENGTH = 200;
  */
 export interface BuildToolsOptions {
   actor?: Actor;
+  /**
+   * Exponera agentens tvärsessions-minne. `memory_read` läggs till när
+   * detta är true; `memory_write` bara när actor dessutom är en agent
+   * (interaktiv staff-chatt). Sätt bara true för staff-drivna körningar —
+   * collectionens API-regler är staff-only (migration 1700000079).
+   */
+  includeMemory?: boolean;
+  /**
+   * Exponera `generate_document` (PPTX/XLSX/DOCX/PDF). Bara för agent-actor
+   * i en interaktiv yta där en människa laddar ned/granskar utkastet. Filen
+   * sparas i ägarens `user_files` (strikt ägaren-bara) och bifogas svaret.
+   */
+  includeDocuments?: boolean;
+  /**
+   * Exponera domänskriv-verktyg (update_startup_field, create_startup_activity,
+   * update_activity_field). Default: true när actor är en agent (interaktiv
+   * staff-chatt med människa-i-loopen). Sätt false för autonoma körningar
+   * (djupa jobb) som får läsa + generera dokument men ALDRIG mutera domändata
+   * (§ 16.3 människa-i-loopen).
+   */
+  includeWrites?: boolean;
 }
 
 export function buildChatTools(
@@ -120,11 +150,11 @@ export function buildChatTools(
     }
   ];
 
-  // Skrivverktyg — bara för agenter. Det delade lagret enforcer:ar
-  // whitelist + validering oavsett vad modellen försöker, men vi
-  // exponerar bara fält som är `allow` så modellen inte ens behöver
-  // gissa.
-  if (options.actor?.kind === 'agent') {
+  // Skrivverktyg — bara för agenter, och bara när includeWrites inte är
+  // explicit false (autonoma djupa jobb stänger av domänskrivning men
+  // behåller läsning/dokument). Det delade lagret enforcer:ar whitelist +
+  // validering oavsett vad modellen försöker.
+  if (options.actor?.kind === 'agent' && options.includeWrites !== false) {
     const startupFields = agentWritableFields('startups');
     if (startupFields.length > 0) {
       tools.push({
@@ -232,10 +262,247 @@ export function buildChatTools(
     }
   }
 
+  // Tvärsessions-minne (Fas 2). memory_read är read-only och kan ges till
+  // autonoma staff-körningar; memory_write kräver agent-actor (interaktiv
+  // staff-chatt med människa-i-loopen).
+  if (options.includeMemory) {
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'memory_read',
+        description:
+          'Läser agentens tvärsessions-minne för denna tenant. Utan `key` ' +
+          'listas alla minnesnycklar med innehåll; med `key` returneras just ' +
+          'den noteringen. Använd för att minnas tidigare slutsatser eller ' +
+          'pågående trådar mellan körningar.',
+        parameters: {
+          type: 'object',
+          properties: {
+            key: {
+              type: 'string',
+              description: 'Valfri nyckel att läsa. Lämna tomt för att lista allt.'
+            }
+          }
+        }
+      }
+    });
+    if (options.actor?.kind === 'agent' && options.includeWrites !== false) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'memory_write',
+          description:
+            'Sparar/uppdaterar en notering i agentens tvärsessions-minne (per ' +
+            'tenant). Använd för slutsatser värda att minnas till nästa körning. ' +
+            'Lagra ALDRIG personuppgifter — bara aggregerade observationer. ' +
+            'Skriver över en befintlig nyckel.',
+          parameters: {
+            type: 'object',
+            properties: {
+              key: {
+                type: 'string',
+                description: 'Kort nyckel/rubrik (max 200 tecken), t.ex. "portfölj/risker".'
+              },
+              content: {
+                type: 'string',
+                description: 'Innehåll att spara (max 8000 tecken).'
+              }
+            },
+            required: ['key', 'content']
+          }
+        }
+      });
+    }
+  }
+
+  // Dokumentgenerering (PPTX/XLSX/DOCX/PDF). Bara agent-actor i en
+  // interaktiv yta där en människa laddar ned/granskar (människa-i-loopen,
+  // § 10). Modellen levererar ett TYPAT spec; servern renderar
+  // deterministiskt → inga hallucinerade siffror.
+  if (options.includeDocuments && options.actor?.kind === 'agent') {
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'generate_document',
+        description:
+          'Skapar ett nedladdningsbart dokument (PowerPoint/Excel/Word/PDF) av ' +
+          'sammanställd data. VIKTIGT: alla siffror och fakta MÅSTE komma från ' +
+          'tidigare query_collection-svar i denna konversation — hitta ALDRIG på ' +
+          'data. Systemet renderar filen deterministiskt från ditt spec och sparar ' +
+          'den i användarens privata Filer samt bifogar den som nedladdning. ' +
+          'Använd `slides` för pptx, `sheets` för xlsx, `sections` för docx/pdf.',
+        parameters: {
+          type: 'object',
+          properties: {
+            kind: {
+              type: 'string',
+              enum: ['pptx', 'xlsx', 'docx', 'pdf'],
+              description: 'Filformat'
+            },
+            title: { type: 'string', description: 'Dokumentets titel (visas på försättssidan)' },
+            subtitle: { type: 'string', description: 'Valfri undertitel' },
+            slides: {
+              type: 'array',
+              description: 'PPTX: en post per slide.',
+              items: {
+                type: 'object',
+                properties: {
+                  layout: { type: 'string', enum: ['title', 'content', 'table', 'chart'] },
+                  heading: { type: 'string' },
+                  subheading: { type: 'string' },
+                  bullets: { type: 'array', items: { type: 'string' } },
+                  table: {
+                    type: 'object',
+                    properties: {
+                      columns: { type: 'array', items: { type: 'string' } },
+                      rows: { type: 'array', items: { type: 'array', items: {} } }
+                    }
+                  },
+                  chart: {
+                    type: 'object',
+                    properties: {
+                      type: { type: 'string', enum: ['bar', 'line', 'pie'] },
+                      categories: { type: 'array', items: { type: 'string' } },
+                      series: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            name: { type: 'string' },
+                            values: { type: 'array', items: { type: 'number' } }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  notes: { type: 'string' }
+                },
+                required: ['layout']
+              }
+            },
+            sheets: {
+              type: 'array',
+              description: 'XLSX: ett blad per post. rows[] är rader med värden i kolumnordning.',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  columns: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        key: { type: 'string' },
+                        label: { type: 'string' },
+                        type: { type: 'string', enum: ['text', 'number', 'currency', 'date'] }
+                      },
+                      required: ['key', 'label']
+                    }
+                  },
+                  rows: { type: 'array', items: { type: 'array', items: {} } },
+                  totals: { type: 'array', items: {} }
+                },
+                required: ['name', 'columns', 'rows']
+              }
+            },
+            sections: {
+              type: 'array',
+              description: 'DOCX/PDF: en post per sektion.',
+              items: {
+                type: 'object',
+                properties: {
+                  heading: { type: 'string' },
+                  level: { type: 'integer', enum: [1, 2, 3] },
+                  paragraphs: { type: 'array', items: { type: 'string' } },
+                  bullets: { type: 'array', items: { type: 'string' } },
+                  table: {
+                    type: 'object',
+                    properties: {
+                      columns: { type: 'array', items: { type: 'string' } },
+                      rows: { type: 'array', items: { type: 'array', items: {} } }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          required: ['kind', 'title']
+        }
+      }
+    });
+  }
+
   return tools;
 }
 
-interface ToolDispatchContext {
+// Människovänliga (svenska) etiketter för live-aktivitetsspåret. Håller sig
+// på kollektions-/dokumenttyp-nivå — aldrig användarvärden eller filter (de
+// kan innehålla namn användaren skrev) → PII-fritt och säkert att persistera.
+const COLLECTION_LABELS: Record<string, string> = {
+  startups: 'bolagsdata',
+  activities: 'aktiviteter',
+  tool_runs: 'AI-körningar',
+  startup_financials: 'bolagens ekonomi',
+  startup_kpis: 'nyckeltal',
+  capital_rounds: 'kapitalrundor',
+  intellectual_property: 'immateriella rättigheter',
+  agreements: 'avtal',
+  incubator_events: 'evenemang',
+  event_signups: 'anmälningar',
+  startup_phase_history: 'fashistorik',
+  ai_usage_events: 'AI-statistik'
+};
+
+const DOC_LABELS: Record<string, string> = {
+  pptx: 'PowerPoint',
+  xlsx: 'Excel-fil',
+  docx: 'Word-dokument',
+  pdf: 'PDF'
+};
+
+function collectionLabel(name: string): string {
+  return COLLECTION_LABELS[name] || name || 'data';
+}
+
+/**
+ * Översätter ett tool-call till en kort svensk etikett för aktivitetsspåret
+ * ("Läser bolagsdata", "Skapar PowerPoint"). PII-fri per design: bara
+ * verktygsnamn + kollektion/dokumenttyp läses, aldrig filter eller värden.
+ */
+export function describeToolCall(call: MistralToolCall): { tool: string; label: string } {
+  let args: Record<string, unknown> = {};
+  try {
+    args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+  } catch {
+    /* etikett faller tillbaka på verktygsnamnet */
+  }
+  const name = call.function.name;
+  const coll = typeof args.collection === 'string' ? args.collection : '';
+  switch (name) {
+    case 'query_collection':
+      return { tool: name, label: `Läser ${collectionLabel(coll)}` };
+    case 'count_collection':
+      return { tool: name, label: `Räknar ${collectionLabel(coll)}` };
+    case 'update_startup_field':
+      return { tool: name, label: 'Uppdaterar bolagsuppgift' };
+    case 'create_startup_activity':
+      return { tool: name, label: 'Loggar aktivitet' };
+    case 'update_activity_field':
+      return { tool: name, label: 'Uppdaterar aktivitet' };
+    case 'memory_read':
+      return { tool: name, label: 'Läser minnet' };
+    case 'memory_write':
+      return { tool: name, label: 'Sparar i minnet' };
+    case 'generate_document': {
+      const kind = typeof args.kind === 'string' ? args.kind : '';
+      return { tool: name, label: `Skapar ${DOC_LABELS[kind] || 'dokument'}` };
+    }
+    default:
+      return { tool: name, label: 'Arbetar' };
+  }
+}
+
+export interface ToolDispatchContext {
   pb: PocketBase;
   tenantId: string;
   collections: ExposedCollection[];
@@ -245,6 +512,18 @@ interface ToolDispatchContext {
    * read-only-verktyg ignoreras fältet (tenant räcker).
    */
   actor?: Actor;
+  /**
+   * Ägare för genererade filer (`generate_document` → `user_files`). Sätts
+   * av den interaktiva staff-chatten/tråden. Krävs för dokumentverktyget.
+   */
+  ownerUserId?: string;
+  /** Tråd som ett genererat dokument knyts till (för spårbarhet). */
+  chatThreadId?: string;
+  /**
+   * Mutabel sink: `generate_document` pushar genererade fil-referenser hit
+   * så chatt-lagret kan bifoga dem på assistant-svaret (nedladdnings-chip).
+   */
+  generatedFiles?: GeneratedFileRef[];
 }
 
 export interface ToolResult {
@@ -401,8 +680,136 @@ export async function dispatchToolCall(
       return runCreateStartupActivity(args, ctx);
     case 'update_activity_field':
       return runUpdateActivityField(args, ctx);
+    case 'memory_read':
+      return runMemoryRead(args, ctx);
+    case 'memory_write':
+      return runMemoryWrite(args, ctx);
+    case 'generate_document':
+      return runGenerateDocument(args, ctx);
     default:
       return { ok: false, error: `Okänt verktyg: ${call.function.name}` };
+  }
+}
+
+async function runMemoryRead(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const key = typeof args.key === 'string' ? args.key.trim() : '';
+  let filter = `tenant = "${escFilter(ctx.tenantId)}"`;
+  if (key) filter += ` && key = "${escFilter(key)}"`;
+  try {
+    const result = await ctx.pb
+      .collection(AGENT_MEMORY_COLLECTION)
+      .getList(1, MAX_MEMORY_ROWS, {
+        filter,
+        sort: '-updated',
+        fields: 'key,content,updated'
+      });
+    return {
+      ok: true,
+      data: {
+        count: result.totalItems,
+        items: result.items.map((m) => ({
+          key: m.key,
+          content: m.content,
+          updated: m.updated
+        }))
+      }
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte läsa minnet.'
+    };
+  }
+}
+
+async function runMemoryWrite(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const key = typeof args.key === 'string' ? args.key.trim() : '';
+  const content = typeof args.content === 'string' ? args.content : '';
+  if (!key) return { ok: false, error: 'key saknas.' };
+  if (key.length > MAX_MEMORY_KEY) {
+    return { ok: false, error: `key för lång (max ${MAX_MEMORY_KEY} tecken).` };
+  }
+  if (!content.trim()) return { ok: false, error: 'content saknas.' };
+  if (content.length > MAX_MEMORY_CONTENT) {
+    return { ok: false, error: `content för långt (max ${MAX_MEMORY_CONTENT} tecken).` };
+  }
+
+  const filter = `tenant = "${escFilter(ctx.tenantId)}" && key = "${escFilter(key)}"`;
+  try {
+    const existing = await ctx.pb
+      .collection(AGENT_MEMORY_COLLECTION)
+      .getFirstListItem(filter)
+      .catch(() => null);
+    if (existing) {
+      await ctx.pb
+        .collection(AGENT_MEMORY_COLLECTION)
+        .update((existing as { id: string }).id, {
+          content,
+          updated_by: actor.id
+        });
+      return { ok: true, data: { key, action: 'updated' } };
+    }
+    await ctx.pb.collection(AGENT_MEMORY_COLLECTION).create({
+      tenant: ctx.tenantId,
+      key,
+      content,
+      created_by: actor.id,
+      updated_by: actor.id
+    });
+    return { ok: true, data: { key, action: 'created' } };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte spara minnet.'
+    };
+  }
+}
+
+async function runGenerateDocument(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  if (!ctx.ownerUserId) {
+    return { ok: false, error: 'Dokumentgenerering kräver en inloggad ägare i kontexten.' };
+  }
+  const v = validateDocumentSpec(args);
+  if (!v.ok) return { ok: false, error: v.error };
+  try {
+    const rendered = await renderDocument(v.spec);
+    const ref = await saveGeneratedFile({
+      pb: ctx.pb,
+      tenant: ctx.tenantId,
+      ownerUserId: ctx.ownerUserId,
+      rendered,
+      docKind: v.spec.kind,
+      chatThreadId: ctx.chatThreadId
+    });
+    if (ctx.generatedFiles) ctx.generatedFiles.push(ref);
+    return {
+      ok: true,
+      data: {
+        user_file_id: ref.user_file_id,
+        filename: ref.filename,
+        kind: v.spec.kind,
+        note: 'Dokumentet renderades, sparades i användarens privata Filer och bifogades svaret som nedladdning. Säg till användaren att det är klart och kan laddas ned — påstå inte att du klistrat in innehållet i chatten.'
+      }
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte generera dokumentet.'
+    };
   }
 }
 

@@ -7,6 +7,7 @@ import { WorkshopAssignForm } from '../../WorkshopAssignForm';
 import { WorkshopStatusBadge } from '@/components/Badges';
 import { deleteWorkshopFormAction } from '@/lib/actions/workshops';
 import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
+import { pbFileUrl } from '@/lib/pb-file';
 import type { Workshop, WorkshopAssignment, WorkshopBlock, WorkshopModule } from '@platform/shared';
 
 const BLOCK_TYPE_EMOJIS: Record<string, string> = {
@@ -50,6 +51,7 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
         : [];
 
   const totalBlocks = modules.reduce((acc, m) => acc + m.blocks.length, 0);
+  const heroImageUrl = pbFileUrl('workshops', workshop.id, workshop.image, '800x450');
 
   let startups: Array<{ id: string; name: string }> = [];
   let recentAssignments: WorkshopAssignment[] = [];
@@ -87,7 +89,15 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
         </Link>
       </div>
 
-      <header className="mb-8 rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
+      <header className="mb-8 overflow-hidden rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
+        {heroImageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={heroImageUrl}
+            alt=""
+            className="-mx-6 -mt-6 mb-5 aspect-[3/1] w-[calc(100%_+_3rem)] max-w-none object-cover"
+          />
+        ) : null}
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <WorkshopStatusBadge status={workshop.status} />

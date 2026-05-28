@@ -21,7 +21,7 @@ export const ICON_PATHS: Record<string, string> = {
   check: 'M5 12l5 5 9-11',
   dot: 'M12 12m-3 0a3 3 0 1 0 6 0 3 3 0 1 0-6 0',
   filter: 'M3 5h18 M6 12h12 M10 19h4',
-  more: 'M5 12h.01 M12 12h.01 M19 12h.01',
+  more: 'M12 4a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z M12 10.4a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z M12 16.8a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z',
   close: 'M6 6l12 12 M18 6l-12 12',
   download: 'M12 3v12 M7 11l5 5 5-5 M5 21h14',
   upload: 'M12 21V9 M7 13l5-5 5 5 M5 3h14',

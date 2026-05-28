@@ -4,7 +4,6 @@ import { requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { listWorkshopAreasForTenant } from '@/lib/actions/workshops';
 import { WorkshopCreateForm } from '../WorkshopCreateForm';
-import { WorkshopAreaManager } from '../WorkshopAreaManager';
 
 export default async function NewWorkshopPage() {
   const user = await requireUser();
@@ -28,7 +27,6 @@ export default async function NewWorkshopPage() {
         </p>
       </header>
       <div className="space-y-6">
-        <WorkshopAreaManager areas={areas} />
         <WorkshopCreateForm areas={areas} />
       </div>
     </main>

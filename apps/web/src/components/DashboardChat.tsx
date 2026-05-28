@@ -1,11 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState, useTransition } from 'react';
-import {
-  sendChatMessage,
-  type ChatAttachment,
-  type ChatMessage
-} from '@/lib/actions/chat';
+import { useEffect, useRef, useState } from 'react';
+import type { ChatAttachment } from '@/lib/actions/chat';
+import type { AgentActivityStep, GeneratedFileRef } from '@platform/shared';
 import {
   extractPdfFromDataUrlAction,
   extractXlsxFromDataUrlAction
@@ -18,10 +15,7 @@ const ACCEPT_IMAGE = ['image/png', 'image/jpeg', 'image/webp'];
 const ACCEPT_TEXT = ['text/plain', 'text/markdown', 'text/csv', 'application/csv'];
 const ACCEPT_PDF = ['application/pdf'];
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const ACCEPT_XLSX = [
-  XLSX_MIME,
-  'application/vnd.ms-excel'
-];
+const ACCEPT_XLSX = [XLSX_MIME, 'application/vnd.ms-excel'];
 const ACCEPT_IMAGE_ATTR = 'image/png,image/jpeg,image/webp';
 const ACCEPT_TEXT_ATTR =
   'text/plain,text/markdown,text/csv,application/pdf,' +
@@ -33,15 +27,58 @@ interface UploadedFile extends ChatAttachment {
   size: number;
 }
 
+// Meddelande som visas i UI:t — kan bära agent-genererade filer (chips) och
+// det aktivitetsspår agenten utförde för svaret.
+export interface UiMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  generated_files?: GeneratedFileRef[];
+  steps?: AgentActivityStep[];
+}
+
+// Ett pågående verktygssteg under en streamande turn.
+export interface LiveStep {
+  id: string;
+  label: string;
+  running: boolean;
+  ok?: boolean;
+}
+
+// Kompakt aktivitetsspår ("Läser bolagsdata", "Skapar PowerPoint"). Visas
+// live medan turen körs (running → spinner) och persiterat under färdiga svar.
+function ActivityTrail({
+  items
+}: {
+  items: Array<{ label: string; running?: boolean; ok?: boolean }>;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <ul className="mb-2 flex flex-col gap-1">
+      {items.map((s, i) => (
+        <li
+          key={i}
+          className="inline-flex items-center gap-2 text-[12.5px] text-foreground-subtle"
+        >
+          {s.running ? (
+            <span
+              className="h-3 w-3 shrink-0 animate-spin rounded-full border border-foreground-subtle border-t-transparent"
+              aria-hidden
+            />
+          ) : (
+            <Icon name={s.ok === false ? 'x' : 'check'} size={12} />
+          )}
+          <span>{s.label}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function detectMime(file: File): string | null {
   const mime = (file.type || '').toLowerCase();
-  if (
-    mime &&
-    [...ACCEPT_IMAGE, ...ACCEPT_TEXT, ...ACCEPT_PDF, ...ACCEPT_XLSX].includes(mime)
-  ) {
+  if (mime && [...ACCEPT_IMAGE, ...ACCEPT_TEXT, ...ACCEPT_PDF, ...ACCEPT_XLSX].includes(mime)) {
     return mime;
   }
-  // Fallback via extension för md/csv/txt/pdf/xlsx utan korrekt mime
   const ext = file.name.toLowerCase().split('.').pop();
   if (ext === 'md' || ext === 'markdown') return 'text/markdown';
   if (ext === 'csv') return 'text/csv';
@@ -118,6 +155,14 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+const DOC_ICON: Record<string, string> = {
+  pptx: 'image',
+  xlsx: 'doc',
+  docx: 'doc',
+  pdf: 'doc',
+  other: 'doc'
+};
+
 export interface DashboardAgent {
   id: string;
   name: string;
@@ -126,9 +171,6 @@ export interface DashboardAgent {
   runs?: number;
 }
 
-// Pinnade connectors visas under assistenter-sektionen på /chatt.
-// Klick → öppnar connector-chatten i samma layout som vanliga
-// connector-vyer (/integrationer/connectors/<kind>/<id>).
 export interface DashboardConnector {
   kind: 'builtin' | 'mcp';
   id: string;
@@ -141,6 +183,23 @@ interface Props {
   agents?: DashboardAgent[];
   connectors?: DashboardConnector[];
   greeting?: string;
+  // Kontrollerade props (ChattWorkspace äger tillståndet)
+  messages: UiMessage[];
+  isPending: boolean;
+  error: string | null;
+  activeAgent: DashboardAgent | null;
+  // Djupt jobb (kontrolleras av ChattWorkspace)
+  deepRunning?: boolean;
+  deepProgress?: number;
+  // Live-aktivitetsspår för den pågående turen (streaming).
+  liveSteps?: LiveStep[];
+  onPickAgent: (a: DashboardAgent | null) => void;
+  onReset: () => void;
+  onSubmit: (
+    text: string,
+    opts: { includeWebContext: boolean; attachments: ChatAttachment[]; deepJob: boolean }
+  ) => void;
+  onDownload: (file: GeneratedFileRef) => void;
 }
 
 const AGENT_TONES = [
@@ -157,14 +216,28 @@ function toneFor(id: string) {
   return AGENT_TONES[h % AGENT_TONES.length];
 }
 
-export default function DashboardChat({ className = '', agents = [], connectors = [], greeting }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+export default function DashboardChat({
+  className = '',
+  agents = [],
+  connectors = [],
+  greeting,
+  messages,
+  isPending,
+  error,
+  activeAgent,
+  deepRunning = false,
+  deepProgress = 0,
+  liveSteps = [],
+  onPickAgent,
+  onReset,
+  onSubmit,
+  onDownload
+}: Props) {
   const [input, setInput] = useState('');
   const [includeWebContext, setIncludeWebContext] = useState(false);
-  const [activeAgent, setActiveAgent] = useState<DashboardAgent | null>(null);
+  const [deepMode, setDeepMode] = useState(false);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
-  const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -173,6 +246,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const isActive = messages.length > 0 || isPending;
+  const shownError = localError || error;
 
   function autoGrow() {
     const el = inputRef.current;
@@ -185,25 +259,25 @@ export default function DashboardChat({ className = '', agents = [], connectors 
     autoGrow();
   }, [input]);
 
-  function scrollToBottom() {
+  useEffect(() => {
     requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     });
-  }
+  }, [messages.length, isPending, liveSteps.length]);
 
   async function addFiles(files: FileList | File[]) {
     const list = Array.from(files);
     if (list.length === 0) return;
-    setError(null);
+    setLocalError(null);
 
     const remaining = MAX_ATTACHMENTS - attachments.length;
     if (remaining <= 0) {
-      setError(`Max ${MAX_ATTACHMENTS} bilagor per meddelande.`);
+      setLocalError(`Max ${MAX_ATTACHMENTS} bilagor per meddelande.`);
       return;
     }
     const accepted = list.slice(0, remaining);
     if (list.length > remaining) {
-      setError(`Endast ${remaining} fil(er) till — max ${MAX_ATTACHMENTS} totalt.`);
+      setLocalError(`Endast ${remaining} fil(er) till — max ${MAX_ATTACHMENTS} totalt.`);
     }
 
     setIsProcessingFiles(true);
@@ -212,17 +286,16 @@ export default function DashboardChat({ className = '', agents = [], connectors 
       for (const file of accepted) {
         const mime = detectMime(file);
         if (!mime) {
-          setError(`${file.name}: filformatet stöds inte.`);
+          setLocalError(`${file.name}: filformatet stöds inte.`);
           continue;
         }
         if (file.size > MAX_FILE_BYTES) {
-          setError(`${file.name} är större än 10 MB.`);
+          setLocalError(`${file.name} är större än 10 MB.`);
           continue;
         }
         try {
           if (ACCEPT_IMAGE.includes(mime)) {
             const { dataUrl, size } = await compressImage(file);
-            // Vid kompression encodas alltid som JPEG; reflektera det i mime.
             const effectiveMime = size < file.size ? 'image/jpeg' : mime;
             next.push({
               uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -236,7 +309,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
             const dataUrl = await readAsDataUrl(file);
             const result = await extractPdfFromDataUrlAction(dataUrl, file.name);
             if (result.error || !result.text) {
-              setError(result.error || `${file.name}: kunde inte läsa PDF.`);
+              setLocalError(result.error || `${file.name}: kunde inte läsa PDF.`);
               continue;
             }
             next.push({
@@ -251,7 +324,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
             const dataUrl = await readAsDataUrl(file);
             const result = await extractXlsxFromDataUrlAction(dataUrl, file.name);
             if (result.error || !result.text) {
-              setError(result.error || `${file.name}: kunde inte läsa Excel-filen.`);
+              setLocalError(result.error || `${file.name}: kunde inte läsa Excel-filen.`);
               continue;
             }
             next.push({
@@ -274,7 +347,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
             });
           }
         } catch (err) {
-          setError(`${file.name}: kunde inte läsa filen.`);
+          setLocalError(`${file.name}: kunde inte läsa filen.`);
           console.error('[DashboardChat] file read failed', err);
         }
       }
@@ -288,56 +361,42 @@ export default function DashboardChat({ className = '', agents = [], connectors 
     setAttachments((prev) => prev.filter((a) => a.uid !== uid));
   }
 
+  function toggleDeepMode() {
+    setDeepMode((v) => {
+      const next = !v;
+      // Djupa jobb tar bara en instruktion — bilagor/webbkällor gäller inte.
+      if (next) {
+        setAttachments([]);
+        setIncludeWebContext(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        if (imageInputRef.current) imageInputRef.current.value = '';
+      }
+      return next;
+    });
+  }
+
   function submit() {
     const text = input.trim();
-    if ((!text && attachments.length === 0) || isPending) return;
-
-    const displayText =
-      text || (attachments.length === 1 ? '(bilaga skickad)' : '(bilagor skickade)');
-    const userMessage: ChatMessage = { role: 'user', content: displayText };
-    const nextMessages: ChatMessage[] = [...messages, userMessage];
-
-    setMessages(nextMessages);
+    // Djupt jobb kräver en instruktion (text); annars krävs text eller bilaga.
+    if (deepMode ? !text : !text && attachments.length === 0) return;
+    if (isPending) return;
+    setLocalError(null);
+    const sentAttachments: ChatAttachment[] = deepMode
+      ? []
+      : attachments.map((a) => ({
+          name: a.name,
+          mime: a.mime,
+          kind: a.kind,
+          text: a.text,
+          dataUrl: a.dataUrl
+        }));
+    const wasDeep = deepMode;
     setInput('');
-    setError(null);
-    scrollToBottom();
-
-    const agentId = activeAgent?.id;
-    const sentAttachments: ChatAttachment[] = attachments.map((a) => ({
-      name: a.name,
-      mime: a.mime,
-      kind: a.kind,
-      text: a.text,
-      dataUrl: a.dataUrl
-    }));
     setAttachments([]);
+    setDeepMode(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (imageInputRef.current) imageInputRef.current.value = '';
-
-    startTransition(async () => {
-      try {
-        const result = await sendChatMessage(nextMessages, {
-          includeWebContext,
-          agentId,
-          attachments: sentAttachments
-        });
-        if (result.error) {
-          setError(result.error);
-        } else if (result.text) {
-          setMessages((prev) => [...prev, { role: 'assistant', content: result.text! }]);
-          scrollToBottom();
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Något gick fel';
-        const bodyLimit = /body|request.*size|payload|too large/i.test(msg);
-        setError(
-          bodyLimit
-            ? 'Bilagorna är för stora för att skickas — försök med färre eller mindre filer.'
-            : msg
-        );
-        console.error('[DashboardChat] submit failed', err);
-      }
-    });
+    onSubmit(text, { includeWebContext, attachments: sentAttachments, deepJob: wasDeep });
   }
 
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -347,39 +406,27 @@ export default function DashboardChat({ className = '', agents = [], connectors 
     }
   }
 
-  function pickAgent(agent: DashboardAgent) {
-    setActiveAgent(agent);
-    setError(null);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }
-
-  function clearAgent() {
-    setActiveAgent(null);
-  }
-
-  function resetConversation() {
-    setMessages([]);
-    setError(null);
-    setActiveAgent(null);
-    setInput('');
-    setAttachments([]);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (imageInputRef.current) imageInputRef.current.value = '';
-  }
-
-  function openFilePicker() {
-    fileInputRef.current?.click();
-  }
-
-  function openImagePicker() {
-    imageInputRef.current?.click();
-  }
-
   const canSubmit =
-    !isPending && !isProcessingFiles && (input.trim().length > 0 || attachments.length > 0);
+    !isPending &&
+    !isProcessingFiles &&
+    (deepMode ? input.trim().length > 0 : input.trim().length > 0 || attachments.length > 0);
 
   const inputPill = (
     <div className="rounded-2xl border border-default bg-surface px-4 py-3 shadow-sm shadow-movexum-svart/5 transition focus-within:border-strong focus-within:ring-2 focus-within:ring-movexum-pastell-lila dark:focus-within:ring-movexum-morklila">
+      {deepRunning && (
+        <div className="mb-2 rounded-xl bg-movexum-pastell-lila px-3 py-2">
+          <div className="flex items-center justify-between text-[12px] font-medium text-movexum-morklila">
+            <span className="inline-flex items-center gap-1.5">
+              <Icon name="sparkle" size={12} />
+              Djupdykning pågår — planerar, hämtar data och sammanställer ett utkast…
+            </span>
+            <span>{deepProgress}%</span>
+          </div>
+          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-canvas-muted">
+            <div className="h-full bg-movexum-lila transition-all" style={{ width: `${deepProgress}%` }} />
+          </div>
+        </div>
+      )}
       {attachments.length > 0 && (
         <ul className="mb-2 flex flex-wrap gap-2">
           {attachments.map((a) => (
@@ -389,11 +436,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
             >
               {a.kind === 'image' && a.dataUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={a.dataUrl}
-                  alt=""
-                  className="h-7 w-7 rounded-lg object-cover"
-                />
+                <img src={a.dataUrl} alt="" className="h-7 w-7 rounded-lg object-cover" />
               ) : (
                 <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-movexum-pastell-bla text-movexum-djupbla">
                   <Icon name="doc" size={13} />
@@ -420,9 +463,11 @@ export default function DashboardChat({ className = '', agents = [], connectors 
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKey}
         placeholder={
-          activeAgent
-            ? `Fråga ${activeAgent.name}…`
-            : 'Fråga om portföljen, ett bolag eller en aktivitet…'
+          deepMode
+            ? 'Beskriv vad djupdykningen ska göra (planeras och körs i flera steg)…'
+            : activeAgent
+              ? `Fråga ${activeAgent.name}…`
+              : 'Fråga om portföljen, ett bolag eller en aktivitet…'
         }
         disabled={isPending}
         rows={1}
@@ -459,9 +504,9 @@ export default function DashboardChat({ className = '', agents = [], connectors 
         }}
       />
 
-      {error && (
+      {shownError && (
         <div className="mt-2 rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange">
-          {error}
+          {shownError}
         </div>
       )}
 
@@ -469,8 +514,8 @@ export default function DashboardChat({ className = '', agents = [], connectors 
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={openFilePicker}
-            disabled={isPending || isProcessingFiles || attachments.length >= MAX_ATTACHMENTS}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isPending || isProcessingFiles || deepMode || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title={`Bifoga fil (PNG, JPG, WebP, PDF, XLSX, TXT, MD, CSV · max ${MAX_ATTACHMENTS} filer · 10 MB/fil)`}
             aria-label="Bifoga fil"
@@ -482,8 +527,8 @@ export default function DashboardChat({ className = '', agents = [], connectors 
           )}
           <button
             type="button"
-            onClick={openImagePicker}
-            disabled={isPending || attachments.length >= MAX_ATTACHMENTS}
+            onClick={() => imageInputRef.current?.click()}
+            disabled={isPending || deepMode || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title={`Bifoga bild (PNG, JPG, WebP · max ${MAX_ATTACHMENTS} bilagor · 10 MB/fil)`}
             aria-label="Bifoga bild"
@@ -494,7 +539,8 @@ export default function DashboardChat({ className = '', agents = [], connectors 
             type="button"
             onClick={() => setIncludeWebContext((v) => !v)}
             aria-pressed={includeWebContext}
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition ${
+            disabled={isPending || deepMode}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition disabled:cursor-not-allowed disabled:opacity-40 ${
               includeWebContext
                 ? 'bg-movexum-pastell-bla text-movexum-djupbla'
                 : 'border border-default text-foreground-subtle hover:text-foreground'
@@ -503,6 +549,22 @@ export default function DashboardChat({ className = '', agents = [], connectors 
           >
             <Icon name="globe" size={12} />
             Webbkällor
+          </button>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={deepMode}
+            onClick={toggleDeepMode}
+            disabled={isPending || deepRunning}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
+              deepMode
+                ? 'bg-movexum-lila text-movexum-vit shadow-sm shadow-movexum-svart/10'
+                : 'border border-default text-foreground-subtle hover:border-strong hover:text-foreground'
+            }`}
+            title="Djupdykning: planerar, hämtar data i flera steg och sammanställer ett utkast (ev. dokument) i tråden"
+          >
+            <Icon name="sparkle" size={12} />
+            Djupdykning
           </button>
         </div>
         <button
@@ -518,6 +580,30 @@ export default function DashboardChat({ className = '', agents = [], connectors 
     </div>
   );
 
+  function renderGeneratedFiles(files?: GeneratedFileRef[]) {
+    if (!files || files.length === 0) return null;
+    return (
+      <ul className="mt-2 flex flex-wrap gap-2">
+        {files.map((f) => (
+          <li key={f.user_file_id}>
+            <button
+              type="button"
+              onClick={() => onDownload(f)}
+              className="inline-flex items-center gap-2 rounded-xl border border-default bg-canvas-subtle py-1.5 pl-2 pr-3 text-[12.5px] text-foreground transition hover:border-strong hover:bg-canvas-muted"
+              title={`Ladda ned ${f.filename}`}
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-movexum-pastell-lila text-movexum-morklila">
+                <Icon name={DOC_ICON[f.doc_kind] || 'doc'} size={13} />
+              </span>
+              <span className="max-w-[200px] truncate font-medium">{f.filename}</span>
+              <Icon name="download" size={13} />
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
   return (
     <div className={`flex min-h-0 flex-1 flex-col ${className}`}>
       {!isActive ? (
@@ -528,9 +614,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                 {greeting}
               </h1>
             )}
-            <p className="mt-2 text-[14px] text-foreground-subtle">
-              Vad kan jag hjälpa dig med idag?
-            </p>
+            <p className="mt-2 text-[14px] text-foreground-subtle">Vad kan jag hjälpa dig med idag?</p>
 
             {activeAgent && (
               <div className="mt-5 flex items-center gap-2">
@@ -541,7 +625,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                   Med {activeAgent.name}
                   <button
                     type="button"
-                    onClick={clearAgent}
+                    onClick={() => onPickAgent(null)}
                     className="text-foreground-subtle transition hover:text-foreground"
                     aria-label="Avsluta agentläge"
                   >
@@ -559,10 +643,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                   <h2 className="font-heading text-[13px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
                     Mina connectors
                   </h2>
-                  <a
-                    href="/integrationer"
-                    className="text-[12px] text-foreground-subtle transition hover:text-foreground"
-                  >
+                  <a href="/integrationer" className="text-[12px] text-foreground-subtle transition hover:text-foreground">
                     Hantera
                   </a>
                 </div>
@@ -595,10 +676,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                   <h2 className="font-heading text-[13px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
                     Assistenter
                   </h2>
-                  <a
-                    href="/toolbox"
-                    className="text-[12px] text-foreground-subtle transition hover:text-foreground"
-                  >
+                  <a href="/toolbox" className="text-[12px] text-foreground-subtle transition hover:text-foreground">
                     Alla
                   </a>
                 </div>
@@ -610,7 +688,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                       <button
                         key={a.id}
                         type="button"
-                        onClick={() => pickAgent(a)}
+                        onClick={() => onPickAgent(a)}
                         className={`group flex flex-col gap-2 rounded-2xl border bg-surface p-4 text-left transition hover:-translate-y-0.5 hover:border-strong hover:shadow-sm hover:shadow-movexum-svart/10 ${
                           selected ? 'border-strong shadow-sm shadow-movexum-svart/10' : 'border-default'
                         }`}
@@ -652,26 +730,18 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                       <Icon name="sparkle" size={9} />
                     </span>
                     Med {activeAgent.name}
-                    <button
-                      type="button"
-                      onClick={clearAgent}
-                      className="text-foreground-subtle transition hover:text-foreground"
-                      aria-label="Avsluta agentläge"
-                    >
-                      <Icon name="x" size={11} />
-                    </button>
                   </span>
                 ) : (
                   <span />
                 )}
                 <button
                   type="button"
-                  onClick={resetConversation}
+                  onClick={onReset}
                   className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] text-foreground-subtle transition hover:text-foreground"
                   title="Börja om"
                 >
                   <Icon name="plus" size={12} />
-                  Ny konversation
+                  Ny chatt
                 </button>
               </div>
 
@@ -684,8 +754,14 @@ export default function DashboardChat({ className = '', agents = [], connectors 
                   </div>
                 ) : (
                   <div key={i} className="flex justify-start">
-                    <div className="max-w-[85%] whitespace-pre-wrap text-[14.5px] leading-relaxed text-foreground">
-                      {msg.content}
+                    <div className="max-w-[85%]">
+                      {msg.steps && msg.steps.length > 0 && (
+                        <ActivityTrail items={msg.steps.map((s) => ({ label: s.label, ok: s.ok }))} />
+                      )}
+                      <div className="whitespace-pre-wrap text-[14.5px] leading-relaxed text-foreground">
+                        {msg.content}
+                      </div>
+                      {renderGeneratedFiles(msg.generated_files)}
                     </div>
                   </div>
                 )
@@ -693,10 +769,15 @@ export default function DashboardChat({ className = '', agents = [], connectors 
 
               {isPending && (
                 <div className="flex justify-start">
-                  <div className="inline-flex gap-1 text-foreground-subtle" aria-label="Laddar svar">
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '0ms' }} />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '150ms' }} />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '300ms' }} />
+                  <div className="max-w-[85%]">
+                    <ActivityTrail
+                      items={liveSteps.map((s) => ({ label: s.label, running: s.running, ok: s.ok }))}
+                    />
+                    <div className="inline-flex gap-1 text-foreground-subtle" aria-label="Arbetar">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '0ms' }} />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '150ms' }} />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '300ms' }} />
+                    </div>
                   </div>
                 </div>
               )}
@@ -709,7 +790,7 @@ export default function DashboardChat({ className = '', agents = [], connectors 
             <div className="mx-auto w-full max-w-[720px] px-6 py-4">
               {inputPill}
               <p className="mt-2 text-center text-[11px] text-foreground-subtle">
-                AI drivs av Mistral / Le Chat (EU). Konfidentiella anteckningar exkluderas alltid.
+                AI drivs av Mistral / Le Chat (EU). Konfidentiella anteckningar exkluderas alltid. Genererade dokument: verifiera innan delning.
               </p>
             </div>
           </div>

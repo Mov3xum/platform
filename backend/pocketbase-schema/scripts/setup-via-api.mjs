@@ -831,6 +831,10 @@ const WORKSHOP_AREAS_CREATE_RULE =
   '@request.auth.roles ?= "incubator_lead" || ' +
   '@request.auth.roles ?= "coach" || ' +
   '@request.auth.roles ?= "mentor")';
+// update/delete utan `?=`-roll-check: PB v0.23 evaluerar dem intermittent
+// fel (samma bugg som migration 1700000049/1700000086). Roll-/tenant-skydd
+// görs i server-actionlagret innan PB-anropet.
+const WORKSHOP_AREAS_WRITE_RULE = '@request.auth.id != "" && @request.auth.tenant != ""';
 
 await ensureCollection({
   id: 'workshop_areas_collection',
@@ -846,8 +850,8 @@ await ensureCollection({
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   createRule: WORKSHOP_AREAS_CREATE_RULE,
-  updateRule: WORKSHOP_AREAS_CREATE_RULE,
-  deleteRule: WORKSHOP_AREAS_CREATE_RULE
+  updateRule: WORKSHOP_AREAS_WRITE_RULE,
+  deleteRule: WORKSHOP_AREAS_WRITE_RULE
 });
 
 // 15. workshops -------------------------------------------------------------
@@ -1722,6 +1726,142 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
 });
+
+// Migration 1700000083: chat_threads — persistenta dashboard-trådar (/chatt).
+// STRIKT ägaren-bara på alla operationer (ingen staff-läsning). Måste skapas
+// före deep_jobs/user_files som relaterar till den.
+const OWNER_DIRECT = '@request.auth.id = owner';
+await ensureCollection({
+  id: 'chat_threads_collection',
+  name: 'chat_threads',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'owner', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: false, max: 200 },
+    { name: 'status', type: 'select', required: false, maxSelect: 1, values: ['active', 'archived'] },
+    { name: 'pinned', type: 'bool', required: false },
+    { name: 'agent', type: 'relation', required: false, collectionId: 'tools_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'messages', type: 'json', required: false, maxSize: 2000000 },
+    { name: 'summary', type: 'text', required: false, max: 4000 },
+    { name: 'last_message_at', type: 'date', required: false },
+    { name: 'model', type: 'text', required: false, max: 100 },
+    { name: 'tokens_in', type: 'number', required: false },
+    { name: 'tokens_out', type: 'number', required: false },
+    { name: 'cost_estimate_usd', type: 'number', required: false },
+    { name: 'deleted_at', type: 'date', required: false },
+    // REST API:t lägger (till skillnad från JSVM-migrationen) inte till
+    // created/updated automatiskt — deklarera dem explicit (appen läser dem).
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+  ],
+  indexes: [
+    'CREATE INDEX idx_ct_owner ON chat_threads (owner)',
+    'CREATE INDEX idx_ct_tenant ON chat_threads (tenant)',
+    'CREATE INDEX idx_ct_owner_status ON chat_threads (owner, status, pinned)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
+});
+
+// Migration 1700000084: deep_jobs — bakgrundsjobb (planera → fan-out → utkast).
+// STRIKT ägaren-bara. Relaterar till chat_threads (måste finnas ovan).
+await ensureCollection({
+  id: 'deep_jobs_collection',
+  name: 'deep_jobs',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'owner', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'thread', type: 'relation', required: true, collectionId: 'chat_threads_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'instruction', type: 'text', required: true, max: 4000 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['queued', 'planning', 'running', 'aggregating', 'succeeded', 'failed', 'cancelled'] },
+    { name: 'plan', type: 'json', required: false, maxSize: 100000 },
+    { name: 'progress', type: 'number', required: false },
+    { name: 'subtask_runs', type: 'json', required: false, maxSize: 50000 },
+    { name: 'tokens_in', type: 'number', required: false },
+    { name: 'tokens_out', type: 'number', required: false },
+    { name: 'cost_estimate_usd', type: 'number', required: false },
+    { name: 'error', type: 'text', required: false, max: 1000 },
+    { name: 'started_at', type: 'date', required: false },
+    { name: 'completed_at', type: 'date', required: false },
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+  ],
+  indexes: [
+    'CREATE INDEX idx_dj_owner ON deep_jobs (owner)',
+    'CREATE INDEX idx_dj_tenant ON deep_jobs (tenant)',
+    'CREATE INDEX idx_dj_thread ON deep_jobs (thread)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
+});
+
+// Migration 1700000085: user_files — personligt filarkiv (/filer).
+// STRIKT ägaren-bara. file-fält: mime-whitelist + 25 MB tak (A.8.9).
+await ensureCollection({
+  id: 'user_files_collection',
+  name: 'user_files',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'owner', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    {
+      name: 'file', type: 'file', required: false, maxSelect: 1, maxSize: 26214400,
+      mimeTypes: [
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/pdf',
+        'application/vnd.ms-excel',
+        'text/plain',
+        'text/markdown',
+        'text/csv',
+        'image/png',
+        'image/jpeg',
+        'image/webp'
+      ]
+    },
+    { name: 'filename', type: 'text', required: true, max: 255 },
+    { name: 'mime', type: 'text', required: false, max: 120 },
+    { name: 'size_bytes', type: 'number', required: false },
+    { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['agent_generated', 'upload'] },
+    { name: 'doc_kind', type: 'select', required: false, maxSelect: 1, values: ['pptx', 'xlsx', 'docx', 'pdf', 'other'] },
+    { name: 'chat_thread', type: 'relation', required: false, collectionId: 'chat_threads_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'tool_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    // created krävs av (owner, created)-indexet nedan + appen sorterar på det.
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+  ],
+  indexes: [
+    'CREATE INDEX idx_uf_owner ON user_files (owner)',
+    'CREATE INDEX idx_uf_tenant ON user_files (tenant)',
+    'CREATE INDEX idx_uf_owner_created ON user_files (owner, created)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
+});
+
+// Backfill: en tidigare körning hann skapa chat_threads/deep_jobs UTAN
+// created/updated (REST API:t auto-lägger dem inte). ensureCollection
+// synkar bara regler på en befintlig collection, så lägg till de saknade
+// autodate-fälten explicit. Idempotent (hoppar över om de redan finns).
+const AUTODATE_FIELDS = [
+  { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+  { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+];
+await patchCollection('chat_threads', AUTODATE_FIELDS);
+await patchCollection('deep_jobs', AUTODATE_FIELDS);
+await patchCollection('user_files', AUTODATE_FIELDS);
 
 // =========================================================================
 // 18d. Field-patches på befintliga collections (porterade från migrations
