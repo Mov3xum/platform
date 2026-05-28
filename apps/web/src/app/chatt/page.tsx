@@ -3,7 +3,8 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import {
   type DashboardAgent,
-  type DashboardConnector
+  type DashboardConnector,
+  type DashboardActivity
 } from '@/components/DashboardChat';
 import ChattWorkspace from './ChattWorkspace';
 import { listThreadsAction } from '@/lib/actions/chat-threads';
@@ -31,6 +32,18 @@ interface PinnedConnectorRow {
   label?: string;
 }
 
+interface ActivityRow {
+  id: string;
+  title: string;
+  kind?: string;
+  type?: string;
+  created: string;
+  expand?: {
+    startup?: { id: string; name: string };
+    tool?: { id: string; icon?: string };
+  };
+}
+
 function greeting() {
   const h = new Date().getHours();
   if (h < 10) return 'God morgon';
@@ -49,7 +62,7 @@ export default async function ChattPage() {
 
   const pb = await getServerPb();
 
-  const [toolsRes, runsRes, pinnedRes] = await Promise.allSettled([
+  const [toolsRes, runsRes, pinnedRes, activitiesRes] = await Promise.allSettled([
     pb.collection('tools').getList<ToolRow>(1, 50, {
       filter: pb.filter('tenant = {:tenant} && active = true', { tenant: user.tenant }),
       sort: 'name'
@@ -67,12 +80,21 @@ export default async function ChattPage() {
         userId: user.id
       }),
       fields: 'id,connector_kind,connector_id,label'
+    }),
+    // Verksamhetsövergripande aktivitetslogg — tenant-scopad via startup.tenant
+    // (samma regel som /aktivitet). Bara händelser knutna till ett bolag.
+    pb.collection('activities').getList<ActivityRow>(1, 8, {
+      filter: pb.filter('startup.tenant = {:tenant}', { tenant: user.tenant }),
+      sort: '-created',
+      expand: 'startup,tool',
+      fields: 'id,title,kind,type,created,expand.startup.id,expand.startup.name,expand.tool.id,expand.tool.icon'
     })
   ]);
 
   const tools = toolsRes.status === 'fulfilled' ? toolsRes.value.items : [];
   const runs = runsRes.status === 'fulfilled' ? runsRes.value.items : [];
   const pinnedRows = pinnedRes.status === 'fulfilled' ? pinnedRes.value.items : [];
+  const activityRows = activitiesRes.status === 'fulfilled' ? activitiesRes.value.items : [];
 
   // För MCP-connectors slår vi upp namn + beskrivning från Mistral så
   // chip-titeln matchar /integrationer-vyn. Fail-soft: om Mistral-listan
@@ -116,6 +138,17 @@ export default async function ChattPage() {
     .sort((a, b) => (b.runs || 0) - (a.runs || 0))
     .slice(0, 9);
 
+  const activities: DashboardActivity[] = activityRows.map((a) => ({
+    id: a.id,
+    title: a.title,
+    kind: a.kind,
+    type: a.type,
+    created: a.created,
+    startupName: a.expand?.startup?.name,
+    startupId: a.expand?.startup?.id,
+    toolIcon: a.expand?.tool?.icon
+  }));
+
   const firstName = user.name.split(' ')[0] || user.email;
   const hello = `${greeting()}, ${firstName}.`;
 
@@ -127,6 +160,7 @@ export default async function ChattPage() {
         greeting={hello}
         agents={agents}
         connectors={connectors}
+        activities={activities}
         initialThreads={initialThreads}
       />
     </PageShell>
