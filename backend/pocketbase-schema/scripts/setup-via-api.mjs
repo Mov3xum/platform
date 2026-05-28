@@ -831,6 +831,10 @@ const WORKSHOP_AREAS_CREATE_RULE =
   '@request.auth.roles ?= "incubator_lead" || ' +
   '@request.auth.roles ?= "coach" || ' +
   '@request.auth.roles ?= "mentor")';
+// update/delete utan `?=`-roll-check: PB v0.23 evaluerar dem intermittent
+// fel (samma bugg som migration 1700000049/1700000086). Roll-/tenant-skydd
+// görs i server-actionlagret innan PB-anropet.
+const WORKSHOP_AREAS_WRITE_RULE = '@request.auth.id != "" && @request.auth.tenant != ""';
 
 await ensureCollection({
   id: 'workshop_areas_collection',
@@ -846,8 +850,8 @@ await ensureCollection({
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   createRule: WORKSHOP_AREAS_CREATE_RULE,
-  updateRule: WORKSHOP_AREAS_CREATE_RULE,
-  deleteRule: WORKSHOP_AREAS_CREATE_RULE
+  updateRule: WORKSHOP_AREAS_WRITE_RULE,
+  deleteRule: WORKSHOP_AREAS_WRITE_RULE
 });
 
 // 15. workshops -------------------------------------------------------------
