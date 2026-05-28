@@ -1,0 +1,88 @@
+name: CI
+
+# Kvalitetsgrind för pull requests. Kör samma kontroller som en mänsklig
+# reviewer annars gör för hand (CLAUDE.md §4 + §10.5), så att en agent kan
+# öppna en PR och få den auto-granskad utan att en maintainer behöver göra
+# detaljerna. Grindarna speglar package.json-scripten 1:1.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - staging
+  # Tillåt manuell körning och körning på feature-branchar (t.ex. agent-PR:ar
+  # som ännu inte pekar mot main/staging).
+  workflow_dispatch:
+  push:
+    branches-ignore:
+      - main
+      - staging
+
+permissions:
+  contents: read
+
+concurrency:
+  # Avbryt äldre körningar på samma ref när en ny push kommer in.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Snabb, dependency-fri grind: misslyckas på sekunder innan vi ens
+  # installerar node_modules. Speglar DoD-checklistan i CLAUDE.md §4.1.
+  compliance:
+    name: Compliance (grafisk profil §4)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Förbjudna Tailwind-färgklasser (slate/cyan/red/emerald/amber m.fl.)
+        run: |
+          set -uo pipefail
+
+          # Movexums grafiska profil (CLAUDE.md §2–§4) tillåter bara semantiska
+          # tokens + movexum-paletten. Ad-hoc Tailwind-färgskalor är förbjudna.
+          # Regexen matchar bara faktiska utility-klasser (prefix + palett +
+          # numerisk skala) så att t.ex. "translate-y-2" eller "Chamber-avtal"
+          # inte ger falska träffar.
+          pattern='(^|[^a-z-])(bg|text|border|ring|ring-offset|from|via|to|fill|stroke|divide|outline|decoration|placeholder|caret|accent|shadow)-(slate|gray|zinc|neutral|stone|cyan|red|emerald|amber|rose|sky|teal|lime|green|blue|indigo|violet|purple|fuchsia|pink|orange|yellow)-[0-9]{2,3}'
+
+          matches="$(grep -rEn "$pattern" apps/web/src --include='*.tsx' --include='*.ts' || true)"
+
+          if [ -n "$matches" ]; then
+            echo "::error::Förbjudna Tailwind-färgklasser hittade. Använd semantiska tokens (bg-canvas, text-foreground …) eller movexum-paletten — se CLAUDE.md §2–§4 + §8."
+            echo "$matches"
+            exit 1
+          fi
+          echo "Inga förbjudna färgklasser. ✅"
+
+  build-and-test:
+    name: Typecheck · Lint · Test · PB-baseline · Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'yarn'
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Typecheck (tsc --noEmit)
+        run: yarn typecheck
+
+      - name: Lint (next lint)
+        run: yarn lint
+
+      - name: Unit tests (@platform/shared)
+        run: yarn test
+
+      - name: PocketBase schema-baseline
+        run: yarn verify:pb-baseline
+
+      - name: Production build
+        run: yarn build
