@@ -2,7 +2,6 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireUser, getServerPb } from '@/lib/auth.server';
-import { getPublicPbUrl } from '@/lib/pb-url';
 import type { UserFile, UserFileDocKind } from '@platform/shared';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB — matchar migrationen
@@ -70,9 +69,16 @@ export async function listFilesAction(): Promise<UserFileListItem[]> {
 }
 
 /**
- * Returnerar en kortlivad, tokeniserad nedladdnings-URL för en privat fil.
- * Filerna är ägaren-bara → publik URL räcker inte; PB kräver en fil-token
- * (mintas mot den inloggades session). Ägar-API-regeln verifieras av PB.
+ * Returnerar en samma-origin nedladdnings-URL för en privat fil.
+ *
+ * Vi pekar INTE direkt på PB-hosten: PB:s publika URL kan serveras över http
+ * medan appen körs över https, vilket får Chrome att blockera nedladdningen
+ * som osäker (mixed-content / insecure-download blocking). I stället strömmar
+ * route-handlern `/api/files/[id]` filen server-side (server→PB-hoppet är inte
+ * ett browser-anrop) så browsern bara ser den säkra Next.js-originen.
+ *
+ * Ägar-/tenant-kontrollen görs här (snabb fel-feedback) och igen i route-
+ * handlern (faktisk åtkomstgräns).
  */
 export async function getFileDownloadUrlAction(fileId: string): Promise<FileActionResult> {
   const user = await requireUser();
@@ -87,14 +93,7 @@ export async function getFileDownloadUrlAction(fileId: string): Promise<FileActi
     return { error: 'Åtkomst nekad.' };
   }
   if (!rec.file) return { error: 'Filen saknar innehåll.' };
-  try {
-    const token = await pb.files.getToken();
-    const base = getPublicPbUrl().replace(/\/$/, '');
-    const url = `${base}/api/files/user_files/${rec.id}/${encodeURIComponent(rec.file)}?token=${encodeURIComponent(token)}&download=1`;
-    return { url };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Kunde inte skapa nedladdningslänk.' };
-  }
+  return { url: `/api/files/${encodeURIComponent(rec.id)}` };
 }
 
 export async function renameFileAction(fileId: string, filename: string): Promise<FileActionResult> {
