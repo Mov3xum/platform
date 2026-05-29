@@ -4,10 +4,14 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Icon } from './Icon';
 
+const LS_RAIL = 'movexum-rail-collapsed';
+
 type Ctx = {
   open: boolean;
   setOpen: (v: boolean) => void;
   toggle: () => void;
+  desktopCollapsed: boolean;
+  toggleDesktopCollapse: () => void;
 };
 
 const MobileRailContext = createContext<Ctx | null>(null);
@@ -17,14 +21,23 @@ export function useMobileRail(): Ctx {
     useContext(MobileRailContext) ?? {
       open: false,
       setOpen: () => {},
-      toggle: () => {}
+      toggle: () => {},
+      desktopCollapsed: false,
+      toggleDesktopCollapse: () => {}
     }
   );
 }
 
 export function MobileRailProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
+  const [desktopCollapsed, setDesktopCollapsed] = useState(false);
   const pathname = usePathname();
+
+  useEffect(() => {
+    try {
+      setDesktopCollapsed(localStorage.getItem(LS_RAIL) === 'true');
+    } catch {}
+  }, []);
 
   useEffect(() => {
     setOpen(false);
@@ -44,11 +57,25 @@ export function MobileRailProvider({ children }: { children: React.ReactNode }) 
     }
   }, [open]);
 
+  function toggleDesktopCollapse() {
+    setDesktopCollapsed((prev) => {
+      const next = !prev;
+      try { localStorage.setItem(LS_RAIL, String(next)); } catch {}
+      return next;
+    });
+  }
+
+  const classes = [
+    'mx-app',
+    open ? 'mx-rail-is-open' : '',
+    desktopCollapsed ? 'mx-rail-desktop-collapsed' : ''
+  ].filter(Boolean).join(' ');
+
   return (
     <MobileRailContext.Provider
-      value={{ open, setOpen, toggle: () => setOpen(!open) }}
+      value={{ open, setOpen, toggle: () => setOpen(!open), desktopCollapsed, toggleDesktopCollapse }}
     >
-      <div className={`mx-app${open ? ' mx-rail-is-open' : ''}`}>{children}</div>
+      <div className={classes}>{children}</div>
     </MobileRailContext.Provider>
   );
 }
