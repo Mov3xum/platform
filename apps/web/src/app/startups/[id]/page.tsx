@@ -20,6 +20,7 @@ import {
   type PhaseHistoryItem
 } from '@/components/StartupPhaseHistoryList';
 import { AllabolagSyncButton } from './AllabolagSyncButton';
+import { StartupFinancialsCharts } from './StartupFinancialsCharts';
 import { LogMeetingButton } from './LogMeetingButton';
 import {
   findIntegrationRow,
@@ -309,7 +310,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       sort: '-created',
       expand: 'workshop,assigned_by'
     }),
-    pb.collection('startup_financials').getList<FinancialsRow>(1, 5, {
+    pb.collection('startup_financials').getList<FinancialsRow>(1, 12, {
       filter: `startup = "${id}"`,
       sort: '-year'
     }),
@@ -965,6 +966,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ) : financials.items.length === 0 ? (
             <Empty>Inga årsrader registrerade än.</Empty>
           ) : (
+            <>
+            <StartupFinancialsCharts rows={financials.items} />
             <div className="overflow-x-auto rounded-2xl border border-default">
               <table className="w-full text-sm">
                 <thead className="bg-canvas-subtle text-left text-xs uppercase tracking-wider text-foreground-subtle">
@@ -1001,6 +1004,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </Section>
 
