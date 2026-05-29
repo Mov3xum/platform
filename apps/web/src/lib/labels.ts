@@ -128,12 +128,14 @@ export type ActivityKind =
   | 'tool_run'
   | 'workshop_assignment'
   | 'workshop_run'
+  | 'education_document'
   | 'integration_sync';
 export const activityKindLabels: Record<ActivityKind, string> = {
   manual: 'Manuell',
   tool_run: 'Verktygskörning',
   workshop_assignment: 'Workshoptilldelning',
   workshop_run: 'Workshop AI-körning',
+  education_document: 'Utbildningsdokument',
   integration_sync: 'Integrationssynk'
 };
 

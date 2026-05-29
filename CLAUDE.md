@@ -1870,3 +1870,45 @@ formulärsubmiten cappades → stora videos fallerade. Nu laddas media upp som
   ingen AI-inferens) → minimal risk. Ladda inte upp personuppgifter (filer nås
   via direktlänk). Bakåtkompatibelt: äldre block med base64-`video_url`/
   `image_url` renderas fortfarande.
+
+### 18.3 Utbildningsdokument tilldelade bolag
+
+Staff kan ladda upp fristående referensdokument (PDF, Excel, PowerPoint, Word)
+under `/education` → fliken **Dokument** och tilldela dem bolag med valfria
+instruktioner + deadline. Bolaget (eller staff) markerar tilldelningen som
+**slutförd** — då visas en stor bock på bolagskortet (`/startups/[id]`,
+sektionen "Tilldelade utbildningsdokument") och en rad loggas i
+aktivitetsfeeden: "**\<bolag\> slutförde \<dokument\>**".
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000088_create_education_documents.js` | Collection `education_documents` (file-fält, mime-whitelist Office/PDF) |
+| `backend/pocketbase-schema/migrations/1700000089_create_education_document_assignments.js` | Collection `education_document_assignments` (dokument↔bolag) |
+| `backend/pocketbase-schema/migrations/1700000090_extend_activity_kinds_education_document.js` | `activities.kind` += `education_document` |
+| `apps/web/src/app/api/education/documents/route.ts` | Upload-route (staff-only) → skapar `education_documents` |
+| `apps/web/src/lib/actions/education-documents.ts` | Server actions: tilldela / slutför / ångra / radera |
+| `apps/web/src/app/education/documents/page.tsx` | Hantering (staff) + slutför-vy (bolagsmedlem) |
+| `packages/shared/src/education-documents.ts` | Ren validering + `doc_kind`-resolver (+ enhetstester) |
+
+- **Datamodell.** `education_documents`: `tenant`, `title`, `description`,
+  `file` (50 MB, mime-whitelist), `doc_kind` (pdf/excel/powerpoint/word/other),
+  `mime`, `size_bytes`, `uploaded_by`, `created_by`.
+  `education_document_assignments`: `tenant`, `document` (cascadeDelete),
+  `startup` (cascadeDelete), `instructions`, `due_date`, `status`
+  (assigned/completed), `assigned_by`, `completed_by`, `completed_at`,
+  `activity`. Unikt index `(tenant, document, startup)` → idempotent tilldelning.
+- **Transport.** Som `workshop_media` (§18.2): filer laddas upp via route handler
+  (inte bunden av `serverActions.bodySizeLimit`), serveras tokenlöst
+  (`${PB}/api/files/education_documents/{id}/{filnamn}`).
+- **RBAC.** Upload + tilldela + radera + ångra = staff
+  (admin/incubator_lead/coach/mentor) via API-regel + server-action. "Slutför"
+  tillåts för staff ELLER en `startup_member` länkad till bolaget — verifieras
+  i server-actionen; PB-skrivningen använder superuser-fallback (samma mönster
+  som workshop-progressen, PB v0.23 rule-eval-bugg). `observer` är read-only.
+- **GDPR/riskklass:** minimal — staff-skapade utbildningsresurser, ingen
+  AI-inferens. Ingen PII lagras (UI varnar mot personuppgifter; filer nås via
+  direktlänk). Aktivitetstiteln innehåller bara bolagsnamn + dokumenttitel (ej
+  PII). `cascadeDelete` på `tenant`/`document`/`startup` ger art. 17-städning.
+  Kollektionerna exponerar inga whitelistade fält till AI-kontexten.
