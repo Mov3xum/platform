@@ -15,10 +15,13 @@ export function WorkshopCreateForm({ areas }: { areas: WorkshopArea[] }) {
   const [state, formAction, pending] = useActionState(createWorkshopAction, initialState);
 
   useEffect(() => {
-    if (state.workshopId) {
+    // Redirect to the new workshop on success — but hold if the cover image
+    // failed to persist so the user can read the warning instead of it being
+    // lost in the navigation.
+    if (state.workshopId && !state.warning) {
       router.push(`/education/workshops/${state.workshopId}`);
     }
-  }, [state.workshopId, router]);
+  }, [state.workshopId, state.warning, router]);
 
   const inputClass =
     'mt-1 w-full rounded-2xl border border-default bg-surface px-4 py-2.5 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
@@ -141,6 +144,19 @@ export function WorkshopCreateForm({ areas }: { areas: WorkshopArea[] }) {
         <p className="rounded-xl bg-movexum-pastell-orange px-3 py-2 text-sm text-movexum-morkorange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange">
           {state.error}
         </p>
+      ) : null}
+      {state.warning ? (
+        <div className="space-y-2 rounded-xl bg-movexum-pastell-gul px-3 py-2 text-sm text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
+          <p>{state.warning}</p>
+          {state.workshopId ? (
+            <Link
+              href={`/education/workshops/${state.workshopId}`}
+              className="inline-block font-medium underline"
+            >
+              Fortsätt till workshopen ändå →
+            </Link>
+          ) : null}
+        </div>
       ) : null}
       <button
         type="submit"
