@@ -51,7 +51,15 @@ import {
   type StartupStatus,
   type ToolRunStatus
 } from '@/lib/labels';
-import type { StartupPhase, SprintXScore } from '@platform/shared';
+import type {
+  StartupPhase,
+  SprintXScore,
+  EducationDocumentAssignment
+} from '@platform/shared';
+import { educationDocumentKindLabels } from '@platform/shared';
+import { Icon } from '@/components/proto';
+import { DocumentCompleteButton } from '@/app/education/documents/DocumentCompleteButton';
+import { pbFileUrl } from '@/lib/pb-file';
 
 interface StartupRecord {
   id: string;
@@ -247,6 +255,10 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   const user = await requireUser();
   if (!canAccessModule(user.roles, 'startups')) notFound();
   const canEdit = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
+  const canManageDocs = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
+  const isLinkedMember =
+    hasRole(user.roles, ['startup_member']) && user.linkedStartups.includes(id);
+  const canCompleteDocs = canManageDocs || isLinkedMember;
 
   let startup: StartupRecord;
   try {
@@ -270,7 +282,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     financialsResult,
     phaseHistoryResult,
     startupContactsResult,
-    tasksResult
+    tasksResult,
+    documentAssignmentsResult
   ] = await Promise.allSettled([
     pb.collection('startup_team_members').getList<TeamMemberRecord>(1, 50, {
       filter: `startup = "${id}"`,
@@ -325,7 +338,14 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     pb.collection('tasks').getList<TaskRecord>(1, 50, {
       filter: `startup = "${id}" && tenant = "${user.tenant}"`,
       sort: '-starts_at'
-    })
+    }),
+    pb
+      .collection(PB_COLLECTIONS.educationDocumentAssignments)
+      .getList<EducationDocumentAssignment>(1, 100, {
+        filter: `startup = "${id}" && tenant = "${user.tenant}"`,
+        sort: '-created',
+        expand: 'document,completed_by'
+      })
   ]);
 
   const team = teamResult.status === 'fulfilled' ? teamResult.value : emptyList;
@@ -344,6 +364,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   const startupContacts =
     startupContactsResult.status === 'fulfilled' ? startupContactsResult.value : emptyList;
   const tasks = tasksResult.status === 'fulfilled' ? tasksResult.value : emptyList;
+  const documentAssignments =
+    documentAssignmentsResult.status === 'fulfilled' ? documentAssignmentsResult.value : emptyList;
 
   // CLAUDE.md § 14: bygg en transient e-post→entitet-index för att matcha
   // Outlook-möten mot detta bolags kontakter + teammedlemmar. Aldrig sparad.
@@ -499,6 +521,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ['#notes', `Anteckningar (${notes.totalItems})`],
           ['#activities', `Aktiviteter (${activities.totalItems})`],
           ['#documents', 'Dokument'],
+          ['#edu-documents', `Utbildningsdokument (${documentAssignments.totalItems})`],
           ['#team', `Personer (${team.totalItems})`],
           ['#milestones', `Inkubatorprocess (${milestones.totalItems})`],
           ['#readiness', 'Bolagsfas & Readiness'],
@@ -732,7 +755,95 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
             <a href="#tools" className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
               Visa verktygskörningar
             </a>
+            <a href="#edu-documents" className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
+              Tilldelade dokument
+            </a>
           </div>
+        </Section>
+
+        <Section id="edu-documents" title="Tilldelade utbildningsdokument">
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-sm text-foreground-muted">
+              Dokument (PDF, Excel, PowerPoint, Word) som bolaget ska gå igenom.
+            </p>
+            {canManageDocs ? (
+              <Link
+                href="/education/documents"
+                className="inline-flex items-center rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
+              >
+                Hantera dokument
+              </Link>
+            ) : null}
+          </div>
+          {documentAssignments.items.length === 0 ? (
+            <Empty>Inga tilldelade dokument än.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {documentAssignments.items.map((assignment) => {
+                const doc = assignment.expand?.document;
+                const fileUrl = doc ? pbFileUrl('education_documents', doc.id, doc.file) : null;
+                const completed = assignment.status === 'completed';
+                return (
+                  <li key={assignment.id} className="rounded-2xl border border-default p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        {completed ? (
+                          <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron">
+                            <Icon name="check" size={30} stroke={2.4} />
+                          </span>
+                        ) : (
+                          <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-canvas-muted text-foreground-subtle">
+                            <Icon name="doc" size={22} />
+                          </span>
+                        )}
+                        <div>
+                          <p className="font-medium text-foreground">{doc?.title || 'Dokument'}</p>
+                          <p className="text-xs text-foreground-subtle">
+                            {doc ? educationDocumentKindLabels[doc.doc_kind] || 'Dokument' : 'Dokument'}
+                            {completed && assignment.completed_at
+                              ? ` · Slutförd ${new Date(assignment.completed_at).toLocaleDateString('sv-SE')}`
+                              : ''}
+                          </p>
+                          {assignment.instructions ? (
+                            <p className="mt-2 whitespace-pre-wrap text-sm text-foreground-muted">
+                              {assignment.instructions}
+                            </p>
+                          ) : null}
+                          {assignment.due_date ? (
+                            <p className="mt-1 text-xs text-foreground-subtle">
+                              Deadline:{' '}
+                              {new Date(assignment.due_date).toLocaleDateString('sv-SE')}
+                            </p>
+                          ) : null}
+                          {fileUrl ? (
+                            <a
+                              href={fileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-link hover:underline"
+                            >
+                              <Icon name="download" size={14} /> Ladda ner
+                            </a>
+                          ) : null}
+                        </div>
+                      </div>
+                      {canCompleteDocs ? (
+                        <DocumentCompleteButton
+                          assignmentId={assignment.id}
+                          completed={completed}
+                          canReopen={canManageDocs}
+                        />
+                      ) : completed ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-movexum-morkgron dark:text-movexum-gron">
+                          Slutförd
+                        </span>
+                      ) : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </Section>
 
         <Section id="team" title="Team">

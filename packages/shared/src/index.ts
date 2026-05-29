@@ -1,3 +1,5 @@
+import type { EducationDocumentKind } from './education-documents';
+
 export type Role =
   | 'admin'
   | 'incubator_lead'
@@ -617,6 +619,49 @@ export interface WorkshopAssignment {
   };
 }
 
+// ── Utbildningsdokument (PDF/Excel/PowerPoint/Word) tilldelade bolag ──────────
+// Staff laddar upp referensdokument under /education/documents och tilldelar dem
+// bolag med valfria instruktioner + deadline. Bolaget markerar "slutförd".
+
+export interface EducationDocument {
+  id: string;
+  tenant: string;
+  title: string;
+  description?: string;
+  file: string;
+  doc_kind: EducationDocumentKind;
+  mime?: string;
+  size_bytes?: number;
+  uploaded_by?: string;
+  created_by?: string;
+  created: string;
+  updated: string;
+}
+
+export type EducationDocumentAssignmentStatus = 'assigned' | 'completed';
+
+export interface EducationDocumentAssignment {
+  id: string;
+  tenant: string;
+  document: string;
+  startup: string;
+  instructions?: string;
+  due_date?: string;
+  status: EducationDocumentAssignmentStatus;
+  assigned_by?: string;
+  completed_by?: string;
+  completed_at?: string;
+  activity?: string;
+  created: string;
+  updated: string;
+  expand?: {
+    document?: EducationDocument;
+    startup?: { id: string; name: string };
+    assigned_by?: { id: string; display_name?: string; email: string };
+    completed_by?: { id: string; display_name?: string; email: string };
+  };
+}
+
 export type WorkshopRunStatus = 'queued' | 'running' | 'succeeded' | 'failed';
 
 export interface WorkshopRun {
@@ -1181,3 +1226,4 @@ export { movexumPalette, typography as brandTypography } from './design/tokens';
 
 // ─── Workshop/utbildning-hjälpare (ren logik, enhetstestad) ──────────────────
 export * from './workshop';
+export * from './education-documents';
