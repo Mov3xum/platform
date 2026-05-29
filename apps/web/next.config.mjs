@@ -36,6 +36,10 @@ const nextConfig = {
   // Produces a minimal runtime build at .next/standalone with only the
   // node_modules actually used. Cuts the runtime Docker image by ~10x.
   output: 'standalone',
+  // @react-pdf/renderer drar in yoga-layout (wasm) + egna dynamiska require:s
+  // som inte ska webpack-bundlas server-side — håll paketet externt så det
+  // körs från node_modules (och file-tracas korrekt till standalone-outputen).
+  serverExternalPackages: ['@react-pdf/renderer'],
   // For monorepo: tell Next.js the workspace root so file-tracing picks up
   // packages/shared and the right yarn.lock.
   outputFileTracingRoot: join(__dirname, '..', '..'),

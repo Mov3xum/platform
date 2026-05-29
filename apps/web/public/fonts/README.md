@@ -26,10 +26,10 @@ Self-hosted variable fonts (WOFF2) – inga CDN-anrop.
 ## TTF/OTF för PDF-inbäddning (genererade dokument) — **valfritt men rekommenderat**
 
 WOFF2-filerna ovan används av webben. PDF-renderaren
-(`apps/web/src/lib/documents/render-pdf.ts`) bäddar in brand-typsnitt via
-`@pdf-lib/fontkit`, men **fontkit kan inte läsa WOFF2** (saknar brotli). Lägg
-därför till statiska TTF/OTF-varianter här för att få Sora/Nunito (och korrekta
-svenska tecken) i genererade PDF:er:
+(`apps/web/src/lib/documents/render-pdf.ts`, `@react-pdf/renderer`) bäddar in
+brand-typsnitt via `Font.register`, men dess fontkit **kan inte läsa WOFF2**
+(saknar brotli). Lägg därför till statiska TTF/OTF-varianter här för att få
+Sora/Nunito (och korrekta svenska tecken) i genererade PDF:er:
 
 | Fil | Typsnitt | Roll i PDF |
 | --- | --- | --- |

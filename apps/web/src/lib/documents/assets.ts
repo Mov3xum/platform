@@ -35,6 +35,18 @@ async function readFirst(rel: string): Promise<Buffer | null> {
   return null;
 }
 
+async function resolveFirst(rel: string): Promise<string | null> {
+  for (const p of candidates(rel)) {
+    try {
+      await fs.access(p);
+      return p;
+    } catch {
+      /* prova nästa kandidat */
+    }
+  }
+  return null;
+}
+
 export type LogoVariant = 'light' | 'dark';
 
 const logoCache = new Map<LogoVariant, Buffer | null>();
@@ -52,31 +64,37 @@ export async function loadLogoPng(variant: LogoVariant): Promise<Buffer | null> 
   return buf;
 }
 
-export interface PdfFontSet {
+/** Absolut sökväg till en wordmark-PNG (eller null). React-PDF läser <Image src> från disk. */
+export async function resolveLogoPath(variant: LogoVariant): Promise<string | null> {
+  return resolveFirst(`brand/movexum-wordmark-${variant}.png`);
+}
+
+export interface PdfFontPaths {
   /** Nunito Sans Regular — brödtext. */
-  regular: Buffer;
+  regular: string;
   /** Nunito Sans Bold — fetstil i brödtext. */
-  bold: Buffer;
+  bold: string;
   /** Sora SemiBold — rubriker. */
-  heading: Buffer;
+  heading: string;
 }
 
 let pdfFontsTried = false;
-let pdfFontsCache: PdfFontSet | null = null;
+let pdfFontsCache: PdfFontPaths | null = null;
 
 /**
- * TTF/OTF-typsnitt för PDF-inbäddning. pdf-lib/fontkit kan INTE läsa woff2
- * (saknar brotli), så de woff2-filer vi self-hostar för webben fungerar inte
- * här — separata .ttf/.otf krävs. Saknas de faller PDF:en tillbaka på
- * Helvetica (fortfarande snygg, men inte brand-typsnittet).
+ * Sökvägar till TTF/OTF-typsnitt för PDF-inbäddning (react-pdf registrerar
+ * typsnitt från fil). react-pdf/fontkit kan INTE läsa woff2 (saknar brotli),
+ * så de woff2-filer vi self-hostar för webben fungerar inte här — separata
+ * .ttf/.otf krävs. Saknas de faller PDF:en tillbaka på Helvetica (fortfarande
+ * snygg, men inte brand-typsnittet).
  */
-export async function loadPdfFonts(): Promise<PdfFontSet | null> {
+export async function resolvePdfFontPaths(): Promise<PdfFontPaths | null> {
   if (pdfFontsTried) return pdfFontsCache;
   pdfFontsTried = true;
   const [regular, bold, heading] = await Promise.all([
-    readFirst('fonts/NunitoSans-Regular.ttf'),
-    readFirst('fonts/NunitoSans-Bold.ttf'),
-    readFirst('fonts/Sora-SemiBold.ttf')
+    resolveFirst('fonts/NunitoSans-Regular.ttf'),
+    resolveFirst('fonts/NunitoSans-Bold.ttf'),
+    resolveFirst('fonts/Sora-SemiBold.ttf')
   ]);
   if (regular && bold && heading) {
     pdfFontsCache = { regular, bold, heading };
