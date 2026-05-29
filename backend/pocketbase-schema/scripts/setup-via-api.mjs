@@ -824,6 +824,22 @@ await patchActivitiesCollection([
   { name: 'tool_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
 ]);
 
+// Cover-image file field for education (workshops + workshop_areas). Mirrors
+// migrations 1700000087/1700000088 so the API-bootstrap path provisions the
+// same `image` field as the Docker/migration path — otherwise PB silently
+// ignores the uploaded image and the upload fails with the
+// "redeploy PocketBase" warning (see lib/actions/workshops.ts).
+// Non-protected file field (no token) — same pattern as tenant logos/avatars.
+const EDUCATION_IMAGE_FIELD = {
+  name: 'image',
+  type: 'file',
+  required: false,
+  maxSelect: 1,
+  maxSize: 5242880, // 5 MB
+  mimeTypes: ['image/png', 'image/jpeg', 'image/webp'],
+  thumbs: ['800x450', '400x300']
+};
+
 // 14.5 workshop_areas (pre-create for workshops.area relation) -------------
 const WORKSHOP_AREAS_CREATE_RULE =
   '@request.auth.id != "" && @request.auth.tenant != "" && (' +
@@ -842,7 +858,8 @@ await ensureCollection({
   type: 'base',
   fields: [
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
-    { name: 'name', type: 'text', required: true, min: 1, max: 120 }
+    { name: 'name', type: 'text', required: true, min: 1, max: 120 },
+    { ...EDUCATION_IMAGE_FIELD }
   ],
   indexes: [
     'CREATE UNIQUE INDEX idx_workshop_areas_tenant_name ON workshop_areas (tenant, name)'
@@ -876,7 +893,8 @@ await ensureCollection({
     { name: 'active', type: 'bool', required: false },
     { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     // area-fältet (relation till workshop_areas),
-    { name: 'area', type: 'relation', required: false, collectionId: 'workshop_areas_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+    { name: 'area', type: 'relation', required: false, collectionId: 'workshop_areas_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { ...EDUCATION_IMAGE_FIELD }
   ],
   indexes: [
     'CREATE UNIQUE INDEX idx_workshops_tenant_key ON workshops (tenant, key)',
@@ -1862,6 +1880,14 @@ const AUTODATE_FIELDS = [
 await patchCollection('chat_threads', AUTODATE_FIELDS);
 await patchCollection('deep_jobs', AUTODATE_FIELDS);
 await patchCollection('user_files', AUTODATE_FIELDS);
+
+// Migration 1700000087/1700000088: cover-image `image` field på workshops +
+// workshop_areas. ensureCollection ovan lägger till fältet på NYA installs;
+// patchCollection lägger till det på BEFINTLIGA collections (idempotent på
+// fältnamn). Utan detta sväljer PB den uppladdade bilden tyst och
+// area/workshop-omslag kan aldrig sparas via API-bootstrap-vägen.
+await patchCollection('workshops', [{ ...EDUCATION_IMAGE_FIELD }]);
+await patchCollection('workshop_areas', [{ ...EDUCATION_IMAGE_FIELD }]);
 
 // =========================================================================
 // 18d. Field-patches på befintliga collections (porterade från migrations
