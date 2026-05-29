@@ -103,6 +103,38 @@ function colLetterToIndex(col: string): number {
   return n;
 }
 
+// ── Hjälpare för den normaliserade (lång-format) layouten ──────────
+// Filen "Movexum bolagslista med år" har tre flikar: en "Bolag"-flik
+// (en rad per bolag) och en "Ekonomi per år"-flik (en rad per
+// bolag × år) som pekar tillbaka på bolaget via Org.nr/bolagsnamn,
+// samt en bred denormaliserad flik (hanteras av parseBolagslista).
+
+const HEADER_YEAR = 'år';
+
+// Mappar varje header-cell (normaliserad text) → dess kolumn-letter.
+function headerColumnMap(headerRow: Row): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const [col, val] of Object.entries(headerRow)) {
+    const n = norm(val);
+    if (n && !m.has(n)) m.set(n, col);
+  }
+  return m;
+}
+
+// Letar upp den första raden (av de första 10) där alla angivna
+// normaliserade headers finns. Returnerar radindex eller -1.
+function findHeaderRow(rows: Row[], required: string[]): number {
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
+    const cells = Object.values(rows[i]).map(norm);
+    if (required.every((h) => cells.includes(h))) return i;
+  }
+  return -1;
+}
+
+function emptyResult(warnings: string[], lastYear: number): BolagslistaParseResult {
+  return { companies: [], warnings, yearRange: { min: lastYear, max: lastYear } };
+}
+
 function detectColumnMap(headerRow: Row, lastYear: number): ColumnMap | null {
   // Sortera kolumner alfabetiskt enligt Excel-ordning (A < B < ... < Z < AA).
   const cols = Object.keys(headerRow).sort((a, b) => {
@@ -341,4 +373,239 @@ export function parseBolagslista(
     warnings,
     yearRange: { min: minYear, max: maxYear }
   };
+}
+
+// Naturlig nyckel för ett bolag: giltigt org-nr om sådant finns,
+// annars bolagsnamnet. Enskilda firmor i exporten saknar riktigt
+// org-nr (cellen innehåller t.ex. "Enskild firma") och flera delar
+// samma platshållare — därför MÅSTE de särskiljas på namn, annars
+// kollapsar de till samma post.
+function companyKey(orgNr: string | null, name: string): string {
+  return orgNr ? `org:${orgNr}` : `name:${name.trim().toLowerCase()}`;
+}
+
+interface NormalizedEntry {
+  startup: StartupRegisterRow;
+  financials: FinancialRow[];
+  finByYear: Map<number, FinancialRow>;
+  rowIndex: number;
+}
+
+// Parser för den normaliserade layouten: "Bolag"-fliken ger
+// parent-raderna, "Ekonomi per år"-fliken ger barn-raderna (en per
+// bolag × år). Relationen följer med genom att varje ekonomirad
+// matchas mot sitt bolag på org-nr (annars namn) — inga "flytande
+// öar". Bolag som saknas i Bolag-fliken men förekommer i
+// ekonomidatan skapas ändå (defensivt mot orphan-rader).
+export function parseBolagslistaNormalized(
+  bolagRows: Row[],
+  ekonomiRows: Row[]
+): BolagslistaParseResult {
+  const warnings: string[] = [];
+  const byKey = new Map<string, NormalizedEntry>();
+
+  // ── Steg 1: bolag (parents) ur Bolag-fliken ──────────────────────
+  const bHeaderIdx = findHeaderRow(bolagRows, [HEADER_BOLAG, HEADER_ORG]);
+  if (bHeaderIdx >= 0) {
+    const m = headerColumnMap(bolagRows[bHeaderIdx]);
+    const colBolag = m.get(HEADER_BOLAG)!;
+    const colOrg = m.get(HEADER_ORG)!;
+    const colKommun = m.get(HEADER_KOMMUN) ?? null;
+    const colStatus = m.get(HEADER_STATUS) ?? null;
+    const colIntag = m.get(HEADER_INTAG) ?? null;
+    const colAvslut = m.get(HEADER_AVSLUT) ?? null;
+
+    for (let i = bHeaderIdx + 1; i < bolagRows.length; i++) {
+      const r = bolagRows[i];
+      const name = (r[colBolag] ?? '').trim();
+      if (!name) continue;
+
+      const orgRaw = (r[colOrg] ?? '').trim();
+      let org: string | null = null;
+      if (orgRaw && ORG_NR_PATTERN.test(orgRaw)) {
+        org = orgRaw;
+      } else if (orgRaw) {
+        warnings.push(
+          `Rad ${i + 1} (${name}): inget giltigt org-nr ("${orgRaw}") — kopplas via bolagsnamn`
+        );
+      } else {
+        warnings.push(`Rad ${i + 1} (${name}): saknar org-nr — kopplas via bolagsnamn`);
+      }
+
+      const statusRaw = colStatus ? (r[colStatus] ?? '').trim() : '';
+      const { bolag: bolagStatus, warn } = parseStatusValue(statusRaw);
+      if (warn) warnings.push(`Rad ${i + 1} (${name}): ${warn}`);
+      const intagsdatum = colIntag ? parseDateCell(r[colIntag] ?? '') : null;
+      const avslutsdatum = colAvslut ? parseDateCell(r[colAvslut] ?? '') : null;
+
+      const key = companyKey(org, name);
+      if (byKey.has(key)) {
+        warnings.push(`Rad ${i + 1} (${name}): dubblettrad i Bolag-fliken — slås ihop`);
+        continue;
+      }
+      byKey.set(key, {
+        startup: {
+          name,
+          org_nr: org,
+          kommun: colKommun ? (r[colKommun] ?? '').trim() || null : null,
+          bolag_status: bolagStatus,
+          status: deriveStartupStatus(bolagStatus, avslutsdatum),
+          intagsdatum,
+          avslutsdatum
+        },
+        financials: [],
+        finByYear: new Map(),
+        rowIndex: i + 1
+      });
+    }
+  } else {
+    warnings.push('Hittade inte Bolag-flikens headers (Bolag/Org.nr) — bolag härleds ur ekonomidatan.');
+  }
+
+  // ── Steg 2: ekonomi (children) ur Ekonomi per år-fliken ──────────
+  const eHeaderIdx = findHeaderRow(ekonomiRows, [HEADER_ORG, HEADER_YEAR]);
+  if (eHeaderIdx < 0) {
+    warnings.push('Hittade inte "Ekonomi per år"-flikens headers (Org.nr/År).');
+    return finalizeNormalized(byKey, warnings);
+  }
+
+  const em = headerColumnMap(ekonomiRows[eHeaderIdx]);
+  // Tolerant matchning: ekonomifliken har "Omsättning (tkr)" medan
+  // den breda fliken har "Omsättning". Exakt match först, annars prefix.
+  const findCol = (exact: string, prefix: string): string | null => {
+    if (em.has(exact)) return em.get(exact)!;
+    for (const [h, c] of em) if (h.startsWith(prefix)) return c;
+    return null;
+  };
+  const eBolag = em.get(HEADER_BOLAG) ?? null;
+  const eOrg = em.get(HEADER_ORG)!;
+  const eKommun = em.get(HEADER_KOMMUN) ?? null;
+  const eYear = em.get(HEADER_YEAR)!;
+  const eEmpl = findCol(HEADER_EMPL, HEADER_EMPL);
+  const eRev = findCol('omsättning (tkr)', HEADER_REVENUE);
+  const ePers = findCol('personalkostnad (tkr)', HEADER_PERSONNEL);
+  const eTax = findCol('bolagsskatt (tkr)', HEADER_TAX);
+
+  for (let i = eHeaderIdx + 1; i < ekonomiRows.length; i++) {
+    const r = ekonomiRows[i];
+    const name = eBolag ? (r[eBolag] ?? '').trim() : '';
+    const orgRaw = (r[eOrg] ?? '').trim();
+    const year = parseInt((r[eYear] ?? '').trim(), 10);
+    if (!Number.isFinite(year) || year < 1900 || year > 2100) continue;
+    const org = orgRaw && ORG_NR_PATTERN.test(orgRaw) ? orgRaw : null;
+    if (!org && !name) continue;
+
+    const key = companyKey(org, name);
+    let entry = byKey.get(key);
+    if (!entry) {
+      // Orphan: bolaget fanns inte i Bolag-fliken. Skapa ändå så
+      // ekonomiraden inte blir en flytande ö.
+      entry = {
+        startup: {
+          name: name || orgRaw || 'Okänt bolag',
+          org_nr: org,
+          kommun: eKommun ? (r[eKommun] ?? '').trim() || null : null,
+          bolag_status: null,
+          status: 'active',
+          intagsdatum: null,
+          avslutsdatum: null
+        },
+        financials: [],
+        finByYear: new Map(),
+        rowIndex: i + 1
+      };
+      byKey.set(key, entry);
+      warnings.push(
+        `Ekonomi-rad ${i + 1} (${name || orgRaw}): bolaget saknades i Bolag-fliken — skapas ur ekonomidatan`
+      );
+    }
+
+    const employees = parseNumberCell(eEmpl ? r[eEmpl] ?? '' : '');
+    const revenueTkr = parseNumberCell(eRev ? r[eRev] ?? '' : '');
+    const personnelTkr = parseNumberCell(ePers ? r[ePers] ?? '' : '');
+    const taxTkr = parseNumberCell(eTax ? r[eTax] ?? '' : '');
+    // Skippa tomma/noll-rader (samma princip som breda parsern).
+    const hasAny =
+      (employees !== null && employees !== 0) ||
+      (revenueTkr !== null && revenueTkr !== 0) ||
+      (personnelTkr !== null && personnelTkr !== 0) ||
+      (taxTkr !== null && taxTkr !== 0);
+    if (!hasAny) continue;
+
+    const fin: FinancialRow = {
+      year,
+      employees,
+      revenue_sek: revenueTkr !== null ? Math.round(revenueTkr * 1000) : null,
+      personnel_cost_sek: personnelTkr !== null ? Math.round(personnelTkr * 1000) : null,
+      corporate_tax_sek: taxTkr !== null ? Math.round(taxTkr * 1000) : null
+    };
+
+    const prev = entry.finByYear.get(year);
+    if (prev) {
+      warnings.push(
+        `Ekonomi-rad ${i + 1} (${name || orgRaw}): dubbel post för år ${year} — senaste vinner`
+      );
+      Object.assign(prev, fin);
+    } else {
+      entry.finByYear.set(year, fin);
+      entry.financials.push(fin);
+    }
+  }
+
+  return finalizeNormalized(byKey, warnings);
+}
+
+function finalizeNormalized(
+  byKey: Map<string, NormalizedEntry>,
+  warnings: string[]
+): BolagslistaParseResult {
+  const companies: CompanyImport[] = [];
+  let min = Infinity;
+  let max = -Infinity;
+  for (const e of byKey.values()) {
+    companies.push({ rowIndex: e.rowIndex, startup: e.startup, financials: e.financials });
+    for (const f of e.financials) {
+      if (f.year < min) min = f.year;
+      if (f.year > max) max = f.year;
+    }
+  }
+  if (!Number.isFinite(min)) {
+    min = 0;
+    max = 0;
+  }
+  return { companies, warnings, yearRange: { min, max } };
+}
+
+// Letar upp Bolag- + Ekonomi per år-flikarna i en parsad arbetsbok.
+// Returnerar null om den normaliserade layouten inte känns igen
+// (då faller anroparen tillbaka på den breda parsern).
+export function detectNormalizedSheets(
+  sheets: Map<string, Row[]>
+): { bolag: Row[]; ekonomi: Row[] } | null {
+  let ekonomi: Row[] | null = null;
+  let bolag: Row[] | null = null;
+  let bolagNamed = false;
+
+  for (const [name, rows] of sheets) {
+    const hIdx = findHeaderRow(rows, [HEADER_BOLAG, HEADER_ORG]);
+    if (hIdx < 0) continue;
+    const m = headerColumnMap(rows[hIdx]);
+    const hasYear = m.has(HEADER_YEAR);
+    const hasEmpl = [...m.keys()].some((h) => h.startsWith(HEADER_EMPL));
+
+    if (hasYear && hasEmpl) {
+      // Lång-format ekonomiflik (en rad per bolag × år).
+      ekonomi = rows;
+    } else if (!hasYear && !hasEmpl) {
+      // Smal Bolag-flik (inga ekonomikolumner, ingen årskolumn) —
+      // särskiljs så att den breda fliken inte väljs av misstag.
+      if (!bolag || (!bolagNamed && norm(name) === HEADER_BOLAG)) {
+        bolag = rows;
+        bolagNamed = norm(name) === HEADER_BOLAG;
+      }
+    }
+  }
+
+  if (!ekonomi) return null;
+  return { bolag: bolag ?? [], ekonomi };
 }
