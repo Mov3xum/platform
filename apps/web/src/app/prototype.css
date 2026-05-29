@@ -169,9 +169,8 @@ html.dark {
 .mx-rail-head {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 14px 16px 12px;
-  border-bottom: 1px solid var(--mx-rail-divider);
+  justify-content: flex-start;
+  padding: 24px 20px 20px;
 }
 
 .mx-rail-brand {
@@ -311,7 +310,6 @@ html.dark {
   gap: 12px;
   padding: 0 20px;
   background: var(--mx-canvas);
-  border-bottom: 1px solid var(--mx-rail-divider);
   position: sticky;
   top: 0;
   z-index: 20;
@@ -944,7 +942,7 @@ body.mx-rail-locked {
   }
 
   .mx-rail-head {
-    padding: 16px 16px;
+    padding: 20px 18px;
   }
 
   .mx-rail-foot {
@@ -1284,7 +1282,6 @@ html.dark .mx-field select:focus {
 /* Topbar smälter med canvas — ingen blur, ingen lila ton */
 html.dark .mx-topbar {
   background: var(--mx-canvas);
-  border-bottom-color: var(--mx-rail-divider);
 }
 
 /* Status chips — fortfarande färgade men med dämpad bakgrund */
@@ -1331,8 +1328,7 @@ html.dark .mx-page-head h1 {
    ============================================================ */
 
 .mx-switcher {
-  padding: 8px 8px 12px;
-  border-bottom: 1px solid var(--mx-rail-divider);
+  padding: 4px 10px 16px;
 }
 
 .mx-switcher-btn {
