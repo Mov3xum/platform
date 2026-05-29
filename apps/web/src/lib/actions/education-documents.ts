@@ -7,6 +7,11 @@ import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { escFilter } from '@/lib/pb-filter';
+import {
+  createCollaboratorTasks,
+  createAssignmentMeeting,
+  type AssignmentCollabOptions
+} from '@/lib/assignments/collaboration';
 import type {
   EducationDocument,
   EducationDocumentAssignment,
@@ -60,7 +65,8 @@ export async function assignDocumentToStartupAction(
   documentId: string,
   startupId: string,
   instructions?: string,
-  dueDate?: string
+  dueDate?: string,
+  options?: AssignmentCollabOptions
 ): Promise<DocumentActionState> {
   const user = await getCurrentUser();
   if (!user) return { error: 'Ej inloggad.' };
@@ -78,11 +84,41 @@ export async function assignDocumentToStartupAction(
   }
   if (String(doc.tenant) !== user.tenant) return { error: 'Åtkomst nekad.' };
 
+  let startupName = 'bolaget';
   try {
-    const startup = await pb.collection('startups').getOne<{ tenant: string }>(startupId);
+    const startup = await pb.collection('startups').getOne<{ tenant: string; name?: string }>(startupId);
     if (String(startup.tenant) !== user.tenant) return { error: 'Åtkomst nekad.' };
+    startupName = startup.name || startupName;
   } catch {
     return { error: 'Bolaget hittades inte.' };
+  }
+
+  const collaboratorIds = options?.collaboratorIds ?? [];
+
+  // Samarbete (CLAUDE.md § 18.4): medarbetar-tasks + ev. möte. Best-effort,
+  // körs före upserten så vi kan lagra collaborators/meeting på raden.
+  let linkedCollaborators: string[] = [];
+  if (collaboratorIds.length > 0) {
+    linkedCollaborators = await createCollaboratorTasks({
+      pb,
+      tenantId: user.tenant,
+      startupId,
+      collaboratorIds,
+      description: `Utbildningsdokument: ${doc.title} – ${startupName}`,
+      dueDate
+    });
+  }
+  let meetingId: string | null = null;
+  if (options?.meeting?.title?.trim()) {
+    meetingId = await createAssignmentMeeting({
+      pb,
+      tenantId: user.tenant,
+      startupId,
+      organizerId: user.id,
+      collaboratorIds,
+      meeting: options.meeting,
+      eventType: 'other'
+    });
   }
 
   const payload: Record<string, unknown> = {
@@ -93,6 +129,8 @@ export async function assignDocumentToStartupAction(
     due_date: dueDate || '',
     assigned_by: user.id
   };
+  if (linkedCollaborators.length > 0) payload.collaborators = linkedCollaborators;
+  if (meetingId) payload.meeting = meetingId;
 
   try {
     // Finns redan en tilldelning? Uppdatera den (idempotent).
@@ -136,6 +174,8 @@ export async function assignDocumentToStartupAction(
   }
 
   revalidatePath('/education/documents');
+  revalidatePath('/pagaende');
+  revalidatePath('/inkorg');
   revalidatePath(`/startups/${startupId}`);
   return { ok: true };
 }

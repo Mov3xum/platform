@@ -1403,6 +1403,7 @@ await ensureCollection({
     { name: 'organization', type: 'text', required: false, max: 200 },
     { name: 'stage', type: 'select', required: true, maxSelect: 1, values: ['signup', 'attended', 'meeting', 'application', 'admitted'] },
     { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'user', type: 'relation', required: false, collectionId: 'users', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'notes', type: 'text', required: false, max: 1000 }
   ],
   indexes: [

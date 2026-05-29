@@ -236,6 +236,7 @@ interface WorkshopAssignmentRecord {
   id: string;
   status: 'planned' | 'in_progress' | 'done';
   due_date?: string;
+  instructions?: string;
   takeaway_json?: {
     summary?: string;
     keyInsights?: string;
@@ -247,6 +248,8 @@ interface WorkshopAssignmentRecord {
   expand?: {
     workshop?: { id: string; title: string; version?: string };
     assigned_by?: { id: string; display_name?: string; email: string };
+    collaborators?: Array<{ id: string; display_name?: string; email: string }>;
+    meeting?: { id: string; name: string; starts_at: string; location?: string };
   };
 }
 
@@ -320,7 +323,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     pb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopAssignmentRecord>(1, 50, {
       filter: `startup = "${id}" && tenant = "${user.tenant}"`,
       sort: '-created',
-      expand: 'workshop,assigned_by'
+      expand: 'workshop,assigned_by,collaborators,meeting'
     }),
     pb.collection('startup_financials').getList<FinancialsRow>(1, 5, {
       filter: `startup = "${id}"`,
@@ -344,7 +347,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       .getList<EducationDocumentAssignment>(1, 100, {
         filter: `startup = "${id}" && tenant = "${user.tenant}"`,
         sort: '-created',
-        expand: 'document,completed_by'
+        expand: 'document,completed_by,collaborators,meeting'
       })
   ]);
 
@@ -815,6 +818,20 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                               {new Date(assignment.due_date).toLocaleDateString('sv-SE')}
                             </p>
                           ) : null}
+                          {(assignment.expand?.collaborators?.length ?? 0) > 0 ? (
+                            <p className="mt-1 text-xs text-foreground-subtle">
+                              Resurser:{' '}
+                              {assignment.expand?.collaborators
+                                ?.map((c) => c.display_name || c.email)
+                                .join(', ')}
+                            </p>
+                          ) : null}
+                          {assignment.expand?.meeting ? (
+                            <p className="mt-1 text-xs text-foreground-subtle">
+                              📅 Möte: {assignment.expand.meeting.name} ·{' '}
+                              {new Date(assignment.expand.meeting.starts_at).toLocaleString('sv-SE')}
+                            </p>
+                          ) : null}
                           {fileUrl ? (
                             <a
                               href={fileUrl}
@@ -1218,6 +1235,25 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                         {assignment.due_date ? (
                           <p className="text-xs text-foreground-subtle">
                             Deadline: {new Date(assignment.due_date).toLocaleDateString('sv-SE')}
+                          </p>
+                        ) : null}
+                        {assignment.instructions ? (
+                          <p className="mt-1 whitespace-pre-wrap text-xs text-foreground-muted">
+                            {assignment.instructions}
+                          </p>
+                        ) : null}
+                        {(assignment.expand?.collaborators?.length ?? 0) > 0 ? (
+                          <p className="mt-1 text-xs text-foreground-subtle">
+                            Resurser:{' '}
+                            {assignment.expand?.collaborators
+                              ?.map((c) => c.display_name || c.email)
+                              .join(', ')}
+                          </p>
+                        ) : null}
+                        {assignment.expand?.meeting ? (
+                          <p className="mt-1 text-xs text-foreground-subtle">
+                            📅 Möte: {assignment.expand.meeting.name} ·{' '}
+                            {new Date(assignment.expand.meeting.starts_at).toLocaleString('sv-SE')}
                           </p>
                         ) : null}
                       </div>
