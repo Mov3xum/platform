@@ -29,7 +29,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sonner": "^1.7.2",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^2.6.0",
+    "echarts": "^5.5.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
