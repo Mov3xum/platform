@@ -29,11 +29,20 @@ function StatusMessage({ state }: { state: WorkshopAreaActionState }) {
       </p>
     );
   }
-  if (state.success) {
+  if (state.success || state.warning) {
     return (
-      <p className="rounded-xl bg-movexum-pastell-gron px-3 py-2 text-sm text-movexum-morkgron dark:bg-movexum-morkgron/35 dark:text-movexum-pastell-gron">
-        {state.success}
-      </p>
+      <div className="space-y-2">
+        {state.success ? (
+          <p className="rounded-xl bg-movexum-pastell-gron px-3 py-2 text-sm text-movexum-morkgron dark:bg-movexum-morkgron/35 dark:text-movexum-pastell-gron">
+            {state.success}
+          </p>
+        ) : null}
+        {state.warning ? (
+          <p className="rounded-xl bg-movexum-pastell-gul px-3 py-2 text-sm text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
+            {state.warning}
+          </p>
+        ) : null}
+      </div>
     );
   }
   return null;

@@ -70,17 +70,31 @@ function readImageFile(formData: FormData): File | null {
   return f instanceof File && f.size > 0 ? f : null;
 }
 
+// Result of a cover-image write. `not_persisted` means PB accepted the write
+// but the value didn't stick — almost always because the `image` file field
+// is missing on the collection (the PocketBase backend hasn't been redeployed
+// to apply migrations 1700000087/1700000088). Surfaced to the user so an
+// upload that silently does nothing becomes an actionable message instead.
+type ImageUpdateResult = 'noop' | 'ok' | 'not_persisted' | 'error';
+
+// Human-facing warning for the `not_persisted` / `error` cases.
+const IMAGE_NOT_SAVED_WARNING =
+  'Bilden kunde inte sparas. Uppdatera/omdistribuera PocketBase-backenden så att bildfältet finns (migration 1700000087/1700000088).';
+
 // Best-effort cover-image write for workshops/areas. Runs after the record has
 // been created/updated, so a failure here never duplicates the parent record.
 // Tries the caller's client first, then falls back to superuser (PB v0.23
-// per-request rule-eval bug, same pattern as the create/update paths).
+// per-request rule-eval bug, same pattern as the create/update paths). After an
+// upload we re-read the record to verify the file actually persisted — PB
+// silently ignores writes to a non-existent field, which would otherwise leave
+// the user staring at a placeholder with no error anywhere.
 async function applyImageUpdate(
   client: PocketBase,
   collection: string,
   recordId: string,
   imageFile: File | null,
   removeImage: boolean
-): Promise<void> {
+): Promise<ImageUpdateResult> {
   let payload: FormData | Record<string, unknown> | null = null;
   if (imageFile) {
     const fd = new FormData();
@@ -95,32 +109,68 @@ async function applyImageUpdate(
   } else if (removeImage) {
     payload = { image: null };
   }
-  if (!payload) return;
+  if (!payload) return 'noop';
 
+  // The client that actually wrote (used for the verify read-back below).
+  let writeClient: PocketBase | null = null;
   try {
     await client.collection(collection).update(recordId, payload);
-    return;
+    writeClient = client;
   } catch (err) {
     const su = await getSuperuserPb();
     if (su.ok) {
       try {
         await su.pb.collection(collection).update(recordId, payload);
-        return;
+        writeClient = su.pb;
       } catch (fallbackErr) {
         console.error('[workshops] image update fallback failed', {
           collection,
           recordId,
           message: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr ?? '')
         });
-        return;
+        return 'error';
       }
+    } else {
+      console.error('[workshops] image update failed', {
+        collection,
+        recordId,
+        message: err instanceof Error ? err.message : String(err ?? '')
+      });
+      return 'error';
     }
-    console.error('[workshops] image update failed', {
+  }
+
+  // Only an upload needs verification; a removal (image: null) leaving the field
+  // empty is the intended outcome. (`writeClient` is always set here — we
+  // return early on every write failure above — the guard satisfies the type.)
+  if (!imageFile || !writeClient) return 'ok';
+
+  try {
+    const rec = await writeClient
+      .collection(collection)
+      .getOne<{ image?: string }>(recordId, { fields: 'id,image' });
+    if (!rec.image) {
+      console.error(
+        '[workshops] image not persisted after upload — the "image" field is likely missing on the collection. Redeploy the PocketBase backend so migration 1700000087/1700000088 applies.',
+        { collection, recordId }
+      );
+      return 'not_persisted';
+    }
+  } catch (verifyErr) {
+    // Verification is best-effort: don't fail the whole flow if the read-back
+    // itself errors (the write may well have succeeded).
+    console.warn('[workshops] image persistence verification skipped', {
       collection,
       recordId,
-      message: err instanceof Error ? err.message : String(err ?? '')
+      message: verifyErr instanceof Error ? verifyErr.message : String(verifyErr ?? '')
     });
   }
+  return 'ok';
+}
+
+// Maps an image-write result to a user-facing warning (or undefined when fine).
+function imageWarning(result: ImageUpdateResult): string | undefined {
+  return result === 'not_persisted' || result === 'error' ? IMAGE_NOT_SAVED_WARNING : undefined;
 }
 
 function detectCreateRuleFailure(
@@ -213,6 +263,7 @@ function toCreateWorkshopError(err: unknown): string {
 
 export type WorkshopActionState = {
   error?: string;
+  warning?: string;
   assignmentId?: string;
   workshopId?: string;
   runId?: string;
@@ -221,6 +272,7 @@ export type WorkshopActionState = {
 
 export type WorkshopAreaActionState = {
   error?: string;
+  warning?: string;
   success?: string;
 };
 
@@ -344,10 +396,10 @@ export async function createWorkshopAction(
 
   try {
     const record = await pb.collection(PB_COLLECTIONS.workshops).create(payload);
-    await applyImageUpdate(pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
+    const imgResult = await applyImageUpdate(pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
     revalidatePath('/education');
     revalidatePath('/education/workshops');
-    return { workshopId: String(record.id) };
+    return { workshopId: String(record.id), warning: imageWarning(imgResult) };
   } catch (err) {
     const pbError = toPbErrorLike(err);
     const message = String(err instanceof Error ? err.message : '');
@@ -363,10 +415,10 @@ export async function createWorkshopAction(
       if (suResult.ok) {
         try {
           const record = await suResult.pb.collection(PB_COLLECTIONS.workshops).create(payload);
-          await applyImageUpdate(suResult.pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
+          const imgResult = await applyImageUpdate(suResult.pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
           revalidatePath('/education');
           revalidatePath('/education/workshops');
-          return { workshopId: String(record.id) };
+          return { workshopId: String(record.id), warning: imageWarning(imgResult) };
         } catch (fallbackErr) {
           logCreateFailure('workshop create fallback (superuser) failed', fallbackErr);
           return { error: toCreateWorkshopError(fallbackErr) };
@@ -461,9 +513,9 @@ export async function updateWorkshopAction(
 
   try {
     await pb.collection(PB_COLLECTIONS.workshops).update(workshopId, payload);
-    await applyImageUpdate(pb, PB_COLLECTIONS.workshops, workshopId, imageFile, removeImage);
+    const imgResult = await applyImageUpdate(pb, PB_COLLECTIONS.workshops, workshopId, imageFile, removeImage);
     revalidateAfterUpdate();
-    return { workshopId };
+    return { workshopId, warning: imageWarning(imgResult) };
   } catch (err) {
     const pbError = toPbErrorLike(err);
     const message = String(err instanceof Error ? err.message : '');
@@ -487,9 +539,9 @@ export async function updateWorkshopAction(
       if (suResult.ok) {
         try {
           await suResult.pb.collection(PB_COLLECTIONS.workshops).update(workshopId, payload);
-          await applyImageUpdate(suResult.pb, PB_COLLECTIONS.workshops, workshopId, imageFile, removeImage);
+          const imgResult = await applyImageUpdate(suResult.pb, PB_COLLECTIONS.workshops, workshopId, imageFile, removeImage);
           revalidateAfterUpdate();
-          return { workshopId };
+          return { workshopId, warning: imageWarning(imgResult) };
         } catch (fallbackErr) {
           console.error('[workshops] workshop update fallback (superuser) failed', {
             pbUrl: PB_URL,
@@ -680,11 +732,11 @@ export async function createWorkshopAreaAction(
 
   try {
     const record = await pb.collection(PB_COLLECTIONS.workshopAreas).create(payload);
-    await applyImageUpdate(pb, PB_COLLECTIONS.workshopAreas, String(record.id), imageFile, false);
+    const imgResult = await applyImageUpdate(pb, PB_COLLECTIONS.workshopAreas, String(record.id), imageFile, false);
     revalidatePath('/education');
     revalidatePath('/education/areas');
     revalidatePath('/education/new');
-    return { success: 'Område tillagt.' };
+    return { success: 'Område tillagt.', warning: imageWarning(imgResult) };
   } catch (err) {
     const pbError = toPbErrorLike(err);
     const message = String(err instanceof Error ? err.message : '');
@@ -713,7 +765,7 @@ export async function createWorkshopAreaAction(
       if (superuserPbResult.ok) {
         try {
           const record = await superuserPbResult.pb.collection(PB_COLLECTIONS.workshopAreas).create(payload);
-          await applyImageUpdate(
+          const imgResult = await applyImageUpdate(
             superuserPbResult.pb,
             PB_COLLECTIONS.workshopAreas,
             String(record.id),
@@ -723,7 +775,7 @@ export async function createWorkshopAreaAction(
           revalidatePath('/education');
           revalidatePath('/education/areas');
           revalidatePath('/education/new');
-          return { success: 'Område tillagt.' };
+          return { success: 'Område tillagt.', warning: imageWarning(imgResult) };
         } catch (fallbackErr) {
           const fallbackMessage = String(fallbackErr instanceof Error ? fallbackErr.message : '');
           const fallbackNormalized = fallbackMessage.toLowerCase();
@@ -958,10 +1010,10 @@ export async function updateWorkshopAreaAction(
 
   try {
     await pb.collection(PB_COLLECTIONS.workshopAreas).update(areaId, payload);
-    await applyImageUpdate(pb, PB_COLLECTIONS.workshopAreas, areaId, imageFile, removeImage);
+    const imgResult = await applyImageUpdate(pb, PB_COLLECTIONS.workshopAreas, areaId, imageFile, removeImage);
     revalidatePath('/education');
     revalidatePath('/education/areas');
-    return { success: 'Område uppdaterat.' };
+    return { success: 'Område uppdaterat.', warning: imageWarning(imgResult) };
   } catch (err) {
     const pbError = toPbErrorLike(err);
     const message = String(err instanceof Error ? err.message : '');
@@ -978,7 +1030,7 @@ export async function updateWorkshopAreaAction(
       if (superuserPbResult.ok) {
         try {
           await superuserPbResult.pb.collection(PB_COLLECTIONS.workshopAreas).update(areaId, payload);
-          await applyImageUpdate(
+          const imgResult = await applyImageUpdate(
             superuserPbResult.pb,
             PB_COLLECTIONS.workshopAreas,
             areaId,
@@ -987,7 +1039,7 @@ export async function updateWorkshopAreaAction(
           );
           revalidatePath('/education');
           revalidatePath('/education/areas');
-          return { success: 'Område uppdaterat.' };
+          return { success: 'Område uppdaterat.', warning: imageWarning(imgResult) };
         } catch (fallbackErr) {
           const fallbackNormalized = String(
             fallbackErr instanceof Error ? fallbackErr.message : ''

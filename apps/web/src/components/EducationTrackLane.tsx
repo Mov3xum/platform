@@ -87,7 +87,11 @@ export function EducationTrackLane({ trackLabel, accent, modules, imageUrl }: Tr
             loading="lazy"
           />
         ) : (
-          <span className={`h-9 w-9 shrink-0 rounded-lg ${ACCENT_PLACEHOLDER[accent]}`} />
+          <span
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold ${ACCENT_PLACEHOLDER[accent]}`}
+          >
+            {trackLabel.trim().charAt(0).toUpperCase() || '#'}
+          </span>
         )}
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[13.5px] font-semibold text-foreground">{trackLabel}</h2>
