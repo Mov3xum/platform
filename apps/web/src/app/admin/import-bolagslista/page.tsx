@@ -34,14 +34,7 @@ export default async function ImportBolagslistaPage() {
         <section className="rounded-3xl border border-default bg-surface p-6">
           <h2 className="text-base font-semibold text-foreground">Vad gör importen?</h2>
           <p className="mt-2 text-sm text-foreground-muted">
-            Läser Movexums Bolagslista (Excel) och uppdaterar två tabeller idempotent.
-            Stöder både den breda listan och den normaliserade exporten med separata
-            flikar <code className="rounded bg-canvas-muted px-1 py-0.5 font-mono text-xs">Bolag</code>{' '}
-            +{' '}
-            <code className="rounded bg-canvas-muted px-1 py-0.5 font-mono text-xs">
-              Ekonomi per år
-            </code>{' '}
-            (en rad per bolag × år):
+            Läser Movexums Bolagslista (Excel) och uppdaterar två tabeller idempotent:
           </p>
           <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-foreground-muted">
             <li>
@@ -71,10 +64,8 @@ export default async function ImportBolagslistaPage() {
           </p>
           <p className="mt-1">
             Inga personuppgifter ingår — organisationsnummer för aktiebolag är inte
-            PII enligt GDPR skäl 14. Enskilda firmor utan giltigt org-nr
-            (XXXXXX-XXXX) får inget org-nr lagrat utan kopplas i stället på
-            bolagsnamn, så deras ekonomirader behåller sin relation i stället för
-            att hoppas över.
+            PII enligt GDPR skäl 14. Enskilda firmor i filen utan giltigt org-nr
+            (XXXXXX-XXXX) hoppas över automatiskt.
           </p>
         </section>
 

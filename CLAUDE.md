@@ -466,16 +466,7 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
   `source` (manual / import_excel / allabolag / other), `synced_at`.
   Unique-index på (startup, year) ger idempotent upsert vid sync från
   allabolag-providern. Modellerar Movexums Bolagslista-Excel
-  (1700000059). **Importen (`/admin/import-bolagslista`,
-  `lib/import/bolagslista.ts`) tar både den breda fliken
-  (`parseBolagslista`, år infereras) och den normaliserade exporten med
-  separata flikar `Bolag` + `Ekonomi per år` (`parseBolagslistaNormalized`,
-  exakt år per rad). Ekonomiraderna kopplas till sitt bolag på org-nr,
-  annars bolagsnamn — så relationen följer med (inga flytande öar).
-  Bolag utan giltigt org-nr (enskilda firmor, där org-nr=personnummer →
-  lagras ALDRIG, § 9.3/§ 10.2) får inget org-nr utan upsertas på (tenant,
-  namn); det partiella unique-indexet `(tenant, org_nr) WHERE org_nr != ''`
-  gör att flera tomma org-nr inte kolliderar.**
+  (1700000059).
 
 **Verktygskategorier:**
 - `ai_per_startup` — AI för enskilt bolag (quarterly report etc.)
