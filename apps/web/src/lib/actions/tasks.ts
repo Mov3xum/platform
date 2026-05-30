@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { getSuperuserPb, requireUser } from '@/lib/auth.server';
+import { getServerPb, getSuperuserPb, requireUser } from '@/lib/auth.server';
 import { getOneForTenant } from '@/lib/pb.server';
 import { hasRole } from '@/lib/rbac';
 import { toRawStatus, type BoardStatus } from '@/lib/overview/status';
@@ -179,6 +179,9 @@ export async function updateTaskStatusAction(
   // rule-eval-bugg som annars får skrivningen att tyst nekas → kortet
   // hoppar tillbaka i boarden.
   const pb = await getSuperuserPb();
+  if (!pb) {
+    return { ok: false, error: 'Kunde inte uppdatera uppgiften.' };
+  }
 
   let row: { id: string; tenant?: string; owner?: string };
   try {

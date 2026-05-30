@@ -32,6 +32,9 @@ export async function updateActivityStatusAction(
   }
 
   const pb = await getSuperuserPb();
+  if (!pb) {
+    return { ok: false, error: 'Kunde inte uppdatera aktiviteten.' };
+  }
 
   // RBAC i koden (tenant + staff/ägare) innan privilegierad skrivning.
   let row: { id: string; owner?: string; expand?: { startup?: { tenant?: string } } };
