@@ -15,6 +15,7 @@ import {
 import { NoteForm } from '@/components/NoteForm';
 import { NoteItem } from '@/components/NoteItem';
 import { StartupDetailDashboard } from '@/components/StartupDetailDashboard';
+import { StartupWorkCards, type WorkCard } from '@/components/StartupWorkCards';
 import {
   StartupPhaseHistoryList,
   type PhaseHistoryItem
@@ -253,6 +254,20 @@ interface WorkshopAssignmentRecord {
   };
 }
 
+interface ToolRunRecord {
+  id: string;
+  tool?: string;
+  status: ToolRunStatus;
+  deadline?: string;
+  assigned_to?: string;
+  created: string;
+  output_md?: string;
+  expand?: {
+    tool?: { id: string; name: string; category: string };
+    assigned_to?: { id: string; display_name?: string; email: string };
+  };
+}
+
 export default async function StartupDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
@@ -286,7 +301,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     phaseHistoryResult,
     startupContactsResult,
     tasksResult,
-    documentAssignmentsResult
+    documentAssignmentsResult,
+    toolRunsResult
   ] = await Promise.allSettled([
     pb.collection('startup_team_members').getList<TeamMemberRecord>(1, 50, {
       filter: `startup = "${id}"`,
@@ -348,7 +364,12 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
         filter: `startup = "${id}" && tenant = "${user.tenant}"`,
         sort: '-created',
         expand: 'document,completed_by,collaborators,meeting'
-      })
+      }),
+    pb.collection('tool_runs').getList<ToolRunRecord>(1, 100, {
+      filter: `startup = "${id}" && tenant = "${user.tenant}"`,
+      sort: '-created',
+      expand: 'tool,assigned_to'
+    })
   ]);
 
   const team = teamResult.status === 'fulfilled' ? teamResult.value : emptyList;
@@ -369,6 +390,90 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   const tasks = tasksResult.status === 'fulfilled' ? tasksResult.value : emptyList;
   const documentAssignments =
     documentAssignmentsResult.status === 'fulfilled' ? documentAssignmentsResult.value : emptyList;
+  const toolRuns = toolRunsResult.status === 'fulfilled' ? toolRunsResult.value : emptyList;
+
+  // Verktyg & utbildning — vad bolaget GJORT (grön bock) och vad som är
+  // tilldelat men INTE gjort ännu (verktyg + workshops + dokument).
+  const DONE_RUN_STATUSES = new Set<ToolRunStatus>([
+    'succeeded',
+    'approved',
+    'ready_for_review'
+  ]);
+  const PENDING_RUN_STATUSES = new Set<ToolRunStatus>([
+    'assigned',
+    'in_progress',
+    'queued',
+    'running'
+  ]);
+  const dayMs = 86_400_000;
+  const relDays = (iso?: string): string | undefined => {
+    if (!iso) return undefined;
+    const diff = Math.round((Date.now() - new Date(iso).getTime()) / dayMs);
+    if (diff < 1) return 'i dag';
+    if (diff === 1) return 'i går';
+    if (diff < 30) return `för ${diff} dgr sedan`;
+    return new Date(iso).toLocaleDateString('sv-SE');
+  };
+  const deadlineLabel = (iso?: string): { label?: string; overdue: boolean } => {
+    if (!iso) return { overdue: false };
+    const diff = Math.round((new Date(iso).getTime() - Date.now()) / dayMs);
+    if (diff < 0) return { label: `försenad ${-diff} dgr`, overdue: true };
+    if (diff === 0) return { label: 'deadline i dag', overdue: false };
+    return { label: `deadline om ${diff} dgr`, overdue: false };
+  };
+
+  const doneWork: WorkCard[] = [];
+  const pendingWork: WorkCard[] = [];
+
+  for (const run of toolRuns.items) {
+    if (run.status === 'rejected' || run.status === 'failed') continue;
+    const card: WorkCard = {
+      id: run.id,
+      kind: 'tool',
+      title: run.expand?.tool?.name || 'Verktyg',
+      statusLabel: toolRunStatusLabels[run.status],
+      href: `/startups/${id}/verktyg/${run.id}`
+    };
+    if (DONE_RUN_STATUSES.has(run.status)) {
+      doneWork.push({ ...card, dateLabel: relDays(run.created) });
+    } else if (PENDING_RUN_STATUSES.has(run.status)) {
+      const dl = deadlineLabel(run.deadline);
+      pendingWork.push({ ...card, dateLabel: dl.label, overdue: dl.overdue });
+    }
+  }
+
+  for (const wa of workshopAssignments.items) {
+    const card: WorkCard = {
+      id: wa.id,
+      kind: 'workshop',
+      title: wa.expand?.workshop?.title || 'Workshop',
+      statusLabel: wa.status === 'done' ? 'Klar' : wa.status === 'in_progress' ? 'Pågår' : 'Planerad',
+      href: `/education/assignments/${wa.id}`
+    };
+    if (wa.status === 'done') {
+      doneWork.push({ ...card, dateLabel: relDays(wa.completed_at || wa.created) });
+    } else {
+      const dl = deadlineLabel(wa.due_date);
+      pendingWork.push({ ...card, dateLabel: dl.label, overdue: dl.overdue });
+    }
+  }
+
+  for (const da of documentAssignments.items) {
+    const doc = da.expand?.document;
+    const card: WorkCard = {
+      id: da.id,
+      kind: 'document',
+      title: doc?.title || 'Dokument',
+      statusLabel: da.status === 'completed' ? 'Slutförd' : 'Tilldelad',
+      href: `/startups/${id}#edu-documents`
+    };
+    if (da.status === 'completed') {
+      doneWork.push({ ...card, dateLabel: relDays(da.completed_at || da.created) });
+    } else {
+      const dl = deadlineLabel(da.due_date);
+      pendingWork.push({ ...card, dateLabel: dl.label, overdue: dl.overdue });
+    }
+  }
 
   // CLAUDE.md § 14: bygg en transient e-post→entitet-index för att matcha
   // Outlook-möten mot detta bolags kontakter + teammedlemmar. Aldrig sparad.
@@ -508,12 +613,16 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           activitiesCount: activities.totalItems,
           notesCount: notes.totalItems,
           milestonesCount: milestones.totalItems,
-          agreementsCount: agreements.totalItems,
+          documentsCount: documentAssignments.totalItems,
           teamMembersCount: team.totalItems,
           workshopsCount: workshopAssignments.totalItems,
           toolRunsCount: toolActivities.totalItems
         }}
       />
+
+      <div className="mt-8">
+        <StartupWorkCards done={doneWork} pending={pendingWork} />
+      </div>
 
       <nav className="mb-8 mt-8 flex flex-wrap gap-3 text-sm">
         {[
@@ -592,6 +701,62 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               </Link>
             </div>
           </div>
+        </Section>
+
+        <Section id="activities" title="Aktiviteter">
+          {activities.items.length === 0 ? (
+            <Empty>Inga aktiviteter registrerade.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {activities.items.map((a) => (
+                <li key={a.id} className="rounded-2xl border border-default p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-foreground">{a.title}</p>
+                      <p className="text-xs text-foreground-subtle">
+                        {activityTypeLabels[a.type]} ·{' '}
+                        {a.due_date ? new Date(a.due_date).toLocaleDateString('sv-SE') : 'Inget datum'}
+                      </p>
+                    </div>
+                    <StatusPill label={activityStatusLabels[a.status]} variant={a.status === 'done' ? 'success' : a.status === 'cancelled' ? 'neutral' : 'info'} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section id="notes" title="Anteckningar">
+          <div className="mb-6 rounded-2xl border border-default bg-canvas-subtle/50 p-4">
+            <NoteForm startupId={id} />
+          </div>
+          {notes.items.length === 0 ? (
+            <Empty>Inga anteckningar än.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {notes.items.map((n) => (
+                <li key={n.id} className="rounded-2xl border border-default p-4">
+                  <div className="mb-2 flex items-center justify-between text-xs text-foreground-subtle">
+                    <span>
+                      {n.expand?.author?.display_name || n.expand?.author?.email || 'Okänd'} ·{' '}
+                      {new Date(n.created).toLocaleString('sv-SE')}
+                    </span>
+                    {n.confidential ? (
+                      <span className="rounded-full bg-movexum-pastell-gul px-2 py-0.5 font-medium text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
+                        Konfidentiell
+                      </span>
+                    ) : null}
+                  </div>
+                  <NoteItem
+                    noteId={n.id}
+                    body={n.body}
+                    confidential={n.confidential}
+                    isAuthor={n.author === user.id}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
         </Section>
 
         <Section id="moten" title="Möten & uppgifter">
@@ -900,62 +1065,6 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                     </div>
                     <StatusPill label={milestoneStatusLabels[m.status]} variant={m.status === 'achieved' ? 'success' : m.status === 'missed' ? 'danger' : 'neutral'} />
                   </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section id="activities" title="Aktiviteter">
-          {activities.items.length === 0 ? (
-            <Empty>Inga aktiviteter registrerade.</Empty>
-          ) : (
-            <ul className="space-y-3">
-              {activities.items.map((a) => (
-                <li key={a.id} className="rounded-2xl border border-default p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-foreground">{a.title}</p>
-                      <p className="text-xs text-foreground-subtle">
-                        {activityTypeLabels[a.type]} ·{' '}
-                        {a.due_date ? new Date(a.due_date).toLocaleDateString('sv-SE') : 'Inget datum'}
-                      </p>
-                    </div>
-                    <StatusPill label={activityStatusLabels[a.status]} variant={a.status === 'done' ? 'success' : a.status === 'cancelled' ? 'neutral' : 'info'} />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section id="notes" title="Anteckningar">
-          <div className="mb-6 rounded-2xl border border-default bg-canvas-subtle/50 p-4">
-            <NoteForm startupId={id} />
-          </div>
-          {notes.items.length === 0 ? (
-            <Empty>Inga anteckningar än.</Empty>
-          ) : (
-            <ul className="space-y-3">
-              {notes.items.map((n) => (
-                <li key={n.id} className="rounded-2xl border border-default p-4">
-                  <div className="mb-2 flex items-center justify-between text-xs text-foreground-subtle">
-                    <span>
-                      {n.expand?.author?.display_name || n.expand?.author?.email || 'Okänd'} ·{' '}
-                      {new Date(n.created).toLocaleString('sv-SE')}
-                    </span>
-                    {n.confidential ? (
-                      <span className="rounded-full bg-movexum-pastell-gul px-2 py-0.5 font-medium text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
-                        Konfidentiell
-                      </span>
-                    ) : null}
-                  </div>
-                  <NoteItem
-                    noteId={n.id}
-                    body={n.body}
-                    confidential={n.confidential}
-                    isAuthor={n.author === user.id}
-                  />
                 </li>
               ))}
             </ul>
