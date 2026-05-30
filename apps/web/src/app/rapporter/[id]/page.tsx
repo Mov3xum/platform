@@ -7,7 +7,12 @@ import { PageHead, Icon } from '@/components/proto';
 import { deleteReportFormAction } from '@/lib/actions/reports';
 import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
 import type { IncubatorReport } from '@platform/shared';
+import { PROGRAM_START } from '@platform/shared';
 import { ReportDetail } from '../ReportDetail';
+import { VinnovaLagesredovisningView } from '../vinnova/View';
+import { buildVinnovaLagesredovisning, FALLBACK_HOURLY_RATE } from '@/lib/reporting/dataset';
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export default async function ReportDetailPage({
   params
@@ -29,6 +34,38 @@ export default async function ReportDetailPage({
   }
   if (!report || report.tenant !== user.tenant) {
     notFound();
+  }
+
+  // För Vinnova-rapporter bygger vi den strukturerade lägesredovisningen
+  // auto-fylld ur systemdata för rapportens period. Allt tål saknade
+  // kollektioner (degraderar till tom tabell, ingen krasch).
+  let vinnova: Awaited<ReturnType<typeof buildVinnovaLagesredovisning>> | null = null;
+  let vinnovaFrom = PROGRAM_START;
+  let vinnovaTo = new Date().toISOString().slice(0, 10);
+  let vinnovaRate = FALLBACK_HOURLY_RATE;
+  if (report.recipient === 'vinnova') {
+    const ps = (report.period_start || '').slice(0, 10);
+    const pe = (report.period_end || '').slice(0, 10);
+    if (DATE_RE.test(ps)) vinnovaFrom = ps;
+    if (DATE_RE.test(pe)) vinnovaTo = pe;
+    if (vinnovaFrom > vinnovaTo) vinnovaTo = vinnovaFrom;
+    try {
+      const t = await pb.collection('tenants').getOne(user.tenant);
+      const r = (t as { default_hourly_rate_sek?: number }).default_hourly_rate_sek;
+      if (r && r > 0) vinnovaRate = r;
+    } catch {
+      /* default */
+    }
+    try {
+      vinnova = await buildVinnovaLagesredovisning(
+        pb,
+        user.tenant,
+        { from: vinnovaFrom, to: vinnovaTo },
+        { hourlyRate: vinnovaRate }
+      );
+    } catch {
+      vinnova = null;
+    }
   }
 
   return (
@@ -55,6 +92,17 @@ export default async function ReportDetailPage({
           </>
         }
       />
+
+      {vinnova && (
+        <div className="mb-5">
+          <VinnovaLagesredovisningView
+            dataset={vinnova}
+            from={vinnovaFrom}
+            to={vinnovaTo}
+            rate={vinnovaRate}
+          />
+        </div>
+      )}
 
       <ReportDetail report={report} />
     </div>
