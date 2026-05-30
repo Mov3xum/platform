@@ -123,6 +123,14 @@ async function verifyCollectionsExist() {
     'sprint_x_checkins',
     'startup_phase_history',
     'startup_financials',
+    // CRM / bolagsisolering (§ 21)
+    'startup_contacts',
+    'capital_rounds',
+    'intellectual_property',
+    'startup_kpis',
+    'tasks',
+    'education_document_assignments',
+    'integration_records',
     // Investor/event
     'investors',
     'deals',
@@ -167,6 +175,72 @@ function assertCreateRuleDoesNotJoinRecord(collection) {
       );
     }
   }
+}
+
+// Bolagsisolering (CLAUDE.md § 21, migration 1700000096). En ren
+// startup_member får bara se sina egna bolags rader. Vi verifierar att
+// list/view-reglerna scope:ar till `linked_startups` för de startup-scopade
+// kollektionerna, och att de tenant-breda kollektionerna är staff/observer-only.
+const MUST_SCOPE_TO_MEMBER = [
+  'startups',
+  'activities',
+  'notes',
+  'milestones',
+  'agreements',
+  'tool_runs',
+  'startup_team_members',
+  'startup_contacts',
+  'startup_phase_history',
+  'startup_financials',
+  'capital_rounds',
+  'intellectual_property',
+  'startup_kpis',
+  'education_document_assignments',
+  'sprint_x_checkins',
+  'partner_engagements',
+  'tasks',
+  'missions'
+];
+
+const MUST_BE_STAFF_OR_OBSERVER = [
+  'partners',
+  'investors',
+  'deals',
+  'alumni',
+  'integration_records'
+];
+
+function verifyStartupMemberIsolation(collections) {
+  for (const name of MUST_SCOPE_TO_MEMBER) {
+    const col = collections.get(name);
+    if (!col) continue; // kollektion saknas i denna instans — hoppa
+    for (const ruleName of ['listRule', 'viewRule']) {
+      if (!includesText(col[ruleName], 'linked_startups')) {
+        fail(
+          `Bolagsisolering: ${name}.${ruleName} saknar linked_startups-scope ` +
+          '(migration 1700000096 ej applicerad?).'
+        );
+      }
+    }
+  }
+
+  for (const name of MUST_BE_STAFF_OR_OBSERVER) {
+    const col = collections.get(name);
+    if (!col) continue;
+    for (const ruleName of ['listRule', 'viewRule']) {
+      const expr = col[ruleName];
+      if (!includesText(expr, '@request.auth.roles')) {
+        fail(
+          `Bolagsisolering: ${name}.${ruleName} bör vara staff/observer-only ` +
+          '(saknar roll-check; migration 1700000096 ej applicerad?).'
+        );
+      }
+      if (includesText(expr, 'startup_member')) {
+        fail(`Bolagsisolering: ${name}.${ruleName} får inte exponera startup_member.`);
+      }
+    }
+  }
+  ok('Bolagsisolering (§ 21) verifierad — startup_member är scope:ad');
 }
 
 function verifyRlsAndRbac(collections) {
@@ -259,6 +333,8 @@ function verifyRlsAndRbac(collections) {
     const col = collections.get(name);
     if (col) assertCreateRuleDoesNotJoinRecord(col);
   }
+
+  verifyStartupMemberIsolation(collections);
 
   ok('RLS/RBAC baseline checks passed (createRules är säkra)');
 }

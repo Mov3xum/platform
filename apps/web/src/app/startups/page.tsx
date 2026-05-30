@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { listForTenant } from '@/lib/pb.server';
+import { listForTenant, hasTenantWideRead } from '@/lib/pb.server';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { canAccessModule, hasRole } from '@/lib/rbac';
 import { ALL_PHASES, type StartupPhase, type SprintXScore } from '@platform/shared';
@@ -36,12 +36,26 @@ export default async function StartupsOverviewPage() {
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
   const canCreate = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
 
+  // Bolagsisolering (CLAUDE.md § 21): en ren startup_member ska aldrig se
+  // portfölj-översikten. Har hen exakt ett bolag → direkt till bolagskortet.
+  const memberScoped = !hasTenantWideRead(user);
+  if (memberScoped) {
+    if (user.linkedStartups.length === 1) redirect(`/startups/${user.linkedStartups[0]}`);
+    if (user.linkedStartups.length === 0) redirect('/dashboard');
+  }
+
   const pb = await getServerPb();
   let items: StartupRecord[] = [];
   let totalItems = 0;
   let loadFailed = false;
   try {
-    const result = await listForTenant<StartupRecord>('startups', { sort: 'name', perPage: 200 });
+    // `scopeToStartupField: 'id'` begränsar listan till medlemmens länkade
+    // bolag (tom no-op för staff/observer).
+    const result = await listForTenant<StartupRecord>('startups', {
+      sort: 'name',
+      perPage: 200,
+      scopeToStartupField: 'id'
+    });
     items = result.items;
     totalItems = result.totalItems;
   } catch (error) {

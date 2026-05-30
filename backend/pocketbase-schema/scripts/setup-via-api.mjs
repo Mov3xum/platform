@@ -549,6 +549,21 @@ await patchUsersCollection(
 const usersCol = await pb.collections.getOne('users');
 const usersId = usersCol.id;
 
+// Bolagsisolering (CLAUDE.md § 21, migration 1700000096). Staff + observer har
+// tenant-bred read; en ren startup_member ser bara sina länkade bolag. Sanningen
+// är migration 1700000096 — denna bootstrap speglar den för de viktigaste
+// kollektionerna (startups + barn med direkt startup-relation).
+const STAFF_OR_OBSERVER_READ =
+  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "mentor" || @request.auth.roles ?= "observer")';
+const MEMBER_OF_STARTUP_REL = '@request.auth.linked_startups ?= startup';
+const MEMBER_OF_THIS_REL = '@request.auth.linked_startups ?= id';
+// list/view scopade till medlemmens egna bolag:
+const READ_OWN_STARTUP_DIRECT = `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP_REL})`;
+const READ_OWN_STARTUP_VIA = `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP_REL})`;
+const READ_OWN_THIS_DIRECT = `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_THIS_REL})`;
+// tenant-bred data en medlem inte får läsa alls:
+const READ_STAFF_OR_OBSERVER = `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_READ}`;
+
 // 3. startups --------------------------------------------------------------
 await ensureCollection({
   id: 'startups_collection',
@@ -571,8 +586,8 @@ await ensureCollection({
     'CREATE INDEX idx_startups_phase ON startups (phase)',
     'CREATE INDEX idx_startups_status ON startups (status)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  listRule: READ_OWN_THIS_DIRECT,
+  viewRule: READ_OWN_THIS_DIRECT,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
@@ -676,8 +691,8 @@ await ensureCollection({
     'CREATE INDEX idx_activities_owner ON activities (owner)',
     'CREATE INDEX idx_activities_due ON activities (due_date)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
+  listRule: READ_OWN_STARTUP_VIA,
+  viewRule: READ_OWN_STARTUP_VIA,
   createRule: `${ANY_AUTH}`,
   updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_OWNER}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_OWNER}`
