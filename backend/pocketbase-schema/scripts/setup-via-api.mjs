@@ -1796,7 +1796,7 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
 });
 
-// Migration 1700000097: service_time_entries — loggad tid per bolag (Vinnova).
+// Migration 1700000102: service_time_entries — loggad tid per bolag (Vinnova).
 await ensureCollection({
   id: 'service_time_entries_col',
   name: 'service_time_entries',
@@ -1824,7 +1824,7 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
 });
 
-// Migration 1700000098: startup_service_costs — externa kostnader per bolag.
+// Migration 1700000103: startup_service_costs — externa kostnader per bolag.
 await ensureCollection({
   id: 'startup_service_costs_col',
   name: 'startup_service_costs',
@@ -1853,7 +1853,7 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
 });
 
-// Migration 1700000099: startup_readiness_assessments — CRL/TMRL/BRL/SRL.
+// Migration 1700000104: startup_readiness_assessments — CRL/TMRL/BRL/SRL.
 await ensureCollection({
   id: 'startup_readiness_assess_col',
   name: 'startup_readiness_assessments',
@@ -1882,7 +1882,7 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
 });
 
-// Migration 1700000100: startup_state_aid_periods — statsstödsgrund (tidsserie).
+// Migration 1700000105: startup_state_aid_periods — statsstödsgrund (tidsserie).
 await ensureCollection({
   id: 'startup_state_aid_periods_col',
   name: 'startup_state_aid_periods',
@@ -2150,7 +2150,7 @@ await patchCollection('startups', [
   { name: 'is_regional', type: 'bool', required: false },
   { name: 'signed_partner_agreement', type: 'bool', required: false },
   { name: 'signed_partner_agreement_at', type: 'date', required: false },
-  // Från 1700000096 — Vinnova lägesredovisning
+  // Från 1700000101 — Vinnova lägesredovisning
   { name: 'sni_code', type: 'text', required: false, max: 20 },
   { name: 'sni_description', type: 'text', required: false, max: 300 },
   { name: 'vinnova_focus', type: 'select', required: false, maxSelect: 1, values: ['agro', 'industriell_teknik', 'life_science', 'miljo_energi', 'mjukvara_ict', 'upplevelseindustri', 'ovrigt'] },
@@ -2158,7 +2158,7 @@ await patchCollection('startups', [
   { name: 'vinnova_funding_end_at', type: 'date', required: false }
 ]);
 
-// Migration 1700000096: tenants default-timpris (Vinnova-rapportering).
+// Migration 1700000101: tenants default-timpris (Vinnova-rapportering).
 await patchTenantsCollection([
   { name: 'default_hourly_rate_sek', type: 'number', required: false, min: 0, max: 100000 }
 ]);

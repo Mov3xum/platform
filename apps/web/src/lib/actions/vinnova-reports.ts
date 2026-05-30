@@ -15,7 +15,7 @@ import type {
   StateAidBasis
 } from '@platform/shared';
 
-// Skriv-RBAC: staff (matchar createRule i migrationerna 1700000097–100).
+// Skriv-RBAC: staff (matchar createRule i migrationerna 1700000102–105).
 const STAFF_WRITE: Role[] = ['admin', 'incubator_lead', 'coach'];
 
 export type ReportingActionState = { error?: string; ok?: boolean; fileRef?: GeneratedFileRef; downloadUrl?: string };

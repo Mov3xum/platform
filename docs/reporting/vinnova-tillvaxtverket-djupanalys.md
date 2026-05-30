@@ -425,7 +425,7 @@ sättas till `sent` förrän kritiska fält är gröna (människa-i-loopen, §10
 
 Levererat i denna PR — den dynamiska, data-kopplade Vinnova-lägesredovisningen:
 
-**Fas 1 — datamodell** (migrationer 1700000096–100 + `setup-via-api.mjs`-paritet):
+**Fas 1 — datamodell** (migrationer 1700000101–105 + `setup-via-api.mjs`-paritet):
 - `startups`: `sni_code`, `sni_description`, `vinnova_focus` (enum),
   `state_aid_start_at`, `vinnova_funding_end_at`; `tenants.default_hourly_rate_sek`.
 - `service_time_entries` — tid × timpris (timpris **per post**, fallback tenant-default).

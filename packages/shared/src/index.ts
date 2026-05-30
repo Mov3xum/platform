@@ -121,7 +121,7 @@ export interface Startup {
   is_regional?: boolean;
   signed_partner_agreement?: boolean;
   signed_partner_agreement_at?: string;
-  // Vinnova lägesredovisning (migration 1700000096)
+  // Vinnova lägesredovisning (migration 1700000101)
   sni_code?: string;
   sni_description?: string;
   vinnova_focus?: VinnovaFocus;
