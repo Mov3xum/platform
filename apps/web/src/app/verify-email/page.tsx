@@ -22,10 +22,10 @@ export default async function VerifyEmailPage({
           message="Verifieringslänken saknas eller är felaktig. Kontrollera att du kopierade hela länken från mailet."
         />
         <Link
-          href="/register"
+          href="/login"
           className="inline-flex w-full items-center justify-center rounded-full bg-brand px-6 py-3 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
         >
-          Skapa konto igen
+          Till inloggning
         </Link>
       </PageShell>
     );
@@ -59,10 +59,10 @@ export default async function VerifyEmailPage({
         message={result.error ?? 'Okänt fel. Försök igen eller kontakta administratören.'}
       />
       <Link
-        href="/register"
+        href="/login"
         className="inline-flex w-full items-center justify-center rounded-full bg-brand px-6 py-3 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
       >
-        Skapa konto igen
+        Till inloggning
       </Link>
     </PageShell>
   );

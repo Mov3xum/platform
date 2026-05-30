@@ -62,10 +62,7 @@ export function LoginForm({ next }: { next: string }) {
       </button>
 
       <p className="text-center text-sm text-foreground-muted">
-        Inget konto?{' '}
-        <Link href="/register" className="font-medium text-link hover:underline">
-          Skapa konto
-        </Link>
+        Saknar du konto? Kontakta en administratör — konton skapas internt.
       </p>
     </form>
   );
