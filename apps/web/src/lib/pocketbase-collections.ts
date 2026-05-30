@@ -20,5 +20,7 @@ export const PB_COLLECTIONS = {
   alumni: 'alumni_collection',
   missionComments: 'mission_comments_collection',
   notifications: 'notifications_collection',
-  startupPhaseHistory: 'startup_phase_history_collection'
+  startupPhaseHistory: 'startup_phase_history_collection',
+  agreements: 'agreements_collection',
+  agreementSignatures: 'agreement_signatures_collection'
 } as const;

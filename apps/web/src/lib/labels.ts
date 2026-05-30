@@ -58,10 +58,17 @@ export const agreementKindLabels: Record<AgreementKind, string> = {
   other: 'Övrigt'
 };
 
-export type AgreementStatus = 'draft' | 'sent' | 'signed' | 'expired' | 'terminated';
+export type AgreementStatus =
+  | 'draft'
+  | 'sent'
+  | 'partially_signed'
+  | 'signed'
+  | 'expired'
+  | 'terminated';
 export const agreementStatusLabels: Record<AgreementStatus, string> = {
   draft: 'Utkast',
   sent: 'Skickat',
+  partially_signed: 'Delvis signerat',
   signed: 'Signerat',
   expired: 'Utgått',
   terminated: 'Avslutat'
