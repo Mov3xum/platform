@@ -1,6 +1,7 @@
 # Djupanalys — Rapportering som excellent inkubator (Vinnova & Tillväxtverket)
 
-> **Status:** Analys & designunderlag (ej implementerat ännu).
+> **Status:** Fas 1–3 implementerade (se §11 nedan). Analys & designunderlag
+> för resterande faser.
 > **Författare:** Plattformsteamet, 2026-05-30.
 > **Syfte:** Kartlägga exakt vad Movexum måste rapportera som *excellent
 > inkubator*, hur de tre nuvarande Excel-flödena ser ut, vilka fält
@@ -419,6 +420,41 @@ sättas till `sent` förrän kritiska fält är gröna (människa-i-loopen, §10
    in i InkRapp manuellt, eller finns API/importformat hos SISP/Vinnova?
 
 ---
+
+## 11. Implementerat (Fas 1–3)
+
+Levererat i denna PR — den dynamiska, data-kopplade Vinnova-lägesredovisningen:
+
+**Fas 1 — datamodell** (migrationer 1700000096–100 + `setup-via-api.mjs`-paritet):
+- `startups`: `sni_code`, `sni_description`, `vinnova_focus` (enum),
+  `state_aid_start_at`, `vinnova_funding_end_at`; `tenants.default_hourly_rate_sek`.
+- `service_time_entries` — tid × timpris (timpris **per post**, fallback tenant-default).
+- `startup_service_costs` — externa kostnader per bolag (`source` har `accounting`
+  reserverat för framtida Fortnox/Visma-integration).
+- `startup_readiness_assessments` — CRL/TMRL/BRL/SRL (tidsserie) + målgruppskontrolldatum.
+- `startup_state_aid_periods` — statsstödsgrund som tidsserie (en-rad-per-grund).
+
+**Fas 2 — beräkningskärna & mall-som-data:**
+- `packages/shared/src/reporting.ts` — dependency-fri logik (värde period/ackumulerat,
+  radbyggare med segmentering per stödgrund, KTH IRL-skalor 1–9, validering). 16 enhetstester.
+- `apps/web/src/lib/reporting/templates.ts` — Vinnova-mallen som kolumn-definitioner
+  (resolver per cell). Nya kolumner/mallar = data, inte kod.
+
+**Fas 3 — auto-fyllning, export & UI:**
+- `apps/web/src/lib/reporting/dataset.ts` — bygger lägesredovisningen tenant-säkert
+  ur systemdata (auto-fyllning av varje cell).
+- `apps/web/src/lib/reporting/export.ts` — renderar xlsx via det befintliga
+  EU-suveräna dokumentlagret (`exceljs`), sparar i `user_files`.
+- `apps/web/src/lib/actions/vinnova-reports.ts` — export-action + datainmatnings-actions
+  (tid/kostnad/readiness/statsstödsgrund), staff-RBAC + input-validering.
+- `apps/web/src/app/rapporter/vinnova/` — tabellvy med per-rad datakvalitetsflaggor,
+  periodval och xlsx-export. Länkad från `/rapporter`.
+
+**Återstår (Fas 4–5, ej i denna PR):** bokföringsintegration (Fortnox/Visma) för
+verifieringskostnader, Excel-importörer för de tre historiska arken, schemalagd
+prep-agent/event-triggers, e-AidRegister-export, InkRapp-aggregat + Tillväxtverket-
+halvårsrapport, samt AI-kontext-whitelist (§10.5 p.10) för de nya fälten (idag
+konsumeras de bara av den deterministiska rapportmotorn, inte av AI-prompter).
 
 ## 10. Källor
 
