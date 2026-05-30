@@ -3,6 +3,13 @@
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { assignDocumentToStartupAction } from '@/lib/actions/education-documents';
+import {
+  AssignmentCollabFields,
+  collabToOptions,
+  EMPTY_COLLAB,
+  type CollabState
+} from '@/components/assignments/AssignmentCollabFields';
+import type { AssignableResource } from '@/lib/assignments/types';
 
 const inputClass =
   'w-full rounded-xl border border-default bg-surface px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
@@ -10,13 +17,15 @@ const inputClass =
 interface DocumentAssignFormProps {
   documentId: string;
   startups: Array<{ id: string; name: string }>;
+  resources?: AssignableResource[];
 }
 
-export function DocumentAssignForm({ documentId, startups }: DocumentAssignFormProps) {
+export function DocumentAssignForm({ documentId, startups, resources = [] }: DocumentAssignFormProps) {
   const router = useRouter();
   const [startupId, setStartupId] = useState('');
   const [instructions, setInstructions] = useState('');
   const [dueDate, setDueDate] = useState('');
+  const [collab, setCollab] = useState<CollabState>(EMPTY_COLLAB);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -30,7 +39,8 @@ export function DocumentAssignForm({ documentId, startups }: DocumentAssignFormP
         documentId,
         startupId,
         instructions || undefined,
-        dueDate || undefined
+        dueDate || undefined,
+        collabToOptions(collab)
       );
       if (result.error) {
         setError(result.error);
@@ -40,6 +50,7 @@ export function DocumentAssignForm({ documentId, startups }: DocumentAssignFormP
       setStartupId('');
       setInstructions('');
       setDueDate('');
+      setCollab(EMPTY_COLLAB);
       router.refresh();
     });
   };
@@ -89,6 +100,14 @@ export function DocumentAssignForm({ documentId, startups }: DocumentAssignFormP
           className={inputClass}
         />
       </label>
+
+      <AssignmentCollabFields
+        resources={resources}
+        value={collab}
+        onChange={setCollab}
+        showInstructions={false}
+      />
+
       <button
         type="submit"
         disabled={isPending || !startupId}

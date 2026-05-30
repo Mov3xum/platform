@@ -2,15 +2,24 @@
 
 import { useState, useTransition } from 'react';
 import { assignWorkshopToStartupAction } from '@/lib/actions/workshops';
+import {
+  AssignmentCollabFields,
+  collabToOptions,
+  EMPTY_COLLAB,
+  type CollabState
+} from '@/components/assignments/AssignmentCollabFields';
+import type { AssignableResource } from '@/lib/assignments/types';
 
 interface WorkshopAssignFormProps {
   workshopId: string;
   startups: Array<{ id: string; name: string }>;
+  resources?: AssignableResource[];
 }
 
-export function WorkshopAssignForm({ workshopId, startups }: WorkshopAssignFormProps) {
+export function WorkshopAssignForm({ workshopId, startups, resources = [] }: WorkshopAssignFormProps) {
   const [startupId, setStartupId] = useState('');
   const [dueDate, setDueDate] = useState('');
+  const [collab, setCollab] = useState<CollabState>(EMPTY_COLLAB);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -23,7 +32,12 @@ export function WorkshopAssignForm({ workshopId, startups }: WorkshopAssignFormP
         setError(null);
         setMessage(null);
         startTransition(async () => {
-          const result = await assignWorkshopToStartupAction(workshopId, startupId, dueDate || undefined);
+          const result = await assignWorkshopToStartupAction(
+            workshopId,
+            startupId,
+            dueDate || undefined,
+            collabToOptions(collab)
+          );
           if (result.error) {
             setError(result.error);
             return;
@@ -31,6 +45,7 @@ export function WorkshopAssignForm({ workshopId, startups }: WorkshopAssignFormP
           setMessage('Workshop tilldelad.');
           setStartupId('');
           setDueDate('');
+          setCollab(EMPTY_COLLAB);
         });
       }}
     >
@@ -67,6 +82,9 @@ export function WorkshopAssignForm({ workshopId, startups }: WorkshopAssignFormP
           className="w-full rounded-xl border border-default bg-surface px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
         />
       </label>
+
+      <AssignmentCollabFields resources={resources} value={collab} onChange={setCollab} />
+
       <button
         type="submit"
         disabled={isPending || !startupId}

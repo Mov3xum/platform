@@ -926,6 +926,9 @@ await ensureCollection({
     { name: 'owner', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'activity', type: 'relation', required: false, collectionId: 'activities_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['planned', 'in_progress', 'done'] },
+    { name: 'instructions', type: 'text', required: false, max: 2000 },
+    { name: 'collaborators', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 20 },
+    { name: 'meeting', type: 'relation', required: false, collectionId: 'incubator_events_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'due_date', type: 'date', required: false },
     { name: 'progress_json', type: 'json', required: false },
     { name: 'answers_json', type: 'json', required: false },
@@ -1403,6 +1406,7 @@ await ensureCollection({
     { name: 'organization', type: 'text', required: false, max: 200 },
     { name: 'stage', type: 'select', required: true, maxSelect: 1, values: ['signup', 'attended', 'meeting', 'application', 'admitted'] },
     { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'user', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'notes', type: 'text', required: false, max: 1000 }
   ],
   indexes: [

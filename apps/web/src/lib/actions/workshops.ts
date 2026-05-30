@@ -8,6 +8,11 @@ import { hasRole } from '@/lib/rbac';
 import { buildStartupContext } from '@/lib/ai/context';
 import { callMistral, estimateCostUsd } from '@/lib/ai/mistral';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import {
+  createCollaboratorTasks,
+  createAssignmentMeeting,
+  type AssignmentCollabOptions
+} from '@/lib/assignments/collaboration';
 import type { Role, WorkshopArea, WorkshopAssignment, Workshop, WorkshopBlock, WorkshopModule } from '@platform/shared';
 import {
   normalizeWorkshopBlocks as toWorkshopBlocks,
@@ -1167,7 +1172,8 @@ export async function listWorkshopAreasForTenant(): Promise<WorkshopArea[]> {
 export async function assignWorkshopToStartupAction(
   workshopId: string,
   startupId: string,
-  dueDate?: string
+  dueDate?: string,
+  options?: AssignmentCollabOptions
 ): Promise<WorkshopActionState> {
   const user = await requireUser();
   if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
@@ -1181,7 +1187,17 @@ export async function assignWorkshopToStartupAction(
   }
   if (workshop.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
 
+  let startupName = 'bolaget';
   try {
+    const s = await pb.collection('startups').getOne<{ tenant: string; name?: string }>(startupId);
+    if (String(s.tenant) !== user.tenant) return { error: 'Åtkomst nekad.' };
+    startupName = s.name || startupName;
+  } catch {
+    return { error: 'Bolaget hittades inte.' };
+  }
+
+  try {
+    const instructions = options?.instructions?.slice(0, 2000) || '';
     const assignment = await pb.collection(PB_COLLECTIONS.workshopAssignments).create({
       tenant: user.tenant,
       workshop: workshopId,
@@ -1190,6 +1206,7 @@ export async function assignWorkshopToStartupAction(
       owner: user.id,
       status: 'planned',
       due_date: dueDate || null,
+      instructions,
       progress_json: {},
       answers_json: {},
       takeaway_json: {},
@@ -1209,13 +1226,40 @@ export async function assignWorkshopToStartupAction(
       due_date: dueDate || new Date().toISOString().slice(0, 10)
     });
 
-    await pb.collection(PB_COLLECTIONS.workshopAssignments).update(String(assignment.id), {
-      activity: activity.id
-    });
+    // ── Samarbete: medarbetar-tasks + ev. möte (CLAUDE.md § 18.4) ──────────
+    const update: Record<string, unknown> = { activity: activity.id };
+    const collaboratorIds = options?.collaboratorIds ?? [];
+    if (collaboratorIds.length > 0) {
+      const linked = await createCollaboratorTasks({
+        pb,
+        tenantId: user.tenant,
+        startupId,
+        collaboratorIds,
+        description: `Workshop: ${workshop.title} – ${startupName}`,
+        dueDate
+      });
+      if (linked.length > 0) update.collaborators = linked;
+    }
+    if (options?.meeting?.title?.trim()) {
+      const meetingId = await createAssignmentMeeting({
+        pb,
+        tenantId: user.tenant,
+        startupId,
+        organizerId: user.id,
+        collaboratorIds,
+        meeting: options.meeting,
+        eventType: 'workshop'
+      });
+      if (meetingId) update.meeting = meetingId;
+    }
+
+    await pb.collection(PB_COLLECTIONS.workshopAssignments).update(String(assignment.id), update);
 
     revalidatePath('/education');
     revalidatePath('/dashboard');
     revalidatePath('/aktivitet');
+    revalidatePath('/pagaende');
+    revalidatePath('/inkorg');
     revalidatePath(`/startups/${startupId}`);
     return { assignmentId: String(assignment.id) };
   } catch (err) {
