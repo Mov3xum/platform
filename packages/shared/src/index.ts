@@ -1256,6 +1256,6 @@ export { movexumPalette, typography as brandTypography } from './design/tokens';
 // ─── Workshop/utbildning-hjälpare (ren logik, enhetstestad) ──────────────────
 export * from './workshop';
 export * from './education-documents';
-
 // ─── De minimis-modul (ren beräkningslogik, enhetstestad) ────────────────────
 export * from './de-minimis';
+export * from './agreements';

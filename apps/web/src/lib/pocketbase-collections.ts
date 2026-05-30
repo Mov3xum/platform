@@ -25,5 +25,7 @@ export const PB_COLLECTIONS = {
   deMinimisRegelverk: 'de_minimis_regelverk_collection',
   deMinimisUnits: 'de_minimis_units_collection',
   deMinimisUnitOrgnr: 'de_minimis_unit_orgnr_collection',
-  deMinimisStod: 'de_minimis_stod_collection'
+  deMinimisStod: 'de_minimis_stod_collection',
+  agreements: 'agreements_collection',
+  agreementSignatures: 'agreement_signatures_collection'
 } as const;

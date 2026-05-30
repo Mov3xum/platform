@@ -43,7 +43,8 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'de_minimis_units',
   'de_minimis_unit_orgnr',
   'de_minimis_stod',
-  'de_minimis_regelverk'
+  'de_minimis_regelverk',
+  'agreement_signatures' // signeringsbevis: signer_email + ip_hash (1700000094)
 ]);
 
 /**

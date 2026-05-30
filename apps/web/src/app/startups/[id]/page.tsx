@@ -38,8 +38,6 @@ import {
 import {
   activityStatusLabels,
   activityTypeLabels,
-  agreementKindLabels,
-  agreementStatusLabels,
   milestoneCategoryLabels,
   milestoneStatusLabels,
   toolRunStatusLabels,
@@ -60,6 +58,7 @@ import type {
 import { educationDocumentKindLabels } from '@platform/shared';
 import { Icon } from '@/components/proto';
 import { DocumentCompleteButton } from '@/app/education/documents/DocumentCompleteButton';
+import { AgreementsSection, type AgreementView } from '@/components/intric/AgreementsSection';
 import { pbFileUrl } from '@/lib/pb-file';
 
 interface StartupRecord {
@@ -176,6 +175,12 @@ interface AgreementRecord {
   status: AgreementStatus;
   signed_at?: string;
   expires_at?: string;
+  file?: string;
+  requires_company_signature?: boolean;
+  requires_movexum_signature?: boolean;
+  company_signed_at?: string;
+  movexum_signed_at?: string;
+  created: string;
 }
 
 interface TeamMemberRecord {
@@ -277,6 +282,14 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   const isLinkedMember =
     hasRole(user.roles, ['startup_member']) && user.linkedStartups.includes(id);
   const canCompleteDocs = canManageDocs || isLinkedMember;
+  // Avtalssignering (§ in-app AES): staff signerar Movexum-parten, en länkad
+  // bolagsmedlem signerar bolagsparten.
+  const canDeleteAgreements = hasRole(user.roles, ['admin', 'incubator_lead']);
+  const agreementSignParty: 'company' | 'movexum' | null = canManageDocs
+    ? 'movexum'
+    : isLinkedMember
+      ? 'company'
+      : null;
 
   let startup: StartupRecord;
   try {
@@ -324,7 +337,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     }),
     pb.collection('agreements').getList<AgreementRecord>(1, 50, {
       filter: `startup = "${id}"`,
-      sort: '-signed_at'
+      sort: '-created'
     }),
     pb.collection('partner_engagements').getList<PartnerEngagementRecord>(1, 50, {
       filter: `startup = "${id}"`,
@@ -377,6 +390,21 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   const activities = activitiesResult.status === 'fulfilled' ? activitiesResult.value : emptyList;
   const notes = notesResult.status === 'fulfilled' ? notesResult.value : emptyList;
   const agreements = agreementsResult.status === 'fulfilled' ? agreementsResult.value : emptyList;
+  const agreementViews: AgreementView[] = (agreements.items as AgreementRecord[]).map((a) => ({
+    id: a.id,
+    title: a.title,
+    kind: a.kind,
+    status: a.status,
+    hasFile: Boolean(a.file),
+    // Befintliga (pre-signering) avtal saknar requires-flaggor → default:
+    // bara Movexum-parten krävs så de inte felaktigt visas som "väntar på bolaget".
+    requiresCompany: a.requires_company_signature === true,
+    requiresMovexum: a.requires_movexum_signature !== false,
+    companySignedAt: a.company_signed_at,
+    movexumSignedAt: a.movexum_signed_at,
+    expiresAt: a.expires_at,
+    createdAt: a.created
+  }));
   const engagements = engagementsResult.status === 'fulfilled' ? engagementsResult.value : emptyList;
   const toolActivities = toolActivitiesResult.status === 'fulfilled' ? toolActivitiesResult.value : emptyList;
   const workshopAssignments =
@@ -1078,24 +1106,15 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
         </Section>
 
         <Section id="agreements" title="Avtal">
-          {agreements.items.length === 0 ? (
-            <Empty>Inga avtal registrerade.</Empty>
-          ) : (
-            <ul className="space-y-3">
-              {agreements.items.map((a) => (
-                <li key={a.id} className="flex items-center justify-between rounded-2xl border border-default p-4">
-                  <div>
-                    <p className="font-medium text-foreground">{a.title}</p>
-                    <p className="text-xs text-foreground-subtle">
-                      {agreementKindLabels[a.kind]} ·{' '}
-                      {a.signed_at ? `signerat ${new Date(a.signed_at).toLocaleDateString('sv-SE')}` : 'osignerat'}
-                    </p>
-                  </div>
-                  <StatusPill label={agreementStatusLabels[a.status]} variant={a.status === 'signed' ? 'success' : a.status === 'expired' || a.status === 'terminated' ? 'danger' : 'info'} />
-                </li>
-              ))}
-            </ul>
-          )}
+          <AgreementsSection
+            startupId={id}
+            startupName={startup.name}
+            agreements={agreementViews}
+            canManage={canManageDocs}
+            canDelete={canDeleteAgreements}
+            signParty={agreementSignParty}
+            defaultSignerName={user.name}
+          />
         </Section>
 
         <Section id="partners" title="Kapital">
