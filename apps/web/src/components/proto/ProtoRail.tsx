@@ -8,6 +8,7 @@ import { StartupSwitcher, type SwitchableStartup } from './StartupSwitcher';
 
 const moduleIcons: Record<string, string> = {
   idag: 'message',
+  min_oversikt: 'home',
   inkorg: 'home',
   pagaende: 'spark',
   uppdrag: 'flow',

@@ -78,6 +78,8 @@ function revalidateFor(startupId: string) {
   revalidatePath('/de-minimis');
   revalidatePath(`/de-minimis/${startupId}`);
   revalidatePath(`/startups/${startupId}`);
+  // De minimis-sektionen är även inbäddad på bolagsmedlemmens "Mitt bolag".
+  revalidatePath('/min-oversikt');
 }
 
 // ─── Enheter (single undertaking) ────────────────────────────────────────────

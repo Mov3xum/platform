@@ -2090,6 +2090,8 @@ prövning görs alltid av stödgivaren (disclaimer visas i UI och i PDF:en).
 | `apps/web/src/lib/actions/de-minimis.ts` | Server actions: enhet/org.nr/stöd CRUD med kanBevilja-blockering |
 | `apps/web/src/app/de-minimis/page.tsx` | Översikt per bolag (samlad summa-chip) |
 | `apps/web/src/app/de-minimis/[startupId]/page.tsx` | Dashboard per bolag (barer, lista, formulär, försäkran) |
+| `apps/web/src/app/startups/[id]/DeMinimisSection.tsx` | **Inbäddad** modul på bolagskortet (barer + alla formulär inline) — återanvänder samma klientformulär/`DeMinimisBars`/`summarize` (§ 20.5) |
+| `apps/web/src/app/min-oversikt/page.tsx` | "Mitt bolag" — bolagsmedlemmens samlade vy (§ 21bis) |
 | `apps/web/src/app/api/de-minimis/units/[unitId]/forsakran/route.ts` | Genererar försäkran-PDF (auth + tenant) |
 | `backend/pocketbase-schema/migrations/1700000093–095_*` | Collections + seed |
 
@@ -2148,6 +2150,46 @@ prövning görs alltid av stödgivaren (disclaimer visas i UI och i PDF:en).
   är deterministisk rendering, ingen AI-inferens; därför INGEN AI-disclaimer,
   utan en juridisk "internt stödverktyg"-footer).
 - **Migrationer:** nya filnummer (1700000093–095), oföränderliga.
+
+### 20.5 Inbäddning på bolagskortet + "Mitt bolag"
+
+Hela de minimis-modulen (progress-barer som läser summorna via `summarize`
+**och** alla ifyllbara formulär — skapa enhet, lägg till stöd, hantera org.nr,
+generera försäkran) är inbäddad direkt på bolagskortet (`/startups/[id]`,
+sektion `#de-minimis`, med ankarpost i sidnavet) via den delade server-
+komponenten `DeMinimisSection`. Den **återanvänder** de befintliga
+klientformulären (`AddStodForm`, `CreateUnitForm`, `OrgnrManager`, `StodList`,
+`UnitActions`) och `DeMinimisBars` — ingen duplicerad logik. Reads går via
+`getServerPb()` så RLS (§ 21) gäller; filtervärden escapas med `escFilter`
+(och scopas hårdare än den fristående sidan: `unit.startup = "<id>"`). En
+"Öppna fullskärm"-länk leder fortfarande till `/de-minimis/[startupId]`.
+
+Samma `DeMinimisSection` återanvänds på **"Mitt bolag"** (`/min-oversikt`, se
+§ 21bis). Skrivflödet är oförändrat säkert oavsett renderingsyta:
+server-actionerna re-verifierar `tenant` + `canManageStartupDeMinimis`
+(medlemskap) och kör `kanBevilja` server-side innan skrivning — klienten är
+aldrig säkerhetsgränsen. `revalidateFor` busta:r `/de-minimis`,
+`/startups/[id]` **och** `/min-oversikt`; formulären kör dessutom
+`router.refresh()` så de inbäddade barerna uppdateras direkt.
+
+---
+
+## 21bis. "Mitt bolag" — bolagsmedlemmens samlade vy
+
+`/min-oversikt` (modul `min_oversikt`, titel **"Mitt bolag"**) är
+`startup_member`-rollens hemvy och samlar allt som rör det egna bolaget:
+bolagsheader (fas/status/IRL/nästa steg + länk till bolagskortet),
+**de minimis-status** (inbäddad `DeMinimisSection`, § 20.5), **tilldelade
+verktyg** (filtrerade via `canRunTool({ isLinkedStartup: true })`),
+**tilldelade utbildningsdokument** (`education_document_assignments` med
+slutför-knapp) och **egna/bolagets öppna uppgifter** (`tasks`).
+
+**Routing/RBAC:** modulen ligger i `coreModules` + `RAIL_GROUPS` ("Översikt")
+med `rolesAllowed` = staff/observer/`startup_member`. Sidan
+`redirect('/chatt')` när modulen saknas. Allt scopas till
+`linkedStartups[0]`; staff utan länkat bolag skickas till `/startups`. Vyn
+exponerar aldrig portföljbred data — bara medlemmens eget bolag (§ 21-
+isolering). Riskklass: minimal (ingen AI-funktion).
 
 ---
 

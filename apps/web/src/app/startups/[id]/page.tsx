@@ -60,6 +60,8 @@ import { Icon } from '@/components/proto';
 import { DocumentCompleteButton } from '@/app/education/documents/DocumentCompleteButton';
 import { AgreementsSection, type AgreementView } from '@/components/intric/AgreementsSection';
 import { pbFileUrl } from '@/lib/pb-file';
+import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
+import { DeMinimisSection } from './DeMinimisSection';
 
 interface StartupRecord {
   id: string;
@@ -658,6 +660,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ['#moten', `Möten & uppgifter (${tasks.totalItems})`],
           ['#phase-history', `Fashistorik (${phaseHistory.totalItems})`],
           ['#kunskap', 'Kunskap'],
+          ['#de-minimis', 'De minimis'],
           ['#notes', `Anteckningar (${notes.totalItems})`],
           ['#activities', `Aktiviteter (${activities.totalItems})`],
           ['#documents', 'Dokument'],
@@ -938,12 +941,32 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               signed={startup.approved_de_minimis}
             />
           </ul>
-          <Link
-            href={`/de-minimis/${startup.id}`}
+          <a
+            href="#de-minimis"
             className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-link transition hover:bg-canvas-subtle"
           >
-            Hantera de minimis-stöd
-          </Link>
+            Till de minimis-liggaren
+          </a>
+        </Section>
+
+        <Section id="de-minimis" title="De minimis">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-foreground-muted">
+              Stöd av mindre betydelse per enhet (&quot;ett enda företag&quot;) — rullande
+              treårssummor mot takbeloppen. Registrera stöd direkt här.
+            </p>
+            <Link
+              href={`/de-minimis/${startup.id}`}
+              className="inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
+            >
+              Öppna fullskärm <Icon name="external" size={14} />
+            </Link>
+          </div>
+          <DeMinimisSection
+            startupId={id}
+            startupName={startup.name}
+            canManage={canManageStartupDeMinimis(user, id)}
+          />
         </Section>
 
         <Section id="documents" title="Dokument">

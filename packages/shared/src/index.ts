@@ -1183,7 +1183,7 @@ export interface ModuleGroup {
 }
 
 export const RAIL_GROUPS: ModuleGroup[] = [
-  { label: 'Översikt', modules: ['idag', 'inkorg', 'pagaende', 'filer', 'inflode', 'uppdrag'] },
+  { label: 'Översikt', modules: ['idag', 'min_oversikt', 'inkorg', 'pagaende', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'insights', 'integrationer', 'installningar'] }
@@ -1196,6 +1196,14 @@ export const coreModules: ModuleDefinition[] = [
     description: 'AI-dashboardchatt — fråga, sammanställ och delegera till agenter och connectors.',
     rolesAllowed: ALL_ROLES,
     route: '/chatt'
+  },
+  {
+    id: 'min_oversikt',
+    title: 'Mitt bolag',
+    description:
+      'Bolagsmedlemmens samlade vy — bolagsstatus, de minimis-liggare, tilldelade verktyg och utbildningsdokument samt egna uppgifter.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
+    route: '/min-oversikt'
   },
   {
     id: 'inkorg',
