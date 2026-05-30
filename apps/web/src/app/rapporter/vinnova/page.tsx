@@ -208,7 +208,10 @@ export default async function VinnovaLagesredovisningPage({
         )}
 
         <div className="text-[11.5px] text-foreground-subtle">
-          Se{' '}
+          <Link href="/admin/import-vinnova" className="text-link hover:underline">
+            Importera historiska arbetsfiler
+          </Link>{' '}
+          (tid, kostnader, lägesredovisning) ·{' '}
           <Link href="/rapporter" className="text-link hover:underline">
             narrativa rapporter
           </Link>{' '}

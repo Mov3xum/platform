@@ -100,6 +100,43 @@ export function formatReadinessCell(axis: ReadinessAxis, level: number | undefin
   return `${prefix} ${level}. ${READINESS_SCALE[axis][level]}`;
 }
 
+// ─── Parsning av Vinnova-mallens textceller (för Excel-import) ────────────────
+
+/**
+ * Extraherar readiness-nivån (1–9) ur en cell som "CRL 7. ...", "SRL4. ..."
+ * eller "TMRL 5. ...". Tar första heltalet 1–9. Tom/ogiltig → null.
+ */
+export function parseReadinessLevel(cell: string | undefined | null): number | null {
+  if (!cell) return null;
+  const m = String(cell).match(/(\d+)/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return n >= 1 && n <= 9 ? n : null;
+}
+
+/** Mappar Vinnovas affärsinriktnings-etikett (frisktext) → enum, eller null. */
+export function mapVinnovaFocus(label: string | undefined | null): VinnovaFocus | null {
+  if (!label) return null;
+  const s = String(label).toLowerCase();
+  if (s.includes('agro')) return 'agro';
+  if (s.includes('industriell')) return 'industriell_teknik';
+  if (s.includes('life science') || s.includes('biotech') || s.includes('medtech')) return 'life_science';
+  if (s.includes('miljö') || s.includes('miljo') || s.includes('energi')) return 'miljo_energi';
+  if (s.includes('mjukvara') || s.includes('ict')) return 'mjukvara_ict';
+  if (s.includes('upplevelse') || s.includes('turism')) return 'upplevelseindustri';
+  if (s.includes('övrigt') || s.includes('ovrigt') || s.includes('annat')) return 'ovrigt';
+  return null;
+}
+
+/** Mappar statsstödsgrundens etikett (frisktext) → enum, eller null. */
+export function mapStateAidBasis(label: string | undefined | null): StateAidBasis | null {
+  if (!label) return null;
+  const s = String(label).toLowerCase();
+  if (s.includes('mindre betydelse') || s.includes('de minimis')) return 'de_minimis';
+  if (s.includes('artikel 22') || s.includes('art. 22') || s.includes('gber')) return 'art22';
+  return null;
+}
+
 // ─── Datum-hjälpare (date-only, inga tidszoner) ──────────────────────────────
 
 /** Normaliserar en ISO-/PB-datumsträng till 'YYYY-MM-DD' (eller null). */

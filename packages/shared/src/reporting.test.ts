@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import {
   PROGRAM_START,
   formatReadinessCell,
+  parseReadinessLevel,
+  mapVinnovaFocus,
+  mapStateAidBasis,
   dateOnly,
   inWindow,
   intersect,
@@ -210,4 +213,32 @@ test('buildLagesredovisning summerar över alla bolag', () => {
 
 test('PROGRAM_START är programperiodens start', () => {
   assert.equal(PROGRAM_START, '2025-07-01');
+});
+
+// ── Parsning för Excel-import ─────────────────────────────────────────────────
+
+test('parseReadinessLevel tar nivån ur Vinnova-textceller', () => {
+  assert.equal(parseReadinessLevel('CRL 7. Customers in extended product testing'), 7);
+  assert.equal(parseReadinessLevel('SRL4. Business concept with embedded'), 4); // utan mellanslag
+  assert.equal(parseReadinessLevel('TMRL 5. Initial founding team'), 5);
+  assert.equal(parseReadinessLevel('SRL 1: None or very low awareness'), 1);
+  assert.equal(parseReadinessLevel(''), null);
+  assert.equal(parseReadinessLevel(undefined), null);
+});
+
+test('mapVinnovaFocus mappar mallens etiketter', () => {
+  assert.equal(mapVinnovaFocus('Miljö & energi'), 'miljo_energi');
+  assert.equal(mapVinnovaFocus('Mjukvara / ICT'), 'mjukvara_ict');
+  assert.equal(mapVinnovaFocus('Industriell teknik (material, nano, produktion, rymd, säkerhet)'), 'industriell_teknik');
+  assert.equal(mapVinnovaFocus('Life Science (e-hälsa, biotech, pharma, medtech)'), 'life_science');
+  assert.equal(mapVinnovaFocus('Övrigt'), 'ovrigt');
+  assert.equal(mapVinnovaFocus('Agro (från jord till bord)'), 'agro');
+  assert.equal(mapVinnovaFocus('okänt'), null);
+});
+
+test('mapStateAidBasis mappar stödgrund', () => {
+  assert.equal(mapStateAidBasis('Stöd av mindre betydelse'), 'de_minimis');
+  assert.equal(mapStateAidBasis('Artikel 22'), 'art22');
+  assert.equal(mapStateAidBasis('Berättigade statststöd enligt artikel 22 i GBER'), 'art22');
+  assert.equal(mapStateAidBasis(''), null);
 });

@@ -450,11 +450,25 @@ Levererat i denna PR — den dynamiska, data-kopplade Vinnova-lägesredovisninge
 - `apps/web/src/app/rapporter/vinnova/` — tabellvy med per-rad datakvalitetsflaggor,
   periodval och xlsx-export. Länkad från `/rapporter`.
 
-**Återstår (Fas 4–5, ej i denna PR):** bokföringsintegration (Fortnox/Visma) för
-verifieringskostnader, Excel-importörer för de tre historiska arken, schemalagd
-prep-agent/event-triggers, e-AidRegister-export, InkRapp-aggregat + Tillväxtverket-
-halvårsrapport, samt AI-kontext-whitelist (§10.5 p.10) för de nya fälten (idag
-konsumeras de bara av den deterministiska rapportmotorn, inte av AI-prompter).
+**Fas 4 — importörer & e-AidRegister (implementerat):**
+- `apps/web/src/lib/import/vinnova.ts` — auto-detekterar och parsar de tre
+  historiska arbetsfilerna (lägesredovisning → backfill av startups +
+  statsstödsperioder + readiness; inrapporterad tid → `service_time_entries`;
+  kostnader bolag, kolumnen ”Externa tjänster” → `startup_service_costs`).
+  Rena parsnings-hjälpare (`parseReadinessLevel`/`mapVinnovaFocus`/
+  `mapStateAidBasis`) ligger i `reporting.ts` och är enhetstestade.
+- `apps/web/src/lib/actions/import-vinnova.ts` — preview→commit, staff-only,
+  idempotent (org-nr/normaliserat namn-matchning, dedupe på naturliga nycklar).
+- `apps/web/src/app/admin/import-vinnova/` — uppladdnings-UI.
+- `apps/web/src/lib/reporting/eair.ts` + `exportEAidRegisterAction` — exporterar
+  de minimis-stöd (namn/org-nr/SNI/belopp/beslutsdatum) som xlsx för
+  e-AidRegister-rapportering (20-dagarskravet), knapp på `/rapporter/vinnova`.
+
+**Återstår (Fas 5 + senare):** bokföringsintegration (Fortnox/Visma) för
+verifieringskostnader (tas separat), schemalagd prep-agent/event-triggers,
+InkRapp-aggregat + Tillväxtverket-halvårsrapport, samt AI-kontext-whitelist
+(§10.5 p.10) för de nya fälten (idag konsumeras de bara av den deterministiska
+rapportmotorn, inte av AI-prompter).
 
 ## 10. Källor
 

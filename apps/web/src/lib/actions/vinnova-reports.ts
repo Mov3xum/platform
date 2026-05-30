@@ -6,6 +6,7 @@ import { hasRole } from '@/lib/rbac';
 import { saveGeneratedFile } from '@/lib/documents/save';
 import { buildVinnovaLagesredovisning, FALLBACK_HOURLY_RATE } from '@/lib/reporting/dataset';
 import { renderLagesredovisning } from '@/lib/reporting/export';
+import { buildEAidRegister, renderEAidRegister } from '@/lib/reporting/eair';
 import type {
   GeneratedFileRef,
   Role,
@@ -68,6 +69,37 @@ export async function exportLagesredovisningAction(input: {
     return { ok: true, fileRef, downloadUrl: `/api/files/${encodeURIComponent(fileRef.user_file_id)}` };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte generera rapporten.' };
+  }
+}
+
+/**
+ * Genererar e-AidRegister-underlaget (de minimis-stöd) som xlsx och sparar
+ * det i användarens Filer. Valfritt filtrerat på beslutsdatum.
+ */
+export async function exportEAidRegisterAction(input?: {
+  from?: string;
+  to?: string;
+}): Promise<ReportingActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_WRITE)) return { error: 'Åtkomst nekad.' };
+  const from = input?.from && validDate(input.from) ? input.from : undefined;
+  const to = input?.to && validDate(input.to) ? input.to : undefined;
+
+  const pb = await getServerPb();
+  try {
+    const dataset = await buildEAidRegister(pb, user.tenant, { from, to });
+    const rendered = await renderEAidRegister(dataset);
+    const fileRef = await saveGeneratedFile({
+      pb,
+      tenant: user.tenant,
+      ownerUserId: user.id,
+      rendered,
+      docKind: 'xlsx'
+    });
+    revalidatePath('/filer');
+    return { ok: true, fileRef, downloadUrl: `/api/files/${encodeURIComponent(fileRef.user_file_id)}` };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Kunde inte generera e-AidRegister-underlaget.' };
   }
 }
 
