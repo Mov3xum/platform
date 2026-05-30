@@ -1186,7 +1186,7 @@ export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['idag', 'min_oversikt', 'inkorg', 'pagaende', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'insights', 'integrationer', 'installningar'] }
+  { label: 'System', modules: ['agenter', 'insights', 'integrationer', 'anvandare', 'installningar'] }
 ];
 
 export const coreModules: ModuleDefinition[] = [
@@ -1311,6 +1311,13 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Anslut externa tjänster och bygg din organisations unika digitala miljö.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'startup_member'],
     route: '/integrationer'
+  },
+  {
+    id: 'anvandare',
+    title: 'Användare',
+    description: 'Hantera plattformsanvändare — skapa bolagsmedlemmar och tilldela bolag.',
+    rolesAllowed: ['admin', 'incubator_lead'],
+    route: '/admin/users'
   },
   {
     id: 'installningar',
