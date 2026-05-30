@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { getSuperuserPb, requireUser } from '@/lib/auth.server';
+import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { updateActivityField } from '@/lib/core/write/activities';
 import type { Actor } from '@/lib/core/write/types';
@@ -15,11 +15,13 @@ const ACTIVITY_STAFF_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
  * Flytta en aktivitet mellan board-kolumner (drag-and-drop på "Min
  * översikt").
  *
- * `activities`-kollektionens updateRule är `null` → endast superuser får
- * skriva via API:t. Vi enforce:ar därför RBAC (tenant + staff/ägare) i
- * koden INNAN superuser-klienten används; koden är säkerhetsgränsen, inte
- * PB-regeln. Det delade, auditade skrivlagret (`updateActivityField`) kör
- * dessutom fält-whitelist + tenant-revalidering + audit-logg.
+ * `activities`-kollektionens update/deleteRule relaxades i migration
+ * 1700000093 till auth-only-form (PB v0.23:s rule-eval-bugg på
+ * relation-join `startup.tenant` + `?=`-roller nekade annars writes
+ * sporadiskt → kortet hoppade tillbaka). Tenant + staff/ägare enforce:as
+ * därför i koden här INNAN PB-anropet — koden är säkerhetsgränsen. Det
+ * delade, auditade skrivlagret (`updateActivityField`) kör dessutom
+ * fält-whitelist + tenant-revalidering + audit-logg.
  */
 export async function updateActivityStatusAction(
   activityId: string,
@@ -31,12 +33,9 @@ export async function updateActivityStatusAction(
     return { ok: false, error: 'Aktiviteter har ingen sådan status.' };
   }
 
-  const pb = await getSuperuserPb();
-  if (!pb) {
-    return { ok: false, error: 'Kunde inte uppdatera aktiviteten.' };
-  }
+  const pb = await getServerPb();
 
-  // RBAC i koden (tenant + staff/ägare) innan privilegierad skrivning.
+  // RBAC i koden (tenant + staff/ägare) innan skrivning.
   let row: { id: string; owner?: string; expand?: { startup?: { tenant?: string } } };
   try {
     row = await pb.collection('activities').getOne(activityId, {
