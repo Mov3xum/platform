@@ -43,6 +43,17 @@ test('alla compass_*-besökardatakollektioner är denylistade', () => {
   }
 });
 
+test('de minimis-kollektionerna är denylistade (org.nr kan vara personnummer)', () => {
+  for (const name of [
+    'de_minimis_units',
+    'de_minimis_unit_orgnr',
+    'de_minimis_stod',
+    'de_minimis_regelverk'
+  ]) {
+    assert.equal(isDeniedCollection(name), true, `${name} ska vara denylistad`);
+  }
+});
+
 test('domänkollektioner som SKA vara läsbara är inte denylistade', () => {
   for (const name of ['startups', 'tool_runs', 'activities', 'startup_financials']) {
     assert.equal(isDeniedCollection(name), false, `${name} ska vara läsbar`);

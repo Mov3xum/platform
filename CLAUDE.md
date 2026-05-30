@@ -1974,3 +1974,89 @@ lagras på tilldelningens `meeting`-fält.
   profilering).
 - **Migrationer:** nya filnummer (1700000091–092), oföränderliga; fälten
   speglas i `scripts/setup-via-api.mjs` för bootstrap-paritet.
+
+---
+
+## 19. De minimis-modul (stöd av mindre betydelse)
+
+### 19.1 Översikt
+
+`/de-minimis` låter varje bolag hålla koll på sin rullande treårssumma av
+de minimis-stöd mot EU:s takbelopp, varnas innan taket nås, blockeras om ett
+nytt stöd skulle överskrida det, och generera en **de minimis-försäkran**
+(PDF) inför ny stödansökan. Det finns ingen central uppslagstjänst — ansvaret
+ligger på företaget (eAir, Tillväxtanalys, kontrollerar takbeloppet först
+fr.o.m. 2029). Modulen ersätter den manuella Excel-sammanställningen.
+
+**Modulen är ett internt stödverktyg, inte ett juridiskt avgörande** — slutlig
+prövning görs alltid av stödgivaren (disclaimer visas i UI och i PDF:en).
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/de-minimis.ts` | Ren, enhetstestad beräkningslogik (summering, kanBevilja, validering, regelverks-defaults) |
+| `packages/shared/src/de-minimis.test.ts` | Enhetstester (rullande 3 år, beskattningsår, samlat tak, varningsnivåer) |
+| `apps/web/src/lib/de-minimis/data.ts` | `loadRegelverk` + `canManageStartupDeMinimis` (server-only) |
+| `apps/web/src/lib/de-minimis/forsakran-pdf.ts` | Dedikerad PDF-byggare för försäkran (pdf-lib, juridisk footer — INTE AI-disclaimer) |
+| `apps/web/src/lib/actions/de-minimis.ts` | Server actions: enhet/org.nr/stöd CRUD med kanBevilja-blockering |
+| `apps/web/src/app/de-minimis/page.tsx` | Översikt per bolag (samlad summa-chip) |
+| `apps/web/src/app/de-minimis/[startupId]/page.tsx` | Dashboard per bolag (barer, lista, formulär, försäkran) |
+| `apps/web/src/app/api/de-minimis/units/[unitId]/forsakran/route.ts` | Genererar försäkran-PDF (auth + tenant) |
+| `backend/pocketbase-schema/migrations/1700000093–095_*` | Collections + seed |
+
+### 19.2 Datamodell
+
+- **`de_minimis_regelverk`** (1700000093, GLOBAL, ingen tenant) — konfigurerbar
+  katalog över de fyra förordningarna (`ALLMAN` 300k, `SGEI` 750k, `JORDBRUK`
+  50k, `FISKE` 30k EUR) med `period` (`RULLANDE_3AR`/`BESKATTNINGSAR_3`) och
+  `giltig_t_o_m`. Seedad; **taket kan uppdateras utan deploy** (PB-admin).
+  Skrivning admin-only; läsning för alla inloggade. `de-minimis.ts` har
+  defaults som fallback.
+- **`de_minimis_units`** (1700000094) — "ett enda företag" (single
+  undertaking). Grupperar flera org.nr under en bolagsprofil (`startup`).
+  Summeringen sker på enhetsnivå.
+- **`de_minimis_unit_orgnr`** (1700000094) — org.nr i en enhet. Unikt index
+  `(unit, organisationsnummer)`.
+- **`de_minimis_stod`** (1700000095) — en rad per mottaget stöd: `forordning`,
+  `stodgivare`, `beslutsdatum` (juridisk rätt, ej utbetalning), `belopp_eur`
+  (sanning, bruttobidragsekvivalent), `belopp_sek` + `valutakurs` (informativt),
+  `syfte`, `beslut_referens`, `dokument` (valfri fil), `registrerad_i_eair`
+  (förbereder framtida eAir-koppling).
+
+### 19.3 Beräkning (`de-minimis.ts`)
+
+- **Rullande 3 år** (`ALLMAN`/`SGEI`): summerar stöd där `beslutsdatum >
+  refDatum − 3 år` (strikt).
+- **Beskattningsår** (`JORDBRUK`/`FISKE`): innevarande kalenderår + två
+  föregående. *Exakt periodtolkning bör bekräftas mot Jordbruksverket innan
+  produktion.*
+- **Samlat tak:** sektorstöd inräknat får ett enda företag totalt max
+  **300 000 EUR** under rullande 3 år. Visas som egen bar + per-förordning.
+- **`kanBevilja`** blockerar nytt stöd som skulle överskrida förordnings- ELLER
+  samlat tak (referensdag = tilltänkt beslutsdatum). Server-actionen avvisar
+  med tydligt felmeddelande om hur mycket och vilket tak.
+- **Varningar:** gul ≥ 80 %, röd (orange — Movexum saknar röd) ≥ 95 %, "över"
+  vid överskridande. Bakåtdaterade poster **varnar men blockerar inte**.
+- **Valuta:** EUR är sanning. SEK + ECB-kurs lagras informativt; om EUR lämnas
+  tomt härleds det ur SEK/kurs. (ECB-auto-hämtning är ej i scope —
+  EU-suveränitet/nätverkspolicy; kursen matas in manuellt.)
+
+### 19.4 RBAC, GDPR och riskklass
+
+- **RBAC:** staff (admin/incubator_lead/coach/mentor) full åtkomst; en
+  `startup_member` hanterar bara sitt eget länkade bolag (verifieras i
+  server-action; PB-skrivregel är staff-only → superuser-fallback efter
+  verifierad länkning, samma mönster som § 18.3). `observer` read-only.
+  Bolagsmedlemmar kan bara **se** sina egna bolag; staff/observer ser alla.
+- **GDPR:** för aktiebolag är org-nr inte personuppgift (skäl 14); för enskild
+  firma motsvarar org-nr personnummer. Därför är **alla fyra de minimis-
+  collections denylistade i `lib/ai/redaction.ts`** (`organisationsnummer`
+  täcks inte av `org_nr`-substringmaskningen) — de når **aldrig** AI-kontexten.
+  Inga fält whitelistas i `lib/ai/context.ts`. Person nr lagras aldrig.
+  Rättslig grund: rättslig förpliktelse/berättigat intresse (efterlevnad av
+  statsstödsregler). Cascade-radering via `tenant`/`startup`.
+- **EU AI Act:** ingen AI-funktion i modulen → ingen riskklass (försäkran-PDF
+  är deterministisk rendering, ingen AI-inferens; därför INGEN AI-disclaimer,
+  utan en juridisk "internt stödverktyg"-footer).
+- **Migrationer:** nya filnummer (1700000093–095), oföränderliga.

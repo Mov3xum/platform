@@ -36,7 +36,14 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // Personliga/innehållstunga kollektioner — aldrig exponerade för agenter.
   'chat_threads', // privat konversationsinnehåll (1700000083)
   'user_files', // personliga filer, strikt ägaren-bara (1700000085)
-  'deep_jobs' // intern orkestrering (1700000084)
+  'deep_jobs', // intern orkestrering (1700000084)
+  // De minimis-modul (1700000093–095) — fristående efterlevnadsverktyg, inte
+  // underlag för AI-resonemang. `de_minimis_unit_orgnr.organisationsnummer`
+  // kan motsvara personnummer för enskild firma → hålls helt utanför AI.
+  'de_minimis_units',
+  'de_minimis_unit_orgnr',
+  'de_minimis_stod',
+  'de_minimis_regelverk'
 ]);
 
 /**

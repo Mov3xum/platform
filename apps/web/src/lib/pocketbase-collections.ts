@@ -20,5 +20,10 @@ export const PB_COLLECTIONS = {
   alumni: 'alumni_collection',
   missionComments: 'mission_comments_collection',
   notifications: 'notifications_collection',
-  startupPhaseHistory: 'startup_phase_history_collection'
+  startupPhaseHistory: 'startup_phase_history_collection',
+  // De minimis-modul (migrationer 1700000093–1700000095)
+  deMinimisRegelverk: 'de_minimis_regelverk_collection',
+  deMinimisUnits: 'de_minimis_units_collection',
+  deMinimisUnitOrgnr: 'de_minimis_unit_orgnr_collection',
+  deMinimisStod: 'de_minimis_stod_collection'
 } as const;
