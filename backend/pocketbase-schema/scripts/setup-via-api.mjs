@@ -714,17 +714,64 @@ await ensureCollection({
     { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'title', type: 'text', required: true, min: 1, max: 200 },
     { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['nda', 'incubator_agreement', 'ip_assignment', 'addendum', 'other'] },
-    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft', 'sent', 'signed', 'expired', 'terminated'] },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft', 'sent', 'partially_signed', 'signed', 'expired', 'terminated'] },
     { name: 'signed_at', type: 'date', required: false },
     { name: 'expires_at', type: 'date', required: false },
-    { name: 'file', type: 'file', required: false, maxSelect: 1, maxSize: 26214400, mimeTypes: ['application/pdf'] }
+    { name: 'file', type: 'file', required: false, maxSelect: 1, maxSize: 26214400, mimeTypes: ['application/pdf'] },
+    // In-app signering (1700000093) — avancerad elektronisk signatur
+    { name: 'assigned_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'assigned_to', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'sent_at', type: 'date', required: false },
+    { name: 'document_hash', type: 'text', required: false, max: 128 },
+    { name: 'requires_company_signature', type: 'bool', required: false },
+    { name: 'requires_movexum_signature', type: 'bool', required: false },
+    { name: 'company_signed_at', type: 'date', required: false },
+    { name: 'company_signed_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'movexum_signed_at', type: 'date', required: false },
+    { name: 'movexum_signed_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],
   indexes: ['CREATE INDEX idx_agreements_startup ON agreements (startup)'],
   listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  createRule: ANY_AUTH,
-  updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
+  // Staff-only create/update (matchar migration 1700000010 + skyddar de
+  // denormaliserade signeringsfälten/document_hash från manipulation av
+  // icke-staff vid direkt API-access; bolagsmedlemmens signaturskrivning går
+  // via server-action + superuser-fallback).
+  createRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_LEAD}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_LEAD}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && @request.auth.roles ?= "admin"`
+});
+
+// 10b. agreement_signatures (1700000094) — oföränderligt signeringsbevis (AES)
+await ensureCollection({
+  id: 'agreement_signatures_collection',
+  name: 'agreement_signatures',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'agreement', type: 'relation', required: true, collectionId: 'agreements_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'signer', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'party', type: 'select', required: true, maxSelect: 1, values: ['company', 'movexum'] },
+    { name: 'signer_name', type: 'text', required: true, max: 200 },
+    { name: 'signer_email', type: 'text', required: false, max: 200 },
+    { name: 'document_hash', type: 'text', required: true, max: 128 },
+    { name: 'signed_at', type: 'date', required: true },
+    { name: 'ip_hash', type: 'text', required: false, max: 128 },
+    { name: 'user_agent', type: 'text', required: false, max: 300 },
+    { name: 'intent_text', type: 'text', required: false, max: 500 },
+    { name: 'method', type: 'select', required: true, maxSelect: 1, values: ['aes', 'bankid'] }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_agreement_signatures_party ON agreement_signatures (agreement, party)',
+    'CREATE INDEX idx_agreement_signatures_startup ON agreement_signatures (startup)',
+    'CREATE INDEX idx_agreement_signatures_tenant ON agreement_signatures (tenant)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  updateRule: null,
+  deleteRule: null
 });
 
 // 11. milestones ------------------------------------------------------------
