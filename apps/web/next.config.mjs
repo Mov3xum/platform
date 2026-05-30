@@ -66,7 +66,10 @@ const nextConfig = {
     // Chat-bilagor (bilder base64-encoded + textfiler) — default 1 MB räcker inte
     serverActions: {
       bodySizeLimit: '32mb'
-    }
+    },
+    // Cap parallel webpack workers on memory-constrained Coolify hosts.
+    // Default is (number of CPUs - 1) which can OOM when many cores are available.
+    cpus: 2,
   },
   webpack: (config) => {
     // Make @-alias resolution explicit in all environments (including Docker/Coolify)

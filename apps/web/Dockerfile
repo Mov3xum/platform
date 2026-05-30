@@ -22,6 +22,11 @@ COPY package.json yarn.lock ./
 COPY apps/web ./apps/web
 COPY packages/shared ./packages/shared
 
+# Pin NODE_ENV so Coolify cannot inject a non-standard value (e.g. "staging")
+# which prevents webpack from using production-mode memory optimisations.
+ENV NODE_ENV=production
+# Suppress telemetry network calls during build.
+ENV NEXT_TELEMETRY_DISABLED=1
 # max-old-space-size must cover both `next build` and the separate
 # trace-collector child process. 1536 MB OOM:ade i "Collecting build
 # traces..." på Coolify-hosten — bumpa till 4096 och exportera så att
