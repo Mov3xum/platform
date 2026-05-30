@@ -2222,20 +2222,30 @@ läckan som § 21 stänger.
 ### 21.3 Regelmönster (PB)
 
 ```js
+// VIKTIGT: använd `:each ?=` (INTE `?=`) mot multi-värde-fält i regler.
 const STAFF_OR_OBSERVER =
-  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "mentor" || @request.auth.roles ?= "observer")';
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "mentor" || @request.auth.roles:each ?= "observer")';
 // startups själv:
-`${ANY_AUTH} && ${TENANT} && (${STAFF_OR_OBSERVER} || @request.auth.linked_startups ?= id)`
+`${ANY_AUTH} && ${TENANT} && (${STAFF_OR_OBSERVER} || @request.auth.linked_startups:each ?= id)`
 // barn med startup-relation (egen tenant ELLER startup.tenant):
-`${ANY_AUTH} && ${TENANT} && (${STAFF_OR_OBSERVER} || @request.auth.linked_startups ?= startup)`
+`${ANY_AUTH} && ${TENANT} && (${STAFF_OR_OBSERVER} || @request.auth.linked_startups:each ?= startup)`
 // tenant-bred data medlem ej får läsa:
 `${ANY_AUTH} && ${TENANT} && ${STAFF_OR_OBSERVER}`
 ```
 
-**PB v0.23-bugg (§ 10.3 / migration 1700000049):** `?=`-roll-checks får ALDRIG
-ligga i **createRules**. Det gäller inte list/view/update/delete — migration
-1700000096 rör därför bara listRule/viewRule (+ `startup_kpis.updateRule` där en
-medlem redan får skriva egen-bolagsdata, § 15.5). Alla createRules lämnas orörda.
+**PB v0.23.4-operatorbugg (§ 10.3 / migrationer 1700000049 + 1700000106):**
+`?=`-operatorn matchar INTE multi-select/multi-relation-fält som
+`@request.auth.roles` eller `@request.auth.linked_startups` i PocketBase v0.23.4
+— uttrycket blir tyst falskt även för en matchande användare (empiriskt
+bekräftat mot pocketbase 0.23.4). Använd därför **`:each ?=`** (membership över
+varje värde) i ALLA regler — list/view/update OCH create. Migration 1700000096
+satte ursprungligen list/view (+ `startup_kpis.updateRule`) med `?=`, vilket tyst
+nekade *alla* (även admin) → bolagskortet gav 404 och listan blev tom. Migration
+**1700000106** rättar dessa till `:each ?=`. (`@request.auth.id = owner`/`=
+mentor` mot single-relation berörs inte — skalär `=` fungerar.) `?=`-roll-checks
+får dessutom ALDRIG ligga i **createRules** (de togs bort i 1700000049 — roll-
+enforcement görs i server-actions). Alla createRules lämnas orörda av 1700000096/
+1700000106.
 
 ### 21.4 Kollektioner
 

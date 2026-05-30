@@ -553,10 +553,13 @@ const usersId = usersCol.id;
 // tenant-bred read; en ren startup_member ser bara sina länkade bolag. Sanningen
 // är migration 1700000096 — denna bootstrap speglar den för de viktigaste
 // kollektionerna (startups + barn med direkt startup-relation).
+// OBS: `:each ?=` (INTE `?=`) — PocketBase v0.23.4 matchar inte `?=` mot
+// multi-select/multi-relation-fält (samma bugg som migration 1700000049/
+// 1700000106). `:each ?=` är den korrekta operatorn för multi-värde-membership.
 const STAFF_OR_OBSERVER_READ =
-  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "mentor" || @request.auth.roles ?= "observer")';
-const MEMBER_OF_STARTUP_REL = '@request.auth.linked_startups ?= startup';
-const MEMBER_OF_THIS_REL = '@request.auth.linked_startups ?= id';
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "mentor" || @request.auth.roles:each ?= "observer")';
+const MEMBER_OF_STARTUP_REL = '@request.auth.linked_startups:each ?= startup';
+const MEMBER_OF_THIS_REL = '@request.auth.linked_startups:each ?= id';
 // list/view scopade till medlemmens egna bolag:
 const READ_OWN_STARTUP_DIRECT = `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP_REL})`;
 const READ_OWN_STARTUP_VIA = `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP_REL})`;
