@@ -27,7 +27,7 @@ const ANALYTICS_WINDOW_DAYS = 90;
 
 export default async function InflödePage() {
   const user = await requireUser();
-  // Bolagsisolering (CLAUDE.md § 20): inflöde/leads är tenant-bred och får
+  // Bolagsisolering (CLAUDE.md § 21): inflöde/leads är tenant-bred och får
   // aldrig nås av en ren startup_member.
   if (!canAccessModuleForUser(user.roles, 'inflode', user.disabledModules)) {
     redirect('/dashboard');

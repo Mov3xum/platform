@@ -13,6 +13,7 @@ const moduleIcons: Record<string, string> = {
   uppdrag: 'flow',
   inflode: 'spark',
   startups: 'people',
+  de_minimis: 'shield',
   investerare: 'graph',
   events: 'spark',
   community: 'people',

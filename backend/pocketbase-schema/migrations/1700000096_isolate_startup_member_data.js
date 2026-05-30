@@ -1,7 +1,7 @@
 /// <reference path="../pb_data/types.d.ts" />
 
 // =============================================================================
-// Bolagsisolering / RLS för rollen `startup_member` (CLAUDE.md § 6, § 20).
+// Bolagsisolering / RLS för rollen `startup_member` (CLAUDE.md § 6, § 21).
 // =============================================================================
 //
 // PROBLEM: Tidigare list/view-regler var i de flesta fall

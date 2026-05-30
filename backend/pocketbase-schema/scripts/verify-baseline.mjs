@@ -123,7 +123,7 @@ async function verifyCollectionsExist() {
     'sprint_x_checkins',
     'startup_phase_history',
     'startup_financials',
-    // CRM / bolagsisolering (§ 20)
+    // CRM / bolagsisolering (§ 21)
     'startup_contacts',
     'capital_rounds',
     'intellectual_property',
@@ -177,7 +177,7 @@ function assertCreateRuleDoesNotJoinRecord(collection) {
   }
 }
 
-// Bolagsisolering (CLAUDE.md § 20, migration 1700000096). En ren
+// Bolagsisolering (CLAUDE.md § 21, migration 1700000096). En ren
 // startup_member får bara se sina egna bolags rader. Vi verifierar att
 // list/view-reglerna scope:ar till `linked_startups` för de startup-scopade
 // kollektionerna, och att de tenant-breda kollektionerna är staff/observer-only.
@@ -240,7 +240,7 @@ function verifyStartupMemberIsolation(collections) {
       }
     }
   }
-  ok('Bolagsisolering (§ 20) verifierad — startup_member är scope:ad');
+  ok('Bolagsisolering (§ 21) verifierad — startup_member är scope:ad');
 }
 
 function verifyRlsAndRbac(collections) {
