@@ -65,7 +65,7 @@ export async function exportLagesredovisningAction(input: {
       docKind: 'xlsx'
     });
     revalidatePath('/filer');
-    revalidatePath('/rapporter/vinnova');
+    revalidatePath('/rapporter', 'layout');
     return { ok: true, fileRef, downloadUrl: `/api/files/${encodeURIComponent(fileRef.user_file_id)}` };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte generera rapporten.' };
@@ -135,7 +135,7 @@ export async function logServiceTimeAction(input: {
       note: (input.note || '').slice(0, 500),
       source: 'manual'
     });
-    revalidatePath('/rapporter/vinnova');
+    revalidatePath('/rapporter', 'layout');
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte spara tidpost.' };
@@ -173,7 +173,7 @@ export async function logServiceCostAction(input: {
       allocation_note: (input.allocation_note || '').slice(0, 500),
       source: 'manual'
     });
-    revalidatePath('/rapporter/vinnova');
+    revalidatePath('/rapporter', 'layout');
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte spara kostnad.' };
@@ -216,7 +216,7 @@ export async function upsertReadinessAssessmentAction(input: {
       assessed_by: user.id,
       note: (input.note || '').slice(0, 1000)
     });
-    revalidatePath('/rapporter/vinnova');
+    revalidatePath('/rapporter', 'layout');
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte spara bedömning.' };
@@ -253,7 +253,7 @@ export async function upsertStateAidPeriodAction(input: {
       valid_to: validDate(input.valid_to) ? input.valid_to : null,
       note: (input.note || '').slice(0, 500)
     });
-    revalidatePath('/rapporter/vinnova');
+    revalidatePath('/rapporter', 'layout');
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte spara statsstödsperiod.' };

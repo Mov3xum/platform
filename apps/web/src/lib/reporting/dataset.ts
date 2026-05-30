@@ -36,6 +36,7 @@ export interface LagesredovisningDataset extends LagesredovisningResult {
   programStart: string;
   fallbackRate: number;
   startupCount: number;
+  startupList: Array<{ id: string; name: string }>;
 }
 
 /**
@@ -130,6 +131,7 @@ export async function buildVinnovaLagesredovisning(
     period,
     programStart: PROGRAM_START,
     fallbackRate,
-    startupCount: startups.length
+    startupCount: startups.length,
+    startupList: startups.map((s) => ({ id: s.id, name: s.name }))
   };
 }

@@ -283,6 +283,6 @@ export async function commitVinnovaImportAction(formData: FormData): Promise<Vin
     }
   }
 
-  revalidatePath('/rapporter/vinnova');
+  revalidatePath('/rapporter', 'layout');
   return out;
 }

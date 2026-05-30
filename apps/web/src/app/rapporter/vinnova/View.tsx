@@ -3,6 +3,7 @@ import { Chip, Icon } from '@/components/proto';
 import type { LagesredovisningDataset } from '@/lib/reporting/dataset';
 import { VINNOVA_LAGESREDOVISNING } from '@/lib/reporting/templates';
 import { ExportButton } from './ExportButton';
+import { DataEntryForms } from './DataEntryForms';
 
 function fmtSek(n: number): string {
   return new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 0 }).format(n) + ' kr';
@@ -37,6 +38,8 @@ export function VinnovaLagesredovisningView({
 
   return (
     <div className="space-y-4">
+      <DataEntryForms startups={dataset.startupList} defaultDate={to} />
+
       <div className="rounded-2xl border border-default bg-surface p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
