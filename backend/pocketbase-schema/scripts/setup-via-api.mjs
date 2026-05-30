@@ -1796,6 +1796,118 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
 });
 
+// Migration 1700000097: service_time_entries — loggad tid per bolag (Vinnova).
+await ensureCollection({
+  id: 'service_time_entries_col',
+  name: 'service_time_entries',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'user', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'activity_kind', type: 'select', required: true, maxSelect: 1, values: ['incubation', 'verification', 'admin'] },
+    { name: 'hours', type: 'number', required: true, min: 0, max: 100000 },
+    { name: 'hourly_rate_sek', type: 'number', required: false, min: 0, max: 100000 },
+    { name: 'occurred_on', type: 'date', required: true },
+    { name: 'note', type: 'text', required: false, max: 500 },
+    { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['manual', 'import_excel', 'task_rollup', 'other'] }
+  ],
+  indexes: [
+    'CREATE INDEX idx_time_entries_tenant ON service_time_entries (tenant)',
+    'CREATE INDEX idx_time_entries_startup ON service_time_entries (startup)',
+    'CREATE INDEX idx_time_entries_occurred ON service_time_entries (occurred_on)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
+});
+
+// Migration 1700000098: startup_service_costs — externa kostnader per bolag.
+await ensureCollection({
+  id: 'startup_service_costs_col',
+  name: 'startup_service_costs',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'cost_type', type: 'select', required: true, maxSelect: 1, values: ['verification', 'external_service', 'other'] },
+    { name: 'supplier', type: 'text', required: false, max: 200 },
+    { name: 'invoice_ref', type: 'text', required: false, max: 120 },
+    { name: 'amount_sek', type: 'number', required: true, min: 0 },
+    { name: 'incurred_on', type: 'date', required: true },
+    { name: 'allocation_note', type: 'text', required: false, max: 500 },
+    { name: 'notes', type: 'text', required: false, max: 1000 },
+    { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['manual', 'import_excel', 'accounting', 'other'] }
+  ],
+  indexes: [
+    'CREATE INDEX idx_service_costs_tenant ON startup_service_costs (tenant)',
+    'CREATE INDEX idx_service_costs_startup ON startup_service_costs (startup)',
+    'CREATE INDEX idx_service_costs_incurred ON startup_service_costs (incurred_on)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
+});
+
+// Migration 1700000099: startup_readiness_assessments — CRL/TMRL/BRL/SRL.
+await ensureCollection({
+  id: 'startup_readiness_assess_col',
+  name: 'startup_readiness_assessments',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'assessed_at', type: 'date', required: true },
+    { name: 'crl', type: 'number', required: false, min: 1, max: 9 },
+    { name: 'tmrl', type: 'number', required: false, min: 1, max: 9 },
+    { name: 'brl', type: 'number', required: false, min: 1, max: 9 },
+    { name: 'srl', type: 'number', required: false, min: 1, max: 9 },
+    { name: 'criteria_checked_at', type: 'date', required: false },
+    { name: 'assessed_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'note', type: 'text', required: false, max: 1000 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_readiness_tenant ON startup_readiness_assessments (tenant)',
+    'CREATE INDEX idx_readiness_startup ON startup_readiness_assessments (startup)',
+    'CREATE INDEX idx_readiness_assessed ON startup_readiness_assessments (assessed_at)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
+});
+
+// Migration 1700000100: startup_state_aid_periods — statsstödsgrund (tidsserie).
+await ensureCollection({
+  id: 'startup_state_aid_periods_col',
+  name: 'startup_state_aid_periods',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'basis', type: 'select', required: true, maxSelect: 1, values: ['art22', 'de_minimis'] },
+    { name: 'sni_code', type: 'text', required: false, max: 20 },
+    { name: 'valid_from', type: 'date', required: true },
+    { name: 'valid_to', type: 'date', required: false },
+    { name: 'note', type: 'text', required: false, max: 500 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_state_aid_tenant ON startup_state_aid_periods (tenant)',
+    'CREATE INDEX idx_state_aid_startup ON startup_state_aid_periods (startup)',
+    'CREATE INDEX idx_state_aid_from ON startup_state_aid_periods (valid_from)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
+});
+
 // Migration 1700000083: chat_threads — persistenta dashboard-trådar (/chatt).
 // STRIKT ägaren-bara på alla operationer (ingen staff-läsning). Måste skapas
 // före deep_jobs/user_files som relaterar till den.
@@ -2037,7 +2149,18 @@ await patchCollection('startups', [
   { name: 'register_notes', type: 'editor', required: false },
   { name: 'is_regional', type: 'bool', required: false },
   { name: 'signed_partner_agreement', type: 'bool', required: false },
-  { name: 'signed_partner_agreement_at', type: 'date', required: false }
+  { name: 'signed_partner_agreement_at', type: 'date', required: false },
+  // Från 1700000096 — Vinnova lägesredovisning
+  { name: 'sni_code', type: 'text', required: false, max: 20 },
+  { name: 'sni_description', type: 'text', required: false, max: 300 },
+  { name: 'vinnova_focus', type: 'select', required: false, maxSelect: 1, values: ['agro', 'industriell_teknik', 'life_science', 'miljo_energi', 'mjukvara_ict', 'upplevelseindustri', 'ovrigt'] },
+  { name: 'state_aid_start_at', type: 'date', required: false },
+  { name: 'vinnova_funding_end_at', type: 'date', required: false }
+]);
+
+// Migration 1700000096: tenants default-timpris (Vinnova-rapportering).
+await patchTenantsCollection([
+  { name: 'default_hourly_rate_sek', type: 'number', required: false, min: 0, max: 100000 }
 ]);
 
 // 19. seed Movexum tenant ---------------------------------------------------

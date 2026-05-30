@@ -47,6 +47,8 @@ export interface Tenant {
   name: string;
   slug: string;
   type: TenantType;
+  /** Fallback-timpris för Vinnova-rapportering (CLAUDE.md §0 reporting). */
+  default_hourly_rate_sek?: number;
 }
 
 export interface UserProfile {
@@ -119,6 +121,107 @@ export interface Startup {
   is_regional?: boolean;
   signed_partner_agreement?: boolean;
   signed_partner_agreement_at?: string;
+  // Vinnova lägesredovisning (migration 1700000096)
+  sni_code?: string;
+  sni_description?: string;
+  vinnova_focus?: VinnovaFocus;
+  state_aid_start_at?: string;
+  vinnova_funding_end_at?: string;
+}
+
+// ─── Vinnova/Tillväxtverket-rapportering ─────────────────────────────────────
+// Datamodell för lägesredovisning (excellent inkubator). Se
+// docs/reporting/vinnova-tillvaxtverket-djupanalys.md.
+
+/** Vinnovas sju affärsinriktningar (lägesredovisningens rullgardin). */
+export type VinnovaFocus =
+  | 'agro'
+  | 'industriell_teknik'
+  | 'life_science'
+  | 'miljo_energi'
+  | 'mjukvara_ict'
+  | 'upplevelseindustri'
+  | 'ovrigt';
+
+/** Statsstödsgrund per period (Art. 22 GBER eller de minimis). */
+export type StateAidBasis = 'art22' | 'de_minimis';
+
+/** Tidpostens insatstyp — styr om värdet räknas som inkubator- eller verifieringstjänst. */
+export type ServiceActivityKind = 'incubation' | 'verification' | 'admin';
+
+export type ServiceCostType = 'verification' | 'external_service' | 'other';
+
+/** En av KTH:s fyra readiness-axlar (IRL 1–9). */
+export type ReadinessAxis = 'crl' | 'tmrl' | 'brl' | 'srl';
+
+export interface ServiceTimeEntry {
+  id: string;
+  tenant: string;
+  startup: string;
+  user?: string;
+  activity_kind: ServiceActivityKind;
+  hours: number;
+  /** Timpris för denna post; saknas → tenant-default. */
+  hourly_rate_sek?: number;
+  occurred_on: string;
+  note?: string;
+  source: 'manual' | 'import_excel' | 'task_rollup' | 'other';
+  created: string;
+  updated: string;
+  expand?: {
+    startup?: { id: string; name: string };
+    user?: { id: string; display_name?: string };
+  };
+}
+
+export interface StartupServiceCost {
+  id: string;
+  tenant: string;
+  startup: string;
+  cost_type: ServiceCostType;
+  supplier?: string;
+  invoice_ref?: string;
+  amount_sek: number;
+  incurred_on: string;
+  allocation_note?: string;
+  /** Strategiskt — exkluderas från AI-kontext (jfr capital_rounds.notes). */
+  notes?: string;
+  source: 'manual' | 'import_excel' | 'accounting' | 'other';
+  created: string;
+  updated: string;
+  expand?: { startup?: { id: string; name: string } };
+}
+
+export interface StartupReadinessAssessment {
+  id: string;
+  tenant: string;
+  startup: string;
+  assessed_at: string;
+  crl?: number;
+  tmrl?: number;
+  brl?: number;
+  srl?: number;
+  /** Datum då målgruppskriterier senast kontrollerades. */
+  criteria_checked_at?: string;
+  assessed_by?: string;
+  note?: string;
+  created: string;
+  updated: string;
+  expand?: { startup?: { id: string; name: string } };
+}
+
+export interface StartupStateAidPeriod {
+  id: string;
+  tenant: string;
+  startup: string;
+  basis: StateAidBasis;
+  sni_code?: string;
+  valid_from: string;
+  valid_to?: string;
+  note?: string;
+  created: string;
+  updated: string;
+  expand?: { startup?: { id: string; name: string } };
 }
 
 export interface StartupPhaseHistory {
