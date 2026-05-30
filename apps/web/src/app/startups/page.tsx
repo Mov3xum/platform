@@ -36,7 +36,7 @@ export default async function StartupsOverviewPage() {
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
   const canCreate = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
 
-  // Bolagsisolering (CLAUDE.md § 19): en ren startup_member ska aldrig se
+  // Bolagsisolering (CLAUDE.md § 20): en ren startup_member ska aldrig se
   // portfölj-översikten. Har hen exakt ett bolag → direkt till bolagskortet.
   const memberScoped = !hasTenantWideRead(user);
   if (memberScoped) {

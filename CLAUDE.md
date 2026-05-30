@@ -1977,91 +1977,6 @@ lagras på tilldelningens `meeting`-fält.
 
 ---
 
-<<<<<<< HEAD
-## 19. Bolagsisolering / RLS för `startup_member`
-
-### 19.1 Kravet
-
-En ren `startup_member` får **BARA** se data som hör till sitt/sina egna bolag
-(`users.linked_startups`) — aldrig andra bolag och aldrig tenant-bred
-portfölj-/pipeline-/lead-data. Staff (`admin`, `incubator_lead`, `coach`,
-`mentor`) och `observer` (intern tillsynsroll) behåller tenant-bred läsning.
-
-Tidigare var de flesta list/view-regler bara
-`@request.auth.id != "" && @request.auth.tenant = tenant`, vilket lät
-**vilken** autentiserad tenant-användare som helst läsa alla bolag — det är
-läckan som § 19 stänger.
-
-### 19.2 Defense-in-depth (två lager)
-
-1. **PocketBase API-regler (sann RLS)** — migration
-   `1700000093_isolate_startup_member_data.js`. Reads i appen går via
-   användarens auth-token (`getServerPb`/`listForTenant`/`getOneForTenant`), så
-   reglerna enforce:as faktiskt.
-2. **App-lager** — `startupScopeFilter(user, field)` i
-   `apps/web/src/lib/pb.server.ts` (tom för staff/observer, annars
-   `(field = "<id>" || …)` över `linked_startups`, escapad via `escFilter`).
-   `listForTenant({ scopeToStartupField })` och sidornas RBAC-guards använder
-   den. Skyddar särskilt superuser-vägar som annars kringgår RLS.
-
-### 19.3 Regelmönster (PB)
-
-```js
-const STAFF_OR_OBSERVER =
-  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "mentor" || @request.auth.roles ?= "observer")';
-// startups själv:
-`${ANY_AUTH} && ${TENANT} && (${STAFF_OR_OBSERVER} || @request.auth.linked_startups ?= id)`
-// barn med startup-relation (egen tenant ELLER startup.tenant):
-`${ANY_AUTH} && ${TENANT} && (${STAFF_OR_OBSERVER} || @request.auth.linked_startups ?= startup)`
-// tenant-bred data medlem ej får läsa:
-`${ANY_AUTH} && ${TENANT} && ${STAFF_OR_OBSERVER}`
-```
-
-**PB v0.23-bugg (§ 10.3 / migration 1700000049):** `?=`-roll-checks får ALDRIG
-ligga i **createRules**. Det gäller inte list/view/update/delete — migration
-1700000093 rör därför bara listRule/viewRule (+ `startup_kpis.updateRule` där en
-medlem redan får skriva egen-bolagsdata, § 15.5). Alla createRules lämnas orörda.
-
-### 19.4 Kollektioner
-
-- **`startups`** — medlem ser bara rader vars id finns i `linked_startups`.
-- **Medlem-scopad (egen-bolag, `linked_startups ?= startup`):** `activities`,
-  `notes` (behåller confidential-logiken), `milestones`, `agreements`,
-  `tool_runs`, `startup_team_members`, `startup_contacts`,
-  `startup_phase_history`, `startup_financials`, `capital_rounds`,
-  `intellectual_property`, `startup_kpis` (+ update), `education_document_assignments`,
-  `sprint_x_checkins`, `partner_engagements`. Polymorfa: `tasks` (medlem ser egna
-  via `owner` + sitt-bolags) och `missions` (sitt-bolags + där hen är
-  `recipient`/`mentor`).
-- **Redan medlem-scopade (orörda):** `workshop_assignments`, `workshop_runs`,
-  `strategies`, `strategy_revisions` (`STAFF_OR_LINKED_STARTUP`).
-- **Tenant-bred — medlem nekas helt (staff/observer-only):** `partners`,
-  `investors`, `deals`, `alumni`, `integration_records`. Redan staff-only sedan
-  tidigare: `incubator_reports`, `tenant_integrations`,
-  `compass_leads/_conversations/_responses`.
-
-### 19.5 Navigations-/route-gating
-
-`coreModules` (`packages/shared/src/modules.ts`) exkluderar redan
-`startup_member` från `aktivitet`/`activity_feed`, `inflode`, `rapporter`,
-`partners`, `investerare`, `insights`, `pagaende`. Sidorna `redirect('/dashboard')`
-när modulen saknas — guards lades till på `/investerare` och `/inflode` (saknade
-dem). Chatt-ytorna `/idag`, `/chatt`, `/filer` redirectar redan non-staff →
-en ren `startup_member` når aldrig dashboard-/tråd-chatten, så AI-chattens
-`query_collection` (§ 9.3) exponeras inte för medlemmar. `/startups` redirectar
-en medlem med exakt ett bolag direkt till bolagskortet och visar annars bara
-hens egna bolag.
-
-### 19.6 Regelefterlevnad
-
-- **GDPR § 5 (dataminimering) + art. 32:** minsta behörighet är default; en
-  medlem kan inte längre läsa andra bolags data.
-- **ISO 27001 A.5.15–A.5.18 (åtkomstkontroll):** RBAC + RLS, ingen inline
-  roll-bypass. **A.8.32:** ny oföränderlig migration (nytt filnummer).
-- **SOC 2 CC6.1–CC6.3:** dokumenterad, verifierbar isolering;
-  `scripts/verify-baseline.mjs` asserterar att reglerna har medlems-scope.
-- **Riskklass:** n/a (åtkomstkontroll, ingen AI-inferens).
-=======
 ## 19. Avtal — tilldelning & juridiskt giltig in-app-signering
 
 ### 19.1 Översikt
@@ -2147,4 +2062,91 @@ De fyra AES-kriterierna uppfylls av: (a/b) `signer` + `signer_email` +
   bevislagring.
 - **Migrationer:** nya filnummer (1700000093–095), oföränderliga; fälten +
   kollektionen speglas i `scripts/setup-via-api.mjs` för bootstrap-paritet.
->>>>>>> origin/staging
+
+---
+
+## 20. Bolagsisolering / RLS för `startup_member`
+
+### 20.1 Kravet
+
+En ren `startup_member` får **BARA** se data som hör till sitt/sina egna bolag
+(`users.linked_startups`) — aldrig andra bolag och aldrig tenant-bred
+portfölj-/pipeline-/lead-data. Staff (`admin`, `incubator_lead`, `coach`,
+`mentor`) och `observer` (intern tillsynsroll) behåller tenant-bred läsning.
+
+Tidigare var de flesta list/view-regler bara
+`@request.auth.id != "" && @request.auth.tenant = tenant`, vilket lät
+**vilken** autentiserad tenant-användare som helst läsa alla bolag — det är
+läckan som § 20 stänger.
+
+### 20.2 Defense-in-depth (två lager)
+
+1. **PocketBase API-regler (sann RLS)** — migration
+   `1700000096_isolate_startup_member_data.js`. Reads i appen går via
+   användarens auth-token (`getServerPb`/`listForTenant`/`getOneForTenant`), så
+   reglerna enforce:as faktiskt.
+2. **App-lager** — `startupScopeFilter(user, field)` i
+   `apps/web/src/lib/pb.server.ts` (tom för staff/observer, annars
+   `(field = "<id>" || …)` över `linked_startups`, escapad via `escFilter`).
+   `listForTenant({ scopeToStartupField })` och sidornas RBAC-guards använder
+   den. Skyddar särskilt superuser-vägar som annars kringgår RLS.
+
+### 20.3 Regelmönster (PB)
+
+```js
+const STAFF_OR_OBSERVER =
+  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "mentor" || @request.auth.roles ?= "observer")';
+// startups själv:
+`${ANY_AUTH} && ${TENANT} && (${STAFF_OR_OBSERVER} || @request.auth.linked_startups ?= id)`
+// barn med startup-relation (egen tenant ELLER startup.tenant):
+`${ANY_AUTH} && ${TENANT} && (${STAFF_OR_OBSERVER} || @request.auth.linked_startups ?= startup)`
+// tenant-bred data medlem ej får läsa:
+`${ANY_AUTH} && ${TENANT} && ${STAFF_OR_OBSERVER}`
+```
+
+**PB v0.23-bugg (§ 10.3 / migration 1700000049):** `?=`-roll-checks får ALDRIG
+ligga i **createRules**. Det gäller inte list/view/update/delete — migration
+1700000096 rör därför bara listRule/viewRule (+ `startup_kpis.updateRule` där en
+medlem redan får skriva egen-bolagsdata, § 15.5). Alla createRules lämnas orörda.
+
+### 20.4 Kollektioner
+
+- **`startups`** — medlem ser bara rader vars id finns i `linked_startups`.
+- **Medlem-scopad (egen-bolag, `linked_startups ?= startup`):** `activities`,
+  `notes` (behåller confidential-logiken), `milestones`, `agreements`,
+  `tool_runs`, `startup_team_members`, `startup_contacts`,
+  `startup_phase_history`, `startup_financials`, `capital_rounds`,
+  `intellectual_property`, `startup_kpis` (+ update), `education_document_assignments`,
+  `sprint_x_checkins`, `partner_engagements`. Polymorfa: `tasks` (medlem ser egna
+  via `owner` + sitt-bolags) och `missions` (sitt-bolags + där hen är
+  `recipient`/`mentor`).
+- **Redan medlem-scopade (orörda):** `workshop_assignments`, `workshop_runs`,
+  `strategies`, `strategy_revisions` (`STAFF_OR_LINKED_STARTUP`).
+- **Tenant-bred — medlem nekas helt (staff/observer-only):** `partners`,
+  `investors`, `deals`, `alumni`, `integration_records`. Redan staff-only sedan
+  tidigare: `incubator_reports`, `tenant_integrations`,
+  `compass_leads/_conversations/_responses`.
+
+### 20.5 Navigations-/route-gating
+
+`coreModules` (`packages/shared/src/modules.ts`) exkluderar redan
+`startup_member` från `aktivitet`/`activity_feed`, `inflode`, `rapporter`,
+`partners`, `investerare`, `insights`, `pagaende`. Sidorna `redirect('/dashboard')`
+när modulen saknas — guards lades till på `/investerare` och `/inflode` (saknade
+dem). Chatt-ytorna `/idag`, `/chatt`, `/filer` redirectar redan non-staff →
+en ren `startup_member` når aldrig dashboard-/tråd-chatten, så AI-chattens
+`query_collection` (§ 9.3) exponeras inte för medlemmar. `/startups` redirectar
+en medlem med exakt ett bolag direkt till bolagskortet och visar annars bara
+hens egna bolag.
+
+### 20.6 Regelefterlevnad
+
+- **GDPR § 5 (dataminimering) + art. 32:** minsta behörighet är default; en
+  medlem kan inte längre läsa andra bolags data.
+- **ISO 27001 A.5.15–A.5.18 (åtkomstkontroll):** RBAC + RLS, ingen inline
+  roll-bypass. **A.8.32:** ny oföränderlig migration (nytt filnummer).
+- **SOC 2 CC6.1–CC6.3:** dokumenterad, verifierbar isolering;
+  `scripts/verify-baseline.mjs` asserterar att reglerna har medlems-scope.
+- **Riskklass:** n/a (åtkomstkontroll, ingen AI-inferens).
+- **Migrationer:** ny oföränderlig migration (1700000096), fälten speglas i
+  `scripts/setup-via-api.mjs` och `scripts/verify-baseline.mjs`.

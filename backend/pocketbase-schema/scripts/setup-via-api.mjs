@@ -549,9 +549,9 @@ await patchUsersCollection(
 const usersCol = await pb.collections.getOne('users');
 const usersId = usersCol.id;
 
-// Bolagsisolering (CLAUDE.md § 19, migration 1700000093). Staff + observer har
+// Bolagsisolering (CLAUDE.md § 20, migration 1700000096). Staff + observer har
 // tenant-bred read; en ren startup_member ser bara sina länkade bolag. Sanningen
-// är migration 1700000093 — denna bootstrap speglar den för de viktigaste
+// är migration 1700000096 — denna bootstrap speglar den för de viktigaste
 // kollektionerna (startups + barn med direkt startup-relation).
 const STAFF_OR_OBSERVER_READ =
   '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "mentor" || @request.auth.roles ?= "observer")';

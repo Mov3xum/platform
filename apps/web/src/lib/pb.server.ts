@@ -11,7 +11,7 @@ export interface TenantQuery {
 }
 
 // Staff + observer (intern tillsynsroll) har tenant-bred läsning. En ren
-// startup_member ska bara se sina egna bolags rader (CLAUDE.md § 19).
+// startup_member ska bara se sina egna bolags rader (CLAUDE.md § 20).
 const TENANT_WIDE_READ_ROLES = [
   'admin',
   'incubator_lead',
@@ -28,7 +28,7 @@ export function hasTenantWideRead(user: Pick<SessionUser, 'roles'>): boolean {
 }
 
 /**
- * Defense-in-depth-fragment för bolagsisolering (CLAUDE.md § 19).
+ * Defense-in-depth-fragment för bolagsisolering (CLAUDE.md § 20).
  *
  * Returnerar ett PocketBase-filterfragment som begränsar en lista till
  * användarens länkade bolag NÄR användaren är en ren `startup_member` (utan
@@ -91,7 +91,7 @@ export async function listForTenant<T = Record<string, unknown>>(
     tenantField?: string;
     /**
      * När satt scopas listan dessutom till användarens länkade bolag för rena
-     * startup_member (CLAUDE.md § 19). Värdet är startup-relationens fältnamn
+     * startup_member (CLAUDE.md § 20). Värdet är startup-relationens fältnamn
      * (t.ex. `startup`, eller `id` för `startups`-kollektionen). Tom/odefinierad
      * = ingen extra scoping (bara tenant-filtret).
      */
