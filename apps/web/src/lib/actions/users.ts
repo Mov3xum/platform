@@ -1,26 +1,29 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { type Role } from '@platform/shared';
 import { requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
-import { validateNewMemberInput } from '@/lib/users/validate';
+import { assignableRolesFor, ROLE_LABELS, validateNewUserInput } from '@/lib/users/validate';
 
 // Staff-initierad registrering av plattformsanvändare.
 //
-// Skapar en verifierad `startup_member`-profil och länkar den till ett bolag
-// så att personen kan logga in direkt i sin miljö. Användarskapande går via
-// superuser-klienten eftersom `users.createRule = null` (ingen publik
-// registrering den vägen) — se migration 1700000002.
+// Skapar en verifierad användare med vald roll så att personen kan logga in
+// direkt i sin miljö. För `startup_member` länkas dessutom ett bolag.
+// Användarskapande går via superuser-klienten eftersom `users.createRule =
+// null` (ingen publik registrering den vägen) — se migration 1700000002.
 //
 // Regelefterlevnad (CLAUDE.md §10.5):
-// - RBAC via hasRole (admin/incubator_lead), aldrig inline-rollkoll.
+// - RBAC via hasRole (admin/incubator_lead) + `assignableRolesFor` så en
+//   incubator_lead aldrig kan skapa en admin (ingen privilegieeskalering).
+//   Aldrig inline-rollkoll.
 // - Tenant-isolation: bolaget korsverifieras mot inloggad staffs tenant.
 // - Dataminimering: bara e-post + visningsnamn (befintliga users-fält).
 //   Rättslig grund = avtal (bolagsmedlem) / berättigat intresse (drift).
 // - Loggar aldrig lösenord eller PII i klartext.
 
-export type CreateStartupMemberState = {
+export type CreateUserState = {
   status: 'idle' | 'ok' | 'error';
   message?: string;
   createdEmail?: string;
@@ -33,27 +36,33 @@ type PbError = {
   data?: { data?: Record<string, { message?: string }>; message?: string };
 };
 
-export async function createStartupMemberAction(
-  _prev: CreateStartupMemberState,
+export async function createUserAction(
+  _prev: CreateUserState,
   formData: FormData
-): Promise<CreateStartupMemberState> {
+): Promise<CreateUserState> {
   // 1. Auth + RBAC
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
     return { status: 'error', message: 'Endast inkubatorledning får registrera användare.' };
   }
+  const assignableRoles = assignableRolesFor(user.roles as Role[]);
 
-  // 2. Input-validering (ren logik delas med enhetstesten)
-  const validated = validateNewMemberInput({
-    email: formData.get('email'),
-    displayName: formData.get('display_name'),
-    password: formData.get('password'),
-    startupId: formData.get('startup_id')
-  });
+  // 2. Input-validering (ren logik delas med enhetstesten). Rollbehörigheten
+  //    valideras både här (defense-in-depth) och implicit via listan ovan.
+  const validated = validateNewUserInput(
+    {
+      email: formData.get('email'),
+      displayName: formData.get('display_name'),
+      password: formData.get('password'),
+      role: formData.get('role'),
+      startupId: formData.get('startup_id')
+    },
+    { assignableRoles }
+  );
   if (!validated.ok) {
     return { status: 'error', message: validated.message };
   }
-  const { email, displayName, password, startupId } = validated.value;
+  const { email, displayName, password, role, startupId } = validated.value;
 
   // 3. Superuser-klient (createRule = null kräver superuser)
   const suResult = await getSuperuserPb();
@@ -68,23 +77,28 @@ export async function createStartupMemberAction(
   }
   const pb = suResult.pb;
 
-  // 4. Tenant-isolation: bolaget måste tillhöra inloggad staffs tenant.
+  // 4. Tenant-isolation: ett ev. bolag måste tillhöra inloggad staffs tenant.
+  //    Bara `startup_member` länkas till ett bolag.
   let startupName = '';
-  try {
-    const startup = await pb
-      .collection('startups')
-      .getOne<{ id: string; name: string; tenant: string }>(startupId, {
-        fields: 'id,name,tenant'
-      });
-    if (startup.tenant !== user.tenant) {
-      return { status: 'error', message: 'Bolaget tillhör inte din organisation.' };
+  const linkedStartups: string[] = [];
+  if (role === 'startup_member') {
+    try {
+      const startup = await pb
+        .collection('startups')
+        .getOne<{ id: string; name: string; tenant: string }>(startupId, {
+          fields: 'id,name,tenant'
+        });
+      if (startup.tenant !== user.tenant) {
+        return { status: 'error', message: 'Bolaget tillhör inte din organisation.' };
+      }
+      startupName = startup.name;
+      linkedStartups.push(startupId);
+    } catch {
+      return { status: 'error', message: 'Bolaget kunde inte hittas.' };
     }
-    startupName = startup.name;
-  } catch {
-    return { status: 'error', message: 'Bolaget kunde inte hittas.' };
   }
 
-  // 5. Skapa verifierad startup_member-profil länkad till bolaget.
+  // 5. Skapa verifierad användare med vald roll.
   try {
     await pb.collection('users').create({
       email,
@@ -92,9 +106,9 @@ export async function createStartupMemberAction(
       passwordConfirm: password,
       display_name: displayName,
       tenant: user.tenant,
-      roles: ['startup_member'],
+      roles: [role],
       verified: true,
-      linked_startups: [startupId]
+      linked_startups: linkedStartups
     });
   } catch (err: unknown) {
     const e = err as PbError;
@@ -113,15 +127,18 @@ export async function createStartupMemberAction(
       }
       return { status: 'error', message: e.data?.message || 'Ogiltig data. Kontrollera fälten.' };
     }
-    console.error('[createStartupMember] failed', { status: e.status });
+    console.error('[createUser] failed', { status: e.status });
     return { status: 'error', message: 'Kunde inte skapa användaren. Försök igen.' };
   }
 
   revalidatePath('/admin/users');
 
+  const roleLabel = ROLE_LABELS[role];
   return {
     status: 'ok',
-    message: `Användaren ${email} skapades och länkades till ${startupName}.`,
+    message: startupName
+      ? `Användaren ${email} skapades som ${roleLabel} och länkades till ${startupName}.`
+      : `Användaren ${email} skapades som ${roleLabel}.`,
     createdEmail: email,
     startupName
   };

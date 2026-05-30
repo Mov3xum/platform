@@ -2,14 +2,13 @@
 
 import { useActionState, useRef, useState } from 'react';
 import Link from 'next/link';
-import {
-  createStartupMemberAction,
-  type CreateStartupMemberState
-} from '@/lib/actions/users';
+import { type Role } from '@platform/shared';
+import { createUserAction, type CreateUserState } from '@/lib/actions/users';
+import { ROLE_LABELS } from '@/lib/users/validate';
 
 export type StartupOption = { id: string; name: string };
 
-const initialState: CreateStartupMemberState = { status: 'idle' };
+const initialState: CreateUserState = { status: 'idle' };
 
 const inputClass =
   'block w-full rounded-2xl border border-default bg-surface px-4 py-2.5 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
@@ -22,33 +21,29 @@ function generatePassword(): string {
   return Array.from(arr, (n) => chars[n % chars.length]).join('');
 }
 
-export function UserForm({ startups }: { startups: StartupOption[] }) {
-  const [state, formAction, pending] = useActionState(
-    createStartupMemberAction,
-    initialState
-  );
+export function UserForm({
+  startups,
+  assignableRoles
+}: {
+  startups: StartupOption[];
+  assignableRoles: Role[];
+}) {
+  const [state, formAction, pending] = useActionState(createUserAction, initialState);
   const formRef = useRef<HTMLFormElement>(null);
   const [password, setPassword] = useState('');
+  const defaultRole: Role = assignableRoles.includes('startup_member')
+    ? 'startup_member'
+    : (assignableRoles[0] ?? 'observer');
+  const [role, setRole] = useState<Role>(defaultRole);
 
   // Återställ formuläret efter en lyckad registrering så nästa person kan läggas in.
   if (state.status === 'ok' && formRef.current && password !== '') {
     formRef.current.reset();
     setPassword('');
+    setRole(defaultRole);
   }
 
-  if (startups.length === 0) {
-    return (
-      <section className="rounded-3xl border border-default bg-surface p-6">
-        <p className="text-sm text-foreground-muted">
-          Det finns inga bolag att tilldela ännu. Skapa ett bolag under{' '}
-          <Link href="/startups" className="text-link underline">
-            Bolag
-          </Link>{' '}
-          först.
-        </p>
-      </section>
-    );
-  }
+  const needsStartup = role === 'startup_member';
 
   return (
     <section className="space-y-4">
@@ -93,30 +88,64 @@ export function UserForm({ startups }: { startups: StartupOption[] }) {
         </div>
 
         <div>
-          <label htmlFor="startup_id" className="block text-sm font-medium text-foreground">
-            Tilldela bolag
+          <label htmlFor="role" className="block text-sm font-medium text-foreground">
+            Roll
           </label>
           <select
-            id="startup_id"
-            name="startup_id"
+            id="role"
+            name="role"
             required
-            defaultValue=""
+            value={role}
+            onChange={(e) => setRole(e.target.value as Role)}
             className={`mt-1 ${inputClass}`}
           >
-            <option value="" disabled>
-              Välj bolag…
-            </option>
-            {startups.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
+            {assignableRoles.map((r) => (
+              <option key={r} value={r}>
+                {ROLE_LABELS[r]}
               </option>
             ))}
           </select>
           <p className="mt-1 text-xs text-foreground-subtle">
-            Personen får rollen <code className="font-mono">startup_member</code> och
-            ser sitt bolags miljö.
+            Rollen styr behörigheter enligt RBAC. Bolag tilldelas bara för{' '}
+            <code className="font-mono">Bolagsmedlem</code>.
           </p>
         </div>
+
+        {needsStartup &&
+          (startups.length === 0 ? (
+            <p className="rounded-2xl bg-movexum-pastell-gul px-4 py-3 text-sm text-movexum-morkgul">
+              Det finns inga bolag att tilldela ännu. Skapa ett bolag under{' '}
+              <Link href="/startups" className="underline">
+                Startups
+              </Link>{' '}
+              först, eller välj en annan roll.
+            </p>
+          ) : (
+            <div>
+              <label htmlFor="startup_id" className="block text-sm font-medium text-foreground">
+                Tilldela bolag
+              </label>
+              <select
+                id="startup_id"
+                name="startup_id"
+                required={needsStartup}
+                defaultValue=""
+                className={`mt-1 ${inputClass}`}
+              >
+                <option value="" disabled>
+                  Välj bolag…
+                </option>
+                {startups.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-foreground-subtle">
+                Bolagsmedlemmen ser bara sitt bolags miljö.
+              </p>
+            </div>
+          ))}
 
         <div>
           <label htmlFor="password" className="block text-sm font-medium text-foreground">
@@ -152,7 +181,7 @@ export function UserForm({ startups }: { startups: StartupOption[] }) {
         <div className="flex justify-end">
           <button
             type="submit"
-            disabled={pending}
+            disabled={pending || (needsStartup && startups.length === 0)}
             className="rounded-2xl bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             {pending ? 'Skapar…' : 'Skapa användare'}
