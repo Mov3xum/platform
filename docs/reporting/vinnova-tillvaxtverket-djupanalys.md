@@ -447,8 +447,11 @@ Levererat i denna PR — den dynamiska, data-kopplade Vinnova-lägesredovisninge
   EU-suveräna dokumentlagret (`exceljs`), sparar i `user_files`.
 - `apps/web/src/lib/actions/vinnova-reports.ts` — export-action + datainmatnings-actions
   (tid/kostnad/readiness/statsstödsgrund), staff-RBAC + input-validering.
-- `apps/web/src/app/rapporter/vinnova/` — tabellvy med per-rad datakvalitetsflaggor,
-  periodval och xlsx-export. Länkad från `/rapporter`.
+- Lägesredovisningen renderas **inuti rapporten** (`/rapporter/[id]` när
+  recipient = `vinnova`) via `app/rapporter/vinnova/View.tsx` — auto-fylld tabell
+  för rapportens period, per-rad datakvalitetsflaggor och xlsx-/e-AidRegister-export.
+  Datahämtningen tål saknade kollektioner (degraderar till tom tabell). Ingen
+  separat sida/knapp — allt ligger under rapport-flödet (`Ny rapport` → Vinnova).
 
 **Fas 4 — importörer & e-AidRegister (implementerat):**
 - `apps/web/src/lib/import/vinnova.ts` — auto-detekterar och parsar de tre

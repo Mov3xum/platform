@@ -40,11 +40,16 @@ export async function buildEAidRegister(
   if (opts?.from) filter += ` && beslutsdatum >= "${escFilter(opts.from)}"`;
   if (opts?.to) filter += ` && beslutsdatum <= "${escFilter(opts.to)} 23:59:59"`;
 
-  const stod = (await pb.collection('de_minimis_stod').getFullList({
-    filter,
-    sort: 'beslutsdatum',
-    expand: 'startup'
-  })) as unknown as Array<DeMinimisStod & { expand?: { startup?: Startup } }>;
+  let stod: Array<DeMinimisStod & { expand?: { startup?: Startup } }> = [];
+  try {
+    stod = (await pb.collection('de_minimis_stod').getFullList({
+      filter,
+      sort: 'beslutsdatum',
+      expand: 'startup'
+    })) as unknown as Array<DeMinimisStod & { expand?: { startup?: Startup } }>;
+  } catch {
+    stod = [];
+  }
 
   const rows: EAidRow[] = stod.map((s) => {
     const su = s.expand?.startup;

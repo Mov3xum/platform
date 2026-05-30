@@ -23,7 +23,12 @@ async function fetchAll<T>(
   collection: string,
   filter: string
 ): Promise<T[]> {
-  return (await pb.collection(collection).getFullList({ filter, sort: '-created' })) as unknown as T[];
+  try {
+    return (await pb.collection(collection).getFullList({ filter, sort: '-created' })) as unknown as T[];
+  } catch {
+    // Kollektionen kan saknas (migration ej applicerad ännu) → degradera mjukt.
+    return [];
+  }
 }
 
 export interface LagesredovisningDataset extends LagesredovisningResult {
@@ -47,10 +52,15 @@ export async function buildVinnovaLagesredovisning(
   const tf = `tenant = "${escFilter(tenant)}"`;
 
   // Aktiva bolag i tenanten (rapporten gäller pågående statsstödsbolag).
-  const startups = (await pb.collection('startups').getFullList({
-    filter: `${tf} && status = "active"`,
-    sort: 'name'
-  })) as unknown as Startup[];
+  let startups: Startup[] = [];
+  try {
+    startups = (await pb.collection('startups').getFullList({
+      filter: `${tf} && status = "active"`,
+      sort: 'name'
+    })) as unknown as Startup[];
+  } catch {
+    startups = [];
+  }
 
   const [times, costs, readiness, aidPeriods] = await Promise.all([
     fetchAll<ServiceTimeEntry>(pb, 'service_time_entries', tf),
