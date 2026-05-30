@@ -6,8 +6,7 @@ import { revalidatePath } from 'next/cache';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
-import { generateVerificationToken, parseVerificationToken } from '@/lib/verification-token';
-import { sendVerificationEmail } from '@/lib/email';
+import { parseVerificationToken } from '@/lib/verification-token';
 import { checkRateLimit, recordFailure, clearFailures } from '@/lib/rate-limit';
 
 const PB_URL = getServerPbUrl();
@@ -51,11 +50,6 @@ export type LoginState = {
   error?: string;
   success?: boolean;
   redirectTo?: string;
-};
-
-export type RegisterState = {
-  error?: string;
-  success?: boolean;
 };
 
 export type ResetPasswordState = {
@@ -208,77 +202,6 @@ export async function logoutAction(): Promise<void> {
   // Purge the cached authenticated root layout so the sidebar/AppShell is dropped.
   revalidatePath('/', 'layout');
   redirect('/login');
-}
-
-export async function registerAction(
-  _prev: RegisterState,
-  formData: FormData
-): Promise<RegisterState> {
-  const email = String(formData.get('email') || '').trim();
-  const password = String(formData.get('password') || '');
-  const passwordConfirm = String(formData.get('passwordConfirm') || '');
-  const displayName = String(formData.get('displayName') || '').trim();
-
-  if (!email || !password || !passwordConfirm) {
-    return { error: 'Alla fält är obligatoriska.' };
-  }
-  if (password !== passwordConfirm) {
-    return { error: 'Lösenorden matchar inte.' };
-  }
-  if (password.length < 8) {
-    return { error: 'Lösenordet måste vara minst 8 tecken.' };
-  }
-
-  const pb = new PocketBase(PB_URL);
-
-  let userId: string;
-  try {
-    const record = await pb.collection('users').create({
-      email,
-      password,
-      passwordConfirm,
-      display_name: displayName || ''
-    });
-    userId = record.id;
-  } catch (err: unknown) {
-    const e = err as PbError;
-    if (e.status === 400) {
-      // Try to extract a field-level error from PocketBase
-      const fieldErrors = e.data?.data;
-      if (fieldErrors) {
-        const first = Object.values(fieldErrors)[0];
-        if (first?.message) return { error: first.message };
-      }
-      return { error: e.data?.message || 'Ogiltig data. Kontrollera fälten.' };
-    }
-    return { error: e.message || 'Registrering misslyckades. Försök igen.' };
-  }
-
-  // Skicka verifieringsmail via Resend
-  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
-  const token = generateVerificationToken(userId);
-  const verificationUrl = `${appUrl}/verify-email?token=${encodeURIComponent(token)}`;
-
-  try {
-    await sendVerificationEmail(email, verificationUrl);
-  } catch (emailErr) {
-    // Radera användaren om mailet misslyckas så att re-registrering möjliggörs
-    console.error('[register] Email sending failed — removing incomplete account', emailErr);
-    try {
-      await pb.collection('users').delete(userId);
-    } catch (deleteErr) {
-      // Log but do not propagate — user remains unverified and cannot log in
-      console.error('[register] Failed to clean up unverified user after email error:', deleteErr);
-    }
-    return {
-      error:
-        emailErr instanceof Error
-          ? emailErr.message
-          : 'Kunde inte skicka verifieringsmail. Försök igen.'
-    };
-  }
-
-  return { success: true };
 }
 
 export async function requestPasswordResetAction(

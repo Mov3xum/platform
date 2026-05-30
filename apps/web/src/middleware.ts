@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = ['/', '/login', '/register', '/reset-password', '/verify-email'];
+const PUBLIC_PATHS = ['/', '/login', '/reset-password', '/verify-email'];
 const AUTH_COOKIE = 'pb_auth';
 
 /**
