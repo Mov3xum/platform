@@ -77,12 +77,20 @@ export default async function RapporterPage({
   );
 
   const actions = (
-    <Link
-      href="/rapporter/new"
-      className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
-    >
-      <Icon name="plus" size={12} /> Ny rapport
-    </Link>
+    <div className="flex items-center gap-2">
+      <Link
+        href="/rapporter/vinnova"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-default px-3 py-1.5 text-[12.5px] font-medium text-foreground hover:bg-canvas-muted"
+      >
+        <Icon name="doc" size={12} /> Vinnova lägesredovisning
+      </Link>
+      <Link
+        href="/rapporter/new"
+        className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
+      >
+        <Icon name="plus" size={12} /> Ny rapport
+      </Link>
+    </div>
   );
 
   return (
