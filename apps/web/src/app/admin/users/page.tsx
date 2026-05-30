@@ -1,5 +1,4 @@
 import { redirect } from 'next/navigation';
-import Link from 'next/link';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
@@ -57,16 +56,8 @@ export default async function AdminUsersPage() {
 
   return (
     <PageShell
-      title="Registrera användare"
+      title="Användare"
       meta={<span className="text-sm text-foreground-muted">Administrationskonsol</span>}
-      actions={
-        <Link
-          href="/integrationer"
-          className="rounded-2xl border border-default bg-surface px-4 py-2 text-sm font-medium text-foreground-muted hover:bg-canvas-subtle"
-        >
-          Tillbaka till integrationer
-        </Link>
-      }
     >
       <div className="mx-auto max-w-3xl space-y-6">
         <section className="rounded-3xl border border-default bg-surface p-6">

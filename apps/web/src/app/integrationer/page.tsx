@@ -430,26 +430,6 @@ export default async function IntegrationerPage({
             </h2>
             <div className="space-y-3">
               <a
-                href="/admin/users"
-                className="block rounded-2xl border border-default bg-surface p-5 transition hover:bg-canvas-subtle"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-foreground">
-                      Registrera användare
-                    </div>
-                    <p className="mt-1 text-[13px] text-foreground-muted">
-                      Skapa en{' '}
-                      <code className="font-mono text-xs">startup_member</code>-profil
-                      och tilldela ett bolag. Personen kan logga in direkt i sin miljö.
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-movexum-pastell-gron px-3 py-1 text-xs font-medium text-movexum-morkgron">
-                    Tillgänglig
-                  </span>
-                </div>
-              </a>
-              <a
                 href="/admin/import-bolagslista"
                 className="block rounded-2xl border border-default bg-surface p-5 transition hover:bg-canvas-subtle"
               >

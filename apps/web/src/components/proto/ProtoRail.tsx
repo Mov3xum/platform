@@ -22,6 +22,7 @@ const moduleIcons: Record<string, string> = {
   agenter: 'bolt',
   insights: 'graph',
   integrationer: 'link',
+  anvandare: 'user',
   installningar: 'gear'
 };
 

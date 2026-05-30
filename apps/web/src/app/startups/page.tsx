@@ -4,7 +4,7 @@ import { listForTenant } from '@/lib/pb.server';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { canAccessModule, hasRole } from '@/lib/rbac';
 import { ALL_PHASES, type StartupPhase, type SprintXScore } from '@platform/shared';
-import { phaseLabels, type StartupStatus } from '@/lib/labels';
+import { phaseLabels, statusLabels, type StartupStatus } from '@/lib/labels';
 import { StartupListDashboard } from '@/components/StartupListDashboard';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailStat } from '@/components/PageRail';
@@ -184,6 +184,69 @@ export default async function StartupsOverviewPage() {
               )}
             </div>
           )
+        )}
+
+        {items.length > 0 && (
+          <section className="overflow-hidden rounded-2xl border border-default bg-surface">
+            <div className="flex items-center justify-between border-b border-default px-5 py-3">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                Alla bolag · {totalItems}
+              </span>
+              <Link
+                href="/startups/inkubator"
+                className="text-[12px] text-foreground-muted hover:text-foreground"
+              >
+                Kortvy →
+              </Link>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left text-[13px]">
+                <thead>
+                  <tr className="border-b border-default text-[10.5px] uppercase tracking-wide text-foreground-subtle">
+                    <th className="px-5 py-2.5 font-semibold">Bolag</th>
+                    <th className="px-3 py-2.5 font-semibold">Fas</th>
+                    <th className="px-3 py-2.5 font-semibold">Status</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">IRL</th>
+                    <th className="px-3 py-2.5 font-semibold">Nästa steg</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((s) => (
+                    <tr
+                      key={s.id}
+                      className="border-b border-default last:border-0 hover:bg-canvas-muted"
+                    >
+                      <td className="px-5 py-3">
+                        <Link
+                          href={`/startups/${s.id}`}
+                          className="font-medium text-foreground hover:text-link hover:underline"
+                        >
+                          {s.name}
+                        </Link>
+                        {s.description && (
+                          <div className="mt-0.5 max-w-md truncate text-[12px] text-foreground-subtle">
+                            {s.description}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-foreground-muted">
+                        {phaseLabels[s.phase] ?? s.phase}
+                      </td>
+                      <td className="px-3 py-3 text-foreground-muted">
+                        {statusLabels[s.status] ?? s.status}
+                      </td>
+                      <td className="px-3 py-3 text-right font-mono tabular-nums text-foreground-muted">
+                        {s.irl_level ?? '—'}
+                      </td>
+                      <td className="px-3 py-3 text-foreground-subtle">
+                        <span className="block max-w-xs truncate">{s.next_step || '—'}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
         )}
 
         {isStaff && statusCounts && (
