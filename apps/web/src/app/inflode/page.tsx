@@ -1,8 +1,9 @@
 // Inflöde — översikt
 
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
-import { hasRole } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { Chip, Icon } from '@/components/proto';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailItem, RailStat } from '@/components/PageRail';
@@ -26,6 +27,11 @@ const ANALYTICS_WINDOW_DAYS = 90;
 
 export default async function InflödePage() {
   const user = await requireUser();
+  // Bolagsisolering (CLAUDE.md § 19): inflöde/leads är tenant-bred och får
+  // aldrig nås av en ren startup_member.
+  if (!canAccessModuleForUser(user.roles, 'inflode', user.disabledModules)) {
+    redirect('/dashboard');
+  }
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
 
   const pb = await getServerPb();
