@@ -207,6 +207,25 @@ export interface StartupCalc {
   sni_code?: string | null;
   state_aid_start_at?: string | null;
   vinnova_funding_end_at?: string | null;
+  // Fält att HÄRLEDA ur när dedikerad rapportdata saknas (auto-generering):
+  /** Frisktext-bransch → härleder vinnova_focus om enum saknas. */
+  industri?: string | null;
+  sector?: string | null;
+  /** Generiskt IRL 1–9 → härleder CRL/TMRL/BRL/SRL om bedömning saknas. */
+  irl_level?: number | null;
+  approved_state_aid_art22?: boolean | null;
+  approved_de_minimis?: boolean | null;
+  /** Datumkällor för statsstödsstart (fallback-ordning). */
+  signed_vinnova_incubation_approval_at?: string | null;
+  intagsdatum?: string | null;
+}
+
+/** Källflaggor — vilka radvärden som härleddes (vs. explicit registrerade). */
+export interface RowDerivation {
+  focus: boolean;
+  basis: boolean;
+  readiness: boolean;
+  state_aid_start: boolean;
 }
 
 export interface LagesredovisningInput {
@@ -300,6 +319,8 @@ export interface LagesredovisningRow {
   brl_cell: string;
   srl_cell: string;
   vinnova_funding_end_at: string;
+  /** Vilka värden som härleddes ur befintlig systemdata (ej explicit registrerade). */
+  derived: RowDerivation;
 }
 
 /**
@@ -315,27 +336,50 @@ export function buildLagesredovisningRows(
   const programStart = opts.programStart || PROGRAM_START;
   const { reportPeriod, fallbackRate } = opts;
   const accWindow: PeriodWindow = { from: programStart, to: reportPeriod.to };
+  const s = input.startup;
   const r = latestReadiness(input.readiness);
 
+  // ── Härled ur befintlig systemdata när dedikerad rapportdata saknas ──
+  // Affärsinriktning: enum → annars mappa industri/sector-frisktext.
+  const focusExplicit = s.vinnova_focus || null;
+  const focus = focusExplicit || mapVinnovaFocus(s.industri) || mapVinnovaFocus(s.sector);
+  const focusDerived = !focusExplicit && focus != null;
+
+  // Statsstödsstart: explicit → Vinnova-godkännandedatum → intagsdatum.
+  const startExplicit = dateOnly(s.state_aid_start_at);
+  const startDerivedVal =
+    startExplicit ||
+    dateOnly(s.signed_vinnova_incubation_approval_at) ||
+    dateOnly(s.intagsdatum);
+  const startDerived = !startExplicit && startDerivedVal != null;
+
+  // Readiness: explicit bedömning → annars härled alla axlar ur irl_level.
+  const hasExplicitReadiness =
+    r != null && (r.crl != null || r.tmrl != null || r.brl != null || r.srl != null);
+  const irl = s.irl_level != null && s.irl_level >= 1 && s.irl_level <= 9 ? s.irl_level : null;
+  const crl = hasExplicitReadiness ? (r?.crl ?? null) : irl;
+  const tmrl = hasExplicitReadiness ? (r?.tmrl ?? null) : irl;
+  const brl = hasExplicitReadiness ? (r?.brl ?? null) : irl;
+  const srl = hasExplicitReadiness ? (r?.srl ?? null) : irl;
+  const readinessDerived = !hasExplicitReadiness && irl != null;
+
   const base = {
-    startupId: input.startup.id,
-    name: input.startup.name,
-    org_nr: input.startup.org_nr || '',
-    state_aid_start_at: dateOnly(input.startup.state_aid_start_at) || '',
-    vinnova_focus: input.startup.vinnova_focus || null,
-    vinnova_focus_label: input.startup.vinnova_focus
-      ? VINNOVA_FOCUS_LABELS[input.startup.vinnova_focus]
-      : '',
+    startupId: s.id,
+    name: s.name,
+    org_nr: s.org_nr || '',
+    state_aid_start_at: startDerivedVal || '',
+    vinnova_focus: focus,
+    vinnova_focus_label: focus ? VINNOVA_FOCUS_LABELS[focus] : '',
     criteria_checked_at: dateOnly(r?.criteria_checked_at) || '',
-    crl: r?.crl ?? null,
-    tmrl: r?.tmrl ?? null,
-    brl: r?.brl ?? null,
-    srl: r?.srl ?? null,
-    crl_cell: formatReadinessCell('crl', r?.crl),
-    tmrl_cell: formatReadinessCell('tmrl', r?.tmrl),
-    brl_cell: formatReadinessCell('brl', r?.brl),
-    srl_cell: formatReadinessCell('srl', r?.srl),
-    vinnova_funding_end_at: dateOnly(input.startup.vinnova_funding_end_at) || ''
+    crl,
+    tmrl,
+    brl,
+    srl,
+    crl_cell: formatReadinessCell('crl', crl),
+    tmrl_cell: formatReadinessCell('tmrl', tmrl),
+    brl_cell: formatReadinessCell('brl', brl),
+    srl_cell: formatReadinessCell('srl', srl),
+    vinnova_funding_end_at: dateOnly(s.vinnova_funding_end_at) || ''
   };
 
   // Statsstödsperioder som överlappar rapportperioden.
@@ -347,15 +391,26 @@ export function buildLagesredovisningRows(
   });
 
   if (overlapping.length === 0) {
-    // Ingen explicit statsstödsperiod → en rad för hela rapportperioden.
+    // Ingen explicit statsstödsperiod → härled grund ur approved_*-flaggorna.
+    const derivedBasis: StateAidBasis | null = s.approved_de_minimis
+      ? 'de_minimis'
+      : s.approved_state_aid_art22
+        ? 'art22'
+        : null;
     return [
       {
         ...base,
-        basis: null,
-        basis_label: '',
-        sni_code: input.startup.sni_code || '',
+        basis: derivedBasis,
+        basis_label: derivedBasis ? STATE_AID_BASIS_LABELS[derivedBasis] : '',
+        sni_code: s.sni_code || '',
         period: totalsForWindow(input.timeEntries, input.costs, reportPeriod, fallbackRate),
-        accumulated: totalsForWindow(input.timeEntries, input.costs, accWindow, fallbackRate)
+        accumulated: totalsForWindow(input.timeEntries, input.costs, accWindow, fallbackRate),
+        derived: {
+          focus: focusDerived,
+          basis: derivedBasis != null,
+          readiness: readinessDerived,
+          state_aid_start: startDerived
+        }
       }
     ];
   }
@@ -371,9 +426,15 @@ export function buildLagesredovisningRows(
       ...base,
       basis: p.basis,
       basis_label: STATE_AID_BASIS_LABELS[p.basis],
-      sni_code: p.sni_code || input.startup.sni_code || '',
+      sni_code: p.sni_code || s.sni_code || '',
       period: totalsForWindow(input.timeEntries, input.costs, periodWin, fallbackRate),
-      accumulated: totalsForWindow(input.timeEntries, input.costs, accWin, fallbackRate)
+      accumulated: totalsForWindow(input.timeEntries, input.costs, accWin, fallbackRate),
+      derived: {
+        focus: focusDerived,
+        basis: false, // explicit period
+        readiness: readinessDerived,
+        state_aid_start: startDerived
+      }
     };
   });
 }

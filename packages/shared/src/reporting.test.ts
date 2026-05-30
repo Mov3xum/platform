@@ -242,3 +242,77 @@ test('mapStateAidBasis mappar stödgrund', () => {
   assert.equal(mapStateAidBasis('Berättigade statststöd enligt artikel 22 i GBER'), 'art22');
   assert.equal(mapStateAidBasis(''), null);
 });
+
+// ── Auto-härledning ur befintlig systemdata ───────────────────────────────────
+
+test('affärsinriktning härleds ur industri-frisktext när enum saknas', () => {
+  const input = baseInput({
+    startup: { ...baseInput().startup, vinnova_focus: null, industri: 'Life Science / medtech' }
+  });
+  const [row] = buildLagesredovisningRows(input, OPTS);
+  assert.equal(row.vinnova_focus, 'life_science');
+  assert.equal(row.derived.focus, true);
+});
+
+test('explicit vinnova_focus härleds inte', () => {
+  const [row] = buildLagesredovisningRows(baseInput(), OPTS);
+  assert.equal(row.vinnova_focus, 'miljo_energi');
+  assert.equal(row.derived.focus, false);
+});
+
+test('statsstödsgrund härleds ur approved_-flaggor när period saknas', () => {
+  const dm = buildLagesredovisningRows(
+    baseInput({ startup: { ...baseInput().startup, approved_de_minimis: true } }),
+    OPTS
+  )[0];
+  assert.equal(dm.basis, 'de_minimis');
+  assert.equal(dm.derived.basis, true);
+
+  const art = buildLagesredovisningRows(
+    baseInput({ startup: { ...baseInput().startup, approved_state_aid_art22: true } }),
+    OPTS
+  )[0];
+  assert.equal(art.basis, 'art22');
+});
+
+test('explicit statsstödsperiod vinner över härledning', () => {
+  const input = baseInput({
+    startup: { ...baseInput().startup, approved_state_aid_art22: true },
+    stateAidPeriods: [{ basis: 'de_minimis', sni_code: 'F.42.21', valid_from: '2025-07-01' }]
+  });
+  const [row] = buildLagesredovisningRows(input, OPTS);
+  assert.equal(row.basis, 'de_minimis');
+  assert.equal(row.derived.basis, false);
+});
+
+test('readiness härleds ur irl_level när bedömning saknas', () => {
+  const input = baseInput({ startup: { ...baseInput().startup, irl_level: 5 } });
+  const [row] = buildLagesredovisningRows(input, OPTS);
+  assert.equal(row.crl, 5);
+  assert.equal(row.srl, 5);
+  assert.equal(row.derived.readiness, true);
+  assert.ok(row.crl_cell.startsWith('CRL 5.'));
+});
+
+test('explicit readiness vinner över irl_level', () => {
+  const input = baseInput({
+    startup: { ...baseInput().startup, irl_level: 5 },
+    readiness: [{ assessed_at: '2025-11-01', crl: 8 }]
+  });
+  const [row] = buildLagesredovisningRows(input, OPTS);
+  assert.equal(row.crl, 8);
+  assert.equal(row.derived.readiness, false);
+});
+
+test('statsstödsstart härleds ur intagsdatum/Vinnova-godkännande', () => {
+  const input = baseInput({
+    startup: {
+      ...baseInput().startup,
+      state_aid_start_at: null,
+      signed_vinnova_incubation_approval_at: '2024-02-01'
+    }
+  });
+  const [row] = buildLagesredovisningRows(input, OPTS);
+  assert.equal(row.state_aid_start_at, '2024-02-01');
+  assert.equal(row.derived.state_aid_start, true);
+});
