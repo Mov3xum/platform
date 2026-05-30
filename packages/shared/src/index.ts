@@ -1081,7 +1081,7 @@ export interface ModuleGroup {
 
 export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['idag', 'inkorg', 'pagaende', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['kompassen', 'startups', 'investerare', 'events', 'community'] },
+  { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'insights', 'integrationer', 'installningar'] }
 ];
@@ -1135,6 +1135,14 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Bolagöversikt: profil, fas, team, milstolpar, avtal.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
     route: '/startups'
+  },
+  {
+    id: 'de_minimis',
+    title: 'De minimis',
+    description:
+      'Stöd av mindre betydelse per bolag — rullande treårssummor mot takbeloppen, varningar och försäkran inför ny stödansökan.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
+    route: '/de-minimis'
   },
   {
     id: 'investerare',
@@ -1248,4 +1256,6 @@ export { movexumPalette, typography as brandTypography } from './design/tokens';
 // ─── Workshop/utbildning-hjälpare (ren logik, enhetstestad) ──────────────────
 export * from './workshop';
 export * from './education-documents';
+// ─── De minimis-modul (ren beräkningslogik, enhetstestad) ────────────────────
+export * from './de-minimis';
 export * from './agreements';

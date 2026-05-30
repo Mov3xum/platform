@@ -938,6 +938,12 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               signed={startup.approved_de_minimis}
             />
           </ul>
+          <Link
+            href={`/de-minimis/${startup.id}`}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-link transition hover:bg-canvas-subtle"
+          >
+            Hantera de minimis-stöd
+          </Link>
         </Section>
 
         <Section id="documents" title="Dokument">

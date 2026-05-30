@@ -14,6 +14,7 @@ import {
   Home,
   Menu,
   Plug2,
+  ShieldCheck,
   Sparkles,
   X
 } from 'lucide-react';
@@ -30,6 +31,7 @@ type NavProps = {
 const iconByModule: Record<string, ComponentType<{ className?: string }>> = {
   dashboard: Home,
   startups: Building2,
+  de_minimis: ShieldCheck,
   partners: FolderKanban,
   onboarding: Compass,
   education: GraduationCap,
