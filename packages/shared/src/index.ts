@@ -1248,3 +1248,4 @@ export { movexumPalette, typography as brandTypography } from './design/tokens';
 // ─── Workshop/utbildning-hjälpare (ren logik, enhetstestad) ──────────────────
 export * from './workshop';
 export * from './education-documents';
+export * from './agreements';

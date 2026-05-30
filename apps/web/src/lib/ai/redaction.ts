@@ -36,7 +36,8 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // Personliga/innehållstunga kollektioner — aldrig exponerade för agenter.
   'chat_threads', // privat konversationsinnehåll (1700000083)
   'user_files', // personliga filer, strikt ägaren-bara (1700000085)
-  'deep_jobs' // intern orkestrering (1700000084)
+  'deep_jobs', // intern orkestrering (1700000084)
+  'agreement_signatures' // signeringsbevis: signer_email + ip_hash (1700000094)
 ]);
 
 /**

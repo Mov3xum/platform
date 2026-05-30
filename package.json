@@ -13,7 +13,7 @@
     "lint": "yarn workspace @platform/web lint",
     "typecheck": "yarn workspace @platform/web typecheck",
     "verify:pb-baseline": "node backend/pocketbase-schema/scripts/verify-baseline.mjs",
-    "test": "node --import ./scripts/register-test-hooks.mjs --experimental-strip-types --test packages/shared/src/*.test.ts apps/web/src/lib/*.test.ts apps/web/src/lib/ai/*.test.ts"
+    "test": "node --import ./scripts/register-test-hooks.mjs --experimental-strip-types --test packages/shared/src/*.test.ts apps/web/src/lib/*.test.ts apps/web/src/lib/users/*.test.ts apps/web/src/lib/ai/*.test.ts"
   },
   "packageManager": "yarn@1.22.22",
   "resolutions": {

@@ -1977,6 +1977,7 @@ lagras på tilldelningens `meeting`-fält.
 
 ---
 
+<<<<<<< HEAD
 ## 19. Bolagsisolering / RLS för `startup_member`
 
 ### 19.1 Kravet
@@ -2060,3 +2061,90 @@ hens egna bolag.
 - **SOC 2 CC6.1–CC6.3:** dokumenterad, verifierbar isolering;
   `scripts/verify-baseline.mjs` asserterar att reglerna har medlems-scope.
 - **Riskklass:** n/a (åtkomstkontroll, ingen AI-inferens).
+=======
+## 19. Avtal — tilldelning & juridiskt giltig in-app-signering
+
+### 19.1 Översikt
+
+Staff kan ladda upp ett avtal (PDF) och tilldela det ett bolag direkt på
+bolagskortet (`/startups/[id]`, sektionen **Avtal**). Bolaget och Movexum
+signerar sedan in-app. Signeringen är en **avancerad elektronisk signatur
+(AES)** enligt eIDAS art. 25–26 — juridiskt giltig, helt EU-suverän (ingen
+extern signeringstjänst). Signeringsstatus och bevis lagras direkt på
+bolagskortet.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000093_extend_agreements_signing.js` | Tilldelnings-/signeringsfält + `partially_signed`-status på `agreements` |
+| `backend/pocketbase-schema/migrations/1700000094_create_agreement_signatures.js` | Oföränderligt signeringsbevis `agreement_signatures` |
+| `backend/pocketbase-schema/migrations/1700000095_extend_activity_kinds_agreement.js` | `activities.kind` += `agreement` |
+| `apps/web/src/app/api/agreements/route.ts` | Upload-route (staff-only) → beräknar SHA-256, skapar `agreements`-rad |
+| `apps/web/src/app/api/agreements/[id]/file/route.ts` | Tenant-scopad PDF-proxy (granskning före signering) |
+| `apps/web/src/lib/actions/agreements.ts` | `signAgreementAction` + `deleteAgreementAction` |
+| `apps/web/src/components/intric/AgreementsSection.tsx` | Avtalslista + signera-modal + tilldela-modal |
+| `packages/shared/src/agreements.ts` | Typer + filvalidering + intent-text (enhetstestad) |
+
+### 19.2 Datamodell
+
+- **`agreements`** (utökad, 1700000093): utöver kärnfälten — `document_hash`
+  (SHA-256 hex av PDF-bytes, den kanoniska hash varje signatur attesterar),
+  `assigned_by`/`assigned_to`, `sent_at`, `requires_company_signature` /
+  `requires_movexum_signature`, `{company,movexum}_signed_{at,by}`. Status får
+  `partially_signed` (en part klar). De denormaliserade `*_signed_*`-fälten är
+  bara för snabb kort-vy; **det rättsliga beviset ligger i
+  `agreement_signatures`**.
+- **`agreement_signatures`** (1700000094): ett oföränderligt bevis per part och
+  avtal — `signer` (user), `party` (`company`/`movexum`), `signer_name`
+  (skriven juridisk namnteckning), `signer_email`, `document_hash` (hashen
+  signatären attesterade), `signed_at` (UTC), `ip_hash` (SHA-256 av IP — ej
+  klartext), `user_agent`, `intent_text` (avsiktsförklaringen), `method`
+  (`aes`; `bankid` reserverat). Unikt index `(agreement, party)` → en signatur
+  per part. **update/delete = endast superuser** (audit-integritet, ISO 27001
+  A.8.32).
+
+### 19.3 Signeringsflöde (AES, eIDAS art. 26)
+
+1. Staff laddar upp PDF + väljer parter (bolag/Movexum) → routen beräknar
+   `document_hash` och skapar avtalet med status `sent`.
+2. Behörig part öppnar signera-modalen, läser PDF:en, skriver sitt
+   fullständiga namn och bekräftar avsiktsförklaringen (`intent_text`).
+3. `signAgreementAction` verifierar part-behörighet (Movexum-parten = staff;
+   bolagsparten = länkad `startup_member`), **laddar ned PDF-bytes på nytt och
+   räknar om hashen** — om den avviker från `document_hash` vägras signeringen
+   (tamper-evidens, art. 26 d). Annars skapas ett oföränderligt
+   `agreement_signatures`-bevis (identitet, avsikt, hash, UTC-tid, ip-hash).
+4. När alla obligatoriska parter signerat → status `signed` + `signed_at`;
+   annars `partially_signed`. Allt loggas i `activities` (`kind='agreement'`).
+
+De fyra AES-kriterierna uppfylls av: (a/b) `signer` + `signer_email` +
+`signer_name`; (c) autentiserad session (httpOnly-cookie); (d) `document_hash`.
+
+**Tamper-kontrollen är best-effort:** avtal uppladdade via routen får alltid en
+`document_hash` (jämförs vid varje signering). Saknar ett avtal lagrad hash
+(legacy/manuellt skapad rad) hoppas jämförelsen över — signaturen registrerar
+ändå den hash som faktiskt sågs vid signeringstillfället. Eftersom
+`agreements.createRule` är staff-only kan icke-staff inte skapa hash-lösa rader.
+
+### 19.4 Säkerhet och regelefterlevnad
+
+- **RBAC:** upload/tilldela/radera = staff (radera kräver admin/incubator_lead).
+  Signering verifierar part-behörighet i server-actionen; bolagsmedlemmens
+  skrivning sker via superuser-fallback efter behörighetskontroll (PB v0.23
+  rule-eval-bugg, samma mönster som education_documents §18.3).
+- **GDPR §5 dataminimering:** IP lagras bara som SHA-256-hash, `user_agent`
+  cappad. `signer_email`/`signer_name` krävs för identifiering (rättslig grund =
+  **avtal/berättigat intresse**, inkubatordrift). Personnummer lagras aldrig.
+- **GDPR art. 17:** `cascadeDelete` på tenant/agreement/startup städar bevisen.
+- **AI-kontext:** `agreement_signatures` är **denylistad** i
+  `lib/ai/redaction.ts` (innehåller `signer_email` + `ip_hash`) → når aldrig
+  `query_collection`/agent-prompten.
+- **EU-suveränitet:** ren in-app-signering, ingen extern tjänst, ingen icke-EU-
+  leverantör. BankID/eID kan kopplas på senare via `method='bankid'` utan
+  brytande ändring.
+- **Riskklass (EU AI Act):** n/a — ingen AI-inferens; deterministisk hashning +
+  bevislagring.
+- **Migrationer:** nya filnummer (1700000093–095), oföränderliga; fälten +
+  kollektionen speglas i `scripts/setup-via-api.mjs` för bootstrap-paritet.
+>>>>>>> origin/staging
