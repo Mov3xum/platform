@@ -10,6 +10,7 @@ import { DocumentUploadForm } from './DocumentUploadForm';
 import { DocumentAssignForm } from './DocumentAssignForm';
 import { DocumentCompleteButton } from './DocumentCompleteButton';
 import { DocumentDeleteButton } from './DocumentDeleteButton';
+import { listAssignableResourcesForTenant, type AssignableResource } from '@/lib/assignments/collaboration';
 import { educationDocumentKindLabels } from '@platform/shared';
 import type { EducationDocument, EducationDocumentAssignment } from '@platform/shared';
 
@@ -23,6 +24,7 @@ export default async function EducationDocumentsPage() {
   let documents: EducationDocument[] = [];
   let assignments: EducationDocumentAssignment[] = [];
   let startups: Array<{ id: string; name: string }> = [];
+  let resources: AssignableResource[] = [];
 
   try {
     documents = (
@@ -65,6 +67,7 @@ export default async function EducationDocumentsPage() {
     } catch (error) {
       console.error('[education/documents] failed to load startups', { tenant: user.tenant, error });
     }
+    resources = await listAssignableResourcesForTenant(pb, user.tenant);
   }
 
   const assignmentsByDocument = new Map<string, EducationDocumentAssignment[]>();
@@ -266,7 +269,7 @@ export default async function EducationDocumentsPage() {
                         </ul>
                       )}
                     </div>
-                    <DocumentAssignForm documentId={doc.id} startups={startups} />
+                    <DocumentAssignForm documentId={doc.id} startups={startups} resources={resources} />
                   </div>
                 </div>
               );

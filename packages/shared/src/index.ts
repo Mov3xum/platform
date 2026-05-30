@@ -601,6 +601,12 @@ export interface WorkshopAssignment {
   status: WorkshopAssignmentStatus;
   due_date?: string;
   activity?: string;
+  /** Fritext-instruktion till bolaget (CLAUDE.md § 18.4). */
+  instructions?: string;
+  /** Inbjudna Movexum-resurser (user-id:n) som medarbetar på tilldelningen. */
+  collaborators?: string[];
+  /** Kopplat möte (incubator_events-id). */
+  meeting?: string;
   progress_json?: Record<string, unknown>;
   answers_json?: Record<string, unknown>;
   takeaway_json?: Record<string, unknown>;
@@ -616,6 +622,8 @@ export interface WorkshopAssignment {
     startup?: { id: string; name: string };
     assigned_by?: { id: string; display_name?: string; email: string };
     owner?: { id: string; display_name?: string; email: string };
+    collaborators?: Array<{ id: string; display_name?: string; email: string }>;
+    meeting?: IncubatorEvent;
   };
 }
 
@@ -652,6 +660,10 @@ export interface EducationDocumentAssignment {
   completed_by?: string;
   completed_at?: string;
   activity?: string;
+  /** Inbjudna Movexum-resurser (user-id:n) som medarbetar på tilldelningen. */
+  collaborators?: string[];
+  /** Kopplat möte (incubator_events-id). */
+  meeting?: string;
   created: string;
   updated: string;
   expand?: {
@@ -659,6 +671,8 @@ export interface EducationDocumentAssignment {
     startup?: { id: string; name: string };
     assigned_by?: { id: string; display_name?: string; email: string };
     completed_by?: { id: string; display_name?: string; email: string };
+    collaborators?: Array<{ id: string; display_name?: string; email: string }>;
+    meeting?: IncubatorEvent;
   };
 }
 
@@ -1066,7 +1080,7 @@ export interface ModuleGroup {
 }
 
 export const RAIL_GROUPS: ModuleGroup[] = [
-  { label: 'Översikt', modules: ['idag', 'inkorg', 'filer', 'inflode', 'uppdrag'] },
+  { label: 'Översikt', modules: ['idag', 'inkorg', 'pagaende', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'insights', 'integrationer', 'installningar'] }
@@ -1086,6 +1100,13 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Allt som är ditt på ett ställe — uppgifter, aktiviteter, möten och events att planera och följa upp.',
     rolesAllowed: ALL_ROLES,
     route: '/inkorg'
+  },
+  {
+    id: 'pagaende',
+    title: 'Pågående',
+    description: 'Allt som pågår med bolagen — workshops, utbildningar och aktiviteter, samlat per bolag så hela Movexum ser läget.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/pagaende'
   },
   {
     id: 'filer',

@@ -1925,3 +1925,52 @@ aktivitetsfeeden: "**\<bolag\> slutförde \<dokument\>**".
   direktlänk). Aktivitetstiteln innehåller bara bolagsnamn + dokumenttitel (ej
   PII). `cascadeDelete` på `tenant`/`document`/`startup` ger art. 17-städning.
   Kollektionerna exponerar inga whitelistade fält till AI-kontexten.
+
+### 18.4 Samarbete kring tilldelningar (instruktioner, resurser, möten)
+
+När staff tilldelar en workshop eller ett utbildningsdokument kan de skriva
+**instruktioner**, bjuda in andra **Movexum-resurser** (coacher/mentorer) som
+medarbetare, och i samma steg skapa ett **möte** med de inbjudna. Inbjudna
+resurser ser tilldelningen i sin "Min översikt" (personlig uppgift) och mötet i
+sin agenda. Sidan **`/pagaende`** ger hela Movexum en tenant-bred översikt över
+allt som pågår med bolagen (workshops, utbildningsdokument, öppna aktiviteter),
+grupperat per bolag.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000091_extend_assignments_collaboration.js` | `instructions`/`collaborators`/`meeting` på `workshop_assignments`; `collaborators`/`meeting` på `education_document_assignments` |
+| `backend/pocketbase-schema/migrations/1700000092_extend_event_signups_user.js` | `user`-relation på `event_signups` (inbjuden Movexum-resurs) |
+| `apps/web/src/lib/assignments/types.ts` | `AssignableResource` + `AssignmentCollabOptions` (server-fria typer) |
+| `apps/web/src/lib/assignments/collaboration.ts` | `listAssignableResourcesForTenant`, `createCollaboratorTasks`, `createAssignmentMeeting` (server-only) |
+| `apps/web/src/components/assignments/AssignmentCollabFields.tsx` | Delade formulärfält (instruktioner, resurs-checkboxar, möte) |
+| `apps/web/src/app/pagaende/page.tsx` | Tenant-bred "Pågående"-översikt per bolag |
+
+**Flöde.** `assignWorkshopToStartupAction` / `assignDocumentToStartupAction` tar
+ett valfritt `options`-objekt (`instructions`, `collaboratorIds`, `meeting`). För
+varje inbjuden resurs skapas en `tasks`-rad (`kind='prep'`, `owner`=resursen,
+`link_kind='startup'`) → syns i resursens översikt ("både uppgift + aktivitet":
+workshop-tilldelningen skapar dessutom som tidigare en `activities`-rad på
+bolaget som syns i feeden). Ett valfritt möte skapas som `incubator_events` +
+en `event_signups`-rad per inbjuden (organisatör inkluderad), och event-id:t
+lagras på tilldelningens `meeting`-fält.
+
+**Säkerhet och regelefterlevnad:**
+- **RBAC:** bara staff (admin/incubator_lead/coach/mentor) kan tilldela och
+  bjuda in. `validResourceIds` verifierar att varje inbjuden resurs faktiskt är
+  staff i tenanten (defense-in-depth ovanpå PB-reglerna). Allt är tenant-scopat.
+- **Möten:** `incubator_events.createRule` kräver admin/incubator_lead/coach;
+  meeting-skapandet är fail-soft (en mentor utan eventbehörighet får tilldelningen
+  utan möte i stället för ett hårt fel).
+- **GDPR §5 / dataminimering:** `collaborators` och `event_signups.user` är
+  interna användare. Inga nya whitelistade fält i `lib/ai/context.ts` —
+  `collaborators`, `meeting` och `event_signups` når **aldrig** AI-kontexten.
+  Task-/mötesbeskrivningar innehåller bara workshop-/dokument- och bolagsnamn
+  (ingen PII).
+- **GDPR art. 17:** nya relationer cascade-städas via befintliga
+  tenant/startup-flöden; `event_signups` cascade-raderas med sitt event.
+- **Riskklass:** minimal (intern koordinering, ingen AI-inferens, ingen
+  profilering).
+- **Migrationer:** nya filnummer (1700000091–092), oföränderliga; fälten
+  speglas i `scripts/setup-via-api.mjs` för bootstrap-paritet.
