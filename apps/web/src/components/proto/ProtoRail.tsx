@@ -1,6 +1,12 @@
 import Link from 'next/link';
 import { Icon } from './Icon';
-import { coreModules, RAIL_GROUPS, type Role } from '@platform/shared';
+import {
+  coreModules,
+  RAIL_GROUPS,
+  MEMBER_RAIL,
+  isPureStartupMember,
+  type Role
+} from '@platform/shared';
 import { canAccessModuleForUser } from '@/lib/rbac';
 import { ModuleNavItem } from './ModuleNavItem';
 import { Logo } from '@/components/Logo';
@@ -9,6 +15,7 @@ import { StartupSwitcher, type SwitchableStartup } from './StartupSwitcher';
 const moduleIcons: Record<string, string> = {
   idag: 'message',
   min_oversikt: 'home',
+  mina_aktiviteter: 'flow',
   inkorg: 'home',
   pagaende: 'spark',
   uppdrag: 'flow',
@@ -51,11 +58,14 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
       .slice(0, 2)
       .toUpperCase() || '??';
 
+  // Ren bolagsmedlem har "Min översikt" som hemvy (staff → Hemmaplan/Chatt).
+  const homeHref = isPureStartupMember(user.roles) ? '/min-oversikt' : '/chatt';
+
   return (
     <aside id="mx-rail" className="mx-rail" aria-label="Huvudnavigation">
       <div className="mx-rail-head">
         <Logo
-          href="/chatt"
+          href={homeHref}
           variant="dark"
           width={120}
           height={28}
@@ -70,7 +80,23 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
       )}
 
       <nav className="mx-rail-nav">
-        {RAIL_GROUPS.map((group) => {
+        {isPureStartupMember(user.roles) ? (
+          // Ren bolagsmedlem → dedikerad, kortare rail (CLAUDE.md § 22).
+          <div>
+            {MEMBER_RAIL.filter((item) =>
+              canAccessModuleForUser(user.roles, item.id, user.disabledModules)
+            ).map((item) => (
+              <ModuleNavItem
+                key={item.id}
+                href={coreModules.find((m) => m.id === item.id)?.route ?? '/min-oversikt'}
+                label={item.label}
+                icon={moduleIcons[item.id] || 'dot'}
+                count={counts[item.id]}
+              />
+            ))}
+          </div>
+        ) : (
+          RAIL_GROUPS.map((group) => {
           const groupModules = group.modules
             .map((id) => coreModules.find((m) => m.id === id))
               .filter(
@@ -95,7 +121,8 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
               ))}
             </div>
           );
-        })}
+          })
+        )}
       </nav>
 
       <div className="mx-rail-foot">

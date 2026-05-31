@@ -2288,3 +2288,57 @@ hens egna bolag.
 - **Riskklass:** n/a (åtkomstkontroll, ingen AI-inferens).
 - **Migrationer:** ny oföränderlig migration (1700000096), fälten speglas i
   `scripts/setup-via-api.mjs` och `scripts/verify-baseline.mjs`.
+
+---
+
+## 22. Bolagsmedlemmens dedikerade navigation
+
+### 22.1 Kravet
+
+En ren `startup_member` ska **inte** se samma vyer som Movexum-personal.
+Bolagsmedlemmen får en egen, kortare rail med bara det som rör det egna
+bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
+
+1. **Min översikt** (`/min-oversikt`) — information om inkubatorprogrammet och
+   Movexum, bolagsstatus, de minimis-status, egna uppgifter ("nödvändiga
+   saker"). Tilldelade verktyg/dokument bor numera under "Aktiviteter".
+2. **Aktiviteter** (`/mina-aktiviteter`) — översikt över tilldelade workshops,
+   dokument och verktyg. Medlemmen öppnar och genomför dem direkt; en
+   **progressbar** visar hur stor andel som slutförts (workshops `done` +
+   dokument `completed` / totalt). Staff/coach kan granska ett bolags progress
+   via `?startup=<id>` (länk från `/pagaende`).
+3. **Filer** (`/filer`) — avtal (`agreements`) kopplade till bolaget och
+   dokument som blivit output av aktiviteter (utbildningsdokument), plus
+   medlemmens egna genererade/uppladdade filer.
+4. **De minimis** (`/de-minimis`) — befintlig modul (§ 20).
+5. **Community** (`/community`) — platshållare för co-startup-interaktion ("bara
+   rubriken för nu"). Alumni-/partnerdatan är staff/observer-only (§ 21).
+
+### 22.2 Implementation
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/index.ts` | `MEMBER_RAIL` (rubriker + etiketter), `isPureStartupMember(roles)`, modul `mina_aktiviteter` |
+| `apps/web/src/components/proto/ProtoRail.tsx` | Renderar medlems-railen i stället för `RAIL_GROUPS` när `isPureStartupMember` |
+| `apps/web/src/app/mina-aktiviteter/page.tsx` | Aktivitetsvy + progressbar (medlem) / read-only granskning (staff via `?startup`) |
+| `apps/web/src/app/min-oversikt/page.tsx` | Program-info för medlem; staff behåller "Mitt bolag" |
+| `apps/web/src/app/filer/page.tsx` | Avtal + aktivitetsdokument-sektioner för medlem |
+| `apps/web/src/app/community/page.tsx` | Medlems-platshållare |
+
+- `isPureStartupMember` = har `startup_member` men ingen
+  staff-/observer-roll. Multi-roll (t.ex. coach + startup_member) behåller
+  hela staff-railen.
+- Hemvy: en ren medlem som landar på `/chatt` redirectas till `/min-oversikt`
+  (rail-logon pekar dit); staff har kvar Hemmaplan/Chatt.
+
+### 22.3 Regelefterlevnad
+
+- **Åtkomst (§ 21):** railen är ren UI-kurering — den faktiska isoleringen
+  ligger kvar i PB-RLS + `startupScopeFilter`. Medlems-railen exponerar inga
+  nya datavägar; alla läsningar går via användarens auth-token.
+- **AI/PII:** inga nya AI-funktioner, inga nya fält i `lib/ai/context.ts`.
+  `/mina-aktiviteter` och `/filer`-medlemssektionerna läser bara redan
+  medlems-scopade kollektioner (`workshop_assignments`,
+  `education_document_assignments`, `agreements`, `tools`, `user_files`).
+- **Riskklass:** minimal/n.a. (navigation + åtkomstkontroll, ingen
+  AI-inferens).

@@ -5,7 +5,7 @@ import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { Avatar, Chip, Icon } from '@/components/proto';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailStat, RailEmpty } from '@/components/PageRail';
-import type { Alumni, AlumniTag, Partner } from '@platform/shared';
+import { isPureStartupMember, type Alumni, type AlumniTag, type Partner } from '@platform/shared';
 
 type AvatarAccent = 'ink' | 'green' | 'purple' | 'brown' | 'copper' | 'yellow' | 'cyan';
 
@@ -69,6 +69,31 @@ interface ActivityRecord {
 
 export default async function CommunityPage() {
   const user = await requireUser();
+
+  // Ren bolagsmedlem får en egen community-yta (CLAUDE.md § 22). Alumni-/
+  // partner-data är staff/observer-only (§ 21) → vi visar en platshållare tills
+  // co-startup-funktionen byggs ut. "Behövs bara rubriken för nu."
+  if (isPureStartupMember(user.roles)) {
+    return (
+      <PageShell title="Community">
+        <div className="py-6">
+          <section className="rounded-3xl border border-default bg-surface p-10 text-center">
+            <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-movexum-pastell-lila text-movexum-lila dark:bg-movexum-morklila/40 dark:text-movexum-pastell-lila">
+              <Icon name="people" size={28} />
+            </span>
+            <h2 className="font-heading text-xl font-semibold text-foreground">
+              Community kommer snart
+            </h2>
+            <p className="mx-auto mt-2 max-w-md text-sm text-foreground-muted">
+              Här kommer du kunna se andra bolag i inkubatorn och interagera med dem. Vi
+              bygger just nu den här ytan — håll utkik.
+            </p>
+          </section>
+        </div>
+      </PageShell>
+    );
+  }
+
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
   const isScopedViewer =

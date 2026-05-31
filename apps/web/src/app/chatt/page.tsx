@@ -57,7 +57,8 @@ export default async function ChattPage() {
 
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
   if (!isStaff && hasRole(user.roles, ['startup_member'])) {
-    redirect('/inkorg');
+    // Bolagsmedlemmens hemvy är "Min översikt" (CLAUDE.md § 22).
+    redirect('/min-oversikt');
   }
 
   const pb = await getServerPb();
