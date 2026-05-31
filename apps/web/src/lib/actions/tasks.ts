@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { getServerPb, getSuperuserPb, requireUser } from '@/lib/auth.server';
+import { getServerPb, requireUser } from '@/lib/auth.server';
 import { getOneForTenant } from '@/lib/pb.server';
 import { hasRole } from '@/lib/rbac';
 import { toRawStatus, type BoardStatus } from '@/lib/overview/status';
@@ -173,15 +173,12 @@ export async function updateTaskStatusAction(
   const raw = toRawStatus('task', boardStatus);
   if (!raw) return { ok: false, error: 'Ogiltig status.' };
 
-  // RBAC enforce:as i koden (tenant + ägare/staff) INNAN superuser-
-  // klienten används för själva skrivningen. Superuser krävs eftersom
-  // PB v0.23:s relation-join (tenant.id = ...) i updateRule har en
-  // rule-eval-bugg som annars får skrivningen att tyst nekas → kortet
-  // hoppar tillbaka i boarden.
-  const pb = await getSuperuserPb();
-  if (!pb) {
-    return { ok: false, error: 'Kunde inte uppdatera uppgiften.' };
-  }
+  // tasks.update/deleteRule relaxades i migration 1700000093 till
+  // auth-only-form (PB v0.23:s relation-join `tenant` + `?=`-roller nekade
+  // annars writes sporadiskt → kortet hoppade tillbaka). Tenant + ägare/
+  // staff enforce:as därför i koden här INNAN skrivningen — koden är
+  // säkerhetsgränsen.
+  const pb = await getServerPb();
 
   let row: { id: string; tenant?: string; owner?: string };
   try {

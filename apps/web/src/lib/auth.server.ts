@@ -59,34 +59,6 @@ export async function getServerPb(): Promise<PocketBase> {
   return pb;
 }
 
-/**
- * Superuser-autentiserad PocketBase-klient. Används BARA efter att RBAC
- * (tenant + roll/ägare) redan verifierats i koden — koden är
- * säkerhetsgränsen, inte PB-regeln. Behövs för skrivningar mot kollektioner
- * vars updateRule jämför mot en relation (t.ex. `tenant`/`startup.tenant`),
- * eftersom PB v0.23:s rule-eval har en bugg som annars tyst nekar
- * skrivningen → drag-and-drop-kort hoppar tillbaka i boarden. Returnerar
- * `null` om credentials saknas/auth failar (anroparen failar då tydligt).
- */
-export async function getSuperuserPb(): Promise<PocketBase | null> {
-  const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
-  const password =
-    process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
-  if (!email || !password) {
-    console.error('[auth.server] superuser credentials missing');
-    return null;
-  }
-  const pb = new PocketBase(SERVER_PB_URL);
-  pb.autoCancellation(false);
-  try {
-    await pb.collection('_superusers').authWithPassword(email, password);
-    return pb;
-  } catch {
-    console.error('[auth.server] superuser auth failed');
-    return null;
-  }
-}
-
 export async function getCurrentUser(): Promise<SessionUser | null> {
   const pb = await getServerPb();
   if (!pb.authStore.isValid || !pb.authStore.model) return null;
