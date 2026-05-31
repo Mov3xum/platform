@@ -179,9 +179,17 @@ export default async function PagaendePage() {
                 >
                   {c.name}
                 </Link>
-                <span className="text-[11px] text-foreground-subtle">
-                  {c.workshops.length + c.documents.length + c.activities.length} pågående
-                </span>
+                <div className="flex items-center gap-3">
+                  <Link
+                    href={`/mina-aktiviteter?startup=${c.id}`}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-medium text-link hover:underline"
+                  >
+                    <Icon name="flow" size={13} /> Aktiviteter & progress
+                  </Link>
+                  <span className="text-[11px] text-foreground-subtle">
+                    {c.workshops.length + c.documents.length + c.activities.length} pågående
+                  </span>
+                </div>
               </div>
 
               <ul className="space-y-2">

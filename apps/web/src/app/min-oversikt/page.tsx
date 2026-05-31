@@ -18,6 +18,7 @@ import { DeMinimisSection } from '@/app/startups/[id]/DeMinimisSection';
 import { DocumentCompleteButton } from '@/app/education/documents/DocumentCompleteButton';
 import {
   educationDocumentKindLabels,
+  isPureStartupMember,
   type EducationDocumentAssignment,
   type StartupPhase,
   type Tool
@@ -98,12 +99,16 @@ export default async function MinOversiktPage() {
     'mentor',
     'observer'
   ]);
+  // Ren bolagsmedlem får en program-fokuserad "Min översikt"; staff behåller
+  // den bredare "Mitt bolag"-vyn med tilldelade verktyg/dokument inline.
+  const isPureMember = isPureStartupMember(user.roles);
+  const pageTitle = isPureMember ? 'Min översikt' : 'Mitt bolag';
   const linkedId = user.linkedStartups[0];
 
   if (!linkedId) {
     if (isStaff) redirect('/startups');
     return (
-      <PageShell title="Mitt bolag">
+      <PageShell title={pageTitle}>
         <div className="py-6">
           <Empty>
             Ditt konto är inte kopplat till något bolag än — kontakta Movexum.
@@ -125,7 +130,7 @@ export default async function MinOversiktPage() {
 
   if (!startup) {
     return (
-      <PageShell title="Mitt bolag">
+      <PageShell title={pageTitle}>
         <div className="py-6">
           <div className="rounded-3xl border border-default bg-surface p-6 text-sm text-foreground-muted">
             Kunde inte ladda ditt bolag just nu. Försök igen eller kontakta Movexum.
@@ -141,36 +146,38 @@ export default async function MinOversiktPage() {
     hasRole(user.roles, ['startup_member']) && user.linkedStartups.includes(linkedId);
   const canCompleteDocs = canManageDocs || isLinkedMember;
 
-  // Tilldelade verktyg — körbara för det egna bolaget.
+  // Tilldelade verktyg + dokument visas inline för staff ("Mitt bolag"); för
+  // bolagsmedlemmar bor de under "Aktiviteter" → hämta dem inte här.
   let tools: Tool[] = [];
-  try {
-    const res = await pb.collection('tools').getList<Tool>(1, 200, {
-      filter: `tenant = "${escFilter(user.tenant)}" && active = true`,
-      sort: 'category,name'
-    });
-    tools = res.items.filter((tool) =>
-      canRunTool(user.roles, tool, { isLinkedStartup: true })
-    );
-  } catch (error) {
-    console.error('[min-oversikt] failed to load tools', { startupId: linkedId, error });
-  }
-
-  // Tilldelade utbildningsdokument (eget bolag).
   let documentAssignments: EducationDocumentAssignment[] = [];
-  try {
-    const res = await pb
-      .collection(PB_COLLECTIONS.educationDocumentAssignments)
-      .getList<EducationDocumentAssignment>(1, 100, {
-        filter: `tenant = "${escFilter(user.tenant)}" && startup = "${escFilter(linkedId)}"`,
-        sort: '-created',
-        expand: 'document'
+  if (!isPureMember) {
+    try {
+      const res = await pb.collection('tools').getList<Tool>(1, 200, {
+        filter: `tenant = "${escFilter(user.tenant)}" && active = true`,
+        sort: 'category,name'
       });
-    documentAssignments = res.items;
-  } catch (error) {
-    console.error('[min-oversikt] failed to load document assignments', {
-      startupId: linkedId,
-      error
-    });
+      tools = res.items.filter((tool) =>
+        canRunTool(user.roles, tool, { isLinkedStartup: true })
+      );
+    } catch (error) {
+      console.error('[min-oversikt] failed to load tools', { startupId: linkedId, error });
+    }
+
+    try {
+      const res = await pb
+        .collection(PB_COLLECTIONS.educationDocumentAssignments)
+        .getList<EducationDocumentAssignment>(1, 100, {
+          filter: `tenant = "${escFilter(user.tenant)}" && startup = "${escFilter(linkedId)}"`,
+          sort: '-created',
+          expand: 'document'
+        });
+      documentAssignments = res.items;
+    } catch (error) {
+      console.error('[min-oversikt] failed to load document assignments', {
+        startupId: linkedId,
+        error
+      });
+    }
   }
 
   // Egna + bolagets öppna uppgifter (ej klara/avbrutna).
@@ -189,7 +196,7 @@ export default async function MinOversiktPage() {
   }
 
   return (
-    <PageShell title="Mitt bolag">
+    <PageShell title={pageTitle}>
       <div className="space-y-6 py-6">
         {/* Bolagsheader */}
         <section className="rounded-3xl border border-default bg-surface p-6">
@@ -221,6 +228,53 @@ export default async function MinOversiktPage() {
           </div>
         </section>
 
+        {/* Om inkubatorprogrammet — bara för bolagsmedlemmar. */}
+        {isPureMember ? (
+          <section className="rounded-3xl border border-default bg-gradient-to-br from-movexum-pastell-bla/50 to-surface p-6 dark:from-brand/10">
+            <div className="flex items-start gap-3">
+              <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground">
+                <Icon name="cap" size={22} />
+              </span>
+              <div className="space-y-3">
+                <div>
+                  <h2 className="font-heading text-lg font-semibold text-foreground">
+                    Välkommen till Movexums inkubatorprogram
+                  </h2>
+                  <p className="mt-1 text-sm text-foreground-muted">
+                    Movexum är Gävleborgs företagsinkubator. Under inkubatorstiden får ni
+                    coachning, workshops, utbildningar och tillgång till nätverk, kapital och
+                    expertis — allt samlat här på plattformen. Den här sidan är er hemvy för
+                    allt som rör ert bolag under resan.
+                  </p>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <Link
+                    href="/mina-aktiviteter"
+                    className="flex items-center gap-2 rounded-2xl border border-default bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-canvas-subtle"
+                  >
+                    <Icon name="flow" size={16} /> Aktiviteter
+                  </Link>
+                  <Link
+                    href="/de-minimis"
+                    className="flex items-center gap-2 rounded-2xl border border-default bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-canvas-subtle"
+                  >
+                    <Icon name="shield" size={16} /> De minimis
+                  </Link>
+                  <Link
+                    href="/filer"
+                    className="flex items-center gap-2 rounded-2xl border border-default bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-canvas-subtle"
+                  >
+                    <Icon name="doc" size={16} /> Filer & avtal
+                  </Link>
+                </div>
+                <p className="text-xs text-foreground-subtle">
+                  Frågor om programmet? Hör av dig till din Movexum-coach.
+                </p>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
         {/* De minimis */}
         <Card
           title="De minimis-status"
@@ -240,7 +294,8 @@ export default async function MinOversiktPage() {
           />
         </Card>
 
-        {/* Tilldelade verktyg */}
+        {/* Tilldelade verktyg — för bolagsmedlemmar samlat under "Aktiviteter". */}
+        {!isPureMember ? (
         <Card title="Tilldelade verktyg">
           {tools.length === 0 ? (
             <Empty>Inga verktyg är tillgängliga för ditt bolag än.</Empty>
@@ -271,8 +326,10 @@ export default async function MinOversiktPage() {
             </ul>
           )}
         </Card>
+        ) : null}
 
-        {/* Tilldelade utbildningsdokument */}
+        {/* Tilldelade utbildningsdokument — för medlemmar samlat under "Aktiviteter". */}
+        {!isPureMember ? (
         <Card title="Tilldelade utbildningsdokument">
           {documentAssignments.length === 0 ? (
             <Empty>Inga tilldelade dokument än.</Empty>
@@ -348,6 +405,7 @@ export default async function MinOversiktPage() {
             </ul>
           )}
         </Card>
+        ) : null}
 
         {/* Mina uppgifter */}
         <Card title="Mina uppgifter">

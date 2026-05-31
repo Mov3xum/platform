@@ -1189,6 +1189,33 @@ export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'System', modules: ['agenter', 'insights', 'integrationer', 'anvandare', 'installningar'] }
 ];
 
+/**
+ * Dedikerad navigation för en *ren* `startup_member` (CLAUDE.md § 21bis/§ 22).
+ * Bolagsmedlemmar ska INTE se samma vyer som Movexum-personal — de får en egen,
+ * kortare rail med bara det som rör det egna bolaget under inkubatorprogrammet.
+ * Etiketterna är explicita (oberoende av `ModuleDefinition.title`) så att t.ex.
+ * `min_oversikt` heter "Min översikt" för medlemmen men "Mitt bolag" för staff.
+ */
+export const MEMBER_RAIL: { id: string; label: string }[] = [
+  { id: 'min_oversikt', label: 'Min översikt' },
+  { id: 'mina_aktiviteter', label: 'Aktiviteter' },
+  { id: 'filer', label: 'Filer' },
+  { id: 'de_minimis', label: 'De minimis' },
+  { id: 'community', label: 'Community' }
+];
+
+/**
+ * Sann när användaren är en *ren* bolagsmedlem — har `startup_member` men ingen
+ * staff-/observer-roll. Används för att rendera den dedikerade medlems-railen och
+ * för medlems-specifika vy-grenar.
+ */
+export function isPureStartupMember(roles: Role[] | undefined): boolean {
+  if (!roles || roles.length === 0) return false;
+  if (!roles.includes('startup_member')) return false;
+  const staffOrObserver: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'];
+  return !roles.some((r) => staffOrObserver.includes(r));
+}
+
 export const coreModules: ModuleDefinition[] = [
   {
     id: 'idag',
@@ -1204,6 +1231,14 @@ export const coreModules: ModuleDefinition[] = [
       'Bolagsmedlemmens samlade vy — bolagsstatus, de minimis-liggare, tilldelade verktyg och utbildningsdokument samt egna uppgifter.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
     route: '/min-oversikt'
+  },
+  {
+    id: 'mina_aktiviteter',
+    title: 'Aktiviteter',
+    description:
+      'Bolagsmedlemmens aktivitetsvy — tilldelade workshops, dokument och verktyg att öppna och genomföra direkt, med progress som coachen också ser.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
+    route: '/mina-aktiviteter'
   },
   {
     id: 'inkorg',
