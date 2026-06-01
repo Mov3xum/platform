@@ -845,7 +845,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: null,
   deleteRule: null
 });
@@ -1607,7 +1607,7 @@ await ensureCollection({
   indexes: ['CREATE INDEX idx_workshop_media_tenant ON workshop_media (tenant)'],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
 });
@@ -2589,7 +2589,7 @@ const FORCE_CREATE_RULES = {
   startup_readiness_assessments: `${ANY_AUTH} && @request.auth.tenant != ""`,
   startup_state_aid_periods: `${ANY_AUTH} && @request.auth.tenant != ""`,
   startup_kpis: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  workshop_media: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  workshop_media: ANY_AUTH,
   education_documents: `${ANY_AUTH} && @request.auth.tenant != ""`,
   education_document_assignments: `${ANY_AUTH} && @request.auth.tenant != ""`,
   agreement_signatures: `${ANY_AUTH} && @request.auth.tenant != ""`,
