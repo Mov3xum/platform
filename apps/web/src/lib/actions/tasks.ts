@@ -173,11 +173,8 @@ export async function updateTaskStatusAction(
   const raw = toRawStatus('task', boardStatus);
   if (!raw) return { ok: false, error: 'Ogiltig status.' };
 
-  // tasks.update/deleteRule relaxades i migration 1700000093 till
-  // auth-only-form (PB v0.23:s relation-join `tenant` + `?=`-roller nekade
-  // annars writes sporadiskt → kortet hoppade tillbaka). Tenant + ägare/
-  // staff enforce:as därför i koden här INNAN skrivningen — koden är
-  // säkerhetsgränsen.
+  // Tenant + ägare/staff verifieras i koden innan skrivningen
+  // (defense-in-depth ovanpå tasks.updateRule).
   const pb = await getServerPb();
 
   let row: { id: string; tenant?: string; owner?: string };

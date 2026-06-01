@@ -655,6 +655,8 @@ await ensureCollection({
 });
 
 // 8. activities -------------------------------------------------------------
+const STAFF_OR_OWNER =
+  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.id = owner)';
 await ensureCollection({
   id: 'activities_collection',
   name: 'activities',
@@ -677,12 +679,8 @@ await ensureCollection({
   listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   createRule: `${ANY_AUTH}`,
-  // update/delete: relaxad auth-only-form (se migration 1700000093).
-  // PB v0.23:s rule-eval-bugg på relation-join (startup.tenant) + ?=-roller
-  // nekar annars writes sporadiskt → drag-and-drop i /inkorg-boarden
-  // persisterar inte. Roll/ägar/tenant enforce:as i server-actionsen.
-  updateRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  deleteRule: `${ANY_AUTH} && @request.auth.tenant != ""`
+  updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_OWNER}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_OWNER}`
 });
 
 // 9. notes ------------------------------------------------------------------
