@@ -86,7 +86,12 @@ interface WorkshopBlockBuilderProps {
 export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderProps) {
   const [modules, setModules] = useState<WorkshopModule[]>(() => {
     if (initialModules && initialModules.length > 0) return initialModules;
-    return [{ id: uid('module'), title: 'Modul 1', description: '', blocks: [] }];
+    // Stabilt id för start-modulen: uid() använder crypto.randomUUID/Date.now
+    // som skiljer sig mellan server- och klientrender → hydreringsmismatch i
+    // det serialiserade modules_json-fältet. Användartillagda moduler/block
+    // skapas i klient-eventhandlers (efter hydrering) och kan därför fortsätta
+    // använda uid().
+    return [{ id: 'module_1', title: 'Modul 1', description: '', blocks: [] }];
   });
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
   const [addingBlockFor, setAddingBlockFor] = useState<string | null>(null);
