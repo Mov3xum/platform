@@ -2410,6 +2410,39 @@ hinkarnas `min`/`max`). Per-val `score`/`bucket` lagras i
   **compass speglas inte** i `scripts/setup-via-api.mjs`/`verify-baseline.mjs`
   (migration-only) — inga mirror-ändringar krävs.
 
+### 23.5 E-postnotis vid nytt inflöde (Resend)
+
+När ett nytt inflöde (lead) kommer in via en publik intag-modul mejlas en notis
+till Movexums inflödesmail via **Resend** (samma klient som e-postverifieringen
+— ingen ny leverantör). Mottagarna är **dynamiska**: per modul i fältet
+`compass_modules.notify_emails` (en eller flera komma-/radseparerade adresser,
+redigeras i modul-admin under "Notifiera inflöde till"), med fallback på env
+`MOVEXUM_INFLOW_EMAIL` när modulen saknar egna mottagare.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000110_extend_compass_modules_notify_emails.js` | `notify_emails`-fält på `compass_modules` |
+| `apps/web/src/lib/email.ts` | `sendInflowNotification` (brandat Resend-mejl, HTML-escapad lead-data) |
+| `apps/web/src/lib/compass/notify.ts` | `resolveInflowRecipients` (modul → env-fallback) + `notifyNewInflow` (best-effort) |
+| `apps/web/src/app/api/public/m/[slug]/{submit,quiz-result,chat}/route.ts` | Anropar `notifyNewInflow` efter att lead skapats |
+
+- **Tre flöden:** formulär (`submit`) och quiz (`quiz-result`) notifierar direkt
+  efter `createLead`; AI-chatt (`chat`) notifierar **en gång**, vid första
+  lead-skapandet (inte vid efterföljande uppdateringar → ingen notis-storm).
+- **Best-effort (SOC 2 availability):** `notifyNewInflow` fångar alla fel (saknad
+  `RESEND_API_KEY`, saknade mottagare, Resend-fel) → ett inflöde felar aldrig för
+  att notisen inte gick fram.
+- **GDPR §5/§6:** mejlet är en **intern staff-notis** (rättslig grund =
+  berättigat intresse, inkubatordrift) och innehåller endast den kontakt-/idé-
+  data besökaren själv lämnade samt en direktlänk till `/inflode/leads/<id>`.
+  Ingen ny AI-väg — compass-kollektionerna förblir denylistade i `lib/ai/schema.ts`
+  (§9.3). Lead-data HTML-escapas i mejlet (XSS-skydd, §10.3).
+- **Riskklass (EU AI Act):** n/a — deterministisk e-postnotis, ingen AI-inferens.
+- **Migration** (1700000110) är ett nytt, oföränderligt filnummer; compass speglas
+  inte i setup/verify-skripten (migration-only).
+
 ---
 
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)

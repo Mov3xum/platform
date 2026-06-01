@@ -3,6 +3,7 @@ import { MistralError } from '@/lib/ai/mistral';
 import { intakeReply, extractLead, scoreLead, type CompassChatMessage } from '@/lib/compass/chat';
 import { appendMessage, createLead, updateLead } from '@/lib/compass/store';
 import { resolvePublicModule } from '@/lib/compass/public';
+import { notifyNewInflow } from '@/lib/compass/notify';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import type PocketBase from 'pocketbase';
 import type { Conversation } from '@/lib/compass/types';
@@ -180,6 +181,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
             } catch {
               // best-effort
             }
+            // Notifiera Movexums inflödesmail om det nya inflödet (en gång,
+            // vid första skapandet — inte vid efterföljande uppdateringar).
+            await notifyNewInflow(module, lead);
           }
         }
       }
