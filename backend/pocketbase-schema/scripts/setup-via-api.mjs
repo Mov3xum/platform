@@ -416,6 +416,10 @@ const STAFF_ROLES =
   '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach")';
 const STAFF_OR_LEAD =
   '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead")';
+// `:each ?=`-variant — korrekt operator mot multi-select `roles` i PB v0.23.4
+// (se migration 1700000107 / § 21.3). Använd den för nyligen rättade regler.
+const STAFF_OR_LEAD_EACH =
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead")';
 const STAFF_INCL_MENTOR =
   '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "mentor")';
 
@@ -1806,11 +1810,13 @@ await ensureCollection({
     { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],
   indexes: ['CREATE INDEX idx_reports_tenant ON incubator_reports (tenant)'],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  // OBS: `:each ?=` (inte `?=`) mot multi-select `roles` — PB v0.23.4-buggen,
+  // se migration 1700000107. `?=` nekar tyst alla, även admin.
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
   createRule: ANY_AUTH,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000035: alumni — exit-företag och tidigare grundare.
