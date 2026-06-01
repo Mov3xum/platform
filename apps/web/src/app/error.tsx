@@ -8,6 +8,7 @@
 
 import { useEffect } from 'react';
 import Link from 'next/link';
+import { attemptChunkReload, isChunkLoadError } from '@/lib/chunk-reload';
 
 export default function RouteError({
   error,
@@ -17,6 +18,12 @@ export default function RouteError({
   reset: () => void;
 }) {
   useEffect(() => {
+    // Chunk-fel uppstår när en gammal flik möter en ny deploy (hashade
+    // chunk-filer har bytt namn). Ladda om en gång för att hämta ny HTML +
+    // rätt chunks — då slipper användaren se någon felvy alls.
+    if (isChunkLoadError(error) && attemptChunkReload()) {
+      return;
+    }
     // Logga till browser-konsolen så det faktiska felet går att felsöka
     // (digest mappar mot serverloggen för server-component-fel).
     console.error('[route-error]', error);

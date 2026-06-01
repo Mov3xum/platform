@@ -6,6 +6,7 @@
 // är inline med Movexums brand-färger (mörkblå/vit).
 
 import { useEffect } from 'react';
+import { attemptChunkReload, isChunkLoadError } from '@/lib/chunk-reload';
 
 export default function GlobalError({
   error,
@@ -15,6 +16,11 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
+    // Sista skyddsnätet: en chunk som inte gick att ladda efter en deploy
+    // läks med ett engångs-reload (loop-skyddat i attemptChunkReload).
+    if (isChunkLoadError(error) && attemptChunkReload()) {
+      return;
+    }
     console.error('[global-error]', error);
   }, [error]);
 
