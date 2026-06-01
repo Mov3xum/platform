@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { headers } from 'next/headers';
 import { Navbar } from '@/components/Navbar';
 import { ThemeScript } from '@/components/ThemeProvider';
+import { ChunkReloadListener } from '@/components/ChunkReloadListener';
 import { AppShell } from '@/components/AppShell';
 import { getCurrentUser } from '@/lib/auth.server';
 import './globals.css';
@@ -36,6 +37,7 @@ export default async function RootLayout({
         <ThemeScript nonce={nonce} />
       </head>
       <body className="min-h-screen bg-canvas text-foreground antialiased">
+        <ChunkReloadListener />
         {user ? (
           <AppShell user={user}>{children}</AppShell>
         ) : (
