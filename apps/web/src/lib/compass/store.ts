@@ -9,6 +9,7 @@ import type {
   LeadStatus,
   SecurityEventKind
 } from './types';
+import { LEAD_STATUS_ORDER } from './types';
 
 /* ────────────────────────────────────────────────────────────────────
    Lead sources — gemensam lookup (ingen tenant)
@@ -477,6 +478,165 @@ function weekKey(iso: string): string {
     return `${yr}-W${String(week).padStart(2, '0')}`;
   } catch {
     return 'okänd';
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   Dashboard — KPI:er, trend och källfördelning (Startupkompassen)
+   ──────────────────────────────────────────────────────────────────── */
+
+export interface DashboardKpis {
+  /** Totalt antal leads (all-time) i tenanten. */
+  totalLeads: number;
+  /** Leads skapade under vald period. */
+  leadsThisPeriod: number;
+  /** Andel av periodens leads jämfört med föregående lika långa period. */
+  leadsDelta: number;
+  /** Accepterade / totalt (all-time). */
+  conversionRate: number;
+  /** Leads i aktiva trattsteg (new/contacted/meeting-booked/evaluating). */
+  activePipeline: number;
+  /** Genomsnittlig AI-poäng för periodens leads (0 om inga poäng). */
+  avgScore: number;
+  /** Förändring i snittpoäng mot föregående period. */
+  scoreDelta: number;
+}
+
+export interface CompassDashboard {
+  periodDays: number;
+  kpis: DashboardKpis;
+  leadsPerDay: { date: string; count: number }[];
+  leadsPerSource: { source_key: string; label: string; color: string; count: number }[];
+  funnel: { status: LeadStatus; count: number }[];
+}
+
+type DashboardLeadRow = Pick<Lead, 'status' | 'score' | 'source_key' | 'created'>;
+
+function emptyDashboard(periodDays: number): CompassDashboard {
+  return {
+    periodDays,
+    kpis: {
+      totalLeads: 0,
+      leadsThisPeriod: 0,
+      leadsDelta: 0,
+      conversionRate: 0,
+      activePipeline: 0,
+      avgScore: 0,
+      scoreDelta: 0
+    },
+    leadsPerDay: [],
+    leadsPerSource: [],
+    funnel: LEAD_STATUS_ORDER.map((status) => ({ status, count: 0 }))
+  };
+}
+
+function avg(values: number[]): number {
+  if (values.length === 0) return 0;
+  return values.reduce((s, v) => s + v, 0) / values.length;
+}
+
+/**
+ * Aggregerar dashboard-mätetal för Startupkompassen. Speglar
+ * movexum-token-usage:s `dashboard-summary`, men mot PocketBase med
+ * tenant-isolering. Hela tratten räknas all-time (funnel/totals), medan
+ * trend, källfördelning och delta beräknas från ett enda batch-hämta över
+ * de två senaste perioderna.
+ */
+export async function getCompassDashboard(
+  pb: PocketBase,
+  tenant: string,
+  days: number,
+  sources: LeadSource[]
+): Promise<CompassDashboard> {
+  const periodDays = Math.min(90, Math.max(7, Math.trunc(days) || 30));
+  try {
+    const now = Date.now();
+    const sinceMs = now - periodDays * 86400_000;
+    const prevSinceIso = new Date(now - periodDays * 2 * 86400_000).toISOString();
+
+    const [funnelCounts, windowLeads] = await Promise.all([
+      countLeadsByStatus(pb, tenant),
+      pb.collection('compass_leads').getFullList<DashboardLeadRow>({
+        filter: pb.filter('tenant = {:tenant} && created >= {:cutoff}', {
+          tenant,
+          cutoff: prevSinceIso
+        }),
+        fields: 'status,score,source_key,created',
+        batch: 1000
+      })
+    ]);
+
+    const totalLeads = LEAD_STATUS_ORDER.reduce((s, k) => s + (funnelCounts[k] || 0), 0);
+    const accepted = funnelCounts.accepted || 0;
+    const activePipeline =
+      (funnelCounts.new || 0) +
+      (funnelCounts.contacted || 0) +
+      (funnelCounts['meeting-booked'] || 0) +
+      (funnelCounts.evaluating || 0);
+    const conversionRate = totalLeads > 0 ? accepted / totalLeads : 0;
+
+    const current = windowLeads.filter((l) => new Date(l.created).getTime() >= sinceMs);
+    const prev = windowLeads.filter((l) => new Date(l.created).getTime() < sinceMs);
+
+    const leadsThisPeriod = current.length;
+    const leadsDelta = prev.length > 0 ? (leadsThisPeriod - prev.length) / prev.length : 0;
+
+    const avgScore = avg(
+      current.map((l) => l.score).filter((s): s is number => typeof s === 'number')
+    );
+    const prevAvgScore = avg(
+      prev.map((l) => l.score).filter((s): s is number => typeof s === 'number')
+    );
+    const scoreDelta = prevAvgScore > 0 ? (avgScore - prevAvgScore) / prevAvgScore : 0;
+
+    // Leads per dag — fyll alla dagar i perioden (även nolldagar).
+    const dayMap = new Map<string, number>();
+    for (let i = periodDays - 1; i >= 0; i -= 1) {
+      dayMap.set(new Date(now - i * 86400_000).toISOString().slice(0, 10), 0);
+    }
+    for (const lead of current) {
+      const key = lead.created.slice(0, 10);
+      if (dayMap.has(key)) dayMap.set(key, (dayMap.get(key) || 0) + 1);
+    }
+    const leadsPerDay = [...dayMap.entries()].map(([date, count]) => ({ date, count }));
+
+    // Leads per källa under perioden.
+    const sourceByKey = new Map(sources.map((s) => [s.key, s]));
+    const srcMap = new Map<string, number>();
+    for (const lead of current) {
+      const key = lead.source_key || 'unknown';
+      srcMap.set(key, (srcMap.get(key) || 0) + 1);
+    }
+    const leadsPerSource = [...srcMap.entries()]
+      .map(([source_key, count]) => {
+        const src = sourceByKey.get(source_key);
+        return {
+          source_key,
+          label: src?.label || source_key,
+          color: src?.color || '#002c40',
+          count
+        };
+      })
+      .filter((s) => s.count > 0)
+      .sort((a, b) => b.count - a.count);
+
+    return {
+      periodDays,
+      kpis: {
+        totalLeads,
+        leadsThisPeriod,
+        leadsDelta,
+        conversionRate,
+        activePipeline,
+        avgScore: Math.round(avgScore),
+        scoreDelta
+      },
+      leadsPerDay,
+      leadsPerSource,
+      funnel: LEAD_STATUS_ORDER.map((status) => ({ status, count: funnelCounts[status] || 0 }))
+    };
+  } catch {
+    return emptyDashboard(periodDays);
   }
 }
 

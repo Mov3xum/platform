@@ -2,9 +2,11 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { PageHead, Card, Chip, Icon } from '@/components/proto';
+import { PageShell } from '@/components/PageShell';
+import { Card, Chip, Icon } from '@/components/proto';
 import { getLeadAnalytics, listModules } from '@/lib/compass/store';
 import { FLOW_TYPE_LABEL } from '@/lib/compass/types';
+import { buildInflodeTabs } from '../../_tabs';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,25 +22,23 @@ export default async function AdminModulesPage() {
   ]);
 
   const metricsBySlug = new Map(analytics.byModule.map((m) => [m.slug, m]));
+  const tabs = buildInflodeTabs();
 
   return (
-    <div className="mx-view-pad mx-wide">
-      <PageHead
-        crumb="Inflöde / Admin / Moduler"
-        title="Intag-moduler"
-        subtitle="Deploya formulär, quiz och AI-chattar på egna URL:er. Spåra konvertering per modul."
-        actions={
-          <>
-            <Link href="/inflode" className="mx-btn">
-              <Icon name="arrow" size={13} /> Översikt
-            </Link>
-            <Link href="/inflode/admin/modules/new" className="mx-btn mx-primary">
-              <Icon name="plus" size={13} /> Skapa modul
-            </Link>
-          </>
-        }
-      />
-
+    <PageShell
+      title="Startupkompassen"
+      tabs={tabs}
+      meta={
+        <span className="text-[12px] text-foreground-subtle">
+          Intag-moduler · formulär, quiz och AI-chattar
+        </span>
+      }
+      actions={
+        <Link href="/inflode/admin/modules/new" className="mx-btn mx-primary">
+          <Icon name="plus" size={13} /> Skapa modul
+        </Link>
+      }
+    >
       <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-paper-2)' }}>
         <div
           className="mx-flex mx-items-c mx-gap-2 mx-t-12 mx-muted"
@@ -129,6 +129,6 @@ export default async function AdminModulesPage() {
           })}
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
