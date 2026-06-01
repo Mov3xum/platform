@@ -2557,6 +2557,35 @@ for (const [collectionName, desiredRule] of Object.entries(FORCE_CREATE_RULES)) 
   ok(`createRule synkad: ${collectionName}`);
 }
 
+// 23. svep alla list/view/update/delete-regler: `?=` → `:each ?=` -----------
+// PB v0.23.4 matchar inte `?=` mot multi-värde-fält (auth.roles,
+// auth.linked_startups, recipients) → tyst falskt även för matchande
+// användare (404 på view/list). Speglar migration 1700000108. createRule
+// rörs ALDRIG (roll-checks hanteras av FORCE_CREATE_RULES ovan, § 21.3).
+function fixRuleOperator(rule) {
+  if (typeof rule !== 'string' || rule === '') return rule;
+  let out = rule;
+  out = out.replace(/@request\.auth\.id\s*\?=\s*recipients/g, 'recipients:each ?= @request.auth.id');
+  out = out.replace(/@request\.auth\.roles\s*\?=/g, '@request.auth.roles:each ?=');
+  out = out.replace(/@request\.auth\.linked_startups\s*\?=/g, '@request.auth.linked_startups:each ?=');
+  return out;
+}
+
+log('Sveper list/view/update/delete-regler (?= → :each ?=)...');
+{
+  const allCollections = await pb.collections.getFullList();
+  for (const collection of allCollections) {
+    const patch = {};
+    for (const key of ['listRule', 'viewRule', 'updateRule', 'deleteRule']) {
+      const fixed = fixRuleOperator(collection[key]);
+      if (fixed !== collection[key]) patch[key] = fixed;
+    }
+    if (Object.keys(patch).length === 0) continue;
+    await pb.collections.update(collection.name, patch);
+    ok(`regel-operator fixad: ${collection.name} (${Object.keys(patch).join(', ')})`);
+  }
+}
+
 console.log('\n✓ Klart. Logga in på <din-web-url>/login med:');
 console.log(`  E-post:   ${APP_USER_EMAIL}`);
 if (APP_USER_PASSWORD) {
