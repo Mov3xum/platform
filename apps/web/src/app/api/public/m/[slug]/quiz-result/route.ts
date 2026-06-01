@@ -5,6 +5,7 @@ import {
   getPublicModuleQuestions,
   pickAttribution
 } from '@/lib/compass/public';
+import { notifyNewInflow } from '@/lib/compass/notify';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { scoreQuiz, resolveBucket, isResultBucketArray, type QuizQuestion } from '@platform/shared';
 import type { Attribution } from '@/lib/compass/types';
@@ -86,7 +87,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   // Bevara utfallet som en lead (människa-i-loopen följer upp). Kontaktfält är
   // frivilliga om modulen inte kräver dem.
   const attribution = pickAttribution(body.attribution);
-  await createLead(pb, tenant, {
+  const lead = await createLead(pb, tenant, {
     name: cleanContact(contact.name, 200) || 'Anonym',
     email: cleanContact(contact.email, 254),
     phone: cleanContact(contact.phone, 50),
@@ -100,6 +101,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     quiz_score: score.total,
     consent_at: new Date().toISOString()
   });
+
+  if (lead) {
+    await notifyNewInflow(module, lead);
+  }
 
   return NextResponse.json({ bucket, score: score.total });
 }

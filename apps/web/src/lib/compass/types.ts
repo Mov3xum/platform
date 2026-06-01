@@ -179,6 +179,11 @@ export interface CompassModule {
   require_email?: boolean;
   require_phone?: boolean;
   require_organization?: boolean;
+  /**
+   * Mottagaradresser (komma-/radseparerade) dit nya inflöden mejlas via Resend.
+   * Tom → fallback på env MOVEXUM_INFLOW_EMAIL (migration 1700000110).
+   */
+  notify_emails?: string;
   /** Quiz-resultatprofiler (flow_type === 'quiz'). */
   result_buckets?: ResultBucket[];
   created: string;
