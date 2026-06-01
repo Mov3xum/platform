@@ -647,6 +647,60 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`
 });
 
+// 6b. contacts --------------------------------------------------------------
+await ensureCollection({
+  id: 'contacts_collection',
+  name: 'contacts',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'first_name', type: 'text', required: true, min: 1, max: 100 },
+    { name: 'last_name', type: 'text', required: true, min: 1, max: 100 },
+    { name: 'email', type: 'email', required: false },
+    { name: 'phone', type: 'text', required: false, max: 30 },
+    { name: 'primary_role', type: 'text', required: false, max: 100 },
+    { name: 'gender', type: 'select', required: false, maxSelect: 1, values: ['kvinna', 'man', 'icke_binar', 'uppger_ej'] },
+    { name: 'skills', type: 'text', required: false, max: 1000 },
+    { name: 'gdpr_consent', type: 'bool', required: false },
+    { name: 'gdpr_consent_at', type: 'date', required: false },
+    { name: 'kommun', type: 'text', required: false, max: 100 },
+    { name: 'info', type: 'editor', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_contacts_tenant ON contacts (tenant)',
+    'CREATE INDEX idx_contacts_last_name ON contacts (last_name)',
+    'CREATE INDEX idx_contacts_email ON contacts (email)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
+});
+
+// 6c. startup_contacts ------------------------------------------------------
+await ensureCollection({
+  id: 'startup_contacts_collection',
+  name: 'startup_contacts',
+  type: 'base',
+  fields: [
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'contact', type: 'relation', required: true, collectionId: 'contacts_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'role', type: 'text', required: false, max: 100 },
+    { name: 'is_primary', type: 'bool', required: false }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_startup_contacts_unique ON startup_contacts (startup, contact)',
+    'CREATE INDEX idx_startup_contacts_startup ON startup_contacts (startup)',
+    'CREATE INDEX idx_startup_contacts_contact ON startup_contacts (contact)'
+  ],
+  listRule: READ_OWN_STARTUP_VIA,
+  viewRule: READ_OWN_STARTUP_VIA,
+  createRule: `${ANY_AUTH}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`
+});
+
 // 7. partner_engagements ----------------------------------------------------
 await ensureCollection({
   id: 'partner_engagements_collection',
