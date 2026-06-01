@@ -245,8 +245,9 @@ function verifyStartupMemberIsolation(collections) {
 
 function verifyRlsAndRbac(collections) {
   const tenants = collections.get('tenants');
-  assertRuleContains(tenants, 'updateRule', '@request.auth.roles ?= "admin"');
-  assertRuleContains(tenants, 'updateRule', '@request.auth.roles ?= "incubator_lead"');
+  // `:each ?=` (inte `?=`) — PB v0.23.4-operatorbugg, se migration 1700000108.
+  assertRuleContains(tenants, 'updateRule', '@request.auth.roles:each ?= "admin"');
+  assertRuleContains(tenants, 'updateRule', '@request.auth.roles:each ?= "incubator_lead"');
 
   const logoLight = getField(tenants, 'logo_light');
   if (logoLight.type !== 'file') {
