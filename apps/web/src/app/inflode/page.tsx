@@ -1,15 +1,16 @@
-// Inflöde — översikt
+// Startupkompassen — Dashboard (översikt över inflödet)
 
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
-import { Chip, Icon } from '@/components/proto';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailItem, RailStat } from '@/components/PageRail';
+import { Chip, Icon, KpiBlock, Spark } from '@/components/proto';
+import { ServerChart } from '@/components/charts/ServerChart';
+import type { MovexumChartSpec } from '@/lib/charts/echarts-theme';
 import {
-  countLeadsByStatus,
-  getLeadAnalytics,
+  getCompassDashboard,
   listLeads,
   listLeadSources,
   listModules
@@ -17,15 +18,18 @@ import {
 import {
   FLOW_TYPE_LABEL,
   LEAD_STATUS_LABEL,
-  LEAD_STATUS_ORDER,
   type LeadStatus
 } from '@/lib/compass/types';
+import { buildInflodeTabs } from './_tabs';
+import { DeltaChip, PeriodFilter, formatNumber, formatPct, parsePeriod } from './_ui';
 
 export const dynamic = 'force-dynamic';
 
-const ANALYTICS_WINDOW_DAYS = 90;
-
-export default async function InflödePage() {
+export default async function InflodeDashboardPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ days?: string }>;
+}) {
   const user = await requireUser();
   // Bolagsisolering (CLAUDE.md § 21): inflöde/leads är tenant-bred och får
   // aldrig nås av en ren startup_member.
@@ -33,71 +37,78 @@ export default async function InflödePage() {
     redirect('/dashboard');
   }
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
+  const days = parsePeriod((await searchParams)?.days);
 
   const pb = await getServerPb();
-  const [statusCounts, recent, sources, modules, analytics] = await Promise.all([
-    isStaff ? countLeadsByStatus(pb, user.tenant) : Promise.resolve(null),
+  const sources = await listLeadSources(pb);
+  const [dashboard, recent, modules] = await Promise.all([
+    getCompassDashboard(pb, user.tenant, days, sources),
     isStaff
       ? listLeads(pb, user.tenant, { perPage: 6 }).then((r) => r.items)
       : Promise.resolve([]),
-    listLeadSources(pb),
-    listModules(pb, user.tenant, { onlyActive: !isStaff }),
-    isStaff ? getLeadAnalytics(pb, user.tenant, ANALYTICS_WINDOW_DAYS) : Promise.resolve(null)
+    listModules(pb, user.tenant, { onlyActive: !isStaff })
   ]);
 
-  const total = statusCounts
-    ? LEAD_STATUS_ORDER.reduce((s, k) => s + (statusCounts[k] || 0), 0)
-    : 0;
-  const inFunnel = statusCounts
-    ? (statusCounts.new || 0) +
-      (statusCounts.contacted || 0) +
-      (statusCounts['meeting-booked'] || 0) +
-      (statusCounts.evaluating || 0)
-    : 0;
-  const conversionRate =
-    statusCounts && total > 0 ? Math.round((100 * (statusCounts.accepted || 0)) / total) : 0;
-
+  const { kpis, leadsPerDay, leadsPerSource, funnel } = dashboard;
   const sourceByKey = new Map(sources.map((s) => [s.key, s]));
   const moduleBySlug = new Map(modules.map((m) => [m.slug, m]));
+  const maxFunnel = Math.max(...funnel.map((f) => f.count), 1);
+
+  const tabs = buildInflodeTabs();
+
+  const leadsPerDaySpec: MovexumChartSpec = {
+    type: 'area',
+    categories: leadsPerDay.map((d) => d.date.slice(5)),
+    series: [{ name: 'Leads', values: leadsPerDay.map((d) => d.count) }]
+  };
+  const sourceSpec: MovexumChartSpec = {
+    type: 'hbar',
+    categories: leadsPerSource.map((s) => s.label),
+    series: [{ name: 'Leads', values: leadsPerSource.map((s) => s.count) }]
+  };
+
+  const actions = (
+    <>
+      <Link href="/inflode/chat" className="mx-btn">
+        <Icon name="sparkle" size={13} /> Öppna intag
+      </Link>
+      {isStaff && (
+        <Link href="/inflode/leads/new" className="mx-btn mx-primary">
+          <Icon name="plus" size={13} /> Nytt lead
+        </Link>
+      )}
+    </>
+  );
 
   const rail = (
     <>
-      {isStaff && statusCounts && (
-        <RailSection label="Pipeline">
-          <div className="grid grid-cols-2 gap-2 px-2">
-            <RailStat label="Totalt" value={total} />
-            <RailStat label="I tratt" value={inFunnel} />
-            <RailStat label="Accepterade" value={statusCounts.accepted || 0} />
-            <RailStat label="Konvertering" value={`${conversionRate}%`} />
-          </div>
-        </RailSection>
-      )}
+      <RailSection label="Pipeline">
+        <div className="grid grid-cols-2 gap-2 px-2">
+          <RailStat label="Totalt" value={formatNumber(kpis.totalLeads)} />
+          <RailStat label="I tratt" value={formatNumber(kpis.activePipeline)} />
+          <RailStat label="Konvertering" value={formatPct(kpis.conversionRate)} />
+          <RailStat label="Snittpoäng" value={kpis.avgScore || '—'} />
+        </div>
+      </RailSection>
 
-      {isStaff && analytics && analytics.bySource.length > 0 && (
-        <RailSection label={`Källor · ${ANALYTICS_WINDOW_DAYS} dgr`}>
-          {analytics.bySource.slice(0, 6).map((s) => {
-            const src = sourceByKey.get(s.source_key);
-            const convPct = s.total > 0 ? Math.round((100 * s.accepted) / s.total) : 0;
-            return (
-              <Link
-                key={s.source_key}
-                href={`/inflode/leads?src=${encodeURIComponent(s.source_key)}`}
-                className="flex items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-canvas-muted"
-              >
-                <span
-                  className="h-2 w-2 shrink-0 rounded-sm"
-                  style={{ background: src?.color || '#002c40' }}
-                />
-                <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-foreground">
-                  {src?.label || s.source_key}
-                </span>
-                <span className="font-mono text-[11px] text-foreground">{s.total}</span>
-                <span className="font-mono text-[10.5px] text-foreground-subtle">
-                  {convPct}%
-                </span>
-              </Link>
-            );
-          })}
+      {leadsPerSource.length > 0 && (
+        <RailSection label={`Källor · ${days} dgr`}>
+          {leadsPerSource.slice(0, 6).map((s) => (
+            <Link
+              key={s.source_key}
+              href={`/inflode/leads?src=${encodeURIComponent(s.source_key)}`}
+              className="flex items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-canvas-muted"
+            >
+              <span
+                className="h-2 w-2 shrink-0 rounded-sm"
+                style={{ background: s.color }}
+              />
+              <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-foreground">
+                {s.label}
+              </span>
+              <span className="font-mono text-[11px] text-foreground">{s.count}</span>
+            </Link>
+          ))}
         </RailSection>
       )}
 
@@ -122,170 +133,121 @@ export default async function InflödePage() {
     </>
   );
 
-  const actions = (
-    <>
-      <Link
-        href="/inflode/chat"
-        className="inline-flex items-center gap-1.5 rounded-lg border border-default bg-surface px-3 py-1.5 text-[12.5px] font-medium text-foreground transition hover:bg-canvas-muted"
-      >
-        Öppna intag
-      </Link>
-      {isStaff && (
-        <Link
-          href="/inflode/leads"
-          className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
-        >
-          <Icon name="people" size={12} /> Alla leads
-        </Link>
-      )}
-    </>
-  );
-
   return (
-    <PageShell title="Inflöde" actions={actions} rightPanel={rail}>
+    <PageShell title="Startupkompassen" tabs={tabs} actions={actions} rightPanel={rail}>
       <div className="space-y-6 py-6">
-        {isStaff && statusCounts && (
-          <section className="rounded-2xl border border-default bg-surface">
-            <div className="flex items-center justify-between border-b border-default px-5 py-3">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
-                Funnel · klicka för att filtrera
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 p-4 md:grid-cols-6">
-              {LEAD_STATUS_ORDER.map((status) => {
-                const n = statusCounts[status] || 0;
-                const pct = total > 0 ? Math.round((100 * n) / total) : 0;
-                return (
-                  <Link
-                    key={status}
-                    href={`/inflode/leads?status=${encodeURIComponent(status)}`}
-                    className="rounded-xl border border-default bg-canvas-subtle px-3 py-3 transition hover:border-strong"
-                  >
-                    <div className="mb-1 font-mono text-[10.5px] uppercase tracking-wide text-foreground-subtle">
-                      {LEAD_STATUS_LABEL[status]}
-                    </div>
-                    <div className="text-2xl font-semibold text-foreground tabular-nums">{n}</div>
-                    <div className="text-[11px] text-foreground-subtle">{pct}%</div>
-                  </Link>
-                );
-              })}
-            </div>
-          </section>
-        )}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-[13px] text-foreground-muted">
+            Översikt över inflödet · senaste {days} dagarna
+          </p>
+          <PeriodFilter days={days} basePath="/inflode" />
+        </div>
 
-        {isStaff && analytics && analytics.byCampaign.length > 0 && (
-          <section className="rounded-2xl border border-default bg-surface">
-            <div className="flex items-center justify-between border-b border-default px-5 py-3">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
-                Kampanjer · UTM
+        {/* KPI-kort */}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiBlock
+            label="Leads denna period"
+            value={formatNumber(kpis.leadsThisPeriod)}
+            hint={`av ${formatNumber(kpis.totalLeads)}`}
+            spark={
+              leadsPerDay.some((d) => d.count > 0) ? (
+                <Spark data={leadsPerDay.map((d) => d.count)} color="var(--mx-ink)" />
+              ) : undefined
+            }
+            foot={<DeltaChip delta={kpis.leadsDelta} />}
+          />
+          <KpiBlock
+            label="Konverteringsgrad"
+            value={formatPct(kpis.conversionRate)}
+            hint="accepterade"
+            foot={
+              <span className="text-[11px] text-foreground-subtle">
+                Accepterade / totalt antal leads
               </span>
-              <span className="font-mono text-[11px] text-foreground-subtle">
-                {analytics.byCampaign.length} aktiva
+            }
+          />
+          <KpiBlock
+            label="Aktiv pipeline"
+            value={formatNumber(kpis.activePipeline)}
+            hint="i tratt"
+            foot={
+              <span className="text-[11px] text-foreground-subtle">
+                Leads i aktiva steg
               </span>
-            </div>
-            <div className="space-y-1 p-4">
-              {analytics.byCampaign.slice(0, 8).map((c) => (
-                <div
-                  key={c.campaign}
-                  className="flex items-center gap-2 rounded-lg px-2 py-1.5"
-                >
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-                    {c.campaign}
-                  </span>
-                  {c.source && (
-                    <Chip variant="cyan" mono>
-                      {c.source}
-                    </Chip>
-                  )}
-                  <span className="w-10 text-right font-mono text-[12px] font-semibold">
-                    {c.total}
-                  </span>
-                  <span className="w-16 text-right font-mono text-[10.5px] text-foreground-subtle">
-                    {c.accepted} accept.
+            }
+          />
+          <KpiBlock
+            label="Snittpoäng"
+            value={kpis.avgScore || '—'}
+            hint="/ 100"
+            foot={<DeltaChip delta={kpis.scoreDelta} />}
+          />
+        </div>
+
+        {/* Trend + källor */}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <section className="rounded-2xl border border-default bg-surface p-4">
+            <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+              Leads per dag
+            </h2>
+            {leadsPerDay.some((d) => d.count > 0) ? (
+              <ServerChart spec={leadsPerDaySpec} width={620} height={260} />
+            ) : (
+              <div className="flex h-[260px] items-center justify-center text-[13px] text-foreground-subtle">
+                Inga leads under perioden.
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-default bg-surface p-4">
+            <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+              Leads per källa
+            </h2>
+            {leadsPerSource.length > 0 ? (
+              <ServerChart spec={sourceSpec} width={620} height={260} />
+            ) : (
+              <div className="flex h-[260px] items-center justify-center text-[13px] text-foreground-subtle">
+                Inga källor registrerade.
+              </div>
+            )}
+          </section>
+        </div>
+
+        {/* Konverteringstratt */}
+        <section className="rounded-2xl border border-default bg-surface">
+          <div className="border-b border-default px-5 py-3">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+              Konverteringstratt · all-time
+            </span>
+          </div>
+          <div className="space-y-3 p-5">
+            {funnel.map((stage) => {
+              const widthPct = Math.max(6, Math.round((stage.count / maxFunnel) * 100));
+              const declined = stage.status === 'declined';
+              return (
+                <div key={stage.status} className="flex items-center gap-3">
+                  <Link
+                    href={`/inflode/leads?status=${encodeURIComponent(stage.status)}`}
+                    className="w-28 shrink-0 text-right text-[12px] text-foreground-muted hover:text-foreground"
+                  >
+                    {LEAD_STATUS_LABEL[stage.status]}
+                  </Link>
+                  <div className="relative flex-1">
+                    <div
+                      className={`h-6 rounded-full ${declined ? 'bg-canvas-muted' : 'bg-brand'}`}
+                      style={{ width: `${widthPct}%` }}
+                    />
+                  </div>
+                  <span className="w-10 shrink-0 text-right font-mono text-[13px] text-foreground tabular-nums">
+                    {stage.count}
                   </span>
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
+              );
+            })}
+          </div>
+        </section>
 
-        {modules.length > 0 && (
-          <section>
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
-                Intag-flöden
-              </h2>
-              {isStaff && (
-                <Link
-                  href="/inflode/admin/modules"
-                  className="text-[12px] text-foreground-muted hover:text-foreground"
-                >
-                  Hantera
-                </Link>
-              )}
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {modules.map((m) => {
-                const metrics = analytics?.byModule.find((x) => x.slug === m.slug);
-                return (
-                  <div
-                    key={m.id}
-                    className="flex h-full flex-col gap-2 rounded-2xl border border-default bg-surface p-4"
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Chip variant={m.flow_type === 'chat' ? 'cyan' : 'default'} mono>
-                        {FLOW_TYPE_LABEL[m.flow_type].toUpperCase()}
-                      </Chip>
-                      {m.public_url_enabled && (
-                        <Chip variant="active" mono>
-                          PUBLIK
-                        </Chip>
-                      )}
-                      {!m.is_active && (
-                        <Chip variant="draft" mono>
-                          UTKAST
-                        </Chip>
-                      )}
-                    </div>
-                    <div className="text-[15px] font-semibold text-foreground">{m.name}</div>
-                    <div className="text-[12.5px] leading-relaxed text-foreground-muted">
-                      {m.description ||
-                        'Starta modulen för att beskriva idén och få nästa steg.'}
-                    </div>
-                    <span className="flex-1" />
-                    {isStaff && metrics && (
-                      <div className="font-mono text-[11px] text-foreground-subtle">
-                        <span className="font-semibold text-foreground">{metrics.total}</span>{' '}
-                        leads ·{' '}
-                        <span className="font-semibold text-foreground">{metrics.accepted}</span>{' '}
-                        accept. ·{' '}
-                        <span className="font-semibold text-foreground">{metrics.converted}</span>{' '}
-                        bolag
-                      </div>
-                    )}
-                    <div className="mt-1 flex items-center gap-2">
-                      <Link
-                        href={`/inflode/m/${m.slug}`}
-                        className="rounded-lg border border-default bg-canvas-muted px-3 py-1.5 text-[12px] text-foreground hover:bg-canvas-subtle"
-                      >
-                        Starta →
-                      </Link>
-                      {isStaff && (
-                        <Link
-                          href={`/inflode/admin/modules/${m.slug}`}
-                          className="rounded-lg px-3 py-1.5 text-[12px] text-foreground-muted hover:text-foreground"
-                        >
-                          Redigera
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
+        {/* Senaste leads (staff) */}
         {isStaff && (
           <section>
             <div className="mb-3 flex items-center justify-between">
@@ -325,11 +287,6 @@ export default async function InflödePage() {
                             <Chip variant={statusChipVariant(lead.status)} mono>
                               {LEAD_STATUS_LABEL[lead.status]}
                             </Chip>
-                            {lead.converted_startup && (
-                              <Chip variant="active" mono>
-                                KONVERTERAT
-                              </Chip>
-                            )}
                           </div>
                           <div className="mt-1 truncate text-[12px] text-foreground-muted">
                             {lead.idea_summary || lead.email || lead.organization || '—'}
@@ -339,7 +296,6 @@ export default async function InflödePage() {
                           <div className="font-mono text-[10.5px] uppercase text-foreground-subtle">
                             {source?.label || lead.source_key}
                             {landingMod && ` · ${landingMod.name}`}
-                            {lead.utm_campaign && ` · ${lead.utm_campaign}`}
                           </div>
                           {typeof lead.score === 'number' && (
                             <div className="mt-1 font-mono text-[11px] font-semibold text-foreground">

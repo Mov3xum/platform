@@ -2,18 +2,15 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import {
-  PageHead,
-  Card,
-  Chip,
-  Icon
-} from '@/components/proto';
+import { PageShell } from '@/components/PageShell';
+import { Card, Chip, Icon } from '@/components/proto';
 import { listLeads, listLeadSources } from '@/lib/compass/store';
 import {
   LEAD_STATUS_LABEL,
   LEAD_STATUS_ORDER,
   type LeadStatus
 } from '@/lib/compass/types';
+import { buildInflodeTabs } from '../_tabs';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,24 +58,23 @@ export default async function LeadsPage({
   if (sourceKey) baseQs.set('src', sourceKey);
   if (landingModule) baseQs.set('landing', landingModule);
 
-  return (
-    <div className="mx-view-pad mx-wide">
-      <PageHead
-        crumb="Hemmaplan / Inflöde / Leads"
-        title="Leads"
-        subtitle={`${totalItems} ${totalItems === 1 ? 'lead' : 'leads'} ${status ? `· ${LEAD_STATUS_LABEL[status]}` : '· alla statusar'}`}
-        actions={
-          <>
-            <Link href="/inflode" className="mx-btn">
-              <Icon name="arrow" size={13} /> Översikt
-            </Link>
-            <Link href="/inflode/leads/new" className="mx-btn mx-primary">
-              <Icon name="plus" size={13} /> Nytt lead
-            </Link>
-          </>
-        }
-      />
+  const tabs = buildInflodeTabs();
 
+  return (
+    <PageShell
+      title="Startupkompassen"
+      tabs={tabs}
+      meta={
+        <span className="text-[12px] text-foreground-subtle">
+          {`${totalItems} ${totalItems === 1 ? 'lead' : 'leads'} ${status ? `· ${LEAD_STATUS_LABEL[status]}` : '· alla statusar'}`}
+        </span>
+      }
+      actions={
+        <Link href="/inflode/leads/new" className="mx-btn mx-primary">
+          <Icon name="plus" size={13} /> Nytt lead
+        </Link>
+      }
+    >
       {/* Filter-bar */}
       <Card style={{ padding: 12, marginBottom: 16 }}>
         <form
@@ -220,7 +216,7 @@ export default async function LeadsPage({
           )}
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
 
