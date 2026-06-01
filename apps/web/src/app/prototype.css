@@ -101,6 +101,23 @@
   --mx-rail-w: 232px;
   --mx-topbar-h: 52px;
   --mx-actionbar-h: 48px;
+
+  /* Modern bakgrund — subtil gradient på innehållsytan (2026-06).
+   * Mjuk Movexum-blå glöd uppe till höger, dämpad lila nere till vänster,
+   * ren vit canvas i mitten. Vita kort/paneler ligger ovanpå. Ingen
+   * dekor-grafik — bara gradienten. */
+  --mx-app-gradient:
+    radial-gradient(58% 52% at 100% 0%, rgba(0, 168, 222, 0.08) 0%, rgba(0, 168, 222, 0) 60%),
+    radial-gradient(60% 58% at 0% 100%, rgba(97, 56, 181, 0.11) 0%, rgba(97, 56, 181, 0) 62%),
+    var(--mx-canvas);
+  /* Genomskinlig, frostad topbar så gradienten flyter bakom den. */
+  --mx-topbar-bg: color-mix(in srgb, var(--mx-canvas) 62%, transparent);
+}
+
+/* Gradient-bakgrund även på utloggade sidor (login) som saknar .mx-app. */
+body {
+  background: var(--mx-app-gradient);
+  background-attachment: fixed;
 }
 
 html.dark {
@@ -300,7 +317,7 @@ html.dark {
   display: grid;
   grid-template-rows: var(--mx-topbar-h) 1fr;
   min-height: 100vh;
-  background: var(--mx-canvas);
+  background: var(--mx-app-gradient);
   min-width: 0;
 }
 
@@ -309,7 +326,9 @@ html.dark {
   align-items: center;
   gap: 12px;
   padding: 0 20px;
-  background: var(--mx-canvas);
+  background: var(--mx-topbar-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   position: sticky;
   top: 0;
   z-index: 20;
