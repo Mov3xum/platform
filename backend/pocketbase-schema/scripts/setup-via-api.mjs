@@ -1571,6 +1571,47 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
 });
 
+// Migration 1700000086: workshop_media — uppladdad workshop-media (video/bild).
+await ensureCollection({
+  id: 'workshop_media_collection',
+  name: 'workshop_media',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'uploaded_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['video', 'image'] },
+    {
+      name: 'file',
+      type: 'file',
+      required: true,
+      maxSelect: 1,
+      maxSize: 262144000,
+      mimeTypes: [
+        'video/mp4',
+        'video/webm',
+        'video/ogg',
+        'video/quicktime',
+        'video/x-msvideo',
+        'video/x-matroska',
+        'video/mpeg',
+        'image/png',
+        'image/jpeg',
+        'image/webp',
+        'image/gif'
+      ],
+      thumbs: []
+    },
+    { name: 'mime', type: 'text', required: false, max: 150 },
+    { name: 'size_bytes', type: 'number', required: false }
+  ],
+  indexes: ['CREATE INDEX idx_workshop_media_tenant ON workshop_media (tenant)'],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
 // Migration 1700000088: education_documents — uppladdade utbildningsresurser.
 await ensureCollection({
   id: 'education_documents_collection',
