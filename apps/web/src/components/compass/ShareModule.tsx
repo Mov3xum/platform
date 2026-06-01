@@ -7,12 +7,14 @@ import { Card, CardHead, Icon } from '@/components/proto';
 interface Props {
   slug: string;
   name: string;
+  /** Global publik slug — den publika URL:en blir /m/<publicSlug>. */
+  publicSlug?: string;
 }
 
 // QR-koden genereras helt lokalt med 'qrcode' (ren JS, inga externa anrop) —
 // EU-suveränt enligt CLAUDE.md § 10.2. Staff kan ladda ner PNG/SVG och
 // publicera på event, affischer eller hemsidor.
-export function ShareModule({ slug, name }: Props) {
+export function ShareModule({ slug, name, publicSlug }: Props) {
   const [origin, setOrigin] = useState('');
   const [copied, setCopied] = useState(false);
   const [pngUrl, setPngUrl] = useState('');
@@ -22,7 +24,9 @@ export function ShareModule({ slug, name }: Props) {
     setOrigin(window.location.origin);
   }, []);
 
-  const url = origin ? `${origin}/inflode/m/${slug}` : '';
+  // Publik, oinloggad URL via global slug. Saknas public_slug → visa hint.
+  const effectiveSlug = publicSlug || '';
+  const url = origin && effectiveSlug ? `${origin}/m/${effectiveSlug}` : '';
 
   useEffect(() => {
     if (!url) return;
@@ -83,7 +87,7 @@ export function ShareModule({ slug, name }: Props) {
             wordBreak: 'break-all'
           }}
         >
-          {url || `…/inflode/m/${slug}`}
+          {url || (effectiveSlug ? `…/m/${effectiveSlug}` : 'Ange en publik länk (slug) för att dela modulen')}
         </div>
 
         <div className="mx-flex mx-items-c mx-gap-2 mx-wrap">

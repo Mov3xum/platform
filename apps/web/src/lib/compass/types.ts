@@ -1,6 +1,10 @@
-// Inflöde — typer
+// Inflöde / Startupkompassen — typer
 // Hjälper de andra modul-filerna att hålla sig till PocketBase-schemat
-// från migration 1700000039 + 1700000049.
+// från migration 1700000039 + 1700000049 + 1700000108.
+
+import type { ResultBucket } from '@platform/shared';
+
+export type { ResultBucket };
 
 export type LeadStatus =
   | 'new'
@@ -100,6 +104,9 @@ export interface Lead {
   tags?: string[];
   consent_at?: string;
   last_contact_at?: string;
+  // Quiz-resultat (Startupkompassen)
+  quiz_result_bucket?: string;
+  quiz_score?: number;
   // Attribution
   utm_source?: string;
   utm_medium?: string;
@@ -155,11 +162,25 @@ export interface CompassModule {
   sort_order?: number;
   // Publik publicering
   public_url_enabled?: boolean;
+  /** Globalt unik slug för den publika URL:en /m/<public_slug> (migration 1700000108). */
+  public_slug?: string;
   target_audience?: string;
   success_message?: string;
   redirect_url?: string;
   theme_color?: string;
   intro_message?: string;
+  // Startupkompassen — branded publik sida + quiz (migration 1700000108)
+  hero_eyebrow?: string;
+  welcome_title?: string;
+  welcome_body?: string;
+  chat_persona?: string;
+  /** Max antal AI-utbyten i chat-flödet (0 = obegränsat). */
+  max_exchanges?: number;
+  require_email?: boolean;
+  require_phone?: boolean;
+  require_organization?: boolean;
+  /** Quiz-resultatprofiler (flow_type === 'quiz'). */
+  result_buckets?: ResultBucket[];
   created: string;
   updated: string;
 }
@@ -171,7 +192,8 @@ export interface CompassQuestion {
   prompt: string;
   help_text?: string;
   input_type: 'short_text' | 'long_text' | 'choice' | 'multi_choice' | 'scale' | 'email' | 'phone';
-  choices?: { value: string; label: string }[];
+  // `score`/`bucket` driver quiz-poängsättningen (packages/shared/compass-quiz.ts).
+  choices?: { value: string; label: string; score?: number; bucket?: string }[];
   required?: boolean;
   sort_order?: number;
 }

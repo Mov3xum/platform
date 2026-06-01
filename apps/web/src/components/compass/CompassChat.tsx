@@ -13,6 +13,14 @@ interface Props {
   moduleSlug?: string;
   /** Visa "AI-genererat"-badge i headern */
   showAiBadge?: boolean;
+  /** Chat-endpoint. Default = /api/inflode/chat (inloggad). Publik: /api/public/m/<slug>/chat */
+  endpoint?: string;
+  /** Rubriknamn i chat-headern (default "Inflöde"). */
+  title?: string;
+  /** Initial i header-avataren (default "I"). */
+  avatarInitial?: string;
+  /** Max antal användarmeddelanden (0/odefinierat = obegränsat). */
+  maxExchanges?: number;
 }
 
 function readAttribution(): Attribution {
@@ -32,7 +40,15 @@ function readAttribution(): Attribution {
 const DEFAULT_GREETING =
   'Hej! Jag är Inflöde, Movexums AI-assistent. Berätta gärna lite om idén du går och funderar på — vad försöker du lösa, och för vem?';
 
-export function CompassChat({ initialAssistantMessage, moduleSlug, showAiBadge = true }: Props) {
+export function CompassChat({
+  initialAssistantMessage,
+  moduleSlug,
+  showAiBadge = true,
+  endpoint = '/api/inflode/chat',
+  title = 'Inflöde',
+  avatarInitial = 'I',
+  maxExchanges = 0
+}: Props) {
   const [messages, setMessages] = useState<Msg[]>(() => [
     { role: 'assistant', content: initialAssistantMessage || DEFAULT_GREETING }
   ]);
@@ -42,6 +58,8 @@ export function CompassChat({ initialAssistantMessage, moduleSlug, showAiBadge =
   const [sessionToken] = useState(() => generateToken());
   const attribution = useMemo(readAttribution, []);
   const logRef = useRef<HTMLDivElement>(null);
+  const userMsgCount = messages.filter((m) => m.role === 'user').length;
+  const reachedLimit = maxExchanges > 0 && userMsgCount >= maxExchanges;
 
   useEffect(() => {
     if (logRef.current) {
@@ -54,13 +72,14 @@ export function CompassChat({ initialAssistantMessage, moduleSlug, showAiBadge =
     const trimmed = input.trim();
     if (!trimmed || pending) return;
     const next: Msg[] = [...messages, { role: 'user', content: trimmed }];
+    if (reachedLimit) return;
     setMessages(next);
     setInput('');
     setPending(true);
     setError(null);
 
     try {
-      const res = await fetch('/api/inflode/chat', {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -119,10 +138,10 @@ export function CompassChat({ initialAssistantMessage, moduleSlug, showAiBadge =
             fontSize: 13
           }}
         >
-          I
+          {avatarInitial}
         </div>
         <div style={{ minWidth: 0 }}>
-          <div className="mx-disp mx-fw-6 mx-t-13">Inflöde</div>
+          <div className="mx-disp mx-fw-6 mx-t-13">{title}</div>
           <div className="mx-mono mx-t-xs mx-muted mx-t-up">
             Mistral · Le Chat · EU-suveränt
           </div>
@@ -186,15 +205,15 @@ export function CompassChat({ initialAssistantMessage, moduleSlug, showAiBadge =
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Skriv ditt svar..."
+          placeholder={reachedLimit ? 'Samtalet är avslutat' : 'Skriv ditt svar...'}
           className="mx-input"
-          disabled={pending}
+          disabled={pending || reachedLimit}
           aria-label="Ditt meddelande"
         />
         <button
           type="submit"
           className="mx-btn mx-primary"
-          disabled={pending || input.trim().length === 0}
+          disabled={pending || reachedLimit || input.trim().length === 0}
         >
           Skicka →
         </button>

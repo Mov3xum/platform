@@ -2342,3 +2342,70 @@ bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
   `education_document_assignments`, `agreements`, `tools`, `user_files`).
 - **Riskklass:** minimal/n.a. (navigation + åtkomstkontroll, ingen
   AI-inferens).
+
+---
+
+## 23. Startupkompassen — publika intag-moduler (quiz / formulär / AI-chatt)
+
+### 23.1 Översikt
+
+`/inflode`-modulen heter i sidmenyn **"Startupkompassen"** (id `inflode`,
+route `/inflode`, `rolesAllowed: ['admin','incubator_lead','coach']`). Den är
+inkubatorns inflöde: bygg intag-moduler i tre flödestyper — **quiz** (poäng +
+resultatprofiler), **formulär/wizard** (frågor) och **AI-chatt** (Mistral) —
+och deploya dem PUBLIKT (oinloggat) på en **globalt unik slug** `/m/<public_slug>`
+med nedladdningsbar QR-kod. Systemet är tenant-/forum-dynamiskt: varje modul
+ägs av en tenant och resolvas publikt via sin globala slug.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000108_extend_compass_startupkompassen.js` | `public_slug` (globalt unikt partiellt index), `result_buckets`, välkomst-/persona-fält, `quiz_*` på leads + seed av tre startmoduler per tenant |
+| `backend/pocketbase-schema/migrations/1700000109_widen_compass_staff_roles_coach.js` | Lägger `coach` i compass-RBAC + rättar operatorer till `:each ?=` (§ 21.3) |
+| `packages/shared/src/compass-quiz.ts` (+ `.test.ts`) | Ren, enhetstestad quiz-poängsättning (`scoreQuiz`, `resolveBucket`) |
+| `apps/web/src/lib/compass/public.ts` | Superuser-resolvning av publik modul + answer→lead-whitelist |
+| `apps/web/src/app/m/[slug]/page.tsx` | Publik, branded modulsida (anonym) |
+| `apps/web/src/components/compass/PublicModuleRunner.tsx` | Samtyckesgrind + flödesdispatch (client) |
+| `apps/web/src/components/compass/{ModuleQuiz,ModuleWizard,CompassChat,QuestionInput}.tsx` | Flödeskomponenter (delar `QuestionInput`) |
+| `apps/web/src/app/api/public/m/[slug]/{chat,submit,quiz-result}/route.ts` | Anonyma API-flöden (superuser, rate-limit, consent) |
+| `apps/web/src/lib/actions/compass.ts` | Modul/fråge-CRUD (`MANAGE_ROLES` = admin/incubator_lead/coach) |
+
+### 23.2 Publik access & tenant-isolation (kritiskt)
+
+De publika ytorna har INGEN användarsession. Middleware (`PUBLIC_PATHS`) släpper
+`/m/` + `/api/public/`; root-layouten visar AppShell bara för inloggade, så en
+anonym besökare får en ren sida. Läs/skriv sker via **`getSuperuserPb()`**
+(`lib/integrations/credentials.ts`), som bypassar PB:s RLS. Därför gäller:
+`resolvePublicModule()` resolvar EN modul på dess globala `public_slug`, härleder
+**tenant FRÅN modulen** och stämplar den tenanten på ALLA skrivningar — en tenant
+accepteras aldrig från request-bodyn. Filtervärden binds via `pb.filter()`.
+Saknas superuser-credentials degraderar sidan snällt (ingen krasch).
+
+### 23.3 Quiz-poängsättning
+
+Sker SERVER-side i `/api/public/m/[slug]/quiz-result` (klienten kan inte
+manipulera poängen). Två modeller (auto-vald): **topp-hink** (val pekar på en
+`bucket` med vikt `score`; flest poäng vinner) och **intervall** (totalpoäng mot
+hinkarnas `min`/`max`). Per-val `score`/`bucket` lagras i
+`compass_questions.choices`-JSON (inget nytt fält). Resultatprofiler i
+`compass_modules.result_buckets`. `red`-nyckel renderas via movexum-orange
+(aldrig röd, § 2.3).
+
+### 23.4 Regelefterlevnad
+
+- **GDPR art. 7 (samtycke):** publika flöden kräver `consent:true` när modulen
+  har en `consent_note`; `consent_at` stämplas. **§ 5 dataminimering:** bara
+  whitelistade fält (`mapAnswersToLead`) blir lead; anonyma leads får
+  `name='Anonym'`. compass-kollektionerna förblir **denylistade** i
+  `lib/ai/schema.ts` (§ 9.3) — besökardata når aldrig AI-kontext.
+- **EU AI Act art. 50:** chat-flödet visar transparensbanner; quiz/wizard är
+  deterministiska (ingen AI-inferens → ingen banner krävs). AI-chatten kör
+  Mistral via befintlig `intakeReply` (ingen ny leverantör).
+- **Robusthet (§ 10.3 A.8.x):** de publika routarna rate-limitas per IP
+  (`lib/rate-limit.ts`): chat 30/5 min, submit 10/min, quiz 15/min.
+- **Riskklass:** quiz/wizard n/a (ingen AI); publik AI-chatt = begränsad
+  (människa-i-loopen granskar genererade leads i `/inflode/leads`).
+- **Migrationer** (1700000108–109) är nya, oföränderliga filnummer.
+  **compass speglas inte** i `scripts/setup-via-api.mjs`/`verify-baseline.mjs`
+  (migration-only) — inga mirror-ändringar krävs.
