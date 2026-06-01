@@ -895,8 +895,8 @@ await ensureCollection({
     'CREATE INDEX idx_tools_tenant_category ON tools (tenant, category)',
     'CREATE INDEX idx_tools_tenant_active ON tools (tenant, active)'
   ],
-  listRule: READ_OWN_STARTUP_DIRECT,
-  viewRule: READ_OWN_STARTUP_DIRECT,
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
