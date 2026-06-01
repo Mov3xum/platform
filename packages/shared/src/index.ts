@@ -1,4 +1,5 @@
 import type { EducationDocumentKind } from './education-documents';
+import type { FileTopic, FileTopicStatus } from './file-topics';
 
 export type Role =
   | 'admin'
@@ -502,6 +503,12 @@ export interface UserFile {
   doc_kind?: UserFileDocKind;
   chat_thread?: string;
   tool_run?: string;
+  // AI-kategorisering (migration 1700000110, CLAUDE.md § 24).
+  topic?: FileTopic;
+  topic_status?: FileTopicStatus;
+  topic_confidence?: number; // 0..1, AI:ns självskattade säkerhet (transparens)
+  startup?: string; // valfri bolagskoppling (relation) för "Bolag"-vyn
+  categorized_at?: string;
   created: string;
   updated: string;
 }
@@ -1415,3 +1422,4 @@ export * from './agreements';
 export * from './reporting';
 // ─── Startupkompassen — quiz-poängsättning (ren logik, enhetstestad) ─────────
 export * from './compass-quiz';
+export * from './file-topics';

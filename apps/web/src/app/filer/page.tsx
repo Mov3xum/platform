@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { PageShell } from '@/components/PageShell';
 import { Icon } from '@/components/proto/Icon';
-import { listFilesAction } from '@/lib/actions/files';
+import { listFilesAction, listFileStartupOptionsAction } from '@/lib/actions/files';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { escFilter } from '@/lib/pb-filter';
 import { pbFileUrl } from '@/lib/pb-file';
@@ -14,7 +14,7 @@ import {
   type AgreementStatus,
   type EducationDocumentAssignment
 } from '@platform/shared';
-import FilesList from './FilesList';
+import FilesBrowser from './FilesBrowser';
 
 export const dynamic = 'force-dynamic';
 
@@ -138,6 +138,7 @@ function FileRow({
 export default async function FilerPage() {
   const user = await requireUser();
   const files = await listFilesAction();
+  const startups = await listFileStartupOptionsAction();
   const isMember = isPureStartupMember(user.roles);
 
   const member = isMember
@@ -196,11 +197,11 @@ export default async function FilerPage() {
               <h2 className="mb-4 font-heading text-lg font-semibold text-foreground">
                 Dina filer
               </h2>
-              <FilesList initialFiles={files} />
+              <FilesBrowser initialFiles={files} startups={startups} />
             </section>
           </>
         ) : (
-          <FilesList initialFiles={files} />
+          <FilesBrowser initialFiles={files} startups={startups} />
         )}
       </div>
     </PageShell>

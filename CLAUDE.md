@@ -2409,3 +2409,80 @@ hinkarnas `min`/`max`). Per-val `score`/`bucket` lagras i
 - **Migrationer** (1700000108–109) är nya, oföränderliga filnummer.
   **compass speglas inte** i `scripts/setup-via-api.mjs`/`verify-baseline.mjs`
   (migration-only) — inga mirror-ändringar krävs.
+
+---
+
+## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)
+
+### 24.1 Översikt
+
+Det personliga filarkivet (`/filer`, § 17.1) är inte längre en platt lista.
+Filerna grupperas i **ämnesmappar** (en fast Movexum-taxonomi) och kan även
+visas per **bolag**. En liten AI-agent (Mistral, EU) klassar varje fil till
+exakt ETT ämne och föreslår en valfri bolagskoppling. När agenten är **osäker**
+flaggas filen och användaren bekräftar ämnet i en **dialog** i stället för att
+en osäker gissning sätts tyst (människa-i-loopen, EU AI Act art. 14).
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/file-topics.ts` | Fast ämnestaxonomi (`FILE_TOPICS`, `FileTopic`, `FileTopicStatus`) + helpers |
+| `backend/pocketbase-schema/migrations/1700000110_extend_user_files_categorization.js` | `topic`/`topic_status`/`topic_confidence`/`startup`/`categorized_at` på `user_files` |
+| `apps/web/src/lib/ai/file-categorize.ts` | `categorizeFile` — Mistral-klassning → `{ topic, startupId, confidence, needsReview }` |
+| `apps/web/src/lib/actions/files.ts` | `categorizeFileAction`/`categorizeAllFilesAction`/`setFileTopicAction`/`listFileStartupOptionsAction` |
+| `apps/web/src/app/filer/FilesBrowser.tsx` | Vy (Ämnen/Bolag-flikar, mappgrid, senaste filer, "Sortera med AI", osäkerhetsdialog) |
+
+### 24.2 Ämnestaxonomi (fast)
+
+Åtta fasta ämnen i `file-topics.ts` (källa av sanning, speglade som
+select-värden i migration 1700000110): `affarsplan_strategi`,
+`finansiering_kapital`, `hallbarhet_esg`, `internationalisering`,
+`pitch_material`, `juridik_avtal`, `rapporter_uppfoljning`, `osorterat`
+(default/fallback). Lägg aldrig till ett ämne utan att utöka BÅDE
+`file-topics.ts` och en migration (fältet är en PB-select).
+
+### 24.3 Klassningsflöde
+
+1. **Vid uppladdning** (`uploadUserFileAction`) sätts `topic_status='pending'`
+   och `categorizeAndStore` körs best-effort direkt (fail-soft).
+2. **"Sortera med AI"** (`categorizeAllFilesAction`) klassar alla filer med
+   `topic_status` tomt/`pending` — rör ALDRIG `confirmed` (människans val) eller
+   redan klassade `auto`/`needs_review`. Capad till 40 filer/körning (robusthet,
+   art. 15).
+3. `categorizeFile` kör `mistral-small-latest` (temp 0, max 200 tokens) med en
+   egen, snäv system-prompt (INTE agent-/chatt-ytan): filinnehåll är **data,
+   inte instruktioner** (§ 9.3). Den får ämneslistan + tenantens bolag (id +
+   `name`, whitelistat fält § 9.3) + filnamn + ett **cappat textutdrag**
+   (pdf/xlsx/text, ≤ 6 KB extraherat / ≤ 4 KB till modellen). Returnerar
+   `{ topic, startup_id, confidence }` som JSON.
+4. `confidence < 0.55` ELLER `topic = osorterat` → `topic_status='needs_review'`
+   (annars `auto`). `startup_id` valideras mot den medskickade bolagslistan.
+5. **Osäkerhetsdialog:** `/filer` visar en banner ("AI:n är osäker på var N filer
+   hör hemma") → användaren väljer ämne (+ valfritt bolag) → `setFileTopicAction`
+   sätter `topic_status='confirmed'`. Samma dialog används för manuell "Flytta".
+
+### 24.4 Säkerhet och regelefterlevnad
+
+- **Riskklass (EU AI Act art. 11):** **begränsad.** Klassar dokument i åtta
+  fasta hinkar; ingen profilering av individer; osäkerhet → människa bekräftar;
+  ingen autopublicering. Versionerad här per art. 11.
+- **Transparens (art. 13/50):** filrader märks "AI" när `topic_status='auto'`,
+  och en not anger att ämnen sätts av AI ("verifiera innan delning").
+- **GDPR § 5 (dataminimering):** det extraherade textutdraget matas **transient**
+  och lagras ALDRIG — bara klassningsresultatet (ämne, ev. bolag, confidence)
+  skrivs. `topic`/`topic_status`/`topic_confidence` är icke-PII metadata.
+- **GDPR art. 17:** inga nya kollektioner; fälten ligger på `user_files`
+  (owner/tenant `cascadeDelete` städar dem). `startup` har ingen cascade (filen
+  överlever bolagsradering, samma princip som `chat_thread`/`tool_run`).
+- **Ingen ny dataväg för agenter:** `user_files` är fortsatt **denylistad** i
+  `lib/ai/schema.ts`. Klassningen är ett separat, isolerat anrop som bara läser
+  ägarens egen fil (owner/tenant verifieras före varje skrivning) — `query_collection`
+  exponerar aldrig arkivet. Bolagsmatchningen använder bara whitelistat `name`.
+- **Kostnad/audit:** varje klassning loggas i `ai_usage_events` (surface
+  `suggestions`) — ingen ny surface-migration behövs.
+- **RBAC/isolation:** allt går via användarens auth-token (`getServerPb`) →
+  owner-only RLS (§ 21.4) gäller; bolagslistan scopas av tenant + medlems-RLS.
+- **Migration** (1700000110) är nytt, oföränderligt filnummer. `user_files`
+  speglas inte i `scripts/setup-via-api.mjs`/`verify-baseline.mjs` — inga
+  mirror-ändringar krävs.
