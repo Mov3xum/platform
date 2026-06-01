@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function AdminModulesPage() {
   const user = await requireUser();
-  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
     redirect('/inflode');
   }
   const pb = await getServerPb();
@@ -46,8 +46,9 @@ export default async function AdminModulesPage() {
         >
           <Icon name="shield" size={13} />
           <span>
-            Varje modul får en egen URL <code className="mx-mono">/inflode/m/[slug]</code>.
-            Lägg på <code className="mx-mono">?utm_source=&hellip;&amp;utm_campaign=&hellip;</code>{' '}
+            Varje modul deployas publikt (oinloggat) på{' '}
+            <code className="mx-mono">/m/[publik-slug]</code> med egen QR-kod. Lägg på{' '}
+            <code className="mx-mono">?utm_source=&hellip;&amp;utm_campaign=&hellip;</code>{' '}
             för att mäta var leads kommer ifrån.
           </span>
         </div>

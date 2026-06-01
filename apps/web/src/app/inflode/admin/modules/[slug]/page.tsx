@@ -42,7 +42,7 @@ export default async function EditModulePage({
 }) {
   const { slug } = await params;
   const user = await requireUser();
-  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
     redirect('/inflode');
   }
   const pb = await getServerPb();
@@ -58,9 +58,9 @@ export default async function EditModulePage({
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb={`Inflöde / Admin / Moduler / ${mod.name}`}
+        crumb={`Startupkompassen / Admin / Moduler / ${mod.name}`}
         title={mod.name}
-        subtitle={`/inflode/m/${mod.slug} · ${FLOW_TYPE_LABEL[mod.flow_type]} · ${mod.is_active ? 'Aktiv' : 'Utkast'}`}
+        subtitle={`${mod.public_slug ? `/m/${mod.public_slug}` : '(ingen publik länk)'} · ${FLOW_TYPE_LABEL[mod.flow_type]} · ${mod.is_active ? 'Aktiv' : 'Utkast'}`}
         actions={
           <>
             <Link href="/inflode/admin/modules" className="mx-btn">
@@ -126,6 +126,50 @@ export default async function EditModulePage({
                   className="mx-input"
                   style={{ marginTop: 4 }}
                   placeholder="Vem är modulen till för?"
+                />
+              </label>
+              <label className="mx-label">
+                Publik länk (slug) — modulen blir svarbar på <code>/m/[slug]</code>
+                <input
+                  type="text"
+                  name="public_slug"
+                  defaultValue={mod.public_slug || ''}
+                  className="mx-input"
+                  style={{ marginTop: 4, fontFamily: 'var(--mx-mono)' }}
+                  placeholder="t.ex. ar-du-entreprenor (globalt unik)"
+                />
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <label className="mx-label">
+                  Eyebrow (liten text ovanför rubriken)
+                  <input
+                    type="text"
+                    name="hero_eyebrow"
+                    defaultValue={mod.hero_eyebrow || ''}
+                    className="mx-input"
+                    style={{ marginTop: 4 }}
+                    placeholder="STARTUPKOMPASSEN"
+                  />
+                </label>
+                <label className="mx-label">
+                  Välkomstrubrik
+                  <input
+                    type="text"
+                    name="welcome_title"
+                    defaultValue={mod.welcome_title || ''}
+                    className="mx-input"
+                    style={{ marginTop: 4 }}
+                    placeholder="Visas stort på publika sidan"
+                  />
+                </label>
+              </div>
+              <label className="mx-label">
+                Välkomsttext (ingress på publika sidan)
+                <textarea
+                  name="welcome_body"
+                  defaultValue={mod.welcome_body || ''}
+                  className="mx-textarea"
+                  style={{ marginTop: 4, minHeight: 50 }}
                 />
               </label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -208,6 +252,31 @@ export default async function EditModulePage({
                   placeholder="Lämna tom för standard-prompten. Skriv egen om du vill att AI:n ska bete sig annorlunda — t.ex. för en specifik kohort."
                 />
               </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <label className="mx-label">
+                  Assistent-namn (AI-chatt)
+                  <input
+                    type="text"
+                    name="chat_persona"
+                    defaultValue={mod.chat_persona || ''}
+                    className="mx-input"
+                    style={{ marginTop: 4 }}
+                    placeholder="t.ex. Movexums AI-rådgivare"
+                  />
+                </label>
+                <label className="mx-label">
+                  Max antal AI-utbyten (0 = obegränsat)
+                  <input
+                    type="number"
+                    name="max_exchanges"
+                    defaultValue={mod.max_exchanges ?? 0}
+                    min={0}
+                    max={100}
+                    className="mx-input"
+                    style={{ marginTop: 4 }}
+                  />
+                </label>
+              </div>
               <label className="mx-label">
                 Tema-färg (frivillig)
                 <input
@@ -243,6 +312,43 @@ export default async function EditModulePage({
                   <span>Markera som publik URL (för delning)</span>
                 </label>
               </div>
+              <div className="mx-flex mx-items-c mx-gap-3 mx-wrap">
+                <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
+                  <input type="checkbox" name="require_email" defaultChecked={!!mod.require_email} />
+                  <span>E-post obligatoriskt</span>
+                </label>
+                <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
+                  <input type="checkbox" name="require_phone" defaultChecked={!!mod.require_phone} />
+                  <span>Telefon obligatoriskt</span>
+                </label>
+                <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    name="require_organization"
+                    defaultChecked={!!mod.require_organization}
+                  />
+                  <span>Organisation obligatoriskt</span>
+                </label>
+              </div>
+              {mod.flow_type === 'quiz' && (
+                <label className="mx-label">
+                  Resultatprofiler (JSON) — för quiz. Varje val i en fråga kan peka på en
+                  hink via <code>värde | etikett | poäng | hink</code>.
+                  <textarea
+                    name="result_buckets"
+                    defaultValue={
+                      mod.result_buckets && mod.result_buckets.length
+                        ? JSON.stringify(mod.result_buckets, null, 2)
+                        : ''
+                    }
+                    className="mx-textarea"
+                    style={{ marginTop: 4, minHeight: 160, fontFamily: 'var(--mx-mono)', fontSize: 11 }}
+                    placeholder={
+                      '[\n  {"key":"green","title":"Redo","body":"...","tips":["..."],"min":14,"max":21,"cta":{"label":"Boka","url":"/m/grundare"}}\n]'
+                    }
+                  />
+                </label>
+              )}
               <div
                 className="mx-flex mx-items-c mx-gap-2"
                 style={{ justifyContent: 'flex-end' }}
@@ -382,13 +488,13 @@ export default async function EditModulePage({
                       />
                     </label>
                     <label className="mx-label">
-                      Val (en per rad, format <code>nyckel | etikett</code>) — endast för
-                      enkelval/flerval
+                      Val (en per rad, format <code>värde | etikett | poäng | hink</code>) — poäng
+                      och hink är frivilliga och styr quiz-poängsättningen
                       <textarea
                         name="choices"
                         className="mx-textarea"
                         style={{ marginTop: 4, minHeight: 60, fontFamily: 'var(--mx-mono)' }}
-                        placeholder="tech | Tech / digitalt&#10;hardware | Hårdvara&#10;service | Tjänst"
+                        placeholder="problem | Att lösa problem | 1 | builder&#10;frihet | Frihet och självständighet | 1 | explorer&#10;hog | Hög | 3"
                       />
                     </label>
                     <div className="mx-flex mx-items-c mx-gap-3">
@@ -413,7 +519,7 @@ export default async function EditModulePage({
 
         {/* Höger: dela, exempel-URL, ta bort */}
         <div style={{ display: 'grid', gap: 16 }}>
-          <ShareModule slug={mod.slug} name={mod.name} />
+          <ShareModule slug={mod.slug} name={mod.name} publicSlug={mod.public_slug} />
 
           <Card>
             <CardHead label="Kampanj-länk-byggare" />
@@ -433,7 +539,7 @@ export default async function EditModulePage({
                   wordBreak: 'break-all'
                 }}
               >
-                /inflode/m/{mod.slug}?utm_source=<em>linkedin</em>&amp;utm_medium=<em>post</em>&amp;utm_campaign=<em>varomgang26</em>
+                /m/{mod.public_slug || '[ange-publik-slug]'}?utm_source=<em>linkedin</em>&amp;utm_medium=<em>post</em>&amp;utm_campaign=<em>varomgang26</em>
               </div>
               <div className="mx-t-12 mx-muted" style={{ marginTop: 10 }}>
                 Mätningen syns på översikten och per modul. Stöder:{' '}

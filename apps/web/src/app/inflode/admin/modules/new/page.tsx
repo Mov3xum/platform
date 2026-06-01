@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function NewModulePage() {
   const user = await requireUser();
-  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
     redirect('/inflode');
   }
 
@@ -44,19 +44,32 @@ export default async function NewModulePage() {
             />
           </label>
 
-          <label className="mx-label">
-            Slug (URL)
-            <input
-              type="text"
-              name="slug"
-              className="mx-input"
-              style={{ marginTop: 4 }}
-              placeholder="genereras från namnet om tomt"
-            />
-            <span className="mx-mono mx-t-xs mx-muted">
-              Modulen blir tillgänglig på <code>/inflode/m/[slug]</code>
-            </span>
-          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <label className="mx-label">
+              Slug (intern)
+              <input
+                type="text"
+                name="slug"
+                className="mx-input"
+                style={{ marginTop: 4 }}
+                placeholder="genereras från namnet om tomt"
+              />
+            </label>
+            <label className="mx-label">
+              Publik länk (slug)
+              <input
+                type="text"
+                name="public_slug"
+                className="mx-input"
+                style={{ marginTop: 4, fontFamily: 'var(--mx-mono)' }}
+                placeholder="globalt unik — /m/[slug]"
+              />
+            </label>
+          </div>
+          <span className="mx-mono mx-t-xs mx-muted">
+            Modulen blir publikt svarbar på <code>/m/[publik-slug]</code> — dela via QR-kod efter
+            att du sparat.
+          </span>
 
           <label className="mx-label">
             Beskrivning

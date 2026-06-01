@@ -1270,9 +1270,9 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'inflode',
-    title: 'Inflöde',
-    description: 'Hjärtat i inkubatorn — fånga, kvalificera och konvertera leads. Deploya formulär, quiz och AI-chattar på egna URL:er och spåra var inflödet kommer ifrån.',
-    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
+    title: 'Startupkompassen',
+    description: 'Hjärtat i inkubatorns inflöde — fånga, kvalificera och konvertera leads. Bygg quiz, formulär och AI-chattar (Mistral) och deploya dem på egna publika URL:er med QR-koder. Hanteras av admin, coach och incubator_lead.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach'],
     route: '/inflode'
   },
   {
@@ -1413,3 +1413,5 @@ export * from './education-documents';
 export * from './de-minimis';
 export * from './agreements';
 export * from './reporting';
+// ─── Startupkompassen — quiz-poängsättning (ren logik, enhetstestad) ─────────
+export * from './compass-quiz';

@@ -373,7 +373,8 @@ export async function declineLeadAction(formData: FormData) {
    ──────────────────────────────────────────────────────────────────── */
 
 const FLOW_TYPES = ['chat', 'wizard', 'quiz'] as const;
-const ADMIN_ROLES = ['admin', 'incubator_lead'] as const;
+// Startupkompassen hanteras av admin, coach och incubator_lead.
+const MANAGE_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
 
 function slugify(s: string): string {
   return s
@@ -387,7 +388,7 @@ function slugify(s: string): string {
 
 export async function createModuleAction(formData: FormData) {
   const user = await requireUser();
-  if (!hasRole(user.roles, [...ADMIN_ROLES])) {
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
     throw new Error('Forbidden');
   }
   const name = String(formData.get('name') || '').trim();
@@ -404,13 +405,18 @@ export async function createModuleAction(formData: FormData) {
 
   const slug = slugify(slugRaw || name);
   if (!slug) throw new Error('Slug kunde inte genereras');
+  const publicSlugRaw = slugify(String(formData.get('public_slug') || '') || slug);
 
   const pb = await getServerPb();
   let createdSlug = slug;
-  try {
-    const rec = await pb.collection('compass_modules').create({
+  // public_slug är GLOBALT unik (migration 1700000108). Vi kan inte läsa andra
+  // tenants moduler med användartoken, så vi försöker den rena sluggen och
+  // faller tillbaka på ett suffix om DB:n nekar pga unik-konflikt.
+  async function createWith(publicSlug: string) {
+    return pb.collection('compass_modules').create({
       tenant: user.tenant,
       slug: createdSlug,
+      public_slug: publicSlug,
       name,
       description,
       flow_type: flowType,
@@ -418,6 +424,14 @@ export async function createModuleAction(formData: FormData) {
       public_url_enabled: publicEnabled,
       sort_order: 999
     });
+  }
+  try {
+    let rec;
+    try {
+      rec = await createWith(publicSlugRaw);
+    } catch {
+      rec = await createWith(`${publicSlugRaw}-${Math.random().toString(36).slice(2, 6)}`);
+    }
     createdSlug = rec.slug;
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
@@ -438,7 +452,7 @@ export async function createModuleAction(formData: FormData) {
 
 export async function updateModuleAction(formData: FormData) {
   const user = await requireUser();
-  if (!hasRole(user.roles, [...ADMIN_ROLES])) {
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
     throw new Error('Forbidden');
   }
   const id = String(formData.get('id') || '');
@@ -448,6 +462,9 @@ export async function updateModuleAction(formData: FormData) {
   // Verifiera tenant
   const existing = await pb.collection('compass_modules').getOne(id);
   if (existing.tenant !== user.tenant) throw new Error('Forbidden');
+
+  const maxExchangesRaw = String(formData.get('max_exchanges') || '').trim();
+  const maxExchanges = Number(maxExchangesRaw);
 
   const patch: Record<string, unknown> = {
     name: String(formData.get('name') || '').trim(),
@@ -459,9 +476,34 @@ export async function updateModuleAction(formData: FormData) {
     theme_color: String(formData.get('theme_color') || '').trim(),
     system_prompt: String(formData.get('system_prompt') || '').trim(),
     consent_note: String(formData.get('consent_note') || '').trim(),
+    // Startupkompassen — publik sida + chat-persona
+    hero_eyebrow: String(formData.get('hero_eyebrow') || '').trim().slice(0, 120),
+    welcome_title: String(formData.get('welcome_title') || '').trim().slice(0, 200),
+    welcome_body: String(formData.get('welcome_body') || '').trim().slice(0, 4000),
+    chat_persona: String(formData.get('chat_persona') || '').trim().slice(0, 4000),
+    max_exchanges: Number.isFinite(maxExchanges) && maxExchanges >= 0 ? Math.min(maxExchanges, 100) : 0,
+    require_email: formData.get('require_email') === 'on',
+    require_phone: formData.get('require_phone') === 'on',
+    require_organization: formData.get('require_organization') === 'on',
     is_active: formData.get('is_active') === 'on',
     public_url_enabled: formData.get('public_url_enabled') === 'on'
   };
+
+  // Publik slug (global unik). Bara sätt om angiven — tom lämnar oförändrad.
+  const publicSlug = slugify(String(formData.get('public_slug') || ''));
+  if (publicSlug) patch.public_slug = publicSlug;
+
+  // Quiz-resultatprofiler skickas som JSON från ResultBucketsEditor.
+  const bucketsRaw = String(formData.get('result_buckets') || '').trim();
+  if (bucketsRaw) {
+    try {
+      const parsed = JSON.parse(bucketsRaw);
+      if (Array.isArray(parsed)) patch.result_buckets = parsed;
+    } catch {
+      throw new Error('Ogiltigt format på resultatprofiler (kunde inte tolka JSON).');
+    }
+  }
+
   const flow = String(formData.get('flow_type') || '');
   if (FLOW_TYPES.includes(flow as (typeof FLOW_TYPES)[number])) {
     patch.flow_type = flow;
@@ -473,6 +515,10 @@ export async function updateModuleAction(formData: FormData) {
     await pb.collection('compass_modules').update(id, patch);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
+    // PB unik-index-fel på public_slug → vänligt meddelande.
+    if (/public_slug|unique/i.test(msg)) {
+      throw new Error('Den publika länken (slug) är upptagen — välj en annan.');
+    }
     throw new Error(`Kunde inte uppdatera modul: ${msg}`);
   }
 
@@ -490,7 +536,7 @@ export async function updateModuleAction(formData: FormData) {
 
 export async function deleteModuleAction(formData: FormData) {
   const user = await requireUser();
-  if (!hasRole(user.roles, [...ADMIN_ROLES])) {
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
     throw new Error('Forbidden');
   }
   const id = String(formData.get('id') || '');
@@ -524,7 +570,7 @@ const INPUT_TYPES = ['short_text', 'long_text', 'choice', 'multi_choice', 'scale
 
 export async function addQuestionAction(formData: FormData) {
   const user = await requireUser();
-  if (!hasRole(user.roles, [...ADMIN_ROLES])) {
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
     throw new Error('Forbidden');
   }
   const moduleId = String(formData.get('module_id') || '');
@@ -541,15 +587,30 @@ export async function addQuestionAction(formData: FormData) {
     throw new Error('Ogiltig input_type');
   }
 
-  let choices: { value: string; label: string }[] | undefined;
+  // Format per rad: `värde | etikett | poäng | hink`
+  // (poäng + hink är frivilliga och driver quiz-poängsättningen).
+  let choices:
+    | { value: string; label: string; score?: number; bucket?: string }[]
+    | undefined;
   if (choicesRaw && (inputType === 'choice' || inputType === 'multi_choice')) {
     choices = choicesRaw
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l.length > 0)
       .map((l) => {
-        const [value, ...rest] = l.split('|').map((s) => s.trim());
-        return { value: slugify(value || l), label: rest.join('|').trim() || value };
+        const parts = l.split('|').map((s) => s.trim());
+        const value = parts[0];
+        const label = parts[1] || value;
+        const choice: { value: string; label: string; score?: number; bucket?: string } = {
+          value: slugify(value || l),
+          label
+        };
+        const score = Number(parts[2]);
+        if (parts[2] !== undefined && parts[2] !== '' && Number.isFinite(score)) {
+          choice.score = score;
+        }
+        if (parts[3]) choice.bucket = slugify(parts[3]);
+        return choice;
       });
   }
 
@@ -579,7 +640,7 @@ export async function addQuestionAction(formData: FormData) {
 
 export async function deleteQuestionAction(formData: FormData) {
   const user = await requireUser();
-  if (!hasRole(user.roles, [...ADMIN_ROLES])) {
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
     throw new Error('Forbidden');
   }
   const id = String(formData.get('id') || '');
