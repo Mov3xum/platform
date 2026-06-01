@@ -2,6 +2,8 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import {
   buildLagesredovisning,
+  mapVinnovaFocus,
+  dateOnly,
   PROGRAM_START,
   type BuildOptions,
   type LagesredovisningInput,
@@ -31,12 +33,24 @@ async function fetchAll<T>(
   }
 }
 
+/** Per-bolag förifyllningsvärden hämtade direkt ur systemet (formulär-prefill). */
+export interface StartupPrefill {
+  id: string;
+  name: string;
+  irl_level: number | null;
+  vinnova_focus: string | null;
+  sni_code: string | null;
+  approved_state_aid_art22: boolean;
+  approved_de_minimis: boolean;
+  state_aid_start_at: string | null;
+}
+
 export interface LagesredovisningDataset extends LagesredovisningResult {
   period: PeriodWindow;
   programStart: string;
   fallbackRate: number;
   startupCount: number;
-  startupList: Array<{ id: string; name: string }>;
+  startupList: StartupPrefill[];
 }
 
 /**
@@ -93,7 +107,15 @@ export async function buildVinnovaLagesredovisning(
       vinnova_focus: s.vinnova_focus,
       sni_code: s.sni_code,
       state_aid_start_at: s.state_aid_start_at,
-      vinnova_funding_end_at: s.vinnova_funding_end_at
+      vinnova_funding_end_at: s.vinnova_funding_end_at,
+      // Härledningskällor (auto-generering ur befintlig systemdata):
+      industri: s.industri,
+      sector: s.sector,
+      irl_level: s.irl_level,
+      approved_state_aid_art22: s.approved_state_aid_art22,
+      approved_de_minimis: s.approved_de_minimis,
+      signed_vinnova_incubation_approval_at: s.signed_vinnova_incubation_approval_at,
+      intagsdatum: s.intagsdatum
     },
     timeEntries: (timeMap.get(s.id) || []).map((t) => ({
       activity_kind: t.activity_kind,
@@ -132,6 +154,19 @@ export async function buildVinnovaLagesredovisning(
     programStart: PROGRAM_START,
     fallbackRate,
     startupCount: startups.length,
-    startupList: startups.map((s) => ({ id: s.id, name: s.name }))
+    startupList: startups.map((s) => ({
+      id: s.id,
+      name: s.name,
+      irl_level: s.irl_level ?? null,
+      vinnova_focus: s.vinnova_focus || mapVinnovaFocus(s.industri) || mapVinnovaFocus(s.sector) || null,
+      sni_code: s.sni_code || null,
+      approved_state_aid_art22: !!s.approved_state_aid_art22,
+      approved_de_minimis: !!s.approved_de_minimis,
+      state_aid_start_at:
+        dateOnly(s.state_aid_start_at) ||
+        dateOnly(s.signed_vinnova_incubation_approval_at) ||
+        dateOnly(s.intagsdatum) ||
+        null
+    }))
   };
 }

@@ -35,6 +35,9 @@ export function VinnovaLagesredovisningView({
     issuesByStartup.set(i.startupId, e);
   }
   const cols = VINNOVA_LAGESREDOVISNING.columns;
+  const derivedCount = dataset.rows.filter(
+    (r) => r.derived.focus || r.derived.basis || r.derived.readiness || r.derived.state_aid_start
+  ).length;
 
   return (
     <div className="space-y-4">
@@ -65,7 +68,14 @@ export function VinnovaLagesredovisningView({
         </div>
 
         <div className="mb-3 rounded-xl bg-canvas-subtle px-3 py-2 text-[11.5px] text-foreground-muted">
-          Deterministiskt genererad ur systemdata — verifiera innan inlämning till Vinnova.
+          Auto-genererad ur systemdata — verifiera innan inlämning till Vinnova.
+          {derivedCount > 0 && (
+            <span className="ml-1">
+              {derivedCount} rad(er) har värden <strong>härledda</strong> ur befintliga fält
+              (affärsinriktning ur bransch, readiness ur IRL-nivå, statsstödsgrund ur
+              godkännandeflaggor, datum ur intag/Vinnova-godkännande) — bekräfta vid behov.
+            </span>
+          )}
           {errors.length > 0 && (
             <span className="ml-1 text-movexum-morkorange">
               {errors.length} fel kräver åtgärd.
