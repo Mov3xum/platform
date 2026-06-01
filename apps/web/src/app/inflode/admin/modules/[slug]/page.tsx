@@ -243,6 +243,22 @@ export default async function EditModulePage({
                 />
               </label>
               <label className="mx-label">
+                Notifiera inflöde till (e-post)
+                <input
+                  type="text"
+                  name="notify_emails"
+                  defaultValue={mod.notify_emails || ''}
+                  className="mx-input"
+                  style={{ marginTop: 4 }}
+                  placeholder="inflode@movexum.se, namn@movexum.se"
+                />
+                <span className="mx-t-12 mx-muted" style={{ display: 'block', marginTop: 4 }}>
+                  En eller flera adresser (kommaseparerade) som får ett mejl när ett
+                  nytt inflöde kommer in. Lämna tom för att använda standardadressen
+                  (<code className="mx-mono">MOVEXUM_INFLOW_EMAIL</code>).
+                </span>
+              </label>
+              <label className="mx-label">
                 System-prompt (för AI-chat-flöden)
                 <textarea
                   name="system_prompt"

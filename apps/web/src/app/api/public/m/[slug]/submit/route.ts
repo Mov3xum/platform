@@ -6,6 +6,7 @@ import {
   mapAnswersToLead,
   pickAttribution
 } from '@/lib/compass/public';
+import { notifyNewInflow } from '@/lib/compass/notify';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import type { Attribution } from '@/lib/compass/types';
 
@@ -79,6 +80,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   if (lead) {
     await createConversation(pb, tenant, { moduleSlug: slug, leadId: lead.id });
+    await notifyNewInflow(module, lead);
   }
 
   return NextResponse.json({ ok: true, leadId: lead?.id });

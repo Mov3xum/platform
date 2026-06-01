@@ -485,6 +485,7 @@ export async function updateModuleAction(formData: FormData) {
     require_email: formData.get('require_email') === 'on',
     require_phone: formData.get('require_phone') === 'on',
     require_organization: formData.get('require_organization') === 'on',
+    notify_emails: String(formData.get('notify_emails') || '').trim().slice(0, 1000),
     is_active: formData.get('is_active') === 'on',
     public_url_enabled: formData.get('public_url_enabled') === 'on'
   };
