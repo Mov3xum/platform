@@ -1875,10 +1875,18 @@ formulärsubmiten cappades → stora videos fallerade. Nu laddas media upp som
   (`${PB}/api/files/workshop_media/{id}/{filnamn}`), samma mönster som
   tenant-logos/avatarer i `auth.server.ts` — fungerar direkt i `<video>`/`<img>`.
 - **Säkerhet/RBAC:** upload kräver staff (admin/incubator_lead/coach/mentor) +
-  inloggning; `workshop_media`-`createRule` refererar BARA auth-fält (ingen
-  `= tenant`-join → undviker PB v0.23-rule-buggen, se `verify-baseline.mjs`),
-  tenant sätts i koden och list/view är tenant-scopade. SameSite=Lax-cookien ger
-  CSRF-skydd (§17.8). Mime + storlek valideras både i klient och route.
+  inloggning; rollen enforce:as i route-handlern (`hasRole`). `workshop_media`-
+  `createRule` är `@request.auth.id != "" && @request.auth.tenant != ""` —
+  INGEN roll-check och INGEN `= tenant`-join (§ 21.3). Den ursprungliga
+  migrationen (1700000086) hade en `?=`-roll-check (`STAFF_ROLES`) i createRule,
+  vilket träffade PB v0.23.4-buggen (tyst nekande av create:en även för admin →
+  uppladdningsroutens `getServerPb()`-create gav 500: "Kunde inte ladda upp
+  filen till servern"). **Migration 1700000111** strippar roll-checken (och
+  speglas i `setup-via-api.mjs`); `verify-baseline.mjs` sveper numera ALLA
+  kollektioners createRule och failar deployen om en roll-check/tenant-join
+  återinförs. Tenant sätts i koden och list/view är tenant-scopade.
+  SameSite=Lax-cookien ger CSRF-skydd (§17.8). Mime + storlek valideras både i
+  klient och route.
 - **GDPR/riskklass:** posterna är staff-skapade utbildningsresurser (ej PII,
   ingen AI-inferens) → minimal risk. Ladda inte upp personuppgifter (filer nås
   via direktlänk). Bakåtkompatibelt: äldre block med base64-`video_url`/

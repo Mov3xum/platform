@@ -2527,7 +2527,49 @@ const FORCE_CREATE_RULES = {
   incubator_reports: `${ANY_AUTH} && @request.auth.tenant != ""`,
   alumni: `${ANY_AUTH} && @request.auth.tenant != ""`,
   tenant_integrations: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  user_mistral_connectors: ANY_AUTH
+  user_mistral_connectors: `${ANY_AUTH} && @request.auth.id = user`,
+  // --- Kollektioner skapade efter migration 0049 (synkat med 1700000111) ----
+  // Deras create-migrationer återinförde `?=`-roll-checks/tenant-joins i
+  // createRule (PB v0.23.4-buggarna). Roll-enforcement görs i server-actions.
+  startup_financials: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  tool_schedules: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  startup_phase_history: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  contacts: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  startup_contacts: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  capital_rounds: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  intellectual_property: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  tasks: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  agent_memory: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  tool_knowledge: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  tool_versions: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  tool_triggers: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  service_time_entries: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  startup_service_costs: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  startup_readiness_assessments: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  startup_state_aid_periods: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  startup_kpis: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  workshop_media: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  education_documents: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  education_document_assignments: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  agreement_signatures: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  de_minimis_units: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  de_minimis_unit_orgnr: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  de_minimis_stod: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  de_minimis_regelverk: ANY_AUTH,
+  chat_threads: `${ANY_AUTH} && @request.auth.id = owner`,
+  deep_jobs: `${ANY_AUTH} && @request.auth.id = owner`,
+  user_files: `${ANY_AUTH} && @request.auth.id = owner`,
+  ai_usage_events: `${ANY_AUTH} && @request.auth.id = user`,
+  tool_run_feedback: `${ANY_AUTH} && @request.auth.id = user`,
+  agent_actions: `${ANY_AUTH} && @request.auth.id = actor`,
+  // Startupkompassen/inflöde + integrationskatalog (synkat med 1700000111).
+  // Publika inflödesflöden skriver via superuser → loosning här rör dem ej.
+  compass_leads: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  compass_conversations: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  compass_modules: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  compass_brand: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  compass_lead_sources: ANY_AUTH,
+  integration_providers: ANY_AUTH
 };
 
 log('Forcerar robusta createRules...');
