@@ -558,6 +558,8 @@ const usersId = usersCol.id;
 // 1700000106). `:each ?=` är den korrekta operatorn för multi-värde-membership.
 const STAFF_OR_OBSERVER_READ =
   '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "mentor" || @request.auth.roles:each ?= "observer")';
+const MEMBER_OF_STARTUP = '@request.auth.linked_startups ?= startup';
+const MEMBER_OF_THIS = '@request.auth.linked_startups ?= id';
 const MEMBER_OF_STARTUP_REL = '@request.auth.linked_startups:each ?= startup';
 const MEMBER_OF_THIS_REL = '@request.auth.linked_startups:each ?= id';
 // list/view scopade till medlemmens egna bolag:
@@ -618,8 +620,8 @@ await ensureCollection({
     { name: 'notes', type: 'editor', required: false }
   ],
   indexes: ['CREATE INDEX idx_partners_tenant ON partners (tenant)'],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
@@ -640,8 +642,8 @@ await ensureCollection({
     { name: 'equity_pct', type: 'number', required: false, min: 0, max: 100 }
   ],
   indexes: ['CREATE INDEX idx_team_members_startup ON startup_team_members (startup)'],
-  listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
+  listRule: READ_OWN_STARTUP_VIA,
+  viewRule: READ_OWN_STARTUP_VIA,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`
@@ -665,8 +667,8 @@ await ensureCollection({
     'CREATE INDEX idx_pe_partner ON partner_engagements (partner)',
     'CREATE INDEX idx_pe_startup ON partner_engagements (startup)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
+  listRule: READ_OWN_STARTUP_VIA,
+  viewRule: READ_OWN_STARTUP_VIA,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`
@@ -718,8 +720,8 @@ await ensureCollection({
     'CREATE INDEX idx_notes_startup ON notes (startup)',
     'CREATE INDEX idx_notes_author ON notes (author)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && (confidential = false || ${STAFF_INCL_MENTOR} || @request.auth.id = author)`,
-  viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && (confidential = false || ${STAFF_INCL_MENTOR} || @request.auth.id = author)`,
+  listRule: `${READ_OWN_STARTUP_VIA} && (confidential = false || ${STAFF_OR_OBSERVER_READ} || @request.auth.id = author)`,
+  viewRule: `${READ_OWN_STARTUP_VIA} && (confidential = false || ${STAFF_OR_OBSERVER_READ} || @request.auth.id = author)`,
   createRule: `${ANY_AUTH} && @request.auth.id = author`,
   updateRule: `${ANY_AUTH} && @request.auth.id = author`,
   deleteRule: `${ANY_AUTH} && (@request.auth.id = author || @request.auth.roles ?= "admin")`
@@ -751,8 +753,8 @@ await ensureCollection({
     { name: 'movexum_signed_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],
   indexes: ['CREATE INDEX idx_agreements_startup ON agreements (startup)'],
-  listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
+  listRule: READ_OWN_STARTUP_VIA,
+  viewRule: READ_OWN_STARTUP_VIA,
   // Staff-only create/update (matchar migration 1700000010 + skyddar de
   // denormaliserade signeringsfälten/document_hash från manipulation av
   // icke-staff vid direkt API-access; bolagsmedlemmens signaturskrivning går
@@ -809,8 +811,8 @@ await ensureCollection({
     { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['planned', 'in_progress', 'achieved', 'missed'] }
   ],
   indexes: ['CREATE INDEX idx_milestones_startup ON milestones (startup)'],
-  listRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
+  listRule: READ_OWN_STARTUP_VIA,
+  viewRule: READ_OWN_STARTUP_VIA,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_ROLES}`
@@ -841,8 +843,8 @@ await ensureCollection({
     'CREATE INDEX idx_tools_tenant_category ON tools (tenant, category)',
     'CREATE INDEX idx_tools_tenant_active ON tools (tenant, active)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  listRule: READ_OWN_STARTUP_DIRECT,
+  viewRule: READ_OWN_STARTUP_DIRECT,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
@@ -877,8 +879,8 @@ await ensureCollection({
     'CREATE INDEX idx_tool_runs_tool ON tool_runs (tool)',
     'CREATE INDEX idx_tool_runs_triggered_by ON tool_runs (triggered_by)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP} || @request.auth.id = mentor || @request.auth.id ?= recipients)`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP} || @request.auth.id = mentor || @request.auth.id ?= recipients)`,
   createRule: `${ANY_AUTH} && @request.auth.id = triggered_by`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = triggered_by`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
@@ -931,8 +933,8 @@ await ensureCollection({
   indexes: [
     'CREATE UNIQUE INDEX idx_workshop_areas_tenant_name ON workshop_areas (tenant, name)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
   createRule: WORKSHOP_AREAS_CREATE_RULE,
   updateRule: WORKSHOP_AREAS_WRITE_RULE,
   deleteRule: WORKSHOP_AREAS_WRITE_RULE
@@ -969,8 +971,8 @@ await ensureCollection({
     'CREATE INDEX idx_workshops_tenant_active ON workshops (tenant, active)',
     'CREATE INDEX idx_workshops_tenant_area ON workshops (tenant, area)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
@@ -1216,8 +1218,8 @@ await ensureCollection({
     'CREATE INDEX idx_missions_status ON missions (status)',
     'CREATE INDEX idx_missions_due ON missions (due_date)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
@@ -1241,8 +1243,8 @@ await ensureCollection({
     'CREATE INDEX idx_mission_comments_mission ON mission_comments (mission)',
     'CREATE INDEX idx_mission_comments_tenant_author ON mission_comments (tenant, author)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
   createRule: `${ANY_AUTH} && @request.auth.id = author`,
   updateRule: `${ANY_AUTH} && @request.auth.id = author`,
   deleteRule: `${ANY_AUTH} && @request.auth.id = author`
@@ -1318,8 +1320,8 @@ await ensureCollection({
     'CREATE INDEX idx_strategies_startup ON strategies (startup)',
     'CREATE INDEX idx_strategies_status ON strategies (status)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
@@ -1345,8 +1347,8 @@ await ensureCollection({
     'CREATE INDEX idx_strategy_revisions_tenant ON strategy_revisions (tenant)',
     'CREATE INDEX idx_strategy_revisions_strategy ON strategy_revisions (strategy)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  listRule: READ_OWN_STARTUP_DIRECT,
+  viewRule: READ_OWN_STARTUP_DIRECT,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
@@ -1370,8 +1372,8 @@ await ensureCollection({
     'CREATE INDEX idx_sprintx_tenant ON sprint_x_checkins (tenant)',
     'CREATE INDEX idx_sprintx_startup ON sprint_x_checkins (startup)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  listRule: READ_OWN_STARTUP_DIRECT,
+  viewRule: READ_OWN_STARTUP_DIRECT,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
