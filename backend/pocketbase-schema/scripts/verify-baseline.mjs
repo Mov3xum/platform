@@ -129,7 +129,9 @@ async function verifyCollectionsExist() {
     'intellectual_property',
     'startup_kpis',
     'tasks',
+    'education_documents',
     'education_document_assignments',
+    'workshop_media',
     'integration_records',
     // Investor/event
     'investors',
@@ -175,6 +177,49 @@ function assertCreateRuleDoesNotJoinRecord(collection) {
       );
     }
   }
+}
+
+// Global invariant (CLAUDE.md § 21.3): INGEN createRule får innehålla en
+// roll-check (`@request.auth.roles ?= ...` / `:each ?=`) eller en tenant-
+// join (`@request.auth.tenant = tenant` / `= startup.tenant`). Båda triggar
+// PB v0.23.4-buggar som TYST nekar create:en → web-routarna returnerar 500
+// (det var precis så workshop-media-uppladdningen föll). Roll-enforcement
+// görs i server-actions; createRule ska bara referera auth-fält + skalär
+// ägar-check. Migration 1700000111 + setup-via-api FORCE_CREATE_RULES håller
+// detta. Den här svep-kontrollen fångar varje NY kollektion som återinför
+// mönstret INNAN den når staging/produktion.
+async function verifyNoBrokenCreateRules() {
+  let all;
+  try {
+    all = await pb.collections.getFullList({ $autoCancel: false });
+  } catch (err) {
+    fail(`Kunde inte lista kollektioner för createRule-svep:\n${describeError(err)}`);
+  }
+  const offenders = [];
+  for (const col of all) {
+    if (col.system) continue; // _superusers etc.
+    const rule = col.createRule;
+    if (typeof rule !== 'string' || rule.trim() === '') continue;
+    if (/@request\.auth\.roles\s*(:each\s*)?\?=/.test(rule)) {
+      offenders.push(`${col.name}.createRule har roll-check: ${JSON.stringify(rule)}`);
+    }
+    if (
+      rule.includes('@request.auth.tenant = tenant') ||
+      rule.includes('@request.auth.tenant = startup.tenant') ||
+      rule.includes('startup.tenant =')
+    ) {
+      offenders.push(`${col.name}.createRule har tenant-join: ${JSON.stringify(rule)}`);
+    }
+  }
+  if (offenders.length) {
+    fail(
+      'Trasiga createRules (PB v0.23.4-buggar — orsakar 500 vid create):\n' +
+        offenders.map((o) => `  - ${o}`).join('\n') +
+        '\nKör migration 1700000111 / setup-via-api.mjs. Roll-checks hör hemma ' +
+        'i server-actions, inte i createRule (CLAUDE.md § 21.3).'
+    );
+  }
+  ok(`createRule-svep: inga roll-checks/tenant-joins (${all.length} kollektioner)`);
 }
 
 // Bolagsisolering (CLAUDE.md § 21, migration 1700000096). En ren
@@ -565,6 +610,7 @@ async function main() {
 
   const collections = await verifyCollectionsExist();
   verifyRlsAndRbac(collections);
+  await verifyNoBrokenCreateRules();
   await verifyAppUser();
   await verifyAppUserCanCreate(pb, APP_USER_EMAIL, APP_USER_PASSWORD);
 
