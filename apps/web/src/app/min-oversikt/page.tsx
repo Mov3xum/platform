@@ -180,6 +180,35 @@ export default async function MinOversiktPage() {
     }
   }
 
+  // Onboarding-status för välkomstkortets knapp (bara för bolagsmedlemmar).
+  // Knappen visas bara om tenanten har en aktiv default-onboarding.
+  let onboarding: { flowExists: boolean; completed: boolean } | null = null;
+  if (isPureMember) {
+    try {
+      const flow = await pb
+        .collection(PB_COLLECTIONS.onboardingFlows)
+        .getFirstListItem<{ id: string }>(
+          `tenant = "${escFilter(user.tenant)}" && is_default = true && status = "active"`,
+          { fields: 'id' }
+        );
+      let completed = false;
+      try {
+        const prog = await pb
+          .collection(PB_COLLECTIONS.onboardingProgress)
+          .getFirstListItem<{ status?: string }>(
+            `tenant = "${escFilter(user.tenant)}" && flow = "${escFilter(flow.id)}" && startup = "${escFilter(linkedId)}"`,
+            { fields: 'status' }
+          );
+        completed = prog.status === 'completed';
+      } catch {
+        completed = false;
+      }
+      onboarding = { flowExists: true, completed };
+    } catch {
+      onboarding = { flowExists: false, completed: false };
+    }
+  }
+
   // Egna + bolagets öppna uppgifter (ej klara/avbrutna).
   let tasks: TaskRecord[] = [];
   try {
@@ -247,26 +276,25 @@ export default async function MinOversiktPage() {
                     allt som rör ert bolag under resan.
                   </p>
                 </div>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <Link
-                    href="/mina-aktiviteter"
-                    className="flex items-center gap-2 rounded-2xl border border-default bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-canvas-subtle"
-                  >
-                    <Icon name="flow" size={16} /> Aktiviteter
-                  </Link>
-                  <Link
-                    href="/de-minimis"
-                    className="flex items-center gap-2 rounded-2xl border border-default bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-canvas-subtle"
-                  >
-                    <Icon name="shield" size={16} /> De minimis
-                  </Link>
-                  <Link
-                    href="/filer"
-                    className="flex items-center gap-2 rounded-2xl border border-default bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-canvas-subtle"
-                  >
-                    <Icon name="doc" size={16} /> Filer & avtal
-                  </Link>
-                </div>
+                {onboarding?.flowExists ? (
+                  <div>
+                    {onboarding.completed ? (
+                      <Link
+                        href="/onboarding"
+                        className="inline-flex items-center gap-2 rounded-2xl border border-default bg-surface px-4 py-2.5 text-sm font-medium text-movexum-morkgron transition hover:bg-canvas-subtle dark:text-movexum-gron"
+                      >
+                        <Icon name="check" size={16} stroke={2.4} /> Onboarding slutförd
+                      </Link>
+                    ) : (
+                      <Link
+                        href="/onboarding"
+                        className="inline-flex items-center gap-2 rounded-2xl bg-brand px-4 py-2.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
+                      >
+                        <Icon name="cap" size={16} /> Onboarding
+                      </Link>
+                    )}
+                  </div>
+                ) : null}
                 <p className="text-xs text-foreground-subtle">
                   Frågor om programmet? Hör av dig till din Movexum-coach.
                 </p>

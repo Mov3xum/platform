@@ -737,6 +737,87 @@ export interface WorkshopAssignment {
   };
 }
 
+// ── Onboarding (digital introduktion för nya bolag) ──────────────────────────
+// Byggs av staff under /education/onboarding (samma byggar-mönster som
+// workshops) och kan sättas som DEFAULT per tenant → visas då för varje aktivt
+// bolag som inte slutfört den. Informativa moduler om Movexum + inkubatortiden.
+// Ingen AI-inferens → riskklass minimal (CLAUDE.md § 10.1). Se § 25.
+
+export type OnboardingStatus = 'draft' | 'active' | 'archived';
+
+export type OnboardingBlockType =
+  | 'text'
+  | 'video'
+  | 'image'
+  | 'acknowledge'
+  | 'question'
+  | 'quiz';
+
+export interface OnboardingBlockOption {
+  id: string;
+  text: string;
+  isCorrect?: boolean;
+}
+
+export interface OnboardingBlock {
+  id: string;
+  type: OnboardingBlockType;
+  title: string;
+  /** Brödtext/innehåll som visas för bolaget (text/acknowledge m.fl.). */
+  body?: string;
+  video_url?: string;
+  image_url?: string;
+  question_type?: 'single' | 'multiple';
+  options?: OnboardingBlockOption[];
+  /** Måste slutföras innan bolaget kan markera onboardingen som klar. */
+  required?: boolean;
+}
+
+export interface OnboardingModule {
+  id: string;
+  title: string;
+  description?: string;
+  blocks: OnboardingBlock[];
+}
+
+export interface OnboardingFlow {
+  id: string;
+  tenant: string;
+  title: string;
+  /** Inledande text på onboardingens startvy. */
+  intro?: string;
+  status: OnboardingStatus;
+  /** Endast ett flöde per tenant kan vara default (enforce:as i server-action). */
+  is_default: boolean;
+  active: boolean;
+  modules?: OnboardingModule[];
+  created_by?: string;
+  created: string;
+  updated: string;
+}
+
+export type OnboardingProgressStatus = 'in_progress' | 'completed';
+
+export interface OnboardingProgress {
+  id: string;
+  tenant: string;
+  flow: string;
+  startup: string;
+  status: OnboardingProgressStatus;
+  answers_json?: Record<string, unknown>;
+  progress_json?: Record<string, unknown>;
+  activity?: string;
+  started_at?: string;
+  completed_at?: string;
+  completed_by?: string;
+  created: string;
+  updated: string;
+  expand?: {
+    flow?: OnboardingFlow;
+    startup?: { id: string; name: string };
+  };
+}
+
 // ── Utbildningsdokument (PDF/Excel/PowerPoint/Word) tilldelade bolag ──────────
 // Staff laddar upp referensdokument under /education/documents och tilldelar dem
 // bolag med valfria instruktioner + deadline. Bolaget markerar "slutförd".
@@ -1415,6 +1496,7 @@ export { movexumPalette, typography as brandTypography } from './design/tokens';
 
 // ─── Workshop/utbildning-hjälpare (ren logik, enhetstestad) ──────────────────
 export * from './workshop';
+export * from './onboarding';
 export * from './education-documents';
 // ─── De minimis-modul (ren beräkningslogik, enhetstestad) ────────────────────
 export * from './de-minimis';

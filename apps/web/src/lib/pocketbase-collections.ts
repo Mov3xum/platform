@@ -7,6 +7,8 @@ export const PB_COLLECTIONS = {
   workshopMedia: 'workshop_media_collection',
   educationDocuments: 'education_documents_collection',
   educationDocumentAssignments: 'education_document_assignments_collection',
+  onboardingFlows: 'onboarding_flows_collection',
+  onboardingProgress: 'onboarding_progress_collection',
   strategies: 'strategies_collection',
   strategyRevisions: 'strategy_revisions_collection',
   // Movexum OS — utökning maj 2026

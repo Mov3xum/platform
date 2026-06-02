@@ -44,7 +44,12 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'de_minimis_unit_orgnr',
   'de_minimis_stod',
   'de_minimis_regelverk',
-  'agreement_signatures' // signeringsbevis: signer_email + ip_hash (1700000094)
+  'agreement_signatures', // signeringsbevis: signer_email + ip_hash (1700000094)
+  // Onboarding (1700000113–114, § 25) — onboarding_progress kan innehålla
+  // bolagets fritextsvar på onboarding-frågor (potentiell PII); flödena är
+  // intern utbildningskonfiguration. Hålls helt utanför AI-kontexten.
+  'onboarding_flows',
+  'onboarding_progress'
 ]);
 
 /**
