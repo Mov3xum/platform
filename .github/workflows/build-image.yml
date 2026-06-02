@@ -1,0 +1,75 @@
+name: Build & push web image
+
+# Reusable workflow: compiles the Next.js web app into a Docker image on
+# GitHub's runners (4 vCPU / 16 GB RAM) and pushes it to GitHub Container
+# Registry (GHCR). Coolify then PULLS this prebuilt image instead of
+# compiling it on the UpCloud host — which was taking up to 30 h and
+# queueing every other deploy behind it.
+#
+# Build-layer caching (type=gha) means repeat builds reuse the yarn install
+# and the Next.js compile cache, so a typical build is a few minutes.
+#
+# Residency note (CLAUDE.md § 10.2): GHCR stores only the COMPILED APP IMAGE
+# (application code) — no PII, no customer data, no PocketBase data. The
+# source already lives on GitHub, so this introduces no new data residency.
+# Runtime still runs EU-only on UpCloud/Coolify.
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: 'Moving tag to publish (staging | production)'
+        required: true
+        type: string
+    outputs:
+      image:
+        description: 'Fully-qualified image repository that was pushed (without tag)'
+        value: ${{ jobs.build.outputs.image }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve image repository (GHCR requires lowercase owner)
+        id: meta
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          owner_lc="${OWNER,,}"
+          echo "image=ghcr.io/${owner_lc}/platform-web" >> "$GITHUB_OUTPUT"
+          echo "Publishing to ghcr.io/${owner_lc}/platform-web:${{ inputs.image_tag }}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ inputs.image_tag }}
+            ${{ steps.meta.outputs.image }}:sha-${{ github.sha }}
+          # GitHub Actions layer cache — reuses yarn install + Next.js compile
+          # caches across runs so repeat builds finish in minutes, not hours.
+          cache-from: type=gha,scope=web-${{ inputs.image_tag }}
+          cache-to: type=gha,mode=max,scope=web-${{ inputs.image_tag }}
+          # Skip provenance attestation; Coolify/compose pulls a plain image.
+          provenance: false

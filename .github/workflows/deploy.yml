@@ -49,8 +49,22 @@ jobs:
             echo "pocketbase_changed=false" >> "$GITHUB_OUTPUT"
           fi
 
-  deploy:
+  # Compile the web image on GitHub's runners and push it to GHCR. Coolify
+  # then pulls this prebuilt image instead of compiling on the UpCloud host
+  # (which took up to 30 h and queued every other deploy behind it).
+  build-image:
     needs: detect-pocketbase-changes
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-image.yml
+    with:
+      image_tag: staging
+
+  deploy:
+    needs:
+      - detect-pocketbase-changes
+      - build-image
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -65,9 +79,10 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
-      - name: Build web app
-        run: yarn build
-
+      # The web image is compiled+validated in the build-image job above; the
+      # typecheck here remains a fast correctness gate before we trigger the
+      # Coolify pull. (No separate `yarn build` — that now happens inside the
+      # Docker image build, so duplicating it would only waste CI minutes.)
       - name: Typecheck
         run: yarn typecheck
 

@@ -6,7 +6,18 @@ on:
       - main
 
 jobs:
+  # Compile the web image on GitHub's runners and push it to GHCR so Coolify
+  # pulls a prebuilt image instead of compiling on the UpCloud host.
+  build-image:
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-image.yml
+    with:
+      image_tag: production
+
   deploy:
+    needs: build-image
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -21,11 +32,10 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      # The web image is compiled+validated in build-image above; typecheck
+      # stays as a fast gate. No duplicate `yarn build` (done in the image).
       - name: Typecheck
         run: yarn typecheck
-
-      - name: Build web app
-        run: yarn build
 
       - name: Deploy to Coolify production
         env:
