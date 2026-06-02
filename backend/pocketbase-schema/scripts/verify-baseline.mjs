@@ -244,7 +244,13 @@ const MUST_SCOPE_TO_MEMBER = [
   'sprint_x_checkins',
   'partner_engagements',
   'tasks',
-  'missions'
+  'missions',
+  // Tillagda av migration 1700000112 (säkerhetsgranskning 2026-06, H4–H6):
+  'agreement_signatures',
+  'de_minimis_units',
+  'de_minimis_unit_orgnr',
+  'de_minimis_stod',
+  'event_signups'
 ];
 
 const MUST_BE_STAFF_OR_OBSERVER = [
@@ -252,7 +258,26 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'investors',
   'deals',
   'alumni',
-  'integration_records'
+  'integration_records',
+  // Tillagda av migration 1700000112 (säkerhetsgranskning 2026-06, H3/H6):
+  'contacts',
+  'service_time_entries',
+  'startup_service_costs',
+  'startup_readiness_assessments',
+  'startup_state_aid_periods',
+  'mission_comments'
+];
+
+// Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa
+// kollektioner saknade tenant-scope helt och läckte mellan tenants. Migration
+// 1700000112 scopar dem via förälder-relation resp. egen tenant. `token` är
+// substring som MÅSTE finnas i list/view-regeln. Fail-soft om kollektionen
+// saknas (t.ex. en bootstrap utan compass).
+const MUST_SCOPE_CROSS_TENANT = [
+  { name: 'compass_messages', token: 'conversation.tenant' },
+  { name: 'compass_responses', token: 'conversation.tenant' },
+  { name: 'compass_questions', token: 'module.tenant' },
+  { name: 'tenants', token: '@request.auth.tenant = id' }
 ];
 
 function verifyStartupMemberIsolation(collections) {
@@ -285,7 +310,20 @@ function verifyStartupMemberIsolation(collections) {
       }
     }
   }
-  ok('Bolagsisolering (§ 21) verifierad — startup_member är scope:ad');
+  for (const { name, token } of MUST_SCOPE_CROSS_TENANT) {
+    const col = collections.get(name);
+    if (!col) continue; // kollektion saknas i denna instans — hoppa
+    for (const ruleName of ['listRule', 'viewRule']) {
+      if (!includesText(col[ruleName], token)) {
+        fail(
+          `Cross-tenant-scope: ${name}.${ruleName} saknar tenant-scope ` +
+          `(\`${token}\`; migration 1700000112 ej applicerad?).`
+        );
+      }
+    }
+  }
+
+  ok('Bolagsisolering (§ 21) + cross-tenant-scope (1700000112) verifierad');
 }
 
 function verifyRlsAndRbac(collections) {

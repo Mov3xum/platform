@@ -493,8 +493,9 @@ await ensureCollection({
     }
   ],
   indexes: ['CREATE UNIQUE INDEX idx_tenants_slug ON tenants (slug)'],
-  listRule: ANY_AUTH,
-  viewRule: ANY_AUTH,
+  // Cross-tenant-fix (migration 1700000112 / M8): bara den egna tenanten.
+  listRule: `${ANY_AUTH} && @request.auth.tenant = id`,
+  viewRule: `${ANY_AUTH} && @request.auth.tenant = id`,
   createRule: null,
   updateRule: TENANTS_UPDATE_RULE,
   deleteRule: null
@@ -675,8 +676,10 @@ await ensureCollection({
     'CREATE INDEX idx_contacts_last_name ON contacts (last_name)',
     'CREATE INDEX idx_contacts_email ON contacts (email)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  // H3 (migration 1700000112): contacts har PII (inkl. art. 9 gender) →
+  // staff/observer-only läsning (ingen direkt startup-relation att scopa mot).
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
   createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
@@ -843,8 +846,10 @@ await ensureCollection({
     'CREATE INDEX idx_agreement_signatures_startup ON agreement_signatures (startup)',
     'CREATE INDEX idx_agreement_signatures_tenant ON agreement_signatures (tenant)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  // H4 (migration 1700000112): signaturbevis (signer-email + ip_hash) →
+  // medlems-scope via startup; staff/observer ser alla.
+  listRule: READ_OWN_STARTUP_DIRECT,
+  viewRule: READ_OWN_STARTUP_DIRECT,
   createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: null,
   deleteRule: null
@@ -1457,8 +1462,9 @@ await ensureCollection({
     'CREATE INDEX idx_contacts_last_name ON contacts (last_name)',
     'CREATE INDEX idx_contacts_email ON contacts (email)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  // H3 (migration 1700000112): contacts → staff/observer-only läsning.
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
   createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
@@ -1784,8 +1790,10 @@ await ensureCollection({
     'CREATE INDEX idx_signups_tenant ON event_signups (tenant)',
     'CREATE INDEX idx_signups_event ON event_signups (event)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  // H6 (migration 1700000112): deltagar-PII → medlem ser sitt-bolags + där
+  // hen är inbjuden (user); staff/observer ser alla.
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || @request.auth.id = user || ${MEMBER_OF_STARTUP_REL})`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || @request.auth.id = user || ${MEMBER_OF_STARTUP_REL})`,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
@@ -2179,8 +2187,9 @@ await ensureCollection({
     'CREATE INDEX idx_time_entries_startup ON service_time_entries (startup)',
     'CREATE INDEX idx_time_entries_occurred ON service_time_entries (occurred_on)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  // H6 (migration 1700000112): intern tid/kostnad → staff/observer-only.
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
@@ -2208,8 +2217,9 @@ await ensureCollection({
     'CREATE INDEX idx_service_costs_startup ON startup_service_costs (startup)',
     'CREATE INDEX idx_service_costs_incurred ON startup_service_costs (incurred_on)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  // H6 (migration 1700000112): intern kostnad → staff/observer-only.
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
@@ -2237,8 +2247,9 @@ await ensureCollection({
     'CREATE INDEX idx_readiness_startup ON startup_readiness_assessments (startup)',
     'CREATE INDEX idx_readiness_assessed ON startup_readiness_assessments (assessed_at)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  // H6 (migration 1700000112): intern bedömning → staff/observer-only.
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
@@ -2263,8 +2274,9 @@ await ensureCollection({
     'CREATE INDEX idx_state_aid_startup ON startup_state_aid_periods (startup)',
     'CREATE INDEX idx_state_aid_from ON startup_state_aid_periods (valid_from)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  // H6 (migration 1700000112): statsstödsperioder → staff/observer-only.
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
