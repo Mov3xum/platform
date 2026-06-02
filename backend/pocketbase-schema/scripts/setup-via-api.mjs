@@ -180,13 +180,36 @@ async function ensureCollection(definition) {
       (existing.updateRule ?? null) !== desiredRules.updateRule ||
       (existing.deleteRule ?? null) !== desiredRules.deleteRule;
 
-    if (needsRuleSync) {
+    // Detect fields present in the desired definition but missing from the
+    // existing collection. This can happen when a migration adds a new field
+    // AFTER the collection was first created (e.g. migration 1700000092 adds
+    // `user` to `event_signups`). Rules that reference such a field will be
+    // rejected with HTTP 400 unless the field is added first.
+    const existingFieldNames = new Set((existing.fields || []).map((f) => f.name));
+    const missingFields = (normalizedDefinition.fields || []).filter(
+      (f) => f && f.name && !existingFieldNames.has(f.name)
+    );
+    const needsFieldSync = missingFields.length > 0;
+
+    if (needsRuleSync || needsFieldSync) {
+      // When adding missing fields we must send the full fields array
+      // (existing + new) because PocketBase replaces the array on update.
+      const updatePayload = { ...desiredRules };
+      if (needsFieldSync) {
+        updatePayload.fields = [...(existing.fields || []), ...missingFields];
+      }
       try {
-        await pb.collections.update(definition.name, desiredRules);
+        await pb.collections.update(definition.name, updatePayload);
       } catch (err) {
         throw new Error(`collection "${definition.name}" rule-sync failed: ${describeError(err)}`);
       }
-      ok(`collection "${definition.name}" finns redan — regler synkade`);
+      if (needsFieldSync && needsRuleSync) {
+        ok(`collection "${definition.name}" finns redan — fält och regler synkade`);
+      } else if (needsFieldSync) {
+        ok(`collection "${definition.name}" finns redan — fält synkade`);
+      } else {
+        ok(`collection "${definition.name}" finns redan — regler synkade`);
+      }
       return;
     }
 
