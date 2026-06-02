@@ -180,13 +180,37 @@ async function ensureCollection(definition) {
       (existing.updateRule ?? null) !== desiredRules.updateRule ||
       (existing.deleteRule ?? null) !== desiredRules.deleteRule;
 
-    if (needsRuleSync) {
-      try {
-        await pb.collections.update(definition.name, desiredRules);
-      } catch (err) {
-        throw new Error(`collection "${definition.name}" rule-sync failed: ${describeError(err)}`);
+    // Detect fields present in the desired definition but missing from the
+    // existing collection. This can happen when a migration adds a new field
+    // AFTER the collection was first created (e.g. migration 1700000092 adds
+    // `user` to `event_signups`). Rules that reference such a field will be
+    // rejected with HTTP 400 unless the field is added first.
+    const existingFieldNames = new Set((existing.fields || []).map((f) => f.name));
+    const missingFields = (normalizedDefinition.fields || []).filter(
+      (f) => f && f.name && !existingFieldNames.has(f.name)
+    );
+    const needsFieldSync = missingFields.length > 0;
+
+    if (needsRuleSync || needsFieldSync) {
+      // When adding missing fields we must send the full fields array
+      // (existing + new) because PocketBase replaces the array on update.
+      const updatePayload = { ...desiredRules };
+      if (needsFieldSync) {
+        updatePayload.fields = [...(existing.fields || []), ...missingFields];
       }
-      ok(`collection "${definition.name}" finns redan — regler synkade`);
+      try {
+        await pb.collections.update(definition.name, updatePayload);
+      } catch (err) {
+        const what = needsFieldSync && needsRuleSync ? 'field+rule-sync' : needsFieldSync ? 'field-sync' : 'rule-sync';
+        throw new Error(`collection "${definition.name}" ${what} failed: ${describeError(err)}`);
+      }
+      if (needsFieldSync && needsRuleSync) {
+        ok(`collection "${definition.name}" finns redan — fält och regler synkade`);
+      } else if (needsFieldSync) {
+        ok(`collection "${definition.name}" finns redan — fält synkade`);
+      } else {
+        ok(`collection "${definition.name}" finns redan — regler synkade`);
+      }
       return;
     }
 
