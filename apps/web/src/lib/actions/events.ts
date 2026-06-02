@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { escFilter } from '@/lib/pb-filter';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import type {
@@ -173,7 +174,7 @@ async function recomputeEventCounters(
 ) {
   try {
     const all = await pb.collection(PB_COLLECTIONS.eventSignups).getFullList<EventSignup>({
-      filter: `tenant = "${tenant}" && event = "${eventId}"`,
+      filter: `tenant = "${escFilter(tenant)}" && event = "${escFilter(eventId)}"`,
       fields: 'id,stage'
     });
     const counts = {
@@ -263,7 +264,7 @@ export async function deleteEventAction(id: string): Promise<EventActionState> {
 
   try {
     const signups = await pb.collection(PB_COLLECTIONS.eventSignups).getFullList<EventSignup>({
-      filter: `tenant = "${user.tenant}" && event = "${id}"`,
+      filter: `tenant = "${escFilter(user.tenant)}" && event = "${escFilter(id)}"`,
       fields: 'id'
     });
     for (const s of signups) {
@@ -313,7 +314,7 @@ export async function listEvents(): Promise<IncubatorEvent[]> {
   const pb = await getServerPb();
   try {
     const res = await pb.collection(PB_COLLECTIONS.events).getList<IncubatorEvent>(1, 100, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: `tenant = "${escFilter(user.tenant)}"`,
       sort: '-starts_at'
     });
     return res.items;
@@ -327,7 +328,7 @@ export async function listEventSignups(eventId: string): Promise<EventSignup[]> 
   const pb = await getServerPb();
   try {
     const res = await pb.collection(PB_COLLECTIONS.eventSignups).getList<EventSignup>(1, 200, {
-      filter: `tenant = "${user.tenant}" && event = "${eventId}"`,
+      filter: `tenant = "${escFilter(user.tenant)}" && event = "${escFilter(eventId)}"`,
       sort: '-created',
       expand: 'startup'
     });

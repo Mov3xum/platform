@@ -289,6 +289,16 @@ export async function verifyEmailAction(token: string): Promise<VerifyEmailState
   try {
     // Authenticate as PocketBase superuser to update the verified field
     await pb.collection('_superusers').authWithPassword(superuserEmail, superuserPassword);
+    // Single-use-ish (L6): om kontot redan är verifierat gör vi ingenting mer.
+    // Begränsar fönstret där en läckt länk har någon effekt till första
+    // användningen. (Full jti/version-baserad engångstoken är en framtida
+    // förbättring om kravbilden skärps.)
+    const existing = await pb
+      .collection('users')
+      .getOne<{ verified?: boolean }>(parsed.userId);
+    if (existing.verified) {
+      return { success: true };
+    }
     await pb.collection('users').update(parsed.userId, { verified: true });
     return { success: true };
   } catch (err: unknown) {

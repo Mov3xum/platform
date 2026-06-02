@@ -18,6 +18,7 @@
   "packageManager": "yarn@1.22.22",
   "resolutions": {
     "@types/node": "20.19.39",
-    "tmp": "^0.2.7"
+    "tmp": "^0.2.7",
+    "postcss": "^8.5.15"
   }
 }
