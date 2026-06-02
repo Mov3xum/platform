@@ -143,3 +143,111 @@ export async function createUserAction(
     startupName
   };
 }
+
+// Koppla en BEFINTLIG användare till ett bolag (eller ta bort kopplingen).
+//
+// `linked_startups` styr hela bolagsmedlemmens vy + RLS (CLAUDE.md §21) men
+// sattes tidigare bara vid kontoskapande (`createUserAction`). En medlem som
+// skapades utan bolag — eller bara lades till i teamlistan
+// (`startup_team_members`, en separat roster) — fick därför aldrig se sina
+// tilldelade workshops/dokument. Den här actionen stänger luckan.
+//
+// Regelefterlevnad (CLAUDE.md §10.5):
+// - RBAC via hasRole (admin/incubator_lead) — aldrig inline-rollkoll.
+// - Tenant-isolation: både målanvändaren och bolaget korsverifieras mot
+//   inloggad staffs tenant.
+// - Dataminimering: rör bara `linked_startups`-relationen, ingen ny PII.
+//   Rättslig grund = avtal (bolagsmedlem) / berättigat intresse (drift).
+// - Skrivning via superuser (users.updateRule är restriktiv); ingen
+//   privilegieeskalering (rollen ändras inte här).
+
+export type UpdateUserState = {
+  status: 'idle' | 'ok' | 'error';
+  message?: string;
+};
+
+export async function updateUserStartupLinkAction(
+  _prev: UpdateUserState,
+  formData: FormData
+): Promise<UpdateUserState> {
+  // 1. Auth + RBAC
+  const actor = await requireUser();
+  if (!hasRole(actor.roles, ['admin', 'incubator_lead'])) {
+    return { status: 'error', message: 'Endast inkubatorledning får ändra bolagskoppling.' };
+  }
+
+  // 2. Input
+  const userId = String(formData.get('user_id') ?? '').trim();
+  const startupId = String(formData.get('startup_id') ?? '').trim();
+  if (!userId) {
+    return { status: 'error', message: 'Användare saknas.' };
+  }
+
+  // 3. Superuser-klient (users-skrivning kräver superuser)
+  const suResult = await getSuperuserPb();
+  if (!suResult.ok) {
+    return {
+      status: 'error',
+      message:
+        suResult.reason === 'missing_credentials'
+          ? 'Serverfel: superuser-credentials saknas. Kontakta administratören.'
+          : 'Serverfel: kunde inte autentisera superuser.'
+    };
+  }
+  const pb = suResult.pb;
+
+  // 4. Tenant-isolation: målanvändaren måste tillhöra inloggad staffs tenant.
+  let targetEmail = '';
+  try {
+    const target = await pb
+      .collection('users')
+      .getOne<{ id: string; tenant: string; email?: string }>(userId, {
+        fields: 'id,tenant,email'
+      });
+    if (String(target.tenant) !== actor.tenant) {
+      return { status: 'error', message: 'Användaren tillhör inte din organisation.' };
+    }
+    targetEmail = target.email ?? '';
+  } catch {
+    return { status: 'error', message: 'Användaren kunde inte hittas.' };
+  }
+
+  // 5. Bolaget (om satt) måste finnas och tillhöra samma tenant. Tomt = koppla bort.
+  let startupName = '';
+  const linkedStartups: string[] = [];
+  if (startupId) {
+    try {
+      const startup = await pb
+        .collection('startups')
+        .getOne<{ id: string; name: string; tenant: string }>(startupId, {
+          fields: 'id,name,tenant'
+        });
+      if (startup.tenant !== actor.tenant) {
+        return { status: 'error', message: 'Bolaget tillhör inte din organisation.' };
+      }
+      startupName = startup.name;
+      linkedStartups.push(startupId);
+    } catch {
+      return { status: 'error', message: 'Bolaget kunde inte hittas.' };
+    }
+  }
+
+  // 6. Skriv kopplingen.
+  try {
+    await pb.collection('users').update(userId, { linked_startups: linkedStartups });
+  } catch (err: unknown) {
+    const e = err as PbError;
+    console.error('[updateUserStartupLink] failed', { status: e.status });
+    return { status: 'error', message: 'Kunde inte uppdatera bolagskopplingen. Försök igen.' };
+  }
+
+  revalidatePath('/admin/users');
+
+  const who = targetEmail || 'användaren';
+  return {
+    status: 'ok',
+    message: startupName
+      ? `Kopplade ${who} till ${startupName}. Personen ser sina aktiviteter vid nästa sidladdning.`
+      : `Tog bort bolagskopplingen för ${who}.`
+  };
+}

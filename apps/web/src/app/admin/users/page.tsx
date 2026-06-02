@@ -5,6 +5,7 @@ import { hasRole } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
 import { assignableRolesFor, ROLE_LABELS } from '@/lib/users/validate';
 import { UserForm, type StartupOption } from './UserForm';
+import { UserStartupLink } from './UserStartupLink';
 
 export const dynamic = 'force-dynamic';
 
@@ -99,37 +100,54 @@ export default async function AdminUsersPage() {
               {members.map((m) => {
                 const linked = m.expand?.linked_startups ?? [];
                 const roles = m.roles ?? [];
+                const isMember = roles.includes('startup_member');
                 return (
-                  <li key={m.id} className="flex items-center justify-between gap-3 py-2.5">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-foreground">
-                        {m.display_name?.trim() || m.email}
+                  <li key={m.id} className="flex flex-col gap-2 py-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-foreground">
+                          {m.display_name?.trim() || m.email}
+                        </div>
+                        <div className="truncate text-xs text-foreground-subtle">{m.email}</div>
                       </div>
-                      <div className="truncate text-xs text-foreground-subtle">{m.email}</div>
+                      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                        {roles.map((r) => (
+                          <span
+                            key={r}
+                            className="rounded-full bg-movexum-pastell-bla px-2.5 py-0.5 text-xs font-medium text-movexum-djupbla"
+                          >
+                            {ROLE_LABELS[r] ?? r}
+                          </span>
+                        ))}
+                        {linked.map((s) => (
+                          <span
+                            key={s.id}
+                            className="rounded-full bg-movexum-pastell-lila px-2.5 py-0.5 text-xs font-medium text-movexum-morklila"
+                          >
+                            {s.name}
+                          </span>
+                        ))}
+                        {m.verified === false && (
+                          <span className="rounded-full bg-movexum-pastell-orange px-2.5 py-0.5 text-xs font-medium text-movexum-morkorange">
+                            Ej verifierad
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                      {roles.map((r) => (
-                        <span
-                          key={r}
-                          className="rounded-full bg-movexum-pastell-bla px-2.5 py-0.5 text-xs font-medium text-movexum-djupbla"
-                        >
-                          {ROLE_LABELS[r] ?? r}
+                    {isMember && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-canvas-subtle px-3 py-2">
+                        <span className="text-xs text-foreground-subtle">
+                          {linked.length === 0
+                            ? 'Inget bolag kopplat — medlemmen ser inga tilldelade aktiviteter än.'
+                            : 'Kopplat bolag'}
                         </span>
-                      ))}
-                      {linked.map((s) => (
-                        <span
-                          key={s.id}
-                          className="rounded-full bg-movexum-pastell-lila px-2.5 py-0.5 text-xs font-medium text-movexum-morklila"
-                        >
-                          {s.name}
-                        </span>
-                      ))}
-                      {m.verified === false && (
-                        <span className="rounded-full bg-movexum-pastell-orange px-2.5 py-0.5 text-xs font-medium text-movexum-morkorange">
-                          Ej verifierad
-                        </span>
-                      )}
-                    </div>
+                        <UserStartupLink
+                          userId={m.id}
+                          currentStartupId={linked[0]?.id ?? ''}
+                          startups={startups}
+                        />
+                      </div>
+                    )}
                   </li>
                 );
               })}
