@@ -15,6 +15,7 @@ import { OrgnrManager, type OrgnrRow } from './OrgnrManager';
 import { StodList, type StodRow } from './StodList';
 import { UnitActions } from './UnitActions';
 import {
+  samladSummaSek,
   summarize,
   type DeMinimisStod,
   type DeMinimisStodCalc,
@@ -121,19 +122,36 @@ export default async function DeMinimisStartupPage({
         </div>
 
         {units.length === 0 ? (
-          <div className="rounded-2xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
-            <h2 className="text-base font-semibold text-foreground">Skapa en enhet</h2>
-            <p className="mb-4 mt-1 text-sm text-foreground-muted">
-              En enhet (&quot;ett enda företag&quot;) samlar de organisationsnummer som hör ihop
-              och summerar stödet gemensamt. Skapa en för att börja registrera de minimis-stöd.
-            </p>
+          <div className="space-y-4">
             {canManage ? (
-              <CreateUnitForm startupId={startupId} defaultName={startup.name} />
+              <div className="rounded-2xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
+                <h2 className="text-base font-semibold text-foreground">Registrera de minimis-stöd</h2>
+                <p className="mb-4 mt-1 text-sm text-foreground-muted">
+                  Välj stödgivare ur listan, fyll i belopp i kronor och beslutsdatum, spara. Bolaget
+                  behandlas som ett enda företag — du behöver inte skapa en enhet manuellt.
+                </p>
+                <AddStodForm startupId={startupId} regelverk={regelverk} />
+              </div>
             ) : (
-              <p className="text-sm text-foreground-subtle">
-                Ingen enhet finns ännu. Kontakta inkubatorpersonalen för att lägga upp en.
-              </p>
+              <div className="rounded-2xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
+                <p className="text-sm text-foreground-subtle">
+                  Inga de minimis-stöd registrerade ännu.
+                </p>
+              </div>
             )}
+
+            {canManage ? (
+              <details className="rounded-2xl border border-dashed border-default bg-surface p-5">
+                <summary className="cursor-pointer text-sm font-medium text-foreground">
+                  Avancerat: skapa en namngiven enhet (flera organisationsnummer)
+                </summary>
+                <p className="mb-3 mt-2 text-xs text-foreground-muted">
+                  En enhet (&quot;ett enda företag&quot;) samlar de organisationsnummer som hör ihop
+                  och summerar stödet gemensamt. Behövs bara om koncernen har flera org.nr.
+                </p>
+                <CreateUnitForm startupId={startupId} defaultName={startup.name} />
+              </details>
+            ) : null}
           </div>
         ) : (
           <div className="space-y-6">
@@ -145,6 +163,7 @@ export default async function DeMinimisStartupPage({
                 beslutsdatum: s.beslutsdatum
               }));
               const { perForordning, samlat } = summarize(calcRows, regelverk);
+              const unitSek = samladSummaSek(unitStod, new Date());
               const stodViewRows: StodRow[] = unitStod.map((s) => ({
                 id: s.id,
                 forordning: s.forordning,
@@ -182,7 +201,7 @@ export default async function DeMinimisStartupPage({
                     </div>
                   </div>
 
-                  <DeMinimisBars perForordning={perForordning} samlat={samlat} regelverk={regelverk} />
+                  <DeMinimisBars perForordning={perForordning} samlat={samlat} regelverk={regelverk} samladSek={unitSek} />
 
                   <div className="mt-6 border-t border-default pt-5">
                     <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground-subtle">

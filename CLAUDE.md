@@ -2159,26 +2159,45 @@ prövning görs alltid av stödgivaren (disclaimer visas i UI och i PDF:en).
   utan en juridisk "internt stödverktyg"-footer).
 - **Migrationer:** nya filnummer (1700000093–095), oföränderliga.
 
-### 20.5 Inbäddning på bolagskortet + "Mitt bolag"
+### 20.5 Inbäddning på bolagskortet + "Mitt bolag" (förenklat flöde)
 
-Hela de minimis-modulen (progress-barer som läser summorna via `summarize`
-**och** alla ifyllbara formulär — skapa enhet, lägg till stöd, hantera org.nr,
-generera försäkran) är inbäddad direkt på bolagskortet (`/startups/[id]`,
-sektion `#de-minimis`, med ankarpost i sidnavet) via den delade server-
-komponenten `DeMinimisSection`. Den **återanvänder** de befintliga
-klientformulären (`AddStodForm`, `CreateUnitForm`, `OrgnrManager`, `StodList`,
-`UnitActions`) och `DeMinimisBars` — ingen duplicerad logik. Reads går via
-`getServerPb()` så RLS (§ 21) gäller; filtervärden escapas med `escFilter`
-(och scopas hårdare än den fristående sidan: `unit.startup = "<id>"`). En
-"Öppna fullskärm"-länk leder fortfarande till `/de-minimis/[startupId]`.
+På bolagskortet (`/startups/[id]`, sektion `#de-minimis`) och "Mitt bolag"
+(`/min-oversikt`, § 21bis) visar den delade server-komponenten
+`DeMinimisSection` ett **förenklat** flöde: en SEK-headline ("Mottaget de
+minimis-stöd, rullande 3 år, X kr"), progress-barer (samlad summa + per
+förordning via `summarize`/`samladSummaSek`), ett **mall-drivet**
+registreringsformulär och listan över stöd. **Ingen manuell enhets-/org.nr-
+hantering** krävs — bolaget behandlas som EN enhet ("ett enda företag"); själva
+`de_minimis_units`-raden skapas **lazy** av `addStodAction` (`resolveOrCreateUnit`)
+första gången ett stöd registreras (via den robusta superuser-fallbacken). En
+"Öppna fullskärm"-länk leder till `/de-minimis/[startupId]` där staff vid behov
+kan gruppera flera org.nr under en namngiven enhet (CreateUnitForm/OrgnrManager
+ligger kvar där, bakom en `<details>` när ingen enhet finns).
 
-Samma `DeMinimisSection` återanvänds på **"Mitt bolag"** (`/min-oversikt`, se
-§ 21bis). Skrivflödet är oförändrat säkert oavsett renderingsyta:
-server-actionerna re-verifierar `tenant` + `canManageStartupDeMinimis`
-(medlemskap) och kör `kanBevilja` server-side innan skrivning — klienten är
-aldrig säkerhetsgränsen. `revalidateFor` busta:r `/de-minimis`,
-`/startups/[id]` **och** `/min-oversikt`; formulären kör dessutom
-`router.refresh()` så de inbäddade barerna uppdateras direkt.
+**Mallar (`DE_MINIMIS_TEMPLATES` i `@platform/shared`).** Färdiga snabbval för
+vanliga svenska de minimis-givare (Vinnova, Almi, Tillväxtverket,
+Jordbruksverket, Havs- och vattenmyndigheten m.fl.) som förifyller stödgivare +
+förordning. "Annan stödgivare" ger fritext. Listan är vägledande — stödgivare
+och förordning kan alltid justeras.
+
+**SEK ("på kronan").** EUR är fortsatt sanning för det legala taket (300 000
+EUR), men formuläret är SEK-först (belopp i kronor + växelkurs,
+`DEFAULT_VAXELKURS_SEK_PER_EUR` som förifyllt värde) och EUR härleds ur SEK ×
+kurs (kan anges exakt). `effektivBeloppSek`/`samladSummaSek` (enhetstestade)
+ger den SEK-summa som visas som headline på bolagskortet, på samlat-baren och
+som chip i `/de-minimis`-översikten. `complete=false` ⇒ "≥ X kr" (någon post
+saknar SEK/kurs).
+
+**Säkerhet (oförändrat).** Reads går via `getServerPb()` så RLS (§ 21) gäller;
+filtervärden escapas med `escFilter` (ISO 27001 A.8.9). Skrivflödet
+re-verifierar `tenant` + `canManageStartupDeMinimis` (medlemskap) och kör
+`kanBevilja` server-side innan skrivning — klienten är aldrig säkerhetsgränsen.
+`de_minimis_*`-createRule är `@request.auth.id != "" && @request.auth.tenant
+!= ""` (§ 21.3, migration 1700000111) → en länkad medlem kan registrera utan
+superuser; fallbacken täcker en ev. otrasig regel-instans. Inga nya fält, inga
+nya kollektioner, ingen ny AI-väg (de_minimis fortsatt denylistat i
+`lib/ai/redaction.ts`). `revalidateFor` busta:r `/de-minimis`, `/startups/[id]`
+**och** `/min-oversikt`; formulären kör dessutom `router.refresh()`.
 
 ---
 

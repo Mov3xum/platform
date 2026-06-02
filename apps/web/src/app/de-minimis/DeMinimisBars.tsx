@@ -2,6 +2,7 @@ import {
   forordningLabels,
   type DeMinimisRegel,
   type ForordningSummary,
+  type SekSumma,
   type WarningLevel
 } from '@platform/shared';
 
@@ -25,16 +26,22 @@ function eur(n: number): string {
   return `${Math.round(n).toLocaleString('sv-SE')} EUR`;
 }
 
+function sek(n: number): string {
+  return `${Math.round(n).toLocaleString('sv-SE')} kr`;
+}
+
 function Bar({
   label,
   sub,
   summary,
-  emphasis = false
+  emphasis = false,
+  samladSek
 }: {
   label: string;
   sub?: string;
   summary: ForordningSummary;
   emphasis?: boolean;
+  samladSek?: SekSumma | null;
 }) {
   const over = summary.level === 'over';
   return (
@@ -45,7 +52,15 @@ function Bar({
           {sub ? <span className="ml-1.5 font-mono text-[11px] text-foreground-subtle">{sub}</span> : null}
         </span>
         <span className="font-mono text-xs text-foreground-muted">
-          {eur(summary.used)} / {eur(summary.cap)}
+          {samladSek && (samladSek.sek > 0 || summary.used > 0) ? (
+            <span className="font-semibold text-foreground">
+              {samladSek.complete ? '' : '≥ '}
+              {sek(samladSek.sek)}
+            </span>
+          ) : null}
+          <span className={samladSek ? 'ml-1.5 text-foreground-subtle' : ''}>
+            {eur(summary.used)} / {eur(summary.cap)}
+          </span>
         </span>
       </div>
       <div className={`h-2.5 w-full overflow-hidden rounded-full ${emphasis ? 'bg-canvas-muted' : 'bg-canvas-subtle'}`}>
@@ -69,11 +84,13 @@ function Bar({
 export function DeMinimisBars({
   perForordning,
   samlat,
-  regelverk
+  regelverk,
+  samladSek = null
 }: {
   perForordning: ForordningSummary[];
   samlat: ForordningSummary;
   regelverk: DeMinimisRegel[];
+  samladSek?: SekSumma | null;
 }) {
   return (
     <div className="space-y-5">
@@ -82,6 +99,7 @@ export function DeMinimisBars({
         sub="(alla förordningar)"
         summary={samlat}
         emphasis
+        samladSek={samladSek}
       />
       <div className="grid gap-5 sm:grid-cols-2">
         {perForordning.map((p) => {

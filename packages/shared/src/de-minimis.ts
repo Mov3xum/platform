@@ -76,6 +76,51 @@ export const forordningLabels: Record<ForordningKod, string> = {
   FISKE: 'Fiske'
 };
 
+// ─── Stödgivar-mallar (färdiga mallar) ───────────────────────────────────────
+//
+// Vanliga svenska de minimis-givare med sin typiska förordning. Används som
+// snabbval i registreringsformuläret (CLAUDE.md § 20) så att en bolagsmedlem
+// bara väljer givaren ur en lista och fyller i belopp + datum — ingen
+// enhets-/org.nr-hantering krävs. Listan är vägledande; stödgivaren och
+// förordningen kan alltid justeras (eller anges fritt via "Annan").
+
+export interface DeMinimisTemplate {
+  /** Stabil nyckel (för select-värdet). */
+  id: string;
+  /** Namn på stödgivaren (förifylls i `stodgivare`). */
+  stodgivare: string;
+  /** Förordning som givaren typiskt lämnar de minimis under. */
+  forordning: ForordningKod;
+  /** Kort beskrivning/typ av stöd (förifylls i `syfte`, valfritt). */
+  hint?: string;
+}
+
+/** Sentinel-värde för "Annan stödgivare" (fritext) i formulärets select. */
+export const DE_MINIMIS_TEMPLATE_CUSTOM = 'custom';
+
+export const DE_MINIMIS_TEMPLATES: DeMinimisTemplate[] = [
+  { id: 'vinnova', stodgivare: 'Vinnova', forordning: 'ALLMAN', hint: 'Innovationsbidrag' },
+  { id: 'almi', stodgivare: 'Almi Företagspartner', forordning: 'ALLMAN', hint: 'Bidrag/affärsutveckling' },
+  { id: 'tillvaxtverket', stodgivare: 'Tillväxtverket', forordning: 'ALLMAN' },
+  { id: 'energimyndigheten', stodgivare: 'Energimyndigheten', forordning: 'ALLMAN' },
+  { id: 'rise', stodgivare: 'RISE', forordning: 'ALLMAN' },
+  { id: 'region', stodgivare: 'Region (regionalt företagsstöd)', forordning: 'ALLMAN' },
+  { id: 'lansstyrelsen', stodgivare: 'Länsstyrelsen', forordning: 'ALLMAN' },
+  { id: 'kommun', stodgivare: 'Kommun', forordning: 'ALLMAN' },
+  { id: 'eruf', stodgivare: 'Europeiska regionala utvecklingsfonden (ERUF)', forordning: 'ALLMAN' },
+  { id: 'esf', stodgivare: 'Europeiska socialfonden (ESF+)', forordning: 'ALLMAN' },
+  { id: 'eismea', stodgivare: 'EU / EISMEA (EIC m.fl.)', forordning: 'ALLMAN' },
+  { id: 'tillvaxtverket_sgei', stodgivare: 'Tillväxtverket (SGEI)', forordning: 'SGEI', hint: 'Tjänst av allmänt ekonomiskt intresse' },
+  { id: 'jordbruksverket', stodgivare: 'Jordbruksverket', forordning: 'JORDBRUK', hint: 'Jordbruksstöd' },
+  { id: 'skogsstyrelsen', stodgivare: 'Skogsstyrelsen', forordning: 'JORDBRUK' },
+  { id: 'havochvatten', stodgivare: 'Havs- och vattenmyndigheten', forordning: 'FISKE', hint: 'Fiske/vattenbruk' }
+];
+
+/** Slår upp en mall på id. */
+export function findDeMinimisTemplate(id: string): DeMinimisTemplate | undefined {
+  return DE_MINIMIS_TEMPLATES.find((t) => t.id === id);
+}
+
 /** Minsta delmängd av ett stöd som krävs för summering. */
 export interface DeMinimisStodCalc {
   forordning: ForordningKod;
@@ -166,6 +211,77 @@ export function samladSumma(stod: DeMinimisStodCalc[], refDatum: Date): number {
     }
   }
   return roundCents(sum);
+}
+
+// ─── SEK-belopp (kronor) ─────────────────────────────────────────────────────
+//
+// EUR är sanning för det legala taket, men på bolagskortet vill vi visa hur
+// mycket bolaget har tagit emot "på kronan" (CLAUDE.md § 20). Svenska
+// beslutsbrev anger beloppet i SEK; växelkursen/EUR-beloppet i beslutet är
+// fortfarande sanning för takberäkningen.
+
+/** Bekväm fallback-växelkurs (SEK per EUR) för formuläret. Den faktiska
+ * kursen/EUR-beloppet från beslutet är alltid det som sparas och styr taket;
+ * detta är bara ett förifyllt värde så medlemmen slipper leta upp det. */
+export const DEFAULT_VAXELKURS_SEK_PER_EUR = 11.3;
+
+/** Minsta delmängd som behövs för att bestämma ett SEK-belopp. */
+export interface BeloppRad {
+  belopp_sek?: number;
+  belopp_eur?: number;
+  valutakurs?: number;
+}
+
+/**
+ * Effektivt SEK-belopp för en post: explicit `belopp_sek` om det finns,
+ * annars härlett ur `belopp_eur × valutakurs` när bägge finns. Returnerar
+ * null när SEK inte kan bestämmas (saknad kurs på en post utan SEK-belopp).
+ */
+export function effektivBeloppSek(rad: BeloppRad): number | null {
+  if (typeof rad.belopp_sek === 'number' && rad.belopp_sek > 0) {
+    return roundCents(rad.belopp_sek);
+  }
+  if (
+    typeof rad.belopp_eur === 'number' &&
+    rad.belopp_eur > 0 &&
+    typeof rad.valutakurs === 'number' &&
+    rad.valutakurs > 0
+  ) {
+    return roundCents(rad.belopp_eur * rad.valutakurs);
+  }
+  return null;
+}
+
+export interface SekSumma {
+  /** Summa mottaget i SEK inom den rullande treårsperioden. */
+  sek: number;
+  /** True om SAMTLIGA poster i perioden hade ett bestämbart SEK-belopp. När
+   * false är `sek` en undre gräns (vissa poster saknade SEK/kurs). */
+  complete: boolean;
+}
+
+/**
+ * Samlad mottagen summa i SEK över SAMTLIGA förordningar inom den rullande
+ * treårsperioden (samma fönster som `samladSumma`). Används för den
+ * SEK-headline som visas på bolagskortet.
+ */
+export function samladSummaSek(
+  rows: Array<BeloppRad & { beslutsdatum: string }>,
+  refDatum: Date = new Date()
+): SekSumma {
+  const cutoff = subYears(refDatum, 3);
+  let sek = 0;
+  let complete = true;
+  for (const r of rows) {
+    const d = parseDateOnly(r.beslutsdatum);
+    if (!d) continue;
+    if (d.getTime() > cutoff.getTime() && d.getTime() <= refDatum.getTime()) {
+      const s = effektivBeloppSek(r);
+      if (s === null) complete = false;
+      else sek += s;
+    }
+  }
+  return { sek: roundCents(sek), complete };
 }
 
 export type WarningLevel = 'ok' | 'warn' | 'critical' | 'over';

@@ -8,9 +8,9 @@ import { Icon } from '@/components/proto/Icon';
 import {
   SAMLAT_TAK_EUR,
   samladSumma,
+  samladSummaSek,
   warningLevel,
   type DeMinimisStod,
-  type DeMinimisStodCalc,
   type WarningLevel
 } from '@platform/shared';
 
@@ -25,6 +25,10 @@ const chipClass: Record<WarningLevel, string> = {
 
 function eur(n: number): string {
   return `${Math.round(n).toLocaleString('sv-SE')} EUR`;
+}
+
+function sek(n: number): string {
+  return `${Math.round(n).toLocaleString('sv-SE')} kr`;
 }
 
 interface StartupRow {
@@ -74,7 +78,7 @@ export default async function DeMinimisIndexPage() {
   }
 
   // Aggregera samlad summa per bolag (rullande 3 år).
-  const byStartup = new Map<string, DeMinimisStodCalc[]>();
+  const byStartup = new Map<string, DeMinimisStod[]>();
   try {
     const allStod = await pb
       .collection(PB_COLLECTIONS.deMinimisStod)
@@ -82,11 +86,7 @@ export default async function DeMinimisIndexPage() {
     for (const s of allStod) {
       const key = String(s.startup);
       if (!byStartup.has(key)) byStartup.set(key, []);
-      byStartup.get(key)!.push({
-        forordning: s.forordning,
-        belopp_eur: s.belopp_eur,
-        beslutsdatum: s.beslutsdatum
-      });
+      byStartup.get(key)!.push(s);
     }
   } catch (error) {
     console.error('[de-minimis] failed to load stöd', { tenant: user.tenant, error });
@@ -115,7 +115,13 @@ export default async function DeMinimisIndexPage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {startups.map((s) => {
               const rows = byStartup.get(s.id) ?? [];
-              const used = samladSumma(rows, now);
+              const calcRows = rows.map((r) => ({
+                forordning: r.forordning,
+                belopp_eur: r.belopp_eur,
+                beslutsdatum: r.beslutsdatum
+              }));
+              const used = samladSumma(calcRows, now);
+              const usedSek = samladSummaSek(rows, now);
               const level = warningLevel(used, SAMLAT_TAK_EUR);
               return (
                 <Link
@@ -130,7 +136,8 @@ export default async function DeMinimisIndexPage() {
                     <span
                       className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${chipClass[level]}`}
                     >
-                      {eur(used)}
+                      {usedSek.complete ? '' : '≥ '}
+                      {sek(usedSek.sek)}
                     </span>
                   </div>
                   <div>
@@ -138,7 +145,7 @@ export default async function DeMinimisIndexPage() {
                       {s.name}
                     </h3>
                     <p className="mt-0.5 text-xs text-foreground-subtle">
-                      Samlat av {eur(SAMLAT_TAK_EUR)}
+                      {eur(used)} av {eur(SAMLAT_TAK_EUR)} (rullande 3 år)
                     </p>
                   </div>
                 </Link>
