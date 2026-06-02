@@ -66,7 +66,25 @@ const nextConfig = {
     // Chat-bilagor (bilder base64-encoded + textfiler) — default 1 MB räcker inte
     serverActions: {
       bodySizeLimit: '32mb'
-    }
+    },
+    // Skip build-only packages from output file tracing. Without this,
+    // @vercel/nft has to stat all of node_modules (including @swc, webpack,
+    // tailwindcss etc.) which causes the build to hang for hours on Coolify.
+    outputFileTracingExcludes: {
+      '*': [
+        'node_modules/@swc/**',
+        'node_modules/@esbuild/**',
+        'node_modules/webpack/**',
+        'node_modules/eslint/**',
+        'node_modules/@eslint/**',
+        'node_modules/typescript/**',
+        'node_modules/tailwindcss/**',
+        'node_modules/@tailwindcss/**',
+        'node_modules/postcss/**',
+        'node_modules/autoprefixer/**',
+        'node_modules/.cache/**',
+      ],
+    },
   },
   webpack: (config) => {
     // Make @-alias resolution explicit in all environments (including Docker/Coolify)

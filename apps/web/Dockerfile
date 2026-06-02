@@ -27,6 +27,8 @@ COPY packages/shared ./packages/shared
 # traces..." på Coolify-hosten — bumpa till 4096 och exportera så att
 # child-processer ärver gränsen.
 ENV NODE_OPTIONS="--max-old-space-size=4096"
+# Disable telemetry to avoid network calls during build
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN cd apps/web && yarn build
 
 # Minimal runtime image: copies only the standalone Next.js output
