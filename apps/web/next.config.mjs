@@ -69,7 +69,9 @@ const nextConfig = {
     },
     // Skip build-only packages from output file tracing. Without this,
     // @vercel/nft has to stat all of node_modules (including @swc, webpack,
-    // tailwindcss etc.) which causes the build to hang for hours on Coolify.
+    // tailwindcss etc.) which hangs the Docker build for 18+ hours on Coolify.
+    // The '*' wildcard applies globally — none of these build-tool packages
+    // are needed at runtime in the standalone output.
     outputFileTracingExcludes: {
       '*': [
         'node_modules/@swc/**',
