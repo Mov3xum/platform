@@ -1,15 +1,14 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { requireUser } from '@/lib/auth.server';
-import { canAccessModuleForUser } from '@/lib/rbac';
+import { getServerPb, requireUser } from '@/lib/auth.server';
+import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
+import { escFilter } from '@/lib/pb-filter';
+import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { PageShell } from '@/components/PageShell';
-import { RailSection, RailItem } from '@/components/PageRail';
+import { OnboardingRunner } from '../education/OnboardingRunner';
+import type { OnboardingFlow, OnboardingModule, OnboardingProgress } from '@platform/shared';
 
-const STEPS = [
-  { id: 1, title: 'Registrera företagsinformation', icon: 'doc' },
-  { id: 2, title: 'Ladda upp dokument', icon: 'upload' },
-  { id: 3, title: 'Signera NDA och inkubatoravtal', icon: 'badge-check' },
-  { id: 4, title: 'Möte med ansvarig coach', icon: 'calendar' }
-];
+export const dynamic = 'force-dynamic';
 
 export default async function OnboardingPage() {
   const user = await requireUser();
@@ -17,47 +16,92 @@ export default async function OnboardingPage() {
     redirect('/dashboard');
   }
 
-  const rail = (
-    <RailSection label="Stegen">
-      {STEPS.map((s) => (
-        <RailItem
-          key={s.id}
-          icon={s.icon}
-          iconTone="brand"
-          title={s.title}
-          meta={`Steg ${s.id} av ${STEPS.length}`}
-        />
-      ))}
-    </RailSection>
-  );
+  const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
+  const linkedId = user.linkedStartups[0];
+
+  // Staff utan eget bolag styr onboardingen i byggaren i stället.
+  if (!linkedId) {
+    if (isStaff) redirect('/education/onboarding');
+    return (
+      <PageShell title="Onboarding">
+        <div className="py-6">
+          <div className="rounded-3xl border border-dashed border-default bg-canvas-subtle p-6 text-sm text-foreground-muted">
+            Ditt konto är inte kopplat till något bolag än — kontakta Movexum.
+          </div>
+        </div>
+      </PageShell>
+    );
+  }
+
+  const pb = await getServerPb();
+
+  // Hämta tenantens aktiva default-onboarding.
+  let flow: OnboardingFlow | null = null;
+  try {
+    flow = await pb
+      .collection(PB_COLLECTIONS.onboardingFlows)
+      .getFirstListItem<OnboardingFlow>(
+        `tenant = "${escFilter(user.tenant)}" && is_default = true && status = "active"`
+      );
+  } catch {
+    flow = null;
+  }
+
+  if (!flow) {
+    return (
+      <PageShell title="Onboarding">
+        <div className="py-6">
+          <div className="rounded-3xl border border-dashed border-default bg-canvas-subtle p-6 text-sm text-foreground-muted">
+            Ingen onboarding är publicerad för ert bolag just nu. Hör av dig till din Movexum-coach
+            om du har frågor om programmet.
+          </div>
+        </div>
+      </PageShell>
+    );
+  }
+
+  // Hämta ev. befintlig progress för bolaget.
+  let progress: OnboardingProgress | null = null;
+  try {
+    progress = await pb
+      .collection(PB_COLLECTIONS.onboardingProgress)
+      .getFirstListItem<OnboardingProgress>(
+        `tenant = "${escFilter(user.tenant)}" && flow = "${escFilter(flow.id)}" && startup = "${escFilter(linkedId)}"`
+      );
+  } catch {
+    progress = null;
+  }
+
+  const modules = (flow.modules as OnboardingModule[] | undefined) ?? [];
+  const initialAnswers = (progress?.answers_json as Record<string, unknown> | undefined) ?? {};
 
   return (
-    <PageShell title="Digital onboarding" rightPanel={rail}>
-      <div className="mx-auto w-full max-w-3xl space-y-6 py-6">
-        <p className="text-[14px] text-foreground-muted">
-          Komplettera de fyra stegen för att avsluta din onboarding. Du kan pausa när som helst —
-          framsteget sparas automatiskt.
-        </p>
+    <PageShell title="Onboarding">
+      <main className="mx-auto w-full max-w-4xl space-y-6 py-6">
+        <header className="rounded-3xl border border-default bg-gradient-to-br from-movexum-pastell-bla/50 to-surface p-6 dark:from-brand/10">
+          <h1 className="font-heading text-2xl font-semibold text-foreground">{flow.title}</h1>
+          {flow.intro ? (
+            <p className="mt-2 whitespace-pre-line text-sm text-foreground-muted">{flow.intro}</p>
+          ) : (
+            <p className="mt-2 text-sm text-foreground-muted">
+              Gå igenom modulerna nedan för att slutföra er onboarding. Framsteget sparas.
+            </p>
+          )}
+          <p className="mt-3 text-xs text-foreground-subtle">
+            <Link href="/min-oversikt" className="text-link hover:underline">
+              ← Tillbaka till Min översikt
+            </Link>
+          </p>
+        </header>
 
-        <div className="rounded-2xl border border-default bg-surface p-6">
-          <ol className="space-y-3">
-            {STEPS.map((s) => (
-              <li
-                key={s.id}
-                className="flex items-center gap-4 rounded-xl border border-default px-4 py-3.5"
-              >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas-muted font-mono text-[12px] text-foreground-muted">
-                  {String(s.id).padStart(2, '0')}
-                </span>
-                <span className="flex-1 text-[14px] text-foreground">{s.title}</span>
-                <span className="text-[11px] uppercase tracking-wider text-foreground-subtle">
-                  Att göra
-                </span>
-              </li>
-            ))}
-          </ol>
-        </div>
-      </div>
+        <OnboardingRunner
+          flowId={flow.id}
+          startupId={linkedId}
+          modules={modules}
+          initialAnswers={initialAnswers}
+          initialStatus={progress?.status}
+        />
+      </main>
     </PageShell>
   );
 }

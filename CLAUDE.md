@@ -2576,3 +2576,92 @@ select-värden i migration 1700000110): `affarsplan_strategi`,
 - **Migration** (1700000110) är nytt, oföränderligt filnummer. `user_files`
   speglas inte i `scripts/setup-via-api.mjs`/`verify-baseline.mjs` — inga
   mirror-ändringar krävs.
+
+---
+
+## 25. Onboarding — byggbar digital introduktion för nya bolag
+
+### 25.1 Översikt
+
+Staff bygger en **onboarding** (digital introduktion) under
+`/education/onboarding` med exakt samma byggar-mönster som workshops (§ 18):
+moduler som innehåller block. Ett flöde kan sättas som **default** per tenant —
+det visas då för varje bolag som inte slutfört sin onboarding, via en knapp på
+**Min översikt** (§ 21bis) och på `/onboarding`. Onboardingen är informativ
+(moduler om Movexum och tiden i inkubatorn) och innehåller **ingen AI-inferens**
+→ riskklass **minimal** (CLAUDE.md § 10.1).
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/onboarding.ts` (+ `.test.ts`) | Ren, enhetstestad normalisering + slutförandelogik |
+| `backend/pocketbase-schema/migrations/1700000113_create_onboarding_flows.js` | Collection `onboarding_flows` |
+| `backend/pocketbase-schema/migrations/1700000114_create_onboarding_progress.js` | Collection `onboarding_progress` |
+| `backend/pocketbase-schema/migrations/1700000115_extend_activity_kinds_onboarding.js` | `activities.kind` += `onboarding` |
+| `apps/web/src/lib/actions/onboarding.ts` | Server actions (bygg/hantera + genomför) |
+| `apps/web/src/app/education/OnboardingBlockBuilder.tsx` | Byggar-UI (moduler/block) |
+| `apps/web/src/app/education/OnboardingFlowForm.tsx` | Skapa/redigera-formulär |
+| `apps/web/src/app/education/OnboardingRunner.tsx` | Genomför-vy (bolag) + staff-förhandsgranskning |
+| `apps/web/src/app/education/onboarding/**` | Staff: lista/ny/redigera/förhandsgranska |
+| `apps/web/src/app/onboarding/page.tsx` | Bolagets genomför-vy (default-flödet) |
+
+### 25.2 Datamodell
+
+- **`onboarding_flows`** (1700000113): `tenant`, `title`, `intro` (editor),
+  `status` (draft/active/archived), `is_default` (bool, ett per tenant —
+  enforce:as i server-action), `active` (bool), `modules` (json —
+  `OnboardingModule[]`), `created_by`. List/view = alla tenant-användare (en
+  bolagsmedlem måste kunna läsa default-flödet); create = auth+tenant (ingen
+  roll-check/join, § 21.3 — roll enforce:as i server-action); update/delete =
+  staff.
+- **`onboarding_progress`** (1700000114): en rad per (`tenant`, `flow`
+  cascadeDelete, `startup` cascadeDelete) — `status` (in_progress/completed),
+  `answers_json` (bolagets svar/bekräftelser per block.id), `progress_json`
+  (pct + tidsstämpel), `activity`, `started_at`, `completed_at`,
+  `completed_by`. Unikt index `(tenant, flow, startup)` → idempotent upsert,
+  progressen återupptas. Bolagsisolering (§ 21): list/view scope:ar via
+  `linked_startups:each ?=` (staff/observer ser hela tenanten); create =
+  auth+tenant; skrivning sker via server-action efter verifierat medlemskap
+  (superuser-fallback vid PB v0.23-rule-eval-bugg, samma mönster som § 18.3).
+
+**Blocktyper** (`OnboardingBlockType`): `text`, `video`, `image`,
+`acknowledge` (alltid obligatorisk bekräftelse), `question` (fritext), `quiz`
+(enkel-/flerval, valfritt rätt svar). Media laddas upp som riktiga PB-filer via
+den befintliga utbildnings-media-routen (`/api/education/media` → `workshop_media`,
+§ 18.2) — blocket lagrar bara en kort fil-URL, ingen base64.
+
+### 25.3 Flöde
+
+1. Staff bygger ett flöde och sätter status `active` + `is_default`.
+   `applyDefault` nollställer `is_default` på tenantens övriga flöden.
+2. Ett bolag öppnar `/onboarding` (knapp på Min översikt) → server hämtar
+   tenantens aktiva default-flöde + ev. progress, och `OnboardingRunner`
+   renderar modulerna. Bolaget bekräftar/svarar och **Slutför** när alla
+   obligatoriska block är klara (`isOnboardingComplete`, server-validerat).
+3. Vid slutförande loggas en aktivitet (`kind='onboarding'`,
+   "<bolag> slutförde onboardingen") i feeden (staff-synlig).
+
+### 25.4 Regelefterlevnad
+
+- **GDPR § 5 (dataminimering):** flödena är staff-skapad utbildningskonfiguration
+  (ingen PII); progressraden lagrar bolagets svar/bekräftelser.
+  `onboarding_flows` + `onboarding_progress` är **denylistade i
+  `lib/ai/redaction.ts`** (fritextsvar kan vara PII) → når aldrig
+  `query_collection`/agent-kontexten. Inga nya whitelistade fält i
+  `lib/ai/context.ts`. UI uppmanar inte till personuppgifter.
+- **GDPR art. 17:** `cascadeDelete` på `flow`/`startup`; tenant-relation städas
+  i erasure-flödet (samma mönster som övriga collections).
+- **RBAC (§ 21 / ISO 27001 A.5.15–A.5.18):** bygg/hantera = staff
+  (admin/incubator_lead/coach/mentor via `/education`-gating); radera =
+  admin/incubator_lead. Genomför = staff ELLER länkad `startup_member`
+  (verifieras i server-action). `observer` read-only. En ren medlem kan bara se
+  sitt eget bolags progress (RLS + `loadFlowAndStartup`-verifiering).
+- **EU AI Act:** ingen AI-funktion i modulen → ingen riskklass/banner
+  (deterministisk genomgång + progress).
+- **Robusthet/idempotens (SOC 2):** server-actions validerar input,
+  upsertar idempotent på `(tenant, flow, startup)`, och fail:ar tydligt.
+- **Migrationer:** nya, oföränderliga filnummer (1700000113–115). Onboarding är
+  **migration-only** (speglas inte i `setup-via-api.mjs`/`verify-baseline.mjs`,
+  samma precedens som compass/de_minimis, § 23.4) — createRules följer § 21.3 så
+  `verify-baseline.mjs`-svepet passerar.

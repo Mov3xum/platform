@@ -136,6 +136,7 @@ export type ActivityKind =
   | 'workshop_assignment'
   | 'workshop_run'
   | 'education_document'
+  | 'onboarding'
   | 'integration_sync';
 export const activityKindLabels: Record<ActivityKind, string> = {
   manual: 'Manuell',
@@ -143,6 +144,7 @@ export const activityKindLabels: Record<ActivityKind, string> = {
   workshop_assignment: 'Workshoptilldelning',
   workshop_run: 'Workshop AI-körning',
   education_document: 'Utbildningsdokument',
+  onboarding: 'Onboarding',
   integration_sync: 'Integrationssynk'
 };
 
