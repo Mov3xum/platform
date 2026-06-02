@@ -2,10 +2,12 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import {
   composeFilter,
+  findDeniedExpandTarget,
   getExposedCollection,
   maskRecord,
   type ExposedCollection
 } from './schema';
+import { GLOBAL_REFERENCE_ALLOWLIST, deepMaskPII } from './redaction';
 import type { MistralToolCall, MistralToolDefinition } from './mistral';
 import { escFilter } from '@/lib/pb-filter';
 import type { GeneratedFileRef } from '@platform/shared';
@@ -576,11 +578,35 @@ async function runQueryCollection(
     if (err) return { ok: false, error: err };
   }
 
+  // H2 (säkerhetsgranskning 2026-06): backstop — vägra läsa en kollektion utan
+  // tenant-scope (skulle annars returnera rader tvärs alla tenants). Discovery
+  // släpper redan inte igenom dem, men superuser-backade körningar bypassar
+  // PB-RLS så vi dubbelkollar här.
+  if (collection.tenantField === null && !GLOBAL_REFERENCE_ALLOWLIST.has(collection.name)) {
+    return {
+      ok: false,
+      error: `Kollektion '${collection.name}' saknar tenant-scope och kan inte läsas.`
+    };
+  }
+
   const sort = typeof args.sort === 'string' ? args.sort.trim().slice(0, MAX_SORT_LENGTH) : undefined;
   const expand =
     typeof args.expand === 'string' ? args.expand.trim().slice(0, MAX_EXPAND_LENGTH) : undefined;
   const fields =
     typeof args.fields === 'string' ? args.fields.trim().slice(0, MAX_EXPAND_LENGTH) : undefined;
+
+  // H1: blockera expand mot denylistade kollektioner (annars kringgår modellen
+  // denylist/maskning via `item.expand.<relation>`).
+  if (expand) {
+    const byName = new Map(ctx.collections.map((c) => [c.name, c]));
+    const denied = findDeniedExpandTarget(collection, expand, byName);
+    if (denied) {
+      return {
+        ok: false,
+        error: `Expand mot '${denied}' är inte tillåtet (skyddad kollektion).`
+      };
+    }
+  }
 
   let limit = 20;
   if (typeof args.limit === 'number' && Number.isFinite(args.limit)) {
@@ -598,8 +624,12 @@ async function runQueryCollection(
     });
 
     const items = result.items.map((item: Record<string, unknown>) => {
+      // maskRecord tar bort kollektionens topp-nivåfält (inkl. override-masks
+      // som tasks.details); deepMaskPII sveper HELA trädet (inkl. item.expand)
+      // för PII-fält (H1). truncateValue cappar längder.
       const masked = maskRecord(item, collection);
-      return truncateValue(masked) as Record<string, unknown>;
+      const deepMasked = deepMaskPII(masked);
+      return truncateValue(deepMasked) as Record<string, unknown>;
     });
 
     return {
@@ -630,6 +660,14 @@ async function runCountCollection(
     return {
       ok: false,
       error: `Kollektion '${collectionName}' är inte exponerad. Välj från: ${available}`
+    };
+  }
+
+  // H2: vägra räkna en kollektion utan tenant-scope (cross-tenant count-läcka).
+  if (collection.tenantField === null && !GLOBAL_REFERENCE_ALLOWLIST.has(collection.name)) {
+    return {
+      ok: false,
+      error: `Kollektion '${collection.name}' saknar tenant-scope och kan inte läsas.`
     };
   }
 

@@ -54,8 +54,9 @@ async function getSuperuserPb(): Promise<PocketBase | null> {
     await pb.collection('_superusers').authWithPassword(email, password);
     return pb;
   } catch (err) {
+    // Logga ALDRIG superuser-emailen (privilegierad credential-identifierare,
+    // ISO 27001 A.8.15 / L5). pbUrl räcker för felsökning.
     console.error('[settings] superuser auth failed', {
-      email,
       pbUrl: PB_URL
     });
     return null;

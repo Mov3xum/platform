@@ -2,7 +2,12 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { PublicModuleRunner } from '@/components/compass/PublicModuleRunner';
-import { resolvePublicModule, getPublicModuleQuestions } from '@/lib/compass/public';
+import {
+  resolvePublicModule,
+  getPublicModuleQuestions,
+  toPublicModuleView,
+  stripQuestionScoring
+} from '@/lib/compass/public';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,8 +40,14 @@ export default async function PublicModulePage({
   if (!resolved) notFound();
 
   const { pb, module } = resolved;
+  // Projektion till publik-säker DTO innan något når den anonyma klienten:
+  // strippar system_prompt/notify_emails/model/result_buckets (M3) och
+  // scoring-kartan i frågorna.
+  const safeModule = toPublicModuleView(module);
   const questions =
-    module.flow_type === 'chat' ? [] : await getPublicModuleQuestions(pb, module.id);
+    module.flow_type === 'chat'
+      ? []
+      : stripQuestionScoring(await getPublicModuleQuestions(pb, module.id));
 
   const accent = module.theme_color && /^#[0-9a-fA-F]{3,8}$/.test(module.theme_color)
     ? module.theme_color
@@ -90,7 +101,7 @@ export default async function PublicModulePage({
             boxShadow: module.flow_type === 'chat' ? 'none' : 'var(--mx-sh-2)'
           }}
         >
-          <PublicModuleRunner module={module} questions={questions} />
+          <PublicModuleRunner module={safeModule} questions={questions} />
         </section>
 
         {/* Transparens (EU AI Act art. 50 för chat) + EU-suveränitet */}

@@ -211,3 +211,17 @@ test('empty file is rejected', () => {
   const r = validateWorkshopMediaFile({ type: 'video/mp4', size: 0 }, 'video');
   assert.equal(r.ok, false);
 });
+
+// Säkerhetsgranskning 2026-06 (M5/F4): SVG kan bära <script> och serveras
+// tokenlöst inline → måste avvisas.
+test('SVG image is rejected (XSS)', () => {
+  const r = validateWorkshopMediaFile({ type: 'image/svg+xml', size: 1024 }, 'image');
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.error, /SVG/);
+});
+
+test('raster image mimes are accepted', () => {
+  for (const type of ['image/png', 'image/jpeg', 'image/webp', 'image/gif']) {
+    assert.equal(validateWorkshopMediaFile({ type, size: 1024 }, 'image').ok, true);
+  }
+});

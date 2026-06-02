@@ -114,6 +114,40 @@ export function pickAttribution(attr: AttrLike | undefined): Record<string, stri
   return out;
 }
 
+/**
+ * Publik-säker projektion av en modul innan den når den ANONYMA klienten
+ * (säkerhetsgranskning 2026-06, M3/F2). Tar bort interna fält: `system_prompt`
+ * (AI-persona/instruktioner), `notify_emails` (staff-PII), `model` och
+ * `result_buckets` (scoring-trösklar). Behåller presentations-/flödesfälten.
+ */
+export function toPublicModuleView(m: CompassModule): CompassModule {
+  const { system_prompt, notify_emails, model, result_buckets, ...safe } = m;
+  void system_prompt;
+  void notify_emails;
+  void model;
+  void result_buckets;
+  return safe as CompassModule;
+}
+
+/**
+ * Tar bort scoring-kartan (`score`/`bucket` per val) ur frågorna innan de når
+ * klienten — annars kan en besökare förutsäga/gamea resultatet (M3/F2). Den
+ * server-side scoringen (quiz-result-routen) läser de råa frågorna separat.
+ */
+export function stripQuestionScoring(questions: CompassQuestion[]): CompassQuestion[] {
+  return questions.map((q) => {
+    if (!q.choices) return q;
+    return {
+      ...q,
+      choices: q.choices.map(({ score, bucket, ...c }) => {
+        void score;
+        void bucket;
+        return c;
+      })
+    };
+  });
+}
+
 export async function getPublicModuleQuestions(
   pb: PocketBase,
   moduleId: string

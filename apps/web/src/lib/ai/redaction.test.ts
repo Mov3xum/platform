@@ -5,7 +5,9 @@ import {
   PII_FIELD_PATTERNS,
   isDeniedCollection,
   autoMaskFields,
-  maskRecord
+  maskRecord,
+  deepMaskPII,
+  fieldNameIsPII
 } from './redaction';
 
 // Dessa tester LÅSER PII-/åtkomstpolicyn för AI-chattens query-verktyg
@@ -123,4 +125,65 @@ test('maskRecord är no-op (samma referens) när inget ska maskas', () => {
   const record = { name: 'Acme AB' };
   const out = maskRecord(record, { maskedFields: [] });
   assert.equal(out, record);
+});
+
+// --- Säkerhetsgranskning 2026-06 ---
+
+test('denylist täcker web_cache, integration_providers och alla compass_*', () => {
+  for (const name of [
+    'web_cache',
+    'integration_providers',
+    'compass_lead_sources',
+    'compass_modules',
+    'compass_questions',
+    'compass_messages',
+    'compass_responses'
+  ]) {
+    assert.ok(isDeniedCollection(name), `${name} ska vara denylistad`);
+  }
+});
+
+test('deepMaskPII tar bort PII-fält på ALLA djup (expand-bypass, H1)', () => {
+  const item = {
+    name: 'Acme AB',
+    phase: 'idea',
+    expand: {
+      startup: {
+        name: 'Acme AB',
+        org_nr: '5566778899',
+        founder_gender: 'kvinna',
+        contact: { first_name: 'Anna', email: 'anna@acme.se', phone: '070-1' }
+      },
+      signups: [
+        { name: 'Event', email: 'a@b.se', ip_hash: 'deadbeef' }
+      ]
+    }
+  };
+  const out = deepMaskPII(item) as Record<string, any>;
+  // Topp-nivå ofarligt kvar.
+  assert.equal(out.name, 'Acme AB');
+  // Nästlade PII borta.
+  assert.equal(out.expand.startup.org_nr, undefined);
+  assert.equal(out.expand.startup.founder_gender, undefined);
+  assert.equal(out.expand.startup.contact.email, undefined);
+  assert.equal(out.expand.startup.contact.phone, undefined);
+  assert.equal(out.expand.signups[0].email, undefined);
+  assert.equal(out.expand.signups[0].ip_hash, undefined);
+  // Ofarliga nästlade fält kvar.
+  assert.equal(out.expand.startup.contact.first_name, 'Anna');
+  assert.equal(out.expand.signups[0].name, 'Event');
+});
+
+test('deepMaskPII muterar inte indata', () => {
+  const item = { expand: { u: { email: 'x@y.se' } } };
+  deepMaskPII(item);
+  assert.equal(item.expand.u.email, 'x@y.se');
+});
+
+test('fieldNameIsPII matchar substrings case-insensitivt', () => {
+  assert.ok(fieldNameIsPII('Founder_Gender'));
+  assert.ok(fieldNameIsPII('contact_email'));
+  assert.ok(fieldNameIsPII('signer_ip_hash'));
+  assert.ok(!fieldNameIsPII('name'));
+  assert.ok(!fieldNameIsPII('phase'));
 });

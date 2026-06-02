@@ -89,8 +89,28 @@ export async function updateAlumniAction(
   }
   if (existing.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
 
+  // Mass-assignment-skydd (säkerhetsgranskning 2026-06, M10): TypeScript-typen
+  // raderas i runtime, så en klient kan skicka godtyckliga nycklar (t.ex.
+  // `tenant`). Bygg en EXPLICIT allowlistad payload — aldrig `partial` rakt in.
+  const payload: Record<string, unknown> = {};
+  if (partial.name !== undefined) payload.name = String(partial.name).slice(0, 200);
+  if (partial.company !== undefined) payload.company = String(partial.company).slice(0, 200);
+  if (partial.bio !== undefined) payload.bio = String(partial.bio).slice(0, 4000);
+  if (partial.contact_email !== undefined)
+    payload.contact_email = String(partial.contact_email).slice(0, 200);
+  if (partial.accent !== undefined) payload.accent = String(partial.accent).slice(0, 50);
+  if (partial.active_mentor !== undefined) payload.active_mentor = Boolean(partial.active_mentor);
+  if (partial.exit_year !== undefined) {
+    const yr = Number(partial.exit_year);
+    if (Number.isInteger(yr)) payload.exit_year = yr;
+  }
+  if (partial.tag !== undefined) {
+    const validTags: AlumniTag[] = ['exit', 'scale', 'active', 'mentor', 'paused'];
+    if (validTags.includes(partial.tag as AlumniTag)) payload.tag = partial.tag;
+  }
+
   try {
-    await pb.collection(PB_COLLECTIONS.alumni).update(id, partial);
+    await pb.collection(PB_COLLECTIONS.alumni).update(id, payload);
     revalidatePath('/community');
     return { alumniId: id };
   } catch (err) {

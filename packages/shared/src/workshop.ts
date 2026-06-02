@@ -18,6 +18,18 @@ export const MAX_WORKSHOP_VIDEO_BYTES = 200 * 1024 * 1024; // 200 MB
 export const WORKSHOP_IMAGE_MIME_PREFIX = 'image/';
 export const WORKSHOP_VIDEO_MIME_PREFIX = 'video/';
 
+/**
+ * Explicit raster-allowlist för bilder. `image/svg+xml` är MEDVETET utelämnad:
+ * SVG kan bära `<script>` och filerna serveras tokenlöst inline från
+ * PB-origin (§ 18.2) → stored XSS (säkerhetsgranskning 2026-06, M5/F4).
+ */
+export const WORKSHOP_IMAGE_MIME_ALLOWLIST: readonly string[] = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif'
+];
+
 export type WorkshopMediaKind = 'image' | 'video';
 
 export interface MediaValidationInput {
@@ -45,15 +57,19 @@ export function validateWorkshopMediaFile(
   kind: WorkshopMediaKind
 ): MediaValidationResult {
   const isImage = kind === 'image';
-  const expectedPrefix = isImage ? WORKSHOP_IMAGE_MIME_PREFIX : WORKSHOP_VIDEO_MIME_PREFIX;
   const maxBytes = isImage ? MAX_WORKSHOP_IMAGE_BYTES : MAX_WORKSHOP_VIDEO_BYTES;
   const type = (file.type || '').toLowerCase();
 
-  if (!type.startsWith(expectedPrefix)) {
+  // Bilder: exakt allowlist (utesluter image/svg+xml → XSS-skydd, M5).
+  // Video: prefix räcker (kan inte exekvera skript inline som SVG).
+  const mimeOk = isImage
+    ? WORKSHOP_IMAGE_MIME_ALLOWLIST.includes(type)
+    : type.startsWith(WORKSHOP_VIDEO_MIME_PREFIX);
+  if (!mimeOk) {
     return {
       ok: false,
       error: isImage
-        ? 'Välj en bildfil (PNG, JPG, WEBP, GIF).'
+        ? 'Välj en bildfil (PNG, JPG, WEBP, GIF). SVG stöds inte.'
         : 'Välj en videofil (MP4, WebM m.fl.).'
     };
   }

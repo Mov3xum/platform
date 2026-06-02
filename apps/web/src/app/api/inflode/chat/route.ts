@@ -7,9 +7,21 @@ import {
   createConversation,
   getModuleBySlug
 } from '@/lib/compass/store';
+import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+// Återinförd rate-limit (säkerhetsgranskning 2026-06, M4/F3): varje turn kostar
+// ett Mistral-anrop, så en inloggad användare kan annars driva kostnads-DoS i
+// en tight loop. Speglar den publika chatten (30/5 min per IP). CLAUDE.md §10.3.
+const CHAT_WINDOW_MS = 5 * 60 * 1000;
+const CHAT_MAX_PER_WINDOW = 30;
+
+function clientIp(req: Request): string {
+  const h = req.headers.get('x-forwarded-for') || '';
+  return h.split(',')[0]!.trim() || 'unknown';
+}
 
 interface ChatRequestBody {
   messages: CompassChatMessage[];
@@ -28,11 +40,17 @@ function isValidMessage(m: unknown): m is CompassChatMessage {
   );
 }
 
-// Rate limit borttagen 2026-05 efter explicit beslut — input-validering
-// (längd, antal meddelanden, isValidMessage) kvarstår som primär
-// abuse-kontroll. Avvikelse från CLAUDE.md §10.3 (A.8.x).
-
 export async function POST(req: Request) {
+  const ip = clientIp(req);
+  const rlKey = `inflode-chat:${ip}`;
+  if (checkRateLimit(rlKey, CHAT_MAX_PER_WINDOW).blocked) {
+    return NextResponse.json(
+      { error: 'För många förfrågningar. Försök igen om en stund.' },
+      { status: 429 }
+    );
+  }
+  recordFailure(rlKey, CHAT_WINDOW_MS);
+
   let body: ChatRequestBody;
   try {
     body = (await req.json()) as ChatRequestBody;

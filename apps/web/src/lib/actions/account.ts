@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE, getServerPb, requireUser } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
+import { validatePassword } from '@/lib/password-policy';
 
 const PB_URL = getServerPbUrl();
 
@@ -120,8 +121,9 @@ export async function changePasswordAction(
   if (newPassword !== newPasswordConfirm) {
     return { error: 'De nya lösenorden matchar inte.' };
   }
-  if (newPassword.length < 8) {
-    return { error: 'Lösenordet måste vara minst 8 tecken.' };
+  const pwErr = validatePassword(newPassword);
+  if (pwErr) {
+    return { error: pwErr };
   }
 
   // Verify current password by re-authenticating

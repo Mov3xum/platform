@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth.server';
+import { sanitizeNextPath } from '@/lib/safe-redirect';
 import { Logo } from '@/components/Logo';
 import { LoginForm } from './LoginForm';
 
@@ -14,7 +15,8 @@ export default async function LoginPage({
 }) {
   const user = await getCurrentUser();
   const params = await searchParams;
-  const next = params.next || '/dashboard';
+  // Öppen-redirect-skydd (M2): bara interna paths accepteras.
+  const next = sanitizeNextPath(params.next);
 
   if (user) {
     redirect(next);

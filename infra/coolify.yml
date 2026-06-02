@@ -17,8 +17,15 @@ services:
       context: ../backend/pocketbase-schema
     container_name: moveum-pocketbase
     restart: always
-    ports:
-      - "8080:8080"
+    # SÄKERHET (säkerhetsgranskning 2026-06, C3): publicera INTE 8080 mot
+    # värden. Web-containern når PB via det interna docker-nätet
+    # (`http://pocketbase:8080`) och Coolify/Traefik terminerar TLS och proxar
+    # endast utåt. `expose` håller porten på det interna nätet → PB:s admin-UI
+    # (/_/) och REST-API är inte direkt nåbara från internet förbi TLS-lagret.
+    # Verifiera dessutom att UpCloud-brandväggen blockerar 8080 externt och
+    # IP-/VPN-begränsa admin-UI:t.
+    expose:
+      - "8080"
     volumes:
       # ENDAST data — migrations + hooks är inbakade i image:n
       - pb_data:/pb_data

@@ -63,8 +63,13 @@ export async function persistConnectorOAuthResult(args: {
   connectorId: string;
   token: Record<string, unknown>;
 }): Promise<void> {
-  const filter =
-    `user = "${args.userId}" && connector_kind = "mcp" && connector_id = "${args.connectorId}"`;
+  // Bind värden via pb.filter() — aldrig rå interpolation (ISO 27001 A.8.9 /
+  // L2). Värdena kommer från ett HMAC-verifierat state, men konventionen är
+  // bindande (CLAUDE.md § 10.3).
+  const filter = args.pb.filter(
+    'user = {:u} && connector_kind = "mcp" && connector_id = {:c}',
+    { u: args.userId, c: args.connectorId }
+  );
   let row: (Record<string, unknown> & { id: string }) | null = null;
   try {
     const list = await args.pb.collection('user_mistral_connectors').getList(1, 1, { filter });

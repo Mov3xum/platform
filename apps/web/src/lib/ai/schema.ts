@@ -5,6 +5,7 @@ import { escFilter } from '@/lib/pb-filter';
 import { getServerPbUrl } from '@/lib/pb-url';
 import {
   COLLECTION_DENYLIST,
+  GLOBAL_REFERENCE_ALLOWLIST,
   autoMaskFields,
   maskRecord
 } from './redaction';
@@ -38,6 +39,12 @@ export interface ExposedCollection {
   maskedFields: string[];
   baseFilter?: string;
   fields: CollectionField[];
+  /**
+   * Relationsfält → målkollektionens namn (inkl. denylistade mål), för att
+   * kunna avvisa `expand` mot förbjudna kollektioner (säkerhetsgranskning
+   * 2026-06, H1). Valfri av bakåtkompatibilitet (STATIC_FALLBACK saknar den).
+   */
+  relationTargets?: Record<string, string>;
 }
 
 const DISCOVERY_TTL_MS = 5 * 60 * 1000;
@@ -273,12 +280,32 @@ async function discoverCollections(): Promise<ExposedCollection[]> {
       ? inferTenantPath(fields, tenantsId, byId)
       : null;
 
+    // H2 (säkerhetsgranskning 2026-06): deny-by-default för kollektioner utan
+    // härledbar tenant-väg. Utan tenant-klausul skulle `composeFilter`
+    // returnera rader TVÄRS alla tenants (värst på superuser-backade
+    // schemalagda/triggade/deep-job-körningar där PB-RLS är bypassad). En
+    // global referenskollektion måste uttryckligen vettas i allowlisten.
+    if (tenantField === null && !GLOBAL_REFERENCE_ALLOWLIST.has(c.name)) {
+      continue;
+    }
+
+    // Relationsfält → målkollektionens namn (inkl. denylistade mål) för
+    // expand-kontrollen (H1).
+    const relationTargets: Record<string, string> = {};
+    for (const f of fields) {
+      if (f.type === 'relation' && f.collectionId) {
+        const target = byId.get(f.collectionId);
+        if (target) relationTargets[f.name] = target.name;
+      }
+    }
+
     const collection: ExposedCollection = {
       name: c.name,
       description: c.name,
       tenantField,
       maskedFields: autoMaskFields(fields),
-      fields: fields.map((f) => ({ name: f.name, type: f.type }))
+      fields: fields.map((f) => ({ name: f.name, type: f.type })),
+      relationTargets
     };
     exposed.push(applyOverrides(collection));
   }
@@ -306,6 +333,34 @@ export function getExposedCollection(
   name: string
 ): ExposedCollection | undefined {
   return collections.find((c) => c.name === name);
+}
+
+/**
+ * Givet en `expand`-sträng (komma-separerade, ev. punkt-separerade relations-
+ * vägar), returnera namnet på den FÖRSTA denylistade kollektion någon väg
+ * når — annars null. Blockerar att modellen expanderar mot t.ex. `users`/
+ * `contacts` för att kringgå denylist/maskning (säkerhetsgranskning 2026-06,
+ * H1). Okända/ej-upplösbara hopp tillåts (de deep-maskas ändå i tools.ts).
+ */
+export function findDeniedExpandTarget(
+  root: ExposedCollection,
+  expand: string,
+  byName: Map<string, ExposedCollection>
+): string | null {
+  for (const rawPath of expand.split(',')) {
+    const path = rawPath.trim();
+    if (!path) continue;
+    let current: ExposedCollection | undefined = root;
+    for (const rawSeg of path.split('.')) {
+      const seg = rawSeg.trim();
+      if (!current) break;
+      const target = current.relationTargets?.[seg];
+      if (!target) break; // okänt fält/relation — kan inte fortsätta
+      if (COLLECTION_DENYLIST.has(target)) return target;
+      current = byName.get(target); // denylistade finns inte i byName → stannar
+    }
+  }
+  return null;
 }
 
 export function buildTenantClause(

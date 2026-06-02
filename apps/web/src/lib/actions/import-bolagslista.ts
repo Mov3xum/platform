@@ -4,6 +4,7 @@ import { requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { revalidatePath } from 'next/cache';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
+import { escFilter } from '@/lib/pb-filter';
 import { parseXlsx } from '@/lib/import/xlsx';
 import {
   parseBolagslista,
@@ -226,7 +227,9 @@ export async function commitImportBolagslistaAction(
 
     // Upsert startups-raden (uppslag på tenant + org_nr)
     let startupId: string;
-    const filter = `tenant = "${user.tenant}" && org_nr = "${orgNr}"`;
+    // org_nr kommer från en uppladdad fil (otillförlitlig) och filtret körs på
+    // superuser-klienten (RLS bypassad) → MÅSTE escapas (ISO 27001 A.8.9, M1).
+    const filter = `tenant = "${escFilter(user.tenant)}" && org_nr = "${escFilter(orgNr)}"`;
     let existing: { id: string } | null = null;
     try {
       existing = await pb
@@ -273,7 +276,9 @@ export async function commitImportBolagslistaAction(
     // Upsert startup_financials per (startup, year)
     const syncedAt = new Date().toISOString();
     for (const f of company.financials) {
-      const finFilter = `startup = "${startupId}" && year = ${f.year}`;
+      // startupId är PB-genererat (säkert); year coercas till heltal som
+      // defense-in-depth mot fil-härledd injektion.
+      const finFilter = `startup = "${escFilter(startupId)}" && year = ${Number(f.year) || 0}`;
       let existingFin: { id: string } | null = null;
       try {
         existingFin = await pb

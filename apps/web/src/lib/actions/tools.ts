@@ -43,6 +43,7 @@ import type {
   ToolRunMessage,
   WebSourceKey
 } from '@platform/shared';
+import { ALL_ROLES } from '@platform/shared';
 import { recordActivity } from './record-activity';
 import { logAiUsage } from '@/lib/ai/usage';
 import { escFilter } from '@/lib/pb-filter';
@@ -1105,7 +1106,12 @@ export async function createToolAction(
     category: String(formData.get('category') || ''),
     icon: String(formData.get('icon') || '').trim(),
     requires_startup: formData.get('requires_startup') === 'on',
-    roles_allowed: formData.getAll('roles_allowed').map(String),
+    // Validera mot kända roller (L4) — lagra aldrig ovaliderade rollsträngar
+    // som canRunTool senare tolkar.
+    roles_allowed: formData
+      .getAll('roles_allowed')
+      .map(String)
+      .filter((r) => (ALL_ROLES as readonly string[]).includes(r)),
     output_format: String(formData.get('output_format') || 'markdown'),
     active: formData.get('active') === 'on',
     created_by: user.id
@@ -1171,7 +1177,12 @@ export async function updateToolAction(
     category: String(formData.get('category') || ''),
     icon: String(formData.get('icon') || '').trim(),
     requires_startup: formData.get('requires_startup') === 'on',
-    roles_allowed: formData.getAll('roles_allowed').map(String),
+    // Validera mot kända roller (L4) — lagra aldrig ovaliderade rollsträngar
+    // som canRunTool senare tolkar.
+    roles_allowed: formData
+      .getAll('roles_allowed')
+      .map(String)
+      .filter((r) => (ALL_ROLES as readonly string[]).includes(r)),
     output_format: String(formData.get('output_format') || 'markdown'),
     active: formData.get('active') === 'on'
   };

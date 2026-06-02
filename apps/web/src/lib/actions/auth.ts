@@ -2,6 +2,8 @@
 
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { sanitizeNextPath } from '@/lib/safe-redirect';
+import { validatePassword } from '@/lib/password-policy';
 import { revalidatePath } from 'next/cache';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE } from '@/lib/auth.server';
@@ -174,10 +176,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     // redirect() här lämnar kvar det utloggade skalet (toppnavbar med
     // "Logga in", ingen sidmeny) i Next.js client Router Cache fastän sidan
     // renderar inloggad. Sanera next → bara interna paths (öppen-redirect-skydd).
-    const redirectTo =
-      next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\')
-        ? next
-        : '/dashboard';
+    const redirectTo = sanitizeNextPath(next);
     return { success: true, redirectTo };
   } catch (outerErr: unknown) {
     // Re-throw NEXT_REDIRECT so Next.js can process the redirect normally.
@@ -246,8 +245,9 @@ export async function confirmPasswordResetAction(
   if (password !== passwordConfirm) {
     return { error: 'Lösenorden matchar inte.' };
   }
-  if (password.length < 8) {
-    return { error: 'Lösenordet måste vara minst 8 tecken.' };
+  const pwErr = validatePassword(password);
+  if (pwErr) {
+    return { error: pwErr };
   }
 
   const pb = new PocketBase(PB_URL);

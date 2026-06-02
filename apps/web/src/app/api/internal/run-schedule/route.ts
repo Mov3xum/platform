@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createHash, timingSafeEqual as cryptoTimingSafeEqual } from 'node:crypto';
 import { runScheduledTool } from '@/lib/scheduling/runner';
 
 // Intern endpoint som PB JSVM-hooken `schedule_tick.pb.js` POSTar till
@@ -18,13 +19,12 @@ import { runScheduledTool } from '@/lib/scheduling/runner';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
+// Konstant-tids-jämförelse UTAN längd-läcka (L1): hasha båda sidor till lika
+// längd och jämför med crypto.timingSafeEqual (samma standard som OAuth-state).
+function secretsMatch(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return cryptoTimingSafeEqual(ha, hb);
 }
 
 export async function POST(req: Request) {
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
   }
 
   const provided = req.headers.get('x-movexum-schedule-secret') || '';
-  if (!timingSafeEqual(provided, expected)) {
+  if (!secretsMatch(provided, expected)) {
     return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
   }
 

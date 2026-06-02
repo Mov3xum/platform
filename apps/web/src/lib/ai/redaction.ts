@@ -28,11 +28,23 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'compass_messages',
   'compass_responses',
   'compass_security_events',
+  // Resterande compass-kollektioner (intake-design/lookup) — besökar-/intag-
+  // data hör aldrig hemma i AI-kontext (§ 9.3, § 23.4).
+  'compass_lead_sources',
+  'compass_modules',
+  'compass_questions',
   'agent_actions',
   'agent_memory',
   'tenant_integrations',
   'user_app_integrations',
   'user_mistral_connectors',
+  // Globala referens-/katalogkollektioner utan tenant-scope. De saknar
+  // tenant-relation → `composeFilter` skulle inte lägga någon tenant-klausul
+  // (cross-tenant-läsning). De innehåller ingen PII men ska inte mata agenten
+  // (säkerhetsgranskning 2026-06, M12). Övriga null-tenant-kollektioner blockas
+  // dessutom deny-by-default i `schema.ts` (GLOBAL_REFERENCE_ALLOWLIST).
+  'web_cache',
+  'integration_providers',
   // Personliga/innehållstunga kollektioner — aldrig exponerade för agenter.
   'chat_threads', // privat konversationsinnehåll (1700000083)
   'user_files', // personliga filer, strikt ägaren-bara (1700000085)
@@ -46,6 +58,14 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'de_minimis_regelverk',
   'agreement_signatures' // signeringsbevis: signer_email + ip_hash (1700000094)
 ]);
+
+/**
+ * Globala referenskollektioner UTAN tenant-relation som ändå uttryckligen får
+ * exponeras för agenten (deny-by-default-undantag, säkerhetsgranskning 2026-06
+ * H2). Tom som default — varje post måste vara medvetet vettad: den får inte
+ * innehålla PII och dess innehåll måste vara identiskt för alla tenants.
+ */
+export const GLOBAL_REFERENCE_ALLOWLIST: ReadonlySet<string> = new Set<string>([]);
 
 /**
  * Fältnamn som auto-maskas i ALLA kollektioner (case-insensitiv substring).
@@ -78,6 +98,36 @@ export const PII_FIELD_PATTERNS: readonly string[] = [
 /** Är kollektionen helt utestängd från agentens query-verktyg? */
 export function isDeniedCollection(name: string): boolean {
   return COLLECTION_DENYLIST.has(name);
+}
+
+/** Matchar ett fältnamn ett PII-mönster (case-insensitiv substring)? */
+export function fieldNameIsPII(name: string): boolean {
+  const lower = name.toLowerCase();
+  return PII_FIELD_PATTERNS.some((p) => lower.includes(p));
+}
+
+/**
+ * Rekursiv PII-maskning över HELA objektträdet (säkerhetsgranskning 2026-06,
+ * H1). `maskRecord` tar bara bort topp-nivåfält i den frågade kollektionen,
+ * men `query_collection` stödjer `expand` → PocketBase lägger relaterade
+ * poster under `item.expand.<relation>`, som annars returneras OMASKERADE.
+ * Den här funktionen sveper varje nyckel på varje djup och tar bort de som
+ * matchar ett PII-mönster, oavsett nivå. Defense-in-depth ovanpå denylist +
+ * `maskRecord`. Returnerar en ny struktur (muterar inte indata).
+ */
+export function deepMaskPII(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(deepMaskPII);
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (fieldNameIsPII(k)) continue;
+      out[k] = deepMaskPII(v);
+    }
+    return out;
+  }
+  return value;
 }
 
 /** Returnerar de fältnamn som ska maskas (matchar ett PII-mönster). */

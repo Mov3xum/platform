@@ -409,17 +409,28 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
   kollektioner men upprätthåller samma exkluderingar som
   context-byggarna, så verktyget inte kan kringgå svartlistan ovan:
   - **Denylist** (aldrig exponerade): utöver `users`/`tenants`/token-
-    tabeller även `contacts` (§ 15.3), alla `compass_*`-besökardata
-    (`compass_leads`, `compass_conversations`, `compass_messages`,
-    `compass_responses`, `compass_security_events`), `agent_actions`
-    (mutationsaudit med before/after-värden) samt krypterade
-    credential-/connector-tabeller (`tenant_integrations`,
+    tabeller även `contacts` (§ 15.3), ALLA `compass_*` (besökar-/intag-
+    data: `compass_leads`, `compass_conversations`, `compass_messages`,
+    `compass_responses`, `compass_security_events`, `compass_lead_sources`,
+    `compass_modules`, `compass_questions`), `agent_actions`
+    (mutationsaudit med before/after-värden), globala referens-/katalog-
+    kollektioner utan tenant-scope (`web_cache`, `integration_providers`)
+    samt krypterade credential-/connector-tabeller (`tenant_integrations`,
     `user_app_integrations`, `user_mistral_connectors`).
+  - **Deny-by-default för null-tenant** (säkerhetsgranskning 2026-06, H2):
+    en kollektion vars tenant-väg inte kan härledas exponeras INTE (skulle
+    annars sakna tenant-klausul → cross-tenant-läsning, värst på superuser-
+    backade autonoma körningar). Undantag måste vettas explicit i
+    `GLOBAL_REFERENCE_ALLOWLIST` (`redaction.ts`). `query/count_collection`
+    har dessutom en runtime-backstop som vägrar läsa/räkna en null-tenant-
+    kollektion.
   - **Fältmaskning** (substring, alla kollektioner): täcker GDPR art. 9
     (`gender`, `identifies_as`), adress (`street_address`,
     `postal_code`), `org_nr` och `ip_hash` utöver
     e-post/telefon/personnummer/avatar. `tasks.details` maskas särskilt
-    (privata arbetsanteckningar).
+    (privata arbetsanteckningar). Maskningen körs REKURSIVT över hela
+    svarsträdet (`deepMaskPII`) så `expand`-relationer inte kan kringgå den
+    (H1), och `expand` mot en denylistad kollektion avvisas helt.
 - **Chattens skrivverktyg:** bara när actor är en agent (staff-chatt)
   exponeras `update_startup_field` (whitelist: `next_step`, `irl_level`),
   `create_startup_activity` och `update_activity_field` (`title`,
