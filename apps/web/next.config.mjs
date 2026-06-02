@@ -61,15 +61,21 @@ const nextConfig = {
     ],
   },
   // Skip build-only packages from output file tracing. Without this,
-  // @vercel/nft has to stat all of node_modules (including @swc, webpack,
-  // tailwindcss etc.) which hangs the Docker build for 18+ hours on Coolify.
-  // The '*' wildcard applies globally — none of these build-tool packages
-  // are needed at runtime in the standalone output.
+  // @vercel/nft has to stat all of node_modules (including the @swc/core
+  // compiler, webpack, tailwindcss etc.) which hangs the Docker build for
+  // 18+ hours on Coolify. The '*' wildcard applies globally — none of these
+  // build-tool packages are needed at runtime in the standalone output.
   // NOTE: Moved from experimental.outputFileTracingExcludes — Next.js 15
   // promoted this to a top-level option.
+  // VIKTIGT: exkludera ENDAST @swc/core (build-kompilatorn), ALDRIG hela
+  // @swc/** — @swc/helpers är en runtime-dep till next och dess output
+  // kräver `@swc/helpers/_/_interop_require_default`. Tas helpers bort ur
+  // standalone-bundlen kraschar servern direkt med MODULE_NOT_FOUND →
+  // healthcheck unhealthy → Coolify rullar tillbaka.
   outputFileTracingExcludes: {
     '*': [
-      'node_modules/@swc/**',
+      'node_modules/@swc/core/**',
+      'node_modules/@swc/core-*/**',
       'node_modules/@esbuild/**',
       'node_modules/webpack/**',
       'node_modules/eslint/**',
