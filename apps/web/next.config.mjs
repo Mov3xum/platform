@@ -60,32 +60,34 @@ const nextConfig = {
       // catch-all https-mönstret ovan. Inget http-sslip.io-undantag behövs.
     ],
   },
+  // Skip build-only packages from output file tracing. Without this,
+  // @vercel/nft has to stat all of node_modules (including @swc, webpack,
+  // tailwindcss etc.) which hangs the Docker build for 18+ hours on Coolify.
+  // The '*' wildcard applies globally — none of these build-tool packages
+  // are needed at runtime in the standalone output.
+  // NOTE: Moved from experimental.outputFileTracingExcludes — Next.js 15
+  // promoted this to a top-level option.
+  outputFileTracingExcludes: {
+    '*': [
+      'node_modules/@swc/**',
+      'node_modules/@esbuild/**',
+      'node_modules/webpack/**',
+      'node_modules/eslint/**',
+      'node_modules/@eslint/**',
+      'node_modules/typescript/**',
+      'node_modules/tailwindcss/**',
+      'node_modules/@tailwindcss/**',
+      'node_modules/postcss/**',
+      'node_modules/autoprefixer/**',
+      'node_modules/.cache/**',
+    ],
+  },
   experimental: {
     // Ensure all dependencies are traced correctly in monorepo with path aliases
     esmExternals: true,
     // Chat-bilagor (bilder base64-encoded + textfiler) — default 1 MB räcker inte
     serverActions: {
       bodySizeLimit: '32mb'
-    },
-    // Skip build-only packages from output file tracing. Without this,
-    // @vercel/nft has to stat all of node_modules (including @swc, webpack,
-    // tailwindcss etc.) which hangs the Docker build for 18+ hours on Coolify.
-    // The '*' wildcard applies globally — none of these build-tool packages
-    // are needed at runtime in the standalone output.
-    outputFileTracingExcludes: {
-      '*': [
-        'node_modules/@swc/**',
-        'node_modules/@esbuild/**',
-        'node_modules/webpack/**',
-        'node_modules/eslint/**',
-        'node_modules/@eslint/**',
-        'node_modules/typescript/**',
-        'node_modules/tailwindcss/**',
-        'node_modules/@tailwindcss/**',
-        'node_modules/postcss/**',
-        'node_modules/autoprefixer/**',
-        'node_modules/.cache/**',
-      ],
     },
   },
   webpack: (config) => {
