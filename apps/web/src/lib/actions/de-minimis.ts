@@ -284,6 +284,72 @@ export async function removeUnitOrgnrAction(orgnrId: string): Promise<DeMinimisA
   return { ok: true };
 }
 
+/**
+ * Hittar bolagets befintliga (primära) de minimis-enhet, eller skapar en
+ * default-enhet om ingen finns. Tar bort kravet att en bolagsmedlem manuellt
+ * måste "skapa enhet" innan ett stöd kan registreras (CLAUDE.md § 20.5) —
+ * enheten ("ett enda företag") blir en implementationsdetalj som skapas lazy
+ * via den robusta skrivvägen (superuser-fallback). Anroparen MÅSTE redan ha
+ * verifierat tenant + `canManageStartupDeMinimis`.
+ */
+async function resolveOrCreateUnit(
+  pb: PocketBase,
+  user: { id: string; tenant: string },
+  startupId: string
+): Promise<{ unitId: string } | { error: string }> {
+  const findExisting = async (client: PocketBase): Promise<string | null> => {
+    try {
+      const existing = await client
+        .collection(PB_COLLECTIONS.deMinimisUnits)
+        .getFirstListItem<DeMinimisUnit>(`startup = "${escFilter(startupId)}"`, { sort: 'created' })
+        .catch(() => null);
+      return existing?.id ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  // 1) Befintlig enhet? Läs först som användaren (RLS tillåter medlem att läsa
+  //    sina egna bolags enheter); om det inte ger träff, dubbelkolla via
+  //    superuser så vi inte skapar en duplicerad tom enhet om RLS-läsningen
+  //    skulle missa en redan skapad enhet.
+  const own = await findExisting(pb);
+  if (own) return { unitId: own };
+  const su = await getSuperuserPb();
+  if (su) {
+    const viaSu = await findExisting(su);
+    if (viaSu) return { unitId: viaSu };
+  }
+
+  // 2) Skapa en default-enhet uppkallad efter bolaget.
+  let namn = 'De minimis';
+  try {
+    const startup = await pb.collection('startups').getOne<{ name: string }>(startupId);
+    if (startup?.name) namn = startup.name;
+  } catch {
+    /* default-namn räcker */
+  }
+
+  try {
+    const created = await writeWithFallback(pb, (client) =>
+      client.collection(PB_COLLECTIONS.deMinimisUnits).create<DeMinimisUnit>({
+        tenant: user.tenant,
+        startup: startupId,
+        namn: namn.slice(0, 200),
+        created_by: user.id
+      })
+    );
+    return { unitId: created.id };
+  } catch (err) {
+    console.error('[de-minimis] resolveOrCreateUnit failed', {
+      tenant: user.tenant,
+      startupId,
+      error: err instanceof Error ? err.message : err
+    });
+    return { error: 'Kunde inte förbereda de minimis-registret.' };
+  }
+}
+
 // ─── Stöd ────────────────────────────────────────────────────────────────────
 
 function numOrUndef(value: FormDataEntryValue | null): number | undefined {
@@ -303,19 +369,39 @@ export async function addStodAction(formData: FormData): Promise<DeMinimisAction
   const user = await getCurrentUser();
   if (!user) return { error: 'Ej inloggad.' };
 
-  const unitId = String(formData.get('unitId') || '');
-  if (!unitId) return { error: 'Enhet saknas.' };
-
   const pb = await getServerPb();
-  let unit: DeMinimisUnit;
-  try {
-    unit = await pb.collection(PB_COLLECTIONS.deMinimisUnits).getOne<DeMinimisUnit>(unitId);
-  } catch {
-    return { error: 'Enheten hittades inte.' };
+
+  // Två ingångar: ett befintligt `unitId` (fullskärmsvyn med flera enheter)
+  // ELLER bara `startupId` (det förenklade flödet på bolagskortet — enheten
+  // skapas lazy så medlemmen aldrig behöver "skapa enhet").
+  let unitId = String(formData.get('unitId') || '');
+  let startupId = '';
+
+  if (unitId) {
+    let unit: DeMinimisUnit;
+    try {
+      unit = await pb.collection(PB_COLLECTIONS.deMinimisUnits).getOne<DeMinimisUnit>(unitId);
+    } catch {
+      return { error: 'Enheten hittades inte.' };
+    }
+    if (String(unit.tenant) !== user.tenant) return { error: 'Åtkomst nekad.' };
+    startupId = String(unit.startup);
+    if (!canManageStartupDeMinimis(user, startupId)) return { error: 'Åtkomst nekad.' };
+  } else {
+    startupId = String(formData.get('startupId') || '');
+    if (!startupId) return { error: 'Bolag saknas.' };
+    try {
+      const startup = await pb.collection('startups').getOne<{ tenant: string }>(startupId);
+      if (String(startup.tenant) !== user.tenant) return { error: 'Åtkomst nekad.' };
+    } catch {
+      return { error: 'Bolaget hittades inte.' };
+    }
+    if (!canManageStartupDeMinimis(user, startupId)) return { error: 'Åtkomst nekad.' };
+
+    const resolved = await resolveOrCreateUnit(pb, user, startupId);
+    if ('error' in resolved) return { error: resolved.error };
+    unitId = resolved.unitId;
   }
-  if (String(unit.tenant) !== user.tenant) return { error: 'Åtkomst nekad.' };
-  const startupId = String(unit.startup);
-  if (!canManageStartupDeMinimis(user, startupId)) return { error: 'Åtkomst nekad.' };
 
   const forordning = String(formData.get('forordning') || '') as ForordningKod;
   const stodgivare = String(formData.get('stodgivare') || '').trim();

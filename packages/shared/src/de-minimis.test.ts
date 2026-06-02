@@ -14,6 +14,10 @@ import {
   summarize,
   kanBevilja,
   validateStodInput,
+  effektivBeloppSek,
+  samladSummaSek,
+  DE_MINIMIS_TEMPLATES,
+  findDeMinimisTemplate,
   type DeMinimisStodCalc
 } from './de-minimis.ts';
 
@@ -198,4 +202,60 @@ test('varje förordningskod har en etikett och en regel', () => {
     assert.equal(typeof forordningLabels[kod], 'string');
     assert.ok(REG.find((r) => r.kod === kod));
   }
+});
+
+// ── Stödgivar-mallar ──────────────────────────────────────────────────────────
+
+test('alla mallar har unik id och giltig förordning', () => {
+  const ids = new Set<string>();
+  for (const t of DE_MINIMIS_TEMPLATES) {
+    assert.ok(t.id && !ids.has(t.id), `dubblett-id: ${t.id}`);
+    ids.add(t.id);
+    assert.ok(t.stodgivare.trim().length > 0);
+    assert.ok(FORORDNING_KODER.includes(t.forordning));
+  }
+  assert.ok(DE_MINIMIS_TEMPLATES.length >= 5);
+});
+
+test('findDeMinimisTemplate slår upp och returnerar undefined för okänt id', () => {
+  assert.equal(findDeMinimisTemplate('vinnova')?.stodgivare, 'Vinnova');
+  assert.equal(findDeMinimisTemplate('finns-inte'), undefined);
+});
+
+// ── SEK-belopp ────────────────────────────────────────────────────────────────
+
+test('effektivBeloppSek använder explicit SEK före härledning', () => {
+  assert.equal(effektivBeloppSek({ belopp_sek: 1000, belopp_eur: 90, valutakurs: 11 }), 1000);
+});
+
+test('effektivBeloppSek härleder ur EUR × kurs när SEK saknas', () => {
+  assert.equal(effektivBeloppSek({ belopp_eur: 100, valutakurs: 11.3 }), 1130);
+});
+
+test('effektivBeloppSek returnerar null när SEK ej kan bestämmas', () => {
+  assert.equal(effektivBeloppSek({ belopp_eur: 100 }), null);
+  assert.equal(effektivBeloppSek({}), null);
+});
+
+test('samladSummaSek summerar inom 3-årsfönstret och flaggar ofullständighet', () => {
+  const ref = new Date(Date.UTC(2026, 4, 30));
+  const rows = [
+    { belopp_sek: 1000, beslutsdatum: '2025-01-01' },
+    { belopp_eur: 100, valutakurs: 11, beslutsdatum: '2025-06-01' }, // 1100 SEK
+    { belopp_eur: 50, beslutsdatum: '2025-07-01' } // saknar kurs → ofullständig
+  ];
+  const r = samladSummaSek(rows, ref);
+  assert.equal(r.sek, 2100);
+  assert.equal(r.complete, false);
+});
+
+test('samladSummaSek exkluderar poster utanför 3-årsfönstret', () => {
+  const ref = new Date(Date.UTC(2026, 4, 30));
+  const rows = [
+    { belopp_sek: 5000, beslutsdatum: '2020-01-01' }, // för gammal
+    { belopp_sek: 2000, beslutsdatum: '2026-01-01' }
+  ];
+  const r = samladSummaSek(rows, ref);
+  assert.equal(r.sek, 2000);
+  assert.equal(r.complete, true);
 });
