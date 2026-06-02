@@ -17,6 +17,7 @@
   },
   "packageManager": "yarn@1.22.22",
   "resolutions": {
-    "@types/node": "20.19.39"
+    "@types/node": "20.19.39",
+    "tmp": "^0.2.7"
   }
 }

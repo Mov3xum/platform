@@ -2273,6 +2273,36 @@ enforcement görs i server-actions). Alla createRules lämnas orörda av 1700000
   tidigare: `incubator_reports`, `tenant_integrations`,
   `compass_leads/_conversations/_responses`.
 
+### 21.7 Efterskörd — kollektioner som missades i § 21 (migration 1700000112)
+
+Säkerhetsgranskningen 2026-06 hittade en rad nyare PII-/finans-kollektioner
+som lagts till EFTER migration 1700000096 utan att skrivas in i isoleringen
+(eller i `verify-baseline.mjs`). Migration **1700000112** stänger dem (endast
+list/view; createRules orörda; `:each ?=` per § 21.3):
+
+- **Cross-tenant (allvarligast):** `compass_messages` / `compass_responses`
+  saknade tenant-kolumn och hade list/view = `auth && STAFF` UTAN tenant-scope
+  → staff i tenant A kunde läsa ALLA tenants besökar-chattar/enkätsvar. Scopas
+  nu via förälder-relationen (`@request.auth.tenant = conversation.tenant`).
+  `compass_questions` (globalt `auth`) scopas via `module.tenant`. `tenants`
+  list/view scopas till den egna tenanten (`@request.auth.tenant = id`).
+- **Medlem-scopade (egen-bolag) tillagda:** `agreement_signatures`,
+  `de_minimis_units`/`de_minimis_unit_orgnr` (via `unit.startup`)/`de_minimis_stod`,
+  `event_signups` (sitt-bolags + inbjuden `user`).
+- **Staff/observer-only tillagda:** `contacts` (PII inkl. art. 9 `gender`),
+  `service_time_entries`, `startup_service_costs`,
+  `startup_readiness_assessments`, `startup_state_aid_periods`,
+  `mission_comments`.
+- **Medvetet kvar tenant-brett:** `education_documents` (delade
+  utbildningsresurser, ej PII; filen serveras ändå via tokenlös publik URL
+  § 18.3 så record-RLS är inte filgränsen). `web_cache`/`integration_providers`
+  (globala) hanteras i AI-denylistan, inte här.
+
+`verify-baseline.mjs` asserterar nu dessa (utökade `MUST_SCOPE_TO_MEMBER` /
+`MUST_BE_STAFF_OR_OBSERVER` + ny `MUST_SCOPE_CROSS_TENANT`), så en framtida
+kollektion som återinför läckan fälls innan deploy. Speglas i
+`setup-via-api.mjs` (de_minimis/compass är migration-only, § 23.4).
+
 ### 21.5 Navigations-/route-gating
 
 `coreModules` (`packages/shared/src/modules.ts`) exkluderar redan
