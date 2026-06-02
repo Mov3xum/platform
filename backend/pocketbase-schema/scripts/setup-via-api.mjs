@@ -201,7 +201,8 @@ async function ensureCollection(definition) {
       try {
         await pb.collections.update(definition.name, updatePayload);
       } catch (err) {
-        throw new Error(`collection "${definition.name}" rule-sync failed: ${describeError(err)}`);
+        const what = needsFieldSync && needsRuleSync ? 'field+rule-sync' : needsFieldSync ? 'field-sync' : 'rule-sync';
+        throw new Error(`collection "${definition.name}" ${what} failed: ${describeError(err)}`);
       }
       if (needsFieldSync && needsRuleSync) {
         ok(`collection "${definition.name}" finns redan — fält och regler synkade`);
