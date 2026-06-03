@@ -60,10 +60,22 @@ jobs:
     with:
       image_tag: staging
 
+  # Compile the PocketBase image on GitHub's runners and push it to GHCR.
+  # Coolify then pulls this prebuilt image instead of building on host.
+  build-pocketbase-image:
+    needs: detect-pocketbase-changes
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-pocketbase-image.yml
+    with:
+      image_tag: staging
+
   deploy:
     needs:
       - detect-pocketbase-changes
       - build-image
+      - build-pocketbase-image
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
