@@ -76,6 +76,7 @@ export function middleware(req: NextRequest) {
     PUBLIC_PATHS.includes(pathname) ||
     pathname.startsWith('/reset-password/') ||
     pathname.startsWith('/_next') ||
+    pathname === '/api/auth/login' ||
     pathname.startsWith('/api/health') ||
     // Startupkompassen — publika, oinloggade intag-moduler (quiz/formulär/chatt)
     // och deras anonyma API-flöden.

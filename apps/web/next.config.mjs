@@ -2,6 +2,16 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const codespacesForwardingHost =
+  process.env.CODESPACE_NAME && process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN
+    ? `${process.env.CODESPACE_NAME}-3000.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`
+    : null;
+const serverActionAllowedOrigins = [
+  'localhost:3000',
+  '127.0.0.1:3000',
+  '0.0.0.0:3000',
+  codespacesForwardingHost,
+].filter(Boolean);
 
 // Statiska säkerhetsheaders (CLAUDE.md § 10.3 A.8.9). Den dynamiska,
 // nonce-baserade Content-Security-Policy sätts i middleware.ts (kräver
@@ -93,7 +103,11 @@ const nextConfig = {
     esmExternals: true,
     // Chat-bilagor (bilder base64-encoded + textfiler) — default 1 MB räcker inte
     serverActions: {
-      bodySizeLimit: '32mb'
+      bodySizeLimit: '32mb',
+      // Local dev in Codespaces can proxy requests via *.app.github.dev while
+      // the browser origin is localhost:3000, which otherwise triggers
+      // "Invalid Server Actions request" host checks.
+      allowedOrigins: serverActionAllowedOrigins,
     },
   },
   webpack: (config) => {
