@@ -1,0 +1,77 @@
+# Coolify-konfiguration för Moveum platform
+# PocketBase och web pullar båda färdiga GHCR-images.
+#
+# OBS: PocketBase tillämpar JS-migrations i
+# backend/pocketbase-schema/migrations/ automatiskt vid container-start.
+# När en ny migration lagts till MÅSTE pocketbase-containern startas
+# om i Coolify innan web-appen ser den nya collectionen — annars 404:ar
+# nya endpoints (t.ex. notifications_collection / user_mistral_connectors).
+# Verifiera i PB-admin /_/#/collections att senaste migrationen är applicerad.
+
+services:
+  pocketbase:
+    # Prebuilt image from GHCR. GitHub Actions compiles and pushes this in
+    # .github/workflows/build-pocketbase-image.yml, so Coolify only pulls it.
+    image: ghcr.io/mov3xum/platform-pocketbase:${MOVEXUM_IMAGE_TAG:-staging}
+    pull_policy: always
+    restart: always
+    expose:
+      - "8080"
+    volumes:
+      # ENDAST data — migrations + hooks är inbakade i image:n
+      - pb_data:/pb_data
+    environment:
+      POCKETBASE_ENCRYPTION_KEY: ${POCKETBASE_ENCRYPTION_KEY:-}
+      APP_ADMIN_INITIAL_PASSWORD: ${APP_ADMIN_INITIAL_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web:
+    # Prebuilt image from GHCR — GitHub Actions compiles + pushes it (see
+    # .github/workflows/build-image.yml). Coolify PULLS this instead of
+    # compiling Next.js on the UpCloud host, which previously took up to 30 h
+    # and queued every other deploy. MOVEXUM_IMAGE_TAG selects staging vs
+    # production (set per Coolify app; default = staging).
+    # If the GHCR package is private, add a registry credential in Coolify;
+    # the simplest path is to make ghcr.io/mov3xum/platform-web public (read).
+    image: ghcr.io/mov3xum/platform-web:${MOVEXUM_IMAGE_TAG:-staging}
+    pull_policy: always
+    restart: always
+    expose:
+      - "3000"
+    environment:
+      # Miljöväljare per deployment: staging | production. Avgör vilket
+      # _STAGING/_PRODUCTION-PocketBase-par appen pratar med (NODE_ENV är
+      # 'production' i båda containrarna och kan inte skilja dem åt).
+      # Default = staging om osatt (säkrare för data). Sätts i Coolify-UI:t.
+      # Staging OCH production kör HTTPS (Let's Encrypt) på sina sslip.io-
+      # hosts → sätt dessa till https://… i Coolify. Se infra/SSL.md för
+      # cert-uppsättning, force-https-redirect och verifiering.
+      MOVEXUM_ENV: ${MOVEXUM_ENV:-staging}
+      POCKETBASE_URL_STAGING: ${POCKETBASE_URL_STAGING:-}
+      POCKETBASE_URL_PRODUCTION: ${POCKETBASE_URL_PRODUCTION:-}
+      NEXT_PUBLIC_POCKETBASE_URL_STAGING: ${NEXT_PUBLIC_POCKETBASE_URL_STAGING:-}
+      NEXT_PUBLIC_POCKETBASE_URL_PRODUCTION: ${NEXT_PUBLIC_POCKETBASE_URL_PRODUCTION:-}
+      # Fallback för lokal/intern compose (den inbyggda pocketbase-servicen
+      # nedan). Container-till-container på docker-nätet → förblir http
+      # (ingen TLS internt). Används bara om varianterna ovan saknas.
+      POCKETBASE_URL: ${POCKETBASE_URL:-http://pocketbase:8080}
+      NEXT_PUBLIC_POCKETBASE_URL: ${NEXT_PUBLIC_POCKETBASE_URL:-http://pocketbase:8080}
+      NODE_ENV: production
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      # Superuser-credentials krävs för fallback-skapande av records när
+      # PB:s createRule failar transient (se workshops.ts). Sätt
+      # POCKETBASE_SUPERUSER_EMAIL/PASSWORD som secrets i Coolify
+      # web-applikationen — INTE i koden.
+      POCKETBASE_SUPERUSER_EMAIL: ${POCKETBASE_SUPERUSER_EMAIL:-}
+      POCKETBASE_SUPERUSER_PASSWORD: ${POCKETBASE_SUPERUSER_PASSWORD:-}
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+
+volumes:
+  pb_data:
+    driver: local
