@@ -60,20 +60,10 @@ jobs:
     with:
       image_tag: staging
 
-  build-pocketbase-image:
-    needs: detect-pocketbase-changes
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/build-pocketbase-image.yml
-    with:
-      image_tag: staging
-
   deploy:
     needs:
       - detect-pocketbase-changes
       - build-image
-      - build-pocketbase-image
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -88,9 +78,8 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
-      # The web and PocketBase images are compiled in the jobs above; the
-      # typecheck here remains a fast correctness gate before we trigger the
-      # Coolify pull.
+      # The web image is compiled in the job above; the typecheck here
+      # remains a fast correctness gate before we trigger the Coolify pull.
       - name: Typecheck
         run: yarn typecheck
 

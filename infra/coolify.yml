@@ -1,5 +1,5 @@
 # Coolify-konfiguration för Moveum platform
-# PocketBase och web pullar båda färdiga images från GHCR.
+# PocketBase byggs lokalt i Coolify; web pullar färdig GHCR-image.
 #
 # OBS: PocketBase tillämpar JS-migrations i
 # backend/pocketbase-schema/migrations/ automatiskt vid container-start.
@@ -10,10 +10,8 @@
 
 services:
   pocketbase:
-    # Prebuilt image from GHCR. GitHub Actions compiles and pushes this in
-    # .github/workflows/build-pocketbase-image.yml, so Coolify only pulls it.
-    image: ghcr.io/mov3xum/platform-pocketbase:${MOVEXUM_IMAGE_TAG:-staging}
-    pull_policy: always
+    build:
+      context: ../backend/pocketbase-schema
     container_name: moveum-pocketbase
     restart: always
     ports:
