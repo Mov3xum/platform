@@ -10,7 +10,8 @@ import { Icon } from '@/components/proto/Icon';
 import {
   PhaseBadge,
   StatusBadge,
-  ToolCategoryBadge
+  ToolCategoryBadge,
+  WorkshopAssignmentStatusBadge
 } from '@/components/Badges';
 import type { StartupStatus } from '@/lib/labels';
 import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
@@ -21,7 +22,8 @@ import {
   isPureStartupMember,
   type EducationDocumentAssignment,
   type StartupPhase,
-  type Tool
+  type Tool,
+  type WorkshopAssignment
 } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
@@ -180,6 +182,46 @@ export default async function MinOversiktPage() {
     }
   }
 
+  // Bolagsmedlemmens landningsvy ("Min översikt") ska visa tilldelade
+  // workshops + dokument direkt — annars verkar bolaget "tomt" trots att
+  // staff tilldelat aktiviteter (de bor annars en klick bort under
+  // "Aktiviteter"). Detaljgenomförande sker fortfarande på /mina-aktiviteter.
+  let memberWorkshops: WorkshopAssignment[] = [];
+  let memberDocs: EducationDocumentAssignment[] = [];
+  if (isPureMember) {
+    try {
+      const res = await pb
+        .collection(PB_COLLECTIONS.workshopAssignments)
+        .getList<WorkshopAssignment>(1, 100, {
+          filter: `tenant = "${escFilter(user.tenant)}" && startup = "${escFilter(linkedId)}"`,
+          sort: '-created',
+          expand: 'workshop'
+        });
+      memberWorkshops = res.items;
+    } catch (error) {
+      console.error('[min-oversikt] failed to load member workshops', {
+        startupId: linkedId,
+        error
+      });
+    }
+    try {
+      const res = await pb
+        .collection(PB_COLLECTIONS.educationDocumentAssignments)
+        .getList<EducationDocumentAssignment>(1, 100, {
+          filter: `tenant = "${escFilter(user.tenant)}" && startup = "${escFilter(linkedId)}"`,
+          sort: '-created',
+          expand: 'document'
+        });
+      memberDocs = res.items;
+    } catch (error) {
+      console.error('[min-oversikt] failed to load member documents', {
+        startupId: linkedId,
+        error
+      });
+    }
+  }
+  const memberActivityCount = memberWorkshops.length + memberDocs.length;
+
   // Egna + bolagets öppna uppgifter (ej klara/avbrutna).
   let tasks: TaskRecord[] = [];
   try {
@@ -273,6 +315,125 @@ export default async function MinOversiktPage() {
               </div>
             </div>
           </section>
+        ) : null}
+
+        {/* Tilldelade aktiviteter — synligt direkt på medlemmens landningsvy. */}
+        {isPureMember ? (
+          <Card
+            title="Tilldelade aktiviteter"
+            action={
+              <Link
+                href="/mina-aktiviteter"
+                className="inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
+              >
+                Öppna Aktiviteter <Icon name="external" size={14} />
+              </Link>
+            }
+          >
+            {memberActivityCount === 0 ? (
+              <Empty>
+                Inga workshops eller dokument tilldelade än. Movexum lägger till dem efter hand.
+              </Empty>
+            ) : (
+              <ul className="space-y-3">
+                {memberWorkshops.map((assignment) => {
+                  const workshop = assignment.expand?.workshop;
+                  const completed = assignment.status === 'done';
+                  return (
+                    <li
+                      key={assignment.id}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-default p-4"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span
+                          className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${
+                            completed
+                              ? 'bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron'
+                              : 'bg-canvas-muted text-foreground-subtle'
+                          }`}
+                        >
+                          <Icon name={completed ? 'check' : 'cap'} size={completed ? 22 : 18} />
+                        </span>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-heading text-sm font-semibold text-foreground">
+                              {workshop?.title ?? 'Workshop'}
+                            </h3>
+                            <WorkshopAssignmentStatusBadge status={assignment.status} />
+                          </div>
+                          {assignment.instructions ? (
+                            <p className="mt-1 text-xs text-foreground-muted">
+                              {assignment.instructions}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                      <Link
+                        href={`/education/assignments/${assignment.id}`}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1.5 text-sm font-medium text-link transition hover:bg-canvas-subtle"
+                      >
+                        {completed ? 'Visa' : 'Genomför'} <Icon name="external" size={14} />
+                      </Link>
+                    </li>
+                  );
+                })}
+                {memberDocs.map((assignment) => {
+                  const doc = assignment.expand?.document;
+                  const completed = assignment.status === 'completed';
+                  return (
+                    <li
+                      key={assignment.id}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-default p-4"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span
+                          className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${
+                            completed
+                              ? 'bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron'
+                              : 'bg-canvas-muted text-foreground-subtle'
+                          }`}
+                        >
+                          <Icon name={completed ? 'check' : 'doc'} size={completed ? 22 : 18} />
+                        </span>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-heading text-sm font-semibold text-foreground">
+                              {doc?.title ?? 'Dokument'}
+                            </h3>
+                            {doc ? (
+                              <span className="inline-flex items-center rounded-full border border-default bg-canvas-subtle px-2 py-0.5 text-[11px] font-medium text-foreground-muted">
+                                {educationDocumentKindLabels[doc.doc_kind] ?? doc.doc_kind}
+                              </span>
+                            ) : null}
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                completed
+                                  ? 'bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron'
+                                  : 'bg-canvas-muted text-foreground-muted'
+                              }`}
+                            >
+                              {completed ? 'Slutförd' : 'Tilldelad'}
+                            </span>
+                          </div>
+                          {assignment.instructions ? (
+                            <p className="mt-1 text-xs text-foreground-muted">
+                              {assignment.instructions}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                      <Link
+                        href="/mina-aktiviteter"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1.5 text-sm font-medium text-link transition hover:bg-canvas-subtle"
+                      >
+                        Öppna <Icon name="external" size={14} />
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
         ) : null}
 
         {/* De minimis */}
