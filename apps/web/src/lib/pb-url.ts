@@ -25,9 +25,17 @@ function target(): 'staging' | 'production' {
   return 'staging';
 }
 
+const STAGING_PB_FALLBACK =
+  'https://pocketbase-r10nklch8dkune7s0flczb89.212.147.227.223.sslip.io';
+
 function localDefault(): string {
+  // In containerized staging/production deploys we often run ONLY the web app
+  // image (no compose service named "pocketbase"). Falling back to
+  // http://pocketbase:8080 makes auth fail hard with "Kunde inte nå
+  // PocketBase". Default to staging PB URL instead when env is missing,
+  // matching the documented safety policy in this file.
   return process.env.NODE_ENV === 'production'
-    ? 'http://pocketbase:8080'
+    ? STAGING_PB_FALLBACK
     : 'http://localhost:8080';
 }
 
