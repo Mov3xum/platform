@@ -2,43 +2,48 @@
 
 ## Problemet vi löste
 
-Coolify byggde Next.js-imagen **på UpCloud-hosten** vid varje deploy.
+Coolify byggde tidigare Next.js-imagen **på UpCloud-hosten** vid varje deploy.
 `next build` + file-tracing tröskade minne i timmar (senast ~30 h) och varje
-nytt deploy köades bakom det → 381 köade deploys.
+nytt deploy köades bakom det → 381 köade deploys. PocketBase byggdes också
+lokalt i stacken och kunde bli en lika lång flaskhals.
 
 ## Lösningen
 
-GitHub Actions kompilerar `apps/web/Dockerfile` på sina runners (4 vCPU /
-16 GB RAM, med lager-cache) och pushar imagen till **GitHub Container
-Registry (GHCR)**. Coolify slutar kompilera och **pullar bara** den färdiga
-imagen — sekunder i stället för timmar.
+GitHub Actions kompilerar både `apps/web/Dockerfile` och
+`backend/pocketbase-schema/Dockerfile` på sina runners (4 vCPU / 16 GB RAM,
+med lager-cache) och pushar images till **GitHub Container Registry
+(GHCR)**. Coolify slutar kompilera och **pullar bara** de färdiga images —
+sekunder i stället för timmar.
 
 ```
-push → GitHub Actions (build-image.yml) → ghcr.io/mov3xum/platform-web:<tag>
-                                              │
-                            Coolify deploy webhook → docker pull → kör
+push → GitHub Actions (build-image.yml + build-pocketbase-image.yml)
+  → ghcr.io/mov3xum/platform-web:<tag>
+  → ghcr.io/mov3xum/platform-pocketbase:<tag>
+                  │
+            Coolify deploy webhook → docker pull → kör
 ```
 
-- Image: `ghcr.io/mov3xum/platform-web`
+- Images: `ghcr.io/mov3xum/platform-web` och `ghcr.io/mov3xum/platform-pocketbase`
 - Taggar: `staging`, `production` (rörliga) + `sha-<commit>` (oföränderlig)
 - Byggcache: GitHub Actions cache (`type=gha`) → snabba ombyggen
 
 ## Engångsinställning i Coolify (krävs)
 
-PocketBase byggs fortfarande på hosten (det tar sekunder) — bara **web**-
-tjänsten ändras till att pulla.
+Både web och PocketBase pullas nu från GHCR — inga lokala Docker-builds i
+Coolify ska återstå.
 
-1. **Gör GHCR-paketet pull-bart.**
-   - Enklast: gör `ghcr.io/mov3xum/platform-web` **publikt** (read) under
+1. **Gör GHCR-paketen pull-bara.**
+   - Enklast: gör `ghcr.io/mov3xum/platform-web` och
+     `ghcr.io/mov3xum/platform-pocketbase` **publika** (read) under
      GitHub → Packages → Package settings → Change visibility.
    - Alternativt (om det ska vara privat): lägg till en registry-credential i
      Coolify (GHCR-användarnamn + en PAT med `read:packages`) och koppla den
-     till web-resursen.
+     till båda resurserna.
 
 2. **Peka web-tjänsten på den förbyggda imagen.**
    - Om Coolify-resursen byggs från `infra/coolify.yml`: inget mer behövs —
-     `web`-tjänsten använder nu `image: ghcr.io/mov3xum/platform-web:...`
-     med `pull_policy: always`.
+     både `web`- och `pocketbase`-tjänsten använder nu `image:
+     ghcr.io/mov3xum/platform-...:...` med `pull_policy: always`.
    - Om web-appen är en separat "Dockerfile"-resurs i Coolify-UI:t: byt dess
      **Build Pack** till **Docker Image** och sätt imagen till
      `ghcr.io/mov3xum/platform-web:staging` (resp. `:production`). Aktivera
@@ -54,8 +59,9 @@ tjänsten ändras till att pulla.
 
 ## Verifiera
 
-- GitHub → Actions → "Deploy to Coolify Staging" → jobbet **build-image**
-  ska bli grönt och Packages ska visa en ny `staging`-tagg.
+- GitHub → Actions → "Deploy to Coolify Staging" → jobben **build-image**
+  och **build-pocketbase-image** ska bli gröna och Packages ska visa nya
+  `staging`-taggar.
 - Coolify-deployloggen ska visa `Pulling image ...` i stället för
   `Building docker image started`.
 

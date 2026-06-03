@@ -50,8 +50,7 @@ jobs:
           fi
 
   # Compile the web image on GitHub's runners and push it to GHCR. Coolify
-  # then pulls this prebuilt image instead of compiling on the UpCloud host
-  # (which took up to 30 h and queued every other deploy behind it).
+  # then pulls this prebuilt image instead of compiling on the UpCloud host.
   build-image:
     needs: detect-pocketbase-changes
     permissions:
@@ -61,10 +60,20 @@ jobs:
     with:
       image_tag: staging
 
+  build-pocketbase-image:
+    needs: detect-pocketbase-changes
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-pocketbase-image.yml
+    with:
+      image_tag: staging
+
   deploy:
     needs:
       - detect-pocketbase-changes
       - build-image
+      - build-pocketbase-image
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -79,10 +88,9 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
-      # The web image is compiled+validated in the build-image job above; the
+      # The web and PocketBase images are compiled in the jobs above; the
       # typecheck here remains a fast correctness gate before we trigger the
-      # Coolify pull. (No separate `yarn build` — that now happens inside the
-      # Docker image build, so duplicating it would only waste CI minutes.)
+      # Coolify pull.
       - name: Typecheck
         run: yarn typecheck
 
