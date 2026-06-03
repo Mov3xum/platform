@@ -28,6 +28,17 @@ function target(): 'staging' | 'production' {
 const STAGING_PB_FALLBACK =
   'https://pocketbase-r10nklch8dkune7s0flczb89.212.147.227.223.sslip.io';
 
+function normalizeServerCandidate(value: string | undefined): string | undefined {
+  const v = (value || '').trim();
+  if (!v) return undefined;
+  // In production Dockerfile deploys the compose-only hostname
+  // "pocketbase:8080" is unreachable and causes recurring auth outages.
+  if (process.env.NODE_ENV === 'production' && /https?:\/\/pocketbase:8080\/?$/i.test(v)) {
+    return undefined;
+  }
+  return v;
+}
+
 function localDefault(): string {
   // In containerized staging/production deploys we often run ONLY the web app
   // image (no compose service named "pocketbase"). Falling back to
@@ -42,10 +53,10 @@ function localDefault(): string {
 export function getServerPbUrl(): string {
   const suffix = target().toUpperCase(); // STAGING | PRODUCTION
   return (
-    process.env[`POCKETBASE_URL_${suffix}`] ||
-    process.env.POCKETBASE_URL ||
-    process.env[`NEXT_PUBLIC_POCKETBASE_URL_${suffix}`] ||
-    process.env.NEXT_PUBLIC_POCKETBASE_URL ||
+    normalizeServerCandidate(process.env[`POCKETBASE_URL_${suffix}`]) ||
+    normalizeServerCandidate(process.env.POCKETBASE_URL) ||
+    normalizeServerCandidate(process.env[`NEXT_PUBLIC_POCKETBASE_URL_${suffix}`]) ||
+    normalizeServerCandidate(process.env.NEXT_PUBLIC_POCKETBASE_URL) ||
     localDefault()
   );
 }
