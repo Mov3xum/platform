@@ -14,18 +14,9 @@ jobs:
     with:
       image_tag: production
 
-  build-pocketbase-image:
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/build-pocketbase-image.yml
-    with:
-      image_tag: production
-
   deploy:
     needs:
       - build-image
-      - build-pocketbase-image
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
