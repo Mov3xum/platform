@@ -1,8 +1,10 @@
 'use server';
 
+import PocketBase from 'pocketbase';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
+import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { hasRole } from '@/lib/rbac';
 import {
   createLead,
@@ -376,6 +378,35 @@ const FLOW_TYPES = ['chat', 'wizard', 'quiz'] as const;
 // Startupkompassen hanteras av admin, coach och incubator_lead.
 const MANAGE_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
 
+function statusOf(err: unknown): number | undefined {
+  if (typeof err === 'object' && err !== null && 'status' in err) {
+    return (err as { status?: number }).status;
+  }
+  return undefined;
+}
+
+// Skriv via app-user-klienten först; faller tillbaka på superuser vid 400/403
+// (PB v0.23.4:s rule-eval-bugg, CLAUDE.md § 21.3 — annars behöriga staff-
+// skrivningar nekas tyst → server-actionen kastade 500). Samma mönster som
+// lib/actions/onboarding.ts + education-documents.ts. Roll + tenant verifieras
+// ALLTID i server-actionen INNAN detta anropas — superusern är en robusthets-
+// fallback, inte behörighetsgränsen.
+async function writeWithFallback<T>(
+  pb: PocketBase,
+  run: (client: PocketBase) => Promise<T>
+): Promise<T> {
+  try {
+    return await run(pb);
+  } catch (err) {
+    const status = statusOf(err);
+    if (status === 400 || status === 403) {
+      const su = await getSuperuserPb();
+      if (su.ok) return run(su.pb);
+    }
+    throw err;
+  }
+}
+
 function slugify(s: string): string {
   return s
     .toLowerCase()
@@ -413,17 +444,19 @@ export async function createModuleAction(formData: FormData) {
   // tenants moduler med användartoken, så vi försöker den rena sluggen och
   // faller tillbaka på ett suffix om DB:n nekar pga unik-konflikt.
   async function createWith(publicSlug: string) {
-    return pb.collection('compass_modules').create({
-      tenant: user.tenant,
-      slug: createdSlug,
-      public_slug: publicSlug,
-      name,
-      description,
-      flow_type: flowType,
-      is_active: isActive,
-      public_url_enabled: publicEnabled,
-      sort_order: 999
-    });
+    return writeWithFallback(pb, (client) =>
+      client.collection('compass_modules').create({
+        tenant: user.tenant,
+        slug: createdSlug,
+        public_slug: publicSlug,
+        name,
+        description,
+        flow_type: flowType,
+        is_active: isActive,
+        public_url_enabled: publicEnabled,
+        sort_order: 999
+      })
+    );
   }
   try {
     let rec;
@@ -513,7 +546,7 @@ export async function updateModuleAction(formData: FormData) {
   if (model) patch.model = model;
 
   try {
-    await pb.collection('compass_modules').update(id, patch);
+    await writeWithFallback(pb, (c) => c.collection('compass_modules').update(id, patch));
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
     // PB unik-index-fel på public_slug → vänligt meddelande.
@@ -548,7 +581,7 @@ export async function deleteModuleAction(formData: FormData) {
   if (existing.tenant !== user.tenant) throw new Error('Forbidden');
 
   try {
-    await pb.collection('compass_modules').delete(id);
+    await writeWithFallback(pb, (c) => c.collection('compass_modules').delete(id));
   } catch {
     // ignore
   }
@@ -621,16 +654,18 @@ export async function addQuestionAction(formData: FormData) {
   if (mod.tenant !== user.tenant) throw new Error('Forbidden');
 
   try {
-    await pb.collection('compass_questions').create({
-      module: moduleId,
-      key,
-      prompt,
-      help_text: helpText || undefined,
-      input_type: inputType,
-      required,
-      choices,
-      sort_order: Date.now() % 1_000_000
-    });
+    await writeWithFallback(pb, (c) =>
+      c.collection('compass_questions').create({
+        module: moduleId,
+        key,
+        prompt,
+        help_text: helpText || undefined,
+        input_type: inputType,
+        required,
+        choices,
+        sort_order: Date.now() % 1_000_000
+      })
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
     throw new Error(`Kunde inte skapa fråga: ${msg}`);
@@ -650,7 +685,7 @@ export async function deleteQuestionAction(formData: FormData) {
 
   const pb = await getServerPb();
   try {
-    await pb.collection('compass_questions').delete(id);
+    await writeWithFallback(pb, (c) => c.collection('compass_questions').delete(id));
   } catch {
     // ignore
   }
