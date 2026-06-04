@@ -6,6 +6,7 @@ import { PageShell } from '@/components/PageShell';
 import { assignableRolesFor, ROLE_LABELS } from '@/lib/users/validate';
 import { UserForm, type StartupOption } from './UserForm';
 import { UserStartupLink } from './UserStartupLink';
+import { MemberAccessDiagnostic } from './MemberAccessDiagnostic';
 
 export const dynamic = 'force-dynamic';
 
@@ -86,6 +87,8 @@ export default async function AdminUsersPage() {
         </section>
 
         <UserForm startups={startups} assignableRoles={assignableRoles} />
+
+        <MemberAccessDiagnostic />
 
         <section className="rounded-3xl border border-default bg-surface p-6">
           <h2 className="text-base font-semibold text-foreground">

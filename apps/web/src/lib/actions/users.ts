@@ -5,6 +5,7 @@ import { type Role } from '@platform/shared';
 import { requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
+import { escFilter } from '@/lib/pb-filter';
 import { assignableRolesFor, ROLE_LABELS, validateNewUserInput } from '@/lib/users/validate';
 
 // Staff-initierad registrering av plattformsanvändare.
@@ -250,4 +251,204 @@ export async function updateUserStartupLinkAction(
       ? `Kopplade ${who} till ${startupName}. Personen ser sina aktiviteter vid nästa sidladdning.`
       : `Tog bort bolagskopplingen för ${who}.`
   };
+}
+
+// =============================================================================
+// Diagnostik: varför ser en bolagsmedlem inte sina tilldelade aktiviteter?
+//
+// Read-only. Läser via superuser (för att se sanningen oberoende av RLS) men
+// scopar HÅRT till inloggad staffs tenant — admin ser aldrig in i en annan
+// tenant. Avslöjar de vanliga felorsakerna: fel/tom linked_startups, bolag i
+// annan tenant, eller att tilldelningen landade på en annan bolagspost.
+// =============================================================================
+
+export type MemberAccessReport = {
+  userFound: boolean;
+  userId?: string;
+  email?: string;
+  roles?: string[];
+  userTenant?: string;
+  actorTenant: string;
+  tenantMatch?: boolean;
+  isPureMember?: boolean;
+  linked: { id: string; name?: string; tenant?: string; tenantMatch: boolean; exists: boolean }[];
+  assignmentsForLinked: { id: string; workshopTitle?: string; startupId: string; tenant: string }[];
+  recentAssignments: {
+    id: string;
+    workshopTitle?: string;
+    startupId: string;
+    startupName?: string;
+    tenant: string;
+    created?: string;
+  }[];
+};
+
+export type DiagnoseState = {
+  status: 'idle' | 'ok' | 'error';
+  message?: string;
+  report?: MemberAccessReport;
+};
+
+export async function diagnoseMemberAccessAction(
+  _prev: DiagnoseState,
+  formData: FormData
+): Promise<DiagnoseState> {
+  const actor = await requireUser();
+  if (!hasRole(actor.roles, ['admin', 'incubator_lead'])) {
+    return { status: 'error', message: 'Endast inkubatorledning får köra diagnostiken.' };
+  }
+  const email = String(formData.get('email') ?? '').trim().toLowerCase();
+  if (!email) return { status: 'error', message: 'Ange en e-postadress.' };
+
+  const suResult = await getSuperuserPb();
+  if (!suResult.ok) {
+    return {
+      status: 'error',
+      message:
+        suResult.reason === 'missing_credentials'
+          ? 'Serverfel: superuser-credentials saknas.'
+          : 'Serverfel: kunde inte autentisera superuser.'
+    };
+  }
+  const pb = suResult.pb;
+
+  const report: MemberAccessReport = {
+    userFound: false,
+    actorTenant: actor.tenant,
+    linked: [],
+    assignmentsForLinked: [],
+    recentAssignments: []
+  };
+
+  // 1. Slå upp användaren (scopad till actorns tenant).
+  type UserRec = {
+    id: string;
+    email?: string;
+    roles?: string[];
+    tenant?: string;
+    linked_startups?: string[];
+  };
+  let userRec: UserRec | null = null;
+  try {
+    userRec = await pb
+      .collection('users')
+      .getFirstListItem<UserRec>(
+        `email = "${escFilter(email)}" && tenant = "${escFilter(actor.tenant)}"`,
+        { fields: 'id,email,roles,tenant,linked_startups' }
+      );
+  } catch {
+    userRec = null;
+  }
+
+  if (!userRec) {
+    // Finns kontot alls (i annan tenant)? Hjälper diagnosen utan att läcka data.
+    let existsElsewhere = false;
+    try {
+      await pb
+        .collection('users')
+        .getFirstListItem(`email = "${escFilter(email)}"`, { fields: 'id' });
+      existsElsewhere = true;
+    } catch {
+      existsElsewhere = false;
+    }
+    return {
+      status: 'ok',
+      message: existsElsewhere
+        ? 'Kontot finns men i en ANNAN organisation (tenant) än din — det kan inte kopplas till dina bolag.'
+        : 'Hittade ingen användare med den e-posten.',
+      report
+    };
+  }
+
+  report.userFound = true;
+  report.userId = userRec.id;
+  report.email = userRec.email;
+  report.roles = userRec.roles ?? [];
+  report.userTenant = userRec.tenant;
+  report.tenantMatch = String(userRec.tenant) === actor.tenant;
+  const staffOrObserver = ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'];
+  report.isPureMember =
+    (report.roles ?? []).includes('startup_member') &&
+    !(report.roles ?? []).some((r) => staffOrObserver.includes(r));
+
+  const linkedIds = (userRec.linked_startups ?? []).filter(Boolean);
+
+  // 2. Lös upp varje länkat bolag.
+  for (const id of linkedIds) {
+    try {
+      const s = await pb
+        .collection('startups')
+        .getOne<{ id: string; name?: string; tenant?: string }>(id, {
+          fields: 'id,name,tenant'
+        });
+      report.linked.push({
+        id,
+        name: s.name,
+        tenant: s.tenant,
+        tenantMatch: String(s.tenant) === actor.tenant,
+        exists: true
+      });
+    } catch {
+      report.linked.push({ id, tenantMatch: false, exists: false });
+    }
+  }
+
+  // 3. Tilldelningar för de länkade bolagen (samma tenant-scope som vyn).
+  if (linkedIds.length > 0) {
+    const ors = linkedIds.map((id) => `startup = "${escFilter(id)}"`).join(' || ');
+    try {
+      const res = await pb.collection('workshop_assignments').getList(1, 100, {
+        filter: `tenant = "${escFilter(actor.tenant)}" && (${ors})`,
+        sort: '-created',
+        expand: 'workshop'
+      });
+      report.assignmentsForLinked = res.items.map((it) => {
+        const rec = it as unknown as {
+          id: string;
+          startup: string;
+          tenant: string;
+          expand?: { workshop?: { title?: string } };
+        };
+        return {
+          id: rec.id,
+          workshopTitle: rec.expand?.workshop?.title,
+          startupId: rec.startup,
+          tenant: rec.tenant
+        };
+      });
+    } catch {
+      /* lämna tomt */
+    }
+  }
+
+  // 4. Senaste tilldelningar i tenanten — visar VAR tilldelningar faktiskt
+  //    landade (t.ex. på en dubblett-post av bolaget).
+  try {
+    const res = await pb.collection('workshop_assignments').getList(1, 20, {
+      filter: `tenant = "${escFilter(actor.tenant)}"`,
+      sort: '-created',
+      expand: 'workshop,startup'
+    });
+    report.recentAssignments = res.items.map((it) => {
+      const rec = it as unknown as {
+        id: string;
+        startup: string;
+        tenant: string;
+        created?: string;
+        expand?: { workshop?: { title?: string }; startup?: { name?: string } };
+      };
+      return {
+        id: rec.id,
+        workshopTitle: rec.expand?.workshop?.title,
+        startupId: rec.startup,
+        startupName: rec.expand?.startup?.name,
+        tenant: rec.tenant,
+        created: rec.created
+      };
+    });
+  } catch {
+    /* lämna tomt */
+  }
+
+  return { status: 'ok', report };
 }
