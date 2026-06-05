@@ -10,6 +10,18 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/verify-stop.sh",
+            "timeout": 300,
+            "statusMessage": "Verifierar (typecheck + lint + test)…"
+          }
+        ]
+      }
     ]
   },
   "permissions": {
