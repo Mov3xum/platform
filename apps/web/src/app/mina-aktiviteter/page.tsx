@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { getAssignmentReadPb } from '@/lib/assignments/read';
 import { canAccessModuleForUser, hasRole, canRunTool } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { escFilter } from '@/lib/pb-filter';
@@ -120,10 +121,17 @@ export default async function MinaAktiviteterPage({
   }
 
   const pb = await getServerPb();
+  // Tilldelningar (workshops/dokument) + bolagsraden läses via en robust
+  // klient: PB v0.23.4:s rule-eval kan TYST returnera noll rader för en annars
+  // behörig medlem (§ 21.3), och en tom lista ger ingen felsignal att fånga.
+  // Behörigheten är redan avgjord ovan: en medlem får bara sitt eget
+  // `linkedStartups[0]`, och staff/observer (tenant-brett) tenant-verifieras
+  // nedan innan något renderas. Se lib/assignments/read.ts.
+  const assignPb = await getAssignmentReadPb();
 
   let startup: StartupRecord | null = null;
   try {
-    startup = await pb.collection('startups').getOne<StartupRecord>(targetId);
+    startup = await assignPb.collection('startups').getOne<StartupRecord>(targetId);
     if (String(startup.tenant) !== user.tenant) startup = null;
   } catch {
     startup = null;
@@ -149,7 +157,7 @@ export default async function MinaAktiviteterPage({
   // Tilldelade workshops.
   let workshops: WorkshopAssignment[] = [];
   try {
-    const res = await pb
+    const res = await assignPb
       .collection(PB_COLLECTIONS.workshopAssignments)
       .getList<WorkshopAssignment>(1, 100, {
         filter: `tenant = "${escFilter(user.tenant)}" && startup = "${escFilter(targetId)}"`,
@@ -164,7 +172,7 @@ export default async function MinaAktiviteterPage({
   // Tilldelade utbildningsdokument.
   let documentAssignments: EducationDocumentAssignment[] = [];
   try {
-    const res = await pb
+    const res = await assignPb
       .collection(PB_COLLECTIONS.educationDocumentAssignments)
       .getList<EducationDocumentAssignment>(1, 100, {
         filter: `tenant = "${escFilter(user.tenant)}" && startup = "${escFilter(targetId)}"`,

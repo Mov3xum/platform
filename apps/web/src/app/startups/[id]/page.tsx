@@ -3,7 +3,9 @@ import { notFound } from 'next/navigation';
 import { getOneForTenant } from '@/lib/pb.server';
 import { markdownToHtml } from '@/lib/safe-html';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { getAssignmentReadPb } from '@/lib/assignments/read';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { escFilter } from '@/lib/pb-filter';
 import { canAccessModule, hasRole } from '@/lib/rbac';
 import {
   PhaseBadge,
@@ -301,6 +303,11 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   }
 
   const pb = await getServerPb();
+  // Tilldelningarna läses via en robust klient (PB v0.23.4 rule-eval, § 21.3):
+  // åtkomsten till just detta bolag är redan verifierad ovan
+  // (getOneForTenant → notFound annars), och frågorna är tenant+startup-scopade.
+  // Se lib/assignments/read.ts.
+  const assignPb = await getAssignmentReadPb();
 
   const emptyList = { items: [], totalItems: 0 };
   const [
@@ -351,8 +358,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       sort: '-created',
       expand: 'tool,tool_run'
     }),
-    pb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopAssignmentRecord>(1, 50, {
-      filter: `startup = "${id}" && tenant = "${user.tenant}"`,
+    assignPb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopAssignmentRecord>(1, 50, {
+      filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
       sort: '-created',
       expand: 'workshop,assigned_by,collaborators,meeting'
     }),
@@ -373,10 +380,10 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       filter: `startup = "${id}" && tenant = "${user.tenant}"`,
       sort: '-starts_at'
     }),
-    pb
+    assignPb
       .collection(PB_COLLECTIONS.educationDocumentAssignments)
       .getList<EducationDocumentAssignment>(1, 100, {
-        filter: `startup = "${id}" && tenant = "${user.tenant}"`,
+        filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
         sort: '-created',
         expand: 'document,completed_by,collaborators,meeting'
       }),

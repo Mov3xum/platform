@@ -1198,7 +1198,7 @@ export async function assignWorkshopToStartupAction(
 
   try {
     const instructions = options?.instructions?.slice(0, 2000) || '';
-    const assignment = await pb.collection(PB_COLLECTIONS.workshopAssignments).create({
+    const assignmentData = {
       tenant: user.tenant,
       workshop: workshopId,
       startup: startupId,
@@ -1212,9 +1212,27 @@ export async function assignWorkshopToStartupAction(
       takeaway_json: {},
       artifacts_json: {},
       ai_thread_json: []
-    });
+    };
 
-    const activity = await pb.collection('activities').create({
+    // Skriv via användartoken; faller tillbaka på superuser om PB v0.23.4:s
+    // rule-eval TYST nekar en annars behörig staff-create (samma mönster som
+    // education_documents § 18.3 — roll + tenant är redan verifierade ovan).
+    // ALLA efterföljande skrivningar (activity, samarbete, update) använder
+    // samma klient så de inte heller fastnar på regel-buggen.
+    let writePb = pb;
+    let assignment;
+    try {
+      assignment = await pb.collection(PB_COLLECTIONS.workshopAssignments).create(assignmentData);
+    } catch (err) {
+      const status = toPbErrorLike(err).status;
+      if (status !== 400 && status !== 403) throw err;
+      const su = await getSuperuserPb();
+      if (!su.ok) throw err;
+      writePb = su.pb;
+      assignment = await writePb.collection(PB_COLLECTIONS.workshopAssignments).create(assignmentData);
+    }
+
+    const activity = await writePb.collection('activities').create({
       startup: startupId,
       type: 'workshop',
       title: `${workshop.title} – tilldelad workshop`,
@@ -1231,7 +1249,7 @@ export async function assignWorkshopToStartupAction(
     const collaboratorIds = options?.collaboratorIds ?? [];
     if (collaboratorIds.length > 0) {
       const linked = await createCollaboratorTasks({
-        pb,
+        pb: writePb,
         tenantId: user.tenant,
         startupId,
         collaboratorIds,
@@ -1242,7 +1260,7 @@ export async function assignWorkshopToStartupAction(
     }
     if (options?.meeting?.title?.trim()) {
       const meetingId = await createAssignmentMeeting({
-        pb,
+        pb: writePb,
         tenantId: user.tenant,
         startupId,
         organizerId: user.id,
@@ -1253,7 +1271,7 @@ export async function assignWorkshopToStartupAction(
       if (meetingId) update.meeting = meetingId;
     }
 
-    await pb.collection(PB_COLLECTIONS.workshopAssignments).update(String(assignment.id), update);
+    await writePb.collection(PB_COLLECTIONS.workshopAssignments).update(String(assignment.id), update);
 
     revalidatePath('/education');
     revalidatePath('/dashboard');
