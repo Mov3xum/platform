@@ -15,6 +15,7 @@ import {
 } from '@/lib/ai/context';
 import { buildKnowledgeContext } from '@/lib/ai/agent-prompt';
 import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
+import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from '@/lib/ai/guidance';
 import { buildChatTools } from '@/lib/ai/tools';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
 import { hasRole } from '@/lib/rbac';
@@ -74,7 +75,9 @@ const CHAT_FALLBACK_MODELS = [
 // När bilder är bifogade måste vi använda en vision-kapabel modell.
 // Pixtral 12B stödjer både vision och function calling.
 const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
-const MAX_TOOL_ITERATIONS = 4;
+// Interaktiv chatt: höjt över det autonoma defaulten (4) så ett intent-flöde
+// (search_records → describe_collection → query → aggregate → svar) ryms.
+const MAX_TOOL_ITERATIONS = 7;
 
 // Modellval för dashboard-chatten
 const STAFF_MODEL = 'mistral-large-latest';
@@ -487,6 +490,8 @@ async function runStaffChatWithTools(
     BASE_SYSTEM_PROMPT +
     (agentBlock ? `\n\n---\n${agentBlock}\n---` : '') +
     STAFF_TOOL_GUIDANCE +
+    SEARCH_STRATEGY_GUIDANCE +
+    DOMAIN_GLOSSARY +
     `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +
     (webBlock ? `\n\n---\n${webBlock}\n---` : '') +
     STYLE_REMINDER;

@@ -4,8 +4,10 @@ import {
   composeFilter,
   getExposedCollection,
   maskRecord,
+  searchableTextFields,
   type ExposedCollection
 } from './schema';
+import { rankCandidates, significantTokens } from './fuzzy';
 import type { MistralToolCall, MistralToolDefinition } from './mistral';
 import { escFilter } from '@/lib/pb-filter';
 import type { GeneratedFileRef } from '@platform/shared';
@@ -32,6 +34,25 @@ const MAX_FIELD_LENGTH = 400;
 const MAX_FILTER_LENGTH = 500;
 const MAX_SORT_LENGTH = 200;
 const MAX_EXPAND_LENGTH = 200;
+
+// search_records / aggregate_collection / describe_collection
+const MAX_SEARCH_LIMIT = 20;
+const SEARCH_CANDIDATE_FETCH = 100; // kandidater per hämtning innan JS-ranking
+const SEARCH_THRESHOLD = 0.4;
+const MAX_AGG_SCAN = 500; // rader aggregeringen får skanna (robusthet § 10)
+const MAX_DISTINCT_VALUES = 40;
+const AGG_OPS = ['count', 'sum', 'avg', 'min', 'max'] as const;
+type AggOp = (typeof AGG_OPS)[number];
+
+// Systemfält som aldrig är meningsfulla att fuzzy-matcha mot.
+const SYSTEM_RECORD_KEYS: ReadonlySet<string> = new Set([
+  'id',
+  'created',
+  'updated',
+  'collectionId',
+  'collectionName',
+  'expand'
+]);
 
 // Återanvändbara dokument-sub-scheman (inlineas i generate_document — undviker
 // $ref/$defs som Mistral inte alltid resolvar).
@@ -205,6 +226,109 @@ export function buildChatTools(
             }
           },
           required: ['collection']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'search_records',
+        description:
+          'Hittar poster via FRITEXT — tolerant mot felstavning, ordföljd och ' +
+          'extra ord. Använd detta FÖRST när användaren nämner en sak vid namn ' +
+          '(bolag, workshop, person, dokument) i stället för att gissa ett exakt ' +
+          'query_collection-filter. Returnerar de mest sannolika träffarna med en ' +
+          'score (1.0 = exakt). Tenant-scope och PII-maskning läggs på automatiskt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            collection: {
+              type: 'string',
+              enum: collectionNames,
+              description: 'Kollektion att söka i'
+            },
+            query: {
+              type: 'string',
+              description:
+                'Användarens egna ord, t.ex. "workshop 1 internationalisering" eller ' +
+                '"enava". Behöver inte vara exakt stavat.'
+            },
+            limit: {
+              type: 'integer',
+              description: `Max antal träffar (1-${MAX_SEARCH_LIMIT}, default 8)`,
+              minimum: 1,
+              maximum: MAX_SEARCH_LIMIT
+            }
+          },
+          required: ['collection', 'query']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'describe_collection',
+        description:
+          'Beskriver en kollektions fält och giltiga enum-värden. Använd INNAN du ' +
+          'filtrerar på status, fas e.d. så du filtrerar på rätt värde (t.ex. ' +
+          '"active", inte "aktiv"). Ange `field` för att även få de distinkta ' +
+          'värden som faktiskt förekommer i ett fält.',
+        parameters: {
+          type: 'object',
+          properties: {
+            collection: {
+              type: 'string',
+              enum: collectionNames,
+              description: 'Kollektion att beskriva'
+            },
+            field: {
+              type: 'string',
+              description:
+                'Valfritt enkelt fältnamn (inga punkter). Returnerar distinkta ' +
+                `värden som förekommer (max ${MAX_DISTINCT_VALUES}).`
+            }
+          },
+          required: ['collection']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'aggregate_collection',
+        description:
+          'Beräknar summa/snitt/min/max/antal över en kollektion, valfritt ' +
+          'grupperat. Använd för totaler och fördelningar i stället för att hämta ' +
+          'rader och räkna själv. Tenant-scope läggs på automatiskt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            collection: {
+              type: 'string',
+              enum: collectionNames,
+              description: 'Kollektion att aggregera'
+            },
+            op: {
+              type: 'string',
+              enum: [...AGG_OPS],
+              description: 'Aggregat: count, sum, avg, min eller max'
+            },
+            field: {
+              type: 'string',
+              description:
+                'Numeriskt fält att aggregera (krävs för sum/avg/min/max; ' +
+                'enkelt fältnamn utan punkter). Ignoreras för count.'
+            },
+            group_by: {
+              type: 'string',
+              description: 'Valfritt enkelt fält att gruppera per (t.ex. `phase`).'
+            },
+            filter: {
+              type: 'string',
+              description: 'Valfritt PocketBase-filter (tenant läggs till automatiskt).'
+            }
+          },
+          required: ['collection', 'op']
         }
       }
     }
@@ -536,6 +660,12 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: `Läser ${collectionLabel(coll)}` };
     case 'count_collection':
       return { tool: name, label: `Räknar ${collectionLabel(coll)}` };
+    case 'search_records':
+      return { tool: name, label: `Söker i ${collectionLabel(coll)}` };
+    case 'describe_collection':
+      return { tool: name, label: `Undersöker ${collectionLabel(coll)}` };
+    case 'aggregate_collection':
+      return { tool: name, label: `Sammanställer ${collectionLabel(coll)}` };
     case 'update_startup_field':
       return { tool: name, label: 'Uppdaterar bolagsuppgift' };
     case 'create_startup_activity':
@@ -711,6 +841,254 @@ async function runCountCollection(
   }
 }
 
+/** Plockar ut de (redan maskade) strängvärden en post kan fuzzy-matchas mot. */
+function recordSearchTexts(record: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(record)) {
+    if (SYSTEM_RECORD_KEYS.has(k)) continue;
+    if (typeof v === 'string' && v.trim()) out.push(v);
+  }
+  return out;
+}
+
+async function runSearchRecords(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const collectionName = String(args.collection ?? '');
+  const collection = getExposedCollection(ctx.collections, collectionName);
+  if (!collection) {
+    const available = ctx.collections.map((c) => c.name).join(', ');
+    return { ok: false, error: `Kollektion '${collectionName}' är inte exponerad. Välj från: ${available}` };
+  }
+
+  const query = typeof args.query === 'string' ? args.query.trim() : '';
+  if (!query) return { ok: false, error: 'query saknas.' };
+
+  let limit = 8;
+  if (typeof args.limit === 'number' && Number.isFinite(args.limit)) {
+    limit = Math.max(1, Math.min(MAX_SEARCH_LIMIT, Math.floor(args.limit)));
+  }
+
+  const tokens = significantTokens(query);
+  // Bred OR-`~`-förfiltrering på fria textfält (aldrig maskade fält) för att
+  // dra in kandidater billigt. Felstavningar fångas av JS-rankingen nedan via
+  // den ofiltrerade fallbacken.
+  const textFields = searchableTextFields(collection);
+  const prefilterClauses: string[] = [];
+  for (const tok of tokens.slice(0, 6)) {
+    const safe = escFilter(tok);
+    for (const f of textFields.slice(0, 6)) prefilterClauses.push(`${f} ~ "${safe}"`);
+  }
+  const prefilter = prefilterClauses.join(' || ');
+
+  const candidates: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  const addFrom = async (modelFilter: string): Promise<void> => {
+    const res = await ctx.pb
+      .collection(collection.name)
+      .getList(1, SEARCH_CANDIDATE_FETCH, {
+        filter: composeFilter(collection, ctx.tenantId, modelFilter) || undefined
+      });
+    for (const item of res.items as Record<string, unknown>[]) {
+      const id = String(item.id ?? '');
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        candidates.push(item);
+      }
+    }
+  };
+
+  try {
+    if (prefilter && prefilter.length <= MAX_FILTER_LENGTH) await addFrom(prefilter);
+    // Ofiltrerad fallback: ger felstavnings-recall + funkar när schemats
+    // textfält är okända (statisk fallback). Capad till SEARCH_CANDIDATE_FETCH.
+    if (candidates.length < Math.max(limit, 10)) await addFrom('');
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Okänt fel vid sökning.' };
+  }
+
+  const masked = candidates.map((c) => maskRecord(c, collection));
+  const ranked = rankCandidates(query, masked, recordSearchTexts, {
+    limit,
+    threshold: SEARCH_THRESHOLD
+  });
+
+  return {
+    ok: true,
+    data: {
+      collection: collection.name,
+      query,
+      matched: ranked.length,
+      items: ranked.map((r) => ({
+        score: r.score,
+        record: truncateValue(r.item)
+      }))
+    }
+  };
+}
+
+async function runDescribeCollection(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const collectionName = String(args.collection ?? '');
+  const collection = getExposedCollection(ctx.collections, collectionName);
+  if (!collection) {
+    const available = ctx.collections.map((c) => c.name).join(', ');
+    return { ok: false, error: `Kollektion '${collectionName}' är inte exponerad. Välj från: ${available}` };
+  }
+
+  const fields = collection.fields.map((f) => ({
+    name: f.name,
+    type: f.type,
+    ...(f.values && f.values.length > 0 ? { values: f.values } : {}),
+    ...(collection.maskedFields.includes(f.name) ? { masked: true } : {})
+  }));
+
+  const data: Record<string, unknown> = {
+    collection: collection.name,
+    tenant_scoped: Boolean(collection.tenantField),
+    fields
+  };
+
+  const field = typeof args.field === 'string' ? args.field.trim() : '';
+  if (field) {
+    if (field.includes('.')) {
+      return { ok: false, error: 'Endast enkla fältnamn stöds (inga punkter).' };
+    }
+    if (collection.maskedFields.includes(field)) {
+      return { ok: false, error: `Fältet '${field}' är maskat (PII) och kan inte listas.` };
+    }
+    try {
+      const res = await ctx.pb.collection(collection.name).getList(1, MAX_AGG_SCAN, {
+        filter: composeFilter(collection, ctx.tenantId, '') || undefined,
+        fields: field
+      });
+      const distinct: unknown[] = [];
+      const seen = new Set<string>();
+      for (const item of res.items as Record<string, unknown>[]) {
+        const v = item[field];
+        if (v === null || v === undefined || v === '') continue;
+        const key = String(v);
+        if (!seen.has(key)) {
+          seen.add(key);
+          distinct.push(v);
+          if (distinct.length >= MAX_DISTINCT_VALUES) break;
+        }
+      }
+      data.distinct_values = {
+        field,
+        values: distinct,
+        capped: res.totalItems > res.items.length
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Kunde inte läsa fältvärden.' };
+    }
+  }
+
+  return { ok: true, data };
+}
+
+async function runAggregateCollection(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const collectionName = String(args.collection ?? '');
+  const collection = getExposedCollection(ctx.collections, collectionName);
+  if (!collection) {
+    const available = ctx.collections.map((c) => c.name).join(', ');
+    return { ok: false, error: `Kollektion '${collectionName}' är inte exponerad. Välj från: ${available}` };
+  }
+
+  const op = String(args.op ?? '') as AggOp;
+  if (!AGG_OPS.includes(op)) {
+    return { ok: false, error: `Ogiltig op. Välj en av: ${AGG_OPS.join(', ')}` };
+  }
+
+  const field = typeof args.field === 'string' ? args.field.trim() : '';
+  const groupBy = typeof args.group_by === 'string' ? args.group_by.trim() : '';
+
+  for (const [label, name] of [
+    ['field', field],
+    ['group_by', groupBy]
+  ] as const) {
+    if (!name) continue;
+    if (name.includes('.')) return { ok: false, error: `Endast enkla fältnamn stöds (${label}).` };
+    if (collection.maskedFields.includes(name)) {
+      return { ok: false, error: `Fältet '${name}' är maskat (PII) och kan inte aggregeras.` };
+    }
+  }
+  if (op !== 'count' && !field) {
+    return { ok: false, error: `op '${op}' kräver ett numeriskt 'field'.` };
+  }
+
+  const modelFilter = typeof args.filter === 'string' ? args.filter.trim() : '';
+  if (modelFilter) {
+    const err = validateFilter(modelFilter);
+    if (err) return { ok: false, error: err };
+  }
+
+  // Hämta bara de fält som behövs (dataminimering § 9.3).
+  const wanted = ['id', field, groupBy].filter(Boolean).join(',');
+
+  try {
+    const res = await ctx.pb.collection(collection.name).getList(1, MAX_AGG_SCAN, {
+      filter: composeFilter(collection, ctx.tenantId, modelFilter) || undefined,
+      fields: wanted || undefined
+    });
+    const rows = res.items as Record<string, unknown>[];
+    const capped = res.totalItems > rows.length;
+
+    const reduce = (values: number[]): number | null => {
+      if (op === 'count') return values.length;
+      const nums = values.filter((n) => Number.isFinite(n));
+      if (nums.length === 0) return null;
+      if (op === 'sum') return nums.reduce((a, b) => a + b, 0);
+      if (op === 'avg') return nums.reduce((a, b) => a + b, 0) / nums.length;
+      if (op === 'min') return Math.min(...nums);
+      if (op === 'max') return Math.max(...nums);
+      return null;
+    };
+    const numOf = (r: Record<string, unknown>): number => {
+      if (op === 'count') return 1;
+      return Number(r[field]);
+    };
+
+    if (groupBy) {
+      const groups = new Map<string, number[]>();
+      for (const r of rows) {
+        const g = r[groupBy] === null || r[groupBy] === undefined ? '(tomt)' : String(r[groupBy]);
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g)!.push(numOf(r));
+      }
+      const result = Array.from(groups.entries())
+        .map(([group, vals]) => ({ group, value: reduce(vals), count: vals.length }))
+        .sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
+      return {
+        ok: true,
+        data: { collection: collection.name, op, field: field || undefined, group_by: groupBy, scanned: rows.length, capped, groups: result }
+      };
+    }
+
+    // Ogrupperad count = sann totalsumma (inte den capade skanningen).
+    const value = op === 'count' ? res.totalItems : reduce(rows.map(numOf));
+    return {
+      ok: true,
+      data: {
+        collection: collection.name,
+        op,
+        field: field || undefined,
+        scanned: rows.length,
+        capped: op === 'count' ? false : capped,
+        value
+      }
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Okänt fel vid aggregering.' };
+  }
+}
+
 export async function dispatchToolCall(
   call: MistralToolCall,
   ctx: ToolDispatchContext
@@ -727,6 +1105,12 @@ export async function dispatchToolCall(
       return runQueryCollection(args, ctx);
     case 'count_collection':
       return runCountCollection(args, ctx);
+    case 'search_records':
+      return runSearchRecords(args, ctx);
+    case 'describe_collection':
+      return runDescribeCollection(args, ctx);
+    case 'aggregate_collection':
+      return runAggregateCollection(args, ctx);
     case 'update_startup_field':
       return runUpdateStartupField(args, ctx);
     case 'create_startup_activity':

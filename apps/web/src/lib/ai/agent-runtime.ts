@@ -12,6 +12,7 @@ import {
   type ToolDispatchContext
 } from './tools';
 import { buildSchemaSummary, getExposedCollections } from './schema';
+import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from './guidance';
 
 // Hur många gånger modellen får anropa verktyg och få tillbaka resultat
 // innan vi tvingar fram ett slutsvar. Skyddar mot oändliga loopar och
@@ -326,6 +327,10 @@ export async function buildReadToolSurface(
   return {
     tools,
     toolContext: { pb, tenantId, collections },
-    guidance: READ_TOOL_GUIDANCE + `\n\n${buildSchemaSummary(collections)}`
+    guidance:
+      READ_TOOL_GUIDANCE +
+      SEARCH_STRATEGY_GUIDANCE +
+      DOMAIN_GLOSSARY +
+      `\n\n${buildSchemaSummary(collections)}`
   };
 }
