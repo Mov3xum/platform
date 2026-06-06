@@ -1,5 +1,6 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
+import { getSuperuserPb } from '@/lib/integrations/credentials';
 import type {
   CompassModule,
   CompassQuestion,
@@ -10,6 +11,47 @@ import type {
   SecurityEventKind
 } from './types';
 import { LEAD_STATUS_ORDER } from './types';
+
+/* ────────────────────────────────────────────────────────────────────
+   Läs-fallback — PB v0.23.4 rule-eval-bugg (CLAUDE.md § 21.3)
+   ────────────────────────────────────────────────────────────────────
+   PocketBase v0.23.4 kan TYST neka list/view-regler som matchar mot
+   multi-värde-fält (`@request.auth.roles`/`linked_startups`) — även för en
+   behörig staff-användare. För compass_leads ger det symptomet "lead skapas
+   men syns inte i listan": create-regeln (auth+tenant) släpper igenom, men
+   list/view-regeln (staff-roll) evalueras tyst falskt → tom lista.
+
+   Alla läs-callers nedan körs på staff-gejtade sidor (admin/incubator_lead/
+   coach/mentor verifieras med `hasRole` innan anropet) och skickar ALLTID med
+   den inloggades egen `tenant`. Vi kör därför användartoken FÖRST (RLS-lagret
+   bevaras, defense-in-depth) och faller bara tillbaka på en superuser-läsning
+   när resultatet är tomt eller anropet fallerar. Tenant-filtret återanvänds
+   oförändrat i fallbacken, så tenant-isoleringen består. Samma mönster som
+   `writeWithFallback` i lib/actions/compass.ts. */
+async function readWithFallback<T>(
+  pb: PocketBase,
+  run: (client: PocketBase) => Promise<T>,
+  isEmpty: (result: T) => boolean
+): Promise<T> {
+  let primary: T | null = null;
+  try {
+    primary = await run(pb);
+    if (!isEmpty(primary)) return primary;
+  } catch {
+    // användartoken nekades/fel — försök superuser nedan
+  }
+  const su = await getSuperuserPb();
+  if (su.ok) {
+    try {
+      const fb = await run(su.pb);
+      if (!isEmpty(fb)) return fb;
+    } catch {
+      // superuser misslyckades också — falla tillbaka på primärresultatet
+    }
+  }
+  if (primary !== null) return primary;
+  throw new Error('compass read failed (primary + superuser)');
+}
 
 /* ────────────────────────────────────────────────────────────────────
    Lead sources — gemensam lookup (ingen tenant)
@@ -63,14 +105,16 @@ export async function listLeads(
     params.q = options.q;
   }
 
+  const filter = pb.filter(filters.join(' && '), params);
   try {
-    const res = await pb.collection('compass_leads').getList<Lead>(
-      options.page ?? 1,
-      options.perPage ?? 25,
-      {
-        filter: pb.filter(filters.join(' && '), params),
-        sort: '-created'
-      }
+    const res = await readWithFallback(
+      pb,
+      (client) =>
+        client.collection('compass_leads').getList<Lead>(options.page ?? 1, options.perPage ?? 25, {
+          filter,
+          sort: '-created'
+        }),
+      (r) => r.totalItems === 0
     );
     return { items: res.items, totalItems: res.totalItems, totalPages: res.totalPages };
   } catch {
@@ -84,7 +128,14 @@ export async function getLead(
   id: string
 ): Promise<Lead | null> {
   try {
-    const rec = await pb.collection('compass_leads').getOne<Lead>(id);
+    const rec = await readWithFallback(
+      pb,
+      (client) => client.collection('compass_leads').getOne<Lead>(id),
+      // En träff vars tenant inte matchar betraktas som "tom" → tvingar
+      // superuser-fallbacken att inte heller returnera fel tenant (den
+      // re-verifieras nedan).
+      (r) => !r || r.tenant !== tenant
+    );
     if (rec.tenant !== tenant) return null;
     return rec;
   } catch {
@@ -137,12 +188,18 @@ export async function countLeadsByStatus(
     accepted: 0,
     declined: 0
   };
+  const filter = pb.filter('tenant = {:tenant}', { tenant });
   try {
-    const all = await pb.collection('compass_leads').getFullList<Pick<Lead, 'status'>>({
-      filter: pb.filter('tenant = {:tenant}', { tenant }),
-      fields: 'status',
-      batch: 500
-    });
+    const all = await readWithFallback(
+      pb,
+      (client) =>
+        client.collection('compass_leads').getFullList<Pick<Lead, 'status'>>({
+          filter,
+          fields: 'status',
+          batch: 500
+        }),
+      (rows) => rows.length === 0
+    );
     for (const row of all) {
       empty[row.status] = (empty[row.status] ?? 0) + 1;
     }
@@ -374,12 +431,18 @@ export async function getLeadAnalytics(
       filterParts.push('created >= {:cutoff}');
       params.cutoff = cutoff;
     }
-    const leads = await pb.collection('compass_leads').getFullList<Lead>({
-      filter: pb.filter(filterParts.join(' && '), params),
-      fields:
-        'id,status,source_key,utm_source,utm_medium,utm_campaign,landing_module,converted_startup,converted_at,created',
-      batch: 1000
-    });
+    const analyticsFilter = pb.filter(filterParts.join(' && '), params);
+    const leads = await readWithFallback(
+      pb,
+      (client) =>
+        client.collection('compass_leads').getFullList<Lead>({
+          filter: analyticsFilter,
+          fields:
+            'id,status,source_key,utm_source,utm_medium,utm_campaign,landing_module,converted_startup,converted_at,created',
+          batch: 1000
+        }),
+      (rows) => rows.length === 0
+    );
 
     const sourceMap = new Map<string, AttributionBreakdown>();
     const campaignMap = new Map<string, CampaignBreakdown>();
@@ -554,16 +617,22 @@ export async function getCompassDashboard(
     const sinceMs = now - periodDays * 86400_000;
     const prevSinceIso = new Date(now - periodDays * 2 * 86400_000).toISOString();
 
+    const windowFilter = pb.filter('tenant = {:tenant} && created >= {:cutoff}', {
+      tenant,
+      cutoff: prevSinceIso
+    });
     const [funnelCounts, windowLeads] = await Promise.all([
       countLeadsByStatus(pb, tenant),
-      pb.collection('compass_leads').getFullList<DashboardLeadRow>({
-        filter: pb.filter('tenant = {:tenant} && created >= {:cutoff}', {
-          tenant,
-          cutoff: prevSinceIso
-        }),
-        fields: 'status,score,source_key,created',
-        batch: 1000
-      })
+      readWithFallback(
+        pb,
+        (client) =>
+          client.collection('compass_leads').getFullList<DashboardLeadRow>({
+            filter: windowFilter,
+            fields: 'status,score,source_key,created',
+            batch: 1000
+          }),
+        (rows) => rows.length === 0
+      )
     ]);
 
     const totalLeads = LEAD_STATUS_ORDER.reduce((s, k) => s + (funnelCounts[k] || 0), 0);
