@@ -28,6 +28,8 @@ export { maskRecord };
 export interface CollectionField {
   name: string;
   type: string;
+  /** Giltiga värden för select-fält (om kända) — driver describe_collection. */
+  values?: string[];
 }
 
 export interface ExposedCollection {
@@ -181,6 +183,7 @@ interface RawField {
   name: string;
   type: string;
   collectionId?: string;
+  values?: string[];
 }
 interface RawCollection {
   id: string;
@@ -278,7 +281,11 @@ async function discoverCollections(): Promise<ExposedCollection[]> {
       description: c.name,
       tenantField,
       maskedFields: autoMaskFields(fields),
-      fields: fields.map((f) => ({ name: f.name, type: f.type }))
+      fields: fields.map((f) => ({
+        name: f.name,
+        type: f.type,
+        ...(Array.isArray(f.values) && f.values.length > 0 ? { values: f.values } : {})
+      }))
     };
     exposed.push(applyOverrides(collection));
   }
@@ -306,6 +313,18 @@ export function getExposedCollection(
   name: string
 ): ExposedCollection | undefined {
   return collections.find((c) => c.name === name);
+}
+
+/**
+ * Textfälten som `search_records` får göra en bred `~`-förfiltrering på.
+ * Bara fria textfält (text/editor) som inte är maskade — så att prefiltret
+ * aldrig rör PII. Tom lista (t.ex. statisk fallback utan fältintrospektion)
+ * → anroparen faller tillbaka på en ofiltrerad, JS-rankad kandidatmängd.
+ */
+export function searchableTextFields(collection: ExposedCollection): string[] {
+  return collection.fields
+    .filter((f) => (f.type === 'text' || f.type === 'editor') && !collection.maskedFields.includes(f.name))
+    .map((f) => f.name);
 }
 
 export function buildTenantClause(

@@ -404,10 +404,23 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
   personnummer → exkluderas alltid (defense-in-depth).
 - **Tenant-isolation:** `buildStartupContext` / `buildPortfolioContext`
   / `buildFinancialsContext` verifierar alltid tenant-ID.
-- **Chattens query-verktyg (`lib/ai/schema.ts`):** dashboardchattens
-  (`/idag`) `query_collection`/`count_collection` auto-upptäcker
-  kollektioner men upprätthåller samma exkluderingar som
-  context-byggarna, så verktyget inte kan kringgå svartlistan ovan:
+- **Chattens läs-/sökverktyg (`lib/ai/schema.ts`, `lib/ai/tools.ts`):**
+  förutom `query_collection`/`count_collection` exponeras tre
+  read-only-verktyg som hjälper modellen förstå vad användaren menar:
+  `search_records` (fuzzy fritext-sökning — typo-/ordföljds-tolerant,
+  rankas i `lib/ai/fuzzy.ts`, enhetstestat), `describe_collection`
+  (fält + giltiga enum-värden + distinkta värden) och
+  `aggregate_collection` (sum/avg/min/max/count, ev. grupperat). **Alla
+  ärver oförändrat tenant-scope + denylist + fältmaskning** via
+  `composeFilter`/`maskRecord` — de är ingen ny dataväg, ingen ny
+  kollektion och ingen ny dependency. `aggregate_collection`/
+  `describe_collection` vägrar dessutom maskade fält (ingen PII-bakväg).
+  Riskklass: oförändrad (begränsad — intern dataåtkomst, ingen
+  profilering). Sökstrategi + domänordlista ligger i `lib/ai/guidance.ts`
+  och delas av dashboardchatt, trådar och autonoma körningar (ingen
+  divergerande kopia). Auto-upptäckta kollektioner upprätthåller samma
+  exkluderingar som context-byggarna, så inget verktyg kan kringgå
+  svartlistan ovan:
   - **Denylist** (aldrig exponerade): utöver `users`/`tenants`/token-
     tabeller även `contacts` (§ 15.3), alla `compass_*`-besökardata
     (`compass_leads`, `compass_conversations`, `compass_messages`,
@@ -1529,19 +1542,24 @@ oändliga loopar/token-explosion (§10 robusthet). `conversation` muteras;
 
 ### 16.3 Verktygsytor per körningstyp (människa-i-loopen)
 
-| Körning | Actor | Verktyg |
+De read-only läs-/sökverktygen (`query/count_collection`,
+`search_records`, `describe_collection`, `aggregate_collection`) finns i
+ALLA körningstyper nedan (`buildChatTools` lägger dem i bas-arrayen, ingen
+actor krävs). Tabellen visar vad som tillkommer per yta:
+
+| Körning | Actor | Tillkommer utöver läs-/sökverktygen |
 |---|---|---|
-| Dashboardchatt (staff) | `agent` | `query/count_collection`, skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`), `memory_read` + `memory_write` |
-| Toolbox (staff) | — (read-only) | `query/count_collection`, `memory_read` |
-| Toolbox (icke-staff) | — (read-only) | `query/count_collection` |
-| Schemalagd | — (read-only) | `query/count_collection`, `memory_read` |
+| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`), `memory_read` + `memory_write` |
+| Toolbox (staff) | — (read-only) | `memory_read` |
+| Toolbox (icke-staff) | — (read-only) | — |
+| Schemalagd | — (read-only) | `memory_read` |
 
 **Princip (§10):** skrivverktyg exponeras BARA i den interaktiva chatten
 där en människa bekräftar varje åtgärd. Autonoma körningar (toolbox-
 engångskörning, schema) får **aldrig** skriva domändata — de föreslår i
 text. Vision-körningar (pixtral) kör verktygslöst (§13.5). PII-maskning,
 denylist och tenant-scope ärvs oförändrat från `lib/ai/schema.ts`
-(§9.3).
+(§9.3) — även för de nya sök-/aggregat-verktygen.
 
 ### 16.4 Tvärsessions-minne (`agent_memory`)
 

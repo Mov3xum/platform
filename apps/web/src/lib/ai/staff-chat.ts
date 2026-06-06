@@ -6,6 +6,7 @@ import { buildChatTools } from './tools';
 import { buildSchemaSummary, getExposedCollections } from './schema';
 import { buildPortfolioContext, renderPromptTemplate } from './context';
 import { buildKnowledgeContext } from './agent-prompt';
+import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from './guidance';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from './web';
 import { withAttachedImages } from './chat-input';
 import { logAiUsage } from './usage';
@@ -26,7 +27,10 @@ export const CHAT_FALLBACK_MODELS = [
 ];
 // Vision-kapabel modell när bilder bifogas (stödjer även function calling).
 export const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
-export const MAX_TOOL_ITERATIONS = 4;
+// Interaktiv staff-chatt: ett intent-flöde blir lätt search_records →
+// describe_collection → query → aggregate → svar, så taket höjs över det
+// autonoma defaulten (4) men hålls bundet (robusthet § 10).
+export const MAX_TOOL_ITERATIONS = 7;
 export const DEFAULT_CHAT_WEB_SOURCES: WebSourceKey[] = ['breakit', 'sifted', 'vinnova'];
 
 export function pickModels(hasImages: boolean): string[] {
@@ -339,6 +343,8 @@ export async function runStaffChatTurn(
     BASE_SYSTEM_PROMPT +
     (opts.agentBlock ? `\n\n---\n${opts.agentBlock}\n---` : '') +
     STAFF_TOOL_GUIDANCE +
+    SEARCH_STRATEGY_GUIDANCE +
+    DOMAIN_GLOSSARY +
     `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +
     (opts.webBlock ? `\n\n---\n${opts.webBlock}\n---` : '') +
     STYLE_REMINDER;
