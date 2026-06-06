@@ -12,6 +12,7 @@ import type { MistralToolCall, MistralToolDefinition } from './mistral';
 import { escFilter } from '@/lib/pb-filter';
 import type { GeneratedFileRef } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
+import { getTemplate, listTemplateSummaries, TEMPLATE_IDS } from '@/lib/documents/templates';
 import { saveGeneratedFile } from '@/lib/documents/save';
 import {
   agentWritableFields,
@@ -52,6 +53,65 @@ const SYSTEM_RECORD_KEYS: ReadonlySet<string> = new Set([
   'collectionName',
   'expand'
 ]);
+
+// Återanvändbara dokument-sub-scheman (inlineas i generate_document — undviker
+// $ref/$defs som Mistral inte alltid resolvar).
+const KPIS_SCHEMA = {
+  type: 'array',
+  description: 'Nyckeltal som stat-kort (max 4 i rad).',
+  items: {
+    type: 'object',
+    properties: {
+      label: { type: 'string' },
+      value: { type: 'string', description: 'Det stora värdet, t.ex. "2,4 Mkr" eller "37 %".' },
+      delta: { type: 'string', description: 'Förändring, t.ex. "+12 %".' },
+      trend: { type: 'string', enum: ['up', 'down', 'flat'] },
+      caption: { type: 'string' }
+    },
+    required: ['label', 'value']
+  }
+} as const;
+const CALLOUT_SCHEMA = {
+  type: 'object',
+  description: 'Färgkodad insikts-/varningsruta.',
+  properties: {
+    variant: { type: 'string', enum: ['info', 'success', 'warning', 'accent'] },
+    title: { type: 'string' },
+    body: { type: 'string' }
+  },
+  required: ['body']
+} as const;
+const QUOTE_SCHEMA = {
+  type: 'object',
+  properties: { text: { type: 'string' }, attribution: { type: 'string' } },
+  required: ['text']
+} as const;
+const TABLE_SCHEMA = {
+  type: 'object',
+  properties: {
+    columns: { type: 'array', items: { type: 'string' } },
+    rows: { type: 'array', items: { type: 'array', items: {} } },
+    emphasizeLastColumn: { type: 'boolean', description: 'Visa proportionella data-barer i sista numeriska kolumnen.' }
+  }
+} as const;
+const CHART_SCHEMA = {
+  type: 'object',
+  description: 'Diagram — föredra framför långa siffertabeller för trender.',
+  properties: {
+    type: { type: 'string', enum: ['bar', 'hbar', 'line', 'area', 'pie', 'donut'] },
+    title: { type: 'string' },
+    unit: { type: 'string', description: 'Enhet på värdeaxeln, t.ex. "kr", "%".' },
+    stacked: { type: 'boolean' },
+    categories: { type: 'array', items: { type: 'string' } },
+    series: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { name: { type: 'string' }, values: { type: 'array', items: { type: 'number' } } }
+      }
+    }
+  }
+} as const;
 
 /**
  * Bygger Mistral-tool-definitionerna för en chatt-session. Tar emot
@@ -449,19 +509,32 @@ export function buildChatTools(
       function: {
         name: 'generate_document',
         description:
-          'Skapar ett nedladdningsbart dokument (PowerPoint/Excel/Word/PDF) av ' +
-          'sammanställd data. VIKTIGT: alla siffror och fakta MÅSTE komma från ' +
-          'tidigare query_collection-svar i denna konversation — hitta ALDRIG på ' +
-          'data. Systemet renderar filen deterministiskt från ditt spec och sparar ' +
-          'den i användarens privata Filer samt bifogar den som nedladdning. ' +
-          'Använd `slides` för pptx, `sheets` för xlsx, `sections` för docx/pdf.',
+          'Skapar ett snyggt, brandat och nedladdningsbart dokument ' +
+          '(PowerPoint/Excel/Word/PDF) av sammanställd data. VIKTIGT: alla siffror ' +
+          'och fakta MÅSTE komma från tidigare query_collection-svar i denna ' +
+          'konversation — hitta ALDRIG på data. Systemet renderar filen ' +
+          'deterministiskt med Movexums designspråk (rundade kort, mjuka skuggor, ' +
+          'KPI-kort, callouts, diagram) och sparar den i användarens privata Filer.\n' +
+          'BÖRJA med att välja en `template` som matchar uppgiften och följ dess ' +
+          'struktur — det ger ett professionellt resultat. Tillgängliga mallar:\n' +
+          listTemplateSummaries() +
+          '\nAnvänd `slides` för pptx, `sheets` för xlsx, `sections` för docx/pdf. ' +
+          'Använd RIKA element där det passar: `kpis` (nyckeltal som stat-kort), ' +
+          '`callout` (färgkodad insikt), `quote`, och `chart` (för att visualisera ' +
+          'trender — föredra diagram framför långa siffertabeller).',
         parameters: {
           type: 'object',
           properties: {
-            kind: {
+            template: {
               type: 'string',
-              enum: ['pptx', 'xlsx', 'docx', 'pdf'],
-              description: 'Filformat'
+              enum: TEMPLATE_IDS,
+              description: 'Mall/blueprint att följa (rekommenderas). Sätter format + accent och styr strukturen.'
+            },
+            kind: { type: 'string', enum: ['pptx', 'xlsx', 'docx', 'pdf'], description: 'Filformat' },
+            accent: {
+              type: 'string',
+              enum: ['blue', 'purple', 'teal', 'green'],
+              description: 'Accenttema (signaturfärg). Default blue (Movexum mörkblå).'
             },
             title: { type: 'string', description: 'Dokumentets titel (visas på försättssidan)' },
             subtitle: { type: 'string', description: 'Valfri undertitel' },
@@ -471,34 +544,15 @@ export function buildChatTools(
               items: {
                 type: 'object',
                 properties: {
-                  layout: { type: 'string', enum: ['title', 'content', 'table', 'chart'] },
+                  layout: { type: 'string', enum: ['title', 'content', 'section', 'table', 'chart', 'kpi', 'quote'], description: '"section" = sektionsdelare, "kpi" = nyckeltalsslide.' },
                   heading: { type: 'string' },
                   subheading: { type: 'string' },
                   bullets: { type: 'array', items: { type: 'string' } },
-                  table: {
-                    type: 'object',
-                    properties: {
-                      columns: { type: 'array', items: { type: 'string' } },
-                      rows: { type: 'array', items: { type: 'array', items: {} } }
-                    }
-                  },
-                  chart: {
-                    type: 'object',
-                    properties: {
-                      type: { type: 'string', enum: ['bar', 'line', 'pie'] },
-                      categories: { type: 'array', items: { type: 'string' } },
-                      series: {
-                        type: 'array',
-                        items: {
-                          type: 'object',
-                          properties: {
-                            name: { type: 'string' },
-                            values: { type: 'array', items: { type: 'number' } }
-                          }
-                        }
-                      }
-                    }
-                  },
+                  kpis: KPIS_SCHEMA,
+                  callout: CALLOUT_SCHEMA,
+                  quote: QUOTE_SCHEMA,
+                  table: TABLE_SCHEMA,
+                  chart: CHART_SCHEMA,
                   notes: { type: 'string' }
                 },
                 required: ['layout']
@@ -511,6 +565,7 @@ export function buildChatTools(
                 type: 'object',
                 properties: {
                   name: { type: 'string' },
+                  kpis: KPIS_SCHEMA,
                   columns: {
                     type: 'array',
                     items: {
@@ -518,7 +573,7 @@ export function buildChatTools(
                       properties: {
                         key: { type: 'string' },
                         label: { type: 'string' },
-                        type: { type: 'string', enum: ['text', 'number', 'currency', 'date'] }
+                        type: { type: 'string', enum: ['text', 'number', 'currency', 'percent', 'date'] }
                       },
                       required: ['key', 'label']
                     }
@@ -539,13 +594,11 @@ export function buildChatTools(
                   level: { type: 'integer', enum: [1, 2, 3] },
                   paragraphs: { type: 'array', items: { type: 'string' } },
                   bullets: { type: 'array', items: { type: 'string' } },
-                  table: {
-                    type: 'object',
-                    properties: {
-                      columns: { type: 'array', items: { type: 'string' } },
-                      rows: { type: 'array', items: { type: 'array', items: {} } }
-                    }
-                  }
+                  kpis: KPIS_SCHEMA,
+                  callout: CALLOUT_SCHEMA,
+                  quote: QUOTE_SCHEMA,
+                  table: TABLE_SCHEMA,
+                  chart: CHART_SCHEMA
                 }
               }
             }
@@ -1166,6 +1219,14 @@ async function runGenerateDocument(
   if ('error' in actor) return { ok: false, error: actor.error };
   if (!ctx.ownerUserId) {
     return { ok: false, error: 'Dokumentgenerering kräver en inloggad ägare i kontexten.' };
+  }
+  // Mall-defaults: en vald mall sätter accent/kind om modellen utelämnat dem,
+  // så att varje dokument får ett enhetligt, modernt uttryck (mallens blueprint
+  // styr själva strukturen via systemprompten, § dokumentmallar).
+  const tpl = getTemplate(typeof args.template === 'string' ? args.template : undefined);
+  if (tpl) {
+    if (!args.accent) args.accent = tpl.accent;
+    if (!args.kind) args.kind = tpl.kind;
   }
   const v = validateDocumentSpec(args);
   if (!v.ok) return { ok: false, error: v.error };

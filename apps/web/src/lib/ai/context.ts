@@ -1,5 +1,6 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
+import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 
 // Whitelist av startup-fält som får skickas till AI-prompten. Allt utanför
 // listan måste vägras (CLAUDE.md § 9.3, § 10.2).
@@ -96,6 +97,20 @@ interface CapitalRoundEntry {
   source: string;
   amount_sek: number;
   received_at: string;
+  /** Vad stödet/kapitalet gavs för (personnummer-sanerad, cappad). § 15.3. */
+  purpose?: string;
+}
+
+/** Mottaget de minimis-stöd (kurerad, PII-fri delmängd av `de_minimis_stod`).
+ * Når AI ENBART via denna per-bolag-builder — `de_minimis_*` är fortsatt
+ * denylistad för det generiska `query_collection` (§ 9.3, org-nr-risk). */
+interface DeMinimisSupportEntry {
+  forordning: string;
+  stodgivare: string;
+  belopp_sek?: number;
+  beslutsdatum: string;
+  /** Vad stödet gavs för (personnummer-sanerad, cappad). */
+  purpose?: string;
 }
 
 interface IPREntry {
@@ -166,8 +181,20 @@ export interface StartupContext {
   financials?: FinancialsEntry[];
   phase_history?: PhaseHistoryEntry[];
   capital_rounds?: CapitalRoundEntry[];
+  de_minimis_support?: DeMinimisSupportEntry[];
   ipr?: IPREntry[];
   kpis?: KPIEntry[];
+}
+
+/** Personnummer-sanering + längdcap för fritext som ska nå AI-prompten.
+ * Defense-in-depth på LÄSVÄGEN (inte bara vid import) så även manuellt
+ * inmatade rader skyddas (CLAUDE.md § 9.3, § 15.3). */
+function safePurpose(raw: unknown, cap = 300): string | undefined {
+  const text = stripHtml(typeof raw === 'string' ? raw : undefined);
+  if (!text) return undefined;
+  const clean = sanitizePersonnummer(text).trim();
+  if (!clean) return undefined;
+  return clean.length > cap ? clean.slice(0, cap) : clean;
 }
 
 export interface PortfolioContext {
@@ -290,13 +317,15 @@ export async function buildStartupContext(
     created: n.created as string
   }));
 
-  const [financials, phase_history, capital_rounds, ipr, kpis] = await Promise.all([
-    buildFinancialsContext(pb, startupId, tenantId),
-    buildPhaseHistoryContext(pb, startupId, tenantId),
-    buildCapitalRoundsContext(pb, startupId, tenantId),
-    buildIPRContext(pb, startupId, tenantId),
-    buildKPIsContext(pb, startupId, tenantId)
-  ]);
+  const [financials, phase_history, capital_rounds, de_minimis_support, ipr, kpis] =
+    await Promise.all([
+      buildFinancialsContext(pb, startupId, tenantId),
+      buildPhaseHistoryContext(pb, startupId, tenantId),
+      buildCapitalRoundsContext(pb, startupId, tenantId),
+      buildDeMinimisSupportContext(pb, startupId, tenantId),
+      buildIPRContext(pb, startupId, tenantId),
+      buildKPIsContext(pb, startupId, tenantId)
+    ]);
 
   return {
     startup,
@@ -306,6 +335,7 @@ export async function buildStartupContext(
     financials,
     phase_history,
     capital_rounds,
+    de_minimis_support,
     ipr,
     kpis
   };
@@ -388,7 +418,10 @@ export async function buildPhaseHistoryContext(
 
 /**
  * Hämtar mottagna kapitalrundor (bidrag, equity, lån). Sorterat
- * nyast → äldst. Bolagsdata, ingen PII. Fail-soft.
+ * nyast → äldst. Bolagsdata, ingen PII. `notes` exponeras som `purpose`
+ * (vad stödet gavs för) — personnummer-saneras + cappas på läsvägen
+ * (CLAUDE.md § 15.3). Bunden + indexerad (`startup`/`received_at`) → skalar
+ * per bolag oavsett portföljstorlek. Fail-soft.
  */
 export async function buildCapitalRoundsContext(
   pb: PocketBase,
@@ -406,12 +439,56 @@ export async function buildCapitalRoundsContext(
     return undefined;
   }
   if (!result.items.length) return undefined;
-  return result.items.map((r) => ({
-    type: r.type as string,
-    source: r.source as string,
-    amount_sek: r.amount_sek as number,
-    received_at: r.received_at as string
-  }));
+  return result.items.map((r) => {
+    const entry: CapitalRoundEntry = {
+      type: r.type as string,
+      source: r.source as string,
+      amount_sek: r.amount_sek as number,
+      received_at: r.received_at as string
+    };
+    const purpose = safePurpose(r.notes);
+    if (purpose) entry.purpose = purpose;
+    return entry;
+  });
+}
+
+/**
+ * Hämtar mottaget de minimis-stöd (CLAUDE.md § 20). Läser `de_minimis_stod`
+ * DIREKT via den denormaliserade `startup`-FK:n (indexerat) — aldrig join via
+ * `de_minimis_units` och aldrig org-nr, så org-nr-risken som denylistar
+ * `de_minimis_*` i `query_collection` (§ 9.3) undviks och läsningen skalar per
+ * bolag. `syfte` exponeras som `purpose` (sanerat/cappat). Sorterat
+ * nyast → äldst. Fail-soft.
+ */
+export async function buildDeMinimisSupportContext(
+  pb: PocketBase,
+  startupId: string,
+  tenantId: string,
+  limit = 20
+): Promise<DeMinimisSupportEntry[] | undefined> {
+  let result;
+  try {
+    result = await pb.collection('de_minimis_stod').getList(1, limit, {
+      filter: `startup = "${startupId}" && tenant = "${tenantId}"`,
+      sort: '-beslutsdatum'
+    });
+  } catch {
+    return undefined;
+  }
+  if (!result.items.length) return undefined;
+  return result.items.map((r) => {
+    const entry: DeMinimisSupportEntry = {
+      forordning: r.forordning as string,
+      stodgivare: r.stodgivare as string,
+      beslutsdatum: r.beslutsdatum as string
+    };
+    if (typeof r.belopp_sek === 'number' && r.belopp_sek > 0) {
+      entry.belopp_sek = r.belopp_sek as number;
+    }
+    const purpose = safePurpose(r.syfte, 500);
+    if (purpose) entry.purpose = purpose;
+    return entry;
+  });
 }
 
 /**

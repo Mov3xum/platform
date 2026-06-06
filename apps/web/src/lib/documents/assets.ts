@@ -35,6 +35,14 @@ async function readFirst(rel: string): Promise<Buffer | null> {
   return null;
 }
 
+// 1×1 transparent PNG — giltig fallback för inbäddade SVG-diagram i DOCX
+// (moderna Word-versioner renderar SVG:n; fallbacken används bara av äldre
+// klienter). Undviker beroende av en rasteriserare (EU-suveränt, ren JS).
+export const TRANSPARENT_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64'
+);
+
 export type LogoVariant = 'light' | 'dark';
 
 const logoCache = new Map<LogoVariant, Buffer | null>();

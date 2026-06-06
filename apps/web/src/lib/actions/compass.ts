@@ -137,7 +137,7 @@ export async function createManualLeadAction(formData: FormData) {
   const idea = String(formData.get('idea_summary') || '').trim() || undefined;
   const source = String(formData.get('source_key') || 'call');
   if (!name) {
-    throw new Error('Namn saknas');
+    redirect('/inflode/leads/new?error=missing_name');
   }
 
   const pb = await getServerPb();
@@ -150,7 +150,7 @@ export async function createManualLeadAction(formData: FormData) {
     source_key: source
   });
   if (!lead) {
-    throw new Error('Kunde inte skapa lead');
+    redirect('/inflode/leads/new?error=creation_failed');
   }
 
   revalidatePath('/inflode');

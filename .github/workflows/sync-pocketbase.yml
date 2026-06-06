@@ -38,7 +38,7 @@ jobs:
           set -euo pipefail
 
           if [ -n "${COOLIFY_DEPLOY_WEBHOOK:-}" ]; then
-            echo "Trigging Coolify deploy webhook (stack redeploy)..."
+            echo "Triggering Coolify deploy webhook (stack redeploy)..."
             curl --fail-with-body -sS -X POST \
               -H "Authorization: Bearer $COOLIFY_TOKEN" \
               -H "Accept: application/json" \
