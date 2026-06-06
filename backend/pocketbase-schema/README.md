@@ -149,3 +149,66 @@ Skriptet är idempotent — om en collection eller record redan finns hoppas den
 - 1 app-user: `hampus@movexum.se` med `roles=["admin"]`
 
 Du kan nu logga in på `<din-web-url>/login` med Hampus-credentials.
+
+> ⚠️ **`setup-via-api.mjs` är inte den auktoritativa schemakällan.**
+> Det är en **bootstrap/regel-sync** som skapar/patchar den delmängd kollektioner
+> som är inskrivna i skriptet. **Migrationerna** (via custom-image, se ovan) är
+> den enda kompletta schemakällan. Kollektioner som BARA finns i en migration —
+> i praktiken hela `compass_*`-familjen (Startupkompassen, § 23) — skapas
+> **inte** av `setup-via-api.mjs`. Om en instans bootstrappats utan att
+> migrationerna körts (t.ex. en rå PB-image eller ett `pb_data` som byggdes via
+> API innan custom-imagen togs i bruk) saknas dessa kollektioner helt → varje
+> skrivning 404:ar och appen kastar 500 (det var precis så
+> "skapa modul/lead i /inflode" gick sönder). `verify-baseline.mjs` failar nu
+> deployen om någon `compass_*`-kollektion saknas, så driften fångas i CI.
+
+## Diagnostik & reconcile: saknade migrationer
+
+Verktyget `scripts/diagnose-migrations.mjs` (read-only) jämför migrationsfilerna
+mot vad som faktiskt finns i en körande instans och listar vilka
+create-migrationer som inte har applicerats:
+
+```bash
+PB_URL='https://<din-pb-domän>' \
+PB_SU_EMAIL='hampus@movexum.se' \
+PB_SU_PASSWORD='<superuser-lösen>' \
+node backend/pocketbase-schema/scripts/diagnose-migrations.mjs
+```
+
+Det skriver bl.a. `✗ SAKNADE kollektioner` + vilken migrationsfil som skulle ha
+skapat dem, och exit-kod 1 om något saknas (lämpligt som CI-grind).
+
+### Reconcile: applicera saknade migrationer (operatör, i PB-containern)
+
+Detta körs **i PocketBase-containern** (den har binären + `pb_data`). **Ta en
+backup av `pb_data` först.**
+
+**Steg A — hotfix: skapa de saknade compass-kollektionerna nu.** Compass-
+migrationerna skapar bara NYA kollektioner / utökar compass → de krockar inte
+med befintligt schema. Peka `migrate up` på en temporär dir med ENBART
+compass-filerna så PB applicerar just dem och registrerar dem i `_migrations`:
+
+```bash
+mkdir -p /tmp/compass
+cp /pb/pb_migrations/1700000039_*.js \
+   /pb/pb_migrations/1700000049_*.js \
+   /pb/pb_migrations/1700000108_*.js \
+   /pb/pb_migrations/1700000109_*.js \
+   /pb/pb_migrations/1700000110_*.js /tmp/compass/
+/pb/pocketbase migrate up --dir=/pb_data --migrationsDir=/tmp/compass
+```
+
+Verifiera sedan med `diagnose-migrations.mjs` (0 saknade) och i appen
+(`/inflode` → skapa modul + lead utan 500).
+
+**Steg B — innan du gör custom-imagen auktoritativ (durabelt).** Om `pb_data`
+historiskt byggdes via `setup-via-api.mjs` är `_migrations`-historiken
+inkonsekvent: kollektionerna finns men deras create-migrationer är inte
+registrerade. Startar du då custom-imagen kör dess `serve` ALLA oregistrerade
+migrationer i ordning → de tidiga create-migrationerna kolliderar med redan
+existerande kollektioner → `serve` avbryts. Kör därför `diagnose-migrations.mjs`
+och backfilla `_migrations` så att varje migration vars effekt redan finns
+markeras applicerad (lämna bara genuint saknade kvar) **innan** du växlar till
+custom-image-auto-migrate. När historiken speglar verkligheten blir
+custom-imagens auto-migrate en kollisionsfri no-op och migrationerna är därefter
+den auktoritativa, självkörande schemakällan.

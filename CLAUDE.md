@@ -2464,8 +2464,18 @@ hinkarnas `min`/`max`). Per-val `score`/`bucket` lagras i
 - **Riskklass:** quiz/wizard n/a (ingen AI); publik AI-chatt = begränsad
   (människa-i-loopen granskar genererade leads i `/inflode/leads`).
 - **Migrationer** (1700000108–109) är nya, oföränderliga filnummer.
-  **compass speglas inte** i `scripts/setup-via-api.mjs`/`verify-baseline.mjs`
-  (migration-only) — inga mirror-ändringar krävs.
+  **compass skapas BARA av migrationerna** (`1700000039` + utökningar) — det
+  speglas medvetet inte i `scripts/setup-via-api.mjs` (som inte är den
+  auktoritativa schemakällan, bara bootstrap/regel-sync). **Förutsättning:**
+  migrationerna måste faktiskt köras mot instansen (custom-image-`serve`
+  auto-migrate). En instans som bootstrappats utan att migrationerna körts
+  saknar hela `compass_*`-familjen → skrivningar 404:ar och `/inflode` kastar
+  500. `verify-baseline.mjs` **asserterar nu att alla `compass_*`-kollektioner
+  finns** (hårt baseline-invariant, inte fail-soft) och
+  `scripts/diagnose-migrations.mjs` listar oapplicerade create-migrationer. Se
+  `backend/pocketbase-schema/README.md` ("Diagnostik & reconcile: saknade
+  migrationer") för hur man applicerar saknade migrationer + synkar
+  `_migrations`-historiken.
 
 ### 23.5 E-postnotis vid nytt inflöde (Resend)
 

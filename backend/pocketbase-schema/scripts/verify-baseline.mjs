@@ -144,6 +144,21 @@ async function verifyCollectionsExist() {
     'ai_usage_events',
     'agent_actions',
     'tool_schedules',
+    // Startupkompassen / inflöde (§ 23). Dessa skapas BARA av migrationerna
+    // (1700000039 + utökningar) och speglas INTE i setup-via-api.mjs. En
+    // instans som bootstrappats utan att migrationerna körts saknar dem helt
+    // → skrivningar 404:ar och /inflode kastar 500. Vi gör dem därför till ett
+    // hårt baseline-invariant: deployen failar om de saknas (i stället för att
+    // buggen upptäcks först av en användare). Se diagnose-migrations.mjs.
+    'compass_lead_sources',
+    'compass_leads',
+    'compass_conversations',
+    'compass_messages',
+    'compass_modules',
+    'compass_questions',
+    'compass_responses',
+    'compass_security_events',
+    'compass_brand',
     // Övrigt
     'web_cache'
   ];
