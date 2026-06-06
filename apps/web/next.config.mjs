@@ -116,6 +116,16 @@ const nextConfig = {
   experimental: {
     // Ensure all dependencies are traced correctly in monorepo with path aliases
     esmExternals: true,
+    // Requests through middleware (our matcher covers every non-static route)
+    // are cloned with a body cap of `middlewareClientMaxBodySize` (Next default
+    // 10 MB). Server actions and route handlers read that CLONE, so any larger
+    // upload — a 10 MB PDF becomes a ~13.4 MB base64 server-action argument —
+    // is silently TRUNCATED before the handler runs, corrupting the payload and
+    // producing a 500 ("kunde inte ladda upp fil PDF"). Raise it to match the
+    // server-action limit below so chat attachments and the media/document/
+    // agreement upload routes get the full body. (Files are still capped per
+    // request in app code: 10 MB/chat-attachment, larger in the media routes.)
+    middlewareClientMaxBodySize: '32mb',
     // Chat-bilagor (bilder base64-encoded + textfiler) — default 1 MB räcker inte
     serverActions: {
       bodySizeLimit: '32mb',
