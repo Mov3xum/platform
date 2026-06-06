@@ -395,6 +395,10 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
   `register_notes`, `sent_to`, `inflow_source`, `contacted_at`,
   `meets_excellence_criteria`, `potential_bc_case`, `approved_state_aid_art22`,
   `approved_de_minimis` samt senaste 5 raderna i `startup_phase_history`.
+  Dessutom mottaget kapital/stöd: `buildCapitalRoundsContext` (inkl.
+  `purpose` = vad stödet gavs för) och `buildDeMinimisSupportContext`
+  (kurerad, PII-fri delmängd av `de_minimis_stod`; org-nr exkluderas) —
+  se § 15.3.
 - **Explicit svartlista i AI-kontext (får ALDRIG till prompten):**
   `phone` (PII), `founder_gender` och `founder_identifies_as` (GDPR
   art. 9 särskild kategori — kan avslöja etnicitet/läggning), `owner`,
@@ -1395,7 +1399,17 @@ Nya whitelistade fält i `apps/web/src/lib/ai/context.ts`:
 
 - **startups:** `city`, `website` (publik bolagsdata).
 - **`buildCapitalRoundsContext`:** `type`, `source`, `amount_sek`,
-  `received_at` per rad. `notes` exkluderas (kan vara strategiskt).
+  `received_at` samt `purpose` (= `notes`, **vad stödet/kapitalet gavs
+  för**) per rad. `purpose` personnummer-saneras + cappas (~300 tecken)
+  **på läsvägen** (`safePurpose` i `context.ts`), inte bara vid import —
+  så även manuellt inmatade rader skyddas.
+- **`buildDeMinimisSupportContext`** (ny, § 20): `forordning`,
+  `stodgivare`, `belopp_sek`, `beslutsdatum` samt `purpose` (= `syfte`,
+  sanerat/cappat) per rad. Läser `de_minimis_stod` **direkt via den
+  denormaliserade `startup`-FK:n** (indexerat, `getList(1,20)`) — aldrig
+  join via `de_minimis_units` och aldrig org-nr. `de_minimis_*` är
+  fortsatt **denylistad** för det generiska `query_collection`
+  (§ 9.3) — stöd-syftet når AI ENBART via denna kurerade per-bolag-builder.
 - **`buildIPRContext`:** `type`, `status`, `external_reference`,
   `filed_at`, `response_at`. `notes` exkluderas.
 - **`buildKPIsContext`:** `kpi_name`, `value_text`, `value_numeric`,
@@ -1412,9 +1426,14 @@ Nya whitelistade fält i `apps/web/src/lib/ai/context.ts`:
 - `tasks.*` och `tasks.details` — uppgifter kan innehålla privata
   arbetsanteckningar; inkluderas inte i default-kontexten. Enskilda
   agenter kan opt-in genom egen helper.
-- `capital_rounds.notes`, `intellectual_property.notes`,
-  `agreements.notes` — strategiska detaljer hålls ute som
-  defense-in-depth.
+- `intellectual_property.notes`, `agreements.notes` — strategiska
+  detaljer hålls ute som defense-in-depth.
+- `capital_rounds.notes` / `de_minimis_stod.syfte` är **whitelistade som
+  stöd-`purpose`** (vad stödet gavs för) via context-buildrarna ovan —
+  lågkänsligt (beskriver insatsens art, t.ex. "IP-strategi Rouse",
+  "affärscoachning"), personnummer-saneras + cappas på läsvägen. Når AI
+  bara via de kurerade per-bolag-buildrarna; `de_minimis_*` förblir
+  denylistad för det generiska `query_collection`.
 - **Outlook-kalenderdata** — mötesdeltagares/organisatörers e-post (läses
   transient för CRM-matchning, § 14.4) är PII och når aldrig
   AI-kontexten. Den lagras inte; endast den resulterande `tasks`-raden
