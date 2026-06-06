@@ -102,13 +102,20 @@
   --mx-topbar-h: 52px;
   --mx-actionbar-h: 48px;
 
-  /* Modern bakgrund — subtil gradient på innehållsytan (2026-06).
-   * Mjuk Movexum-blå glöd uppe till höger, dämpad lila nere till vänster,
-   * ren vit canvas i mitten. Vita kort/paneler ligger ovanpå. Ingen
-   * dekor-grafik — bara gradienten. */
+  /* Bakgrund "G · Aurora-pärlemor" (2026-06).
+   * Ett diagonalt band (135°) av Movexum blå → lila → grön (C:s
+   * diagonala band) ovanpå fyra pärlemor-mjuka pastellhörn: gul uppe
+   * till höger, orange nedtill, ljusgrön nere till vänster, ljuslila
+   * uppe till vänster (E:s pastellhörn). Alla toner kommer ur Movexums
+   * palett (CLAUDE.md §2.2) och ligger på mycket låg alpha så ren vit
+   * canvas lyser igenom i mitten. Vita kort/paneler ligger ovanpå.
+   * Ingen dekor-grafik — bara gradienten. */
   --mx-app-gradient:
-    radial-gradient(58% 52% at 100% 0%, rgba(0, 168, 222, 0.08) 0%, rgba(0, 168, 222, 0) 60%),
-    radial-gradient(60% 58% at 0% 100%, rgba(97, 56, 181, 0.11) 0%, rgba(97, 56, 181, 0) 62%),
+    linear-gradient(135deg, rgba(0, 168, 222, 0.075) 0%, rgba(97, 56, 181, 0.06) 34%, rgba(74, 125, 74, 0.05) 60%, rgba(255, 255, 255, 0) 88%),
+    radial-gradient(46% 44% at 96% 70%, rgba(240, 210, 46, 0.086), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(50% 48% at 60% 112%, rgba(214, 126, 71, 0.07), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(42% 44% at 6% 92%, rgba(136, 180, 139, 0.09), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(40% 40% at 14% 8%, rgba(142, 111, 214, 0.07), rgba(0, 0, 0, 0) 60%),
     var(--mx-canvas);
   /* Genomskinlig, frostad topbar så gradienten flyter bakom den. */
   --mx-topbar-bg: color-mix(in srgb, var(--mx-canvas) 62%, transparent);
@@ -146,6 +153,18 @@ html.dark {
   --mx-rail-hover-bg:  rgba(255, 255, 255, 0.035);
   --mx-rail-divider:   rgba(255, 255, 255, 0.045);
   --mx-rail-accent:    #4fc4ea;
+
+  /* "G · Aurora-pärlemor" i dark mode: samma komposition som i light,
+   * men en aning högre alpha så banden/hörnen läser mot den nästan
+   * svarta canvasen — fortfarande hyper-subtilt (dark-mode-principen i
+   * tokens.css). Diagonalbandet slutar transparent (rgba .. 0). */
+  --mx-app-gradient:
+    linear-gradient(135deg, rgba(0, 168, 222, 0.10) 0%, rgba(97, 56, 181, 0.09) 34%, rgba(74, 125, 74, 0.07) 60%, rgba(0, 0, 0, 0) 88%),
+    radial-gradient(46% 44% at 96% 70%, rgba(240, 210, 46, 0.07), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(50% 48% at 60% 112%, rgba(214, 126, 71, 0.06), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(42% 44% at 6% 92%, rgba(136, 180, 139, 0.08), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(40% 40% at 14% 8%, rgba(142, 111, 214, 0.08), rgba(0, 0, 0, 0) 60%),
+    var(--mx-canvas);
 }
 
 /* ============================================================
