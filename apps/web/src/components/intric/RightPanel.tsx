@@ -5,7 +5,7 @@ import { Icon } from '@/components/proto/Icon';
 
 export interface KnowledgeItem {
   id: string;
-  kind: 'note' | 'milestone' | 'compass' | 'irl' | 'file' | 'tool_run';
+  kind: 'note' | 'milestone' | 'compass' | 'irl' | 'file' | 'tool_run' | 'activity';
   name: string;
   meta?: string;
   updated?: string;
@@ -23,7 +23,8 @@ const kindIcon: Record<KnowledgeItem['kind'], string> = {
   compass: 'compass',
   irl: 'graph',
   file: 'doc',
-  tool_run: 'sparkle'
+  tool_run: 'sparkle',
+  activity: 'flow'
 };
 
 const kindIconClass: Partial<Record<KnowledgeItem['kind'], string>> = {
@@ -66,7 +67,7 @@ export function RightPanel({ knowledge, startupId }: Props) {
       </div>
 
       <p className="px-5 pt-3 text-[11.5px] leading-relaxed text-foreground-subtle">
-        Allt bolaget producerar — AI-resultat, dokument, anteckningar och milstolpar.
+        Allt bolaget producerar — aktiviteter, AI-resultat, anteckningar och milstolpar.
       </p>
 
       <div className="space-y-1 px-3 py-3">
