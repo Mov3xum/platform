@@ -831,10 +831,15 @@ export interface EducationDocument {
   doc_kind: EducationDocumentKind;
   mime?: string;
   size_bytes?: number;
+  /** Valfri koppling till ett område (workshop_areas), precis som workshops. */
+  area?: string;
   uploaded_by?: string;
   created_by?: string;
   created: string;
   updated: string;
+  expand?: {
+    area?: WorkshopArea;
+  };
 }
 
 export type EducationDocumentAssignmentStatus = 'assigned' | 'completed';

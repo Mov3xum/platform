@@ -362,6 +362,67 @@ export async function deleteDocumentAssignmentAction(
   return { ok: true };
 }
 
+/**
+ * Koppla (eller koppla bort) ett utbildningsdokument till ett område
+ * (staff-only). Tomt areaId nollställer kopplingen. Området verifieras tillhöra
+ * tenanten innan skrivning (samma mönster som workshops.area).
+ */
+export async function setEducationDocumentAreaAction(
+  documentId: string,
+  areaId: string
+): Promise<DocumentActionState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: 'Ej inloggad.' };
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  if (!documentId) return { error: 'Dokument saknas.' };
+
+  const pb = await getServerPb();
+
+  let doc: EducationDocument;
+  try {
+    doc = await pb.collection(PB_COLLECTIONS.educationDocuments).getOne<EducationDocument>(documentId);
+  } catch {
+    return { error: 'Dokumentet hittades inte.' };
+  }
+  if (String(doc.tenant) !== user.tenant) return { error: 'Åtkomst nekad.' };
+
+  if (areaId) {
+    try {
+      const area = await pb
+        .collection(PB_COLLECTIONS.workshopAreas)
+        .getOne<{ tenant: string }>(areaId);
+      if (String(area.tenant) !== user.tenant) return { error: 'Ogiltigt område.' };
+    } catch {
+      return { error: 'Området hittades inte.' };
+    }
+  }
+
+  const payload = { area: areaId || null };
+  try {
+    try {
+      await pb.collection(PB_COLLECTIONS.educationDocuments).update(documentId, payload);
+    } catch (err) {
+      const status = statusOf(err);
+      if (status === 400 || status === 403) {
+        const su = await getSuperuserPb();
+        if (!su) throw err;
+        await su.collection(PB_COLLECTIONS.educationDocuments).update(documentId, payload);
+      } else {
+        throw err;
+      }
+    }
+  } catch (err) {
+    console.error('[education-documents] set area failed', {
+      tenant: user.tenant,
+      error: err instanceof Error ? err.message : err
+    });
+    return { error: 'Kunde inte uppdatera området.' };
+  }
+
+  revalidatePath('/education/documents');
+  return { ok: true };
+}
+
 /** Ta bort ett dokument (staff-only). Tilldelningar cascade-raderas av PB. */
 export async function deleteEducationDocumentAction(
   documentId: string
