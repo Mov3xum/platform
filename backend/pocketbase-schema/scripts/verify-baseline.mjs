@@ -30,6 +30,18 @@ const PB_URL = normalizePbUrl(PB_URL_RAW);
 const pb = new PocketBase(PB_URL);
 pb.autoCancellation(false);
 
+const COMPASS_COLLECTIONS = new Set([
+  'compass_lead_sources',
+  'compass_leads',
+  'compass_conversations',
+  'compass_messages',
+  'compass_modules',
+  'compass_questions',
+  'compass_responses',
+  'compass_security_events',
+  'compass_brand'
+]);
+
 const log = (...a) => console.log('•', ...a);
 const ok = (...a) => console.log('✓', ...a);
 const fail = (msg) => {
@@ -86,6 +98,16 @@ async function ensureCollection(name) {
     ok(`collection "${name}" exists`);
     return collection;
   } catch (error) {
+    if (COMPASS_COLLECTIONS.has(name)) {
+      fail(
+        `Collection "${name}" not found or inaccessible.\n` +
+          'Hint: Startupkompassen-kollektionerna skapas av migrationerna (inte av setup-via-api).\n' +
+          'Kör diagnose först:\n' +
+          '  node backend/pocketbase-schema/scripts/diagnose-migrations.mjs\n' +
+          'Om den listar saknade compass-kollektioner, applicera saknade migrationer i PB-containern enligt\n' +
+          'backend/pocketbase-schema/README.md under "Diagnostik & reconcile: saknade migrationer".'
+      );
+    }
     fail(`Collection "${name}" not found or inaccessible`);
   }
 }

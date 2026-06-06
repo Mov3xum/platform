@@ -234,6 +234,7 @@ jobs:
           NODE_TLS_REJECT_UNAUTHORIZED: '0'
         run: |
           set -euo pipefail
+          node backend/pocketbase-schema/scripts/diagnose-migrations.mjs
           node backend/pocketbase-schema/scripts/verify-baseline.mjs
 
   sync-pocketbase:
