@@ -20,6 +20,12 @@ export interface QuizChoice {
   score?: number;
   /** Profil/hink valet pekar på (topp-hink-läge). */
   bucket?: string;
+  /**
+   * Multi-hink-läge: ett enda val kan ge poäng till FLERA profiler samtidigt
+   * ({ builder: 2, explorer: 1, potential: 0 }). När `buckets` är satt har det
+   * företräde framför `bucket`/`score`. Används av "Är du entreprenör?"-quizet.
+   */
+  buckets?: Record<string, number>;
 }
 
 export interface ResultBucket {
@@ -80,7 +86,15 @@ export function scoreQuiz(
     for (const value of chosen) {
       const choice = choices.find((c) => c.value === value);
       if (!choice) continue;
-      if (choice.bucket) {
+      if (choice.buckets && typeof choice.buckets === 'object') {
+        // Multi-hink: valet fördelar poäng över flera profiler samtidigt.
+        for (const [key, raw] of Object.entries(choice.buckets)) {
+          const weight = Number(raw);
+          if (!Number.isFinite(weight)) continue;
+          byBucket[key] = (byBucket[key] ?? 0) + weight;
+          total += weight;
+        }
+      } else if (choice.bucket) {
         const weight = typeof choice.score === 'number' ? choice.score : 1;
         byBucket[choice.bucket] = (byBucket[choice.bucket] ?? 0) + weight;
         total += weight;

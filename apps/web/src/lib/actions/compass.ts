@@ -602,6 +602,24 @@ export async function deleteModuleAction(formData: FormData) {
 
 const INPUT_TYPES = ['short_text', 'long_text', 'choice', 'multi_choice', 'scale', 'email', 'phone'] as const;
 
+/**
+ * Tolkar en multi-hink-spec som `builder:2 explorer:1 potential:0` (mellanslag-
+ * eller kommaseparerade `hink:poäng`-par). Returnerar undefined om strängen inte
+ * är en sådan spec (då faller parsern tillbaka på enkel `poäng`/`hink`-kolumn).
+ */
+function parseBucketSpec(raw: string | undefined): Record<string, number> | undefined {
+  if (!raw) return undefined;
+  const tokens = raw.split(/[\s,]+/).map((t) => t.trim()).filter(Boolean);
+  if (tokens.length === 0) return undefined;
+  const map: Record<string, number> = {};
+  for (const tok of tokens) {
+    const m = tok.match(/^([\p{L}0-9_-]+):(-?\d+(?:\.\d+)?)$/u);
+    if (!m) return undefined; // inte en hink-spec → låt enkel-parsern ta över
+    map[slugify(m[1])] = Number(m[2]);
+  }
+  return Object.keys(map).length > 0 ? map : undefined;
+}
+
 export async function addQuestionAction(formData: FormData) {
   const user = await requireUser();
   if (!hasRole(user.roles, [...MANAGE_ROLES])) {
@@ -621,10 +639,13 @@ export async function addQuestionAction(formData: FormData) {
     throw new Error('Ogiltig input_type');
   }
 
-  // Format per rad: `värde | etikett | poäng | hink`
-  // (poäng + hink är frivilliga och driver quiz-poängsättningen).
+  // Två format per rad stöds:
+  //   • Enkel/intervall: `värde | etikett | poäng | hink`
+  //     (poäng + hink frivilliga; en hink per val).
+  //   • Multi-hink: `värde | etikett | builder:2 explorer:1 potential:0`
+  //     (ett val fördelar poäng över flera profiler — företräde framför hink).
   let choices:
-    | { value: string; label: string; score?: number; bucket?: string }[]
+    | { value: string; label: string; score?: number; bucket?: string; buckets?: Record<string, number> }[]
     | undefined;
   if (choicesRaw && (inputType === 'choice' || inputType === 'multi_choice')) {
     choices = choicesRaw
@@ -635,15 +656,27 @@ export async function addQuestionAction(formData: FormData) {
         const parts = l.split('|').map((s) => s.trim());
         const value = parts[0];
         const label = parts[1] || value;
-        const choice: { value: string; label: string; score?: number; bucket?: string } = {
+        const choice: {
+          value: string;
+          label: string;
+          score?: number;
+          bucket?: string;
+          buckets?: Record<string, number>;
+        } = {
           value: slugify(value || l),
           label
         };
-        const score = Number(parts[2]);
-        if (parts[2] !== undefined && parts[2] !== '' && Number.isFinite(score)) {
-          choice.score = score;
+        // Multi-hink kan stå i poäng- eller hink-kolumnen (`builder:2 explorer:1`).
+        const buckets = parseBucketSpec(parts[2]) || parseBucketSpec(parts[3]);
+        if (buckets) {
+          choice.buckets = buckets;
+        } else {
+          const score = Number(parts[2]);
+          if (parts[2] !== undefined && parts[2] !== '' && Number.isFinite(score)) {
+            choice.score = score;
+          }
+          if (parts[3]) choice.bucket = slugify(parts[3]);
         }
-        if (parts[3]) choice.bucket = slugify(parts[3]);
         return choice;
       });
   }

@@ -197,8 +197,15 @@ export interface CompassQuestion {
   prompt: string;
   help_text?: string;
   input_type: 'short_text' | 'long_text' | 'choice' | 'multi_choice' | 'scale' | 'email' | 'phone';
-  // `score`/`bucket` driver quiz-poängsättningen (packages/shared/compass-quiz.ts).
-  choices?: { value: string; label: string; score?: number; bucket?: string }[];
+  // `score`/`bucket`/`buckets` driver quiz-poängsättningen (packages/shared/compass-quiz.ts).
+  // `buckets` = multi-hink (ett val fördelar poäng över flera profiler).
+  choices?: {
+    value: string;
+    label: string;
+    score?: number;
+    bucket?: string;
+    buckets?: Record<string, number>;
+  }[];
   required?: boolean;
   sort_order?: number;
 }
