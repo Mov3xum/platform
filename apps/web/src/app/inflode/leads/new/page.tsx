@@ -4,6 +4,7 @@ import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PageHead, Card, CardHead, Icon } from '@/components/proto';
 import { listLeadSources } from '@/lib/compass/store';
+import { createManualLeadAction } from '@/lib/actions/compass';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,8 +45,7 @@ export default async function NewLeadPage({
           </div>
         )}
         <form
-          action="/api/inflode/leads/manual"
-          method="post"
+          action={createManualLeadAction}
           style={{ padding: 16, display: 'grid', gap: 12 }}
         >
           <label className="mx-label">
