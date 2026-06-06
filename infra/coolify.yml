@@ -3,10 +3,16 @@
 #
 # OBS: PocketBase tillämpar JS-migrations i
 # backend/pocketbase-schema/migrations/ automatiskt vid container-start.
-# När en ny migration lagts till MÅSTE pocketbase-containern startas
+# Migrationerna är den AUKTORITATIVA schemakällan (setup-via-api.mjs är bara
+# bootstrap/regel-sync och skapar INTE migration-only-kollektioner som
+# compass_*). När en ny migration lagts till MÅSTE pocketbase-containern startas
 # om i Coolify innan web-appen ser den nya collectionen — annars 404:ar
 # nya endpoints (t.ex. notifications_collection / user_mistral_connectors).
 # Verifiera i PB-admin /_/#/collections att senaste migrationen är applicerad.
+# Om en instans byggdes utan att migrationerna körts (rå PB-image eller äldre
+# setup-via-api-bootstrap) saknas migration-only-kollektioner → se
+# backend/pocketbase-schema/README.md "Diagnostik & reconcile: saknade
+# migrationer" (diagnose-migrations.mjs + reconcile-migration-history.mjs).
 
 services:
   pocketbase:
