@@ -609,7 +609,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10 lg:px-8">
+    <main className="flex-1 overflow-y-auto px-6 py-10 lg:px-8">
+      <div className="mx-auto max-w-6xl">
       <div className="mb-6">
         <Link href="/startups" className="text-sm text-foreground-muted hover:text-foreground">
           ← Alla bolag
@@ -1449,6 +1450,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
             </ul>
           )}
         </Section>
+      </div>
       </div>
     </main>
   );

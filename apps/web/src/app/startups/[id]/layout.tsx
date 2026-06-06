@@ -43,6 +43,24 @@ interface ToolRunRow {
   status: string;
 }
 
+interface ActivityRow {
+  id: string;
+  title?: string;
+  description?: string;
+  kind?: string;
+  type?: string;
+  created: string;
+}
+
+const activityKindLabels: Record<string, string> = {
+  manual: 'Aktivitet',
+  tool_run: 'AI-körning',
+  integration_sync: 'Synk',
+  education_document: 'Utbildning',
+  agreement: 'Avtal',
+  onboarding: 'Onboarding'
+};
+
 function rel(iso: string): string {
   const d = new Date(iso);
   const diff = Math.round((Date.now() - d.getTime()) / 86_400_000);
@@ -73,8 +91,8 @@ export default async function StartupLayout({
 
   const pb = await getServerPb();
 
-  // Knowledge sources: notes (non-confidential) + milestones
-  const [notesRes, milestonesRes, toolsRes, runsRes] = await Promise.allSettled([
+  // Knowledge sources: aktiviteter + anteckningar (icke-konfidentiella) + milstolpar + AI-resultat
+  const [notesRes, milestonesRes, toolsRes, runsRes, activitiesRes] = await Promise.allSettled([
     pb.collection('notes').getList<NoteRow>(1, 12, {
       filter: `startup = "${id}" && confidential = false`,
       sort: '-created'
@@ -94,6 +112,11 @@ export default async function StartupLayout({
       }),
       sort: '-created',
       fields: 'id,tool,created,status'
+    }),
+    pb.collection('activities').getList<ActivityRow>(1, 20, {
+      filter: `startup = "${id}"`,
+      sort: '-created',
+      fields: 'id,title,description,kind,type,created'
     })
   ]);
 
@@ -101,10 +124,13 @@ export default async function StartupLayout({
   const milestones = milestonesRes.status === 'fulfilled' ? milestonesRes.value.items : [];
   const tools = toolsRes.status === 'fulfilled' ? toolsRes.value.items : [];
   const runs = runsRes.status === 'fulfilled' ? runsRes.value.items : [];
+  const activities = activitiesRes.status === 'fulfilled' ? activitiesRes.value.items : [];
 
   // Kunskap = allt bolaget producerar: AI-resultat, anteckningar, milstolpar.
   const toolNameById = new Map(tools.map((t) => [t.id, t.name]));
   const RESULT_STATUSES = new Set(['succeeded', 'approved', 'ready_for_review']);
+
+  const stripHtml = (s: string) => s.replace(/<[^>]*>/g, '').trim();
 
   const knowledge: KnowledgeItem[] = (
     [
@@ -120,6 +146,20 @@ export default async function StartupLayout({
             href: `/toolbox/runs/${r.id}`
           },
           ts: r.created
+        })),
+      // Aktiviteter (manuella m.fl.) — tool_run-kind hoppas över; de täcks redan av AI-resultaten ovan.
+      ...activities
+        .filter((a) => (a.kind || a.type || 'manual') !== 'tool_run')
+        .map((a) => ({
+          item: {
+            id: a.id,
+            kind: 'activity' as const,
+            name: a.title || stripHtml(a.description || '').slice(0, 60) || 'Aktivitet',
+            meta: activityKindLabels[a.kind || a.type || 'manual'] || 'Aktivitet',
+            updated: rel(a.created),
+            href: `/startups/${id}/logg`
+          },
+          ts: a.created
         })),
       ...notes.map((n) => ({
         item: {
