@@ -1671,10 +1671,15 @@ await ensureCollection({
     { name: 'doc_kind', type: 'select', required: true, maxSelect: 1, values: ['pdf', 'excel', 'powerpoint', 'word', 'other'] },
     { name: 'mime', type: 'text', required: false, max: 150 },
     { name: 'size_bytes', type: 'number', required: false },
+    // Migration 1700000116: valfri koppling till ett område (workshop_areas).
+    { name: 'area', type: 'relation', required: false, collectionId: 'workshop_areas_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'uploaded_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],
-  indexes: ['CREATE INDEX idx_education_documents_tenant ON education_documents (tenant)'],
+  indexes: [
+    'CREATE INDEX idx_education_documents_tenant ON education_documents (tenant)',
+    'CREATE INDEX idx_education_documents_tenant_area ON education_documents (tenant, area)'
+  ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
@@ -2449,6 +2454,12 @@ await patchCollection('user_files', AUTODATE_FIELDS);
 // area/workshop-omslag kan aldrig sparas via API-bootstrap-vägen.
 await patchCollection('workshops', [{ ...EDUCATION_IMAGE_FIELD }]);
 await patchCollection('workshop_areas', [{ ...EDUCATION_IMAGE_FIELD }]);
+
+// Migration 1700000116: education_documents.area (valfri koppling till ett
+// område). patchCollection lägger till fältet på BEFINTLIGA installs.
+await patchCollection('education_documents', [
+  { name: 'area', type: 'relation', required: false, collectionId: 'workshop_areas_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+]);
 
 // =========================================================================
 // 18d. Field-patches på befintliga collections (porterade från migrations

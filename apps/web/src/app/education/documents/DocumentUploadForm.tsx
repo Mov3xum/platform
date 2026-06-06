@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useRef, useState, useTransition } from 'react';
 import {
@@ -7,15 +8,17 @@ import {
   formatDocumentMbLimit,
   MAX_EDUCATION_DOCUMENT_BYTES
 } from '@platform/shared';
+import type { WorkshopArea } from '@platform/shared';
 
 const inputClass =
   'w-full rounded-xl border border-default bg-surface px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
 
-export function DocumentUploadForm() {
+export function DocumentUploadForm({ areas }: { areas: WorkshopArea[] }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [area, setArea] = useState('');
   const [fileName, setFileName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -49,6 +52,7 @@ export function DocumentUploadForm() {
     fd.append('file', file);
     fd.append('title', title.trim());
     if (description.trim()) fd.append('description', description.trim());
+    if (area) fd.append('area', area);
 
     startTransition(async () => {
       try {
@@ -61,6 +65,7 @@ export function DocumentUploadForm() {
         setMessage('Dokumentet laddades upp.');
         setTitle('');
         setDescription('');
+        setArea('');
         setFileName('');
         if (fileRef.current) fileRef.current.value = '';
         router.refresh();
@@ -104,6 +109,26 @@ export function DocumentUploadForm() {
           rows={2}
           className={inputClass}
         />
+      </label>
+
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-foreground-muted">Område (valfritt)</span>
+        <select value={area} onChange={(e) => setArea(e.target.value)} className={inputClass}>
+          <option value="">Inget område</option>
+          {areas.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+        <span className="mt-1 block text-[11px] text-foreground-subtle">
+          {areas.length === 0 ? 'Inga områden ännu. ' : null}
+          Skapa och hantera områden i{' '}
+          <Link href="/education/areas" className="text-link hover:underline">
+            Områden-fliken
+          </Link>
+          .
+        </span>
       </label>
 
       <label className="block">
