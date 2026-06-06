@@ -42,6 +42,7 @@ export async function saveGeneratedFile(
     filename: rendered.filename,
     mime: rendered.mime,
     doc_kind: p.docKind,
-    size_bytes: rendered.buffer.length
+    size_bytes: rendered.buffer.length,
+    ...(rendered.previewSvg ? { preview_svg: rendered.previewSvg } : {})
   };
 }

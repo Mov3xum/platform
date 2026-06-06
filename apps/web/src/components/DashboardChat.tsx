@@ -657,21 +657,48 @@ export default function DashboardChat({
   function renderGeneratedFiles(files?: GeneratedFileRef[]) {
     if (!files || files.length === 0) return null;
     return (
-      <ul className="mt-2 flex flex-wrap gap-2">
+      <ul className="mt-3 flex flex-wrap gap-3">
         {files.map((f) => (
           <li key={f.user_file_id}>
-            <button
-              type="button"
-              onClick={() => onDownload(f)}
-              className="inline-flex items-center gap-2 rounded-xl border border-default bg-canvas-subtle py-1.5 pl-2 pr-3 text-[12.5px] text-foreground transition hover:border-strong hover:bg-canvas-muted"
-              title={`Ladda ned ${f.filename}`}
-            >
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-movexum-pastell-lila text-movexum-morklila">
-                <Icon name={DOC_ICON[f.doc_kind] || 'doc'} size={13} />
-              </span>
-              <span className="max-w-[200px] truncate font-medium">{f.filename}</span>
-              <Icon name="download" size={13} />
-            </button>
+            <div className="w-[300px] max-w-full overflow-hidden rounded-2xl border border-default bg-surface shadow-movexum-svart/5 shadow-lg transition hover:border-strong">
+              {f.preview_svg ? (
+                <button
+                  type="button"
+                  onClick={() => onDownload(f)}
+                  className="block w-full bg-canvas-subtle"
+                  title={`Öppna ${f.filename}`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(f.preview_svg)}`}
+                    alt={`Förhandsgranskning av ${f.filename}`}
+                    className="block w-full"
+                  />
+                </button>
+              ) : null}
+              <div className="flex items-center gap-2 px-3 py-2">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-movexum-pastell-lila text-movexum-morklila">
+                  <Icon name={DOC_ICON[f.doc_kind] || 'doc'} size={14} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12.5px] font-medium text-foreground" title={f.filename}>
+                    {f.filename}
+                  </span>
+                  <span className="block text-[11px] uppercase tracking-wide text-foreground-subtle">
+                    {f.doc_kind} · {Math.max(1, Math.round((f.size_bytes || 0) / 1024))} kB
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onDownload(f)}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-default bg-canvas-subtle px-2.5 py-1.5 text-[12px] font-medium text-foreground transition hover:border-strong hover:bg-canvas-muted"
+                  title={`Ladda ned ${f.filename}`}
+                >
+                  <Icon name="download" size={13} />
+                  Ladda ned
+                </button>
+              </div>
+            </div>
           </li>
         ))}
       </ul>

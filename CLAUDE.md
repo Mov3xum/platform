@@ -1717,30 +1717,54 @@ validerat `DocumentSpec`; en deterministisk renderare bygger filen. Siffror
 ska komma från `query_collection`-svar i samma konversation. Verktyget
 `generate_document` exponeras bara för agent-actor i en interaktiv yta
 (`includeDocuments`), sparar i ägarens `user_files` och bifogar en
-`GeneratedFileRef` på assistant-svaret (nedladdnings-chip).
+`GeneratedFileRef` på assistant-svaret (inline-preview + nedladdnings-chip).
 
 - **Bibliotek (motiverat undantag från dependency-free):** `pptxgenjs`,
-  `exceljs`, `docx`, `pdf-lib` + `@pdf-lib/fontkit` — alla ren JS, inga
-  native-binärer, inga runtime-nätverksanrop → EU-suveränt, körs server-side
-  på UpCloud.
-- **Brand:** ett gemensamt designspråk över alla fyra format
-  (`documents/brand.ts` + `documents/render-*.ts`): brandat omslag i mörkblått
-  med wordmark, accent-detaljer i lila, Sora-rubriker, Nunito-brödtext,
-  zebra-randade tabeller och brandad footer. Färger hämtas från `tokens.ts`
-  (källan-av-sanning). Typsnitt: PPTX/DOCX/XLSX refererar Sora/Nunito
-  **by-name** (renderas om den som öppnar dokumentet har dem). **PDF bäddar in
-  Sora/Nunito** via `@pdf-lib/fontkit` när TTF/OTF finns i `public/fonts`
+  `exceljs`, `docx`, `pdf-lib` + `@pdf-lib/fontkit`, `echarts` (SSR→SVG) — alla
+  ren JS, inga native-binärer, inga runtime-nätverksanrop → EU-suveränt, körs
+  server-side på UpCloud.
+- **2026-designspråk (`documents/brand.ts` + `documents/render-*.ts`):** ett
+  gemensamt språk över alla fyra format — brandat omslag med accent-panel +
+  geometriska former, **rundade kort med mjuka skuggor**, **KPI-/stat-kort**,
+  **callout-rutor**, **pull-quotes**, **zebra-tabeller med data-barer** och
+  **diagram i alla format**. Färger hämtas från `tokens.ts` (källan-av-sanning)
+  via `accentTheme`/`calloutTheme`. Accent-tema väljs per dokument
+  (`accent: blue|purple|teal|green`). Geometri-primitiver (rundade hörn,
+  skuggor) i `brand.ts` (`roundedRectPath`, `softShadow`). Wordmarken renderas
+  som **text** (Sora) — inget PNG-beroende längre. AI-disclaimer-footer i varje
+  dokument (§9.7 / EU AI Act art. 50).
+- **Primitiver (`documents/types.ts`, validerade i `validate.ts`):** `kpis`
+  (stat-kort), `callout` (variant info/success/warning/accent), `quote`,
+  `chart` (`bar|hbar|line|area|pie|donut`, nu även i docx/pdf), `table`
+  (`emphasizeLastColumn` → data-barer). Slide-layouter utökade med `section`
+  (delare) och `kpi`.
+- **Diagram (`documents/chart.ts`):** PPTX använder nativa, **editerbara**
+  diagram (pptxgenjs) i en skuggad kort-container; **DOCX bäddar in** brandad
+  SVG från `charts/`-ECharts-temat (med transparent PNG-fallback för äldre
+  Word); **PDF ritar nativt** med pdf-lib (`drawSvgPath`) eftersom pdf-lib inte
+  kan bädda SVG utan rastrering. Visuellt konsekvent palett (`CHART_COLORS`).
+- **Mall-bibliotek (`documents/templates.ts`):** gedigna blueprints
+  (investerar-onepager, kvartalsrapport, styrelsedeck, pitch deck,
+  portföljöversikt, finansiell sammanställning, bolagsprofil, coach-briefing,
+  status-PM). Agenten väljer `template` → sätter format + accent och styr
+  strukturen så varje dokument får ett enhetligt, professionellt uttryck. Detta
+  är "rattarna" i förbättrings-loopen (§9.10): justera blueprinten → alla
+  framtida dokument blir bättre.
+- **Inline-preview (`documents/preview.ts`):** vid generering produceras en
+  kompakt, deterministisk **SVG av första sidan** (brandat omslag + glimt av
+  KPI:er/diagram/punkter) som returneras på `GeneratedFileRef.preview_svg` och
+  visas inline i chatten (`DashboardChat.renderGeneratedFiles`, via
+  `<img src=data:image/svg+xml>` — ingen `dangerouslySetInnerHTML`, escapad,
+  cappad till 24 KB). Persisteras i `ToolRunMessage.generated_files` så
+  återöppnade trådar visar previewen. PDF kan dessutom öppnas i full fidelity.
+- **Typsnitt:** PPTX/DOCX/XLSX refererar Sora/Nunito **by-name**; **PDF bäddar
+  in** Sora/Nunito via `@pdf-lib/fontkit` när TTF/OTF finns i `public/fonts`
   (`Sora-SemiBold.ttf`, `NunitoSans-Regular.ttf`, `NunitoSans-Bold.ttf`),
-  annars Helvetica-fallback. AI-disclaimer-footer i varje dokument (§9.7 /
-  EU AI Act art. 50).
-- **Brand-assets (`documents/assets.ts`, fail-soft):** wordmark-loggor som
-  **PNG** (`public/brand/movexum-wordmark-{light,dark}.png` — SVG kan inte
-  bäddas in) och PDF-typsnitt laddas server-side från disk och cachas.
-  Saknas filerna renderas dokumentet ändå (utan logga / med Helvetica). Se
-  README i `public/brand/` resp. `public/fonts/`.
-- **PII:** renderaren är ingen ny dataväg — dokumentet kan bara innehålla
-  data agenten redan såg via `query_collection` (PII-denylist/maskning i
-  `schema.ts` gäller uppströms).
+  annars Helvetica-fallback (`documents/assets.ts`, fail-soft).
+- **PII:** varken renderaren eller previewen är en ny dataväg — dokumentet kan
+  bara innehålla data agenten redan såg via `query_collection` (PII-denylist/
+  maskning i `schema.ts` gäller uppströms). Preview-etiketterna härleds ur
+  samma spec. Riskklass oförändrad (begränsad, § 17.5).
 
 ### 17.4 Djupa jobb / subagenter
 

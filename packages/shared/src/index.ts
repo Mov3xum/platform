@@ -322,6 +322,11 @@ export interface GeneratedFileRef {
   mime: string;
   doc_kind: UserFileDocKind;
   size_bytes: number;
+  // Kompakt, deterministiskt genererad SVG-förhandsgranskning av dokumentets
+  // första sida (brandat omslag + glimt av innehållet). Låter chatten visa en
+  // inline-preview utan att rastrera Office-filer. Sanerad/escapad vid
+  // generering; cappad i storlek. Valfri (bakåtkompatibelt).
+  preview_svg?: string;
 }
 
 // Ett verktygssteg agenten utförde under en turn. Live-streamas till UI:t
