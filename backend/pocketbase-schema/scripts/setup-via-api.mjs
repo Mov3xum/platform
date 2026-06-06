@@ -444,6 +444,9 @@ const STAFF_OR_LEAD =
 // (se migration 1700000107 / § 21.3). Använd den för nyligen rättade regler.
 const STAFF_OR_LEAD_EACH =
   '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead")';
+const COMPASS_STAFF_EACH =
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach")';
+const ADMIN_EACH = '@request.auth.roles:each ?= "admin"';
 const STAFF_INCL_MENTOR =
   '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "mentor")';
 
@@ -2169,6 +2172,266 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
 });
+
+// Startupkompassen/inflöde (migrationer 1700000039, 1700000049,
+// 1700000108, 1700000109, 1700000110, 1700000112).
+// Viktigt: dessa collectioner skapades historiskt bara via migrationer.
+// Vid API-bootstrapad instans saknas de helt, vilket fäller baseline.
+await ensureCollection({
+  id: 'compass_lead_sources_collection',
+  name: 'compass_lead_sources',
+  type: 'base',
+  fields: [
+    { name: 'key', type: 'text', required: true, min: 1, max: 50 },
+    { name: 'label', type: 'text', required: true, max: 100 },
+    { name: 'icon', type: 'text', required: false, max: 50 },
+    { name: 'color', type: 'text', required: false, max: 20 },
+    { name: 'sort_order', type: 'number', required: false }
+  ],
+  indexes: ['CREATE UNIQUE INDEX idx_compass_lead_sources_key ON compass_lead_sources (key)'],
+  listRule: ANY_AUTH,
+  viewRule: ANY_AUTH,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`
+});
+
+await ensureCollection({
+  id: 'compass_leads_collection',
+  name: 'compass_leads',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'name', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'email', type: 'email', required: false },
+    { name: 'phone', type: 'text', required: false, max: 50 },
+    { name: 'organization', type: 'text', required: false, max: 200 },
+    { name: 'idea_summary', type: 'text', required: false, max: 4000 },
+    { name: 'idea_category', type: 'text', required: false, max: 100 },
+    { name: 'source_key', type: 'text', required: true, max: 50 },
+    { name: 'source_detail', type: 'text', required: false, max: 200 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['new', 'contacted', 'meeting-booked', 'evaluating', 'accepted', 'declined'] },
+    { name: 'score', type: 'number', required: false, min: 0, max: 100 },
+    { name: 'score_reasoning', type: 'text', required: false, max: 4000 },
+    { name: 'assigned_to', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'notes', type: 'text', required: false, max: 8000 },
+    { name: 'tags', type: 'select', required: false, maxSelect: 12, values: ['sustainable', 'tech', 'service', 'product', 'local', 'international', 'student', 'researcher', 'female-led', 'social-impact', 'b2b', 'b2c'] },
+    { name: 'consent_at', type: 'date', required: false },
+    { name: 'last_contact_at', type: 'date', required: false },
+    { name: 'utm_source', type: 'text', required: false, max: 100 },
+    { name: 'utm_medium', type: 'text', required: false, max: 100 },
+    { name: 'utm_campaign', type: 'text', required: false, max: 100 },
+    { name: 'utm_term', type: 'text', required: false, max: 100 },
+    { name: 'utm_content', type: 'text', required: false, max: 200 },
+    { name: 'referrer_url', type: 'text', required: false, max: 500 },
+    { name: 'landing_module', type: 'text', required: false, max: 100 },
+    { name: 'market_scan', type: 'json', required: false, maxSize: 200000 },
+    { name: 'ai_review', type: 'json', required: false, maxSize: 200000 },
+    { name: 'converted_startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'converted_at', type: 'date', required: false },
+    { name: 'quiz_result_bucket', type: 'text', required: false, max: 60 },
+    { name: 'quiz_score', type: 'number', required: false, min: 0 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_compass_leads_tenant_status ON compass_leads (tenant, status)',
+    'CREATE INDEX idx_compass_leads_tenant_name ON compass_leads (tenant, name)',
+    'CREATE INDEX idx_compass_leads_tenant_source ON compass_leads (tenant, source_key)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`
+});
+
+await ensureCollection({
+  id: 'compass_conversations_collection',
+  name: 'compass_conversations',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'lead', type: 'relation', required: false, collectionId: 'compass_leads_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+    { name: 'module_slug', type: 'text', required: false, max: 100 },
+    { name: 'session_token', type: 'text', required: false, max: 100 },
+    { name: 'visitor_ip_hash', type: 'text', required: false, max: 100 },
+    { name: 'extracted_data', type: 'json', required: false, maxSize: 200000 },
+    { name: 'status', type: 'select', required: false, maxSelect: 1, values: ['active', 'completed', 'abandoned'] }
+  ],
+  indexes: [
+    'CREATE INDEX idx_compass_conv_tenant_status ON compass_conversations (tenant, status)',
+    'CREATE INDEX idx_compass_conv_lead ON compass_conversations (lead)',
+    'CREATE INDEX idx_compass_conv_session ON compass_conversations (session_token)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`
+});
+
+await ensureCollection({
+  id: 'compass_messages_collection',
+  name: 'compass_messages',
+  type: 'base',
+  fields: [
+    { name: 'conversation', type: 'relation', required: true, collectionId: 'compass_conversations_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'role', type: 'select', required: true, maxSelect: 1, values: ['user', 'assistant', 'system'] },
+    { name: 'content', type: 'text', required: true, max: 20000 },
+    { name: 'tokens_in', type: 'number', required: false, min: 0 },
+    { name: 'tokens_out', type: 'number', required: false, min: 0 },
+    { name: 'model', type: 'text', required: false, max: 100 }
+  ],
+  indexes: ['CREATE INDEX idx_compass_msg_conv ON compass_messages (conversation)'],
+  listRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
+  viewRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`
+});
+
+await ensureCollection({
+  id: 'compass_modules_collection',
+  name: 'compass_modules',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'slug', type: 'text', required: true, min: 1, max: 100 },
+    { name: 'name', type: 'text', required: true, max: 200 },
+    { name: 'description', type: 'text', required: false, max: 1000 },
+    { name: 'flow_type', type: 'select', required: true, maxSelect: 1, values: ['chat', 'wizard', 'quiz'] },
+    { name: 'system_prompt', type: 'editor', required: false },
+    { name: 'consent_note', type: 'text', required: false, max: 2000 },
+    { name: 'is_active', type: 'bool', required: false },
+    { name: 'model', type: 'select', required: false, maxSelect: 1, values: ['mistral-large-latest', 'mistral-medium-latest', 'mistral-small-latest'] },
+    { name: 'sort_order', type: 'number', required: false },
+    { name: 'public_url_enabled', type: 'bool', required: false },
+    { name: 'target_audience', type: 'text', required: false, max: 500 },
+    { name: 'success_message', type: 'text', required: false, max: 2000 },
+    { name: 'redirect_url', type: 'text', required: false, max: 500 },
+    { name: 'theme_color', type: 'text', required: false, max: 20 },
+    { name: 'intro_message', type: 'text', required: false, max: 2000 },
+    { name: 'public_slug', type: 'text', required: false, max: 100 },
+    { name: 'result_buckets', type: 'json', required: false, maxSize: 100000 },
+    { name: 'welcome_title', type: 'text', required: false, max: 200 },
+    { name: 'welcome_body', type: 'text', required: false, max: 4000 },
+    { name: 'hero_eyebrow', type: 'text', required: false, max: 120 },
+    { name: 'chat_persona', type: 'text', required: false, max: 4000 },
+    { name: 'max_exchanges', type: 'number', required: false, min: 0 },
+    { name: 'require_email', type: 'bool', required: false },
+    { name: 'require_phone', type: 'bool', required: false },
+    { name: 'require_organization', type: 'bool', required: false },
+    { name: 'notify_emails', type: 'text', required: false, max: 1000 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_compass_modules_tenant_slug ON compass_modules (tenant, slug)',
+    'CREATE INDEX idx_compass_modules_tenant_active ON compass_modules (tenant, is_active)',
+    "CREATE UNIQUE INDEX idx_compass_modules_public_slug ON compass_modules (public_slug) WHERE public_slug != ''"
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`
+});
+
+await ensureCollection({
+  id: 'compass_questions_collection',
+  name: 'compass_questions',
+  type: 'base',
+  fields: [
+    { name: 'module', type: 'relation', required: true, collectionId: 'compass_modules_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'key', type: 'text', required: true, max: 100 },
+    { name: 'prompt', type: 'text', required: true, max: 2000 },
+    { name: 'help_text', type: 'text', required: false, max: 1000 },
+    { name: 'input_type', type: 'select', required: true, maxSelect: 1, values: ['short_text', 'long_text', 'choice', 'multi_choice', 'scale', 'email', 'phone'] },
+    { name: 'choices', type: 'json', required: false, maxSize: 50000 },
+    { name: 'required', type: 'bool', required: false },
+    { name: 'sort_order', type: 'number', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_compass_questions_module_sort ON compass_questions (module, sort_order)',
+    'CREATE UNIQUE INDEX idx_compass_questions_module_key ON compass_questions (module, key)'
+  ],
+  listRule: `${ANY_AUTH} && @request.auth.tenant = module.tenant`,
+  viewRule: `${ANY_AUTH} && @request.auth.tenant = module.tenant`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`
+});
+
+await ensureCollection({
+  id: 'compass_responses_collection',
+  name: 'compass_responses',
+  type: 'base',
+  fields: [
+    { name: 'conversation', type: 'relation', required: true, collectionId: 'compass_conversations_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'question', type: 'relation', required: true, collectionId: 'compass_questions_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'value', type: 'text', required: false, max: 8000 },
+    { name: 'value_json', type: 'json', required: false, maxSize: 200000 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_compass_responses_conv ON compass_responses (conversation)',
+    'CREATE INDEX idx_compass_responses_q ON compass_responses (question)'
+  ],
+  listRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
+  viewRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`
+});
+
+await ensureCollection({
+  id: 'compass_security_events_collection',
+  name: 'compass_security_events',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'actor', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['login', 'logout', 'invite_sent', 'invite_accepted', 'role_change', 'lead_delete', 'lead_export', 'lead_erase', 'module_publish', 'module_unpublish', 'brand_update', 'failed_login', 'rate_limit'] },
+    { name: 'subject', type: 'text', required: false, max: 200 },
+    { name: 'meta', type: 'json', required: false, maxSize: 50000 },
+    { name: 'ip_hash', type: 'text', required: false, max: 100 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_compass_sec_tenant_kind ON compass_security_events (tenant, kind)',
+    'CREATE INDEX idx_compass_sec_kind ON compass_security_events (kind)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  createRule: null,
+  updateRule: null,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${ADMIN_EACH}`
+});
+
+await ensureCollection({
+  id: 'compass_brand_collection',
+  name: 'compass_brand',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'key', type: 'text', required: true, max: 100 },
+    { name: 'value', type: 'text', required: false, max: 4000 },
+    { name: 'value_json', type: 'json', required: false, maxSize: 200000 }
+  ],
+  indexes: ['CREATE UNIQUE INDEX idx_compass_brand_tenant_key ON compass_brand (tenant, key)'],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`
+});
+
+// Seeda standardkällor om de saknas (idempotent på key).
+for (const source of [
+  { key: 'event', label: 'Event', icon: 'calendar', color: '#f0d22e', sort_order: 0 },
+  { key: 'web', label: 'Webbformulär', icon: 'globe', color: '#00a8de', sort_order: 1 },
+  { key: 'social', label: 'Sociala medier', icon: 'share', color: '#8e6fd6', sort_order: 2 },
+  { key: 'referral', label: 'Rekommendation', icon: 'users', color: '#4a7d4a', sort_order: 3 },
+  { key: 'call', label: 'Samtal', icon: 'phone', color: '#d67e47', sort_order: 4 },
+  { key: 'ai-chat', label: 'AI-intag', icon: 'sparkles', color: '#002c40', sort_order: 5 }
+]) {
+  await ensureRecord('compass_lead_sources', `key = "${source.key}"`, source);
+}
 
 // Migration 1700000062: startup_phase_history — historik över faskiften.
 await ensureCollection({
