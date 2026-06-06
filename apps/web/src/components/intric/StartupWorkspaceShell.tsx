@@ -20,18 +20,16 @@ interface Props {
   activeTabBadges?: Partial<Record<TabId, number>>;
 }
 
-type TabId = 'overview' | 'chat' | 'verktyg' | 'logg';
+type TabId = 'overview' | 'verktyg' | 'logg';
 
 const TABS: { id: TabId; label: string; path: string }[] = [
   { id: 'overview', label: 'Översikt', path: '' },
-  { id: 'chat', label: 'Chat', path: '/chat' },
   { id: 'verktyg', label: 'Verktyg', path: '/verktyg' },
   { id: 'logg', label: 'Logg', path: '/logg' }
 ];
 
 function deriveActiveTab(pathname: string, startupId: string): TabId {
   const base = `/startups/${startupId}`;
-  if (pathname.startsWith(`${base}/chat`)) return 'chat';
   if (pathname.startsWith(`${base}/verktyg`)) return 'verktyg';
   if (pathname.startsWith(`${base}/logg`)) return 'logg';
   return 'overview';
