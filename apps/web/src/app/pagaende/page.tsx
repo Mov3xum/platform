@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { getAssignmentReadPb } from '@/lib/assignments/read';
 import { canAccessModuleForUser } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { PageShell } from '@/components/PageShell';
@@ -91,16 +92,20 @@ export default async function PagaendePage() {
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'pagaende', user.disabledModules)) redirect('/chatt');
   const pb = await getServerPb();
+  // Tilldelningarna läses via en robust klient (PB v0.23.4 rule-eval, § 21.3).
+  // Sidan är redan staff/observer-gated ovan och frågorna är tenant-scopade.
+  // Se lib/assignments/read.ts.
+  const assignPb = await getAssignmentReadPb();
   const tenant = escFilter(user.tenant);
 
   const emptyList = { items: [] as never[] };
   const [workshopsRes, docsRes, activitiesRes] = await Promise.allSettled([
-    pb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopRow>(1, 200, {
+    assignPb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopRow>(1, 200, {
       filter: `tenant = "${tenant}" && status != "done"`,
       sort: '-created',
       expand: 'workshop,startup,assigned_by,collaborators,meeting'
     }),
-    pb.collection(PB_COLLECTIONS.educationDocumentAssignments).getList<DocRow>(1, 200, {
+    assignPb.collection(PB_COLLECTIONS.educationDocumentAssignments).getList<DocRow>(1, 200, {
       filter: `tenant = "${tenant}" && status != "completed"`,
       sort: '-created',
       expand: 'document,startup,collaborators,meeting'
