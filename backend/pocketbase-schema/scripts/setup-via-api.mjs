@@ -2433,6 +2433,303 @@ for (const source of [
   await ensureRecord('compass_lead_sources', `key = "${source.key}"`, source);
 }
 
+// Migration 1700000079: agent_memory.
+await ensureCollection({
+  id: 'agent_memory_col',
+  name: 'agent_memory',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+    { name: 'key', type: 'text', required: true, max: 200 },
+    { name: 'content', type: 'text', required: true, max: 8000 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'updated_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_agent_memory_unique ON agent_memory (tenant, startup, key)',
+    'CREATE INDEX idx_agent_memory_tenant ON agent_memory (tenant)',
+    'CREATE INDEX idx_agent_memory_startup ON agent_memory (startup)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
+// Migration 1700000080: tool_knowledge.
+await ensureCollection({
+  id: 'tool_knowledge_col',
+  name: 'tool_knowledge',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'tool', type: 'relation', required: true, collectionId: 'tools_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: false, max: 200 },
+    { name: 'filename', type: 'text', required: true, min: 1, max: 300 },
+    { name: 'mime', type: 'text', required: false, max: 120 },
+    { name: 'size_bytes', type: 'number', required: false, min: 0, onlyInt: true },
+    {
+      name: 'file',
+      type: 'file',
+      required: false,
+      maxSelect: 1,
+      maxSize: 10485760,
+      mimeTypes: [
+        'application/pdf',
+        'text/plain',
+        'text/markdown',
+        'text/csv',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      ]
+    },
+    { name: 'extracted_text', type: 'text', required: false, max: 80000 },
+    { name: 'char_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'redacted', type: 'bool', required: false },
+    { name: 'sort_order', type: 'number', required: false, onlyInt: true },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_tool_knowledge_tenant ON tool_knowledge (tenant)',
+    'CREATE INDEX idx_tool_knowledge_tool ON tool_knowledge (tool)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
+});
+
+// Migration 1700000081: tool_versions.
+await ensureCollection({
+  id: 'tool_versions_col',
+  name: 'tool_versions',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'tool', type: 'relation', required: true, collectionId: 'tools_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'version', type: 'number', required: true, min: 1, onlyInt: true },
+    { name: 'snapshot', type: 'json', required: true, maxSize: 200000 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_tool_versions_unique ON tool_versions (tool, version)',
+    'CREATE INDEX idx_tool_versions_tenant ON tool_versions (tenant)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  updateRule: null,
+  deleteRule: null
+});
+
+// Migration 1700000082: tool_triggers.
+await ensureCollection({
+  id: 'tool_triggers_col',
+  name: 'tool_triggers',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'tool', type: 'relation', required: true, collectionId: 'tools_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'event', type: 'select', required: true, maxSelect: 1, values: ['startup_created'] },
+    { name: 'enabled', type: 'bool', required: false },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_tool_triggers_unique ON tool_triggers (tenant, tool, event)',
+    'CREATE INDEX idx_tool_triggers_event ON tool_triggers (event)',
+    'CREATE INDEX idx_tool_triggers_tenant ON tool_triggers (tenant)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
+});
+
+// Migration 1700000093/94/95: de minimis.
+await ensureCollection({
+  id: 'de_minimis_regelverk_collection',
+  name: 'de_minimis_regelverk',
+  type: 'base',
+  fields: [
+    { name: 'kod', type: 'select', required: true, maxSelect: 1, values: ['ALLMAN', 'SGEI', 'JORDBRUK', 'FISKE'] },
+    { name: 'forordning_text', type: 'text', required: true, max: 300 },
+    { name: 'tillampning', type: 'text', required: true, max: 300 },
+    { name: 'tak_eur', type: 'number', required: true, min: 0 },
+    { name: 'period', type: 'select', required: true, maxSelect: 1, values: ['RULLANDE_3AR', 'BESKATTNINGSAR_3'] },
+    { name: 'giltig_t_o_m', type: 'date', required: false },
+    { name: 'sort_order', type: 'number', required: false }
+  ],
+  indexes: ['CREATE UNIQUE INDEX idx_de_minimis_regelverk_kod ON de_minimis_regelverk (kod)'],
+  listRule: ANY_AUTH,
+  viewRule: ANY_AUTH,
+  createRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`,
+  updateRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`,
+  deleteRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`
+});
+
+for (const regel of [
+  { kod: 'ALLMAN', forordning_text: '(EU) 2023/2831', tillampning: 'Allmänt stöd av mindre betydelse', tak_eur: 300000, period: 'RULLANDE_3AR', giltig_t_o_m: '2030-12-31', sort_order: 10 },
+  { kod: 'SGEI', forordning_text: '(EU) 2023/2832', tillampning: 'Tjänster av allmänt ekonomiskt intresse (SGEI)', tak_eur: 750000, period: 'RULLANDE_3AR', giltig_t_o_m: '2030-12-31', sort_order: 20 },
+  { kod: 'JORDBRUK', forordning_text: '(EU) 1408/2013, senast ändrad (EU) 2024/3118', tillampning: 'Primärproduktion av jordbruksprodukter', tak_eur: 50000, period: 'BESKATTNINGSAR_3', giltig_t_o_m: '2030-12-31', sort_order: 30 },
+  { kod: 'FISKE', forordning_text: '(EU) 717/2014', tillampning: 'Fiskeri- och vattenbrukssektorn', tak_eur: 30000, period: 'BESKATTNINGSAR_3', giltig_t_o_m: '2030-12-31', sort_order: 40 }
+]) {
+  await ensureRecord('de_minimis_regelverk', `kod = "${regel.kod}"`, regel);
+}
+
+await ensureCollection({
+  id: 'de_minimis_units_collection',
+  name: 'de_minimis_units',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'namn', type: 'text', required: true, max: 200 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_de_minimis_units_tenant ON de_minimis_units (tenant)',
+    'CREATE INDEX idx_de_minimis_units_startup ON de_minimis_units (startup)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
+await ensureCollection({
+  id: 'de_minimis_unit_orgnr_collection',
+  name: 'de_minimis_unit_orgnr',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'unit', type: 'relation', required: true, collectionId: 'de_minimis_units_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'organisationsnummer', type: 'text', required: true, max: 32 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_de_minimis_orgnr_tenant ON de_minimis_unit_orgnr (tenant)',
+    'CREATE INDEX idx_de_minimis_orgnr_unit ON de_minimis_unit_orgnr (unit)',
+    'CREATE UNIQUE INDEX idx_de_minimis_orgnr_unique ON de_minimis_unit_orgnr (unit, organisationsnummer)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
+await ensureCollection({
+  id: 'de_minimis_stod_collection',
+  name: 'de_minimis_stod',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'unit', type: 'relation', required: true, collectionId: 'de_minimis_units_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'forordning', type: 'select', required: true, maxSelect: 1, values: ['ALLMAN', 'SGEI', 'JORDBRUK', 'FISKE'] },
+    { name: 'stodgivare', type: 'text', required: true, max: 200 },
+    { name: 'beslutsdatum', type: 'date', required: true },
+    { name: 'belopp_eur', type: 'number', required: true, min: 0 },
+    { name: 'belopp_sek', type: 'number', required: false, min: 0 },
+    { name: 'valutakurs', type: 'number', required: false, min: 0 },
+    { name: 'syfte', type: 'text', required: false, max: 500 },
+    { name: 'beslut_referens', type: 'text', required: false, max: 200 },
+    {
+      name: 'dokument',
+      type: 'file',
+      required: false,
+      maxSelect: 1,
+      maxSize: 15728640,
+      mimeTypes: [
+        'application/pdf',
+        'image/png',
+        'image/jpeg',
+        'image/webp',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      ]
+    },
+    { name: 'registrerad_i_eair', type: 'bool', required: false },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_de_minimis_stod_tenant ON de_minimis_stod (tenant)',
+    'CREATE INDEX idx_de_minimis_stod_startup ON de_minimis_stod (startup)',
+    'CREATE INDEX idx_de_minimis_stod_unit ON de_minimis_stod (unit)',
+    'CREATE INDEX idx_de_minimis_stod_lookup ON de_minimis_stod (unit, forordning, beslutsdatum)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
+// Migration 1700000113/114: onboarding.
+const STAFF_OR_OBSERVER_EACH =
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "mentor" || @request.auth.roles:each ?= "observer")';
+const STAFF_EACH =
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "mentor")';
+
+await ensureCollection({
+  id: 'onboarding_flows_collection',
+  name: 'onboarding_flows',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'intro', type: 'editor', required: false },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft', 'active', 'archived'] },
+    { name: 'is_default', type: 'bool', required: false },
+    { name: 'active', type: 'bool', required: false },
+    { name: 'modules', type: 'json', required: false },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_onboarding_flows_tenant ON onboarding_flows (tenant)',
+    'CREATE INDEX idx_onboarding_flows_tenant_default ON onboarding_flows (tenant, is_default)',
+    'CREATE INDEX idx_onboarding_flows_tenant_active ON onboarding_flows (tenant, active)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
+});
+
+await ensureCollection({
+  id: 'onboarding_progress_collection',
+  name: 'onboarding_progress',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'flow', type: 'relation', required: true, collectionId: 'onboarding_flows_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['in_progress', 'completed'] },
+    { name: 'answers_json', type: 'json', required: false },
+    { name: 'progress_json', type: 'json', required: false },
+    { name: 'activity', type: 'relation', required: false, collectionId: 'activities_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'started_at', type: 'date', required: false },
+    { name: 'completed_at', type: 'date', required: false },
+    { name: 'completed_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_onboarding_progress_unique ON onboarding_progress (tenant, flow, startup)',
+    'CREATE INDEX idx_onboarding_progress_startup ON onboarding_progress (startup)',
+    'CREATE INDEX idx_onboarding_progress_flow ON onboarding_progress (flow)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || @request.auth.linked_startups:each ?= startup)`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || @request.auth.linked_startups:each ?= startup)`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || @request.auth.linked_startups:each ?= startup)`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
+});
+
 // Migration 1700000062: startup_phase_history — historik över faskiften.
 await ensureCollection({
   id: 'startup_phase_history_collection',
