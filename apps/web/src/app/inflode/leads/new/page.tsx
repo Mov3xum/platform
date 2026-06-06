@@ -7,11 +7,17 @@ import { listLeadSources } from '@/lib/compass/store';
 
 export const dynamic = 'force-dynamic';
 
-export default async function NewLeadPage() {
+export default async function NewLeadPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ error?: string }>;
+}) {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) {
     redirect('/inflode');
   }
+  const params = (await searchParams) || {};
+  const error = params.error === 'missing_name' || params.error === 'creation_failed' ? params.error : undefined;
   const pb = await getServerPb();
   const sources = await listLeadSources(pb);
 
@@ -30,6 +36,13 @@ export default async function NewLeadPage() {
 
       <Card>
         <CardHead label="Idébärare" />
+        {error && (
+          <div className="mx-t-13 bg-movexum-pastell-orange px-4 py-2 text-movexum-morkorange">
+            {error === 'missing_name'
+              ? 'Namn är obligatoriskt för att skapa lead.'
+              : 'Kunde inte skapa lead just nu. Försök igen.'}
+          </div>
+        )}
         <form
           action="/api/inflode/leads/manual"
           method="post"
