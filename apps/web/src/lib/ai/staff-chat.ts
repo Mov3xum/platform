@@ -76,10 +76,15 @@ const STAFF_TOOL_GUIDANCE =
   'aktivitet kopplat till ett bolag.\n' +
   '- `update_activity_field`: uppdatera en befintlig aktivitets `title`, ' +
   '`description` eller `status`.\n' +
-  '- `generate_document` (när tillgängligt): ta fram en .pptx/.xlsx/.docx/.pdf ' +
-  'av sammanställd data. Siffror och fakta MÅSTE komma från tidigare ' +
-  'query_collection-svar — hitta aldrig på. Filen renderas deterministiskt och ' +
-  'sparas i användarens privata Filer + bifogas svaret för nedladdning.\n\n' +
+  '- `generate_document` (när tillgängligt): ta fram en snygg, brandad ' +
+  '.pptx/.xlsx/.docx/.pdf av sammanställd data. Siffror och fakta MÅSTE komma ' +
+  'från tidigare query_collection-svar — hitta aldrig på. VÄLJ alltid en ' +
+  '`template` som matchar uppgiften och följ dess struktur. Gör dokumentet ' +
+  'visuellt: använd `kpis` (nyckeltal som kort), `callout` (insikter), och ' +
+  '`chart` för trender i stället för långa siffertabeller. Filen renderas ' +
+  'deterministiskt med rundade kort, skuggor och diagram, sparas i användarens ' +
+  'privata Filer, bifogas svaret för nedladdning OCH visas som inline-' +
+  'förhandsgranskning i chatten.\n\n' +
   'Skrivregler:\n' +
   '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
   'efterfrågad.\n' +
