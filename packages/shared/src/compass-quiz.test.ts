@@ -76,6 +76,48 @@ test('multi_choice summerar alla valda val', () => {
   assert.equal(scoreQuiz(q, { m: ['x', 'z'] }).total, 7);
 });
 
+// ── Multi-hink-läge (ett val → flera profiler) ────────────────────────────────
+
+const multiBucketQuestions: QuizQuestion[] = [
+  {
+    key: 'driver',
+    input_type: 'choice',
+    choices: [
+      { value: 'a', label: 'A', buckets: { builder: 2, explorer: 0 } },
+      { value: 'b', label: 'B', buckets: { builder: 1, explorer: 1 } },
+      { value: 'd', label: 'D', buckets: { builder: 0, explorer: 2 } }
+    ]
+  },
+  {
+    key: 'reaction',
+    input_type: 'choice',
+    choices: [
+      { value: 'help', label: 'Ber om hjälp', buckets: { builder: 0, explorer: 1, potential: 1 } },
+      { value: 'drop', label: 'Tappar energi', buckets: { builder: 0, explorer: 0, potential: 2 } }
+    ]
+  }
+];
+
+test('multi-hink fördelar poäng över flera profiler per val', () => {
+  const s = scoreQuiz(multiBucketQuestions, { driver: 'a', reaction: 'help' });
+  assert.equal(s.byBucket.builder, 2);
+  assert.equal(s.byBucket.explorer, 1);
+  assert.equal(s.byBucket.potential, 1);
+  assert.equal(s.total, 4);
+});
+
+test('multi-hink: resolveBucket väljer profilen med flest poäng', () => {
+  const s = scoreQuiz(multiBucketQuestions, { driver: 'd', reaction: 'drop' });
+  // builder 0, explorer 2, potential 2 → oavgjort explorer/potential, men
+  // profil-ordningen avgör (explorer före potential i listan nedan).
+  const buckets: ResultBucket[] = [
+    { key: 'builder', title: 'Builder', body: '', tips: [] },
+    { key: 'explorer', title: 'Explorer', body: '', tips: [] },
+    { key: 'potential', title: 'Potential', body: '', tips: [] }
+  ];
+  assert.equal(resolveBucket(s, buckets)?.key, 'explorer');
+});
+
 // ── Intervall-läge (range) ────────────────────────────────────────────────────
 
 const rangeQuestions: QuizQuestion[] = [

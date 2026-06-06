@@ -504,13 +504,15 @@ export default async function EditModulePage({
                       />
                     </label>
                     <label className="mx-label">
-                      Val (en per rad, format <code>värde | etikett | poäng | hink</code>) — poäng
-                      och hink är frivilliga och styr quiz-poängsättningen
+                      Val (en per rad). Format <code>värde | etikett | poäng | hink</code> för
+                      en hink per val, eller <code>värde | etikett | builder:2 explorer:1</code>{' '}
+                      för att fördela poäng över flera profiler. Poäng/hink är frivilliga och
+                      styr quiz-poängsättningen.
                       <textarea
                         name="choices"
                         className="mx-textarea"
                         style={{ marginTop: 4, minHeight: 60, fontFamily: 'var(--mx-mono)' }}
-                        placeholder="problem | Att lösa problem | 1 | builder&#10;frihet | Frihet och självständighet | 1 | explorer&#10;hog | Hög | 3"
+                        placeholder="problem | Att lösa problem | builder:2 explorer:0&#10;frihet | Frihet och självständighet | builder:1 explorer:1&#10;hog | Hög | 3"
                       />
                     </label>
                     <div className="mx-flex mx-items-c mx-gap-3">

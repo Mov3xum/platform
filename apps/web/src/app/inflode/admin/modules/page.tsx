@@ -113,9 +113,21 @@ export default async function AdminModulesPage() {
                     </div>
                   )}
                   <div className="mx-flex mx-gap-2" style={{ flexShrink: 0 }}>
-                    <Link href={`/inflode/m/${m.slug}`} className="mx-btn mx-sm">
-                      Förhandsgranska
-                    </Link>
+                    {m.public_slug && m.is_active && m.public_url_enabled ? (
+                      <a
+                        href={`/m/${m.public_slug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mx-btn mx-sm"
+                        title="Kör hela det publika flödet i en ny flik"
+                      >
+                        <Icon name="spark" size={12} /> Öppna
+                      </a>
+                    ) : (
+                      <Link href={`/inflode/m/${m.slug}`} className="mx-btn mx-sm">
+                        Förhandsgranska
+                      </Link>
+                    )}
                     <Link
                       href={`/inflode/admin/modules/${m.slug}`}
                       className="mx-btn mx-sm mx-primary"
