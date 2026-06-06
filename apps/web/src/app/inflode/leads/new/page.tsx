@@ -4,15 +4,20 @@ import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PageHead, Card, CardHead, Icon } from '@/components/proto';
 import { listLeadSources } from '@/lib/compass/store';
-import { createManualLeadAction } from '@/lib/actions/compass';
 
 export const dynamic = 'force-dynamic';
 
-export default async function NewLeadPage() {
+export default async function NewLeadPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ error?: string }>;
+}) {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) {
     redirect('/inflode');
   }
+  const params = (await searchParams) || {};
+  const error = params.error === 'missing_name' || params.error === 'creation_failed' ? params.error : undefined;
   const pb = await getServerPb();
   const sources = await listLeadSources(pb);
 
@@ -31,8 +36,16 @@ export default async function NewLeadPage() {
 
       <Card>
         <CardHead label="Idébärare" />
+        {error && (
+          <div className="mx-t-13 bg-movexum-pastell-orange px-4 py-2 text-movexum-morkorange">
+            {error === 'missing_name'
+              ? 'Namn är obligatoriskt för att skapa lead.'
+              : 'Kunde inte skapa lead just nu. Försök igen.'}
+          </div>
+        )}
         <form
-          action={createManualLeadAction}
+          action="/api/inflode/leads/manual"
+          method="post"
           style={{ padding: 16, display: 'grid', gap: 12 }}
         >
           <label className="mx-label">
