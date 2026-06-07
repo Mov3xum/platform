@@ -158,6 +158,31 @@ async function normalizeFields(fields, context = 'collection') {
   return resolved;
 }
 
+async function findExistingCollection(definition) {
+  const candidates = [definition?.name, definition?.id].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      return await pb.collections.getOne(candidate);
+    } catch (err) {
+      if (err?.status !== 404) throw err;
+    }
+  }
+
+  return null;
+}
+
+function isAlreadyExistingCollectionError(err) {
+  if (err?.status !== 400) return false;
+  const data = err?.response?.data || err?.data?.data || {};
+  const nameCode = data?.name?.code;
+  const idCode = data?.id?.code;
+  return (
+    nameCode === 'validation_collection_name_exists' ||
+    idCode === 'validation_invalid_or_existing_id'
+  );
+}
+
 async function ensureCollection(definition) {
   const normalizedDefinition = {
     ...definition,
@@ -165,64 +190,76 @@ async function ensureCollection(definition) {
   };
 
   try {
-    const existing = await pb.collections.getOne(definition.name);
-    const desiredRules = {
-      listRule: normalizedDefinition.listRule ?? null,
-      viewRule: normalizedDefinition.viewRule ?? null,
-      createRule: normalizedDefinition.createRule ?? null,
-      updateRule: normalizedDefinition.updateRule ?? null,
-      deleteRule: normalizedDefinition.deleteRule ?? null
-    };
-    const needsRuleSync =
-      (existing.listRule ?? null) !== desiredRules.listRule ||
-      (existing.viewRule ?? null) !== desiredRules.viewRule ||
-      (existing.createRule ?? null) !== desiredRules.createRule ||
-      (existing.updateRule ?? null) !== desiredRules.updateRule ||
-      (existing.deleteRule ?? null) !== desiredRules.deleteRule;
+    const existing = await findExistingCollection(definition);
+    if (existing) {
+      const desiredRules = {
+        listRule: normalizedDefinition.listRule ?? null,
+        viewRule: normalizedDefinition.viewRule ?? null,
+        createRule: normalizedDefinition.createRule ?? null,
+        updateRule: normalizedDefinition.updateRule ?? null,
+        deleteRule: normalizedDefinition.deleteRule ?? null
+      };
+      const needsRuleSync =
+        (existing.listRule ?? null) !== desiredRules.listRule ||
+        (existing.viewRule ?? null) !== desiredRules.viewRule ||
+        (existing.createRule ?? null) !== desiredRules.createRule ||
+        (existing.updateRule ?? null) !== desiredRules.updateRule ||
+        (existing.deleteRule ?? null) !== desiredRules.deleteRule;
 
-    // Detect fields present in the desired definition but missing from the
-    // existing collection. This can happen when a migration adds a new field
-    // AFTER the collection was first created (e.g. migration 1700000092 adds
-    // `user` to `event_signups`). Rules that reference such a field will be
-    // rejected with HTTP 400 unless the field is added first.
-    const existingFieldNames = new Set((existing.fields || []).map((f) => f.name));
-    const missingFields = (normalizedDefinition.fields || []).filter(
-      (f) => f && f.name && !existingFieldNames.has(f.name)
-    );
-    const needsFieldSync = missingFields.length > 0;
+      // Detect fields present in the desired definition but missing from the
+      // existing collection. This can happen when a migration adds a new field
+      // AFTER the collection was first created (e.g. migration 1700000092 adds
+      // `user` to `event_signups`). Rules that reference such a field will be
+      // rejected with HTTP 400 unless the field is added first.
+      const existingFieldNames = new Set((existing.fields || []).map((f) => f.name));
+      const missingFields = (normalizedDefinition.fields || []).filter(
+        (f) => f && f.name && !existingFieldNames.has(f.name)
+      );
+      const needsFieldSync = missingFields.length > 0;
 
-    if (needsRuleSync || needsFieldSync) {
-      // When adding missing fields we must send the full fields array
-      // (existing + new) because PocketBase replaces the array on update.
-      const updatePayload = { ...desiredRules };
-      if (needsFieldSync) {
-        updatePayload.fields = [...(existing.fields || []), ...missingFields];
+      if (needsRuleSync || needsFieldSync) {
+        // When adding missing fields we must send the full fields array
+        // (existing + new) because PocketBase replaces the array on update.
+        const updatePayload = { ...desiredRules };
+        if (needsFieldSync) {
+          updatePayload.fields = [...(existing.fields || []), ...missingFields];
+        }
+        try {
+          await pb.collections.update(definition.name, updatePayload);
+        } catch (err) {
+          const what = needsFieldSync && needsRuleSync ? 'field+rule-sync' : needsFieldSync ? 'field-sync' : 'rule-sync';
+          throw new Error(`collection "${definition.name}" ${what} failed: ${describeError(err)}`);
+        }
+        if (needsFieldSync && needsRuleSync) {
+          ok(`collection "${definition.name}" finns redan — fält och regler synkade`);
+        } else if (needsFieldSync) {
+          ok(`collection "${definition.name}" finns redan — fält synkade`);
+        } else {
+          ok(`collection "${definition.name}" finns redan — regler synkade`);
+        }
+        return;
       }
-      try {
-        await pb.collections.update(definition.name, updatePayload);
-      } catch (err) {
-        const what = needsFieldSync && needsRuleSync ? 'field+rule-sync' : needsFieldSync ? 'field-sync' : 'rule-sync';
-        throw new Error(`collection "${definition.name}" ${what} failed: ${describeError(err)}`);
-      }
-      if (needsFieldSync && needsRuleSync) {
-        ok(`collection "${definition.name}" finns redan — fält och regler synkade`);
-      } else if (needsFieldSync) {
-        ok(`collection "${definition.name}" finns redan — fält synkade`);
-      } else {
-        ok(`collection "${definition.name}" finns redan — regler synkade`);
-      }
+
+      warn(`collection "${definition.name}" finns redan — hoppar över`);
       return;
     }
-
-    warn(`collection "${definition.name}" finns redan — hoppar över`);
-    return;
   } catch (e) {
-    if (e?.status !== 404) throw e;
+    throw e;
   }
 
   try {
     await pb.collections.create(normalizedDefinition);
   } catch (err) {
+    // Idempotency guard: in some environments the pre-check can miss an
+    // already existing collection and create then returns name/id conflict.
+    // Treat that as "already exists" instead of hard-failing sync.
+    if (isAlreadyExistingCollectionError(err)) {
+      const existing = await findExistingCollection(definition);
+      if (existing) {
+        warn(`collection "${definition.name}" finns redan (upptäckt vid create) — fortsätter`);
+        return;
+      }
+    }
     console.error(
       `\n✗ create collection failed: ${definition.name}\n` +
       `${describeError(err)}\n` +
