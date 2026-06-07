@@ -29,7 +29,15 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const user = await getCurrentUser();
-  const nonce = (await headers()).get('x-nonce') ?? undefined;
+  const headerList = await headers();
+  const nonce = headerList.get('x-nonce') ?? undefined;
+  const pathname = headerList.get('x-pathname') ?? '';
+
+  // Publika Startupkompass-moduler (/m/<slug>) är fristående, oinloggade
+  // ytor. De ska ALDRIG visa systemets vänstermeny/AppShell — även om en
+  // inloggad medarbetare öppnar den publika länken ska sidan se ut som den
+  // gör för en anonym besökare (en ren, isolerad chatt-/formulär-yta).
+  const isPublicModule = pathname === '/m' || pathname.startsWith('/m/');
 
   return (
     <html lang="sv" suppressHydrationWarning>
@@ -38,7 +46,9 @@ export default async function RootLayout({
       </head>
       <body className="min-h-screen bg-canvas text-foreground antialiased">
         <ChunkReloadListener />
-        {user ? (
+        {isPublicModule ? (
+          children
+        ) : user ? (
           <AppShell user={user}>{children}</AppShell>
         ) : (
           <>

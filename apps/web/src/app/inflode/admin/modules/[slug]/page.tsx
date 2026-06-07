@@ -17,6 +17,7 @@ import {
   updateModuleAction
 } from '@/lib/actions/compass';
 import { ShareModule } from '@/components/compass/ShareModule';
+import { moduleHeroImageUrl } from '@/lib/compass/media';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,6 +56,7 @@ export default async function EditModulePage({
     getLeadAnalytics(pb, user.tenant, 365)
   ]);
   const metrics = analytics.byModule.find((m) => m.slug === mod.slug);
+  const heroImageUrl = moduleHeroImageUrl(mod);
 
   return (
     <div className="mx-view-pad mx-wide">
@@ -173,6 +175,60 @@ export default async function EditModulePage({
                   style={{ marginTop: 4, minHeight: 50 }}
                 />
               </label>
+
+              {/* Omslagsbild — visas stort högst upp på den publika sidan */}
+              <div className="mx-label">
+                Omslagsbild (visas högst upp på den publika landningssidan)
+                <div
+                  style={{
+                    marginTop: 6,
+                    display: 'grid',
+                    gap: 10,
+                    padding: 12,
+                    borderRadius: 12,
+                    background: 'var(--mx-paper-2)',
+                    border: '1px solid var(--mx-line-soft)'
+                  }}
+                >
+                  {heroImageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={heroImageUrl}
+                      alt="Nuvarande omslagsbild"
+                      style={{
+                        width: '100%',
+                        maxHeight: 180,
+                        objectFit: 'cover',
+                        borderRadius: 10,
+                        border: '1px solid var(--mx-line)'
+                      }}
+                    />
+                  ) : (
+                    <div className="mx-muted mx-t-12">
+                      Ingen bild uppladdad — en branded gradient visas i stället.
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    name="hero_image"
+                    accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                    className="mx-t-13"
+                  />
+                  <span className="mx-t-12 mx-muted">
+                    PNG, JPG, WebP, GIF eller SVG. Max 15 MB. Ladda inte upp bilder
+                    med personuppgifter — bilden serveras publikt.
+                  </span>
+                  {heroImageUrl && (
+                    <label
+                      className="mx-flex mx-items-c mx-gap-2 mx-t-13"
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <input type="checkbox" name="remove_hero_image" />
+                      <span>Ta bort nuvarande bild</span>
+                    </label>
+                  )}
+                </div>
+              </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <label className="mx-label">
                   Flow-typ
