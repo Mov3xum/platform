@@ -424,56 +424,33 @@ export default async function IntegrationerPage({
           )}
         </section>
 
-        {isStaff && (
+        {isAdmin && (
           <section>
             <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
               Administration
             </h2>
             <div className="space-y-3">
               <a
-                href="/admin/import-bolagslista"
+                href="/admin/import-crm"
                 className="block rounded-2xl border border-default bg-surface p-5 transition hover:bg-canvas-subtle"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-foreground">
-                      Bolagslista (Excel)
+                      Generell Excel-import
                     </div>
                     <p className="mt-1 text-[13px] text-foreground-muted">
-                      Ladda upp Movexums Bolagslista och fyll på{' '}
-                      <code className="font-mono text-xs">startups</code> +{' '}
-                      <code className="font-mono text-xs">startup_financials</code>{' '}
-                      idempotent. Underlag för AI-agenterna.
+                      Ladda upp valfri Excel-fil och mappa varje ark mot en
+                      befintlig tabell + kolumn mot fält. Förhandsgranska vad
+                      som kommer med innan import. GDPR-saneras och skrivs
+                      idempotent.
                     </p>
                   </div>
                   <span className="rounded-full bg-movexum-pastell-gron px-3 py-1 text-xs font-medium text-movexum-morkgron">
-                    Tillgänglig
+                    Endast admin
                   </span>
                 </div>
               </a>
-              {isAdmin && (
-                <a
-                  href="/admin/import-crm"
-                  className="block rounded-2xl border border-default bg-surface p-5 transition hover:bg-canvas-subtle"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold text-foreground">
-                        Generell Excel-import
-                      </div>
-                      <p className="mt-1 text-[13px] text-foreground-muted">
-                        Ladda upp valfri Excel-fil och mappa varje ark mot en
-                        befintlig tabell + kolumn mot fält. Förhandsgranska vad
-                        som kommer med innan import. GDPR-saneras och skrivs
-                        idempotent.
-                      </p>
-                    </div>
-                    <span className="rounded-full bg-movexum-pastell-gron px-3 py-1 text-xs font-medium text-movexum-morkgron">
-                      Endast admin
-                    </span>
-                  </div>
-                </a>
-              )}
             </div>
           </section>
         )}
