@@ -184,7 +184,7 @@ export default async function InstallningarPage() {
         updated_by?: { display_name?: string; email?: string };
       };
     }>(1, 100, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: pb.filter('tenant = {:t}', { t: user.tenant }),
       sort: '-updated',
       expand: 'startup,updated_by'
     });
@@ -206,7 +206,7 @@ export default async function InstallningarPage() {
   }
   try {
     const s = await pb.collection('startups').getList<{ id: string; name: string }>(1, 200, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: pb.filter('tenant = {:t}', { t: user.tenant }),
       sort: 'name',
       fields: 'id,name'
     });
