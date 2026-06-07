@@ -14,9 +14,14 @@ export default async function WorkshopAssignmentPage({
 }) {
   const { id } = await params;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) notFound();
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
+  const canAccessEducation = canAccessModuleForUser(user.roles, 'education', user.disabledModules);
+  const canAccessMemberActivities = canAccessModuleForUser(
+    user.roles,
+    'mina_aktiviteter',
+    user.disabledModules
+  );
 
   let assignment: WorkshopAssignment;
   try {
@@ -29,9 +34,15 @@ export default async function WorkshopAssignmentPage({
 
   if (assignment.tenant !== user.tenant) notFound();
   const isLinkedStartup = user.linkedStartups.includes(String(assignment.startup));
-  if (!isStaff && !(hasRole(user.roles, ['startup_member']) && isLinkedStartup)) {
+  const isStaffViewer = isStaff && canAccessEducation;
+  const isLinkedStartupMember =
+    hasRole(user.roles, ['startup_member']) && isLinkedStartup && canAccessMemberActivities;
+  if (!isStaffViewer && !isLinkedStartupMember) {
     notFound();
   }
+
+  const backHref = isStaffViewer ? '/education' : '/mina-aktiviteter';
+  const backLabel = isStaffViewer ? 'Till utbildning' : 'Till aktiviteter';
 
   const workshop = assignment.expand?.workshop;
   const startup = assignment.expand?.startup;
@@ -53,8 +64,8 @@ export default async function WorkshopAssignmentPage({
   return (
     <main className="mx-auto max-w-5xl px-6 py-10 lg:px-8">
       <div className="mb-6">
-        <Link href="/education" className="text-sm text-foreground-muted hover:text-foreground">
-          ← Till utbildning
+        <Link href={backHref} className="text-sm text-foreground-muted hover:text-foreground">
+          ← {backLabel}
         </Link>
       </div>
 

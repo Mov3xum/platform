@@ -1277,6 +1277,7 @@ export async function assignWorkshopToStartupAction(
     revalidatePath('/dashboard');
     revalidatePath('/aktivitet');
     revalidatePath('/pagaende');
+    revalidatePath('/mina-aktiviteter');
     revalidatePath('/inkorg');
     revalidatePath(`/startups/${startupId}`);
     return { assignmentId: String(assignment.id) };
@@ -1322,6 +1323,7 @@ export async function saveWorkshopProgressAction(
     revalidatePath(`/education/assignments/${assignmentId}`);
     revalidatePath('/education');
     revalidatePath('/dashboard');
+    revalidatePath('/mina-aktiviteter');
     if (assignment.startup) revalidatePath(`/startups/${assignment.startup}`);
     return { assignmentId };
   } catch (err) {
@@ -1596,6 +1598,8 @@ export async function completeWorkshopAction(
     revalidatePath('/education');
     revalidatePath('/dashboard');
     revalidatePath('/aktivitet');
+    revalidatePath('/pagaende');
+    revalidatePath('/mina-aktiviteter');
     if (assignment.startup) revalidatePath(`/startups/${assignment.startup}`);
     return { assignmentId, reportMd };
   } catch (err) {
