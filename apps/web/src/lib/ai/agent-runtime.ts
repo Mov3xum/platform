@@ -132,15 +132,26 @@ export async function runAgentLoop(
       tool_calls: toolCalls
     });
 
-    for (const call of toolCalls) {
-      const desc = describeToolCall(call);
-      options.onStep?.({ phase: 'start', id: call.id, tool: desc.tool, label: desc.label });
-      const toolResult = await dispatchToolCall(call, options.toolContext);
+    // Verktygsanropen i EN tur är oberoende av varandra (modellen har redan
+    // bestämt alla innan den ser något resultat) → kör dem samtidigt i stället
+    // för seriellt. Det gör att t.ex. flera query_collection mot olika bolag
+    // tar ~en rundturs tid i stället för N (CLAUDE.md § 10 robusthet/latens).
+    // Det delade skriv-/dispatch-lagret är idempotent och tenant-scopat per
+    // anrop, så samtidighet ändrar inte säkerhets- eller RBAC-garantierna.
+    const descs = toolCalls.map((call) => describeToolCall(call));
+    toolCalls.forEach((call, i) =>
+      options.onStep?.({ phase: 'start', id: call.id, tool: descs[i].tool, label: descs[i].label })
+    );
+    const toolResults = await Promise.all(
+      toolCalls.map((call) => dispatchToolCall(call, options.toolContext))
+    );
+    toolCalls.forEach((call, i) => {
+      const toolResult = toolResults[i];
       options.onStep?.({
         phase: 'end',
         id: call.id,
-        tool: desc.tool,
-        label: desc.label,
+        tool: descs[i].tool,
+        label: descs[i].label,
         ok: toolResult.ok
       });
       toolCallsMade++;
@@ -150,7 +161,7 @@ export async function runAgentLoop(
         name: call.function.name,
         content: JSON.stringify(toolResult).slice(0, MAX_TOOL_RESULT_CHARS)
       });
-    }
+    });
   }
 
   // Iterations-taket nått — tvinga ett slutsvar utan verktyg.

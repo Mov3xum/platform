@@ -6,7 +6,7 @@ import { requireRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { escFilter } from '@/lib/pb-filter';
 import { indexOrgKnowledge } from '@/lib/ai/rag';
-import { logAiUsage } from '@/lib/ai/usage';
+import { logIndexUsage } from '@/lib/ai/usage';
 import type { OrgKnowledge, Role } from '@platform/shared';
 
 // Server actions för den tenant-breda kunskapsbasen (§ 26). Uppladdning sker via
@@ -102,16 +102,7 @@ export async function reindexOrgKnowledgeAction(id: string): Promise<OrgKnowledg
   if (!text.trim()) return { error: 'Filen saknar extraherad text att indexera.' };
   try {
     const idx = await indexOrgKnowledge(pb, { tenant: user.tenant, sourceId: id, text });
-    if (idx.usage.tokensIn > 0) {
-      void logAiUsage(pb, {
-        tenant: user.tenant,
-        userId: user.id,
-        surface: 'suggestions',
-        model: 'mistral-embed',
-        tokensIn: idx.usage.tokensIn,
-        tokensOut: idx.usage.tokensOut
-      });
-    }
+    void logIndexUsage(pb, { tenant: user.tenant, userId: user.id }, idx.usage);
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte indexera om filen.' };
   }

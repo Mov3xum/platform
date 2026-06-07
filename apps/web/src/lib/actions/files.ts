@@ -3,10 +3,10 @@
 import { revalidatePath } from 'next/cache';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
-import { extractPdfText, extractXlsxText } from '@/lib/ai/attachments';
+import { extractPdfText, extractXlsxText, extractDocxText, extractPptxText } from '@/lib/ai/attachments';
 import { categorizeFile, type StartupOption } from '@/lib/ai/file-categorize';
 import { indexUserFile } from '@/lib/ai/rag';
-import { logAiUsage } from '@/lib/ai/usage';
+import { logAiUsage, logIndexUsage } from '@/lib/ai/usage';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import {
   isFileTopic,
@@ -226,15 +226,19 @@ async function loadStartupOptions(pb: PocketBase, tenant: string): Promise<Start
   }
 }
 
-/** Är filen en av de texttyper vi kan extrahera (pdf/xlsx/text/csv/md)? */
-function isExtractable(rec: UserFile): { pdf: boolean; xlsx: boolean; text: boolean } | null {
+/** Är filen en av de texttyper vi kan extrahera (pdf/xlsx/docx/pptx/text/csv/md)? */
+function isExtractable(
+  rec: UserFile
+): { pdf: boolean; xlsx: boolean; docx: boolean; pptx: boolean; text: boolean } | null {
   const mime = (rec.mime || '').toLowerCase();
   const pdf = mime === 'application/pdf' || rec.doc_kind === 'pdf';
   const xlsx =
     mime.includes('spreadsheetml') || mime === 'application/vnd.ms-excel' || rec.doc_kind === 'xlsx';
+  const docx = mime.includes('wordprocessingml') || rec.doc_kind === 'docx';
+  const pptx = mime.includes('presentationml') || rec.doc_kind === 'pptx';
   const text = SNIPPET_TEXT_MIMES.has(mime);
-  if (!pdf && !xlsx && !text) return null;
-  return { pdf, xlsx, text };
+  if (!pdf && !xlsx && !docx && !pptx && !text) return null;
+  return { pdf, xlsx, docx, pptx, text };
 }
 
 /**
@@ -262,6 +266,8 @@ async function downloadAndExtractText(
     let text = '';
     if (kinds.pdf) text = await extractPdfText(buf);
     else if (kinds.xlsx) text = await extractXlsxText(buf);
+    else if (kinds.docx) text = await extractDocxText(buf);
+    else if (kinds.pptx) text = await extractPptxText(buf);
     else text = buf.toString('utf8');
     return text.slice(0, maxChars).trim() || undefined;
   } catch {
@@ -318,16 +324,7 @@ async function extractAndIndexUserFile(
 
   try {
     const idx = await indexUserFile(pb, { tenant, owner: ownerId, sourceId: fileId, text });
-    if (idx.usage.tokensIn > 0) {
-      void logAiUsage(pb, {
-        tenant,
-        userId: ownerId,
-        surface: 'suggestions',
-        model: 'mistral-embed',
-        tokensIn: idx.usage.tokensIn,
-        tokensOut: idx.usage.tokensOut
-      });
-    }
+    void logIndexUsage(pb, { tenant, userId: ownerId }, idx.usage);
     return idx.chunkCount;
   } catch {
     return 0;

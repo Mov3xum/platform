@@ -1,7 +1,10 @@
 import 'server-only';
 
-import { extractPdfText, extractXlsxText } from './attachments';
+import { extractPdfText, extractXlsxText, extractDocxText, extractPptxText } from './attachments';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
+
+const MIME_DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const MIME_PPTX = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
 // Extraktion + sanering av en kunskapsbas-fil (tool_knowledge). Texten
 // extraheras EN gång här vid uppladdning, saneras (personnummer → [REDACTED],
@@ -16,7 +19,9 @@ const ALLOWED_MIME_TYPES = new Set([
   'text/plain',
   'text/markdown',
   'text/csv',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  MIME_DOCX,
+  MIME_PPTX
 ]);
 
 export class KnowledgeError extends Error {
@@ -82,6 +87,22 @@ export async function extractKnowledgeFromFile(
     } catch (err) {
       throw new KnowledgeError(
         `Kunde inte läsa Excel "${file.name}": ${err instanceof Error ? err.message : 'okänt fel'}`
+      );
+    }
+  } else if (mime === MIME_DOCX) {
+    try {
+      raw = await extractDocxText(buf);
+    } catch (err) {
+      throw new KnowledgeError(
+        `Kunde inte läsa Word "${file.name}": ${err instanceof Error ? err.message : 'okänt fel'}`
+      );
+    }
+  } else if (mime === MIME_PPTX) {
+    try {
+      raw = await extractPptxText(buf);
+    } catch (err) {
+      throw new KnowledgeError(
+        `Kunde inte läsa PowerPoint "${file.name}": ${err instanceof Error ? err.message : 'okänt fel'}`
       );
     }
   } else {

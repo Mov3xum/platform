@@ -13,7 +13,7 @@ import type { MistralToolCall, MistralToolDefinition } from './mistral';
 import { searchOrgKnowledge, searchUserFiles, renderKnowledgeHits } from './rag';
 import { logAiUsage } from './usage';
 import { escFilter } from '@/lib/pb-filter';
-import type { GeneratedFileRef } from '@platform/shared';
+import { type GeneratedFileRef, FILE_TOPIC_IDS, isFileTopic } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
 import { getTemplate, listTemplateSummaries, TEMPLATE_IDS } from '@/lib/documents/templates';
 import { saveGeneratedFile } from '@/lib/documents/save';
@@ -46,6 +46,34 @@ const MAX_AGG_SCAN = 500; // rader describe_collection får skanna för distinkt
 const AGG_PAGE = 500; // PB:s max perPage — sidstorlek vid aggregerings-paginering
 const MAX_AGG_ROWS = 5000; // hård tak-radmängd för aggregering (10 sidor, robusthet § 10)
 const MAX_DISTINCT_VALUES = 40;
+
+// Display-fält vi försöker läsa ur en expanderad relation när group_by är en
+// relation, i prioordning. Bara icke-PII-etiketter (namn/titel) — aldrig
+// e-post/telefon/personnr (de maskas ändå uppströms). Faller tillbaka på id.
+const GROUP_LABEL_FIELDS = ['name', 'title', 'label'] as const;
+
+/** Etikett för en skalär (icke-relation) grupp-nyckel. */
+function scalarGroupLabel(v: unknown): string {
+  return v === null || v === undefined || v === '' ? '(tomt)' : String(v);
+}
+
+/**
+ * Etikett för en relations-grupp: läser name/title/label ur den expanderade
+ * posten så att grupperna blir läsbara namn i stället för id:n. Faller tillbaka
+ * på det råa id:t om expansionen saknas (t.ex. trasig relation).
+ */
+function relationGroupLabel(row: Record<string, unknown>, groupBy: string): string {
+  const expand = row.expand as Record<string, unknown> | undefined;
+  const related = expand?.[groupBy] as Record<string, unknown> | undefined;
+  if (related) {
+    for (const disp of GROUP_LABEL_FIELDS) {
+      const v = related[disp];
+      if (typeof v === 'string' && v.trim()) return v;
+    }
+  }
+  const raw = row[groupBy];
+  return raw === null || raw === undefined || raw === '' ? '(tomt)' : String(raw);
+}
 
 // Systemfält som aldrig är meningsfulla att fuzzy-matcha mot.
 const SYSTEM_RECORD_KEYS: ReadonlySet<string> = new Set([
@@ -302,10 +330,11 @@ export function buildChatTools(
         description:
           'Beräknar summa/snitt/min/max/antal över en kollektion, valfritt ' +
           'grupperat. Använd för totaler och fördelningar i stället för att hämta ' +
-          'rader och räkna själv. Tenant-scope läggs på automatiskt. Om svaret ' +
-          'har `incomplete: true` (eller en `warning`) är värdet PARTIELLT — ' +
-          'presentera det aldrig som exakt, utan tala om för användaren att det ' +
-          'finns fler rader än vad som kunde summeras.',
+          'rader och räkna själv. När `group_by` är ett relationsfält (t.ex. ' +
+          '`startup`) returneras gruppen som läsbart NAMN, inte id. Tenant-scope ' +
+          'läggs på automatiskt. Om svaret har `incomplete: true` (eller en ' +
+          '`warning`) är värdet PARTIELLT — presentera det aldrig som exakt, utan ' +
+          'tala om för användaren att det finns fler rader än vad som kunde summeras.',
         parameters: {
           type: 'object',
           properties: {
@@ -360,6 +389,14 @@ export function buildChatTools(
                 'Det du vill veta, med användarens egna ord. T.ex. "vår ' +
                 'antagningsprocess för boost chamber" eller "mall för kvartalsrapport".'
             },
+            topic: {
+              type: 'string',
+              enum: [...FILE_TOPIC_IDS],
+              description:
+                'Valfritt ämnesfilter — begränsar sökningen till EN ämnesmapp. ' +
+                'Använd när frågan tydligt hör till ett ämne (t.ex. finansiering, ' +
+                'juridik) för snabbare och mer precisa träffar.'
+            },
             limit: {
               type: 'integer',
               description: 'Max antal textstycken att hämta (1-12, default 6).',
@@ -397,6 +434,13 @@ export function buildChatTools(
             query: {
               type: 'string',
               description: 'Det du vill veta, med användarens egna ord.'
+            },
+            topic: {
+              type: 'string',
+              enum: [...FILE_TOPIC_IDS],
+              description:
+                'Valfritt ämnesfilter — begränsar sökningen till EN ämnesmapp ' +
+                '(samma taxonomi som /filer).'
             },
             limit: {
               type: 'integer',
@@ -1123,24 +1167,42 @@ async function runAggregateCollection(
     }
   }
 
+  // Om group_by pekar på ett relationsfält expanderar vi det till ett
+  // läsbart namn (name/title/label) så grupperna blir bolagsnamn i stället
+  // för id:n. Bara icke-maskade display-fält läses → ingen PII-bakväg.
+  const groupField = groupBy
+    ? collection.fields.find((f) => f.name === groupBy)
+    : undefined;
+  const groupIsRelation = groupField?.type === 'relation';
+
   // Hämta bara de fält som behövs (dataminimering § 9.3). Paginera upp till en
   // hård säkerhetsgräns så att sum/avg/min/max blir EXAKTA för realistiska
   // tenant-storlekar — capas bara vid extrema radmängder (då markeras
   // resultatet `incomplete`, aldrig tyst fel).
-  const wanted = ['id', field, groupBy].filter(Boolean).join(',');
+  const fieldParts = ['id', field, groupBy].filter(Boolean);
+  if (groupIsRelation) {
+    for (const disp of GROUP_LABEL_FIELDS) fieldParts.push(`expand.${groupBy}.${disp}`);
+  }
+  const wanted = fieldParts.join(',');
   try {
-    const rows: Record<string, unknown>[] = [];
+    const rawRows: Record<string, unknown>[] = [];
     let total = 0;
     const maxPages = Math.ceil(MAX_AGG_ROWS / AGG_PAGE);
     for (let page = 1; page <= maxPages; page++) {
       const res = await ctx.pb.collection(collection.name).getList(page, AGG_PAGE, {
         filter: finalFilter,
-        fields: wanted || undefined
+        fields: wanted || undefined,
+        expand: groupIsRelation ? groupBy : undefined
       });
       total = res.totalItems;
-      rows.push(...(res.items as Record<string, unknown>[]));
-      if (rows.length >= total || res.items.length < AGG_PAGE) break;
+      rawRows.push(...(res.items as Record<string, unknown>[]));
+      if (rawRows.length >= total || res.items.length < AGG_PAGE) break;
     }
+    // Normalisera grupp-nyckeln: relations-fält → läsbart namn så att
+    // computeAggregate grupperar på "Acme AB" snarare än relations-id.
+    const rows = groupIsRelation && groupBy
+      ? rawRows.map((r) => ({ ...r, [groupBy]: relationGroupLabel(r, groupBy) }))
+      : rawRows;
 
     const result = computeAggregate({ op, field, groupBy, rows, total });
     return { ok: true, data: { collection: collection.name, ...result } };
@@ -1155,6 +1217,38 @@ async function runAggregateCollection(
  * ai_usage_events (surface 'suggestions') när en actor-id finns. Kunskapsbasen
  * är denylistad för query_collection — detta är dess ENDA väg till modellen.
  */
+/**
+ * Loggar RAG-sökningens token-utfall. Embeddings (mistral-embed) och en ev.
+ * LLM-rerank (mistral-small) loggas som SEPARATA ai_usage_events eftersom
+ * modellen — och därmed kostnaden — skiljer sig. No-op utan actor-id.
+ */
+function logKnowledgeUsage(
+  ctx: ToolDispatchContext,
+  usage: { tokensIn: number; tokensOut: number; rerank?: { tokensIn: number; tokensOut: number } }
+): void {
+  if (!ctx.actor?.id) return;
+  if (usage.tokensIn > 0 || usage.tokensOut > 0) {
+    void logAiUsage(ctx.pb, {
+      tenant: ctx.tenantId,
+      userId: ctx.actor.id,
+      surface: 'suggestions',
+      model: 'mistral-embed',
+      tokensIn: usage.tokensIn,
+      tokensOut: usage.tokensOut
+    });
+  }
+  if (usage.rerank && (usage.rerank.tokensIn > 0 || usage.rerank.tokensOut > 0)) {
+    void logAiUsage(ctx.pb, {
+      tenant: ctx.tenantId,
+      userId: ctx.actor.id,
+      surface: 'suggestions',
+      model: 'mistral-small-latest',
+      tokensIn: usage.rerank.tokensIn,
+      tokensOut: usage.rerank.tokensOut
+    });
+  }
+}
+
 async function runSearchKnowledge(
   args: Record<string, unknown>,
   ctx: ToolDispatchContext
@@ -1166,22 +1260,17 @@ async function runSearchKnowledge(
     limit = Math.max(1, Math.min(12, Math.floor(args.limit)));
   }
 
+  const topic = isFileTopic(args.topic) ? args.topic : undefined;
+
   let result;
   try {
-    result = await searchOrgKnowledge(ctx.pb, { tenant: ctx.tenantId, query, topK: limit });
+    result = await searchOrgKnowledge(ctx.pb, { tenant: ctx.tenantId, query, topK: limit, topic });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Kunde inte söka i kunskapsbasen.' };
   }
 
-  if (ctx.actor?.id && (result.usage.tokensIn > 0 || result.usage.tokensOut > 0)) {
-    void logAiUsage(ctx.pb, {
-      tenant: ctx.tenantId,
-      userId: ctx.actor.id,
-      surface: 'suggestions',
-      model: 'mistral-embed',
-      tokensIn: result.usage.tokensIn,
-      tokensOut: result.usage.tokensOut
-    });
+  if (ctx.actor?.id) {
+    logKnowledgeUsage(ctx, result.usage);
   }
 
   if (result.hits.length === 0) {
@@ -1225,35 +1314,29 @@ async function runSearchMyFiles(
     limit = Math.max(1, Math.min(12, Math.floor(args.limit)));
   }
 
+  const topic = isFileTopic(args.topic) ? args.topic : undefined;
+
   let result;
   try {
     result = await searchUserFiles(ctx.pb, {
       tenant: ctx.tenantId,
       owner: ctx.actor.id,
       query,
-      topK: limit
+      topK: limit,
+      topic
     });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Kunde inte söka i dina filer.' };
   }
 
-  if (result.usage.tokensIn > 0 || result.usage.tokensOut > 0) {
-    void logAiUsage(ctx.pb, {
-      tenant: ctx.tenantId,
-      userId: ctx.actor.id,
-      surface: 'suggestions',
-      model: 'mistral-embed',
-      tokensIn: result.usage.tokensIn,
-      tokensOut: result.usage.tokensOut
-    });
-  }
+  logKnowledgeUsage(ctx, result.usage);
 
   if (result.hits.length === 0) {
     return {
       ok: true,
       data: {
         matched: 0,
-        note: 'Inget relevant hittades bland dina uppladdade filer. Filen kan vara ej indexerad (t.ex. PowerPoint/Word — exportera till PDF) eller så saknas materialet.'
+        note: 'Inget relevant hittades bland dina uppladdade filer. Filen kan vara ej indexerad än (kör "Gör sökbara i chatten" på /filer) eller så saknas materialet.'
       }
     };
   }
