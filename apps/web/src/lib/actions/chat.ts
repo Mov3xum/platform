@@ -17,7 +17,7 @@ import {
 import { buildKnowledgeContext } from '@/lib/ai/agent-prompt';
 import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
 import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from '@/lib/ai/guidance';
-import { buildChatTools } from '@/lib/ai/tools';
+import { buildChatTools, buildMemoryRecallBlock } from '@/lib/ai/tools';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
 import { hasRole } from '@/lib/rbac';
 import { logAiUsage } from '@/lib/ai/usage';
@@ -150,7 +150,14 @@ const STAFF_TOOL_GUIDANCE =
   'aktivitet kopplat till ett bolag.\n' +
   '- `update_activity_field`: uppdatera en befintlig aktivitets `title`, ' +
   '`description` eller `status` (t.ex. markera en uppgift som `done`). ' +
-  'Slå upp aktivitetens id med `query_collection` på `activities` först.\n\n' +
+  'Slå upp aktivitetens id med `query_collection` på `activities` först.\n' +
+  '- `memory_read` / `memory_write`: ditt tvärsessions-minne (per tenant). När ' +
+  'personalen RÄTTAR dig eller lär dig en bestående regel ("räkna inte lån som ' +
+  'investeringar", "Bolag X heter numera Y") — spara det med `memory_write` ' +
+  '(kort `key`, tydlig `content`) så att det gäller även i framtida samtal. ' +
+  'Lagra ALDRIG personuppgifter i minnet, bara generella regler/slutsatser. ' +
+  'Inlärt minne injiceras automatiskt i din kontext; använd `memory_read` för ' +
+  'fler detaljer.\n\n' +
   'Skrivregler:\n' +
   '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
   'efterfrågad ("uppdatera Acmes next_step till X" är otvetydigt; "vad ska Acme göra härnäst?" är inte det).\n' +
@@ -487,12 +494,17 @@ async function runStaffChatWithTools(
     `Användare: ${user.name} (roller: ${user.roles.join(', ')}). ` +
     `Tenant: ${user.tenantName ?? user.tenant}. Dagens datum: ${today}.`;
 
+  // Auto-recall av tvärsessions-minnet (§ 16.4): tidigare korrigeringar/slutsatser
+  // injiceras så att en rättelse faktiskt påverkar nästa samtal. RLS-skyddat.
+  const memoryBlock = await buildMemoryRecallBlock(pb, user.tenant);
+
   const systemContent =
     BASE_SYSTEM_PROMPT +
     (agentBlock ? `\n\n---\n${agentBlock}\n---` : '') +
     STAFF_TOOL_GUIDANCE +
     SEARCH_STRATEGY_GUIDANCE +
     DOMAIN_GLOSSARY +
+    memoryBlock +
     `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +
     (webBlock ? `\n\n---\n${webBlock}\n---` : '') +
     STYLE_REMINDER;

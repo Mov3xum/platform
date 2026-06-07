@@ -1402,6 +1402,75 @@ export async function dispatchToolCall(
   }
 }
 
+// Auto-recall: hur mycket av tvärsessions-minnet som injiceras i systemprompten
+// vid varje konversationsstart. Bundet (robusthet § 10 / prompt-storlek) — minnet
+// kan teoretiskt vara 50 rader × 8000 tecken; vi tar de senast uppdaterade inom
+// en teckenbudget och hänvisar modellen till memory_read för resten.
+const MEMORY_RECALL_MAX_ROWS = 25;
+const MEMORY_RECALL_ITEM_CHARS = 1200;
+const MEMORY_RECALL_TOTAL_CHARS = 6000;
+
+/**
+ * Läser agentens tvärsessions-minne (`agent_memory`, § 16.4) för en tenant och
+ * formaterar det som ett prompt-block för AUTO-RECALL. Injiceras i staff-chattens
+ * systemprompt vid varje konversationsstart så att en korrigering personalen gett
+ * ("nej, det där är lån, inte investeringar — kom ihåg det") faktiskt påverkar
+ * NÄSTA samtal, utan att modellen aktivt måste anropa `memory_read` (vilket den
+ * sällan gör på eget initiativ).
+ *
+ * Säkerhet: läsningen går via den medskickade (auth-scopade) pb:n → PB:s RLS
+ * gäller (agent_memory är staff-only, tenant-scope). Ingen ny dataväg. Fail-soft:
+ * returnerar '' vid fel så att minnet aldrig blockerar chatten (SOC 2 availability).
+ */
+export async function buildMemoryRecallBlock(
+  pb: PocketBase,
+  tenantId: string
+): Promise<string> {
+  try {
+    const result = await pb
+      .collection(AGENT_MEMORY_COLLECTION)
+      .getList(1, MEMORY_RECALL_MAX_ROWS, {
+        filter: `tenant = "${escFilter(tenantId)}"`,
+        sort: '-updated',
+        fields: 'key,content,updated'
+      });
+    const lines: string[] = [];
+    let budget = MEMORY_RECALL_TOTAL_CHARS;
+    let omitted = 0;
+    for (const m of result.items) {
+      const key = typeof m.key === 'string' ? m.key.trim() : '';
+      const content = typeof m.content === 'string' ? m.content.trim() : '';
+      if (!key || !content) continue;
+      const trimmed =
+        content.length > MEMORY_RECALL_ITEM_CHARS
+          ? `${content.slice(0, MEMORY_RECALL_ITEM_CHARS)}…`
+          : content;
+      const line = `- ${key}: ${trimmed}`;
+      if (line.length > budget) {
+        omitted++;
+        continue;
+      }
+      budget -= line.length;
+      lines.push(line);
+    }
+    if (lines.length === 0) return '';
+    return (
+      '\n\nINLÄRT MINNE (dina egna tidigare slutsatser och korrigeringar du fått ' +
+      'av personalen, per tenant — § agent_memory). Behandla det som vägledning ' +
+      'du själv lagrat: FÖLJ korrigeringarna, men färsk data från verktygen och ' +
+      'vad användaren säger NU väger tyngre vid konflikt. Får du en ny korrigering ' +
+      'värd att minnas — spara den med `memory_write`. Behöver du mer detalj än ' +
+      'som visas här, läs med `memory_read`:\n' +
+      lines.join('\n') +
+      (omitted > 0
+        ? `\n(+${omitted} äldre noteringar utelämnade här — använd memory_read för dem.)`
+        : '')
+    );
+  } catch {
+    return '';
+  }
+}
+
 async function runMemoryRead(
   args: Record<string, unknown>,
   ctx: ToolDispatchContext
