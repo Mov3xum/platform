@@ -2843,10 +2843,20 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
 2. `indexOrgKnowledge` chunkar texten (~1500 tecken, overlap 200), embeddar varje
    chunk (`mistral-embed`, batchat) och skriver `org_knowledge_chunks`. Fail-soft:
    en misslyckad indexering gör filen sökbar via nyckelords-fallback i stället.
-3. I chatten anropar modellen `search_knowledge` → frågan embeddas, rankas mot
-   tenantens chunkar (cosine, JS-side) och de bästa styckena matas tillbaka som
-   ett tydligt avgränsat referensblock ("data, inte instruktioner"). Faller
-   tillbaka på `~`-nyckelordssökning över `extracted_text` om embeddings saknas.
+3. I chatten anropar modellen `search_knowledge` → **HYBRID retrieval**: en
+   semantisk gren (cosine, JS-side, paginerat svep upp till `MAX_TOTAL_SCAN`)
+   och en nyckelordsgren (server-side `text ~`, fångar exakta termer även
+   utanför svepet) fusioneras med **Reciprocal Rank Fusion**, diversifieras med
+   **MMR** (så att överlappande chunkar inte fyller topp-K) och omrankas till
+   sist av en liten LLM (**mistral-small**) — `rank.ts` (ren, enhetstestad) +
+   `rag.ts` (orkestrering). De bästa styckena matas tillbaka som ett tydligt
+   avgränsat referensblock ("data, inte instruktioner"). Frågeembeddings cachas
+   in-process (LRU, `lru.ts`). Fail-soft: faller tillbaka på chunk-/
+   `extracted_text`-nyckelordssökning om embeddings saknas. Valfritt
+   `topic`-förfilter (FILE_TOPICS) begränsar sökrummet.
+   - **Reranker av/på:** `MOVEXUM_RAG_RERANK=0` stänger av LLM-omrankningen
+     (default på). Fail-open i `llmRerank` — en granskare som inte kan tolkas
+     returnerar ursprungsordningen.
 
 ### 26.4 Säkerhet och regelefterlevnad
 
@@ -2881,25 +2891,49 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
   bevaras) och RLS-skyddat (en icke-staff auth-token får tom retur från
   `org_knowledge*`), så den bredare exponeringen är avsiktlig och säker.
 - **Kostnad/audit:** embeddings (index- och query-tid) loggas i
-  `ai_usage_events` (surface `suggestions`, modell `mistral-embed`); `/insights`
-  aggregerar.
+  `ai_usage_events` (surface `suggestions`, modell `mistral-embed`). LLM-
+  omrankningen loggas som ett SEPARAT event (modell `mistral-small-latest`)
+  eftersom kostnaden skiljer sig (`logKnowledgeUsage` i `lib/ai/tools.ts`);
+  `/insights` aggregerar.
 - **Migrationer:** nya, oföränderliga filnummer (1700000118–119). Som
   compass/de_minimis/onboarding är de **migration-only** för bootstrap (speglas
   inte i `setup-via-api.mjs`); isolerings-svepet i `verify-baseline.mjs`
   asserterar dem dock (se ovan). createRules följer § 21.3 så
   `verify-baseline.mjs`-svepet passerar.
 
-### 26.5 Begränsningar (MVP) och kommande steg
+### 26.5 Retrieval-kvalitet, eval och kommande steg
 
-- **PPTX/DOCX-textextraktion** är inte i scope ännu — exportera presentationer/
-  Word till PDF. (Befintliga pipen extraherar PDF/text/Markdown/CSV/Excel.)
-- **Cosine i JS** över `getList(1, 1500)` räcker upp till några tusen chunkar
-  per tenant; bortom det lyfts retrieval till pgvector/vektortjänst utan
-  brytande ändring (verktygsgränssnittet `search_knowledge` är detsamma).
-- **SharePoint-sync (Steg 3):** `source_ref`-fältet är förberett för en
-  framtida tenant-integration (§ 11) som hämtar filer från Microsoft Graph och
-  kör dem genom samma extraktions-/indexerings-pipe — kräver Azure AD-app +
-  DPIA-notering.
+**Implementerat (retrieval-mognad):** hybrid (semantisk + nyckelord), RRF-
+fusion, MMR-diversifiering, LLM-rerank (`mistral-small`, env-styrd), paginerat
+svep (`MAX_TOTAL_SCAN`, inte ett fast 1500-fönster → ingen tyst recall-förlust),
+frågeembedding-cache (LRU) och `topic`-förfilter. Ren rankningsmatematik i
+`rank.ts` (RRF/MMR/cosine) och `lru.ts`, enhetstestade.
+
+**Eval-harness (CLAUDE.md-mätbarhet):** `apps/web/src/lib/ai/eval-metrics.ts`
+(ren, enhetstestad: recall@K, precision@K, MRR, nDCG@K, hit-rate) +
+`scripts/rag-eval.mjs` (offline-runner) + `eval/rag-golden.example.jsonl` (mall)
++ `docs/ai/rag-eval.md`. Gyllene set fylls av teamet när mätning startar; kör
+samma set före/efter en retrieval-ändring och jämför.
+
+**Modellval efter komplexitet:** chatten planerar inte längre default på
+`mistral-small`. `lib/ai/model-router.ts` (ren, enhetstestad) klassar frågans
+komplexitet (heuristik, ingen extra LLM-runda) och väljer startmodell:
+låg → small, medel → medium, hög (analys/rapport/dokument) → large. Kedjan
+faller fortfarande uppåt vid 429 och har small som sista utväg. Används av både
+`staff-chat.ts` (trådar/streaming) och `lib/actions/chat.ts` (efemär `/idag`).
+
+**Kvar / kommande steg:**
+- **Contextual retrieval** (Anthropic-tekniken: LLM-genererad kontext-prefix per
+  chunk vid indexering) — index-time-kostnad, egen PR med reindex.
+- **Parent-document / small-to-big** (returnera grannchunkars kontext) — avvägs
+  mot prompt-storlekstaket (`MAX_TOOL_RESULT_CHARS`).
+- **PPTX/DOCX-textextraktion** — exportera presentationer/Word till PDF tills den
+  dependency-fria OOXML-extraktorn (återanvänder XLSX-zip-kärnan) är på plats.
+- **pgvector/vektortjänst** när en tenant passerar några tusen chunkar — JS-
+  cosine + paginerat svep räcker tills dess; `searchSource`-seamen är oförändrad
+  så bytet blir drop-in.
+- **SharePoint-sync (Steg 3):** `source_ref`-fältet är förberett för en framtida
+  tenant-integration (§ 11) via Microsoft Graph — kräver Azure AD-app + DPIA.
 
 ---
 

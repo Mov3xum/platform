@@ -1242,6 +1242,38 @@ async function runAggregateCollection(
  * ai_usage_events (surface 'suggestions') när en actor-id finns. Kunskapsbasen
  * är denylistad för query_collection — detta är dess ENDA väg till modellen.
  */
+/**
+ * Loggar RAG-sökningens token-utfall. Embeddings (mistral-embed) och en ev.
+ * LLM-rerank (mistral-small) loggas som SEPARATA ai_usage_events eftersom
+ * modellen — och därmed kostnaden — skiljer sig. No-op utan actor-id.
+ */
+function logKnowledgeUsage(
+  ctx: ToolDispatchContext,
+  usage: { tokensIn: number; tokensOut: number; rerank?: { tokensIn: number; tokensOut: number } }
+): void {
+  if (!ctx.actor?.id) return;
+  if (usage.tokensIn > 0 || usage.tokensOut > 0) {
+    void logAiUsage(ctx.pb, {
+      tenant: ctx.tenantId,
+      userId: ctx.actor.id,
+      surface: 'suggestions',
+      model: 'mistral-embed',
+      tokensIn: usage.tokensIn,
+      tokensOut: usage.tokensOut
+    });
+  }
+  if (usage.rerank && (usage.rerank.tokensIn > 0 || usage.rerank.tokensOut > 0)) {
+    void logAiUsage(ctx.pb, {
+      tenant: ctx.tenantId,
+      userId: ctx.actor.id,
+      surface: 'suggestions',
+      model: 'mistral-small-latest',
+      tokensIn: usage.rerank.tokensIn,
+      tokensOut: usage.rerank.tokensOut
+    });
+  }
+}
+
 async function runSearchKnowledge(
   args: Record<string, unknown>,
   ctx: ToolDispatchContext
@@ -1262,15 +1294,8 @@ async function runSearchKnowledge(
     return { ok: false, error: err instanceof Error ? err.message : 'Kunde inte söka i kunskapsbasen.' };
   }
 
-  if (ctx.actor?.id && (result.usage.tokensIn > 0 || result.usage.tokensOut > 0)) {
-    void logAiUsage(ctx.pb, {
-      tenant: ctx.tenantId,
-      userId: ctx.actor.id,
-      surface: 'suggestions',
-      model: 'mistral-embed',
-      tokensIn: result.usage.tokensIn,
-      tokensOut: result.usage.tokensOut
-    });
+  if (ctx.actor?.id) {
+    logKnowledgeUsage(ctx, result.usage);
   }
 
   if (result.hits.length === 0) {
@@ -1329,16 +1354,7 @@ async function runSearchMyFiles(
     return { ok: false, error: err instanceof Error ? err.message : 'Kunde inte söka i dina filer.' };
   }
 
-  if (result.usage.tokensIn > 0 || result.usage.tokensOut > 0) {
-    void logAiUsage(ctx.pb, {
-      tenant: ctx.tenantId,
-      userId: ctx.actor.id,
-      surface: 'suggestions',
-      model: 'mistral-embed',
-      tokensIn: result.usage.tokensIn,
-      tokensOut: result.usage.tokensOut
-    });
-  }
+  logKnowledgeUsage(ctx, result.usage);
 
   if (result.hits.length === 0) {
     return {
