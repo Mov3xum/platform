@@ -1,5 +1,6 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
+import { escFilter } from '@/lib/pb-filter';
 import { getSuperuserPb, loadCredentials } from './credentials';
 import { getHandler } from './registry';
 import type {
@@ -45,7 +46,12 @@ async function upsertRecord(
   rec: NormalizedRecord,
   syncedAt: string
 ): Promise<'created' | 'updated' | 'skipped'> {
-  const filter = `tenant_integration = "${tenantIntegrationId}" && record_type = "${rec.recordType}" && external_id = "${rec.externalId}"`;
+  // record_type/external_id kommer från extern leverantörsdata → escapas
+  // (filter-injection mot superuser-PB, CLAUDE.md § 10.3 A.8.9).
+  const filter =
+    `tenant_integration = "${escFilter(tenantIntegrationId)}" && ` +
+    `record_type = "${escFilter(rec.recordType)}" && ` +
+    `external_id = "${escFilter(rec.externalId)}"`;
 
   let existing: ExistingRecord | null = null;
   try {

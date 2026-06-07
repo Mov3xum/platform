@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { escFilter } from '@/lib/pb-filter';
 import type {
   Role,
   Deal,
@@ -239,7 +240,7 @@ export async function deleteInvestorAction(id: string): Promise<InvestorActionSt
 
   try {
     const deals = await pb.collection(PB_COLLECTIONS.deals).getFullList<Deal>({
-      filter: `tenant = "${user.tenant}" && investor = "${id}"`,
+      filter: `tenant = "${escFilter(user.tenant)}" && investor = "${escFilter(id)}"`,
       fields: 'id'
     });
     for (const d of deals) {
@@ -290,7 +291,7 @@ export async function getInvestorDeals(investorId: string): Promise<Deal[]> {
   const pb = await getServerPb();
   try {
     const res = await pb.collection(PB_COLLECTIONS.deals).getList<Deal>(1, 50, {
-      filter: `tenant = "${user.tenant}" && investor = "${investorId}"`,
+      filter: `tenant = "${escFilter(user.tenant)}" && investor = "${escFilter(investorId)}"`,
       sort: '-last_activity',
       expand: 'startup,investor'
     });

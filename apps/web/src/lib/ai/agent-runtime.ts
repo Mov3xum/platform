@@ -13,6 +13,7 @@ import {
 } from './tools';
 import { buildSchemaSummary, getExposedCollections } from './schema';
 import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from './guidance';
+import { assertWithinAiBudget } from './budget.server';
 
 // Hur många gånger modellen får anropa verktyg och få tillbaka resultat
 // innan vi tvingar fram ett slutsvar. Skyddar mot oändliga loopar och
@@ -97,6 +98,11 @@ export async function runAgentLoop(
   const tools =
     options.tools && options.tools.length > 0 ? options.tools : undefined;
   let toolCallsMade = 0;
+
+  // Hård kostnadsspärr per tenant/månad (EU AI Act art. 15 robusthet). No-op
+  // när inget tak är satt; kastar AiBudgetExceededError när månadsbudgeten är
+  // slut så att en skenande loop/fan-out inte kan bränna obegränsat.
+  await assertWithinAiBudget(options.toolContext.pb, options.toolContext.tenantId);
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     const result = await callMistralWithFallback(options.models, conversation, {

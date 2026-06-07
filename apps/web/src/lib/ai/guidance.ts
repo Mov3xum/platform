@@ -26,7 +26,9 @@ export const SEARCH_STRATEGY_GUIDANCE =
   '"aktiv" när det egentligen är "active" — slå upp det.\n' +
   '- `aggregate_collection`: använd för summor, snitt, min/max och fördelningar ' +
   '(t.ex. total omsättning, snitt-IRL per fas). Hämta INTE rader och räkna ' +
-  'själv — det blir fel.\n' +
+  'själv — det blir fel. Om svaret har `incomplete: true` eller en `warning`: ' +
+  'värdet är partiellt (fler rader fanns än som kunde summeras) — säg det rakt ' +
+  'ut för användaren och presentera ALDRIG siffran som exakt.\n' +
   '- `query_collection` / `count_collection`: för riktade uppslag när du redan ' +
   'vet kollektion/fält/id. Tänk på att `~` är exakt substring (ingen ' +
   'felstavningstolerans) — för namnsökning är `search_records` bättre.\n\n' +

@@ -1,9 +1,13 @@
 import 'server-only';
 import { getModelMeta } from './models';
+import {
+  conversationsUrl,
+  embeddingsUrl,
+  primaryBase,
+  resolveChatProviders,
+  type ChatProvider
+} from './mistral-endpoints';
 
-const MISTRAL_API_URL = 'https://api.mistral.ai/v1/chat/completions';
-const MISTRAL_CONVERSATIONS_URL = 'https://api.mistral.ai/v1/conversations';
-const MISTRAL_EMBEDDINGS_URL = 'https://api.mistral.ai/v1/embeddings';
 export const EMBEDDING_MODEL = 'mistral-embed';
 const MAX_TOKENS = 4000;
 const MAX_ATTEMPTS = 3;
@@ -171,8 +175,8 @@ export async function callMistral(
   messages: MistralMessage[],
   options: CallMistralOptions = {}
 ): Promise<MistralResponse> {
-  const apiKey = process.env.MISTRAL_API_KEY;
-  if (!apiKey) {
+  const providers = resolveChatProviders(process.env);
+  if (providers.length === 0) {
     throw new MistralError('MISTRAL_API_KEY saknas i miljövariablerna.', 0);
   }
 
@@ -207,16 +211,49 @@ export async function callMistral(
     body.tool_choice = options.toolChoice ?? 'auto';
   }
 
+  // Primär provider (Mistral EU) först, sedan en valfri självhostad EU-fallback
+  // (degraderat läge, § 10.4). Vid kapacitet/utfall byter vi provider; vid
+  // request-fel (4xx, t.ex. auth) kastar vi direkt — fallbacken hjälper inte.
   let lastError: MistralError | null = null;
+  for (let p = 0; p < providers.length; p++) {
+    const provider = providers[p];
+    try {
+      return await attemptChatProvider(provider, body);
+    } catch (err) {
+      lastError = err instanceof MistralError ? err : new MistralError(String(err), 0);
+      const status = lastError.status;
+      const retryable = status === 0 || RETRYABLE_STATUSES.has(status);
+      const hasFallback = p < providers.length - 1;
+      if (!retryable || !hasFallback) throw lastError;
+      console.warn('[mistral] provider failed, degrading to fallback', {
+        from: provider.label,
+        to: providers[p + 1].label,
+        status
+      });
+    }
+  }
+  // Unreachable — loopen returnerar eller kastar.
+  throw lastError ?? new MistralError('Okänt fel vid AI-anrop.', 0);
+}
 
+/**
+ * Kör MAX_ATTEMPTS-loopen med backoff mot EN provider (url + nyckel).
+ * Returnerar svaret eller kastar MistralError. Bryts ut så att den yttre
+ * provider-loopen kan falla över till EU-fallbacken vid utfall/kapacitet.
+ */
+async function attemptChatProvider(
+  provider: ChatProvider,
+  body: Record<string, unknown>
+): Promise<MistralResponse> {
+  let lastError: MistralError | null = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let response: Response;
     try {
-      response = await fetch(MISTRAL_API_URL, {
+      response = await fetch(provider.url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`
+          Authorization: `Bearer ${provider.apiKey}`
         },
         body: JSON.stringify(body)
       });
@@ -453,7 +490,7 @@ export async function callMistralConversation(
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let response: Response;
     try {
-      response = await fetch(MISTRAL_CONVERSATIONS_URL, {
+      response = await fetch(conversationsUrl(primaryBase(process.env)), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -554,7 +591,7 @@ export async function embedTexts(inputs: string[]): Promise<EmbeddingResult> {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let response: Response;
     try {
-      response = await fetch(MISTRAL_EMBEDDINGS_URL, {
+      response = await fetch(embeddingsUrl(primaryBase(process.env)), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

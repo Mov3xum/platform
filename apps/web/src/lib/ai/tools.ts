@@ -8,6 +8,7 @@ import {
   type ExposedCollection
 } from './schema';
 import { rankCandidates, significantTokens } from './fuzzy';
+import { AGG_OPS, computeAggregate, type AggOp } from './aggregate';
 import type { MistralToolCall, MistralToolDefinition } from './mistral';
 import { searchOrgKnowledge, searchUserFiles, renderKnowledgeHits } from './rag';
 import { logAiUsage } from './usage';
@@ -41,10 +42,10 @@ const MAX_EXPAND_LENGTH = 200;
 const MAX_SEARCH_LIMIT = 20;
 const SEARCH_CANDIDATE_FETCH = 100; // kandidater per hämtning innan JS-ranking
 const SEARCH_THRESHOLD = 0.4;
-const MAX_AGG_SCAN = 500; // rader aggregeringen får skanna (robusthet § 10)
+const MAX_AGG_SCAN = 500; // rader describe_collection får skanna för distinkta värden
+const AGG_PAGE = 500; // PB:s max perPage — sidstorlek vid aggregerings-paginering
+const MAX_AGG_ROWS = 5000; // hård tak-radmängd för aggregering (10 sidor, robusthet § 10)
 const MAX_DISTINCT_VALUES = 40;
-const AGG_OPS = ['count', 'sum', 'avg', 'min', 'max'] as const;
-type AggOp = (typeof AGG_OPS)[number];
 
 // Display-fält vi försöker läsa ur en expanderad relation när group_by är en
 // relation, i prioordning. Bara icke-PII-etiketter (namn/titel) — aldrig
@@ -330,9 +331,10 @@ export function buildChatTools(
           'Beräknar summa/snitt/min/max/antal över en kollektion, valfritt ' +
           'grupperat. Använd för totaler och fördelningar i stället för att hämta ' +
           'rader och räkna själv. När `group_by` är ett relationsfält (t.ex. ' +
-          '`startup`) returneras gruppen som läsbart NAMN, inte id — så du kan ' +
-          'lista "vilka bolag som gjort X" med ETT anrop i stället för en fråga ' +
-          'per bolag. Tenant-scope läggs på automatiskt.',
+          '`startup`) returneras gruppen som läsbart NAMN, inte id. Tenant-scope ' +
+          'läggs på automatiskt. Om svaret har `incomplete: true` (eller en ' +
+          '`warning`) är värdet PARTIELLT — presentera det aldrig som exakt, utan ' +
+          'tala om för användaren att det finns fler rader än vad som kunde summeras.',
         parameters: {
           type: 'object',
           properties: {
@@ -1152,85 +1154,58 @@ async function runAggregateCollection(
     if (err) return { ok: false, error: err };
   }
 
+  const finalFilter = composeFilter(collection, ctx.tenantId, modelFilter) || undefined;
+
+  // Ogrupperad count behöver inga rader — PB:s totalItems är det exakta svaret.
+  if (op === 'count' && !groupBy) {
+    try {
+      const head = await ctx.pb.collection(collection.name).getList(1, 1, { filter: finalFilter, fields: 'id' });
+      const result = computeAggregate({ op, rows: [], total: head.totalItems });
+      return { ok: true, data: { collection: collection.name, ...result } };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Okänt fel vid aggregering.' };
+    }
+  }
+
   // Om group_by pekar på ett relationsfält expanderar vi det till ett
   // läsbart namn (name/title/label) så grupperna blir bolagsnamn i stället
-  // för id:n. Det låter modellen lista "vilka som gjort X" med ETT anrop —
-  // utan en uppföljande fråga per id (N+1). Bara icke-maskade display-fält
-  // (name/title/label) läses ur den expanderade posten → ingen PII-bakväg.
+  // för id:n. Bara icke-maskade display-fält läses → ingen PII-bakväg.
   const groupField = groupBy
     ? collection.fields.find((f) => f.name === groupBy)
     : undefined;
   const groupIsRelation = groupField?.type === 'relation';
 
-  // Hämta bara de fält som behövs (dataminimering § 9.3).
+  // Hämta bara de fält som behövs (dataminimering § 9.3). Paginera upp till en
+  // hård säkerhetsgräns så att sum/avg/min/max blir EXAKTA för realistiska
+  // tenant-storlekar — capas bara vid extrema radmängder (då markeras
+  // resultatet `incomplete`, aldrig tyst fel).
   const fieldParts = ['id', field, groupBy].filter(Boolean);
   if (groupIsRelation) {
     for (const disp of GROUP_LABEL_FIELDS) fieldParts.push(`expand.${groupBy}.${disp}`);
   }
   const wanted = fieldParts.join(',');
-
   try {
-    const res = await ctx.pb.collection(collection.name).getList(1, MAX_AGG_SCAN, {
-      filter: composeFilter(collection, ctx.tenantId, modelFilter) || undefined,
-      fields: wanted || undefined,
-      expand: groupIsRelation ? groupBy : undefined
-    });
-    const rows = res.items as Record<string, unknown>[];
-    const capped = res.totalItems > rows.length;
-
-    const reduce = (values: number[]): number | null => {
-      if (op === 'count') return values.length;
-      const nums = values.filter((n) => Number.isFinite(n));
-      if (nums.length === 0) return null;
-      if (op === 'sum') return nums.reduce((a, b) => a + b, 0);
-      if (op === 'avg') return nums.reduce((a, b) => a + b, 0) / nums.length;
-      if (op === 'min') return Math.min(...nums);
-      if (op === 'max') return Math.max(...nums);
-      return null;
-    };
-    const numOf = (r: Record<string, unknown>): number => {
-      if (op === 'count') return 1;
-      return Number(r[field]);
-    };
-
-    if (groupBy) {
-      const groups = new Map<string, number[]>();
-      for (const r of rows) {
-        const g = groupIsRelation ? relationGroupLabel(r, groupBy) : scalarGroupLabel(r[groupBy]);
-        if (!groups.has(g)) groups.set(g, []);
-        groups.get(g)!.push(numOf(r));
-      }
-      const result = Array.from(groups.entries())
-        .map(([group, vals]) => ({ group, value: reduce(vals), count: vals.length }))
-        .sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
-      return {
-        ok: true,
-        data: {
-          collection: collection.name,
-          op,
-          field: field || undefined,
-          group_by: groupBy,
-          group_label: groupIsRelation ? 'name' : 'value',
-          scanned: rows.length,
-          capped,
-          groups: result
-        }
-      };
+    const rawRows: Record<string, unknown>[] = [];
+    let total = 0;
+    const maxPages = Math.ceil(MAX_AGG_ROWS / AGG_PAGE);
+    for (let page = 1; page <= maxPages; page++) {
+      const res = await ctx.pb.collection(collection.name).getList(page, AGG_PAGE, {
+        filter: finalFilter,
+        fields: wanted || undefined,
+        expand: groupIsRelation ? groupBy : undefined
+      });
+      total = res.totalItems;
+      rawRows.push(...(res.items as Record<string, unknown>[]));
+      if (rawRows.length >= total || res.items.length < AGG_PAGE) break;
     }
+    // Normalisera grupp-nyckeln: relations-fält → läsbart namn så att
+    // computeAggregate grupperar på "Acme AB" snarare än relations-id.
+    const rows = groupIsRelation && groupBy
+      ? rawRows.map((r) => ({ ...r, [groupBy]: relationGroupLabel(r, groupBy) }))
+      : rawRows;
 
-    // Ogrupperad count = sann totalsumma (inte den capade skanningen).
-    const value = op === 'count' ? res.totalItems : reduce(rows.map(numOf));
-    return {
-      ok: true,
-      data: {
-        collection: collection.name,
-        op,
-        field: field || undefined,
-        scanned: rows.length,
-        capped: op === 'count' ? false : capped,
-        value
-      }
-    };
+    const result = computeAggregate({ op, field, groupBy, rows, total });
+    return { ok: true, data: { collection: collection.name, ...result } };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Okänt fel vid aggregering.' };
   }

@@ -382,6 +382,15 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
 - Klient: `lib/ai/mistral.ts` — ett tunt fetch-omslag utan npm-deps
 - Hård gräns: `max_tokens=4000`
 - Leverantörsbyte kräver bara en fils ändring (`mistral.ts`) + `tools.model`-värden
+- **Endpoint-resolvning + degraderat läge (`lib/ai/mistral-endpoints.ts`, ren/
+  enhetstestad).** Bas-URL:en är env-överstyrbar (`MISTRAL_API_BASE_URL`,
+  default `https://api.mistral.ai`) och `callMistral` kan falla över till en
+  **valfri självhostad, OpenAI-kompatibel EU-fallback** (vLLM/Ollama med Mistral
+  open-weights på UpCloud) via `MISTRAL_FALLBACK_BASE_URL` (+ valfri
+  `MISTRAL_FALLBACK_API_KEY`, ärver annars primärnyckeln). Fallbacken används
+  bara vid kapacitet (429), 5xx eller nätverksutfall — **aldrig** vid 4xx
+  (request-/auth-fel). Dormant tills env är satt → inget beteende ändras i
+  dagsläget; SOC 2 availability (§ 10.4), EU-suveränt (§ 10.2).
 
 ### 9.3 Säkerhet och dataskydd
 
@@ -425,7 +434,13 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
   `composeFilter`/`maskRecord` — de är ingen ny dataväg, ingen ny
   kollektion och ingen ny dependency. `aggregate_collection`/
   `describe_collection` vägrar dessutom maskade fält (ingen PII-bakväg).
-  Riskklass: oförändrad (begränsad — intern dataåtkomst, ingen
+  **`aggregate_collection` ljuger aldrig tyst** (`lib/ai/aggregate.ts`,
+  enhetstestat): den paginerar upp till `MAX_AGG_ROWS=5000` så sum/avg/min/max
+  blir exakta för realistiska radmängder, och vid cap returneras
+  `incomplete: true` + `warning` + sann `total` (ogrupperad `count` använder
+  PB:s `totalItems` → exakt även vid cap). `guidance.ts` + tool-beskrivningen
+  tvingar modellen att lyfta ett partiellt värde i stället för att presentera
+  det som komplett. Riskklass: oförändrad (begränsad — intern dataåtkomst, ingen
   profilering). Sökstrategi + domänordlista ligger i `lib/ai/guidance.ts`
   och delas av dashboardchatt, trådar och autonoma körningar (ingen
   divergerande kopia).
@@ -445,7 +460,13 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
     (`street_address`/`postal_code`), `avatar`, lösenord/tokens samt art. 9
     (`gender`, `identifies_as`). `tasks.details` maskas särskilt (privata
     arbetsanteckningar). `aggregate_collection`/`describe_collection` vägrar
-    dessutom maskade fält (ingen PII-bakväg).
+    dessutom maskade fält (ingen PII-bakväg). Policyn låses i TVÅ lager:
+    `redaction.test.ts` mot KODEN (denylist + mönster), och ett **live-
+    schema-svep i `verify-baseline.mjs`** (`verifyAiPiiMasking`) mot det
+    FAKTISKT deployade schemat — deployen failar om en exponerad (icke-
+    denylistad) kollektion får ett fält vars namn dodgar substring-maskern
+    (svensk/variant-stavning som `kön`, `epost`, `personnr`). Escape-hatch:
+    `PII_SWEEP_ALLOWLIST` för granskade icke-PII-fält.
   - **EU-suveränitet:** Mistral (FR) är personuppgiftsbiträde med DPA;
     rättslig grund = berättigat intresse (inkubatordrift), § 10.2.
 
@@ -537,6 +558,17 @@ Prissättning (ungefär):
 - Mistral Large: €2/€6 per 1M in/out tokens
 - Mistral Medium: €0.4/€1.2 per 1M in/out tokens
 - Mistral Small: €0.1/€0.3 per 1M in/out tokens
+
+**Hård kostnadsspärr per tenant/månad** (`lib/ai/budget.ts` rent/
+enhetstestat + `budget.server.ts` IO). `assertWithinAiBudget` summerar
+tenantens `ai_usage_events.cost_estimate_usd` för innevarande kalendermånad
+(60 s-cache, paginerings-tak, fail-open) och kastar `AiBudgetExceededError`
+när taket nås. Enforce:as vid starten av den delade `runAgentLoop` (täcker
+dashboardchatt, toolbox, schemalagt, triggers, djupjobb-subtasks) **och** i
+connector-turn:en. Aktiveras via `MOVEXUM_MONTHLY_AI_BUDGET_USD` (Coolify env,
+aldrig i kod). **Opt-in:** osatt/0 = spärren av, så en felkonfiguration aldrig
+tyst bryter en kunds chatt mitt i månaden — sätt env:en för att få ett tak.
+Robusthet enligt EU AI Act art. 15 / SOC 2 processing integrity (§ 10).
 
 ### 9.7 Bannrar och varningstexter
 
