@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { Logo } from '@/components/Logo';
 import { PublicModuleRunner } from '@/components/compass/PublicModuleRunner';
 import { resolvePublicModule, getPublicModuleQuestions } from '@/lib/compass/public';
+import { moduleHeroImageUrl } from '@/lib/compass/media';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,62 +40,50 @@ export default async function PublicModulePage({
 
   const accent = module.theme_color && /^#[0-9a-fA-F]{3,8}$/.test(module.theme_color)
     ? module.theme_color
-    : undefined;
+    : '#002c40';
+  const heroImageUrl = moduleHeroImageUrl(module);
+  const isChat = module.flow_type === 'chat';
 
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        background: 'var(--mx-canvas, #ffffff)',
-        padding: '24px 16px 64px'
-      }}
-    >
-      <div style={{ maxWidth: 720, margin: '0 auto', display: 'grid', gap: 24 }}>
-        {/* Toppbar: logotyp + modul-badge */}
-        <div className="mx-flex mx-items-c mx-gap-3" style={{ flexWrap: 'wrap' }}>
-          <Logo height={28} variant="auto" href="/" />
-          <span
-            className="mx-chip mx-mono mx-t-xs"
-            style={{ background: 'var(--mx-paper-2)', color: 'var(--mx-ink)' }}
-          >
-            {module.name}
-          </span>
+    <main className="mx-compass-landing">
+      <div className="mx-compass-wrap">
+        {/* Omslagsbild — uppladdad bild eller branded gradient som faller in */}
+        <div className={`mx-compass-hero${heroImageUrl ? '' : ' mx-compass-hero-fallback'}`}>
+          {heroImageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={heroImageUrl} alt="" className="mx-compass-hero-img" />
+          ) : (
+            <span>{module.welcome_title || module.name}</span>
+          )}
         </div>
 
-        {/* Hero */}
-        <header style={{ display: 'grid', gap: 8 }}>
-          <div
-            className="mx-mono mx-t-xs mx-t-up mx-fw-6"
-            style={{ color: accent || '#002c40', letterSpacing: '0.08em' }}
-          >
+        {/* Hero-text */}
+        <header className="mx-compass-head">
+          <div className="mx-compass-eyebrow" style={{ color: accent }}>
             {module.hero_eyebrow || 'STARTUPKOMPASSEN'}
           </div>
-          <h1 className="mx-disp" style={{ fontSize: 36, fontWeight: 700, lineHeight: 1.1, margin: 0 }}>
-            {module.welcome_title || module.name}
-          </h1>
+          <h1 className="mx-compass-title">{module.welcome_title || module.name}</h1>
           {(module.welcome_body || module.description) && (
-            <p className="mx-t-15 mx-muted" style={{ lineHeight: 1.6, margin: 0, maxWidth: 560 }}>
-              {module.welcome_body || module.description}
-            </p>
+            <p className="mx-compass-body">{module.welcome_body || module.description}</p>
           )}
         </header>
 
         {/* Flöde */}
         <section
           style={{
-            background: module.flow_type === 'chat' ? 'transparent' : 'var(--mx-paper)',
-            border: module.flow_type === 'chat' ? 'none' : '1px solid var(--mx-line)',
+            background: isChat ? 'transparent' : 'var(--mx-paper)',
+            border: isChat ? 'none' : '1px solid var(--mx-line)',
             borderRadius: 'var(--mx-r-lg, 16px)',
-            padding: module.flow_type === 'chat' ? 0 : 24,
-            boxShadow: module.flow_type === 'chat' ? 'none' : 'var(--mx-sh-2)'
+            padding: isChat ? 0 : 24,
+            boxShadow: isChat ? 'none' : 'var(--mx-sh-2)'
           }}
         >
           <PublicModuleRunner module={module} questions={questions} />
         </section>
 
         {/* Transparens (EU AI Act art. 50 för chat) + EU-suveränitet */}
-        <footer className="mx-mono mx-t-xs mx-muted" style={{ textAlign: 'center' }}>
-          {module.flow_type === 'chat'
+        <footer className="mx-compass-foot">
+          {isChat
             ? 'Drivs av Mistral / Le Chat (EU-suveränt) · Genererat av AI – verifiera innan delning'
             : 'Dina svar hanteras inom EU och delas aldrig vidare.'}
         </footer>
