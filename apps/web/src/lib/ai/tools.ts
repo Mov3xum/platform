@@ -46,6 +46,34 @@ const MAX_DISTINCT_VALUES = 40;
 const AGG_OPS = ['count', 'sum', 'avg', 'min', 'max'] as const;
 type AggOp = (typeof AGG_OPS)[number];
 
+// Display-fält vi försöker läsa ur en expanderad relation när group_by är en
+// relation, i prioordning. Bara icke-PII-etiketter (namn/titel) — aldrig
+// e-post/telefon/personnr (de maskas ändå uppströms). Faller tillbaka på id.
+const GROUP_LABEL_FIELDS = ['name', 'title', 'label'] as const;
+
+/** Etikett för en skalär (icke-relation) grupp-nyckel. */
+function scalarGroupLabel(v: unknown): string {
+  return v === null || v === undefined || v === '' ? '(tomt)' : String(v);
+}
+
+/**
+ * Etikett för en relations-grupp: läser name/title/label ur den expanderade
+ * posten så att grupperna blir läsbara namn i stället för id:n. Faller tillbaka
+ * på det råa id:t om expansionen saknas (t.ex. trasig relation).
+ */
+function relationGroupLabel(row: Record<string, unknown>, groupBy: string): string {
+  const expand = row.expand as Record<string, unknown> | undefined;
+  const related = expand?.[groupBy] as Record<string, unknown> | undefined;
+  if (related) {
+    for (const disp of GROUP_LABEL_FIELDS) {
+      const v = related[disp];
+      if (typeof v === 'string' && v.trim()) return v;
+    }
+  }
+  const raw = row[groupBy];
+  return raw === null || raw === undefined || raw === '' ? '(tomt)' : String(raw);
+}
+
 // Systemfält som aldrig är meningsfulla att fuzzy-matcha mot.
 const SYSTEM_RECORD_KEYS: ReadonlySet<string> = new Set([
   'id',
@@ -301,7 +329,10 @@ export function buildChatTools(
         description:
           'Beräknar summa/snitt/min/max/antal över en kollektion, valfritt ' +
           'grupperat. Använd för totaler och fördelningar i stället för att hämta ' +
-          'rader och räkna själv. Tenant-scope läggs på automatiskt.',
+          'rader och räkna själv. När `group_by` är ett relationsfält (t.ex. ' +
+          '`startup`) returneras gruppen som läsbart NAMN, inte id — så du kan ' +
+          'lista "vilka bolag som gjort X" med ETT anrop i stället för en fråga ' +
+          'per bolag. Tenant-scope läggs på automatiskt.',
         parameters: {
           type: 'object',
           properties: {
@@ -1104,13 +1135,28 @@ async function runAggregateCollection(
     if (err) return { ok: false, error: err };
   }
 
+  // Om group_by pekar på ett relationsfält expanderar vi det till ett
+  // läsbart namn (name/title/label) så grupperna blir bolagsnamn i stället
+  // för id:n. Det låter modellen lista "vilka som gjort X" med ETT anrop —
+  // utan en uppföljande fråga per id (N+1). Bara icke-maskade display-fält
+  // (name/title/label) läses ur den expanderade posten → ingen PII-bakväg.
+  const groupField = groupBy
+    ? collection.fields.find((f) => f.name === groupBy)
+    : undefined;
+  const groupIsRelation = groupField?.type === 'relation';
+
   // Hämta bara de fält som behövs (dataminimering § 9.3).
-  const wanted = ['id', field, groupBy].filter(Boolean).join(',');
+  const fieldParts = ['id', field, groupBy].filter(Boolean);
+  if (groupIsRelation) {
+    for (const disp of GROUP_LABEL_FIELDS) fieldParts.push(`expand.${groupBy}.${disp}`);
+  }
+  const wanted = fieldParts.join(',');
 
   try {
     const res = await ctx.pb.collection(collection.name).getList(1, MAX_AGG_SCAN, {
       filter: composeFilter(collection, ctx.tenantId, modelFilter) || undefined,
-      fields: wanted || undefined
+      fields: wanted || undefined,
+      expand: groupIsRelation ? groupBy : undefined
     });
     const rows = res.items as Record<string, unknown>[];
     const capped = res.totalItems > rows.length;
@@ -1133,7 +1179,7 @@ async function runAggregateCollection(
     if (groupBy) {
       const groups = new Map<string, number[]>();
       for (const r of rows) {
-        const g = r[groupBy] === null || r[groupBy] === undefined ? '(tomt)' : String(r[groupBy]);
+        const g = groupIsRelation ? relationGroupLabel(r, groupBy) : scalarGroupLabel(r[groupBy]);
         if (!groups.has(g)) groups.set(g, []);
         groups.get(g)!.push(numOf(r));
       }
@@ -1142,7 +1188,16 @@ async function runAggregateCollection(
         .sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
       return {
         ok: true,
-        data: { collection: collection.name, op, field: field || undefined, group_by: groupBy, scanned: rows.length, capped, groups: result }
+        data: {
+          collection: collection.name,
+          op,
+          field: field || undefined,
+          group_by: groupBy,
+          group_label: groupIsRelation ? 'name' : 'value',
+          scanned: rows.length,
+          capped,
+          groups: result
+        }
       };
     }
 
