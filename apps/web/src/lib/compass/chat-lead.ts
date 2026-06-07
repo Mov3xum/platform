@@ -1,7 +1,8 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
+import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { extractLead, scoreLead, type CompassChatMessage } from './chat';
-import { appendMessage, createLead, updateLead } from './store';
+import { appendMessage, createConversation, createLead, updateLead } from './store';
 import { notifyNewInflow } from './notify';
 import type { CompassModule, Conversation } from './types';
 
@@ -24,28 +25,38 @@ export async function getOrCreateChatConversation(
   moduleSlug: string,
   sessionToken: string
 ): Promise<Conversation | null> {
-  try {
-    return await pb
+  // Hitta en pågående session-konversation. PB v0.23.4 kan TYST neka
+  // list/view-regeln (roll mot multi-value-fält, CLAUDE.md § 21.3), så vi
+  // faller tillbaka på en superuser-läsning innan vi ger upp och skapar en ny —
+  // annars skulle varje tur skapa en NY konversation (och tappa idempotensen på
+  // lead-upserten via conversation.lead).
+  const findExisting = (client: PocketBase) =>
+    client
       .collection('compass_conversations')
       .getFirstListItem<Conversation>(
-        pb.filter('tenant = {:t} && module_slug = {:m} && session_token = {:s}', {
+        client.filter('tenant = {:t} && module_slug = {:m} && session_token = {:s}', {
           t: tenant,
           m: moduleSlug,
           s: sessionToken
         })
       );
+
+  try {
+    return await findExisting(pb);
   } catch {
-    try {
-      return await pb.collection('compass_conversations').create<Conversation>({
-        tenant,
-        module_slug: moduleSlug,
-        session_token: sessionToken,
-        status: 'active'
-      });
-    } catch {
-      return null;
+    const su = await getSuperuserPb();
+    if (su.ok) {
+      try {
+        const found = await findExisting(su.pb);
+        if (found && found.tenant === tenant) return found;
+      } catch {
+        // ingen befintlig konversation — skapa en ny nedan
+      }
     }
   }
+
+  // Skapa via den delade store-helpern som har superuser-skriv-fallback.
+  return createConversation(pb, tenant, { moduleSlug, sessionToken });
 }
 
 /** Sammanfattar samtalet till en lead-sammanfattning + interna anteckningar. */
@@ -160,10 +171,20 @@ export async function persistChatTurnAndUpsertLead(
     consent_at: new Date().toISOString()
   });
   if (lead) {
+    // Koppla leadet till konversationen så efterföljande turer berikar SAMMA
+    // lead (idempotens) i stället för att skapa en ny per tur. Samma v0.23.4
+    // rule-eval-risk → superuser-fallback om användartokenets update nekas.
     try {
       await pb.collection('compass_conversations').update(conversation.id, { lead: lead.id });
     } catch {
-      // best-effort — leadet finns redan, kopplingen är en bekvämlighet
+      const su = await getSuperuserPb();
+      if (su.ok) {
+        try {
+          await su.pb.collection('compass_conversations').update(conversation.id, { lead: lead.id });
+        } catch {
+          // best-effort — leadet finns redan, kopplingen är en bekvämlighet
+        }
+      }
     }
     // Notifiera Movexums inflödesmail om det nya inflödet (en gång, vid
     // första skapandet — inte vid efterföljande uppdateringar).

@@ -5,6 +5,7 @@ import { PageHead, Card, Chip, Icon } from '@/components/proto';
 import { getModuleBySlug, listQuestionsForModule } from '@/lib/compass/store';
 import { CompassChat } from '@/components/compass/CompassChat';
 import { ModuleWizard } from '@/components/compass/ModuleWizard';
+import { ModuleQuiz } from '@/components/compass/ModuleQuiz';
 import { FLOW_TYPE_LABEL } from '@/lib/compass/types';
 
 export const dynamic = 'force-dynamic';
@@ -67,6 +68,17 @@ export default async function ModulePage({
             initialAssistantMessage={mod.intro_message || undefined}
           />
         </div>
+      ) : mod.flow_type === 'quiz' ? (
+        <Card style={{ padding: 24 }}>
+          <ModuleQuiz
+            moduleSlug={mod.slug}
+            questions={questions}
+            requireEmail={mod.require_email}
+            requirePhone={mod.require_phone}
+            requireOrganization={mod.require_organization}
+            successMessage={mod.success_message}
+          />
+        </Card>
       ) : (
         <Card style={{ padding: 24 }}>
           <ModuleWizard

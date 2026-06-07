@@ -54,6 +54,35 @@ async function readWithFallback<T>(
 }
 
 /* ────────────────────────────────────────────────────────────────────
+   Skriv-fallback — samma PB v0.23.4 rule-eval-bugg (CLAUDE.md § 21.3)
+   ────────────────────────────────────────────────────────────────────
+   Spegelbilden av `readWithFallback`. Lead-skrivningar (create/update) går via
+   den inloggades auth-token så RLS-lagret bevaras (defense-in-depth). Men
+   `compass_leads.createRule` är en roll-/tenant-regel, och PB v0.23.4 kan TYST
+   neka den (`?=` mot multi-value `@request.auth.roles`) — även för en behörig
+   admin. Symptomet är exakt det rapporterade: "jag interagerar med en modul men
+   blir aldrig upplagd som lead" — create:en avvisas tyst och leadet skapas
+   aldrig. Modul-/frågeskrivningar hade redan denna fallback (`writeWithFallback`
+   i lib/actions/compass.ts); lead-skrivningarna saknade den.
+
+   Vi försöker därför alltid användartoken FÖRST och faller bara tillbaka på en
+   superuser-skrivning när den nekas/felar. Tenant stämplas explicit av anroparen
+   (aldrig från en request-body), så tenant-isoleringen består även i fallbacken.
+   De PUBLIKA flödena skickar redan in en superuser-klient → no-op för dem. */
+async function writeWithFallback<T>(
+  pb: PocketBase,
+  run: (client: PocketBase) => Promise<T>
+): Promise<T> {
+  try {
+    return await run(pb);
+  } catch {
+    const su = await getSuperuserPb();
+    if (su.ok) return run(su.pb);
+    throw new Error('compass write failed (primary + superuser unavailable)');
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────
    Lead sources — gemensam lookup (ingen tenant)
    ──────────────────────────────────────────────────────────────────── */
 
@@ -155,7 +184,9 @@ export async function createLead(
       source_key: 'ai-chat',
       ...data
     };
-    return await pb.collection('compass_leads').create<Lead>(payload);
+    return await writeWithFallback(pb, (client) =>
+      client.collection('compass_leads').create<Lead>(payload)
+    );
   } catch {
     return null;
   }
@@ -170,7 +201,9 @@ export async function updateLead(
   const existing = await getLead(pb, tenant, id);
   if (!existing) return null;
   try {
-    return await pb.collection('compass_leads').update<Lead>(id, patch);
+    return await writeWithFallback(pb, (client) =>
+      client.collection('compass_leads').update<Lead>(id, patch)
+    );
   } catch {
     return null;
   }
@@ -250,13 +283,15 @@ export async function createConversation(
   data: { moduleSlug?: string; sessionToken?: string; leadId?: string }
 ): Promise<Conversation | null> {
   try {
-    return await pb.collection('compass_conversations').create<Conversation>({
-      tenant,
-      module_slug: data.moduleSlug,
-      session_token: data.sessionToken,
-      lead: data.leadId,
-      status: 'active'
-    });
+    return await writeWithFallback(pb, (client) =>
+      client.collection('compass_conversations').create<Conversation>({
+        tenant,
+        module_slug: data.moduleSlug,
+        session_token: data.sessionToken,
+        lead: data.leadId,
+        status: 'active'
+      })
+    );
   } catch {
     return null;
   }
