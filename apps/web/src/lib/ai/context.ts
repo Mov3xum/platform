@@ -1,6 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
+import { escFilter } from '@/lib/pb-filter';
 
 // Whitelist av startup-fält som får skickas till AI-prompten. Allt utanför
 // listan måste vägras (CLAUDE.md § 9.3, § 10.2).
@@ -214,15 +215,15 @@ export async function buildStartupContext(
   const [startupRecord, milestonesResult, activitiesResult, notesResult] = await Promise.all([
     pb.collection('startups').getOne(startupId),
     pb.collection('milestones').getList(1, 100, {
-      filter: `startup = "${startupId}"`,
+      filter: `startup = "${escFilter(startupId)}"`,
       sort: 'target_date'
     }),
     pb.collection('activities').getList(1, 100, {
-      filter: `startup = "${startupId}" && due_date >= "${ninetyDaysAgo()}"`,
+      filter: `startup = "${escFilter(startupId)}" && due_date >= "${ninetyDaysAgo()}"`,
       sort: '-due_date'
     }),
     pb.collection('notes').getList(1, 100, {
-      filter: `startup = "${startupId}" && confidential = false`,
+      filter: `startup = "${escFilter(startupId)}" && confidential = false`,
       sort: '-created'
     })
   ]);
@@ -355,7 +356,7 @@ export async function buildFinancialsContext(
   let result;
   try {
     result = await pb.collection('startup_financials').getList(1, lastNYears, {
-      filter: `startup = "${startupId}" && tenant = "${tenantId}"`,
+      filter: `startup = "${escFilter(startupId)}" && tenant = "${escFilter(tenantId)}"`,
       sort: '-year'
     });
   } catch (e) {
@@ -398,7 +399,7 @@ export async function buildPhaseHistoryContext(
   let result;
   try {
     result = await pb.collection('startup_phase_history').getList(1, limit, {
-      filter: `startup = "${startupId}" && tenant = "${tenantId}"`,
+      filter: `startup = "${escFilter(startupId)}" && tenant = "${escFilter(tenantId)}"`,
       sort: '-entered_at'
     });
   } catch {
@@ -432,7 +433,7 @@ export async function buildCapitalRoundsContext(
   let result;
   try {
     result = await pb.collection('capital_rounds').getList(1, limit, {
-      filter: `startup = "${startupId}" && tenant = "${tenantId}"`,
+      filter: `startup = "${escFilter(startupId)}" && tenant = "${escFilter(tenantId)}"`,
       sort: '-received_at'
     });
   } catch {
@@ -469,7 +470,7 @@ export async function buildDeMinimisSupportContext(
   let result;
   try {
     result = await pb.collection('de_minimis_stod').getList(1, limit, {
-      filter: `startup = "${startupId}" && tenant = "${tenantId}"`,
+      filter: `startup = "${escFilter(startupId)}" && tenant = "${escFilter(tenantId)}"`,
       sort: '-beslutsdatum'
     });
   } catch {
@@ -504,7 +505,7 @@ export async function buildIPRContext(
   let result;
   try {
     result = await pb.collection('intellectual_property').getList(1, limit, {
-      filter: `startup = "${startupId}" && tenant = "${tenantId}"`,
+      filter: `startup = "${escFilter(startupId)}" && tenant = "${escFilter(tenantId)}"`,
       sort: '-filed_at'
     });
   } catch {
@@ -536,7 +537,7 @@ export async function buildKPIsContext(
   let result;
   try {
     result = await pb.collection('startup_kpis').getList(1, limit, {
-      filter: `startup = "${startupId}" && tenant = "${tenantId}" && is_current = true`,
+      filter: `startup = "${escFilter(startupId)}" && tenant = "${escFilter(tenantId)}" && is_current = true`,
       sort: '-measured_at'
     });
   } catch {
@@ -567,7 +568,7 @@ export async function buildPortfolioContext(
   tenantId: string
 ): Promise<PortfolioContext> {
   const result = await pb.collection('startups').getList(1, 200, {
-    filter: `tenant = "${tenantId}" && status = "active"`
+    filter: `tenant = "${escFilter(tenantId)}" && status = "active"`
   });
 
   const portfolio: StartupPortfolioEntry[] = result.items.map((s) => {
