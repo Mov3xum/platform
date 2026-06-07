@@ -565,10 +565,21 @@ tenantens `ai_usage_events.cost_estimate_usd` för innevarande kalendermånad
 (60 s-cache, paginerings-tak, fail-open) och kastar `AiBudgetExceededError`
 när taket nås. Enforce:as vid starten av den delade `runAgentLoop` (täcker
 dashboardchatt, toolbox, schemalagt, triggers, djupjobb-subtasks) **och** i
-connector-turn:en. Aktiveras via `MOVEXUM_MONTHLY_AI_BUDGET_USD` (Coolify env,
-aldrig i kod). **Opt-in:** osatt/0 = spärren av, så en felkonfiguration aldrig
-tyst bryter en kunds chatt mitt i månaden — sätt env:en för att få ett tak.
-Robusthet enligt EU AI Act art. 15 / SOC 2 processing integrity (§ 10).
+connector-turn:en. Robusthet enligt EU AI Act art. 15 / SOC 2 processing
+integrity (§ 10).
+
+**Två nivåer för taket** (`effectiveBudgetUsd`, enhetstestad):
+- **Global default:** env `MOVEXUM_MONTHLY_AI_BUDGET_USD` (Coolify, aldrig i
+  kod). Osatt/0 = av.
+- **Per-tenant override:** `tenants.monthly_ai_budget_usd` (migration
+  1700000122), justeras av admin/incubator_lead i **`/installningar` → "AI-
+  kostnadstak"** (server action `saveAiBudgetAction`). Värde > 0 överstyr env-
+  defaulten; 0/tomt ärver den. UI:t visar förbrukat-hittills via
+  `getBudgetStatus` (gul ≥ 80 %, orange ≥ 95 % — ingen röd, § 2.3).
+
+**Opt-in:** med både env osatt OCH tenant-fältet 0 är spärren av, så en
+felkonfiguration aldrig tyst bryter en kunds chatt mitt i månaden — sätt env:en
+eller tenant-taket för att aktivera.
 
 ### 9.7 Bannrar och varningstexter
 

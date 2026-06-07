@@ -9,6 +9,8 @@ import { RailSection, RailItem, RailStat, RailNote } from '@/components/PageRail
 import { AdminToggles, type ModuleToggleItem } from './AdminToggles';
 import { UserModuleToggles } from './UserModuleToggles';
 import { TenantLogoUpload } from './TenantLogoUpload';
+import { AiBudgetForm } from './AiBudgetForm';
+import { getBudgetStatus } from '@/lib/ai/budget.server';
 import { getInfraHealth, healthStateLabel, type HealthState } from '@/lib/health';
 
 interface TenantRecord {
@@ -109,6 +111,9 @@ export default async function InstallningarPage() {
   } catch {
     // Om fältet ännu inte finns eller annan fel — visa alla moduler
   }
+
+  // ── AI-kostnadstak (tak + förbrukning denna månad) ───────────
+  const budgetStatus = await getBudgetStatus(pb, user.tenant);
 
   // Filtrera bort legacy/dolda moduler som inte ska hanteras manuellt
   const HIDDEN_MODULE_IDS = ['dashboard', 'toolbox', 'onboarding', 'activity_feed', 'partners'];
@@ -241,6 +246,25 @@ export default async function InstallningarPage() {
             </p>
           </div>
           <AdminToggles modules={moduleItems} />
+        </section>
+
+        {/* ── AI-kostnadstak ───────────────────────────────────── */}
+        <section className="rounded-2xl border border-default bg-surface p-5">
+          <div className="mb-4">
+            <h2 className="font-heading text-[15px] font-semibold text-foreground">
+              AI-kostnadstak
+            </h2>
+            <p className="text-[12.5px] text-foreground-muted">
+              Maximal AI-kostnad per kalendermånad för denna tenant. När taket nås
+              pausas nya AI-körningar till nästa månad.
+            </p>
+          </div>
+          <AiBudgetForm
+            tenantBudgetUsd={budgetStatus.tenantBudgetUsd}
+            envDefaultUsd={budgetStatus.envDefaultUsd}
+            effectiveUsd={budgetStatus.effectiveUsd}
+            spentUsd={budgetStatus.spentUsd}
+          />
         </section>
 
         {isAdmin && (
