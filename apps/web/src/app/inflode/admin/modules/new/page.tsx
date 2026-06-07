@@ -7,11 +7,28 @@ import { createModuleAction } from '@/lib/actions/compass';
 
 export const dynamic = 'force-dynamic';
 
-export default async function NewModulePage() {
+const ERROR_TEXT: Record<string, string> = {
+  slug_invalid: 'Slug kunde inte genereras. Ange ett tydligare namn eller slug.',
+  public_slug_taken: 'Publik slug är upptagen. Prova en annan publik länk.',
+  collections_missing:
+    'Startupkompassen-kollektioner saknas i PocketBase. Kör migrationer/redeploy av PocketBase och försök igen.',
+  forbidden: 'Du saknar behörighet att skapa moduler i den här tenanten.',
+  create_failed: 'Kunde inte skapa modul. Försök igen eller kontrollera serverloggarna.'
+};
+
+export default async function NewModulePage({
+  searchParams
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
     redirect('/inflode');
   }
+  const params = searchParams ? await searchParams : {};
+  const errorKeyRaw = params.error;
+  const errorKey = Array.isArray(errorKeyRaw) ? errorKeyRaw[0] : errorKeyRaw;
+  const errorText = errorKey ? ERROR_TEXT[errorKey] || ERROR_TEXT.create_failed : null;
 
   return (
     <div className="mx-view-pad mx-narrow">
@@ -28,6 +45,22 @@ export default async function NewModulePage() {
 
       <Card>
         <CardHead label="Ny modul" />
+        {errorText && (
+          <div
+            role="alert"
+            style={{
+              margin: '12px 16px 0',
+              padding: '10px 12px',
+              borderRadius: 10,
+              border: '1px solid var(--mx-movexum-morkorange)',
+              background: 'var(--mx-movexum-pastell-orange)',
+              color: 'var(--mx-movexum-morkorange)'
+            }}
+            className="mx-t-13"
+          >
+            {errorText}
+          </div>
+        )}
         <form
           action={createModuleAction}
           style={{ padding: 16, display: 'grid', gap: 14 }}

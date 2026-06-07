@@ -417,6 +417,14 @@ function slugify(s: string): string {
     .slice(0, 60);
 }
 
+function toErrorCode(err: unknown): string {
+  const msg = (err instanceof Error ? err.message : String(err || '')).toLowerCase();
+  if (/public_slug|unique|upptagen/.test(msg)) return 'public_slug_taken';
+  if (/missing.+collection|not found|404/.test(msg)) return 'collections_missing';
+  if (/forbidden|401|403/.test(msg)) return 'forbidden';
+  return 'create_failed';
+}
+
 export async function createModuleAction(formData: FormData) {
   const user = await requireUser();
   if (!hasRole(user.roles, [...MANAGE_ROLES])) {
@@ -435,7 +443,9 @@ export async function createModuleAction(formData: FormData) {
   }
 
   const slug = slugify(slugRaw || name);
-  if (!slug) throw new Error('Slug kunde inte genereras');
+  if (!slug) {
+    redirect('/inflode/admin/modules/new?error=slug_invalid');
+  }
   const publicSlugRaw = slugify(String(formData.get('public_slug') || '') || slug);
 
   const pb = await getServerPb();
@@ -467,8 +477,8 @@ export async function createModuleAction(formData: FormData) {
     }
     createdSlug = rec.slug;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Okänt fel';
-    throw new Error(`Kunde inte skapa modul: ${msg}`);
+    const code = toErrorCode(err);
+    redirect(`/inflode/admin/modules/new?error=${code}`);
   }
 
   await logSecurity(pb, user.tenant, {
