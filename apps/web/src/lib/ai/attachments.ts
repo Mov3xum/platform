@@ -65,6 +65,45 @@ export async function extractPdfText(buffer: Buffer): Promise<string> {
   return result.text ?? '';
 }
 
+/** Extraherar läsbar text ur en DOCX-buffer (`word/document.xml`). */
+export async function extractDocxText(buffer: Buffer): Promise<string> {
+  const { readZipMap, extractEntry } = await import('@/lib/import/zip');
+  const { docxXmlToText } = await import('@/lib/import/ooxml-text');
+  const byName = readZipMap(buffer);
+  const entry = byName.get('word/document.xml');
+  if (!entry) throw new Error('DOCX saknar word/document.xml.');
+  return docxXmlToText(extractEntry(buffer, entry).toString('utf8'));
+}
+
+/**
+ * Extraherar läsbar text ur en PPTX-buffer. Slides ligger i
+ * `ppt/slides/slideN.xml` — vi tar dem i numerisk ordning och separerar varje
+ * slide med en rubrikrad så strukturen bevaras för retrieval.
+ */
+export async function extractPptxText(buffer: Buffer): Promise<string> {
+  const { readZipMap, extractEntry } = await import('@/lib/import/zip');
+  const { pptxSlideXmlToText } = await import('@/lib/import/ooxml-text');
+  const byName = readZipMap(buffer);
+  const slideRe = /^ppt\/slides\/slide(\d+)\.xml$/;
+  const slides = [...byName.keys()]
+    .map((name) => {
+      const m = slideRe.exec(name);
+      return m ? { name, n: parseInt(m[1], 10) } : null;
+    })
+    .filter((s): s is { name: string; n: number } => s !== null)
+    .sort((a, b) => a.n - b.n);
+  if (slides.length === 0) throw new Error('PPTX saknar slides (ppt/slides/slideN.xml).');
+
+  const parts: string[] = [];
+  for (const s of slides) {
+    const entry = byName.get(s.name);
+    if (!entry) continue;
+    const text = pptxSlideXmlToText(extractEntry(buffer, entry).toString('utf8')).trim();
+    if (text) parts.push(`# Slide ${s.n}\n${text}`);
+  }
+  return parts.join('\n\n');
+}
+
 /**
  * Konverterar en xlsx-buffer till en kompakt TSV-liknande textrepresentation
  * (en sektion per sheet, kolumner sorterade A→Z→AA→AB). Tomma efter-rader

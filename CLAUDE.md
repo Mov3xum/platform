@@ -2826,7 +2826,7 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
 ### 26.2 Datamodell
 
 - **`org_knowledge`** (1700000118): `tenant`, `title`, `filename`, `mime`,
-  `size_bytes`, `file` (25 MB; PDF/text/Markdown/CSV/Excel), `extracted_text`
+  `size_bytes`, `file` (25 MB; PDF/text/Markdown/CSV/Excel/Word/PowerPoint), `extracted_text`
   (sanerad, cappad ~300 KB), `char_count`, `redacted`, `topic` (samma taxonomi
   som § 24), `indexed`, `chunk_count`, `source_ref` (reserverat för
   SharePoint-sync), `created_by`.
@@ -2927,8 +2927,11 @@ faller fortfarande uppåt vid 429 och har small som sista utväg. Används av b�
   chunk vid indexering) — index-time-kostnad, egen PR med reindex.
 - **Parent-document / small-to-big** (returnera grannchunkars kontext) — avvägs
   mot prompt-storlekstaket (`MAX_TOOL_RESULT_CHARS`).
-- **PPTX/DOCX-textextraktion** — exportera presentationer/Word till PDF tills den
-  dependency-fria OOXML-extraktorn (återanvänder XLSX-zip-kärnan) är på plats.
+- **PPTX/DOCX-textextraktion** — KLAR. Dependency-fri OOXML-extraktion via den
+  delade `lib/import/zip.ts` (ZIP-kärnan, delas med XLSX) + `lib/import/ooxml-text.ts`
+  (ren, enhetstestad XML→text) i `lib/ai/attachments.ts`
+  (`extractDocxText`/`extractPptxText`). `org_knowledge.file`-whitelisten vidgad i
+  migration 1700000122; `user_files` accepterade redan typerna (1700000085).
 - **pgvector/vektortjänst** när en tenant passerar några tusen chunkar — JS-
   cosine + paginerat svep räcker tills dess; `searchSource`-seamen är oförändrad
   så bytet blir drop-in.
@@ -3006,9 +3009,10 @@ når deras egna filer, via verktyget `search_my_files`.
 
 ### 27.5 Begränsningar (MVP)
 
-- **PPTX/DOCX/bild** extraheras inte — exportera till PDF (samma gräns som § 26.5).
+- **PDF/Excel/Word/PowerPoint/text** extraheras (PPTX/DOCX via den dependency-fria
+  OOXML-extraktorn, § 26.5). **Bilder** extraheras inte (ingen OCR).
 - **Agent-genererade dokument** (PPTX/XLSX/DOCX/PDF i `user_files`) indexeras inte
-  automatiskt vid skapande; kör "Gör sökbara i chatten" för att indexera de
-  extraherbara (PDF/Excel) i efterhand.
+  automatiskt vid skapande; kör "Gör sökbara i chatten" för att indexera dem
+  (alla extraherbara format) i efterhand.
 - **Cosine i JS** över ägarens chunkar räcker gott för ett personligt arkiv;
   samma skalningsväg som § 26.5 vid behov.

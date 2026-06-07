@@ -1361,7 +1361,7 @@ async function runSearchMyFiles(
       ok: true,
       data: {
         matched: 0,
-        note: 'Inget relevant hittades bland dina uppladdade filer. Filen kan vara ej indexerad (t.ex. PowerPoint/Word — exportera till PDF) eller så saknas materialet.'
+        note: 'Inget relevant hittades bland dina uppladdade filer. Filen kan vara ej indexerad än (kör "Gör sökbara i chatten" på /filer) eller så saknas materialet.'
       }
     };
   }
