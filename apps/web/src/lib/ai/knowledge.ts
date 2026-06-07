@@ -47,7 +47,14 @@ export interface ExtractedKnowledge {
  * till per-turn-attachments). Kastar KnowledgeError vid valideringsfel eller
  * om filen inte ger någon text.
  */
-export async function extractKnowledgeFromFile(file: File): Promise<ExtractedKnowledge> {
+export async function extractKnowledgeFromFile(
+  file: File,
+  options: { maxTextBytes?: number } = {}
+): Promise<ExtractedKnowledge> {
+  // Per-agent kunskapsbas (tool_knowledge) injicerar hela texten i prompten och
+  // håller sig snål (50 KB). Den tenant-breda kunskapsbasen (org_knowledge, §26)
+  // chunkar + embeddar i stället, så den får extrahera mer text per fil.
+  const maxTextBytes = options.maxTextBytes ?? MAX_TEXT_BYTES;
   const mime = file.type || 'application/octet-stream';
   if (!ALLOWED_MIME_TYPES.has(mime)) {
     throw new KnowledgeError(
@@ -90,7 +97,7 @@ export async function extractKnowledgeFromFile(file: File): Promise<ExtractedKno
 
   const sanitized = sanitizePersonnummer(trimmed);
   const redacted = sanitized !== trimmed;
-  const text = truncateUtf8(sanitized, MAX_TEXT_BYTES);
+  const text = truncateUtf8(sanitized, maxTextBytes);
 
   return {
     text,

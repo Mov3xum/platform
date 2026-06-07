@@ -4,6 +4,8 @@ import { getServerPbUrl } from '@/lib/pb-url';
 import { categorizeFile, type StartupOption } from '@/lib/ai/file-categorize';
 import { extractPdfText, extractXlsxText } from '@/lib/ai/attachments';
 import { logAiUsage } from '@/lib/ai/usage';
+import { indexUserFile } from '@/lib/ai/rag';
+import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import {
   isFileTopic,
   resolveFileTopic,
@@ -18,6 +20,12 @@ export const dynamic = 'force-dynamic';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_FILENAME = 255;
+const MAX_INDEX_PER_RUN = 40;
+const RAG_MAX_TEXT_CHARS = 300_000;
+const EXTRACTABLE_FILTER =
+  '(doc_kind = "pdf" || doc_kind = "xlsx" || mime = "application/pdf" || ' +
+  'mime ~ "spreadsheetml" || mime = "application/vnd.ms-excel" || ' +
+  'mime = "text/plain" || mime = "text/markdown" || mime = "text/csv")';
 
 const UPLOAD_MIME_KIND: Record<string, UserFileDocKind> = {
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
@@ -88,7 +96,7 @@ async function listStartupOptions(pb: Awaited<ReturnType<typeof getServerPb>>, t
   }
 }
 
-async function extractTextSnippet(pb: Awaited<ReturnType<typeof getServerPb>>, rec: UserFile): Promise<string | undefined> {
+async function extractTextSnippet(pb: Awaited<ReturnType<typeof getServerPb>>, rec: UserFile, maxChars = 6000): Promise<string | undefined> {
   if (!rec.file) return undefined;
   const mime = (rec.mime || '').toLowerCase();
   const isPdf = mime === 'application/pdf' || rec.doc_kind === 'pdf';
@@ -106,9 +114,45 @@ async function extractTextSnippet(pb: Awaited<ReturnType<typeof getServerPb>>, r
     if (isPdf) text = await extractPdfText(buf);
     else if (isXlsx) text = await extractXlsxText(buf);
     else text = buf.toString('utf8');
-    return text.slice(0, 6000).trim() || undefined;
+    return text.slice(0, maxChars).trim() || undefined;
   } catch {
     return undefined;
+  }
+}
+
+async function extractAndIndexFile(
+  pb: Awaited<ReturnType<typeof getServerPb>>,
+  tenant: string,
+  ownerId: string,
+  rec: UserFile
+): Promise<number> {
+  if (rec.owner !== ownerId || rec.tenant !== tenant) return 0;
+  const raw = await extractTextSnippet(pb, rec, RAG_MAX_TEXT_CHARS);
+  if (!raw) {
+    await pb.collection('user_files').update(rec.id, { indexed: false, chunk_count: 0 }).catch(() => {});
+    return 0;
+  }
+  const text = sanitizePersonnummer(raw);
+  try {
+    await pb.collection('user_files').update(rec.id, { extracted_text: text });
+  } catch {
+    /* fail-soft */
+  }
+  try {
+    const idx = await indexUserFile(pb, { tenant, owner: ownerId, sourceId: rec.id, text });
+    if (idx.usage.tokensIn > 0) {
+      void logAiUsage(pb, {
+        tenant,
+        userId: ownerId,
+        surface: 'suggestions',
+        model: 'mistral-embed',
+        tokensIn: idx.usage.tokensIn,
+        tokensOut: idx.usage.tokensOut
+      });
+    }
+    return idx.chunkCount;
+  } catch {
+    return 0;
   }
 }
 
@@ -312,6 +356,31 @@ export async function POST(req: Request) {
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : 'Kunde inte radera filen.' }, { status: 500 });
     }
+  }
+
+  if (action === 'index-my-files') {
+    let pending: UserFile[];
+    try {
+      const res = await pb.collection('user_files').getList(1, MAX_INDEX_PER_RUN, {
+        filter: pb.filter(
+          `owner = {:o} && tenant = {:t} && indexed != true && ${EXTRACTABLE_FILTER}`,
+          { o: user.id, t: user.tenant }
+        ),
+        sort: '-created'
+      });
+      pending = res.items as unknown as UserFile[];
+    } catch {
+      return NextResponse.json({ error: 'Kunde inte läsa filer.' }, { status: 500 });
+    }
+
+    let indexed = 0;
+    let skipped = 0;
+    for (const rec of pending) {
+      const chunks = await extractAndIndexFile(pb, user.tenant, user.id, rec as unknown as UserFile);
+      if (chunks > 0) indexed += 1;
+      else skipped += 1;
+    }
+    return NextResponse.json({ ok: true, indexed, skipped });
   }
 
   return NextResponse.json({ error: 'Okänd åtgärd.' }, { status: 400 });

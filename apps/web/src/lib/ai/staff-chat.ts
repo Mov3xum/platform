@@ -6,7 +6,7 @@ import { buildChatTools } from './tools';
 import { buildSchemaSummary, getExposedCollections } from './schema';
 import { buildPortfolioContext, renderPromptTemplate } from './context';
 import { buildKnowledgeContext } from './agent-prompt';
-import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from './guidance';
+import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY, KNOWLEDGE_GUIDANCE } from './guidance';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from './web';
 import { withAttachedImages } from './chat-input';
 import { logAiUsage } from './usage';
@@ -355,6 +355,7 @@ export async function runStaffChatTurn(
     (opts.agentBlock ? `\n\n---\n${opts.agentBlock}\n---` : '') +
     STAFF_TOOL_GUIDANCE +
     SEARCH_STRATEGY_GUIDANCE +
+    KNOWLEDGE_GUIDANCE +
     DOMAIN_GLOSSARY +
     `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +
     (opts.webBlock ? `\n\n---\n${opts.webBlock}\n---` : '') +

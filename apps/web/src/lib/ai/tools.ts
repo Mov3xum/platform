@@ -9,6 +9,8 @@ import {
 } from './schema';
 import { rankCandidates, significantTokens } from './fuzzy';
 import type { MistralToolCall, MistralToolDefinition } from './mistral';
+import { searchOrgKnowledge, searchUserFiles, renderKnowledgeHits } from './rag';
+import { logAiUsage } from './usage';
 import { escFilter } from '@/lib/pb-filter';
 import type { GeneratedFileRef } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
@@ -331,8 +333,77 @@ export function buildChatTools(
           required: ['collection', 'op']
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'search_knowledge',
+        description:
+          'Söker i organisationens KUNSKAPSBAS — uppladdat Movexum-material som ' +
+          'processbeskrivningar, mallar, policys, rapporter och presentationer ' +
+          '(dokument, inte databasrader). Använd detta när användaren frågar om ' +
+          'HUR Movexum arbetar, om interna rutiner/processer, om vad som står i ' +
+          'ett uppladdat dokument, eller för bakgrund som inte finns i ' +
+          'databastabellerna. Kombinera gärna med query_collection: kunskapsbasen ' +
+          'ger kontext/process, databasen ger aktuella siffror. Returnerar de mest ' +
+          'relevanta textstyckena med källa. Tenant-scope läggs på automatiskt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description:
+                'Det du vill veta, med användarens egna ord. T.ex. "vår ' +
+                'antagningsprocess för boost chamber" eller "mall för kvartalsrapport".'
+            },
+            limit: {
+              type: 'integer',
+              description: 'Max antal textstycken att hämta (1-12, default 6).',
+              minimum: 1,
+              maximum: 12
+            }
+          },
+          required: ['query']
+        }
+      }
     }
   ];
+
+  // Personliga filer (§ 27) — söker i ÄGARENS egna /filer-uppladdningar. Bara i
+  // den interaktiva chatten (agent-actor = den inloggade användaren); read-only.
+  // Scope:as till actor.id i dispatchern så ingen kan läsa andras filer.
+  // Exponeras alltså aldrig i icke-staff-körningar utan inloggad ägare.
+  if (options.actor?.kind === 'agent') {
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'search_my_files',
+        description:
+          'Söker i ANVÄNDARENS EGNA uppladdade filer i den personliga Filer-ytan ' +
+          '(PDF, Excel, text, CSV m.m. som användaren själv laddat upp). Använd när ' +
+          'användaren refererar till "mina filer", "dokumentet jag laddade upp", en ' +
+          'rapport/fil de äger, eller vill att du kör mot eget material. Bara den ' +
+          'inloggade användarens egna filer nås — aldrig andras. Returnerar de mest ' +
+          'relevanta textstyckena med filnamn.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Det du vill veta, med användarens egna ord.'
+            },
+            limit: {
+              type: 'integer',
+              description: 'Max antal textstycken att hämta (1-12, default 6).',
+              minimum: 1,
+              maximum: 12
+            }
+          },
+          required: ['query']
+        }
+      }
+    });
+  }
 
   // Skrivverktyg — bara för agenter, och bara när includeWrites inte är
   // explicit false (autonoma djupa jobb stänger av domänskrivning men
@@ -666,6 +737,10 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: `Undersöker ${collectionLabel(coll)}` };
     case 'aggregate_collection':
       return { tool: name, label: `Sammanställer ${collectionLabel(coll)}` };
+    case 'search_knowledge':
+      return { tool: name, label: 'Söker i kunskapsbasen' };
+    case 'search_my_files':
+      return { tool: name, label: 'Söker i dina filer' };
     case 'update_startup_field':
       return { tool: name, label: 'Uppdaterar bolagsuppgift' };
     case 'create_startup_activity':
@@ -1089,6 +1164,126 @@ async function runAggregateCollection(
   }
 }
 
+/**
+ * Söker i den tenant-breda kunskapsbasen (org_knowledge, § 26) via RAG. Read-
+ * only och tenant-scopad. Loggar query-embeddingens token-utfall i
+ * ai_usage_events (surface 'suggestions') när en actor-id finns. Kunskapsbasen
+ * är denylistad för query_collection — detta är dess ENDA väg till modellen.
+ */
+async function runSearchKnowledge(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const query = typeof args.query === 'string' ? args.query.trim() : '';
+  if (!query) return { ok: false, error: 'query saknas.' };
+  let limit: number | undefined;
+  if (typeof args.limit === 'number' && Number.isFinite(args.limit)) {
+    limit = Math.max(1, Math.min(12, Math.floor(args.limit)));
+  }
+
+  let result;
+  try {
+    result = await searchOrgKnowledge(ctx.pb, { tenant: ctx.tenantId, query, topK: limit });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Kunde inte söka i kunskapsbasen.' };
+  }
+
+  if (ctx.actor?.id && (result.usage.tokensIn > 0 || result.usage.tokensOut > 0)) {
+    void logAiUsage(ctx.pb, {
+      tenant: ctx.tenantId,
+      userId: ctx.actor.id,
+      surface: 'suggestions',
+      model: 'mistral-embed',
+      tokensIn: result.usage.tokensIn,
+      tokensOut: result.usage.tokensOut
+    });
+  }
+
+  if (result.hits.length === 0) {
+    return {
+      ok: true,
+      data: {
+        matched: 0,
+        note: 'Inget relevant hittades i kunskapsbasen. Svara utifrån databasen om möjligt, annars säg att underlag saknas.'
+      }
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      matched: result.hits.length,
+      mode: result.mode,
+      sources: [...new Set(result.hits.map((h) => h.title))],
+      material: renderKnowledgeHits(result.hits)
+    }
+  };
+}
+
+/**
+ * Söker i ÄGARENS egna personliga filer (user_files, § 27) via RAG. Owner-scopad
+ * till den inloggade användaren (ctx.actor.id) — kan ALDRIG läsa andras filer.
+ * Bara agent-actor (interaktiv chatt) når hit; saknas en agent-actor returneras
+ * ett tydligt fel i stället för data. Loggar query-embeddingen i ai_usage_events.
+ */
+async function runSearchMyFiles(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  if (!ctx.actor || ctx.actor.kind !== 'agent' || !ctx.actor.id) {
+    return { ok: false, error: 'Personliga filer kan bara sökas i en inloggad användares egen chatt.' };
+  }
+  const query = typeof args.query === 'string' ? args.query.trim() : '';
+  if (!query) return { ok: false, error: 'query saknas.' };
+  let limit: number | undefined;
+  if (typeof args.limit === 'number' && Number.isFinite(args.limit)) {
+    limit = Math.max(1, Math.min(12, Math.floor(args.limit)));
+  }
+
+  let result;
+  try {
+    result = await searchUserFiles(ctx.pb, {
+      tenant: ctx.tenantId,
+      owner: ctx.actor.id,
+      query,
+      topK: limit
+    });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Kunde inte söka i dina filer.' };
+  }
+
+  if (result.usage.tokensIn > 0 || result.usage.tokensOut > 0) {
+    void logAiUsage(ctx.pb, {
+      tenant: ctx.tenantId,
+      userId: ctx.actor.id,
+      surface: 'suggestions',
+      model: 'mistral-embed',
+      tokensIn: result.usage.tokensIn,
+      tokensOut: result.usage.tokensOut
+    });
+  }
+
+  if (result.hits.length === 0) {
+    return {
+      ok: true,
+      data: {
+        matched: 0,
+        note: 'Inget relevant hittades bland dina uppladdade filer. Filen kan vara ej indexerad (t.ex. PowerPoint/Word — exportera till PDF) eller så saknas materialet.'
+      }
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      matched: result.hits.length,
+      mode: result.mode,
+      sources: [...new Set(result.hits.map((h) => h.title))],
+      material: renderKnowledgeHits(result.hits)
+    }
+  };
+}
+
 export async function dispatchToolCall(
   call: MistralToolCall,
   ctx: ToolDispatchContext
@@ -1111,6 +1306,10 @@ export async function dispatchToolCall(
       return runDescribeCollection(args, ctx);
     case 'aggregate_collection':
       return runAggregateCollection(args, ctx);
+    case 'search_knowledge':
+      return runSearchKnowledge(args, ctx);
+    case 'search_my_files':
+      return runSearchMyFiles(args, ctx);
     case 'update_startup_field':
       return runUpdateStartupField(args, ctx);
     case 'create_startup_activity':

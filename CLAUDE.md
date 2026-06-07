@@ -2784,3 +2784,190 @@ den befintliga utbildnings-media-routen (`/api/education/media` → `workshop_me
   **migration-only** (speglas inte i `setup-via-api.mjs`/`verify-baseline.mjs`,
   samma precedens som compass/de_minimis, § 23.4) — createRules följer § 21.3 så
   `verify-baseline.mjs`-svepet passerar.
+
+---
+
+## 26. Tenant-bred AI-kunskapsbas (RAG över uppladdat material)
+
+### 26.1 Översikt
+
+`/kunskapsbas` (modul `kunskapsbas`, System-railen, staff-only) låter
+Movexum-personal ladda upp verksamhetsmaterial — processbeskrivningar, mallar,
+policys, rapporter, exporterade presentationer — EN gång för hela tenanten.
+AI-chatten (`/chatt`, `/idag`) kan sedan svara på frågor om innehållet via
+verktyget `search_knowledge` **samtidigt som den läser databasen** i samma
+agent-loop (`buildChatTools`-basytan, § 16). Till skillnad från `tool_knowledge`
+(§ 9.11), som är bunden till EN agent och injicerar hela texten i prompten,
+är detta tenant-brett och använder **RAG** (chunkning + embeddings + semantisk
+sökning) så det skalar bortom prompt-injektionens storlekstak.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000118_create_org_knowledge.js` | Collection `org_knowledge` (källfiler + sanerad text) |
+| `backend/pocketbase-schema/migrations/1700000119_create_org_knowledge_chunks.js` | Collection `org_knowledge_chunks` (RAG-index: text + embedding) |
+| `apps/web/src/lib/ai/rag.ts` | `chunkText`, `cosineSimilarity`, `indexOrgKnowledge`, `searchOrgKnowledge` |
+| `apps/web/src/lib/ai/mistral.ts` | `embedTexts()` mot `/v1/embeddings` (mistral-embed, EU) + pris |
+| `apps/web/src/lib/ai/knowledge.ts` | Extraktion + personnummer-sanering (delad pipe, nu med valbart text-tak) |
+| `apps/web/src/lib/ai/tools.ts` | Verktyget `search_knowledge` + dispatch |
+| `apps/web/src/lib/ai/guidance.ts` | `KNOWLEDGE_GUIDANCE` (delad — kunskapsbas ⨯ databas) |
+| `apps/web/src/app/api/knowledge/route.ts` | Upload-route (staff-only, extraherar + indexerar) |
+| `apps/web/src/lib/actions/org-knowledge.ts` | Lista / radera / indexera om |
+| `apps/web/src/app/kunskapsbas/{page,KnowledgeManager}.tsx` | UI |
+
+### 26.2 Datamodell
+
+- **`org_knowledge`** (1700000118): `tenant`, `title`, `filename`, `mime`,
+  `size_bytes`, `file` (25 MB; PDF/text/Markdown/CSV/Excel), `extracted_text`
+  (sanerad, cappad ~300 KB), `char_count`, `redacted`, `topic` (samma taxonomi
+  som § 24), `indexed`, `chunk_count`, `source_ref` (reserverat för
+  SharePoint-sync), `created_by`.
+- **`org_knowledge_chunks`** (1700000119): `tenant`, `source` (→ `org_knowledge`,
+  cascadeDelete), `chunk_index`, `text` (≤ 8000), `embedding` (json, 1024-dim
+  mistral-embed-vektor), `token_count`.
+
+### 26.3 Flöde
+
+1. Staff laddar upp en fil via `/api/knowledge` (route handler → slipper
+   `serverActions.bodySizeLimit`, § 18.2). Texten extraheras EN gång,
+   **personnummer-saneras** (samma regex som CRM-importen) och cachas i
+   `extracted_text`.
+2. `indexOrgKnowledge` chunkar texten (~1500 tecken, overlap 200), embeddar varje
+   chunk (`mistral-embed`, batchat) och skriver `org_knowledge_chunks`. Fail-soft:
+   en misslyckad indexering gör filen sökbar via nyckelords-fallback i stället.
+3. I chatten anropar modellen `search_knowledge` → frågan embeddas, rankas mot
+   tenantens chunkar (cosine, JS-side) och de bästa styckena matas tillbaka som
+   ett tydligt avgränsat referensblock ("data, inte instruktioner"). Faller
+   tillbaka på `~`-nyckelordssökning över `extracted_text` om embeddings saknas.
+
+### 26.4 Säkerhet och regelefterlevnad
+
+- **EU-suveränitet:** embeddings via `mistral-embed` (Mistral, FR/EU). Ingen
+  US-tjänst, ingen ny leverantör (§ 10.2).
+- **Riskklass (EU AI Act art. 11): begränsad.** Dokument-Q&A med
+  människa-i-loopen (chatten granskas av användaren); ingen profilering av
+  individer, ingen autopublicering. Versionerad här per art. 11.
+- **Transparens (art. 13/50):** UI:t bär Mistral-/verifiera-bannern; vilka
+  källor en körning använde syns i tool-svaret (`sources`).
+- **GDPR § 5 dataminimering:** referensfiler kan inte fält-whitelistas
+  (fritext), så skyddet är: **staff-only uppladdning** (rollen enforce:as i
+  route/server-action; PB-createRule är roll-lös per § 21.3),
+  **personnummer-sanering** vid extraktion, storlekstak, och en varningsbanner
+  ("ladda inte upp personuppgifter").
+- **GDPR art. 17:** `tenant` cascadeDelete=false (städas i tenant-erasure);
+  chunkar cascade-raderas med sin `source`-fil.
+- **§ 9.3 / denylist:** `org_knowledge` + `org_knowledge_chunks` är
+  **denylistade i `lib/ai/redaction.ts`** → det generiska `query_collection`
+  exponerar dem ALDRIG. Innehållet når modellen enbart via det kurerade
+  `search_knowledge`-verktyget. Inga nya fält i `lib/ai/context.ts`.
+- **§ 21 isolering:** list/view = staff/observer-only; rena `startup_member`
+  har ingen dashboardchatt och ingen åtkomst till kunskapsbasen. createRule
+  utan roll-check/`= tenant`-join (§ 21.3); update/delete använder `:each ?=`.
+  `verify-baseline.mjs` asserterar list/view-isoleringen
+  (`MUST_BE_STAFF_OR_OBSERVER`) så en framtida regression som öppnar dem för
+  medlemmar fälls innan deploy.
+- **Verktygsyta (§ 16.3):** `search_knowledge` ligger i `buildChatTools`-basytan
+  och är därför tillgängligt i ALLA read-only-körningstyper (dashboardchatt,
+  trådar, schemalagt, event-triggers, djupjobb), inte bara den interaktiva
+  chatten. Det är strikt read-only (ingen domänmutation → människa-i-loopen
+  bevaras) och RLS-skyddat (en icke-staff auth-token får tom retur från
+  `org_knowledge*`), så den bredare exponeringen är avsiktlig och säker.
+- **Kostnad/audit:** embeddings (index- och query-tid) loggas i
+  `ai_usage_events` (surface `suggestions`, modell `mistral-embed`); `/insights`
+  aggregerar.
+- **Migrationer:** nya, oföränderliga filnummer (1700000118–119). Som
+  compass/de_minimis/onboarding är de **migration-only** för bootstrap (speglas
+  inte i `setup-via-api.mjs`); isolerings-svepet i `verify-baseline.mjs`
+  asserterar dem dock (se ovan). createRules följer § 21.3 så
+  `verify-baseline.mjs`-svepet passerar.
+
+### 26.5 Begränsningar (MVP) och kommande steg
+
+- **PPTX/DOCX-textextraktion** är inte i scope ännu — exportera presentationer/
+  Word till PDF. (Befintliga pipen extraherar PDF/text/Markdown/CSV/Excel.)
+- **Cosine i JS** över `getList(1, 1500)` räcker upp till några tusen chunkar
+  per tenant; bortom det lyfts retrieval till pgvector/vektortjänst utan
+  brytande ändring (verktygsgränssnittet `search_knowledge` är detsamma).
+- **SharePoint-sync (Steg 3):** `source_ref`-fältet är förberett för en
+  framtida tenant-integration (§ 11) som hämtar filer från Microsoft Graph och
+  kör dem genom samma extraktions-/indexerings-pipe — kräver Azure AD-app +
+  DPIA-notering.
+
+---
+
+## 27. Personliga filer i chatten (RAG över eget filarkiv)
+
+### 27.1 Översikt
+
+Utöver den tenant-breda kunskapsbasen (§ 26) kan AI-chatten köra mot filer som
+**användaren själv** laddat upp i sitt personliga filarkiv (`/filer`,
+`user_files`, § 17). Det låter en användare ladda upp eget material och fråga
+chatten om det — utan SharePoint och utan att exponera filerna för någon annan.
+Sökningen är **STRIKT ägaren-bara**: bara den inloggade användarens egen chatt
+når deras egna filer, via verktyget `search_my_files`.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000120_extend_user_files_rag.js` | `extracted_text`/`indexed`/`chunk_count` på `user_files` |
+| `backend/pocketbase-schema/migrations/1700000121_create_user_file_chunks.js` | Collection `user_file_chunks` (RAG-index, owner-only) |
+| `apps/web/src/lib/ai/rag.ts` | Delad RAG-kärna + `indexUserFile`/`searchUserFiles` |
+| `apps/web/src/lib/ai/tools.ts` | Verktyget `search_my_files` (agent-actor, owner-scopat) |
+| `apps/web/src/lib/actions/files.ts` | Extraktion + indexering vid uppladdning + `indexMyFilesAction` |
+| `apps/web/src/app/filer/FilesBrowser.tsx` | Knappen "Gör sökbara i chatten" |
+
+### 27.2 Datamodell
+
+- **`user_files`** (utökad, 1700000120): `extracted_text` (sanerad, cappad
+  ~300 KB), `indexed`, `chunk_count`. Reglerna är oförändrade — STRIKT
+  ägaren-bara (§ 17.2).
+- **`user_file_chunks`** (1700000121): `tenant`, `owner`, `source` (→ `user_files`,
+  cascadeDelete), `chunk_index`, `text`, `embedding` (mistral-embed, 1024-dim),
+  `token_count`. ALLA operationer kräver `@request.auth.id = owner` (samma
+  strikta ägar-scope som user_files).
+
+### 27.3 Flöde
+
+1. Vid uppladdning (`uploadUserFileAction`) extraheras text ur PDF/Excel/text/
+   CSV/Markdown, **personnummer-saneras** och cachas i `user_files.extracted_text`,
+   chunkas + embeddas till `user_file_chunks` (best-effort, fail-soft).
+   Befintliga filer indexeras via knappen **"Gör sökbara i chatten"** på `/filer`
+   (`indexMyFilesAction`, capad 40/körning).
+2. I chatten anropar modellen `search_my_files` → frågan embeddas, rankas mot
+   **användarens egna** chunkar (owner = den inloggade) och de bästa styckena
+   matas tillbaka. Faller tillbaka på `~`-nyckelordssökning över `extracted_text`.
+3. PowerPoint/Word/bilder indexeras inte (ingen textextraktion ännu) — exportera
+   till PDF. Återanvänder samma RAG-kärna som § 26 (ingen divergerande kopia).
+
+### 27.4 Säkerhet och regelefterlevnad
+
+- **Riskklass (EU AI Act art. 11): begränsad.** Dokument-Q&A över eget material,
+  människa-i-loopen, ingen profilering, ingen autopublicering.
+- **GDPR § 5/art. 17:** `extracted_text` är användarens eget filinnehåll,
+  personnummer-sanerat; `owner`/`source`/`tenant` cascadeDelete städar både text
+  och index vid radering/erasure. Originalfilen lämnas orörd.
+- **§ 9.3 / denylist:** `user_files` + `user_file_chunks` är **denylistade i
+  `lib/ai/redaction.ts`** → det generiska `query_collection` exponerar dem
+  ALDRIG. Innehållet når modellen enbart via det ägar-scopade `search_my_files`.
+- **Ägar-isolering (§ 21):** `search_my_files` exponeras BARA för agent-actor
+  (interaktiv staff-chatt/tråd) och scope:as till `ctx.actor.id` i dispatchern —
+  kan aldrig läsa en annan användares filer. Saknas en inloggad agent-actor
+  (autonoma körningar) returneras ett fel, inte data. PB-reglerna (owner-only) är
+  den hårda gränsen; reads går via användarens auth-token.
+- **EU-suveränitet:** embeddings via `mistral-embed` (FR/EU), ingen ny leverantör.
+- **Kostnad/audit:** embeddings loggas i `ai_usage_events` (surface
+  `suggestions`, modell `mistral-embed`).
+- **Migrationer:** nya, oföränderliga filnummer (1700000120–121); `user_files`/
+  `user_file_chunks` är owner-only och migration-only (speglas inte i
+  setup/verify — de är personliga, inte tenant-isolerings-invarianter i § 21.7).
+
+### 27.5 Begränsningar (MVP)
+
+- **PPTX/DOCX/bild** extraheras inte — exportera till PDF (samma gräns som § 26.5).
+- **Agent-genererade dokument** (PPTX/XLSX/DOCX/PDF i `user_files`) indexeras inte
+  automatiskt vid skapande; kör "Gör sökbara i chatten" för att indexera de
+  extraherbara (PDF/Excel) i efterhand.
+- **Cosine i JS** över ägarens chunkar räcker gott för ett personligt arkiv;
+  samma skalningsväg som § 26.5 vid behov.

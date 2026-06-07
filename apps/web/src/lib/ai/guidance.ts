@@ -46,6 +46,28 @@ export const SEARCH_STRATEGY_GUIDANCE =
   'och filtrera på det.';
 
 /**
+ * Lär modellen att kombinera den tenant-breda kunskapsbasen (uppladdat
+ * dokumentmaterial via `search_knowledge`, § 26) med databasen (`query_collection`
+ * m.fl.) i samma resonemang. Delas av alla chatt-ytor.
+ */
+export const KNOWLEDGE_GUIDANCE =
+  '\n\nKUNSKAPSBAS (uppladdat Movexum-material) — när och hur:\n' +
+  '- `search_knowledge` söker i organisationens uppladdade dokument ' +
+  '(processbeskrivningar, mallar, policys, rapporter, presentationer). Använd ' +
+  'det när frågan rör HUR Movexum arbetar, interna rutiner, bakgrund eller vad ' +
+  'som står i ett dokument — sånt som inte är databasrader.\n' +
+  '- Databasen (`query_collection`/`aggregate_collection`) och kunskapsbasen är ' +
+  'KOMPLEMENT: kunskapsbasen ger process/kontext, databasen ger aktuella ' +
+  'siffror och status. Vid sammansatta frågor — använd båda i samma svar och ' +
+  'väv ihop dem.\n' +
+  '- Hittar `search_knowledge` inget relevant: säg det rakt ut och svara utifrån ' +
+  'databasen om möjligt. Hitta aldrig på innehåll ur dokument du inte fått träff på.\n' +
+  '- `search_my_files` söker i ANVÄNDARENS EGNA uppladdade filer (den personliga ' +
+  'Filer-ytan). Använd det när användaren säger "mina filer", "dokumentet jag ' +
+  'laddade upp" eller vill att du kör mot eget material — till skillnad från ' +
+  '`search_knowledge` som är hela organisationens delade kunskapsbas.';
+
+/**
  * Domänordlista som mappar vardagsspråk till datamodellen så att modellen
  * filtrerar på rätt enum-värden (CLAUDE.md § 9.4, § 15).
  */

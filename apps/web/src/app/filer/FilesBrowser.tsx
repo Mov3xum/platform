@@ -46,6 +46,7 @@ export default function FilesBrowser({
   const [view, setView] = useState<View>('amnen');
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [sortQueue, setSortQueue] = useState<UserFileListItem[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -153,6 +154,7 @@ export default function FilesBrowser({
 
   function sortWithAi() {
     setError(null);
+    setNotice(null);
     startTransition(async () => {
       const res = await fetch('/api/filer', {
         method: 'POST',
@@ -162,6 +164,28 @@ export default function FilesBrowser({
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok || data.error) setError(data.error || 'Kunde inte kategorisera filerna.');
       else await refresh();
+    });
+  }
+
+  function indexForChat() {
+    setError(null);
+    setNotice(null);
+    startTransition(async () => {
+      const res = await fetch('/api/filer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'index-my-files' })
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; indexed?: number; skipped?: number };
+      if (!res.ok || data.error) {
+        setError(data.error || 'Kunde inte indexera filerna.');
+        return;
+      }
+      await refresh();
+      const parts: string[] = [];
+      if (data.indexed) parts.push(`${data.indexed} fil${data.indexed === 1 ? '' : 'er'} sökbara i chatten`);
+      if (data.skipped) parts.push(`${data.skipped} hoppades över (PowerPoint/Word/bild — exportera till PDF)`);
+      setNotice(parts.length ? parts.join(' · ') : 'Inga nya filer att indexera.');
     });
   }
 
@@ -212,6 +236,16 @@ export default function FilesBrowser({
             </button>
             <button
               type="button"
+              onClick={indexForChat}
+              disabled={isPending}
+              title="Gör dina text-filer (PDF/Excel/text) sökbara i AI-chatten"
+              className="inline-flex items-center gap-2 rounded-xl border border-default px-3 py-2 text-[13px] font-medium text-foreground transition hover:border-strong disabled:opacity-50"
+            >
+              <Icon name="search" size={14} />
+              Gör sökbara i chatten
+            </button>
+            <button
+              type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={isPending}
               className="inline-flex items-center gap-2 rounded-xl bg-brand px-3 py-2 text-[13px] font-medium text-brand-foreground transition hover:bg-brand-hover disabled:opacity-50"
@@ -233,6 +267,12 @@ export default function FilesBrowser({
       {error && (
         <div className="rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange">
           {error}
+        </div>
+      )}
+
+      {notice && (
+        <div className="rounded-xl bg-movexum-pastell-gron px-3 py-2 text-[12.5px] text-movexum-morkgron">
+          {notice}
         </div>
       )}
 

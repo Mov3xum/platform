@@ -3,6 +3,8 @@ import { getModelMeta } from './models';
 
 const MISTRAL_API_URL = 'https://api.mistral.ai/v1/chat/completions';
 const MISTRAL_CONVERSATIONS_URL = 'https://api.mistral.ai/v1/conversations';
+const MISTRAL_EMBEDDINGS_URL = 'https://api.mistral.ai/v1/embeddings';
+export const EMBEDDING_MODEL = 'mistral-embed';
 const MAX_TOKENS = 4000;
 const MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 1000;
@@ -326,7 +328,11 @@ export function estimateCostUsd(
     'mistral-large-latest': [2.0, 6.0],
     'mistral-medium-latest': [0.4, 1.2],
     'mistral-small-latest': [0.1, 0.3],
-    'pixtral-large-latest': [0.15, 0.15]
+    'pixtral-large-latest': [0.15, 0.15],
+    // Embeddings: ~€0.1/1M input-tokens, ingen output (vektorn räknas inte som
+    // completion-tokens). Utan denna rad skulle estimateCostUsd defaulta till
+    // Large-tier och kraftigt överskatta RAG-kostnaden.
+    'mistral-embed': [0.1, 0.0]
   };
   const [inPrice, outPrice] = pricing[model] ?? [2.0, 6.0];
   return (tokensIn / 1_000_000) * inPrice + (tokensOut / 1_000_000) * outPrice;
@@ -517,4 +523,84 @@ export async function callMistralConversation(
   }
 
   throw lastError ?? new MistralError('Okänt fel vid AI-anrop.', 0);
+}
+
+// ── /v1/embeddings — mistral-embed (RAG-index, § 26) ────────────────────────
+
+export interface EmbeddingResult {
+  /** En vektor per input-text, i samma ordning. */
+  vectors: number[][];
+  usage: { prompt_tokens: number; completion_tokens: number };
+}
+
+/**
+ * Skapar embeddings för en batch texter via Mistrals /v1/embeddings
+ * (mistral-embed, körs på Mistral AI:s EU-infrastruktur). Samma retry-/
+ * backoff-policy som callMistral. Tom input → tom vektorlista (inget anrop).
+ * Throws MistralError vid slutligt fel.
+ */
+export async function embedTexts(inputs: string[]): Promise<EmbeddingResult> {
+  if (inputs.length === 0) {
+    return { vectors: [], usage: { prompt_tokens: 0, completion_tokens: 0 } };
+  }
+  const apiKey = process.env.MISTRAL_API_KEY;
+  if (!apiKey) {
+    throw new MistralError('MISTRAL_API_KEY saknas i miljövariablerna.', 0);
+  }
+
+  const body = JSON.stringify({ model: EMBEDDING_MODEL, input: inputs });
+  let lastError: MistralError | null = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(MISTRAL_EMBEDDINGS_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`
+        },
+        body
+      });
+    } catch (err) {
+      lastError = new MistralError(
+        err instanceof Error ? err.message : 'Nätverksfel mot AI-tjänsten.',
+        503
+      );
+      if (attempt < MAX_ATTEMPTS) {
+        await sleep(backoffMs(attempt, null));
+        continue;
+      }
+      throw lastError;
+    }
+
+    if (response.ok) {
+      const data = (await response.json()) as {
+        data?: Array<{ embedding?: number[]; index?: number }>;
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
+      };
+      // Sortera på `index` för att garantera samma ordning som input.
+      const rows = (data.data ?? [])
+        .slice()
+        .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+      const vectors = rows.map((r) => (Array.isArray(r.embedding) ? r.embedding : []));
+      return {
+        vectors,
+        usage: {
+          prompt_tokens: data.usage?.prompt_tokens ?? 0,
+          completion_tokens: data.usage?.completion_tokens ?? 0
+        }
+      };
+    }
+
+    const errorBody = await response.text().catch(() => '');
+    lastError = classifyError(response.status, errorBody);
+    if (!RETRYABLE_STATUSES.has(response.status) || attempt >= MAX_ATTEMPTS) {
+      throw lastError;
+    }
+    const retryAfter = parseRetryAfter(response.headers.get('retry-after'));
+    await sleep(backoffMs(attempt, retryAfter));
+  }
+
+  throw lastError ?? new MistralError('Okänt fel vid embedding-anrop.', 0);
 }

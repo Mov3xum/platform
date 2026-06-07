@@ -514,6 +514,10 @@ export interface UserFile {
   topic_confidence?: number; // 0..1, AI:ns självskattade säkerhet (transparens)
   startup?: string; // valfri bolagskoppling (relation) för "Bolag"-vyn
   categorized_at?: string;
+  // RAG: sökbar i ägarens egen chatt via search_my_files (migration 1700000120–121, § 27).
+  extracted_text?: string;
+  indexed?: boolean;
+  chunk_count?: number;
   created: string;
   updated: string;
 }
@@ -1284,7 +1288,7 @@ export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['idag', 'min_oversikt', 'inkorg', 'pagaende', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'insights', 'integrationer', 'anvandare', 'installningar'] }
+  { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'anvandare', 'installningar'] }
 ];
 
 /**
@@ -1431,6 +1435,14 @@ export const coreModules: ModuleDefinition[] = [
     route: '/toolbox'
   },
   {
+    id: 'kunskapsbas',
+    title: 'Kunskapsbas',
+    description:
+      'Organisationens AI-kunskapsbas — ladda upp Movexum-material (processer, mallar, policys, rapporter, presentationer) så chatten kan svara på frågor om verksamheten och koppla det mot databasen.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor'],
+    route: '/kunskapsbas'
+  },
+  {
     id: 'insights',
     title: 'Usage insights',
     description:
@@ -1515,3 +1527,41 @@ export * from './reporting';
 // ─── Startupkompassen — quiz-poängsättning (ren logik, enhetstestad) ─────────
 export * from './compass-quiz';
 export * from './file-topics';
+
+// ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
+/** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */
+export interface OrgKnowledge {
+  id: string;
+  tenant: string;
+  title?: string;
+  filename: string;
+  mime?: string;
+  size_bytes?: number;
+  file?: string;
+  extracted_text?: string;
+  char_count?: number;
+  redacted?: boolean;
+  /** Ämnesetikett (samma taxonomi som FileTopic i file-topics.ts). */
+  topic?: string;
+  /** True när chunkning + embeddings (RAG-index) byggts. */
+  indexed?: boolean;
+  chunk_count?: number;
+  /** Reserverat för framtida SharePoint-sync (extern fil-id/eTag). */
+  source_ref?: string;
+  created_by?: string;
+  created: string;
+  updated: string;
+}
+
+/** Ett embeddat textstycke ur en OrgKnowledge-källa (RAG-index). */
+export interface OrgKnowledgeChunk {
+  id: string;
+  tenant: string;
+  source: string;
+  chunk_index?: number;
+  text?: string;
+  embedding?: number[];
+  token_count?: number;
+  created: string;
+  updated: string;
+}

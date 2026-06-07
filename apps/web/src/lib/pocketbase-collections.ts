@@ -29,5 +29,10 @@ export const PB_COLLECTIONS = {
   deMinimisUnitOrgnr: 'de_minimis_unit_orgnr_collection',
   deMinimisStod: 'de_minimis_stod_collection',
   agreements: 'agreements_collection',
-  agreementSignatures: 'agreement_signatures_collection'
+  agreementSignatures: 'agreement_signatures_collection',
+  // Tenant-bred kunskapsbas + RAG-index (migrationer 1700000118–1700000119, § 26)
+  orgKnowledge: 'org_knowledge_col',
+  orgKnowledgeChunks: 'org_knowledge_chunks_col',
+  // Personligt filarkiv-RAG-index (migration 1700000121, § 27)
+  userFileChunks: 'user_file_chunks_col'
 } as const;
