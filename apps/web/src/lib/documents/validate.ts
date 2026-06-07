@@ -228,6 +228,26 @@ function sectionIsEmpty(s: SectionSpec): boolean {
   );
 }
 
+// En slide ska aldrig renderas tom (vanligaste "fula" defekten — en rubrik på
+// en annars blank yta). `title`/`section` är rubrik-drivna by design; övriga
+// layouter kräver minst ETT innehållselement (punkter/KPI/tabell/diagram/
+// citat/callout).
+function slideHasBody(s: SlideSpec): boolean {
+  return Boolean(
+    (s.bullets && s.bullets.length) ||
+      (s.kpis && s.kpis.length) ||
+      s.table ||
+      s.chart ||
+      s.quote ||
+      s.callout
+  );
+}
+
+function slideIsKeepable(s: SlideSpec): boolean {
+  if (s.layout === 'title' || s.layout === 'section') return Boolean(s.heading || s.subheading);
+  return slideHasBody(s);
+}
+
 export function validateDocumentSpec(raw: unknown): ValidateResult {
   if (!raw || typeof raw !== 'object') {
     return { ok: false, error: 'Spec saknas eller är inte ett objekt.' };
@@ -246,8 +266,12 @@ export function validateDocumentSpec(raw: unknown): ValidateResult {
   if (ACCENTS.includes(String(o.accent) as DocumentAccent)) spec.accent = o.accent as DocumentAccent;
 
   if (kind === 'pptx') {
-    spec.slides = validateSlides(o.slides);
-    if (spec.slides.length === 0) return { ok: false, error: 'pptx kräver minst en slide i `slides`.' };
+    const all = validateSlides(o.slides);
+    if (all.length === 0) return { ok: false, error: 'pptx kräver minst en slide i `slides`.' };
+    // Släng tomma slides (rubrik utan innehåll). Faller tillbaka på allt om
+    // filtret skulle tömma decket helt.
+    const kept = all.filter(slideIsKeepable);
+    spec.slides = kept.length ? kept : all;
   } else if (kind === 'xlsx') {
     spec.sheets = validateSheets(o.sheets);
     if (spec.sheets.length === 0) return { ok: false, error: 'xlsx kräver minst ett blad i `sheets`.' };
