@@ -136,22 +136,29 @@ function addChart(slide: pptxgen.Slide, pptx: pptxgen, chart: ChartSpec, y: numb
   const chartColors = CHART_COLORS.map((c) => hex(c));
   const isPie = chart.type === 'pie' || chart.type === 'donut';
   const isLine = chart.type === 'line' || chart.type === 'area';
+  const isHbar = chart.type === 'hbar';
+  const manyCats = chart.categories.length > 6;
   const type = isPie ? pptx.ChartType.pie : isLine ? pptx.ChartType.line : pptx.ChartType.bar;
   const data = isPie
     ? [{ name: chart.series[0]?.name || 'Andel', labels: chart.categories, values: chart.series[0]?.values || [] }]
     : chart.series.map((se) => ({ name: se.name, labels: chart.categories, values: se.values }));
+  // Värdesetiketter trängs vid många stående staplar → visa bara vid få
+  // kategorier (eller liggande staplar där de får plats).
+  const showValue = !isLine && !isPie && (isHbar || chart.categories.length <= 7);
   slide.addChart(type, data, {
     x: MX + 0.22, y: plotY, w: w - 0.44, h: plotH,
-    barDir: chart.type === 'hbar' ? 'bar' : 'col',
+    barDir: isHbar ? 'bar' : 'col',
     barGrouping: chart.stacked ? 'stacked' : 'clustered',
     chartColors,
     showLegend: chart.series.length > 1 || isPie, legendPos: 'b', legendFontFace: FONT_BODY, legendFontSize: 10,
-    showValue: !isLine && !isPie, dataLabelFontFace: FONT_BODY, dataLabelFontSize: 9, dataLabelColor: INK_SOFT,
+    showValue, dataLabelFontFace: FONT_BODY, dataLabelFontSize: 9, dataLabelColor: INK_SOFT,
+    dataLabelFormatCode: chart.unit === '%' ? '0.0%' : '#,##0',
     showPercent: isPie, holeSize: chart.type === 'donut' ? 58 : 0,
-    catAxisLabelFontFace: FONT_BODY, catAxisLabelFontSize: 10, catAxisLabelColor: MUTED,
+    catAxisLabelFontFace: FONT_BODY, catAxisLabelFontSize: manyCats ? 8 : 10, catAxisLabelColor: MUTED,
+    catAxisLabelRotate: manyCats && !isHbar ? -35 : 0,
     valAxisLabelFontFace: FONT_BODY, valAxisLabelFontSize: 9, valAxisLabelColor: MUTED,
     valGridLine: { style: 'solid', color: BORDER, size: 0.5 }, catGridLine: { style: 'none' },
-    chartColorsOpacity: 100, barGapWidthPct: 55
+    chartColorsOpacity: 100, barGapWidthPct: 45
   });
 }
 
