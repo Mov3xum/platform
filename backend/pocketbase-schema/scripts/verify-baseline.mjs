@@ -302,7 +302,13 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'startup_service_costs',
   'startup_readiness_assessments',
   'startup_state_aid_periods',
-  'mission_comments'
+  'mission_comments',
+  // Tenant-bred AI-kunskapsbas (migrationer 1700000118–119, § 26). Tenant-bred,
+  // potentiellt PII-haltig fritext → staff/observer-only. Isolerings-assertionen
+  // är skild från bootstrap-spegling (kollektionerna är migration-only); detta
+  // svep fångar en framtida regression som öppnar list/view för startup_member.
+  'org_knowledge',
+  'org_knowledge_chunks'
 ];
 
 // Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa

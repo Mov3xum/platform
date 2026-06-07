@@ -2816,12 +2816,22 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
 - **§ 21 isolering:** list/view = staff/observer-only; rena `startup_member`
   har ingen dashboardchatt och ingen åtkomst till kunskapsbasen. createRule
   utan roll-check/`= tenant`-join (§ 21.3); update/delete använder `:each ?=`.
+  `verify-baseline.mjs` asserterar list/view-isoleringen
+  (`MUST_BE_STAFF_OR_OBSERVER`) så en framtida regression som öppnar dem för
+  medlemmar fälls innan deploy.
+- **Verktygsyta (§ 16.3):** `search_knowledge` ligger i `buildChatTools`-basytan
+  och är därför tillgängligt i ALLA read-only-körningstyper (dashboardchatt,
+  trådar, schemalagt, event-triggers, djupjobb), inte bara den interaktiva
+  chatten. Det är strikt read-only (ingen domänmutation → människa-i-loopen
+  bevaras) och RLS-skyddat (en icke-staff auth-token får tom retur från
+  `org_knowledge*`), så den bredare exponeringen är avsiktlig och säker.
 - **Kostnad/audit:** embeddings (index- och query-tid) loggas i
   `ai_usage_events` (surface `suggestions`, modell `mistral-embed`); `/insights`
   aggregerar.
 - **Migrationer:** nya, oföränderliga filnummer (1700000118–119). Som
-  compass/de_minimis/onboarding är de **migration-only** (speglas inte i
-  `setup-via-api.mjs`/`verify-baseline.mjs`); createRules följer § 21.3 så
+  compass/de_minimis/onboarding är de **migration-only** för bootstrap (speglas
+  inte i `setup-via-api.mjs`); isolerings-svepet i `verify-baseline.mjs`
+  asserterar dem dock (se ovan). createRules följer § 21.3 så
   `verify-baseline.mjs`-svepet passerar.
 
 ### 26.5 Begränsningar (MVP) och kommande steg
