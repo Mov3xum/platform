@@ -422,21 +422,42 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
   Riskklass: oförändrad (begränsad — intern dataåtkomst, ingen
   profilering). Sökstrategi + domänordlista ligger i `lib/ai/guidance.ts`
   och delas av dashboardchatt, trådar och autonoma körningar (ingen
-  divergerande kopia). Auto-upptäckta kollektioner upprätthåller samma
-  exkluderingar som context-byggarna, så inget verktyg kan kringgå
-  svartlistan ovan:
-  - **Denylist** (aldrig exponerade): utöver `users`/`tenants`/token-
-    tabeller även `contacts` (§ 15.3), alla `compass_*`-besökardata
-    (`compass_leads`, `compass_conversations`, `compass_messages`,
-    `compass_responses`, `compass_security_events`), `agent_actions`
-    (mutationsaudit med before/after-värden) samt krypterade
-    credential-/connector-tabeller (`tenant_integrations`,
-    `user_app_integrations`, `user_mistral_connectors`).
-  - **Fältmaskning** (substring, alla kollektioner): täcker GDPR art. 9
-    (`gender`, `identifies_as`), adress (`street_address`,
-    `postal_code`), `org_nr` och `ip_hash` utöver
-    e-post/telefon/personnummer/avatar. `tasks.details` maskas särskilt
-    (privata arbetsanteckningar).
+  divergerande kopia).
+
+  **Åtkomstpolicy (2026-06): "läs all domändata utom hårda hemligheter och
+  privat innehåll".** Movexum-personalen ska nå all domändata via chatten för
+  bästa möjliga upplevelse, utan att GDPR-efterlevnaden tappas. Skyddet ligger
+  i tre lager i stället för en grovkornig denylist (`lib/ai/redaction.ts`):
+  - **RLS först:** dashboardchatten är staff-only och kör mot användarens
+    auth-token, så PB-reglerna (§ 21) scopar varje läsning till tenant + roll.
+    Agenten ser BARA det inloggad personal redan får se — chatten är ett nytt
+    *lins*, inte en ny dataväg.
+  - **Fältmaskning (substring, alla kollektioner):** direkta identifierare och
+    GDPR art. 9 tas bort INNAN posten når modellen — e-post, telefon,
+    personnummer/`ssn`, `org_nr` **och utskrivet `organisationsnummer`**
+    (enskild firma = personnummer), `ip_hash`, `session_token`, adress
+    (`street_address`/`postal_code`), `avatar`, lösenord/tokens samt art. 9
+    (`gender`, `identifies_as`). `tasks.details` maskas särskilt (privata
+    arbetsanteckningar). `aggregate_collection`/`describe_collection` vägrar
+    dessutom maskade fält (ingen PII-bakväg).
+  - **EU-suveränitet:** Mistral (FR) är personuppgiftsbiträde med DPA;
+    rättslig grund = berättigat intresse (inkubatordrift), § 10.2.
+
+  **Denylist (får ALDRIG nå modellen)** — minimerad till två grupper:
+  - **A. Auth, system & krypterade hemligheter:** `users`, `tenants`,
+    `verification_tokens`, `pending_signups`, `tenant_integrations`,
+    `user_app_integrations`, `user_mistral_connectors`.
+  - **B. Strikt privat ägaren-bara-innehåll** (att exponera bryter
+    § 21-isoleringen): `chat_threads`, `user_files`, `deep_jobs`,
+    `agent_memory`.
+
+  Allt annat — CRM (`contacts`), compass-inflöde (`compass_*`), de minimis
+  (`de_minimis_*`), avtal/signeringsbevis (`agreement_signatures`),
+  mutationsaudit (`agent_actions`), onboarding (`onboarding_*`) — är nu
+  **läsbart** via query-verktygen, skyddat av RLS + fältmaskning ovan. De
+  KURERADE per-bolag-context-byggarna i `lib/ai/context.ts` är oförändrade och
+  styr struktur-kontexten; denna lista styr de GENERISKA query-verktygen.
+  Riskklass: oförändrad (begränsad — intern dataåtkomst, ingen profilering).
 - **Chattens skrivverktyg:** bara när actor är en agent (staff-chatt)
   exponeras `update_startup_field` (whitelist: `next_step`, `irl_level`),
   `create_startup_activity` och `update_activity_field` (`title`,
@@ -1420,22 +1441,28 @@ Nya whitelistade fält i `apps/web/src/lib/ai/context.ts`:
   `stodgivare`, `belopp_sek`, `beslutsdatum` samt `purpose` (= `syfte`,
   sanerat/cappat) per rad. Läser `de_minimis_stod` **direkt via den
   denormaliserade `startup`-FK:n** (indexerat, `getList(1,20)`) — aldrig
-  join via `de_minimis_units` och aldrig org-nr. `de_minimis_*` är
-  fortsatt **denylistad** för det generiska `query_collection`
-  (§ 9.3) — stöd-syftet når AI ENBART via denna kurerade per-bolag-builder.
+  join via `de_minimis_units` och aldrig org-nr. Detta är den KURERADE
+  per-bolag-vägen som matar struktur-kontexten. Sedan policy-skiftet 2026-06
+  (§ 9.3) är `de_minimis_*` dessutom **läsbar** för det generiska
+  `query_collection` (skyddat av RLS + fältmaskning; `organisationsnummer`
+  maskas), så portföljbreda de minimis-frågor i chatten fungerar.
 - **`buildIPRContext`:** `type`, `status`, `external_reference`,
   `filed_at`, `response_at`. `notes` exkluderas.
 - **`buildKPIsContext`:** `kpi_name`, `value_text`, `value_numeric`,
   `unit`, `measured_at`, `is_current` — endast `is_current=true` per
   default.
 
-**Explicit svartlistade** (utöver befintlig lista i § 9.3):
+**Explicit svartlistade i de KURERADE context-byggarna** (`context.ts`,
+utöver befintlig lista i § 9.3). OBS: detta gäller struktur-kontexten som
+matas in per bolag — det GENERISKA `query_collection` har en egen, bredare
+policy (§ 9.3, läsbart med fältmaskning) sedan skiftet 2026-06:
 
 - `startups.email`, `startups.street_address`, `startups.postal_code`
   (PII när bolagsformen är enskild firma).
-- `contacts.*` — alla fält på externa kontakter (förnamn, efternamn,
-  e-post, telefon, gender, skills, info) hålls ute från AI-prompts.
-  Endast aggregat ("bolag X har 3 mentor-kontakter") får härledas.
+- `contacts.*` — externa kontakters fält tas inte med i den kurerade
+  struktur-kontexten (förnamn, efternamn, e-post, telefon, gender, skills,
+  info). Via `query_collection` är `contacts` numera läsbart men med
+  direkt-PII maskat (e-post/telefon/gender); namn/roll syns.
 - `tasks.*` och `tasks.details` — uppgifter kan innehålla privata
   arbetsanteckningar; inkluderas inte i default-kontexten. Enskilda
   agenter kan opt-in genom egen helper.
@@ -1444,9 +1471,10 @@ Nya whitelistade fält i `apps/web/src/lib/ai/context.ts`:
 - `capital_rounds.notes` / `de_minimis_stod.syfte` är **whitelistade som
   stöd-`purpose`** (vad stödet gavs för) via context-buildrarna ovan —
   lågkänsligt (beskriver insatsens art, t.ex. "IP-strategi Rouse",
-  "affärscoachning"), personnummer-saneras + cappas på läsvägen. Når AI
-  bara via de kurerade per-bolag-buildrarna; `de_minimis_*` förblir
-  denylistad för det generiska `query_collection`.
+  "affärscoachning"), personnummer-saneras + cappas på läsvägen. Når den
+  kurerade struktur-kontexten via per-bolag-buildrarna. `de_minimis_*` är
+  sedan 2026-06 även läsbar för det generiska `query_collection` (RLS +
+  fältmaskning; `organisationsnummer` maskas), § 9.3.
 - **Outlook-kalenderdata** — mötesdeltagares/organisatörers e-post (läses
   transient för CRM-matchning, § 14.4) är PII och når aldrig
   AI-kontexten. Den lagras inte; endast den resulterande `tasks`-raden
@@ -2121,9 +2149,10 @@ De fyra AES-kriterierna uppfylls av: (a/b) `signer` + `signer_email` +
   cappad. `signer_email`/`signer_name` krävs för identifiering (rättslig grund =
   **avtal/berättigat intresse**, inkubatordrift). Personnummer lagras aldrig.
 - **GDPR art. 17:** `cascadeDelete` på tenant/agreement/startup städar bevisen.
-- **AI-kontext:** `agreement_signatures` är **denylistad** i
-  `lib/ai/redaction.ts` (innehåller `signer_email` + `ip_hash`) → når aldrig
-  `query_collection`/agent-prompten.
+- **AI-kontext:** `agreement_signatures` är sedan policy-skiftet 2026-06
+  (§ 9.3) **läsbar** för `query_collection`, men `signer_email` och `ip_hash`
+  **fältmaskas** bort innan posten når modellen (signer_name/party/status
+  syns). Skyddat dessutom av RLS (staff-only chatt, tenant-scope).
 - **EU-suveränitet:** ren in-app-signering, ingen extern tjänst, ingen icke-EU-
   leverantör. BankID/eID kan kopplas på senare via `method='bankid'` utan
   brytande ändring.
@@ -2209,10 +2238,13 @@ prövning görs alltid av stödgivaren (disclaimer visas i UI och i PDF:en).
   verifierad länkning, samma mönster som § 18.3). `observer` read-only.
   Bolagsmedlemmar kan bara **se** sina egna bolag; staff/observer ser alla.
 - **GDPR:** för aktiebolag är org-nr inte personuppgift (skäl 14); för enskild
-  firma motsvarar org-nr personnummer. Därför är **alla fyra de minimis-
-  collections denylistade i `lib/ai/redaction.ts`** (`organisationsnummer`
-  täcks inte av `org_nr`-substringmaskningen) — de når **aldrig** AI-kontexten.
-  Inga fält whitelistas i `lib/ai/context.ts`. Person nr lagras aldrig.
+  firma motsvarar org-nr personnummer. Sedan policy-skiftet 2026-06 (§ 9.3) är
+  de fyra de minimis-collectionerna **läsbara** för `query_collection`, men
+  `organisationsnummer` lades till i `PII_FIELD_PATTERNS` (`org_nr`-substringen
+  fångade inte det utskrivna fältnamnet) → org-nr **fältmaskas** alltid bort.
+  Beloppen (`belopp_sek`/`belopp_eur`), stödgivare och syfte syns. RLS scopar
+  läsningen (staff-only chatt). Inga fält whitelistas i den kurerade
+  `lib/ai/context.ts`-struktur-kontexten. Person nr lagras aldrig.
   Rättslig grund: rättslig förpliktelse/berättigat intresse (efterlevnad av
   statsstödsregler). Cascade-radering via `tenant`/`startup`.
 - **EU AI Act:** ingen AI-funktion i modulen → ingen riskklass (försäkran-PDF
@@ -2256,8 +2288,9 @@ re-verifierar `tenant` + `canManageStartupDeMinimis` (medlemskap) och kör
 `de_minimis_*`-createRule är `@request.auth.id != "" && @request.auth.tenant
 != ""` (§ 21.3, migration 1700000111) → en länkad medlem kan registrera utan
 superuser; fallbacken täcker en ev. otrasig regel-instans. Inga nya fält, inga
-nya kollektioner, ingen ny AI-väg (de_minimis fortsatt denylistat i
-`lib/ai/redaction.ts`). `revalidateFor` busta:r `/de-minimis`, `/startups/[id]`
+nya kollektioner. (`de_minimis_*` är sedan 2026-06 läsbart för
+`query_collection` med org-nr-maskning, § 9.3.) `revalidateFor` busta:r
+`/de-minimis`, `/startups/[id]`
 **och** `/min-oversikt`; formulären kör dessutom `router.refresh()`.
 
 ---
@@ -2515,8 +2548,12 @@ hinkarnas `min`/`max`). Per-val `score`/`bucket` lagras i
 - **GDPR art. 7 (samtycke):** publika flöden kräver `consent:true` när modulen
   har en `consent_note`; `consent_at` stämplas. **§ 5 dataminimering:** bara
   whitelistade fält (`mapAnswersToLead`) blir lead; anonyma leads får
-  `name='Anonym'`. compass-kollektionerna förblir **denylistade** i
-  `lib/ai/schema.ts` (§ 9.3) — besökardata når aldrig AI-kontext.
+  `name='Anonym'`. Sedan policy-skiftet 2026-06 (§ 9.3) är compass-
+  kollektionerna **läsbara** för det generiska `query_collection` i den
+  staff-only dashboardchatten (RLS scopar per tenant; e-post/telefon/
+  ip-hash/session-token fältmaskas). De publika intag-ytorna har dock ingen
+  AI-chatt mot lead-databasen — besökardatan flödar bara till intern
+  staff-analys, aldrig tillbaka till en anonym besökare.
 - **EU AI Act art. 50:** chat-flödet visar transparensbanner; quiz/wizard är
   deterministiska (ingen AI-inferens → ingen banner krävs). AI-chatten kör
   Mistral via befintlig `intakeReply` (ingen ny leverantör).
@@ -2565,8 +2602,10 @@ redigeras i modul-admin under "Notifiera inflöde till"), med fallback på env
 - **GDPR §5/§6:** mejlet är en **intern staff-notis** (rättslig grund =
   berättigat intresse, inkubatordrift) och innehåller endast den kontakt-/idé-
   data besökaren själv lämnade samt en direktlänk till `/inflode/leads/<id>`.
-  Ingen ny AI-väg — compass-kollektionerna förblir denylistade i `lib/ai/schema.ts`
-  (§9.3). Lead-data HTML-escapas i mejlet (XSS-skydd, §10.3).
+  Notisen i sig är ingen AI-väg (deterministiskt mejl). Compass-data är sedan
+  2026-06 läsbar för den staff-only chattens `query_collection` med RLS +
+  fältmaskning (§ 9.3), men inte via detta notisflöde. Lead-data HTML-escapas
+  i mejlet (XSS-skydd, §10.3).
 - **Riskklass (EU AI Act):** n/a — deterministisk e-postnotis, ingen AI-inferens.
 - **Migration** (1700000110) är ett nytt, oföränderligt filnummer; compass speglas
   inte i setup/verify-skripten (migration-only).
@@ -2717,10 +2756,13 @@ den befintliga utbildnings-media-routen (`/api/education/media` → `workshop_me
 
 - **GDPR § 5 (dataminimering):** flödena är staff-skapad utbildningskonfiguration
   (ingen PII); progressraden lagrar bolagets svar/bekräftelser.
-  `onboarding_flows` + `onboarding_progress` är **denylistade i
-  `lib/ai/redaction.ts`** (fritextsvar kan vara PII) → når aldrig
-  `query_collection`/agent-kontexten. Inga nya whitelistade fält i
-  `lib/ai/context.ts`. UI uppmanar inte till personuppgifter.
+  `onboarding_flows` + `onboarding_progress` är sedan policy-skiftet 2026-06
+  (§ 9.3) **läsbara** för det generiska `query_collection` (RLS scopar
+  staff-only chatt + eget-bolag-isolering). `onboarding_progress.answers_json`
+  är fritext och kan inte fältmaskas — UI uppmanar uttryckligen att INTE skriva
+  personuppgifter, och åtkomsten är begränsad till den staff som ändå ser
+  progressen. Inga nya whitelistade fält i den kurerade
+  `lib/ai/context.ts`-struktur-kontexten.
 - **GDPR art. 17:** `cascadeDelete` på `flow`/`startup`; tenant-relation städas
   i erasure-flödet (samma mönster som övriga collections).
 - **RBAC (§ 21 / ISO 27001 A.5.15–A.5.18):** bygg/hantera = staff
