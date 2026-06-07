@@ -2,7 +2,7 @@
    Movexum OS — Prototyp-shell + UI-system
    Mappat mot Movexums grafiska profil (se CLAUDE.md §2).
    Identitet:
-   1. Sora display + JetBrains Mono till IDs / labels / timestamps
+   1. Sora display + Nunito Sans till IDs / labels / timestamps
    2. Radius-skala: 8 / 14 / 26 — aldrig blandat
    3. Movexum Mörkblå #002c40 som signaturfärg på rail + accenter
    ============================================================ */
@@ -81,10 +81,12 @@
   --mx-st-danger:   #d67e47;
   --mx-st-danger-bg:#f1e5df;
 
-  /* Type — använder Movexums fonter via fonts.css */
+  /* Type — ENBART Sora + Nunito Sans (§ 2.4). `--mx-mono` behålls som
+     variabelnamn för bakåtkompatibilitet men pekar på Nunito Sans (med
+     tabular-nums via .mx-tnum där siffror behöver linjera) — ingen JetBrains. */
   --mx-display: "Sora Variable", "Sora", system-ui, sans-serif;
   --mx-ui:      "Nunito Sans Variable", "Nunito Sans", system-ui, sans-serif;
-  --mx-mono:    "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+  --mx-mono:    "Nunito Sans Variable", "Nunito Sans", system-ui, sans-serif;
 
   /* Radii — LÅSTA 8 / 14 / 26 */
   --mx-r-sm: 8px;
