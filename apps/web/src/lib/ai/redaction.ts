@@ -58,22 +58,6 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'user_files', // personliga filer, strikt ägaren-bara (1700000085)
   'user_file_chunks', // RAG-index för personliga filer (1700000121, § 27) — owner-only, nås bara via search_my_files
   'deep_jobs', // intern orkestrering (1700000084)
-  // De minimis-modul (1700000093–095). `de_minimis_unit_orgnr.organisationsnummer`
-  // kan motsvara personnummer för enskild firma → hela familjen hålls utanför det
-  // GENERISKA query_collection. OBS: en KURERAD, PII-fri delmängd av `de_minimis_stod`
-  // (forordning/stodgivare/belopp_sek/beslutsdatum/syfte — aldrig org-nr) når
-  // per-bolag-agenter via `buildDeMinimisSupportContext` i `context.ts` (§ 9.3, § 20).
-  // Denylistan här ska därför INTE lyftas.
-  'de_minimis_units',
-  'de_minimis_unit_orgnr',
-  'de_minimis_stod',
-  'de_minimis_regelverk',
-  'agreement_signatures', // signeringsbevis: signer_email + ip_hash (1700000094)
-  // Onboarding (1700000113–114, § 25) — onboarding_progress kan innehålla
-  // bolagets fritextsvar på onboarding-frågor (potentiell PII); flödena är
-  // intern utbildningskonfiguration. Hålls helt utanför AI-kontexten.
-  'onboarding_flows',
-  'onboarding_progress',
   // Tenant-bred kunskapsbas (1700000118–119, § 26). Innehållet (uppladdat
   // verksamhetsmaterial + dess embeddings) når AI ENBART via det kurerade
   // `search_knowledge`-verktyget — aldrig via det generiska query_collection.
