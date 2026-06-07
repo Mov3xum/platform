@@ -514,6 +514,10 @@ export interface UserFile {
   topic_confidence?: number; // 0..1, AI:ns självskattade säkerhet (transparens)
   startup?: string; // valfri bolagskoppling (relation) för "Bolag"-vyn
   categorized_at?: string;
+  // RAG: sökbar i ägarens egen chatt via search_my_files (migration 1700000120–121, § 27).
+  extracted_text?: string;
+  indexed?: boolean;
+  chunk_count?: number;
   created: string;
   updated: string;
 }

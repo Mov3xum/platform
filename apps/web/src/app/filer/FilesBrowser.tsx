@@ -16,6 +16,7 @@ import {
   deleteFileAction,
   uploadUserFileAction,
   categorizeAllFilesAction,
+  indexMyFilesAction,
   setFileTopicAction,
   type UserFileListItem
 } from '@/lib/actions/files';
@@ -55,6 +56,7 @@ export default function FilesBrowser({
   const [view, setView] = useState<View>('amnen');
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [sortQueue, setSortQueue] = useState<UserFileListItem[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -146,10 +148,28 @@ export default function FilesBrowser({
 
   function sortWithAi() {
     setError(null);
+    setNotice(null);
     startTransition(async () => {
       const res = await categorizeAllFilesAction();
       if (res.error) setError(res.error);
       else await refresh();
+    });
+  }
+
+  function indexForChat() {
+    setError(null);
+    setNotice(null);
+    startTransition(async () => {
+      const res = await indexMyFilesAction();
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      await refresh();
+      const parts: string[] = [];
+      if (res.indexed) parts.push(`${res.indexed} fil${res.indexed === 1 ? '' : 'er'} sökbara i chatten`);
+      if (res.skipped) parts.push(`${res.skipped} hoppades över (PowerPoint/Word/bild — exportera till PDF)`);
+      setNotice(parts.length ? parts.join(' · ') : 'Inga nya filer att indexera.');
     });
   }
 
@@ -200,6 +220,16 @@ export default function FilesBrowser({
             </button>
             <button
               type="button"
+              onClick={indexForChat}
+              disabled={isPending}
+              title="Gör dina text-filer (PDF/Excel/text) sökbara i AI-chatten"
+              className="inline-flex items-center gap-2 rounded-xl border border-default px-3 py-2 text-[13px] font-medium text-foreground transition hover:border-strong disabled:opacity-50"
+            >
+              <Icon name="search" size={14} />
+              Gör sökbara i chatten
+            </button>
+            <button
+              type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={isPending}
               className="inline-flex items-center gap-2 rounded-xl bg-brand px-3 py-2 text-[13px] font-medium text-brand-foreground transition hover:bg-brand-hover disabled:opacity-50"
@@ -221,6 +251,12 @@ export default function FilesBrowser({
       {error && (
         <div className="rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange">
           {error}
+        </div>
+      )}
+
+      {notice && (
+        <div className="rounded-xl bg-movexum-pastell-gron px-3 py-2 text-[12.5px] text-movexum-morkgron">
+          {notice}
         </div>
       )}
 

@@ -61,7 +61,11 @@ export const KNOWLEDGE_GUIDANCE =
   'siffror och status. Vid sammansatta frågor — använd båda i samma svar och ' +
   'väv ihop dem.\n' +
   '- Hittar `search_knowledge` inget relevant: säg det rakt ut och svara utifrån ' +
-  'databasen om möjligt. Hitta aldrig på innehåll ur dokument du inte fått träff på.';
+  'databasen om möjligt. Hitta aldrig på innehåll ur dokument du inte fått träff på.\n' +
+  '- `search_my_files` söker i ANVÄNDARENS EGNA uppladdade filer (den personliga ' +
+  'Filer-ytan). Använd det när användaren säger "mina filer", "dokumentet jag ' +
+  'laddade upp" eller vill att du kör mot eget material — till skillnad från ' +
+  '`search_knowledge` som är hela organisationens delade kunskapsbas.';
 
 /**
  * Domänordlista som mappar vardagsspråk till datamodellen så att modellen

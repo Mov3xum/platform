@@ -36,6 +36,7 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // Personliga/innehållstunga kollektioner — aldrig exponerade för agenter.
   'chat_threads', // privat konversationsinnehåll (1700000083)
   'user_files', // personliga filer, strikt ägaren-bara (1700000085)
+  'user_file_chunks', // RAG-index för personliga filer (1700000121, § 27) — owner-only, nås bara via search_my_files
   'deep_jobs', // intern orkestrering (1700000084)
   // De minimis-modul (1700000093–095). `de_minimis_unit_orgnr.organisationsnummer`
   // kan motsvara personnummer för enskild firma → hela familjen hålls utanför det
