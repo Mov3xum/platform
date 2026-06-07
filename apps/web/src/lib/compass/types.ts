@@ -205,6 +205,7 @@ export interface CompassQuestion {
     score?: number;
     bucket?: string;
     buckets?: Record<string, number>;
+    next_key?: string;
   }[];
   required?: boolean;
   sort_order?: number;

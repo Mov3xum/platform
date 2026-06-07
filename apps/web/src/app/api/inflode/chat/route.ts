@@ -2,10 +2,12 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { MistralError } from '@/lib/ai/mistral';
 import { intakeReply, type CompassChatMessage } from '@/lib/compass/chat';
+import { buildModuleChatSystemPrompt } from '@/lib/compass/public';
 import {
   appendMessage,
   createConversation,
-  getModuleBySlug
+  getModuleBySlug,
+  listQuestionsForModule
 } from '@/lib/compass/store';
 
 export const runtime = 'nodejs';
@@ -63,7 +65,8 @@ export async function POST(req: Request) {
   if (user && body.moduleSlug) {
     const mod = await getModuleBySlug(pb, user.tenant, body.moduleSlug);
     if (mod) {
-      if (mod.system_prompt) systemPrompt = mod.system_prompt;
+      const questions = await listQuestionsForModule(pb, mod.id);
+      systemPrompt = buildModuleChatSystemPrompt(mod, questions);
       if (mod.model) model = mod.model;
     }
   }

@@ -620,6 +620,78 @@ function parseBucketSpec(raw: string | undefined): Record<string, number> | unde
   return Object.keys(map).length > 0 ? map : undefined;
 }
 
+function parseQuestionChoices(raw: string):
+  | { value: string; label: string; score?: number; bucket?: string; buckets?: Record<string, number>; next_key?: string }[]
+  | undefined {
+  if (!raw) return undefined;
+
+  return raw
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .map((l) => {
+      const parts = l.split('|').map((s) => s.trim());
+      const value = parts[0];
+      const label = parts[1] || value;
+      const choice: {
+        value: string;
+        label: string;
+        score?: number;
+        bucket?: string;
+        buckets?: Record<string, number>;
+        next_key?: string;
+      } = {
+        value: slugify(value || l),
+        label
+      };
+
+      const parseBucketToken = (token: string | undefined): string | undefined => {
+        const rawToken = String(token || '').trim();
+        if (!rawToken) return undefined;
+        if (rawToken.toLowerCase().startsWith('bucket:')) {
+          return slugify(rawToken.slice('bucket:'.length));
+        }
+        return undefined;
+      };
+
+      // Format per rad:
+      //   value | label | score | next_key
+      //   value | label | score | bucket:profil | next_key
+      //   value | label | bucket:profil | next_key
+      //   value | label | builder:2 explorer:1 | next_key
+      // Legacy stöds också: value | label | score | bucket | next_key
+      const buckets = parseBucketSpec(parts[2]);
+      if (buckets) {
+        choice.buckets = buckets;
+        if (parts[3]) {
+          choice.next_key = slugify(parts[3]);
+        }
+      } else {
+        const score = Number(parts[2]);
+        if (parts[2] !== undefined && parts[2] !== '' && Number.isFinite(score)) {
+          choice.score = score;
+        } else {
+          const explicitBucket = parseBucketToken(parts[2]);
+          if (explicitBucket) choice.bucket = explicitBucket;
+        }
+
+        if (parts[4]) {
+          choice.bucket = parseBucketToken(parts[3]) || slugify(parts[3]);
+          choice.next_key = slugify(parts[4]);
+        } else if (parts[3]) {
+          const explicitBucket = parseBucketToken(parts[3]);
+          if (explicitBucket) {
+            choice.bucket = explicitBucket;
+          } else if (!choice.bucket) {
+            choice.next_key = slugify(parts[3]);
+          }
+        }
+      }
+
+      return choice;
+    });
+}
+
 export async function addQuestionAction(formData: FormData) {
   const user = await requireUser();
   if (!hasRole(user.roles, [...MANAGE_ROLES])) {
@@ -644,42 +716,10 @@ export async function addQuestionAction(formData: FormData) {
   //     (poäng + hink frivilliga; en hink per val).
   //   • Multi-hink: `värde | etikett | builder:2 explorer:1 potential:0`
   //     (ett val fördelar poäng över flera profiler — företräde framför hink).
-  let choices:
-    | { value: string; label: string; score?: number; bucket?: string; buckets?: Record<string, number> }[]
-    | undefined;
-  if (choicesRaw && (inputType === 'choice' || inputType === 'multi_choice')) {
-    choices = choicesRaw
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0)
-      .map((l) => {
-        const parts = l.split('|').map((s) => s.trim());
-        const value = parts[0];
-        const label = parts[1] || value;
-        const choice: {
-          value: string;
-          label: string;
-          score?: number;
-          bucket?: string;
-          buckets?: Record<string, number>;
-        } = {
-          value: slugify(value || l),
-          label
-        };
-        // Multi-hink kan stå i poäng- eller hink-kolumnen (`builder:2 explorer:1`).
-        const buckets = parseBucketSpec(parts[2]) || parseBucketSpec(parts[3]);
-        if (buckets) {
-          choice.buckets = buckets;
-        } else {
-          const score = Number(parts[2]);
-          if (parts[2] !== undefined && parts[2] !== '' && Number.isFinite(score)) {
-            choice.score = score;
-          }
-          if (parts[3]) choice.bucket = slugify(parts[3]);
-        }
-        return choice;
-      });
-  }
+  const choices =
+    choicesRaw && (inputType === 'choice' || inputType === 'multi_choice')
+      ? parseQuestionChoices(choicesRaw)
+      : undefined;
 
   const pb = await getServerPb();
   // Verify module ownership
@@ -702,6 +742,50 @@ export async function addQuestionAction(formData: FormData) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
     throw new Error(`Kunde inte skapa fråga: ${msg}`);
+  }
+
+  revalidatePath(`/inflode/admin/modules/${moduleSlug}`);
+}
+
+export async function updateQuestionAction(formData: FormData) {
+  const user = await requireUser();
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
+    throw new Error('Forbidden');
+  }
+  const id = String(formData.get('id') || '');
+  const moduleId = String(formData.get('module_id') || '');
+  const moduleSlug = String(formData.get('module_slug') || '');
+  const key = slugify(String(formData.get('key') || ''));
+  const prompt = String(formData.get('prompt') || '').trim();
+  const helpText = String(formData.get('help_text') || '').trim();
+  const inputType = String(formData.get('input_type') || 'short_text');
+  const required = formData.get('required') === 'on';
+  const choicesRaw = String(formData.get('choices') || '').trim();
+
+  if (!id || !moduleId || !key || !prompt) throw new Error('Modul, nyckel och fråga krävs');
+  if (!INPUT_TYPES.includes(inputType as (typeof INPUT_TYPES)[number])) {
+    throw new Error('Ogiltig input_type');
+  }
+
+  const pb = await getServerPb();
+  const mod = await pb.collection('compass_modules').getOne(moduleId);
+  if (mod.tenant !== user.tenant) throw new Error('Forbidden');
+
+  try {
+    await writeWithFallback(pb, (c) =>
+      c.collection('compass_questions').update(id, {
+        module: moduleId,
+        key,
+        prompt,
+        help_text: helpText || undefined,
+        input_type: inputType,
+        required,
+        choices: choicesRaw && (inputType === 'choice' || inputType === 'multi_choice') ? parseQuestionChoices(choicesRaw) : undefined
+      })
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Okänt fel';
+    throw new Error(`Kunde inte uppdatera fråga: ${msg}`);
   }
 
   revalidatePath(`/inflode/admin/modules/${moduleSlug}`);
