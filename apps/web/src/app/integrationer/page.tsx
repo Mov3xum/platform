@@ -95,6 +95,7 @@ export default async function IntegrationerPage({
     redirect('/dashboard');
 
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
+  const isAdmin = hasRole(user.roles, ['admin']);
   const pb = await getServerPb();
 
   let providers: ProviderRecord[] = [];
@@ -450,26 +451,29 @@ export default async function IntegrationerPage({
                   </span>
                 </div>
               </a>
-              <a
-                href="/admin/import-crm"
-                className="block rounded-2xl border border-default bg-surface p-5 transition hover:bg-canvas-subtle"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-foreground">
-                      CRM-export (Excel, 12 ark)
+              {isAdmin && (
+                <a
+                  href="/admin/import-crm"
+                  className="block rounded-2xl border border-default bg-surface p-5 transition hover:bg-canvas-subtle"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-foreground">
+                        Generell Excel-import
+                      </div>
+                      <p className="mt-1 text-[13px] text-foreground-muted">
+                        Ladda upp valfri Excel-fil och mappa varje ark mot en
+                        befintlig tabell + kolumn mot fält. Förhandsgranska vad
+                        som kommer med innan import. GDPR-saneras och skrivs
+                        idempotent.
+                      </p>
                     </div>
-                    <p className="mt-1 text-[13px] text-foreground-muted">
-                      Migrera hela det tidigare CRM:t — företag, personer,
-                      aktiviteter, kapital, IPR, avtal, todo och mätetal.
-                      GDPR-saneras och skrivs idempotent.
-                    </p>
+                    <span className="rounded-full bg-movexum-pastell-gron px-3 py-1 text-xs font-medium text-movexum-morkgron">
+                      Endast admin
+                    </span>
                   </div>
-                  <span className="rounded-full bg-movexum-pastell-gron px-3 py-1 text-xs font-medium text-movexum-morkgron">
-                    Tillgänglig
-                  </span>
-                </div>
-              </a>
+                </a>
+              )}
             </div>
           </section>
         )}
