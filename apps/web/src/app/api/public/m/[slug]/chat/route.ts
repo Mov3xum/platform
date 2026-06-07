@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { MistralError } from '@/lib/ai/mistral';
-import { intakeReply, extractLead, scoreLead, type CompassChatMessage } from '@/lib/compass/chat';
-import { appendMessage, createLead, updateLead } from '@/lib/compass/store';
+import { intakeReply, type CompassChatMessage } from '@/lib/compass/chat';
+import {
+  getOrCreateChatConversation,
+  persistChatTurnAndUpsertLead
+} from '@/lib/compass/chat-lead';
 import { buildModuleChatSystemPrompt, getPublicModuleQuestions, resolvePublicModule } from '@/lib/compass/public';
-import { notifyNewInflow } from '@/lib/compass/notify';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
-import type PocketBase from 'pocketbase';
-import type { Conversation } from '@/lib/compass/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,56 +33,6 @@ function isValidMessage(m: unknown): m is CompassChatMessage {
 function clientIp(req: Request): string {
   const h = req.headers.get('x-forwarded-for') || '';
   return h.split(',')[0]?.trim() || 'anon';
-}
-
-function summarizeChatLead(history: CompassChatMessage[], moduleName: string): { summary: string; notes: string } {
-  const userMessages = history.filter((m) => m.role === 'user').map((m) => m.content.trim()).filter(Boolean);
-  const assistantMessages = history.filter((m) => m.role === 'assistant').map((m) => m.content.trim()).filter(Boolean);
-  const lastUser = userMessages[userMessages.length - 1] || '';
-  const snippet = userMessages.slice(-3).join(' · ') || lastUser || moduleName;
-  const notes = [
-    `Samtal via modul: ${moduleName}`,
-    userMessages.length > 0 ? `Användaren skrev: ${userMessages.slice(-5).join(' | ')}` : '',
-    assistantMessages.length > 0 ? `AI svarade: ${assistantMessages.slice(-3).join(' | ')}` : ''
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  return {
-    summary: snippet.slice(0, 4000),
-    notes: notes.slice(0, 8000)
-  };
-}
-
-/** Hämta/skapa en konversation per session (kontinuitet i den publika chatten). */
-async function getOrCreateConversation(
-  pb: PocketBase,
-  tenant: string,
-  moduleSlug: string,
-  sessionToken: string
-): Promise<Conversation | null> {
-  try {
-    return await pb
-      .collection('compass_conversations')
-      .getFirstListItem<Conversation>(
-        pb.filter('tenant = {:t} && module_slug = {:m} && session_token = {:s}', {
-          t: tenant,
-          m: moduleSlug,
-          s: sessionToken
-        })
-      );
-  } catch {
-    try {
-      return await pb.collection('compass_conversations').create<Conversation>({
-        tenant,
-        module_slug: moduleSlug,
-        session_token: sessionToken,
-        status: 'active'
-      });
-    } catch {
-      return null;
-    }
-  }
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -151,67 +101,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     return NextResponse.json({ error: 'Kunde inte hämta svar just nu — försök igen.' }, { status: 502 });
   }
 
-  // Best-effort: persistera + extrahera lead (människa-i-loopen granskar sedan).
+  // GARANTERA en lead för samtalet (idempotent upsert per tur). Best-effort:
+  // chatten ska aldrig fela på persistens/extraktion.
   try {
-    const conv = await getOrCreateConversation(pb, tenant, slug, sessionToken);
+    const conv = await getOrCreateChatConversation(pb, tenant, slug, sessionToken);
     if (conv) {
-      const lastUser = history[history.length - 1];
-      if (lastUser?.role === 'user') {
-        await appendMessage(pb, conv.id, { role: 'user', content: lastUser.content });
-      }
-      await appendMessage(pb, conv.id, {
-        role: 'assistant',
-        content: reply.text,
-        tokens_in: reply.tokensIn,
-        tokens_out: reply.tokensOut,
-        model: reply.model
+      await persistChatTurnAndUpsertLead(pb, {
+        tenant,
+        conversation: conv,
+        history,
+        reply,
+        moduleName: module.name,
+        sourceKey: 'ai-chat',
+        landingModule: slug,
+        notifyModule: module
       });
-
-      // Extrahera kontakt/idé ur samtalet. Skapa lead när tillräckligt finns.
-      const fullHistory: CompassChatMessage[] = [...history, { role: 'assistant', content: reply.text }];
-      const extracted = await extractLead(fullHistory);
-      const fallback = summarizeChatLead(fullHistory, module.name);
-      const leadFields = {
-        name: extracted?.name || 'Anonym',
-        email: extracted?.email || undefined,
-        phone: extracted?.phone || undefined,
-        organization: extracted?.organization || undefined,
-        idea_summary: extracted?.idea_summary || fallback.summary,
-        idea_category: extracted?.idea_category || undefined,
-        source_detail: `AI-chatt via ${module.name}`,
-        notes: fallback.notes
-      };
-      if (conv.lead) {
-        await updateLead(pb, tenant, conv.lead, leadFields);
-      } else {
-        const scoringSource = extracted || {
-          name: leadFields.name,
-          email: leadFields.email || null,
-          phone: leadFields.phone || null,
-          organization: leadFields.organization || null,
-          idea_summary: leadFields.idea_summary,
-          idea_category: leadFields.idea_category || null
-        };
-        const { score, reasoning } = await scoreLead(scoringSource);
-        const lead = await createLead(pb, tenant, {
-          ...leadFields,
-          source_key: 'ai-chat',
-          landing_module: slug,
-          score,
-          score_reasoning: reasoning,
-          consent_at: new Date().toISOString()
-        });
-        if (lead) {
-          try {
-            await pb.collection('compass_conversations').update(conv.id, { lead: lead.id });
-          } catch {
-            // best-effort
-          }
-          // Notifiera Movexums inflödesmail om det nya inflödet (en gång,
-          // vid första skapandet — inte vid efterföljande uppdateringar).
-          await notifyNewInflow(module, lead);
-        }
-      }
     }
   } catch {
     // best-effort — chatten ska aldrig fela på persistens/extraktion
