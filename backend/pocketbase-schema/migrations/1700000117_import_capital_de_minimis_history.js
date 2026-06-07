@@ -1,3 +1,95 @@
+/// <reference path="../pb_data/types.d.ts" />
+
+// Data-migration: importerar det historiska CRM-arket "Kapital" (capital_id-
+// listan) → `capital_rounds` (ALLA rader, § 15.2) + `de_minimis_stod`
+// (endast Typ="De minimis", § 20). Ersätter det tidigare engångsskriptet så
+// att datan kommer in automatiskt vid deploy (auto-migrate).
+//
+// Mappning (§ 15.2 / § 20):
+//   • Typ → capital_rounds.type: Bidrag→grant, Ägarkapital→equity, Lån→loan,
+//     Innovationscheck→soft_funding, Excellensmedel→other, De minimis→other.
+//   • Endast Typ="De minimis" → de_minimis_stod (forordning=ALLMAN,
+//     stodgivare=Finansiär, beslutsdatum=Mottaget datum, belopp_sek=Belopp,
+//     belopp_eur=Belopp/11.3, syfte=Anteckning). Excellensmedel är GBER art. 22
+//     statsstöd och hamnar INTE i de minimis.
+//
+// Säkerhet/efterlevnad:
+//   • Tenant-scope: kör BARA mot tenant med slug "movexum"; saknas den blir
+//     migrationen en säker no-op (andra/testmiljöer påverkas inte).
+//   • Bolagsmatchning på NAMN (arket saknar org-nr; gamla Excel-id finns inte).
+//     Omatchade rader hoppas tyst över (inkl. privatpersoner/skräp-rader).
+//   • PII: Anteckning personnummer-saneras (\d{6,8}[-+]?\d{4} → [REDACTED]),
+//     samma regex som apps/web/src/lib/import/crm-excel.ts.
+//   • Idempotent: natural-key-dedup (startup+source+belopp+datum) → kan inte
+//     skapa dubletter; de minimis-enhet (de_minimis_units) skapas lazy per bolag.
+//   • kanBevilja-taket körs INTE — historisk registrering, inte nya beslut
+//     (taket får överskridas historiskt; § 20.3).
+//   • Riskklass (EU AI Act): n/a — ren dataimport, ingen AI-inferens.
+
+const TENANT_SLUG = 'movexum';
+const VAXELKURS = 11.3; // DEFAULT_VAXELKURS_SEK_PER_EUR (packages/shared/src/de-minimis.ts)
+const PNR_RE = /\b\d{6,8}[-+]?\d{4}\b/g;
+
+// Typ → capital_rounds.type (speglar CAPITAL_TYPE_MAP i crm-excel.ts).
+const CAPITAL_TYPE_MAP = {
+  bidrag: 'grant',
+  ägarkapital: 'equity',
+  aktiekapital: 'equity',
+  lån: 'loan',
+  innovationscheck: 'soft_funding',
+  konvertibel: 'convertible',
+  konvertibelt: 'convertible'
+};
+
+// Explicit alias-override: arknamn (lowercase) → exakt startups.name. Fyll i
+// vid behov om ett bolag inte matchar på normaliserat namn.
+const NAME_ALIASES = {};
+
+function normLower(s) {
+  return String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+function sanitizePnr(t) {
+  return String(t).replace(PNR_RE, '[REDACTED]');
+}
+function mapCapitalType(raw) {
+  return CAPITAL_TYPE_MAP[normLower(raw)] || 'other';
+}
+function isDeMinimis(raw) {
+  return normLower(raw) === 'de minimis';
+}
+function parseDate(raw) {
+  const m = /(\d{4})-(\d{2})-(\d{2})/.exec(String(raw == null ? '' : raw));
+  return m ? m[1] + '-' + m[2] + '-' + m[3] : null;
+}
+function parseAmount(raw) {
+  if (raw == null) return null;
+  const cleaned = String(raw).replace(/[^\d.,-]/g, '').replace(/\s/g, '').replace(',', '.');
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  return isFinite(n) ? n : null;
+}
+function normalizeName(raw) {
+  let s = String(raw == null ? '' : raw).trim().toLowerCase();
+  s = s.replace(/\s+/g, ' ');
+  s = s.replace(/\s*\baktiebolag\b/g, ' ab');
+  s = s.replace(/[.'"`’]/g, '');
+  s = s.replace(/\s*\bab\b\s*$/g, '').trim();
+  return s;
+}
+function parenInner(raw) {
+  const m = /\(([^)]+)\)/.exec(String(raw == null ? '' : raw));
+  return m ? m[1] : null;
+}
+function stripParen(raw) {
+  return String(raw == null ? '' : raw).replace(/\([^)]*\)/g, ' ').trim();
+}
+function esc(v) {
+  return String(v == null ? '' : v).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+// Tab-separerad källa (header på rad 1). Kolumner:
+// Företagsnamn, Typ, Finansiär, Belopp, Mottaget datum, Anteckning.
+const DATA = `
 Företagsnamn	Typ	Finansiär	Belopp	Mottaget datum	Anteckning
 Equiesum AB	De minimis	Sprint X TVV De minimis	30000	2026-03-31	Origami makers teamutvecklingsinsats Sprint X 2
 Equiesum AB	De minimis	Sprint X TVV De minimis	4446	2026-03-31	Buss och logi techarena
@@ -407,3 +499,174 @@ Nitiu AB	De minimis	Sprint X TVV De minimis	15000	2020-09-30	Allies workinar - H
 Nitiu AB	Ägarkapital	Nyemission	3622000	2020-05-31
 Lovisa of Sweden AB	Bidrag	ALMI	100000	2020-03-27	Verifieringsmedel
 Lovisa of Sweden AB	Bidrag	ALMI	200000	2018-01-02
+`;
+
+migrate(
+  (app) => {
+    let tenant = null;
+    try {
+      tenant = app.findFirstRecordByFilter('tenants', `slug = "${TENANT_SLUG}"`);
+    } catch (e) {
+      tenant = null;
+    }
+    if (!tenant) {
+      console.log('[import-capital] tenant "' + TENANT_SLUG + '" saknas — hoppar över.');
+      return;
+    }
+    const tenantId = tenant.id;
+
+    let startups = [];
+    try {
+      startups = app.findRecordsByFilter('startups', `tenant = "${tenantId}"`, '', 100000, 0);
+    } catch (e) {
+      startups = [];
+    }
+
+    const nameIndex = {};
+    const addKey = (k, id) => {
+      if (k && !(k in nameIndex)) nameIndex[k] = id;
+    };
+    for (const s of startups) {
+      const raw = s.getString('name');
+      addKey(normalizeName(raw), s.id);
+      const inner = parenInner(raw);
+      if (inner) addKey(normalizeName(inner), s.id);
+      const outer = stripParen(raw);
+      if (outer && outer !== raw) addKey(normalizeName(outer), s.id);
+    }
+
+    const matchStartup = (rawName) => {
+      const alias = NAME_ALIASES[normLower(rawName)];
+      const cands = alias
+        ? [normalizeName(alias)]
+        : [normalizeName(rawName), normalizeName(parenInner(rawName) || ''), normalizeName(stripParen(rawName))];
+      for (const k of cands) {
+        if (k && k in nameIndex) return nameIndex[k];
+      }
+      return null;
+    };
+
+    const capCol = app.findCollectionByNameOrId('capital_rounds');
+    const dmCol = app.findCollectionByNameOrId('de_minimis_stod');
+    const unitCol = app.findCollectionByNameOrId('de_minimis_units');
+
+    const unitCache = {};
+    const resolveUnit = (startupId, name) => {
+      if (startupId in unitCache) return unitCache[startupId];
+      let unitId = null;
+      try {
+        const u = app.findFirstRecordByFilter('de_minimis_units', `startup = "${startupId}"`);
+        unitId = u.id;
+      } catch (e) {
+        unitId = null;
+      }
+      if (!unitId) {
+        const r = new Record(unitCol);
+        r.set('tenant', tenantId);
+        r.set('startup', startupId);
+        r.set('namn', name || 'De minimis');
+        app.save(r);
+        unitId = r.id;
+      }
+      unitCache[startupId] = unitId;
+      return unitId;
+    };
+
+    const lines = DATA.split('\n').filter((l) => l.trim().length > 0);
+    let capCreated = 0;
+    let dmCreated = 0;
+    let skipped = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const c = lines[i].split('\t');
+      const name = (c[0] || '').trim();
+      const typ = (c[1] || '').trim();
+      const finansiar = (c[2] || '').trim();
+      const belopp = parseAmount(c[3]);
+      const datum = parseDate(c[4]);
+      const note = (c[5] || '').trim();
+      if (!name || belopp === null || belopp <= 0 || !datum) {
+        skipped++;
+        continue;
+      }
+      const startupId = matchStartup(name);
+      if (!startupId) {
+        skipped++;
+        continue;
+      }
+      const source = finansiar || '(okänd finansiär)';
+      const clean = note ? sanitizePnr(note) : '';
+
+      // 1) capital_rounds — alla rader.
+      let exists = [];
+      try {
+        exists = app.findRecordsByFilter(
+          'capital_rounds',
+          `startup = "${startupId}" && source = "${esc(source)}" && amount_sek = ${belopp} && received_at >= "${datum} 00:00:00" && received_at <= "${datum} 23:59:59"`,
+          '',
+          1,
+          0
+        );
+      } catch (e) {
+        exists = [];
+      }
+      if (exists.length === 0) {
+        const r = new Record(capCol);
+        r.set('tenant', tenantId);
+        r.set('startup', startupId);
+        r.set('type', mapCapitalType(typ));
+        r.set('source', source);
+        r.set('amount_sek', belopp);
+        r.set('received_at', datum);
+        if (clean) r.set('notes', clean);
+        app.save(r);
+        capCreated++;
+      }
+
+      // 2) de_minimis_stod — endast Typ="De minimis".
+      if (isDeMinimis(typ)) {
+        const unitId = resolveUnit(startupId, name);
+        let dmExists = [];
+        try {
+          dmExists = app.findRecordsByFilter(
+            'de_minimis_stod',
+            `unit = "${unitId}" && stodgivare = "${esc(source)}" && belopp_sek = ${belopp} && beslutsdatum >= "${datum} 00:00:00" && beslutsdatum <= "${datum} 23:59:59"`,
+            '',
+            1,
+            0
+          );
+        } catch (e) {
+          dmExists = [];
+        }
+        if (dmExists.length === 0) {
+          const eur = Math.round((belopp / VAXELKURS) * 100) / 100;
+          const r = new Record(dmCol);
+          r.set('tenant', tenantId);
+          r.set('startup', startupId);
+          r.set('unit', unitId);
+          r.set('forordning', 'ALLMAN');
+          r.set('stodgivare', source);
+          r.set('beslutsdatum', datum);
+          r.set('belopp_sek', belopp);
+          r.set('valutakurs', VAXELKURS);
+          r.set('belopp_eur', eur);
+          if (clean) r.set('syfte', clean.slice(0, 500));
+          app.save(r);
+          dmCreated++;
+        }
+      }
+    }
+    console.log(
+      '[import-capital] klart: capital_rounds +' +
+        capCreated +
+        ', de_minimis_stod +' +
+        dmCreated +
+        ', skippade ' +
+        skipped
+    );
+  },
+  (app) => {
+    // down: medveten no-op. Historisk data är inte säkert reverterbar — en
+    // natural-key-radering skulle kunna träffa manuellt inmatade rader. Rulla
+    // tillbaka manuellt vid behov.
+  }
+);
