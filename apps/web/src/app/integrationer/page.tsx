@@ -95,6 +95,7 @@ export default async function IntegrationerPage({
     redirect('/dashboard');
 
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
+  const isAdmin = hasRole(user.roles, ['admin']);
   const pb = await getServerPb();
 
   let providers: ProviderRecord[] = [];
@@ -423,33 +424,12 @@ export default async function IntegrationerPage({
           )}
         </section>
 
-        {isStaff && (
+        {isAdmin && (
           <section>
             <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
               Administration
             </h2>
             <div className="space-y-3">
-              <a
-                href="/admin/import-bolagslista"
-                className="block rounded-2xl border border-default bg-surface p-5 transition hover:bg-canvas-subtle"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-foreground">
-                      Bolagslista (Excel)
-                    </div>
-                    <p className="mt-1 text-[13px] text-foreground-muted">
-                      Ladda upp Movexums Bolagslista och fyll på{' '}
-                      <code className="font-mono text-xs">startups</code> +{' '}
-                      <code className="font-mono text-xs">startup_financials</code>{' '}
-                      idempotent. Underlag för AI-agenterna.
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-movexum-pastell-gron px-3 py-1 text-xs font-medium text-movexum-morkgron">
-                    Tillgänglig
-                  </span>
-                </div>
-              </a>
               <a
                 href="/admin/import-crm"
                 className="block rounded-2xl border border-default bg-surface p-5 transition hover:bg-canvas-subtle"
@@ -457,16 +437,17 @@ export default async function IntegrationerPage({
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-foreground">
-                      CRM-export (Excel, 12 ark)
+                      Generell Excel-import
                     </div>
                     <p className="mt-1 text-[13px] text-foreground-muted">
-                      Migrera hela det tidigare CRM:t — företag, personer,
-                      aktiviteter, kapital, IPR, avtal, todo och mätetal.
-                      GDPR-saneras och skrivs idempotent.
+                      Ladda upp valfri Excel-fil och mappa varje ark mot en
+                      befintlig tabell + kolumn mot fält. Förhandsgranska vad
+                      som kommer med innan import. GDPR-saneras och skrivs
+                      idempotent.
                     </p>
                   </div>
                   <span className="rounded-full bg-movexum-pastell-gron px-3 py-1 text-xs font-medium text-movexum-morkgron">
-                    Tillgänglig
+                    Endast admin
                   </span>
                 </div>
               </a>
