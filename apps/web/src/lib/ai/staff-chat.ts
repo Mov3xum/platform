@@ -84,7 +84,13 @@ const STAFF_TOOL_GUIDANCE =
   '`chart` för trender i stället för långa siffertabeller. Filen renderas ' +
   'deterministiskt med rundade kort, skuggor och diagram, sparas i användarens ' +
   'privata Filer, bifogas svaret för nedladdning OCH visas som inline-' +
-  'förhandsgranskning i chatten.\n\n' +
+  'förhandsgranskning i chatten.\n' +
+  '  • PRESENTATIONER (pptx): skapa ett RIKT deck — minst 5–6 innehållsslides. ' +
+  'Lägg en KPI-slide (layout "kpi") med nyckeltal, visualisera trender med ' +
+  '`chart`, och avsluta med en slutsats/nästa-steg-slide. Skapa ALDRIG en slide ' +
+  'utan innehåll (tomma slides tas bort) och upprepa inte titeln som egen slide. ' +
+  'För topp-N/ranking: använd `chart.type:"hbar"` (liggande staplar). Använd ' +
+  'rubrik + 3–5 korta punkter per slide, inte långa stycken.\n\n' +
   'Skrivregler:\n' +
   '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
   'efterfrågad.\n' +
