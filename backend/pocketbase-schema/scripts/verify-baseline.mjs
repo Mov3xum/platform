@@ -369,6 +369,88 @@ function verifyStartupMemberIsolation(collections) {
   ok('Bolagsisolering (§ 21) + cross-tenant-scope (1700000112) verifierad');
 }
 
+// ── AI-fältmaskning: live-schema-svep mot tyst PII-regression ────────────────
+// CLAUDE.md § 9.3 / § 10.5 punkt 10. AI-chattens query_collection maskar PII
+// per FÄLTNAMN (substring) i `apps/web/src/lib/ai/redaction.ts`. Risken: ett
+// NYTT fält vars namn dodgar substring-maskern (svensk/variant-stavning som
+// `kön`, `epost`, `personnr`) hamnar i en EXPONERAD (icke-denylistad) kollektion
+// och läcker till modellen. redaction.test.ts låser policyn mot koden; det här
+// svepet låser den mot det FAKTISKT deployade schemat och failar deployen.
+
+// Spegel av PII_FIELD_PATTERNS (redaction.ts) — maskerns FAKTISKA täckning.
+// Källa av sanning är redaction.ts + redaction.test.ts; håll i synk här så
+// svepet vet vad som redan maskas. (Avvikelse ger bara en över-strikt fail.)
+const MASKED_PATTERNS = [
+  'password', 'tokenkey', 'token_key', 'session_token', 'email', 'person_nr',
+  'personnummer', 'ssn', 'phone', 'telefon', 'mobil', 'avatar', 'gender',
+  'identifies_as', 'street_address', 'postal_code', 'org_nr',
+  'organisationsnummer', 'ip_hash'
+];
+
+// Spegel av COLLECTION_DENYLIST (redaction.ts) — helt utestängda kollektioner.
+const AI_DENYLIST = new Set([
+  'users', 'tenants', 'verification_tokens', 'pending_signups',
+  'tenant_integrations', 'user_app_integrations', 'user_mistral_connectors',
+  'chat_threads', 'user_files', 'user_file_chunks', 'deep_jobs',
+  'org_knowledge', 'org_knowledge_chunks', 'agent_memory'
+]);
+
+// PII-stavningar som substring-maskern INTE redan fångar. Förankrade till `_`
+// eller sträng-gräns så att `konferens`/`kontakt`/`postnummer` inte falsk-larmar.
+const PII_GAP_PATTERNS = [
+  /(^|_)k[oö]n(_|$)/i,                       // kön/kon (GDPR art. 9 — gender)
+  /(^|_)e[-_]?post\w*(_|$)/i,                // epost/e-post/e_post(adress)
+  /(^|_)(gatu|hem|post)?adress(_|$)/i,       // adress/postadress/gatuadress
+  /(^|_)p(erson)?nr(_|$)/i,                  // pnr/personnr
+  /(^|_)(f[oö]delse\w*|birth\w*|dob)(_|$)/i  // födelsedatum/birthdate/dob
+];
+
+// Granskade fält som matchar heuristiken men som INTE är PII ("whitelistade").
+// Format: "<collection>.<field>". Lägg till med motivering vid behov.
+const PII_SWEEP_ALLOWLIST = new Set([]);
+
+function isMaskedByPatterns(fieldName) {
+  const lower = fieldName.toLowerCase();
+  return MASKED_PATTERNS.some((p) => lower.includes(p));
+}
+
+async function verifyAiPiiMasking() {
+  let all;
+  try {
+    all = await pb.collections.getFullList({ $autoCancel: false });
+  } catch (err) {
+    fail(`Kunde inte lista kollektioner för PII-maskningssvep:\n${describeError(err)}`);
+  }
+  const offenders = [];
+  let swept = 0;
+  for (const col of all) {
+    if (col.system) continue;
+    if (AI_DENYLIST.has(col.name)) continue; // helt utestängd → kan inte läcka
+    swept++;
+    for (const field of col.fields || []) {
+      const name = field.name;
+      if (!name) continue;
+      if (isMaskedByPatterns(name)) continue; // redan maskad
+      if (PII_SWEEP_ALLOWLIST.has(`${col.name}.${name}`)) continue;
+      if (PII_GAP_PATTERNS.some((re) => re.test(name))) {
+        offenders.push(`${col.name}.${name}`);
+      }
+    }
+  }
+  if (offenders.length) {
+    fail(
+      'AI-PII-maskning: fält som ser ut som personuppgifter men som varken maskas\n' +
+        'eller ligger i en denylistad kollektion (skulle läcka till modellen via\n' +
+        'query_collection, CLAUDE.md § 9.3):\n' +
+        offenders.map((o) => `  - ${o}`).join('\n') +
+        '\nÅtgärd: lägg fältnamnets mönster i PII_FIELD_PATTERNS (redaction.ts +\n' +
+        'spegeln i detta skript), ELLER denylista kollektionen, ELLER — om fältet\n' +
+        'bevisligen inte är PII — lägg "<collection>.<field>" i PII_SWEEP_ALLOWLIST.'
+    );
+  }
+  ok(`AI-PII-maskningssvep: inga oskyddade PII-fält (${swept} exponerade kollektioner)`);
+}
+
 function verifyRlsAndRbac(collections) {
   const tenants = collections.get('tenants');
   // `:each ?=` (inte `?=`) — PB v0.23.4-operatorbugg, se migration 1700000108.
@@ -692,6 +774,7 @@ async function main() {
   const collections = await verifyCollectionsExist();
   verifyRlsAndRbac(collections);
   await verifyNoBrokenCreateRules();
+  await verifyAiPiiMasking();
   await verifyAppUser();
   await verifyAppUserCanCreate(pb, APP_USER_EMAIL, APP_USER_PASSWORD);
 

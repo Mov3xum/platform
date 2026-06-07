@@ -33,6 +33,7 @@ import {
   AttachmentError
 } from '@/lib/ai/attachments';
 import { logAiUsage } from '@/lib/ai/usage';
+import { assertWithinAiBudget, AiBudgetExceededError } from '@/lib/ai/budget.server';
 import type { ToolModel, ToolRunMessage } from '@platform/shared';
 
 const STAFF_ROLES = ['admin', 'incubator_lead'] as const;
@@ -409,6 +410,14 @@ export async function runConnectorTurnAction(formData: FormData): Promise<Connec
   const allowlist = getTenantAllowlist(tenant);
   if (!canActivateConnector(user.roles, { kind, id: connectorId }, allowlist)) {
     return { error: 'Connector inte tillåten i tenanten.' };
+  }
+
+  // Hård kostnadsspärr per tenant/månad (samma gräns som agent-loopen).
+  try {
+    await assertWithinAiBudget(pb, user.tenant);
+  } catch (err) {
+    if (err instanceof AiBudgetExceededError) return { error: err.message };
+    // Övriga fel ska inte tyst blockera — låt budgetkollen vara fail-open.
   }
 
   // Modellval — måste stödja built-in tools.
