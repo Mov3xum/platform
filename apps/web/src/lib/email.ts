@@ -24,7 +24,7 @@ export async function sendVerificationEmail(to: string, verificationUrl: string)
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Verifiera ditt konto – movexum</title>
 </head>
-<body style="margin:0;padding:0;background:#f2f2f2;font-family:system-ui,sans-serif;">
+<body style="margin:0;padding:0;background:#f2f2f2;font-family:'Nunito Sans','Nunito Sans Variable',system-ui,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f2f2;padding:40px 16px;">
     <tr>
       <td align="center">
@@ -159,7 +159,7 @@ export async function sendInflowNotification(
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nytt inflöde – Startupkompassen</title>
 </head>
-<body style="margin:0;padding:0;background:#f2f2f2;font-family:system-ui,sans-serif;">
+<body style="margin:0;padding:0;background:#f2f2f2;font-family:'Nunito Sans','Nunito Sans Variable',system-ui,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f2f2;padding:40px 16px;">
     <tr>
       <td align="center">
