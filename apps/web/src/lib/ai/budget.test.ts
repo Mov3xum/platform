@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveBudgetUsd, isOverBudget, monthStartIso, AiBudgetExceededError } from './budget';
+import {
+  resolveBudgetUsd,
+  effectiveBudgetUsd,
+  isOverBudget,
+  monthStartIso,
+  AiBudgetExceededError
+} from './budget';
 
 // Låser den hårda kostnadsspärrens rena logik (CLAUDE.md § 10.1 robusthet).
 
@@ -15,6 +21,22 @@ test('resolveBudgetUsd: osatt/0/ogiltigt → spärren av (0)', () => {
 test('resolveBudgetUsd: giltigt positivt tal parsas', () => {
   assert.equal(resolveBudgetUsd('100'), 100);
   assert.equal(resolveBudgetUsd('49.5'), 49.5);
+});
+
+test('effectiveBudgetUsd: tenant > 0 överstyr env-defaulten', () => {
+  assert.equal(effectiveBudgetUsd(50, '100'), 50);
+  assert.equal(effectiveBudgetUsd(250, undefined), 250);
+});
+
+test('effectiveBudgetUsd: tenant 0/tomt ärver env-defaulten', () => {
+  assert.equal(effectiveBudgetUsd(0, '100'), 100);
+  assert.equal(effectiveBudgetUsd(null, '100'), 100);
+  assert.equal(effectiveBudgetUsd(undefined, '100'), 100);
+});
+
+test('effectiveBudgetUsd: tenant 0 + ingen env = spärren av (0)', () => {
+  assert.equal(effectiveBudgetUsd(0, undefined), 0);
+  assert.equal(effectiveBudgetUsd(undefined, '0'), 0);
 });
 
 test('isOverBudget: bara när tak satt OCH förbrukat', () => {

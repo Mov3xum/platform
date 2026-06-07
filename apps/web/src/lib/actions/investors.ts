@@ -306,7 +306,7 @@ export async function listInvestors(): Promise<Investor[]> {
   const pb = await getServerPb();
   try {
     const res = await pb.collection(PB_COLLECTIONS.investors).getList<Investor>(1, 100, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: `tenant = "${escFilter(user.tenant)}"`,
       sort: '-updated'
     });
     return res.items;
@@ -320,7 +320,7 @@ export async function listDeals(): Promise<Deal[]> {
   const pb = await getServerPb();
   try {
     const res = await pb.collection(PB_COLLECTIONS.deals).getList<Deal>(1, 200, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: `tenant = "${escFilter(user.tenant)}"`,
       sort: '-last_activity',
       expand: 'startup,investor'
     });

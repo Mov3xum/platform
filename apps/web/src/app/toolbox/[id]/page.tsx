@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole, canRunTool } from '@/lib/rbac';
@@ -46,7 +47,7 @@ export default async function ToolDetailPage({
   if (tool.requires_startup) {
     try {
       const result = await pb.collection('startups').getList<{ id: string; name: string }>(1, 200, {
-        filter: `tenant = "${user.tenant}" && status = "active"`,
+        filter: `tenant = "${escFilter(user.tenant)}" && status = "active"`,
         sort: 'name',
         fields: 'id,name'
       });
@@ -72,7 +73,7 @@ export default async function ToolDetailPage({
   let runsLoadFailed = false;
   try {
     runsResult = await pb.collection('tool_runs').getList<ToolRun>(1, 10, {
-      filter: `tool = "${id}" && tenant = "${user.tenant}"`,
+      filter: `tool = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
       sort: '-created',
       expand: 'startup,triggered_by'
     });
@@ -111,7 +112,7 @@ export default async function ToolDetailPage({
     try {
       const rec = await pb
         .collection('tool_schedules')
-        .getFirstListItem(`tool = "${id}" && tenant = "${user.tenant}"`);
+        .getFirstListItem(`tool = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`);
       existingSchedule = {
         id: rec.id as string,
         enabled: Boolean(rec.enabled),

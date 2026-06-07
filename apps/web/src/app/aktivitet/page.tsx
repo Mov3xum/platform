@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { redirect } from 'next/navigation';
 import { listForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
@@ -112,7 +113,7 @@ export default async function AktivitetPage({
   if (!kind || kind === 'tool_run') {
     try {
       systemRunsResult = await pb.collection('tool_runs').getList<ToolRun>(1, 20, {
-        filter: `tenant = "${user.tenant}" && startup = ""`,
+        filter: `tenant = "${escFilter(user.tenant)}" && startup = ""`,
         sort: '-created',
         expand: 'tool,triggered_by'
       });
@@ -134,7 +135,7 @@ export default async function AktivitetPage({
       syncRunsResult = await pb
         .collection('integration_sync_runs')
         .getList<IntegrationSyncRunRow>(1, 20, {
-          filter: `tenant = "${user.tenant}"`,
+          filter: `tenant = "${escFilter(user.tenant)}"`,
           sort: '-started_at',
           expand: 'triggered_by'
         });

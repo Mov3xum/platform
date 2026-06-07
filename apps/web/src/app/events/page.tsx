@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
@@ -59,7 +60,7 @@ export default async function EventsPage() {
 
   try {
     const res = await pb.collection(PB_COLLECTIONS.events).getList<IncubatorEvent>(1, 100, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: `tenant = "${escFilter(user.tenant)}"`,
       sort: '-starts_at'
     });
     events = res.items;
@@ -83,7 +84,7 @@ export default async function EventsPage() {
       const sRes = await pb
         .collection(PB_COLLECTIONS.eventSignups)
         .getList<EventSignup>(1, 500, {
-          filter: `tenant = "${user.tenant}" && event = "${funnelEvent.id}"`,
+          filter: `tenant = "${escFilter(user.tenant)}" && event = "${escFilter(funnelEvent.id)}"`,
           fields: 'id,stage,event'
         });
       allSignups = sRes.items;

@@ -31,6 +31,20 @@ export function resolveBudgetUsd(raw: string | undefined): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+/**
+ * Effektivt tak: tenantens fält (`monthly_ai_budget_usd`) överstyr env-defaulten
+ * när det är satt (> 0); 0/tomt ärver den globala env-defaulten. 0 i retur =
+ * spärren av. Per-tenant-override styrs från /installningar (§ 9.6).
+ */
+export function effectiveBudgetUsd(
+  tenantBudget: number | null | undefined,
+  envRaw: string | undefined
+): number {
+  const t = Number(tenantBudget);
+  if (Number.isFinite(t) && t > 0) return t;
+  return resolveBudgetUsd(envRaw);
+}
+
 /** Spärren slår till när ett tak är satt OCH redan förbrukat. */
 export function isOverBudget(spentUsd: number, budgetUsd: number): boolean {
   return budgetUsd > 0 && spentUsd >= budgetUsd;

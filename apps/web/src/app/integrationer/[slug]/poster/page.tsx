@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { notFound, redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser } from '@/lib/rbac';
@@ -61,7 +62,7 @@ export default async function IntegrationRecordsPage({
   try {
     provider = await pb
       .collection('integration_providers')
-      .getFirstListItem<ProviderRow>(`slug = "${slug}" && active = true`);
+      .getFirstListItem<ProviderRow>(`slug = "${escFilter(slug)}" && active = true`);
   } catch {
     provider = null;
   }
@@ -72,7 +73,7 @@ export default async function IntegrationRecordsPage({
     tenantIntegration = await pb
       .collection('tenant_integrations')
       .getFirstListItem<TenantIntegrationRow>(
-        `tenant = "${user.tenant}" && provider = "${provider.id}"`
+        `tenant = "${escFilter(user.tenant)}" && provider = "${escFilter(provider.id)}"`
       );
   } catch {
     tenantIntegration = null;

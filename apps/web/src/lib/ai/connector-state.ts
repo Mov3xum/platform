@@ -1,4 +1,5 @@
 import 'server-only';
+import { escFilter } from '@/lib/pb-filter';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
   encryptCredentials,
@@ -64,7 +65,7 @@ export async function persistConnectorOAuthResult(args: {
   token: Record<string, unknown>;
 }): Promise<void> {
   const filter =
-    `user = "${args.userId}" && connector_kind = "mcp" && connector_id = "${args.connectorId}"`;
+    `user = "${escFilter(args.userId)}" && connector_kind = "mcp" && connector_id = "${escFilter(args.connectorId)}"`;
   let row: (Record<string, unknown> & { id: string }) | null = null;
   try {
     const list = await args.pb.collection('user_mistral_connectors').getList(1, 1, { filter });

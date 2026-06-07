@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { notFound, redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
@@ -84,7 +85,7 @@ export default async function EventDetailPage({
   let signups: EventSignup[] = [];
   try {
     const res = await pb.collection(PB_COLLECTIONS.eventSignups).getList<EventSignup>(1, 500, {
-      filter: `tenant = "${user.tenant}" && event = "${id}"`,
+      filter: `tenant = "${escFilter(user.tenant)}" && event = "${escFilter(id)}"`,
       sort: '-created',
       expand: 'startup'
     });

@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { escFilter } from '@/lib/pb-filter';
 import Link from 'next/link';
 import { ExternalLink, Check } from 'lucide-react';
 import { getServerPb, requireUser } from '@/lib/auth.server';
@@ -116,7 +117,7 @@ export default async function IntegrationerPage({
     const res = await pb
       .collection('tenant_integrations')
       .getList<TenantIntegrationRecord>(1, 200, {
-        filter: `tenant = "${user.tenant}"`,
+        filter: `tenant = "${escFilter(user.tenant)}"`,
         fields: 'id,provider,status'
       });
     for (const row of res.items) {
@@ -168,7 +169,7 @@ export default async function IntegrationerPage({
     pb
       .collection('user_mistral_connectors')
       .getList<ConnectorActivation>(1, 200, {
-        filter: `user = "${user.id}"`
+        filter: `user = "${escFilter(user.id)}"`
       })
       .catch(() => ({ items: [] as ConnectorActivation[] })),
     listActiveConnectors().catch(() => [] as MistralConnector[])

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
@@ -32,7 +33,7 @@ export default async function EducationPage() {
     const workshopsResult = await pb
       .collection(PB_COLLECTIONS.workshops)
       .getList<Workshop>(1, 200, {
-        filter: `tenant = "${user.tenant}" && active = true`,
+        filter: `tenant = "${escFilter(user.tenant)}" && active = true`,
         sort: 'title',
         expand: 'area'
       });
@@ -48,7 +49,7 @@ export default async function EducationPage() {
   try {
     areas = (
       await pb.collection(PB_COLLECTIONS.workshopAreas).getList<WorkshopArea>(1, 200, {
-        filter: `tenant = "${user.tenant}"`,
+        filter: `tenant = "${escFilter(user.tenant)}"`,
         sort: 'name'
       })
     ).items;
@@ -69,7 +70,7 @@ export default async function EducationPage() {
       await pb
         .collection(PB_COLLECTIONS.workshopAssignments)
         .getList<WorkshopAssignment>(1, 200, {
-          filter: `tenant = "${user.tenant}"${linkedFilter ? ` && (${linkedFilter})` : ''}`,
+          filter: `tenant = "${escFilter(user.tenant)}"${linkedFilter ? ` && (${linkedFilter})` : ''}`,
           sort: '-created',
           expand: 'workshop,startup'
         })

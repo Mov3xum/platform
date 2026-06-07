@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { redirect } from 'next/navigation';
 import { listForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
@@ -112,7 +113,7 @@ export default async function ToolboxPage({
   try {
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const recent = await pb.collection('tool_runs').getList<ToolRun>(1, 500, {
-      filter: `tenant = "${user.tenant}" && created >= "${since24h}"`,
+      filter: `tenant = "${escFilter(user.tenant)}" && created >= "${escFilter(since24h)}"`,
       sort: '-created'
     });
     runsLast24h = recent.totalItems;
@@ -122,7 +123,7 @@ export default async function ToolboxPage({
   }
   try {
     const allRuns = await pb.collection('tool_runs').getList<ToolRun>(1, 500, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: `tenant = "${escFilter(user.tenant)}"`,
       sort: '-created'
     });
     for (const r of allRuns.items) {
