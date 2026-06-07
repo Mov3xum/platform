@@ -6,6 +6,7 @@ import { buildChatTools } from './tools';
 import { buildSchemaSummary, getExposedCollections } from './schema';
 import { buildPortfolioContext, renderPromptTemplate } from './context';
 import { buildKnowledgeContext } from './agent-prompt';
+import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from './guidance';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from './web';
 import { withAttachedImages } from './chat-input';
 import { logAiUsage } from './usage';
@@ -26,7 +27,10 @@ export const CHAT_FALLBACK_MODELS = [
 ];
 // Vision-kapabel modell när bilder bifogas (stödjer även function calling).
 export const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
-export const MAX_TOOL_ITERATIONS = 4;
+// Interaktiv staff-chatt: ett intent-flöde blir lätt search_records →
+// describe_collection → query → aggregate → svar, så taket höjs över det
+// autonoma defaulten (4) men hålls bundet (robusthet § 10).
+export const MAX_TOOL_ITERATIONS = 7;
 export const DEFAULT_CHAT_WEB_SOURCES: WebSourceKey[] = ['breakit', 'sifted', 'vinnova'];
 
 export function pickModels(hasImages: boolean): string[] {
@@ -76,10 +80,15 @@ const STAFF_TOOL_GUIDANCE =
   'aktivitet kopplat till ett bolag.\n' +
   '- `update_activity_field`: uppdatera en befintlig aktivitets `title`, ' +
   '`description` eller `status`.\n' +
-  '- `generate_document` (när tillgängligt): ta fram en .pptx/.xlsx/.docx/.pdf ' +
-  'av sammanställd data. Siffror och fakta MÅSTE komma från tidigare ' +
-  'query_collection-svar — hitta aldrig på. Filen renderas deterministiskt och ' +
-  'sparas i användarens privata Filer + bifogas svaret för nedladdning.\n\n' +
+  '- `generate_document` (när tillgängligt): ta fram en snygg, brandad ' +
+  '.pptx/.xlsx/.docx/.pdf av sammanställd data. Siffror och fakta MÅSTE komma ' +
+  'från tidigare query_collection-svar — hitta aldrig på. VÄLJ alltid en ' +
+  '`template` som matchar uppgiften och följ dess struktur. Gör dokumentet ' +
+  'visuellt: använd `kpis` (nyckeltal som kort), `callout` (insikter), och ' +
+  '`chart` för trender i stället för långa siffertabeller. Filen renderas ' +
+  'deterministiskt med rundade kort, skuggor och diagram, sparas i användarens ' +
+  'privata Filer, bifogas svaret för nedladdning OCH visas som inline-' +
+  'förhandsgranskning i chatten.\n\n' +
   'Skrivregler:\n' +
   '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
   'efterfrågad.\n' +
@@ -339,6 +348,8 @@ export async function runStaffChatTurn(
     BASE_SYSTEM_PROMPT +
     (opts.agentBlock ? `\n\n---\n${opts.agentBlock}\n---` : '') +
     STAFF_TOOL_GUIDANCE +
+    SEARCH_STRATEGY_GUIDANCE +
+    DOMAIN_GLOSSARY +
     `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +
     (opts.webBlock ? `\n\n---\n${opts.webBlock}\n---` : '') +
     STYLE_REMINDER;

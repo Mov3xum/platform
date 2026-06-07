@@ -15,6 +15,7 @@ import {
 } from '@/lib/ai/context';
 import { buildKnowledgeContext } from '@/lib/ai/agent-prompt';
 import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
+import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from '@/lib/ai/guidance';
 import { buildChatTools } from '@/lib/ai/tools';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
 import { hasRole } from '@/lib/rbac';
@@ -74,7 +75,9 @@ const CHAT_FALLBACK_MODELS = [
 // När bilder är bifogade måste vi använda en vision-kapabel modell.
 // Pixtral 12B stödjer både vision och function calling.
 const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
-const MAX_TOOL_ITERATIONS = 4;
+// Interaktiv chatt: höjt över det autonoma defaulten (4) så ett intent-flöde
+// (search_records → describe_collection → query → aggregate → svar) ryms.
+const MAX_TOOL_ITERATIONS = 7;
 
 // Modellval för dashboard-chatten
 const STAFF_MODEL = 'mistral-large-latest';
@@ -487,6 +490,8 @@ async function runStaffChatWithTools(
     BASE_SYSTEM_PROMPT +
     (agentBlock ? `\n\n---\n${agentBlock}\n---` : '') +
     STAFF_TOOL_GUIDANCE +
+    SEARCH_STRATEGY_GUIDANCE +
+    DOMAIN_GLOSSARY +
     `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +
     (webBlock ? `\n\n---\n${webBlock}\n---` : '') +
     STYLE_REMINDER;
@@ -517,90 +522,6 @@ async function runStaffChatWithTools(
     return { text: result.text };
   } catch (err) {
     console.error('[chat] mistral tool loop error', { tenant: user.tenant, error: err });
-    return { error: chatErrorMessage(err) };
-  }
-}
-
-/**
- * Skickar ett chat-meddelande scope:at till ett specifikt bolag. För
- * Intric-stil per-bolag chat (ChatTab i StartupWorkspaceShell). Staff
- * får skriva om vilket bolag de har access till; founders får bara om
- * sina linkedStartups.
- */
-export async function sendStartupChatMessage(
-  messages: ChatMessage[],
-  startupId: string
-): Promise<ChatActionResult> {
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return { error: 'Ogiltigt meddelande.' };
-  }
-  if (!startupId) return { error: 'Inget bolag valt.' };
-
-  const limited: Array<{ role: 'user' | 'assistant'; content: string }> = messages
-    .slice(-20)
-    .map((m) => {
-      if (m.role !== 'user' && m.role !== 'assistant') return null;
-      return {
-        role: m.role,
-        content: String(m.content || '').trim().slice(0, 2000)
-      };
-    })
-    .filter((m): m is { role: 'user' | 'assistant'; content: string } => Boolean(m?.content));
-  if (limited.length === 0) return { error: 'Meddelandet är tomt.' };
-
-  const user = await requireUser();
-  const pb = await getServerPb();
-
-  const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
-  const isFounderOfStartup = user.linkedStartups.includes(startupId);
-
-  if (!isStaff && !isFounderOfStartup) {
-    return { error: 'Åtkomst nekad.' };
-  }
-
-  let contextBlock = '';
-  try {
-    const ctx = await buildStartupContext(pb, startupId, user.tenant);
-    contextBlock =
-      'BOLAG:\n' +
-      JSON.stringify(ctx.startup, null, 2) +
-      '\n\nMILSTOLPAR:\n' +
-      JSON.stringify(ctx.milestones, null, 2) +
-      '\n\nAKTIVITETER (senaste 90 dgr):\n' +
-      JSON.stringify(ctx.activities, null, 2) +
-      '\n\nANTECKNINGAR (ej konfidentiella):\n' +
-      JSON.stringify(ctx.notes, null, 2);
-  } catch (err) {
-    console.error('[startup-chat] context failed', {
-      tenant: user.tenant,
-      startupId,
-      error: err
-    });
-    return { error: 'Kunde inte ladda bolagets kontext.' };
-  }
-
-  const systemContent = `${BASE_SYSTEM_PROMPT}\n\n---\nKONTEXT:\n${contextBlock}\n---${STYLE_REMINDER}`;
-
-  try {
-    const result = await callMistralWithFallback(CHAT_FALLBACK_MODELS, [
-      { role: 'system', content: systemContent },
-      ...limited
-    ]);
-    await logAiUsage(pb, {
-      tenant: user.tenant,
-      userId: user.id,
-      surface: 'startup_chat',
-      model: result.modelUsed,
-      tokensIn: result.usage.prompt_tokens,
-      tokensOut: result.usage.completion_tokens
-    });
-    return { text: result.text };
-  } catch (err) {
-    console.error('[startup-chat] mistral error', {
-      tenant: user.tenant,
-      startupId,
-      error: err
-    });
     return { error: chatErrorMessage(err) };
   }
 }

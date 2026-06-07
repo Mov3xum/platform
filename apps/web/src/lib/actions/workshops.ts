@@ -8,6 +8,11 @@ import { hasRole } from '@/lib/rbac';
 import { buildStartupContext } from '@/lib/ai/context';
 import { callMistral, estimateCostUsd } from '@/lib/ai/mistral';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import {
+  createCollaboratorTasks,
+  createAssignmentMeeting,
+  type AssignmentCollabOptions
+} from '@/lib/assignments/collaboration';
 import type { Role, WorkshopArea, WorkshopAssignment, Workshop, WorkshopBlock, WorkshopModule } from '@platform/shared';
 import {
   normalizeWorkshopBlocks as toWorkshopBlocks,
@@ -70,51 +75,176 @@ function readImageFile(formData: FormData): File | null {
   return f instanceof File && f.size > 0 ? f : null;
 }
 
+// Canonical cover-image file-field definition — kept byte-for-byte in sync with
+// migrations 1700000087/1700000088 and setup-via-api.mjs. Used by the
+// self-heal path below when a deploy left the field off the collection.
+const IMAGE_FIELD_SPEC = {
+  name: 'image',
+  type: 'file',
+  required: false,
+  maxSelect: 1,
+  maxSize: MAX_IMAGE_BYTES,
+  mimeTypes: ['image/png', 'image/jpeg', 'image/webp'],
+  thumbs: ['800x450', '400x300']
+} as const;
+
+// Self-heal: if the running PocketBase is missing the `image` field on a
+// collection (the backend wasn't redeployed / the API-setup path never
+// provisioned it), an uploaded image is silently dropped. Rather than make the
+// user redeploy, we add the field ourselves via superuser — idempotent, and the
+// definition matches the migration exactly so this never diverges from the
+// versioned schema. Returns true if the field exists (already, or after adding).
+async function ensureImageFieldExists(superuser: PocketBase, collection: string): Promise<boolean> {
+  try {
+    const coll = await superuser.collections.getOne(collection);
+    const fields = Array.isArray(coll.fields) ? coll.fields : [];
+    if (fields.some((f: { name?: string }) => f?.name === 'image')) return true;
+
+    await superuser.collections.update(coll.id, {
+      fields: [...fields, { ...IMAGE_FIELD_SPEC }]
+    });
+    console.warn(
+      '[workshops] "image" field was missing on collection — added it via superuser to self-heal a stale deploy.',
+      { collection }
+    );
+    return true;
+  } catch (err) {
+    console.error('[workshops] failed to ensure "image" field exists', {
+      collection,
+      message: err instanceof Error ? err.message : String(err ?? '')
+    });
+    return false;
+  }
+}
+
+// Result of a cover-image write. `not_persisted` means PB accepted the write
+// but the value didn't stick — almost always because the `image` file field
+// is missing on the collection (the PocketBase backend hasn't been redeployed
+// to apply migrations 1700000087/1700000088). Surfaced to the user so an
+// upload that silently does nothing becomes an actionable message instead.
+type ImageUpdateResult = 'noop' | 'ok' | 'not_persisted' | 'error';
+
+// Human-facing warning for the `not_persisted` / `error` cases.
+const IMAGE_NOT_SAVED_WARNING =
+  'Bilden kunde inte sparas. Uppdatera/omdistribuera PocketBase-backenden så att bildfältet finns (migration 1700000087/1700000088).';
+
 // Best-effort cover-image write for workshops/areas. Runs after the record has
 // been created/updated, so a failure here never duplicates the parent record.
 // Tries the caller's client first, then falls back to superuser (PB v0.23
-// per-request rule-eval bug, same pattern as the create/update paths).
+// per-request rule-eval bug, same pattern as the create/update paths). After an
+// upload we re-read the record to verify the file actually persisted — PB
+// silently ignores writes to a non-existent field, which would otherwise leave
+// the user staring at a placeholder with no error anywhere.
 async function applyImageUpdate(
   client: PocketBase,
   collection: string,
   recordId: string,
   imageFile: File | null,
   removeImage: boolean
-): Promise<void> {
+): Promise<ImageUpdateResult> {
   let payload: FormData | Record<string, unknown> | null = null;
   if (imageFile) {
     const fd = new FormData();
-    fd.append('image', imageFile);
+    // Materialisera bytes innan vidareskick: en File som plockats ur en
+    // server-actions FormData kan annars skickas med tom body när den
+    // återanvänds i en ny FormData mot PB:s SDK (Node/undici-gotcha) → filen
+    // "laddas upp" men sparas tom och visas aldrig.
+    const bytes = Buffer.from(await imageFile.arrayBuffer());
+    const blob = new Blob([bytes], { type: imageFile.type || 'application/octet-stream' });
+    fd.append('image', blob, imageFile.name || 'image');
     payload = fd;
   } else if (removeImage) {
     payload = { image: null };
   }
-  if (!payload) return;
+  if (!payload) return 'noop';
 
+  // The client that actually wrote (used for the verify read-back below).
+  let writeClient: PocketBase | null = null;
   try {
     await client.collection(collection).update(recordId, payload);
-    return;
+    writeClient = client;
   } catch (err) {
     const su = await getSuperuserPb();
     if (su.ok) {
       try {
         await su.pb.collection(collection).update(recordId, payload);
-        return;
+        writeClient = su.pb;
       } catch (fallbackErr) {
         console.error('[workshops] image update fallback failed', {
           collection,
           recordId,
           message: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr ?? '')
         });
-        return;
+        return 'error';
       }
+    } else {
+      console.error('[workshops] image update failed', {
+        collection,
+        recordId,
+        message: err instanceof Error ? err.message : String(err ?? '')
+      });
+      return 'error';
     }
-    console.error('[workshops] image update failed', {
+  }
+
+  // Only an upload needs verification; a removal (image: null) leaving the field
+  // empty is the intended outcome. (`writeClient` is always set here — we
+  // return early on every write failure above — the guard satisfies the type.)
+  if (!imageFile || !writeClient) return 'ok';
+
+  try {
+    const rec = await writeClient
+      .collection(collection)
+      .getOne<{ image?: string }>(recordId, { fields: 'id,image' });
+    if (rec.image) return 'ok';
+
+    // The write was accepted but nothing stuck — almost always because the
+    // `image` field is missing on the collection (stale deploy). Self-heal:
+    // add the field via superuser and retry the upload once so the image the
+    // user just uploaded actually lands. A fresh blob is built because the
+    // first one was already consumed by the write above.
+    console.warn(
+      '[workshops] image not persisted after upload — attempting self-heal (add missing "image" field + retry).',
+      { collection, recordId }
+    );
+    const su = await getSuperuserPb();
+    if (!su.ok) return 'not_persisted';
+    if (!(await ensureImageFieldExists(su.pb, collection))) return 'not_persisted';
+
+    const retryBytes = Buffer.from(await imageFile.arrayBuffer());
+    const retryFd = new FormData();
+    retryFd.append(
+      'image',
+      new Blob([retryBytes], { type: imageFile.type || 'application/octet-stream' }),
+      imageFile.name || 'image'
+    );
+    await su.pb.collection(collection).update(recordId, retryFd);
+
+    const recheck = await su.pb
+      .collection(collection)
+      .getOne<{ image?: string }>(recordId, { fields: 'id,image' });
+    if (recheck.image) return 'ok';
+
+    console.error(
+      '[workshops] image still not persisted after self-heal retry.',
+      { collection, recordId }
+    );
+    return 'not_persisted';
+  } catch (verifyErr) {
+    // Verification/self-heal is best-effort: don't fail the whole flow if the
+    // read-back itself errors (the original write may well have succeeded).
+    console.warn('[workshops] image persistence verification skipped', {
       collection,
       recordId,
-      message: err instanceof Error ? err.message : String(err ?? '')
+      message: verifyErr instanceof Error ? verifyErr.message : String(verifyErr ?? '')
     });
   }
+  return 'ok';
+}
+
+// Maps an image-write result to a user-facing warning (or undefined when fine).
+function imageWarning(result: ImageUpdateResult): string | undefined {
+  return result === 'not_persisted' || result === 'error' ? IMAGE_NOT_SAVED_WARNING : undefined;
 }
 
 function detectCreateRuleFailure(
@@ -207,6 +337,7 @@ function toCreateWorkshopError(err: unknown): string {
 
 export type WorkshopActionState = {
   error?: string;
+  warning?: string;
   assignmentId?: string;
   workshopId?: string;
   runId?: string;
@@ -215,6 +346,7 @@ export type WorkshopActionState = {
 
 export type WorkshopAreaActionState = {
   error?: string;
+  warning?: string;
   success?: string;
 };
 
@@ -338,10 +470,10 @@ export async function createWorkshopAction(
 
   try {
     const record = await pb.collection(PB_COLLECTIONS.workshops).create(payload);
-    await applyImageUpdate(pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
+    const imgResult = await applyImageUpdate(pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
     revalidatePath('/education');
     revalidatePath('/education/workshops');
-    return { workshopId: String(record.id) };
+    return { workshopId: String(record.id), warning: imageWarning(imgResult) };
   } catch (err) {
     const pbError = toPbErrorLike(err);
     const message = String(err instanceof Error ? err.message : '');
@@ -357,10 +489,10 @@ export async function createWorkshopAction(
       if (suResult.ok) {
         try {
           const record = await suResult.pb.collection(PB_COLLECTIONS.workshops).create(payload);
-          await applyImageUpdate(suResult.pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
+          const imgResult = await applyImageUpdate(suResult.pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
           revalidatePath('/education');
           revalidatePath('/education/workshops');
-          return { workshopId: String(record.id) };
+          return { workshopId: String(record.id), warning: imageWarning(imgResult) };
         } catch (fallbackErr) {
           logCreateFailure('workshop create fallback (superuser) failed', fallbackErr);
           return { error: toCreateWorkshopError(fallbackErr) };
@@ -455,9 +587,9 @@ export async function updateWorkshopAction(
 
   try {
     await pb.collection(PB_COLLECTIONS.workshops).update(workshopId, payload);
-    await applyImageUpdate(pb, PB_COLLECTIONS.workshops, workshopId, imageFile, removeImage);
+    const imgResult = await applyImageUpdate(pb, PB_COLLECTIONS.workshops, workshopId, imageFile, removeImage);
     revalidateAfterUpdate();
-    return { workshopId };
+    return { workshopId, warning: imageWarning(imgResult) };
   } catch (err) {
     const pbError = toPbErrorLike(err);
     const message = String(err instanceof Error ? err.message : '');
@@ -481,9 +613,9 @@ export async function updateWorkshopAction(
       if (suResult.ok) {
         try {
           await suResult.pb.collection(PB_COLLECTIONS.workshops).update(workshopId, payload);
-          await applyImageUpdate(suResult.pb, PB_COLLECTIONS.workshops, workshopId, imageFile, removeImage);
+          const imgResult = await applyImageUpdate(suResult.pb, PB_COLLECTIONS.workshops, workshopId, imageFile, removeImage);
           revalidateAfterUpdate();
-          return { workshopId };
+          return { workshopId, warning: imageWarning(imgResult) };
         } catch (fallbackErr) {
           console.error('[workshops] workshop update fallback (superuser) failed', {
             pbUrl: PB_URL,
@@ -674,11 +806,11 @@ export async function createWorkshopAreaAction(
 
   try {
     const record = await pb.collection(PB_COLLECTIONS.workshopAreas).create(payload);
-    await applyImageUpdate(pb, PB_COLLECTIONS.workshopAreas, String(record.id), imageFile, false);
+    const imgResult = await applyImageUpdate(pb, PB_COLLECTIONS.workshopAreas, String(record.id), imageFile, false);
     revalidatePath('/education');
     revalidatePath('/education/areas');
     revalidatePath('/education/new');
-    return { success: 'Område tillagt.' };
+    return { success: 'Område tillagt.', warning: imageWarning(imgResult) };
   } catch (err) {
     const pbError = toPbErrorLike(err);
     const message = String(err instanceof Error ? err.message : '');
@@ -707,7 +839,7 @@ export async function createWorkshopAreaAction(
       if (superuserPbResult.ok) {
         try {
           const record = await superuserPbResult.pb.collection(PB_COLLECTIONS.workshopAreas).create(payload);
-          await applyImageUpdate(
+          const imgResult = await applyImageUpdate(
             superuserPbResult.pb,
             PB_COLLECTIONS.workshopAreas,
             String(record.id),
@@ -717,7 +849,7 @@ export async function createWorkshopAreaAction(
           revalidatePath('/education');
           revalidatePath('/education/areas');
           revalidatePath('/education/new');
-          return { success: 'Område tillagt.' };
+          return { success: 'Område tillagt.', warning: imageWarning(imgResult) };
         } catch (fallbackErr) {
           const fallbackMessage = String(fallbackErr instanceof Error ? fallbackErr.message : '');
           const fallbackNormalized = fallbackMessage.toLowerCase();
@@ -952,10 +1084,10 @@ export async function updateWorkshopAreaAction(
 
   try {
     await pb.collection(PB_COLLECTIONS.workshopAreas).update(areaId, payload);
-    await applyImageUpdate(pb, PB_COLLECTIONS.workshopAreas, areaId, imageFile, removeImage);
+    const imgResult = await applyImageUpdate(pb, PB_COLLECTIONS.workshopAreas, areaId, imageFile, removeImage);
     revalidatePath('/education');
     revalidatePath('/education/areas');
-    return { success: 'Område uppdaterat.' };
+    return { success: 'Område uppdaterat.', warning: imageWarning(imgResult) };
   } catch (err) {
     const pbError = toPbErrorLike(err);
     const message = String(err instanceof Error ? err.message : '');
@@ -972,7 +1104,7 @@ export async function updateWorkshopAreaAction(
       if (superuserPbResult.ok) {
         try {
           await superuserPbResult.pb.collection(PB_COLLECTIONS.workshopAreas).update(areaId, payload);
-          await applyImageUpdate(
+          const imgResult = await applyImageUpdate(
             superuserPbResult.pb,
             PB_COLLECTIONS.workshopAreas,
             areaId,
@@ -981,7 +1113,7 @@ export async function updateWorkshopAreaAction(
           );
           revalidatePath('/education');
           revalidatePath('/education/areas');
-          return { success: 'Område uppdaterat.' };
+          return { success: 'Område uppdaterat.', warning: imageWarning(imgResult) };
         } catch (fallbackErr) {
           const fallbackNormalized = String(
             fallbackErr instanceof Error ? fallbackErr.message : ''
@@ -1040,7 +1172,8 @@ export async function listWorkshopAreasForTenant(): Promise<WorkshopArea[]> {
 export async function assignWorkshopToStartupAction(
   workshopId: string,
   startupId: string,
-  dueDate?: string
+  dueDate?: string,
+  options?: AssignmentCollabOptions
 ): Promise<WorkshopActionState> {
   const user = await requireUser();
   if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
@@ -1054,8 +1187,18 @@ export async function assignWorkshopToStartupAction(
   }
   if (workshop.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
 
+  let startupName = 'bolaget';
   try {
-    const assignment = await pb.collection(PB_COLLECTIONS.workshopAssignments).create({
+    const s = await pb.collection('startups').getOne<{ tenant: string; name?: string }>(startupId);
+    if (String(s.tenant) !== user.tenant) return { error: 'Åtkomst nekad.' };
+    startupName = s.name || startupName;
+  } catch {
+    return { error: 'Bolaget hittades inte.' };
+  }
+
+  try {
+    const instructions = options?.instructions?.slice(0, 2000) || '';
+    const assignmentData = {
       tenant: user.tenant,
       workshop: workshopId,
       startup: startupId,
@@ -1063,14 +1206,33 @@ export async function assignWorkshopToStartupAction(
       owner: user.id,
       status: 'planned',
       due_date: dueDate || null,
+      instructions,
       progress_json: {},
       answers_json: {},
       takeaway_json: {},
       artifacts_json: {},
       ai_thread_json: []
-    });
+    };
 
-    const activity = await pb.collection('activities').create({
+    // Skriv via användartoken; faller tillbaka på superuser om PB v0.23.4:s
+    // rule-eval TYST nekar en annars behörig staff-create (samma mönster som
+    // education_documents § 18.3 — roll + tenant är redan verifierade ovan).
+    // ALLA efterföljande skrivningar (activity, samarbete, update) använder
+    // samma klient så de inte heller fastnar på regel-buggen.
+    let writePb = pb;
+    let assignment;
+    try {
+      assignment = await pb.collection(PB_COLLECTIONS.workshopAssignments).create(assignmentData);
+    } catch (err) {
+      const status = toPbErrorLike(err).status;
+      if (status !== 400 && status !== 403) throw err;
+      const su = await getSuperuserPb();
+      if (!su.ok) throw err;
+      writePb = su.pb;
+      assignment = await writePb.collection(PB_COLLECTIONS.workshopAssignments).create(assignmentData);
+    }
+
+    const activity = await writePb.collection('activities').create({
       startup: startupId,
       type: 'workshop',
       title: `${workshop.title} – tilldelad workshop`,
@@ -1082,13 +1244,40 @@ export async function assignWorkshopToStartupAction(
       due_date: dueDate || new Date().toISOString().slice(0, 10)
     });
 
-    await pb.collection(PB_COLLECTIONS.workshopAssignments).update(String(assignment.id), {
-      activity: activity.id
-    });
+    // ── Samarbete: medarbetar-tasks + ev. möte (CLAUDE.md § 18.4) ──────────
+    const update: Record<string, unknown> = { activity: activity.id };
+    const collaboratorIds = options?.collaboratorIds ?? [];
+    if (collaboratorIds.length > 0) {
+      const linked = await createCollaboratorTasks({
+        pb: writePb,
+        tenantId: user.tenant,
+        startupId,
+        collaboratorIds,
+        description: `Workshop: ${workshop.title} – ${startupName}`,
+        dueDate
+      });
+      if (linked.length > 0) update.collaborators = linked;
+    }
+    if (options?.meeting?.title?.trim()) {
+      const meetingId = await createAssignmentMeeting({
+        pb: writePb,
+        tenantId: user.tenant,
+        startupId,
+        organizerId: user.id,
+        collaboratorIds,
+        meeting: options.meeting,
+        eventType: 'workshop'
+      });
+      if (meetingId) update.meeting = meetingId;
+    }
+
+    await writePb.collection(PB_COLLECTIONS.workshopAssignments).update(String(assignment.id), update);
 
     revalidatePath('/education');
     revalidatePath('/dashboard');
     revalidatePath('/aktivitet');
+    revalidatePath('/pagaende');
+    revalidatePath('/inkorg');
     revalidatePath(`/startups/${startupId}`);
     return { assignmentId: String(assignment.id) };
   } catch (err) {

@@ -58,7 +58,9 @@ export function PageShell({
   children
 }: Props) {
   const pathname = usePathname();
-  const [railOpen, setRailOpen] = useState(true);
+  // Panelen är dold som default på undersidor — användaren öppnar den via
+  // "Visa panel"-knappen i headern vid behov.
+  const [railOpen, setRailOpen] = useState(false);
   const hasRail = Boolean(rightPanel);
   const hasHead =
     Boolean(title) || (tabs && tabs.length > 0) || Boolean(actions) || Boolean(meta);

@@ -101,6 +101,23 @@
   --mx-rail-w: 232px;
   --mx-topbar-h: 52px;
   --mx-actionbar-h: 48px;
+
+  /* Modern bakgrund — subtil gradient på innehållsytan (2026-06).
+   * Mjuk Movexum-blå glöd uppe till höger, dämpad lila nere till vänster,
+   * ren vit canvas i mitten. Vita kort/paneler ligger ovanpå. Ingen
+   * dekor-grafik — bara gradienten. */
+  --mx-app-gradient:
+    radial-gradient(58% 52% at 100% 0%, rgba(0, 168, 222, 0.08) 0%, rgba(0, 168, 222, 0) 60%),
+    radial-gradient(60% 58% at 0% 100%, rgba(97, 56, 181, 0.11) 0%, rgba(97, 56, 181, 0) 62%),
+    var(--mx-canvas);
+  /* Genomskinlig, frostad topbar så gradienten flyter bakom den. */
+  --mx-topbar-bg: color-mix(in srgb, var(--mx-canvas) 62%, transparent);
+}
+
+/* Gradient-bakgrund även på utloggade sidor (login) som saknar .mx-app. */
+body {
+  background: var(--mx-app-gradient);
+  background-attachment: fixed;
 }
 
 html.dark {
@@ -139,7 +156,7 @@ html.dark {
   display: grid;
   grid-template-columns: var(--mx-rail-w) 1fr;
   gap: 0;
-  padding: 12px 0 12px 12px;
+  padding: 0;
   min-height: 100vh;
   background: var(--mx-canvas);
   color: var(--mx-ink);
@@ -159,21 +176,18 @@ html.dark {
   display: flex;
   flex-direction: column;
   position: sticky;
-  top: 12px;
-  height: calc(100vh - 24px);
+  top: 0;
+  height: 100vh;
   z-index: 30;
   overflow: hidden;
-  border: 1px solid var(--mx-line-soft);
-  border-radius: var(--mx-r-lg);
-  box-shadow: var(--mx-sh-3);
+  border-right: 1px solid var(--mx-line-soft);
 }
 
 .mx-rail-head {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 14px 16px 12px;
-  border-bottom: 1px solid var(--mx-rail-divider);
+  justify-content: flex-start;
+  padding: 24px 20px 20px;
 }
 
 .mx-rail-brand {
@@ -303,7 +317,7 @@ html.dark {
   display: grid;
   grid-template-rows: var(--mx-topbar-h) 1fr;
   min-height: 100vh;
-  background: var(--mx-canvas);
+  background: var(--mx-app-gradient);
   min-width: 0;
 }
 
@@ -312,13 +326,18 @@ html.dark {
   align-items: center;
   gap: 12px;
   padding: 0 20px;
-  background: var(--mx-canvas);
-  border-bottom: 1px solid var(--mx-rail-divider);
+  background: var(--mx-topbar-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   position: sticky;
   top: 0;
   z-index: 20;
   font-size: 13px;
   height: var(--mx-topbar-h);
+}
+
+.mx-desktop-rail-btn {
+  display: none;
 }
 
 .mx-crumb {
@@ -942,7 +961,7 @@ body.mx-rail-locked {
   }
 
   .mx-rail-head {
-    padding: 16px 16px;
+    padding: 20px 18px;
   }
 
   .mx-rail-foot {
@@ -953,6 +972,43 @@ body.mx-rail-locked {
 @media (min-width: 1025px) {
   .mx-rail-backdrop {
     display: none !important;
+  }
+
+  /* Desktop rail collapse */
+  .mx-app {
+    transition: grid-template-columns 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .mx-app.mx-rail-desktop-collapsed {
+    grid-template-columns: 0px 1fr;
+  }
+  .mx-rail {
+    transition: opacity 160ms ease, visibility 160ms;
+  }
+  .mx-app.mx-rail-desktop-collapsed .mx-rail {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  /* Toggle button — only on desktop */
+  .mx-desktop-rail-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--mx-r-sm);
+    border: 0;
+    background: none;
+    color: var(--mx-muted);
+    cursor: pointer;
+    transition: background .12s, color .12s;
+    flex-shrink: 0;
+  }
+  .mx-desktop-rail-btn:hover {
+    background: var(--mx-rail-hover-bg);
+    color: var(--mx-ink);
   }
 }
 
@@ -1245,7 +1301,6 @@ html.dark .mx-field select:focus {
 /* Topbar smälter med canvas — ingen blur, ingen lila ton */
 html.dark .mx-topbar {
   background: var(--mx-canvas);
-  border-bottom-color: var(--mx-rail-divider);
 }
 
 /* Status chips — fortfarande färgade men med dämpad bakgrund */
@@ -1287,12 +1342,12 @@ html.dark .mx-page-head h1 {
 }
 
 /* ============================================================
-   Intric-stil — Startup-switcher i rail
+   Startup-switcher i rail — paper/ink (Startupkompass-skiftet)
+   Använder --mx-rail-*-tokens så dark mode mappas om automatiskt.
    ============================================================ */
 
 .mx-switcher {
-  padding: 10px 12px 14px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 4px 10px 16px;
 }
 
 .mx-switcher-btn {
@@ -1300,11 +1355,11 @@ html.dark .mx-page-head h1 {
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
-  color: white;
+  padding: 7px 8px 7px 7px;
+  border-radius: var(--mx-r-sm);
+  background: var(--mx-paper-2);
+  border: 1px solid var(--mx-line);
+  color: var(--mx-rail-fg-strong);
   font-family: inherit;
   text-align: left;
   cursor: pointer;
@@ -1312,19 +1367,19 @@ html.dark .mx-page-head h1 {
 }
 
 .mx-switcher-btn:hover {
-  background: rgba(255,255,255,0.08);
-  border-color: rgba(141,111,214,0.35);
+  background: var(--mx-rail-hover-bg);
+  border-color: var(--mx-line-strong);
 }
 
 .mx-switcher-mark {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
-  background: var(--mx-paper-2);
+  border-radius: var(--mx-r-sm);
+  background: var(--mx-rail-active-bg);
   border: 1px solid var(--mx-line);
-  color: var(--mx-ink);
+  color: var(--mx-rail-accent);
   font-family: var(--mx-mono);
   font-weight: 700;
   font-size: 11px;
@@ -1334,8 +1389,8 @@ html.dark .mx-page-head h1 {
 }
 
 .mx-switcher-mark.mx-sm {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   font-size: 10px;
 }
 
@@ -1350,7 +1405,7 @@ html.dark .mx-page-head h1 {
 .mx-switcher-name {
   font-size: 12.5px;
   font-weight: 600;
-  color: white;
+  color: var(--mx-rail-fg-strong);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1358,14 +1413,14 @@ html.dark .mx-page-head h1 {
 
 .mx-switcher-sub {
   font-size: 10.5px;
-  color: rgba(255,255,255,0.5);
+  color: var(--mx-rail-fg-mute);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .mx-switcher-chev {
-  color: rgba(255,255,255,0.5);
+  color: var(--mx-rail-fg-mute);
   flex-shrink: 0;
   transition: transform .15s ease;
 }
@@ -1376,13 +1431,13 @@ html.dark .mx-page-head h1 {
 
 .mx-switcher-pop {
   position: absolute;
-  left: 12px;
-  right: 12px;
-  top: calc(100% - 4px);
-  background: #0a0a0a;
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 12px;
-  box-shadow: 0 12px 32px -4px rgba(0,0,0,.5), 0 4px 12px rgba(0,0,0,.3);
+  left: 8px;
+  right: 8px;
+  top: calc(100% - 6px);
+  background: var(--mx-canvas);
+  border: 1px solid var(--mx-line);
+  border-radius: var(--mx-r-md);
+  box-shadow: var(--mx-sh-3);
   z-index: 60;
   overflow: hidden;
   display: flex;
@@ -1395,8 +1450,8 @@ html.dark .mx-page-head h1 {
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-  color: rgba(255,255,255,0.5);
+  border-bottom: 1px solid var(--mx-line);
+  color: var(--mx-muted);
 }
 
 .mx-switcher-search input {
@@ -1404,13 +1459,26 @@ html.dark .mx-page-head h1 {
   background: none;
   border: 0;
   outline: 0;
-  color: white;
+  color: var(--mx-ink);
   font-family: inherit;
   font-size: 12.5px;
 }
 
 .mx-switcher-search input::placeholder {
-  color: rgba(255,255,255,0.4);
+  color: var(--mx-muted-2);
+}
+
+.mx-switcher-count {
+  flex-shrink: 0;
+  font-family: var(--mx-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--mx-rail-fg-mute);
+  background: var(--mx-paper-2);
+  border: 1px solid var(--mx-line);
+  border-radius: var(--mx-r-pill);
+  padding: 1px 7px;
 }
 
 .mx-switcher-list {
@@ -1430,22 +1498,22 @@ html.dark .mx-page-head h1 {
   border: 0;
   cursor: pointer;
   text-align: left;
-  color: rgba(255,255,255,0.85);
+  color: var(--mx-ink-soft);
   font-family: inherit;
   transition: background .12s ease;
 }
 
 .mx-switcher-item:hover {
-  background: rgba(255,255,255,0.06);
+  background: var(--mx-rail-hover-bg);
 }
 
 .mx-switcher-item.mx-current {
-  background: rgba(141,111,214,0.12);
-  color: white;
+  background: var(--mx-rail-active-bg);
+  color: var(--mx-rail-fg-strong);
 }
 
 .mx-switcher-check {
-  color: #4fc4ea;
+  color: var(--mx-rail-accent);
   flex-shrink: 0;
 }
 
@@ -1453,7 +1521,7 @@ html.dark .mx-page-head h1 {
   padding: 16px 12px;
   text-align: center;
   font-size: 12px;
-  color: rgba(255,255,255,0.5);
+  color: var(--mx-muted);
 }
 
 .mx-switcher-foot {
@@ -1461,16 +1529,16 @@ html.dark .mx-page-head h1 {
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  border-top: 1px solid rgba(255,255,255,0.08);
+  border-top: 1px solid var(--mx-line);
   font-size: 12px;
-  color: rgba(255,255,255,0.7);
+  color: var(--mx-rail-fg);
   text-decoration: none;
   cursor: pointer;
 }
 
 .mx-switcher-foot:hover {
-  background: rgba(255,255,255,0.06);
-  color: white;
+  background: var(--mx-rail-hover-bg);
+  color: var(--mx-rail-fg-strong);
 }
 
 /* ============================================================

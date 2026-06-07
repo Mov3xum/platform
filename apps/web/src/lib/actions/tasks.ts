@@ -173,6 +173,8 @@ export async function updateTaskStatusAction(
   const raw = toRawStatus('task', boardStatus);
   if (!raw) return { ok: false, error: 'Ogiltig status.' };
 
+  // Tenant + ägare/staff verifieras i koden innan skrivningen
+  // (defense-in-depth ovanpå tasks.updateRule).
   const pb = await getServerPb();
 
   let row: { id: string; tenant?: string; owner?: string };

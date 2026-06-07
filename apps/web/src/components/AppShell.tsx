@@ -103,7 +103,11 @@ export async function AppShell({ user, children }: AppShellProps) {
   return (
     <ProtoShell
       user={user}
-      counts={{ education: assignedWorkshopCount, inkorg: inkorgUnread }}
+      counts={{
+        education: assignedWorkshopCount,
+        mina_aktiviteter: assignedWorkshopCount,
+        inkorg: inkorgUnread
+      }}
       switchableStartups={switchableStartups}
     >
       {children}

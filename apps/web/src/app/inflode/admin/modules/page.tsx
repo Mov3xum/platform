@@ -2,15 +2,17 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { PageHead, Card, Chip, Icon } from '@/components/proto';
+import { PageShell } from '@/components/PageShell';
+import { Card, Chip, Icon } from '@/components/proto';
 import { getLeadAnalytics, listModules } from '@/lib/compass/store';
 import { FLOW_TYPE_LABEL } from '@/lib/compass/types';
+import { buildInflodeTabs } from '../../_tabs';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminModulesPage() {
   const user = await requireUser();
-  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
     redirect('/inflode');
   }
   const pb = await getServerPb();
@@ -20,25 +22,23 @@ export default async function AdminModulesPage() {
   ]);
 
   const metricsBySlug = new Map(analytics.byModule.map((m) => [m.slug, m]));
+  const tabs = buildInflodeTabs();
 
   return (
-    <div className="mx-view-pad mx-wide">
-      <PageHead
-        crumb="Inflöde / Admin / Moduler"
-        title="Intag-moduler"
-        subtitle="Deploya formulär, quiz och AI-chattar på egna URL:er. Spåra konvertering per modul."
-        actions={
-          <>
-            <Link href="/inflode" className="mx-btn">
-              <Icon name="arrow" size={13} /> Översikt
-            </Link>
-            <Link href="/inflode/admin/modules/new" className="mx-btn mx-primary">
-              <Icon name="plus" size={13} /> Skapa modul
-            </Link>
-          </>
-        }
-      />
-
+    <PageShell
+      title="Startupkompassen"
+      tabs={tabs}
+      meta={
+        <span className="text-[12px] text-foreground-subtle">
+          Intag-moduler · formulär, quiz och AI-chattar
+        </span>
+      }
+      actions={
+        <Link href="/inflode/admin/modules/new" className="mx-btn mx-primary">
+          <Icon name="plus" size={13} /> Skapa modul
+        </Link>
+      }
+    >
       <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-paper-2)' }}>
         <div
           className="mx-flex mx-items-c mx-gap-2 mx-t-12 mx-muted"
@@ -46,8 +46,9 @@ export default async function AdminModulesPage() {
         >
           <Icon name="shield" size={13} />
           <span>
-            Varje modul får en egen URL <code className="mx-mono">/inflode/m/[slug]</code>.
-            Lägg på <code className="mx-mono">?utm_source=&hellip;&amp;utm_campaign=&hellip;</code>{' '}
+            Varje modul deployas publikt (oinloggat) på{' '}
+            <code className="mx-mono">/m/[publik-slug]</code> med egen QR-kod. Lägg på{' '}
+            <code className="mx-mono">?utm_source=&hellip;&amp;utm_campaign=&hellip;</code>{' '}
             för att mäta var leads kommer ifrån.
           </span>
         </div>
@@ -112,9 +113,21 @@ export default async function AdminModulesPage() {
                     </div>
                   )}
                   <div className="mx-flex mx-gap-2" style={{ flexShrink: 0 }}>
-                    <Link href={`/inflode/m/${m.slug}`} className="mx-btn mx-sm">
-                      Förhandsgranska
-                    </Link>
+                    {m.public_slug && m.is_active && m.public_url_enabled ? (
+                      <a
+                        href={`/m/${m.public_slug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mx-btn mx-sm"
+                        title="Kör hela det publika flödet i en ny flik"
+                      >
+                        <Icon name="spark" size={12} /> Öppna
+                      </a>
+                    ) : (
+                      <Link href={`/inflode/m/${m.slug}`} className="mx-btn mx-sm">
+                        Förhandsgranska
+                      </Link>
+                    )}
                     <Link
                       href={`/inflode/admin/modules/${m.slug}`}
                       className="mx-btn mx-sm mx-primary"
@@ -128,6 +141,6 @@ export default async function AdminModulesPage() {
           })}
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

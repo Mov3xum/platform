@@ -14,6 +14,8 @@ export type ActivityKind =
   | 'note'
   | 'onboarding'
   | 'chat'
+  | 'education_document'
+  | 'agreement'
   | 'integration_sync';
 
 export interface RecordActivityParams {

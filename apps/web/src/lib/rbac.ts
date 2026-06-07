@@ -48,6 +48,12 @@ export const canRunTool = (
   if (!tool.active) return false;
   if (!userRoles || userRoles.length === 0) return false;
 
+  // observer är read-only och kör ALDRIG verktyg (CLAUDE.md § 9.5) — även om
+  // ett verktyg av misstag skulle lista 'observer' i roles_allowed. Speglar
+  // canActivateConnector. En multi-roll (t.ex. coach+observer) kör på sin
+  // andra roll och blockeras alltså inte.
+  if (userRoles.includes('observer') && userRoles.length === 1) return false;
+
   // Staff always allowed
   if (hasRole(userRoles, STAFF_ROLES)) return true;
 

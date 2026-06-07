@@ -3,7 +3,9 @@ import { notFound } from 'next/navigation';
 import { getOneForTenant } from '@/lib/pb.server';
 import { markdownToHtml } from '@/lib/safe-html';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { getAssignmentReadPb } from '@/lib/assignments/read';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { escFilter } from '@/lib/pb-filter';
 import { canAccessModule, hasRole } from '@/lib/rbac';
 import {
   PhaseBadge,
@@ -15,6 +17,7 @@ import {
 import { NoteForm } from '@/components/NoteForm';
 import { NoteItem } from '@/components/NoteItem';
 import { StartupDetailDashboard } from '@/components/StartupDetailDashboard';
+import { StartupWorkCards, type WorkCard } from '@/components/StartupWorkCards';
 import {
   StartupPhaseHistoryList,
   type PhaseHistoryItem
@@ -37,8 +40,6 @@ import {
 import {
   activityStatusLabels,
   activityTypeLabels,
-  agreementKindLabels,
-  agreementStatusLabels,
   milestoneCategoryLabels,
   milestoneStatusLabels,
   toolRunStatusLabels,
@@ -51,7 +52,18 @@ import {
   type StartupStatus,
   type ToolRunStatus
 } from '@/lib/labels';
-import type { StartupPhase, SprintXScore } from '@platform/shared';
+import type {
+  StartupPhase,
+  SprintXScore,
+  EducationDocumentAssignment
+} from '@platform/shared';
+import { educationDocumentKindLabels } from '@platform/shared';
+import { Icon } from '@/components/proto';
+import { DocumentCompleteButton } from '@/app/education/documents/DocumentCompleteButton';
+import { AgreementsSection, type AgreementView } from '@/components/intric/AgreementsSection';
+import { pbFileUrl } from '@/lib/pb-file';
+import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
+import { DeMinimisSection } from './DeMinimisSection';
 
 interface StartupRecord {
   id: string;
@@ -167,6 +179,12 @@ interface AgreementRecord {
   status: AgreementStatus;
   signed_at?: string;
   expires_at?: string;
+  file?: string;
+  requires_company_signature?: boolean;
+  requires_movexum_signature?: boolean;
+  company_signed_at?: string;
+  movexum_signed_at?: string;
+  created: string;
 }
 
 interface TeamMemberRecord {
@@ -228,6 +246,7 @@ interface WorkshopAssignmentRecord {
   id: string;
   status: 'planned' | 'in_progress' | 'done';
   due_date?: string;
+  instructions?: string;
   takeaway_json?: {
     summary?: string;
     keyInsights?: string;
@@ -239,6 +258,22 @@ interface WorkshopAssignmentRecord {
   expand?: {
     workshop?: { id: string; title: string; version?: string };
     assigned_by?: { id: string; display_name?: string; email: string };
+    collaborators?: Array<{ id: string; display_name?: string; email: string }>;
+    meeting?: { id: string; name: string; starts_at: string; location?: string };
+  };
+}
+
+interface ToolRunRecord {
+  id: string;
+  tool?: string;
+  status: ToolRunStatus;
+  deadline?: string;
+  assigned_to?: string;
+  created: string;
+  output_md?: string;
+  expand?: {
+    tool?: { id: string; name: string; category: string };
+    assigned_to?: { id: string; display_name?: string; email: string };
   };
 }
 
@@ -247,6 +282,18 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   const user = await requireUser();
   if (!canAccessModule(user.roles, 'startups')) notFound();
   const canEdit = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
+  const canManageDocs = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
+  const isLinkedMember =
+    hasRole(user.roles, ['startup_member']) && user.linkedStartups.includes(id);
+  const canCompleteDocs = canManageDocs || isLinkedMember;
+  // Avtalssignering (§ in-app AES): staff signerar Movexum-parten, en länkad
+  // bolagsmedlem signerar bolagsparten.
+  const canDeleteAgreements = hasRole(user.roles, ['admin', 'incubator_lead']);
+  const agreementSignParty: 'company' | 'movexum' | null = canManageDocs
+    ? 'movexum'
+    : isLinkedMember
+      ? 'company'
+      : null;
 
   let startup: StartupRecord;
   try {
@@ -256,6 +303,11 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   }
 
   const pb = await getServerPb();
+  // Tilldelningarna läses via en robust klient (PB v0.23.4 rule-eval, § 21.3):
+  // åtkomsten till just detta bolag är redan verifierad ovan
+  // (getOneForTenant → notFound annars), och frågorna är tenant+startup-scopade.
+  // Se lib/assignments/read.ts.
+  const assignPb = await getAssignmentReadPb();
 
   const emptyList = { items: [], totalItems: 0 };
   const [
@@ -270,7 +322,9 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     financialsResult,
     phaseHistoryResult,
     startupContactsResult,
-    tasksResult
+    tasksResult,
+    documentAssignmentsResult,
+    toolRunsResult
   ] = await Promise.allSettled([
     pb.collection('startup_team_members').getList<TeamMemberRecord>(1, 50, {
       filter: `startup = "${id}"`,
@@ -292,7 +346,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     }),
     pb.collection('agreements').getList<AgreementRecord>(1, 50, {
       filter: `startup = "${id}"`,
-      sort: '-signed_at'
+      sort: '-created'
     }),
     pb.collection('partner_engagements').getList<PartnerEngagementRecord>(1, 50, {
       filter: `startup = "${id}"`,
@@ -304,10 +358,10 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       sort: '-created',
       expand: 'tool,tool_run'
     }),
-    pb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopAssignmentRecord>(1, 50, {
-      filter: `startup = "${id}" && tenant = "${user.tenant}"`,
+    assignPb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopAssignmentRecord>(1, 50, {
+      filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
       sort: '-created',
-      expand: 'workshop,assigned_by'
+      expand: 'workshop,assigned_by,collaborators,meeting'
     }),
     pb.collection('startup_financials').getList<FinancialsRow>(1, 5, {
       filter: `startup = "${id}"`,
@@ -325,6 +379,18 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     pb.collection('tasks').getList<TaskRecord>(1, 50, {
       filter: `startup = "${id}" && tenant = "${user.tenant}"`,
       sort: '-starts_at'
+    }),
+    assignPb
+      .collection(PB_COLLECTIONS.educationDocumentAssignments)
+      .getList<EducationDocumentAssignment>(1, 100, {
+        filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
+        sort: '-created',
+        expand: 'document,completed_by,collaborators,meeting'
+      }),
+    pb.collection('tool_runs').getList<ToolRunRecord>(1, 100, {
+      filter: `startup = "${id}" && tenant = "${user.tenant}"`,
+      sort: '-created',
+      expand: 'tool,assigned_to'
     })
   ]);
 
@@ -333,6 +399,21 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   const activities = activitiesResult.status === 'fulfilled' ? activitiesResult.value : emptyList;
   const notes = notesResult.status === 'fulfilled' ? notesResult.value : emptyList;
   const agreements = agreementsResult.status === 'fulfilled' ? agreementsResult.value : emptyList;
+  const agreementViews: AgreementView[] = (agreements.items as AgreementRecord[]).map((a) => ({
+    id: a.id,
+    title: a.title,
+    kind: a.kind,
+    status: a.status,
+    hasFile: Boolean(a.file),
+    // Befintliga (pre-signering) avtal saknar requires-flaggor → default:
+    // bara Movexum-parten krävs så de inte felaktigt visas som "väntar på bolaget".
+    requiresCompany: a.requires_company_signature === true,
+    requiresMovexum: a.requires_movexum_signature !== false,
+    companySignedAt: a.company_signed_at,
+    movexumSignedAt: a.movexum_signed_at,
+    expiresAt: a.expires_at,
+    createdAt: a.created
+  }));
   const engagements = engagementsResult.status === 'fulfilled' ? engagementsResult.value : emptyList;
   const toolActivities = toolActivitiesResult.status === 'fulfilled' ? toolActivitiesResult.value : emptyList;
   const workshopAssignments =
@@ -344,6 +425,92 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   const startupContacts =
     startupContactsResult.status === 'fulfilled' ? startupContactsResult.value : emptyList;
   const tasks = tasksResult.status === 'fulfilled' ? tasksResult.value : emptyList;
+  const documentAssignments =
+    documentAssignmentsResult.status === 'fulfilled' ? documentAssignmentsResult.value : emptyList;
+  const toolRuns = toolRunsResult.status === 'fulfilled' ? toolRunsResult.value : emptyList;
+
+  // Verktyg & utbildning — vad bolaget GJORT (grön bock) och vad som är
+  // tilldelat men INTE gjort ännu (verktyg + workshops + dokument).
+  const DONE_RUN_STATUSES = new Set<ToolRunStatus>([
+    'succeeded',
+    'approved',
+    'ready_for_review'
+  ]);
+  const PENDING_RUN_STATUSES = new Set<ToolRunStatus>([
+    'assigned',
+    'in_progress',
+    'queued',
+    'running'
+  ]);
+  const dayMs = 86_400_000;
+  const relDays = (iso?: string): string | undefined => {
+    if (!iso) return undefined;
+    const diff = Math.round((Date.now() - new Date(iso).getTime()) / dayMs);
+    if (diff < 1) return 'i dag';
+    if (diff === 1) return 'i går';
+    if (diff < 30) return `för ${diff} dgr sedan`;
+    return new Date(iso).toLocaleDateString('sv-SE');
+  };
+  const deadlineLabel = (iso?: string): { label?: string; overdue: boolean } => {
+    if (!iso) return { overdue: false };
+    const diff = Math.round((new Date(iso).getTime() - Date.now()) / dayMs);
+    if (diff < 0) return { label: `försenad ${-diff} dgr`, overdue: true };
+    if (diff === 0) return { label: 'deadline i dag', overdue: false };
+    return { label: `deadline om ${diff} dgr`, overdue: false };
+  };
+
+  const doneWork: WorkCard[] = [];
+  const pendingWork: WorkCard[] = [];
+
+  for (const run of toolRuns.items) {
+    if (run.status === 'rejected' || run.status === 'failed') continue;
+    const card: WorkCard = {
+      id: run.id,
+      kind: 'tool',
+      title: run.expand?.tool?.name || 'Verktyg',
+      statusLabel: toolRunStatusLabels[run.status],
+      href: `/startups/${id}/verktyg/${run.id}`
+    };
+    if (DONE_RUN_STATUSES.has(run.status)) {
+      doneWork.push({ ...card, dateLabel: relDays(run.created) });
+    } else if (PENDING_RUN_STATUSES.has(run.status)) {
+      const dl = deadlineLabel(run.deadline);
+      pendingWork.push({ ...card, dateLabel: dl.label, overdue: dl.overdue });
+    }
+  }
+
+  for (const wa of workshopAssignments.items) {
+    const card: WorkCard = {
+      id: wa.id,
+      kind: 'workshop',
+      title: wa.expand?.workshop?.title || 'Workshop',
+      statusLabel: wa.status === 'done' ? 'Klar' : wa.status === 'in_progress' ? 'Pågår' : 'Planerad',
+      href: `/education/assignments/${wa.id}`
+    };
+    if (wa.status === 'done') {
+      doneWork.push({ ...card, dateLabel: relDays(wa.completed_at || wa.created) });
+    } else {
+      const dl = deadlineLabel(wa.due_date);
+      pendingWork.push({ ...card, dateLabel: dl.label, overdue: dl.overdue });
+    }
+  }
+
+  for (const da of documentAssignments.items) {
+    const doc = da.expand?.document;
+    const card: WorkCard = {
+      id: da.id,
+      kind: 'document',
+      title: doc?.title || 'Dokument',
+      statusLabel: da.status === 'completed' ? 'Slutförd' : 'Tilldelad',
+      href: `/startups/${id}#edu-documents`
+    };
+    if (da.status === 'completed') {
+      doneWork.push({ ...card, dateLabel: relDays(da.completed_at || da.created) });
+    } else {
+      const dl = deadlineLabel(da.due_date);
+      pendingWork.push({ ...card, dateLabel: dl.label, overdue: dl.overdue });
+    }
+  }
 
   // CLAUDE.md § 14: bygg en transient e-post→entitet-index för att matcha
   // Outlook-möten mot detta bolags kontakter + teammedlemmar. Aldrig sparad.
@@ -442,7 +609,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10 lg:px-8">
+    <main className="flex-1 overflow-y-auto px-6 py-10 lg:px-8">
+      <div className="mx-auto max-w-6xl">
       <div className="mb-6">
         <Link href="/startups" className="text-sm text-foreground-muted hover:text-foreground">
           ← Alla bolag
@@ -483,12 +651,16 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           activitiesCount: activities.totalItems,
           notesCount: notes.totalItems,
           milestonesCount: milestones.totalItems,
-          agreementsCount: agreements.totalItems,
+          documentsCount: documentAssignments.totalItems,
           teamMembersCount: team.totalItems,
           workshopsCount: workshopAssignments.totalItems,
           toolRunsCount: toolActivities.totalItems
         }}
       />
+
+      <div className="mt-8">
+        <StartupWorkCards done={doneWork} pending={pendingWork} />
+      </div>
 
       <nav className="mb-8 mt-8 flex flex-wrap gap-3 text-sm">
         {[
@@ -496,9 +668,11 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ['#moten', `Möten & uppgifter (${tasks.totalItems})`],
           ['#phase-history', `Fashistorik (${phaseHistory.totalItems})`],
           ['#kunskap', 'Kunskap'],
+          ['#de-minimis', 'De minimis'],
           ['#notes', `Anteckningar (${notes.totalItems})`],
           ['#activities', `Aktiviteter (${activities.totalItems})`],
           ['#documents', 'Dokument'],
+          ['#edu-documents', `Utbildningsdokument (${documentAssignments.totalItems})`],
           ['#team', `Personer (${team.totalItems})`],
           ['#milestones', `Inkubatorprocess (${milestones.totalItems})`],
           ['#readiness', 'Bolagsfas & Readiness'],
@@ -566,6 +740,62 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               </Link>
             </div>
           </div>
+        </Section>
+
+        <Section id="activities" title="Aktiviteter">
+          {activities.items.length === 0 ? (
+            <Empty>Inga aktiviteter registrerade.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {activities.items.map((a) => (
+                <li key={a.id} className="rounded-2xl border border-default p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-foreground">{a.title}</p>
+                      <p className="text-xs text-foreground-subtle">
+                        {activityTypeLabels[a.type]} ·{' '}
+                        {a.due_date ? new Date(a.due_date).toLocaleDateString('sv-SE') : 'Inget datum'}
+                      </p>
+                    </div>
+                    <StatusPill label={activityStatusLabels[a.status]} variant={a.status === 'done' ? 'success' : a.status === 'cancelled' ? 'neutral' : 'info'} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section id="notes" title="Anteckningar">
+          <div className="mb-6 rounded-2xl border border-default bg-canvas-subtle/50 p-4">
+            <NoteForm startupId={id} />
+          </div>
+          {notes.items.length === 0 ? (
+            <Empty>Inga anteckningar än.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {notes.items.map((n) => (
+                <li key={n.id} className="rounded-2xl border border-default p-4">
+                  <div className="mb-2 flex items-center justify-between text-xs text-foreground-subtle">
+                    <span>
+                      {n.expand?.author?.display_name || n.expand?.author?.email || 'Okänd'} ·{' '}
+                      {new Date(n.created).toLocaleString('sv-SE')}
+                    </span>
+                    {n.confidential ? (
+                      <span className="rounded-full bg-movexum-pastell-gul px-2 py-0.5 font-medium text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
+                        Konfidentiell
+                      </span>
+                    ) : null}
+                  </div>
+                  <NoteItem
+                    noteId={n.id}
+                    body={n.body}
+                    confidential={n.confidential}
+                    isAuthor={n.author === user.id}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
         </Section>
 
         <Section id="moten" title="Möten & uppgifter">
@@ -719,6 +949,32 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               signed={startup.approved_de_minimis}
             />
           </ul>
+          <a
+            href="#de-minimis"
+            className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-link transition hover:bg-canvas-subtle"
+          >
+            Till de minimis-liggaren
+          </a>
+        </Section>
+
+        <Section id="de-minimis" title="De minimis">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-foreground-muted">
+              Stöd av mindre betydelse per enhet (&quot;ett enda företag&quot;) — rullande
+              treårssummor mot takbeloppen. Registrera stöd direkt här.
+            </p>
+            <Link
+              href={`/de-minimis/${startup.id}`}
+              className="inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
+            >
+              Öppna fullskärm <Icon name="external" size={14} />
+            </Link>
+          </div>
+          <DeMinimisSection
+            startupId={id}
+            startupName={startup.name}
+            canManage={canManageStartupDeMinimis(user, id)}
+          />
         </Section>
 
         <Section id="documents" title="Dokument">
@@ -732,7 +988,109 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
             <a href="#tools" className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
               Visa verktygskörningar
             </a>
+            <a href="#edu-documents" className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
+              Tilldelade dokument
+            </a>
           </div>
+        </Section>
+
+        <Section id="edu-documents" title="Tilldelade utbildningsdokument">
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-sm text-foreground-muted">
+              Dokument (PDF, Excel, PowerPoint, Word) som bolaget ska gå igenom.
+            </p>
+            {canManageDocs ? (
+              <Link
+                href="/education/documents"
+                className="inline-flex items-center rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
+              >
+                Hantera dokument
+              </Link>
+            ) : null}
+          </div>
+          {documentAssignments.items.length === 0 ? (
+            <Empty>Inga tilldelade dokument än.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {documentAssignments.items.map((assignment) => {
+                const doc = assignment.expand?.document;
+                const fileUrl = doc ? pbFileUrl('education_documents', doc.id, doc.file) : null;
+                const completed = assignment.status === 'completed';
+                return (
+                  <li key={assignment.id} className="rounded-2xl border border-default p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        {completed ? (
+                          <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron">
+                            <Icon name="check" size={30} stroke={2.4} />
+                          </span>
+                        ) : (
+                          <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-canvas-muted text-foreground-subtle">
+                            <Icon name="doc" size={22} />
+                          </span>
+                        )}
+                        <div>
+                          <p className="font-medium text-foreground">{doc?.title || 'Dokument'}</p>
+                          <p className="text-xs text-foreground-subtle">
+                            {doc ? educationDocumentKindLabels[doc.doc_kind] || 'Dokument' : 'Dokument'}
+                            {completed && assignment.completed_at
+                              ? ` · Slutförd ${new Date(assignment.completed_at).toLocaleDateString('sv-SE')}`
+                              : ''}
+                          </p>
+                          {assignment.instructions ? (
+                            <p className="mt-2 whitespace-pre-wrap text-sm text-foreground-muted">
+                              {assignment.instructions}
+                            </p>
+                          ) : null}
+                          {assignment.due_date ? (
+                            <p className="mt-1 text-xs text-foreground-subtle">
+                              Deadline:{' '}
+                              {new Date(assignment.due_date).toLocaleDateString('sv-SE')}
+                            </p>
+                          ) : null}
+                          {(assignment.expand?.collaborators?.length ?? 0) > 0 ? (
+                            <p className="mt-1 text-xs text-foreground-subtle">
+                              Resurser:{' '}
+                              {assignment.expand?.collaborators
+                                ?.map((c) => c.display_name || c.email)
+                                .join(', ')}
+                            </p>
+                          ) : null}
+                          {assignment.expand?.meeting ? (
+                            <p className="mt-1 text-xs text-foreground-subtle">
+                              📅 Möte: {assignment.expand.meeting.name} ·{' '}
+                              {new Date(assignment.expand.meeting.starts_at).toLocaleString('sv-SE')}
+                            </p>
+                          ) : null}
+                          {fileUrl ? (
+                            <a
+                              href={fileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-link hover:underline"
+                            >
+                              <Icon name="download" size={14} /> Ladda ner
+                            </a>
+                          ) : null}
+                        </div>
+                      </div>
+                      {canCompleteDocs ? (
+                        <DocumentCompleteButton
+                          assignmentId={assignment.id}
+                          completed={completed}
+                          canReopen={canManageDocs}
+                        />
+                      ) : completed ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-movexum-morkgron dark:text-movexum-gron">
+                          Slutförd
+                        </span>
+                      ) : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </Section>
 
         <Section id="team" title="Team">
@@ -778,81 +1136,16 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           )}
         </Section>
 
-        <Section id="activities" title="Aktiviteter">
-          {activities.items.length === 0 ? (
-            <Empty>Inga aktiviteter registrerade.</Empty>
-          ) : (
-            <ul className="space-y-3">
-              {activities.items.map((a) => (
-                <li key={a.id} className="rounded-2xl border border-default p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-foreground">{a.title}</p>
-                      <p className="text-xs text-foreground-subtle">
-                        {activityTypeLabels[a.type]} ·{' '}
-                        {a.due_date ? new Date(a.due_date).toLocaleDateString('sv-SE') : 'Inget datum'}
-                      </p>
-                    </div>
-                    <StatusPill label={activityStatusLabels[a.status]} variant={a.status === 'done' ? 'success' : a.status === 'cancelled' ? 'neutral' : 'info'} />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section id="notes" title="Anteckningar">
-          <div className="mb-6 rounded-2xl border border-default bg-canvas-subtle/50 p-4">
-            <NoteForm startupId={id} />
-          </div>
-          {notes.items.length === 0 ? (
-            <Empty>Inga anteckningar än.</Empty>
-          ) : (
-            <ul className="space-y-3">
-              {notes.items.map((n) => (
-                <li key={n.id} className="rounded-2xl border border-default p-4">
-                  <div className="mb-2 flex items-center justify-between text-xs text-foreground-subtle">
-                    <span>
-                      {n.expand?.author?.display_name || n.expand?.author?.email || 'Okänd'} ·{' '}
-                      {new Date(n.created).toLocaleString('sv-SE')}
-                    </span>
-                    {n.confidential ? (
-                      <span className="rounded-full bg-movexum-pastell-gul px-2 py-0.5 font-medium text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
-                        Konfidentiell
-                      </span>
-                    ) : null}
-                  </div>
-                  <NoteItem
-                    noteId={n.id}
-                    body={n.body}
-                    confidential={n.confidential}
-                    isAuthor={n.author === user.id}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-
         <Section id="agreements" title="Avtal">
-          {agreements.items.length === 0 ? (
-            <Empty>Inga avtal registrerade.</Empty>
-          ) : (
-            <ul className="space-y-3">
-              {agreements.items.map((a) => (
-                <li key={a.id} className="flex items-center justify-between rounded-2xl border border-default p-4">
-                  <div>
-                    <p className="font-medium text-foreground">{a.title}</p>
-                    <p className="text-xs text-foreground-subtle">
-                      {agreementKindLabels[a.kind]} ·{' '}
-                      {a.signed_at ? `signerat ${new Date(a.signed_at).toLocaleDateString('sv-SE')}` : 'osignerat'}
-                    </p>
-                  </div>
-                  <StatusPill label={agreementStatusLabels[a.status]} variant={a.status === 'signed' ? 'success' : a.status === 'expired' || a.status === 'terminated' ? 'danger' : 'info'} />
-                </li>
-              ))}
-            </ul>
-          )}
+          <AgreementsSection
+            startupId={id}
+            startupName={startup.name}
+            agreements={agreementViews}
+            canManage={canManageDocs}
+            canDelete={canDeleteAgreements}
+            signParty={agreementSignParty}
+            defaultSignerName={user.name}
+          />
         </Section>
 
         <Section id="partners" title="Kapital">
@@ -1109,6 +1402,25 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                             Deadline: {new Date(assignment.due_date).toLocaleDateString('sv-SE')}
                           </p>
                         ) : null}
+                        {assignment.instructions ? (
+                          <p className="mt-1 whitespace-pre-wrap text-xs text-foreground-muted">
+                            {assignment.instructions}
+                          </p>
+                        ) : null}
+                        {(assignment.expand?.collaborators?.length ?? 0) > 0 ? (
+                          <p className="mt-1 text-xs text-foreground-subtle">
+                            Resurser:{' '}
+                            {assignment.expand?.collaborators
+                              ?.map((c) => c.display_name || c.email)
+                              .join(', ')}
+                          </p>
+                        ) : null}
+                        {assignment.expand?.meeting ? (
+                          <p className="mt-1 text-xs text-foreground-subtle">
+                            📅 Möte: {assignment.expand.meeting.name} ·{' '}
+                            {new Date(assignment.expand.meeting.starts_at).toLocaleString('sv-SE')}
+                          </p>
+                        ) : null}
                       </div>
                       <WorkshopAssignmentStatusBadge status={assignment.status} />
                     </div>
@@ -1138,6 +1450,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
             </ul>
           )}
         </Section>
+      </div>
       </div>
     </main>
   );

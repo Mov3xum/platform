@@ -48,13 +48,21 @@ export async function POST(request: Request): Promise<Response> {
 
   const pb = await getServerPb();
   try {
+    // Node/undici-gotcha: en File från FormData kan skickas vidare med tom body.
+    // Materialisera till Buffer och slå om i en Blob innan vi laddar upp.
+    const buffer = Buffer.from(await file.arrayBuffer());
+
     const fd = new FormData();
     fd.append('tenant', user.tenant);
     fd.append('uploaded_by', user.id);
     fd.append('kind', kind);
     fd.append('mime', (file.type || '').toLowerCase());
     fd.append('size_bytes', String(file.size));
-    fd.append('file', file, file.name || `${kind}-${Date.now()}`);
+    fd.append(
+      'file',
+      new Blob([buffer], { type: file.type || 'application/octet-stream' }),
+      file.name || `${kind}-${Date.now()}`
+    );
 
     const rec = await pb.collection(PB_COLLECTIONS.workshopMedia).create(fd);
     const filename = String((rec as Record<string, unknown>).file || '');

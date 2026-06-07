@@ -426,7 +426,7 @@ export default async function IntegrationerPage({
         {isStaff && (
           <section>
             <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
-              Manuella importer
+              Administration
             </h2>
             <div className="space-y-3">
               <a

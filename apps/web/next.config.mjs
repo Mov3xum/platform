@@ -2,6 +2,16 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const codespacesForwardingHost =
+  process.env.CODESPACE_NAME && process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN
+    ? `${process.env.CODESPACE_NAME}-3000.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`
+    : null;
+const serverActionAllowedOrigins = [
+  'localhost:3000',
+  '127.0.0.1:3000',
+  '0.0.0.0:3000',
+  codespacesForwardingHost,
+].filter(Boolean);
 
 // Statiska säkerhetsheaders (CLAUDE.md § 10.3 A.8.9). Den dynamiska,
 // nonce-baserade Content-Security-Policy sätts i middleware.ts (kräver
@@ -39,6 +49,21 @@ const nextConfig = {
   // For monorepo: tell Next.js the workspace root so file-tracing picks up
   // packages/shared and the right yarn.lock.
   outputFileTracingRoot: join(__dirname, '..', '..'),
+  // Node-only server libraries that MUST NOT be webpack-bundled. pdf-parse
+  // (PDF text extraction for chat/file uploads) pins its own pdf.js build and
+  // reads files via dynamic require()/fs; exceljs (XLSX generation) does the
+  // same. When webpack bundles them into the standalone server chunks their
+  // internal requires are rewritten and they throw at runtime in production
+  // ("kunde inte ladda upp fil PDF"). Kept external they are required natively
+  // and correctly file-traced into .next/standalone/node_modules.
+  //
+  // NOTE: the pure-JS doc libs (pdf-lib, pptxgenjs, docx) are deliberately NOT
+  // listed — they bundle fine, and @vercel/nft traces docx's CJS entry
+  // incompletely, so externalizing it would break the DOCX renderer.
+  serverExternalPackages: [
+    'pdf-parse',
+    'exceljs',
+  ],
   images: {
     remotePatterns: [
       {
@@ -60,13 +85,55 @@ const nextConfig = {
       // catch-all https-mönstret ovan. Inget http-sslip.io-undantag behövs.
     ],
   },
+  // Skip build-only packages from output file tracing. Without this,
+  // @vercel/nft has to stat all of node_modules (including the @swc/core
+  // compiler, webpack, tailwindcss etc.) which hangs the Docker build for
+  // 18+ hours on Coolify. The '*' wildcard applies globally — none of these
+  // build-tool packages are needed at runtime in the standalone output.
+  // NOTE: Moved from experimental.outputFileTracingExcludes — Next.js 15
+  // promoted this to a top-level option.
+  // VIKTIGT: exkludera ENDAST @swc/core (build-kompilatorn), ALDRIG hela
+  // @swc/** — @swc/helpers är en runtime-dep till next och dess output
+  // kräver `@swc/helpers/_/_interop_require_default`. Tas helpers bort ur
+  // standalone-bundlen kraschar servern direkt med MODULE_NOT_FOUND →
+  // healthcheck unhealthy → Coolify rullar tillbaka.
+  outputFileTracingExcludes: {
+    '*': [
+      'node_modules/@swc/core/**',
+      'node_modules/@swc/core-*/**',
+      'node_modules/@esbuild/**',
+      'node_modules/webpack/**',
+      'node_modules/eslint/**',
+      'node_modules/@eslint/**',
+      'node_modules/typescript/**',
+      'node_modules/tailwindcss/**',
+      'node_modules/@tailwindcss/**',
+      'node_modules/postcss/**',
+      'node_modules/autoprefixer/**',
+      'node_modules/.cache/**',
+    ],
+  },
   experimental: {
     // Ensure all dependencies are traced correctly in monorepo with path aliases
     esmExternals: true,
+    // Requests through middleware (our matcher covers every non-static route)
+    // are cloned with a body cap of `middlewareClientMaxBodySize` (Next default
+    // 10 MB). Server actions and route handlers read that CLONE, so any larger
+    // upload — a 10 MB PDF becomes a ~13.4 MB base64 server-action argument —
+    // is silently TRUNCATED before the handler runs, corrupting the payload and
+    // producing a 500 ("kunde inte ladda upp fil PDF"). Raise it to match the
+    // server-action limit below so chat attachments and the media/document/
+    // agreement upload routes get the full body. (Files are still capped per
+    // request in app code: 10 MB/chat-attachment, larger in the media routes.)
+    middlewareClientMaxBodySize: '32mb',
     // Chat-bilagor (bilder base64-encoded + textfiler) — default 1 MB räcker inte
     serverActions: {
-      bodySizeLimit: '32mb'
-    }
+      bodySizeLimit: '32mb',
+      // Local dev in Codespaces can proxy requests via *.app.github.dev while
+      // the browser origin is localhost:3000, which otherwise triggers
+      // "Invalid Server Actions request" host checks.
+      allowedOrigins: serverActionAllowedOrigins,
+    },
   },
   webpack: (config) => {
     // Make @-alias resolution explicit in all environments (including Docker/Coolify)

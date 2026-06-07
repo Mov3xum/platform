@@ -1,30 +1,31 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import type { Attribution, CompassQuestion } from '@/lib/compass/types';
+import type { CompassQuestion } from '@/lib/compass/types';
+import { QuestionInput, readAttribution } from './QuestionInput';
 
 interface Props {
   moduleSlug: string;
   questions: CompassQuestion[];
   successMessage?: string;
   redirectUrl?: string;
+  /**
+   * Endpoint-bas för submit. Default = inloggad admin-preview (/api/inflode).
+   * Den publika sidan skickar `/api/public/m` (oinloggat flöde).
+   */
+  apiBase?: string;
+  /** Skickas i submit-body för publika flöden där samtycke krävs. */
+  consent?: boolean;
 }
 
-function readAttribution(): Attribution {
-  if (typeof window === 'undefined') return {};
-  const params = new URLSearchParams(window.location.search);
-  const get = (k: string) => params.get(k) || undefined;
-  return {
-    utm_source: get('utm_source'),
-    utm_medium: get('utm_medium'),
-    utm_campaign: get('utm_campaign'),
-    utm_term: get('utm_term'),
-    utm_content: get('utm_content'),
-    referrer_url: typeof document !== 'undefined' ? document.referrer || undefined : undefined
-  };
-}
-
-export function ModuleWizard({ moduleSlug, questions, successMessage, redirectUrl }: Props) {
+export function ModuleWizard({
+  moduleSlug,
+  questions,
+  successMessage,
+  redirectUrl,
+  apiBase = '/api/inflode/m',
+  consent
+}: Props) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -79,10 +80,10 @@ export function ModuleWizard({ moduleSlug, questions, successMessage, redirectUr
     // Sista frågan — skicka in
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/inflode/m/${encodeURIComponent(moduleSlug)}/submit`, {
+      const res = await fetch(`${apiBase}/${encodeURIComponent(moduleSlug)}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers, attribution })
+        body: JSON.stringify({ answers, attribution, consent })
       });
       if (!res.ok) throw new Error(`Servern svarade ${res.status}`);
       setDone(true);
@@ -145,11 +146,7 @@ export function ModuleWizard({ moduleSlug, questions, successMessage, redirectUr
       </div>
 
       {/* Input */}
-      <Input
-        question={q}
-        value={current}
-        onChange={setValue}
-      />
+      <QuestionInput question={q} value={current} onChange={setValue} />
 
       {error && (
         <div
@@ -180,159 +177,4 @@ export function ModuleWizard({ moduleSlug, questions, successMessage, redirectUr
       </div>
     </form>
   );
-}
-
-function Input({
-  question,
-  value,
-  onChange
-}: {
-  question: CompassQuestion;
-  value?: string | string[];
-  onChange: (v: string | string[]) => void;
-}) {
-  switch (question.input_type) {
-    case 'long_text':
-      return (
-        <textarea
-          className="mx-textarea"
-          value={(value as string) || ''}
-          onChange={(e) => onChange(e.target.value)}
-          rows={5}
-          required={question.required}
-          autoFocus
-        />
-      );
-    case 'choice':
-      return (
-        <div style={{ display: 'grid', gap: 8 }}>
-          {(question.choices || []).map((c) => {
-            const selected = value === c.value;
-            return (
-              <label
-                key={c.value}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 12,
-                  border: `1px solid ${selected ? '#002c40' : 'var(--mx-line)'}`,
-                  background: selected ? '#002c40' : 'var(--mx-paper)',
-                  color: selected ? 'white' : 'var(--mx-ink)',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10
-                }}
-              >
-                <input
-                  type="radio"
-                  name={question.key}
-                  value={c.value}
-                  checked={selected}
-                  onChange={() => onChange(c.value)}
-                  style={{ accentColor: '#002c40' }}
-                />
-                {c.label}
-              </label>
-            );
-          })}
-        </div>
-      );
-    case 'multi_choice': {
-      const arr = Array.isArray(value) ? value : [];
-      return (
-        <div style={{ display: 'grid', gap: 8 }}>
-          {(question.choices || []).map((c) => {
-            const selected = arr.includes(c.value);
-            return (
-              <label
-                key={c.value}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 12,
-                  border: `1px solid ${selected ? '#002c40' : 'var(--mx-line)'}`,
-                  background: selected ? 'var(--mx-cyan-tint-2)' : 'var(--mx-paper)',
-                  color: 'var(--mx-ink)',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={selected}
-                  onChange={(e) => {
-                    if (e.target.checked) onChange([...arr, c.value]);
-                    else onChange(arr.filter((v) => v !== c.value));
-                  }}
-                  style={{ accentColor: '#002c40' }}
-                />
-                {c.label}
-              </label>
-            );
-          })}
-        </div>
-      );
-    }
-    case 'scale': {
-      const num = typeof value === 'string' ? Number(value) : 5;
-      return (
-        <div>
-          <input
-            type="range"
-            min={1}
-            max={10}
-            value={num}
-            onChange={(e) => onChange(e.target.value)}
-            style={{ width: '100%', accentColor: '#002c40' }}
-          />
-          <div className="mx-flex mx-mono mx-t-xs mx-muted" style={{ justifyContent: 'space-between', marginTop: 4 }}>
-            <span>1</span>
-            <span className="mx-fw-6 mx-ink-soft">{num}</span>
-            <span>10</span>
-          </div>
-        </div>
-      );
-    }
-    case 'email':
-      return (
-        <input
-          type="email"
-          className="mx-input"
-          value={(value as string) || ''}
-          onChange={(e) => onChange(e.target.value)}
-          required={question.required}
-          autoComplete="email"
-          autoFocus
-        />
-      );
-    case 'phone':
-      return (
-        <input
-          type="tel"
-          className="mx-input"
-          value={(value as string) || ''}
-          onChange={(e) => onChange(e.target.value)}
-          required={question.required}
-          autoComplete="tel"
-          autoFocus
-        />
-      );
-    case 'short_text':
-    default:
-      return (
-        <input
-          type="text"
-          className="mx-input"
-          value={(value as string) || ''}
-          onChange={(e) => onChange(e.target.value)}
-          required={question.required}
-          autoFocus
-        />
-      );
-  }
 }

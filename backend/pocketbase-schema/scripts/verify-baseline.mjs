@@ -30,6 +30,18 @@ const PB_URL = normalizePbUrl(PB_URL_RAW);
 const pb = new PocketBase(PB_URL);
 pb.autoCancellation(false);
 
+const COMPASS_COLLECTIONS = new Set([
+  'compass_lead_sources',
+  'compass_leads',
+  'compass_conversations',
+  'compass_messages',
+  'compass_modules',
+  'compass_questions',
+  'compass_responses',
+  'compass_security_events',
+  'compass_brand'
+]);
+
 const log = (...a) => console.log('•', ...a);
 const ok = (...a) => console.log('✓', ...a);
 const fail = (msg) => {
@@ -86,6 +98,16 @@ async function ensureCollection(name) {
     ok(`collection "${name}" exists`);
     return collection;
   } catch (error) {
+    if (COMPASS_COLLECTIONS.has(name)) {
+      fail(
+        `Collection "${name}" not found or inaccessible.\n` +
+          'Hint: Startupkompassen-kollektionerna skapas av migrationerna (inte av setup-via-api).\n' +
+          'Kör diagnose först:\n' +
+          '  node backend/pocketbase-schema/scripts/diagnose-migrations.mjs\n' +
+          'Om den listar saknade compass-kollektioner, applicera saknade migrationer i PB-containern enligt\n' +
+          'backend/pocketbase-schema/README.md under "Diagnostik & reconcile: saknade migrationer".'
+      );
+    }
     fail(`Collection "${name}" not found or inaccessible`);
   }
 }
@@ -123,6 +145,16 @@ async function verifyCollectionsExist() {
     'sprint_x_checkins',
     'startup_phase_history',
     'startup_financials',
+    // CRM / bolagsisolering (§ 21)
+    'startup_contacts',
+    'capital_rounds',
+    'intellectual_property',
+    'startup_kpis',
+    'tasks',
+    'education_documents',
+    'education_document_assignments',
+    'workshop_media',
+    'integration_records',
     // Investor/event
     'investors',
     'deals',
@@ -134,6 +166,21 @@ async function verifyCollectionsExist() {
     'ai_usage_events',
     'agent_actions',
     'tool_schedules',
+    // Startupkompassen / inflöde (§ 23). Dessa skapas BARA av migrationerna
+    // (1700000039 + utökningar) och speglas INTE i setup-via-api.mjs. En
+    // instans som bootstrappats utan att migrationerna körts saknar dem helt
+    // → skrivningar 404:ar och /inflode kastar 500. Vi gör dem därför till ett
+    // hårt baseline-invariant: deployen failar om de saknas (i stället för att
+    // buggen upptäcks först av en användare). Se diagnose-migrations.mjs.
+    'compass_lead_sources',
+    'compass_leads',
+    'compass_conversations',
+    'compass_messages',
+    'compass_modules',
+    'compass_questions',
+    'compass_responses',
+    'compass_security_events',
+    'compass_brand',
     // Övrigt
     'web_cache'
   ];
@@ -169,10 +216,158 @@ function assertCreateRuleDoesNotJoinRecord(collection) {
   }
 }
 
+// Global invariant (CLAUDE.md § 21.3): INGEN createRule får innehålla en
+// roll-check (`@request.auth.roles ?= ...` / `:each ?=`) eller en tenant-
+// join (`@request.auth.tenant = tenant` / `= startup.tenant`). Båda triggar
+// PB v0.23.4-buggar som TYST nekar create:en → web-routarna returnerar 500
+// (det var precis så workshop-media-uppladdningen föll). Roll-enforcement
+// görs i server-actions; createRule ska bara referera auth-fält + skalär
+// ägar-check. Migration 1700000111 + setup-via-api FORCE_CREATE_RULES håller
+// detta. Den här svep-kontrollen fångar varje NY kollektion som återinför
+// mönstret INNAN den når staging/produktion.
+async function verifyNoBrokenCreateRules() {
+  let all;
+  try {
+    all = await pb.collections.getFullList({ $autoCancel: false });
+  } catch (err) {
+    fail(`Kunde inte lista kollektioner för createRule-svep:\n${describeError(err)}`);
+  }
+  const offenders = [];
+  for (const col of all) {
+    if (col.system) continue; // _superusers etc.
+    const rule = col.createRule;
+    if (typeof rule !== 'string' || rule.trim() === '') continue;
+    if (/@request\.auth\.roles\s*(:each\s*)?\?=/.test(rule)) {
+      offenders.push(`${col.name}.createRule har roll-check: ${JSON.stringify(rule)}`);
+    }
+    if (
+      rule.includes('@request.auth.tenant = tenant') ||
+      rule.includes('@request.auth.tenant = startup.tenant') ||
+      rule.includes('startup.tenant =')
+    ) {
+      offenders.push(`${col.name}.createRule har tenant-join: ${JSON.stringify(rule)}`);
+    }
+  }
+  if (offenders.length) {
+    fail(
+      'Trasiga createRules (PB v0.23.4-buggar — orsakar 500 vid create):\n' +
+        offenders.map((o) => `  - ${o}`).join('\n') +
+        '\nKör migration 1700000111 / setup-via-api.mjs. Roll-checks hör hemma ' +
+        'i server-actions, inte i createRule (CLAUDE.md § 21.3).'
+    );
+  }
+  ok(`createRule-svep: inga roll-checks/tenant-joins (${all.length} kollektioner)`);
+}
+
+// Bolagsisolering (CLAUDE.md § 21, migration 1700000096). En ren
+// startup_member får bara se sina egna bolags rader. Vi verifierar att
+// list/view-reglerna scope:ar till `linked_startups` för de startup-scopade
+// kollektionerna, och att de tenant-breda kollektionerna är staff/observer-only.
+const MUST_SCOPE_TO_MEMBER = [
+  'startups',
+  'activities',
+  'notes',
+  'milestones',
+  'agreements',
+  'tool_runs',
+  'startup_team_members',
+  'startup_contacts',
+  'startup_phase_history',
+  'startup_financials',
+  'capital_rounds',
+  'intellectual_property',
+  'startup_kpis',
+  'education_document_assignments',
+  'sprint_x_checkins',
+  'partner_engagements',
+  'tasks',
+  'missions',
+  // Tillagda av migration 1700000112 (säkerhetsgranskning 2026-06, H4–H6):
+  'agreement_signatures',
+  'de_minimis_units',
+  'de_minimis_unit_orgnr',
+  'de_minimis_stod',
+  'event_signups'
+];
+
+const MUST_BE_STAFF_OR_OBSERVER = [
+  'partners',
+  'investors',
+  'deals',
+  'alumni',
+  'integration_records',
+  // Tillagda av migration 1700000112 (säkerhetsgranskning 2026-06, H3/H6):
+  'contacts',
+  'service_time_entries',
+  'startup_service_costs',
+  'startup_readiness_assessments',
+  'startup_state_aid_periods',
+  'mission_comments'
+];
+
+// Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa
+// kollektioner saknade tenant-scope helt och läckte mellan tenants. Migration
+// 1700000112 scopar dem via förälder-relation resp. egen tenant. `token` är
+// substring som MÅSTE finnas i list/view-regeln. Fail-soft om kollektionen
+// saknas (t.ex. en bootstrap utan compass).
+const MUST_SCOPE_CROSS_TENANT = [
+  { name: 'compass_messages', token: 'conversation.tenant' },
+  { name: 'compass_responses', token: 'conversation.tenant' },
+  { name: 'compass_questions', token: 'module.tenant' },
+  { name: 'tenants', token: '@request.auth.tenant = id' }
+];
+
+function verifyStartupMemberIsolation(collections) {
+  for (const name of MUST_SCOPE_TO_MEMBER) {
+    const col = collections.get(name);
+    if (!col) continue; // kollektion saknas i denna instans — hoppa
+    for (const ruleName of ['listRule', 'viewRule']) {
+      if (!includesText(col[ruleName], 'linked_startups')) {
+        fail(
+          `Bolagsisolering: ${name}.${ruleName} saknar linked_startups-scope ` +
+          '(migration 1700000096 ej applicerad?).'
+        );
+      }
+    }
+  }
+
+  for (const name of MUST_BE_STAFF_OR_OBSERVER) {
+    const col = collections.get(name);
+    if (!col) continue;
+    for (const ruleName of ['listRule', 'viewRule']) {
+      const expr = col[ruleName];
+      if (!includesText(expr, '@request.auth.roles')) {
+        fail(
+          `Bolagsisolering: ${name}.${ruleName} bör vara staff/observer-only ` +
+          '(saknar roll-check; migration 1700000096 ej applicerad?).'
+        );
+      }
+      if (includesText(expr, 'startup_member')) {
+        fail(`Bolagsisolering: ${name}.${ruleName} får inte exponera startup_member.`);
+      }
+    }
+  }
+  for (const { name, token } of MUST_SCOPE_CROSS_TENANT) {
+    const col = collections.get(name);
+    if (!col) continue; // kollektion saknas i denna instans — hoppa
+    for (const ruleName of ['listRule', 'viewRule']) {
+      if (!includesText(col[ruleName], token)) {
+        fail(
+          `Cross-tenant-scope: ${name}.${ruleName} saknar tenant-scope ` +
+          `(\`${token}\`; migration 1700000112 ej applicerad?).`
+        );
+      }
+    }
+  }
+
+  ok('Bolagsisolering (§ 21) + cross-tenant-scope (1700000112) verifierad');
+}
+
 function verifyRlsAndRbac(collections) {
   const tenants = collections.get('tenants');
-  assertRuleContains(tenants, 'updateRule', '@request.auth.roles ?= "admin"');
-  assertRuleContains(tenants, 'updateRule', '@request.auth.roles ?= "incubator_lead"');
+  // `:each ?=` (inte `?=`) — PB v0.23.4-operatorbugg, se migration 1700000108.
+  assertRuleContains(tenants, 'updateRule', '@request.auth.roles:each ?= "admin"');
+  assertRuleContains(tenants, 'updateRule', '@request.auth.roles:each ?= "incubator_lead"');
 
   const logoLight = getField(tenants, 'logo_light');
   if (logoLight.type !== 'file') {
@@ -259,6 +454,8 @@ function verifyRlsAndRbac(collections) {
     const col = collections.get(name);
     if (col) assertCreateRuleDoesNotJoinRecord(col);
   }
+
+  verifyStartupMemberIsolation(collections);
 
   ok('RLS/RBAC baseline checks passed (createRules är säkra)');
 }
@@ -488,6 +685,7 @@ async function main() {
 
   const collections = await verifyCollectionsExist();
   verifyRlsAndRbac(collections);
+  await verifyNoBrokenCreateRules();
   await verifyAppUser();
   await verifyAppUserCanCreate(pb, APP_USER_EMAIL, APP_USER_PASSWORD);
 

@@ -4,6 +4,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { WorkshopAssignForm } from '../../WorkshopAssignForm';
+import { listAssignableResourcesForTenant, type AssignableResource } from '@/lib/assignments/collaboration';
 import { WorkshopStatusBadge } from '@/components/Badges';
 import { deleteWorkshopFormAction } from '@/lib/actions/workshops';
 import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
@@ -54,6 +55,7 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
   const heroImageUrl = pbFileUrl('workshops', workshop.id, workshop.image, '800x450');
 
   let startups: Array<{ id: string; name: string }> = [];
+  let resources: AssignableResource[] = [];
   let recentAssignments: WorkshopAssignment[] = [];
   if (isStaff) {
     try {
@@ -67,6 +69,7 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
     } catch {
       startups = [];
     }
+    resources = await listAssignableResourcesForTenant(pb, user.tenant);
   }
 
   try {
@@ -247,7 +250,9 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
               {workshop.ai_system_prompt || 'Ingen systemprompt satt.'}
             </p>
           </div>
-          {isStaff ? <WorkshopAssignForm workshopId={id} startups={startups} /> : null}
+          {isStaff ? (
+            <WorkshopAssignForm workshopId={id} startups={startups} resources={resources} />
+          ) : null}
         </aside>
       </div>
     </main>

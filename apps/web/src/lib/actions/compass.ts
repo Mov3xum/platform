@@ -1,8 +1,10 @@
 'use server';
 
+import PocketBase from 'pocketbase';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
+import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { hasRole } from '@/lib/rbac';
 import {
   createLead,
@@ -135,7 +137,7 @@ export async function createManualLeadAction(formData: FormData) {
   const idea = String(formData.get('idea_summary') || '').trim() || undefined;
   const source = String(formData.get('source_key') || 'call');
   if (!name) {
-    throw new Error('Namn saknas');
+    redirect('/inflode/leads/new?error=missing_name');
   }
 
   const pb = await getServerPb();
@@ -148,7 +150,7 @@ export async function createManualLeadAction(formData: FormData) {
     source_key: source
   });
   if (!lead) {
-    throw new Error('Kunde inte skapa lead');
+    redirect('/inflode/leads/new?error=creation_failed');
   }
 
   revalidatePath('/inflode');
@@ -373,7 +375,37 @@ export async function declineLeadAction(formData: FormData) {
    ──────────────────────────────────────────────────────────────────── */
 
 const FLOW_TYPES = ['chat', 'wizard', 'quiz'] as const;
-const ADMIN_ROLES = ['admin', 'incubator_lead'] as const;
+// Startupkompassen hanteras av admin, coach och incubator_lead.
+const MANAGE_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
+
+function statusOf(err: unknown): number | undefined {
+  if (typeof err === 'object' && err !== null && 'status' in err) {
+    return (err as { status?: number }).status;
+  }
+  return undefined;
+}
+
+// Skriv via app-user-klienten först; faller tillbaka på superuser vid 400/403
+// (PB v0.23.4:s rule-eval-bugg, CLAUDE.md § 21.3 — annars behöriga staff-
+// skrivningar nekas tyst → server-actionen kastade 500). Samma mönster som
+// lib/actions/onboarding.ts + education-documents.ts. Roll + tenant verifieras
+// ALLTID i server-actionen INNAN detta anropas — superusern är en robusthets-
+// fallback, inte behörighetsgränsen.
+async function writeWithFallback<T>(
+  pb: PocketBase,
+  run: (client: PocketBase) => Promise<T>
+): Promise<T> {
+  try {
+    return await run(pb);
+  } catch (err) {
+    const status = statusOf(err);
+    if (status === 400 || status === 403) {
+      const su = await getSuperuserPb();
+      if (su.ok) return run(su.pb);
+    }
+    throw err;
+  }
+}
 
 function slugify(s: string): string {
   return s
@@ -387,7 +419,7 @@ function slugify(s: string): string {
 
 export async function createModuleAction(formData: FormData) {
   const user = await requireUser();
-  if (!hasRole(user.roles, [...ADMIN_ROLES])) {
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
     throw new Error('Forbidden');
   }
   const name = String(formData.get('name') || '').trim();
@@ -404,20 +436,35 @@ export async function createModuleAction(formData: FormData) {
 
   const slug = slugify(slugRaw || name);
   if (!slug) throw new Error('Slug kunde inte genereras');
+  const publicSlugRaw = slugify(String(formData.get('public_slug') || '') || slug);
 
   const pb = await getServerPb();
   let createdSlug = slug;
+  // public_slug är GLOBALT unik (migration 1700000108). Vi kan inte läsa andra
+  // tenants moduler med användartoken, så vi försöker den rena sluggen och
+  // faller tillbaka på ett suffix om DB:n nekar pga unik-konflikt.
+  async function createWith(publicSlug: string) {
+    return writeWithFallback(pb, (client) =>
+      client.collection('compass_modules').create({
+        tenant: user.tenant,
+        slug: createdSlug,
+        public_slug: publicSlug,
+        name,
+        description,
+        flow_type: flowType,
+        is_active: isActive,
+        public_url_enabled: publicEnabled,
+        sort_order: 999
+      })
+    );
+  }
   try {
-    const rec = await pb.collection('compass_modules').create({
-      tenant: user.tenant,
-      slug: createdSlug,
-      name,
-      description,
-      flow_type: flowType,
-      is_active: isActive,
-      public_url_enabled: publicEnabled,
-      sort_order: 999
-    });
+    let rec;
+    try {
+      rec = await createWith(publicSlugRaw);
+    } catch {
+      rec = await createWith(`${publicSlugRaw}-${Math.random().toString(36).slice(2, 6)}`);
+    }
     createdSlug = rec.slug;
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
@@ -438,7 +485,7 @@ export async function createModuleAction(formData: FormData) {
 
 export async function updateModuleAction(formData: FormData) {
   const user = await requireUser();
-  if (!hasRole(user.roles, [...ADMIN_ROLES])) {
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
     throw new Error('Forbidden');
   }
   const id = String(formData.get('id') || '');
@@ -448,6 +495,9 @@ export async function updateModuleAction(formData: FormData) {
   // Verifiera tenant
   const existing = await pb.collection('compass_modules').getOne(id);
   if (existing.tenant !== user.tenant) throw new Error('Forbidden');
+
+  const maxExchangesRaw = String(formData.get('max_exchanges') || '').trim();
+  const maxExchanges = Number(maxExchangesRaw);
 
   const patch: Record<string, unknown> = {
     name: String(formData.get('name') || '').trim(),
@@ -459,9 +509,35 @@ export async function updateModuleAction(formData: FormData) {
     theme_color: String(formData.get('theme_color') || '').trim(),
     system_prompt: String(formData.get('system_prompt') || '').trim(),
     consent_note: String(formData.get('consent_note') || '').trim(),
+    // Startupkompassen — publik sida + chat-persona
+    hero_eyebrow: String(formData.get('hero_eyebrow') || '').trim().slice(0, 120),
+    welcome_title: String(formData.get('welcome_title') || '').trim().slice(0, 200),
+    welcome_body: String(formData.get('welcome_body') || '').trim().slice(0, 4000),
+    chat_persona: String(formData.get('chat_persona') || '').trim().slice(0, 4000),
+    max_exchanges: Number.isFinite(maxExchanges) && maxExchanges >= 0 ? Math.min(maxExchanges, 100) : 0,
+    require_email: formData.get('require_email') === 'on',
+    require_phone: formData.get('require_phone') === 'on',
+    require_organization: formData.get('require_organization') === 'on',
+    notify_emails: String(formData.get('notify_emails') || '').trim().slice(0, 1000),
     is_active: formData.get('is_active') === 'on',
     public_url_enabled: formData.get('public_url_enabled') === 'on'
   };
+
+  // Publik slug (global unik). Bara sätt om angiven — tom lämnar oförändrad.
+  const publicSlug = slugify(String(formData.get('public_slug') || ''));
+  if (publicSlug) patch.public_slug = publicSlug;
+
+  // Quiz-resultatprofiler skickas som JSON från ResultBucketsEditor.
+  const bucketsRaw = String(formData.get('result_buckets') || '').trim();
+  if (bucketsRaw) {
+    try {
+      const parsed = JSON.parse(bucketsRaw);
+      if (Array.isArray(parsed)) patch.result_buckets = parsed;
+    } catch {
+      throw new Error('Ogiltigt format på resultatprofiler (kunde inte tolka JSON).');
+    }
+  }
+
   const flow = String(formData.get('flow_type') || '');
   if (FLOW_TYPES.includes(flow as (typeof FLOW_TYPES)[number])) {
     patch.flow_type = flow;
@@ -470,9 +546,13 @@ export async function updateModuleAction(formData: FormData) {
   if (model) patch.model = model;
 
   try {
-    await pb.collection('compass_modules').update(id, patch);
+    await writeWithFallback(pb, (c) => c.collection('compass_modules').update(id, patch));
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
+    // PB unik-index-fel på public_slug → vänligt meddelande.
+    if (/public_slug|unique/i.test(msg)) {
+      throw new Error('Den publika länken (slug) är upptagen — välj en annan.');
+    }
     throw new Error(`Kunde inte uppdatera modul: ${msg}`);
   }
 
@@ -490,7 +570,7 @@ export async function updateModuleAction(formData: FormData) {
 
 export async function deleteModuleAction(formData: FormData) {
   const user = await requireUser();
-  if (!hasRole(user.roles, [...ADMIN_ROLES])) {
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
     throw new Error('Forbidden');
   }
   const id = String(formData.get('id') || '');
@@ -501,7 +581,7 @@ export async function deleteModuleAction(formData: FormData) {
   if (existing.tenant !== user.tenant) throw new Error('Forbidden');
 
   try {
-    await pb.collection('compass_modules').delete(id);
+    await writeWithFallback(pb, (c) => c.collection('compass_modules').delete(id));
   } catch {
     // ignore
   }
@@ -522,9 +602,27 @@ export async function deleteModuleAction(formData: FormData) {
 
 const INPUT_TYPES = ['short_text', 'long_text', 'choice', 'multi_choice', 'scale', 'email', 'phone'] as const;
 
+/**
+ * Tolkar en multi-hink-spec som `builder:2 explorer:1 potential:0` (mellanslag-
+ * eller kommaseparerade `hink:poäng`-par). Returnerar undefined om strängen inte
+ * är en sådan spec (då faller parsern tillbaka på enkel `poäng`/`hink`-kolumn).
+ */
+function parseBucketSpec(raw: string | undefined): Record<string, number> | undefined {
+  if (!raw) return undefined;
+  const tokens = raw.split(/[\s,]+/).map((t) => t.trim()).filter(Boolean);
+  if (tokens.length === 0) return undefined;
+  const map: Record<string, number> = {};
+  for (const tok of tokens) {
+    const m = tok.match(/^([\p{L}0-9_-]+):(-?\d+(?:\.\d+)?)$/u);
+    if (!m) return undefined; // inte en hink-spec → låt enkel-parsern ta över
+    map[slugify(m[1])] = Number(m[2]);
+  }
+  return Object.keys(map).length > 0 ? map : undefined;
+}
+
 export async function addQuestionAction(formData: FormData) {
   const user = await requireUser();
-  if (!hasRole(user.roles, [...ADMIN_ROLES])) {
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
     throw new Error('Forbidden');
   }
   const moduleId = String(formData.get('module_id') || '');
@@ -541,15 +639,45 @@ export async function addQuestionAction(formData: FormData) {
     throw new Error('Ogiltig input_type');
   }
 
-  let choices: { value: string; label: string }[] | undefined;
+  // Två format per rad stöds:
+  //   • Enkel/intervall: `värde | etikett | poäng | hink`
+  //     (poäng + hink frivilliga; en hink per val).
+  //   • Multi-hink: `värde | etikett | builder:2 explorer:1 potential:0`
+  //     (ett val fördelar poäng över flera profiler — företräde framför hink).
+  let choices:
+    | { value: string; label: string; score?: number; bucket?: string; buckets?: Record<string, number> }[]
+    | undefined;
   if (choicesRaw && (inputType === 'choice' || inputType === 'multi_choice')) {
     choices = choicesRaw
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l.length > 0)
       .map((l) => {
-        const [value, ...rest] = l.split('|').map((s) => s.trim());
-        return { value: slugify(value || l), label: rest.join('|').trim() || value };
+        const parts = l.split('|').map((s) => s.trim());
+        const value = parts[0];
+        const label = parts[1] || value;
+        const choice: {
+          value: string;
+          label: string;
+          score?: number;
+          bucket?: string;
+          buckets?: Record<string, number>;
+        } = {
+          value: slugify(value || l),
+          label
+        };
+        // Multi-hink kan stå i poäng- eller hink-kolumnen (`builder:2 explorer:1`).
+        const buckets = parseBucketSpec(parts[2]) || parseBucketSpec(parts[3]);
+        if (buckets) {
+          choice.buckets = buckets;
+        } else {
+          const score = Number(parts[2]);
+          if (parts[2] !== undefined && parts[2] !== '' && Number.isFinite(score)) {
+            choice.score = score;
+          }
+          if (parts[3]) choice.bucket = slugify(parts[3]);
+        }
+        return choice;
       });
   }
 
@@ -559,16 +687,18 @@ export async function addQuestionAction(formData: FormData) {
   if (mod.tenant !== user.tenant) throw new Error('Forbidden');
 
   try {
-    await pb.collection('compass_questions').create({
-      module: moduleId,
-      key,
-      prompt,
-      help_text: helpText || undefined,
-      input_type: inputType,
-      required,
-      choices,
-      sort_order: Date.now() % 1_000_000
-    });
+    await writeWithFallback(pb, (c) =>
+      c.collection('compass_questions').create({
+        module: moduleId,
+        key,
+        prompt,
+        help_text: helpText || undefined,
+        input_type: inputType,
+        required,
+        choices,
+        sort_order: Date.now() % 1_000_000
+      })
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
     throw new Error(`Kunde inte skapa fråga: ${msg}`);
@@ -579,7 +709,7 @@ export async function addQuestionAction(formData: FormData) {
 
 export async function deleteQuestionAction(formData: FormData) {
   const user = await requireUser();
-  if (!hasRole(user.roles, [...ADMIN_ROLES])) {
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
     throw new Error('Forbidden');
   }
   const id = String(formData.get('id') || '');
@@ -588,7 +718,7 @@ export async function deleteQuestionAction(formData: FormData) {
 
   const pb = await getServerPb();
   try {
-    await pb.collection('compass_questions').delete(id);
+    await writeWithFallback(pb, (c) => c.collection('compass_questions').delete(id));
   } catch {
     // ignore
   }

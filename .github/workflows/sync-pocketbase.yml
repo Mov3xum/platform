@@ -38,7 +38,7 @@ jobs:
           set -euo pipefail
 
           if [ -n "${COOLIFY_DEPLOY_WEBHOOK:-}" ]; then
-            echo "Trigging Coolify deploy webhook (stack redeploy)..."
+            echo "Triggering Coolify deploy webhook (stack redeploy)..."
             curl --fail-with-body -sS -X POST \
               -H "Authorization: Bearer $COOLIFY_TOKEN" \
               -H "Accept: application/json" \
@@ -71,7 +71,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'yarn'
 
       - name: Install pocketbase npm-paket
@@ -205,4 +205,5 @@ jobs:
             exit 1
           fi
 
+          node backend/pocketbase-schema/scripts/diagnose-migrations.mjs
           APP_USER_EMAIL="$app_user_email" node backend/pocketbase-schema/scripts/verify-baseline.mjs

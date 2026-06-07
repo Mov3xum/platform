@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useMemo } from 'react';
 import { coreModules } from '@platform/shared';
-import { MobileMenuButton } from './MobileRail';
+import { MobileMenuButton, useMobileRail } from './MobileRail';
+import { Icon } from './Icon';
 
 function buildCrumbs(pathname: string): { label: string; href: string; now: boolean }[] {
   if (pathname === '/' || pathname === '/chatt') {
@@ -35,10 +36,20 @@ function buildCrumbs(pathname: string): { label: string; href: string; now: bool
 export function ProtoTopBar() {
   const pathname = usePathname();
   const crumbs = useMemo(() => buildCrumbs(pathname), [pathname]);
+  const { toggleDesktopCollapse } = useMobileRail();
 
   return (
     <div className="mx-topbar">
       <MobileMenuButton />
+      <button
+        type="button"
+        onClick={toggleDesktopCollapse}
+        className="mx-desktop-rail-btn"
+        aria-label="Visa/dölj navigering"
+        title="Visa/dölj navigering"
+      >
+        <Icon name="menu" size={18} />
+      </button>
       <div className="mx-crumb">
         {crumbs.map((c, i) => (
           <span key={c.href + i} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>

@@ -157,8 +157,11 @@ export async function updateActivityField(
 
   let current: ActivityRow;
   try {
+    // `expand.startup.tenant` måste ligga i `fields` — annars strippar PB
+    // bort hela `expand`-objektet när `fields` är satt, och tenant-checken
+    // nedan nekar då alltid skrivningen (TENANT_MISMATCH).
     current = (await pb.collection('activities').getOne(params.activityId, {
-      fields: `id,startup,${params.field}`,
+      fields: `id,startup,${params.field},expand.startup.tenant`,
       expand: 'startup'
     })) as ActivityRow & {
       expand?: { startup?: { tenant?: string } };

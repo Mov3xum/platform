@@ -58,10 +58,17 @@ export const agreementKindLabels: Record<AgreementKind, string> = {
   other: 'Övrigt'
 };
 
-export type AgreementStatus = 'draft' | 'sent' | 'signed' | 'expired' | 'terminated';
+export type AgreementStatus =
+  | 'draft'
+  | 'sent'
+  | 'partially_signed'
+  | 'signed'
+  | 'expired'
+  | 'terminated';
 export const agreementStatusLabels: Record<AgreementStatus, string> = {
   draft: 'Utkast',
   sent: 'Skickat',
+  partially_signed: 'Delvis signerat',
   signed: 'Signerat',
   expired: 'Utgått',
   terminated: 'Avslutat'
@@ -128,12 +135,16 @@ export type ActivityKind =
   | 'tool_run'
   | 'workshop_assignment'
   | 'workshop_run'
+  | 'education_document'
+  | 'onboarding'
   | 'integration_sync';
 export const activityKindLabels: Record<ActivityKind, string> = {
   manual: 'Manuell',
   tool_run: 'Verktygskörning',
   workshop_assignment: 'Workshoptilldelning',
   workshop_run: 'Workshop AI-körning',
+  education_document: 'Utbildningsdokument',
+  onboarding: 'Onboarding',
   integration_sync: 'Integrationssynk'
 };
 

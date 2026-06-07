@@ -4,12 +4,15 @@ import {
   composeFilter,
   getExposedCollection,
   maskRecord,
+  searchableTextFields,
   type ExposedCollection
 } from './schema';
+import { rankCandidates, significantTokens } from './fuzzy';
 import type { MistralToolCall, MistralToolDefinition } from './mistral';
 import { escFilter } from '@/lib/pb-filter';
 import type { GeneratedFileRef } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
+import { getTemplate, listTemplateSummaries, TEMPLATE_IDS } from '@/lib/documents/templates';
 import { saveGeneratedFile } from '@/lib/documents/save';
 import {
   agentWritableFields,
@@ -31,6 +34,84 @@ const MAX_FIELD_LENGTH = 400;
 const MAX_FILTER_LENGTH = 500;
 const MAX_SORT_LENGTH = 200;
 const MAX_EXPAND_LENGTH = 200;
+
+// search_records / aggregate_collection / describe_collection
+const MAX_SEARCH_LIMIT = 20;
+const SEARCH_CANDIDATE_FETCH = 100; // kandidater per hämtning innan JS-ranking
+const SEARCH_THRESHOLD = 0.4;
+const MAX_AGG_SCAN = 500; // rader aggregeringen får skanna (robusthet § 10)
+const MAX_DISTINCT_VALUES = 40;
+const AGG_OPS = ['count', 'sum', 'avg', 'min', 'max'] as const;
+type AggOp = (typeof AGG_OPS)[number];
+
+// Systemfält som aldrig är meningsfulla att fuzzy-matcha mot.
+const SYSTEM_RECORD_KEYS: ReadonlySet<string> = new Set([
+  'id',
+  'created',
+  'updated',
+  'collectionId',
+  'collectionName',
+  'expand'
+]);
+
+// Återanvändbara dokument-sub-scheman (inlineas i generate_document — undviker
+// $ref/$defs som Mistral inte alltid resolvar).
+const KPIS_SCHEMA = {
+  type: 'array',
+  description: 'Nyckeltal som stat-kort (max 4 i rad).',
+  items: {
+    type: 'object',
+    properties: {
+      label: { type: 'string' },
+      value: { type: 'string', description: 'Det stora värdet, t.ex. "2,4 Mkr" eller "37 %".' },
+      delta: { type: 'string', description: 'Förändring, t.ex. "+12 %".' },
+      trend: { type: 'string', enum: ['up', 'down', 'flat'] },
+      caption: { type: 'string' }
+    },
+    required: ['label', 'value']
+  }
+} as const;
+const CALLOUT_SCHEMA = {
+  type: 'object',
+  description: 'Färgkodad insikts-/varningsruta.',
+  properties: {
+    variant: { type: 'string', enum: ['info', 'success', 'warning', 'accent'] },
+    title: { type: 'string' },
+    body: { type: 'string' }
+  },
+  required: ['body']
+} as const;
+const QUOTE_SCHEMA = {
+  type: 'object',
+  properties: { text: { type: 'string' }, attribution: { type: 'string' } },
+  required: ['text']
+} as const;
+const TABLE_SCHEMA = {
+  type: 'object',
+  properties: {
+    columns: { type: 'array', items: { type: 'string' } },
+    rows: { type: 'array', items: { type: 'array', items: {} } },
+    emphasizeLastColumn: { type: 'boolean', description: 'Visa proportionella data-barer i sista numeriska kolumnen.' }
+  }
+} as const;
+const CHART_SCHEMA = {
+  type: 'object',
+  description: 'Diagram — föredra framför långa siffertabeller för trender.',
+  properties: {
+    type: { type: 'string', enum: ['bar', 'hbar', 'line', 'area', 'pie', 'donut'] },
+    title: { type: 'string' },
+    unit: { type: 'string', description: 'Enhet på värdeaxeln, t.ex. "kr", "%".' },
+    stacked: { type: 'boolean' },
+    categories: { type: 'array', items: { type: 'string' } },
+    series: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { name: { type: 'string' }, values: { type: 'array', items: { type: 'number' } } }
+      }
+    }
+  }
+} as const;
 
 /**
  * Bygger Mistral-tool-definitionerna för en chatt-session. Tar emot
@@ -145,6 +226,109 @@ export function buildChatTools(
             }
           },
           required: ['collection']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'search_records',
+        description:
+          'Hittar poster via FRITEXT — tolerant mot felstavning, ordföljd och ' +
+          'extra ord. Använd detta FÖRST när användaren nämner en sak vid namn ' +
+          '(bolag, workshop, person, dokument) i stället för att gissa ett exakt ' +
+          'query_collection-filter. Returnerar de mest sannolika träffarna med en ' +
+          'score (1.0 = exakt). Tenant-scope och PII-maskning läggs på automatiskt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            collection: {
+              type: 'string',
+              enum: collectionNames,
+              description: 'Kollektion att söka i'
+            },
+            query: {
+              type: 'string',
+              description:
+                'Användarens egna ord, t.ex. "workshop 1 internationalisering" eller ' +
+                '"enava". Behöver inte vara exakt stavat.'
+            },
+            limit: {
+              type: 'integer',
+              description: `Max antal träffar (1-${MAX_SEARCH_LIMIT}, default 8)`,
+              minimum: 1,
+              maximum: MAX_SEARCH_LIMIT
+            }
+          },
+          required: ['collection', 'query']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'describe_collection',
+        description:
+          'Beskriver en kollektions fält och giltiga enum-värden. Använd INNAN du ' +
+          'filtrerar på status, fas e.d. så du filtrerar på rätt värde (t.ex. ' +
+          '"active", inte "aktiv"). Ange `field` för att även få de distinkta ' +
+          'värden som faktiskt förekommer i ett fält.',
+        parameters: {
+          type: 'object',
+          properties: {
+            collection: {
+              type: 'string',
+              enum: collectionNames,
+              description: 'Kollektion att beskriva'
+            },
+            field: {
+              type: 'string',
+              description:
+                'Valfritt enkelt fältnamn (inga punkter). Returnerar distinkta ' +
+                `värden som förekommer (max ${MAX_DISTINCT_VALUES}).`
+            }
+          },
+          required: ['collection']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'aggregate_collection',
+        description:
+          'Beräknar summa/snitt/min/max/antal över en kollektion, valfritt ' +
+          'grupperat. Använd för totaler och fördelningar i stället för att hämta ' +
+          'rader och räkna själv. Tenant-scope läggs på automatiskt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            collection: {
+              type: 'string',
+              enum: collectionNames,
+              description: 'Kollektion att aggregera'
+            },
+            op: {
+              type: 'string',
+              enum: [...AGG_OPS],
+              description: 'Aggregat: count, sum, avg, min eller max'
+            },
+            field: {
+              type: 'string',
+              description:
+                'Numeriskt fält att aggregera (krävs för sum/avg/min/max; ' +
+                'enkelt fältnamn utan punkter). Ignoreras för count.'
+            },
+            group_by: {
+              type: 'string',
+              description: 'Valfritt enkelt fält att gruppera per (t.ex. `phase`).'
+            },
+            filter: {
+              type: 'string',
+              description: 'Valfritt PocketBase-filter (tenant läggs till automatiskt).'
+            }
+          },
+          required: ['collection', 'op']
         }
       }
     }
@@ -325,19 +509,32 @@ export function buildChatTools(
       function: {
         name: 'generate_document',
         description:
-          'Skapar ett nedladdningsbart dokument (PowerPoint/Excel/Word/PDF) av ' +
-          'sammanställd data. VIKTIGT: alla siffror och fakta MÅSTE komma från ' +
-          'tidigare query_collection-svar i denna konversation — hitta ALDRIG på ' +
-          'data. Systemet renderar filen deterministiskt från ditt spec och sparar ' +
-          'den i användarens privata Filer samt bifogar den som nedladdning. ' +
-          'Använd `slides` för pptx, `sheets` för xlsx, `sections` för docx/pdf.',
+          'Skapar ett snyggt, brandat och nedladdningsbart dokument ' +
+          '(PowerPoint/Excel/Word/PDF) av sammanställd data. VIKTIGT: alla siffror ' +
+          'och fakta MÅSTE komma från tidigare query_collection-svar i denna ' +
+          'konversation — hitta ALDRIG på data. Systemet renderar filen ' +
+          'deterministiskt med Movexums designspråk (rundade kort, mjuka skuggor, ' +
+          'KPI-kort, callouts, diagram) och sparar den i användarens privata Filer.\n' +
+          'BÖRJA med att välja en `template` som matchar uppgiften och följ dess ' +
+          'struktur — det ger ett professionellt resultat. Tillgängliga mallar:\n' +
+          listTemplateSummaries() +
+          '\nAnvänd `slides` för pptx, `sheets` för xlsx, `sections` för docx/pdf. ' +
+          'Använd RIKA element där det passar: `kpis` (nyckeltal som stat-kort), ' +
+          '`callout` (färgkodad insikt), `quote`, och `chart` (för att visualisera ' +
+          'trender — föredra diagram framför långa siffertabeller).',
         parameters: {
           type: 'object',
           properties: {
-            kind: {
+            template: {
               type: 'string',
-              enum: ['pptx', 'xlsx', 'docx', 'pdf'],
-              description: 'Filformat'
+              enum: TEMPLATE_IDS,
+              description: 'Mall/blueprint att följa (rekommenderas). Sätter format + accent och styr strukturen.'
+            },
+            kind: { type: 'string', enum: ['pptx', 'xlsx', 'docx', 'pdf'], description: 'Filformat' },
+            accent: {
+              type: 'string',
+              enum: ['blue', 'purple', 'teal', 'green'],
+              description: 'Accenttema (signaturfärg). Default blue (Movexum mörkblå).'
             },
             title: { type: 'string', description: 'Dokumentets titel (visas på försättssidan)' },
             subtitle: { type: 'string', description: 'Valfri undertitel' },
@@ -347,34 +544,15 @@ export function buildChatTools(
               items: {
                 type: 'object',
                 properties: {
-                  layout: { type: 'string', enum: ['title', 'content', 'table', 'chart'] },
+                  layout: { type: 'string', enum: ['title', 'content', 'section', 'table', 'chart', 'kpi', 'quote'], description: '"section" = sektionsdelare, "kpi" = nyckeltalsslide.' },
                   heading: { type: 'string' },
                   subheading: { type: 'string' },
                   bullets: { type: 'array', items: { type: 'string' } },
-                  table: {
-                    type: 'object',
-                    properties: {
-                      columns: { type: 'array', items: { type: 'string' } },
-                      rows: { type: 'array', items: { type: 'array', items: {} } }
-                    }
-                  },
-                  chart: {
-                    type: 'object',
-                    properties: {
-                      type: { type: 'string', enum: ['bar', 'line', 'pie'] },
-                      categories: { type: 'array', items: { type: 'string' } },
-                      series: {
-                        type: 'array',
-                        items: {
-                          type: 'object',
-                          properties: {
-                            name: { type: 'string' },
-                            values: { type: 'array', items: { type: 'number' } }
-                          }
-                        }
-                      }
-                    }
-                  },
+                  kpis: KPIS_SCHEMA,
+                  callout: CALLOUT_SCHEMA,
+                  quote: QUOTE_SCHEMA,
+                  table: TABLE_SCHEMA,
+                  chart: CHART_SCHEMA,
                   notes: { type: 'string' }
                 },
                 required: ['layout']
@@ -387,6 +565,7 @@ export function buildChatTools(
                 type: 'object',
                 properties: {
                   name: { type: 'string' },
+                  kpis: KPIS_SCHEMA,
                   columns: {
                     type: 'array',
                     items: {
@@ -394,7 +573,7 @@ export function buildChatTools(
                       properties: {
                         key: { type: 'string' },
                         label: { type: 'string' },
-                        type: { type: 'string', enum: ['text', 'number', 'currency', 'date'] }
+                        type: { type: 'string', enum: ['text', 'number', 'currency', 'percent', 'date'] }
                       },
                       required: ['key', 'label']
                     }
@@ -415,13 +594,11 @@ export function buildChatTools(
                   level: { type: 'integer', enum: [1, 2, 3] },
                   paragraphs: { type: 'array', items: { type: 'string' } },
                   bullets: { type: 'array', items: { type: 'string' } },
-                  table: {
-                    type: 'object',
-                    properties: {
-                      columns: { type: 'array', items: { type: 'string' } },
-                      rows: { type: 'array', items: { type: 'array', items: {} } }
-                    }
-                  }
+                  kpis: KPIS_SCHEMA,
+                  callout: CALLOUT_SCHEMA,
+                  quote: QUOTE_SCHEMA,
+                  table: TABLE_SCHEMA,
+                  chart: CHART_SCHEMA
                 }
               }
             }
@@ -483,6 +660,12 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: `Läser ${collectionLabel(coll)}` };
     case 'count_collection':
       return { tool: name, label: `Räknar ${collectionLabel(coll)}` };
+    case 'search_records':
+      return { tool: name, label: `Söker i ${collectionLabel(coll)}` };
+    case 'describe_collection':
+      return { tool: name, label: `Undersöker ${collectionLabel(coll)}` };
+    case 'aggregate_collection':
+      return { tool: name, label: `Sammanställer ${collectionLabel(coll)}` };
     case 'update_startup_field':
       return { tool: name, label: 'Uppdaterar bolagsuppgift' };
     case 'create_startup_activity':
@@ -658,6 +841,254 @@ async function runCountCollection(
   }
 }
 
+/** Plockar ut de (redan maskade) strängvärden en post kan fuzzy-matchas mot. */
+function recordSearchTexts(record: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(record)) {
+    if (SYSTEM_RECORD_KEYS.has(k)) continue;
+    if (typeof v === 'string' && v.trim()) out.push(v);
+  }
+  return out;
+}
+
+async function runSearchRecords(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const collectionName = String(args.collection ?? '');
+  const collection = getExposedCollection(ctx.collections, collectionName);
+  if (!collection) {
+    const available = ctx.collections.map((c) => c.name).join(', ');
+    return { ok: false, error: `Kollektion '${collectionName}' är inte exponerad. Välj från: ${available}` };
+  }
+
+  const query = typeof args.query === 'string' ? args.query.trim() : '';
+  if (!query) return { ok: false, error: 'query saknas.' };
+
+  let limit = 8;
+  if (typeof args.limit === 'number' && Number.isFinite(args.limit)) {
+    limit = Math.max(1, Math.min(MAX_SEARCH_LIMIT, Math.floor(args.limit)));
+  }
+
+  const tokens = significantTokens(query);
+  // Bred OR-`~`-förfiltrering på fria textfält (aldrig maskade fält) för att
+  // dra in kandidater billigt. Felstavningar fångas av JS-rankingen nedan via
+  // den ofiltrerade fallbacken.
+  const textFields = searchableTextFields(collection);
+  const prefilterClauses: string[] = [];
+  for (const tok of tokens.slice(0, 6)) {
+    const safe = escFilter(tok);
+    for (const f of textFields.slice(0, 6)) prefilterClauses.push(`${f} ~ "${safe}"`);
+  }
+  const prefilter = prefilterClauses.join(' || ');
+
+  const candidates: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  const addFrom = async (modelFilter: string): Promise<void> => {
+    const res = await ctx.pb
+      .collection(collection.name)
+      .getList(1, SEARCH_CANDIDATE_FETCH, {
+        filter: composeFilter(collection, ctx.tenantId, modelFilter) || undefined
+      });
+    for (const item of res.items as Record<string, unknown>[]) {
+      const id = String(item.id ?? '');
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        candidates.push(item);
+      }
+    }
+  };
+
+  try {
+    if (prefilter && prefilter.length <= MAX_FILTER_LENGTH) await addFrom(prefilter);
+    // Ofiltrerad fallback: ger felstavnings-recall + funkar när schemats
+    // textfält är okända (statisk fallback). Capad till SEARCH_CANDIDATE_FETCH.
+    if (candidates.length < Math.max(limit, 10)) await addFrom('');
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Okänt fel vid sökning.' };
+  }
+
+  const masked = candidates.map((c) => maskRecord(c, collection));
+  const ranked = rankCandidates(query, masked, recordSearchTexts, {
+    limit,
+    threshold: SEARCH_THRESHOLD
+  });
+
+  return {
+    ok: true,
+    data: {
+      collection: collection.name,
+      query,
+      matched: ranked.length,
+      items: ranked.map((r) => ({
+        score: r.score,
+        record: truncateValue(r.item)
+      }))
+    }
+  };
+}
+
+async function runDescribeCollection(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const collectionName = String(args.collection ?? '');
+  const collection = getExposedCollection(ctx.collections, collectionName);
+  if (!collection) {
+    const available = ctx.collections.map((c) => c.name).join(', ');
+    return { ok: false, error: `Kollektion '${collectionName}' är inte exponerad. Välj från: ${available}` };
+  }
+
+  const fields = collection.fields.map((f) => ({
+    name: f.name,
+    type: f.type,
+    ...(f.values && f.values.length > 0 ? { values: f.values } : {}),
+    ...(collection.maskedFields.includes(f.name) ? { masked: true } : {})
+  }));
+
+  const data: Record<string, unknown> = {
+    collection: collection.name,
+    tenant_scoped: Boolean(collection.tenantField),
+    fields
+  };
+
+  const field = typeof args.field === 'string' ? args.field.trim() : '';
+  if (field) {
+    if (field.includes('.')) {
+      return { ok: false, error: 'Endast enkla fältnamn stöds (inga punkter).' };
+    }
+    if (collection.maskedFields.includes(field)) {
+      return { ok: false, error: `Fältet '${field}' är maskat (PII) och kan inte listas.` };
+    }
+    try {
+      const res = await ctx.pb.collection(collection.name).getList(1, MAX_AGG_SCAN, {
+        filter: composeFilter(collection, ctx.tenantId, '') || undefined,
+        fields: field
+      });
+      const distinct: unknown[] = [];
+      const seen = new Set<string>();
+      for (const item of res.items as Record<string, unknown>[]) {
+        const v = item[field];
+        if (v === null || v === undefined || v === '') continue;
+        const key = String(v);
+        if (!seen.has(key)) {
+          seen.add(key);
+          distinct.push(v);
+          if (distinct.length >= MAX_DISTINCT_VALUES) break;
+        }
+      }
+      data.distinct_values = {
+        field,
+        values: distinct,
+        capped: res.totalItems > res.items.length
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Kunde inte läsa fältvärden.' };
+    }
+  }
+
+  return { ok: true, data };
+}
+
+async function runAggregateCollection(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const collectionName = String(args.collection ?? '');
+  const collection = getExposedCollection(ctx.collections, collectionName);
+  if (!collection) {
+    const available = ctx.collections.map((c) => c.name).join(', ');
+    return { ok: false, error: `Kollektion '${collectionName}' är inte exponerad. Välj från: ${available}` };
+  }
+
+  const op = String(args.op ?? '') as AggOp;
+  if (!AGG_OPS.includes(op)) {
+    return { ok: false, error: `Ogiltig op. Välj en av: ${AGG_OPS.join(', ')}` };
+  }
+
+  const field = typeof args.field === 'string' ? args.field.trim() : '';
+  const groupBy = typeof args.group_by === 'string' ? args.group_by.trim() : '';
+
+  for (const [label, name] of [
+    ['field', field],
+    ['group_by', groupBy]
+  ] as const) {
+    if (!name) continue;
+    if (name.includes('.')) return { ok: false, error: `Endast enkla fältnamn stöds (${label}).` };
+    if (collection.maskedFields.includes(name)) {
+      return { ok: false, error: `Fältet '${name}' är maskat (PII) och kan inte aggregeras.` };
+    }
+  }
+  if (op !== 'count' && !field) {
+    return { ok: false, error: `op '${op}' kräver ett numeriskt 'field'.` };
+  }
+
+  const modelFilter = typeof args.filter === 'string' ? args.filter.trim() : '';
+  if (modelFilter) {
+    const err = validateFilter(modelFilter);
+    if (err) return { ok: false, error: err };
+  }
+
+  // Hämta bara de fält som behövs (dataminimering § 9.3).
+  const wanted = ['id', field, groupBy].filter(Boolean).join(',');
+
+  try {
+    const res = await ctx.pb.collection(collection.name).getList(1, MAX_AGG_SCAN, {
+      filter: composeFilter(collection, ctx.tenantId, modelFilter) || undefined,
+      fields: wanted || undefined
+    });
+    const rows = res.items as Record<string, unknown>[];
+    const capped = res.totalItems > rows.length;
+
+    const reduce = (values: number[]): number | null => {
+      if (op === 'count') return values.length;
+      const nums = values.filter((n) => Number.isFinite(n));
+      if (nums.length === 0) return null;
+      if (op === 'sum') return nums.reduce((a, b) => a + b, 0);
+      if (op === 'avg') return nums.reduce((a, b) => a + b, 0) / nums.length;
+      if (op === 'min') return Math.min(...nums);
+      if (op === 'max') return Math.max(...nums);
+      return null;
+    };
+    const numOf = (r: Record<string, unknown>): number => {
+      if (op === 'count') return 1;
+      return Number(r[field]);
+    };
+
+    if (groupBy) {
+      const groups = new Map<string, number[]>();
+      for (const r of rows) {
+        const g = r[groupBy] === null || r[groupBy] === undefined ? '(tomt)' : String(r[groupBy]);
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g)!.push(numOf(r));
+      }
+      const result = Array.from(groups.entries())
+        .map(([group, vals]) => ({ group, value: reduce(vals), count: vals.length }))
+        .sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
+      return {
+        ok: true,
+        data: { collection: collection.name, op, field: field || undefined, group_by: groupBy, scanned: rows.length, capped, groups: result }
+      };
+    }
+
+    // Ogrupperad count = sann totalsumma (inte den capade skanningen).
+    const value = op === 'count' ? res.totalItems : reduce(rows.map(numOf));
+    return {
+      ok: true,
+      data: {
+        collection: collection.name,
+        op,
+        field: field || undefined,
+        scanned: rows.length,
+        capped: op === 'count' ? false : capped,
+        value
+      }
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Okänt fel vid aggregering.' };
+  }
+}
+
 export async function dispatchToolCall(
   call: MistralToolCall,
   ctx: ToolDispatchContext
@@ -674,6 +1105,12 @@ export async function dispatchToolCall(
       return runQueryCollection(args, ctx);
     case 'count_collection':
       return runCountCollection(args, ctx);
+    case 'search_records':
+      return runSearchRecords(args, ctx);
+    case 'describe_collection':
+      return runDescribeCollection(args, ctx);
+    case 'aggregate_collection':
+      return runAggregateCollection(args, ctx);
     case 'update_startup_field':
       return runUpdateStartupField(args, ctx);
     case 'create_startup_activity':
@@ -782,6 +1219,14 @@ async function runGenerateDocument(
   if ('error' in actor) return { ok: false, error: actor.error };
   if (!ctx.ownerUserId) {
     return { ok: false, error: 'Dokumentgenerering kräver en inloggad ägare i kontexten.' };
+  }
+  // Mall-defaults: en vald mall sätter accent/kind om modellen utelämnat dem,
+  // så att varje dokument får ett enhetligt, modernt uttryck (mallens blueprint
+  // styr själva strukturen via systemprompten, § dokumentmallar).
+  const tpl = getTemplate(typeof args.template === 'string' ? args.template : undefined);
+  if (tpl) {
+    if (!args.accent) args.accent = tpl.accent;
+    if (!args.kind) args.kind = tpl.kind;
   }
   const v = validateDocumentSpec(args);
   if (!v.ok) return { ok: false, error: v.error };

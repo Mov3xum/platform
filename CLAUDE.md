@@ -395,6 +395,10 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
   `register_notes`, `sent_to`, `inflow_source`, `contacted_at`,
   `meets_excellence_criteria`, `potential_bc_case`, `approved_state_aid_art22`,
   `approved_de_minimis` samt senaste 5 raderna i `startup_phase_history`.
+  Dessutom mottaget kapital/stöd: `buildCapitalRoundsContext` (inkl.
+  `purpose` = vad stödet gavs för) och `buildDeMinimisSupportContext`
+  (kurerad, PII-fri delmängd av `de_minimis_stod`; org-nr exkluderas) —
+  se § 15.3.
 - **Explicit svartlista i AI-kontext (får ALDRIG till prompten):**
   `phone` (PII), `founder_gender` och `founder_identifies_as` (GDPR
   art. 9 särskild kategori — kan avslöja etnicitet/läggning), `owner`,
@@ -404,10 +408,23 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
   personnummer → exkluderas alltid (defense-in-depth).
 - **Tenant-isolation:** `buildStartupContext` / `buildPortfolioContext`
   / `buildFinancialsContext` verifierar alltid tenant-ID.
-- **Chattens query-verktyg (`lib/ai/schema.ts`):** dashboardchattens
-  (`/idag`) `query_collection`/`count_collection` auto-upptäcker
-  kollektioner men upprätthåller samma exkluderingar som
-  context-byggarna, så verktyget inte kan kringgå svartlistan ovan:
+- **Chattens läs-/sökverktyg (`lib/ai/schema.ts`, `lib/ai/tools.ts`):**
+  förutom `query_collection`/`count_collection` exponeras tre
+  read-only-verktyg som hjälper modellen förstå vad användaren menar:
+  `search_records` (fuzzy fritext-sökning — typo-/ordföljds-tolerant,
+  rankas i `lib/ai/fuzzy.ts`, enhetstestat), `describe_collection`
+  (fält + giltiga enum-värden + distinkta värden) och
+  `aggregate_collection` (sum/avg/min/max/count, ev. grupperat). **Alla
+  ärver oförändrat tenant-scope + denylist + fältmaskning** via
+  `composeFilter`/`maskRecord` — de är ingen ny dataväg, ingen ny
+  kollektion och ingen ny dependency. `aggregate_collection`/
+  `describe_collection` vägrar dessutom maskade fält (ingen PII-bakväg).
+  Riskklass: oförändrad (begränsad — intern dataåtkomst, ingen
+  profilering). Sökstrategi + domänordlista ligger i `lib/ai/guidance.ts`
+  och delas av dashboardchatt, trådar och autonoma körningar (ingen
+  divergerande kopia). Auto-upptäckta kollektioner upprätthåller samma
+  exkluderingar som context-byggarna, så inget verktyg kan kringgå
+  svartlistan ovan:
   - **Denylist** (aldrig exponerade): utöver `users`/`tenants`/token-
     tabeller även `contacts` (§ 15.3), alla `compass_*`-besökardata
     (`compass_leads`, `compass_conversations`, `compass_messages`,
@@ -1395,7 +1412,17 @@ Nya whitelistade fält i `apps/web/src/lib/ai/context.ts`:
 
 - **startups:** `city`, `website` (publik bolagsdata).
 - **`buildCapitalRoundsContext`:** `type`, `source`, `amount_sek`,
-  `received_at` per rad. `notes` exkluderas (kan vara strategiskt).
+  `received_at` samt `purpose` (= `notes`, **vad stödet/kapitalet gavs
+  för**) per rad. `purpose` personnummer-saneras + cappas (~300 tecken)
+  **på läsvägen** (`safePurpose` i `context.ts`), inte bara vid import —
+  så även manuellt inmatade rader skyddas.
+- **`buildDeMinimisSupportContext`** (ny, § 20): `forordning`,
+  `stodgivare`, `belopp_sek`, `beslutsdatum` samt `purpose` (= `syfte`,
+  sanerat/cappat) per rad. Läser `de_minimis_stod` **direkt via den
+  denormaliserade `startup`-FK:n** (indexerat, `getList(1,20)`) — aldrig
+  join via `de_minimis_units` och aldrig org-nr. `de_minimis_*` är
+  fortsatt **denylistad** för det generiska `query_collection`
+  (§ 9.3) — stöd-syftet når AI ENBART via denna kurerade per-bolag-builder.
 - **`buildIPRContext`:** `type`, `status`, `external_reference`,
   `filed_at`, `response_at`. `notes` exkluderas.
 - **`buildKPIsContext`:** `kpi_name`, `value_text`, `value_numeric`,
@@ -1412,9 +1439,14 @@ Nya whitelistade fält i `apps/web/src/lib/ai/context.ts`:
 - `tasks.*` och `tasks.details` — uppgifter kan innehålla privata
   arbetsanteckningar; inkluderas inte i default-kontexten. Enskilda
   agenter kan opt-in genom egen helper.
-- `capital_rounds.notes`, `intellectual_property.notes`,
-  `agreements.notes` — strategiska detaljer hålls ute som
-  defense-in-depth.
+- `intellectual_property.notes`, `agreements.notes` — strategiska
+  detaljer hålls ute som defense-in-depth.
+- `capital_rounds.notes` / `de_minimis_stod.syfte` är **whitelistade som
+  stöd-`purpose`** (vad stödet gavs för) via context-buildrarna ovan —
+  lågkänsligt (beskriver insatsens art, t.ex. "IP-strategi Rouse",
+  "affärscoachning"), personnummer-saneras + cappas på läsvägen. Når AI
+  bara via de kurerade per-bolag-buildrarna; `de_minimis_*` förblir
+  denylistad för det generiska `query_collection`.
 - **Outlook-kalenderdata** — mötesdeltagares/organisatörers e-post (läses
   transient för CRM-matchning, § 14.4) är PII och når aldrig
   AI-kontexten. Den lagras inte; endast den resulterande `tasks`-raden
@@ -1529,19 +1561,24 @@ oändliga loopar/token-explosion (§10 robusthet). `conversation` muteras;
 
 ### 16.3 Verktygsytor per körningstyp (människa-i-loopen)
 
-| Körning | Actor | Verktyg |
+De read-only läs-/sökverktygen (`query/count_collection`,
+`search_records`, `describe_collection`, `aggregate_collection`) finns i
+ALLA körningstyper nedan (`buildChatTools` lägger dem i bas-arrayen, ingen
+actor krävs). Tabellen visar vad som tillkommer per yta:
+
+| Körning | Actor | Tillkommer utöver läs-/sökverktygen |
 |---|---|---|
-| Dashboardchatt (staff) | `agent` | `query/count_collection`, skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`), `memory_read` + `memory_write` |
-| Toolbox (staff) | — (read-only) | `query/count_collection`, `memory_read` |
-| Toolbox (icke-staff) | — (read-only) | `query/count_collection` |
-| Schemalagd | — (read-only) | `query/count_collection`, `memory_read` |
+| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`), `memory_read` + `memory_write` |
+| Toolbox (staff) | — (read-only) | `memory_read` |
+| Toolbox (icke-staff) | — (read-only) | — |
+| Schemalagd | — (read-only) | `memory_read` |
 
 **Princip (§10):** skrivverktyg exponeras BARA i den interaktiva chatten
 där en människa bekräftar varje åtgärd. Autonoma körningar (toolbox-
 engångskörning, schema) får **aldrig** skriva domändata — de föreslår i
 text. Vision-körningar (pixtral) kör verktygslöst (§13.5). PII-maskning,
 denylist och tenant-scope ärvs oförändrat från `lib/ai/schema.ts`
-(§9.3).
+(§9.3) — även för de nya sök-/aggregat-verktygen.
 
 ### 16.4 Tvärsessions-minne (`agent_memory`)
 
@@ -1717,17 +1754,54 @@ validerat `DocumentSpec`; en deterministisk renderare bygger filen. Siffror
 ska komma från `query_collection`-svar i samma konversation. Verktyget
 `generate_document` exponeras bara för agent-actor i en interaktiv yta
 (`includeDocuments`), sparar i ägarens `user_files` och bifogar en
-`GeneratedFileRef` på assistant-svaret (nedladdnings-chip).
+`GeneratedFileRef` på assistant-svaret (inline-preview + nedladdnings-chip).
 
 - **Bibliotek (motiverat undantag från dependency-free):** `pptxgenjs`,
-  `exceljs`, `docx`, `pdf-lib` — alla ren JS, inga native-binärer, inga
-  runtime-nätverksanrop → EU-suveränt, körs server-side på UpCloud.
-- **Brand:** färger från `tokens.ts` (källan-av-sanning, `documents/brand.ts`),
-  Sora/Nunito **by-name** (ingen TTF-inbäddning i v1; PDF använder Helvetica),
-  AI-disclaimer-footer i varje dokument (§9.7 / EU AI Act art. 50).
-- **PII:** renderaren är ingen ny dataväg — dokumentet kan bara innehålla
-  data agenten redan såg via `query_collection` (PII-denylist/maskning i
-  `schema.ts` gäller uppströms).
+  `exceljs`, `docx`, `pdf-lib` + `@pdf-lib/fontkit`, `echarts` (SSR→SVG) — alla
+  ren JS, inga native-binärer, inga runtime-nätverksanrop → EU-suveränt, körs
+  server-side på UpCloud.
+- **2026-designspråk (`documents/brand.ts` + `documents/render-*.ts`):** ett
+  gemensamt språk över alla fyra format — brandat omslag med accent-panel +
+  geometriska former, **rundade kort med mjuka skuggor**, **KPI-/stat-kort**,
+  **callout-rutor**, **pull-quotes**, **zebra-tabeller med data-barer** och
+  **diagram i alla format**. Färger hämtas från `tokens.ts` (källan-av-sanning)
+  via `accentTheme`/`calloutTheme`. Accent-tema väljs per dokument
+  (`accent: blue|purple|teal|green`). Geometri-primitiver (rundade hörn,
+  skuggor) i `brand.ts` (`roundedRectPath`, `softShadow`). Wordmarken renderas
+  som **text** (Sora) — inget PNG-beroende längre. AI-disclaimer-footer i varje
+  dokument (§9.7 / EU AI Act art. 50).
+- **Primitiver (`documents/types.ts`, validerade i `validate.ts`):** `kpis`
+  (stat-kort), `callout` (variant info/success/warning/accent), `quote`,
+  `chart` (`bar|hbar|line|area|pie|donut`, nu även i docx/pdf), `table`
+  (`emphasizeLastColumn` → data-barer). Slide-layouter utökade med `section`
+  (delare) och `kpi`.
+- **Diagram (`documents/chart.ts`):** PPTX använder nativa, **editerbara**
+  diagram (pptxgenjs) i en skuggad kort-container; **DOCX bäddar in** brandad
+  SVG från `charts/`-ECharts-temat (med transparent PNG-fallback för äldre
+  Word); **PDF ritar nativt** med pdf-lib (`drawSvgPath`) eftersom pdf-lib inte
+  kan bädda SVG utan rastrering. Visuellt konsekvent palett (`CHART_COLORS`).
+- **Mall-bibliotek (`documents/templates.ts`):** gedigna blueprints
+  (investerar-onepager, kvartalsrapport, styrelsedeck, pitch deck,
+  portföljöversikt, finansiell sammanställning, bolagsprofil, coach-briefing,
+  status-PM). Agenten väljer `template` → sätter format + accent och styr
+  strukturen så varje dokument får ett enhetligt, professionellt uttryck. Detta
+  är "rattarna" i förbättrings-loopen (§9.10): justera blueprinten → alla
+  framtida dokument blir bättre.
+- **Inline-preview (`documents/preview.ts`):** vid generering produceras en
+  kompakt, deterministisk **SVG av första sidan** (brandat omslag + glimt av
+  KPI:er/diagram/punkter) som returneras på `GeneratedFileRef.preview_svg` och
+  visas inline i chatten (`DashboardChat.renderGeneratedFiles`, via
+  `<img src=data:image/svg+xml>` — ingen `dangerouslySetInnerHTML`, escapad,
+  cappad till 24 KB). Persisteras i `ToolRunMessage.generated_files` så
+  återöppnade trådar visar previewen. PDF kan dessutom öppnas i full fidelity.
+- **Typsnitt:** PPTX/DOCX/XLSX refererar Sora/Nunito **by-name**; **PDF bäddar
+  in** Sora/Nunito via `@pdf-lib/fontkit` när TTF/OTF finns i `public/fonts`
+  (`Sora-SemiBold.ttf`, `NunitoSans-Regular.ttf`, `NunitoSans-Bold.ttf`),
+  annars Helvetica-fallback (`documents/assets.ts`, fail-soft).
+- **PII:** varken renderaren eller previewen är en ny dataväg — dokumentet kan
+  bara innehålla data agenten redan såg via `query_collection` (PII-denylist/
+  maskning i `schema.ts` gäller uppströms). Preview-etiketterna härleds ur
+  samma spec. Riskklass oförändrad (begränsad, § 17.5).
 
 ### 17.4 Djupa jobb / subagenter
 
@@ -1862,11 +1936,803 @@ formulärsubmiten cappades → stora videos fallerade. Nu laddas media upp som
   (`${PB}/api/files/workshop_media/{id}/{filnamn}`), samma mönster som
   tenant-logos/avatarer i `auth.server.ts` — fungerar direkt i `<video>`/`<img>`.
 - **Säkerhet/RBAC:** upload kräver staff (admin/incubator_lead/coach/mentor) +
-  inloggning; `workshop_media`-`createRule` refererar BARA auth-fält (ingen
-  `= tenant`-join → undviker PB v0.23-rule-buggen, se `verify-baseline.mjs`),
-  tenant sätts i koden och list/view är tenant-scopade. SameSite=Lax-cookien ger
-  CSRF-skydd (§17.8). Mime + storlek valideras både i klient och route.
+  inloggning; rollen enforce:as i route-handlern (`hasRole`). `workshop_media`-
+  `createRule` är `@request.auth.id != "" && @request.auth.tenant != ""` —
+  INGEN roll-check och INGEN `= tenant`-join (§ 21.3). Den ursprungliga
+  migrationen (1700000086) hade en `?=`-roll-check (`STAFF_ROLES`) i createRule,
+  vilket träffade PB v0.23.4-buggen (tyst nekande av create:en även för admin →
+  uppladdningsroutens `getServerPb()`-create gav 500: "Kunde inte ladda upp
+  filen till servern"). **Migration 1700000111** strippar roll-checken (och
+  speglas i `setup-via-api.mjs`); `verify-baseline.mjs` sveper numera ALLA
+  kollektioners createRule och failar deployen om en roll-check/tenant-join
+  återinförs. Tenant sätts i koden och list/view är tenant-scopade.
+  SameSite=Lax-cookien ger CSRF-skydd (§17.8). Mime + storlek valideras både i
+  klient och route.
 - **GDPR/riskklass:** posterna är staff-skapade utbildningsresurser (ej PII,
   ingen AI-inferens) → minimal risk. Ladda inte upp personuppgifter (filer nås
   via direktlänk). Bakåtkompatibelt: äldre block med base64-`video_url`/
   `image_url` renderas fortfarande.
+
+### 18.3 Utbildningsdokument tilldelade bolag
+
+Staff kan ladda upp fristående referensdokument (PDF, Excel, PowerPoint, Word)
+under `/education` → fliken **Dokument** och tilldela dem bolag med valfria
+instruktioner + deadline. Bolaget (eller staff) markerar tilldelningen som
+**slutförd** — då visas en stor bock på bolagskortet (`/startups/[id]`,
+sektionen "Tilldelade utbildningsdokument") och en rad loggas i
+aktivitetsfeeden: "**\<bolag\> slutförde \<dokument\>**".
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000088_create_education_documents.js` | Collection `education_documents` (file-fält, mime-whitelist Office/PDF) |
+| `backend/pocketbase-schema/migrations/1700000089_create_education_document_assignments.js` | Collection `education_document_assignments` (dokument↔bolag) |
+| `backend/pocketbase-schema/migrations/1700000090_extend_activity_kinds_education_document.js` | `activities.kind` += `education_document` |
+| `apps/web/src/app/api/education/documents/route.ts` | Upload-route (staff-only) → skapar `education_documents` |
+| `apps/web/src/lib/actions/education-documents.ts` | Server actions: tilldela / slutför / ångra / radera |
+| `apps/web/src/app/education/documents/page.tsx` | Hantering (staff) + slutför-vy (bolagsmedlem) |
+| `packages/shared/src/education-documents.ts` | Ren validering + `doc_kind`-resolver (+ enhetstester) |
+
+- **Datamodell.** `education_documents`: `tenant`, `title`, `description`,
+  `file` (50 MB, mime-whitelist), `doc_kind` (pdf/excel/powerpoint/word/other),
+  `mime`, `size_bytes`, `uploaded_by`, `created_by`.
+  `education_document_assignments`: `tenant`, `document` (cascadeDelete),
+  `startup` (cascadeDelete), `instructions`, `due_date`, `status`
+  (assigned/completed), `assigned_by`, `completed_by`, `completed_at`,
+  `activity`. Unikt index `(tenant, document, startup)` → idempotent tilldelning.
+- **Transport.** Som `workshop_media` (§18.2): filer laddas upp via route handler
+  (inte bunden av `serverActions.bodySizeLimit`), serveras tokenlöst
+  (`${PB}/api/files/education_documents/{id}/{filnamn}`).
+- **RBAC.** Upload + tilldela + radera + ångra = staff
+  (admin/incubator_lead/coach/mentor) via API-regel + server-action. "Slutför"
+  tillåts för staff ELLER en `startup_member` länkad till bolaget — verifieras
+  i server-actionen; PB-skrivningen använder superuser-fallback (samma mönster
+  som workshop-progressen, PB v0.23 rule-eval-bugg). `observer` är read-only.
+- **GDPR/riskklass:** minimal — staff-skapade utbildningsresurser, ingen
+  AI-inferens. Ingen PII lagras (UI varnar mot personuppgifter; filer nås via
+  direktlänk). Aktivitetstiteln innehåller bara bolagsnamn + dokumenttitel (ej
+  PII). `cascadeDelete` på `tenant`/`document`/`startup` ger art. 17-städning.
+  Kollektionerna exponerar inga whitelistade fält till AI-kontexten.
+
+### 18.4 Samarbete kring tilldelningar (instruktioner, resurser, möten)
+
+När staff tilldelar en workshop eller ett utbildningsdokument kan de skriva
+**instruktioner**, bjuda in andra **Movexum-resurser** (coacher/mentorer) som
+medarbetare, och i samma steg skapa ett **möte** med de inbjudna. Inbjudna
+resurser ser tilldelningen i sin "Min översikt" (personlig uppgift) och mötet i
+sin agenda. Sidan **`/pagaende`** ger hela Movexum en tenant-bred översikt över
+allt som pågår med bolagen (workshops, utbildningsdokument, öppna aktiviteter),
+grupperat per bolag.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000091_extend_assignments_collaboration.js` | `instructions`/`collaborators`/`meeting` på `workshop_assignments`; `collaborators`/`meeting` på `education_document_assignments` |
+| `backend/pocketbase-schema/migrations/1700000092_extend_event_signups_user.js` | `user`-relation på `event_signups` (inbjuden Movexum-resurs) |
+| `apps/web/src/lib/assignments/types.ts` | `AssignableResource` + `AssignmentCollabOptions` (server-fria typer) |
+| `apps/web/src/lib/assignments/collaboration.ts` | `listAssignableResourcesForTenant`, `createCollaboratorTasks`, `createAssignmentMeeting` (server-only) |
+| `apps/web/src/components/assignments/AssignmentCollabFields.tsx` | Delade formulärfält (instruktioner, resurs-checkboxar, möte) |
+| `apps/web/src/app/pagaende/page.tsx` | Tenant-bred "Pågående"-översikt per bolag |
+
+**Flöde.** `assignWorkshopToStartupAction` / `assignDocumentToStartupAction` tar
+ett valfritt `options`-objekt (`instructions`, `collaboratorIds`, `meeting`). För
+varje inbjuden resurs skapas en `tasks`-rad (`kind='prep'`, `owner`=resursen,
+`link_kind='startup'`) → syns i resursens översikt ("både uppgift + aktivitet":
+workshop-tilldelningen skapar dessutom som tidigare en `activities`-rad på
+bolaget som syns i feeden). Ett valfritt möte skapas som `incubator_events` +
+en `event_signups`-rad per inbjuden (organisatör inkluderad), och event-id:t
+lagras på tilldelningens `meeting`-fält.
+
+**Säkerhet och regelefterlevnad:**
+- **RBAC:** bara staff (admin/incubator_lead/coach/mentor) kan tilldela och
+  bjuda in. `validResourceIds` verifierar att varje inbjuden resurs faktiskt är
+  staff i tenanten (defense-in-depth ovanpå PB-reglerna). Allt är tenant-scopat.
+- **Möten:** `incubator_events.createRule` kräver admin/incubator_lead/coach;
+  meeting-skapandet är fail-soft (en mentor utan eventbehörighet får tilldelningen
+  utan möte i stället för ett hårt fel).
+- **GDPR §5 / dataminimering:** `collaborators` och `event_signups.user` är
+  interna användare. Inga nya whitelistade fält i `lib/ai/context.ts` —
+  `collaborators`, `meeting` och `event_signups` når **aldrig** AI-kontexten.
+  Task-/mötesbeskrivningar innehåller bara workshop-/dokument- och bolagsnamn
+  (ingen PII).
+- **GDPR art. 17:** nya relationer cascade-städas via befintliga
+  tenant/startup-flöden; `event_signups` cascade-raderas med sitt event.
+- **Riskklass:** minimal (intern koordinering, ingen AI-inferens, ingen
+  profilering).
+- **Migrationer:** nya filnummer (1700000091–092), oföränderliga; fälten
+  speglas i `scripts/setup-via-api.mjs` för bootstrap-paritet.
+
+---
+
+## 19. Avtal — tilldelning & juridiskt giltig in-app-signering
+
+### 19.1 Översikt
+
+Staff kan ladda upp ett avtal (PDF) och tilldela det ett bolag direkt på
+bolagskortet (`/startups/[id]`, sektionen **Avtal**). Bolaget och Movexum
+signerar sedan in-app. Signeringen är en **avancerad elektronisk signatur
+(AES)** enligt eIDAS art. 25–26 — juridiskt giltig, helt EU-suverän (ingen
+extern signeringstjänst). Signeringsstatus och bevis lagras direkt på
+bolagskortet.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000093_extend_agreements_signing.js` | Tilldelnings-/signeringsfält + `partially_signed`-status på `agreements` |
+| `backend/pocketbase-schema/migrations/1700000094_create_agreement_signatures.js` | Oföränderligt signeringsbevis `agreement_signatures` |
+| `backend/pocketbase-schema/migrations/1700000095_extend_activity_kinds_agreement.js` | `activities.kind` += `agreement` |
+| `apps/web/src/app/api/agreements/route.ts` | Upload-route (staff-only) → beräknar SHA-256, skapar `agreements`-rad |
+| `apps/web/src/app/api/agreements/[id]/file/route.ts` | Tenant-scopad PDF-proxy (granskning före signering) |
+| `apps/web/src/lib/actions/agreements.ts` | `signAgreementAction` + `deleteAgreementAction` |
+| `apps/web/src/components/intric/AgreementsSection.tsx` | Avtalslista + signera-modal + tilldela-modal |
+| `packages/shared/src/agreements.ts` | Typer + filvalidering + intent-text (enhetstestad) |
+
+### 19.2 Datamodell
+
+- **`agreements`** (utökad, 1700000093): utöver kärnfälten — `document_hash`
+  (SHA-256 hex av PDF-bytes, den kanoniska hash varje signatur attesterar),
+  `assigned_by`/`assigned_to`, `sent_at`, `requires_company_signature` /
+  `requires_movexum_signature`, `{company,movexum}_signed_{at,by}`. Status får
+  `partially_signed` (en part klar). De denormaliserade `*_signed_*`-fälten är
+  bara för snabb kort-vy; **det rättsliga beviset ligger i
+  `agreement_signatures`**.
+- **`agreement_signatures`** (1700000094): ett oföränderligt bevis per part och
+  avtal — `signer` (user), `party` (`company`/`movexum`), `signer_name`
+  (skriven juridisk namnteckning), `signer_email`, `document_hash` (hashen
+  signatären attesterade), `signed_at` (UTC), `ip_hash` (SHA-256 av IP — ej
+  klartext), `user_agent`, `intent_text` (avsiktsförklaringen), `method`
+  (`aes`; `bankid` reserverat). Unikt index `(agreement, party)` → en signatur
+  per part. **update/delete = endast superuser** (audit-integritet, ISO 27001
+  A.8.32).
+
+### 19.3 Signeringsflöde (AES, eIDAS art. 26)
+
+1. Staff laddar upp PDF + väljer parter (bolag/Movexum) → routen beräknar
+   `document_hash` och skapar avtalet med status `sent`.
+2. Behörig part öppnar signera-modalen, läser PDF:en, skriver sitt
+   fullständiga namn och bekräftar avsiktsförklaringen (`intent_text`).
+3. `signAgreementAction` verifierar part-behörighet (Movexum-parten = staff;
+   bolagsparten = länkad `startup_member`), **laddar ned PDF-bytes på nytt och
+   räknar om hashen** — om den avviker från `document_hash` vägras signeringen
+   (tamper-evidens, art. 26 d). Annars skapas ett oföränderligt
+   `agreement_signatures`-bevis (identitet, avsikt, hash, UTC-tid, ip-hash).
+4. När alla obligatoriska parter signerat → status `signed` + `signed_at`;
+   annars `partially_signed`. Allt loggas i `activities` (`kind='agreement'`).
+
+De fyra AES-kriterierna uppfylls av: (a/b) `signer` + `signer_email` +
+`signer_name`; (c) autentiserad session (httpOnly-cookie); (d) `document_hash`.
+
+**Tamper-kontrollen är best-effort:** avtal uppladdade via routen får alltid en
+`document_hash` (jämförs vid varje signering). Saknar ett avtal lagrad hash
+(legacy/manuellt skapad rad) hoppas jämförelsen över — signaturen registrerar
+ändå den hash som faktiskt sågs vid signeringstillfället. Eftersom
+`agreements.createRule` är staff-only kan icke-staff inte skapa hash-lösa rader.
+
+### 19.4 Säkerhet och regelefterlevnad
+
+- **RBAC:** upload/tilldela/radera = staff (radera kräver admin/incubator_lead).
+  Signering verifierar part-behörighet i server-actionen; bolagsmedlemmens
+  skrivning sker via superuser-fallback efter behörighetskontroll (PB v0.23
+  rule-eval-bugg, samma mönster som education_documents §18.3).
+- **GDPR §5 dataminimering:** IP lagras bara som SHA-256-hash, `user_agent`
+  cappad. `signer_email`/`signer_name` krävs för identifiering (rättslig grund =
+  **avtal/berättigat intresse**, inkubatordrift). Personnummer lagras aldrig.
+- **GDPR art. 17:** `cascadeDelete` på tenant/agreement/startup städar bevisen.
+- **AI-kontext:** `agreement_signatures` är **denylistad** i
+  `lib/ai/redaction.ts` (innehåller `signer_email` + `ip_hash`) → når aldrig
+  `query_collection`/agent-prompten.
+- **EU-suveränitet:** ren in-app-signering, ingen extern tjänst, ingen icke-EU-
+  leverantör. BankID/eID kan kopplas på senare via `method='bankid'` utan
+  brytande ändring.
+- **Riskklass (EU AI Act):** n/a — ingen AI-inferens; deterministisk hashning +
+  bevislagring.
+- **Migrationer:** nya filnummer (1700000093–095), oföränderliga; fälten +
+  kollektionen speglas i `scripts/setup-via-api.mjs` för bootstrap-paritet.
+
+---
+
+## 20. De minimis-modul (stöd av mindre betydelse)
+
+### 20.1 Översikt
+
+`/de-minimis` låter varje bolag hålla koll på sin rullande treårssumma av
+de minimis-stöd mot EU:s takbelopp, varnas innan taket nås, blockeras om ett
+nytt stöd skulle överskrida det, och generera en **de minimis-försäkran**
+(PDF) inför ny stödansökan. Det finns ingen central uppslagstjänst — ansvaret
+ligger på företaget (eAir, Tillväxtanalys, kontrollerar takbeloppet först
+fr.o.m. 2029). Modulen ersätter den manuella Excel-sammanställningen.
+
+**Modulen är ett internt stödverktyg, inte ett juridiskt avgörande** — slutlig
+prövning görs alltid av stödgivaren (disclaimer visas i UI och i PDF:en).
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/de-minimis.ts` | Ren, enhetstestad beräkningslogik (summering, kanBevilja, validering, regelverks-defaults) |
+| `packages/shared/src/de-minimis.test.ts` | Enhetstester (rullande 3 år, beskattningsår, samlat tak, varningsnivåer) |
+| `apps/web/src/lib/de-minimis/data.ts` | `loadRegelverk` + `canManageStartupDeMinimis` (server-only) |
+| `apps/web/src/lib/de-minimis/forsakran-pdf.ts` | Dedikerad PDF-byggare för försäkran (pdf-lib, juridisk footer — INTE AI-disclaimer) |
+| `apps/web/src/lib/actions/de-minimis.ts` | Server actions: enhet/org.nr/stöd CRUD med kanBevilja-blockering |
+| `apps/web/src/app/de-minimis/page.tsx` | Översikt per bolag (samlad summa-chip) |
+| `apps/web/src/app/de-minimis/[startupId]/page.tsx` | Dashboard per bolag (barer, lista, formulär, försäkran) |
+| `apps/web/src/app/startups/[id]/DeMinimisSection.tsx` | **Inbäddad** modul på bolagskortet (barer + alla formulär inline) — återanvänder samma klientformulär/`DeMinimisBars`/`summarize` (§ 20.5) |
+| `apps/web/src/app/min-oversikt/page.tsx` | "Mitt bolag" — bolagsmedlemmens samlade vy (§ 21bis) |
+| `apps/web/src/app/api/de-minimis/units/[unitId]/forsakran/route.ts` | Genererar försäkran-PDF (auth + tenant) |
+| `backend/pocketbase-schema/migrations/1700000093–095_*` | Collections + seed |
+
+### 20.2 Datamodell
+
+- **`de_minimis_regelverk`** (1700000093, GLOBAL, ingen tenant) — konfigurerbar
+  katalog över de fyra förordningarna (`ALLMAN` 300k, `SGEI` 750k, `JORDBRUK`
+  50k, `FISKE` 30k EUR) med `period` (`RULLANDE_3AR`/`BESKATTNINGSAR_3`) och
+  `giltig_t_o_m`. Seedad; **taket kan uppdateras utan deploy** (PB-admin).
+  Skrivning admin-only; läsning för alla inloggade. `de-minimis.ts` har
+  defaults som fallback.
+- **`de_minimis_units`** (1700000094) — "ett enda företag" (single
+  undertaking). Grupperar flera org.nr under en bolagsprofil (`startup`).
+  Summeringen sker på enhetsnivå.
+- **`de_minimis_unit_orgnr`** (1700000094) — org.nr i en enhet. Unikt index
+  `(unit, organisationsnummer)`.
+- **`de_minimis_stod`** (1700000095) — en rad per mottaget stöd: `forordning`,
+  `stodgivare`, `beslutsdatum` (juridisk rätt, ej utbetalning), `belopp_eur`
+  (sanning, bruttobidragsekvivalent), `belopp_sek` + `valutakurs` (informativt),
+  `syfte`, `beslut_referens`, `dokument` (valfri fil), `registrerad_i_eair`
+  (förbereder framtida eAir-koppling).
+
+### 20.3 Beräkning (`de-minimis.ts`)
+
+- **Rullande 3 år** (`ALLMAN`/`SGEI`): summerar stöd där `beslutsdatum >
+  refDatum − 3 år` (strikt).
+- **Beskattningsår** (`JORDBRUK`/`FISKE`): innevarande kalenderår + två
+  föregående. *Exakt periodtolkning bör bekräftas mot Jordbruksverket innan
+  produktion.*
+- **Samlat tak:** sektorstöd inräknat får ett enda företag totalt max
+  **300 000 EUR** under rullande 3 år. Visas som egen bar + per-förordning.
+- **`kanBevilja`** blockerar nytt stöd som skulle överskrida förordnings- ELLER
+  samlat tak (referensdag = tilltänkt beslutsdatum). Server-actionen avvisar
+  med tydligt felmeddelande om hur mycket och vilket tak.
+- **Varningar:** gul ≥ 80 %, röd (orange — Movexum saknar röd) ≥ 95 %, "över"
+  vid överskridande. Bakåtdaterade poster **varnar men blockerar inte**.
+- **Valuta:** EUR är sanning. SEK + ECB-kurs lagras informativt; om EUR lämnas
+  tomt härleds det ur SEK/kurs. (ECB-auto-hämtning är ej i scope —
+  EU-suveränitet/nätverkspolicy; kursen matas in manuellt.)
+
+### 20.4 RBAC, GDPR och riskklass
+
+- **RBAC:** staff (admin/incubator_lead/coach/mentor) full åtkomst; en
+  `startup_member` hanterar bara sitt eget länkade bolag (verifieras i
+  server-action; PB-skrivregel är staff-only → superuser-fallback efter
+  verifierad länkning, samma mönster som § 18.3). `observer` read-only.
+  Bolagsmedlemmar kan bara **se** sina egna bolag; staff/observer ser alla.
+- **GDPR:** för aktiebolag är org-nr inte personuppgift (skäl 14); för enskild
+  firma motsvarar org-nr personnummer. Därför är **alla fyra de minimis-
+  collections denylistade i `lib/ai/redaction.ts`** (`organisationsnummer`
+  täcks inte av `org_nr`-substringmaskningen) — de når **aldrig** AI-kontexten.
+  Inga fält whitelistas i `lib/ai/context.ts`. Person nr lagras aldrig.
+  Rättslig grund: rättslig förpliktelse/berättigat intresse (efterlevnad av
+  statsstödsregler). Cascade-radering via `tenant`/`startup`.
+- **EU AI Act:** ingen AI-funktion i modulen → ingen riskklass (försäkran-PDF
+  är deterministisk rendering, ingen AI-inferens; därför INGEN AI-disclaimer,
+  utan en juridisk "internt stödverktyg"-footer).
+- **Migrationer:** nya filnummer (1700000093–095), oföränderliga.
+
+### 20.5 Inbäddning på bolagskortet + "Mitt bolag" (förenklat flöde)
+
+På bolagskortet (`/startups/[id]`, sektion `#de-minimis`) och "Mitt bolag"
+(`/min-oversikt`, § 21bis) visar den delade server-komponenten
+`DeMinimisSection` ett **förenklat** flöde: en SEK-headline ("Mottaget de
+minimis-stöd, rullande 3 år, X kr"), progress-barer (samlad summa + per
+förordning via `summarize`/`samladSummaSek`), ett **mall-drivet**
+registreringsformulär och listan över stöd. **Ingen manuell enhets-/org.nr-
+hantering** krävs — bolaget behandlas som EN enhet ("ett enda företag"); själva
+`de_minimis_units`-raden skapas **lazy** av `addStodAction` (`resolveOrCreateUnit`)
+första gången ett stöd registreras (via den robusta superuser-fallbacken). En
+"Öppna fullskärm"-länk leder till `/de-minimis/[startupId]` där staff vid behov
+kan gruppera flera org.nr under en namngiven enhet (CreateUnitForm/OrgnrManager
+ligger kvar där, bakom en `<details>` när ingen enhet finns).
+
+**Mallar (`DE_MINIMIS_TEMPLATES` i `@platform/shared`).** Färdiga snabbval för
+vanliga svenska de minimis-givare (Vinnova, Almi, Tillväxtverket,
+Jordbruksverket, Havs- och vattenmyndigheten m.fl.) som förifyller stödgivare +
+förordning. "Annan stödgivare" ger fritext. Listan är vägledande — stödgivare
+och förordning kan alltid justeras.
+
+**SEK ("på kronan").** EUR är fortsatt sanning för det legala taket (300 000
+EUR), men formuläret är SEK-först (belopp i kronor + växelkurs,
+`DEFAULT_VAXELKURS_SEK_PER_EUR` som förifyllt värde) och EUR härleds ur SEK ×
+kurs (kan anges exakt). `effektivBeloppSek`/`samladSummaSek` (enhetstestade)
+ger den SEK-summa som visas som headline på bolagskortet, på samlat-baren och
+som chip i `/de-minimis`-översikten. `complete=false` ⇒ "≥ X kr" (någon post
+saknar SEK/kurs).
+
+**Säkerhet (oförändrat).** Reads går via `getServerPb()` så RLS (§ 21) gäller;
+filtervärden escapas med `escFilter` (ISO 27001 A.8.9). Skrivflödet
+re-verifierar `tenant` + `canManageStartupDeMinimis` (medlemskap) och kör
+`kanBevilja` server-side innan skrivning — klienten är aldrig säkerhetsgränsen.
+`de_minimis_*`-createRule är `@request.auth.id != "" && @request.auth.tenant
+!= ""` (§ 21.3, migration 1700000111) → en länkad medlem kan registrera utan
+superuser; fallbacken täcker en ev. otrasig regel-instans. Inga nya fält, inga
+nya kollektioner, ingen ny AI-väg (de_minimis fortsatt denylistat i
+`lib/ai/redaction.ts`). `revalidateFor` busta:r `/de-minimis`, `/startups/[id]`
+**och** `/min-oversikt`; formulären kör dessutom `router.refresh()`.
+
+---
+
+## 21bis. "Mitt bolag" — bolagsmedlemmens samlade vy
+
+`/min-oversikt` (modul `min_oversikt`, titel **"Mitt bolag"**) är
+`startup_member`-rollens hemvy och samlar allt som rör det egna bolaget:
+bolagsheader (fas/status/IRL/nästa steg + länk till bolagskortet),
+**de minimis-status** (inbäddad `DeMinimisSection`, § 20.5), **tilldelade
+verktyg** (filtrerade via `canRunTool({ isLinkedStartup: true })`),
+**tilldelade utbildningsdokument** (`education_document_assignments` med
+slutför-knapp) och **egna/bolagets öppna uppgifter** (`tasks`).
+
+**Routing/RBAC:** modulen ligger i `coreModules` + `RAIL_GROUPS` ("Översikt")
+med `rolesAllowed` = staff/observer/`startup_member`. Sidan
+`redirect('/chatt')` när modulen saknas. Allt scopas till
+`linkedStartups[0]`; staff utan länkat bolag skickas till `/startups`. Vyn
+exponerar aldrig portföljbred data — bara medlemmens eget bolag (§ 21-
+isolering). Riskklass: minimal (ingen AI-funktion).
+
+---
+
+## 21. Bolagsisolering / RLS för `startup_member`
+
+### 21.1 Kravet
+
+En ren `startup_member` får **BARA** se data som hör till sitt/sina egna bolag
+(`users.linked_startups`) — aldrig andra bolag och aldrig tenant-bred
+portfölj-/pipeline-/lead-data. Staff (`admin`, `incubator_lead`, `coach`,
+`mentor`) och `observer` (intern tillsynsroll) behåller tenant-bred läsning.
+
+Tidigare var de flesta list/view-regler bara
+`@request.auth.id != "" && @request.auth.tenant = tenant`, vilket lät
+**vilken** autentiserad tenant-användare som helst läsa alla bolag — det är
+läckan som § 21 stänger.
+
+### 21.2 Defense-in-depth (två lager)
+
+1. **PocketBase API-regler (sann RLS)** — migration
+   `1700000096_isolate_startup_member_data.js`. Reads i appen går via
+   användarens auth-token (`getServerPb`/`listForTenant`/`getOneForTenant`), så
+   reglerna enforce:as faktiskt.
+2. **App-lager** — `startupScopeFilter(user, field)` i
+   `apps/web/src/lib/pb.server.ts` (tom för staff/observer, annars
+   `(field = "<id>" || …)` över `linked_startups`, escapad via `escFilter`).
+   `listForTenant({ scopeToStartupField })` och sidornas RBAC-guards använder
+   den. Skyddar särskilt superuser-vägar som annars kringgår RLS.
+
+### 21.3 Regelmönster (PB)
+
+```js
+// VIKTIGT: använd `:each ?=` (INTE `?=`) mot multi-värde-fält i regler.
+const STAFF_OR_OBSERVER =
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "mentor" || @request.auth.roles:each ?= "observer")';
+// startups själv:
+`${ANY_AUTH} && ${TENANT} && (${STAFF_OR_OBSERVER} || @request.auth.linked_startups:each ?= id)`
+// barn med startup-relation (egen tenant ELLER startup.tenant):
+`${ANY_AUTH} && ${TENANT} && (${STAFF_OR_OBSERVER} || @request.auth.linked_startups:each ?= startup)`
+// tenant-bred data medlem ej får läsa:
+`${ANY_AUTH} && ${TENANT} && ${STAFF_OR_OBSERVER}`
+```
+
+**PB v0.23.4-operatorbugg (§ 10.3 / migrationer 1700000049 + 1700000106):**
+`?=`-operatorn matchar INTE multi-select/multi-relation-fält som
+`@request.auth.roles` eller `@request.auth.linked_startups` i PocketBase v0.23.4
+— uttrycket blir tyst falskt även för en matchande användare (empiriskt
+bekräftat mot pocketbase 0.23.4). Använd därför **`:each ?=`** (membership över
+varje värde) i ALLA regler — list/view/update OCH create. Migration 1700000096
+satte ursprungligen list/view (+ `startup_kpis.updateRule`) med `?=`, vilket tyst
+nekade *alla* (även admin) → bolagskortet gav 404 och listan blev tom. Migration
+**1700000106** rättar dessa till `:each ?=`. (`@request.auth.id = owner`/`=
+mentor` mot single-relation berörs inte — skalär `=` fungerar.) `?=`-roll-checks
+får dessutom ALDRIG ligga i **createRules** (de togs bort i 1700000049 — roll-
+enforcement görs i server-actions). Alla createRules lämnas orörda av 1700000096/
+1700000106.
+
+### 21.4 Kollektioner
+
+- **`startups`** — medlem ser bara rader vars id finns i `linked_startups`.
+- **Medlem-scopad (egen-bolag, `linked_startups ?= startup`):** `activities`,
+  `notes` (behåller confidential-logiken), `milestones`, `agreements`,
+  `tool_runs`, `startup_team_members`, `startup_contacts`,
+  `startup_phase_history`, `startup_financials`, `capital_rounds`,
+  `intellectual_property`, `startup_kpis` (+ update), `education_document_assignments`,
+  `sprint_x_checkins`, `partner_engagements`. Polymorfa: `tasks` (medlem ser egna
+  via `owner` + sitt-bolags) och `missions` (sitt-bolags + där hen är
+  `recipient`/`mentor`).
+- **Redan medlem-scopade (orörda):** `workshop_assignments`, `workshop_runs`,
+  `strategies`, `strategy_revisions` (`STAFF_OR_LINKED_STARTUP`).
+- **Tenant-bred — medlem nekas helt (staff/observer-only):** `partners`,
+  `investors`, `deals`, `alumni`, `integration_records`. Redan staff-only sedan
+  tidigare: `incubator_reports`, `tenant_integrations`,
+  `compass_leads/_conversations/_responses`.
+
+### 21.7 Efterskörd — kollektioner som missades i § 21 (migration 1700000112)
+
+Säkerhetsgranskningen 2026-06 hittade en rad nyare PII-/finans-kollektioner
+som lagts till EFTER migration 1700000096 utan att skrivas in i isoleringen
+(eller i `verify-baseline.mjs`). Migration **1700000112** stänger dem (endast
+list/view; createRules orörda; `:each ?=` per § 21.3):
+
+- **Cross-tenant (allvarligast):** `compass_messages` / `compass_responses`
+  saknade tenant-kolumn och hade list/view = `auth && STAFF` UTAN tenant-scope
+  → staff i tenant A kunde läsa ALLA tenants besökar-chattar/enkätsvar. Scopas
+  nu via förälder-relationen (`@request.auth.tenant = conversation.tenant`).
+  `compass_questions` (globalt `auth`) scopas via `module.tenant`. `tenants`
+  list/view scopas till den egna tenanten (`@request.auth.tenant = id`).
+- **Medlem-scopade (egen-bolag) tillagda:** `agreement_signatures`,
+  `de_minimis_units`/`de_minimis_unit_orgnr` (via `unit.startup`)/`de_minimis_stod`,
+  `event_signups` (sitt-bolags + inbjuden `user`).
+- **Staff/observer-only tillagda:** `contacts` (PII inkl. art. 9 `gender`),
+  `service_time_entries`, `startup_service_costs`,
+  `startup_readiness_assessments`, `startup_state_aid_periods`,
+  `mission_comments`.
+- **Medvetet kvar tenant-brett:** `education_documents` (delade
+  utbildningsresurser, ej PII; filen serveras ändå via tokenlös publik URL
+  § 18.3 så record-RLS är inte filgränsen). `web_cache`/`integration_providers`
+  (globala) hanteras i AI-denylistan, inte här.
+
+`verify-baseline.mjs` asserterar nu dessa (utökade `MUST_SCOPE_TO_MEMBER` /
+`MUST_BE_STAFF_OR_OBSERVER` + ny `MUST_SCOPE_CROSS_TENANT`), så en framtida
+kollektion som återinför läckan fälls innan deploy. Speglas i
+`setup-via-api.mjs` (de_minimis/compass är migration-only, § 23.4).
+
+### 21.5 Navigations-/route-gating
+
+`coreModules` (`packages/shared/src/modules.ts`) exkluderar redan
+`startup_member` från `aktivitet`/`activity_feed`, `inflode`, `rapporter`,
+`partners`, `investerare`, `insights`, `pagaende`. Sidorna `redirect('/dashboard')`
+när modulen saknas — guards lades till på `/investerare` och `/inflode` (saknade
+dem). Chatt-ytorna `/idag`, `/chatt`, `/filer` redirectar redan non-staff →
+en ren `startup_member` når aldrig dashboard-/tråd-chatten, så AI-chattens
+`query_collection` (§ 9.3) exponeras inte för medlemmar. `/startups` redirectar
+en medlem med exakt ett bolag direkt till bolagskortet och visar annars bara
+hens egna bolag.
+
+### 21.6 Regelefterlevnad
+
+- **GDPR § 5 (dataminimering) + art. 32:** minsta behörighet är default; en
+  medlem kan inte längre läsa andra bolags data.
+- **ISO 27001 A.5.15–A.5.18 (åtkomstkontroll):** RBAC + RLS, ingen inline
+  roll-bypass. **A.8.32:** ny oföränderlig migration (nytt filnummer).
+- **SOC 2 CC6.1–CC6.3:** dokumenterad, verifierbar isolering;
+  `scripts/verify-baseline.mjs` asserterar att reglerna har medlems-scope.
+- **Riskklass:** n/a (åtkomstkontroll, ingen AI-inferens).
+- **Migrationer:** ny oföränderlig migration (1700000096), fälten speglas i
+  `scripts/setup-via-api.mjs` och `scripts/verify-baseline.mjs`.
+
+---
+
+## 22. Bolagsmedlemmens dedikerade navigation
+
+### 22.1 Kravet
+
+En ren `startup_member` ska **inte** se samma vyer som Movexum-personal.
+Bolagsmedlemmen får en egen, kortare rail med bara det som rör det egna
+bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
+
+1. **Min översikt** (`/min-oversikt`) — information om inkubatorprogrammet och
+   Movexum, bolagsstatus, de minimis-status, egna uppgifter ("nödvändiga
+   saker"). Tilldelade verktyg/dokument bor numera under "Aktiviteter".
+2. **Aktiviteter** (`/mina-aktiviteter`) — översikt över tilldelade workshops,
+   dokument och verktyg. Medlemmen öppnar och genomför dem direkt; en
+   **progressbar** visar hur stor andel som slutförts (workshops `done` +
+   dokument `completed` / totalt). Staff/coach kan granska ett bolags progress
+   via `?startup=<id>` (länk från `/pagaende`).
+3. **Filer** (`/filer`) — avtal (`agreements`) kopplade till bolaget och
+   dokument som blivit output av aktiviteter (utbildningsdokument), plus
+   medlemmens egna genererade/uppladdade filer.
+4. **De minimis** (`/de-minimis`) — befintlig modul (§ 20).
+5. **Community** (`/community`) — platshållare för co-startup-interaktion ("bara
+   rubriken för nu"). Alumni-/partnerdatan är staff/observer-only (§ 21).
+
+### 22.2 Implementation
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/index.ts` | `MEMBER_RAIL` (rubriker + etiketter), `isPureStartupMember(roles)`, modul `mina_aktiviteter` |
+| `apps/web/src/components/proto/ProtoRail.tsx` | Renderar medlems-railen i stället för `RAIL_GROUPS` när `isPureStartupMember` |
+| `apps/web/src/app/mina-aktiviteter/page.tsx` | Aktivitetsvy + progressbar (medlem) / read-only granskning (staff via `?startup`) |
+| `apps/web/src/app/min-oversikt/page.tsx` | Program-info för medlem; staff behåller "Mitt bolag" |
+| `apps/web/src/app/filer/page.tsx` | Avtal + aktivitetsdokument-sektioner för medlem |
+| `apps/web/src/app/community/page.tsx` | Medlems-platshållare |
+
+- `isPureStartupMember` = har `startup_member` men ingen
+  staff-/observer-roll. Multi-roll (t.ex. coach + startup_member) behåller
+  hela staff-railen.
+- Hemvy: en ren medlem som landar på `/chatt` redirectas till `/min-oversikt`
+  (rail-logon pekar dit); staff har kvar Hemmaplan/Chatt.
+
+### 22.3 Regelefterlevnad
+
+- **Åtkomst (§ 21):** railen är ren UI-kurering — den faktiska isoleringen
+  ligger kvar i PB-RLS + `startupScopeFilter`. Medlems-railen exponerar inga
+  nya datavägar; alla läsningar går via användarens auth-token.
+- **AI/PII:** inga nya AI-funktioner, inga nya fält i `lib/ai/context.ts`.
+  `/mina-aktiviteter` och `/filer`-medlemssektionerna läser bara redan
+  medlems-scopade kollektioner (`workshop_assignments`,
+  `education_document_assignments`, `agreements`, `tools`, `user_files`).
+- **Riskklass:** minimal/n.a. (navigation + åtkomstkontroll, ingen
+  AI-inferens).
+
+---
+
+## 23. Startupkompassen — publika intag-moduler (quiz / formulär / AI-chatt)
+
+### 23.1 Översikt
+
+`/inflode`-modulen heter i sidmenyn **"Startupkompassen"** (id `inflode`,
+route `/inflode`, `rolesAllowed: ['admin','incubator_lead','coach']`). Den är
+inkubatorns inflöde: bygg intag-moduler i tre flödestyper — **quiz** (poäng +
+resultatprofiler), **formulär/wizard** (frågor) och **AI-chatt** (Mistral) —
+och deploya dem PUBLIKT (oinloggat) på en **globalt unik slug** `/m/<public_slug>`
+med nedladdningsbar QR-kod. Systemet är tenant-/forum-dynamiskt: varje modul
+ägs av en tenant och resolvas publikt via sin globala slug.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000108_extend_compass_startupkompassen.js` | `public_slug` (globalt unikt partiellt index), `result_buckets`, välkomst-/persona-fält, `quiz_*` på leads + seed av tre startmoduler per tenant |
+| `backend/pocketbase-schema/migrations/1700000109_widen_compass_staff_roles_coach.js` | Lägger `coach` i compass-RBAC + rättar operatorer till `:each ?=` (§ 21.3) |
+| `packages/shared/src/compass-quiz.ts` (+ `.test.ts`) | Ren, enhetstestad quiz-poängsättning (`scoreQuiz`, `resolveBucket`) |
+| `apps/web/src/lib/compass/public.ts` | Superuser-resolvning av publik modul + answer→lead-whitelist |
+| `apps/web/src/app/m/[slug]/page.tsx` | Publik, branded modulsida (anonym) |
+| `apps/web/src/components/compass/PublicModuleRunner.tsx` | Samtyckesgrind + flödesdispatch (client) |
+| `apps/web/src/components/compass/{ModuleQuiz,ModuleWizard,CompassChat,QuestionInput}.tsx` | Flödeskomponenter (delar `QuestionInput`) |
+| `apps/web/src/app/api/public/m/[slug]/{chat,submit,quiz-result}/route.ts` | Anonyma API-flöden (superuser, rate-limit, consent) |
+| `apps/web/src/lib/actions/compass.ts` | Modul/fråge-CRUD (`MANAGE_ROLES` = admin/incubator_lead/coach) |
+
+### 23.2 Publik access & tenant-isolation (kritiskt)
+
+De publika ytorna har INGEN användarsession. Middleware (`PUBLIC_PATHS`) släpper
+`/m/` + `/api/public/`; root-layouten visar AppShell bara för inloggade, så en
+anonym besökare får en ren sida. Läs/skriv sker via **`getSuperuserPb()`**
+(`lib/integrations/credentials.ts`), som bypassar PB:s RLS. Därför gäller:
+`resolvePublicModule()` resolvar EN modul på dess globala `public_slug`, härleder
+**tenant FRÅN modulen** och stämplar den tenanten på ALLA skrivningar — en tenant
+accepteras aldrig från request-bodyn. Filtervärden binds via `pb.filter()`.
+Saknas superuser-credentials degraderar sidan snällt (ingen krasch).
+
+### 23.3 Quiz-poängsättning
+
+Sker SERVER-side i `/api/public/m/[slug]/quiz-result` (klienten kan inte
+manipulera poängen). Två modeller (auto-vald): **topp-hink** (val pekar på en
+`bucket` med vikt `score`; flest poäng vinner) och **intervall** (totalpoäng mot
+hinkarnas `min`/`max`). Per-val `score`/`bucket` lagras i
+`compass_questions.choices`-JSON (inget nytt fält). Resultatprofiler i
+`compass_modules.result_buckets`. `red`-nyckel renderas via movexum-orange
+(aldrig röd, § 2.3).
+
+### 23.4 Regelefterlevnad
+
+- **GDPR art. 7 (samtycke):** publika flöden kräver `consent:true` när modulen
+  har en `consent_note`; `consent_at` stämplas. **§ 5 dataminimering:** bara
+  whitelistade fält (`mapAnswersToLead`) blir lead; anonyma leads får
+  `name='Anonym'`. compass-kollektionerna förblir **denylistade** i
+  `lib/ai/schema.ts` (§ 9.3) — besökardata når aldrig AI-kontext.
+- **EU AI Act art. 50:** chat-flödet visar transparensbanner; quiz/wizard är
+  deterministiska (ingen AI-inferens → ingen banner krävs). AI-chatten kör
+  Mistral via befintlig `intakeReply` (ingen ny leverantör).
+- **Robusthet (§ 10.3 A.8.x):** de publika routarna rate-limitas per IP
+  (`lib/rate-limit.ts`): chat 30/5 min, submit 10/min, quiz 15/min.
+- **Riskklass:** quiz/wizard n/a (ingen AI); publik AI-chatt = begränsad
+  (människa-i-loopen granskar genererade leads i `/inflode/leads`).
+- **Migrationer** (1700000108–109) är nya, oföränderliga filnummer.
+  **compass skapas BARA av migrationerna** (`1700000039` + utökningar) — det
+  speglas medvetet inte i `scripts/setup-via-api.mjs` (som inte är den
+  auktoritativa schemakällan, bara bootstrap/regel-sync). **Förutsättning:**
+  migrationerna måste faktiskt köras mot instansen (custom-image-`serve`
+  auto-migrate). En instans som bootstrappats utan att migrationerna körts
+  saknar hela `compass_*`-familjen → skrivningar 404:ar och `/inflode` kastar
+  500. `verify-baseline.mjs` **asserterar nu att alla `compass_*`-kollektioner
+  finns** (hårt baseline-invariant, inte fail-soft) och
+  `scripts/diagnose-migrations.mjs` listar oapplicerade create-migrationer. Se
+  `backend/pocketbase-schema/README.md` ("Diagnostik & reconcile: saknade
+  migrationer") för hur man applicerar saknade migrationer + synkar
+  `_migrations`-historiken.
+
+### 23.5 E-postnotis vid nytt inflöde (Resend)
+
+När ett nytt inflöde (lead) kommer in via en publik intag-modul mejlas en notis
+till Movexums inflödesmail via **Resend** (samma klient som e-postverifieringen
+— ingen ny leverantör). Mottagarna är **dynamiska**: per modul i fältet
+`compass_modules.notify_emails` (en eller flera komma-/radseparerade adresser,
+redigeras i modul-admin under "Notifiera inflöde till"), med fallback på env
+`MOVEXUM_INFLOW_EMAIL` när modulen saknar egna mottagare.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000110_extend_compass_modules_notify_emails.js` | `notify_emails`-fält på `compass_modules` |
+| `apps/web/src/lib/email.ts` | `sendInflowNotification` (brandat Resend-mejl, HTML-escapad lead-data) |
+| `apps/web/src/lib/compass/notify.ts` | `resolveInflowRecipients` (modul → env-fallback) + `notifyNewInflow` (best-effort) |
+| `apps/web/src/app/api/public/m/[slug]/{submit,quiz-result,chat}/route.ts` | Anropar `notifyNewInflow` efter att lead skapats |
+
+- **Tre flöden:** formulär (`submit`) och quiz (`quiz-result`) notifierar direkt
+  efter `createLead`; AI-chatt (`chat`) notifierar **en gång**, vid första
+  lead-skapandet (inte vid efterföljande uppdateringar → ingen notis-storm).
+- **Best-effort (SOC 2 availability):** `notifyNewInflow` fångar alla fel (saknad
+  `RESEND_API_KEY`, saknade mottagare, Resend-fel) → ett inflöde felar aldrig för
+  att notisen inte gick fram.
+- **GDPR §5/§6:** mejlet är en **intern staff-notis** (rättslig grund =
+  berättigat intresse, inkubatordrift) och innehåller endast den kontakt-/idé-
+  data besökaren själv lämnade samt en direktlänk till `/inflode/leads/<id>`.
+  Ingen ny AI-väg — compass-kollektionerna förblir denylistade i `lib/ai/schema.ts`
+  (§9.3). Lead-data HTML-escapas i mejlet (XSS-skydd, §10.3).
+- **Riskklass (EU AI Act):** n/a — deterministisk e-postnotis, ingen AI-inferens.
+- **Migration** (1700000110) är ett nytt, oföränderligt filnummer; compass speglas
+  inte i setup/verify-skripten (migration-only).
+
+---
+
+## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)
+
+### 24.1 Översikt
+
+Det personliga filarkivet (`/filer`, § 17.1) är inte längre en platt lista.
+Filerna grupperas i **ämnesmappar** (en fast Movexum-taxonomi) och kan även
+visas per **bolag**. En liten AI-agent (Mistral, EU) klassar varje fil till
+exakt ETT ämne och föreslår en valfri bolagskoppling. När agenten är **osäker**
+flaggas filen och användaren bekräftar ämnet i en **dialog** i stället för att
+en osäker gissning sätts tyst (människa-i-loopen, EU AI Act art. 14).
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/file-topics.ts` | Fast ämnestaxonomi (`FILE_TOPICS`, `FileTopic`, `FileTopicStatus`) + helpers |
+| `backend/pocketbase-schema/migrations/1700000110_extend_user_files_categorization.js` | `topic`/`topic_status`/`topic_confidence`/`startup`/`categorized_at` på `user_files` |
+| `apps/web/src/lib/ai/file-categorize.ts` | `categorizeFile` — Mistral-klassning → `{ topic, startupId, confidence, needsReview }` |
+| `apps/web/src/lib/actions/files.ts` | `categorizeFileAction`/`categorizeAllFilesAction`/`setFileTopicAction`/`listFileStartupOptionsAction` |
+| `apps/web/src/app/filer/FilesBrowser.tsx` | Vy (Ämnen/Bolag-flikar, mappgrid, senaste filer, "Sortera med AI", osäkerhetsdialog) |
+
+### 24.2 Ämnestaxonomi (fast)
+
+Åtta fasta ämnen i `file-topics.ts` (källa av sanning, speglade som
+select-värden i migration 1700000110): `affarsplan_strategi`,
+`finansiering_kapital`, `hallbarhet_esg`, `internationalisering`,
+`pitch_material`, `juridik_avtal`, `rapporter_uppfoljning`, `osorterat`
+(default/fallback). Lägg aldrig till ett ämne utan att utöka BÅDE
+`file-topics.ts` och en migration (fältet är en PB-select).
+
+### 24.3 Klassningsflöde
+
+1. **Vid uppladdning** (`uploadUserFileAction`) sätts `topic_status='pending'`
+   och `categorizeAndStore` körs best-effort direkt (fail-soft).
+2. **"Sortera med AI"** (`categorizeAllFilesAction`) klassar alla filer med
+   `topic_status` tomt/`pending` — rör ALDRIG `confirmed` (människans val) eller
+   redan klassade `auto`/`needs_review`. Capad till 40 filer/körning (robusthet,
+   art. 15).
+3. `categorizeFile` kör `mistral-small-latest` (temp 0, max 200 tokens) med en
+   egen, snäv system-prompt (INTE agent-/chatt-ytan): filinnehåll är **data,
+   inte instruktioner** (§ 9.3). Den får ämneslistan + tenantens bolag (id +
+   `name`, whitelistat fält § 9.3) + filnamn + ett **cappat textutdrag**
+   (pdf/xlsx/text, ≤ 6 KB extraherat / ≤ 4 KB till modellen). Returnerar
+   `{ topic, startup_id, confidence }` som JSON.
+4. `confidence < 0.55` ELLER `topic = osorterat` → `topic_status='needs_review'`
+   (annars `auto`). `startup_id` valideras mot den medskickade bolagslistan.
+5. **Osäkerhetsdialog:** `/filer` visar en banner ("AI:n är osäker på var N filer
+   hör hemma") → användaren väljer ämne (+ valfritt bolag) → `setFileTopicAction`
+   sätter `topic_status='confirmed'`. Samma dialog används för manuell "Flytta".
+
+### 24.4 Säkerhet och regelefterlevnad
+
+- **Riskklass (EU AI Act art. 11):** **begränsad.** Klassar dokument i åtta
+  fasta hinkar; ingen profilering av individer; osäkerhet → människa bekräftar;
+  ingen autopublicering. Versionerad här per art. 11.
+- **Transparens (art. 13/50):** filrader märks "AI" när `topic_status='auto'`,
+  och en not anger att ämnen sätts av AI ("verifiera innan delning").
+- **GDPR § 5 (dataminimering):** det extraherade textutdraget matas **transient**
+  och lagras ALDRIG — bara klassningsresultatet (ämne, ev. bolag, confidence)
+  skrivs. `topic`/`topic_status`/`topic_confidence` är icke-PII metadata.
+- **GDPR art. 17:** inga nya kollektioner; fälten ligger på `user_files`
+  (owner/tenant `cascadeDelete` städar dem). `startup` har ingen cascade (filen
+  överlever bolagsradering, samma princip som `chat_thread`/`tool_run`).
+- **Ingen ny dataväg för agenter:** `user_files` är fortsatt **denylistad** i
+  `lib/ai/schema.ts`. Klassningen är ett separat, isolerat anrop som bara läser
+  ägarens egen fil (owner/tenant verifieras före varje skrivning) — `query_collection`
+  exponerar aldrig arkivet. Bolagsmatchningen använder bara whitelistat `name`.
+- **Kostnad/audit:** varje klassning loggas i `ai_usage_events` (surface
+  `suggestions`) — ingen ny surface-migration behövs.
+- **RBAC/isolation:** allt går via användarens auth-token (`getServerPb`) →
+  owner-only RLS (§ 21.4) gäller; bolagslistan scopas av tenant + medlems-RLS.
+- **Migration** (1700000110) är nytt, oföränderligt filnummer. `user_files`
+  speglas inte i `scripts/setup-via-api.mjs`/`verify-baseline.mjs` — inga
+  mirror-ändringar krävs.
+
+---
+
+## 25. Onboarding — byggbar digital introduktion för nya bolag
+
+### 25.1 Översikt
+
+Staff bygger en **onboarding** (digital introduktion) under
+`/education/onboarding` med exakt samma byggar-mönster som workshops (§ 18):
+moduler som innehåller block. Ett flöde kan sättas som **default** per tenant —
+det visas då för varje bolag som inte slutfört sin onboarding, via en knapp på
+**Min översikt** (§ 21bis) och på `/onboarding`. Onboardingen är informativ
+(moduler om Movexum och tiden i inkubatorn) och innehåller **ingen AI-inferens**
+→ riskklass **minimal** (CLAUDE.md § 10.1).
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/onboarding.ts` (+ `.test.ts`) | Ren, enhetstestad normalisering + slutförandelogik |
+| `backend/pocketbase-schema/migrations/1700000113_create_onboarding_flows.js` | Collection `onboarding_flows` |
+| `backend/pocketbase-schema/migrations/1700000114_create_onboarding_progress.js` | Collection `onboarding_progress` |
+| `backend/pocketbase-schema/migrations/1700000115_extend_activity_kinds_onboarding.js` | `activities.kind` += `onboarding` |
+| `apps/web/src/lib/actions/onboarding.ts` | Server actions (bygg/hantera + genomför) |
+| `apps/web/src/app/education/OnboardingBlockBuilder.tsx` | Byggar-UI (moduler/block) |
+| `apps/web/src/app/education/OnboardingFlowForm.tsx` | Skapa/redigera-formulär |
+| `apps/web/src/app/education/OnboardingRunner.tsx` | Genomför-vy (bolag) + staff-förhandsgranskning |
+| `apps/web/src/app/education/onboarding/**` | Staff: lista/ny/redigera/förhandsgranska |
+| `apps/web/src/app/onboarding/page.tsx` | Bolagets genomför-vy (default-flödet) |
+
+### 25.2 Datamodell
+
+- **`onboarding_flows`** (1700000113): `tenant`, `title`, `intro` (editor),
+  `status` (draft/active/archived), `is_default` (bool, ett per tenant —
+  enforce:as i server-action), `active` (bool), `modules` (json —
+  `OnboardingModule[]`), `created_by`. List/view = alla tenant-användare (en
+  bolagsmedlem måste kunna läsa default-flödet); create = auth+tenant (ingen
+  roll-check/join, § 21.3 — roll enforce:as i server-action); update/delete =
+  staff.
+- **`onboarding_progress`** (1700000114): en rad per (`tenant`, `flow`
+  cascadeDelete, `startup` cascadeDelete) — `status` (in_progress/completed),
+  `answers_json` (bolagets svar/bekräftelser per block.id), `progress_json`
+  (pct + tidsstämpel), `activity`, `started_at`, `completed_at`,
+  `completed_by`. Unikt index `(tenant, flow, startup)` → idempotent upsert,
+  progressen återupptas. Bolagsisolering (§ 21): list/view scope:ar via
+  `linked_startups:each ?=` (staff/observer ser hela tenanten); create =
+  auth+tenant; skrivning sker via server-action efter verifierat medlemskap
+  (superuser-fallback vid PB v0.23-rule-eval-bugg, samma mönster som § 18.3).
+
+**Blocktyper** (`OnboardingBlockType`): `text`, `video`, `image`,
+`acknowledge` (alltid obligatorisk bekräftelse), `question` (fritext), `quiz`
+(enkel-/flerval, valfritt rätt svar). Media laddas upp som riktiga PB-filer via
+den befintliga utbildnings-media-routen (`/api/education/media` → `workshop_media`,
+§ 18.2) — blocket lagrar bara en kort fil-URL, ingen base64.
+
+### 25.3 Flöde
+
+1. Staff bygger ett flöde och sätter status `active` + `is_default`.
+   `applyDefault` nollställer `is_default` på tenantens övriga flöden.
+2. Ett bolag öppnar `/onboarding` (knapp på Min översikt) → server hämtar
+   tenantens aktiva default-flöde + ev. progress, och `OnboardingRunner`
+   renderar modulerna. Bolaget bekräftar/svarar och **Slutför** när alla
+   obligatoriska block är klara (`isOnboardingComplete`, server-validerat).
+3. Vid slutförande loggas en aktivitet (`kind='onboarding'`,
+   "<bolag> slutförde onboardingen") i feeden (staff-synlig).
+
+### 25.4 Regelefterlevnad
+
+- **GDPR § 5 (dataminimering):** flödena är staff-skapad utbildningskonfiguration
+  (ingen PII); progressraden lagrar bolagets svar/bekräftelser.
+  `onboarding_flows` + `onboarding_progress` är **denylistade i
+  `lib/ai/redaction.ts`** (fritextsvar kan vara PII) → når aldrig
+  `query_collection`/agent-kontexten. Inga nya whitelistade fält i
+  `lib/ai/context.ts`. UI uppmanar inte till personuppgifter.
+- **GDPR art. 17:** `cascadeDelete` på `flow`/`startup`; tenant-relation städas
+  i erasure-flödet (samma mönster som övriga collections).
+- **RBAC (§ 21 / ISO 27001 A.5.15–A.5.18):** bygg/hantera = staff
+  (admin/incubator_lead/coach/mentor via `/education`-gating); radera =
+  admin/incubator_lead. Genomför = staff ELLER länkad `startup_member`
+  (verifieras i server-action). `observer` read-only. En ren medlem kan bara se
+  sitt eget bolags progress (RLS + `loadFlowAndStartup`-verifiering).
+- **EU AI Act:** ingen AI-funktion i modulen → ingen riskklass/banner
+  (deterministisk genomgång + progress).
+- **Robusthet/idempotens (SOC 2):** server-actions validerar input,
+  upsertar idempotent på `(tenant, flow, startup)`, och fail:ar tydligt.
+- **Migrationer:** nya, oföränderliga filnummer (1700000113–115). Onboarding är
+  **migration-only** (speglas inte i `setup-via-api.mjs`/`verify-baseline.mjs`,
+  samma precedens som compass/de_minimis, § 23.4) — createRules följer § 21.3 så
+  `verify-baseline.mjs`-svepet passerar.

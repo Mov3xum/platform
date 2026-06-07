@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useActionState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateWorkshopAction, type WorkshopActionState } from '@/lib/actions/workshops';
@@ -29,10 +30,12 @@ export function WorkshopEditForm({ workshop, areas, imageUrl }: Props) {
   const [state, formAction, pending] = useActionState(boundAction, {} as WorkshopActionState);
 
   useEffect(() => {
-    if (state.workshopId && !pending) {
+    // Hold the redirect when the cover image failed to persist so the warning
+    // stays visible instead of being lost in the navigation.
+    if (state.workshopId && !pending && !state.warning) {
       router.push(`/education/workshops/${workshop.id}`);
     }
-  }, [state.workshopId, pending, router, workshop.id]);
+  }, [state.workshopId, state.warning, pending, router, workshop.id]);
 
   const inputClass =
     'mt-1 w-full rounded-2xl border border-default bg-surface px-4 py-2.5 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
@@ -212,6 +215,14 @@ export function WorkshopEditForm({ workshop, areas, imageUrl }: Props) {
         <p className="rounded-xl bg-movexum-pastell-orange px-3 py-2 text-sm text-movexum-morkorange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange">
           {state.error}
         </p>
+      ) : null}
+      {state.warning ? (
+        <div className="space-y-2 rounded-xl bg-movexum-pastell-gul px-3 py-2 text-sm text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
+          <p>{state.warning}</p>
+          <Link href={`/education/workshops/${workshop.id}`} className="inline-block font-medium underline">
+            Tillbaka till workshopen →
+          </Link>
+        </div>
       ) : null}
 
       <button

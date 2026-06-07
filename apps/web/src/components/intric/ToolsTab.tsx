@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/proto/Icon';
 import type { ToolRun, ToolRunStatus, WorkshopAssignmentStatus } from '@platform/shared';
-import { assignWorkshopToStartupAction } from '@/lib/actions/workshops';
 import { useLiveWorkspace } from '@/lib/realtime/tool-runs';
 import { AssignModal, type AssignableTool, type AssignableUser } from './AssignModal';
+import { EducationAssignModal, type AssignableEducation } from './EducationAssignModal';
+import type { AssignableResource } from '@/lib/assignments/types';
 import { ASSIGN_STATUS, statusFor, daysUntil, formatDeadline, formatRelativeDate } from './constants';
 
 interface AssignmentView {
@@ -63,6 +63,7 @@ interface Props {
   canAssign: boolean;
   educationCatalog?: EducationCard[];
   assignedEducations?: AssignedEducation[];
+  resources?: AssignableResource[];
 }
 
 export function ToolsTab(props: Props) {
@@ -75,26 +76,17 @@ export function ToolsTab(props: Props) {
     assignees,
     canAssign,
     educationCatalog = [],
-    assignedEducations = []
+    assignedEducations = [],
+    resources = []
   } = props;
-  const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
   const [defaultToolId, setDefaultToolId] = useState<string | undefined>();
-  const [assigningWorkshopId, setAssigningWorkshopId] = useState<string | null>(null);
-  const [eduError, setEduError] = useState<string | null>(null);
-  const [isAssigningEdu, startEduTransition] = useTransition();
+  const [eduModalWorkshop, setEduModalWorkshop] = useState<AssignableEducation | null>(null);
 
   useLiveWorkspace(true, 20_000);
 
-  function assignEducation(workshopId: string) {
-    setEduError(null);
-    setAssigningWorkshopId(workshopId);
-    startEduTransition(async () => {
-      const result = await assignWorkshopToStartupAction(workshopId, startupId);
-      setAssigningWorkshopId(null);
-      if (result.error) setEduError(result.error);
-      else router.refresh();
-    });
+  function openAssignEducation(workshop: AssignableEducation) {
+    setEduModalWorkshop(workshop);
   }
 
   function openAssign(toolId?: string) {
@@ -407,12 +399,6 @@ export function ToolsTab(props: Props) {
               </p>
             </div>
 
-            {eduError && (
-              <div className="mb-3 rounded-lg bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange">
-                {eduError}
-              </div>
-            )}
-
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {educationCatalog.map((e) => (
                 <div
@@ -444,12 +430,10 @@ export function ToolsTab(props: Props) {
                       ) : (
                         <button
                           type="button"
-                          onClick={() => assignEducation(e.id)}
-                          disabled={isAssigningEdu}
+                          onClick={() => openAssignEducation({ id: e.id, title: e.title })}
                           className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[11.5px] font-medium text-brand-foreground hover:opacity-90 disabled:opacity-50"
                         >
-                          <Icon name="inbox" size={12} />
-                          {isAssigningEdu && assigningWorkshopId === e.id ? 'Tilldelar…' : 'Tilldela'}
+                          <Icon name="inbox" size={12} /> Tilldela
                         </button>
                       )
                     ) : null}
@@ -473,6 +457,15 @@ export function ToolsTab(props: Props) {
         defaultToolId={defaultToolId}
         tools={assignableTools}
         assignees={assignees}
+        startupId={startupId}
+        startupName={startupName}
+      />
+
+      <EducationAssignModal
+        open={eduModalWorkshop !== null}
+        onClose={() => setEduModalWorkshop(null)}
+        workshop={eduModalWorkshop}
+        resources={resources}
         startupId={startupId}
         startupName={startupName}
       />

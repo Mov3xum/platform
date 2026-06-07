@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = ['/', '/login', '/register', '/reset-password', '/verify-email'];
+const PUBLIC_PATHS = ['/', '/login', '/reset-password', '/verify-email'];
 const AUTH_COOKIE = 'pb_auth';
 
 /**
@@ -76,7 +76,13 @@ export function middleware(req: NextRequest) {
     PUBLIC_PATHS.includes(pathname) ||
     pathname.startsWith('/reset-password/') ||
     pathname.startsWith('/_next') ||
-    pathname.startsWith('/api/health');
+    pathname === '/api/auth/login' ||
+    pathname.startsWith('/api/health') ||
+    // Startupkompassen — publika, oinloggade intag-moduler (quiz/formulär/chatt)
+    // och deras anonyma API-flöden.
+    pathname === '/m' ||
+    pathname.startsWith('/m/') ||
+    pathname.startsWith('/api/public/');
 
   let res: NextResponse;
   if (isPublic) {

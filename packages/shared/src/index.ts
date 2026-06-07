@@ -1,3 +1,6 @@
+import type { EducationDocumentKind } from './education-documents';
+import type { FileTopic, FileTopicStatus } from './file-topics';
+
 export type Role =
   | 'admin'
   | 'incubator_lead'
@@ -45,6 +48,8 @@ export interface Tenant {
   name: string;
   slug: string;
   type: TenantType;
+  /** Fallback-timpris för Vinnova-rapportering (CLAUDE.md §0 reporting). */
+  default_hourly_rate_sek?: number;
 }
 
 export interface UserProfile {
@@ -117,6 +122,107 @@ export interface Startup {
   is_regional?: boolean;
   signed_partner_agreement?: boolean;
   signed_partner_agreement_at?: string;
+  // Vinnova lägesredovisning (migration 1700000101)
+  sni_code?: string;
+  sni_description?: string;
+  vinnova_focus?: VinnovaFocus;
+  state_aid_start_at?: string;
+  vinnova_funding_end_at?: string;
+}
+
+// ─── Vinnova/Tillväxtverket-rapportering ─────────────────────────────────────
+// Datamodell för lägesredovisning (excellent inkubator). Se
+// docs/reporting/vinnova-tillvaxtverket-djupanalys.md.
+
+/** Vinnovas sju affärsinriktningar (lägesredovisningens rullgardin). */
+export type VinnovaFocus =
+  | 'agro'
+  | 'industriell_teknik'
+  | 'life_science'
+  | 'miljo_energi'
+  | 'mjukvara_ict'
+  | 'upplevelseindustri'
+  | 'ovrigt';
+
+/** Statsstödsgrund per period (Art. 22 GBER eller de minimis). */
+export type StateAidBasis = 'art22' | 'de_minimis';
+
+/** Tidpostens insatstyp — styr om värdet räknas som inkubator- eller verifieringstjänst. */
+export type ServiceActivityKind = 'incubation' | 'verification' | 'admin';
+
+export type ServiceCostType = 'verification' | 'external_service' | 'other';
+
+/** En av KTH:s fyra readiness-axlar (IRL 1–9). */
+export type ReadinessAxis = 'crl' | 'tmrl' | 'brl' | 'srl';
+
+export interface ServiceTimeEntry {
+  id: string;
+  tenant: string;
+  startup: string;
+  user?: string;
+  activity_kind: ServiceActivityKind;
+  hours: number;
+  /** Timpris för denna post; saknas → tenant-default. */
+  hourly_rate_sek?: number;
+  occurred_on: string;
+  note?: string;
+  source: 'manual' | 'import_excel' | 'task_rollup' | 'other';
+  created: string;
+  updated: string;
+  expand?: {
+    startup?: { id: string; name: string };
+    user?: { id: string; display_name?: string };
+  };
+}
+
+export interface StartupServiceCost {
+  id: string;
+  tenant: string;
+  startup: string;
+  cost_type: ServiceCostType;
+  supplier?: string;
+  invoice_ref?: string;
+  amount_sek: number;
+  incurred_on: string;
+  allocation_note?: string;
+  /** Strategiskt — exkluderas från AI-kontext (jfr capital_rounds.notes). */
+  notes?: string;
+  source: 'manual' | 'import_excel' | 'accounting' | 'other';
+  created: string;
+  updated: string;
+  expand?: { startup?: { id: string; name: string } };
+}
+
+export interface StartupReadinessAssessment {
+  id: string;
+  tenant: string;
+  startup: string;
+  assessed_at: string;
+  crl?: number;
+  tmrl?: number;
+  brl?: number;
+  srl?: number;
+  /** Datum då målgruppskriterier senast kontrollerades. */
+  criteria_checked_at?: string;
+  assessed_by?: string;
+  note?: string;
+  created: string;
+  updated: string;
+  expand?: { startup?: { id: string; name: string } };
+}
+
+export interface StartupStateAidPeriod {
+  id: string;
+  tenant: string;
+  startup: string;
+  basis: StateAidBasis;
+  sni_code?: string;
+  valid_from: string;
+  valid_to?: string;
+  note?: string;
+  created: string;
+  updated: string;
+  expand?: { startup?: { id: string; name: string } };
 }
 
 export interface StartupPhaseHistory {
@@ -216,6 +322,11 @@ export interface GeneratedFileRef {
   mime: string;
   doc_kind: UserFileDocKind;
   size_bytes: number;
+  // Kompakt, deterministiskt genererad SVG-förhandsgranskning av dokumentets
+  // första sida (brandat omslag + glimt av innehållet). Låter chatten visa en
+  // inline-preview utan att rastrera Office-filer. Sanerad/escapad vid
+  // generering; cappad i storlek. Valfri (bakåtkompatibelt).
+  preview_svg?: string;
 }
 
 // Ett verktygssteg agenten utförde under en turn. Live-streamas till UI:t
@@ -397,6 +508,12 @@ export interface UserFile {
   doc_kind?: UserFileDocKind;
   chat_thread?: string;
   tool_run?: string;
+  // AI-kategorisering (migration 1700000110, CLAUDE.md § 24).
+  topic?: FileTopic;
+  topic_status?: FileTopicStatus;
+  topic_confidence?: number; // 0..1, AI:ns självskattade säkerhet (transparens)
+  startup?: string; // valfri bolagskoppling (relation) för "Bolag"-vyn
+  categorized_at?: string;
   created: string;
   updated: string;
 }
@@ -599,6 +716,12 @@ export interface WorkshopAssignment {
   status: WorkshopAssignmentStatus;
   due_date?: string;
   activity?: string;
+  /** Fritext-instruktion till bolaget (CLAUDE.md § 18.4). */
+  instructions?: string;
+  /** Inbjudna Movexum-resurser (user-id:n) som medarbetar på tilldelningen. */
+  collaborators?: string[];
+  /** Kopplat möte (incubator_events-id). */
+  meeting?: string;
   progress_json?: Record<string, unknown>;
   answers_json?: Record<string, unknown>;
   takeaway_json?: Record<string, unknown>;
@@ -614,6 +737,143 @@ export interface WorkshopAssignment {
     startup?: { id: string; name: string };
     assigned_by?: { id: string; display_name?: string; email: string };
     owner?: { id: string; display_name?: string; email: string };
+    collaborators?: Array<{ id: string; display_name?: string; email: string }>;
+    meeting?: IncubatorEvent;
+  };
+}
+
+// ── Onboarding (digital introduktion för nya bolag) ──────────────────────────
+// Byggs av staff under /education/onboarding (samma byggar-mönster som
+// workshops) och kan sättas som DEFAULT per tenant → visas då för varje aktivt
+// bolag som inte slutfört den. Informativa moduler om Movexum + inkubatortiden.
+// Ingen AI-inferens → riskklass minimal (CLAUDE.md § 10.1). Se § 25.
+
+export type OnboardingStatus = 'draft' | 'active' | 'archived';
+
+export type OnboardingBlockType =
+  | 'text'
+  | 'video'
+  | 'image'
+  | 'acknowledge'
+  | 'question'
+  | 'quiz';
+
+export interface OnboardingBlockOption {
+  id: string;
+  text: string;
+  isCorrect?: boolean;
+}
+
+export interface OnboardingBlock {
+  id: string;
+  type: OnboardingBlockType;
+  title: string;
+  /** Brödtext/innehåll som visas för bolaget (text/acknowledge m.fl.). */
+  body?: string;
+  video_url?: string;
+  image_url?: string;
+  question_type?: 'single' | 'multiple';
+  options?: OnboardingBlockOption[];
+  /** Måste slutföras innan bolaget kan markera onboardingen som klar. */
+  required?: boolean;
+}
+
+export interface OnboardingModule {
+  id: string;
+  title: string;
+  description?: string;
+  blocks: OnboardingBlock[];
+}
+
+export interface OnboardingFlow {
+  id: string;
+  tenant: string;
+  title: string;
+  /** Inledande text på onboardingens startvy. */
+  intro?: string;
+  status: OnboardingStatus;
+  /** Endast ett flöde per tenant kan vara default (enforce:as i server-action). */
+  is_default: boolean;
+  active: boolean;
+  modules?: OnboardingModule[];
+  created_by?: string;
+  created: string;
+  updated: string;
+}
+
+export type OnboardingProgressStatus = 'in_progress' | 'completed';
+
+export interface OnboardingProgress {
+  id: string;
+  tenant: string;
+  flow: string;
+  startup: string;
+  status: OnboardingProgressStatus;
+  answers_json?: Record<string, unknown>;
+  progress_json?: Record<string, unknown>;
+  activity?: string;
+  started_at?: string;
+  completed_at?: string;
+  completed_by?: string;
+  created: string;
+  updated: string;
+  expand?: {
+    flow?: OnboardingFlow;
+    startup?: { id: string; name: string };
+  };
+}
+
+// ── Utbildningsdokument (PDF/Excel/PowerPoint/Word) tilldelade bolag ──────────
+// Staff laddar upp referensdokument under /education/documents och tilldelar dem
+// bolag med valfria instruktioner + deadline. Bolaget markerar "slutförd".
+
+export interface EducationDocument {
+  id: string;
+  tenant: string;
+  title: string;
+  description?: string;
+  file: string;
+  doc_kind: EducationDocumentKind;
+  mime?: string;
+  size_bytes?: number;
+  /** Valfri koppling till ett område (workshop_areas), precis som workshops. */
+  area?: string;
+  uploaded_by?: string;
+  created_by?: string;
+  created: string;
+  updated: string;
+  expand?: {
+    area?: WorkshopArea;
+  };
+}
+
+export type EducationDocumentAssignmentStatus = 'assigned' | 'completed';
+
+export interface EducationDocumentAssignment {
+  id: string;
+  tenant: string;
+  document: string;
+  startup: string;
+  instructions?: string;
+  due_date?: string;
+  status: EducationDocumentAssignmentStatus;
+  assigned_by?: string;
+  completed_by?: string;
+  completed_at?: string;
+  activity?: string;
+  /** Inbjudna Movexum-resurser (user-id:n) som medarbetar på tilldelningen. */
+  collaborators?: string[];
+  /** Kopplat möte (incubator_events-id). */
+  meeting?: string;
+  created: string;
+  updated: string;
+  expand?: {
+    document?: EducationDocument;
+    startup?: { id: string; name: string };
+    assigned_by?: { id: string; display_name?: string; email: string };
+    completed_by?: { id: string; display_name?: string; email: string };
+    collaborators?: Array<{ id: string; display_name?: string; email: string }>;
+    meeting?: IncubatorEvent;
   };
 }
 
@@ -1021,11 +1281,38 @@ export interface ModuleGroup {
 }
 
 export const RAIL_GROUPS: ModuleGroup[] = [
-  { label: 'Översikt', modules: ['idag', 'inkorg', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['kompassen', 'startups', 'investerare', 'events', 'community'] },
+  { label: 'Översikt', modules: ['idag', 'min_oversikt', 'inkorg', 'pagaende', 'filer', 'inflode', 'uppdrag'] },
+  { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'insights', 'integrationer', 'installningar'] }
+  { label: 'System', modules: ['agenter', 'insights', 'integrationer', 'anvandare', 'installningar'] }
 ];
+
+/**
+ * Dedikerad navigation för en *ren* `startup_member` (CLAUDE.md § 21bis/§ 22).
+ * Bolagsmedlemmar ska INTE se samma vyer som Movexum-personal — de får en egen,
+ * kortare rail med bara det som rör det egna bolaget under inkubatorprogrammet.
+ * Etiketterna är explicita (oberoende av `ModuleDefinition.title`) så att t.ex.
+ * `min_oversikt` heter "Min översikt" för medlemmen men "Mitt bolag" för staff.
+ */
+export const MEMBER_RAIL: { id: string; label: string }[] = [
+  { id: 'min_oversikt', label: 'Min översikt' },
+  { id: 'mina_aktiviteter', label: 'Aktiviteter' },
+  { id: 'filer', label: 'Filer' },
+  { id: 'de_minimis', label: 'De minimis' },
+  { id: 'community', label: 'Community' }
+];
+
+/**
+ * Sann när användaren är en *ren* bolagsmedlem — har `startup_member` men ingen
+ * staff-/observer-roll. Används för att rendera den dedikerade medlems-railen och
+ * för medlems-specifika vy-grenar.
+ */
+export function isPureStartupMember(roles: Role[] | undefined): boolean {
+  if (!roles || roles.length === 0) return false;
+  if (!roles.includes('startup_member')) return false;
+  const staffOrObserver: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'];
+  return !roles.some((r) => staffOrObserver.includes(r));
+}
 
 export const coreModules: ModuleDefinition[] = [
   {
@@ -1036,11 +1323,34 @@ export const coreModules: ModuleDefinition[] = [
     route: '/chatt'
   },
   {
+    id: 'min_oversikt',
+    title: 'Mitt bolag',
+    description:
+      'Bolagsmedlemmens samlade vy — bolagsstatus, de minimis-liggare, tilldelade verktyg och utbildningsdokument samt egna uppgifter.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
+    route: '/min-oversikt'
+  },
+  {
+    id: 'mina_aktiviteter',
+    title: 'Aktiviteter',
+    description:
+      'Bolagsmedlemmens aktivitetsvy — tilldelade workshops, dokument och verktyg att öppna och genomföra direkt, med progress som coachen också ser.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
+    route: '/mina-aktiviteter'
+  },
+  {
     id: 'inkorg',
     title: 'Min översikt',
     description: 'Allt som är ditt på ett ställe — uppgifter, aktiviteter, möten och events att planera och följa upp.',
     rolesAllowed: ALL_ROLES,
     route: '/inkorg'
+  },
+  {
+    id: 'pagaende',
+    title: 'Pågående',
+    description: 'Allt som pågår med bolagen — workshops, utbildningar och aktiviteter, samlat per bolag så hela Movexum ser läget.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/pagaende'
   },
   {
     id: 'filer',
@@ -1058,9 +1368,9 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'inflode',
-    title: 'Inflöde',
-    description: 'Hjärtat i inkubatorn — fånga, kvalificera och konvertera leads. Deploya formulär, quiz och AI-chattar på egna URL:er och spåra var inflödet kommer ifrån.',
-    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
+    title: 'Startupkompassen',
+    description: 'Hjärtat i inkubatorns inflöde — fånga, kvalificera och konvertera leads. Bygg quiz, formulär och AI-chattar (Mistral) och deploya dem på egna publika URL:er med QR-koder. Hanteras av admin, coach och incubator_lead.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach'],
     route: '/inflode'
   },
   {
@@ -1069,6 +1379,14 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Bolagöversikt: profil, fas, team, milstolpar, avtal.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
     route: '/startups'
+  },
+  {
+    id: 'de_minimis',
+    title: 'De minimis',
+    description:
+      'Stöd av mindre betydelse per bolag — rullande treårssummor mot takbeloppen, varningar och försäkran inför ny stödansökan.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
+    route: '/de-minimis'
   },
   {
     id: 'investerare',
@@ -1128,6 +1446,13 @@ export const coreModules: ModuleDefinition[] = [
     route: '/integrationer'
   },
   {
+    id: 'anvandare',
+    title: 'Användare',
+    description: 'Hantera plattformsanvändare — skapa bolagsmedlemmar och tilldela bolag.',
+    rolesAllowed: ['admin', 'incubator_lead'],
+    route: '/admin/users'
+  },
+  {
     id: 'installningar',
     title: 'Inställningar',
     description: 'Moduler, tenants, integrationer och infrastruktur.',
@@ -1181,3 +1506,12 @@ export { movexumPalette, typography as brandTypography } from './design/tokens';
 
 // ─── Workshop/utbildning-hjälpare (ren logik, enhetstestad) ──────────────────
 export * from './workshop';
+export * from './onboarding';
+export * from './education-documents';
+// ─── De minimis-modul (ren beräkningslogik, enhetstestad) ────────────────────
+export * from './de-minimis';
+export * from './agreements';
+export * from './reporting';
+// ─── Startupkompassen — quiz-poängsättning (ren logik, enhetstestad) ─────────
+export * from './compass-quiz';
+export * from './file-topics';

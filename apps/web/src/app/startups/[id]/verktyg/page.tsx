@@ -3,6 +3,7 @@ import { getOneForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModule, hasRole } from '@/lib/rbac';
 import { ToolsTab } from '@/components/intric/ToolsTab';
+import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import type {
   ToolRunStatus,
@@ -228,6 +229,10 @@ export default async function StartupVerktygPage({
 
   const assignedWorkshopIds = new Set(assignedEducations.map((e) => e.workshopId));
 
+  // Movexum-resurser (staff) som kan bjudas in som medarbetare vid tilldelning
+  // av en utbildning (CLAUDE.md § 18.4). Bara relevant för staff.
+  const resources = isStaff ? await listAssignableResourcesForTenant(pb, user.tenant) : [];
+
   const educationCatalog = workshops.map((w) => {
     const counts = countBlocks(w);
     return {
@@ -251,6 +256,7 @@ export default async function StartupVerktygPage({
       canAssign={isStaff}
       educationCatalog={educationCatalog}
       assignedEducations={assignedEducations}
+      resources={resources}
     />
   );
 }

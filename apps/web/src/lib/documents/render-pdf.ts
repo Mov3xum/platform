@@ -1,20 +1,44 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
-import type { DocumentSpec, SectionSpec, TableSpec } from './types';
-import { BRAND, rgb01, generatedFooter } from './brand';
+import fontkit from '@pdf-lib/fontkit';
+import type { DocumentSpec, SectionSpec, TableSpec, ChartSpec, KpiSpec, CalloutSpec, QuoteSpec } from './types';
+import {
+  BRAND,
+  rgb01,
+  generatedFooter,
+  WORDMARK,
+  accentTheme,
+  calloutTheme,
+  trendColor,
+  tint,
+  roundedRectPath,
+  CHART_COLORS,
+  type AccentTheme
+} from './brand';
+import { loadPdfFonts } from './assets';
 
-// PDF-renderare (pdf-lib, ren JS — ingen headless browser). Egen liten
-// layout-motor: radbrytning, paginering, rubriker, punktlistor och enkla
-// tabeller. Brand-färger appliceras; typsnitt = inbyggda Helvetica (vi
-// bäddar inte in Sora/Nunito i v1 — beslut "färger nu, typsnitt by-name").
+// PDF-renderare (pdf-lib, ren JS — ingen headless browser). Egen layout-motor
+// med 2026-designspråk: omslag med accent-panel + geometriska former, rundade
+// kort med mjuka skuggor, KPI-/stat-kort, callout-rutor, pull-quotes, nativa
+// vektordiagram (bar/hbar/line/area/pie/donut) och zebra-tabeller i en kort-
+// container. Allt deterministiskt.
+//
+// Typsnitt: Sora (rubriker) + Nunito Sans (brödtext) bäddas in från .ttf/.otf
+// i public/fonts om de finns (via fontkit) — annars Helvetica-fallback.
 
 const A4: [number, number] = [595.28, 841.89];
-const MARGIN = 56;
-const PRIMARY = rgb01(BRAND.primary);
+const MARGIN = 54;
 const INK = rgb01(BRAND.ink);
+const INK_SOFT = rgb01(BRAND.inkSoft);
 const MUTED = rgb01(BRAND.muted);
+const BORDER = rgb01(BRAND.border);
+const HAIRLINE = rgb01(BRAND.hairline);
+const SURFACE = rgb01(BRAND.surface);
+const WHITE = rgb(1, 1, 1);
 
-// WinAnsi-säker text (Helvetica kan inte koda godtycklig unicode → annars kast).
-function pdfSafe(s: string): string {
+type RGB = { r: number; g: number; b: number };
+const col = (c: RGB) => rgb(c.r, c.g, c.b);
+
+function winAnsi(s: string): string {
   return String(s ?? '')
     .replace(/[—–]/g, '-')
     .replace(/[“”„]/g, '"')
@@ -28,155 +52,647 @@ function pdfSafe(s: string): string {
 interface Ctx {
   pdf: PDFDocument;
   page: PDFPage;
-  font: PDFFont;
+  body: PDFFont;
   bold: PDFFont;
+  heading: PDFFont;
+  unicode: boolean;
+  accent: AccentTheme;
   y: number;
   width: number;
   height: number;
 }
 
+function clean(ctx: Ctx, s: string): string {
+  const str = String(s ?? '').replace(/\t/g, '  ');
+  return ctx.unicode ? str.replace(/[\u200B-\u200D\uFEFF]/g, "") : winAnsi(str);
+}
+
 function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
-  const words = pdfSafe(text).split(/\s+/);
-  const lines: string[] = [];
-  let line = '';
-  for (const w of words) {
-    const test = line ? `${line} ${w}` : w;
-    if (font.widthOfTextAtSize(test, size) > maxWidth && line) {
-      lines.push(line);
-      line = w;
-    } else {
-      line = test;
+  const out: string[] = [];
+  for (const para of text.split('\n')) {
+    const words = para.split(/\s+/).filter(Boolean);
+    let line = '';
+    for (const w of words) {
+      const test = line ? `${line} ${w}` : w;
+      if (font.widthOfTextAtSize(test, size) > maxWidth && line) {
+        out.push(line);
+        line = w;
+      } else {
+        line = test;
+      }
     }
+    out.push(line);
   }
-  if (line) lines.push(line);
-  return lines.length ? lines : [''];
+  return out.length ? out : [''];
+}
+
+// ── Geometri-primitiver ───────────────────────────────────────────────────
+function card(
+  page: PDFPage,
+  x: number,
+  topY: number,
+  w: number,
+  h: number,
+  r: number,
+  opts: { fill?: RGB; border?: RGB; borderW?: number; fillOpacity?: number } = {}
+) {
+  page.drawSvgPath(roundedRectPath(w, h, r), {
+    x,
+    y: topY,
+    color: opts.fill ? col(opts.fill) : undefined,
+    opacity: opts.fillOpacity,
+    borderColor: opts.border ? col(opts.border) : undefined,
+    borderWidth: opts.borderW ?? (opts.border ? 1 : 0)
+  });
+}
+
+function softShadow(page: PDFPage, x: number, topY: number, w: number, h: number, r: number) {
+  const layers = [
+    { dy: 5, a: 0.035 },
+    { dy: 3, a: 0.05 },
+    { dy: 1.5, a: 0.06 }
+  ];
+  for (const l of layers) {
+    page.drawSvgPath(roundedRectPath(w, h, r), {
+      x: x + 0.5,
+      y: topY - l.dy,
+      color: col(INK),
+      opacity: l.a
+    });
+  }
+}
+
+function shadowedCard(
+  page: PDFPage,
+  x: number,
+  topY: number,
+  w: number,
+  h: number,
+  r: number,
+  fill: RGB = { r: 1, g: 1, b: 1 },
+  border: RGB = BORDER
+) {
+  softShadow(page, x, topY, w, h, r);
+  card(page, x, topY, w, h, r, { fill, border, borderW: 1 });
+}
+
+function fitCell(ctx: Ctx, font: PDFFont, text: string, size: number, maxW: number): string {
+  let shown = clean(ctx, text);
+  if (font.widthOfTextAtSize(shown, size) <= maxW) return shown;
+  while (shown && font.widthOfTextAtSize(`${shown}…`, size) > maxW) shown = shown.slice(0, -1);
+  return shown ? `${shown}…` : '';
+}
+
+function drawHeader(ctx: Ctx, page: PDFPage) {
+  page.drawRectangle({ x: 0, y: ctx.height - 3, width: A4[0], height: 3, color: col(rgb01(ctx.accent.base)) });
+  page.drawText(clean(ctx, WORDMARK), {
+    x: MARGIN,
+    y: ctx.height - 26,
+    size: 11,
+    font: ctx.heading,
+    color: col(rgb01(ctx.accent.base))
+  });
 }
 
 function newPage(ctx: Ctx) {
   ctx.page = ctx.pdf.addPage(A4);
-  ctx.y = ctx.height - MARGIN;
+  drawHeader(ctx, ctx.page);
+  ctx.y = ctx.height - 58;
 }
 
 function ensure(ctx: Ctx, needed: number) {
-  if (ctx.y - needed < MARGIN + 24) newPage(ctx);
+  if (ctx.y - needed < MARGIN + 26) newPage(ctx);
 }
 
 function drawLines(
   ctx: Ctx,
   text: string,
-  opts: { size: number; bold?: boolean; color?: { r: number; g: number; b: number }; indent?: number; gap?: number }
+  opts: { size: number; font?: 'body' | 'bold' | 'heading'; color?: RGB; indent?: number; gap?: number; lh?: number }
 ) {
-  const font = opts.bold ? ctx.bold : ctx.font;
+  const font = opts.font === 'heading' ? ctx.heading : opts.font === 'bold' ? ctx.bold : ctx.body;
   const color = opts.color ?? INK;
   const indent = opts.indent ?? 0;
-  const lineH = opts.size * 1.4;
-  const lines = wrap(text, font, opts.size, ctx.width - indent);
+  const lineH = opts.size * (opts.lh ?? 1.5);
+  const lines = wrap(clean(ctx, text), font, opts.size, ctx.width - indent);
   for (const ln of lines) {
     ensure(ctx, lineH);
-    ctx.page.drawText(ln, {
-      x: MARGIN + indent,
-      y: ctx.y - opts.size,
-      size: opts.size,
-      font,
-      color: rgb(color.r, color.g, color.b)
-    });
+    ctx.page.drawText(ln, { x: MARGIN + indent, y: ctx.y - opts.size, size: opts.size, font, color: col(color) });
     ctx.y -= lineH;
   }
   if (opts.gap) ctx.y -= opts.gap;
 }
 
+// ── KPI-/stat-kort ──────────────────────────────────────────────────────
+function drawKpis(ctx: Ctx, kpis: KpiSpec[]) {
+  const items = kpis.slice(0, 4);
+  const n = items.length;
+  if (n === 0) return;
+  const gap = 12;
+  const h = 78;
+  const cardW = (ctx.width - gap * (n - 1)) / n;
+  ensure(ctx, h + 16);
+  ctx.y -= 4;
+  const top = ctx.y;
+  items.forEach((k, i) => {
+    const x = MARGIN + i * (cardW + gap);
+    shadowedCard(ctx.page, x, top, cardW, h, 12, { r: 1, g: 1, b: 1 }, BORDER);
+    // Accent-tab till vänster.
+    ctx.page.drawSvgPath(roundedRectPath(4, h - 20, 2), { x: x + 12, y: top - 10, color: col(rgb01(ctx.accent.base)) });
+    const pad = x + 26;
+    ctx.page.drawText(fitCell(ctx, ctx.bold, k.label.toUpperCase(), 8, cardW - 40), {
+      x: pad,
+      y: top - 22,
+      size: 8,
+      font: ctx.bold,
+      color: col(MUTED)
+    });
+    ctx.page.drawText(fitCell(ctx, ctx.heading, k.value, 22, cardW - 40), {
+      x: pad,
+      y: top - 48,
+      size: 22,
+      font: ctx.heading,
+      color: col(rgb01(BRAND.primary))
+    });
+    let metaX = pad;
+    if (k.delta) {
+      const dc = rgb01(trendColor(k.trend));
+      const arrow = k.trend === 'up' ? '▲ ' : k.trend === 'down' ? '▼ ' : '';
+      const dtxt = clean(ctx, `${arrow}${k.delta}`);
+      ctx.page.drawText(dtxt, { x: metaX, y: top - 64, size: 9, font: ctx.bold, color: col(dc) });
+      metaX += ctx.bold.widthOfTextAtSize(dtxt, 9) + 6;
+    }
+    if (k.caption) {
+      ctx.page.drawText(fitCell(ctx, ctx.body, k.caption, 8.5, x + cardW - 14 - metaX), {
+        x: metaX,
+        y: top - 64,
+        size: 8.5,
+        font: ctx.body,
+        color: col(MUTED)
+      });
+    }
+  });
+  ctx.y = top - h - 14;
+}
+
+// ── Callout-ruta ──────────────────────────────────────────────────────────
+function drawCallout(ctx: Ctx, c: CalloutSpec) {
+  const t = calloutTheme(c.variant);
+  const pad = 14;
+  const innerW = ctx.width - pad * 2 - 6;
+  const titleLines = c.title ? wrap(clean(ctx, c.title), ctx.bold, 11, innerW) : [];
+  const bodyLines = wrap(clean(ctx, c.body), ctx.body, 10.5, innerW);
+  const h = pad * 2 + titleLines.length * 16 + bodyLines.length * 15 + (titleLines.length ? 3 : 0);
+  ensure(ctx, h + 12);
+  const top = ctx.y;
+  card(ctx.page, MARGIN, top, ctx.width, h, 10, { fill: rgb01(t.bg) });
+  // Accent-stapel vänster.
+  ctx.page.drawSvgPath(roundedRectPath(4, h - 16, 2), { x: MARGIN + 8, y: top - 8, color: col(rgb01(t.bar)) });
+  let yy = top - pad;
+  const textX = MARGIN + pad + 6;
+  for (const ln of titleLines) {
+    ctx.page.drawText(ln, { x: textX, y: yy - 11, size: 11, font: ctx.bold, color: col(rgb01(t.ink)) });
+    yy -= 16;
+  }
+  if (titleLines.length) yy -= 3;
+  for (const ln of bodyLines) {
+    ctx.page.drawText(ln, { x: textX, y: yy - 10.5, size: 10.5, font: ctx.body, color: col(INK_SOFT) });
+    yy -= 15;
+  }
+  ctx.y = top - h - 12;
+}
+
+// ── Pull-quote ──────────────────────────────────────────────────────────
+function drawQuote(ctx: Ctx, q: QuoteSpec) {
+  const innerW = ctx.width - 30;
+  const lines = wrap(clean(ctx, q.text), ctx.heading, 15, innerW);
+  const attr = q.attribution ? clean(ctx, `— ${q.attribution}`) : '';
+  const h = 16 + lines.length * 22 + (attr ? 20 : 0);
+  ensure(ctx, h + 14);
+  const top = ctx.y;
+  ctx.page.drawSvgPath(roundedRectPath(4, h, 2), { x: MARGIN, y: top, color: col(rgb01(ctx.accent.base)) });
+  let yy = top - 6;
+  for (const ln of lines) {
+    ctx.page.drawText(ln, { x: MARGIN + 18, y: yy - 15, size: 15, font: ctx.heading, color: col(rgb01(BRAND.primary)) });
+    yy -= 22;
+  }
+  if (attr) {
+    ctx.page.drawText(attr, { x: MARGIN + 18, y: yy - 11, size: 10.5, font: ctx.body, color: col(MUTED) });
+  }
+  ctx.y = top - h - 14;
+}
+
+// ── Tabell (kort-container, rundad header, zebra) ─────────────────────────
 function drawTable(ctx: Ctx, table: TableSpec) {
   const cols = table.columns.length || (table.rows[0]?.length ?? 0);
   if (cols === 0) return;
   const colW = ctx.width / cols;
-  const rowH = 20;
+  const rowH = 24;
+  const headH = 26;
   const size = 9;
+  const pad = 8;
+  const emphCol = table.emphasizeLastColumn ? cols - 1 : -1;
+  // Max för data-bar.
+  let maxVal = 0;
+  if (emphCol >= 0) {
+    for (const r of table.rows) {
+      const v = Number(r[emphCol]);
+      if (Number.isFinite(v)) maxVal = Math.max(maxVal, Math.abs(v));
+    }
+  }
 
-  // Header.
-  ensure(ctx, rowH);
-  ctx.page.drawRectangle({
-    x: MARGIN,
-    y: ctx.y - rowH,
-    width: ctx.width,
-    height: rowH,
-    color: rgb(PRIMARY.r, PRIMARY.g, PRIMARY.b)
-  });
+  ensure(ctx, headH + rowH);
+  const top = ctx.y;
+  // Header (rundad ovankant) i accent.
+  ctx.page.drawSvgPath(roundedRectPath(ctx.width, headH, 8), { x: MARGIN, y: top, color: col(rgb01(ctx.accent.base)) });
   table.columns.forEach((c, i) => {
-    ctx.page.drawText(pdfSafe(String(c)).slice(0, 40), {
-      x: MARGIN + i * colW + 4,
-      y: ctx.y - rowH + 6,
+    ctx.page.drawText(fitCell(ctx, ctx.bold, String(c), size, colW - pad * 2), {
+      x: MARGIN + i * colW + pad,
+      y: top - headH + 9,
       size,
       font: ctx.bold,
-      color: rgb(1, 1, 1)
+      color: WHITE
     });
   });
-  ctx.y -= rowH;
+  ctx.y = top - headH;
 
-  for (const r of table.rows) {
+  table.rows.forEach((r, ri) => {
     ensure(ctx, rowH);
+    const ry = ctx.y;
+    if (ri % 2 === 1) {
+      ctx.page.drawRectangle({ x: MARGIN, y: ry - rowH, width: ctx.width, height: rowH, color: col(SURFACE) });
+    }
     r.slice(0, cols).forEach((cell, i) => {
-      const txt = pdfSafe(String(cell));
-      // Trunkera till kolumnbredd (enrads-celler).
-      let shown = txt;
-      while (shown && ctx.font.widthOfTextAtSize(shown, size) > colW - 8) shown = shown.slice(0, -1);
-      ctx.page.drawText(shown, {
-        x: MARGIN + i * colW + 4,
-        y: ctx.y - rowH + 6,
+      if (i === emphCol && maxVal > 0 && Number.isFinite(Number(cell))) {
+        // Data-bar bakom värdet.
+        const frac = Math.min(1, Math.abs(Number(cell)) / maxVal);
+        const barW = (colW - pad * 2) * frac;
+        ctx.page.drawSvgPath(roundedRectPath(Math.max(2, barW), 6, 3), {
+          x: MARGIN + i * colW + pad,
+          y: ry - rowH + 16,
+          color: col(rgb01(tint(ctx.accent.base, 0.45)))
+        });
+      }
+      ctx.page.drawText(fitCell(ctx, ctx.body, String(cell), size, colW - pad * 2), {
+        x: MARGIN + i * colW + pad,
+        y: ry - rowH + 8,
         size,
-        font: ctx.font,
-        color: rgb(INK.r, INK.g, INK.b)
+        font: i === emphCol ? ctx.bold : ctx.body,
+        color: col(INK)
       });
     });
+    // Radlinje.
     ctx.page.drawLine({
-      start: { x: MARGIN, y: ctx.y - rowH },
-      end: { x: MARGIN + ctx.width, y: ctx.y - rowH },
+      start: { x: MARGIN, y: ry - rowH },
+      end: { x: MARGIN + ctx.width, y: ry - rowH },
       thickness: 0.5,
-      color: rgb(0.9, 0.9, 0.9)
+      color: col(HAIRLINE)
     });
     ctx.y -= rowH;
-  }
-  ctx.y -= 8;
+  });
+  ctx.y -= 14;
 }
 
+// ── Nativa vektordiagram ──────────────────────────────────────────────────
+function drawChart(ctx: Ctx, chart: ChartSpec) {
+  const plotH = 196;
+  const titleH = chart.title ? 22 : 0;
+  const legendH = chart.series.length > 1 || chart.type === 'pie' || chart.type === 'donut' ? 22 : 0;
+  const cardH = 20 + titleH + plotH + legendH + 16;
+  ensure(ctx, cardH + 14);
+  const top = ctx.y;
+  shadowedCard(ctx.page, MARGIN, top, ctx.width, cardH, 12);
+
+  let innerTop = top - 18;
+  if (chart.title) {
+    ctx.page.drawText(fitCell(ctx, ctx.heading, chart.title, 13, ctx.width - 32), {
+      x: MARGIN + 16,
+      y: innerTop - 13,
+      size: 13,
+      font: ctx.heading,
+      color: col(rgb01(BRAND.primary))
+    });
+    innerTop -= titleH;
+  }
+
+  const px = MARGIN + 16;
+  const pw = ctx.width - 32;
+  const pyTop = innerTop;
+  const pyBot = pyTop - plotH;
+
+  if (chart.type === 'pie' || chart.type === 'donut') {
+    drawPie(ctx, chart, px, pyTop, pw, plotH);
+  } else if (chart.type === 'line' || chart.type === 'area') {
+    drawLineChart(ctx, chart, px, pyTop, pw, plotH);
+  } else {
+    drawBarChart(ctx, chart, px, pyTop, pw, plotH);
+  }
+
+  // Legend.
+  if (legendH > 0) {
+    const labels =
+      chart.type === 'pie' || chart.type === 'donut'
+        ? chart.categories
+        : chart.series.map((s) => s.name);
+    drawLegend(ctx, labels, px, pyBot - 4, pw);
+  }
+
+  ctx.y = top - cardH - 14;
+}
+
+function niceMax(v: number): number {
+  if (v <= 0) return 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(v)));
+  const norm = v / mag;
+  const step = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+  return step * mag;
+}
+
+function fmtAxis(v: number): string {
+  const a = Math.abs(v);
+  if (a >= 1_000_000) return `${(v / 1_000_000).toFixed(a % 1_000_000 ? 1 : 0)}M`;
+  if (a >= 1_000) return `${(v / 1_000).toFixed(a % 1_000 ? 1 : 0)}k`;
+  return String(Math.round(v));
+}
+
+function drawBarChart(ctx: Ctx, chart: ChartSpec, x: number, top: number, w: number, h: number) {
+  const horizontal = chart.type === 'hbar';
+  const cats = chart.categories;
+  const series = chart.series;
+  let max = 0;
+  for (const s of series) for (const v of s.values) max = Math.max(max, Math.abs(v));
+  max = niceMax(max);
+  const axisGap = 30;
+
+  if (horizontal) {
+    const plotX = x + 70;
+    const plotW = w - 70;
+    const bandH = (h - 4) / Math.max(1, cats.length);
+    cats.forEach((cat, ci) => {
+      const cy = top - ci * bandH - bandH / 2;
+      ctx.page.drawText(fitCell(ctx, ctx.body, cat, 8.5, 64), {
+        x,
+        y: cy - 3,
+        size: 8.5,
+        font: ctx.body,
+        color: col(MUTED)
+      });
+      const val = series[0]?.values[ci] ?? 0;
+      const barW = (Math.abs(val) / max) * plotW;
+      const bh = Math.min(16, bandH * 0.5);
+      ctx.page.drawSvgPath(roundedRectPath(Math.max(2, barW), bh, 3), {
+        x: plotX,
+        y: cy + bh / 2,
+        color: col(rgb01(CHART_COLORS[0]))
+      });
+    });
+    return;
+  }
+
+  // Vertikal: gridlines + grupperade staplar.
+  const plotBottom = top - h + 16;
+  const plotTop = top;
+  const plotH = plotTop - plotBottom;
+  for (let g = 0; g <= 4; g++) {
+    const gy = plotBottom + (plotH * g) / 4;
+    ctx.page.drawLine({ start: { x: x + axisGap, y: gy }, end: { x: x + w, y: gy }, thickness: 0.5, color: col(HAIRLINE) });
+    ctx.page.drawText(fmtAxis((max * g) / 4), { x, y: gy - 3, size: 7.5, font: ctx.body, color: col(MUTED) });
+  }
+  const bandW = (w - axisGap) / Math.max(1, cats.length);
+  const ns = series.length;
+  const groupW = bandW * 0.7;
+  const barW = groupW / ns;
+  cats.forEach((cat, ci) => {
+    const bx = x + axisGap + ci * bandW + (bandW - groupW) / 2;
+    series.forEach((s, si) => {
+      const val = Math.abs(s.values[ci] ?? 0);
+      const bh = (val / max) * plotH;
+      ctx.page.drawSvgPath(roundedRectPath(Math.max(2, barW - 3), Math.max(1, bh), 3), {
+        x: bx + si * barW,
+        y: plotBottom + bh,
+        color: col(rgb01(CHART_COLORS[si % CHART_COLORS.length]))
+      });
+    });
+    ctx.page.drawText(fitCell(ctx, ctx.body, cat, 8, bandW - 2), {
+      x: x + axisGap + ci * bandW + 2,
+      y: plotBottom - 12,
+      size: 8,
+      font: ctx.body,
+      color: col(MUTED)
+    });
+  });
+}
+
+function drawLineChart(ctx: Ctx, chart: ChartSpec, x: number, top: number, w: number, h: number) {
+  const cats = chart.categories;
+  const series = chart.series;
+  let max = 0;
+  for (const s of series) for (const v of s.values) max = Math.max(max, Math.abs(v));
+  max = niceMax(max);
+  const axisGap = 30;
+  const plotBottom = top - h + 16;
+  const plotTop = top;
+  const plotH = plotTop - plotBottom;
+  const plotW = w - axisGap;
+  for (let g = 0; g <= 4; g++) {
+    const gy = plotBottom + (plotH * g) / 4;
+    ctx.page.drawLine({ start: { x: x + axisGap, y: gy }, end: { x: x + w, y: gy }, thickness: 0.5, color: col(HAIRLINE) });
+    ctx.page.drawText(fmtAxis((max * g) / 4), { x, y: gy - 3, size: 7.5, font: ctx.body, color: col(MUTED) });
+  }
+  const n = Math.max(1, cats.length - 1);
+  series.forEach((s, si) => {
+    const c = rgb01(CHART_COLORS[si % CHART_COLORS.length]);
+    const pts = s.values.map((v, i) => ({
+      x: x + axisGap + (plotW * i) / n,
+      y: plotBottom + (Math.abs(v) / max) * plotH
+    }));
+    for (let i = 1; i < pts.length; i++) {
+      ctx.page.drawLine({ start: pts[i - 1], end: pts[i], thickness: 2, color: col(c) });
+    }
+    for (const p of pts) {
+      ctx.page.drawCircle({ x: p.x, y: p.y, size: 2.6, color: col(c) });
+    }
+  });
+  cats.forEach((cat, ci) => {
+    ctx.page.drawText(fitCell(ctx, ctx.body, cat, 8, plotW / Math.max(1, cats.length)), {
+      x: x + axisGap + (plotW * ci) / n - 6,
+      y: plotBottom - 12,
+      size: 8,
+      font: ctx.body,
+      color: col(MUTED)
+    });
+  });
+}
+
+function drawPie(ctx: Ctx, chart: ChartSpec, x: number, top: number, w: number, h: number) {
+  const values = chart.categories.map((_, i) => Math.abs(chart.series[0]?.values[i] ?? 0));
+  const total = values.reduce((a, b) => a + b, 0) || 1;
+  const cx = x + w / 2;
+  const cy = top - h / 2;
+  const rO = Math.min(w, h) / 2 - 8;
+  const rI = chart.type === 'donut' ? rO * 0.58 : rO * 0.001;
+  let a0 = -Math.PI / 2;
+  values.forEach((v, i) => {
+    const frac = v / total;
+    const a1 = a0 + frac * Math.PI * 2;
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+    // svg-space (y nedåt) relativt center; drawSvgPath anchoras vid {cx, cy}.
+    const p = (ang: number, r: number) => `${(Math.cos(ang) * r).toFixed(2)} ${(Math.sin(ang) * r).toFixed(2)}`;
+    const path =
+      `M ${p(a0, rO)} A ${rO} ${rO} 0 ${large} 1 ${p(a1, rO)} ` +
+      `L ${p(a1, rI)} A ${rI} ${rI} 0 ${large} 0 ${p(a0, rI)} Z`;
+    ctx.page.drawSvgPath(path, {
+      x: cx,
+      y: cy,
+      color: col(rgb01(CHART_COLORS[i % CHART_COLORS.length])),
+      borderColor: WHITE,
+      borderWidth: 1.5
+    });
+    a0 = a1;
+  });
+}
+
+function drawLegend(ctx: Ctx, labels: string[], x: number, y: number, w: number) {
+  let lx = x;
+  const size = 8.5;
+  for (let i = 0; i < labels.length; i++) {
+    const label = clean(ctx, labels[i]);
+    const lw = 14 + ctx.body.widthOfTextAtSize(label, size) + 14;
+    if (lx + lw > x + w) break;
+    ctx.page.drawSvgPath(roundedRectPath(9, 9, 2.5), {
+      x: lx,
+      y: y + 1,
+      color: col(rgb01(CHART_COLORS[i % CHART_COLORS.length]))
+    });
+    ctx.page.drawText(label, { x: lx + 13, y: y - 7, size, font: ctx.body, color: col(MUTED) });
+    lx += lw;
+  }
+}
+
+// ── Sektion ───────────────────────────────────────────────────────────────
 function drawSection(ctx: Ctx, s: SectionSpec) {
   if (s.heading) {
-    const size = s.level === 3 ? 13 : s.level === 2 ? 16 : 20;
-    ctx.y -= 6;
-    drawLines(ctx, s.heading, { size, bold: true, color: PRIMARY, gap: 4 });
+    const size = s.level === 3 ? 13 : s.level === 2 ? 16 : 21;
+    ctx.y -= 10;
+    ensure(ctx, size * 2);
+    if (!s.level || s.level === 1) {
+      // Accent-prick före nivå-1-rubriker.
+      ctx.page.drawCircle({ x: MARGIN + 4, y: ctx.y - size + 6, size: 4, color: col(rgb01(ctx.accent.base)) });
+      drawLines(ctx, s.heading, { size, font: 'heading', color: rgb01(BRAND.primary), gap: 6, indent: 16 });
+    } else {
+      drawLines(ctx, s.heading, { size, font: 'heading', color: s.level === 3 ? INK_SOFT : rgb01(BRAND.primary), gap: 4 });
+    }
   }
-  for (const p of s.paragraphs || []) drawLines(ctx, p, { size: 11, gap: 6 });
-  for (const b of s.bullets || []) drawLines(ctx, `-  ${b}`, { size: 11, indent: 10, gap: 2 });
+  for (const p of s.paragraphs || []) drawLines(ctx, p, { size: 10.5, color: INK_SOFT, gap: 8 });
+  for (const b of s.bullets || []) {
+    ensure(ctx, 16);
+    ctx.page.drawCircle({ x: MARGIN + 4, y: ctx.y - 7, size: 2, color: col(rgb01(ctx.accent.base)) });
+    drawLines(ctx, b, { size: 10.5, color: INK_SOFT, indent: 14, gap: 4 });
+  }
+  if (s.kpis && s.kpis.length) drawKpis(ctx, s.kpis);
+  if (s.callout) drawCallout(ctx, s.callout);
+  if (s.quote) drawQuote(ctx, s.quote);
+  if (s.chart) drawChart(ctx, s.chart);
   if (s.table && (s.table.columns.length > 0 || s.table.rows.length > 0)) drawTable(ctx, s.table);
 }
 
 export async function renderPdf(spec: DocumentSpec): Promise<Buffer> {
   const pdf = await PDFDocument.create();
-  pdf.setTitle(pdfSafe(spec.title));
+  pdf.registerFontkit(fontkit);
+  pdf.setTitle(spec.title);
   pdf.setCreator('Movexum OS');
   pdf.setProducer('Movexum OS');
 
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  let body: PDFFont;
+  let bold: PDFFont;
+  let heading: PDFFont;
+  let unicode = false;
+  const fonts = await loadPdfFonts();
+  if (fonts) {
+    try {
+      body = await pdf.embedFont(fonts.regular, { subset: true });
+      bold = await pdf.embedFont(fonts.bold, { subset: true });
+      heading = await pdf.embedFont(fonts.heading, { subset: true });
+      unicode = true;
+    } catch {
+      body = await pdf.embedFont(StandardFonts.Helvetica);
+      bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+      heading = bold;
+    }
+  } else {
+    body = await pdf.embedFont(StandardFonts.Helvetica);
+    bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+    heading = bold;
+  }
 
-  const page = pdf.addPage(A4);
+  const accent = accentTheme(spec.accent);
+  const cover = pdf.addPage(A4);
   const ctx: Ctx = {
     pdf,
-    page,
-    font,
+    page: cover,
+    body,
     bold,
+    heading,
+    unicode,
+    accent,
     y: A4[1] - MARGIN,
     width: A4[0] - MARGIN * 2,
     height: A4[1]
   };
 
-  // Cover-accent.
-  ctx.page.drawRectangle({ x: 0, y: ctx.height - 8, width: A4[0], height: 8, color: rgb(PRIMARY.r, PRIMARY.g, PRIMARY.b) });
-  ctx.y = ctx.height - 160;
-  drawLines(ctx, spec.title, { size: 30, bold: true, color: PRIMARY, gap: 8 });
-  if (spec.subtitle) drawLines(ctx, spec.subtitle, { size: 14, color: MUTED, gap: 8 });
-  drawLines(ctx, generatedFooter(), { size: 9, color: MUTED, gap: 16 });
+  // ── Omslag: accent-panel + geometriska former ─────────────────────────
+  const bandH = 360;
+  const bandTop = A4[1];
+  cover.drawRectangle({ x: 0, y: bandTop - bandH, width: A4[0], height: bandH, color: col(rgb01(accent.base)) });
+  // Mjuka geometriska cirklar (tint) för djup.
+  cover.drawCircle({ x: A4[0] - 40, y: bandTop - 70, size: 150, color: col(rgb01(tint(accent.base, 0.18))), opacity: 0.5 });
+  cover.drawCircle({ x: A4[0] - 110, y: bandTop - bandH + 60, size: 90, color: WHITE, opacity: 0.05 });
+  // Diskret djupblå fot.
+  cover.drawRectangle({ x: 0, y: bandTop - bandH, width: A4[0], height: 6, color: col(rgb01(BRAND.deep)) });
+
+  // Wordmark (vit) + kind-pill.
+  cover.drawText(clean(ctx, WORDMARK), { x: MARGIN, y: bandTop - 60, size: 24, font: heading, color: WHITE });
+  const pill = spec.kind.toUpperCase();
+  const pillW = bold.widthOfTextAtSize(pill, 8) + 20;
+  cover.drawSvgPath(roundedRectPath(pillW, 18, 9), { x: MARGIN, y: bandTop - 80, color: WHITE, opacity: 0.16 });
+  cover.drawText(pill, { x: MARGIN + 10, y: bandTop - 93, size: 8, font: bold, color: WHITE });
+
+  // Titel (vit) i bandets nedre del.
+  let cy = bandTop - 150;
+  for (const ln of wrap(clean(ctx, spec.title), heading, 30, ctx.width - 20)) {
+    cover.drawText(ln, { x: MARGIN, y: cy - 30, size: 30, font: heading, color: WHITE });
+    cy -= 38;
+  }
+  cover.drawSvgPath(roundedRectPath(64, 4, 2), { x: MARGIN, y: cy - 6, color: col(rgb01(BRAND.accent === accent.base ? BRAND.info : BRAND.accent)) });
+  cy -= 22;
+  if (spec.subtitle) {
+    for (const ln of wrap(clean(ctx, spec.subtitle), body, 13, ctx.width - 20)) {
+      cover.drawText(ln, { x: MARGIN, y: cy - 13, size: 13, font: body, color: col(rgb01(tint(accent.base, 0.78))) });
+      cy -= 19;
+    }
+  }
+
+  // Meta under bandet.
+  ctx.y = bandTop - bandH - 30;
+  const meta = clean(ctx, [spec.author, new Date().toLocaleDateString('sv-SE')].filter(Boolean).join('  ·  '));
+  cover.drawText(meta, { x: MARGIN, y: ctx.y, size: 10, font: bold, color: col(rgb01(BRAND.primary)) });
+  ctx.y -= 16;
+  cover.drawText(clean(ctx, generatedFooter()), { x: MARGIN, y: ctx.y, size: 8.5, font: body, color: col(MUTED) });
+  ctx.y -= 30;
 
   for (const s of spec.sections || []) drawSection(ctx, s);
+
+  // ── Footer + sidnummer (efter paginering) ─────────────────────────────
+  const pages = pdf.getPages();
+  const total = pages.length;
+  const disclaimer = clean(ctx, generatedFooter());
+  pages.forEach((p, i) => {
+    if (i === 0) return;
+    p.drawLine({ start: { x: MARGIN, y: MARGIN - 6 }, end: { x: A4[0] - MARGIN, y: MARGIN - 6 }, thickness: 0.5, color: col(BORDER) });
+    p.drawText(disclaimer, { x: MARGIN, y: MARGIN - 20, size: 8, font: body, color: col(MUTED) });
+    const pageLabel = `${i + 1} / ${total}`;
+    const w = body.widthOfTextAtSize(pageLabel, 8);
+    p.drawText(pageLabel, { x: A4[0] - MARGIN - w, y: MARGIN - 20, size: 8, font: body, color: col(MUTED) });
+  });
 
   const bytes = await pdf.save();
   return Buffer.from(bytes);

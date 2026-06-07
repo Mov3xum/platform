@@ -1,25 +1,51 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState, useEffect } from 'react';
-import { loginAction, type LoginState } from '@/lib/actions/auth';
-
-const initialState: LoginState = {};
+import { useState } from 'react';
 
 export function LoginForm({ next }: { next: string }) {
-  const [state, formAction, pending] = useActionState(loginAction, initialState);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Hård navigering efter lyckad inloggning så att rot-layouten byggs om
-  // från servern (sidmenyn/AppShell dyker upp). En mjuk redirect skulle
-  // återanvända det cachade utloggade skalet.
-  useEffect(() => {
-    if (state?.success && state.redirectTo) {
-      window.location.assign(state.redirectTo);
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+
+    const formData = new FormData(event.currentTarget);
+    const email = String(formData.get('email') || '').trim();
+    const password = String(formData.get('password') || '');
+    const nextPath = String(formData.get('next') || '/dashboard');
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password, next: nextPath })
+      });
+
+      const data = (await res.json().catch(() => ({}))) as { error?: string; redirectTo?: string };
+
+      if (!res.ok) {
+        setError(data.error || 'Inloggning misslyckades. Försök igen.');
+        setPending(false);
+        return;
+      }
+
+      const redirectTo =
+        typeof data.redirectTo === 'string' && data.redirectTo.length > 0
+          ? data.redirectTo
+          : '/dashboard';
+      // Hård navigering så att root-layouten läser den nya auth-cookien.
+      window.location.assign(redirectTo);
+    } catch {
+      setError('Kunde inte nå servern. Försök igen.');
+      setPending(false);
     }
-  }, [state]);
+  }
 
   return (
-    <form action={formAction} className="space-y-5">
+    <form onSubmit={handleSubmit} className="space-y-5">
       <input type="hidden" name="next" value={next} />
 
       <label className="block">
@@ -49,23 +75,20 @@ export function LoginForm({ next }: { next: string }) {
         />
       </label>
 
-      {state?.error ? (
-        <p className="rounded-xl bg-movexum-pastell-orange px-4 py-2.5 text-sm text-movexum-morkorange">{state.error}</p>
+      {error ? (
+        <p className="rounded-xl bg-movexum-pastell-orange px-4 py-2.5 text-sm text-movexum-morkorange">{error}</p>
       ) : null}
 
       <button
         type="submit"
-        disabled={pending || Boolean(state?.success)}
+        disabled={pending}
         className="inline-flex w-full items-center justify-center rounded-full bg-brand px-6 py-3 text-sm font-semibold text-brand-foreground shadow-lg shadow-movexum-lila/20 transition hover:bg-brand-hover dark:shadow-movexum-lila/30 disabled:opacity-60"
       >
-        {pending || state?.success ? 'Loggar in…' : 'Logga in'}
+        {pending ? 'Loggar in…' : 'Logga in'}
       </button>
 
       <p className="text-center text-sm text-foreground-muted">
-        Inget konto?{' '}
-        <Link href="/register" className="font-medium text-link hover:underline">
-          Skapa konto
-        </Link>
+        Saknar du konto? Kontakta en administratör — konton skapas internt.
       </p>
     </form>
   );
