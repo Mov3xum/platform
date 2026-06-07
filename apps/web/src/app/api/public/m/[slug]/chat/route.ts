@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { MistralError } from '@/lib/ai/mistral';
 import { intakeReply, extractLead, scoreLead, type CompassChatMessage } from '@/lib/compass/chat';
 import { appendMessage, createLead, updateLead } from '@/lib/compass/store';
-import { resolvePublicModule } from '@/lib/compass/public';
+import { buildModuleChatSystemPrompt, getPublicModuleQuestions, resolvePublicModule } from '@/lib/compass/public';
 import { notifyNewInflow } from '@/lib/compass/notify';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import type PocketBase from 'pocketbase';
@@ -33,6 +33,25 @@ function isValidMessage(m: unknown): m is CompassChatMessage {
 function clientIp(req: Request): string {
   const h = req.headers.get('x-forwarded-for') || '';
   return h.split(',')[0]?.trim() || 'anon';
+}
+
+function summarizeChatLead(history: CompassChatMessage[], moduleName: string): { summary: string; notes: string } {
+  const userMessages = history.filter((m) => m.role === 'user').map((m) => m.content.trim()).filter(Boolean);
+  const assistantMessages = history.filter((m) => m.role === 'assistant').map((m) => m.content.trim()).filter(Boolean);
+  const lastUser = userMessages[userMessages.length - 1] || '';
+  const snippet = userMessages.slice(-3).join(' · ') || lastUser || moduleName;
+  const notes = [
+    `Samtal via modul: ${moduleName}`,
+    userMessages.length > 0 ? `Användaren skrev: ${userMessages.slice(-5).join(' | ')}` : '',
+    assistantMessages.length > 0 ? `AI svarade: ${assistantMessages.slice(-3).join(' | ')}` : ''
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return {
+    summary: snippet.slice(0, 4000),
+    notes: notes.slice(0, 8000)
+  };
 }
 
 /** Hämta/skapa en konversation per session (kontinuitet i den publika chatten). */
@@ -100,6 +119,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     return NextResponse.json({ error: 'Modulen är inte en chatt.' }, { status: 400 });
   }
 
+  const questions = await getPublicModuleQuestions(pb, module.id);
+
   // Tak på antal användarutbyten (max_exchanges).
   const userTurns = history.filter((m) => m.role === 'user').length;
   if (module.max_exchanges && module.max_exchanges > 0 && userTurns > module.max_exchanges) {
@@ -115,12 +136,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
       : 'anon';
 
   // Systemprompt: persona + ev. egen prompt (annars default i intakeReply).
-  let systemPrompt: string | undefined;
-  if (module.system_prompt) {
-    systemPrompt = module.chat_persona
-      ? `Du agerar som "${module.chat_persona}".\n\n${module.system_prompt}`
-      : module.system_prompt;
-  }
+  const systemPrompt = buildModuleChatSystemPrompt(module, questions);
 
   let reply;
   try {
@@ -154,37 +170,46 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
       // Extrahera kontakt/idé ur samtalet. Skapa lead när tillräckligt finns.
       const fullHistory: CompassChatMessage[] = [...history, { role: 'assistant', content: reply.text }];
       const extracted = await extractLead(fullHistory);
-      if (extracted && (extracted.email || (extracted.name && extracted.idea_summary))) {
-        const leadFields = {
-          name: extracted.name || 'Anonym',
-          email: extracted.email || undefined,
-          phone: extracted.phone || undefined,
-          organization: extracted.organization || undefined,
-          idea_summary: extracted.idea_summary || undefined,
-          idea_category: extracted.idea_category || undefined
+      const fallback = summarizeChatLead(fullHistory, module.name);
+      const leadFields = {
+        name: extracted?.name || 'Anonym',
+        email: extracted?.email || undefined,
+        phone: extracted?.phone || undefined,
+        organization: extracted?.organization || undefined,
+        idea_summary: extracted?.idea_summary || fallback.summary,
+        idea_category: extracted?.idea_category || undefined,
+        source_detail: `AI-chatt via ${module.name}`,
+        notes: fallback.notes
+      };
+      if (conv.lead) {
+        await updateLead(pb, tenant, conv.lead, leadFields);
+      } else {
+        const scoringSource = extracted || {
+          name: leadFields.name,
+          email: leadFields.email || null,
+          phone: leadFields.phone || null,
+          organization: leadFields.organization || null,
+          idea_summary: leadFields.idea_summary,
+          idea_category: leadFields.idea_category || null
         };
-        if (conv.lead) {
-          await updateLead(pb, tenant, conv.lead, leadFields);
-        } else {
-          const { score, reasoning } = await scoreLead(extracted);
-          const lead = await createLead(pb, tenant, {
-            ...leadFields,
-            source_key: 'ai-chat',
-            landing_module: slug,
-            score,
-            score_reasoning: reasoning,
-            consent_at: new Date().toISOString()
-          });
-          if (lead) {
-            try {
-              await pb.collection('compass_conversations').update(conv.id, { lead: lead.id });
-            } catch {
-              // best-effort
-            }
-            // Notifiera Movexums inflödesmail om det nya inflödet (en gång,
-            // vid första skapandet — inte vid efterföljande uppdateringar).
-            await notifyNewInflow(module, lead);
+        const { score, reasoning } = await scoreLead(scoringSource);
+        const lead = await createLead(pb, tenant, {
+          ...leadFields,
+          source_key: 'ai-chat',
+          landing_module: slug,
+          score,
+          score_reasoning: reasoning,
+          consent_at: new Date().toISOString()
+        });
+        if (lead) {
+          try {
+            await pb.collection('compass_conversations').update(conv.id, { lead: lead.id });
+          } catch {
+            // best-effort
           }
+          // Notifiera Movexums inflödesmail om det nya inflödet (en gång,
+          // vid första skapandet — inte vid efterföljande uppdateringar).
+          await notifyNewInflow(module, lead);
         }
       }
     }

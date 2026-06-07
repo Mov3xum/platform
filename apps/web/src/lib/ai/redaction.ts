@@ -13,27 +13,47 @@
 
 /**
  * Kollektioner som ALDRIG exponeras för agentens generiska query-verktyg.
- * Auth-/token-tabeller, extern-PII (`contacts`), compass-besökardata,
- * mutations-/säkerhetsaudit, agent-minne, krypterade credentials samt
- * personliga innehållsytor (trådar, filer, djupjobb). Se § 9.3.
+ *
+ * **Policy (2026-06): "läs allt utom hårda hemligheter och privat innehåll".**
+ * Movexum-personalen ska kunna nå all domändata via chatten för bästa möjliga
+ * upplevelse. Denylistan är därför minimerad till de två grupper som ALDRIG får
+ * nå modellen:
+ *
+ *   A. **Auth, system & krypterade hemligheter** — lösenord, tokens, AES-256-GCM-
+ *      krypterade integrationscredentials. Att läsa dem ger inget värde och är
+ *      ren attackyta (ISO 27001 A.8.24).
+ *   B. **Strikt privat ägaren-bara-innehåll** — andra användares trådar/filer/
+ *      djupjobb + agentens tvärsessions-minne. Att exponera dem skulle bryta
+ *      ägar-isoleringen (§ 21) eftersom query-verktyget läser via superuser-
+ *      introspektion av schemat.
+ *
+ * Allt annat (CRM, compass-inflöde, de minimis, avtal/signeringar, onboarding,
+ * audit) är nu LÄSBART. Skyddet ligger i tre lager i stället för en grovkornig
+ * denylist:
+ *   1. **RLS** — dashboardchatten är staff-only och kör mot användarens auth-
+ *      token, så PB-reglerna (§ 21) scopar varje läsning till tenant + roll.
+ *      Agenten ser bara det inloggad personal redan får se.
+ *   2. **Fältmaskning** (`PII_FIELD_PATTERNS` nedan) — direkta identifierare
+ *      (e-post, telefon, personnummer, org-nr inkl. utskrivet
+ *      `organisationsnummer`, ip-hash, session-token) och GDPR art. 9
+ *      (gender/identifies_as) tas bort INNAN posten når modellen.
+ *   3. **EU-suveränitet** — Mistral (FR) är personuppgiftsbiträde med DPA;
+ *      rättslig grund = berättigat intresse (inkubatordrift). Se § 9.3, § 10.2.
+ *
+ * OBS: den KURERADE per-bolag-vägen (`buildDeMinimisSupportContext` m.fl. i
+ * `context.ts`) finns kvar oförändrad — den matar struktur-kontexten, denna
+ * lista styr de GENERISKA query-verktygen.
  */
 export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
+  // A. Auth, system & krypterade hemligheter.
   'users',
   'tenants',
   'verification_tokens',
   'pending_signups',
-  'contacts',
-  'compass_leads',
-  'compass_conversations',
-  'compass_messages',
-  'compass_responses',
-  'compass_security_events',
-  'agent_actions',
-  'agent_memory',
-  'tenant_integrations',
+  'tenant_integrations', // AES-256-GCM-krypterade credentials
   'user_app_integrations',
   'user_mistral_connectors',
-  // Personliga/innehållstunga kollektioner — aldrig exponerade för agenter.
+  // B. Strikt privat ägaren-bara-innehåll (att exponera bryter § 21-isoleringen).
   'chat_threads', // privat konversationsinnehåll (1700000083)
   'user_files', // personliga filer, strikt ägaren-bara (1700000085)
   'user_file_chunks', // RAG-index för personliga filer (1700000121, § 27) — owner-only, nås bara via search_my_files
@@ -59,7 +79,8 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // `search_knowledge`-verktyget — aldrig via det generiska query_collection.
   // Embedding-vektorerna är dessutom ointressanta/bullriga för en LLM att läsa rått.
   'org_knowledge',
-  'org_knowledge_chunks'
+  'org_knowledge_chunks',
+  'agent_memory' // agentens tvärsessions-scratchpad (1700000079)
 ]);
 
 /**
@@ -72,6 +93,7 @@ export const PII_FIELD_PATTERNS: readonly string[] = [
   'password',
   'tokenkey',
   'token_key',
+  'session_token', // compass-besökarsession (credential, 1700000039)
   'email',
   'person_nr',
   'personnummer',
@@ -87,6 +109,9 @@ export const PII_FIELD_PATTERNS: readonly string[] = [
   'street_address',
   'postal_code',
   'org_nr',
+  // Utskrivet org-nr (de_minimis_unit_orgnr.organisationsnummer) — fångas inte
+  // av `org_nr`-substringen. För enskild firma motsvarar det personnummer.
+  'organisationsnummer',
   'ip_hash'
 ];
 

@@ -12,50 +12,53 @@ import {
 // (CLAUDE.md § 9.3, § 10.2). Om någon av dem fallerar har en regression
 // öppnat en väg för personuppgifter/känsliga kollektioner till modellen.
 
-test('denylist håller ute auth-, PII- och credential-kollektioner', () => {
+// Policy 2026-06: bara grupp A (auth/hemligheter) + B (privat ägar-innehåll)
+// är denylistade. Allt annat är läsbart, skyddat av RLS + fältmaskning.
+
+test('denylist håller ute auth-, credential- och privat-innehåll-kollektioner', () => {
   for (const name of [
+    // A. Auth, system & krypterade hemligheter
     'users',
     'tenants',
     'verification_tokens',
-    'contacts', // extern-PII (§15.3)
-    'agent_actions', // mutationsaudit
-    'agent_memory', // tvärsessions-minne (§16.4)
+    'pending_signups',
     'tenant_integrations', // krypterade credentials
     'user_app_integrations',
     'user_mistral_connectors',
+    // B. Strikt privat ägaren-bara-innehåll
     'chat_threads', // privat innehåll (§17.2)
     'user_files',
-    'deep_jobs'
+    'deep_jobs',
+    'agent_memory' // tvärsessions-minne (§16.4)
   ]) {
     assert.equal(isDeniedCollection(name), true, `${name} ska vara denylistad`);
   }
 });
 
-test('alla compass_*-besökardatakollektioner är denylistade', () => {
+test('domändata är LÄSBAR (låstes upp 2026-06; skyddas av RLS + fältmaskning)', () => {
   for (const name of [
+    // Kärndomän
+    'startups',
+    'tool_runs',
+    'activities',
+    'startup_financials',
+    // C — tidigare denylistat, nu läsbart med fältmaskning
+    'contacts',
     'compass_leads',
     'compass_conversations',
     'compass_messages',
     'compass_responses',
-    'compass_security_events'
-  ]) {
-    assert.equal(isDeniedCollection(name), true, `${name} ska vara denylistad`);
-  }
-});
-
-test('de minimis-kollektionerna är denylistade (org.nr kan vara personnummer)', () => {
-  for (const name of [
+    'compass_security_events',
+    'agent_actions',
+    'agreement_signatures',
+    // D — de minimis + onboarding
     'de_minimis_units',
     'de_minimis_unit_orgnr',
     'de_minimis_stod',
-    'de_minimis_regelverk'
+    'de_minimis_regelverk',
+    'onboarding_flows',
+    'onboarding_progress'
   ]) {
-    assert.equal(isDeniedCollection(name), true, `${name} ska vara denylistad`);
-  }
-});
-
-test('domänkollektioner som SKA vara läsbara är inte denylistade', () => {
-  for (const name of ['startups', 'tool_runs', 'activities', 'startup_financials']) {
     assert.equal(isDeniedCollection(name), false, `${name} ska vara läsbar`);
   }
 });
@@ -70,12 +73,29 @@ test('PII-mönstren täcker direkt-PII, GDPR art. 9 och pseudonym-PII', () => {
     'gender', // art. 9 — fångar founder_gender, founder_identifies_as via substring
     'identifies_as',
     'org_nr',
+    'organisationsnummer', // utskrivet org-nr (de_minimis_unit_orgnr)
+    'session_token', // compass-besökarsession
     'street_address',
     'postal_code',
     'ip_hash'
   ]) {
     assert.ok(PII_FIELD_PATTERNS.includes(p), `mönstret '${p}' saknas`);
   }
+});
+
+test('autoMaskFields maskar utskrivet org-nr, ip-hash och session-token', () => {
+  const fields = [
+    { name: 'belopp_sek' }, // de minimis-belopp — SKA synas (det vi vill åt)
+    { name: 'stodgivare' }, // SKA synas
+    { name: 'organisationsnummer' }, // enskild firma = personnummer → mask
+    { name: 'visitor_ip_hash' }, // mask (ip_hash)
+    { name: 'session_token' }, // mask (credential)
+    { name: 'signer_email' } // mask (email)
+  ];
+  const masked = autoMaskFields(fields).sort();
+  assert.deepEqual(masked, ['organisationsnummer', 'session_token', 'signer_email', 'visitor_ip_hash'].sort());
+  assert.ok(!masked.includes('belopp_sek'));
+  assert.ok(!masked.includes('stodgivare'));
 });
 
 test('autoMaskFields maskar art. 9- och PII-fält (case-insensitive substring)', () => {

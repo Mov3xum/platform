@@ -3,6 +3,7 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import type { CompassQuestion, ResultBucket } from '@/lib/compass/types';
 import { QuestionInput, readAttribution } from './QuestionInput';
+import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 
 interface Props {
   moduleSlug: string;
@@ -136,7 +137,8 @@ export function ModuleQuiz({
         return;
       }
       setError(null);
-      setStep(step + 1);
+      const nextStep = resolveNextQuestionIndex(questions, step, value);
+      setStep(nextStep >= total ? total : nextStep);
       return;
     }
 

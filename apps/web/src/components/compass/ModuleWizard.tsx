@@ -3,6 +3,7 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import type { CompassQuestion } from '@/lib/compass/types';
 import { QuestionInput, readAttribution } from './QuestionInput';
+import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 
 interface Props {
   moduleSlug: string;
@@ -72,8 +73,9 @@ export function ModuleWizard({
     }
     setError(null);
 
-    if (step + 1 < total) {
-      setStep(step + 1);
+    const nextStep = resolveNextQuestionIndex(questions, step, value);
+    if (nextStep < total) {
+      setStep(nextStep);
       return;
     }
 

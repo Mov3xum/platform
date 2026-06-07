@@ -37,7 +37,26 @@ export default async function EducationDocumentsPage() {
       })
     ).items;
   } catch (error) {
-    console.error('[education/documents] failed to load documents', { tenant: user.tenant, error });
+    // En valfri detalj (t.ex. `expand: 'area'` mot en instans där
+    // område-migrationen ännu inte applicerats) får ALDRIG dölja hela listan.
+    // Försök igen utan expand så uppladdade dokument fortfarande syns.
+    console.error('[education/documents] failed to load documents (retrying without expand)', {
+      tenant: user.tenant,
+      error
+    });
+    try {
+      documents = (
+        await pb.collection(PB_COLLECTIONS.educationDocuments).getList<EducationDocument>(1, 200, {
+          filter: `tenant = "${user.tenant}"`,
+          sort: '-created'
+        })
+      ).items;
+    } catch (retryError) {
+      console.error('[education/documents] failed to load documents', {
+        tenant: user.tenant,
+        error: retryError
+      });
+    }
   }
 
   try {
@@ -174,14 +193,23 @@ export default async function EducationDocumentsPage() {
     }
   }
   const documentGroups: { id: string; label: string; documents: EducationDocument[] }[] = [];
+  const renderedAreaIds = new Set<string>();
   for (const area of areas) {
     const docs = documentsByArea.get(area.id);
     if (docs && docs.length > 0) {
       documentGroups.push({ id: area.id, label: area.name, documents: docs });
+      renderedAreaIds.add(area.id);
     }
   }
-  if (documentsWithoutArea.length > 0) {
-    documentGroups.push({ id: '__none__', label: 'Utan område', documents: documentsWithoutArea });
+  // Dokument vars område inte finns i `areas` (område raderat, eller `areas`
+  // kunde inte laddas) får ALDRIG försvinna tyst — samla dem under "Utan område".
+  const orphanedDocuments: EducationDocument[] = [];
+  for (const [areaId, docs] of documentsByArea) {
+    if (!renderedAreaIds.has(areaId)) orphanedDocuments.push(...docs);
+  }
+  const ungroupedDocuments = [...documentsWithoutArea, ...orphanedDocuments];
+  if (ungroupedDocuments.length > 0) {
+    documentGroups.push({ id: '__none__', label: 'Utan område', documents: ungroupedDocuments });
   }
 
   // ── Staff-vy: ladda upp, tilldela, hantera ─────────────────────────────────

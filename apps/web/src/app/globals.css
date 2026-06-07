@@ -110,7 +110,9 @@
   --font-heading: "Sora Variable", system-ui, sans-serif;
   --font-body: "Nunito Sans Variable", system-ui, sans-serif;
   --font-sans: "Nunito Sans Variable", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono Variable", monospace;
+  /* Endast Sora + Nunito Sans tillåts (§ 2.4). `font-mono`-utility:n behålls
+     för bakåtkompatibilitet men pekar på Nunito Sans — ingen JetBrains Mono. */
+  --font-mono: "Nunito Sans Variable", system-ui, sans-serif;
 }
 
 @custom-variant dark (&:is(.dark *));

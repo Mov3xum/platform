@@ -129,3 +129,52 @@ export async function getPublicModuleQuestions(
     return [];
   }
 }
+
+export function buildModuleChatSystemPrompt(
+  module: Pick<CompassModule, 'name' | 'chat_persona' | 'system_prompt'>,
+  questions: CompassQuestion[]
+): string | undefined {
+  const segments: string[] = [];
+
+  if (module.chat_persona) {
+    segments.push(`Du agerar som "${module.chat_persona}".`);
+  }
+
+  if (module.system_prompt) {
+    segments.push(module.system_prompt);
+  }
+
+  if (questions.length > 0) {
+    const guide = questions
+      .map((question, index) => {
+        const lines = [`${index + 1}. ${question.key}: ${question.prompt}`];
+        lines.push(`   Typ: ${question.input_type}${question.required ? ' (obligatorisk)' : ''}`);
+        if (question.help_text) lines.push(`   Hjälp: ${question.help_text}`);
+        if (question.choices?.length) {
+          lines.push(
+            '   Alternativ: ' +
+              question.choices
+                .map((choice) => {
+                  const next = choice.next_key ? ` → ${choice.next_key}` : '';
+                  return `${choice.label} [${choice.value}]${next}`;
+                })
+                .join(' · ')
+          );
+        }
+        return lines.join('\n');
+      })
+      .join('\n\n');
+
+    segments.push(
+      [
+        'Frågebank för modulen:',
+        'Använd frågorna som en dynamisk intervjuguide.',
+        'Ställ en fråga i taget, anpassa ordningen efter användarens svar och hoppa till choice.next_key när det finns ett angivet nästa steg.',
+        'När du har tillräckligt underlag, sammanfatta kort och fortsätt till nästa relevanta fråga eller be om kontaktuppgifter om de saknas.',
+        guide
+      ].join('\n')
+    );
+  }
+
+  return segments.length > 0 ? segments.join('\n\n') : undefined;
+}
