@@ -305,6 +305,8 @@ export interface RunStaffChatTurnOptions {
   surface?: AiUsageSurface;
   /** Live-callback för verktygssteg (streaming-endpoint). */
   onStep?: (step: AgentLoopStep) => void;
+  /** Live-callback för text-deltan (löpande utskrift, streaming-endpoint). */
+  onToken?: (delta: string) => void;
 }
 
 /**
@@ -404,6 +406,7 @@ export async function runStaffChatTurn(
       },
       maxIterations: MAX_TOOL_ITERATIONS,
       onStep: opts.onStep,
+      onToken: opts.onToken,
       onUsage: (u) => {
         tokensIn += u.tokensIn;
         tokensOut += u.tokensOut;

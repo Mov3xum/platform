@@ -248,6 +248,8 @@ interface Props {
   deepProgress?: number;
   // Live-aktivitetsspår för den pågående turen (streaming).
   liveSteps?: LiveStep[];
+  // Svaret medan det strömmas in token-för-token (löpande utskrift).
+  liveText?: string;
   onPickAgent: (a: DashboardAgent | null) => void;
   onReset: () => void;
   onSubmit: (
@@ -284,6 +286,7 @@ export default function DashboardChat({
   deepRunning = false,
   deepProgress = 0,
   liveSteps = [],
+  liveText = '',
   onPickAgent,
   onReset,
   onSubmit,
@@ -320,7 +323,7 @@ export default function DashboardChat({
     requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     });
-  }, [messages.length, isPending, liveSteps.length]);
+  }, [messages.length, isPending, liveSteps.length, liveText]);
 
   async function addFiles(files: FileList | File[]) {
     const list = Array.from(files);
@@ -947,11 +950,21 @@ export default function DashboardChat({
                     <ActivityTrail
                       items={liveSteps.map((s) => ({ label: s.label, running: s.running, ok: s.ok }))}
                     />
-                    <div className="inline-flex gap-1 text-foreground-subtle" aria-label="Arbetar">
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '0ms' }} />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '150ms' }} />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '300ms' }} />
-                    </div>
+                    {liveText ? (
+                      <div className="whitespace-pre-wrap text-[14.5px] leading-relaxed text-foreground">
+                        {liveText}
+                        <span
+                          className="ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[2px] animate-pulse bg-foreground-subtle align-middle"
+                          aria-hidden
+                        />
+                      </div>
+                    ) : (
+                      <div className="inline-flex gap-1 text-foreground-subtle" aria-label="Arbetar">
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '0ms' }} />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '150ms' }} />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

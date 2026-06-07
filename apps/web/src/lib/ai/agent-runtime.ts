@@ -63,6 +63,12 @@ export interface RunAgentLoopOptions {
    * live-aktivitetsspår. Synkron — får inte blockera loopen.
    */
   onStep?: (step: AgentLoopStep) => void;
+  /**
+   * Anropas med varje text-delta medan modellen strömmar sitt svar (för
+   * löpande utskrift i chatten). En tur som bara anropar verktyg strömmar
+   * ingen text. Synkron — får inte blockera loopen.
+   */
+  onToken?: (delta: string) => void;
 }
 
 export interface AgentLoopResult {
@@ -107,7 +113,8 @@ export async function runAgentLoop(
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     const result = await callMistralWithFallback(options.models, conversation, {
       tools,
-      toolChoice: tools ? 'auto' : undefined
+      toolChoice: tools ? 'auto' : undefined,
+      onToken: options.onToken
     });
 
     await options.onUsage?.({
@@ -166,7 +173,8 @@ export async function runAgentLoop(
 
   // Iterations-taket nått — tvinga ett slutsvar utan verktyg.
   const finalCall = await callMistralWithFallback(options.models, conversation, {
-    toolChoice: 'none'
+    toolChoice: 'none',
+    onToken: options.onToken
   });
   await options.onUsage?.({
     model: finalCall.modelUsed,
