@@ -52,7 +52,13 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // bolagets fritextsvar på onboarding-frågor (potentiell PII); flödena är
   // intern utbildningskonfiguration. Hålls helt utanför AI-kontexten.
   'onboarding_flows',
-  'onboarding_progress'
+  'onboarding_progress',
+  // Tenant-bred kunskapsbas (1700000118–119, § 26). Innehållet (uppladdat
+  // verksamhetsmaterial + dess embeddings) når AI ENBART via det kurerade
+  // `search_knowledge`-verktyget — aldrig via det generiska query_collection.
+  // Embedding-vektorerna är dessutom ointressanta/bullriga för en LLM att läsa rått.
+  'org_knowledge',
+  'org_knowledge_chunks'
 ]);
 
 /**
