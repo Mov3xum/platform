@@ -1,14 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState, useTransition } from 'react';
-import {
-  analyzeImportAction,
-  previewImportAction,
-  commitImportAction,
-  type AnalyzeState,
-  type RunState,
-  type SheetOutcome
-} from '@/lib/actions/import-general';
+import type { AnalyzeState, RunState, SheetOutcome } from '@/lib/actions/import-general';
 import type { ImportCollection } from '@/lib/import/importable';
 import type { AnalyzedSheet, SheetMapping } from '@/lib/import/mapping';
 import {
@@ -27,6 +20,11 @@ const btnPrimary =
   'rounded-2xl bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50';
 const btnGhost =
   'rounded-2xl border border-default bg-surface px-5 py-2.5 text-sm font-medium text-foreground-muted hover:bg-canvas-subtle disabled:cursor-not-allowed disabled:opacity-50';
+
+async function parseImportResponse<T>(res: Response): Promise<T> {
+  const data = (await res.json().catch(() => ({}))) as T;
+  return data;
+}
 
 export function ImportForm() {
   const [file, setFile] = useState<File | null>(null);
@@ -72,14 +70,16 @@ export function ImportForm() {
     setStage('analyze');
     startTransition(async () => {
       const fd = new FormData();
+      fd.append('action', 'analyze');
       fd.append('file', file);
-      const res: AnalyzeState = await analyzeImportAction(fd);
-      if (res.status === 'error') {
-        setError(res.message);
+      const res = await fetch('/api/admin/import-crm', { method: 'POST', body: fd });
+      const data = await parseImportResponse<AnalyzeState>(res);
+      if (!res.ok || data.status === 'error') {
+        setError(data.status === 'error' ? data.message : 'Kunde inte analysera filen.');
         setAnalysis(null);
-      } else if (res.status === 'ok') {
-        setAnalysis({ sheets: res.sheets, collections: res.collections });
-        setConfig(buildInitialConfig(res.sheets, res.collections));
+      } else if (data.status === 'ok') {
+        setAnalysis({ sheets: data.sheets, collections: data.collections });
+        setConfig(buildInitialConfig(data.sheets, data.collections));
       }
       setStage(null);
     });
@@ -91,13 +91,19 @@ export function ImportForm() {
     setStage(kind);
     startTransition(async () => {
       const fd = new FormData();
+      fd.append('action', kind);
       fd.append('file', file);
       fd.append('config', JSON.stringify({ sheets: config }));
-      const action = kind === 'preview' ? previewImportAction : commitImportAction;
-      const res = await action(fd);
-      if (kind === 'preview') setPreview(res);
-      else setCommit(res);
-      if (res.status === 'error') setError(res.message);
+      const res = await fetch('/api/admin/import-crm', { method: 'POST', body: fd });
+      const data = await parseImportResponse<RunState>(res);
+      if (!res.ok || data.status === 'error') {
+        setError(data.status === 'error' ? data.message : 'Kunde inte köra importen.');
+        if (kind === 'preview') setPreview(data);
+        else setCommit(data);
+      } else {
+        if (kind === 'preview') setPreview(data);
+        else setCommit(data);
+      }
       setStage(null);
     });
   }
