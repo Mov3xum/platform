@@ -6,7 +6,7 @@ import { getServerPbUrl } from '@/lib/pb-url';
 import { extractPdfText, extractXlsxText, extractDocxText, extractPptxText } from '@/lib/ai/attachments';
 import { categorizeFile, type StartupOption } from '@/lib/ai/file-categorize';
 import { indexUserFile } from '@/lib/ai/rag';
-import { logAiUsage } from '@/lib/ai/usage';
+import { logAiUsage, logIndexUsage } from '@/lib/ai/usage';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import {
   isFileTopic,
@@ -324,16 +324,7 @@ async function extractAndIndexUserFile(
 
   try {
     const idx = await indexUserFile(pb, { tenant, owner: ownerId, sourceId: fileId, text });
-    if (idx.usage.tokensIn > 0) {
-      void logAiUsage(pb, {
-        tenant,
-        userId: ownerId,
-        surface: 'suggestions',
-        model: 'mistral-embed',
-        tokensIn: idx.usage.tokensIn,
-        tokensOut: idx.usage.tokensOut
-      });
-    }
+    void logIndexUsage(pb, { tenant, userId: ownerId }, idx.usage);
     return idx.chunkCount;
   } catch {
     return 0;

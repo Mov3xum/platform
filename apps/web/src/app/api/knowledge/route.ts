@@ -4,7 +4,7 @@ import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { extractKnowledgeFromFile, KnowledgeError } from '@/lib/ai/knowledge';
 import { indexOrgKnowledge } from '@/lib/ai/rag';
-import { logAiUsage } from '@/lib/ai/usage';
+import { logIndexUsage } from '@/lib/ai/usage';
 import { isFileTopic } from '@platform/shared';
 import type { Role } from '@platform/shared';
 
@@ -102,16 +102,7 @@ export async function POST(request: Request): Promise<Response> {
       text: extracted.text
     });
     chunkCount = idx.chunkCount;
-    if (idx.usage.tokensIn > 0) {
-      void logAiUsage(pb, {
-        tenant: user.tenant,
-        userId: user.id,
-        surface: 'suggestions',
-        model: 'mistral-embed',
-        tokensIn: idx.usage.tokensIn,
-        tokensOut: idx.usage.tokensOut
-      });
-    }
+    void logIndexUsage(pb, { tenant: user.tenant, userId: user.id }, idx.usage);
   } catch (err) {
     console.warn('[knowledge] indexing failed (swallowed)', {
       tenantId: user.tenant,

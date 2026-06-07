@@ -2938,8 +2938,19 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
 **Implementerat (retrieval-mognad):** hybrid (semantisk + nyckelord), RRF-
 fusion, MMR-diversifiering, LLM-rerank (`mistral-small`, env-styrd), paginerat
 svep (`MAX_TOTAL_SCAN`, inte ett fast 1500-fönster → ingen tyst recall-förlust),
-frågeembedding-cache (LRU) och `topic`-förfilter. Ren rankningsmatematik i
-`rank.ts` (RRF/MMR/cosine) och `lru.ts`, enhetstestade.
+frågeembedding-cache (LRU), `topic`-förfilter och **contextual retrieval**
+(Anthropic-tekniken). Ren rankningsmatematik i `rank.ts` (RRF/MMR/cosine) och
+`lru.ts`, enhetstestade.
+
+**Contextual retrieval (env-gated, av default — index-tid-kostnad):** sätt
+`MOVEXUM_RAG_CONTEXTUAL=1` så genererar en liten LLM (`mistral-small`) en kort
+kontextmening per chunk vid indexering, som prependas BARA på det som embeddas
+(bättre recall/disambiguering). Den lagrade `text` förblir ORIGINALET → varken
+nyckelordssökning eller visade utdrag innehåller syntetiserad text. Bundet:
+`CONTEXT_MAX_CHUNKS=120`/fil, samtidighet `CONTEXT_CONCURRENCY=4`,
+dokumentutdrag `CONTEXT_DOC_CHARS=4000`. Kontext-tokens loggas separat
+(`mistral-small`) via `logIndexUsage`. Kräver ombyggt index (reindexa filer
+efter att flaggan slagits på).
 
 **Eval-harness (CLAUDE.md-mätbarhet):** `apps/web/src/lib/ai/eval-metrics.ts`
 (ren, enhetstestad: recall@K, precision@K, MRR, nDCG@K, hit-rate) +
@@ -2955,8 +2966,6 @@ faller fortfarande uppåt vid 429 och har small som sista utväg. Används av b�
 `staff-chat.ts` (trådar/streaming) och `lib/actions/chat.ts` (efemär `/idag`).
 
 **Kvar / kommande steg:**
-- **Contextual retrieval** (Anthropic-tekniken: LLM-genererad kontext-prefix per
-  chunk vid indexering) — index-time-kostnad, egen PR med reindex.
 - **Parent-document / small-to-big** (returnera grannchunkars kontext) — avvägs
   mot prompt-storlekstaket (`MAX_TOOL_RESULT_CHARS`).
 - **PPTX/DOCX-textextraktion** — KLAR. Dependency-fri OOXML-extraktion via den
