@@ -44,7 +44,7 @@ export interface LiveStep {
   ok?: boolean;
 }
 
-// Kompakt aktivitetsspår ("Läser bolagsdata", "Skapar PowerPoint"). Visas
+// Kompakt aktivitetsspår ("Läser bolagen", "Skapar PowerPoint"). Visas
 // live medan turen körs (running → spinner) och persiterat under färdiga svar.
 function ActivityTrail({
   items
