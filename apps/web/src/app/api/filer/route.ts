@@ -319,12 +319,28 @@ export async function POST(req: Request) {
         }
       }
 
-      await pb.collection('user_files').update(fileId, {
-        topic: resolveFileTopic(topic),
+      const resolved = resolveFileTopic(topic);
+      const updated = (await pb.collection('user_files').update(fileId, {
+        topic: resolved,
         topic_status: 'confirmed',
         startup,
         categorized_at: new Date().toISOString()
-      });
+      })) as unknown as UserFile;
+
+      // Verifiera att skrivningen faktiskt fastnade. Saknar instansen
+      // kategoriseringsfälten (migration 1700000110 ej applicerad / schema
+      // ur synk) släpper PocketBase dem TYST vid update → 200 men inget
+      // ändrades. Gör det till ett tydligt fel i stället för en tyst no-op.
+      if (updated.topic !== resolved || (startup && updated.startup !== startup)) {
+        return NextResponse.json(
+          {
+            error:
+              'Filarkivets ämnes-/bolagsfält saknas i databasen — kör schemasynk ' +
+              '(setup-via-api / migration 1700000110) och försök igen.'
+          },
+          { status: 503 }
+        );
+      }
       return NextResponse.json({ ok: true, fileId });
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : 'Kunde inte spara ämnet.' }, { status: 500 });

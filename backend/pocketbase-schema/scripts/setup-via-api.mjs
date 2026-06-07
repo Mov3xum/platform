@@ -3032,6 +3032,46 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
 });
 
+// Migration 1700000110: user_files AI-kategorisering (ämnes-/bolagsmappar, § 24).
+// Utan dessa fält no-op:ar "Var hör filen hemma?"-dialogen tyst (PB släpper
+// okända fält vid update) → filer går inte att sortera in i ämne/bolag.
+await patchCollection('user_files', [
+  {
+    name: 'topic',
+    type: 'select',
+    required: false,
+    maxSelect: 1,
+    values: [
+      'affarsplan_strategi',
+      'finansiering_kapital',
+      'hallbarhet_esg',
+      'internationalisering',
+      'pitch_material',
+      'juridik_avtal',
+      'rapporter_uppfoljning',
+      'osorterat'
+    ]
+  },
+  {
+    name: 'topic_status',
+    type: 'select',
+    required: false,
+    maxSelect: 1,
+    values: ['pending', 'auto', 'needs_review', 'confirmed']
+  },
+  { name: 'topic_confidence', type: 'number', required: false, min: 0, max: 1 },
+  {
+    name: 'startup',
+    type: 'relation',
+    required: false,
+    collectionId: 'startups_collection',
+    cascadeDelete: false,
+    minSelect: 0,
+    maxSelect: 1
+  },
+  { name: 'categorized_at', type: 'date', required: false }
+]);
+
 // Migration 1700000120: user_files RAG-fält (personlig fil-QA).
 await patchCollection('user_files', [
   { name: 'extracted_text', type: 'text', required: false, max: 320000 },
