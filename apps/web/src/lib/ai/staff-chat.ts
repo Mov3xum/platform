@@ -2,7 +2,7 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { MistralError, callMistral, type MistralMessage } from './mistral';
 import { runAgentLoop, type AgentLoopStep } from './agent-runtime';
-import { buildChatTools } from './tools';
+import { buildChatTools, buildMemoryRecallBlock } from './tools';
 import { buildSchemaSummary, getExposedCollections } from './schema';
 import { buildPortfolioContext, renderPromptTemplate } from './context';
 import { buildKnowledgeContext } from './agent-prompt';
@@ -89,6 +89,13 @@ const STAFF_TOOL_GUIDANCE =
   'aktivitet kopplat till ett bolag.\n' +
   '- `update_activity_field`: uppdatera en befintlig aktivitets `title`, ' +
   '`description` eller `status`.\n' +
+  '- `memory_read` / `memory_write`: ditt tvärsessions-minne (per tenant). När ' +
+  'personalen RÄTTAR dig eller lär dig en bestående regel ("räkna inte lån som ' +
+  'investeringar", "Bolag X heter numera Y") — spara det med `memory_write` ' +
+  '(kort `key`, tydlig `content`) så att det gäller även i framtida samtal. ' +
+  'Lagra ALDRIG personuppgifter i minnet, bara generella regler/slutsatser. ' +
+  'Inlärt minne injiceras automatiskt i din kontext; använd `memory_read` för ' +
+  'fler detaljer.\n' +
   '- `generate_document` (när tillgängligt): ta fram en snygg, brandad ' +
   '.pptx/.xlsx/.docx/.pdf av sammanställd data. Siffror och fakta MÅSTE komma ' +
   'från tidigare query_collection-svar — hitta aldrig på. VÄLJ alltid en ' +
@@ -359,6 +366,10 @@ export async function runStaffChatTurn(
     `Användare: ${user.name} (roller: ${user.roles.join(', ')}). ` +
     `Tenant: ${user.tenantName ?? user.tenant}. Dagens datum: ${today}.`;
 
+  // Auto-recall av tvärsessions-minnet (§ 16.4): tidigare korrigeringar/slutsatser
+  // injiceras så att en rättelse faktiskt påverkar nästa samtal. RLS-skyddat.
+  const memoryBlock = await buildMemoryRecallBlock(pb, user.tenant);
+
   const systemContent =
     BASE_SYSTEM_PROMPT +
     (opts.agentBlock ? `\n\n---\n${opts.agentBlock}\n---` : '') +
@@ -366,6 +377,7 @@ export async function runStaffChatTurn(
     SEARCH_STRATEGY_GUIDANCE +
     KNOWLEDGE_GUIDANCE +
     DOMAIN_GLOSSARY +
+    memoryBlock +
     `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +
     (opts.webBlock ? `\n\n---\n${opts.webBlock}\n---` : '') +
     STYLE_REMINDER;

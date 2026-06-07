@@ -104,4 +104,15 @@ export const DOMAIN_GLOSSARY =
   '- `startups.bolag_status` (bolagets operationella status, SKILJ från status ' +
   'ovan): aktiv, vilande, konkurs, likvidering, avregistrerat.\n' +
   '- `irl_level` (1–9) = Investment Readiness Level, plattformens mognadsmått — ' +
-  'INTE TRL. Frågar någon om TRL, svara med IRL och förklara skillnaden kort.';
+  'INTE TRL. Frågar någon om TRL, svara med IRL och förklara skillnaden kort.\n' +
+  '- Mottaget kapital/stöd (`capital_rounds.type`): equity (ägarkapital/' +
+  'investering), convertible (konvertibelt skuldebrev), loan (lån/kredit), ' +
+  'grant (bidrag/anslag, t.ex. Vinnova/Almi/EU), soft_funding (mjuk ' +
+  'finansiering), other (övrigt). VIKTIGT — blanda ALDRIG ihop dessa: en ' +
+  '"investering"/"investeringsrunda" är BARA `equity` och `convertible`. Lån ' +
+  '(`loan`) och bidrag (`grant`/`soft_funding`) är INTE investeringar och får ' +
+  'aldrig räknas som investeringsrundor. Frågar någon om "investeringar" eller ' +
+  '"hur många rundor" — filtrera på `type` i ("equity","convertible") och säg ' +
+  'uttryckligen att lån/bidrag räknas separat. Vill användaren ha allt mottaget ' +
+  'kapital, summera per `type` och redovisa uppdelningen, inte en klumpsumma ' +
+  'kallad "investeringar". `amount_sek` är beloppet; `source` är finansiären.';
