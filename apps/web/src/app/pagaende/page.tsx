@@ -101,17 +101,17 @@ export default async function PagaendePage() {
   const emptyList = { items: [] as never[] };
   const [workshopsRes, docsRes, activitiesRes] = await Promise.allSettled([
     assignPb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopRow>(1, 200, {
-      filter: `tenant = "${tenant}" && status != "done"`,
+      filter: `tenant = "${escFilter(tenant)}" && status != "done"`,
       sort: '-created',
       expand: 'workshop,startup,assigned_by,collaborators,meeting'
     }),
     assignPb.collection(PB_COLLECTIONS.educationDocumentAssignments).getList<DocRow>(1, 200, {
-      filter: `tenant = "${tenant}" && status != "completed"`,
+      filter: `tenant = "${escFilter(tenant)}" && status != "completed"`,
       sort: '-created',
       expand: 'document,startup,collaborators,meeting'
     }),
     pb.collection('activities').getList<ActivityRow>(1, 200, {
-      filter: `startup.tenant = "${tenant}" && (status = "planned" || status = "in_progress") && (kind = "manual" || kind = "")`,
+      filter: `startup.tenant = "${escFilter(tenant)}" && (status = "planned" || status = "in_progress") && (kind = "manual" || kind = "")`,
       sort: '-created',
       expand: 'startup,owner'
     })

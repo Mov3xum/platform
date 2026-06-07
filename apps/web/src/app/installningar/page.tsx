@@ -1,4 +1,5 @@
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { escFilter } from '@/lib/pb-filter';
 import { hasRole } from '@/lib/rbac';
 import { redirect } from 'next/navigation';
 import { Chip } from '@/components/proto';
@@ -13,6 +14,8 @@ import {
   type AgentMemoryItem,
   type StartupOption
 } from './AgentMemoryManager';
+import { AiBudgetForm } from './AiBudgetForm';
+import { getBudgetStatus } from '@/lib/ai/budget.server';
 import { getInfraHealth, healthStateLabel, type HealthState } from '@/lib/health';
 
 interface TenantRecord {
@@ -80,7 +83,7 @@ export default async function InstallningarPage() {
     let userCount = 0;
     try {
       const s = await pb.collection('startups').getList(1, 1, {
-        filter: `tenant = "${t.id}"`,
+        filter: `tenant = "${escFilter(t.id)}"`,
         fields: 'id'
       });
       startupCount = s.totalItems;
@@ -89,7 +92,7 @@ export default async function InstallningarPage() {
     }
     try {
       const u = await pb.collection('users').getList(1, 1, {
-        filter: `tenant = "${t.id}"`,
+        filter: `tenant = "${escFilter(t.id)}"`,
         fields: 'id'
       });
       userCount = u.totalItems;
@@ -114,6 +117,9 @@ export default async function InstallningarPage() {
     // Om fältet ännu inte finns eller annan fel — visa alla moduler
   }
 
+  // ── AI-kostnadstak (tak + förbrukning denna månad) ───────────
+  const budgetStatus = await getBudgetStatus(pb, user.tenant);
+
   // Filtrera bort legacy/dolda moduler som inte ska hanteras manuellt
   const HIDDEN_MODULE_IDS = ['dashboard', 'toolbox', 'onboarding', 'activity_feed', 'partners'];
 
@@ -137,7 +143,7 @@ export default async function InstallningarPage() {
   if (isAdmin) {
     try {
       const usersRes = await pb.collection('users').getList<UserRecord>(1, 200, {
-        filter: `tenant = "${user.tenant}"`,
+        filter: `tenant = "${escFilter(user.tenant)}"`,
         sort: 'email',
         fields: 'id,email,display_name,roles,disabled_modules,tenant'
       });
@@ -282,6 +288,24 @@ export default async function InstallningarPage() {
             <div className="h-px flex-1 bg-[var(--mx-line-soft)]" />
           </div>
 
+        {/* ── AI-kostnadstak ───────────────────────────────────── */}
+        <section className="rounded-2xl border border-default bg-surface p-5">
+          <div className="mb-4">
+            <h2 className="font-heading text-[15px] font-semibold text-foreground">
+              AI-kostnadstak
+            </h2>
+            <p className="text-[12.5px] text-foreground-muted">
+              Maximal AI-kostnad per kalendermånad för denna tenant. När taket nås
+              pausas nya AI-körningar till nästa månad.
+            </p>
+          </div>
+          <AiBudgetForm
+            tenantBudgetUsd={budgetStatus.tenantBudgetUsd}
+            envDefaultUsd={budgetStatus.envDefaultUsd}
+            effectiveUsd={budgetStatus.effectiveUsd}
+            spentUsd={budgetStatus.spentUsd}
+          />
+        </section>
           <section className="rounded-2xl border border-default bg-surface p-5">
             <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
               <div>

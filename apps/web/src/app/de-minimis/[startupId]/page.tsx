@@ -73,7 +73,7 @@ export default async function DeMinimisStartupPage({
       .getFullList<DeMinimisUnit>({ filter: `startup = "${escFilter(startupId)}"`, sort: 'created' });
     orgnrRows = await pb
       .collection(PB_COLLECTIONS.deMinimisUnitOrgnr)
-      .getFullList<DeMinimisUnitOrgnr>({ filter: `tenant = "${user.tenant}"` });
+      .getFullList<DeMinimisUnitOrgnr>({ filter: `tenant = "${escFilter(user.tenant)}"` });
     stodRows = await pb
       .collection(PB_COLLECTIONS.deMinimisStod)
       .getFullList<DeMinimisStod>({ filter: `startup = "${escFilter(startupId)}"` });

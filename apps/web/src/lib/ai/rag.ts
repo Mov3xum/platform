@@ -5,6 +5,7 @@ import { callMistral, embedTexts, type MistralMessage } from './mistral';
 import { escFilter } from '@/lib/pb-filter';
 import { significantTokens } from './fuzzy';
 import { LruCache } from './lru';
+import { stitchChunks } from './chunk-stitch';
 import {
   cosineSimilarity,
   mmrOrder,
@@ -66,6 +67,17 @@ const CONTEXT_CONCURRENCY = 4; // parallella kontext-anrop (wall-clock vs rate-l
 /** Contextual retrieval är AV som standard; sätt MOVEXUM_RAG_CONTEXTUAL=1 för på. */
 function contextualEnabled(): boolean {
   return process.env.MOVEXUM_RAG_CONTEXTUAL === '1';
+}
+
+// Parent-document / small-to-big: sök på små chunkar men returnera ett större
+// sammanhängande fönster (grannchunkar runt träffen). Av default — kan blåsa upp
+// prompten (tool-resultatet capas ändå nedströms). Sätt MOVEXUM_RAG_PARENT=1.
+const PARENT_WINDOW = 1; // antal grannchunkar på var sida om träffen
+const PARENT_MAX_CHARS = 3500; // tak per hopslaget fönster (prompt-budget)
+
+/** Parent-document är AV som standard; sätt MOVEXUM_RAG_PARENT=1 för på. */
+function parentEnabled(): boolean {
+  return process.env.MOVEXUM_RAG_PARENT === '1';
 }
 
 // Frågeembedding-cache (per process). Nyckel = källkollektion + normaliserad
@@ -312,6 +324,7 @@ async function indexSource(
 interface ChunkRow {
   id: string;
   source: string;
+  chunk_index?: number;
   text?: string;
   embedding?: unknown;
   expand?: { source?: { id?: string; title?: string; filename?: string } };
@@ -325,7 +338,7 @@ function sourceTitle(row: ChunkRow): string {
 // Fält vi hämtar per chunk. `title` finns bara på org_knowledge, `filename` på
 // båda — PB utelämnar tyst det som saknas, så samma projektion funkar för båda.
 const CHUNK_FIELDS =
-  'id,source,text,embedding,expand.source.id,expand.source.title,expand.source.filename';
+  'id,source,chunk_index,text,embedding,expand.source.id,expand.source.title,expand.source.filename';
 
 /** Hur många av frågans tokens som förekommer i en text (enkel nyckelords-rang). */
 function keywordHitCount(tokens: string[], text: string): number {
@@ -340,6 +353,8 @@ interface Candidate {
   emb: number[] | null;
   sourceId: string;
   title: string;
+  /** chunk_index inom källfilen — för parent-document-fönstret. */
+  index: number;
 }
 
 /** Embeddar en fråga med in-process-cache. Fail-soft → tom vektor vid fel. */
@@ -441,7 +456,8 @@ async function searchSource(
       text: String(row.text ?? ''),
       emb: emb && emb.length > 0 ? emb : null,
       sourceId: String(row.expand?.source?.id || row.source),
-      title: sourceTitle(row)
+      title: sourceTitle(row),
+      index: typeof row.chunk_index === 'number' ? row.chunk_index : -1
     });
     if (emb && emb.length > 0 && qvec.length > 0) cosine.set(id, cosineSimilarity(qvec, emb));
   };
@@ -532,10 +548,22 @@ async function searchSource(
     }
   }
 
-  const hits: KnowledgeHit[] = ordered.slice(0, topK).map((id) => {
+  const selectedIds = ordered.slice(0, topK);
+  const selected = selectedIds.map((id) => byId.get(id)!);
+  const hits: KnowledgeHit[] = selectedIds.map((id) => {
     const c = byId.get(id)!;
     return { sourceId: c.sourceId, title: c.title, score: cosine.get(id) ?? 0, text: c.text };
   });
+
+  // 6) Parent-document (env-gated): byt ut varje träffs text mot ett
+  // sammanhängande fönster av grannchunkar (small-to-big). Fail-soft.
+  if (parentEnabled()) {
+    try {
+      await expandParentWindows(pb, src, scope, selected, hits);
+    } catch {
+      /* fail-soft: behåll de oexpanderade träffarna */
+    }
+  }
 
   const mode: KnowledgeSearchResult['mode'] =
     semanticList.length && keywordList.length
@@ -544,6 +572,70 @@ async function searchSource(
         ? 'semantic'
         : 'keyword';
   return { hits, mode, usage: { tokensIn, tokensOut: 0, rerank: rerankUsage } };
+}
+
+/**
+ * Parent-document / small-to-big: för varje vald chunk hämtas grannchunkar
+ * (samma källfil, chunk_index ± PARENT_WINDOW) i ETT batchat anrop, och varje
+ * träffs text byts mot det hopslagna fönstret (overlap-dedupat, cappat).
+ * Muterar `hits[i].text`. Hoppar träffar som saknar känt chunk_index.
+ */
+async function expandParentWindows(
+  pb: PocketBase,
+  src: RagSource,
+  scope: string,
+  selected: Candidate[],
+  hits: KnowledgeHit[]
+): Promise<void> {
+  // Bygg ett range-villkor per (källfil, index-fönster). Bara träffar med känt
+  // index (>= 0) och som faktiskt har grannar att hämta.
+  const ranges: { sourceId: string; lo: number; hi: number }[] = [];
+  for (const c of selected) {
+    if (c.index < 0) continue;
+    ranges.push({
+      sourceId: c.sourceId,
+      lo: Math.max(0, c.index - PARENT_WINDOW),
+      hi: c.index + PARENT_WINDOW
+    });
+  }
+  if (ranges.length === 0) return;
+
+  const clauses = ranges.map(
+    (r) =>
+      `(source = "${escFilter(r.sourceId)}" && chunk_index >= ${r.lo} && chunk_index <= ${r.hi})`
+  );
+  const filter = `${scope} && (${clauses.join(' || ')})`;
+  const limit = ranges.length * (2 * PARENT_WINDOW + 1);
+
+  const res = await pb.collection(src.chunkCollection).getList<ChunkRow>(1, limit, {
+    fields: 'id,source,chunk_index,text',
+    filter
+  });
+
+  // Index neighbours per källfil: `${sourceId}` → (chunk_index → text).
+  const bySource = new Map<string, Map<number, string>>();
+  for (const row of res.items) {
+    const sid = String(row.source);
+    const idx = typeof row.chunk_index === 'number' ? row.chunk_index : -1;
+    if (idx < 0) continue;
+    if (!bySource.has(sid)) bySource.set(sid, new Map());
+    bySource.get(sid)!.set(idx, String(row.text ?? ''));
+  }
+
+  for (let i = 0; i < selected.length; i++) {
+    const c = selected[i];
+    if (c.index < 0) continue;
+    const neighbours = bySource.get(c.sourceId);
+    if (!neighbours) continue;
+    const parts: { index: number; text: string }[] = [];
+    for (let idx = c.index - PARENT_WINDOW; idx <= c.index + PARENT_WINDOW; idx++) {
+      const text = neighbours.get(idx);
+      if (text) parts.push({ index: idx, text });
+    }
+    if (parts.length > 1) {
+      hits[i].text = stitchChunks(parts, { maxOverlap: CHUNK_OVERLAP, maxChars: PARENT_MAX_CHARS });
+    }
+  }
 }
 
 async function keywordSearch(

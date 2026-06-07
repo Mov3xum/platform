@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
@@ -53,7 +54,7 @@ export default async function DeMinimisIndexPage() {
 
   let startups: StartupRow[] = [];
   try {
-    let filter = `tenant = "${user.tenant}"`;
+    let filter = `tenant = "${escFilter(user.tenant)}"`;
     if (isMemberOnly) {
       if (user.linkedStartups.length === 0) {
         return (
@@ -82,7 +83,7 @@ export default async function DeMinimisIndexPage() {
   try {
     const allStod = await pb
       .collection(PB_COLLECTIONS.deMinimisStod)
-      .getFullList<DeMinimisStod>({ filter: `tenant = "${user.tenant}"` });
+      .getFullList<DeMinimisStod>({ filter: `tenant = "${escFilter(user.tenant)}"` });
     for (const s of allStod) {
       const key = String(s.startup);
       if (!byStartup.has(key)) byStartup.set(key, []);

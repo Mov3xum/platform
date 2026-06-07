@@ -99,6 +99,13 @@ export interface CallMistralOptions {
   toolChoice?: 'auto' | 'none' | 'any';
   temperature?: number;
   maxTokens?: number;
+  /**
+   * När satt strömmas svaret token-för-token: varje text-delta forwardas
+   * direkt via `onToken` (för live-utskrift i chatten) medan funktionen ändå
+   * returnerar hela det ackumulerade svaret (text + tool_calls + usage). En
+   * tur som bara anropar verktyg strömmar ingen text (delta.content är tom).
+   */
+  onToken?: (delta: string) => void;
 }
 
 export class MistralError extends Error {
@@ -186,6 +193,7 @@ export async function callMistral(
     max_tokens: options.maxTokens ?? MAX_TOKENS,
     temperature: options.temperature ?? 0.3
   };
+  if (options.onToken) body.stream = true;
 
   const combinedTools: MistralAnyTool[] = [];
   if (options.tools && options.tools.length > 0) {
@@ -218,7 +226,7 @@ export async function callMistral(
   for (let p = 0; p < providers.length; p++) {
     const provider = providers[p];
     try {
-      return await attemptChatProvider(provider, body);
+      return await attemptChatProvider(provider, body, options.onToken);
     } catch (err) {
       lastError = err instanceof MistralError ? err : new MistralError(String(err), 0);
       const status = lastError.status;
@@ -243,7 +251,8 @@ export async function callMistral(
  */
 async function attemptChatProvider(
   provider: ChatProvider,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  onToken?: (delta: string) => void
 ): Promise<MistralResponse> {
   let lastError: MistralError | null = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -268,6 +277,15 @@ async function attemptChatProvider(
         continue;
       }
       throw lastError;
+    }
+
+    if (response.ok && onToken) {
+      // Strömmande läge: HTTP-statusen var OK, så ev. retry/fallback (429/5xx)
+      // har redan hanterats ovan. Härifrån läser vi SSE-strömmen och
+      // forwardar text-deltan live. readChatStream rethrowar bara om INGET
+      // hann strömmas (säkert att retrya) — annars returneras det partiella
+      // svaret så vi aldrig dubbelskriver redan utskriven text.
+      return await readChatStream(response, onToken);
     }
 
     if (response.ok) {
@@ -305,6 +323,121 @@ async function attemptChatProvider(
 
   // Unreachable — loop either returns or throws.
   throw lastError ?? new MistralError('Okänt fel vid AI-anrop.', 0);
+}
+
+/**
+ * Läser en Mistral chat-completions SSE-ström (`stream: true`) och forwardar
+ * varje text-delta via `onToken` medan den ackumulerar hela svaret (text +
+ * tool_calls + usage) till samma `MistralResponse`-form som det icke-strömmande
+ * fallet. Tool-call-deltan slås ihop per `index`. Kastar bara om strömmen
+ * bryts INNAN något hann tas emot (då är retry säkert); annars returneras det
+ * partiella svaret så vi aldrig dubbelskriver redan utströmmad text.
+ */
+async function readChatStream(
+  response: Response,
+  onToken: (delta: string) => void
+): Promise<MistralResponse> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new MistralError('AI-strömmen saknar kropp.', 503);
+
+  const decoder = new TextDecoder();
+  let buf = '';
+  let text = '';
+  let finishReason = '';
+  const usage = { prompt_tokens: 0, completion_tokens: 0 };
+  const toolAcc = new Map<number, { id: string; name: string; args: string }>();
+
+  const handleData = (payload: string) => {
+    if (!payload || payload === '[DONE]') return;
+    let json: {
+      choices?: Array<{
+        delta?: {
+          content?: string | null;
+          tool_calls?: Array<{
+            index?: number;
+            id?: string;
+            function?: { name?: string; arguments?: string };
+          }>;
+        };
+        finish_reason?: string | null;
+      }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+    try {
+      json = JSON.parse(payload);
+    } catch {
+      return;
+    }
+    const choice = json.choices?.[0];
+    const delta = choice?.delta;
+    if (delta) {
+      if (typeof delta.content === 'string' && delta.content) {
+        text += delta.content;
+        onToken(delta.content);
+      }
+      if (Array.isArray(delta.tool_calls)) {
+        for (const tc of delta.tool_calls) {
+          const idx = typeof tc.index === 'number' ? tc.index : 0;
+          const cur = toolAcc.get(idx) ?? { id: '', name: '', args: '' };
+          if (tc.id) cur.id = tc.id;
+          if (tc.function?.name) cur.name = tc.function.name;
+          if (typeof tc.function?.arguments === 'string') cur.args += tc.function.arguments;
+          toolAcc.set(idx, cur);
+        }
+      }
+    }
+    if (choice?.finish_reason) finishReason = choice.finish_reason;
+    if (json.usage) {
+      if (typeof json.usage.prompt_tokens === 'number') usage.prompt_tokens = json.usage.prompt_tokens;
+      if (typeof json.usage.completion_tokens === 'number') usage.completion_tokens = json.usage.completion_tokens;
+    }
+  };
+
+  const drainLines = () => {
+    let nl: number;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (line.startsWith('data:')) handleData(line.slice(5).trim());
+    }
+  };
+
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      drainLines();
+    }
+    const rest = buf.trim();
+    if (rest.startsWith('data:')) handleData(rest.slice(5).trim());
+  } catch (err) {
+    // Bröt strömmen innan något togs emot → säkert att retrya/falla över.
+    if (!text && toolAcc.size === 0) {
+      throw new MistralError(
+        err instanceof Error ? err.message : 'AI-strömmen bröts.',
+        503
+      );
+    }
+    // Annars: behåll det partiella svaret (texten är redan utskriven).
+  }
+
+  const toolCalls: MistralToolCall[] = Array.from(toolAcc.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, t]) => ({
+      id: t.id,
+      type: 'function' as const,
+      function: { name: t.name, arguments: t.args }
+    }))
+    .filter((t) => t.function.name);
+
+  // Strömmen returnerar inte alltid usage i sista chunken — uppskatta grovt
+  // ur textlängden så kostnadsloggningen inte blir noll.
+  if (usage.completion_tokens === 0 && text) {
+    usage.completion_tokens = Math.ceil(text.length / 4);
+  }
+
+  return { text, toolCalls, finishReason: finishReason || 'stop', usage };
 }
 
 function backoffMs(attempt: number, retryAfterMs: number | null): number {

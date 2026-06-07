@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { escFilter } from '@/lib/pb-filter';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
@@ -31,7 +32,7 @@ export default async function EducationDocumentsPage() {
   try {
     documents = (
       await pb.collection(PB_COLLECTIONS.educationDocuments).getList<EducationDocument>(1, 200, {
-        filter: `tenant = "${user.tenant}"`,
+        filter: `tenant = "${escFilter(user.tenant)}"`,
         sort: '-created',
         expand: 'area'
       })
@@ -47,7 +48,7 @@ export default async function EducationDocumentsPage() {
     try {
       documents = (
         await pb.collection(PB_COLLECTIONS.educationDocuments).getList<EducationDocument>(1, 200, {
-          filter: `tenant = "${user.tenant}"`,
+          filter: `tenant = "${escFilter(user.tenant)}"`,
           sort: '-created'
         })
       ).items;
@@ -68,7 +69,7 @@ export default async function EducationDocumentsPage() {
       await pb
         .collection(PB_COLLECTIONS.educationDocumentAssignments)
         .getList<EducationDocumentAssignment>(1, 500, {
-          filter: `tenant = "${user.tenant}"${linkedFilter}`,
+          filter: `tenant = "${escFilter(user.tenant)}"${linkedFilter}`,
           sort: '-created',
           expand: 'document,startup,completed_by'
         })
@@ -81,7 +82,7 @@ export default async function EducationDocumentsPage() {
     try {
       startups = (
         await pb.collection('startups').getList<{ id: string; name: string }>(1, 300, {
-          filter: `tenant = "${user.tenant}"`,
+          filter: `tenant = "${escFilter(user.tenant)}"`,
           sort: 'name',
           fields: 'id,name'
         })
@@ -94,7 +95,7 @@ export default async function EducationDocumentsPage() {
     try {
       areas = (
         await pb.collection(PB_COLLECTIONS.workshopAreas).getList<WorkshopArea>(1, 200, {
-          filter: `tenant = "${user.tenant}"`,
+          filter: `tenant = "${escFilter(user.tenant)}"`,
           sort: 'name'
         })
       ).items;

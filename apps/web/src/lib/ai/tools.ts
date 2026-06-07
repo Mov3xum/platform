@@ -733,22 +733,28 @@ export function buildChatTools(
   return tools;
 }
 
-// Människovänliga (svenska) etiketter för live-aktivitetsspåret. Håller sig
-// på kollektions-/dokumenttyp-nivå — aldrig användarvärden eller filter (de
-// kan innehålla namn användaren skrev) → PII-fritt och säkert att persistera.
+// Människovänliga (svenska) etiketter för live-aktivitetsspåret. Skrivna som
+// naturliga substantiv i bestämd form så de läser som en kollega som berättar
+// ("Läser bolagen", inte "Läser bolagsdata"). Håller sig på kollektions-/
+// dokumenttyp-nivå — aldrig användarvärden eller filter (de kan innehålla namn
+// användaren skrev) → PII-fritt och säkert att persistera.
 const COLLECTION_LABELS: Record<string, string> = {
-  startups: 'bolagsdata',
-  activities: 'aktiviteter',
-  tool_runs: 'AI-körningar',
+  startups: 'bolagen',
+  activities: 'aktiviteterna',
+  tool_runs: 'AI-körningarna',
   startup_financials: 'bolagens ekonomi',
-  startup_kpis: 'nyckeltal',
-  capital_rounds: 'kapitalrundor',
+  startup_kpis: 'nyckeltalen',
+  capital_rounds: 'kapitalrundorna',
   intellectual_property: 'immateriella rättigheter',
-  agreements: 'avtal',
-  incubator_events: 'evenemang',
-  event_signups: 'anmälningar',
-  startup_phase_history: 'fashistorik',
-  ai_usage_events: 'AI-statistik'
+  agreements: 'avtalen',
+  incubator_events: 'evenemangen',
+  event_signups: 'anmälningarna',
+  startup_phase_history: 'fashistoriken',
+  ai_usage_events: 'AI-statistiken',
+  contacts: 'kontakterna',
+  de_minimis_stod: 'de minimis-stöden',
+  compass_leads: 'inflödet',
+  onboarding_progress: 'onboardingen'
 };
 
 const DOC_LABELS: Record<string, string> = {
@@ -759,12 +765,13 @@ const DOC_LABELS: Record<string, string> = {
 };
 
 function collectionLabel(name: string): string {
-  return COLLECTION_LABELS[name] || name || 'data';
+  return COLLECTION_LABELS[name] || 'uppgifterna';
 }
 
 /**
  * Översätter ett tool-call till en kort svensk etikett för aktivitetsspåret
- * ("Läser bolagsdata", "Skapar PowerPoint"). PII-fri per design: bara
+ * ("Läser bolagen", "Skapar PowerPoint"). Skriven så det låter som en kollega
+ * som berättar vad den gör, inte en databasoperation. PII-fri per design: bara
  * verktygsnamn + kollektion/dokumenttyp läses, aldrig filter eller värden.
  */
 export function describeToolCall(call: MistralToolCall): { tool: string; label: string } {
@@ -782,9 +789,9 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
     case 'count_collection':
       return { tool: name, label: `Räknar ${collectionLabel(coll)}` };
     case 'search_records':
-      return { tool: name, label: `Söker i ${collectionLabel(coll)}` };
+      return { tool: name, label: `Letar i ${collectionLabel(coll)}` };
     case 'describe_collection':
-      return { tool: name, label: `Undersöker ${collectionLabel(coll)}` };
+      return { tool: name, label: `Tittar närmare på ${collectionLabel(coll)}` };
     case 'aggregate_collection':
       return { tool: name, label: `Sammanställer ${collectionLabel(coll)}` };
     case 'search_knowledge':

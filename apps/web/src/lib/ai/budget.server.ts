@@ -3,6 +3,7 @@ import type PocketBase from 'pocketbase';
 import { escFilter } from '@/lib/pb-filter';
 import {
   AiBudgetExceededError,
+  effectiveBudgetUsd,
   isOverBudget,
   monthStartIso,
   resolveBudgetUsd
@@ -42,7 +43,7 @@ export async function getMonthlyAiSpendUsd(
   const cached = spendCache.get(cacheKey);
   if (cached && Date.now() - cached.at < SPEND_CACHE_TTL_MS) return cached.value;
 
-  const filter = `tenant = "${escFilter(tenantId)}" && created >= "${monthStartIso(now)}"`;
+  const filter = `tenant = "${escFilter(tenantId)}" && created >= "${escFilter(monthStartIso(now))}"`;
   let total = 0;
   try {
     for (let page = 1; page <= MAX_SPEND_PAGES; page++) {
@@ -73,8 +74,56 @@ export function clearSpendCache(): void {
 }
 
 /**
+ * Tenantens egna tak (`monthly_ai_budget_usd`), 0 om osatt/oläsbart. Fail-open:
+ * ett läsfel ger 0 (= falla tillbaka på env-defaulten), aldrig en blockering.
+ */
+async function getTenantBudgetUsd(pb: PocketBase, tenantId: string): Promise<number> {
+  try {
+    const rec = await pb
+      .collection('tenants')
+      .getOne(tenantId, { fields: 'monthly_ai_budget_usd' });
+    const n = Number((rec as { monthly_ai_budget_usd?: number }).monthly_ai_budget_usd);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Det effektiva taket för tenanten = tenant-fältet (om satt) annars env-default.
+ */
+async function getEffectiveBudgetUsd(pb: PocketBase, tenantId: string): Promise<number> {
+  const tenantBudget = await getTenantBudgetUsd(pb, tenantId);
+  return effectiveBudgetUsd(tenantBudget, process.env.MOVEXUM_MONTHLY_AI_BUDGET_USD);
+}
+
+export interface BudgetStatus {
+  /** Tenantens egna värde (0 = ärver env-default). */
+  tenantBudgetUsd: number;
+  /** Global env-default (0 = av). */
+  envDefaultUsd: number;
+  /** Det tak som faktiskt gäller (0 = spärren av). */
+  effectiveUsd: number;
+  /** Förbrukat hittills denna kalendermånad. */
+  spentUsd: number;
+}
+
+/** Hämtar tak + förbrukning för admin-vyn (/installningar). */
+export async function getBudgetStatus(pb: PocketBase, tenantId: string): Promise<BudgetStatus> {
+  const tenantBudgetUsd = await getTenantBudgetUsd(pb, tenantId);
+  const envDefaultUsd = resolveBudgetUsd(process.env.MOVEXUM_MONTHLY_AI_BUDGET_USD);
+  return {
+    tenantBudgetUsd,
+    envDefaultUsd,
+    effectiveUsd: effectiveBudgetUsd(tenantBudgetUsd, process.env.MOVEXUM_MONTHLY_AI_BUDGET_USD),
+    spentUsd: await getMonthlyAiSpendUsd(pb, tenantId)
+  };
+}
+
+/**
  * Kastar `AiBudgetExceededError` om tenanten nått sitt månadstak. No-op när
- * spärren är av (inget tak satt). Anropas vid starten av varje agent-loop +
+ * spärren är av (inget tak satt). Tenantens `monthly_ai_budget_usd` överstyr
+ * env-defaulten (§ 9.6). Anropas vid starten av varje agent-loop +
  * connector-turn.
  */
 export async function assertWithinAiBudget(
@@ -82,7 +131,7 @@ export async function assertWithinAiBudget(
   tenantId: string,
   now: Date = new Date()
 ): Promise<void> {
-  const budget = resolveBudgetUsd(process.env.MOVEXUM_MONTHLY_AI_BUDGET_USD);
+  const budget = await getEffectiveBudgetUsd(pb, tenantId);
   if (budget <= 0) return; // spärren av
   const spent = await getMonthlyAiSpendUsd(pb, tenantId, now);
   if (isOverBudget(spent, budget)) {

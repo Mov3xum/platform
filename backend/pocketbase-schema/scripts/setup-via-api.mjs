@@ -3326,6 +3326,12 @@ await patchTenantsCollection([
   { name: 'default_hourly_rate_sek', type: 'number', required: false, min: 0, max: 100000 }
 ]);
 
+// Per-tenant AI-kostnadstak (USD/månad). 0/tomt = ärver env-default
+// MOVEXUM_MONTHLY_AI_BUDGET_USD (CLAUDE.md § 9.6). Migration 1700000122.
+await patchTenantsCollection([
+  { name: 'monthly_ai_budget_usd', type: 'number', required: false, min: 0, max: 1000000 }
+]);
+
 // 19. seed Movexum tenant ---------------------------------------------------
 const tenant = await ensureRecord('tenants', 'slug = "movexum"', {
   name: 'Movexum',

@@ -6,8 +6,9 @@ import type { Role } from '@platform/shared';
 
 // Streamande chatt-turn för /chatt. Kör samma delade turn-/persistenslogik
 // som server-action-fallbacken (`executeThreadTurn`) men strömmar agentens
-// verktygssteg ("Läser bolagsdata", "Skapar PowerPoint") live till klienten
-// medan turen körs, och avslutar med hela det sparade meddelandeflödet.
+// verktygssteg ("Läser bolagen", "Skapar PowerPoint") OCH själva svaret
+// token-för-token live till klienten medan turen körs, och avslutar med hela
+// det sparade meddelandeflödet.
 //
 // Säkerhet: samma RBAC som sendThreadMessageAction (staff-only), ägar-/
 // tenant-verifierad tråd, ingen ny dataväg (executeThreadTurn äger
@@ -70,7 +71,8 @@ export async function POST(req: Request): Promise<Response> {
         const result = await executeThreadTurn(pb, user, thread, text, {
           includeWebContext,
           attachments,
-          onStep: (step) => send({ type: 'step', ...step })
+          onStep: (step) => send({ type: 'step', ...step }),
+          onToken: (delta) => send({ type: 'token', delta })
         });
         if (result.error) send({ type: 'error', error: result.error });
         else send({ type: 'final', messages: result.messages });

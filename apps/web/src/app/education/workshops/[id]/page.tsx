@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
@@ -61,7 +62,7 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
     try {
       startups = (
         await pb.collection('startups').getList<{ id: string; name: string }>(1, 200, {
-          filter: `tenant = "${user.tenant}" && status = "active"`,
+          filter: `tenant = "${escFilter(user.tenant)}" && status = "active"`,
           sort: 'name',
           fields: 'id,name'
         })
@@ -75,7 +76,7 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
   try {
     recentAssignments = (
       await pb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopAssignment>(1, 10, {
-        filter: `tenant = "${user.tenant}" && workshop = "${id}"`,
+        filter: `tenant = "${escFilter(user.tenant)}" && workshop = "${escFilter(id)}"`,
         sort: '-created',
         expand: 'startup'
       })

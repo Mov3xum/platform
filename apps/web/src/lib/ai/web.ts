@@ -1,4 +1,5 @@
 import 'server-only';
+import { escFilter } from '@/lib/pb-filter';
 import type PocketBase from 'pocketbase';
 import type { WebSourceKey } from '@platform/shared';
 
@@ -221,7 +222,7 @@ async function readCache(
   try {
     const record = await pb
       .collection('web_cache')
-      .getFirstListItem(`source = "${source}"`, { sort: '-fetched_at' });
+      .getFirstListItem(`source = "${escFilter(source)}"`, { sort: '-fetched_at' });
     const fetchedAt = record.fetched_at as string;
     const age = Date.now() - new Date(fetchedAt).getTime();
     if (age > CACHE_TTL_MS) return null;
@@ -241,7 +242,7 @@ async function writeCache(
   try {
     const existing = await pb
       .collection('web_cache')
-      .getFullList({ filter: `source = "${source}"`, sort: '-fetched_at' });
+      .getFullList({ filter: `source = "${escFilter(source)}"`, sort: '-fetched_at' });
     for (const rec of existing) {
       await pb.collection('web_cache').delete(rec.id).catch(() => {});
     }

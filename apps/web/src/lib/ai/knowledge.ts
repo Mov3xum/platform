@@ -54,20 +54,23 @@ export interface ExtractedKnowledge {
  */
 export async function extractKnowledgeFromFile(
   file: File,
-  options: { maxTextBytes?: number } = {}
+  options: { maxTextBytes?: number; maxFileBytes?: number } = {}
 ): Promise<ExtractedKnowledge> {
   // Per-agent kunskapsbas (tool_knowledge) injicerar hela texten i prompten och
-  // håller sig snål (50 KB). Den tenant-breda kunskapsbasen (org_knowledge, §26)
-  // chunkar + embeddar i stället, så den får extrahera mer text per fil.
+  // håller sig snål (50 KB) + 10 MB/fil. Den tenant-breda kunskapsbasen
+  // (org_knowledge, §26) chunkar + embeddar i stället, så den får både extrahera
+  // mer text och ta emot större filer per fil (matchar PB-schemats 25 MB).
   const maxTextBytes = options.maxTextBytes ?? MAX_TEXT_BYTES;
+  const maxFileBytes = options.maxFileBytes ?? MAX_FILE_BYTES;
   const mime = file.type || 'application/octet-stream';
   if (!ALLOWED_MIME_TYPES.has(mime)) {
     throw new KnowledgeError(
       `Filtypen "${mime}" stöds inte i kunskapsbasen (${file.name}). Tillåtet: PDF, text, Markdown, CSV, Excel.`
     );
   }
-  if (file.size > MAX_FILE_BYTES) {
-    throw new KnowledgeError(`Filen "${file.name}" är för stor (max 10 MB).`);
+  if (file.size > maxFileBytes) {
+    const maxMb = Math.round(maxFileBytes / (1024 * 1024));
+    throw new KnowledgeError(`Filen "${file.name}" är för stor (max ${maxMb} MB).`);
   }
 
   const buf = Buffer.from(await file.arrayBuffer());

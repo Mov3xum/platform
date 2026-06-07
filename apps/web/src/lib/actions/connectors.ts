@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { escFilter } from '@/lib/pb-filter';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole, requireRole, canActivateConnector } from '@/lib/rbac';
@@ -80,7 +81,7 @@ async function findActivationRow(
 ): Promise<(Record<string, unknown> & { id: string }) | null> {
   try {
     const filter =
-      `user = "${userId}" && connector_kind = "${kind}" && connector_id = "${connectorId}"`;
+      `user = "${escFilter(userId)}" && connector_kind = "${escFilter(kind)}" && connector_id = "${escFilter(connectorId)}"`;
     const list = await pb.collection('user_mistral_connectors').getList(1, 1, { filter });
     if (list.totalItems === 0) return null;
     return list.items[0] as Record<string, unknown> & { id: string };
@@ -287,7 +288,7 @@ export async function toggleConnectorPinAction(input: {
 
   if (input.pinned) {
     const pinnedList = await pb.collection('user_mistral_connectors').getList(1, 50, {
-      filter: `user = "${user.id}" && is_pinned = true`,
+      filter: `user = "${escFilter(user.id)}" && is_pinned = true`,
       fields: 'id'
     });
     if (pinnedList.totalItems >= MAX_PINNED_CONNECTORS) {

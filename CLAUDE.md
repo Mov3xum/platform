@@ -565,10 +565,21 @@ tenantens `ai_usage_events.cost_estimate_usd` för innevarande kalendermånad
 (60 s-cache, paginerings-tak, fail-open) och kastar `AiBudgetExceededError`
 när taket nås. Enforce:as vid starten av den delade `runAgentLoop` (täcker
 dashboardchatt, toolbox, schemalagt, triggers, djupjobb-subtasks) **och** i
-connector-turn:en. Aktiveras via `MOVEXUM_MONTHLY_AI_BUDGET_USD` (Coolify env,
-aldrig i kod). **Opt-in:** osatt/0 = spärren av, så en felkonfiguration aldrig
-tyst bryter en kunds chatt mitt i månaden — sätt env:en för att få ett tak.
-Robusthet enligt EU AI Act art. 15 / SOC 2 processing integrity (§ 10).
+connector-turn:en. Robusthet enligt EU AI Act art. 15 / SOC 2 processing
+integrity (§ 10).
+
+**Två nivåer för taket** (`effectiveBudgetUsd`, enhetstestad):
+- **Global default:** env `MOVEXUM_MONTHLY_AI_BUDGET_USD` (Coolify, aldrig i
+  kod). Osatt/0 = av.
+- **Per-tenant override:** `tenants.monthly_ai_budget_usd` (migration
+  1700000122), justeras av admin/incubator_lead i **`/installningar` → "AI-
+  kostnadstak"** (server action `saveAiBudgetAction`). Värde > 0 överstyr env-
+  defaulten; 0/tomt ärver den. UI:t visar förbrukat-hittills via
+  `getBudgetStatus` (gul ≥ 80 %, orange ≥ 95 % — ingen röd, § 2.3).
+
+**Opt-in:** med både env osatt OCH tenant-fältet 0 är spärren av, så en
+felkonfiguration aldrig tyst bryter en kunds chatt mitt i månaden — sätt env:en
+eller tenant-taket för att aktivera.
 
 ### 9.7 Bannrar och varningstexter
 
@@ -950,7 +961,13 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
 - **Filter-injection (A.8.9):** dynamiska värden i PocketBase-
   filtersträngar escapas alltid med `escFilter()` i
   `apps/web/src/lib/pb-filter.ts` (escapar `\` före `"`). Använd aldrig
-  rå interpolation eller ad-hoc-escapers.
+  rå interpolation eller ad-hoc-escapers. För ny kod föredras PB:s bundna
+  syntax `pb.filter("f = {:x}", { x })` (strukturellt injektionssäker, ingen
+  escaper att glömma). **Invarianten är CI-tvingad:** `yarn check:filters`
+  (`backend/pocketbase-schema/scripts/check-pb-filters.mjs`, körs i `yarn test`)
+  sveper alla filter-literaler och failar bygget om ett `"${...}"`-värde inte är
+  `escFilter`-wrappat. `escFilter` självt är fuzz-testat (`pb-filter.test.ts`,
+  5000 iterationer) mot utbrytning.
 - **Backup (A.8.13):** PocketBase-DB säkerhetskopieras dagligen i
   Coolify. Restore-rutin ska vara testad kvartalsvis.
 - **Incident response (A.5.24–A.5.27):** loggas i `docs/incidents/`
@@ -2965,9 +2982,9 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
 **Implementerat (retrieval-mognad):** hybrid (semantisk + nyckelord), RRF-
 fusion, MMR-diversifiering, LLM-rerank (`mistral-small`, env-styrd), paginerat
 svep (`MAX_TOTAL_SCAN`, inte ett fast 1500-fönster → ingen tyst recall-förlust),
-frågeembedding-cache (LRU), `topic`-förfilter och **contextual retrieval**
-(Anthropic-tekniken). Ren rankningsmatematik i `rank.ts` (RRF/MMR/cosine) och
-`lru.ts`, enhetstestade.
+frågeembedding-cache (LRU), `topic`-förfilter, **contextual retrieval**
+(Anthropic-tekniken) och **parent-document** (small-to-big, env-gated). Ren,
+enhetstestad logik i `rank.ts` (RRF/MMR/cosine), `lru.ts` och `chunk-stitch.ts`.
 
 **Contextual retrieval (env-gated, av default — index-tid-kostnad):** sätt
 `MOVEXUM_RAG_CONTEXTUAL=1` så genererar en liten LLM (`mistral-small`) en kort
@@ -2992,9 +3009,14 @@ låg → small, medel → medium, hög (analys/rapport/dokument) → large. Kedj
 faller fortfarande uppåt vid 429 och har small som sista utväg. Används av både
 `staff-chat.ts` (trådar/streaming) och `lib/actions/chat.ts` (efemär `/idag`).
 
+**Parent-document / small-to-big (env-gated, av default — prompt-budget):** sätt
+`MOVEXUM_RAG_PARENT=1` så byts varje träffs text mot ett sammanhängande fönster
+av grannchunkar (chunk_index ± `PARENT_WINDOW`, hämtat i ETT batchat anrop,
+overlap-dedupat via den rena `chunk-stitch.ts`, cappat till `PARENT_MAX_CHARS`).
+Sök på små chunkar (precision) men returnera mer kontext (svarskvalitet). Av
+default eftersom det blåser upp prompten (tool-resultatet capas ändå nedströms).
+
 **Kvar / kommande steg:**
-- **Parent-document / small-to-big** (returnera grannchunkars kontext) — avvägs
-  mot prompt-storlekstaket (`MAX_TOOL_RESULT_CHARS`).
 - **PPTX/DOCX-textextraktion** — KLAR. Dependency-fri OOXML-extraktion via den
   delade `lib/import/zip.ts` (ZIP-kärnan, delas med XLSX) + `lib/import/ooxml-text.ts`
   (ren, enhetstestad XML→text) i `lib/ai/attachments.ts`

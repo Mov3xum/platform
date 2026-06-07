@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { notFound, redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
@@ -93,7 +94,7 @@ export default async function IntegrationDetailPage({
   try {
     provider = await pb
       .collection('integration_providers')
-      .getFirstListItem<ProviderRecord>(`slug = "${slug}" && active = true`);
+      .getFirstListItem<ProviderRecord>(`slug = "${escFilter(slug)}" && active = true`);
   } catch {
     provider = null;
   }
@@ -104,7 +105,7 @@ export default async function IntegrationDetailPage({
     tenantIntegration = await pb
       .collection('tenant_integrations')
       .getFirstListItem<TenantIntegrationRecord>(
-        `tenant = "${user.tenant}" && provider = "${provider.id}"`
+        `tenant = "${escFilter(user.tenant)}" && provider = "${escFilter(provider.id)}"`
       );
   } catch {
     tenantIntegration = null;
@@ -121,7 +122,7 @@ export default async function IntegrationDetailPage({
       const runs = await pb
         .collection('integration_sync_runs')
         .getList<SyncRunRecord>(1, 10, {
-          filter: `tenant_integration = "${tenantIntegration.id}"`,
+          filter: `tenant_integration = "${escFilter(tenantIntegration.id)}"`,
           sort: '-started_at'
         });
       syncRuns = runs.items;
@@ -134,7 +135,7 @@ export default async function IntegrationDetailPage({
       const recs = await pb
         .collection('integration_records')
         .getList<IntegrationRecordRow>(1, 20, {
-          filter: `tenant_integration = "${tenantIntegration.id}"`,
+          filter: `tenant_integration = "${escFilter(tenantIntegration.id)}"`,
           sort: '-occurred_at'
         });
       recentRecords = recs.items;
@@ -147,13 +148,13 @@ export default async function IntegrationDetailPage({
       const startupsRes = await pb
         .collection('startups')
         .getList(1, 1, {
-          filter: `tenant = "${user.tenant}" && org_nr != ""`,
+          filter: `tenant = "${escFilter(user.tenant)}" && org_nr != ""`,
           fields: 'id'
         });
       const financialsRes = await pb
         .collection('startup_financials')
         .getList<{ startup: string }>(1, 500, {
-          filter: `tenant = "${user.tenant}" && source = "allabolag"`,
+          filter: `tenant = "${escFilter(user.tenant)}" && source = "allabolag"`,
           fields: 'startup'
         });
       const uniqueStartups = new Set(financialsRes.items.map((r) => r.startup));

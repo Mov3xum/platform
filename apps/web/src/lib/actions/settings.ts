@@ -18,6 +18,13 @@ export type UploadTenantLogoState = {
   success?: boolean;
 };
 
+export type SaveAiBudgetState = {
+  error?: string;
+  success?: boolean;
+};
+
+const MAX_AI_BUDGET_USD = 1000000;
+
 const HIDDEN_MODULE_IDS = ['dashboard', 'toolbox', 'onboarding', 'activity_feed', 'partners'];
 
 const ALLOWED_MODULE_IDS = new Set(
@@ -171,6 +178,50 @@ export async function saveUserModuleTogglesAction(
   revalidatePath('/', 'layout');
   revalidatePath('/installningar');
 
+  return { success: true };
+}
+
+/**
+ * Sparar tenantens AI-kostnadstak (USD/månad). 0 = ärver env-defaulten
+ * (MOVEXUM_MONTHLY_AI_BUDGET_USD). Kräver admin/incubator_lead. CLAUDE.md § 9.6.
+ */
+export async function saveAiBudgetAction(
+  _prev: SaveAiBudgetState,
+  formData: FormData
+): Promise<SaveAiBudgetState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+    return { error: 'Åtkomst nekad.' };
+  }
+
+  const raw = String(formData.get('budget_usd') ?? '').trim().replace(',', '.');
+  const value = raw === '' ? 0 : Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    return { error: 'Ange ett belopp i USD (0 = ingen egen spärr).' };
+  }
+  if (value > MAX_AI_BUDGET_USD) {
+    return { error: `Taket får inte överstiga $${MAX_AI_BUDGET_USD.toLocaleString('sv-SE')}.` };
+  }
+  const budget = Math.round(value * 100) / 100;
+
+  const pb = await getServerPb();
+  try {
+    await pb.collection('tenants').update(user.tenant, { monthly_ai_budget_usd: budget });
+  } catch {
+    const superuserPb = await getSuperuserPb();
+    if (!superuserPb) {
+      console.error('[settings] saveAiBudget failed', { tenantId: user.tenant });
+      return { error: 'Kunde inte spara budgeten. Försök igen.' };
+    }
+    try {
+      await superuserPb.collection('tenants').update(user.tenant, { monthly_ai_budget_usd: budget });
+    } catch {
+      console.error('[settings] saveAiBudget failed (fallback)', { tenantId: user.tenant });
+      return { error: 'Kunde inte spara budgeten. Försök igen.' };
+    }
+  }
+
+  revalidatePath('/installningar');
   return { success: true };
 }
 

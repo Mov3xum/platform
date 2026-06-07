@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
@@ -314,7 +315,7 @@ export default async function InsightsPage({
     try {
       const filter = userIds.map((id) => `id = "${id}"`).join(' || ');
       const list = await pb.collection('users').getList<UserRecord>(1, 500, {
-        filter: `(${filter}) && tenant = "${user.tenant}"`
+        filter: `(${filter}) && tenant = "${escFilter(user.tenant)}"`
       });
       for (const u of list.items) usersById.set(u.id, u);
     } catch {
