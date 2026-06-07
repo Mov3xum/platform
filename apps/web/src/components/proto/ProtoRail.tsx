@@ -9,6 +9,7 @@ import {
 } from '@platform/shared';
 import { canAccessModuleForUser } from '@/lib/rbac';
 import { ModuleNavItem } from './ModuleNavItem';
+import { RailToggleButton } from './MobileRail';
 import { Logo } from '@/components/Logo';
 import { StartupSwitcher, type SwitchableStartup } from './StartupSwitcher';
 
@@ -73,6 +74,7 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
           logoLightUrl={user.tenantLogoLightUrl}
           logoDarkUrl={user.tenantLogoDarkUrl}
         />
+        <RailToggleButton />
       </div>
 
       {switchableStartups.length > 0 && (

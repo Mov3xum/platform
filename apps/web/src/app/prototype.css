@@ -340,14 +340,13 @@ html.dark {
   min-width: 0;
 }
 
+/* Sökvägsrad mot bakgrunden — ingen egen yta, ingen blur, ingen vit remsa. */
 .mx-topbar {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 0 20px;
-  background: var(--mx-topbar-bg);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: transparent;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -355,8 +354,49 @@ html.dark {
   height: var(--mx-topbar-h);
 }
 
-.mx-desktop-rail-btn {
+/* Burger som bor i sidmenyns header (kollapsar railen / stänger drawern). */
+.mx-rail-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  border: 0;
+  border-radius: var(--mx-r-sm);
+  background: none;
+  color: var(--mx-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background .12s, color .12s;
+}
+
+.mx-rail-toggle-btn:hover {
+  background: var(--mx-rail-hover-bg);
+  color: var(--mx-ink);
+}
+
+/* Kontextuell trigger i sökvägsraden — visas BARA när railen är dold. */
+.mx-rail-reopen-btn {
   display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: 0 -4px 0 -8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--mx-ink);
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mx-rail-reopen-btn:hover,
+.mx-rail-reopen-btn:focus-visible {
+  background: var(--mx-rail-hover-bg);
+  outline: none;
 }
 
 .mx-crumb {
@@ -884,30 +924,8 @@ select.mx-input:focus {
 .mx-view::-webkit-scrollbar-thumb:hover { background: var(--mx-muted-2); }
 
 /* ============================================================
-   Mobile menu button + backdrop
+   Rail backdrop (mobil drawer)
    ============================================================ */
-
-.mx-mobile-menu-btn {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  margin: 0 -4px 0 -8px;
-  border: 0;
-  background: transparent;
-  color: var(--mx-ink);
-  border-radius: 8px;
-  cursor: pointer;
-  flex-shrink: 0;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.mx-mobile-menu-btn:hover,
-.mx-mobile-menu-btn:focus-visible {
-  background: var(--mx-paper-2);
-  outline: none;
-}
 
 .mx-rail-backdrop {
   position: fixed;
@@ -942,8 +960,14 @@ body.mx-rail-locked {
     padding: 0;
   }
 
-  .mx-mobile-menu-btn {
+  /* Mobil: railen är en drawer → reopen-knappen är alltid synlig
+     (när drawern är stängd) som enda väg att öppna menyn. */
+  .mx-rail-reopen-btn {
     display: inline-flex;
+  }
+
+  .mx-app.mx-rail-is-open .mx-rail-reopen-btn {
+    display: none;
   }
 
   .mx-rail {
@@ -1010,24 +1034,10 @@ body.mx-rail-locked {
     overflow: hidden;
   }
 
-  /* Toggle button — only on desktop */
-  .mx-desktop-rail-btn {
+  /* Desktop: reopen-knappen i sökvägsraden visas BARA när railen är
+     kollapsad — annars sköts dölj/visa från burgern inne i sidmenyn. */
+  .mx-app.mx-rail-desktop-collapsed .mx-rail-reopen-btn {
     display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: var(--mx-r-sm);
-    border: 0;
-    background: none;
-    color: var(--mx-muted);
-    cursor: pointer;
-    transition: background .12s, color .12s;
-    flex-shrink: 0;
-  }
-  .mx-desktop-rail-btn:hover {
-    background: var(--mx-rail-hover-bg);
-    color: var(--mx-ink);
   }
 }
 
@@ -1317,9 +1327,9 @@ html.dark .mx-field select:focus {
   box-shadow: 0 0 0 2px rgba(79, 196, 234, 0.18);
 }
 
-/* Topbar smälter med canvas — ingen blur, ingen lila ton */
+/* Topbar är transparent även i dark mode — bara sökvägen mot bakgrunden. */
 html.dark .mx-topbar {
-  background: var(--mx-canvas);
+  background: transparent;
 }
 
 /* Status chips — fortfarande färgade men med dämpad bakgrund */
@@ -1625,8 +1635,7 @@ html.dark .mx-page-head h1 {
 
 .mx-page-shell-head {
   padding: 18px 24px 0;
-  border-bottom: 1px solid var(--mx-rail-divider);
-  background: var(--mx-canvas);
+  background: transparent;
   flex-shrink: 0;
 }
 
@@ -1669,8 +1678,7 @@ html.dark .mx-page-head h1 {
 /* Bolags-header i workspace */
 .mx-startup-head {
   padding: 18px 24px 0;
-  border-bottom: 1px solid var(--mx-line);
-  background: var(--mx-canvas);
+  background: transparent;
 }
 
 .mx-startup-head-row {
