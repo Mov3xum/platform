@@ -4,10 +4,11 @@ Self-hosted brand-typsnitt – inga CDN-anrop, EU-suveränt.
 
 ## Movexum brand-typsnitt (grafisk profil § 2.4)
 
-Sora (rubriker) + Nunito Sans (brödtext) är de **enda** godkända text-typsnitten.
-JetBrains Mono används bara för kod/data. Inga andra familjer
-(Inter/Fraunces/Helvetica/Arial/system-ui som primär) får förekomma någonstans
-i plattformen – varken i UI, genererade dokument, PDF:er, diagram eller mejl.
+Sora (rubriker) + Nunito Sans (brödtext) är de **enda** godkända typsnitten.
+Inga andra familjer (JetBrains Mono/Inter/Fraunces/Helvetica/Arial/system-ui
+som primär) får förekomma någonstans i plattformen – varken i UI, genererade
+dokument, PDF:er, diagram eller mejl. `font-mono`/`--mx-mono` är ommappade till
+Nunito Sans (tabular-nums via `.mx-tnum` där siffror behöver linjera).
 
 ### Webb (variable WOFF2, laddas via `apps/web/src/app/fonts.css`)
 
@@ -16,7 +17,6 @@ i plattformen – varken i UI, genererade dokument, PDF:er, diagram eller mejl.
 | `sora-variable.woff2` | Sora Variable | Rubriker (100–800) |
 | `nunito-sans-variable.woff2` | Nunito Sans Variable | Brödtext upright (200–1000) |
 | `nunito-sans-italic-variable.woff2` | Nunito Sans Variable | Brödtext italic (200–1000) |
-| `jetbrains-mono-variable.woff2` | JetBrains Mono Variable | Kod/data |
 
 ### PDF-inbäddning (statiska TTF, `apps/web/src/lib/documents/assets.ts`)
 

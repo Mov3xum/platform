@@ -134,8 +134,14 @@ i UI och bevara minst 16 px luft runtomkring.
 | Användning  | Typsnitt       | Vikter (rekommenderade)         |
 | ----------- | -------------- | ------------------------------- |
 | Rubriker    | **Sora**       | Regular 400, Semi Bold 600, Bold 700 |
-| Brödtext    | **Nunito Sans**| Regular 400, Medium 500, Semi Bold 600, Bold 700 |
-| Kod / data  | JetBrains Mono | Regular 400                     |
+| Brödtext / allt övrigt | **Nunito Sans** | Regular 400, Medium 500, Semi Bold 600, Bold 700 |
+
+**Endast Sora + Nunito Sans får förekomma — överallt.** Det finns inget
+separat kod/data-typsnitt längre: JetBrains Mono har avvecklats. För kod, IDs,
+tidsstämplar och etiketter används Nunito Sans (med `font-variant-numeric:
+tabular-nums` / `.mx-tnum` där siffror behöver linjera). `font-mono`-utility:n
+och `--mx-mono`-variabeln finns kvar som namn (bakåtkompatibelt) men pekar på
+Nunito Sans.
 
 Filer (variable WOFF2) ligger i `apps/web/public/fonts/` och laddas via
 `apps/web/src/app/fonts.css`. CSS-variabler:
@@ -143,13 +149,13 @@ Filer (variable WOFF2) ligger i `apps/web/public/fonts/` och laddas via
 ```css
 --font-heading: "Sora Variable", system-ui, sans-serif;
 --font-body:    "Nunito Sans Variable", system-ui, sans-serif;
---font-mono:    "JetBrains Mono Variable", monospace;
+--font-mono:    "Nunito Sans Variable", system-ui, sans-serif; /* ej JetBrains */
 ```
 
 Använd `font-heading` / `font-body` Tailwind-utility:erna eller låt
 `<h1>`–`<h6>` ärva (sker automatiskt via `globals.css`).
-**Använd ALDRIG Inter, Fraunces eller andra typsnitt** — de fanns i
-ett tidigare utkast och har avvecklats.
+**Använd ALDRIG Inter, Fraunces, JetBrains Mono eller andra typsnitt** — bara
+Sora + Nunito Sans.
 
 ---
 
