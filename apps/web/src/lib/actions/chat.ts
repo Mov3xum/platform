@@ -8,6 +8,7 @@ import {
   type MistralContentPart
 } from '@/lib/ai/mistral';
 import { runAgentLoop } from '@/lib/ai/agent-runtime';
+import { routeChatModels } from '@/lib/ai/model-router';
 import {
   buildStartupContext,
   buildPortfolioContext,
@@ -501,7 +502,14 @@ async function runStaffChatWithTools(
     ...withAttachedImages(userMessages, images)
   ];
 
-  const models = pickModels(images.length > 0);
+  // Modellval efter komplexitet (ej längre default small). Bilder → vision.
+  const models = images.length > 0
+    ? pickModels(true)
+    : routeChatModels({
+        message: userMessages.filter((m) => m.role === 'user').at(-1)?.content ?? '',
+        hasAgent: Boolean(agentId),
+        historyTurns: userMessages.length
+      });
 
   try {
     const result = await runAgentLoop(conversation, {

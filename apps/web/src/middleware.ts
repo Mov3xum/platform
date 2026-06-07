@@ -52,6 +52,11 @@ function buildCsp(nonce: string | null, isHttps: boolean): string {
 
 function withSecurityContext(req: NextRequest, nonce: string | null, csp: string): NextResponse {
   const requestHeaders = new Headers(req.headers);
+  // Exponera den faktiska request-pathen för root-layouten (server component
+  // saknar annars tillgång till pathname). Vi sätter ALLTID värdet — och
+  // skriver över ev. klient-medskickad x-pathname — så layouten kan avgöra om
+  // sidan är en publik, oinloggad yta (t.ex. /m/<slug>) utan att kunna luras.
+  requestHeaders.set('x-pathname', req.nextUrl.pathname);
   if (nonce) {
     // Next.js läser nonce från CSP-headern på request och applicerar den på
     // sina egna script-taggar. x-nonce läses av layouten för ThemeScript.

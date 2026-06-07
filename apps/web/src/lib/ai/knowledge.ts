@@ -1,7 +1,10 @@
 import 'server-only';
 
-import { extractPdfText, extractXlsxText } from './attachments';
+import { extractPdfText, extractXlsxText, extractDocxText, extractPptxText } from './attachments';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
+
+const MIME_DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const MIME_PPTX = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
 // Extraktion + sanering av en kunskapsbas-fil (tool_knowledge). Texten
 // extraheras EN gång här vid uppladdning, saneras (personnummer → [REDACTED],
@@ -16,7 +19,9 @@ const ALLOWED_MIME_TYPES = new Set([
   'text/plain',
   'text/markdown',
   'text/csv',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  MIME_DOCX,
+  MIME_PPTX
 ]);
 
 export class KnowledgeError extends Error {
@@ -49,20 +54,23 @@ export interface ExtractedKnowledge {
  */
 export async function extractKnowledgeFromFile(
   file: File,
-  options: { maxTextBytes?: number } = {}
+  options: { maxTextBytes?: number; maxFileBytes?: number } = {}
 ): Promise<ExtractedKnowledge> {
   // Per-agent kunskapsbas (tool_knowledge) injicerar hela texten i prompten och
-  // håller sig snål (50 KB). Den tenant-breda kunskapsbasen (org_knowledge, §26)
-  // chunkar + embeddar i stället, så den får extrahera mer text per fil.
+  // håller sig snål (50 KB) + 10 MB/fil. Den tenant-breda kunskapsbasen
+  // (org_knowledge, §26) chunkar + embeddar i stället, så den får både extrahera
+  // mer text och ta emot större filer per fil (matchar PB-schemats 25 MB).
   const maxTextBytes = options.maxTextBytes ?? MAX_TEXT_BYTES;
+  const maxFileBytes = options.maxFileBytes ?? MAX_FILE_BYTES;
   const mime = file.type || 'application/octet-stream';
   if (!ALLOWED_MIME_TYPES.has(mime)) {
     throw new KnowledgeError(
       `Filtypen "${mime}" stöds inte i kunskapsbasen (${file.name}). Tillåtet: PDF, text, Markdown, CSV, Excel.`
     );
   }
-  if (file.size > MAX_FILE_BYTES) {
-    throw new KnowledgeError(`Filen "${file.name}" är för stor (max 10 MB).`);
+  if (file.size > maxFileBytes) {
+    const maxMb = Math.round(maxFileBytes / (1024 * 1024));
+    throw new KnowledgeError(`Filen "${file.name}" är för stor (max ${maxMb} MB).`);
   }
 
   const buf = Buffer.from(await file.arrayBuffer());
@@ -82,6 +90,22 @@ export async function extractKnowledgeFromFile(
     } catch (err) {
       throw new KnowledgeError(
         `Kunde inte läsa Excel "${file.name}": ${err instanceof Error ? err.message : 'okänt fel'}`
+      );
+    }
+  } else if (mime === MIME_DOCX) {
+    try {
+      raw = await extractDocxText(buf);
+    } catch (err) {
+      throw new KnowledgeError(
+        `Kunde inte läsa Word "${file.name}": ${err instanceof Error ? err.message : 'okänt fel'}`
+      );
+    }
+  } else if (mime === MIME_PPTX) {
+    try {
+      raw = await extractPptxText(buf);
+    } catch (err) {
+      throw new KnowledgeError(
+        `Kunde inte läsa PowerPoint "${file.name}": ${err instanceof Error ? err.message : 'okänt fel'}`
       );
     }
   } else {

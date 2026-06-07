@@ -58,6 +58,8 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [liveSteps, setLiveSteps] = useState<LiveStep[]>([]);
+  // Svaret medan det strömmas in token-för-token (löpande utskrift).
+  const [liveText, setLiveText] = useState('');
   const [deepJob, setDeepJob] = useState<{ id: string; threadId: string; status: DeepJobStatus; progress: number } | null>(null);
   const [rightOpen, setRightOpen] = useState(true);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -148,6 +150,10 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   type SubmitOpts = { includeWebContext: boolean; attachments: ChatAttachment[]; deepJob: boolean };
 
   function applyStep(ev: { phase: 'start' | 'end'; id: string; label: string; ok?: boolean }) {
+    // Ett verktygssteg startar → ev. text som strömmats innan dess var en
+    // inledning före verktygsanropet, inte slutsvaret. Nolla den löpande
+    // texten så bara det riktiga svaret (som strömmas EFTER stegen) blir kvar.
+    if (ev.phase === 'start') setLiveText('');
     setLiveSteps((prev) => {
       if (ev.phase === 'start') {
         if (prev.some((s) => s.id === ev.id)) return prev;
@@ -174,6 +180,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   async function runStreamingTurn(text: string, opts: SubmitOpts) {
     setStreaming(true);
     setLiveSteps([]);
+    setLiveText('');
     try {
       let threadId = activeThreadId;
       if (!threadId) {
@@ -243,8 +250,14 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           }
           if (ev.type === 'step') {
             applyStep(ev as unknown as { phase: 'start' | 'end'; id: string; label: string; ok?: boolean });
+          } else if (ev.type === 'token') {
+            const delta = ev.delta;
+            if (typeof delta === 'string' && delta) setLiveText((prev) => prev + delta);
           } else if (ev.type === 'final') {
             gotFinal = true;
+            // Persisterade meddelandet ersätter den live-strömmade texten —
+            // nolla liveText så svaret inte visas dubbelt en kort stund.
+            setLiveText('');
             if (Array.isArray(ev.messages)) setMessages(toUiMessages(ev.messages as ToolRunMessage[]));
           } else if (ev.type === 'error') {
             gotError = true;
@@ -263,6 +276,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     } finally {
       setStreaming(false);
       setLiveSteps([]);
+      setLiveText('');
     }
   }
 
@@ -400,6 +414,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           deepRunning={deepRunning}
           deepProgress={deepJob?.progress ?? 0}
           liveSteps={liveSteps}
+          liveText={liveText}
           onPickAgent={setActiveAgent}
           onReset={newChat}
           onSubmit={submit}

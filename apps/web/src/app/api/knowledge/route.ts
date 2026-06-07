@@ -4,7 +4,7 @@ import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { extractKnowledgeFromFile, KnowledgeError } from '@/lib/ai/knowledge';
 import { indexOrgKnowledge } from '@/lib/ai/rag';
-import { logAiUsage } from '@/lib/ai/usage';
+import { logIndexUsage } from '@/lib/ai/usage';
 import { isFileTopic } from '@platform/shared';
 import type { Role } from '@platform/shared';
 
@@ -19,6 +19,9 @@ export const maxDuration = 300;
 // Tenant-bred kunskapsbas → mer text per fil än per-agent-basen (50 KB). Vi
 // chunkar + embeddar ändå, så taket är bara mot prompt-/lagrings-explosion.
 const ORG_MAX_TEXT_BYTES = 300_000;
+// Filstorlek matchar org_knowledge.file-schemat (migration 1700000118, 25 MB).
+// Per-agent-basen (tool_knowledge) ligger kvar på 10 MB.
+const ORG_MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 
@@ -47,7 +50,10 @@ export async function POST(request: Request): Promise<Response> {
   // Extrahera + sanera (personnummer) + cappa text.
   let extracted;
   try {
-    extracted = await extractKnowledgeFromFile(fileEntry, { maxTextBytes: ORG_MAX_TEXT_BYTES });
+    extracted = await extractKnowledgeFromFile(fileEntry, {
+      maxTextBytes: ORG_MAX_TEXT_BYTES,
+      maxFileBytes: ORG_MAX_FILE_BYTES
+    });
   } catch (err) {
     if (err instanceof KnowledgeError) {
       return NextResponse.json({ error: err.message }, { status: 400 });
@@ -102,16 +108,7 @@ export async function POST(request: Request): Promise<Response> {
       text: extracted.text
     });
     chunkCount = idx.chunkCount;
-    if (idx.usage.tokensIn > 0) {
-      void logAiUsage(pb, {
-        tenant: user.tenant,
-        userId: user.id,
-        surface: 'suggestions',
-        model: 'mistral-embed',
-        tokensIn: idx.usage.tokensIn,
-        tokensOut: idx.usage.tokensOut
-      });
-    }
+    void logIndexUsage(pb, { tenant: user.tenant, userId: user.id }, idx.usage);
   } catch (err) {
     console.warn('[knowledge] indexing failed (swallowed)', {
       tenantId: user.tenant,

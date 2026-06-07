@@ -17,7 +17,7 @@ import {
   LEAD_STATUS_ORDER,
   type LeadStatus
 } from '@/lib/compass/types';
-import { ALL_PHASES, type StartupPhase } from '@platform/shared';
+import { ALL_PHASES, validateWorkshopMediaFile, type StartupPhase } from '@platform/shared';
 
 const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
 const CONVERT_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
@@ -554,6 +554,27 @@ export async function updateModuleAction(formData: FormData) {
   }
   const model = String(formData.get('model') || '');
   if (model) patch.model = model;
+
+  // Omslagsbild (hero_image): ladda upp en ny bild, eller rensa den befintliga.
+  // serverActions.bodySizeLimit är 32 MB → en bild på upp till 15 MB ryms.
+  const heroImage = formData.get('hero_image');
+  const removeHero = formData.get('remove_hero_image') === 'on';
+  if (heroImage instanceof File && heroImage.size > 0) {
+    const check = validateWorkshopMediaFile(
+      { type: heroImage.type, size: heroImage.size },
+      'image'
+    );
+    if (!check.ok) throw new Error(check.error);
+    // Node/undici-gotcha (samma som /api/education/media): materialisera till
+    // Buffer och slå om i en ny File innan vidaresändning till PocketBase, annars
+    // kan filen skickas med tom body.
+    const buffer = Buffer.from(await heroImage.arrayBuffer());
+    patch.hero_image = new File([buffer], heroImage.name || `omslag-${Date.now()}`, {
+      type: heroImage.type || 'application/octet-stream'
+    });
+  } else if (removeHero) {
+    patch.hero_image = null;
+  }
 
   try {
     await writeWithFallback(pb, (c) => c.collection('compass_modules').update(id, patch));

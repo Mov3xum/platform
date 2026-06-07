@@ -32,6 +32,22 @@ export const SEARCH_STRATEGY_GUIDANCE =
   '- `query_collection` / `count_collection`: för riktade uppslag när du redan ' +
   'vet kollektion/fält/id. Tänk på att `~` är exakt substring (ingen ' +
   'felstavningstolerans) — för namnsökning är `search_records` bättre.\n\n' +
+  'EFFEKTIVITET — gör ALDRIG en fråga per bolag (det är för långsamt och slår ' +
+  'i steg-taket):\n' +
+  '- Vill du LISTA eller RÄKNA vilka bolag som har något i en barnkollektion ' +
+  '(kapitalrundor, avtal, KPI:er, aktiviteter …): kör EN ' +
+  '`aggregate_collection` på barnkollektionen med `group_by` = relationsfältet ' +
+  'till bolaget (oftast `startup`). Grupperna kommer tillbaka som bolagsNAMN, ' +
+  'så du behöver INTE slå upp varje id separat. Exempel: "vilka bolag har gjort ' +
+  'kapitalrundor" → `aggregate_collection(collection:"capital_rounds", ' +
+  'op:"count", group_by:"startup")`. Lägg till `filter` för tidsfönster, t.ex. ' +
+  '`received_at >= "2025-01-01"` för "senaste året".\n' +
+  '- Behöver du DETALJER från flera bolags rader på en gång: kör EN ' +
+  '`query_collection` på barnkollektionen med `expand:"startup"` och läs ' +
+  'bolagsnamnet ur `expand.startup.name` — loopa inte bolag för bolag.\n' +
+  '- Måste du ändå köra flera oberoende uppslag i samma steg: lägg dem som ' +
+  'PARALLELLA verktygsanrop i SAMMA svar (de körs samtidigt), aldrig ett i ' +
+  'taget över många turer.\n\n' +
   'Regler för att förstå användaren:\n' +
   '- Ge ALDRIG upp efter en enda träfflös query. Bredda: prova `search_records`, ' +
   'färre/andra söktermer, alternativa fält. Säg "hittade inget" först EFTER en ' +
@@ -64,6 +80,9 @@ export const KNOWLEDGE_GUIDANCE =
   'väv ihop dem.\n' +
   '- Hittar `search_knowledge` inget relevant: säg det rakt ut och svara utifrån ' +
   'databasen om möjligt. Hitta aldrig på innehåll ur dokument du inte fått träff på.\n' +
+  '- Hör frågan tydligt till ETT ämne (finansiering, juridik, pitch, hållbarhet, ' +
+  'internationalisering, rapporter, affärsplan): sätt `topic` så blir sökningen ' +
+  'snabbare och mer precis. Är du osäker — lämna `topic` tomt och sök brett.\n' +
   '- `search_my_files` söker i ANVÄNDARENS EGNA uppladdade filer (den personliga ' +
   'Filer-ytan). Använd det när användaren säger "mina filer", "dokumentet jag ' +
   'laddade upp" eller vill att du kör mot eget material — till skillnad från ' +

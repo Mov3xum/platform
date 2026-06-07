@@ -7,6 +7,7 @@ import { buildSchemaSummary, getExposedCollections } from './schema';
 import { buildPortfolioContext, renderPromptTemplate } from './context';
 import { buildKnowledgeContext } from './agent-prompt';
 import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY, KNOWLEDGE_GUIDANCE } from './guidance';
+import { routeChatModels } from './model-router';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from './web';
 import { withAttachedImages } from './chat-input';
 import { logAiUsage } from './usage';
@@ -35,6 +36,14 @@ export const DEFAULT_CHAT_WEB_SOURCES: WebSourceKey[] = ['breakit', 'sifted', 'v
 
 export function pickModels(hasImages: boolean): string[] {
   return hasImages ? VISION_FALLBACK_MODELS : CHAT_FALLBACK_MODELS;
+}
+
+/** Senaste användarturen — driver komplexitets-routingen av modellval. */
+function latestUserMessage(messages: Array<{ role: string; content: string }>): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') return messages[i].content;
+  }
+  return '';
 }
 
 export function chatErrorMessage(err: unknown): string {
@@ -296,6 +305,8 @@ export interface RunStaffChatTurnOptions {
   surface?: AiUsageSurface;
   /** Live-callback för verktygssteg (streaming-endpoint). */
   onStep?: (step: AgentLoopStep) => void;
+  /** Live-callback för text-deltan (löpande utskrift, streaming-endpoint). */
+  onToken?: (delta: string) => void;
 }
 
 /**
@@ -372,9 +383,17 @@ export async function runStaffChatTurn(
   const generatedFiles: GeneratedFileRef[] = [];
   const surface: AiUsageSurface = opts.surface ?? 'dashboard_chat';
 
+  // Modellval efter komplexitet (ej längre default small). Bilder → vision.
+  const models = routeChatModels({
+    hasImages: images.length > 0,
+    message: latestUserMessage(opts.userMessages),
+    hasAgent: Boolean(opts.agentId),
+    historyTurns: opts.userMessages.length
+  });
+
   try {
     const result = await runAgentLoop(conversation, {
-      models: pickModels(images.length > 0),
+      models,
       tools,
       toolContext: {
         pb,
@@ -387,6 +406,7 @@ export async function runStaffChatTurn(
       },
       maxIterations: MAX_TOOL_ITERATIONS,
       onStep: opts.onStep,
+      onToken: opts.onToken,
       onUsage: (u) => {
         tokensIn += u.tokensIn;
         tokensOut += u.tokensOut;

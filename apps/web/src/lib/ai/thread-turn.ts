@@ -33,6 +33,8 @@ export interface ThreadTurnOptions {
   attachments?: ChatAttachment[];
   /** Live-callback för verktygssteg (forwardas av streaming-endpointen). */
   onStep?: (step: AgentLoopStep) => void;
+  /** Live-callback för text-deltan (löpande utskrift, streaming-endpoint). */
+  onToken?: (delta: string) => void;
 }
 
 /** Laddar en tråd och verifierar ägarskap + tenant (defense-in-depth). */
@@ -125,7 +127,8 @@ export async function executeThreadTurn(
     ownerUserId: user.id,
     chatThreadId: thread.id,
     surface: 'dashboard_chat',
-    onStep
+    onStep,
+    onToken: options.onToken
   });
 
   if (!turn.ok) return { error: turn.error };
