@@ -158,6 +158,60 @@ export async function analyzeImportAction(formData: FormData): Promise<AnalyzeSt
 // ── Relation-uppslag (cachat per körning) ──────────────────────────
 const RELATION_KEY_FIELDS = ['name', 'title', 'org_nr', 'email', 'kpi_name'];
 
+function relationMatchHints(target: ImportCollection, fieldName: string, raw: string): string {
+  const trimmed = raw.trim();
+  const targetFieldNames = new Set(target.fields.map((f) => f.name));
+  const candidates = RELATION_KEY_FIELDS.filter((f) => targetFieldNames.has(f));
+  const candidateText = candidates.length > 0 ? candidates.join(', ') : 'inga importerbara nyckelfält';
+
+  if (target.name === 'startups' && fieldName === 'startup') {
+    return [
+      'Kolumnen "startup" måste peka på ett befintligt bolag i startups.',
+      `Importen matchar just nu bara mot: ${candidateText}.`,
+      'För kapitalimport: mappa "Företagsnamn" till startup och låt "FöretagsID" vara Ignorera. Om värdet inte hittas behöver bolaget skapas eller så måste namn/org_nr korrigeras.'
+    ].join(' ');
+  }
+
+  return [
+    `Kolumnen "${fieldName}" måste kunna kopplas till en befintlig post i ${target.name}.`,
+    `Importen matchar mot: ${candidateText}.`,
+    trimmed ? `Det värde som inte matchade var "${trimmed}".` : 'Värdet var tomt.'
+  ].join(' ');
+}
+
+function scalarErrorHint(field: ImportField, reason: string, raw: string): string {
+  const trimmed = raw.trim();
+  const valuePart = trimmed ? ` Värdet "${trimmed}" kunde inte tolkas.` : '';
+
+  if (field.type === 'select') {
+    const values = field.values?.length ? ` Tillåtna värden: ${field.values.join(', ')}.` : '';
+    return `Kolumnen "${field.name}" har ogiltigt select-värde.${valuePart}${values} Kontrollera stavning och om Excel-filen använder ett annat namn än vår datamodell.`;
+  }
+
+  if (field.type === 'date') {
+    return `Kolumnen "${field.name}" måste vara ett giltigt datum i formatet YYYY-MM-DD eller ett Excel-datum.${valuePart} Kontrollera cellformatet.`;
+  }
+
+  if (field.type === 'number') {
+    return `Kolumnen "${field.name}" måste vara ett giltigt tal.${valuePart} Kontrollera decimaltecken, tusentalsavgränsare och att cellen inte innehåller text.`;
+  }
+
+  if (field.type === 'bool') {
+    return `Kolumnen "${field.name}" måste vara ja/nej.${valuePart} Använd till exempel ja, nej, true, false, 1 eller 0.`;
+  }
+
+  return `Kolumnen "${field.name}" kunde inte läsas: ${reason}.${valuePart}`;
+}
+
+function writeErrorHint(collectionName: string, err: unknown): string {
+  const message = err instanceof Error ? err.message : 'okänt fel';
+  return [
+    `Raden kunde inte sparas i ${collectionName}.`,
+    `PocketBase svarade: ${message}.`,
+    'Kontrollera att alla obligatoriska fält finns, att relationer pekar på befintliga poster, och att select-värden matchar tillåtna alternativ.'
+  ].join(' ');
+}
+
 async function resolveRelation(
   pb: PocketBase,
   target: ImportCollection,
@@ -321,9 +375,9 @@ async function runImport(buf: Buffer, config: ImportConfig, dryRun: boolean): Pr
           ? collByName.get(field.relationCollection)
           : undefined;
         if (!target) {
-          // Mål utanför importerbar yta (t.ex. users/tenants) — kan ej kopplas.
           addIssue(
-            `Rad ${rowNum}, "${field.name}": relationen kan inte slås upp automatiskt (mål skyddat).`
+            `Rad ${rowNum}, "${field.name}": relationen kan inte slås upp automatiskt. ` +
+              'Målkollektionen är skyddad eller saknar importerbara nyckelfält.'
           );
           continue;
         }
@@ -331,7 +385,7 @@ async function runImport(buf: Buffer, config: ImportConfig, dryRun: boolean): Pr
         if (id) {
           record[field.name] = (field.maxSelect ?? 1) > 1 ? [id] : id;
         } else {
-          addIssue(`Rad ${rowNum}, "${field.name}": hittade ingen matchande post i ${target.name}.`);
+          addIssue(`Rad ${rowNum}, "${field.name}": ${relationMatchHints(target, field.name, raw)}`);
         }
       }
 
@@ -343,7 +397,11 @@ async function runImport(buf: Buffer, config: ImportConfig, dryRun: boolean): Pr
       if (missing.length > 0) {
         outcome.skipped++;
         totals.skipped++;
-        addIssue(`Rad ${rowNum}: saknar obligatoriska fält (${missing.join(', ')}) — hoppas över.`);
+        addIssue(
+          `Rad ${rowNum}: saknar obligatoriska fält (${missing.join(', ')}). ` +
+            'Fyll i eller mappa de fälten i arket innan du kör importen igen. ' +
+            'Om fältet är en relation måste den peka på en befintlig post.'
+        );
         continue;
       }
 
@@ -389,9 +447,7 @@ async function runImport(buf: Buffer, config: ImportConfig, dryRun: boolean): Pr
       } catch (err) {
         outcome.skipped++;
         totals.skipped++;
-        addIssue(
-          `Rad ${rowNum}: kunde inte skrivas (${err instanceof Error ? err.message : 'okänt fel'}).`
-        );
+        addIssue(`Rad ${rowNum}: ${writeErrorHint(collection.name, err)}`);
       }
     }
 

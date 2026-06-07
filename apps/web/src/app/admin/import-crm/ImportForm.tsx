@@ -402,8 +402,11 @@ function SheetCard({
                 <span>
                   {' '}
                   Minst en av dem är en relation, så den här importen kan inte skapa rader
-                  förrän du mappar en kolumn till rätt koppling. Om du inte har någon lämplig
-                  källkolumn, lämna arket utanför eller använd en specialimport för den tabellen.
+                  förrän du mappar en kolumn till rätt koppling. För kapital/import av bolagsdata
+                  betyder det normalt att du ska mappa <strong>Företagsnamn</strong> till
+                  <strong>startup</strong> och låta externa käll-ID:n som <strong>FöretagsID</strong>
+                  vara ignorerade. Om bolaget inte finns i databasen ännu måste det läggas in
+                  först, eller så behöver du använda en specialimport för den tabellen.
                 </span>
               ) : (
                 <span>

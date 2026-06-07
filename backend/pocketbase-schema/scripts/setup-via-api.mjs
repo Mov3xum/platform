@@ -3032,6 +3032,123 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
 });
 
+// Migration 1700000120: user_files RAG-fält (personlig fil-QA).
+await patchCollection('user_files', [
+  { name: 'extracted_text', type: 'text', required: false, max: 320000 },
+  { name: 'indexed', type: 'bool', required: false },
+  { name: 'chunk_count', type: 'number', required: false, min: 0, onlyInt: true }
+]);
+
+// Migration 1700000118: org_knowledge — tenant-bred kunskapsbas.
+await ensureCollection({
+  id: 'org_knowledge_col',
+  name: 'org_knowledge',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: false, max: 300 },
+    { name: 'filename', type: 'text', required: true, min: 1, max: 300 },
+    { name: 'mime', type: 'text', required: false, max: 120 },
+    { name: 'size_bytes', type: 'number', required: false, min: 0, onlyInt: true },
+    {
+      name: 'file',
+      type: 'file',
+      required: false,
+      maxSelect: 1,
+      maxSize: 26214400,
+      mimeTypes: [
+        'application/pdf',
+        'text/plain',
+        'text/markdown',
+        'text/csv',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      ]
+    },
+    { name: 'extracted_text', type: 'text', required: false, max: 320000 },
+    { name: 'char_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'redacted', type: 'bool', required: false },
+    {
+      name: 'topic',
+      type: 'select',
+      required: false,
+      maxSelect: 1,
+      values: [
+        'affarsplan_strategi',
+        'finansiering_kapital',
+        'hallbarhet_esg',
+        'internationalisering',
+        'pitch_material',
+        'juridik_avtal',
+        'rapporter_uppfoljning',
+        'osorterat'
+      ]
+    },
+    { name: 'indexed', type: 'bool', required: false },
+    { name: 'chunk_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'source_ref', type: 'text', required: false, max: 300 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_org_knowledge_tenant ON org_knowledge (tenant)',
+    'CREATE INDEX idx_org_knowledge_topic ON org_knowledge (topic)'
+  ],
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
+// Migration 1700000119: org_knowledge_chunks — RAG-index för tenant-kunskapsbas.
+await ensureCollection({
+  id: 'org_knowledge_chunks_col',
+  name: 'org_knowledge_chunks',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'source', type: 'relation', required: true, collectionId: 'org_knowledge_col', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'chunk_index', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'text', type: 'text', required: false, max: 8000 },
+    { name: 'embedding', type: 'json', required: false, maxSize: 200000 },
+    { name: 'token_count', type: 'number', required: false, min: 0, onlyInt: true }
+  ],
+  indexes: [
+    'CREATE INDEX idx_org_knowledge_chunks_tenant ON org_knowledge_chunks (tenant)',
+    'CREATE INDEX idx_org_knowledge_chunks_source ON org_knowledge_chunks (source)'
+  ],
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
+// Migration 1700000121: user_file_chunks — RAG-index för personligt filarkiv.
+await ensureCollection({
+  id: 'user_file_chunks_col',
+  name: 'user_file_chunks',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'owner', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'source', type: 'relation', required: true, collectionId: 'user_files_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'chunk_index', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'text', type: 'text', required: false, max: 8000 },
+    { name: 'embedding', type: 'json', required: false, maxSize: 200000 },
+    { name: 'token_count', type: 'number', required: false, min: 0, onlyInt: true }
+  ],
+  indexes: [
+    'CREATE INDEX idx_user_file_chunks_owner ON user_file_chunks (owner)',
+    'CREATE INDEX idx_user_file_chunks_source ON user_file_chunks (source)',
+    'CREATE INDEX idx_user_file_chunks_tenant ON user_file_chunks (tenant)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${OWNER_DIRECT}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
+});
+
 // Backfill: en tidigare körning hann skapa chat_threads/deep_jobs UTAN
 // created/updated (REST API:t auto-lägger dem inte). ensureCollection
 // synkar bara regler på en befintlig collection, så lägg till de saknade
@@ -3244,6 +3361,9 @@ const FORCE_CREATE_RULES = {
   chat_threads: `${ANY_AUTH} && @request.auth.id = owner`,
   deep_jobs: `${ANY_AUTH} && @request.auth.id = owner`,
   user_files: `${ANY_AUTH} && @request.auth.id = owner`,
+  org_knowledge: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  org_knowledge_chunks: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  user_file_chunks: `${ANY_AUTH} && @request.auth.id = owner`,
   ai_usage_events: `${ANY_AUTH} && @request.auth.id = user`,
   tool_run_feedback: `${ANY_AUTH} && @request.auth.id = user`,
   agent_actions: `${ANY_AUTH} && @request.auth.id = actor`,
