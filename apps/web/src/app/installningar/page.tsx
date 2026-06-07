@@ -8,6 +8,11 @@ import { RailSection, RailItem, RailStat, RailNote } from '@/components/PageRail
 import { AdminToggles, type ModuleToggleItem } from './AdminToggles';
 import { UserModuleToggles } from './UserModuleToggles';
 import { TenantLogoUpload } from './TenantLogoUpload';
+import {
+  AgentMemoryManager,
+  type AgentMemoryItem,
+  type StartupOption
+} from './AgentMemoryManager';
 import { getInfraHealth, healthStateLabel, type HealthState } from '@/lib/health';
 
 interface TenantRecord {
@@ -156,6 +161,54 @@ export default async function InstallningarPage() {
     }
   }
 
+  // ── AI-minne (agent_memory, § 16.4) ──────────────────────────
+  // Tvärsessions-minnet som chatten lär sig av personalens korrigeringar.
+  // Läses via användarens auth-token → RLS (staff-only, tenant-scope) gäller.
+  let memoryItems: AgentMemoryItem[] = [];
+  let startupOptions: StartupOption[] = [];
+  try {
+    const mem = await pb.collection('agent_memory').getList<{
+      id: string;
+      key: string;
+      content: string;
+      startup?: string;
+      updated: string;
+      expand?: {
+        startup?: { name?: string };
+        updated_by?: { display_name?: string; email?: string };
+      };
+    }>(1, 100, {
+      filter: `tenant = "${user.tenant}"`,
+      sort: '-updated',
+      expand: 'startup,updated_by'
+    });
+    memoryItems = mem.items.map((m) => {
+      const startupName = m.expand?.startup?.name;
+      const editor = m.expand?.updated_by;
+      return {
+        id: m.id,
+        key: m.key,
+        content: m.content,
+        scoped: Boolean(m.startup),
+        scopeLabel: m.startup ? startupName || 'Bolag' : 'Hela tenanten',
+        updatedAt: m.updated,
+        updatedBy: editor?.display_name?.trim() || editor?.email || ''
+      };
+    });
+  } catch (error) {
+    console.error('[installningar] failed to load agent_memory', { tenant: user.tenant, error });
+  }
+  try {
+    const s = await pb.collection('startups').getList<{ id: string; name: string }>(1, 200, {
+      filter: `tenant = "${user.tenant}"`,
+      sort: 'name',
+      fields: 'id,name'
+    });
+    startupOptions = s.items.map((it) => ({ id: it.id, name: it.name }));
+  } catch {
+    /* ignore — scope-väljaren faller tillbaka på bara tenant-brett */
+  }
+
   // ── Härledda värden för rail ─────────────────────────────────
   const totalStartups = rows.reduce((sum, r) => sum + r.startups, 0);
   const totalUsers = rows.reduce((sum, r) => sum + r.users, 0);
@@ -174,6 +227,7 @@ export default async function InstallningarPage() {
           />
           <RailStat label="Användare" value={totalUsers} />
           <RailStat label="Bolag" value={totalStartups} />
+          <RailStat label="AI-minne" value={memoryItems.length} hint="inlärda noteringar" />
         </div>
       </RailSection>
 
@@ -212,63 +266,131 @@ export default async function InstallningarPage() {
 
   return (
     <PageShell title="Inställningar" rightPanel={rail}>
-      <div className="space-y-6 py-6">
-        {/* ── Logotyp ──────────────────────────────────────────── */}
-        <section className="rounded-2xl border border-default bg-surface p-5">
-          <div className="mb-4">
-            <h2 className="font-heading text-[15px] font-semibold text-foreground">
-              Logotyp
-            </h2>
-            <p className="text-[12.5px] text-foreground-muted">
-              Ladda upp din logotyp för light och dark mode.
-            </p>
-          </div>
-          <TenantLogoUpload
-            logoLightUrl={user.tenantLogoLightUrl}
-            logoDarkUrl={user.tenantLogoDarkUrl}
-          />
-        </section>
+      <div className="space-y-8 py-6">
+        <p className="max-w-2xl text-[13.5px] leading-relaxed text-foreground-muted">
+          Styr hur Movexum OS ser ut och beter sig för din organisation — varumärke,
+          vilka moduler som är på, åtkomst per användare, och vad AI-chatten har lärt
+          sig av din personal. Ändringar gäller hela tenanten direkt.
+        </p>
 
-        {/* ── Moduler ──────────────────────────────────────────── */}
-        <section className="rounded-2xl border border-default bg-surface p-5">
-          <div className="mb-4">
-            <h2 className="font-heading text-[15px] font-semibold text-foreground">
-              Moduler
+        {/* ═══ AI & automation ═══════════════════════════════════ */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <h2 className="font-heading text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+              AI &amp; automation
             </h2>
-            <p className="text-[12.5px] text-foreground-muted">
-              Aktivera per tenant.
-            </p>
+            <div className="h-px flex-1 bg-[var(--mx-line-soft)]" />
           </div>
-          <AdminToggles modules={moduleItems} />
-        </section>
 
-        {isAdmin && (
           <section className="rounded-2xl border border-default bg-surface p-5">
-            <div className="mb-4">
-              <h2 className="font-heading text-[15px] font-semibold text-foreground">
-                Användarspecifika moduler
-              </h2>
-              <p className="text-[12.5px] text-foreground-muted">
-                Admin kan toggla per användare.
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h3 className="font-heading text-[15px] font-semibold text-foreground">
+                  AI-minne — vad chatten har lärt sig
+                </h3>
+                <p className="max-w-2xl text-[12.5px] text-foreground-muted">
+                  När du rättar AI-chatten sparar den slutsatsen här och tar med den i
+                  framtida samtal (per tenant). Redigera en notering om den blev fel,
+                  ta bort den, eller lägg till en bestående regel manuellt.
+                </p>
+              </div>
+              <span className="rounded-full bg-canvas-muted px-3 py-1 text-[11px] font-medium text-foreground-subtle">
+                {memoryItems.length} {memoryItems.length === 1 ? 'notering' : 'noteringar'}
+              </span>
+            </div>
+            <div className="mb-4 rounded-2xl border border-movexum-bla/30 bg-movexum-pastell-bla px-4 py-3 dark:border-movexum-bla/40 dark:bg-movexum-bla/10">
+              <p className="text-xs text-movexum-djupbla dark:text-movexum-bla">
+                Minnet får bara innehålla generella regler och slutsatser — aldrig
+                personuppgifter. Det syns för all Movexum-personal i din tenant.
               </p>
             </div>
-            {userModuleRows.length > 0 ? (
-              <UserModuleToggles users={userModuleRows} modules={moduleItems} />
-            ) : (
-              <div className="rounded-xl border border-default bg-canvas-subtle p-4 text-[13px] text-foreground-muted">
-                Inga användare hittades för din tenant.
-              </div>
-            )}
+            <AgentMemoryManager items={memoryItems} startups={startupOptions} />
           </section>
-        )}
+        </div>
+
+        {/* ═══ Utseende ══════════════════════════════════════════ */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <h2 className="font-heading text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+              Utseende
+            </h2>
+            <div className="h-px flex-1 bg-[var(--mx-line-soft)]" />
+          </div>
+
+          <section className="rounded-2xl border border-default bg-surface p-5">
+            <div className="mb-4">
+              <h3 className="font-heading text-[15px] font-semibold text-foreground">
+                Logotyp
+              </h3>
+              <p className="text-[12.5px] text-foreground-muted">
+                Ladda upp din logotyp för light och dark mode.
+              </p>
+            </div>
+            <TenantLogoUpload
+              logoLightUrl={user.tenantLogoLightUrl}
+              logoDarkUrl={user.tenantLogoDarkUrl}
+            />
+          </section>
+        </div>
+
+        {/* ═══ Moduler & åtkomst ═════════════════════════════════ */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <h2 className="font-heading text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+              Moduler &amp; åtkomst
+            </h2>
+            <div className="h-px flex-1 bg-[var(--mx-line-soft)]" />
+          </div>
+
+          <section className="rounded-2xl border border-default bg-surface p-5">
+            <div className="mb-4">
+              <h3 className="font-heading text-[15px] font-semibold text-foreground">
+                Moduler
+              </h3>
+              <p className="text-[12.5px] text-foreground-muted">
+                Aktivera per tenant.
+              </p>
+            </div>
+            <AdminToggles modules={moduleItems} />
+          </section>
+
+          {isAdmin && (
+            <section className="rounded-2xl border border-default bg-surface p-5">
+              <div className="mb-4">
+                <h3 className="font-heading text-[15px] font-semibold text-foreground">
+                  Användarspecifika moduler
+                </h3>
+                <p className="text-[12.5px] text-foreground-muted">
+                  Admin kan toggla per användare.
+                </p>
+              </div>
+              {userModuleRows.length > 0 ? (
+                <UserModuleToggles users={userModuleRows} modules={moduleItems} />
+              ) : (
+                <div className="rounded-xl border border-default bg-canvas-subtle p-4 text-[13px] text-foreground-muted">
+                  Inga användare hittades för din tenant.
+                </div>
+              )}
+            </section>
+          )}
+        </div>
+
+        {/* ═══ Organisation ══════════════════════════════════════ */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <h2 className="font-heading text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+              Organisation
+            </h2>
+            <div className="h-px flex-1 bg-[var(--mx-line-soft)]" />
+          </div>
 
         {/* ── Tenants ──────────────────────────────────────────── */}
         <section className="rounded-2xl border border-default bg-surface">
           <div className="flex items-center justify-between border-b border-default px-5 py-4">
             <div>
-              <h2 className="font-heading text-[15px] font-semibold text-foreground">
+              <h3 className="font-heading text-[15px] font-semibold text-foreground">
                 Tenants
-              </h2>
+              </h3>
               <p className="text-[12.5px] text-foreground-muted">
                 {rows.length} {rows.length === 1 ? 'tenant' : 'tenants'}
               </p>
@@ -322,6 +444,7 @@ export default async function InstallningarPage() {
             </table>
           </div>
         </section>
+        </div>
       </div>
     </PageShell>
   );
