@@ -2648,6 +2648,33 @@ redigeras i modul-admin under "Notifiera inflöde till"), med fallback på env
 - **Migration** (1700000110) är ett nytt, oföränderligt filnummer; compass speglas
   inte i setup/verify-skripten (migration-only).
 
+### 23.6 Lead-garanti — slutförd modul eller chatt ⇒ lead i Startupkompassen
+
+**Invariant:** varje slutförd intag-modul OCH varje intag-chatt ska ALLTID
+resultera i en lead som syns i Startupkompassen (`/inflode/leads`).
+Människa-i-loopen följer sedan upp (status sätts manuellt).
+
+- **Quiz / formulär (wizard):** `quiz-result`/`submit`-routarna skapar en lead
+  vid sista steget — även utan kontaktuppgifter (`name='Anonym'`). Oförändrat.
+- **Chatt (publik OCH intern AI-intag):** en chatt har inget hårt "avslut"-event
+  (besökaren lämnar bara), så lead-skapandet är en **idempotent upsert per tur**:
+  leadet skapas vid första turen (även när AI-extraktionen är tom → `Anonym` +
+  sammanfattning av samtalet) och berikas vid varje efterföljande tur via
+  `conversation.lead`. Lead-skapandet hänger ALDRIG på att meddelandeloggen
+  eller AI-extraktionen lyckas.
+- **Delad kärna (ingen divergerande kopia):**
+  `apps/web/src/lib/compass/chat-lead.ts` (`getOrCreateChatConversation` +
+  `persistChatTurnAndUpsertLead`) används av BÅDE
+  `/api/public/m/[slug]/chat` och `/api/inflode/chat`. Tidigare skapade den
+  interna AI-intag-chatten ingen lead alls (bara meddelandelogg) trots att
+  sidans subtitle lovade "dyker upp som lead" — det är nu åtgärdat. Den interna
+  staff-test-chatten notifierar INTE inflödesmailen (`notifyModule` utelämnas)
+  för att undvika notis-brus; den publika modul-chatten notifierar en gång vid
+  första skapandet (§ 23.5).
+- **GDPR §5/art. 7:** oförändrad dataminimering — bara whitelistade fält +
+  PII-saneras nedströms; publika flöden kräver fortsatt `consent`.
+- **Riskklass:** oförändrad (publik AI-chatt = begränsad; quiz/wizard n/a).
+
 ---
 
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)
