@@ -289,6 +289,9 @@ function SheetCard({
   const mappedFields = mapping.columns.map((c) => c.field).filter((f): f is string => !!f);
   const piiMapped = fields.filter((f) => f.pii && mappedFields.includes(f.name));
   const unmapped = mapping.columns.filter((c) => !c.field);
+  const requiredFields = fields.filter((f) => f.required);
+  const missingRequired = requiredFields.filter((f) => !mappedFields.includes(f.name));
+  const missingRequiredRelations = missingRequired.filter((f) => f.type === 'relation');
 
   return (
     <div className="space-y-4 rounded-3xl border border-default bg-surface p-6">
@@ -384,6 +387,27 @@ function SheetCard({
             <span className="text-movexum-morkorange">⚠ PII</span> = känsligt fält
             (personnummer saneras automatiskt i textfält).
           </p>
+
+          {missingRequired.length > 0 && (
+            <div className="rounded-2xl bg-movexum-pastell-orange px-4 py-3 text-sm text-movexum-morkorange">
+              <strong>Obligatoriska fält saknar mappning:</strong>{' '}
+              {missingRequired.map((f) => f.name).join(', ')}.
+              {missingRequiredRelations.length > 0 ? (
+                <span>
+                  {' '}
+                  Minst en av dem är en relation, så den här importen kan inte skapa rader
+                  förrän du mappar en kolumn till rätt koppling. Om du inte har någon lämplig
+                  källkolumn, lämna arket utanför eller använd en specialimport för den tabellen.
+                </span>
+              ) : (
+                <span>
+                  {' '}
+                  Den här tabellen kan fortfarande förhandsgranskas, men rader med saknade
+                  obligatoriska fält kommer att hoppas över.
+                </span>
+              )}
+            </div>
+          )}
 
           {unmapped.length > 0 && (
             <div className="rounded-2xl bg-movexum-pastell-gul px-4 py-3 text-sm text-movexum-morkgul">
