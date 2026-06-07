@@ -12,7 +12,7 @@ import type { MistralToolCall, MistralToolDefinition } from './mistral';
 import { searchOrgKnowledge, searchUserFiles, renderKnowledgeHits } from './rag';
 import { logAiUsage } from './usage';
 import { escFilter } from '@/lib/pb-filter';
-import type { GeneratedFileRef } from '@platform/shared';
+import { type GeneratedFileRef, FILE_TOPIC_IDS, isFileTopic } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
 import { getTemplate, listTemplateSummaries, TEMPLATE_IDS } from '@/lib/documents/templates';
 import { saveGeneratedFile } from '@/lib/documents/save';
@@ -387,6 +387,14 @@ export function buildChatTools(
                 'Det du vill veta, med användarens egna ord. T.ex. "vår ' +
                 'antagningsprocess för boost chamber" eller "mall för kvartalsrapport".'
             },
+            topic: {
+              type: 'string',
+              enum: [...FILE_TOPIC_IDS],
+              description:
+                'Valfritt ämnesfilter — begränsar sökningen till EN ämnesmapp. ' +
+                'Använd när frågan tydligt hör till ett ämne (t.ex. finansiering, ' +
+                'juridik) för snabbare och mer precisa träffar.'
+            },
             limit: {
               type: 'integer',
               description: 'Max antal textstycken att hämta (1-12, default 6).',
@@ -422,6 +430,13 @@ export function buildChatTools(
             query: {
               type: 'string',
               description: 'Det du vill veta, med användarens egna ord.'
+            },
+            topic: {
+              type: 'string',
+              enum: [...FILE_TOPIC_IDS],
+              description:
+                'Valfritt ämnesfilter — begränsar sökningen till EN ämnesmapp ' +
+                '(samma taxonomi som /filer).'
             },
             limit: {
               type: 'integer',
@@ -1236,9 +1251,11 @@ async function runSearchKnowledge(
     limit = Math.max(1, Math.min(12, Math.floor(args.limit)));
   }
 
+  const topic = isFileTopic(args.topic) ? args.topic : undefined;
+
   let result;
   try {
-    result = await searchOrgKnowledge(ctx.pb, { tenant: ctx.tenantId, query, topK: limit });
+    result = await searchOrgKnowledge(ctx.pb, { tenant: ctx.tenantId, query, topK: limit, topic });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Kunde inte söka i kunskapsbasen.' };
   }
@@ -1295,13 +1312,16 @@ async function runSearchMyFiles(
     limit = Math.max(1, Math.min(12, Math.floor(args.limit)));
   }
 
+  const topic = isFileTopic(args.topic) ? args.topic : undefined;
+
   let result;
   try {
     result = await searchUserFiles(ctx.pb, {
       tenant: ctx.tenantId,
       owner: ctx.actor.id,
       query,
-      topK: limit
+      topK: limit,
+      topic
     });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Kunde inte söka i dina filer.' };

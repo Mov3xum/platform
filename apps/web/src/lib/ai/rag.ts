@@ -4,27 +4,40 @@ import type PocketBase from 'pocketbase';
 import { embedTexts } from './mistral';
 import { escFilter } from '@/lib/pb-filter';
 import { significantTokens } from './fuzzy';
+import {
+  cosineSimilarity,
+  mmrOrder,
+  normalizeScores,
+  reciprocalRankFusion
+} from './rank';
+
+// Cosine-similariteten bor i den rena, enhetstestade `./rank`-modulen
+// tillsammans med RRF + MMR. Re-exporteras här för bakåtkompatibilitet.
+export { cosineSimilarity };
 
 // RAG-kärna, delad av två kunskapskällor (CLAUDE.md § 26 + § 27):
 //   - org_knowledge / org_knowledge_chunks — tenant-bred, staff/observer (§ 26)
 //   - user_files / user_file_chunks         — personligt, STRIKT ägaren-bara (§ 27)
 //
 // Indexering: en källfils sanerade text chunkas, varje chunk embeddas
-// (mistral-embed, EU) och sparas i chunk-kollektionen. Sökning: frågan embeddas
-// och rankas mot chunkarna via cosine-similaritet (JS-side — PocketBase saknar
-// pgvector). Bara de mest relevanta styckena matas till modellen, vilket låter
-// kunskapskällan skala bortom prompt-injektionens storlekstak.
+// (mistral-embed, EU) och sparas i chunk-kollektionen. Sökning är HYBRID:
+// semantisk (cosine över ett fönster) + nyckelord (server-side `text ~`, som
+// fångar exakta termer — org-nr, produktnamn — även utanför fönstret) fusioneras
+// med Reciprocal Rank Fusion och diversifieras med MMR (så att överlappande
+// chunkar inte fyller topp-K). Allt rankas JS-side — PocketBase saknar pgvector.
 //
-// Fail-soft i båda riktningar: kan embeddings inte byggas/läsas faller vi
-// tillbaka på en nyckelords-`~`-sökning över källans `extracted_text`.
+// Fail-soft i flera led: kan embeddings inte byggas/läsas faller vi tillbaka på
+// ren nyckelordssökning (chunk-nivå, sedan källans `extracted_text`).
 
 const CHUNK_CHARS = 1500; // ~375 tokens; under text-fältets 8000-tecken-gräns
 const CHUNK_OVERLAP = 200;
 const EMBED_BATCH = 32; // texter per embeddings-anrop (robusthet/latens)
 const MAX_CHUNKS_PER_FILE = 200; // robusthet (EU AI Act art. 15)
-const MAX_SCAN_CHUNKS = 1500; // hur många chunkar en sökning rankar
+const MAX_SCAN_CHUNKS = 1500; // hur många chunkar det semantiska fönstret rankar
+const KEYWORD_FETCH = 50; // chunkar nyckelords-grenen drar in (server-side `~`)
 const DEFAULT_TOP_K = 6;
-const SIM_THRESHOLD = 0.2; // släpp irrelevanta träffar
+const SIM_THRESHOLD = 0.2; // släpp irrelevanta semantiska träffar
+const MMR_LAMBDA = 0.7; // relevans vs diversitet i MMR (relevansvänlig)
 
 export interface KnowledgeHit {
   /** Källfilens id (org_knowledge resp. user_files). */
@@ -37,8 +50,16 @@ export interface KnowledgeHit {
 export interface KnowledgeSearchResult {
   hits: KnowledgeHit[];
   /** Hur sökningen löstes — för transparens/diagnostik. */
-  mode: 'semantic' | 'keyword' | 'empty';
+  mode: 'hybrid' | 'semantic' | 'keyword' | 'empty';
   usage: { tokensIn: number; tokensOut: number };
+}
+
+/** Valfria metadata-förfilter (CLAUDE.md § 24/§ 26) som begränsar sökrummet. */
+export interface RagSearchMeta {
+  /** Ämnesmapp (FILE_TOPICS) — matchar källfilens `topic`. */
+  topic?: string;
+  /** Bolags-id — matchar källfilens `startup` (bara user_files har fältet). */
+  startup?: string;
 }
 
 export interface IndexResult {
@@ -89,22 +110,6 @@ export function chunkText(text: string): string[] {
     i = Math.max(end - CHUNK_OVERLAP, i + 1);
   }
   return chunks;
-}
-
-/** Cosine-similaritet mellan två lika långa vektorer. 0 vid degenererad input. */
-export function cosineSimilarity(a: number[], b: number[]): number {
-  const n = Math.min(a.length, b.length);
-  if (n === 0) return 0;
-  let dot = 0;
-  let na = 0;
-  let nb = 0;
-  for (let i = 0; i < n; i++) {
-    dot += a[i] * b[i];
-    na += a[i] * a[i];
-    nb += b[i] * b[i];
-  }
-  if (na === 0 || nb === 0) return 0;
-  return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
 function approxTokens(text: string): number {
@@ -189,18 +194,46 @@ function sourceTitle(row: ChunkRow): string {
   return String(s?.title || s?.filename || 'Källa');
 }
 
-/** Semantisk sökning i en RAG-källa — generisk kärna. `scope` är tenant (+ev. owner). */
+// Fält vi hämtar per chunk. `title` finns bara på org_knowledge, `filename` på
+// båda — PB utelämnar tyst det som saknas, så samma projektion funkar för båda.
+const CHUNK_FIELDS =
+  'id,source,text,embedding,expand.source.id,expand.source.title,expand.source.filename';
+
+/** Hur många av frågans tokens som förekommer i en text (enkel nyckelords-rang). */
+function keywordHitCount(tokens: string[], text: string): number {
+  const lower = text.toLowerCase();
+  let n = 0;
+  for (const t of tokens) if (lower.includes(t)) n++;
+  return n;
+}
+
+interface Candidate {
+  text: string;
+  emb: number[] | null;
+  sourceId: string;
+  title: string;
+}
+
+/**
+ * HYBRID sökning i en RAG-källa — generisk kärna. `scope` är tenant (+ev. owner
+ * och metadata-förfilter). Semantisk gren (cosine över ett fönster) + nyckelords-
+ * gren (server-side `text ~`) fusioneras med RRF och diversifieras med MMR.
+ */
 async function searchSource(
   pb: PocketBase,
   src: RagSource,
   query: string,
-  topK: number
+  topK: number,
+  meta?: RagSearchMeta
 ): Promise<KnowledgeSearchResult> {
-  const scope = src.owner
-    ? `tenant = "${escFilter(src.tenant)}" && owner = "${escFilter(src.owner)}"`
-    : `tenant = "${escFilter(src.tenant)}"`;
+  const scopeParts = [`tenant = "${escFilter(src.tenant)}"`];
+  if (src.owner) scopeParts.push(`owner = "${escFilter(src.owner)}"`);
+  // Metadata-förfilter via källfilens relation (chunkar har en `source`-FK).
+  if (meta?.topic) scopeParts.push(`source.topic = "${escFilter(meta.topic)}"`);
+  if (meta?.startup) scopeParts.push(`source.startup = "${escFilter(meta.startup)}"`);
+  const scope = scopeParts.join(' && ');
 
-  // 1) Embedda frågan.
+  // 1) Embedda frågan (fail-soft — utan vektor körs ren nyckelordssökning).
   let qvec: number[] = [];
   let tokensIn = 0;
   try {
@@ -211,41 +244,98 @@ async function searchSource(
     qvec = [];
   }
 
-  // 2) Hämta chunkarna och ranka (om vi fick en frågevektor).
+  const byId = new Map<string, Candidate>();
+  const cosine = new Map<string, number>();
+  const ingest = (row: ChunkRow): void => {
+    const id = String(row.id);
+    if (byId.has(id)) return;
+    const emb = Array.isArray(row.embedding) ? (row.embedding as number[]) : null;
+    byId.set(id, {
+      text: String(row.text ?? ''),
+      emb: emb && emb.length > 0 ? emb : null,
+      sourceId: String(row.expand?.source?.id || row.source),
+      title: sourceTitle(row)
+    });
+    if (emb && emb.length > 0 && qvec.length > 0) cosine.set(id, cosineSimilarity(qvec, emb));
+  };
+
+  // 2a) Semantiskt fönster (bara meningsfullt med en frågevektor).
+  let semanticList: string[] = [];
   if (qvec.length > 0) {
     try {
       const res = await pb.collection(src.chunkCollection).getList<ChunkRow>(1, MAX_SCAN_CHUNKS, {
-        // Bara fält som finns på BÅDA käll-kollektionerna (org_knowledge +
-        // user_files). user_files saknar `title` → vi etiketterar på `filename`.
-        fields: 'id,source,text,embedding,expand.source.id,expand.source.filename',
+        fields: CHUNK_FIELDS,
         filter: scope,
         expand: 'source'
       });
-      const scored: KnowledgeHit[] = [];
-      for (const row of res.items) {
-        const emb = Array.isArray(row.embedding) ? (row.embedding as number[]) : null;
-        if (!emb || emb.length === 0) continue;
-        const score = cosineSimilarity(qvec, emb);
-        if (score < SIM_THRESHOLD) continue;
-        scored.push({
-          sourceId: String(row.expand?.source?.id || row.source),
-          title: sourceTitle(row),
-          score,
-          text: String(row.text ?? '')
-        });
-      }
-      scored.sort((a, b) => b.score - a.score);
-      if (scored.length > 0) {
-        return { hits: scored.slice(0, topK), mode: 'semantic', usage: { tokensIn, tokensOut: 0 } };
-      }
+      for (const row of res.items) ingest(row);
+      semanticList = [...byId.keys()]
+        .filter((id) => (cosine.get(id) ?? -1) >= SIM_THRESHOLD)
+        .sort((a, b) => (cosine.get(b) ?? 0) - (cosine.get(a) ?? 0));
     } catch {
-      /* fall igenom till nyckelords-fallback */
+      /* fall igenom — nyckelordsgrenen kan ändå ge träffar */
     }
   }
 
-  // 3) Nyckelords-fallback: `~` över källans extracted_text.
-  const keyword = await keywordSearch(pb, src, scope, query, topK);
-  return { hits: keyword, mode: keyword.length ? 'keyword' : 'empty', usage: { tokensIn, tokensOut: 0 } };
+  // 2b) Nyckelordsgren: server-side `text ~`, fångar exakta termer var som
+  // helst i scope (även utanför det semantiska fönstret).
+  let keywordList: string[] = [];
+  const qTokens = significantTokens(query).slice(0, 6);
+  if (qTokens.length > 0) {
+    const clauses = qTokens.map((t) => `text ~ "${escFilter(t)}"`).join(' || ');
+    try {
+      const res = await pb.collection(src.chunkCollection).getList<ChunkRow>(1, KEYWORD_FETCH, {
+        fields: CHUNK_FIELDS,
+        filter: `${scope} && (${clauses})`,
+        expand: 'source'
+      });
+      for (const row of res.items) ingest(row);
+      keywordList = res.items
+        .map((r) => String(r.id))
+        .sort(
+          (a, b) =>
+            keywordHitCount(qTokens, byId.get(b)?.text ?? '') -
+            keywordHitCount(qTokens, byId.get(a)?.text ?? '')
+        );
+    } catch {
+      /* fall igenom */
+    }
+  }
+
+  const candidates = new Set<string>([...semanticList, ...keywordList]);
+
+  // 3) Inga chunk-träffar → sista utvägen: nyckelord över källans extracted_text.
+  if (candidates.size === 0) {
+    const keyword = await keywordSearch(pb, src, scope, query, topK);
+    return {
+      hits: keyword,
+      mode: keyword.length ? 'keyword' : 'empty',
+      usage: { tokensIn, tokensOut: 0 }
+    };
+  }
+
+  // 4) Fusionera (RRF) + diversifiera (MMR).
+  const fused = reciprocalRankFusion([semanticList, keywordList]);
+  const relevance = normalizeScores(fused);
+  const vectors = new Map<string, number[]>();
+  for (const id of candidates) {
+    const emb = byId.get(id)?.emb;
+    if (emb) vectors.set(id, emb);
+  }
+  const ordered = mmrOrder({ ids: [...candidates], relevance, vectors, lambda: MMR_LAMBDA, topK });
+
+  const hits: KnowledgeHit[] = ordered.map((id) => {
+    const c = byId.get(id)!;
+    return { sourceId: c.sourceId, title: c.title, score: cosine.get(id) ?? 0, text: c.text };
+  });
+
+  const mode: KnowledgeSearchResult['mode'] =
+    semanticList.length && keywordList.length
+      ? 'hybrid'
+      : semanticList.length
+        ? 'semantic'
+        : 'keyword';
+  return { hits, mode, usage: { tokensIn, tokensOut: 0 } };
 }
 
 async function keywordSearch(
@@ -307,15 +397,15 @@ export function indexOrgKnowledge(
   return indexSource(pb, { ...RAG_ORG, tenant: params.tenant }, params.sourceId, params.text);
 }
 
-/** Semantisk sökning i den tenant-breda kunskapsbasen (§ 26). */
+/** Hybrid sökning i den tenant-breda kunskapsbasen (§ 26). */
 export function searchOrgKnowledge(
   pb: PocketBase,
-  params: { tenant: string; query: string; topK?: number }
+  params: { tenant: string; query: string; topK?: number; topic?: string }
 ): Promise<KnowledgeSearchResult> {
   const query = (params.query ?? '').trim();
   if (!query) return Promise.resolve({ hits: [], mode: 'empty', usage: { tokensIn: 0, tokensOut: 0 } });
   const topK = Math.max(1, Math.min(params.topK ?? DEFAULT_TOP_K, 12));
-  return searchSource(pb, { ...RAG_ORG, tenant: params.tenant }, query, topK);
+  return searchSource(pb, { ...RAG_ORG, tenant: params.tenant }, query, topK, { topic: params.topic });
 }
 
 /** Indexerar EN av ägarens personliga filer (§ 27). Owner-scopat. */
@@ -331,13 +421,26 @@ export function indexUserFile(
   );
 }
 
-/** Semantisk sökning i ÄGARENS egna filer (§ 27). Owner-scopat. */
+/** Hybrid sökning i ÄGARENS egna filer (§ 27). Owner-scopat. */
 export function searchUserFiles(
   pb: PocketBase,
-  params: { tenant: string; owner: string; query: string; topK?: number }
+  params: {
+    tenant: string;
+    owner: string;
+    query: string;
+    topK?: number;
+    topic?: string;
+    startup?: string;
+  }
 ): Promise<KnowledgeSearchResult> {
   const query = (params.query ?? '').trim();
   if (!query) return Promise.resolve({ hits: [], mode: 'empty', usage: { tokensIn: 0, tokensOut: 0 } });
   const topK = Math.max(1, Math.min(params.topK ?? DEFAULT_TOP_K, 12));
-  return searchSource(pb, { ...RAG_USER, tenant: params.tenant, owner: params.owner }, query, topK);
+  return searchSource(
+    pb,
+    { ...RAG_USER, tenant: params.tenant, owner: params.owner },
+    query,
+    topK,
+    { topic: params.topic, startup: params.startup }
+  );
 }

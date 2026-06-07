@@ -78,6 +78,9 @@ export const KNOWLEDGE_GUIDANCE =
   'väv ihop dem.\n' +
   '- Hittar `search_knowledge` inget relevant: säg det rakt ut och svara utifrån ' +
   'databasen om möjligt. Hitta aldrig på innehåll ur dokument du inte fått träff på.\n' +
+  '- Hör frågan tydligt till ETT ämne (finansiering, juridik, pitch, hållbarhet, ' +
+  'internationalisering, rapporter, affärsplan): sätt `topic` så blir sökningen ' +
+  'snabbare och mer precis. Är du osäker — lämna `topic` tomt och sök brett.\n' +
   '- `search_my_files` söker i ANVÄNDARENS EGNA uppladdade filer (den personliga ' +
   'Filer-ytan). Använd det när användaren säger "mina filer", "dokumentet jag ' +
   'laddade upp" eller vill att du kör mot eget material — till skillnad från ' +
