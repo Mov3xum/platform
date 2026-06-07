@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { escFilter } from '@/lib/pb-filter';
 import { type Role } from '@platform/shared';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
@@ -36,7 +37,7 @@ export default async function AdminUsersPage() {
   let startups: StartupOption[] = [];
   try {
     const res = await pb.collection('startups').getFullList<StartupRow>({
-      filter: `tenant = "${user.tenant}"`,
+      filter: `tenant = "${escFilter(user.tenant)}"`,
       sort: 'name',
       fields: 'id,name'
     });
@@ -49,7 +50,7 @@ export default async function AdminUsersPage() {
   let members: MemberRow[] = [];
   try {
     const res = await pb.collection('users').getList<MemberRow>(1, 200, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: `tenant = "${escFilter(user.tenant)}"`,
       sort: 'email',
       fields:
         'id,email,display_name,roles,verified,expand.linked_startups.id,expand.linked_startups.name',

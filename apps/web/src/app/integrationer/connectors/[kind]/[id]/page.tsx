@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation';
+import { escFilter } from '@/lib/pb-filter';
 import Link from 'next/link';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { PageShell } from '@/components/PageShell';
@@ -42,7 +43,7 @@ export default async function ConnectorChatPage({
     pb
       .collection('user_mistral_connectors')
       .getList<Activation>(1, 1, {
-        filter: `user = "${user.id}" && connector_kind = "${kind}" && connector_id = "${connectorId}"`
+        filter: `user = "${escFilter(user.id)}" && connector_kind = "${escFilter(kind)}" && connector_id = "${escFilter(connectorId)}"`
       }),
     kind === 'mcp' ? listActiveConnectors() : Promise.resolve([])
   ]);
@@ -59,7 +60,7 @@ export default async function ConnectorChatPage({
   let run: ConnectorRun | null = null;
   try {
     const recent = await pb.collection('tool_runs').getList<ConnectorRun>(1, 1, {
-      filter: `tenant = "${user.tenant}" && triggered_by = "${user.id}" && connector_kind = "${kind}" && connector_id = "${connectorId}"`,
+      filter: `tenant = "${escFilter(user.tenant)}" && triggered_by = "${escFilter(user.id)}" && connector_kind = "${escFilter(kind)}" && connector_id = "${escFilter(connectorId)}"`,
       sort: '-created'
     });
     if (recent.totalItems > 0) {

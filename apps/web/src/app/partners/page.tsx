@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import type { Partner } from '@platform/shared';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
@@ -53,7 +54,7 @@ export default async function PartnersPage() {
           const engagements = await pb
             .collection('partner_engagements')
             .getFullList<{ partner?: string }>({
-              filter: `tenant = "${user.tenant}" && (${linkedFilter})`,
+              filter: `tenant = "${escFilter(user.tenant)}" && (${linkedFilter})`,
               fields: 'partner'
             });
           scopedPartnerIds = Array.from(

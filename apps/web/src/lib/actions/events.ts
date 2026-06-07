@@ -314,7 +314,7 @@ export async function listEvents(): Promise<IncubatorEvent[]> {
   const pb = await getServerPb();
   try {
     const res = await pb.collection(PB_COLLECTIONS.events).getList<IncubatorEvent>(1, 100, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: `tenant = "${escFilter(user.tenant)}"`,
       sort: '-starts_at'
     });
     return res.items;

@@ -1,4 +1,5 @@
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { escFilter } from '@/lib/pb-filter';
 import { hasRole } from '@/lib/rbac';
 import { redirect } from 'next/navigation';
 import { Chip } from '@/components/proto';
@@ -75,7 +76,7 @@ export default async function InstallningarPage() {
     let userCount = 0;
     try {
       const s = await pb.collection('startups').getList(1, 1, {
-        filter: `tenant = "${t.id}"`,
+        filter: `tenant = "${escFilter(t.id)}"`,
         fields: 'id'
       });
       startupCount = s.totalItems;
@@ -84,7 +85,7 @@ export default async function InstallningarPage() {
     }
     try {
       const u = await pb.collection('users').getList(1, 1, {
-        filter: `tenant = "${t.id}"`,
+        filter: `tenant = "${escFilter(t.id)}"`,
         fields: 'id'
       });
       userCount = u.totalItems;
@@ -132,7 +133,7 @@ export default async function InstallningarPage() {
   if (isAdmin) {
     try {
       const usersRes = await pb.collection('users').getList<UserRecord>(1, 200, {
-        filter: `tenant = "${user.tenant}"`,
+        filter: `tenant = "${escFilter(user.tenant)}"`,
         sort: 'email',
         fields: 'id,email,display_name,roles,disabled_modules,tenant'
       });

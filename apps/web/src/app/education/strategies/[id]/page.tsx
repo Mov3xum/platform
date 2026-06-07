@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
@@ -40,7 +41,7 @@ export default async function StrategyPage({
     const revResult = await pb
       .collection(PB_COLLECTIONS.strategyRevisions)
       .getList<StrategyRevision>(1, 20, {
-        filter: `strategy = "${id}"`,
+        filter: `strategy = "${escFilter(id)}"`,
         sort: '-created'
       });
     revisions = revResult.items;

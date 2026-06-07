@@ -370,7 +370,7 @@ export async function syncStartupFromAllabolagAction(
     tenantIntegration = await adminResult.pb
       .collection('tenant_integrations')
       .getFirstListItem<{ id: string; status: string }>(
-        `tenant = "${user.tenant}" && provider = "${provider.id}"`
+        `tenant = "${escFilter(user.tenant)}" && provider = "${escFilter(provider.id)}"`
       );
   } catch {
     return { error: 'Anslut Allabolag först på /integrationer/allabolag.' };

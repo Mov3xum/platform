@@ -219,7 +219,7 @@ export async function buildStartupContext(
       sort: 'target_date'
     }),
     pb.collection('activities').getList(1, 100, {
-      filter: `startup = "${escFilter(startupId)}" && due_date >= "${ninetyDaysAgo()}"`,
+      filter: `startup = "${escFilter(startupId)}" && due_date >= "${escFilter(ninetyDaysAgo())}"`,
       sort: '-due_date'
     }),
     pb.collection('notes').getList(1, 100, {

@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { escFilter } from '@/lib/pb-filter';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
@@ -306,7 +307,7 @@ async function recordPhaseTransition(ctx: PhaseHistoryWriteCtx): Promise<void> {
     if (ctx.fromPhase && ctx.fromPhase !== ctx.toPhase) {
       try {
         const last = await pb.collection('startup_phase_history').getFirstListItem(
-          `startup = "${ctx.startupId}" && phase = "${ctx.fromPhase}" && (exited_at = '' || exited_at = null)`,
+          `startup = "${escFilter(ctx.startupId)}" && phase = "${escFilter(ctx.fromPhase)}" && (exited_at = '' || exited_at = null)`,
           { sort: '-entered_at' }
         );
         if (last?.id) {

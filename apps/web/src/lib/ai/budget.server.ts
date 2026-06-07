@@ -42,7 +42,7 @@ export async function getMonthlyAiSpendUsd(
   const cached = spendCache.get(cacheKey);
   if (cached && Date.now() - cached.at < SPEND_CACHE_TTL_MS) return cached.value;
 
-  const filter = `tenant = "${escFilter(tenantId)}" && created >= "${monthStartIso(now)}"`;
+  const filter = `tenant = "${escFilter(tenantId)}" && created >= "${escFilter(monthStartIso(now))}"`;
   let total = 0;
   try {
     for (let page = 1; page <= MAX_SPEND_PAGES; page++) {

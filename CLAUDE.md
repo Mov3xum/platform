@@ -950,7 +950,13 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
 - **Filter-injection (A.8.9):** dynamiska värden i PocketBase-
   filtersträngar escapas alltid med `escFilter()` i
   `apps/web/src/lib/pb-filter.ts` (escapar `\` före `"`). Använd aldrig
-  rå interpolation eller ad-hoc-escapers.
+  rå interpolation eller ad-hoc-escapers. För ny kod föredras PB:s bundna
+  syntax `pb.filter("f = {:x}", { x })` (strukturellt injektionssäker, ingen
+  escaper att glömma). **Invarianten är CI-tvingad:** `yarn check:filters`
+  (`backend/pocketbase-schema/scripts/check-pb-filters.mjs`, körs i `yarn test`)
+  sveper alla filter-literaler och failar bygget om ett `"${...}"`-värde inte är
+  `escFilter`-wrappat. `escFilter` självt är fuzz-testat (`pb-filter.test.ts`,
+  5000 iterationer) mot utbrytning.
 - **Backup (A.8.13):** PocketBase-DB säkerhetskopieras dagligen i
   Coolify. Restore-rutin ska vara testad kvartalsvis.
 - **Incident response (A.5.24–A.5.27):** loggas i `docs/incidents/`

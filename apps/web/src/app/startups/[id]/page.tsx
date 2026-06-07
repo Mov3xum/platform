@@ -377,7 +377,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       expand: 'contact'
     }),
     pb.collection('tasks').getList<TaskRecord>(1, 50, {
-      filter: `startup = "${escFilter(id)}" && tenant = "${user.tenant}"`,
+      filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
       sort: '-starts_at'
     }),
     assignPb
@@ -388,7 +388,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
         expand: 'document,completed_by,collaborators,meeting'
       }),
     pb.collection('tool_runs').getList<ToolRunRecord>(1, 100, {
-      filter: `startup = "${escFilter(id)}" && tenant = "${user.tenant}"`,
+      filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
       sort: '-created',
       expand: 'tool,assigned_to'
     })
