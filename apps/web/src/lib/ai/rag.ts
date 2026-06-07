@@ -4,6 +4,7 @@ import type PocketBase from 'pocketbase';
 import { embedTexts } from './mistral';
 import { escFilter } from '@/lib/pb-filter';
 import { significantTokens } from './fuzzy';
+import { FILE_TOPIC_LABELS, resolveFileTopic } from '@platform/shared';
 
 // RAG-kärna, delad av två kunskapskällor (CLAUDE.md § 26 + § 27):
 //   - org_knowledge / org_knowledge_chunks — tenant-bred, staff/observer (§ 26)
@@ -331,13 +332,71 @@ export function indexUserFile(
   );
 }
 
-/** Semantisk sökning i ÄGARENS egna filer (§ 27). Owner-scopat. */
-export function searchUserFiles(
+/**
+ * Semantisk sökning i ÄGARENS egna filer (§ 27). Owner-scopat.
+ *
+ * Träffarnas etikett berikas med den manuella organisationen (ämnesmapp +
+ * kopplat bolag, § 24) så chatten förstår VAR ett textstycke hör hemma — t.ex.
+ * "[Acme AB · Finansiering] rapport.pdf". Det gör att sorteringen i /filer
+ * faktiskt betalar sig i chattens resonemang utan en ny dataväg (bara
+ * whitelistat bolagsnamn + icke-PII ämnesmetadata, samma owner-scope).
+ */
+export async function searchUserFiles(
   pb: PocketBase,
   params: { tenant: string; owner: string; query: string; topK?: number }
 ): Promise<KnowledgeSearchResult> {
   const query = (params.query ?? '').trim();
-  if (!query) return Promise.resolve({ hits: [], mode: 'empty', usage: { tokensIn: 0, tokensOut: 0 } });
+  if (!query) return { hits: [], mode: 'empty', usage: { tokensIn: 0, tokensOut: 0 } };
   const topK = Math.max(1, Math.min(params.topK ?? DEFAULT_TOP_K, 12));
-  return searchSource(pb, { ...RAG_USER, tenant: params.tenant, owner: params.owner }, query, topK);
+  const result = await searchSource(
+    pb,
+    { ...RAG_USER, tenant: params.tenant, owner: params.owner },
+    query,
+    topK
+  );
+  result.hits = await enrichUserFileHits(pb, params.owner, result.hits);
+  return result;
+}
+
+/**
+ * Slår upp ämnesmapp + kopplat bolag för träffarnas källfiler och prefixar
+ * titeln. Owner-verifieras (ägaren-bara, § 27). Fail-soft: en miss lämnar
+ * titeln orörd. Liten N (≤ topK) → en getList räcker.
+ */
+async function enrichUserFileHits(
+  pb: PocketBase,
+  owner: string,
+  hits: KnowledgeHit[]
+): Promise<KnowledgeHit[]> {
+  const ids = [...new Set(hits.map((h) => h.sourceId).filter(Boolean))];
+  if (ids.length === 0) return hits;
+  const meta = new Map<string, { topic?: string; company?: string }>();
+  try {
+    const filter = `owner = "${escFilter(owner)}" && (${ids
+      .map((id) => `id = "${escFilter(id)}"`)
+      .join(' || ')})`;
+    const res = await pb.collection(RAG_USER.sourceCollection).getList(1, ids.length, {
+      filter,
+      fields: 'id,topic,expand.startup.name',
+      expand: 'startup'
+    });
+    for (const r of res.items) {
+      const rec = r as Record<string, unknown> & { expand?: { startup?: { name?: string } } };
+      meta.set(String(r.id), {
+        topic: rec.topic ? String(rec.topic) : undefined,
+        company: rec.expand?.startup?.name
+      });
+    }
+  } catch {
+    return hits; // fail-soft — etiketten är en bonus, inte en korrekthetsgräns
+  }
+
+  return hits.map((h) => {
+    const m = meta.get(h.sourceId);
+    if (!m) return h;
+    const tags: string[] = [];
+    if (m.company) tags.push(m.company);
+    if (m.topic && m.topic !== 'osorterat') tags.push(FILE_TOPIC_LABELS[resolveFileTopic(m.topic)]);
+    return tags.length ? { ...h, title: `[${tags.join(' · ')}] ${h.title}` } : h;
+  });
 }

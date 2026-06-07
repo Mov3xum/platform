@@ -2689,9 +2689,16 @@ select-värden i migration 1700000110): `affarsplan_strategi`,
   `suggestions`) — ingen ny surface-migration behövs.
 - **RBAC/isolation:** allt går via användarens auth-token (`getServerPb`) →
   owner-only RLS (§ 21.4) gäller; bolagslistan scopas av tenant + medlems-RLS.
-- **Migration** (1700000110) är nytt, oföränderligt filnummer. `user_files`
-  speglas inte i `scripts/setup-via-api.mjs`/`verify-baseline.mjs` — inga
-  mirror-ändringar krävs.
+- **Migration** (1700000110) är nytt, oföränderligt filnummer.
+  Kategoriseringsfälten (`topic`/`topic_status`/`topic_confidence`/`startup`/
+  `categorized_at`) **speglas i `scripts/setup-via-api.mjs`** (patchCollection
+  på `user_files`, parallellt med RAG-fälten i § 27) — annars saknar en instans
+  som reconcile:as via bootstrap-skriptet fälten, och "Var hör filen hemma?"-
+  dialogen no-op:ar tyst (PB släpper okända fält vid update → filer går inte att
+  sortera in i ämne/bolag). `verify-baseline.mjs` asserterar dem inte (det
+  bevakar RLS-isolering, inte fält-närvaro). `set-topic`-routen läser dessutom
+  tillbaka den uppdaterade posten och returnerar ett tydligt 503-fel om fälten
+  saknas, i stället för en tyst lyckad no-op.
 
 ---
 
