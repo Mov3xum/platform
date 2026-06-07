@@ -2965,9 +2965,9 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
 **Implementerat (retrieval-mognad):** hybrid (semantisk + nyckelord), RRF-
 fusion, MMR-diversifiering, LLM-rerank (`mistral-small`, env-styrd), paginerat
 svep (`MAX_TOTAL_SCAN`, inte ett fast 1500-fönster → ingen tyst recall-förlust),
-frågeembedding-cache (LRU), `topic`-förfilter och **contextual retrieval**
-(Anthropic-tekniken). Ren rankningsmatematik i `rank.ts` (RRF/MMR/cosine) och
-`lru.ts`, enhetstestade.
+frågeembedding-cache (LRU), `topic`-förfilter, **contextual retrieval**
+(Anthropic-tekniken) och **parent-document** (small-to-big, env-gated). Ren,
+enhetstestad logik i `rank.ts` (RRF/MMR/cosine), `lru.ts` och `chunk-stitch.ts`.
 
 **Contextual retrieval (env-gated, av default — index-tid-kostnad):** sätt
 `MOVEXUM_RAG_CONTEXTUAL=1` så genererar en liten LLM (`mistral-small`) en kort
@@ -2992,9 +2992,14 @@ låg → small, medel → medium, hög (analys/rapport/dokument) → large. Kedj
 faller fortfarande uppåt vid 429 och har small som sista utväg. Används av både
 `staff-chat.ts` (trådar/streaming) och `lib/actions/chat.ts` (efemär `/idag`).
 
+**Parent-document / small-to-big (env-gated, av default — prompt-budget):** sätt
+`MOVEXUM_RAG_PARENT=1` så byts varje träffs text mot ett sammanhängande fönster
+av grannchunkar (chunk_index ± `PARENT_WINDOW`, hämtat i ETT batchat anrop,
+overlap-dedupat via den rena `chunk-stitch.ts`, cappat till `PARENT_MAX_CHARS`).
+Sök på små chunkar (precision) men returnera mer kontext (svarskvalitet). Av
+default eftersom det blåser upp prompten (tool-resultatet capas ändå nedströms).
+
 **Kvar / kommande steg:**
-- **Parent-document / small-to-big** (returnera grannchunkars kontext) — avvägs
-  mot prompt-storlekstaket (`MAX_TOOL_RESULT_CHARS`).
 - **PPTX/DOCX-textextraktion** — KLAR. Dependency-fri OOXML-extraktion via den
   delade `lib/import/zip.ts` (ZIP-kärnan, delas med XLSX) + `lib/import/ooxml-text.ts`
   (ren, enhetstestad XML→text) i `lib/ai/attachments.ts`
