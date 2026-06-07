@@ -423,7 +423,9 @@ export function buildChatTools(
           'användaren refererar till "mina filer", "dokumentet jag laddade upp", en ' +
           'rapport/fil de äger, eller vill att du kör mot eget material. Bara den ' +
           'inloggade användarens egna filer nås — aldrig andras. Returnerar de mest ' +
-          'relevanta textstyckena med filnamn.',
+          'relevanta textstyckena med filnamn; etiketten visar även filens ' +
+          'ämnesmapp och kopplade bolag (t.ex. "[Acme AB · Finansiering] …") när ' +
+          'användaren sorterat filen, så du vet vilket bolag/ämne stycket rör.',
         parameters: {
           type: 'object',
           properties: {
