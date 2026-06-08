@@ -47,15 +47,14 @@ export default async function PublicModulePage({
   return (
     <main className="mx-compass-landing">
       <div className="mx-compass-wrap">
-        {/* Omslagsbild — uppladdad bild eller branded gradient som faller in */}
-        <div className={`mx-compass-hero${heroImageUrl ? '' : ' mx-compass-hero-fallback'}`}>
-          {heroImageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
+        {/* Omslagsbild — visas bara när en bild laddats upp (ingen blå
+            gradient-fallback; titeln visas ändå i hero-texten nedan) */}
+        {heroImageUrl && (
+          <div className="mx-compass-hero">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={heroImageUrl} alt="" className="mx-compass-hero-img" />
-          ) : (
-            <span>{module.welcome_title || module.name}</span>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Hero-text */}
         <header className="mx-compass-head">
