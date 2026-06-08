@@ -139,27 +139,3 @@
     letter-spacing: -0.01em;
   }
 }
-
-/*
- * Inloggningssidans gradient-panel — mjukt flytande aurora-orbar.
- * Movexum brand-färger (blå/lila), respekterar prefers-reduced-motion.
- */
-@keyframes mx-orb-drift {
-  0%   { transform: translate(0, 0) scale(1); }
-  33%  { transform: translate(6%, -8%) scale(1.08); }
-  66%  { transform: translate(-5%, 6%) scale(0.96); }
-  100% { transform: translate(0, 0) scale(1); }
-}
-
-@keyframes mx-orb-drift-slow {
-  0%   { transform: translate(0, 0) scale(1.05); }
-  50%  { transform: translate(-8%, -6%) scale(1.12); }
-  100% { transform: translate(0, 0) scale(1.05); }
-}
-
-.mx-orb { will-change: transform; animation: mx-orb-drift 18s ease-in-out infinite; }
-.mx-orb-slow { will-change: transform; animation: mx-orb-drift-slow 24s ease-in-out infinite; }
-
-@media (prefers-reduced-motion: reduce) {
-  .mx-orb, .mx-orb-slow { animation: none; }
-}
