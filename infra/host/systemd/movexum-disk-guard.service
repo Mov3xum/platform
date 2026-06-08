@@ -1,0 +1,14 @@
+[Unit]
+Description=Movexum disk- och inodbevakning (larm vid 80/90 %)
+Documentation=https://github.com/mov3xum/platform/blob/main/infra/host/README.md
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/movexum/disk-guard.env
+ExecStart=/opt/movexum/disk-guard.sh
+Nice=10
+# Begränsa skadeyta — skriptet behöver bara läsa df + ev. köra cleanup.
+ProtectHome=true
+NoNewPrivileges=true

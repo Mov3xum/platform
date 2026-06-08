@@ -1,0 +1,11 @@
+[Unit]
+Description=Kör Movexum diskbevakning var 10:e minut
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
