@@ -405,8 +405,8 @@ export default async function EditModulePage({
               </div>
               {mod.flow_type === 'quiz' && (
                 <label className="mx-label">
-                  Resultatprofiler (JSON) — för quiz. Varje val i en fråga kan peka på en
-                  hink via <code>värde | etikett | poäng | hink</code>.
+                  Resultatprofiler (JSON) — för quiz. Summan av alla valda alternativs
+                  poäng jämförs mot varje profils <code>min</code>/<code>max</code>.
                   <textarea
                     name="result_buckets"
                     defaultValue={
@@ -538,35 +538,21 @@ export default async function EditModulePage({
                       </label>
 
                       <label className="mx-label">
-                        Val (en per rad). Format{' '}
-                        <code>värde | etikett | poäng | nästa_nyckel</code>. Om du vill sätta
-                        profil-hink, använd <code>bucket:profil</code> som tredje (eller fjärde)
-                        kolumn. Multi-hink används via <code>builder:2 explorer:1</code> i tredje
-                        kolumnen.
+                        Val (en per rad). Format <code>värde | etikett | poäng</code> — en
+                        poäng per alternativ. Poängen summeras och totalen avgör vilken
+                        resultatprofil besökaren landar i.
                         <textarea
                           name="choices"
                           className="mx-textarea"
                           defaultValue={
                             q.choices?.length
                               ? q.choices
-                                  .map((c) => {
-                                    const buckets = c.buckets
-                                      ? Object.entries(c.buckets)
-                                          .map(([k, v]) => `${k}:${v}`)
-                                          .join(' ')
-                                      : '';
-                                    const scoreOrBucket = buckets || c.score?.toString() || (c.bucket ? `bucket:${c.bucket}` : '');
-                                    const bucketColumn = c.score !== undefined && c.bucket ? `bucket:${c.bucket}` : '';
-                                    const nextKey = c.next_key || '';
-                                    return [c.value, c.label, scoreOrBucket, bucketColumn, nextKey].filter(Boolean).join(' | ');
-                                  })
+                                  .map((c) => [c.value, c.label, choiceScoreText(c)].join(' | '))
                                   .join('\n')
                               : ''
                           }
                           style={{ marginTop: 4, minHeight: 74, fontFamily: 'var(--mx-mono)' }}
-                          placeholder={
-                            'problem | Att lösa problem | 2 | followup&#10;frihet | Frihet och självständighet | builder:1 explorer:1 | next_question&#10;hog | Hög | bucket:builder'
-                          }
+                          placeholder={'ja | Ja, absolut | 3&#10;kanske | Delvis | 1&#10;nej | Nej | 0'}
                         />
                       </label>
 
@@ -658,14 +644,14 @@ export default async function EditModulePage({
                     />
                   </label>
                   <label className="mx-label">
-                    Val (en per rad). Format <code>värde | etikett | poäng | nästa_nyckel</code>
-                    för branching. Hink sätts med <code>bucket:profil</code>. Multi-hink anges som
-                    <code>builder:2 explorer:1</code> i tredje kolumnen.
+                    Val (en per rad). Format <code>värde | etikett | poäng</code> — en poäng
+                    per alternativ. Poängen summeras och totalen avgör vilken resultatprofil
+                    besökaren landar i.
                     <textarea
                       name="choices"
                       className="mx-textarea"
                       style={{ marginTop: 4, minHeight: 70, fontFamily: 'var(--mx-mono)' }}
-                      placeholder="problem | Att lösa problem | 2 | why&#10;frihet | Frihet och självständighet | builder:1 explorer:1 | next_question&#10;hog | Hög | bucket:builder"
+                      placeholder="ja | Ja, absolut | 3&#10;kanske | Delvis | 1&#10;nej | Nej | 0"
                     />
                   </label>
                   <div className="mx-flex mx-items-c mx-gap-3">
@@ -745,6 +731,23 @@ export default async function EditModulePage({
       </div>
     </div>
   );
+}
+
+/**
+ * Visar EN poäng per val i redigeringsfältet. Härleder en poäng ur äldre,
+ * hink-baserade val (summan av hink-vikterna, eller 1 för en enkel hink) så att
+ * fältet aldrig blir tomt när en seedad quiz öppnas — sparas det om blir valet
+ * rent poäng-baserat (§ 23.3).
+ */
+function choiceScoreText(c: {
+  score?: number;
+  bucket?: string;
+  buckets?: Record<string, number>;
+}): string {
+  if (typeof c.score === 'number') return String(c.score);
+  if (c.buckets) return String(Object.values(c.buckets).reduce((a, b) => a + b, 0));
+  if (c.bucket) return '1';
+  return '0';
 }
 
 function Stat({ label, value }: { label: string; value: number }) {

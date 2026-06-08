@@ -634,25 +634,18 @@ export async function deleteModuleAction(formData: FormData) {
 const INPUT_TYPES = ['short_text', 'long_text', 'choice', 'multi_choice', 'scale', 'email', 'phone'] as const;
 
 /**
- * Tolkar en multi-hink-spec som `builder:2 explorer:1 potential:0` (mellanslag-
- * eller kommaseparerade `hink:poäng`-par). Returnerar undefined om strängen inte
- * är en sådan spec (då faller parsern tillbaka på enkel `poäng`/`hink`-kolumn).
+ * Tolkar svarsalternativ för en quiz-/formulärfråga. EN rad per val, EN poäng
+ * per val:
+ *
+ *   värde | etikett | poäng
+ *
+ * `poäng` är frivillig (default ingen poäng = 0 i summeringen). Poängen summeras
+ * server-side (`scoreQuiz`) och totalen jämförs mot resultatprofilernas
+ * `min`/`max`-intervall (`resolveBucket`). Inga hinkar, multi-hinkar eller
+ * branching i inmatningen — det höll vi enkelt med avsikt.
  */
-function parseBucketSpec(raw: string | undefined): Record<string, number> | undefined {
-  if (!raw) return undefined;
-  const tokens = raw.split(/[\s,]+/).map((t) => t.trim()).filter(Boolean);
-  if (tokens.length === 0) return undefined;
-  const map: Record<string, number> = {};
-  for (const tok of tokens) {
-    const m = tok.match(/^([\p{L}0-9_-]+):(-?\d+(?:\.\d+)?)$/u);
-    if (!m) return undefined; // inte en hink-spec → låt enkel-parsern ta över
-    map[slugify(m[1])] = Number(m[2]);
-  }
-  return Object.keys(map).length > 0 ? map : undefined;
-}
-
 function parseQuestionChoices(raw: string):
-  | { value: string; label: string; score?: number; bucket?: string; buckets?: Record<string, number>; next_key?: string }[]
+  | { value: string; label: string; score?: number }[]
   | undefined {
   if (!raw) return undefined;
 
@@ -664,59 +657,14 @@ function parseQuestionChoices(raw: string):
       const parts = l.split('|').map((s) => s.trim());
       const value = parts[0];
       const label = parts[1] || value;
-      const choice: {
-        value: string;
-        label: string;
-        score?: number;
-        bucket?: string;
-        buckets?: Record<string, number>;
-        next_key?: string;
-      } = {
+      const choice: { value: string; label: string; score?: number } = {
         value: slugify(value || l),
         label
       };
 
-      const parseBucketToken = (token: string | undefined): string | undefined => {
-        const rawToken = String(token || '').trim();
-        if (!rawToken) return undefined;
-        if (rawToken.toLowerCase().startsWith('bucket:')) {
-          return slugify(rawToken.slice('bucket:'.length));
-        }
-        return undefined;
-      };
-
-      // Format per rad:
-      //   value | label | score | next_key
-      //   value | label | score | bucket:profil | next_key
-      //   value | label | bucket:profil | next_key
-      //   value | label | builder:2 explorer:1 | next_key
-      // Legacy stöds också: value | label | score | bucket | next_key
-      const buckets = parseBucketSpec(parts[2]);
-      if (buckets) {
-        choice.buckets = buckets;
-        if (parts[3]) {
-          choice.next_key = slugify(parts[3]);
-        }
-      } else {
-        const score = Number(parts[2]);
-        if (parts[2] !== undefined && parts[2] !== '' && Number.isFinite(score)) {
-          choice.score = score;
-        } else {
-          const explicitBucket = parseBucketToken(parts[2]);
-          if (explicitBucket) choice.bucket = explicitBucket;
-        }
-
-        if (parts[4]) {
-          choice.bucket = parseBucketToken(parts[3]) || slugify(parts[3]);
-          choice.next_key = slugify(parts[4]);
-        } else if (parts[3]) {
-          const explicitBucket = parseBucketToken(parts[3]);
-          if (explicitBucket) {
-            choice.bucket = explicitBucket;
-          } else if (!choice.bucket) {
-            choice.next_key = slugify(parts[3]);
-          }
-        }
+      const score = Number(parts[2]);
+      if (parts[2] !== undefined && parts[2] !== '' && Number.isFinite(score)) {
+        choice.score = score;
       }
 
       return choice;
@@ -742,11 +690,8 @@ export async function addQuestionAction(formData: FormData) {
     throw new Error('Ogiltig input_type');
   }
 
-  // Två format per rad stöds:
-  //   • Enkel/intervall: `värde | etikett | poäng | hink`
-  //     (poäng + hink frivilliga; en hink per val).
-  //   • Multi-hink: `värde | etikett | builder:2 explorer:1 potential:0`
-  //     (ett val fördelar poäng över flera profiler — företräde framför hink).
+  // Ett format per rad: `värde | etikett | poäng` (en poäng per val, frivillig).
+  // Poängen summeras och jämförs mot resultatprofilernas intervall.
   const choices =
     choicesRaw && (inputType === 'choice' || inputType === 'multi_choice')
       ? parseQuestionChoices(choicesRaw)
