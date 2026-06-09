@@ -2,21 +2,17 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { PageHead, Card, CardHead, Chip, Icon } from '@/components/proto';
+import { PageHead, Card, CardHead, Icon } from '@/components/proto';
 import {
   getLeadAnalytics,
   getModuleBySlug,
   listQuestionsForModule
 } from '@/lib/compass/store';
 import { FLOW_TYPE_LABEL } from '@/lib/compass/types';
-import {
-  addQuestionAction,
-  deleteModuleAction,
-  deleteQuestionAction,
-  updateQuestionAction,
-  updateModuleAction
-} from '@/lib/actions/compass';
+import { deleteModuleAction, updateModuleAction } from '@/lib/actions/compass';
 import { ShareModule } from '@/components/compass/ShareModule';
+import { QuestionsManager } from '@/components/compass/QuestionsManager';
+import { ResultBucketsEditor } from '@/components/compass/ResultBucketsEditor';
 import { moduleHeroImageUrl } from '@/lib/compass/media';
 
 export const dynamic = 'force-dynamic';
@@ -25,16 +21,6 @@ const MODEL_OPTIONS = [
   { value: 'mistral-large-latest', label: 'Mistral Large (rikast)' },
   { value: 'mistral-medium-latest', label: 'Mistral Medium' },
   { value: 'mistral-small-latest', label: 'Mistral Small (snabb/billig)' }
-];
-
-const INPUT_TYPES = [
-  { value: 'short_text', label: 'Kort text' },
-  { value: 'long_text', label: 'Lång text' },
-  { value: 'email', label: 'E-post' },
-  { value: 'phone', label: 'Telefon' },
-  { value: 'choice', label: 'Enkelval' },
-  { value: 'multi_choice', label: 'Flerval' },
-  { value: 'scale', label: 'Skala 1–10' }
 ];
 
 export default async function EditModulePage({
@@ -404,23 +390,7 @@ export default async function EditModulePage({
                 </label>
               </div>
               {mod.flow_type === 'quiz' && (
-                <label className="mx-label">
-                  Resultatprofiler (JSON) — för quiz. Summan av alla valda alternativs
-                  poäng jämförs mot varje profils <code>min</code>/<code>max</code>.
-                  <textarea
-                    name="result_buckets"
-                    defaultValue={
-                      mod.result_buckets && mod.result_buckets.length
-                        ? JSON.stringify(mod.result_buckets, null, 2)
-                        : ''
-                    }
-                    className="mx-textarea"
-                    style={{ marginTop: 4, minHeight: 160, fontFamily: 'var(--mx-mono)', fontSize: 11 }}
-                    placeholder={
-                      '[\n  {"key":"green","title":"Redo","body":"...","tips":["..."],"min":14,"max":21,"cta":{"label":"Boka","url":"/m/grundare"}}\n]'
-                    }
-                  />
-                </label>
+                <ResultBucketsEditor initial={mod.result_buckets ?? []} />
               )}
               <div
                 className="mx-flex mx-items-c mx-gap-2"
@@ -443,232 +413,14 @@ export default async function EditModulePage({
                 </span>
               }
             />
-            <div style={{ padding: 16, display: 'grid', gap: 16 }}>
-              <div className="mx-muted mx-t-13" style={{ lineHeight: 1.5 }}>
-                Frågor och alternativ kan användas i alla modultyper. AI-chatten använder dem som
-                dynamisk intervjuguide, medan quiz och formulär visar dem direkt för besökaren.
-              </div>
-
-              {questions.length === 0 ? (
-                <div className="mx-muted mx-t-13">Inga frågor ännu. Lägg till din första nedan.</div>
-              ) : (
-                <div style={{ display: 'grid', gap: 12 }}>
-                  {questions.map((q, i) => (
-                    <form
-                      key={q.id}
-                      action={updateQuestionAction}
-                      style={{
-                        padding: 12,
-                        borderRadius: 10,
-                        background: 'var(--mx-paper-2)',
-                        border: '1px solid var(--mx-line-soft)',
-                        display: 'grid',
-                        gap: 10
-                      }}
-                    >
-                      <input type="hidden" name="id" value={q.id} />
-                      <input type="hidden" name="module_id" value={mod.id} />
-                      <input type="hidden" name="module_slug" value={mod.slug} />
-
-                      <div className="mx-flex mx-items-c mx-gap-2 mx-wrap">
-                        <span className="mx-mono mx-t-xs mx-muted" style={{ minWidth: 24 }}>
-                          {i + 1}
-                        </span>
-                        <Chip mono>{q.input_type}</Chip>
-                        <div className="mx-mono mx-t-xs mx-muted">
-                          {q.key}
-                          {q.required && ' · obligatorisk'}
-                        </div>
-                        <span className="mx-grow" />
-                        <button type="submit" className="mx-btn mx-sm mx-primary">
-                          <Icon name="check" size={11} /> Spara fråga
-                        </button>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                        <label className="mx-label">
-                          Nyckel
-                          <input
-                            type="text"
-                            name="key"
-                            required
-                            defaultValue={q.key}
-                            className="mx-input"
-                            style={{ marginTop: 4 }}
-                          />
-                        </label>
-                        <label className="mx-label">
-                          Input-typ
-                          <select
-                            name="input_type"
-                            defaultValue={q.input_type}
-                            className="mx-input"
-                            style={{ marginTop: 4 }}
-                          >
-                            {INPUT_TYPES.map((it) => (
-                              <option key={it.value} value={it.value}>
-                                {it.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-
-                      <label className="mx-label">
-                        Fråga (texten som visas)
-                        <input
-                          type="text"
-                          name="prompt"
-                          required
-                          defaultValue={q.prompt}
-                          className="mx-input"
-                          style={{ marginTop: 4 }}
-                        />
-                      </label>
-
-                      <label className="mx-label">
-                        Hjälptext (valfri)
-                        <input
-                          type="text"
-                          name="help_text"
-                          defaultValue={q.help_text || ''}
-                          className="mx-input"
-                          style={{ marginTop: 4 }}
-                        />
-                      </label>
-
-                      <label className="mx-label">
-                        Val (en per rad). Format <code>värde | etikett | poäng</code> — en
-                        poäng per alternativ. Poängen summeras och totalen avgör vilken
-                        resultatprofil besökaren landar i.
-                        <textarea
-                          name="choices"
-                          className="mx-textarea"
-                          defaultValue={
-                            q.choices?.length
-                              ? q.choices
-                                  .map((c) => [c.value, c.label, choiceScoreText(c)].join(' | '))
-                                  .join('\n')
-                              : ''
-                          }
-                          style={{ marginTop: 4, minHeight: 74, fontFamily: 'var(--mx-mono)' }}
-                          placeholder={'ja | Ja, absolut | 3&#10;kanske | Delvis | 1&#10;nej | Nej | 0'}
-                        />
-                      </label>
-
-                      <div className="mx-flex mx-items-c mx-gap-3 mx-wrap">
-                        <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
-                          <input type="checkbox" name="required" defaultChecked={!!q.required} />
-                          Obligatorisk
-                        </label>
-                        <span className="mx-grow" />
-                        <button
-                          type="submit"
-                          formAction={deleteQuestionAction}
-                          className="mx-btn mx-sm"
-                          style={{ color: '#4b2718' }}
-                        >
-                          <Icon name="trash" size={11} /> Ta bort
-                        </button>
-                      </div>
-                    </form>
-                  ))}
-                </div>
-              )}
-
-              <details>
-                <summary
-                  className="mx-btn mx-sm"
-                  style={{ display: 'inline-flex', cursor: 'pointer' }}
-                >
-                  <Icon name="plus" size={11} /> Ny fråga
-                </summary>
-                <form
-                  action={addQuestionAction}
-                  style={{
-                    marginTop: 12,
-                    padding: 12,
-                    borderRadius: 10,
-                    background: 'var(--mx-paper-2)',
-                    display: 'grid',
-                    gap: 8
-                  }}
-                >
-                  <input type="hidden" name="module_id" value={mod.id} />
-                  <input type="hidden" name="module_slug" value={mod.slug} />
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <label className="mx-label">
-                      Nyckel (mappas till lead-fält om matchande)
-                      <input
-                        type="text"
-                        name="key"
-                        required
-                        className="mx-input"
-                        style={{ marginTop: 4 }}
-                        placeholder="t.ex. idea_summary, email, role"
-                      />
-                    </label>
-                    <label className="mx-label">
-                      Input-typ
-                      <select
-                        name="input_type"
-                        className="mx-input"
-                        defaultValue="short_text"
-                        style={{ marginTop: 4 }}
-                      >
-                        {INPUT_TYPES.map((it) => (
-                          <option key={it.value} value={it.value}>
-                            {it.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <label className="mx-label">
-                    Fråga (texten som visas)
-                    <input
-                      type="text"
-                      name="prompt"
-                      required
-                      className="mx-input"
-                      style={{ marginTop: 4 }}
-                    />
-                  </label>
-                  <label className="mx-label">
-                    Hjälptext (valfri)
-                    <input
-                      type="text"
-                      name="help_text"
-                      className="mx-input"
-                      style={{ marginTop: 4 }}
-                    />
-                  </label>
-                  <label className="mx-label">
-                    Val (en per rad). Format <code>värde | etikett | poäng</code> — en poäng
-                    per alternativ. Poängen summeras och totalen avgör vilken resultatprofil
-                    besökaren landar i.
-                    <textarea
-                      name="choices"
-                      className="mx-textarea"
-                      style={{ marginTop: 4, minHeight: 70, fontFamily: 'var(--mx-mono)' }}
-                      placeholder="ja | Ja, absolut | 3&#10;kanske | Delvis | 1&#10;nej | Nej | 0"
-                    />
-                  </label>
-                  <div className="mx-flex mx-items-c mx-gap-3">
-                    <label
-                      className="mx-flex mx-items-c mx-gap-2 mx-t-13"
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <input type="checkbox" name="required" />
-                      Obligatorisk
-                    </label>
-                    <span className="mx-grow" />
-                    <button type="submit" className="mx-btn mx-primary">
-                      <Icon name="plus" size={12} /> Lägg till fråga
-                    </button>
-                  </div>
-                </form>
-              </details>
+            <div style={{ padding: 16 }}>
+              <QuestionsManager
+                moduleId={mod.id}
+                moduleSlug={mod.slug}
+                flowType={mod.flow_type}
+                initialQuestions={questions}
+                resultBuckets={mod.result_buckets ?? []}
+              />
             </div>
           </Card>
         </div>
@@ -731,23 +483,6 @@ export default async function EditModulePage({
       </div>
     </div>
   );
-}
-
-/**
- * Visar EN poäng per val i redigeringsfältet. Härleder en poäng ur äldre,
- * hink-baserade val (summan av hink-vikterna, eller 1 för en enkel hink) så att
- * fältet aldrig blir tomt när en seedad quiz öppnas — sparas det om blir valet
- * rent poäng-baserat (§ 23.3).
- */
-function choiceScoreText(c: {
-  score?: number;
-  bucket?: string;
-  buckets?: Record<string, number>;
-}): string {
-  if (typeof c.score === 'number') return String(c.score);
-  if (c.buckets) return String(Object.values(c.buckets).reduce((a, b) => a + b, 0));
-  if (c.bucket) return '1';
-  return '0';
 }
 
 function Stat({ label, value }: { label: string; value: number }) {

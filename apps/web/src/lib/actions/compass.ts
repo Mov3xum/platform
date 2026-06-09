@@ -671,6 +671,86 @@ function parseQuestionChoices(raw: string):
     });
 }
 
+type ParsedChoice = {
+  value: string;
+  label: string;
+  score?: number;
+  buckets?: Record<string, number>;
+};
+
+/** Normaliserar en hink-/profilnyckel till ett säkert, kort format. */
+function normalizeBucketKey(raw: string): string {
+  return raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+}
+
+/**
+ * Tolkar svarsalternativ från den visuella fråge-editorn (`QuestionsManager`).
+ * Klienten skickar en JSON-array med `{ value, label, score?, buckets? }` —
+ * `buckets` = poäng per resultatprofil (topp-hink-läge, t.ex.
+ * `{ green: 2, yellow: 0, red: 0 }`). Allt valideras/saneras här server-side;
+ * klienten är aldrig säkerhetsgränsen (CLAUDE.md § 10.5 punkt 7). Tomma/0-poäng
+ * utelämnas så lagringen hålls minimal.
+ */
+function parseChoicesJson(raw: string): ParsedChoice[] | undefined {
+  if (!raw) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) return undefined;
+
+  const out: ParsedChoice[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const label = String(rec.label ?? rec.value ?? '').trim().slice(0, 200);
+    const value = slugify(String(rec.value ?? rec.label ?? ''));
+    if (!value || !label) continue;
+
+    const choice: ParsedChoice = { value, label };
+
+    if (rec.buckets && typeof rec.buckets === 'object' && !Array.isArray(rec.buckets)) {
+      const buckets: Record<string, number> = {};
+      for (const [k, v] of Object.entries(rec.buckets as Record<string, unknown>)) {
+        const key = normalizeBucketKey(k);
+        const n = Number(v);
+        if (key && Number.isFinite(n) && n !== 0) buckets[key] = n;
+      }
+      if (Object.keys(buckets).length > 0) choice.buckets = buckets;
+    }
+
+    const score = Number(rec.score);
+    if (rec.score !== undefined && rec.score !== '' && Number.isFinite(score) && score !== 0) {
+      choice.score = score;
+    }
+
+    out.push(choice);
+  }
+  return out;
+}
+
+/**
+ * Härleder valen för en fråga: föredrar den strukturerade `choices_json` från
+ * den visuella editorn, faller annars tillbaka på det äldre
+ * `värde | etikett | poäng`-textfältet (bakåtkompatibelt). Returnerar undefined
+ * för fråge-typer utan val.
+ */
+function resolveChoices(formData: FormData, inputType: string): ParsedChoice[] | undefined {
+  if (inputType !== 'choice' && inputType !== 'multi_choice') return undefined;
+  const jsonRaw = String(formData.get('choices_json') || '').trim();
+  if (jsonRaw) return parseChoicesJson(jsonRaw);
+  const choicesRaw = String(formData.get('choices') || '').trim();
+  return choicesRaw ? parseQuestionChoices(choicesRaw) : undefined;
+}
+
 export async function addQuestionAction(formData: FormData) {
   const user = await requireUser();
   if (!hasRole(user.roles, [...MANAGE_ROLES])) {
@@ -683,19 +763,16 @@ export async function addQuestionAction(formData: FormData) {
   const helpText = String(formData.get('help_text') || '').trim();
   const inputType = String(formData.get('input_type') || 'short_text');
   const required = formData.get('required') === 'on';
-  const choicesRaw = String(formData.get('choices') || '').trim();
 
   if (!moduleId || !key || !prompt) throw new Error('Modul, nyckel och fråga krävs');
   if (!INPUT_TYPES.includes(inputType as (typeof INPUT_TYPES)[number])) {
     throw new Error('Ogiltig input_type');
   }
 
-  // Ett format per rad: `värde | etikett | poäng` (en poäng per val, frivillig).
-  // Poängen summeras och jämförs mot resultatprofilernas intervall.
-  const choices =
-    choicesRaw && (inputType === 'choice' || inputType === 'multi_choice')
-      ? parseQuestionChoices(choicesRaw)
-      : undefined;
+  // Val + poäng från den visuella editorn (`choices_json`) eller det äldre
+  // textfältet. `buckets` ger poäng per resultatprofil; totalen avgör vinnande
+  // profil (`scoreQuiz`/`resolveBucket`, packages/shared/compass-quiz.ts).
+  const choices = resolveChoices(formData, inputType);
 
   const pb = await getServerPb();
   // Verify module ownership
@@ -736,12 +813,13 @@ export async function updateQuestionAction(formData: FormData) {
   const helpText = String(formData.get('help_text') || '').trim();
   const inputType = String(formData.get('input_type') || 'short_text');
   const required = formData.get('required') === 'on';
-  const choicesRaw = String(formData.get('choices') || '').trim();
 
   if (!id || !moduleId || !key || !prompt) throw new Error('Modul, nyckel och fråga krävs');
   if (!INPUT_TYPES.includes(inputType as (typeof INPUT_TYPES)[number])) {
     throw new Error('Ogiltig input_type');
   }
+
+  const choices = resolveChoices(formData, inputType);
 
   const pb = await getServerPb();
   const mod = await pb.collection('compass_modules').getOne(moduleId);
@@ -756,7 +834,7 @@ export async function updateQuestionAction(formData: FormData) {
         help_text: helpText || undefined,
         input_type: inputType,
         required,
-        choices: choicesRaw && (inputType === 'choice' || inputType === 'multi_choice') ? parseQuestionChoices(choicesRaw) : undefined
+        choices
       })
     );
   } catch (err) {
