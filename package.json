@@ -14,7 +14,7 @@
     "typecheck": "yarn workspace @platform/web typecheck",
     "verify:pb-baseline": "node backend/pocketbase-schema/scripts/verify-baseline.mjs",
     "check:filters": "node backend/pocketbase-schema/scripts/check-pb-filters.mjs",
-    "test": "node backend/pocketbase-schema/scripts/check-pb-filters.mjs && node --import ./scripts/register-test-hooks.mjs --experimental-strip-types --test packages/shared/src/*.test.ts apps/web/src/lib/*.test.ts apps/web/src/lib/users/*.test.ts apps/web/src/lib/ai/*.test.ts apps/web/src/lib/import/*.test.ts"
+    "test": "node backend/pocketbase-schema/scripts/check-pb-filters.mjs && node --import ./scripts/register-test-hooks.mjs --experimental-strip-types --test packages/shared/src/*.test.ts apps/web/src/lib/*.test.ts apps/web/src/lib/users/*.test.ts apps/web/src/lib/ai/*.test.ts apps/web/src/lib/import/*.test.ts apps/web/src/lib/compass/*.test.ts"
   },
   "packageManager": "yarn@1.22.22",
   "resolutions": {

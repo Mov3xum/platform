@@ -8,7 +8,7 @@ import {
   persistChatTurnAndUpsertLead
 } from '@/lib/compass/chat-lead';
 import { getModuleBySlug, listQuestionsForModule } from '@/lib/compass/store';
-import type { CompassModule } from '@/lib/compass/types';
+import { PREVIEW_SOURCE_KEY, type CompassModule } from '@/lib/compass/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -116,7 +116,9 @@ export async function POST(req: Request) {
           history,
           reply,
           moduleName: mod?.name || 'AI-intag',
-          sourceKey: 'ai-chat',
+          // Intern staff-test-chatt = förhandsgranskning → leadet skapas (så
+          // pipelinen kan verifieras) men exkluderas från all statistik.
+          sourceKey: PREVIEW_SOURCE_KEY,
           // Bara en riktig modul-slug attribueras i analytics (inte sentineln).
           landingModule: body.moduleSlug
         });

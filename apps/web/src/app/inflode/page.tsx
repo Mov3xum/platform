@@ -44,14 +44,18 @@ export default async function InflodeDashboardPage({
   const [dashboard, recent, modules] = await Promise.all([
     getCompassDashboard(pb, user.tenant, days, sources),
     isStaff
-      ? listLeads(pb, user.tenant, { perPage: 6 }).then((r) => r.items)
+      ? listLeads(pb, user.tenant, { perPage: 6, excludePreview: true }).then((r) => r.items)
       : Promise.resolve([]),
     listModules(pb, user.tenant, { onlyActive: !isStaff })
   ]);
 
   const { kpis, leadsPerDay, leadsPerSource, funnel } = dashboard;
   const sourceByKey = new Map(sources.map((s) => [s.key, s]));
+  // landing_module kan vara modulens publika ELLER interna slug — mappa båda.
   const moduleBySlug = new Map(modules.map((m) => [m.slug, m]));
+  for (const m of modules) {
+    if (m.public_slug) moduleBySlug.set(m.public_slug, m);
+  }
   const maxFunnel = Math.max(...funnel.map((f) => f.count), 1);
 
   const tabs = buildInflodeTabs();
@@ -69,8 +73,8 @@ export default async function InflodeDashboardPage({
 
   const actions = (
     <>
-      <Link href="/inflode/chat" className="mx-btn">
-        <Icon name="sparkle" size={13} /> Öppna intag
+      <Link href="/inflode/chat" className="mx-btn" title="Testa AI-intagschatten som Movexum-personal">
+        <Icon name="sparkle" size={13} /> Testa AI-intag
       </Link>
       {isStaff && (
         <Link href="/inflode/leads/new" className="mx-btn mx-primary">
@@ -142,6 +146,28 @@ export default async function InflodeDashboardPage({
           </p>
           <PeriodFilter days={days} basePath="/inflode" />
         </div>
+
+        {/* Kom igång — visas tills första modulen/leadet finns */}
+        {isStaff && kpis.totalLeads === 0 && modules.length === 0 && (
+          <section className="rounded-2xl border border-dashed border-default bg-canvas-subtle p-8 text-center">
+            <h2 className="font-heading text-[17px] font-semibold text-foreground">
+              Kom igång med Startupkompassen
+            </h2>
+            <p className="mx-auto mt-2 max-w-[520px] text-[13px] leading-relaxed text-foreground-muted">
+              Bygg en intag-modul (quiz, formulär eller AI-chatt), deploya den publikt
+              med QR-kod i de forum ni rör er, och följ upp inflödet här — varje
+              slutfört flöde blir ett lead.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <Link href="/inflode/admin/modules/new" className="mx-btn mx-primary">
+                <Icon name="plus" size={13} /> Skapa din första modul
+              </Link>
+              <Link href="/inflode/admin/modules" className="mx-btn">
+                Visa moduler
+              </Link>
+            </div>
+          </section>
+        )}
 
         {/* KPI-kort */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

@@ -43,7 +43,23 @@ export default async function EditModulePage({
     getLeadAnalytics(pb, user.tenant, 365),
     listModules(pb, user.tenant)
   ]);
-  const metrics = analytics.byModule.find((m) => m.slug === mod.slug);
+  // Publika flöden lagrar landing_module som modulens PUBLIKA slug, interna
+  // förhandsgranskningar som den interna — slå ihop bägge så statistiken
+  // stämmer (tidigare visades 0 leads när public_slug skilde sig från slug).
+  const metricRows = analytics.byModule.filter(
+    (m) => m.slug === mod.slug || (mod.public_slug && m.slug === mod.public_slug)
+  );
+  const metrics =
+    metricRows.length > 0
+      ? metricRows.reduce(
+          (acc, m) => ({
+            total: acc.total + m.total,
+            accepted: acc.accepted + m.accepted,
+            converted: acc.converted + m.converted
+          }),
+          { total: 0, accepted: 0, converted: 0 }
+        )
+      : undefined;
   const heroImageUrl = moduleHeroImageUrl(mod);
   // Övriga moduler i tenanten — kandidater för "nästa modul"-kedjan (ej sig själv).
   const otherModules = allModules
@@ -81,7 +97,10 @@ export default async function EditModulePage({
             <Stat label="Accepterade" value={metrics.accepted} />
             <Stat label="Konverterade bolag" value={metrics.converted} />
             <span className="mx-grow" />
-            <Link href={`/inflode/leads?landing=${mod.slug}`} className="mx-btn mx-sm mx-ghost">
+            <Link
+              href={`/inflode/leads?landing=${encodeURIComponent(mod.public_slug || mod.slug)}`}
+              className="mx-btn mx-sm mx-ghost"
+            >
               Visa leads från modulen →
             </Link>
           </div>

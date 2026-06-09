@@ -32,6 +32,15 @@ export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
   declined: 'Avböjd'
 };
 
+/**
+ * Lead-källa för INTERNA förhandsgranskningar (admin-preview på /inflode/m/…
+ * och staff-test-chatten /inflode/chat). Leads med den här källan skapas så
+ * att staff kan verifiera hela pipelinen, men EXKLUDERAS från all statistik
+ * (dashboard, analys, CSV-export) — de är test, inte inflöde.
+ */
+export const PREVIEW_SOURCE_KEY = 'preview';
+export const PREVIEW_SOURCE_LABEL = 'Förhandsgranskning';
+
 export type FlowType = 'chat' | 'wizard' | 'quiz';
 
 export const FLOW_TYPE_LABEL: Record<FlowType, string> = {

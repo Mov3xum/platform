@@ -27,7 +27,10 @@ export function ResultBucketsEditor({ initial }: { initial: ResultBucket[] }) {
         tips: (b.tips ?? []).map((t) => t.trim()).filter(Boolean)
       }))
       .filter((b) => b.key && b.title);
-    return cleaned.length ? JSON.stringify(cleaned) : '';
+    // Alltid giltig JSON — '[]' låter servern RENSA profilerna (en tom sträng
+    // hoppas över av updateModuleAction och gjorde det omöjligt att ta bort
+    // sista profilen).
+    return JSON.stringify(cleaned);
   }, [buckets]);
 
   function update(i: number, patch: Partial<ResultBucket>) {

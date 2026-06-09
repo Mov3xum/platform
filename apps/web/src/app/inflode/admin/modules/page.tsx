@@ -22,6 +22,21 @@ export default async function AdminModulesPage() {
   ]);
 
   const metricsBySlug = new Map(analytics.byModule.map((m) => [m.slug, m]));
+  // landing_module lagras som publik slug i de publika flödena — slå ihop
+  // mätvärden för bägge sluggarna så korten visar rätt siffror.
+  const metricsFor = (m: (typeof modules)[number]) => {
+    const a = m.public_slug ? metricsBySlug.get(m.public_slug) : undefined;
+    const b = metricsBySlug.get(m.slug);
+    if (a && b && a !== b) {
+      return {
+        total: a.total + b.total,
+        accepted: a.accepted + b.accepted,
+        converted: a.converted + b.converted
+      };
+    }
+    return a || b;
+  };
+  const moduleNameById = new Map(modules.map((m) => [m.id, m.name]));
   const tabs = buildInflodeTabs();
 
   return (
@@ -69,7 +84,8 @@ export default async function AdminModulesPage() {
       ) : (
         <div style={{ display: 'grid', gap: 10 }}>
           {modules.map((m) => {
-            const metrics = metricsBySlug.get(m.slug);
+            const metrics = metricsFor(m);
+            const nextName = m.next_module ? moduleNameById.get(m.next_module) : undefined;
             return (
               <Card key={m.id} style={{ padding: 14 }}>
                 <div className="mx-flex mx-items-c mx-gap-2">
@@ -97,7 +113,11 @@ export default async function AdminModulesPage() {
                       )}
                     </div>
                     <div className="mx-t-12 mx-muted mx-truncate" style={{ marginTop: 4 }}>
-                      <code className="mx-mono">/inflode/m/{m.slug}</code>
+                      {/* Den publika delningslänken är det staff faktiskt använder. */}
+                      <code className="mx-mono">
+                        {m.public_slug ? `/m/${m.public_slug}` : `/inflode/m/${m.slug}`}
+                      </code>
+                      {nextName ? ` · kedjas vidare till "${nextName}"` : ''}
                       {m.description ? ` · ${m.description}` : ''}
                     </div>
                   </div>

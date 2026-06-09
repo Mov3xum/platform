@@ -6,13 +6,15 @@ import {
   getModuleBySlug,
   listQuestionsForModule
 } from '@/lib/compass/store';
+import { mapAnswersToLead, pickAttribution } from '@/lib/compass/public';
+import { findMissingRequiredAlongPath } from '@/lib/compass/question-flow';
+import { PREVIEW_SOURCE_KEY, type Attribution } from '@/lib/compass/types';
 import {
   attachAiSummary,
   buildSubmissionEntries,
   moduleWantsLead,
   parseContactPreference
 } from '@/lib/compass/lead-capture';
-import type { Attribution } from '@/lib/compass/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,14 +25,7 @@ interface SubmitBody {
   contact_preference?: string;
 }
 
-function pickString(v: unknown, max: number): string | undefined {
-  if (typeof v !== 'string') return undefined;
-  const t = v.trim();
-  if (!t) return undefined;
-  return t.slice(0, max);
-}
-
-/** Tar emot svaren från ModuleWizard och skapar lead + conversation. */
+/** Tar emot svaren från ModuleWizard (inloggad admin-preview) och skapar lead + conversation. */
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ slug: string }> }
@@ -55,71 +50,33 @@ export async function POST(
   }
   const questions = await listQuestionsForModule(pb, mod.id);
 
-  // Validera obligatoriska
-  for (const q of questions) {
-    if (!q.required) continue;
-    const v = answers[q.key];
-    if (v === undefined || v === '' || (Array.isArray(v) && v.length === 0)) {
-      return NextResponse.json(
-        { error: `Fältet "${q.prompt}" är obligatoriskt.` },
-        { status: 400 }
-      );
-    }
+  // Validera obligatoriska längs den FAKTISKA grenen (hopplogik via next_key
+  // hoppar legitimt över frågor) — samma regel som den publika routen.
+  const missing = findMissingRequiredAlongPath(questions, answers);
+  if (missing) {
+    return NextResponse.json(
+      { error: `Fältet "${missing.prompt}" är obligatoriskt.` },
+      { status: 400 }
+    );
   }
 
-  // Mappa kända fält till lead-schemat (whitelist, inga övriga fält).
-  const FIELD_MAP: Record<string, 'name' | 'email' | 'phone' | 'organization' | 'idea_summary' | 'idea_category'> = {
-    name: 'name',
-    namn: 'name',
-    email: 'email',
-    epost: 'email',
-    phone: 'phone',
-    telefon: 'phone',
-    organization: 'organization',
-    bolag: 'organization',
-    idea: 'idea_summary',
-    idea_summary: 'idea_summary',
-    category: 'idea_category',
-    kategori: 'idea_category'
-  };
-
-  const leadPayload: Record<string, string> = {};
-  for (const [key, raw] of Object.entries(answers)) {
-    const field = FIELD_MAP[key];
-    if (!field) continue;
-    const value = Array.isArray(raw) ? raw.join(', ') : raw;
-    if (typeof value === 'string' && value.trim().length > 0) {
-      leadPayload[field] = value.trim().slice(0, field === 'idea_summary' ? 4000 : 200);
-    }
-  }
-
-  // Attribution — whitelist + längdgränser, ingen blind genomgång.
-  const attr = body.attribution || {};
-  const attribution: Record<string, string> = {};
-  const utmSource = pickString(attr.utm_source, 100);
-  if (utmSource) attribution.utm_source = utmSource;
-  const utmMedium = pickString(attr.utm_medium, 100);
-  if (utmMedium) attribution.utm_medium = utmMedium;
-  const utmCampaign = pickString(attr.utm_campaign, 100);
-  if (utmCampaign) attribution.utm_campaign = utmCampaign;
-  const utmTerm = pickString(attr.utm_term, 100);
-  if (utmTerm) attribution.utm_term = utmTerm;
-  const utmContent = pickString(attr.utm_content, 200);
-  if (utmContent) attribution.utm_content = utmContent;
-  const referrerUrl = pickString(attr.referrer_url, 500);
-  if (referrerUrl) attribution.referrer_url = referrerUrl;
+  // Delad whitelist-mappning (dataminimering, GDPR § 5) — samma som publika
+  // flödet, ingen divergerande kopia.
+  const leadPayload = mapAnswersToLead(answers);
+  const attribution = pickAttribution(body.attribution);
 
   // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead.
   if (!moduleWantsLead(mod)) {
     return NextResponse.json({ ok: true });
   }
 
-  const name = leadPayload.name || 'Anonym';
+  // Intern admin-preview → markeras som förhandsgranskning och exkluderas
+  // från all statistik (dashboard/analys/export).
   const lead = await createLead(pb, user.tenant, {
     ...leadPayload,
     ...attribution,
-    name,
-    source_key: 'web',
+    name: leadPayload.name || 'Anonym',
+    source_key: PREVIEW_SOURCE_KEY,
     landing_module: slug,
     contact_preference: parseContactPreference(body.contact_preference),
     consent_at: new Date().toISOString()

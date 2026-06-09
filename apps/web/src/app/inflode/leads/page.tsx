@@ -8,6 +8,8 @@ import { listLeads, listLeadSources, listModules } from '@/lib/compass/store';
 import {
   LEAD_STATUS_LABEL,
   LEAD_STATUS_ORDER,
+  PREVIEW_SOURCE_KEY,
+  PREVIEW_SOURCE_LABEL,
   type LeadStatus
 } from '@/lib/compass/types';
 import { buildInflodeTabs } from '../_tabs';
@@ -82,9 +84,18 @@ export default async function LeadsPage({
         </span>
       }
       actions={
-        <Link href="/inflode/leads/new" className="mx-btn mx-primary">
-          <Icon name="plus" size={13} /> Nytt lead
-        </Link>
+        <>
+          <a
+            href={`/api/inflode/leads/export${baseQs.toString() ? `?${baseQs.toString()}` : ''}`}
+            className="mx-btn"
+            title="Exportera de filtrerade leadsen som CSV (Excel) — för uppföljning och rapportering"
+          >
+            <Icon name="download" size={13} /> Exportera CSV
+          </a>
+          <Link href="/inflode/leads/new" className="mx-btn mx-primary">
+            <Icon name="plus" size={13} /> Nytt lead
+          </Link>
+        </>
       }
     >
       {/* Filter-bar */}
@@ -94,6 +105,8 @@ export default async function LeadsPage({
           method="get"
           className="mx-flex mx-items-c mx-gap-2 mx-wrap"
         >
+          {/* Bevara ett aktivt modulfilter (länkat från modul-admin) vid sök. */}
+          {landingModule && <input type="hidden" name="landing" value={landingModule} />}
           <input
             type="search"
             name="q"
@@ -143,6 +156,14 @@ export default async function LeadsPage({
             {LEAD_STATUS_LABEL[s]}
           </Link>
         ))}
+        <Link
+          href={`/inflode/leads?src=${PREVIEW_SOURCE_KEY}`}
+          className={`mx-chip mx-mono${sourceKey === PREVIEW_SOURCE_KEY ? ' mx-ink-chip' : ''}`}
+          style={{ textDecoration: 'none' }}
+          title="Interna testkörningar — räknas inte i statistik eller export"
+        >
+          {PREVIEW_SOURCE_LABEL}
+        </Link>
       </div>
 
       {/* Lista */}
@@ -174,10 +195,16 @@ export default async function LeadsPage({
                       <Chip variant={statusChipVariant(lead.status)} mono>
                         {LEAD_STATUS_LABEL[lead.status]}
                       </Chip>
-                      {source && (
-                        <span className="mx-mono mx-t-xs mx-muted mx-t-up">
-                          · {source.label}
-                        </span>
+                      {lead.source_key === PREVIEW_SOURCE_KEY ? (
+                        <Chip variant="draft" mono>
+                          {PREVIEW_SOURCE_LABEL.toUpperCase()}
+                        </Chip>
+                      ) : (
+                        source && (
+                          <span className="mx-mono mx-t-xs mx-muted mx-t-up">
+                            · {source.label}
+                          </span>
+                        )
                       )}
                       {landingLabel(lead.landing_module) && (
                         <Chip variant="cyan" mono>

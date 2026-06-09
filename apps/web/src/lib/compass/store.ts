@@ -10,7 +10,7 @@ import type {
   LeadStatus,
   SecurityEventKind
 } from './types';
-import { LEAD_STATUS_ORDER } from './types';
+import { LEAD_STATUS_ORDER, PREVIEW_SOURCE_KEY } from './types';
 
 /* ────────────────────────────────────────────────────────────────────
    Läs-fallback — PB v0.23.4 rule-eval-bugg (CLAUDE.md § 21.3)
@@ -101,18 +101,23 @@ export async function listLeadSources(pb: PocketBase): Promise<LeadSource[]> {
    Leads
    ──────────────────────────────────────────────────────────────────── */
 
-export async function listLeads(
-  pb: PocketBase,
-  tenant: string,
-  options: {
-    status?: LeadStatus;
-    q?: string;
-    sourceKey?: string;
-    landingModule?: string;
-    page?: number;
-    perPage?: number;
-  } = {}
-): Promise<{ items: Lead[]; totalItems: number; totalPages: number }> {
+export interface LeadListOptions {
+  status?: LeadStatus;
+  q?: string;
+  sourceKey?: string;
+  landingModule?: string;
+  page?: number;
+  perPage?: number;
+  /**
+   * Exkludera interna förhandsgranskningar (source_key = 'preview') — används
+   * av statistik/export/dashboard. Ignoreras när ett explicit källfilter är
+   * satt (så staff kan filtrera fram just förhandsgranskningarna).
+   */
+  excludePreview?: boolean;
+}
+
+/** Delad filterbyggare för lead-listning/-export (bunden syntax, § 10.3). */
+function buildLeadFilter(pb: PocketBase, tenant: string, options: LeadListOptions): string {
   const filters: string[] = ['tenant = {:tenant}'];
   const params: Record<string, unknown> = { tenant };
   if (options.status) {
@@ -122,6 +127,9 @@ export async function listLeads(
   if (options.sourceKey) {
     filters.push('source_key = {:src}');
     params.src = options.sourceKey;
+  } else if (options.excludePreview) {
+    filters.push('source_key != {:pv}');
+    params.pv = PREVIEW_SOURCE_KEY;
   }
   if (options.landingModule) {
     filters.push('landing_module = {:lm}');
@@ -133,8 +141,15 @@ export async function listLeads(
     );
     params.q = options.q;
   }
+  return pb.filter(filters.join(' && '), params);
+}
 
-  const filter = pb.filter(filters.join(' && '), params);
+export async function listLeads(
+  pb: PocketBase,
+  tenant: string,
+  options: LeadListOptions = {}
+): Promise<{ items: Lead[]; totalItems: number; totalPages: number }> {
+  const filter = buildLeadFilter(pb, tenant, options);
   try {
     const res = await readWithFallback(
       pb,
@@ -148,6 +163,33 @@ export async function listLeads(
     return { items: res.items, totalItems: res.totalItems, totalPages: res.totalPages };
   } catch {
     return { items: [], totalItems: 0, totalPages: 0 };
+  }
+}
+
+/**
+ * Hämtar ALLA leads som matchar filtret (för CSV-export till intressent-/
+ * ägarrapportering). Staff-gejtad i export-routen; exporten audit-loggas med
+ * `lead_export` (PII lämnar systemet — ISO 27001 A.8.15).
+ */
+export async function listLeadsForExport(
+  pb: PocketBase,
+  tenant: string,
+  options: LeadListOptions = {}
+): Promise<Lead[]> {
+  const filter = buildLeadFilter(pb, tenant, options);
+  try {
+    return await readWithFallback(
+      pb,
+      (client) =>
+        client.collection('compass_leads').getFullList<Lead>({
+          filter,
+          sort: '-created',
+          batch: 500
+        }),
+      (rows) => rows.length === 0
+    );
+  } catch {
+    return [];
   }
 }
 
@@ -247,7 +289,11 @@ export async function countLeadsByStatus(
     accepted: 0,
     declined: 0
   };
-  const filter = pb.filter('tenant = {:tenant}', { tenant });
+  // Förhandsgranskningar (preview) räknas aldrig i tratt/statistik.
+  const filter = pb.filter('tenant = {:tenant} && source_key != {:pv}', {
+    tenant,
+    pv: PREVIEW_SOURCE_KEY
+  });
   try {
     const all = await readWithFallback(
       pb,
@@ -470,6 +516,14 @@ export interface ModuleConversion {
   converted: number;
 }
 
+export interface QuizBucketBreakdown {
+  /** Modulens slug (landing_module). */
+  module: string;
+  /** Resultatprofilens nyckel (quiz_result_bucket). */
+  bucket: string;
+  count: number;
+}
+
 /** Snabba analytics — räknar leads per dimension från ett enda batch-hämta. */
 export async function getLeadAnalytics(
   pb: PocketBase,
@@ -479,14 +533,17 @@ export async function getLeadAnalytics(
   bySource: AttributionBreakdown[];
   byCampaign: CampaignBreakdown[];
   byModule: ModuleConversion[];
+  /** Fördelning av quiz-resultatprofiler per modul (beslutsdata). */
+  byQuizBucket: QuizBucketBreakdown[];
   weekly: { week: string; total: number; accepted: number }[];
   total: number;
   accepted: number;
   converted: number;
 }> {
   try {
-    const filterParts = ['tenant = {:tenant}'];
-    const params: Record<string, unknown> = { tenant };
+    // Förhandsgranskningar (preview) exkluderas ur all analys.
+    const filterParts = ['tenant = {:tenant}', 'source_key != {:pv}'];
+    const params: Record<string, unknown> = { tenant, pv: PREVIEW_SOURCE_KEY };
     if (windowDays && windowDays > 0) {
       const cutoff = new Date(Date.now() - windowDays * 86400_000).toISOString();
       filterParts.push('created >= {:cutoff}');
@@ -499,7 +556,7 @@ export async function getLeadAnalytics(
         client.collection('compass_leads').getFullList<Lead>({
           filter: analyticsFilter,
           fields:
-            'id,status,source_key,utm_source,utm_medium,utm_campaign,landing_module,converted_startup,converted_at,created',
+            'id,status,source_key,utm_source,utm_medium,utm_campaign,landing_module,quiz_result_bucket,converted_startup,converted_at,created',
           batch: 1000
         }),
       (rows) => rows.length === 0
@@ -508,6 +565,7 @@ export async function getLeadAnalytics(
     const sourceMap = new Map<string, AttributionBreakdown>();
     const campaignMap = new Map<string, CampaignBreakdown>();
     const moduleMap = new Map<string, ModuleConversion>();
+    const quizBucketMap = new Map<string, QuizBucketBreakdown>();
     const weekMap = new Map<string, { week: string; total: number; accepted: number }>();
 
     let accepted = 0;
@@ -560,6 +618,18 @@ export async function getLeadAnalytics(
         if (isConverted) m.converted++;
       }
 
+      // Quiz-resultatfördelning per modul
+      const bucket = (lead.quiz_result_bucket || '').trim();
+      if (bucket) {
+        const key = `${slug}|${bucket}`;
+        let qb = quizBucketMap.get(key);
+        if (!qb) {
+          qb = { module: slug, bucket, count: 0 };
+          quizBucketMap.set(key, qb);
+        }
+        qb.count++;
+      }
+
       // Weekly bucket
       const wkKey = weekKey(lead.created);
       let w = weekMap.get(wkKey);
@@ -575,6 +645,9 @@ export async function getLeadAnalytics(
       bySource: [...sourceMap.values()].sort((a, b) => b.total - a.total),
       byCampaign: [...campaignMap.values()].sort((a, b) => b.total - a.total),
       byModule: [...moduleMap.values()].sort((a, b) => b.total - a.total),
+      byQuizBucket: [...quizBucketMap.values()].sort(
+        (a, b) => a.module.localeCompare(b.module) || b.count - a.count
+      ),
       weekly: [...weekMap.values()].sort((a, b) => (a.week > b.week ? 1 : -1)),
       total: leads.length,
       accepted,
@@ -585,6 +658,7 @@ export async function getLeadAnalytics(
       bySource: [],
       byCampaign: [],
       byModule: [],
+      byQuizBucket: [],
       weekly: [],
       total: 0,
       accepted: 0,
@@ -678,10 +752,11 @@ export async function getCompassDashboard(
     const sinceMs = now - periodDays * 86400_000;
     const prevSinceIso = new Date(now - periodDays * 2 * 86400_000).toISOString();
 
-    const windowFilter = pb.filter('tenant = {:tenant} && created >= {:cutoff}', {
-      tenant,
-      cutoff: prevSinceIso
-    });
+    // Förhandsgranskningar (preview) exkluderas ur KPI:er/trend.
+    const windowFilter = pb.filter(
+      'tenant = {:tenant} && created >= {:cutoff} && source_key != {:pv}',
+      { tenant, cutoff: prevSinceIso, pv: PREVIEW_SOURCE_KEY }
+    );
     const [funnelCounts, windowLeads] = await Promise.all([
       countLeadsByStatus(pb, tenant),
       readWithFallback(

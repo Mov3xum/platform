@@ -25,6 +25,7 @@ const VIEWS = [
   { id: 'oversikt', label: 'Översikt' },
   { id: 'kallor', label: 'Källor' },
   { id: 'moduler', label: 'Moduler' },
+  { id: 'quiz', label: 'Quiz-resultat' },
   { id: 'kampanjer', label: 'Kampanjer' }
 ] as const;
 
@@ -57,10 +58,58 @@ export default async function InflodeAnalysisPage({
   ]);
 
   const sourceLabel = new Map(sources.map((s) => [s.key, s.label]));
-  const moduleName = new Map(modules.map((m) => [m.slug, m.name]));
+  // landing_module lagras som publik slug (publika flöden) eller intern slug
+  // (admin-preview) → mappa båda till modulnamn.
+  const moduleName = new Map<string, string>();
+  for (const m of modules) {
+    if (m.public_slug) moduleName.set(m.public_slug, m.name);
+    moduleName.set(m.slug, m.name);
+  }
+  // Resultatprofilens nyckel → titel (per modul), för quiz-fördelningen.
+  const bucketTitle = new Map<string, string>();
+  for (const m of modules) {
+    for (const b of m.result_buckets ?? []) {
+      if (m.public_slug) bucketTitle.set(`${m.public_slug}|${b.key}`, b.title);
+      bucketTitle.set(`${m.slug}|${b.key}`, b.title);
+    }
+  }
 
   const conversionRate = analytics.total > 0 ? analytics.accepted / analytics.total : 0;
   const maxFunnel = Math.max(...LEAD_STATUS_ORDER.map((s) => funnelCounts[s] || 0), 1);
+
+  // En modul kan förekomma under BÅDE sin publika och interna slug i
+  // landing_module — slå ihop per visningsnamn så den inte ser ut som två.
+  const byModuleMerged = (() => {
+    const map = new Map<string, { name: string; total: number; accepted: number; converted: number }>();
+    for (const m of analytics.byModule) {
+      const name = moduleName.get(m.slug) || m.slug;
+      let row = map.get(name);
+      if (!row) {
+        row = { name, total: 0, accepted: 0, converted: 0 };
+        map.set(name, row);
+      }
+      row.total += m.total;
+      row.accepted += m.accepted;
+      row.converted += m.converted;
+    }
+    return [...map.values()].sort((a, b) => b.total - a.total);
+  })();
+
+  const byQuizBucketMerged = (() => {
+    const map = new Map<string, { name: string; bucket: string; count: number }>();
+    for (const qb of analytics.byQuizBucket) {
+      const name = moduleName.get(qb.module) || qb.module || 'Okänd modul';
+      const bucket = bucketTitle.get(`${qb.module}|${qb.bucket}`) || qb.bucket;
+      const key = `${name}|${bucket}`;
+      let row = map.get(key);
+      if (!row) {
+        row = { name, bucket, count: 0 };
+        map.set(key, row);
+      }
+      row.count += qb.count;
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name) || b.count - a.count);
+  })();
 
   const tabs = buildInflodeTabs();
 
@@ -79,8 +128,8 @@ export default async function InflodeAnalysisPage({
   };
   const moduleSpec: MovexumChartSpec = {
     type: 'hbar',
-    categories: analytics.byModule.slice(0, 10).map((m) => moduleName.get(m.slug) || m.slug),
-    series: [{ name: 'Leads', values: analytics.byModule.slice(0, 10).map((m) => m.total) }]
+    categories: byModuleMerged.slice(0, 10).map((m) => m.name),
+    series: [{ name: 'Leads', values: byModuleMerged.slice(0, 10).map((m) => m.total) }]
   };
 
   const rail = (
@@ -212,7 +261,7 @@ export default async function InflodeAnalysisPage({
               <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
                 Leads per modul
               </h2>
-              {analytics.byModule.length > 0 ? (
+              {byModuleMerged.length > 0 ? (
                 <ServerChart spec={moduleSpec} width={900} height={300} />
               ) : (
                 <Empty>Inga moduler har genererat leads ännu.</Empty>
@@ -220,14 +269,38 @@ export default async function InflodeAnalysisPage({
             </section>
             <AnalyticsTable
               head={['Modul', 'Leads', 'Accepterade', 'Bolag', 'Konv.']}
-              rows={analytics.byModule.map((m) => [
-                moduleName.get(m.slug) || m.slug,
+              rows={byModuleMerged.map((m) => [
+                m.name,
                 formatNumber(m.total),
                 formatNumber(m.accepted),
                 formatNumber(m.converted),
                 formatPct(m.total > 0 ? m.accepted / m.total : 0)
               ])}
               empty="Inga moduler under perioden."
+            />
+          </div>
+        )}
+
+        {view === 'quiz' && (
+          <div className="space-y-4">
+            <p className="text-[12px] text-foreground-muted">
+              Hur besökarna fördelar sig över quiz-modulernas resultatprofiler — ett
+              snabbt mått på kvaliteten i inflödet per kanal/modul.
+            </p>
+            <AnalyticsTable
+              head={['Modul', 'Resultatprofil', 'Antal', 'Andel av modulen']}
+              rows={byQuizBucketMerged.map((qb) => {
+                const moduleTotal = byQuizBucketMerged
+                  .filter((x) => x.name === qb.name)
+                  .reduce((s, x) => s + x.count, 0);
+                return [
+                  qb.name,
+                  qb.bucket,
+                  formatNumber(qb.count),
+                  formatPct(moduleTotal > 0 ? qb.count / moduleTotal : 0)
+                ];
+              })}
+              empty="Inga quiz-resultat under perioden. Resultaten dyker upp här när besökare slutför en quiz-modul."
             />
           </div>
         )}

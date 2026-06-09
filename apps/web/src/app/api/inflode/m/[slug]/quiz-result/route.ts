@@ -9,7 +9,7 @@ import {
   parseContactPreference
 } from '@/lib/compass/lead-capture';
 import { scoreQuiz, resolveBucket, isResultBucketArray, type QuizQuestion } from '@platform/shared';
-import type { Attribution } from '@/lib/compass/types';
+import { PREVIEW_SOURCE_KEY, type Attribution } from '@/lib/compass/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -63,6 +63,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   if (mod.require_phone && !cleanContact(contact.phone, 50)) {
     return NextResponse.json({ error: 'Telefon krävs.' }, { status: 400 });
   }
+  if (mod.require_organization && !cleanContact(contact.organization, 200)) {
+    return NextResponse.json({ error: 'Organisation krävs.' }, { status: 400 });
+  }
 
   const questions = await listQuestionsForModule(pb, mod.id);
   const quizQuestions: QuizQuestion[] = questions.map((q) => ({
@@ -89,7 +92,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     idea_category: bucket?.key,
     idea_summary: bucket ? `Quiz "${mod.name}": ${bucket.title}` : `Quiz "${mod.name}"`,
     ...attribution,
-    source_key: 'web',
+    // Intern admin-preview → markeras som förhandsgranskning och exkluderas
+    // från all statistik (dashboard/analys/export).
+    source_key: PREVIEW_SOURCE_KEY,
     landing_module: slug,
     quiz_result_bucket: bucket?.key,
     quiz_score: score.total,

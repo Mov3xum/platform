@@ -232,7 +232,7 @@ export function ModuleSettingsForm({ module: mod, heroImageUrl, modelOptions, ot
                 />
               ) : (
                 <div className="mx-muted mx-t-12">
-                  Ingen bild uppladdad — en branded gradient visas i stället.
+                  Ingen bild uppladdad — den publika sidan visar rubriken utan omslag.
                 </div>
               )}
               <input

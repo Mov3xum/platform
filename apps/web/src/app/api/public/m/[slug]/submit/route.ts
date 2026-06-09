@@ -13,6 +13,7 @@ import {
   parseContactPreference
 } from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
+import { findMissingRequiredAlongPath } from '@/lib/compass/question-flow';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import type { Attribution } from '@/lib/compass/types';
 
@@ -65,12 +66,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   const answers = body.answers || {};
   const questions = await getPublicModuleQuestions(pb, module.id);
-  for (const q of questions) {
-    if (!q.required) continue;
-    const v = answers[q.key];
-    if (v === undefined || v === '' || (Array.isArray(v) && v.length === 0)) {
-      return NextResponse.json({ error: `Fältet "${q.prompt}" är obligatoriskt.` }, { status: 400 });
-    }
+  // Validera obligatoriska längs den FAKTISKA grenen (hopplogik via next_key
+  // hoppar legitimt över frågor — de får inte blockera inskicket).
+  const missing = findMissingRequiredAlongPath(questions, answers);
+  if (missing) {
+    return NextResponse.json(
+      { error: `Fältet "${missing.prompt}" är obligatoriskt.` },
+      { status: 400 }
+    );
   }
 
   // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead.
