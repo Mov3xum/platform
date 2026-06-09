@@ -49,6 +49,7 @@ export function ModuleQuiz({
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [contact, setContact] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [result, setResult] = useState<QuizResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const attribution = useMemo(readAttribution, []);
@@ -105,62 +106,61 @@ export function ModuleQuiz({
               {b.cta.label} →
             </a>
           )}
-          <button type="button" className="mx-btn" onClick={downloadResult}>
-            ↓ Ladda ner mitt resultat
+          <button type="button" className="mx-btn" onClick={downloadResult} disabled={downloading}>
+            {downloading ? 'Skapar PDF…' : '↓ Ladda ner mitt resultat (PDF)'}
           </button>
         </div>
         {nextModule && <NextModuleCta next={nextModule} prompt="Fortsätt till nästa steg" />}
+        {error && (
+          <div
+            className="mx-t-12"
+            style={{ padding: '8px 12px', borderRadius: 10, background: 'var(--mx-st-danger-bg)', color: '#4b2718' }}
+          >
+            {error}
+          </div>
+        )}
       </div>
     );
   }
 
-  // Bygger ett fristående, brandat HTML-dokument av resultatet och laddar ner
-  // det (öppningsbart/utskrivbart till PDF i webbläsaren). Helt klient-side —
-  // ingen ny dataväg och inget extra beroende.
-  function downloadResult() {
-    if (!result) return;
+  // Laddar ner resultatprofilen som en brandad PDF (Sora/Nunito) i stället för
+  // ett HTML-dokument som öppnas i webbläsaren. Rendringen sker server-side
+  // (pdf-lib, EU-suveränt) — vi skickar bara den profil besökaren redan ser,
+  // ingen ny dataväg.
+  async function downloadResult() {
+    if (!result || downloading) return;
     const b = result.bucket;
-    const esc = (s: string) =>
-      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const today = new Date().toLocaleDateString('sv-SE');
-    const brand = brandName || 'Movexum';
-    const tipsHtml =
-      b?.tips && b.tips.length > 0
-        ? `<h2>Nästa steg</h2><ul>${b.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`
-        : '';
-    const html = `<!doctype html><html lang="sv"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Resultat – ${esc(moduleName || 'Startupkompassen')}</title>
-<style>
-  :root { color-scheme: light; }
-  body { font-family: -apple-system, "Nunito Sans", system-ui, sans-serif; color: #0a0a0a;
-         max-width: 680px; margin: 48px auto; padding: 0 24px; line-height: 1.6; }
-  .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 12px;
-             font-weight: 700; color: #005470; }
-  h1 { font-size: 30px; line-height: 1.15; margin: 6px 0 4px; }
-  h2 { font-size: 16px; margin: 28px 0 8px; }
-  .meta { color: #6b6b6b; font-size: 13px; margin-bottom: 24px; }
-  ul { padding-left: 20px; } li { margin: 6px 0; }
-  .foot { margin-top: 40px; border-top: 1px solid #e5e5e5; padding-top: 14px;
-          color: #6b6b6b; font-size: 12px; }
-  @media print { body { margin: 0; } }
-</style></head><body>
-  <div class="eyebrow">${esc(brand)} · Startupkompassen</div>
-  <h1>${esc(b?.title || 'Tack för dina svar!')}</h1>
-  <div class="meta">${esc(moduleName || '')}${moduleName ? ' · ' : ''}${today}</div>
-  ${b?.body ? `<p>${esc(b.body)}</p>` : ''}
-  ${tipsHtml}
-  <div class="foot">Resultatet är vägledande och baseras på dina egna svar. Dina uppgifter hanteras inom EU och delas aldrig vidare.</div>
-</body></html>`;
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `startupkompassen-resultat-${today}.html`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setDownloading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/public/result-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: b?.title || 'Tack för dina svar!',
+          body: b?.body,
+          tips: b?.tips,
+          moduleName: moduleName,
+          brandName: brandName,
+          accent: '#002c40'
+        })
+      });
+      if (!res.ok) throw new Error(`Servern svarade ${res.status}`);
+      const blob = await res.blob();
+      const today = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `startupkompassen-resultat-${today}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      setError('Kunde inte skapa PDF:en. Försök igen.');
+    } finally {
+      setDownloading(false);
+    }
   }
 
   function setValue(value: string | string[]) {
