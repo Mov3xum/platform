@@ -2692,6 +2692,42 @@ Människa-i-loopen följer sedan upp (status sätts manuellt).
   PII-saneras nedströms; publika flöden kräver fortsatt `consent`.
 - **Riskklass:** oförändrad (publik AI-chatt = begränsad; quiz/wizard n/a).
 
+### 23.7 Kedjebyggda moduler + stegindelad modul-setup
+
+Moduler kan **kedjas**: när en besökare slutfört en modul (t.ex. "Berätta om
+din idé") erbjuds hen att fortsätta direkt till nästa modul i flödet. Detta
+låter staff bygga ett sammanhängande inflöde (quiz → formulär → AI-chatt) utan
+extern länkhantering.
+
+**Datamodell.** `compass_modules.next_module` (självrelation, single, optional,
+`cascadeDelete: false`, migration **1700000124**). Nollställs av PB om
+nästa-modulen raderas (kedjan bryts, modulen själv lever vidare). Som övriga
+compass-fält är detta **migration-only** (CLAUDE.md § 23.4) — speglas inte i
+`setup-via-api.mjs`.
+
+**Flöde.** `updateModuleAction` validerar att `next_module` pekar på en ANNAN
+modul i SAMMA tenant (aldrig sig själv, aldrig korstenant — klienten är inte
+säkerhetsgränsen). Den publika sidan (`/m/[slug]`) resolvar nästa-modulens
+publika länk via `getNextModuleLink` (superuser, tenant-likhet + `is_active` +
+`public_url_enabled` + `public_slug` krävs) och renderar `NextModuleCta`:
+- **quiz/formulär:** "fortsätt"-knappen visas på resultat-/tack-skärmen (men
+  `redirect_url` vinner om båda är satta — auto-redirecten kör då i stället).
+- **AI-chatt:** knappen visas under chatten (chatten har inget hårt
+  "klart"-event).
+
+**Stegindelad setup-UI.** Modul-redigeringssidan
+(`/inflode/admin/modules/[slug]`) delar upp inställningarna i **fyra steg**
+(`ModuleSettingsForm`, client) i stället för en vägg av fält: 1) Grunder,
+2) Publik sida, 3) Flöde & innehåll, 4) Efter & nästa steg. Hela formuläret
+ligger kvar i DOM:en (inaktiva steg döljs med `display:none`) så en enda submit
+postar ALLA fält till `updateModuleAction` — stegen är ren visuell uppdelning,
+ingen ändrad dataväg. Frågor (`QuestionsManager`) och resultatprofiler
+(`ResultBucketsEditor`, visas bara när flow-typ = quiz) ligger kvar.
+
+**Riskklass:** oförändrad (n/a — navigation + konfiguration, ingen AI-inferens,
+ingen ny PII-väg; `next_module` är en intern modul-relation och whitelistas
+aldrig i `lib/ai/context.ts`).
+
 ---
 
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)

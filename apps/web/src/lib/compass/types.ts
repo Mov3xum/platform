@@ -188,6 +188,13 @@ export interface CompassModule {
   notify_emails?: string;
   /** Quiz-resultatprofiler (flow_type === 'quiz'). */
   result_buckets?: ResultBucket[];
+  /**
+   * Nästa modul i kedjan (relation→compass_modules, migration 1700000124).
+   * När satt erbjuds besökaren att fortsätta till den modulen efter att den
+   * här slutförts. Pekar alltid på en modul i samma tenant (verifieras i
+   * server-actionen).
+   */
+  next_module?: string;
   created: string;
   updated: string;
 }
@@ -211,6 +218,14 @@ export interface CompassQuestion {
   }[];
   required?: boolean;
   sort_order?: number;
+}
+
+/** Kedjad nästa-modul-länk (migration 1700000124) — visas efter slutfört flöde. */
+export interface NextModuleLink {
+  /** Publik slug — länkmål blir /m/<slug>. */
+  slug: string;
+  /** Visningsnamn på "fortsätt"-knappen. */
+  label: string;
 }
 
 export interface Attribution {

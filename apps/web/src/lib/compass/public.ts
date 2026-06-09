@@ -2,7 +2,9 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { getPublicPbUrl } from '@/lib/pb-url';
-import type { CompassModule, CompassQuestion } from './types';
+import type { CompassModule, CompassQuestion, NextModuleLink } from './types';
+
+export type { NextModuleLink };
 
 // Publik (oinloggad) resolvning av Startupkompass-moduler.
 //
@@ -60,6 +62,35 @@ export async function resolvePublicModule(
   }
   if (!mod.tenant) return null;
   return { pb: su.pb, module: mod, tenant: mod.tenant };
+}
+
+// Resolvar den kedjade nästa-modulens publika länk (migration 1700000124).
+// Returnerar bara en länk om nästa-modulen finns i SAMMA tenant, är aktiv +
+// publik och har en public_slug — annars null (ingen "fortsätt"-CTA visas).
+// Körs med superuser-klienten (publik sida saknar session); tenant-likhet
+// kontrolleras explicit så kedjan aldrig korsar tenant-gränsen.
+export async function getNextModuleLink(
+  pb: PocketBase,
+  module: Pick<CompassModule, 'next_module' | 'tenant'>
+): Promise<NextModuleLink | null> {
+  const nextId = (module.next_module || '').trim();
+  if (!nextId) return null;
+  try {
+    const next = await pb
+      .collection('compass_modules')
+      .getOne<CompassModule>(nextId);
+    if (
+      next.tenant !== module.tenant ||
+      !next.is_active ||
+      !next.public_url_enabled ||
+      !next.public_slug
+    ) {
+      return null;
+    }
+    return { slug: next.public_slug, label: next.welcome_title || next.name };
+  } catch {
+    return null;
+  }
 }
 
 export interface PublicTenantBranding {
