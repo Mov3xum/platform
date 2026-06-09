@@ -369,6 +369,28 @@ export function ModuleSettingsForm({ module: mod, heroImageUrl, modelOptions, ot
 
         {/* ── Steg 4: Efter & nästa steg ──────────────────────────────────── */}
         <Step active={step === 3}>
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 12,
+              background: 'var(--mx-paper-2)',
+              border: '1px solid var(--mx-line-soft)',
+              display: 'grid',
+              gap: 6
+            }}
+          >
+            <label className="mx-flex mx-items-c mx-gap-2 mx-t-13 mx-fw-6" style={{ cursor: 'pointer' }}>
+              <input type="checkbox" name="create_lead" defaultChecked={mod.create_lead !== false} />
+              <span>Skapa lead i Startupkompassen när modulen slutförs</span>
+            </label>
+            <span className="mx-t-12 mx-muted" style={{ lineHeight: 1.5 }}>
+              Ikryssad: varje slutförd körning skapar garanterat ett lead under{' '}
+              <strong>Leads</strong> (med AI-sammanställning av svaren) — kan
+              leadet inte sparas visas ett fel för besökaren i stället för att
+              svaren tyst tappas. Avkryssad: inga leads skapas av modulen.
+            </span>
+          </div>
+
           <label className="mx-label">
             Tack-meddelande (efter inskickat)
             <textarea

@@ -40,6 +40,14 @@ export const FLOW_TYPE_LABEL: Record<FlowType, string> = {
   quiz: 'Quiz'
 };
 
+/** Besökarens eget val i intag-flödet (migration 1700000125). */
+export type ContactPreference = 'contact_me' | 'self_reach';
+
+export const CONTACT_PREFERENCE_LABEL: Record<ContactPreference, string> = {
+  contact_me: 'Vill bli kontaktad av Movexum',
+  self_reach: 'Hör av sig själv när hen är redo'
+};
+
 export type SecurityEventKind =
   | 'login'
   | 'logout'
@@ -104,6 +112,10 @@ export interface Lead {
   tags?: string[];
   consent_at?: string;
   last_contact_at?: string;
+  /** AI-genererad sammanställning av det inskickade (migration 1700000125). */
+  ai_summary?: string;
+  /** Besökarens kontaktpreferens (migration 1700000125). */
+  contact_preference?: ContactPreference;
   // Quiz-resultat (Startupkompassen)
   quiz_result_bucket?: string;
   quiz_score?: number;
@@ -195,6 +207,12 @@ export interface CompassModule {
    * server-actionen).
    */
   next_module?: string;
+  /**
+   * Steg 4-valet "Skapa lead i Startupkompassen när modulen slutförs"
+   * (migration 1700000125). SAKNAT fält (oapplicerad migration) tolkas som
+   * true — bara ett uttryckligt false stänger av lead-skapandet.
+   */
+  create_lead?: boolean;
   created: string;
   updated: string;
 }

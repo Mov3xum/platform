@@ -6,6 +6,12 @@ import {
   mapAnswersToLead,
   pickAttribution
 } from '@/lib/compass/public';
+import {
+  attachAiSummary,
+  buildSubmissionEntries,
+  moduleWantsLead,
+  parseContactPreference
+} from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import type { Attribution } from '@/lib/compass/types';
@@ -20,6 +26,7 @@ interface SubmitBody {
   answers: Record<string, string | string[]>;
   attribution?: Attribution;
   consent?: boolean;
+  contact_preference?: string;
 }
 
 function clientIp(req: Request): string {
@@ -66,8 +73,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     }
   }
 
+  // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead.
+  if (!moduleWantsLead(module)) {
+    return NextResponse.json({ ok: true });
+  }
+
   const leadPayload = mapAnswersToLead(answers);
   const attribution = pickAttribution(body.attribution);
+  const contactPreference = parseContactPreference(body.contact_preference);
 
   const lead = await createLead(pb, tenant, {
     ...leadPayload,
@@ -75,13 +88,28 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     name: leadPayload.name || 'Anonym',
     source_key: 'web',
     landing_module: slug,
+    contact_preference: contactPreference,
     consent_at: new Date().toISOString()
   });
 
-  if (lead) {
-    await createConversation(pb, tenant, { moduleSlug: slug, leadId: lead.id });
-    await notifyNewInflow(module, lead);
+  // Hård lead-garanti (CLAUDE.md § 23.6): är modulen konfigurerad att skapa
+  // lead MÅSTE leadet finnas — annars felar inskickningen HÖGT i stället för
+  // att besökaren ser "Tack!" medan svaren tyst tappas. Grundorsaken loggas
+  // PII-fritt i createLead.
+  if (!lead) {
+    return NextResponse.json(
+      { error: 'Dina svar kunde inte sparas just nu. Försök igen om en stund.' },
+      { status: 500 }
+    );
   }
 
-  return NextResponse.json({ ok: true, leadId: lead?.id });
+  await createConversation(pb, tenant, { moduleSlug: slug, leadId: lead.id });
+
+  // AI-sammanställning av det inskickade (best-effort — blockerar aldrig).
+  const entries = buildSubmissionEntries(questions, answers);
+  const aiSummary = await attachAiSummary(pb, tenant, lead, entries, module.name);
+
+  await notifyNewInflow(module, { ...lead, ai_summary: aiSummary ?? lead.ai_summary });
+
+  return NextResponse.json({ ok: true, leadId: lead.id });
 }

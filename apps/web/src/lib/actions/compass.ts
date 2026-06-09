@@ -464,6 +464,8 @@ export async function createModuleAction(formData: FormData) {
         flow_type: flowType,
         is_active: isActive,
         public_url_enabled: publicEnabled,
+        // Nya moduler skapar lead som default (steg 4-valet, migration 1700000125).
+        create_lead: true,
         sort_order: 999
       })
     );
@@ -528,6 +530,8 @@ export async function updateModuleAction(formData: FormData) {
     require_email: formData.get('require_email') === 'on',
     require_phone: formData.get('require_phone') === 'on',
     require_organization: formData.get('require_organization') === 'on',
+    // Steg 4: "Skapa lead i Startupkompassen när modulen slutförs".
+    create_lead: formData.get('create_lead') === 'on',
     notify_emails: String(formData.get('notify_emails') || '').trim().slice(0, 1000),
     is_active: formData.get('is_active') === 'on',
     public_url_enabled: formData.get('public_url_enabled') === 'on'
@@ -546,15 +550,30 @@ export async function updateModuleAction(formData: FormData) {
   } else if (nextModuleRaw === id) {
     throw new Error('En modul kan inte kedjas till sig själv.');
   } else {
+    // Läs målmodulen med användartoken först; PB v0.23.4 kan TYST neka
+    // view-regeln (roll mot multi-value-fält, CLAUDE.md § 21.3) vilket fick
+    // kedje-sparandet att fela med "kunde inte hittas" för behörig staff →
+    // superuser-fallback. Tenant-likheten verifieras EXPLICIT oavsett klient.
+    let target: { tenant?: string } | null = null;
     try {
-      const target = await pb.collection('compass_modules').getOne(nextModuleRaw);
-      if (target.tenant !== user.tenant) {
-        throw new Error('Nästa modul tillhör en annan tenant.');
-      }
-      patch.next_module = nextModuleRaw;
+      target = await pb.collection('compass_modules').getOne(nextModuleRaw);
     } catch {
+      const su = await getSuperuserPb();
+      if (su.ok) {
+        try {
+          target = await su.pb.collection('compass_modules').getOne(nextModuleRaw);
+        } catch {
+          target = null;
+        }
+      }
+    }
+    if (!target) {
       throw new Error('Vald nästa modul kunde inte hittas.');
     }
+    if (target.tenant !== user.tenant) {
+      throw new Error('Nästa modul tillhör en annan tenant.');
+    }
+    patch.next_module = nextModuleRaw;
   }
 
   // Quiz-resultatprofiler skickas som JSON från ResultBucketsEditor.

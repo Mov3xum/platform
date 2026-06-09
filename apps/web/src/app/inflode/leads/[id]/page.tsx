@@ -11,6 +11,7 @@ import {
 } from '@/components/proto';
 import { getLead, listAssignableStaff, listLeadSources, listModules } from '@/lib/compass/store';
 import {
+  CONTACT_PREFERENCE_LABEL,
   LEAD_STATUS_LABEL,
   LEAD_STATUS_ORDER,
   type LeadStatus
@@ -130,6 +131,17 @@ export default async function LeadDetailPage({
               <Field label="E-post" value={lead.email} mono />
               <Field label="Telefon" value={lead.phone} mono />
               <Field label="Organisation" value={lead.organization} />
+              {lead.contact_preference && (
+                <div>
+                  <div className="mx-label">Kontaktpreferens</div>
+                  <Chip
+                    variant={lead.contact_preference === 'contact_me' ? 'active' : 'draft'}
+                    mono
+                  >
+                    {CONTACT_PREFERENCE_LABEL[lead.contact_preference]}
+                  </Chip>
+                </div>
+              )}
             </div>
           </Card>
 
@@ -137,6 +149,17 @@ export default async function LeadDetailPage({
             <CardHead label="Idé" />
             <div style={{ padding: 16, display: 'grid', gap: 10 }}>
               <Field label="Sammanfattning" value={lead.idea_summary} multiline />
+              {lead.ai_summary && (
+                <div>
+                  <div className="mx-label">AI-sammanställning av det inskickade</div>
+                  <div className="mx-t-13" style={{ lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                    {lead.ai_summary}
+                  </div>
+                  <div className="mx-mono mx-t-xs mx-muted" style={{ marginTop: 4 }}>
+                    Genererat av AI – verifiera innan delning
+                  </div>
+                </div>
+              )}
               <Field label="Kategori" value={lead.idea_category} />
               {lead.tags && lead.tags.length > 0 && (
                 <div>

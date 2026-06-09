@@ -114,7 +114,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
         moduleName: module.name,
         sourceKey: 'ai-chat',
         landingModule: slug,
-        notifyModule: module
+        notifyModule: module,
+        createLead: module.create_lead !== false
       });
     }
   } catch {
