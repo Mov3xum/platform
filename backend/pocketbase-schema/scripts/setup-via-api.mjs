@@ -472,11 +472,11 @@ const ANY_AUTH = '@request.auth.id != ""';
 const TENANT_DIRECT = '@request.auth.tenant = tenant';
 const TENANT_VIA_STARTUP = '@request.auth.tenant = startup.tenant';
 const TENANTS_UPDATE_RULE =
-  '@request.auth.id != "" && (@request.auth.roles ?= "admin" || (@request.auth.roles ?= "incubator_lead" && @request.auth.tenant = id))';
+  '@request.auth.id != "" && (@request.auth.roles:each ?= "admin" || (@request.auth.roles:each ?= "incubator_lead" && @request.auth.tenant = id))';
 const STAFF_ROLES =
-  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach")';
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach")';
 const STAFF_OR_LEAD =
-  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead")';
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead")';
 // `:each ?=`-variant — korrekt operator mot multi-select `roles` i PB v0.23.4
 // (se migration 1700000107 / § 21.3). Använd den för nyligen rättade regler.
 const STAFF_OR_LEAD_EACH =
@@ -485,7 +485,7 @@ const COMPASS_STAFF_EACH =
   '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach")';
 const ADMIN_EACH = '@request.auth.roles:each ?= "admin"';
 const STAFF_INCL_MENTOR =
-  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "mentor")';
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "mentor")';
 
 // ----------------------------------------------------------------------------
 // Main
@@ -662,7 +662,7 @@ await ensureCollection({
   viewRule: READ_OWN_THIS_DIRECT,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // 4. users — add linked_startups -------------------------------------------
@@ -691,7 +691,7 @@ await ensureCollection({
   viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // 6. startup_team_members ---------------------------------------------------
@@ -799,7 +799,7 @@ await ensureCollection({
 
 // 8. activities -------------------------------------------------------------
 const STAFF_OR_OWNER =
-  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.id = owner)';
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.id = owner)';
 await ensureCollection({
   id: 'activities_collection',
   name: 'activities',
@@ -845,7 +845,7 @@ await ensureCollection({
   viewRule: `${READ_OWN_STARTUP_VIA} && (confidential = false || ${STAFF_OR_OBSERVER_READ} || @request.auth.id = author)`,
   createRule: `${ANY_AUTH} && @request.auth.id = author`,
   updateRule: `${ANY_AUTH} && @request.auth.id = author`,
-  deleteRule: `${ANY_AUTH} && (@request.auth.id = author || @request.auth.roles ?= "admin")`
+  deleteRule: `${ANY_AUTH} && (@request.auth.id = author || @request.auth.roles:each ?= "admin")`
 });
 
 // 10. agreements ------------------------------------------------------------
@@ -882,7 +882,7 @@ await ensureCollection({
   // via server-action + superuser-fallback).
   createRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_LEAD}`,
   updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_LEAD}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && @request.auth.roles:each ?= "admin"`
 });
 
 // 10b. agreement_signatures (1700000094) — oföränderligt signeringsbevis (AES)
@@ -1035,10 +1035,10 @@ const EDUCATION_IMAGE_FIELD = {
 // 14.5 workshop_areas (pre-create for workshops.area relation) -------------
 const WORKSHOP_AREAS_CREATE_RULE =
   '@request.auth.id != "" && @request.auth.tenant != "" && (' +
-  '@request.auth.roles ?= "admin" || ' +
-  '@request.auth.roles ?= "incubator_lead" || ' +
-  '@request.auth.roles ?= "coach" || ' +
-  '@request.auth.roles ?= "mentor")';
+  '@request.auth.roles:each ?= "admin" || ' +
+  '@request.auth.roles:each ?= "incubator_lead" || ' +
+  '@request.auth.roles:each ?= "coach" || ' +
+  '@request.auth.roles:each ?= "mentor")';
 // update/delete utan `?=`-roll-check: PB v0.23 evaluerar dem intermittent
 // fel (samma bugg som migration 1700000049/1700000086). Roll-/tenant-skydd
 // görs i server-actionlagret innan PB-anropet.
@@ -1137,8 +1137,8 @@ await ensureCollection({
     'CREATE INDEX idx_workshop_assignments_workshop ON workshop_assignments (workshop)',
     'CREATE INDEX idx_workshop_assignments_status ON workshop_assignments (status)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles:each ?= "startup_member" && @request.auth.linked_startups:each ?= startup))`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles:each ?= "startup_member" && @request.auth.linked_startups:each ?= startup))`,
   createRule: `${ANY_AUTH} && @request.auth.id = assigned_by`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
@@ -1172,8 +1172,8 @@ await ensureCollection({
     'CREATE INDEX idx_workshop_runs_startup ON workshop_runs (startup)',
     'CREATE INDEX idx_workshop_runs_workshop ON workshop_runs (workshop)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles:each ?= "startup_member" && @request.auth.linked_startups:each ?= startup))`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles:each ?= "startup_member" && @request.auth.linked_startups:each ?= startup))`,
   createRule: `${ANY_AUTH} && @request.auth.id = triggered_by`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = triggered_by`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
@@ -1341,11 +1341,11 @@ await ensureCollection({
     'CREATE INDEX idx_missions_status ON missions (status)',
     'CREATE INDEX idx_missions_due ON missions (due_date)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP_REL} || @request.auth.id = mentor || @request.auth.id ?= recipients)`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP_REL} || @request.auth.id = mentor || @request.auth.id ?= recipients)`,
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP_REL} || @request.auth.id = mentor || recipients:each ?= @request.auth.id)`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP_REL} || @request.auth.id = mentor || recipients:each ?= @request.auth.id)`,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000051: mission_comments — trådad kommentarsfunktion.
@@ -1499,7 +1499,7 @@ await ensureCollection({
   viewRule: READ_OWN_STARTUP_DIRECT,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000071: contacts — externa kontakter utan plattformskonto.
@@ -1636,8 +1636,8 @@ await ensureCollection({
   ],
   listRule: READ_OWN_STARTUP_DIRECT,
   viewRule: READ_OWN_STARTUP_DIRECT,
-  createRule: `${ANY_AUTH} && (@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "startup_member")`,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "startup_member")`,
+  createRule: `${ANY_AUTH} && (@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "startup_member")`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "startup_member")`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
 });
 
@@ -1779,7 +1779,7 @@ await ensureCollection({
   viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000031: deals — investerar-bolag-matchning.
@@ -1957,7 +1957,7 @@ await ensureCollection({
   viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000041: integration_providers — global katalog över leverantörer.
@@ -1984,9 +1984,9 @@ await ensureCollection({
   ],
   listRule: ANY_AUTH,
   viewRule: ANY_AUTH,
-  createRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`,
-  updateRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`,
-  deleteRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`
+  createRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`,
+  updateRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`,
+  deleteRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000041: tenant_integrations — per-tenant kopplingsstatus.
@@ -2016,7 +2016,7 @@ await ensureCollection({
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000054: integration_records — normaliserad data från syncs.
@@ -2150,7 +2150,7 @@ await ensureCollection({
   viewRule: READ_OWN_STARTUP_DIRECT,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000061: agent_actions — audit-logg för dataändringar via skrivlager.
@@ -2602,9 +2602,9 @@ await ensureCollection({
   indexes: ['CREATE UNIQUE INDEX idx_de_minimis_regelverk_kod ON de_minimis_regelverk (kod)'],
   listRule: ANY_AUTH,
   viewRule: ANY_AUTH,
-  createRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`,
-  updateRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`,
-  deleteRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`
+  createRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`,
+  updateRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`,
+  deleteRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`
 });
 
 for (const regel of [
@@ -2789,7 +2789,7 @@ await ensureCollection({
   viewRule: READ_OWN_STARTUP_DIRECT,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000102: service_time_entries — loggad tid per bolag (Vinnova).
