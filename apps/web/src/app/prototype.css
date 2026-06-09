@@ -1060,7 +1060,7 @@ select.mx-input:focus {
 }
 .mx-compass-wrap {
   width: 100%;
-  max-width: 780px;
+  max-width: 920px;
   display: grid;
   gap: 30px;
   align-content: start;
@@ -1117,9 +1117,9 @@ select.mx-input:focus {
 }
 .mx-compass-title {
   font-family: var(--mx-display);
-  font-size: clamp(34px, 5.6vw, 52px);
+  font-size: clamp(26px, 3.4vw, 38px);
   font-weight: 700;
-  line-height: 1.04;
+  line-height: 1.08;
   letter-spacing: -0.02em;
   margin: 0;
   color: var(--mx-ink);
@@ -1171,6 +1171,21 @@ select.mx-input:focus {
   text-align: center;
   color: var(--mx-muted-2);
   letter-spacing: 0.02em;
+}
+
+/* Mobilanpassning — tightare luft, mjukare kort, läsbar rubrik på smal skärm. */
+@media (max-width: 640px) {
+  .mx-compass-landing { padding: 0 14px 64px; }
+  .mx-compass-wrap { gap: 22px; padding-top: 18px; }
+  .mx-compass-topbar { gap: 10px; }
+  .mx-compass-head { gap: 10px; }
+  .mx-compass-title { font-size: clamp(23px, 7vw, 30px); line-height: 1.12; }
+  .mx-compass-body { font-size: 15px; line-height: 1.55; }
+  .mx-compass-card { padding: 20px 16px; border-radius: var(--mx-r-md); }
+  .mx-compass-hero-img { height: clamp(150px, 42vw, 220px); }
+  /* Knapprad i quiz/wizard staplar snyggt och fyller bredden på mobil. */
+  .mx-compass-card .mx-consent-cta { width: 100%; }
+  .mx-compass-card .mx-consent-cta .mx-btn { flex: 1 1 auto; justify-content: center; }
 }
 
 /* Scrollbar polish för main view */
