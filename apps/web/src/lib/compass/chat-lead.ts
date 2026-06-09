@@ -106,6 +106,11 @@ export interface UpsertChatLeadOptions {
   landingModule?: string;
   /** När satt + leadet skapas första gången → notifiera inflödesmailen (en gång). */
   notifyModule?: CompassModule;
+  /**
+   * Steg 4-valet "Skapa lead" (migration 1700000125). Default true — bara ett
+   * uttryckligt false hoppar över lead-upserten (meddelandena loggas ändå).
+   */
+  createLead?: boolean;
 }
 
 /**
@@ -132,6 +137,9 @@ export async function persistChatTurnAndUpsertLead(
     tokens_out: reply.tokensOut,
     model: reply.model
   });
+
+  // Modulen kan vara konfigurerad att inte skapa leads (steg 4-valet).
+  if (opts.createLead === false) return;
 
   // Extrahera kontakt/idé ur samtalet (människa-i-loopen granskar sedan).
   const fullHistory: CompassChatMessage[] = [...history, { role: 'assistant', content: reply.text }];

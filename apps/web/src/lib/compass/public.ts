@@ -79,15 +79,15 @@ export async function getNextModuleLink(
     const next = await pb
       .collection('compass_modules')
       .getOne<CompassModule>(nextId);
-    if (
-      next.tenant !== module.tenant ||
-      !next.is_active ||
-      !next.public_url_enabled ||
-      !next.public_slug
-    ) {
+    if (next.tenant !== module.tenant || !next.is_active || !next.public_url_enabled) {
       return null;
     }
-    return { slug: next.public_slug, label: next.welcome_title || next.name };
+    // resolvePublicModule matchar i andra hand på den interna sluggen, så en
+    // aktiv + publik modul utan egen public_slug är ändå nåbar — kedjan ska
+    // inte tyst brytas bara för att public_slug-fältet lämnats tomt.
+    const slug = next.public_slug || next.slug;
+    if (!slug) return null;
+    return { slug, label: next.welcome_title || next.name };
   } catch {
     return null;
   }

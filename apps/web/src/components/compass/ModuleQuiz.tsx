@@ -4,6 +4,7 @@ import { useMemo, useState, type FormEvent } from 'react';
 import type { CompassQuestion, ResultBucket, NextModuleLink } from '@/lib/compass/types';
 import { QuestionInput, readAttribution } from './QuestionInput';
 import { NextModuleCta } from './NextModuleCta';
+import { ContactPreferencePicker } from './ContactPreferencePicker';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 
 interface Props {
@@ -48,6 +49,7 @@ export function ModuleQuiz({
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [contact, setContact] = useState<Record<string, string>>({});
+  const [contactPreference, setContactPreference] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [result, setResult] = useState<QuizResult | null>(null);
@@ -68,6 +70,19 @@ export function ModuleQuiz({
   // ── Resultatskärm ────────────────────────────────────────────────────────
   if (result) {
     const b = result.bucket;
+    // Kedjan (next_module, validerad server-side) har företräde framför en
+    // resultatprofil-CTA som pekar på en intern /m/-länk — sådana länkar kan
+    // vara hårdkodade mot en slug som inte längre finns/är publik (trasig
+    // kedja). Externa CTA-länkar lämnas orörda.
+    const bucketCta = b?.cta;
+    const ctaIsInternalModuleLink = Boolean(bucketCta?.url?.startsWith('/m/'));
+    const primaryCta =
+      bucketCta && ctaIsInternalModuleLink && nextModule
+        ? { label: bucketCta.label, url: `/m/${encodeURIComponent(nextModule.slug)}` }
+        : bucketCta;
+    // Visa den fristående "fortsätt"-rutan bara när kedjan inte redan tagit
+    // över den primära CTA:n (annars dubbla knappar till samma mål).
+    const showNextBox = Boolean(nextModule && !(bucketCta && ctaIsInternalModuleLink));
     return (
       <div style={{ display: 'grid', gap: 16 }}>
         <div className="mx-mono mx-t-xs mx-t-up mx-muted">{successMessage || 'Ditt resultat'}</div>
@@ -101,16 +116,18 @@ export function ModuleQuiz({
           </div>
         )}
         <div className="mx-flex mx-items-c mx-gap-2 mx-wrap">
-          {b?.cta && (
-            <a href={b.cta.url} className="mx-btn mx-primary">
-              {b.cta.label} →
+          {primaryCta && (
+            <a href={primaryCta.url} className="mx-btn mx-primary">
+              {primaryCta.label} →
             </a>
           )}
           <button type="button" className="mx-btn" onClick={downloadResult} disabled={downloading}>
             {downloading ? 'Skapar PDF…' : '↓ Ladda ner mitt resultat (PDF)'}
           </button>
         </div>
-        {nextModule && <NextModuleCta next={nextModule} prompt="Fortsätt till nästa steg" />}
+        {showNextBox && nextModule && (
+          <NextModuleCta next={nextModule} prompt="Fortsätt till nästa steg" />
+        )}
         {error && (
           <div
             className="mx-t-12"
@@ -176,7 +193,13 @@ export function ModuleQuiz({
       const res = await fetch(`${apiBase}/${encodeURIComponent(moduleSlug)}/quiz-result`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers, contact, attribution, consent })
+        body: JSON.stringify({
+          answers,
+          contact,
+          attribution,
+          consent,
+          contact_preference: contactPreference || undefined
+        })
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -283,6 +306,7 @@ export function ModuleQuiz({
               />
             </label>
           )}
+          <ContactPreferencePicker value={contactPreference} onChange={setContactPreference} />
         </div>
       ) : (
         <div>

@@ -4,6 +4,7 @@ import { useMemo, useState, type FormEvent } from 'react';
 import type { CompassQuestion, NextModuleLink } from '@/lib/compass/types';
 import { QuestionInput, readAttribution } from './QuestionInput';
 import { NextModuleCta } from './NextModuleCta';
+import { ContactPreferencePicker } from './ContactPreferencePicker';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 
 interface Props {
@@ -33,6 +34,7 @@ export function ModuleWizard({
 }: Props) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
+  const [contactPreference, setContactPreference] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,9 +96,19 @@ export function ModuleWizard({
       const res = await fetch(`${apiBase}/${encodeURIComponent(moduleSlug)}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers, attribution, consent })
+        body: JSON.stringify({
+          answers,
+          attribution,
+          consent,
+          contact_preference: contactPreference || undefined
+        })
       });
-      if (!res.ok) throw new Error(`Servern svarade ${res.status}`);
+      if (!res.ok) {
+        // Visa serverns riktiga felmeddelande (t.ex. "kunde inte sparas") i
+        // stället för en naken statuskod — lead-garantin ska synas (§ 23.6).
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || `Servern svarade ${res.status}`);
+      }
       setDone(true);
       if (redirectUrl) {
         setTimeout(() => {
@@ -158,6 +170,11 @@ export function ModuleWizard({
 
       {/* Input */}
       <QuestionInput question={q} value={current} onChange={setValue} />
+
+      {/* Kontaktpreferens — visas på sista frågan, innan inskick. */}
+      {step + 1 === total && (
+        <ContactPreferencePicker value={contactPreference} onChange={setContactPreference} />
+      )}
 
       {error && (
         <div

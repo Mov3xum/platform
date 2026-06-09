@@ -6,6 +6,12 @@ import {
   getModuleBySlug,
   listQuestionsForModule
 } from '@/lib/compass/store';
+import {
+  attachAiSummary,
+  buildSubmissionEntries,
+  moduleWantsLead,
+  parseContactPreference
+} from '@/lib/compass/lead-capture';
 import type { Attribution } from '@/lib/compass/types';
 
 export const runtime = 'nodejs';
@@ -14,6 +20,7 @@ export const dynamic = 'force-dynamic';
 interface SubmitBody {
   answers: Record<string, string | string[]>;
   attribution?: Attribution;
+  contact_preference?: string;
 }
 
 function pickString(v: unknown, max: number): string | undefined {
@@ -102,22 +109,38 @@ export async function POST(
   const referrerUrl = pickString(attr.referrer_url, 500);
   if (referrerUrl) attribution.referrer_url = referrerUrl;
 
+  // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead.
+  if (!moduleWantsLead(mod)) {
+    return NextResponse.json({ ok: true });
+  }
+
   const name = leadPayload.name || 'Anonym';
   const lead = await createLead(pb, user.tenant, {
     ...leadPayload,
     ...attribution,
     name,
-    source_key: utmSource ? 'web' : 'web',
+    source_key: 'web',
     landing_module: slug,
+    contact_preference: parseContactPreference(body.contact_preference),
     consent_at: new Date().toISOString()
   });
 
-  if (lead) {
-    await createConversation(pb, user.tenant, {
-      moduleSlug: slug,
-      leadId: lead.id
-    });
+  // Hård lead-garanti (CLAUDE.md § 23.6) — fela högt i stället för tyst tapp.
+  if (!lead) {
+    return NextResponse.json(
+      { error: 'Svaren kunde inte sparas som lead. Se serverloggen för grundorsaken.' },
+      { status: 500 }
+    );
   }
 
-  return NextResponse.json({ ok: true, leadId: lead?.id });
+  await createConversation(pb, user.tenant, {
+    moduleSlug: slug,
+    leadId: lead.id
+  });
+
+  // AI-sammanställning av det inskickade (best-effort — blockerar aldrig).
+  const entries = buildSubmissionEntries(questions, answers);
+  await attachAiSummary(pb, user.tenant, lead, entries, mod.name);
+
+  return NextResponse.json({ ok: true, leadId: lead.id });
 }
