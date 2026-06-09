@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import type { CompassQuestion } from '@/lib/compass/types';
 
 // Delad input-renderare för Startupkompassens fråge-flöden (ModuleWizard +
@@ -117,29 +118,8 @@ export function QuestionInput({
         </div>
       );
     }
-    case 'scale': {
-      const num = typeof value === 'string' ? Number(value) : 5;
-      return (
-        <div>
-          <input
-            type="range"
-            min={1}
-            max={10}
-            value={num}
-            onChange={(e) => onChange(e.target.value)}
-            style={{ width: '100%', accentColor: '#002c40' }}
-          />
-          <div
-            className="mx-flex mx-mono mx-t-xs mx-muted"
-            style={{ justifyContent: 'space-between', marginTop: 4 }}
-          >
-            <span>1</span>
-            <span className="mx-fw-6 mx-ink-soft">{num}</span>
-            <span>10</span>
-          </div>
-        </div>
-      );
-    }
+    case 'scale':
+      return <ScaleInput value={value} onChange={onChange} />;
     case 'email':
       return (
         <input
@@ -177,6 +157,46 @@ export function QuestionInput({
         />
       );
   }
+}
+
+function ScaleInput({
+  value,
+  onChange
+}: {
+  value?: string | string[];
+  onChange: (v: string | string[]) => void;
+}) {
+  const num = typeof value === 'string' && value !== '' ? Number(value) : 5;
+
+  // Slidern VISAR 5 som default men svaret registrerades tidigare först när
+  // användaren rörde reglaget — en obligatorisk skala-fråga gav då ett falskt
+  // "välj ett svar"-fel. Committa default-värdet direkt så det som visas
+  // alltid är det som sparas/poängsätts.
+  useEffect(() => {
+    if (value === undefined || value === '') onChange(String(num));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  return (
+    <div>
+      <input
+        type="range"
+        min={1}
+        max={10}
+        value={num}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ width: '100%', accentColor: '#002c40' }}
+      />
+      <div
+        className="mx-flex mx-mono mx-t-xs mx-muted"
+        style={{ justifyContent: 'space-between', marginTop: 4 }}
+      >
+        <span>1</span>
+        <span className="mx-fw-6 mx-ink-soft">{num}</span>
+        <span>10</span>
+      </div>
+    </div>
+  );
 }
 
 /** Läser UTM-attribution från URL:en (delas av flödeskomponenterna). */

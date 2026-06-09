@@ -104,6 +104,8 @@ export interface UpsertChatLeadOptions {
   sourceKey: string;
   /** Slug för analytics (`landing_module`). Tom för intern AI-intag utan modul. */
   landingModule?: string;
+  /** Whitelistad UTM-attribution (pickAttribution) — sätts vid lead-skapandet. */
+  attribution?: Record<string, string>;
   /** När satt + leadet skapas första gången → notifiera inflödesmailen (en gång). */
   notifyModule?: CompassModule;
 }
@@ -164,6 +166,7 @@ export async function persistChatTurnAndUpsertLead(
   const { score, reasoning } = await scoreLead(scoringSource);
   const lead = await createLead(pb, tenant, {
     ...leadFields,
+    ...(opts.attribution || {}),
     source_key: opts.sourceKey,
     landing_module: opts.landingModule,
     score,

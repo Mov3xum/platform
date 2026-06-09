@@ -5,8 +5,14 @@ import {
   getOrCreateChatConversation,
   persistChatTurnAndUpsertLead
 } from '@/lib/compass/chat-lead';
-import { buildModuleChatSystemPrompt, getPublicModuleQuestions, resolvePublicModule } from '@/lib/compass/public';
+import {
+  buildModuleChatSystemPrompt,
+  getPublicModuleQuestions,
+  pickAttribution,
+  resolvePublicModule
+} from '@/lib/compass/public';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
+import type { Attribution } from '@/lib/compass/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,6 +23,8 @@ const MAX_PER_WINDOW = 30;
 interface ChatBody {
   messages: CompassChatMessage[];
   sessionToken?: string;
+  attribution?: Attribution;
+  consent?: boolean;
 }
 
 function isValidMessage(m: unknown): m is CompassChatMessage {
@@ -69,6 +77,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     return NextResponse.json({ error: 'Modulen är inte en chatt.' }, { status: 400 });
   }
 
+  // Samtyckesgrind (GDPR art. 7) — samma server-side-krav som submit/quiz.
+  // Utan detta kunde en direkt POST kringgå klientens grind trots att leadet
+  // sedan stämplas med consent_at.
+  if (module.consent_note && body.consent !== true) {
+    return NextResponse.json({ error: 'Samtycke krävs.' }, { status: 400 });
+  }
+
   const questions = await getPublicModuleQuestions(pb, module.id);
 
   // Tak på antal användarutbyten (max_exchanges).
@@ -114,6 +129,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
         moduleName: module.name,
         sourceKey: 'ai-chat',
         landingModule: slug,
+        attribution: pickAttribution(body.attribution),
         notifyModule: module
       });
     }

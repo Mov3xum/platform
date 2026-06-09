@@ -32,6 +32,9 @@ export function ModuleWizard({
   nextModule
 }: Props) {
   const [step, setStep] = useState(0);
+  // Besökta steg (för "Tillbaka") — hopplogik (next_key) kan skippa frågor,
+  // så step-1 är inte alltid den fråga besökaren faktiskt såg senast.
+  const [trail, setTrail] = useState<number[]>([]);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
@@ -84,6 +87,7 @@ export function ModuleWizard({
 
     const nextStep = resolveNextQuestionIndex(questions, step, value);
     if (nextStep < total) {
+      setTrail((t) => [...t, step]);
       setStep(nextStep);
       return;
     }
@@ -177,8 +181,14 @@ export function ModuleWizard({
         <button
           type="button"
           className="mx-btn"
-          disabled={step === 0 || submitting}
-          onClick={() => setStep((s) => Math.max(0, s - 1))}
+          disabled={trail.length === 0 || submitting}
+          onClick={() => {
+            const prev = trail[trail.length - 1];
+            if (prev === undefined) return;
+            setTrail((t) => t.slice(0, -1));
+            setStep(prev);
+            setError(null);
+          }}
         >
           ← Tillbaka
         </button>

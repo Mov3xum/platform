@@ -36,6 +36,36 @@ export function resolveNextQuestionIndex(
   return currentIndex + 1;
 }
 
+function isAnswerMissing(value: string | string[] | undefined): boolean {
+  return value === undefined || value === '' || (Array.isArray(value) && value.length === 0);
+}
+
+/**
+ * Validerar obligatoriska frågor LÄNGS DEN FAKTISKA GRENEN. Ett formulär med
+ * hopplogik (`choice.next_key`) hoppar legitimt över frågor — de får inte
+ * blockera inskick bara för att de är `required`. Vi går samma väg som
+ * klienten (resolveNextQuestionIndex) utifrån svaren och kräver bara de
+ * frågor som faktiskt besökts. Returnerar första saknade obligatoriska
+ * frågan, annars null.
+ */
+export function findMissingRequiredAlongPath(
+  questions: CompassQuestion[],
+  answers: Record<string, string | string[] | undefined>
+): CompassQuestion | null {
+  let index = 0;
+  let guard = 0;
+  while (index < questions.length && guard < questions.length + 1) {
+    guard += 1;
+    const q = questions[index];
+    const value = answers[q.key];
+    if (q.required && isAnswerMissing(value)) return q;
+    const next = resolveNextQuestionIndex(questions, index, value);
+    // resolveNextQuestionIndex hoppar bara framåt — skydda ändå mot loop.
+    index = next > index ? next : index + 1;
+  }
+  return null;
+}
+
 export function buildChatQuestionGuide(questions: CompassQuestion[]): string {
   if (questions.length === 0) return '';
 

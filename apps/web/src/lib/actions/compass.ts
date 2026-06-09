@@ -546,15 +546,19 @@ export async function updateModuleAction(formData: FormData) {
   } else if (nextModuleRaw === id) {
     throw new Error('En modul kan inte kedjas till sig själv.');
   } else {
+    let target: { tenant?: string } | null = null;
     try {
-      const target = await pb.collection('compass_modules').getOne(nextModuleRaw);
-      if (target.tenant !== user.tenant) {
-        throw new Error('Nästa modul tillhör en annan tenant.');
-      }
-      patch.next_module = nextModuleRaw;
+      target = await pb.collection('compass_modules').getOne(nextModuleRaw);
     } catch {
+      target = null;
+    }
+    if (!target) {
       throw new Error('Vald nästa modul kunde inte hittas.');
     }
+    if (target.tenant !== user.tenant) {
+      throw new Error('Nästa modul tillhör en annan tenant.');
+    }
+    patch.next_module = nextModuleRaw;
   }
 
   // Quiz-resultatprofiler skickas som JSON från ResultBucketsEditor.

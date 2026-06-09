@@ -13,7 +13,7 @@ export default async function CompassChatPage() {
       <PageHead
         crumb="Inflöde / AI-intag"
         title="AI-intag · Inflöde"
-        subtitle="Test-läge för Movexum-personal. Konversationen lagras i tenant-isolerad logg och dyker upp som lead efter avslut."
+        subtitle="Test-läge för Movexum-personal. Konversationen lagras i tenant-isolerad logg och dyker upp som lead i Startupkompassen redan vid första svaret."
         actions={
           <Link href="/inflode" className="mx-btn">
             <Icon name="arrow" size={13} /> Översikt

@@ -2692,6 +2692,35 @@ Människa-i-loopen följer sedan upp (status sätts manuellt).
   PII-saneras nedströms; publika flöden kräver fortsatt `consent`.
 - **Riskklass:** oförändrad (publik AI-chatt = begränsad; quiz/wizard n/a).
 
+### 23.6bis Härdning & rapportering (2026-06)
+
+- **Samtycke i publika chatten:** `/api/public/m/[slug]/chat` kräver nu
+  `consent:true` server-side när modulen har `consent_note` (GDPR art. 7) —
+  tidigare låg grinden bara i klienten trots att leadet stämplades med
+  `consent_at`. Quiz/submit hade redan kravet.
+- **UTM-attribution för chatt-leads:** klienten skickade attribution men
+  chat-routen släppte den — nu whitelistas den via `pickAttribution` och sätts
+  vid lead-skapandet (samma fält och cap som quiz/formulär).
+- **Gren-medveten validering:** obligatoriska frågor valideras längs den
+  FAKTISKA grenen (`findMissingRequiredAlongPath`, enhetstestad i
+  `lib/compass/question-flow.test.ts`) — frågor som hopplogiken (`next_key`)
+  legitimt skippat blockerar inte längre inskick. Klientens "Tillbaka" följer
+  en besökt-steg-stack i stället för index−1.
+- **CSV-export av leads** (`/api/inflode/leads/export`): staff-only, speglar
+  list-filtren, semikolon+BOM (svensk Excel), formel-injection-neutraliserad.
+  Varje export audit-loggas med `lead_export` i `compass_security_events`
+  (PII lämnar systemet — ISO 27001 A.8.15). För uppföljning/rapportering till
+  intressenter och ägare.
+- **Quiz-resultatfördelning** i `/inflode/analysis` (vy "Quiz-resultat"):
+  aggregerar `quiz_result_bucket` per modul (`byQuizBucket` i
+  `getLeadAnalytics`) — beslutsdata om inflödets kvalitet per kanal/modul.
+  Ingen ny kollektion, inga nya fält.
+- **Slug-merge i statistik:** `landing_module` kan vara modulens publika ELLER
+  interna slug — dashboard, analys och modulkorten mappar/summerar nu båda
+  (tidigare visade modulkortet 0 leads när `public_slug` ≠ `slug`).
+- Riskklass: oförändrad (export/analys är deterministisk aggregering av
+  befintlig lead-data; ingen ny AI-funktion).
+
 ### 23.7 Kedjebyggda moduler + stegindelad modul-setup
 
 Moduler kan **kedjas**: när en besökare slutfört en modul (t.ex. "Berätta om

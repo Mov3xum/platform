@@ -46,6 +46,9 @@ export function ModuleQuiz({
   nextModule
 }: Props) {
   const [step, setStep] = useState(0);
+  // Besökta steg (för "Tillbaka") — hopplogik (next_key) kan skippa frågor,
+  // så step-1 är inte alltid den fråga besökaren faktiskt såg senast.
+  const [trail, setTrail] = useState<number[]>([]);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [contact, setContact] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -203,6 +206,7 @@ export function ModuleQuiz({
       }
       setError(null);
       const nextStep = resolveNextQuestionIndex(questions, step, value);
+      setTrail((t) => [...t, step]);
       setStep(nextStep >= total ? total : nextStep);
       return;
     }
@@ -214,6 +218,10 @@ export function ModuleQuiz({
     }
     if (requirePhone && !contact.phone) {
       setError('Telefon krävs.');
+      return;
+    }
+    if (requireOrganization && !contact.organization) {
+      setError('Organisation krävs.');
       return;
     }
     setError(null);
@@ -274,7 +282,7 @@ export function ModuleQuiz({
           )}
           {requireOrganization && (
             <label className="mx-label">
-              Organisation
+              Organisation *
               <input
                 className="mx-input"
                 style={{ marginTop: 4 }}
@@ -317,8 +325,14 @@ export function ModuleQuiz({
         <button
           type="button"
           className="mx-btn"
-          disabled={step === 0 || submitting}
-          onClick={() => setStep((s) => Math.max(0, s - 1))}
+          disabled={trail.length === 0 || submitting}
+          onClick={() => {
+            const prev = trail[trail.length - 1];
+            if (prev === undefined) return;
+            setTrail((t) => t.slice(0, -1));
+            setStep(prev);
+            setError(null);
+          }}
         >
           ← Tillbaka
         </button>

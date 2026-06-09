@@ -69,6 +69,7 @@ export function PublicModuleRunner({ module, questions, brandName, nextModule }:
             title={module.chat_persona || module.name}
             avatarInitial={(module.name || 'M').slice(0, 1).toUpperCase()}
             maxExchanges={module.max_exchanges || 0}
+            consent
           />
         </div>
         {nextModule && <NextModuleCta next={nextModule} prompt="Klar? Gå vidare till nästa steg." />}

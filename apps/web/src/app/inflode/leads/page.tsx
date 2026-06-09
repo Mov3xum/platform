@@ -82,9 +82,18 @@ export default async function LeadsPage({
         </span>
       }
       actions={
-        <Link href="/inflode/leads/new" className="mx-btn mx-primary">
-          <Icon name="plus" size={13} /> Nytt lead
-        </Link>
+        <>
+          <a
+            href={`/api/inflode/leads/export${baseQs.toString() ? `?${baseQs.toString()}` : ''}`}
+            className="mx-btn"
+            title="Exportera de filtrerade leadsen som CSV (Excel) — för uppföljning och rapportering"
+          >
+            <Icon name="download" size={13} /> Exportera CSV
+          </a>
+          <Link href="/inflode/leads/new" className="mx-btn mx-primary">
+            <Icon name="plus" size={13} /> Nytt lead
+          </Link>
+        </>
       }
     >
       {/* Filter-bar */}
@@ -94,6 +103,8 @@ export default async function LeadsPage({
           method="get"
           className="mx-flex mx-items-c mx-gap-2 mx-wrap"
         >
+          {/* Bevara ett aktivt modulfilter (länkat från modul-admin) vid sök. */}
+          {landingModule && <input type="hidden" name="landing" value={landingModule} />}
           <input
             type="search"
             name="q"

@@ -21,6 +21,8 @@ interface Props {
   avatarInitial?: string;
   /** Max antal användarmeddelanden (0/odefinierat = obegränsat). */
   maxExchanges?: number;
+  /** Skickas till publika chat-routen där modulen har en samtyckesgrind. */
+  consent?: boolean;
 }
 
 function readAttribution(): Attribution {
@@ -47,7 +49,8 @@ export function CompassChat({
   endpoint = '/api/inflode/chat',
   title = 'Inflöde',
   avatarInitial = 'I',
-  maxExchanges = 0
+  maxExchanges = 0,
+  consent
 }: Props) {
   const [messages, setMessages] = useState<Msg[]>(() => [
     { role: 'assistant', content: initialAssistantMessage || DEFAULT_GREETING }
@@ -86,10 +89,16 @@ export function CompassChat({
           messages: next.map((m) => ({ role: m.role, content: m.content })),
           moduleSlug,
           sessionToken,
-          attribution
+          attribution,
+          consent
         })
       });
-      if (!res.ok) throw new Error(`Servern svarade ${res.status}`);
+      if (!res.ok) {
+        // Servern skickar vänliga, svenska felmeddelanden (rate limit,
+        // Mistral-överbelastning m.m.) — visa dem i stället för rå statuskod.
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || `Servern svarade ${res.status}`);
+      }
       const data = (await res.json()) as { reply?: string };
       if (!data.reply) throw new Error('Ingen replik från servern');
       setMessages((m) => [...m, { role: 'assistant', content: data.reply ?? '' }]);
@@ -192,5 +201,10 @@ function Bubble({
 }
 
 function generateToken(): string {
+  // Sessionstoken nycklar konversationen (och därmed lead-upserten) på
+  // servern — använd kryptografiskt stark slump när webbläsaren stödjer det.
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `s_${crypto.randomUUID()}`;
+  }
   return `s_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
 }

@@ -56,6 +56,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   if (mod.require_phone && !cleanContact(contact.phone, 50)) {
     return NextResponse.json({ error: 'Telefon krävs.' }, { status: 400 });
   }
+  if (mod.require_organization && !cleanContact(contact.organization, 200)) {
+    return NextResponse.json({ error: 'Organisation krävs.' }, { status: 400 });
+  }
 
   const questions = await listQuestionsForModule(pb, mod.id);
   const quizQuestions: QuizQuestion[] = questions.map((q) => ({
