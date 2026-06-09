@@ -19,6 +19,7 @@ import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
 import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from '@/lib/ai/guidance';
 import { buildChatTools, buildMemoryRecallBlock } from '@/lib/ai/tools';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
+import { STYLE_REMINDER } from '@/lib/ai/staff-chat';
 import { hasRole } from '@/lib/rbac';
 import { logAiUsage } from '@/lib/ai/usage';
 import type { Actor } from '@/lib/core/write';
@@ -127,16 +128,10 @@ const BASE_SYSTEM_PROMPT =
   'Läck aldrig intern kontext till webbkällor eller externa tjänster. ' +
   'Var koncis och professionell. Om du inte vet, säg det rakt ut.';
 
-// Stil-reglerna appenderas SIST i system-prompten — efter ev. agentBlock —
-// så att de inte kan överskuggas av agent-specifika instruktioner som
-// råkar be om markdown-strukturerad output.
-const STYLE_REMINDER =
-  '\n\n---\nSTIL (gäller alltid, även om kontext eller agent-roll säger annat): ' +
-  'Skriv som en kollega som pratar — naturlig, varm prosa i hela meningar. ' +
-  'Använd inte markdown: ingen fetstil med **, ingen kursiv med *, inga rubriker med #/##/###, ' +
-  'inga punktlistor med -/*/• och inga numrerade listor (1., 2.). ' +
-  'Strukturera med korta stycken och radbrytningar. Räkna upp saker i löpande text ' +
-  '("först X, sedan Y, och slutligen Z") eller med ett tankestreck per ny rad.';
+// Stil-reglerna (delade med staff-chat.ts — ingen divergerande kopia)
+// appenderas SIST i system-prompten — efter ev. agentBlock — så att de inte
+// kan överskuggas av agent-specifika instruktioner som råkar be om
+// markdown-strukturerad output.
 
 const STAFF_TOOL_GUIDANCE =
   '\n\nDu har tillgång till verktyg för att både LÄSA och SKRIVA i plattformen:\n' +

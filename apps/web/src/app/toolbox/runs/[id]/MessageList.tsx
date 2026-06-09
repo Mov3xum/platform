@@ -4,6 +4,7 @@ import type {
   ToolRunFeedbackRating
 } from '@platform/shared';
 import { FeedbackButtons } from './FeedbackButtons';
+import { markdownToHtml } from '@/lib/safe-html';
 
 export type MessageFeedbackMap = Record<
   number,
@@ -59,9 +60,18 @@ function MessageBubble({
             ))}
           </div>
         )}
-        <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
-          <pre className="whitespace-pre-wrap font-body text-sm">{message.content}</pre>
-        </div>
+        {isAssistant ? (
+          // AI-svar renderas via den säkra markdown-hjälpen (escapar allt) så
+          // att fetstil/listor visas snyggt i stället för som råa **-tecken.
+          <div
+            className="max-w-none text-sm"
+            dangerouslySetInnerHTML={{ __html: markdownToHtml(message.content) }}
+          />
+        ) : (
+          <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
+            <pre className="whitespace-pre-wrap font-body text-sm">{message.content}</pre>
+          </div>
+        )}
         {isAssistant && (message.model || message.tokens_in) && (
           <p className="mt-2 text-xs text-foreground-subtle">
             {message.model && <span className="font-mono">{message.model}</span>}

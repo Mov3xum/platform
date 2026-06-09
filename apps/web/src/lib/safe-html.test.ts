@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { escapeHtml, inlineMarkdown, markdownToHtml } from './safe-html';
+import { escapeHtml, inlineMarkdown, markdownToHtml, chatMarkdownToHtml } from './safe-html';
 
 // Låser XSS-skyddet (CLAUDE.md § 10.3). Allt som når dangerouslySetInnerHTML
 // måste gå via dessa helpers — testerna bevisar att markup escapas.
@@ -38,4 +38,26 @@ test('markdownToHtml stänger listor korrekt vid tom rad', () => {
   const html = markdownToHtml('- a\n- b\n\ntext');
   assert.equal((html.match(/<ul/g) ?? []).length, 1);
   assert.equal((html.match(/<\/ul>/g) ?? []).length, 1);
+});
+
+test('inlineMarkdown lämnar aldrig kvar råa ** i utdata', () => {
+  const out = inlineMarkdown('**Namn:** Göran och en ** oparad stjärna');
+  assert.ok(!out.includes('**'), 'råa ** får aldrig nå UI:t');
+  assert.match(out, /<strong[^>]*>Namn:<\/strong>/);
+});
+
+test('markdownToHtml renderar numrerade listor som <ol>', () => {
+  const html = markdownToHtml('1. första\n2. andra\n\ntext');
+  assert.equal((html.match(/<ol/g) ?? []).length, 1);
+  assert.equal((html.match(/<\/ol>/g) ?? []).length, 1);
+  assert.ok(html.includes('första') && html.includes('andra'));
+});
+
+test('chatMarkdownToHtml renderar fetstil/listor utan råa asterisker och escapar markup', () => {
+  const html = chatMarkdownToHtml('Hej **Göran** <script>evil()</script>\n\n- punkt ett\n1. steg ett');
+  assert.ok(!html.includes('**'), 'råa ** får aldrig nå chattbubblan');
+  assert.ok(!html.includes('<script>'), 'script-tagg får inte passera');
+  assert.match(html, /<strong/);
+  assert.match(html, /<ul/);
+  assert.match(html, /<ol/);
 });

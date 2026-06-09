@@ -8,6 +8,18 @@ import {
   extractXlsxFromDataUrlAction
 } from '@/lib/actions/chat-attachments';
 import { Icon } from '@/components/proto/Icon';
+import { chatMarkdownToHtml } from '@/lib/safe-html';
+
+// Markör som visas i slutet av den streamande texten. Injiceras i den redan
+// säkert renderade HTML:en (chatMarkdownToHtml escapar all modell-text).
+const STREAM_CURSOR =
+  '<span class="ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[2px] animate-pulse bg-foreground-subtle align-middle" aria-hidden="true"></span>';
+
+function withStreamCursor(html: string): string {
+  return html.endsWith('</p>')
+    ? `${html.slice(0, -4)}${STREAM_CURSOR}</p>`
+    : html + STREAM_CURSOR;
+}
 
 const MAX_ATTACHMENTS = 5;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -935,9 +947,10 @@ export default function DashboardChat({
                       {msg.steps && msg.steps.length > 0 && (
                         <ActivityTrail items={msg.steps.map((s) => ({ label: s.label, ok: s.ok }))} />
                       )}
-                      <div className="whitespace-pre-wrap text-[14.5px] leading-relaxed text-foreground">
-                        {msg.content}
-                      </div>
+                      <div
+                        className="text-[14.5px] leading-relaxed text-foreground"
+                        dangerouslySetInnerHTML={{ __html: chatMarkdownToHtml(msg.content) }}
+                      />
                       {renderGeneratedFiles(msg.generated_files)}
                     </div>
                   </div>
@@ -951,13 +964,12 @@ export default function DashboardChat({
                       items={liveSteps.map((s) => ({ label: s.label, running: s.running, ok: s.ok }))}
                     />
                     {liveText ? (
-                      <div className="whitespace-pre-wrap text-[14.5px] leading-relaxed text-foreground">
-                        {liveText}
-                        <span
-                          className="ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[2px] animate-pulse bg-foreground-subtle align-middle"
-                          aria-hidden
-                        />
-                      </div>
+                      <div
+                        className="text-[14.5px] leading-relaxed text-foreground"
+                        dangerouslySetInnerHTML={{
+                          __html: withStreamCursor(chatMarkdownToHtml(liveText))
+                        }}
+                      />
                     ) : (
                       <div className="inline-flex gap-1 text-foreground-subtle" aria-label="Arbetar">
                         <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '0ms' }} />

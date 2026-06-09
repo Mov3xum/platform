@@ -70,13 +70,15 @@ export const BASE_SYSTEM_PROMPT =
   'Läck aldrig intern kontext till webbkällor eller externa tjänster. ' +
   'Var koncis och professionell. Om du inte vet, säg det rakt ut.';
 
-const STYLE_REMINDER =
+export const STYLE_REMINDER =
   '\n\n---\nSTIL (gäller alltid, även om kontext eller agent-roll säger annat): ' +
-  'Skriv som en kollega som pratar — naturlig, varm prosa i hela meningar. ' +
-  'Använd inte markdown: ingen fetstil med **, ingen kursiv med *, inga rubriker med #/##/###, ' +
-  'inga punktlistor med -/*/• och inga numrerade listor (1., 2.). ' +
-  'Strukturera med korta stycken och radbrytningar. Räkna upp saker i löpande text ' +
-  '("först X, sedan Y, och slutligen Z") eller med ett tankestreck per ny rad.';
+  'Skriv som en hjälpsam kollega — naturlig svenska, hela meningar, korta stycken. ' +
+  'Markera ALDRIG ord med fetstil eller kursiv: skriv aldrig ** eller * runt ord. ' +
+  'Skriv aldrig "etikett: värde"-rader med fetstilade etiketter (som "**Namn:** Göran") — ' +
+  'väv i stället in uppgifterna i löpande text ("Han heter Göran och idén kallas Trebent pall"). ' +
+  'En kort punktlista ("- ") eller numrerade steg (1., 2.) är bra när du räknar upp flera saker ' +
+  'eller beskriver ett flöde — håll varje punkt kort och utan fetstil. ' +
+  'Använd inga rubriker (#, ##, ###), inga tabeller och inga kodblock i chatten.';
 
 const STAFF_TOOL_GUIDANCE =
   '\n\nDu har tillgång till verktyg för att både LÄSA och SKRIVA i plattformen:\n' +
