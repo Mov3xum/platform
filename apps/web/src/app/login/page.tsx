@@ -29,10 +29,10 @@ export default async function LoginPage({
       <div className="grid w-full max-w-6xl items-stretch gap-6 lg:grid-cols-2 lg:gap-12">
         {/* Vänster: bildpanel (rundade kanter, döljs på små skärmar) */}
         <div className="relative hidden min-h-[660px] overflow-hidden rounded-[2rem] bg-gradient-to-br from-movexum-bla via-movexum-lila to-movexum-morkbla shadow-2xl shadow-movexum-svart/15 lg:block">
-          {/* Hjältebild — public/brand/AdobeStock_1604728058.jpeg */}
+          {/* Hjältebild — public/brand/login-hero.webp (komprimerad, ~52 KB) */}
           <div
             className="absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: 'url(/brand/AdobeStock_1604728058.jpeg)' }}
+            style={{ backgroundImage: 'url(/brand/login-hero.webp)' }}
             aria-hidden="true"
           />
           {/* Läsbarhetsskugga underifrån för wordmark + rubrik */}
