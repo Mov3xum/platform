@@ -44,7 +44,7 @@ export default async function InflodeDashboardPage({
   const [dashboard, recent, modules] = await Promise.all([
     getCompassDashboard(pb, user.tenant, days, sources),
     isStaff
-      ? listLeads(pb, user.tenant, { perPage: 6 }).then((r) => r.items)
+      ? listLeads(pb, user.tenant, { perPage: 6, excludePreview: true }).then((r) => r.items)
       : Promise.resolve([]),
     listModules(pb, user.tenant, { onlyActive: !isStaff })
   ]);

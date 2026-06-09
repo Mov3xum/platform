@@ -2718,6 +2718,16 @@ Människa-i-loopen följer sedan upp (status sätts manuellt).
 - **Slug-merge i statistik:** `landing_module` kan vara modulens publika ELLER
   interna slug — dashboard, analys och modulkorten mappar/summerar nu båda
   (tidigare visade modulkortet 0 leads när `public_slug` ≠ `slug`).
+- **Förhandsgranskningar exkluderas ur statistiken:** interna testkörningar
+  (admin-preview `/inflode/m/…` + staff-test-chatten `/inflode/chat`) stämplar
+  `source_key='preview'` (`PREVIEW_SOURCE_KEY`). Lead-garantin (§ 23.6) består
+  — leadet skapas så pipelinen kan verifieras — men ALL statistik (dashboard-
+  KPI:er/tratt/trend, analys, modulkort) och CSV-exporten filtrerar bort dem
+  (`source_key != 'preview'`; ett explicit `src`-filter vinner så previews kan
+  listas/exporteras medvetet). I leads-listan märks de med chip
+  "Förhandsgranskning" + snabbfilter, och lead-detaljen visar en banner.
+  Befintliga preview-leads skapade FÖRE skiftet (`web`/`ai-chat`) kan inte
+  retroaktivt identifieras — radera dem manuellt vid behov.
 - Riskklass: oförändrad (export/analys är deterministisk aggregering av
   befintlig lead-data; ingen ny AI-funktion).
 

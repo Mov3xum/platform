@@ -8,6 +8,8 @@ import { listLeads, listLeadSources, listModules } from '@/lib/compass/store';
 import {
   LEAD_STATUS_LABEL,
   LEAD_STATUS_ORDER,
+  PREVIEW_SOURCE_KEY,
+  PREVIEW_SOURCE_LABEL,
   type LeadStatus
 } from '@/lib/compass/types';
 import { buildInflodeTabs } from '../_tabs';
@@ -154,6 +156,14 @@ export default async function LeadsPage({
             {LEAD_STATUS_LABEL[s]}
           </Link>
         ))}
+        <Link
+          href={`/inflode/leads?src=${PREVIEW_SOURCE_KEY}`}
+          className={`mx-chip mx-mono${sourceKey === PREVIEW_SOURCE_KEY ? ' mx-ink-chip' : ''}`}
+          style={{ textDecoration: 'none' }}
+          title="Interna testkörningar — räknas inte i statistik eller export"
+        >
+          {PREVIEW_SOURCE_LABEL}
+        </Link>
       </div>
 
       {/* Lista */}
@@ -185,10 +195,16 @@ export default async function LeadsPage({
                       <Chip variant={statusChipVariant(lead.status)} mono>
                         {LEAD_STATUS_LABEL[lead.status]}
                       </Chip>
-                      {source && (
-                        <span className="mx-mono mx-t-xs mx-muted mx-t-up">
-                          · {source.label}
-                        </span>
+                      {lead.source_key === PREVIEW_SOURCE_KEY ? (
+                        <Chip variant="draft" mono>
+                          {PREVIEW_SOURCE_LABEL.toUpperCase()}
+                        </Chip>
+                      ) : (
+                        source && (
+                          <span className="mx-mono mx-t-xs mx-muted mx-t-up">
+                            · {source.label}
+                          </span>
+                        )
                       )}
                       {landingLabel(lead.landing_module) && (
                         <Chip variant="cyan" mono>

@@ -41,6 +41,17 @@ export default async function ModulePage({
         }
       />
 
+      <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-paper-2)' }}>
+        <div className="mx-flex mx-items-c mx-gap-2 mx-t-12 mx-muted" style={{ flexWrap: 'wrap' }}>
+          <Icon name="shield" size={13} />
+          <span>
+            Förhandsgranskning — leads härifrån markeras som{' '}
+            <strong>Förhandsgranskning</strong> och räknas inte i statistik eller export.
+            Den publika sidan ligger på <code className="mx-mono">/m/[publik-slug]</code>.
+          </span>
+        </div>
+      </Card>
+
       {mod.intro_message && (
         <Card style={{ padding: 16, marginBottom: 16 }}>
           <div className="mx-t-13" style={{ lineHeight: 1.5 }}>

@@ -10,7 +10,7 @@ import type {
   LeadStatus,
   SecurityEventKind
 } from './types';
-import { LEAD_STATUS_ORDER } from './types';
+import { LEAD_STATUS_ORDER, PREVIEW_SOURCE_KEY } from './types';
 
 /* ────────────────────────────────────────────────────────────────────
    Läs-fallback — PB v0.23.4 rule-eval-bugg (CLAUDE.md § 21.3)
@@ -108,6 +108,12 @@ export interface LeadListOptions {
   landingModule?: string;
   page?: number;
   perPage?: number;
+  /**
+   * Exkludera interna förhandsgranskningar (source_key = 'preview') — används
+   * av statistik/export/dashboard. Ignoreras när ett explicit källfilter är
+   * satt (så staff kan filtrera fram just förhandsgranskningarna).
+   */
+  excludePreview?: boolean;
 }
 
 /** Delad filterbyggare för lead-listning/-export (bunden syntax, § 10.3). */
@@ -121,6 +127,9 @@ function buildLeadFilter(pb: PocketBase, tenant: string, options: LeadListOption
   if (options.sourceKey) {
     filters.push('source_key = {:src}');
     params.src = options.sourceKey;
+  } else if (options.excludePreview) {
+    filters.push('source_key != {:pv}');
+    params.pv = PREVIEW_SOURCE_KEY;
   }
   if (options.landingModule) {
     filters.push('landing_module = {:lm}');
@@ -254,7 +263,11 @@ export async function countLeadsByStatus(
     accepted: 0,
     declined: 0
   };
-  const filter = pb.filter('tenant = {:tenant}', { tenant });
+  // Förhandsgranskningar (preview) räknas aldrig i tratt/statistik.
+  const filter = pb.filter('tenant = {:tenant} && source_key != {:pv}', {
+    tenant,
+    pv: PREVIEW_SOURCE_KEY
+  });
   try {
     const all = await readWithFallback(
       pb,
@@ -502,8 +515,9 @@ export async function getLeadAnalytics(
   converted: number;
 }> {
   try {
-    const filterParts = ['tenant = {:tenant}'];
-    const params: Record<string, unknown> = { tenant };
+    // Förhandsgranskningar (preview) exkluderas ur all analys.
+    const filterParts = ['tenant = {:tenant}', 'source_key != {:pv}'];
+    const params: Record<string, unknown> = { tenant, pv: PREVIEW_SOURCE_KEY };
     if (windowDays && windowDays > 0) {
       const cutoff = new Date(Date.now() - windowDays * 86400_000).toISOString();
       filterParts.push('created >= {:cutoff}');
@@ -712,10 +726,11 @@ export async function getCompassDashboard(
     const sinceMs = now - periodDays * 86400_000;
     const prevSinceIso = new Date(now - periodDays * 2 * 86400_000).toISOString();
 
-    const windowFilter = pb.filter('tenant = {:tenant} && created >= {:cutoff}', {
-      tenant,
-      cutoff: prevSinceIso
-    });
+    // Förhandsgranskningar (preview) exkluderas ur KPI:er/trend.
+    const windowFilter = pb.filter(
+      'tenant = {:tenant} && created >= {:cutoff} && source_key != {:pv}',
+      { tenant, cutoff: prevSinceIso, pv: PREVIEW_SOURCE_KEY }
+    );
     const [funnelCounts, windowLeads] = await Promise.all([
       countLeadsByStatus(pb, tenant),
       readWithFallback(

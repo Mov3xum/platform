@@ -62,7 +62,10 @@ export async function GET(req: Request) {
     status: isLeadStatus(statusRaw) ? statusRaw : undefined,
     q: url.searchParams.get('q')?.trim().slice(0, 200) || undefined,
     sourceKey: url.searchParams.get('src')?.trim().slice(0, 100) || undefined,
-    landingModule: url.searchParams.get('landing')?.trim().slice(0, 100) || undefined
+    landingModule: url.searchParams.get('landing')?.trim().slice(0, 100) || undefined,
+    // Interna förhandsgranskningar hör inte hemma i intressentrapporter.
+    // (Ett explicit src-filter vinner — då kan även previews exporteras.)
+    excludePreview: true
   };
 
   const pb = await getServerPb();

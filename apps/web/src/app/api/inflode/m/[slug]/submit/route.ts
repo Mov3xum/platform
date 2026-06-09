@@ -8,7 +8,7 @@ import {
 } from '@/lib/compass/store';
 import { mapAnswersToLead, pickAttribution } from '@/lib/compass/public';
 import { findMissingRequiredAlongPath } from '@/lib/compass/question-flow';
-import type { Attribution } from '@/lib/compass/types';
+import { PREVIEW_SOURCE_KEY, type Attribution } from '@/lib/compass/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -58,11 +58,13 @@ export async function POST(
   const leadPayload = mapAnswersToLead(answers);
   const attribution = pickAttribution(body.attribution);
 
+  // Intern admin-preview → markeras som förhandsgranskning och exkluderas
+  // från all statistik (dashboard/analys/export).
   const lead = await createLead(pb, user.tenant, {
     ...leadPayload,
     ...attribution,
     name: leadPayload.name || 'Anonym',
-    source_key: 'web',
+    source_key: PREVIEW_SOURCE_KEY,
     landing_module: slug,
     consent_at: new Date().toISOString()
   });

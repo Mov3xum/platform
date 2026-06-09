@@ -13,6 +13,8 @@ import { getLead, listAssignableStaff, listLeadSources, listModules } from '@/li
 import {
   LEAD_STATUS_LABEL,
   LEAD_STATUS_ORDER,
+  PREVIEW_SOURCE_KEY,
+  PREVIEW_SOURCE_LABEL,
   type LeadStatus
 } from '@/lib/compass/types';
 import { type StartupPhase } from '@platform/shared';
@@ -104,6 +106,19 @@ export default async function LeadDetailPage({
           </>
         }
       />
+
+      {lead.source_key === PREVIEW_SOURCE_KEY && (
+        <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-paper-2)' }}>
+          <div className="mx-flex mx-items-c mx-gap-2 mx-t-13 mx-muted">
+            <Icon name="shield" size={14} />
+            <span>
+              <strong>Intern förhandsgranskning.</strong> Det här leadet skapades av
+              Movexum-personal i testläge och räknas inte i statistik, analys eller
+              CSV-export. Radera det gärna när testet är klart.
+            </span>
+          </div>
+        </Card>
+      )}
 
       {alreadyConverted && (
         <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-cyan-tint-2)' }}>
@@ -419,8 +434,10 @@ export default async function LeadDetailPage({
             <CardHead label="Källa & attribution" />
             <div style={{ padding: 16, display: 'grid', gap: 8 }}>
               <div className="mx-flex mx-items-c mx-gap-2">
-                <Chip variant="cyan" mono>
-                  {source?.label || lead.source_key}
+                <Chip variant={lead.source_key === PREVIEW_SOURCE_KEY ? 'draft' : 'cyan'} mono>
+                  {lead.source_key === PREVIEW_SOURCE_KEY
+                    ? PREVIEW_SOURCE_LABEL
+                    : source?.label || lead.source_key}
                 </Chip>
                 {(landingModule || lead.landing_module) && (
                   <span className="mx-mono mx-t-xs mx-muted">

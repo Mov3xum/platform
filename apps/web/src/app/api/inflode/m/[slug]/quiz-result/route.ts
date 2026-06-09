@@ -3,7 +3,7 @@ import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { createLead, getModuleBySlug, listQuestionsForModule } from '@/lib/compass/store';
 import { pickAttribution } from '@/lib/compass/public';
 import { scoreQuiz, resolveBucket, isResultBucketArray, type QuizQuestion } from '@platform/shared';
-import type { Attribution } from '@/lib/compass/types';
+import { PREVIEW_SOURCE_KEY, type Attribution } from '@/lib/compass/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -80,7 +80,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     idea_category: bucket?.key,
     idea_summary: bucket ? `Quiz "${mod.name}": ${bucket.title}` : `Quiz "${mod.name}"`,
     ...attribution,
-    source_key: 'web',
+    // Intern admin-preview → markeras som förhandsgranskning och exkluderas
+    // från all statistik (dashboard/analys/export).
+    source_key: PREVIEW_SOURCE_KEY,
     landing_module: slug,
     quiz_result_bucket: bucket?.key,
     quiz_score: score.total,
