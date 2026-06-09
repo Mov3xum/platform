@@ -13,6 +13,13 @@ interface Props {
 
 const PUBLIC_API_BASE = '/api/public/m';
 
+// Etiketter för flödestypspillen på samtyckesgrinden.
+const FLOW_LABEL: Record<string, string> = {
+  chat: 'AI-assisterad chatt',
+  quiz: 'Quiz',
+  wizard: 'Formulär'
+};
+
 // Publik (oinloggad) körning av en Startupkompass-modul. Visar en
 // samtyckesgrind före all datainsamling (GDPR art. 7) och dispatchar sedan
 // till rätt flöde. Skickar consent=true till de publika API-routarna.
@@ -22,22 +29,24 @@ export function PublicModuleRunner({ module, questions }: Props) {
 
   if (!consented) {
     return (
-      <div style={{ display: 'grid', gap: 16 }}>
+      <div className="mx-consent">
         <div className="mx-mono mx-t-xs mx-t-up mx-muted">Innan vi börjar</div>
-        <div className="mx-disp" style={{ fontSize: 22, fontWeight: 600 }}>
+        <h2 className="mx-disp" style={{ fontSize: 24, fontWeight: 700, margin: 0, color: 'var(--mx-ink)' }}>
           Så hanterar vi dina uppgifter
-        </div>
-        <p className="mx-t-13 mx-muted" style={{ lineHeight: 1.6, maxWidth: 560 }}>
+        </h2>
+        <p className="mx-t-13 mx-muted" style={{ lineHeight: 1.65, maxWidth: 560 }}>
           {module.consent_note}
         </p>
-        <button
-          type="button"
-          className="mx-btn mx-primary"
-          style={{ justifySelf: 'start' }}
-          onClick={() => setConsented(true)}
-        >
-          Jag förstår, starta →
-        </button>
+        <div className="mx-consent-cta">
+          <span className="mx-chip mx-mono">{FLOW_LABEL[module.flow_type]}</span>
+          <button
+            type="button"
+            className="mx-btn mx-primary mx-lg"
+            onClick={() => setConsented(true)}
+          >
+            Jag förstår, starta <span aria-hidden>→</span>
+          </button>
+        </div>
       </div>
     );
   }
