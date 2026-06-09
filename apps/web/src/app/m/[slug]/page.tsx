@@ -2,7 +2,11 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { PublicModuleRunner } from '@/components/compass/PublicModuleRunner';
-import { resolvePublicModule, getPublicModuleQuestions } from '@/lib/compass/public';
+import {
+  resolvePublicModule,
+  getPublicModuleQuestions,
+  getPublicTenantBranding
+} from '@/lib/compass/public';
 import { moduleHeroImageUrl } from '@/lib/compass/media';
 
 export const dynamic = 'force-dynamic';
@@ -35,9 +39,14 @@ export default async function PublicModulePage({
   const resolved = await resolvePublicModule(slug);
   if (!resolved) notFound();
 
-  const { pb, module } = resolved;
-  const questions =
-    module.flow_type === 'chat' ? [] : await getPublicModuleQuestions(pb, module.id);
+  const { pb, module, tenant } = resolved;
+  const [questions, branding] = await Promise.all([
+    module.flow_type === 'chat'
+      ? Promise.resolve([])
+      : getPublicModuleQuestions(pb, module.id),
+    getPublicTenantBranding(pb, tenant)
+  ]);
+  const hasTenantLogo = Boolean(branding.logoLightUrl || branding.logoDarkUrl);
 
   const accent =
     module.theme_color && /^#[0-9a-fA-F]{3,8}$/.test(module.theme_color)
@@ -58,7 +67,16 @@ export default async function PublicModulePage({
         {/* Topbar — wordmark (mörkblå) + valfri målgruppspill */}
         <header className="mx-compass-topbar">
           <span className="mx-compass-brand">
-            <Logo variant="flex" href="/" height={30} width={148} />
+            {/* Tenantens uppladdade logotyp (från /installningar) om den finns,
+                annars text-wordmarken. Den publika sidan är alltid ljus. */}
+            <Logo
+              variant="light"
+              href="/"
+              height={hasTenantLogo ? 52 : 40}
+              width={hasTenantLogo ? 260 : 200}
+              logoLightUrl={branding.logoLightUrl}
+              logoDarkUrl={branding.logoDarkUrl}
+            />
           </span>
           {module.target_audience && (
             <span className="mx-compass-aud">{module.target_audience}</span>
@@ -87,7 +105,7 @@ export default async function PublicModulePage({
 
         {/* Flöde */}
         <section className={`mx-compass-card${isChat ? ' mx-compass-card-chat' : ''}`}>
-          <PublicModuleRunner module={module} questions={questions} />
+          <PublicModuleRunner module={module} questions={questions} brandName={branding.name} />
         </section>
 
         {/* Transparens (EU AI Act art. 50 för chat) + EU-suveränitet */}

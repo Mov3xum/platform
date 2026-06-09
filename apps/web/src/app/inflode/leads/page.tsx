@@ -4,7 +4,7 @@ import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
 import { Card, Chip, Icon } from '@/components/proto';
-import { listLeads, listLeadSources } from '@/lib/compass/store';
+import { listLeads, listLeadSources, listModules } from '@/lib/compass/store';
 import {
   LEAD_STATUS_LABEL,
   LEAD_STATUS_ORDER,
@@ -39,7 +39,7 @@ export default async function LeadsPage({
   const page = Math.max(1, Number(params.page) || 1);
 
   const pb = await getServerPb();
-  const [{ items, totalItems, totalPages }, sources] = await Promise.all([
+  const [{ items, totalItems, totalPages }, sources, modules] = await Promise.all([
     listLeads(pb, user.tenant, {
       status,
       q,
@@ -48,9 +48,21 @@ export default async function LeadsPage({
       page,
       perPage: PER_PAGE
     }),
-    listLeadSources(pb)
+    listLeadSources(pb),
+    listModules(pb, user.tenant)
   ]);
   const sourceByKey = new Map(sources.map((s) => [s.key, s]));
+  // Mappa landing_module (lagras som modulens public_slug eller slug) → namn,
+  // så att vi kan visa VILKEN modul varje lead kom in via (CLAUDE.md § 23.6).
+  const moduleNameBySlug = new Map<string, string>();
+  for (const m of modules) {
+    if (m.public_slug) moduleNameBySlug.set(m.public_slug, m.name);
+    if (m.slug) moduleNameBySlug.set(m.slug, m.name);
+  }
+  const landingLabel = (slug?: string): string | undefined => {
+    if (!slug) return undefined;
+    return moduleNameBySlug.get(slug) || slug;
+  };
 
   const baseQs = new URLSearchParams();
   if (status) baseQs.set('status', status);
@@ -166,6 +178,11 @@ export default async function LeadsPage({
                         <span className="mx-mono mx-t-xs mx-muted mx-t-up">
                           · {source.label}
                         </span>
+                      )}
+                      {landingLabel(lead.landing_module) && (
+                        <Chip variant="cyan" mono>
+                          {landingLabel(lead.landing_module)}
+                        </Chip>
                       )}
                     </div>
                     <div className="mx-t-12 mx-muted mx-truncate" style={{ marginTop: 4 }}>

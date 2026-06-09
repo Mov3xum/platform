@@ -15,6 +15,10 @@ interface Props {
   requirePhone?: boolean;
   requireOrganization?: boolean;
   successMessage?: string;
+  /** Modulens visningsnamn — används i det nedladdningsbara resultatet. */
+  moduleName?: string;
+  /** Tenantens namn — visas i det nedladdningsbara resultatet. */
+  brandName?: string;
 }
 
 interface QuizResult {
@@ -33,7 +37,9 @@ export function ModuleQuiz({
   requireEmail,
   requirePhone,
   requireOrganization,
-  successMessage
+  successMessage,
+  moduleName,
+  brandName
 }: Props) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
@@ -89,13 +95,67 @@ export function ModuleQuiz({
             </ul>
           </div>
         )}
-        {b?.cta && (
-          <a href={b.cta.url} className="mx-btn mx-primary" style={{ justifySelf: 'start' }}>
-            {b.cta.label} →
-          </a>
-        )}
+        <div className="mx-flex mx-items-c mx-gap-2 mx-wrap">
+          {b?.cta && (
+            <a href={b.cta.url} className="mx-btn mx-primary">
+              {b.cta.label} →
+            </a>
+          )}
+          <button type="button" className="mx-btn" onClick={downloadResult}>
+            ↓ Ladda ner mitt resultat
+          </button>
+        </div>
       </div>
     );
+  }
+
+  // Bygger ett fristående, brandat HTML-dokument av resultatet och laddar ner
+  // det (öppningsbart/utskrivbart till PDF i webbläsaren). Helt klient-side —
+  // ingen ny dataväg och inget extra beroende.
+  function downloadResult() {
+    if (!result) return;
+    const b = result.bucket;
+    const esc = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const today = new Date().toLocaleDateString('sv-SE');
+    const brand = brandName || 'Movexum';
+    const tipsHtml =
+      b?.tips && b.tips.length > 0
+        ? `<h2>Nästa steg</h2><ul>${b.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`
+        : '';
+    const html = `<!doctype html><html lang="sv"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resultat – ${esc(moduleName || 'Startupkompassen')}</title>
+<style>
+  :root { color-scheme: light; }
+  body { font-family: -apple-system, "Nunito Sans", system-ui, sans-serif; color: #0a0a0a;
+         max-width: 680px; margin: 48px auto; padding: 0 24px; line-height: 1.6; }
+  .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 12px;
+             font-weight: 700; color: #005470; }
+  h1 { font-size: 30px; line-height: 1.15; margin: 6px 0 4px; }
+  h2 { font-size: 16px; margin: 28px 0 8px; }
+  .meta { color: #6b6b6b; font-size: 13px; margin-bottom: 24px; }
+  ul { padding-left: 20px; } li { margin: 6px 0; }
+  .foot { margin-top: 40px; border-top: 1px solid #e5e5e5; padding-top: 14px;
+          color: #6b6b6b; font-size: 12px; }
+  @media print { body { margin: 0; } }
+</style></head><body>
+  <div class="eyebrow">${esc(brand)} · Startupkompassen</div>
+  <h1>${esc(b?.title || 'Tack för dina svar!')}</h1>
+  <div class="meta">${esc(moduleName || '')}${moduleName ? ' · ' : ''}${today}</div>
+  ${b?.body ? `<p>${esc(b.body)}</p>` : ''}
+  ${tipsHtml}
+  <div class="foot">Resultatet är vägledande och baseras på dina egna svar. Dina uppgifter hanteras inom EU och delas aldrig vidare.</div>
+</body></html>`;
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `startupkompassen-resultat-${today}.html`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function setValue(value: string | string[]) {
