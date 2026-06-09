@@ -3,6 +3,7 @@
 import PocketBase from 'pocketbase';
 import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { getAssignmentReadPb } from '@/lib/assignments/read';
 import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { buildStartupContext } from '@/lib/ai/context';
@@ -350,13 +351,39 @@ export type WorkshopAreaActionState = {
   success?: string;
 };
 
+// Aktivitetslogg-skrivningar är sekundära till själva tilldelnings-/status-
+// mutationen. En schema-mismatch (t.ex. en PB-backend som ännu inte fått
+// migration 1700000126, som återställer activities.kind-värdena
+// workshop_assignment/workshop_run) får inte avbryta flödet halvvägs — då
+// blir tilldelningen skapad men ser trasig ut, och användaren får ett fel
+// som inte kan ångra den redan skrivna raden. Fail-soft + serverlogg.
+async function tryActivityWrite<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (err) {
+    const pbError = toPbErrorLike(err);
+    console.error(`[workshops] ${label} failed (fail-soft)`, {
+      statusCode: pbError.status,
+      message: err instanceof Error ? err.message : String(err ?? ''),
+      response: pbError.response ?? null
+    });
+    return null;
+  }
+}
+
 async function loadAssignmentWithAccessCheck(assignmentId: string) {
   const user = await requireUser();
   const pb = await getServerPb();
 
+  // Läs tilldelningen via den robusta klienten (PB v0.23.4 rule-eval kan tyst
+  // ge 404 för en annars behörig användare, § 21.3 / lib/assignments/read.ts).
+  // Behörigheten avgörs i app-koden direkt nedan (tenant + roll/medlemskap);
+  // efterföljande SKRIVNINGAR går via användarens token (`pb`) så RLS gäller.
+  const readPb = await getAssignmentReadPb();
+
   let assignment: WorkshopAssignment & Record<string, unknown>;
   try {
-    assignment = await pb
+    assignment = await readPb
       .collection(PB_COLLECTIONS.workshopAssignments)
       .getOne<WorkshopAssignment & Record<string, unknown>>(assignmentId, {
         expand: 'workshop,startup'
@@ -1232,20 +1259,26 @@ export async function assignWorkshopToStartupAction(
       assignment = await writePb.collection(PB_COLLECTIONS.workshopAssignments).create(assignmentData);
     }
 
-    const activity = await writePb.collection('activities').create({
-      startup: startupId,
-      type: 'workshop',
-      title: `${workshop.title} – tilldelad workshop`,
-      status: 'planned',
-      kind: 'workshop_assignment',
-      workshop: workshopId,
-      workshop_assignment: assignment.id,
-      owner: user.id,
-      due_date: dueDate || new Date().toISOString().slice(0, 10)
-    });
+    // Fail-soft: tilldelningsraden är redan skriven — ett aktivitetslogg-fel
+    // (t.ex. saknade kind-värden före migration 1700000126) får inte få hela
+    // tilldelningen att se misslyckad ut.
+    const activity = await tryActivityWrite('assignment activity create', () =>
+      writePb.collection('activities').create({
+        startup: startupId,
+        type: 'workshop',
+        title: `${workshop.title} – tilldelad workshop`,
+        status: 'planned',
+        kind: 'workshop_assignment',
+        workshop: workshopId,
+        workshop_assignment: assignment.id,
+        owner: user.id,
+        due_date: dueDate || new Date().toISOString().slice(0, 10)
+      })
+    );
 
     // ── Samarbete: medarbetar-tasks + ev. möte (CLAUDE.md § 18.4) ──────────
-    const update: Record<string, unknown> = { activity: activity.id };
+    const update: Record<string, unknown> = {};
+    if (activity) update.activity = activity.id;
     const collaboratorIds = options?.collaboratorIds ?? [];
     if (collaboratorIds.length > 0) {
       const linked = await createCollaboratorTasks({
@@ -1271,7 +1304,9 @@ export async function assignWorkshopToStartupAction(
       if (meetingId) update.meeting = meetingId;
     }
 
-    await writePb.collection(PB_COLLECTIONS.workshopAssignments).update(String(assignment.id), update);
+    if (Object.keys(update).length > 0) {
+      await writePb.collection(PB_COLLECTIONS.workshopAssignments).update(String(assignment.id), update);
+    }
 
     revalidatePath('/education');
     revalidatePath('/dashboard');
@@ -1280,7 +1315,12 @@ export async function assignWorkshopToStartupAction(
     revalidatePath('/mina-aktiviteter');
     revalidatePath('/inkorg');
     revalidatePath(`/startups/${startupId}`);
-    return { assignmentId: String(assignment.id) };
+    return {
+      assignmentId: String(assignment.id),
+      warning: activity
+        ? undefined
+        : 'Workshopen tilldelades, men aktivitetsloggen kunde inte skrivas (uppdatera/omdistribuera PocketBase-backenden, migration 1700000126).'
+    };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte tilldela workshop.' };
   }
@@ -1314,10 +1354,12 @@ export async function saveWorkshopProgressAction(
 
     if (assignment.activity) {
       const workshopTitle = assignment.expand?.workshop?.title ?? 'Workshop';
-      await pb.collection('activities').update(String(assignment.activity), {
-        status: nextStatus,
-        title: `${workshopTitle} – pågår`
-      });
+      await tryActivityWrite('progress activity update', () =>
+        pb.collection('activities').update(String(assignment.activity), {
+          status: nextStatus,
+          title: `${workshopTitle} – pågår`
+        })
+      );
     }
 
     revalidatePath(`/education/assignments/${assignmentId}`);
@@ -1410,19 +1452,23 @@ export async function runWorkshopAiChatAction(
       last_saved_at: now
     });
 
-    await pb.collection('activities').create({
-      startup: assignment.startup,
-      type: 'workshop',
-      title: `${workshop.title} – AI-chattmoment`,
-      status: 'done',
-      kind: 'workshop_run',
-      workshop: assignment.workshop,
-      workshop_assignment: assignment.id,
-      workshop_run: run.id,
-      owner: user.id,
-      completed_at: now,
-      due_date: now.slice(0, 10)
-    });
+    // Fail-soft: svaret är redan sparat på tilldelningen — aktivitetsloggen
+    // får inte fälla hela chatten (jfr migration 1700000126).
+    await tryActivityWrite('ai-chat activity create', () =>
+      pb.collection('activities').create({
+        startup: assignment.startup,
+        type: 'workshop',
+        title: `${workshop.title} – AI-chattmoment`,
+        status: 'done',
+        kind: 'workshop_run',
+        workshop: assignment.workshop,
+        workshop_assignment: assignment.id,
+        workshop_run: run.id,
+        owner: user.id,
+        completed_at: now,
+        due_date: now.slice(0, 10)
+      })
+    );
 
     revalidatePath(`/education/assignments/${assignmentId}`);
     revalidatePath('/aktivitet');
@@ -1534,19 +1580,23 @@ export async function completeWorkshopAction(
       completed_at: now
     });
 
-    await pb.collection('activities').create({
-      startup: assignment.startup,
-      type: 'workshop',
-      title: `${workshopTitle} – rapport genererad`,
-      status: 'done',
-      kind: 'workshop_run',
-      workshop: assignment.workshop,
-      workshop_assignment: assignment.id,
-      workshop_run: run.id,
-      owner: user.id,
-      completed_at: now,
-      due_date: now.slice(0, 10)
-    });
+    // Fail-soft: rapporten är redan genererad och loggad i workshop_runs —
+    // ett aktivitetslogg-fel får inte kasta bort den (jfr 1700000126).
+    await tryActivityWrite('report activity create', () =>
+      pb.collection('activities').create({
+        startup: assignment.startup,
+        type: 'workshop',
+        title: `${workshopTitle} – rapport genererad`,
+        status: 'done',
+        kind: 'workshop_run',
+        workshop: assignment.workshop,
+        workshop_assignment: assignment.id,
+        workshop_run: run.id,
+        owner: user.id,
+        completed_at: now,
+        due_date: now.slice(0, 10)
+      })
+    );
   } catch (err) {
     console.error('[workshops] report generation failed', {
       assignmentId,
@@ -1573,26 +1623,33 @@ export async function completeWorkshopAction(
       last_saved_at: now
     });
 
+    // Fail-soft: statusen är redan satt till 'done' ovan — ett fel i
+    // aktivitetsloggen får inte lämna tilldelningen i ett "klar men flödet
+    // felade"-läge utan rapport/återkoppling (jfr migration 1700000126).
     if (assignment.activity) {
-      await pb.collection('activities').update(String(assignment.activity), {
-        status: 'done',
-        title: `${workshopTitle} – slutförd`,
-        completed_at: now
-      });
+      await tryActivityWrite('complete activity update', () =>
+        pb.collection('activities').update(String(assignment.activity), {
+          status: 'done',
+          title: `${workshopTitle} – slutförd`,
+          completed_at: now
+        })
+      );
     }
 
-    await pb.collection('activities').create({
-      startup: assignment.startup,
-      type: 'workshop',
-      title: `${workshopTitle} – takeaway sparad`,
-      status: 'done',
-      kind: 'workshop_assignment',
-      workshop: assignment.workshop,
-      workshop_assignment: assignment.id,
-      owner: assignment.owner || assignment.assigned_by || null,
-      completed_at: now,
-      due_date: now.slice(0, 10)
-    });
+    await tryActivityWrite('complete activity create', () =>
+      pb.collection('activities').create({
+        startup: assignment.startup,
+        type: 'workshop',
+        title: `${workshopTitle} – takeaway sparad`,
+        status: 'done',
+        kind: 'workshop_assignment',
+        workshop: assignment.workshop,
+        workshop_assignment: assignment.id,
+        owner: assignment.owner || assignment.assigned_by || null,
+        completed_at: now,
+        due_date: now.slice(0, 10)
+      })
+    );
 
     revalidatePath(`/education/assignments/${assignmentId}`);
     revalidatePath('/education');
@@ -1770,17 +1827,19 @@ export async function submitForCoachReviewAction(
   });
 
   const workshop = assignment.expand?.workshop as Workshop | undefined;
-  await pb.collection('activities').create({
-    startup: assignment.startup,
-    type: 'workshop',
-    title: `${workshop?.title ?? 'Workshop'} – skickad till coach`,
-    status: 'in_progress',
-    kind: 'workshop_assignment',
-    workshop: assignment.workshop,
-    workshop_assignment: assignment.id,
-    owner: user.id,
-    due_date: now.slice(0, 10)
-  });
+  await tryActivityWrite('coach-review activity create', () =>
+    pb.collection('activities').create({
+      startup: assignment.startup,
+      type: 'workshop',
+      title: `${workshop?.title ?? 'Workshop'} – skickad till coach`,
+      status: 'in_progress',
+      kind: 'workshop_assignment',
+      workshop: assignment.workshop,
+      workshop_assignment: assignment.id,
+      owner: user.id,
+      due_date: now.slice(0, 10)
+    })
+  );
 
   revalidatePath(`/education/assignments/${assignmentId}`);
   return { assignmentId };
@@ -1898,11 +1957,13 @@ export async function commitWorkshopDocumentAction(
   });
 
   if (assignment.activity) {
-    await pb.collection('activities').update(String(assignment.activity), {
-      status: 'done',
-      title: `${workshop?.title ?? 'Workshop'} – committad`,
-      completed_at: now
-    });
+    await tryActivityWrite('commit activity update', () =>
+      pb.collection('activities').update(String(assignment.activity), {
+        status: 'done',
+        title: `${workshop?.title ?? 'Workshop'} – committad`,
+        completed_at: now
+      })
+    );
   }
 
   revalidatePath(`/education/assignments/${assignmentId}`);

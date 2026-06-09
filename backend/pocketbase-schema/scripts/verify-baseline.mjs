@@ -259,6 +259,54 @@ async function verifyNoBrokenCreateRules() {
   ok(`createRule-svep: inga roll-checks/tenant-joins (${all.length} kollektioner)`);
 }
 
+// Global invariant (CLAUDE.md § 21.3): list/view/update/delete-regler får
+// ALDRIG använda bart `?=` mot multi-värde-auth-fälten `@request.auth.roles`
+// / `@request.auth.linked_startups` (eller `@request.auth.id ?= recipients`).
+// PB v0.23.4 matchar inte `?=` mot multi-värde-fält — uttrycket blir TYST
+// falskt även för en behörig användare → list ger tomt/400 och view ger 404
+// för ALLA användartokens (det var så workshop-tilldelningar blev osynliga
+// för bolagsmedlemmar). Svep-migrationen 1700000108 skulle rätta detta men
+// var en tyst no-op (JSVM exponerar regler som Go-`*string`-pekare, inte
+// strängar); migration 1700000127 gör om svepet pekarsäkert. Den här
+// kontrollen fäller deployen om mönstret någonsin återinförs.
+const BARE_MULTI_VALUE_PATTERNS = [
+  /@request\.auth\.roles\s*\?=/, // `:each ?=` matchar inte (tecknet efter fältet är `:`)
+  /@request\.auth\.linked_startups\s*\?=/,
+  /@request\.auth\.id\s*\?=\s*recipients/
+];
+
+async function verifyNoBareMultiValueOperators() {
+  let all;
+  try {
+    all = await pb.collections.getFullList({ $autoCancel: false });
+  } catch (err) {
+    fail(`Kunde inte lista kollektioner för operator-svep:\n${describeError(err)}`);
+  }
+  const offenders = [];
+  for (const col of all) {
+    if (col.system) continue;
+    for (const key of ['listRule', 'viewRule', 'updateRule', 'deleteRule']) {
+      const rule = col[key];
+      if (typeof rule !== 'string' || rule.trim() === '') continue;
+      for (const pattern of BARE_MULTI_VALUE_PATTERNS) {
+        if (pattern.test(rule)) {
+          offenders.push(`${col.name}.${key}: ${JSON.stringify(rule)}`);
+          break;
+        }
+      }
+    }
+  }
+  if (offenders.length) {
+    fail(
+      'Trasiga regel-operatorer (bart `?=` mot multi-värde-auth-fält — PB ' +
+        'v0.23.4 nekar då TYST alla användartokens, CLAUDE.md § 21.3):\n' +
+        offenders.map((o) => `  - ${o}`).join('\n') +
+        '\nKör migration 1700000127 (pekarsäkert `:each ?=`-svep) eller rätta regeln.'
+    );
+  }
+  ok(`operator-svep: inga bara \`?=\` mot multi-värde-auth-fält (${all.length} kollektioner)`);
+}
+
 // Bolagsisolering (CLAUDE.md § 21, migration 1700000096). En ren
 // startup_member får bara se sina egna bolags rader. Vi verifierar att
 // list/view-reglerna scope:ar till `linked_startups` för de startup-scopade
@@ -774,6 +822,7 @@ async function main() {
   const collections = await verifyCollectionsExist();
   verifyRlsAndRbac(collections);
   await verifyNoBrokenCreateRules();
+  await verifyNoBareMultiValueOperators();
   await verifyAiPiiMasking();
   await verifyAppUser();
   await verifyAppUserCanCreate(pb, APP_USER_EMAIL, APP_USER_PASSWORD);

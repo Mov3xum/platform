@@ -2423,6 +2423,26 @@ får dessutom ALDRIG ligga i **createRules** (de togs bort i 1700000049 — roll
 enforcement görs i server-actions). Alla createRules lämnas orörda av 1700000096/
 1700000106.
 
+**JSVM-pekarfälla (migration 1700000127).** Svep-migrationen 1700000108
+(`fix_all_rule_operators_each`) var en TYST NO-OP: i PB v0.23:s JSVM exponeras
+collection-regler som Go-`*string`-pekare — `typeof collection.listRule` är
+`'object'`, inte `'string'` — så svepets typ-guard hoppade över varje regel.
+Konsekvens: `workshop_assignments`/`workshop_runs`/`strategies`/
+`strategy_revisions` m.fl. behöll bart `?=` → workshop-tilldelningar blev
+osynliga/oöppningsbara för alla användartokens (bolagsmedlemmens
+Aktiviteter-vy, genomför-sidan, verktygsfliken). Migration **1700000127** gör
+om svepet pekarsäkert (`String(rule)`-koercering). Skriv ALDRIG
+`typeof rule === 'string'`-guards i JSVM-migrationer — koercera med
+`String(...)` och hantera `null` separat. Dessutom tappade migration
+1700000049 `workshop_assignment`/`workshop_run` ur `activities.kind`
+(ersatte values-listan i stället för union) — återställt av migration
+**1700000126**; aktivitetslogg-skrivningarna i workshop-flödena är nu
+fail-soft (`lib/actions/workshops.ts`) så huvudmutationen aldrig avbryts av
+loggen. `verify-baseline.mjs` sveper numera ALLA list/view/update/delete-
+regler och failar deployen på bart `?=` mot multi-värde-auth-fält; bart `?=`
+är även utbytt i `setup-via-api.mjs` (vars regel-sync annars skulle
+återinföra felet vid reconcile).
+
 ### 21.4 Kollektioner
 
 - **`startups`** — medlem ser bara rader vars id finns i `linked_startups`.

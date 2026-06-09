@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getServerPb, requireUser } from '@/lib/auth.server';
+import { requireUser } from '@/lib/auth.server';
+import { getAssignmentReadPb } from '@/lib/assignments/read';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { WorkshopAssignmentStatusBadge } from '@/components/Badges';
@@ -14,7 +15,11 @@ export default async function WorkshopAssignmentPage({
 }) {
   const { id } = await params;
   const user = await requireUser();
-  const pb = await getServerPb();
+  // Robust läsning av tilldelningen (PB v0.23.4 rule-eval kan tyst ge 404 för
+  // en annars behörig användare, § 21.3 — se lib/assignments/read.ts).
+  // Behörigheten avgörs i app-koden direkt nedan: tenant-match + staff eller
+  // länkad startup_member, annars notFound().
+  const pb = await getAssignmentReadPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
   const canAccessEducation = canAccessModuleForUser(user.roles, 'education', user.disabledModules);
   const canAccessMemberActivities = canAccessModuleForUser(
