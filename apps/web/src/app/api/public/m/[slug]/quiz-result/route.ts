@@ -5,6 +5,12 @@ import {
   getPublicModuleQuestions,
   pickAttribution
 } from '@/lib/compass/public';
+import {
+  attachAiSummary,
+  buildSubmissionEntries,
+  moduleWantsLead,
+  parseContactPreference
+} from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { scoreQuiz, resolveBucket, isResultBucketArray, type QuizQuestion } from '@platform/shared';
@@ -21,6 +27,7 @@ interface QuizBody {
   contact?: { name?: string; email?: string; phone?: string; organization?: string };
   attribution?: Attribution;
   consent?: boolean;
+  contact_preference?: string;
 }
 
 function clientIp(req: Request): string {
@@ -87,9 +94,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const buckets = isResultBucketArray(module.result_buckets) ? module.result_buckets : [];
   const bucket = resolveBucket(score, buckets);
 
+  // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead — visa
+  // bara resultatet i så fall.
+  if (!moduleWantsLead(module)) {
+    return NextResponse.json({ bucket, score: score.total });
+  }
+
   // Bevara utfallet som en lead (människa-i-loopen följer upp). Kontaktfält är
   // frivilliga om modulen inte kräver dem.
   const attribution = pickAttribution(body.attribution);
+  const contactPreference = parseContactPreference(body.contact_preference);
   const lead = await createLead(pb, tenant, {
     name: cleanContact(contact.name, 200) || 'Anonym',
     email: cleanContact(contact.email, 254),
@@ -102,12 +116,29 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     landing_module: slug,
     quiz_result_bucket: bucket?.key,
     quiz_score: score.total,
+    contact_preference: contactPreference,
     consent_at: new Date().toISOString()
   });
 
-  if (lead) {
-    await notifyNewInflow(module, lead);
+  // Hård lead-garanti (CLAUDE.md § 23.6): leadet MÅSTE finnas när modulen är
+  // konfigurerad att skapa det — fela högt i stället för att besökaren ser
+  // sitt resultat medan inflödet tyst tappas. Grundorsaken loggas PII-fritt
+  // i createLead.
+  if (!lead) {
+    return NextResponse.json(
+      { error: 'Ditt resultat kunde inte sparas just nu. Försök igen om en stund.' },
+      { status: 500 }
+    );
   }
+
+  // AI-sammanställning av svaren + resultatprofilen (best-effort).
+  const entries = buildSubmissionEntries(questions, body.answers || {});
+  const resultLine = bucket
+    ? `${bucket.title} (${score.total} poäng)`
+    : `${score.total} poäng`;
+  const aiSummary = await attachAiSummary(pb, tenant, lead, entries, module.name, resultLine);
+
+  await notifyNewInflow(module, { ...lead, ai_summary: aiSummary ?? lead.ai_summary });
 
   return NextResponse.json({ bucket, score: score.total });
 }

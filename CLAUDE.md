@@ -2691,6 +2691,30 @@ Människa-i-loopen följer sedan upp (status sätts manuellt).
 - **GDPR §5/art. 7:** oförändrad dataminimering — bara whitelistade fält +
   PII-saneras nedströms; publika flöden kräver fortsatt `consent`.
 - **Riskklass:** oförändrad (publik AI-chatt = begränsad; quiz/wizard n/a).
+- **Steg 4-valet `create_lead` (migration 1700000125):** staff väljer per modul
+  om en slutförd körning ska skapa lead. SAKNAT fält tolkas som `true`
+  (oapplicerad migration ändrar aldrig beteendet); migrationen backfillar
+  `true` på alla befintliga moduler. När valet är PÅ är garantin **hård**:
+  submit-/quiz-routarna returnerar 500 med tydligt fel till besökaren om
+  leadet inte kan skapas (i stället för "Tack!" + tyst tapp), och `createLead`
+  (`lib/compass/store.ts`) loggar grundorsaken PII-fritt (status + avvisade
+  fältNYCKLAR, aldrig värden). När valet är AV skapar varken formulär, quiz
+  eller chatt leads (chatten loggar fortfarande meddelanden). Delad kärna för
+  publika + interna routar: `lib/compass/lead-capture.ts`.
+- **AI-sammanställning (`compass_leads.ai_summary`, migration 1700000125):**
+  vid lead-skapande från formulär/quiz sammanfattar `mistral-small`
+  (`summarizeSubmission`, `lib/compass/chat.ts`) det besökaren skickade in
+  (fråge-etiketter + valda svar + ev. quizresultat) — best-effort EFTER att
+  leadet skapats, så garantin blockeras aldrig. Personnummer-saneras
+  (§ 15.6-regexen) före både AI-anropet och lagringen; visas i lead-vyn och i
+  inflödesmejlet med art. 50-disclaimer. Riskklass: begränsad (sammanfattning
+  av besökarens egna svar, människa-i-loopen granskar i `/inflode/leads`).
+- **Kontaktpreferens (`compass_leads.contact_preference`, migration
+  1700000125):** besökaren väljer frivilligt `contact_me` (Movexum hör av
+  sig) eller `self_reach` (hör av sig själv när hen är redo) i
+  quiz-kontaktsteget respektive formulärets sista steg
+  (`ContactPreferencePicker`). Endast whitelistade värden accepteras
+  server-side. Icke-känslig preferensdata; visas i lead-vyn + notismejlet.
 
 ### 23.6bis Härdning & rapportering (2026-06)
 
@@ -2746,13 +2770,22 @@ compass-fält är detta **migration-only** (CLAUDE.md § 23.4) — speglas inte 
 
 **Flöde.** `updateModuleAction` validerar att `next_module` pekar på en ANNAN
 modul i SAMMA tenant (aldrig sig själv, aldrig korstenant — klienten är inte
-säkerhetsgränsen). Den publika sidan (`/m/[slug]`) resolvar nästa-modulens
-publika länk via `getNextModuleLink` (superuser, tenant-likhet + `is_active` +
-`public_url_enabled` + `public_slug` krävs) och renderar `NextModuleCta`:
+säkerhetsgränsen); valideringsläsningen har superuser-fallback (PB v0.23.4
+kan tyst neka view-regeln för behörig staff, § 21.3) och tenant-likheten
+verifieras explicit oavsett klient. Den publika sidan (`/m/[slug]`) resolvar
+nästa-modulens publika länk via `getNextModuleLink` (superuser, tenant-likhet
++ `is_active` + `public_url_enabled` krävs; sluggen är `public_slug` med
+fallback på interna `slug` — resolvePublicModule matchar båda) och renderar
+`NextModuleCta`:
 - **quiz/formulär:** "fortsätt"-knappen visas på resultat-/tack-skärmen (men
   `redirect_url` vinner om båda är satta — auto-redirecten kör då i stället).
 - **AI-chatt:** knappen visas under chatten (chatten har inget hårt
   "klart"-event).
+- **Kedjan har företräde på quiz-resultatet:** pekar en resultatprofils CTA på
+  en intern `/m/`-länk OCH modulen har en validerad `next_module`-kedja, byts
+  CTA-länken till kedjans mål (hårdkodade profil-slugs kan vara döda — kedjan
+  är sanningen för modul-till-modul-navigering). Externa CTA-länkar lämnas
+  orörda.
 
 **Stegindelad setup-UI.** Modul-redigeringssidan
 (`/inflode/admin/modules/[slug]`) delar upp inställningarna i **fyra steg**

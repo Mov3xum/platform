@@ -9,6 +9,12 @@ import {
 import { mapAnswersToLead, pickAttribution } from '@/lib/compass/public';
 import { findMissingRequiredAlongPath } from '@/lib/compass/question-flow';
 import { PREVIEW_SOURCE_KEY, type Attribution } from '@/lib/compass/types';
+import {
+  attachAiSummary,
+  buildSubmissionEntries,
+  moduleWantsLead,
+  parseContactPreference
+} from '@/lib/compass/lead-capture';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,6 +22,7 @@ export const dynamic = 'force-dynamic';
 interface SubmitBody {
   answers: Record<string, string | string[]>;
   attribution?: Attribution;
+  contact_preference?: string;
 }
 
 /** Tar emot svaren från ModuleWizard (inloggad admin-preview) och skapar lead + conversation. */
@@ -58,6 +65,11 @@ export async function POST(
   const leadPayload = mapAnswersToLead(answers);
   const attribution = pickAttribution(body.attribution);
 
+  // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead.
+  if (!moduleWantsLead(mod)) {
+    return NextResponse.json({ ok: true });
+  }
+
   // Intern admin-preview → markeras som förhandsgranskning och exkluderas
   // från all statistik (dashboard/analys/export).
   const lead = await createLead(pb, user.tenant, {
@@ -66,15 +78,26 @@ export async function POST(
     name: leadPayload.name || 'Anonym',
     source_key: PREVIEW_SOURCE_KEY,
     landing_module: slug,
+    contact_preference: parseContactPreference(body.contact_preference),
     consent_at: new Date().toISOString()
   });
 
-  if (lead) {
-    await createConversation(pb, user.tenant, {
-      moduleSlug: slug,
-      leadId: lead.id
-    });
+  // Hård lead-garanti (CLAUDE.md § 23.6) — fela högt i stället för tyst tapp.
+  if (!lead) {
+    return NextResponse.json(
+      { error: 'Svaren kunde inte sparas som lead. Se serverloggen för grundorsaken.' },
+      { status: 500 }
+    );
   }
 
-  return NextResponse.json({ ok: true, leadId: lead?.id });
+  await createConversation(pb, user.tenant, {
+    moduleSlug: slug,
+    leadId: lead.id
+  });
+
+  // AI-sammanställning av det inskickade (best-effort — blockerar aldrig).
+  const entries = buildSubmissionEntries(questions, answers);
+  await attachAiSummary(pb, user.tenant, lead, entries, mod.name);
+
+  return NextResponse.json({ ok: true, leadId: lead.id });
 }

@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { createLead, getModuleBySlug, listQuestionsForModule } from '@/lib/compass/store';
 import { pickAttribution } from '@/lib/compass/public';
+import {
+  attachAiSummary,
+  buildSubmissionEntries,
+  moduleWantsLead,
+  parseContactPreference
+} from '@/lib/compass/lead-capture';
 import { scoreQuiz, resolveBucket, isResultBucketArray, type QuizQuestion } from '@platform/shared';
 import { PREVIEW_SOURCE_KEY, type Attribution } from '@/lib/compass/types';
 
@@ -12,6 +18,7 @@ interface QuizBody {
   answers: Record<string, string | string[]>;
   contact?: { name?: string; email?: string; phone?: string; organization?: string };
   attribution?: Attribution;
+  contact_preference?: string;
 }
 
 function cleanContact(v: unknown, max: number): string | undefined {
@@ -71,6 +78,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const buckets = isResultBucketArray(mod.result_buckets) ? mod.result_buckets : [];
   const bucket = resolveBucket(score, buckets);
 
+  // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead.
+  if (!moduleWantsLead(mod)) {
+    return NextResponse.json({ bucket, score: score.total });
+  }
+
   const attribution = pickAttribution(body.attribution);
   const lead = await createLead(pb, user.tenant, {
     name: cleanContact(contact.name, 200) || 'Anonym',
@@ -86,8 +98,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     landing_module: slug,
     quiz_result_bucket: bucket?.key,
     quiz_score: score.total,
+    contact_preference: parseContactPreference(body.contact_preference),
     consent_at: new Date().toISOString()
   });
 
-  return NextResponse.json({ bucket, score: score.total, leadId: lead?.id });
+  // Hård lead-garanti (CLAUDE.md § 23.6) — fela högt i stället för tyst tapp.
+  if (!lead) {
+    return NextResponse.json(
+      { error: 'Resultatet kunde inte sparas som lead. Se serverloggen för grundorsaken.' },
+      { status: 500 }
+    );
+  }
+
+  // AI-sammanställning av svaren + resultatprofilen (best-effort).
+  const entries = buildSubmissionEntries(questions, body.answers || {});
+  const resultLine = bucket ? `${bucket.title} (${score.total} poäng)` : `${score.total} poäng`;
+  await attachAiSummary(pb, user.tenant, lead, entries, mod.name, resultLine);
+
+  return NextResponse.json({ bucket, score: score.total, leadId: lead.id });
 }

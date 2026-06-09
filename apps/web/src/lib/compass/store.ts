@@ -214,6 +214,24 @@ export async function getLead(
   }
 }
 
+/**
+ * PII-fri beskrivning av ett PB-fel för serverloggen: status, meddelande och
+ * VILKA fält som avvisades (aldrig deras värden). Utan denna logg är ett
+ * misslyckat lead-skapande helt osynligt — symptomet "fyllt i flera formulär
+ * utan att en lead skapats" gick inte att felsöka.
+ */
+function describePbError(err: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (err instanceof Error) out.message = err.message;
+  if (typeof err === 'object' && err !== null) {
+    const e = err as { status?: number; response?: { data?: Record<string, unknown> } };
+    if (typeof e.status === 'number') out.status = e.status;
+    const data = e.response?.data;
+    if (data && typeof data === 'object') out.rejectedFields = Object.keys(data);
+  }
+  return out;
+}
+
 export async function createLead(
   pb: PocketBase,
   tenant: string,
@@ -229,7 +247,15 @@ export async function createLead(
     return await writeWithFallback(pb, (client) =>
       client.collection('compass_leads').create<Lead>(payload)
     );
-  } catch {
+  } catch (err) {
+    // Logga ALLTID grundorsaken (PII-fritt) — anroparen avgör om felet ska
+    // bubbla upp till besökaren (hård lead-garanti, CLAUDE.md § 23.6).
+    console.error('[compass] createLead failed', {
+      tenant,
+      source_key: data.source_key,
+      landing_module: data.landing_module,
+      ...describePbError(err)
+    });
     return null;
   }
 }

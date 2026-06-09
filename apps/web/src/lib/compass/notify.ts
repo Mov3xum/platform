@@ -1,6 +1,11 @@
 import 'server-only';
 import { sendInflowNotification } from '@/lib/email';
-import { FLOW_TYPE_LABEL, type CompassModule, type Lead } from './types';
+import {
+  CONTACT_PREFERENCE_LABEL,
+  FLOW_TYPE_LABEL,
+  type CompassModule,
+  type Lead
+} from './types';
 
 // Notifiering av Movexums inflödesmail om nya inflöden (leads) från
 // Startupkompassen. Mottagarna är DYNAMISKA: per modul (`notify_emails`,
@@ -48,6 +53,10 @@ export async function notifyNewInflow(module: CompassModule, lead: Lead): Promis
       organization: lead.organization,
       ideaSummary: lead.idea_summary,
       ideaCategory: lead.idea_category,
+      contactPreference: lead.contact_preference
+        ? CONTACT_PREFERENCE_LABEL[lead.contact_preference]
+        : undefined,
+      aiSummary: lead.ai_summary,
       leadUrl
     });
   } catch (err) {
