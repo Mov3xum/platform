@@ -537,6 +537,26 @@ export async function updateModuleAction(formData: FormData) {
   const publicSlug = slugify(String(formData.get('public_slug') || ''));
   if (publicSlug) patch.public_slug = publicSlug;
 
+  // Nästa modul i kedjan (migration 1700000124). Tom = nollställ (avsluta
+  // flödet). En satt relation måste peka på en ANNAN modul i SAMMA tenant —
+  // klienten är aldrig säkerhetsgränsen (CLAUDE.md § 10.5 punkt 7).
+  const nextModuleRaw = String(formData.get('next_module') || '').trim();
+  if (!nextModuleRaw) {
+    patch.next_module = '';
+  } else if (nextModuleRaw === id) {
+    throw new Error('En modul kan inte kedjas till sig själv.');
+  } else {
+    try {
+      const target = await pb.collection('compass_modules').getOne(nextModuleRaw);
+      if (target.tenant !== user.tenant) {
+        throw new Error('Nästa modul tillhör en annan tenant.');
+      }
+      patch.next_module = nextModuleRaw;
+    } catch {
+      throw new Error('Vald nästa modul kunde inte hittas.');
+    }
+  }
+
   // Quiz-resultatprofiler skickas som JSON från ResultBucketsEditor.
   const bucketsRaw = String(formData.get('result_buckets') || '').trim();
   if (bucketsRaw) {

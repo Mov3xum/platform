@@ -1,8 +1,9 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import type { CompassQuestion } from '@/lib/compass/types';
+import type { CompassQuestion, NextModuleLink } from '@/lib/compass/types';
 import { QuestionInput, readAttribution } from './QuestionInput';
+import { NextModuleCta } from './NextModuleCta';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 
 interface Props {
@@ -10,6 +11,8 @@ interface Props {
   questions: CompassQuestion[];
   successMessage?: string;
   redirectUrl?: string;
+  /** Kedjad nästa modul (migration 1700000124). */
+  nextModule?: NextModuleLink | null;
   /**
    * Endpoint-bas för submit. Default = inloggad admin-preview (/api/inflode).
    * Den publika sidan skickar `/api/public/m` (oinloggat flöde).
@@ -25,7 +28,8 @@ export function ModuleWizard({
   successMessage,
   redirectUrl,
   apiBase = '/api/inflode/m',
-  consent
+  consent,
+  nextModule
 }: Props) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
@@ -58,6 +62,11 @@ export function ModuleWizard({
           <p className="mx-mono mx-t-xs mx-muted" style={{ marginTop: 12 }}>
             Du skickas vidare till <a href={redirectUrl}>{redirectUrl}</a>…
           </p>
+        )}
+        {!redirectUrl && nextModule && (
+          <div style={{ maxWidth: 460, margin: '20px auto 0' }}>
+            <NextModuleCta next={nextModule} prompt="Fortsätt till nästa steg" />
+          </div>
         )}
       </div>
     );

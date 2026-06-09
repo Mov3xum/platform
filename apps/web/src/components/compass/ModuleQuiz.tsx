@@ -1,8 +1,9 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import type { CompassQuestion, ResultBucket } from '@/lib/compass/types';
+import type { CompassQuestion, ResultBucket, NextModuleLink } from '@/lib/compass/types';
 import { QuestionInput, readAttribution } from './QuestionInput';
+import { NextModuleCta } from './NextModuleCta';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 
 interface Props {
@@ -19,6 +20,8 @@ interface Props {
   moduleName?: string;
   /** Tenantens namn — visas i det nedladdningsbara resultatet. */
   brandName?: string;
+  /** Kedjad nästa modul (migration 1700000124). */
+  nextModule?: NextModuleLink | null;
 }
 
 interface QuizResult {
@@ -39,7 +42,8 @@ export function ModuleQuiz({
   requireOrganization,
   successMessage,
   moduleName,
-  brandName
+  brandName,
+  nextModule
 }: Props) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
@@ -105,6 +109,7 @@ export function ModuleQuiz({
             ↓ Ladda ner mitt resultat
           </button>
         </div>
+        {nextModule && <NextModuleCta next={nextModule} prompt="Fortsätt till nästa steg" />}
       </div>
     );
   }

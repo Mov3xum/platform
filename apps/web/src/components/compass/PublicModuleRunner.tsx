@@ -1,16 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import type { CompassModule, CompassQuestion } from '@/lib/compass/types';
+import type { CompassModule, CompassQuestion, NextModuleLink } from '@/lib/compass/types';
 import { CompassChat } from './CompassChat';
 import { ModuleWizard } from './ModuleWizard';
 import { ModuleQuiz } from './ModuleQuiz';
+import { NextModuleCta } from './NextModuleCta';
 
 interface Props {
   module: CompassModule;
   questions: CompassQuestion[];
   /** Tenantens namn — visas i det nedladdningsbara resultatet. */
   brandName?: string;
+  /** Kedjad nästa modul (migration 1700000124) — visas efter slutfört flöde. */
+  nextModule?: NextModuleLink | null;
 }
 
 const PUBLIC_API_BASE = '/api/public/m';
@@ -25,7 +28,7 @@ const FLOW_LABEL: Record<string, string> = {
 // Publik (oinloggad) körning av en Startupkompass-modul. Visar en
 // samtyckesgrind före all datainsamling (GDPR art. 7) och dispatchar sedan
 // till rätt flöde. Skickar consent=true till de publika API-routarna.
-export function PublicModuleRunner({ module, questions, brandName }: Props) {
+export function PublicModuleRunner({ module, questions, brandName, nextModule }: Props) {
   const hasConsentGate = Boolean(module.consent_note);
   const [consented, setConsented] = useState(!hasConsentGate);
 
@@ -54,16 +57,21 @@ export function PublicModuleRunner({ module, questions, brandName }: Props) {
   }
 
   if (module.flow_type === 'chat') {
+    // Chatten har inget hårt "klart"-event → visa en frivillig "fortsätt"-CTA
+    // under chatten när modulen är kedjad till en nästa modul.
     return (
-      <div style={{ height: '70vh', minHeight: 520 }}>
-        <CompassChat
-          endpoint={`${PUBLIC_API_BASE}/${module.public_slug || module.slug}/chat`}
-          moduleSlug={module.public_slug || module.slug}
-          initialAssistantMessage={module.intro_message || undefined}
-          title={module.chat_persona || module.name}
-          avatarInitial={(module.name || 'M').slice(0, 1).toUpperCase()}
-          maxExchanges={module.max_exchanges || 0}
-        />
+      <div style={{ display: 'grid', gap: 16 }}>
+        <div style={{ height: '70vh', minHeight: 520 }}>
+          <CompassChat
+            endpoint={`${PUBLIC_API_BASE}/${module.public_slug || module.slug}/chat`}
+            moduleSlug={module.public_slug || module.slug}
+            initialAssistantMessage={module.intro_message || undefined}
+            title={module.chat_persona || module.name}
+            avatarInitial={(module.name || 'M').slice(0, 1).toUpperCase()}
+            maxExchanges={module.max_exchanges || 0}
+          />
+        </div>
+        {nextModule && <NextModuleCta next={nextModule} prompt="Klar? Gå vidare till nästa steg." />}
       </div>
     );
   }
@@ -81,6 +89,7 @@ export function PublicModuleRunner({ module, questions, brandName }: Props) {
         successMessage={module.success_message}
         moduleName={module.welcome_title || module.name}
         brandName={brandName}
+        nextModule={nextModule}
       />
     );
   }
@@ -93,6 +102,7 @@ export function PublicModuleRunner({ module, questions, brandName }: Props) {
       consent
       successMessage={module.success_message}
       redirectUrl={module.redirect_url}
+      nextModule={nextModule}
     />
   );
 }

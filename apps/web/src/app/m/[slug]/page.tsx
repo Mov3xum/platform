@@ -5,7 +5,8 @@ import { PublicModuleRunner } from '@/components/compass/PublicModuleRunner';
 import {
   resolvePublicModule,
   getPublicModuleQuestions,
-  getPublicTenantBranding
+  getPublicTenantBranding,
+  getNextModuleLink
 } from '@/lib/compass/public';
 import { moduleHeroImageUrl } from '@/lib/compass/media';
 
@@ -40,11 +41,12 @@ export default async function PublicModulePage({
   if (!resolved) notFound();
 
   const { pb, module, tenant } = resolved;
-  const [questions, branding] = await Promise.all([
+  const [questions, branding, nextModule] = await Promise.all([
     module.flow_type === 'chat'
       ? Promise.resolve([])
       : getPublicModuleQuestions(pb, module.id),
-    getPublicTenantBranding(pb, tenant)
+    getPublicTenantBranding(pb, tenant),
+    getNextModuleLink(pb, module)
   ]);
   const hasTenantLogo = Boolean(branding.logoLightUrl || branding.logoDarkUrl);
 
@@ -105,7 +107,12 @@ export default async function PublicModulePage({
 
         {/* Flöde */}
         <section className={`mx-compass-card${isChat ? ' mx-compass-card-chat' : ''}`}>
-          <PublicModuleRunner module={module} questions={questions} brandName={branding.name} />
+          <PublicModuleRunner
+            module={module}
+            questions={questions}
+            brandName={branding.name}
+            nextModule={nextModule}
+          />
         </section>
 
         {/* Transparens (EU AI Act art. 50 för chat) + EU-suveränitet */}
