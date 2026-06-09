@@ -183,6 +183,22 @@ jobs:
 
           node backend/pocketbase-schema/scripts/setup-via-api.mjs
 
+      - name: Seed Startupkompassen-quizet (innovationspotential)
+        env:
+          PB_URL: ${{ steps.pb_ready.outputs.selected_url }}
+          PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL_STAGING || secrets.PB_SU_EMAIL }}
+          PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD_STAGING || secrets.PB_SU_PASSWORD }}
+          NODE_TLS_REJECT_UNAUTHORIZED: '0'
+        run: |
+          set -euo pipefail
+
+          if [ -z "${PB_SU_EMAIL:-}" ] || [ -z "${PB_SU_PASSWORD:-}" ]; then
+            echo "::error::PB_SU_EMAIL_STAGING/PB_SU_EMAIL och PB_SU_PASSWORD_STAGING/PB_SU_PASSWORD måste vara satta."
+            exit 1
+          fi
+
+          node backend/pocketbase-schema/scripts/seed-innovationspotential-quiz.mjs
+
       - name: Verifiera PocketBase baseline
         env:
           PB_URL: ${{ steps.pb_ready.outputs.selected_url }}
