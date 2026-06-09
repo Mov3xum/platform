@@ -3007,11 +3007,21 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
   omrankningen loggas som ett SEPARAT event (modell `mistral-small-latest`)
   eftersom kostnaden skiljer sig (`logKnowledgeUsage` i `lib/ai/tools.ts`);
   `/insights` aggregerar.
-- **Migrationer:** nya, oföränderliga filnummer (1700000118–119). Som
-  compass/de_minimis/onboarding är de **migration-only** för bootstrap (speglas
-  inte i `setup-via-api.mjs`); isolerings-svepet i `verify-baseline.mjs`
-  asserterar dem dock (se ovan). createRules följer § 21.3 så
+- **Migrationer:** nya, oföränderliga filnummer (1700000118–119), speglade i
+  `setup-via-api.mjs` (kollektioner + regler); isolerings-svepet i
+  `verify-baseline.mjs` asserterar dem (se ovan). createRules följer § 21.3 så
   `verify-baseline.mjs`-svepet passerar.
+- **`created`/`updated` (migration 1700000125, juni 2026):** PB v0.23
+  auto-lägger INTE autodate-fälten vid `new Collection(...)`, och 1700000118/
+  1700000119/1700000121 skapade RAG-kollektionerna utan dem. Följden var att
+  `/kunskapsbas`-listan (sort `-created`) och nyckelords-fallbacken i
+  `lib/ai/rag.ts` (sort `-updated`) fick 400 från PB och tyst blev tomma —
+  uppladdningar LYCKADES men syntes aldrig. Migration **1700000125** backfillar
+  fälten idempotent (`org_knowledge`, `org_knowledge_chunks`, `user_files`,
+  `user_file_chunks`), `setup-via-api.mjs` speglar (autodate i defs +
+  `patchCollection`-backfill + mime-paritet för 1700000122), och läsvägarna är
+  dessutom fail-soft (osorterad retry) så funktionen fungerar även mot ett
+  ännu inte migrerat schema.
 
 ### 26.5 Retrieval-kvalitet, eval och kommande steg
 
@@ -3058,6 +3068,16 @@ default eftersom det blåser upp prompten (tool-resultatet capas ändå nedströ
   (ren, enhetstestad XML→text) i `lib/ai/attachments.ts`
   (`extractDocxText`/`extractPptxText`). `org_knowledge.file`-whitelisten vidgad i
   migration 1700000122; `user_files` accepterade redan typerna (1700000085).
+- **PDF-textextraktion via `pdfjs-dist`** — KLAR (juni 2026). `pdf-parse`
+  (inbäddad pdf.js från 2018) kunde inte läsa moderna PDF:er med object-/xref-
+  streams (PDF 1.5+, standard i Word-/Google Docs-exporter) → "Invalid PDF
+  structure" och uppladdningen avvisades. `extractPdfText` i
+  `lib/ai/attachments.ts` kör nu `pdfjs-dist` (Mozilla, ren JS, körs lokalt på
+  UpCloud-servern, inga nätverksanrop → EU-suveränt; `isEvalSupported:false`
+  per CSP § 10.3). Motiverat undantag från dependency-free, samma princip som
+  dokumentbiblioteken i § 17.3. Gäller alla PDF-vägar (kunskapsbas,
+  chatt-bilagor, `/filer`, `tool_knowledge`). `pdf-parse` är borttagen;
+  `serverExternalPackages` uppdaterad i `next.config.mjs`.
 - **pgvector/vektortjänst** när en tenant passerar några tusen chunkar — JS-
   cosine + paginerat svep räcker tills dess; `searchSource`-seamen är oförändrad
   så bytet blir drop-in.

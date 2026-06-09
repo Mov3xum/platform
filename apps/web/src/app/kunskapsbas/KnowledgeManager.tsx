@@ -11,7 +11,10 @@ import {
 } from '@/lib/actions/org-knowledge';
 
 const ACCEPT =
-  '.pdf,.txt,.md,.csv,.xlsx,application/pdf,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  '.pdf,.txt,.md,.csv,.xlsx,.docx,.pptx,application/pdf,text/plain,text/markdown,text/csv,' +
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,' +
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document,' +
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
 function formatBytes(n?: number): string {
   if (!n || n <= 0) return '';
@@ -104,7 +107,7 @@ export default function KnowledgeManager({
       <section className="rounded-3xl border border-default bg-surface p-6">
         <h2 className="mb-1 font-heading text-lg font-semibold text-foreground">Lägg till material</h2>
         <p className="mb-4 text-xs text-foreground-subtle">
-          PDF, text, Markdown, CSV eller Excel (max 25 MB). Exportera presentationer/Word till PDF.
+          PDF, Word, PowerPoint, Excel, text, Markdown eller CSV (max 25 MB).
           Ladda <strong>inte</strong> upp personuppgifter — innehållet blir sökbart för AI:n.
           Personnummer saneras automatiskt.
         </p>

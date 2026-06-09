@@ -65,7 +65,7 @@ export async function extractKnowledgeFromFile(
   const mime = file.type || 'application/octet-stream';
   if (!ALLOWED_MIME_TYPES.has(mime)) {
     throw new KnowledgeError(
-      `Filtypen "${mime}" stöds inte i kunskapsbasen (${file.name}). Tillåtet: PDF, text, Markdown, CSV, Excel.`
+      `Filtypen "${mime}" stöds inte i kunskapsbasen (${file.name}). Tillåtet: PDF, Word, PowerPoint, Excel, text, Markdown, CSV.`
     );
   }
   if (file.size > maxFileBytes) {
@@ -115,7 +115,8 @@ export async function extractKnowledgeFromFile(
   const trimmed = raw.trim();
   if (!trimmed) {
     throw new KnowledgeError(
-      `Ingen läsbar text kunde extraheras ur "${file.name}".`
+      `Ingen läsbar text kunde extraheras ur "${file.name}". Är det en skannad ` +
+        'bild-PDF? Kör OCR eller exportera om dokumentet med text.'
     );
   }
 

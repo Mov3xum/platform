@@ -3085,6 +3085,10 @@ await ensureCollection({
   name: 'org_knowledge',
   type: 'base',
   fields: [
+    // PB v0.23 auto-lägger INTE created/updated — deklarera explicit (appen
+    // sorterar på -created; migration 1700000125 backfillar befintliga installs).
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
     { name: 'title', type: 'text', required: false, max: 300 },
     { name: 'filename', type: 'text', required: true, min: 1, max: 300 },
@@ -3096,12 +3100,16 @@ await ensureCollection({
       required: false,
       maxSelect: 1,
       maxSize: 26214400,
+      // Migration 1700000122: även Word (DOCX) + PowerPoint (PPTX) —
+      // OOXML-text extraheras dependency-fritt (CLAUDE.md § 26.5).
       mimeTypes: [
         'application/pdf',
         'text/plain',
         'text/markdown',
         'text/csv',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation'
       ]
     },
     { name: 'extracted_text', type: 'text', required: false, max: 320000 },
@@ -3145,6 +3153,8 @@ await ensureCollection({
   name: 'org_knowledge_chunks',
   type: 'base',
   fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
     { name: 'source', type: 'relation', required: true, collectionId: 'org_knowledge_col', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'chunk_index', type: 'number', required: false, min: 0, onlyInt: true },
@@ -3169,6 +3179,8 @@ await ensureCollection({
   name: 'user_file_chunks',
   type: 'base',
   fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'owner', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'source', type: 'relation', required: true, collectionId: 'user_files_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
@@ -3200,6 +3212,29 @@ const AUTODATE_FIELDS = [
 await patchCollection('chat_threads', AUTODATE_FIELDS);
 await patchCollection('deep_jobs', AUTODATE_FIELDS);
 await patchCollection('user_files', AUTODATE_FIELDS);
+// Migration 1700000125: RAG-kollektionerna skapades utan created/updated —
+// /kunskapsbas-listan sorterar på -created och nyckelords-fallbacken på
+// -updated, så utan fälten 400:ar PB och listan/sökningen blir tyst tom.
+await patchCollection('org_knowledge', AUTODATE_FIELDS);
+await patchCollection('org_knowledge_chunks', AUTODATE_FIELDS);
+await patchCollection('user_file_chunks', AUTODATE_FIELDS);
+
+// Migration 1700000122: org_knowledge.file accepterar även Word/PowerPoint
+// (OOXML-text extraheras dependency-fritt, CLAUDE.md § 26.5). ensureCollection
+// uppdaterar inte befintliga fält-options — patcha mime-whitelisten explicit.
+await patchCollection('org_knowledge', [], {
+  file: {
+    mimeTypes: [
+      'application/pdf',
+      'text/plain',
+      'text/markdown',
+      'text/csv',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    ]
+  }
+});
 
 // Migration 1700000087/1700000088: cover-image `image` field på workshops +
 // workshop_areas. ensureCollection ovan lägger till fältet på NYA installs;

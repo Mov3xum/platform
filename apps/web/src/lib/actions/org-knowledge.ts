@@ -54,15 +54,27 @@ function toListItem(r: OrgKnowledge): OrgKnowledgeListItem {
 export async function listOrgKnowledgeAction(): Promise<OrgKnowledgeListItem[]> {
   const user = await requireUser();
   const pb = await getServerPb();
+  const params = {
+    filter: `tenant = "${escFilter(user.tenant)}"`,
+    fields: 'id,title,filename,mime,size_bytes,topic,indexed,chunk_count,redacted,char_count,created'
+  };
   try {
-    const res = await pb.collection(PB_COLLECTIONS.orgKnowledge).getList<OrgKnowledge>(1, 200, {
-      filter: `tenant = "${escFilter(user.tenant)}"`,
-      sort: '-created',
-      fields: 'id,title,filename,mime,size_bytes,topic,indexed,chunk_count,redacted,char_count,created'
-    });
+    const res = await pb
+      .collection(PB_COLLECTIONS.orgKnowledge)
+      .getList<OrgKnowledge>(1, 200, { ...params, sort: '-created' });
     return res.items.map(toListItem);
   } catch {
-    return [];
+    // Schemat kan sakna `created` (kollektion skapad innan migration
+    // 1700000125) → sorteringen 400:ar. Lista då osorterat och vänd ordningen
+    // (PB:s defaultordning är äldst-först) så uppladdningar aldrig "försvinner".
+    try {
+      const res = await pb
+        .collection(PB_COLLECTIONS.orgKnowledge)
+        .getList<OrgKnowledge>(1, 200, params);
+      return res.items.map(toListItem).reverse();
+    } catch {
+      return [];
+    }
   }
 }
 
