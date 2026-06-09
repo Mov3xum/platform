@@ -2705,9 +2705,13 @@ nästa-modulen raderas (kedjan bryts, modulen själv lever vidare). Som övriga
 compass-fält är detta **migration-only** (CLAUDE.md § 23.4) — speglas inte i
 `setup-via-api.mjs`.
 
-**Flöde.** `updateModuleAction` validerar att `next_module` pekar på en ANNAN
-modul i SAMMA tenant (aldrig sig själv, aldrig korstenant — klienten är inte
-säkerhetsgränsen). Den publika sidan (`/m/[slug]`) resolvar nästa-modulens
+**Flöde.** `updateModuleAction` (en `useActionState`-action som returnerar
+`ModuleFormState` i stället för att kasta) validerar att `next_module` pekar på
+en ANNAN modul i SAMMA tenant (aldrig sig själv, aldrig korstenant — klienten
+är inte säkerhetsgränsen). Kedjefältet skrivs i en **separat best-effort-
+update** efter huvudsparningen: om PB-instansen saknar fältet (migration ej
+körd) faller resten av sparningen ändå inte — användaren får en mjuk varning i
+stället för en krasch. Den publika sidan (`/m/[slug]`) resolvar nästa-modulens
 publika länk via `getNextModuleLink` (superuser, tenant-likhet + `is_active` +
 `public_url_enabled` + `public_slug` krävs) och renderar `NextModuleCta`:
 - **quiz/formulär:** "fortsätt"-knappen visas på resultat-/tack-skärmen (men
@@ -2715,14 +2719,18 @@ publika länk via `getNextModuleLink` (superuser, tenant-likhet + `is_active` +
 - **AI-chatt:** knappen visas under chatten (chatten har inget hårt
   "klart"-event).
 
-**Stegindelad setup-UI.** Modul-redigeringssidan
-(`/inflode/admin/modules/[slug]`) delar upp inställningarna i **fyra steg**
-(`ModuleSettingsForm`, client) i stället för en vägg av fält: 1) Grunder,
-2) Publik sida, 3) Flöde & innehåll, 4) Efter & nästa steg. Hela formuläret
-ligger kvar i DOM:en (inaktiva steg döljs med `display:none`) så en enda submit
-postar ALLA fält till `updateModuleAction` — stegen är ren visuell uppdelning,
-ingen ändrad dataväg. Frågor (`QuestionsManager`) och resultatprofiler
-(`ResultBucketsEditor`, visas bara när flow-typ = quiz) ligger kvar.
+**Guidad setup-wizard (popup).** Modul-redigeringssidan
+(`/inflode/admin/modules/[slug]`) visar en kompakt **sammanfattning** + en
+"Konfigurera modul"-knapp som öppnar en **popup-wizard** (`ModuleSettingsForm`,
+client, via `createPortal`) i stället för en vägg av fält. Wizarden är en
+**linjär röd tråd** — ett steg i taget (1 Vad är modulen? → 2 Hur ser sidan ut?
+→ 3 Vad händer i modulen? → 4 Vad händer sen?), navigerad med Föregående/Nästa
+och en stepper som bara kan klickas bakåt till redan nådda steg. Sällan ändrade
+fält ligger hopfällda under "Visa fler inställningar". Hela formuläret är
+monterat (inaktiva steg + hopfällda block döljs med `display:none`) så en enda
+submit postar ALLA fält — stegen är ren visuell uppdelning, ingen ändrad
+dataväg. Frågor (`QuestionsManager`) och resultatprofiler (`ResultBucketsEditor`,
+visas bara när flow-typ = quiz) ligger kvar i wizarden resp. under sidan.
 
 **Riskklass:** oförändrad (n/a — navigation + konfiguration, ingen AI-inferens,
 ingen ny PII-väg; `next_module` är en intern modul-relation och whitelistas

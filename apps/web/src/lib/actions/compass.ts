@@ -493,18 +493,34 @@ export async function createModuleAction(formData: FormData) {
   redirect(`/inflode/admin/modules/${createdSlug}`);
 }
 
-export async function updateModuleAction(formData: FormData) {
+export type ModuleFormState = {
+  error?: string;
+  /** Mjuk varning — sparningen lyckades men något delmoment hoppades över. */
+  warning?: string;
+  /** Sätts vid lyckad sparning så klienten kan stänga wizarden/refresha. */
+  savedAt?: number;
+};
+
+export async function updateModuleAction(
+  _prev: ModuleFormState,
+  formData: FormData
+): Promise<ModuleFormState> {
   const user = await requireUser();
   if (!hasRole(user.roles, [...MANAGE_ROLES])) {
-    throw new Error('Forbidden');
+    return { error: 'Du saknar behörighet att ändra moduler.' };
   }
   const id = String(formData.get('id') || '');
-  if (!id) throw new Error('Invalid input');
+  if (!id) return { error: 'Ogiltig indata.' };
 
   const pb = await getServerPb();
   // Verifiera tenant
-  const existing = await pb.collection('compass_modules').getOne(id);
-  if (existing.tenant !== user.tenant) throw new Error('Forbidden');
+  let existing;
+  try {
+    existing = await pb.collection('compass_modules').getOne(id);
+  } catch {
+    return { error: 'Modulen kunde inte hittas.' };
+  }
+  if (existing.tenant !== user.tenant) return { error: 'Du saknar behörighet till modulen.' };
 
   const maxExchangesRaw = String(formData.get('max_exchanges') || '').trim();
   const maxExchanges = Number(maxExchangesRaw);
@@ -537,23 +553,24 @@ export async function updateModuleAction(formData: FormData) {
   const publicSlug = slugify(String(formData.get('public_slug') || ''));
   if (publicSlug) patch.public_slug = publicSlug;
 
-  // Nästa modul i kedjan (migration 1700000124). Tom = nollställ (avsluta
-  // flödet). En satt relation måste peka på en ANNAN modul i SAMMA tenant —
-  // klienten är aldrig säkerhetsgränsen (CLAUDE.md § 10.5 punkt 7).
+  // Nästa modul i kedjan (migration 1700000124). Valideras här men skrivs
+  // SEPARAT och best-effort nedan — så ett saknat schemafält (migrationen ej
+  // körd på instansen) aldrig fäller hela sparningen.
   const nextModuleRaw = String(formData.get('next_module') || '').trim();
+  let nextModuleValue: string | null = ''; // '' = nollställ, null = hoppa över
   if (!nextModuleRaw) {
-    patch.next_module = '';
+    nextModuleValue = '';
   } else if (nextModuleRaw === id) {
-    throw new Error('En modul kan inte kedjas till sig själv.');
+    return { error: 'En modul kan inte kedjas till sig själv.' };
   } else {
     try {
       const target = await pb.collection('compass_modules').getOne(nextModuleRaw);
       if (target.tenant !== user.tenant) {
-        throw new Error('Nästa modul tillhör en annan tenant.');
+        return { error: 'Vald nästa modul tillhör en annan tenant.' };
       }
-      patch.next_module = nextModuleRaw;
+      nextModuleValue = nextModuleRaw;
     } catch {
-      throw new Error('Vald nästa modul kunde inte hittas.');
+      return { error: 'Vald nästa modul kunde inte hittas.' };
     }
   }
 
@@ -564,7 +581,7 @@ export async function updateModuleAction(formData: FormData) {
       const parsed = JSON.parse(bucketsRaw);
       if (Array.isArray(parsed)) patch.result_buckets = parsed;
     } catch {
-      throw new Error('Ogiltigt format på resultatprofiler (kunde inte tolka JSON).');
+      return { error: 'Ogiltigt format på resultatprofiler (kunde inte tolka JSON).' };
     }
   }
 
@@ -584,7 +601,7 @@ export async function updateModuleAction(formData: FormData) {
       { type: heroImage.type, size: heroImage.size },
       'image'
     );
-    if (!check.ok) throw new Error(check.error);
+    if (!check.ok) return { error: check.error };
     // Node/undici-gotcha (samma som /api/education/media): materialisera till
     // Buffer och slå om i en ny File innan vidaresändning till PocketBase, annars
     // kan filen skickas med tom body.
@@ -602,9 +619,27 @@ export async function updateModuleAction(formData: FormData) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
     // PB unik-index-fel på public_slug → vänligt meddelande.
     if (/public_slug|unique/i.test(msg)) {
-      throw new Error('Den publika länken (slug) är upptagen — välj en annan.');
+      return { error: 'Den publika länken (slug) är upptagen — välj en annan.' };
     }
-    throw new Error(`Kunde inte uppdatera modul: ${msg}`);
+    return { error: `Kunde inte uppdatera modul: ${msg}` };
+  }
+
+  // Skriv kedjefältet separat och best-effort. Misslyckas det (t.ex. för att
+  // migration 1700000124 inte körts på den här PB-instansen → fältet saknas)
+  // ska resten av sparningen ändå stå kvar — vi flaggar bara en mjuk varning.
+  let warning: string | undefined;
+  if (nextModuleValue !== null) {
+    try {
+      await writeWithFallback(pb, (c) =>
+        c.collection('compass_modules').update(id, { next_module: nextModuleValue })
+      );
+    } catch {
+      if (nextModuleValue) {
+        warning =
+          'Modulen sparades, men kopplingen till nästa modul kunde inte sparas. ' +
+          'Databasen kan sakna migration 1700000124 — kontakta en administratör.';
+      }
+    }
   }
 
   await logSecurity(pb, user.tenant, {
@@ -617,6 +652,7 @@ export async function updateModuleAction(formData: FormData) {
   revalidatePath('/inflode');
   revalidatePath('/inflode/admin/modules');
   revalidatePath(`/inflode/admin/modules/${existing.slug}`);
+  return { savedAt: Date.now(), warning };
 }
 
 export async function deleteModuleAction(formData: FormData) {
