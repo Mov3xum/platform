@@ -54,15 +54,43 @@ function isTextMime(mime: string): boolean {
 }
 
 export async function extractPdfText(buffer: Buffer): Promise<string> {
-  // Dynamisk import för att hålla pdf-parse Node-only och utanför edge-bundles.
-  // pdf-parse/lib/pdf-parse.js bypasser modulens debug-mode som annars vill
-  // läsa en test-PDF vid import.
-  const mod = await import('pdf-parse/lib/pdf-parse.js' as string);
-  const pdfParse = (mod.default ?? mod) as (
-    data: Buffer | Uint8Array
-  ) => Promise<{ text: string }>;
-  const result = await pdfParse(buffer);
-  return result.text ?? '';
+  // pdfjs-dist (Mozilla pdf.js, ren JS, körs lokalt — inga nätverksanrop).
+  // Ersätter pdf-parse, vars inbäddade pdf.js från 2018 inte kunde läsa
+  // moderna PDF:er med object streams/xref streams (PDF 1.5+, standard i
+  // Word-/Google Docs-exporter) → "Invalid PDF structure" och uppladdningen
+  // avvisades. Dynamisk import håller biblioteket Node-only och utanför
+  // edge-bundles; legacy-builden kör utan worker och utan DOM.
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const task = pdfjs.getDocument({
+    // Kopiera till en egen Uint8Array — pdfjs tar ownership och kan neutra
+    // (detach:a) buffern den får.
+    data: new Uint8Array(buffer),
+    // Säkerhet/robusthet: ingen eval (CSP §10.3), inga systemfonter/DOM-fonter
+    // behövs för ren textextraktion.
+    isEvalSupported: false,
+    disableFontFace: true,
+    useSystemFonts: false
+  });
+  const doc = await task.promise;
+  try {
+    const pages: string[] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      let pageText = '';
+      for (const item of content.items) {
+        if (!('str' in item)) continue;
+        pageText += item.str;
+        pageText += item.hasEOL ? '\n' : ' ';
+      }
+      page.cleanup();
+      const trimmed = pageText.trim();
+      if (trimmed) pages.push(trimmed);
+    }
+    return pages.join('\n\n');
+  } finally {
+    await doc.destroy();
+  }
 }
 
 /** Extraherar läsbar text ur en DOCX-buffer (`word/document.xml`). */

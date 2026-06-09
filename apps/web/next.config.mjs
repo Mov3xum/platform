@@ -49,19 +49,19 @@ const nextConfig = {
   // For monorepo: tell Next.js the workspace root so file-tracing picks up
   // packages/shared and the right yarn.lock.
   outputFileTracingRoot: join(__dirname, '..', '..'),
-  // Node-only server libraries that MUST NOT be webpack-bundled. pdf-parse
-  // (PDF text extraction for chat/file uploads) pins its own pdf.js build and
-  // reads files via dynamic require()/fs; exceljs (XLSX generation) does the
-  // same. When webpack bundles them into the standalone server chunks their
-  // internal requires are rewritten and they throw at runtime in production
-  // ("kunde inte ladda upp fil PDF"). Kept external they are required natively
-  // and correctly file-traced into .next/standalone/node_modules.
+  // Node-only server libraries that MUST NOT be webpack-bundled. pdfjs-dist
+  // (PDF text extraction for chat/file uploads, replaces pdf-parse) probes for
+  // optional native canvas at runtime; exceljs (XLSX generation) reads files
+  // via dynamic require()/fs. When webpack bundles them into the standalone
+  // server chunks their internal requires are rewritten and they throw at
+  // runtime in production ("kunde inte ladda upp fil PDF"). Kept external they
+  // are required natively and correctly file-traced into .next/standalone/node_modules.
   //
   // NOTE: the pure-JS doc libs (pdf-lib, pptxgenjs, docx) are deliberately NOT
   // listed — they bundle fine, and @vercel/nft traces docx's CJS entry
   // incompletely, so externalizing it would break the DOCX renderer.
   serverExternalPackages: [
-    'pdf-parse',
+    'pdfjs-dist',
     'exceljs',
   ],
   images: {

@@ -649,13 +649,18 @@ async function keywordSearch(
   const clauses = tokens.map((t) => `extracted_text ~ "${escFilter(t)}"`);
   const filter = clauses.length ? `${scope} && (${clauses.join(' || ')})` : scope;
   try {
-    const res = await pb.collection(src.sourceCollection).getList(1, topK, {
-      // `filename` finns på båda käll-kollektionerna; org_knowledge har även
-      // `title` (hämtas inte här — filnamn räcker som etikett i fallbacken).
-      filter,
-      fields: 'id,filename,extracted_text',
-      sort: '-updated'
-    });
+    // `filename` finns på båda käll-kollektionerna; org_knowledge har även
+    // `title` (hämtas inte här — filnamn räcker som etikett i fallbacken).
+    const params = { filter, fields: 'id,filename,extracted_text' };
+    const res = await pb
+      .collection(src.sourceCollection)
+      .getList(1, topK, { ...params, sort: '-updated' })
+      .catch(() => {
+        // Schemat kan sakna `updated` (kollektion skapad innan migration
+        // 1700000125) → sorteringen 400:ar. Fallbacken är relevans, inte
+        // recency — kör osorterat hellre än att tyst returnera tomt.
+        return pb.collection(src.sourceCollection).getList(1, topK, params);
+      });
     return res.items.map((r) => {
       const rec = r as Record<string, unknown>;
       const text = String(rec.extracted_text ?? '');
