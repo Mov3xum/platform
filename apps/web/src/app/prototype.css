@@ -1132,7 +1132,7 @@ select.mx-input:focus {
   color: var(--mx-muted);
 }
 
-/* Flöde-kort — upphöjt glas med tunn accent-strimma upptill */
+/* Flöde-kort — upphöjt glas (ingen accent-strimma upptill) */
 .mx-compass-card {
   position: relative;
   background: rgba(255, 255, 255, 0.86);
@@ -1144,20 +1144,6 @@ select.mx-input:focus {
   padding: clamp(24px, 3vw, 36px);
   overflow: hidden;
 }
-.mx-compass-card::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 4px;
-  background: linear-gradient(
-    90deg,
-    var(--mx-accent, #002c40) 0%,
-    #00a8de 58%,
-    #6138b5 100%
-  );
-}
 /* Chat-flödet bär sitt eget chrome → kortet bara wrappar */
 .mx-compass-card-chat {
   background: transparent;
@@ -1168,7 +1154,6 @@ select.mx-input:focus {
   padding: 0;
   overflow: visible;
 }
-.mx-compass-card-chat::before { display: none; }
 
 /* Samtyckesgrind */
 .mx-consent { display: grid; gap: 16px; }

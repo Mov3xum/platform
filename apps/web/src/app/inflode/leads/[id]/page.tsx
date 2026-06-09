@@ -58,8 +58,12 @@ export default async function LeadDetailPage({
   ]);
   if (!lead) notFound();
   const source = sources.find((s) => s.key === lead.source_key);
+  // landing_module lagras som modulens public_slug (publika flöden) eller
+  // interna slug (admin-preview) → matcha mot båda.
   const landingModule = lead.landing_module
-    ? modules.find((m) => m.slug === lead.landing_module)
+    ? modules.find(
+        (m) => m.public_slug === lead.landing_module || m.slug === lead.landing_module
+      )
     : undefined;
 
   const canConvert = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
@@ -418,9 +422,9 @@ export default async function LeadDetailPage({
                 <Chip variant="cyan" mono>
                   {source?.label || lead.source_key}
                 </Chip>
-                {landingModule && (
+                {(landingModule || lead.landing_module) && (
                   <span className="mx-mono mx-t-xs mx-muted">
-                    via {landingModule.name}
+                    via {landingModule?.name || lead.landing_module}
                   </span>
                 )}
               </div>
