@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { Logo } from '@/components/Logo';
 import { PublicModuleRunner } from '@/components/compass/PublicModuleRunner';
 import { resolvePublicModule, getPublicModuleQuestions } from '@/lib/compass/public';
 import { moduleHeroImageUrl } from '@/lib/compass/media';
@@ -38,15 +39,32 @@ export default async function PublicModulePage({
   const questions =
     module.flow_type === 'chat' ? [] : await getPublicModuleQuestions(pb, module.id);
 
-  const accent = module.theme_color && /^#[0-9a-fA-F]{3,8}$/.test(module.theme_color)
-    ? module.theme_color
-    : '#002c40';
+  const accent =
+    module.theme_color && /^#[0-9a-fA-F]{3,8}$/.test(module.theme_color)
+      ? module.theme_color
+      : '#002c40';
   const heroImageUrl = moduleHeroImageUrl(module);
   const isChat = module.flow_type === 'chat';
 
+  const title = module.welcome_title || module.name;
+  const eyebrow = module.hero_eyebrow || 'STARTUPKOMPASSEN';
+  // Undvik dubblerad rubrik när eyebrow råkar vara identisk med titeln.
+  const showEyebrow = eyebrow.trim().toLowerCase() !== (title || '').trim().toLowerCase();
+  const body = module.welcome_body || module.description;
+
   return (
-    <main className="mx-compass-landing">
+    <main className="mx-compass-landing" style={{ ['--mx-accent' as string]: accent }}>
       <div className="mx-compass-wrap">
+        {/* Topbar — wordmark (mörkblå) + valfri målgruppspill */}
+        <header className="mx-compass-topbar">
+          <span className="mx-compass-brand">
+            <Logo variant="flex" href="/" height={30} width={148} />
+          </span>
+          {module.target_audience && (
+            <span className="mx-compass-aud">{module.target_audience}</span>
+          )}
+        </header>
+
         {/* Omslagsbild — visas bara när en bild laddats upp (ingen blå
             gradient-fallback; titeln visas ändå i hero-texten nedan) */}
         {heroImageUrl && (
@@ -57,26 +75,18 @@ export default async function PublicModulePage({
         )}
 
         {/* Hero-text */}
-        <header className="mx-compass-head">
-          <div className="mx-compass-eyebrow" style={{ color: accent }}>
-            {module.hero_eyebrow || 'STARTUPKOMPASSEN'}
-          </div>
-          <h1 className="mx-compass-title">{module.welcome_title || module.name}</h1>
-          {(module.welcome_body || module.description) && (
-            <p className="mx-compass-body">{module.welcome_body || module.description}</p>
+        <div className="mx-compass-head">
+          {showEyebrow && (
+            <div className="mx-compass-eyebrow" style={{ color: accent }}>
+              {eyebrow}
+            </div>
           )}
-        </header>
+          <h1 className="mx-compass-title">{title}</h1>
+          {body && <p className="mx-compass-body">{body}</p>}
+        </div>
 
         {/* Flöde */}
-        <section
-          style={{
-            background: isChat ? 'transparent' : 'var(--mx-paper)',
-            border: isChat ? 'none' : '1px solid var(--mx-line)',
-            borderRadius: 'var(--mx-r-lg, 16px)',
-            padding: isChat ? 0 : 24,
-            boxShadow: isChat ? 'none' : 'var(--mx-sh-2)'
-          }}
-        >
+        <section className={`mx-compass-card${isChat ? ' mx-compass-card-chat' : ''}`}>
           <PublicModuleRunner module={module} questions={questions} />
         </section>
 
