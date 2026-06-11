@@ -573,25 +573,45 @@ export async function getLeadAnalytics(
 }> {
   try {
     // Förhandsgranskningar (preview) exkluderas ur all analys.
-    const filterParts = ['tenant = {:tenant}', 'source_key != {:pv}'];
-    const params: Record<string, unknown> = { tenant, pv: PREVIEW_SOURCE_KEY };
-    if (windowDays && windowDays > 0) {
-      const cutoff = new Date(Date.now() - windowDays * 86400_000).toISOString();
-      filterParts.push('created >= {:cutoff}');
-      params.cutoff = cutoff;
+    const baseParts = ['tenant = {:tenant}', 'source_key != {:pv}'];
+    const baseParams: Record<string, unknown> = { tenant, pv: PREVIEW_SOURCE_KEY };
+    // OBS: bind cutoff som Date-objekt — SDK:n serialiserar då till PB:s
+    // lagringsformat ('YYYY-MM-DD HH:MM:SS.sssZ', mellanslag). En ISO-STRÄNG
+    // ('...T...') jämförs lexikografiskt fel mot lagrade värden samma dag
+    // (' ' < 'T') och tappar upp till en dags leads vid fönsterkanten.
+    const cutoffDate =
+      windowDays && windowDays > 0
+        ? new Date(Date.now() - windowDays * 86400_000)
+        : undefined;
+    const fetchLeads = (filter: string) =>
+      readWithFallback(
+        pb,
+        (client) =>
+          client.collection('compass_leads').getFullList<Lead>({
+            filter,
+            fields:
+              'id,status,source_key,utm_source,utm_medium,utm_campaign,landing_module,quiz_result_bucket,converted_startup,converted_at,created',
+            batch: 1000
+          }),
+        (rows) => rows.length === 0
+      );
+    let leads: Lead[];
+    try {
+      leads = await fetchLeads(
+        pb.filter(
+          cutoffDate ? [...baseParts, 'created >= {:cutoff}'].join(' && ') : baseParts.join(' && '),
+          cutoffDate ? { ...baseParams, cutoff: cutoffDate } : baseParams
+        )
+      );
+    } catch (err) {
+      // Saknat `created`-fält (innan migration 1700000126) → datumfiltret
+      // 400:ar. Hämta utan cutoff och fönstra i JS (rader utan created kan
+      // inte tidsplaceras och utelämnas ur perioden).
+      if (!cutoffDate) throw err;
+      const cutoffMs = cutoffDate.getTime();
+      const all = await fetchLeads(pb.filter(baseParts.join(' && '), baseParams));
+      leads = all.filter((l) => l.created && new Date(l.created).getTime() >= cutoffMs);
     }
-    const analyticsFilter = pb.filter(filterParts.join(' && '), params);
-    const leads = await readWithFallback(
-      pb,
-      (client) =>
-        client.collection('compass_leads').getFullList<Lead>({
-          filter: analyticsFilter,
-          fields:
-            'id,status,source_key,utm_source,utm_medium,utm_campaign,landing_module,quiz_result_bucket,converted_startup,converted_at,created',
-          batch: 1000
-        }),
-      (rows) => rows.length === 0
-    );
 
     const sourceMap = new Map<string, AttributionBreakdown>();
     const campaignMap = new Map<string, CampaignBreakdown>();
@@ -661,15 +681,19 @@ export async function getLeadAnalytics(
         qb.count++;
       }
 
-      // Weekly bucket
-      const wkKey = weekKey(lead.created);
-      let w = weekMap.get(wkKey);
-      if (!w) {
-        w = { week: wkKey, total: 0, accepted: 0 };
-        weekMap.set(wkKey, w);
+      // Weekly bucket — rader utan `created` (backfillade innan migration
+      // 1700000127) kan inte tidsplaceras och utelämnas ur veckotrenden
+      // (de räknas fortfarande i totalen ovan).
+      if (lead.created) {
+        const wkKey = weekKey(lead.created);
+        let w = weekMap.get(wkKey);
+        if (!w) {
+          w = { week: wkKey, total: 0, accepted: 0 };
+          weekMap.set(wkKey, w);
+        }
+        w.total++;
+        if (isAccepted) w.accepted++;
       }
-      w.total++;
-      if (isAccepted) w.accepted++;
     }
 
     return {
@@ -781,25 +805,51 @@ export async function getCompassDashboard(
   try {
     const now = Date.now();
     const sinceMs = now - periodDays * 86400_000;
-    const prevSinceIso = new Date(now - periodDays * 2 * 86400_000).toISOString();
+    const prevSince = new Date(now - periodDays * 2 * 86400_000);
 
     // Förhandsgranskningar (preview) exkluderas ur KPI:er/trend.
-    const windowFilter = pb.filter(
-      'tenant = {:tenant} && created >= {:cutoff} && source_key != {:pv}',
-      { tenant, cutoff: prevSinceIso, pv: PREVIEW_SOURCE_KEY }
-    );
-    const [funnelCounts, windowLeads] = await Promise.all([
-      countLeadsByStatus(pb, tenant),
+    const fetchWindow = (filter: string) =>
       readWithFallback(
         pb,
         (client) =>
           client.collection('compass_leads').getFullList<DashboardLeadRow>({
-            filter: windowFilter,
+            filter,
             fields: 'status,score,source_key,created',
             batch: 1000
           }),
         (rows) => rows.length === 0
-      )
+      );
+    // Fönster-läsningen får ALDRIG fälla tratten (countLeadsByStatus räknar
+    // utan datumfilter): saknat `created`-fält (innan migration 1700000126)
+    // 400:ar datumfiltret → hämta då utan cutoff och fönstra i JS.
+    const fetchWindowLeads = async (): Promise<DashboardLeadRow[]> => {
+      try {
+        // Date-objekt (inte ISO-sträng) — se kommentaren i getLeadAnalytics.
+        return await fetchWindow(
+          pb.filter('tenant = {:tenant} && created >= {:cutoff} && source_key != {:pv}', {
+            tenant,
+            cutoff: prevSince,
+            pv: PREVIEW_SOURCE_KEY
+          })
+        );
+      } catch {
+        try {
+          const all = await fetchWindow(
+            pb.filter('tenant = {:tenant} && source_key != {:pv}', {
+              tenant,
+              pv: PREVIEW_SOURCE_KEY
+            })
+          );
+          const prevSinceMs = prevSince.getTime();
+          return all.filter((l) => l.created && new Date(l.created).getTime() >= prevSinceMs);
+        } catch {
+          return []; // degraderat läge: tratt/totaler visas ändå
+        }
+      }
+    };
+    const [funnelCounts, windowLeads] = await Promise.all([
+      countLeadsByStatus(pb, tenant),
+      fetchWindowLeads()
     ]);
 
     const totalLeads = LEAD_STATUS_ORDER.reduce((s, k) => s + (funnelCounts[k] || 0), 0);
