@@ -61,6 +61,17 @@ export async function extractPdfText(buffer: Buffer): Promise<string> {
   // avvisades. Dynamisk import håller biblioteket Node-only och utanför
   // edge-bundles; legacy-builden kör utan worker och utan DOM.
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  // Ladda worker-modulen explicit med literal specifier. Den sätter
+  // `globalThis.pdfjsWorker`, som pdf.mjs använder i stället för sin egen
+  // dynamiska import av en BERÄKNAD sökväg — den importen kan @vercel/nft
+  // inte file-tracea, så pdf.worker.mjs saknades i standalone-imagen och
+  // varje PDF-uppladdning föll med `Setting up fake worker failed`. En
+  // literal specifier traceas som vilken import som helst → filen följer
+  // med till .next/standalone/node_modules.
+  if (!(globalThis as { pdfjsWorker?: unknown }).pdfjsWorker) {
+    // @ts-expect-error — pdfjs-dist skeppar ingen typdeklaration för worker-entryn.
+    await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
+  }
   const task = pdfjs.getDocument({
     // Kopiera till en egen Uint8Array — pdfjs tar ownership och kan neutra
     // (detach:a) buffern den får.
