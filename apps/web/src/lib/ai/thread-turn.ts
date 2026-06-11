@@ -148,6 +148,7 @@ export async function executeThreadTurn(
       turn.result.tokensOut
     ),
     generated_files: turn.result.generatedFiles.length > 0 ? turn.result.generatedFiles : undefined,
+    visuals: turn.result.visuals.length > 0 ? turn.result.visuals : undefined,
     steps: steps.length > 0 ? steps : undefined,
     at: new Date().toISOString()
   };

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChatAttachment } from '@/lib/actions/chat';
-import type { AgentActivityStep, GeneratedFileRef } from '@platform/shared';
+import type { AgentActivityStep, GeneratedFileRef, InlineVisualRef } from '@platform/shared';
 import {
   AI_IMPACT_SOURCE_LABEL,
   formatAiImpact,
@@ -50,6 +50,7 @@ export interface UiMessage {
   role: 'user' | 'assistant';
   content: string;
   generated_files?: GeneratedFileRef[];
+  visuals?: InlineVisualRef[];
   steps?: AgentActivityStep[];
 }
 
@@ -170,6 +171,60 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// ── Inline-visualiseringar (diagram/nyckeltal) ──────────────────────────────
+// SVG:n kommer redan escapad/cappad från servern (render_visual). Den visas
+// som <img src=data:image/svg+xml…> (ingen dangerouslySetInnerHTML) och
+// rastreras klient-side till PNG/JPEG vid nedladdning.
+
+function svgDataUrl(svg: string): string {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function visualFilename(title: string | undefined, ext: string): string {
+  const slug =
+    (title || 'visualisering')
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'visualisering';
+  return `${slug}-${new Date().toISOString().slice(0, 10)}.${ext}`;
+}
+
+// Rastrerar SVG:n till PNG/JPEG i 2x-upplösning och triggar nedladdning.
+// Vit bakgrund fylls alltid (JPEG saknar alfakanal; SVG:n är redan vit).
+async function downloadVisualImage(v: InlineVisualRef, format: 'png' | 'jpeg'): Promise<void> {
+  const img = await loadImage(svgDataUrl(v.svg));
+  const scale = 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(v.width * scale);
+  canvas.height = Math.round(v.height * scale);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Kunde inte skapa bilden');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const blob: Blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('Kunde inte skapa bilden'))),
+      format === 'png' ? 'image/png' : 'image/jpeg',
+      0.92
+    );
+  });
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = visualFilename(v.title, format === 'png' ? 'png' : 'jpg');
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
 }
 
 const DOC_ICON: Record<string, string> = {
@@ -319,6 +374,8 @@ export default function DashboardChat({
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  // Fullskärmsvy för en inline-visualisering (stort över hela ytan).
+  const [lightbox, setLightbox] = useState<InlineVisualRef | null>(null);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -344,6 +401,16 @@ export default function DashboardChat({
       bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     });
   }, [messages.length, isPending, liveSteps.length, liveText]);
+
+  // Stäng fullskärmsvyn med Escape.
+  useEffect(() => {
+    if (!lightbox) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setLightbox(null);
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [lightbox]);
 
   async function addFiles(files: FileList | File[]) {
     const list = Array.from(files);
@@ -728,8 +795,135 @@ export default function DashboardChat({
     );
   }
 
+  function visualDownload(v: InlineVisualRef, format: 'png' | 'jpeg') {
+    void downloadVisualImage(v, format).catch(() => {
+      setLocalError('Kunde inte ladda ned bilden — försök igen.');
+    });
+  }
+
+  function visualDownloadButtons(v: InlineVisualRef, size: 'sm' | 'lg' = 'sm') {
+    const cls =
+      size === 'lg'
+        ? 'inline-flex items-center gap-1.5 rounded-lg border border-default bg-canvas-subtle px-3 py-1.5 text-[12.5px] font-medium text-foreground transition hover:border-strong hover:bg-canvas-muted'
+        : 'inline-flex items-center gap-1 rounded-lg border border-default bg-canvas-subtle px-2 py-1 text-[11.5px] font-medium text-foreground transition hover:border-strong hover:bg-canvas-muted';
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => visualDownload(v, 'png')}
+          className={cls}
+          title="Ladda ned som PNG-bild"
+        >
+          <Icon name="download" size={size === 'lg' ? 13 : 12} />
+          PNG
+        </button>
+        <button
+          type="button"
+          onClick={() => visualDownload(v, 'jpeg')}
+          className={cls}
+          title="Ladda ned som JPEG-bild"
+        >
+          <Icon name="download" size={size === 'lg' ? 13 : 12} />
+          JPEG
+        </button>
+      </>
+    );
+  }
+
+  // Inline-visualiseringar — visas i chattens fulla bredd; klick öppnar
+  // fullskärmsvyn, och PNG/JPEG laddas ned direkt från kortet.
+  function renderVisuals(visuals?: InlineVisualRef[]) {
+    if (!visuals || visuals.length === 0) return null;
+    return (
+      <div className="mt-3 flex w-full flex-col gap-4">
+        {visuals.map((v) => (
+          <figure
+            key={v.id}
+            className="w-full overflow-hidden rounded-2xl border border-default bg-surface shadow-lg shadow-movexum-svart/5"
+          >
+            <figcaption className="flex items-center justify-between gap-2 border-b border-default px-4 py-2.5">
+              <span className="inline-flex min-w-0 items-center gap-2">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-movexum-pastell-bla text-movexum-djupbla">
+                  <Icon name="graph" size={13} />
+                </span>
+                <span className="truncate font-heading text-[13px] font-semibold text-foreground">
+                  {v.title || (v.kind === 'stats' ? 'Nyckeltal' : 'Diagram')}
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center gap-1.5">
+                {visualDownloadButtons(v)}
+                <button
+                  type="button"
+                  onClick={() => setLightbox(v)}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground"
+                  title="Visa i fullskärm"
+                  aria-label="Visa i fullskärm"
+                >
+                  <Icon name="external" size={13} />
+                </button>
+              </span>
+            </figcaption>
+            <button
+              type="button"
+              onClick={() => setLightbox(v)}
+              className="block w-full cursor-zoom-in bg-movexum-vit"
+              title="Klicka för fullskärm"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={svgDataUrl(v.svg)}
+                alt={v.title || 'Visualisering'}
+                className="block w-full"
+              />
+            </button>
+          </figure>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className={`flex min-h-0 flex-1 flex-col ${className}`}>
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-movexum-svart/70 p-4 backdrop-blur-sm md:p-8"
+          role="dialog"
+          aria-modal="true"
+          aria-label={lightbox.title || 'Visualisering i fullskärm'}
+          onClick={() => setLightbox(null)}
+        >
+          <div
+            className="flex max-h-full w-full max-w-[1320px] flex-col overflow-hidden rounded-2xl border border-default bg-surface shadow-xl shadow-movexum-svart/20"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-default px-4 py-3">
+              <span className="truncate font-heading text-[15px] font-semibold text-foreground">
+                {lightbox.title || (lightbox.kind === 'stats' ? 'Nyckeltal' : 'Diagram')}
+              </span>
+              <span className="flex shrink-0 items-center gap-2">
+                {visualDownloadButtons(lightbox, 'lg')}
+                <button
+                  type="button"
+                  onClick={() => setLightbox(null)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground"
+                  title="Stäng"
+                  aria-label="Stäng fullskärmsvyn"
+                >
+                  <Icon name="x" size={15} />
+                </button>
+              </span>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto bg-movexum-vit">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={svgDataUrl(lightbox.svg)}
+                alt={lightbox.title || 'Visualisering'}
+                className="block w-full"
+              />
+            </div>
+          </div>
+        </div>
+      )}
       {!isActive ? (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto py-10">
           <div className="mx-auto flex w-full max-w-[720px] flex-col px-6">
@@ -951,14 +1145,16 @@ export default function DashboardChat({
                   </div>
                 ) : (
                   <div key={i} className="flex justify-start">
-                    <div className="max-w-[85%]">
+                    {/* Full bredd när visualiseringar finns — de ska visas stort över hela ytan. */}
+                    <div className={msg.visuals && msg.visuals.length > 0 ? 'w-full min-w-0' : 'max-w-[85%]'}>
                       {msg.steps && msg.steps.length > 0 && (
                         <ActivityTrail items={msg.steps.map((s) => ({ label: s.label, ok: s.ok }))} />
                       )}
                       <div
-                        className="text-[14.5px] leading-relaxed text-foreground"
+                        className="max-w-[640px] text-[14.5px] leading-relaxed text-foreground"
                         dangerouslySetInnerHTML={{ __html: chatMarkdownToHtml(msg.content) }}
                       />
+                      {renderVisuals(msg.visuals)}
                       {renderGeneratedFiles(msg.generated_files)}
                     </div>
                   </div>

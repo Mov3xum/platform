@@ -12,7 +12,13 @@ import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from './web
 import { withAttachedImages } from './chat-input';
 import { logAiUsage } from './usage';
 import type { Actor } from '@/lib/core/write';
-import type { AiUsageSurface, GeneratedFileRef, Role, WebSourceKey } from '@platform/shared';
+import type {
+  AiUsageSurface,
+  GeneratedFileRef,
+  InlineVisualRef,
+  Role,
+  WebSourceKey
+} from '@platform/shared';
 
 // Delad staff-chatt-motor. Tidigare bodde all denna logik privat i
 // `lib/actions/chat.ts` (efemär dashboardchatt). Den är nu extraherad så att
@@ -114,7 +120,15 @@ const STAFF_TOOL_GUIDANCE =
   '`chart`, och avsluta med en slutsats/nästa-steg-slide. Skapa ALDRIG en slide ' +
   'utan innehåll (tomma slides tas bort) och upprepa inte titeln som egen slide. ' +
   'För topp-N/ranking: använd `chart.type:"hbar"` (liggande staplar). Använd ' +
-  'rubrik + 3–5 korta punkter per slide, inte långa stycken.\n\n' +
+  'rubrik + 3–5 korta punkter per slide, inte långa stycken.\n' +
+  '- `render_visual` (när tillgängligt): visa ett STORT, brandat diagram ' +
+  'och/eller nyckeltalskort DIREKT i chatten (full bredd; användaren kan ladda ' +
+  'ned det som PNG/JPEG). Använd det PROAKTIVT när svaret handlar om siffror: ' +
+  'trender → line/area, jämförelser/topp-listor → bar/hbar, fördelningar → ' +
+  'pie/donut, nyckeltal → `kpis`. Siffrorna MÅSTE komma från verktygssvar i ' +
+  'samma konversation. Skriv texten som komplement till visualiseringen — ' +
+  'upprepa inte alla siffror. Vill användaren ha en FIL (PowerPoint/PDF) är ' +
+  'det `generate_document` som gäller; `render_visual` är för att SE direkt.\n\n' +
   'Skrivregler:\n' +
   '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
   'efterfrågad.\n' +
@@ -296,6 +310,8 @@ export interface StaffTurnResult {
   tokensOut: number;
   /** Dokument som agenten genererade under turn:en (för nedladdnings-chips). */
   generatedFiles: GeneratedFileRef[];
+  /** Inline-visualiseringar (diagram/KPI-kort) som agenten tog fram under turn:en. */
+  visuals: InlineVisualRef[];
 }
 
 export interface RunStaffChatTurnOptions {
@@ -397,6 +413,7 @@ export async function runStaffChatTurn(
   let tokensOut = 0;
   let lastModel = '';
   const generatedFiles: GeneratedFileRef[] = [];
+  const inlineVisuals: InlineVisualRef[] = [];
   const surface: AiUsageSurface = opts.surface ?? 'dashboard_chat';
 
   // Modellval efter komplexitet (ej längre default small). Bilder → vision.
@@ -418,7 +435,8 @@ export async function runStaffChatTurn(
         actor,
         ownerUserId: opts.ownerUserId,
         chatThreadId: opts.chatThreadId,
-        generatedFiles
+        generatedFiles,
+        inlineVisuals
       },
       maxIterations: MAX_TOOL_ITERATIONS,
       onStep: opts.onStep,
@@ -439,7 +457,14 @@ export async function runStaffChatTurn(
     });
     return {
       ok: true,
-      result: { text: result.text, model: lastModel, tokensIn, tokensOut, generatedFiles }
+      result: {
+        text: result.text,
+        model: lastModel,
+        tokensIn,
+        tokensOut,
+        generatedFiles,
+        visuals: inlineVisuals
+      }
     };
   } catch (err) {
     console.error('[staff-chat] mistral tool loop error', { tenant: user.tenant, error: err });

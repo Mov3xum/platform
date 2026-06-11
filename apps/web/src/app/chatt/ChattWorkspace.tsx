@@ -45,6 +45,7 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
       role: m.role as 'user' | 'assistant',
       content: m.content,
       generated_files: m.generated_files,
+      visuals: m.visuals,
       steps: m.steps
     }));
 }

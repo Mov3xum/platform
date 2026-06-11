@@ -1955,6 +1955,38 @@ PowerPoint"). Stegen persisteras dessutom PII-fritt på assistant-meddelandet
 - **Riskklass:** oförändrad (ingen ny AI-funktion — bara transparens om
   befintliga verktygsanrop, EU AI Act art. 13/50).
 
+### 17.9 Inline-visualiseringar i chatten (`render_visual`)
+
+Agenten kan visa **stora, brandade diagram och nyckeltalskort (statistik)
+direkt inline i chatten** — i konversationens fulla bredd, med
+klick-till-fullskärm och **nedladdning som PNG/JPEG**. Samma
+determinism-princip som dokumentgenereringen (§ 17.3): modellen levererar ett
+TYPAT spec (`chart` och/eller `kpis`, samma scheman som `generate_document`),
+servern renderar en SVG via det brandade ECharts-temat (`charts/ssr.ts`) +
+KPI-kort i 2026-designspråket — modellen skriver aldrig bildformatet och
+siffrorna ska komma från verktygssvar i samma konversation.
+
+- **Kritiska filer:** `lib/ai/visuals.ts` (`renderInlineVisual` — komposition
+  header + KPI-kort + nästlat ECharts-SVG + transparens-footer),
+  `lib/ai/tools.ts` (verktyget `render_visual` + `inlineVisuals`-sink),
+  `DashboardChat.tsx` (full-bredd-rendering, lightbox, klient-side rastrering
+  SVG→canvas→PNG/JPEG i 2x-upplösning). Persisteras som
+  `ToolRunMessage.visuals` (`InlineVisualRef[]` i `@platform/shared`) så
+  återöppnade trådar visar visualiseringarna.
+- **Exponering:** samma gate som `generate_document` (`includeDocuments` +
+  agent-actor) → interaktiva trådar/streaming + djupjobbens aggregeringssteg.
+  Ingen persistens utanför chatt-meddelandet (inget `user_files`-skrivande).
+- **Robusthet (§ 10):** max 4 visualiseringar/svar, 150 KB SVG/styck
+  (`chat_threads.messages` har 2 MB-tak). Validering återanvänder
+  dokumentlagrets `validateChart`/`validateKpis` (cappade kategorier/serier).
+- **PII/transparens:** ingen ny dataväg — spec:et kan bara innehålla data
+  agenten redan såg via verktygen (maskning/denylist gäller uppströms). All
+  text SVG-escapas; visas via `<img src=data:image/svg+xml>` (ingen
+  `dangerouslySetInnerHTML`). AI-disclaimern (art. 50) bakas in i själva
+  bilden eftersom nedladdade PNG/JPEG lämnar plattformen.
+- **Riskklass (art. 11): begränsad** — deterministisk rendering av agent-spec,
+  människa granskar i chatten; ingen profilering, ingen autopublicering.
+
 ### 17.7 Begränsningar (MVP)
 
 - Djupjobb-progress pollas (var 3:e s) i UI:t; PB-realtime kan ersätta det.
