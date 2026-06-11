@@ -1881,8 +1881,11 @@ await ensureCollection({
     { name: 'starts_at', type: 'date', required: false },
     { name: 'due_at', type: 'date', required: false },
     { name: 'completed_at', type: 'date', required: false },
-    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['open', 'in_progress', 'blocked', 'done', 'cancelled'] },
+    // Migration 1700000129: + backlog/review (bolagskanbanens 6 kolumner).
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['open', 'in_progress', 'blocked', 'done', 'cancelled', 'backlog', 'review'] },
     { name: 'owner', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    // Migration 1700000129: Movexum-kollegor på kanban-kortet.
+    { name: 'assignees', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 20 },
     { name: 'link_kind', type: 'select', required: true, maxSelect: 1, values: ['none', 'startup', 'contact', 'event'] },
     { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'contact', type: 'relation', required: false, collectionId: 'contacts_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
@@ -3265,6 +3268,16 @@ await patchCollection('workshop_areas', [{ ...EDUCATION_IMAGE_FIELD }]);
 await patchCollection('education_documents', [
   { name: 'area', type: 'relation', required: false, collectionId: 'workshop_areas_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
 ]);
+
+// Migration 1700000129: bolagskanban (fliken "Aktiviteter" på bolagskortet) —
+// tasks.status += backlog/review (6 kolumner) + tasks.assignees (Movexum-
+// kollegor på kortet). Inline-defen ovan täcker NYA installs; patchen täcker
+// BEFINTLIGA (idempotent på fältnamn/values).
+await patchCollection('tasks', [
+  { name: 'assignees', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 20 }
+], {
+  status: { values: ['open', 'in_progress', 'blocked', 'done', 'cancelled', 'backlog', 'review'], maxSelect: 1 }
+});
 
 // =========================================================================
 // 18d. Field-patches på befintliga collections (porterade från migrations

@@ -4,6 +4,9 @@
 //
 // Två kollektioner med olika status-enums mappas till fyra board-kolumner:
 //   tasks.status:      open | in_progress | blocked  | done | cancelled
+//                      (+ backlog/review från bolagskanbanen § 15.7 —
+//                       mappas till todo/waiting så korten inte försvinner
+//                       ur den här 4-kolumnsvyn)
 //   activities.status: planned | in_progress | (—)    | done | cancelled
 // `cancelled` filtreras bort helt. Activities saknar "blocked" → kolumnen
 // "Väntar" är inte ett giltigt drop-mål för aktivitetskort.
@@ -22,10 +25,12 @@ export const BOARD_COLUMNS: { id: BoardStatus; label: string }[] = [
 export function toBoardStatus(source: WorkItemSource, raw: string): BoardStatus | null {
   if (source === 'task') {
     switch (raw) {
+      case 'backlog':
       case 'open':
         return 'todo';
       case 'in_progress':
         return 'in_progress';
+      case 'review':
       case 'blocked':
         return 'waiting';
       case 'done':

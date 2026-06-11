@@ -1612,6 +1612,42 @@ importer"). Flödet är preview → commit, speglar Bolagslista-importen
    implementerad — `kommun` importeras som frisktext. (Framtida
    förbättring; påverkar inte korrektheten.)
 
+### 15.7 Bolagskanban — fliken "Aktiviteter" på bolagskortet
+
+Bolagskortet (`/startups/[id]`) har en flik **Aktiviteter**
+(`/startups/[id]/aktiviteter`) med en kanban i **sex kolumner** (Miro-stil)
+över bolagets uppgifter (`tasks`, `link_kind='startup'`). Staff samarbetar
+kring bolaget: skapar kort direkt i en kolumn, **tilldelar Movexum-kollegor**
+och drar kort mellan kolumnerna.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000129_extend_tasks_kanban.js` | `tasks.status` += `backlog`/`review` (union) + `tasks.assignees` (relation→users, multi) |
+| `apps/web/src/lib/startup-board/board.ts` | Ren kolumnmodell (`STARTUP_BOARD_COLUMNS`, 6 st) |
+| `apps/web/src/lib/actions/tasks.ts` | `createStartupBoardTaskAction` / `moveStartupBoardTaskAction` / `setTaskAssigneesAction` |
+| `apps/web/src/app/startups/[id]/aktiviteter/{page,StartupKanban}.tsx` | Flik-route + drag-and-drop-tavla (klient) |
+
+- **Kolumner = råa `tasks.status`-värden:** `backlog` (Backlogg), `open`
+  (Att göra), `in_progress` (Pågår), `review` (Granskas), `blocked`
+  (Blockerad), `done` (Klar). `cancelled` finns kvar i enumet men visas inte
+  på tavlan. `lib/overview/status.ts` mappar `backlog`→todo och
+  `review`→waiting så korten inte försvinner ur 4-kolumnsboarden i
+  "Min översikt".
+- **RBAC:** skapa/tilldela = staff (admin/incubator_lead/coach/mentor),
+  flytta = staff eller ägare — verifieras i server-actions (tenant-check +
+  `hasRole`) ovanpå `tasks`-API-reglerna (oförändrade). Tilldelade kollegor
+  valideras mot tenantens staff via `listAssignableResourcesForTenant`
+  (§ 18.4-mönstret). Reads via användarens token → § 21-RLS gäller.
+- **GDPR/AI:** `assignees` är interna användare — ingen ny PII-väg; tasks
+  ingår inte i den kurerade AI-kontexten (§ 15.3) och `tasks.details`
+  fältmaskas (§ 9.3). Inga nya whitelist-fält i `lib/ai/context.ts`.
+- **Riskklass:** n/a (ingen AI-inferens — ren arbetsytefunktion).
+- **Migration** 1700000129 (nytt, oföränderligt filnummer) speglas i
+  `setup-via-api.mjs` (inline-def + `patchCollection` för befintliga
+  installs).
+
 ---
 
 ## 16. Agent-runtime (delad exekveringskärna)
