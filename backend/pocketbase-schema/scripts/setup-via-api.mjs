@@ -3219,6 +3219,22 @@ await patchCollection('org_knowledge', AUTODATE_FIELDS);
 await patchCollection('org_knowledge_chunks', AUTODATE_FIELDS);
 await patchCollection('user_file_chunks', AUTODATE_FIELDS);
 
+// Migration 1700000128: generellt autodate-svep — PB v0.23 auto-lägger inte
+// created/updated, och flera äldre kollektioner (tool_runs, ai_usage_events
+// m.fl.) skapades utan dem → HTTP 400 på varje created-filter/-sortering
+// (/insights, /admin/ai-miljo, månadsbudget-spärren). Sveper ALLA
+// bas-kollektioner så bootstrap-vägen aldrig återinför buggen.
+{
+  const allForAutodate = await pb.collections.getFullList();
+  for (const c of allForAutodate) {
+    if (c.system || c.type !== 'base' || c.name.startsWith('_')) continue;
+    const fieldNames = new Set((c.fields || []).map((f) => f.name));
+    if (!fieldNames.has('created') || !fieldNames.has('updated')) {
+      await patchCollection(c.name, AUTODATE_FIELDS);
+    }
+  }
+}
+
 // Migration 1700000122: org_knowledge.file accepterar även Word/PowerPoint
 // (OOXML-text extraheras dependency-fritt, CLAUDE.md § 26.5). ensureCollection
 // uppdaterar inte befintliga fält-options — patcha mime-whitelisten explicit.

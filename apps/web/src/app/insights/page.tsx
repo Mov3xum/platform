@@ -125,8 +125,59 @@ function formatPbError(err: unknown): string {
   return parts.join(' · ');
 }
 
-function buildDailyBuckets(days: number): { key: string; label: string }[] {
-  const out: { key: string; label: string }[] = [];
+interface PeriodRows<T> {
+  current: T[];
+  previous: T[];
+  /** True när PB inte stödde datumfiltret (created-fält saknas) och perioden fönstrats i JS. */
+  degraded: boolean;
+}
+
+/**
+ * Laddar innevarande + föregående periods rader för en tenant-scopad
+ * kollektion. Fail-soft: PB svarar HTTP 400 på `created`-filter/-sortering
+ * när autodate-fälten saknas (PB v0.23-buggen, CLAUDE.md § 23.6; fixas av
+ * migration 1700000128) — då hämtas raderna utan datumfilter och fönstras i
+ * JS i stället. Rader utan tidsstämpel räknas till innevarande period
+ * (hellre synliga än borttappade). PB:s datumsträngar jämför korrekt
+ * lexikografiskt.
+ */
+async function loadPeriodRows<T extends { created?: string }>(
+  pb: Awaited<ReturnType<typeof getServerPb>>,
+  collection: string,
+  tenant: string,
+  sincePb: string,
+  prevSincePb: string
+): Promise<PeriodRows<T>> {
+  try {
+    const current = await pb.collection(collection).getList<T>(1, 500, {
+      filter: pb.filter('tenant = {:tenant} && created >= {:since}', {
+        tenant,
+        since: sincePb
+      }),
+      sort: '-created'
+    });
+    const previous = await pb.collection(collection).getList<T>(1, 500, {
+      filter: pb.filter(
+        'tenant = {:tenant} && created >= {:prevSince} && created < {:since}',
+        { tenant, prevSince: prevSincePb, since: sincePb }
+      ),
+      sort: '-created'
+    });
+    return { current: current.items, previous: previous.items, degraded: false };
+  } catch {
+    const res = await pb.collection(collection).getList<T>(1, 500, {
+      filter: pb.filter('tenant = {:tenant}', { tenant })
+    });
+    const current = res.items.filter((r) => !r.created || r.created >= sincePb);
+    const previous = res.items.filter(
+      (r) => Boolean(r.created) && (r.created as string) >= prevSincePb && (r.created as string) < sincePb
+    );
+    current.sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));
+    return { current, previous, degraded: true };
+  }
+}
+
+function buildDailyBuckets(days: number): { key: string; label: string }[] {  const out: { key: string; label: string }[] = [];
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   for (let i = days - 1; i >= 0; i--) {
@@ -196,28 +247,18 @@ export default async function InsightsPage({
   let previousPeriodRuns: ToolRun[] = [];
   let runsLoadFailed = false;
   let runsLoadError: string | undefined;
+  let runsDegraded = false;
   try {
-    const current = await pb.collection('tool_runs').getList<ToolRun>(1, 500, {
-      filter: pb.filter('tenant = {:tenant} && created >= {:since}', {
-        tenant: user.tenant,
-        since: pbDate(sinceIso)
-      }),
-      sort: '-created'
-    });
-    runs = current.items;
-
-    const previous = await pb.collection('tool_runs').getList<ToolRun>(1, 500, {
-      filter: pb.filter(
-        'tenant = {:tenant} && created >= {:prevSince} && created < {:since}',
-        {
-          tenant: user.tenant,
-          prevSince: pbDate(previousSinceIso),
-          since: pbDate(sinceIso)
-        }
-      ),
-      sort: '-created'
-    });
-    previousPeriodRuns = previous.items;
+    const loaded = await loadPeriodRows<ToolRun>(
+      pb,
+      'tool_runs',
+      user.tenant,
+      pbDate(sinceIso),
+      pbDate(previousSinceIso)
+    );
+    runs = loaded.current;
+    previousPeriodRuns = loaded.previous;
+    runsDegraded = loaded.degraded;
   } catch (error) {
     runsLoadFailed = true;
     runsLoadError = formatPbError(error);
@@ -231,32 +272,18 @@ export default async function InsightsPage({
   let events: AiUsageEvent[] = [];
   let previousPeriodEvents: AiUsageEvent[] = [];
   let eventsLoadError: string | undefined;
+  let eventsDegraded = false;
   try {
-    const current = await pb
-      .collection('ai_usage_events')
-      .getList<AiUsageEvent>(1, 500, {
-        filter: pb.filter('tenant = {:tenant} && created >= {:since}', {
-          tenant: user.tenant,
-          since: pbDate(sinceIso)
-        }),
-        sort: '-created'
-      });
-    events = current.items;
-
-    const previous = await pb
-      .collection('ai_usage_events')
-      .getList<AiUsageEvent>(1, 500, {
-        filter: pb.filter(
-          'tenant = {:tenant} && created >= {:prevSince} && created < {:since}',
-          {
-            tenant: user.tenant,
-            prevSince: pbDate(previousSinceIso),
-            since: pbDate(sinceIso)
-          }
-        ),
-        sort: '-created'
-      });
-    previousPeriodEvents = previous.items;
+    const loaded = await loadPeriodRows<AiUsageEvent>(
+      pb,
+      'ai_usage_events',
+      user.tenant,
+      pbDate(sinceIso),
+      pbDate(previousSinceIso)
+    );
+    events = loaded.current;
+    previousPeriodEvents = loaded.previous;
+    eventsDegraded = loaded.degraded;
   } catch (error) {
     eventsLoadError = formatPbError(error);
     // Fail-soft: collectionen kan saknas på äldre PB-instanser.
@@ -716,7 +743,7 @@ export default async function InsightsPage({
               <dd className="font-mono text-foreground">
                 {runsLoadFailed
                   ? `FEL (${runsLoadError ?? 'okänt'})`
-                  : `OK · ${runs.length} rader`}
+                  : `OK · ${runs.length} rader${runsDegraded ? ' · JS-fönstrad (created saknas)' : ''}`}
               </dd>
             </div>
             <div className="flex justify-between gap-3 rounded-lg bg-canvas-subtle px-3 py-2">
@@ -724,7 +751,7 @@ export default async function InsightsPage({
               <dd className="font-mono text-foreground">
                 {eventsLoadError
                   ? `FEL (${eventsLoadError})`
-                  : `OK · ${events.length} rader`}
+                  : `OK · ${events.length} rader${eventsDegraded ? ' · JS-fönstrad (created saknas)' : ''}`}
               </dd>
             </div>
             <div className="flex justify-between gap-3 rounded-lg bg-canvas-subtle px-3 py-2">
@@ -746,6 +773,16 @@ export default async function InsightsPage({
                 1700000058_create_ai_usage_events.js upp på startup).
               </p>
             )}
+          {(runsDegraded || eventsDegraded) && (
+            <p className="mt-3 text-[11px] text-movexum-morkorange">
+              💡 created-tidsstämplar saknas på tool_runs/ai_usage_events
+              (PB v0.23 lägger inte till autodate-fälten automatiskt) —
+              statistiken visas via en JS-fallback utan exakt periodfönster.
+              Redeploya PocketBase så att migration
+              1700000128_add_autodate_all_collections appliceras (lägger till
+              fälten och backfillar tidsstämplar).
+            </p>
+          )}
         </section>
 
         {/* ── Daily trend ─────────────────────────────────────────── */}

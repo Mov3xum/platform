@@ -3327,9 +3327,16 @@ konservativ uppskattning — alla värden märks "≈" i UI:t.
 
 ### 28.2 Ytor
 
-- **Chatten (`/chatt`):** under inmatningsfältet visas konversationens totala
-  tokens (summa av `tokens_in`/`tokens_out` per assistant-turn i `messages[]`)
-  plus uppskattad CO₂e/vatten. Tooltipen anger källan (EU AI Act art. 13).
+- **Chatten (`/chatt`):** INLINE under varje assistant-svar visas turens
+  tokens (`tokens_in` + `tokens_out` ur per-turn-metadatan i `messages[]`)
+  plus uppskattad CO₂e/vatten. Tooltipen anger källan (EU AI Act art. 13)
+  och förklarar varför siffran kan kännas hög: varje verktygssteg i
+  agent-loopen (§ 16.2) är ett EGET modellanrop som bearbetar hela
+  kontexten (systemprompt + schema-sammanfattning + guidance + historik +
+  verktygsresultat) igen, och Mistral debiterar prompt-tokens per anrop —
+  en tur med 2–3 verktygsanrop landar därför normalt på tiotusentals
+  tokens. Det är verklig, korrekt summerad förbrukning (`onUsage` per
+  API-anrop i `runAgentLoop`), inte ett räknefel.
 - **`/insights` (staff):** tenantens period-tokens omräknade till CO₂e/vatten
   i Översikt-railen (samma `ai_usage_events`-summa som token-statet).
 - **`/admin/ai-miljo` (ADMIN-ONLY):** period-väljare (innevarande månad /
@@ -3355,3 +3362,54 @@ konservativ uppskattning — alla värden märks "≈" i UI:t.
   faktor för alla modeller (small/medium/embed) → medveten överskattning för
   mindre modeller. Uppdatera konstanterna i `ai-impact.ts` om Mistral
   publicerar per-modell-siffror.
+
+### 28.4 Token-optimering av chatten — prompt-skopning (2026-06)
+
+Tidigare bar VARJE Mistral-anrop i chatten fulla fältlistor för ALLA
+exponerade kollektioner (~55 st) plus kollektionsnamnen duplicerade som
+`enum` i fem verktygsscheman — och eftersom varje verktygs-iteration i
+agent-loopen är ett eget anrop som bearbetar hela prompten igen kostade en
+tur med 2–3 verktygssteg tiotusentals tokens. Åtgärdat med **progressiv
+exponering** (best practice), utan att kvalitet tappas:
+
+- **Skopad schema-sammanfattning** (`lib/ai/schema-scope.ts`, ren +
+  enhetstestad): fulla fältlistor injiceras BARA för kärnsetet
+  (`startups`, `activities`, `tasks`) + kollektioner som matchar de
+  senaste användarturerna (deterministisk svensk synonymkarta +
+  kollektionsnamnets egna tokens — ingen extra LLM-runda, ingen latens).
+  Resten listas som kompakt namn+beskrivning-index, capat till
+  `MAX_DETAILED_COLLECTIONS=12` detaljerade.
+- **Kvalitetsskyddsnät:** indexet visar ALLTID alla kollektionsnamn (inget
+  göms); `describe_collection` ger fält + enum-värden på begäran (guidance
+  instruerar redan "describe före filter"); dispatch-felet vid okänt
+  kollektionsnamn listar alla giltiga namn → självläkande till priset av
+  en extra iteration (taket är 7, § 9.3).
+- **Enum-duplicering borttagen:** de fem läsverktygens scheman bär inte
+  längre alla kollektionsnamn som `enum` (namnen finns i indexet; Mistral
+  gör ingen constrained decoding på enum — det var bara prompt-tokens).
+- **Vision-turer bantade:** bild-turer kör verktygslöst (§ 13.5) →
+  verktygsguide + schema-sammanfattning utelämnas helt ur deras prompt.
+- **Djupjobb:** planeraren + varje subtask skopar schemat mot
+  instruktionen/delmålet (`buildReadToolSurface({ scopeText })`).
+  Toolbox-/schemalagda körningar behåller den fulla sammanfattningen
+  (oförändrat beteende; kan skopas senare med agentens prompt som text).
+- **Säkerhet oförändrad:** skopningen styr bara PROMPTENS detaljnivå —
+  tenant-scope, denylist och fältmaskning ligger kvar i `schema.ts`/
+  `redaction.ts` och påverkas inte. Riskklass: n/a.
+
+### 28.5 Autodate-grundorsaken — migration 1700000128
+
+`tool_runs` (1700000015) och `ai_usage_events` (1700000058) skapades UTAN
+autodate-fälten `created`/`updated` (PB v0.23 auto-lägger dem inte vid
+`new Collection(...)`, samma bugg-klass som § 23.6/§ 26.4). Följd: varje
+fråga med `created`-filter/-sortering fick HTTP 400 → /insights felade,
+/admin/ai-miljo felade och **månadsbudget-spärren (§ 9.6) var tyst inaktiv**
+(fail-open i `budget.server.ts` returnerade 0). Migration **1700000128**
+sveper ALLA bas-kollektioner och lägger till saknade autodate-fält, samt
+backfillar värden där statistiken kräver det (`tool_runs.created` ←
+`started_at`/`completed_at`; `ai_usage_events.created` ← migrations-
+tidpunkt, § 23.6-precedensen). Speglas i `setup-via-api.mjs` (generiskt
+autodate-svep). Läsvägarna är dessutom **fail-soft**: /insights och
+/admin/ai-miljo retry:ar utan datumfilter och fönstrar i JS mot ett ännu
+inte migrerat schema, med tydlig varning + diagnos-hint i UI:t (rader utan
+tidsstämpel räknas till innevarande period — hellre synliga än borttappade).

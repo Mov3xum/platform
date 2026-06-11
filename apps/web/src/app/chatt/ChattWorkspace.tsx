@@ -46,25 +46,20 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
       content: m.content,
       generated_files: m.generated_files,
       visuals: m.visuals,
-      steps: m.steps
+      steps: m.steps,
+      // Turens tokens (in + ut, per-turn-metadata § 9.9) → inline miljöchip
+      // under varje assistant-svar.
+      tokens:
+        m.role === 'assistant'
+          ? (Number(m.tokens_in) || 0) + (Number(m.tokens_out) || 0)
+          : undefined
     }));
-}
-
-// Totala tokens (in + ut) för konversationen — per-turn-metadata på varje
-// assistant-meddelande (§ 9.9). Driver miljöchipen i chatten (CO₂e/vatten).
-function sumThreadTokens(messages: ToolRunMessage[]): number {
-  return messages.reduce(
-    (acc, m) => acc + (Number(m.tokens_in) || 0) + (Number(m.tokens_out) || 0),
-    0
-  );
 }
 
 export default function ChattWorkspace({ greeting, agents, connectors, activities, initialThreads }: Props) {
   const [threads, setThreads] = useState<ThreadListResult>(initialThreads);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
-  // Totala tokens (in + ut) i den aktiva konversationen → miljöchip i chatten.
-  const [usageTokens, setUsageTokens] = useState(0);
   const [activeAgent, setActiveAgent] = useState<DashboardAgent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -84,11 +79,9 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     setThreads(next);
   }, []);
 
-  // Sätter både UI-meddelandena och konversationens token-summa från
-  // de persisterade trådmeddelandena (per-turn-metadata, § 9.9).
+  // Laddar in de persisterade trådmeddelandena (inkl. per-turn-tokens) i UI:t.
   const applyThreadMessages = useCallback((raw: ToolRunMessage[]) => {
     setMessages(toUiMessages(raw));
-    setUsageTokens(sumThreadTokens(raw));
   }, []);
 
   useEffect(() => {
@@ -149,7 +142,6 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   function newChat() {
     setActiveThreadId(null);
     setMessages([]);
-    setUsageTokens(0);
     setActiveAgent(null);
     setError(null);
   }
@@ -428,7 +420,6 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           connectors={connectors}
           activities={activities}
           messages={messages}
-          usageTokens={usageTokens}
           isPending={streaming || deepRunning}
           error={error}
           activeAgent={activeAgent}

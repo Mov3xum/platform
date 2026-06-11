@@ -53,6 +53,7 @@ interface UsageEventRow {
   tokens_in?: number;
   tokens_out?: number;
   cost_estimate_usd?: number;
+  created?: string;
 }
 
 interface TenantUsage {
@@ -99,6 +100,7 @@ export default async function AiMiljoPage({
   let rows: UsageEventRow[] = [];
   let truncated = false;
   let loadError: string | null = null;
+  let degraded = false;
 
   if (!su.ok) {
     loadError =
@@ -117,17 +119,37 @@ export default async function AiMiljoPage({
         tenants.map((t) => [t.id, t.name || t.slug || t.id])
       );
 
-      for (let page = 1; page <= MAX_PAGES; page++) {
-        const res = await su.pb
-          .collection('ai_usage_events')
-          .getList<UsageEventRow>(page, PAGE_SIZE, {
-            filter: su.pb.filter('created >= {:since}', { since }),
-            fields: 'tenant,tokens_in,tokens_out,cost_estimate_usd',
-            sort: '-created'
-          });
-        rows.push(...res.items);
-        if (res.items.length < PAGE_SIZE || page * PAGE_SIZE >= res.totalItems) break;
-        if (page === MAX_PAGES) truncated = true;
+      try {
+        for (let page = 1; page <= MAX_PAGES; page++) {
+          const res = await su.pb
+            .collection('ai_usage_events')
+            .getList<UsageEventRow>(page, PAGE_SIZE, {
+              filter: su.pb.filter('created >= {:since}', { since }),
+              fields: 'tenant,tokens_in,tokens_out,cost_estimate_usd',
+              sort: '-created'
+            });
+          rows.push(...res.items);
+          if (res.items.length < PAGE_SIZE || page * PAGE_SIZE >= res.totalItems) break;
+          if (page === MAX_PAGES) truncated = true;
+        }
+      } catch {
+        // PB 400:ar created-filter/-sortering när autodate-fälten saknas
+        // (PB v0.23-buggen, fixas av migration 1700000128). Fail-soft: hämta
+        // utan datumfilter och fönstra i JS — rader utan tidsstämpel
+        // inkluderas (hellre synliga än borttappade). Lexikografisk
+        // strängjämförelse fungerar för PB:s datumformat.
+        degraded = true;
+        rows = [];
+        for (let page = 1; page <= MAX_PAGES; page++) {
+          const res = await su.pb
+            .collection('ai_usage_events')
+            .getList<UsageEventRow>(page, PAGE_SIZE, {
+              fields: 'tenant,tokens_in,tokens_out,cost_estimate_usd,created'
+            });
+          rows.push(...res.items.filter((r) => !r.created || r.created >= since));
+          if (res.items.length < PAGE_SIZE || page * PAGE_SIZE >= res.totalItems) break;
+          if (page === MAX_PAGES) truncated = true;
+        }
       }
     } catch (err) {
       loadError = err instanceof Error ? err.message : 'Kunde inte läsa AI-användningen.';
@@ -206,6 +228,16 @@ export default async function AiMiljoPage({
           <div className="rounded-2xl border border-default bg-movexum-pastell-orange p-4 text-[13px] text-movexum-morkorange">
             <div className="font-medium">Dashboarden kan inte visas just nu.</div>
             <div className="mt-1">{loadError}</div>
+          </div>
+        )}
+
+        {degraded && (
+          <div className="rounded-2xl border border-default bg-movexum-pastell-gul p-4 text-[13px] text-movexum-morkgul">
+            created-tidsstämplar saknas på ai_usage_events (PB v0.23 lägger
+            inte till autodate-fälten automatiskt) — perioden fönstras i JS
+            och rader utan tidsstämpel inkluderas. Redeploya PocketBase så att
+            migration 1700000128_add_autodate_all_collections appliceras
+            (lägger till fälten och backfillar tidsstämplar).
           </div>
         )}
 
