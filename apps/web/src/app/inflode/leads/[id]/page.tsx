@@ -9,6 +9,7 @@ import {
   Chip,
   Icon
 } from '@/components/proto';
+import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
 import { getLead, listAssignableStaff, listLeadSources, listModules } from '@/lib/compass/store';
 import {
   CONTACT_PREFERENCE_LABEL,
@@ -572,13 +573,13 @@ export default async function LeadDetailPage({
             <CardHead label="Farlig zon" />
             <form action={deleteLeadAction} style={{ padding: 16 }}>
               <input type="hidden" name="id" value={lead.id} />
-              <button
-                type="submit"
+              <ConfirmSubmitButton
+                confirmText={`Radera leadet "${lead.name || 'Anonym'}" permanent? Konversationer och svar raderas också (hård cascade) — detta kan inte ångras.`}
                 className="mx-btn"
                 style={{ width: '100%', color: '#4b2718', borderColor: '#d67e47' }}
               >
                 <Icon name="trash" size={13} /> Radera lead permanent
-              </button>
+              </ConfirmSubmitButton>
               <div
                 className="mx-mono mx-t-xs mx-muted"
                 style={{ marginTop: 8, textAlign: 'center' }}

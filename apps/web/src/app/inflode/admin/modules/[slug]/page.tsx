@@ -12,6 +12,7 @@ import {
 import { FLOW_TYPE_LABEL } from '@/lib/compass/types';
 import { deleteModuleAction } from '@/lib/actions/compass';
 import { ShareModule } from '@/components/compass/ShareModule';
+import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
 import { QuestionsManager } from '@/components/compass/QuestionsManager';
 import { ModuleSettingsForm } from '@/components/compass/ModuleSettingsForm';
 import { moduleHeroImageUrl } from '@/lib/compass/media';
@@ -181,13 +182,13 @@ export default async function EditModulePage({
             <CardHead label="Farlig zon" />
             <form action={deleteModuleAction} style={{ padding: 16 }}>
               <input type="hidden" name="id" value={mod.id} />
-              <button
-                type="submit"
+              <ConfirmSubmitButton
+                confirmText={`Radera modulen "${mod.name}"? Alla frågor raderas också (cascade) och den publika länken slutar fungera — detta kan inte ångras. Befintliga leads bevaras.`}
                 className="mx-btn"
                 style={{ width: '100%', color: '#4b2718', borderColor: '#d67e47' }}
               >
                 <Icon name="trash" size={13} /> Radera modul
-              </button>
+              </ConfirmSubmitButton>
               <div
                 className="mx-mono mx-t-xs mx-muted"
                 style={{ marginTop: 8, textAlign: 'center' }}
