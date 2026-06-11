@@ -573,25 +573,41 @@ export async function getLeadAnalytics(
 }> {
   try {
     // Förhandsgranskningar (preview) exkluderas ur all analys.
-    const filterParts = ['tenant = {:tenant}', 'source_key != {:pv}'];
-    const params: Record<string, unknown> = { tenant, pv: PREVIEW_SOURCE_KEY };
-    if (windowDays && windowDays > 0) {
-      const cutoff = new Date(Date.now() - windowDays * 86400_000).toISOString();
-      filterParts.push('created >= {:cutoff}');
-      params.cutoff = cutoff;
+    const baseParts = ['tenant = {:tenant}', 'source_key != {:pv}'];
+    const baseParams: Record<string, unknown> = { tenant, pv: PREVIEW_SOURCE_KEY };
+    const cutoffIso =
+      windowDays && windowDays > 0
+        ? new Date(Date.now() - windowDays * 86400_000).toISOString()
+        : undefined;
+    const fetchLeads = (filter: string) =>
+      readWithFallback(
+        pb,
+        (client) =>
+          client.collection('compass_leads').getFullList<Lead>({
+            filter,
+            fields:
+              'id,status,source_key,utm_source,utm_medium,utm_campaign,landing_module,quiz_result_bucket,converted_startup,converted_at,created',
+            batch: 1000
+          }),
+        (rows) => rows.length === 0
+      );
+    let leads: Lead[];
+    try {
+      leads = await fetchLeads(
+        pb.filter(
+          cutoffIso ? [...baseParts, 'created >= {:cutoff}'].join(' && ') : baseParts.join(' && '),
+          cutoffIso ? { ...baseParams, cutoff: cutoffIso } : baseParams
+        )
+      );
+    } catch (err) {
+      // Saknat `created`-fält (innan migration 1700000126) → datumfiltret
+      // 400:ar. Hämta utan cutoff och fönstra i JS (rader utan created kan
+      // inte tidsplaceras och utelämnas ur perioden).
+      if (!cutoffIso) throw err;
+      const cutoffMs = Date.parse(cutoffIso);
+      const all = await fetchLeads(pb.filter(baseParts.join(' && '), baseParams));
+      leads = all.filter((l) => l.created && new Date(l.created).getTime() >= cutoffMs);
     }
-    const analyticsFilter = pb.filter(filterParts.join(' && '), params);
-    const leads = await readWithFallback(
-      pb,
-      (client) =>
-        client.collection('compass_leads').getFullList<Lead>({
-          filter: analyticsFilter,
-          fields:
-            'id,status,source_key,utm_source,utm_medium,utm_campaign,landing_module,quiz_result_bucket,converted_startup,converted_at,created',
-          batch: 1000
-        }),
-      (rows) => rows.length === 0
-    );
 
     const sourceMap = new Map<string, AttributionBreakdown>();
     const campaignMap = new Map<string, CampaignBreakdown>();
@@ -661,15 +677,19 @@ export async function getLeadAnalytics(
         qb.count++;
       }
 
-      // Weekly bucket
-      const wkKey = weekKey(lead.created);
-      let w = weekMap.get(wkKey);
-      if (!w) {
-        w = { week: wkKey, total: 0, accepted: 0 };
-        weekMap.set(wkKey, w);
+      // Weekly bucket — rader utan `created` (backfillade innan migration
+      // 1700000127) kan inte tidsplaceras och utelämnas ur veckotrenden
+      // (de räknas fortfarande i totalen ovan).
+      if (lead.created) {
+        const wkKey = weekKey(lead.created);
+        let w = weekMap.get(wkKey);
+        if (!w) {
+          w = { week: wkKey, total: 0, accepted: 0 };
+          weekMap.set(wkKey, w);
+        }
+        w.total++;
+        if (isAccepted) w.accepted++;
       }
-      w.total++;
-      if (isAccepted) w.accepted++;
     }
 
     return {
@@ -784,22 +804,47 @@ export async function getCompassDashboard(
     const prevSinceIso = new Date(now - periodDays * 2 * 86400_000).toISOString();
 
     // Förhandsgranskningar (preview) exkluderas ur KPI:er/trend.
-    const windowFilter = pb.filter(
-      'tenant = {:tenant} && created >= {:cutoff} && source_key != {:pv}',
-      { tenant, cutoff: prevSinceIso, pv: PREVIEW_SOURCE_KEY }
-    );
-    const [funnelCounts, windowLeads] = await Promise.all([
-      countLeadsByStatus(pb, tenant),
+    const fetchWindow = (filter: string) =>
       readWithFallback(
         pb,
         (client) =>
           client.collection('compass_leads').getFullList<DashboardLeadRow>({
-            filter: windowFilter,
+            filter,
             fields: 'status,score,source_key,created',
             batch: 1000
           }),
         (rows) => rows.length === 0
-      )
+      );
+    // Fönster-läsningen får ALDRIG fälla tratten (countLeadsByStatus räknar
+    // utan datumfilter): saknat `created`-fält (innan migration 1700000126)
+    // 400:ar datumfiltret → hämta då utan cutoff och fönstra i JS.
+    const fetchWindowLeads = async (): Promise<DashboardLeadRow[]> => {
+      try {
+        return await fetchWindow(
+          pb.filter('tenant = {:tenant} && created >= {:cutoff} && source_key != {:pv}', {
+            tenant,
+            cutoff: prevSinceIso,
+            pv: PREVIEW_SOURCE_KEY
+          })
+        );
+      } catch {
+        try {
+          const all = await fetchWindow(
+            pb.filter('tenant = {:tenant} && source_key != {:pv}', {
+              tenant,
+              pv: PREVIEW_SOURCE_KEY
+            })
+          );
+          const prevSinceMs = Date.parse(prevSinceIso);
+          return all.filter((l) => l.created && new Date(l.created).getTime() >= prevSinceMs);
+        } catch {
+          return []; // degraderat läge: tratt/totaler visas ändå
+        }
+      }
+    };
+    const [funnelCounts, windowLeads] = await Promise.all([
+      countLeadsByStatus(pb, tenant),
+      fetchWindowLeads()
     ]);
 
     const totalLeads = LEAD_STATUS_ORDER.reduce((s, k) => s + (funnelCounts[k] || 0), 0);

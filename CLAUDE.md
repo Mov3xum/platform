@@ -2763,7 +2763,12 @@ Människa-i-loopen följer sedan upp (status sätts manuellt).
   (filter `created >=`). 1700000126 backfillar fälten idempotent; läsvägarna i
   `lib/compass/store.ts` är dessutom fail-soft (osorterad retry) mot ett ännu
   inte migrerat schema. Compass är migration-only (§ 23.4) — speglas inte i
-  setup-via-api.mjs.
+  setup-via-api.mjs. **Migration 1700000127** backfillar dessutom VÄRDEN i
+  `compass_leads.created` på befintliga rader (consent_at → last_contact_at →
+  migrations-tidpunkt) — utan det räknades äldre leads i tratten men aldrig i
+  dashboardens/analysens period-KPI:er/trend ("Leads denna period: 0 av N").
+  `getCompassDashboard`/`getLeadAnalytics` fönstrar i JS som fallback när
+  datumfiltret 400:ar, så tratten/totalerna aldrig nollas av ett saknat fält.
 
 ### 23.7 Kedjebyggda moduler + stegindelad modul-setup
 
