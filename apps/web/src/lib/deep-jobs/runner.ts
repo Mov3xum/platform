@@ -8,7 +8,11 @@ import {
   type AgentLoopUsage
 } from '@/lib/ai/agent-runtime';
 import { buildChatTools } from '@/lib/ai/tools';
-import { getExposedCollections, buildSchemaSummary } from '@/lib/ai/schema';
+import { getExposedCollections } from '@/lib/ai/schema';
+import {
+  selectRelevantCollections,
+  buildScopedSchemaSummary
+} from '@/lib/ai/schema-scope';
 import { buildAgentSystemPrompt } from '@/lib/ai/agent-prompt';
 import { logAiUsage } from '@/lib/ai/usage';
 import { planDeepJob } from './planner';
@@ -120,7 +124,15 @@ export async function runDeepJob(deepJobId: string): Promise<DeepJobResult> {
     });
 
     const collections = await getExposedCollections().catch(() => []);
-    const schemaSummary = collections.length > 0 ? buildSchemaSummary(collections) : '';
+    // Skopat schema till planeringen (§ 28.4): planeraren behöver namn +
+    // beskrivningar för att lägga delsteg — inte alla fältlistor.
+    const schemaSummary =
+      collections.length > 0
+        ? buildScopedSchemaSummary(
+            collections,
+            selectRelevantCollections(collections, job.instruction)
+          )
+        : '';
 
     // ── Planering ──────────────────────────────────────────────────────
     const plan: DeepJobSubtask[] = await planDeepJob(MODELS, job.instruction, schemaSummary, onUsage);
@@ -159,7 +171,13 @@ export async function runDeepJob(deepJobId: string): Promise<DeepJobResult> {
         /* audit-raden är best-effort */
       }
 
-      const surface = await buildReadToolSurface(pb, job.tenant, { includeMemory: true });
+      const surface = await buildReadToolSurface(pb, job.tenant, {
+        includeMemory: true,
+        // Skopa schema-detaljerna till jobbets instruktion + delstegets mål
+        // (§ 28.4) — varje subtask är ett eget anrop som annars bär hela
+        // schema-sammanfattningen.
+        scopeText: `${job.instruction}\n${st.goal}`
+      });
       const sysContent =
         buildAgentSystemPrompt(
           'Du är en analytiker som löser ETT avgränsat delsteg i ett större jobb. ' +

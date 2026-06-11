@@ -15,7 +15,11 @@ import {
   renderPromptTemplate
 } from '@/lib/ai/context';
 import { buildKnowledgeContext } from '@/lib/ai/agent-prompt';
-import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
+import { getExposedCollections } from '@/lib/ai/schema';
+import {
+  selectRelevantCollections,
+  buildScopedSchemaSummary
+} from '@/lib/ai/schema-scope';
 import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from '@/lib/ai/guidance';
 import { buildChatTools, buildMemoryRecallBlock } from '@/lib/ai/tools';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
@@ -461,7 +465,18 @@ async function runStaffChatWithTools(
   let schemaSummary = '';
   try {
     collections = await getExposedCollections();
-    schemaSummary = buildSchemaSummary(collections);
+    // Skopad schema-sammanfattning (§ 28.4): fältlistor bara för kärnset +
+    // kollektioner relevanta för de senaste användarturerna; övriga som
+    // kompakt namnindex (describe_collection täcker detaljerna).
+    const scopeText = userMessages
+      .filter((m) => m.role === 'user')
+      .slice(-3)
+      .map((m) => m.content)
+      .join('\n');
+    schemaSummary = buildScopedSchemaSummary(
+      collections,
+      selectRelevantCollections(collections, scopeText)
+    );
   } catch (err) {
     console.error('[chat] schema introspection failed', { tenant: user.tenant, error: err });
   }

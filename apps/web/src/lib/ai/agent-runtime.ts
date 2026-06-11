@@ -12,6 +12,7 @@ import {
   type ToolDispatchContext
 } from './tools';
 import { buildSchemaSummary, getExposedCollections } from './schema';
+import { selectRelevantCollections, buildScopedSchemaSummary } from './schema-scope';
 import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from './guidance';
 import { assertWithinAiBudget } from './budget.server';
 
@@ -335,7 +336,7 @@ export interface ReadToolSurface {
 export async function buildReadToolSurface(
   pb: PocketBase,
   tenantId: string,
-  options: { includeMemory?: boolean } = {}
+  options: { includeMemory?: boolean; scopeText?: string } = {}
 ): Promise<ReadToolSurface | null> {
   let collections: Awaited<ReturnType<typeof getExposedCollections>>;
   try {
@@ -349,6 +350,17 @@ export async function buildReadToolSurface(
   // memory_read när includeMemory är satt; memory_write kräver agent-actor
   // och ges därför aldrig i en autonom körning).
   const tools = buildChatTools(collections, { includeMemory: options.includeMemory });
+
+  // Med `scopeText` (t.ex. djupjobbets instruktion + delstegets mål) skopas
+  // schema-sammanfattningen: fältlistor bara för relevanta kollektioner,
+  // resten som kompakt index + describe_collection (§ 28.4). Utan scopeText
+  // behålls den fulla sammanfattningen (toolbox/schemalagda körningar).
+  const summary = options.scopeText
+    ? buildScopedSchemaSummary(
+        collections,
+        selectRelevantCollections(collections, options.scopeText)
+      )
+    : buildSchemaSummary(collections);
   return {
     tools,
     toolContext: { pb, tenantId, collections },
@@ -356,6 +368,6 @@ export async function buildReadToolSurface(
       READ_TOOL_GUIDANCE +
       SEARCH_STRATEGY_GUIDANCE +
       DOMAIN_GLOSSARY +
-      `\n\n${buildSchemaSummary(collections)}`
+      `\n\n${summary}`
   };
 }

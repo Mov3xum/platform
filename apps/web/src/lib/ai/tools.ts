@@ -185,7 +185,11 @@ export function buildChatTools(
   collections: ExposedCollection[],
   options: BuildToolsOptions = {}
 ): MistralToolDefinition[] {
-  const collectionNames = collections.map((c) => c.name);
+  // OBS: kollektionsnamnen dupliceras MEDVETET inte som enum i varje
+  // verktygsschema (~55 namn × 5 verktyg ≈ tusentals prompt-tokens per
+  // anrop). Namnen finns i schema-indexet i systemprompten, och dispatchen
+  // svarar med hela listan vid okänt namn → självläkande utan kostnaden.
+  void collections;
   const tools: MistralToolDefinition[] = [
     {
       type: 'function',
@@ -200,8 +204,8 @@ export function buildChatTools(
           properties: {
             collection: {
               type: 'string',
-              enum: collectionNames,
-              description: 'Namn på kollektionen att fråga'
+              description:
+                'Exakt kollektionsnamn (se kollektionsindexet i din kontext)'
             },
             filter: {
               type: 'string',
@@ -248,8 +252,8 @@ export function buildChatTools(
           properties: {
             collection: {
               type: 'string',
-              enum: collectionNames,
-              description: 'Namn på kollektionen'
+              description:
+                'Exakt kollektionsnamn (se kollektionsindexet i din kontext)'
             },
             filter: {
               type: 'string',
@@ -275,8 +279,8 @@ export function buildChatTools(
           properties: {
             collection: {
               type: 'string',
-              enum: collectionNames,
-              description: 'Kollektion att söka i'
+              description:
+                'Exakt kollektionsnamn att söka i (se kollektionsindexet i din kontext)'
             },
             query: {
               type: 'string',
@@ -309,8 +313,8 @@ export function buildChatTools(
           properties: {
             collection: {
               type: 'string',
-              enum: collectionNames,
-              description: 'Kollektion att beskriva'
+              description:
+                'Exakt kollektionsnamn att beskriva (se kollektionsindexet i din kontext)'
             },
             field: {
               type: 'string',
@@ -340,8 +344,8 @@ export function buildChatTools(
           properties: {
             collection: {
               type: 'string',
-              enum: collectionNames,
-              description: 'Kollektion att aggregera'
+              description:
+                'Exakt kollektionsnamn att aggregera (se kollektionsindexet i din kontext)'
             },
             op: {
               type: 'string',

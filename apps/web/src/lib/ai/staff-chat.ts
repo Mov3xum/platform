@@ -3,7 +3,8 @@ import type PocketBase from 'pocketbase';
 import { MistralError, callMistral, type MistralMessage } from './mistral';
 import { runAgentLoop, type AgentLoopStep } from './agent-runtime';
 import { buildChatTools, buildMemoryRecallBlock } from './tools';
-import { buildSchemaSummary, getExposedCollections } from './schema';
+import { getExposedCollections } from './schema';
+import { selectRelevantCollections, buildScopedSchemaSummary } from './schema-scope';
 import { buildPortfolioContext, renderPromptTemplate } from './context';
 import { buildKnowledgeContext } from './agent-prompt';
 import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY, KNOWLEDGE_GUIDANCE } from './guidance';
@@ -331,10 +332,8 @@ export async function runStaffChatTurn(
   opts: RunStaffChatTurnOptions
 ): Promise<{ ok: true; result: StaffTurnResult } | { ok: false; error: string }> {
   let collections: Awaited<ReturnType<typeof getExposedCollections>> = [];
-  let schemaSummary = '';
   try {
     collections = await getExposedCollections();
-    schemaSummary = buildSchemaSummary(collections);
   } catch (err) {
     console.error('[staff-chat] schema introspection failed', { tenant: user.tenant, error: err });
   }
@@ -374,15 +373,30 @@ export async function runStaffChatTurn(
   // injiceras så att en rättelse faktiskt påverkar nästa samtal. RLS-skyddat.
   const memoryBlock = await buildMemoryRecallBlock(pb, user.tenant);
 
+  // Skopad schema-sammanfattning (§ 28.4): fulla fältlistor bara för kärnset +
+  // kollektioner relevanta för de senaste användarturerna; resten som kompakt
+  // namnindex (describe_collection täcker detaljerna). Vision-turer kör
+  // verktygslöst (§ 13.5) → verktygsguide + schema utelämnas helt där.
+  const scopeText = opts.userMessages
+    .filter((m) => m.role === 'user')
+    .slice(-3)
+    .map((m) => m.content)
+    .join('\n');
+  const schemaBlock = useTools
+    ? `\n\n${buildScopedSchemaSummary(collections, selectRelevantCollections(collections, scopeText))}`
+    : '';
+  const toolGuidanceBlocks = useTools
+    ? STAFF_TOOL_GUIDANCE + SEARCH_STRATEGY_GUIDANCE + KNOWLEDGE_GUIDANCE
+    : '';
+
   const systemContent =
     BASE_SYSTEM_PROMPT +
     (opts.agentBlock ? `\n\n---\n${opts.agentBlock}\n---` : '') +
-    STAFF_TOOL_GUIDANCE +
-    SEARCH_STRATEGY_GUIDANCE +
-    KNOWLEDGE_GUIDANCE +
+    toolGuidanceBlocks +
     DOMAIN_GLOSSARY +
     memoryBlock +
-    `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +
+    `\n\n---\n${identityBlock}\n---` +
+    schemaBlock +
     (opts.webBlock ? `\n\n---\n${opts.webBlock}\n---` : '') +
     STYLE_REMINDER;
 
