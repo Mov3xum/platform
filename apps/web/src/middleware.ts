@@ -29,9 +29,13 @@ function buildCsp(nonce: string | null, isHttps: boolean): string {
     `script-src ${scriptSrc}`,
     // Next.js + Tailwind injicerar inline-styles; style-injektion är lågrisk.
     `style-src 'self' 'unsafe-inline'`,
-    // PocketBase-filer (avatarer/loggor) kan ligga på annan origin, ev. http
-    // i staging. Bilder kan inte exekvera kod.
+    // PocketBase-filer (avatarer/loggor/videos) kan ligga på annan origin, ev.
+    // http i staging. Bilder och media kan inte exekvera kod.
     `img-src 'self' data: blob: https: http:`,
+    // workshop_media-videos laddas från PocketBase-origin (kan vara extern,
+    // ev. http i staging). Utan explicit media-src faller browsern tillbaka
+    // på default-src 'self' och blockerar uppspelning.
+    `media-src 'self' https: http:`,
     `font-src 'self'`,
     `connect-src 'self'`,
     `frame-src 'none'`,
