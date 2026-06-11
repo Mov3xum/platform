@@ -29,9 +29,11 @@ export const CHAT_FALLBACK_MODELS = [
 // Vision-kapabel modell när bilder bifogas (stödjer även function calling).
 export const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
 // Interaktiv staff-chatt: ett intent-flöde blir lätt search_records →
-// describe_collection → query → aggregate → svar, så taket höjs över det
-// autonoma defaulten (4) men hålls bundet (robusthet § 10).
-export const MAX_TOOL_ITERATIONS = 7;
+// describe_collection → query → aggregate → svar — och kräver ibland ett par
+// självkorrigeringar (fel kollektion/fält först). Taket höjs därför rejält
+// över det autonoma defaulten (4) men hålls bundet (robusthet § 10);
+// dubblett-vakten i runAgentLoop hindrar att höjningen bränns på upprepningar.
+export const MAX_TOOL_ITERATIONS = 12;
 export const DEFAULT_CHAT_WEB_SOURCES: WebSourceKey[] = ['breakit', 'sifted', 'vinnova'];
 
 export function pickModels(hasImages: boolean): string[] {

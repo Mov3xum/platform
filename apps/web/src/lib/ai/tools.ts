@@ -845,6 +845,10 @@ export interface ToolResult {
   ok: boolean;
   data?: unknown;
   error?: string;
+  /** Sätts av dubblett-vakten i runAgentLoop när exakt samma anrop upprepas. */
+  repeated?: boolean;
+  /** Instruktion till modellen (t.ex. "upprepa inte detta anrop"). */
+  warning?: string;
 }
 
 function validateFilter(filter: string): string | null {
@@ -852,6 +856,49 @@ function validateFilter(filter: string): string | null {
   if (/@request\b/i.test(filter)) return 'Filter får inte innehålla @request.';
   if (/@collection\b/i.test(filter)) return 'Filter får inte innehålla @collection.';
   return null;
+}
+
+/**
+ * Gör om ett PocketBase-fel till ett ÅTGÄRDBART felmeddelande för modellen.
+ * PB svarar med ett generiskt 400 ("Something went wrong while processing
+ * your request.") vid t.ex. okänt fältnamn i filter/sort — det gav modellen
+ * noll att självkorrigera på, så den körde om samma fråga tills steg-taket
+ * tog slut. Här pekar vi i stället ut trolig orsak + nästa steg.
+ */
+function pbErrorMessage(err: unknown, fallback: string): string {
+  const e = err as {
+    status?: number;
+    response?: { message?: string; data?: Record<string, unknown> };
+    message?: string;
+  };
+  const status = typeof e?.status === 'number' ? e.status : undefined;
+  const fieldErrors: string[] = [];
+  const data = e?.response?.data;
+  if (data && typeof data === 'object') {
+    for (const [field, info] of Object.entries(data)) {
+      const msg = (info as { message?: unknown } | null)?.message;
+      if (typeof msg === 'string' && msg) fieldErrors.push(`${field}: ${msg}`);
+    }
+  }
+  const detail = fieldErrors.length > 0 ? ` Detaljer: ${fieldErrors.join('; ')}.` : '';
+  if (status === 400) {
+    return (
+      'Ogiltig fråga (400) — troligen ett okänt fältnamn i filter/sort eller ' +
+      'ogiltig filtersyntax.' +
+      detail +
+      ' Kör describe_collection för att se kollektionens giltiga fält och ' +
+      'försök sedan med ett ÄNDRAT anrop — upprepa inte exakt samma.'
+    );
+  }
+  if (status === 403 || status === 404) {
+    return (
+      `Åtkomst nekad eller hittades inte (${status}) — kollektionen/posten ` +
+      'är inte läsbar i detta sammanhang. Prova en annan kollektion.' +
+      detail
+    );
+  }
+  if (typeof e?.message === 'string' && e.message) return e.message + detail;
+  return fallback;
 }
 
 function truncateValue(value: unknown): unknown {
@@ -927,10 +974,7 @@ async function runQueryCollection(
       }
     };
   } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : 'Okänt fel vid query.'
-    };
+    return { ok: false, error: pbErrorMessage(err, 'Okänt fel vid query.') };
   }
 }
 
@@ -966,10 +1010,7 @@ async function runCountCollection(
       data: { collection: collection.name, count: result.totalItems }
     };
   } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : 'Okänt fel vid count.'
-    };
+    return { ok: false, error: pbErrorMessage(err, 'Okänt fel vid count.') };
   }
 }
 
@@ -1037,7 +1078,7 @@ async function runSearchRecords(
     // textfält är okända (statisk fallback). Capad till SEARCH_CANDIDATE_FETCH.
     if (candidates.length < Math.max(limit, 10)) await addFrom('');
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Okänt fel vid sökning.' };
+    return { ok: false, error: pbErrorMessage(err, 'Okänt fel vid sökning.') };
   }
 
   const masked = candidates.map((c) => maskRecord(c, collection));
@@ -1115,7 +1156,7 @@ async function runDescribeCollection(
         capped: res.totalItems > res.items.length
       };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : 'Kunde inte läsa fältvärden.' };
+      return { ok: false, error: pbErrorMessage(err, 'Kunde inte läsa fältvärden.') };
     }
   }
 
@@ -1170,7 +1211,7 @@ async function runAggregateCollection(
       const result = computeAggregate({ op, rows: [], total: head.totalItems });
       return { ok: true, data: { collection: collection.name, ...result } };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : 'Okänt fel vid aggregering.' };
+      return { ok: false, error: pbErrorMessage(err, 'Okänt fel vid aggregering.') };
     }
   }
 
@@ -1214,7 +1255,7 @@ async function runAggregateCollection(
     const result = computeAggregate({ op, field, groupBy, rows, total });
     return { ok: true, data: { collection: collection.name, ...result } };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Okänt fel vid aggregering.' };
+    return { ok: false, error: pbErrorMessage(err, 'Okänt fel vid aggregering.') };
   }
 }
 
