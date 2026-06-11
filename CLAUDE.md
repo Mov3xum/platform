@@ -3269,3 +3269,57 @@ når deras egna filer, via verktyget `search_my_files`.
   (alla extraherbara format) i efterhand.
 - **Cosine i JS** över ägarens chunkar räcker gott för ett personligt arkiv;
   samma skalningsväg som § 26.5 vid behov.
+
+---
+
+## 28. AI-miljöpåverkan — tokens, CO₂e och vatten
+
+### 28.1 Översikt
+
+Plattformen visar uppskattad miljöpåverkan av AI-användningen, baserat på
+**Mistrals officiella livscykelsiffror för Mistral Large 2**: ett svar på
+**400 tokens ≈ 1,14 g CO₂e och ≈ 45 ml vatten** (källa:
+https://www.deeplearning.ai/the-batch/french-ai-startup-discloses-full-lifecycle-consumption-and-emissions-for-mistral-large-2).
+Faktorn tillämpas på **totala tokens (in + ut)** som en transparent,
+konservativ uppskattning — alla värden märks "≈" i UI:t.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/ai-impact.ts` (+ `.test.ts`) | Ren, enhetstestad beräknings-/formatteringslogik (tokens → CO₂e/vatten, sv-SE-formattering) |
+| `apps/web/src/app/chatt/ChattWorkspace.tsx` | Summerar konversationens tokens från per-turn-metadata (§ 9.9) |
+| `apps/web/src/components/DashboardChat.tsx` | Token-/miljöchip under chatten ("X tokens · ≈ Y g CO₂e · Z ml vatten") |
+| `apps/web/src/app/insights/page.tsx` | Tenant-vy: CO₂e/vatten i Översikt-railen + admin-länk till systemdashboarden |
+| `apps/web/src/app/admin/ai-miljo/page.tsx` | Systemvid dashboard: total tokenanvändning + utsläpp **per tenant** för vald period |
+
+### 28.2 Ytor
+
+- **Chatten (`/chatt`):** under inmatningsfältet visas konversationens totala
+  tokens (summa av `tokens_in`/`tokens_out` per assistant-turn i `messages[]`)
+  plus uppskattad CO₂e/vatten. Tooltipen anger källan (EU AI Act art. 13).
+- **`/insights` (staff):** tenantens period-tokens omräknade till CO₂e/vatten
+  i Översikt-railen (samma `ai_usage_events`-summa som token-statet).
+- **`/admin/ai-miljo` (ADMIN-ONLY):** period-väljare (innevarande månad /
+  7/30/90 dagar), KPI-kort (tokens, CO₂e, vatten, anrop, kostnad) och tabell
+  **per tenant**. Läser `ai_usage_events` över alla tenants via
+  `getSuperuserPb()` (RLS:en är tenant-scopad) — RBAC-gaten är `admin`-roll,
+  och sidan visar bara aggregerade tekniska siffror (tenantnamn, tokens,
+  kostnad), aldrig PII eller innehåll. Saknade superuser-credentials →
+  tydligt degraderat läge (SOC 2). Paginering är capad (40 × 500 events);
+  vid cap visas en explicit "nedre gräns"-varning — partiella värden
+  presenteras aldrig som kompletta (samma princip som `aggregate_collection`
+  § 9.3).
+
+### 28.3 Regelefterlevnad
+
+- **Riskklass (EU AI Act):** n/a — deterministisk aggregering av befintlig
+  telemetri, ingen AI-inferens, ingen profilering.
+- **GDPR § 5:** inga nya fält, inga nya kollektioner, ingen PII — bara
+  tekniska siffror ur `ai_usage_events` (redan PII-fri, § 9.6-mönstret).
+- **Transparens (art. 13):** källan + metoden (faktor per 400 tokens,
+  tillämpad på in+ut) visas i UI:t och på dashboardens metodsektion.
+- **Begränsning:** faktorn är mätt för Mistral Large 2; vi tillämpar samma
+  faktor för alla modeller (small/medium/embed) → medveten överskattning för
+  mindre modeller. Uppdatera konstanterna i `ai-impact.ts` om Mistral
+  publicerar per-modell-siffror.

@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { ChatAttachment } from '@/lib/actions/chat';
 import type { AgentActivityStep, GeneratedFileRef } from '@platform/shared';
 import {
+  AI_IMPACT_SOURCE_LABEL,
+  formatAiImpact,
+  formatTokens
+} from '@platform/shared';
+import {
   extractPdfFromDataUrlAction,
   extractXlsxFromDataUrlAction
 } from '@/lib/actions/chat-attachments';
@@ -252,6 +257,8 @@ interface Props {
   greeting?: string;
   // Kontrollerade props (ChattWorkspace äger tillståndet)
   messages: UiMessage[];
+  // Totala tokens (in + ut) i konversationen → token-/miljöchip under chatten.
+  usageTokens?: number;
   isPending: boolean;
   error: string | null;
   activeAgent: DashboardAgent | null;
@@ -292,6 +299,7 @@ export default function DashboardChat({
   activities = [],
   greeting,
   messages,
+  usageTokens = 0,
   isPending,
   error,
   activeAgent,
@@ -991,6 +999,14 @@ export default function DashboardChat({
               <p className="mt-2 text-center text-[11px] text-foreground-subtle">
                 AI drivs av Mistral / Le Chat (EU). Konfidentiella anteckningar exkluderas alltid. Genererade dokument: verifiera innan delning.
               </p>
+              {usageTokens > 0 && (
+                <p
+                  className="mt-1 text-center text-[11px] tabular-nums text-foreground-subtle"
+                  title={`${AI_IMPACT_SOURCE_LABEL}. Uppskattningen tillämpas på chattens totala tokens (in + ut).`}
+                >
+                  {formatTokens(usageTokens)} tokens i den här chatten · {formatAiImpact(usageTokens)}
+                </p>
+              )}
             </div>
           </div>
         </div>

@@ -1527,6 +1527,8 @@ export * from './reporting';
 // ─── Startupkompassen — quiz-poängsättning (ren logik, enhetstestad) ─────────
 export * from './compass-quiz';
 export * from './file-topics';
+// ─── AI-miljöpåverkan (tokens → CO₂e/vatten, ren logik, enhetstestad) ────────
+export * from './ai-impact';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */
