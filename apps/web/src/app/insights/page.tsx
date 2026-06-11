@@ -12,6 +12,12 @@ import {
   type ToolRunStatus
 } from '@/lib/labels';
 import { estimateCostUsd } from '@/lib/ai/mistral';
+import {
+  co2GramsForTokens,
+  waterMlForTokens,
+  formatCo2Grams,
+  formatWaterMl
+} from '@platform/shared';
 import type {
   Tool,
   ToolRun,
@@ -592,6 +598,16 @@ export default async function InsightsPage({
             value={formatCostUsd(totalCostUsd)}
             hint="ungefärlig"
           />
+          <RailStat
+            label="CO₂-utsläpp"
+            value={`≈ ${formatCo2Grams(co2GramsForTokens(totalTokens))}`}
+            hint="1,14 g / 400 tokens (Mistral)"
+          />
+          <RailStat
+            label="Vatten"
+            value={`≈ ${formatWaterMl(waterMlForTokens(totalTokens))}`}
+            hint="45 ml / 400 tokens (Mistral)"
+          />
         </div>
       </RailSection>
 
@@ -606,6 +622,18 @@ export default async function InsightsPage({
           />
         ))}
       </RailSection>
+
+      {hasRole(user.roles, ['admin']) && (
+        <RailSection label="System">
+          <RailItem
+            icon="globe"
+            iconTone="accent"
+            title="AI-miljöpåverkan"
+            meta="tokens, CO₂e och vatten per tenant"
+            href="/admin/ai-miljo"
+          />
+        </RailSection>
+      )}
 
       <RailSection
         label="Topp verktyg"

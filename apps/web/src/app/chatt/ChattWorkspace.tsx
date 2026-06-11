@@ -49,10 +49,21 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
     }));
 }
 
+// Totala tokens (in + ut) för konversationen — per-turn-metadata på varje
+// assistant-meddelande (§ 9.9). Driver miljöchipen i chatten (CO₂e/vatten).
+function sumThreadTokens(messages: ToolRunMessage[]): number {
+  return messages.reduce(
+    (acc, m) => acc + (Number(m.tokens_in) || 0) + (Number(m.tokens_out) || 0),
+    0
+  );
+}
+
 export default function ChattWorkspace({ greeting, agents, connectors, activities, initialThreads }: Props) {
   const [threads, setThreads] = useState<ThreadListResult>(initialThreads);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
+  // Totala tokens (in + ut) i den aktiva konversationen → miljöchip i chatten.
+  const [usageTokens, setUsageTokens] = useState(0);
   const [activeAgent, setActiveAgent] = useState<DashboardAgent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -70,6 +81,13 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   const refreshThreads = useCallback(async () => {
     const next = await listThreadsAction();
     setThreads(next);
+  }, []);
+
+  // Sätter både UI-meddelandena och konversationens token-summa från
+  // de persisterade trådmeddelandena (per-turn-metadata, § 9.9).
+  const applyThreadMessages = useCallback((raw: ToolRunMessage[]) => {
+    setMessages(toUiMessages(raw));
+    setUsageTokens(sumThreadTokens(raw));
   }, []);
 
   useEffect(() => {
@@ -90,13 +108,13 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       setDeepJob((cur) => (cur ? { ...cur, status, progress: res.progress ?? cur.progress } : cur));
       if (['succeeded', 'failed', 'cancelled'].includes(status)) {
         const msgs = await getThreadMessagesAction(deepJob.threadId);
-        if (msgs.messages) setMessages(toUiMessages(msgs.messages));
+        if (msgs.messages) applyThreadMessages(msgs.messages);
         await refreshThreads();
         if (status === 'failed') setError(res.jobError || 'Djupdykningen misslyckades.');
       }
     }, 3000);
     return () => clearInterval(timer);
-  }, [deepJob, deepRunning, refreshThreads]);
+  }, [deepJob, deepRunning, refreshThreads, applyThreadMessages]);
 
   async function startDeep(instruction: string) {
     const clean = instruction.trim();
@@ -123,13 +141,14 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     }
     setDeepJob({ id: res.jobId, threadId, status: 'queued', progress: 0 });
     const msgs = await getThreadMessagesAction(threadId);
-    if (msgs.messages) setMessages(toUiMessages(msgs.messages));
+    if (msgs.messages) applyThreadMessages(msgs.messages);
     await refreshThreads();
   }
 
   function newChat() {
     setActiveThreadId(null);
     setMessages([]);
+    setUsageTokens(0);
     setActiveAgent(null);
     setError(null);
   }
@@ -143,7 +162,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       return;
     }
     setActiveThreadId(id);
-    setMessages(toUiMessages(res.messages || []));
+    applyThreadMessages(res.messages || []);
     setActiveAgent(res.agent ? agents.find((a) => a.id === res.agent) || null : null);
   }
 
@@ -173,7 +192,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       setError(res.error);
       return;
     }
-    if (res.messages) setMessages(toUiMessages(res.messages));
+    if (res.messages) applyThreadMessages(res.messages);
     await refreshThreads();
   }
 
@@ -258,7 +277,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
             // Persisterade meddelandet ersätter den live-strömmade texten —
             // nolla liveText så svaret inte visas dubbelt en kort stund.
             setLiveText('');
-            if (Array.isArray(ev.messages)) setMessages(toUiMessages(ev.messages as ToolRunMessage[]));
+            if (Array.isArray(ev.messages)) applyThreadMessages(ev.messages as ToolRunMessage[]);
           } else if (ev.type === 'error') {
             gotError = true;
             setError(typeof ev.error === 'string' ? ev.error : 'Kunde inte hämta svar just nu — försök igen.');
@@ -270,7 +289,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       // anslutningen) — turen kan ändå ha sparats server-side, så ladda om.
       if (!gotFinal && !gotError) {
         const msgs = await getThreadMessagesAction(threadId);
-        if (msgs.messages) setMessages(toUiMessages(msgs.messages));
+        if (msgs.messages) applyThreadMessages(msgs.messages);
       }
       await refreshThreads();
     } finally {
@@ -408,6 +427,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           connectors={connectors}
           activities={activities}
           messages={messages}
+          usageTokens={usageTokens}
           isPending={streaming || deepRunning}
           error={error}
           activeAgent={activeAgent}
