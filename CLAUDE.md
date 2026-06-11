@@ -3364,3 +3364,20 @@ exponering** (best practice), utan att kvalitet tappas:
 - **Säkerhet oförändrad:** skopningen styr bara PROMPTENS detaljnivå —
   tenant-scope, denylist och fältmaskning ligger kvar i `schema.ts`/
   `redaction.ts` och påverkas inte. Riskklass: n/a.
+
+### 28.5 Autodate-grundorsaken — migration 1700000128
+
+`tool_runs` (1700000015) och `ai_usage_events` (1700000058) skapades UTAN
+autodate-fälten `created`/`updated` (PB v0.23 auto-lägger dem inte vid
+`new Collection(...)`, samma bugg-klass som § 23.6/§ 26.4). Följd: varje
+fråga med `created`-filter/-sortering fick HTTP 400 → /insights felade,
+/admin/ai-miljo felade och **månadsbudget-spärren (§ 9.6) var tyst inaktiv**
+(fail-open i `budget.server.ts` returnerade 0). Migration **1700000128**
+sveper ALLA bas-kollektioner och lägger till saknade autodate-fält, samt
+backfillar värden där statistiken kräver det (`tool_runs.created` ←
+`started_at`/`completed_at`; `ai_usage_events.created` ← migrations-
+tidpunkt, § 23.6-precedensen). Speglas i `setup-via-api.mjs` (generiskt
+autodate-svep). Läsvägarna är dessutom **fail-soft**: /insights och
+/admin/ai-miljo retry:ar utan datumfilter och fönstrar i JS mot ett ännu
+inte migrerat schema, med tydlig varning + diagnos-hint i UI:t (rader utan
+tidsstämpel räknas till innevarande period — hellre synliga än borttappade).
