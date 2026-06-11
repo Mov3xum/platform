@@ -150,19 +150,33 @@ export async function listLeads(
   options: LeadListOptions = {}
 ): Promise<{ items: Lead[]; totalItems: number; totalPages: number }> {
   const filter = buildLeadFilter(pb, tenant, options);
-  try {
-    const res = await readWithFallback(
+  const fetchPage = (sort?: string) =>
+    readWithFallback(
       pb,
       (client) =>
         client.collection('compass_leads').getList<Lead>(options.page ?? 1, options.perPage ?? 25, {
           filter,
-          sort: '-created'
+          ...(sort ? { sort } : {})
         }),
       (r) => r.totalItems === 0
     );
+  try {
+    const res = await fetchPage('-created');
     return { items: res.items, totalItems: res.totalItems, totalPages: res.totalPages };
   } catch {
-    return { items: [], totalItems: 0, totalPages: 0 };
+    // Schemat kan sakna `created` (kollektion skapad innan migration
+    // 1700000126) → sorteringen 400:ar. Lista då osorterat och vänd ordningen
+    // (PB:s defaultordning är äldst-först) så leads aldrig "försvinner".
+    try {
+      const res = await fetchPage();
+      return {
+        items: [...res.items].reverse(),
+        totalItems: res.totalItems,
+        totalPages: res.totalPages
+      };
+    } catch {
+      return { items: [], totalItems: 0, totalPages: 0 };
+    }
   }
 }
 
@@ -177,19 +191,26 @@ export async function listLeadsForExport(
   options: LeadListOptions = {}
 ): Promise<Lead[]> {
   const filter = buildLeadFilter(pb, tenant, options);
-  try {
-    return await readWithFallback(
+  const fetchAll = (sort?: string) =>
+    readWithFallback(
       pb,
       (client) =>
         client.collection('compass_leads').getFullList<Lead>({
           filter,
-          sort: '-created',
+          ...(sort ? { sort } : {}),
           batch: 500
         }),
       (rows) => rows.length === 0
     );
+  try {
+    return await fetchAll('-created');
   } catch {
-    return [];
+    // Saknat `created`-fält (innan migration 1700000126) → osorterad retry.
+    try {
+      return (await fetchAll()).reverse();
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -395,14 +416,24 @@ export async function listMessages(
   pb: PocketBase,
   conversationId: string
 ): Promise<{ role: 'user' | 'assistant' | 'system'; content: string }[]> {
+  const filter = pb.filter('conversation = {:c}', { c: conversationId });
   try {
     const res = await pb.collection('compass_messages').getFullList<{
       role: 'user' | 'assistant' | 'system';
       content: string;
-    }>({ filter: pb.filter('conversation = {:c}', { c: conversationId }), sort: 'created', batch: 200 });
+    }>({ filter, sort: 'created', batch: 200 });
     return res;
   } catch {
-    return [];
+    // Saknat `created`-fält (innan migration 1700000126) → osorterad retry
+    // (PB:s defaultordning är äldst-först = samma ordning som sort `created`).
+    try {
+      return await pb.collection('compass_messages').getFullList<{
+        role: 'user' | 'assistant' | 'system';
+        content: string;
+      }>({ filter, batch: 200 });
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -856,17 +887,24 @@ export async function listSecurityEvents(
     filters.push('kind = {:k}');
     params.k = options.kind;
   }
+  const filter = pb.filter(filters.join(' && '), params);
   try {
     return await pb.collection('compass_security_events').getList(
       options.page ?? 1,
       options.perPage ?? 50,
-      {
-        filter: pb.filter(filters.join(' && '), params),
-        sort: '-created',
-        expand: 'actor'
-      }
+      { filter, sort: '-created', expand: 'actor' }
     );
   } catch {
-    return { items: [], totalItems: 0, totalPages: 0 };
+    // Saknat `created`-fält (innan migration 1700000126) → osorterad retry.
+    try {
+      const res = await pb.collection('compass_security_events').getList(
+        options.page ?? 1,
+        options.perPage ?? 50,
+        { filter, expand: 'actor' }
+      );
+      return { ...res, items: [...res.items].reverse() };
+    } catch {
+      return { items: [], totalItems: 0, totalPages: 0 };
+    }
   }
 }
