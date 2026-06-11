@@ -1,10 +1,16 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import type PocketBase from 'pocketbase';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { getOneForTenant } from '@/lib/pb.server';
 import { hasRole } from '@/lib/rbac';
 import { toRawStatus, type BoardStatus } from '@/lib/overview/status';
+import {
+  isStartupBoardStatus,
+  type StartupBoardStatus
+} from '@/lib/startup-board/board';
+import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
 
 /**
  * Server actions för CRM-uppgifter (`tasks`, migration 1700000077).
@@ -205,5 +211,181 @@ export async function updateTaskStatusAction(
   }
 
   revalidatePath('/inkorg');
+  return { ok: true };
+}
+
+// ============================================================================
+// Bolagskanban — fliken "Aktiviteter" på bolagskortet (CLAUDE.md § 15.7).
+// Sex kolumner = råa tasks.status-värden (migration 1700000129).
+// ============================================================================
+
+/** Validerar tilldelade kollegor: bara staff i den egna tenanten släpps
+ *  igenom (defense-in-depth ovanpå PB-reglerna, § 18.4-mönstret). */
+async function validStaffIds(
+  pb: PocketBase,
+  tenantId: string,
+  candidateIds: string[]
+): Promise<string[]> {
+  const wanted = new Set(candidateIds.filter(Boolean));
+  if (wanted.size === 0) return [];
+  const resources = await listAssignableResourcesForTenant(pb, tenantId);
+  const allowed = new Set(resources.map((r) => r.id));
+  return [...wanted].filter((id) => allowed.has(id));
+}
+
+function revalidateStartupBoard(startupId: string) {
+  revalidatePath(`/startups/${startupId}/aktiviteter`);
+  revalidatePath(`/startups/${startupId}`);
+  revalidatePath('/inkorg');
+}
+
+/** Skapa en uppgift direkt i en kolumn på bolagskanbanen. Bara staff. */
+export async function createStartupBoardTaskAction(input: {
+  startupId: string;
+  description: string;
+  status?: string;
+  kind?: string;
+  dueAt?: string;
+  assigneeIds?: string[];
+}): Promise<TaskActionResult> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, [...STAFF_ROLES])) {
+    return { ok: false, error: 'Endast personal kan skapa uppgifter.' };
+  }
+
+  const description = (input.description ?? '').trim();
+  if (!description) return { ok: false, error: 'Beskrivning krävs.' };
+  if (description.length > 500) {
+    return { ok: false, error: 'Beskrivning får vara max 500 tecken.' };
+  }
+
+  const status: StartupBoardStatus = isStartupBoardStatus(input.status ?? '')
+    ? (input.status as StartupBoardStatus)
+    : 'open';
+  const kind: TaskKind = TASK_KINDS.includes(input.kind as TaskKind)
+    ? (input.kind as TaskKind)
+    : 'other';
+
+  // Tenant-isolation: bolaget måste finnas i användarens tenant.
+  try {
+    await getOneForTenant('startups', input.startupId);
+  } catch {
+    return { ok: false, error: 'Bolaget hittades inte i din organisation.' };
+  }
+
+  const pb = await getServerPb();
+  const assignees = await validStaffIds(pb, user.tenant, input.assigneeIds ?? []);
+
+  const payload: Record<string, unknown> = {
+    tenant: user.tenant,
+    kind,
+    description,
+    status,
+    owner: user.id,
+    assignees,
+    link_kind: 'startup',
+    startup: input.startupId,
+    completed_at: status === 'done' ? new Date().toISOString() : null
+  };
+  if (input.dueAt && /^\d{4}-\d{2}-\d{2}/.test(input.dueAt)) {
+    payload.due_at = input.dueAt;
+  }
+
+  try {
+    await pb.collection('tasks').create(payload);
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte skapa uppgiften.'
+    };
+  }
+
+  revalidateStartupBoard(input.startupId);
+  return { ok: true };
+}
+
+/** Flytta ett kort mellan kanban-kolumner (drag-and-drop). Staff eller ägare. */
+export async function moveStartupBoardTaskAction(
+  taskId: string,
+  status: string
+): Promise<TaskActionResult> {
+  const user = await requireUser();
+  if (!isStartupBoardStatus(status)) {
+    return { ok: false, error: 'Ogiltig kolumn.' };
+  }
+
+  const pb = await getServerPb();
+
+  let row: { id: string; tenant?: string; owner?: string; startup?: string };
+  try {
+    row = await pb
+      .collection('tasks')
+      .getOne(taskId, { fields: 'id,tenant,owner,startup' });
+  } catch {
+    return { ok: false, error: 'Uppgiften hittades inte.' };
+  }
+
+  if (row.tenant !== user.tenant) {
+    return { ok: false, error: 'Åtkomst nekad.' };
+  }
+  const canEdit = hasRole(user.roles, [...STAFF_ROLES]) || row.owner === user.id;
+  if (!canEdit) {
+    return { ok: false, error: 'Du får inte flytta denna uppgift.' };
+  }
+
+  try {
+    await pb.collection('tasks').update(taskId, {
+      status,
+      completed_at: status === 'done' ? new Date().toISOString() : null
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte flytta uppgiften.'
+    };
+  }
+
+  if (row.startup) revalidateStartupBoard(row.startup);
+  else revalidatePath('/inkorg');
+  return { ok: true };
+}
+
+/** Sätt vilka Movexum-kollegor som är tilldelade ett kort. Bara staff. */
+export async function setTaskAssigneesAction(
+  taskId: string,
+  assigneeIds: string[]
+): Promise<TaskActionResult> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, [...STAFF_ROLES])) {
+    return { ok: false, error: 'Endast personal kan tilldela kollegor.' };
+  }
+
+  const pb = await getServerPb();
+
+  let row: { id: string; tenant?: string; startup?: string };
+  try {
+    row = await pb
+      .collection('tasks')
+      .getOne(taskId, { fields: 'id,tenant,startup' });
+  } catch {
+    return { ok: false, error: 'Uppgiften hittades inte.' };
+  }
+
+  if (row.tenant !== user.tenant) {
+    return { ok: false, error: 'Åtkomst nekad.' };
+  }
+
+  const assignees = await validStaffIds(pb, user.tenant, assigneeIds ?? []);
+
+  try {
+    await pb.collection('tasks').update(taskId, { assignees });
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte uppdatera tilldelningen.'
+    };
+  }
+
+  if (row.startup) revalidateStartupBoard(row.startup);
   return { ok: true };
 }
