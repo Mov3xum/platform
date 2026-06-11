@@ -40,6 +40,7 @@ const PB_URL = /^https?:\/\//i.test(PB_URL_RAW) ? PB_URL_RAW : `https://${PB_URL
 
 const PUBLIC_SLUG = 'innovationspotential';
 const INTERNAL_SLUG = 'innovationspotential';
+const FALLBACK_SLUGS = ['entreprenorsprofil'];
 
 const NEXT_CTA = { label: 'Berätta om din idé för Movexum', url: '/m/grundare' };
 
@@ -209,18 +210,24 @@ async function main() {
     process.exit(2);
   }
 
-  // Hitta modulen: public_slug i första hand, internt slug i andra.
-  let modules = await pb
-    .collection('compass_modules')
-    .getFullList({ filter: pb.filter('public_slug = {:s}', { s: PUBLIC_SLUG }) });
-  if (modules.length === 0) {
-    modules = await pb
+  // Hitta modulen: public_slug/slug för primärslug, med fallback för omdöpt modul.
+  const slugCandidates = [...new Set([PUBLIC_SLUG, INTERNAL_SLUG, ...FALLBACK_SLUGS])];
+  const byId = new Map();
+  for (const slug of slugCandidates) {
+    const byPublicSlug = await pb
       .collection('compass_modules')
-      .getFullList({ filter: pb.filter('slug = {:s}', { s: INTERNAL_SLUG }) });
+      .getFullList({ filter: pb.filter('public_slug = {:s}', { s: slug }) });
+    for (const mod of byPublicSlug) byId.set(mod.id, mod);
+
+    const byInternalSlug = await pb
+      .collection('compass_modules')
+      .getFullList({ filter: pb.filter('slug = {:s}', { s: slug }) });
+    for (const mod of byInternalSlug) byId.set(mod.id, mod);
   }
+  const modules = [...byId.values()];
 
   if (modules.length === 0) {
-    console.error(`✗ Hittade ingen modul med public_slug/slug = "${PUBLIC_SLUG}".`);
+    console.error(`✗ Hittade ingen modul med public_slug/slug i [${slugCandidates.join(', ')}].`);
     const all = await pb
       .collection('compass_modules')
       .getFullList({ fields: 'id,name,slug,public_slug,flow_type' });
@@ -272,7 +279,7 @@ async function main() {
     console.log(`  ✓ Verifierat: modulen har nu ${after.length} frågor`);
   }
 
-  console.log('\n✓ Klart. Ladda om /m/innovationspotential (och admin-vyn).');
+  console.log('\n✓ Klart. Ladda om aktuell publik modul (/m/<public_slug>) och admin-vyn.');
 }
 
 main().catch((err) => {
