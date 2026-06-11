@@ -51,6 +51,8 @@ export interface UiMessage {
   content: string;
   generated_files?: GeneratedFileRef[];
   steps?: AgentActivityStep[];
+  /** Turens tokens (in + ut) → inline token-/miljöchip under svaret. */
+  tokens?: number;
 }
 
 // Ett pågående verktygssteg under en streamande turn.
@@ -257,8 +259,6 @@ interface Props {
   greeting?: string;
   // Kontrollerade props (ChattWorkspace äger tillståndet)
   messages: UiMessage[];
-  // Totala tokens (in + ut) i konversationen → token-/miljöchip under chatten.
-  usageTokens?: number;
   isPending: boolean;
   error: string | null;
   activeAgent: DashboardAgent | null;
@@ -299,7 +299,6 @@ export default function DashboardChat({
   activities = [],
   greeting,
   messages,
-  usageTokens = 0,
   isPending,
   error,
   activeAgent,
@@ -960,6 +959,14 @@ export default function DashboardChat({
                         dangerouslySetInnerHTML={{ __html: chatMarkdownToHtml(msg.content) }}
                       />
                       {renderGeneratedFiles(msg.generated_files)}
+                      {typeof msg.tokens === 'number' && msg.tokens > 0 && (
+                        <p
+                          className="mt-1.5 text-[11px] tabular-nums text-foreground-subtle"
+                          title={`${AI_IMPACT_SOURCE_LABEL}. Uppskattningen tillämpas på turens totala tokens (in + ut) — varje verktygssteg kräver ett eget modellanrop som bearbetar hela kontexten igen.`}
+                        >
+                          {formatTokens(msg.tokens)} tokens · {formatAiImpact(msg.tokens)}
+                        </p>
+                      )}
                     </div>
                   </div>
                 )
@@ -999,14 +1006,6 @@ export default function DashboardChat({
               <p className="mt-2 text-center text-[11px] text-foreground-subtle">
                 AI drivs av Mistral / Le Chat (EU). Konfidentiella anteckningar exkluderas alltid. Genererade dokument: verifiera innan delning.
               </p>
-              {usageTokens > 0 && (
-                <p
-                  className="mt-1 text-center text-[11px] tabular-nums text-foreground-subtle"
-                  title={`${AI_IMPACT_SOURCE_LABEL}. Uppskattningen tillämpas på chattens totala tokens (in + ut).`}
-                >
-                  {formatTokens(usageTokens)} tokens i den här chatten · {formatAiImpact(usageTokens)}
-                </p>
-              )}
             </div>
           </div>
         </div>

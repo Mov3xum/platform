@@ -3295,9 +3295,16 @@ konservativ uppskattning — alla värden märks "≈" i UI:t.
 
 ### 28.2 Ytor
 
-- **Chatten (`/chatt`):** under inmatningsfältet visas konversationens totala
-  tokens (summa av `tokens_in`/`tokens_out` per assistant-turn i `messages[]`)
-  plus uppskattad CO₂e/vatten. Tooltipen anger källan (EU AI Act art. 13).
+- **Chatten (`/chatt`):** INLINE under varje assistant-svar visas turens
+  tokens (`tokens_in` + `tokens_out` ur per-turn-metadatan i `messages[]`)
+  plus uppskattad CO₂e/vatten. Tooltipen anger källan (EU AI Act art. 13)
+  och förklarar varför siffran kan kännas hög: varje verktygssteg i
+  agent-loopen (§ 16.2) är ett EGET modellanrop som bearbetar hela
+  kontexten (systemprompt + schema-sammanfattning + guidance + historik +
+  verktygsresultat) igen, och Mistral debiterar prompt-tokens per anrop —
+  en tur med 2–3 verktygsanrop landar därför normalt på tiotusentals
+  tokens. Det är verklig, korrekt summerad förbrukning (`onUsage` per
+  API-anrop i `runAgentLoop`), inte ett räknefel.
 - **`/insights` (staff):** tenantens period-tokens omräknade till CO₂e/vatten
   i Översikt-railen (samma `ai_usage_events`-summa som token-statet).
 - **`/admin/ai-miljo` (ADMIN-ONLY):** period-väljare (innevarande månad /
