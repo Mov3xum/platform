@@ -82,8 +82,10 @@ function formatPercent(n: number): string {
   return `${(n * 100).toFixed(0)}%`;
 }
 
-function dateKey(iso: string): string {
-  return iso.slice(0, 10);
+function dateKey(iso: string | undefined): string {
+  // Null-safe: rader från fail-soft-fallbacken (§ 28.5) kan sakna `created`
+  // när autodate-fälten inte finns på PB-instansen ännu.
+  return (iso || '').slice(0, 10);
 }
 
 /**
@@ -1122,7 +1124,9 @@ export default async function InsightsPage({
                               {toolById.get(f.tool || '')?.name || 'Agentkörning'}
                             </Link>
                             <span className="shrink-0 text-[10px] text-foreground-subtle tabular-nums">
-                              {new Date(f.created).toLocaleDateString('sv-SE')}
+                              {f.created
+                                ? new Date(f.created).toLocaleDateString('sv-SE')
+                                : '—'}
                             </span>
                           </div>
                           <p className="mt-0.5 text-[12px] text-foreground-muted">
