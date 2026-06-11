@@ -18,6 +18,7 @@ import type {
   DeepJob,
   DeepJobSubtask,
   GeneratedFileRef,
+  InlineVisualRef,
   Role,
   ToolRunMessage
 } from '@platform/shared';
@@ -231,6 +232,7 @@ export async function runDeepJob(deepJobId: string): Promise<DeepJobResult> {
       }
     ];
     const generatedFiles: GeneratedFileRef[] = [];
+    const inlineVisuals: InlineVisualRef[] = [];
     let draft = '';
     try {
       const loop = await runAgentLoop(aggConv, {
@@ -243,7 +245,8 @@ export async function runDeepJob(deepJobId: string): Promise<DeepJobResult> {
           actor,
           ownerUserId: job.owner,
           chatThreadId: job.thread,
-          generatedFiles
+          generatedFiles,
+          inlineVisuals
         },
         maxIterations: AGG_MAX_ITER,
         onUsage
@@ -265,6 +268,7 @@ export async function runDeepJob(deepJobId: string): Promise<DeepJobResult> {
       tokens_out: tokensOut,
       cost_usd: costUsd,
       generated_files: generatedFiles.length > 0 ? generatedFiles : undefined,
+      visuals: inlineVisuals.length > 0 ? inlineVisuals : undefined,
       at: new Date().toISOString()
     };
     await pb.collection('chat_threads').update(job.thread, {

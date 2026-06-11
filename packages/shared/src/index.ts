@@ -329,6 +329,21 @@ export interface GeneratedFileRef {
   preview_svg?: string;
 }
 
+// Inline-visualisering (diagram och/eller nyckeltalskort) renderad
+// deterministiskt server-side som brandad SVG och bifogad ett assistant-svar.
+// Visas i full bredd i chatten och kan laddas ned som PNG/JPEG (rastreras
+// klient-side). Ingen ny dataväg — innehållet kommer från verktygssvar
+// agenten redan sett i samma konversation. Escapad vid rendering; cappad
+// i storlek.
+export interface InlineVisualRef {
+  id: string;
+  kind: 'chart' | 'stats';
+  title?: string;
+  svg: string;
+  width: number;
+  height: number;
+}
+
 // Ett verktygssteg agenten utförde under en turn. Live-streamas till UI:t
 // medan turen körs och persisteras på assistant-meddelandet så återöppnade
 // trådar visar vad agenten gjorde. Etiketter är PII-fria (kollektionsnivå /
@@ -345,6 +360,8 @@ export interface ToolRunMessage {
   attachments?: ToolRunAttachmentRef[];
   // Agent-genererade dokument knutna till detta (assistant-)turn.
   generated_files?: GeneratedFileRef[];
+  // Inline-visualiseringar (diagram/nyckeltal) knutna till detta (assistant-)turn.
+  visuals?: InlineVisualRef[];
   // Verktygssteg agenten utförde för detta (assistant-)turn.
   steps?: AgentActivityStep[];
   model?: string; // modell som producerade detta turn (assistant)

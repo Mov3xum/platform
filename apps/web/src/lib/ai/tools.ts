@@ -13,8 +13,15 @@ import type { MistralToolCall, MistralToolDefinition } from './mistral';
 import { searchOrgKnowledge, searchUserFiles, renderKnowledgeHits } from './rag';
 import { logAiUsage } from './usage';
 import { escFilter } from '@/lib/pb-filter';
-import { type GeneratedFileRef, FILE_TOPIC_IDS, isFileTopic } from '@platform/shared';
+import {
+  type GeneratedFileRef,
+  type InlineVisualRef,
+  FILE_TOPIC_IDS,
+  isFileTopic
+} from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
+import { validateChart, validateKpis } from '@/lib/documents/validate';
+import { renderInlineVisual } from './visuals';
 import { getTemplate, listTemplateSummaries, TEMPLATE_IDS } from '@/lib/documents/templates';
 import { saveGeneratedFile } from '@/lib/documents/save';
 import {
@@ -46,6 +53,11 @@ const MAX_AGG_SCAN = 500; // rader describe_collection får skanna för distinkt
 const AGG_PAGE = 500; // PB:s max perPage — sidstorlek vid aggregerings-paginering
 const MAX_AGG_ROWS = 5000; // hård tak-radmängd för aggregering (10 sidor, robusthet § 10)
 const MAX_DISTINCT_VALUES = 40;
+
+// render_visual — inline-visualiseringar i chatten (robusthet § 10:
+// visuals persisteras i chat_threads.messages som har 2 MB-tak).
+const MAX_VISUALS_PER_TURN = 4;
+const MAX_VISUAL_SVG_BYTES = 150_000;
 
 // Display-fält vi försöker läsa ur en expanderad relation när group_by är en
 // relation, i prioordning. Bara icke-PII-etiketter (namn/titel) — aldrig
@@ -728,6 +740,41 @@ export function buildChatTools(
         }
       }
     });
+
+    // Inline-visualisering: stort, brandat diagram och/eller KPI-kort som visas
+    // direkt i chatten (full bredd) och kan laddas ned som PNG/JPEG. Samma
+    // determinism-princip som generate_document — modellen levererar ett typat
+    // spec, servern renderar; siffrorna måste komma från verktygssvar.
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'render_visual',
+        description:
+          'Visar ett STORT, brandat diagram och/eller nyckeltalskort (statistik) ' +
+          'direkt INLINE i chatten — användaren ser det i full bredd och kan ladda ' +
+          'ned det som PNG/JPEG-bild. Använd detta PROAKTIVT när användaren vill SE ' +
+          'data: trender (line/area), jämförelser och topp-listor (bar/hbar), ' +
+          'fördelningar (pie/donut) eller nyckeltal (`kpis` som stat-kort). ' +
+          'VIKTIGT: alla siffror MÅSTE komma från tidigare verktygssvar i denna ' +
+          'konversation — hitta ALDRIG på data. Ange minst ett av `chart` och ' +
+          `\`kpis\`. Max ${MAX_VISUALS_PER_TURN} per svar.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            title: {
+              type: 'string',
+              description: 'Rubrik som visas ovanför visualiseringen.'
+            },
+            subtitle: {
+              type: 'string',
+              description: 'Valfri kort underrubrik/förklaring (t.ex. period, urval).'
+            },
+            chart: CHART_SCHEMA,
+            kpis: KPIS_SCHEMA
+          }
+        }
+      }
+    });
   }
 
   return tools;
@@ -812,6 +859,11 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       const kind = typeof args.kind === 'string' ? args.kind : '';
       return { tool: name, label: `Skapar ${DOC_LABELS[kind] || 'dokument'}` };
     }
+    case 'render_visual':
+      return {
+        tool: name,
+        label: args.chart ? 'Ritar diagram' : 'Tar fram nyckeltalskort'
+      };
     default:
       return { tool: name, label: 'Arbetar' };
   }
@@ -839,6 +891,11 @@ export interface ToolDispatchContext {
    * så chatt-lagret kan bifoga dem på assistant-svaret (nedladdnings-chip).
    */
   generatedFiles?: GeneratedFileRef[];
+  /**
+   * Mutabel sink: `render_visual` pushar inline-visualiseringar (diagram/
+   * KPI-kort som SVG) hit så chatt-lagret kan bifoga dem på assistant-svaret.
+   */
+  inlineVisuals?: InlineVisualRef[];
 }
 
 export interface ToolResult {
@@ -1438,6 +1495,8 @@ export async function dispatchToolCall(
       return runMemoryWrite(args, ctx);
     case 'generate_document':
       return runGenerateDocument(args, ctx);
+    case 'render_visual':
+      return runRenderVisual(args, ctx);
     default:
       return { ok: false, error: `Okänt verktyg: ${call.function.name}` };
   }
@@ -1638,6 +1697,69 @@ async function runGenerateDocument(
     return {
       ok: false,
       error: err instanceof Error ? err.message : 'Kunde inte generera dokumentet.'
+    };
+  }
+}
+
+/**
+ * Renderar en inline-visualisering (diagram/KPI-kort) som brandad SVG och
+ * bifogar den assistant-svaret via ctx.inlineVisuals-sinken. Deterministisk
+ * rendering av agentens typade spec (samma princip som generate_document) —
+ * ingen ny dataväg, ingen persistens utanför chatt-meddelandet.
+ */
+async function runRenderVisual(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  if (!ctx.inlineVisuals) {
+    return { ok: false, error: 'Inline-visualiseringar är inte tillgängliga i den här ytan.' };
+  }
+  if (ctx.inlineVisuals.length >= MAX_VISUALS_PER_TURN) {
+    return { ok: false, error: `Max ${MAX_VISUALS_PER_TURN} visualiseringar per svar.` };
+  }
+
+  const chart = validateChart(args.chart);
+  const kpis = validateKpis(args.kpis);
+  if (!chart && !kpis) {
+    return {
+      ok: false,
+      error:
+        'Ange minst ett av `chart` (type + categories + series med values) ' +
+        'eller `kpis` (label + value per kort).'
+    };
+  }
+
+  try {
+    const visual = renderInlineVisual({
+      title: typeof args.title === 'string' ? args.title : undefined,
+      subtitle: typeof args.subtitle === 'string' ? args.subtitle : undefined,
+      chart,
+      kpis
+    });
+    if (visual.svg.length > MAX_VISUAL_SVG_BYTES) {
+      return {
+        ok: false,
+        error: 'Visualiseringen blev för stor — minska antalet kategorier/serier.'
+      };
+    }
+    ctx.inlineVisuals.push(visual);
+    return {
+      ok: true,
+      data: {
+        visual_id: visual.id,
+        kind: visual.kind,
+        note:
+          'Visualiseringen visas i full bredd i chatten direkt under ditt svar ' +
+          'och kan laddas ned som PNG/JPEG. Hänvisa kort till den i din text — ' +
+          'räkna inte upp alla siffror igen.'
+      }
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte rendera visualiseringen.'
     };
   }
 }
