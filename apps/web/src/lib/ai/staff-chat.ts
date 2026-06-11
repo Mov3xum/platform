@@ -13,7 +13,13 @@ import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from './web
 import { withAttachedImages } from './chat-input';
 import { logAiUsage } from './usage';
 import type { Actor } from '@/lib/core/write';
-import type { AiUsageSurface, GeneratedFileRef, Role, WebSourceKey } from '@platform/shared';
+import type {
+  AiUsageSurface,
+  GeneratedFileRef,
+  InlineVisualRef,
+  Role,
+  WebSourceKey
+} from '@platform/shared';
 
 // Delad staff-chatt-motor. Tidigare bodde all denna logik privat i
 // `lib/actions/chat.ts` (efemär dashboardchatt). Den är nu extraherad så att
@@ -30,9 +36,11 @@ export const CHAT_FALLBACK_MODELS = [
 // Vision-kapabel modell när bilder bifogas (stödjer även function calling).
 export const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
 // Interaktiv staff-chatt: ett intent-flöde blir lätt search_records →
-// describe_collection → query → aggregate → svar, så taket höjs över det
-// autonoma defaulten (4) men hålls bundet (robusthet § 10).
-export const MAX_TOOL_ITERATIONS = 7;
+// describe_collection → query → aggregate → svar — och kräver ibland ett par
+// självkorrigeringar (fel kollektion/fält först). Taket höjs därför rejält
+// över det autonoma defaulten (4) men hålls bundet (robusthet § 10);
+// dubblett-vakten i runAgentLoop hindrar att höjningen bränns på upprepningar.
+export const MAX_TOOL_ITERATIONS = 12;
 export const DEFAULT_CHAT_WEB_SOURCES: WebSourceKey[] = ['breakit', 'sifted', 'vinnova'];
 
 export function pickModels(hasImages: boolean): string[] {
@@ -113,7 +121,15 @@ const STAFF_TOOL_GUIDANCE =
   '`chart`, och avsluta med en slutsats/nästa-steg-slide. Skapa ALDRIG en slide ' +
   'utan innehåll (tomma slides tas bort) och upprepa inte titeln som egen slide. ' +
   'För topp-N/ranking: använd `chart.type:"hbar"` (liggande staplar). Använd ' +
-  'rubrik + 3–5 korta punkter per slide, inte långa stycken.\n\n' +
+  'rubrik + 3–5 korta punkter per slide, inte långa stycken.\n' +
+  '- `render_visual` (när tillgängligt): visa ett STORT, brandat diagram ' +
+  'och/eller nyckeltalskort DIREKT i chatten (full bredd; användaren kan ladda ' +
+  'ned det som PNG/JPEG). Använd det PROAKTIVT när svaret handlar om siffror: ' +
+  'trender → line/area, jämförelser/topp-listor → bar/hbar, fördelningar → ' +
+  'pie/donut, nyckeltal → `kpis`. Siffrorna MÅSTE komma från verktygssvar i ' +
+  'samma konversation. Skriv texten som komplement till visualiseringen — ' +
+  'upprepa inte alla siffror. Vill användaren ha en FIL (PowerPoint/PDF) är ' +
+  'det `generate_document` som gäller; `render_visual` är för att SE direkt.\n\n' +
   'Skrivregler:\n' +
   '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
   'efterfrågad.\n' +
@@ -295,6 +311,8 @@ export interface StaffTurnResult {
   tokensOut: number;
   /** Dokument som agenten genererade under turn:en (för nedladdnings-chips). */
   generatedFiles: GeneratedFileRef[];
+  /** Inline-visualiseringar (diagram/KPI-kort) som agenten tog fram under turn:en. */
+  visuals: InlineVisualRef[];
 }
 
 export interface RunStaffChatTurnOptions {
@@ -409,6 +427,7 @@ export async function runStaffChatTurn(
   let tokensOut = 0;
   let lastModel = '';
   const generatedFiles: GeneratedFileRef[] = [];
+  const inlineVisuals: InlineVisualRef[] = [];
   const surface: AiUsageSurface = opts.surface ?? 'dashboard_chat';
 
   // Modellval efter komplexitet (ej längre default small). Bilder → vision.
@@ -430,7 +449,8 @@ export async function runStaffChatTurn(
         actor,
         ownerUserId: opts.ownerUserId,
         chatThreadId: opts.chatThreadId,
-        generatedFiles
+        generatedFiles,
+        inlineVisuals
       },
       maxIterations: MAX_TOOL_ITERATIONS,
       onStep: opts.onStep,
@@ -451,7 +471,14 @@ export async function runStaffChatTurn(
     });
     return {
       ok: true,
-      result: { text: result.text, model: lastModel, tokensIn, tokensOut, generatedFiles }
+      result: {
+        text: result.text,
+        model: lastModel,
+        tokensIn,
+        tokensOut,
+        generatedFiles,
+        visuals: inlineVisuals
+      }
     };
   } catch (err) {
     console.error('[staff-chat] mistral tool loop error', { tenant: user.tenant, error: err });

@@ -82,8 +82,9 @@ const CHAT_FALLBACK_MODELS = [
 // Pixtral 12B stödjer både vision och function calling.
 const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
 // Interaktiv chatt: höjt över det autonoma defaulten (4) så ett intent-flöde
-// (search_records → describe_collection → query → aggregate → svar) ryms.
-const MAX_TOOL_ITERATIONS = 7;
+// (search_records → describe_collection → query → aggregate → svar) ryms,
+// inklusive ett par självkorrigeringar. Samma tak som staff-chat.ts.
+const MAX_TOOL_ITERATIONS = 12;
 
 // Modellval för dashboard-chatten
 const STAFF_MODEL = 'mistral-large-latest';

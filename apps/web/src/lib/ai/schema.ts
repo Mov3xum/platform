@@ -82,6 +82,11 @@ const COLLECTION_OVERRIDES: Record<
       'Uppgifter (kind, status, due_at, owner, länkad startup/kontakt/event). ' +
       'Fritextfältet `details` exkluderas (kan innehålla privata arbetsanteckningar, CLAUDE.md § 15.3).',
     maskedFields: ['details']
+  },
+  compass_leads: {
+    description:
+      'Inflöde/leads från Startupkompassen — nya intresseanmälningar/idéer som ' +
+      'kommit in via publika intag-moduler. "Senaste inflödet" = senaste raden här (sort -created)'
   }
 };
 

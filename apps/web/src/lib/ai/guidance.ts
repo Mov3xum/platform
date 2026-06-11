@@ -99,6 +99,12 @@ export const DOMAIN_GLOSSARY =
   '(inkubation), prescale, acceleration. "Antagen till BC" härleds ur en rad i ' +
   '`startup_phase_history` med `phase = "boost_chamber"` — det finns inget eget ' +
   'fält för det.\n' +
+  '- "Inflöde"/"inflöden"/"leads" (nya intresseanmälningar via Startupkompassen, ' +
+  'sidan /inflode) = kollektionen `compass_leads` — INTE `startups`. "Vårt ' +
+  'senaste inflöde" → `query_collection(collection:"compass_leads", ' +
+  'sort:"-created", limit:1)`. SKILJ detta från bolag som befinner sig i ' +
+  'inflödesfasen (`startups.phase = "inflode"`); fråga vid tvetydighet, men ' +
+  '"ett inflöde"/"senaste inflödet" betyder normalt en compass_leads-rad.\n' +
   '- `startups.status` (relation till inkubatorn): active (aktiv/pågående), ' +
   'alumni (alumn/avslutad), paused (pausad), rejected (avvisad/nekad).\n' +
   '- `startups.bolag_status` (bolagets operationella status, SKILJ från status ' +
