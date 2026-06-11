@@ -9,7 +9,8 @@ import {
   buildChatTools,
   describeToolCall,
   dispatchToolCall,
-  type ToolDispatchContext
+  type ToolDispatchContext,
+  type ToolResult
 } from './tools';
 import { buildSchemaSummary, getExposedCollections } from './schema';
 import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from './guidance';
@@ -105,6 +106,13 @@ export async function runAgentLoop(
     options.tools && options.tools.length > 0 ? options.tools : undefined;
   let toolCallsMade = 0;
 
+  // Dubblett-vakt: en modell som kör fast upprepar gärna EXAKT samma
+  // verktygsanrop (samma namn + argument) tur efter tur och bränner hela
+  // steg-taket utan framsteg. Vi cachar varje anrops resultat och svarar på
+  // upprepningar med det cachade resultatet + en explicit uppmaning att byta
+  // angreppssätt — i stället för att köra om frågan (§ 10 robusthet).
+  const seenCalls = new Map<string, ToolResult>();
+
   // Hård kostnadsspärr per tenant/månad (EU AI Act art. 15 robusthet). No-op
   // när inget tak är satt; kastar AiBudgetExceededError när månadsbudgeten är
   // slut så att en skenande loop/fan-out inte kan bränna obegränsat.
@@ -150,7 +158,26 @@ export async function runAgentLoop(
       options.onStep?.({ phase: 'start', id: call.id, tool: descs[i].tool, label: descs[i].label })
     );
     const toolResults = await Promise.all(
-      toolCalls.map((call) => dispatchToolCall(call, options.toolContext))
+      toolCalls.map(async (call): Promise<ToolResult> => {
+        const key = `${call.function.name}|${call.function.arguments ?? ''}`;
+        const previous = seenCalls.get(key);
+        if (previous) {
+          // Kör INTE om — returnera det tidigare resultatet med en tydlig
+          // instruktion så modellen slutar loopa på samma anrop.
+          return {
+            ...previous,
+            repeated: true,
+            warning:
+              'Du har redan kört EXAKT detta verktygsanrop i denna tur — detta är ' +
+              'samma resultat igen. Upprepa det inte: ändra angreppssätt (annan ' +
+              'kollektion, annat filter/sort, describe_collection för giltiga fält) ' +
+              'eller svara användaren nu utifrån det du redan hittat.'
+          };
+        }
+        const result = await dispatchToolCall(call, options.toolContext);
+        seenCalls.set(key, result);
+        return result;
+      })
     );
     toolCalls.forEach((call, i) => {
       const toolResult = toolResults[i];
@@ -171,7 +198,19 @@ export async function runAgentLoop(
     });
   }
 
-  // Iterations-taket nått — tvinga ett slutsvar utan verktyg.
+  // Iterations-taket nått — tvinga ett slutsvar utan verktyg. Utan en
+  // explicit instruktion svarar modellen ofta med TOM text här (den "vill"
+  // anropa fler verktyg) och användaren får bara fallback-raden. Be den
+  // därför uttryckligen sammanfatta det den FAKTISKT hann hitta.
+  conversation.push({
+    role: 'user',
+    content:
+      'SYSTEM (data, inte användarens ord): Steg-taket för verktygsanrop är ' +
+      'nått. Anropa inga fler verktyg. Sammanfatta nu det du faktiskt hittade ' +
+      'i verktygsresultaten ovan och ge användaren ditt bästa svar. Om något ' +
+      'inte hanns med: säg kort vad som saknas och föreslå en mer avgränsad ' +
+      'följdfråga.'
+  });
   const finalCall = await callMistralWithFallback(options.models, conversation, {
     toolChoice: 'none',
     onToken: options.onToken
