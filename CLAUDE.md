@@ -2754,6 +2754,16 @@ Människa-i-loopen följer sedan upp (status sätts manuellt).
   retroaktivt identifieras — radera dem manuellt vid behov.
 - Riskklass: oförändrad (export/analys är deterministisk aggregering av
   befintlig lead-data; ingen ny AI-funktion).
+- **Autodate-fix (migration 1700000126):** compass-kollektionerna skapades
+  (1700000039) utan `created`/`updated` — PB v0.23 auto-lägger dem inte vid
+  `new Collection(...)` (samma grundorsak som RAG-fixen 1700000125). Följden:
+  `listLeads` (sort `-created`) fick 400 → **leads skapades men listan var
+  tyst tom** ("Visa mitt resultat" gav lead, `/inflode/leads` visade inget).
+  Träffade även CSV-export, chatt-historik, säkerhetslogg och dashboard/analys
+  (filter `created >=`). 1700000126 backfillar fälten idempotent; läsvägarna i
+  `lib/compass/store.ts` är dessutom fail-soft (osorterad retry) mot ett ännu
+  inte migrerat schema. Compass är migration-only (§ 23.4) — speglas inte i
+  setup-via-api.mjs.
 
 ### 23.7 Kedjebyggda moduler + stegindelad modul-setup
 
