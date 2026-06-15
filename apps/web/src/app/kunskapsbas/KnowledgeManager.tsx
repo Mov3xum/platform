@@ -11,10 +11,12 @@ import {
 } from '@/lib/actions/org-knowledge';
 
 const ACCEPT =
-  '.pdf,.txt,.md,.csv,.xlsx,.docx,.pptx,application/pdf,text/plain,text/markdown,text/csv,' +
+  '.pdf,.txt,.md,.csv,.xlsx,.docx,.pptx,.png,.jpg,.jpeg,.webp,' +
+  'application/pdf,text/plain,text/markdown,text/csv,' +
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,' +
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document,' +
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation,' +
+  'image/png,image/jpeg,image/webp';
 
 function formatBytes(n?: number): string {
   if (!n || n <= 0) return '';
@@ -107,7 +109,9 @@ export default function KnowledgeManager({
       <section className="rounded-3xl border border-default bg-surface p-6">
         <h2 className="mb-1 font-heading text-lg font-semibold text-foreground">Lägg till material</h2>
         <p className="mb-4 text-xs text-foreground-subtle">
-          PDF, Word, PowerPoint, Excel, text, Markdown eller CSV (max 25 MB).
+          PDF, Word, PowerPoint, Excel, text, Markdown, CSV eller bild
+          (PNG/JPG/WebP, max 25 MB). Bilder läses av AI-bildigenkänning (Pixtral, EU)
+          som transkriberar text och beskriver diagram/matriser.
           Ladda <strong>inte</strong> upp personuppgifter — innehållet blir sökbart för AI:n.
           Personnummer saneras automatiskt.
         </p>
