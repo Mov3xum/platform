@@ -3105,6 +3105,8 @@ await ensureCollection({
       maxSize: 26214400,
       // Migration 1700000122: även Word (DOCX) + PowerPoint (PPTX) —
       // OOXML-text extraheras dependency-fritt (CLAUDE.md § 26.5).
+      // Migration 1700000130: även bilder (PNG/JPG/WebP) — text via Pixtral-
+      // bildigenkänning (CLAUDE.md § 26 / § 28).
       mimeTypes: [
         'application/pdf',
         'text/plain',
@@ -3112,7 +3114,10 @@ await ensureCollection({
         'text/csv',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'image/png',
+        'image/jpeg',
+        'image/webp'
       ]
     },
     { name: 'extracted_text', type: 'text', required: false, max: 320000 },
@@ -3238,9 +3243,10 @@ await patchCollection('user_file_chunks', AUTODATE_FIELDS);
   }
 }
 
-// Migration 1700000122: org_knowledge.file accepterar även Word/PowerPoint
-// (OOXML-text extraheras dependency-fritt, CLAUDE.md § 26.5). ensureCollection
-// uppdaterar inte befintliga fält-options — patcha mime-whitelisten explicit.
+// Migration 1700000122/1700000130: org_knowledge.file accepterar även Word/
+// PowerPoint (OOXML-text, § 26.5) och bilder (PNG/JPG/WebP — text via Pixtral-
+// bildigenkänning, § 26 / § 28). ensureCollection uppdaterar inte befintliga
+// fält-options — patcha mime-whitelisten explicit.
 await patchCollection('org_knowledge', [], {
   file: {
     mimeTypes: [
@@ -3250,7 +3256,10 @@ await patchCollection('org_knowledge', [], {
       'text/csv',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'image/png',
+      'image/jpeg',
+      'image/webp'
     ]
   }
 });

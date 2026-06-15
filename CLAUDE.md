@@ -3103,8 +3103,10 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
 | `backend/pocketbase-schema/migrations/1700000119_create_org_knowledge_chunks.js` | Collection `org_knowledge_chunks` (RAG-index: text + embedding) |
 | `apps/web/src/lib/ai/rag.ts` | `chunkText`, `cosineSimilarity`, `indexOrgKnowledge`, `searchOrgKnowledge` |
 | `apps/web/src/lib/ai/mistral.ts` | `embedTexts()` mot `/v1/embeddings` (mistral-embed, EU) + pris |
-| `apps/web/src/lib/ai/knowledge.ts` | Extraktion + personnummer-sanering (delad pipe, nu med valbart text-tak) |
-| `apps/web/src/lib/ai/tools.ts` | Verktyget `search_knowledge` + dispatch |
+| `apps/web/src/lib/ai/knowledge.ts` | Extraktion + personnummer-sanering (delad pipe; valbart text-tak + `allowImages`) |
+| `apps/web/src/lib/ai/vision.ts` | `extractImageText` — Pixtral-bildigenkänning (transkribering + beskrivning) av PNG/JPG/WebP |
+| `backend/pocketbase-schema/migrations/1700000130_extend_org_knowledge_image_mimes.js` | `org_knowledge.file` accepterar bilder (PNG/JPG/WebP) |
+| `apps/web/src/lib/ai/tools.ts` | Verktygen `search_knowledge` (fragment-RAG) + `read_knowledge_document` (lista/läs HELT dokument) + dispatch |
 | `apps/web/src/lib/ai/guidance.ts` | `KNOWLEDGE_GUIDANCE` (delad — kunskapsbas ⨯ databas) |
 | `apps/web/src/app/api/knowledge/route.ts` | Upload-route (staff-only, extraherar + indexerar) |
 | `apps/web/src/lib/actions/org-knowledge.ts` | Lista / radera / indexera om |
@@ -3126,7 +3128,15 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
 1. Staff laddar upp en fil via `/api/knowledge` (route handler → slipper
    `serverActions.bodySizeLimit`, § 18.2). Texten extraheras EN gång,
    **personnummer-saneras** (samma regex som CRM-importen) och cachas i
-   `extracted_text`.
+   `extracted_text`. **Bilduppladdningar** (PNG/JPG/WebP, migration 1700000130 +
+   `allowImages` på `extractKnowledgeFromFile`) har inget textlager → texten
+   "extraheras" i stället via **Pixtral-bildigenkänning** (`lib/ai/vision.ts`,
+   `extractImageText`): all synlig text transkriberas och icke-text-innehåll
+   (tabeller, matriser, diagram) beskrivs till sökbar text. Pixtral kör på
+   Mistral AI:s EU-infrastruktur (samma leverantör/DPA, § 10.2); fallback till
+   Mistral Medium (även multimodal) vid 429. Den igenkända texten saneras +
+   chunkas + embeddas precis som övriga format. Bilden cachas aldrig i
+   tredjepart; vision-tokens loggas separat i `ai_usage_events` (Pixtral-modell).
 2. `indexOrgKnowledge` chunkar texten (~1500 tecken, overlap 200), embeddar varje
    chunk (`mistral-embed`, batchat) och skriver `org_knowledge_chunks`. Fail-soft:
    en misslyckad indexering gör filen sökbar via nyckelords-fallback i stället.
@@ -3144,11 +3154,37 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
    - **Reranker av/på:** `MOVEXUM_RAG_RERANK=0` stänger av LLM-omrankningen
      (default på). Fail-open i `llmRerank` — en granskare som inte kan tolkas
      returnerar ursprungsordningen.
+4. **`read_knowledge_document` (helt dokument, inte fragment).**
+   `search_knowledge` är fragment-RAG: den returnerar bara topp-K textstycken,
+   så den kan tyst MISSA ett namngivet dokument (t.ex. en visuell matris vars
+   tabell-extraktion rankar lågt) och kan ALDRIG mata in ett helt dokument för
+   "analysera/sammanfatta dokumentet". `read_knowledge_document` täpper till det:
+   utan `query`/`document_id` returnerar den KATALOGEN (titlar + id + topic +
+   char_count) så modellen ser vad som finns; med `query` fuzzy-matchas titel/
+   filnamn (`rankCandidates`, samma som `search_records`); med `document_id` (eller
+   en entydig namnträff) returneras hela den sanerade `extracted_text` sidvis
+   (`MAX_DOC_CHARS=60 000`/anrop, `offset`/`next_offset` för längre dokument).
+   Ligger i `buildChatTools`-basytan (alla read-only-körningstyper, som
+   `search_knowledge`), är strikt read-only och tenant-scopad (id-läsningar
+   filtreras på `tenant` oavsett pb-typ). Ingen ny dataväg/kollektion/dependency
+   — `org_knowledge` är fortsatt denylistad för `query_collection`; detta är dess
+   andra KURERADE väg (samma RLS + redan personnummer-sanerade text som
+   `search_knowledge`). Riskklass: oförändrad (begränsad).
 
 ### 26.4 Säkerhet och regelefterlevnad
 
-- **EU-suveränitet:** embeddings via `mistral-embed` (Mistral, FR/EU). Ingen
-  US-tjänst, ingen ny leverantör (§ 10.2).
+- **EU-suveränitet:** embeddings via `mistral-embed` (Mistral, FR/EU); bild-
+  igenkänning via `pixtral-large-latest` (fallback `mistral-medium-latest`) på
+  samma EU-infrastruktur. Ingen US-tjänst, ingen ny leverantör (§ 10.2).
+- **Bildigenkänning (Pixtral) — riskklass begränsad (EU AI Act art. 11):**
+  deterministiskt syfte (transkribera/beskriva en uppladdad bild till sökbar
+  text); ingen profilering av individer, ingen autopublicering (innehållet
+  granskas av människa i chatten). Immutabel system-prompt behandlar bilden som
+  DATA, inte instruktioner (§ 9.3 — prompt-injection-skydd även för bild-burna
+  instruktioner). Den igenkända texten personnummer-saneras före lagring/index;
+  bilden cachas aldrig i tredjepart. Vision-tokens loggas i `ai_usage_events`
+  (surface `suggestions`, Pixtral-modell). Gäller bara den tenant-breda
+  kunskapsbasen (`allowImages`); per-agent-basen (`tool_knowledge`) är oförändrad.
 - **Riskklass (EU AI Act art. 11): begränsad.** Dokument-Q&A med
   människa-i-loopen (chatten granskas av användaren); ingen profilering av
   individer, ingen autopublicering. Versionerad här per art. 11.
@@ -3238,6 +3274,13 @@ Sök på små chunkar (precision) men returnera mer kontext (svarskvalitet). Av
 default eftersom det blåser upp prompten (tool-resultatet capas ändå nedströms).
 
 **Kvar / kommande steg:**
+- **Bildigenkänning (PNG/JPG/WebP) via Pixtral** — KLAR (juni 2026). Uppladdade
+  bilder i kunskapsbasen transkriberas/beskrivs till sökbar text av
+  `lib/ai/vision.ts` (`extractImageText`, Pixtral → Medium-fallback, EU) och
+  indexeras som vilket dokument som helst (migration 1700000130 vidgar
+  `org_knowledge.file`-whitelisten). **Skannade bild-PDF:er** (PDF utan textlager)
+  kräver fortfarande sid-rastrering innan vision — INTE i scope (skulle kräva en
+  PDF→bild-rasterare); exportera om till text-PDF eller ladda upp sidan som bild.
 - **PPTX/DOCX-textextraktion** — KLAR. Dependency-fri OOXML-extraktion via den
   delade `lib/import/zip.ts` (ZIP-kärnan, delas med XLSX) + `lib/import/ooxml-text.ts`
   (ren, enhetstestad XML→text) i `lib/ai/attachments.ts`

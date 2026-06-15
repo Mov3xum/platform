@@ -45,6 +45,11 @@ const MAX_FILTER_LENGTH = 500;
 const MAX_SORT_LENGTH = 200;
 const MAX_EXPAND_LENGTH = 200;
 
+// read_knowledge_document — listar/läser HELA kunskapsbas-dokument (§ 26).
+const ORG_KNOWLEDGE_COLLECTION = 'org_knowledge';
+const MAX_DOC_LIST = 50; // dokument som listas i katalog-läget
+const MAX_DOC_CHARS = 60_000; // returnerad textbudget per anrop (~15k tokens, prompt-budget)
+
 // search_records / aggregate_collection / describe_collection
 const MAX_SEARCH_LIMIT = 20;
 const SEARCH_CANDIDATE_FETCH = 100; // kandidater per hämtning innan JS-ranking
@@ -421,6 +426,47 @@ export function buildChatTools(
             }
           },
           required: ['query']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'read_knowledge_document',
+        description:
+          'LISTAR dokumenten i organisationens kunskapsbas, ELLER läser HELA ' +
+          'innehållet i ETT namngivet dokument — till skillnad från ' +
+          'search_knowledge som bara returnerar de mest relevanta textstyckena. ' +
+          'Använd detta när användaren refererar till ett SPECIFIKT dokument vid ' +
+          'namn ("IRL-matrisen", "vår processbeskrivning") eller ber dig ' +
+          'ANALYSERA/SAMMANFATTA ett helt dokument — då räcker inte fragment. ' +
+          'Lämna `query` och `document_id` tomma för att se vilka dokument som ' +
+          'finns; matcha sedan på namn (`query`) eller läs ett exakt dokument ' +
+          '(`document_id`). Långa dokument läses sidvis med `offset`. ' +
+          'Tenant-scope läggs på automatiskt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description:
+                'Dokumentets namn/titel (tolerant mot felstavning). Lämna tomt ' +
+                'för att lista alla dokument i kunskapsbasen.'
+            },
+            document_id: {
+              type: 'string',
+              description:
+                'Exakt dokument-id (från en tidigare listning) — läser hela det ' +
+                'dokumentet. Vinner över `query` om båda anges.'
+            },
+            offset: {
+              type: 'integer',
+              description:
+                'Teckenoffset för långa dokument — fortsätt läsa från denna ' +
+                'position (default 0). Använd `next_offset` från föregående svar.',
+              minimum: 0
+            }
+          }
         }
       }
     }
@@ -847,6 +893,11 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: `Sammanställer ${collectionLabel(coll)}` };
     case 'search_knowledge':
       return { tool: name, label: 'Söker i kunskapsbasen' };
+    case 'read_knowledge_document':
+      return {
+        tool: name,
+        label: args.query || args.document_id ? 'Läser kunskapsdokument' : 'Bläddrar i kunskapsbasen'
+      };
     case 'search_my_files':
       return { tool: name, label: 'Söker i dina filer' };
     case 'update_startup_field':
@@ -1387,7 +1438,12 @@ async function runSearchKnowledge(
       ok: true,
       data: {
         matched: 0,
-        note: 'Inget relevant hittades i kunskapsbasen. Svara utifrån databasen om möjligt, annars säg att underlag saknas.'
+        note:
+          'Inga relevanta textstycken hittades. Gäller frågan ett SPECIFIKT ' +
+          'dokument vid namn, eller vill användaren att du analyserar ett helt ' +
+          'dokument? Använd read_knowledge_document (lista utan query, läs sedan ' +
+          'rätt dokument) — det fångar dokument som fragment-sökningen missar. ' +
+          'Annars: svara utifrån databasen om möjligt, annars säg att underlag saknas.'
       }
     };
   }
@@ -1401,6 +1457,179 @@ async function runSearchKnowledge(
       material: renderKnowledgeHits(result.hits)
     }
   };
+}
+
+interface OrgKnowledgeRow {
+  id: string;
+  title?: string;
+  filename?: string;
+  topic?: string;
+  char_count?: number;
+  indexed?: boolean;
+  extracted_text?: string;
+}
+
+/** Kompakt katalog-rad (utan tung extracted_text) för listnings-läget. */
+function knowledgeCatalogEntry(r: OrgKnowledgeRow): Record<string, unknown> {
+  return {
+    document_id: String(r.id),
+    title: String(r.title || r.filename || 'Namnlöst dokument'),
+    topic: r.topic || null,
+    char_count: typeof r.char_count === 'number' ? r.char_count : undefined,
+    indexed: Boolean(r.indexed)
+  };
+}
+
+/** Returnerar (ett sid-fönster av) ETT dokuments hela text till modellen. */
+function renderKnowledgeDocSlice(doc: OrgKnowledgeRow, offset: number): ToolResult {
+  const text = String(doc.extracted_text ?? '');
+  if (!text) {
+    return {
+      ok: true,
+      data: {
+        document_id: String(doc.id),
+        title: String(doc.title || doc.filename || 'Namnlöst dokument'),
+        note:
+          'Dokumentet saknar extraherad text (kan vara en skannad bild-PDF). ' +
+          'Be användaren ladda upp en textbaserad version.'
+      }
+    };
+  }
+  const slice = text.slice(offset, offset + MAX_DOC_CHARS);
+  const truncated = offset + MAX_DOC_CHARS < text.length;
+  return {
+    ok: true,
+    data: {
+      document_id: String(doc.id),
+      title: String(doc.title || doc.filename || 'Namnlöst dokument'),
+      topic: doc.topic || null,
+      char_count: text.length,
+      offset,
+      returned_chars: slice.length,
+      truncated,
+      ...(truncated ? { next_offset: offset + MAX_DOC_CHARS } : {}),
+      content: slice,
+      ...(truncated
+        ? { note: 'Dokumentet är längre — fortsätt med samma verktyg och offset=next_offset.' }
+        : {})
+    }
+  };
+}
+
+/**
+ * Listar kunskapsbasen eller läser HELA innehållet i ETT namngivet dokument
+ * (org_knowledge, § 26). Komplement till `search_knowledge` (fragment-RAG): när
+ * användaren refererar ett SPECIFIKT dokument vid namn eller ber om en analys av
+ * hela dokumentet räcker inte de topp-K styckena. Read-only och tenant-scopad —
+ * läser den redan sanerade (personnummer-fria) `extracted_text`, ingen ny
+ * dataväg utöver det `search_knowledge` redan exponerar. Kunskapsbasen är
+ * denylistad för query_collection; detta är dess andra kurerade väg till modellen.
+ */
+async function runReadKnowledgeDocument(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const query = typeof args.query === 'string' ? args.query.trim() : '';
+  const documentId = typeof args.document_id === 'string' ? args.document_id.trim() : '';
+  let offset = 0;
+  if (typeof args.offset === 'number' && Number.isFinite(args.offset)) {
+    offset = Math.max(0, Math.floor(args.offset));
+  }
+
+  const tenantClause = `tenant = "${escFilter(ctx.tenantId)}"`;
+  const docFields = 'id,title,filename,topic,char_count,indexed,extracted_text';
+
+  try {
+    // 1) Exakt dokument via id — tenant enforce:as i filtret (oavsett pb-typ).
+    if (documentId) {
+      const doc = await ctx.pb
+        .collection(ORG_KNOWLEDGE_COLLECTION)
+        .getFirstListItem<OrgKnowledgeRow>(`id = "${escFilter(documentId)}" && ${tenantClause}`, {
+          fields: docFields
+        })
+        .catch(() => null);
+      if (!doc) {
+        return {
+          ok: false,
+          error: `Inget kunskapsdokument med id '${documentId}' i kunskapsbasen. Lista först utan query.`
+        };
+      }
+      return renderKnowledgeDocSlice(doc, offset);
+    }
+
+    // 2) Hämta katalogen (tenant-scopad). Liten N (en kunskapsbas per tenant).
+    const list = await ctx.pb.collection(ORG_KNOWLEDGE_COLLECTION).getList<OrgKnowledgeRow>(1, 200, {
+      filter: tenantClause,
+      fields: 'id,title,filename,topic,char_count,indexed',
+      sort: '-updated'
+    });
+    const docs = list.items;
+    if (docs.length === 0) {
+      return {
+        ok: true,
+        data: { matched: 0, note: 'Kunskapsbasen är tom — inga dokument uppladdade ännu.' }
+      };
+    }
+
+    // 3) Ingen query → returnera katalogen så modellen ser vad som finns.
+    if (!query) {
+      return {
+        ok: true,
+        data: {
+          total: list.totalItems,
+          documents: docs.slice(0, MAX_DOC_LIST).map(knowledgeCatalogEntry),
+          note: 'Ange `query` (dokumentets namn) eller `document_id` för att läsa hela innehållet.'
+        }
+      };
+    }
+
+    // 4) Fuzzy-matcha på titel/filnamn (tolerant mot felstavning/ordföljd).
+    const ranked = rankCandidates(
+      query,
+      docs,
+      (d) => [String(d.title ?? ''), String(d.filename ?? '')],
+      { limit: 5, threshold: SEARCH_THRESHOLD }
+    );
+    if (ranked.length === 0) {
+      return {
+        ok: true,
+        data: {
+          matched: 0,
+          documents: docs.slice(0, MAX_DOC_LIST).map(knowledgeCatalogEntry),
+          note:
+            'Ingen dokumenttitel matchade. Här är dokumenten i kunskapsbasen — ' +
+            'välj ett via `document_id`, eller använd search_knowledge för att söka i innehållet.'
+        }
+      };
+    }
+
+    // 5) Tvetydigt (två nära toppträffar) → be modellen välja via id.
+    if (ranked.length > 1 && ranked[1].score >= ranked[0].score - 0.1) {
+      return {
+        ok: true,
+        data: {
+          ambiguous: true,
+          candidates: ranked.map((r) => ({ ...knowledgeCatalogEntry(r.item), score: r.score })),
+          note: 'Flera dokument matchar namnet — läs det avsedda via `document_id`.'
+        }
+      };
+    }
+
+    // 6) Entydig träff → läs hela dokumentet (med tung extracted_text).
+    const top = ranked[0].item;
+    const doc = await ctx.pb
+      .collection(ORG_KNOWLEDGE_COLLECTION)
+      .getFirstListItem<OrgKnowledgeRow>(`id = "${escFilter(String(top.id))}" && ${tenantClause}`, {
+        fields: docFields
+      })
+      .catch(() => null);
+    if (!doc) {
+      return { ok: false, error: 'Dokumentet kunde inte läsas (kan ha raderats).' };
+    }
+    return renderKnowledgeDocSlice(doc, offset);
+  } catch (err) {
+    return { ok: false, error: pbErrorMessage(err, 'Kunde inte läsa kunskapsdokumentet.') };
+  }
 }
 
 /**
@@ -1485,6 +1714,8 @@ export async function dispatchToolCall(
       return runAggregateCollection(args, ctx);
     case 'search_knowledge':
       return runSearchKnowledge(args, ctx);
+    case 'read_knowledge_document':
+      return runReadKnowledgeDocument(args, ctx);
     case 'search_my_files':
       return runSearchMyFiles(args, ctx);
     case 'update_startup_field':
