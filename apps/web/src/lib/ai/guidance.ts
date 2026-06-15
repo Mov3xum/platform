@@ -78,8 +78,15 @@ export const KNOWLEDGE_GUIDANCE =
   'KOMPLEMENT: kunskapsbasen ger process/kontext, databasen ger aktuella ' +
   'siffror och status. Vid sammansatta frågor — använd båda i samma svar och ' +
   'väv ihop dem.\n' +
+  '- `read_knowledge_document` LISTAR kunskapsbasen eller läser HELA ett ' +
+  'namngivet dokument. Använd det (inte bara search_knowledge) när användaren ' +
+  'refererar ett SPECIFIKT dokument vid namn ("IRL-matrisen", "vår ' +
+  'processbeskrivning") eller ber dig ANALYSERA/SAMMANFATTA ett helt dokument — ' +
+  'fragment-sökningen räcker då inte. Vet du inte om dokumentet finns: lista ' +
+  'först (tom query), matcha sedan på namn eller läs via `document_id`.\n' +
   '- Hittar `search_knowledge` inget relevant: säg det rakt ut och svara utifrån ' +
-  'databasen om möjligt. Hitta aldrig på innehåll ur dokument du inte fått träff på.\n' +
+  'databasen om möjligt. Hitta aldrig på innehåll ur dokument du inte fått träff på. ' +
+  'Gäller frågan ett namngivet dokument — prova read_knowledge_document innan du ger upp.\n' +
   '- Hör frågan tydligt till ETT ämne (finansiering, juridik, pitch, hållbarhet, ' +
   'internationalisering, rapporter, affärsplan): sätt `topic` så blir sökningen ' +
   'snabbare och mer precis. Är du osäker — lämna `topic` tomt och sök brett.\n' +
