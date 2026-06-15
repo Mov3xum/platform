@@ -1,9 +1,10 @@
 // Movexum OS — MissionFlow
-// Visar uppdragets header (meta), flödesrail (steg), artefakter och AI-förslag.
+// Visar uppdragets header (meta), flödesrail (steg) och AI-förslag.
+// Dokumentation hanteras numera i en egen panel (MissionDocuments, § 29).
 // Server-komponent. Stage-knappar och form använder server actions.
 
 import { Chip, Avatar, Meta, Icon } from '@/components/proto';
-import { advanceStageFormAction, addArtifactFormAction, updateMissionStatusFormAction } from '@/lib/actions/missions';
+import { advanceStageFormAction, updateMissionStatusFormAction } from '@/lib/actions/missions';
 import type { Mission, MissionStage, MissionStatus } from '@platform/shared';
 
 type AvatarAccent = 'ink' | 'green' | 'purple' | 'brown' | 'copper' | 'yellow' | 'cyan';
@@ -76,7 +77,6 @@ export function MissionFlow({ mission, currentUserId, canAdvance }: {
   const mentor = mission.expand?.mentor;
   const startup = mission.expand?.startup;
   const stages: MissionStage[] = Array.isArray(mission.stages_json) ? mission.stages_json : [];
-  const artifacts = Array.isArray(mission.artifacts_json) ? mission.artifacts_json : [];
   const nextStageIdx = stages.findIndex((s) => !s.done);
   const overdue = isOverdue(mission.due_date, mission.status);
   const days = daysUntil(mission.due_date);
@@ -198,62 +198,6 @@ export function MissionFlow({ mission, currentUserId, canAdvance }: {
               />
             ))}
           </div>
-        )}
-      </div>
-
-      {/* Artifacts */}
-      <div style={{ padding: 18, borderTop: '1px solid var(--mx-line-soft)' }}>
-        <div className="mx-flex mx-items-c mx-gap-2 mx-mb-3">
-          <span className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6">
-            Artefakter ({artifacts.length})
-          </span>
-        </div>
-        {artifacts.length === 0 ? (
-          <div className="mx-muted mx-t-13 mx-mb-3">Inga artefakter ännu.</div>
-        ) : (
-          <div className="mx-flex mx-col mx-gap-2 mx-mb-3">
-            {artifacts.map((a) => (
-              <div
-                key={a.id}
-                className="mx-flex mx-items-c mx-gap-3"
-                style={{ padding: '10px 12px', background: 'var(--mx-paper-3)', borderRadius: 8 }}
-              >
-                <Icon name="doc" size={16} className="mx-muted" />
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="mx-t-13 mx-fw-6 mx-truncate">{a.name}</div>
-                  <div className="mx-t-xs mx-muted mx-mono">
-                    {[a.size, a.created ? new Date(a.created).toLocaleDateString('sv-SE') : null]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </div>
-                </div>
-                {a.url ? (
-                  <a href={a.url} target="_blank" rel="noreferrer" className="mx-btn mx-sm mx-ghost">
-                    <Icon name="external" size={12} />
-                  </a>
-                ) : (
-                  <span className="mx-mono mx-t-xs mx-muted">Ingen länk</span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {canAdvance && (
-          <form action={addArtifactFormAction} className="mx-flex mx-gap-2 mx-wrap">
-            <input type="hidden" name="mission_id" value={mission.id} />
-            <input
-              name="name"
-              required
-              placeholder="Artefaktens namn"
-              style={inputStyle}
-            />
-            <input name="size" placeholder="t.ex. 1.2 MB" style={{ ...inputStyle, maxWidth: 120 }} />
-            <input name="url" placeholder="https://…" style={inputStyle} />
-            <button type="submit" className="mx-btn mx-sm">
-              <Icon name="plus" size={12} /> Lägg till
-            </button>
-          </form>
         )}
       </div>
 

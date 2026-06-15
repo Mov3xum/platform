@@ -8,7 +8,6 @@ import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import {
   ALL_ROLES,
   type Mission,
-  type MissionArtifact,
   type MissionParticipant,
   type MissionParticipantRole,
   type MissionStage,
@@ -380,52 +379,6 @@ export async function advanceStage(id: string, stageId: string, note?: string): 
   }
 }
 
-// ── addArtifact ─────────────────────────────────────────────────────────
-
-export async function addArtifact(
-  id: string,
-  name: string,
-  size?: string,
-  url?: string
-): Promise<MissionActionState> {
-  const user = await requireUser();
-  const trimmedName = name.trim();
-  if (!trimmedName) return { error: 'Namn krävs.' };
-
-  const pb = await getServerPb();
-  let mission: Mission;
-  try {
-    mission = await pb.collection(PB_COLLECTIONS.missions).getOne<Mission>(id);
-  } catch {
-    return { error: 'Uppdraget hittades inte.' };
-  }
-  if (mission.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
-
-  const ctx = getMissionContext(mission, user.id, user.roles);
-  if (!ctx.canAdvanceStage) return { error: 'Du saknar behörighet.' };
-
-  const artifacts: MissionArtifact[] = Array.isArray(mission.artifacts_json)
-    ? [...mission.artifacts_json]
-    : [];
-  const newArtifact: MissionArtifact = {
-    id: `art_${Date.now()}`,
-    name: trimmedName.slice(0, 200),
-    size: size?.trim() || undefined,
-    url: url?.trim() || undefined,
-    uploaded_by: user.id,
-    created: new Date().toISOString()
-  };
-  artifacts.push(newArtifact);
-
-  try {
-    await pb.collection(PB_COLLECTIONS.missions).update(id, { artifacts_json: artifacts });
-    revalidatePath(`/uppdrag/${id}`);
-    return { missionId: id };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Kunde inte lägga till artefakt.' };
-  }
-}
-
 // ── updateParticipants ──────────────────────────────────────────────────
 
 export async function updateMissionParticipants(
@@ -598,16 +551,6 @@ export async function advanceStageFormAction(formData: FormData): Promise<void> 
   const note = String(formData.get('note') || '').trim() || undefined;
   if (!id || !stageId) return;
   await advanceStage(id, stageId, note);
-}
-
-export async function addArtifactFormAction(formData: FormData): Promise<void> {
-  'use server';
-  const id = String(formData.get('mission_id') || '');
-  const name = String(formData.get('name') || '');
-  const size = String(formData.get('size') || '').trim() || undefined;
-  const url = String(formData.get('url') || '').trim() || undefined;
-  if (!id || !name.trim()) return;
-  await addArtifact(id, name, size, url);
 }
 
 export async function updateMissionStatusFormAction(formData: FormData): Promise<void> {

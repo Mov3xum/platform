@@ -3478,6 +3478,12 @@ beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 | `backend/pocketbase-schema/migrations/1700000131_extend_tasks_mission_link.js` | `tasks.link_kind += 'mission'` + `tasks.mission` |
 | `apps/web/src/lib/assignments/collaboration.ts` | `createMissionMemberTasks` (personlig uppgift per teammedlem) |
 | `apps/web/src/app/uppdrag/[id]/TeamCompetencePanel.tsx` | "Team & kompetenser"-panel (samlad täckning + per medlem) |
+| `apps/web/src/components/kanban/TaskKanban.tsx` | Delad 6-kolumners kanban (driver bolags- OCH uppdragskanban) |
+| `apps/web/src/app/uppdrag/[id]/MissionTaskBoard.tsx` | Uppdragstavla — wrapper som binder mission-board-actions |
+| `apps/web/src/lib/actions/tasks.ts` | `createMissionBoardTaskAction` / `moveMissionBoardTaskAction` |
+| `backend/pocketbase-schema/migrations/1700000133_create_mission_documents.js` | Collection `mission_documents` (uppladdad dokumentation) |
+| `apps/web/src/app/api/missions/[id]/documents/route.ts` | Upload-route för dokumentation (staff-only) |
+| `apps/web/src/app/uppdrag/[id]/MissionDocuments.tsx` | Dokumentation-panel (ladda upp/lista/radera) |
 | `backend/pocketbase-schema/migrations/1700000132_seed_competence_gap_agent.js` | Portfölj-agent `ai_competence_gap` (kompetensbehov/gap, Fas 3) |
 
 ### 29.2 Kompetensmodell (Fas 0)
@@ -3514,6 +3520,27 @@ mönster som assignment-collaboration (§ 18.4). Uppdragskortet
 kompetenstäckning** + varje medlems kompetenser, så staff ser om teamet är
 tvärfunktionellt nog.
 
+**Uppdragskanban (tavla inne på uppdraget).** Samma 6-kolumners `tasks`-tavla
+som bolagskanbanen (§ 15.7) finns nu direkt på uppdragskortet. Den
+presentationella tavlan är extraherad till `components/kanban/TaskKanban.tsx`
+(ingen divergerande kopia) och tar sina server actions som callbacks; tunna
+wrappers (`StartupKanban` / `MissionTaskBoard`) binder scopet (startup vs
+mission). Mission-board-actions (`createMissionBoardTaskAction` /
+`moveMissionBoardTaskAction`, `lib/actions/tasks.ts`) tillåter **staff ELLER
+uppdragsdeltagare** att skapa/flytta kort; tilldelning av kollegor
+(`setTaskAssigneesAction`) är fortsatt staff-only. Korten skapas med
+`link_kind='mission'` + `mission`-FK och syns i medlemmarnas "Min översikt".
+
+**Dokumentation (ersätter artefakter).** Den tidigare artefakt-/länklistan i
+`MissionFlow` är borttagen. I stället laddar staff upp riktiga filer i
+`MissionDocuments`-panelen → `mission_documents` (migration 1700000133, RIKTIG
+PB-fil, samma mönster som education_documents § 18.3) via en route-handler
+(`/api/missions/[id]/documents`, slipper `serverActions.bodySizeLimit`,
+CSRF-skydd via SameSite=Lax). Filerna serveras tokenlöst publikt; radering via
+`deleteMissionDocumentAction` (staff-only, tenant-verifierad). RLS:
+list/view = staff/observer-only (intern team-dokumentation), createRule roll-lös
+(§ 21.3, enforce i routen), autodate explicit (§ 28.5).
+
 ### 29.5 Kompetensbehov & gap-analys (Fas 3)
 
 Migration 1700000132 seedar portfölj-agenten `ai_competence_gap`
@@ -3539,8 +3566,11 @@ INGA personuppgifter.
 - **Transparens (art. 13/50):** formuläret bär Mistral-/"verifiera"-bannern.
 - **RBAC (§ 21):** `suggestTeamAction` + team-skapande är staff-only;
   `min-profil` är self-service. `tasks.mission` ärver tasks RLS.
-- **Migrationer:** nya oföränderliga filnummer (1700000130–132); fält-
-  utökningarna (`users.competences/title/bio`, `tasks.mission`/`link_kind`)
-  speglas i `setup-via-api.mjs`. Agent-seeden (1700000132) är migration-only
-  (samma precedens som 1700000055).
-- **Riskklass för `tasks`-länk/panel:** n/a (arbetsyta, ingen AI-inferens).
+- **Migrationer:** nya oföränderliga filnummer (1700000130–133); fält-
+  utökningarna (`users.competences/title/bio`, `tasks.mission`/`link_kind`) och
+  collectionen `mission_documents` speglas i `setup-via-api.mjs`. Agent-seeden
+  (1700000132) är migration-only (samma precedens som 1700000055).
+- **Riskklass för kanban/dokumentation:** n/a (arbetsyta + filuppladdning, ingen
+  AI-inferens). `mission_documents` läses staff/observer-only; intern
+  team-dokumentation, ingen ny AI-kontext-väg (whitelistas aldrig i
+  `lib/ai/context.ts`).

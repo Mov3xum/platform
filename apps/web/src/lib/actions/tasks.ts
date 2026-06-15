@@ -11,6 +11,9 @@ import {
   type StartupBoardStatus
 } from '@/lib/startup-board/board';
 import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
+import { unionParticipantIds } from '@/lib/missions-server';
+import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import type { Mission } from '@platform/shared';
 
 /**
  * Server actions för CRM-uppgifter (`tasks`, migration 1700000077).
@@ -362,11 +365,11 @@ export async function setTaskAssigneesAction(
 
   const pb = await getServerPb();
 
-  let row: { id: string; tenant?: string; startup?: string };
+  let row: { id: string; tenant?: string; startup?: string; mission?: string };
   try {
     row = await pb
       .collection('tasks')
-      .getOne(taskId, { fields: 'id,tenant,startup' });
+      .getOne(taskId, { fields: 'id,tenant,startup,mission' });
   } catch {
     return { ok: false, error: 'Uppgiften hittades inte.' };
   }
@@ -387,5 +390,151 @@ export async function setTaskAssigneesAction(
   }
 
   if (row.startup) revalidateStartupBoard(row.startup);
+  if (row.mission) revalidatePath(`/uppdrag/${row.mission}`);
+  return { ok: true };
+}
+
+// ============================================================================
+// Uppdragskanban — fliken "Tavla" på ett uppdrag (CLAUDE.md § 29). Samma
+// `tasks`-board som bolagskanbanen, men korten länkas till en mission
+// (link_kind='mission'). RBAC: staff ELLER uppdragsdeltagare.
+// ============================================================================
+
+/** Laddar ett uppdrag och returnerar tenant + deltagar-id:n. Null om saknas
+ *  eller fel tenant. */
+async function loadMissionAccess(
+  pb: PocketBase,
+  missionId: string,
+  tenantId: string
+): Promise<{ participantIds: string[] } | null> {
+  try {
+    const mission = await pb
+      .collection(PB_COLLECTIONS.missions)
+      .getOne<Mission>(missionId, {
+        fields: 'id,tenant,issuer,mentor,recipients,participants_json'
+      });
+    if (mission.tenant !== tenantId) return null;
+    return { participantIds: unionParticipantIds(mission) };
+  } catch {
+    return null;
+  }
+}
+
+function revalidateMissionBoard(missionId: string) {
+  revalidatePath(`/uppdrag/${missionId}`);
+  revalidatePath('/inkorg');
+}
+
+/** Skapa en uppgift direkt i en kolumn på uppdragskanbanen. Staff eller deltagare. */
+export async function createMissionBoardTaskAction(input: {
+  missionId: string;
+  description: string;
+  status?: string;
+  kind?: string;
+  dueAt?: string;
+  assigneeIds?: string[];
+}): Promise<TaskActionResult> {
+  const user = await requireUser();
+  const pb = await getServerPb();
+
+  const access = await loadMissionAccess(pb, input.missionId, user.tenant);
+  if (!access) return { ok: false, error: 'Uppdraget hittades inte.' };
+
+  const isStaff = hasRole(user.roles, [...STAFF_ROLES]);
+  if (!isStaff && !access.participantIds.includes(user.id)) {
+    return { ok: false, error: 'Bara teamet kan skapa uppgifter på uppdraget.' };
+  }
+
+  const description = (input.description ?? '').trim();
+  if (!description) return { ok: false, error: 'Beskrivning krävs.' };
+  if (description.length > 500) {
+    return { ok: false, error: 'Beskrivning får vara max 500 tecken.' };
+  }
+
+  const status: StartupBoardStatus = isStartupBoardStatus(input.status ?? '')
+    ? (input.status as StartupBoardStatus)
+    : 'open';
+  const kind: TaskKind = TASK_KINDS.includes(input.kind as TaskKind)
+    ? (input.kind as TaskKind)
+    : 'other';
+
+  const assignees = await validStaffIds(pb, user.tenant, input.assigneeIds ?? []);
+
+  const payload: Record<string, unknown> = {
+    tenant: user.tenant,
+    kind,
+    description,
+    status,
+    owner: user.id,
+    assignees,
+    link_kind: 'mission',
+    mission: input.missionId,
+    completed_at: status === 'done' ? new Date().toISOString() : null
+  };
+  if (input.dueAt && /^\d{4}-\d{2}-\d{2}/.test(input.dueAt)) {
+    payload.due_at = input.dueAt;
+  }
+
+  try {
+    await pb.collection('tasks').create(payload);
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte skapa uppgiften.'
+    };
+  }
+
+  revalidateMissionBoard(input.missionId);
+  return { ok: true };
+}
+
+/** Flytta ett kort på uppdragskanbanen. Staff, ägare eller deltagare. */
+export async function moveMissionBoardTaskAction(
+  taskId: string,
+  status: string
+): Promise<TaskActionResult> {
+  const user = await requireUser();
+  if (!isStartupBoardStatus(status)) {
+    return { ok: false, error: 'Ogiltig kolumn.' };
+  }
+
+  const pb = await getServerPb();
+  let row: { id: string; tenant?: string; owner?: string; mission?: string };
+  try {
+    row = await pb
+      .collection('tasks')
+      .getOne(taskId, { fields: 'id,tenant,owner,mission' });
+  } catch {
+    return { ok: false, error: 'Uppgiften hittades inte.' };
+  }
+  if (row.tenant !== user.tenant) {
+    return { ok: false, error: 'Åtkomst nekad.' };
+  }
+
+  let isParticipant = false;
+  if (row.mission) {
+    const access = await loadMissionAccess(pb, row.mission, user.tenant);
+    isParticipant = access?.participantIds.includes(user.id) ?? false;
+  }
+  const canEdit =
+    hasRole(user.roles, [...STAFF_ROLES]) || row.owner === user.id || isParticipant;
+  if (!canEdit) {
+    return { ok: false, error: 'Du får inte flytta denna uppgift.' };
+  }
+
+  try {
+    await pb.collection('tasks').update(taskId, {
+      status,
+      completed_at: status === 'done' ? new Date().toISOString() : null
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte flytta uppgiften.'
+    };
+  }
+
+  if (row.mission) revalidateMissionBoard(row.mission);
+  else revalidatePath('/inkorg');
   return { ok: true };
 }
