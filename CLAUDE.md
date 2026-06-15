@@ -3492,3 +3492,98 @@ autodate-svep). Läsvägarna är dessutom **fail-soft**: /insights och
 /admin/ai-miljo retry:ar utan datumfilter och fönstrar i JS mot ett ännu
 inte migrerat schema, med tydlig varning + diagnos-hint i UI:t (rader utan
 tidsstämpel räknas till innevarande period — hellre synliga än borttappade).
+
+---
+
+## 29. Tvärfunktionella team — kompetenser & AI-teammatchning
+
+### 29.1 Bakgrund
+
+Movexum omorganiserar (1 nov 2026) till **tvärfunktionella team som formas runt
+ett uppdrag/behov** ("bolagsutmaning"), där rätt kompetens kopplas på — ibland
+externt (t.ex. annan inkubator). Funktionen "sätt upp ett team utifrån en
+beskrivning av ett uppdrag där relevanta kompetenser kopplas på" byggs ovanpå
+den befintliga **uppdrags-/missionsmodellen** (`/uppdrag`, §-spine i
+`lib/actions/missions.ts` + `missions-server.ts`) snarare än som en parallell
+yta. Tre delar: (1) kompetensmodell på personer, (2) AI-matchning
+beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/competences.ts` (+ `.test.ts`) | Fast kompetenstaxonomi (`COMPETENCES`, `CompetenceId`) + helpers (`sanitizeCompetences`, `inferCompetencesFromText`) — ren, enhetstestad |
+| `backend/pocketbase-schema/migrations/1700000130_extend_users_competences.js` | `users.competences` (select), `users.title`, `users.bio` |
+| `apps/web/src/lib/actions/profile.ts` + `app/min-profil/**` | Självservice-profil (titel/bio/kompetenser) |
+| `apps/web/src/lib/ai/team-match.ts` | `matchTeam` — isolerad Mistral-körning: beskrivning → kompetenser + kandidater (samma mönster som `file-categorize.ts`) |
+| `apps/web/src/lib/actions/team.ts` | `suggestTeamAction` — laddar kandidater (users+contacts), kör matcharen, loggar usage |
+| `apps/web/src/app/uppdrag/new/NewMissionForm.tsx` | AI-teamförslag inbäddat i nytt-uppdrag-formuläret |
+| `backend/pocketbase-schema/migrations/1700000131_extend_tasks_mission_link.js` | `tasks.link_kind += 'mission'` + `tasks.mission` |
+| `apps/web/src/lib/assignments/collaboration.ts` | `createMissionMemberTasks` (personlig uppgift per teammedlem) |
+| `apps/web/src/app/uppdrag/[id]/TeamCompetencePanel.tsx` | "Team & kompetenser"-panel (samlad täckning + per medlem) |
+| `backend/pocketbase-schema/migrations/1700000132_seed_competence_gap_agent.js` | Portfölj-agent `ai_competence_gap` (kompetensbehov/gap, Fas 3) |
+
+### 29.2 Kompetensmodell (Fas 0)
+
+`competences.ts` är källan av sanning (14 id:n, samma mönster som
+`file-topics.ts`). Migration 1700000130 lägger fälten på `users`:
+`competences` (multi-select, MÅSTE spegla `CompetenceId`), `title`, `bio`.
+Användaren sätter dem själv på `/min-profil` (updateRule `@request.auth.id = id`
+oförändrad). Externa resurser återanvänder `contacts.skills` (fritext) —
+`inferCompetencesFromText` mappar dem heuristiskt till taxonomin (bara för att
+berika kandidatlistan, aldrig en säkerhetsgräns).
+
+### 29.3 AI-teammatchning (Fas 1)
+
+`matchTeam` (`team-match.ts`) är en liten, billig, **isolerad** `mistral-small`-
+körning (temp 0) — egen snäv system-prompt (INTE agent-/chatt-ytan): beskrivning
++ ev. bolagskontext + kandidatlista (id/namn/kompetens, **ingen PII**) →
+JSON: föreslagna kompetenser (validerade mot taxonomin), kandidater (validerade
+mot listan, roll/motivering/confidence) och ev. `external_note` (kompetensgap).
+`suggestTeamAction` (staff-only) laddar interna users (staff med competences) +
+externa contacts (skills), kör matcharen och loggar i `ai_usage_events` (surface
+`suggestions`). `NewMissionForm` visar förslaget; staff kopplar på kandidater med
+ett klick — **inget tilldelas automatiskt** (människa-i-loopen, EU AI Act
+art. 14). Externa kontakter blir inte uppdragsdeltagare (de hör till CRM:t) utan
+visas som "extern kompetens att koppla på".
+
+### 29.4 Team-arbetsyta (Fas 2)
+
+`createMissionAction` ger varje teammedlem (utom utfärdaren) en personlig
+uppgift kopplad till uppdraget (`tasks.link_kind='mission'`, migration
+1700000131) via `createMissionMemberTasks` — fail-soft, staff-drivet, samma
+mönster som assignment-collaboration (§ 18.4). Uppdragskortet
+(`/uppdrag/[id]`) visar `TeamCompetencePanel`: teamets **samlade
+kompetenstäckning** + varje medlems kompetenser, så staff ser om teamet är
+tvärfunktionellt nog.
+
+### 29.5 Kompetensbehov & gap-analys (Fas 3)
+
+Migration 1700000132 seedar portfölj-agenten `ai_competence_gap`
+(`ai_system_wide`, admin/incubator_lead) som analyserar portföljens utmaningar →
+vilka kompetenser som krävs och var det finns gap (internt/externt). Den läser
+portföljkontexten + den uppladdade **kompetenskartläggningen** via kunskapsbasen
+(`search_knowledge`, § 26) — ladda upp kartläggningen i `/kunskapsbas`. Den läser
+INGA personuppgifter.
+
+### 29.6 Regelefterlevnad
+
+- **GDPR § 5 / rättslig grund:** `users.competences/title/bio` är personalens
+  YRKESkompetens (berättigat intresse: bemanning av tvärfunktionella team),
+  **inte** art. 9 särskild kategori. Sätts av användaren själv; `bio` cappad.
+  Inga nya whitelistade fält i den kurerade `lib/ai/context.ts` — matcharen läser
+  kandidatdata via en egen isolerad körning, inte `query_collection`. `users`
+  förblir denylistad (§ 9.3).
+- **EU AI Act art. 11 (riskklass): begränsad** för matcharen och gap-agenten —
+  rekommendation/beslutsstöd, ingen profilering på skyddade attribut (system-
+  prompten förbjuder det explicit), människa beslutar. **Gräns:** detta är
+  intern teamformering, INTE anställnings-/HR-beslut (Annex III) — håll
+  människa-i-loopen.
+- **Transparens (art. 13/50):** formuläret bär Mistral-/"verifiera"-bannern.
+- **RBAC (§ 21):** `suggestTeamAction` + team-skapande är staff-only;
+  `min-profil` är self-service. `tasks.mission` ärver tasks RLS.
+- **Migrationer:** nya oföränderliga filnummer (1700000130–132); fält-
+  utökningarna (`users.competences/title/bio`, `tasks.mission`/`link_kind`)
+  speglas i `setup-via-api.mjs`. Agent-seeden (1700000132) är migration-only
+  (samma precedens som 1700000055).
+- **Riskklass för `tasks`-länk/panel:** n/a (arbetsyta, ingen AI-inferens).

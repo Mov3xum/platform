@@ -108,6 +108,51 @@ export async function createCollaboratorTasks(
   return ids;
 }
 
+interface MissionMemberTaskInput {
+  pb: PocketBase;
+  tenantId: string;
+  missionId: string;
+  /** Deltagar-user-id:n (issuer exkluderas av anroparen). */
+  memberIds: string[];
+  /** Kort, PII-fri beskrivning (t.ex. "Uppdrag: Personalhandbok"). */
+  description: string;
+  dueDate?: string;
+}
+
+/**
+ * Skapar en personlig uppgift per teammedlem kopplad till ett uppdrag
+ * (link_kind='mission', § 29) så att den dyker upp i medlemmens "Min översikt".
+ * Fail-soft per rad. Returnerar id:n som faktiskt fick en task. Validerar att
+ * varje mottagare är staff i tenanten (defense-in-depth) — tvärfunktionella
+ * team bemannas av Movexum-resurser.
+ */
+export async function createMissionMemberTasks(
+  input: MissionMemberTaskInput
+): Promise<string[]> {
+  const { pb, tenantId, missionId, description, dueDate } = input;
+  const ids = await validResourceIds(pb, tenantId, input.memberIds);
+  const desc = description.slice(0, 500);
+  const dueAt = dueDate && /^\d{4}-\d{2}-\d{2}/.test(dueDate) ? dueDate : null;
+
+  for (const uid of ids) {
+    try {
+      await pb.collection('tasks').create({
+        tenant: tenantId,
+        kind: 'prep',
+        description: desc,
+        due_at: dueAt,
+        status: 'open',
+        owner: uid,
+        link_kind: 'mission',
+        mission: missionId
+      });
+    } catch {
+      /* fail-soft */
+    }
+  }
+  return ids;
+}
+
 export interface MeetingInput {
   title: string;
   startsAt: string; // ISO eller "YYYY-MM-DDTHH:mm"

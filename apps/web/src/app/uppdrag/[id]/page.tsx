@@ -13,11 +13,17 @@ import { MissionStartupsChips } from '@/components/missions/MissionStartupsChips
 import { getMissionContext, getStartupIds } from '@/lib/missions-server';
 import { deleteMissionFormAction } from '@/lib/actions/missions';
 import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
-import type { Mission, MissionComment, MissionParticipant } from '@platform/shared';
+import { TeamCompetencePanel, type TeamMemberView } from './TeamCompetencePanel';
+import { sanitizeCompetences } from '@platform/shared';
+import type { Mission, MissionComment, MissionParticipant, CompetenceId } from '@platform/shared';
 
 interface UserOption {
   id: string;
   label: string;
+}
+interface UserMeta {
+  title?: string;
+  competences: CompetenceId[];
 }
 
 export default async function MissionDetailPage({
@@ -43,17 +49,29 @@ export default async function MissionDetailPage({
   const ctx = getMissionContext(mission, user.id, user.roles);
   if (!ctx.canView) redirect('/uppdrag');
 
-  // Hämta tenant-användare (för @mention-autocomplete + deltagar-picker)
+  // Hämta tenant-användare (för @mention-autocomplete + deltagar-picker) inkl.
+  // kompetenser/titel för "Team & kompetenser"-panelen (§ 29).
   let users: UserOption[] = [];
+  const userMeta = new Map<string, UserMeta>();
   try {
     const res = await pb.collection('users').getList(1, 200, {
       filter: pb.filter('tenant = {:tenant}', { tenant: user.tenant }),
       sort: 'display_name',
-      fields: 'id,display_name,email'
+      fields: 'id,display_name,email,title,competences'
     });
     users = res.items.map((u) => {
-      const rec = u as unknown as { id: string; display_name?: string; email?: string };
+      const rec = u as unknown as {
+        id: string;
+        display_name?: string;
+        email?: string;
+        title?: string;
+        competences?: unknown;
+      };
       const local = rec.email ? rec.email.split('@')[0] : rec.id;
+      userMeta.set(rec.id, {
+        title: rec.title || undefined,
+        competences: sanitizeCompetences(rec.competences)
+      });
       return { id: rec.id, label: rec.display_name || local };
     });
   } catch {
@@ -111,6 +129,19 @@ export default async function MissionDetailPage({
             ? [{ user_id: mission.mentor, role: 'observer' as const }]
             : [])
         ];
+
+  // Team-medlemmar med kompetenser (för panelen)
+  const usersByIdLabel = new Map(users.map((u) => [u.id, u.label]));
+  const teamMembers: TeamMemberView[] = participantsForUi.map((p) => {
+    const meta = userMeta.get(p.user_id);
+    return {
+      id: p.user_id,
+      name: usersByIdLabel.get(p.user_id) || p.user_id,
+      title: meta?.title,
+      role: p.role,
+      competences: meta?.competences ?? []
+    };
+  });
 
   return (
     <div
@@ -182,6 +213,7 @@ export default async function MissionDetailPage({
             initialParticipants={participantsForUi}
             canEdit={ctx.canEdit}
           />
+          <TeamCompetencePanel members={teamMembers} />
         </div>
       </div>
     </div>

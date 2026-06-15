@@ -673,6 +673,22 @@ await patchUsersCollection([
   }
 ]);
 
+// 4b. users — kompetensmodell (migration 1700000130, CLAUDE.md § 29) ---------
+// Speglar CompetenceId i packages/shared/src/competences.ts. Yrkeskompetens
+// (berättigat intresse) — sätts av användaren själv (updateRule oförändrad).
+await patchUsersCollection([
+  {
+    name: 'competences', type: 'select', required: false, maxSelect: 14,
+    values: [
+      'affarscoaching', 'affarsutveckling', 'projektledning', 'kommunikation',
+      'hr_personal', 'juridik', 'finansiering_kapital', 'ai_teknik', 'hallbarhet',
+      'internationalisering', 'boost_chamber', 'design', 'branschspecifik', 'annat'
+    ]
+  },
+  { name: 'title', type: 'text', required: false, max: 120 },
+  { name: 'bio', type: 'text', required: false, max: 1000 }
+]);
+
 // 5. partners ---------------------------------------------------------------
 await ensureCollection({
   id: 'partners_collection',
@@ -1886,10 +1902,12 @@ await ensureCollection({
     { name: 'owner', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     // Migration 1700000129: Movexum-kollegor på kanban-kortet.
     { name: 'assignees', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 20 },
-    { name: 'link_kind', type: 'select', required: true, maxSelect: 1, values: ['none', 'startup', 'contact', 'event'] },
+    // Migration 1700000131: + 'mission' (tvärfunktionella team, § 29).
+    { name: 'link_kind', type: 'select', required: true, maxSelect: 1, values: ['none', 'startup', 'contact', 'event', 'mission'] },
     { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'contact', type: 'relation', required: false, collectionId: 'contacts_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
-    { name: 'event', type: 'relation', required: false, collectionId: 'incubator_events_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+    { name: 'event', type: 'relation', required: false, collectionId: 'incubator_events_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'mission', type: 'relation', required: false, collectionId: 'missions_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],
   indexes: [
     'CREATE INDEX idx_tasks_tenant ON tasks (tenant)',
