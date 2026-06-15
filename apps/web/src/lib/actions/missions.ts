@@ -18,6 +18,7 @@ import {
   type Role
 } from '@platform/shared';
 import { deriveRecipientsFromParticipants, getMissionContext, unionParticipantIds } from '@/lib/missions-server';
+import { createMissionMemberTasks } from '@/lib/assignments/collaboration';
 import { notify } from '@/lib/notifications-server';
 
 const MEMBER_ROLES: Role[] = ALL_ROLES.filter((r) => r !== 'observer');
@@ -212,6 +213,24 @@ export async function createMissionAction(
   const targetIds = participants
     .filter((p) => p.user_id !== user.id)
     .map((p) => p.user_id);
+
+  // Tvärfunktionella team (§ 29): ge varje medlem en personlig uppgift kopplad
+  // till uppdraget (link_kind='mission'). Fail-soft — blockerar aldrig skapandet.
+  if (targetIds.length > 0 && hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) {
+    try {
+      await createMissionMemberTasks({
+        pb,
+        tenantId: user.tenant,
+        missionId: created.id,
+        memberIds: targetIds,
+        description: `Uppdrag: ${title}`.slice(0, 500),
+        dueDate
+      });
+    } catch {
+      /* fail-soft */
+    }
+  }
+
   if (targetIds.length > 0) {
     await notify(pb, {
       tenant: user.tenant,

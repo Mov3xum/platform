@@ -1305,7 +1305,7 @@ export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['idag', 'min_oversikt', 'inkorg', 'pagaende', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'anvandare', 'installningar'] }
+  { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'anvandare', 'installningar', 'min_profil'] }
 ];
 
 /**
@@ -1386,6 +1386,13 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Skapa och samarbeta på projekt och uppdrag — bjud in roller, kommentera och följ flöden.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer'],
     route: '/uppdrag'
+  },
+  {
+    id: 'min_profil',
+    title: 'Min profil',
+    description: 'Din yrkestitel och dina kompetenser — driver matchningen av tvärfunktionella team.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner'],
+    route: '/min-profil'
   },
   {
     id: 'inflode',
@@ -1544,6 +1551,8 @@ export * from './reporting';
 // ─── Startupkompassen — quiz-poängsättning (ren logik, enhetstestad) ─────────
 export * from './compass-quiz';
 export * from './file-topics';
+// ─── Kompetenstaxonomi (tvärfunktionella team, ren logik, enhetstestad) ──────
+export * from './competences';
 // ─── AI-miljöpåverkan (tokens → CO₂e/vatten, ren logik, enhetstestad) ────────
 export * from './ai-impact';
 
