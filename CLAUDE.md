@@ -3651,6 +3651,11 @@ aldrig. Läsning sker via det auto-exponerade `query_collection` (collectionen
   skrivningarna är deterministiska mutationer via det delade lagret.
 - **Grafisk profil (§ 2):** hjulets kategorifärger hämtas från Movexum-brand-
   CSS-variablerna (`--movexum-djupbla/bla/lila`) — inga ad-hoc-hex.
-- **Migration:** nytt oföränderligt filnummer (1700000133). Speglas även i
-  `setup-via-api.mjs` för self-healing-sync i CI; createRule följer § 21.3 så
-  `verify-baseline.mjs`-svepet passerar.
+- **Migration:** nytt oföränderligt filnummer (1700000133). Kollektionen
+  **speglas i `setup-via-api.mjs`** (collection-def + `FORCE_CREATE_RULES` +
+  autodate-backfill) så att en instans som provisioneras/reconcile:as via
+  bootstrap-skriptet — inte bara via auto-migrate — också får kollektionen.
+  (Utan speglingen 404:ade chatt-skrivningarna med "Missing or invalid
+  collection context" på en bootstrappad instans.) createRule följer § 21.3 så
+  `verify-baseline.mjs`-svepet passerar, och list/view-isoleringen asserteras i
+  `MUST_BE_STAFF_OR_OBSERVER`.
