@@ -7,7 +7,6 @@
 // detta är en segment-gräns, inte global-error.
 
 import { useEffect } from 'react';
-import Link from 'next/link';
 import { attemptChunkReload, isChunkLoadError } from '@/lib/chunk-reload';
 
 export default function RouteError({
@@ -53,12 +52,6 @@ export default function RouteError({
           >
             Försök igen
           </button>
-          <Link
-            href="/education/workshops"
-            className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-5 py-2.5 text-sm font-semibold text-foreground-muted transition hover:bg-canvas-subtle"
-          >
-            Till workshops
-          </Link>
         </div>
       </div>
     </main>
