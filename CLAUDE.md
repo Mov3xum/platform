@@ -3651,6 +3651,6 @@ aldrig. Läsning sker via det auto-exponerade `query_collection` (collectionen
   skrivningarna är deterministiska mutationer via det delade lagret.
 - **Grafisk profil (§ 2):** hjulets kategorifärger hämtas från Movexum-brand-
   CSS-variablerna (`--movexum-djupbla/bla/lila`) — inga ad-hoc-hex.
-- **Migration:** nytt oföränderligt filnummer (1700000133). Migration-only
-  (speglas inte i `setup-via-api.mjs`, samma precedens som onboarding/compass);
-  createRule följer § 21.3 så `verify-baseline.mjs`-svepet passerar.
+- **Migration:** nytt oföränderligt filnummer (1700000133). Speglas även i
+  `setup-via-api.mjs` för self-healing-sync i CI; createRule följer § 21.3 så
+  `verify-baseline.mjs`-svepet passerar.
