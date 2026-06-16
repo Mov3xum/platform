@@ -1,5 +1,13 @@
 import 'server-only';
-import { ALL_PHASES, type StartupPhase } from '@platform/shared';
+import {
+  ALL_PHASES,
+  ANNUAL_WHEEL_CATEGORY_IDS,
+  ANNUAL_WHEEL_TRACK_IDS,
+  sanitizeMonth,
+  type AnnualWheelCategory,
+  type AnnualWheelTrack,
+  type StartupPhase
+} from '@platform/shared';
 
 /**
  * Per-fält validering. Returnerar normaliserat värde eller felmeddelande.
@@ -121,4 +129,42 @@ export function validateActivityKindForWrite(
     };
   }
   return { ok: true, value: s as ActivityKindForWrite };
+}
+
+// ── Årshjul (§ 30) ───────────────────────────────────────────────────────────
+
+export function validateAnnualWheelCategory(
+  value: unknown
+): ValidationResult<AnnualWheelCategory> {
+  const s = asString(value);
+  if (s === null) return { ok: false, error: 'category saknas.' };
+  if (!ANNUAL_WHEEL_CATEGORY_IDS.includes(s as AnnualWheelCategory)) {
+    return { ok: false, error: `category måste vara en av: ${ANNUAL_WHEEL_CATEGORY_IDS.join(', ')}.` };
+  }
+  return { ok: true, value: s as AnnualWheelCategory };
+}
+
+export function validateAnnualWheelTrack(value: unknown): ValidationResult<AnnualWheelTrack> {
+  const s = asString(value);
+  if (s === null) return { ok: false, error: 'track saknas.' };
+  if (!ANNUAL_WHEEL_TRACK_IDS.includes(s as AnnualWheelTrack)) {
+    return { ok: false, error: `track måste vara en av: ${ANNUAL_WHEEL_TRACK_IDS.join(', ')}.` };
+  }
+  return { ok: true, value: s as AnnualWheelTrack };
+}
+
+/** Månad: 1–12, eller null (helårs-/odaterad post). Tomt värde = null. */
+export function validateAnnualWheelMonth(value: unknown): ValidationResult<number | null> {
+  if (value === null || value === '' || value === undefined) return { ok: true, value: null };
+  const m = sanitizeMonth(value);
+  if (m === null) return { ok: false, error: 'month måste vara ett heltal 1–12 (eller tomt).' };
+  return { ok: true, value: m };
+}
+
+export function validateYear(value: unknown): ValidationResult<number> {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(n) || n < 2000 || n > 2100) {
+    return { ok: false, error: 'year måste vara ett heltal 2000–2100.' };
+  }
+  return { ok: true, value: n };
 }

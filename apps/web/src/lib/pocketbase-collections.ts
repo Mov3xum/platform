@@ -34,5 +34,7 @@ export const PB_COLLECTIONS = {
   orgKnowledge: 'org_knowledge_col',
   orgKnowledgeChunks: 'org_knowledge_chunks_col',
   // Personligt filarkiv-RAG-index (migration 1700000121, § 27)
-  userFileChunks: 'user_file_chunks_col'
+  userFileChunks: 'user_file_chunks_col',
+  // Årshjul — verksamhetskalender (migration 1700000133, § 30)
+  annualWheelItems: 'annual_wheel_items_collection'
 } as const;

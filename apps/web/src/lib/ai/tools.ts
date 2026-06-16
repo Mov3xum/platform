@@ -17,7 +17,9 @@ import {
   type GeneratedFileRef,
   type InlineVisualRef,
   FILE_TOPIC_IDS,
-  isFileTopic
+  isFileTopic,
+  ANNUAL_WHEEL_CATEGORY_IDS,
+  ANNUAL_WHEEL_TRACK_IDS
 } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
 import { validateChart, validateKpis } from '@/lib/documents/validate';
@@ -30,6 +32,9 @@ import {
   createActivity,
   updateActivityField,
   updateStartupField,
+  createAnnualWheelItem,
+  updateAnnualWheelItemField,
+  type AnnualWheelWritableField,
   type Actor,
   type StartupWritableField
 } from '@/lib/core/write';
@@ -627,6 +632,73 @@ export function buildChatTools(
         }
       });
     }
+
+    // Årshjul (§ 30) — skapa/uppdatera Movexums verksamhetskalender direkt
+    // från chatten. Allt går via det delade skrivlagret (whitelist + tenant +
+    // validering + agent_actions-logg). Ingen PII (intern planering).
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_annual_wheel_item',
+        description:
+          'Lägger till en aktivitet i Movexums årshjul (verksamhetskalendern). ' +
+          'Använd när personalen ber dig planera in återkommande aktiviteter ' +
+          '(t.ex. "lägg bokslut i april" eller "styrelsemöte varje kvartal"). ' +
+          'Skapa en post per månad om aktiviteten återkommer.',
+        parameters: {
+          type: 'object',
+          properties: {
+            year: { type: 'integer', description: 'Verksamhetsår, t.ex. 2026.' },
+            title: { type: 'string', description: 'Aktivitetens namn (max 200 tecken).' },
+            month: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 12,
+              description: 'Månad 1–12. Utelämna för en helårs-/kvartalsövergripande aktivitet.'
+            },
+            track: {
+              type: 'string',
+              enum: [...ANNUAL_WHEEL_TRACK_IDS],
+              description: 'Spår/kolumn (kampanjer, projekt, team, ledningsgrupp …).'
+            },
+            category: {
+              type: 'string',
+              enum: [...ANNUAL_WHEEL_CATEGORY_IDS],
+              description: 'Kategori för färg/legend: styrelse, ledning eller gemensamt.'
+            },
+            notes: { type: 'string', description: 'Valfri notering (max 2000 tecken).' }
+          },
+          required: ['year', 'title', 'track', 'category']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'update_annual_wheel_item',
+        description:
+          'Uppdaterar ETT fält på en befintlig årshjuls-aktivitet (slå upp id via ' +
+          'query_collection mot annual_wheel_items). Använd för att flytta en ' +
+          'aktivitet till en annan månad, byta kategori/spår eller ändra titel.',
+        parameters: {
+          type: 'object',
+          properties: {
+            itemId: { type: 'string', description: 'PocketBase-id för årshjuls-posten.' },
+            field: {
+              type: 'string',
+              enum: ['title', 'month', 'track', 'category', 'notes', 'year'],
+              description: 'Vilket fält som ska uppdateras.'
+            },
+            value: {
+              description:
+                'Nytt värde. month: 1–12 eller null. track/category: giltigt enum-värde. ' +
+                'title/notes: text. year: heltal.'
+            }
+          },
+          required: ['itemId', 'field', 'value']
+        }
+      }
+    });
   }
 
   // Tvärsessions-minne (Fas 2). memory_read är read-only och kan ges till
@@ -851,7 +923,8 @@ const COLLECTION_LABELS: Record<string, string> = {
   contacts: 'kontakterna',
   de_minimis_stod: 'de minimis-stöden',
   compass_leads: 'inflödet',
-  onboarding_progress: 'onboardingen'
+  onboarding_progress: 'onboardingen',
+  annual_wheel_items: 'årshjulet'
 };
 
 const DOC_LABELS: Record<string, string> = {
@@ -906,6 +979,10 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: 'Loggar aktivitet' };
     case 'update_activity_field':
       return { tool: name, label: 'Uppdaterar aktivitet' };
+    case 'create_annual_wheel_item':
+      return { tool: name, label: 'Lägger till i årshjulet' };
+    case 'update_annual_wheel_item':
+      return { tool: name, label: 'Uppdaterar årshjulet' };
     case 'memory_read':
       return { tool: name, label: 'Läser minnet' };
     case 'memory_write':
@@ -1724,6 +1801,10 @@ export async function dispatchToolCall(
       return runCreateStartupActivity(args, ctx);
     case 'update_activity_field':
       return runUpdateActivityField(args, ctx);
+    case 'create_annual_wheel_item':
+      return runCreateAnnualWheelItem(args, ctx);
+    case 'update_annual_wheel_item':
+      return runUpdateAnnualWheelItem(args, ctx);
     case 'memory_read':
       return runMemoryRead(args, ctx);
     case 'memory_write':
@@ -2101,6 +2182,68 @@ async function runUpdateActivityField(
     ok: true,
     data: {
       activityId: result.value.activityId,
+      field: result.value.field,
+      before: result.value.before,
+      after: result.value.after,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateAnnualWheelItem(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createAnnualWheelItem(ctx.pb, actor, {
+    year: typeof args.year === 'number' ? args.year : Number(args.year),
+    title: typeof args.title === 'string' ? args.title : '',
+    month: args.month === undefined || args.month === null ? null : Number(args.month),
+    track: typeof args.track === 'string' ? args.track : '',
+    category: typeof args.category === 'string' ? args.category : '',
+    notes: typeof args.notes === 'string' ? args.notes : undefined
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      item_id: result.value.itemId,
+      year: result.value.year,
+      title: result.value.title,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runUpdateAnnualWheelItem(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const itemId = typeof args.itemId === 'string' ? args.itemId.trim() : '';
+  const field = typeof args.field === 'string' ? args.field.trim() : '';
+  if (!itemId) return { ok: false, error: 'itemId saknas.' };
+  const allowed = ['title', 'month', 'track', 'category', 'notes', 'year'];
+  if (!allowed.includes(field)) {
+    return { ok: false, error: `field måste vara en av: ${allowed.join(', ')}.` };
+  }
+
+  const result = await updateAnnualWheelItemField(ctx.pb, actor, {
+    itemId,
+    field: field as AnnualWheelWritableField,
+    value: args.value
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      item_id: result.value.itemId,
       field: result.value.field,
       before: result.value.before,
       after: result.value.after,
