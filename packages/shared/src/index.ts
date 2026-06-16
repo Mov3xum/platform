@@ -1318,7 +1318,7 @@ export interface ModuleGroup {
 }
 
 export const RAIL_GROUPS: ModuleGroup[] = [
-  { label: 'Översikt', modules: ['idag', 'min_oversikt', 'inkorg', 'pagaende', 'filer', 'inflode', 'uppdrag'] },
+  { label: 'Översikt', modules: ['idag', 'min_oversikt', 'inkorg', 'pagaende', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'anvandare', 'installningar', 'min_profil'] }
@@ -1388,6 +1388,14 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Allt som pågår med bolagen — workshops, utbildningar och aktiviteter, samlat per bolag så hela Movexum ser läget.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
     route: '/pagaende'
+  },
+  {
+    id: 'arshjul',
+    title: 'Årshjul',
+    description:
+      'Movexums verksamhetsårshjul — alla återkommande aktiviteter (styrelse/ledning) över året som hjul och tabell. Bygg och styr manuellt eller via chatten; filtrera per kategori, spår och år.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/arshjul'
   },
   {
     id: 'filer',
@@ -1562,6 +1570,8 @@ export * from './onboarding';
 export * from './education-documents';
 // ─── De minimis-modul (ren beräkningslogik, enhetstestad) ────────────────────
 export * from './de-minimis';
+// ─── Årshjul (ren domän-/geometrilogik, enhetstestad) ────────────────────────
+export * from './annual-wheel';
 export * from './agreements';
 export * from './reporting';
 // ─── Startupkompassen — quiz-poängsättning (ren logik, enhetstestad) ─────────

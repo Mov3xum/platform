@@ -28,6 +28,8 @@ interface FieldPolicy {
 }
 
 const STAFF_AND_COACH: Role[] = ['admin', 'incubator_lead', 'coach'];
+// Årshjulet är intern verksamhetsplanering — hela Movexum-staben redigerar.
+const STAFF_FULL: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 
 const POLICIES: Record<string, Record<string, FieldPolicy>> = {
   startups: {
@@ -76,6 +78,16 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
       user: { kind: 'any-role' },
       agent: { kind: 'allow' }
     }
+  },
+  // Årshjul (§ 30). Hela aktiviteten är icke-PII verksamhetsplanering, så
+  // agenten får uppdatera alla fält (människa-i-loopen i staff-chatten).
+  annual_wheel_items: {
+    title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    month: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    track: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    category: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    notes: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    year: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } }
   }
 };
 
@@ -86,6 +98,10 @@ const CREATE_POLICIES: Record<
 > = {
   activities: {
     user: { kind: 'any-role' },
+    agent: { kind: 'allow' }
+  },
+  annual_wheel_items: {
+    user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'allow' }
   }
 };

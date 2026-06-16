@@ -2,6 +2,11 @@ import 'server-only';
 
 export { updateStartupField, type StartupWritableField } from './startups';
 export { createActivity, updateActivityField } from './activities';
+export {
+  createAnnualWheelItem,
+  updateAnnualWheelItemField,
+  type AnnualWheelWritableField
+} from './annual-wheel';
 export { logAgentAction } from './audit';
 export {
   canWriteField,

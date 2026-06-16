@@ -3103,8 +3103,10 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
 | `backend/pocketbase-schema/migrations/1700000119_create_org_knowledge_chunks.js` | Collection `org_knowledge_chunks` (RAG-index: text + embedding) |
 | `apps/web/src/lib/ai/rag.ts` | `chunkText`, `cosineSimilarity`, `indexOrgKnowledge`, `searchOrgKnowledge` |
 | `apps/web/src/lib/ai/mistral.ts` | `embedTexts()` mot `/v1/embeddings` (mistral-embed, EU) + pris |
-| `apps/web/src/lib/ai/knowledge.ts` | Extraktion + personnummer-sanering (delad pipe, nu med valbart text-tak) |
-| `apps/web/src/lib/ai/tools.ts` | Verktyget `search_knowledge` + dispatch |
+| `apps/web/src/lib/ai/knowledge.ts` | Extraktion + personnummer-sanering (delad pipe; valbart text-tak + `allowImages`) |
+| `apps/web/src/lib/ai/vision.ts` | `extractImageText` — Pixtral-bildigenkänning (transkribering + beskrivning) av PNG/JPG/WebP |
+| `backend/pocketbase-schema/migrations/1700000130_extend_org_knowledge_image_mimes.js` | `org_knowledge.file` accepterar bilder (PNG/JPG/WebP) |
+| `apps/web/src/lib/ai/tools.ts` | Verktygen `search_knowledge` (fragment-RAG) + `read_knowledge_document` (lista/läs HELT dokument) + dispatch |
 | `apps/web/src/lib/ai/guidance.ts` | `KNOWLEDGE_GUIDANCE` (delad — kunskapsbas ⨯ databas) |
 | `apps/web/src/app/api/knowledge/route.ts` | Upload-route (staff-only, extraherar + indexerar) |
 | `apps/web/src/lib/actions/org-knowledge.ts` | Lista / radera / indexera om |
@@ -3126,7 +3128,15 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
 1. Staff laddar upp en fil via `/api/knowledge` (route handler → slipper
    `serverActions.bodySizeLimit`, § 18.2). Texten extraheras EN gång,
    **personnummer-saneras** (samma regex som CRM-importen) och cachas i
-   `extracted_text`.
+   `extracted_text`. **Bilduppladdningar** (PNG/JPG/WebP, migration 1700000130 +
+   `allowImages` på `extractKnowledgeFromFile`) har inget textlager → texten
+   "extraheras" i stället via **Pixtral-bildigenkänning** (`lib/ai/vision.ts`,
+   `extractImageText`): all synlig text transkriberas och icke-text-innehåll
+   (tabeller, matriser, diagram) beskrivs till sökbar text. Pixtral kör på
+   Mistral AI:s EU-infrastruktur (samma leverantör/DPA, § 10.2); fallback till
+   Mistral Medium (även multimodal) vid 429. Den igenkända texten saneras +
+   chunkas + embeddas precis som övriga format. Bilden cachas aldrig i
+   tredjepart; vision-tokens loggas separat i `ai_usage_events` (Pixtral-modell).
 2. `indexOrgKnowledge` chunkar texten (~1500 tecken, overlap 200), embeddar varje
    chunk (`mistral-embed`, batchat) och skriver `org_knowledge_chunks`. Fail-soft:
    en misslyckad indexering gör filen sökbar via nyckelords-fallback i stället.
@@ -3144,11 +3154,37 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
    - **Reranker av/på:** `MOVEXUM_RAG_RERANK=0` stänger av LLM-omrankningen
      (default på). Fail-open i `llmRerank` — en granskare som inte kan tolkas
      returnerar ursprungsordningen.
+4. **`read_knowledge_document` (helt dokument, inte fragment).**
+   `search_knowledge` är fragment-RAG: den returnerar bara topp-K textstycken,
+   så den kan tyst MISSA ett namngivet dokument (t.ex. en visuell matris vars
+   tabell-extraktion rankar lågt) och kan ALDRIG mata in ett helt dokument för
+   "analysera/sammanfatta dokumentet". `read_knowledge_document` täpper till det:
+   utan `query`/`document_id` returnerar den KATALOGEN (titlar + id + topic +
+   char_count) så modellen ser vad som finns; med `query` fuzzy-matchas titel/
+   filnamn (`rankCandidates`, samma som `search_records`); med `document_id` (eller
+   en entydig namnträff) returneras hela den sanerade `extracted_text` sidvis
+   (`MAX_DOC_CHARS=60 000`/anrop, `offset`/`next_offset` för längre dokument).
+   Ligger i `buildChatTools`-basytan (alla read-only-körningstyper, som
+   `search_knowledge`), är strikt read-only och tenant-scopad (id-läsningar
+   filtreras på `tenant` oavsett pb-typ). Ingen ny dataväg/kollektion/dependency
+   — `org_knowledge` är fortsatt denylistad för `query_collection`; detta är dess
+   andra KURERADE väg (samma RLS + redan personnummer-sanerade text som
+   `search_knowledge`). Riskklass: oförändrad (begränsad).
 
 ### 26.4 Säkerhet och regelefterlevnad
 
-- **EU-suveränitet:** embeddings via `mistral-embed` (Mistral, FR/EU). Ingen
-  US-tjänst, ingen ny leverantör (§ 10.2).
+- **EU-suveränitet:** embeddings via `mistral-embed` (Mistral, FR/EU); bild-
+  igenkänning via `pixtral-large-latest` (fallback `mistral-medium-latest`) på
+  samma EU-infrastruktur. Ingen US-tjänst, ingen ny leverantör (§ 10.2).
+- **Bildigenkänning (Pixtral) — riskklass begränsad (EU AI Act art. 11):**
+  deterministiskt syfte (transkribera/beskriva en uppladdad bild till sökbar
+  text); ingen profilering av individer, ingen autopublicering (innehållet
+  granskas av människa i chatten). Immutabel system-prompt behandlar bilden som
+  DATA, inte instruktioner (§ 9.3 — prompt-injection-skydd även för bild-burna
+  instruktioner). Den igenkända texten personnummer-saneras före lagring/index;
+  bilden cachas aldrig i tredjepart. Vision-tokens loggas i `ai_usage_events`
+  (surface `suggestions`, Pixtral-modell). Gäller bara den tenant-breda
+  kunskapsbasen (`allowImages`); per-agent-basen (`tool_knowledge`) är oförändrad.
 - **Riskklass (EU AI Act art. 11): begränsad.** Dokument-Q&A med
   människa-i-loopen (chatten granskas av användaren); ingen profilering av
   individer, ingen autopublicering. Versionerad här per art. 11.
@@ -3238,6 +3274,13 @@ Sök på små chunkar (precision) men returnera mer kontext (svarskvalitet). Av
 default eftersom det blåser upp prompten (tool-resultatet capas ändå nedströms).
 
 **Kvar / kommande steg:**
+- **Bildigenkänning (PNG/JPG/WebP) via Pixtral** — KLAR (juni 2026). Uppladdade
+  bilder i kunskapsbasen transkriberas/beskrivs till sökbar text av
+  `lib/ai/vision.ts` (`extractImageText`, Pixtral → Medium-fallback, EU) och
+  indexeras som vilket dokument som helst (migration 1700000130 vidgar
+  `org_knowledge.file`-whitelisten). **Skannade bild-PDF:er** (PDF utan textlager)
+  kräver fortfarande sid-rastrering innan vision — INTE i scope (skulle kräva en
+  PDF→bild-rasterare); exportera om till text-PDF eller ladda upp sidan som bild.
 - **PPTX/DOCX-textextraktion** — KLAR. Dependency-fri OOXML-extraktion via den
   delade `lib/import/zip.ts` (ZIP-kärnan, delas med XLSX) + `lib/import/ooxml-text.ts`
   (ren, enhetstestad XML→text) i `lib/ai/attachments.ts`
@@ -3470,21 +3513,21 @@ beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 | Fil | Syfte |
 |-----|-------|
 | `packages/shared/src/competences.ts` (+ `.test.ts`) | Fast kompetenstaxonomi (`COMPETENCES`, `CompetenceId`) + helpers (`sanitizeCompetences`, `inferCompetencesFromText`) — ren, enhetstestad |
-| `backend/pocketbase-schema/migrations/1700000130_extend_users_competences.js` | `users.competences` (select), `users.title`, `users.bio` |
+| `backend/pocketbase-schema/migrations/1700000134_extend_users_competences.js` | `users.competences` (select), `users.title`, `users.bio` |
 | `apps/web/src/lib/actions/profile.ts` + `app/min-profil/**` | Självservice-profil (titel/bio/kompetenser) |
 | `apps/web/src/lib/ai/team-match.ts` | `matchTeam` — isolerad Mistral-körning: beskrivning → kompetenser + kandidater (samma mönster som `file-categorize.ts`) |
 | `apps/web/src/lib/actions/team.ts` | `suggestTeamAction` — laddar kandidater (users+contacts), kör matcharen, loggar usage |
 | `apps/web/src/app/uppdrag/new/NewMissionForm.tsx` | AI-teamförslag inbäddat i nytt-uppdrag-formuläret |
-| `backend/pocketbase-schema/migrations/1700000131_extend_tasks_mission_link.js` | `tasks.link_kind += 'mission'` + `tasks.mission` |
+| `backend/pocketbase-schema/migrations/1700000135_extend_tasks_mission_link.js` | `tasks.link_kind += 'mission'` + `tasks.mission` |
 | `apps/web/src/lib/assignments/collaboration.ts` | `createMissionMemberTasks` (personlig uppgift per teammedlem) |
 | `apps/web/src/app/uppdrag/[id]/TeamCompetencePanel.tsx` | "Team & kompetenser"-panel (samlad täckning + per medlem) |
 | `apps/web/src/components/kanban/TaskKanban.tsx` | Delad 6-kolumners kanban (driver bolags- OCH uppdragskanban) |
 | `apps/web/src/app/uppdrag/[id]/MissionTaskBoard.tsx` | Uppdragstavla — wrapper som binder mission-board-actions |
 | `apps/web/src/lib/actions/tasks.ts` | `createMissionBoardTaskAction` / `moveMissionBoardTaskAction` |
-| `backend/pocketbase-schema/migrations/1700000133_create_mission_documents.js` | Collection `mission_documents` (uppladdad dokumentation) |
+| `backend/pocketbase-schema/migrations/1700000137_create_mission_documents.js` | Collection `mission_documents` (uppladdad dokumentation) |
 | `apps/web/src/app/api/missions/[id]/documents/route.ts` | Upload-route för dokumentation (staff-only) |
 | `apps/web/src/app/uppdrag/[id]/MissionDocuments.tsx` | Dokumentation-panel (ladda upp/lista/radera) |
-| `backend/pocketbase-schema/migrations/1700000132_seed_competence_gap_agent.js` | Portfölj-agent `ai_competence_gap` (kompetensbehov/gap, Fas 3) |
+| `backend/pocketbase-schema/migrations/1700000136_seed_competence_gap_agent.js` | Portfölj-agent `ai_competence_gap` (kompetensbehov/gap, Fas 3) |
 
 ### 29.2 Kompetensmodell (Fas 0)
 
@@ -3543,7 +3586,7 @@ list/view = staff/observer-only (intern team-dokumentation), createRule roll-lö
 
 ### 29.5 Kompetensbehov & gap-analys (Fas 3)
 
-Migration 1700000132 seedar portfölj-agenten `ai_competence_gap`
+Migration 1700000136 seedar portfölj-agenten `ai_competence_gap`
 (`ai_system_wide`, admin/incubator_lead) som analyserar portföljens utmaningar →
 vilka kompetenser som krävs och var det finns gap (internt/externt). Den läser
 portföljkontexten + den uppladdade **kompetenskartläggningen** via kunskapsbasen
@@ -3566,11 +3609,78 @@ INGA personuppgifter.
 - **Transparens (art. 13/50):** formuläret bär Mistral-/"verifiera"-bannern.
 - **RBAC (§ 21):** `suggestTeamAction` + team-skapande är staff-only;
   `min-profil` är self-service. `tasks.mission` ärver tasks RLS.
-- **Migrationer:** nya oföränderliga filnummer (1700000130–133); fält-
-  utökningarna (`users.competences/title/bio`, `tasks.mission`/`link_kind`) och
-  collectionen `mission_documents` speglas i `setup-via-api.mjs`. Agent-seeden
-  (1700000132) är migration-only (samma precedens som 1700000055).
+- **Migrationer:** nya oföränderliga filnummer (1700000134–137); fält-
+  utökningarna (`users.competences/title/bio`, `tasks.mission`/`link_kind`)
+  speglas i `setup-via-api.mjs`. Agent-seeden (1700000136) är migration-only
+  (samma precedens som 1700000055).
 - **Riskklass för kanban/dokumentation:** n/a (arbetsyta + filuppladdning, ingen
   AI-inferens). `mission_documents` läses staff/observer-only; intern
   team-dokumentation, ingen ny AI-kontext-väg (whitelistas aldrig i
   `lib/ai/context.ts`).
+
+---
+
+## 30. Årshjul — Movexums verksamhetskalender (manuell + chatt-styrd)
+
+### 30.1 Översikt
+
+`/arshjul` (modul `arshjul`, "Översikt"-railen, staff/observer) är Movexums
+**verksamhetsårshjul**: alla återkommande aktiviteter över ett år — styrelse-
+och ledningsspåren (bokslut, kvartalsrapporter, strategidagar, medarbetar-
+samtal, kampanjer m.m.) — visade både som ett **hjul** (månads-/kvartalsvy med
+kategorifärgat yttre band) och som en **tabell** (månad × spår, speglar
+Movexums Excel-vy). Aktiviteter styrs **manuellt** i UI:t ELLER **via
+dashboardchatten** (samma delade skrivlager, § 16). Filter per kategori, spår
+och år.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/annual-wheel.ts` (+ `.test.ts`) | Ren domän-/geometrilogik (taxonomi, filter, gruppering, tabell-byggare, hjul-vinklar/SVG-path) — enhetstestad |
+| `backend/pocketbase-schema/migrations/1700000133_create_annual_wheel_items.js` | Collection `annual_wheel_items` |
+| `apps/web/src/lib/core/write/annual-wheel.ts` | `createAnnualWheelItem` / `updateAnnualWheelItemField` (delat skrivlager) |
+| `apps/web/src/lib/actions/annual-wheel.ts` | Server actions (manuell CRUD via UI) |
+| `apps/web/src/app/arshjul/{page,AnnualWheelView}.tsx` | Sida + klientvy (hjul-SVG, tabell, filter, editor) |
+| `apps/web/src/lib/ai/tools.ts` | Verktygen `create_annual_wheel_item` / `update_annual_wheel_item` + dispatch |
+
+### 30.2 Datamodell
+
+- **`annual_wheel_items`** (1700000133): `tenant` (cascadeDelete), `year`
+  (int 2000–2100), `title`, `month` (int 1–12 eller tomt = helårs-/kvartals-
+  övergripande), `track` (select: kampanjer, verksamhetsrapporter, projekt,
+  team, ledningsgrupp, projektstyrgrupper, ovrigt — tabellens kolumner),
+  `category` (select: styrelse, ledning, gemensamt — hjulets legend/färg),
+  `notes`, `created_by`. Index på `(tenant)` och `(tenant, year)`. Taxonomin
+  är källan-av-sanning i `annual-wheel.ts` och MÅSTE speglas som select-värden
+  i migrationen.
+
+### 30.3 Manuell + chatt-styrd (delat skrivlager)
+
+Både UI-actionen och chatt-agenten går genom **det delade skrivlagret**
+(`lib/core/write/annual-wheel.ts`) — whitelist (`writable-fields.ts`:
+`annual_wheel_items` create + fält title/month/track/category/notes/year),
+validering (`validators.ts`), tenant-stämpel från actorn och `agent_actions`-
+logg. Reglerna kan därför aldrig divergera mellan människa och agent (§ 16).
+Chatt-verktygen exponeras BARA för agent-actor i den interaktiva staff-chatten
+(`includeWrites`, människa-i-loopen § 16.3) — autonoma körningar skriver
+aldrig. Läsning sker via det auto-exponerade `query_collection` (collectionen
+är inte denylistad) under RLS + tenant-scope.
+
+### 30.4 Regelefterlevnad
+
+- **§ 21 isolering:** tenant-bred STAFF/OBSERVER-data — en ren `startup_member`
+  ser inte Movexums interna styrelse-/ledningskalender. list/view kräver
+  staff/observer (`:each ?=`, § 21.3); createRule refererar bara auth-fält
+  (ingen roll-check/tenant-join → verify-baseline-svepet passerar); roll-
+  enforcement i server-action + delat skrivlager. `verify-baseline.mjs`
+  asserterar list/view-isoleringen (`MUST_BE_STAFF_OR_OBSERVER`, fail-soft).
+- **GDPR § 5:** ingen PII (intern verksamhetsplanering); inga nya whitelistade
+  fält i `lib/ai/context.ts`. `cascadeDelete` på tenant städar art. 17.
+- **EU AI Act:** ingen AI-inferens i modulen → ingen riskklass/banner. Chatt-
+  skrivningarna är deterministiska mutationer via det delade lagret.
+- **Grafisk profil (§ 2):** hjulets kategorifärger hämtas från Movexum-brand-
+  CSS-variablerna (`--movexum-djupbla/bla/lila`) — inga ad-hoc-hex.
+- **Migration:** nytt oföränderligt filnummer (1700000133). Speglas även i
+  `setup-via-api.mjs` för self-healing-sync i CI; createRule följer § 21.3 så
+  `verify-baseline.mjs`-svepet passerar.

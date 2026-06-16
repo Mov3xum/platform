@@ -19,6 +19,7 @@ const moduleIcons: Record<string, string> = {
   mina_aktiviteter: 'flow',
   inkorg: 'home',
   pagaende: 'spark',
+  arshjul: 'calendar',
   uppdrag: 'flow',
   inflode: 'spark',
   startups: 'people',
