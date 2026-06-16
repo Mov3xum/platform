@@ -2818,6 +2818,34 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
 });
 
+// Migration 1700000133: annual_wheel_items — årshjul (/arshjul).
+// Self-healing syncen måste kunna skapa kollektionen via API också, annars
+// faller diagnose-migrations när en instans saknar migrationen.
+await ensureCollection({
+  id: 'annual_wheel_items_collection',
+  name: 'annual_wheel_items',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'year', type: 'number', required: true, onlyInt: true, min: 2000, max: 2100 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'month', type: 'number', required: false, onlyInt: true, min: 1, max: 12 },
+    { name: 'track', type: 'select', required: true, maxSelect: 1, values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt'] },
+    { name: 'category', type: 'select', required: true, maxSelect: 1, values: ['styrelse', 'ledning', 'gemensamt'] },
+    { name: 'notes', type: 'text', required: false, max: 2000 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_annual_wheel_items_tenant ON annual_wheel_items (tenant)',
+    'CREATE INDEX idx_annual_wheel_items_tenant_year ON annual_wheel_items (tenant, year)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
+});
+
 // Migration 1700000062: startup_phase_history — historik över faskiften.
 await ensureCollection({
   id: 'startup_phase_history_collection',
