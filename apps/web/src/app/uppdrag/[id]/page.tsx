@@ -4,7 +4,15 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
+import { hasRole } from '@/lib/rbac';
+import { getPublicPbUrl } from '@/lib/pb-url';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
+import {
+  isStartupBoardStatus,
+  type StartupBoardStatus,
+  type StartupBoardTask
+} from '@/lib/startup-board/board';
 import { PageHead, Icon } from '@/components/proto';
 import { MissionFlow } from '@/components/MissionFlow';
 import { MissionComments } from '@/components/missions/MissionComments';
@@ -14,8 +22,30 @@ import { getMissionContext, getStartupIds } from '@/lib/missions-server';
 import { deleteMissionFormAction } from '@/lib/actions/missions';
 import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
 import { TeamCompetencePanel, type TeamMemberView } from './TeamCompetencePanel';
+import { MissionTaskBoard } from './MissionTaskBoard';
+import { MissionDocuments, type MissionDocView } from './MissionDocuments';
 import { sanitizeCompetences } from '@platform/shared';
-import type { Mission, MissionComment, MissionParticipant, CompetenceId } from '@platform/shared';
+import type { Mission, MissionComment, MissionParticipant, MissionDocument, CompetenceId, Role } from '@platform/shared';
+
+const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
+
+interface TaskRow {
+  id: string;
+  kind: string;
+  description: string;
+  due_at?: string;
+  status: string;
+  owner?: string;
+  assignees?: string[];
+  expand?: {
+    owner?: { id: string; display_name?: string; email: string };
+    assignees?: Array<{ id: string; display_name?: string; email: string }>;
+  };
+}
+
+function userName(u?: { display_name?: string; email?: string }): string {
+  return u?.display_name || (u?.email ? u.email.split('@')[0] : '');
+}
 
 interface UserOption {
   id: string;
@@ -130,6 +160,60 @@ export default async function MissionDetailPage({
             : [])
         ];
 
+  // ── Uppdragskanban (§ 29): tasks länkade till uppdraget ────────────────
+  const isStaff = hasRole(user.roles, STAFF_ROLES);
+  const boardCanManage = isStaff || ctx.isParticipant;
+  const [boardRes, resources] = await Promise.all([
+    pb
+      .collection('tasks')
+      .getList<TaskRow>(1, 200, {
+        filter: pb.filter('tenant = {:t} && mission = {:m} && status != "cancelled"', {
+          t: user.tenant,
+          m: mission.id
+        }),
+        sort: '-created',
+        expand: 'owner,assignees'
+      })
+      .catch(() => ({ items: [] as TaskRow[] })),
+    isStaff ? listAssignableResourcesForTenant(pb, user.tenant) : Promise.resolve([])
+  ]);
+
+  const boardTasks: StartupBoardTask[] = boardRes.items
+    .filter((t) => isStartupBoardStatus(t.status))
+    .map((t) => ({
+      id: t.id,
+      status: t.status as StartupBoardStatus,
+      title: t.description,
+      kind: t.kind,
+      dueAt: t.due_at || undefined,
+      ownerId: t.owner || undefined,
+      ownerName: userName(t.expand?.owner) || undefined,
+      assignees: (t.expand?.assignees || []).map((a) => ({ id: a.id, name: userName(a) })),
+      canEdit: boardCanManage || (!!t.owner && t.owner === user.id)
+    }));
+
+  // ── Dokumentation (§ 29): uppladdade filer kopplade till uppdraget ─────
+  let documents: MissionDocView[] = [];
+  try {
+    const docsRes = await pb
+      .collection(PB_COLLECTIONS.missionDocuments)
+      .getList<MissionDocument>(1, 100, {
+        filter: pb.filter('mission = {:m}', { m: mission.id }),
+        sort: '-created'
+      });
+    const base = getPublicPbUrl().replace(/\/$/, '');
+    documents = docsRes.items.map((d) => ({
+      id: d.id,
+      title: d.title || undefined,
+      filename: d.filename || 'dokument',
+      url: `${base}/api/files/mission_documents/${d.id}/${encodeURIComponent(d.file)}`,
+      sizeBytes: d.size_bytes,
+      created: d.created
+    }));
+  } catch {
+    /* fail-soft: ej migrerat schema → tom lista */
+  }
+
   // Team-medlemmar med kompetenser (för panelen)
   const usersByIdLabel = new Map(users.map((u) => [u.id, u.label]));
   const teamMembers: TeamMemberView[] = participantsForUi.map((p) => {
@@ -197,6 +281,23 @@ export default async function MissionDetailPage({
             currentUserId={user.id}
             canAdvance={ctx.canAdvanceStage}
           />
+          <section>
+            <div className="mx-flex mx-items-c mx-gap-2 mx-mb-3">
+              <Icon name="flow" size={15} />
+              <h2 className="mx-fw-6 mx-t-15" style={{ margin: 0 }}>
+                Tavla
+              </h2>
+              <span className="mx-mono mx-t-xs mx-muted">
+                Teamets gemensamma uppgifter
+              </span>
+            </div>
+            <MissionTaskBoard
+              missionId={mission.id}
+              tasks={boardTasks}
+              resources={resources}
+              canManage={boardCanManage}
+            />
+          </section>
           <MissionComments
             missionId={mission.id}
             comments={comments}
@@ -214,6 +315,11 @@ export default async function MissionDetailPage({
             canEdit={ctx.canEdit}
           />
           <TeamCompetencePanel members={teamMembers} />
+          <MissionDocuments
+            missionId={mission.id}
+            documents={documents}
+            canManage={isStaff}
+          />
         </div>
       </div>
     </div>

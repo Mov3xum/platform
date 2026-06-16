@@ -2,23 +2,23 @@
 
 import { TaskKanban } from '@/components/kanban/TaskKanban';
 import {
-  createStartupBoardTaskAction,
-  moveStartupBoardTaskAction,
+  createMissionBoardTaskAction,
+  moveMissionBoardTaskAction,
   setTaskAssigneesAction
 } from '@/lib/actions/tasks';
 import type { StartupBoardTask } from '@/lib/startup-board/board';
 import type { AssignableResource } from '@/lib/assignments/types';
 
-// Bolagskanbanen (CLAUDE.md § 15.7) — tunn wrapper som binder bolagets
+// Uppdragskanbanen (CLAUDE.md § 29) — tunn wrapper som binder uppdragets
 // server actions till den delade TaskKanban-tavlan (ingen divergerande kopia).
 
-export function StartupKanban({
-  startupId,
+export function MissionTaskBoard({
+  missionId,
   tasks,
   resources,
   canManage
 }: {
-  startupId: string;
+  missionId: string;
   tasks: StartupBoardTask[];
   resources: AssignableResource[];
   canManage: boolean;
@@ -29,8 +29,8 @@ export function StartupKanban({
       resources={resources}
       canManage={canManage}
       actions={{
-        onCreate: (input) => createStartupBoardTaskAction({ startupId, ...input }),
-        onMove: (taskId, status) => moveStartupBoardTaskAction(taskId, status),
+        onCreate: (input) => createMissionBoardTaskAction({ missionId, ...input }),
+        onMove: (taskId, status) => moveMissionBoardTaskAction(taskId, status),
         onAssign: (taskId, ids) => setTaskAssigneesAction(taskId, ids)
       }}
     />

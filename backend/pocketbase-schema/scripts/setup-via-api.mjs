@@ -1403,6 +1403,49 @@ await patchCollection('mission_comments', [
   }
 ]);
 
+// Migration 1700000133: mission_documents — uppladdad dokumentation per uppdrag
+// (CLAUDE.md § 29). Staff-/observer-läsning; createRule roll-lös (§ 21.3),
+// roll-enforce i upload-routen. Autodate explicit (PB v0.23, § 28.5).
+await ensureCollection({
+  id: 'mission_documents_collection',
+  name: 'mission_documents',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'mission', type: 'relation', required: true, collectionId: 'missions_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: false, max: 200 },
+    {
+      name: 'file', type: 'file', required: true, maxSelect: 1, maxSize: 26214400, thumbs: [],
+      mimeTypes: [
+        'application/pdf',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain', 'text/markdown', 'text/csv',
+        'image/png', 'image/jpeg', 'image/webp'
+      ]
+    },
+    { name: 'filename', type: 'text', required: false, max: 300 },
+    { name: 'mime', type: 'text', required: false, max: 150 },
+    { name: 'size_bytes', type: 'number', required: false },
+    { name: 'uploaded_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+  ],
+  indexes: [
+    'CREATE INDEX idx_mission_documents_tenant ON mission_documents (tenant)',
+    'CREATE INDEX idx_mission_documents_mission ON mission_documents (mission)'
+  ],
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
 // Migration 1700000052: notifications — in-app-aviseringar för samarbete.
 await ensureCollection({
   id: 'notifications_collection',

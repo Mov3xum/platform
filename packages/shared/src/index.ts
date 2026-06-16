@@ -1094,6 +1094,22 @@ export interface Mission {
   };
 }
 
+// Uppladdad dokumentation kopplad till ett uppdrag (CLAUDE.md § 29,
+// migration 1700000133). Ersätter den tidigare artefakt-/länklistan.
+export interface MissionDocument {
+  id: string;
+  tenant: string;
+  mission: string;
+  title?: string;
+  file: string;
+  filename?: string;
+  mime?: string;
+  size_bytes?: number;
+  uploaded_by?: string;
+  created: string;
+  updated: string;
+}
+
 // ─── Kommentarer & notiser för samarbete ─────────────────────────────────────
 
 export interface MissionComment {
