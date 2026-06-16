@@ -16,6 +16,7 @@ import {
   polarPoint,
   quarterForMonth,
   quarterSliceAngles,
+  roundedAnnulusSectorPath,
   sanitizeMonth,
   type AnnualWheelItem
 } from './annual-wheel.ts';
@@ -163,4 +164,22 @@ test('annulusSectorPath produces a closed path with two arcs', () => {
   assert.match(path, /A 80 80/);
   assert.match(path, /A 40 40/);
   assert.match(path, /Z$/);
+});
+
+test('roundedAnnulusSectorPath rounds corners with béziers and clamps radius', () => {
+  const path = roundedAnnulusSectorPath(100, 100, 40, 80, 0, 30, 8);
+  assert.match(path, /^M /);
+  assert.match(path, /A 80 80/);
+  assert.match(path, /A 40 40/);
+  assert.match(path, /Q /); // rundade hörn
+  assert.match(path, /Z$/);
+
+  // Hörnradie 0 → faller tillbaka på den skarpa varianten (inga béziers).
+  const sharp = roundedAnnulusSectorPath(100, 100, 40, 80, 0, 30, 0);
+  assert.equal(sharp, annulusSectorPath(100, 100, 40, 80, 0, 30));
+
+  // Smal sektor: orimligt stor radie ska klampas, inte krascha/producera NaN.
+  const narrow = roundedAnnulusSectorPath(100, 100, 40, 80, 0, 2, 50);
+  assert.doesNotMatch(narrow, /NaN/);
+  assert.match(narrow, /Z$/);
 });
