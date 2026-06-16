@@ -1824,7 +1824,8 @@ await ensureCollection({
 });
 
 // Migration 1700000032: incubator_events — pitch-event, konferenser etc.
-// Inkluderar counter-fält från 1700000067.
+// Inkluderar counter-fält från 1700000067 + CRM-fält (1700000073) +
+// activity_id/source_created/source_updated (1700000134, § 15.2).
 await ensureCollection({
   id: 'incubator_events_collection',
   name: 'incubator_events',
@@ -1842,7 +1843,19 @@ await ensureCollection({
     { name: 'signups_count', type: 'number', required: false, min: 0 },
     { name: 'attended_count', type: 'number', required: false, min: 0 },
     { name: 'leads_count', type: 'number', required: false, min: 0 },
-    { name: 'admitted_count', type: 'number', required: false, min: 0 }
+    { name: 'admitted_count', type: 'number', required: false, min: 0 },
+    // CRM-fält (migration 1700000073) — Excel-arket "Aktiviteter".
+    { name: 'organizer', type: 'text', required: false, max: 200 },
+    { name: 'target_audience', type: 'text', required: false, max: 200 },
+    { name: 'event_url', type: 'url', required: false },
+    { name: 'internal_comment', type: 'editor', required: false },
+    { name: 'outcome', type: 'editor', required: false },
+    { name: 'owner', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'participant_count', type: 'number', required: false, min: 0 },
+    // Externt Excel-id + källtidsstämplar (migration 1700000134).
+    { name: 'activity_id', type: 'text', required: false, max: 100 },
+    { name: 'source_created', type: 'date', required: false },
+    { name: 'source_updated', type: 'date', required: false }
   ],
   indexes: [
     'CREATE INDEX idx_events_tenant ON incubator_events (tenant)',
@@ -1854,6 +1867,23 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
 });
+
+// Befintliga instanser: ensureCollection synkar bara regler, inte fält. Lägg
+// till CRM-/import-fälten explicit (idempotent — patchCollection hoppar över
+// de som redan finns). Annars droppar PB dem vid import → "Ej importerade
+// kolumner" (§ 15.2).
+await patchCollection('incubator_events', [
+  { name: 'organizer', type: 'text', required: false, max: 200 },
+  { name: 'target_audience', type: 'text', required: false, max: 200 },
+  { name: 'event_url', type: 'url', required: false },
+  { name: 'internal_comment', type: 'editor', required: false },
+  { name: 'outcome', type: 'editor', required: false },
+  { name: 'owner', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+  { name: 'participant_count', type: 'number', required: false, min: 0 },
+  { name: 'activity_id', type: 'text', required: false, max: 100 },
+  { name: 'source_created', type: 'date', required: false },
+  { name: 'source_updated', type: 'date', required: false }
+]);
 
 // Migration 1700000033: event_signups — registreringar för events.
 await ensureCollection({
