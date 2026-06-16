@@ -17,6 +17,7 @@ import {
   polarPoint,
   quarterForMonth,
   quarterSliceAngles,
+  roundedAnnulusSectorPath,
   type AnnualWheelCategory,
   type AnnualWheelItem,
   type AnnualWheelTrack
@@ -212,7 +213,7 @@ export function AnnualWheelView({ items, canEdit }: Props) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
         {/* Hjulet */}
         <section className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
           <Wheel byMonth={byMonth} year={year} onPick={canEdit ? openEdit : undefined} />
@@ -243,7 +244,7 @@ export function AnnualWheelView({ items, canEdit }: Props) {
                 Inga aktiviteter matchar filtret för {year}.
               </p>
             ) : (
-              <div className="space-y-2">
+              <div className="max-h-[460px] space-y-2 overflow-y-auto pr-1">
                 {byMonth.slice(1).map((monthItems, idx) =>
                   monthItems.length > 0 ? (
                     <div key={idx} className="rounded-xl border border-default p-2.5">
@@ -373,8 +374,22 @@ function Wheel({
               r={250}
               gradientUnits="userSpaceOnUse"
             >
-              <stop offset="0.62" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.92} />
-              <stop offset="1" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.55} />
+              <stop offset="0.5" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.2} />
+              <stop offset="1" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.06} />
+            </radialGradient>
+          ))}
+          {/* Tonad fyllning vid hover (något starkare). */}
+          {ANNUAL_WHEEL_CATEGORIES.map((c) => (
+            <radialGradient
+              key={`h-${c.id}`}
+              id={`mx-aw-grad-${c.id}-hover`}
+              cx={CX}
+              cy={CY}
+              r={250}
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0.5" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.34} />
+              <stop offset="1" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.14} />
             </radialGradient>
           ))}
           {/* Mitt-disk: subtil ljus gradient. */}
@@ -460,18 +475,19 @@ function Wheel({
                 // Lyft den hovrade aktiviteten en aning utåt.
                 const inner = isHovered ? 174 : 172;
                 const outer = isHovered ? 256 : 250;
-                const d = annulusSectorPath(CX, CY, inner, outer, s + 0.7, e - 0.7);
+                const d = roundedAnnulusSectorPath(CX, CY, inner, outer, s + 0.9, e - 0.9, 7);
                 return (
                   <path
                     key={it.id}
                     d={d}
-                    fill={`url(#mx-aw-grad-${it.category})`}
-                    stroke="var(--color-surface)"
-                    strokeWidth={1.5}
+                    fill={`url(#mx-aw-grad-${it.category}${isHovered ? '-hover' : ''})`}
+                    stroke={CATEGORY_VAR[it.category]}
+                    strokeWidth={isHovered ? 2.5 : 1.75}
                     strokeLinejoin="round"
+                    strokeLinecap="round"
                     filter={isHovered ? 'url(#mx-aw-shadow-hover)' : 'url(#mx-aw-shadow)'}
-                    className={onPick ? 'cursor-pointer transition-opacity' : 'transition-opacity'}
-                    style={{ opacity: hover && !isHovered ? 0.55 : 1 }}
+                    className={onPick ? 'cursor-pointer transition-all' : 'transition-all'}
+                    style={{ opacity: hover && !isHovered ? 0.4 : 1 }}
                     onClick={onPick ? () => onPick(it) : undefined}
                     onMouseEnter={(ev) => track(it, m, ev)}
                     onMouseMove={(ev) => track(it, m, ev)}

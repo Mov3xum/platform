@@ -318,3 +318,62 @@ export function annulusSectorPath(
     'Z'
   ].join(' ');
 }
+
+/**
+ * Som `annulusSectorPath` men med mjukt RUNDADE hörn (modernare uttryck).
+ * Varje hörn dras in en bit längs sina två kanter och förbinds med en
+ * kvadratisk bézier genom det skarpa hörnet. Hörnradien klampas så att den
+ * aldrig är större än halva sektorns bredd/höjd → fungerar även för smala
+ * sub-sektorer (många aktiviteter i samma månad). Determinststisk.
+ */
+export function roundedAnnulusSectorPath(
+  cx: number,
+  cy: number,
+  innerRadius: number,
+  outerRadius: number,
+  startAngle: number,
+  endAngle: number,
+  cornerRadius: number
+): string {
+  const span = endAngle - startAngle;
+  const ringWidth = outerRadius - innerRadius;
+  // Klampa hörnradien mot både radiell bredd och den kortaste bågsidans längd.
+  const innerArcLen = (Math.PI / 180) * span * innerRadius;
+  const r = Math.max(
+    0,
+    Math.min(cornerRadius, ringWidth / 2, innerArcLen / 2)
+  );
+  if (r <= 0.001) {
+    return annulusSectorPath(cx, cy, innerRadius, outerRadius, startAngle, endAngle);
+  }
+  // Vinkeloffset (grader) som motsvarar hörnradien på respektive båge.
+  const aOut = (r / outerRadius) * (180 / Math.PI);
+  const aIn = (r / innerRadius) * (180 / Math.PI);
+
+  const oStart = polarPoint(cx, cy, outerRadius, startAngle + aOut);
+  const oEnd = polarPoint(cx, cy, outerRadius, endAngle - aOut);
+  const cOuterEnd = polarPoint(cx, cy, outerRadius, endAngle);
+  const endOuter = polarPoint(cx, cy, outerRadius - r, endAngle);
+  const endInner = polarPoint(cx, cy, innerRadius + r, endAngle);
+  const cInnerEnd = polarPoint(cx, cy, innerRadius, endAngle);
+  const iEnd = polarPoint(cx, cy, innerRadius, endAngle - aIn);
+  const iStart = polarPoint(cx, cy, innerRadius, startAngle + aIn);
+  const cInnerStart = polarPoint(cx, cy, innerRadius, startAngle);
+  const startInner = polarPoint(cx, cy, innerRadius + r, startAngle);
+  const startOuter = polarPoint(cx, cy, outerRadius - r, startAngle);
+  const cOuterStart = polarPoint(cx, cy, outerRadius, startAngle);
+
+  const f = (n: number) => n.toFixed(3);
+  return [
+    `M ${f(oStart.x)} ${f(oStart.y)}`,
+    `A ${outerRadius} ${outerRadius} 0 0 1 ${f(oEnd.x)} ${f(oEnd.y)}`,
+    `Q ${f(cOuterEnd.x)} ${f(cOuterEnd.y)} ${f(endOuter.x)} ${f(endOuter.y)}`,
+    `L ${f(endInner.x)} ${f(endInner.y)}`,
+    `Q ${f(cInnerEnd.x)} ${f(cInnerEnd.y)} ${f(iEnd.x)} ${f(iEnd.y)}`,
+    `A ${innerRadius} ${innerRadius} 0 0 0 ${f(iStart.x)} ${f(iStart.y)}`,
+    `Q ${f(cInnerStart.x)} ${f(cInnerStart.y)} ${f(startInner.x)} ${f(startInner.y)}`,
+    `L ${f(startOuter.x)} ${f(startOuter.y)}`,
+    `Q ${f(cOuterStart.x)} ${f(cOuterStart.y)} ${f(oStart.x)} ${f(oStart.y)}`,
+    'Z'
+  ].join(' ');
+}
