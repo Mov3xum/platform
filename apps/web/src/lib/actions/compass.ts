@@ -576,6 +576,36 @@ export async function updateModuleAction(formData: FormData) {
     patch.next_module = nextModuleRaw;
   }
 
+  // Kopplat event/aktivitet (migration 1700000138). Tom = nollställ. En satt
+  // relation måste peka på ett event i SAMMA tenant — klienten är aldrig
+  // säkerhetsgränsen (CLAUDE.md § 10.5 punkt 7). Samma fallback-mönster som
+  // next_module (PB v0.23.4 kan TYST neka view-regeln för behörig staff).
+  const linkedEventRaw = String(formData.get('linked_event') || '').trim();
+  if (!linkedEventRaw) {
+    patch.linked_event = '';
+  } else {
+    let targetEvent: { tenant?: string } | null = null;
+    try {
+      targetEvent = await pb.collection('incubator_events').getOne(linkedEventRaw);
+    } catch {
+      const su = await getSuperuserPb();
+      if (su.ok) {
+        try {
+          targetEvent = await su.pb.collection('incubator_events').getOne(linkedEventRaw);
+        } catch {
+          targetEvent = null;
+        }
+      }
+    }
+    if (!targetEvent) {
+      throw new Error('Valt event kunde inte hittas.');
+    }
+    if (targetEvent.tenant !== user.tenant) {
+      throw new Error('Eventet tillhör en annan tenant.');
+    }
+    patch.linked_event = linkedEventRaw;
+  }
+
   // Quiz-resultatprofiler skickas som JSON från ResultBucketsEditor.
   const bucketsRaw = String(formData.get('result_buckets') || '').trim();
   if (bucketsRaw) {
