@@ -359,8 +359,7 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'org_knowledge_chunks',
   // Årshjul (migration 1700000133, § 30). Tenant-bred intern verksamhets-
   // planering (styrelse/ledning) → staff/observer-only; en ren startup_member
-  // ska inte se Movexums interna kalender. Migration-only (speglas inte i
-  // bootstrap); fail-soft om kollektionen saknas i en instans.
+  // ska inte se Movexums interna kalender.
   'annual_wheel_items'
 ];
 
