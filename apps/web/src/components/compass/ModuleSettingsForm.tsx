@@ -19,12 +19,20 @@ interface OtherModule {
   public_url_enabled?: boolean;
 }
 
+interface EventOption {
+  id: string;
+  name: string;
+  starts_at?: string;
+}
+
 interface Props {
   module: CompassModule;
   heroImageUrl?: string | null;
   modelOptions: ModelOption[];
   /** Övriga moduler i tenanten (för "nästa modul"-kedjan). */
   otherModules: OtherModule[];
+  /** Tenantens event/aktiviteter (för modulens event-koppling). */
+  events: EventOption[];
 }
 
 const STEPS = [
@@ -38,7 +46,7 @@ const STEPS = [
 // ligger kvar i DOM:en (inaktiva steg döljs med display:none) så en enda
 // submit postar ALLA fält till updateModuleAction — stegen är bara en visuell
 // uppdelning för att slippa en överväldigande vägg av inputs.
-export function ModuleSettingsForm({ module: mod, heroImageUrl, modelOptions, otherModules }: Props) {
+export function ModuleSettingsForm({ module: mod, heroImageUrl, modelOptions, otherModules, events }: Props) {
   const [step, setStep] = useState(0);
   const [flowType, setFlowType] = useState<FlowType>(mod.flow_type);
   const isLast = step === STEPS.length - 1;
@@ -426,6 +434,34 @@ export function ModuleSettingsForm({ module: mod, heroImageUrl, modelOptions, ot
               direkt till nästa modul. Bygg t.ex. ett quiz → ett formulär → en
               AI-chatt i följd. Nästa modul måste vara <strong>aktiv + publik</strong>
               {' '}för att knappen ska visas.
+            </span>
+          </label>
+
+          <label className="mx-label">
+            Kopplat event / aktivitet
+            <select
+              name="linked_event"
+              defaultValue={mod.linked_event || ''}
+              className="mx-input"
+              style={{ marginTop: 4 }}
+            >
+              <option value="">Ingen — modulen är inte kopplad till ett event</option>
+              {events.map((e) => {
+                const date = e.starts_at ? e.starts_at.slice(0, 10) : '';
+                return (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                    {date ? ` (${date})` : ''}
+                  </option>
+                );
+              })}
+            </select>
+            <span className="mx-t-12 mx-muted" style={{ display: 'block', marginTop: 4 }}>
+              Koppla modulen till ett event/aktivitet i CRM:t (under{' '}
+              <strong>Aktiviteter</strong>) — t.ex. en intag-modul för en
+              pitch-kväll eller informationsträff. Kopplingen är en referens som
+              hjälper dig hålla ihop modulen med rätt aktivitet.
+              {events.length === 0 && ' Inga event finns ännu — skapa ett under Aktiviteter först.'}
             </span>
           </label>
 

@@ -217,6 +217,13 @@ export interface CompassModule {
    */
   next_module?: string;
   /**
+   * Kopplat event/aktivitet (relation→incubator_events, migration 1700000138).
+   * Ren referens — staff ser vilket event/aktivitet i CRM:t ("Aktiviteter",
+   * § 15.2) modulen hör till. Pekar alltid på ett event i samma tenant
+   * (verifieras i server-actionen).
+   */
+  linked_event?: string;
+  /**
    * Steg 4-valet "Skapa lead i Startupkompassen när modulen slutförs"
    * (migration 1700000125). SAKNAT fält (oapplicerad migration) tolkas som
    * true — bara ett uttryckligt false stänger av lead-skapandet.

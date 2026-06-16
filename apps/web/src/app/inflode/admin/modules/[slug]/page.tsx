@@ -11,6 +11,7 @@ import {
 } from '@/lib/compass/store';
 import { FLOW_TYPE_LABEL } from '@/lib/compass/types';
 import { deleteModuleAction } from '@/lib/actions/compass';
+import { listEvents } from '@/lib/actions/events';
 import { ShareModule } from '@/components/compass/ShareModule';
 import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
 import { QuestionsManager } from '@/components/compass/QuestionsManager';
@@ -39,10 +40,11 @@ export default async function EditModulePage({
   const mod = await getModuleBySlug(pb, user.tenant, slug);
   if (!mod) notFound();
 
-  const [questions, analytics, allModules] = await Promise.all([
+  const [questions, analytics, allModules, events] = await Promise.all([
     listQuestionsForModule(pb, mod.id),
     getLeadAnalytics(pb, user.tenant, 365),
-    listModules(pb, user.tenant)
+    listModules(pb, user.tenant),
+    listEvents()
   ]);
   // Publika flöden lagrar landing_module som modulens PUBLIKA slug, interna
   // förhandsgranskningar som den interna — slå ihop bägge så statistiken
@@ -72,6 +74,12 @@ export default async function EditModulePage({
       is_active: m.is_active,
       public_url_enabled: m.public_url_enabled
     }));
+  // Tenantens event/aktiviteter — kandidater för modulens event-koppling.
+  const eventOptions = events.map((e) => ({
+    id: e.id,
+    name: e.name,
+    starts_at: e.starts_at
+  }));
 
   return (
     <div className="mx-view-pad mx-wide">
@@ -118,6 +126,7 @@ export default async function EditModulePage({
               heroImageUrl={heroImageUrl}
               modelOptions={MODEL_OPTIONS}
               otherModules={otherModules}
+              events={eventOptions}
             />
           </Card>
 
