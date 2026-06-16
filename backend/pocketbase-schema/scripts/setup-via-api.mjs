@@ -3227,6 +3227,43 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
 });
 
+// Migration 1700000133: annual_wheel_items — Movexums verksamhetsårshjul (§ 30).
+// Tenant-bred STAFF/OBSERVER-data (intern styrelse-/ledningsplanering) — en ren
+// startup_member ska inte se den (§ 21). createRule refererar bara auth-fält
+// (§ 21.3); roll-enforcement i server-action + delat skrivlager. Ingen PII.
+await ensureCollection({
+  id: 'annual_wheel_items_collection',
+  name: 'annual_wheel_items',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'year', type: 'number', required: true, onlyInt: true, min: 2000, max: 2100 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'month', type: 'number', required: false, onlyInt: true, min: 1, max: 12 },
+    {
+      name: 'track', type: 'select', required: true, maxSelect: 1,
+      values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt']
+    },
+    {
+      name: 'category', type: 'select', required: true, maxSelect: 1,
+      values: ['styrelse', 'ledning', 'gemensamt']
+    },
+    { name: 'notes', type: 'text', required: false, max: 2000 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_annual_wheel_items_tenant ON annual_wheel_items (tenant)',
+    'CREATE INDEX idx_annual_wheel_items_tenant_year ON annual_wheel_items (tenant, year)'
+  ],
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
 // Backfill: en tidigare körning hann skapa chat_threads/deep_jobs UTAN
 // created/updated (REST API:t auto-lägger dem inte). ensureCollection
 // synkar bara regler på en befintlig collection, så lägg till de saknade
@@ -3244,6 +3281,9 @@ await patchCollection('user_files', AUTODATE_FIELDS);
 await patchCollection('org_knowledge', AUTODATE_FIELDS);
 await patchCollection('org_knowledge_chunks', AUTODATE_FIELDS);
 await patchCollection('user_file_chunks', AUTODATE_FIELDS);
+// Årshjul (§ 30): säkerställ autodate även om en tidigare körning skapade
+// collectionen innan fälten lades till (idempotent).
+await patchCollection('annual_wheel_items', AUTODATE_FIELDS);
 
 // Migration 1700000128: generellt autodate-svep — PB v0.23 auto-lägger inte
 // created/updated, och flera äldre kollektioner (tool_runs, ai_usage_events
@@ -3511,7 +3551,9 @@ const FORCE_CREATE_RULES = {
   compass_modules: `${ANY_AUTH} && @request.auth.tenant != ""`,
   compass_brand: `${ANY_AUTH} && @request.auth.tenant != ""`,
   compass_lead_sources: ANY_AUTH,
-  integration_providers: ANY_AUTH
+  integration_providers: ANY_AUTH,
+  // Årshjul (§ 30) — roll-enforcement i server-action + delat skrivlager.
+  annual_wheel_items: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
 log('Forcerar robusta createRules...');
