@@ -3587,3 +3587,70 @@ INGA personuppgifter.
   speglas i `setup-via-api.mjs`. Agent-seeden (1700000132) är migration-only
   (samma precedens som 1700000055).
 - **Riskklass för `tasks`-länk/panel:** n/a (arbetsyta, ingen AI-inferens).
+
+---
+
+## 30. Årshjul — Movexums verksamhetskalender (manuell + chatt-styrd)
+
+### 30.1 Översikt
+
+`/arshjul` (modul `arshjul`, "Översikt"-railen, staff/observer) är Movexums
+**verksamhetsårshjul**: alla återkommande aktiviteter över ett år — styrelse-
+och ledningsspåren (bokslut, kvartalsrapporter, strategidagar, medarbetar-
+samtal, kampanjer m.m.) — visade både som ett **hjul** (månads-/kvartalsvy med
+kategorifärgat yttre band) och som en **tabell** (månad × spår, speglar
+Movexums Excel-vy). Aktiviteter styrs **manuellt** i UI:t ELLER **via
+dashboardchatten** (samma delade skrivlager, § 16). Filter per kategori, spår
+och år.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/annual-wheel.ts` (+ `.test.ts`) | Ren domän-/geometrilogik (taxonomi, filter, gruppering, tabell-byggare, hjul-vinklar/SVG-path) — enhetstestad |
+| `backend/pocketbase-schema/migrations/1700000133_create_annual_wheel_items.js` | Collection `annual_wheel_items` |
+| `apps/web/src/lib/core/write/annual-wheel.ts` | `createAnnualWheelItem` / `updateAnnualWheelItemField` (delat skrivlager) |
+| `apps/web/src/lib/actions/annual-wheel.ts` | Server actions (manuell CRUD via UI) |
+| `apps/web/src/app/arshjul/{page,AnnualWheelView}.tsx` | Sida + klientvy (hjul-SVG, tabell, filter, editor) |
+| `apps/web/src/lib/ai/tools.ts` | Verktygen `create_annual_wheel_item` / `update_annual_wheel_item` + dispatch |
+
+### 30.2 Datamodell
+
+- **`annual_wheel_items`** (1700000133): `tenant` (cascadeDelete), `year`
+  (int 2000–2100), `title`, `month` (int 1–12 eller tomt = helårs-/kvartals-
+  övergripande), `track` (select: kampanjer, verksamhetsrapporter, projekt,
+  team, ledningsgrupp, projektstyrgrupper, ovrigt — tabellens kolumner),
+  `category` (select: styrelse, ledning, gemensamt — hjulets legend/färg),
+  `notes`, `created_by`. Index på `(tenant)` och `(tenant, year)`. Taxonomin
+  är källan-av-sanning i `annual-wheel.ts` och MÅSTE speglas som select-värden
+  i migrationen.
+
+### 30.3 Manuell + chatt-styrd (delat skrivlager)
+
+Både UI-actionen och chatt-agenten går genom **det delade skrivlagret**
+(`lib/core/write/annual-wheel.ts`) — whitelist (`writable-fields.ts`:
+`annual_wheel_items` create + fält title/month/track/category/notes/year),
+validering (`validators.ts`), tenant-stämpel från actorn och `agent_actions`-
+logg. Reglerna kan därför aldrig divergera mellan människa och agent (§ 16).
+Chatt-verktygen exponeras BARA för agent-actor i den interaktiva staff-chatten
+(`includeWrites`, människa-i-loopen § 16.3) — autonoma körningar skriver
+aldrig. Läsning sker via det auto-exponerade `query_collection` (collectionen
+är inte denylistad) under RLS + tenant-scope.
+
+### 30.4 Regelefterlevnad
+
+- **§ 21 isolering:** tenant-bred STAFF/OBSERVER-data — en ren `startup_member`
+  ser inte Movexums interna styrelse-/ledningskalender. list/view kräver
+  staff/observer (`:each ?=`, § 21.3); createRule refererar bara auth-fält
+  (ingen roll-check/tenant-join → verify-baseline-svepet passerar); roll-
+  enforcement i server-action + delat skrivlager. `verify-baseline.mjs`
+  asserterar list/view-isoleringen (`MUST_BE_STAFF_OR_OBSERVER`, fail-soft).
+- **GDPR § 5:** ingen PII (intern verksamhetsplanering); inga nya whitelistade
+  fält i `lib/ai/context.ts`. `cascadeDelete` på tenant städar art. 17.
+- **EU AI Act:** ingen AI-inferens i modulen → ingen riskklass/banner. Chatt-
+  skrivningarna är deterministiska mutationer via det delade lagret.
+- **Grafisk profil (§ 2):** hjulets kategorifärger hämtas från Movexum-brand-
+  CSS-variablerna (`--movexum-djupbla/bla/lila`) — inga ad-hoc-hex.
+- **Migration:** nytt oföränderligt filnummer (1700000133). Migration-only
+  (speglas inte i `setup-via-api.mjs`, samma precedens som onboarding/compass);
+  createRule följer § 21.3 så `verify-baseline.mjs`-svepet passerar.

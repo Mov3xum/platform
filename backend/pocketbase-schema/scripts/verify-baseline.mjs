@@ -356,7 +356,12 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // är skild från bootstrap-spegling (kollektionerna är migration-only); detta
   // svep fångar en framtida regression som öppnar list/view för startup_member.
   'org_knowledge',
-  'org_knowledge_chunks'
+  'org_knowledge_chunks',
+  // Årshjul (migration 1700000133, § 30). Tenant-bred intern verksamhets-
+  // planering (styrelse/ledning) → staff/observer-only; en ren startup_member
+  // ska inte se Movexums interna kalender. Migration-only (speglas inte i
+  // bootstrap); fail-soft om kollektionen saknas i en instans.
+  'annual_wheel_items'
 ];
 
 // Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa
