@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ANNUAL_WHEEL_CATEGORIES,
@@ -329,6 +329,13 @@ export function AnnualWheelView({ items, canEdit }: Props) {
 
 // ─── Hjulet (SVG) ────────────────────────────────────────────────────────────
 
+interface HoverInfo {
+  item: AnnualWheelItem;
+  month: number;
+  x: number;
+  y: number;
+}
+
 function Wheel({
   byMonth,
   year,
@@ -338,109 +345,207 @@ function Wheel({
   year: number;
   onPick?: (item: AnnualWheelItem) => void;
 }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<HoverInfo | null>(null);
+
+  function track(item: AnnualWheelItem, month: number, e: React.MouseEvent) {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setHover({ item, month, x: e.clientX - rect.left, y: e.clientY - rect.top });
+  }
+
   return (
-    <svg viewBox="0 0 560 560" className="mx-auto block w-full max-w-[520px]" role="img" aria-label={`Årshjul ${year}`}>
-      {/* Kvartalsring */}
-      {[1, 2, 3, 4].map((q) => {
-        const a = quarterSliceAngles(q);
-        const path = annulusSectorPath(CX, CY, 70, 116, a.start, a.end);
-        const label = polarPoint(CX, CY, 93, a.mid);
-        return (
-          <g key={`q${q}`}>
-            <path d={path} fill="var(--color-canvas-muted)" stroke="var(--color-surface)" strokeWidth={2} />
-            <text
-              x={label.x}
-              y={label.y}
-              textAnchor="middle"
-              dominantBaseline="central"
-              className="fill-foreground-muted"
-              fontSize={13}
-              fontWeight={600}
-            >
-              Q{q}
-            </text>
-          </g>
-        );
-      })}
-
-      {/* Månadsring + aktivitets-yttre band */}
-      {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
-        const a = monthSliceAngles(m);
-        const monthPath = annulusSectorPath(CX, CY, 116, 170, a.start, a.end);
-        const monthItems = byMonth[m];
-        const labelPos = polarPoint(CX, CY, 143, a.mid);
-        const isEven = m % 2 === 0;
-        return (
-          <g key={`m${m}`}>
-            <path
-              d={monthPath}
-              fill={isEven ? 'var(--color-canvas-subtle)' : 'var(--color-surface)'}
-              stroke="var(--color-border-default, var(--color-canvas-muted))"
-              strokeWidth={1}
-            />
-            <text
-              x={labelPos.x}
-              y={labelPos.y}
-              textAnchor="middle"
-              dominantBaseline="central"
-              className="fill-foreground"
-              fontSize={12}
-              fontWeight={600}
-            >
-              {monthShortLabel(m)}
-            </text>
-
-            {/* Yttre band: en sub-sektor per aktivitet, färgad per kategori. */}
-            {monthItems.map((it, idx) => {
-              const span = (a.end - a.start) / Math.max(1, monthItems.length);
-              const s = a.start + idx * span;
-              const e = s + span;
-              const d = annulusSectorPath(CX, CY, 172, 250, s + 0.6, e - 0.6);
-              return (
-                <path
-                  key={it.id}
-                  d={d}
-                  fill={CATEGORY_VAR[it.category]}
-                  stroke="var(--color-surface)"
-                  strokeWidth={1}
-                  className={onPick ? 'cursor-pointer' : ''}
-                  onClick={onPick ? () => onPick(it) : undefined}
-                >
-                  <title>
-                    {monthShortLabel(m)} · {annualWheelCategoryLabel(it.category)} ·{' '}
-                    {annualWheelTrackLabel(it.track)}: {it.title}
-                  </title>
-                </path>
-              );
-            })}
-          </g>
-        );
-      })}
-
-      {/* Mitt: år */}
-      <circle cx={CX} cy={CY} r={68} fill="var(--color-surface)" />
-      <text
-        x={CX}
-        y={CY - 8}
-        textAnchor="middle"
-        dominantBaseline="central"
-        className="fill-foreground"
-        fontSize={26}
-        fontWeight={700}
+    <div ref={wrapRef} className="relative" onMouseLeave={() => setHover(null)}>
+      <svg
+        viewBox="0 0 560 560"
+        className="mx-auto block w-full max-w-[520px]"
+        role="img"
+        aria-label={`Årshjul ${year}`}
       >
-        {year}
-      </text>
-      <text
-        x={CX}
-        y={CY + 16}
-        textAnchor="middle"
-        dominantBaseline="central"
-        className="fill-foreground-subtle"
-        fontSize={11}
-      >
-        Årshjul
-      </text>
-    </svg>
+        <defs>
+          {/* Mjuka radiella gradienter per kategori (saturerad inåt, dämpad utåt). */}
+          {ANNUAL_WHEEL_CATEGORIES.map((c) => (
+            <radialGradient
+              key={c.id}
+              id={`mx-aw-grad-${c.id}`}
+              cx={CX}
+              cy={CY}
+              r={250}
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0.62" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.92} />
+              <stop offset="1" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.55} />
+            </radialGradient>
+          ))}
+          {/* Mitt-disk: subtil ljus gradient. */}
+          <radialGradient id="mx-aw-core" cx={CX} cy={CY - 24} r={96} gradientUnits="userSpaceOnUse">
+            <stop offset="0" stopColor="var(--color-surface)" />
+            <stop offset="1" stopColor="var(--color-canvas-subtle)" />
+          </radialGradient>
+          {/* Mjuk skugga för aktivitetsbanden. */}
+          <filter id="mx-aw-shadow" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="2.5" stdDeviation="3.5" floodColor="var(--movexum-svart)" floodOpacity={0.18} />
+          </filter>
+          {/* Starkare lyft vid hover. */}
+          <filter id="mx-aw-shadow-hover" x="-40%" y="-40%" width="180%" height="180%">
+            <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="var(--movexum-svart)" floodOpacity={0.3} />
+          </filter>
+        </defs>
+
+        {/* Bakgrundsdisk bakom hela hjulet (mjuk inramning). */}
+        <circle cx={CX} cy={CY} r={252} fill="var(--color-canvas-subtle)" opacity={0.4} />
+
+        {/* Kvartalsring */}
+        {[1, 2, 3, 4].map((q) => {
+          const a = quarterSliceAngles(q);
+          const path = annulusSectorPath(CX, CY, 70, 116, a.start, a.end);
+          const label = polarPoint(CX, CY, 93, a.mid);
+          return (
+            <g key={`q${q}`}>
+              <path
+                d={path}
+                fill="var(--color-canvas-muted)"
+                stroke="var(--color-surface)"
+                strokeWidth={3}
+                opacity={0.7}
+              />
+              <text
+                x={label.x}
+                y={label.y}
+                textAnchor="middle"
+                dominantBaseline="central"
+                className="fill-foreground-muted"
+                fontSize={13}
+                fontWeight={600}
+              >
+                Q{q}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Månadsring + aktivitets-yttre band */}
+        {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
+          const a = monthSliceAngles(m);
+          const monthPath = annulusSectorPath(CX, CY, 116, 170, a.start, a.end);
+          const monthItems = byMonth[m];
+          const labelPos = polarPoint(CX, CY, 143, a.mid);
+          const isEven = m % 2 === 0;
+          return (
+            <g key={`m${m}`}>
+              <path
+                d={monthPath}
+                fill={isEven ? 'var(--color-canvas-subtle)' : 'var(--color-surface)'}
+                stroke="var(--color-canvas-muted)"
+                strokeWidth={1}
+              />
+              <text
+                x={labelPos.x}
+                y={labelPos.y}
+                textAnchor="middle"
+                dominantBaseline="central"
+                className="fill-foreground"
+                fontSize={12}
+                fontWeight={600}
+              >
+                {monthShortLabel(m)}
+              </text>
+
+              {/* Yttre band: en sub-sektor per aktivitet, färgad per kategori. */}
+              {monthItems.map((it, idx) => {
+                const span = (a.end - a.start) / Math.max(1, monthItems.length);
+                const s = a.start + idx * span;
+                const e = s + span;
+                const isHovered = hover?.item.id === it.id;
+                // Lyft den hovrade aktiviteten en aning utåt.
+                const inner = isHovered ? 174 : 172;
+                const outer = isHovered ? 256 : 250;
+                const d = annulusSectorPath(CX, CY, inner, outer, s + 0.7, e - 0.7);
+                return (
+                  <path
+                    key={it.id}
+                    d={d}
+                    fill={`url(#mx-aw-grad-${it.category})`}
+                    stroke="var(--color-surface)"
+                    strokeWidth={1.5}
+                    strokeLinejoin="round"
+                    filter={isHovered ? 'url(#mx-aw-shadow-hover)' : 'url(#mx-aw-shadow)'}
+                    className={onPick ? 'cursor-pointer transition-opacity' : 'transition-opacity'}
+                    style={{ opacity: hover && !isHovered ? 0.55 : 1 }}
+                    onClick={onPick ? () => onPick(it) : undefined}
+                    onMouseEnter={(ev) => track(it, m, ev)}
+                    onMouseMove={(ev) => track(it, m, ev)}
+                  />
+                );
+              })}
+            </g>
+          );
+        })}
+
+        {/* Mitt: år */}
+        <circle cx={CX} cy={CY} r={68} fill="url(#mx-aw-core)" stroke="var(--color-canvas-muted)" strokeWidth={1.5} />
+        <text
+          x={CX}
+          y={CY - 8}
+          textAnchor="middle"
+          dominantBaseline="central"
+          className="fill-foreground"
+          fontSize={26}
+          fontWeight={700}
+        >
+          {year}
+        </text>
+        <text
+          x={CX}
+          y={CY + 16}
+          textAnchor="middle"
+          dominantBaseline="central"
+          className="fill-foreground-subtle"
+          fontSize={11}
+        >
+          Årshjul
+        </text>
+      </svg>
+
+      {hover ? <HoverCard hover={hover} /> : null}
+    </div>
+  );
+}
+
+function HoverCard({ hover }: { hover: HoverInfo }) {
+  const { item, month } = hover;
+  // Placera kortet vid pekaren, men förskjut så det inte skyms av muspekaren
+  // och håll det inom hjul-containern.
+  const left = Math.max(8, Math.min(hover.x + 16, 520 - 248));
+  const top = Math.max(8, hover.y + 16);
+  return (
+    <div
+      className="pointer-events-none absolute z-20 w-60 rounded-2xl border border-default bg-surface/95 p-3.5 shadow-xl shadow-movexum-svart/20 backdrop-blur-sm"
+      style={{ left, top }}
+    >
+      <div className="mb-1.5 flex items-center gap-2">
+        <span
+          className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+          style={{ background: CATEGORY_VAR[item.category] }}
+          aria-hidden
+        />
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle">
+          {annualWheelCategoryLabel(item.category)}
+        </span>
+      </div>
+      <p className="font-heading text-[14px] font-semibold leading-snug text-foreground">{item.title}</p>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <span className="inline-flex items-center rounded-md bg-canvas-subtle px-1.5 py-0.5 text-[11px] font-medium text-foreground-muted">
+          {annualWheelTrackLabel(item.track)}
+        </span>
+        <span className="inline-flex items-center rounded-md bg-canvas-subtle px-1.5 py-0.5 text-[11px] font-medium text-foreground-muted">
+          {monthLongLabel(month)} · Q{quarterForMonth(month)}
+        </span>
+      </div>
+      {item.notes ? (
+        <p className="mt-2 line-clamp-3 text-[12px] leading-relaxed text-foreground-muted">{item.notes}</p>
+      ) : null}
+    </div>
   );
 }
 
