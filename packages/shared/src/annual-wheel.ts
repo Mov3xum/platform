@@ -285,6 +285,58 @@ export function monthSliceAngles(month: number): SliceAngles {
   return { start, end, mid: (start + end) / 2 };
 }
 
+/** Antal dagar i en 1-baserad månad för ett givet år (skottår-medvetet). */
+export function daysInMonth(year: number, month: number): number {
+  const m = Math.min(12, Math.max(1, Math.trunc(month)));
+  return new Date(year, m, 0).getDate();
+}
+
+/**
+ * Vinkel (grader, 0° = toppen, medurs) för ett datum inom ett givet år,
+ * inpassad i hjulets jämnstora 30°-månadssektorer (dag-fraktionen interpoleras
+ * inom månaden). Returnerar null om datumet inte ligger i `year` → "idag"-
+ * visaren ritas bara när man tittar på innevarande år.
+ */
+export function dateAngleInYear(date: Date, year: number): number | null {
+  if (Number.isNaN(date.getTime()) || date.getFullYear() !== year) return null;
+  const m = date.getMonth() + 1; // 1–12
+  const day = date.getDate();
+  const dim = daysInMonth(year, m);
+  const frac = dim > 0 ? (day - 1) / dim : 0;
+  return (m - 1) * 30 + frac * 30;
+}
+
+export interface NextAnnualWheelItem {
+  item: AnnualWheelItem;
+  /** Representativt datum (första i postens månad/år). */
+  date: Date;
+  /** Hela dagar från `from` (avrundat uppåt; 0 = idag). */
+  days: number;
+}
+
+/**
+ * Hittar den närmast kommande daterade posten (month satt) räknat från `from`.
+ * Postens representativa datum är den 1:a i dess månad. Endast poster idag
+ * eller i framtiden (`days >= 0`) räknas; tidigast vinner. Ren & testbar.
+ */
+export function nextUpcomingItem(
+  items: readonly AnnualWheelItem[],
+  from: Date
+): NextAnnualWheelItem | null {
+  if (Number.isNaN(from.getTime())) return null;
+  const startOfDay = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  let best: NextAnnualWheelItem | null = null;
+  for (const it of items) {
+    const m = sanitizeMonth(it.month);
+    if (m === null) continue;
+    const date = new Date(it.year, m - 1, 1);
+    const days = Math.ceil((date.getTime() - startOfDay.getTime()) / 86_400_000);
+    if (days < 0) continue;
+    if (!best || days < best.days) best = { item: it, date, days };
+  }
+  return best;
+}
+
 /** Vinklar för ett 1-baserat kvartals 90°-sektor (Q1 = Jan–Mar, börjar i toppen). */
 export function quarterSliceAngles(quarter: number): SliceAngles {
   const q = Math.min(4, Math.max(1, Math.trunc(quarter)));

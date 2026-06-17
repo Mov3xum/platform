@@ -139,3 +139,49 @@
     letter-spacing: -0.01em;
   }
 }
+
+/* ── Årshjul (§30) — inanimering av tårtbitarna ────────────────────────────
+   Banden växer ut från mitten med en mjuk rotation. Per-band-fördröjningen
+   sätts inline (style={{ animationDelay }}) så de sveper runt hjulet medurs.
+   Stagger respekterar `prefers-reduced-motion`. */
+@keyframes mx-wheel-band-in {
+  from {
+    opacity: 0;
+    transform: scale(0.72) rotate(-7deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+.mx-wheel-band {
+  transform-box: view-box;
+  transform-origin: 280px 280px;
+  animation: mx-wheel-band-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes mx-wheel-hand-in {
+  from {
+    opacity: 0;
+    transform: rotate(-12deg);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0deg);
+  }
+}
+
+.mx-wheel-hand {
+  transform-box: view-box;
+  transform-origin: 280px 280px;
+  animation: mx-wheel-hand-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: 0.45s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mx-wheel-band,
+  .mx-wheel-hand {
+    animation: none;
+  }
+}
