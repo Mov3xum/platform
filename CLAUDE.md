@@ -1991,6 +1991,25 @@ PowerPoint"). Stegen persisteras dessutom PII-fritt på assistant-meddelandet
 - **Riskklass:** oförändrad (ingen ny AI-funktion — bara transparens om
   befintliga verktygsanrop, EU AI Act art. 13/50).
 
+**Fri scroll + meddelandekö (löpande feedback).** Chatten låser inte längre
+användaren vid botten medan ett svar strömmar in, och blockerar inte input
+medan en turn körs (`ChattWorkspace.tsx` + `DashboardChat.tsx`, ren
+klient-UX — ingen ny dataväg, ingen ny AI-funktion, riskklass oförändrad):
+- **Scroll:** auto-scroll är "fäst vid botten" och engageras bara när
+  användaren redan är nära botten (`<120 px`, mätt på scroll-containern).
+  Scrollar hen uppåt för att läsa/jämföra stannar vyn kvar medan texten
+  strömmar; en flytande "till senaste"-knapp (`chevdown`) tar tillbaka en
+  ned. Byte av tråd/ny chatt återställer fäst-läget (`resetSignal`).
+- **Kö:** ett meddelande som skrivs medan en turn körs **köas** i stället för
+  att blockeras (`queueRef`/`queued` i `ChattWorkspace`; visas som streckade
+  "I kö"-bubblor med ångra-kryss). När den pågående turen (streaming ELLER
+  djupt jobb) blir klar dras kön vidare ett steg i taget via `runNext` (anropad
+  i streamingens `finally` och vid djupjobbets terminalstatus). Synkrona
+  `streamingRef`/`deepRunningRef`-flaggor förhindrar att två turer startar
+  samtidigt. Köade djupjobb stöds (samma `runTurn`-väg). Varje turn är redan
+  oberoende och trådpersisterad server-side, så kön kräver inga backend-
+  ändringar — den anropar bara `/api/chat/stream` igen per köat meddelande.
+
 ### 17.9 Inline-visualiseringar i chatten (`render_visual`)
 
 Agenten kan visa **stora, brandade diagram och nyckeltalskort (statistik)
