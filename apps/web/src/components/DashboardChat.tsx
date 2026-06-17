@@ -282,28 +282,34 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
 }
 
-// Ikon + färgton per aktivitetstyp/-sort. Färgerna är Movexum-pasteller (§2.3).
+// Ikon per aktivitetstyp/-sort. Färgtonen är medvetet neutral (samma diskreta
+// paper-yta för alla) — bara ikonen skiljer typerna åt, så loggen blir lugn.
+const ACTIVITY_SWATCH = 'bg-canvas-muted text-foreground-subtle';
+
 function activityVisual(act: DashboardActivity): { icon: string; swatch: string } {
-  if (act.kind === 'tool_run')
-    return { icon: 'sparkle', swatch: 'bg-movexum-pastell-lila text-movexum-morklila' };
-  if (act.kind === 'integration_sync')
-    return { icon: 'cloud', swatch: 'bg-movexum-pastell-bla text-movexum-djupbla' };
-  if (act.kind === 'workshop_run' || act.kind === 'workshop_assignment')
-    return { icon: 'cap', swatch: 'bg-movexum-pastell-gron text-movexum-morkgron' };
-  switch (act.type) {
-    case 'meeting':
-      return { icon: 'calendar', swatch: 'bg-movexum-pastell-bla text-movexum-djupbla' };
-    case 'call':
-      return { icon: 'people', swatch: 'bg-movexum-pastell-gron text-movexum-morkgron' };
-    case 'email':
-      return { icon: 'inbox', swatch: 'bg-movexum-pastell-gul text-movexum-morkgul' };
-    case 'task':
-      return { icon: 'check', swatch: 'bg-movexum-pastell-gron text-movexum-morkgron' };
-    case 'workshop':
-      return { icon: 'cap', swatch: 'bg-movexum-pastell-gron text-movexum-morkgron' };
-    default:
-      return { icon: 'dot', swatch: 'bg-canvas-muted text-foreground-subtle' };
-  }
+  let icon = 'dot';
+  if (act.kind === 'tool_run') icon = 'sparkle';
+  else if (act.kind === 'integration_sync') icon = 'cloud';
+  else if (act.kind === 'workshop_run' || act.kind === 'workshop_assignment') icon = 'cap';
+  else
+    switch (act.type) {
+      case 'meeting':
+        icon = 'calendar';
+        break;
+      case 'call':
+        icon = 'people';
+        break;
+      case 'email':
+        icon = 'inbox';
+        break;
+      case 'task':
+        icon = 'check';
+        break;
+      case 'workshop':
+        icon = 'cap';
+        break;
+    }
+  return { icon, swatch: ACTIVITY_SWATCH };
 }
 
 interface Props {
@@ -375,6 +381,8 @@ export default function DashboardChat({
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   // Fullskärmsvy för en inline-visualisering (stort över hela ytan).
   const [lightbox, setLightbox] = useState<InlineVisualRef | null>(null);
+  // Aktivitetsloggen visar bara de fem senaste tills användaren expanderar.
+  const [activitiesExpanded, setActivitiesExpanded] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1049,57 +1057,72 @@ export default function DashboardChat({
                     Inga händelser än. Aktiviteter från bolagen dyker upp här.
                   </div>
                 ) : (
-                  <ul className="overflow-hidden rounded-2xl border border-default bg-surface">
-                    {activities.map((act, i) => {
-                      const v = activityVisual(act);
-                      const inner = (
-                        <>
-                          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${v.swatch}`}>
-                            {act.toolIcon ? (
-                              <span className="text-[15px] leading-none">{act.toolIcon}</span>
-                            ) : (
-                              <Icon name={v.icon} size={15} />
-                            )}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-[13.5px] font-medium text-foreground">{act.title}</p>
-                            <p className="mt-0.5 flex items-center gap-1.5 text-[12px] text-foreground-subtle">
-                              {act.startupName && (
-                                <>
-                                  <span className="truncate font-medium text-foreground-muted">
-                                    {act.startupName}
-                                  </span>
-                                  <span aria-hidden>·</span>
-                                </>
+                  <>
+                    <ul className="overflow-hidden rounded-2xl border border-default bg-surface">
+                      {(activitiesExpanded ? activities : activities.slice(0, 5)).map((act, i) => {
+                        const v = activityVisual(act);
+                        const inner = (
+                          <>
+                            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${v.swatch}`}>
+                              {act.toolIcon ? (
+                                <span className="text-[13px] leading-none">{act.toolIcon}</span>
+                              ) : (
+                                <Icon name={v.icon} size={13} />
                               )}
-                              <span className="shrink-0">{relativeTime(act.created)}</span>
-                            </p>
-                          </div>
-                          {act.startupId && (
-                            <Icon
-                              name="arrow-up-right"
-                              size={14}
-                              className="shrink-0 text-foreground-subtle transition group-hover:text-foreground"
-                            />
-                          )}
-                        </>
-                      );
-                      const rowClass = `group flex items-center gap-3 px-4 py-3 transition ${
-                        i > 0 ? 'border-t border-default' : ''
-                      } ${act.startupId ? 'hover:bg-canvas-subtle' : ''}`;
-                      return (
-                        <li key={act.id}>
-                          {act.startupId ? (
-                            <a href={`/startups/${act.startupId}`} className={rowClass}>
-                              {inner}
-                            </a>
-                          ) : (
-                            <div className={rowClass}>{inner}</div>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
+                            </span>
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                              <p className="truncate text-[13px] font-medium text-foreground">{act.title}</p>
+                              {act.startupName && (
+                                <span className="shrink-0 truncate text-[12px] text-foreground-muted">
+                                  {act.startupName}
+                                </span>
+                              )}
+                            </div>
+                            <span className="shrink-0 text-[11.5px] text-foreground-subtle">
+                              {relativeTime(act.created)}
+                            </span>
+                            {act.startupId && (
+                              <Icon
+                                name="arrow-up-right"
+                                size={13}
+                                className="shrink-0 text-foreground-subtle transition group-hover:text-foreground"
+                              />
+                            )}
+                          </>
+                        );
+                        const rowClass = `group flex items-center gap-2.5 px-4 py-2 transition ${
+                          i > 0 ? 'border-t border-default' : ''
+                        } ${act.startupId ? 'hover:bg-canvas-subtle' : ''}`;
+                        return (
+                          <li key={act.id}>
+                            {act.startupId ? (
+                              <a href={`/startups/${act.startupId}`} className={rowClass}>
+                                {inner}
+                              </a>
+                            ) : (
+                              <div className={rowClass}>{inner}</div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {activities.length > 5 && (
+                      <button
+                        type="button"
+                        onClick={() => setActivitiesExpanded((v) => !v)}
+                        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-[12px] text-foreground-subtle transition hover:bg-canvas-subtle hover:text-foreground"
+                      >
+                        {activitiesExpanded
+                          ? 'Visa färre'
+                          : `Visa ${activities.length - 5} till`}
+                        <Icon
+                          name="chevdown"
+                          size={13}
+                          className={`transition ${activitiesExpanded ? 'rotate-180' : ''}`}
+                        />
+                      </button>
+                    )}
+                  </>
                 )}
               </section>
             )}
