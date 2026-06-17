@@ -213,7 +213,7 @@ export function AnnualWheelView({ items, canEdit }: Props) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
         {/* Hjulet */}
         <section className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
           <Wheel byMonth={byMonth} year={year} onPick={canEdit ? openEdit : undefined} />
@@ -221,7 +221,7 @@ export function AnnualWheelView({ items, canEdit }: Props) {
         </section>
 
         {/* Odaterade + snabböversikt */}
-        <section className="space-y-4">
+        <section className="flex min-h-0 flex-col gap-4">
           {undated.length > 0 ? (
             <div className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
               <h3 className="mb-2 font-heading text-[14px] font-semibold text-foreground">
@@ -235,7 +235,7 @@ export function AnnualWheelView({ items, canEdit }: Props) {
             </div>
           ) : null}
 
-          <div className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
+          <div className="flex min-h-0 flex-1 flex-col rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
             <h3 className="mb-2 font-heading text-[14px] font-semibold text-foreground">
               Per månad
             </h3>
@@ -244,7 +244,7 @@ export function AnnualWheelView({ items, canEdit }: Props) {
                 Inga aktiviteter matchar filtret för {year}.
               </p>
             ) : (
-              <div className="max-h-[460px] space-y-2 overflow-y-auto pr-1">
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {byMonth.slice(1).map((monthItems, idx) =>
                   monthItems.length > 0 ? (
                     <div key={idx} className="rounded-xl border border-default p-2.5">
