@@ -7,6 +7,9 @@ import {
   annulusSectorPath,
   buildAnnualWheelTable,
   clampYear,
+  dateAngleInYear,
+  daysInMonth,
+  nextUpcomingItem,
   filterAnnualWheelItems,
   groupItemsByMonth,
   isAnnualWheelCategory,
@@ -182,4 +185,45 @@ test('roundedAnnulusSectorPath rounds corners with béziers and clamps radius', 
   const narrow = roundedAnnulusSectorPath(100, 100, 40, 80, 0, 2, 50);
   assert.doesNotMatch(narrow, /NaN/);
   assert.match(narrow, /Z$/);
+});
+
+// ── "Idag"-visare + nedräkning ───────────────────────────────────────────────
+
+test('daysInMonth is leap-year aware', () => {
+  assert.equal(daysInMonth(2024, 2), 29);
+  assert.equal(daysInMonth(2026, 2), 28);
+  assert.equal(daysInMonth(2026, 1), 31);
+  assert.equal(daysInMonth(2026, 4), 30);
+});
+
+test('dateAngleInYear maps dates into equal-month sectors', () => {
+  // 1 jan = toppen (0°).
+  assert.equal(dateAngleInYear(new Date(2026, 0, 1), 2026), 0);
+  // 1 feb = början på andra sektorn (30°).
+  assert.equal(dateAngleInYear(new Date(2026, 1, 1), 2026), 30);
+  // Mitten av en 31-dagarsmånad ligger inom sektorn (mellan 0 och 30).
+  const mid = dateAngleInYear(new Date(2026, 0, 16), 2026)!;
+  assert.ok(mid > 0 && mid < 30);
+  // Annat år → ingen visare.
+  assert.equal(dateAngleInYear(new Date(2025, 5, 1), 2026), null);
+});
+
+test('nextUpcomingItem picks the soonest dated item from a reference day', () => {
+  const items: AnnualWheelItem[] = [
+    item({ id: 'a', title: 'Bokslut', month: 1, year: 2026 }),
+    item({ id: 'b', title: 'Strategidag', month: 8, year: 2026 }),
+    item({ id: 'c', title: 'Helår', month: null, year: 2026 })
+  ];
+  const next = nextUpcomingItem(items, new Date(2026, 4, 10)); // 10 maj
+  assert.equal(next?.item.id, 'b'); // aug är nästa framåt
+  assert.ok(next!.days > 0);
+
+  // Idag (1:a i månaden) → days = 0.
+  const today = nextUpcomingItem(items, new Date(2026, 0, 1));
+  assert.equal(today?.item.id, 'a');
+  assert.equal(today?.days, 0);
+
+  // Inga framtida poster → null.
+  const none = nextUpcomingItem(items, new Date(2027, 0, 1));
+  assert.equal(none, null);
 });

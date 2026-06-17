@@ -9,18 +9,21 @@ import {
   annualWheelTrackLabel,
   annulusSectorPath,
   buildAnnualWheelTable,
+  dateAngleInYear,
   filterAnnualWheelItems,
   groupItemsByMonth,
   monthLongLabel,
   monthShortLabel,
   monthSliceAngles,
+  nextUpcomingItem,
   polarPoint,
   quarterForMonth,
   quarterSliceAngles,
   roundedAnnulusSectorPath,
   type AnnualWheelCategory,
   type AnnualWheelItem,
-  type AnnualWheelTrack
+  type AnnualWheelTrack,
+  type NextAnnualWheelItem
 } from '@platform/shared';
 import { Icon } from '@/components/proto/Icon';
 import {
@@ -72,6 +75,7 @@ export function AnnualWheelView({ items, canEdit }: Props) {
   });
   const [category, setCategory] = useState<AnnualWheelCategory | 'all'>('all');
   const [track, setTrack] = useState<AnnualWheelTrack | 'all'>('all');
+  const [monthFocus, setMonthFocus] = useState<number | null>(null);
 
   const [form, setForm] = useState<FormState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +87,16 @@ export function AnnualWheelView({ items, canEdit }: Props) {
   const byMonth = useMemo(() => groupItemsByMonth(filtered), [filtered]);
   const undated = byMonth[0];
   const tableRows = useMemo(() => buildAnnualWheelTable(filtered), [filtered]);
+
+  // "Idag"-visare + nedräkning (bara meningsfullt för innevarande år).
+  const today = useMemo(() => new Date(), []);
+  const todayAngle = useMemo(() => dateAngleInYear(today, year), [today, year]);
+  const currentMonth = today.getFullYear() === year ? today.getMonth() + 1 : null;
+  const next = useMemo(() => nextUpcomingItem(filtered, today), [filtered, today]);
+
+  function toggleMonthFocus(m: number) {
+    setMonthFocus((cur) => (cur === m ? null : m));
+  }
 
   function openCreate() {
     setError(null);
@@ -216,7 +230,17 @@ export function AnnualWheelView({ items, canEdit }: Props) {
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
         {/* Hjulet */}
         <section className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
-          <Wheel byMonth={byMonth} year={year} onPick={canEdit ? openEdit : undefined} />
+          <Wheel
+            byMonth={byMonth}
+            year={year}
+            onPick={canEdit ? openEdit : undefined}
+            todayAngle={todayAngle}
+            currentMonth={currentMonth}
+            monthFocus={monthFocus}
+            onFocusMonth={toggleMonthFocus}
+            next={next}
+          />
+          {next ? <NextCaption next={next} /> : null}
           <Legend />
         </section>
 
@@ -236,29 +260,47 @@ export function AnnualWheelView({ items, canEdit }: Props) {
           ) : null}
 
           <div className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
-            <h3 className="mb-2 font-heading text-[14px] font-semibold text-foreground">
-              Per månad
-            </h3>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="font-heading text-[14px] font-semibold text-foreground">Per månad</h3>
+              {monthFocus ? (
+                <button
+                  type="button"
+                  onClick={() => setMonthFocus(null)}
+                  className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] font-medium text-brand hover:bg-brand/15"
+                >
+                  {monthLongLabel(monthFocus)}
+                  <Icon name="x" size={11} />
+                </button>
+              ) : null}
+            </div>
             {filtered.length === 0 ? (
               <p className="py-6 text-center text-[13px] text-foreground-muted">
                 Inga aktiviteter matchar filtret för {year}.
               </p>
             ) : (
               <div className="max-h-[460px] space-y-2 overflow-y-auto pr-1">
-                {byMonth.slice(1).map((monthItems, idx) =>
-                  monthItems.length > 0 ? (
-                    <div key={idx} className="rounded-xl border border-default p-2.5">
-                      <div className="mb-1 text-[12px] font-semibold text-foreground-muted">
-                        {monthLongLabel(idx + 1)}
+                {byMonth
+                  .slice(1)
+                  .map((monthItems, idx) => ({ monthItems, m: idx + 1 }))
+                  .filter(({ m }) => (monthFocus ? m === monthFocus : true))
+                  .map(({ monthItems, m }) =>
+                    monthItems.length > 0 ? (
+                      <div key={m} className="rounded-xl border border-default p-2.5">
+                        <div className="mb-1 text-[12px] font-semibold text-foreground-muted">
+                          {monthLongLabel(m)}
+                        </div>
+                        <ul className="space-y-1">
+                          {monthItems.map((it) => (
+                            <ItemPill key={it.id} item={it} onEdit={canEdit ? openEdit : undefined} onDelete={canEdit ? remove : undefined} />
+                          ))}
+                        </ul>
                       </div>
-                      <ul className="space-y-1">
-                        {monthItems.map((it) => (
-                          <ItemPill key={it.id} item={it} onEdit={canEdit ? openEdit : undefined} onDelete={canEdit ? remove : undefined} />
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null
-                )}
+                    ) : monthFocus ? (
+                      <p key={m} className="py-4 text-center text-[12.5px] text-foreground-muted">
+                        Inga aktiviteter i {monthLongLabel(m)}.
+                      </p>
+                    ) : null
+                  )}
               </div>
             )}
           </div>
@@ -337,14 +379,47 @@ interface HoverInfo {
   y: number;
 }
 
+function countdownLabel(days: number): string {
+  if (days <= 0) return 'idag';
+  if (days === 1) return 'imorgon';
+  return `om ${days} dgr`;
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function NextCaption({ next }: { next: NextAnnualWheelItem }) {
+  return (
+    <div className="mt-1.5 flex items-center justify-center gap-1.5 text-[12px] text-foreground-muted">
+      <Icon name="clock" size={13} />
+      <span className="font-semibold text-foreground">Nästa:</span>
+      <span className="max-w-[200px] truncate">{next.item.title}</span>
+      <span className="text-foreground-subtle">
+        · {monthShortLabel(next.item.month)} · {countdownLabel(next.days)}
+      </span>
+    </div>
+  );
+}
+
 function Wheel({
   byMonth,
   year,
-  onPick
+  onPick,
+  todayAngle,
+  currentMonth,
+  monthFocus,
+  onFocusMonth,
+  next
 }: {
   byMonth: AnnualWheelItem[][];
   year: number;
   onPick?: (item: AnnualWheelItem) => void;
+  todayAngle: number | null;
+  currentMonth: number | null;
+  monthFocus: number | null;
+  onFocusMonth?: (m: number) => void;
+  next: NextAnnualWheelItem | null;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<HoverInfo | null>(null);
@@ -354,6 +429,9 @@ function Wheel({
     if (!rect) return;
     setHover({ item, month, x: e.clientX - rect.left, y: e.clientY - rect.top });
   }
+
+  const todayTip = todayAngle !== null ? polarPoint(CX, CY, 258, todayAngle) : null;
+  const todayBase = todayAngle !== null ? polarPoint(CX, CY, 72, todayAngle) : null;
 
   return (
     <div ref={wrapRef} className="relative" onMouseLeave={() => setHover(null)}>
@@ -439,88 +517,161 @@ function Wheel({
           );
         })}
 
-        {/* Månadsring + aktivitets-yttre band */}
-        {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
-          const a = monthSliceAngles(m);
-          const monthPath = annulusSectorPath(CX, CY, 116, 170, a.start, a.end);
-          const monthItems = byMonth[m];
-          const labelPos = polarPoint(CX, CY, 143, a.mid);
-          const isEven = m % 2 === 0;
-          return (
-            <g key={`m${m}`}>
-              <path
-                d={monthPath}
-                fill={isEven ? 'var(--color-canvas-subtle)' : 'var(--color-surface)'}
-                stroke="var(--color-canvas-muted)"
-                strokeWidth={1}
+        {/* Månadsring + aktivitets-yttre band. Keyad på året → inanimeringen
+            (mx-wheel-band) spelas om vid årsbyte. */}
+        <g key={`wheel-${year}`}>
+          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
+            const a = monthSliceAngles(m);
+            const monthPath = annulusSectorPath(CX, CY, 116, 170, a.start, a.end);
+            const monthItems = byMonth[m];
+            const labelPos = polarPoint(CX, CY, 143, a.mid);
+            const isEven = m % 2 === 0;
+            const isCurrent = currentMonth === m;
+            const isFocus = monthFocus === m;
+            const highlighted = isCurrent || isFocus;
+            const focusable = !!onFocusMonth;
+            return (
+              <g key={`m${m}`}>
+                <path
+                  d={monthPath}
+                  fill={isEven ? 'var(--color-canvas-subtle)' : 'var(--color-surface)'}
+                  stroke={highlighted ? 'var(--color-brand)' : 'var(--color-canvas-muted)'}
+                  strokeWidth={isFocus ? 2.5 : isCurrent ? 1.75 : 1}
+                  className={focusable ? 'cursor-pointer' : undefined}
+                  onClick={focusable ? () => onFocusMonth!(m) : undefined}
+                />
+                {highlighted ? (
+                  <path d={monthPath} fill="var(--color-brand)" opacity={isFocus ? 0.13 : 0.07} pointerEvents="none" />
+                ) : null}
+                <text
+                  x={labelPos.x}
+                  y={labelPos.y}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  className={highlighted ? 'fill-brand' : 'fill-foreground'}
+                  fontSize={12}
+                  fontWeight={highlighted ? 700 : 600}
+                  style={focusable ? { cursor: 'pointer' } : undefined}
+                  onClick={focusable ? () => onFocusMonth!(m) : undefined}
+                >
+                  {monthShortLabel(m)}
+                </text>
+
+                {/* Yttre band: en sub-sektor per aktivitet, färgad per kategori. */}
+                {monthItems.map((it, idx) => {
+                  const span = (a.end - a.start) / Math.max(1, monthItems.length);
+                  const s = a.start + idx * span;
+                  const e = s + span;
+                  const isHovered = hover?.item.id === it.id;
+                  // Lyft den hovrade aktiviteten en aning utåt.
+                  const inner = isHovered ? 174 : 172;
+                  const outer = isHovered ? 256 : 250;
+                  const d = roundedAnnulusSectorPath(CX, CY, inner, outer, s + 0.9, e - 0.9, 7);
+                  // Stagger: sveper medurs runt året (månad → aktivitet).
+                  const delay = (m - 1) * 45 + idx * 25;
+                  return (
+                    <path
+                      key={it.id}
+                      d={d}
+                      fill={`url(#mx-aw-grad-${it.category}${isHovered ? '-hover' : ''})`}
+                      stroke={CATEGORY_VAR[it.category]}
+                      strokeWidth={isHovered ? 2.5 : 1.75}
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                      filter={isHovered ? 'url(#mx-aw-shadow-hover)' : 'url(#mx-aw-shadow)'}
+                      className={`mx-wheel-band transition-opacity ${onPick ? 'cursor-pointer' : ''}`}
+                      style={{ opacity: hover && !isHovered ? 0.4 : 1, animationDelay: `${delay}ms` }}
+                      onClick={onPick ? () => onPick(it) : undefined}
+                      onMouseEnter={(ev) => track(it, m, ev)}
+                      onMouseMove={(ev) => track(it, m, ev)}
+                    />
+                  );
+                })}
+              </g>
+            );
+          })}
+
+          {/* "Idag"-visare: tunn klockvisare som pekar på dagens datum. */}
+          {todayTip && todayBase ? (
+            <g className="mx-wheel-hand" style={{ pointerEvents: 'none' }}>
+              <circle cx={todayTip.x} cy={todayTip.y} r={9} fill="var(--color-brand)" opacity={0.18} />
+              <line
+                x1={todayBase.x}
+                y1={todayBase.y}
+                x2={todayTip.x}
+                y2={todayTip.y}
+                stroke="var(--color-brand)"
+                strokeWidth={2.5}
+                strokeLinecap="round"
+                opacity={0.85}
               />
-              <text
-                x={labelPos.x}
-                y={labelPos.y}
-                textAnchor="middle"
-                dominantBaseline="central"
-                className="fill-foreground"
-                fontSize={12}
-                fontWeight={600}
-              >
-                {monthShortLabel(m)}
-              </text>
-
-              {/* Yttre band: en sub-sektor per aktivitet, färgad per kategori. */}
-              {monthItems.map((it, idx) => {
-                const span = (a.end - a.start) / Math.max(1, monthItems.length);
-                const s = a.start + idx * span;
-                const e = s + span;
-                const isHovered = hover?.item.id === it.id;
-                // Lyft den hovrade aktiviteten en aning utåt.
-                const inner = isHovered ? 174 : 172;
-                const outer = isHovered ? 256 : 250;
-                const d = roundedAnnulusSectorPath(CX, CY, inner, outer, s + 0.9, e - 0.9, 7);
-                return (
-                  <path
-                    key={it.id}
-                    d={d}
-                    fill={`url(#mx-aw-grad-${it.category}${isHovered ? '-hover' : ''})`}
-                    stroke={CATEGORY_VAR[it.category]}
-                    strokeWidth={isHovered ? 2.5 : 1.75}
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                    filter={isHovered ? 'url(#mx-aw-shadow-hover)' : 'url(#mx-aw-shadow)'}
-                    className={onPick ? 'cursor-pointer transition-all' : 'transition-all'}
-                    style={{ opacity: hover && !isHovered ? 0.4 : 1 }}
-                    onClick={onPick ? () => onPick(it) : undefined}
-                    onMouseEnter={(ev) => track(it, m, ev)}
-                    onMouseMove={(ev) => track(it, m, ev)}
-                  />
-                );
-              })}
+              <circle cx={todayTip.x} cy={todayTip.y} r={4.5} fill="var(--color-brand)" />
             </g>
-          );
-        })}
+          ) : null}
+        </g>
 
-        {/* Mitt: år */}
+        {/* Mitt: år + nedräkning till nästa aktivitet. */}
         <circle cx={CX} cy={CY} r={68} fill="url(#mx-aw-core)" stroke="var(--color-canvas-muted)" strokeWidth={1.5} />
-        <text
-          x={CX}
-          y={CY - 8}
-          textAnchor="middle"
-          dominantBaseline="central"
-          className="fill-foreground"
-          fontSize={26}
-          fontWeight={700}
-        >
-          {year}
-        </text>
-        <text
-          x={CX}
-          y={CY + 16}
-          textAnchor="middle"
-          dominantBaseline="central"
-          className="fill-foreground-subtle"
-          fontSize={11}
-        >
-          Årshjul
-        </text>
+        {next ? (
+          <>
+            <text
+              x={CX}
+              y={CY - 16}
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="fill-foreground"
+              fontSize={22}
+              fontWeight={700}
+            >
+              {year}
+            </text>
+            <text
+              x={CX}
+              y={CY + 6}
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="fill-brand"
+              fontSize={13}
+              fontWeight={700}
+            >
+              {countdownLabel(next.days)}
+            </text>
+            <text
+              x={CX}
+              y={CY + 23}
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="fill-foreground-subtle"
+              fontSize={9}
+            >
+              {truncate(next.item.title, 18)}
+            </text>
+          </>
+        ) : (
+          <>
+            <text
+              x={CX}
+              y={CY - 8}
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="fill-foreground"
+              fontSize={26}
+              fontWeight={700}
+            >
+              {year}
+            </text>
+            <text
+              x={CX}
+              y={CY + 16}
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="fill-foreground-subtle"
+              fontSize={11}
+            >
+              Årshjul
+            </text>
+          </>
+        )}
       </svg>
 
       {hover ? <HoverCard hover={hover} /> : null}
