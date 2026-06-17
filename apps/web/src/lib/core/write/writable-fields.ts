@@ -84,6 +84,7 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
   annual_wheel_items: {
     title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     month: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    day: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     track: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     category: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     notes: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },

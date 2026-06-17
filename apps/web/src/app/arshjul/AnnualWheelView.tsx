@@ -6,10 +6,12 @@ import {
   ANNUAL_WHEEL_CATEGORIES,
   ANNUAL_WHEEL_TRACKS,
   annualWheelCategoryLabel,
+  annualWheelDateLabel,
   annualWheelTrackLabel,
   annulusSectorPath,
   buildAnnualWheelTable,
   dateAngleInYear,
+  daysInMonth,
   filterAnnualWheelItems,
   groupItemsByMonth,
   monthLongLabel,
@@ -32,12 +34,20 @@ import {
   updateAnnualWheelItemAction
 } from '@/lib/actions/annual-wheel';
 
-type AnnualWheelWritableFieldClient = 'title' | 'month' | 'track' | 'category' | 'notes' | 'year';
+type AnnualWheelWritableFieldClient =
+  | 'title'
+  | 'month'
+  | 'day'
+  | 'track'
+  | 'category'
+  | 'notes'
+  | 'year';
 
 // Kategori → Movexum-brand-CSS-variabel (källan av sanning är tokens.css).
+// Mjuka gul/grön/lila i stället för blå → fräschare, ljusare uttryck (§ 2.2).
 const CATEGORY_VAR: Record<AnnualWheelCategory, string> = {
-  styrelse: 'var(--movexum-djupbla)',
-  ledning: 'var(--movexum-bla)',
+  styrelse: 'var(--movexum-gron)',
+  ledning: 'var(--movexum-gul)',
   gemensamt: 'var(--movexum-lila)'
 };
 
@@ -51,6 +61,7 @@ interface FormState {
   year: number;
   title: string;
   month: string; // '' = helår
+  day: string; // '' = hela månaden
   track: AnnualWheelTrack;
   category: AnnualWheelCategory;
   notes: string;
@@ -104,6 +115,7 @@ export function AnnualWheelView({ items, canEdit }: Props) {
       year,
       title: '',
       month: '',
+      day: '',
       track: track === 'all' ? 'projekt' : track,
       category: category === 'all' ? 'ledning' : category,
       notes: ''
@@ -117,6 +129,7 @@ export function AnnualWheelView({ items, canEdit }: Props) {
       year: item.year,
       title: item.title,
       month: item.month ? String(item.month) : '',
+      day: item.day ? String(item.day) : '',
       track: item.track,
       category: item.category,
       notes: item.notes ?? ''
@@ -131,6 +144,8 @@ export function AnnualWheelView({ items, canEdit }: Props) {
       return;
     }
     const monthValue = form.month === '' ? null : Number(form.month);
+    // En dag utan månad är meningslös → nollställ.
+    const dayValue = monthValue === null || form.day === '' ? null : Number(form.day);
     setError(null);
 
     startTransition(async () => {
@@ -141,6 +156,8 @@ export function AnnualWheelView({ items, canEdit }: Props) {
         if (!original || original.title !== title) updates.push({ field: 'title', value: title });
         if (!original || (original.month ?? null) !== monthValue)
           updates.push({ field: 'month', value: monthValue });
+        if (!original || (original.day ?? null) !== dayValue)
+          updates.push({ field: 'day', value: dayValue });
         if (!original || original.track !== form.track) updates.push({ field: 'track', value: form.track });
         if (!original || original.category !== form.category)
           updates.push({ field: 'category', value: form.category });
@@ -160,6 +177,7 @@ export function AnnualWheelView({ items, canEdit }: Props) {
           year: form.year,
           title,
           month: monthValue,
+          day: dayValue,
           track: form.track,
           category: form.category,
           notes: form.notes.trim() || undefined
@@ -385,10 +403,6 @@ function countdownLabel(days: number): string {
   return `om ${days} dgr`;
 }
 
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
-
 function NextCaption({ next }: { next: NextAnnualWheelItem }) {
   return (
     <div className="mt-1.5 flex items-center justify-center gap-1.5 text-[12px] text-foreground-muted">
@@ -430,8 +444,8 @@ function Wheel({
     setHover({ item, month, x: e.clientX - rect.left, y: e.clientY - rect.top });
   }
 
-  const todayTip = todayAngle !== null ? polarPoint(CX, CY, 258, todayAngle) : null;
-  const todayBase = todayAngle !== null ? polarPoint(CX, CY, 72, todayAngle) : null;
+  // "Idag"-markör: en liten prick UTANFÖR hjulet (ingen visarlinje).
+  const todayDot = todayAngle !== null ? polarPoint(CX, CY, 266, todayAngle) : null;
 
   return (
     <div ref={wrapRef} className="relative" onMouseLeave={() => setHover(null)}>
@@ -442,7 +456,8 @@ function Wheel({
         aria-label={`Årshjul ${year}`}
       >
         <defs>
-          {/* Mjuka radiella gradienter per kategori (saturerad inåt, dämpad utåt). */}
+          {/* Mycket mjuka radiella gradienter per kategori (väldigt svaga, ingen
+              outline) → fräscht, ljust uttryck. Saturerad inåt, dämpad utåt. */}
           {ANNUAL_WHEEL_CATEGORIES.map((c) => (
             <radialGradient
               key={c.id}
@@ -452,11 +467,11 @@ function Wheel({
               r={250}
               gradientUnits="userSpaceOnUse"
             >
-              <stop offset="0.5" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.2} />
-              <stop offset="1" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.06} />
+              <stop offset="0.5" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.16} />
+              <stop offset="1" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.04} />
             </radialGradient>
           ))}
-          {/* Tonad fyllning vid hover (något starkare). */}
+          {/* Tonad fyllning vid hover (något starkare men fortfarande mjuk). */}
           {ANNUAL_WHEEL_CATEGORIES.map((c) => (
             <radialGradient
               key={`h-${c.id}`}
@@ -466,8 +481,8 @@ function Wheel({
               r={250}
               gradientUnits="userSpaceOnUse"
             >
-              <stop offset="0.5" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.34} />
-              <stop offset="1" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.14} />
+              <stop offset="0.5" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.3} />
+              <stop offset="1" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.1} />
             </radialGradient>
           ))}
           {/* Mitt-disk: subtil ljus gradient. */}
@@ -475,18 +490,18 @@ function Wheel({
             <stop offset="0" stopColor="var(--color-surface)" />
             <stop offset="1" stopColor="var(--color-canvas-subtle)" />
           </radialGradient>
-          {/* Mjuk skugga för aktivitetsbanden. */}
+          {/* Mjuk, luftig skugga för aktivitetsbanden (ger separation utan outline). */}
           <filter id="mx-aw-shadow" x="-30%" y="-30%" width="160%" height="160%">
-            <feDropShadow dx="0" dy="2.5" stdDeviation="3.5" floodColor="var(--movexum-svart)" floodOpacity={0.18} />
+            <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="var(--movexum-svart)" floodOpacity={0.1} />
           </filter>
-          {/* Starkare lyft vid hover. */}
+          {/* Lyft vid hover (lite tydligare, fortfarande mjuk). */}
           <filter id="mx-aw-shadow-hover" x="-40%" y="-40%" width="180%" height="180%">
-            <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="var(--movexum-svart)" floodOpacity={0.3} />
+            <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="var(--movexum-svart)" floodOpacity={0.18} />
           </filter>
         </defs>
 
         {/* Bakgrundsdisk bakom hela hjulet (mjuk inramning). */}
-        <circle cx={CX} cy={CY} r={252} fill="var(--color-canvas-subtle)" opacity={0.4} />
+        <circle cx={CX} cy={CY} r={252} fill="var(--color-canvas-subtle)" opacity={0.3} />
 
         {/* Kvartalsring */}
         {[1, 2, 3, 4].map((q) => {
@@ -536,12 +551,13 @@ function Wheel({
                   d={monthPath}
                   fill={isEven ? 'var(--color-canvas-subtle)' : 'var(--color-surface)'}
                   stroke={highlighted ? 'var(--color-brand)' : 'var(--color-canvas-muted)'}
-                  strokeWidth={isFocus ? 2.5 : isCurrent ? 1.75 : 1}
+                  strokeOpacity={highlighted ? 0.45 : 1}
+                  strokeWidth={isFocus ? 2 : isCurrent ? 1.5 : 1}
                   className={focusable ? 'cursor-pointer' : undefined}
                   onClick={focusable ? () => onFocusMonth!(m) : undefined}
                 />
                 {highlighted ? (
-                  <path d={monthPath} fill="var(--color-brand)" opacity={isFocus ? 0.13 : 0.07} pointerEvents="none" />
+                  <path d={monthPath} fill="var(--color-brand)" opacity={isFocus ? 0.09 : 0.05} pointerEvents="none" />
                 ) : null}
                 <text
                   x={labelPos.x}
@@ -574,13 +590,9 @@ function Wheel({
                       key={it.id}
                       d={d}
                       fill={`url(#mx-aw-grad-${it.category}${isHovered ? '-hover' : ''})`}
-                      stroke={CATEGORY_VAR[it.category]}
-                      strokeWidth={isHovered ? 2.5 : 1.75}
-                      strokeLinejoin="round"
-                      strokeLinecap="round"
                       filter={isHovered ? 'url(#mx-aw-shadow-hover)' : 'url(#mx-aw-shadow)'}
                       className={`mx-wheel-band transition-opacity ${onPick ? 'cursor-pointer' : ''}`}
-                      style={{ opacity: hover && !isHovered ? 0.4 : 1, animationDelay: `${delay}ms` }}
+                      style={{ opacity: hover && !isHovered ? 0.45 : 1, animationDelay: `${delay}ms` }}
                       onClick={onPick ? () => onPick(it) : undefined}
                       onMouseEnter={(ev) => track(it, m, ev)}
                       onMouseMove={(ev) => track(it, m, ev)}
@@ -591,21 +603,18 @@ function Wheel({
             );
           })}
 
-          {/* "Idag"-visare: tunn klockvisare som pekar på dagens datum. */}
-          {todayTip && todayBase ? (
+          {/* "Idag"-markör: en svart prick utanför hjulet vid dagens datum. */}
+          {todayDot ? (
             <g className="mx-wheel-hand" style={{ pointerEvents: 'none' }}>
-              <circle cx={todayTip.x} cy={todayTip.y} r={9} fill="var(--color-brand)" opacity={0.18} />
-              <line
-                x1={todayBase.x}
-                y1={todayBase.y}
-                x2={todayTip.x}
-                y2={todayTip.y}
-                stroke="var(--color-brand)"
-                strokeWidth={2.5}
-                strokeLinecap="round"
-                opacity={0.85}
+              <circle cx={todayDot.x} cy={todayDot.y} r={10} fill="var(--color-foreground)" opacity={0.1} />
+              <circle
+                cx={todayDot.x}
+                cy={todayDot.y}
+                r={4.5}
+                fill="var(--color-foreground)"
+                stroke="var(--color-surface)"
+                strokeWidth={1.5}
               />
-              <circle cx={todayTip.x} cy={todayTip.y} r={4.5} fill="var(--color-brand)" />
             </g>
           ) : null}
         </g>
@@ -616,35 +625,25 @@ function Wheel({
           <>
             <text
               x={CX}
-              y={CY - 16}
+              y={CY - 12}
               textAnchor="middle"
               dominantBaseline="central"
               className="fill-foreground"
-              fontSize={22}
+              fontSize={24}
               fontWeight={700}
             >
               {year}
             </text>
             <text
               x={CX}
-              y={CY + 6}
+              y={CY + 13}
               textAnchor="middle"
               dominantBaseline="central"
-              className="fill-brand"
-              fontSize={13}
-              fontWeight={700}
+              className="fill-foreground-muted"
+              fontSize={12}
+              fontWeight={600}
             >
-              {countdownLabel(next.days)}
-            </text>
-            <text
-              x={CX}
-              y={CY + 23}
-              textAnchor="middle"
-              dominantBaseline="central"
-              className="fill-foreground-subtle"
-              fontSize={9}
-            >
-              {truncate(next.item.title, 18)}
+              Nästa {countdownLabel(next.days)}
             </text>
           </>
         ) : (
@@ -706,7 +705,7 @@ function HoverCard({ hover }: { hover: HoverInfo }) {
           {annualWheelTrackLabel(item.track)}
         </span>
         <span className="inline-flex items-center rounded-md bg-canvas-subtle px-1.5 py-0.5 text-[11px] font-medium text-foreground-muted">
-          {monthLongLabel(month)} · Q{quarterForMonth(month)}
+          {annualWheelDateLabel(item.month, item.day, item.year)} · Q{quarterForMonth(month)}
         </span>
       </div>
       {item.notes ? (
@@ -752,7 +751,7 @@ function ItemPill({
       <span className="min-w-0 flex-1 truncate text-foreground">{item.title}</span>
       <span className="shrink-0 text-[11px] text-foreground-subtle">
         {annualWheelTrackLabel(item.track)}
-        {item.month ? ` · ${monthShortLabel(item.month)}` : ''}
+        {item.month ? ` · ${item.day ? `${item.day} ` : ''}${monthShortLabel(item.month)}` : ''}
       </span>
       {onEdit ? (
         <button
@@ -872,7 +871,9 @@ function EditorModal({
             <Field label="Månad">
               <select
                 value={form.month}
-                onChange={(e) => setForm({ ...form, month: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, month: e.target.value, day: e.target.value === '' ? '' : form.day })
+                }
                 className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground"
               >
                 <option value="">Helår / återkommande</option>
@@ -884,6 +885,24 @@ function EditorModal({
               </select>
             </Field>
           </div>
+
+          <Field label="Specifikt datum (valfritt)">
+            <select
+              value={form.day}
+              disabled={form.month === ''}
+              onChange={(e) => setForm({ ...form, day: e.target.value })}
+              className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground disabled:opacity-50"
+            >
+              <option value="">Hela månaden</option>
+              {form.month !== ''
+                ? Array.from({ length: daysInMonth(form.year, Number(form.month)) }, (_, i) => i + 1).map((d) => (
+                    <option key={d} value={String(d)}>
+                      {d} {monthLongLabel(Number(form.month))}
+                    </option>
+                  ))
+                : null}
+            </select>
+          </Field>
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Kategori">

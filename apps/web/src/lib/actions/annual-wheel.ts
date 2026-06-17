@@ -36,6 +36,7 @@ export async function createAnnualWheelItemAction(input: {
   year: number;
   title: string;
   month?: number | null;
+  day?: number | null;
   track: string;
   category: string;
   notes?: string;
@@ -49,6 +50,7 @@ export async function createAnnualWheelItemAction(input: {
     year: input.year,
     title: input.title,
     month: input.month ?? null,
+    day: input.day ?? null,
     track: input.track,
     category: input.category,
     notes: input.notes

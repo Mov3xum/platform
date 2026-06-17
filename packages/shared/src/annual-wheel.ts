@@ -24,8 +24,8 @@ export interface AnnualWheelCategoryDef {
 
 /** Källa av sanning — speglas som select-värden i migrationen. */
 export const ANNUAL_WHEEL_CATEGORIES: readonly AnnualWheelCategoryDef[] = [
-  { id: 'styrelse', label: 'Styrelse', token: 'djupbla' },
-  { id: 'ledning', label: 'Ledning', token: 'bla' },
+  { id: 'styrelse', label: 'Styrelse', token: 'gron' },
+  { id: 'ledning', label: 'Ledning', token: 'gul' },
   { id: 'gemensamt', label: 'Gemensamt', token: 'lila' }
 ] as const;
 
@@ -123,6 +123,23 @@ export function monthLongLabel(month: number | null | undefined): string {
   return MONTHS_LONG_SV[month - 1];
 }
 
+/**
+ * Läsbar datumetikett för en årshjuls-post (svenska). Med dag → "12 augusti
+ * 2026"; bara månad → "augusti 2026"; ingen månad → "Hela året 2026".
+ */
+export function annualWheelDateLabel(
+  month: number | null | undefined,
+  day: number | null | undefined,
+  year: number
+): string {
+  const m = sanitizeMonth(month);
+  if (m === null) return `Hela året ${year}`;
+  const monthName = MONTHS_LONG_SV[m - 1].toLowerCase();
+  const d = sanitizeDay(day);
+  if (d === null) return `${monthName} ${year}`;
+  return `${d} ${monthName} ${year}`;
+}
+
 /** Kvartal (1–4) för en 1-baserad månad. 0 för ogiltig månad. */
 export function quarterForMonth(month: number | null | undefined): 0 | 1 | 2 | 3 | 4 {
   if (typeof month !== 'number' || month < 1 || month > 12) return 0;
@@ -139,6 +156,20 @@ export function sanitizeMonth(value: unknown): number | null {
   if (!Number.isFinite(n)) return null;
   const i = Math.trunc(n);
   if (i < 1 || i > 12) return null;
+  return i;
+}
+
+/**
+ * Normaliserar ett inkommande dagvärde till heltal 1–31, annars null
+ * (= hela månaden). Tolerant mot strängar och flyttal. OBS: validerar inte
+ * mot månadens faktiska längd — det görs vid datum-bygget (`new Date` klampar).
+ */
+export function sanitizeDay(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return null;
+  const i = Math.trunc(n);
+  if (i < 1 || i > 31) return null;
   return i;
 }
 
@@ -160,6 +191,8 @@ export interface AnnualWheelItem {
   title: string;
   /** 1–12, eller null för helårs-/kvartalsövergripande aktivitet. */
   month: number | null;
+  /** 1–31, valfritt specifikt datum inom månaden (null = hela månaden). */
+  day?: number | null;
   track: AnnualWheelTrack;
   category: AnnualWheelCategory;
   notes?: string;
@@ -329,7 +362,8 @@ export function nextUpcomingItem(
   for (const it of items) {
     const m = sanitizeMonth(it.month);
     if (m === null) continue;
-    const date = new Date(it.year, m - 1, 1);
+    const day = sanitizeDay(it.day) ?? 1;
+    const date = new Date(it.year, m - 1, day);
     const days = Math.ceil((date.getTime() - startOfDay.getTime()) / 86_400_000);
     if (days < 0) continue;
     if (!best || days < best.days) best = { item: it, date, days };

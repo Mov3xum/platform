@@ -3,6 +3,7 @@ import {
   ALL_PHASES,
   ANNUAL_WHEEL_CATEGORY_IDS,
   ANNUAL_WHEEL_TRACK_IDS,
+  sanitizeDay,
   sanitizeMonth,
   type AnnualWheelCategory,
   type AnnualWheelTrack,
@@ -159,6 +160,14 @@ export function validateAnnualWheelMonth(value: unknown): ValidationResult<numbe
   const m = sanitizeMonth(value);
   if (m === null) return { ok: false, error: 'month måste vara ett heltal 1–12 (eller tomt).' };
   return { ok: true, value: m };
+}
+
+/** Dag: 1–31, eller null (hela månaden). Tomt värde = null. */
+export function validateAnnualWheelDay(value: unknown): ValidationResult<number | null> {
+  if (value === null || value === '' || value === undefined) return { ok: true, value: null };
+  const d = sanitizeDay(value);
+  if (d === null) return { ok: false, error: 'day måste vara ett heltal 1–31 (eller tomt).' };
+  return { ok: true, value: d };
 }
 
 export function validateYear(value: unknown): ValidationResult<number> {
