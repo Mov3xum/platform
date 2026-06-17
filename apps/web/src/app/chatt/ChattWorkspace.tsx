@@ -6,6 +6,7 @@ import DashboardChat, {
   type DashboardConnector,
   type DashboardActivity,
   type LiveStep,
+  type QueuedItem,
   type UiMessage
 } from '@/components/DashboardChat';
 import { Icon } from '@/components/proto/Icon';
@@ -38,6 +39,11 @@ interface Props {
   initialThreads: ThreadListResult;
 }
 
+type SubmitOpts = { includeWebContext: boolean; attachments: ChatAttachment[]; deepJob: boolean };
+
+// Ett köat meddelande med all info som behövs för att köra det senare.
+type QueuedTurn = { id: string; text: string; opts: SubmitOpts; displayText: string };
+
 function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
   return messages
     .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -69,10 +75,33 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   const [liveText, setLiveText] = useState('');
   const [deepJob, setDeepJob] = useState<{ id: string; threadId: string; status: DeepJobStatus; progress: number } | null>(null);
   const [rightOpen, setRightOpen] = useState(true);
+  // Köade meddelanden (skrivna medan en turn körs). `queueRef` är sanningen
+  // (synkron åtkomst i körnings-callbacks); `queued` speglar den för rendering.
+  const [queued, setQueued] = useState<QueuedItem[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
+  const queueRef = useRef<QueuedTurn[]>([]);
+  // Synkrona "upptagen"-flaggor så submit/drain inte tävlar med React-state.
+  const streamingRef = useRef(false);
+  const deepRunningRef = useRef(false);
 
   const deepRunning =
     !!deepJob && !['succeeded', 'failed', 'cancelled'].includes(deepJob.status);
+
+  function publishQueue() {
+    setQueued(queueRef.current.map((q) => ({ id: q.id, content: q.displayText })));
+  }
+
+  // Kör nästa köade meddelande om inget redan körs.
+  const runNextRef = useRef<() => void>(() => {});
+  function runNext() {
+    if (streamingRef.current || deepRunningRef.current) return;
+    const next = queueRef.current[0];
+    if (!next) return;
+    queueRef.current = queueRef.current.slice(1);
+    publishQueue();
+    runTurn(next);
+  }
+  runNextRef.current = runNext;
 
   const refreshThreads = useCallback(async () => {
     const next = await listThreadsAction();
@@ -105,24 +134,33 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
         if (msgs.messages) applyThreadMessages(msgs.messages);
         await refreshThreads();
         if (status === 'failed') setError(res.jobError || 'Djupdykningen misslyckades.');
+        // Jobbet klart → kör nästa köade meddelande (löpande feedback).
+        deepRunningRef.current = false;
+        runNextRef.current();
       }
     }, 3000);
     return () => clearInterval(timer);
   }, [deepJob, deepRunning, refreshThreads, applyThreadMessages]);
 
-  async function startDeep(instruction: string) {
+  // Startar ett djupt jobb. Lägger INTE till användarmeddelandet (runTurn gör
+  // det), och städar `deepRunningRef` + drar kön vidare om starten fallerar.
+  async function startDeepInternal(instruction: string) {
     const clean = instruction.trim();
+    deepRunningRef.current = true;
     if (!clean) {
       setError('Beskriv vad djupdykningen ska göra.');
+      deepRunningRef.current = false;
+      runNextRef.current();
       return;
     }
     setError(null);
-    setMessages((prev) => [...prev, { role: 'user', content: clean }]);
     let threadId = activeThreadId;
     if (!threadId) {
       const created = await createThreadAction(activeAgent?.id);
       if (created.error || !created.threadId) {
         setError(created.error || 'Kunde inte skapa tråd.');
+        deepRunningRef.current = false;
+        runNextRef.current();
         return;
       }
       threadId = created.threadId;
@@ -131,6 +169,8 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     const res = await startDeepJobAction(threadId, clean);
     if (res.error || !res.jobId) {
       setError(res.error || 'Kunde inte starta jobbet.');
+      deepRunningRef.current = false;
+      runNextRef.current();
       return;
     }
     setDeepJob({ id: res.jobId, threadId, status: 'queued', progress: 0 });
@@ -139,7 +179,18 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     await refreshThreads();
   }
 
+  function clearQueue() {
+    queueRef.current = [];
+    publishQueue();
+  }
+
+  function cancelQueued(id: string) {
+    queueRef.current = queueRef.current.filter((q) => q.id !== id);
+    publishQueue();
+  }
+
   function newChat() {
+    clearQueue();
     setActiveThreadId(null);
     setMessages([]);
     setActiveAgent(null);
@@ -149,6 +200,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   async function openThread(id: string) {
     setError(null);
     setMenuFor(null);
+    clearQueue();
     const res = await getThreadMessagesAction(id);
     if (res.error) {
       setError(res.error);
@@ -158,8 +210,6 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     applyThreadMessages(res.messages || []);
     setActiveAgent(res.agent ? agents.find((a) => a.id === res.agent) || null : null);
   }
-
-  type SubmitOpts = { includeWebContext: boolean; attachments: ChatAttachment[]; deepJob: boolean };
 
   function applyStep(ev: { phase: 'start' | 'end'; id: string; label: string; ok?: boolean }) {
     // Ett verktygssteg startar → ev. text som strömmats innan dess var en
@@ -190,6 +240,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   }
 
   async function runStreamingTurn(text: string, opts: SubmitOpts) {
+    streamingRef.current = true;
     setStreaming(true);
     setLiveSteps([]);
     setLiveText('');
@@ -286,22 +337,45 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       }
       await refreshThreads();
     } finally {
+      streamingRef.current = false;
       setStreaming(false);
       setLiveSteps([]);
       setLiveText('');
+      // Turen klar → kör nästa köade meddelande (löpande feedback).
+      runNextRef.current();
+    }
+  }
+
+  // Visar användarmeddelandet i transkriptet och kör turen (streaming/djupt).
+  function runTurn(item: QueuedTurn) {
+    setMessages((prev) => [...prev, { role: 'user', content: item.displayText }]);
+    if (item.opts.deepJob) {
+      void startDeepInternal(item.text);
+    } else {
+      void runStreamingTurn(item.text, item.opts);
     }
   }
 
   function submit(text: string, opts: SubmitOpts) {
     setError(null);
-    if (opts.deepJob) {
-      void startDeep(text);
+    const displayText = opts.deepJob
+      ? text
+      : text || (opts.attachments.length === 1 ? '(bilaga skickad)' : '(bilagor skickade)');
+    const item: QueuedTurn = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      text,
+      opts,
+      displayText
+    };
+    // Upptagen (en turn kör eller kön är icke-tom) → köa. Annars kör direkt.
+    const busy =
+      streamingRef.current || deepRunningRef.current || queueRef.current.length > 0;
+    if (busy) {
+      queueRef.current = [...queueRef.current, item];
+      publishQueue();
       return;
     }
-    const displayText =
-      text || (opts.attachments.length === 1 ? '(bilaga skickad)' : '(bilagor skickade)');
-    setMessages((prev) => [...prev, { role: 'user', content: displayText }]);
-    void runStreamingTurn(text, opts);
+    runTurn(item);
   }
 
   async function onDownload(file: GeneratedFileRef) {
@@ -427,10 +501,13 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           deepProgress={deepJob?.progress ?? 0}
           liveSteps={liveSteps}
           liveText={liveText}
+          queued={queued}
+          resetSignal={activeThreadId ?? 'new'}
           onPickAgent={setActiveAgent}
           onReset={newChat}
           onSubmit={submit}
           onDownload={onDownload}
+          onCancelQueued={cancelQueued}
         />
         {!rightOpen && (
           <button

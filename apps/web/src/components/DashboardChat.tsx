@@ -64,6 +64,12 @@ export interface LiveStep {
   ok?: boolean;
 }
 
+// Ett köat meddelande — skrivet medan en turn körs, körs när den är klar.
+export interface QueuedItem {
+  id: string;
+  content: string;
+}
+
 // Kompakt aktivitetsspår ("Läser bolagen", "Skapar PowerPoint"). Visas
 // live medan turen körs (running → spinner) och persiterat under färdiga svar.
 function ActivityTrail({
@@ -330,6 +336,10 @@ interface Props {
   liveSteps?: LiveStep[];
   // Svaret medan det strömmas in token-för-token (löpande utskrift).
   liveText?: string;
+  // Meddelanden som köats medan en turn körs (körs när den blir klar).
+  queued?: QueuedItem[];
+  // Ändras när en annan tråd öppnas → återställ scroll-läget till botten.
+  resetSignal?: string;
   onPickAgent: (a: DashboardAgent | null) => void;
   onReset: () => void;
   onSubmit: (
@@ -337,6 +347,8 @@ interface Props {
     opts: { includeWebContext: boolean; attachments: ChatAttachment[]; deepJob: boolean }
   ) => void;
   onDownload: (file: GeneratedFileRef) => void;
+  // Ta bort ett ännu icke-körat köat meddelande.
+  onCancelQueued?: (id: string) => void;
 }
 
 const AGENT_TONES = [
@@ -367,10 +379,13 @@ export default function DashboardChat({
   deepProgress = 0,
   liveSteps = [],
   liveText = '',
+  queued = [],
+  resetSignal,
   onPickAgent,
   onReset,
   onSubmit,
-  onDownload
+  onDownload,
+  onCancelQueued
 }: Props) {
   const [input, setInput] = useState('');
   const [includeWebContext, setIncludeWebContext] = useState(false);
@@ -388,6 +403,11 @@ export default function DashboardChat({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // "Fäst vid botten" — auto-scrollar bara när användaren redan är nära botten.
+  // Scrollar hen uppåt (för att läsa/jämföra) låter vi vyn vara kvar där medan
+  // svaret strömmar in, och visar en "till senaste"-knapp i stället.
+  const [stickToBottom, setStickToBottom] = useState(true);
 
   const isActive = messages.length > 0 || isPending;
   const shownError = localError || error;
@@ -403,11 +423,35 @@ export default function DashboardChat({
     autoGrow();
   }, [input]);
 
+  // Auto-scroll bara om användaren är "fäst" vid botten. Streamande text
+  // använder instant scroll (smooth slåss med token-flödet och rycker).
   useEffect(() => {
+    if (!stickToBottom) return;
+    requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ block: 'end' });
+    });
+  }, [messages.length, isPending, liveSteps.length, liveText, queued.length, stickToBottom]);
+
+  // Uppdaterar "fäst vid botten" när användaren scrollar. ~120 px tolerans så
+  // små avvikelser fortfarande räknas som "vid botten".
+  function onScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setStickToBottom(distanceFromBottom < 120);
+  }
+
+  function scrollToBottom() {
+    setStickToBottom(true);
     requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     });
-  }, [messages.length, isPending, liveSteps.length, liveText]);
+  }
+
+  // Byte av tråd (eller ny chatt) → börja om fäst vid botten.
+  useEffect(() => {
+    setStickToBottom(true);
+  }, [resetSignal]);
 
   // Stäng fullskärmsvyn med Escape.
   useEffect(() => {
@@ -533,8 +577,13 @@ export default function DashboardChat({
     const text = input.trim();
     // Djupt jobb kräver en instruktion (text); annars krävs text eller bilaga.
     if (deepMode ? !text : !text && attachments.length === 0) return;
-    if (isPending) return;
+    // Medan en turn körs blockerar vi INTE — ChattWorkspace köar meddelandet
+    // och kör det när den pågående turen är klar (löpande feedback). Bilagor
+    // hör till just det köade meddelandet.
+    if (isProcessingFiles) return;
     setLocalError(null);
+    // Användaren skickade aktivt → hoppa till botten så det egna meddelandet syns.
+    setStickToBottom(true);
     const sentAttachments: ChatAttachment[] = deepMode
       ? []
       : attachments.map((a) => ({
@@ -560,10 +609,13 @@ export default function DashboardChat({
     }
   }
 
+  // Går att skicka även medan en turn körs (meddelandet köas då). Vi blockerar
+  // bara medan en bilaga fortfarande läses in.
   const canSubmit =
-    !isPending &&
     !isProcessingFiles &&
     (deepMode ? input.trim().length > 0 : input.trim().length > 0 || attachments.length > 0);
+  // Om en turn redan kör (eller det finns kö) hamnar nästa meddelande i kön.
+  const willQueue = isPending || queued.length > 0;
 
   const inputPill = (
     <div className="rounded-2xl border border-default bg-surface px-4 py-3 shadow-sm shadow-movexum-svart/5 transition focus-within:border-strong focus-within:ring-2 focus-within:ring-movexum-pastell-lila dark:focus-within:ring-movexum-morklila">
@@ -619,11 +671,12 @@ export default function DashboardChat({
         placeholder={
           deepMode
             ? 'Beskriv vad djupdykningen ska göra (planeras och körs i flera steg)…'
-            : activeAgent
-              ? `Fråga ${activeAgent.name}…`
-              : 'Fråga om portföljen, ett bolag eller en aktivitet…'
+            : willQueue
+              ? 'Skriv ett meddelande — det köas och körs när det pågående svaret är klart…'
+              : activeAgent
+                ? `Fråga ${activeAgent.name}…`
+                : 'Fråga om portföljen, ett bolag eller en aktivitet…'
         }
-        disabled={isPending}
         rows={1}
         className="block w-full resize-none bg-transparent text-[15px] leading-6 text-foreground placeholder:text-foreground-subtle focus:outline-none disabled:opacity-50"
       />
@@ -669,7 +722,7 @@ export default function DashboardChat({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isPending || isProcessingFiles || deepMode || attachments.length >= MAX_ATTACHMENTS}
+            disabled={isProcessingFiles || deepMode || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title={`Bifoga fil (PNG, JPG, WebP, PDF, XLSX, TXT, MD, CSV · max ${MAX_ATTACHMENTS} filer · 10 MB/fil)`}
             aria-label="Bifoga fil"
@@ -682,7 +735,7 @@ export default function DashboardChat({
           <button
             type="button"
             onClick={() => imageInputRef.current?.click()}
-            disabled={isPending || deepMode || attachments.length >= MAX_ATTACHMENTS}
+            disabled={deepMode || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title={`Bifoga bild (PNG, JPG, WebP · max ${MAX_ATTACHMENTS} bilagor · 10 MB/fil)`}
             aria-label="Bifoga bild"
@@ -693,7 +746,7 @@ export default function DashboardChat({
             type="button"
             onClick={() => setIncludeWebContext((v) => !v)}
             aria-pressed={includeWebContext}
-            disabled={isPending || deepMode}
+            disabled={deepMode}
             className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition disabled:cursor-not-allowed disabled:opacity-40 ${
               includeWebContext
                 ? 'bg-movexum-pastell-bla text-movexum-djupbla'
@@ -709,7 +762,7 @@ export default function DashboardChat({
             role="switch"
             aria-checked={deepMode}
             onClick={toggleDeepMode}
-            disabled={isPending || deepRunning}
+            disabled={deepRunning}
             className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
               deepMode
                 ? 'bg-movexum-lila text-movexum-vit shadow-sm shadow-movexum-svart/10'
@@ -742,10 +795,11 @@ export default function DashboardChat({
           type="button"
           onClick={submit}
           disabled={!canSubmit}
-          aria-label="Skicka"
+          aria-label={willQueue ? 'Köa meddelande' : 'Skicka'}
+          title={willQueue ? 'Köa meddelande (körs när pågående svar är klart)' : 'Skicka'}
           className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-brand text-brand-foreground transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-40"
         >
-          <Icon name="arrow" size={16} />
+          <Icon name={willQueue ? 'plus' : 'arrow'} size={16} />
         </button>
       </div>
     </div>
@@ -1134,7 +1188,8 @@ export default function DashboardChat({
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex-1 overflow-y-auto">
+          <div className="relative min-h-0 flex-1">
+            <div ref={scrollRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto">
             <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-6 py-6">
               <div className="flex items-center justify-between">
                 {activeAgent ? (
@@ -1215,8 +1270,44 @@ export default function DashboardChat({
                 </div>
               )}
 
+              {/* Köade meddelanden — skrivna medan turen körs, körs i tur och ordning. */}
+              {queued.map((q) => (
+                <div key={q.id} className="flex justify-end">
+                  <div className="group relative max-w-[78%] rounded-2xl rounded-tr-md border border-dashed border-strong bg-canvas-subtle px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground-muted">
+                    <span className="mb-1 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                      <Icon name="clock" size={11} />
+                      I kö
+                      {onCancelQueued && (
+                        <button
+                          type="button"
+                          onClick={() => onCancelQueued(q.id)}
+                          className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground"
+                          aria-label="Ta bort ur kö"
+                          title="Ta bort ur kö"
+                        >
+                          <Icon name="x" size={10} />
+                        </button>
+                      )}
+                    </span>
+                    {q.content}
+                  </div>
+                </div>
+              ))}
+
               <div ref={bottomRef} />
             </div>
+            </div>
+            {!stickToBottom && (
+              <button
+                type="button"
+                onClick={scrollToBottom}
+                className="absolute bottom-4 left-1/2 z-10 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-default bg-surface text-foreground-muted shadow-md shadow-movexum-svart/10 transition hover:border-strong hover:text-foreground"
+                title="Till senaste"
+                aria-label="Scrolla till senaste meddelandet"
+              >
+                <Icon name="chevdown" size={18} />
+              </button>
+            )}
           </div>
 
           <div className="border-t border-default bg-canvas">
