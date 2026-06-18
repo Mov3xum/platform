@@ -656,6 +656,13 @@ export function buildChatTools(
               maximum: 12,
               description: 'Månad 1–12. Utelämna för en helårs-/kvartalsövergripande aktivitet.'
             },
+            day: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 31,
+              description:
+                'Valfri specifik dag 1–31 inom månaden (kräver month). Utelämna för hela månaden.'
+            },
             track: {
               type: 'string',
               enum: [...ANNUAL_WHEEL_TRACK_IDS],
@@ -686,13 +693,13 @@ export function buildChatTools(
             itemId: { type: 'string', description: 'PocketBase-id för årshjuls-posten.' },
             field: {
               type: 'string',
-              enum: ['title', 'month', 'track', 'category', 'notes', 'year'],
+              enum: ['title', 'month', 'day', 'track', 'category', 'notes', 'year'],
               description: 'Vilket fält som ska uppdateras.'
             },
             value: {
               description:
-                'Nytt värde. month: 1–12 eller null. track/category: giltigt enum-värde. ' +
-                'title/notes: text. year: heltal.'
+                'Nytt värde. month: 1–12 eller null. day: 1–31 eller null. ' +
+                'track/category: giltigt enum-värde. title/notes: text. year: heltal.'
             }
           },
           required: ['itemId', 'field', 'value']
@@ -2201,6 +2208,7 @@ async function runCreateAnnualWheelItem(
     year: typeof args.year === 'number' ? args.year : Number(args.year),
     title: typeof args.title === 'string' ? args.title : '',
     month: args.month === undefined || args.month === null ? null : Number(args.month),
+    day: args.day === undefined || args.day === null ? null : Number(args.day),
     track: typeof args.track === 'string' ? args.track : '',
     category: typeof args.category === 'string' ? args.category : '',
     notes: typeof args.notes === 'string' ? args.notes : undefined
@@ -2228,7 +2236,7 @@ async function runUpdateAnnualWheelItem(
   const itemId = typeof args.itemId === 'string' ? args.itemId.trim() : '';
   const field = typeof args.field === 'string' ? args.field.trim() : '';
   if (!itemId) return { ok: false, error: 'itemId saknas.' };
-  const allowed = ['title', 'month', 'track', 'category', 'notes', 'year'];
+  const allowed = ['title', 'month', 'day', 'track', 'category', 'notes', 'year'];
   if (!allowed.includes(field)) {
     return { ok: false, error: `field måste vara en av: ${allowed.join(', ')}.` };
   }

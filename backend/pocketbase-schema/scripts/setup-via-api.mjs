@@ -2873,6 +2873,7 @@ await ensureCollection({
     { name: 'year', type: 'number', required: true, onlyInt: true, min: 2000, max: 2100 },
     { name: 'title', type: 'text', required: true, min: 1, max: 200 },
     { name: 'month', type: 'number', required: false, onlyInt: true, min: 1, max: 12 },
+    { name: 'day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 },
     { name: 'track', type: 'select', required: true, maxSelect: 1, values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt'] },
     { name: 'category', type: 'select', required: true, maxSelect: 1, values: ['styrelse', 'ledning', 'gemensamt'] },
     { name: 'notes', type: 'text', required: false, max: 2000 },
@@ -3343,6 +3344,7 @@ await ensureCollection({
     { name: 'year', type: 'number', required: true, onlyInt: true, min: 2000, max: 2100 },
     { name: 'title', type: 'text', required: true, min: 1, max: 200 },
     { name: 'month', type: 'number', required: false, onlyInt: true, min: 1, max: 12 },
+    { name: 'day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 },
     {
       name: 'track', type: 'select', required: true, maxSelect: 1,
       values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt']
@@ -3364,6 +3366,12 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
 });
+
+// Migration 1700000138: valfritt specifikt datum (`day`) på årshjuls-poster.
+// patchCollection lägger fältet på en redan bootstrappad instans (idempotent).
+await patchCollection('annual_wheel_items', [
+  { name: 'day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 }
+]);
 
 // Backfill: en tidigare körning hann skapa chat_threads/deep_jobs UTAN
 // created/updated (REST API:t auto-lägger dem inte). ensureCollection

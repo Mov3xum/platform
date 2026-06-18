@@ -8,6 +8,7 @@ import type { AnnualWheelItem, Role } from '@platform/shared';
 import {
   isAnnualWheelCategory,
   isAnnualWheelTrack,
+  sanitizeDay,
   sanitizeMonth
 } from '@platform/shared';
 
@@ -21,6 +22,7 @@ interface WheelRow {
   year?: number;
   title?: string;
   month?: number | null;
+  day?: number | null;
   track?: string;
   category?: string;
   notes?: string;
@@ -51,6 +53,7 @@ export default async function ArshjulPage() {
     year: typeof r.year === 'number' ? r.year : Number(r.year) || new Date().getFullYear(),
     title: r.title || '(namnlös)',
     month: sanitizeMonth(r.month),
+    day: sanitizeDay(r.day),
     track: isAnnualWheelTrack(r.track) ? r.track : 'ovrigt',
     category: isAnnualWheelCategory(r.category) ? r.category : 'gemensamt',
     notes: r.notes || undefined,

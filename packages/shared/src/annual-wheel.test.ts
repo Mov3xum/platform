@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   ANNUAL_WHEEL_CATEGORY_IDS,
   ANNUAL_WHEEL_TRACK_IDS,
+  annualWheelDateLabel,
   annulusSectorPath,
   buildAnnualWheelTable,
   clampYear,
@@ -20,6 +21,7 @@ import {
   quarterForMonth,
   quarterSliceAngles,
   roundedAnnulusSectorPath,
+  sanitizeDay,
   sanitizeMonth,
   type AnnualWheelItem
 } from './annual-wheel.ts';
@@ -226,4 +228,37 @@ test('nextUpcomingItem picks the soonest dated item from a reference day', () =>
   // Inga framtida poster → null.
   const none = nextUpcomingItem(items, new Date(2027, 0, 1));
   assert.equal(none, null);
+});
+
+// ── Specifikt datum (day) ────────────────────────────────────────────────────
+
+test('sanitizeDay clamps and coerces 1–31', () => {
+  assert.equal(sanitizeDay(1), 1);
+  assert.equal(sanitizeDay(31), 31);
+  assert.equal(sanitizeDay('12'), 12);
+  assert.equal(sanitizeDay(12.7), 12);
+  assert.equal(sanitizeDay(0), null);
+  assert.equal(sanitizeDay(32), null);
+  assert.equal(sanitizeDay(''), null);
+  assert.equal(sanitizeDay(null), null);
+  assert.equal(sanitizeDay('abc'), null);
+});
+
+test('annualWheelDateLabel renders day/month/year variants', () => {
+  assert.equal(annualWheelDateLabel(8, 12, 2026), '12 augusti 2026');
+  assert.equal(annualWheelDateLabel(8, null, 2026), 'augusti 2026');
+  assert.equal(annualWheelDateLabel(null, null, 2026), 'Hela året 2026');
+  // Dag utan giltig månad → behandlas som hela året.
+  assert.equal(annualWheelDateLabel(null, 12, 2026), 'Hela året 2026');
+});
+
+test('nextUpcomingItem honours specific day within the month', () => {
+  const items: AnnualWheelItem[] = [
+    item({ id: 'a', month: 6, day: 1, year: 2026 }),
+    item({ id: 'b', month: 6, day: 20, year: 2026 })
+  ];
+  // 10 juni: dag-1-posten har passerat, dag-20 är nästa.
+  const next = nextUpcomingItem(items, new Date(2026, 5, 10));
+  assert.equal(next?.item.id, 'b');
+  assert.equal(next?.date.getDate(), 20);
 });

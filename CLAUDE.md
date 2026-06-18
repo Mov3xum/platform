@@ -3667,12 +3667,18 @@ och år.
 
 - **`annual_wheel_items`** (1700000133): `tenant` (cascadeDelete), `year`
   (int 2000–2100), `title`, `month` (int 1–12 eller tomt = helårs-/kvartals-
-  övergripande), `track` (select: kampanjer, verksamhetsrapporter, projekt,
-  team, ledningsgrupp, projektstyrgrupper, ovrigt — tabellens kolumner),
-  `category` (select: styrelse, ledning, gemensamt — hjulets legend/färg),
-  `notes`, `created_by`. Index på `(tenant)` och `(tenant, year)`. Taxonomin
-  är källan-av-sanning i `annual-wheel.ts` och MÅSTE speglas som select-värden
-  i migrationen.
+  övergripande), `day` (int 1–31 eller tomt = hela månaden; valfritt specifikt
+  datum, **migration 1700000138**), `track` (select: kampanjer,
+  verksamhetsrapporter, projekt, team, ledningsgrupp, projektstyrgrupper,
+  ovrigt — tabellens kolumner), `category` (select: styrelse, ledning,
+  gemensamt — hjulets legend/färg), `notes`, `created_by`. Index på `(tenant)`
+  och `(tenant, year)`. Taxonomin är källan-av-sanning i `annual-wheel.ts` och
+  MÅSTE speglas som select-värden i migrationen. `day` saknar PII (rent
+  datumtal); en dag utan månad nollställs i skrivlagret. Hjulets
+  kategorifärger är mjuka **gul/grön/lila** (CATEGORY_VAR i `AnnualWheelView`,
+  ur `--movexum-gul/gron/lila`) — banden fylls väldigt svagt utan outline,
+  "idag" visas som en svart prick utanför hjulet, och hovring visar postens
+  fullständiga datum (`annualWheelDateLabel`).
 
 ### 30.3 Manuell + chatt-styrd (delat skrivlager)
 

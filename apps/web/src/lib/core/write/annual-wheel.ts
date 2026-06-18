@@ -5,6 +5,7 @@ import { canCreateRecord, canWriteField } from './writable-fields';
 import { logAgentAction } from './audit';
 import {
   validateAnnualWheelCategory,
+  validateAnnualWheelDay,
   validateAnnualWheelMonth,
   validateAnnualWheelTrack,
   validateNonEmptyText,
@@ -21,6 +22,7 @@ export interface CreateAnnualWheelItemParams {
   year: number;
   title: string;
   month?: number | null;
+  day?: number | null;
   track: string;
   category: string;
   notes?: string;
@@ -59,6 +61,9 @@ export async function createAnnualWheelItem(
   const month = validateAnnualWheelMonth(params.month);
   if (!month.ok) return fail('INVALID_VALUE', month.error);
 
+  const day = validateAnnualWheelDay(params.day);
+  if (!day.ok) return fail('INVALID_VALUE', day.error);
+
   const track = validateAnnualWheelTrack(params.track);
   if (!track.ok) return fail('INVALID_VALUE', track.error);
 
@@ -68,11 +73,14 @@ export async function createAnnualWheelItem(
   const notes = validateOptionalText(params.notes, 'notes', 2000);
   if (!notes.ok) return fail('INVALID_VALUE', notes.error);
 
+  // En dag utan månad är meningslös (hjulet placerar per månad) → nollställ.
+  const effectiveDay = month.value === null ? null : day.value;
   const payload: Record<string, unknown> = {
     tenant: actor.tenant,
     year: year.value,
     title: title.value,
     month: month.value === null ? null : month.value,
+    day: effectiveDay,
     track: track.value,
     category: category.value,
     created_by: actor.id
@@ -95,6 +103,7 @@ export async function createAnnualWheelItem(
       year: year.value,
       title: title.value,
       month: month.value,
+      day: effectiveDay,
       track: track.value,
       category: category.value
     }
@@ -103,7 +112,14 @@ export async function createAnnualWheelItem(
   return ok({ itemId: created.id, year: year.value, title: title.value });
 }
 
-export type AnnualWheelWritableField = 'title' | 'month' | 'track' | 'category' | 'notes' | 'year';
+export type AnnualWheelWritableField =
+  | 'title'
+  | 'month'
+  | 'day'
+  | 'track'
+  | 'category'
+  | 'notes'
+  | 'year';
 
 export interface UpdateAnnualWheelItemFieldParams {
   itemId: string;
@@ -145,6 +161,12 @@ export async function updateAnnualWheelItemField(
     }
     case 'month': {
       const r = validateAnnualWheelMonth(params.value);
+      if (!r.ok) return fail('INVALID_VALUE', r.error);
+      normalized = r.value;
+      break;
+    }
+    case 'day': {
+      const r = validateAnnualWheelDay(params.value);
       if (!r.ok) return fail('INVALID_VALUE', r.error);
       normalized = r.value;
       break;
