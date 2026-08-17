@@ -151,19 +151,27 @@ export function slugifyAnnualWheelCategoryKey(input: unknown): string | null {
   const lowered = input.trim().toLowerCase();
   if (!lowered) return null;
   let out = '';
+  let prevDash = false;
   for (const ch of lowered) {
     const mapped = TRANSLITERATE[ch];
     if (mapped) {
       out += mapped;
+      prevDash = false;
       continue;
     }
-    out += /[a-z0-9]/.test(ch) ? ch : '-';
+    if (/[a-z0-9]/.test(ch)) {
+      out += ch;
+      prevDash = false;
+      continue;
+    }
+    if (!prevDash) out += '-';
+    prevDash = true;
   }
-  const slug = out
-    .replace(/-+/g, '-')
-    .replace(/^[-_]+|[-_]+$/g, '')
-    .slice(0, ANNUAL_WHEEL_CATEGORY_KEY_MAX)
-    .replace(/[-_]+$/g, '');
+  let slug = out;
+  while (slug.startsWith('-') || slug.startsWith('_')) slug = slug.slice(1);
+  while (slug.endsWith('-') || slug.endsWith('_')) slug = slug.slice(0, -1);
+  slug = slug.slice(0, ANNUAL_WHEEL_CATEGORY_KEY_MAX);
+  while (slug.endsWith('-') || slug.endsWith('_')) slug = slug.slice(0, -1);
   if (!slug || !CATEGORY_KEY_RE.test(slug)) return null;
   return slug;
 }
