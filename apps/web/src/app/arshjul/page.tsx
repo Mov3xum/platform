@@ -2,11 +2,16 @@ import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { listForTenant } from '@/lib/pb.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
+import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
+import {
+  sanitizeAnnualWheelTags,
+  sanitizeDay,
+  sanitizeMonth
+} from '@platform/shared';
 import { listAnnualWheelCategories } from '@/lib/annual-wheel/categories';
 import { PageShell } from '@/components/PageShell';
 import { AnnualWheelView } from './AnnualWheelView';
 import type { AnnualWheelItem, Role } from '@platform/shared';
-import { isAnnualWheelTrack, sanitizeDay, sanitizeMonth } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,8 +26,11 @@ interface WheelRow {
   title?: string;
   month?: number | null;
   day?: number | null;
+  tags?: string[] | string | null;
+  /** Deprecerat (migration 1700000139) — läses bara som fallback. */
   track?: string;
   category?: string;
+  responsible?: string;
   notes?: string;
   created_by?: string;
   created?: string;
@@ -51,7 +59,14 @@ export default async function ArshjulPage() {
 
   const fallbackCategory = categories[0]?.id ?? 'gemensamt';
 
-  // Normalisera till den rena domäntypen (saneras + defaultas).
+  // Movexum-resurser som kan sättas som ansvariga (staff i tenanten). Samma
+  // helper som tilldelnings-samarbetet (§ 18.4) — bara id + visningsnamn,
+  // aldrig e-post.
+  const people = await listAssignableResourcesForTenant(pb, user.tenant);
+  const nameById = new Map(people.map((p) => [p.id, p.name]));
+
+  // Normalisera till den rena domäntypen (saneras + defaultas). `track` läses
+  // som fallback för en instans där migration 1700000139 ännu inte körts.
   const items: AnnualWheelItem[] = res.items.map((r) => ({
     id: r.id,
     tenant: r.tenant,
@@ -59,7 +74,12 @@ export default async function ArshjulPage() {
     title: r.title || '(namnlös)',
     month: sanitizeMonth(r.month),
     day: sanitizeDay(r.day),
-    track: isAnnualWheelTrack(r.track) ? r.track : 'ovrigt',
+    // Fallback till `track` BARA när `tags`-fältet saknas helt (instans utan
+    // migration 1700000139). En tom lista är ett medvetet "otaggad" och ska
+    // aldrig återuppväcka det deprecerade spåret.
+    tags: sanitizeAnnualWheelTags(r.tags === undefined || r.tags === null ? r.track : r.tags),
+    responsible: r.responsible || null,
+    responsible_name: r.responsible ? (nameById.get(r.responsible) ?? null) : null,
     // Kategorin är fri text (dynamisk lista). En post som pekar på en raderad
     // kategori behåller sin nyckel — vyn visar den då rått med neutral färg.
     category: typeof r.category === 'string' && r.category ? r.category : fallbackCategory,
@@ -85,6 +105,7 @@ export default async function ArshjulPage() {
         items={items}
         categories={categories}
         canEdit={canEdit}
+        people={people}
         canManageCategories={canManageCategories}
       />
     </PageShell>

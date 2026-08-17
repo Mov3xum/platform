@@ -58,8 +58,9 @@ export async function createAnnualWheelItemAction(input: {
   title: string;
   month?: number | null;
   day?: number | null;
-  track: string;
+  tags?: string[];
   category: string;
+  responsible?: string | null;
   notes?: string;
 }): Promise<AnnualWheelActionState> {
   const user = await getCurrentUser();
@@ -72,8 +73,9 @@ export async function createAnnualWheelItemAction(input: {
     title: input.title,
     month: input.month ?? null,
     day: input.day ?? null,
-    track: input.track,
+    tags: input.tags ?? [],
     category: input.category,
+    responsible: input.responsible ?? null,
     notes: input.notes
   });
   if (!result.ok) return { error: result.error };

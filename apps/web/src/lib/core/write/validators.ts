@@ -1,12 +1,12 @@
 import 'server-only';
 import {
   ALL_PHASES,
-  ANNUAL_WHEEL_TRACK_IDS,
+  ANNUAL_WHEEL_TAG_IDS,
   isAnnualWheelCategoryKey,
   sanitizeDay,
   sanitizeMonth,
   type AnnualWheelCategory,
-  type AnnualWheelTrack,
+  type AnnualWheelTag,
   type StartupPhase
 } from '@platform/shared';
 
@@ -154,13 +154,37 @@ export function validateAnnualWheelCategory(
   return { ok: true, value: s };
 }
 
-export function validateAnnualWheelTrack(value: unknown): ValidationResult<AnnualWheelTrack> {
-  const s = asString(value);
-  if (s === null) return { ok: false, error: 'track saknas.' };
-  if (!ANNUAL_WHEEL_TRACK_IDS.includes(s as AnnualWheelTrack)) {
-    return { ok: false, error: `track måste vara en av: ${ANNUAL_WHEEL_TRACK_IDS.join(', ')}.` };
+/**
+ * Taggar (tidigare "spår"). VALFRIA och flera tillåtna — tomt värde ger en tom
+ * lista. Ogiltiga värden avvisas explicit (i stället för att tyst filtreras)
+ * så att en agent/klient får veta att taxonomin inte matchar.
+ */
+export function validateAnnualWheelTags(value: unknown): ValidationResult<AnnualWheelTag[]> {
+  if (value === null || value === undefined || value === '') return { ok: true, value: [] };
+  const raw: unknown[] = Array.isArray(value) ? value : [value];
+  const out: AnnualWheelTag[] = [];
+  for (const entry of raw) {
+    const s = asString(entry);
+    if (s === null) continue;
+    if (!ANNUAL_WHEEL_TAG_IDS.includes(s as AnnualWheelTag)) {
+      return { ok: false, error: `tags måste vara några av: ${ANNUAL_WHEEL_TAG_IDS.join(', ')}.` };
+    }
+    if (!out.includes(s as AnnualWheelTag)) out.push(s as AnnualWheelTag);
   }
-  return { ok: true, value: s as AnnualWheelTrack };
+  return { ok: true, value: out };
+}
+
+/**
+ * Ansvarig: ett users-id eller null (ingen ansvarig). Formatgranskning bara —
+ * att id:t faktiskt tillhör tenantens personal verifieras mot databasen i
+ * skrivlagret (defense-in-depth).
+ */
+export function validateAnnualWheelResponsible(value: unknown): ValidationResult<string | null> {
+  if (value === null || value === undefined || value === '') return { ok: true, value: null };
+  const s = asString(value);
+  if (s === null) return { ok: false, error: 'responsible måste vara ett användar-id eller tomt.' };
+  if (s.length > 50) return { ok: false, error: 'responsible är inte ett giltigt användar-id.' };
+  return { ok: true, value: s };
 }
 
 /** Månad: 1–12, eller null (helårs-/odaterad post). Tomt värde = null. */

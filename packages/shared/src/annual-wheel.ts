@@ -151,19 +151,27 @@ export function slugifyAnnualWheelCategoryKey(input: unknown): string | null {
   const lowered = input.trim().toLowerCase();
   if (!lowered) return null;
   let out = '';
+  let prevDash = false;
   for (const ch of lowered) {
     const mapped = TRANSLITERATE[ch];
     if (mapped) {
       out += mapped;
+      prevDash = false;
       continue;
     }
-    out += /[a-z0-9]/.test(ch) ? ch : '-';
+    if (/[a-z0-9]/.test(ch)) {
+      out += ch;
+      prevDash = false;
+      continue;
+    }
+    if (!prevDash) out += '-';
+    prevDash = true;
   }
-  const slug = out
-    .replace(/-+/g, '-')
-    .replace(/^[-_]+|[-_]+$/g, '')
-    .slice(0, ANNUAL_WHEEL_CATEGORY_KEY_MAX)
-    .replace(/[-_]+$/g, '');
+  let slug = out;
+  while (slug.startsWith('-') || slug.startsWith('_')) slug = slug.slice(1);
+  while (slug.endsWith('-') || slug.endsWith('_')) slug = slug.slice(0, -1);
+  slug = slug.slice(0, ANNUAL_WHEEL_CATEGORY_KEY_MAX);
+  while (slug.endsWith('-') || slug.endsWith('_')) slug = slug.slice(0, -1);
   if (!slug || !CATEGORY_KEY_RE.test(slug)) return null;
   return slug;
 }
@@ -252,9 +260,15 @@ export function resolveAnnualWheelCategories(
   return sortAnnualWheelCategories(out);
 }
 
-// ─── Spår (tabellens kolumner / aktivitetstyp) ───────────────────────────────
+// ─── Taggar (tidigare "spår") ────────────────────────────────────────────────
+//
+// Taggar är VALFRIA och en aktivitet kan bära flera. De ersätter det tidigare
+// obligatoriska `track` (ett spår per aktivitet) så att aktiviteter kan följas
+// upp per tagg över tid. Vokabulären är fast (samma mönster som file-topics.ts
+// och competences.ts) — fritext skulle drifta isär och göra uppföljningen
+// oanvändbar. Utöka BÅDE listan här och en migration för att lägga till en tagg.
 
-export type AnnualWheelTrack =
+export type AnnualWheelTag =
   | 'kampanjer'
   | 'verksamhetsrapporter'
   | 'projekt'
@@ -263,13 +277,13 @@ export type AnnualWheelTrack =
   | 'projektstyrgrupper'
   | 'ovrigt';
 
-export interface AnnualWheelTrackDef {
-  id: AnnualWheelTrack;
+export interface AnnualWheelTagDef {
+  id: AnnualWheelTag;
   label: string;
 }
 
-/** Speglar Excel-arket "Mätetal/Aktiviteter"-kolumnerna i bild 2. */
-export const ANNUAL_WHEEL_TRACKS: readonly AnnualWheelTrackDef[] = [
+/** Källa av sanning — speglas som select-värden (multi) i migrationen. */
+export const ANNUAL_WHEEL_TAGS: readonly AnnualWheelTagDef[] = [
   { id: 'kampanjer', label: 'Kampanjer' },
   { id: 'verksamhetsrapporter', label: 'Verksamhetsrapporter' },
   { id: 'projekt', label: 'Projekt' },
@@ -279,16 +293,37 @@ export const ANNUAL_WHEEL_TRACKS: readonly AnnualWheelTrackDef[] = [
   { id: 'ovrigt', label: 'Övrigt' }
 ] as const;
 
-export const ANNUAL_WHEEL_TRACK_IDS: readonly AnnualWheelTrack[] = ANNUAL_WHEEL_TRACKS.map(
-  (t) => t.id
-);
+export const ANNUAL_WHEEL_TAG_IDS: readonly AnnualWheelTag[] = ANNUAL_WHEEL_TAGS.map((t) => t.id);
 
-export function isAnnualWheelTrack(value: unknown): value is AnnualWheelTrack {
-  return typeof value === 'string' && ANNUAL_WHEEL_TRACK_IDS.includes(value as AnnualWheelTrack);
+export function isAnnualWheelTag(value: unknown): value is AnnualWheelTag {
+  return typeof value === 'string' && ANNUAL_WHEEL_TAG_IDS.includes(value as AnnualWheelTag);
 }
 
-export function annualWheelTrackLabel(id: string): string {
-  return ANNUAL_WHEEL_TRACKS.find((t) => t.id === id)?.label ?? id;
+export function annualWheelTagLabel(id: string): string {
+  return ANNUAL_WHEEL_TAGS.find((t) => t.id === id)?.label ?? id;
+}
+
+/**
+ * Normaliserar ett inkommande taggvärde till en unik lista giltiga taggar.
+ * Tolerant mot array, enkelvärde och kommaseparerad sträng (t.ex. gamla
+ * `track`-värden); ogiltiga värden tas bort i stället för att fela — taggar är
+ * valfria metadata, inte en säkerhetsgräns.
+ */
+export function sanitizeAnnualWheelTags(value: unknown): AnnualWheelTag[] {
+  const raw: unknown[] = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(',')
+      : value === null || value === undefined
+        ? []
+        : [value];
+  const seen = new Set<AnnualWheelTag>();
+  for (const entry of raw) {
+    const s = typeof entry === 'string' ? entry.trim() : '';
+    if (isAnnualWheelTag(s)) seen.add(s);
+  }
+  // Behåll taxonomins ordning så visning/sortering blir deterministisk.
+  return ANNUAL_WHEEL_TAG_IDS.filter((t) => seen.has(t));
 }
 
 // ─── Månader / kvartal ───────────────────────────────────────────────────────
@@ -405,8 +440,13 @@ export interface AnnualWheelItem {
   month: number | null;
   /** 1–31, valfritt specifikt datum inom månaden (null = hela månaden). */
   day?: number | null;
-  track: AnnualWheelTrack;
+  /** Valfria taggar (kan vara flera, kan vara tom). Ersätter tidigare `track`. */
+  tags: AnnualWheelTag[];
   category: AnnualWheelCategory;
+  /** Valfri ansvarig i organisationen (users-id). */
+  responsible?: string | null;
+  /** Ansvarigs visningsnamn, upplöst av anroparen (aldrig e-post/PII). */
+  responsible_name?: string | null;
   notes?: string;
   created_by?: string;
   created?: string;
@@ -416,10 +456,13 @@ export interface AnnualWheelItem {
 export interface AnnualWheelFilter {
   year?: number;
   category?: AnnualWheelCategory | 'all';
-  track?: AnnualWheelTrack | 'all';
+  /** `none` = bara otaggade poster. */
+  tag?: AnnualWheelTag | 'all' | 'none';
+  /** Users-id, `none` = bara poster utan ansvarig. */
+  responsible?: string | 'all' | 'none';
 }
 
-/** Filtrerar poster på år, kategori och spår (rena, kombinerbara filter). */
+/** Filtrerar poster på år, kategori, tagg och ansvarig (kombinerbara filter). */
 export function filterAnnualWheelItems(
   items: readonly AnnualWheelItem[],
   filter: AnnualWheelFilter = {}
@@ -427,15 +470,42 @@ export function filterAnnualWheelItems(
   return items.filter((it) => {
     if (typeof filter.year === 'number' && it.year !== filter.year) return false;
     if (filter.category && filter.category !== 'all' && it.category !== filter.category) return false;
-    if (filter.track && filter.track !== 'all' && it.track !== filter.track) return false;
+    if (filter.tag && filter.tag !== 'all') {
+      const tags = it.tags ?? [];
+      if (filter.tag === 'none') {
+        if (tags.length > 0) return false;
+      } else if (!tags.includes(filter.tag)) {
+        return false;
+      }
+    }
+    if (filter.responsible && filter.responsible !== 'all') {
+      const owner = it.responsible || '';
+      if (filter.responsible === 'none') {
+        if (owner) return false;
+      } else if (owner !== filter.responsible) {
+        return false;
+      }
+    }
     return true;
   });
+}
+
+/** Ordningstal för en posts första tagg (otaggade sist) — stabil sortering. */
+function firstTagOrder(item: AnnualWheelItem): number {
+  const tags = item.tags ?? [];
+  if (tags.length === 0) return 99;
+  let best = 99;
+  for (const t of tags) {
+    const idx = ANNUAL_WHEEL_TAG_IDS.indexOf(t);
+    if (idx >= 0 && idx < best) best = idx;
+  }
+  return best;
 }
 
 /**
  * Grupperar poster per 1-baserad månad (1–12). Index 0 i den returnerade
  * arrayen samlar helårs-/odaterade poster (month = null). Inom varje månad
- * sorteras posterna stabilt på spår-ordning och sedan titel.
+ * sorteras posterna stabilt på tagg-ordning och sedan titel.
  */
 export function groupItemsByMonth(items: readonly AnnualWheelItem[]): AnnualWheelItem[][] {
   const buckets: AnnualWheelItem[][] = Array.from({ length: 13 }, () => []);
@@ -443,11 +513,10 @@ export function groupItemsByMonth(items: readonly AnnualWheelItem[]): AnnualWhee
     const m = sanitizeMonth(it.month) ?? 0;
     buckets[m].push(it);
   }
-  const trackOrder = new Map(ANNUAL_WHEEL_TRACK_IDS.map((t, i) => [t, i]));
   for (const bucket of buckets) {
     bucket.sort((a, b) => {
-      const ta = trackOrder.get(a.track) ?? 99;
-      const tb = trackOrder.get(b.track) ?? 99;
+      const ta = firstTagOrder(a);
+      const tb = firstTagOrder(b);
       if (ta !== tb) return ta - tb;
       return a.title.localeCompare(b.title, 'sv');
     });
@@ -455,8 +524,40 @@ export function groupItemsByMonth(items: readonly AnnualWheelItem[]): AnnualWhee
   return buckets;
 }
 
+export interface AnnualWheelTagCount {
+  /** null = otaggade poster. */
+  tag: AnnualWheelTag | null;
+  count: number;
+}
+
+/**
+ * Räknar poster per tagg (uppföljning "hur mycket ligger på varje tagg?").
+ * En post med flera taggar räknas i varje tagg; otaggade poster samlas i en
+ * egen post med `tag: null`. Taggar utan poster utelämnas; `null`-posten tas
+ * bara med när det finns otaggade poster.
+ */
+export function countItemsByTag(items: readonly AnnualWheelItem[]): AnnualWheelTagCount[] {
+  const counts = new Map<AnnualWheelTag, number>();
+  let untagged = 0;
+  for (const it of items) {
+    const tags = it.tags ?? [];
+    if (tags.length === 0) {
+      untagged++;
+      continue;
+    }
+    for (const t of tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  const out: AnnualWheelTagCount[] = ANNUAL_WHEEL_TAG_IDS.filter((t) => counts.has(t)).map((t) => ({
+    tag: t,
+    count: counts.get(t) as number
+  }));
+  if (untagged > 0) out.push({ tag: null, count: untagged });
+  return out;
+}
+
 export interface AnnualWheelTableCell {
-  track: AnnualWheelTrack;
+  /** null = kolumnen för otaggade poster. */
+  tag: AnnualWheelTag | null;
   items: AnnualWheelItem[];
 }
 
@@ -468,27 +569,31 @@ export interface AnnualWheelTableRow {
 }
 
 /**
- * Bygger en tabell (12 rader × spår-kolumner) som speglar Movexums Excel-vy
- * (bild 2): en rad per månad, en cell per spår med dess aktiviteter.
+ * Bygger en tabell (12 rader × tagg-kolumner) som speglar Movexums Excel-vy:
+ * en rad per månad, en cell per tagg med dess aktiviteter. En post med flera
+ * taggar syns i varje matchande kolumn; otaggade poster hamnar i den sista
+ * kolumnen (`tag: null`) så att inget försvinner när taggar är valfria.
  * Odaterade poster (month = null) ingår inte i tabellraderna — de hör hemma i
  * hjulets mitt och listas separat av anroparen.
  */
 export function buildAnnualWheelTable(
   items: readonly AnnualWheelItem[],
-  tracks: readonly AnnualWheelTrack[] = ANNUAL_WHEEL_TRACK_IDS
+  tags: readonly AnnualWheelTag[] = ANNUAL_WHEEL_TAG_IDS
 ): AnnualWheelTableRow[] {
   const byMonth = groupItemsByMonth(items);
   const rows: AnnualWheelTableRow[] = [];
   for (let m = 1; m <= 12; m++) {
     const monthItems = byMonth[m];
+    const cells: AnnualWheelTableCell[] = tags.map((tag) => ({
+      tag,
+      items: monthItems.filter((it) => (it.tags ?? []).includes(tag))
+    }));
+    cells.push({ tag: null, items: monthItems.filter((it) => (it.tags ?? []).length === 0) });
     rows.push({
       month: m,
       monthLabel: monthShortLabel(m),
       quarter: quarterForMonth(m),
-      cells: tracks.map((track) => ({
-        track,
-        items: monthItems.filter((it) => it.track === track)
-      }))
+      cells
     });
   }
   return rows;
