@@ -61,6 +61,12 @@ const SEED_CATEGORIES = [
   { key: 'gemensamt', label: 'Gemensamt', token: 'lila', sort_order: 2 }
 ];
 
+// PocketBase JSVM-migrationer saknar `pb.filter()`-binds. Escapea därför
+// dynamiska värden manuellt enligt samma policy som app-lagret (§ 10.3 A.8.9).
+function escFilter(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 migrate(
   (app) => {
     const tenantsCol = app.findCollectionByNameOrId('tenants');
@@ -121,7 +127,7 @@ migrate(
         for (const def of SEED_CATEGORIES) {
           const existing = app.findRecordsByFilter(
             'annual_wheel_categories',
-            `tenant = "${t.id}" && key = "${def.key}"`,
+            `tenant = "${escFilter(t.id)}" && key = "${escFilter(def.key)}"`,
             '',
             1,
             0
