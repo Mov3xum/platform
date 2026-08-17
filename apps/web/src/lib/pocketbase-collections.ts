@@ -37,5 +37,7 @@ export const PB_COLLECTIONS = {
   // Personligt filarkiv-RAG-index (migration 1700000121, § 27)
   userFileChunks: 'user_file_chunks_col',
   // Årshjul — verksamhetskalender (migration 1700000133, § 30)
-  annualWheelItems: 'annual_wheel_items_collection'
+  annualWheelItems: 'annual_wheel_items_collection',
+  // Dynamiska årshjuls-kategorier per tenant (migration 1700000139, § 30)
+  annualWheelCategories: 'annual_wheel_categories_collection'
 } as const;
