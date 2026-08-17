@@ -7,7 +7,8 @@ import {
   validateAnnualWheelCategory,
   validateAnnualWheelDay,
   validateAnnualWheelMonth,
-  validateAnnualWheelTrack,
+  validateAnnualWheelResponsible,
+  validateAnnualWheelTags,
   validateNonEmptyText,
   validateOptionalText,
   validateYear
@@ -18,13 +19,49 @@ import { fail, ok } from './types';
 const COLLECTION = 'annual_wheel_items';
 const PB_ID = PB_COLLECTIONS.annualWheelItems;
 
+/** Roller som kan äga en årshjuls-aktivitet (samma krets som ser hjulet, § 21). */
+const RESPONSIBLE_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'];
+
+/**
+ * Verifierar att en ansvarig faktiskt är en användare i actorns tenant med en
+ * roll som ser årshjulet. Klienten skickar bara ett id — den är aldrig
+ * säkerhetsgränsen (defense-in-depth, § 18.4-mönstret).
+ */
+async function assertResponsibleInTenant(
+  pb: PocketBase,
+  actor: Actor,
+  userId: string
+): Promise<WriteResult<string>> {
+  let row: { id: string; tenant?: string; roles?: string[] };
+  try {
+    row = await pb
+      .collection('users')
+      .getOne<{ id: string; tenant?: string; roles?: string[] }>(userId, {
+        fields: 'id,tenant,roles'
+      });
+  } catch {
+    return fail('NOT_FOUND', 'Ansvarig användare hittades inte.');
+  }
+  if (String(row.tenant ?? '') !== actor.tenant) {
+    return fail('TENANT_MISMATCH', 'Ansvarig tillhör en annan organisation.');
+  }
+  const roles = Array.isArray(row.roles) ? row.roles : [];
+  if (!roles.some((r) => RESPONSIBLE_ROLES.includes(r))) {
+    return fail('INVALID_VALUE', 'Ansvarig måste vara en resurs i Movexum-organisationen.');
+  }
+  return ok(row.id);
+}
+
 export interface CreateAnnualWheelItemParams {
   year: number;
   title: string;
   month?: number | null;
   day?: number | null;
-  track: string;
+  /** Valfria taggar (flera tillåtna). Ersätter tidigare obligatoriska `track`. */
+  tags?: string[] | string | null;
   category: string;
+  /** Valfri ansvarig (users-id) i organisationen. */
+  responsible?: string | null;
   notes?: string;
 }
 
@@ -64,11 +101,18 @@ export async function createAnnualWheelItem(
   const day = validateAnnualWheelDay(params.day);
   if (!day.ok) return fail('INVALID_VALUE', day.error);
 
-  const track = validateAnnualWheelTrack(params.track);
-  if (!track.ok) return fail('INVALID_VALUE', track.error);
+  const tags = validateAnnualWheelTags(params.tags);
+  if (!tags.ok) return fail('INVALID_VALUE', tags.error);
 
   const category = validateAnnualWheelCategory(params.category);
   if (!category.ok) return fail('INVALID_VALUE', category.error);
+
+  const responsible = validateAnnualWheelResponsible(params.responsible);
+  if (!responsible.ok) return fail('INVALID_VALUE', responsible.error);
+  if (responsible.value) {
+    const verified = await assertResponsibleInTenant(pb, actor, responsible.value);
+    if (!verified.ok) return fail(verified.code ?? 'INVALID_VALUE', verified.error);
+  }
 
   const notes = validateOptionalText(params.notes, 'notes', 2000);
   if (!notes.ok) return fail('INVALID_VALUE', notes.error);
@@ -81,8 +125,10 @@ export async function createAnnualWheelItem(
     title: title.value,
     month: month.value === null ? null : month.value,
     day: effectiveDay,
-    track: track.value,
+    tags: tags.value,
     category: category.value,
+    // Tom relation skrivs som '' (PB avvisar null på relation-fält).
+    responsible: responsible.value ?? '',
     created_by: actor.id
   };
   if (notes.value) payload.notes = notes.value;
@@ -104,8 +150,9 @@ export async function createAnnualWheelItem(
       title: title.value,
       month: month.value,
       day: effectiveDay,
-      track: track.value,
-      category: category.value
+      tags: tags.value,
+      category: category.value,
+      responsible: responsible.value
     }
   });
 
@@ -116,8 +163,9 @@ export type AnnualWheelWritableField =
   | 'title'
   | 'month'
   | 'day'
-  | 'track'
+  | 'tags'
   | 'category'
+  | 'responsible'
   | 'notes'
   | 'year';
 
@@ -129,6 +177,21 @@ export interface UpdateAnnualWheelItemFieldParams {
 
 interface AnnualWheelRow extends Record<string, unknown> {
   tenant?: string;
+}
+
+/**
+ * Jämför gammalt och nytt fältvärde. `tags` är en lista → ordnings-okänslig
+ * jämförelse så att en oförändrad tagguppsättning inte skriver (och loggar) i
+ * onödan. Tom relation kan komma tillbaka som '' eller null från PB.
+ */
+function sameValue(before: unknown, after: unknown): boolean {
+  if (Array.isArray(before) || Array.isArray(after)) {
+    const a = Array.isArray(before) ? [...before].map(String).sort() : [];
+    const b = Array.isArray(after) ? [...after].map(String).sort() : [];
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+  }
+  const norm = (v: unknown) => (v === '' || v === null || v === undefined ? null : v);
+  return norm(before) === norm(after);
 }
 
 /** Uppdaterar ETT fält på en årshjuls-post (tenant-verifierat + audit-loggat). */
@@ -145,7 +208,7 @@ export async function updateAnnualWheelItemField(
     );
   }
 
-  let normalized: string | number | null;
+  let normalized: string | number | string[] | null;
   switch (params.field) {
     case 'title': {
       const r = validateNonEmptyText(params.value, 'title', 200);
@@ -171,9 +234,19 @@ export async function updateAnnualWheelItemField(
       normalized = r.value;
       break;
     }
-    case 'track': {
-      const r = validateAnnualWheelTrack(params.value);
+    case 'tags': {
+      const r = validateAnnualWheelTags(params.value);
       if (!r.ok) return fail('INVALID_VALUE', r.error);
+      normalized = r.value;
+      break;
+    }
+    case 'responsible': {
+      const r = validateAnnualWheelResponsible(params.value);
+      if (!r.ok) return fail('INVALID_VALUE', r.error);
+      if (r.value) {
+        const verified = await assertResponsibleInTenant(pb, actor, r.value);
+        if (!verified.ok) return fail(verified.code ?? 'INVALID_VALUE', verified.error);
+      }
       normalized = r.value;
       break;
     }
@@ -206,12 +279,15 @@ export async function updateAnnualWheelItemField(
   }
 
   const before = current[params.field] ?? null;
-  if (before === normalized) {
+  if (sameValue(before, normalized)) {
     return ok({ itemId: params.itemId, field: params.field, before, after: normalized });
   }
 
+  // Tom relation rensas med '' i PocketBase (null avvisas av relation-fältet).
+  const payloadValue =
+    params.field === 'responsible' && normalized === null ? '' : normalized;
   try {
-    await pb.collection(PB_ID).update(params.itemId, { [params.field]: normalized });
+    await pb.collection(PB_ID).update(params.itemId, { [params.field]: payloadValue });
   } catch (err) {
     return fail('DB_ERROR', err instanceof Error ? err.message : 'DB-uppdatering misslyckades.');
   }

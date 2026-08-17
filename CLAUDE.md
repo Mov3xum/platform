@@ -3668,25 +3668,52 @@ och år.
 - **`annual_wheel_items`** (1700000133): `tenant` (cascadeDelete), `year`
   (int 2000–2100), `title`, `month` (int 1–12 eller tomt = helårs-/kvartals-
   övergripande), `day` (int 1–31 eller tomt = hela månaden; valfritt specifikt
-  datum, **migration 1700000138**), `track` (select: kampanjer,
-  verksamhetsrapporter, projekt, team, ledningsgrupp, projektstyrgrupper,
-  ovrigt — tabellens kolumner), `category` (select: styrelse, ledning,
-  gemensamt — hjulets legend/färg), `notes`, `created_by`. Index på `(tenant)`
-  och `(tenant, year)`. Taxonomin är källan-av-sanning i `annual-wheel.ts` och
-  MÅSTE speglas som select-värden i migrationen. `day` saknar PII (rent
-  datumtal); en dag utan månad nollställs i skrivlagret. Hjulets
-  kategorifärger är mjuka **gul/grön/lila** (CATEGORY_VAR i `AnnualWheelView`,
-  ur `--movexum-gul/gron/lila`) — banden fylls väldigt svagt utan outline,
-  "idag" visas som en svart prick utanför hjulet, och hovring visar postens
-  fullständiga datum (`annualWheelDateLabel`).
+  datum, **migration 1700000138**), `tags` (select **multi, VALFRI**:
+  kampanjer, verksamhetsrapporter, projekt, team, ledningsgrupp,
+  projektstyrgrupper, ovrigt — tabellens kolumner + uppföljning,
+  **migration 1700000139**), `category` (select: styrelse, ledning,
+  gemensamt — hjulets legend/färg), `responsible` (relation → `users`, valfri,
+  `cascadeDelete: false`, **migration 1700000139**), `notes`, `created_by`.
+  Index på `(tenant)` och `(tenant, year)`. Taxonomin är källan-av-sanning i
+  `annual-wheel.ts` och MÅSTE speglas som select-värden i migrationen. `day`
+  saknar PII (rent datumtal); en dag utan månad nollställs i skrivlagret.
+  Hjulets kategorifärger är mjuka **gul/grön/lila** (CATEGORY_VAR i
+  `AnnualWheelView`, ur `--movexum-gul/gron/lila`) — banden fylls väldigt svagt
+  utan outline, "idag" visas som en svart prick utanför hjulet, och hovring
+  visar postens fullständiga datum (`annualWheelDateLabel`), taggar och
+  ansvarig.
+
+**Taggar ersätter spår (migration 1700000139).** Fältet `track` var ett
+obligatoriskt spår (ett per aktivitet). Det är nu ersatt av `tags`: **valfria**
+och **flera per aktivitet**, så att aktiviteter kan följas upp per tagg över
+tid. `track` finns kvar som **deprecerat, icke-obligatoriskt** fält
+(expand/contract) — migrationen backfillar `tags = [track]` och appen läser det
+bara som fallback (`page.tsx`) mot en instans där migrationen ännu inte körts.
+Vokabulären är fast (samma mönster som `file-topics.ts`/`competences.ts`);
+fritext skulle drifta isär och göra uppföljningen oanvändbar. Otaggade
+aktiviteter försvinner aldrig: hjulet visar dem som vanligt, tabellen har en
+"Utan tagg"-kolumn och tagg-chipsen (`countItemsByTag`) räknar dem separat.
+
+**Ansvarig (`responsible`).** Staff kan peka ut vem i organisationen som äger
+en aktivitet. Kandidatlistan kommer från `listAssignableResourcesForTenant`
+(§ 18.4-mönstret — bara id + visningsnamn, aldrig e-post) och skrivlagret
+verifierar att id:t är en användare i actorns tenant med en roll som ser
+årshjulet (defense-in-depth; klienten är aldrig säkerhetsgränsen). Ansvarig
+visas i hjulets hovringskort, i månadslistorna och i verksamhetstabellen, och
+går att filtrera på. Fältet är en intern användarrelation — ingen ny PII-väg:
+det whitelistas aldrig i `lib/ai/context.ts` och `users` är fortsatt denylistad
+för `query_collection` (§ 9.3). Agenten får därför **inte** skriva
+`responsible` (`writable-fields.ts`: `agent: deny`) — den kan inte slå upp
+användar-id:n och ska inte gissa vem som äger en aktivitet; människan sätter
+ansvarig i UI:t.
 
 ### 30.3 Manuell + chatt-styrd (delat skrivlager)
 
 Både UI-actionen och chatt-agenten går genom **det delade skrivlagret**
 (`lib/core/write/annual-wheel.ts`) — whitelist (`writable-fields.ts`:
-`annual_wheel_items` create + fält title/month/track/category/notes/year),
-validering (`validators.ts`), tenant-stämpel från actorn och `agent_actions`-
-logg. Reglerna kan därför aldrig divergera mellan människa och agent (§ 16).
+`annual_wheel_items` create + fält title/month/day/tags/category/notes/year för
+BÅDA, `responsible` bara för människa), validering (`validators.ts`),
+tenant-stämpel från actorn och `agent_actions`-logg. Reglerna kan därför aldrig divergera mellan människa och agent (§ 16).
 Chatt-verktygen exponeras BARA för agent-actor i den interaktiva staff-chatten
 (`includeWrites`, människa-i-loopen § 16.3) — autonoma körningar skriver
 aldrig. Läsning sker via det auto-exponerade `query_collection` (collectionen
@@ -3702,13 +3729,22 @@ aldrig. Läsning sker via det auto-exponerade `query_collection` (collectionen
   asserterar list/view-isoleringen (`MUST_BE_STAFF_OR_OBSERVER`, fail-soft).
 - **GDPR § 5:** ingen PII (intern verksamhetsplanering); inga nya whitelistade
   fält i `lib/ai/context.ts`. `cascadeDelete` på tenant städar art. 17.
+  `responsible` är en relation till en intern användare (Movexum-personal) —
+  rättslig grund berättigat intresse (verksamhetsplanering), ingen ny PII-väg
+  (visningsnamn visas bara internt i modulen, aldrig e-post, aldrig i
+  AI-kontexten). `cascadeDelete: false` → en raderad användare nollställer bara
+  ansvarig, aktiviteten lever vidare.
 - **EU AI Act:** ingen AI-inferens i modulen → ingen riskklass/banner. Chatt-
   skrivningarna är deterministiska mutationer via det delade lagret.
 - **Grafisk profil (§ 2):** hjulets kategorifärger hämtas från Movexum-brand-
   CSS-variablerna (`--movexum-djupbla/bla/lila`) — inga ad-hoc-hex.
-- **Migration:** nytt oföränderligt filnummer (1700000133). Kollektionen
-  **speglas i `setup-via-api.mjs`** (collection-def + `FORCE_CREATE_RULES` +
-  autodate-backfill) så att en instans som provisioneras/reconcile:as via
+- **Migration:** nya oföränderliga filnummer (1700000133, 1700000138,
+  **1700000139**). Kollektionen **speglas i `setup-via-api.mjs`**
+  (collection-def + `FORCE_CREATE_RULES` + autodate-backfill + en
+  `patchCollection` som lägger `tags`/`responsible` och sätter `track`
+  `required: false` på BEFINTLIGA installs — annars avvisar en bootstrappad
+  instans nya aktiviteter med 400 eftersom appen inte längre skriver `track`)
+  så att en instans som provisioneras/reconcile:as via
   bootstrap-skriptet — inte bara via auto-migrate — också får kollektionen.
   (Utan speglingen 404:ade chatt-skrivningarna med "Missing or invalid
   collection context" på en bootstrappad instans.) createRule följer § 21.3 så

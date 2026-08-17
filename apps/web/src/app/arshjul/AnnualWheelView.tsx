@@ -4,12 +4,13 @@ import { useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ANNUAL_WHEEL_CATEGORIES,
-  ANNUAL_WHEEL_TRACKS,
+  ANNUAL_WHEEL_TAGS,
   annualWheelCategoryLabel,
   annualWheelDateLabel,
-  annualWheelTrackLabel,
+  annualWheelTagLabel,
   annulusSectorPath,
   buildAnnualWheelTable,
+  countItemsByTag,
   dateAngleInYear,
   daysInMonth,
   filterAnnualWheelItems,
@@ -24,10 +25,11 @@ import {
   roundedAnnulusSectorPath,
   type AnnualWheelCategory,
   type AnnualWheelItem,
-  type AnnualWheelTrack,
+  type AnnualWheelTag,
   type NextAnnualWheelItem
 } from '@platform/shared';
 import { Icon } from '@/components/proto/Icon';
+import type { AssignableResource } from '@/lib/assignments/types';
 import {
   createAnnualWheelItemAction,
   deleteAnnualWheelItemAction,
@@ -38,8 +40,9 @@ type AnnualWheelWritableFieldClient =
   | 'title'
   | 'month'
   | 'day'
-  | 'track'
+  | 'tags'
   | 'category'
+  | 'responsible'
   | 'notes'
   | 'year';
 
@@ -54,6 +57,8 @@ const CATEGORY_VAR: Record<AnnualWheelCategory, string> = {
 interface Props {
   items: AnnualWheelItem[];
   canEdit: boolean;
+  /** Movexum-resurser som kan sättas som ansvariga (id + visningsnamn). */
+  people: AssignableResource[];
 }
 
 interface FormState {
@@ -62,15 +67,24 @@ interface FormState {
   title: string;
   month: string; // '' = helår
   day: string; // '' = hela månaden
-  track: AnnualWheelTrack;
+  tags: AnnualWheelTag[]; // valfria, flera tillåtna
   category: AnnualWheelCategory;
+  responsible: string; // '' = ingen ansvarig
   notes: string;
+}
+
+/** Ordnings-okänslig jämförelse av två tagguppsättningar. */
+function sameTags(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((v, i) => v === sb[i]);
 }
 
 const CX = 280;
 const CY = 280;
 
-export function AnnualWheelView({ items, canEdit }: Props) {
+export function AnnualWheelView({ items, canEdit, people }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
@@ -85,19 +99,26 @@ export function AnnualWheelView({ items, canEdit }: Props) {
     return years.includes(now) ? now : years[years.length - 1];
   });
   const [category, setCategory] = useState<AnnualWheelCategory | 'all'>('all');
-  const [track, setTrack] = useState<AnnualWheelTrack | 'all'>('all');
+  const [tag, setTag] = useState<AnnualWheelTag | 'all' | 'none'>('all');
+  const [responsible, setResponsible] = useState<string>('all');
   const [monthFocus, setMonthFocus] = useState<number | null>(null);
 
   const [form, setForm] = useState<FormState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const filtered = useMemo(
-    () => filterAnnualWheelItems(items, { year, category, track }),
-    [items, year, category, track]
+    () => filterAnnualWheelItems(items, { year, category, tag, responsible }),
+    [items, year, category, tag, responsible]
   );
   const byMonth = useMemo(() => groupItemsByMonth(filtered), [filtered]);
   const undated = byMonth[0];
   const tableRows = useMemo(() => buildAnnualWheelTable(filtered), [filtered]);
+  // Uppföljning per tagg — räknas på årets poster (före tagg-filtret) så
+  // chipsen fungerar som en översikt man kan filtrera med.
+  const tagCounts = useMemo(
+    () => countItemsByTag(filterAnnualWheelItems(items, { year, category, responsible })),
+    [items, year, category, responsible]
+  );
 
   // "Idag"-visare + nedräkning (bara meningsfullt för innevarande år).
   const today = useMemo(() => new Date(), []);
@@ -116,8 +137,10 @@ export function AnnualWheelView({ items, canEdit }: Props) {
       title: '',
       month: '',
       day: '',
-      track: track === 'all' ? 'projekt' : track,
+      // Taggar är valfria — förifyll bara den man redan filtrerar på.
+      tags: tag !== 'all' && tag !== 'none' ? [tag] : [],
       category: category === 'all' ? 'ledning' : category,
+      responsible: responsible !== 'all' && responsible !== 'none' ? responsible : '',
       notes: ''
     });
   }
@@ -130,8 +153,9 @@ export function AnnualWheelView({ items, canEdit }: Props) {
       title: item.title,
       month: item.month ? String(item.month) : '',
       day: item.day ? String(item.day) : '',
-      track: item.track,
+      tags: [...(item.tags ?? [])],
       category: item.category,
+      responsible: item.responsible ?? '',
       notes: item.notes ?? ''
     });
   }
@@ -158,9 +182,12 @@ export function AnnualWheelView({ items, canEdit }: Props) {
           updates.push({ field: 'month', value: monthValue });
         if (!original || (original.day ?? null) !== dayValue)
           updates.push({ field: 'day', value: dayValue });
-        if (!original || original.track !== form.track) updates.push({ field: 'track', value: form.track });
+        if (!original || !sameTags(original.tags ?? [], form.tags))
+          updates.push({ field: 'tags', value: form.tags });
         if (!original || original.category !== form.category)
           updates.push({ field: 'category', value: form.category });
+        if (!original || (original.responsible ?? '') !== form.responsible)
+          updates.push({ field: 'responsible', value: form.responsible || null });
         if (!original || (original.notes ?? '') !== form.notes.trim())
           updates.push({ field: 'notes', value: form.notes.trim() });
         if (!original || original.year !== form.year) updates.push({ field: 'year', value: form.year });
@@ -178,8 +205,9 @@ export function AnnualWheelView({ items, canEdit }: Props) {
           title,
           month: monthValue,
           day: dayValue,
-          track: form.track,
+          tags: form.tags,
           category: form.category,
+          responsible: form.responsible || null,
           notes: form.notes.trim() || undefined
         });
         if (res?.error) {
@@ -224,12 +252,23 @@ export function AnnualWheelView({ items, canEdit }: Props) {
           ]}
         />
         <FilterSelect
-          label="Spår"
-          value={track}
-          onChange={(v) => setTrack(v as AnnualWheelTrack | 'all')}
+          label="Tagg"
+          value={tag}
+          onChange={(v) => setTag(v as AnnualWheelTag | 'all' | 'none')}
           options={[
-            { value: 'all', label: 'Alla spår' },
-            ...ANNUAL_WHEEL_TRACKS.map((t) => ({ value: t.id, label: t.label }))
+            { value: 'all', label: 'Alla taggar' },
+            ...ANNUAL_WHEEL_TAGS.map((t) => ({ value: t.id, label: t.label })),
+            { value: 'none', label: 'Utan tagg' }
+          ]}
+        />
+        <FilterSelect
+          label="Ansvarig"
+          value={responsible}
+          onChange={setResponsible}
+          options={[
+            { value: 'all', label: 'Alla ansvariga' },
+            ...people.map((p) => ({ value: p.id, label: p.name })),
+            { value: 'none', label: 'Utan ansvarig' }
           ]}
         />
         <div className="ml-auto flex items-center gap-3">
@@ -244,6 +283,32 @@ export function AnnualWheelView({ items, canEdit }: Props) {
           ) : null}
         </div>
       </div>
+
+      {/* Uppföljning per tagg — klicka för att filtrera hjul, listor och tabell. */}
+      {tagCounts.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {tagCounts.map(({ tag: t, count }) => {
+            const value = t ?? 'none';
+            const active = tag === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setTag(active ? 'all' : (value as AnnualWheelTag | 'none'))}
+                aria-pressed={active}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] transition-colors ${
+                  active
+                    ? 'border-brand bg-brand/10 text-brand'
+                    : 'border-default text-foreground-muted hover:border-strong hover:text-foreground'
+                }`}
+              >
+                {t ? annualWheelTagLabel(t) : 'Utan tagg'}
+                <span className="mx-tnum text-[11px] text-foreground-subtle">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
         {/* Hjulet */}
@@ -335,11 +400,12 @@ export function AnnualWheelView({ items, canEdit }: Props) {
             <thead>
               <tr className="text-left text-foreground-subtle">
                 <th className="sticky left-0 bg-surface px-2 py-1.5 font-medium">Månad</th>
-                {ANNUAL_WHEEL_TRACKS.map((t) => (
+                {ANNUAL_WHEEL_TAGS.map((t) => (
                   <th key={t.id} className="px-2 py-1.5 font-medium">
                     {t.label}
                   </th>
                 ))}
+                <th className="px-2 py-1.5 font-medium">Utan tagg</th>
               </tr>
             </thead>
             <tbody>
@@ -349,7 +415,7 @@ export function AnnualWheelView({ items, canEdit }: Props) {
                     {row.monthLabel}
                   </th>
                   {row.cells.map((cell) => (
-                    <td key={cell.track} className="px-2 py-1.5">
+                    <td key={cell.tag ?? '__untagged'} className="px-2 py-1.5">
                       <div className="flex flex-col gap-1">
                         {cell.items.map((it) => (
                           <span
@@ -362,6 +428,9 @@ export function AnnualWheelView({ items, canEdit }: Props) {
                               aria-hidden
                             />
                             {it.title}
+                            {it.responsible_name ? (
+                              <span className="text-foreground-subtle">· {it.responsible_name}</span>
+                            ) : null}
                           </span>
                         ))}
                       </div>
@@ -382,6 +451,7 @@ export function AnnualWheelView({ items, canEdit }: Props) {
           onClose={() => setForm(null)}
           pending={pending}
           error={error}
+          people={people}
         />
       ) : null}
     </div>
@@ -701,13 +771,24 @@ function HoverCard({ hover }: { hover: HoverInfo }) {
       </div>
       <p className="font-heading text-[14px] font-semibold leading-snug text-foreground">{item.title}</p>
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-        <span className="inline-flex items-center rounded-md bg-canvas-subtle px-1.5 py-0.5 text-[11px] font-medium text-foreground-muted">
-          {annualWheelTrackLabel(item.track)}
-        </span>
+        {(item.tags ?? []).map((t) => (
+          <span
+            key={t}
+            className="inline-flex items-center rounded-md bg-canvas-subtle px-1.5 py-0.5 text-[11px] font-medium text-foreground-muted"
+          >
+            {annualWheelTagLabel(t)}
+          </span>
+        ))}
         <span className="inline-flex items-center rounded-md bg-canvas-subtle px-1.5 py-0.5 text-[11px] font-medium text-foreground-muted">
           {annualWheelDateLabel(item.month, item.day, item.year)} · Q{quarterForMonth(month)}
         </span>
       </div>
+      {item.responsible_name ? (
+        <p className="mt-1.5 flex items-center gap-1.5 text-[12px] text-foreground-muted">
+          <Icon name="user" size={12} />
+          Ansvarig: <span className="font-medium text-foreground">{item.responsible_name}</span>
+        </p>
+      ) : null}
       {item.notes ? (
         <p className="mt-2 line-clamp-3 text-[12px] leading-relaxed text-foreground-muted">{item.notes}</p>
       ) : null}
@@ -749,9 +830,17 @@ function ItemPill({
         aria-hidden
       />
       <span className="min-w-0 flex-1 truncate text-foreground">{item.title}</span>
+      {item.responsible_name ? (
+        <span
+          className="shrink-0 rounded-full bg-canvas-subtle px-1.5 py-0.5 text-[11px] text-foreground-muted"
+          title={`Ansvarig: ${item.responsible_name}`}
+        >
+          {item.responsible_name}
+        </span>
+      ) : null}
       <span className="shrink-0 text-[11px] text-foreground-subtle">
-        {annualWheelTrackLabel(item.track)}
-        {item.month ? ` · ${item.day ? `${item.day} ` : ''}${monthShortLabel(item.month)}` : ''}
+        {(item.tags ?? []).map((t) => annualWheelTagLabel(t)).join(', ')}
+        {item.month ? `${(item.tags ?? []).length > 0 ? ' · ' : ''}${item.day ? `${item.day} ` : ''}${monthShortLabel(item.month)}` : ''}
       </span>
       {onEdit ? (
         <button
@@ -812,7 +901,8 @@ function EditorModal({
   onSubmit,
   onClose,
   pending,
-  error
+  error,
+  people
 }: {
   form: FormState;
   setForm: (f: FormState) => void;
@@ -820,6 +910,7 @@ function EditorModal({
   onClose: () => void;
   pending: boolean;
   error: string | null;
+  people: AssignableResource[];
 }) {
   const yearNow = new Date().getFullYear();
   const yearOptions = [yearNow - 1, yearNow, yearNow + 1, yearNow + 2];
@@ -918,20 +1009,51 @@ function EditorModal({
                 ))}
               </select>
             </Field>
-            <Field label="Spår">
+            <Field label="Ansvarig (valfritt)">
               <select
-                value={form.track}
-                onChange={(e) => setForm({ ...form, track: e.target.value as AnnualWheelTrack })}
+                value={form.responsible}
+                onChange={(e) => setForm({ ...form, responsible: e.target.value })}
                 className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground"
               >
-                {ANNUAL_WHEEL_TRACKS.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label}
+                <option value="">Ingen ansvarig</option>
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
                   </option>
                 ))}
               </select>
             </Field>
           </div>
+
+          <Field label="Taggar (valfritt)">
+            <div className="flex flex-wrap gap-1.5">
+              {ANNUAL_WHEEL_TAGS.map((t) => {
+                const active = form.tags.includes(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        tags: active
+                          ? form.tags.filter((x) => x !== t.id)
+                          : [...form.tags, t.id]
+                      })
+                    }
+                    className={`rounded-full border px-2.5 py-1 text-[12px] transition-colors ${
+                      active
+                        ? 'border-brand bg-brand/10 text-brand'
+                        : 'border-default text-foreground-muted hover:border-strong hover:text-foreground'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
 
           <Field label="Anteckning (valfritt)">
             <textarea

@@ -19,7 +19,7 @@ import {
   FILE_TOPIC_IDS,
   isFileTopic,
   ANNUAL_WHEEL_CATEGORY_IDS,
-  ANNUAL_WHEEL_TRACK_IDS
+  ANNUAL_WHEEL_TAG_IDS
 } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
 import { validateChart, validateKpis } from '@/lib/documents/validate';
@@ -663,10 +663,13 @@ export function buildChatTools(
               description:
                 'Valfri specifik dag 1–31 inom månaden (kräver month). Utelämna för hela månaden.'
             },
-            track: {
-              type: 'string',
-              enum: [...ANNUAL_WHEEL_TRACK_IDS],
-              description: 'Spår/kolumn (kampanjer, projekt, team, ledningsgrupp …).'
+            tags: {
+              type: 'array',
+              items: { type: 'string', enum: [...ANNUAL_WHEEL_TAG_IDS] },
+              description:
+                'Valfria taggar för uppföljning (kampanjer, projekt, team, ' +
+                'ledningsgrupp …). Utelämna om personalen inte anger någon — ' +
+                'gissa aldrig en tagg.'
             },
             category: {
               type: 'string',
@@ -675,7 +678,7 @@ export function buildChatTools(
             },
             notes: { type: 'string', description: 'Valfri notering (max 2000 tecken).' }
           },
-          required: ['year', 'title', 'track', 'category']
+          required: ['year', 'title', 'category']
         }
       }
     });
@@ -686,20 +689,21 @@ export function buildChatTools(
         description:
           'Uppdaterar ETT fält på en befintlig årshjuls-aktivitet (slå upp id via ' +
           'query_collection mot annual_wheel_items). Använd för att flytta en ' +
-          'aktivitet till en annan månad, byta kategori/spår eller ändra titel.',
+          'aktivitet till en annan månad, byta kategori/taggar eller ändra titel.',
         parameters: {
           type: 'object',
           properties: {
             itemId: { type: 'string', description: 'PocketBase-id för årshjuls-posten.' },
             field: {
               type: 'string',
-              enum: ['title', 'month', 'day', 'track', 'category', 'notes', 'year'],
+              enum: ['title', 'month', 'day', 'tags', 'category', 'notes', 'year'],
               description: 'Vilket fält som ska uppdateras.'
             },
             value: {
               description:
                 'Nytt värde. month: 1–12 eller null. day: 1–31 eller null. ' +
-                'track/category: giltigt enum-värde. title/notes: text. year: heltal.'
+                'tags: lista med giltiga taggar (tom lista rensar). category: ' +
+                'giltigt enum-värde. title/notes: text. year: heltal.'
             }
           },
           required: ['itemId', 'field', 'value']
@@ -2209,7 +2213,7 @@ async function runCreateAnnualWheelItem(
     title: typeof args.title === 'string' ? args.title : '',
     month: args.month === undefined || args.month === null ? null : Number(args.month),
     day: args.day === undefined || args.day === null ? null : Number(args.day),
-    track: typeof args.track === 'string' ? args.track : '',
+    tags: Array.isArray(args.tags) ? (args.tags as string[]) : [],
     category: typeof args.category === 'string' ? args.category : '',
     notes: typeof args.notes === 'string' ? args.notes : undefined
   });
@@ -2236,7 +2240,7 @@ async function runUpdateAnnualWheelItem(
   const itemId = typeof args.itemId === 'string' ? args.itemId.trim() : '';
   const field = typeof args.field === 'string' ? args.field.trim() : '';
   if (!itemId) return { ok: false, error: 'itemId saknas.' };
-  const allowed = ['title', 'month', 'day', 'track', 'category', 'notes', 'year'];
+  const allowed = ['title', 'month', 'day', 'tags', 'category', 'notes', 'year'];
   if (!allowed.includes(field)) {
     return { ok: false, error: `field måste vara en av: ${allowed.join(', ')}.` };
   }

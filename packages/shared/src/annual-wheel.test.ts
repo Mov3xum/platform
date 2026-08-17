@@ -3,24 +3,26 @@ import assert from 'node:assert/strict';
 
 import {
   ANNUAL_WHEEL_CATEGORY_IDS,
-  ANNUAL_WHEEL_TRACK_IDS,
+  ANNUAL_WHEEL_TAG_IDS,
   annualWheelDateLabel,
   annulusSectorPath,
   buildAnnualWheelTable,
   clampYear,
+  countItemsByTag,
   dateAngleInYear,
   daysInMonth,
   nextUpcomingItem,
   filterAnnualWheelItems,
   groupItemsByMonth,
   isAnnualWheelCategory,
-  isAnnualWheelTrack,
+  isAnnualWheelTag,
   monthShortLabel,
   monthSliceAngles,
   polarPoint,
   quarterForMonth,
   quarterSliceAngles,
   roundedAnnulusSectorPath,
+  sanitizeAnnualWheelTags,
   sanitizeDay,
   sanitizeMonth,
   type AnnualWheelItem
@@ -33,7 +35,7 @@ function item(partial: Partial<AnnualWheelItem>): AnnualWheelItem {
     year: 2026,
     title: 'Aktivitet',
     month: 1,
-    track: 'projekt',
+    tags: ['projekt'],
     category: 'ledning',
     ...partial
   };
@@ -41,18 +43,51 @@ function item(partial: Partial<AnnualWheelItem>): AnnualWheelItem {
 
 // ── Taxonomi-guards ──────────────────────────────────────────────────────────
 
-test('category/track guards accept valid ids, reject junk', () => {
+test('category/tag guards accept valid ids, reject junk', () => {
   assert.ok(isAnnualWheelCategory('styrelse'));
   assert.ok(isAnnualWheelCategory('ledning'));
   assert.equal(isAnnualWheelCategory('vd'), false);
   assert.equal(isAnnualWheelCategory(7), false);
 
-  assert.ok(isAnnualWheelTrack('kampanjer'));
-  assert.equal(isAnnualWheelTrack('saknas'), false);
+  assert.ok(isAnnualWheelTag('kampanjer'));
+  assert.equal(isAnnualWheelTag('saknas'), false);
 
   // Listorna är icke-tomma och unika.
   assert.equal(new Set(ANNUAL_WHEEL_CATEGORY_IDS).size, ANNUAL_WHEEL_CATEGORY_IDS.length);
-  assert.equal(new Set(ANNUAL_WHEEL_TRACK_IDS).size, ANNUAL_WHEEL_TRACK_IDS.length);
+  assert.equal(new Set(ANNUAL_WHEEL_TAG_IDS).size, ANNUAL_WHEEL_TAG_IDS.length);
+});
+
+// ── Taggar (valfria, flera) ──────────────────────────────────────────────────
+
+test('sanitizeAnnualWheelTags accepts arrays, single values and legacy csv', () => {
+  assert.deepEqual(sanitizeAnnualWheelTags(['projekt', 'team']), ['projekt', 'team']);
+  // Enkelvärde (gammalt `track`) → lista.
+  assert.deepEqual(sanitizeAnnualWheelTags('kampanjer'), ['kampanjer']);
+  assert.deepEqual(sanitizeAnnualWheelTags('projekt,team'), ['projekt', 'team']);
+  // Dubbletter och skräp rensas; taxonomins ordning bevaras.
+  assert.deepEqual(sanitizeAnnualWheelTags(['team', 'projekt', 'team', 'nonsens']), [
+    'projekt',
+    'team'
+  ]);
+  // Tomt = otaggad (taggar är valfria).
+  assert.deepEqual(sanitizeAnnualWheelTags(null), []);
+  assert.deepEqual(sanitizeAnnualWheelTags(''), []);
+  assert.deepEqual(sanitizeAnnualWheelTags([]), []);
+  assert.deepEqual(sanitizeAnnualWheelTags(7), []);
+});
+
+test('countItemsByTag counts multi-tagged items once per tag and reports untagged', () => {
+  const items = [
+    item({ tags: ['projekt', 'team'] }),
+    item({ tags: ['projekt'] }),
+    item({ tags: [] })
+  ];
+  const counts = countItemsByTag(items);
+  assert.equal(counts.find((c) => c.tag === 'projekt')?.count, 2);
+  assert.equal(counts.find((c) => c.tag === 'team')?.count, 1);
+  assert.equal(counts.find((c) => c.tag === null)?.count, 1);
+  // Taggar utan poster utelämnas.
+  assert.equal(counts.some((c) => c.tag === 'kampanjer'), false);
 });
 
 // ── Månad / kvartal ──────────────────────────────────────────────────────────
@@ -89,11 +124,11 @@ test('clampYear falls back outside range', () => {
 
 // ── Filtrering ───────────────────────────────────────────────────────────────
 
-test('filterAnnualWheelItems combines year/category/track', () => {
+test('filterAnnualWheelItems combines year/category/tag/responsible', () => {
   const items = [
-    item({ year: 2026, category: 'styrelse', track: 'projekt' }),
-    item({ year: 2026, category: 'ledning', track: 'team' }),
-    item({ year: 2025, category: 'styrelse', track: 'projekt' })
+    item({ year: 2026, category: 'styrelse', tags: ['projekt', 'team'], responsible: 'u1' }),
+    item({ year: 2026, category: 'ledning', tags: ['team'] }),
+    item({ year: 2025, category: 'styrelse', tags: ['projekt'], responsible: 'u2' })
   ];
   assert.equal(filterAnnualWheelItems(items, { year: 2026 }).length, 2);
   assert.equal(filterAnnualWheelItems(items, { category: 'styrelse' }).length, 2);
@@ -101,39 +136,59 @@ test('filterAnnualWheelItems combines year/category/track', () => {
     filterAnnualWheelItems(items, { year: 2026, category: 'styrelse' }).length,
     1
   );
-  assert.equal(filterAnnualWheelItems(items, { track: 'team' }).length, 1);
+  // Tagg-filtret matchar poster som bär taggen (flera taggar tillåtna).
+  assert.equal(filterAnnualWheelItems(items, { tag: 'team' }).length, 2);
+  assert.equal(filterAnnualWheelItems(items, { tag: 'projekt' }).length, 2);
+  // Ansvarig.
+  assert.equal(filterAnnualWheelItems(items, { responsible: 'u1' }).length, 1);
+  assert.equal(filterAnnualWheelItems(items, { responsible: 'none' }).length, 1);
+  // Otaggade poster.
+  assert.equal(filterAnnualWheelItems([...items, item({ tags: [] })], { tag: 'none' }).length, 1);
   // 'all' = ingen begränsning.
-  assert.equal(filterAnnualWheelItems(items, { category: 'all', track: 'all' }).length, 3);
+  assert.equal(
+    filterAnnualWheelItems(items, { category: 'all', tag: 'all', responsible: 'all' }).length,
+    3
+  );
 });
 
 // ── Gruppering / tabell ──────────────────────────────────────────────────────
 
-test('groupItemsByMonth buckets null month at index 0 and sorts by track', () => {
+test('groupItemsByMonth buckets null month at index 0 and sorts by first tag', () => {
   const items = [
     item({ month: null, title: 'Helår' }),
-    item({ month: 3, track: 'team', title: 'B' }),
-    item({ month: 3, track: 'kampanjer', title: 'A' })
+    item({ month: 3, tags: ['team'], title: 'B' }),
+    item({ month: 3, tags: ['kampanjer'], title: 'A' }),
+    item({ month: 3, tags: [], title: 'C' })
   ];
   const buckets = groupItemsByMonth(items);
   assert.equal(buckets[0].length, 1);
   assert.equal(buckets[0][0].title, 'Helår');
-  assert.equal(buckets[3].length, 2);
-  // kampanjer (index 0) sorteras före team.
-  assert.equal(buckets[3][0].track, 'kampanjer');
-  assert.equal(buckets[3][1].track, 'team');
+  assert.equal(buckets[3].length, 3);
+  // kampanjer (index 0) sorteras före team; otaggade sist.
+  assert.deepEqual(buckets[3][0].tags, ['kampanjer']);
+  assert.deepEqual(buckets[3][1].tags, ['team']);
+  assert.deepEqual(buckets[3][2].tags, []);
 });
 
-test('buildAnnualWheelTable yields 12 rows with one cell per track', () => {
-  const items = [item({ month: 4, track: 'projekt', title: 'Bokslut' })];
+test('buildAnnualWheelTable yields 12 rows with one cell per tag + untagged', () => {
+  const items = [
+    item({ month: 4, tags: ['projekt', 'team'], title: 'Bokslut' }),
+    item({ month: 4, tags: [], title: 'Otaggat' })
+  ];
   const rows = buildAnnualWheelTable(items);
   assert.equal(rows.length, 12);
   const april = rows[3];
   assert.equal(april.month, 4);
   assert.equal(april.monthLabel, 'Apr');
   assert.equal(april.quarter, 2);
-  assert.equal(april.cells.length, ANNUAL_WHEEL_TRACK_IDS.length);
-  const projektCell = april.cells.find((c) => c.track === 'projekt');
-  assert.equal(projektCell?.items.length, 1);
+  // En kolumn per tagg + en kolumn för otaggade.
+  assert.equal(april.cells.length, ANNUAL_WHEEL_TAG_IDS.length + 1);
+  // En post med flera taggar syns i varje matchande kolumn.
+  assert.equal(april.cells.find((c) => c.tag === 'projekt')?.items.length, 1);
+  assert.equal(april.cells.find((c) => c.tag === 'team')?.items.length, 1);
+  const untagged = april.cells.find((c) => c.tag === null);
+  assert.equal(untagged?.items.length, 1);
+  assert.equal(untagged?.items[0].title, 'Otaggat');
   // Odaterade poster hamnar inte i tabellraderna.
   const withNull = buildAnnualWheelTable([item({ month: null })]);
   const totalInTable = withNull.reduce(

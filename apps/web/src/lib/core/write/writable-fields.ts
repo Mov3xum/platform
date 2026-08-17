@@ -85,8 +85,15 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     month: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     day: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
-    track: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    tags: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     category: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    // Ansvarig pekar ut en intern användare. Agenten kan inte slå upp
+    // användar-id:n (`users` är denylistad, § 9.3) och ska inte gissa vem som
+    // äger en aktivitet → människan sätter ansvarig i UI:t.
+    responsible: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Ansvarig sätts av en människa i årshjulet.' }
+    },
     notes: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     year: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } }
   }

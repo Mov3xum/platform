@@ -2874,8 +2874,12 @@ await ensureCollection({
     { name: 'title', type: 'text', required: true, min: 1, max: 200 },
     { name: 'month', type: 'number', required: false, onlyInt: true, min: 1, max: 12 },
     { name: 'day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 },
-    { name: 'track', type: 'select', required: true, maxSelect: 1, values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt'] },
+    // Migration 1700000139: taggar (valfria, flera) ersätter obligatoriskt spår.
+    // `track` behålls deprecerat + valfritt så befintlig data inte tappas.
+    { name: 'track', type: 'select', required: false, maxSelect: 1, values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt'] },
+    { name: 'tags', type: 'select', required: false, maxSelect: 7, values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt'] },
     { name: 'category', type: 'select', required: true, maxSelect: 1, values: ['styrelse', 'ledning', 'gemensamt'] },
+    { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'notes', type: 'text', required: false, max: 2000 },
     { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],
@@ -3345,14 +3349,21 @@ await ensureCollection({
     { name: 'title', type: 'text', required: true, min: 1, max: 200 },
     { name: 'month', type: 'number', required: false, onlyInt: true, min: 1, max: 12 },
     { name: 'day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 },
+    // Migration 1700000139: taggar (valfria, flera) ersätter obligatoriskt spår;
+    // `track` är deprecerat men behålls valfritt så data inte tappas.
     {
-      name: 'track', type: 'select', required: true, maxSelect: 1,
+      name: 'track', type: 'select', required: false, maxSelect: 1,
+      values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt']
+    },
+    {
+      name: 'tags', type: 'select', required: false, maxSelect: 7,
       values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt']
     },
     {
       name: 'category', type: 'select', required: true, maxSelect: 1,
       values: ['styrelse', 'ledning', 'gemensamt']
     },
+    { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'notes', type: 'text', required: false, max: 2000 },
     { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],
@@ -3453,6 +3464,21 @@ await patchCollection('tasks', [
   { name: 'assignees', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 20 }
 ], {
   status: { values: ['open', 'in_progress', 'blocked', 'done', 'cancelled', 'backlog', 'review'], maxSelect: 1 }
+});
+
+// Migration 1700000139 (§ 30): årshjulets `track` (obligatoriskt spår) ersätts
+// av valfria `tags` (flera) + valfri `responsible`. Inline-defen ovan täcker
+// NYA installs; patchen täcker BEFINTLIGA — utan `required: false` på track
+// skulle en bootstrappad instans avvisa nya aktiviteter (400) eftersom appen
+// inte längre skriver fältet. Idempotent.
+const ANNUAL_WHEEL_TAG_VALUES = [
+  'kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt'
+];
+await patchCollection('annual_wheel_items', [
+  { name: 'tags', type: 'select', required: false, maxSelect: 7, values: ANNUAL_WHEEL_TAG_VALUES },
+  { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+], {
+  track: { required: false }
 });
 
 // =========================================================================
