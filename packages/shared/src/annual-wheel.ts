@@ -12,32 +12,244 @@
  */
 
 // ─── Kategorier (hjulets legend + färg + filter) ─────────────────────────────
+//
+// Kategorierna är DYNAMISKA per tenant (collection `annual_wheel_categories`).
+// Nyckeln (`id`) är en slug som lagras i `annual_wheel_items.category` (text).
+// Listan nedan är bara DEFAULTS: de seedas per tenant av migrationen och
+// används som fallback när kollektionen saknas/är tom (fail-soft → hjulet
+// fungerar även på en instans som inte migrerats än).
 
-export type AnnualWheelCategory = 'styrelse' | 'ledning' | 'gemensamt';
+/** Kategorinyckel — fri slug (dynamisk per tenant), inte längre en union. */
+export type AnnualWheelCategory = string;
+
+/** Tillåtna färger = Movexums brand-tokens (§ 2.2). Inga ad-hoc-hex. */
+export type AnnualWheelColorToken =
+  | 'morkbla'
+  | 'djupbla'
+  | 'bla'
+  | 'morklila'
+  | 'lila'
+  | 'ljuslila'
+  | 'morkgron'
+  | 'gron'
+  | 'ljusgron'
+  | 'morkgul'
+  | 'gul'
+  | 'morkorange'
+  | 'orange';
+
+export interface AnnualWheelColorTokenDef {
+  id: AnnualWheelColorToken;
+  label: string;
+}
+
+/** Färgvalen i kategori-editorn — speglar `--movexum-*` i tokens.css. */
+export const ANNUAL_WHEEL_COLOR_TOKENS: readonly AnnualWheelColorTokenDef[] = [
+  { id: 'gron', label: 'Grön' },
+  { id: 'gul', label: 'Gul' },
+  { id: 'lila', label: 'Lila' },
+  { id: 'bla', label: 'Blå' },
+  { id: 'orange', label: 'Orange' },
+  { id: 'ljuslila', label: 'Ljuslila' },
+  { id: 'ljusgron', label: 'Ljusgrön' },
+  { id: 'djupbla', label: 'Djupblå' },
+  { id: 'morkbla', label: 'Mörkblå' },
+  { id: 'morklila', label: 'Mörklila' },
+  { id: 'morkgron', label: 'Mörkgrön' },
+  { id: 'morkgul', label: 'Mörkgul' },
+  { id: 'morkorange', label: 'Mörkorange' }
+] as const;
+
+export const ANNUAL_WHEEL_COLOR_TOKEN_IDS: readonly AnnualWheelColorToken[] =
+  ANNUAL_WHEEL_COLOR_TOKENS.map((t) => t.id);
+
+export const DEFAULT_ANNUAL_WHEEL_COLOR_TOKEN: AnnualWheelColorToken = 'lila';
+
+export function isAnnualWheelColorToken(value: unknown): value is AnnualWheelColorToken {
+  return (
+    typeof value === 'string' &&
+    ANNUAL_WHEEL_COLOR_TOKEN_IDS.includes(value as AnnualWheelColorToken)
+  );
+}
+
+/** CSS-variabel för en färg-token (fallback = default-tokenen). */
+export function annualWheelColorVar(token: unknown): string {
+  const t = isAnnualWheelColorToken(token) ? token : DEFAULT_ANNUAL_WHEEL_COLOR_TOKEN;
+  return `var(--movexum-${t})`;
+}
 
 export interface AnnualWheelCategoryDef {
+  /** Stabil nyckel (slug) — lagras i `annual_wheel_items.category`. */
   id: AnnualWheelCategory;
   label: string;
   /** Movexum-brand-token-namn (utan `--movexum-`-prefix) för hjul-segmentet. */
-  token: string;
+  token: AnnualWheelColorToken;
+  /** Sorteringsordning i legend/filter/editor (lägre först). */
+  sortOrder?: number;
+  /** PB-record-id — saknas för de inbyggda fallback-kategorierna. */
+  recordId?: string;
+  /** True för de inbyggda defaults (kan inte raderas när de är fallback). */
+  builtin?: boolean;
 }
 
-/** Källa av sanning — speglas som select-värden i migrationen. */
-export const ANNUAL_WHEEL_CATEGORIES: readonly AnnualWheelCategoryDef[] = [
-  { id: 'styrelse', label: 'Styrelse', token: 'gron' },
-  { id: 'ledning', label: 'Ledning', token: 'gul' },
-  { id: 'gemensamt', label: 'Gemensamt', token: 'lila' }
+/**
+ * DEFAULTS — seedas per tenant av migration 1700000139 och används som
+ * fallback när `annual_wheel_categories` saknas eller är tom.
+ */
+export const DEFAULT_ANNUAL_WHEEL_CATEGORIES: readonly AnnualWheelCategoryDef[] = [
+  { id: 'styrelse', label: 'Styrelse', token: 'gron', sortOrder: 0, builtin: true },
+  { id: 'ledning', label: 'Ledning', token: 'gul', sortOrder: 1, builtin: true },
+  { id: 'gemensamt', label: 'Gemensamt', token: 'lila', sortOrder: 2, builtin: true }
 ] as const;
 
-export const ANNUAL_WHEEL_CATEGORY_IDS: readonly AnnualWheelCategory[] =
-  ANNUAL_WHEEL_CATEGORIES.map((c) => c.id);
+/** Bakåtkompatibelt alias (äldre importer). */
+export const ANNUAL_WHEEL_CATEGORIES = DEFAULT_ANNUAL_WHEEL_CATEGORIES;
 
-export function isAnnualWheelCategory(value: unknown): value is AnnualWheelCategory {
-  return typeof value === 'string' && ANNUAL_WHEEL_CATEGORY_IDS.includes(value as AnnualWheelCategory);
+export const DEFAULT_ANNUAL_WHEEL_CATEGORY_IDS: readonly string[] =
+  DEFAULT_ANNUAL_WHEEL_CATEGORIES.map((c) => c.id);
+
+/** Bakåtkompatibelt alias (äldre importer). */
+export const ANNUAL_WHEEL_CATEGORY_IDS = DEFAULT_ANNUAL_WHEEL_CATEGORY_IDS;
+
+/** Maxlängder — speglas i PB-fälten (`key` 40, `label` 60). */
+export const ANNUAL_WHEEL_CATEGORY_KEY_MAX = 40;
+export const ANNUAL_WHEEL_CATEGORY_LABEL_MAX = 60;
+
+const CATEGORY_KEY_RE = /^[a-z0-9][a-z0-9_-]*$/;
+
+/** Giltig kategorinyckel: gemener/siffror/bindestreck/understreck, ≤ 40 tecken. */
+export function isAnnualWheelCategoryKey(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const s = value.trim();
+  if (!s || s.length > ANNUAL_WHEEL_CATEGORY_KEY_MAX) return false;
+  return CATEGORY_KEY_RE.test(s);
 }
 
-export function annualWheelCategoryLabel(id: string): string {
-  return ANNUAL_WHEEL_CATEGORIES.find((c) => c.id === id)?.label ?? id;
+const TRANSLITERATE: Record<string, string> = {
+  å: 'a',
+  ä: 'a',
+  ö: 'o',
+  æ: 'ae',
+  ø: 'o',
+  é: 'e',
+  è: 'e',
+  ê: 'e',
+  ü: 'u',
+  á: 'a',
+  à: 'a',
+  ô: 'o',
+  ñ: 'n',
+  ç: 'c'
+};
+
+/**
+ * Härleder en stabil nyckel ur en etikett ("Ägarmöten" → "agarmoten").
+ * Returnerar null när inget användbart återstår (t.ex. bara emoji).
+ */
+export function slugifyAnnualWheelCategoryKey(input: unknown): string | null {
+  if (typeof input !== 'string') return null;
+  const lowered = input.trim().toLowerCase();
+  if (!lowered) return null;
+  let out = '';
+  for (const ch of lowered) {
+    const mapped = TRANSLITERATE[ch];
+    if (mapped) {
+      out += mapped;
+      continue;
+    }
+    out += /[a-z0-9]/.test(ch) ? ch : '-';
+  }
+  const slug = out
+    .replace(/-+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, ANNUAL_WHEEL_CATEGORY_KEY_MAX)
+    .replace(/[-_]+$/g, '');
+  if (!slug || !CATEGORY_KEY_RE.test(slug)) return null;
+  return slug;
+}
+
+/** Sorterar kategorier på sortOrder, sedan etikett (svensk kollation). */
+export function sortAnnualWheelCategories(
+  categories: readonly AnnualWheelCategoryDef[]
+): AnnualWheelCategoryDef[] {
+  return [...categories].sort((a, b) => {
+    const sa = typeof a.sortOrder === 'number' ? a.sortOrder : 999;
+    const sb = typeof b.sortOrder === 'number' ? b.sortOrder : 999;
+    if (sa !== sb) return sa - sb;
+    return a.label.localeCompare(b.label, 'sv');
+  });
+}
+
+export function findAnnualWheelCategory(
+  categories: readonly AnnualWheelCategoryDef[],
+  id: string
+): AnnualWheelCategoryDef | undefined {
+  return categories.find((c) => c.id === id);
+}
+
+/** Etikett för en kategorinyckel; okänd nyckel visas som sin råa nyckel. */
+export function annualWheelCategoryLabel(
+  id: string,
+  categories: readonly AnnualWheelCategoryDef[] = DEFAULT_ANNUAL_WHEEL_CATEGORIES
+): string {
+  return findAnnualWheelCategory(categories, id)?.label ?? id;
+}
+
+/** CSS-variabel för en kategori (okänd kategori → default-token). */
+export function annualWheelCategoryColorVar(
+  id: string,
+  categories: readonly AnnualWheelCategoryDef[] = DEFAULT_ANNUAL_WHEEL_CATEGORIES
+): string {
+  return annualWheelColorVar(findAnnualWheelCategory(categories, id)?.token);
+}
+
+/** Finns kategorin i listan? (Ersätter den gamla union-type-guarden.) */
+export function isAnnualWheelCategory(
+  value: unknown,
+  categories: readonly AnnualWheelCategoryDef[] = DEFAULT_ANNUAL_WHEEL_CATEGORIES
+): value is AnnualWheelCategory {
+  return typeof value === 'string' && categories.some((c) => c.id === value);
+}
+
+interface AnnualWheelCategoryRow {
+  id?: unknown;
+  key?: unknown;
+  label?: unknown;
+  token?: unknown;
+  sort_order?: unknown;
+}
+
+/**
+ * Normaliserar PB-rader från `annual_wheel_categories` till domäntypen:
+ * ogiltiga nycklar/etiketter kastas, dubbletter tas bort (första vinner),
+ * färg-token defaultas och listan sorteras. En TOM lista (kollektion saknas,
+ * eller ännu inte seedad) faller tillbaka på defaults — hjulet renderar då som
+ * förut i stället för att bli färg- och legendlöst.
+ */
+export function resolveAnnualWheelCategories(
+  rows: readonly unknown[] | null | undefined
+): AnnualWheelCategoryDef[] {
+  const out: AnnualWheelCategoryDef[] = [];
+  const seen = new Set<string>();
+  for (const raw of rows ?? []) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = raw as AnnualWheelCategoryRow;
+    const key = typeof row.key === 'string' ? row.key.trim() : '';
+    if (!isAnnualWheelCategoryKey(key) || seen.has(key)) continue;
+    const label = typeof row.label === 'string' ? row.label.trim() : '';
+    if (!label) continue;
+    seen.add(key);
+    const sortRaw = typeof row.sort_order === 'number' ? row.sort_order : Number(row.sort_order);
+    out.push({
+      id: key,
+      label: label.slice(0, ANNUAL_WHEEL_CATEGORY_LABEL_MAX),
+      token: isAnnualWheelColorToken(row.token) ? row.token : DEFAULT_ANNUAL_WHEEL_COLOR_TOKEN,
+      sortOrder: Number.isFinite(sortRaw) ? Math.trunc(sortRaw as number) : 999,
+      recordId: typeof row.id === 'string' && row.id ? row.id : undefined
+    });
+  }
+  if (out.length === 0) return [...DEFAULT_ANNUAL_WHEEL_CATEGORIES];
+  return sortAnnualWheelCategories(out);
 }
 
 // ─── Spår (tabellens kolumner / aktivitetstyp) ───────────────────────────────

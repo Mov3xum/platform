@@ -1,8 +1,8 @@
 import 'server-only';
 import {
   ALL_PHASES,
-  ANNUAL_WHEEL_CATEGORY_IDS,
   ANNUAL_WHEEL_TRACK_IDS,
+  isAnnualWheelCategoryKey,
   sanitizeDay,
   sanitizeMonth,
   type AnnualWheelCategory,
@@ -134,15 +134,24 @@ export function validateActivityKindForWrite(
 
 // ── Årshjul (§ 30) ───────────────────────────────────────────────────────────
 
+/**
+ * Kategorinyckel: bara FORMAT valideras här (slug, ≤ 40 tecken). Kategorierna
+ * är dynamiska per tenant (§ 30), så att nyckeln faktiskt FINNS kontrolleras i
+ * skrivlagret mot `annual_wheel_categories` (`assertCategoryExists`).
+ */
 export function validateAnnualWheelCategory(
   value: unknown
 ): ValidationResult<AnnualWheelCategory> {
   const s = asString(value);
   if (s === null) return { ok: false, error: 'category saknas.' };
-  if (!ANNUAL_WHEEL_CATEGORY_IDS.includes(s as AnnualWheelCategory)) {
-    return { ok: false, error: `category måste vara en av: ${ANNUAL_WHEEL_CATEGORY_IDS.join(', ')}.` };
+  if (!isAnnualWheelCategoryKey(s)) {
+    return {
+      ok: false,
+      error:
+        'category måste vara en kategorinyckel i gemener (a–z, 0–9, - och _), max 40 tecken.'
+    };
   }
-  return { ok: true, value: s as AnnualWheelCategory };
+  return { ok: true, value: s };
 }
 
 export function validateAnnualWheelTrack(value: unknown): ValidationResult<AnnualWheelTrack> {
