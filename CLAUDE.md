@@ -3750,6 +3750,12 @@ aldrig. Läsning sker via det auto-exponerade `query_collection` (collectionen
 - **Grafisk profil (§ 2):** kategorifärgerna väljs ur en fast lista av
   Movexum-brand-tokens och renderas som `var(--movexum-*)` — inga ad-hoc-hex,
   varken i kod eller i data.
+- **Synligt degraderat läge (SOC 2 availability):** `loadAnnualWheelCategories`
+  returnerar `source` (`db` | `missing_schema` | `unreadable` | `empty`). Saknas
+  kollektionen (migrationen inte körd på instansen) visar kategori-modalen en
+  varning och stänger av tillägg, och server-actionerna svarar med exakt orsak
+  + PB-status i stället för ett anonymt "Kunde inte skapa kategorin". Samma
+  princip som § 24.4 (ingen tyst no-op) och § 26.4/§ 28.5 (saknat schema).
 - **Audit (ISO 27001 A.8.15):** kategori-CRUD loggas i `agent_actions`
   (`collection = 'annual_wheel_categories'`, PII-fritt: nyckel/etikett/färg).
   Radering loggas som `update` med `after_value.deleted` — `action_type` har

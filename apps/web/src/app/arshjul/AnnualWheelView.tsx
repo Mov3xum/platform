@@ -33,6 +33,7 @@ import {
   type AnnualWheelTrack,
   type NextAnnualWheelItem
 } from '@platform/shared';
+import type { AnnualWheelCategorySource } from '@/lib/annual-wheel/categories';
 import { Icon } from '@/components/proto/Icon';
 import {
   createAnnualWheelCategoryAction,
@@ -61,6 +62,9 @@ interface Props {
   items: AnnualWheelItem[];
   /** Tenantens kategorier (legend, filter, färg). */
   categories: AnnualWheelCategoryDef[];
+  /** False = listan är inbyggda defaults (schema saknas/oläsbart) → ej redigerbar. */
+  categoriesEditable: boolean;
+  categoriesSource: AnnualWheelCategorySource;
   canEdit: boolean;
   /** Bara superadmin (`admin`) får lägga till/ta bort kategorier. */
   canManageCategories: boolean;
@@ -80,7 +84,14 @@ interface FormState {
 const CX = 280;
 const CY = 280;
 
-export function AnnualWheelView({ items, categories, canEdit, canManageCategories }: Props) {
+export function AnnualWheelView({
+  items,
+  categories,
+  categoriesEditable,
+  categoriesSource,
+  canEdit,
+  canManageCategories
+}: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
@@ -437,6 +448,8 @@ export function AnnualWheelView({ items, categories, canEdit, canManageCategorie
       {manageCategories && canManageCategories ? (
         <CategoryManagerModal
           categories={categories}
+          categoriesEditable={categoriesEditable}
+          categoriesSource={categoriesSource}
           items={items}
           onClose={() => setManageCategories(false)}
         />
@@ -1097,10 +1110,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function CategoryManagerModal({
   categories,
+  categoriesEditable,
+  categoriesSource,
   items,
   onClose
 }: {
   categories: AnnualWheelCategoryDef[];
+  categoriesEditable: boolean;
+  categoriesSource: AnnualWheelCategorySource;
   items: AnnualWheelItem[];
   onClose: () => void;
 }) {
@@ -1120,6 +1137,10 @@ function CategoryManagerModal({
   }, [items]);
 
   const previewKey = slugifyAnnualWheelCategoryKey(newLabel);
+  const schemaMissing = categoriesSource === 'missing_schema';
+  // Tenanten kan sakna rader ännu (`empty`) — då materialiserar server-actionen
+  // defaults vid första tillägget. Men utan tabell alls går det inte.
+  const canAdd = !schemaMissing && categoriesSource !== 'unreadable';
 
   function run(action: () => Promise<{ ok?: boolean; error?: string }>) {
     setError(null);
@@ -1185,6 +1206,20 @@ function CategoryManagerModal({
           Kategorierna styr hjulets legend och färg. Bara superadmin kan lägga till eller ta bort
           dem. En kategori som används av aktiviteter måste tömmas först.
         </p>
+
+        {schemaMissing ? (
+          <p className="mt-3 rounded-lg bg-movexum-pastell-gul px-2.5 py-2 text-[12px] leading-relaxed text-movexum-morkgul">
+            <strong>Kategori-tabellen finns inte i databasen ännu.</strong> Backend-migrationen
+            (1700000139) är inte körd på den här PocketBase-instansen, så listan nedan är inbyggda
+            standardvärden och kan inte ändras. Deploya backend-schemat (eller kör
+            bootstrap-skriptet) — sedan fungerar tillägg och borttag.
+          </p>
+        ) : !categoriesEditable ? (
+          <p className="mt-3 rounded-lg bg-movexum-pastell-gul px-2.5 py-2 text-[12px] leading-relaxed text-movexum-morkgul">
+            Kunde inte läsa kategorierna från databasen — listan nedan är inbyggda standardvärden.
+            Ladda om sidan och försök igen.
+          </p>
+        ) : null}
 
         <ul className="mt-4 space-y-2">
           {categories.map((c) => {
@@ -1256,6 +1291,7 @@ function CategoryManagerModal({
               value={newLabel}
               maxLength={ANNUAL_WHEEL_CATEGORY_LABEL_MAX}
               placeholder="t.ex. Ägarmöten"
+              disabled={!canAdd}
               onChange={(e) => setNewLabel(e.target.value)}
               className="min-w-0 flex-1 rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground"
             />
@@ -1274,7 +1310,7 @@ function CategoryManagerModal({
             <button
               type="button"
               onClick={add}
-              disabled={pending}
+              disabled={pending || !canAdd}
               className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[13px] font-medium text-brand-foreground hover:bg-brand-hover disabled:opacity-60"
             >
               <Icon name="plus" size={14} /> Lägg till

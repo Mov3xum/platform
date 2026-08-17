@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { listForTenant } from '@/lib/pb.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
-import { listAnnualWheelCategories } from '@/lib/annual-wheel/categories';
+import { loadAnnualWheelCategories } from '@/lib/annual-wheel/categories';
 import { PageShell } from '@/components/PageShell';
 import { AnnualWheelView } from './AnnualWheelView';
 import type { AnnualWheelItem, Role } from '@platform/shared';
@@ -40,15 +40,17 @@ export default async function ArshjulPage() {
   if (!canAccessModuleForUser(user.roles, 'arshjul', user.disabledModules)) redirect('/chatt');
 
   const pb = await getServerPb();
-  const [res, categories] = await Promise.all([
+  const [res, loadedCategories] = await Promise.all([
     listForTenant<WheelRow>('annual_wheel_items', {
       sort: 'year,month',
       perPage: 500
     }).catch(() => ({ items: [] as WheelRow[] })),
-    // Dynamiska kategorier per tenant (§ 30) — fail-soft till defaults.
-    listAnnualWheelCategories(pb, user.tenant)
+    // Dynamiska kategorier per tenant (§ 30) — fail-soft till defaults, men
+    // `source` säger OM de kom från databasen så UI:t kan degradera synligt.
+    loadAnnualWheelCategories(pb, user.tenant)
   ]);
 
+  const categories = loadedCategories.categories;
   const fallbackCategory = categories[0]?.id ?? 'gemensamt';
 
   // Normalisera till den rena domäntypen (saneras + defaultas).
@@ -84,6 +86,8 @@ export default async function ArshjulPage() {
       <AnnualWheelView
         items={items}
         categories={categories}
+        categoriesEditable={loadedCategories.editable}
+        categoriesSource={loadedCategories.source}
         canEdit={canEdit}
         canManageCategories={canManageCategories}
       />

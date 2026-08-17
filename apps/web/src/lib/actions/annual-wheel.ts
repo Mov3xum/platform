@@ -15,7 +15,8 @@ import type { Actor } from '@/lib/core/write';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import {
   ensureAnnualWheelCategoriesMaterialized,
-  listAnnualWheelCategories
+  listAnnualWheelCategories,
+  loadAnnualWheelCategories
 } from '@/lib/annual-wheel/categories';
 import {
   ANNUAL_WHEEL_CATEGORY_LABEL_MAX,
@@ -132,6 +133,34 @@ export async function deleteAnnualWheelItemAction(itemId: string): Promise<Annua
 const CATEGORY_COLLECTION = 'annual_wheel_categories';
 
 /**
+ * Tydligt fel när kategori-kollektionen inte finns i PB (migration 1700000139
+ * inte körd på instansen). Utan detta blev symptomet ett anonymt "Kunde inte
+ * skapa kategorin" — samma fälla som § 24.4 (tyst no-op) och § 26.4/§ 28.5
+ * (saknat schema). Degradera SYNLIGT.
+ */
+const SCHEMA_MISSING_ERROR =
+  'Kategori-tabellen (annual_wheel_categories) finns inte i den här ' +
+  'PocketBase-instansen ännu — migration 1700000139 är inte körd. Deploya ' +
+  'backend-schemat (eller kör bootstrap-skriptet setup-via-api.mjs), sedan ' +
+  'går det att lägga till kategorier. Kategorierna som visas är inbyggda ' +
+  'standardvärden.';
+
+function pbStatus(err: unknown): number {
+  return err && typeof err === 'object' && 'status' in err
+    ? Number((err as { status: unknown }).status)
+    : 0;
+}
+
+/** PB:s eget felmeddelande (schema-/valideringsinfo, aldrig PII). */
+function pbMessage(err: unknown): string {
+  if (err && typeof err === 'object' && 'message' in err) {
+    const msg = String((err as { message: unknown }).message ?? '').trim();
+    if (msg) return msg;
+  }
+  return 'okänt fel';
+}
+
+/**
  * Kör en skrivning som den inloggade; faller tillbaka på superuser vid
  * 400/403 (PB v0.23.4:s rule-eval-quirks, § 21.3). Rollen är redan verifierad
  * av anroparen — fallbacken är robusthet, inte en behörighetsgenväg.
@@ -216,6 +245,13 @@ export async function createAnnualWheelCategoryAction(input: {
 
   const token = isAnnualWheelColorToken(input.token) ? input.token : DEFAULT_ANNUAL_WHEEL_COLOR_TOKEN;
 
+  // Finns kollektionen alls? Ett omigrerat schema ska ge ett TYDLIGT fel.
+  const loaded = await loadAnnualWheelCategories(pb, user.tenant);
+  if (loaded.source === 'missing_schema') return { error: SCHEMA_MISSING_ERROR };
+  if (loaded.source === 'unreadable') {
+    return { error: 'Kunde inte läsa kategorierna från databasen. Försök igen.' };
+  }
+
   // Befintliga kategorier: unik nyckel + nästa sort_order. Har tenanten inga
   // rader alls materialiseras defaults först, så de inte tappas när den första
   // egna kategorin läggs till.
@@ -240,11 +276,14 @@ export async function createAnnualWheelCategoryAction(input: {
     );
     createdId = created.id;
   } catch (err) {
+    const status = pbStatus(err);
     console.error('[annual-wheel] category create failed', {
       tenant: user.tenant,
-      error: err instanceof Error ? err.message : err
+      status,
+      error: pbMessage(err)
     });
-    return { error: 'Kunde inte skapa kategorin.' };
+    if (status === 404) return { error: SCHEMA_MISSING_ERROR };
+    return { error: `Kunde inte skapa kategorin (${status || 'fel'}): ${pbMessage(err)}` };
   }
 
   await logAgentAction(pb, {
@@ -293,11 +332,14 @@ export async function updateAnnualWheelCategoryAction(
       client.collection(PB_COLLECTIONS.annualWheelCategories).update(recordId, payload)
     );
   } catch (err) {
+    const status = pbStatus(err);
     console.error('[annual-wheel] category update failed', {
       tenant: user.tenant,
-      error: err instanceof Error ? err.message : err
+      status,
+      error: pbMessage(err)
     });
-    return { error: 'Kunde inte uppdatera kategorin.' };
+    if (status === 404) return { error: SCHEMA_MISSING_ERROR };
+    return { error: `Kunde inte uppdatera kategorin (${status || 'fel'}): ${pbMessage(err)}` };
   }
 
   await logAgentAction(pb, {
@@ -356,11 +398,14 @@ export async function deleteAnnualWheelCategoryAction(
       client.collection(PB_COLLECTIONS.annualWheelCategories).delete(recordId)
     );
   } catch (err) {
+    const status = pbStatus(err);
     console.error('[annual-wheel] category delete failed', {
       tenant: user.tenant,
-      error: err instanceof Error ? err.message : err
+      status,
+      error: pbMessage(err)
     });
-    return { error: 'Kunde inte ta bort kategorin.' };
+    if (status === 404) return { error: SCHEMA_MISSING_ERROR };
+    return { error: `Kunde inte ta bort kategorin (${status || 'fel'}): ${pbMessage(err)}` };
   }
 
   await logAgentAction(pb, {
