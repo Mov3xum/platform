@@ -3,9 +3,12 @@
 import { useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  ANNUAL_WHEEL_CATEGORIES,
   ANNUAL_WHEEL_TAGS,
+  ANNUAL_WHEEL_CATEGORY_LABEL_MAX,
+  ANNUAL_WHEEL_COLOR_TOKENS,
+  annualWheelCategoryColorVar,
   annualWheelCategoryLabel,
+  annualWheelColorVar,
   annualWheelDateLabel,
   annualWheelTagLabel,
   annulusSectorPath,
@@ -23,7 +26,10 @@ import {
   quarterForMonth,
   quarterSliceAngles,
   roundedAnnulusSectorPath,
+  slugifyAnnualWheelCategoryKey,
   type AnnualWheelCategory,
+  type AnnualWheelCategoryDef,
+  type AnnualWheelColorToken,
   type AnnualWheelItem,
   type AnnualWheelTag,
   type NextAnnualWheelItem
@@ -31,8 +37,11 @@ import {
 import { Icon } from '@/components/proto/Icon';
 import type { AssignableResource } from '@/lib/assignments/types';
 import {
+  createAnnualWheelCategoryAction,
   createAnnualWheelItemAction,
+  deleteAnnualWheelCategoryAction,
   deleteAnnualWheelItemAction,
+  updateAnnualWheelCategoryAction,
   updateAnnualWheelItemAction
 } from '@/lib/actions/annual-wheel';
 
@@ -46,19 +55,20 @@ type AnnualWheelWritableFieldClient =
   | 'notes'
   | 'year';
 
-// Kategori → Movexum-brand-CSS-variabel (källan av sanning är tokens.css).
-// Mjuka gul/grön/lila i stället för blå → fräschare, ljusare uttryck (§ 2.2).
-const CATEGORY_VAR: Record<AnnualWheelCategory, string> = {
-  styrelse: 'var(--movexum-gron)',
-  ledning: 'var(--movexum-gul)',
-  gemensamt: 'var(--movexum-lila)'
-};
+// Kategorierna är dynamiska per tenant (§ 30) — färgen är alltid en Movexum-
+// brand-token (källan av sanning är tokens.css), aldrig ad-hoc-hex (§ 2.2).
+// En post som pekar på en raderad kategori faller tillbaka på default-tokenen.
+const FALLBACK_GRADIENT_KEY = 'okand';
 
 interface Props {
   items: AnnualWheelItem[];
+  /** Tenantens kategorier (legend, filter, färg). */
+  categories: AnnualWheelCategoryDef[];
   canEdit: boolean;
   /** Movexum-resurser som kan sättas som ansvariga (id + visningsnamn). */
   people: AssignableResource[];
+  /** Bara superadmin (`admin`) får lägga till/ta bort kategorier. */
+  canManageCategories: boolean;
 }
 
 interface FormState {
@@ -84,9 +94,20 @@ function sameTags(a: readonly string[], b: readonly string[]): boolean {
 const CX = 280;
 const CY = 280;
 
-export function AnnualWheelView({ items, canEdit, people }: Props) {
+export function AnnualWheelView({ items, categories, canEdit, people, canManageCategories }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+
+  // Kategorier som används av poster men inte längre finns i listan (raderade)
+  // — de visas i legenden som "okänd" så inget band blir oförklarat.
+  const orphanCategories = useMemo(() => {
+    const known = new Set(categories.map((c) => c.id));
+    return [...new Set(items.map((i) => i.category).filter((c) => c && !known.has(c)))];
+  }, [items, categories]);
+
+  const colorVar = (id: string) => annualWheelCategoryColorVar(id, categories);
+
+  const [manageCategories, setManageCategories] = useState(false);
 
   const years = useMemo(() => {
     const set = new Set<number>(items.map((i) => i.year));
@@ -139,7 +160,7 @@ export function AnnualWheelView({ items, canEdit, people }: Props) {
       day: '',
       // Taggar är valfria — förifyll bara den man redan filtrerar på.
       tags: tag !== 'all' && tag !== 'none' ? [tag] : [],
-      category: category === 'all' ? 'ledning' : category,
+      category: category === 'all' ? (categories[0]?.id ?? 'ledning') : category,
       responsible: responsible !== 'all' && responsible !== 'none' ? responsible : '',
       notes: ''
     });
@@ -165,6 +186,10 @@ export function AnnualWheelView({ items, canEdit, people }: Props) {
     const title = form.title.trim();
     if (!title) {
       setError('Ange en titel.');
+      return;
+    }
+    if (!form.category) {
+      setError('Välj en kategori.');
       return;
     }
     const monthValue = form.month === '' ? null : Number(form.month);
@@ -248,7 +273,8 @@ export function AnnualWheelView({ items, canEdit, people }: Props) {
           onChange={(v) => setCategory(v as AnnualWheelCategory | 'all')}
           options={[
             { value: 'all', label: 'Alla kategorier' },
-            ...ANNUAL_WHEEL_CATEGORIES.map((c) => ({ value: c.id, label: c.label }))
+            ...categories.map((c) => ({ value: c.id, label: c.label })),
+            ...orphanCategories.map((c) => ({ value: c, label: `${c} (borttagen)` }))
           ]}
         />
         <FilterSelect
@@ -271,7 +297,16 @@ export function AnnualWheelView({ items, canEdit, people }: Props) {
             { value: 'none', label: 'Utan ansvarig' }
           ]}
         />
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-2">
+          {canManageCategories ? (
+            <button
+              type="button"
+              onClick={() => setManageCategories(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-default px-3 py-1.5 text-[13px] font-medium text-foreground-muted hover:border-strong hover:text-foreground"
+            >
+              <Icon name="filter" size={14} /> Kategorier
+            </button>
+          ) : null}
           {canEdit ? (
             <button
               type="button"
@@ -316,6 +351,7 @@ export function AnnualWheelView({ items, canEdit, people }: Props) {
           <Wheel
             byMonth={byMonth}
             year={year}
+            categories={categories}
             onPick={canEdit ? openEdit : undefined}
             todayAngle={todayAngle}
             currentMonth={currentMonth}
@@ -324,7 +360,7 @@ export function AnnualWheelView({ items, canEdit, people }: Props) {
             next={next}
           />
           {next ? <NextCaption next={next} /> : null}
-          <Legend />
+          <Legend categories={categories} orphans={orphanCategories} />
         </section>
 
         {/* Odaterade + snabböversikt */}
@@ -336,7 +372,13 @@ export function AnnualWheelView({ items, canEdit, people }: Props) {
               </h3>
               <ul className="space-y-1.5">
                 {undated.map((it) => (
-                  <ItemPill key={it.id} item={it} onEdit={canEdit ? openEdit : undefined} onDelete={canEdit ? remove : undefined} />
+                  <ItemPill
+                    key={it.id}
+                    item={it}
+                    categories={categories}
+                    onEdit={canEdit ? openEdit : undefined}
+                    onDelete={canEdit ? remove : undefined}
+                  />
                 ))}
               </ul>
             </div>
@@ -374,7 +416,13 @@ export function AnnualWheelView({ items, canEdit, people }: Props) {
                         </div>
                         <ul className="space-y-1">
                           {monthItems.map((it) => (
-                            <ItemPill key={it.id} item={it} onEdit={canEdit ? openEdit : undefined} onDelete={canEdit ? remove : undefined} />
+                            <ItemPill
+                              key={it.id}
+                              item={it}
+                              categories={categories}
+                              onEdit={canEdit ? openEdit : undefined}
+                              onDelete={canEdit ? remove : undefined}
+                            />
                           ))}
                         </ul>
                       </div>
@@ -424,7 +472,7 @@ export function AnnualWheelView({ items, canEdit, people }: Props) {
                           >
                             <span
                               className="inline-block h-2 w-2 shrink-0 rounded-full"
-                              style={{ background: CATEGORY_VAR[it.category] }}
+                              style={{ background: colorVar(it.category) }}
                               aria-hidden
                             />
                             {it.title}
@@ -446,12 +494,21 @@ export function AnnualWheelView({ items, canEdit, people }: Props) {
       {form ? (
         <EditorModal
           form={form}
+          categories={categories}
           setForm={setForm}
           onSubmit={submitForm}
           onClose={() => setForm(null)}
           pending={pending}
           error={error}
           people={people}
+        />
+      ) : null}
+
+      {manageCategories && canManageCategories ? (
+        <CategoryManagerModal
+          categories={categories}
+          items={items}
+          onClose={() => setManageCategories(false)}
         />
       ) : null}
     </div>
@@ -489,6 +546,7 @@ function NextCaption({ next }: { next: NextAnnualWheelItem }) {
 function Wheel({
   byMonth,
   year,
+  categories,
   onPick,
   todayAngle,
   currentMonth,
@@ -498,6 +556,7 @@ function Wheel({
 }: {
   byMonth: AnnualWheelItem[][];
   year: number;
+  categories: AnnualWheelCategoryDef[];
   onPick?: (item: AnnualWheelItem) => void;
   todayAngle: number | null;
   currentMonth: number | null;
@@ -507,6 +566,16 @@ function Wheel({
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<HoverInfo | null>(null);
+
+  const gradientDefs = useMemo(
+    () => [
+      ...categories.map((c) => ({ key: c.id, color: annualWheelColorVar(c.token) })),
+      { key: FALLBACK_GRADIENT_KEY, color: annualWheelColorVar(undefined) }
+    ],
+    [categories]
+  );
+  const gradientKey = (id: string) =>
+    categories.some((c) => c.id === id) ? id : FALLBACK_GRADIENT_KEY;
 
   function track(item: AnnualWheelItem, month: number, e: React.MouseEvent) {
     const rect = wrapRef.current?.getBoundingClientRect();
@@ -527,32 +596,34 @@ function Wheel({
       >
         <defs>
           {/* Mycket mjuka radiella gradienter per kategori (väldigt svaga, ingen
-              outline) → fräscht, ljust uttryck. Saturerad inåt, dämpad utåt. */}
-          {ANNUAL_WHEEL_CATEGORIES.map((c) => (
+              outline) → fräscht, ljust uttryck. Saturerad inåt, dämpad utåt.
+              En gradient per tenant-kategori + en fallback för poster vars
+              kategori har raderats (nycklarna är slugs → giltiga SVG-id:n). */}
+          {gradientDefs.map((g) => (
             <radialGradient
-              key={c.id}
-              id={`mx-aw-grad-${c.id}`}
+              key={g.key}
+              id={`mx-aw-grad-${g.key}`}
               cx={CX}
               cy={CY}
               r={250}
               gradientUnits="userSpaceOnUse"
             >
-              <stop offset="0.5" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.16} />
-              <stop offset="1" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.04} />
+              <stop offset="0.5" stopColor={g.color} stopOpacity={0.16} />
+              <stop offset="1" stopColor={g.color} stopOpacity={0.04} />
             </radialGradient>
           ))}
           {/* Tonad fyllning vid hover (något starkare men fortfarande mjuk). */}
-          {ANNUAL_WHEEL_CATEGORIES.map((c) => (
+          {gradientDefs.map((g) => (
             <radialGradient
-              key={`h-${c.id}`}
-              id={`mx-aw-grad-${c.id}-hover`}
+              key={`h-${g.key}`}
+              id={`mx-aw-grad-${g.key}-hover`}
               cx={CX}
               cy={CY}
               r={250}
               gradientUnits="userSpaceOnUse"
             >
-              <stop offset="0.5" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.3} />
-              <stop offset="1" stopColor={CATEGORY_VAR[c.id]} stopOpacity={0.1} />
+              <stop offset="0.5" stopColor={g.color} stopOpacity={0.3} />
+              <stop offset="1" stopColor={g.color} stopOpacity={0.1} />
             </radialGradient>
           ))}
           {/* Mitt-disk: subtil ljus gradient. */}
@@ -659,7 +730,7 @@ function Wheel({
                     <path
                       key={it.id}
                       d={d}
-                      fill={`url(#mx-aw-grad-${it.category}${isHovered ? '-hover' : ''})`}
+                      fill={`url(#mx-aw-grad-${gradientKey(it.category)}${isHovered ? '-hover' : ''})`}
                       filter={isHovered ? 'url(#mx-aw-shadow-hover)' : 'url(#mx-aw-shadow)'}
                       className={`mx-wheel-band transition-opacity ${onPick ? 'cursor-pointer' : ''}`}
                       style={{ opacity: hover && !isHovered ? 0.45 : 1, animationDelay: `${delay}ms` }}
@@ -743,12 +814,18 @@ function Wheel({
         )}
       </svg>
 
-      {hover ? <HoverCard hover={hover} /> : null}
+      {hover ? <HoverCard hover={hover} categories={categories} /> : null}
     </div>
   );
 }
 
-function HoverCard({ hover }: { hover: HoverInfo }) {
+function HoverCard({
+  hover,
+  categories
+}: {
+  hover: HoverInfo;
+  categories: AnnualWheelCategoryDef[];
+}) {
   const { item, month } = hover;
   // Placera kortet vid pekaren, men förskjut så det inte skyms av muspekaren
   // och håll det inom hjul-containern.
@@ -762,11 +839,11 @@ function HoverCard({ hover }: { hover: HoverInfo }) {
       <div className="mb-1.5 flex items-center gap-2">
         <span
           className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-          style={{ background: CATEGORY_VAR[item.category] }}
+          style={{ background: annualWheelCategoryColorVar(item.category, categories) }}
           aria-hidden
         />
         <span className="text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle">
-          {annualWheelCategoryLabel(item.category)}
+          {annualWheelCategoryLabel(item.category, categories)}
         </span>
       </div>
       <p className="font-heading text-[14px] font-semibold leading-snug text-foreground">{item.title}</p>
@@ -796,17 +873,38 @@ function HoverCard({ hover }: { hover: HoverInfo }) {
   );
 }
 
-function Legend() {
+function Legend({
+  categories,
+  orphans
+}: {
+  categories: AnnualWheelCategoryDef[];
+  orphans: string[];
+}) {
   return (
     <div className="mt-2 flex flex-wrap items-center justify-center gap-4">
-      {ANNUAL_WHEEL_CATEGORIES.map((c) => (
+      {categories.map((c) => (
         <span key={c.id} className="inline-flex items-center gap-1.5 text-[12px] text-foreground-muted">
           <span
             className="inline-block h-3 w-3 rounded-sm"
-            style={{ background: CATEGORY_VAR[c.id] }}
+            style={{ background: annualWheelColorVar(c.token) }}
             aria-hidden
           />
           {c.label}
+        </span>
+      ))}
+      {/* Poster vars kategori har raderats — visas så inget band blir oförklarat. */}
+      {orphans.map((key) => (
+        <span
+          key={key}
+          className="inline-flex items-center gap-1.5 text-[12px] text-foreground-subtle"
+          title="Kategorin har tagits bort — välj en ny på aktiviteten."
+        >
+          <span
+            className="inline-block h-3 w-3 rounded-sm"
+            style={{ background: annualWheelColorVar(undefined) }}
+            aria-hidden
+          />
+          {key} (borttagen)
         </span>
       ))}
     </div>
@@ -815,10 +913,12 @@ function Legend() {
 
 function ItemPill({
   item,
+  categories,
   onEdit,
   onDelete
 }: {
   item: AnnualWheelItem;
+  categories: AnnualWheelCategoryDef[];
   onEdit?: (item: AnnualWheelItem) => void;
   onDelete?: (item: AnnualWheelItem) => void;
 }) {
@@ -826,7 +926,7 @@ function ItemPill({
     <li className="flex items-center gap-2 text-[12.5px]">
       <span
         className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-        style={{ background: CATEGORY_VAR[item.category] }}
+        style={{ background: annualWheelCategoryColorVar(item.category, categories) }}
         aria-hidden
       />
       <span className="min-w-0 flex-1 truncate text-foreground">{item.title}</span>
@@ -897,6 +997,7 @@ function FilterSelect({
 
 function EditorModal({
   form,
+  categories,
   setForm,
   onSubmit,
   onClose,
@@ -905,6 +1006,7 @@ function EditorModal({
   people
 }: {
   form: FormState;
+  categories: AnnualWheelCategoryDef[];
   setForm: (f: FormState) => void;
   onSubmit: () => void;
   onClose: () => void;
@@ -999,14 +1101,19 @@ function EditorModal({
             <Field label="Kategori">
               <select
                 value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value as AnnualWheelCategory })}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
                 className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground"
               >
-                {ANNUAL_WHEEL_CATEGORIES.map((c) => (
+                {categories.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.label}
                   </option>
                 ))}
+                {/* Posten kan peka på en raderad kategori — visa den så den inte
+                    byts tyst, men uppmuntra ett aktivt val. */}
+                {form.category && !categories.some((c) => c.id === form.category) ? (
+                  <option value={form.category}>{form.category} (borttagen)</option>
+                ) : null}
               </select>
             </Field>
             <Field label="Ansvarig (valfritt)">
@@ -1101,5 +1208,223 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="mb-1 block text-[11px] font-medium text-foreground-subtle">{label}</span>
       {children}
     </label>
+  );
+}
+
+// ─── Kategori-hantering (superadmin) ─────────────────────────────────────────
+//
+// Bara superadmin (`admin`) når denna modal — behörigheten enforce:as i
+// server-actionerna (säkerhetsgränsen) och i PB:s update/delete-regler; UI:t
+// är bara en bekvämlighet. Färgerna är låsta till Movexums brand-tokens (§ 2.2).
+
+function CategoryManagerModal({
+  categories,
+  items,
+  onClose
+}: {
+  categories: AnnualWheelCategoryDef[];
+  items: AnnualWheelItem[];
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [newLabel, setNewLabel] = useState('');
+  const [newToken, setNewToken] = useState<AnnualWheelColorToken>(
+    ANNUAL_WHEEL_COLOR_TOKENS[0].id
+  );
+
+  // Hur många aktiviteter använder respektive kategori (styr radera-knappen).
+  const usage = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const it of items) map.set(it.category, (map.get(it.category) ?? 0) + 1);
+    return map;
+  }, [items]);
+
+  const previewKey = slugifyAnnualWheelCategoryKey(newLabel);
+
+  function run(action: () => Promise<{ ok?: boolean; error?: string }>) {
+    setError(null);
+    startTransition(async () => {
+      const res = await action();
+      if (res?.error) {
+        setError(res.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  function add() {
+    const label = newLabel.trim();
+    if (!label) {
+      setError('Ange ett namn på kategorin.');
+      return;
+    }
+    if (!previewKey) {
+      setError('Namnet måste innehålla minst en bokstav eller siffra.');
+      return;
+    }
+    run(async () => {
+      const res = await createAnnualWheelCategoryAction({ label, token: newToken });
+      if (!res?.error) setNewLabel('');
+      return res;
+    });
+  }
+
+  function rename(cat: AnnualWheelCategoryDef, label: string) {
+    const next = label.trim();
+    if (!cat.recordId || !next || next === cat.label) return;
+    run(() => updateAnnualWheelCategoryAction(cat.recordId!, { label: next }));
+  }
+
+  function recolor(cat: AnnualWheelCategoryDef, token: string) {
+    if (!cat.recordId || token === cat.token) return;
+    run(() => updateAnnualWheelCategoryAction(cat.recordId!, { token }));
+  }
+
+  function remove(cat: AnnualWheelCategoryDef) {
+    if (!cat.recordId) return;
+    if (!confirm(`Ta bort kategorin "${cat.label}"?`)) return;
+    run(() => deleteAnnualWheelCategoryAction(cat.recordId!));
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-movexum-svart/40 p-4"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-2xl border border-default bg-surface p-5 shadow-lg shadow-movexum-svart/20"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="font-heading text-[16px] font-semibold text-foreground">
+          Årshjulets kategorier
+        </h3>
+        <p className="mt-1 text-[12px] text-foreground-muted">
+          Kategorierna styr hjulets legend och färg. Bara superadmin kan lägga till eller ta bort
+          dem. En kategori som används av aktiviteter måste tömmas först.
+        </p>
+
+        <ul className="mt-4 space-y-2">
+          {categories.map((c) => {
+            const used = usage.get(c.id) ?? 0;
+            const persisted = !!c.recordId;
+            return (
+              <li key={c.id} className="flex items-center gap-2 rounded-xl border border-default p-2">
+                <span
+                  className="inline-block h-4 w-4 shrink-0 rounded-sm"
+                  style={{ background: annualWheelColorVar(c.token) }}
+                  aria-hidden
+                />
+                <input
+                  type="text"
+                  defaultValue={c.label}
+                  maxLength={ANNUAL_WHEEL_CATEGORY_LABEL_MAX}
+                  disabled={pending || !persisted}
+                  onBlur={(e) => rename(c, e.target.value)}
+                  aria-label={`Namn på kategorin ${c.label}`}
+                  className="min-w-0 flex-1 rounded-lg border border-default bg-canvas px-2 py-1 text-[13px] text-foreground disabled:opacity-60"
+                />
+                <select
+                  value={c.token}
+                  disabled={pending || !persisted}
+                  onChange={(e) => recolor(c, e.target.value)}
+                  aria-label={`Färg för kategorin ${c.label}`}
+                  className="rounded-lg border border-default bg-canvas px-2 py-1 text-[12px] text-foreground disabled:opacity-60"
+                >
+                  {ANNUAL_WHEEL_COLOR_TOKENS.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+                <span
+                  className="w-16 shrink-0 text-right text-[11px] text-foreground-subtle"
+                  title="Antal aktiviteter i kategorin"
+                >
+                  {used} st
+                </span>
+                <button
+                  type="button"
+                  onClick={() => remove(c)}
+                  disabled={pending || !persisted || used > 0 || categories.length <= 1}
+                  className="shrink-0 text-foreground-subtle hover:text-movexum-orange disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label={`Ta bort kategorin ${c.label}`}
+                  title={
+                    used > 0
+                      ? 'Kategorin används av aktiviteter — flytta dem först.'
+                      : categories.length <= 1
+                        ? 'Årshjulet måste ha minst en kategori.'
+                        : 'Ta bort kategorin'
+                  }
+                >
+                  <Icon name="trash" size={14} />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className="mt-4 rounded-xl border border-default bg-canvas-subtle p-3">
+          <span className="mb-1.5 block text-[11px] font-medium text-foreground-subtle">
+            Ny kategori
+          </span>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={newLabel}
+              maxLength={ANNUAL_WHEEL_CATEGORY_LABEL_MAX}
+              placeholder="t.ex. Ägarmöten"
+              onChange={(e) => setNewLabel(e.target.value)}
+              className="min-w-0 flex-1 rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground"
+            />
+            <select
+              value={newToken}
+              onChange={(e) => setNewToken(e.target.value as AnnualWheelColorToken)}
+              aria-label="Färg för den nya kategorin"
+              className="rounded-lg border border-default bg-canvas px-2 py-1.5 text-[12px] text-foreground"
+            >
+              {ANNUAL_WHEEL_COLOR_TOKENS.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={add}
+              disabled={pending}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[13px] font-medium text-brand-foreground hover:bg-brand-hover disabled:opacity-60"
+            >
+              <Icon name="plus" size={14} /> Lägg till
+            </button>
+          </div>
+          {previewKey ? (
+            <p className="mt-1.5 text-[11px] text-foreground-subtle">
+              Nyckel: <span className="mx-tnum">{previewKey}</span> (kan inte ändras senare)
+            </p>
+          ) : null}
+        </div>
+
+        {error ? (
+          <p className="mt-3 rounded-lg bg-movexum-pastell-orange px-2.5 py-1.5 text-[12px] text-movexum-morkorange">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="mt-4 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-3 py-1.5 text-[13px] text-foreground-muted hover:text-foreground"
+          >
+            Stäng
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

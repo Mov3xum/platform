@@ -4,6 +4,10 @@ import assert from 'node:assert/strict';
 import {
   ANNUAL_WHEEL_CATEGORY_IDS,
   ANNUAL_WHEEL_TAG_IDS,
+  ANNUAL_WHEEL_CATEGORY_KEY_MAX,
+  annualWheelCategoryColorVar,
+  annualWheelCategoryLabel,
+  annualWheelColorVar,
   annualWheelDateLabel,
   annulusSectorPath,
   buildAnnualWheelTable,
@@ -11,18 +15,25 @@ import {
   countItemsByTag,
   dateAngleInYear,
   daysInMonth,
+  DEFAULT_ANNUAL_WHEEL_CATEGORY_IDS,
+  DEFAULT_ANNUAL_WHEEL_COLOR_TOKEN,
   nextUpcomingItem,
   filterAnnualWheelItems,
   groupItemsByMonth,
   isAnnualWheelCategory,
   isAnnualWheelTag,
+  isAnnualWheelCategoryKey,
+  isAnnualWheelColorToken,
   monthShortLabel,
   monthSliceAngles,
   polarPoint,
   quarterForMonth,
   quarterSliceAngles,
+  resolveAnnualWheelCategories,
   roundedAnnulusSectorPath,
   sanitizeAnnualWheelTags,
+  slugifyAnnualWheelCategoryKey,
+  sortAnnualWheelCategories,
   sanitizeDay,
   sanitizeMonth,
   type AnnualWheelItem
@@ -316,4 +327,103 @@ test('nextUpcomingItem honours specific day within the month', () => {
   const next = nextUpcomingItem(items, new Date(2026, 5, 10));
   assert.equal(next?.item.id, 'b');
   assert.equal(next?.date.getDate(), 20);
+});
+
+// ── Dynamiska kategorier (per tenant) ────────────────────────────────────────
+
+test('isAnnualWheelCategory checks membership in a dynamic list', () => {
+  const dynamic = [
+    { id: 'agarmoten', label: 'Ägarmöten', token: 'bla' as const },
+    { id: 'ledning', label: 'Ledningsgrupp', token: 'gul' as const }
+  ];
+  assert.ok(isAnnualWheelCategory('agarmoten', dynamic));
+  assert.equal(isAnnualWheelCategory('styrelse', dynamic), false);
+  // Utan lista gäller defaults (bakåtkompatibelt).
+  assert.ok(isAnnualWheelCategory('styrelse'));
+});
+
+test('slugifyAnnualWheelCategoryKey transliterates Swedish and rejects junk', () => {
+  assert.equal(slugifyAnnualWheelCategoryKey('Ägarmöten'), 'agarmoten');
+  assert.equal(slugifyAnnualWheelCategoryKey('Styrelse & ledning'), 'styrelse-ledning');
+  assert.equal(slugifyAnnualWheelCategoryKey('  Hållbarhet  '), 'hallbarhet');
+  assert.equal(slugifyAnnualWheelCategoryKey('ÅÄÖ'), 'aao');
+  assert.equal(slugifyAnnualWheelCategoryKey('---'), null);
+  assert.equal(slugifyAnnualWheelCategoryKey(''), null);
+  assert.equal(slugifyAnnualWheelCategoryKey(42), null);
+  // Cappas till nyckelns maxlängd och slutar aldrig på bindestreck.
+  const long = slugifyAnnualWheelCategoryKey('a'.repeat(60));
+  assert.equal(long?.length, ANNUAL_WHEEL_CATEGORY_KEY_MAX);
+});
+
+test('isAnnualWheelCategoryKey enforces the slug shape', () => {
+  assert.ok(isAnnualWheelCategoryKey('styrelse'));
+  assert.ok(isAnnualWheelCategoryKey('q1-mote_2'));
+  assert.equal(isAnnualWheelCategoryKey('Styrelse'), false); // versaler
+  assert.equal(isAnnualWheelCategoryKey('-styrelse'), false); // inledande bindestreck
+  assert.equal(isAnnualWheelCategoryKey('sty relse'), false); // blanksteg
+  assert.equal(isAnnualWheelCategoryKey('a'.repeat(41)), false);
+  assert.equal(isAnnualWheelCategoryKey(''), false);
+  assert.equal(isAnnualWheelCategoryKey(null), false);
+});
+
+test('annualWheelColorVar maps tokens and falls back for junk', () => {
+  assert.equal(annualWheelColorVar('gron'), 'var(--movexum-gron)');
+  assert.equal(annualWheelColorVar('bla'), 'var(--movexum-bla)');
+  // Okänd/ogiltig token → default-tokenen (aldrig ad-hoc-hex, § 2.2).
+  assert.equal(annualWheelColorVar('#ff0000'), `var(--movexum-${DEFAULT_ANNUAL_WHEEL_COLOR_TOKEN})`);
+  assert.equal(annualWheelColorVar(undefined), `var(--movexum-${DEFAULT_ANNUAL_WHEEL_COLOR_TOKEN})`);
+  assert.ok(isAnnualWheelColorToken(DEFAULT_ANNUAL_WHEEL_COLOR_TOKEN));
+});
+
+test('resolveAnnualWheelCategories normalizes PB rows', () => {
+  const resolved = resolveAnnualWheelCategories([
+    { id: 'rec2', key: 'ledning', label: 'Ledning', token: 'gul', sort_order: 2 },
+    { id: 'rec1', key: 'agarmoten', label: 'Ägarmöten', token: 'bla', sort_order: 1 },
+    // Ogiltiga rader kastas: trasig nyckel, tom etikett, dubblett, icke-objekt.
+    { id: 'rec3', key: 'Fel Nyckel', label: 'Fel', token: 'bla' },
+    { id: 'rec4', key: 'tom', label: '   ', token: 'bla' },
+    { id: 'rec5', key: 'ledning', label: 'Dubblett', token: 'gron' },
+    null
+  ]);
+  assert.deepEqual(
+    resolved.map((c) => [c.id, c.label, c.token, c.recordId]),
+    [
+      ['agarmoten', 'Ägarmöten', 'bla', 'rec1'],
+      ['ledning', 'Ledning', 'gul', 'rec2']
+    ]
+  );
+});
+
+test('resolveAnnualWheelCategories defaults token and falls back when empty', () => {
+  const [one] = resolveAnnualWheelCategories([{ id: 'r', key: 'nytt', label: 'Nytt', token: 'magenta' }]);
+  assert.equal(one.token, DEFAULT_ANNUAL_WHEEL_COLOR_TOKEN);
+
+  // Tom/saknad kollektion → defaults, så hjulet aldrig blir legendlöst.
+  for (const empty of [[], null, undefined]) {
+    assert.deepEqual(
+      resolveAnnualWheelCategories(empty).map((c) => c.id),
+      [...DEFAULT_ANNUAL_WHEEL_CATEGORY_IDS]
+    );
+  }
+});
+
+test('label/color lookups tolerate a category that was removed', () => {
+  const dynamic = [{ id: 'agarmoten', label: 'Ägarmöten', token: 'bla' as const }];
+  assert.equal(annualWheelCategoryLabel('agarmoten', dynamic), 'Ägarmöten');
+  // Post som pekar på en raderad kategori: rå nyckel + default-färg, ingen krasch.
+  assert.equal(annualWheelCategoryLabel('borttagen', dynamic), 'borttagen');
+  assert.equal(
+    annualWheelCategoryColorVar('borttagen', dynamic),
+    `var(--movexum-${DEFAULT_ANNUAL_WHEEL_COLOR_TOKEN})`
+  );
+});
+
+test('sortAnnualWheelCategories orders by sortOrder then label', () => {
+  const sorted = sortAnnualWheelCategories([
+    { id: 'c', label: 'Ceta', token: 'gul' },
+    { id: 'a', label: 'Alfa', token: 'gron', sortOrder: 5 },
+    { id: 'b', label: 'Beta', token: 'lila', sortOrder: 1 }
+  ]);
+  // Utan sortOrder hamnar posten sist (999).
+  assert.deepEqual(sorted.map((c) => c.id), ['b', 'a', 'c']);
 });

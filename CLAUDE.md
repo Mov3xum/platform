@@ -3656,11 +3656,14 @@ och år.
 
 | Fil | Syfte |
 |-----|-------|
-| `packages/shared/src/annual-wheel.ts` (+ `.test.ts`) | Ren domän-/geometrilogik (taxonomi, filter, gruppering, tabell-byggare, hjul-vinklar/SVG-path) — enhetstestad |
+| `packages/shared/src/annual-wheel.ts` (+ `.test.ts`) | Ren domän-/geometrilogik (taxonomi, kategori-slug/färg-tokens, filter, gruppering, tabell-byggare, hjul-vinklar/SVG-path) — enhetstestad |
 | `backend/pocketbase-schema/migrations/1700000133_create_annual_wheel_items.js` | Collection `annual_wheel_items` |
-| `apps/web/src/lib/core/write/annual-wheel.ts` | `createAnnualWheelItem` / `updateAnnualWheelItemField` (delat skrivlager) |
-| `apps/web/src/lib/actions/annual-wheel.ts` | Server actions (manuell CRUD via UI) |
-| `apps/web/src/app/arshjul/{page,AnnualWheelView}.tsx` | Sida + klientvy (hjul-SVG, tabell, filter, editor) |
+| `backend/pocketbase-schema/migrations/1700000139_create_annual_wheel_categories.js` | Collection `annual_wheel_categories` (dynamiska kategorier + seed per tenant) |
+| `backend/pocketbase-schema/migrations/1700000140_annual_wheel_items_category_text.js` | `annual_wheel_items.category`: select → text (fri kategorinyckel) |
+| `apps/web/src/lib/annual-wheel/categories.ts` | Enda läsvägen för tenantens kategorier (delas av sida, actions och skrivlager) |
+| `apps/web/src/lib/core/write/annual-wheel.ts` | `createAnnualWheelItem` / `updateAnnualWheelItemField` (delat skrivlager + kategori-existenskontroll) |
+| `apps/web/src/lib/actions/annual-wheel.ts` | Server actions (manuell CRUD via UI + kategori-CRUD för superadmin) |
+| `apps/web/src/app/arshjul/{page,AnnualWheelView}.tsx` | Sida + klientvy (hjul-SVG, tabell, filter, editor, kategori-hantering) |
 | `apps/web/src/lib/ai/tools.ts` | Verktygen `create_annual_wheel_item` / `update_annual_wheel_item` + dispatch |
 
 ### 30.2 Datamodell
@@ -3671,16 +3674,14 @@ och år.
   datum, **migration 1700000138**), `tags` (select **multi, VALFRI**:
   kampanjer, verksamhetsrapporter, projekt, team, ledningsgrupp,
   projektstyrgrupper, ovrigt — tabellens kolumner + uppföljning,
-  **migration 1700000139**), `category` (select: styrelse, ledning,
-  gemensamt — hjulets legend/färg), `responsible` (relation → `users`, valfri,
+  **migration 1700000139**), `category` (**text sedan migration 1700000140**
+  — en kategorinyckel ur `annual_wheel_categories`), `responsible` (relation → `users`, valfri,
   `cascadeDelete: false`, **migration 1700000139**), `notes`, `created_by`.
   Index på `(tenant)` och `(tenant, year)`. Taxonomin är källan-av-sanning i
-  `annual-wheel.ts` och MÅSTE speglas som select-värden i migrationen. `day`
+  `annual-wheel.ts` och MÅSTE speglas som select-värden i migrationen. `category`
+  valideras mot tenantens kategori-katalog i det delade skrivlagret. `day`
   saknar PII (rent datumtal); en dag utan månad nollställs i skrivlagret.
-  Hjulets kategorifärger är mjuka **gul/grön/lila** (CATEGORY_VAR i
-  `AnnualWheelView`, ur `--movexum-gul/gron/lila`) — banden fylls väldigt svagt
-  utan outline, "idag" visas som en svart prick utanför hjulet, och hovring
-  visar postens fullständiga datum (`annualWheelDateLabel`), taggar och
+  Hovring visar postens fullständiga datum (`annualWheelDateLabel`), taggar och
   ansvarig.
 
 **Taggar ersätter spår (migration 1700000139).** Fältet `track` var ett
@@ -3706,8 +3707,48 @@ för `query_collection` (§ 9.3). Agenten får därför **inte** skriva
 `responsible` (`writable-fields.ts`: `agent: deny`) — den kan inte slå upp
 användar-id:n och ska inte gissa vem som äger en aktivitet; människan sätter
 ansvarig i UI:t.
+- **`annual_wheel_categories`** (1700000139): `tenant` (cascadeDelete), `key`
+  (slug ≤ 40 tecken — det som lagras på posterna, **oföränderlig**), `label`
+  (≤ 60), `token` (select över Movexums brand-färger, § 2.2), `sort_order`,
+  `created_by`. Unikt index `(tenant, key)` → idempotent. Migrationen seedar
+  `styrelse`/`ledning`/`gemensamt` (grön/gul/lila) per tenant, så befintliga
+  poster behåller sin färg.
 
-### 30.3 Manuell + chatt-styrd (delat skrivlager)
+### 30.3 Dynamiska kategorier — bara superadmin får ändra dem
+
+Kategorierna (hjulets legend/färg/filter) var tidigare hårdkodade select-värden.
+De är nu en egen tenant-scopad kollektion, och `annual_wheel_items.category` är
+ett textfält med kategorinyckeln. Konsekvenser:
+
+- **Behörighet:** BARA **superadmin** — plattformens `admin`-roll (§ 6, den
+  högsta app-rollen; någon separat "superadmin"-roll finns inte) — får lägga
+  till, byta namn/färg på eller ta bort kategorier. Enforce:as i
+  server-actionerna (`create/update/deleteAnnualWheelCategoryAction`, som är
+  säkerhetsgränsen) OCH i PB:s `update`/`delete`-regler (`:each ?= "admin"`,
+  § 21.3). Övrig staff (`incubator_lead`/`coach`/`mentor`) *väljer* bland
+  befintliga kategorier när de skapar aktiviteter, men kan inte ändra listan.
+  Knappen "Kategorier" på `/arshjul` visas bara för superadmin.
+- **Nyckeln är oföränderlig.** Den härleds ur etiketten
+  (`slugifyAnnualWheelCategoryKey`: "Ägarmöten" → `agarmoten`) eftersom
+  posterna refererar den. Etikett och färg kan ändras fritt.
+- **Radering är skyddad:** en kategori som används av aktiviteter kan inte tas
+  bort (server-actionen räknar posterna och svarar med antalet), och den sista
+  kategorin kan aldrig tas bort. Skulle en post ändå peka på en försvunnen
+  nyckel renderas den med default-färgen och märks "(borttagen)" i legend,
+  filter och editor — aldrig en tyst omkategorisering.
+- **Färger är låsta till brand-tokens** (`AnnualWheelColorToken` →
+  `--movexum-*`). Ingen fritext-hex kan sparas (§ 2.2, § 5).
+- **En läsväg:** `lib/annual-wheel/categories.ts` används av sidan,
+  server-actionerna OCH skrivlagret, så människa och agent validerar mot exakt
+  samma lista. **Fail-soft:** saknas kollektionen (omigrerad instans) eller är
+  den tom används de inbyggda defaults, så hjulet aldrig blir legend-/färglöst.
+- **Validering i två steg:** `validators.ts` kontrollerar nyckelns FORMAT
+  (slug ≤ 40), skrivlagret att den FINNS för tenanten — annars avvisas
+  skrivningen med de giltiga nycklarna i felmeddelandet. Fältet är fritext i PB,
+  så det är den kontrollen (inte tool-schemat) som är gränsen: chatt-agenten kan
+  inte hitta på en egen kategori.
+
+### 30.4 Manuell + chatt-styrd (delat skrivlager)
 
 Både UI-actionen och chatt-agenten går genom **det delade skrivlagret**
 (`lib/core/write/annual-wheel.ts`) — whitelist (`writable-fields.ts`:
@@ -3719,7 +3760,7 @@ Chatt-verktygen exponeras BARA för agent-actor i den interaktiva staff-chatten
 aldrig. Läsning sker via det auto-exponerade `query_collection` (collectionen
 är inte denylistad) under RLS + tenant-scope.
 
-### 30.4 Regelefterlevnad
+### 30.5 Regelefterlevnad
 
 - **§ 21 isolering:** tenant-bred STAFF/OBSERVER-data — en ren `startup_member`
   ser inte Movexums interna styrelse-/ledningskalender. list/view kräver
@@ -3734,19 +3775,26 @@ aldrig. Läsning sker via det auto-exponerade `query_collection` (collectionen
   (visningsnamn visas bara internt i modulen, aldrig e-post, aldrig i
   AI-kontexten). `cascadeDelete: false` → en raderad användare nollställer bara
   ansvarig, aktiviteten lever vidare.
-- **EU AI Act:** ingen AI-inferens i modulen → ingen riskklass/banner. Chatt-
-  skrivningarna är deterministiska mutationer via det delade lagret.
-- **Grafisk profil (§ 2):** hjulets kategorifärger hämtas från Movexum-brand-
-  CSS-variablerna (`--movexum-djupbla/bla/lila`) — inga ad-hoc-hex.
-- **Migration:** nya oföränderliga filnummer (1700000133, 1700000138,
-  **1700000139**). Kollektionen **speglas i `setup-via-api.mjs`**
-  (collection-def + `FORCE_CREATE_RULES` + autodate-backfill + en
-  `patchCollection` som lägger `tags`/`responsible` och sätter `track`
-  `required: false` på BEFINTLIGA installs — annars avvisar en bootstrappad
-  instans nya aktiviteter med 400 eftersom appen inte längre skriver `track`)
-  så att en instans som provisioneras/reconcile:as via
-  bootstrap-skriptet — inte bara via auto-migrate — också får kollektionen.
-  (Utan speglingen 404:ade chatt-skrivningarna med "Missing or invalid
-  collection context" på en bootstrappad instans.) createRule följer § 21.3 så
-  `verify-baseline.mjs`-svepet passerar, och list/view-isoleringen asserteras i
-  `MUST_BE_STAFF_OR_OBSERVER`.
+- **EU AI Act:** ingen AI-inferens i modulen → ingen riskklass/banner (gäller
+  även kategori-CRUD: ren konfiguration). Chatt-skrivningarna är deterministiska
+  mutationer via det delade lagret.
+- **Grafisk profil (§ 2):** kategorifärgerna väljs ur en fast lista av
+  Movexum-brand-tokens och renderas som `var(--movexum-*)` — inga ad-hoc-hex,
+  varken i kod eller i data.
+- **Audit (ISO 27001 A.8.15):** kategori-CRUD loggas i `agent_actions`
+  (`collection = 'annual_wheel_categories'`, PII-fritt: nyckel/etikett/färg).
+  Radering loggas som `update` med `after_value.deleted` — `action_type` har
+  bara `create|update|revert`.
+- **Migrationer:** nya oföränderliga filnummer (1700000133, **1700000139**,
+  **1700000140**). Båda kollektionerna **speglas i `setup-via-api.mjs`**
+  (collection-defs + `FORCE_CREATE_RULES` + autodate + kategori-seed +
+  `convertSelectFieldToText` för `category` + en `patchCollection` som lägger
+  `tags`/`responsible` och sätter `track.required=false`) så att en instans som
+  provisioneras/reconcile:as via bootstrap-skriptet — inte bara via
+  auto-migrate — också får dem. (Utan speglingen 404:ade chatt-skrivningarna
+  med "Missing or invalid collection context" på en bootstrappad instans.)
+  Typbytet bevarar data: fältets **id behålls** → PB gör en fält-uppdatering
+  i stället för drop+create, och migrationen skriver dessutom tillbaka en
+  snapshot som skyddsnät. createRules följer § 21.3 så
+  `verify-baseline.mjs`-svepet passerar, och list/view-isoleringen asserteras
+  för BÅDA kollektionerna i `MUST_BE_STAFF_OR_OBSERVER`.

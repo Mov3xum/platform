@@ -15,6 +15,7 @@ import {
 } from './validators';
 import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
+import { listAnnualWheelCategoryKeys } from '@/lib/annual-wheel/categories';
 
 const COLLECTION = 'annual_wheel_items';
 const PB_ID = PB_COLLECTIONS.annualWheelItems;
@@ -50,6 +51,25 @@ async function assertResponsibleInTenant(
     return fail('INVALID_VALUE', 'Ansvarig måste vara en resurs i Movexum-organisationen.');
   }
   return ok(row.id);
+}
+
+/**
+ * Kategorierna är dynamiska per tenant (§ 30) → nyckeln måste finnas i
+ * tenantens `annual_wheel_categories`. Validatorn har redan kontrollerat
+ * FORMATET; detta är existens-kontrollen. Gäller både människa och agent, så
+ * modellen inte kan hitta på en egen kategori (fältet är fritext i PB).
+ */
+async function assertCategoryExists(
+  pb: PocketBase,
+  actor: Actor,
+  key: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const keys = await listAnnualWheelCategoryKeys(pb, actor.tenant);
+  if (keys.includes(key)) return { ok: true };
+  return {
+    ok: false,
+    error: `Okänd kategori '${key}'. Giltiga kategorier: ${keys.join(', ')}.`
+  };
 }
 
 export interface CreateAnnualWheelItemParams {
@@ -113,6 +133,8 @@ export async function createAnnualWheelItem(
     const verified = await assertResponsibleInTenant(pb, actor, responsible.value);
     if (!verified.ok) return fail(verified.code ?? 'INVALID_VALUE', verified.error);
   }
+  const categoryExists = await assertCategoryExists(pb, actor, category.value);
+  if (!categoryExists.ok) return fail('INVALID_VALUE', categoryExists.error);
 
   const notes = validateOptionalText(params.notes, 'notes', 2000);
   if (!notes.ok) return fail('INVALID_VALUE', notes.error);
@@ -253,6 +275,8 @@ export async function updateAnnualWheelItemField(
     case 'category': {
       const r = validateAnnualWheelCategory(params.value);
       if (!r.ok) return fail('INVALID_VALUE', r.error);
+      const exists = await assertCategoryExists(pb, actor, r.value);
+      if (!exists.ok) return fail('INVALID_VALUE', exists.error);
       normalized = r.value;
       break;
     }

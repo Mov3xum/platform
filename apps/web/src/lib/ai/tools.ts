@@ -18,7 +18,6 @@ import {
   type InlineVisualRef,
   FILE_TOPIC_IDS,
   isFileTopic,
-  ANNUAL_WHEEL_CATEGORY_IDS,
   ANNUAL_WHEEL_TAG_IDS
 } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
@@ -673,8 +672,11 @@ export function buildChatTools(
             },
             category: {
               type: 'string',
-              enum: [...ANNUAL_WHEEL_CATEGORY_IDS],
-              description: 'Kategori för färg/legend: styrelse, ledning eller gemensamt.'
+              description:
+                'Kategorinyckel för färg/legend. Kategorierna är dynamiska per ' +
+                'tenant — slå upp giltiga nycklar via query_collection mot ' +
+                'annual_wheel_categories (fältet `key`) om du är osäker. ' +
+                'Standard i en ny tenant: styrelse, ledning, gemensamt.'
             },
             notes: { type: 'string', description: 'Valfri notering (max 2000 tecken).' }
           },
@@ -703,7 +705,8 @@ export function buildChatTools(
               description:
                 'Nytt värde. month: 1–12 eller null. day: 1–31 eller null. ' +
                 'tags: lista med giltiga taggar (tom lista rensar). category: ' +
-                'giltigt enum-värde. title/notes: text. year: heltal.'
+                'en giltig kategorinyckel ur annual_wheel_categories. ' +
+                'title/notes: text. year: heltal.'
             }
           },
           required: ['itemId', 'field', 'value']

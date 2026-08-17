@@ -2878,7 +2878,9 @@ await ensureCollection({
     // `track` behålls deprecerat + valfritt så befintlig data inte tappas.
     { name: 'track', type: 'select', required: false, maxSelect: 1, values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt'] },
     { name: 'tags', type: 'select', required: false, maxSelect: 7, values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt'] },
-    { name: 'category', type: 'select', required: true, maxSelect: 1, values: ['styrelse', 'ledning', 'gemensamt'] },
+    // Migration 1700000140: dynamiska kategorier (§ 30) → fritext-nyckel som
+    // valideras mot annual_wheel_categories i det delade skrivlagret.
+    { name: 'category', type: 'text', required: true, min: 1, max: 40 },
     { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'notes', type: 'text', required: false, max: 2000 },
     { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
@@ -3360,9 +3362,7 @@ await ensureCollection({
       values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt']
     },
     {
-      name: 'category', type: 'select', required: true, maxSelect: 1,
-      values: ['styrelse', 'ledning', 'gemensamt']
-    },
+    { name: 'category', type: 'text', required: true, min: 1, max: 40 },
     { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'notes', type: 'text', required: false, max: 2000 },
     { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
@@ -3383,6 +3383,119 @@ await ensureCollection({
 await patchCollection('annual_wheel_items', [
   { name: 'day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 }
 ]);
+
+// ── Hjälpare för årshjulets dynamiska kategorier (§ 30) ─────────────────────
+
+/**
+ * Byter en select-kolumn till text UTAN att tappa data: fältets id behålls, så
+ * PocketBase gör en fält-UPPDATERING i stället för drop+create (båda är TEXT i
+ * SQLite). Idempotent — hoppar över om fältet redan är text.
+ */
+async function convertSelectFieldToText(collectionName, fieldName, opts = {}) {
+  let collection;
+  try {
+    collection = await pb.collections.getOne(collectionName);
+  } catch (err) {
+    if (err?.status === 404) {
+      warn(`${collectionName}: finns inte — hoppar fälttyp-konvertering`);
+      return;
+    }
+    throw err;
+  }
+  const fields = [...(collection.fields || [])];
+  const idx = fields.findIndex((f) => f.name === fieldName);
+  if (idx === -1) {
+    warn(`${collectionName}.${fieldName}: fältet saknas — hoppar konvertering`);
+    return;
+  }
+  if (fields[idx].type === 'text') {
+    warn(`${collectionName}.${fieldName} är redan text — hoppar`);
+    return;
+  }
+  fields[idx] = {
+    id: fields[idx].id,
+    name: fieldName,
+    type: 'text',
+    required: !!fields[idx].required,
+    min: opts.min ?? 0,
+    max: opts.max ?? 0
+  };
+  await pb.collections.update(collectionName, { fields });
+  ok(`${collectionName}.${fieldName} konverterad till text`);
+}
+
+/** Seedar default-kategorierna per tenant (idempotent). */
+async function seedAnnualWheelCategories() {
+  const defaults = [
+    { key: 'styrelse', label: 'Styrelse', token: 'gron', sort_order: 0 },
+    { key: 'ledning', label: 'Ledning', token: 'gul', sort_order: 1 },
+    { key: 'gemensamt', label: 'Gemensamt', token: 'lila', sort_order: 2 }
+  ];
+  let tenants;
+  try {
+    tenants = await pb.collection('tenants').getFullList();
+  } catch (err) {
+    warn(`kunde inte lista tenants för kategori-seed: ${describeError(err)}`);
+    return;
+  }
+  for (const tenant of tenants) {
+    for (const def of defaults) {
+      const existing = await pb
+        .collection('annual_wheel_categories')
+        .getFirstListItem(pb.filter('tenant = {:t} && key = {:k}', { t: tenant.id, k: def.key }))
+        .catch(() => null);
+      if (existing) continue;
+      try {
+        await pb.collection('annual_wheel_categories').create({ tenant: tenant.id, ...def });
+        ok(`årshjuls-kategori "${def.key}" seedad för tenant ${tenant.id}`);
+      } catch (err) {
+        warn(`kategori-seed "${def.key}" misslyckades: ${describeError(err)}`);
+      }
+    }
+  }
+}
+
+// Migration 1700000139: annual_wheel_categories — DYNAMISKA kategorier per
+// tenant (§ 30). Bara superadmin (`admin`) får skapa/ändra/radera dem →
+// update/delete-reglerna kräver admin; createRule refererar bara auth-fält
+// (§ 21.3) och rollen enforce:as i server-actionen. Läsning staff/observer-only.
+await ensureCollection({
+  id: 'annual_wheel_categories_collection',
+  name: 'annual_wheel_categories',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'key', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'label', type: 'text', required: true, min: 1, max: 60 },
+    {
+      name: 'token', type: 'select', required: true, maxSelect: 1,
+      // MÅSTE spegla AnnualWheelColorToken i packages/shared/src/annual-wheel.ts.
+      values: ['morkbla', 'djupbla', 'bla', 'morklila', 'lila', 'ljuslila', 'morkgron', 'gron', 'ljusgron', 'morkgul', 'gul', 'morkorange', 'orange']
+    },
+    { name: 'sort_order', type: 'number', required: false, onlyInt: true, min: 0, max: 999 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_annual_wheel_categories_tenant_key ON annual_wheel_categories (tenant, key)',
+    'CREATE INDEX idx_annual_wheel_categories_tenant ON annual_wheel_categories (tenant)'
+  ],
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${ADMIN_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${ADMIN_EACH}`
+});
+
+// Migration 1700000140: `annual_wheel_items.category` blir TEXT (dynamiska
+// kategorier). ensureCollection/patchCollection byter inte fälttyp, så gör det
+// explicit — fältets id BEHÅLLS så PB gör en uppdatering (värdena följer med).
+await convertSelectFieldToText('annual_wheel_items', 'category', { min: 1, max: 40 });
+
+// Seed default-kategorierna per tenant (idempotent) — speglar migration
+// 1700000139 så en bootstrappad instans också får dem redigerbara.
+await seedAnnualWheelCategories();
 
 // Backfill: en tidigare körning hann skapa chat_threads/deep_jobs UTAN
 // created/updated (REST API:t auto-lägger dem inte). ensureCollection
@@ -3688,7 +3801,10 @@ const FORCE_CREATE_RULES = {
   compass_lead_sources: ANY_AUTH,
   integration_providers: ANY_AUTH,
   // Årshjul (§ 30) — roll-enforcement i server-action + delat skrivlager.
-  annual_wheel_items: `${ANY_AUTH} && @request.auth.tenant != ""`
+  annual_wheel_items: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Årshjuls-kategorier (§ 30, migration 1700000139) — create är roll-lös per
+  // § 21.3; superadmin-kravet ligger i server-actionen + update/delete-reglerna.
+  annual_wheel_categories: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
 log('Forcerar robusta createRules...');
