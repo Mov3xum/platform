@@ -3361,7 +3361,6 @@ await ensureCollection({
       name: 'tags', type: 'select', required: false, maxSelect: 7,
       values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt']
     },
-    {
     { name: 'category', type: 'text', required: true, min: 1, max: 40 },
     { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'notes', type: 'text', required: false, max: 2000 },
