@@ -2641,6 +2641,17 @@ bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
 | `apps/web/src/app/min-oversikt/page.tsx` | Program-info för medlem; staff behåller "Mitt bolag" |
 | `apps/web/src/app/filer/page.tsx` | Avtal + aktivitetsdokument-sektioner för medlem |
 | `apps/web/src/app/community/page.tsx` | Medlems-platshållare |
+| `apps/web/src/components/proto/RailAccountMenu.tsx` | Kontomenyn i railens fot (gäller ALLA roller): "Mitt konto" + "Logga ut" |
+
+**Kontomenyn (railens fot).** Hela raden med avatar + namn är en knapp som
+öppnar en meny med **Mitt konto** och **Logga ut**. Tidigare var raden en ren
+`<div>` där bara ett litet kugghjul länkade till `/konto` — ett klick på det
+egna namnet gjorde ingenting, och utloggningen låg begravd under två formulär
+på `/konto`. Utloggningen är ett `<form action={logoutAction}>` (server
+action), inte en onClick-fetch: cookien rensas server-side precis som förut och
+knappen fungerar även innan JS hunnit hydrera. `Navbar`/`LogoutButton` renderas
+bara för UTLOGGADE besökare, så railens meny är den enda utloggningsvägen för
+en inloggad användare.
 
 - `isPureStartupMember` = har `startup_member` men ingen
   staff-/observer-roll. Multi-roll (t.ex. coach + startup_member) behåller
