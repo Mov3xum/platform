@@ -62,6 +62,13 @@ function describeError(err) {
   return parts.length > 0 ? parts.join(' | ') : String(err);
 }
 
+function containsErrorCode(value, expectedCode, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return false;
+  seen.add(value);
+  if (value.code === expectedCode) return true;
+  return Object.values(value).some((nested) => containsErrorCode(nested, expectedCode, seen));
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -2861,41 +2868,6 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
 });
 
-// Migration 1700000133: annual_wheel_items — årshjul (/arshjul).
-// Self-healing syncen måste kunna skapa kollektionen via API också, annars
-// faller diagnose-migrations när en instans saknar migrationen.
-await ensureCollection({
-  id: 'annual_wheel_items_collection',
-  name: 'annual_wheel_items',
-  type: 'base',
-  fields: [
-    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
-    { name: 'year', type: 'number', required: true, onlyInt: true, min: 2000, max: 2100 },
-    { name: 'title', type: 'text', required: true, min: 1, max: 200 },
-    { name: 'month', type: 'number', required: false, onlyInt: true, min: 1, max: 12 },
-    { name: 'day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 },
-    // Migration 1700000139: taggar (valfria, flera) ersätter obligatoriskt spår.
-    // `track` behålls deprecerat + valfritt så befintlig data inte tappas.
-    { name: 'track', type: 'select', required: false, maxSelect: 1, values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt'] },
-    { name: 'tags', type: 'select', required: false, maxSelect: 7, values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt'] },
-    // Migration 1700000140: dynamiska kategorier (§ 30) → fritext-nyckel som
-    // valideras mot annual_wheel_categories i det delade skrivlagret.
-    { name: 'category', type: 'text', required: true, min: 1, max: 40 },
-    { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
-    { name: 'notes', type: 'text', required: false, max: 2000 },
-    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
-  ],
-  indexes: [
-    'CREATE INDEX idx_annual_wheel_items_tenant ON annual_wheel_items (tenant)',
-    'CREATE INDEX idx_annual_wheel_items_tenant_year ON annual_wheel_items (tenant, year)'
-  ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
-  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
-});
-
 // Migration 1700000062: startup_phase_history — historik över faskiften.
 await ensureCollection({
   id: 'startup_phase_history_collection',
@@ -3419,7 +3391,17 @@ async function convertSelectFieldToText(collectionName, fieldName, opts = {}) {
     min: opts.min ?? 0,
     max: opts.max ?? 0
   };
-  await pb.collections.update(collectionName, { fields });
+  try {
+    await pb.collections.update(collectionName, { fields });
+  } catch (err) {
+    if (!containsErrorCode(err, 'validation_field_type_change')) throw err;
+
+    warn(
+      `${collectionName}.${fieldName}: PocketBase REST kan inte ändra fälttyp från select till text — ` +
+        'hoppar över; migration 1700000140 måste köras av PocketBase-containern'
+    );
+    return;
+  }
   ok(`${collectionName}.${fieldName} konverterad till text`);
 }
 
