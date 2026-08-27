@@ -62,6 +62,7 @@ export const ICON_PATHS: Record<string, string> = {
   'panel-right':
     'M3 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z M15 4v17',
   'arrow-up-right': 'M7 17l10-10 M7 7h10v10',
+  logout: 'M9 4H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h3 M14 8l4 4-4 4 M18 12H9',
   mic: 'M9 2h6v12a3 3 0 0 1-6 0z M5 11a7 7 0 0 0 14 0 M12 18v4',
   bot: 'M4 8h16v10H4z M12 8V4 M9 13h.01 M15 13h.01 M8 18h8',
   'rotate-ccw': 'M1 4v6h6 M3.5 15a9 9 0 1 0 2.1-9.4L1 10',

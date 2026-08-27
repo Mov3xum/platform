@@ -2641,6 +2641,17 @@ bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
 | `apps/web/src/app/min-oversikt/page.tsx` | Program-info för medlem; staff behåller "Mitt bolag" |
 | `apps/web/src/app/filer/page.tsx` | Avtal + aktivitetsdokument-sektioner för medlem |
 | `apps/web/src/app/community/page.tsx` | Medlems-platshållare |
+| `apps/web/src/components/proto/RailAccountMenu.tsx` | Kontomenyn i railens fot (gäller ALLA roller): "Mitt konto" + "Logga ut" |
+
+**Kontomenyn (railens fot).** Hela raden med avatar + namn är en knapp som
+öppnar en meny med **Mitt konto** och **Logga ut**. Tidigare var raden en ren
+`<div>` där bara ett litet kugghjul länkade till `/konto` — ett klick på det
+egna namnet gjorde ingenting, och utloggningen låg begravd under två formulär
+på `/konto`. Utloggningen är ett `<form action={logoutAction}>` (server
+action), inte en onClick-fetch: cookien rensas server-side precis som förut och
+knappen fungerar även innan JS hunnit hydrera. `Navbar`/`LogoutButton` renderas
+bara för UTLOGGADE besökare, så railens meny är den enda utloggningsvägen för
+en inloggad användare.
 
 - `isPureStartupMember` = har `startup_member` men ingen
   staff-/observer-roll. Multi-roll (t.ex. coach + startup_member) behåller
@@ -3856,6 +3867,12 @@ npm-dependency (§ 10.2).
    läser igenom, rättar och trycker skicka själv.
 6. Därefter är det en helt vanlig chatt-turn: agenten planerar, läser data och
    anropar skrivverktygen med människan i loopen.
+
+**Kräver https.** `navigator.mediaDevices.getUserMedia` finns bara i en
+**säker kontext** — https eller localhost. På en http-serverad miljö är API:et
+helt borta (inte bara nekat), så mikrofonknappen visas då **avstängd med en
+förklaring i tooltip:en**; den döljs aldrig tyst (en osynlig knapp går inte att
+felsöka). Samma sak om webbläsaren saknar `MediaRecorder`.
 
 **Konfiguration:** `MISTRAL_API_KEY` (befintlig) räcker.
 `MISTRAL_VOICE_MODEL` (valfri, default `voxtral-mini-latest`) och

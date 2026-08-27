@@ -35,6 +35,18 @@ interface Props {
 
 type Phase = 'idle' | 'recording' | 'transcribing';
 
+/** Varför röstinmatning inte är tillgänglig (null = allt fungerar). */
+type BlockedReason = null | 'insecure' | 'unsupported';
+
+const BLOCKED_MESSAGES: Record<'insecure' | 'unsupported', string> = {
+  insecure:
+    'Röstinmatning kräver en säker anslutning (https). Sidan är serverad över ' +
+    'http, och webbläsaren stänger då av mikrofonen helt.',
+  unsupported:
+    'Din webbläsare stöder inte röstinspelning (MediaRecorder saknas). Prova ' +
+    'Chrome, Edge, Firefox eller Safari 14+.'
+};
+
 /** Första mime-typen webbläsaren faktiskt kan spela in. */
 function pickRecorderMime(): string | undefined {
   if (typeof MediaRecorder === 'undefined') return undefined;
@@ -54,7 +66,7 @@ function pickRecorderMime(): string | undefined {
 export default function VoiceInputButton({ onTranscript, disabled, onError }: Props) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [seconds, setSeconds] = useState(0);
-  const [supported, setSupported] = useState(true);
+  const [blocked, setBlocked] = useState<BlockedReason>(null);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
@@ -89,12 +101,21 @@ export default function VoiceInputButton({ onTranscript, disabled, onError }: Pr
     };
   }, [stopTicker]);
 
+  // Varför mikrofonen ev. inte går att använda. Vi döljer ALDRIG knappen tyst —
+  // en osynlig knapp är omöjlig att felsöka ("jag ser ingen röststyrning").
+  // I stället visas den avstängd med en förklaring i tooltip:en, och ett
+  // klick lägger samma text i chattens felruta.
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     const hasApi =
-      typeof window !== 'undefined' &&
-      typeof MediaRecorder !== 'undefined' &&
-      !!navigator.mediaDevices?.getUserMedia;
-    setSupported(hasApi);
+      typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
+    if (hasApi) {
+      setBlocked(null);
+      return;
+    }
+    // `getUserMedia` finns bara i en säker kontext (https eller localhost) —
+    // på en http-serverad miljö är API:et helt borta, inte bara nekat.
+    setBlocked(window.isSecureContext === false ? 'insecure' : 'unsupported');
   }, []);
 
   const fail = useCallback(
@@ -135,8 +156,8 @@ export default function VoiceInputButton({ onTranscript, disabled, onError }: Pr
   }
 
   async function startRecording() {
-    if (!supported) {
-      fail('Din webbläsare stöder inte röstinspelning.');
+    if (blocked) {
+      fail(BLOCKED_MESSAGES[blocked]);
       return;
     }
     onError?.('');
@@ -212,7 +233,19 @@ export default function VoiceInputButton({ onTranscript, disabled, onError }: Pr
     stopRecording();
   }
 
-  if (!supported) return null;
+  if (blocked) {
+    return (
+      <button
+        type="button"
+        onClick={() => fail(BLOCKED_MESSAGES[blocked])}
+        aria-label="Röstinmatning är inte tillgänglig"
+        title={BLOCKED_MESSAGES[blocked]}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle opacity-40 transition hover:bg-canvas-muted"
+      >
+        <Icon name="mic" size={14} />
+      </button>
+    );
+  }
 
   if (phase === 'recording') {
     return (
