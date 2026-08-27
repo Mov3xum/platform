@@ -945,6 +945,16 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
   (CSS/JS/fonter/bilder) till https på en http-serverad staging utan
   TLS, vilket gör sidan helt ostylad. `MOVEXUM_ALLOW_INSECURE_COOKIES`
   stänger av det explicit.
+- **Force-HTTPS (A.8.9):** middleware:n tvingar https på app-nivå
+  (defense-in-depth ovanpå Coolifys proxy-redirect, se `infra/SSL.md`):
+  en produktions-request med `x-forwarded-proto: http` får `308` →
+  `https://<host><path>`. Redirecten triggas ENBART när en edge-proxy
+  uttryckligen rapporterat http — container-interna anrop utan headern
+  (Coolify-healthchecks, PB-hookarnas POST mot `http://moveum-web:3000`)
+  redirectas aldrig, och `/api/health` + `/api/internal/` är explicit
+  undantagna. `MOVEXUM_ALLOW_INSECURE_COOKIES=true` stänger av
+  redirecten för en medvetet http-serverad deploy (samma escape-hatch
+  som ovan).
 - **Auth-cookie:** `httpOnly` + `SameSite=Lax`. `Secure` följer det
   faktiska request-protokollet via `x-forwarded-proto`
   (`shouldUseSecureCookie` i `lib/actions/auth.ts`): https → `Secure`,

@@ -10,6 +10,15 @@ repot. Appen är redan byggd för att auto-detektera HTTPS via
 `Secure`-cookies (`apps/web/src/lib/actions/auth.ts`) och CSP-direktivet
 `upgrade-insecure-requests` (`apps/web/src/middleware.ts`) på automatiskt.
 
+Dessutom **tvingar appen själv https** (defense-in-depth ovanpå Coolifys
+force-https-toggle): middleware:n svarar `308` → `https://<host><path>` när
+en request kommer in med `x-forwarded-proto: http` i produktion. Redirecten
+triggas ALDRIG för container-interna anrop (Coolify-healthchecks, PB-hookarnas
+POST mot `http://moveum-web:3000`) — de saknar `x-forwarded-proto`-headern —
+och `/api/health` + `/api/internal/` är dessutom explicit undantagna.
+`MOVEXUM_ALLOW_INSECURE_COOKIES=true` stänger av redirecten för en medvetet
+http-serverad deploy (samma escape-hatch som Secure-cookies).
+
 ## Ordning (viktigt)
 
 Slå på TLS + force-https i Coolify **först** och verifiera certet. Deploya
@@ -53,9 +62,15 @@ Lämna oförändrat (internt docker-nät, ingen TLS internt):
 - `MOVEXUM_WEB_URL` (PB-hooks) = `http://moveum-web:3000` — hookarna anropar
   web-containern container-till-container.
 
+> **OBS för en http-only-deploy (utan cert):** app-redirecten ovan aktiveras
+> av att Traefik skickar `x-forwarded-proto: http`. Kör en miljö medvetet
+> utan TLS måste `MOVEXUM_ALLOW_INSECURE_COOKIES=true` vara satt — annars
+> redirectas besökaren till en https-lyssnare som inte finns.
+
 ## Verifiering efter deploy
 
-- `curl -I https://<web-host>` → `200` + giltigt cert; `http://` → `301`.
+- `curl -I https://<web-host>` → `200` + giltigt cert; `http://` → `301`
+  (Coolify-proxyn) eller `308` (appens egen force-https-redirect).
 - `curl -fsS https://<pb-host>/api/health` → `200`.
 - Login över https → DevTools ▸ Application ▸ Cookies: `pb_auth` har `Secure` ✓.
 - Response-headers: `Strict-Transport-Security` finns + CSP innehåller
