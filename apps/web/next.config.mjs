@@ -26,8 +26,12 @@ const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   {
+    // `microphone=(self)` krävs för röstinmatningen i chatten (CLAUDE.md § 31):
+    // getUserMedia blockeras annars av policyn, även på samma origin. Kameran
+    // och övriga känsliga API:er är fortsatt helt avstängda (minsta behörighet,
+    // ISO 27001 A.8.9) och inga tredjeparts-origins tillåts.
     key: 'Permissions-Policy',
-    value: 'camera=(), microphone=(), geolocation=(), browsing-topics=()'
+    value: 'camera=(), microphone=(self), geolocation=(), browsing-topics=()'
   }
 ];
 

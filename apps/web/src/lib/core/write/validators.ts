@@ -2,11 +2,20 @@ import 'server-only';
 import {
   ALL_PHASES,
   ANNUAL_WHEEL_TAG_IDS,
+  COMPASS_FLOW_TYPES,
+  COMPASS_INPUT_TYPES,
   isAnnualWheelCategoryKey,
+  isCompassFlowType,
+  isCompassInputType,
+  normalizeCompassChoices,
   sanitizeDay,
   sanitizeMonth,
+  slugifyCompassKey,
   type AnnualWheelCategory,
   type AnnualWheelTag,
+  type CompassChoice,
+  type CompassFlowType,
+  type CompassInputType,
   type StartupPhase
 } from '@platform/shared';
 
@@ -209,4 +218,116 @@ export function validateYear(value: unknown): ValidationResult<number> {
     return { ok: false, error: 'year måste vara ett heltal 2000–2100.' };
   }
   return { ok: true, value: n };
+}
+
+// ── Startupkompassen — modul-/frågeförfattande (§ 23, § 31) ─────────────────
+
+/** Flödestyp: chat (AI-samtal), wizard (formulär) eller quiz (poäng+profil). */
+export function validateCompassFlowType(value: unknown): ValidationResult<CompassFlowType> {
+  const s = asString(value);
+  if (s === null) return { ok: false, error: 'flow_type saknas.' };
+  const normalized = s.trim().toLowerCase();
+  if (!isCompassFlowType(normalized)) {
+    return {
+      ok: false,
+      error: `flow_type måste vara en av: ${COMPASS_FLOW_TYPES.join(', ')}.`
+    };
+  }
+  return { ok: true, value: normalized };
+}
+
+/** Frågans inmatningstyp (`compass_questions.input_type`). */
+export function validateCompassInputType(value: unknown): ValidationResult<CompassInputType> {
+  const s = asString(value);
+  if (s === null) return { ok: false, error: 'input_type saknas.' };
+  const normalized = s.trim().toLowerCase();
+  if (!isCompassInputType(normalized)) {
+    return {
+      ok: false,
+      error: `input_type måste vara en av: ${COMPASS_INPUT_TYPES.join(', ')}.`
+    };
+  }
+  return { ok: true, value: normalized };
+}
+
+/**
+ * Slug/nyckel. Härleds ur ett fritt namn om det behövs — en agent (eller en
+ * röstinmatning) ska aldrig behöva formulera en teknisk nyckel själv.
+ */
+export function validateSlugKey(
+  value: unknown,
+  field: string,
+  maxLen = 60
+): ValidationResult<string> {
+  const s = asString(value);
+  if (s === null) return { ok: false, error: `${field} måste vara text.` };
+  const slug = slugifyCompassKey(s, maxLen);
+  if (!slug) {
+    return {
+      ok: false,
+      error: `${field} måste innehålla minst en bokstav eller siffra.`
+    };
+  }
+  return { ok: true, value: slug };
+}
+
+/**
+ * Svarsalternativ. Normaliseras med den delade, enhetstestade helpern så att
+ * UI-formulären och agentens verktyg ger IDENTISKT lagrat resultat.
+ */
+export function validateCompassChoices(
+  value: unknown,
+  inputType: CompassInputType
+): ValidationResult<CompassChoice[] | undefined> {
+  const needsChoices = inputType === 'choice' || inputType === 'multi_choice';
+  if (!needsChoices) return { ok: true, value: undefined };
+
+  const choices = normalizeCompassChoices(value);
+  if (choices.length < 2) {
+    return {
+      ok: false,
+      error:
+        'En fråga med svarsalternativ behöver minst två giltiga alternativ ' +
+        '(skicka dem som en lista med etiketter).'
+    };
+  }
+  return { ok: true, value: choices };
+}
+
+/** Bool som tål "true"/"on"/1 från formulär och verktygsanrop. */
+export function validateBool(value: unknown, fallback = false): ValidationResult<boolean> {
+  if (value === undefined || value === null || value === '') {
+    return { ok: true, value: fallback };
+  }
+  if (typeof value === 'boolean') return { ok: true, value };
+  if (typeof value === 'number') return { ok: true, value: value !== 0 };
+  const s = String(value).trim().toLowerCase();
+  if (['true', 'on', 'yes', 'ja', '1'].includes(s)) return { ok: true, value: true };
+  if (['false', 'off', 'no', 'nej', '0'].includes(s)) return { ok: true, value: false };
+  return { ok: false, error: 'Värdet måste vara sant eller falskt.' };
+}
+
+// ── Workshops (§ 18) ────────────────────────────────────────────────────────
+
+const WORKSHOP_STATUS_VALUES = ['draft', 'active', 'archived'] as const;
+export type WorkshopStatusForWrite = (typeof WORKSHOP_STATUS_VALUES)[number];
+
+/**
+ * Workshop-status. Agenten får bara skapa UTKAST — publicering är ett
+ * mänskligt beslut (människa-i-loopen, § 10.1 art. 14) och görs i
+ * `/education`-UI:t.
+ */
+export function validateWorkshopStatus(
+  value: unknown
+): ValidationResult<WorkshopStatusForWrite> {
+  const s = asString(value);
+  if (s === null || s.trim() === '') return { ok: true, value: 'draft' };
+  const normalized = s.trim().toLowerCase();
+  if (!WORKSHOP_STATUS_VALUES.includes(normalized as WorkshopStatusForWrite)) {
+    return {
+      ok: false,
+      error: `status måste vara en av: ${WORKSHOP_STATUS_VALUES.join(', ')}.`
+    };
+  }
+  return { ok: true, value: normalized as WorkshopStatusForWrite };
 }

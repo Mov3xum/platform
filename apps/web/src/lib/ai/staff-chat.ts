@@ -7,7 +7,12 @@ import { getExposedCollections } from './schema';
 import { selectRelevantCollections, buildScopedSchemaSummary } from './schema-scope';
 import { buildPortfolioContext, renderPromptTemplate } from './context';
 import { buildKnowledgeContext } from './agent-prompt';
-import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY, KNOWLEDGE_GUIDANCE } from './guidance';
+import {
+  SEARCH_STRATEGY_GUIDANCE,
+  DOMAIN_GLOSSARY,
+  KNOWLEDGE_GUIDANCE,
+  AUTHORING_GUIDANCE
+} from './guidance';
 import { routeChatModels } from './model-router';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from './web';
 import { withAttachedImages } from './chat-input';
@@ -404,7 +409,7 @@ export async function runStaffChatTurn(
     ? `\n\n${buildScopedSchemaSummary(collections, selectRelevantCollections(collections, scopeText))}`
     : '';
   const toolGuidanceBlocks = useTools
-    ? STAFF_TOOL_GUIDANCE + SEARCH_STRATEGY_GUIDANCE + KNOWLEDGE_GUIDANCE
+    ? STAFF_TOOL_GUIDANCE + AUTHORING_GUIDANCE + SEARCH_STRATEGY_GUIDANCE + KNOWLEDGE_GUIDANCE
     : '';
 
   const systemContent =

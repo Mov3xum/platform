@@ -1581,6 +1581,8 @@ export * from './file-topics';
 export * from './competences';
 // ─── AI-miljöpåverkan (tokens → CO₂e/vatten, ren logik, enhetstestad) ────────
 export * from './ai-impact';
+export * from './voice';
+export * from './compass-authoring';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */

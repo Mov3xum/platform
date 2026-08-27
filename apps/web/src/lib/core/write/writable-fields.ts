@@ -30,6 +30,9 @@ interface FieldPolicy {
 const STAFF_AND_COACH: Role[] = ['admin', 'incubator_lead', 'coach'];
 // Årshjulet är intern verksamhetsplanering — hela Movexum-staben redigerar.
 const STAFF_FULL: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
+// Startupkompassen hanteras av admin/incubator_lead/coach (samma krets som
+// `MANAGE_ROLES` i lib/actions/compass.ts, § 23).
+const COMPASS_MANAGE: Role[] = ['admin', 'incubator_lead', 'coach'];
 
 const POLICIES: Record<string, Record<string, FieldPolicy>> = {
   startups: {
@@ -96,6 +99,49 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     },
     notes: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     year: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } }
+  },
+  // Startupkompassens intag-moduler (§ 23, § 31). Ren modulkonfiguration —
+  // ingen besökardata, ingen PII. Publiceringsfälten (`is_active`,
+  // `public_url_enabled`) är MEDVETET agent-nekade: att lägga ut en modul
+  // publikt på webben är ett mänskligt beslut i modul-admin.
+  compass_modules: {
+    name: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    intro_message: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    success_message: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    target_audience: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    consent_note: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    flow_type: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    is_active: {
+      user: { kind: 'roles', roles: COMPASS_MANAGE },
+      agent: { kind: 'deny', reason: 'Publicering av en modul görs av en människa i modul-admin.' }
+    },
+    public_url_enabled: {
+      user: { kind: 'roles', roles: COMPASS_MANAGE },
+      agent: { kind: 'deny', reason: 'Publik URL slås på av en människa i modul-admin.' }
+    }
+  },
+  // Frågor i en intag-modul. `key` och `input_type` sätts vid skapandet och
+  // ändras inte i efterhand — svar som redan samlats in refererar dem.
+  compass_questions: {
+    prompt: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    help_text: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    required: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } }
+  },
+  // Workshops (§ 18). Agenten får förbereda innehåll i ett UTKAST; att
+  // publicera och tilldela bolag är mänskliga beslut.
+  workshops: {
+    title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    goal: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    instructions: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    status: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Publicering av en workshop görs av en människa i /education.' }
+    },
+    active: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Aktivering av en workshop görs av en människa i /education.' }
+    }
   }
 };
 
@@ -109,6 +155,18 @@ const CREATE_POLICIES: Record<
     agent: { kind: 'allow' }
   },
   annual_wheel_items: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  compass_modules: {
+    user: { kind: 'roles', roles: COMPASS_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  compass_questions: {
+    user: { kind: 'roles', roles: COMPASS_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  workshops: {
     user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'allow' }
   }
@@ -138,14 +196,15 @@ export function canWriteField(
     return { ok: false, reason: `Fältet '${collection}.${field}' är inte whitelistat för skrivning.` };
   }
 
-  if (actor.kind === 'agent') {
-    if (fieldPolicy.agent.kind === 'deny') {
-      return { ok: false, reason: fieldPolicy.agent.reason };
-    }
-    return { ok: true };
+  if (actor.kind === 'agent' && fieldPolicy.agent.kind === 'deny') {
+    return { ok: false, reason: fieldPolicy.agent.reason };
   }
 
-  // user
+  // Rollkravet gäller BÅDA aktörstyperna: en agent kör alltid å en inloggad
+  // människas vägnar (`actor.roles` = den triggande användarens roller), så
+  // agent-whitelisten förblir en äkta delmängd av människo-whitelisten — en
+  // mentor kan inte via chatten göra det hen inte får göra i UI:t
+  // (ISO 27001 A.5.15–A.5.18 minsta behörighet).
   if (!matchUserPolicy(actor.roles, fieldPolicy.user)) {
     return { ok: false, reason: `Saknar roll för att skriva '${collection}.${field}'.` };
   }
@@ -157,12 +216,10 @@ export function canCreateRecord(actor: Actor, collection: string): PolicyResult 
   if (!policy) {
     return { ok: false, reason: `Kollektion '${collection}' stöder inte create via det delade lagret.` };
   }
-  if (actor.kind === 'agent') {
-    if (policy.agent.kind === 'deny') {
-      return { ok: false, reason: policy.agent.reason };
-    }
-    return { ok: true };
+  if (actor.kind === 'agent' && policy.agent.kind === 'deny') {
+    return { ok: false, reason: policy.agent.reason };
   }
+  // Se `canWriteField`: rollkravet gäller även agent-aktörer.
   if (!matchUserPolicy(actor.roles, policy.user)) {
     return { ok: false, reason: `Saknar roll för att skapa i '${collection}'.` };
   }

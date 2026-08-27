@@ -13,6 +13,7 @@ import {
   extractXlsxFromDataUrlAction
 } from '@/lib/actions/chat-attachments';
 import { Icon } from '@/components/proto/Icon';
+import VoiceInputButton from '@/components/VoiceInputButton';
 import { chatMarkdownToHtml } from '@/lib/safe-html';
 
 // Markör som visas i slutet av den streamande texten. Injiceras i den redan
@@ -573,6 +574,19 @@ export default function DashboardChat({
     });
   }
 
+  /**
+   * Röstinmatning (§ 31): transkriptet läggs i rutan i stället för att skickas
+   * automatiskt, så att människan läser igenom och skickar själv
+   * (människa-i-loopen, EU AI Act art. 14). Flera inspelningar staplas på
+   * varandra med mellanslag.
+   */
+  function appendTranscript(text: string) {
+    const addition = text.trim();
+    if (!addition) return;
+    setInput((prev) => (prev.trim() ? `${prev.trim()} ${addition}` : addition));
+    inputRef.current?.focus();
+  }
+
   function submit() {
     const text = input.trim();
     // Djupt jobb kräver en instruktion (text); annars krävs text eller bilaga.
@@ -719,6 +733,11 @@ export default function DashboardChat({
 
       <div className="mt-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
+          <VoiceInputButton
+            disabled={isProcessingFiles}
+            onError={(message) => setLocalError(message || null)}
+            onTranscript={appendTranscript}
+          />
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}

@@ -7,6 +7,13 @@ export {
   updateAnnualWheelItemField,
   type AnnualWheelWritableField
 } from './annual-wheel';
+export {
+  createCompassModule,
+  addCompassQuestion,
+  updateCompassModuleField,
+  type CompassModuleWritableField
+} from './compass';
+export { createWorkshop } from './workshops';
 export { logAgentAction } from './audit';
 export {
   canWriteField,
@@ -18,5 +25,6 @@ export {
 export type { Actor, ActorKind, WriteResult, WriteErrorCode } from './types';
 export type {
   ActivityKindForWrite,
-  ActivityStatus
+  ActivityStatus,
+  WorkshopStatusForWrite
 } from './validators';
