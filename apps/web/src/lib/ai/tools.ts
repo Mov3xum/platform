@@ -18,7 +18,10 @@ import {
   type InlineVisualRef,
   FILE_TOPIC_IDS,
   isFileTopic,
-  ANNUAL_WHEEL_TAG_IDS
+  ANNUAL_WHEEL_TAG_IDS,
+  COMPASS_FLOW_TYPES,
+  COMPASS_INPUT_TYPES,
+  MAX_COMPASS_CHOICES
 } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
 import { validateChart, validateKpis } from '@/lib/documents/validate';
@@ -33,7 +36,12 @@ import {
   updateStartupField,
   createAnnualWheelItem,
   updateAnnualWheelItemField,
+  createCompassModule,
+  addCompassQuestion,
+  updateCompassModuleField,
+  createWorkshop,
   type AnnualWheelWritableField,
+  type CompassModuleWritableField,
   type Actor,
   type StartupWritableField
 } from '@/lib/core/write';
@@ -713,6 +721,188 @@ export function buildChatTools(
         }
       }
     });
+
+    // Startupkompassen (§ 23) + workshops (§ 18) — bygg intag-moduler och
+    // utbildningsutkast direkt från chatten (även röststyrt, § 31). Allt går
+    // via det delade skrivlagret: rollpolicy, validering, tenant-stämpel och
+    // agent_actions-logg. Publicering är MEDVETET inte exponerat — en
+    // AI-skapad modul/workshop granskas och publiceras av en människa.
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_compass_module',
+        description:
+          'Skapar en ny intag-modul i Startupkompassen (/inflode). Använd när ' +
+          'personalen beskriver en modul de vill ha — t.ex. "gör ett quiz som ' +
+          'heter Är du redo för inkubator" eller "ett formulär där folk får ' +
+          'berätta om sin idé". Modulen skapas som OPUBLICERAT utkast; lägg ' +
+          'sedan till frågorna med add_compass_question. Berätta för ' +
+          'användaren att den publiceras i modul-admin när den är klar.',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Modulens namn, som besökaren ser det (max 200 tecken).' },
+            flow_type: {
+              type: 'string',
+              enum: [...COMPASS_FLOW_TYPES],
+              description:
+                'Flödestyp: "quiz" (frågor med poäng → resultatprofil), ' +
+                '"wizard" (formulär/steg-för-steg-frågor utan poäng) eller ' +
+                '"chat" (AI-samtal med besökaren). Fråga användaren om det ' +
+                'inte framgår — gissa inte.'
+            },
+            description: { type: 'string', description: 'Kort intern beskrivning av modulens syfte.' },
+            intro_message: { type: 'string', description: 'Välkomsttext besökaren möter först.' },
+            success_message: { type: 'string', description: 'Tacktext när besökaren är klar.' },
+            target_audience: { type: 'string', description: 'Vilken målgrupp modulen riktar sig till.' }
+          },
+          required: ['name', 'flow_type']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'add_compass_question',
+        description:
+          'Lägger till EN fråga i en intag-modul i Startupkompassen. Anropa en ' +
+          'gång per fråga, i den ordning frågorna ska ställas. Modul-id får du ' +
+          'från create_compass_module eller via query_collection mot ' +
+          'compass_modules.',
+        parameters: {
+          type: 'object',
+          properties: {
+            module_id: { type: 'string', description: 'PocketBase-id för modulen.' },
+            prompt: { type: 'string', description: 'Själva frågan, som besökaren läser den.' },
+            input_type: {
+              type: 'string',
+              enum: [...COMPASS_INPUT_TYPES],
+              description:
+                'short_text (kort svar), long_text (fritext), choice (ett ' +
+                'alternativ), multi_choice (flera alternativ), scale (skala), ' +
+                'email, phone. Default short_text.'
+            },
+            help_text: { type: 'string', description: 'Valfri hjälptext under frågan.' },
+            required: { type: 'boolean', description: 'Måste besökaren svara? Default nej.' },
+            choices: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string', description: 'Alternativets text.' },
+                  score: {
+                    type: 'number',
+                    description:
+                      'Valfri poäng i quiz-läge. Summan av poängen avgör ' +
+                      'vilken resultatprofil besökaren hamnar i.'
+                  }
+                },
+                required: ['label']
+              },
+              description:
+                'Svarsalternativ — KRÄVS för choice/multi_choice (minst två, ' +
+                `max ${MAX_COMPASS_CHOICES}). Utelämna för övriga frågetyper.`
+            }
+          },
+          required: ['module_id', 'prompt']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'update_compass_module_field',
+        description:
+          'Uppdaterar ETT fält på en befintlig intag-modul (namn, beskrivning, ' +
+          'välkomst-/tacktext, målgrupp, samtyckesnot eller flödestyp). ' +
+          'Publicering (is_active) och publik URL kan du INTE sätta — det gör ' +
+          'personalen själv i modul-admin.',
+        parameters: {
+          type: 'object',
+          properties: {
+            module_id: { type: 'string', description: 'PocketBase-id för modulen.' },
+            field: {
+              type: 'string',
+              enum: [
+                'name',
+                'description',
+                'intro_message',
+                'success_message',
+                'target_audience',
+                'consent_note',
+                'flow_type'
+              ],
+              description: 'Vilket fält som ska uppdateras.'
+            },
+            value: { type: 'string', description: 'Nytt värde.' }
+          },
+          required: ['module_id', 'field', 'value']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_workshop',
+        description:
+          'Skapar ett UTKAST till en workshop i utbildningsmodulen ' +
+          '(/education). Använd när personalen ber dig lägga upp en workshop ' +
+          'och beskriver dess innehåll. Fyll i mål och instruktioner, och lägg ' +
+          'gärna upp innehållet som moduler med textblock. Bilder/film och ' +
+          'publicering läggs till av en människa i byggaren efteråt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Workshopens titel (max 200 tecken).' },
+            goal: { type: 'string', description: 'Vad deltagaren ska uppnå.' },
+            instructions: { type: 'string', description: 'Övergripande instruktioner till deltagaren.' },
+            audience_roles: {
+              type: 'array',
+              items: {
+                type: 'string',
+                enum: ['startup_member', 'coach', 'mentor', 'incubator_lead', 'admin', 'partner', 'observer']
+              },
+              description: 'Vilka roller workshopen riktar sig till. Default startup_member.'
+            },
+            modules: {
+              type: 'array',
+              description:
+                'Valfri innehållsstruktur: en lista moduler, var och en med ' +
+                'titel och textblock. Max 20 moduler.',
+              items: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string', description: 'Modulens rubrik.' },
+                  description: { type: 'string', description: 'Kort beskrivning av modulen.' },
+                  blocks: {
+                    type: 'array',
+                    description: 'Momenten i modulen (max 20).',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        type: {
+                          type: 'string',
+                          enum: ['instruction', 'exercise', 'question', 'summary'],
+                          description:
+                            'instruction (läsa/lyssna), exercise (göra), ' +
+                            'question (svara), summary (sammanfatta).'
+                        },
+                        title: { type: 'string', description: 'Momentets rubrik.' },
+                        instructions: { type: 'string', description: 'Momentets text/uppgift.' },
+                        desired_result: { type: 'string', description: 'Vad momentet ska resultera i.' }
+                      },
+                      required: ['title']
+                    }
+                  }
+                },
+                required: ['title']
+              }
+            }
+          },
+          required: ['title']
+        }
+      }
+    });
   }
 
   // Tvärsessions-minne (Fas 2). memory_read är read-only och kan ges till
@@ -938,7 +1128,10 @@ const COLLECTION_LABELS: Record<string, string> = {
   de_minimis_stod: 'de minimis-stöden',
   compass_leads: 'inflödet',
   onboarding_progress: 'onboardingen',
-  annual_wheel_items: 'årshjulet'
+  annual_wheel_items: 'årshjulet',
+  compass_modules: 'intag-modulerna',
+  compass_questions: 'modulfrågorna',
+  workshops: 'workshopparna'
 };
 
 const DOC_LABELS: Record<string, string> = {
@@ -997,6 +1190,14 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: 'Lägger till i årshjulet' };
     case 'update_annual_wheel_item':
       return { tool: name, label: 'Uppdaterar årshjulet' };
+    case 'create_compass_module':
+      return { tool: name, label: 'Skapar modul i Startupkompassen' };
+    case 'add_compass_question':
+      return { tool: name, label: 'Lägger till en fråga i modulen' };
+    case 'update_compass_module_field':
+      return { tool: name, label: 'Uppdaterar modulen' };
+    case 'create_workshop':
+      return { tool: name, label: 'Skapar workshop-utkast' };
     case 'memory_read':
       return { tool: name, label: 'Läser minnet' };
     case 'memory_write':
@@ -1819,6 +2020,14 @@ export async function dispatchToolCall(
       return runCreateAnnualWheelItem(args, ctx);
     case 'update_annual_wheel_item':
       return runUpdateAnnualWheelItem(args, ctx);
+    case 'create_compass_module':
+      return runCreateCompassModule(args, ctx);
+    case 'add_compass_question':
+      return runAddCompassQuestion(args, ctx);
+    case 'update_compass_module_field':
+      return runUpdateCompassModuleField(args, ctx);
+    case 'create_workshop':
+      return runCreateWorkshop(args, ctx);
     case 'memory_read':
       return runMemoryRead(args, ctx);
     case 'memory_write':
@@ -2262,6 +2471,158 @@ async function runUpdateAnnualWheelItem(
       field: result.value.field,
       before: result.value.before,
       after: result.value.after,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+
+// ── Startupkompassen + workshops (§ 23, § 18, § 31) ──────────────────────────
+//
+// Verktygsschemat är en HINT till modellen — säkerhetsgränsen är det delade
+// skrivlagret (rollpolicy, validering, tenant-stämpel, agent_actions).
+
+async function runCreateCompassModule(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createCompassModule(ctx.pb, actor, {
+    name: typeof args.name === 'string' ? args.name : '',
+    flowType: typeof args.flow_type === 'string' ? args.flow_type : '',
+    description: typeof args.description === 'string' ? args.description : undefined,
+    introMessage: typeof args.intro_message === 'string' ? args.intro_message : undefined,
+    successMessage: typeof args.success_message === 'string' ? args.success_message : undefined,
+    targetAudience: typeof args.target_audience === 'string' ? args.target_audience : undefined,
+    consentNote: typeof args.consent_note === 'string' ? args.consent_note : undefined
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      module_id: result.value.moduleId,
+      slug: result.value.slug,
+      name: result.value.name,
+      flow_type: result.value.flowType,
+      admin_path: result.value.adminPath,
+      published: false,
+      next_step:
+        'Lägg till frågorna med add_compass_question. Modulen är ett ' +
+        'opublicerat utkast tills personalen publicerar den i modul-admin.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runAddCompassQuestion(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const moduleId = typeof args.module_id === 'string' ? args.module_id.trim() : '';
+  if (!moduleId) return { ok: false, error: 'module_id saknas.' };
+
+  const result = await addCompassQuestion(ctx.pb, actor, {
+    moduleId,
+    prompt: typeof args.prompt === 'string' ? args.prompt : '',
+    inputType: typeof args.input_type === 'string' ? args.input_type : undefined,
+    key: typeof args.key === 'string' ? args.key : undefined,
+    helpText: typeof args.help_text === 'string' ? args.help_text : undefined,
+    required: typeof args.required === 'boolean' ? args.required : undefined,
+    choices: args.choices
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      question_id: result.value.questionId,
+      module_id: result.value.moduleId,
+      key: result.value.key,
+      input_type: result.value.inputType,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runUpdateCompassModuleField(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const moduleId = typeof args.module_id === 'string' ? args.module_id.trim() : '';
+  const field = typeof args.field === 'string' ? args.field.trim() : '';
+  if (!moduleId) return { ok: false, error: 'module_id saknas.' };
+
+  const allowed = [
+    'name',
+    'description',
+    'intro_message',
+    'success_message',
+    'target_audience',
+    'consent_note',
+    'flow_type'
+  ];
+  if (!allowed.includes(field)) {
+    return { ok: false, error: `field måste vara en av: ${allowed.join(', ')}.` };
+  }
+
+  const result = await updateCompassModuleField(ctx.pb, actor, {
+    moduleId,
+    field: field as CompassModuleWritableField,
+    value: args.value
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      module_id: result.value.moduleId,
+      field: result.value.field,
+      before: result.value.before,
+      after: result.value.after,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateWorkshop(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createWorkshop(ctx.pb, actor, {
+    title: typeof args.title === 'string' ? args.title : '',
+    goal: typeof args.goal === 'string' ? args.goal : undefined,
+    instructions: typeof args.instructions === 'string' ? args.instructions : undefined,
+    audienceRoles: Array.isArray(args.audience_roles)
+      ? (args.audience_roles as unknown[]).filter((r): r is string => typeof r === 'string')
+      : undefined,
+    modules: args.modules
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      workshop_id: result.value.workshopId,
+      key: result.value.key,
+      title: result.value.title,
+      module_count: result.value.moduleCount,
+      admin_path: result.value.adminPath,
+      status: 'draft',
+      next_step:
+        'Workshopen är ett utkast. Personalen kompletterar med bild/film och ' +
+        'publicerar den i /education.',
       logged_in: 'agent_actions'
     }
   };

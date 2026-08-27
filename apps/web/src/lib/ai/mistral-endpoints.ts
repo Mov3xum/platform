@@ -45,6 +45,11 @@ export function embeddingsUrl(base: string): string {
   return `${trimBase(base)}/v1/embeddings`;
 }
 
+/** Voxtral-transkribering (röstinmatning, CLAUDE.md § 31). */
+export function transcriptionsUrl(base: string): string {
+  return `${trimBase(base)}/v1/audio/transcriptions`;
+}
+
 /** Primär bas-URL (env-override eller Mistrals EU-API). */
 export function primaryBase(env: MistralEnv): string {
   const raw = env.MISTRAL_API_BASE_URL?.trim();

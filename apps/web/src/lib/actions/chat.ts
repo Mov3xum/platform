@@ -20,7 +20,11 @@ import {
   selectRelevantCollections,
   buildScopedSchemaSummary
 } from '@/lib/ai/schema-scope';
-import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from '@/lib/ai/guidance';
+import {
+  SEARCH_STRATEGY_GUIDANCE,
+  DOMAIN_GLOSSARY,
+  AUTHORING_GUIDANCE
+} from '@/lib/ai/guidance';
 import { buildChatTools, buildMemoryRecallBlock } from '@/lib/ai/tools';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
 import { STYLE_REMINDER } from '@/lib/ai/staff-chat';
@@ -513,6 +517,7 @@ async function runStaffChatWithTools(
     BASE_SYSTEM_PROMPT +
     (agentBlock ? `\n\n---\n${agentBlock}\n---` : '') +
     STAFF_TOOL_GUIDANCE +
+    AUTHORING_GUIDANCE +
     SEARCH_STRATEGY_GUIDANCE +
     DOMAIN_GLOSSARY +
     memoryBlock +

@@ -129,3 +129,37 @@ export const DOMAIN_GLOSSARY =
   'uttryckligen att lån/bidrag räknas separat. Vill användaren ha allt mottaget ' +
   'kapital, summera per `type` och redovisa uppdelningen, inte en klumpsumma ' +
   'kallad "investeringar". `amount_sek` är beloppet; `source` är finansiären.';
+
+/**
+ * Hur agenten FÖRFATTAR saker i plattformen — intag-moduler i
+ * Startupkompassen (§ 23), workshops (§ 18) och årshjuls-aktiviteter (§ 30).
+ * Delas av dashboardchatten och trådchatten så att reglerna aldrig divergerar.
+ * Extra viktigt vid röststyrning (§ 31): talat språk är otydligare än skrivet,
+ * så agenten ska sammanfatta och stämma av innan den skapar något.
+ */
+export const AUTHORING_GUIDANCE =
+  '\n\nATT BYGGA SAKER ÅT PERSONALEN (moduler, workshops, årshjul):\n' +
+  '- `create_compass_module` + `add_compass_question`: bygger en intag-modul i ' +
+  'Startupkompassen (/inflode). Så här arbetar du: (1) fastställ NAMN och ' +
+  'FLÖDESTYP — quiz (frågor med poäng → resultatprofil), wizard (formulär, ' +
+  'inga poäng) eller chat (AI-samtal). Framgår inte typen: FRÅGA, gissa ' +
+  'aldrig. (2) Sammanfatta modulen och frågorna i punktform och be om ett ' +
+  'kort "ja" innan du skapar något. (3) Skapa modulen och lägg sedan till ' +
+  'frågorna EN i taget med `add_compass_question`, i rätt ordning. ' +
+  '(4) Berätta att modulen är ett OPUBLICERAT utkast och länka till ' +
+  '`admin_path` som verktyget returnerar. Du kan inte publicera modulen eller ' +
+  'slå på dess publika URL — det gör personalen själv.\n' +
+  '- Frågor med svarsalternativ (`choice`/`multi_choice`) behöver minst två ' +
+  'alternativ. I ett quiz ger du varje alternativ en `score`; högre poäng = ' +
+  'mognare/mer redo. Har personalen beskrivit resultatprofiler ("grön/gul/' +
+  'röd") — nämn att profilerna och deras poängintervall ställs in i ' +
+  'modul-admin.\n' +
+  '- `create_workshop`: skapar ett workshop-UTKAST i /education med mål, ' +
+  'instruktioner och (valfritt) moduler med textmoment. Film och bild laddas ' +
+  'upp av en människa i byggaren, och det är också hon som publicerar och ' +
+  'tilldelar bolag.\n' +
+  '- `create_annual_wheel_item`: lägger in aktiviteter i verksamhetskalendern ' +
+  '(en post per månad om den återkommer).\n' +
+  '- GEMENSAM REGEL: bekräfta innan du skapar, skapa sedan ALLT i samma svar ' +
+  '(inget "jag återkommer"), och avsluta med en kort kvittens: vad som ' +
+  'skapades, var det finns och vad personalen behöver göra själv.'
