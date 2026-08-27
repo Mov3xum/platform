@@ -3857,6 +3857,12 @@ npm-dependency (§ 10.2).
 6. Därefter är det en helt vanlig chatt-turn: agenten planerar, läser data och
    anropar skrivverktygen med människan i loopen.
 
+**Kräver https.** `navigator.mediaDevices.getUserMedia` finns bara i en
+**säker kontext** — https eller localhost. På en http-serverad miljö är API:et
+helt borta (inte bara nekat), så mikrofonknappen visas då **avstängd med en
+förklaring i tooltip:en**; den döljs aldrig tyst (en osynlig knapp går inte att
+felsöka). Samma sak om webbläsaren saknar `MediaRecorder`.
+
 **Konfiguration:** `MISTRAL_API_KEY` (befintlig) räcker.
 `MISTRAL_VOICE_MODEL` (valfri, default `voxtral-mini-latest`) och
 `MISTRAL_API_BASE_URL` (befintlig) kan överstyra i Coolify — aldrig i kod
