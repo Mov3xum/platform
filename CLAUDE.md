@@ -2938,14 +2938,32 @@ fallback på interna `slug` — resolvePublicModule matchar båda) och renderar
   är sanningen för modul-till-modul-navigering). Externa CTA-länkar lämnas
   orörda.
 
-**Stegindelad setup-UI.** Modul-redigeringssidan
-(`/inflode/admin/modules/[slug]`) delar upp inställningarna i **fyra steg**
-(`ModuleSettingsForm`, client) i stället för en vägg av fält: 1) Grunder,
-2) Publik sida, 3) Flöde & innehåll, 4) Efter & nästa steg. Hela formuläret
+**Stegindelad setup-UI (omgjord 2026-08).** Modul-redigeringssidan
+(`/inflode/admin/modules/[slug]`) är en stegvis editor i **fem steg**
+(`components/compass/ModuleEditor.tsx`, client) där ETT steg syns i taget:
+1) Grunder (namn, typ, intern beskrivning), 2) Landningssida (rubrik,
+beskrivning, bild + video), 3) Frågor — `QuestionsManager` +
+`ResultBucketsEditor` (quiz) ligger nu I steget, inte som eget kort bredvid;
+för chat-moduler visas samtalsinställningarna här, 4) Målgrupp & uppgifter
+(målgrupp, obligatoriska kontaktfält, samtyckestext), 5) Efter slutförande
+(tack, kedja/`next_module`, lead-val, notiser, publicering). Formulärfälten
 ligger kvar i DOM:en (inaktiva steg döljs med `display:none`) så en enda submit
-postar ALLA fält till `updateModuleAction` — stegen är ren visuell uppdelning,
-ingen ändrad dataväg. Frågor (`QuestionsManager`) och resultatprofiler
-(`ResultBucketsEditor`, visas bara när flow-typ = quiz) ligger kvar.
+postar ALLA fält till `updateModuleAction` — ingen ändrad dataväg.
+`QuestionsManager` ligger UTANFÖR `<form>`-elementet (frågor sparas direkt per
+fråga via egna server actions); `ResultBucketsEditor`s dolda fält associeras
+via `form`-attributet. "Skapa modul"-sidan är avsiktligt minimal (namn + typ) —
+allt annat byggs i stegen.
+
+**Omslagsmedia (bild + video).** `compass_modules.hero_image` (migration
+1700000122) kompletteras av **`hero_video`** (migration **1700000141**, filfält
+200 MB, video-mimes). Uppladdning sker DIREKT vid filval via route-handlern
+`/api/inflode/modules/[id]/media` (inte server action — stora videos ryms inte
+i `serverActions.bodySizeLimit`, § 18.2-mönstret; RBAC admin/incubator_lead/
+coach + tenant-check i handlern, superuser-fallback per § 21.3, validering via
+`validateWorkshopMediaFile`). Båda filerna är avsiktligt PUBLIKT
+marknadsföringsmaterial (ingen PII) och serveras tokenlöst; på `/m/<slug>`
+vinner videon när båda finns (bilden blir `poster`). Compass är fortsatt
+migration-only (§ 23.4).
 
 **Riskklass:** oförändrad (n/a — navigation + konfiguration, ingen AI-inferens,
 ingen ny PII-väg; `next_module` är en intern modul-relation och whitelistas
