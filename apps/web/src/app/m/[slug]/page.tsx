@@ -8,7 +8,7 @@ import {
   getPublicTenantBranding,
   getNextModuleLink
 } from '@/lib/compass/public';
-import { moduleHeroImageUrl } from '@/lib/compass/media';
+import { moduleHeroImageUrl, moduleHeroVideoUrl } from '@/lib/compass/media';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,6 +55,7 @@ export default async function PublicModulePage({
       ? module.theme_color
       : '#002c40';
   const heroImageUrl = moduleHeroImageUrl(module);
+  const heroVideoUrl = moduleHeroVideoUrl(module);
   const isChat = module.flow_type === 'chat';
 
   const title = module.welcome_title || module.name;
@@ -85,14 +86,26 @@ export default async function PublicModulePage({
           )}
         </header>
 
-        {/* Omslagsbild — visas bara när en bild laddats upp (ingen blå
-            gradient-fallback; titeln visas ändå i hero-texten nedan) */}
-        {heroImageUrl && (
+        {/* Omslag — video vinner när båda finns (bilden blir startbild).
+            Visas bara när media laddats upp (ingen blå gradient-fallback;
+            titeln visas ändå i hero-texten nedan) */}
+        {heroVideoUrl ? (
+          <div className="mx-compass-hero">
+            <video
+              src={heroVideoUrl}
+              className="mx-compass-hero-img"
+              controls
+              playsInline
+              preload="metadata"
+              poster={heroImageUrl ?? undefined}
+            />
+          </div>
+        ) : heroImageUrl ? (
           <div className="mx-compass-hero">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={heroImageUrl} alt="" className="mx-compass-hero-img" />
           </div>
-        )}
+        ) : null}
 
         {/* Hero-text */}
         <div className="mx-compass-head">
