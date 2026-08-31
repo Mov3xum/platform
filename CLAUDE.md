@@ -945,16 +945,20 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
   (CSS/JS/fonter/bilder) till https på en http-serverad staging utan
   TLS, vilket gör sidan helt ostylad. `MOVEXUM_ALLOW_INSECURE_COOKIES`
   stänger av det explicit.
-- **Force-HTTPS (A.8.9):** middleware:n tvingar https på app-nivå
-  (defense-in-depth ovanpå Coolifys proxy-redirect, se `infra/SSL.md`):
-  en produktions-request med `x-forwarded-proto: http` får `308` →
-  `https://<host><path>`. Redirecten triggas ENBART när en edge-proxy
-  uttryckligen rapporterat http — container-interna anrop utan headern
-  (Coolify-healthchecks, PB-hookarnas POST mot `http://moveum-web:3000`)
-  redirectas aldrig, och `/api/health` + `/api/internal/` är explicit
-  undantagna. `MOVEXUM_ALLOW_INSECURE_COOKIES=true` stänger av
-  redirecten för en medvetet http-serverad deploy (samma escape-hatch
-  som ovan).
+- **Force-HTTPS (A.8.9):** middleware:n kan tvinga https på app-nivå
+  (defense-in-depth ovanpå Coolifys proxy-redirect, se `infra/SSL.md`) —
+  **OPT-IN via env `MOVEXUM_FORCE_HTTPS=true`**, default AV. Sätt
+  flaggan FÖRST när hosten har ett verifierat giltigt cert: en
+  på-per-default-variant gjorde plattformen onåbar när den deployades
+  mot http-only sslip.io-hosts utan cert-möjlighet (incident
+  2026-08-31). Aktiverad ger en produktions-request med
+  `x-forwarded-proto: http` `308` → `https://<host><path>`. Redirecten
+  triggas ENBART när en edge-proxy uttryckligen rapporterat http —
+  container-interna anrop utan headern (Coolify-healthchecks,
+  PB-hookarnas POST mot `http://moveum-web:3000`) redirectas aldrig,
+  och `/api/health` + `/api/internal/` är explicit undantagna.
+  `MOVEXUM_ALLOW_INSECURE_COOKIES=true` vinner alltid över flaggan
+  (samma escape-hatch som ovan).
 - **Auth-cookie:** `httpOnly` + `SameSite=Lax`. `Secure` följer det
   faktiska request-protokollet via `x-forwarded-proto`
   (`shouldUseSecureCookie` i `lib/actions/auth.ts`): https → `Secure`,
