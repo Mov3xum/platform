@@ -12,14 +12,18 @@ repot. Appen är redan byggd för att auto-detektera HTTPS via
 `Secure`-cookies (`apps/web/src/lib/actions/auth.ts`) och CSP-direktivet
 `upgrade-insecure-requests` (`apps/web/src/middleware.ts`) på automatiskt.
 
-Dessutom **tvingar appen själv https** (defense-in-depth ovanpå Coolifys
-force-https-toggle): middleware:n svarar `308` → `https://<host><path>` när
-en request kommer in med `x-forwarded-proto: http` i produktion. Redirecten
-triggas ALDRIG för container-interna anrop (Coolify-healthchecks, PB-hookarnas
-POST mot `http://moveum-web:3000`) — de saknar `x-forwarded-proto`-headern —
-och `/api/health` + `/api/internal/` är dessutom explicit undantagna.
-`MOVEXUM_ALLOW_INSECURE_COOKIES=true` stänger av redirecten för en medvetet
-http-serverad deploy (samma escape-hatch som Secure-cookies).
+Dessutom kan **appen själv tvinga https** (defense-in-depth ovanpå Coolifys
+force-https-toggle): med env `MOVEXUM_FORCE_HTTPS=true` svarar middleware:n
+`308` → `https://<host><path>` när en request kommer in med
+`x-forwarded-proto: http` i produktion. **OPT-IN — sätt flaggan FÖRST när
+certet är utfärdat och verifierat.** Default är AV: en på-per-default-
+redirect gjorde plattformen helt onåbar när den deployades mot http-only
+sslip.io-hosts (incident 2026-08-31 — 308 mot en https-lyssnare utan giltigt
+cert). Redirecten triggas ALDRIG för container-interna anrop
+(Coolify-healthchecks, PB-hookarnas POST mot `http://moveum-web:3000`) — de
+saknar `x-forwarded-proto`-headern — och `/api/health` + `/api/internal/` är
+dessutom explicit undantagna. `MOVEXUM_ALLOW_INSECURE_COOKIES=true` vinner
+alltid över flaggan (samma escape-hatch som Secure-cookies).
 
 ## Ordning (viktigt)
 
@@ -76,6 +80,7 @@ pocketbase-production.
 | `NEXT_PUBLIC_POCKETBASE_URL_STAGING` / `_PRODUCTION` | `https://…sslip.io` |
 | `NEXT_PUBLIC_APP_URL` | `https://<web-host>` (per miljö; används i verifieringsmail) |
 | `MOVEXUM_ALLOW_INSECURE_COOKIES` | **rensa / ≠ `true`** → Secure-cookies + upgrade-insecure-requests slås på |
+| `MOVEXUM_FORCE_HTTPS` | `true` — MEN först efter att `https://…` verifierats med giltigt cert (opt-in app-redirect http→https) |
 
 Lämna oförändrat (internt docker-nät, ingen TLS internt):
 
@@ -83,10 +88,10 @@ Lämna oförändrat (internt docker-nät, ingen TLS internt):
 - `MOVEXUM_WEB_URL` (PB-hooks) = `http://moveum-web:3000` — hookarna anropar
   web-containern container-till-container.
 
-> **OBS för en http-only-deploy (utan cert):** app-redirecten ovan aktiveras
-> av att Traefik skickar `x-forwarded-proto: http`. Kör en miljö medvetet
-> utan TLS måste `MOVEXUM_ALLOW_INSECURE_COOKIES=true` vara satt — annars
-> redirectas besökaren till en https-lyssnare som inte finns.
+> **OBS för en http-only-deploy (utan cert):** lämna `MOVEXUM_FORCE_HTTPS`
+> osatt (app-redirecten är opt-in och förblir då av). Sätts flaggan mot en
+> host utan giltigt cert redirectas besökaren till en https-lyssnare som
+> inte finns → plattformen blir onåbar.
 
 ## Verifiering efter deploy
 

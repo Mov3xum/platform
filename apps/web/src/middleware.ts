@@ -87,18 +87,23 @@ export function middleware(req: NextRequest) {
   const isHttps = (forwardedProto ?? req.nextUrl.protocol.replace(':', '')) === 'https';
 
   // Force-HTTPS (CLAUDE.md § 10.3 A.8.9) — app-nivå-redirect som defense-in-
-  // depth ovanpå Coolifys proxy-toggle (infra/SSL.md). Redirecta ENBART när en
-  // edge-proxy uttryckligen rapporterat att klienten kom in över http
-  // (`x-forwarded-proto: http`). Saknas headern är requesten container-intern
-  // (Coolify-healthchecks, PB-hookarnas anrop mot http://moveum-web:3000) och
-  // får ALDRIG redirectas — det finns ingen https-lyssnare på docker-nätet.
-  // `MOVEXUM_ALLOW_INSECURE_COOKIES=true` stänger av redirecten för en
-  // medvetet http-serverad deploy (samma escape-hatch som Secure-cookies och
-  // upgrade-insecure-requests). Interna endpoints undantas som extra skydd.
+  // depth ovanpå Coolifys proxy-toggle (infra/SSL.md). OPT-IN via env
+  // `MOVEXUM_FORCE_HTTPS=true`: slå BARA på när ett giltigt cert faktiskt
+  // finns på hosten. Default AV — staging/production har körts http-only på
+  // sslip.io-hosts där Let's Encrypt-cert inte kan utfärdas (global kvot, se
+  // infra/SSL.md), och en på-per-default-redirect gjorde då hela plattformen
+  // onåbar (308 → https-lyssnare utan giltigt cert). Redirecta dessutom
+  // ENBART när en edge-proxy uttryckligen rapporterat att klienten kom in
+  // över http (`x-forwarded-proto: http`) — saknas headern är requesten
+  // container-intern (Coolify-healthchecks, PB-hookarnas anrop mot
+  // http://moveum-web:3000) och får ALDRIG redirectas.
+  // `MOVEXUM_ALLOW_INSECURE_COOKIES=true` vinner alltid (samma escape-hatch
+  // som Secure-cookies). Interna endpoints undantas som extra skydd.
+  const forceHttps = process.env.MOVEXUM_FORCE_HTTPS === 'true';
   const allowInsecure = process.env.MOVEXUM_ALLOW_INSECURE_COOKIES === 'true';
   const isInternalPath =
     pathname.startsWith('/api/health') || pathname.startsWith('/api/internal/');
-  if (isProd && !allowInsecure && forwardedProto === 'http' && !isInternalPath) {
+  if (isProd && forceHttps && !allowInsecure && forwardedProto === 'http' && !isInternalPath) {
     const url = req.nextUrl.clone();
     url.protocol = 'https:';
     // Traefik bevarar Host, men respektera x-forwarded-host om proxyn satt den.
