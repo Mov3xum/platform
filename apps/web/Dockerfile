@@ -22,6 +22,8 @@ COPY package.json yarn.lock ./
 COPY apps/web ./apps/web
 COPY packages/shared ./packages/shared
 
+# Enforce standard NODE_ENV=production during Next.js build regardless of host/Coolify env
+ENV NODE_ENV=production
 # max-old-space-size must cover both `next build` and the separate
 # trace-collector child process. 1536 MB OOM:ade i "Collecting build
 # traces..." på Coolify-hosten — bumpa till 4096 och exportera så att
