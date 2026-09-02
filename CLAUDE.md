@@ -488,7 +488,10 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
 - **Chattens skrivverktyg:** bara när actor är en agent (staff-chatt)
   exponeras `update_startup_field` (whitelist: `next_step`, `irl_level`),
   `create_startup_activity` och `update_activity_field` (`title`,
-  `description`, `status` — t.ex. markera uppgift `done`). Alla går via
+  `description`, `status` — t.ex. markera uppgift `done`), samt den
+  utökade skrivytan i § 33 (tilldelningar, kanban, events, uppdrags-utkast,
+  de minimis, KPI/kapital, schemaläggning, icke-konfidentiella
+  anteckningar). Alla går via
   det delade skrivlagret (`lib/core/write`) som enforce:ar whitelist +
   tenant + validering och loggar i `agent_actions`. Tool-schemat är hint
   för modellen, inte säkerhetsgränsen.
@@ -1705,7 +1708,7 @@ actor krävs). Tabellen visar vad som tillkommer per yta:
 
 | Körning | Actor | Tillkommer utöver läs-/sökverktygen |
 |---|---|---|
-| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`), `memory_read` + `memory_write` |
+| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`, samt § 33: `assign_workshop`, `assign_education_document`, `create_task`/`move_task`, `create_event`, `create_mission`, `register_de_minimis_support`, `add_startup_kpi`, `add_capital_round`, `schedule_agent`, `create_startup_note`), `memory_read` + `memory_write` |
 | Toolbox (staff) | — (read-only) | `memory_read` |
 | Toolbox (icke-staff) | — (read-only) | — |
 | Schemalagd | — (read-only) | `memory_read` |
@@ -4013,9 +4016,14 @@ två befintliga källor:
 2. **`agent_actions`** — det delade skrivlagrets append-only-audit (§ 16),
    översatt till läsbara feed-poster i `apps/web/src/lib/feed/agent-log.ts`
    (`loadAgentLogEntries`): årshjulet (aktiviteter + kategorier),
-   Startupkompassen (moduler + frågor), workshops och bolagsfält-ändringar.
+   Startupkompassen (moduler + frågor), workshops och bolagsfält-ändringar,
+   samt hela § 33-ytan (dokumenttilldelningar, kanban-kort, events,
+   uppdrags-utkast, de minimis-stöd, KPI:er, kapital, agent-scheman,
+   anteckningar — `workshop_assignments` hoppas över eftersom tilldelningen
+   redan skapar en egen activities-rad).
    Varje rad får en intern länk (`/arshjul`, `/inflode/admin/modules/<slug>`,
-   `/education`, `/startups/<id>`) och en "AI"-markering när åtgärden
+   `/education`, `/startups/<id>`, `/uppdrag/<id>`, `/events/<id>`,
+   `/de-minimis/<id>`, `/toolbox/<id>` …) och en "AI"-markering när åtgärden
    utfördes av chatt-agenten (`actor_kind='agent'`, art. 13-transparens).
 
 Dashboarden visar de 5 senaste och expanderar stegvis ("Visa fler", +15 åt
@@ -4042,3 +4050,52 @@ filter **Ändringslogg** (`?kind=log`).
   i loggen är redan PII-fria (skrivlagrets ansvar, § 16.4); feed-titlarna
   byggs av verksamhetsdata (titlar, modulnamn, fältetiketter). Aktörsnamn
   visas endast internt (staff-UI). Ingen AI-inferens → riskklass n/a.
+
+---
+
+## 33. Utökad chatt-skrivyta — chatten som samlingspunkt
+
+### 33.1 Översikt
+
+Den interaktiva staff-chatten (§ 16.3, agent-actor) kan utöver § 9.3:s
+grundverktyg UTFÖRA vardagsåtgärder i plattformen. Alla går genom **det
+delade skrivlagret** (`lib/core/write/*`): rollpolicy i `writable-fields.ts`
+(agenten kör å den inloggades vägnar — aldrig mer än rollen får i UI:t),
+validering i `validators.ts`, tenant-stämpel från actorn och
+`agent_actions`-audit → varje åtgärd syns automatiskt i den samlade
+aktivitetsloggen (§ 32) med klickbar länk.
+
+| Verktyg | Gör | Får INTE / spärr |
+|---|---|---|
+| `assign_workshop` | Tilldelar workshop → bolag (+ activities-rad som UI:t) | Dubbeltilldelning stoppas; medarbetare/möte kopplas av människa i /education |
+| `assign_education_document` | Tilldelar utbildningsdokument → bolag (idempotent upsert) | — |
+| `create_task` / `move_task` | Kanban-kort på bolags-/uppdragstavla + kolumnflytt | `assignees` agent-nekad (kan inte slå upp användar-id:n, `users` denylistad § 9.3) |
+| `create_event` | Event i kalendern (status `planned`, roller admin/incubator_lead/coach) | Inbjudningar (`event_signups`) görs av människa i /events |
+| `create_mission` | Uppdrag som **UTKAST** (status `draft`, actor = lead) | Team/recipients sätts av människa (AI-teamförslaget finns i /uppdrag-formuläret, § 29.3) |
+| `register_de_minimis_support` | De minimis-stöd med lazy enhet (§ 20.5) | **`kanBevilja` server-side** — förordnings-/samlat tak kan aldrig rundas; personnummer-sanering av `syfte` |
+| `add_startup_kpi` | KPI-rad; äldre `is_current` med samma namn avmarkeras | — |
+| `add_capital_round` | Mottaget kapital; `purpose` personnummer-saneras (§ 15.6-regexen) | — |
+| `schedule_agent` | Upsert av `tool_schedules` (§ 12), samma cron-parser + `canRunTool` | Roller admin/incubator_lead (`SCHEDULE_MANAGE`) |
+| `create_startup_note` | Anteckning på bolagskort | **`confidential=false` tvingas**; anteckningstexten loggas ALDRIG i audit (bara längd) |
+
+### 33.2 Regelefterlevnad
+
+- **Människa-i-loopen (art. 14 / § 16.3):** verktygen exponeras BARA för
+  agent-actor i den interaktiva chatten (`includeWrites`) — autonoma
+  körningar (toolbox/schema/djupjobb) förblir read-only. Publicering,
+  teamtilldelning och inbjudningar är fortsatt mänskliga beslut i UI:t.
+- **RBAC (ISO 27001 A.5.15–A.5.18):** `canCreateRecord`/`canWriteField`
+  prövar den triggande användarens roller; referensposter (bolag, workshop,
+  dokument, uppdrag, verktyg) tenant-verifieras alltid (`getRecordInTenant`
+  i `lib/core/write/helpers.ts`); PB-skrivningar via användartoken med
+  superuser-fallback endast vid PB v0.23.4-rule-eval-buggen (§ 21.3).
+- **GDPR § 5:** inga nya kollektioner/fält; inga nya AI-läsvägar
+  (`lib/ai/context.ts` orörd). `after_value` i audit är PII-fri
+  (bolagsnamn/titlar/belopp — aldrig anteckningstext, aldrig person-PII).
+- **Riskklass (art. 11):** n/a — deterministiska mutationer via delade
+  lagret; ingen ny AI-inferens. De minimis-spärren är samma rena,
+  enhetstestade logik som UI:t (§ 20.3).
+- **Ingen divergerande säkerhetskopia:** där UI-flödet har affärsregler
+  (kanBevilja, cron-validering, idempotent upsert, aktivitetslogg vid
+  workshop-tilldelning) återanvänder skrivlagret samma delade/pura funktioner
+  (`@platform/shared`, `lib/de-minimis/data`, `lib/scheduling/cron`).

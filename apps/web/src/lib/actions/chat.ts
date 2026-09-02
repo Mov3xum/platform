@@ -155,6 +155,18 @@ const STAFF_TOOL_GUIDANCE =
   '- `update_activity_field`: uppdatera en befintlig aktivitets `title`, ' +
   '`description` eller `status` (t.ex. markera en uppgift som `done`). ' +
   'Slå upp aktivitetens id med `query_collection` på `activities` först.\n' +
+  '- Du kan också UTFÖRA åtgärder direkt (§ 33): tilldela workshops ' +
+  '(`assign_workshop`) och utbildningsdokument (`assign_education_document`) ' +
+  'till bolag, skapa och flytta kanban-kort (`create_task`/`move_task`), boka ' +
+  'events (`create_event`), skapa uppdrags-UTKAST (`create_mission`), ' +
+  'registrera de minimis-stöd (`register_de_minimis_support` — prövas ' +
+  'automatiskt mot EU-taken och blockeras vid överskridande), lägga in KPI:er ' +
+  'och mottaget kapital (`add_startup_kpi`/`add_capital_round`), schemalägga ' +
+  'AI-agenter (`schedule_agent`, kräver admin/incubator_lead) och skriva ' +
+  'icke-konfidentiella anteckningar på bolagskort (`create_startup_note`). ' +
+  'Slå alltid upp id:n via `query_collection` först. Publicering, ' +
+  'teamtilldelning och inbjudningar gör en människa i UI:t — säg det när det ' +
+  'är nästa steg.\n' +
   '- `memory_read` / `memory_write`: ditt tvärsessions-minne (per tenant). När ' +
   'personalen RÄTTAR dig eller lär dig en bestående regel ("räkna inte lån som ' +
   'investeringar", "Bolag X heter numera Y") — spara det med `memory_write` ' +

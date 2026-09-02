@@ -40,6 +40,22 @@ import {
   addCompassQuestion,
   updateCompassModuleField,
   createWorkshop,
+  assignWorkshop,
+  assignEducationDocument,
+  createTask,
+  moveTask,
+  TASK_KINDS,
+  createEvent,
+  EVENT_TYPES,
+  createMissionDraft,
+  MISSION_TYPES,
+  addStartupKpi,
+  addCapitalRound,
+  createStartupNote,
+  CAPITAL_TYPES,
+  registerDeMinimisSupport,
+  FORORDNINGAR,
+  scheduleAgent,
   type AnnualWheelWritableField,
   type CompassModuleWritableField,
   type Actor,
@@ -903,6 +919,283 @@ export function buildChatTools(
         }
       }
     });
+
+    // ── Utökad chatt-skrivyta (§ 33) ─────────────────────────────────────
+    // Tilldelningar, kanban, möten, uppdrag, CRM-registreringar, de minimis
+    // och schemaläggning. Allt går via det delade skrivlagret (rollpolicy +
+    // validering + tenant + agent_actions-logg) och syns i aktivitetsloggen.
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'assign_workshop',
+        description:
+          'Tilldelar en befintlig workshop till ett bolag. Slå upp workshop-id ' +
+          'via query_collection mot workshops och bolags-id mot startups. ' +
+          'Bolaget ser tilldelningen under sina aktiviteter. Medarbetare och ' +
+          'möte kopplas på av en människa i /education.',
+        parameters: {
+          type: 'object',
+          properties: {
+            workshop_id: { type: 'string', description: 'PocketBase-id för workshopen.' },
+            startup_id: { type: 'string', description: 'PocketBase-id för bolaget.' },
+            due_date: { type: 'string', description: 'Valfri deadline (ÅÅÅÅ-MM-DD).' },
+            instructions: {
+              type: 'string',
+              description: 'Valfria instruktioner till bolaget (max 2000 tecken).'
+            }
+          },
+          required: ['workshop_id', 'startup_id']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'assign_education_document',
+        description:
+          'Tilldelar ett uppladdat utbildningsdokument till ett bolag ' +
+          '(idempotent — en befintlig tilldelning uppdateras). Slå upp ' +
+          'dokument-id via query_collection mot education_documents.',
+        parameters: {
+          type: 'object',
+          properties: {
+            document_id: { type: 'string', description: 'PocketBase-id för dokumentet.' },
+            startup_id: { type: 'string', description: 'PocketBase-id för bolaget.' },
+            instructions: {
+              type: 'string',
+              description: 'Valfria instruktioner till bolaget (max 2000 tecken).'
+            },
+            due_date: { type: 'string', description: 'Valfri deadline (ÅÅÅÅ-MM-DD).' }
+          },
+          required: ['document_id', 'startup_id']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_task',
+        description:
+          'Skapar ett kanban-kort (uppgift). Koppla det till ett bolags tavla ' +
+          '(startup_id), ett uppdrags tavla (mission_id) eller lämna fristående. ' +
+          'Kollegor tilldelas av en människa på tavlan — gissa aldrig vem som ' +
+          'ska göra uppgiften.',
+        parameters: {
+          type: 'object',
+          properties: {
+            description: { type: 'string', description: 'Kortets text (max 500 tecken).' },
+            startup_id: { type: 'string', description: 'Bolagets id (valfritt).' },
+            mission_id: { type: 'string', description: 'Uppdragets id (valfritt, ej ihop med startup_id).' },
+            status: {
+              type: 'string',
+              enum: ['backlog', 'open', 'in_progress', 'review', 'blocked', 'done'],
+              description: 'Kolumn på tavlan. Default open (Att göra).'
+            },
+            kind: {
+              type: 'string',
+              enum: [...TASK_KINDS],
+              description: 'Typ av uppgift (call/meeting/email/prep/followup/admin/other). Default other.'
+            },
+            due_at: { type: 'string', description: 'Valfri deadline (ÅÅÅÅ-MM-DD).' }
+          },
+          required: ['description']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'move_task',
+        description:
+          'Flyttar ett kanban-kort till en annan kolumn — t.ex. markera en ' +
+          'uppgift som klar (done). Slå upp kortets id via query_collection ' +
+          'mot tasks.',
+        parameters: {
+          type: 'object',
+          properties: {
+            task_id: { type: 'string', description: 'PocketBase-id för uppgiften.' },
+            status: {
+              type: 'string',
+              enum: ['backlog', 'open', 'in_progress', 'review', 'blocked', 'done'],
+              description: 'Kolumnen kortet ska flyttas till.'
+            }
+          },
+          required: ['task_id', 'status']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_event',
+        description:
+          'Skapar ett event/möte i kalendern (incubator_events) med status ' +
+          '"planned". Deltagare bjuds in av en människa i /events efteråt. ' +
+          'Ange tider i ISO-format; fråga om datum/tid är otydligt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Eventets namn (max 200 tecken).' },
+            type: {
+              type: 'string',
+              enum: [...EVENT_TYPES],
+              description: 'Typ av event. Default other.'
+            },
+            starts_at: { type: 'string', description: 'Starttid, t.ex. 2026-09-10T14:00:00+02:00.' },
+            ends_at: { type: 'string', description: 'Valfri sluttid (ISO).' },
+            location: { type: 'string', description: 'Valfri plats (max 200 tecken).' },
+            description: { type: 'string', description: 'Valfri beskrivning.' }
+          },
+          required: ['name', 'starts_at']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_mission',
+        description:
+          'Skapar ett UTKAST till ett uppdrag (/uppdrag) — t.ex. en ' +
+          'bolagsutmaning som ett tvärfunktionellt team ska formas runt. ' +
+          'Teamet kopplas på (gärna med AI-teamförslaget) och uppdraget ' +
+          'startas av en människa i /uppdrag.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Uppdragets titel (2–200 tecken).' },
+            type: {
+              type: 'string',
+              enum: [...MISSION_TYPES],
+              description: 'Typ av uppdrag. Default custom.'
+            },
+            description: { type: 'string', description: 'Vad uppdraget går ut på.' },
+            startup_id: { type: 'string', description: 'Valfritt bolag uppdraget gäller.' },
+            due_date: { type: 'string', description: 'Valfri deadline (ÅÅÅÅ-MM-DD).' }
+          },
+          required: ['title']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'register_de_minimis_support',
+        description:
+          'Registrerar ett mottaget de minimis-stöd för ett bolag (§ 20). ' +
+          'Posten prövas automatiskt mot förordningens tak och det samlade ' +
+          'taket (300 000 EUR) och BLOCKERAS om taket skulle överskridas. ' +
+          'EUR är sanning — ange belopp_eur, eller belopp_sek + valutakurs så ' +
+          'härleds EUR. Beslutsdatum = datumet för stödbeslutet, inte utbetalningen.',
+        parameters: {
+          type: 'object',
+          properties: {
+            startup_id: { type: 'string', description: 'PocketBase-id för bolaget.' },
+            forordning: {
+              type: 'string',
+              enum: [...FORORDNINGAR],
+              description: 'ALLMAN (300k), SGEI (750k), JORDBRUK (50k) eller FISKE (30k EUR).'
+            },
+            stodgivare: { type: 'string', description: 'Vem som gav stödet (t.ex. Vinnova, Almi).' },
+            beslutsdatum: { type: 'string', description: 'Beslutsdatum (ÅÅÅÅ-MM-DD).' },
+            belopp_eur: { type: 'number', description: 'Belopp i EUR (bruttobidragsekvivalent).' },
+            belopp_sek: { type: 'number', description: 'Belopp i SEK (om EUR saknas).' },
+            valutakurs: { type: 'number', description: 'SEK per EUR (krävs ihop med belopp_sek).' },
+            syfte: { type: 'string', description: 'Vad stödet gavs för (max 500 tecken).' },
+            beslut_referens: { type: 'string', description: 'Valfri beslutsreferens/diarienummer.' }
+          },
+          required: ['startup_id', 'forordning', 'stodgivare', 'beslutsdatum']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'add_startup_kpi',
+        description:
+          'Registrerar ett KPI-värde för ett bolag (startup_kpis). Sätts som ' +
+          'aktuellt värde (is_current) om inget annat anges — äldre värden med ' +
+          'samma KPI-namn avmarkeras automatiskt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            startup_id: { type: 'string', description: 'PocketBase-id för bolaget.' },
+            kpi_name: { type: 'string', description: 'KPI-namn, t.ex. "MRR" eller "Antal kunder".' },
+            value_text: { type: 'string', description: 'Värdet som text, t.ex. "120 000 kr".' },
+            value_numeric: { type: 'number', description: 'Valfritt numeriskt värde för grafer.' },
+            unit: { type: 'string', description: 'Valfri enhet, t.ex. "kr", "st", "%".' },
+            measured_at: { type: 'string', description: 'Mätdatum (ÅÅÅÅ-MM-DD). Default idag.' },
+            is_current: { type: 'boolean', description: 'Är detta det aktuella värdet? Default ja.' }
+          },
+          required: ['startup_id', 'kpi_name', 'value_text']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'add_capital_round',
+        description:
+          'Registrerar mottaget kapital/stöd för ett bolag (capital_rounds) — ' +
+          't.ex. "Fixkod tog in 2 MSEK från Almi i augusti". Ange beloppet i ' +
+          'kronor.',
+        parameters: {
+          type: 'object',
+          properties: {
+            startup_id: { type: 'string', description: 'PocketBase-id för bolaget.' },
+            type: {
+              type: 'string',
+              enum: [...CAPITAL_TYPES],
+              description: 'grant (bidrag), equity (ägarkapital), loan (lån), soft_funding, convertible, other.'
+            },
+            source: { type: 'string', description: 'Finansiär, t.ex. "Almi" eller "Vinnova".' },
+            amount_sek: { type: 'number', description: 'Belopp i SEK.' },
+            received_at: { type: 'string', description: 'Datum (ÅÅÅÅ-MM-DD).' },
+            purpose: { type: 'string', description: 'Valfritt: vad kapitalet/stödet gavs för.' }
+          },
+          required: ['startup_id', 'type', 'source', 'amount_sek', 'received_at']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'schedule_agent',
+        description:
+          'Schemalägger en AI-agent att köras automatiskt (t.ex. "kör ' +
+          'portföljöversikten varje måndag 07:00"). Ett schema per agent — ' +
+          'ett befintligt uppdateras. Cron är 5-fält (minut timme dag månad ' +
+          'veckodag) i angiven tidszon, default Europe/Stockholm. ' +
+          'Kräver admin/incubator_lead.',
+        parameters: {
+          type: 'object',
+          properties: {
+            tool_id: { type: 'string', description: 'PocketBase-id för agenten (tools-raden).' },
+            cron_expression: { type: 'string', description: 'T.ex. "0 7 * * 1" = måndagar 07:00.' },
+            timezone: { type: 'string', description: 'IANA-tidszon. Default Europe/Stockholm.' },
+            enabled: { type: 'boolean', description: 'false pausar schemat. Default true.' }
+          },
+          required: ['tool_id', 'cron_expression']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_startup_note',
+        description:
+          'Skriver en ICKE-konfidentiell anteckning på ett bolagskort (notes). ' +
+          'Konfidentiella anteckningar kan du inte skriva — de görs i UI:t. ' +
+          'Skriv aldrig personuppgifter i anteckningen.',
+        parameters: {
+          type: 'object',
+          properties: {
+            startup_id: { type: 'string', description: 'PocketBase-id för bolaget.' },
+            body: { type: 'string', description: 'Anteckningens text (max 8000 tecken).' }
+          },
+          required: ['startup_id', 'body']
+        }
+      }
+    });
   }
 
   // Tvärsessions-minne (Fas 2). memory_read är read-only och kan ges till
@@ -1198,6 +1491,28 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: 'Uppdaterar modulen' };
     case 'create_workshop':
       return { tool: name, label: 'Skapar workshop-utkast' };
+    case 'assign_workshop':
+      return { tool: name, label: 'Tilldelar workshop' };
+    case 'assign_education_document':
+      return { tool: name, label: 'Tilldelar utbildningsdokument' };
+    case 'create_task':
+      return { tool: name, label: 'Skapar kanban-kort' };
+    case 'move_task':
+      return { tool: name, label: 'Flyttar kanban-kort' };
+    case 'create_event':
+      return { tool: name, label: 'Bokar event' };
+    case 'create_mission':
+      return { tool: name, label: 'Skapar uppdrags-utkast' };
+    case 'register_de_minimis_support':
+      return { tool: name, label: 'Registrerar de minimis-stöd' };
+    case 'add_startup_kpi':
+      return { tool: name, label: 'Registrerar KPI' };
+    case 'add_capital_round':
+      return { tool: name, label: 'Registrerar kapital' };
+    case 'schedule_agent':
+      return { tool: name, label: 'Schemalägger agent' };
+    case 'create_startup_note':
+      return { tool: name, label: 'Skriver anteckning' };
     case 'memory_read':
       return { tool: name, label: 'Läser minnet' };
     case 'memory_write':
@@ -2028,6 +2343,28 @@ export async function dispatchToolCall(
       return runUpdateCompassModuleField(args, ctx);
     case 'create_workshop':
       return runCreateWorkshop(args, ctx);
+    case 'assign_workshop':
+      return runAssignWorkshop(args, ctx);
+    case 'assign_education_document':
+      return runAssignEducationDocument(args, ctx);
+    case 'create_task':
+      return runCreateTask(args, ctx);
+    case 'move_task':
+      return runMoveTask(args, ctx);
+    case 'create_event':
+      return runCreateEvent(args, ctx);
+    case 'create_mission':
+      return runCreateMission(args, ctx);
+    case 'register_de_minimis_support':
+      return runRegisterDeMinimisSupport(args, ctx);
+    case 'add_startup_kpi':
+      return runAddStartupKpi(args, ctx);
+    case 'add_capital_round':
+      return runAddCapitalRound(args, ctx);
+    case 'schedule_agent':
+      return runScheduleAgent(args, ctx);
+    case 'create_startup_note':
+      return runCreateStartupNote(args, ctx);
     case 'memory_read':
       return runMemoryRead(args, ctx);
     case 'memory_write':
@@ -2623,6 +2960,334 @@ async function runCreateWorkshop(
       next_step:
         'Workshopen är ett utkast. Personalen kompletterar med bild/film och ' +
         'publicerar den i /education.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+// ── Utökad chatt-skrivyta (§ 33) — dispatch-funktioner ──────────────────────
+// Tunna omslag: typa upp argumenten och delegera till det delade skrivlagret
+// (rollpolicy, validering, tenant-verifiering och agent_actions-logg bor där).
+
+function argStr(args: Record<string, unknown>, key: string): string {
+  return typeof args[key] === 'string' ? (args[key] as string).trim() : '';
+}
+
+function argNum(args: Record<string, unknown>, key: string): number | undefined {
+  const v = args[key];
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+async function runAssignWorkshop(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await assignWorkshop(ctx.pb, actor, {
+    workshopId: argStr(args, 'workshop_id'),
+    startupId: argStr(args, 'startup_id'),
+    dueDate: argStr(args, 'due_date') || null,
+    instructions: argStr(args, 'instructions') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      assignment_id: result.value.assignmentId,
+      workshop: result.value.workshopTitle,
+      startup: result.value.startupName,
+      path: result.value.startupPath,
+      next_step:
+        'Tilldelningen syns på bolagskortet och i bolagets Aktiviteter. ' +
+        'Medarbetare/möte kopplas på i /education vid behov.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runAssignEducationDocument(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await assignEducationDocument(ctx.pb, actor, {
+    documentId: argStr(args, 'document_id'),
+    startupId: argStr(args, 'startup_id'),
+    instructions: argStr(args, 'instructions') || null,
+    dueDate: argStr(args, 'due_date') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      assignment_id: result.value.assignmentId,
+      document: result.value.documentTitle,
+      startup: result.value.startupName,
+      updated_existing: result.value.updatedExisting,
+      path: result.value.startupPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateTask(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createTask(ctx.pb, actor, {
+    description: typeof args.description === 'string' ? args.description : '',
+    startupId: argStr(args, 'startup_id') || null,
+    missionId: argStr(args, 'mission_id') || null,
+    status: argStr(args, 'status') || null,
+    kind: argStr(args, 'kind') || null,
+    dueAt: argStr(args, 'due_at') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      task_id: result.value.taskId,
+      status: result.value.status,
+      board_path: result.value.boardPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runMoveTask(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await moveTask(ctx.pb, actor, {
+    taskId: argStr(args, 'task_id'),
+    status: argStr(args, 'status')
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      task_id: result.value.taskId,
+      before: result.value.before,
+      after: result.value.after,
+      board_path: result.value.boardPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateEvent(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createEvent(ctx.pb, actor, {
+    name: typeof args.name === 'string' ? args.name : '',
+    type: argStr(args, 'type') || null,
+    startsAt: argStr(args, 'starts_at'),
+    endsAt: argStr(args, 'ends_at') || null,
+    location: argStr(args, 'location') || null,
+    description: typeof args.description === 'string' ? args.description : null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      event_id: result.value.eventId,
+      name: result.value.name,
+      starts_at: result.value.startsAt,
+      path: result.value.eventPath,
+      next_step: 'Deltagare bjuds in av personalen i /events.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateMission(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createMissionDraft(ctx.pb, actor, {
+    title: typeof args.title === 'string' ? args.title : '',
+    type: argStr(args, 'type') || null,
+    description: typeof args.description === 'string' ? args.description : null,
+    startupId: argStr(args, 'startup_id') || null,
+    dueDate: argStr(args, 'due_date') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      mission_id: result.value.missionId,
+      title: result.value.title,
+      status: 'draft',
+      path: result.value.missionPath,
+      next_step:
+        'Uppdraget är ett utkast. Personalen kopplar på teamet (AI-teamförslaget ' +
+        'finns i formuläret) och startar det i /uppdrag.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runRegisterDeMinimisSupport(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await registerDeMinimisSupport(ctx.pb, actor, {
+    startupId: argStr(args, 'startup_id'),
+    forordning: argStr(args, 'forordning'),
+    stodgivare: argStr(args, 'stodgivare'),
+    beslutsdatum: argStr(args, 'beslutsdatum'),
+    beloppEur: argNum(args, 'belopp_eur'),
+    beloppSek: argNum(args, 'belopp_sek'),
+    valutakurs: argNum(args, 'valutakurs'),
+    syfte: argStr(args, 'syfte') || null,
+    beslutReferens: argStr(args, 'beslut_referens') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      stod_id: result.value.stodId,
+      stodgivare: result.value.stodgivare,
+      belopp_eur: result.value.beloppEur,
+      startup: result.value.startupName,
+      warnings: result.value.warnings,
+      path: result.value.deMinimisPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runAddStartupKpi(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await addStartupKpi(ctx.pb, actor, {
+    startupId: argStr(args, 'startup_id'),
+    kpiName: typeof args.kpi_name === 'string' ? args.kpi_name : '',
+    valueText: typeof args.value_text === 'string' ? args.value_text : '',
+    valueNumeric: argNum(args, 'value_numeric') ?? null,
+    unit: argStr(args, 'unit') || null,
+    measuredAt: argStr(args, 'measured_at') || null,
+    isCurrent: args.is_current === undefined ? undefined : args.is_current !== false
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      kpi_id: result.value.kpiId,
+      kpi_name: result.value.kpiName,
+      startup: result.value.startupName,
+      path: result.value.startupPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runAddCapitalRound(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const amount = argNum(args, 'amount_sek');
+  if (amount === undefined) return { ok: false, error: 'amount_sek (belopp i kronor) saknas.' };
+
+  const result = await addCapitalRound(ctx.pb, actor, {
+    startupId: argStr(args, 'startup_id'),
+    type: argStr(args, 'type'),
+    source: typeof args.source === 'string' ? args.source : '',
+    amountSek: amount,
+    receivedAt: argStr(args, 'received_at'),
+    purpose: argStr(args, 'purpose') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      round_id: result.value.roundId,
+      source: result.value.source,
+      amount_sek: result.value.amountSek,
+      startup: result.value.startupName,
+      path: result.value.startupPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runScheduleAgent(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await scheduleAgent(ctx.pb, actor, {
+    toolId: argStr(args, 'tool_id'),
+    cronExpression: argStr(args, 'cron_expression'),
+    timezone: argStr(args, 'timezone') || null,
+    enabled: args.enabled === undefined ? undefined : args.enabled !== false
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      schedule_id: result.value.scheduleId,
+      tool: result.value.toolName,
+      cron_expression: result.value.cronExpression,
+      enabled: result.value.enabled,
+      next_run_at: result.value.nextRunAt,
+      updated_existing: result.value.updatedExisting,
+      path: result.value.toolPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateStartupNote(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createStartupNote(ctx.pb, actor, {
+    startupId: argStr(args, 'startup_id'),
+    body: typeof args.body === 'string' ? args.body : ''
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      note_id: result.value.noteId,
+      startup: result.value.startupName,
+      confidential: false,
+      path: result.value.startupPath,
       logged_in: 'agent_actions'
     }
   };
