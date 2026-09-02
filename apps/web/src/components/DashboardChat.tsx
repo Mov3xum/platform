@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChatAttachment } from '@/lib/actions/chat';
-import type { AgentActivityStep, GeneratedFileRef, InlineVisualRef } from '@platform/shared';
+import type {
+  AgentActivityStep,
+  ApprovalRequestRef,
+  GeneratedFileRef,
+  InlineVisualRef
+} from '@platform/shared';
 import {
   AI_IMPACT_SOURCE_LABEL,
   formatAiImpact,
@@ -55,6 +60,8 @@ export interface UiMessage {
   steps?: AgentActivityStep[];
   /** Turens tokens (in + ut) → inline token-/miljöchip under svaret. */
   tokens?: number;
+  /** Agenten väntar på Godkänn/Avbryt inför en kritisk åtgärd (§ 33). */
+  approval_request?: ApprovalRequestRef;
 }
 
 // Ett pågående verktygssteg under en streamande turn.
@@ -359,6 +366,8 @@ interface Props {
   onDownload: (file: GeneratedFileRef) => void;
   // Ta bort ett ännu icke-körat köat meddelande.
   onCancelQueued?: (id: string) => void;
+  // Svar på agentens godkännandefråga (Godkänn/Avbryt-knapparna, § 33).
+  onApproval?: (approved: boolean) => void;
 }
 
 const AGENT_TONES = [
@@ -395,7 +404,8 @@ export default function DashboardChat({
   onReset,
   onSubmit,
   onDownload,
-  onCancelQueued
+  onCancelQueued,
+  onApproval
 }: Props) {
   const [input, setInput] = useState('');
   const [includeWebContext, setIncludeWebContext] = useState(false);
@@ -886,6 +896,44 @@ export default function DashboardChat({
     );
   }
 
+  // Godkännandekort (§ 33): visas bara på det SENASTE assistant-svaret och
+  // bara medan inget nytt körs/köas — ett klick skickar "Godkänn"/"Avbryt"
+  // som en vanlig user-tur, varpå kortet försvinner (meddelandet är inte
+  // längre senast). Knappen är UX, inte säkerhetsgränsen (RBAC/skrivlagret).
+  function renderApprovalRequest(msg: UiMessage, isLast: boolean) {
+    if (!msg.approval_request || !isLast || !onApproval) return null;
+    if (isPending || queued.length > 0) return null;
+    return (
+      <div className="mt-3 max-w-[640px] rounded-2xl border border-default bg-canvas-subtle p-3.5">
+        <p className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+          <Icon name="check" size={11} />
+          Väntar på ditt godkännande
+        </p>
+        <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground">
+          {msg.approval_request.summary}
+        </p>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onApproval(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-[13px] font-medium text-brand-foreground transition hover:bg-brand-hover"
+          >
+            <Icon name="check" size={13} />
+            Godkänn
+          </button>
+          <button
+            type="button"
+            onClick={() => onApproval(false)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-default px-4 py-2 text-[13px] font-medium text-foreground-muted transition hover:border-strong hover:text-foreground"
+          >
+            <Icon name="x" size={12} />
+            Avbryt
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   function visualDownload(v: InlineVisualRef, format: 'png' | 'jpeg') {
     void downloadVisualImage(v, format).catch(() => {
       setLocalError('Kunde inte ladda ned bilden — försök igen.');
@@ -1289,6 +1337,7 @@ export default function DashboardChat({
                       />
                       {renderVisuals(msg.visuals)}
                       {renderGeneratedFiles(msg.generated_files)}
+                      {renderApprovalRequest(msg, i === messages.length - 1)}
                       {typeof msg.tokens === 'number' && msg.tokens > 0 && (
                         <p
                           className="mt-1.5 text-[11px] tabular-nums text-foreground-subtle"

@@ -143,8 +143,9 @@ export const AUTHORING_GUIDANCE =
   'Startupkompassen (/inflode). Så här arbetar du: (1) fastställ NAMN och ' +
   'FLÖDESTYP — quiz (frågor med poäng → resultatprofil), wizard (formulär, ' +
   'inga poäng) eller chat (AI-samtal). Framgår inte typen: FRÅGA, gissa ' +
-  'aldrig. (2) Sammanfatta modulen och frågorna i punktform och be om ett ' +
-  'kort "ja" innan du skapar något. (3) Skapa modulen och lägg sedan till ' +
+  'aldrig. (2) Framgår namn, typ och innehåll: skapa DIREKT utan att be om ' +
+  'lov — modulen blir ett opublicerat utkast, så inget når webben förrän en ' +
+  'människa publicerar. (3) Skapa modulen och lägg sedan till ' +
   'frågorna EN i taget med `add_compass_question`, i rätt ordning. ' +
   '(4) Berätta att modulen är ett OPUBLICERAT utkast och länka till ' +
   '`admin_path` som verktyget returnerar. Du kan inte publicera modulen eller ' +
@@ -160,9 +161,38 @@ export const AUTHORING_GUIDANCE =
   'tilldelar bolag.\n' +
   '- `create_annual_wheel_item`: lägger in aktiviteter i verksamhetskalendern ' +
   '(en post per månad om den återkommer).\n' +
-  '- GEMENSAM REGEL: bekräfta innan du skapar, skapa sedan ALLT i samma svar ' +
-  '(inget "jag återkommer"), och avsluta med en kort kvittens: vad som ' +
-  'skapades, var det finns och vad personalen behöver göra själv.'
+  '- GEMENSAM REGEL: skapa ALLT i samma svar (inget "jag återkommer" och ' +
+  'ingen "är det okej?"-fråga för utkast — de är ofarliga att skapa), och ' +
+  'avsluta med en kort kvittens: vad som skapades, var det finns och vad ' +
+  'personalen behöver göra själv.'
+
+/**
+ * Godkännandeflödet (§ 33): agenten ska INTE fråga i onödan — rutinåtgärder
+ * utförs direkt; bara KRITISKA åtgärder får en Godkänn-knapp via verktyget
+ * `request_approval`. Delas av alla interaktiva staff-chatt-ytor så policyn
+ * aldrig divergerar.
+ */
+export const APPROVAL_GUIDANCE =
+  '\n\nGODKÄNNANDE — fråga inte i onödan:\n' +
+  '- Har användaren tydligt bett om en RUTINÅTGÄRD — skapa utkast (moduler, ' +
+  'workshops, uppdrag), anteckningar, aktiviteter, kanban-kort, ' +
+  'årshjulsposter, KPI:er, tilldelningar — utför den DIREKT och kvittera ' +
+  'kort efteråt. Fråga ALDRIG "Är det okej?"/"Ska jag ...?" för sådana ' +
+  'åtgärder: allt loggas i agent_actions, utkast är opublicerade och staff ' +
+  'kan rulla tillbaka.\n' +
+  '- Anropa `request_approval` ENBART före en KRITISK åtgärd: juridiskt/' +
+  'ekonomiskt bindande eller svår att ångra (t.ex. registrera de ' +
+  'minimis-stöd), återkommande kostnad (schemalägga en agent), något som ' +
+  'berör MÅNGA poster på en gång, eller något som går UTÖVER vad användaren ' +
+  'uttryckligen bad om.\n' +
+  '- Behöver du godkännande: ställ frågan via `request_approval` (då får ' +
+  'användaren en Godkänn-knapp) — aldrig i löptext. Avsluta sedan svaret ' +
+  'kort UTAN att utföra åtgärden.\n' +
+  '- Nästa meddelande "Godkänn" = utför åtgärden direkt (fråga inte igen). ' +
+  '"Avbryt" = utför inget; fråga kort vad som ska ändras.\n' +
+  '- Saknas något du MÅSTE veta (t.ex. flödestyp eller vilket bolag som ' +
+  'avses) är det en vanlig FÖLJDFRÅGA i text, inte ett godkännande — ställ ' +
+  'den kort och specifikt.';
 
 /**
  * Utökad chatt-skrivyta (§ 33) — vilka åtgärder agenten kan UTFÖRA direkt.

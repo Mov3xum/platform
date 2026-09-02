@@ -53,6 +53,7 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
       generated_files: m.generated_files,
       visuals: m.visuals,
       steps: m.steps,
+      approval_request: m.approval_request,
       // Turens tokens (in + ut, per-turn-metadata § 9.9) → inline miljöchip
       // under varje assistant-svar.
       tokens:
@@ -378,6 +379,17 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     runTurn(item);
   }
 
+  // Svar på agentens godkännandefråga (§ 33): skickas som en vanlig user-tur
+  // ("Godkänn"/"Avbryt") så beslutet syns i transkriptet och persisteras i
+  // tråden — agenten utför (eller avstår) i nästa svar.
+  function onApproval(approved: boolean) {
+    submit(approved ? 'Godkänn' : 'Avbryt', {
+      includeWebContext: false,
+      attachments: [],
+      deepJob: false
+    });
+  }
+
   async function onDownload(file: GeneratedFileRef) {
     const res = await getFileDownloadUrlAction(file.user_file_id);
     if (res.url) {
@@ -508,6 +520,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           onSubmit={submit}
           onDownload={onDownload}
           onCancelQueued={cancelQueued}
+          onApproval={onApproval}
         />
         {!rightOpen && (
           <button
