@@ -354,6 +354,15 @@ export interface AgentActivityStep {
   ok?: boolean; // utfall (sätts när steget är klart)
 }
 
+// Godkännandefråga från agenten (verktyget `request_approval`): agenten vill
+// utföra en KRITISK åtgärd och väntar på användarens beslut. UI:t renderar en
+// Godkänn/Avbryt-knapp på assistant-meddelandet; beslutet skickas som nästa
+// user-tur ("Godkänn"/"Avbryt"). Bara en per assistant-tur.
+export interface ApprovalRequestRef {
+  /** Kort beskrivning av exakt vad som utförs vid godkännande. */
+  summary: string;
+}
+
 export interface ToolRunMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -364,6 +373,9 @@ export interface ToolRunMessage {
   visuals?: InlineVisualRef[];
   // Verktygssteg agenten utförde för detta (assistant-)turn.
   steps?: AgentActivityStep[];
+  // Godkännandefråga (assistant): agenten väntar på Godkänn/Avbryt innan en
+  // kritisk åtgärd utförs. Renderas som knappar när meddelandet är senast.
+  approval_request?: ApprovalRequestRef;
   model?: string; // modell som producerade detta turn (assistant)
   tokens_in?: number;
   tokens_out?: number;

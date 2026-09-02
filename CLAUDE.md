@@ -4077,6 +4077,22 @@ aktivitetsloggen (§ 32) med klickbar länk.
 | `add_capital_round` | Mottaget kapital; `purpose` personnummer-saneras (§ 15.6-regexen) | — |
 | `schedule_agent` | Upsert av `tool_schedules` (§ 12), samma cron-parser + `canRunTool` | Roller admin/incubator_lead (`SCHEDULE_MANAGE`) |
 | `create_startup_note` | Anteckning på bolagskort | **`confidential=false` tvingas**; anteckningstexten loggas ALDRIG i audit (bara längd) |
+| `request_approval` | Visar Godkänn/Avbryt-knapp i chatten inför en KRITISK åtgärd | Ingen dataväg (ren UX); max 1/tur; medan frågan är obesvarad spärras alla domänskrivverktyg i samma tur server-side |
+
+**Godkännandeflödet ("fråga inte i onödan").** Agenten ska INTE be om
+bekräftelse för rutinåtgärder användaren tydligt bett om (utkast,
+anteckningar, kort, KPI:er, tilldelningar — allt loggas och kan rullas
+tillbaka). Inför en KRITISK åtgärd (juridiskt/ekonomiskt bindande,
+återkommande kostnad, många poster, eller utöver vad användaren bad om)
+anropar den `request_approval`: sammanfattningen persisteras på
+assistant-meddelandet (`ToolRunMessage.approval_request`,
+`@platform/shared`) och UI:t (`DashboardChat`) renderar Godkänn/Avbryt-
+knappar på det senaste svaret; klicket skickas som en vanlig user-tur
+("Godkänn"/"Avbryt") så beslutet syns i transkriptet. Policyn ligger i den
+delade `APPROVAL_GUIDANCE` (`lib/ai/guidance.ts`); spärr + sink i
+`lib/ai/tools.ts` (`DOMAIN_WRITE_TOOLS`). Knappen är UX som FÖRSTÄRKER
+människa-i-loopen (art. 14) — säkerhetsgränsen är oförändrat RBAC +
+skrivlagrets whitelist.
 
 ### 33.2 Regelefterlevnad
 

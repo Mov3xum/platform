@@ -14,6 +14,7 @@ import { searchOrgKnowledge, searchUserFiles, renderKnowledgeHits } from './rag'
 import { logAiUsage } from './usage';
 import { escFilter } from '@/lib/pb-filter';
 import {
+  type ApprovalRequestRef,
   type GeneratedFileRef,
   type InlineVisualRef,
   FILE_TOPIC_IDS,
@@ -91,6 +92,40 @@ const MAX_DISTINCT_VALUES = 40;
 // visuals persisteras i chat_threads.messages som har 2 MB-tak).
 const MAX_VISUALS_PER_TURN = 4;
 const MAX_VISUAL_SVG_BYTES = 150_000;
+
+// request_approval — godkännandefråga före KRITISK åtgärd (Godkänn-knapp i
+// chatten). Sammanfattningen persisteras på meddelandet → cappad.
+const MAX_APPROVAL_SUMMARY = 500;
+
+// Verktyg som muterar domändata (eller minnet). När en godkännandefråga redan
+// är ställd i turen spärras dessa tills användaren svarat — modellen ska
+// avsluta svaret och vänta på Godkänn/Avbryt. Läsverktyg och artefakter
+// (generate_document/render_visual) spärras inte. OBS: detta är UX-flödets
+// spärr, inte säkerhetsgränsen — den är och förblir RBAC + skrivlagrets
+// whitelist (lib/core/write).
+const DOMAIN_WRITE_TOOLS = new Set([
+  'update_startup_field',
+  'create_startup_activity',
+  'update_activity_field',
+  'create_annual_wheel_item',
+  'update_annual_wheel_item',
+  'create_compass_module',
+  'add_compass_question',
+  'update_compass_module_field',
+  'create_workshop',
+  'assign_workshop',
+  'assign_education_document',
+  'create_task',
+  'move_task',
+  'create_event',
+  'create_mission',
+  'register_de_minimis_support',
+  'add_startup_kpi',
+  'add_capital_round',
+  'schedule_agent',
+  'create_startup_note',
+  'memory_write'
+]);
 
 // Display-fält vi försöker läsa ur en expanderad relation när group_by är en
 // relation, i prioordning. Bara icke-PII-etiketter (namn/titel) — aldrig
@@ -1196,6 +1231,36 @@ export function buildChatTools(
         }
       }
     });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'request_approval',
+        description:
+          'Visar en Godkänn/Avbryt-knapp för användaren i chatten. Använd ' +
+          'ENBART före en KRITISK åtgärd: juridiskt/ekonomiskt bindande eller ' +
+          'svår att ångra (t.ex. registrera de minimis-stöd), återkommande ' +
+          'kostnad (schemalägga en agent), något som berör MÅNGA poster på en ' +
+          'gång, eller något som går utöver vad användaren uttryckligen bad om. ' +
+          'ALDRIG för rutinåtgärder (utkast, anteckningar, kort, KPI:er, ' +
+          'tilldelningar) — de utför du direkt utan att fråga. Anropa det EN ' +
+          'gång, avsluta sedan svaret KORT utan att utföra åtgärden; ' +
+          'användarens beslut kommer som nästa meddelande ("Godkänn" eller ' +
+          '"Avbryt").',
+        parameters: {
+          type: 'object',
+          properties: {
+            summary: {
+              type: 'string',
+              description:
+                'Kort (1–2 meningar) beskrivning av exakt vad som utförs vid ' +
+                'godkännande, t.ex. "Registrerar de minimis-stöd på 200 000 kr ' +
+                'från Vinnova för Acme AB." Inga personuppgifter.'
+            }
+          },
+          required: ['summary']
+        }
+      }
+    });
   }
 
   // Tvärsessions-minne (Fas 2). memory_read är read-only och kan ges till
@@ -1513,6 +1578,8 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: 'Schemalägger agent' };
     case 'create_startup_note':
       return { tool: name, label: 'Skriver anteckning' };
+    case 'request_approval':
+      return { tool: name, label: 'Ber om ditt godkännande' };
     case 'memory_read':
       return { tool: name, label: 'Läser minnet' };
     case 'memory_write':
@@ -1558,6 +1625,13 @@ export interface ToolDispatchContext {
    * KPI-kort som SVG) hit så chatt-lagret kan bifoga dem på assistant-svaret.
    */
   inlineVisuals?: InlineVisualRef[];
+  /**
+   * Mutabel sink: `request_approval` pushar en godkännandefråga hit så
+   * chatt-lagret kan bifoga den på assistant-svaret (Godkänn/Avbryt-knapp).
+   * Sätts bara av interaktiva ytor; max en per tur, och när den är satt
+   * spärras ytterligare domänskrivningar i samma tur (DOMAIN_WRITE_TOOLS).
+   */
+  approvalRequests?: ApprovalRequestRef[];
 }
 
 export interface ToolResult {
@@ -2308,6 +2382,24 @@ export async function dispatchToolCall(
     return { ok: false, error: `Ogiltig JSON i tool-argument: ${call.function.arguments}` };
   }
 
+  // En godkännandefråga är ställd i denna tur → spärra ytterligare
+  // domänskrivningar tills användaren svarat (Godkänn/Avbryt kommer som nästa
+  // user-tur, där sinken är tom igen). Läsverktyg påverkas inte. Best-effort
+  // inom en parallell tool-batch; deterministisk för efterföljande iterationer.
+  if (
+    ctx.approvalRequests &&
+    ctx.approvalRequests.length > 0 &&
+    DOMAIN_WRITE_TOOLS.has(call.function.name)
+  ) {
+    return {
+      ok: false,
+      error:
+        'Du har redan bett om godkännande i denna tur — utför inga åtgärder ' +
+        'förrän användaren svarat. Avsluta ditt svar nu och invänta ' +
+        'Godkänn/Avbryt.'
+    };
+  }
+
   switch (call.function.name) {
     case 'query_collection':
       return runQueryCollection(args, ctx);
@@ -2365,6 +2457,8 @@ export async function dispatchToolCall(
       return runScheduleAgent(args, ctx);
     case 'create_startup_note':
       return runCreateStartupNote(args, ctx);
+    case 'request_approval':
+      return runRequestApproval(args, ctx);
     case 'memory_read':
       return runMemoryRead(args, ctx);
     case 'memory_write':
@@ -2645,6 +2739,54 @@ function requireAgentActor(ctx: ToolDispatchContext): Actor | { error: string } 
     return { error: 'Skrivverktyg får bara köras från en agent-kontext.' };
   }
   return ctx.actor;
+}
+
+/**
+ * Ställer en godkännandefråga till användaren (Godkänn/Avbryt-knapp i chatten)
+ * inför en KRITISK åtgärd. Ingen dataväg — bara UX: sammanfattningen bifogas
+ * assistant-svaret via ctx.approvalRequests-sinken och persisteras på
+ * meddelandet. Medvetet HELT synkron (ingen await före sink-pushen) så att
+ * skrivspärren i dispatchToolCall hinner gälla även för senare anrop i samma
+ * parallella tool-batch.
+ */
+function runRequestApproval(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): ToolResult {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  if (!ctx.approvalRequests) {
+    return {
+      ok: false,
+      error:
+        'Godkännande-knappen är inte tillgänglig i den här ytan. Utför ' +
+        'rutinåtgärder direkt, eller be om bekräftelse i text.'
+    };
+  }
+  if (ctx.approvalRequests.length > 0) {
+    return {
+      ok: false,
+      error:
+        'Du har redan ställt en godkännandefråga i denna tur — max en. ' +
+        'Avsluta ditt svar och invänta användarens beslut.'
+    };
+  }
+  const summary =
+    typeof args.summary === 'string' ? args.summary.replace(/\s+/g, ' ').trim() : '';
+  if (!summary) {
+    return { ok: false, error: 'Ange `summary` — vad som utförs vid godkännande.' };
+  }
+  ctx.approvalRequests.push({ summary: summary.slice(0, MAX_APPROVAL_SUMMARY) });
+  return {
+    ok: true,
+    data: {
+      note:
+        'Godkänn/Avbryt-knappen visas nu för användaren under ditt svar. ' +
+        'Utför INTE åtgärden ännu och anropa inga fler skrivverktyg — ' +
+        'avsluta svaret med en KORT sammanfattning av vad som väntar på ' +
+        'godkännande. Användarens beslut kommer som nästa meddelande.'
+    }
+  };
 }
 
 async function runUpdateStartupField(

@@ -165,8 +165,11 @@ const STAFF_TOOL_GUIDANCE =
   'Inlärt minne injiceras automatiskt i din kontext; använd `memory_read` för ' +
   'fler detaljer.\n\n' +
   'Skrivregler:\n' +
-  '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
-  'efterfrågad ("uppdatera Acmes next_step till X" är otvetydigt; "vad ska Acme göra härnäst?" är inte det).\n' +
+  '- Fråga inte i onödan: en rutinåtgärd som är otvetydigt efterfrågad utförs ' +
+  'DIREKT utan bekräftelsefråga ("uppdatera Acmes next_step till X" är otvetydigt; ' +
+  '"vad ska Acme göra härnäst?" är inte det). Be bara om bekräftelse inför ' +
+  'KRITISKA åtgärder: juridiskt/ekonomiskt bindande, återkommande kostnad, ' +
+  'många poster på en gång, eller något utöver vad användaren bad om.\n' +
   '- Slå alltid upp bolagets id med `query_collection` först om du inte redan har det.\n' +
   '- Varje skrivning loggas i `agent_actions` och kan rullas tillbaka av staff — ' +
   'var ändå försiktig och föredra små, tydliga ändringar.\n' +
