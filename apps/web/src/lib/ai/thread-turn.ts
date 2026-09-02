@@ -151,6 +151,7 @@ export async function executeThreadTurn(
     visuals: turn.result.visuals.length > 0 ? turn.result.visuals : undefined,
     steps: steps.length > 0 ? steps : undefined,
     approval_request: turn.result.approvalRequest,
+    meeting_request: turn.result.meetingRequest,
     at: new Date().toISOString()
   };
 

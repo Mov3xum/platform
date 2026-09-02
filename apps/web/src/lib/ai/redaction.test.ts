@@ -29,6 +29,7 @@ test('denylist håller ute auth-, credential- och privat-innehåll-kollektioner'
     'chat_threads', // privat innehåll (§17.2)
     'user_files',
     'deep_jobs',
+    'meeting_transcripts', // råa mötestranskript (§34)
     'agent_memory' // tvärsessions-minne (§16.4)
   ]) {
     assert.equal(isDeniedCollection(name), true, `${name} ska vara denylistad`);

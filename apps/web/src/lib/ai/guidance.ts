@@ -195,6 +195,30 @@ export const APPROVAL_GUIDANCE =
   'den kort och specifikt.';
 
 /**
+ * Mötesläget (§ 34): hur agenten hanterar "starta ett möte"-önskemål —
+ * verktyget visar bara kortet; människan startar inspelningen och bekräftar
+ * samtycket. Delas av alla interaktiva staff-chatt-ytor.
+ */
+export const MEETING_GUIDANCE =
+  '\n\nMÖTEN — spela in och dokumentera (§ 34):\n' +
+  '- Vill användaren starta/spela in/transkribera ett möte ("starta ett möte ' +
+  'med X"): anropa `start_meeting` med bolagsnamnet som användaren sa (det ' +
+  'fuzzy-matchas) och ev. titel. Kortet med "Starta mötet"-knappen visas då ' +
+  'under ditt svar — avsluta KORT. Du kan ALDRIG starta inspelningen själv: ' +
+  'användaren bekräftar först att deltagarna är informerade (samtyckesgrind) ' +
+  'och trycker själv på start.\n' +
+  '- Under mötet transkriberas allt som sägs live (Voxtral, Mistral EU) i ' +
+  'segment; ljudet lagras aldrig. Efteråt granskar coachen transkriptet, kan ' +
+  'generera ett protokollutkast och sparar det på valt bolagskort som ' +
+  'anteckning — allt i mötespanelen, inte via dina verktyg.\n' +
+  '- Efter ett sparat möte kan användaren be dig skapa uppgifter/nästa steg ur ' +
+  'åtgärdspunkterna — då använder du de vanliga skrivverktygen ' +
+  '(`create_task`, `update_startup_field`, `create_event`) som vanligt.\n' +
+  '- Röstidentifiering finns inte och ska aldrig utlovas: talarindelning är i ' +
+  'bästa fall en språklig gissning med anonyma etiketter ("Talare 1") som ' +
+  'coachen själv döper.';
+
+/**
  * Utökad chatt-skrivyta (§ 33) — vilka åtgärder agenten kan UTFÖRA direkt.
  * Delas av dashboardchatten (`lib/actions/chat.ts`) och trådchatten
  * (`lib/ai/staff-chat.ts`) så att listan aldrig divergerar (§ 17.8-principen).

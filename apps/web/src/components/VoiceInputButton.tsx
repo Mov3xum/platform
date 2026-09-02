@@ -47,8 +47,8 @@ const BLOCKED_MESSAGES: Record<'insecure' | 'unsupported', string> = {
     'Chrome, Edge, Firefox eller Safari 14+.'
 };
 
-/** Första mime-typen webbläsaren faktiskt kan spela in. */
-function pickRecorderMime(): string | undefined {
+/** Första mime-typen webbläsaren faktiskt kan spela in. Delas med mötesläget (§ 34). */
+export function pickRecorderMime(): string | undefined {
   if (typeof MediaRecorder === 'undefined') return undefined;
   const candidates = [
     'audio/webm;codecs=opus',

@@ -13,6 +13,7 @@ import {
   KNOWLEDGE_GUIDANCE,
   AUTHORING_GUIDANCE,
   APPROVAL_GUIDANCE,
+  MEETING_GUIDANCE,
   CHAT_WRITE_ACTIONS_GUIDANCE
 } from './guidance';
 import { routeChatModels } from './model-router';
@@ -25,6 +26,7 @@ import type {
   ApprovalRequestRef,
   GeneratedFileRef,
   InlineVisualRef,
+  MeetingRequestRef,
   Role,
   WebSourceKey
 } from '@platform/shared';
@@ -324,6 +326,8 @@ export interface StaffTurnResult {
   visuals: InlineVisualRef[];
   /** Godkännandefråga (`request_approval`) — Godkänn/Avbryt-knapp i UI:t. */
   approvalRequest?: ApprovalRequestRef;
+  /** Möteskort (`start_meeting`, § 34) — "Starta mötet"-knapp i UI:t. */
+  meetingRequest?: MeetingRequestRef;
 }
 
 export interface RunStaffChatTurnOptions {
@@ -418,6 +422,7 @@ export async function runStaffChatTurn(
     ? STAFF_TOOL_GUIDANCE +
       APPROVAL_GUIDANCE +
       AUTHORING_GUIDANCE +
+      MEETING_GUIDANCE +
       SEARCH_STRATEGY_GUIDANCE +
       KNOWLEDGE_GUIDANCE
     : '';
@@ -444,6 +449,7 @@ export async function runStaffChatTurn(
   const generatedFiles: GeneratedFileRef[] = [];
   const inlineVisuals: InlineVisualRef[] = [];
   const approvalRequests: ApprovalRequestRef[] = [];
+  const meetingRequests: MeetingRequestRef[] = [];
   const surface: AiUsageSurface = opts.surface ?? 'dashboard_chat';
 
   // Modellval efter komplexitet (ej längre default small). Bilder → vision.
@@ -467,7 +473,8 @@ export async function runStaffChatTurn(
         chatThreadId: opts.chatThreadId,
         generatedFiles,
         inlineVisuals,
-        approvalRequests
+        approvalRequests,
+        meetingRequests
       },
       maxIterations: MAX_TOOL_ITERATIONS,
       onStep: opts.onStep,
@@ -495,7 +502,8 @@ export async function runStaffChatTurn(
         tokensOut,
         generatedFiles,
         visuals: inlineVisuals,
-        approvalRequest: approvalRequests[0]
+        approvalRequest: approvalRequests[0],
+        meetingRequest: meetingRequests[0]
       }
     };
   } catch (err) {
