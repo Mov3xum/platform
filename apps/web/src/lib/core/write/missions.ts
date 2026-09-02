@@ -1,6 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import type { MissionStage, MissionType } from '@platform/shared';
 import { canCreateRecord } from './writable-fields';
 import { logAgentAction } from './audit';
@@ -78,6 +79,8 @@ export async function createMissionDraft(
   const title = validateNonEmptyText(params.title, 'title', 200);
   if (!title.ok) return fail('INVALID_VALUE', title.error);
   if (title.value.length < 2) return fail('INVALID_VALUE', 'Titel måste vara minst 2 tecken.');
+  // Person nr lagras aldrig (§ 9.4) — sanera fritexten på skrivvägen.
+  const cleanTitle = sanitizePersonnummer(title.value);
 
   const type: MissionType = MISSION_TYPES.includes(params.type as MissionType)
     ? (params.type as MissionType)
@@ -109,7 +112,7 @@ export async function createMissionDraft(
     created = await writeWithFallback(pb, (client) =>
       client.collection(PB_COLLECTIONS.missions).create<{ id: string }>({
         tenant: actor.tenant,
-        title: title.value,
+        title: cleanTitle,
         type,
         status: 'draft',
         issuer: actor.id,
@@ -122,7 +125,7 @@ export async function createMissionDraft(
         ],
         visibility: 'tenant',
         due_date: dueDate.value || null,
-        description: description.value ?? '',
+        description: description.value ? sanitizePersonnummer(description.value) : '',
         stages_json: draftStages(type),
         artifacts_json: [],
         accent: 'purple'
@@ -138,7 +141,7 @@ export async function createMissionDraft(
     collection: 'missions',
     record_id: created.id,
     after_value: {
-      title: title.value,
+      title: cleanTitle,
       type,
       status: 'draft',
       startup: startupId || undefined,
@@ -149,7 +152,7 @@ export async function createMissionDraft(
 
   return ok({
     missionId: created.id,
-    title: title.value,
+    title: cleanTitle,
     missionPath: `/uppdrag/${created.id}`
   });
 }

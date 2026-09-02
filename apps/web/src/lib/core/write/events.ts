@@ -1,6 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import { canCreateRecord } from './writable-fields';
 import { logAgentAction } from './audit';
 import {
@@ -77,18 +78,23 @@ export async function createEvent(
   const description = validateOptionalText(params.description, 'description', 4000);
   if (!description.ok) return fail('INVALID_VALUE', description.error);
 
+  // Person nr lagras aldrig (§ 9.4) — sanera fritextfälten på skrivvägen.
+  const cleanName = sanitizePersonnummer(name.value);
+  const cleanLocation = location.value ? sanitizePersonnummer(location.value) : '';
+  const cleanDescription = description.value ? sanitizePersonnummer(description.value) : '';
+
   let created: { id: string };
   try {
     created = await writeWithFallback(pb, (client) =>
       client.collection(PB_COLLECTIONS.events).create<{ id: string }>({
         tenant: actor.tenant,
-        name: name.value,
+        name: cleanName,
         type,
         status: 'planned',
         starts_at: startsAt.value,
         ends_at: endsAtIso,
-        location: location.value ?? '',
-        description: description.value ?? '',
+        location: cleanLocation,
+        description: cleanDescription,
         owner: actor.id
       })
     );
@@ -102,17 +108,17 @@ export async function createEvent(
     collection: 'incubator_events',
     record_id: created.id,
     after_value: {
-      name: name.value,
+      name: cleanName,
       type,
       starts_at: startsAt.value,
       ends_at: endsAtIso ?? undefined,
-      location: location.value ?? undefined
+      location: cleanLocation || undefined
     }
   });
 
   return ok({
     eventId: created.id,
-    name: name.value,
+    name: cleanName,
     startsAt: startsAt.value,
     eventPath: `/events/${created.id}`
   });

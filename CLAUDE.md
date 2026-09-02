@@ -4072,7 +4072,7 @@ aktivitetsloggen (§ 32) med klickbar länk.
 | `create_task` / `move_task` | Kanban-kort på bolags-/uppdragstavla + kolumnflytt | `assignees` agent-nekad (kan inte slå upp användar-id:n, `users` denylistad § 9.3) |
 | `create_event` | Event i kalendern (status `planned`, roller admin/incubator_lead/coach) | Inbjudningar (`event_signups`) görs av människa i /events |
 | `create_mission` | Uppdrag som **UTKAST** (status `draft`, actor = lead) | Team/recipients sätts av människa (AI-teamförslaget finns i /uppdrag-formuläret, § 29.3) |
-| `register_de_minimis_support` | De minimis-stöd med lazy enhet (§ 20.5) | **`kanBevilja` server-side** — förordnings-/samlat tak kan aldrig rundas; personnummer-sanering av `syfte` |
+| `register_de_minimis_support` | De minimis-stöd med lazy enhet (§ 20.5) | **`kanBevilja` server-side, fail-closed** — enhetsupplösningen superuser-dubbelkollas (en tyst RLS-miss får aldrig ge en tom dubblett-enhet), takunderlaget läses som superuser och ett läsfel AVBRYTER registreringen; personnummer-sanering av `syfte` |
 | `add_startup_kpi` | KPI-rad; äldre `is_current` med samma namn avmarkeras | — |
 | `add_capital_round` | Mottaget kapital; `purpose` personnummer-saneras (§ 15.6-regexen) | — |
 | `schedule_agent` | Upsert av `tool_schedules` (§ 12), samma cron-parser + `canRunTool` | Roller admin/incubator_lead (`SCHEDULE_MANAGE`) |
@@ -4090,8 +4090,16 @@ aktivitetsloggen (§ 32) med klickbar länk.
   i `lib/core/write/helpers.ts`); PB-skrivningar via användartoken med
   superuser-fallback endast vid PB v0.23.4-rule-eval-buggen (§ 21.3).
 - **GDPR § 5:** inga nya kollektioner/fält; inga nya AI-läsvägar
-  (`lib/ai/context.ts` orörd). `after_value` i audit är PII-fri
-  (bolagsnamn/titlar/belopp — aldrig anteckningstext, aldrig person-PII).
+  (`lib/ai/context.ts` orörd). All fritext som chatten skriver
+  (kort-beskrivningar, anteckningar, event-fält, uppdragstext,
+  instruktioner, syften) **personnummer-saneras på skrivvägen**
+  (§ 15.6-regexen). `after_value` i audit är PII-fri (bolagsnamn/sanerade
+  titlar/belopp — aldrig anteckningstext, bara `body_length`).
+- **Audit-robusthet (ISO 27001 A.8.15 / SOC 2 CC7.2):** `logAgentAction`
+  har superuser-fallback — i exakt de fall PB v0.23.4:s rule-eval tyst
+  nekar användartokenens skrivning (§ 21.3, samma fall där mutationen
+  behövde fallbacken) tappas inte audit-raden; `actor` sätts explicit i
+  payloaden så attributionen består.
 - **Riskklass (art. 11):** n/a — deterministiska mutationer via delade
   lagret; ingen ny AI-inferens. De minimis-spärren är samma rena,
   enhetstestade logik som UI:t (§ 20.3).

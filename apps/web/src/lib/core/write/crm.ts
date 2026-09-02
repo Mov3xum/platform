@@ -279,6 +279,10 @@ export async function createStartupNote(
 
   const body = validateNonEmptyText(params.body, 'body', 8000);
   if (!body.ok) return fail('INVALID_VALUE', body.error);
+  // Person nr lagras ALDRIG (§ 9.4) — sanera på skrivvägen (§ 15.6-regexen);
+  // verktygsbeskrivningens "skriv inga personuppgifter" är en instruktion
+  // till modellen, inte en kontroll. Extra relevant vid röstinmatning (§ 31).
+  const cleanBody = sanitizePersonnummer(body.value);
 
   const startup = await getRecordInTenant<{ id: string; tenant?: string; name?: string }>(
     pb,
@@ -295,7 +299,7 @@ export async function createStartupNote(
       client.collection(NOTES_COLLECTION).create<{ id: string }>({
         startup: startup.id,
         author: actor.id,
-        body: body.value,
+        body: cleanBody,
         // Chatten skriver ALDRIG konfidentiella anteckningar (§ 33).
         confidential: false
       })
@@ -315,7 +319,7 @@ export async function createStartupNote(
       startup: startup.id,
       startup_name: startup.name,
       confidential: false,
-      body_length: body.value.length
+      body_length: cleanBody.length
     }
   });
 

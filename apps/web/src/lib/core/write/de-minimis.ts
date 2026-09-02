@@ -2,6 +2,7 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { escFilter } from '@/lib/pb-filter';
+import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { loadRegelverk } from '@/lib/de-minimis/data';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import {
@@ -38,16 +39,28 @@ async function resolveUnit(
   startupId: string,
   startupName: string
 ): Promise<{ unitId: string } | { error: string }> {
-  // Befintlig enhet? (Läs via användartoken; helpers-fallbacken täcker en
-  // trasig regel-instans via skrivvägen nedan.)
-  try {
-    const existing = await pb
-      .collection(PB_COLLECTIONS.deMinimisUnits)
-      .getFirstListItem<DeMinimisUnit>(`startup = "${escFilter(startupId)}"`, { sort: 'created' })
-      .catch(() => null);
-    if (existing) return { unitId: existing.id };
-  } catch {
-    /* skapa nedan */
+  // Befintlig enhet? Läs via användartoken OCH dubbelkolla via superuser
+  // (samma grind som UI:ts `resolveOrCreateUnit`): en tyst RLS-miss
+  // (PB v0.23.4:s rule-eval-bugg, § 21.3) får ALDRIG ge en duplicerad tom
+  // enhet — då skulle takprövningen köras mot tom historik och taket kunna
+  // rundas. Tenant är redan verifierad av anroparen.
+  const findExisting = async (client: PocketBase): Promise<string | null> => {
+    try {
+      const existing = await client
+        .collection(PB_COLLECTIONS.deMinimisUnits)
+        .getFirstListItem<DeMinimisUnit>(`startup = "${escFilter(startupId)}"`, { sort: 'created' })
+        .catch(() => null);
+      return existing?.id ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const own = await findExisting(pb);
+  if (own) return { unitId: own };
+  const su = await getSuperuserPb();
+  if (su.ok) {
+    const viaSu = await findExisting(su.pb);
+    if (viaSu) return { unitId: viaSu };
   }
 
   try {
@@ -162,14 +175,34 @@ export async function registerDeMinimisSupport(
   const unit = await resolveUnit(pb, actor, startup.id, startupName);
   if ('error' in unit) return fail('DB_ERROR', unit.error);
 
-  // Pröva mot taken INNAN skrivning (kanBevilja, § 20.3).
-  let existing: DeMinimisStod[] = [];
-  try {
-    existing = await pb
-      .collection(PB_COLLECTIONS.deMinimisStod)
-      .getFullList<DeMinimisStod>({ filter: `unit = "${escFilter(unit.unitId)}"` });
-  } catch {
-    /* tom lista — kanBevilja prövar då bara den nya posten */
+  // Pröva mot taken INNAN skrivning (kanBevilja, § 20.3). Takunderlaget
+  // läses i första hand som superuser: det är en server-side
+  // integritetskontroll (raderna når aldrig modellen — bara provet), och en
+  // tyst RLS-miss får inte ge tom historik → trivialt godkänt tak.
+  // FAIL-CLOSED: kan underlaget inte läsas alls avbryts registreringen —
+  // spärren är en legal gräns (§ 20.4), inte en best-effort.
+  const loadStod = async (client: PocketBase): Promise<DeMinimisStod[] | null> => {
+    try {
+      return await client
+        .collection(PB_COLLECTIONS.deMinimisStod)
+        .getFullList<DeMinimisStod>({ filter: `unit = "${escFilter(unit.unitId)}"` });
+    } catch {
+      return null;
+    }
+  };
+  let existing: DeMinimisStod[] | null = null;
+  const suForStod = await getSuperuserPb();
+  if (suForStod.ok) existing = await loadStod(suForStod.pb);
+  if (existing === null) existing = await loadStod(pb);
+  if (existing === null) {
+    console.error('[write:de-minimis] kunde inte läsa takunderlaget', {
+      tenant: actor.tenant,
+      unitId: unit.unitId
+    });
+    return fail(
+      'DB_ERROR',
+      'Kunde inte läsa bolagets befintliga stöd för takprövningen — registreringen avbröts. Försök igen.'
+    );
   }
 
   const regelverk = await loadRegelverk(pb);

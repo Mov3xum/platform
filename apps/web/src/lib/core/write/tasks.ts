@@ -1,5 +1,6 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
+import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import { isStartupBoardStatus, type StartupBoardStatus } from '@/lib/startup-board/board';
 import { canCreateRecord, canWriteField } from './writable-fields';
 import { logAgentAction } from './audit';
@@ -62,6 +63,9 @@ export async function createTask(
 
   const description = validateNonEmptyText(params.description, 'description', 500);
   if (!description.ok) return fail('INVALID_VALUE', description.error);
+  // Person nr lagras aldrig (§ 9.4) — sanera fritexten på skrivvägen; texten
+  // hamnar dessutom i den oföränderliga agent_actions-loggen (§ 32).
+  const cleanDescription = sanitizePersonnummer(description.value);
 
   const status: StartupBoardStatus = isStartupBoardStatus(String(params.status ?? ''))
     ? (params.status as StartupBoardStatus)
@@ -91,7 +95,7 @@ export async function createTask(
   const payload: Record<string, unknown> = {
     tenant: actor.tenant,
     kind,
-    description: description.value,
+    description: cleanDescription,
     status,
     owner: actor.id,
     link_kind: startupId ? 'startup' : missionId ? 'mission' : 'none',
@@ -116,7 +120,7 @@ export async function createTask(
     collection: COLLECTION,
     record_id: created.id,
     after_value: {
-      description: description.value,
+      description: cleanDescription,
       status,
       kind,
       link_kind: payload.link_kind,
@@ -128,7 +132,7 @@ export async function createTask(
 
   return ok({
     taskId: created.id,
-    description: description.value,
+    description: cleanDescription,
     status,
     boardPath: boardPathFor(startupId, missionId)
   });

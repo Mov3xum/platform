@@ -2,6 +2,7 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { escFilter } from '@/lib/pb-filter';
+import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import { canCreateRecord } from './writable-fields';
 import { logAgentAction } from './audit';
 import { validateDateOnly, validateOptionalText } from './validators';
@@ -107,7 +108,8 @@ export async function assignWorkshop(
         owner: actor.id,
         status: 'planned',
         due_date: dueDate.value || null,
-        instructions: instructions.value ?? '',
+        // Person nr lagras aldrig (§ 9.4) — sanera fritexten på skrivvägen.
+        instructions: instructions.value ? sanitizePersonnummer(instructions.value) : '',
         progress_json: {},
         answers_json: {},
         takeaway_json: {},
@@ -221,7 +223,8 @@ export async function assignEducationDocument(
     tenant: actor.tenant,
     document: doc.id,
     startup: startup.id,
-    instructions: instructions.value ?? '',
+    // Person nr lagras aldrig (§ 9.4) — sanera fritexten på skrivvägen.
+    instructions: instructions.value ? sanitizePersonnummer(instructions.value) : '',
     due_date: dueDate.value || '',
     assigned_by: actor.id
   };
