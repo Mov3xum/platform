@@ -3997,3 +3997,48 @@ INNAN fallbacken används.
 - Workshop-block från agenten är textburna (`instruction`, `exercise`,
   `question`, `summary`); film/bild laddas upp av en människa i byggaren
   (§ 18.2).
+
+---
+
+## 32. Samlad aktivitetslogg — feeden på /chatt och /aktivitet
+
+### 32.1 Översikt
+
+Aktivitetssektionen på dashboarden (`/chatt`, "Aktivitet") och den globala
+feeden (`/aktivitet`) visar numera EN kronologisk, klickbar logg som slår ihop
+två befintliga källor:
+
+1. **`activities`** — bolagshändelser som förut (workshop-tilldelningar,
+   verktygskörningar, manuella aktiviteter). Oförändrad datamodell.
+2. **`agent_actions`** — det delade skrivlagrets append-only-audit (§ 16),
+   översatt till läsbara feed-poster i `apps/web/src/lib/feed/agent-log.ts`
+   (`loadAgentLogEntries`): årshjulet (aktiviteter + kategorier),
+   Startupkompassen (moduler + frågor), workshops och bolagsfält-ändringar.
+   Varje rad får en intern länk (`/arshjul`, `/inflode/admin/modules/<slug>`,
+   `/education`, `/startups/<id>`) och en "AI"-markering när åtgärden
+   utfördes av chatt-agenten (`actor_kind='agent'`, art. 13-transparens).
+
+Dashboarden visar de 5 senaste och expanderar stegvis ("Visa fler", +15 åt
+gången) upp till 60 poster; "Alla" leder till `/aktivitet` som har ett eget
+filter **Ändringslogg** (`?kind=log`).
+
+### 32.2 Ingen ny dataväg
+
+- **RLS:** läsningen sker med användarens egen token — `agent_actions`-reglerna
+  gäller oförändrat (admin/incubator_lead ser tenantens logg, övriga bara rader
+  där de själva är actor). Namn-/slug-berikningen slår upp `compass_modules`/
+  `startups` per id med samma token (tenant-filtrerat + RLS). Fail-soft: kan
+  källan inte läsas visas feeden utan loggrader.
+- **Dubbletter:** `agent_actions`-rader för collection `activities` hoppas
+  över (de syns redan som egna aktivitetsposter). Okända kollektioner hoppas
+  också över — nya loggtyper läggs till medvetet med etikett + länk i
+  `agent-log.ts`.
+- **Täckning:** UI-vägarna för kompassmodul- och workshop-skapande
+  (`lib/actions/compass.ts` `createModuleAction`, `lib/actions/workshops.ts`
+  `createWorkshopAction`) loggar nu också `agent_actions` (samma format som
+  chatt-verktygen), så loggen ser skapanden oavsett väg. Årshjulet gick redan
+  via skrivlagret (§ 30.4).
+- **PII/GDPR § 5:** inga nya fält, ingen ny kollektion. `before/after_value`
+  i loggen är redan PII-fria (skrivlagrets ansvar, § 16.4); feed-titlarna
+  byggs av verksamhetsdata (titlar, modulnamn, fältetiketter). Aktörsnamn
+  visas endast internt (staff-UI). Ingen AI-inferens → riskklass n/a.

@@ -7,6 +7,7 @@ import { getAssignmentReadPb } from '@/lib/assignments/read';
 import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { buildStartupContext } from '@/lib/ai/context';
+import { logAgentAction } from '@/lib/core/write';
 import { callMistral, estimateCostUsd } from '@/lib/ai/mistral';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import {
@@ -495,9 +496,22 @@ export async function createWorkshopAction(
     });
   };
 
+  // Ändringslogg (CLAUDE.md § 32): UI-skapade workshops loggas i
+  // `agent_actions` med samma format som chatt-agentens `create_workshop`,
+  // så den samlade aktivitetsloggen ser skapandet oavsett väg. Fail-soft.
+  const logWorkshopCreated = (recordId: string) =>
+    logAgentAction(pb, {
+      actor: { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles },
+      action_type: 'create',
+      collection: 'workshops',
+      record_id: recordId,
+      after_value: { key, title, status, modules: modules.length }
+    });
+
   try {
     const record = await pb.collection(PB_COLLECTIONS.workshops).create(payload);
     const imgResult = await applyImageUpdate(pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
+    await logWorkshopCreated(String(record.id));
     revalidatePath('/education');
     revalidatePath('/education/workshops');
     return { workshopId: String(record.id), warning: imageWarning(imgResult) };
@@ -517,6 +531,7 @@ export async function createWorkshopAction(
         try {
           const record = await suResult.pb.collection(PB_COLLECTIONS.workshops).create(payload);
           const imgResult = await applyImageUpdate(suResult.pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
+          await logWorkshopCreated(String(record.id));
           revalidatePath('/education');
           revalidatePath('/education/workshops');
           return { workshopId: String(record.id), warning: imageWarning(imgResult) };
