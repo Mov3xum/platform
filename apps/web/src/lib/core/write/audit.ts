@@ -1,5 +1,6 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
+import { getSuperuserPb } from '@/lib/integrations/credentials';
 import type { Actor } from './types';
 
 export type AgentActionType = 'update' | 'create' | 'revert';
@@ -46,6 +47,20 @@ export async function logAgentAction(
   try {
     await pb.collection('agent_actions').create(payload);
   } catch (err) {
+    // PB v0.23.4:s rule-eval kan tyst neka en behörig skrivning (§ 21.3) —
+    // exakt de fall där själva mutationen behövde superuser-fallbacken.
+    // Auditen får inte tappas just då (ISO 27001 A.8.15 / SOC 2 CC7.2):
+    // försök som superuser innan felet sväljs. `actor` sätts explicit i
+    // payload, så raden blir korrekt attribuerad även via superuser.
+    try {
+      const su = await getSuperuserPb();
+      if (su.ok) {
+        await su.pb.collection('agent_actions').create(payload);
+        return;
+      }
+    } catch {
+      /* faller igenom till fel-loggen nedan */
+    }
     console.error('[agent_actions] log failed', {
       tenant: params.actor.tenant,
       action_type: params.action_type,

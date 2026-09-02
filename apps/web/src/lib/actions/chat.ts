@@ -23,7 +23,8 @@ import {
 import {
   SEARCH_STRATEGY_GUIDANCE,
   DOMAIN_GLOSSARY,
-  AUTHORING_GUIDANCE
+  AUTHORING_GUIDANCE,
+  CHAT_WRITE_ACTIONS_GUIDANCE
 } from '@/lib/ai/guidance';
 import { buildChatTools, buildMemoryRecallBlock } from '@/lib/ai/tools';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
@@ -155,6 +156,7 @@ const STAFF_TOOL_GUIDANCE =
   '- `update_activity_field`: uppdatera en befintlig aktivitets `title`, ' +
   '`description` eller `status` (t.ex. markera en uppgift som `done`). ' +
   'Slå upp aktivitetens id med `query_collection` på `activities` först.\n' +
+  CHAT_WRITE_ACTIONS_GUIDANCE +
   '- `memory_read` / `memory_write`: ditt tvärsessions-minne (per tenant). När ' +
   'personalen RÄTTAR dig eller lär dig en bestående regel ("räkna inte lån som ' +
   'investeringar", "Bolag X heter numera Y") — spara det med `memory_write` ' +

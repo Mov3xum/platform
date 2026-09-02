@@ -331,3 +331,41 @@ export function validateWorkshopStatus(
   }
   return { ok: true, value: normalized as WorkshopStatusForWrite };
 }
+
+// ── Datum (delas av tasks/events/CRM/de minimis, § 33) ─────────────────────
+
+/**
+ * Valfritt datum (dag-nivå). Accepterar 'ÅÅÅÅ-MM-DD' eller full ISO-sträng
+ * (trunkeras till dagen). Tomt/null → null.
+ */
+export function validateDateOnly(
+  value: unknown,
+  fieldName: string
+): ValidationResult<string | null> {
+  if (value === null || value === undefined || value === '') {
+    return { ok: true, value: null };
+  }
+  const s = asString(value);
+  if (s === null) return { ok: false, error: `${fieldName} måste vara ett datum (ÅÅÅÅ-MM-DD).` };
+  const day = s.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(Date.parse(day))) {
+    return { ok: false, error: `${fieldName} måste vara ett giltigt datum (ÅÅÅÅ-MM-DD).` };
+  }
+  return { ok: true, value: day };
+}
+
+/** Obligatorisk tidpunkt — ISO-parsbar sträng, normaliseras till UTC-ISO. */
+export function validateIsoDateTime(
+  value: unknown,
+  fieldName: string
+): ValidationResult<string> {
+  const s = asString(value);
+  if (s === null || s.trim() === '') {
+    return { ok: false, error: `${fieldName} saknas (ange datum/tid, t.ex. 2026-09-10 14:00).` };
+  }
+  const ms = Date.parse(s.trim());
+  if (!Number.isFinite(ms)) {
+    return { ok: false, error: `${fieldName} är ingen giltig tidpunkt (använd ISO-format).` };
+  }
+  return { ok: true, value: new Date(ms).toISOString() };
+}

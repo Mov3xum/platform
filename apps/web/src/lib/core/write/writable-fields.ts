@@ -33,6 +33,11 @@ const STAFF_FULL: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 // Startupkompassen hanteras av admin/incubator_lead/coach (samma krets som
 // `MANAGE_ROLES` i lib/actions/compass.ts, § 23).
 const COMPASS_MANAGE: Role[] = ['admin', 'incubator_lead', 'coach'];
+// Events skapas av admin/incubator_lead/coach (speglar incubator_events
+// createRule-kretsen, § 18.4).
+const EVENT_MANAGE: Role[] = ['admin', 'incubator_lead', 'coach'];
+// Schemaläggning av AI-agenter är admin/incubator_lead (§ 12.2).
+const SCHEDULE_MANAGE: Role[] = ['admin', 'incubator_lead'];
 
 const POLICIES: Record<string, Record<string, FieldPolicy>> = {
   startups: {
@@ -128,6 +133,13 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     help_text: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     required: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } }
   },
+  // Kanban-kort (§ 15.7/§ 29.4). Agenten får flytta kort mellan kolumner
+  // ("markera LOI-uppföljningen som klar"). Tilldelning av kollegor
+  // (`assignees`) är MEDVETET inte skrivbar för agenten — den kan inte slå
+  // upp användar-id:n (`users` är denylistad, § 9.3) och ska inte gissa.
+  tasks: {
+    status: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } }
+  },
   // Workshops (§ 18). Agenten får förbereda innehåll i ett UTKAST; att
   // publicera och tilldela bolag är mänskliga beslut.
   workshops: {
@@ -167,6 +179,55 @@ const CREATE_POLICIES: Record<
     agent: { kind: 'allow' }
   },
   workshops: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  // ── Utökad chatt-skrivyta (§ 33) ─────────────────────────────────────────
+  // Tilldelningar är verkliga åtgärder mot bolag — hela staff-kretsen får
+  // (samma som UI-actions), agenten kör å den inloggades vägnar.
+  workshop_assignments: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  education_document_assignments: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  tasks: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  incubator_events: {
+    user: { kind: 'roles', roles: EVENT_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  // Uppdrag skapas som UTKAST (status 'draft') av agenten — teamet kopplas på
+  // och uppdraget startas av en människa i /uppdrag (§ 29).
+  missions: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  // De minimis-registrering går genom samma kanBevilja-spärr som UI:t (§ 20)
+  // — taket kan aldrig rundas via chatten.
+  de_minimis_stod: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  startup_kpis: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  capital_rounds: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  tool_schedules: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  // Anteckningar via chatten är ALLTID icke-konfidentiella (confidential=false
+  // tvingas i skrivlagret) — konfidentiella anteckningar skrivs i UI:t.
+  notes: {
     user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'allow' }
   }

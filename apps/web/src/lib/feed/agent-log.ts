@@ -87,6 +87,20 @@ const FLOW_LABELS: Record<string, string> = {
   quiz: 'quiz'
 };
 
+/** Kanban-kolumnernas etiketter (§ 15.7). */
+const TASK_COLUMN_LABELS: Record<string, string> = {
+  backlog: 'Backlogg',
+  open: 'Att göra',
+  in_progress: 'Pågår',
+  review: 'Granskas',
+  blocked: 'Blockerad',
+  done: 'Klar'
+};
+
+function trunc(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
 function fieldLabel(field?: string): string {
   if (!field) return 'ett fält';
   return FIELD_LABELS[field] ?? field;
@@ -254,6 +268,128 @@ function mapRow(
           : `Ett bolag: ${fieldLabel(row.field)} ${changedVerb}`,
         href: row.record_id ? `/startups/${row.record_id}` : undefined,
         icon: 'pencil'
+      };
+    }
+
+    // Workshop-tilldelningar skapar redan en egen activities-rad i feeden
+    // (skrivlagret speglar UI-flödet) — loggraden vore en dubblett.
+    case 'workshop_assignments':
+      return null;
+
+    case 'education_document_assignments': {
+      const startupId = str(after.startup);
+      return {
+        title: `Utbildningsdokument tilldelat: "${str(after.document_title) || 'dokument'}"`,
+        detail: str(after.startup_name) || undefined,
+        href: startupId ? `/startups/${startupId}` : undefined,
+        icon: 'doc'
+      };
+    }
+
+    case 'tasks': {
+      if (action === 'create') {
+        const startupId = str(after.startup);
+        const missionId = str(after.mission);
+        return {
+          title: `Nytt kanban-kort: "${trunc(str(after.description), 60) || 'uppgift'}"`,
+          href: startupId
+            ? `/startups/${startupId}/aktiviteter`
+            : missionId
+              ? `/uppdrag/${missionId}`
+              : '/inkorg',
+          icon: 'check'
+        };
+      }
+      const column = TASK_COLUMN_LABELS[str(row.after_value)] ?? str(row.after_value);
+      return {
+        title: column
+          ? `Ett kanban-kort flyttades till ${column}`
+          : `Ett kanban-kort ${changedVerb}`,
+        href: '/inkorg',
+        icon: 'check'
+      };
+    }
+
+    case 'incubator_events': {
+      const starts = str(after.starts_at);
+      return {
+        title: `Nytt event: "${str(after.name) || 'utan namn'}"`,
+        detail: starts ? new Date(starts).toLocaleString('sv-SE').slice(0, 16) : undefined,
+        href: row.record_id ? `/events/${row.record_id}` : '/events',
+        icon: 'calendar'
+      };
+    }
+
+    case 'missions': {
+      const startupName = str(after.startup_name);
+      return {
+        title: `Nytt uppdrag: "${str(after.title) || 'utan titel'}"`,
+        detail: startupName ? `utkast · ${startupName}` : 'utkast',
+        href: row.record_id ? `/uppdrag/${row.record_id}` : '/uppdrag',
+        icon: 'target'
+      };
+    }
+
+    case 'de_minimis_stod': {
+      const startupId = str(after.startup);
+      const belopp = Number(after.belopp_eur);
+      return {
+        title: `De minimis-stöd registrerat: ${str(after.stodgivare) || 'stödgivare'}`,
+        detail: [
+          Number.isFinite(belopp) ? `${belopp.toLocaleString('sv-SE')} EUR` : null,
+          str(after.startup_name) || null
+        ]
+          .filter(Boolean)
+          .join(' · ') || undefined,
+        href: startupId ? `/de-minimis/${startupId}` : '/de-minimis',
+        icon: 'shield'
+      };
+    }
+
+    case 'startup_kpis': {
+      const startupId = str(after.startup);
+      return {
+        title: `KPI registrerad: ${str(after.kpi_name) || 'nyckeltal'}`,
+        detail: str(after.startup_name) || undefined,
+        href: startupId ? `/startups/${startupId}` : undefined,
+        icon: 'graph'
+      };
+    }
+
+    case 'capital_rounds': {
+      const startupId = str(after.startup);
+      const amount = Number(after.amount_sek);
+      return {
+        title: `Kapital registrerat: ${str(after.source) || 'finansiär'}`,
+        detail: [
+          Number.isFinite(amount) ? `${amount.toLocaleString('sv-SE')} kr` : null,
+          str(after.startup_name) || null
+        ]
+          .filter(Boolean)
+          .join(' · ') || undefined,
+        href: startupId ? `/startups/${startupId}` : undefined,
+        icon: 'graph'
+      };
+    }
+
+    case 'tool_schedules': {
+      const toolId = str(after.tool);
+      return {
+        title: `Agent schemalagd: ${str(after.tool_name) || 'AI-agent'}`,
+        detail: str(after.cron_expression) || undefined,
+        href: toolId ? `/toolbox/${toolId}` : '/toolbox',
+        icon: 'clock'
+      };
+    }
+
+    case 'notes': {
+      const startupId = str(after.startup);
+      return {
+        title: str(after.startup_name)
+          ? `Ny anteckning: ${str(after.startup_name)}`
+          : 'Ny anteckning på ett bolagskort',
+        href: startupId ? `/startups/${startupId}` : undefined,
+        icon: 'doc'
       };
     }
 

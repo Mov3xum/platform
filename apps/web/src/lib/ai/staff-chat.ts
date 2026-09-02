@@ -11,7 +11,8 @@ import {
   SEARCH_STRATEGY_GUIDANCE,
   DOMAIN_GLOSSARY,
   KNOWLEDGE_GUIDANCE,
-  AUTHORING_GUIDANCE
+  AUTHORING_GUIDANCE,
+  CHAT_WRITE_ACTIONS_GUIDANCE
 } from './guidance';
 import { routeChatModels } from './model-router';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from './web';
@@ -105,6 +106,7 @@ const STAFF_TOOL_GUIDANCE =
   'aktivitet kopplat till ett bolag.\n' +
   '- `update_activity_field`: uppdatera en befintlig aktivitets `title`, ' +
   '`description` eller `status`.\n' +
+  CHAT_WRITE_ACTIONS_GUIDANCE +
   '- `memory_read` / `memory_write`: ditt tvärsessions-minne (per tenant). När ' +
   'personalen RÄTTAR dig eller lär dig en bestående regel ("räkna inte lån som ' +
   'investeringar", "Bolag X heter numera Y") — spara det med `memory_write` ' +

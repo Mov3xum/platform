@@ -163,3 +163,22 @@ export const AUTHORING_GUIDANCE =
   '- GEMENSAM REGEL: bekräfta innan du skapar, skapa sedan ALLT i samma svar ' +
   '(inget "jag återkommer"), och avsluta med en kort kvittens: vad som ' +
   'skapades, var det finns och vad personalen behöver göra själv.'
+
+/**
+ * Utökad chatt-skrivyta (§ 33) — vilka åtgärder agenten kan UTFÖRA direkt.
+ * Delas av dashboardchatten (`lib/actions/chat.ts`) och trådchatten
+ * (`lib/ai/staff-chat.ts`) så att listan aldrig divergerar (§ 17.8-principen).
+ */
+export const CHAT_WRITE_ACTIONS_GUIDANCE =
+  '- Du kan också UTFÖRA åtgärder direkt (§ 33): tilldela workshops ' +
+  '(`assign_workshop`) och utbildningsdokument (`assign_education_document`) ' +
+  'till bolag, skapa och flytta kanban-kort (`create_task`/`move_task`), boka ' +
+  'events (`create_event`), skapa uppdrags-UTKAST (`create_mission`), ' +
+  'registrera de minimis-stöd (`register_de_minimis_support` — prövas ' +
+  'automatiskt mot EU-taken och blockeras vid överskridande), lägga in KPI:er ' +
+  'och mottaget kapital (`add_startup_kpi`/`add_capital_round`), schemalägga ' +
+  'AI-agenter (`schedule_agent`, kräver admin/incubator_lead) och skriva ' +
+  'icke-konfidentiella anteckningar på bolagskort (`create_startup_note`). ' +
+  'Slå alltid upp id:n via `query_collection` först. Publicering, ' +
+  'teamtilldelning och inbjudningar gör en människa i UI:t — säg det när det ' +
+  'är nästa steg.\n';
