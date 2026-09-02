@@ -14,6 +14,8 @@ import {
 } from '@/lib/actions/chat-attachments';
 import { Icon } from '@/components/proto/Icon';
 import VoiceInputButton from '@/components/VoiceInputButton';
+import ChatHelpGuide from '@/components/ChatHelpGuide';
+import type { Role } from '@platform/shared';
 import { chatMarkdownToHtml } from '@/lib/safe-html';
 
 // Markör som visas i slutet av den streamande texten. Injiceras i den redan
@@ -333,6 +335,8 @@ interface Props {
   agents?: DashboardAgent[];
   connectors?: DashboardConnector[];
   activities?: DashboardActivity[];
+  /** Inloggad användares roller — styr vilka delar hjälp-guiden visar (§ 33.3). */
+  userRoles?: Role[];
   greeting?: string;
   // Kontrollerade props (ChattWorkspace äger tillståndet)
   messages: UiMessage[];
@@ -380,6 +384,7 @@ export default function DashboardChat({
   agents = [],
   connectors = [],
   activities = [],
+  userRoles = [],
   greeting,
   messages,
   isPending,
@@ -398,6 +403,8 @@ export default function DashboardChat({
   onCancelQueued
 }: Props) {
   const [input, setInput] = useState('');
+  // Hjälp-guiden ("Vad kan chatten göra?") — rollspecifik, § 33.3.
+  const [showGuide, setShowGuide] = useState(false);
   const [includeWebContext, setIncludeWebContext] = useState(false);
   const [deepMode, setDeepMode] = useState(false);
   const [showAssistants, setShowAssistants] = useState(false);
@@ -820,6 +827,15 @@ export default function DashboardChat({
               Assistenter
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setShowGuide(true)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-default px-3 py-1 text-[12px] text-foreground-subtle transition hover:border-strong hover:text-foreground"
+            title="Vad kan chatten göra? Öppna guiden med exempel för din roll"
+          >
+            <Icon name="help" size={12} />
+            Hjälp
+          </button>
         </div>
         <button
           type="button"
@@ -975,6 +991,19 @@ export default function DashboardChat({
 
   return (
     <div className={`flex min-h-0 flex-1 flex-col ${className}`}>
+      {showGuide && (
+        <ChatHelpGuide
+          roles={userRoles}
+          onClose={() => setShowGuide(false)}
+          onUseExample={(text) => {
+            // Exemplet läggs i chattrutan men skickas INTE — användaren
+            // läser, justerar och skickar själv (människa-i-loopen).
+            setInput(text);
+            setShowGuide(false);
+            inputRef.current?.focus();
+          }}
+        />
+      )}
       {lightbox && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-movexum-svart/70 p-4 backdrop-blur-sm md:p-8"
@@ -1024,6 +1053,14 @@ export default function DashboardChat({
               </h1>
             )}
             <p className="mt-2 text-[14px] text-foreground-subtle">Vad kan jag hjälpa dig med idag?</p>
+            <button
+              type="button"
+              onClick={() => setShowGuide(true)}
+              className="mt-2 inline-flex items-center gap-1.5 self-start text-[13px] text-link transition hover:underline"
+            >
+              <Icon name="help" size={13} />
+              Vad kan chatten göra? Se guiden med exempel
+            </button>
 
             {activeAgent && (
               <div className="mt-5 flex items-center gap-2">

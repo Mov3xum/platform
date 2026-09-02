@@ -185,6 +185,7 @@ export default async function ChattPage() {
         agents={agents}
         connectors={connectors}
         activities={activities}
+        userRoles={user.roles}
         initialThreads={initialThreads}
       />
     </PageShell>
