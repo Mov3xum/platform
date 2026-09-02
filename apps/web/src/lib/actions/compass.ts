@@ -13,6 +13,7 @@ import {
   updateLead
 } from '@/lib/compass/store';
 import { marketScanLead, reviewLead, scoreLead } from '@/lib/compass/chat';
+import { logAgentAction } from '@/lib/core/write';
 import {
   LEAD_STATUS_ORDER,
   type LeadStatus
@@ -470,6 +471,7 @@ export async function createModuleAction(formData: FormData) {
       })
     );
   }
+  let createdId = '';
   try {
     let rec;
     try {
@@ -478,10 +480,22 @@ export async function createModuleAction(formData: FormData) {
       rec = await createWith(`${publicSlugRaw}-${Math.random().toString(36).slice(2, 6)}`);
     }
     createdSlug = rec.slug;
+    createdId = String(rec.id);
   } catch (err) {
     const code = toErrorCode(err);
     redirect(`/inflode/admin/modules/new?error=${code}`);
   }
+
+  // Ändringslogg (CLAUDE.md § 32): UI-skapade moduler loggas i `agent_actions`
+  // med samma format som chatt-agentens `create_compass_module`, så den
+  // samlade aktivitetsloggen ser skapandet oavsett väg. Fail-soft i helpern.
+  await logAgentAction(pb, {
+    actor: { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles },
+    action_type: 'create',
+    collection: 'compass_modules',
+    record_id: createdId,
+    after_value: { slug: createdSlug, name, flow_type: flowType }
+  });
 
   await logSecurity(pb, user.tenant, {
     actor: user.id,

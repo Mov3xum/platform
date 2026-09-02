@@ -271,6 +271,14 @@ export interface DashboardActivity {
   startupName?: string;
   startupId?: string;
   toolIcon?: string;
+  /** Egen länk (systemloggrader: årshjulet, modul-admin …). Vinner över startupId. */
+  href?: string;
+  /** Ikonnamn satt av servern (systemloggrader). */
+  icon?: string;
+  /** Vem som utförde åtgärden — visas som tooltip. */
+  actorName?: string;
+  /** true när åtgärden gjordes av AI-agenten i chatten (art. 13-transparens). */
+  viaAgent?: boolean;
 }
 
 // Relativ, svensk tidsangivelse ("nyss", "2 tim sedan", "igår").
@@ -295,7 +303,8 @@ const ACTIVITY_SWATCH = 'bg-canvas-muted text-foreground-subtle';
 
 function activityVisual(act: DashboardActivity): { icon: string; swatch: string } {
   let icon = 'dot';
-  if (act.kind === 'tool_run') icon = 'sparkle';
+  if (act.icon) icon = act.icon;
+  else if (act.kind === 'tool_run') icon = 'sparkle';
   else if (act.kind === 'integration_sync') icon = 'cloud';
   else if (act.kind === 'workshop_run' || act.kind === 'workshop_assignment') icon = 'cap';
   else
@@ -397,8 +406,10 @@ export default function DashboardChat({
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   // Fullskärmsvy för en inline-visualisering (stort över hela ytan).
   const [lightbox, setLightbox] = useState<InlineVisualRef | null>(null);
-  // Aktivitetsloggen visar bara de fem senaste tills användaren expanderar.
-  const [activitiesExpanded, setActivitiesExpanded] = useState(false);
+  // Aktivitetsloggen visar de fem senaste; "Visa fler" utökar stegvis så att
+  // hela historiken kan läsas som en logg utan att startvyn blir lång.
+  const ACTIVITY_STEP = 15;
+  const [visibleActivities, setVisibleActivities] = useState(5);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1118,7 +1129,7 @@ export default function DashboardChat({
                       Aktivitet
                     </h2>
                     <p className="mt-0.5 text-[12px] text-foreground-subtle">
-                      Senaste händelserna i portföljen
+                      Det senaste i portföljen och det du gjort i systemet
                     </p>
                   </div>
                   <a href="/aktivitet" className="text-[12px] text-foreground-subtle transition hover:text-foreground">
@@ -1132,8 +1143,10 @@ export default function DashboardChat({
                 ) : (
                   <>
                     <ul className="overflow-hidden rounded-2xl border border-default bg-surface">
-                      {(activitiesExpanded ? activities : activities.slice(0, 5)).map((act, i) => {
+                      {activities.slice(0, visibleActivities).map((act, i) => {
                         const v = activityVisual(act);
+                        const href =
+                          act.href ?? (act.startupId ? `/startups/${act.startupId}` : undefined);
                         const inner = (
                           <>
                             <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${v.swatch}`}>
@@ -1150,11 +1163,20 @@ export default function DashboardChat({
                                   {act.startupName}
                                 </span>
                               )}
+                              {act.viaAgent && (
+                                <span
+                                  className="inline-flex shrink-0 items-center gap-1 rounded-md bg-canvas-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground-subtle"
+                                  title="Utfört via AI-chatten"
+                                >
+                                  <Icon name="sparkle" size={9} />
+                                  AI
+                                </span>
+                              )}
                             </div>
                             <span className="shrink-0 text-[11.5px] text-foreground-subtle">
                               {relativeTime(act.created)}
                             </span>
-                            {act.startupId && (
+                            {href && (
                               <Icon
                                 name="arrow-up-right"
                                 size={13}
@@ -1165,35 +1187,50 @@ export default function DashboardChat({
                         );
                         const rowClass = `group flex items-center gap-2.5 px-4 py-2 transition ${
                           i > 0 ? 'border-t border-default' : ''
-                        } ${act.startupId ? 'hover:bg-canvas-subtle' : ''}`;
+                        } ${href ? 'hover:bg-canvas-subtle' : ''}`;
+                        const rowTitle = act.actorName ? `Av ${act.actorName}` : undefined;
                         return (
                           <li key={act.id}>
-                            {act.startupId ? (
-                              <a href={`/startups/${act.startupId}`} className={rowClass}>
+                            {href ? (
+                              <a href={href} className={rowClass} title={rowTitle}>
                                 {inner}
                               </a>
                             ) : (
-                              <div className={rowClass}>{inner}</div>
+                              <div className={rowClass} title={rowTitle}>
+                                {inner}
+                              </div>
                             )}
                           </li>
                         );
                       })}
                     </ul>
                     {activities.length > 5 && (
-                      <button
-                        type="button"
-                        onClick={() => setActivitiesExpanded((v) => !v)}
-                        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-[12px] text-foreground-subtle transition hover:bg-canvas-subtle hover:text-foreground"
-                      >
-                        {activitiesExpanded
-                          ? 'Visa färre'
-                          : `Visa ${activities.length - 5} till`}
-                        <Icon
-                          name="chevdown"
-                          size={13}
-                          className={`transition ${activitiesExpanded ? 'rotate-180' : ''}`}
-                        />
-                      </button>
+                      <div className="mt-2 flex items-center justify-center gap-2">
+                        {visibleActivities < activities.length && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setVisibleActivities((v) =>
+                                Math.min(activities.length, v + ACTIVITY_STEP)
+                              )
+                            }
+                            className="flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-[12px] text-foreground-subtle transition hover:bg-canvas-subtle hover:text-foreground"
+                          >
+                            {`Visa ${Math.min(activities.length - visibleActivities, ACTIVITY_STEP)} till`}
+                            <Icon name="chevdown" size={13} />
+                          </button>
+                        )}
+                        {visibleActivities > 5 && (
+                          <button
+                            type="button"
+                            onClick={() => setVisibleActivities(5)}
+                            className="flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-[12px] text-foreground-subtle transition hover:bg-canvas-subtle hover:text-foreground"
+                          >
+                            Visa färre
+                            <Icon name="chevdown" size={13} className="rotate-180" />
+                          </button>
+                        )}
+                      </div>
                     )}
                   </>
                 )}
