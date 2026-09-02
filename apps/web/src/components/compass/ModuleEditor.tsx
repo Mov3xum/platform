@@ -500,6 +500,9 @@ export function ModuleEditor({
                   <span>Publicerad publikt (kräver Aktiv)</span>
                 </label>
               </div>
+              <span className="mx-t-12 mx-muted">
+                Länken fungerar när båda är ibockade och du har sparat.
+              </span>
             </div>
           </Step>
         </form>
