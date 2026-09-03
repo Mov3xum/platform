@@ -85,9 +85,13 @@ migrate(
         'CREATE INDEX idx_mt_owner_status ON meeting_transcripts (owner, status)'
       ],
       // STRIKT ägaren-bara på ALLA operationer — ingen staff-läsning.
+      // createRule får INTE innehålla en tenant-join (`= tenant`) — det
+      // triggar PB v0.23.4:s "sql: no rows in result set"-bugg och tyst
+      // nekande av create:en (CLAUDE.md § 21.3, migration 1700000111). Behåll
+      // bara den skalära ägar-checken där; tenant sätts av server-actionen.
       listRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${OWNER_MATCH}`,
       viewRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${OWNER_MATCH}`,
-      createRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${OWNER_MATCH}`,
+      createRule: `${ANY_AUTH} && ${OWNER_MATCH}`,
       updateRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${OWNER_MATCH}`,
       deleteRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${OWNER_MATCH}`
     });
