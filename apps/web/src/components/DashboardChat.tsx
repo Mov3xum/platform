@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChatAttachment } from '@/lib/actions/chat';
-import type { AgentActivityStep, GeneratedFileRef, InlineVisualRef } from '@platform/shared';
+import type {
+  AgentActivityStep,
+  ApprovalRequestRef,
+  GeneratedFileRef,
+  InlineVisualRef,
+  MeetingRequestRef
+} from '@platform/shared';
 import {
   AI_IMPACT_SOURCE_LABEL,
   formatAiImpact,
@@ -57,6 +63,10 @@ export interface UiMessage {
   steps?: AgentActivityStep[];
   /** Turens tokens (in + ut) → inline token-/miljöchip under svaret. */
   tokens?: number;
+  /** Agenten väntar på Godkänn/Avbryt inför en kritisk åtgärd (§ 33). */
+  approval_request?: ApprovalRequestRef;
+  /** Agenten har förberett mötesläget (§ 34) — "Starta mötet"-kort. */
+  meeting_request?: MeetingRequestRef;
 }
 
 // Ett pågående verktygssteg under en streamande turn.
@@ -363,6 +373,12 @@ interface Props {
   onDownload: (file: GeneratedFileRef) => void;
   // Ta bort ett ännu icke-körat köat meddelande.
   onCancelQueued?: (id: string) => void;
+  // Svar på agentens godkännandefråga (Godkänn/Avbryt-knapparna, § 33).
+  onApproval?: (approved: boolean) => void;
+  // Öppna mötesläget (§ 34) — chip i komposern.
+  onOpenMeeting?: () => void;
+  // Starta mötesläget från agentens möteskort (`start_meeting`, § 34).
+  onStartMeeting?: (req: MeetingRequestRef) => void;
 }
 
 const AGENT_TONES = [
@@ -400,7 +416,10 @@ export default function DashboardChat({
   onReset,
   onSubmit,
   onDownload,
-  onCancelQueued
+  onCancelQueued,
+  onApproval,
+  onOpenMeeting,
+  onStartMeeting
 }: Props) {
   const [input, setInput] = useState('');
   // Hjälp-guiden ("Vad kan chatten göra?") — rollspecifik, § 33.3.
@@ -810,6 +829,18 @@ export default function DashboardChat({
             <Icon name="sparkle" size={12} />
             Djupdykning
           </button>
+          {onOpenMeeting && (
+            <button
+              type="button"
+              onClick={onOpenMeeting}
+              disabled={deepMode}
+              className="inline-flex items-center gap-1.5 rounded-full border border-default px-3 py-1 text-[12px] font-medium text-foreground-subtle transition hover:border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              title="Mötesläge: spela in ett möte, få allt transkriberat live och spara protokollet på ett bolagskort"
+            >
+              <Icon name="mic" size={12} />
+              Möte
+            </button>
+          )}
           {!isActive && agents.length > 0 && (
             <button
               type="button"
@@ -899,6 +930,79 @@ export default function DashboardChat({
           </li>
         ))}
       </ul>
+    );
+  }
+
+  // Godkännandekort (§ 33): visas bara på det SENASTE assistant-svaret och
+  // bara medan inget nytt körs/köas — ett klick skickar "Godkänn"/"Avbryt"
+  // som en vanlig user-tur, varpå kortet försvinner (meddelandet är inte
+  // längre senast). Knappen är UX, inte säkerhetsgränsen (RBAC/skrivlagret).
+  function renderApprovalRequest(msg: UiMessage, isLast: boolean) {
+    if (!msg.approval_request || !isLast || !onApproval) return null;
+    if (isPending || queued.length > 0) return null;
+    return (
+      <div className="mt-3 max-w-[640px] rounded-2xl border border-default bg-canvas-subtle p-3.5">
+        <p className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+          <Icon name="check" size={11} />
+          Väntar på ditt godkännande
+        </p>
+        <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground">
+          {msg.approval_request.summary}
+        </p>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onApproval(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-[13px] font-medium text-brand-foreground transition hover:bg-brand-hover"
+          >
+            <Icon name="check" size={13} />
+            Godkänn
+          </button>
+          <button
+            type="button"
+            onClick={() => onApproval(false)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-default px-4 py-2 text-[13px] font-medium text-foreground-muted transition hover:border-strong hover:text-foreground"
+          >
+            <Icon name="x" size={12} />
+            Avbryt
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Möteskort (§ 34): agenten har förberett mötesläget via `start_meeting`.
+  // Visas som "Starta mötet"-knapp på det senaste assistant-svaret — själva
+  // starten (och samtyckesgrinden) är alltid ett mänskligt klick i panelen.
+  function renderMeetingRequest(msg: UiMessage, isLast: boolean) {
+    if (!msg.meeting_request || !isLast || !onStartMeeting) return null;
+    if (isPending || queued.length > 0) return null;
+    const req = msg.meeting_request;
+    return (
+      <div className="mt-3 max-w-[640px] rounded-2xl border border-default bg-canvas-subtle p-3.5">
+        <p className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+          <Icon name="mic" size={11} />
+          Mötesläge förberett
+        </p>
+        <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground">
+          {req.startup_name
+            ? `Möte med ${req.startup_name}${req.title ? ` — ${req.title}` : ''}. `
+            : req.title
+              ? `${req.title}. `
+              : ''}
+          Allt som sägs transkriberas live och kan sparas på bolagskortet efter granskning.
+        </p>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onStartMeeting(req)}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-[13px] font-medium text-brand-foreground transition hover:bg-brand-hover"
+          >
+            <Icon name="mic" size={13} />
+            Starta mötet
+          </button>
+        </div>
+      </div>
     );
   }
 
@@ -1326,6 +1430,8 @@ export default function DashboardChat({
                       />
                       {renderVisuals(msg.visuals)}
                       {renderGeneratedFiles(msg.generated_files)}
+                      {renderApprovalRequest(msg, i === messages.length - 1)}
+                      {renderMeetingRequest(msg, i === messages.length - 1)}
                       {typeof msg.tokens === 'number' && msg.tokens > 0 && (
                         <p
                           className="mt-1.5 text-[11px] tabular-nums text-foreground-subtle"

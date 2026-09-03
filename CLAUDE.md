@@ -4077,6 +4077,22 @@ aktivitetsloggen (§ 32) med klickbar länk.
 | `add_capital_round` | Mottaget kapital; `purpose` personnummer-saneras (§ 15.6-regexen) | — |
 | `schedule_agent` | Upsert av `tool_schedules` (§ 12), samma cron-parser + `canRunTool` | Roller admin/incubator_lead (`SCHEDULE_MANAGE`) |
 | `create_startup_note` | Anteckning på bolagskort | **`confidential=false` tvingas**; anteckningstexten loggas ALDRIG i audit (bara längd) |
+| `request_approval` | Visar Godkänn/Avbryt-knapp i chatten inför en KRITISK åtgärd | Ingen dataväg (ren UX); max 1/tur; medan frågan är obesvarad spärras alla domänskrivverktyg i samma tur server-side |
+
+**Godkännandeflödet ("fråga inte i onödan").** Agenten ska INTE be om
+bekräftelse för rutinåtgärder användaren tydligt bett om (utkast,
+anteckningar, kort, KPI:er, tilldelningar — allt loggas och kan rullas
+tillbaka). Inför en KRITISK åtgärd (juridiskt/ekonomiskt bindande,
+återkommande kostnad, många poster, eller utöver vad användaren bad om)
+anropar den `request_approval`: sammanfattningen persisteras på
+assistant-meddelandet (`ToolRunMessage.approval_request`,
+`@platform/shared`) och UI:t (`DashboardChat`) renderar Godkänn/Avbryt-
+knappar på det senaste svaret; klicket skickas som en vanlig user-tur
+("Godkänn"/"Avbryt") så beslutet syns i transkriptet. Policyn ligger i den
+delade `APPROVAL_GUIDANCE` (`lib/ai/guidance.ts`); spärr + sink i
+`lib/ai/tools.ts` (`DOMAIN_WRITE_TOOLS`). Knappen är UX som FÖRSTÄRKER
+människa-i-loopen (art. 14) — säkerhetsgränsen är oförändrat RBAC +
+skrivlagrets whitelist.
 
 ### 33.2 Regelefterlevnad
 
@@ -4126,3 +4142,133 @@ Chatten (`/chatt`) har en inbyggd guide ("Vad kan chatten göra?") som nås via
   Exemplen är generiska (inga riktiga bolagsnamn, ingen PII).
 - **Riskklass:** n/a — statiskt UI-innehåll, ingen dataväg, ingen AI-inferens.
   Transparensbannern (§ 9.7) visas i guidens sidfot.
+
+---
+
+## 34. Mötesläge i chatten — inspelning, live-transkribering & bolagskorts-protokoll
+
+### 34.1 Översikt
+
+Chatten (`/chatt`) har ett **mötesläge**: coachen startar ett möte (via
+🎙 Möte-chippen i komposern, eller med rösten — "starta ett möte med Fixkod"
+→ agent-verktyget `start_meeting` visar ett möteskort), allt som sägs
+transkriberas **live** i ~90-sekunderssegment (Voxtral, Mistral EU — samma
+pipeline som § 31), och efter granskning sparas protokoll + transkript som
+**anteckning på valt bolagskort**. Därefter kan agenten föreslå uppgifter/
+nästa steg/uppföljningsmöte ur åtgärdspunkterna via befintliga § 33-verktyg
+("jobba från chatten").
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/meeting.ts` (+ `.test.ts`) | Ren, enhetstestad möteslogik: segment-/längdtak, samtyckestext, transkript-sammanfogning med luck-markering, purge-fönster, `MeetingRequestRef` |
+| `backend/pocketbase-schema/migrations/1700000142_create_meeting_transcripts.js` | Collection `meeting_transcripts` (STRIKT ägaren-bara, autodate explicit) |
+| `backend/pocketbase-schema/migrations/1700000143_extend_activity_kinds_meeting.js` | `activities.kind` += `meeting` (union) |
+| `apps/web/src/app/api/chat/meeting/segment/route.ts` | Segment-upload (route handler, § 18.2-mönstret): Voxtral + personnummer-sanering + usage-logg |
+| `apps/web/src/lib/actions/meetings.ts` | Livscykel: starta (samtyckesgrind)/avsluta/kasta/spara+purge/återuppta + Outlook-förifyllnad |
+| `apps/web/src/lib/ai/meeting-protocol.ts` | Isolerade Mistral-körningar: protokollutkast (kedje-summering för långa möten) + LLM-gissad turindelning |
+| `apps/web/src/components/meeting/MeetingMode.tsx` | Panelen: samtyckesgrind → segmenterad inspelning (wake lock, beforeunload) → granskning → spara |
+| `apps/web/src/lib/ai/tools.ts` | Verktyget `start_meeting` (UX-sink som `request_approval` — ingen dataväg) |
+| `apps/web/src/lib/ai/guidance.ts` | `MEETING_GUIDANCE` (delad av chatt-ytorna) |
+
+### 34.2 Datamodell
+
+**`meeting_transcripts`** (1700000142) — **STRIKT ägaren-bara** arbetsdata
+(samma klass som `chat_threads`/`user_files`, § 17.2; owner-only-regler på
+ALLA operationer, även admin utestängd): `tenant`/`owner` (cascadeDelete),
+`startup` (valfri, ingen cascade), `status`
+(`recording → ended → saved/discarded`), `title`, `segments` (json,
+`MeetingSegment[] { index, text, at?, speaker? }`, 2 MB),
+`consent_confirmed_at`, `started_at`, `ended_at`. **Denylistad i
+`lib/ai/redaction.ts`** → `query_collection` exponerar den aldrig. Owner-only
+⇒ migration-only (§ 27-precedens). `speaker`-fältet är reserverat från dag 1
+för Fas 3 (talarindelning) så framtida diarisering inte kräver
+datamodelländring.
+
+**Raden är inte arkiv:** när protokollet sparats på bolagskortet **purgas
+råtranskriptet** (anteckningen är arkivet); osparade möten purgas efter
+`MEETING_STALE_DAYS = 7` dagar (lazy, vid list-/startanrop). Ljud lagras
+ALDRIG — varken hos oss eller Mistral (§ 31-dataflödet oförändrat per
+segment).
+
+### 34.3 Flöde
+
+1. **Start:** chip i komposern ELLER röst → `start_meeting` (agent-verktyg,
+   UX-sink som `request_approval`: fuzzy-matchar bolagsnamn via
+   `rankCandidates`, pushar `MeetingRequestRef` på assistant-svaret;
+   persisteras i `ToolRunMessage.meeting_request`). Agenten kan ALDRIG starta
+   inspelningen — kortets knapp, och samtyckesgrinden, är mänskliga klick.
+2. **Samtyckesgrind (GDPR art. 7/13):** mötet spelar in ANDRA människor än
+   användaren — coachen bekräftar `MEETING_CONSENT_TEXT` ("deltagarna är
+   informerade…"); `consent_confirmed_at` stämplas; utan bock vägrar
+   `startMeetingAction`. Synlig pulserande indikator + timer hela mötet.
+3. **Inspelning:** MediaRecorder **startas om** per segment (~90 s — INTE
+   `timeslice`, sådana chunkar är inte självständigt avkodbara). Varje segment
+   POSTas till `/api/chat/meeting/segment` (staff-only, rate-limitad 40/5 min,
+   ägar-verifierad, samma Voxtral-klient + validering som § 31), texten
+   **personnummer-saneras** (§ 15.6-regexen — folk säger personnummer högt) och
+   appendas på raden. Live-transkriptet växer i panelen. Robusthet: wake lock,
+   beforeunload-varning, retry per segment; ett förlorat segment blir en
+   **explicit lucka-markör** (saknat index ⇒ `MEETING_GAP_MARKER` i
+   `assembleMeetingTranscript`) — aldrig ett tyst hål. Tak: 3 h / 160 segment
+   (art. 15). Tystnad (Voxtral 422) = tomt segment, inte fel. En kraschad flik
+   kostar max ett segment; "Återuppta granskningen"-bannern i `/chatt` öppnar
+   det oavslutade mötet.
+4. **Granskning (människa-i-loopen, art. 14):** redigerbart transkript;
+   "Generera protokoll" (`meeting-protocol.ts`: isolerad mistral-medium→small,
+   kedje-summering >60 KB, budget-spärren § 9.6 prövas, transkriptet är DATA
+   inte instruktioner); "Dela upp i repliker" (LLM-gissad turindelning — REN
+   textbearbetning, anonyma "Talare 1/2", ≤40 KB).
+5. **Spara:** `saveMeetingToStartupAction` — en MÄNSKLIG knapptryckning (inte
+   agent-skriv) → coachen får därför välja **konfidentiell**, vilket
+   chatt-agentens `create_startup_note` med rätta aldrig får (§ 33). Skapar
+   `notes`-rad (author = coachen, AI-disclaimer-rad i bodyn), `activities`-rad
+   (`kind='meeting'`, PII-fri titel, fail-soft) och purgar mötesraden.
+6. **Vidare i chatten:** "Föreslå uppgifter i chatten" skickar protokollet som
+   en vanlig user-tur (mänskligt klick, § 33-mönstret) → agenten föreslår/
+   utför `create_task`/`update_startup_field`/`create_event` med
+   `request_approval` där det behövs.
+
+**Outlook-förifyllnad (§ 14.4):** pågår ett matchat kalendermöte förifylls
+titel (+ bolag vid ENTYDIG kontaktmatchning). E-post läses transient, aldrig
+persisterad/loggad, når aldrig AI-kontexten. Fail-soft utan koppling.
+
+### 34.4 Röstigenkänning — gränsen (bindande)
+
+- **Byggs ALDRIG:** biometrisk röstidentifiering (röst → identitet via
+  röstavtryck) och känslodetektering — GDPR art. 9 + förbjuden/högrisk-praktik
+  (§ 10.1, § 31.4). Inga röstavtryck skapas eller lagras, ingen jämförelse mot
+  röstprofiler görs.
+- **Fas 2 (implementerad):** LLM-gissad turindelning på språkliga grunder —
+  ingen ljudanalys alls.
+- **Fas 3 (INTE implementerad — grindad):** akustisk diarisering till anonyma
+  etiketter ("Talare 1/2") som coachen döper manuellt. Kräver
+  leverantörsstöd (Voxtral saknar diarisering i API:t) ELLER en självhostad
+  EU-komponent = nytt beroende ⇒ **maintainer-beslut + DPIA-tillägg innan
+  bygge**. `MeetingSegment.speaker` är förberett.
+
+### 34.5 Regelefterlevnad
+
+- **Riskklass (EU AI Act art. 11): begränsad.** Transkribering +
+  sammanfattning av ett fysiskt möte, med människa-i-loopen i varje steg
+  (start, samtycke, granskning, sparande, åtgärder). Ingen profilering av
+  individer, ingen autopublicering. DPIA:
+  `docs/privacy/dpia-meeting-transcription.md`.
+- **GDPR:** rättslig grund = berättigat intresse (inkubatordrift,
+  mötesdokumentation) + informerat samtycke via grinden (art. 7, stämplad).
+  § 5: ljud transient; personnummer-sanering på skrivvägen; auto-purge av
+  råtranskript; anteckningen ärver notes befintliga confidential-/
+  raderingsflöden (art. 17: cascadeDelete owner/tenant).
+- **Transparens (art. 13/50):** leverantör + "ljudet lagras aldrig" i
+  samtyckesgrinden och panel-footern; protokoll märks "Genererat av AI –
+  verifiera"; AI-disclaimer-rad i den sparade anteckningen; feed-raden är
+  PII-fri.
+- **§ 21/RLS:** owner-only-regler + ägar-/tenant-verifiering i kod
+  (defense-in-depth); segment-routen är staff-only med SameSite=Lax-CSRF-skydd
+  (§ 17.8); rena `startup_member` når varken chatten eller mötesläget.
+- **Kostnad/robusthet (§ 9.6/§ 10):** alla Voxtral-/protokoll-tokens loggas i
+  `ai_usage_events` (surface `dashboard_chat`) och räknas mot månadstaket;
+  protokollgenereringen kör `assertWithinAiBudget`; hårda tak på längd,
+  segment, chunk-antal och turindelningsstorlek.
+>>>>>>> origin/staging

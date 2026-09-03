@@ -12,6 +12,8 @@ import {
   DOMAIN_GLOSSARY,
   KNOWLEDGE_GUIDANCE,
   AUTHORING_GUIDANCE,
+  APPROVAL_GUIDANCE,
+  MEETING_GUIDANCE,
   CHAT_WRITE_ACTIONS_GUIDANCE
 } from './guidance';
 import { routeChatModels } from './model-router';
@@ -21,8 +23,10 @@ import { logAiUsage } from './usage';
 import type { Actor } from '@/lib/core/write';
 import type {
   AiUsageSurface,
+  ApprovalRequestRef,
   GeneratedFileRef,
   InlineVisualRef,
+  MeetingRequestRef,
   Role,
   WebSourceKey
 } from '@platform/shared';
@@ -138,8 +142,8 @@ const STAFF_TOOL_GUIDANCE =
   'upprepa inte alla siffror. Vill användaren ha en FIL (PowerPoint/PDF) är ' +
   'det `generate_document` som gäller; `render_visual` är för att SE direkt.\n\n' +
   'Skrivregler:\n' +
-  '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
-  'efterfrågad.\n' +
+  '- Rutinåtgärder som användaren bett om utförs DIREKT utan bekräftelsefråga; ' +
+  'inför en KRITISK åtgärd använder du `request_approval` (se GODKÄNNANDE-reglerna).\n' +
   '- Slå alltid upp bolagets id med `query_collection` först om du inte redan har det.\n' +
   '- Varje skrivning loggas i `agent_actions` och kan rullas tillbaka av staff.\n\n' +
   'SÅ HÄR ARBETAR DU (viktigt):\n' +
@@ -320,6 +324,10 @@ export interface StaffTurnResult {
   generatedFiles: GeneratedFileRef[];
   /** Inline-visualiseringar (diagram/KPI-kort) som agenten tog fram under turn:en. */
   visuals: InlineVisualRef[];
+  /** Godkännandefråga (`request_approval`) — Godkänn/Avbryt-knapp i UI:t. */
+  approvalRequest?: ApprovalRequestRef;
+  /** Möteskort (`start_meeting`, § 34) — "Starta mötet"-knapp i UI:t. */
+  meetingRequest?: MeetingRequestRef;
 }
 
 export interface RunStaffChatTurnOptions {
@@ -411,7 +419,12 @@ export async function runStaffChatTurn(
     ? `\n\n${buildScopedSchemaSummary(collections, selectRelevantCollections(collections, scopeText))}`
     : '';
   const toolGuidanceBlocks = useTools
-    ? STAFF_TOOL_GUIDANCE + AUTHORING_GUIDANCE + SEARCH_STRATEGY_GUIDANCE + KNOWLEDGE_GUIDANCE
+    ? STAFF_TOOL_GUIDANCE +
+      APPROVAL_GUIDANCE +
+      AUTHORING_GUIDANCE +
+      MEETING_GUIDANCE +
+      SEARCH_STRATEGY_GUIDANCE +
+      KNOWLEDGE_GUIDANCE
     : '';
 
   const systemContent =
@@ -435,6 +448,8 @@ export async function runStaffChatTurn(
   let lastModel = '';
   const generatedFiles: GeneratedFileRef[] = [];
   const inlineVisuals: InlineVisualRef[] = [];
+  const approvalRequests: ApprovalRequestRef[] = [];
+  const meetingRequests: MeetingRequestRef[] = [];
   const surface: AiUsageSurface = opts.surface ?? 'dashboard_chat';
 
   // Modellval efter komplexitet (ej längre default small). Bilder → vision.
@@ -457,7 +472,9 @@ export async function runStaffChatTurn(
         ownerUserId: opts.ownerUserId,
         chatThreadId: opts.chatThreadId,
         generatedFiles,
-        inlineVisuals
+        inlineVisuals,
+        approvalRequests,
+        meetingRequests
       },
       maxIterations: MAX_TOOL_ITERATIONS,
       onStep: opts.onStep,
@@ -484,7 +501,9 @@ export async function runStaffChatTurn(
         tokensIn,
         tokensOut,
         generatedFiles,
-        visuals: inlineVisuals
+        visuals: inlineVisuals,
+        approvalRequest: approvalRequests[0],
+        meetingRequest: meetingRequests[0]
       }
     };
   } catch (err) {

@@ -134,7 +134,12 @@ export default async function EditModulePage({
 
         {/* Höger: dela + ta bort */}
         <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
-          <ShareModule slug={mod.slug} name={mod.name} publicSlug={mod.public_slug} />
+          <ShareModule
+            slug={mod.slug}
+            name={mod.name}
+            publicSlug={mod.public_slug}
+            isPublished={Boolean(mod.is_active && mod.public_url_enabled)}
+          />
 
           <Card>
             <CardHead label="Kampanjlänkar" />

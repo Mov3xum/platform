@@ -1,5 +1,6 @@
 import type { EducationDocumentKind } from './education-documents';
 import type { FileTopic, FileTopicStatus } from './file-topics';
+import type { MeetingRequestRef } from './meeting';
 
 export type Role =
   | 'admin'
@@ -354,6 +355,15 @@ export interface AgentActivityStep {
   ok?: boolean; // utfall (sätts när steget är klart)
 }
 
+// Godkännandefråga från agenten (verktyget `request_approval`): agenten vill
+// utföra en KRITISK åtgärd och väntar på användarens beslut. UI:t renderar en
+// Godkänn/Avbryt-knapp på assistant-meddelandet; beslutet skickas som nästa
+// user-tur ("Godkänn"/"Avbryt"). Bara en per assistant-tur.
+export interface ApprovalRequestRef {
+  /** Kort beskrivning av exakt vad som utförs vid godkännande. */
+  summary: string;
+}
+
 export interface ToolRunMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -364,6 +374,13 @@ export interface ToolRunMessage {
   visuals?: InlineVisualRef[];
   // Verktygssteg agenten utförde för detta (assistant-)turn.
   steps?: AgentActivityStep[];
+  // Godkännandefråga (assistant): agenten väntar på Godkänn/Avbryt innan en
+  // kritisk åtgärd utförs. Renderas som knappar när meddelandet är senast.
+  approval_request?: ApprovalRequestRef;
+  // Möteskort (assistant, § 34): agenten har förberett mötesläget (verktyget
+  // `start_meeting`). UI:t renderar en "Starta mötet"-knapp — inspelningen
+  // startas ALLTID av ett mänskligt klick, aldrig av agenten själv.
+  meeting_request?: MeetingRequestRef;
   model?: string; // modell som producerade detta turn (assistant)
   tokens_in?: number;
   tokens_out?: number;
@@ -1583,6 +1600,8 @@ export * from './competences';
 export * from './ai-impact';
 export * from './voice';
 export * from './compass-authoring';
+// ─── Mötesläge i chatten (ren möteslogik, enhetstestad, § 34) ────────────────
+export * from './meeting';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */

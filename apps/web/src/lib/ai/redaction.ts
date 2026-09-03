@@ -58,6 +58,7 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'user_files', // personliga filer, strikt ägaren-bara (1700000085)
   'user_file_chunks', // RAG-index för personliga filer (1700000121, § 27) — owner-only, nås bara via search_my_files
   'deep_jobs', // intern orkestrering (1700000084)
+  'meeting_transcripts', // råa mötestranskript, strikt ägaren-bara (1700000142, § 34)
   // Tenant-bred kunskapsbas (1700000118–119, § 26). Innehållet (uppladdat
   // verksamhetsmaterial + dess embeddings) når AI ENBART via det kurerade
   // `search_knowledge`-verktyget — aldrig via det generiska query_collection.

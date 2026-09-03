@@ -26,6 +26,23 @@ function statusOf(err: unknown): number | undefined {
   return undefined;
 }
 
+// Plockar ut PocketBase:s valideringsmeddelande (PII-fritt — det är schema-/
+// valideringstext, aldrig innehåll) så klienten kan visa VAD som var fel i
+// stället för en generisk 500:a.
+function pbErrorMessage(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const response = (err as { response?: unknown }).response;
+  if (typeof response !== 'object' || response === null) return undefined;
+  const data = (response as { data?: Record<string, { message?: string }> }).data;
+  if (data && typeof data === 'object') {
+    for (const v of Object.values(data)) {
+      if (v && typeof v.message === 'string' && v.message) return v.message;
+    }
+  }
+  const msg = (response as { message?: string }).message;
+  return typeof msg === 'string' && msg ? msg : undefined;
+}
+
 // Skriv via app-user-klienten först; superuser-fallback vid 400/403 (PB
 // v0.23.4:s rule-eval-bugg, CLAUDE.md § 21.3). Roll + tenant är ALLTID
 // verifierade i handlern INNAN detta anropas — fallbacken är robusthet,
@@ -94,6 +111,19 @@ export async function POST(
     return NextResponse.json({ error: 'Åtkomst nekad.' }, { status: 403 });
   }
 
+  // Fail-fast med tydligt fel om fältet saknas i det deployade PB-schemat
+  // (migrationen inte applicerad) — PB ignorerar annars okända fält tyst och
+  // uppladdningen ser ut att lyckas utan att något sparas.
+  if (!(field in (mod as Record<string, unknown>))) {
+    const migration = kind === 'image' ? '1700000122' : '1700000141';
+    return NextResponse.json(
+      {
+        error: `Fältet ${field} saknas i databasen — PocketBase-migrationen (${migration}) är inte applicerad. Deploya om PocketBase och försök igen.`
+      },
+      { status: 503 }
+    );
+  }
+
   try {
     if (remove) {
       await writeWithFallback(pb, (c) =>
@@ -133,17 +163,28 @@ export async function POST(
     return NextResponse.json({ url });
   } catch (err) {
     // PII-fri logg (CLAUDE.md § 10.3 A.8.15).
+    const status = statusOf(err);
+    const detail = pbErrorMessage(err);
     console.error('[inflode/module-media] upload failed', {
       tenantId: user.tenant,
       userId: user.id,
       moduleId: id,
       kind,
       remove,
+      status,
+      detail,
       message: err instanceof Error ? err.message : String(err ?? '')
     });
+    // PB-valideringsfel (t.ex. otillåten filtyp/för stor fil) → 400 med PB:s
+    // eget meddelande så användaren ser VAD som var fel. Övrigt → 500.
+    const isValidation = status === 400 || status === 413;
     return NextResponse.json(
-      { error: 'Kunde inte spara filen på servern.' },
-      { status: 500 }
+      {
+        error: isValidation
+          ? `Filen avvisades: ${detail || 'ogiltig fil.'}`
+          : 'Kunde inte spara filen på servern.'
+      },
+      { status: isValidation ? 400 : 500 }
     );
   }
 }
