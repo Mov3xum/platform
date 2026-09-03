@@ -3767,6 +3767,9 @@ const FORCE_CREATE_RULES = {
   chat_threads: `${ANY_AUTH} && @request.auth.id = owner`,
   deep_jobs: `${ANY_AUTH} && @request.auth.id = owner`,
   user_files: `${ANY_AUTH} && @request.auth.id = owner`,
+  // Mötesläge (§ 34, migration 1700000142) — STRIKT ägaren-bara, samma
+  // mönster som chat_threads/user_files ovan.
+  meeting_transcripts: `${ANY_AUTH} && @request.auth.id = owner`,
   org_knowledge: `${ANY_AUTH} && @request.auth.tenant != ""`,
   org_knowledge_chunks: `${ANY_AUTH} && @request.auth.tenant != ""`,
   user_file_chunks: `${ANY_AUTH} && @request.auth.id = owner`,
