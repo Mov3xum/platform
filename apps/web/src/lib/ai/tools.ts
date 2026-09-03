@@ -17,6 +17,8 @@ import {
   type ApprovalRequestRef,
   type GeneratedFileRef,
   type InlineVisualRef,
+  type MeetingRequestRef,
+  MAX_MEETING_TITLE,
   FILE_TOPIC_IDS,
   isFileTopic,
   ANNUAL_WHEEL_TAG_IDS,
@@ -1261,6 +1263,35 @@ export function buildChatTools(
         }
       }
     });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'start_meeting',
+        description:
+          'Förbereder MÖTESLÄGET i chatten (§ 34): visar ett möteskort med en ' +
+          '"Starta mötet"-knapp för användaren. Använd när användaren vill ' +
+          'starta/spela in/transkribera ett möte (t.ex. "starta ett möte med ' +
+          'Fixkod"). Ange bolagsnamnet som användaren sa — det fuzzy-matchas ' +
+          'mot bolagslistan och förifylls (användaren kan byta). Du kan ALDRIG ' +
+          'starta själva inspelningen — det, och samtyckesbekräftelsen, är ' +
+          'alltid ett mänskligt klick. Anropa EN gång och avsluta sedan svaret ' +
+          'KORT (t.ex. "Klart — tryck på Starta mötet när ni är redo").',
+        parameters: {
+          type: 'object',
+          properties: {
+            startup_name: {
+              type: 'string',
+              description:
+                'Bolaget mötet gäller, som användaren uttryckte det (fuzzy-matchas). Valfritt.'
+            },
+            title: {
+              type: 'string',
+              description: 'Kort mötestitel, t.ex. "Coachmöte" eller "Uppföljning Q3". Valfritt.'
+            }
+          }
+        }
+      }
+    });
   }
 
   // Tvärsessions-minne (Fas 2). memory_read är read-only och kan ges till
@@ -1580,6 +1611,8 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: 'Skriver anteckning' };
     case 'request_approval':
       return { tool: name, label: 'Ber om ditt godkännande' };
+    case 'start_meeting':
+      return { tool: name, label: 'Förbereder mötesläget' };
     case 'memory_read':
       return { tool: name, label: 'Läser minnet' };
     case 'memory_write':
@@ -1632,6 +1665,13 @@ export interface ToolDispatchContext {
    * spärras ytterligare domänskrivningar i samma tur (DOMAIN_WRITE_TOOLS).
    */
   approvalRequests?: ApprovalRequestRef[];
+  /**
+   * Mutabel sink: `start_meeting` pushar en mötesförberedelse hit så
+   * chatt-lagret kan bifoga ett möteskort ("Starta mötet"-knapp) på
+   * assistant-svaret (§ 34). Bara UX — inspelning + samtycke är alltid ett
+   * mänskligt klick i mötespanelen. Max en per tur.
+   */
+  meetingRequests?: MeetingRequestRef[];
 }
 
 export interface ToolResult {
@@ -2459,6 +2499,8 @@ export async function dispatchToolCall(
       return runCreateStartupNote(args, ctx);
     case 'request_approval':
       return runRequestApproval(args, ctx);
+    case 'start_meeting':
+      return runStartMeeting(args, ctx);
     case 'memory_read':
       return runMemoryRead(args, ctx);
     case 'memory_write':
@@ -2785,6 +2827,84 @@ function runRequestApproval(
         'Utför INTE åtgärden ännu och anropa inga fler skrivverktyg — ' +
         'avsluta svaret med en KORT sammanfattning av vad som väntar på ' +
         'godkännande. Användarens beslut kommer som nästa meddelande.'
+    }
+  };
+}
+
+/**
+ * Förbereder mötesläget (§ 34): fuzzy-matchar ev. bolagsnamn mot tenantens
+ * bolag och pushar ett möteskort till ctx.meetingRequests-sinken. Ingen
+ * dataväg och ingen inspelning — kortets "Starta mötet"-knapp (och
+ * samtyckesgrinden) är alltid ett mänskligt klick i mötespanelen.
+ */
+async function runStartMeeting(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  if (!ctx.meetingRequests) {
+    return {
+      ok: false,
+      error:
+        'Mötesläget är inte tillgängligt i den här ytan. Be användaren öppna ' +
+        'chatten (/chatt) och använda Möte-knappen i skrivfältet.'
+    };
+  }
+  if (ctx.meetingRequests.length > 0) {
+    return {
+      ok: false,
+      error: 'Du har redan förberett ett möte i denna tur — max ett. Avsluta ditt svar.'
+    };
+  }
+
+  const query = typeof args.startup_name === 'string' ? args.startup_name.trim() : '';
+  const title =
+    typeof args.title === 'string' ? args.title.trim().slice(0, MAX_MEETING_TITLE) : '';
+
+  const request: MeetingRequestRef = {};
+  if (title) request.title = title;
+
+  let matchNote = '';
+  if (query) {
+    try {
+      const rows = await ctx.pb
+        .collection('startups')
+        .getList<{ id: string; name: string; idea_name?: string }>(1, 200, {
+          filter: `tenant = "${escFilter(ctx.tenantId)}"`,
+          fields: 'id,name,idea_name'
+        });
+      const ranked = rankCandidates(
+        query,
+        rows.items,
+        (s) => [s.name, s.idea_name || ''],
+        { limit: 1, threshold: 0.4 }
+      );
+      if (ranked.length > 0) {
+        request.startup_id = ranked[0].item.id;
+        request.startup_name = ranked[0].item.name;
+        matchNote = `Bolaget "${ranked[0].item.name}" är förifyllt (användaren kan byta i panelen).`;
+      } else {
+        matchNote =
+          `Inget bolag matchade "${query}" — kortet visas utan förifyllt bolag; ` +
+          'användaren väljer själv i panelen.';
+      }
+    } catch {
+      matchNote = 'Bolagslistan kunde inte läsas — kortet visas utan förifyllt bolag.';
+    }
+  }
+
+  ctx.meetingRequests.push(request);
+  return {
+    ok: true,
+    data: {
+      startup_id: request.startup_id,
+      startup_name: request.startup_name,
+      note:
+        'Möteskortet visas nu under ditt svar. ' +
+        matchNote +
+        ' Inspelningen (och samtyckesbekräftelsen) startas av användaren själv ' +
+        '— avsluta svaret KORT och lova inget mer.'
     }
   };
 }
