@@ -4124,6 +4124,25 @@ skrivlagrets whitelist.
   workshop-tilldelning) återanvänder skrivlagret samma delade/pura funktioner
   (`@platform/shared`, `lib/de-minimis/data`, `lib/scheduling/cron`).
 
+### 33.3 Hjälp-guiden i chatten — rollspecifik
+
+Chatten (`/chatt`) har en inbyggd guide ("Vad kan chatten göra?") som nås via
+**Hjälp**-chipen i chattrutan och en länk i startvyn. Innehållet bor i
+`apps/web/src/lib/chat-guide.ts` (`buildChatGuide(roles)`) och renderas av
+`components/ChatHelpGuide.tsx`.
+
+- **Rollspecifik:** punkter med rollkrav filtreras mot den inloggades roller
+  (t.ex. `schedule_agent` bara för admin/incubator_lead; events/kompassmoduler/
+  bolagsfält för admin/incubator_lead/coach). Rollkraven i guiden är en
+  SPEGLING av `writable-fields.ts` för läsbarhet — guiden är ren presentation
+  och aldrig säkerhetsgränsen (den ligger kvar i skrivlagret + PB-reglerna).
+  Ändras en policy: uppdatera båda.
+- **Klickbara exempel:** varje exempel fyller chattrutan men SKICKAS inte —
+  användaren läser, justerar och skickar själv (människa-i-loopen).
+  Exemplen är generiska (inga riktiga bolagsnamn, ingen PII).
+- **Riskklass:** n/a — statiskt UI-innehåll, ingen dataväg, ingen AI-inferens.
+  Transparensbannern (§ 9.7) visas i guidens sidfot.
+
 ---
 
 ## 34. Mötesläge i chatten — inspelning, live-transkribering & bolagskorts-protokoll
@@ -4252,3 +4271,4 @@ persisterad/loggad, når aldrig AI-kontexten. Fail-soft utan koppling.
   `ai_usage_events` (surface `dashboard_chat`) och räknas mot månadstaket;
   protokollgenereringen kör `assertWithinAiBudget`; hårda tak på längd,
   segment, chunk-antal och turindelningsstorlek.
+>>>>>>> origin/staging

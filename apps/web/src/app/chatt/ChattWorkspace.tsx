@@ -34,13 +34,15 @@ import {
   startDeepJobAction,
   getDeepJobStatusAction
 } from '@/lib/actions/deep-jobs';
-import type { DeepJobStatus } from '@platform/shared';
+import type { DeepJobStatus, Role } from '@platform/shared';
 
 interface Props {
   greeting: string;
   agents: DashboardAgent[];
   connectors: DashboardConnector[];
   activities: DashboardActivity[];
+  /** Inloggad användares roller — hjälp-guiden är rollspecifik (§ 33.3). */
+  userRoles: Role[];
   initialThreads: ThreadListResult;
 }
 
@@ -69,7 +71,7 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
     }));
 }
 
-export default function ChattWorkspace({ greeting, agents, connectors, activities, initialThreads }: Props) {
+export default function ChattWorkspace({ greeting, agents, connectors, activities, userRoles, initialThreads }: Props) {
   const [threads, setThreads] = useState<ThreadListResult>(initialThreads);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
@@ -558,6 +560,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           agents={agents}
           connectors={connectors}
           activities={activities}
+          userRoles={userRoles}
           messages={messages}
           isPending={streaming || deepRunning}
           error={error}
