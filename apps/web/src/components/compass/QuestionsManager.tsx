@@ -80,15 +80,9 @@ export function QuestionsManager({
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <div className="mx-muted mx-t-13" style={{ lineHeight: 1.5 }}>
-        Frågor och alternativ kan användas i alla modultyper. AI-chatten använder dem som
-        dynamisk intervjuguide, medan quiz och formulär visar dem direkt för besökaren.
-        {flowType === 'quiz' && (
-          <>
-            {' '}
-            För quiz fyller du i hur många <strong>poäng</strong> varje svar ger till respektive
-            resultatprofil — profilen med flest poäng vinner.
-          </>
-        )}
+        {flowType === 'chat'
+          ? 'Frågorna används som intervjuguide i samtalet.'
+          : 'Frågorna visas för besökaren i den här ordningen. Varje fråga sparas direkt.'}
       </div>
 
       {error && <div className="mx-t-13" style={{ color: '#4b2718' }}>{error}</div>}
@@ -103,8 +97,8 @@ export function QuestionsManager({
             border: '1px solid var(--mx-line-soft)'
           }}
         >
-          Tips: skapa dina <strong>resultatprofiler</strong> (t.ex. grön/gul/röd) i rutan ovanför
-          först — då dyker poängkolumnerna upp här automatiskt.
+          Skapa <strong>resultatprofilerna</strong> ovanför först — då dyker
+          poängkolumnerna upp på frågornas svarsalternativ.
         </div>
       )}
 
@@ -220,18 +214,18 @@ function NewQuestionForm({
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <label className="mx-label">
-          Nyckel (mappas till lead-fält om matchande)
+          Nyckel (t.ex. email, idea — kopplar svaret till rätt lead-fält)
           <input
             type="text"
             className="mx-input"
             style={{ marginTop: 4 }}
-            placeholder="t.ex. idea_summary, email, role"
+            placeholder="t.ex. idea, email, name"
             value={key}
             onChange={(e) => setKey(e.target.value)}
           />
         </label>
         <label className="mx-label">
-          Input-typ
+          Svarstyp
           <select
             className="mx-input"
             style={{ marginTop: 4 }}
@@ -458,7 +452,7 @@ function QuestionCard({
           <input type="text" className="mx-input" style={{ marginTop: 4 }} value={key} onChange={(e) => setKey(e.target.value)} />
         </label>
         <label className="mx-label">
-          Input-typ
+          Svarstyp
           <select
             className="mx-input"
             style={{ marginTop: 4 }}

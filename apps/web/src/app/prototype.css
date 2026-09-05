@@ -299,6 +299,86 @@ html.dark {
   gap: 10px;
 }
 
+/* Kontomenyn i railens fot (§ 22). Hela raden är klickbar — tidigare var
+   bara kugghjulet en länk, så ett klick på det egna namnet gjorde ingenting. */
+.mx-rail-account {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.mx-rail-account-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 6px 6px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--mx-r-sm);
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background .14s ease, border-color .14s ease;
+}
+
+.mx-rail-account-btn:hover {
+  background: var(--mx-rail-hover-bg);
+  border-color: var(--mx-line);
+}
+
+.mx-rail-account-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.mx-rail-account-chev {
+  color: var(--mx-rail-fg-mute);
+  flex-shrink: 0;
+  transition: transform .15s ease;
+}
+
+.mx-rail-account-chev.mx-open {
+  transform: rotate(180deg);
+}
+
+/* Öppnas UPPÅT — blocket sitter längst ned i railen. */
+.mx-rail-account-pop {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  background: var(--mx-canvas);
+  border: 1px solid var(--mx-line);
+  border-radius: var(--mx-r-md);
+  box-shadow: var(--mx-sh-3);
+  z-index: 60;
+  overflow: hidden;
+  padding: 4px;
+}
+
+.mx-rail-account-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--mx-r-sm);
+  background: transparent;
+  color: var(--mx-ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s ease;
+}
+
+.mx-rail-account-item:hover {
+  background: var(--mx-paper-2);
+}
+
 .mx-rail-user-av {
   width: 28px; height: 28px;
   border-radius: 50%;
@@ -312,6 +392,8 @@ html.dark {
 }
 
 .mx-rail-user-name {
+  /* Renderas som <span> i kontomenyn — block krävs för ellipsen. */
+  display: block;
   font-size: 12px;
   font-weight: 600;
   color: var(--mx-rail-fg-strong);
@@ -322,6 +404,7 @@ html.dark {
 }
 
 .mx-rail-user-role {
+  display: block;
   font-family: var(--mx-mono);
   font-size: 9px;
   letter-spacing: 1px;

@@ -14,11 +14,17 @@ import { searchOrgKnowledge, searchUserFiles, renderKnowledgeHits } from './rag'
 import { logAiUsage } from './usage';
 import { escFilter } from '@/lib/pb-filter';
 import {
+  type ApprovalRequestRef,
   type GeneratedFileRef,
   type InlineVisualRef,
+  type MeetingRequestRef,
+  MAX_MEETING_TITLE,
   FILE_TOPIC_IDS,
   isFileTopic,
-  ANNUAL_WHEEL_TAG_IDS
+  ANNUAL_WHEEL_TAG_IDS,
+  COMPASS_FLOW_TYPES,
+  COMPASS_INPUT_TYPES,
+  MAX_COMPASS_CHOICES
 } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
 import { validateChart, validateKpis } from '@/lib/documents/validate';
@@ -33,7 +39,28 @@ import {
   updateStartupField,
   createAnnualWheelItem,
   updateAnnualWheelItemField,
+  createCompassModule,
+  addCompassQuestion,
+  updateCompassModuleField,
+  createWorkshop,
+  assignWorkshop,
+  assignEducationDocument,
+  createTask,
+  moveTask,
+  TASK_KINDS,
+  createEvent,
+  EVENT_TYPES,
+  createMissionDraft,
+  MISSION_TYPES,
+  addStartupKpi,
+  addCapitalRound,
+  createStartupNote,
+  CAPITAL_TYPES,
+  registerDeMinimisSupport,
+  FORORDNINGAR,
+  scheduleAgent,
   type AnnualWheelWritableField,
+  type CompassModuleWritableField,
   type Actor,
   type StartupWritableField
 } from '@/lib/core/write';
@@ -67,6 +94,40 @@ const MAX_DISTINCT_VALUES = 40;
 // visuals persisteras i chat_threads.messages som har 2 MB-tak).
 const MAX_VISUALS_PER_TURN = 4;
 const MAX_VISUAL_SVG_BYTES = 150_000;
+
+// request_approval — godkännandefråga före KRITISK åtgärd (Godkänn-knapp i
+// chatten). Sammanfattningen persisteras på meddelandet → cappad.
+const MAX_APPROVAL_SUMMARY = 500;
+
+// Verktyg som muterar domändata (eller minnet). När en godkännandefråga redan
+// är ställd i turen spärras dessa tills användaren svarat — modellen ska
+// avsluta svaret och vänta på Godkänn/Avbryt. Läsverktyg och artefakter
+// (generate_document/render_visual) spärras inte. OBS: detta är UX-flödets
+// spärr, inte säkerhetsgränsen — den är och förblir RBAC + skrivlagrets
+// whitelist (lib/core/write).
+const DOMAIN_WRITE_TOOLS = new Set([
+  'update_startup_field',
+  'create_startup_activity',
+  'update_activity_field',
+  'create_annual_wheel_item',
+  'update_annual_wheel_item',
+  'create_compass_module',
+  'add_compass_question',
+  'update_compass_module_field',
+  'create_workshop',
+  'assign_workshop',
+  'assign_education_document',
+  'create_task',
+  'move_task',
+  'create_event',
+  'create_mission',
+  'register_de_minimis_support',
+  'add_startup_kpi',
+  'add_capital_round',
+  'schedule_agent',
+  'create_startup_note',
+  'memory_write'
+]);
 
 // Display-fält vi försöker läsa ur en expanderad relation när group_by är en
 // relation, i prioordning. Bara icke-PII-etiketter (namn/titel) — aldrig
@@ -713,6 +774,524 @@ export function buildChatTools(
         }
       }
     });
+
+    // Startupkompassen (§ 23) + workshops (§ 18) — bygg intag-moduler och
+    // utbildningsutkast direkt från chatten (även röststyrt, § 31). Allt går
+    // via det delade skrivlagret: rollpolicy, validering, tenant-stämpel och
+    // agent_actions-logg. Publicering är MEDVETET inte exponerat — en
+    // AI-skapad modul/workshop granskas och publiceras av en människa.
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_compass_module',
+        description:
+          'Skapar en ny intag-modul i Startupkompassen (/inflode). Använd när ' +
+          'personalen beskriver en modul de vill ha — t.ex. "gör ett quiz som ' +
+          'heter Är du redo för inkubator" eller "ett formulär där folk får ' +
+          'berätta om sin idé". Modulen skapas som OPUBLICERAT utkast; lägg ' +
+          'sedan till frågorna med add_compass_question. Berätta för ' +
+          'användaren att den publiceras i modul-admin när den är klar.',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Modulens namn, som besökaren ser det (max 200 tecken).' },
+            flow_type: {
+              type: 'string',
+              enum: [...COMPASS_FLOW_TYPES],
+              description:
+                'Flödestyp: "quiz" (frågor med poäng → resultatprofil), ' +
+                '"wizard" (formulär/steg-för-steg-frågor utan poäng) eller ' +
+                '"chat" (AI-samtal med besökaren). Fråga användaren om det ' +
+                'inte framgår — gissa inte.'
+            },
+            description: { type: 'string', description: 'Kort intern beskrivning av modulens syfte.' },
+            intro_message: { type: 'string', description: 'Välkomsttext besökaren möter först.' },
+            success_message: { type: 'string', description: 'Tacktext när besökaren är klar.' },
+            target_audience: { type: 'string', description: 'Vilken målgrupp modulen riktar sig till.' }
+          },
+          required: ['name', 'flow_type']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'add_compass_question',
+        description:
+          'Lägger till EN fråga i en intag-modul i Startupkompassen. Anropa en ' +
+          'gång per fråga, i den ordning frågorna ska ställas. Modul-id får du ' +
+          'från create_compass_module eller via query_collection mot ' +
+          'compass_modules.',
+        parameters: {
+          type: 'object',
+          properties: {
+            module_id: { type: 'string', description: 'PocketBase-id för modulen.' },
+            prompt: { type: 'string', description: 'Själva frågan, som besökaren läser den.' },
+            input_type: {
+              type: 'string',
+              enum: [...COMPASS_INPUT_TYPES],
+              description:
+                'short_text (kort svar), long_text (fritext), choice (ett ' +
+                'alternativ), multi_choice (flera alternativ), scale (skala), ' +
+                'email, phone. Default short_text.'
+            },
+            help_text: { type: 'string', description: 'Valfri hjälptext under frågan.' },
+            required: { type: 'boolean', description: 'Måste besökaren svara? Default nej.' },
+            choices: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string', description: 'Alternativets text.' },
+                  score: {
+                    type: 'number',
+                    description:
+                      'Valfri poäng i quiz-läge. Summan av poängen avgör ' +
+                      'vilken resultatprofil besökaren hamnar i.'
+                  }
+                },
+                required: ['label']
+              },
+              description:
+                'Svarsalternativ — KRÄVS för choice/multi_choice (minst två, ' +
+                `max ${MAX_COMPASS_CHOICES}). Utelämna för övriga frågetyper.`
+            }
+          },
+          required: ['module_id', 'prompt']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'update_compass_module_field',
+        description:
+          'Uppdaterar ETT fält på en befintlig intag-modul (namn, beskrivning, ' +
+          'välkomst-/tacktext, målgrupp, samtyckesnot eller flödestyp). ' +
+          'Publicering (is_active) och publik URL kan du INTE sätta — det gör ' +
+          'personalen själv i modul-admin.',
+        parameters: {
+          type: 'object',
+          properties: {
+            module_id: { type: 'string', description: 'PocketBase-id för modulen.' },
+            field: {
+              type: 'string',
+              enum: [
+                'name',
+                'description',
+                'intro_message',
+                'success_message',
+                'target_audience',
+                'consent_note',
+                'flow_type'
+              ],
+              description: 'Vilket fält som ska uppdateras.'
+            },
+            value: { type: 'string', description: 'Nytt värde.' }
+          },
+          required: ['module_id', 'field', 'value']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_workshop',
+        description:
+          'Skapar ett UTKAST till en workshop i utbildningsmodulen ' +
+          '(/education). Använd när personalen ber dig lägga upp en workshop ' +
+          'och beskriver dess innehåll. Fyll i mål och instruktioner, och lägg ' +
+          'gärna upp innehållet som moduler med textblock. Bilder/film och ' +
+          'publicering läggs till av en människa i byggaren efteråt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Workshopens titel (max 200 tecken).' },
+            goal: { type: 'string', description: 'Vad deltagaren ska uppnå.' },
+            instructions: { type: 'string', description: 'Övergripande instruktioner till deltagaren.' },
+            audience_roles: {
+              type: 'array',
+              items: {
+                type: 'string',
+                enum: ['startup_member', 'coach', 'mentor', 'incubator_lead', 'admin', 'partner', 'observer']
+              },
+              description: 'Vilka roller workshopen riktar sig till. Default startup_member.'
+            },
+            modules: {
+              type: 'array',
+              description:
+                'Valfri innehållsstruktur: en lista moduler, var och en med ' +
+                'titel och textblock. Max 20 moduler.',
+              items: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string', description: 'Modulens rubrik.' },
+                  description: { type: 'string', description: 'Kort beskrivning av modulen.' },
+                  blocks: {
+                    type: 'array',
+                    description: 'Momenten i modulen (max 20).',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        type: {
+                          type: 'string',
+                          enum: ['instruction', 'exercise', 'question', 'summary'],
+                          description:
+                            'instruction (läsa/lyssna), exercise (göra), ' +
+                            'question (svara), summary (sammanfatta).'
+                        },
+                        title: { type: 'string', description: 'Momentets rubrik.' },
+                        instructions: { type: 'string', description: 'Momentets text/uppgift.' },
+                        desired_result: { type: 'string', description: 'Vad momentet ska resultera i.' }
+                      },
+                      required: ['title']
+                    }
+                  }
+                },
+                required: ['title']
+              }
+            }
+          },
+          required: ['title']
+        }
+      }
+    });
+
+    // ── Utökad chatt-skrivyta (§ 33) ─────────────────────────────────────
+    // Tilldelningar, kanban, möten, uppdrag, CRM-registreringar, de minimis
+    // och schemaläggning. Allt går via det delade skrivlagret (rollpolicy +
+    // validering + tenant + agent_actions-logg) och syns i aktivitetsloggen.
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'assign_workshop',
+        description:
+          'Tilldelar en befintlig workshop till ett bolag. Slå upp workshop-id ' +
+          'via query_collection mot workshops och bolags-id mot startups. ' +
+          'Bolaget ser tilldelningen under sina aktiviteter. Medarbetare och ' +
+          'möte kopplas på av en människa i /education.',
+        parameters: {
+          type: 'object',
+          properties: {
+            workshop_id: { type: 'string', description: 'PocketBase-id för workshopen.' },
+            startup_id: { type: 'string', description: 'PocketBase-id för bolaget.' },
+            due_date: { type: 'string', description: 'Valfri deadline (ÅÅÅÅ-MM-DD).' },
+            instructions: {
+              type: 'string',
+              description: 'Valfria instruktioner till bolaget (max 2000 tecken).'
+            }
+          },
+          required: ['workshop_id', 'startup_id']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'assign_education_document',
+        description:
+          'Tilldelar ett uppladdat utbildningsdokument till ett bolag ' +
+          '(idempotent — en befintlig tilldelning uppdateras). Slå upp ' +
+          'dokument-id via query_collection mot education_documents.',
+        parameters: {
+          type: 'object',
+          properties: {
+            document_id: { type: 'string', description: 'PocketBase-id för dokumentet.' },
+            startup_id: { type: 'string', description: 'PocketBase-id för bolaget.' },
+            instructions: {
+              type: 'string',
+              description: 'Valfria instruktioner till bolaget (max 2000 tecken).'
+            },
+            due_date: { type: 'string', description: 'Valfri deadline (ÅÅÅÅ-MM-DD).' }
+          },
+          required: ['document_id', 'startup_id']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_task',
+        description:
+          'Skapar ett kanban-kort (uppgift). Koppla det till ett bolags tavla ' +
+          '(startup_id), ett uppdrags tavla (mission_id) eller lämna fristående. ' +
+          'Kollegor tilldelas av en människa på tavlan — gissa aldrig vem som ' +
+          'ska göra uppgiften.',
+        parameters: {
+          type: 'object',
+          properties: {
+            description: { type: 'string', description: 'Kortets text (max 500 tecken).' },
+            startup_id: { type: 'string', description: 'Bolagets id (valfritt).' },
+            mission_id: { type: 'string', description: 'Uppdragets id (valfritt, ej ihop med startup_id).' },
+            status: {
+              type: 'string',
+              enum: ['backlog', 'open', 'in_progress', 'review', 'blocked', 'done'],
+              description: 'Kolumn på tavlan. Default open (Att göra).'
+            },
+            kind: {
+              type: 'string',
+              enum: [...TASK_KINDS],
+              description: 'Typ av uppgift (call/meeting/email/prep/followup/admin/other). Default other.'
+            },
+            due_at: { type: 'string', description: 'Valfri deadline (ÅÅÅÅ-MM-DD).' }
+          },
+          required: ['description']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'move_task',
+        description:
+          'Flyttar ett kanban-kort till en annan kolumn — t.ex. markera en ' +
+          'uppgift som klar (done). Slå upp kortets id via query_collection ' +
+          'mot tasks.',
+        parameters: {
+          type: 'object',
+          properties: {
+            task_id: { type: 'string', description: 'PocketBase-id för uppgiften.' },
+            status: {
+              type: 'string',
+              enum: ['backlog', 'open', 'in_progress', 'review', 'blocked', 'done'],
+              description: 'Kolumnen kortet ska flyttas till.'
+            }
+          },
+          required: ['task_id', 'status']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_event',
+        description:
+          'Skapar ett event/möte i kalendern (incubator_events) med status ' +
+          '"planned". Deltagare bjuds in av en människa i /events efteråt. ' +
+          'Ange tider i ISO-format; fråga om datum/tid är otydligt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Eventets namn (max 200 tecken).' },
+            type: {
+              type: 'string',
+              enum: [...EVENT_TYPES],
+              description: 'Typ av event. Default other.'
+            },
+            starts_at: { type: 'string', description: 'Starttid, t.ex. 2026-09-10T14:00:00+02:00.' },
+            ends_at: { type: 'string', description: 'Valfri sluttid (ISO).' },
+            location: { type: 'string', description: 'Valfri plats (max 200 tecken).' },
+            description: { type: 'string', description: 'Valfri beskrivning.' }
+          },
+          required: ['name', 'starts_at']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_mission',
+        description:
+          'Skapar ett UTKAST till ett uppdrag (/uppdrag) — t.ex. en ' +
+          'bolagsutmaning som ett tvärfunktionellt team ska formas runt. ' +
+          'Teamet kopplas på (gärna med AI-teamförslaget) och uppdraget ' +
+          'startas av en människa i /uppdrag.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Uppdragets titel (2–200 tecken).' },
+            type: {
+              type: 'string',
+              enum: [...MISSION_TYPES],
+              description: 'Typ av uppdrag. Default custom.'
+            },
+            description: { type: 'string', description: 'Vad uppdraget går ut på.' },
+            startup_id: { type: 'string', description: 'Valfritt bolag uppdraget gäller.' },
+            due_date: { type: 'string', description: 'Valfri deadline (ÅÅÅÅ-MM-DD).' }
+          },
+          required: ['title']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'register_de_minimis_support',
+        description:
+          'Registrerar ett mottaget de minimis-stöd för ett bolag (§ 20). ' +
+          'Posten prövas automatiskt mot förordningens tak och det samlade ' +
+          'taket (300 000 EUR) och BLOCKERAS om taket skulle överskridas. ' +
+          'EUR är sanning — ange belopp_eur, eller belopp_sek + valutakurs så ' +
+          'härleds EUR. Beslutsdatum = datumet för stödbeslutet, inte utbetalningen.',
+        parameters: {
+          type: 'object',
+          properties: {
+            startup_id: { type: 'string', description: 'PocketBase-id för bolaget.' },
+            forordning: {
+              type: 'string',
+              enum: [...FORORDNINGAR],
+              description: 'ALLMAN (300k), SGEI (750k), JORDBRUK (50k) eller FISKE (30k EUR).'
+            },
+            stodgivare: { type: 'string', description: 'Vem som gav stödet (t.ex. Vinnova, Almi).' },
+            beslutsdatum: { type: 'string', description: 'Beslutsdatum (ÅÅÅÅ-MM-DD).' },
+            belopp_eur: { type: 'number', description: 'Belopp i EUR (bruttobidragsekvivalent).' },
+            belopp_sek: { type: 'number', description: 'Belopp i SEK (om EUR saknas).' },
+            valutakurs: { type: 'number', description: 'SEK per EUR (krävs ihop med belopp_sek).' },
+            syfte: { type: 'string', description: 'Vad stödet gavs för (max 500 tecken).' },
+            beslut_referens: { type: 'string', description: 'Valfri beslutsreferens/diarienummer.' }
+          },
+          required: ['startup_id', 'forordning', 'stodgivare', 'beslutsdatum']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'add_startup_kpi',
+        description:
+          'Registrerar ett KPI-värde för ett bolag (startup_kpis). Sätts som ' +
+          'aktuellt värde (is_current) om inget annat anges — äldre värden med ' +
+          'samma KPI-namn avmarkeras automatiskt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            startup_id: { type: 'string', description: 'PocketBase-id för bolaget.' },
+            kpi_name: { type: 'string', description: 'KPI-namn, t.ex. "MRR" eller "Antal kunder".' },
+            value_text: { type: 'string', description: 'Värdet som text, t.ex. "120 000 kr".' },
+            value_numeric: { type: 'number', description: 'Valfritt numeriskt värde för grafer.' },
+            unit: { type: 'string', description: 'Valfri enhet, t.ex. "kr", "st", "%".' },
+            measured_at: { type: 'string', description: 'Mätdatum (ÅÅÅÅ-MM-DD). Default idag.' },
+            is_current: { type: 'boolean', description: 'Är detta det aktuella värdet? Default ja.' }
+          },
+          required: ['startup_id', 'kpi_name', 'value_text']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'add_capital_round',
+        description:
+          'Registrerar mottaget kapital/stöd för ett bolag (capital_rounds) — ' +
+          't.ex. "Fixkod tog in 2 MSEK från Almi i augusti". Ange beloppet i ' +
+          'kronor.',
+        parameters: {
+          type: 'object',
+          properties: {
+            startup_id: { type: 'string', description: 'PocketBase-id för bolaget.' },
+            type: {
+              type: 'string',
+              enum: [...CAPITAL_TYPES],
+              description: 'grant (bidrag), equity (ägarkapital), loan (lån), soft_funding, convertible, other.'
+            },
+            source: { type: 'string', description: 'Finansiär, t.ex. "Almi" eller "Vinnova".' },
+            amount_sek: { type: 'number', description: 'Belopp i SEK.' },
+            received_at: { type: 'string', description: 'Datum (ÅÅÅÅ-MM-DD).' },
+            purpose: { type: 'string', description: 'Valfritt: vad kapitalet/stödet gavs för.' }
+          },
+          required: ['startup_id', 'type', 'source', 'amount_sek', 'received_at']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'schedule_agent',
+        description:
+          'Schemalägger en AI-agent att köras automatiskt (t.ex. "kör ' +
+          'portföljöversikten varje måndag 07:00"). Ett schema per agent — ' +
+          'ett befintligt uppdateras. Cron är 5-fält (minut timme dag månad ' +
+          'veckodag) i angiven tidszon, default Europe/Stockholm. ' +
+          'Kräver admin/incubator_lead.',
+        parameters: {
+          type: 'object',
+          properties: {
+            tool_id: { type: 'string', description: 'PocketBase-id för agenten (tools-raden).' },
+            cron_expression: { type: 'string', description: 'T.ex. "0 7 * * 1" = måndagar 07:00.' },
+            timezone: { type: 'string', description: 'IANA-tidszon. Default Europe/Stockholm.' },
+            enabled: { type: 'boolean', description: 'false pausar schemat. Default true.' }
+          },
+          required: ['tool_id', 'cron_expression']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_startup_note',
+        description:
+          'Skriver en ICKE-konfidentiell anteckning på ett bolagskort (notes). ' +
+          'Konfidentiella anteckningar kan du inte skriva — de görs i UI:t. ' +
+          'Skriv aldrig personuppgifter i anteckningen.',
+        parameters: {
+          type: 'object',
+          properties: {
+            startup_id: { type: 'string', description: 'PocketBase-id för bolaget.' },
+            body: { type: 'string', description: 'Anteckningens text (max 8000 tecken).' }
+          },
+          required: ['startup_id', 'body']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'request_approval',
+        description:
+          'Visar en Godkänn/Avbryt-knapp för användaren i chatten. Använd ' +
+          'ENBART före en KRITISK åtgärd: juridiskt/ekonomiskt bindande eller ' +
+          'svår att ångra (t.ex. registrera de minimis-stöd), återkommande ' +
+          'kostnad (schemalägga en agent), något som berör MÅNGA poster på en ' +
+          'gång, eller något som går utöver vad användaren uttryckligen bad om. ' +
+          'ALDRIG för rutinåtgärder (utkast, anteckningar, kort, KPI:er, ' +
+          'tilldelningar) — de utför du direkt utan att fråga. Anropa det EN ' +
+          'gång, avsluta sedan svaret KORT utan att utföra åtgärden; ' +
+          'användarens beslut kommer som nästa meddelande ("Godkänn" eller ' +
+          '"Avbryt").',
+        parameters: {
+          type: 'object',
+          properties: {
+            summary: {
+              type: 'string',
+              description:
+                'Kort (1–2 meningar) beskrivning av exakt vad som utförs vid ' +
+                'godkännande, t.ex. "Registrerar de minimis-stöd på 200 000 kr ' +
+                'från Vinnova för Acme AB." Inga personuppgifter.'
+            }
+          },
+          required: ['summary']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'start_meeting',
+        description:
+          'Förbereder MÖTESLÄGET i chatten (§ 34): visar ett möteskort med en ' +
+          '"Starta mötet"-knapp för användaren. Använd när användaren vill ' +
+          'starta/spela in/transkribera ett möte (t.ex. "starta ett möte med ' +
+          'Fixkod"). Ange bolagsnamnet som användaren sa — det fuzzy-matchas ' +
+          'mot bolagslistan och förifylls (användaren kan byta). Du kan ALDRIG ' +
+          'starta själva inspelningen — det, och samtyckesbekräftelsen, är ' +
+          'alltid ett mänskligt klick. Anropa EN gång och avsluta sedan svaret ' +
+          'KORT (t.ex. "Klart — tryck på Starta mötet när ni är redo").',
+        parameters: {
+          type: 'object',
+          properties: {
+            startup_name: {
+              type: 'string',
+              description:
+                'Bolaget mötet gäller, som användaren uttryckte det (fuzzy-matchas). Valfritt.'
+            },
+            title: {
+              type: 'string',
+              description: 'Kort mötestitel, t.ex. "Coachmöte" eller "Uppföljning Q3". Valfritt.'
+            }
+          }
+        }
+      }
+    });
   }
 
   // Tvärsessions-minne (Fas 2). memory_read är read-only och kan ges till
@@ -938,7 +1517,10 @@ const COLLECTION_LABELS: Record<string, string> = {
   de_minimis_stod: 'de minimis-stöden',
   compass_leads: 'inflödet',
   onboarding_progress: 'onboardingen',
-  annual_wheel_items: 'årshjulet'
+  annual_wheel_items: 'årshjulet',
+  compass_modules: 'intag-modulerna',
+  compass_questions: 'modulfrågorna',
+  workshops: 'workshopparna'
 };
 
 const DOC_LABELS: Record<string, string> = {
@@ -997,6 +1579,40 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: 'Lägger till i årshjulet' };
     case 'update_annual_wheel_item':
       return { tool: name, label: 'Uppdaterar årshjulet' };
+    case 'create_compass_module':
+      return { tool: name, label: 'Skapar modul i Startupkompassen' };
+    case 'add_compass_question':
+      return { tool: name, label: 'Lägger till en fråga i modulen' };
+    case 'update_compass_module_field':
+      return { tool: name, label: 'Uppdaterar modulen' };
+    case 'create_workshop':
+      return { tool: name, label: 'Skapar workshop-utkast' };
+    case 'assign_workshop':
+      return { tool: name, label: 'Tilldelar workshop' };
+    case 'assign_education_document':
+      return { tool: name, label: 'Tilldelar utbildningsdokument' };
+    case 'create_task':
+      return { tool: name, label: 'Skapar kanban-kort' };
+    case 'move_task':
+      return { tool: name, label: 'Flyttar kanban-kort' };
+    case 'create_event':
+      return { tool: name, label: 'Bokar event' };
+    case 'create_mission':
+      return { tool: name, label: 'Skapar uppdrags-utkast' };
+    case 'register_de_minimis_support':
+      return { tool: name, label: 'Registrerar de minimis-stöd' };
+    case 'add_startup_kpi':
+      return { tool: name, label: 'Registrerar KPI' };
+    case 'add_capital_round':
+      return { tool: name, label: 'Registrerar kapital' };
+    case 'schedule_agent':
+      return { tool: name, label: 'Schemalägger agent' };
+    case 'create_startup_note':
+      return { tool: name, label: 'Skriver anteckning' };
+    case 'request_approval':
+      return { tool: name, label: 'Ber om ditt godkännande' };
+    case 'start_meeting':
+      return { tool: name, label: 'Förbereder mötesläget' };
     case 'memory_read':
       return { tool: name, label: 'Läser minnet' };
     case 'memory_write':
@@ -1042,6 +1658,20 @@ export interface ToolDispatchContext {
    * KPI-kort som SVG) hit så chatt-lagret kan bifoga dem på assistant-svaret.
    */
   inlineVisuals?: InlineVisualRef[];
+  /**
+   * Mutabel sink: `request_approval` pushar en godkännandefråga hit så
+   * chatt-lagret kan bifoga den på assistant-svaret (Godkänn/Avbryt-knapp).
+   * Sätts bara av interaktiva ytor; max en per tur, och när den är satt
+   * spärras ytterligare domänskrivningar i samma tur (DOMAIN_WRITE_TOOLS).
+   */
+  approvalRequests?: ApprovalRequestRef[];
+  /**
+   * Mutabel sink: `start_meeting` pushar en mötesförberedelse hit så
+   * chatt-lagret kan bifoga ett möteskort ("Starta mötet"-knapp) på
+   * assistant-svaret (§ 34). Bara UX — inspelning + samtycke är alltid ett
+   * mänskligt klick i mötespanelen. Max en per tur.
+   */
+  meetingRequests?: MeetingRequestRef[];
 }
 
 export interface ToolResult {
@@ -1792,6 +2422,24 @@ export async function dispatchToolCall(
     return { ok: false, error: `Ogiltig JSON i tool-argument: ${call.function.arguments}` };
   }
 
+  // En godkännandefråga är ställd i denna tur → spärra ytterligare
+  // domänskrivningar tills användaren svarat (Godkänn/Avbryt kommer som nästa
+  // user-tur, där sinken är tom igen). Läsverktyg påverkas inte. Best-effort
+  // inom en parallell tool-batch; deterministisk för efterföljande iterationer.
+  if (
+    ctx.approvalRequests &&
+    ctx.approvalRequests.length > 0 &&
+    DOMAIN_WRITE_TOOLS.has(call.function.name)
+  ) {
+    return {
+      ok: false,
+      error:
+        'Du har redan bett om godkännande i denna tur — utför inga åtgärder ' +
+        'förrän användaren svarat. Avsluta ditt svar nu och invänta ' +
+        'Godkänn/Avbryt.'
+    };
+  }
+
   switch (call.function.name) {
     case 'query_collection':
       return runQueryCollection(args, ctx);
@@ -1819,6 +2467,40 @@ export async function dispatchToolCall(
       return runCreateAnnualWheelItem(args, ctx);
     case 'update_annual_wheel_item':
       return runUpdateAnnualWheelItem(args, ctx);
+    case 'create_compass_module':
+      return runCreateCompassModule(args, ctx);
+    case 'add_compass_question':
+      return runAddCompassQuestion(args, ctx);
+    case 'update_compass_module_field':
+      return runUpdateCompassModuleField(args, ctx);
+    case 'create_workshop':
+      return runCreateWorkshop(args, ctx);
+    case 'assign_workshop':
+      return runAssignWorkshop(args, ctx);
+    case 'assign_education_document':
+      return runAssignEducationDocument(args, ctx);
+    case 'create_task':
+      return runCreateTask(args, ctx);
+    case 'move_task':
+      return runMoveTask(args, ctx);
+    case 'create_event':
+      return runCreateEvent(args, ctx);
+    case 'create_mission':
+      return runCreateMission(args, ctx);
+    case 'register_de_minimis_support':
+      return runRegisterDeMinimisSupport(args, ctx);
+    case 'add_startup_kpi':
+      return runAddStartupKpi(args, ctx);
+    case 'add_capital_round':
+      return runAddCapitalRound(args, ctx);
+    case 'schedule_agent':
+      return runScheduleAgent(args, ctx);
+    case 'create_startup_note':
+      return runCreateStartupNote(args, ctx);
+    case 'request_approval':
+      return runRequestApproval(args, ctx);
+    case 'start_meeting':
+      return runStartMeeting(args, ctx);
     case 'memory_read':
       return runMemoryRead(args, ctx);
     case 'memory_write':
@@ -2101,6 +2783,132 @@ function requireAgentActor(ctx: ToolDispatchContext): Actor | { error: string } 
   return ctx.actor;
 }
 
+/**
+ * Ställer en godkännandefråga till användaren (Godkänn/Avbryt-knapp i chatten)
+ * inför en KRITISK åtgärd. Ingen dataväg — bara UX: sammanfattningen bifogas
+ * assistant-svaret via ctx.approvalRequests-sinken och persisteras på
+ * meddelandet. Medvetet HELT synkron (ingen await före sink-pushen) så att
+ * skrivspärren i dispatchToolCall hinner gälla även för senare anrop i samma
+ * parallella tool-batch.
+ */
+function runRequestApproval(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): ToolResult {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  if (!ctx.approvalRequests) {
+    return {
+      ok: false,
+      error:
+        'Godkännande-knappen är inte tillgänglig i den här ytan. Utför ' +
+        'rutinåtgärder direkt, eller be om bekräftelse i text.'
+    };
+  }
+  if (ctx.approvalRequests.length > 0) {
+    return {
+      ok: false,
+      error:
+        'Du har redan ställt en godkännandefråga i denna tur — max en. ' +
+        'Avsluta ditt svar och invänta användarens beslut.'
+    };
+  }
+  const summary =
+    typeof args.summary === 'string' ? args.summary.replace(/\s+/g, ' ').trim() : '';
+  if (!summary) {
+    return { ok: false, error: 'Ange `summary` — vad som utförs vid godkännande.' };
+  }
+  ctx.approvalRequests.push({ summary: summary.slice(0, MAX_APPROVAL_SUMMARY) });
+  return {
+    ok: true,
+    data: {
+      note:
+        'Godkänn/Avbryt-knappen visas nu för användaren under ditt svar. ' +
+        'Utför INTE åtgärden ännu och anropa inga fler skrivverktyg — ' +
+        'avsluta svaret med en KORT sammanfattning av vad som väntar på ' +
+        'godkännande. Användarens beslut kommer som nästa meddelande.'
+    }
+  };
+}
+
+/**
+ * Förbereder mötesläget (§ 34): fuzzy-matchar ev. bolagsnamn mot tenantens
+ * bolag och pushar ett möteskort till ctx.meetingRequests-sinken. Ingen
+ * dataväg och ingen inspelning — kortets "Starta mötet"-knapp (och
+ * samtyckesgrinden) är alltid ett mänskligt klick i mötespanelen.
+ */
+async function runStartMeeting(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  if (!ctx.meetingRequests) {
+    return {
+      ok: false,
+      error:
+        'Mötesläget är inte tillgängligt i den här ytan. Be användaren öppna ' +
+        'chatten (/chatt) och använda Möte-knappen i skrivfältet.'
+    };
+  }
+  if (ctx.meetingRequests.length > 0) {
+    return {
+      ok: false,
+      error: 'Du har redan förberett ett möte i denna tur — max ett. Avsluta ditt svar.'
+    };
+  }
+
+  const query = typeof args.startup_name === 'string' ? args.startup_name.trim() : '';
+  const title =
+    typeof args.title === 'string' ? args.title.trim().slice(0, MAX_MEETING_TITLE) : '';
+
+  const request: MeetingRequestRef = {};
+  if (title) request.title = title;
+
+  let matchNote = '';
+  if (query) {
+    try {
+      const rows = await ctx.pb
+        .collection('startups')
+        .getList<{ id: string; name: string; idea_name?: string }>(1, 200, {
+          filter: `tenant = "${escFilter(ctx.tenantId)}"`,
+          fields: 'id,name,idea_name'
+        });
+      const ranked = rankCandidates(
+        query,
+        rows.items,
+        (s) => [s.name, s.idea_name || ''],
+        { limit: 1, threshold: 0.4 }
+      );
+      if (ranked.length > 0) {
+        request.startup_id = ranked[0].item.id;
+        request.startup_name = ranked[0].item.name;
+        matchNote = `Bolaget "${ranked[0].item.name}" är förifyllt (användaren kan byta i panelen).`;
+      } else {
+        matchNote =
+          `Inget bolag matchade "${query}" — kortet visas utan förifyllt bolag; ` +
+          'användaren väljer själv i panelen.';
+      }
+    } catch {
+      matchNote = 'Bolagslistan kunde inte läsas — kortet visas utan förifyllt bolag.';
+    }
+  }
+
+  ctx.meetingRequests.push(request);
+  return {
+    ok: true,
+    data: {
+      startup_id: request.startup_id,
+      startup_name: request.startup_name,
+      note:
+        'Möteskortet visas nu under ditt svar. ' +
+        matchNote +
+        ' Inspelningen (och samtyckesbekräftelsen) startas av användaren själv ' +
+        '— avsluta svaret KORT och lova inget mer.'
+    }
+  };
+}
+
 async function runUpdateStartupField(
   args: Record<string, unknown>,
   ctx: ToolDispatchContext
@@ -2262,6 +3070,486 @@ async function runUpdateAnnualWheelItem(
       field: result.value.field,
       before: result.value.before,
       after: result.value.after,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+
+// ── Startupkompassen + workshops (§ 23, § 18, § 31) ──────────────────────────
+//
+// Verktygsschemat är en HINT till modellen — säkerhetsgränsen är det delade
+// skrivlagret (rollpolicy, validering, tenant-stämpel, agent_actions).
+
+async function runCreateCompassModule(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createCompassModule(ctx.pb, actor, {
+    name: typeof args.name === 'string' ? args.name : '',
+    flowType: typeof args.flow_type === 'string' ? args.flow_type : '',
+    description: typeof args.description === 'string' ? args.description : undefined,
+    introMessage: typeof args.intro_message === 'string' ? args.intro_message : undefined,
+    successMessage: typeof args.success_message === 'string' ? args.success_message : undefined,
+    targetAudience: typeof args.target_audience === 'string' ? args.target_audience : undefined,
+    consentNote: typeof args.consent_note === 'string' ? args.consent_note : undefined
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      module_id: result.value.moduleId,
+      slug: result.value.slug,
+      name: result.value.name,
+      flow_type: result.value.flowType,
+      admin_path: result.value.adminPath,
+      published: false,
+      next_step:
+        'Lägg till frågorna med add_compass_question. Modulen är ett ' +
+        'opublicerat utkast tills personalen publicerar den i modul-admin.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runAddCompassQuestion(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const moduleId = typeof args.module_id === 'string' ? args.module_id.trim() : '';
+  if (!moduleId) return { ok: false, error: 'module_id saknas.' };
+
+  const result = await addCompassQuestion(ctx.pb, actor, {
+    moduleId,
+    prompt: typeof args.prompt === 'string' ? args.prompt : '',
+    inputType: typeof args.input_type === 'string' ? args.input_type : undefined,
+    key: typeof args.key === 'string' ? args.key : undefined,
+    helpText: typeof args.help_text === 'string' ? args.help_text : undefined,
+    required: typeof args.required === 'boolean' ? args.required : undefined,
+    choices: args.choices
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      question_id: result.value.questionId,
+      module_id: result.value.moduleId,
+      key: result.value.key,
+      input_type: result.value.inputType,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runUpdateCompassModuleField(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const moduleId = typeof args.module_id === 'string' ? args.module_id.trim() : '';
+  const field = typeof args.field === 'string' ? args.field.trim() : '';
+  if (!moduleId) return { ok: false, error: 'module_id saknas.' };
+
+  const allowed = [
+    'name',
+    'description',
+    'intro_message',
+    'success_message',
+    'target_audience',
+    'consent_note',
+    'flow_type'
+  ];
+  if (!allowed.includes(field)) {
+    return { ok: false, error: `field måste vara en av: ${allowed.join(', ')}.` };
+  }
+
+  const result = await updateCompassModuleField(ctx.pb, actor, {
+    moduleId,
+    field: field as CompassModuleWritableField,
+    value: args.value
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      module_id: result.value.moduleId,
+      field: result.value.field,
+      before: result.value.before,
+      after: result.value.after,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateWorkshop(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createWorkshop(ctx.pb, actor, {
+    title: typeof args.title === 'string' ? args.title : '',
+    goal: typeof args.goal === 'string' ? args.goal : undefined,
+    instructions: typeof args.instructions === 'string' ? args.instructions : undefined,
+    audienceRoles: Array.isArray(args.audience_roles)
+      ? (args.audience_roles as unknown[]).filter((r): r is string => typeof r === 'string')
+      : undefined,
+    modules: args.modules
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      workshop_id: result.value.workshopId,
+      key: result.value.key,
+      title: result.value.title,
+      module_count: result.value.moduleCount,
+      admin_path: result.value.adminPath,
+      status: 'draft',
+      next_step:
+        'Workshopen är ett utkast. Personalen kompletterar med bild/film och ' +
+        'publicerar den i /education.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+// ── Utökad chatt-skrivyta (§ 33) — dispatch-funktioner ──────────────────────
+// Tunna omslag: typa upp argumenten och delegera till det delade skrivlagret
+// (rollpolicy, validering, tenant-verifiering och agent_actions-logg bor där).
+
+function argStr(args: Record<string, unknown>, key: string): string {
+  return typeof args[key] === 'string' ? (args[key] as string).trim() : '';
+}
+
+function argNum(args: Record<string, unknown>, key: string): number | undefined {
+  const v = args[key];
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+async function runAssignWorkshop(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await assignWorkshop(ctx.pb, actor, {
+    workshopId: argStr(args, 'workshop_id'),
+    startupId: argStr(args, 'startup_id'),
+    dueDate: argStr(args, 'due_date') || null,
+    instructions: argStr(args, 'instructions') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      assignment_id: result.value.assignmentId,
+      workshop: result.value.workshopTitle,
+      startup: result.value.startupName,
+      path: result.value.startupPath,
+      next_step:
+        'Tilldelningen syns på bolagskortet och i bolagets Aktiviteter. ' +
+        'Medarbetare/möte kopplas på i /education vid behov.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runAssignEducationDocument(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await assignEducationDocument(ctx.pb, actor, {
+    documentId: argStr(args, 'document_id'),
+    startupId: argStr(args, 'startup_id'),
+    instructions: argStr(args, 'instructions') || null,
+    dueDate: argStr(args, 'due_date') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      assignment_id: result.value.assignmentId,
+      document: result.value.documentTitle,
+      startup: result.value.startupName,
+      updated_existing: result.value.updatedExisting,
+      path: result.value.startupPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateTask(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createTask(ctx.pb, actor, {
+    description: typeof args.description === 'string' ? args.description : '',
+    startupId: argStr(args, 'startup_id') || null,
+    missionId: argStr(args, 'mission_id') || null,
+    status: argStr(args, 'status') || null,
+    kind: argStr(args, 'kind') || null,
+    dueAt: argStr(args, 'due_at') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      task_id: result.value.taskId,
+      status: result.value.status,
+      board_path: result.value.boardPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runMoveTask(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await moveTask(ctx.pb, actor, {
+    taskId: argStr(args, 'task_id'),
+    status: argStr(args, 'status')
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      task_id: result.value.taskId,
+      before: result.value.before,
+      after: result.value.after,
+      board_path: result.value.boardPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateEvent(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createEvent(ctx.pb, actor, {
+    name: typeof args.name === 'string' ? args.name : '',
+    type: argStr(args, 'type') || null,
+    startsAt: argStr(args, 'starts_at'),
+    endsAt: argStr(args, 'ends_at') || null,
+    location: argStr(args, 'location') || null,
+    description: typeof args.description === 'string' ? args.description : null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      event_id: result.value.eventId,
+      name: result.value.name,
+      starts_at: result.value.startsAt,
+      path: result.value.eventPath,
+      next_step: 'Deltagare bjuds in av personalen i /events.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateMission(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createMissionDraft(ctx.pb, actor, {
+    title: typeof args.title === 'string' ? args.title : '',
+    type: argStr(args, 'type') || null,
+    description: typeof args.description === 'string' ? args.description : null,
+    startupId: argStr(args, 'startup_id') || null,
+    dueDate: argStr(args, 'due_date') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      mission_id: result.value.missionId,
+      title: result.value.title,
+      status: 'draft',
+      path: result.value.missionPath,
+      next_step:
+        'Uppdraget är ett utkast. Personalen kopplar på teamet (AI-teamförslaget ' +
+        'finns i formuläret) och startar det i /uppdrag.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runRegisterDeMinimisSupport(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await registerDeMinimisSupport(ctx.pb, actor, {
+    startupId: argStr(args, 'startup_id'),
+    forordning: argStr(args, 'forordning'),
+    stodgivare: argStr(args, 'stodgivare'),
+    beslutsdatum: argStr(args, 'beslutsdatum'),
+    beloppEur: argNum(args, 'belopp_eur'),
+    beloppSek: argNum(args, 'belopp_sek'),
+    valutakurs: argNum(args, 'valutakurs'),
+    syfte: argStr(args, 'syfte') || null,
+    beslutReferens: argStr(args, 'beslut_referens') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      stod_id: result.value.stodId,
+      stodgivare: result.value.stodgivare,
+      belopp_eur: result.value.beloppEur,
+      startup: result.value.startupName,
+      warnings: result.value.warnings,
+      path: result.value.deMinimisPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runAddStartupKpi(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await addStartupKpi(ctx.pb, actor, {
+    startupId: argStr(args, 'startup_id'),
+    kpiName: typeof args.kpi_name === 'string' ? args.kpi_name : '',
+    valueText: typeof args.value_text === 'string' ? args.value_text : '',
+    valueNumeric: argNum(args, 'value_numeric') ?? null,
+    unit: argStr(args, 'unit') || null,
+    measuredAt: argStr(args, 'measured_at') || null,
+    isCurrent: args.is_current === undefined ? undefined : args.is_current !== false
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      kpi_id: result.value.kpiId,
+      kpi_name: result.value.kpiName,
+      startup: result.value.startupName,
+      path: result.value.startupPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runAddCapitalRound(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const amount = argNum(args, 'amount_sek');
+  if (amount === undefined) return { ok: false, error: 'amount_sek (belopp i kronor) saknas.' };
+
+  const result = await addCapitalRound(ctx.pb, actor, {
+    startupId: argStr(args, 'startup_id'),
+    type: argStr(args, 'type'),
+    source: typeof args.source === 'string' ? args.source : '',
+    amountSek: amount,
+    receivedAt: argStr(args, 'received_at'),
+    purpose: argStr(args, 'purpose') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      round_id: result.value.roundId,
+      source: result.value.source,
+      amount_sek: result.value.amountSek,
+      startup: result.value.startupName,
+      path: result.value.startupPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runScheduleAgent(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await scheduleAgent(ctx.pb, actor, {
+    toolId: argStr(args, 'tool_id'),
+    cronExpression: argStr(args, 'cron_expression'),
+    timezone: argStr(args, 'timezone') || null,
+    enabled: args.enabled === undefined ? undefined : args.enabled !== false
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      schedule_id: result.value.scheduleId,
+      tool: result.value.toolName,
+      cron_expression: result.value.cronExpression,
+      enabled: result.value.enabled,
+      next_run_at: result.value.nextRunAt,
+      updated_existing: result.value.updatedExisting,
+      path: result.value.toolPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateStartupNote(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createStartupNote(ctx.pb, actor, {
+    startupId: argStr(args, 'startup_id'),
+    body: typeof args.body === 'string' ? args.body : ''
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      note_id: result.value.noteId,
+      startup: result.value.startupName,
+      confidential: false,
+      path: result.value.startupPath,
       logged_in: 'agent_actions'
     }
   };

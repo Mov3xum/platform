@@ -67,6 +67,12 @@ services:
       POCKETBASE_URL: ${POCKETBASE_URL:-http://pocketbase:8080}
       NEXT_PUBLIC_POCKETBASE_URL: ${NEXT_PUBLIC_POCKETBASE_URL:-http://pocketbase:8080}
       NODE_ENV: production
+      # HTTPS-beteende (infra/SSL.md): MOVEXUM_FORCE_HTTPS=true slår på appens
+      # opt-in http→https-redirect — sätt FÖRST när hosten har giltigt cert.
+      # MOVEXUM_ALLOW_INSECURE_COOKIES=true är escape-hatchen för medvetet
+      # http-serverade deploys (vinner alltid).
+      MOVEXUM_FORCE_HTTPS: ${MOVEXUM_FORCE_HTTPS:-}
+      MOVEXUM_ALLOW_INSECURE_COOKIES: ${MOVEXUM_ALLOW_INSECURE_COOKIES:-}
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
       # Superuser-credentials krävs för fallback-skapande av records när
       # PB:s createRule failar transient (se workshops.ts). Sätt

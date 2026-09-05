@@ -9,12 +9,14 @@ interface Props {
   name: string;
   /** Global publik slug — den publika URL:en blir /m/<publicSlug>. */
   publicSlug?: string;
+  /** Aktiv + publicerad publikt — annars ger /m/-länken 404. */
+  isPublished?: boolean;
 }
 
 // QR-koden genereras helt lokalt med 'qrcode' (ren JS, inga externa anrop) —
 // EU-suveränt enligt CLAUDE.md § 10.2. Staff kan ladda ner PNG/SVG och
 // publicera på event, affischer eller hemsidor.
-export function ShareModule({ slug, name, publicSlug }: Props) {
+export function ShareModule({ slug, name, publicSlug, isPublished = true }: Props) {
   const [origin, setOrigin] = useState('');
   const [copied, setCopied] = useState(false);
   const [pngUrl, setPngUrl] = useState('');
@@ -89,6 +91,14 @@ export function ShareModule({ slug, name, publicSlug }: Props) {
         >
           {url || (effectiveSlug ? `…/m/${effectiveSlug}` : 'Ange en publik länk (slug) för att dela modulen')}
         </div>
+
+        {url && !isPublished && (
+          <div className="mx-t-12" style={{ color: '#4b2718', lineHeight: 1.5 }}>
+            Modulen är inte publicerad ännu — länken ger 404. Bocka i{' '}
+            <strong>Aktiv</strong> och <strong>Publicerad publikt</strong> i steget{' '}
+            <strong>Efter slutförande</strong> och spara.
+          </div>
+        )}
 
         <div className="mx-flex mx-items-c mx-gap-2 mx-wrap">
           <button type="button" onClick={copy} className="mx-btn mx-sm mx-primary">

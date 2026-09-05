@@ -1,14 +1,29 @@
 # SSL/TLS — staging & production
 
-Staging och production körs på `*.sslip.io`-hostnames bakom Coolifys
-Traefik-proxy. Det här dokumentet beskriver hur HTTPS slås på med **Let's
-Encrypt** och vad som måste stämma i appens env-vars.
+Staging och production körs bakom Coolifys Traefik-proxy. Det här dokumentet
+beskriver hur HTTPS slås på med **Let's Encrypt** och vad som måste stämma i
+appens env-vars. **OBS:** för https krävs i praktiken en **egen domän** —
+`*.sslip.io` delar en global, regelbundet uttömd LE-kvot (se varningen under
+"Steg per service").
 
 Själva cert-utfärdandet görs i **Coolify-UI:t** — det kan inte göras från
 repot. Appen är redan byggd för att auto-detektera HTTPS via
 `x-forwarded-proto` (sätts av Traefik): så fort proxyn terminerar TLS slås
 `Secure`-cookies (`apps/web/src/lib/actions/auth.ts`) och CSP-direktivet
 `upgrade-insecure-requests` (`apps/web/src/middleware.ts`) på automatiskt.
+
+Dessutom kan **appen själv tvinga https** (defense-in-depth ovanpå Coolifys
+force-https-toggle): med env `MOVEXUM_FORCE_HTTPS=true` svarar middleware:n
+`308` → `https://<host><path>` när en request kommer in med
+`x-forwarded-proto: http` i produktion. **OPT-IN — sätt flaggan FÖRST när
+certet är utfärdat och verifierat.** Default är AV: en på-per-default-
+redirect gjorde plattformen helt onåbar när den deployades mot http-only
+sslip.io-hosts (incident 2026-08-31 — 308 mot en https-lyssnare utan giltigt
+cert). Redirecten triggas ALDRIG för container-interna anrop
+(Coolify-healthchecks, PB-hookarnas POST mot `http://moveum-web:3000`) — de
+saknar `x-forwarded-proto`-headern — och `/api/health` + `/api/internal/` är
+dessutom explicit undantagna. `MOVEXUM_ALLOW_INSECURE_COOKIES=true` vinner
+alltid över flaggan (samma escape-hatch som Secure-cookies).
 
 ## Ordning (viktigt)
 
@@ -23,9 +38,9 @@ Gäller alla fyra: web-staging, web-production, pocketbase-staging,
 pocketbase-production.
 
 1. **Coolify → appen → Configuration → Domains.** Sätt FQDN med `https://`-
-   schema, t.ex.
-   `https://pocketbase-r10nklch8dkune7s0flczb89.212.147.227.223.sslip.io`.
-   Coolify använder schemat för att be Traefik om ett Let's Encrypt-cert.
+   schema, t.ex. `https://pb.movexum.se` (egen domän — se avsnittet nedan;
+   inte en sslip-host). Coolify använder schemat för att be Traefik om ett
+   Let's Encrypt-cert.
 2. **Brandvägg (UpCloud):** öppna port **80 och 443** mot hosten.
    LE:s HTTP-01-challenge kräver att :80 är nåbar; :443 serverar TLS.
 3. **Force HTTPS:** slå på Coolifys redirect-toggle → http→https 301 på
@@ -34,9 +49,28 @@ pocketbase-production.
 5. **Verifiera:** `curl -I https://<host>` ger giltigt cert;
    `curl -I http://<host>` ger `301` → https.
 
-> Let's Encrypt funkar för sslip.io: varje `*.sslip.io`-host är en egen
-> entry i Public Suffix List, så per-domän-rate-limits gäller per host (inte
-> hela sslip.io). Ett fåtal hosts ligger gott inom gränserna.
+> **VARNING — https på sslip.io fungerar i praktiken INTE.** Tidigare stod
+> här att varje `*.sslip.io`-host är en egen Public Suffix List-entry — det
+> är FEL. sslip.io finns inte i PSL, så hela världens `*.sslip.io`-cert
+> delar EN gemensam Let's Encrypt-kvot (höjd till 50 000 cert/vecka), och
+> den töms regelbundet (cunnie/sslip.io#108, feb 2026: "too many
+> certificates (50000) already issued for sslip.io"). Coolify varnar därför
+> uttryckligen när https sätts på en sslip-domän. Utfärdandet kan råka
+> lyckas, men förnyelsen (~var 60:e dag) kan lika gärna faila → certet dör
+> tyst i drift. **Använd en egen domän för https** (se nedan); sslip.io
+> duger bara för tillfällig http.
+
+## Egen domän (krävs i praktiken för https)
+
+1. Välj subdomäner på en domän ni kontrollerar (exempel med `movexum.se`):
+   `app.movexum.se` (web-production), `staging.movexum.se` (web-staging),
+   `pb.movexum.se` / `pb-staging.movexum.se` (PocketBase).
+2. Skapa **A-poster** hos DNS-leverantören som pekar på serverns publika IP
+   (`212.147.227.223`). Vänta tills de resolvar (`dig +short app.movexum.se`).
+3. Använd dessa FQDN:er med `https://`-schema i "Steg per service" ovan.
+   Let's Encrypts rate-limit (50 cert/vecka per registrerad domän) gäller då
+   er egen domän — långt ifrån ett problem.
+4. Uppdatera env-vars (tabellen nedan) till de nya https-hostarna.
 
 ## Env-vars i Coolify (båda web-apparna, efter att cert är på plats)
 
@@ -46,6 +80,7 @@ pocketbase-production.
 | `NEXT_PUBLIC_POCKETBASE_URL_STAGING` / `_PRODUCTION` | `https://…sslip.io` |
 | `NEXT_PUBLIC_APP_URL` | `https://<web-host>` (per miljö; används i verifieringsmail) |
 | `MOVEXUM_ALLOW_INSECURE_COOKIES` | **rensa / ≠ `true`** → Secure-cookies + upgrade-insecure-requests slås på |
+| `MOVEXUM_FORCE_HTTPS` | `true` — MEN först efter att `https://…` verifierats med giltigt cert (opt-in app-redirect http→https) |
 
 Lämna oförändrat (internt docker-nät, ingen TLS internt):
 
@@ -53,9 +88,15 @@ Lämna oförändrat (internt docker-nät, ingen TLS internt):
 - `MOVEXUM_WEB_URL` (PB-hooks) = `http://moveum-web:3000` — hookarna anropar
   web-containern container-till-container.
 
+> **OBS för en http-only-deploy (utan cert):** lämna `MOVEXUM_FORCE_HTTPS`
+> osatt (app-redirecten är opt-in och förblir då av). Sätts flaggan mot en
+> host utan giltigt cert redirectas besökaren till en https-lyssnare som
+> inte finns → plattformen blir onåbar.
+
 ## Verifiering efter deploy
 
-- `curl -I https://<web-host>` → `200` + giltigt cert; `http://` → `301`.
+- `curl -I https://<web-host>` → `200` + giltigt cert; `http://` → `301`
+  (Coolify-proxyn) eller `308` (appens egen force-https-redirect).
 - `curl -fsS https://<pb-host>/api/health` → `200`.
 - Login över https → DevTools ▸ Application ▸ Cookies: `pb_auth` har `Secure` ✓.
 - Response-headers: `Strict-Transport-Security` finns + CSP innehåller

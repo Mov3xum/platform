@@ -7,7 +7,15 @@ import { getExposedCollections } from './schema';
 import { selectRelevantCollections, buildScopedSchemaSummary } from './schema-scope';
 import { buildPortfolioContext, renderPromptTemplate } from './context';
 import { buildKnowledgeContext } from './agent-prompt';
-import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY, KNOWLEDGE_GUIDANCE } from './guidance';
+import {
+  SEARCH_STRATEGY_GUIDANCE,
+  DOMAIN_GLOSSARY,
+  KNOWLEDGE_GUIDANCE,
+  AUTHORING_GUIDANCE,
+  APPROVAL_GUIDANCE,
+  MEETING_GUIDANCE,
+  CHAT_WRITE_ACTIONS_GUIDANCE
+} from './guidance';
 import { routeChatModels } from './model-router';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from './web';
 import { withAttachedImages } from './chat-input';
@@ -15,8 +23,10 @@ import { logAiUsage } from './usage';
 import type { Actor } from '@/lib/core/write';
 import type {
   AiUsageSurface,
+  ApprovalRequestRef,
   GeneratedFileRef,
   InlineVisualRef,
+  MeetingRequestRef,
   Role,
   WebSourceKey
 } from '@platform/shared';
@@ -100,6 +110,7 @@ const STAFF_TOOL_GUIDANCE =
   'aktivitet kopplat till ett bolag.\n' +
   '- `update_activity_field`: uppdatera en befintlig aktivitets `title`, ' +
   '`description` eller `status`.\n' +
+  CHAT_WRITE_ACTIONS_GUIDANCE +
   '- `memory_read` / `memory_write`: ditt tvärsessions-minne (per tenant). När ' +
   'personalen RÄTTAR dig eller lär dig en bestående regel ("räkna inte lån som ' +
   'investeringar", "Bolag X heter numera Y") — spara det med `memory_write` ' +
@@ -131,8 +142,8 @@ const STAFF_TOOL_GUIDANCE =
   'upprepa inte alla siffror. Vill användaren ha en FIL (PowerPoint/PDF) är ' +
   'det `generate_document` som gäller; `render_visual` är för att SE direkt.\n\n' +
   'Skrivregler:\n' +
-  '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
-  'efterfrågad.\n' +
+  '- Rutinåtgärder som användaren bett om utförs DIREKT utan bekräftelsefråga; ' +
+  'inför en KRITISK åtgärd använder du `request_approval` (se GODKÄNNANDE-reglerna).\n' +
   '- Slå alltid upp bolagets id med `query_collection` först om du inte redan har det.\n' +
   '- Varje skrivning loggas i `agent_actions` och kan rullas tillbaka av staff.\n\n' +
   'SÅ HÄR ARBETAR DU (viktigt):\n' +
@@ -313,6 +324,10 @@ export interface StaffTurnResult {
   generatedFiles: GeneratedFileRef[];
   /** Inline-visualiseringar (diagram/KPI-kort) som agenten tog fram under turn:en. */
   visuals: InlineVisualRef[];
+  /** Godkännandefråga (`request_approval`) — Godkänn/Avbryt-knapp i UI:t. */
+  approvalRequest?: ApprovalRequestRef;
+  /** Möteskort (`start_meeting`, § 34) — "Starta mötet"-knapp i UI:t. */
+  meetingRequest?: MeetingRequestRef;
 }
 
 export interface RunStaffChatTurnOptions {
@@ -404,7 +419,12 @@ export async function runStaffChatTurn(
     ? `\n\n${buildScopedSchemaSummary(collections, selectRelevantCollections(collections, scopeText))}`
     : '';
   const toolGuidanceBlocks = useTools
-    ? STAFF_TOOL_GUIDANCE + SEARCH_STRATEGY_GUIDANCE + KNOWLEDGE_GUIDANCE
+    ? STAFF_TOOL_GUIDANCE +
+      APPROVAL_GUIDANCE +
+      AUTHORING_GUIDANCE +
+      MEETING_GUIDANCE +
+      SEARCH_STRATEGY_GUIDANCE +
+      KNOWLEDGE_GUIDANCE
     : '';
 
   const systemContent =
@@ -428,6 +448,8 @@ export async function runStaffChatTurn(
   let lastModel = '';
   const generatedFiles: GeneratedFileRef[] = [];
   const inlineVisuals: InlineVisualRef[] = [];
+  const approvalRequests: ApprovalRequestRef[] = [];
+  const meetingRequests: MeetingRequestRef[] = [];
   const surface: AiUsageSurface = opts.surface ?? 'dashboard_chat';
 
   // Modellval efter komplexitet (ej längre default small). Bilder → vision.
@@ -450,7 +472,9 @@ export async function runStaffChatTurn(
         ownerUserId: opts.ownerUserId,
         chatThreadId: opts.chatThreadId,
         generatedFiles,
-        inlineVisuals
+        inlineVisuals,
+        approvalRequests,
+        meetingRequests
       },
       maxIterations: MAX_TOOL_ITERATIONS,
       onStep: opts.onStep,
@@ -477,7 +501,9 @@ export async function runStaffChatTurn(
         tokensIn,
         tokensOut,
         generatedFiles,
-        visuals: inlineVisuals
+        visuals: inlineVisuals,
+        approvalRequest: approvalRequests[0],
+        meetingRequest: meetingRequests[0]
       }
     };
   } catch (err) {

@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChatAttachment } from '@/lib/actions/chat';
-import type { AgentActivityStep, GeneratedFileRef, InlineVisualRef } from '@platform/shared';
+import type {
+  AgentActivityStep,
+  ApprovalRequestRef,
+  GeneratedFileRef,
+  InlineVisualRef,
+  MeetingRequestRef
+} from '@platform/shared';
 import {
   AI_IMPACT_SOURCE_LABEL,
   formatAiImpact,
@@ -13,6 +19,9 @@ import {
   extractXlsxFromDataUrlAction
 } from '@/lib/actions/chat-attachments';
 import { Icon } from '@/components/proto/Icon';
+import VoiceInputButton from '@/components/VoiceInputButton';
+import ChatHelpGuide from '@/components/ChatHelpGuide';
+import type { Role } from '@platform/shared';
 import { chatMarkdownToHtml } from '@/lib/safe-html';
 
 // Markör som visas i slutet av den streamande texten. Injiceras i den redan
@@ -54,6 +63,10 @@ export interface UiMessage {
   steps?: AgentActivityStep[];
   /** Turens tokens (in + ut) → inline token-/miljöchip under svaret. */
   tokens?: number;
+  /** Agenten väntar på Godkänn/Avbryt inför en kritisk åtgärd (§ 33). */
+  approval_request?: ApprovalRequestRef;
+  /** Agenten har förberett mötesläget (§ 34) — "Starta mötet"-kort. */
+  meeting_request?: MeetingRequestRef;
 }
 
 // Ett pågående verktygssteg under en streamande turn.
@@ -270,6 +283,14 @@ export interface DashboardActivity {
   startupName?: string;
   startupId?: string;
   toolIcon?: string;
+  /** Egen länk (systemloggrader: årshjulet, modul-admin …). Vinner över startupId. */
+  href?: string;
+  /** Ikonnamn satt av servern (systemloggrader). */
+  icon?: string;
+  /** Vem som utförde åtgärden — visas som tooltip. */
+  actorName?: string;
+  /** true när åtgärden gjordes av AI-agenten i chatten (art. 13-transparens). */
+  viaAgent?: boolean;
 }
 
 // Relativ, svensk tidsangivelse ("nyss", "2 tim sedan", "igår").
@@ -294,7 +315,8 @@ const ACTIVITY_SWATCH = 'bg-canvas-muted text-foreground-subtle';
 
 function activityVisual(act: DashboardActivity): { icon: string; swatch: string } {
   let icon = 'dot';
-  if (act.kind === 'tool_run') icon = 'sparkle';
+  if (act.icon) icon = act.icon;
+  else if (act.kind === 'tool_run') icon = 'sparkle';
   else if (act.kind === 'integration_sync') icon = 'cloud';
   else if (act.kind === 'workshop_run' || act.kind === 'workshop_assignment') icon = 'cap';
   else
@@ -323,6 +345,8 @@ interface Props {
   agents?: DashboardAgent[];
   connectors?: DashboardConnector[];
   activities?: DashboardActivity[];
+  /** Inloggad användares roller — styr vilka delar hjälp-guiden visar (§ 33.3). */
+  userRoles?: Role[];
   greeting?: string;
   // Kontrollerade props (ChattWorkspace äger tillståndet)
   messages: UiMessage[];
@@ -349,6 +373,12 @@ interface Props {
   onDownload: (file: GeneratedFileRef) => void;
   // Ta bort ett ännu icke-körat köat meddelande.
   onCancelQueued?: (id: string) => void;
+  // Svar på agentens godkännandefråga (Godkänn/Avbryt-knapparna, § 33).
+  onApproval?: (approved: boolean) => void;
+  // Öppna mötesläget (§ 34) — chip i komposern.
+  onOpenMeeting?: () => void;
+  // Starta mötesläget från agentens möteskort (`start_meeting`, § 34).
+  onStartMeeting?: (req: MeetingRequestRef) => void;
 }
 
 const AGENT_TONES = [
@@ -370,6 +400,7 @@ export default function DashboardChat({
   agents = [],
   connectors = [],
   activities = [],
+  userRoles = [],
   greeting,
   messages,
   isPending,
@@ -385,9 +416,14 @@ export default function DashboardChat({
   onReset,
   onSubmit,
   onDownload,
-  onCancelQueued
+  onCancelQueued,
+  onApproval,
+  onOpenMeeting,
+  onStartMeeting
 }: Props) {
   const [input, setInput] = useState('');
+  // Hjälp-guiden ("Vad kan chatten göra?") — rollspecifik, § 33.3.
+  const [showGuide, setShowGuide] = useState(false);
   const [includeWebContext, setIncludeWebContext] = useState(false);
   const [deepMode, setDeepMode] = useState(false);
   const [showAssistants, setShowAssistants] = useState(false);
@@ -396,8 +432,10 @@ export default function DashboardChat({
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   // Fullskärmsvy för en inline-visualisering (stort över hela ytan).
   const [lightbox, setLightbox] = useState<InlineVisualRef | null>(null);
-  // Aktivitetsloggen visar bara de fem senaste tills användaren expanderar.
-  const [activitiesExpanded, setActivitiesExpanded] = useState(false);
+  // Aktivitetsloggen visar de fem senaste; "Visa fler" utökar stegvis så att
+  // hela historiken kan läsas som en logg utan att startvyn blir lång.
+  const ACTIVITY_STEP = 15;
+  const [visibleActivities, setVisibleActivities] = useState(5);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -573,6 +611,19 @@ export default function DashboardChat({
     });
   }
 
+  /**
+   * Röstinmatning (§ 31): transkriptet läggs i rutan i stället för att skickas
+   * automatiskt, så att människan läser igenom och skickar själv
+   * (människa-i-loopen, EU AI Act art. 14). Flera inspelningar staplas på
+   * varandra med mellanslag.
+   */
+  function appendTranscript(text: string) {
+    const addition = text.trim();
+    if (!addition) return;
+    setInput((prev) => (prev.trim() ? `${prev.trim()} ${addition}` : addition));
+    inputRef.current?.focus();
+  }
+
   function submit() {
     const text = input.trim();
     // Djupt jobb kräver en instruktion (text); annars krävs text eller bilaga.
@@ -719,6 +770,11 @@ export default function DashboardChat({
 
       <div className="mt-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
+          <VoiceInputButton
+            disabled={isProcessingFiles}
+            onError={(message) => setLocalError(message || null)}
+            onTranscript={appendTranscript}
+          />
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
@@ -773,6 +829,18 @@ export default function DashboardChat({
             <Icon name="sparkle" size={12} />
             Djupdykning
           </button>
+          {onOpenMeeting && (
+            <button
+              type="button"
+              onClick={onOpenMeeting}
+              disabled={deepMode}
+              className="inline-flex items-center gap-1.5 rounded-full border border-default px-3 py-1 text-[12px] font-medium text-foreground-subtle transition hover:border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              title="Mötesläge: spela in ett möte, få allt transkriberat live och spara protokollet på ett bolagskort"
+            >
+              <Icon name="mic" size={12} />
+              Möte
+            </button>
+          )}
           {!isActive && agents.length > 0 && (
             <button
               type="button"
@@ -790,6 +858,15 @@ export default function DashboardChat({
               Assistenter
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setShowGuide(true)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-default px-3 py-1 text-[12px] text-foreground-subtle transition hover:border-strong hover:text-foreground"
+            title="Vad kan chatten göra? Öppna guiden med exempel för din roll"
+          >
+            <Icon name="help" size={12} />
+            Hjälp
+          </button>
         </div>
         <button
           type="button"
@@ -853,6 +930,79 @@ export default function DashboardChat({
           </li>
         ))}
       </ul>
+    );
+  }
+
+  // Godkännandekort (§ 33): visas bara på det SENASTE assistant-svaret och
+  // bara medan inget nytt körs/köas — ett klick skickar "Godkänn"/"Avbryt"
+  // som en vanlig user-tur, varpå kortet försvinner (meddelandet är inte
+  // längre senast). Knappen är UX, inte säkerhetsgränsen (RBAC/skrivlagret).
+  function renderApprovalRequest(msg: UiMessage, isLast: boolean) {
+    if (!msg.approval_request || !isLast || !onApproval) return null;
+    if (isPending || queued.length > 0) return null;
+    return (
+      <div className="mt-3 max-w-[640px] rounded-2xl border border-default bg-canvas-subtle p-3.5">
+        <p className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+          <Icon name="check" size={11} />
+          Väntar på ditt godkännande
+        </p>
+        <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground">
+          {msg.approval_request.summary}
+        </p>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onApproval(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-[13px] font-medium text-brand-foreground transition hover:bg-brand-hover"
+          >
+            <Icon name="check" size={13} />
+            Godkänn
+          </button>
+          <button
+            type="button"
+            onClick={() => onApproval(false)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-default px-4 py-2 text-[13px] font-medium text-foreground-muted transition hover:border-strong hover:text-foreground"
+          >
+            <Icon name="x" size={12} />
+            Avbryt
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Möteskort (§ 34): agenten har förberett mötesläget via `start_meeting`.
+  // Visas som "Starta mötet"-knapp på det senaste assistant-svaret — själva
+  // starten (och samtyckesgrinden) är alltid ett mänskligt klick i panelen.
+  function renderMeetingRequest(msg: UiMessage, isLast: boolean) {
+    if (!msg.meeting_request || !isLast || !onStartMeeting) return null;
+    if (isPending || queued.length > 0) return null;
+    const req = msg.meeting_request;
+    return (
+      <div className="mt-3 max-w-[640px] rounded-2xl border border-default bg-canvas-subtle p-3.5">
+        <p className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+          <Icon name="mic" size={11} />
+          Mötesläge förberett
+        </p>
+        <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground">
+          {req.startup_name
+            ? `Möte med ${req.startup_name}${req.title ? ` — ${req.title}` : ''}. `
+            : req.title
+              ? `${req.title}. `
+              : ''}
+          Allt som sägs transkriberas live och kan sparas på bolagskortet efter granskning.
+        </p>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onStartMeeting(req)}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-[13px] font-medium text-brand-foreground transition hover:bg-brand-hover"
+          >
+            <Icon name="mic" size={13} />
+            Starta mötet
+          </button>
+        </div>
+      </div>
     );
   }
 
@@ -945,6 +1095,19 @@ export default function DashboardChat({
 
   return (
     <div className={`flex min-h-0 flex-1 flex-col ${className}`}>
+      {showGuide && (
+        <ChatHelpGuide
+          roles={userRoles}
+          onClose={() => setShowGuide(false)}
+          onUseExample={(text) => {
+            // Exemplet läggs i chattrutan men skickas INTE — användaren
+            // läser, justerar och skickar själv (människa-i-loopen).
+            setInput(text);
+            setShowGuide(false);
+            inputRef.current?.focus();
+          }}
+        />
+      )}
       {lightbox && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-movexum-svart/70 p-4 backdrop-blur-sm md:p-8"
@@ -994,6 +1157,14 @@ export default function DashboardChat({
               </h1>
             )}
             <p className="mt-2 text-[14px] text-foreground-subtle">Vad kan jag hjälpa dig med idag?</p>
+            <button
+              type="button"
+              onClick={() => setShowGuide(true)}
+              className="mt-2 inline-flex items-center gap-1.5 self-start text-[13px] text-link transition hover:underline"
+            >
+              <Icon name="help" size={13} />
+              Vad kan chatten göra? Se guiden med exempel
+            </button>
 
             {activeAgent && (
               <div className="mt-5 flex items-center gap-2">
@@ -1099,7 +1270,7 @@ export default function DashboardChat({
                       Aktivitet
                     </h2>
                     <p className="mt-0.5 text-[12px] text-foreground-subtle">
-                      Senaste händelserna i portföljen
+                      Det senaste i portföljen och det du gjort i systemet
                     </p>
                   </div>
                   <a href="/aktivitet" className="text-[12px] text-foreground-subtle transition hover:text-foreground">
@@ -1113,8 +1284,10 @@ export default function DashboardChat({
                 ) : (
                   <>
                     <ul className="overflow-hidden rounded-2xl border border-default bg-surface">
-                      {(activitiesExpanded ? activities : activities.slice(0, 5)).map((act, i) => {
+                      {activities.slice(0, visibleActivities).map((act, i) => {
                         const v = activityVisual(act);
+                        const href =
+                          act.href ?? (act.startupId ? `/startups/${act.startupId}` : undefined);
                         const inner = (
                           <>
                             <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${v.swatch}`}>
@@ -1131,11 +1304,20 @@ export default function DashboardChat({
                                   {act.startupName}
                                 </span>
                               )}
+                              {act.viaAgent && (
+                                <span
+                                  className="inline-flex shrink-0 items-center gap-1 rounded-md bg-canvas-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground-subtle"
+                                  title="Utfört via AI-chatten"
+                                >
+                                  <Icon name="sparkle" size={9} />
+                                  AI
+                                </span>
+                              )}
                             </div>
                             <span className="shrink-0 text-[11.5px] text-foreground-subtle">
                               {relativeTime(act.created)}
                             </span>
-                            {act.startupId && (
+                            {href && (
                               <Icon
                                 name="arrow-up-right"
                                 size={13}
@@ -1146,35 +1328,50 @@ export default function DashboardChat({
                         );
                         const rowClass = `group flex items-center gap-2.5 px-4 py-2 transition ${
                           i > 0 ? 'border-t border-default' : ''
-                        } ${act.startupId ? 'hover:bg-canvas-subtle' : ''}`;
+                        } ${href ? 'hover:bg-canvas-subtle' : ''}`;
+                        const rowTitle = act.actorName ? `Av ${act.actorName}` : undefined;
                         return (
                           <li key={act.id}>
-                            {act.startupId ? (
-                              <a href={`/startups/${act.startupId}`} className={rowClass}>
+                            {href ? (
+                              <a href={href} className={rowClass} title={rowTitle}>
                                 {inner}
                               </a>
                             ) : (
-                              <div className={rowClass}>{inner}</div>
+                              <div className={rowClass} title={rowTitle}>
+                                {inner}
+                              </div>
                             )}
                           </li>
                         );
                       })}
                     </ul>
                     {activities.length > 5 && (
-                      <button
-                        type="button"
-                        onClick={() => setActivitiesExpanded((v) => !v)}
-                        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-[12px] text-foreground-subtle transition hover:bg-canvas-subtle hover:text-foreground"
-                      >
-                        {activitiesExpanded
-                          ? 'Visa färre'
-                          : `Visa ${activities.length - 5} till`}
-                        <Icon
-                          name="chevdown"
-                          size={13}
-                          className={`transition ${activitiesExpanded ? 'rotate-180' : ''}`}
-                        />
-                      </button>
+                      <div className="mt-2 flex items-center justify-center gap-2">
+                        {visibleActivities < activities.length && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setVisibleActivities((v) =>
+                                Math.min(activities.length, v + ACTIVITY_STEP)
+                              )
+                            }
+                            className="flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-[12px] text-foreground-subtle transition hover:bg-canvas-subtle hover:text-foreground"
+                          >
+                            {`Visa ${Math.min(activities.length - visibleActivities, ACTIVITY_STEP)} till`}
+                            <Icon name="chevdown" size={13} />
+                          </button>
+                        )}
+                        {visibleActivities > 5 && (
+                          <button
+                            type="button"
+                            onClick={() => setVisibleActivities(5)}
+                            className="flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-[12px] text-foreground-subtle transition hover:bg-canvas-subtle hover:text-foreground"
+                          >
+                            Visa färre
+                            <Icon name="chevdown" size={13} className="rotate-180" />
+                          </button>
+                        )}
+                      </div>
                     )}
                   </>
                 )}
@@ -1233,6 +1430,8 @@ export default function DashboardChat({
                       />
                       {renderVisuals(msg.visuals)}
                       {renderGeneratedFiles(msg.generated_files)}
+                      {renderApprovalRequest(msg, i === messages.length - 1)}
+                      {renderMeetingRequest(msg, i === messages.length - 1)}
                       {typeof msg.tokens === 'number' && msg.tokens > 0 && (
                         <p
                           className="mt-1.5 text-[11px] tabular-nums text-foreground-subtle"
