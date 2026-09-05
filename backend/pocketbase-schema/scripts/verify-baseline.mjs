@@ -360,7 +360,10 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // Årshjul (migration 1700000133, § 30). Tenant-bred intern verksamhets-
   // planering (styrelse/ledning) → staff/observer-only; en ren startup_member
   // ska inte se Movexums interna kalender.
-  'annual_wheel_items'
+  'annual_wheel_items',
+  // Årshjulets dynamiska kategorier (migration 1700000139, § 30). Samma
+  // isolering som posterna — de beskriver Movexums interna kalender.
+  'annual_wheel_categories'
 ];
 
 // Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa

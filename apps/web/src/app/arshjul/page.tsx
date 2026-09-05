@@ -3,19 +3,21 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { listForTenant } from '@/lib/pb.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
-import { PageShell } from '@/components/PageShell';
-import { AnnualWheelView } from './AnnualWheelView';
-import type { AnnualWheelItem, Role } from '@platform/shared';
 import {
-  isAnnualWheelCategory,
   sanitizeAnnualWheelTags,
   sanitizeDay,
   sanitizeMonth
 } from '@platform/shared';
+import { listAnnualWheelCategories } from '@/lib/annual-wheel/categories';
+import { PageShell } from '@/components/PageShell';
+import { AnnualWheelView } from './AnnualWheelView';
+import type { AnnualWheelItem, Role } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
 
 const EDIT_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
+/** Kategori-CRUD är superadmin-only (`admin` = högsta app-rollen, § 6). */
+const CATEGORY_MANAGE_ROLES: Role[] = ['admin'];
 
 interface WheelRow {
   id: string;
@@ -45,15 +47,21 @@ export default async function ArshjulPage() {
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'arshjul', user.disabledModules)) redirect('/chatt');
 
-  const res = await listForTenant<WheelRow>('annual_wheel_items', {
-    sort: 'year,month',
-    perPage: 500
-  }).catch(() => ({ items: [] as WheelRow[] }));
+  const pb = await getServerPb();
+  const [res, categories] = await Promise.all([
+    listForTenant<WheelRow>('annual_wheel_items', {
+      sort: 'year,month',
+      perPage: 500
+    }).catch(() => ({ items: [] as WheelRow[] })),
+    // Dynamiska kategorier per tenant (§ 30) — fail-soft till defaults.
+    listAnnualWheelCategories(pb, user.tenant)
+  ]);
+
+  const fallbackCategory = categories[0]?.id ?? 'gemensamt';
 
   // Movexum-resurser som kan sättas som ansvariga (staff i tenanten). Samma
   // helper som tilldelnings-samarbetet (§ 18.4) — bara id + visningsnamn,
   // aldrig e-post.
-  const pb = await getServerPb();
   const people = await listAssignableResourcesForTenant(pb, user.tenant);
   const nameById = new Map(people.map((p) => [p.id, p.name]));
 
@@ -70,9 +78,11 @@ export default async function ArshjulPage() {
     // migration 1700000139). En tom lista är ett medvetet "otaggad" och ska
     // aldrig återuppväcka det deprecerade spåret.
     tags: sanitizeAnnualWheelTags(r.tags === undefined || r.tags === null ? r.track : r.tags),
-    category: isAnnualWheelCategory(r.category) ? r.category : 'gemensamt',
     responsible: r.responsible || null,
     responsible_name: r.responsible ? (nameById.get(r.responsible) ?? null) : null,
+    // Kategorin är fri text (dynamisk lista). En post som pekar på en raderad
+    // kategori behåller sin nyckel — vyn visar den då rått med neutral färg.
+    category: typeof r.category === 'string' && r.category ? r.category : fallbackCategory,
     notes: r.notes || undefined,
     created_by: r.created_by,
     created: r.created,
@@ -80,6 +90,7 @@ export default async function ArshjulPage() {
   }));
 
   const canEdit = hasRole(user.roles, EDIT_ROLES);
+  const canManageCategories = hasRole(user.roles, CATEGORY_MANAGE_ROLES);
 
   return (
     <PageShell
@@ -90,7 +101,13 @@ export default async function ArshjulPage() {
         </span>
       }
     >
-      <AnnualWheelView items={items} canEdit={canEdit} people={people} />
+      <AnnualWheelView
+        items={items}
+        categories={categories}
+        canEdit={canEdit}
+        people={people}
+        canManageCategories={canManageCategories}
+      />
     </PageShell>
   );
 }
