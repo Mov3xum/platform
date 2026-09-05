@@ -1,5 +1,3 @@
-import Link from 'next/link';
-import { Icon } from './Icon';
 import {
   coreModules,
   RAIL_GROUPS,
@@ -12,6 +10,7 @@ import { ModuleNavItem } from './ModuleNavItem';
 import { RailToggleButton } from './MobileRail';
 import { Logo } from '@/components/Logo';
 import { StartupSwitcher, type SwitchableStartup } from './StartupSwitcher';
+import { RailAccountMenu } from './RailAccountMenu';
 
 const moduleIcons: Record<string, string> = {
   idag: 'message',
@@ -129,19 +128,12 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
       </nav>
 
       <div className="mx-rail-foot">
-        <div className="mx-rail-user-av">{initial}</div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="mx-rail-user-name">{user.name || user.email}</div>
-          <div className="mx-rail-user-role">{user.roles[0]?.replace('_', ' ') || ''}</div>
-        </div>
-        <Link
-          href="/konto"
-          className="mx-icon-btn"
-          style={{ color: 'rgba(255,255,255,.5)' }}
-          aria-label="Mitt konto"
-        >
-          <Icon name="gear" size={14} />
-        </Link>
+        <RailAccountMenu
+          name={user.name}
+          email={user.email}
+          role={user.roles[0]?.replace('_', ' ') || ''}
+          initial={initial}
+        />
       </div>
     </aside>
   );

@@ -21,6 +21,7 @@ import {
   type ToolRunStatus
 } from '@/lib/labels';
 import type { ToolRun } from '@platform/shared';
+import { loadAgentLogEntries, type AgentLogEntry } from '@/lib/feed/agent-log';
 
 interface ActivityRecord {
   id: string;
@@ -53,7 +54,8 @@ const FILTERS: { id: string; label: string; href: string }[] = [
   { id: 'tool_run', label: 'Verktygskörningar', href: '/aktivitet?kind=tool_run' },
   { id: 'workshop_assignment', label: 'Workshop tilldelning', href: '/aktivitet?kind=workshop_assignment' },
   { id: 'workshop_run', label: 'Workshop AI', href: '/aktivitet?kind=workshop_run' },
-  { id: 'integration_sync', label: 'Integrationssynk', href: '/aktivitet?kind=integration_sync' }
+  { id: 'integration_sync', label: 'Integrationssynk', href: '/aktivitet?kind=integration_sync' },
+  { id: 'log', label: 'Ändringslogg', href: '/aktivitet?kind=log' }
 ];
 
 interface IntegrationSyncRunRow {
@@ -90,22 +92,31 @@ export default async function AktivitetPage({
 
   let activitiesResult: { items: ActivityRecord[] } = { items: [] };
   let activitiesLoadFailed = false;
-  try {
-    activitiesResult = await listForTenant<ActivityRecord>('activities', {
-      filter: filterParts.length > 0 ? filterParts.join(' && ') : undefined,
-      sort: '-created',
-      expand: 'startup,tool,tool_run,workshop,workshop_assignment,workshop_run,owner',
-      tenantField: 'startup.tenant',
-      perPage: 50
-    });
-  } catch (error) {
-    activitiesLoadFailed = true;
-    console.error('[aktivitet] failed to load activities', {
-      tenant: user.tenant,
-      userId: user.id,
-      kind,
-      error
-    });
+  // 'log' visar bara ändringsloggen — bolagshändelserna hoppar vi över där.
+  if (kind !== 'log') {
+    try {
+      activitiesResult = await listForTenant<ActivityRecord>('activities', {
+        filter: filterParts.length > 0 ? filterParts.join(' && ') : undefined,
+        sort: '-created',
+        expand: 'startup,tool,tool_run,workshop,workshop_assignment,workshop_run,owner',
+        tenantField: 'startup.tenant',
+        perPage: 50
+      });
+    } catch (error) {
+      activitiesLoadFailed = true;
+      console.error('[aktivitet] failed to load activities', {
+        tenant: user.tenant,
+        userId: user.id,
+        kind,
+        error
+      });
+    }
+  }
+
+  // Ändringsloggen (agent_actions via skrivlagret, § 32) — fail-soft.
+  let logEntries: AgentLogEntry[] = [];
+  if (!kind || kind === 'log') {
+    logEntries = await loadAgentLogEntries(pb, user.tenant, 50);
   }
 
   let systemRunsResult: { items: ToolRun[] } | null = null;
@@ -153,11 +164,17 @@ export default async function AktivitetPage({
   type FeedItem =
     | { type: 'activity'; item: ActivityRecord; created: string }
     | { type: 'system_run'; item: ToolRun; created: string }
-    | { type: 'sync_run'; item: IntegrationSyncRunRow; created: string };
+    | { type: 'sync_run'; item: IntegrationSyncRunRow; created: string }
+    | { type: 'log'; item: AgentLogEntry; created: string };
 
   const feed: FeedItem[] = [
     ...activitiesResult.items.map((item) => ({
       type: 'activity' as const,
+      item,
+      created: item.created
+    })),
+    ...logEntries.map((item) => ({
+      type: 'log' as const,
       item,
       created: item.created
     })),
@@ -315,6 +332,53 @@ export default async function AktivitetPage({
                             {activityStatusLabels[a.status]}
                           </span>
                         )}
+                      </div>
+                    </div>
+                  </li>
+                );
+              }
+
+              if (entry.type === 'log') {
+                const log = entry.item;
+                return (
+                  <li key={`log-${log.id}`} className="rounded-xl border border-default bg-surface p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[13.5px] font-medium text-foreground">
+                          {log.href ? (
+                            <Link href={log.href} className="hover:underline">
+                              {log.title}
+                            </Link>
+                          ) : (
+                            log.title
+                          )}
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px] text-foreground-subtle">
+                          {log.detail && (
+                            <>
+                              <span>{log.detail}</span>
+                              <span>·</span>
+                            </>
+                          )}
+                          <span className="font-mono">
+                            {new Date(log.created).toLocaleString('sv-SE')}
+                          </span>
+                          <span>·</span>
+                          <span>{log.actorName ?? 'Okänd'}</span>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {log.viaAgent && (
+                          <span
+                            className="inline-flex items-center rounded-md bg-canvas-muted px-2 py-0.5 text-[11px] font-medium text-foreground-muted"
+                            title="Utfört via AI-chatten"
+                          >
+                            AI-chatten
+                          </span>
+                        )}
+                        <span className="inline-flex items-center rounded-md bg-canvas-muted px-2 py-0.5 text-[11px] font-medium text-foreground-muted">
+                          Ändringslogg
+                        </span>
                       </div>
                     </div>
                   </li>

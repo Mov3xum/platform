@@ -196,6 +196,8 @@ export interface CompassModule {
   welcome_body?: string;
   /** Omslagsbild (filnamn på compass_modules.hero_image, migration 1700000122). */
   hero_image?: string;
+  /** Omslagsvideo (filnamn på compass_modules.hero_video, migration 1700000141). */
+  hero_video?: string;
   chat_persona?: string;
   /** Max antal AI-utbyten i chat-flödet (0 = obegränsat). */
   max_exchanges?: number;

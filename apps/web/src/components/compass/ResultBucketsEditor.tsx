@@ -12,7 +12,14 @@ import type { ResultBucket } from '@/lib/compass/types';
  * som har dem, så ingen data tappas tyst — men UI:t fokuserar på det enkla
  * topp-hink-läget (poäng per profil sätts på svarsalternativen).
  */
-export function ResultBucketsEditor({ initial }: { initial: ResultBucket[] }) {
+export function ResultBucketsEditor({
+  initial,
+  formId
+}: {
+  initial: ResultBucket[];
+  /** Modulformulärets id — låter editorn ligga utanför <form>-elementet. */
+  formId?: string;
+}) {
   const [buckets, setBuckets] = useState<ResultBucket[]>(() =>
     initial.map((b) => ({ ...b, tips: Array.isArray(b.tips) ? b.tips : [] }))
   );
@@ -48,15 +55,14 @@ export function ResultBucketsEditor({ initial }: { initial: ResultBucket[] }) {
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       {/* Dolt fält som följer med modulformuläret. */}
-      <input type="hidden" name="result_buckets" value={json} />
+      <input type="hidden" name="result_buckets" value={json} form={formId} />
 
       <div className="mx-label" style={{ marginBottom: 0 }}>
-        Resultatprofiler (för quiz)
+        Resultatprofiler
       </div>
       <div className="mx-muted mx-t-12" style={{ marginTop: -4 }}>
-        Skapa en profil per möjligt resultat (t.ex. <code>green</code> / <code>yellow</code> /{' '}
-        <code>red</code>). Nyckeln används som poängkolumn på frågornas svarsalternativ. Profilen med
-        flest poäng visas för besökaren.
+        En profil per möjligt resultat (t.ex. grön/gul/röd). Profilen med flest
+        poäng visas för besökaren.
       </div>
 
       {buckets.length === 0 ? (

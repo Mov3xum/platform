@@ -77,8 +77,45 @@ export function middleware(req: NextRequest) {
   // Bakom Coolify-proxyn rapporterar req.nextUrl.protocol ofta http även vid
   // https → lita på x-forwarded-proto. Saknas signalen antar vi http (säkrare
   // default: hellre utelämna upgrade-insecure-requests än att bryta sidan).
-  const forwardedProto = req.headers.get('x-forwarded-proto') || req.headers.get('x-forwarded-protocol');
+  // Vid kedjade proxies kan headern vara kommaseparerad ("https, http") —
+  // första värdet är klientens faktiska protokoll.
+  const forwardedProtoRaw =
+    req.headers.get('x-forwarded-proto') || req.headers.get('x-forwarded-protocol');
+  const forwardedProto = forwardedProtoRaw
+    ? forwardedProtoRaw.split(',')[0]!.trim().toLowerCase()
+    : null;
   const isHttps = (forwardedProto ?? req.nextUrl.protocol.replace(':', '')) === 'https';
+
+  // Force-HTTPS (CLAUDE.md § 10.3 A.8.9) — app-nivå-redirect som defense-in-
+  // depth ovanpå Coolifys proxy-toggle (infra/SSL.md). OPT-IN via env
+  // `MOVEXUM_FORCE_HTTPS=true`: slå BARA på när ett giltigt cert faktiskt
+  // finns på hosten. Default AV — staging/production har körts http-only på
+  // sslip.io-hosts där Let's Encrypt-cert inte kan utfärdas (global kvot, se
+  // infra/SSL.md), och en på-per-default-redirect gjorde då hela plattformen
+  // onåbar (308 → https-lyssnare utan giltigt cert). Redirecta dessutom
+  // ENBART när en edge-proxy uttryckligen rapporterat att klienten kom in
+  // över http (`x-forwarded-proto: http`) — saknas headern är requesten
+  // container-intern (Coolify-healthchecks, PB-hookarnas anrop mot
+  // http://moveum-web:3000) och får ALDRIG redirectas.
+  // `MOVEXUM_ALLOW_INSECURE_COOKIES=true` vinner alltid (samma escape-hatch
+  // som Secure-cookies). Interna endpoints undantas som extra skydd.
+  const forceHttps = process.env.MOVEXUM_FORCE_HTTPS === 'true';
+  const allowInsecure = process.env.MOVEXUM_ALLOW_INSECURE_COOKIES === 'true';
+  const isInternalPath =
+    pathname.startsWith('/api/health') || pathname.startsWith('/api/internal/');
+  if (isProd && forceHttps && !allowInsecure && forwardedProto === 'http' && !isInternalPath) {
+    const url = req.nextUrl.clone();
+    url.protocol = 'https:';
+    // Traefik bevarar Host, men respektera x-forwarded-host om proxyn satt den.
+    const forwardedHost = req.headers.get('x-forwarded-host');
+    if (forwardedHost) url.host = forwardedHost.split(',')[0]!.trim();
+    // Explicit port (t.ex. :3000 vid direktaccess via proxy) hör inte hemma
+    // på den publika https-URL:en.
+    url.port = '';
+    // 308 = permanent + bevarar HTTP-metoden (POST förblir POST).
+    return NextResponse.redirect(url, 308);
+  }
+
   const csp = buildCsp(nonce, isHttps);
 
   const isPublic =

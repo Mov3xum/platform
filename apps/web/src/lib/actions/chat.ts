@@ -20,7 +20,12 @@ import {
   selectRelevantCollections,
   buildScopedSchemaSummary
 } from '@/lib/ai/schema-scope';
-import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from '@/lib/ai/guidance';
+import {
+  SEARCH_STRATEGY_GUIDANCE,
+  DOMAIN_GLOSSARY,
+  AUTHORING_GUIDANCE,
+  CHAT_WRITE_ACTIONS_GUIDANCE
+} from '@/lib/ai/guidance';
 import { buildChatTools, buildMemoryRecallBlock } from '@/lib/ai/tools';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
 import { STYLE_REMINDER } from '@/lib/ai/staff-chat';
@@ -151,6 +156,7 @@ const STAFF_TOOL_GUIDANCE =
   '- `update_activity_field`: uppdatera en befintlig aktivitets `title`, ' +
   '`description` eller `status` (t.ex. markera en uppgift som `done`). ' +
   'Slå upp aktivitetens id med `query_collection` på `activities` först.\n' +
+  CHAT_WRITE_ACTIONS_GUIDANCE +
   '- `memory_read` / `memory_write`: ditt tvärsessions-minne (per tenant). När ' +
   'personalen RÄTTAR dig eller lär dig en bestående regel ("räkna inte lån som ' +
   'investeringar", "Bolag X heter numera Y") — spara det med `memory_write` ' +
@@ -159,8 +165,11 @@ const STAFF_TOOL_GUIDANCE =
   'Inlärt minne injiceras automatiskt i din kontext; använd `memory_read` för ' +
   'fler detaljer.\n\n' +
   'Skrivregler:\n' +
-  '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
-  'efterfrågad ("uppdatera Acmes next_step till X" är otvetydigt; "vad ska Acme göra härnäst?" är inte det).\n' +
+  '- Fråga inte i onödan: en rutinåtgärd som är otvetydigt efterfrågad utförs ' +
+  'DIREKT utan bekräftelsefråga ("uppdatera Acmes next_step till X" är otvetydigt; ' +
+  '"vad ska Acme göra härnäst?" är inte det). Be bara om bekräftelse inför ' +
+  'KRITISKA åtgärder: juridiskt/ekonomiskt bindande, återkommande kostnad, ' +
+  'många poster på en gång, eller något utöver vad användaren bad om.\n' +
   '- Slå alltid upp bolagets id med `query_collection` först om du inte redan har det.\n' +
   '- Varje skrivning loggas i `agent_actions` och kan rullas tillbaka av staff — ' +
   'var ändå försiktig och föredra små, tydliga ändringar.\n' +
@@ -513,6 +522,7 @@ async function runStaffChatWithTools(
     BASE_SYSTEM_PROMPT +
     (agentBlock ? `\n\n---\n${agentBlock}\n---` : '') +
     STAFF_TOOL_GUIDANCE +
+    AUTHORING_GUIDANCE +
     SEARCH_STRATEGY_GUIDANCE +
     DOMAIN_GLOSSARY +
     memoryBlock +

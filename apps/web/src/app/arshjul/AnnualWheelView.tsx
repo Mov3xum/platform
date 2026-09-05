@@ -489,7 +489,7 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
               <h3 className="mb-2 font-heading text-[14px] font-semibold text-foreground">
                 Helårs- / återkommande aktiviteter
               </h3>
-              <ul className="space-y-1.5">
+              <ul className="space-y-0.5">
                 {undated.map((it) => (
                   <ItemPill
                     key={it.id}
@@ -529,11 +529,17 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
                   .filter(({ m }) => (monthFocus ? m === monthFocus : true))
                   .map(({ monthItems, m }) =>
                     monthItems.length > 0 ? (
-                      <div key={m} className="rounded-xl border border-default p-2.5">
-                        <div className="mb-1 text-[12px] font-semibold text-foreground-muted">
-                          {monthLongLabel(m)}
+                      <div key={m} className="rounded-xl border border-default bg-surface p-2">
+                        <div className="mb-1 flex items-baseline justify-between gap-2 px-1.5 pt-0.5">
+                          <span className="font-heading text-[12.5px] font-semibold text-foreground">
+                            {monthLongLabel(m)}
+                          </span>
+                          <span className="mx-tnum shrink-0 text-[11px] text-foreground-subtle">
+                            Q{quarterForMonth(m)} · {monthItems.length}{' '}
+                            {monthItems.length === 1 ? 'aktivitet' : 'aktiviteter'}
+                          </span>
                         </div>
-                        <ul className="space-y-1">
+                        <ul className="space-y-0.5">
                           {monthItems.map((it) => (
                             <ItemPill
                               key={it.id}
@@ -600,6 +606,11 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
                               </span>
                             ) : null}
                             {it.title}
+                            {it.day ? (
+                              <span className="mx-tnum text-foreground-subtle">
+                                · {it.day}/{row.month}
+                              </span>
+                            ) : null}
                             {it.responsible_name ? (
                               <span className="text-foreground-subtle">· {it.responsible_name}</span>
                             ) : null}
@@ -647,6 +658,32 @@ interface HoverInfo {
   y: number;
 }
 
+/**
+ * Öppen bågbana för text längs en aktivitet. På hjulets nedre halva ritas
+ * bågen moturs så att texten läses rättvänd (SVG lägger glyfernas "upp" mot
+ * banans vänstra normal).
+ */
+function arcLabelPath(r: number, start: number, end: number): string {
+  const mid = (start + end) / 2;
+  const flip = mid > 90 && mid < 270;
+  const a = polarPoint(CX, CY, r, flip ? end : start);
+  const b = polarPoint(CX, CY, r, flip ? start : end);
+  const large = end - start > 180 ? 1 : 0;
+  return `M ${a.x.toFixed(2)} ${a.y.toFixed(2)} A ${r} ${r} 0 ${large} ${flip ? 0 : 1} ${b.x.toFixed(2)} ${b.y.toFixed(2)}`;
+}
+
+/** Titel som får plats längs bågen (≈ 6 px/tecken), annars null. */
+function arcLabel(title: string, r: number, start: number, end: number): string | null {
+  const span = end - start;
+  if (span <= 0) return null;
+  const arcLength = (span * Math.PI * r) / 180;
+  const maxChars = Math.floor(arcLength / 6.2);
+  if (maxChars < 4) return null;
+  const t = title.trim();
+  if (t.length <= maxChars) return t;
+  return `${t.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
+}
+
 /** Aktivitetsbandets radier: körfälten packas mellan inner och outer. */
 const BAND_INNER = 174;
 const BAND_OUTER = 252;
@@ -664,7 +701,7 @@ function NextCaption({ next }: { next: NextAnnualWheelItem }) {
       <Icon name={next.ongoing ? 'bolt' : 'clock'} size={13} />
       <span className="font-semibold text-foreground">{next.ongoing ? 'Pågår nu:' : 'Nästa:'}</span>
       <span className="max-w-[200px] truncate">{next.item.title}</span>
-      <span className="text-foreground-subtle">
+      <span className="mx-tnum text-foreground-subtle">
         · {annualWheelShortRangeLabel(next.item)}
         {next.ongoing ? '' : ` · ${countdownLabel(next.days)}`}
       </span>
@@ -872,18 +909,42 @@ function Wheel({
             );
             // Stagger: sveper medurs runt året.
             const delay = Math.round(start * 1.5) + idx * 8;
+            // Titel längs bågen när den är bred nog (kampanjer/hela månader) —
+            // gör hjulet läsbart utan hovring. Kortas med "…" efter båglängden.
+            const rMid = (inner + outer) / 2;
+            const label = arcLabel(it.title, rMid, start + 2, end - 2);
+            const showLabel = label !== null && laneHeight >= 12;
+            const fontSize = Math.min(11, Math.max(8, laneHeight * 0.55));
             return (
-              <path
-                key={it.id}
-                d={d}
-                fill={`url(#mx-aw-grad-${gradientKey(it.category)}${isHovered ? '-hover' : ''})`}
-                filter={isHovered ? 'url(#mx-aw-shadow-hover)' : 'url(#mx-aw-shadow)'}
-                className={`mx-wheel-band transition-opacity ${onPick ? 'cursor-pointer' : ''}`}
-                style={{ opacity: hover && !isHovered ? 0.4 : 1, animationDelay: `${delay}ms` }}
-                onClick={onPick ? () => onPick(it) : undefined}
-                onMouseEnter={(ev) => track(it, ev)}
-                onMouseMove={(ev) => track(it, ev)}
-              />
+              <g key={it.id}>
+                <path
+                  d={d}
+                  fill={`url(#mx-aw-grad-${gradientKey(it.category)}${isHovered ? '-hover' : ''})`}
+                  filter={isHovered ? 'url(#mx-aw-shadow-hover)' : 'url(#mx-aw-shadow)'}
+                  className={`mx-wheel-band transition-opacity ${onPick ? 'cursor-pointer' : ''}`}
+                  style={{ opacity: hover && !isHovered ? 0.4 : 1, animationDelay: `${delay}ms` }}
+                  onClick={onPick ? () => onPick(it) : undefined}
+                  onMouseEnter={(ev) => track(it, ev)}
+                  onMouseMove={(ev) => track(it, ev)}
+                />
+                {showLabel ? (
+                  <>
+                    <path id={`mx-aw-tp-${it.id}`} d={arcLabelPath(rMid, start + 2, end - 2)} fill="none" />
+                    <text
+                      className="mx-wheel-band fill-foreground"
+                      fontSize={fontSize}
+                      fontWeight={600}
+                      dominantBaseline="central"
+                      pointerEvents="none"
+                      style={{ opacity: hover && !isHovered ? 0.4 : 1, animationDelay: `${delay}ms` }}
+                    >
+                      <textPath href={`#mx-aw-tp-${it.id}`} startOffset="50%" textAnchor="middle">
+                        {label}
+                      </textPath>
+                    </text>
+                  </>
+                ) : null}
+              </g>
             );
           })}
 
@@ -990,8 +1051,6 @@ function HoverCard({
         </span>
       </div>
       <p className="font-heading text-[14px] font-semibold leading-snug text-foreground">{item.title}</p>
-      {/* Datumet är det man vill se när man hovrar — egen rad, inte ett chip
-          bland taggarna. Visas alltid (odaterade poster säger "Hela året"). */}
       <p className="mt-1.5 flex items-center gap-1.5 text-[12.5px] font-medium text-foreground">
         <Icon name="calendar" size={13} />
         {annualWheelRangeLabel(item)}
@@ -1065,6 +1124,54 @@ function Legend({
   );
 }
 
+/**
+ * Liten datumbricka (mini-kalenderblad) per aktivitet: dag + månad när ett
+ * specifikt datum är satt, bara månad för månadsaktiviteter, och en
+ * kalenderikon för helårs-/återkommande poster.
+ */
+function DateBadge({ item }: { item: AnnualWheelItem }) {
+  const month = item.month ?? null;
+  const day = item.day ?? null;
+  if (isAnnualWheelPeriod(item)) {
+    // Kampanj: "JAN → FEB" i stället för en enskild dag.
+    return (
+      <span
+        className="flex h-9 w-9 shrink-0 flex-col items-center justify-center rounded-lg border border-default bg-canvas-subtle leading-none"
+        aria-hidden
+      >
+        <span className="text-[8.5px] font-semibold uppercase tracking-wide text-foreground">
+          {monthShortLabel(month)}
+        </span>
+        <span className="my-0.5 text-[8px] text-foreground-subtle">→</span>
+        <span className="text-[8.5px] font-semibold uppercase tracking-wide text-foreground">
+          {monthShortLabel(item.end_month ?? null)}
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span
+      className="flex h-9 w-9 shrink-0 flex-col items-center justify-center rounded-lg border border-default bg-canvas-subtle leading-none"
+      aria-hidden
+    >
+      {month === null ? (
+        <Icon name="calendar" size={14} className="text-foreground-subtle" />
+      ) : day ? (
+        <>
+          <span className="mx-tnum text-[13px] font-semibold text-foreground">{day}</span>
+          <span className="mt-0.5 text-[8px] font-semibold uppercase tracking-wide text-foreground-subtle">
+            {monthShortLabel(month)}
+          </span>
+        </>
+      ) : (
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-foreground-muted">
+          {monthShortLabel(month)}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function ItemPill({
   item,
   categories,
@@ -1076,39 +1183,39 @@ function ItemPill({
   onEdit?: (item: AnnualWheelItem) => void;
   onDelete?: (item: AnnualWheelItem) => void;
 }) {
+  const tagText = (item.tags ?? []).map((t) => annualWheelTagLabel(t)).join(' · ');
   return (
-    <li className="flex items-center gap-2 text-[12.5px]">
-      <span
-        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-        style={{ background: annualWheelCategoryColorVar(item.category, categories) }}
-        aria-hidden
-      />
-      {/* Datum först och alltid synligt — det är listans viktigaste kolumn. */}
-      <span
-        className="mx-tnum shrink-0 rounded-md bg-canvas-subtle px-1.5 py-0.5 text-[11px] font-medium text-foreground-muted"
-        title={annualWheelRangeLabel(item)}
-      >
-        {annualWheelShortRangeLabel(item)}
-      </span>
-      <span className="min-w-0 flex-1 truncate text-foreground">{item.title}</span>
-      {item.responsible_name ? (
-        <span
-          className="shrink-0 rounded-full bg-canvas-subtle px-1.5 py-0.5 text-[11px] text-foreground-muted"
-          title={`Ansvarig: ${item.responsible_name}`}
-        >
-          {item.responsible_name}
-        </span>
-      ) : null}
-      {(item.tags ?? []).length > 0 ? (
-        <span className="shrink-0 text-[11px] text-foreground-subtle">
-          {(item.tags ?? []).map((t) => annualWheelTagLabel(t)).join(', ')}
-        </span>
-      ) : null}
+    <li className="group flex items-center gap-2.5 rounded-xl px-1.5 py-1.5 transition-colors hover:bg-canvas-subtle">
+      <DateBadge item={item} />
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-1.5 text-[13px] leading-snug">
+          <span
+            className="inline-block h-2 w-2 shrink-0 rounded-full"
+            style={{ background: annualWheelCategoryColorVar(item.category, categories) }}
+            aria-hidden
+          />
+          <span className="min-w-0 truncate font-medium text-foreground">{item.title}</span>
+        </p>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-3.5 text-[11px] text-foreground-subtle">
+          <span
+            className="mx-tnum shrink-0 rounded-md bg-canvas-subtle px-1.5 py-0.5 font-medium text-foreground-muted"
+            title={annualWheelRangeLabel(item)}
+          >
+            {annualWheelShortRangeLabel(item)}
+          </span>
+          {item.responsible_name ? (
+            <span className="truncate" title={`Ansvarig: ${item.responsible_name}`}>
+              {item.responsible_name}
+            </span>
+          ) : null}
+          {tagText ? <span className="truncate">{tagText}</span> : null}
+        </div>
+      </div>
       {onEdit ? (
         <button
           type="button"
           onClick={() => onEdit(item)}
-          className="shrink-0 text-foreground-subtle hover:text-brand"
+          className="shrink-0 rounded-md p-1 text-foreground-subtle transition-colors hover:bg-canvas-muted hover:text-brand"
           aria-label="Redigera"
         >
           <Icon name="pencil" size={13} />
@@ -1118,7 +1225,7 @@ function ItemPill({
         <button
           type="button"
           onClick={() => onDelete(item)}
-          className="shrink-0 text-foreground-subtle hover:text-movexum-orange"
+          className="shrink-0 rounded-md p-1 text-foreground-subtle transition-colors hover:bg-canvas-muted hover:text-movexum-orange"
           aria-label="Ta bort"
         >
           <Icon name="trash" size={13} />
@@ -1181,6 +1288,12 @@ function EditorModal({
   if (!yearOptions.includes(form.year)) yearOptions.push(form.year);
   yearOptions.sort((a, b) => a - b);
 
+  // Nollställ dagen om den inte finns i den nya månaden/året (t.ex. 31 → april).
+  function clampedDay(year: number, month: string, day: string): string {
+    if (month === '' || day === '') return month === '' ? '' : day;
+    return Number(day) > daysInMonth(year, Number(month)) ? '' : day;
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-movexum-svart/40 p-4"
@@ -1189,12 +1302,15 @@ function EditorModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl border border-default bg-surface p-5 shadow-lg shadow-movexum-svart/20"
+        className="max-h-[calc(100vh-3rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-default bg-surface p-5 shadow-lg shadow-movexum-svart/20"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-3 font-heading text-[16px] font-semibold text-foreground">
+        <h3 className="font-heading text-[16px] font-semibold text-foreground">
           {form.id ? 'Redigera aktivitet' : 'Ny aktivitet i årshjulet'}
         </h3>
+        <p className="mb-3 mt-0.5 text-[12px] text-foreground-subtle">
+          Välj månad och, om du vill, en specifik dag i kalendern nedan.
+        </p>
 
         <div className="space-y-3">
           <Field label="Titel">
@@ -1213,7 +1329,10 @@ function EditorModal({
             <Field label="År">
               <select
                 value={String(form.year)}
-                onChange={(e) => setForm({ ...form, year: Number(e.target.value) })}
+                onChange={(e) => {
+                  const year = Number(e.target.value);
+                  setForm({ ...form, year, day: clampedDay(year, form.month, form.day) });
+                }}
                 className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground"
               >
                 {yearOptions.map((y) => (
@@ -1226,9 +1345,10 @@ function EditorModal({
             <Field label="Månad">
               <select
                 value={form.month}
-                onChange={(e) =>
-                  setForm({ ...form, month: e.target.value, day: e.target.value === '' ? '' : form.day })
-                }
+                onChange={(e) => {
+                  const month = e.target.value;
+                  setForm({ ...form, month, day: clampedDay(form.year, month, form.day) });
+                }}
                 className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground"
               >
                 <option value="">Helår / återkommande</option>
@@ -1241,23 +1361,24 @@ function EditorModal({
             </Field>
           </div>
 
-          <Field label="Specifikt datum (valfritt)">
-            <select
-              value={form.day}
-              disabled={form.month === ''}
-              onChange={(e) => setForm({ ...form, day: e.target.value })}
-              className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground disabled:opacity-50"
-            >
-              <option value="">Hela månaden</option>
-              {form.month !== ''
-                ? Array.from({ length: daysInMonth(form.year, Number(form.month)) }, (_, i) => i + 1).map((d) => (
-                    <option key={d} value={String(d)}>
-                      {d} {monthLongLabel(Number(form.month))}
-                    </option>
-                  ))
-                : null}
-            </select>
-          </Field>
+          <div>
+            <span className="mb-1 block text-[11px] font-medium text-foreground-subtle">
+              Datum (valfritt)
+            </span>
+            {form.month === '' ? (
+              <p className="rounded-xl border border-dashed border-default bg-canvas-subtle px-3 py-3 text-[12px] text-foreground-muted">
+                Välj en månad ovan för att kunna sätta ett specifikt datum. Utan månad gäller
+                aktiviteten hela året.
+              </p>
+            ) : (
+              <DayCalendar
+                year={form.year}
+                month={Number(form.month)}
+                selected={form.day === '' ? null : Number(form.day)}
+                onSelect={(d) => setForm({ ...form, day: d === null ? '' : String(d) })}
+              />
+            )}
+          </div>
 
           {/* Period: en kampanj löper över tid och ritas som en båge i hjulet. */}
           <div className="rounded-xl border border-default p-2.5">
@@ -1484,6 +1605,98 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="mb-1 block text-[11px] font-medium text-foreground-subtle">{label}</span>
       {children}
     </label>
+  );
+}
+
+// ─── Kalender (datumval i editorn) ───────────────────────────────────────────
+
+/** Veckodagsrubriker, måndagsstartad vecka (svensk standard). */
+const WEEKDAYS_SV = ['Må', 'Ti', 'On', 'To', 'Fr', 'Lö', 'Sö'] as const;
+
+/**
+ * Mini-kalender för "Specifikt datum": ett klick väljer dagen, ett klick på
+ * den valda dagen (eller "Hela månaden") rensar valet. Dagens datum ringas in
+ * när den visade månaden är innevarande månad.
+ */
+function DayCalendar({
+  year,
+  month,
+  selected,
+  onSelect
+}: {
+  year: number;
+  month: number;
+  selected: number | null;
+  onSelect: (day: number | null) => void;
+}) {
+  const dim = daysInMonth(year, month);
+  // getDay() har söndag = 0 → skifta till måndagsstartat index (0 = måndag).
+  const leading = (new Date(year, month - 1, 1).getDay() + 6) % 7;
+  const now = new Date();
+  const todayDay =
+    now.getFullYear() === year && now.getMonth() + 1 === month ? now.getDate() : null;
+
+  return (
+    <div className="rounded-xl border border-default bg-canvas p-2.5">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-foreground">
+          <Icon name="calendar" size={13} className="text-foreground-subtle" />
+          {monthLongLabel(month)} {year}
+        </span>
+        <button
+          type="button"
+          onClick={() => onSelect(null)}
+          aria-pressed={selected === null}
+          className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+            selected === null
+              ? 'border-brand bg-brand/10 font-medium text-brand'
+              : 'border-default text-foreground-muted hover:border-strong hover:text-foreground'
+          }`}
+        >
+          Hela månaden
+        </button>
+      </div>
+      <div className="grid grid-cols-7 gap-0.5 text-center">
+        {WEEKDAYS_SV.map((d, i) => (
+          <span
+            key={`wd-${i}`}
+            className="pb-1 text-[10px] font-semibold uppercase tracking-wide text-foreground-subtle"
+          >
+            {d}
+          </span>
+        ))}
+        {Array.from({ length: leading }, (_, i) => (
+          <span key={`blank-${i}`} aria-hidden />
+        ))}
+        {Array.from({ length: dim }, (_, i) => i + 1).map((d) => {
+          const isSelected = selected === d;
+          const isToday = todayDay === d;
+          return (
+            <button
+              key={d}
+              type="button"
+              onClick={() => onSelect(isSelected ? null : d)}
+              aria-pressed={isSelected}
+              aria-label={`${d} ${monthLongLabel(month).toLowerCase()} ${year}`}
+              className={`mx-tnum h-8 rounded-lg text-[12.5px] transition-colors ${
+                isSelected
+                  ? 'bg-brand font-semibold text-brand-foreground shadow-sm shadow-movexum-svart/10'
+                  : isToday
+                    ? 'font-semibold text-brand ring-1 ring-inset ring-brand/35 hover:bg-brand/10'
+                    : 'text-foreground hover:bg-canvas-subtle'
+              }`}
+            >
+              {d}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-2 border-t border-default pt-2 text-[11px] text-foreground-subtle">
+        {selected !== null
+          ? `Valt datum: ${annualWheelDateLabel(month, selected, year)}`
+          : 'Ingen specifik dag vald — aktiviteten gäller hela månaden.'}
+      </p>
+    </div>
   );
 }
 

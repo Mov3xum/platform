@@ -10,8 +10,13 @@ import DashboardChat, {
   type UiMessage
 } from '@/components/DashboardChat';
 import { Icon } from '@/components/proto/Icon';
+import MeetingMode, { type MeetingInitial } from '@/components/meeting/MeetingMode';
 import type { ChatAttachment } from '@/lib/actions/chat';
-import type { GeneratedFileRef, ToolRunMessage } from '@platform/shared';
+import type { GeneratedFileRef, MeetingRequestRef, ToolRunMessage } from '@platform/shared';
+import {
+  listResumableMeetingsAction,
+  type ResumableMeeting
+} from '@/lib/actions/meetings';
 import {
   createThreadAction,
   listThreadsAction,
@@ -29,13 +34,15 @@ import {
   startDeepJobAction,
   getDeepJobStatusAction
 } from '@/lib/actions/deep-jobs';
-import type { DeepJobStatus } from '@platform/shared';
+import type { DeepJobStatus, Role } from '@platform/shared';
 
 interface Props {
   greeting: string;
   agents: DashboardAgent[];
   connectors: DashboardConnector[];
   activities: DashboardActivity[];
+  /** Inloggad användares roller — hjälp-guiden är rollspecifik (§ 33.3). */
+  userRoles: Role[];
   initialThreads: ThreadListResult;
 }
 
@@ -53,6 +60,8 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
       generated_files: m.generated_files,
       visuals: m.visuals,
       steps: m.steps,
+      approval_request: m.approval_request,
+      meeting_request: m.meeting_request,
       // Turens tokens (in + ut, per-turn-metadata § 9.9) → inline miljöchip
       // under varje assistant-svar.
       tokens:
@@ -62,7 +71,7 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
     }));
 }
 
-export default function ChattWorkspace({ greeting, agents, connectors, activities, initialThreads }: Props) {
+export default function ChattWorkspace({ greeting, agents, connectors, activities, userRoles, initialThreads }: Props) {
   const [threads, setThreads] = useState<ThreadListResult>(initialThreads);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
@@ -75,6 +84,9 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   const [liveText, setLiveText] = useState('');
   const [deepJob, setDeepJob] = useState<{ id: string; threadId: string; status: DeepJobStatus; progress: number } | null>(null);
   const [rightOpen, setRightOpen] = useState(true);
+  // Mötesläget (§ 34): null = stängt; objektet bär ev. förifyllnad/återupptag.
+  const [meetingPanel, setMeetingPanel] = useState<MeetingInitial | null>(null);
+  const [resumableMeetings, setResumableMeetings] = useState<ResumableMeeting[]>([]);
   // Köade meddelanden (skrivna medan en turn körs). `queueRef` är sanningen
   // (synkron åtkomst i körnings-callbacks); `queued` speglar den för rendering.
   const [queued, setQueued] = useState<QueuedItem[]>([]);
@@ -107,6 +119,27 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     const next = await listThreadsAction();
     setThreads(next);
   }, []);
+
+  // Oavslutade möten (kraschad flik / ej sparad granskning) → återuppta-banner.
+  const refreshResumableMeetings = useCallback(async () => {
+    const res = await listResumableMeetingsAction();
+    setResumableMeetings(res.meetings);
+  }, []);
+
+  useEffect(() => {
+    void refreshResumableMeetings();
+  }, [refreshResumableMeetings]);
+
+  function closeMeetingPanel() {
+    setMeetingPanel(null);
+    void refreshResumableMeetings();
+  }
+
+  // "Föreslå uppgifter i chatten" efter ett sparat möte: skickas som en vanlig
+  // user-tur (mänskligt klick — samma mönster som Godkänn-knappen, § 33).
+  function sendMeetingPromptToChat(prompt: string) {
+    submit(prompt, { includeWebContext: false, attachments: [], deepJob: false });
+  }
 
   // Laddar in de persisterade trådmeddelandena (inkl. per-turn-tokens) i UI:t.
   const applyThreadMessages = useCallback((raw: ToolRunMessage[]) => {
@@ -378,6 +411,17 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     runTurn(item);
   }
 
+  // Svar på agentens godkännandefråga (§ 33): skickas som en vanlig user-tur
+  // ("Godkänn"/"Avbryt") så beslutet syns i transkriptet och persisteras i
+  // tråden — agenten utför (eller avstår) i nästa svar.
+  function onApproval(approved: boolean) {
+    submit(approved ? 'Godkänn' : 'Avbryt', {
+      includeWebContext: false,
+      attachments: [],
+      deepJob: false
+    });
+  }
+
   async function onDownload(file: GeneratedFileRef) {
     const res = await getFileDownloadUrlAction(file.user_file_id);
     if (res.url) {
@@ -487,12 +531,36 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
 
   return (
     <div className="flex min-h-0 flex-1">
+      {meetingPanel && (
+        <MeetingMode
+          initial={meetingPanel}
+          onClose={closeMeetingPanel}
+          onSendToChat={sendMeetingPromptToChat}
+        />
+      )}
       <div className="relative flex min-h-0 flex-1 flex-col">
+        {resumableMeetings.length > 0 && !meetingPanel && (
+          <div className="flex items-center justify-between gap-3 border-b border-default bg-movexum-pastell-gul px-4 py-2">
+            <p className="min-w-0 truncate text-[12.5px] text-movexum-morkgul">
+              <span className="font-semibold">Oavslutat möte:</span>{' '}
+              {resumableMeetings[0].title} ({resumableMeetings[0].segmentCount} transkriberade
+              segment). Osparade möten raderas efter 7 dagar.
+            </p>
+            <button
+              type="button"
+              onClick={() => setMeetingPanel({ resumeMeetingId: resumableMeetings[0].id })}
+              className="shrink-0 rounded-lg bg-movexum-morkgul px-3 py-1 text-[12px] font-medium text-movexum-vit transition hover:opacity-90"
+            >
+              Återuppta granskningen
+            </button>
+          </div>
+        )}
         <DashboardChat
           greeting={greeting}
           agents={agents}
           connectors={connectors}
           activities={activities}
+          userRoles={userRoles}
           messages={messages}
           isPending={streaming || deepRunning}
           error={error}
@@ -508,6 +576,15 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           onSubmit={submit}
           onDownload={onDownload}
           onCancelQueued={cancelQueued}
+          onApproval={onApproval}
+          onOpenMeeting={() => setMeetingPanel({})}
+          onStartMeeting={(req: MeetingRequestRef) =>
+            setMeetingPanel({
+              startupId: req.startup_id,
+              startupName: req.startup_name,
+              title: req.title
+            })
+          }
         />
         {!rightOpen && (
           <button

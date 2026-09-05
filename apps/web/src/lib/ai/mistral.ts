@@ -502,7 +502,13 @@ export function estimateCostUsd(
     // Embeddings: ~€0.1/1M input-tokens, ingen output (vektorn räknas inte som
     // completion-tokens). Utan denna rad skulle estimateCostUsd defaulta till
     // Large-tier och kraftigt överskatta RAG-kostnaden.
-    'mistral-embed': [0.1, 0.0]
+    'mistral-embed': [0.1, 0.0],
+    // Voxtral (röstinmatning, § 31). Ljudtokens debiteras som input; en
+    // transkribering ger bara den transkriberade texten som output. Utan
+    // dessa rader skulle estimateCostUsd defaulta till Large-tier och
+    // kraftigt överskatta rösttranskriberingen.
+    'voxtral-mini-latest': [0.04, 0.04],
+    'voxtral-small-latest': [0.1, 0.3]
   };
   const [inPrice, outPrice] = pricing[model] ?? [2.0, 6.0];
   return (tokensIn / 1_000_000) * inPrice + (tokensOut / 1_000_000) * outPrice;
