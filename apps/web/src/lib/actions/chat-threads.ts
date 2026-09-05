@@ -3,7 +3,12 @@
 import { revalidatePath } from 'next/cache';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { loadOwnedThread, executeThreadTurn } from '@/lib/ai/thread-turn';
+import {
+  loadOwnedThread,
+  createOwnedThread,
+  executeThreadTurn,
+  friendlyThreadError
+} from '@/lib/ai/thread-turn';
 import type { ChatAttachment } from '@/lib/ai/chat-input';
 import type { ChatThread, ToolRunMessage } from '@platform/shared';
 
@@ -36,32 +41,6 @@ export interface SendThreadResult {
   messages?: ToolRunMessage[];
 }
 
-/**
- * Översätter PocketBase-fel till begripliga meddelanden. Speciellt: en 404 med
- * "no rows in result set" (eller "missing or invalid collection context") betyder
- * att själva kollektionen saknas på den körande PB-instansen — migrationerna är
- * inte deployade (migrations bakas in i PB-imagen och appliceras vid start, se
- * backend/pocketbase-schema/Dockerfile). Samma signaturhantering som
- * lib/actions/workshops.ts.
- */
-function friendlyThreadError(err: unknown, fallback: string): string {
-  const e = err as { status?: number; message?: string; response?: unknown };
-  const msg = (e?.message || '').toLowerCase();
-  const details = JSON.stringify(e?.response ?? {}).toLowerCase();
-  const missingCollection =
-    msg.includes('missing or invalid collection context') ||
-    details.includes('missing or invalid collection context') ||
-    (e?.status === 404 && (details.includes('no rows in result set') || msg.includes('no rows in result set')));
-  if (missingCollection) {
-    console.error('[chat-threads] saknad kollektion / serverkonfiguration', {
-      status: e?.status,
-      message: e?.message
-    });
-    return 'Chatten kan inte sparas just nu på grund av en serverkonfiguration — chatt-tabellerna saknas på servern. Be en administratör att deploya om PocketBase så att de senaste migrationerna (chat_threads, deep_jobs, user_files) appliceras.';
-  }
-  return e?.message || fallback;
-}
-
 function toListItem(t: ChatThread): ThreadListItem {
   return {
     id: t.id,
@@ -90,18 +69,9 @@ export async function createThreadAction(agentId?: string): Promise<ThreadAction
   const user = await requireStaff();
   const pb = await getServerPb();
   try {
-    const data: Record<string, unknown> = {
-      tenant: user.tenant,
-      owner: user.id,
-      status: 'active',
-      pinned: false,
-      messages: [],
-      last_message_at: new Date().toISOString()
-    };
-    if (agentId) data.agent = agentId;
-    const rec = await pb.collection('chat_threads').create(data);
+    const rec = await createOwnedThread(pb, user, agentId);
     revalidatePath('/chatt');
-    return { threadId: rec.id as string };
+    return { threadId: rec.id };
   } catch (err) {
     return { error: friendlyThreadError(err, 'Kunde inte skapa tråd.') };
   }
