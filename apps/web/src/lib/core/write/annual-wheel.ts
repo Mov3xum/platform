@@ -1,6 +1,5 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
-import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { canCreateRecord, canWriteField } from './writable-fields';
 import { logAgentAction } from './audit';
 import {
@@ -16,11 +15,122 @@ import {
 import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
 
+/**
+ * PB-target för BÅDE läsning och skrivning är kollektionens NAMN, inte dess
+ * custom-id. En instans som provisionerats via `setup-via-api.mjs` (i stället
+ * för migrationerna) kan ha fått ett annat, autogenererat collection-id — då
+ * 404:ade skrivningar med "Missing or invalid collection context" medan
+ * sidans läsningar (som alltid gått på namnet) fungerade. Namnet är stabilt i
+ * båda vägarna.
+ */
 const COLLECTION = 'annual_wheel_items';
-const PB_ID = PB_COLLECTIONS.annualWheelItems;
 
 /** Roller som kan äga en årshjuls-aktivitet (samma krets som ser hjulet, § 21). */
 const RESPONSIBLE_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'];
+
+/** Fält som kräver migration 1700000138/1700000139 för att kunna lagras. */
+const SCHEMA_FIELDS = ['day', 'tags', 'responsible'] as const;
+
+interface PbFieldError {
+  message?: string;
+}
+
+function statusOf(err: unknown): number | null {
+  const s = (err as { status?: unknown })?.status;
+  return typeof s === 'number' ? s : null;
+}
+
+/** Fältnycklar som PocketBase klagade på (t.ex. { track: 'Cannot be blank.' }). */
+function pbFieldErrors(err: unknown): Record<string, string> {
+  const data = (err as { response?: { data?: unknown }; data?: { data?: unknown } })?.response
+    ?.data as Record<string, PbFieldError> | undefined;
+  const nested = (err as { data?: { data?: unknown } })?.data?.data as
+    | Record<string, PbFieldError>
+    | undefined;
+  const source = nested ?? data;
+  if (!source || typeof source !== 'object') return {};
+  const out: Record<string, string> = {};
+  for (const [field, detail] of Object.entries(source)) {
+    const message = detail && typeof detail === 'object' ? detail.message : undefined;
+    if (typeof message === 'string') out[field] = message;
+  }
+  return out;
+}
+
+/**
+ * PocketBase-fel som en LÄSBAR mening. SDK:ns `err.message` är alltid den
+ * generiska "Failed to create record." — de användbara detaljerna ligger i
+ * `response.data` per fält. Utan detta blev varje misslyckad skrivning en
+ * odiagnostiserbar "Kunde inte skapa årshjuls-post".
+ */
+function describePbError(err: unknown, fallback: string): string {
+  const fields = pbFieldErrors(err);
+  const parts = Object.entries(fields).map(([field, message]) => `${field}: ${message}`);
+  const base = err instanceof Error && err.message ? err.message : fallback;
+  return parts.length > 0 ? `${base} (${parts.join('; ')})` : base;
+}
+
+/**
+ * Kör en skrivning som den inloggade och faller tillbaka på en ev. medskickad
+ * klient (superuser) vid 400/403 — PB v0.23.4:s rule-eval kan tyst neka en
+ * behörig staff-användare (§ 21.3). Fallbacken skickas BARA av UI-actions som
+ * redan verifierat rollen; agent-vägen får ingen (least privilege).
+ */
+async function runWrite<T>(
+  pb: PocketBase,
+  run: (client: PocketBase) => Promise<T>,
+  options?: AnnualWheelWriteOptions
+): Promise<T> {
+  try {
+    return await run(pb);
+  } catch (err) {
+    const status = statusOf(err);
+    if ((status === 400 || status === 403) && options?.fallbackPb) {
+      const su = await options.fallbackPb();
+      if (su) return await run(su);
+    }
+    throw err;
+  }
+}
+
+export interface AnnualWheelWriteOptions {
+  /**
+   * Superuser-klient att falla tillbaka på vid rule-eval-nekande. Skickas bara
+   * från server-actions (människa), aldrig från agentens verktyg.
+   */
+  fallbackPb?: () => Promise<PocketBase | null>;
+}
+
+/**
+ * Vilka av de nyare fälten som SAKNAS i det faktiskt deployade schemat.
+ * PocketBase släpper okända fält tyst vid create/update — utan den här
+ * kontrollen sparas t.ex. ett datum "framgångsrikt" men försvinner (symtomet
+ * "datumet syns inte i hjulet"). Samma mönster som /filer set-topic (§ 24.4).
+ */
+function missingSchemaFields(row: Record<string, unknown> | null): string[] {
+  if (!row) return [];
+  return SCHEMA_FIELDS.filter((f) => !(f in row));
+}
+
+/** Kollektionen finns inte alls i den deployade instansen. */
+function collectionMissingMessage(): string {
+  return (
+    'Kollektionen `annual_wheel_items` finns inte i PocketBase-instansen — ' +
+    'kör migrationerna (auto-migrate i PB-imagen) eller ' +
+    '`node backend/pocketbase-schema/scripts/setup-via-api.mjs`. ' +
+    'Diagnos: node backend/pocketbase-schema/scripts/diagnose-migrations.mjs'
+  );
+}
+
+/** Läsbar instruktion när schemat släpar efter koden. */
+export function schemaDriftMessage(fields: string[]): string {
+  return (
+    `Databasschemat saknar fälten ${fields.join(', ')} — kör migrationerna ` +
+    '(1700000138 + 1700000139) eller `node backend/pocketbase-schema/scripts/' +
+    'setup-via-api.mjs` mot instansen. Datum, ' +
+    'taggar och ansvarig kan inte sparas förrän det är gjort.'
+  );
+}
 
 /**
  * Verifierar att en ansvarig faktiskt är en användare i actorns tenant med en
@@ -69,6 +179,8 @@ export interface CreatedAnnualWheelItemResult {
   itemId: string;
   year: number;
   title: string;
+  /** Fält som inte kunde lagras för att schemat släpar efter (PII-fritt). */
+  schemaMissing?: string[];
 }
 
 /**
@@ -79,7 +191,8 @@ export interface CreatedAnnualWheelItemResult {
 export async function createAnnualWheelItem(
   pb: PocketBase,
   actor: Actor,
-  params: CreateAnnualWheelItemParams
+  params: CreateAnnualWheelItemParams,
+  options?: AnnualWheelWriteOptions
 ): Promise<WriteResult<CreatedAnnualWheelItemResult>> {
   const createPolicy = canCreateRecord(actor, COLLECTION);
   if (!createPolicy.ok) {
@@ -133,12 +246,36 @@ export async function createAnnualWheelItem(
   };
   if (notes.value) payload.notes = notes.value;
 
-  let created: { id: string };
+  let created: { id: string } & Record<string, unknown>;
   try {
-    created = (await pb.collection(PB_ID).create(payload)) as { id: string };
+    created = (await runWrite(pb, (c) => c.collection(COLLECTION).create(payload), options)) as {
+      id: string;
+    } & Record<string, unknown>;
   } catch (err) {
-    return fail('DB_ERROR', err instanceof Error ? err.message : 'Kunde inte skapa årshjuls-post.');
+    // Instans där migration 1700000139 inte körts har kvar `track` som
+    // OBLIGATORISKT fält. Appen skickar det inte längre → PB svarar 400
+    // "track: Cannot be blank." Skriv då en gång till med spåret härlett ur
+    // första taggen (annars 'ovrigt') så att aktiviteten faktiskt kan skapas.
+    if (statusOf(err) === 404) return fail('NOT_FOUND', collectionMissingMessage());
+    const legacyTrackRequired = 'track' in pbFieldErrors(err);
+    if (!legacyTrackRequired) {
+      return fail('DB_ERROR', describePbError(err, 'Kunde inte skapa årshjuls-post.'));
+    }
+    try {
+      created = (await runWrite(
+        pb,
+        (c) => c.collection(COLLECTION).create({ ...payload, track: tags.value[0] ?? 'ovrigt' }),
+        options
+      )) as { id: string } & Record<string, unknown>;
+    } catch (retryErr) {
+      return fail('DB_ERROR', describePbError(retryErr, 'Kunde inte skapa årshjuls-post.'));
+    }
   }
+
+  // Läs tillbaka posten: PB släpper okända fält TYST, så en instans med gammalt
+  // schema sparar aktiviteten men tappar datum/taggar/ansvarig. Rapportera det
+  // i stället för att låtsas att allt gick bra.
+  const schemaMissing = missingSchemaFields(created);
 
   await logAgentAction(pb, {
     actor,
@@ -156,7 +293,12 @@ export async function createAnnualWheelItem(
     }
   });
 
-  return ok({ itemId: created.id, year: year.value, title: title.value });
+  return ok({
+    itemId: created.id,
+    year: year.value,
+    title: title.value,
+    ...(schemaMissing.length > 0 ? { schemaMissing } : {})
+  });
 }
 
 export type AnnualWheelWritableField =
@@ -198,7 +340,8 @@ function sameValue(before: unknown, after: unknown): boolean {
 export async function updateAnnualWheelItemField(
   pb: PocketBase,
   actor: Actor,
-  params: UpdateAnnualWheelItemFieldParams
+  params: UpdateAnnualWheelItemFieldParams,
+  options?: AnnualWheelWriteOptions
 ): Promise<WriteResult<{ itemId: string; field: string; before: unknown; after: unknown }>> {
   const policy = canWriteField(actor, COLLECTION, params.field);
   if (!policy.ok) {
@@ -268,14 +411,22 @@ export async function updateAnnualWheelItemField(
 
   let current: AnnualWheelRow;
   try {
-    current = (await pb
-      .collection(PB_ID)
-      .getOne(params.itemId, { fields: `id,tenant,${params.field}` })) as AnnualWheelRow;
-  } catch {
+    // Hela posten (inte bara `fields`) → vi ser om kolumnen finns i schemat.
+    current = (await pb.collection(COLLECTION).getOne(params.itemId)) as AnnualWheelRow;
+  } catch (err) {
+    const message = String((err as { message?: unknown })?.message ?? '');
+    if (message.toLowerCase().includes('collection')) {
+      return fail('NOT_FOUND', collectionMissingMessage());
+    }
     return fail('NOT_FOUND', 'Årshjuls-posten hittades inte.');
   }
   if (current.tenant !== actor.tenant) {
     return fail('TENANT_MISMATCH', 'Åtkomst nekad — posten tillhör en annan tenant.');
+  }
+  // Saknas kolumnen i det deployade schemat skulle PB svara 200 men tyst
+  // kasta värdet (t.ex. ett datum som "sparas" men aldrig syns).
+  if (!(params.field in current)) {
+    return fail('DB_ERROR', schemaDriftMessage([params.field]));
   }
 
   const before = current[params.field] ?? null;
@@ -287,9 +438,13 @@ export async function updateAnnualWheelItemField(
   const payloadValue =
     params.field === 'responsible' && normalized === null ? '' : normalized;
   try {
-    await pb.collection(PB_ID).update(params.itemId, { [params.field]: payloadValue });
+    await runWrite(
+      pb,
+      (c) => c.collection(COLLECTION).update(params.itemId, { [params.field]: payloadValue }),
+      options
+    );
   } catch (err) {
-    return fail('DB_ERROR', err instanceof Error ? err.message : 'DB-uppdatering misslyckades.');
+    return fail('DB_ERROR', describePbError(err, 'DB-uppdatering misslyckades.'));
   }
 
   await logAgentAction(pb, {

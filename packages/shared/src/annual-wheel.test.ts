@@ -5,6 +5,7 @@ import {
   ANNUAL_WHEEL_CATEGORY_IDS,
   ANNUAL_WHEEL_TAG_IDS,
   annualWheelDateLabel,
+  annualWheelShortDateLabel,
   annulusSectorPath,
   buildAnnualWheelTable,
   clampYear,
@@ -305,6 +306,16 @@ test('annualWheelDateLabel renders day/month/year variants', () => {
   assert.equal(annualWheelDateLabel(null, null, 2026), 'Hela året 2026');
   // Dag utan giltig månad → behandlas som hela året.
   assert.equal(annualWheelDateLabel(null, 12, 2026), 'Hela året 2026');
+});
+
+test('annualWheelShortDateLabel renders compact list/chip labels', () => {
+  assert.equal(annualWheelShortDateLabel(8, 12), '12 aug');
+  assert.equal(annualWheelShortDateLabel(8, null), 'aug');
+  assert.equal(annualWheelShortDateLabel(null, null), 'Hela året');
+  // Dag utan giltig månad → hela året (samma tolkning som den långa etiketten).
+  assert.equal(annualWheelShortDateLabel(null, 12), 'Hela året');
+  // Tolerant mot strängar från formulär/DB.
+  assert.equal(annualWheelShortDateLabel('3' as unknown as number, '9' as unknown as number), '9 mar');
 });
 
 test('nextUpcomingItem honours specific day within the month', () => {
