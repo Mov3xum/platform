@@ -10,7 +10,16 @@ import {
   annualWheelCategoryLabel,
   annualWheelColorVar,
   annualWheelDateLabel,
+  annualWheelRangeLabel,
   annualWheelShortDateLabel,
+  annualWheelShortRangeLabel,
+  annualWheelTagsInUse,
+  annualWheelTagsInGroup,
+  isAnnualWheelPeriod,
+  packAnnualWheelArcs,
+  expandAnnualWheelSeries,
+  ANNUAL_WHEEL_REPEATS,
+  ANNUAL_WHEEL_TAG_GROUP_LABELS,
   annualWheelTagLabel,
   annulusSectorPath,
   buildAnnualWheelTable,
@@ -32,6 +41,7 @@ import {
   type AnnualWheelCategoryDef,
   type AnnualWheelColorToken,
   type AnnualWheelItem,
+  type AnnualWheelRepeat,
   type AnnualWheelTag,
   type NextAnnualWheelItem
 } from '@platform/shared';
@@ -50,6 +60,8 @@ type AnnualWheelWritableFieldClient =
   | 'title'
   | 'month'
   | 'day'
+  | 'end_month'
+  | 'end_day'
   | 'tags'
   | 'category'
   | 'responsible'
@@ -78,10 +90,33 @@ interface FormState {
   title: string;
   month: string; // '' = helår
   day: string; // '' = hela månaden
+  endMonth: string; // '' = punktaktivitet (ingen period)
+  endDay: string; // '' = slutmånadens sista dag
   tags: AnnualWheelTag[]; // valfria, flera tillåtna
   category: AnnualWheelCategory;
   responsible: string; // '' = ingen ansvarig
   notes: string;
+  repeat: AnnualWheelRepeat; // 'none' = engångsaktivitet
+  repeatUntilMonth: string; // '' = december
+}
+
+/** Hur många aktiviteter en serie skulle skapa (för förhandsbeskedet i UI:t). */
+function seriesPreviewCount(form: FormState): number {
+  if (form.month === '') return 1;
+  return Math.max(
+    1,
+    expandAnnualWheelSeries(
+      {
+        year: form.year,
+        month: Number(form.month),
+        day: form.day === '' ? null : Number(form.day),
+        end_month: form.endMonth === '' ? null : Number(form.endMonth),
+        end_day: form.endDay === '' ? null : Number(form.endDay)
+      },
+      form.repeat,
+      form.repeatUntilMonth === '' ? 12 : Number(form.repeatUntilMonth)
+    ).length
+  );
 }
 
 /** Ordnings-okänslig jämförelse av två tagguppsättningar. */
@@ -129,6 +164,8 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
   const [error, setError] = useState<string | null>(null);
   // Icke-blockerande varning från servern (t.ex. schemat saknar datumfältet).
   const [warning, setWarning] = useState<string | null>(null);
+  // Positiv kvittens (t.ex. "12 aktiviteter lades till").
+  const [notice, setNotice] = useState<string | null>(null);
 
   const filtered = useMemo(
     () => filterAnnualWheelItems(items, { year, category, tag, responsible }),
@@ -136,7 +173,13 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
   );
   const byMonth = useMemo(() => groupItemsByMonth(filtered), [filtered]);
   const undated = byMonth[0];
-  const tableRows = useMemo(() => buildAnnualWheelTable(filtered), [filtered]);
+  // Bara taggar som faktiskt används blir kolumner — annars blir tabellen en
+  // vägg av tomma kolumner när man jobbar med t.ex. bara marknadsaktiviteter.
+  const tableTags = useMemo(() => annualWheelTagsInUse(filtered), [filtered]);
+  const tableRows = useMemo(
+    () => buildAnnualWheelTable(filtered, tableTags),
+    [filtered, tableTags]
+  );
   // Uppföljning per tagg — räknas på årets poster (före tagg-filtret) så
   // chipsen fungerar som en översikt man kan filtrera med.
   const tagCounts = useMemo(
@@ -161,6 +204,10 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
       title: '',
       month: '',
       day: '',
+      endMonth: '',
+      endDay: '',
+      repeat: 'none',
+      repeatUntilMonth: '',
       // Taggar är valfria — förifyll bara den man redan filtrerar på.
       tags: tag !== 'all' && tag !== 'none' ? [tag] : [],
       category: category === 'all' ? (categories[0]?.id ?? 'ledning') : category,
@@ -177,6 +224,11 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
       title: item.title,
       month: item.month ? String(item.month) : '',
       day: item.day ? String(item.day) : '',
+      endMonth: item.end_month ? String(item.end_month) : '',
+      endDay: item.end_day ? String(item.end_day) : '',
+      // Serier expanderas vid skapandet — en befintlig post redigeras enskilt.
+      repeat: 'none',
+      repeatUntilMonth: '',
       tags: [...(item.tags ?? [])],
       category: item.category,
       responsible: item.responsible ?? '',
@@ -198,8 +250,16 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
     const monthValue = form.month === '' ? null : Number(form.month);
     // En dag utan månad är meningslös → nollställ.
     const dayValue = monthValue === null || form.day === '' ? null : Number(form.day);
+    // Slutdatum bara relevant när aktiviteten har en startmånad (= period).
+    const endMonthValue = monthValue === null || form.endMonth === '' ? null : Number(form.endMonth);
+    const endDayValue = endMonthValue === null || form.endDay === '' ? null : Number(form.endDay);
+    if (endMonthValue !== null && monthValue !== null && endMonthValue < monthValue) {
+      setError('Periodens slut måste ligga efter starten.');
+      return;
+    }
     setError(null);
     setWarning(null);
+    setNotice(null);
 
     startTransition(async () => {
       if (form.id) {
@@ -211,6 +271,10 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
           updates.push({ field: 'month', value: monthValue });
         if (!original || (original.day ?? null) !== dayValue)
           updates.push({ field: 'day', value: dayValue });
+        if (!original || (original.end_month ?? null) !== endMonthValue)
+          updates.push({ field: 'end_month', value: endMonthValue });
+        if (!original || (original.end_day ?? null) !== endDayValue)
+          updates.push({ field: 'end_day', value: endDayValue });
         if (!original || !sameTags(original.tags ?? [], form.tags))
           updates.push({ field: 'tags', value: form.tags });
         if (!original || original.category !== form.category)
@@ -234,16 +298,23 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
           title,
           month: monthValue,
           day: dayValue,
+          end_month: endMonthValue,
+          end_day: endDayValue,
           tags: form.tags,
           category: form.category,
           responsible: form.responsible || null,
-          notes: form.notes.trim() || undefined
+          notes: form.notes.trim() || undefined,
+          repeat: form.repeat,
+          repeatUntilMonth: form.repeatUntilMonth === '' ? null : Number(form.repeatUntilMonth)
         });
         if (res?.error) {
           setError(res.error);
           return;
         }
         if (res?.warning) setWarning(res.warning);
+        else if ((res?.created ?? 1) > 1) {
+          setNotice(`${res!.created} aktiviteter lades till i årshjulet.`);
+        }
       }
       setForm(null);
       router.refresh();
@@ -264,6 +335,20 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
 
   return (
     <div className="space-y-6 py-6">
+      {notice ? (
+        <div className="flex items-start gap-2 rounded-xl bg-movexum-pastell-gron px-3 py-2 text-[12.5px] text-movexum-morkgron">
+          <Icon name="check" size={14} />
+          <span className="flex-1">{notice}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="shrink-0 opacity-70 hover:opacity-100"
+            aria-label="Stäng"
+          >
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      ) : null}
       {warning ? (
         <div className="flex items-start gap-2 rounded-xl bg-movexum-pastell-gul px-3 py-2 text-[12.5px] text-movexum-morkgul">
           <Icon name="alert" size={14} />
@@ -383,7 +468,7 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
         {/* Hjulet */}
         <section className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
           <Wheel
-            byMonth={byMonth}
+            items={filtered}
             year={year}
             categories={categories}
             onPick={canEdit ? openEdit : undefined}
@@ -482,9 +567,9 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
             <thead>
               <tr className="text-left text-foreground-subtle">
                 <th className="sticky left-0 bg-surface px-2 py-1.5 font-medium">Månad</th>
-                {ANNUAL_WHEEL_TAGS.map((t) => (
-                  <th key={t.id} className="px-2 py-1.5 font-medium">
-                    {t.label}
+                {tableTags.map((t) => (
+                  <th key={t} className="px-2 py-1.5 font-medium">
+                    {annualWheelTagLabel(t)}
                   </th>
                 ))}
                 <th className="px-2 py-1.5 font-medium">Utan tagg</th>
@@ -509,9 +594,9 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
                               style={{ background: colorVar(it.category) }}
                               aria-hidden
                             />
-                            {it.day ? (
+                            {it.day || isAnnualWheelPeriod(it) ? (
                               <span className="mx-tnum shrink-0 font-medium text-foreground-subtle">
-                                {it.day}/{it.month}
+                                {annualWheelShortRangeLabel(it)}
                               </span>
                             ) : null}
                             {it.title}
@@ -558,10 +643,14 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
 
 interface HoverInfo {
   item: AnnualWheelItem;
-  month: number;
   x: number;
   y: number;
 }
+
+/** Aktivitetsbandets radier: körfälten packas mellan inner och outer. */
+const BAND_INNER = 174;
+const BAND_OUTER = 252;
+const LANE_GAP = 3;
 
 function countdownLabel(days: number): string {
   if (days <= 0) return 'idag';
@@ -572,18 +661,19 @@ function countdownLabel(days: number): string {
 function NextCaption({ next }: { next: NextAnnualWheelItem }) {
   return (
     <div className="mt-1.5 flex items-center justify-center gap-1.5 text-[12px] text-foreground-muted">
-      <Icon name="clock" size={13} />
-      <span className="font-semibold text-foreground">Nästa:</span>
+      <Icon name={next.ongoing ? 'bolt' : 'clock'} size={13} />
+      <span className="font-semibold text-foreground">{next.ongoing ? 'Pågår nu:' : 'Nästa:'}</span>
       <span className="max-w-[200px] truncate">{next.item.title}</span>
       <span className="text-foreground-subtle">
-        · {annualWheelShortDateLabel(next.item.month, next.item.day)} · {countdownLabel(next.days)}
+        · {annualWheelShortRangeLabel(next.item)}
+        {next.ongoing ? '' : ` · ${countdownLabel(next.days)}`}
       </span>
     </div>
   );
 }
 
 function Wheel({
-  byMonth,
+  items,
   year,
   categories,
   onPick,
@@ -593,7 +683,7 @@ function Wheel({
   onFocusMonth,
   next
 }: {
-  byMonth: AnnualWheelItem[][];
+  items: AnnualWheelItem[];
   year: number;
   categories: AnnualWheelCategoryDef[];
   onPick?: (item: AnnualWheelItem) => void;
@@ -616,11 +706,18 @@ function Wheel({
   const gradientKey = (id: string) =>
     categories.some((c) => c.id === id) ? id : FALLBACK_GRADIENT_KEY;
 
-  function track(item: AnnualWheelItem, month: number, e: React.MouseEvent) {
+  function track(item: AnnualWheelItem, e: React.MouseEvent) {
     const rect = wrapRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setHover({ item, month, x: e.clientX - rect.left, y: e.clientY - rect.top });
+    setHover({ item, x: e.clientX - rect.left, y: e.clientY - rect.top });
   }
+
+  // Packa posterna i körfält efter sitt faktiska tidsspann (perioder = bågar).
+  const { arcs, laneCount } = useMemo(() => packAnnualWheelArcs(items), [items]);
+  const laneHeight = Math.max(
+    6,
+    (BAND_OUTER - BAND_INNER - (laneCount - 1) * LANE_GAP) / Math.max(1, laneCount)
+  );
 
   // "Idag"-markör: en liten prick UTANFÖR hjulet (ingen visarlinje).
   const todayDot = todayAngle !== null ? polarPoint(CX, CY, 266, todayAngle) : null;
@@ -718,7 +815,6 @@ function Wheel({
           {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
             const a = monthSliceAngles(m);
             const monthPath = annulusSectorPath(CX, CY, 116, 170, a.start, a.end);
-            const monthItems = byMonth[m];
             const labelPos = polarPoint(CX, CY, 143, a.mid);
             const isEven = m % 2 === 0;
             const isCurrent = currentMonth === m;
@@ -753,33 +849,41 @@ function Wheel({
                   {monthShortLabel(m)}
                 </text>
 
-                {/* Yttre band: en sub-sektor per aktivitet, färgad per kategori. */}
-                {monthItems.map((it, idx) => {
-                  const span = (a.end - a.start) / Math.max(1, monthItems.length);
-                  const s = a.start + idx * span;
-                  const e = s + span;
-                  const isHovered = hover?.item.id === it.id;
-                  // Lyft den hovrade aktiviteten en aning utåt.
-                  const inner = isHovered ? 174 : 172;
-                  const outer = isHovered ? 256 : 250;
-                  const d = roundedAnnulusSectorPath(CX, CY, inner, outer, s + 0.9, e - 0.9, 7);
-                  // Stagger: sveper medurs runt året (månad → aktivitet).
-                  const delay = (m - 1) * 45 + idx * 25;
-                  return (
-                    <path
-                      key={it.id}
-                      d={d}
-                      fill={`url(#mx-aw-grad-${gradientKey(it.category)}${isHovered ? '-hover' : ''})`}
-                      filter={isHovered ? 'url(#mx-aw-shadow-hover)' : 'url(#mx-aw-shadow)'}
-                      className={`mx-wheel-band transition-opacity ${onPick ? 'cursor-pointer' : ''}`}
-                      style={{ opacity: hover && !isHovered ? 0.45 : 1, animationDelay: `${delay}ms` }}
-                      onClick={onPick ? () => onPick(it) : undefined}
-                      onMouseEnter={(ev) => track(it, m, ev)}
-                      onMouseMove={(ev) => track(it, m, ev)}
-                    />
-                  );
-                })}
               </g>
+            );
+          })}
+
+          {/* Aktivitetsbågar: varje post ritas över sitt FAKTISKA tidsspann —
+              en dag blir en smal båge, en kampanj en båge över flera månader.
+              Överlappande poster hamnar i olika körfält (Gantt-liknande). */}
+          {arcs.map(({ item: it, start, end, lane }: (typeof arcs)[number], idx: number) => {
+            const isHovered = hover?.item.id === it.id;
+            const laneInner = BAND_INNER + lane * (laneHeight + LANE_GAP);
+            const inner = isHovered ? laneInner - 1.5 : laneInner;
+            const outer = inner + laneHeight + (isHovered ? 3 : 0);
+            const d = roundedAnnulusSectorPath(
+              CX,
+              CY,
+              inner,
+              outer,
+              start + 0.35,
+              Math.max(start + 0.7, end - 0.35),
+              Math.min(7, laneHeight / 2)
+            );
+            // Stagger: sveper medurs runt året.
+            const delay = Math.round(start * 1.5) + idx * 8;
+            return (
+              <path
+                key={it.id}
+                d={d}
+                fill={`url(#mx-aw-grad-${gradientKey(it.category)}${isHovered ? '-hover' : ''})`}
+                filter={isHovered ? 'url(#mx-aw-shadow-hover)' : 'url(#mx-aw-shadow)'}
+                className={`mx-wheel-band transition-opacity ${onPick ? 'cursor-pointer' : ''}`}
+                style={{ opacity: hover && !isHovered ? 0.4 : 1, animationDelay: `${delay}ms` }}
+                onClick={onPick ? () => onPick(it) : undefined}
+                onMouseEnter={(ev) => track(it, ev)}
+                onMouseMove={(ev) => track(it, ev)}
+              />
             );
           })}
 
@@ -865,7 +969,7 @@ function HoverCard({
   hover: HoverInfo;
   categories: AnnualWheelCategoryDef[];
 }) {
-  const { item, month } = hover;
+  const { item } = hover;
   // Placera kortet vid pekaren, men förskjut så det inte skyms av muspekaren
   // och håll det inom hjul-containern.
   const left = Math.max(8, Math.min(hover.x + 16, 520 - 248));
@@ -890,9 +994,14 @@ function HoverCard({
           bland taggarna. Visas alltid (odaterade poster säger "Hela året"). */}
       <p className="mt-1.5 flex items-center gap-1.5 text-[12.5px] font-medium text-foreground">
         <Icon name="calendar" size={13} />
-        {annualWheelDateLabel(item.month, item.day, item.year)}
-        <span className="font-normal text-foreground-subtle">· Q{quarterForMonth(month)}</span>
+        {annualWheelRangeLabel(item)}
+        <span className="font-normal text-foreground-subtle">· Q{quarterForMonth(item.month)}</span>
       </p>
+      {isAnnualWheelPeriod(item) ? (
+        <p className="mt-0.5 text-[11px] font-medium uppercase tracking-wide text-foreground-subtle">
+          Period
+        </p>
+      ) : null}
       {item.responsible_name ? (
         <p className="mt-1 flex items-center gap-1.5 text-[12px] text-foreground-muted">
           <Icon name="user" size={12} />
@@ -977,9 +1086,9 @@ function ItemPill({
       {/* Datum först och alltid synligt — det är listans viktigaste kolumn. */}
       <span
         className="mx-tnum shrink-0 rounded-md bg-canvas-subtle px-1.5 py-0.5 text-[11px] font-medium text-foreground-muted"
-        title={annualWheelDateLabel(item.month, item.day, item.year)}
+        title={annualWheelRangeLabel(item)}
       >
-        {annualWheelShortDateLabel(item.month, item.day)}
+        {annualWheelShortRangeLabel(item)}
       </span>
       <span className="min-w-0 flex-1 truncate text-foreground">{item.title}</span>
       {item.responsible_name ? (
@@ -1150,6 +1259,111 @@ function EditorModal({
             </select>
           </Field>
 
+          {/* Period: en kampanj löper över tid och ritas som en båge i hjulet. */}
+          <div className="rounded-xl border border-default p-2.5">
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-foreground-subtle">
+              <Icon name="target" size={12} />
+              Pågår över tid (kampanj)
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Slutmånad">
+                <select
+                  value={form.endMonth}
+                  disabled={form.month === ''}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      endMonth: e.target.value,
+                      endDay: e.target.value === '' ? '' : form.endDay
+                    })
+                  }
+                  className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground disabled:opacity-50"
+                >
+                  <option value="">Ingen period (en dag/månad)</option>
+                  {form.month !== ''
+                    ? Array.from({ length: 12 }, (_, i) => i + 1)
+                        .filter((m) => m >= Number(form.month))
+                        .map((m) => (
+                          <option key={m} value={String(m)}>
+                            {monthLongLabel(m)}
+                          </option>
+                        ))
+                    : null}
+                </select>
+              </Field>
+              <Field label="Slutdag">
+                <select
+                  value={form.endDay}
+                  disabled={form.endMonth === ''}
+                  onChange={(e) => setForm({ ...form, endDay: e.target.value })}
+                  className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground disabled:opacity-50"
+                >
+                  <option value="">Månadens sista dag</option>
+                  {form.endMonth !== ''
+                    ? Array.from(
+                        { length: daysInMonth(form.year, Number(form.endMonth)) },
+                        (_, i) => i + 1
+                      ).map((d) => (
+                        <option key={d} value={String(d)}>
+                          {d} {monthLongLabel(Number(form.endMonth))}
+                        </option>
+                      ))
+                    : null}
+                </select>
+              </Field>
+            </div>
+          </div>
+
+          {/* Upprepning: skapar hela serien på en gång (bara vid nyskapande). */}
+          {!form.id ? (
+            <div className="rounded-xl border border-default p-2.5">
+              <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-foreground-subtle">
+                <Icon name="copy" size={12} />
+                Upprepa
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Hur ofta">
+                  <select
+                    value={form.repeat}
+                    disabled={form.month === ''}
+                    onChange={(e) =>
+                      setForm({ ...form, repeat: e.target.value as AnnualWheelRepeat })
+                    }
+                    className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground disabled:opacity-50"
+                  >
+                    {ANNUAL_WHEEL_REPEATS.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="T.o.m.">
+                  <select
+                    value={form.repeatUntilMonth}
+                    disabled={form.repeat === 'none' || form.month === ''}
+                    onChange={(e) => setForm({ ...form, repeatUntilMonth: e.target.value })}
+                    className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground disabled:opacity-50"
+                  >
+                    <option value="">December</option>
+                    {Array.from({ length: 12 }, (_, i) => i + 1)
+                      .filter((m) => form.month === '' || m >= Number(form.month))
+                      .map((m) => (
+                        <option key={m} value={String(m)}>
+                          {monthLongLabel(m)}
+                        </option>
+                      ))}
+                  </select>
+                </Field>
+              </div>
+              {form.repeat !== 'none' && form.month !== '' ? (
+                <p className="mt-1.5 text-[11.5px] text-foreground-subtle">
+                  Skapar {seriesPreviewCount(form)} aktiviteter — en per förekomst.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-3">
             <Field label="Kategori">
               <select
@@ -1186,32 +1400,41 @@ function EditorModal({
           </div>
 
           <Field label="Taggar (valfritt)">
-            <div className="flex flex-wrap gap-1.5">
-              {ANNUAL_WHEEL_TAGS.map((t) => {
-                const active = form.tags.includes(t.id);
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() =>
-                      setForm({
-                        ...form,
-                        tags: active
-                          ? form.tags.filter((x) => x !== t.id)
-                          : [...form.tags, t.id]
-                      })
-                    }
-                    className={`rounded-full border px-2.5 py-1 text-[12px] transition-colors ${
-                      active
-                        ? 'border-brand bg-brand/10 text-brand'
-                        : 'border-default text-foreground-muted hover:border-strong hover:text-foreground'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                );
-              })}
+            <div className="space-y-2">
+              {(['marknad', 'verksamhet'] as const).map((group) => (
+                <div key={group}>
+                  <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-foreground-subtle">
+                    {ANNUAL_WHEEL_TAG_GROUP_LABELS[group]}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {annualWheelTagsInGroup(group).map((t) => {
+                      const active = form.tags.includes(t.id);
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() =>
+                            setForm({
+                              ...form,
+                              tags: active
+                                ? form.tags.filter((x) => x !== t.id)
+                                : [...form.tags, t.id]
+                            })
+                          }
+                          className={`rounded-full border px-2.5 py-1 text-[12px] transition-colors ${
+                            active
+                              ? 'border-brand bg-brand/10 text-brand'
+                              : 'border-default text-foreground-muted hover:border-strong hover:text-foreground'
+                          }`}
+                        >
+                          {t.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           </Field>
 

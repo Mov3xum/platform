@@ -2877,7 +2877,9 @@ await ensureCollection({
     // Migration 1700000139: taggar (valfria, flera) ersätter obligatoriskt spår.
     // `track` behålls deprecerat + valfritt så befintlig data inte tappas.
     { name: 'track', type: 'select', required: false, maxSelect: 1, values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt'] },
-    { name: 'tags', type: 'select', required: false, maxSelect: 7, values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt'] },
+    { name: 'tags', type: 'select', required: false, maxSelect: 13, values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt', 'linkedin', 'nyhetsbrev', 'event', 'pr', 'webinar', 'annonsering'] },
+    { name: 'end_month', type: 'number', required: false, onlyInt: true, min: 1, max: 12 },
+    { name: 'end_day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 },
     // Migration 1700000140: dynamiska kategorier (§ 30) → fritext-nyckel som
     // valideras mot annual_wheel_categories i det delade skrivlagret.
     { name: 'category', type: 'text', required: true, min: 1, max: 40 },
@@ -3358,9 +3360,11 @@ await ensureCollection({
       values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt']
     },
     {
-      name: 'tags', type: 'select', required: false, maxSelect: 7,
-      values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt']
+      name: 'tags', type: 'select', required: false, maxSelect: 13,
+      values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt', 'linkedin', 'nyhetsbrev', 'event', 'pr', 'webinar', 'annonsering']
     },
+    { name: 'end_month', type: 'number', required: false, onlyInt: true, min: 1, max: 12 },
+    { name: 'end_day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 },
     { name: 'category', type: 'text', required: true, min: 1, max: 40 },
     { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'notes', type: 'text', required: false, max: 2000 },
@@ -3583,14 +3587,20 @@ await patchCollection('tasks', [
 // NYA installs; patchen täcker BEFINTLIGA — utan `required: false` på track
 // skulle en bootstrappad instans avvisa nya aktiviteter (400) eftersom appen
 // inte längre skriver fältet. Idempotent.
+// Migration 1700000141 utökar taggarna med marknadskanaler och lägger till
+// periodfälten (end_month/end_day) för kampanjer som löper över tid.
 const ANNUAL_WHEEL_TAG_VALUES = [
-  'kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt'
+  'kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt',
+  'linkedin', 'nyhetsbrev', 'event', 'pr', 'webinar', 'annonsering'
 ];
 await patchCollection('annual_wheel_items', [
-  { name: 'tags', type: 'select', required: false, maxSelect: 7, values: ANNUAL_WHEEL_TAG_VALUES },
-  { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  { name: 'tags', type: 'select', required: false, maxSelect: ANNUAL_WHEEL_TAG_VALUES.length, values: ANNUAL_WHEEL_TAG_VALUES },
+  { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+  { name: 'end_month', type: 'number', required: false, onlyInt: true, min: 1, max: 12 },
+  { name: 'end_day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 }
 ], {
-  track: { required: false }
+  track: { required: false },
+  tags: { values: ANNUAL_WHEEL_TAG_VALUES, maxSelect: ANNUAL_WHEEL_TAG_VALUES.length }
 });
 
 // =========================================================================

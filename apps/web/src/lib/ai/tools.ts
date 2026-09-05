@@ -31,7 +31,7 @@ import {
   createActivity,
   updateActivityField,
   updateStartupField,
-  createAnnualWheelItem,
+  createAnnualWheelSeries,
   updateAnnualWheelItemField,
   type AnnualWheelWritableField,
   type Actor,
@@ -641,9 +641,10 @@ export function buildChatTools(
         name: 'create_annual_wheel_item',
         description:
           'Lägger till en aktivitet i Movexums årshjul (verksamhetskalendern). ' +
-          'Använd när personalen ber dig planera in återkommande aktiviteter ' +
-          '(t.ex. "lägg bokslut i april" eller "styrelsemöte varje kvartal"). ' +
-          'Skapa en post per månad om aktiviteten återkommer.',
+          'Använd när personalen ber dig planera in aktiviteter (t.ex. "lägg ' +
+          'bokslut i april", "LinkedIn-kampanj mars–maj" eller "nyhetsbrev den ' +
+          '15:e varje månad"). Perioder anges med end_month/end_day och ' +
+          'återkommande aktiviteter med repeat — ett anrop räcker.',
         parameters: {
           type: 'object',
           properties: {
@@ -661,6 +662,34 @@ export function buildChatTools(
               maximum: 31,
               description:
                 'Valfri specifik dag 1–31 inom månaden (kräver month). Utelämna för hela månaden.'
+            },
+            end_month: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 12,
+              description:
+                'Slutmånad om aktiviteten är en PERIOD/kampanj som löper över tid ' +
+                '(t.ex. "kampanj mars–maj"). Utelämna för en punktaktivitet.'
+            },
+            end_day: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 31,
+              description: 'Slutdag inom slutmånaden (kräver end_month). Utelämna = månadens sista dag.'
+            },
+            repeat: {
+              type: 'string',
+              enum: ['none', 'monthly', 'bimonthly', 'quarterly'],
+              description:
+                'Skapar en HEL SERIE i ett anrop när aktiviteten återkommer ' +
+                '("nyhetsbrev varje månad", "avstämning varje kvartal"). Anropa ' +
+                'INTE verktyget en gång per månad — använd det här i stället.'
+            },
+            repeat_until_month: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 12,
+              description: 'Sista månad serien sträcker sig till (default december).'
             },
             tags: {
               type: 'array',
@@ -698,7 +727,7 @@ export function buildChatTools(
             itemId: { type: 'string', description: 'PocketBase-id för årshjuls-posten.' },
             field: {
               type: 'string',
-              enum: ['title', 'month', 'day', 'tags', 'category', 'notes', 'year'],
+              enum: ['title', 'month', 'day', 'end_month', 'end_day', 'tags', 'category', 'notes', 'year'],
               description: 'Vilket fält som ska uppdateras.'
             },
             value: {
@@ -2211,23 +2240,28 @@ async function runCreateAnnualWheelItem(
   const actor = requireAgentActor(ctx);
   if ('error' in actor) return { ok: false, error: actor.error };
 
-  const result = await createAnnualWheelItem(ctx.pb, actor, {
+  const num = (v: unknown) => (v === undefined || v === null || v === '' ? null : Number(v));
+  const result = await createAnnualWheelSeries(ctx.pb, actor, {
     year: typeof args.year === 'number' ? args.year : Number(args.year),
     title: typeof args.title === 'string' ? args.title : '',
-    month: args.month === undefined || args.month === null ? null : Number(args.month),
-    day: args.day === undefined || args.day === null ? null : Number(args.day),
+    month: num(args.month),
+    day: num(args.day),
+    end_month: num(args.end_month),
+    end_day: num(args.end_day),
     tags: Array.isArray(args.tags) ? (args.tags as string[]) : [],
     category: typeof args.category === 'string' ? args.category : '',
-    notes: typeof args.notes === 'string' ? args.notes : undefined
+    notes: typeof args.notes === 'string' ? args.notes : undefined,
+    repeat: typeof args.repeat === 'string' ? args.repeat : 'none',
+    repeat_until_month: num(args.repeat_until_month)
   });
 
   if (!result.ok) return { ok: false, error: result.error };
   return {
     ok: true,
     data: {
-      item_id: result.value.itemId,
-      year: result.value.year,
-      title: result.value.title,
+      item_ids: result.value.itemIds,
+      created: result.value.created,
+      months: result.value.months,
       logged_in: 'agent_actions'
     }
   };
@@ -2243,7 +2277,7 @@ async function runUpdateAnnualWheelItem(
   const itemId = typeof args.itemId === 'string' ? args.itemId.trim() : '';
   const field = typeof args.field === 'string' ? args.field.trim() : '';
   if (!itemId) return { ok: false, error: 'itemId saknas.' };
-  const allowed = ['title', 'month', 'day', 'tags', 'category', 'notes', 'year'];
+  const allowed = ['title', 'month', 'day', 'end_month', 'end_day', 'tags', 'category', 'notes', 'year'];
   if (!allowed.includes(field)) {
     return { ok: false, error: `field måste vara en av: ${allowed.join(', ')}.` };
   }

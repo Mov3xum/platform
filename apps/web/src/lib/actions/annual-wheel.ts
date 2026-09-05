@@ -5,7 +5,7 @@ import type PocketBase from 'pocketbase';
 import { getServerPb, getCurrentUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import {
-  createAnnualWheelItem,
+  createAnnualWheelSeries,
   logAgentAction,
   schemaDriftMessage,
   updateAnnualWheelItemField,
@@ -31,6 +31,8 @@ export interface AnnualWheelActionState {
   error?: string;
   /** Icke-blockerande varning (t.ex. schemat saknar fält). */
   warning?: string;
+  /** Antal skapade aktiviteter (> 1 när en serie skapats). */
+  created?: number;
 }
 
 const EDIT_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
@@ -79,17 +81,23 @@ export async function createAnnualWheelItemAction(input: {
   title: string;
   month?: number | null;
   day?: number | null;
+  end_month?: number | null;
+  end_day?: number | null;
   tags?: string[];
   category: string;
   responsible?: string | null;
   notes?: string;
+  /** 'none' | 'monthly' | 'bimonthly' | 'quarterly' — skapar en hel serie. */
+  repeat?: string;
+  /** Sista månad serien får sträcka sig till (default december). */
+  repeatUntilMonth?: number | null;
 }): Promise<AnnualWheelActionState> {
   const user = await getCurrentUser();
   if (!user) return { error: 'Ej inloggad.' };
   if (!hasRole(user.roles, EDIT_ROLES)) return { error: 'Åtkomst nekad.' };
 
   const pb = await getServerPb();
-  const result = await createAnnualWheelItem(
+  const result = await createAnnualWheelSeries(
     pb,
     userActor(user),
     {
@@ -97,10 +105,14 @@ export async function createAnnualWheelItemAction(input: {
       title: input.title,
       month: input.month ?? null,
       day: input.day ?? null,
+      end_month: input.end_month ?? null,
+      end_day: input.end_day ?? null,
       tags: input.tags ?? [],
       category: input.category,
       responsible: input.responsible ?? null,
-      notes: input.notes
+      notes: input.notes,
+      repeat: input.repeat,
+      repeat_until_month: input.repeatUntilMonth ?? 12
     },
     { fallbackPb: superuserPb }
   );
@@ -111,7 +123,12 @@ export async function createAnnualWheelItemAction(input: {
 
   revalidate();
   const missing = result.value.schemaMissing ?? [];
-  return missing.length > 0 ? { ok: true, warning: schemaDriftMessage(missing) } : { ok: true };
+  const created = result.value.created;
+  return {
+    ok: true,
+    created,
+    ...(missing.length > 0 ? { warning: schemaDriftMessage(missing) } : {})
+  };
 }
 
 /** Uppdaterar ETT fält på en årshjuls-post. */

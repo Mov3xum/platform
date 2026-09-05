@@ -9,8 +9,17 @@ import {
   annualWheelCategoryLabel,
   annualWheelColorVar,
   annualWheelDateLabel,
+  annualWheelRangeLabel,
   annualWheelShortDateLabel,
+  annualWheelShortRangeLabel,
+  annualWheelItemAngles,
+  annualWheelTagsInUse,
   annulusSectorPath,
+  clampDayToMonth,
+  expandAnnualWheelSeries,
+  isAnnualWheelPeriod,
+  monthsForAnnualWheelItem,
+  packAnnualWheelArcs,
   buildAnnualWheelTable,
   clampYear,
   countItemsByTag,
@@ -437,4 +446,152 @@ test('sortAnnualWheelCategories orders by sortOrder then label', () => {
   ]);
   // Utan sortOrder hamnar posten sist (999).
   assert.deepEqual(sorted.map((c) => c.id), ['b', 'a', 'c']);
+});
+
+// ── Perioder (kampanjer) ─────────────────────────────────────────────────────
+
+test('isAnnualWheelPeriod distinguishes campaigns from point activities', () => {
+  assert.equal(isAnnualWheelPeriod(item({ month: 1, end_month: 2 })), true);
+  // Samma månad räknas som period bara när slutdagen ligger efter startdagen.
+  assert.equal(isAnnualWheelPeriod(item({ month: 3, day: 5, end_month: 3, end_day: 20 })), true);
+  assert.equal(isAnnualWheelPeriod(item({ month: 3, day: 20, end_month: 3, end_day: 20 })), false);
+  assert.equal(isAnnualWheelPeriod(item({ month: 3, end_month: 3 })), false);
+  // Slut före start är ingen period (och kraschar inte).
+  assert.equal(isAnnualWheelPeriod(item({ month: 6, end_month: 2 })), false);
+  assert.equal(isAnnualWheelPeriod(item({ month: null, end_month: 4 })), false);
+});
+
+test('monthsForAnnualWheelItem spans every month a campaign runs', () => {
+  assert.deepEqual(monthsForAnnualWheelItem(item({ month: 2, end_month: 5 })), [2, 3, 4, 5]);
+  assert.deepEqual(monthsForAnnualWheelItem(item({ month: 9 })), [9]);
+  assert.deepEqual(monthsForAnnualWheelItem(item({ month: null })), []);
+});
+
+test('range labels read naturally for periods and points', () => {
+  assert.equal(
+    annualWheelRangeLabel(item({ month: 1, day: 15, end_month: 2, end_day: 28, year: 2026 })),
+    '15 januari – 28 februari 2026'
+  );
+  // Utan slutdag → månadens sista dag.
+  assert.equal(
+    annualWheelRangeLabel(item({ month: 4, day: 1, end_month: 4, end_day: null, year: 2026 })),
+    '1 april – 30 april 2026'
+  );
+  // Punktaktivitet faller tillbaka på den vanliga datumetiketten.
+  assert.equal(annualWheelRangeLabel(item({ month: 8, day: 12, year: 2026 })), '12 augusti 2026');
+  assert.equal(
+    annualWheelShortRangeLabel(item({ month: 1, day: 15, end_month: 2, end_day: 28, year: 2026 })),
+    '15 jan–28 feb'
+  );
+  assert.equal(annualWheelShortRangeLabel(item({ month: 8, day: 12, year: 2026 })), '12 aug');
+});
+
+test('buildAnnualWheelTable repeats a campaign in every month it runs', () => {
+  const rows = buildAnnualWheelTable([
+    item({ month: 2, end_month: 4, tags: ['kampanjer'], title: 'Rekryteringskampanj' })
+  ]);
+  const monthsWithItem = rows
+    .filter((r) => r.cells.some((c) => c.items.length > 0))
+    .map((r) => r.month);
+  assert.deepEqual(monthsWithItem, [2, 3, 4]);
+});
+
+test('annualWheelTagsInUse returns only tags present, in taxonomy order', () => {
+  const used = annualWheelTagsInUse([
+    item({ tags: ['team'] }),
+    item({ tags: ['linkedin', 'team'] }),
+    item({ tags: [] })
+  ]);
+  assert.deepEqual(used, ['linkedin', 'team']);
+});
+
+// ── Hjulets bågar + körfält ──────────────────────────────────────────────────
+
+test('annualWheelItemAngles maps months, days and periods onto the wheel', () => {
+  // Hela januari = första 30°-sektorn.
+  assert.deepEqual(annualWheelItemAngles(item({ month: 1, day: null, year: 2026 })), {
+    start: 0,
+    end: 30
+  });
+  // Period jan–feb slutar vid 60° (hela februari ut).
+  const period = annualWheelItemAngles(item({ month: 1, day: 1, end_month: 2, year: 2026 }))!;
+  assert.equal(period.start, 0);
+  assert.ok(Math.abs(period.end - 60) < 1e-9);
+  // En enskild dag blir en smal båge som ändå är minst minSpan bred.
+  const oneDay = annualWheelItemAngles(item({ month: 6, day: 10, year: 2026 }), 2)!;
+  assert.ok(oneDay.end - oneDay.start >= 2 - 1e-9);
+  // Odaterad post har ingen båge.
+  assert.equal(annualWheelItemAngles(item({ month: null, year: 2026 })), null);
+});
+
+test('packAnnualWheelArcs puts overlapping campaigns in separate lanes', () => {
+  const a = item({ id: 'a', month: 1, end_month: 3, title: 'A', year: 2026 });
+  const b = item({ id: 'b', month: 2, end_month: 4, title: 'B', year: 2026 });
+  const c = item({ id: 'c', month: 6, end_month: 7, title: 'C', year: 2026 });
+  const { arcs, laneCount } = packAnnualWheelArcs([a, b, c]);
+  const laneOf = (id: string) => arcs.find((x) => x.item.id === id)!.lane;
+  assert.notEqual(laneOf('a'), laneOf('b')); // överlappar → olika körfält
+  assert.equal(laneOf('c'), 0); // efter A → återanvänder första körfältet
+  assert.equal(laneCount, 2);
+  // Odaterade poster ingår inte.
+  assert.equal(packAnnualWheelArcs([item({ month: null })]).arcs.length, 0);
+});
+
+test('nextUpcomingItem treats a running campaign as ongoing (day 0)', () => {
+  const items: AnnualWheelItem[] = [
+    item({ id: 'kampanj', month: 5, day: 1, end_month: 6, end_day: 30, year: 2026 }),
+    item({ id: 'punkt', month: 5, day: 20, year: 2026 })
+  ];
+  const next = nextUpcomingItem(items, new Date(2026, 4, 10)); // 10 maj
+  assert.equal(next?.item.id, 'kampanj');
+  assert.equal(next?.days, 0);
+  assert.equal(next?.ongoing, true);
+  // Helt passerad period plockas bort.
+  assert.equal(nextUpcomingItem([items[0]], new Date(2026, 6, 1)), null);
+});
+
+// ── Serier (upprepning) ──────────────────────────────────────────────────────
+
+test('clampDayToMonth respects month length and leap years', () => {
+  assert.equal(clampDayToMonth(2026, 2, 31), 28);
+  assert.equal(clampDayToMonth(2024, 2, 31), 29);
+  assert.equal(clampDayToMonth(2026, 1, 15), 15);
+  assert.equal(clampDayToMonth(2026, 1, null), null);
+});
+
+test('expandAnnualWheelSeries repeats monthly/quarterly and clamps the day', () => {
+  const monthly = expandAnnualWheelSeries({ year: 2026, month: 1, day: 31 }, 'monthly', 4);
+  assert.deepEqual(
+    monthly.map((o) => [o.month, o.day]),
+    [
+      [1, 31],
+      [2, 28],
+      [3, 31],
+      [4, 30]
+    ]
+  );
+  const quarterly = expandAnnualWheelSeries({ year: 2026, month: 2, day: 1 }, 'quarterly', 12);
+  assert.deepEqual(quarterly.map((o) => o.month), [2, 5, 8, 11]);
+  // Ingen upprepning → bara basen.
+  assert.equal(expandAnnualWheelSeries({ year: 2026, month: 6 }, 'none').length, 1);
+  // Odaterad post kan inte bli en serie.
+  assert.equal(expandAnnualWheelSeries({ year: 2026, month: null }, 'monthly').length, 0);
+});
+
+test('expandAnnualWheelSeries shifts periods and stops before the year rolls over', () => {
+  const series = expandAnnualWheelSeries(
+    { year: 2026, month: 9, day: 1, end_month: 10, end_day: 15 },
+    'monthly',
+    12
+  );
+  assert.deepEqual(
+    series.map((o) => [o.month, o.end_month]),
+    [
+      [9, 10],
+      [10, 11],
+      [11, 12]
+    ]
+  );
+  // December skulle ge slut i januari nästa år → utelämnas.
+  assert.equal(series.some((o) => o.month === 12), false);
 });

@@ -823,7 +823,8 @@ async function verifyHealthEndpoint() {
  */
 const REQUIRED_APP_FIELDS = [
   // Årshjul (§ 30): day = migration 1700000138, tags/responsible = 1700000139.
-  { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible'] }
+  // day = 1700000138, tags/responsible = 1700000139, end_* = 1700000141.
+  { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible', 'end_month', 'end_day'] }
 ];
 
 const MUST_NOT_BE_REQUIRED = [

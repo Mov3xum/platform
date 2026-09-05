@@ -195,6 +195,26 @@ export function validateAnnualWheelMonth(value: unknown): ValidationResult<numbe
   return { ok: true, value: m };
 }
 
+/**
+ * Slutmånad för en period (kampanj). Samma intervall som `month`; tomt = ingen
+ * period. Att slutet ligger EFTER starten kontrolleras i skrivlagret (där både
+ * start och slut är kända).
+ */
+export function validateAnnualWheelEndMonth(value: unknown): ValidationResult<number | null> {
+  if (value === null || value === '' || value === undefined) return { ok: true, value: null };
+  const m = sanitizeMonth(value);
+  if (m === null) return { ok: false, error: 'end_month måste vara ett heltal 1–12 (eller tomt).' };
+  return { ok: true, value: m };
+}
+
+/** Slutdag inom slutmånaden. Tomt = månadens sista dag. */
+export function validateAnnualWheelEndDay(value: unknown): ValidationResult<number | null> {
+  if (value === null || value === '' || value === undefined) return { ok: true, value: null };
+  const d = sanitizeDay(value);
+  if (d === null) return { ok: false, error: 'end_day måste vara ett heltal 1–31 (eller tomt).' };
+  return { ok: true, value: d };
+}
+
 /** Dag: 1–31, eller null (hela månaden). Tomt värde = null. */
 export function validateAnnualWheelDay(value: unknown): ValidationResult<number | null> {
   if (value === null || value === '' || value === undefined) return { ok: true, value: null };
