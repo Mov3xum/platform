@@ -10,6 +10,7 @@ import {
   annualWheelCategoryLabel,
   annualWheelColorVar,
   annualWheelDateLabel,
+  annualWheelShortDateLabel,
   annualWheelTagLabel,
   annulusSectorPath,
   buildAnnualWheelTable,
@@ -126,6 +127,8 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
 
   const [form, setForm] = useState<FormState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Icke-blockerande varning från servern (t.ex. schemat saknar datumfältet).
+  const [warning, setWarning] = useState<string | null>(null);
 
   const filtered = useMemo(
     () => filterAnnualWheelItems(items, { year, category, tag, responsible }),
@@ -196,6 +199,7 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
     // En dag utan månad är meningslös → nollställ.
     const dayValue = monthValue === null || form.day === '' ? null : Number(form.day);
     setError(null);
+    setWarning(null);
 
     startTransition(async () => {
       if (form.id) {
@@ -239,6 +243,7 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
           setError(res.error);
           return;
         }
+        if (res?.warning) setWarning(res.warning);
       }
       setForm(null);
       router.refresh();
@@ -259,6 +264,35 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
 
   return (
     <div className="space-y-6 py-6">
+      {warning ? (
+        <div className="flex items-start gap-2 rounded-xl bg-movexum-pastell-gul px-3 py-2 text-[12.5px] text-movexum-morkgul">
+          <Icon name="alert" size={14} />
+          <span className="flex-1">{warning}</span>
+          <button
+            type="button"
+            onClick={() => setWarning(null)}
+            className="shrink-0 opacity-70 hover:opacity-100"
+            aria-label="Stäng"
+          >
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      ) : null}
+      {error && !form ? (
+        <div className="flex items-start gap-2 rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange">
+          <Icon name="alert" size={14} />
+          <span className="flex-1">{error}</span>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            className="shrink-0 opacity-70 hover:opacity-100"
+            aria-label="Stäng"
+          >
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      ) : null}
+
       {/* Filterrad */}
       <div className="flex flex-wrap items-center gap-3">
         <FilterSelect
@@ -481,6 +515,11 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
                               style={{ background: colorVar(it.category) }}
                               aria-hidden
                             />
+                            {it.day ? (
+                              <span className="mx-tnum shrink-0 font-medium text-foreground-subtle">
+                                {it.day}/{it.month}
+                              </span>
+                            ) : null}
                             {it.title}
                             {it.day ? (
                               <span className="mx-tnum text-foreground-subtle">
@@ -548,8 +587,7 @@ function NextCaption({ next }: { next: NextAnnualWheelItem }) {
       <span className="font-semibold text-foreground">Nästa:</span>
       <span className="max-w-[200px] truncate">{next.item.title}</span>
       <span className="mx-tnum text-foreground-subtle">
-        · {next.item.day ? `${next.item.day} ` : ''}
-        {monthShortLabel(next.item.month)} · {countdownLabel(next.days)}
+        · {annualWheelShortDateLabel(next.item.month, next.item.day)} · {countdownLabel(next.days)}
       </span>
     </div>
   );
@@ -879,25 +917,28 @@ function HoverCard({
         </span>
       </div>
       <p className="font-heading text-[14px] font-semibold leading-snug text-foreground">{item.title}</p>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-        <span className="inline-flex items-center gap-1 rounded-md bg-canvas-subtle px-1.5 py-0.5 text-[11px] font-medium text-foreground-muted">
-          <Icon name="calendar" size={11} />
-          {annualWheelDateLabel(item.month, item.day, item.year)} · Q{quarterForMonth(month)}
-        </span>
-        {(item.tags ?? []).map((t) => (
-          <span
-            key={t}
-            className="inline-flex items-center rounded-md bg-canvas-subtle px-1.5 py-0.5 text-[11px] font-medium text-foreground-muted"
-          >
-            {annualWheelTagLabel(t)}
-          </span>
-        ))}
-      </div>
+      <p className="mt-1.5 flex items-center gap-1.5 text-[12.5px] font-medium text-foreground">
+        <Icon name="calendar" size={13} />
+        {annualWheelDateLabel(item.month, item.day, item.year)}
+        <span className="font-normal text-foreground-subtle">· Q{quarterForMonth(month)}</span>
+      </p>
       {item.responsible_name ? (
-        <p className="mt-1.5 flex items-center gap-1.5 text-[12px] text-foreground-muted">
+        <p className="mt-1 flex items-center gap-1.5 text-[12px] text-foreground-muted">
           <Icon name="user" size={12} />
           Ansvarig: <span className="font-medium text-foreground">{item.responsible_name}</span>
         </p>
+      ) : null}
+      {(item.tags ?? []).length > 0 ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {(item.tags ?? []).map((t) => (
+            <span
+              key={t}
+              className="inline-flex items-center rounded-md bg-canvas-subtle px-1.5 py-0.5 text-[11px] font-medium text-foreground-muted"
+            >
+              {annualWheelTagLabel(t)}
+            </span>
+          ))}
+        </div>
       ) : null}
       {item.notes ? (
         <p className="mt-2 line-clamp-3 text-[12px] leading-relaxed text-foreground-muted">{item.notes}</p>
@@ -997,13 +1038,20 @@ function ItemPill({
           />
           <span className="min-w-0 truncate font-medium text-foreground">{item.title}</span>
         </p>
-        {tagText || item.responsible_name ? (
-          <p className="mt-0.5 truncate pl-3.5 text-[11px] text-foreground-subtle">
-            {tagText}
-            {tagText && item.responsible_name ? ' · ' : ''}
-            {item.responsible_name ?? ''}
-          </p>
-        ) : null}
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-3.5 text-[11px] text-foreground-subtle">
+          <span
+            className="mx-tnum shrink-0 rounded-md bg-canvas-subtle px-1.5 py-0.5 font-medium text-foreground-muted"
+            title={annualWheelDateLabel(item.month, item.day, item.year)}
+          >
+            {annualWheelShortDateLabel(item.month, item.day)}
+          </span>
+          {item.responsible_name ? (
+            <span className="truncate" title={`Ansvarig: ${item.responsible_name}`}>
+              {item.responsible_name}
+            </span>
+          ) : null}
+          {tagText ? <span className="truncate">{tagText}</span> : null}
+        </div>
       </div>
       {onEdit ? (
         <button

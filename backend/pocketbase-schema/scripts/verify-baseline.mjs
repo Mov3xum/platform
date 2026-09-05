@@ -811,6 +811,60 @@ async function verifyHealthEndpoint() {
   ok('PocketBase health endpoint responded successfully');
 }
 
+/**
+ * Fält som koden SKRIVER men som en instans kan sakna om en migration inte
+ * applicerats. PocketBase släpper okända fält TYST vid create/update, så
+ * driften märks bara som "datumet försvann" / "det går inte att skapa" i
+ * UI:t — därför fälls deployen här i stället.
+ *
+ * `required`-kontrollen fångar det omvända: ett fält som koden slutat skriva
+ * (deprecerade `annual_wheel_items.track`) men som fortfarande är
+ * obligatoriskt i schemat → varje create svarar 400.
+ */
+const REQUIRED_APP_FIELDS = [
+  // Årshjul (§ 30): day = migration 1700000138, tags/responsible = 1700000139.
+  { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible'] }
+];
+
+const MUST_NOT_BE_REQUIRED = [
+  { collection: 'annual_wheel_items', fields: ['track'] }
+];
+
+function verifyAppWritableFields(collections) {
+  const byName = new Map(collections.map((c) => [c.name, c]));
+
+  for (const { collection, fields } of REQUIRED_APP_FIELDS) {
+    const col = byName.get(collection);
+    if (!col) continue; // frånvaro fångas av verifyCollectionsExist
+    const present = new Set((col.fields || []).map((f) => f.name));
+    const missing = fields.filter((f) => !present.has(f));
+    if (missing.length > 0) {
+      fail(
+        `Collection "${collection}" saknar fält som appen skriver: ${missing.join(', ')}.\n` +
+          'PocketBase släpper okända fält tyst → värdena försvinner utan felmeddelande.\n' +
+          'Kör migrationerna (auto-migrate i custom-imagen) eller setup-via-api.mjs mot instansen.\n' +
+          'Diagnos: node backend/pocketbase-schema/scripts/diagnose-migrations.mjs'
+      );
+    }
+    ok(`collection "${collection}" har appens skrivbara fält (${fields.join(', ')})`);
+  }
+
+  for (const { collection, fields } of MUST_NOT_BE_REQUIRED) {
+    const col = byName.get(collection);
+    if (!col) continue;
+    for (const name of fields) {
+      const field = (col.fields || []).find((f) => f.name === name);
+      if (field && field.required) {
+        fail(
+          `Field "${collection}.${name}" är obligatoriskt men skrivs inte längre av appen ` +
+            '→ varje create avvisas med 400. Kör migration 1700000139 eller setup-via-api.mjs.'
+        );
+      }
+    }
+    ok(`collection "${collection}" har inga deprecerade obligatoriska fält`);
+  }
+}
+
 async function main() {
   log(`PB: ${PB_URL}`);
   await verifyHealthEndpoint();
@@ -828,6 +882,7 @@ async function main() {
 
   const collections = await verifyCollectionsExist();
   verifyRlsAndRbac(collections);
+  verifyAppWritableFields(collections);
   await verifyNoBrokenCreateRules();
   await verifyNoBareMultiValueOperators();
   await verifyAiPiiMasking();

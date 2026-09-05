@@ -3810,6 +3810,38 @@ Chatt-verktygen exponeras BARA för agent-actor i den interaktiva staff-chatten
 aldrig. Läsning sker via det auto-exponerade `query_collection` (collectionen
 är inte denylistad) under RLS + tenant-scope.
 
+**Skrivvägens robusthet (juni 2026).** Att skapa en aktivitet kunde fela tyst
+av tre olika miljöskäl. Alla tre är nu täckta i `lib/core/write/annual-wheel.ts`
++ `lib/actions/annual-wheel.ts`:
+
+1. **PB-target är kollektionens NAMN, aldrig custom-id:t.** Sidans läsningar
+   gick redan på namnet (`annual_wheel_items`) medan skrivningarna gick på
+   `PB_COLLECTIONS.annualWheelItems` (`annual_wheel_items_collection`). En
+   instans som provisionerats via `setup-via-api.mjs` kan ha fått ett annat,
+   autogenererat collection-id → skrivningarna 404:ade med "Missing or invalid
+   collection context" medan hjulet renderade fint. Använd namnet i BÅDA
+   riktningarna för den här kollektionen.
+2. **Superuser-fallback vid 400/403** (samma mönster som de minimis § 20.5 och
+   education_documents § 18.3): PB v0.23.4:s rule-eval kan tyst neka en behörig
+   staff-användare. Fallbacken skickas BARA av server-actions (rollen är redan
+   verifierad); agentens verktyg får den aldrig — least privilege.
+3. **Schema-drift.** PocketBase släpper okända fält TYST vid create/update. En
+   instans där migration 1700000138/1700000139 inte körts saknar `day`/`tags`/
+   `responsible` → datumet "sparades" men försvann, och det kvarvarande
+   obligatoriska `track` fick varje create att svara 400. Nu: create:en görs om
+   EN gång med härlett `track` (första taggen, annars `ovrigt`) så aktiviteten
+   kan skapas ändå; posten läses tillbaka och saknade fält rapporteras som en
+   gul varning i UI:t med exakt vad som ska köras; en update mot ett fält som
+   saknas i schemat felar tydligt i stället för att låtsas lyckas (samma
+   princip som `/filer` set-topic, § 24.4). PB:s fältfel (`response.data`)
+   plockas dessutom in i felmeddelandet — SDK:ns `err.message` är alltid den
+   intetsägande "Failed to create record."
+
+**Deploy-invariant:** `verify-baseline.mjs` (`verifyAppWritableFields`)
+asserterar att `annual_wheel_items` HAR `day`/`tags`/`responsible` och att det
+deprecerade `track` INTE är obligatoriskt. Schemadrift fäller därmed deployen i
+stället för att dyka upp som "det går inte att skapa en aktivitet".
+
 ### 30.5 Regelefterlevnad
 
 - **§ 21 isolering:** tenant-bred STAFF/OBSERVER-data — en ren `startup_member`
@@ -4271,4 +4303,3 @@ persisterad/loggad, når aldrig AI-kontexten. Fail-soft utan koppling.
   `ai_usage_events` (surface `dashboard_chat`) och räknas mot månadstaket;
   protokollgenereringen kör `assertWithinAiBudget`; hårda tak på längd,
   segment, chunk-antal och turindelningsstorlek.
->>>>>>> origin/staging

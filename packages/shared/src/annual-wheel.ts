@@ -387,6 +387,21 @@ export function annualWheelDateLabel(
   return `${d} ${monthName} ${year}`;
 }
 
+/**
+ * Kompakt datumetikett för listor/chips: "12 aug", "aug" (hela månaden) eller
+ * "Hela året" (odaterad). Året utelämnas — listorna visar redan ett valt år.
+ */
+export function annualWheelShortDateLabel(
+  month: number | null | undefined,
+  day: number | null | undefined
+): string {
+  const m = sanitizeMonth(month);
+  if (m === null) return 'Hela året';
+  const short = MONTHS_SHORT_SV[m - 1].toLowerCase();
+  const d = sanitizeDay(day);
+  return d === null ? short : `${d} ${short}`;
+}
+
 /** Kvartal (1–4) för en 1-baserad månad. 0 för ogiltig månad. */
 export function quarterForMonth(month: number | null | undefined): 0 | 1 | 2 | 3 | 4 {
   if (typeof month !== 'number' || month < 1 || month > 12) return 0;

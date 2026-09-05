@@ -3,11 +3,11 @@
 import { revalidatePath } from 'next/cache';
 import type PocketBase from 'pocketbase';
 import { getServerPb, getCurrentUser } from '@/lib/auth.server';
-import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { hasRole } from '@/lib/rbac';
 import {
   createAnnualWheelItem,
   logAgentAction,
+  schemaDriftMessage,
   updateAnnualWheelItemField,
   type AnnualWheelWritableField
 } from '@/lib/core/write';
@@ -29,9 +29,14 @@ import {
 export interface AnnualWheelActionState {
   ok?: boolean;
   error?: string;
+  /** Icke-blockerande varning (t.ex. schemat saknar fält). */
+  warning?: string;
 }
 
 const EDIT_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
+
+/** Kollektionens NAMN — aldrig custom-id:t (se kommentar i core/write). */
+const COLLECTION = 'annual_wheel_items';
 
 /**
  * Kategorier styrs BARA av superadmin — plattformens `admin`-roll (den högsta
@@ -46,6 +51,22 @@ function revalidate() {
 
 function userActor(user: { id: string; tenant: string; roles: Role[] }): Actor {
   return { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles };
+}
+
+/**
+ * Superuser-klient som skrivlagret får falla tillbaka på när PB v0.23.4:s
+ * rule-eval tyst nekar en behörig staff-användare (samma mönster som
+ * de minimis § 20.5 och education_documents § 18.3). Rollen är redan
+ * verifierad i actionen innan fallbacken kan användas; saknas credentials
+ * returneras null och det ursprungliga felet bubblar upp.
+ */
+async function superuserPb(): Promise<PocketBase | null> {
+  const su = await getSuperuserPb();
+  if (!su.ok) {
+    console.error('[arshjul] superuser unavailable — ingen fallback', { reason: su.reason });
+    return null;
+  }
+  return su.pb;
 }
 
 /**
@@ -68,20 +89,29 @@ export async function createAnnualWheelItemAction(input: {
   if (!hasRole(user.roles, EDIT_ROLES)) return { error: 'Åtkomst nekad.' };
 
   const pb = await getServerPb();
-  const result = await createAnnualWheelItem(pb, userActor(user), {
-    year: input.year,
-    title: input.title,
-    month: input.month ?? null,
-    day: input.day ?? null,
-    tags: input.tags ?? [],
-    category: input.category,
-    responsible: input.responsible ?? null,
-    notes: input.notes
-  });
-  if (!result.ok) return { error: result.error };
+  const result = await createAnnualWheelItem(
+    pb,
+    userActor(user),
+    {
+      year: input.year,
+      title: input.title,
+      month: input.month ?? null,
+      day: input.day ?? null,
+      tags: input.tags ?? [],
+      category: input.category,
+      responsible: input.responsible ?? null,
+      notes: input.notes
+    },
+    { fallbackPb: superuserPb }
+  );
+  if (!result.ok) {
+    console.error('[arshjul] create failed', { tenant: user.tenant, error: result.error });
+    return { error: result.error };
+  }
 
   revalidate();
-  return { ok: true };
+  const missing = result.value.schemaMissing ?? [];
+  return missing.length > 0 ? { ok: true, warning: schemaDriftMessage(missing) } : { ok: true };
 }
 
 /** Uppdaterar ETT fält på en årshjuls-post. */
@@ -95,8 +125,16 @@ export async function updateAnnualWheelItemAction(
   if (!hasRole(user.roles, EDIT_ROLES)) return { error: 'Åtkomst nekad.' };
 
   const pb = await getServerPb();
-  const result = await updateAnnualWheelItemField(pb, userActor(user), { itemId, field, value });
-  if (!result.ok) return { error: result.error };
+  const result = await updateAnnualWheelItemField(
+    pb,
+    userActor(user),
+    { itemId, field, value },
+    { fallbackPb: superuserPb }
+  );
+  if (!result.ok) {
+    console.error('[arshjul] update failed', { tenant: user.tenant, field, error: result.error });
+    return { error: result.error };
+  }
 
   revalidate();
   return { ok: true };
@@ -112,12 +150,34 @@ export async function deleteAnnualWheelItemAction(itemId: string): Promise<Annua
   const pb = await getServerPb();
   try {
     const row = await pb
-      .collection(PB_COLLECTIONS.annualWheelItems)
+      .collection(COLLECTION)
       .getOne<{ tenant: string }>(itemId, { fields: 'id,tenant' });
     if (String(row.tenant) !== user.tenant) return { error: 'Åtkomst nekad.' };
-    await pb.collection(PB_COLLECTIONS.annualWheelItems).delete(itemId);
   } catch {
-    return { error: 'Kunde inte radera posten.' };
+    return { error: 'Posten hittades inte.' };
+  }
+
+  try {
+    await pb.collection(COLLECTION).delete(itemId);
+  } catch (err) {
+    // Rule-eval kan neka en behörig staff-användare (§ 21.3) → superuser.
+    const su = await superuserPb();
+    if (!su) {
+      console.error('[arshjul] delete failed', {
+        tenant: user.tenant,
+        error: err instanceof Error ? err.message : err
+      });
+      return { error: 'Kunde inte radera posten.' };
+    }
+    try {
+      await su.collection(COLLECTION).delete(itemId);
+    } catch (suErr) {
+      console.error('[arshjul] delete failed (superuser)', {
+        tenant: user.tenant,
+        error: suErr instanceof Error ? suErr.message : suErr
+      });
+      return { error: 'Kunde inte radera posten.' };
+    }
   }
 
   revalidate();
@@ -179,7 +239,7 @@ async function loadCategoryRecord(
   if (!recordId) return { ok: false, error: 'Kategori saknas.' };
   try {
     const row = await pb
-      .collection(PB_COLLECTIONS.annualWheelCategories)
+      .collection(CATEGORY_COLLECTION)
       .getOne<{ id: string; tenant: string; key: string; label: string }>(recordId, {
         fields: 'id,tenant,key,label'
       });
@@ -231,7 +291,7 @@ export async function createAnnualWheelCategoryAction(input: {
   let createdId: string;
   try {
     const created = await writeWithFallback(pb, (client) =>
-      client.collection(PB_COLLECTIONS.annualWheelCategories).create<{ id: string }>({
+      client.collection(CATEGORY_COLLECTION).create<{ id: string }>({
         tenant: user.tenant,
         key,
         label,
@@ -292,7 +352,7 @@ export async function updateAnnualWheelCategoryAction(
 
   try {
     await writeWithFallback(pb, (client) =>
-      client.collection(PB_COLLECTIONS.annualWheelCategories).update(recordId, payload)
+      client.collection(CATEGORY_COLLECTION).update(recordId, payload)
     );
   } catch (err) {
     console.error('[annual-wheel] category update failed', {
@@ -336,7 +396,7 @@ export async function deleteAnnualWheelCategoryAction(
 
   // Används kategorin av någon aktivitet? Då krävs omkategorisering först.
   try {
-    const used = await pb.collection(PB_COLLECTIONS.annualWheelItems).getList(1, 1, {
+    const used = await pb.collection(COLLECTION).getList(1, 1, {
       filter: pb.filter('tenant = {:tenant} && category = {:key}', {
         tenant: user.tenant,
         key: found.row.key
@@ -355,7 +415,7 @@ export async function deleteAnnualWheelCategoryAction(
 
   try {
     await writeWithFallback(pb, (client) =>
-      client.collection(PB_COLLECTIONS.annualWheelCategories).delete(recordId)
+      client.collection(CATEGORY_COLLECTION).delete(recordId)
     );
   } catch (err) {
     console.error('[annual-wheel] category delete failed', {

@@ -5,7 +5,13 @@ import {
   resolveAnnualWheelCategories,
   type AnnualWheelCategoryDef
 } from '@platform/shared';
-import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+
+/**
+ * PB-target är kollektionens NAMN, inte custom-id:t: en instans som
+ * provisionerats via `setup-via-api.mjs` kan ha fått ett autogenererat
+ * collection-id, och då 404:ar id-baserade anrop (§ 30.4).
+ */
+const CATEGORY_COLLECTION = 'annual_wheel_categories';
 
 /**
  * Årshjulets DYNAMISKA kategorier (CLAUDE.md § 30).
@@ -38,7 +44,7 @@ export async function listAnnualWheelCategories(
   if (!tenantId) return [...DEFAULT_ANNUAL_WHEEL_CATEGORIES];
   try {
     const res = await pb
-      .collection(PB_COLLECTIONS.annualWheelCategories)
+      .collection(CATEGORY_COLLECTION)
       .getList<CategoryRow>(1, ANNUAL_WHEEL_CATEGORY_PAGE_SIZE, {
         filter: pb.filter('tenant = {:tenant}', { tenant: tenantId }),
         sort: 'sort_order,label'
@@ -80,7 +86,7 @@ export async function ensureAnnualWheelCategoriesMaterialized(
   let rowCount = 0;
   try {
     const res = await pb
-      .collection(PB_COLLECTIONS.annualWheelCategories)
+      .collection(CATEGORY_COLLECTION)
       .getList<CategoryRow>(1, 1, {
         filter: pb.filter('tenant = {:tenant}', { tenant: tenantId }),
         fields: 'id'
@@ -94,7 +100,7 @@ export async function ensureAnnualWheelCategoriesMaterialized(
 
   for (const def of DEFAULT_ANNUAL_WHEEL_CATEGORIES) {
     try {
-      await pb.collection(PB_COLLECTIONS.annualWheelCategories).create({
+      await pb.collection(CATEGORY_COLLECTION).create({
         tenant: tenantId,
         key: def.id,
         label: def.label,

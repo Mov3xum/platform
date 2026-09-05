@@ -5,7 +5,9 @@ export { createActivity, updateActivityField } from './activities';
 export {
   createAnnualWheelItem,
   updateAnnualWheelItemField,
-  type AnnualWheelWritableField
+  schemaDriftMessage,
+  type AnnualWheelWritableField,
+  type AnnualWheelWriteOptions
 } from './annual-wheel';
 export {
   createCompassModule,
