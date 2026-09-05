@@ -51,6 +51,82 @@ type SubmitOpts = { includeWebContext: boolean; attachments: ChatAttachment[]; d
 // Ett köat meddelande med all info som behövs för att köra det senare.
 type QueuedTurn = { id: string; text: string; opts: SubmitOpts; displayText: string };
 
+// Körtillstånd PER TRÅD — flera trådar kan ha varsin pågående turn samtidigt.
+// Turer i olika trådar är oberoende server-side (varje turn laddar och sparar
+// sin egen tråd-rad), så parallellitet är rent klient-tillstånd. Inom EN tråd
+// gäller fortsatt kö-semantiken (en turn i taget, ordningen bevaras).
+interface ConvState {
+  messages: UiMessage[];
+  /** Meddelandena är inlästa (skapad denna session eller hämtade från servern). */
+  loaded: boolean;
+  agentId: string | null;
+  /** En turn förbereds (tråd skapas / djupjobb registreras) — räknas som upptagen. */
+  starting: boolean;
+  streaming: boolean;
+  liveSteps: LiveStep[];
+  liveText: string;
+  deepJob: { id: string; status: DeepJobStatus; progress: number } | null;
+  queue: QueuedTurn[];
+  error: string | null;
+  /** En turn blev klar medan tråden inte var öppen → grön prick tills den öppnas. */
+  unread: boolean;
+}
+
+// Nyckel för den ännu inte sparade "Ny chatt"-konversationen. Migreras till
+// det riktiga tråd-id:t när tråden skapats (kö + meddelanden följer med).
+const DRAFT_KEY = '__draft__';
+
+const DEEP_TERMINAL: DeepJobStatus[] = ['succeeded', 'failed', 'cancelled'];
+
+function emptyConv(): ConvState {
+  return {
+    messages: [],
+    loaded: false,
+    agentId: null,
+    starting: false,
+    streaming: false,
+    liveSteps: [],
+    liveText: '',
+    deepJob: null,
+    queue: [],
+    error: null,
+    unread: false
+  };
+}
+
+function isDeepRunning(c?: ConvState | null): boolean {
+  return !!c?.deepJob && !DEEP_TERMINAL.includes(c.deepJob.status);
+}
+
+/** Tråden kör (eller har köat) något — nya meddelanden i den köas. */
+function isBusy(c?: ConvState | null): boolean {
+  return !!c && (c.starting || c.streaming || isDeepRunning(c) || c.queue.length > 0);
+}
+
+// ── Statusprickar per tråd (som Claude Code) ────────────────────────────────
+// blå (pulserande) = agenten arbetar · gul = väntar på dig · orange = fel ·
+// grön = klart, oläst svar. Movexum-paletten (§ 2.3) — aldrig röd.
+type ThreadStatus = 'working' | 'action' | 'error' | 'done';
+
+function statusFor(c?: ConvState): ThreadStatus | null {
+  if (!c) return null;
+  if (c.starting || c.streaming || isDeepRunning(c) || c.queue.length > 0) return 'working';
+  if (c.error) return 'error';
+  const last = c.messages[c.messages.length - 1];
+  if (last?.role === 'assistant' && (last.approval_request || last.meeting_request)) {
+    return 'action';
+  }
+  if (c.unread) return 'done';
+  return null;
+}
+
+const STATUS_DOT: Record<ThreadStatus, { cls: string; label: string }> = {
+  working: { cls: 'bg-movexum-bla animate-pulse', label: 'Agenten arbetar' },
+  action: { cls: 'bg-movexum-gul', label: 'Väntar på dig — godkännande eller möte' },
+  error: { cls: 'bg-movexum-orange', label: 'Något gick fel — öppna chatten' },
+  done: { cls: 'bg-movexum-gron', label: 'Klart — nytt svar att läsa' }
+};
+
 function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
   return messages
     .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -74,46 +150,50 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
 export default function ChattWorkspace({ greeting, agents, connectors, activities, userRoles, initialThreads }: Props) {
   const [threads, setThreads] = useState<ThreadListResult>(initialThreads);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<UiMessage[]>([]);
+  // Alla konversationers körtillstånd, nycklat på tråd-id (eller DRAFT_KEY).
+  // `convsRef` är sanningen (synkron åtkomst i körnings-callbacks som löper
+  // parallellt); state speglar den för rendering.
+  const [convs, setConvs] = useState<Record<string, ConvState>>({});
   const [activeAgent, setActiveAgent] = useState<DashboardAgent | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [streaming, setStreaming] = useState(false);
-  const [liveSteps, setLiveSteps] = useState<LiveStep[]>([]);
-  // Svaret medan det strömmas in token-för-token (löpande utskrift).
-  const [liveText, setLiveText] = useState('');
-  const [deepJob, setDeepJob] = useState<{ id: string; threadId: string; status: DeepJobStatus; progress: number } | null>(null);
   const [rightOpen, setRightOpen] = useState(true);
   // Mötesläget (§ 34): null = stängt; objektet bär ev. förifyllnad/återupptag.
   const [meetingPanel, setMeetingPanel] = useState<MeetingInitial | null>(null);
   const [resumableMeetings, setResumableMeetings] = useState<ResumableMeeting[]>([]);
-  // Köade meddelanden (skrivna medan en turn körs). `queueRef` är sanningen
-  // (synkron åtkomst i körnings-callbacks); `queued` speglar den för rendering.
-  const [queued, setQueued] = useState<QueuedItem[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
-  const queueRef = useRef<QueuedTurn[]>([]);
-  // Synkrona "upptagen"-flaggor så submit/drain inte tävlar med React-state.
-  const streamingRef = useRef(false);
-  const deepRunningRef = useRef(false);
+  const convsRef = useRef<Record<string, ConvState>>({});
+  const activeThreadIdRef = useRef<string | null>(null);
+  // Pågående trådskapande (Ny chatt) — delas av snabba dubbelsubmits.
+  const creatingThreadRef = useRef<Promise<string | null> | null>(null);
 
-  const deepRunning =
-    !!deepJob && !['succeeded', 'failed', 'cancelled'].includes(deepJob.status);
-
-  function publishQueue() {
-    setQueued(queueRef.current.map((q) => ({ id: q.id, content: q.displayText })));
+  function updateConv(key: string, updater: (c: ConvState) => ConvState) {
+    const cur = convsRef.current[key] ?? emptyConv();
+    convsRef.current = { ...convsRef.current, [key]: updater(cur) };
+    setConvs(convsRef.current);
   }
 
-  // Kör nästa köade meddelande om inget redan körs.
-  const runNextRef = useRef<() => void>(() => {});
-  function runNext() {
-    if (streamingRef.current || deepRunningRef.current) return;
-    const next = queueRef.current[0];
-    if (!next) return;
-    queueRef.current = queueRef.current.slice(1);
-    publishQueue();
-    runTurn(next);
+  function dropConv(key: string) {
+    if (!(key in convsRef.current)) return;
+    const next = { ...convsRef.current };
+    delete next[key];
+    convsRef.current = next;
+    setConvs(next);
   }
-  runNextRef.current = runNext;
+
+  function setActive(id: string | null) {
+    activeThreadIdRef.current = id;
+    setActiveThreadId(id);
+  }
+
+  const activeKey = activeThreadId ?? DRAFT_KEY;
+  const activeConv = convs[activeKey];
+  const streaming = activeConv?.streaming ?? false;
+  const deepRunning = isDeepRunning(activeConv);
+  const starting = activeConv?.starting ?? false;
+  const queuedItems: QueuedItem[] = (activeConv?.queue ?? []).map((q) => ({
+    id: q.id,
+    content: q.displayText
+  }));
 
   const refreshThreads = useCallback(async () => {
     const next = await listThreadsAction();
@@ -141,11 +221,6 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     submit(prompt, { includeWebContext: false, attachments: [], deepJob: false });
   }
 
-  // Laddar in de persisterade trådmeddelandena (inkl. per-turn-tokens) i UI:t.
-  const applyThreadMessages = useCallback((raw: ToolRunMessage[]) => {
-    setMessages(toUiMessages(raw));
-  }, []);
-
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuFor(null);
@@ -154,141 +229,183 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
-  // Pollar ett pågående djupt jobb och laddar in utkastet när det är klart.
+  // ── Djupa jobb ────────────────────────────────────────────────────────────
+  // Pollar ALLA pågående djupjobb (ett per tråd kan köra samtidigt) och laddar
+  // in utkastet i respektive tråd när det är klart. Intervallet beror bara på
+  // ANTALET körande jobb (stabilt), inte på convs-objektet — annars skulle
+  // varje streamad token i en annan tråd nollställa timern.
+  const runningDeepCount = Object.values(convs).filter(
+    (c) => isDeepRunning(c) && c.deepJob?.id
+  ).length;
+
   useEffect(() => {
-    if (!deepJob || !deepRunning) return;
+    if (runningDeepCount === 0) return;
     const timer = setInterval(async () => {
-      const res = await getDeepJobStatusAction(deepJob.id);
-      if (res.error || !res.status) return;
-      const status = res.status;
-      setDeepJob((cur) => (cur ? { ...cur, status, progress: res.progress ?? cur.progress } : cur));
-      if (['succeeded', 'failed', 'cancelled'].includes(status)) {
-        const msgs = await getThreadMessagesAction(deepJob.threadId);
-        if (msgs.messages) applyThreadMessages(msgs.messages);
-        await refreshThreads();
-        if (status === 'failed') setError(res.jobError || 'Djupdykningen misslyckades.');
-        // Jobbet klart → kör nästa köade meddelande (löpande feedback).
-        deepRunningRef.current = false;
-        runNextRef.current();
+      const entries = Object.entries(convsRef.current).filter(
+        ([, c]) => c.deepJob?.id && !DEEP_TERMINAL.includes(c.deepJob.status)
+      );
+      for (const [threadId, c] of entries) {
+        const jobId = c.deepJob!.id;
+        try {
+          const res = await getDeepJobStatusAction(jobId);
+          if (res.error || !res.status) continue;
+          const status = res.status;
+          // Överlappande ticks (långsamma anrop) får inte processa samma
+          // terminala jobb två gånger — kolla sanningen (ref) synkront igen.
+          const live = convsRef.current[threadId]?.deepJob;
+          if (!live || live.id !== jobId || DEEP_TERMINAL.includes(live.status)) continue;
+          updateConv(threadId, (cur) =>
+            cur.deepJob && cur.deepJob.id === jobId
+              ? {
+                  ...cur,
+                  deepJob: { ...cur.deepJob, status, progress: res.progress ?? cur.deepJob.progress }
+                }
+              : cur
+          );
+          if (DEEP_TERMINAL.includes(status)) {
+            const msgs = await getThreadMessagesAction(threadId);
+            const inactive = activeThreadIdRef.current !== threadId;
+            updateConv(threadId, (cur) => ({
+              ...cur,
+              messages: msgs.messages ? toUiMessages(msgs.messages) : cur.messages,
+              loaded: true,
+              error:
+                status === 'failed' ? res.jobError || 'Djupdykningen misslyckades.' : cur.error,
+              unread: status === 'succeeded' && inactive ? true : cur.unread
+            }));
+            await refreshThreads();
+            // Jobbet klart → kör nästa köade meddelande i den tråden.
+            runNext(threadId);
+          }
+        } catch {
+          // Nätverksglapp under pollning — försök igen nästa tick.
+        }
       }
     }, 3000);
     return () => clearInterval(timer);
-  }, [deepJob, deepRunning, refreshThreads, applyThreadMessages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runningDeepCount, refreshThreads]);
 
-  // Startar ett djupt jobb. Lägger INTE till användarmeddelandet (runTurn gör
-  // det), och städar `deepRunningRef` + drar kön vidare om starten fallerar.
-  async function startDeepInternal(instruction: string) {
+  // Startar ett djupt jobb i en given tråd. Användarmeddelandet är redan
+  // tillagt av runTurn; vid fel städas upptagen-flaggan och kön dras vidare.
+  async function startDeep(threadId: string, instruction: string) {
     const clean = instruction.trim();
-    deepRunningRef.current = true;
+    updateConv(threadId, (c) => ({ ...c, starting: true }));
     if (!clean) {
-      setError('Beskriv vad djupdykningen ska göra.');
-      deepRunningRef.current = false;
-      runNextRef.current();
+      updateConv(threadId, (c) => ({ ...c, starting: false, error: 'Beskriv vad djupdykningen ska göra.' }));
+      runNext(threadId);
       return;
     }
-    setError(null);
-    let threadId = activeThreadId;
-    if (!threadId) {
-      const created = await createThreadAction(activeAgent?.id);
-      if (created.error || !created.threadId) {
-        setError(created.error || 'Kunde inte skapa tråd.');
-        deepRunningRef.current = false;
-        runNextRef.current();
-        return;
-      }
-      threadId = created.threadId;
-      setActiveThreadId(threadId);
+    let res: Awaited<ReturnType<typeof startDeepJobAction>>;
+    try {
+      res = await startDeepJobAction(threadId, clean);
+    } catch (err) {
+      res = { error: err instanceof Error ? err.message : 'Kunde inte starta jobbet.' };
     }
-    const res = await startDeepJobAction(threadId, clean);
     if (res.error || !res.jobId) {
-      setError(res.error || 'Kunde inte starta jobbet.');
-      deepRunningRef.current = false;
-      runNextRef.current();
+      updateConv(threadId, (c) => ({
+        ...c,
+        starting: false,
+        error: res.error || 'Kunde inte starta jobbet.'
+      }));
+      runNext(threadId);
       return;
     }
-    setDeepJob({ id: res.jobId, threadId, status: 'queued', progress: 0 });
+    updateConv(threadId, (c) => ({
+      ...c,
+      starting: false,
+      deepJob: { id: res.jobId!, status: 'queued', progress: 0 }
+    }));
     const msgs = await getThreadMessagesAction(threadId);
-    if (msgs.messages) applyThreadMessages(msgs.messages);
+    if (msgs.messages) {
+      updateConv(threadId, (c) => ({ ...c, messages: toUiMessages(msgs.messages!), loaded: true }));
+    }
     await refreshThreads();
   }
 
-  function clearQueue() {
-    queueRef.current = [];
-    publishQueue();
-  }
-
   function cancelQueued(id: string) {
-    queueRef.current = queueRef.current.filter((q) => q.id !== id);
-    publishQueue();
+    updateConv(activeKey, (c) => ({ ...c, queue: c.queue.filter((q) => q.id !== id) }));
   }
 
   function newChat() {
-    clearQueue();
-    setActiveThreadId(null);
-    setMessages([]);
+    // Kön i en pågående tråd lever kvar (den är per tråd) — bara utkastet nollas.
+    dropConv(DRAFT_KEY);
+    setActive(null);
     setActiveAgent(null);
-    setError(null);
   }
 
   async function openThread(id: string) {
-    setError(null);
     setMenuFor(null);
-    clearQueue();
-    const res = await getThreadMessagesAction(id);
-    if (res.error) {
-      setError(res.error);
+    setActive(id);
+    // Öppnad → läst. (Gul "väntar på dig" härleds ur meddelandena och ligger
+    // kvar tills godkännandet faktiskt besvaras.)
+    updateConv(id, (c) => ({ ...c, unread: false }));
+    const existing = convsRef.current[id];
+    if (existing?.loaded) {
+      // Tråden är redan i minnet (ev. mitt i en körning) — visa den direkt.
+      setActiveAgent(existing.agentId ? agents.find((a) => a.id === existing.agentId) || null : null);
       return;
     }
-    setActiveThreadId(id);
-    applyThreadMessages(res.messages || []);
+    const res = await getThreadMessagesAction(id);
+    if (res.error) {
+      // `loaded` lämnas false så nästa klick på tråden försöker läsa igen.
+      updateConv(id, (c) => ({ ...c, error: res.error! }));
+      return;
+    }
+    updateConv(id, (c) => ({
+      ...c,
+      messages: toUiMessages(res.messages || []),
+      loaded: true,
+      agentId: res.agent || null,
+      unread: false
+    }));
     setActiveAgent(res.agent ? agents.find((a) => a.id === res.agent) || null : null);
   }
 
-  function applyStep(ev: { phase: 'start' | 'end'; id: string; label: string; ok?: boolean }) {
-    // Ett verktygssteg startar → ev. text som strömmats innan dess var en
-    // inledning före verktygsanropet, inte slutsvaret. Nolla den löpande
-    // texten så bara det riktiga svaret (som strömmas EFTER stegen) blir kvar.
-    if (ev.phase === 'start') setLiveText('');
-    setLiveSteps((prev) => {
+  function applyStep(
+    threadId: string,
+    ev: { phase: 'start' | 'end'; id: string; label: string; ok?: boolean }
+  ) {
+    updateConv(threadId, (c) => {
+      // Ett verktygssteg startar → ev. text som strömmats innan dess var en
+      // inledning före verktygsanropet, inte slutsvaret. Nolla den löpande
+      // texten så bara det riktiga svaret (som strömmas EFTER stegen) blir kvar.
+      const liveText = ev.phase === 'start' ? '' : c.liveText;
       if (ev.phase === 'start') {
-        if (prev.some((s) => s.id === ev.id)) return prev;
-        return [...prev, { id: ev.id, label: ev.label, running: true }];
+        if (c.liveSteps.some((s) => s.id === ev.id)) return { ...c, liveText };
+        return { ...c, liveText, liveSteps: [...c.liveSteps, { id: ev.id, label: ev.label, running: true }] };
       }
-      return prev.map((s) => (s.id === ev.id ? { ...s, running: false, ok: ev.ok } : s));
+      return {
+        ...c,
+        liveText,
+        liveSteps: c.liveSteps.map((s) => (s.id === ev.id ? { ...s, running: false, ok: ev.ok } : s))
+      };
     });
   }
 
   // Icke-streamande fallback (server-action) om streaming inte är tillgänglig.
-  async function fallbackTurn(threadId: string, text: string, opts: SubmitOpts) {
+  // Returnerar true när svaret faktiskt landade i tråden.
+  async function fallbackTurn(threadId: string, text: string, opts: SubmitOpts): Promise<boolean> {
     const res = await sendThreadMessageAction(threadId, text, {
       includeWebContext: opts.includeWebContext,
       attachments: opts.attachments
     });
     if (res.error) {
-      setError(res.error);
-      return;
+      updateConv(threadId, (c) => ({ ...c, error: res.error! }));
+      return false;
     }
-    if (res.messages) applyThreadMessages(res.messages);
+    if (res.messages) {
+      updateConv(threadId, (c) => ({ ...c, messages: toUiMessages(res.messages!), loaded: true }));
+    }
     await refreshThreads();
+    return true;
   }
 
-  async function runStreamingTurn(text: string, opts: SubmitOpts) {
-    streamingRef.current = true;
-    setStreaming(true);
-    setLiveSteps([]);
-    setLiveText('');
+  async function runStreamingTurn(threadId: string, text: string, opts: SubmitOpts) {
+    updateConv(threadId, (c) => ({ ...c, streaming: true, liveSteps: [], liveText: '' }));
+    // true när assistentens svar landade (styr den gröna oläst-pricken).
+    let landed = false;
     try {
-      let threadId = activeThreadId;
-      if (!threadId) {
-        const created = await createThreadAction(activeAgent?.id);
-        if (created.error || !created.threadId) {
-          setError(created.error || 'Kunde inte skapa tråd.');
-          return;
-        }
-        threadId = created.threadId;
-        setActiveThreadId(threadId);
-      }
-
       let res: Response;
       try {
         res = await fetch('/api/chat/stream', {
@@ -303,13 +420,13 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
         });
       } catch {
         // Nätverks-/uppkopplingsfel → degradera till server-action.
-        await fallbackTurn(threadId, text, opts);
+        landed = await fallbackTurn(threadId, text, opts);
         return;
       }
 
       if (!res.ok || !res.body) {
         if (res.status >= 500) {
-          await fallbackTurn(threadId, text, opts);
+          landed = await fallbackTurn(threadId, text, opts);
         } else {
           let msg = 'Kunde inte hämta svar just nu — försök igen.';
           try {
@@ -318,7 +435,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           } catch {
             /* behåll default */
           }
-          setError(msg);
+          updateConv(threadId, (c) => ({ ...c, error: msg }));
         }
         return;
       }
@@ -345,19 +462,29 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
             continue;
           }
           if (ev.type === 'step') {
-            applyStep(ev as unknown as { phase: 'start' | 'end'; id: string; label: string; ok?: boolean });
+            applyStep(threadId, ev as unknown as { phase: 'start' | 'end'; id: string; label: string; ok?: boolean });
           } else if (ev.type === 'token') {
             const delta = ev.delta;
-            if (typeof delta === 'string' && delta) setLiveText((prev) => prev + delta);
+            if (typeof delta === 'string' && delta) {
+              updateConv(threadId, (c) => ({ ...c, liveText: c.liveText + delta }));
+            }
           } else if (ev.type === 'final') {
             gotFinal = true;
+            landed = true;
             // Persisterade meddelandet ersätter den live-strömmade texten —
             // nolla liveText så svaret inte visas dubbelt en kort stund.
-            setLiveText('');
-            if (Array.isArray(ev.messages)) applyThreadMessages(ev.messages as ToolRunMessage[]);
+            if (Array.isArray(ev.messages)) {
+              const msgs = toUiMessages(ev.messages as ToolRunMessage[]);
+              updateConv(threadId, (c) => ({ ...c, liveText: '', messages: msgs, loaded: true }));
+            } else {
+              updateConv(threadId, (c) => ({ ...c, liveText: '' }));
+            }
           } else if (ev.type === 'error') {
             gotError = true;
-            setError(typeof ev.error === 'string' ? ev.error : 'Kunde inte hämta svar just nu — försök igen.');
+            updateConv(threadId, (c) => ({
+              ...c,
+              error: typeof ev.error === 'string' ? (ev.error as string) : 'Kunde inte hämta svar just nu — försök igen.'
+            }));
           }
         }
       }
@@ -366,31 +493,128 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       // anslutningen) — turen kan ändå ha sparats server-side, så ladda om.
       if (!gotFinal && !gotError) {
         const msgs = await getThreadMessagesAction(threadId);
-        if (msgs.messages) applyThreadMessages(msgs.messages);
+        if (msgs.messages) {
+          landed = true;
+          updateConv(threadId, (c) => ({ ...c, messages: toUiMessages(msgs.messages!), loaded: true }));
+        }
       }
       await refreshThreads();
+    } catch {
+      // Oväntat fel mitt i turen (t.ex. avbruten läsning) — visa ett fel i
+      // tråden i stället för att tyst lämna den hängande.
+      updateConv(threadId, (c) => ({
+        ...c,
+        error: c.error || 'Kunde inte hämta svar just nu — försök igen.'
+      }));
     } finally {
-      streamingRef.current = false;
-      setStreaming(false);
-      setLiveSteps([]);
-      setLiveText('');
-      // Turen klar → kör nästa köade meddelande (löpande feedback).
-      runNextRef.current();
+      const inactive = activeThreadIdRef.current !== threadId;
+      updateConv(threadId, (c) => ({
+        ...c,
+        streaming: false,
+        liveSteps: [],
+        liveText: '',
+        // Blev klar i bakgrunden → grön prick tills tråden öppnas.
+        unread: landed && inactive ? true : c.unread
+      }));
+      // Turen klar → kör nästa köade meddelande i samma tråd. Andra trådars
+      // körningar är oberoende och påverkas inte.
+      runNext(threadId);
     }
+  }
+
+  // Kör nästa köade meddelande i EN tråd om den inte redan kör något.
+  function runNext(threadId: string) {
+    const conv = convsRef.current[threadId];
+    if (!conv) return;
+    if (conv.starting || conv.streaming || isDeepRunning(conv)) return;
+    const next = conv.queue[0];
+    if (!next) return;
+    updateConv(threadId, (c) => ({ ...c, queue: c.queue.slice(1) }));
+    runTurn(threadId, next);
   }
 
   // Visar användarmeddelandet i transkriptet och kör turen (streaming/djupt).
-  function runTurn(item: QueuedTurn) {
-    setMessages((prev) => [...prev, { role: 'user', content: item.displayText }]);
+  function runTurn(threadId: string, item: QueuedTurn) {
+    updateConv(threadId, (c) => ({
+      ...c,
+      messages: [...c.messages, { role: 'user', content: item.displayText }],
+      error: null,
+      unread: false
+    }));
     if (item.opts.deepJob) {
-      void startDeepInternal(item.text);
+      void startDeep(threadId, item.text);
     } else {
-      void runStreamingTurn(item.text, item.opts);
+      void runStreamingTurn(threadId, item.text, item.opts);
     }
   }
 
+  // Skapar tråden för utkastet ("Ny chatt") EN gång och migrerar utkastets
+  // tillstånd (kö + ev. meddelanden) till det riktiga tråd-id:t.
+  function ensureThreadFromDraft(): Promise<string | null> {
+    if (!creatingThreadRef.current) {
+      creatingThreadRef.current = (async () => {
+        let created: Awaited<ReturnType<typeof createThreadAction>>;
+        try {
+          created = await createThreadAction(activeAgent?.id);
+        } catch (err) {
+          created = { error: err instanceof Error ? err.message : 'Kunde inte skapa tråd.' };
+        }
+        if (created.error || !created.threadId) {
+          updateConv(DRAFT_KEY, (c) => ({
+            ...c,
+            starting: false,
+            queue: [],
+            error: created.error || 'Kunde inte skapa tråd.'
+          }));
+          return null;
+        }
+        const id = created.threadId;
+        const draft = convsRef.current[DRAFT_KEY] ?? emptyConv();
+        const next = {
+          ...convsRef.current,
+          [id]: { ...draft, starting: false, loaded: true, agentId: activeAgent?.id ?? null }
+        };
+        delete next[DRAFT_KEY];
+        convsRef.current = next;
+        setConvs(next);
+        // Byt bara vy om användaren fortfarande står kvar i utkastet — har hen
+        // hunnit öppna en annan tråd fortsätter körningen i bakgrunden.
+        if (activeThreadIdRef.current === null) setActive(id);
+        void refreshThreads();
+        return id;
+      })();
+      creatingThreadRef.current.finally(() => {
+        creatingThreadRef.current = null;
+      });
+    }
+    return creatingThreadRef.current;
+  }
+
+  async function dispatchSubmit(item: QueuedTurn) {
+    const threadId = activeThreadIdRef.current;
+    if (threadId) {
+      updateConv(threadId, (c) => ({ ...c, error: null }));
+      if (isBusy(convsRef.current[threadId])) {
+        updateConv(threadId, (c) => ({ ...c, queue: [...c.queue, item] }));
+        return;
+      }
+      runTurn(threadId, item);
+      return;
+    }
+    // Utkast: köa meddelandet lokalt (visas direkt), skapa tråden och kör.
+    updateConv(DRAFT_KEY, (c) => ({
+      ...c,
+      loaded: true,
+      starting: true,
+      error: null,
+      queue: [...c.queue, item]
+    }));
+    const createdId = await ensureThreadFromDraft();
+    if (!createdId) return;
+    runNext(createdId);
+  }
+
   function submit(text: string, opts: SubmitOpts) {
-    setError(null);
     const displayText = opts.deepJob
       ? text
       : text || (opts.attachments.length === 1 ? '(bilaga skickad)' : '(bilagor skickade)');
@@ -400,15 +624,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       opts,
       displayText
     };
-    // Upptagen (en turn kör eller kön är icke-tom) → köa. Annars kör direkt.
-    const busy =
-      streamingRef.current || deepRunningRef.current || queueRef.current.length > 0;
-    if (busy) {
-      queueRef.current = [...queueRef.current, item];
-      publishQueue();
-      return;
-    }
-    runTurn(item);
+    void dispatchSubmit(item);
   }
 
   // Svar på agentens godkännandefråga (§ 33): skickas som en vanlig user-tur
@@ -427,7 +643,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     if (res.url) {
       window.open(res.url, '_blank', 'noopener,noreferrer');
     } else {
-      setError(res.error || 'Kunde inte hämta filen.');
+      updateConv(activeKey, (c) => ({ ...c, error: res.error || 'Kunde inte hämta filen.' }));
     }
   }
 
@@ -457,12 +673,14 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       return;
     }
     await deleteThreadAction(item.id);
+    dropConv(item.id);
     if (activeThreadId === item.id) newChat();
     await refreshThreads();
   }
 
   function ThreadRow({ item }: { item: ThreadListItem }) {
     const selected = item.id === activeThreadId;
+    const status = statusFor(convs[item.id]);
     return (
       <div
         className={`group relative flex items-center gap-1 rounded-xl px-2 py-1.5 text-[13px] transition ${
@@ -471,9 +689,16 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       >
         <button
           type="button"
-          onClick={() => openThread(item.id)}
+          onClick={() => void openThread(item.id)}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
+          {status && (
+            <span
+              className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[status].cls}`}
+              title={STATUS_DOT[status].label}
+              aria-label={STATUS_DOT[status].label}
+            />
+          )}
           {item.pinned && <Icon name="star" size={11} />}
           <span className="truncate">{item.title}</span>
         </button>
@@ -529,6 +754,12 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   const hasThreads =
     threads.pinned.length + threads.active.length + threads.archived.length > 0;
 
+  // Antal trådar med en pågående körning — visas i sidopanelens sidfot så det
+  // syns att andra chattar arbetar även när man står i en annan.
+  const workingCount = Object.entries(convs).filter(
+    ([key, c]) => key !== DRAFT_KEY && (c.starting || c.streaming || isDeepRunning(c) || c.queue.length > 0)
+  ).length;
+
   return (
     <div className="flex min-h-0 flex-1">
       {meetingPanel && (
@@ -561,15 +792,15 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           connectors={connectors}
           activities={activities}
           userRoles={userRoles}
-          messages={messages}
-          isPending={streaming || deepRunning}
-          error={error}
+          messages={activeConv?.messages ?? []}
+          isPending={streaming || deepRunning || starting}
+          error={activeConv?.error ?? null}
           activeAgent={activeAgent}
           deepRunning={deepRunning}
-          deepProgress={deepJob?.progress ?? 0}
-          liveSteps={liveSteps}
-          liveText={liveText}
-          queued={queued}
+          deepProgress={activeConv?.deepJob?.progress ?? 0}
+          liveSteps={activeConv?.liveSteps ?? []}
+          liveText={activeConv?.liveText ?? ''}
+          queued={queuedItems}
           resetSignal={activeThreadId ?? 'new'}
           onPickAgent={setActiveAgent}
           onReset={newChat}
@@ -632,6 +863,29 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
                 <Section label="Arkiverade" items={threads.archived} />
               </>
             )}
+          </div>
+          {/* Förklaring av statusprickarna — flera chattar kan arbeta parallellt. */}
+          <div className="border-t border-default px-3 py-2.5">
+            {workingCount > 0 && (
+              <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-foreground-muted">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-movexum-bla" aria-hidden />
+                {workingCount === 1 ? '1 chatt arbetar' : `${workingCount} chattar arbetar`}
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-foreground-subtle">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-movexum-bla" aria-hidden /> Arbetar
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-movexum-gul" aria-hidden /> Väntar på dig
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-movexum-gron" aria-hidden /> Klart
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-movexum-orange" aria-hidden /> Fel
+              </span>
+            </div>
           </div>
         </aside>
       )}
