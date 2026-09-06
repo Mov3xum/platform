@@ -55,7 +55,7 @@ import { Icon } from '@/components/proto/Icon';
 import { NextCaption, Wheel } from './Wheel';
 import {
   CategoryShareBar,
-  ChartCard,
+  DashSection,
   HBarList,
   MonthlyLoadChart,
   QuarterStrip,
@@ -253,6 +253,9 @@ export function AnnualWheelView({
   const todayAngle = useMemo(() => dateAngleInYear(today, year), [today, year]);
   const currentMonth = today.getFullYear() === year ? today.getMonth() + 1 : null;
   const next = useMemo(() => nextUpcomingItem(filtered, today), [filtered, today]);
+
+  const activeFilters =
+    (category !== 'all' ? 1 : 0) + (tag !== 'all' ? 1 : 0) + (responsible !== 'all' ? 1 : 0);
 
   function toggleMonthFocus(m: number) {
     setMonthFocus((cur) => (cur === m ? null : m));
@@ -458,7 +461,7 @@ export function AnnualWheelView({
         </div>
       ) : null}
 
-      {/* Filterrad */}
+      {/* Filterrad — en rad ovanför allt den styr (nyckeltal, hjul, listor, diagram, tabell). */}
       <div className="flex flex-wrap items-center gap-3">
         <FilterSelect
           label="År"
@@ -496,6 +499,20 @@ export function AnnualWheelView({
             { value: 'none', label: 'Utan ansvarig' }
           ]}
         />
+        {activeFilters > 0 ? (
+          <button
+            type="button"
+            onClick={() => {
+              setCategory('all');
+              setTag('all');
+              setResponsible('all');
+              setMonthFocus(null);
+            }}
+            className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-[12px] font-medium text-brand hover:bg-brand/15"
+          >
+            <Icon name="x" size={11} /> Rensa {activeFilters === 1 ? 'filter' : `${activeFilters} filter`}
+          </button>
+        ) : null}
         <div className="ml-auto flex items-center gap-2">
           {canManageCategories ? (
             <button
@@ -536,7 +553,7 @@ export function AnnualWheelView({
 
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
         {/* Hjulet */}
-        <section className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
+        <section className="min-w-0">
           <Wheel
             items={filtered}
             year={year}
@@ -555,10 +572,11 @@ export function AnnualWheelView({
         {/* Odaterade + snabböversikt */}
         <section className="space-y-4">
           {undated.length > 0 ? (
-            <div className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
-              <h3 className="mb-2 font-heading text-[14px] font-semibold text-foreground">
+            <div className="min-w-0">
+              <h3 className="mb-1 font-heading text-[14px] font-semibold text-foreground">
                 Helårs- / återkommande aktiviteter
               </h3>
+              <p className="mb-2 text-[11.5px] text-foreground-subtle">Ligger i hjulets mitt — utan fast månad.</p>
               <ul className="space-y-0.5">
                 {undated.map((it) => (
                   <ItemPill
@@ -573,8 +591,8 @@ export function AnnualWheelView({
             </div>
           ) : null}
 
-          <div className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
-            <div className="mb-2 flex items-center justify-between gap-2">
+          <div className={`min-w-0 ${undated.length > 0 ? 'border-t border-default pt-4' : ''}`}>
+            <div className="mb-1 flex items-center justify-between gap-2">
               <h3 className="font-heading text-[14px] font-semibold text-foreground">Per månad</h3>
               {monthFocus ? (
                 <button
@@ -592,17 +610,20 @@ export function AnnualWheelView({
                 Inga aktiviteter matchar filtret för {year}.
               </p>
             ) : (
-              <div className="max-h-[460px] space-y-2 overflow-y-auto pr-1">
+              <div className="max-h-[520px] overflow-y-auto pr-1">
                 {byMonth
                   .slice(1)
                   .map((monthItems, idx) => ({ monthItems, m: idx + 1 }))
                   .filter(({ m }) => (monthFocus ? m === monthFocus : true))
                   .map(({ monthItems, m }) =>
                     monthItems.length > 0 ? (
-                      <div key={m} className="rounded-xl border border-default bg-surface p-2">
-                        <div className="mb-1 flex items-baseline justify-between gap-2 px-1.5 pt-0.5">
-                          <span className="font-heading text-[12.5px] font-semibold text-foreground">
+                      <div key={m} className="pb-3 pt-2">
+                        <div className="mb-1 flex items-baseline justify-between gap-2 border-b border-default px-1.5 pb-1">
+                          <span className="inline-flex items-center gap-1.5 font-heading text-[12.5px] font-semibold text-foreground">
                             {monthLongLabel(m)}
+                            {m === currentMonth ? (
+                              <span className="rounded-full bg-brand/10 px-1.5 py-px text-[10px] font-medium text-brand">Nu</span>
+                            ) : null}
                           </span>
                           <span className="mx-tnum shrink-0 text-[11px] text-foreground-subtle">
                             Q{quarterForMonth(m)} · {monthItems.length}{' '}
@@ -634,8 +655,18 @@ export function AnnualWheelView({
       </div>
 
       {/* Analys — linjer och fördelningar; klick på tagg/ansvarig filtrerar allt ovan. */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <ChartCard className="lg:col-span-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 pt-2">
+        <div>
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">Analys</div>
+          <h2 className="font-heading text-[18px] font-semibold text-foreground">Så fördelar sig året</h2>
+        </div>
+        <span className="text-[12px] text-foreground-subtle">
+          Räknas på {filtered.length} {filtered.length === 1 ? 'aktivitet' : 'aktiviteter'} i det aktuella urvalet
+          {hasPreviousYear ? ` · jämförs med ${previousYear}` : ''}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-x-10 gap-y-6 lg:grid-cols-3">
+        <DashSection className="lg:col-span-2">
           <MonthlyLoadChart
             load={load}
             previous={prevLoad}
@@ -645,60 +676,78 @@ export function AnnualWheelView({
             mode={loadMode}
             onModeChange={setLoadMode}
           />
-        </ChartCard>
-        <ChartCard title="Per kategori" subtitle={`Fördelning av ${filtered.length} aktiviteter`}>
+        </DashSection>
+        <DashSection title="Per kategori" subtitle={`Fördelning av ${filtered.length} aktiviteter`}>
           <CategoryShareBar counts={categoryCounts} categories={categories} total={filtered.length} />
-          <div className="mt-4 border-t border-default pt-4">
+          <div className="mt-5">
             <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
               Per kvartal
             </div>
             <QuarterStrip counts={quarterCounts} currentQuarter={currentMonth ? quarterForMonth(currentMonth) : null} />
           </div>
-        </ChartCard>
+        </DashSection>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ChartCard title="Per tagg" subtitle="En aktivitet med flera taggar räknas i varje tagg · klicka för att filtrera">
+      <div className="grid grid-cols-1 gap-x-10 gap-y-6 lg:grid-cols-2">
+        <DashSection title="Per tagg" subtitle="En aktivitet med flera taggar räknas i varje tagg · klicka för att filtrera">
           <HBarList
             rows={tagRows(tagCounts, tag, (value) =>
               setTag(tag === value ? 'all' : (value as AnnualWheelTag | 'none'))
             )}
             emptyText="Inga aktiviteter matchar filtret."
           />
-        </ChartCard>
-        <ChartCard title="Per ansvarig" subtitle="Vem som äger flest aktiviteter · klicka för att filtrera">
+        </DashSection>
+        <DashSection title="Per ansvarig" subtitle="Vem som äger flest aktiviteter · klicka för att filtrera">
           <HBarList
             rows={responsibleRows(responsibleCounts, responsible, (value) =>
               setResponsible(responsible === value ? 'all' : value)
             )}
             emptyText="Inga aktiviteter matchar filtret."
           />
-        </ChartCard>
+        </DashSection>
       </div>
 
       {/* Tabell (månad × spår) — speglar Excel-vyn */}
-      <section className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
-        <h3 className="mb-3 font-heading text-[14px] font-semibold text-foreground">
-          Verksamhetstabell {year}
-        </h3>
+      <section className="border-t border-default pt-4">
+        <div className="mb-3">
+          <h3 className="font-heading text-[14px] font-semibold text-foreground">Verksamhetstabell {year}</h3>
+          <p className="text-[11.5px] text-foreground-subtle">Månad × tagg — speglar Excel-vyn. Perioder syns i varje månad de löper.</p>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-[12px]">
             <thead>
               <tr className="text-left text-foreground-subtle">
-                <th className="sticky left-0 bg-surface px-2 py-1.5 font-medium">Månad</th>
+                <th className="sticky left-0 bg-canvas/85 px-2 py-1.5 font-medium backdrop-blur-sm">Månad</th>
                 {tableTags.map((t) => (
-                  <th key={t} className="px-2 py-1.5 font-medium">
+                  <th key={t} className="min-w-[170px] px-2 py-1.5 font-medium">
                     {annualWheelTagLabel(t)}
                   </th>
                 ))}
-                <th className="px-2 py-1.5 font-medium">Utan tagg</th>
+                <th className="min-w-[170px] px-2 py-1.5 font-medium">Utan tagg</th>
               </tr>
             </thead>
             <tbody>
               {tableRows.map((row) => (
-                <tr key={row.month} className="border-t border-default align-top">
-                  <th className="sticky left-0 bg-surface px-2 py-1.5 text-left font-medium text-foreground">
-                    {row.monthLabel}
+                <tr
+                  key={row.month}
+                  className={`border-t align-top ${
+                    row.month === currentMonth ? 'border-brand/30 bg-brand/5' : 'border-default'
+                  } ${row.month % 3 === 1 && row.month > 1 ? 'border-t-2' : ''}`}
+                >
+                  <th
+                    className={`sticky left-0 px-2 py-1.5 text-left font-medium text-foreground ${
+                      row.month === currentMonth ? 'bg-brand/5' : 'bg-canvas/85 backdrop-blur-sm'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      {row.monthLabel}
+                      {row.month === currentMonth ? (
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand" aria-hidden />
+                      ) : null}
+                    </span>
+                    {row.month % 3 === 1 ? (
+                      <span className="ml-1 text-[10px] font-normal text-foreground-subtle">Q{row.quarter}</span>
+                    ) : null}
                   </th>
                   {row.cells.map((cell) => (
                     <td key={cell.tag ?? '__untagged'} className="px-2 py-1.5">
@@ -706,27 +755,25 @@ export function AnnualWheelView({
                         {cell.items.map((it) => (
                           <span
                             key={it.id}
-                            className="inline-flex items-center gap-1 text-foreground-muted"
+                            className="flex items-start gap-1.5 whitespace-nowrap text-foreground-muted"
+                            title={`${it.title} · ${annualWheelRangeLabel(it)}${it.responsible_name ? ` · ${it.responsible_name}` : ''}`}
                           >
                             <span
-                              className="inline-block h-2 w-2 shrink-0 rounded-full"
+                              className="mt-[5px] inline-block h-2 w-2 shrink-0 rounded-full"
                               style={{ background: colorVar(it.category) }}
                               aria-hidden
                             />
-                            {it.day || isAnnualWheelPeriod(it) ? (
-                              <span className="mx-tnum shrink-0 font-medium text-foreground-subtle">
-                                {annualWheelShortRangeLabel(it)}
-                              </span>
-                            ) : null}
-                            {it.title}
-                            {it.day ? (
-                              <span className="mx-tnum text-foreground-subtle">
-                                · {it.day}/{row.month}
-                              </span>
-                            ) : null}
-                            {it.responsible_name ? (
-                              <span className="text-foreground-subtle">· {it.responsible_name}</span>
-                            ) : null}
+                            <span className="min-w-0">
+                              {it.day || isAnnualWheelPeriod(it) ? (
+                                <span className="mx-tnum mr-1 font-medium text-foreground-subtle">
+                                  {annualWheelShortRangeLabel(it)}
+                                </span>
+                              ) : null}
+                              <span className="font-medium text-foreground">{it.title}</span>
+                              {it.responsible_name ? (
+                                <span className="text-foreground-subtle"> · {it.responsible_name}</span>
+                              ) : null}
+                            </span>
                           </span>
                         ))}
                       </div>

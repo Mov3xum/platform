@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   annualWheelCategoryColorVar,
   annualWheelCategoryLabel,
@@ -54,37 +54,40 @@ export function StatTile({
   value: ReactNode;
   hint?: ReactNode;
   /** Signerad förändring mot en namngiven period (visas bara när den finns). */
-  delta?: { value: number; label: string } | null;
+  delta?: { value: number; label: string; short?: string } | null;
   /** 0–1: fyllnad i en tunn mätare under värdet. */
   meter?: number | null;
   spark?: ReactNode;
   icon?: 'calendar' | 'check' | 'bolt' | 'clock' | 'user' | 'graph';
 }) {
   return (
-    <div className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+    <div className="min-w-0 px-4 py-1 first:pl-0 last:pr-0">
+      <div className="flex items-center gap-1.5">
+        {icon ? <Icon name={icon} size={13} className="shrink-0 text-brand" /> : null}
+        <span className="truncate text-[10.5px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
           {label}
         </span>
-        {icon ? <Icon name={icon} size={14} className="text-foreground-subtle" /> : null}
       </div>
       <div className="mt-2 flex items-end justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-baseline gap-2">
-            <span className="text-[28px] font-semibold leading-none text-foreground">{value}</span>
+            <span className="text-[30px] font-semibold leading-none tracking-[-0.02em] text-foreground">{value}</span>
             {delta ? (
               <span
-                className={`mx-tnum text-[12px] font-medium ${
+                className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[11.5px] font-semibold ${
                   delta.value > 0
-                    ? 'text-movexum-morkgron dark:text-movexum-ljusgron'
+                    ? 'bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-ljusgron'
                     : delta.value < 0
-                      ? 'text-movexum-morkorange dark:text-movexum-orange'
-                      : 'text-foreground-subtle'
+                      ? 'bg-movexum-pastell-orange text-movexum-morkorange dark:bg-movexum-morkorange/50 dark:text-movexum-orange'
+                      : 'bg-canvas-muted text-foreground-subtle'
                 }`}
                 title={delta.label}
               >
-                {delta.value > 0 ? '+' : ''}
-                {fmt(delta.value)}
+                <span className="mx-tnum">
+                  {delta.value > 0 ? '+' : delta.value < 0 ? '−' : '±'}
+                  {fmt(Math.abs(delta.value))}
+                </span>
+                <span className="font-normal opacity-80">{delta.short}</span>
               </span>
             ) : null}
           </div>
@@ -177,8 +180,9 @@ export function MonthlyLoadChart({
   mode: LoadMode;
   onModeChange: (m: LoadMode) => void;
 }) {
-  const { ref, width } = useContainerWidth<HTMLDivElement>();
+  const { ref, width } = useContainerWidth<HTMLDivElement>(860);
   const [hover, setHover] = useState<number | null>(null);
+  const gradId = useId().replace(/:/g, '');
 
   const H = 220;
   const PAD = { top: 18, right: 18, bottom: 28, left: 34 };
@@ -277,6 +281,12 @@ export function MonthlyLoadChart({
           onPointerLeave={() => setHover(null)}
           className="block overflow-visible"
         >
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--color-brand)" stopOpacity="0.16" />
+              <stop offset="100%" stopColor="var(--color-brand)" stopOpacity="0" />
+            </linearGradient>
+          </defs>
           {/* Rutnät + y-axel */}
           {ticks.map((t) => (
             <g key={t}>
@@ -318,8 +328,9 @@ export function MonthlyLoadChart({
           {/* Idag */}
           {todayX !== null ? (
             <g>
-              <line x1={todayX} x2={todayX} y1={PAD.top - 6} y2={yAt(0)} stroke="var(--color-foreground-subtle)" strokeWidth="1" />
-              <text x={todayX + 4} y={PAD.top - 2} fontSize="10" fill="var(--color-foreground-subtle)">
+              <line x1={todayX} x2={todayX} y1={PAD.top - 2} y2={yAt(0)} stroke="var(--color-foreground-subtle)" strokeWidth="1" strokeOpacity="0.7" />
+              <rect x={todayX - 16} y={PAD.top - 16} width="32" height="14" rx="7" fill="var(--color-canvas-muted)" />
+              <text x={todayX} y={PAD.top - 6} textAnchor="middle" fontSize="9.5" fontWeight={600} fill="var(--color-foreground-muted)">
                 Idag
               </text>
             </g>
@@ -331,8 +342,13 @@ export function MonthlyLoadChart({
           ) : null}
 
           {/* Aktuellt år */}
-          <path d={areaOf(cur)} fill="var(--color-brand)" fillOpacity="0.06" />
+          <path d={areaOf(cur)} fill={`url(#${gradId})`} />
           <path d={pathOf(cur)} fill="none" stroke="var(--color-brand)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          {cur.map((v, i) =>
+            i === labelIdx || i === hover ? null : (
+              <circle key={i} cx={xAt(i)} cy={yAt(v)} r="2.5" fill="var(--color-brand)" stroke="var(--color-surface)" strokeWidth="1.5" />
+            )
+          )}
 
           {/* Direktetikett (en) */}
           {labelIdx !== null ? (
@@ -465,20 +481,21 @@ export function CategoryShareBar({
 export function QuarterStrip({ counts, currentQuarter }: { counts: AnnualWheelQuarterCount[]; currentQuarter: number | null }) {
   const max = Math.max(1, ...counts.map((c) => c.count));
   return (
-    <div className="grid grid-cols-4 gap-2" role="img" aria-label="Aktiviteter per kvartal">
+    <div className="grid grid-cols-4 divide-x divide-default" role="img" aria-label="Aktiviteter per kvartal">
       {counts.map((c) => {
         const now = c.quarter === currentQuarter;
         return (
           <div
             key={c.quarter}
-            className={`rounded-xl border px-2.5 py-2 ${now ? 'border-brand/40 bg-brand/5' : 'border-default bg-canvas-subtle'}`}
+            className="px-3 first:pl-0 last:pr-0"
             title={`Q${c.quarter}: ${fmt(c.count)} (${pct(c.share)} av daterade)`}
           >
-            <div className="flex items-baseline justify-between">
-              <span className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-foreground-subtle">
+            <div className="flex items-baseline justify-between gap-1">
+              <span className={`inline-flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] ${now ? 'text-brand' : 'text-foreground-subtle'}`}>
                 Q{c.quarter}
+                {now ? <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand" aria-hidden /> : null}
               </span>
-              <span className="text-[11px] text-foreground-subtle">{pct(c.share)}</span>
+              <span className="mx-tnum text-[11px] text-foreground-subtle">{pct(c.share)}</span>
             </div>
             <div className="mt-1 text-[20px] font-semibold leading-none text-foreground">{fmt(c.count)}</div>
             <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-brand/15">
@@ -605,12 +622,20 @@ export function StatsRow({
 }) {
   const isCurrentYear = new Date().getFullYear() === year;
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+    <div className="grid grid-cols-2 gap-y-5 border-y border-default py-4 md:grid-cols-3 md:divide-x md:divide-default xl:grid-cols-5">
       <StatTile
         label={`Aktiviteter ${year}`}
         value={fmt(stats.total)}
         icon="calendar"
-        delta={previousTotal !== null ? { value: stats.total - previousTotal, label: `Jämfört med ${previousYear} (${fmt(previousTotal)})` } : null}
+        delta={
+          previousTotal !== null
+            ? {
+                value: stats.total - previousTotal,
+                label: `Jämfört med ${previousYear} (${fmt(previousTotal)})`,
+                short: `vs ${previousYear}`
+              }
+            : null
+        }
         hint={
           stats.periods > 0
             ? `${fmt(stats.periods)} ${stats.periods === 1 ? 'period' : 'perioder'} · ${fmt(stats.undated)} helår`
@@ -671,23 +696,32 @@ export function StatsRow({
   );
 }
 
-export function ChartCard({
+/**
+ * Inline sektion — ingen box, bara en hårlinje ovanför och en tydlig rubrik.
+ * `aside` hamnar till höger om rubriken (kontroller, förklaring).
+ */
+export function DashSection({
   title,
   subtitle,
+  aside,
   children,
   className = ''
 }: {
   title?: string;
   subtitle?: string;
+  aside?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
   return (
-    <section className={`rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5 ${className}`}>
-      {title ? (
-        <div className="mb-3">
-          <h3 className="font-heading text-[14px] font-semibold text-foreground">{title}</h3>
-          {subtitle ? <p className="text-[11.5px] text-foreground-subtle">{subtitle}</p> : null}
+    <section className={`min-w-0 border-t border-default pt-4 ${className}`}>
+      {title || aside ? (
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            {title ? <h3 className="font-heading text-[14px] font-semibold text-foreground">{title}</h3> : null}
+            {subtitle ? <p className="text-[11.5px] text-foreground-subtle">{subtitle}</p> : null}
+          </div>
+          {aside}
         </div>
       ) : null}
       {children}

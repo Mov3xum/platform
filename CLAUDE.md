@@ -4002,6 +4002,10 @@ klick. All räkning är ren, enhetstestad logik i `@platform/shared`
 filtrerade urvalet — filterraden styr allt, så siffrorna hänger ihop.
 Diagrammen är inline-SVG med CSS-variabler (`--color-brand`, kategori-tokens)
 så dark mode följer med utan `dark:`-varianter; text bär aldrig seriefärg.
+**Layouten är boxlös (2026-09):** inga vita kort — sektionerna (nyckeltal, hjul,
+listor, analys, tabell) skiljs åt med hårlinjer (`border-t border-default`),
+eyebrow-etiketter och rubriker (`DashSection`), så sidan läses som en
+sammanhängande dashboard i stället för staplade paneler.
 Ingen ny dataväg, ingen PII (ansvarig visas som visningsnamn, som tidigare),
 ingen AI-inferens → riskklass n/a.
 
