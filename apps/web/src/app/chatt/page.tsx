@@ -12,6 +12,7 @@ import { PageShell } from '@/components/PageShell';
 import { getBuiltin } from '@/lib/ai/builtins';
 import { listActiveConnectors } from '@/lib/ai/connectors';
 import { loadAgentLogEntries } from '@/lib/feed/agent-log';
+import { swedishGreeting } from '@platform/shared';
 
 interface ToolRow {
   id: string;
@@ -43,14 +44,6 @@ interface ActivityRow {
     startup?: { id: string; name: string };
     tool?: { id: string; icon?: string };
   };
-}
-
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 10) return 'God morgon';
-  if (h < 13) return 'God förmiddag';
-  if (h < 17) return 'God eftermiddag';
-  return 'God kväll';
 }
 
 export default async function ChattPage() {
@@ -174,7 +167,8 @@ export default async function ChattPage() {
     .slice(0, 60);
 
   const firstName = user.name.split(' ')[0] || user.email;
-  const hello = `${greeting()}, ${firstName}.`;
+  // Hälsningen följer svensk tid (Europe/Stockholm), inte serverns UTC-klocka.
+  const hello = `${swedishGreeting()}, ${firstName}.`;
 
   const initialThreads = await listThreadsAction();
 

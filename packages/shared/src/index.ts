@@ -1602,6 +1602,7 @@ export * from './voice';
 export * from './compass-authoring';
 // ─── Mötesläge i chatten (ren möteslogik, enhetstestad, § 34) ────────────────
 export * from './meeting';
+export * from './greeting';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */
