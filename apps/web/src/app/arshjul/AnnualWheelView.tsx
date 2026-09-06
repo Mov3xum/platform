@@ -16,6 +16,11 @@ import {
   annualWheelShortRangeLabel,
   annualWheelTagsInUse,
   annualWheelTagsInGroup,
+  annualWheelMonthlyLoad,
+  annualWheelYearStats,
+  countItemsByCategory,
+  countItemsByQuarter,
+  countItemsByResponsible,
   isAnnualWheelPeriod,
   packAnnualWheelArcs,
   expandAnnualWheelSeries,
@@ -48,6 +53,17 @@ import {
 } from '@platform/shared';
 import { Icon } from '@/components/proto/Icon';
 import { NextCaption, Wheel } from './Wheel';
+import {
+  CategoryShareBar,
+  ChartCard,
+  HBarList,
+  MonthlyLoadChart,
+  QuarterStrip,
+  StatsRow,
+  responsibleRows,
+  tagRows,
+  type LoadMode
+} from './Dashboard';
 import type { AssignableResource } from '@/lib/assignments/types';
 import {
   createAnnualWheelCategoryAction,
@@ -209,8 +225,31 @@ export function AnnualWheelView({
     [items, year, category, responsible]
   );
 
-  // "Idag"-visare + nedräkning (bara meningsfullt för innevarande år).
+  // ── Dashboard-underlag (ren logik i @platform/shared, filtren styr allt) ──
   const today = useMemo(() => new Date(), []);
+  const previousYear = year - 1;
+  // Föregående år med SAMMA kategori-/tagg-/ansvarig-filter → jämförbar linje.
+  const prevFiltered = useMemo(
+    () => filterAnnualWheelItems(items, { year: previousYear, category, tag, responsible }),
+    [items, previousYear, category, tag, responsible]
+  );
+  const hasPreviousYear = useMemo(() => items.some((i) => i.year === previousYear), [items, previousYear]);
+  const stats = useMemo(() => annualWheelYearStats(filtered, year, today), [filtered, year, today]);
+  const load = useMemo(() => annualWheelMonthlyLoad(filtered), [filtered]);
+  const prevLoad = useMemo(
+    () => (hasPreviousYear ? annualWheelMonthlyLoad(prevFiltered) : null),
+    [hasPreviousYear, prevFiltered]
+  );
+  const [loadMode, setLoadMode] = useState<LoadMode>('active');
+  const categoryCounts = useMemo(() => countItemsByCategory(filtered, categories), [filtered, categories]);
+  const quarterCounts = useMemo(() => countItemsByQuarter(filtered), [filtered]);
+  // Ansvarig-fördelning räknas före ansvarig-filtret så staplarna kan användas som filter.
+  const responsibleCounts = useMemo(
+    () => countItemsByResponsible(filterAnnualWheelItems(items, { year, category, tag })),
+    [items, year, category, tag]
+  );
+
+  // "Idag"-visare + nedräkning (bara meningsfullt för innevarande år).
   const todayAngle = useMemo(() => dateAngleInYear(today, year), [today, year]);
   const currentMonth = today.getFullYear() === year ? today.getMonth() + 1 : null;
   const next = useMemo(() => nextUpcomingItem(filtered, today), [filtered, today]);
@@ -486,31 +525,14 @@ export function AnnualWheelView({
         </div>
       </div>
 
-      {/* Uppföljning per tagg — klicka för att filtrera hjul, listor och tabell. */}
-      {tagCounts.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1.5">
-          {tagCounts.map(({ tag: t, count }) => {
-            const value = t ?? 'none';
-            const active = tag === value;
-            return (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setTag(active ? 'all' : (value as AnnualWheelTag | 'none'))}
-                aria-pressed={active}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] transition-colors ${
-                  active
-                    ? 'border-brand bg-brand/10 text-brand'
-                    : 'border-default text-foreground-muted hover:border-strong hover:text-foreground'
-                }`}
-              >
-                {t ? annualWheelTagLabel(t) : 'Utan tagg'}
-                <span className="mx-tnum text-[11px] text-foreground-subtle">{count}</span>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
+      {/* Nyckeltal — räknas på det filtrerade urvalet så alla siffror hänger ihop. */}
+      <StatsRow
+        stats={stats}
+        previousTotal={hasPreviousYear ? prevFiltered.length : null}
+        year={year}
+        previousYear={previousYear}
+        spark={load.map((r) => r.active)}
+      />
 
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
         {/* Hjulet */}
@@ -609,6 +631,49 @@ export function AnnualWheelView({
             )}
           </div>
         </section>
+      </div>
+
+      {/* Analys — linjer och fördelningar; klick på tagg/ansvarig filtrerar allt ovan. */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <ChartCard className="lg:col-span-2">
+          <MonthlyLoadChart
+            load={load}
+            previous={prevLoad}
+            year={year}
+            previousYear={previousYear}
+            today={today}
+            mode={loadMode}
+            onModeChange={setLoadMode}
+          />
+        </ChartCard>
+        <ChartCard title="Per kategori" subtitle={`Fördelning av ${filtered.length} aktiviteter`}>
+          <CategoryShareBar counts={categoryCounts} categories={categories} total={filtered.length} />
+          <div className="mt-4 border-t border-default pt-4">
+            <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+              Per kvartal
+            </div>
+            <QuarterStrip counts={quarterCounts} currentQuarter={currentMonth ? quarterForMonth(currentMonth) : null} />
+          </div>
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <ChartCard title="Per tagg" subtitle="En aktivitet med flera taggar räknas i varje tagg · klicka för att filtrera">
+          <HBarList
+            rows={tagRows(tagCounts, tag, (value) =>
+              setTag(tag === value ? 'all' : (value as AnnualWheelTag | 'none'))
+            )}
+            emptyText="Inga aktiviteter matchar filtret."
+          />
+        </ChartCard>
+        <ChartCard title="Per ansvarig" subtitle="Vem som äger flest aktiviteter · klicka för att filtrera">
+          <HBarList
+            rows={responsibleRows(responsibleCounts, responsible, (value) =>
+              setResponsible(responsible === value ? 'all' : value)
+            )}
+            emptyText="Inga aktiviteter matchar filtret."
+          />
+        </ChartCard>
       </div>
 
       {/* Tabell (månad × spår) — speglar Excel-vyn */}

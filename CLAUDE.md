@@ -3769,6 +3769,7 @@ och år.
 | `apps/web/src/lib/actions/annual-wheel.ts` | Server actions (manuell CRUD via UI + kategori-CRUD för superadmin) |
 | `apps/web/src/app/arshjul/{page,AnnualWheelView}.tsx` | Sida + klientvy (tabell, filter, editor, kategori-hantering) |
 | `apps/web/src/app/arshjul/Wheel.tsx` | Hjul-SVG:n — EN renderare, delad av redigeringsvyn och presentationsläget |
+| `apps/web/src/app/arshjul/Dashboard.tsx` | Dashboard-komponenter (nyckeltalskort, linjediagram per månad, kategori-/kvartals-/tagg-/ansvarig-fördelning) — ren presentation |
 | `apps/web/src/app/arshjul/presentation/{page,AnnualWheelPresentation}.tsx` | Presentationsläget (`/arshjul/presentation`, helskärm utan rail) |
 | `apps/web/src/lib/annual-wheel/schema-repair.ts` | Självreparation av schemat via superuser (stale deploy) |
 | `apps/web/src/lib/ai/tools.ts` | Verktygen `create_annual_wheel_item` / `update_annual_wheel_item` + dispatch |
@@ -3984,6 +3985,25 @@ Taggar*) med klistrad topp- och bottenrad; period och upprepning är
 hopfällda `ToggleRow`-switchar som visar fälten först när de slås på, så
 dialogen inte känns som ett formulär för allt på en gång. `EditorModal`
 exporteras för fristående förhandsvisning/skärmdump.
+
+### 30.5bis Dashboard-komponenter på `/arshjul`
+
+Ovanför hjulet ligger en **nyckeltalsrad** (aktiviteter i år med delta mot
+föregående år + gnistlinje, genomfört-andel med mätare och andel av året,
+pågår nu, kommande 30 dagar + toppmånad, andel med ansvarig) och under
+hjul/lista ett **analysblock**: linjediagram över beläggning per månad
+(perioder räknas i varje månad de löper) med växling till kumulativt,
+föregående år som de-emfaslinje, "Idag"-markör och hårkors-tooltip; fördelning
+per kategori (segmenterad stapel i kategoriernas brand-tokens) + per kvartal;
+liggande staplar per tagg och per ansvarig som **filtrerar** hela sidan vid
+klick. All räkning är ren, enhetstestad logik i `@platform/shared`
+(`annualWheelYearStats`, `annualWheelMonthlyLoad`, `countItemsByCategory`,
+`countItemsByQuarter`, `countItemsByResponsible`) och körs på det redan
+filtrerade urvalet — filterraden styr allt, så siffrorna hänger ihop.
+Diagrammen är inline-SVG med CSS-variabler (`--color-brand`, kategori-tokens)
+så dark mode följer med utan `dark:`-varianter; text bär aldrig seriefärg.
+Ingen ny dataväg, ingen PII (ansvarig visas som visningsnamn, som tidigare),
+ingen AI-inferens → riskklass n/a.
 
 ### 30.6 Regelefterlevnad
 

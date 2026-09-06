@@ -1267,3 +1267,236 @@ export function roundedAnnulusSectorPath(
     'Z'
   ].join(' ');
 }
+
+// ─── Dashboard-statistik (ren, testbar — matar nyckeltal och diagram) ────────
+
+export interface AnnualWheelMonthlyLoad {
+  /** 1-baserad månad. */
+  month: number;
+  /** Poster som STARTAR i månaden (perioder räknas i sin startmånad, som hjulet). */
+  starts: number;
+  /** Poster som är AKTIVA i månaden (perioder räknas i varje månad de löper, som tabellen). */
+  active: number;
+  /** Ackumulerat antal starter t.o.m. månaden. */
+  cumulative: number;
+}
+
+/**
+ * Beläggning per månad (12 rader). Odaterade poster (month = null) ingår inte —
+ * de har ingen plats på tidsaxeln och listas separat av anroparen.
+ */
+export function annualWheelMonthlyLoad(items: readonly AnnualWheelItem[]): AnnualWheelMonthlyLoad[] {
+  const starts = Array.from({ length: 13 }, () => 0);
+  const active = Array.from({ length: 13 }, () => 0);
+  for (const it of items) {
+    const m = sanitizeMonth(it.month);
+    if (m === null) continue;
+    starts[m]++;
+    for (const am of monthsForAnnualWheelItem(it)) active[am]++;
+  }
+  const out: AnnualWheelMonthlyLoad[] = [];
+  let cumulative = 0;
+  for (let m = 1; m <= 12; m++) {
+    cumulative += starts[m];
+    out.push({ month: m, starts: starts[m], active: active[m], cumulative });
+  }
+  return out;
+}
+
+export interface AnnualWheelCategoryCount {
+  category: AnnualWheelCategory;
+  count: number;
+  /** Andel av alla poster (0–1). 0 när det inte finns några poster. */
+  share: number;
+}
+
+/**
+ * Antal poster per kategori, i katalogens ordning; kategorier som förekommer
+ * på poster men saknas i katalogen (raderade) läggs sist så inget tappas.
+ */
+export function countItemsByCategory(
+  items: readonly AnnualWheelItem[],
+  categories: readonly { id: string }[] = DEFAULT_ANNUAL_WHEEL_CATEGORIES
+): AnnualWheelCategoryCount[] {
+  const counts = new Map<string, number>();
+  for (const it of items) counts.set(it.category, (counts.get(it.category) ?? 0) + 1);
+  const total = items.length;
+  const known = categories.map((c) => c.id);
+  const orphans = [...counts.keys()].filter((k) => !known.includes(k)).sort();
+  return [...known, ...orphans]
+    .filter((id) => counts.has(id))
+    .map((id) => {
+      const count = counts.get(id) as number;
+      return { category: id, count, share: total > 0 ? count / total : 0 };
+    });
+}
+
+export interface AnnualWheelResponsibleCount {
+  /** Users-id, null = poster utan ansvarig. */
+  id: string | null;
+  /** Visningsnamn (aldrig e-post); "Utan ansvarig" för null. */
+  name: string;
+  count: number;
+}
+
+/**
+ * Antal poster per ansvarig, flest först (namn som sekundär ordning). Poster
+ * utan ansvarig samlas i en egen rad sist. `limit` kapar listan och lägger
+ * resten i en "Övriga"-rad (id `'__other'`) så diagrammet aldrig får fler
+ * staplar än det tål.
+ */
+export function countItemsByResponsible(
+  items: readonly AnnualWheelItem[],
+  limit = 6
+): AnnualWheelResponsibleCount[] {
+  const counts = new Map<string, { name: string; count: number }>();
+  let none = 0;
+  for (const it of items) {
+    const id = it.responsible || '';
+    if (!id) {
+      none++;
+      continue;
+    }
+    const cur = counts.get(id);
+    if (cur) cur.count++;
+    else counts.set(id, { name: it.responsible_name || 'Okänd', count: 1 });
+  }
+  const sorted = [...counts.entries()]
+    .map(([id, v]) => ({ id, name: v.name, count: v.count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'sv'));
+  const cap = Math.max(1, Math.trunc(limit));
+  const head: AnnualWheelResponsibleCount[] = sorted.slice(0, cap);
+  const tail = sorted.slice(cap);
+  if (tail.length > 0) {
+    head.push({ id: '__other', name: `Övriga (${tail.length})`, count: tail.reduce((s, r) => s + r.count, 0) });
+  }
+  if (none > 0) head.push({ id: null, name: 'Utan ansvarig', count: none });
+  return head;
+}
+
+export interface AnnualWheelYearStats {
+  /** Alla poster (inkl. odaterade). */
+  total: number;
+  /** Poster med månad satt. */
+  dated: number;
+  /** Helårs-/odaterade poster. */
+  undated: number;
+  /** Perioder (kampanjer som löper över tid). */
+  periods: number;
+  /** Poster med minst en tagg. */
+  tagged: number;
+  /** Poster med ansvarig satt. */
+  withResponsible: number;
+  /** Daterade poster som helt passerat (slut före idag). Alltid 0 för framtida år. */
+  passed: number;
+  /** Perioder som pågår idag + punktaktiviteter idag. */
+  ongoing: number;
+  /** Daterade poster som startar inom `horizonDays` dagar (efter idag). */
+  upcoming: number;
+  /** Daterade poster som ännu inte passerat (pågående + kommande, hela året). */
+  remaining: number;
+  /** Andel av daterade poster som passerat (0–1). 0 utan daterade poster. */
+  passedShare: number;
+  /** Andel av året som passerat (0–1) — 0 för framtida år, 1 för passerade. */
+  yearProgress: number;
+  /** Månad (1–12) med flest aktiva poster, null när allt är odaterat. */
+  peakMonth: number | null;
+  peakCount: number;
+}
+
+/**
+ * Nyckeltal för ett års poster räknat från `today`. Ren och testbar —
+ * dashboardens nyckeltalskort gör ingen egen räkning.
+ */
+export function annualWheelYearStats(
+  items: readonly AnnualWheelItem[],
+  year: number,
+  today: Date,
+  horizonDays = 30
+): AnnualWheelYearStats {
+  const day = startOfLocalDay(today);
+  const horizonEnd = new Date(day);
+  horizonEnd.setDate(horizonEnd.getDate() + horizonDays);
+
+  let dated = 0;
+  let periods = 0;
+  let tagged = 0;
+  let withResponsible = 0;
+  let passed = 0;
+  let ongoing = 0;
+  let upcoming = 0;
+  let remaining = 0;
+  for (const it of items) {
+    if ((it.tags ?? []).length > 0) tagged++;
+    if (it.responsible) withResponsible++;
+    if (isAnnualWheelPeriod(it)) periods++;
+    const range = annualWheelItemDateRange(it);
+    if (!range) continue;
+    dated++;
+    const start = startOfLocalDay(range.start).getTime();
+    const end = startOfLocalDay(range.end).getTime();
+    if (end < day.getTime()) {
+      passed++;
+      continue;
+    }
+    remaining++;
+    if (start <= day.getTime()) ongoing++;
+    else if (start <= horizonEnd.getTime()) upcoming++;
+  }
+
+  const yearStart = new Date(year, 0, 1).getTime();
+  const yearEnd = new Date(year + 1, 0, 1).getTime();
+  const yearProgress = Math.min(1, Math.max(0, (day.getTime() - yearStart) / (yearEnd - yearStart)));
+
+  const load = annualWheelMonthlyLoad(items);
+  let peakMonth: number | null = null;
+  let peakCount = 0;
+  for (const row of load) {
+    if (row.active > peakCount) {
+      peakCount = row.active;
+      peakMonth = row.month;
+    }
+  }
+
+  return {
+    total: items.length,
+    dated,
+    undated: items.length - dated,
+    periods,
+    tagged,
+    withResponsible,
+    passed,
+    ongoing,
+    upcoming,
+    remaining,
+    passedShare: dated > 0 ? passed / dated : 0,
+    yearProgress,
+    peakMonth,
+    peakCount
+  };
+}
+
+export interface AnnualWheelQuarterCount {
+  quarter: 1 | 2 | 3 | 4;
+  /** Poster som startar i kvartalet (perioder i sin startmånad). */
+  count: number;
+  /** Andel av alla daterade poster (0–1). */
+  share: number;
+}
+
+/** Antal daterade poster per kvartal (Q1 = jan–mar). Odaterade ingår inte. */
+export function countItemsByQuarter(items: readonly AnnualWheelItem[]): AnnualWheelQuarterCount[] {
+  const counts = [0, 0, 0, 0, 0];
+  let dated = 0;
+  for (const it of items) {
+    const q = quarterForMonth(it.month);
+    if (q === 0) continue;
+    counts[q]++;
+    dated++;
+  }
+  return ([1, 2, 3, 4] as const).map((q) => ({
+    quarter: q,
+    count: counts[q],
+    share: dated > 0 ? counts[q] / dated : 0
+  }));
+}
