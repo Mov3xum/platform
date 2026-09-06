@@ -5,6 +5,7 @@ import {
   MAX_MEETING_SECONDS,
   MAX_MEETING_SEGMENTS,
   MEETING_CONSENT_TEXT,
+  MEETING_FIRST_SEGMENT_SECONDS,
   MEETING_SEGMENT_SECONDS,
   MIN_VOICE_BYTES,
   formatMeetingClock,
@@ -91,6 +92,12 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
   // Inspelning
   const [elapsed, setElapsed] = useState(0);
   const [segments, setSegments] = useState<LiveSegment[]>([]);
+  // Senaste transkriberings-/uppladdningsfelet från servern — visas för
+  // användaren i stället för att sväljas (annars är ett kort möte med ETT
+  // fallerat segment bara "tomt transkript" utan förklaring).
+  const [segmentError, setSegmentError] = useState<string | null>(null);
+  const segmentErrorRef = useRef<string | null>(null);
+  const failedCountRef = useRef(0);
 
   // Granskning
   const [transcript, setTranscript] = useState('');
@@ -257,13 +264,20 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
       const data = (await res.json().catch(() => ({}))) as { text?: string; error?: string };
       if (!res.ok) throw new Error(data.error || 'Uppladdningen misslyckades.');
       updateSegment(index, { text: data.text || '', status: 'done' });
-    } catch {
+    } catch (err) {
       if (attempt === 0 && !discardedRef.current) {
         await sleep(1500);
         return uploadSegment(blob, mime, index, 1);
       }
       // Segmentet är förlorat — servern markerar luckan i transkriptet
       // (saknat index ⇒ lucka-markör), så coachen ser aldrig ett tyst hål.
+      // ORSAKEN visas för användaren (Voxtral-/konfigurations-/behörighetsfel
+      // ska aldrig sväljas till ett oförklarat tomt transkript).
+      const message =
+        err instanceof Error && err.message ? err.message : 'Uppladdningen misslyckades.';
+      segmentErrorRef.current = message;
+      failedCountRef.current += 1;
+      setSegmentError(message);
       updateSegment(index, { status: 'failed' });
     }
   }
@@ -305,13 +319,16 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     };
     recorderRef.current = recorder;
     recorder.start();
+    // Första segmentet hålls kort så att live-texten (eller ett fel) syns
+    // snabbt — därefter ~90-sekunderssegment (MEETING_FIRST_SEGMENT_SECONDS).
+    const segmentSeconds = index === 0 ? MEETING_FIRST_SEGMENT_SECONDS : MEETING_SEGMENT_SECONDS;
     segTimerRef.current = setTimeout(() => {
       try {
         recorder.stop();
       } catch {
         /* redan stoppad */
       }
-    }, MEETING_SEGMENT_SECONDS * 1000);
+    }, segmentSeconds * 1000);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -356,6 +373,9 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     recordingRef.current = true;
     nextIndexRef.current = 0;
     elapsedRef.current = 0;
+    segmentErrorRef.current = null;
+    failedCountRef.current = 0;
+    setSegmentError(null);
     setSegments([]);
     setElapsed(0);
     setPhase('recording');
@@ -413,6 +433,18 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     const ended = res.meeting;
     setTranscript(ended.transcript);
     if (ended.startupId) setStartupId((cur) => cur || ended.startupId);
+    // Föll segment bort ska granskningen förklara VARFÖR — särskilt när hela
+    // transkriptet blev tomt (ett kort möte har bara ett enda segment).
+    if (failedCountRef.current > 0) {
+      const reason = segmentErrorRef.current;
+      setError(
+        `${failedCountRef.current} segment kunde inte transkriberas` +
+          (reason ? `: ${reason}` : '.') +
+          (ended.transcript.trim()
+            ? ' De markeras som luckor i transkriptet.'
+            : ' Transkriptet blev därför tomt.')
+      );
+    }
     setPhase('review');
   }
 
@@ -657,8 +689,10 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
           {(phase === 'recording' || phase === 'finishing') && (
             <div className="flex flex-col gap-3">
               <p className="text-[12.5px] text-foreground-subtle">
-                Transkriberas löpande i ~{MEETING_SEGMENT_SECONDS}-sekunderssegment. Lämna gärna
-                fliken öppen — skärmen hålls vaken under inspelningen.
+                Transkriberas löpande — första texten dyker upp efter ca{' '}
+                {MEETING_FIRST_SEGMENT_SECONDS} sekunder, därefter i ~{MEETING_SEGMENT_SECONDS}
+                -sekunderssegment. Lämna gärna fliken öppen — skärmen hålls vaken under
+                inspelningen.
               </p>
               <div className="flex min-h-[180px] flex-col gap-2 rounded-xl border border-default bg-canvas-subtle p-3">
                 {doneSegments.length === 0 && pendingCount === 0 ? (
@@ -684,8 +718,9 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
                 )}
                 {failedSegments.length > 0 && (
                   <p className="text-[12px] text-movexum-morkorange">
-                    {failedSegments.length} segment kunde inte transkriberas — de markeras som
-                    luckor i transkriptet.
+                    {failedSegments.length} segment kunde inte transkriberas
+                    {segmentError ? ` (${segmentError})` : ''} — de markeras som luckor i
+                    transkriptet.
                   </p>
                 )}
               </div>
