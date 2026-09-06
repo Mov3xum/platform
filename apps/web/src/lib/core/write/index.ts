@@ -6,7 +6,9 @@ export {
   createAnnualWheelItem,
   createAnnualWheelSeries,
   updateAnnualWheelItemField,
+  updateAnnualWheelItemFields,
   schemaDriftMessage,
+  type AnnualWheelFieldChange,
   type AnnualWheelWritableField,
   type AnnualWheelWriteOptions
 } from './annual-wheel';

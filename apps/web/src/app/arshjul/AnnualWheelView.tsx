@@ -56,7 +56,7 @@ import {
   deleteAnnualWheelItemAction,
   repairAnnualWheelSchemaAction,
   updateAnnualWheelCategoryAction,
-  updateAnnualWheelItemAction
+  updateAnnualWheelItemFieldsAction
 } from '@/lib/actions/annual-wheel';
 
 type AnnualWheelWritableFieldClient =
@@ -285,30 +285,27 @@ export function AnnualWheelView({
 
     startTransition(async () => {
       if (form.id) {
-        // Uppdatera ändrade fält (ett anrop per fält via det delade lagret).
+        // Uppdatera ändrade fält i ETT anrop via det delade lagret, så att en
+        // periods start och slut valideras tillsammans (fält för fält föll på
+        // "slutet måste ligga efter starten" mot det GAMLA slutet).
         const original = items.find((i) => i.id === form.id);
-        const updates: { field: AnnualWheelWritableFieldClient; value: unknown }[] = [];
-        if (!original || original.title !== title) updates.push({ field: 'title', value: title });
-        if (!original || (original.month ?? null) !== monthValue)
-          updates.push({ field: 'month', value: monthValue });
-        if (!original || (original.day ?? null) !== dayValue)
-          updates.push({ field: 'day', value: dayValue });
+        const changes: Partial<Record<AnnualWheelWritableFieldClient, unknown>> = {};
+        if (!original || original.title !== title) changes.title = title;
+        if (!original || (original.month ?? null) !== monthValue) changes.month = monthValue;
+        if (!original || (original.day ?? null) !== dayValue) changes.day = dayValue;
         if (!original || (original.end_month ?? null) !== endMonthValue)
-          updates.push({ field: 'end_month', value: endMonthValue });
-        if (!original || (original.end_day ?? null) !== endDayValue)
-          updates.push({ field: 'end_day', value: endDayValue });
-        if (!original || !sameTags(original.tags ?? [], form.tags))
-          updates.push({ field: 'tags', value: form.tags });
-        if (!original || original.category !== form.category)
-          updates.push({ field: 'category', value: form.category });
+          changes.end_month = endMonthValue;
+        if (!original || (original.end_day ?? null) !== endDayValue) changes.end_day = endDayValue;
+        if (!original || !sameTags(original.tags ?? [], form.tags)) changes.tags = form.tags;
+        if (!original || original.category !== form.category) changes.category = form.category;
         if (!original || (original.responsible ?? '') !== form.responsible)
-          updates.push({ field: 'responsible', value: form.responsible || null });
+          changes.responsible = form.responsible || null;
         if (!original || (original.notes ?? '') !== form.notes.trim())
-          updates.push({ field: 'notes', value: form.notes.trim() });
-        if (!original || original.year !== form.year) updates.push({ field: 'year', value: form.year });
+          changes.notes = form.notes.trim();
+        if (!original || original.year !== form.year) changes.year = form.year;
 
-        for (const u of updates) {
-          const res = await updateAnnualWheelItemAction(form.id, u.field, u.value);
+        if (Object.keys(changes).length > 0) {
+          const res = await updateAnnualWheelItemFieldsAction(form.id, changes);
           if (res?.error) {
             setError(res.error);
             return;

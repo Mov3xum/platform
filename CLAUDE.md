@@ -3945,6 +3945,17 @@ av tre olika miljöskäl. Alla tre är nu täckta i `lib/core/write/annual-wheel
    (least privilege). Fel i skrivlagret visas nu på svenska med PB:s
    fältdetaljer ("Kunde inte spara aktiviteten. (category: …)").
 
+5. **Flera fält i EN skrivning (`updateAnnualWheelItemFields`).** Redigerings-
+   dialogen skrev tidigare ett fält i taget, och varje steg validerades mot
+   postens GAMLA övriga datumfält — att flytta en period från jan–feb till
+   mars–april föll på "Periodens slut måste ligga efter starten" när `month`
+   skrevs först (mars mot det gamla slutet februari), trots att resultatet var
+   giltigt. Nu skickar dialogen alla ändrade fält i ett anrop
+   (`updateAnnualWheelItemFieldsAction`), skrivlagret validerar perioden mot
+   det SAMMANLAGDA nya tillståndet, skriver en gång och audit-loggar per fält
+   (samma `agent_actions`-format som förut). `updateAnnualWheelItemField`
+   (chatt-verktyget) är ett tunt omslag över samma funktion.
+
 **Deploy-invariant:** `verify-baseline.mjs` (`verifyAppWritableFields`)
 asserterar att `annual_wheel_items` HAR `day`/`tags`/`responsible`/`end_month`/
 `end_day` och att det deprecerade `track` INTE är obligatoriskt. Schemadrift fäller därmed deployen i
