@@ -9,6 +9,7 @@ import {
   sanitizeMonth
 } from '@platform/shared';
 import { listAnnualWheelCategories } from '@/lib/annual-wheel/categories';
+import { ensureAnnualWheelSchema, unrepairableDriftMessage } from '@/lib/annual-wheel/schema-repair';
 import { PageShell } from '@/components/PageShell';
 import { AnnualWheelView } from './AnnualWheelView';
 import type { AnnualWheelItem, Role } from '@platform/shared';
@@ -48,6 +49,25 @@ interface WheelRow {
 export default async function ArshjulPage() {
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'arshjul', user.disabledModules)) redirect('/chatt');
+
+  const canEdit = hasRole(user.roles, EDIT_ROLES);
+  const canManageCategories = hasRole(user.roles, CATEGORY_MANAGE_ROLES);
+
+  // Självreparation av schemat (§ 30) FÖRE läsningen — cachad 10 min,
+  // fail-soft. Repareras det tyst loggas det (och posterna läses därefter
+  // med rätt fält); kan det INTE repareras får redaktören en tydlig
+  // instruktion i stället för ett kryptiskt sparfel senare.
+  let schemaNotice: string | null = null;
+  if (canEdit) {
+    try {
+      const outcome = await ensureAnnualWheelSchema();
+      if (outcome.status === 'drift_unrepairable') {
+        schemaNotice = unrepairableDriftMessage(outcome.drift, outcome.reason);
+      }
+    } catch {
+      /* fail-soft */
+    }
+  }
 
   const pb = await getServerPb();
   const [res, categories] = await Promise.all([
@@ -93,8 +113,6 @@ export default async function ArshjulPage() {
     updated: r.updated
   }));
 
-  const canEdit = hasRole(user.roles, EDIT_ROLES);
-  const canManageCategories = hasRole(user.roles, CATEGORY_MANAGE_ROLES);
 
   return (
     <PageShell
@@ -111,6 +129,7 @@ export default async function ArshjulPage() {
         canEdit={canEdit}
         people={people}
         canManageCategories={canManageCategories}
+        schemaNotice={schemaNotice}
       />
     </PageShell>
   );

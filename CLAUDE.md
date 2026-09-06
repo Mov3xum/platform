@@ -3746,7 +3746,10 @@ och år.
 | `apps/web/src/lib/annual-wheel/categories.ts` | Enda läsvägen för tenantens kategorier (delas av sida, actions och skrivlager) |
 | `apps/web/src/lib/core/write/annual-wheel.ts` | `createAnnualWheelItem` / `updateAnnualWheelItemField` (delat skrivlager + kategori-existenskontroll) |
 | `apps/web/src/lib/actions/annual-wheel.ts` | Server actions (manuell CRUD via UI + kategori-CRUD för superadmin) |
-| `apps/web/src/app/arshjul/{page,AnnualWheelView}.tsx` | Sida + klientvy (hjul-SVG, tabell, filter, editor, kategori-hantering) |
+| `apps/web/src/app/arshjul/{page,AnnualWheelView}.tsx` | Sida + klientvy (tabell, filter, editor, kategori-hantering) |
+| `apps/web/src/app/arshjul/Wheel.tsx` | Hjul-SVG:n — EN renderare, delad av redigeringsvyn och presentationsläget |
+| `apps/web/src/app/arshjul/presentation/{page,AnnualWheelPresentation}.tsx` | Presentationsläget (`/arshjul/presentation`, helskärm utan rail) |
+| `apps/web/src/lib/annual-wheel/schema-repair.ts` | Självreparation av schemat via superuser (stale deploy) |
 | `apps/web/src/lib/ai/tools.ts` | Verktygen `create_annual_wheel_item` / `update_annual_wheel_item` + dispatch |
 
 ### 30.2 Datamodell
@@ -3785,14 +3788,18 @@ aktiviteter försvinner aldrig: hjulet visar dem som vanligt, tabellen har en
 **Perioder (migration 1700000141).** En aktivitet med `end_month` (och valfri
 `end_day`) löper över tid. Skrivlagret kräver att slutet ligger efter starten
 inom samma kalenderår (`normalizePeriod`, kontrolleras även när bara EN ände
-uppdateras). Hjulet ritar inte längre en jämnt uppdelad sub-sektor per månad:
-**varje post ritas över sitt faktiska tidsspann** (en dag → smal båge, en
-månad → månadssektorn, en period → båge över flera månader) och överlappande
-poster packas i **körfält** som ett Gantt-schema (`packAnnualWheelArcs`, ren
-greedy-algoritm, enhetstestad). Tabellen visar en period i **varje** månad
-den löper (`monthsForAnnualWheelItem`) och bara taggar som faktiskt används
-som kolumner (`annualWheelTagsInUse`). En pågående period visas som "Pågår
-nu" i navet (`nextUpcomingItem` → `ongoing`).
+uppdateras). **Hjulets grundutseende är lugnt:** varje månad delas jämnt
+mellan de aktiviteter som STARTAR i månaden (en period ligger i sin
+startmånad), inga texter längs bågarna — en variant med körfält och titlar
+längs bågarna testades och upplevdes plottrig. Hela periodens spann visas i
+stället **vid hovring**: en mjuk, streckad båge från start till slut ritas
+bakom det lyfta bandet (`annualWheelItemAngles`), och hovringskortet visar
+"15 januari – 28 februari 2026". `packAnnualWheelArcs` (körfältspackning,
+enhetstestad) finns kvar i `@platform/shared` för framtida bruk. Tabellen
+visar en period i **varje** månad den löper (`monthsForAnnualWheelItem`) och
+bara taggar som faktiskt används som kolumner (`annualWheelTagsInUse`). En
+pågående period visas som "Pågår nu" i navet (`nextUpcomingItem` →
+`ongoing`).
 
 **Serier (upprepning).** "Nyhetsbrev den 15:e varje månad" skapas i ETT steg:
 `expandAnnualWheelSeries` (ren, enhetstestad) expanderar basen till
@@ -3898,12 +3905,66 @@ av tre olika miljöskäl. Alla tre är nu täckta i `lib/core/write/annual-wheel
    plockas dessutom in i felmeddelandet — SDK:ns `err.message` är alltid den
    intetsägande "Failed to create record."
 
+4. **Självreparation av schemat (`lib/annual-wheel/schema-repair.ts`).** Web-
+   appen deployas oftare än PocketBase-containern, och migrationerna körs
+   BARA när PB-imagen byggs om. Däremellan avvisade instansen varje ny
+   kategori ("category: Invalid value projekt" — fältet var fortfarande ett
+   select) och tappade datum/taggar tyst. Samma mönster som workshops-
+   bildfältet (`ensureImageFieldExists`): `ensureAnnualWheelSchema()`
+   inspekterar kollektionen via superuser (cachat 10 min när friskt) och
+   reparerar vid drift — lägger saknade fält (`day`, `end_month`, `end_day`,
+   `tags`, `responsible`) byte-för-byte som migrationerna, sätter `track`
+   valfritt, unionar taggvärdena och konverterar `category` select→text
+   (REST kan inte byta typ in-place → snapshot av värdena, drop+add, återställ
+   rad för rad; misslyckade rader rapporteras, aldrig tyst). Körs FÖRE
+   läsningen på `/arshjul` (staff) och FÖRE varje sparning i server-actions;
+   utan superuser-credentials visas i stället driften + instruktion i en
+   banner med "Försök reparera" (admin/incubator_lead →
+   `repairAnnualWheelSchemaAction`). Agentens verktyg får ingen reparation
+   (least privilege). Fel i skrivlagret visas nu på svenska med PB:s
+   fältdetaljer ("Kunde inte spara aktiviteten. (category: …)").
+
 **Deploy-invariant:** `verify-baseline.mjs` (`verifyAppWritableFields`)
 asserterar att `annual_wheel_items` HAR `day`/`tags`/`responsible`/`end_month`/
 `end_day` och att det deprecerade `track` INTE är obligatoriskt. Schemadrift fäller därmed deployen i
 stället för att dyka upp som "det går inte att skapa en aktivitet".
 
-### 30.5 Regelefterlevnad
+### 30.5 Presentationsläge (`/arshjul/presentation`)
+
+Helskärmsyta för måndagsgenomgången på projektorn — root-layouten tar bort
+railen för exakt den sökvägen (som `/m/` och `/login`); RBAC är oförändrat
+(inloggad staff/observer, `page.tsx`). Samma dataläsning som `/arshjul`
+(användarens token → RLS), ren läsvy, inga skrivningar. **EN hjul-renderare**
+(`Wheel.tsx`, `emphasis="bold"` → kraftig fyllning för fokuserade band,
+`focusIds` tonar ned resten, `hoverCard={false}`) så hjulet ser likadant ut
+på skärm och projektor.
+
+- **Två lägen:** *Just nu* (default) — panelen visar *Pågår nu / Den här
+  veckan / Kommande 30 dagar* (`buildAnnualWheelAgenda`, ren + enhetstestad;
+  varje post hamnar i EN hink, den mest akuta) och hjulet lyfter fram exakt
+  dessa. *Månad* (← →, eller klick på en sektor) — bläddra månad för månad,
+  panelen listar månadens aktiviteter (perioder syns i varje månad de löper).
+- **Tangenter:** ← → månad · Mellanslag/Home = tillbaka till idag · F =
+  helskärm (`requestFullscreen`) · Esc = stäng. I helskärm betyder Esc bara
+  "lämna helskärm" (webbläsaren sköter det, `fullscreenRef` håller kvar vyn
+  en stund efter `fullscreenchange`); utanför helskärm navigerar Esc till
+  `/arshjul`.
+- **Hålls färsk:** klockan tickar varje minut, datan `router.refresh()`:as
+  var 5:e minut — en skärm som står på hela mötet visar dagens läge.
+- **Vecka:** ISO 8601 (`isoWeekNumber`/`weekRange`, måndag först,
+  enhetstestade).
+- Hjulets box har **explicit, viewport-baserad** storlek
+  (`calc(100dvh - 236px)` i både höjd och bredd) — procent-höjder inne i
+  flex/grid kollapsade till 0 och gjorde hjulet osynligt på projektorn.
+- Riskklass n/a (ren presentation av redan synlig data, ingen AI).
+
+**Redigeringsdialogen** (`EditorModal`) är sektionsindelad (*Vad / När /
+Taggar*) med klistrad topp- och bottenrad; period och upprepning är
+hopfällda `ToggleRow`-switchar som visar fälten först när de slås på, så
+dialogen inte känns som ett formulär för allt på en gång. `EditorModal`
+exporteras för fristående förhandsvisning/skärmdump.
+
+### 30.6 Regelefterlevnad
 
 - **§ 21 isolering:** tenant-bred STAFF/OBSERVER-data — en ren `startup_member`
   ser inte Movexums interna styrelse-/ledningskalender. list/view kräver

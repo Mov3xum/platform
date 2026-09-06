@@ -44,8 +44,13 @@ export default async function RootLayout({
   // toppnavigationen (Navbar). Samma princip som de publika modulerna ovan.
   const isAuthPage = pathname === '/login';
 
+  // Årshjulets presentationsläge (§ 30) är en helskärmsyta för projektorn —
+  // ingen rail, ingen sidmeny. Sidan kräver fortfarande inloggning + staff
+  // (RBAC i page.tsx); bara ramen tas bort.
+  const isPresentation = pathname === '/arshjul/presentation';
+
   let content: React.ReactNode;
-  if (isPublicModule || isAuthPage) {
+  if (isPublicModule || isAuthPage || isPresentation) {
     content = children;
   } else if (user) {
     content = <AppShell user={user}>{children}</AppShell>;
