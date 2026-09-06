@@ -18,6 +18,7 @@ import {
   extractPdfFromDataUrlAction,
   extractXlsxFromDataUrlAction
 } from '@/lib/actions/chat-attachments';
+import { isStaleDeploymentError, STALE_DEPLOYMENT_MESSAGE } from '@/lib/action-error';
 import { Icon } from '@/components/proto/Icon';
 import VoiceInputButton from '@/components/VoiceInputButton';
 import ChatHelpGuide from '@/components/ChatHelpGuide';
@@ -293,11 +294,15 @@ export interface DashboardActivity {
   viaAgent?: boolean;
 }
 
-// Relativ, svensk tidsangivelse ("nyss", "2 tim sedan", "igår").
-function relativeTime(iso: string): string {
+// Relativ, svensk tidsangivelse ("nyss", "2 tim sedan", "igår"). `now` skickas
+// in explicit (Date.now() efter mount) — beräknas den under server-renderingen
+// skiljer sig texten från klientens hydrering (klockskev/minutgräns/tidszon)
+// och React kastar hydration-fel #418 ("text mismatch") som klientrenderar om
+// hela trädet.
+function relativeTime(iso: string, now: number): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return '';
-  const diff = Math.max(0, Date.now() - then);
+  const diff = Math.max(0, now - then);
   const min = Math.round(diff / 60000);
   if (min < 1) return 'nyss';
   if (min < 60) return `${min} min sedan`;
@@ -436,6 +441,13 @@ export default function DashboardChat({
   // hela historiken kan läsas som en logg utan att startvyn blir lång.
   const ACTIVITY_STEP = 15;
   const [visibleActivities, setVisibleActivities] = useState(5);
+  // Klockan för relativa tider sätts först EFTER mount: servern och klienten
+  // renderar då exakt samma text ("") vid hydreringen, och tiderna fylls i
+  // direkt därefter. Se kommentaren vid `relativeTime`.
+  const [clockNow, setClockNow] = useState<number | null>(null);
+  useEffect(() => {
+    setClockNow(Date.now());
+  }, []);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -583,7 +595,14 @@ export default function DashboardChat({
             });
           }
         } catch (err) {
-          setLocalError(`${file.name}: kunde inte läsa filen.`);
+          // PDF-/Excel-extraktionen går via server actions — efter en deploy
+          // kastar en stale flik UnrecognizedActionError; säg då "ladda om"
+          // i stället för det missvisande "kunde inte läsa filen".
+          setLocalError(
+            isStaleDeploymentError(err)
+              ? STALE_DEPLOYMENT_MESSAGE
+              : `${file.name}: kunde inte läsa filen.`
+          );
           console.error('[DashboardChat] file read failed', err);
         }
       }
@@ -1315,7 +1334,7 @@ export default function DashboardChat({
                               )}
                             </div>
                             <span className="shrink-0 text-[11.5px] text-foreground-subtle">
-                              {relativeTime(act.created)}
+                              {clockNow === null ? '' : relativeTime(act.created, clockNow)}
                             </span>
                             {href && (
                               <Icon

@@ -10,8 +10,6 @@ type PbError = {
   data?: { data?: Record<string, { message?: string }>; message?: string };
 };
 
-const PB_URL = getServerPbUrl();
-
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_PER_ACCOUNT = 8;
 const LOGIN_MAX_PER_IP = 40;
@@ -65,7 +63,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const pb = new PocketBase(PB_URL);
+  const pbUrl = getServerPbUrl();
+  const pb = new PocketBase(pbUrl);
 
   try {
     await pb.collection('users').authWithPassword(email, password, { expand: 'tenant' });
@@ -96,11 +95,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
     if (!e.status) {
       return NextResponse.json(
-        { error: `Kunde inte nå PocketBase (${PB_URL}). Kontrollera POCKETBASE_URL/NEXT_PUBLIC_POCKETBASE_URL.` },
+        { error: `Kunde inte nå PocketBase (${pbUrl}). Kontrollera POCKETBASE_URL/NEXT_PUBLIC_POCKETBASE_URL.` },
         { status: 503 }
       );
     }
-
     return NextResponse.json(
       { error: e.data?.message || e.message || 'Inloggning misslyckades. Försök igen.' },
       { status: 500 }

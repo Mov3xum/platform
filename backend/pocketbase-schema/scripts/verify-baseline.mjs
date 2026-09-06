@@ -823,7 +823,8 @@ async function verifyHealthEndpoint() {
  */
 const REQUIRED_APP_FIELDS = [
   // Årshjul (§ 30): day = migration 1700000138, tags/responsible = 1700000139.
-  { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible'] }
+  // day = 1700000138, tags/responsible = 1700000139, end_* = 1700000141.
+  { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible', 'end_month', 'end_day'] }
 ];
 
 const MUST_NOT_BE_REQUIRED = [
@@ -831,12 +832,15 @@ const MUST_NOT_BE_REQUIRED = [
 ];
 
 function verifyAppWritableFields(collections) {
-  const byName = new Map(collections.map((c) => [c.name, c]));
+  const byName = collections instanceof Map
+    ? collections
+    : new Map((Array.isArray(collections) ? collections : Object.values(collections)).map((c) => [c.name, c]));
 
   for (const { collection, fields } of REQUIRED_APP_FIELDS) {
     const col = byName.get(collection);
     if (!col) continue; // frånvaro fångas av verifyCollectionsExist
-    const present = new Set((col.fields || []).map((f) => f.name));
+    const colFields = col.fields || col.schema || [];
+    const present = new Set(colFields.map((f) => f.name));
     const missing = fields.filter((f) => !present.has(f));
     if (missing.length > 0) {
       fail(
@@ -852,8 +856,9 @@ function verifyAppWritableFields(collections) {
   for (const { collection, fields } of MUST_NOT_BE_REQUIRED) {
     const col = byName.get(collection);
     if (!col) continue;
+    const colFields = col.fields || col.schema || [];
     for (const name of fields) {
-      const field = (col.fields || []).find((f) => f.name === name);
+      const field = colFields.find((f) => f.name === name);
       if (field && field.required) {
         fail(
           `Field "${collection}.${name}" är obligatoriskt men skrivs inte längre av appen ` +

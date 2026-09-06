@@ -4,6 +4,7 @@ export { updateStartupField, type StartupWritableField } from './startups';
 export { createActivity, updateActivityField } from './activities';
 export {
   createAnnualWheelItem,
+  createAnnualWheelSeries,
   updateAnnualWheelItemField,
   schemaDriftMessage,
   type AnnualWheelWritableField,

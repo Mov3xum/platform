@@ -22,6 +22,16 @@
  */
 export const MEETING_SEGMENT_SECONDS = 90;
 
+/**
+ * Det FÖRSTA segmentet hålls kort så att live-transkriptet syns snabbt —
+ * annars ser ett kort möte (eller de första 90 sekunderna av ett långt) ut
+ * som att transkriberingen inte fungerar. Ett tidigt fel (t.ex. Voxtral
+ * felkonfigurerad) upptäcks då också direkt i stället för efter 90 s.
+ * Segmentlängder är en ren klientangelägenhet — servern bryr sig bara om
+ * index (luck-detekteringen) och per-klipp-taken i voice.ts.
+ */
+export const MEETING_FIRST_SEGMENT_SECONDS = 20;
+
 /** Hårt tak på möteslängd (robusthet/kostnad, EU AI Act art. 15). */
 export const MAX_MEETING_SECONDS = 3 * 60 * 60;
 

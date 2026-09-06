@@ -2235,6 +2235,39 @@ lagras på tilldelningens `meeting`-fält.
 - **Migrationer:** nya filnummer (1700000091–092), oföränderliga; fälten
   speglas i `scripts/setup-via-api.mjs` för bootstrap-paritet.
 
+### 18.5 Förhandsgranskning & testläge för workshops
+
+Staff (admin/incubator_lead/coach/mentor) kan förhandsgranska och **testa** en
+workshop direkt efter att den skapats — exakt som ett bolag kommer att uppleva
+den — på `/education/workshops/[id]/preview` (länkad som primär knapp på
+workshopkortet samt från workshoplistan och redigeringssidan; onboarding hade
+redan motsvarande vy, § 25, som nu också är fullt interaktiv i preview).
+`WorkshopRunner` körs i `preview`-läge: all interaktion är lokal och
+**ingenting persisteras** — ingen tilldelning, inga `workshop_runs`, inga
+`activities`, så testkörningar förorenar aldrig bolagsstatistiken eller
+aktivitetsfeeden. Coach-granskning och commit simuleras lokalt (inga dokument
+skapas).
+
+- **AI-momenten körs på riktigt** (samma modeller och promptar som i skarpt
+  läge — chat-blocket, `ai_pipeline`-block och slutrapporten) men mot ett
+  **fiktivt exempelbolag** i stället för `buildStartupContext` — ingen
+  bolagsdata läses och ingen PII kan nå prompten. Server actions:
+  `previewWorkshopAiChatAction` / `previewPipelineBlockAction` /
+  `previewWorkshopReportAction` i `lib/actions/workshops.ts` (staff-only +
+  tenant-verifierade). Rapportunderlaget byggs av samma delade
+  `buildWorkshopAnswersText` som skarpa körningar (ingen divergerande kopia).
+- **Input-validering (§ 10.5 p. 7):** testlägets svar/artefakter kommer direkt
+  från klienten (ingen DB-rad att läsa) och cappas hårt server-side
+  (`capPreviewRecord`/`capPreviewThread`, 30 KB totalt / 4 KB per värde) —
+  defense-in-depth mot prompt-explosion.
+- **Kostnad/telemetri:** testkörningarnas tokens loggas i `ai_usage_events`
+  (surface `workshop_run`) och syns därmed i `/insights` + miljödashboarden
+  (§ 28) och räknas mot månadstaket (§ 9.6).
+- **Riskklass (EU AI Act art. 11):** oförändrad (begränsad) — samma
+  AI-funktion som workshopkörningen, ingen ny dataväg (kontexten är fiktiv
+  exempeldata i stället för bolagsdata); transparensbannrarna (§ 9.7) visas
+  oförändrat och testläget är tydligt markerat i UI:t.
+
 ---
 
 ## 19. Avtal — tilldelning & juridiskt giltig in-app-signering
@@ -3721,10 +3754,14 @@ och år.
 - **`annual_wheel_items`** (1700000133): `tenant` (cascadeDelete), `year`
   (int 2000–2100), `title`, `month` (int 1–12 eller tomt = helårs-/kvartals-
   övergripande), `day` (int 1–31 eller tomt = hela månaden; valfritt specifikt
-  datum, **migration 1700000138**), `tags` (select **multi, VALFRI**:
-  kampanjer, verksamhetsrapporter, projekt, team, ledningsgrupp,
-  projektstyrgrupper, ovrigt — tabellens kolumner + uppföljning,
-  **migration 1700000139**), `category` (**text sedan migration 1700000140**
+  datum, **migration 1700000138**), `end_month`/`end_day` (valfria; satt
+  slutmånad gör aktiviteten till en **PERIOD** — kampanj som löper över tid,
+  ritas som en båge i hjulet, **migration 1700000141**), `tags` (select
+  **multi, VALFRI**, grupperade i *Marknad*: kampanjer, linkedin, nyhetsbrev,
+  event, pr, webinar, annonsering och *Verksamhet*: verksamhetsrapporter,
+  projekt, team, ledningsgrupp, projektstyrgrupper, ovrigt — tabellens
+  kolumner + uppföljning, **migration 1700000139 + 1700000141**), `category`
+  (**text sedan migration 1700000140**
   — en kategorinyckel ur `annual_wheel_categories`), `responsible` (relation → `users`, valfri,
   `cascadeDelete: false`, **migration 1700000139**), `notes`, `created_by`.
   Index på `(tenant)` och `(tenant, year)`. Taxonomin är källan-av-sanning i
@@ -3744,6 +3781,29 @@ Vokabulären är fast (samma mönster som `file-topics.ts`/`competences.ts`);
 fritext skulle drifta isär och göra uppföljningen oanvändbar. Otaggade
 aktiviteter försvinner aldrig: hjulet visar dem som vanligt, tabellen har en
 "Utan tagg"-kolumn och tagg-chipsen (`countItemsByTag`) räknar dem separat.
+
+**Perioder (migration 1700000141).** En aktivitet med `end_month` (och valfri
+`end_day`) löper över tid. Skrivlagret kräver att slutet ligger efter starten
+inom samma kalenderår (`normalizePeriod`, kontrolleras även när bara EN ände
+uppdateras). Hjulet ritar inte längre en jämnt uppdelad sub-sektor per månad:
+**varje post ritas över sitt faktiska tidsspann** (en dag → smal båge, en
+månad → månadssektorn, en period → båge över flera månader) och överlappande
+poster packas i **körfält** som ett Gantt-schema (`packAnnualWheelArcs`, ren
+greedy-algoritm, enhetstestad). Tabellen visar en period i **varje** månad
+den löper (`monthsForAnnualWheelItem`) och bara taggar som faktiskt används
+som kolumner (`annualWheelTagsInUse`). En pågående period visas som "Pågår
+nu" i navet (`nextUpcomingItem` → `ongoing`).
+
+**Serier (upprepning).** "Nyhetsbrev den 15:e varje månad" skapas i ETT steg:
+`expandAnnualWheelSeries` (ren, enhetstestad) expanderar basen till
+förekomster (varje/varannan månad, varje kvartal, t.o.m. vald månad; dagen
+klampas mot månadslängden; perioder flyttas med hela steget och förekomster
+som skulle spilla över årsskiftet utelämnas; hårt tak 12). Både UI-actionen
+och chatt-verktyget `create_annual_wheel_item` (parametrarna `repeat` +
+`repeat_until_month`) går genom `createAnnualWheelSeries` i det delade
+skrivlagret, som skapar varje förekomst via `createAnnualWheelItem` — samma
+whitelist, validering, tenant-stämpel och audit per rad. En delvis lyckad
+serie rapporteras som fel MED antalet redan skapade, aldrig som tyst succé.
 
 **Ansvarig (`responsible`).** Staff kan peka ut vem i organisationen som äger
 en aktivitet. Kandidatlistan kommer från `listAssignableResourcesForTenant`
@@ -3802,8 +3862,9 @@ ett textfält med kategorinyckeln. Konsekvenser:
 
 Både UI-actionen och chatt-agenten går genom **det delade skrivlagret**
 (`lib/core/write/annual-wheel.ts`) — whitelist (`writable-fields.ts`:
-`annual_wheel_items` create + fält title/month/day/tags/category/notes/year för
-BÅDA, `responsible` bara för människa), validering (`validators.ts`),
+`annual_wheel_items` create + fält title/month/day/end_month/end_day/tags/
+category/notes/year för BÅDA, `responsible` bara för människa), validering
+(`validators.ts`),
 tenant-stämpel från actorn och `agent_actions`-logg. Reglerna kan därför aldrig divergera mellan människa och agent (§ 16).
 Chatt-verktygen exponeras BARA för agent-actor i den interaktiva staff-chatten
 (`includeWrites`, människa-i-loopen § 16.3) — autonoma körningar skriver
@@ -3838,8 +3899,8 @@ av tre olika miljöskäl. Alla tre är nu täckta i `lib/core/write/annual-wheel
    intetsägande "Failed to create record."
 
 **Deploy-invariant:** `verify-baseline.mjs` (`verifyAppWritableFields`)
-asserterar att `annual_wheel_items` HAR `day`/`tags`/`responsible` och att det
-deprecerade `track` INTE är obligatoriskt. Schemadrift fäller därmed deployen i
+asserterar att `annual_wheel_items` HAR `day`/`tags`/`responsible`/`end_month`/
+`end_day` och att det deprecerade `track` INTE är obligatoriskt. Schemadrift fäller därmed deployen i
 stället för att dyka upp som "det går inte att skapa en aktivitet".
 
 ### 30.5 Regelefterlevnad
@@ -3868,7 +3929,8 @@ stället för att dyka upp som "det går inte att skapa en aktivitet".
   Radering loggas som `update` med `after_value.deleted` — `action_type` har
   bara `create|update|revert`.
 - **Migrationer:** nya oföränderliga filnummer (1700000133, **1700000139**,
-  **1700000140**). Båda kollektionerna **speglas i `setup-via-api.mjs`**
+  **1700000140**, **1700000141** — perioder + marknadskanal-taggar; taggvärdena
+  unionas så befintliga rader aldrig blir ogiltiga). Båda kollektionerna **speglas i `setup-via-api.mjs`**
   (collection-defs + `FORCE_CREATE_RULES` + autodate + kategori-seed +
   `convertSelectFieldToText` för `category` + en `patchCollection` som lägger
   `tags`/`responsible` och sätter `track.required=false`) så att en instans som
@@ -4236,14 +4298,23 @@ segment).
    informerade…"); `consent_confirmed_at` stämplas; utan bock vägrar
    `startMeetingAction`. Synlig pulserande indikator + timer hela mötet.
 3. **Inspelning:** MediaRecorder **startas om** per segment (~90 s — INTE
-   `timeslice`, sådana chunkar är inte självständigt avkodbara). Varje segment
+   `timeslice`, sådana chunkar är inte självständigt avkodbara; det FÖRSTA
+   segmentet är kort, `MEETING_FIRST_SEGMENT_SECONDS` = 20 s, så live-texten —
+   eller ett konfigurationsfel — syns snabbt även i korta möten). Varje segment
    POSTas till `/api/chat/meeting/segment` (staff-only, rate-limitad 40/5 min,
    ägar-verifierad, samma Voxtral-klient + validering som § 31), texten
    **personnummer-saneras** (§ 15.6-regexen — folk säger personnummer högt) och
    appendas på raden. Live-transkriptet växer i panelen. Robusthet: wake lock,
    beforeunload-varning, retry per segment; ett förlorat segment blir en
    **explicit lucka-markör** (saknat index ⇒ `MEETING_GAP_MARKER` i
-   `assembleMeetingTranscript`) — aldrig ett tyst hål. Tak: 3 h / 160 segment
+   `assembleMeetingTranscript`) — aldrig ett tyst hål, och serverns
+   FELORSAK visas i panelen (inspelnings- OCH granskningsvyn) i stället för
+   att sväljas till ett oförklarat tomt transkript. Läs-/skrivvägarna mot
+   `meeting_transcripts` (create/getOne/update/delete i actions + segment-
+   routen, delade i `lib/meetings/access.ts`) har **superuser-fallback vid
+   PB v0.23.4:s tysta regel-nekande** (400/403/404, § 21.3-klassen) — ägar-/
+   tenant-checken i koden är den hårda gränsen, fallbacken är robusthet
+   (samma mönster som § 18.3/§ 20.5/§ 30.4). Tak: 3 h / 160 segment
    (art. 15). Tystnad (Voxtral 422) = tomt segment, inte fel. En kraschad flik
    kostar max ett segment; "Återuppta granskningen"-bannern i `/chatt` öppnar
    det oavslutade mötet.

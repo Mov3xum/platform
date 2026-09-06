@@ -34,6 +34,11 @@ import {
   startDeepJobAction,
   getDeepJobStatusAction
 } from '@/lib/actions/deep-jobs';
+import {
+  actionErrorMessage,
+  isStaleDeploymentError,
+  STALE_DEPLOYMENT_MESSAGE
+} from '@/lib/action-error';
 import type { DeepJobStatus, Role } from '@platform/shared';
 
 interface Props {
@@ -195,15 +200,26 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     content: q.displayText
   }));
 
+  // Kastar ALDRIG (anropas fire-and-forget från många ställen): trådlistan är
+  // dekorativ — vid stale deploy/nätverksglapp behåller vi den lista vi har.
   const refreshThreads = useCallback(async () => {
-    const next = await listThreadsAction();
-    setThreads(next);
+    try {
+      const next = await listThreadsAction();
+      setThreads(next);
+    } catch (err) {
+      console.error('[ChattWorkspace] kunde inte uppdatera trådlistan', err);
+    }
   }, []);
 
   // Oavslutade möten (kraschad flik / ej sparad granskning) → återuppta-banner.
+  // Kastar aldrig (körs i useEffect utan felhantering hos anroparen).
   const refreshResumableMeetings = useCallback(async () => {
-    const res = await listResumableMeetingsAction();
-    setResumableMeetings(res.meetings);
+    try {
+      const res = await listResumableMeetingsAction();
+      setResumableMeetings(res.meetings);
+    } catch (err) {
+      console.error('[ChattWorkspace] kunde inte lista oavslutade möten', err);
+    }
   }, []);
 
   useEffect(() => {
@@ -246,39 +262,55 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       );
       for (const [threadId, c] of entries) {
         const jobId = c.deepJob!.id;
+        let res: Awaited<ReturnType<typeof getDeepJobStatusAction>>;
         try {
-          const res = await getDeepJobStatusAction(jobId);
-          if (res.error || !res.status) continue;
-          const status = res.status;
-          // Överlappande ticks (långsamma anrop) får inte processa samma
-          // terminala jobb två gånger — kolla sanningen (ref) synkront igen.
-          const live = convsRef.current[threadId]?.deepJob;
-          if (!live || live.id !== jobId || DEEP_TERMINAL.includes(live.status)) continue;
-          updateConv(threadId, (cur) =>
-            cur.deepJob && cur.deepJob.id === jobId
-              ? {
-                  ...cur,
-                  deepJob: { ...cur.deepJob, status, progress: res.progress ?? cur.deepJob.progress }
-                }
-              : cur
-          );
-          if (DEEP_TERMINAL.includes(status)) {
-            const msgs = await getThreadMessagesAction(threadId);
-            const inactive = activeThreadIdRef.current !== threadId;
-            updateConv(threadId, (cur) => ({
-              ...cur,
-              messages: msgs.messages ? toUiMessages(msgs.messages) : cur.messages,
-              loaded: true,
-              error:
-                status === 'failed' ? res.jobError || 'Djupdykningen misslyckades.' : cur.error,
-              unread: status === 'succeeded' && inactive ? true : cur.unread
-            }));
-            await refreshThreads();
-            // Jobbet klart → kör nästa köade meddelande i den tråden.
+          res = await getDeepJobStatusAction(jobId);
+        } catch (err) {
+          // Stale deploy → pollen kan ALDRIG lyckas igen i den här fliken för
+          // just det jobbet. Släpp låset lokalt i den tråden (jobbet kör
+          // vidare server-side och utkastet finns i tråden efter omladdning),
+          // markera det som avslutat och kör vidare kön i just den tråden.
+          // Övriga fel (nätverksglapp) → hoppa över ticken, försök igen nästa.
+          if (isStaleDeploymentError(err)) {
+            updateConv(threadId, (cur) =>
+              cur.deepJob && cur.deepJob.id === jobId
+                ? { ...cur, deepJob: { ...cur.deepJob, status: 'failed' }, error: STALE_DEPLOYMENT_MESSAGE }
+                : cur
+            );
             runNext(threadId);
           }
-        } catch {
-          // Nätverksglapp under pollning — försök igen nästa tick.
+          continue;
+        }
+        if (res.error || !res.status) continue;
+        const status = res.status;
+        // Överlappande ticks (långsamma anrop) får inte processa samma
+        // terminala jobb två gånger — kolla sanningen (ref) synkront igen.
+        const live = convsRef.current[threadId]?.deepJob;
+        if (!live || live.id !== jobId || DEEP_TERMINAL.includes(live.status)) continue;
+        updateConv(threadId, (cur) =>
+          cur.deepJob && cur.deepJob.id === jobId
+            ? {
+                ...cur,
+                deepJob: { ...cur.deepJob, status, progress: res.progress ?? cur.deepJob.progress }
+              }
+            : cur
+        );
+        if (DEEP_TERMINAL.includes(status)) {
+          // Best-effort: transkript + trådlista är dekorativa här — ett fel
+          // får aldrig hindra att upptagen-flaggan släpps och kön dras vidare.
+          const msgs = await getThreadMessagesAction(threadId).catch(() => null);
+          const inactive = activeThreadIdRef.current !== threadId;
+          updateConv(threadId, (cur) => ({
+            ...cur,
+            messages: msgs?.messages ? toUiMessages(msgs.messages) : cur.messages,
+            loaded: true,
+            error:
+              status === 'failed' ? res.jobError || 'Djupdykningen misslyckades.' : cur.error,
+            unread: status === 'succeeded' && inactive ? true : cur.unread
+          }));
+          await refreshThreads();
+          // Jobbet klart → kör nästa köade meddelande i den tråden.
+          runNext(threadId);
         }
       }
     }, 3000);
@@ -296,11 +328,16 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       runNext(threadId);
       return;
     }
+    // Tråden finns redan (skapad av anroparen innan detta jobb köades) — vi
+    // behöver aldrig skapa en här som i den globala arkitekturen.
     let res: Awaited<ReturnType<typeof startDeepJobAction>>;
     try {
       res = await startDeepJobAction(threadId, clean);
     } catch (err) {
-      res = { error: err instanceof Error ? err.message : 'Kunde inte starta jobbet.' };
+      // En kastad server action (t.ex. stale deploy: UnrecognizedActionError)
+      // lämnade tidigare `starting=true` för evigt → chatten låstes.
+      console.error('[ChattWorkspace] djupdykning kunde inte startas', err);
+      res = { error: actionErrorMessage(err, 'Kunde inte starta djupdykningen — försök igen.') };
     }
     if (res.error || !res.jobId) {
       updateConv(threadId, (c) => ({
@@ -316,8 +353,9 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       starting: false,
       deepJob: { id: res.jobId!, status: 'queued', progress: 0 }
     }));
-    const msgs = await getThreadMessagesAction(threadId);
-    if (msgs.messages) {
+    // Best-effort — jobbet är redan igång; pollen tar det härifrån.
+    const msgs = await getThreadMessagesAction(threadId).catch(() => null);
+    if (msgs?.messages) {
       updateConv(threadId, (c) => ({ ...c, messages: toUiMessages(msgs.messages!), loaded: true }));
     }
     await refreshThreads();
@@ -346,20 +384,27 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       setActiveAgent(existing.agentId ? agents.find((a) => a.id === existing.agentId) || null : null);
       return;
     }
-    const res = await getThreadMessagesAction(id);
-    if (res.error) {
-      // `loaded` lämnas false så nästa klick på tråden försöker läsa igen.
-      updateConv(id, (c) => ({ ...c, error: res.error! }));
-      return;
+    try {
+      const res = await getThreadMessagesAction(id);
+      if (res.error) {
+        // `loaded` lämnas false så nästa klick på tråden försöker läsa igen.
+        updateConv(id, (c) => ({ ...c, error: res.error! }));
+        return;
+      }
+      updateConv(id, (c) => ({
+        ...c,
+        messages: toUiMessages(res.messages || []),
+        loaded: true,
+        agentId: res.agent || null,
+        unread: false
+      }));
+      setActiveAgent(res.agent ? agents.find((a) => a.id === res.agent) || null : null);
+    } catch (err) {
+      updateConv(id, (c) => ({
+        ...c,
+        error: actionErrorMessage(err, 'Kunde inte öppna chatten — försök igen.')
+      }));
     }
-    updateConv(id, (c) => ({
-      ...c,
-      messages: toUiMessages(res.messages || []),
-      loaded: true,
-      agentId: res.agent || null,
-      unread: false
-    }));
-    setActiveAgent(res.agent ? agents.find((a) => a.id === res.agent) || null : null);
   }
 
   function applyStep(
@@ -412,7 +457,8 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            threadId,
+            threadId: threadId ?? undefined,
+            agentId: activeAgent?.id,
             text,
             includeWebContext: opts.includeWebContext,
             attachments: opts.attachments
@@ -492,19 +538,21 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       // Strömmen stängdes utan ett slutgiltigt meddelande (t.ex. proxy bröt
       // anslutningen) — turen kan ändå ha sparats server-side, så ladda om.
       if (!gotFinal && !gotError) {
-        const msgs = await getThreadMessagesAction(threadId);
-        if (msgs.messages) {
+        const msgs = await getThreadMessagesAction(threadId).catch(() => null);
+        if (msgs?.messages) {
           landed = true;
           updateConv(threadId, (c) => ({ ...c, messages: toUiMessages(msgs.messages!), loaded: true }));
         }
       }
       await refreshThreads();
-    } catch {
-      // Oväntat fel mitt i turen (t.ex. avbruten läsning) — visa ett fel i
-      // tråden i stället för att tyst lämna den hängande.
+    } catch (err) {
+      // Oväntat fel mitt i turen (t.ex. avbruten läsning, stale deploy i
+      // fallbackTurn) — visa ett fel i tråden i stället för att tyst lämna
+      // den hängande.
+      console.error('[ChattWorkspace] chatturen misslyckades', err);
       updateConv(threadId, (c) => ({
         ...c,
-        error: c.error || 'Kunde inte hämta svar just nu — försök igen.'
+        error: c.error || actionErrorMessage(err, 'Kunde inte hämta svar just nu — försök igen.')
       }));
     } finally {
       const inactive = activeThreadIdRef.current !== threadId;
@@ -639,11 +687,18 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   }
 
   async function onDownload(file: GeneratedFileRef) {
-    const res = await getFileDownloadUrlAction(file.user_file_id);
-    if (res.url) {
-      window.open(res.url, '_blank', 'noopener,noreferrer');
-    } else {
-      updateConv(activeKey, (c) => ({ ...c, error: res.error || 'Kunde inte hämta filen.' }));
+    try {
+      const res = await getFileDownloadUrlAction(file.user_file_id);
+      if (res.url) {
+        window.open(res.url, '_blank', 'noopener,noreferrer');
+      } else {
+        updateConv(activeKey, (c) => ({ ...c, error: res.error || 'Kunde inte hämta filen.' }));
+      }
+    } catch (err) {
+      updateConv(activeKey, (c) => ({
+        ...c,
+        error: actionErrorMessage(err, 'Kunde inte hämta filen — försök igen.')
+      }));
     }
   }
 
@@ -651,19 +706,40 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     setMenuFor(null);
     const title = window.prompt('Byt namn på chatten', item.title);
     if (title == null) return;
-    await renameThreadAction(item.id, title);
+    try {
+      await renameThreadAction(item.id, title);
+    } catch (err) {
+      updateConv(activeKey, (c) => ({
+        ...c,
+        error: actionErrorMessage(err, 'Kunde inte byta namn på chatten.')
+      }));
+    }
     await refreshThreads();
   }
 
   async function doPin(item: ThreadListItem) {
     setMenuFor(null);
-    await pinThreadAction(item.id, !item.pinned);
+    try {
+      await pinThreadAction(item.id, !item.pinned);
+    } catch (err) {
+      updateConv(activeKey, (c) => ({
+        ...c,
+        error: actionErrorMessage(err, 'Kunde inte fästa chatten.')
+      }));
+    }
     await refreshThreads();
   }
 
   async function doArchive(item: ThreadListItem) {
     setMenuFor(null);
-    await archiveThreadAction(item.id, item.status !== 'archived');
+    try {
+      await archiveThreadAction(item.id, item.status !== 'archived');
+    } catch (err) {
+      updateConv(activeKey, (c) => ({
+        ...c,
+        error: actionErrorMessage(err, 'Kunde inte arkivera chatten.')
+      }));
+    }
     await refreshThreads();
   }
 
@@ -672,9 +748,16 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     if (!window.confirm(`Radera chatten "${item.title}"? Den tas bort från listan (mjuk radering).`)) {
       return;
     }
-    await deleteThreadAction(item.id);
-    dropConv(item.id);
-    if (activeThreadId === item.id) newChat();
+    try {
+      await deleteThreadAction(item.id);
+      dropConv(item.id);
+      if (activeThreadId === item.id) newChat();
+    } catch (err) {
+      updateConv(activeKey, (c) => ({
+        ...c,
+        error: actionErrorMessage(err, 'Kunde inte radera chatten.')
+      }));
+    }
     await refreshThreads();
   }
 
