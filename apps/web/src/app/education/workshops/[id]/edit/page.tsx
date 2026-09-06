@@ -39,12 +39,18 @@ export default async function EditWorkshopPage({
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10 lg:px-8">
-      <div className="mb-6">
+      <div className="mb-6 flex items-center justify-between">
         <Link
           href={`/education/workshops/${id}`}
           className="text-sm text-foreground-muted hover:text-foreground"
         >
           ← Tillbaka till {workshop.title}
+        </Link>
+        <Link
+          href={`/education/workshops/${id}/preview`}
+          className="text-sm font-medium text-link hover:underline"
+        >
+          Förhandsgranska &amp; testa →
         </Link>
       </div>
 

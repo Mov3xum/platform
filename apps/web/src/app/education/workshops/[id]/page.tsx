@@ -110,6 +110,12 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
           {isStaff ? (
             <div className="flex items-center gap-2">
               <Link
+                href={`/education/workshops/${id}/preview`}
+                className="inline-flex items-center justify-center rounded-full bg-brand px-4 py-1.5 text-xs font-semibold text-brand-foreground transition hover:bg-brand-hover"
+              >
+                Förhandsgranska &amp; testa
+              </Link>
+              <Link
                 href={`/education/workshops/${id}/edit`}
                 className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-4 py-1.5 text-xs font-semibold text-foreground-muted transition hover:bg-canvas-subtle"
               >

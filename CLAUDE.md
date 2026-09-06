@@ -2235,6 +2235,39 @@ lagras på tilldelningens `meeting`-fält.
 - **Migrationer:** nya filnummer (1700000091–092), oföränderliga; fälten
   speglas i `scripts/setup-via-api.mjs` för bootstrap-paritet.
 
+### 18.5 Förhandsgranskning & testläge för workshops
+
+Staff (admin/incubator_lead/coach/mentor) kan förhandsgranska och **testa** en
+workshop direkt efter att den skapats — exakt som ett bolag kommer att uppleva
+den — på `/education/workshops/[id]/preview` (länkad som primär knapp på
+workshopkortet samt från workshoplistan och redigeringssidan; onboarding hade
+redan motsvarande vy, § 25, som nu också är fullt interaktiv i preview).
+`WorkshopRunner` körs i `preview`-läge: all interaktion är lokal och
+**ingenting persisteras** — ingen tilldelning, inga `workshop_runs`, inga
+`activities`, så testkörningar förorenar aldrig bolagsstatistiken eller
+aktivitetsfeeden. Coach-granskning och commit simuleras lokalt (inga dokument
+skapas).
+
+- **AI-momenten körs på riktigt** (samma modeller och promptar som i skarpt
+  läge — chat-blocket, `ai_pipeline`-block och slutrapporten) men mot ett
+  **fiktivt exempelbolag** i stället för `buildStartupContext` — ingen
+  bolagsdata läses och ingen PII kan nå prompten. Server actions:
+  `previewWorkshopAiChatAction` / `previewPipelineBlockAction` /
+  `previewWorkshopReportAction` i `lib/actions/workshops.ts` (staff-only +
+  tenant-verifierade). Rapportunderlaget byggs av samma delade
+  `buildWorkshopAnswersText` som skarpa körningar (ingen divergerande kopia).
+- **Input-validering (§ 10.5 p. 7):** testlägets svar/artefakter kommer direkt
+  från klienten (ingen DB-rad att läsa) och cappas hårt server-side
+  (`capPreviewRecord`/`capPreviewThread`, 30 KB totalt / 4 KB per värde) —
+  defense-in-depth mot prompt-explosion.
+- **Kostnad/telemetri:** testkörningarnas tokens loggas i `ai_usage_events`
+  (surface `workshop_run`) och syns därmed i `/insights` + miljödashboarden
+  (§ 28) och räknas mot månadstaket (§ 9.6).
+- **Riskklass (EU AI Act art. 11):** oförändrad (begränsad) — samma
+  AI-funktion som workshopkörningen, ingen ny dataväg (kontexten är fiktiv
+  exempeldata i stället för bolagsdata); transparensbannrarna (§ 9.7) visas
+  oförändrat och testläget är tydligt markerat i UI:t.
+
 ---
 
 ## 19. Avtal — tilldelning & juridiskt giltig in-app-signering
