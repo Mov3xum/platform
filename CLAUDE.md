@@ -3920,7 +3920,12 @@ npm-dependency (§ 10.2).
 1. Användaren håller in mikrofonknappen i chatten. `MediaRecorder` spelar in
    (Opus/webm när webbläsaren stödjer det), max **120 sekunder** — klienten
    stoppar automatiskt vid taket.
-2. Klippet POST:as till `/api/chat/voice` (route handler → inte bunden av
+2. Klippet **konverteras i webbläsaren till 16 kHz mono WAV**
+   (`lib/audio/wav.ts`, Web Audio API, ingen dependency) — Mistrals
+   transkriberings-endpoint accepterar inte webbläsarformaten webm/opus och
+   mp4/AAC (avvisas med 400). Fail-soft: kan klippet inte avkodas skickas
+   originalet, och serverns 4xx-fel bär numera Mistrals felorsak i klartext.
+   Därefter POST:as det till `/api/chat/voice` (route handler → inte bunden av
    `serverActions.bodySizeLimit`, samma mönster som § 18.2/§ 26.3).
    Auth-cookien är `SameSite=Lax` → cross-site POST saknar cookie (CSRF-skydd,
    § 17.8).
@@ -4239,7 +4244,9 @@ segment).
    `timeslice`, sådana chunkar är inte självständigt avkodbara; det FÖRSTA
    segmentet är kort, `MEETING_FIRST_SEGMENT_SECONDS` = 20 s, så live-texten —
    eller ett konfigurationsfel — syns snabbt även i korta möten). Varje segment
-   POSTas till `/api/chat/meeting/segment` (staff-only, rate-limitad 40/5 min,
+   **konverteras till 16 kHz mono WAV i webbläsaren** (`lib/audio/wav.ts`,
+   § 31.2 — Voxtral avvisar webm/opus- och mp4-klipp med 400) och POSTas till
+   `/api/chat/meeting/segment` (staff-only, rate-limitad 40/5 min,
    ägar-verifierad, samma Voxtral-klient + validering som § 31), texten
    **personnummer-saneras** (§ 15.6-regexen — folk säger personnummer högt) och
    appendas på raden. Live-transkriptet växer i panelen. Robusthet: wake lock,
@@ -4257,10 +4264,13 @@ segment).
    kostar max ett segment; "Återuppta granskningen"-bannern i `/chatt` öppnar
    det oavslutade mötet.
 4. **Granskning (människa-i-loopen, art. 14):** redigerbart transkript;
-   "Generera protokoll" (`meeting-protocol.ts`: isolerad mistral-medium→small,
-   kedje-summering >60 KB, budget-spärren § 9.6 prövas, transkriptet är DATA
-   inte instruktioner); "Dela upp i repliker" (LLM-gissad turindelning — REN
-   textbearbetning, anonyma "Talare 1/2", ≤40 KB).
+   protokollutkastet (sammanfattning/beslut/åtgärdspunkter) **genereras
+   automatiskt när granskningen öppnas** (även vid återupptagen granskning;
+   fel sväljs — knappen "Generera protokoll" finns kvar och visar orsaken;
+   inget sparas automatiskt) via `meeting-protocol.ts` (isolerad
+   mistral-medium→small, kedje-summering >60 KB, budget-spärren § 9.6 prövas,
+   transkriptet är DATA inte instruktioner); "Dela upp i repliker" (LLM-gissad
+   turindelning — REN textbearbetning, anonyma "Talare 1/2", ≤40 KB).
 5. **Spara:** `saveMeetingToStartupAction` — en MÄNSKLIG knapptryckning (inte
    agent-skriv) → coachen får därför välja **konfidentiell**, vilket
    chatt-agentens `create_startup_note` med rätta aldrig får (§ 33). Skapar
