@@ -963,6 +963,125 @@ export function nextUpcomingItem(
   return best;
 }
 
+// ─── Datumintervall, veckor och "vad händer nu" (presentationsläget) ─────────
+
+export interface DateRange {
+  start: Date;
+  end: Date;
+}
+
+/**
+ * Postens faktiska datumintervall (lokal tid, hela dagar). Punkt med dag →
+ * den dagen; bara månad → hela månaden; period → start t.o.m. slutdag.
+ * Odaterad post → null.
+ */
+export function annualWheelItemDateRange(item: {
+  year: number;
+  month?: number | null;
+  day?: number | null;
+  end_month?: number | null;
+  end_day?: number | null;
+}): DateRange | null {
+  const m = sanitizeMonth(item.month);
+  if (m === null) return null;
+  const d = sanitizeDay(item.day);
+  const start = new Date(item.year, m - 1, d ?? 1);
+  if (isAnnualWheelPeriod(item)) {
+    const em = sanitizeMonth(item.end_month) as number;
+    const ed = sanitizeDay(item.end_day) ?? daysInMonth(item.year, em);
+    return { start, end: new Date(item.year, em - 1, Math.min(ed, daysInMonth(item.year, em))) };
+  }
+  if (d === null) return { start, end: new Date(item.year, m - 1, daysInMonth(item.year, m)) };
+  return { start, end: new Date(item.year, m - 1, Math.min(d, daysInMonth(item.year, m))) };
+}
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+/** Överlappar två intervall (inklusiva, hela dagar)? */
+export function dateRangesOverlap(a: DateRange, b: DateRange): boolean {
+  return startOfLocalDay(a.start).getTime() <= startOfLocalDay(b.end).getTime() &&
+    startOfLocalDay(a.end).getTime() >= startOfLocalDay(b.start).getTime();
+}
+
+/** ISO 8601-veckonummer (måndag = veckans första dag). */
+export function isoWeekNumber(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = d.getUTCDay() || 7; // söndag = 7
+  d.setUTCDate(d.getUTCDate() + 4 - day); // torsdagen i samma vecka
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
+}
+
+/** Måndag–söndag för veckan som innehåller `date` (lokal tid). */
+export function weekRange(date: Date): DateRange {
+  const start = startOfLocalDay(date);
+  const offset = (start.getDay() + 6) % 7; // måndag = 0
+  start.setDate(start.getDate() - offset);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  return { start, end };
+}
+
+export interface AnnualWheelAgenda<T> {
+  /** Perioder som pågår just nu (start ≤ idag ≤ slut) samt punkter idag. */
+  ongoing: T[];
+  /** Poster som berör innevarande vecka (utöver de pågående). */
+  thisWeek: T[];
+  /** Poster som börjar efter veckan men inom `horizonDays` dagar. */
+  upcoming: T[];
+}
+
+/**
+ * Delar upp posterna i "pågår nu / den här veckan / kommande" för
+ * måndagsgenomgången. Varje post hamnar i EN hink (den mest akuta), sorterad
+ * på startdatum. Ren och testbar — presentationsläget gör ingen egen logik.
+ */
+export function buildAnnualWheelAgenda<
+  T extends {
+    id: string;
+    title: string;
+    year: number;
+    month?: number | null;
+    day?: number | null;
+    end_month?: number | null;
+    end_day?: number | null;
+  }
+>(items: readonly T[], today: Date, horizonDays = 30): AnnualWheelAgenda<T> {
+  const day = startOfLocalDay(today);
+  const week = weekRange(day);
+  const horizonEnd = new Date(day);
+  horizonEnd.setDate(horizonEnd.getDate() + horizonDays);
+
+  const withRange = items
+    .map((item) => ({ item, range: annualWheelItemDateRange(item) }))
+    .filter((x): x is { item: T; range: DateRange } => x.range !== null)
+    .sort((a, b) => {
+      const diff = a.range.start.getTime() - b.range.start.getTime();
+      return diff !== 0 ? diff : a.item.title.localeCompare(b.item.title, 'sv');
+    });
+
+  const ongoing: T[] = [];
+  const thisWeek: T[] = [];
+  const upcoming: T[] = [];
+  for (const { item, range } of withRange) {
+    const started = startOfLocalDay(range.start).getTime() <= day.getTime();
+    const ended = startOfLocalDay(range.end).getTime() < day.getTime();
+    if (ended) continue;
+    if (started) {
+      ongoing.push(item);
+      continue;
+    }
+    if (dateRangesOverlap(range, week)) {
+      thisWeek.push(item);
+      continue;
+    }
+    if (range.start.getTime() <= horizonEnd.getTime()) upcoming.push(item);
+  }
+  return { ongoing, thisWeek, upcoming };
+}
+
 // ─── Serier (upprepade aktiviteter) ──────────────────────────────────────────
 
 export type AnnualWheelRepeat = 'none' | 'monthly' | 'bimonthly' | 'quarterly';

@@ -73,7 +73,11 @@ function pbFieldErrors(err: unknown): Record<string, string> {
 function describePbError(err: unknown, fallback: string): string {
   const fields = pbFieldErrors(err);
   const parts = Object.entries(fields).map(([field, message]) => `${field}: ${message}`);
-  const base = err instanceof Error && err.message ? err.message : fallback;
+  const raw = err instanceof Error && err.message ? err.message : '';
+  // SDK:ns generiska engelska meddelanden ersätts med fallback-texten; PB:s
+  // fältdetaljer (det som faktiskt förklarar felet) behålls.
+  const generic = /^Failed to (create|update|delete) record\.?$/i.test(raw) || !raw;
+  const base = generic ? fallback : raw;
   return parts.length > 0 ? `${base} (${parts.join('; ')})` : base;
 }
 
@@ -326,7 +330,7 @@ export async function createAnnualWheelItem(
     if (statusOf(err) === 404) return fail('NOT_FOUND', collectionMissingMessage());
     const legacyTrackRequired = 'track' in pbFieldErrors(err);
     if (!legacyTrackRequired) {
-      return fail('DB_ERROR', describePbError(err, 'Kunde inte skapa årshjuls-post.'));
+      return fail('DB_ERROR', describePbError(err, 'Kunde inte spara aktiviteten.'));
     }
     try {
       created = (await runWrite(
@@ -335,7 +339,7 @@ export async function createAnnualWheelItem(
         options
       )) as { id: string } & Record<string, unknown>;
     } catch (retryErr) {
-      return fail('DB_ERROR', describePbError(retryErr, 'Kunde inte skapa årshjuls-post.'));
+      return fail('DB_ERROR', describePbError(retryErr, 'Kunde inte spara aktiviteten.'));
     }
   }
 
@@ -652,7 +656,7 @@ export async function updateAnnualWheelItemField(
       options
     );
   } catch (err) {
-    return fail('DB_ERROR', describePbError(err, 'DB-uppdatering misslyckades.'));
+    return fail('DB_ERROR', describePbError(err, 'Kunde inte spara ändringen.'));
   }
 
   await logAgentAction(pb, {

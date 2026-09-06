@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState, useTransition } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ANNUAL_WHEEL_TAGS,
@@ -46,12 +47,14 @@ import {
   type NextAnnualWheelItem
 } from '@platform/shared';
 import { Icon } from '@/components/proto/Icon';
+import { NextCaption, Wheel } from './Wheel';
 import type { AssignableResource } from '@/lib/assignments/types';
 import {
   createAnnualWheelCategoryAction,
   createAnnualWheelItemAction,
   deleteAnnualWheelCategoryAction,
   deleteAnnualWheelItemAction,
+  repairAnnualWheelSchemaAction,
   updateAnnualWheelCategoryAction,
   updateAnnualWheelItemAction
 } from '@/lib/actions/annual-wheel';
@@ -68,11 +71,6 @@ type AnnualWheelWritableFieldClient =
   | 'notes'
   | 'year';
 
-// Kategorierna är dynamiska per tenant (§ 30) — färgen är alltid en Movexum-
-// brand-token (källan av sanning är tokens.css), aldrig ad-hoc-hex (§ 2.2).
-// En post som pekar på en raderad kategori faller tillbaka på default-tokenen.
-const FALLBACK_GRADIENT_KEY = 'okand';
-
 interface Props {
   items: AnnualWheelItem[];
   /** Tenantens kategorier (legend, filter, färg). */
@@ -82,6 +80,8 @@ interface Props {
   people: AssignableResource[];
   /** Bara superadmin (`admin`) får lägga till/ta bort kategorier. */
   canManageCategories: boolean;
+  /** Schemadrift som inte kunde repareras automatiskt (server-side check). */
+  schemaNotice?: string | null;
 }
 
 interface FormState {
@@ -127,10 +127,14 @@ function sameTags(a: readonly string[], b: readonly string[]): boolean {
   return sa.every((v, i) => v === sb[i]);
 }
 
-const CX = 280;
-const CY = 280;
-
-export function AnnualWheelView({ items, categories, canEdit, people, canManageCategories }: Props) {
+export function AnnualWheelView({
+  items,
+  categories,
+  canEdit,
+  people,
+  canManageCategories,
+  schemaNotice = null
+}: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
@@ -166,6 +170,24 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
   const [warning, setWarning] = useState<string | null>(null);
   // Positiv kvittens (t.ex. "12 aktiviteter lades till").
   const [notice, setNotice] = useState<string | null>(null);
+  // Schemadrift från servern kan repareras manuellt av admin/incubator_lead.
+  const [schemaWarning, setSchemaWarning] = useState<string | null>(schemaNotice);
+  const [repairing, setRepairing] = useState(false);
+
+  function repairSchema() {
+    setRepairing(true);
+    startTransition(async () => {
+      const res = await repairAnnualWheelSchemaAction();
+      setRepairing(false);
+      if (res?.error) {
+        setSchemaWarning(res.error);
+        return;
+      }
+      setSchemaWarning(null);
+      if (res?.notice) setNotice(res.notice);
+      router.refresh();
+    });
+  }
 
   const filtered = useMemo(
     () => filterAnnualWheelItems(items, { year, category, tag, responsible }),
@@ -291,6 +313,8 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
             setError(res.error);
             return;
           }
+          if (res?.warning) setWarning(res.warning);
+          if (res?.notice) setNotice(res.notice);
         }
       } else {
         const res = await createAnnualWheelItemAction({
@@ -312,9 +336,10 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
           return;
         }
         if (res?.warning) setWarning(res.warning);
-        else if ((res?.created ?? 1) > 1) {
-          setNotice(`${res!.created} aktiviteter lades till i årshjulet.`);
-        }
+        const parts: string[] = [];
+        if ((res?.created ?? 1) > 1) parts.push(`${res!.created} aktiviteter lades till i årshjulet.`);
+        if (res?.notice) parts.push(res.notice);
+        if (parts.length > 0) setNotice(parts.join(' '));
       }
       setForm(null);
       router.refresh();
@@ -335,6 +360,22 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
 
   return (
     <div className="space-y-6 py-6">
+      {schemaWarning ? (
+        <div className="flex items-start gap-2 rounded-xl bg-movexum-pastell-gul px-3 py-2 text-[12.5px] text-movexum-morkgul">
+          <Icon name="alert" size={14} />
+          <span className="flex-1">{schemaWarning}</span>
+          {canManageCategories || canEdit ? (
+            <button
+              type="button"
+              onClick={repairSchema}
+              disabled={repairing}
+              className="shrink-0 rounded-md bg-movexum-morkgul/15 px-2 py-0.5 text-[12px] font-medium hover:bg-movexum-morkgul/25 disabled:opacity-60"
+            >
+              {repairing ? 'Reparerar…' : 'Försök reparera'}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {notice ? (
         <div className="flex items-start gap-2 rounded-xl bg-movexum-pastell-gron px-3 py-2 text-[12.5px] text-movexum-morkgron">
           <Icon name="check" size={14} />
@@ -426,6 +467,13 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
               <Icon name="filter" size={14} /> Kategorier
             </button>
           ) : null}
+          <Link
+            href="/arshjul/presentation"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-default px-3 py-1.5 text-[13px] font-medium text-foreground-muted hover:border-strong hover:text-foreground"
+            title="Helskärmsläge för måndagsgenomgången"
+          >
+            <Icon name="external" size={14} /> Presentera
+          </Link>
           {canEdit ? (
             <button
               type="button"
@@ -650,442 +698,6 @@ export function AnnualWheelView({ items, categories, canEdit, people, canManageC
   );
 }
 
-// ─── Hjulet (SVG) ────────────────────────────────────────────────────────────
-
-interface HoverInfo {
-  item: AnnualWheelItem;
-  x: number;
-  y: number;
-}
-
-/**
- * Öppen bågbana för text längs en aktivitet. På hjulets nedre halva ritas
- * bågen moturs så att texten läses rättvänd (SVG lägger glyfernas "upp" mot
- * banans vänstra normal).
- */
-function arcLabelPath(r: number, start: number, end: number): string {
-  const mid = (start + end) / 2;
-  const flip = mid > 90 && mid < 270;
-  const a = polarPoint(CX, CY, r, flip ? end : start);
-  const b = polarPoint(CX, CY, r, flip ? start : end);
-  const large = end - start > 180 ? 1 : 0;
-  return `M ${a.x.toFixed(2)} ${a.y.toFixed(2)} A ${r} ${r} 0 ${large} ${flip ? 0 : 1} ${b.x.toFixed(2)} ${b.y.toFixed(2)}`;
-}
-
-/** Titel som får plats längs bågen (≈ 6 px/tecken), annars null. */
-function arcLabel(title: string, r: number, start: number, end: number): string | null {
-  const span = end - start;
-  if (span <= 0) return null;
-  const arcLength = (span * Math.PI * r) / 180;
-  const maxChars = Math.floor(arcLength / 6.2);
-  if (maxChars < 4) return null;
-  const t = title.trim();
-  if (t.length <= maxChars) return t;
-  return `${t.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
-}
-
-/** Aktivitetsbandets radier: körfälten packas mellan inner och outer. */
-const BAND_INNER = 174;
-const BAND_OUTER = 252;
-const LANE_GAP = 3;
-
-function countdownLabel(days: number): string {
-  if (days <= 0) return 'idag';
-  if (days === 1) return 'imorgon';
-  return `om ${days} dgr`;
-}
-
-function NextCaption({ next }: { next: NextAnnualWheelItem }) {
-  return (
-    <div className="mt-1.5 flex items-center justify-center gap-1.5 text-[12px] text-foreground-muted">
-      <Icon name={next.ongoing ? 'bolt' : 'clock'} size={13} />
-      <span className="font-semibold text-foreground">{next.ongoing ? 'Pågår nu:' : 'Nästa:'}</span>
-      <span className="max-w-[200px] truncate">{next.item.title}</span>
-      <span className="mx-tnum text-foreground-subtle">
-        · {annualWheelShortRangeLabel(next.item)}
-        {next.ongoing ? '' : ` · ${countdownLabel(next.days)}`}
-      </span>
-    </div>
-  );
-}
-
-function Wheel({
-  items,
-  year,
-  categories,
-  onPick,
-  todayAngle,
-  currentMonth,
-  monthFocus,
-  onFocusMonth,
-  next
-}: {
-  items: AnnualWheelItem[];
-  year: number;
-  categories: AnnualWheelCategoryDef[];
-  onPick?: (item: AnnualWheelItem) => void;
-  todayAngle: number | null;
-  currentMonth: number | null;
-  monthFocus: number | null;
-  onFocusMonth?: (m: number) => void;
-  next: NextAnnualWheelItem | null;
-}) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<HoverInfo | null>(null);
-
-  const gradientDefs = useMemo(
-    () => [
-      ...categories.map((c) => ({ key: c.id, color: annualWheelColorVar(c.token) })),
-      { key: FALLBACK_GRADIENT_KEY, color: annualWheelColorVar(undefined) }
-    ],
-    [categories]
-  );
-  const gradientKey = (id: string) =>
-    categories.some((c) => c.id === id) ? id : FALLBACK_GRADIENT_KEY;
-
-  function track(item: AnnualWheelItem, e: React.MouseEvent) {
-    const rect = wrapRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setHover({ item, x: e.clientX - rect.left, y: e.clientY - rect.top });
-  }
-
-  // Packa posterna i körfält efter sitt faktiska tidsspann (perioder = bågar).
-  const { arcs, laneCount } = useMemo(() => packAnnualWheelArcs(items), [items]);
-  const laneHeight = Math.max(
-    6,
-    (BAND_OUTER - BAND_INNER - (laneCount - 1) * LANE_GAP) / Math.max(1, laneCount)
-  );
-
-  // "Idag"-markör: en liten prick UTANFÖR hjulet (ingen visarlinje).
-  const todayDot = todayAngle !== null ? polarPoint(CX, CY, 266, todayAngle) : null;
-
-  return (
-    <div ref={wrapRef} className="relative" onMouseLeave={() => setHover(null)}>
-      <svg
-        viewBox="0 0 560 560"
-        className="mx-auto block w-full max-w-[520px]"
-        role="img"
-        aria-label={`Årshjul ${year}`}
-      >
-        <defs>
-          {/* Mycket mjuka radiella gradienter per kategori (väldigt svaga, ingen
-              outline) → fräscht, ljust uttryck. Saturerad inåt, dämpad utåt.
-              En gradient per tenant-kategori + en fallback för poster vars
-              kategori har raderats (nycklarna är slugs → giltiga SVG-id:n). */}
-          {gradientDefs.map((g) => (
-            <radialGradient
-              key={g.key}
-              id={`mx-aw-grad-${g.key}`}
-              cx={CX}
-              cy={CY}
-              r={250}
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0.5" stopColor={g.color} stopOpacity={0.16} />
-              <stop offset="1" stopColor={g.color} stopOpacity={0.04} />
-            </radialGradient>
-          ))}
-          {/* Tonad fyllning vid hover (något starkare men fortfarande mjuk). */}
-          {gradientDefs.map((g) => (
-            <radialGradient
-              key={`h-${g.key}`}
-              id={`mx-aw-grad-${g.key}-hover`}
-              cx={CX}
-              cy={CY}
-              r={250}
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0.5" stopColor={g.color} stopOpacity={0.3} />
-              <stop offset="1" stopColor={g.color} stopOpacity={0.1} />
-            </radialGradient>
-          ))}
-          {/* Mitt-disk: subtil ljus gradient. */}
-          <radialGradient id="mx-aw-core" cx={CX} cy={CY - 24} r={96} gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor="var(--color-surface)" />
-            <stop offset="1" stopColor="var(--color-canvas-subtle)" />
-          </radialGradient>
-          {/* Mjuk, luftig skugga för aktivitetsbanden (ger separation utan outline). */}
-          <filter id="mx-aw-shadow" x="-30%" y="-30%" width="160%" height="160%">
-            <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="var(--movexum-svart)" floodOpacity={0.1} />
-          </filter>
-          {/* Lyft vid hover (lite tydligare, fortfarande mjuk). */}
-          <filter id="mx-aw-shadow-hover" x="-40%" y="-40%" width="180%" height="180%">
-            <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="var(--movexum-svart)" floodOpacity={0.18} />
-          </filter>
-        </defs>
-
-        {/* Bakgrundsdisk bakom hela hjulet (mjuk inramning). */}
-        <circle cx={CX} cy={CY} r={252} fill="var(--color-canvas-subtle)" opacity={0.3} />
-
-        {/* Kvartalsring */}
-        {[1, 2, 3, 4].map((q) => {
-          const a = quarterSliceAngles(q);
-          const path = annulusSectorPath(CX, CY, 70, 116, a.start, a.end);
-          const label = polarPoint(CX, CY, 93, a.mid);
-          return (
-            <g key={`q${q}`}>
-              <path
-                d={path}
-                fill="var(--color-canvas-muted)"
-                stroke="var(--color-surface)"
-                strokeWidth={3}
-                opacity={0.7}
-              />
-              <text
-                x={label.x}
-                y={label.y}
-                textAnchor="middle"
-                dominantBaseline="central"
-                className="fill-foreground-muted"
-                fontSize={13}
-                fontWeight={600}
-              >
-                Q{q}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* Månadsring + aktivitets-yttre band. Keyad på året → inanimeringen
-            (mx-wheel-band) spelas om vid årsbyte. */}
-        <g key={`wheel-${year}`}>
-          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
-            const a = monthSliceAngles(m);
-            const monthPath = annulusSectorPath(CX, CY, 116, 170, a.start, a.end);
-            const labelPos = polarPoint(CX, CY, 143, a.mid);
-            const isEven = m % 2 === 0;
-            const isCurrent = currentMonth === m;
-            const isFocus = monthFocus === m;
-            const highlighted = isCurrent || isFocus;
-            const focusable = !!onFocusMonth;
-            return (
-              <g key={`m${m}`}>
-                <path
-                  d={monthPath}
-                  fill={isEven ? 'var(--color-canvas-subtle)' : 'var(--color-surface)'}
-                  stroke={highlighted ? 'var(--color-brand)' : 'var(--color-canvas-muted)'}
-                  strokeOpacity={highlighted ? 0.45 : 1}
-                  strokeWidth={isFocus ? 2 : isCurrent ? 1.5 : 1}
-                  className={focusable ? 'cursor-pointer' : undefined}
-                  onClick={focusable ? () => onFocusMonth!(m) : undefined}
-                />
-                {highlighted ? (
-                  <path d={monthPath} fill="var(--color-brand)" opacity={isFocus ? 0.09 : 0.05} pointerEvents="none" />
-                ) : null}
-                <text
-                  x={labelPos.x}
-                  y={labelPos.y}
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  className={highlighted ? 'fill-brand' : 'fill-foreground'}
-                  fontSize={12}
-                  fontWeight={highlighted ? 700 : 600}
-                  style={focusable ? { cursor: 'pointer' } : undefined}
-                  onClick={focusable ? () => onFocusMonth!(m) : undefined}
-                >
-                  {monthShortLabel(m)}
-                </text>
-
-              </g>
-            );
-          })}
-
-          {/* Aktivitetsbågar: varje post ritas över sitt FAKTISKA tidsspann —
-              en dag blir en smal båge, en kampanj en båge över flera månader.
-              Överlappande poster hamnar i olika körfält (Gantt-liknande). */}
-          {arcs.map(({ item: it, start, end, lane }: (typeof arcs)[number], idx: number) => {
-            const isHovered = hover?.item.id === it.id;
-            const laneInner = BAND_INNER + lane * (laneHeight + LANE_GAP);
-            const inner = isHovered ? laneInner - 1.5 : laneInner;
-            const outer = inner + laneHeight + (isHovered ? 3 : 0);
-            const d = roundedAnnulusSectorPath(
-              CX,
-              CY,
-              inner,
-              outer,
-              start + 0.35,
-              Math.max(start + 0.7, end - 0.35),
-              Math.min(7, laneHeight / 2)
-            );
-            // Stagger: sveper medurs runt året.
-            const delay = Math.round(start * 1.5) + idx * 8;
-            // Titel längs bågen när den är bred nog (kampanjer/hela månader) —
-            // gör hjulet läsbart utan hovring. Kortas med "…" efter båglängden.
-            const rMid = (inner + outer) / 2;
-            const label = arcLabel(it.title, rMid, start + 2, end - 2);
-            const showLabel = label !== null && laneHeight >= 12;
-            const fontSize = Math.min(11, Math.max(8, laneHeight * 0.55));
-            return (
-              <g key={it.id}>
-                <path
-                  d={d}
-                  fill={`url(#mx-aw-grad-${gradientKey(it.category)}${isHovered ? '-hover' : ''})`}
-                  filter={isHovered ? 'url(#mx-aw-shadow-hover)' : 'url(#mx-aw-shadow)'}
-                  className={`mx-wheel-band transition-opacity ${onPick ? 'cursor-pointer' : ''}`}
-                  style={{ opacity: hover && !isHovered ? 0.4 : 1, animationDelay: `${delay}ms` }}
-                  onClick={onPick ? () => onPick(it) : undefined}
-                  onMouseEnter={(ev) => track(it, ev)}
-                  onMouseMove={(ev) => track(it, ev)}
-                />
-                {showLabel ? (
-                  <>
-                    <path id={`mx-aw-tp-${it.id}`} d={arcLabelPath(rMid, start + 2, end - 2)} fill="none" />
-                    <text
-                      className="mx-wheel-band fill-foreground"
-                      fontSize={fontSize}
-                      fontWeight={600}
-                      dominantBaseline="central"
-                      pointerEvents="none"
-                      style={{ opacity: hover && !isHovered ? 0.4 : 1, animationDelay: `${delay}ms` }}
-                    >
-                      <textPath href={`#mx-aw-tp-${it.id}`} startOffset="50%" textAnchor="middle">
-                        {label}
-                      </textPath>
-                    </text>
-                  </>
-                ) : null}
-              </g>
-            );
-          })}
-
-          {/* "Idag"-markör: en svart prick utanför hjulet vid dagens datum. */}
-          {todayDot ? (
-            <g className="mx-wheel-hand" style={{ pointerEvents: 'none' }}>
-              <circle cx={todayDot.x} cy={todayDot.y} r={10} fill="var(--color-foreground)" opacity={0.1} />
-              <circle
-                cx={todayDot.x}
-                cy={todayDot.y}
-                r={4.5}
-                fill="var(--color-foreground)"
-                stroke="var(--color-surface)"
-                strokeWidth={1.5}
-              />
-            </g>
-          ) : null}
-        </g>
-
-        {/* Mitt: år + nedräkning till nästa aktivitet. */}
-        <circle cx={CX} cy={CY} r={68} fill="url(#mx-aw-core)" stroke="var(--color-canvas-muted)" strokeWidth={1.5} />
-        {next ? (
-          <>
-            <text
-              x={CX}
-              y={CY - 12}
-              textAnchor="middle"
-              dominantBaseline="central"
-              className="fill-foreground"
-              fontSize={24}
-              fontWeight={700}
-            >
-              {year}
-            </text>
-            <text
-              x={CX}
-              y={CY + 13}
-              textAnchor="middle"
-              dominantBaseline="central"
-              className="fill-foreground-muted"
-              fontSize={12}
-              fontWeight={600}
-            >
-              Nästa {countdownLabel(next.days)}
-            </text>
-          </>
-        ) : (
-          <>
-            <text
-              x={CX}
-              y={CY - 8}
-              textAnchor="middle"
-              dominantBaseline="central"
-              className="fill-foreground"
-              fontSize={26}
-              fontWeight={700}
-            >
-              {year}
-            </text>
-            <text
-              x={CX}
-              y={CY + 16}
-              textAnchor="middle"
-              dominantBaseline="central"
-              className="fill-foreground-subtle"
-              fontSize={11}
-            >
-              Årshjul
-            </text>
-          </>
-        )}
-      </svg>
-
-      {hover ? <HoverCard hover={hover} categories={categories} /> : null}
-    </div>
-  );
-}
-
-function HoverCard({
-  hover,
-  categories
-}: {
-  hover: HoverInfo;
-  categories: AnnualWheelCategoryDef[];
-}) {
-  const { item } = hover;
-  // Placera kortet vid pekaren, men förskjut så det inte skyms av muspekaren
-  // och håll det inom hjul-containern.
-  const left = Math.max(8, Math.min(hover.x + 16, 520 - 248));
-  const top = Math.max(8, hover.y + 16);
-  return (
-    <div
-      className="pointer-events-none absolute z-20 w-60 rounded-2xl border border-default bg-surface/95 p-3.5 shadow-xl shadow-movexum-svart/20 backdrop-blur-sm"
-      style={{ left, top }}
-    >
-      <div className="mb-1.5 flex items-center gap-2">
-        <span
-          className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-          style={{ background: annualWheelCategoryColorVar(item.category, categories) }}
-          aria-hidden
-        />
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle">
-          {annualWheelCategoryLabel(item.category, categories)}
-        </span>
-      </div>
-      <p className="font-heading text-[14px] font-semibold leading-snug text-foreground">{item.title}</p>
-      <p className="mt-1.5 flex items-center gap-1.5 text-[12.5px] font-medium text-foreground">
-        <Icon name="calendar" size={13} />
-        {annualWheelRangeLabel(item)}
-        <span className="font-normal text-foreground-subtle">· Q{quarterForMonth(item.month)}</span>
-      </p>
-      {isAnnualWheelPeriod(item) ? (
-        <p className="mt-0.5 text-[11px] font-medium uppercase tracking-wide text-foreground-subtle">
-          Period
-        </p>
-      ) : null}
-      {item.responsible_name ? (
-        <p className="mt-1 flex items-center gap-1.5 text-[12px] text-foreground-muted">
-          <Icon name="user" size={12} />
-          Ansvarig: <span className="font-medium text-foreground">{item.responsible_name}</span>
-        </p>
-      ) : null}
-      {(item.tags ?? []).length > 0 ? (
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          {(item.tags ?? []).map((t) => (
-            <span
-              key={t}
-              className="inline-flex items-center rounded-md bg-canvas-subtle px-1.5 py-0.5 text-[11px] font-medium text-foreground-muted"
-            >
-              {annualWheelTagLabel(t)}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      {item.notes ? (
-        <p className="mt-2 line-clamp-3 text-[12px] leading-relaxed text-foreground-muted">{item.notes}</p>
-      ) : null}
-    </div>
-  );
-}
-
 function Legend({
   categories,
   orphans
@@ -1264,7 +876,7 @@ function FilterSelect({
   );
 }
 
-function EditorModal({
+export function EditorModal({
   form,
   categories,
   setForm,
@@ -1288,11 +900,30 @@ function EditorModal({
   if (!yearOptions.includes(form.year)) yearOptions.push(form.year);
   yearOptions.sort((a, b) => a - b);
 
+  // Period och upprepning är avancerade val — hopfällda tills man slår på
+  // dem, så dialogen inte känns som ett formulär för allt på en gång.
+  const [periodOpen, setPeriodOpen] = useState(form.endMonth !== '');
+  const [repeatOpen, setRepeatOpen] = useState(form.repeat !== 'none');
+  const hasMonth = form.month !== '';
+
   // Nollställ dagen om den inte finns i den nya månaden/året (t.ex. 31 → april).
   function clampedDay(year: number, month: string, day: string): string {
     if (month === '' || day === '') return month === '' ? '' : day;
     return Number(day) > daysInMonth(year, Number(month)) ? '' : day;
   }
+
+  function togglePeriod(on: boolean) {
+    setPeriodOpen(on);
+    if (!on) setForm({ ...form, endMonth: '', endDay: '' });
+  }
+
+  function toggleRepeat(on: boolean) {
+    setRepeatOpen(on);
+    setForm({ ...form, repeat: on ? 'monthly' : 'none', repeatUntilMonth: on ? form.repeatUntilMonth : '' });
+  }
+
+  const inputCls =
+    'w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground disabled:opacity-50';
 
   return (
     <div
@@ -1302,173 +933,172 @@ function EditorModal({
       onClick={onClose}
     >
       <div
-        className="max-h-[calc(100vh-3rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-default bg-surface p-5 shadow-lg shadow-movexum-svart/20"
+        className="max-h-[calc(100vh-3rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-default bg-surface shadow-lg shadow-movexum-svart/20"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="font-heading text-[16px] font-semibold text-foreground">
-          {form.id ? 'Redigera aktivitet' : 'Ny aktivitet i årshjulet'}
-        </h3>
-        <p className="mb-3 mt-0.5 text-[12px] text-foreground-subtle">
-          Välj månad och, om du vill, en specifik dag i kalendern nedan.
-        </p>
-
-        <div className="space-y-3">
-          <Field label="Titel">
-            <input
-              type="text"
-              value={form.title}
-              maxLength={200}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground"
-              placeholder="t.ex. Bokslut, Styrelsemöte, Strategidagar"
-              autoFocus
-            />
-          </Field>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="År">
-              <select
-                value={String(form.year)}
-                onChange={(e) => {
-                  const year = Number(e.target.value);
-                  setForm({ ...form, year, day: clampedDay(year, form.month, form.day) });
-                }}
-                className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground"
-              >
-                {yearOptions.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Månad">
-              <select
-                value={form.month}
-                onChange={(e) => {
-                  const month = e.target.value;
-                  setForm({ ...form, month, day: clampedDay(form.year, month, form.day) });
-                }}
-                className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground"
-              >
-                <option value="">Helår / återkommande</option>
-                {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-                  <option key={m} value={String(m)}>
-                    {monthLongLabel(m)} (Q{quarterForMonth(m)})
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-default bg-surface/95 px-5 py-3.5 backdrop-blur-sm">
           <div>
-            <span className="mb-1 block text-[11px] font-medium text-foreground-subtle">
-              Datum (valfritt)
-            </span>
-            {form.month === '' ? (
-              <p className="rounded-xl border border-dashed border-default bg-canvas-subtle px-3 py-3 text-[12px] text-foreground-muted">
-                Välj en månad ovan för att kunna sätta ett specifikt datum. Utan månad gäller
-                aktiviteten hela året.
-              </p>
-            ) : (
+            <h3 className="font-heading text-[16px] font-semibold text-foreground">
+              {form.id ? 'Redigera aktivitet' : 'Ny aktivitet'}
+            </h3>
+            <p className="mt-0.5 text-[12px] text-foreground-subtle">
+              {form.id
+                ? 'Ändringarna sparas fält för fält och loggas.'
+                : 'Titel, kategori och när — resten är valfritt.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 text-foreground-subtle hover:bg-canvas-subtle hover:text-foreground"
+            aria-label="Stäng"
+          >
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-5 px-5 py-4">
+          {/* ── Vad ─────────────────────────────────────────────────────── */}
+          <section className="space-y-3">
+            <Field label="Titel">
+              <input
+                type="text"
+                value={form.title}
+                maxLength={200}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                className={`${inputCls} text-[14px]`}
+                placeholder="t.ex. LinkedIn-kampanj, Styrelsemöte, Strategidagar"
+                autoFocus
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Kategori">
+                <select
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  className={inputCls}
+                >
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+                  {/* Posten kan peka på en raderad kategori — visa den så den inte
+                      byts tyst, men uppmuntra ett aktivt val. */}
+                  {form.category && !categories.some((c) => c.id === form.category) ? (
+                    <option value={form.category}>{form.category} (borttagen)</option>
+                  ) : null}
+                </select>
+              </Field>
+              <Field label="Ansvarig">
+                <select
+                  value={form.responsible}
+                  onChange={(e) => setForm({ ...form, responsible: e.target.value })}
+                  className={inputCls}
+                >
+                  <option value="">Ingen ansvarig</option>
+                  {people.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          </section>
+
+          {/* ── När ─────────────────────────────────────────────────────── */}
+          <section className="space-y-3">
+            <SectionHeading icon="calendar" label="När" />
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-3">
+              <Field label="År">
+                <select
+                  value={String(form.year)}
+                  onChange={(e) => {
+                    const year = Number(e.target.value);
+                    setForm({ ...form, year, day: clampedDay(year, form.month, form.day) });
+                  }}
+                  className={inputCls}
+                >
+                  {yearOptions.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Månad">
+                <select
+                  value={form.month}
+                  onChange={(e) => {
+                    const month = e.target.value;
+                    setForm({
+                      ...form,
+                      month,
+                      day: clampedDay(form.year, month, form.day),
+                      // Utan månad finns varken period eller serie.
+                      ...(month === '' ? { endMonth: '', endDay: '', repeat: 'none' as AnnualWheelRepeat } : {})
+                    });
+                    if (month === '') {
+                      setPeriodOpen(false);
+                      setRepeatOpen(false);
+                    }
+                  }}
+                  className={inputCls}
+                >
+                  <option value="">Helår / återkommande</option>
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                    <option key={m} value={String(m)}>
+                      {monthLongLabel(m)} (Q{quarterForMonth(m)})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+
+            {hasMonth ? (
               <DayCalendar
                 year={form.year}
                 month={Number(form.month)}
                 selected={form.day === '' ? null : Number(form.day)}
                 onSelect={(d) => setForm({ ...form, day: d === null ? '' : String(d) })}
               />
+            ) : (
+              <p className="rounded-xl border border-dashed border-default bg-canvas-subtle px-3 py-2.5 text-[12px] text-foreground-muted">
+                Utan månad gäller aktiviteten hela året. Välj en månad för att sätta datum,
+                period eller upprepning.
+              </p>
             )}
-          </div>
 
-          {/* Period: en kampanj löper över tid och ritas som en båge i hjulet. */}
-          <div className="rounded-xl border border-default p-2.5">
-            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-foreground-subtle">
-              <Icon name="target" size={12} />
-              Pågår över tid (kampanj)
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Slutmånad">
-                <select
-                  value={form.endMonth}
-                  disabled={form.month === ''}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      endMonth: e.target.value,
-                      endDay: e.target.value === '' ? '' : form.endDay
-                    })
-                  }
-                  className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground disabled:opacity-50"
-                >
-                  <option value="">Ingen period (en dag/månad)</option>
-                  {form.month !== ''
-                    ? Array.from({ length: 12 }, (_, i) => i + 1)
-                        .filter((m) => m >= Number(form.month))
-                        .map((m) => (
-                          <option key={m} value={String(m)}>
-                            {monthLongLabel(m)}
-                          </option>
-                        ))
-                    : null}
-                </select>
-              </Field>
-              <Field label="Slutdag">
-                <select
-                  value={form.endDay}
-                  disabled={form.endMonth === ''}
-                  onChange={(e) => setForm({ ...form, endDay: e.target.value })}
-                  className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground disabled:opacity-50"
-                >
-                  <option value="">Månadens sista dag</option>
-                  {form.endMonth !== ''
-                    ? Array.from(
-                        { length: daysInMonth(form.year, Number(form.endMonth)) },
-                        (_, i) => i + 1
-                      ).map((d) => (
-                        <option key={d} value={String(d)}>
-                          {d} {monthLongLabel(Number(form.endMonth))}
-                        </option>
-                      ))
-                    : null}
-                </select>
-              </Field>
-            </div>
-          </div>
-
-          {/* Upprepning: skapar hela serien på en gång (bara vid nyskapande). */}
-          {!form.id ? (
-            <div className="rounded-xl border border-default p-2.5">
-              <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-foreground-subtle">
-                <Icon name="copy" size={12} />
-                Upprepa
-              </div>
+            {/* Period */}
+            <ToggleRow
+              icon="target"
+              label="Pågår över tid"
+              hint={
+                periodOpen && form.endMonth !== ''
+                  ? `Till ${form.endDay !== '' ? `${form.endDay} ` : ''}${monthLongLabel(Number(form.endMonth)).toLowerCase()}`
+                  : 'Kampanj eller projekt med start och slut'
+              }
+              checked={periodOpen}
+              disabled={!hasMonth}
+              onChange={togglePeriod}
+            >
               <div className="grid grid-cols-2 gap-3">
-                <Field label="Hur ofta">
+                <Field label="Slutmånad">
                   <select
-                    value={form.repeat}
-                    disabled={form.month === ''}
+                    value={form.endMonth}
                     onChange={(e) =>
-                      setForm({ ...form, repeat: e.target.value as AnnualWheelRepeat })
+                      setForm({
+                        ...form,
+                        endMonth: e.target.value,
+                        endDay: e.target.value === '' ? '' : form.endDay
+                      })
                     }
-                    className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground disabled:opacity-50"
+                    className={inputCls}
                   >
-                    {ANNUAL_WHEEL_REPEATS.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.label}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="T.o.m.">
-                  <select
-                    value={form.repeatUntilMonth}
-                    disabled={form.repeat === 'none' || form.month === ''}
-                    onChange={(e) => setForm({ ...form, repeatUntilMonth: e.target.value })}
-                    className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground disabled:opacity-50"
-                  >
-                    <option value="">December</option>
+                    <option value="">Välj slutmånad…</option>
                     {Array.from({ length: 12 }, (_, i) => i + 1)
-                      .filter((m) => form.month === '' || m >= Number(form.month))
+                      .filter((m) => m >= Number(form.month))
                       .map((m) => (
                         <option key={m} value={String(m)}>
                           {monthLongLabel(m)}
@@ -1476,107 +1106,133 @@ function EditorModal({
                       ))}
                   </select>
                 </Field>
+                <Field label="Slutdag">
+                  <select
+                    value={form.endDay}
+                    disabled={form.endMonth === ''}
+                    onChange={(e) => setForm({ ...form, endDay: e.target.value })}
+                    className={inputCls}
+                  >
+                    <option value="">Månadens sista dag</option>
+                    {form.endMonth !== ''
+                      ? Array.from(
+                          { length: daysInMonth(form.year, Number(form.endMonth)) },
+                          (_, i) => i + 1
+                        ).map((d) => (
+                          <option key={d} value={String(d)}>
+                            {d} {monthLongLabel(Number(form.endMonth)).toLowerCase()}
+                          </option>
+                        ))
+                      : null}
+                  </select>
+                </Field>
               </div>
-              {form.repeat !== 'none' && form.month !== '' ? (
-                <p className="mt-1.5 text-[11.5px] text-foreground-subtle">
-                  Skapar {seriesPreviewCount(form)} aktiviteter — en per förekomst.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+            </ToggleRow>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Kategori">
-              <select
-                value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-                className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground"
+            {/* Upprepning (bara vid nyskapande — serien expanderas då). */}
+            {!form.id ? (
+              <ToggleRow
+                icon="copy"
+                label="Upprepa"
+                hint={
+                  repeatOpen && form.repeat !== 'none'
+                    ? `Skapar ${seriesPreviewCount(form)} aktiviteter — en per förekomst`
+                    : 'Varje månad, varannan eller varje kvartal'
+                }
+                checked={repeatOpen}
+                disabled={!hasMonth}
+                onChange={toggleRepeat}
               >
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label}
-                  </option>
-                ))}
-                {/* Posten kan peka på en raderad kategori — visa den så den inte
-                    byts tyst, men uppmuntra ett aktivt val. */}
-                {form.category && !categories.some((c) => c.id === form.category) ? (
-                  <option value={form.category}>{form.category} (borttagen)</option>
-                ) : null}
-              </select>
-            </Field>
-            <Field label="Ansvarig (valfritt)">
-              <select
-                value={form.responsible}
-                onChange={(e) => setForm({ ...form, responsible: e.target.value })}
-                className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground"
-              >
-                <option value="">Ingen ansvarig</option>
-                {people.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-
-          <Field label="Taggar (valfritt)">
-            <div className="space-y-2">
-              {(['marknad', 'verksamhet'] as const).map((group) => (
-                <div key={group}>
-                  <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-foreground-subtle">
-                    {ANNUAL_WHEEL_TAG_GROUP_LABELS[group]}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {annualWheelTagsInGroup(group).map((t) => {
-                      const active = form.tags.includes(t.id);
-                      return (
-                        <button
-                          key={t.id}
-                          type="button"
-                          aria-pressed={active}
-                          onClick={() =>
-                            setForm({
-                              ...form,
-                              tags: active
-                                ? form.tags.filter((x) => x !== t.id)
-                                : [...form.tags, t.id]
-                            })
-                          }
-                          className={`rounded-full border px-2.5 py-1 text-[12px] transition-colors ${
-                            active
-                              ? 'border-brand bg-brand/10 text-brand'
-                              : 'border-default text-foreground-muted hover:border-strong hover:text-foreground'
-                          }`}
-                        >
-                          {t.label}
-                        </button>
-                      );
-                    })}
-                  </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Hur ofta">
+                    <select
+                      value={form.repeat}
+                      onChange={(e) => setForm({ ...form, repeat: e.target.value as AnnualWheelRepeat })}
+                      className={inputCls}
+                    >
+                      {ANNUAL_WHEEL_REPEATS.filter((r) => r.id !== 'none').map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="T.o.m.">
+                    <select
+                      value={form.repeatUntilMonth}
+                      onChange={(e) => setForm({ ...form, repeatUntilMonth: e.target.value })}
+                      className={inputCls}
+                    >
+                      <option value="">December</option>
+                      {Array.from({ length: 12 }, (_, i) => i + 1)
+                        .filter((m) => m >= Number(form.month))
+                        .map((m) => (
+                          <option key={m} value={String(m)}>
+                            {monthLongLabel(m)}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
                 </div>
-              ))}
-            </div>
-          </Field>
+              </ToggleRow>
+            ) : null}
+          </section>
 
+          {/* ── Taggar ──────────────────────────────────────────────────── */}
+          <section className="space-y-2">
+            <SectionHeading icon="filter" label="Taggar" hint="valfritt — för uppföljning" />
+            {(['marknad', 'verksamhet'] as const).map((group) => (
+              <div key={group} className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 w-[86px] shrink-0 text-[11px] font-medium text-foreground-subtle">
+                  {ANNUAL_WHEEL_TAG_GROUP_LABELS[group]}
+                </span>
+                {annualWheelTagsInGroup(group).map((t) => {
+                  const active = form.tags.includes(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() =>
+                        setForm({
+                          ...form,
+                          tags: active ? form.tags.filter((x) => x !== t.id) : [...form.tags, t.id]
+                        })
+                      }
+                      className={`rounded-full border px-2.5 py-0.5 text-[12px] transition-colors ${
+                        active
+                          ? 'border-brand bg-brand/10 font-medium text-brand'
+                          : 'border-default text-foreground-muted hover:border-strong hover:text-foreground'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </section>
+
+          {/* ── Anteckning ──────────────────────────────────────────────── */}
           <Field label="Anteckning (valfritt)">
             <textarea
               value={form.notes}
               maxLength={2000}
               rows={2}
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              className="w-full rounded-lg border border-default bg-canvas px-2.5 py-1.5 text-[13px] text-foreground"
+              className={inputCls}
             />
           </Field>
 
           {error ? (
-            <p className="rounded-lg bg-movexum-pastell-orange px-2.5 py-1.5 text-[12px] text-movexum-morkorange">
-              {error}
+            <p className="flex items-start gap-2 rounded-lg bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange">
+              <Icon name="alert" size={14} />
+              <span>{error}</span>
             </p>
           ) : null}
         </div>
 
-        <div className="mt-4 flex items-center justify-end gap-2">
+        <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-default bg-surface/95 px-5 py-3 backdrop-blur-sm">
           <button
             type="button"
             onClick={onClose}
@@ -1589,12 +1245,80 @@ function EditorModal({
             type="button"
             onClick={onSubmit}
             disabled={pending}
-            className="rounded-lg bg-brand px-3.5 py-1.5 text-[13px] font-medium text-brand-foreground hover:bg-brand-hover disabled:opacity-60"
+            className="rounded-lg bg-brand px-4 py-1.5 text-[13px] font-medium text-brand-foreground hover:bg-brand-hover disabled:opacity-60"
           >
-            {pending ? 'Sparar…' : 'Spara'}
+            {pending ? 'Sparar…' : form.id ? 'Spara ändringar' : 'Lägg till'}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function SectionHeading({ icon, label, hint }: { icon: 'calendar' | 'filter'; label: string; hint?: string }) {
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle">
+      <Icon name={icon} size={12} />
+      {label}
+      {hint ? <span className="font-normal normal-case tracking-normal">· {hint}</span> : null}
+    </div>
+  );
+}
+
+/**
+ * Hopfällbar rad med en switch: stängd = en lugn rad med förklaring, öppen =
+ * fälten visas under. Håller dialogen kort utan att gömma funktionerna.
+ */
+function ToggleRow({
+  icon,
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+  children
+}: {
+  icon: 'target' | 'copy';
+  label: string;
+  hint: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (on: boolean) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={`rounded-xl border transition-colors ${
+        checked ? 'border-brand/40 bg-brand/[0.03]' : 'border-default'
+      } ${disabled ? 'opacity-50' : ''}`}
+    >
+      <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5">
+        <Icon name={icon} size={14} className="shrink-0 text-foreground-subtle" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13px] font-medium text-foreground">{label}</span>
+          <span className="block truncate text-[11.5px] text-foreground-subtle">{hint}</span>
+        </span>
+        <input
+          type="checkbox"
+          className="sr-only"
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        <span
+          aria-hidden
+          className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${
+            checked ? 'bg-brand' : 'bg-canvas-muted'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 h-4 w-4 rounded-full bg-surface shadow-sm shadow-movexum-svart/20 transition-transform ${
+              checked ? 'translate-x-[18px]' : 'translate-x-0.5'
+            }`}
+          />
+        </span>
+      </label>
+      {checked ? <div className="border-t border-default/60 px-3 py-3">{children}</div> : null}
     </div>
   );
 }
