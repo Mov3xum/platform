@@ -5,6 +5,7 @@
  */
 
 import PocketBase from 'pocketbase';
+import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -875,11 +876,16 @@ async function main() {
   await verifyHealthEndpoint();
 
   const authUrl = `${PB_URL.replace(/\/$/, '')}/api/collections/_superusers/auth-with-password`;
-  try {
-    await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
-  } catch (err) {
+  const authError = await authenticateSuperuserWithRetry(pb, SU_EMAIL, SU_PASSWORD, {
+    onRetry: (err, attempt, maxAttempts, delayMs) => {
+      log(
+        `superuser auth failed (attempt ${attempt}/${maxAttempts}): ${describeError(err)} — retrying in ${delayMs}ms`
+      );
+    }
+  });
+  if (authError) {
     fail(
-      `Superuser auth failed for ${SU_EMAIL} at ${authUrl}\n${describeError(err)}\n` +
+      `Superuser auth failed for ${SU_EMAIL} at ${authUrl}\n${describeError(authError)}\n` +
       `Check PB_SU_EMAIL/PB_SU_PASSWORD secrets, that PB is reachable, and that PB v0.23+ exposes /api/collections/_superusers/auth-with-password.`
     );
   }

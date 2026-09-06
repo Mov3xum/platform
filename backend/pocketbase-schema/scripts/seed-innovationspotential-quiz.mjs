@@ -26,6 +26,7 @@
  */
 
 import PocketBase from 'pocketbase';
+import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -196,7 +197,17 @@ pb.autoCancellation(false);
 
 async function main() {
   console.log('• PB_URL:', PB_URL);
-  await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
+  const authError = await authenticateSuperuserWithRetry(pb, SU_EMAIL, SU_PASSWORD, {
+    onRetry: (err, attempt, maxAttempts, delayMs) => {
+      console.log(
+        `! superuser-auth misslyckades (försök ${attempt}/${maxAttempts}): ${err?.message || err} — försöker igen om ${delayMs}ms`
+      );
+    }
+  });
+  if (authError) {
+    console.error(`✗ Superuser-auth misslyckades: ${authError?.message || authError}`);
+    process.exit(1);
+  }
   console.log('✓ Superuser-auth OK');
 
   // Sanity: finns compass_modules-kollektionen alls?
