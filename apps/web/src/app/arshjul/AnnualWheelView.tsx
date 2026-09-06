@@ -261,6 +261,22 @@ export function AnnualWheelView({
     setMonthFocus((cur) => (cur === m ? null : m));
   }
 
+  // Aktivitet som senast klickades i hjulet — lyfts fram i månadslistan en
+  // kort stund så man ser var den hamnade.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+
+  function pickFromWheel(item: AnnualWheelItem) {
+    if (item.month) setMonthFocus(item.month);
+    setHighlightId(item.id);
+    // Scrolla fram raden när listan renderats om med den fokuserade månaden.
+    requestAnimationFrame(() => {
+      document
+        .getElementById(`aw-item-${item.id}`)
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+    window.setTimeout(() => setHighlightId((cur) => (cur === item.id ? null : cur)), 2400);
+  }
+
   function openCreate() {
     setError(null);
     setForm({
@@ -555,7 +571,7 @@ export function AnnualWheelView({
             items={filtered}
             year={year}
             categories={categories}
-            onPick={canEdit ? openEdit : undefined}
+            onPick={pickFromWheel}
             todayAngle={todayAngle}
             currentMonth={currentMonth}
             monthFocus={monthFocus}
@@ -633,6 +649,7 @@ export function AnnualWheelView({
                               key={it.id}
                               item={it}
                               categories={categories}
+                              highlighted={highlightId === it.id}
                               onEdit={canEdit ? openEdit : undefined}
                               onDelete={canEdit ? remove : undefined}
                             />
@@ -896,17 +913,25 @@ function DateBadge({ item }: { item: AnnualWheelItem }) {
 function ItemPill({
   item,
   categories,
+  highlighted = false,
   onEdit,
   onDelete
 }: {
   item: AnnualWheelItem;
   categories: AnnualWheelCategoryDef[];
+  /** Lyfts fram (klickad i hjulet) — mjuk brand-ton som tonar bort. */
+  highlighted?: boolean;
   onEdit?: (item: AnnualWheelItem) => void;
   onDelete?: (item: AnnualWheelItem) => void;
 }) {
   const tagText = (item.tags ?? []).map((t) => annualWheelTagLabel(t)).join(' · ');
   return (
-    <li className="group flex items-center gap-2.5 rounded-xl px-1.5 py-1.5 transition-colors hover:bg-canvas-subtle">
+    <li
+      id={`aw-item-${item.id}`}
+      className={`group flex items-center gap-2.5 rounded-xl px-1.5 py-1.5 transition-colors duration-500 hover:bg-canvas-subtle ${
+        highlighted ? 'bg-brand/10 ring-1 ring-brand/30' : ''
+      }`}
+    >
       <DateBadge item={item} />
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 text-[13px] leading-snug">

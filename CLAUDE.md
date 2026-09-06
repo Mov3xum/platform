@@ -3821,7 +3821,10 @@ enhetstestad) finns kvar i `@platform/shared` för framtida bruk. Tabellen
 visar en period i **varje** månad den löper (`monthsForAnnualWheelItem`) och
 bara taggar som faktiskt används som kolumner (`annualWheelTagsInUse`). En
 pågående period visas som "Pågår nu" i navet (`nextUpcomingItem` →
-`ongoing`).
+`ongoing`). **Klick i hjulet** fokuserar månaden i listan "Per månad" (månadsringen
+växlar fokus, ett aktivitetsband fokuserar sin startmånad och lyfter fram raden
+en kort stund) — redigering sker via pennan i listan, aldrig genom att klicka
+i hjulet, så en genomgång kan klickas igenom utan att dialoger öppnas.
 
 **Serier (upprepning).** "Nyhetsbrev den 15:e varje månad" skapas i ETT steg:
 `expandAnnualWheelSeries` (ren, enhetstestad) expanderar basen till
