@@ -17,6 +17,7 @@ import {
   CHAT_WRITE_ACTIONS_GUIDANCE
 } from './guidance';
 import { routeChatModels } from './model-router';
+import { getModelMeta, isAllowedModel, modelSupportsVision } from './models';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from './web';
 import { withAttachedImages } from './chat-input';
 import { logAiUsage } from './usage';
@@ -154,9 +155,9 @@ const STAFF_TOOL_GUIDANCE =
   'svar och invänta resultatet innan du skriver klart. Påstå aldrig att ett ' +
   'dokument är på väg, håller på att skapas, eller snart är klart utan att ' +
   'faktiskt ha anropat verktyget och fått tillbaka filen.\n' +
-  '- Om uppgiften kräver många steg eller längre research: säg det rakt ut och ' +
-  'be användaren använda "Djupdykning"-läget i stället för att låtsas fortsätta ' +
-  'arbeta efter att svaret skickats.\n\n' +
+  '- Om uppgiften kräver många steg eller längre research: säg det rakt ut, gör ' +
+  'det du hinner i detta svar och föreslå att användaren delar upp resten i ' +
+  'flera turer — låtsas aldrig fortsätta arbeta efter att svaret skickats.\n\n' +
   'OBS: Plattformen spårar IRL (Investment Readiness Level, fältet `irl_level` 1-9) — INTE TRL.';
 
 interface AgentRecord {
@@ -346,6 +347,11 @@ export interface RunStaffChatTurnOptions {
   chatThreadId?: string;
   /** ai_usage_events-surface (default dashboard_chat). */
   surface?: AiUsageSurface;
+  /**
+   * Modell användaren valt uttryckligen (modellväljaren i chatten, § 9.9).
+   * Tom/okänd → automatiskt val efter komplexitet (`model-router.ts`).
+   */
+  model?: string;
   /** Live-callback för verktygssteg (streaming-endpoint). */
   onStep?: (step: AgentLoopStep) => void;
   /** Live-callback för text-deltan (löpande utskrift, streaming-endpoint). */
@@ -378,6 +384,16 @@ export async function runStaffChatTurn(
   }
 
   const images = opts.images ?? [];
+
+  // Uttryckligt modellval: bara registrerade modeller (lib/ai/models.ts).
+  // Bilder + vald modell utan vision → tydligt fel, aldrig tyst fallback (§ 9.9).
+  const preferredModel = isAllowedModel(opts.model) ? opts.model : undefined;
+  if (preferredModel && images.length > 0 && !modelSupportsVision(preferredModel)) {
+    return {
+      ok: false,
+      error: `${getModelMeta(preferredModel).label} stödjer inte bilder. Välj Mistral Medium eller Pixtral Large — eller "Auto" — för att skicka bilder.`
+    };
+  }
 
   const actor: Actor = {
     kind: 'agent',
@@ -457,7 +473,8 @@ export async function runStaffChatTurn(
     hasImages: images.length > 0,
     message: latestUserMessage(opts.userMessages),
     hasAgent: Boolean(opts.agentId),
-    historyTurns: opts.userMessages.length
+    historyTurns: opts.userMessages.length,
+    preferredModel
   });
 
   try {

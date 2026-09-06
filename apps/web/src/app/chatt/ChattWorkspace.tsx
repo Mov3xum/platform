@@ -30,16 +30,9 @@ import {
   type ThreadListItem
 } from '@/lib/actions/chat-threads';
 import { getFileDownloadUrlAction } from '@/lib/actions/files';
-import {
-  startDeepJobAction,
-  getDeepJobStatusAction
-} from '@/lib/actions/deep-jobs';
-import {
-  actionErrorMessage,
-  isStaleDeploymentError,
-  STALE_DEPLOYMENT_MESSAGE
-} from '@/lib/action-error';
-import type { DeepJobStatus, Role } from '@platform/shared';
+import { actionErrorMessage } from '@/lib/action-error';
+import { isAllowedModel } from '@/lib/ai/models';
+import type { Role } from '@platform/shared';
 
 interface Props {
   greeting: string;
@@ -51,7 +44,20 @@ interface Props {
   initialThreads: ThreadListResult;
 }
 
-type SubmitOpts = { includeWebContext: boolean; attachments: ChatAttachment[]; deepJob: boolean };
+type SubmitOpts = { includeWebContext: boolean; attachments: ChatAttachment[]; model?: string };
+
+// Modellvalet (§ 9.9) sparas per webbläsare — bekvämlighet, ingen datakälla
+// (servern validerar alltid mot registret i lib/ai/models.ts).
+const MODEL_STORAGE_KEY = 'movexum-chat-model';
+
+function readStoredModel(): string {
+  try {
+    const v = window.localStorage.getItem(MODEL_STORAGE_KEY) || '';
+    return isAllowedModel(v) ? v : '';
+  } catch {
+    return '';
+  }
+}
 
 // Ett köat meddelande med all info som behövs för att köra det senare.
 type QueuedTurn = { id: string; text: string; opts: SubmitOpts; displayText: string };
@@ -65,12 +71,11 @@ interface ConvState {
   /** Meddelandena är inlästa (skapad denna session eller hämtade från servern). */
   loaded: boolean;
   agentId: string | null;
-  /** En turn förbereds (tråd skapas / djupjobb registreras) — räknas som upptagen. */
+  /** En turn förbereds (tråd skapas) — räknas som upptagen. */
   starting: boolean;
   streaming: boolean;
   liveSteps: LiveStep[];
   liveText: string;
-  deepJob: { id: string; status: DeepJobStatus; progress: number } | null;
   queue: QueuedTurn[];
   error: string | null;
   /** En turn blev klar medan tråden inte var öppen → grön prick tills den öppnas. */
@@ -81,8 +86,6 @@ interface ConvState {
 // det riktiga tråd-id:t när tråden skapats (kö + meddelanden följer med).
 const DRAFT_KEY = '__draft__';
 
-const DEEP_TERMINAL: DeepJobStatus[] = ['succeeded', 'failed', 'cancelled'];
-
 function emptyConv(): ConvState {
   return {
     messages: [],
@@ -92,20 +95,15 @@ function emptyConv(): ConvState {
     streaming: false,
     liveSteps: [],
     liveText: '',
-    deepJob: null,
     queue: [],
     error: null,
     unread: false
   };
 }
 
-function isDeepRunning(c?: ConvState | null): boolean {
-  return !!c?.deepJob && !DEEP_TERMINAL.includes(c.deepJob.status);
-}
-
 /** Tråden kör (eller har köat) något — nya meddelanden i den köas. */
 function isBusy(c?: ConvState | null): boolean {
-  return !!c && (c.starting || c.streaming || isDeepRunning(c) || c.queue.length > 0);
+  return !!c && (c.starting || c.streaming || c.queue.length > 0);
 }
 
 // ── Statusprickar per tråd (som Claude Code) ────────────────────────────────
@@ -115,7 +113,7 @@ type ThreadStatus = 'working' | 'action' | 'error' | 'done';
 
 function statusFor(c?: ConvState): ThreadStatus | null {
   if (!c) return null;
-  if (c.starting || c.streaming || isDeepRunning(c) || c.queue.length > 0) return 'working';
+  if (c.starting || c.streaming || c.queue.length > 0) return 'working';
   if (c.error) return 'error';
   const last = c.messages[c.messages.length - 1];
   if (last?.role === 'assistant' && (last.approval_request || last.meeting_request)) {
@@ -143,6 +141,7 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
       steps: m.steps,
       approval_request: m.approval_request,
       meeting_request: m.meeting_request,
+      model: m.role === 'assistant' ? m.model : undefined,
       // Turens tokens (in + ut, per-turn-metadata § 9.9) → inline miljöchip
       // under varje assistant-svar.
       tokens:
@@ -162,6 +161,9 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   const [activeAgent, setActiveAgent] = useState<DashboardAgent | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [rightOpen, setRightOpen] = useState(true);
+  // Valt modell-id ('' = Auto). Läses från localStorage EFTER mount så servern
+  // och klienten renderar samma initialvärde vid hydreringen (§ 9.9).
+  const [model, setModel] = useState('');
   // Mötesläget (§ 34): null = stängt; objektet bär ev. förifyllnad/återupptag.
   const [meetingPanel, setMeetingPanel] = useState<MeetingInitial | null>(null);
   const [resumableMeetings, setResumableMeetings] = useState<ResumableMeeting[]>([]);
@@ -193,7 +195,6 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   const activeKey = activeThreadId ?? DRAFT_KEY;
   const activeConv = convs[activeKey];
   const streaming = activeConv?.streaming ?? false;
-  const deepRunning = isDeepRunning(activeConv);
   const starting = activeConv?.starting ?? false;
   const queuedItems: QueuedItem[] = (activeConv?.queue ?? []).map((q) => ({
     id: q.id,
@@ -226,6 +227,21 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     void refreshResumableMeetings();
   }, [refreshResumableMeetings]);
 
+  useEffect(() => {
+    setModel(readStoredModel());
+  }, []);
+
+  function changeModel(next: string) {
+    const clean = isAllowedModel(next) ? next : '';
+    setModel(clean);
+    try {
+      if (clean) window.localStorage.setItem(MODEL_STORAGE_KEY, clean);
+      else window.localStorage.removeItem(MODEL_STORAGE_KEY);
+    } catch {
+      /* privat läge / blockerad lagring — valet gäller ändå för sessionen */
+    }
+  }
+
   function closeMeetingPanel() {
     setMeetingPanel(null);
     void refreshResumableMeetings();
@@ -234,7 +250,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   // "Föreslå uppgifter i chatten" efter ett sparat möte: skickas som en vanlig
   // user-tur (mänskligt klick — samma mönster som Godkänn-knappen, § 33).
   function sendMeetingPromptToChat(prompt: string) {
-    submit(prompt, { includeWebContext: false, attachments: [], deepJob: false });
+    submit(prompt, { includeWebContext: false, attachments: [], model });
   }
 
   useEffect(() => {
@@ -244,122 +260,6 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
-
-  // ── Djupa jobb ────────────────────────────────────────────────────────────
-  // Pollar ALLA pågående djupjobb (ett per tråd kan köra samtidigt) och laddar
-  // in utkastet i respektive tråd när det är klart. Intervallet beror bara på
-  // ANTALET körande jobb (stabilt), inte på convs-objektet — annars skulle
-  // varje streamad token i en annan tråd nollställa timern.
-  const runningDeepCount = Object.values(convs).filter(
-    (c) => isDeepRunning(c) && c.deepJob?.id
-  ).length;
-
-  useEffect(() => {
-    if (runningDeepCount === 0) return;
-    const timer = setInterval(async () => {
-      const entries = Object.entries(convsRef.current).filter(
-        ([, c]) => c.deepJob?.id && !DEEP_TERMINAL.includes(c.deepJob.status)
-      );
-      for (const [threadId, c] of entries) {
-        const jobId = c.deepJob!.id;
-        let res: Awaited<ReturnType<typeof getDeepJobStatusAction>>;
-        try {
-          res = await getDeepJobStatusAction(jobId);
-        } catch (err) {
-          // Stale deploy → pollen kan ALDRIG lyckas igen i den här fliken för
-          // just det jobbet. Släpp låset lokalt i den tråden (jobbet kör
-          // vidare server-side och utkastet finns i tråden efter omladdning),
-          // markera det som avslutat och kör vidare kön i just den tråden.
-          // Övriga fel (nätverksglapp) → hoppa över ticken, försök igen nästa.
-          if (isStaleDeploymentError(err)) {
-            updateConv(threadId, (cur) =>
-              cur.deepJob && cur.deepJob.id === jobId
-                ? { ...cur, deepJob: { ...cur.deepJob, status: 'failed' }, error: STALE_DEPLOYMENT_MESSAGE }
-                : cur
-            );
-            runNext(threadId);
-          }
-          continue;
-        }
-        if (res.error || !res.status) continue;
-        const status = res.status;
-        // Överlappande ticks (långsamma anrop) får inte processa samma
-        // terminala jobb två gånger — kolla sanningen (ref) synkront igen.
-        const live = convsRef.current[threadId]?.deepJob;
-        if (!live || live.id !== jobId || DEEP_TERMINAL.includes(live.status)) continue;
-        updateConv(threadId, (cur) =>
-          cur.deepJob && cur.deepJob.id === jobId
-            ? {
-                ...cur,
-                deepJob: { ...cur.deepJob, status, progress: res.progress ?? cur.deepJob.progress }
-              }
-            : cur
-        );
-        if (DEEP_TERMINAL.includes(status)) {
-          // Best-effort: transkript + trådlista är dekorativa här — ett fel
-          // får aldrig hindra att upptagen-flaggan släpps och kön dras vidare.
-          const msgs = await getThreadMessagesAction(threadId).catch(() => null);
-          const inactive = activeThreadIdRef.current !== threadId;
-          updateConv(threadId, (cur) => ({
-            ...cur,
-            messages: msgs?.messages ? toUiMessages(msgs.messages) : cur.messages,
-            loaded: true,
-            error:
-              status === 'failed' ? res.jobError || 'Djupdykningen misslyckades.' : cur.error,
-            unread: status === 'succeeded' && inactive ? true : cur.unread
-          }));
-          await refreshThreads();
-          // Jobbet klart → kör nästa köade meddelande i den tråden.
-          runNext(threadId);
-        }
-      }
-    }, 3000);
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runningDeepCount, refreshThreads]);
-
-  // Startar ett djupt jobb i en given tråd. Användarmeddelandet är redan
-  // tillagt av runTurn; vid fel städas upptagen-flaggan och kön dras vidare.
-  async function startDeep(threadId: string, instruction: string) {
-    const clean = instruction.trim();
-    updateConv(threadId, (c) => ({ ...c, starting: true }));
-    if (!clean) {
-      updateConv(threadId, (c) => ({ ...c, starting: false, error: 'Beskriv vad djupdykningen ska göra.' }));
-      runNext(threadId);
-      return;
-    }
-    // Tråden finns redan (skapad av anroparen innan detta jobb köades) — vi
-    // behöver aldrig skapa en här som i den globala arkitekturen.
-    let res: Awaited<ReturnType<typeof startDeepJobAction>>;
-    try {
-      res = await startDeepJobAction(threadId, clean);
-    } catch (err) {
-      // En kastad server action (t.ex. stale deploy: UnrecognizedActionError)
-      // lämnade tidigare `starting=true` för evigt → chatten låstes.
-      console.error('[ChattWorkspace] djupdykning kunde inte startas', err);
-      res = { error: actionErrorMessage(err, 'Kunde inte starta djupdykningen — försök igen.') };
-    }
-    if (res.error || !res.jobId) {
-      updateConv(threadId, (c) => ({
-        ...c,
-        starting: false,
-        error: res.error || 'Kunde inte starta jobbet.'
-      }));
-      runNext(threadId);
-      return;
-    }
-    updateConv(threadId, (c) => ({
-      ...c,
-      starting: false,
-      deepJob: { id: res.jobId!, status: 'queued', progress: 0 }
-    }));
-    // Best-effort — jobbet är redan igång; pollen tar det härifrån.
-    const msgs = await getThreadMessagesAction(threadId).catch(() => null);
-    if (msgs?.messages) {
-      updateConv(threadId, (c) => ({ ...c, messages: toUiMessages(msgs.messages!), loaded: true }));
-    }
-    await refreshThreads();
-  }
 
   function cancelQueued(id: string) {
     updateConv(activeKey, (c) => ({ ...c, queue: c.queue.filter((q) => q.id !== id) }));
@@ -433,7 +333,8 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   async function fallbackTurn(threadId: string, text: string, opts: SubmitOpts): Promise<boolean> {
     const res = await sendThreadMessageAction(threadId, text, {
       includeWebContext: opts.includeWebContext,
-      attachments: opts.attachments
+      attachments: opts.attachments,
+      model: opts.model || undefined
     });
     if (res.error) {
       updateConv(threadId, (c) => ({ ...c, error: res.error! }));
@@ -461,7 +362,8 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
             agentId: activeAgent?.id,
             text,
             includeWebContext: opts.includeWebContext,
-            attachments: opts.attachments
+            attachments: opts.attachments,
+            model: opts.model || undefined
           })
         });
       } catch {
@@ -574,7 +476,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   function runNext(threadId: string) {
     const conv = convsRef.current[threadId];
     if (!conv) return;
-    if (conv.starting || conv.streaming || isDeepRunning(conv)) return;
+    if (conv.starting || conv.streaming) return;
     const next = conv.queue[0];
     if (!next) return;
     updateConv(threadId, (c) => ({ ...c, queue: c.queue.slice(1) }));
@@ -589,11 +491,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       error: null,
       unread: false
     }));
-    if (item.opts.deepJob) {
-      void startDeep(threadId, item.text);
-    } else {
-      void runStreamingTurn(threadId, item.text, item.opts);
-    }
+    void runStreamingTurn(threadId, item.text, item.opts);
   }
 
   // Skapar tråden för utkastet ("Ny chatt") EN gång och migrerar utkastets
@@ -663,9 +561,8 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   }
 
   function submit(text: string, opts: SubmitOpts) {
-    const displayText = opts.deepJob
-      ? text
-      : text || (opts.attachments.length === 1 ? '(bilaga skickad)' : '(bilagor skickade)');
+    const displayText =
+      text || (opts.attachments.length === 1 ? '(bilaga skickad)' : '(bilagor skickade)');
     const item: QueuedTurn = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       text,
@@ -682,7 +579,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     submit(approved ? 'Godkänn' : 'Avbryt', {
       includeWebContext: false,
       attachments: [],
-      deepJob: false
+      model
     });
   }
 
@@ -840,7 +737,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   // Antal trådar med en pågående körning — visas i sidopanelens sidfot så det
   // syns att andra chattar arbetar även när man står i en annan.
   const workingCount = Object.entries(convs).filter(
-    ([key, c]) => key !== DRAFT_KEY && (c.starting || c.streaming || isDeepRunning(c) || c.queue.length > 0)
+    ([key, c]) => key !== DRAFT_KEY && (c.starting || c.streaming || c.queue.length > 0)
   ).length;
 
   return (
@@ -876,18 +773,18 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           activities={activities}
           userRoles={userRoles}
           messages={activeConv?.messages ?? []}
-          isPending={streaming || deepRunning || starting}
+          isPending={streaming || starting}
           error={activeConv?.error ?? null}
           activeAgent={activeAgent}
-          deepRunning={deepRunning}
-          deepProgress={activeConv?.deepJob?.progress ?? 0}
+          model={model}
+          onModelChange={changeModel}
           liveSteps={activeConv?.liveSteps ?? []}
           liveText={activeConv?.liveText ?? ''}
           queued={queuedItems}
           resetSignal={activeThreadId ?? 'new'}
           onPickAgent={setActiveAgent}
           onReset={newChat}
-          onSubmit={submit}
+          onSubmit={(text, opts) => submit(text, { ...opts, model })}
           onDownload={onDownload}
           onCancelQueued={cancelQueued}
           onApproval={onApproval}
