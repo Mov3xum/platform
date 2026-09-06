@@ -21,7 +21,19 @@ import {
   expandAnnualWheelSeries,
   ANNUAL_WHEEL_REPEATS,
   ANNUAL_WHEEL_TAG_GROUP_LABELS,
+  ANNUAL_WHEEL_QUARTERS,
+  ANNUAL_WHEEL_SORTS,
+  annualWheelPeriodLabel,
+  annualWheelQuarterLabel,
   annualWheelTagLabel,
+  isAnnualWheelSort,
+  itemInAnnualWheelPeriod,
+  monthPeriodKey,
+  monthsInAnnualWheelPeriod,
+  periodMonth,
+  periodQuarter,
+  quarterPeriodKey,
+  toggleAnnualWheelPeriod,
   annulusSectorPath,
   buildAnnualWheelTable,
   countItemsByTag,
@@ -42,7 +54,9 @@ import {
   type AnnualWheelCategoryDef,
   type AnnualWheelColorToken,
   type AnnualWheelItem,
+  type AnnualWheelPeriodKey,
   type AnnualWheelRepeat,
+  type AnnualWheelSort,
   type AnnualWheelTag,
   type NextAnnualWheelItem
 } from '@platform/shared';
@@ -162,7 +176,11 @@ export function AnnualWheelView({
   const [category, setCategory] = useState<AnnualWheelCategory | 'all'>('all');
   const [tag, setTag] = useState<AnnualWheelTag | 'all' | 'none'>('all');
   const [responsible, setResponsible] = useState<string>('all');
-  const [monthFocus, setMonthFocus] = useState<number | null>(null);
+  // Period = markerat kvartal (q1–q4) eller månad (m1–m12). Ett klick i
+  // hjulet (kvartalsring eller månadsring) och Period-väljaren styr samma
+  // state, så Q4 filtrerar listor och tabell precis som en enskild månad.
+  const [period, setPeriod] = useState<AnnualWheelPeriodKey>('all');
+  const [sort, setSort] = useState<AnnualWheelSort>('date');
 
   const [form, setForm] = useState<FormState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -193,14 +211,37 @@ export function AnnualWheelView({
     () => filterAnnualWheelItems(items, { year, category, tag, responsible }),
     [items, year, category, tag, responsible]
   );
-  const byMonth = useMemo(() => groupItemsByMonth(filtered), [filtered]);
+  // Kategoriernas legend-ordning styr sorteringen "Kategori".
+  const categoryOrder = useMemo(() => categories.map((c) => c.id), [categories]);
+  const byMonth = useMemo(
+    () => groupItemsByMonth(filtered, sort, categoryOrder),
+    [filtered, sort, categoryOrder]
+  );
   const undated = byMonth[0];
+  // Månaderna som den valda perioden täcker (hela året → 1–12).
+  const periodMonths = useMemo(() => monthsInAnnualWheelPeriod(period), [period]);
+  const periodMonthSet = useMemo(() => new Set(periodMonths), [periodMonths]);
+  // Poster i perioden — hjulet tonar ned resten så markeringen syns direkt.
+  const periodIds = useMemo(
+    () =>
+      period === 'all'
+        ? undefined
+        : new Set(filtered.filter((it) => itemInAnnualWheelPeriod(it, period)).map((it) => it.id)),
+    [filtered, period]
+  );
+  const periodCount = useMemo(
+    () => (periodIds ? periodIds.size : filtered.length - undated.length),
+    [periodIds, filtered.length, undated.length]
+  );
   // Bara taggar som faktiskt används blir kolumner — annars blir tabellen en
   // vägg av tomma kolumner när man jobbar med t.ex. bara marknadsaktiviteter.
   const tableTags = useMemo(() => annualWheelTagsInUse(filtered), [filtered]);
   const tableRows = useMemo(
-    () => buildAnnualWheelTable(filtered, tableTags),
-    [filtered, tableTags]
+    () =>
+      buildAnnualWheelTable(filtered, tableTags, sort, categoryOrder).filter((row) =>
+        periodMonthSet.has(row.month)
+      ),
+    [filtered, tableTags, sort, categoryOrder, periodMonthSet]
   );
   // Uppföljning per tagg — räknas på årets poster (före tagg-filtret) så
   // chipsen fungerar som en översikt man kan filtrera med.
@@ -216,7 +257,11 @@ export function AnnualWheelView({
   const next = useMemo(() => nextUpcomingItem(filtered, today), [filtered, today]);
 
   function toggleMonthFocus(m: number) {
-    setMonthFocus((cur) => (cur === m ? null : m));
+    setPeriod((cur) => toggleAnnualWheelPeriod(cur, monthPeriodKey(m)));
+  }
+
+  function toggleQuarterFocus(q: number) {
+    setPeriod((cur) => toggleAnnualWheelPeriod(cur, quarterPeriodKey(q)));
   }
 
   function openCreate() {
@@ -457,6 +502,28 @@ export function AnnualWheelView({
             { value: 'none', label: 'Utan ansvarig' }
           ]}
         />
+        <FilterSelect
+          label="Period"
+          value={period}
+          onChange={(v) => setPeriod(v as AnnualWheelPeriodKey)}
+          options={[
+            { value: 'all', label: 'Hela året' },
+            ...ANNUAL_WHEEL_QUARTERS.map((q) => ({
+              value: quarterPeriodKey(q),
+              label: annualWheelQuarterLabel(q)
+            })),
+            ...Array.from({ length: 12 }, (_, i) => i + 1).map((m) => ({
+              value: monthPeriodKey(m),
+              label: monthLongLabel(m)
+            }))
+          ]}
+        />
+        <FilterSelect
+          label="Sortering"
+          value={sort}
+          onChange={(v) => setSort(isAnnualWheelSort(v) ? v : 'date')}
+          options={ANNUAL_WHEEL_SORTS.map((s) => ({ value: s.id, label: s.label }))}
+        />
         <div className="ml-auto flex items-center gap-2">
           {canManageCategories ? (
             <button
@@ -512,6 +579,48 @@ export function AnnualWheelView({
         </div>
       ) : null}
 
+      {/* Kvartal — snabbval. Samma state som Period-väljaren och hjulets ring. */}
+      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Markera kvartal">
+        <button
+          type="button"
+          onClick={() => setPeriod('all')}
+          aria-pressed={period === 'all'}
+          className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[12px] transition-colors ${
+            period === 'all'
+              ? 'border-brand bg-brand/10 text-brand'
+              : 'border-default text-foreground-muted hover:border-strong hover:text-foreground'
+          }`}
+        >
+          Hela året
+        </button>
+        {ANNUAL_WHEEL_QUARTERS.map((q) => {
+          const active = periodQuarter(period) === q;
+          const count = filtered.filter((it) => itemInAnnualWheelPeriod(it, quarterPeriodKey(q))).length;
+          return (
+            <button
+              key={q}
+              type="button"
+              onClick={() => toggleQuarterFocus(q)}
+              aria-pressed={active}
+              title={annualWheelQuarterLabel(q)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] transition-colors ${
+                active
+                  ? 'border-brand bg-brand/10 text-brand'
+                  : 'border-default text-foreground-muted hover:border-strong hover:text-foreground'
+              }`}
+            >
+              Q{q}
+              <span className="mx-tnum text-[11px] text-foreground-subtle">{count}</span>
+            </button>
+          );
+        })}
+        {periodMonth(period) !== null ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-[12px] font-medium text-brand">
+            {annualWheelPeriodLabel(period)}
+          </span>
+        ) : null}
+      </div>
+
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
         {/* Hjulet */}
         <section className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
@@ -522,8 +631,11 @@ export function AnnualWheelView({
             onPick={canEdit ? openEdit : undefined}
             todayAngle={todayAngle}
             currentMonth={currentMonth}
-            monthFocus={monthFocus}
+            monthFocus={periodMonth(period)}
             onFocusMonth={toggleMonthFocus}
+            quarterFocus={periodQuarter(period)}
+            onFocusQuarter={toggleQuarterFocus}
+            focusIds={periodIds}
             next={next}
           />
           {next ? <NextCaption next={next} /> : null}
@@ -553,14 +665,20 @@ export function AnnualWheelView({
 
           <div className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
             <div className="mb-2 flex items-center justify-between gap-2">
-              <h3 className="font-heading text-[14px] font-semibold text-foreground">Per månad</h3>
-              {monthFocus ? (
+              <h3 className="font-heading text-[14px] font-semibold text-foreground">
+                Per månad
+                <span className="mx-tnum ml-1.5 text-[11px] font-normal text-foreground-subtle">
+                  {periodCount} {periodCount === 1 ? 'aktivitet' : 'aktiviteter'}
+                </span>
+              </h3>
+              {period !== 'all' ? (
                 <button
                   type="button"
-                  onClick={() => setMonthFocus(null)}
+                  onClick={() => setPeriod('all')}
                   className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] font-medium text-brand hover:bg-brand/15"
+                  title="Visa hela året"
                 >
-                  {monthLongLabel(monthFocus)}
+                  {annualWheelPeriodLabel(period)}
                   <Icon name="x" size={11} />
                 </button>
               ) : null}
@@ -574,7 +692,7 @@ export function AnnualWheelView({
                 {byMonth
                   .slice(1)
                   .map((monthItems, idx) => ({ monthItems, m: idx + 1 }))
-                  .filter(({ m }) => (monthFocus ? m === monthFocus : true))
+                  .filter(({ m }) => periodMonthSet.has(m))
                   .map(({ monthItems, m }) =>
                     monthItems.length > 0 ? (
                       <div key={m} className="rounded-xl border border-default bg-surface p-2">
@@ -599,9 +717,9 @@ export function AnnualWheelView({
                           ))}
                         </ul>
                       </div>
-                    ) : monthFocus ? (
+                    ) : period !== 'all' ? (
                       <p key={m} className="py-4 text-center text-[12.5px] text-foreground-muted">
-                        Inga aktiviteter i {monthLongLabel(m)}.
+                        Inga aktiviteter i {monthLongLabel(m).toLowerCase()}.
                       </p>
                     ) : null
                   )}
@@ -615,6 +733,11 @@ export function AnnualWheelView({
       <section className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
         <h3 className="mb-3 font-heading text-[14px] font-semibold text-foreground">
           Verksamhetstabell {year}
+          {period !== 'all' ? (
+            <span className="ml-1.5 text-[12px] font-normal text-foreground-subtle">
+              · {annualWheelPeriodLabel(period)}
+            </span>
+          ) : null}
         </h3>
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-[12px]">

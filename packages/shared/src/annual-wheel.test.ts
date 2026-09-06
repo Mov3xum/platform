@@ -35,6 +35,20 @@ import {
   nextUpcomingItem,
   filterAnnualWheelItems,
   groupItemsByMonth,
+  annualWheelPeriodLabel,
+  annualWheelQuarterLabel,
+  compareAnnualWheelItems,
+  isAnnualWheelSort,
+  itemInAnnualWheelPeriod,
+  monthPeriodKey,
+  monthsInAnnualWheelPeriod,
+  parseAnnualWheelPeriod,
+  periodMonth,
+  periodQuarter,
+  quarterMonths,
+  quarterPeriodKey,
+  sortAnnualWheelItems,
+  toggleAnnualWheelPeriod,
   isAnnualWheelCategory,
   isAnnualWheelTag,
   isAnnualWheelCategoryKey,
@@ -179,14 +193,14 @@ test('filterAnnualWheelItems combines year/category/tag/responsible', () => {
 
 // ── Gruppering / tabell ──────────────────────────────────────────────────────
 
-test('groupItemsByMonth buckets null month at index 0 and sorts by first tag', () => {
+test('groupItemsByMonth buckets null month at index 0 and sorts by first tag when asked', () => {
   const items = [
     item({ month: null, title: 'Helår' }),
     item({ month: 3, tags: ['team'], title: 'B' }),
     item({ month: 3, tags: ['kampanjer'], title: 'A' }),
     item({ month: 3, tags: [], title: 'C' })
   ];
-  const buckets = groupItemsByMonth(items);
+  const buckets = groupItemsByMonth(items, 'tag');
   assert.equal(buckets[0].length, 1);
   assert.equal(buckets[0][0].title, 'Helår');
   assert.equal(buckets[3].length, 3);
@@ -654,4 +668,128 @@ test('buildAnnualWheelAgenda buckets ongoing / this week / upcoming', () => {
   assert.deepEqual(agenda.ongoing.map((i) => i.id), ['kampanj', 'idag']);
   assert.deepEqual(agenda.thisWeek.map((i) => i.id), ['fredag']);
   assert.deepEqual(agenda.upcoming.map((i) => i.id), ['snart']);
+});
+
+// ── Period (kvartal / månad) ─────────────────────────────────────────────────
+
+test('quarterMonths + period keys map quarters and months', () => {
+  assert.deepEqual(quarterMonths(4), [10, 11, 12]);
+  assert.deepEqual(quarterMonths(1), [1, 2, 3]);
+  assert.deepEqual(quarterMonths(5), []);
+  assert.equal(quarterPeriodKey(4), 'q4');
+  assert.equal(monthPeriodKey(10), 'm10');
+  assert.equal(monthPeriodKey(13), 'all');
+  assert.equal(periodQuarter('q3'), 3);
+  assert.equal(periodQuarter('m3'), null);
+  assert.equal(periodMonth('m12'), 12);
+  assert.equal(periodMonth('q1'), null);
+  assert.deepEqual(monthsInAnnualWheelPeriod('q4'), [10, 11, 12]);
+  assert.deepEqual(monthsInAnnualWheelPeriod('m7'), [7]);
+  assert.equal(monthsInAnnualWheelPeriod('all').length, 12);
+});
+
+test('parseAnnualWheelPeriod is tolerant and falls back to all', () => {
+  assert.equal(parseAnnualWheelPeriod('Q4'), 'q4');
+  assert.equal(parseAnnualWheelPeriod(' m11 '), 'm11');
+  assert.equal(parseAnnualWheelPeriod('m13'), 'all');
+  assert.equal(parseAnnualWheelPeriod('q5'), 'all');
+  assert.equal(parseAnnualWheelPeriod(null), 'all');
+  assert.equal(parseAnnualWheelPeriod('junk'), 'all');
+});
+
+test('period labels read naturally', () => {
+  assert.equal(annualWheelQuarterLabel(4), 'Q4 · okt–dec');
+  assert.equal(annualWheelPeriodLabel('q1'), 'Q1 · jan–mar');
+  assert.equal(annualWheelPeriodLabel('m10'), 'Oktober');
+  assert.equal(annualWheelPeriodLabel('all'), 'Hela året');
+});
+
+test('itemInAnnualWheelPeriod matches months, spans campaigns, excludes undated', () => {
+  const oct = item({ month: 10 });
+  const campaign = item({ month: 8, end_month: 11 });
+  const undated = item({ month: null });
+  assert.equal(itemInAnnualWheelPeriod(oct, 'q4'), true);
+  assert.equal(itemInAnnualWheelPeriod(oct, 'q3'), false);
+  assert.equal(itemInAnnualWheelPeriod(oct, 'm10'), true);
+  assert.equal(itemInAnnualWheelPeriod(oct, 'm11'), false);
+  // Kampanj aug–nov löper in i Q4 och Q3, men inte Q1.
+  assert.equal(itemInAnnualWheelPeriod(campaign, 'q4'), true);
+  assert.equal(itemInAnnualWheelPeriod(campaign, 'q3'), true);
+  assert.equal(itemInAnnualWheelPeriod(campaign, 'q1'), false);
+  assert.equal(itemInAnnualWheelPeriod(campaign, 'm9'), true);
+  // Odaterade poster hör hemma i helårslistan — bara `all` matchar.
+  assert.equal(itemInAnnualWheelPeriod(undated, 'all'), true);
+  assert.equal(itemInAnnualWheelPeriod(undated, 'q4'), false);
+});
+
+test('filterAnnualWheelItems combines period with the other filters', () => {
+  const items = [
+    item({ month: 10, category: 'styrelse' }),
+    item({ month: 11, category: 'ledning' }),
+    item({ month: 2, category: 'styrelse' })
+  ];
+  assert.equal(filterAnnualWheelItems(items, { period: 'q4' }).length, 2);
+  assert.equal(filterAnnualWheelItems(items, { period: 'q4', category: 'styrelse' }).length, 1);
+  assert.equal(filterAnnualWheelItems(items, { period: 'all' }).length, 3);
+});
+
+test('toggleAnnualWheelPeriod releases the same period, switches otherwise', () => {
+  assert.equal(toggleAnnualWheelPeriod('all', 'q4'), 'q4');
+  assert.equal(toggleAnnualWheelPeriod('q4', 'q4'), 'all');
+  assert.equal(toggleAnnualWheelPeriod('q4', 'm10'), 'm10');
+  assert.equal(toggleAnnualWheelPeriod('m10', 'q4'), 'q4');
+});
+
+// ── Sortering ────────────────────────────────────────────────────────────────
+
+test('groupItemsByMonth sorts by date within a month by default', () => {
+  const items = [
+    item({ month: 10, day: 20, title: 'Sen' }),
+    item({ month: 10, day: 3, title: 'Tidig' }),
+    item({ month: 10, day: null, title: 'Hela månaden' }),
+    item({ month: 10, day: 3, title: 'Alfa' })
+  ];
+  const oct = groupItemsByMonth(items)[10];
+  assert.deepEqual(
+    oct.map((i) => i.title),
+    ['Hela månaden', 'Alfa', 'Tidig', 'Sen']
+  );
+});
+
+test('sortAnnualWheelItems orders by category (legend order), tag and title with date fallback', () => {
+  const items = [
+    item({ month: 3, day: 5, category: 'ledning', tags: ['team'], title: 'B' }),
+    item({ month: 1, day: 9, category: 'styrelse', tags: ['kampanjer'], title: 'C' }),
+    item({ month: 2, day: 1, category: 'styrelse', tags: [], title: 'A' }),
+    item({ month: 1, day: 2, category: 'borttagen', tags: ['team'], title: 'D' })
+  ];
+  const order = ['ledning', 'styrelse'];
+  assert.deepEqual(
+    sortAnnualWheelItems(items, 'category', order).map((i) => i.title),
+    // ledning först, sen styrelse i datumordning (jan före feb), okänd kategori sist.
+    ['B', 'C', 'A', 'D']
+  );
+  assert.deepEqual(
+    sortAnnualWheelItems(items, 'tag').map((i) => i.title),
+    // kampanjer (index 0) → team i datumordning (D jan 2 före B mar 5) → otaggad.
+    ['C', 'D', 'B', 'A']
+  );
+  assert.deepEqual(sortAnnualWheelItems(items, 'title').map((i) => i.title), ['A', 'B', 'C', 'D']);
+  assert.deepEqual(sortAnnualWheelItems(items, 'date').map((i) => i.title), ['D', 'C', 'A', 'B']);
+  // Muterar aldrig indata.
+  assert.equal(items[0].title, 'B');
+  assert.equal(isAnnualWheelSort('date'), true);
+  assert.equal(isAnnualWheelSort('random'), false);
+  assert.ok(compareAnnualWheelItems(items[1], items[0], 'date') < 0);
+});
+
+test('buildAnnualWheelTable cells follow the chosen sort (date by default)', () => {
+  const rows = buildAnnualWheelTable(
+    [
+      item({ month: 4, day: 28, tags: ['event'], title: 'Sen' }),
+      item({ month: 4, day: 2, tags: ['event'], title: 'Tidig' })
+    ],
+    ['event']
+  );
+  assert.deepEqual(rows[3].cells[0].items.map((i) => i.title), ['Tidig', 'Sen']);
 });

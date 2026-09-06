@@ -76,6 +76,10 @@ export interface WheelProps {
   currentMonth: number | null;
   monthFocus: number | null;
   onFocusMonth?: (m: number) => void;
+  /** Markerat kvartal (1–4) — lyfter kvartalsringen OCH dess tre månader. */
+  quarterFocus?: number | null;
+  /** Klick på ett kvartal i ringen (samma växlingsbeteende som månad). */
+  onFocusQuarter?: (q: number) => void;
   next: NextAnnualWheelItem | null;
   /**
    * När satt (och icke-tom) framhävs BARA dessa poster — övriga bågar tonas
@@ -103,6 +107,8 @@ export function Wheel({
   currentMonth,
   monthFocus,
   onFocusMonth,
+  quarterFocus = null,
+  onFocusQuarter,
   next,
   focusIds,
   svgClassName = 'mx-auto block w-full max-w-[520px]',
@@ -212,28 +218,41 @@ export function Wheel({
         {/* Bakgrundsdisk bakom hela hjulet (mjuk inramning). */}
         <circle cx={CX} cy={CY} r={252} fill="var(--color-canvas-subtle)" opacity={0.3} />
 
-        {/* Kvartalsring */}
+        {/* Kvartalsring — klickbar: markera t.ex. Q4 så lyfts kvartalet och
+            dess tre månader, precis som ett klick på en enskild månad. */}
         {[1, 2, 3, 4].map((q) => {
           const a = quarterSliceAngles(q);
           const path = annulusSectorPath(CX, CY, 70, 116, a.start, a.end);
           const label = polarPoint(CX, CY, 93, a.mid);
+          const isFocus = quarterFocus === q;
+          const focusable = !!onFocusQuarter;
+          const onClick = focusable ? () => onFocusQuarter!(q) : undefined;
           return (
-            <g key={`q${q}`}>
+            <g
+              key={`q${q}`}
+              className={focusable ? 'cursor-pointer' : undefined}
+              onClick={onClick}
+              role={focusable ? 'button' : undefined}
+              aria-label={focusable ? `Markera kvartal ${q}` : undefined}
+              aria-pressed={focusable ? isFocus : undefined}
+            >
               <path
                 d={path}
-                fill="var(--color-canvas-muted)"
-                stroke="var(--color-surface)"
-                strokeWidth={3}
-                opacity={0.7}
+                fill={isFocus ? 'var(--color-brand)' : 'var(--color-canvas-muted)'}
+                fillOpacity={isFocus ? 0.14 : 1}
+                stroke={isFocus ? 'var(--color-brand)' : 'var(--color-surface)'}
+                strokeOpacity={isFocus ? 0.55 : 1}
+                strokeWidth={isFocus ? 2 : 3}
+                opacity={isFocus ? 1 : 0.7}
               />
               <text
                 x={label.x}
                 y={label.y}
                 textAnchor="middle"
                 dominantBaseline="central"
-                className="fill-foreground-muted"
+                className={isFocus ? 'fill-brand' : 'fill-foreground-muted'}
                 fontSize={13}
-                fontWeight={600}
+                fontWeight={isFocus ? 700 : 600}
               >
                 Q{q}
               </text>
@@ -250,7 +269,9 @@ export function Wheel({
             const labelPos = polarPoint(CX, CY, 143, a.mid);
             const isEven = m % 2 === 0;
             const isCurrent = currentMonth === m;
-            const isFocus = monthFocus === m;
+            // En månad är i fokus när den är vald direkt ELLER när dess
+            // kvartal är markerat (Q4 → okt, nov, dec lyfts tillsammans).
+            const isFocus = monthFocus === m || (quarterFocus !== null && quarterForMonth(m) === quarterFocus);
             const highlighted = isCurrent || isFocus;
             const focusable = !!onFocusMonth;
             return (
