@@ -5,6 +5,8 @@ import { logAgentAction } from './audit';
 import {
   validateAnnualWheelCategory,
   validateAnnualWheelDay,
+  validateAnnualWheelEndDay,
+  validateAnnualWheelEndMonth,
   validateAnnualWheelMonth,
   validateAnnualWheelResponsible,
   validateAnnualWheelTags,
@@ -12,6 +14,10 @@ import {
   validateOptionalText,
   validateYear
 } from './validators';
+import {
+  expandAnnualWheelSeries,
+  isAnnualWheelRepeat
+} from '@platform/shared';
 import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
 import { listAnnualWheelCategoryKeys } from '@/lib/annual-wheel/categories';
@@ -29,8 +35,8 @@ const COLLECTION = 'annual_wheel_items';
 /** Roller som kan äga en årshjuls-aktivitet (samma krets som ser hjulet, § 21). */
 const RESPONSIBLE_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'];
 
-/** Fält som kräver migration 1700000138/1700000139 för att kunna lagras. */
-const SCHEMA_FIELDS = ['day', 'tags', 'responsible'] as const;
+/** Fält som kräver migration 1700000138/1700000139/1700000141 för att lagras. */
+const SCHEMA_FIELDS = ['day', 'tags', 'responsible', 'end_month', 'end_day'] as const;
 
 interface PbFieldError {
   message?: string;
@@ -123,6 +129,30 @@ function collectionMissingMessage(): string {
   );
 }
 
+/**
+ * Normaliserar och kontrollerar en periods start/slut. En period måste sluta
+ * EFTER att den börjat och ligga inom samma kalenderår (årshjulet visar ett år
+ * i taget). Slut utan start är meningslöst → nollställs i stället för att fela.
+ */
+function normalizePeriod(
+  month: number | null,
+  day: number | null,
+  endMonth: number | null,
+  endDay: number | null
+): { ok: true; value: { endMonth: number | null; endDay: number | null } } | { ok: false; error: string } {
+  if (month === null || endMonth === null) return { ok: true, value: { endMonth: null, endDay: null } };
+  if (endMonth < month) {
+    return {
+      ok: false,
+      error: 'Periodens slut måste ligga efter starten (samma kalenderår).'
+    };
+  }
+  if (endMonth === month && endDay !== null && day !== null && endDay <= day) {
+    return { ok: false, error: 'Periodens slutdag måste ligga efter startdagen.' };
+  }
+  return { ok: true, value: { endMonth, endDay } };
+}
+
 /** Läsbar instruktion när schemat släpar efter koden. */
 export function schemaDriftMessage(fields: string[]): string {
   return (
@@ -187,6 +217,10 @@ export interface CreateAnnualWheelItemParams {
   title: string;
   month?: number | null;
   day?: number | null;
+  /** Slutmånad för en PERIOD (kampanj). Tomt = punktaktivitet. */
+  end_month?: number | null;
+  /** Slutdag inom slutmånaden (tomt = månadens sista dag). */
+  end_day?: number | null;
   /** Valfria taggar (flera tillåtna). Ersätter tidigare obligatoriska `track`. */
   tags?: string[] | string | null;
   category: string;
@@ -234,6 +268,15 @@ export async function createAnnualWheelItem(
   const day = validateAnnualWheelDay(params.day);
   if (!day.ok) return fail('INVALID_VALUE', day.error);
 
+  const endMonth = validateAnnualWheelEndMonth(params.end_month);
+  if (!endMonth.ok) return fail('INVALID_VALUE', endMonth.error);
+
+  const endDay = validateAnnualWheelEndDay(params.end_day);
+  if (!endDay.ok) return fail('INVALID_VALUE', endDay.error);
+
+  const period = normalizePeriod(month.value, day.value, endMonth.value, endDay.value);
+  if (!period.ok) return fail('INVALID_VALUE', period.error);
+
   const tags = validateAnnualWheelTags(params.tags);
   if (!tags.ok) return fail('INVALID_VALUE', tags.error);
 
@@ -260,6 +303,8 @@ export async function createAnnualWheelItem(
     title: title.value,
     month: month.value === null ? null : month.value,
     day: effectiveDay,
+    end_month: period.value.endMonth,
+    end_day: period.value.endDay,
     tags: tags.value,
     category: category.value,
     // Tom relation skrivs som '' (PB avvisar null på relation-fält).
@@ -309,6 +354,8 @@ export async function createAnnualWheelItem(
       title: title.value,
       month: month.value,
       day: effectiveDay,
+      end_month: period.value.endMonth,
+      end_day: period.value.endDay,
       tags: tags.value,
       category: category.value,
       responsible: responsible.value
@@ -323,10 +370,116 @@ export async function createAnnualWheelItem(
   });
 }
 
+// ─── Serier (upprepade aktiviteter) ──────────────────────────────────────────
+
+export interface CreateAnnualWheelSeriesParams extends CreateAnnualWheelItemParams {
+  /** 'none' | 'monthly' | 'bimonthly' | 'quarterly'. */
+  repeat?: string;
+  /** Sista månad serien får sträcka sig till (1–12, default december). */
+  repeat_until_month?: number | null;
+}
+
+export interface CreatedAnnualWheelSeriesResult {
+  itemIds: string[];
+  created: number;
+  /** Månaderna som faktiskt skapades (för ett tydligt svar till användaren). */
+  months: number[];
+  schemaMissing?: string[];
+}
+
+/**
+ * Skapar EN aktivitet eller en hel SERIE ("nyhetsbrev den 15:e varje månad").
+ * Expansionen är den rena, enhetstestade `expandAnnualWheelSeries` i
+ * @platform/shared, och varje förekomst går genom `createAnnualWheelItem` —
+ * alltså exakt samma whitelist, validering, tenant-stämpel och audit-logg som
+ * en enskild aktivitet. UI-actionen OCH chatt-agenten använder den här
+ * funktionen, så serier kan aldrig divergera mellan människa och agent (§ 16).
+ *
+ * Delvis lyckad serie rapporteras som fel MED de skapade id:na, så anroparen
+ * kan säga vad som faktiskt hände i stället för att låtsas att allt gick bra.
+ */
+export async function createAnnualWheelSeries(
+  pb: PocketBase,
+  actor: Actor,
+  params: CreateAnnualWheelSeriesParams,
+  options?: AnnualWheelWriteOptions
+): Promise<WriteResult<CreatedAnnualWheelSeriesResult>> {
+  const repeat = isAnnualWheelRepeat(params.repeat) ? params.repeat : 'none';
+  const year = validateYear(params.year);
+  if (!year.ok) return fail('INVALID_VALUE', year.error);
+
+  const occurrences = expandAnnualWheelSeries(
+    {
+      year: year.value,
+      month: params.month ?? null,
+      day: params.day ?? null,
+      end_month: params.end_month ?? null,
+      end_day: params.end_day ?? null
+    },
+    repeat,
+    params.repeat_until_month ?? 12
+  );
+
+  // Odaterad aktivitet (helår) kan inte upprepas — skapa den en gång.
+  if (occurrences.length === 0) {
+    const single = await createAnnualWheelItem(pb, actor, params, options);
+    if (!single.ok) return fail(single.code ?? 'DB_ERROR', single.error);
+    return ok({
+      itemIds: [single.value.itemId],
+      created: 1,
+      months: [],
+      ...(single.value.schemaMissing ? { schemaMissing: single.value.schemaMissing } : {})
+    });
+  }
+
+  const itemIds: string[] = [];
+  const months: number[] = [];
+  let schemaMissing: string[] | undefined;
+
+  for (const occurrence of occurrences) {
+    const result = await createAnnualWheelItem(
+      pb,
+      actor,
+      {
+        ...params,
+        month: occurrence.month,
+        day: occurrence.day,
+        end_month: occurrence.end_month,
+        end_day: occurrence.end_day
+      },
+      options
+    );
+    if (!result.ok) {
+      // Avbryt vid första felet men behåll det som redan skapats (idempotens
+      // finns inte på den här kollektionen — bättre att vara ärlig än att
+      // försöka rulla tillbaka halvvägs).
+      const created = itemIds.length;
+      return fail(
+        result.code ?? 'DB_ERROR',
+        created > 0
+          ? `${created} av ${occurrences.length} aktiviteter skapades innan det sprack: ${result.error}`
+          : result.error
+      );
+    }
+    itemIds.push(result.value.itemId);
+    months.push(occurrence.month);
+    if (result.value.schemaMissing) schemaMissing = result.value.schemaMissing;
+  }
+
+  return ok({
+    itemIds,
+    created: itemIds.length,
+    months,
+    ...(schemaMissing ? { schemaMissing } : {})
+  });
+}
+
 export type AnnualWheelWritableField =
   | 'title'
   | 'month'
   | 'day'
+  | 'end_month'
+  | 'end_day'
   | 'tags'
   | 'category'
   | 'responsible'
@@ -341,6 +494,10 @@ export interface UpdateAnnualWheelItemFieldParams {
 
 interface AnnualWheelRow extends Record<string, unknown> {
   tenant?: string;
+  month?: unknown;
+  day?: unknown;
+  end_month?: unknown;
+  end_day?: unknown;
 }
 
 /**
@@ -399,6 +556,18 @@ export async function updateAnnualWheelItemField(
       normalized = r.value;
       break;
     }
+    case 'end_month': {
+      const r = validateAnnualWheelEndMonth(params.value);
+      if (!r.ok) return fail('INVALID_VALUE', r.error);
+      normalized = r.value;
+      break;
+    }
+    case 'end_day': {
+      const r = validateAnnualWheelEndDay(params.value);
+      if (!r.ok) return fail('INVALID_VALUE', r.error);
+      normalized = r.value;
+      break;
+    }
     case 'tags': {
       const r = validateAnnualWheelTags(params.value);
       if (!r.ok) return fail('INVALID_VALUE', r.error);
@@ -451,6 +620,21 @@ export async function updateAnnualWheelItemField(
   // kasta värdet (t.ex. ett datum som "sparas" men aldrig syns).
   if (!(params.field in current)) {
     return fail('DB_ERROR', schemaDriftMessage([params.field]));
+  }
+
+  // Perioden måste hänga ihop även när BARA en ände ändras — kontrollera det
+  // nya värdet mot postens övriga datumfält.
+  if (['month', 'day', 'end_month', 'end_day'].includes(params.field)) {
+    const asNumber = (v: unknown) => (typeof v === 'number' && v > 0 ? v : null);
+    const next = {
+      month: params.field === 'month' ? (normalized as number | null) : asNumber(current.month),
+      day: params.field === 'day' ? (normalized as number | null) : asNumber(current.day),
+      end_month:
+        params.field === 'end_month' ? (normalized as number | null) : asNumber(current.end_month),
+      end_day: params.field === 'end_day' ? (normalized as number | null) : asNumber(current.end_day)
+    };
+    const period = normalizePeriod(next.month, next.day, next.end_month, next.end_day);
+    if (!period.ok) return fail('INVALID_VALUE', period.error);
   }
 
   const before = current[params.field] ?? null;

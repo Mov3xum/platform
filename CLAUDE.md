@@ -3754,10 +3754,14 @@ och år.
 - **`annual_wheel_items`** (1700000133): `tenant` (cascadeDelete), `year`
   (int 2000–2100), `title`, `month` (int 1–12 eller tomt = helårs-/kvartals-
   övergripande), `day` (int 1–31 eller tomt = hela månaden; valfritt specifikt
-  datum, **migration 1700000138**), `tags` (select **multi, VALFRI**:
-  kampanjer, verksamhetsrapporter, projekt, team, ledningsgrupp,
-  projektstyrgrupper, ovrigt — tabellens kolumner + uppföljning,
-  **migration 1700000139**), `category` (**text sedan migration 1700000140**
+  datum, **migration 1700000138**), `end_month`/`end_day` (valfria; satt
+  slutmånad gör aktiviteten till en **PERIOD** — kampanj som löper över tid,
+  ritas som en båge i hjulet, **migration 1700000141**), `tags` (select
+  **multi, VALFRI**, grupperade i *Marknad*: kampanjer, linkedin, nyhetsbrev,
+  event, pr, webinar, annonsering och *Verksamhet*: verksamhetsrapporter,
+  projekt, team, ledningsgrupp, projektstyrgrupper, ovrigt — tabellens
+  kolumner + uppföljning, **migration 1700000139 + 1700000141**), `category`
+  (**text sedan migration 1700000140**
   — en kategorinyckel ur `annual_wheel_categories`), `responsible` (relation → `users`, valfri,
   `cascadeDelete: false`, **migration 1700000139**), `notes`, `created_by`.
   Index på `(tenant)` och `(tenant, year)`. Taxonomin är källan-av-sanning i
@@ -3777,6 +3781,29 @@ Vokabulären är fast (samma mönster som `file-topics.ts`/`competences.ts`);
 fritext skulle drifta isär och göra uppföljningen oanvändbar. Otaggade
 aktiviteter försvinner aldrig: hjulet visar dem som vanligt, tabellen har en
 "Utan tagg"-kolumn och tagg-chipsen (`countItemsByTag`) räknar dem separat.
+
+**Perioder (migration 1700000141).** En aktivitet med `end_month` (och valfri
+`end_day`) löper över tid. Skrivlagret kräver att slutet ligger efter starten
+inom samma kalenderår (`normalizePeriod`, kontrolleras även när bara EN ände
+uppdateras). Hjulet ritar inte längre en jämnt uppdelad sub-sektor per månad:
+**varje post ritas över sitt faktiska tidsspann** (en dag → smal båge, en
+månad → månadssektorn, en period → båge över flera månader) och överlappande
+poster packas i **körfält** som ett Gantt-schema (`packAnnualWheelArcs`, ren
+greedy-algoritm, enhetstestad). Tabellen visar en period i **varje** månad
+den löper (`monthsForAnnualWheelItem`) och bara taggar som faktiskt används
+som kolumner (`annualWheelTagsInUse`). En pågående period visas som "Pågår
+nu" i navet (`nextUpcomingItem` → `ongoing`).
+
+**Serier (upprepning).** "Nyhetsbrev den 15:e varje månad" skapas i ETT steg:
+`expandAnnualWheelSeries` (ren, enhetstestad) expanderar basen till
+förekomster (varje/varannan månad, varje kvartal, t.o.m. vald månad; dagen
+klampas mot månadslängden; perioder flyttas med hela steget och förekomster
+som skulle spilla över årsskiftet utelämnas; hårt tak 12). Både UI-actionen
+och chatt-verktyget `create_annual_wheel_item` (parametrarna `repeat` +
+`repeat_until_month`) går genom `createAnnualWheelSeries` i det delade
+skrivlagret, som skapar varje förekomst via `createAnnualWheelItem` — samma
+whitelist, validering, tenant-stämpel och audit per rad. En delvis lyckad
+serie rapporteras som fel MED antalet redan skapade, aldrig som tyst succé.
 
 **Ansvarig (`responsible`).** Staff kan peka ut vem i organisationen som äger
 en aktivitet. Kandidatlistan kommer från `listAssignableResourcesForTenant`
@@ -3835,8 +3862,9 @@ ett textfält med kategorinyckeln. Konsekvenser:
 
 Både UI-actionen och chatt-agenten går genom **det delade skrivlagret**
 (`lib/core/write/annual-wheel.ts`) — whitelist (`writable-fields.ts`:
-`annual_wheel_items` create + fält title/month/day/tags/category/notes/year för
-BÅDA, `responsible` bara för människa), validering (`validators.ts`),
+`annual_wheel_items` create + fält title/month/day/end_month/end_day/tags/
+category/notes/year för BÅDA, `responsible` bara för människa), validering
+(`validators.ts`),
 tenant-stämpel från actorn och `agent_actions`-logg. Reglerna kan därför aldrig divergera mellan människa och agent (§ 16).
 Chatt-verktygen exponeras BARA för agent-actor i den interaktiva staff-chatten
 (`includeWrites`, människa-i-loopen § 16.3) — autonoma körningar skriver
@@ -3871,8 +3899,8 @@ av tre olika miljöskäl. Alla tre är nu täckta i `lib/core/write/annual-wheel
    intetsägande "Failed to create record."
 
 **Deploy-invariant:** `verify-baseline.mjs` (`verifyAppWritableFields`)
-asserterar att `annual_wheel_items` HAR `day`/`tags`/`responsible` och att det
-deprecerade `track` INTE är obligatoriskt. Schemadrift fäller därmed deployen i
+asserterar att `annual_wheel_items` HAR `day`/`tags`/`responsible`/`end_month`/
+`end_day` och att det deprecerade `track` INTE är obligatoriskt. Schemadrift fäller därmed deployen i
 stället för att dyka upp som "det går inte att skapa en aktivitet".
 
 ### 30.5 Regelefterlevnad
@@ -3901,7 +3929,8 @@ stället för att dyka upp som "det går inte att skapa en aktivitet".
   Radering loggas som `update` med `after_value.deleted` — `action_type` har
   bara `create|update|revert`.
 - **Migrationer:** nya oföränderliga filnummer (1700000133, **1700000139**,
-  **1700000140**). Båda kollektionerna **speglas i `setup-via-api.mjs`**
+  **1700000140**, **1700000141** — perioder + marknadskanal-taggar; taggvärdena
+  unionas så befintliga rader aldrig blir ogiltiga). Båda kollektionerna **speglas i `setup-via-api.mjs`**
   (collection-defs + `FORCE_CREATE_RULES` + autodate + kategori-seed +
   `convertSelectFieldToText` för `category` + en `patchCollection` som lägger
   `tags`/`responsible` och sätter `track.required=false`) så att en instans som

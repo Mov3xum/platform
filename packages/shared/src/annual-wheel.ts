@@ -275,23 +275,51 @@ export type AnnualWheelTag =
   | 'team'
   | 'ledningsgrupp'
   | 'projektstyrgrupper'
-  | 'ovrigt';
+  | 'ovrigt'
+  // Marknadskanaler (migration 1700000141) — gör tagg-uppföljningen användbar
+  // för marknadsaktiviteter, inte bara styrelse-/ledningsspåren.
+  | 'linkedin'
+  | 'nyhetsbrev'
+  | 'event'
+  | 'pr'
+  | 'webinar'
+  | 'annonsering';
+
+/** Taggarna grupperas i pickern/legenden så listan inte blir en vägg. */
+export type AnnualWheelTagGroup = 'verksamhet' | 'marknad';
 
 export interface AnnualWheelTagDef {
   id: AnnualWheelTag;
   label: string;
+  group: AnnualWheelTagGroup;
 }
+
+export const ANNUAL_WHEEL_TAG_GROUP_LABELS: Record<AnnualWheelTagGroup, string> = {
+  verksamhet: 'Verksamhet',
+  marknad: 'Marknad'
+};
 
 /** Källa av sanning — speglas som select-värden (multi) i migrationen. */
 export const ANNUAL_WHEEL_TAGS: readonly AnnualWheelTagDef[] = [
-  { id: 'kampanjer', label: 'Kampanjer' },
-  { id: 'verksamhetsrapporter', label: 'Verksamhetsrapporter' },
-  { id: 'projekt', label: 'Projekt' },
-  { id: 'team', label: 'Team' },
-  { id: 'ledningsgrupp', label: 'Ledningsgrupp' },
-  { id: 'projektstyrgrupper', label: 'Projektstyrgrupper' },
-  { id: 'ovrigt', label: 'Övrigt' }
+  { id: 'kampanjer', label: 'Kampanjer', group: 'marknad' },
+  { id: 'linkedin', label: 'LinkedIn', group: 'marknad' },
+  { id: 'nyhetsbrev', label: 'Nyhetsbrev', group: 'marknad' },
+  { id: 'event', label: 'Event & mässor', group: 'marknad' },
+  { id: 'pr', label: 'PR & media', group: 'marknad' },
+  { id: 'webinar', label: 'Webinar', group: 'marknad' },
+  { id: 'annonsering', label: 'Annonsering', group: 'marknad' },
+  { id: 'verksamhetsrapporter', label: 'Verksamhetsrapporter', group: 'verksamhet' },
+  { id: 'projekt', label: 'Projekt', group: 'verksamhet' },
+  { id: 'team', label: 'Team', group: 'verksamhet' },
+  { id: 'ledningsgrupp', label: 'Ledningsgrupp', group: 'verksamhet' },
+  { id: 'projektstyrgrupper', label: 'Projektstyrgrupper', group: 'verksamhet' },
+  { id: 'ovrigt', label: 'Övrigt', group: 'verksamhet' }
 ] as const;
+
+/** Taggar i en grupp (för grupperad picker/legend). */
+export function annualWheelTagsInGroup(group: AnnualWheelTagGroup): AnnualWheelTagDef[] {
+  return ANNUAL_WHEEL_TAGS.filter((t) => t.group === group);
+}
 
 export const ANNUAL_WHEEL_TAG_IDS: readonly AnnualWheelTag[] = ANNUAL_WHEEL_TAGS.map((t) => t.id);
 
@@ -402,6 +430,94 @@ export function annualWheelShortDateLabel(
   return d === null ? short : `${d} ${short}`;
 }
 
+// ─── Perioder (kampanjer som löper över tid) ─────────────────────────────────
+
+/** En post med giltig slutmånad efter startmånaden är en PERIOD, inte en punkt. */
+export function isAnnualWheelPeriod(item: {
+  month?: number | null;
+  day?: number | null;
+  end_month?: number | null;
+  end_day?: number | null;
+}): boolean {
+  const start = sanitizeMonth(item.month);
+  const end = sanitizeMonth(item.end_month);
+  if (start === null || end === null) return false;
+  if (end > start) return true;
+  if (end < start) return false;
+  // Samma månad: period bara om slutdagen ligger efter startdagen.
+  const sd = sanitizeDay(item.day);
+  const ed = sanitizeDay(item.end_day);
+  if (ed === null) return sd !== null; // "12 aug – hela augusti ut"
+  return sd !== null && ed > sd;
+}
+
+/**
+ * Vilka månader (1-baserade) en post berör. En punktaktivitet ger sin egen
+ * månad; en period ger alla månader den löper över. Odaterade poster ger [].
+ * Används av tabellen så en kampanj syns i varje månad den pågår.
+ */
+export function monthsForAnnualWheelItem(item: {
+  month?: number | null;
+  day?: number | null;
+  end_month?: number | null;
+  end_day?: number | null;
+}): number[] {
+  const start = sanitizeMonth(item.month);
+  if (start === null) return [];
+  if (!isAnnualWheelPeriod(item)) return [start];
+  const end = sanitizeMonth(item.end_month) as number;
+  const out: number[] = [];
+  for (let m = start; m <= end; m++) out.push(m);
+  return out;
+}
+
+/**
+ * Läsbar period-/datumetikett. Period → "15 januari – 28 februari 2026"
+ * (månadsnamnet i början utelämnas när båda ändar ligger i samma månad).
+ * Punkt → samma som `annualWheelDateLabel`.
+ */
+export function annualWheelRangeLabel(item: {
+  month?: number | null;
+  day?: number | null;
+  end_month?: number | null;
+  end_day?: number | null;
+  year: number;
+}): string {
+  if (!isAnnualWheelPeriod(item)) {
+    return annualWheelDateLabel(item.month ?? null, item.day ?? null, item.year);
+  }
+  const start = sanitizeMonth(item.month) as number;
+  const end = sanitizeMonth(item.end_month) as number;
+  const sd = sanitizeDay(item.day);
+  const ed = sanitizeDay(item.end_day) ?? daysInMonth(item.year, end);
+  const startMonthName = MONTHS_LONG_SV[start - 1].toLowerCase();
+  const endMonthName = MONTHS_LONG_SV[end - 1].toLowerCase();
+  const startText = sd === null ? startMonthName : `${sd} ${startMonthName}`;
+  const endText = `${ed} ${endMonthName}`;
+  return `${startText} – ${endText} ${item.year}`;
+}
+
+/** Kompakt periodetikett för listor/chips: "15 jan–28 feb" / "12 aug". */
+export function annualWheelShortRangeLabel(item: {
+  month?: number | null;
+  day?: number | null;
+  end_month?: number | null;
+  end_day?: number | null;
+  year: number;
+}): string {
+  if (!isAnnualWheelPeriod(item)) {
+    return annualWheelShortDateLabel(item.month ?? null, item.day ?? null);
+  }
+  const start = sanitizeMonth(item.month) as number;
+  const end = sanitizeMonth(item.end_month) as number;
+  const sd = sanitizeDay(item.day);
+  const ed = sanitizeDay(item.end_day) ?? daysInMonth(item.year, end);
+  const startShort = MONTHS_SHORT_SV[start - 1].toLowerCase();
+  const endShort = MONTHS_SHORT_SV[end - 1].toLowerCase();
+  const startText = sd === null ? startShort : `${sd} ${startShort}`;
+  return `${startText}–${ed} ${endShort}`;
+}
+
 /** Kvartal (1–4) för en 1-baserad månad. 0 för ogiltig månad. */
 export function quarterForMonth(month: number | null | undefined): 0 | 1 | 2 | 3 | 4 {
   if (typeof month !== 'number' || month < 1 || month > 12) return 0;
@@ -455,6 +571,13 @@ export interface AnnualWheelItem {
   month: number | null;
   /** 1–31, valfritt specifikt datum inom månaden (null = hela månaden). */
   day?: number | null;
+  /**
+   * Slutmånad för en PERIOD (kampanj som löper över tid). Null = punktaktivitet
+   * (en dag eller en månad). Perioder ritas som bågar i hjulet.
+   */
+  end_month?: number | null;
+  /** Slutdag inom `end_month` (null = månadens sista dag). */
+  end_day?: number | null;
   /** Valfria taggar (kan vara flera, kan vara tom). Ersätter tidigare `track`. */
   tags: AnnualWheelTag[];
   category: AnnualWheelCategory;
@@ -570,6 +693,17 @@ export function countItemsByTag(items: readonly AnnualWheelItem[]): AnnualWheelT
   return out;
 }
 
+/**
+ * Taggar som faktiskt förekommer bland posterna (i taxonomins ordning).
+ * Tabellen visar bara dessa kolumner — annars blir 13 taggar en vägg av tomma
+ * kolumner när man bara jobbar med marknadsaktiviteter.
+ */
+export function annualWheelTagsInUse(items: readonly AnnualWheelItem[]): AnnualWheelTag[] {
+  const used = new Set<AnnualWheelTag>();
+  for (const it of items) for (const t of it.tags ?? []) used.add(t);
+  return ANNUAL_WHEEL_TAG_IDS.filter((t) => used.has(t));
+}
+
 export interface AnnualWheelTableCell {
   /** null = kolumnen för otaggade poster. */
   tag: AnnualWheelTag | null;
@@ -595,7 +729,12 @@ export function buildAnnualWheelTable(
   items: readonly AnnualWheelItem[],
   tags: readonly AnnualWheelTag[] = ANNUAL_WHEEL_TAG_IDS
 ): AnnualWheelTableRow[] {
-  const byMonth = groupItemsByMonth(items);
+  // Perioder (kampanjer) syns i VARJE månad de löper över — tabellen är en
+  // kalendervy, inte en räkning. Punktaktiviteter hamnar i sin egen månad.
+  const byMonth: AnnualWheelItem[][] = Array.from({ length: 13 }, () => []);
+  for (const it of items) {
+    for (const m of monthsForAnnualWheelItem(it)) byMonth[m].push(it);
+  }
   const rows: AnnualWheelTableRow[] = [];
   for (let m = 1; m <= 12; m++) {
     const monthItems = byMonth[m];
@@ -671,12 +810,122 @@ export function dateAngleInYear(date: Date, year: number): number | null {
   return (m - 1) * 30 + frac * 30;
 }
 
+// ─── Bågar + körfält (Gantt-liknande packning i hjulet) ──────────────────────
+
+export interface AnnualWheelArcSpan {
+  /** Startvinkel i grader (0° = toppen/1 jan, medurs). */
+  start: number;
+  end: number;
+}
+
+/**
+ * Postens vinkelspann i hjulet. Punktaktivitet med dag → en tunn båge runt den
+ * dagen (breddad till `minSpan` så den går att träffa med musen); bara månad →
+ * hela månadssektorn; period → från startdagen till och med slutdagen.
+ * Odaterade poster (ingen månad) ger null — de listas separat.
+ */
+export function annualWheelItemAngles(
+  item: {
+    month?: number | null;
+    day?: number | null;
+    end_month?: number | null;
+    end_day?: number | null;
+    year: number;
+  },
+  minSpan = 2
+): AnnualWheelArcSpan | null {
+  const start = sanitizeMonth(item.month);
+  if (start === null) return null;
+  const startDay = sanitizeDay(item.day);
+  const startDim = daysInMonth(item.year, start);
+  const startAngle = (start - 1) * 30 + (startDay === null ? 0 : ((startDay - 1) / startDim) * 30);
+
+  let endAngle: number;
+  if (isAnnualWheelPeriod(item)) {
+    const end = sanitizeMonth(item.end_month) as number;
+    const endDim = daysInMonth(item.year, end);
+    const endDay = sanitizeDay(item.end_day) ?? endDim;
+    endAngle = (end - 1) * 30 + (endDay / endDim) * 30;
+  } else if (startDay === null) {
+    endAngle = start * 30; // hela månaden
+  } else {
+    endAngle = startAngle + (1 / startDim) * 30; // en dag
+  }
+
+  if (endAngle < startAngle) endAngle = startAngle;
+  if (endAngle - startAngle < minSpan) {
+    // Bredda symmetriskt men håll bågen inom året (0–360).
+    const grow = (minSpan - (endAngle - startAngle)) / 2;
+    const s = Math.max(0, startAngle - grow);
+    const e = Math.min(360, s + minSpan);
+    return { start: Math.max(0, Math.min(s, 360 - minSpan)), end: e };
+  }
+  return { start: startAngle, end: Math.min(360, endAngle) };
+}
+
+export interface AnnualWheelArc<T> extends AnnualWheelArcSpan {
+  item: T;
+  /** 0 = innersta körfältet. */
+  lane: number;
+}
+
+export interface AnnualWheelArcLayout<T> {
+  arcs: AnnualWheelArc<T>[];
+  laneCount: number;
+}
+
+/**
+ * Packar poster i körfält (lanes) så att överlappande perioder aldrig ritas
+ * ovanpå varandra — samma greedy-algoritm som ett Gantt-schema: sortera på
+ * start, lägg varje båge i det första körfält som är ledigt. Deterministisk
+ * (stabil sortering på start → slut → titel) och ren, alltså enhetstestbar.
+ */
+export function packAnnualWheelArcs<
+  T extends {
+    id: string;
+    title: string;
+    month?: number | null;
+    day?: number | null;
+    end_month?: number | null;
+    end_day?: number | null;
+    year: number;
+  }
+>(items: readonly T[], options: { minSpan?: number; gap?: number } = {}): AnnualWheelArcLayout<T> {
+  const { minSpan = 2, gap = 0.6 } = options;
+  const spans: AnnualWheelArc<T>[] = [];
+  for (const item of items) {
+    const span = annualWheelItemAngles(item, minSpan);
+    if (!span) continue;
+    spans.push({ item, start: span.start, end: span.end, lane: 0 });
+  }
+  spans.sort((a, b) => {
+    if (a.start !== b.start) return a.start - b.start;
+    if (a.end !== b.end) return a.end - b.end;
+    return a.item.title.localeCompare(b.item.title, 'sv');
+  });
+
+  const laneEnds: number[] = [];
+  for (const arc of spans) {
+    let lane = laneEnds.findIndex((end) => end <= arc.start - gap);
+    if (lane === -1) {
+      lane = laneEnds.length;
+      laneEnds.push(arc.end);
+    } else {
+      laneEnds[lane] = arc.end;
+    }
+    arc.lane = lane;
+  }
+  return { arcs: spans, laneCount: Math.max(1, laneEnds.length) };
+}
+
 export interface NextAnnualWheelItem {
   item: AnnualWheelItem;
   /** Representativt datum (första i postens månad/år). */
   date: Date;
-  /** Hela dagar från `from` (avrundat uppåt; 0 = idag). */
+  /** Hela dagar från `from` (avrundat uppåt; 0 = idag eller pågår). */
   days: number;
+  /** True när `from` ligger inom en periods start–slut (kampanjen rullar nu). */
+  ongoing?: boolean;
 }
 
 /**
@@ -696,11 +945,115 @@ export function nextUpcomingItem(
     if (m === null) continue;
     const day = sanitizeDay(it.day) ?? 1;
     const date = new Date(it.year, m - 1, day);
-    const days = Math.ceil((date.getTime() - startOfDay.getTime()) / 86_400_000);
+    // Perioder: en kampanj som redan startat men inte tagit slut PÅGÅR — den
+    // är mer relevant än nästa kommande punkt och sorteras därför som dag 0.
+    const endMonth = isAnnualWheelPeriod(it) ? (sanitizeMonth(it.end_month) as number) : null;
+    const endDate =
+      endMonth === null
+        ? date
+        : new Date(it.year, endMonth - 1, sanitizeDay(it.end_day) ?? daysInMonth(it.year, endMonth));
+    if (endDate.getTime() < startOfDay.getTime()) continue; // helt passerad
+    const ongoing = endMonth !== null && date.getTime() <= startOfDay.getTime();
+    const days = ongoing
+      ? 0
+      : Math.ceil((date.getTime() - startOfDay.getTime()) / 86_400_000);
     if (days < 0) continue;
-    if (!best || days < best.days) best = { item: it, date, days };
+    if (!best || days < best.days) best = { item: it, date, days, ongoing };
   }
   return best;
+}
+
+// ─── Serier (upprepade aktiviteter) ──────────────────────────────────────────
+
+export type AnnualWheelRepeat = 'none' | 'monthly' | 'bimonthly' | 'quarterly';
+
+export interface AnnualWheelRepeatDef {
+  id: AnnualWheelRepeat;
+  label: string;
+  /** Antal månader mellan varje förekomst (0 = ingen upprepning). */
+  stepMonths: number;
+}
+
+export const ANNUAL_WHEEL_REPEATS: readonly AnnualWheelRepeatDef[] = [
+  { id: 'none', label: 'Upprepas inte', stepMonths: 0 },
+  { id: 'monthly', label: 'Varje månad', stepMonths: 1 },
+  { id: 'bimonthly', label: 'Varannan månad', stepMonths: 2 },
+  { id: 'quarterly', label: 'Varje kvartal', stepMonths: 3 }
+] as const;
+
+export function isAnnualWheelRepeat(value: unknown): value is AnnualWheelRepeat {
+  return (
+    typeof value === 'string' && ANNUAL_WHEEL_REPEATS.some((r) => r.id === (value as AnnualWheelRepeat))
+  );
+}
+
+export function annualWheelRepeatStep(repeat: unknown): number {
+  return ANNUAL_WHEEL_REPEATS.find((r) => r.id === repeat)?.stepMonths ?? 0;
+}
+
+export interface AnnualWheelOccurrence {
+  month: number;
+  day: number | null;
+  end_month: number | null;
+  end_day: number | null;
+}
+
+/** Klampar en dag mot månadens faktiska längd (31 jan → 28/29 feb). */
+export function clampDayToMonth(year: number, month: number, day: number | null): number | null {
+  if (day === null) return null;
+  return Math.min(day, daysInMonth(year, month));
+}
+
+/**
+ * Expanderar en aktivitet till en SERIE förekomster ("nyhetsbrev den 15:e
+ * varje månad t.o.m. december"). Ren och testbar — samma expansion används av
+ * UI-actionen och chatt-agenten så serierna aldrig kan divergera.
+ *
+ * • `repeat: 'none'`, saknad månad eller steg 0 → en enda förekomst (basen).
+ * • Dagen klampas mot varje månads längd (31 → 30/28).
+ * • Perioder flyttas med hela steget (start OCH slut) och förekomster vars
+ *   slut skulle passera december utelämnas — årshjulet är ett kalenderår.
+ * • Hård övre gräns på 12 förekomster (ett år).
+ */
+export function expandAnnualWheelSeries(
+  base: {
+    year: number;
+    month?: number | null;
+    day?: number | null;
+    end_month?: number | null;
+    end_day?: number | null;
+  },
+  repeat: AnnualWheelRepeat,
+  untilMonth = 12
+): AnnualWheelOccurrence[] {
+  const startMonth = sanitizeMonth(base.month);
+  const baseOccurrence: AnnualWheelOccurrence = {
+    month: startMonth ?? 0,
+    day: startMonth === null ? null : clampDayToMonth(base.year, startMonth, sanitizeDay(base.day)),
+    end_month: sanitizeMonth(base.end_month),
+    end_day: sanitizeDay(base.end_day)
+  };
+  const step = annualWheelRepeatStep(repeat);
+  if (startMonth === null || step <= 0) {
+    return startMonth === null ? [] : [baseOccurrence];
+  }
+
+  const until = Math.min(12, Math.max(startMonth, sanitizeMonth(untilMonth) ?? 12));
+  const endMonth = sanitizeMonth(base.end_month);
+  const spanMonths = endMonth !== null && endMonth >= startMonth ? endMonth - startMonth : 0;
+
+  const out: AnnualWheelOccurrence[] = [];
+  for (let m = startMonth; m <= until && out.length < 12; m += step) {
+    const occEnd = endMonth === null ? null : m + spanMonths;
+    if (occEnd !== null && occEnd > 12) break; // perioden skulle spilla över årsskiftet
+    out.push({
+      month: m,
+      day: clampDayToMonth(base.year, m, sanitizeDay(base.day)),
+      end_month: occEnd,
+      end_day: occEnd === null ? null : clampDayToMonth(base.year, occEnd, sanitizeDay(base.end_day))
+    });
+  }
+  return out;
 }
 
 /** Vinklar för ett 1-baserat kvartals 90°-sektor (Q1 = Jan–Mar, börjar i toppen). */

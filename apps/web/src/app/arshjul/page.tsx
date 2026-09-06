@@ -26,6 +26,8 @@ interface WheelRow {
   title?: string;
   month?: number | null;
   day?: number | null;
+  end_month?: number | null;
+  end_day?: number | null;
   tags?: string[] | string | null;
   /** Deprecerat (migration 1700000139) — läses bara som fallback. */
   track?: string;
@@ -74,6 +76,8 @@ export default async function ArshjulPage() {
     title: r.title || '(namnlös)',
     month: sanitizeMonth(r.month),
     day: sanitizeDay(r.day),
+    end_month: sanitizeMonth(r.end_month),
+    end_day: sanitizeDay(r.end_day),
     // Fallback till `track` BARA när `tags`-fältet saknas helt (instans utan
     // migration 1700000139). En tom lista är ett medvetet "otaggad" och ska
     // aldrig återuppväcka det deprecerade spåret.

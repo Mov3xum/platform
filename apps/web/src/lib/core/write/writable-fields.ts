@@ -93,6 +93,9 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     month: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     day: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    // Kampanjperioder (migration 1700000141): slutmånad/-dag.
+    end_month: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    end_day: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     tags: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     category: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     // Ansvarig pekar ut en intern användare. Agenten kan inte slå upp
