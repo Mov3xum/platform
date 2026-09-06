@@ -26,15 +26,11 @@
  */
 
 import PocketBase from 'pocketbase';
+import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
 const SU_PASSWORD = process.env.PB_SU_PASSWORD;
-// PB v0.23 rate-limitar auth-endpointen. I CI-workflowen loggar setup-via-api.mjs
-// redan in som superuser strax innan detta skript kör — retry med backoff på
-// 429/5xx håller detta i synk med setup-via-api.mjs:s samma mönster.
-const PB_AUTH_RETRY_ATTEMPTS = Number(process.env.PB_AUTH_RETRY_ATTEMPTS || 12);
-const PB_AUTH_RETRY_DELAY_MS = Number(process.env.PB_AUTH_RETRY_DELAY_MS || 5000);
 
 if (!PB_URL_RAW || !SU_EMAIL || !SU_PASSWORD) {
   console.error('Saknar env. Krävs: PB_URL, PB_SU_EMAIL, PB_SU_PASSWORD');
@@ -42,18 +38,6 @@ if (!PB_URL_RAW || !SU_EMAIL || !SU_PASSWORD) {
 }
 
 const PB_URL = /^https?:\/\//i.test(PB_URL_RAW) ? PB_URL_RAW : `https://${PB_URL_RAW}`;
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function shouldRetrySuperuserAuth(err) {
-  const status = Number(err?.status || 0);
-  if ([408, 425, 429, 500, 502, 503, 504].includes(status)) return true;
-
-  const code = String(err?.originalError?.code || err?.cause?.code || '').toUpperCase();
-  return ['ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENOTFOUND', 'ETIMEDOUT'].includes(code);
-}
 
 const PUBLIC_SLUG = 'innovationspotential';
 const INTERNAL_SLUG = 'innovationspotential';
@@ -213,23 +197,13 @@ pb.autoCancellation(false);
 
 async function main() {
   console.log('• PB_URL:', PB_URL);
-  let authError = null;
-  for (let attempt = 1; attempt <= PB_AUTH_RETRY_ATTEMPTS; attempt++) {
-    try {
-      await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
-      authError = null;
-      break;
-    } catch (err) {
-      authError = err;
-      const retryable = shouldRetrySuperuserAuth(err);
-      if (!retryable || attempt === PB_AUTH_RETRY_ATTEMPTS) break;
-
+  const authError = await authenticateSuperuserWithRetry(pb, SU_EMAIL, SU_PASSWORD, {
+    onRetry: (err, attempt, maxAttempts, delayMs) => {
       console.log(
-        `! superuser-auth misslyckades (försök ${attempt}/${PB_AUTH_RETRY_ATTEMPTS}): ${err?.message || err} — försöker igen om ${PB_AUTH_RETRY_DELAY_MS}ms`
+        `! superuser-auth misslyckades (försök ${attempt}/${maxAttempts}): ${err?.message || err} — försöker igen om ${delayMs}ms`
       );
-      await sleep(PB_AUTH_RETRY_DELAY_MS);
     }
-  }
+  });
   if (authError) {
     console.error(`✗ Superuser-auth misslyckades: ${authError?.message || authError}`);
     process.exit(1);

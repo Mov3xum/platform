@@ -24,6 +24,7 @@
  */
 
 import PocketBase from 'pocketbase';
+import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -32,8 +33,6 @@ const APP_USER_PASSWORD = process.env.APP_USER_PASSWORD;
 
 const APP_USER_EMAIL = 'hampus@movexum.se';
 const APP_USER_NAME = 'Hampus Granström';
-const PB_AUTH_RETRY_ATTEMPTS = Number(process.env.PB_AUTH_RETRY_ATTEMPTS || 12);
-const PB_AUTH_RETRY_DELAY_MS = Number(process.env.PB_AUTH_RETRY_DELAY_MS || 5000);
 
 if (!PB_URL_RAW || !SU_EMAIL || !SU_PASSWORD) {
   console.error('Missing env vars. Required: PB_URL, PB_SU_EMAIL, PB_SU_PASSWORD');
@@ -67,18 +66,6 @@ function containsErrorCode(value, expectedCode, seen = new Set()) {
   seen.add(value);
   if (value.code === expectedCode) return true;
   return Object.values(value).some((nested) => containsErrorCode(nested, expectedCode, seen));
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function shouldRetrySuperuserAuth(err) {
-  const status = Number(err?.status || 0);
-  if ([408, 425, 429, 500, 502, 503, 504].includes(status)) return true;
-
-  const code = String(err?.originalError?.code || err?.cause?.code || '').toUpperCase();
-  return ['ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENOTFOUND', 'ETIMEDOUT'].includes(code);
 }
 
 // Normalisera defensivt:
@@ -503,26 +490,13 @@ log(`Superuser: ${SU_EMAIL}`);
 
 {
   const authUrl = `${PB_URL.replace(/\/$/, '')}/api/collections/_superusers/auth-with-password`;
-  let authError = null;
-
-  for (let attempt = 1; attempt <= PB_AUTH_RETRY_ATTEMPTS; attempt++) {
-    try {
-      await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
-      authError = null;
-      break;
-    } catch (err) {
-      authError = err;
-      const retryable = shouldRetrySuperuserAuth(err);
-      if (!retryable || attempt === PB_AUTH_RETRY_ATTEMPTS) {
-        break;
-      }
-
+  const authError = await authenticateSuperuserWithRetry(pb, SU_EMAIL, SU_PASSWORD, {
+    onRetry: (err, attempt, maxAttempts, delayMs) => {
       warn(
-        `superuser auth failed (attempt ${attempt}/${PB_AUTH_RETRY_ATTEMPTS}): ${describeError(err)} — retrying in ${PB_AUTH_RETRY_DELAY_MS}ms`
+        `superuser auth failed (attempt ${attempt}/${maxAttempts}): ${describeError(err)} — retrying in ${delayMs}ms`
       );
-      await sleep(PB_AUTH_RETRY_DELAY_MS);
     }
-  }
+  });
 
   if (authError) {
     console.error(
