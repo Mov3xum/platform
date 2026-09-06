@@ -252,10 +252,24 @@ function toVoiceError(status: number, body: string): VoiceError {
   if (status >= 500) {
     return new VoiceError('AI-tjänsten svarade med ett fel. Försök igen.', 502);
   }
-  // 4xx: oftast ett ljudformat Voxtral inte accepterar.
-  const detail = body.length > 200 ? body.slice(0, 200) + '…' : body;
+  // 4xx: oftast ett ljudformat Voxtral inte accepterar. Mistrals felorsak
+  // följer med till klienten (trimmad, PII-fri API-text) så att ett format-/
+  // parameterfel går att felsöka i UI:t i stället för ett oförklarat stopp.
+  const detail = compactApiDetail(body);
   console.warn('[voice] avvisat av Mistral', { status, detail });
-  return new VoiceError('Ljudklippet kunde inte transkriberas.', 400);
+  return new VoiceError(
+    detail
+      ? `Ljudklippet kunde inte transkriberas — AI-tjänsten svarade: ${detail}`
+      : 'Ljudklippet kunde inte transkriberas.',
+    400
+  );
+}
+
+/** Plattar ut ett API-felsvar till en kort, enradig etikett för UI/logg. */
+function compactApiDetail(body: string): string {
+  const flat = body.replace(/\s+/g, ' ').trim();
+  if (!flat) return '';
+  return flat.length > 160 ? `${flat.slice(0, 160)}…` : flat;
 }
 
 // Re-exporteras så att kallare kan skilja Mistral-fel från våra egna.

@@ -3769,6 +3769,7 @@ och år.
 | `apps/web/src/lib/actions/annual-wheel.ts` | Server actions (manuell CRUD via UI + kategori-CRUD för superadmin) |
 | `apps/web/src/app/arshjul/{page,AnnualWheelView}.tsx` | Sida + klientvy (tabell, filter, editor, kategori-hantering) |
 | `apps/web/src/app/arshjul/Wheel.tsx` | Hjul-SVG:n — EN renderare, delad av redigeringsvyn och presentationsläget |
+| `apps/web/src/app/arshjul/Dashboard.tsx` | Dashboard-komponenter (nyckeltalskort, linjediagram per månad, kategori-/kvartals-/tagg-/ansvarig-fördelning) — ren presentation |
 | `apps/web/src/app/arshjul/presentation/{page,AnnualWheelPresentation}.tsx` | Presentationsläget (`/arshjul/presentation`, helskärm utan rail) |
 | `apps/web/src/lib/annual-wheel/schema-repair.ts` | Självreparation av schemat via superuser (stale deploy) |
 | `apps/web/src/lib/ai/tools.ts` | Verktygen `create_annual_wheel_item` / `update_annual_wheel_item` + dispatch |
@@ -3820,7 +3821,10 @@ enhetstestad) finns kvar i `@platform/shared` för framtida bruk. Tabellen
 visar en period i **varje** månad den löper (`monthsForAnnualWheelItem`) och
 bara taggar som faktiskt används som kolumner (`annualWheelTagsInUse`). En
 pågående period visas som "Pågår nu" i navet (`nextUpcomingItem` →
-`ongoing`).
+`ongoing`). **Klick i hjulet** fokuserar månaden i listan "Per månad" (månadsringen
+växlar fokus, ett aktivitetsband fokuserar sin startmånad och lyfter fram raden
+en kort stund) — redigering sker via pennan i listan, aldrig genom att klicka
+i hjulet, så en genomgång kan klickas igenom utan att dialoger öppnas.
 
 **Serier (upprepning).** "Nyhetsbrev den 15:e varje månad" skapas i ETT steg:
 `expandAnnualWheelSeries` (ren, enhetstestad) expanderar basen till
@@ -3945,6 +3949,17 @@ av tre olika miljöskäl. Alla tre är nu täckta i `lib/core/write/annual-wheel
    (least privilege). Fel i skrivlagret visas nu på svenska med PB:s
    fältdetaljer ("Kunde inte spara aktiviteten. (category: …)").
 
+5. **Flera fält i EN skrivning (`updateAnnualWheelItemFields`).** Redigerings-
+   dialogen skrev tidigare ett fält i taget, och varje steg validerades mot
+   postens GAMLA övriga datumfält — att flytta en period från jan–feb till
+   mars–april föll på "Periodens slut måste ligga efter starten" när `month`
+   skrevs först (mars mot det gamla slutet februari), trots att resultatet var
+   giltigt. Nu skickar dialogen alla ändrade fält i ett anrop
+   (`updateAnnualWheelItemFieldsAction`), skrivlagret validerar perioden mot
+   det SAMMANLAGDA nya tillståndet, skriver en gång och audit-loggar per fält
+   (samma `agent_actions`-format som förut). `updateAnnualWheelItemField`
+   (chatt-verktyget) är ett tunt omslag över samma funktion.
+
 **Deploy-invariant:** `verify-baseline.mjs` (`verifyAppWritableFields`)
 asserterar att `annual_wheel_items` HAR `day`/`tags`/`responsible`/`end_month`/
 `end_day` och att det deprecerade `track` INTE är obligatoriskt. Schemadrift fäller därmed deployen i
@@ -4002,6 +4017,29 @@ Taggar*) med klistrad topp- och bottenrad; period och upprepning är
 hopfällda `ToggleRow`-switchar som visar fälten först när de slås på, så
 dialogen inte känns som ett formulär för allt på en gång. `EditorModal`
 exporteras för fristående förhandsvisning/skärmdump.
+
+### 30.5bis Dashboard-komponenter på `/arshjul`
+
+Ovanför hjulet ligger en **nyckeltalsrad** (aktiviteter i år med delta mot
+föregående år + gnistlinje, genomfört-andel med mätare och andel av året,
+pågår nu, kommande 30 dagar + toppmånad, andel med ansvarig) och under
+hjul/lista ett **analysblock**: linjediagram över beläggning per månad
+(perioder räknas i varje månad de löper) med växling till kumulativt,
+föregående år som de-emfaslinje, "Idag"-markör och hårkors-tooltip; fördelning
+per kategori (segmenterad stapel i kategoriernas brand-tokens) + per kvartal;
+liggande staplar per tagg och per ansvarig som **filtrerar** hela sidan vid
+klick. All räkning är ren, enhetstestad logik i `@platform/shared`
+(`annualWheelYearStats`, `annualWheelMonthlyLoad`, `countItemsByCategory`,
+`countItemsByQuarter`, `countItemsByResponsible`) och körs på det redan
+filtrerade urvalet — filterraden styr allt, så siffrorna hänger ihop.
+Diagrammen är inline-SVG med CSS-variabler (`--color-brand`, kategori-tokens)
+så dark mode följer med utan `dark:`-varianter; text bär aldrig seriefärg.
+**Layouten är boxlös (2026-09):** inga vita kort — sektionerna (nyckeltal, hjul,
+listor, analys, tabell) skiljs åt med hårlinjer (`border-t border-default`),
+eyebrow-etiketter och rubriker (`DashSection`), så sidan läses som en
+sammanhängande dashboard i stället för staplade paneler.
+Ingen ny dataväg, ingen PII (ansvarig visas som visningsnamn, som tidigare),
+ingen AI-inferens → riskklass n/a.
 
 ### 30.6 Regelefterlevnad
 
@@ -4082,7 +4120,12 @@ npm-dependency (§ 10.2).
 1. Användaren håller in mikrofonknappen i chatten. `MediaRecorder` spelar in
    (Opus/webm när webbläsaren stödjer det), max **120 sekunder** — klienten
    stoppar automatiskt vid taket.
-2. Klippet POST:as till `/api/chat/voice` (route handler → inte bunden av
+2. Klippet **konverteras i webbläsaren till 16 kHz mono WAV**
+   (`lib/audio/wav.ts`, Web Audio API, ingen dependency) — Mistrals
+   transkriberings-endpoint accepterar inte webbläsarformaten webm/opus och
+   mp4/AAC (avvisas med 400). Fail-soft: kan klippet inte avkodas skickas
+   originalet, och serverns 4xx-fel bär numera Mistrals felorsak i klartext.
+   Därefter POST:as det till `/api/chat/voice` (route handler → inte bunden av
    `serverActions.bodySizeLimit`, samma mönster som § 18.2/§ 26.3).
    Auth-cookien är `SameSite=Lax` → cross-site POST saknar cookie (CSRF-skydd,
    § 17.8).
@@ -4401,7 +4444,9 @@ segment).
    `timeslice`, sådana chunkar är inte självständigt avkodbara; det FÖRSTA
    segmentet är kort, `MEETING_FIRST_SEGMENT_SECONDS` = 20 s, så live-texten —
    eller ett konfigurationsfel — syns snabbt även i korta möten). Varje segment
-   POSTas till `/api/chat/meeting/segment` (staff-only, rate-limitad 40/5 min,
+   **konverteras till 16 kHz mono WAV i webbläsaren** (`lib/audio/wav.ts`,
+   § 31.2 — Voxtral avvisar webm/opus- och mp4-klipp med 400) och POSTas till
+   `/api/chat/meeting/segment` (staff-only, rate-limitad 40/5 min,
    ägar-verifierad, samma Voxtral-klient + validering som § 31), texten
    **personnummer-saneras** (§ 15.6-regexen — folk säger personnummer högt) och
    appendas på raden. Live-transkriptet växer i panelen. Robusthet: wake lock,
@@ -4419,10 +4464,13 @@ segment).
    kostar max ett segment; "Återuppta granskningen"-bannern i `/chatt` öppnar
    det oavslutade mötet.
 4. **Granskning (människa-i-loopen, art. 14):** redigerbart transkript;
-   "Generera protokoll" (`meeting-protocol.ts`: isolerad mistral-medium→small,
-   kedje-summering >60 KB, budget-spärren § 9.6 prövas, transkriptet är DATA
-   inte instruktioner); "Dela upp i repliker" (LLM-gissad turindelning — REN
-   textbearbetning, anonyma "Talare 1/2", ≤40 KB).
+   protokollutkastet (sammanfattning/beslut/åtgärdspunkter) **genereras
+   automatiskt när granskningen öppnas** (även vid återupptagen granskning;
+   fel sväljs — knappen "Generera protokoll" finns kvar och visar orsaken;
+   inget sparas automatiskt) via `meeting-protocol.ts` (isolerad
+   mistral-medium→small, kedje-summering >60 KB, budget-spärren § 9.6 prövas,
+   transkriptet är DATA inte instruktioner); "Dela upp i repliker" (LLM-gissad
+   turindelning — REN textbearbetning, anonyma "Talare 1/2", ≤40 KB).
 5. **Spara:** `saveMeetingToStartupAction` — en MÄNSKLIG knapptryckning (inte
    agent-skriv) → coachen får därför välja **konfidentiell**, vilket
    chatt-agentens `create_startup_note` med rätta aldrig får (§ 33). Skapar

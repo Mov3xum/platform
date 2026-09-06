@@ -28,6 +28,11 @@ import {
   buildAnnualWheelTable,
   clampYear,
   countItemsByTag,
+  countItemsByCategory,
+  countItemsByQuarter,
+  countItemsByResponsible,
+  annualWheelMonthlyLoad,
+  annualWheelYearStats,
   dateAngleInYear,
   daysInMonth,
   DEFAULT_ANNUAL_WHEEL_CATEGORY_IDS,
@@ -792,4 +797,117 @@ test('buildAnnualWheelTable cells follow the chosen sort (date by default)', () 
     ['event']
   );
   assert.deepEqual(rows[3].cells[0].items.map((i) => i.title), ['Tidig', 'Sen']);
+});
+
+// ── Dashboard-statistik ──────────────────────────────────────────────────────
+
+test('annualWheelMonthlyLoad counts starts, active months and cumulative', () => {
+  const items = [
+    item({ month: 1 }),
+    item({ month: 1, day: 15, end_month: 3 }), // period jan–mar
+    item({ month: 3 }),
+    item({ month: null }) // odaterad ingår inte
+  ];
+  const load = annualWheelMonthlyLoad(items);
+  assert.equal(load.length, 12);
+  assert.deepEqual(load[0], { month: 1, starts: 2, active: 2, cumulative: 2 });
+  assert.deepEqual(load[1], { month: 2, starts: 0, active: 1, cumulative: 2 });
+  assert.deepEqual(load[2], { month: 3, starts: 1, active: 2, cumulative: 3 });
+  assert.equal(load[11].cumulative, 3);
+  assert.equal(load[11].active, 0);
+});
+
+test('countItemsByCategory keeps catalogue order and appends orphans with shares', () => {
+  const items = [
+    item({ category: 'ledning' }),
+    item({ category: 'styrelse' }),
+    item({ category: 'ledning' }),
+    item({ category: 'borttagen' })
+  ];
+  const counts = countItemsByCategory(items, [{ id: 'styrelse' }, { id: 'ledning' }, { id: 'gemensamt' }]);
+  assert.deepEqual(
+    counts.map((c) => [c.category, c.count]),
+    [
+      ['styrelse', 1],
+      ['ledning', 2],
+      ['borttagen', 1]
+    ]
+  );
+  assert.equal(counts[1].share, 0.5);
+  assert.deepEqual(countItemsByCategory([]), []);
+});
+
+test('countItemsByResponsible sorts by count, caps with Övriga and lists unassigned last', () => {
+  const items = [
+    item({ responsible: 'a', responsible_name: 'Anna' }),
+    item({ responsible: 'a', responsible_name: 'Anna' }),
+    item({ responsible: 'b', responsible_name: 'Bo' }),
+    item({ responsible: 'c', responsible_name: 'Cia' }),
+    item({ responsible: null })
+  ];
+  const rows = countItemsByResponsible(items, 2);
+  assert.deepEqual(
+    rows.map((r) => [r.id, r.count]),
+    [
+      ['a', 2],
+      ['b', 1],
+      ['__other', 1],
+      [null, 1]
+    ]
+  );
+  assert.equal(rows[2].name, 'Övriga (1)');
+  assert.equal(rows[3].name, 'Utan ansvarig');
+  // Utan tak: ingen Övriga-rad.
+  assert.equal(countItemsByResponsible(items).some((r) => r.id === '__other'), false);
+});
+
+test('annualWheelYearStats splits passed / ongoing / upcoming / remaining from a reference day', () => {
+  const today = new Date(2026, 8, 6); // 6 sep 2026
+  const items = [
+    item({ month: 3, day: 10 }), // passerad
+    item({ month: 8, end_month: 10, tags: [] }), // period aug–okt → pågår
+    item({ month: 9, day: 10, responsible: 'a', responsible_name: 'Anna' }), // om 4 dgr
+    item({ month: 11 }), // utanför 30-dagars horisonten men kvar i år
+    item({ month: null }) // odaterad
+  ];
+  const s = annualWheelYearStats(items, 2026, today);
+  assert.equal(s.total, 5);
+  assert.equal(s.dated, 4);
+  assert.equal(s.undated, 1);
+  assert.equal(s.periods, 1);
+  assert.equal(s.tagged, 4);
+  assert.equal(s.withResponsible, 1);
+  assert.equal(s.passed, 1);
+  assert.equal(s.ongoing, 1);
+  assert.equal(s.upcoming, 1);
+  assert.equal(s.remaining, 3);
+  assert.equal(s.passedShare, 0.25);
+  assert.ok(s.yearProgress > 0.67 && s.yearProgress < 0.69);
+  assert.equal(s.peakMonth, 9); // aug–okt-perioden + 10 sep
+  assert.equal(s.peakCount, 2);
+});
+
+test('annualWheelYearStats clamps year progress and handles empty input', () => {
+  const s = annualWheelYearStats([], 2030, new Date(2026, 0, 1));
+  assert.equal(s.total, 0);
+  assert.equal(s.passedShare, 0);
+  assert.equal(s.yearProgress, 0);
+  assert.equal(s.peakMonth, null);
+  assert.equal(annualWheelYearStats([], 2020, new Date(2026, 0, 1)).yearProgress, 1);
+});
+
+test('countItemsByQuarter buckets dated items by quarter with shares', () => {
+  const items = [item({ month: 1 }), item({ month: 3 }), item({ month: 7 }), item({ month: null })];
+  const q = countItemsByQuarter(items);
+  assert.deepEqual(
+    q.map((r) => [r.quarter, r.count]),
+    [
+      [1, 2],
+      [2, 0],
+      [3, 1],
+      [4, 0]
+    ]
+  );
+  assert.equal(q[0].share, 2 / 3);
+  assert.equal(countItemsByQuarter([])[0].share, 0);
 });
