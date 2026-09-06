@@ -8,6 +8,7 @@ import {
   validateVoiceClip
 } from '@platform/shared';
 import { Icon } from '@/components/proto/Icon';
+import { VOICE_WAV_MIME, convertBlobToWav } from '@/lib/audio/wav';
 
 /**
  * Mikrofonknapp för chatten (CLAUDE.md § 31). Spelar in ett ljudklipp med
@@ -127,16 +128,25 @@ export default function VoiceInputButton({ onTranscript, disabled, onError }: Pr
   );
 
   async function sendClip(blob: Blob, mime: string) {
-    const validation = validateVoiceClip(mime, blob.size);
+    setPhase('transcribing');
+
+    // Voxtrals transkriberings-endpoint accepterar inte webbläsarens
+    // inspelningsformat (webm/opus, mp4/AAC) — konvertera till 16 kHz mono
+    // WAV innan uppladdning. Fail-soft: kan klippet inte avkodas skickas
+    // originalet, och servern svarar med Mistrals orsak.
+    const wav = await convertBlobToWav(blob);
+    const body = wav ?? blob;
+    const bodyMime = wav ? VOICE_WAV_MIME : mime;
+
+    const validation = validateVoiceClip(bodyMime, body.size);
     if (!validation.ok) {
       fail(validation.error);
       return;
     }
 
-    setPhase('transcribing');
     const form = new FormData();
     // Filnamnet är bara en etikett — servern går på mime-typen.
-    form.append('audio', new File([blob], 'rost-inspelning', { type: validation.mime }));
+    form.append('audio', new File([body], 'rost-inspelning', { type: validation.mime }));
 
     try {
       const response = await fetch('/api/chat/voice', { method: 'POST', body: form });
