@@ -496,12 +496,43 @@ export interface UpdateAnnualWheelItemFieldParams {
   value: unknown;
 }
 
+/** Flera fält på samma post i EN skrivning (valideras som en helhet). */
+export interface UpdateAnnualWheelItemFieldsParams {
+  itemId: string;
+  changes: Partial<Record<AnnualWheelWritableField, unknown>>;
+}
+
+export interface AnnualWheelFieldChange {
+  field: AnnualWheelWritableField;
+  before: unknown;
+  after: unknown;
+}
+
 interface AnnualWheelRow extends Record<string, unknown> {
   tenant?: string;
   month?: unknown;
   day?: unknown;
   end_month?: unknown;
   end_day?: unknown;
+}
+
+type NormalizedFieldValue = string | number | string[] | null;
+
+const WRITABLE_FIELDS: readonly AnnualWheelWritableField[] = [
+  'title',
+  'month',
+  'day',
+  'end_month',
+  'end_day',
+  'tags',
+  'category',
+  'responsible',
+  'notes',
+  'year'
+];
+
+function isWritableField(field: string): field is AnnualWheelWritableField {
+  return (WRITABLE_FIELDS as readonly string[]).includes(field);
 }
 
 /**
@@ -519,91 +550,103 @@ function sameValue(before: unknown, after: unknown): boolean {
   return norm(before) === norm(after);
 }
 
-/** Uppdaterar ETT fält på en årshjuls-post (tenant-verifierat + audit-loggat). */
-export async function updateAnnualWheelItemField(
+/** Validerar + normaliserar ETT fältvärde (samma regler som vid skapande). */
+async function normalizeFieldValue(
   pb: PocketBase,
   actor: Actor,
-  params: UpdateAnnualWheelItemFieldParams,
-  options?: AnnualWheelWriteOptions
-): Promise<WriteResult<{ itemId: string; field: string; before: unknown; after: unknown }>> {
-  const policy = canWriteField(actor, COLLECTION, params.field);
-  if (!policy.ok) {
-    return fail(
-      actor.kind === 'agent' ? 'FIELD_NOT_WRITABLE' : 'FORBIDDEN',
-      policy.reason ?? 'Skrivning nekad.'
-    );
-  }
-
-  let normalized: string | number | string[] | null;
-  switch (params.field) {
+  field: AnnualWheelWritableField,
+  value: unknown
+): Promise<WriteResult<NormalizedFieldValue>> {
+  switch (field) {
     case 'title': {
-      const r = validateNonEmptyText(params.value, 'title', 200);
-      if (!r.ok) return fail('INVALID_VALUE', r.error);
-      normalized = r.value;
-      break;
+      const r = validateNonEmptyText(value, 'title', 200);
+      return r.ok ? ok(r.value) : fail('INVALID_VALUE', r.error);
     }
     case 'notes': {
-      const r = validateOptionalText(params.value, 'notes', 2000);
-      if (!r.ok) return fail('INVALID_VALUE', r.error);
-      normalized = r.value;
-      break;
+      const r = validateOptionalText(value, 'notes', 2000);
+      return r.ok ? ok(r.value) : fail('INVALID_VALUE', r.error);
     }
     case 'month': {
-      const r = validateAnnualWheelMonth(params.value);
-      if (!r.ok) return fail('INVALID_VALUE', r.error);
-      normalized = r.value;
-      break;
+      const r = validateAnnualWheelMonth(value);
+      return r.ok ? ok(r.value) : fail('INVALID_VALUE', r.error);
     }
     case 'day': {
-      const r = validateAnnualWheelDay(params.value);
-      if (!r.ok) return fail('INVALID_VALUE', r.error);
-      normalized = r.value;
-      break;
+      const r = validateAnnualWheelDay(value);
+      return r.ok ? ok(r.value) : fail('INVALID_VALUE', r.error);
     }
     case 'end_month': {
-      const r = validateAnnualWheelEndMonth(params.value);
-      if (!r.ok) return fail('INVALID_VALUE', r.error);
-      normalized = r.value;
-      break;
+      const r = validateAnnualWheelEndMonth(value);
+      return r.ok ? ok(r.value) : fail('INVALID_VALUE', r.error);
     }
     case 'end_day': {
-      const r = validateAnnualWheelEndDay(params.value);
-      if (!r.ok) return fail('INVALID_VALUE', r.error);
-      normalized = r.value;
-      break;
+      const r = validateAnnualWheelEndDay(value);
+      return r.ok ? ok(r.value) : fail('INVALID_VALUE', r.error);
     }
     case 'tags': {
-      const r = validateAnnualWheelTags(params.value);
-      if (!r.ok) return fail('INVALID_VALUE', r.error);
-      normalized = r.value;
-      break;
+      const r = validateAnnualWheelTags(value);
+      return r.ok ? ok(r.value) : fail('INVALID_VALUE', r.error);
     }
     case 'responsible': {
-      const r = validateAnnualWheelResponsible(params.value);
+      const r = validateAnnualWheelResponsible(value);
       if (!r.ok) return fail('INVALID_VALUE', r.error);
       if (r.value) {
         const verified = await assertResponsibleInTenant(pb, actor, r.value);
         if (!verified.ok) return fail(verified.code ?? 'INVALID_VALUE', verified.error);
       }
-      normalized = r.value;
-      break;
+      return ok(r.value);
     }
     case 'category': {
-      const r = validateAnnualWheelCategory(params.value);
+      const r = validateAnnualWheelCategory(value);
       if (!r.ok) return fail('INVALID_VALUE', r.error);
       const exists = await assertCategoryExists(pb, actor, r.value);
       if (!exists.ok) return fail('INVALID_VALUE', exists.error);
-      normalized = r.value;
-      break;
+      return ok(r.value);
     }
     case 'year': {
-      const r = validateYear(params.value);
-      if (!r.ok) return fail('INVALID_VALUE', r.error);
-      normalized = r.value;
-      break;
+      const r = validateYear(value);
+      return r.ok ? ok(r.value) : fail('INVALID_VALUE', r.error);
     }
     default:
-      return fail('FIELD_NOT_WRITABLE', `Fältet '${params.field}' är inte skrivbart.`);
+      return fail('FIELD_NOT_WRITABLE', `Fältet '${String(field)}' är inte skrivbart.`);
+  }
+}
+
+/**
+ * Uppdaterar ETT ELLER FLERA fält på en årshjuls-post i EN skrivning
+ * (tenant-verifierat + audit-loggat per fält).
+ *
+ * Varför flera fält åt gången: en periods start och slut hänger ihop. Skrevs
+ * de ett i taget validerades varje steg mot postens GAMLA övriga datumfält —
+ * att flytta en period från jan–feb till mars–april föll då på "slutet måste
+ * ligga efter starten" när `month` skrevs först (mars mot det gamla slutet
+ * februari), trots att det färdiga resultatet var giltigt. Här kontrolleras
+ * perioden mot det NYA sammanlagda tillståndet.
+ */
+export async function updateAnnualWheelItemFields(
+  pb: PocketBase,
+  actor: Actor,
+  params: UpdateAnnualWheelItemFieldsParams,
+  options?: AnnualWheelWriteOptions
+): Promise<WriteResult<{ itemId: string; changes: AnnualWheelFieldChange[] }>> {
+  const fields = Object.keys(params.changes).filter(isWritableField);
+  const unknown = Object.keys(params.changes).filter((f) => !isWritableField(f));
+  if (unknown.length > 0) {
+    return fail('FIELD_NOT_WRITABLE', `Fältet '${unknown[0]}' är inte skrivbart.`);
+  }
+  if (fields.length === 0) return ok({ itemId: params.itemId, changes: [] });
+
+  const normalized = new Map<AnnualWheelWritableField, NormalizedFieldValue>();
+  for (const field of fields) {
+    const policy = canWriteField(actor, COLLECTION, field);
+    if (!policy.ok) {
+      return fail(
+        actor.kind === 'agent' ? 'FIELD_NOT_WRITABLE' : 'FORBIDDEN',
+        policy.reason ?? 'Skrivning nekad.'
+      );
+    }
+    const r = await normalizeFieldValue(pb, actor, field, params.changes[field]);
+    if (!r.ok) return fail(r.code ?? 'INVALID_VALUE', r.error);
+    normalized.set(field, r.value);
   }
 
   let current: AnnualWheelRow;
@@ -622,52 +665,86 @@ export async function updateAnnualWheelItemField(
   }
   // Saknas kolumnen i det deployade schemat skulle PB svara 200 men tyst
   // kasta värdet (t.ex. ett datum som "sparas" men aldrig syns).
-  if (!(params.field in current)) {
-    return fail('DB_ERROR', schemaDriftMessage([params.field]));
-  }
+  const missing = fields.filter((f) => !(f in current));
+  if (missing.length > 0) return fail('DB_ERROR', schemaDriftMessage(missing));
 
   // Perioden måste hänga ihop även när BARA en ände ändras — kontrollera det
-  // nya värdet mot postens övriga datumfält.
-  if (['month', 'day', 'end_month', 'end_day'].includes(params.field)) {
+  // sammanlagda NYA tillståndet (nya värden där de finns, annars postens).
+  const touchesDates = fields.some((f) => ['month', 'day', 'end_month', 'end_day'].includes(f));
+  if (touchesDates) {
     const asNumber = (v: unknown) => (typeof v === 'number' && v > 0 ? v : null);
-    const next = {
-      month: params.field === 'month' ? (normalized as number | null) : asNumber(current.month),
-      day: params.field === 'day' ? (normalized as number | null) : asNumber(current.day),
-      end_month:
-        params.field === 'end_month' ? (normalized as number | null) : asNumber(current.end_month),
-      end_day: params.field === 'end_day' ? (normalized as number | null) : asNumber(current.end_day)
-    };
-    const period = normalizePeriod(next.month, next.day, next.end_month, next.end_day);
+    const pick = (field: 'month' | 'day' | 'end_month' | 'end_day') =>
+      normalized.has(field) ? (normalized.get(field) as number | null) : asNumber(current[field]);
+    const month = pick('month');
+    const day = pick('day');
+    const period = normalizePeriod(month, day, pick('end_month'), pick('end_day'));
     if (!period.ok) return fail('INVALID_VALUE', period.error);
+    // Normaliseringen kan nollställa beroende fält (dag utan månad, slut utan
+    // start) — skriv dem så posten aldrig lämnas i ett halvt tillstånd.
+    if (month === null && day !== null) normalized.set('day', null);
+    if (period.value.endMonth === null) {
+      if (asNumber(current.end_month) !== null || normalized.has('end_month')) {
+        normalized.set('end_month', null);
+      }
+      if (asNumber(current.end_day) !== null || normalized.has('end_day')) {
+        normalized.set('end_day', null);
+      }
+    }
   }
 
-  const before = current[params.field] ?? null;
-  if (sameValue(before, normalized)) {
-    return ok({ itemId: params.itemId, field: params.field, before, after: normalized });
+  const changes: AnnualWheelFieldChange[] = [];
+  const payload: Record<string, unknown> = {};
+  for (const [field, after] of normalized) {
+    const before = current[field] ?? null;
+    if (sameValue(before, after)) continue;
+    changes.push({ field, before, after });
+    // Tom relation rensas med '' i PocketBase (null avvisas av relation-fältet).
+    payload[field] = field === 'responsible' && after === null ? '' : after;
   }
+  if (changes.length === 0) return ok({ itemId: params.itemId, changes: [] });
 
-  // Tom relation rensas med '' i PocketBase (null avvisas av relation-fältet).
-  const payloadValue =
-    params.field === 'responsible' && normalized === null ? '' : normalized;
   try {
-    await runWrite(
-      pb,
-      (c) => c.collection(COLLECTION).update(params.itemId, { [params.field]: payloadValue }),
-      options
-    );
+    await runWrite(pb, (c) => c.collection(COLLECTION).update(params.itemId, payload), options);
   } catch (err) {
     return fail('DB_ERROR', describePbError(err, 'Kunde inte spara ändringen.'));
   }
 
-  await logAgentAction(pb, {
-    actor,
-    action_type: 'update',
-    collection: COLLECTION,
-    record_id: params.itemId,
-    field: params.field,
-    before_value: before,
-    after_value: normalized
-  });
+  for (const change of changes) {
+    await logAgentAction(pb, {
+      actor,
+      action_type: 'update',
+      collection: COLLECTION,
+      record_id: params.itemId,
+      field: change.field,
+      before_value: change.before,
+      after_value: change.after
+    });
+  }
 
-  return ok({ itemId: params.itemId, field: params.field, before, after: normalized });
+  return ok({ itemId: params.itemId, changes });
+}
+
+/** Uppdaterar ETT fält på en årshjuls-post (tenant-verifierat + audit-loggat). */
+export async function updateAnnualWheelItemField(
+  pb: PocketBase,
+  actor: Actor,
+  params: UpdateAnnualWheelItemFieldParams,
+  options?: AnnualWheelWriteOptions
+): Promise<WriteResult<{ itemId: string; field: string; before: unknown; after: unknown }>> {
+  if (!isWritableField(params.field)) {
+    return fail('FIELD_NOT_WRITABLE', `Fältet '${String(params.field)}' är inte skrivbart.`);
+  }
+  const result = await updateAnnualWheelItemFields(
+    pb,
+    actor,
+    { itemId: params.itemId, changes: { [params.field]: params.value } },
+    options
+  );
+  if (!result.ok) return fail(result.code ?? 'DB_ERROR', result.error);
+  const change = result.value.changes.find((c) => c.field === params.field);
+  if (change) {
+    return ok({ itemId: params.itemId, field: params.field, before: change.before, after: change.after });
+  }
+  // Oförändrat värde → ingen skrivning, ingen audit; svara ändå med läget.
+  return ok({ itemId: params.itemId, field: params.field, before: params.value, after: params.value });
 }
