@@ -14,6 +14,11 @@ import {
 import type { Actor } from '@/lib/core/write';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import {
+  ensureAnnualWheelSchema,
+  unrepairableDriftMessage,
+  type EnsureSchemaOutcome
+} from '@/lib/annual-wheel/schema-repair';
+import {
   ensureAnnualWheelCategoriesMaterialized,
   listAnnualWheelCategories
 } from '@/lib/annual-wheel/categories';
@@ -33,6 +38,64 @@ export interface AnnualWheelActionState {
   warning?: string;
   /** Antal skapade aktiviteter (> 1 när en serie skapats). */
   created?: number;
+  /** Positiv kvittens (t.ex. att schemat reparerades automatiskt). */
+  notice?: string;
+}
+
+/**
+ * Självreparation av schemat FÖRE skrivningen (§ 30): en instans där
+ * PocketBase-migrationerna inte körts saknar day/tags/end_*, har `track`
+ * obligatoriskt och `category` som select → sparningen avvisas eller tappar
+ * fält tyst. Samma mönster som workshops-bildfältet. Fail-soft: utan
+ * superuser returneras bara en instruktion till användaren.
+ */
+async function healSchema(): Promise<{ notice?: string; warning?: string }> {
+  let outcome: EnsureSchemaOutcome;
+  try {
+    outcome = await ensureAnnualWheelSchema();
+  } catch (err) {
+    console.error('[arshjul] schema self-heal threw', {
+      error: err instanceof Error ? err.message : err
+    });
+    return {};
+  }
+  if (outcome.status === 'repaired') {
+    const r = outcome.result;
+    const parts = [`Databasschemat för årshjulet uppdaterades automatiskt (${r.repaired.join(', ')}).`];
+    if (r.failedCategories > 0) {
+      parts.push(
+        `${r.failedCategories} aktivitet(er) kunde inte få tillbaka sin kategori — kontrollera dem i listan.`
+      );
+    }
+    return { notice: parts.join(' ') };
+  }
+  if (outcome.status === 'drift_unrepairable') {
+    return { warning: unrepairableDriftMessage(outcome.drift, outcome.reason) };
+  }
+  return {};
+}
+
+/** Manuell reparation från bannern på /arshjul (admin/incubator_lead). */
+export async function repairAnnualWheelSchemaAction(): Promise<AnnualWheelActionState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: 'Ej inloggad.' };
+  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) return { error: 'Åtkomst nekad.' };
+  const outcome = await ensureAnnualWheelSchema({ force: true });
+  if (outcome.status === 'repaired') {
+    revalidate();
+    return {
+      ok: true,
+      notice: `Schemat reparerat (${outcome.result.repaired.join(', ') || 'inget behövde ändras'}).`
+    };
+  }
+  if (outcome.status === 'healthy') return { ok: true, notice: 'Schemat är redan uppdaterat.' };
+  if (outcome.status === 'drift_unrepairable') {
+    return { error: unrepairableDriftMessage(outcome.drift, outcome.reason) };
+  }
+  return {
+    error:
+      'Kunde inte läsa schemat — superuser-credentials (POCKETBASE_SUPERUSER_EMAIL/PASSWORD) saknas eller är fel.'
+  };
 }
 
 const EDIT_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
@@ -96,6 +159,7 @@ export async function createAnnualWheelItemAction(input: {
   if (!user) return { error: 'Ej inloggad.' };
   if (!hasRole(user.roles, EDIT_ROLES)) return { error: 'Åtkomst nekad.' };
 
+  const heal = await healSchema();
   const pb = await getServerPb();
   const result = await createAnnualWheelSeries(
     pb,
@@ -124,10 +188,12 @@ export async function createAnnualWheelItemAction(input: {
   revalidate();
   const missing = result.value.schemaMissing ?? [];
   const created = result.value.created;
+  const warning = missing.length > 0 ? schemaDriftMessage(missing) : heal.warning;
   return {
     ok: true,
     created,
-    ...(missing.length > 0 ? { warning: schemaDriftMessage(missing) } : {})
+    ...(warning ? { warning } : {}),
+    ...(heal.notice ? { notice: heal.notice } : {})
   };
 }
 
@@ -141,6 +207,7 @@ export async function updateAnnualWheelItemAction(
   if (!user) return { error: 'Ej inloggad.' };
   if (!hasRole(user.roles, EDIT_ROLES)) return { error: 'Åtkomst nekad.' };
 
+  const heal = await healSchema();
   const pb = await getServerPb();
   const result = await updateAnnualWheelItemField(
     pb,
@@ -154,7 +221,11 @@ export async function updateAnnualWheelItemAction(
   }
 
   revalidate();
-  return { ok: true };
+  return {
+    ok: true,
+    ...(heal.warning ? { warning: heal.warning } : {}),
+    ...(heal.notice ? { notice: heal.notice } : {})
+  };
 }
 
 /** Raderar en årshjuls-post (tenant-verifierad). */

@@ -13,6 +13,11 @@ import {
   annualWheelShortDateLabel,
   annualWheelShortRangeLabel,
   annualWheelItemAngles,
+  annualWheelItemDateRange,
+  buildAnnualWheelAgenda,
+  dateRangesOverlap,
+  isoWeekNumber,
+  weekRange,
   annualWheelTagsInUse,
   annulusSectorPath,
   clampDayToMonth,
@@ -594,4 +599,59 @@ test('expandAnnualWheelSeries shifts periods and stops before the year rolls ove
   );
   // December skulle ge slut i januari nästa år → utelämnas.
   assert.equal(series.some((o) => o.month === 12), false);
+});
+
+// ── Datumintervall, veckor och agenda (presentationsläget) ───────────────────
+
+test('annualWheelItemDateRange covers day, month and period', () => {
+  const day = annualWheelItemDateRange(item({ month: 8, day: 12, year: 2026 }))!;
+  assert.equal(day.start.getDate(), 12);
+  assert.equal(day.end.getDate(), 12);
+  const month = annualWheelItemDateRange(item({ month: 2, day: null, year: 2026 }))!;
+  assert.equal(month.start.getDate(), 1);
+  assert.equal(month.end.getDate(), 28);
+  const period = annualWheelItemDateRange(
+    item({ month: 1, day: 15, end_month: 2, end_day: null, year: 2026 })
+  )!;
+  assert.equal(period.start.getMonth(), 0);
+  assert.equal(period.end.getMonth(), 1);
+  assert.equal(period.end.getDate(), 28);
+  assert.equal(annualWheelItemDateRange(item({ month: null })), null);
+});
+
+test('isoWeekNumber + weekRange follow ISO 8601 (Monday first)', () => {
+  // 2026-01-01 är en torsdag → vecka 1. 2026-09-07 är en måndag → vecka 37.
+  assert.equal(isoWeekNumber(new Date(2026, 0, 1)), 1);
+  assert.equal(isoWeekNumber(new Date(2026, 8, 7)), 37);
+  // 2024-12-30 (måndag) tillhör vecka 1 2025.
+  assert.equal(isoWeekNumber(new Date(2024, 11, 30)), 1);
+  const week = weekRange(new Date(2026, 8, 9)); // onsdag 9 sep
+  assert.equal(week.start.getDate(), 7); // måndag
+  assert.equal(week.end.getDate(), 13); // söndag
+  assert.equal(week.start.getDay(), 1);
+});
+
+test('dateRangesOverlap is inclusive on whole days', () => {
+  const a = { start: new Date(2026, 0, 1), end: new Date(2026, 0, 10) };
+  const b = { start: new Date(2026, 0, 10, 15), end: new Date(2026, 0, 20) };
+  const c = { start: new Date(2026, 0, 11), end: new Date(2026, 0, 20) };
+  assert.equal(dateRangesOverlap(a, b), true);
+  assert.equal(dateRangesOverlap(a, c), false);
+});
+
+test('buildAnnualWheelAgenda buckets ongoing / this week / upcoming', () => {
+  const today = new Date(2026, 8, 9); // onsdag 9 sep, vecka 37 (7–13 sep)
+  const items: AnnualWheelItem[] = [
+    item({ id: 'kampanj', title: 'Kampanj', month: 9, day: 1, end_month: 10, end_day: 15, year: 2026 }),
+    item({ id: 'idag', title: 'Idag', month: 9, day: 9, year: 2026 }),
+    item({ id: 'fredag', title: 'Fredag', month: 9, day: 11, year: 2026 }),
+    item({ id: 'snart', title: 'Snart', month: 9, day: 25, year: 2026 }),
+    item({ id: 'sent', title: 'Sent', month: 11, day: 1, year: 2026 }),
+    item({ id: 'passerat', title: 'Passerat', month: 9, day: 2, year: 2026 }),
+    item({ id: 'helar', title: 'Helår', month: null, year: 2026 })
+  ];
+  const agenda = buildAnnualWheelAgenda(items, today, 30);
+  assert.deepEqual(agenda.ongoing.map((i) => i.id), ['kampanj', 'idag']);
+  assert.deepEqual(agenda.thisWeek.map((i) => i.id), ['fredag']);
+  assert.deepEqual(agenda.upcoming.map((i) => i.id), ['snart']);
 });
