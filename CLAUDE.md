@@ -3994,6 +3994,24 @@ på skärm och projektor.
   flex/grid kollapsade till 0 och gjorde hjulet osynligt på projektorn.
 - Riskklass n/a (ren presentation av redan synlig data, ingen AI).
 
+**Period (kvartal/månad) + sortering (2026-09).** Hjulets kvartalsring är
+klickbar precis som månadsringen: markera **Q4** så lyfts kvartalet och dess
+tre månader i hjulet, övriga band tonas ned (`focusIds`), "Per månad"-listan
+visar bara okt–dec och verksamhetstabellen bara de raderna. Samma state
+(`AnnualWheelPeriodKey` = `all` | `q1`–`q4` | `m1`–`m12`) styrs av
+Period-väljaren i filterraden, kvartals-chipsen (med antal) och klick i
+hjulet — att klicka det redan valda kvartalet/månaden släpper markeringen
+(`toggleAnnualWheelPeriod`). En kampanj matchar en period om NÅGON av dess
+månader ligger i den (`itemInAnnualWheelPeriod`, samma regel som tabellen);
+odaterade poster listas oförändrat som helårsaktiviteter. Sortering-väljaren
+(`AnnualWheelSort` = `date` | `category` | `tag` | `title`) styr ordningen i
+listor OCH tabellceller: **datum är default** (hela månaden före dagsatta,
+sedan dag, sedan titel), kategori följer legend-ordningen (raderade sist),
+tagg följer taxonomin — alla med datum som sekundär ordning
+(`compareAnnualWheelItems`/`sortAnnualWheelItems`, `groupItemsByMonth(items,
+sort, categoryOrder)`). All logik är ren och enhetstestad i
+`@platform/shared`; ingen ny dataväg, inga nya fält, riskklass n/a.
+
 **Redigeringsdialogen** (`EditorModal`) är sektionsindelad (*Vad / När /
 Taggar*) med klistrad topp- och bottenrad; period och upprepning är
 hopfällda `ToggleRow`-switchar som visar fälten först när de slås på, så

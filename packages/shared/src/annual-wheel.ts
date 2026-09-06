@@ -598,15 +598,25 @@ export interface AnnualWheelFilter {
   tag?: AnnualWheelTag | 'all' | 'none';
   /** Users-id, `none` = bara poster utan ansvarig. */
   responsible?: string | 'all' | 'none';
+  /**
+   * Period: ett kvartal (`q1`–`q4`) eller en månad (`m1`–`m12`). `all` =
+   * hela året. En period (kampanj) matchar om NÅGON av dess månader ligger i
+   * perioden; odaterade poster (month = null) matchar bara `all`.
+   */
+  period?: AnnualWheelPeriodKey;
 }
 
-/** Filtrerar poster på år, kategori, tagg och ansvarig (kombinerbara filter). */
+/**
+ * Filtrerar poster på år, kategori, tagg, ansvarig och period (kombinerbara
+ * filter).
+ */
 export function filterAnnualWheelItems(
   items: readonly AnnualWheelItem[],
   filter: AnnualWheelFilter = {}
 ): AnnualWheelItem[] {
   return items.filter((it) => {
     if (typeof filter.year === 'number' && it.year !== filter.year) return false;
+    if (filter.period && !itemInAnnualWheelPeriod(it, filter.period)) return false;
     if (filter.category && filter.category !== 'all' && it.category !== filter.category) return false;
     if (filter.tag && filter.tag !== 'all') {
       const tags = it.tags ?? [];
@@ -628,6 +638,137 @@ export function filterAnnualWheelItems(
   });
 }
 
+// ─── Period: kvartal / månad (markera Q4 eller en enskild månad) ─────────────
+
+export type AnnualWheelQuarter = 1 | 2 | 3 | 4;
+
+/**
+ * Periodnyckel för filter/fokus: `all` (hela året), `q1`–`q4` (kvartal) eller
+ * `m1`–`m12` (månad). En sträng så den kan sitta direkt i en `<select>` och
+ * i URL:er utan extra mappning.
+ */
+export type AnnualWheelPeriodKey = 'all' | `q${AnnualWheelQuarter}` | `m${number}`;
+
+export const ANNUAL_WHEEL_QUARTERS: readonly AnnualWheelQuarter[] = [1, 2, 3, 4];
+
+/** Månaderna (1-baserade) i ett kvartal; tom lista för ogiltigt kvartal. */
+export function quarterMonths(quarter: number): number[] {
+  const q = Math.trunc(quarter);
+  if (q < 1 || q > 4) return [];
+  const first = (q - 1) * 3 + 1;
+  return [first, first + 1, first + 2];
+}
+
+/** Kort kvartalsetikett: "Q4 · okt–dec". */
+export function annualWheelQuarterLabel(quarter: number): string {
+  const months = quarterMonths(quarter);
+  if (months.length === 0) return '';
+  const a = MONTHS_SHORT_SV[months[0] - 1].toLowerCase();
+  const b = MONTHS_SHORT_SV[months[2] - 1].toLowerCase();
+  return `Q${Math.trunc(quarter)} · ${a}–${b}`;
+}
+
+/** Periodnyckel för ett kvartal (1–4). */
+export function quarterPeriodKey(quarter: number): AnnualWheelPeriodKey {
+  const q = Math.min(4, Math.max(1, Math.trunc(quarter))) as AnnualWheelQuarter;
+  return `q${q}`;
+}
+
+/** Periodnyckel för en månad (1–12). */
+export function monthPeriodKey(month: number): AnnualWheelPeriodKey {
+  const m = sanitizeMonth(month);
+  return m === null ? 'all' : (`m${m}` as AnnualWheelPeriodKey);
+}
+
+/**
+ * Tolkar ett inkommande värde (select, URL, chatt) till en giltig periodnyckel.
+ * Allt som inte är `q1`–`q4` / `m1`–`m12` blir `all` — ett ogiltigt filter
+ * ska visa allt, inte tomt.
+ */
+export function parseAnnualWheelPeriod(value: unknown): AnnualWheelPeriodKey {
+  if (typeof value !== 'string') return 'all';
+  const v = value.trim().toLowerCase();
+  const q = /^q([1-4])$/.exec(v);
+  if (q) return `q${Number(q[1]) as AnnualWheelQuarter}`;
+  const m = /^m(\d{1,2})$/.exec(v);
+  if (m) {
+    const month = sanitizeMonth(Number(m[1]));
+    if (month !== null) return `m${month}` as AnnualWheelPeriodKey;
+  }
+  return 'all';
+}
+
+/** Kvartalet (1–4) en periodnyckel avser, annars null. */
+export function periodQuarter(key: AnnualWheelPeriodKey): AnnualWheelQuarter | null {
+  const q = /^q([1-4])$/.exec(key);
+  return q ? (Number(q[1]) as AnnualWheelQuarter) : null;
+}
+
+/** Månaden (1–12) en periodnyckel avser, annars null. */
+export function periodMonth(key: AnnualWheelPeriodKey): number | null {
+  const m = /^m(\d{1,2})$/.exec(key);
+  return m ? sanitizeMonth(Number(m[1])) : null;
+}
+
+/** Månaderna (1-baserade) en periodnyckel täcker; `all` → alla tolv. */
+export function monthsInAnnualWheelPeriod(key: AnnualWheelPeriodKey): number[] {
+  const q = periodQuarter(key);
+  if (q !== null) return quarterMonths(q);
+  const m = periodMonth(key);
+  if (m !== null) return [m];
+  return Array.from({ length: 12 }, (_, i) => i + 1);
+}
+
+/** Läsbar etikett: "Hela året", "Q4 · okt–dec" eller "Oktober". */
+export function annualWheelPeriodLabel(key: AnnualWheelPeriodKey): string {
+  const q = periodQuarter(key);
+  if (q !== null) return annualWheelQuarterLabel(q);
+  const m = periodMonth(key);
+  if (m !== null) return monthLongLabel(m);
+  return 'Hela året';
+}
+
+/**
+ * Ligger posten i perioden? En kampanj matchar om NÅGON av dess månader gör
+ * det (samma regel som tabellen: en period syns i varje månad den löper).
+ * Odaterade poster (month = null) matchar bara `all` — de listas separat som
+ * helårsaktiviteter.
+ */
+export function itemInAnnualWheelPeriod(
+  item: Pick<AnnualWheelItem, 'month' | 'day' | 'end_month' | 'end_day'>,
+  key: AnnualWheelPeriodKey
+): boolean {
+  if (key === 'all') return true;
+  const wanted = new Set(monthsInAnnualWheelPeriod(key));
+  return monthsForAnnualWheelItem(item).some((m) => wanted.has(m));
+}
+
+/**
+ * Växlar en period: att välja den redan valda perioden igen släpper den
+ * (`all`) — samma klick-beteende för kvartal som för månad i hjulet.
+ */
+export function toggleAnnualWheelPeriod(
+  current: AnnualWheelPeriodKey,
+  next: AnnualWheelPeriodKey
+): AnnualWheelPeriodKey {
+  return current === next ? 'all' : next;
+}
+
+// ─── Sortering (datum / kategori / tagg / titel) ─────────────────────────────
+
+export type AnnualWheelSort = 'date' | 'category' | 'tag' | 'title';
+
+export const ANNUAL_WHEEL_SORTS: readonly { id: AnnualWheelSort; label: string }[] = [
+  { id: 'date', label: 'Datum' },
+  { id: 'category', label: 'Kategori' },
+  { id: 'tag', label: 'Tagg' },
+  { id: 'title', label: 'Titel' }
+];
+
+export function isAnnualWheelSort(value: unknown): value is AnnualWheelSort {
+  return typeof value === 'string' && ANNUAL_WHEEL_SORTS.some((s) => s.id === value);
+}
+
 /** Ordningstal för en posts första tagg (otaggade sist) — stabil sortering. */
 function firstTagOrder(item: AnnualWheelItem): number {
   const tags = item.tags ?? [];
@@ -641,23 +782,102 @@ function firstTagOrder(item: AnnualWheelItem): number {
 }
 
 /**
+ * Startdatum som ordningstal (månad × 100 + dag). Hela månaden (dag saknas)
+ * sorteras före dagsatta poster i samma månad; odaterade poster får 0.
+ */
+function startOrder(item: AnnualWheelItem): number {
+  const m = sanitizeMonth(item.month);
+  if (m === null) return 0;
+  return m * 100 + (sanitizeDay(item.day) ?? 0);
+}
+
+/** Slutdatum som ordningstal — punktaktiviteter slutar där de börjar. */
+function endOrder(item: AnnualWheelItem): number {
+  if (!isAnnualWheelPeriod(item)) return startOrder(item);
+  const em = sanitizeMonth(item.end_month) as number;
+  return em * 100 + (sanitizeDay(item.end_day) ?? 31);
+}
+
+function compareByDate(a: AnnualWheelItem, b: AnnualWheelItem): number {
+  const sa = startOrder(a);
+  const sb = startOrder(b);
+  if (sa !== sb) return sa - sb;
+  const ea = endOrder(a);
+  const eb = endOrder(b);
+  if (ea !== eb) return ea - eb;
+  return a.title.localeCompare(b.title, 'sv');
+}
+
+/**
+ * Jämför två poster enligt vald sortering. Alla ordningar faller tillbaka
+ * på datum (och sist titel) så att listan alltid är deterministisk.
+ * `categoryOrder` är tenantens kategorilista (id:n i legend-ordning); okända/
+ * raderade kategorier hamnar sist.
+ */
+export function compareAnnualWheelItems(
+  a: AnnualWheelItem,
+  b: AnnualWheelItem,
+  sort: AnnualWheelSort = 'date',
+  categoryOrder: readonly string[] = []
+): number {
+  switch (sort) {
+    case 'category': {
+      const ia = categoryOrder.indexOf(a.category);
+      const ib = categoryOrder.indexOf(b.category);
+      const ra = ia < 0 ? Number.MAX_SAFE_INTEGER : ia;
+      const rb = ib < 0 ? Number.MAX_SAFE_INTEGER : ib;
+      if (ra !== rb) return ra - rb;
+      if (ra === Number.MAX_SAFE_INTEGER) {
+        const c = a.category.localeCompare(b.category, 'sv');
+        if (c !== 0) return c;
+      }
+      return compareByDate(a, b);
+    }
+    case 'tag': {
+      const ta = firstTagOrder(a);
+      const tb = firstTagOrder(b);
+      if (ta !== tb) return ta - tb;
+      return compareByDate(a, b);
+    }
+    case 'title': {
+      const c = a.title.localeCompare(b.title, 'sv');
+      if (c !== 0) return c;
+      return compareByDate(a, b);
+    }
+    case 'date':
+    default:
+      return compareByDate(a, b);
+  }
+}
+
+/** Sorterad KOPIA av posterna (stabil, muterar aldrig indata). */
+export function sortAnnualWheelItems(
+  items: readonly AnnualWheelItem[],
+  sort: AnnualWheelSort = 'date',
+  categoryOrder: readonly string[] = []
+): AnnualWheelItem[] {
+  return [...items].sort((a, b) => compareAnnualWheelItems(a, b, sort, categoryOrder));
+}
+
+/**
  * Grupperar poster per 1-baserad månad (1–12). Index 0 i den returnerade
  * arrayen samlar helårs-/odaterade poster (month = null). Inom varje månad
- * sorteras posterna stabilt på tagg-ordning och sedan titel.
+ * sorteras posterna stabilt enligt `sort` — default DATUM (dag i månaden), så
+ * listan alltid ligger i kronologisk ordning; `category`/`tag`/`title` ger
+ * grupperad läsning med datum som sekundär ordning.
  */
-export function groupItemsByMonth(items: readonly AnnualWheelItem[]): AnnualWheelItem[][] {
+export function groupItemsByMonth(
+  items: readonly AnnualWheelItem[],
+  sort: AnnualWheelSort = 'date',
+  categoryOrder: readonly string[] = []
+): AnnualWheelItem[][] {
   const buckets: AnnualWheelItem[][] = Array.from({ length: 13 }, () => []);
   for (const it of items) {
     const m = sanitizeMonth(it.month) ?? 0;
     buckets[m].push(it);
   }
   for (const bucket of buckets) {
-    bucket.sort((a, b) => {
-      const ta = firstTagOrder(a);
-      const tb = firstTagOrder(b);
-      if (ta !== tb) return ta - tb;
-      return a.title.localeCompare(b.title, 'sv');
-    });
+    bucket.sort((a, b) => compareAnnualWheelItems(a, b, sort, categoryOrder));
   }
   return buckets;
 }
@@ -727,12 +947,15 @@ export interface AnnualWheelTableRow {
  */
 export function buildAnnualWheelTable(
   items: readonly AnnualWheelItem[],
-  tags: readonly AnnualWheelTag[] = ANNUAL_WHEEL_TAG_IDS
+  tags: readonly AnnualWheelTag[] = ANNUAL_WHEEL_TAG_IDS,
+  sort: AnnualWheelSort = 'date',
+  categoryOrder: readonly string[] = []
 ): AnnualWheelTableRow[] {
   // Perioder (kampanjer) syns i VARJE månad de löper över — tabellen är en
   // kalendervy, inte en räkning. Punktaktiviteter hamnar i sin egen månad.
+  // Cellerna följer samma sortering som listorna (default datum).
   const byMonth: AnnualWheelItem[][] = Array.from({ length: 13 }, () => []);
-  for (const it of items) {
+  for (const it of sortAnnualWheelItems(items, sort, categoryOrder)) {
     for (const m of monthsForAnnualWheelItem(it)) byMonth[m].push(it);
   }
   const rows: AnnualWheelTableRow[] = [];
