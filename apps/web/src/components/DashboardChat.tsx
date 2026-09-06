@@ -22,6 +22,12 @@ import { isStaleDeploymentError, STALE_DEPLOYMENT_MESSAGE } from '@/lib/action-e
 import { Icon } from '@/components/proto/Icon';
 import VoiceInputButton from '@/components/VoiceInputButton';
 import ChatHelpGuide from '@/components/ChatHelpGuide';
+import {
+  AVAILABLE_MODELS,
+  isAllowedModel,
+  modelCostTier,
+  modelSupportsVision
+} from '@/lib/ai/models';
 import type { Role } from '@platform/shared';
 import { chatMarkdownToHtml } from '@/lib/safe-html';
 
@@ -64,6 +70,8 @@ export interface UiMessage {
   steps?: AgentActivityStep[];
   /** Turens tokens (in + ut) → inline token-/miljöchip under svaret. */
   tokens?: number;
+  /** Modellen som faktiskt svarade (per-turn-metadata, transparens art. 13). */
+  model?: string;
   /** Agenten väntar på Godkänn/Avbryt inför en kritisk åtgärd (§ 33). */
   approval_request?: ApprovalRequestRef;
   /** Agenten har förberett mötesläget (§ 34) — "Starta mötet"-kort. */
@@ -82,6 +90,167 @@ export interface LiveStep {
 export interface QueuedItem {
   id: string;
   content: string;
+}
+
+/** Visningsnamn för en modell — registrerade modeller får sin etikett, övriga visas med rått id. */
+function modelLabel(id: string | undefined): string {
+  if (!id) return '';
+  return AVAILABLE_MODELS.find((m) => m.id === id)?.label ?? id;
+}
+
+const AUTO_MODEL_RECOMMENDATION =
+  'Väljer själv efter frågan: Small för enkla uppslag, Medium för sammanställningar, Large för analys och rapporter.';
+
+/**
+ * Modellväljare i komposern (§ 9.9). "Auto" låter `model-router` välja efter
+ * frågans komplexitet; ett uttryckligt val blir startmodell (kedjan faller
+ * ändå över vid kapacitetstak). Modeller + rekommendationer kommer från
+ * registret i lib/ai/models.ts — aldrig inline. Menyn öppnas uppåt eftersom
+ * komposern ligger i botten av vyn.
+ */
+function ModelPicker({
+  value,
+  hasImages,
+  onChange
+}: {
+  value: string;
+  hasImages: boolean;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const current = AVAILABLE_MODELS.find((m) => m.id === value);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  function pick(id: string) {
+    onChange(id);
+    setOpen(false);
+  }
+
+  const optionBase =
+    'flex w-full items-start gap-3 px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-40';
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium transition ${
+          current
+            ? 'bg-movexum-pastell-lila text-movexum-morklila'
+            : 'border border-default text-foreground-subtle hover:border-strong hover:text-foreground'
+        }`}
+        title={
+          current
+            ? `Modell: ${current.label} — ${current.recommendation}`
+            : `Modell: Auto — ${AUTO_MODEL_RECOMMENDATION}`
+        }
+      >
+        <Icon name="zap" size={12} />
+        {current ? current.label : 'Auto'}
+        <Icon name="chevdown" size={10} className={`transition ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Välj AI-modell"
+          className="absolute bottom-full left-0 z-20 mb-2 w-[300px] overflow-hidden rounded-2xl border border-default bg-surface py-1 shadow-lg shadow-movexum-svart/10"
+        >
+          <p className="px-3 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
+            Modell för nästa svar
+          </p>
+          <button
+            type="button"
+            role="option"
+            aria-selected={!current}
+            onClick={() => pick('')}
+            className={`${optionBase} ${!current ? 'bg-canvas-muted' : 'hover:bg-canvas-subtle'}`}
+          >
+            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-movexum-pastell-lila text-movexum-morklila">
+              <Icon name="sparkle" size={12} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2 text-[13px] font-medium text-foreground">
+                Auto
+                <span className="rounded-full bg-movexum-pastell-gron px-1.5 py-px text-[10px] font-semibold text-movexum-morkgron">
+                  Rekommenderas
+                </span>
+              </span>
+              <span className="block text-[11.5px] leading-snug text-foreground-subtle">
+                {AUTO_MODEL_RECOMMENDATION}
+              </span>
+            </span>
+            {!current && <Icon name="check" size={13} className="mt-1 shrink-0 text-movexum-morklila" />}
+          </button>
+          <div className="my-1 border-t border-default" />
+          {AVAILABLE_MODELS.map((m) => {
+            const selected = m.id === value;
+            const noVision = hasImages && !m.supportsVision;
+            const tier = modelCostTier(m);
+            return (
+              <button
+                key={m.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                disabled={noVision}
+                onClick={() => pick(m.id)}
+                className={`${optionBase} ${selected ? 'bg-canvas-muted' : 'hover:bg-canvas-subtle'}`}
+                title={noVision ? 'Stödjer inte bilder — ta bort bilden eller välj en vision-modell' : undefined}
+              >
+                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-movexum-pastell-bla text-movexum-djupbla">
+                  <Icon name={m.supportsVision ? 'image' : 'bolt'} size={12} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2 text-[13px] font-medium text-foreground">
+                    {m.label}
+                    <span
+                      className="text-[10.5px] font-semibold tracking-wide text-foreground-subtle"
+                      title={`Kostnadsnivå ${tier} av 3 · $${m.priceInPerMillion.toFixed(2)}/$${m.priceOutPerMillion.toFixed(2)} per 1M tokens (in/ut)`}
+                    >
+                      {'€'.repeat(tier)}
+                      <span className="opacity-30">{'€'.repeat(3 - tier)}</span>
+                    </span>
+                    {m.supportsVision && (
+                      <span className="rounded-full bg-movexum-pastell-bla px-1.5 py-px text-[10px] font-semibold text-movexum-djupbla">
+                        Bilder
+                      </span>
+                    )}
+                  </span>
+                  <span className="block text-[11.5px] leading-snug text-foreground-subtle">
+                    {noVision ? 'Stödjer inte bilder.' : m.recommendation}
+                  </span>
+                </span>
+                {selected && <Icon name="check" size={13} className="mt-1 shrink-0 text-movexum-morklila" />}
+              </button>
+            );
+          })}
+          <p className="border-t border-default px-3 pb-1.5 pt-2 text-[10.5px] leading-snug text-foreground-subtle">
+            Alla modeller körs hos Mistral (EU). Är modellen överbelastad faller chatten
+            automatiskt över till nästa.
+          </p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Kompakt aktivitetsspår ("Läser bolagen", "Skapar PowerPoint"). Visas
@@ -358,9 +527,11 @@ interface Props {
   isPending: boolean;
   error: string | null;
   activeAgent: DashboardAgent | null;
-  // Djupt jobb (kontrolleras av ChattWorkspace)
-  deepRunning?: boolean;
-  deepProgress?: number;
+  // Modellval (§ 9.9): '' = automatiskt efter frågans komplexitet, annars ett
+  // registrerat modell-id från lib/ai/models.ts. Ägs av ChattWorkspace så att
+  // ÄVEN Godkänn-/mötesturer följer valet.
+  model?: string;
+  onModelChange?: (model: string) => void;
   // Live-aktivitetsspår för den pågående turen (streaming).
   liveSteps?: LiveStep[];
   // Svaret medan det strömmas in token-för-token (löpande utskrift).
@@ -373,7 +544,7 @@ interface Props {
   onReset: () => void;
   onSubmit: (
     text: string,
-    opts: { includeWebContext: boolean; attachments: ChatAttachment[]; deepJob: boolean }
+    opts: { includeWebContext: boolean; attachments: ChatAttachment[] }
   ) => void;
   onDownload: (file: GeneratedFileRef) => void;
   // Ta bort ett ännu icke-körat köat meddelande.
@@ -411,8 +582,8 @@ export default function DashboardChat({
   isPending,
   error,
   activeAgent,
-  deepRunning = false,
-  deepProgress = 0,
+  model = '',
+  onModelChange,
   liveSteps = [],
   liveText = '',
   queued = [],
@@ -430,7 +601,6 @@ export default function DashboardChat({
   // Hjälp-guiden ("Vad kan chatten göra?") — rollspecifik, § 33.3.
   const [showGuide, setShowGuide] = useState(false);
   const [includeWebContext, setIncludeWebContext] = useState(false);
-  const [deepMode, setDeepMode] = useState(false);
   const [showAssistants, setShowAssistants] = useState(false);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -461,6 +631,10 @@ export default function DashboardChat({
 
   const isActive = messages.length > 0 || isPending;
   const shownError = localError || error;
+  // Bara registrerade modell-id:n räknas som ett val (t.ex. ett gammalt
+  // localStorage-värde efter att registret ändrats → Auto).
+  const selectedModel = isAllowedModel(model) ? model : '';
+  const hasImageAttachment = attachments.some((a) => a.kind === 'image');
 
   function autoGrow() {
     const el = inputRef.current;
@@ -616,20 +790,6 @@ export default function DashboardChat({
     setAttachments((prev) => prev.filter((a) => a.uid !== uid));
   }
 
-  function toggleDeepMode() {
-    setDeepMode((v) => {
-      const next = !v;
-      // Djupa jobb tar bara en instruktion — bilagor/webbkällor gäller inte.
-      if (next) {
-        setAttachments([]);
-        setIncludeWebContext(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-        if (imageInputRef.current) imageInputRef.current.value = '';
-      }
-      return next;
-    });
-  }
-
   /**
    * Röstinmatning (§ 31): transkriptet läggs i rutan i stället för att skickas
    * automatiskt, så att människan läser igenom och skickar själv
@@ -645,8 +805,15 @@ export default function DashboardChat({
 
   function submit() {
     const text = input.trim();
-    // Djupt jobb kräver en instruktion (text); annars krävs text eller bilaga.
-    if (deepMode ? !text : !text && attachments.length === 0) return;
+    if (!text && attachments.length === 0) return;
+    // Bilder + vald modell utan vision → stoppa här med tydligt fel (servern
+    // avvisar också, § 9.9 — aldrig tyst fallback).
+    if (hasImageAttachment && selectedModel && !modelSupportsVision(selectedModel)) {
+      setLocalError(
+        `${modelLabel(selectedModel)} stödjer inte bilder. Välj Mistral Medium, Pixtral Large eller Auto.`
+      );
+      return;
+    }
     // Medan en turn körs blockerar vi INTE — ChattWorkspace köar meddelandet
     // och kör det när den pågående turen är klar (löpande feedback). Bilagor
     // hör till just det köade meddelandet.
@@ -654,22 +821,18 @@ export default function DashboardChat({
     setLocalError(null);
     // Användaren skickade aktivt → hoppa till botten så det egna meddelandet syns.
     setStickToBottom(true);
-    const sentAttachments: ChatAttachment[] = deepMode
-      ? []
-      : attachments.map((a) => ({
-          name: a.name,
-          mime: a.mime,
-          kind: a.kind,
-          text: a.text,
-          dataUrl: a.dataUrl
-        }));
-    const wasDeep = deepMode;
+    const sentAttachments: ChatAttachment[] = attachments.map((a) => ({
+      name: a.name,
+      mime: a.mime,
+      kind: a.kind,
+      text: a.text,
+      dataUrl: a.dataUrl
+    }));
     setInput('');
     setAttachments([]);
-    setDeepMode(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (imageInputRef.current) imageInputRef.current.value = '';
-    onSubmit(text, { includeWebContext, attachments: sentAttachments, deepJob: wasDeep });
+    onSubmit(text, { includeWebContext, attachments: sentAttachments });
   }
 
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -682,27 +845,12 @@ export default function DashboardChat({
   // Går att skicka även medan en turn körs (meddelandet köas då). Vi blockerar
   // bara medan en bilaga fortfarande läses in.
   const canSubmit =
-    !isProcessingFiles &&
-    (deepMode ? input.trim().length > 0 : input.trim().length > 0 || attachments.length > 0);
+    !isProcessingFiles && (input.trim().length > 0 || attachments.length > 0);
   // Om en turn redan kör (eller det finns kö) hamnar nästa meddelande i kön.
   const willQueue = isPending || queued.length > 0;
 
   const inputPill = (
     <div className="rounded-2xl border border-default bg-surface px-4 py-3 shadow-sm shadow-movexum-svart/5 transition focus-within:border-strong focus-within:ring-2 focus-within:ring-movexum-pastell-lila dark:focus-within:ring-movexum-morklila">
-      {deepRunning && (
-        <div className="mb-2 rounded-xl bg-movexum-pastell-lila px-3 py-2">
-          <div className="flex items-center justify-between text-[12px] font-medium text-movexum-morklila">
-            <span className="inline-flex items-center gap-1.5">
-              <Icon name="sparkle" size={12} />
-              Djupdykning pågår — planerar, hämtar data och sammanställer ett utkast…
-            </span>
-            <span>{deepProgress}%</span>
-          </div>
-          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-canvas-muted">
-            <div className="h-full bg-movexum-lila transition-all" style={{ width: `${deepProgress}%` }} />
-          </div>
-        </div>
-      )}
       {attachments.length > 0 && (
         <ul className="mb-2 flex flex-wrap gap-2">
           {attachments.map((a) => (
@@ -739,13 +887,11 @@ export default function DashboardChat({
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKey}
         placeholder={
-          deepMode
-            ? 'Beskriv vad djupdykningen ska göra (planeras och körs i flera steg)…'
-            : willQueue
-              ? 'Skriv ett meddelande — det köas och körs när det pågående svaret är klart…'
-              : activeAgent
-                ? `Fråga ${activeAgent.name}…`
-                : 'Fråga om portföljen, ett bolag eller en aktivitet…'
+          willQueue
+            ? 'Skriv ett meddelande — det köas och körs när det pågående svaret är klart…'
+            : activeAgent
+              ? `Fråga ${activeAgent.name}…`
+              : 'Fråga om portföljen, ett bolag eller en aktivitet…'
         }
         rows={1}
         className="block w-full resize-none bg-transparent text-[15px] leading-6 text-foreground placeholder:text-foreground-subtle focus:outline-none disabled:opacity-50"
@@ -797,7 +943,7 @@ export default function DashboardChat({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isProcessingFiles || deepMode || attachments.length >= MAX_ATTACHMENTS}
+            disabled={isProcessingFiles || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title={`Bifoga fil (PNG, JPG, WebP, PDF, XLSX, TXT, MD, CSV · max ${MAX_ATTACHMENTS} filer · 10 MB/fil)`}
             aria-label="Bifoga fil"
@@ -810,7 +956,7 @@ export default function DashboardChat({
           <button
             type="button"
             onClick={() => imageInputRef.current?.click()}
-            disabled={deepMode || attachments.length >= MAX_ATTACHMENTS}
+            disabled={attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title={`Bifoga bild (PNG, JPG, WebP · max ${MAX_ATTACHMENTS} bilagor · 10 MB/fil)`}
             aria-label="Bifoga bild"
@@ -821,8 +967,7 @@ export default function DashboardChat({
             type="button"
             onClick={() => setIncludeWebContext((v) => !v)}
             aria-pressed={includeWebContext}
-            disabled={deepMode}
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition ${
               includeWebContext
                 ? 'bg-movexum-pastell-bla text-movexum-djupbla'
                 : 'border border-default text-foreground-subtle hover:text-foreground'
@@ -832,28 +977,16 @@ export default function DashboardChat({
             <Icon name="globe" size={12} />
             Webbkällor
           </button>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={deepMode}
-            onClick={toggleDeepMode}
-            disabled={deepRunning}
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
-              deepMode
-                ? 'bg-movexum-lila text-movexum-vit shadow-sm shadow-movexum-svart/10'
-                : 'border border-default text-foreground-subtle hover:border-strong hover:text-foreground'
-            }`}
-            title="Djupdykning: planerar, hämtar data i flera steg och sammanställer ett utkast (ev. dokument) i tråden"
-          >
-            <Icon name="sparkle" size={12} />
-            Djupdykning
-          </button>
+          <ModelPicker
+            value={selectedModel}
+            hasImages={hasImageAttachment}
+            onChange={(id) => onModelChange?.(id)}
+          />
           {onOpenMeeting && (
             <button
               type="button"
               onClick={onOpenMeeting}
-              disabled={deepMode}
-              className="inline-flex items-center gap-1.5 rounded-full border border-default px-3 py-1 text-[12px] font-medium text-foreground-subtle transition hover:border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-full border border-default px-3 py-1 text-[12px] font-medium text-foreground-subtle transition hover:border-strong hover:text-foreground"
               title="Mötesläge: spela in ett möte, få allt transkriberat live och spara protokollet på ett bolagskort"
             >
               <Icon name="mic" size={12} />
@@ -1457,6 +1590,7 @@ export default function DashboardChat({
                           title={`${AI_IMPACT_SOURCE_LABEL}. Uppskattningen tillämpas på turens totala tokens (in + ut) — varje verktygssteg kräver ett eget modellanrop som bearbetar hela kontexten igen.`}
                         >
                           {formatTokens(msg.tokens)} tokens · {formatAiImpact(msg.tokens)}
+                          {msg.model ? ` · ${modelLabel(msg.model)}` : ''}
                         </p>
                       )}
                     </div>

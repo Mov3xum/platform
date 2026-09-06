@@ -11,6 +11,8 @@ export interface ModelMeta {
   priceInPerMillion: number; // USD per 1M input tokens
   priceOutPerMillion: number; // USD per 1M output tokens
   blurb: string;
+  /** Kort rekommendation ("använd till …") — visas i chattens modellväljare (§ 9.9). */
+  recommendation: string;
 }
 
 export const AVAILABLE_MODELS: ModelMeta[] = [
@@ -21,7 +23,8 @@ export const AVAILABLE_MODELS: ModelMeta[] = [
     supportsBuiltinTools: true,
     priceInPerMillion: 2.0,
     priceOutPerMillion: 6.0,
-    blurb: 'Djup analys, högst kvalitet'
+    blurb: 'Djup analys, högst kvalitet',
+    recommendation: 'Analyser, rapporter och dokument där kvaliteten avgör.'
   },
   {
     id: 'mistral-medium-latest',
@@ -30,7 +33,8 @@ export const AVAILABLE_MODELS: ModelMeta[] = [
     supportsBuiltinTools: true,
     priceInPerMillion: 0.4,
     priceOutPerMillion: 1.2,
-    blurb: 'Balans — multimodal'
+    blurb: 'Balans — multimodal',
+    recommendation: 'Vardagsfrågor, sammanställningar och bilder — bra balans.'
   },
   {
     id: 'mistral-small-latest',
@@ -39,7 +43,8 @@ export const AVAILABLE_MODELS: ModelMeta[] = [
     supportsBuiltinTools: false,
     priceInPerMillion: 0.1,
     priceOutPerMillion: 0.3,
-    blurb: 'Snabb och billig'
+    blurb: 'Snabb och billig',
+    recommendation: 'Snabba uppslag och enkla frågor till lägst kostnad.'
   },
   {
     id: 'pixtral-large-latest',
@@ -48,9 +53,17 @@ export const AVAILABLE_MODELS: ModelMeta[] = [
     supportsBuiltinTools: false,
     priceInPerMillion: 2.0,
     priceOutPerMillion: 6.0,
-    blurb: 'Vision-specialist'
+    blurb: 'Vision-specialist',
+    recommendation: 'Skärmdumpar, foton och skannade underlag som ska tolkas.'
   }
 ];
+
+/** Kostnadsnivå 1–3 utifrån inpriset — för kompakt visning ("€", "€€", "€€€"). */
+export function modelCostTier(m: Pick<ModelMeta, 'priceInPerMillion'>): 1 | 2 | 3 {
+  if (m.priceInPerMillion >= 1.5) return 3;
+  if (m.priceInPerMillion >= 0.3) return 2;
+  return 1;
+}
 
 export const DEFAULT_MODEL: ToolModel = 'mistral-medium-latest';
 

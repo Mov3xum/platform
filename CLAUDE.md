@@ -648,6 +648,22 @@ Idag: `mistral-large-latest`, `mistral-medium-latest`,
 **Medium** och **Pixtral**. Lägg aldrig till modeller inline i UI —
 extend registret istället.
 
+**Modellval i dashboardchatten (`/chatt`, 2026-09).** Komposern har en
+modellväljare (⚡-chip, `DashboardChat.tsx`) med **Auto** + registrets
+modeller. Auto = befintlig komplexitets-routing (`lib/ai/model-router.ts`,
+§ 26.5). Ett uttryckligt val skickas som `model` i `/api/chat/stream`
+(och i `sendThreadMessageAction`-fallbacken), valideras server-side mot
+registret (`isAllowedModel`, okänt id → 400/fel — aldrig tyst ignorerat)
+och blir **startmodell** i `routeChatModels({ preferredModel })`; resten av
+tier-kedjan behålls som fallback vid 429/5xx så chatten inte dör när en
+modell är överbelastad. Bilder + vald modell utan vision → tydligt fel i
+både klient och server (ingen tyst fallback, samma princip som toolbox).
+Valet sparas per webbläsare i `localStorage` (`movexum-chat-model`,
+bekvämlighet — ingen datakälla) och ägs av `ChattWorkspace` så att även
+Godkänn-/mötesturer följer det. Modellen som faktiskt svarade visas under
+varje svar (per-turn `model`, transparens art. 13). Ingen ny dataväg, ingen
+ny leverantör, riskklass oförändrad.
+
 **Bilagor.** Whitelistade mime-types: PNG, JPG, WebP, PDF, TXT, MD,
 CSV. Max 5 filer/turn, 10 MB/fil. PDF/text extraheras server-side
 (`apps/web/src/lib/ai/attachments.ts`) och cappas till 50 KB/fil samt
@@ -1843,9 +1859,13 @@ per aktiv trigger — aktivera triggers med det i åtanke (kostnad).
 `/chatt` är nu en persistent arbetsyta i stället för en efemär chatt. Varje
 konversation sparas och kan tas upp igen, agenter kan ta fram nedladdningsbara
 dokument (PPTX/XLSX/DOCX/PDF), genererade filer landar i en personlig
-**Filer**-yta (`/filer`), och längre uppgifter kan köras som **djupa jobb**
-(planera → fan-out av read-only sub-körningar → utkast). Cross-session-minnet
-(`agent_memory`, §16.4) är inkopplat i trådchatten.
+**Filer**-yta (`/filer`). Cross-session-minnet (`agent_memory`, §16.4) är
+inkopplat i trådchatten. **Djupdykning är borttagen ur chatten (2026-09):**
+"Djupdykning"-chippen, djupjobbs-pollningen och progress-bannern finns inte
+längre i `ChattWorkspace`/`DashboardChat`; komposern har i stället en
+modellväljare (§ 9.9). Djupjobbs-stacken (`lib/deep-jobs/`, `lib/actions/
+deep-jobs.ts`, kollektionen `deep_jobs`) ligger kvar vilande (RBAC-skyddad,
+ingen UI-väg) — ta bort eller återaktivera medvetet i en egen PR.
 
 **Kritiska filer:**
 
@@ -1856,12 +1876,12 @@ dokument (PPTX/XLSX/DOCX/PDF), genererade filer landar i en personlig
 | `apps/web/src/lib/ai/thread-turn.ts` | Delad turn-/persistenskärna (`executeThreadTurn` + `loadOwnedThread`) — streaming-endpoint OCH server-action-fallback delar den |
 | `apps/web/src/lib/actions/chat-threads.ts` | CRUD + `sendThreadMessageAction` (icke-streamande fallback) |
 | `apps/web/src/app/api/chat/stream/route.ts` | Streamande chatt-turn (NDJSON) — strömmar agentens verktygssteg live |
-| `apps/web/src/app/chatt/ChattWorkspace.tsx` | Trådsidebar + chatt + djupjobb-kontroll + streaming-klient (client) |
+| `apps/web/src/app/chatt/ChattWorkspace.tsx` | Trådsidebar + chatt + modellval + streaming-klient (client) |
 | `apps/web/src/lib/documents/` | Dokumentlager: `types`, `validate`, `brand`, `render-{pptx,xlsx,docx,pdf}`, `index`, `save` |
 | `apps/web/src/lib/actions/files.ts` | Filer-actions (lista/ladda ned/döp om/radera/ladda upp) |
 | `apps/web/src/app/filer/` | Personlig Filer-yta |
 | `apps/web/src/lib/deep-jobs/{planner,runner}.ts` | Djupjobb-planerare + orkestrator |
-| `apps/web/src/lib/actions/deep-jobs.ts` | Starta/avbryt/status för djupa jobb |
+| `apps/web/src/lib/actions/deep-jobs.ts` | Starta/avbryt/status för djupa jobb (vilande — ingen UI-väg sedan 2026-09) |
 
 ### 17.2 Datamodell (nya kollektioner)
 
@@ -1943,7 +1963,7 @@ ska komma från `query_collection`-svar i samma konversation. Verktyget
   maskning i `schema.ts` gäller uppströms). Preview-etiketterna härleds ur
   samma spec. Riskklass oförändrad (begränsad, § 17.5).
 
-### 17.4 Djupa jobb / subagenter
+### 17.4 Djupa jobb / subagenter (vilande sedan 2026-09 — ej exponerat i chatten)
 
 `startDeepJobAction` skapar ett `deep_jobs` och kör `runDeepJob` i bakgrunden
 (samma persistenta Node-server — ingen HTTP-hop behövs för en
@@ -2008,7 +2028,8 @@ PowerPoint"). Stegen persisteras dessutom PII-fritt på assistant-meddelandet
 - **Ärlig agent:** `STAFF_TOOL_GUIDANCE` (i `staff-chat.ts` och `chat.ts`)
   förbjuder uttryckligen att lova bakgrundsarbete ("strax", "i bakgrunden",
   "återkom om en stund") — turen är synkron, så ett dokument måste skapas via
-  `generate_document` i samma svar, annars hänvisas till Djupdykning.
+  `generate_document` i samma svar, annars sägs det rakt ut och användaren
+  ombeds dela upp uppgiften i flera turer.
 - **Riskklass:** oförändrad (ingen ny AI-funktion — bara transparens om
   befintliga verktygsanrop, EU AI Act art. 13/50).
 

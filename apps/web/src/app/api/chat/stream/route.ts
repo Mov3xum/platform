@@ -7,6 +7,7 @@ import {
   friendlyThreadError
 } from '@/lib/ai/thread-turn';
 import type { ChatAttachment } from '@/lib/ai/chat-input';
+import { isAllowedModel } from '@/lib/ai/models';
 import type { ChatThread, Role } from '@platform/shared';
 
 // Streamande chatt-turn för /chatt. Kör samma delade turn-/persistenslogik
@@ -43,6 +44,7 @@ export async function POST(req: Request): Promise<Response> {
     text?: unknown;
     includeWebContext?: unknown;
     attachments?: unknown;
+    model?: unknown;
   };
   try {
     body = (await req.json()) as typeof body;
@@ -53,6 +55,12 @@ export async function POST(req: Request): Promise<Response> {
   const threadId = typeof body.threadId === 'string' ? body.threadId.trim() : '';
   const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : '';
   const text = typeof body.text === 'string' ? body.text : '';
+
+  // Modellval (§ 9.9): tomt = automatiskt; annat än registrerade modeller
+  // avvisas (input-validering § 10.5 p. 7) i stället för att tyst ignoreras.
+  const rawModel = typeof body.model === 'string' ? body.model.trim() : '';
+  if (rawModel && !isAllowedModel(rawModel)) return jsonError('Okänd modell.', 400);
+  const model = rawModel || undefined;
 
   const includeWebContext = body.includeWebContext === true;
   const attachments = Array.isArray(body.attachments)
@@ -98,6 +106,7 @@ export async function POST(req: Request): Promise<Response> {
         const result = await executeThreadTurn(pb, user, thread, text, {
           includeWebContext,
           attachments,
+          model,
           onStep: (step) => send({ type: 'step', ...step }),
           onToken: (delta) => send({ type: 'token', delta })
         });

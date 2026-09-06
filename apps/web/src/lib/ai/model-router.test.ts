@@ -52,3 +52,30 @@ test('routeChatModels: textfråga route:ar på komplexitet', () => {
   assert.equal(routeChatModels({ message: 'hej' })[0], 'mistral-small-latest');
   assert.equal(routeChatModels({ message: 'analysera portföljen' })[0], 'mistral-large-latest');
 });
+
+test('routeChatModels: uttryckligt modellval blir startpunkt med kedjan som fallback', () => {
+  const chain = routeChatModels({
+    message: 'analysera portföljens risker',
+    preferredModel: 'mistral-small-latest'
+  });
+  assert.equal(chain[0], 'mistral-small-latest');
+  // Tier-kedjan (large → medium → small) behålls som fallback utan dubbletter.
+  assert.deepEqual(chain, ['mistral-small-latest', 'mistral-large-latest', 'mistral-medium-latest']);
+});
+
+test('routeChatModels: okänt modell-id ignoreras → automatiskt val', () => {
+  assert.deepEqual(
+    routeChatModels({ message: 'hej', preferredModel: 'gpt-4' }),
+    routeChatModels({ message: 'hej' })
+  );
+});
+
+test('routeChatModels: bilder + vald vision-modell → den valda först', () => {
+  const chain = routeChatModels({ hasImages: true, preferredModel: 'pixtral-large-latest' });
+  assert.equal(chain[0], 'pixtral-large-latest');
+  // Vald modell utan vision-stöd får inte tyst bli vision-kedjan här (avvisas
+  // uppströms) — men routern faller ändå säkert till standard-vision.
+  assert.deepEqual(routeChatModels({ hasImages: true, preferredModel: 'mistral-large-latest' }), [
+    'pixtral-12b-2409'
+  ]);
+});

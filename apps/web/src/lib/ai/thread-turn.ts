@@ -31,6 +31,8 @@ export interface ThreadTurnUser {
 export interface ThreadTurnOptions {
   includeWebContext?: boolean;
   attachments?: ChatAttachment[];
+  /** Uttryckligt modellval från chatten (tomt = automatiskt, § 9.9). */
+  model?: string;
   /** Live-callback för verktygssteg (forwardas av streaming-endpointen). */
   onStep?: (step: AgentLoopStep) => void;
   /** Live-callback för text-deltan (löpande utskrift, streaming-endpoint). */
@@ -179,6 +181,7 @@ export async function executeThreadTurn(
     ownerUserId: user.id,
     chatThreadId: thread.id,
     surface: 'dashboard_chat',
+    model: options.model,
     onStep,
     onToken: options.onToken
   });

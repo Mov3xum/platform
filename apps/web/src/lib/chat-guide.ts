@@ -68,7 +68,7 @@ const GUIDE: ChatGuideSection[] = [
   },
   {
     id: 'dokument',
-    title: 'Dokument & djupdykning',
+    title: 'Dokument & modellval',
     icon: 'doc',
     items: [
       {
@@ -78,9 +78,9 @@ const GUIDE: ChatGuideSection[] = [
         examples: ['Ta fram en kvartalsrapport som PowerPoint för ett av bolagen']
       },
       {
-        title: 'Djupdykning',
+        title: 'Välj AI-modell',
         description:
-          'Slå på Djupdykning i chattrutan för större uppgifter — den planerar, hämtar data i flera steg och sammanställer ett utkast i tråden.',
+          'Modellväljaren i chattrutan (⚡) låter dig välja Mistral Large, Medium, Small eller Pixtral för nästa svar. Auto väljer själv efter frågans komplexitet. Alla modeller körs hos Mistral (EU) och vilken modell som svarade visas under varje svar.',
         examples: [
           'Jämför de tre mest kapitalintensiva bolagen och sammanställ en styrelserapport'
         ]
