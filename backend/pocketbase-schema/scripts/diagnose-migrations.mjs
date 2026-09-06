@@ -36,6 +36,12 @@ import { fileURLToPath } from 'node:url';
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
 const SU_PASSWORD = process.env.PB_SU_PASSWORD;
+// PB v0.23 rate-limitar auth-endpointen. Denna workflow-jobben hinner redan
+// logga in flera gånger (setup-via-api.mjs, seed-innovationspotential-quiz.mjs)
+// innan diagnose-migrations.mjs/verify-baseline.mjs kör — retry med backoff
+// på 429/5xx håller skriptet i synk med setup-via-api.mjs:s samma mönster.
+const PB_AUTH_RETRY_ATTEMPTS = Number(process.env.PB_AUTH_RETRY_ATTEMPTS || 12);
+const PB_AUTH_RETRY_DELAY_MS = Number(process.env.PB_AUTH_RETRY_DELAY_MS || 5000);
 
 if (!PB_URL_RAW || !SU_EMAIL || !SU_PASSWORD) {
   console.error('Missing env vars. Required: PB_URL, PB_SU_EMAIL, PB_SU_PASSWORD');
@@ -45,6 +51,18 @@ if (!PB_URL_RAW || !SU_EMAIL || !SU_PASSWORD) {
 const log = (...a) => console.log('•', ...a);
 const ok = (...a) => console.log('✓', ...a);
 const warn = (...a) => console.log('!', ...a);
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldRetrySuperuserAuth(err) {
+  const status = Number(err?.status || 0);
+  if ([408, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+
+  const code = String(err?.originalError?.code || err?.cause?.code || '').toUpperCase();
+  return ['ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENOTFOUND', 'ETIMEDOUT'].includes(code);
+}
 
 function normalizePbUrl(raw) {
   let url = String(raw).trim().replace(/\/+$/, '');
@@ -108,10 +126,25 @@ async function main() {
   const pb = new PocketBase(PB_URL);
   pb.autoCancellation(false);
 
-  try {
-    await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
-  } catch (err) {
-    console.error(`✗ Superuser-auth misslyckades för ${SU_EMAIL}: ${err?.message || err}`);
+  let authError = null;
+  for (let attempt = 1; attempt <= PB_AUTH_RETRY_ATTEMPTS; attempt++) {
+    try {
+      await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
+      authError = null;
+      break;
+    } catch (err) {
+      authError = err;
+      const retryable = shouldRetrySuperuserAuth(err);
+      if (!retryable || attempt === PB_AUTH_RETRY_ATTEMPTS) break;
+
+      warn(
+        `superuser-auth misslyckades (försök ${attempt}/${PB_AUTH_RETRY_ATTEMPTS}): ${err?.message || err} — försöker igen om ${PB_AUTH_RETRY_DELAY_MS}ms`
+      );
+      await sleep(PB_AUTH_RETRY_DELAY_MS);
+    }
+  }
+  if (authError) {
+    console.error(`✗ Superuser-auth misslyckades för ${SU_EMAIL}: ${authError?.message || authError}`);
     process.exit(1);
   }
   ok(`Autentiserad som superuser ${SU_EMAIL}`);
