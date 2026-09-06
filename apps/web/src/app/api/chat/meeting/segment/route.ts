@@ -6,6 +6,11 @@ import { logAiUsage } from '@/lib/ai/usage';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import {
+  MEETING_COLLECTION,
+  loadOwnedMeeting,
+  meetingWriteWithFallback
+} from '@/lib/meetings/access';
+import {
   MAX_MEETING_SEGMENTS,
   MAX_VOICE_BYTES,
   normalizeMeetingSegments,
@@ -38,14 +43,6 @@ const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 // marginal för retries men stoppar en skenande klient (kostnadstak, § 10).
 const RATE_WINDOW_MS = 5 * 60 * 1000;
 const RATE_MAX_PER_USER = 40;
-
-interface MeetingRow {
-  id: string;
-  tenant: string;
-  owner: string;
-  status: string;
-  segments?: unknown;
-}
 
 export async function POST(request: Request): Promise<Response> {
   const user = await getCurrentUser();
@@ -92,14 +89,11 @@ export async function POST(request: Request): Promise<Response> {
 
   const pb = await getServerPb();
 
-  // Ägar-verifierad läsning (RLS är owner-only; koden dubbelkollar ändå).
-  let meeting: MeetingRow;
-  try {
-    meeting = await pb.collection('meeting_transcripts').getOne<MeetingRow>(meetingId);
-  } catch {
-    return NextResponse.json({ error: 'Mötet hittades inte.' }, { status: 404 });
-  }
-  if (meeting.owner !== user.id || meeting.tenant !== user.tenant) {
+  // Ägar-verifierad läsning med superuser-fallback (§ 21.3 — PB v0.23.4 kan
+  // tyst neka en behörig ägare även på view-regeln; ägar-/tenant-checken i
+  // loadOwnedMeeting är den hårda gränsen).
+  const meeting = await loadOwnedMeeting(pb, meetingId, user);
+  if (!meeting) {
     return NextResponse.json({ error: 'Mötet hittades inte.' }, { status: 404 });
   }
   if (meeting.status !== 'recording') {
@@ -155,7 +149,12 @@ export async function POST(request: Request): Promise<Response> {
   const updated = [...existing.filter((s) => s.index !== segmentIndex), segment];
 
   try {
-    await pb.collection('meeting_transcripts').update(meetingId, { segments: updated });
+    // Superuser-fallback vid tyst regel-nekande (400/403/404, § 21.3) — utan
+    // den transkriberas segmentet hos Voxtral men kan inte sparas, och mötet
+    // slutar som ett tomt transkript. Ägaren är redan verifierad ovan.
+    await meetingWriteWithFallback(pb, (client) =>
+      client.collection(MEETING_COLLECTION).update(meetingId, { segments: updated })
+    );
   } catch (err) {
     console.error('[meeting-segment] kunde inte spara segmentet', {
       userId: user.id,

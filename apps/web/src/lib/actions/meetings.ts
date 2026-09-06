@@ -7,6 +7,12 @@ import { escFilter } from '@/lib/pb-filter';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import { writeWithFallback } from '@/lib/core/write/helpers';
 import {
+  MEETING_COLLECTION,
+  loadOwnedMeeting,
+  meetingWriteWithFallback,
+  type MeetingRow
+} from '@/lib/meetings/access';
+import {
   generateMeetingProtocol,
   structureMeetingTranscript
 } from '@/lib/ai/meeting-protocol';
@@ -50,7 +56,7 @@ import type PocketBase from 'pocketbase';
  */
 
 const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
-const COLLECTION = 'meeting_transcripts';
+const COLLECTION = MEETING_COLLECTION;
 
 async function requireStaff() {
   const user = await requireUser();
@@ -58,35 +64,6 @@ async function requireStaff() {
     throw new Error('Åtkomst nekad.');
   }
   return user;
-}
-
-interface MeetingRow {
-  id: string;
-  tenant: string;
-  owner: string;
-  startup?: string;
-  status: MeetingStatus;
-  title?: string;
-  segments?: unknown;
-  consent_confirmed_at?: string;
-  started_at?: string;
-  ended_at?: string;
-  updated: string;
-}
-
-/** Laddar ett möte och verifierar ägarskap + tenant (defense-in-depth). */
-async function loadOwnedMeeting(
-  pb: PocketBase,
-  meetingId: string,
-  user: { id: string; tenant: string }
-): Promise<MeetingRow | null> {
-  try {
-    const row = await pb.collection(COLLECTION).getOne<MeetingRow>(meetingId);
-    if (row.owner !== user.id || row.tenant !== user.tenant) return null;
-    return row;
-  } catch {
-    return null;
-  }
 }
 
 export interface MeetingStartupOption {
@@ -155,7 +132,9 @@ async function purgeStaleMeetings(pb: PocketBase, userId: string): Promise<void>
       const stale = isStaleMeeting(row.updated);
       const leftover = row.status === 'saved' || row.status === 'discarded';
       if (stale || leftover) {
-        await pb.collection(COLLECTION).delete(row.id).catch(() => undefined);
+        await meetingWriteWithFallback(pb, (client) =>
+          client.collection(COLLECTION).delete(row.id)
+        ).catch(() => undefined);
       }
     }
   } catch {
@@ -216,18 +195,23 @@ export async function startMeetingAction(
     }
 
     const nowIso = new Date().toISOString();
-    const created = await pb.collection(COLLECTION).create<{ id: string }>({
-      tenant: user.tenant,
-      owner: user.id,
-      startup: startupId || null,
-      status: 'recording',
-      title: String(input.title || '')
-        .trim()
-        .slice(0, MAX_MEETING_TITLE),
-      segments: [],
-      consent_confirmed_at: nowIso,
-      started_at: nowIso
-    });
+    // Superuser-fallback vid PB v0.23.4:s tysta regel-nekande (§ 21.3) —
+    // tenant/owner sätts explicit från den verifierade användaren, aldrig
+    // från klienten, så fallbacken ändrar ingen behörighetsgräns.
+    const created = await meetingWriteWithFallback(pb, (client) =>
+      client.collection(COLLECTION).create<{ id: string }>({
+        tenant: user.tenant,
+        owner: user.id,
+        startup: startupId || null,
+        status: 'recording',
+        title: String(input.title || '')
+          .trim()
+          .slice(0, MAX_MEETING_TITLE),
+        segments: [],
+        consent_confirmed_at: nowIso,
+        started_at: nowIso
+      })
+    );
     return { meetingId: created.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte starta mötet.' };
@@ -244,10 +228,12 @@ export async function endMeetingAction(
     const row = await loadOwnedMeeting(pb, meetingId, user);
     if (!row) return { error: 'Mötet hittades inte.' };
     if (row.status === 'recording') {
-      await pb.collection(COLLECTION).update(row.id, {
-        status: 'ended',
-        ended_at: new Date().toISOString()
-      });
+      await meetingWriteWithFallback(pb, (client) =>
+        client.collection(COLLECTION).update(row.id, {
+          status: 'ended',
+          ended_at: new Date().toISOString()
+        })
+      );
       row.status = 'ended';
       row.ended_at = new Date().toISOString();
     }
@@ -265,7 +251,7 @@ export async function discardMeetingAction(meetingId: string): Promise<{ error?:
     const pb = await getServerPb();
     const row = await loadOwnedMeeting(pb, meetingId, user);
     if (!row) return {};
-    await pb.collection(COLLECTION).delete(row.id);
+    await meetingWriteWithFallback(pb, (client) => client.collection(COLLECTION).delete(row.id));
     return {};
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte radera mötet.' };
@@ -454,7 +440,9 @@ export async function saveMeetingToStartupAction(
     }
 
     // Purge: anteckningen är arkivet — råtranskriptet raderas (GDPR § 5).
-    await pb.collection(COLLECTION).delete(row.id).catch(() => undefined);
+    await meetingWriteWithFallback(pb, (client) =>
+      client.collection(COLLECTION).delete(row.id)
+    ).catch(() => undefined);
 
     revalidatePath(`/startups/${startupId}`);
     revalidatePath('/aktivitet');

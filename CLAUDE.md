@@ -4269,14 +4269,23 @@ segment).
    informerade…"); `consent_confirmed_at` stämplas; utan bock vägrar
    `startMeetingAction`. Synlig pulserande indikator + timer hela mötet.
 3. **Inspelning:** MediaRecorder **startas om** per segment (~90 s — INTE
-   `timeslice`, sådana chunkar är inte självständigt avkodbara). Varje segment
+   `timeslice`, sådana chunkar är inte självständigt avkodbara; det FÖRSTA
+   segmentet är kort, `MEETING_FIRST_SEGMENT_SECONDS` = 20 s, så live-texten —
+   eller ett konfigurationsfel — syns snabbt även i korta möten). Varje segment
    POSTas till `/api/chat/meeting/segment` (staff-only, rate-limitad 40/5 min,
    ägar-verifierad, samma Voxtral-klient + validering som § 31), texten
    **personnummer-saneras** (§ 15.6-regexen — folk säger personnummer högt) och
    appendas på raden. Live-transkriptet växer i panelen. Robusthet: wake lock,
    beforeunload-varning, retry per segment; ett förlorat segment blir en
    **explicit lucka-markör** (saknat index ⇒ `MEETING_GAP_MARKER` i
-   `assembleMeetingTranscript`) — aldrig ett tyst hål. Tak: 3 h / 160 segment
+   `assembleMeetingTranscript`) — aldrig ett tyst hål, och serverns
+   FELORSAK visas i panelen (inspelnings- OCH granskningsvyn) i stället för
+   att sväljas till ett oförklarat tomt transkript. Läs-/skrivvägarna mot
+   `meeting_transcripts` (create/getOne/update/delete i actions + segment-
+   routen, delade i `lib/meetings/access.ts`) har **superuser-fallback vid
+   PB v0.23.4:s tysta regel-nekande** (400/403/404, § 21.3-klassen) — ägar-/
+   tenant-checken i koden är den hårda gränsen, fallbacken är robusthet
+   (samma mönster som § 18.3/§ 20.5/§ 30.4). Tak: 3 h / 160 segment
    (art. 15). Tystnad (Voxtral 422) = tomt segment, inte fel. En kraschad flik
    kostar max ett segment; "Återuppta granskningen"-bannern i `/chatt` öppnar
    det oavslutade mötet.
