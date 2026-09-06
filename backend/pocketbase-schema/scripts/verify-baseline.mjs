@@ -26,7 +26,6 @@ function normalizePbUrl(raw) {
   return url;
 }
 
-
 const PB_URL = normalizePbUrl(PB_URL_RAW);
 
 const pb = new PocketBase(PB_URL);
