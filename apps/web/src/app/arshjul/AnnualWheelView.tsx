@@ -314,7 +314,7 @@ export function AnnualWheelView({
   const [highlightId, setHighlightId] = useState<string | null>(null);
 
   function pickFromWheel(item: AnnualWheelItem) {
-    if (item.month) setMonthFocus(item.month);
+    if (item.month) toggleMonthFocus(item.month);
     setHighlightId(item.id);
     // Scrolla fram raden när listan renderats om med den fokuserade månaden.
     requestAnimationFrame(() => {
