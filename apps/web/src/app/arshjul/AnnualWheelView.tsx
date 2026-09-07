@@ -719,8 +719,9 @@ export function AnnualWheelView({
             </div>
           ) : null}
 
-          <div className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
-            <div className="mb-2 flex items-center justify-between gap-2">
+          {/* Inline (boxlös, § 30.5bis) — ingen egen scrollruta; listan flödar med sidan. */}
+          <div className={`min-w-0 ${undated.length > 0 ? 'border-t border-default pt-4' : ''}`}>
+            <div className="mb-1 flex items-center justify-between gap-2">
               <h3 className="font-heading text-[14px] font-semibold text-foreground">
                 Per månad
                 <span className="mx-tnum ml-1.5 text-[11px] font-normal text-foreground-subtle">
@@ -744,7 +745,7 @@ export function AnnualWheelView({
                 Inga aktiviteter matchar filtret för {year}.
               </p>
             ) : (
-              <div className="max-h-[520px] overflow-y-auto pr-1">
+              <div>
                 {byMonth
                   .slice(1)
                   .map((monthItems, idx) => ({ monthItems, m: idx + 1 }))
