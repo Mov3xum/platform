@@ -10,7 +10,10 @@ COPY packages/shared/package.json packages/shared/package.json
 
 # Build stage needs devDependencies (Tailwind/PostCSS plugins) even if
 # deployment environment exports NODE_ENV=production.
-RUN yarn install --frozen-lockfile --production=false
+# --network-concurrency caps parallel fetches: the unqualified fetch step
+# died silently (no yarn error, exit 255) on a memory-constrained Coolify
+# host — same host that previously OOM'd during "next build" traces.
+RUN yarn install --frozen-lockfile --production=false --network-concurrency 4
 
 FROM node:20-alpine AS builder
 WORKDIR /app
