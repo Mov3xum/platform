@@ -3841,6 +3841,17 @@ ringar), ringbanan är en svag ton av samma färg, månads-/kvartalsavdelare är
 tunna linjer i ytfärg och "idag" är en hårlinje genom ringarna + en prick
 utanför hjulet. Hovring lyfter bågen och visar kortet med fullständigt
 datum ("15 januari – 28 februari 2026"), taggar och ansvarig.
+**Kategorival i hjulet (flerval):** klick på en ring i en månadssektor (på
+banan eller på en båge) väljer kategorin OCH sätter månadsfokus, så listan
+"Per månad" visar just den kategorins aktiviteter i den månaden; klick i fler
+ringar lägger till kategorier (flera kan vara valda samtidigt), klick på samma
+ring + månad igen avmarkerar. Rubrik-pillen väljer kategorin utan månad;
+legenden under hjulet är samma flerval med "Visa alla". Hjulet visar alltid
+ALLA kategorier (bara år/tagg/ansvarig filtrerar det) så fler ringar går att
+klicka — valda ringar behåller full färg, övriga tonas ned. Dubbelklick på en
+båge öppnar redigeringen. Kategorifiltret är därmed ett set
+(`filterAnnualWheelItems({ categories })`, enhetstestat); dropdownen speglar
+det ("N kategorier valda").
 Tabellen
 visar en period i **varje** månad den löper (`monthsForAnnualWheelItem`) och
 bara taggar som faktiskt används som kolumner (`annualWheelTagsInUse`). En

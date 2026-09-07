@@ -911,3 +911,17 @@ test('countItemsByQuarter buckets dated items by quarter with shares', () => {
   assert.equal(q[0].share, 2 / 3);
   assert.equal(countItemsByQuarter([])[0].share, 0);
 });
+
+test('filterAnnualWheelItems accepts several categories at once (empty list = all)', () => {
+  const items = [
+    item({ category: 'styrelse' }),
+    item({ category: 'ledning' }),
+    item({ category: 'gemensamt' })
+  ];
+  assert.equal(filterAnnualWheelItems(items, { categories: [] }).length, 3);
+  assert.deepEqual(
+    filterAnnualWheelItems(items, { categories: ['styrelse', 'gemensamt'] }).map((i) => i.category),
+    ['styrelse', 'gemensamt']
+  );
+  assert.equal(filterAnnualWheelItems(items, { categories: ['styrelse'], category: 'ledning' }).length, 0);
+});

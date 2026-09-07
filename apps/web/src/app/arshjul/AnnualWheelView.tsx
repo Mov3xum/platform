@@ -189,7 +189,12 @@ export function AnnualWheelView({
     const now = new Date().getFullYear();
     return years.includes(now) ? now : years[years.length - 1];
   });
-  const [category, setCategory] = useState<AnnualWheelCategory | 'all'>('all');
+  // Kategorier är FLERVAL (tom = alla): väljs i dropdownen, i legenden eller
+  // genom att klicka på en ring i hjulet (då sätts även månadsfokus).
+  const [selectedCategories, setSelectedCategories] = useState<ReadonlySet<AnnualWheelCategory>>(
+    () => new Set()
+  );
+  const categoryList = useMemo(() => [...selectedCategories], [selectedCategories]);
   const [tag, setTag] = useState<AnnualWheelTag | 'all' | 'none'>('all');
   const [responsible, setResponsible] = useState<string>('all');
   // Period = markerat kvartal (q1–q4) eller månad (m1–m12). Ett klick i
@@ -197,6 +202,18 @@ export function AnnualWheelView({
   // state, så Q4 filtrerar listor och tabell precis som en enskild månad.
   const [period, setPeriod] = useState<AnnualWheelPeriodKey>('all');
   const [sort, setSort] = useState<AnnualWheelSort>('date');
+
+  function toggleCategory(id: AnnualWheelCategory, month?: number | null) {
+    const focusMonth = periodMonth(period);
+    setSelectedCategories((cur) => {
+      const next = new Set(cur);
+      // Samma ring + samma månad igen → avmarkera; annars lägg till/byt månad.
+      if (next.has(id) && (month == null || focusMonth === month)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    if (month != null) setPeriod(monthPeriodKey(month));
+  }
 
   const [form, setForm] = useState<FormState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -224,8 +241,14 @@ export function AnnualWheelView({
   }
 
   const filtered = useMemo(
-    () => filterAnnualWheelItems(items, { year, category, tag, responsible }),
-    [items, year, category, tag, responsible]
+    () => filterAnnualWheelItems(items, { year, categories: categoryList, tag, responsible }),
+    [items, year, categoryList, tag, responsible]
+  );
+  // Hjulet visar ALLA kategorier (bara år/tagg/ansvarig filtrerar) så att man
+  // kan klicka i fler ringar — valda kategorier markeras i stället.
+  const wheelItems = useMemo(
+    () => filterAnnualWheelItems(items, { year, tag, responsible }),
+    [items, year, tag, responsible]
   );
   // Kategoriernas legend-ordning styr sorteringen "Kategori".
   const categoryOrder = useMemo(() => categories.map((c) => c.id), [categories]);
@@ -262,8 +285,8 @@ export function AnnualWheelView({
   // Uppföljning per tagg — räknas på årets poster (före tagg-filtret) så
   // chipsen fungerar som en översikt man kan filtrera med.
   const tagCounts = useMemo(
-    () => countItemsByTag(filterAnnualWheelItems(items, { year, category, responsible })),
-    [items, year, category, responsible]
+    () => countItemsByTag(filterAnnualWheelItems(items, { year, categories: categoryList, responsible })),
+    [items, year, categoryList, responsible]
   );
 
   // ── Dashboard-underlag (ren logik i @platform/shared, filtren styr allt) ──
@@ -271,8 +294,8 @@ export function AnnualWheelView({
   const previousYear = year - 1;
   // Föregående år med SAMMA kategori-/tagg-/ansvarig-filter → jämförbar linje.
   const prevFiltered = useMemo(
-    () => filterAnnualWheelItems(items, { year: previousYear, category, tag, responsible }),
-    [items, previousYear, category, tag, responsible]
+    () => filterAnnualWheelItems(items, { year: previousYear, categories: categoryList, tag, responsible }),
+    [items, previousYear, categoryList, tag, responsible]
   );
   const hasPreviousYear = useMemo(() => items.some((i) => i.year === previousYear), [items, previousYear]);
   const stats = useMemo(() => annualWheelYearStats(filtered, year, today), [filtered, year, today]);
@@ -286,8 +309,8 @@ export function AnnualWheelView({
   const quarterCounts = useMemo(() => countItemsByQuarter(filtered), [filtered]);
   // Ansvarig-fördelning räknas före ansvarig-filtret så staplarna kan användas som filter.
   const responsibleCounts = useMemo(
-    () => countItemsByResponsible(filterAnnualWheelItems(items, { year, category, tag })),
-    [items, year, category, tag]
+    () => countItemsByResponsible(filterAnnualWheelItems(items, { year, categories: categoryList, tag })),
+    [items, year, categoryList, tag]
   );
 
   // "Idag"-visare + nedräkning (bara meningsfullt för innevarande år).
@@ -296,7 +319,7 @@ export function AnnualWheelView({
   const next = useMemo(() => nextUpcomingItem(filtered, today), [filtered, today]);
 
   const activeFilters =
-    (category !== 'all' ? 1 : 0) +
+    (selectedCategories.size > 0 ? 1 : 0) +
     (tag !== 'all' ? 1 : 0) +
     (responsible !== 'all' ? 1 : 0) +
     (period !== 'all' ? 1 : 0);
@@ -314,7 +337,7 @@ export function AnnualWheelView({
   const [highlightId, setHighlightId] = useState<string | null>(null);
 
   function pickFromWheel(item: AnnualWheelItem) {
-    if (item.month) toggleMonthFocus(item.month);
+    // Månad + kategori sätts av onToggleCategory; här lyfts bara raden fram.
     setHighlightId(item.id);
     // Scrolla fram raden när listan renderats om med den fokuserade månaden.
     requestAnimationFrame(() => {
@@ -338,7 +361,7 @@ export function AnnualWheelView({
       repeatUntilMonth: '',
       // Taggar är valfria — förifyll bara den man redan filtrerar på.
       tags: tag !== 'all' && tag !== 'none' ? [tag] : [],
-      category: category === 'all' ? (categories[0]?.id ?? 'ledning') : category,
+      category: categoryList[0] ?? categories[0]?.id ?? 'ledning',
       responsible: responsible !== 'all' && responsible !== 'none' ? responsible : '',
       notes: ''
     });
@@ -532,10 +555,15 @@ export function AnnualWheelView({
         />
         <FilterSelect
           label="Kategori"
-          value={category}
-          onChange={(v) => setCategory(v as AnnualWheelCategory | 'all')}
+          value={
+            selectedCategories.size === 0 ? 'all' : selectedCategories.size === 1 ? categoryList[0] : '__multi'
+          }
+          onChange={(v) => setSelectedCategories(v === 'all' ? new Set() : new Set([v]))}
           options={[
             { value: 'all', label: 'Alla kategorier' },
+            ...(selectedCategories.size > 1
+              ? [{ value: '__multi', label: `${selectedCategories.size} kategorier valda` }]
+              : []),
             ...categories.map((c) => ({ value: c.id, label: c.label })),
             ...orphanCategories.map((c) => ({ value: c, label: `${c} (borttagen)` }))
           ]}
@@ -586,7 +614,7 @@ export function AnnualWheelView({
           <button
             type="button"
             onClick={() => {
-              setCategory('all');
+              setSelectedCategories(new Set());
               setTag('all');
               setResponsible('all');
               setPeriod('all');
@@ -680,10 +708,13 @@ export function AnnualWheelView({
         {/* Hjulet */}
         <section className="min-w-0">
           <Wheel
-            items={filtered}
+            items={wheelItems}
             year={year}
             categories={categories}
             onPick={pickFromWheel}
+            onEdit={canEdit ? openEdit : undefined}
+            selectedCategories={selectedCategories}
+            onToggleCategory={toggleCategory}
             todayAngle={todayAngle}
             currentMonth={currentMonth}
             monthFocus={periodMonth(period)}
@@ -694,7 +725,13 @@ export function AnnualWheelView({
             next={next}
           />
           {next ? <NextCaption next={next} /> : null}
-          <Legend categories={categories} orphans={orphanCategories} />
+          <Legend
+            categories={categories}
+            orphans={orphanCategories}
+            selected={selectedCategories}
+            onToggle={(id) => toggleCategory(id)}
+            onClear={() => setSelectedCategories(new Set())}
+          />
         </section>
 
         {/* Odaterade + snabböversikt */}
@@ -951,38 +988,58 @@ export function AnnualWheelView({
 
 function Legend({
   categories,
-  orphans
+  orphans,
+  selected,
+  onToggle,
+  onClear
 }: {
   categories: AnnualWheelCategoryDef[];
   orphans: string[];
+  selected: ReadonlySet<string>;
+  onToggle: (id: string) => void;
+  onClear: () => void;
 }) {
-  return (
-    <div className="mt-2 flex flex-wrap items-center justify-center gap-4">
-      {categories.map((c) => (
-        <span key={c.id} className="inline-flex items-center gap-1.5 text-[12px] text-foreground-muted">
-          <span
-            className="inline-block h-3 w-3 rounded-sm"
-            style={{ background: annualWheelColorVar(c.token) }}
-            aria-hidden
-          />
-          {c.label}
-        </span>
-      ))}
-      {/* Poster vars kategori har raderats — visas så inget band blir oförklarat. */}
-      {orphans.map((key) => (
+  const any = selected.size > 0;
+  const chip = (id: string, label: string, color: string, orphan = false) => {
+    const active = selected.has(id);
+    return (
+      <button
+        key={id}
+        type="button"
+        onClick={() => onToggle(id)}
+        aria-pressed={active}
+        title={orphan ? 'Kategorin har tagits bort — välj en ny på aktiviteten.' : 'Klicka för att välja (flera kan väljas)'}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[12px] transition-colors ${
+          active
+            ? 'border-brand/40 bg-brand/10 text-foreground'
+            : any
+              ? 'border-transparent text-foreground-subtle hover:text-foreground'
+              : 'border-transparent text-foreground-muted hover:text-foreground'
+        }`}
+      >
         <span
-          key={key}
-          className="inline-flex items-center gap-1.5 text-[12px] text-foreground-subtle"
-          title="Kategorin har tagits bort — välj en ny på aktiviteten."
+          className="inline-block h-2.5 w-2.5 rounded-sm"
+          style={{ background: color, opacity: any && !active ? 0.4 : 1 }}
+          aria-hidden
+        />
+        {label}
+        {orphan ? <span className="text-foreground-subtle">(borttagen)</span> : null}
+      </button>
+    );
+  };
+  return (
+    <div className="mt-2 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1">
+      {categories.map((c) => chip(c.id, c.label, annualWheelColorVar(c.token)))}
+      {orphans.map((key) => chip(key, key, annualWheelColorVar(undefined), true))}
+      {any ? (
+        <button
+          type="button"
+          onClick={onClear}
+          className="ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-medium text-brand hover:bg-brand/10"
         >
-          <span
-            className="inline-block h-3 w-3 rounded-sm"
-            style={{ background: annualWheelColorVar(undefined) }}
-            aria-hidden
-          />
-          {key} (borttagen)
-        </span>
-      ))}
+          <Icon name="x" size={11} /> Visa alla
+        </button>
+      ) : null}
     </div>
   );
 }

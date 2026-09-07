@@ -9,6 +9,7 @@ import {
   annualWheelTagLabel,
   annulusSectorPath,
   isAnnualWheelPeriod,
+  monthLongLabel,
   monthShortLabel,
   monthSliceAngles,
   packAnnualWheelArcs,
@@ -37,10 +38,12 @@ export const CX = 280;
 export const CY = 280;
 
 // Radier (viewBox 560): kärna → månadsring → kategoriringar → "idag"-prick.
-const CORE_R = 58;
-const MONTH_R0 = 62;
-const MONTH_R1 = 96;
-const RINGS_R0 = 102;
+const CORE_R = 50;
+const QUARTER_R0 = 54;
+const QUARTER_R1 = 76;
+const MONTH_R0 = 80;
+const MONTH_R1 = 108;
+const RINGS_R0 = 114;
 const OUTER_R = 256;
 
 // ─── Hjulet (SVG) ────────────────────────────────────────────────────────────
@@ -100,6 +103,15 @@ export interface WheelProps {
    * projektor, övriga tonas ned men förblir läsbara.
    */
   emphasis?: 'soft' | 'bold';
+  /** Valda kategorier (flerval). Tom/undefined = inga valda → allt visas fullt. */
+  selectedCategories?: ReadonlySet<string>;
+  /**
+   * Klick på en ring (i en månadssektor, på en båge eller på rubriken) →
+   * växla kategorin; `month` är sektorn som klickades (null från rubriken).
+   */
+  onToggleCategory?: (id: string, month: number | null) => void;
+  /** Dubbelklick på en båge → redigera (bara när användaren får redigera). */
+  onEdit?: (item: AnnualWheelItem) => void;
 }
 
 export function Wheel({
@@ -117,7 +129,10 @@ export function Wheel({
   focusIds,
   svgClassName = 'mx-auto block w-full max-w-[520px]',
   hoverCard = true,
-  emphasis = 'soft'
+  emphasis = 'soft',
+  selectedCategories,
+  onToggleCategory,
+  onEdit
 }: WheelProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<HoverInfo | null>(null);
@@ -157,6 +172,9 @@ export function Wheel({
 
   const hasFocus = !!focusIds && focusIds.size > 0;
   const bold = emphasis === 'bold';
+  const anySelected = !!selectedCategories && selectedCategories.size > 0;
+  const isSelected = (id: string) => !anySelected || selectedCategories!.has(id);
+  const selectable = !!onToggleCategory;
 
   // "Idag": tunn hårlinje genom ringarna + prick utanför hjulet.
   const todayLine =
@@ -181,15 +199,12 @@ export function Wheel({
           </radialGradient>
         </defs>
 
-        {/* Bakgrundsdisk bakom hela hjulet (mjuk inramning). */}
-        <circle cx={CX} cy={CY} r={252} fill="var(--color-canvas-subtle)" opacity={0.3} />
-
         {/* Kvartalsring — klickbar: markera t.ex. Q4 så lyfts kvartalet och
             dess tre månader, precis som ett klick på en enskild månad. */}
         {[1, 2, 3, 4].map((q) => {
           const a = quarterSliceAngles(q);
-          const path = annulusSectorPath(CX, CY, 70, 116, a.start, a.end);
-          const label = polarPoint(CX, CY, 93, a.mid);
+          const path = annulusSectorPath(CX, CY, QUARTER_R0, QUARTER_R1, a.start, a.end);
+          const label = polarPoint(CX, CY, (QUARTER_R0 + QUARTER_R1) / 2, a.mid);
           const isFocus = quarterFocus === q;
           const focusable = !!onFocusQuarter;
           const onClick = focusable ? () => onFocusQuarter!(q) : undefined;
@@ -217,7 +232,7 @@ export function Wheel({
                 textAnchor="middle"
                 dominantBaseline="central"
                 className={isFocus ? 'fill-brand' : 'fill-foreground-muted'}
-                fontSize={13}
+                fontSize={11}
                 fontWeight={isFocus ? 700 : 600}
               >
                 Q{q}
@@ -274,14 +289,35 @@ export function Wheel({
             const r1 = r0 + ringWidth;
             const lanes = Math.min(MAX_LANES, ring.layout.laneCount);
             const laneWidth = ringWidth / lanes;
+            const selected = isSelected(ring.id);
             return (
               <g key={`ring-${ring.id}`}>
-                {/* Banan: en full cirkelring i kategorins ton. */}
+                {/* Banan: en full cirkelring i kategorins ton (dämpad när ringen inte är vald). */}
                 <path
                   d={annulusSectorPath(CX, CY, r0, r1, 0, 359.999)}
                   fill={ring.color}
-                  fillOpacity={0.08}
+                  fillOpacity={selected ? 0.08 : 0.035}
+                  className="transition-opacity"
                 />
+                {/* Klickbara celler: ring × månad → välj kategori + månad. */}
+                {selectable
+                  ? Array.from({ length: 12 }, (_, mi) => mi + 1).map((m) => {
+                      const a = monthSliceAngles(m);
+                      const isCell = selected && anySelected && monthFocus === m;
+                      return (
+                        <path
+                          key={`cell-${ring.id}-${m}`}
+                          d={annulusSectorPath(CX, CY, r0, r1, a.start, a.end)}
+                          fill={isCell ? 'var(--color-brand)' : 'transparent'}
+                          fillOpacity={isCell ? 0.1 : 0}
+                          className="cursor-pointer"
+                          onClick={() => onToggleCategory!(ring.id, m)}
+                        >
+                          <title>{`${ring.label} · ${monthLongLabel(m)} — klicka för att välja`}</title>
+                        </path>
+                      );
+                    })
+                  : null}
                 {ring.layout.arcs.map((arc, idx) => {
                   const it = arc.item;
                   const isHovered = hover?.item.id === it.id;
@@ -293,8 +329,10 @@ export function Wheel({
                   const shade = idx % 2 === 0 ? 0.92 : 0.66;
                   let opacity = shade;
                   if (hover && !isHovered) opacity = shade * 0.4;
-                  else if (!inFocus) opacity = bold ? 0.28 : 0.18;
+                  else if (!inFocus || !selected) opacity = bold ? 0.28 : 0.18;
                   else if (isHovered) opacity = 1;
+                  // Klick väljer ringens kategori (+ bågens startmånad); dubbelklick redigerar.
+                  const clickMonth = it.month ?? null;
                   const d = roundedAnnulusSectorPath(CX, CY, li0, li1, arc.start, arc.end, 3);
                   return (
                     <path
@@ -304,9 +342,13 @@ export function Wheel({
                       stroke="var(--color-surface)"
                       strokeWidth={2}
                       paintOrder="stroke"
-                      className={`mx-wheel-band transition-opacity ${onPick ? 'cursor-pointer' : ''}`}
+                      className={`mx-wheel-band transition-opacity ${onPick || selectable ? 'cursor-pointer' : ''}`}
                       style={{ opacity, animationDelay: `${Math.round(arc.start * 1.2)}ms` }}
-                      onClick={onPick ? () => onPick(it) : undefined}
+                      onClick={() => {
+                        onToggleCategory?.(ring.id, clickMonth);
+                        onPick?.(it);
+                      }}
+                      onDoubleClick={onEdit ? () => onEdit(it) : undefined}
                       onMouseEnter={(ev) => track(it, ev)}
                       onMouseMove={(ev) => track(it, ev)}
                     />
@@ -343,8 +385,15 @@ export function Wheel({
             const h = Math.min(ringWidth - 1, fontSize + 7);
             // Bredd uppskattas ur teckenantal (SVG kan inte mäta text i SSR).
             const w = Math.round(ring.label.length * fontSize * 0.56 + 22);
+            const selected = isSelected(ring.id);
             return (
-              <g key={`lbl-${ring.id}`} pointerEvents="none">
+              <g
+                key={`lbl-${ring.id}`}
+                pointerEvents={selectable ? 'auto' : 'none'}
+                className={selectable ? 'cursor-pointer' : undefined}
+                style={{ opacity: selected ? 1 : 0.55 }}
+                onClick={selectable ? () => onToggleCategory!(ring.id, null) : undefined}
+              >
                 <rect
                   x={CX - w / 2}
                   y={cy - h / 2}
@@ -357,6 +406,21 @@ export function Wheel({
                   strokeOpacity={0.35}
                   strokeWidth={1}
                 />
+                {selected && anySelected ? (
+                  <rect
+                    x={CX - w / 2}
+                    y={cy - h / 2}
+                    width={w}
+                    height={h}
+                    rx={h / 2}
+                    fill="var(--color-brand)"
+                    fillOpacity={0.1}
+                    stroke="var(--color-brand)"
+                    strokeOpacity={0.6}
+                    strokeWidth={1.25}
+                    pointerEvents="none"
+                  />
+                ) : null}
                 <circle cx={CX - w / 2 + 8} cy={cy} r={2.6} fill={ring.color} />
                 <text
                   x={CX - w / 2 + 14}
@@ -403,22 +467,22 @@ export function Wheel({
           <>
             <text
               x={CX}
-              y={CY - 10}
+              y={CY - 8}
               textAnchor="middle"
               dominantBaseline="central"
               className="fill-foreground"
-              fontSize={22}
+              fontSize={20}
               fontWeight={700}
             >
               {year}
             </text>
             <text
               x={CX}
-              y={CY + 12}
+              y={CY + 11}
               textAnchor="middle"
               dominantBaseline="central"
               className="fill-foreground-muted"
-              fontSize={11}
+              fontSize={10}
               fontWeight={600}
             >
               {next.ongoing ? 'Pågår nu' : `Nästa ${countdownLabel(next.days)}`}
@@ -451,17 +515,21 @@ export function Wheel({
         )}
       </svg>
 
-      {hover && hoverCard ? <HoverCard hover={hover} categories={categories} /> : null}
+      {hover && hoverCard ? (
+        <HoverCard hover={hover} categories={categories} hint={selectable ? (onEdit ? 'Klick väljer kategori · dubbelklick redigerar' : 'Klick väljer kategori') : undefined} />
+      ) : null}
     </div>
   );
 }
 
 function HoverCard({
   hover,
-  categories
+  categories,
+  hint
 }: {
   hover: HoverInfo;
   categories: AnnualWheelCategoryDef[];
+  hint?: string;
 }) {
   const { item } = hover;
   // Placera kortet vid pekaren, men förskjut så det inte skyms av muspekaren
@@ -515,6 +583,7 @@ function HoverCard({
       {item.notes ? (
         <p className="mt-2 line-clamp-3 text-[12px] leading-relaxed text-foreground-muted">{item.notes}</p>
       ) : null}
+      {hint ? <p className="mt-2 text-[10.5px] text-foreground-subtle">{hint}</p> : null}
     </div>
   );
 }
