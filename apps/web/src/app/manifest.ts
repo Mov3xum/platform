@@ -6,7 +6,9 @@ import type { MetadataRoute } from 'next';
  *
  * Serveras av Next på `/manifest.webmanifest`. Sökvägen är publik i
  * middleware:n eftersom webbläsare hämtar manifestet utan cookies.
- * Färgerna följer grafiska profilen (§ 2): mörkblå som tema, vit canvas.
+ * Hemskärmsikonen är Movexum-wordmarken i vitt på svart; splash-bakgrund
+ * och tema-färg är därför svarta så ikon, startskärm och fönsterram hänger
+ * ihop (§ 35.4).
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
@@ -21,8 +23,8 @@ export default function manifest(): MetadataRoute.Manifest {
     display: 'standalone',
     display_override: ['standalone', 'minimal-ui'],
     orientation: 'portrait',
-    background_color: '#ffffff',
-    theme_color: '#002c40',
+    background_color: '#000000',
+    theme_color: '#000000',
     categories: ['business', 'productivity'],
     icons: [
       { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },

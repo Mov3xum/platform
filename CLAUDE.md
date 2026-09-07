@@ -4559,8 +4559,8 @@ service workern och manifestet är handskrivna och versionerade i repot.
 | Fil | Syfte |
 |-----|-------|
 | `apps/web/src/app/manifest.ts` | Web App Manifest (`/manifest.webmanifest`): namn, start-URL `/chatt`, `display: standalone`, brand-färger, ikoner, genvägar |
-| `apps/web/public/icons/*.png` | App-ikoner (192/512, maskable 512, apple-touch-icon 180) — mörkblå + vit "m" i Sora |
-| `apps/web/scripts/render-pwa-icons.mjs` | Rastrerar ikonerna från HTML/Sora via headless Chromium (ingen npm-dep); kör om vid brand-ändring |
+| `apps/web/public/icons/*.png` + `apps/web/public/favicon.ico` | Favicon (16/32/48 i ICO + PNG) och app-ikoner (192/512, maskable 512, apple-touch-icon 180) — Movexum-wordmarken i vitt på **svart** (`#000000`) |
+| `apps/web/scripts/render-pwa-icons.mjs` | Rastrerar favicon, app-ikoner och `public/brand/movexum-wordmark-dark.png` (vit wordmark, transparent) från Sora via headless Chromium + canvas-nedskalning (ingen npm-dep); kör om vid brand-ändring |
 | `apps/web/public/sw.js` | Service worker: nät-först för navigeringar (aldrig cachade sidor), cache-first för `/_next/static`, fonter, ikoner; offline-fallback |
 | `apps/web/src/components/pwa/PwaRegister.tsx` | Registrerar SW:n (bara i produktion + säker kontext), tar över direkt vid ny deploy |
 | `apps/web/src/components/pwa/InstallPrompt.tsx` | "Använd Movexum som app"-hint: `beforeinstallprompt` (Android/Chrome) eller iOS-instruktion; avfärdas 30 dagar |
@@ -4628,9 +4628,18 @@ service workern och manifestet är handskrivna och versionerade i repot.
 
 `@media (display-mode: standalone)`: `overscroll-behavior-y: none` (inget
 pull-to-refresh-hopp), topbar/rail respekterar `safe-area-inset-top`,
-`-webkit-touch-callout: none` på navigering. `appleWebApp.statusBarStyle` är
-`default` (opak statusrad) — byt till `black-translucent` först om hela
-topbaren designas om för att ligga under statusraden. Ikonerna renderas om
-med `node apps/web/scripts/render-pwa-icons.mjs` (Chromium via `CHROME_BIN`
-eller Playwrights katalog) om wordmark/färg ändras — uppdatera i så fall även
-`manifest.ts` (`theme_color`) i samma PR (§ 2/§ 5).
+`-webkit-touch-callout: none` på navigering.
+
+**Svart ikon- och kromfärg (2026-09).** Favicon och hemskärmsikon är
+Movexum-wordmarken i vitt på **svart** (`#000000`) — inte mörkblå. Därför är
+`manifest.ts` (`theme_color` + `background_color`), `viewport.themeColor` i
+`app/layout.tsx` (webbläsarens adressfält/flikrad och desktop-PWA:ns
+fönsterram, i BÅDA färglägena) och `appleWebApp.statusBarStyle` (`black`,
+opak svart statusrad på iOS) satta till svart så ikon, splash och
+webbläsarfönster hänger ihop. Byt till `black-translucent` först om hela
+topbaren designas om för att ligga under statusraden. Ikonerna, `favicon.ico`
+och den vita wordmark-PNG:n renderas om med
+`node apps/web/scripts/render-pwa-icons.mjs` (Chromium via `CHROME_BIN` eller
+Playwrights katalog) om wordmark/färg ändras — uppdatera i så fall även
+`manifest.ts`/`layout.tsx` (färgerna) och bumpa `VERSION` i `public/sw.js`
+(ikonerna cachas cache-first) i samma PR (§ 2/§ 5).
