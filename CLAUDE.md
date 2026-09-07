@@ -4522,3 +4522,98 @@ persisterad/loggad, når aldrig AI-kontexten. Fail-soft utan koppling.
   `ai_usage_events` (surface `dashboard_chat`) och räknas mot månadstaket;
   protokollgenereringen kör `assertWithinAiBudget`; hårda tak på längd,
   segment, chunk-antal och turindelningsstorlek.
+
+---
+
+## 35. Mobil app-läge — PWA (hemskärm), bottom-meny & mobilpolish
+
+### 35.1 Översikt
+
+Plattformen är en **installerbar PWA**: den kan läggas på hemskärmen (iOS
+Safari, Android Chrome, desktop Chrome/Edge) och körs då i standalone-läge
+utan webbläsar-krom. På mobil/surfplatta (≤ 1024 px, samma brytpunkt som
+rail-drawern) visas en **bottom-meny** med fem platser där **chatten är den
+upphöjda mittknappen**; "Mer" öppnar den befintliga sidmenyn (drawern) med
+hela navigationen och kontomenyn. Inga nya beroenden (ingen `next-pwa`) —
+service workern och manifestet är handskrivna och versionerade i repot.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `apps/web/src/app/manifest.ts` | Web App Manifest (`/manifest.webmanifest`): namn, start-URL `/chatt`, `display: standalone`, brand-färger, ikoner, genvägar |
+| `apps/web/public/icons/*.png` | App-ikoner (192/512, maskable 512, apple-touch-icon 180) — mörkblå + vit "m" i Sora |
+| `apps/web/scripts/render-pwa-icons.mjs` | Rastrerar ikonerna från HTML/Sora via headless Chromium (ingen npm-dep); kör om vid brand-ändring |
+| `apps/web/public/sw.js` | Service worker: nät-först för navigeringar (aldrig cachade sidor), cache-first för `/_next/static`, fonter, ikoner; offline-fallback |
+| `apps/web/src/components/pwa/PwaRegister.tsx` | Registrerar SW:n (bara i produktion + säker kontext), tar över direkt vid ny deploy |
+| `apps/web/src/components/pwa/InstallPrompt.tsx` | "Använd Movexum som app"-hint: `beforeinstallprompt` (Android/Chrome) eller iOS-instruktion; avfärdas 30 dagar |
+| `apps/web/src/lib/pwa.ts` (+ `.test.ts`) | Rena hjälpare: standalone-detektion, iOS-Safari-detektion, avfärdande |
+| `apps/web/src/app/offline/page.tsx` | Statisk offline-sida (förcachad av SW:n, renderas utan AppShell) |
+| `apps/web/src/lib/mobile-nav.ts` (+ `.test.ts`) | Ren urvalslogik för bottom-menyns fem platser (RBAC-filtrerad, prioriterade kandidater) |
+| `apps/web/src/lib/module-icons.ts` | Ikon per modul-id — delas av railen och bottom-menyn |
+| `apps/web/src/components/proto/MobileBottomNav.tsx` | Bottom-menyn (klient): aktiv-markering, badge, "Mer" → drawer, döljs när tangentbordet är uppe |
+| `apps/web/src/app/prototype.css` (§ "Mobil app-läge") | Bottom-meny, install-hint, `display-mode: standalone`, safe-area, helhöjds-ytor |
+
+### 35.2 Bottom-menyn
+
+- **Platser:** `[vänster 1] [vänster 2] [MITT] [höger 1] [Mer]`. Urvalet görs
+  server-side i `ProtoShell` via `buildMobileNav` med **samma
+  `canAccessModuleForUser` som railen** (menyn är UI-kurering, aldrig
+  säkerhetsgräns — RLS/RBAC ligger kvar i § 21).
+- **Staff/observer:** Översikt (`inkorg`, med olästa-badge) · Bolag
+  (`startups`) · **Chatt** (`idag`) · Pågående (`pagaende`) · Mer. Avstängda
+  moduler hoppas över och nästa kandidat tar platsen (uppdrag, årshjul, filer …).
+- **Ren `startup_member`** (§ 22): Aktiviteter · Filer · **Översikt**
+  (`min_oversikt` — chatten finns inte för medlemmar, § 21.5) · De minimis ·
+  Mer. Chatten exponeras aldrig (enhetstestat).
+- **Mittknappen** är en upphöjd cirkel i mörkblå (`#002c40`, vit ikon); i dark
+  mode ljusblå (`#4fc4ea`, mörkblå ikon) — samma mappning som `--color-brand`
+  (§ 3.2). Aktiv sida markeras med accentfärg; inga ad-hoc-färger.
+- **Tangentbord:** när ett textfält får fokus sätts `body.mx-bnav-hidden` →
+  menyn glider ned och `--mx-bnav-total` nollas så chattens komposer får hela
+  den krympta viewporten (`interactiveWidget: resizes-content` i `viewport`).
+- **Layout:** `.mx-view` får `padding-bottom: var(--mx-bnav-total)`; fasta
+  helhöjds-ytor (`.mx-page`, `.mx-workspace`) räknar i stället bort menyn ur
+  sin `100dvh`-höjd (`:has(> .mx-page)` nollar paddingen). Safe-area-insets
+  (`env(safe-area-inset-bottom/top)`) respekteras överallt; `viewport-fit=cover`.
+
+### 35.3 PWA — säkerhet och dataminimering (bindande)
+
+- **Service workern cachar ALDRIG sidor eller API-svar.** Navigeringar går
+  alltid till nätet (fallback = förcachad `/offline`); `/api/`, PocketBase och
+  server actions rörs inte. Bara oföränderliga, publika resurser (`/_next/static`,
+  `/fonts`, `/icons`, `/brand`) cachas. Inloggad domändata/PII hamnar därmed
+  aldrig i en SW-cache (GDPR § 5, § 21-isolering bevaras).
+- **`/offline` renderas utan AppShell** (root-layouten, som `/login`), så den
+  förcachade HTML:en aldrig innehåller användarnamn, bolagslista eller
+  tenant-data.
+- **CSP (§ 10.3):** `worker-src 'self'` tillagd i `middleware.ts` — utan den
+  faller browsern tillbaka på `script-src`, där `'strict-dynamic'` ignorerar
+  `'self'` och registreringen blockeras i produktion. `manifest-src 'self'`
+  fanns redan. Inga externa origins, inga CDN.
+- **Publika sökvägar:** `/manifest.webmanifest`, `/sw.js`, `/icons/` och
+  `/offline` är undantagna auth-redirecten i middleware:n — de hämtas av
+  browsern utan cookies och innehåller ingen data.
+- **HTTP-cache:** `/sw.js` skickas med `Cache-Control: no-cache` (next.config)
+  så en ny deploy tar över direkt (`SKIP_WAITING` + ett reload) — en gammal
+  flik kör inte vidare mot inaktuella statiska filer (samma princip som
+  `ChunkReloadListener`).
+- **Kräver https:** service workern registreras bara i säker kontext (https /
+  localhost) och bara i produktion (dev-servern får aldrig en cache framför
+  sig). På http-staging (sslip.io utan cert, § 10.3) fungerar allt som förut —
+  bara utan offline-fallback och utan installations-prompt.
+- **Install-hinten** lagrar bara en tidsstämpel i `localStorage`
+  (`movexum-install-dismissed-at`) — bekvämlighet, ingen datakälla.
+- **Riskklass (EU AI Act):** n/a — ren klient-/navigationsfunktion, ingen
+  AI-inferens, ingen ny dataväg. Inga nya kollektioner, fält eller migrationer.
+
+### 35.4 Standalone-läge
+
+`@media (display-mode: standalone)`: `overscroll-behavior-y: none` (inget
+pull-to-refresh-hopp), topbar/rail respekterar `safe-area-inset-top`,
+`-webkit-touch-callout: none` på navigering. `appleWebApp.statusBarStyle` är
+`default` (opak statusrad) — byt till `black-translucent` först om hela
+topbaren designas om för att ligga under statusraden. Ikonerna renderas om
+med `node apps/web/scripts/render-pwa-icons.mjs` (Chromium via `CHROME_BIN`
+eller Playwrights katalog) om wordmark/färg ändras — uppdatera i så fall även
+`manifest.ts` (`theme_color`) i samma PR (§ 2/§ 5).

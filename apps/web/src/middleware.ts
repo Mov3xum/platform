@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = ['/', '/login', '/reset-password', '/verify-email'];
+const PUBLIC_PATHS = ['/', '/login', '/reset-password', '/verify-email', '/offline'];
+
+// PWA-resurser (CLAUDE.md § 35): manifest, service worker och ikoner hämtas
+// av webbläsaren utan cookies och måste därför vara publika. De innehåller
+// ingen data — bara statisk app-metadata.
+const PWA_PUBLIC_PREFIXES = ['/manifest.webmanifest', '/sw.js', '/icons/'];
 const AUTH_COOKIE = 'pb_auth';
 
 /**
@@ -42,7 +47,11 @@ function buildCsp(nonce: string | null, isHttps: boolean): string {
     `frame-ancestors 'none'`,
     `form-action 'self'`,
     `object-src 'none'`,
-    `manifest-src 'self'`
+    `manifest-src 'self'`,
+    // Service workern (public/sw.js, § 35) — utan explicit worker-src faller
+    // browsern tillbaka på script-src, där 'strict-dynamic' ignorerar 'self'
+    // och registreringen blockeras i produktion.
+    `worker-src 'self'`
   ];
   // upgrade-insecure-requests tvingar browsern att uppgradera ALLA subresurser
   // (CSS/JS/fonter/bilder) till https. På en http-serverad deploy (staging utan
@@ -128,7 +137,8 @@ export function middleware(req: NextRequest) {
     // och deras anonyma API-flöden.
     pathname === '/m' ||
     pathname.startsWith('/m/') ||
-    pathname.startsWith('/api/public/');
+    pathname.startsWith('/api/public/') ||
+    PWA_PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
 
   let res: NextResponse;
   if (isPublic) {

@@ -2128,3 +2128,341 @@ html.dark .mx-tab-badge {
   background: #4fc4ea;
   color: #002c40;
 }
+
+/* ============================================================
+   Mobil app-läge (CLAUDE.md § 35) — bottom-meny, install-hint,
+   standalone (hemskärm) och tangentbordshantering.
+   ============================================================ */
+
+:root {
+  /* Bottom-menyns höjd exkl. safe-area. 0 på desktop (menyn är dold). */
+  --mx-bnav-h: 0px;
+  --mx-bnav-total: 0px;
+}
+
+.mx-bnav {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  :root {
+    --mx-bnav-h: 64px;
+    --mx-bnav-total: calc(var(--mx-bnav-h) + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* När tangentbordet är uppe döljs menyn (MobileBottomNav) och ytan återtas. */
+  body.mx-bnav-hidden {
+    --mx-bnav-total: 0px;
+  }
+
+  .mx-bnav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 50;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    align-items: end;
+    height: var(--mx-bnav-h);
+    padding: 0 6px env(safe-area-inset-bottom, 0px);
+    box-sizing: content-box;
+    background: color-mix(in srgb, var(--mx-canvas) 93%, transparent);
+    -webkit-backdrop-filter: saturate(160%) blur(16px);
+    backdrop-filter: saturate(160%) blur(16px);
+    border-top: 1px solid var(--mx-line);
+    box-shadow: 0 -8px 24px -16px rgba(10, 10, 10, 0.18);
+    transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  }
+
+  body.mx-bnav-hidden .mx-bnav {
+    transform: translateY(110%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .mx-bnav-item,
+  .mx-bnav-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 3px;
+    height: var(--mx-bnav-h);
+    min-width: 44px;
+    padding: 6px 2px 8px;
+    border: 0;
+    background: none;
+    color: var(--mx-muted);
+    font-family: inherit;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    text-decoration: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    transition: color 120ms ease;
+  }
+
+  .mx-bnav-item.active {
+    color: var(--mx-rail-accent, #002c40);
+  }
+
+  .mx-bnav-ico {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 30px;
+    border-radius: 12px;
+    transition: background 120ms ease;
+  }
+
+  .mx-bnav-item.active .mx-bnav-ico {
+    background: var(--mx-rail-active-bg, rgba(0, 44, 64, 0.08));
+  }
+
+  .mx-bnav-item:active .mx-bnav-ico {
+    background: var(--mx-rail-hover-bg, rgba(10, 10, 10, 0.05));
+  }
+
+  .mx-bnav-label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.1;
+  }
+
+  .mx-bnav-badge {
+    position: absolute;
+    top: -2px;
+    right: 2px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: #002c40;
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 17px;
+    text-align: center;
+    border: 2px solid var(--mx-canvas);
+    box-sizing: content-box;
+  }
+
+  /* Mittknappen — upphöjd, brand-färgad, chatten. */
+  .mx-bnav-center {
+    color: var(--mx-ink);
+  }
+
+  .mx-bnav-center-btn {
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    margin-top: -22px;
+    border-radius: 999px;
+    background: #002c40;
+    color: #ffffff;
+    box-shadow:
+      0 0 0 5px var(--mx-canvas),
+      0 10px 24px -8px rgba(0, 44, 64, 0.55);
+    transition: transform 140ms ease, box-shadow 140ms ease;
+  }
+
+  .mx-bnav-center:active .mx-bnav-center-btn {
+    transform: scale(0.94);
+  }
+
+  .mx-bnav-center.active .mx-bnav-center-btn {
+    box-shadow:
+      0 0 0 5px var(--mx-canvas),
+      0 0 0 7px rgba(0, 44, 64, 0.22),
+      0 10px 24px -8px rgba(0, 44, 64, 0.55);
+  }
+
+  html.dark .mx-bnav {
+    background: color-mix(in srgb, var(--mx-canvas) 82%, transparent);
+    border-top-color: var(--mx-line-strong);
+    box-shadow: 0 -8px 24px -16px rgba(0, 0, 0, 0.6);
+  }
+
+  html.dark .mx-bnav-item.active {
+    color: var(--mx-rail-accent);
+  }
+
+  html.dark .mx-bnav-badge,
+  html.dark .mx-bnav-center-btn {
+    background: #4fc4ea;
+    color: #002c40;
+  }
+
+  html.dark .mx-bnav-center-btn {
+    box-shadow:
+      0 0 0 5px var(--mx-canvas),
+      0 10px 24px -8px rgba(79, 196, 234, 0.35);
+  }
+
+  html.dark .mx-bnav-center.active .mx-bnav-center-btn {
+    box-shadow:
+      0 0 0 5px var(--mx-canvas),
+      0 0 0 7px rgba(79, 196, 234, 0.25),
+      0 10px 24px -8px rgba(79, 196, 234, 0.35);
+  }
+
+  /* Innehållet slutar ovanför menyn. */
+  .mx-view {
+    padding-bottom: var(--mx-bnav-total);
+  }
+
+  /* Fasta helhöjds-ytor (chatt, bolagsarbetsyta) räknar bort menyn själva
+     i stället för att få padding — annars scrollar dokumentet i onödan. */
+  .mx-view:has(> .mx-page),
+  .mx-view:has(> .mx-workspace) {
+    padding-bottom: 0;
+  }
+
+  .mx-page,
+  .mx-workspace {
+    height: calc(100dvh - var(--mx-topbar-h) - var(--mx-bnav-total));
+  }
+
+  .mx-main-col {
+    min-height: 100dvh;
+  }
+
+  /* Drawern (railen) lämnar plats för safe-area — bottom-menyn ligger under
+     backdropen (z 60) när drawern är öppen. */
+  .mx-rail-foot {
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Install-hint ("Lägg till på hemskärmen") — flyter ovanför bottom-menyn. */
+.mx-install-hint {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .mx-install-hint {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(var(--mx-bnav-total) + 10px);
+    z-index: 49;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 10px 10px 12px;
+    border-radius: var(--mx-r-md, 14px);
+    background: var(--mx-paper, #ffffff);
+    border: 1px solid var(--mx-line);
+    box-shadow: var(--mx-sh-2);
+    color: var(--mx-ink);
+    font-size: 12.5px;
+    line-height: 1.35;
+  }
+
+  body.mx-bnav-hidden .mx-install-hint {
+    display: none;
+  }
+
+  .mx-install-icon {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border-radius: 11px;
+    background: #002c40;
+    color: #f2f2f2;
+  }
+
+  .mx-install-glyph {
+    font-family: var(--font-heading, "Sora Variable", system-ui, sans-serif);
+    font-weight: 700;
+    font-size: 24px;
+    line-height: 1;
+    letter-spacing: -0.04em;
+    transform: translateY(-1px);
+  }
+
+  .mx-install-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .mx-install-text strong {
+    font-weight: 700;
+    color: var(--mx-ink);
+  }
+
+  .mx-install-text span {
+    color: var(--mx-muted);
+  }
+
+  .mx-install-inline-ico {
+    display: inline-block;
+    vertical-align: -2px;
+    margin: 0 1px;
+  }
+
+  .mx-install-close {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    border: 0;
+    border-radius: 10px;
+    background: none;
+    color: var(--mx-muted);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mx-install-close:active {
+    background: var(--mx-rail-hover-bg, rgba(10, 10, 10, 0.05));
+  }
+}
+
+/* Standalone (hemskärms-app): inget "pull-to-refresh"-hopp, ingen
+   markering vid långtryck på navigering, och topbaren respekterar en ev.
+   status-bar-inset. */
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  html {
+    overscroll-behavior-y: none;
+  }
+
+  .mx-topbar {
+    padding-top: env(safe-area-inset-top, 0px);
+    height: calc(var(--mx-topbar-h) + env(safe-area-inset-top, 0px));
+  }
+
+  .mx-main-col {
+    grid-template-rows: calc(var(--mx-topbar-h) + env(safe-area-inset-top, 0px)) 1fr;
+  }
+
+  .mx-page,
+  .mx-workspace {
+    height: calc(100dvh - var(--mx-topbar-h) - env(safe-area-inset-top, 0px) - var(--mx-bnav-total));
+  }
+
+  .mx-rail-head {
+    padding-top: calc(20px + env(safe-area-inset-top, 0px));
+  }
+
+  .mx-bnav-item,
+  .mx-bnav-center,
+  .mx-rail-item {
+    -webkit-touch-callout: none;
+  }
+}

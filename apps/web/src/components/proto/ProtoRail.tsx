@@ -11,29 +11,9 @@ import { RailToggleButton } from './MobileRail';
 import { Logo } from '@/components/Logo';
 import { StartupSwitcher, type SwitchableStartup } from './StartupSwitcher';
 import { RailAccountMenu } from './RailAccountMenu';
+import { MODULE_ICONS } from '@/lib/module-icons';
 
-const moduleIcons: Record<string, string> = {
-  idag: 'message',
-  min_oversikt: 'home',
-  mina_aktiviteter: 'flow',
-  inkorg: 'home',
-  pagaende: 'spark',
-  arshjul: 'calendar',
-  uppdrag: 'flow',
-  inflode: 'spark',
-  startups: 'people',
-  de_minimis: 'shield',
-  investerare: 'graph',
-  events: 'spark',
-  community: 'people',
-  education: 'cap',
-  rapporter: 'doc',
-  agenter: 'bolt',
-  insights: 'graph',
-  integrationer: 'link',
-  anvandare: 'user',
-  installningar: 'gear'
-};
+const moduleIcons = MODULE_ICONS;
 
 interface ProtoRailProps {
   user: {
