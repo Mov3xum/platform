@@ -756,8 +756,8 @@ export function AnnualWheelView({
             </div>
           ) : null}
 
-          <div className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
-            <div className="mb-2 flex items-center justify-between gap-2">
+          <div className={`min-w-0 ${undated.length > 0 ? 'border-t border-default pt-4' : ''}`}>
+            <div className="mb-1 flex items-center justify-between gap-2">
               <h3 className="font-heading text-[14px] font-semibold text-foreground">
                 Per månad
                 <span className="mx-tnum ml-1.5 text-[11px] font-normal text-foreground-subtle">
@@ -880,7 +880,7 @@ export function AnnualWheelView({
       </div>
 
       {/* Tabell (månad × spår) — speglar Excel-vyn */}
-      <section className="rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
+      <section className="border-t border-default pt-4">
         <h3 className="mb-3 font-heading text-[14px] font-semibold text-foreground">
           Verksamhetstabell {year}
           {period !== 'all' ? (
