@@ -594,6 +594,8 @@ export interface AnnualWheelItem {
 export interface AnnualWheelFilter {
   year?: number;
   category?: AnnualWheelCategory | 'all';
+  /** Flera kategorier samtidigt (tom lista = alla). Kombineras med `category` (AND). */
+  categories?: readonly AnnualWheelCategory[];
   /** `none` = bara otaggade poster. */
   tag?: AnnualWheelTag | 'all' | 'none';
   /** Users-id, `none` = bara poster utan ansvarig. */
@@ -618,6 +620,8 @@ export function filterAnnualWheelItems(
     if (typeof filter.year === 'number' && it.year !== filter.year) return false;
     if (filter.period && !itemInAnnualWheelPeriod(it, filter.period)) return false;
     if (filter.category && filter.category !== 'all' && it.category !== filter.category) return false;
+    if (filter.categories && filter.categories.length > 0 && !filter.categories.includes(it.category))
+      return false;
     if (filter.tag && filter.tag !== 'all') {
       const tags = it.tags ?? [];
       if (filter.tag === 'none') {
