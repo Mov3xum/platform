@@ -188,7 +188,7 @@ export default async function LeadsPage({
               >
                 <Card style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="mx-flex mx-items-c mx-gap-2">
+                    <div className="mx-flex mx-items-c mx-gap-2" style={{ flexWrap: 'wrap' }}>
                       <span className="mx-disp mx-fw-6 mx-t-13 mx-truncate">
                         {lead.name || 'Anonym'}
                       </span>
