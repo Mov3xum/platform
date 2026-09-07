@@ -3810,14 +3810,20 @@ aktiviteter försvinner aldrig: hjulet visar dem som vanligt, tabellen har en
 **Perioder (migration 1700000141).** En aktivitet med `end_month` (och valfri
 `end_day`) löper över tid. Skrivlagret kräver att slutet ligger efter starten
 inom samma kalenderår (`normalizePeriod`, kontrolleras även när bara EN ände
-uppdateras). **Hjulets grundutseende är lugnt:** varje månad delas jämnt
-mellan de aktiviteter som STARTAR i månaden (en period ligger i sin
-startmånad), inga texter längs bågarna — en variant med körfält och titlar
-längs bågarna testades och upplevdes plottrig. Hela periodens spann visas i
-stället **vid hovring**: en mjuk, streckad båge från start till slut ritas
-bakom det lyfta bandet (`annualWheelItemAngles`), och hovringskortet visar
-"15 januari – 28 februari 2026". `packAnnualWheelArcs` (körfältspackning,
-enhetstestad) finns kvar i `@platform/shared` för framtida bruk. Tabellen
+uppdateras). **Hjulets utseende (Plandisc-stil, 2026-09):** innerst en klickbar
+månadsring, därefter **en ring per kategori** (katalogens ordning inifrån
+och ut, bara kategorier som förekommer i urvalet) där varje aktivitet ritas
+som en båge över sitt faktiska spann — en dag blir en smal markering, en
+månad en 30°-sektor, en period en båge från start till slut. Överlappande
+aktiviteter i samma kategori packas i körfält (`packAnnualWheelArcs`, max
+tre synliga) så inget ritas ovanpå något annat; intilliggande bågar skiljs
+åt med en 2 px yta-gap och två växlande nyanser av kategorins brand-token,
+aldrig outline. Kategorinamnet löper längs ringens topp (textPath med ljus
+halo), ringbanan är en svag ton av samma färg, månads-/kvartalsavdelare är
+tunna linjer i ytfärg och "idag" är en hårlinje genom ringarna + en prick
+utanför hjulet. Hovring lyfter bågen och visar kortet med fullständigt
+datum ("15 januari – 28 februari 2026"), taggar och ansvarig.
+Tabellen
 visar en period i **varje** månad den löper (`monthsForAnnualWheelItem`) och
 bara taggar som faktiskt används som kolumner (`annualWheelTagsInUse`). En
 pågående period visas som "Pågår nu" i navet (`nextUpcomingItem` →

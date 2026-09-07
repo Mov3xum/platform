@@ -4,19 +4,16 @@ import { useMemo, useRef, useState } from 'react';
 import {
   annualWheelCategoryColorVar,
   annualWheelCategoryLabel,
-  annualWheelColorVar,
-  annualWheelItemAngles,
   annualWheelRangeLabel,
   annualWheelShortRangeLabel,
   annualWheelTagLabel,
   annulusSectorPath,
-  groupItemsByMonth,
   isAnnualWheelPeriod,
   monthShortLabel,
   monthSliceAngles,
+  packAnnualWheelArcs,
   polarPoint,
   quarterForMonth,
-  quarterSliceAngles,
   roundedAnnulusSectorPath,
   type AnnualWheelCategoryDef,
   type AnnualWheelItem,
@@ -34,10 +31,16 @@ import { Icon } from '@/components/proto/Icon';
 // Kategorierna är dynamiska per tenant (§ 30) — färgen är alltid en Movexum-
 // brand-token (källan av sanning är tokens.css), aldrig ad-hoc-hex (§ 2.2).
 // En post som pekar på en raderad kategori faller tillbaka på default-tokenen.
-const FALLBACK_GRADIENT_KEY = 'okand';
 
 export const CX = 280;
 export const CY = 280;
+
+// Radier (viewBox 560): kärna → månadsring → kategoriringar → "idag"-prick.
+const CORE_R = 58;
+const MONTH_R0 = 62;
+const MONTH_R1 = 96;
+const RINGS_R0 = 102;
+const OUTER_R = 256;
 
 // ─── Hjulet (SVG) ────────────────────────────────────────────────────────────
 
@@ -112,33 +115,48 @@ export function Wheel({
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<HoverInfo | null>(null);
 
-  const gradientDefs = useMemo(
-    () => [
-      ...categories.map((c) => ({ key: c.id, color: annualWheelColorVar(c.token) })),
-      { key: FALLBACK_GRADIENT_KEY, color: annualWheelColorVar(undefined) }
-    ],
-    [categories]
-  );
-  const gradientKey = (id: string) =>
-    categories.some((c) => c.id === id) ? id : FALLBACK_GRADIENT_KEY;
-
   function track(item: AnnualWheelItem, e: React.MouseEvent) {
     const rect = wrapRef.current?.getBoundingClientRect();
     if (!rect) return;
     setHover({ item, x: e.clientX - rect.left, y: e.clientY - rect.top });
   }
 
-  // Lugnt grundutseende: varje månad delas jämnt mellan de aktiviteter som
-  // STARTAR i månaden (perioder ligger i sin startmånad). Hela periodens
-  // spann visas först vid hovring — annars blir hjulet plottrigt.
-  const byMonth = useMemo(() => groupItemsByMonth(items), [items]);
-  const hoverSpan = useMemo(
-    () => (hover && isAnnualWheelPeriod(hover.item) ? annualWheelItemAngles(hover.item, 2) : null),
-    [hover]
-  );
+  // ── Ringar per kategori (Plandisc-stil) ─────────────────────────────────
+  // En ring per kategori som FÖREKOMMER i urvalet (katalogens ordning, raderade
+  // kategorier sist). Inom ringen packas aktiviteterna i körfält så att
+  // överlappande perioder aldrig ritas ovanpå varandra.
+  const rings = useMemo(() => {
+    const known = categories.map((c) => c.id);
+    const present = new Set(items.map((i) => i.category));
+    const orphans = [...present].filter((c) => !known.includes(c)).sort();
+    return [...known, ...orphans]
+      .filter((id) => present.has(id))
+      .map((id) => ({
+        id,
+        label: annualWheelCategoryLabel(id, categories),
+        color: annualWheelCategoryColorVar(id, categories),
+        layout: packAnnualWheelArcs(
+          items.filter((i) => i.category === id),
+          { minSpan: 3, gap: 0.8 }
+        )
+      }));
+  }, [items, categories]);
 
-  // "Idag"-markör: en liten prick UTANFÖR hjulet (ingen visarlinje).
-  const todayDot = todayAngle !== null ? polarPoint(CX, CY, 266, todayAngle) : null;
+  const ringCount = Math.max(1, rings.length);
+  const RING_GAP = 4;
+  const ringWidth = (OUTER_R - RINGS_R0 - RING_GAP * (ringCount - 1)) / ringCount;
+  const ringInner = (i: number) => RINGS_R0 + i * (ringWidth + RING_GAP);
+  const MAX_LANES = 3;
+
+  const hasFocus = !!focusIds && focusIds.size > 0;
+  const bold = emphasis === 'bold';
+
+  // "Idag": tunn hårlinje genom ringarna + prick utanför hjulet.
+  const todayLine =
+    todayAngle !== null
+      ? { a: polarPoint(CX, CY, MONTH_R1 - 2, todayAngle), b: polarPoint(CX, CY, OUTER_R + 4, todayAngle) }
+      : null;
+  const todayDot = todayAngle !== null ? polarPoint(CX, CY, OUTER_R + 12, todayAngle) : null;
 
   return (
     <div ref={wrapRef} className="relative" onMouseLeave={() => setHover(null)}>
@@ -149,106 +167,33 @@ export function Wheel({
         aria-label={`Årshjul ${year}`}
       >
         <defs>
-          {/* Mycket mjuka radiella gradienter per kategori (väldigt svaga, ingen
-              outline) → fräscht, ljust uttryck. Saturerad inåt, dämpad utåt.
-              En gradient per tenant-kategori + en fallback för poster vars
-              kategori har raderats (nycklarna är slugs → giltiga SVG-id:n). */}
-          {gradientDefs.map((g) => (
-            <radialGradient
-              key={g.key}
-              id={`mx-aw-grad-${g.key}`}
-              cx={CX}
-              cy={CY}
-              r={250}
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0.5" stopColor={g.color} stopOpacity={0.16} />
-              <stop offset="1" stopColor={g.color} stopOpacity={0.04} />
-            </radialGradient>
-          ))}
-          {/* Tonad fyllning vid hover (något starkare men fortfarande mjuk). */}
-          {gradientDefs.map((g) => (
-            <radialGradient
-              key={`h-${g.key}`}
-              id={`mx-aw-grad-${g.key}-hover`}
-              cx={CX}
-              cy={CY}
-              r={250}
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0.5" stopColor={g.color} stopOpacity={0.3} />
-              <stop offset="1" stopColor={g.color} stopOpacity={0.1} />
-            </radialGradient>
-          ))}
-          {/* Kraftig fyllning (presentationsläget) — bär på en projektor. */}
-          {gradientDefs.map((g) => (
-            <radialGradient
-              key={`s-${g.key}`}
-              id={`mx-aw-grad-${g.key}-strong`}
-              cx={CX}
-              cy={CY}
-              r={250}
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0.5" stopColor={g.color} stopOpacity={0.55} />
-              <stop offset="1" stopColor={g.color} stopOpacity={0.28} />
-            </radialGradient>
-          ))}
           {/* Mitt-disk: subtil ljus gradient. */}
           <radialGradient id="mx-aw-core" cx={CX} cy={CY - 24} r={96} gradientUnits="userSpaceOnUse">
             <stop offset="0" stopColor="var(--color-surface)" />
             <stop offset="1" stopColor="var(--color-canvas-subtle)" />
           </radialGradient>
-          {/* Mjuk, luftig skugga för aktivitetsbanden (ger separation utan outline). */}
-          <filter id="mx-aw-shadow" x="-30%" y="-30%" width="160%" height="160%">
-            <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="var(--movexum-svart)" floodOpacity={0.1} />
-          </filter>
-          {/* Lyft vid hover (lite tydligare, fortfarande mjuk). */}
-          <filter id="mx-aw-shadow-hover" x="-40%" y="-40%" width="180%" height="180%">
-            <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="var(--movexum-svart)" floodOpacity={0.18} />
-          </filter>
+          {/* Textbanor för kategorinamnen — längs ringens mitt, centrerade i toppen. */}
+          {rings.map((ring, i) => {
+            const r = ringInner(i) + ringWidth / 2;
+            const a = polarPoint(CX, CY, r, -40);
+            const b = polarPoint(CX, CY, r, 40);
+            return (
+              <path
+                key={`tp-${ring.id}`}
+                id={`mx-aw-tp-${i}`}
+                d={`M ${a.x.toFixed(3)} ${a.y.toFixed(3)} A ${r} ${r} 0 0 1 ${b.x.toFixed(3)} ${b.y.toFixed(3)}`}
+                fill="none"
+              />
+            );
+          })}
         </defs>
 
-        {/* Bakgrundsdisk bakom hela hjulet (mjuk inramning). */}
-        <circle cx={CX} cy={CY} r={252} fill="var(--color-canvas-subtle)" opacity={0.3} />
-
-        {/* Kvartalsring */}
-        {[1, 2, 3, 4].map((q) => {
-          const a = quarterSliceAngles(q);
-          const path = annulusSectorPath(CX, CY, 70, 116, a.start, a.end);
-          const label = polarPoint(CX, CY, 93, a.mid);
-          return (
-            <g key={`q${q}`}>
-              <path
-                d={path}
-                fill="var(--color-canvas-muted)"
-                stroke="var(--color-surface)"
-                strokeWidth={3}
-                opacity={0.7}
-              />
-              <text
-                x={label.x}
-                y={label.y}
-                textAnchor="middle"
-                dominantBaseline="central"
-                className="fill-foreground-muted"
-                fontSize={13}
-                fontWeight={600}
-              >
-                Q{q}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* Månadsring + aktivitets-yttre band. Keyad på året → inanimeringen
-            (mx-wheel-band) spelas om vid årsbyte. */}
         <g key={`wheel-${year}`}>
+          {/* Månadsring (innerst): klickbar, markerar innevarande/vald månad. */}
           {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
             const a = monthSliceAngles(m);
-            const monthPath = annulusSectorPath(CX, CY, 116, 170, a.start, a.end);
-            const labelPos = polarPoint(CX, CY, 143, a.mid);
-            const isEven = m % 2 === 0;
+            const monthPath = annulusSectorPath(CX, CY, MONTH_R0, MONTH_R1, a.start, a.end);
+            const labelPos = polarPoint(CX, CY, (MONTH_R0 + MONTH_R1) / 2, a.mid);
             const isCurrent = currentMonth === m;
             const isFocus = monthFocus === m;
             const highlighted = isCurrent || isFocus;
@@ -257,121 +202,131 @@ export function Wheel({
               <g key={`m${m}`}>
                 <path
                   d={monthPath}
-                  fill={isEven ? 'var(--color-canvas-subtle)' : 'var(--color-surface)'}
-                  stroke={highlighted ? 'var(--color-brand)' : 'var(--color-canvas-muted)'}
-                  strokeOpacity={highlighted ? 0.45 : 1}
-                  strokeWidth={isFocus ? 2 : isCurrent ? 1.5 : 1}
+                  fill={highlighted ? 'var(--color-brand)' : 'var(--color-canvas-muted)'}
+                  fillOpacity={isFocus ? 0.16 : isCurrent ? 0.1 : 0.55}
+                  stroke="var(--color-surface)"
+                  strokeWidth={2}
                   className={focusable ? 'cursor-pointer' : undefined}
                   onClick={focusable ? () => onFocusMonth!(m) : undefined}
                 />
-                {highlighted ? (
-                  <path d={monthPath} fill="var(--color-brand)" opacity={isFocus ? 0.09 : 0.05} pointerEvents="none" />
-                ) : null}
                 <text
                   x={labelPos.x}
                   y={labelPos.y}
                   textAnchor="middle"
                   dominantBaseline="central"
                   className={highlighted ? 'fill-brand' : 'fill-foreground'}
-                  fontSize={12}
+                  fontSize={11.5}
                   fontWeight={highlighted ? 700 : 600}
                   style={focusable ? { cursor: 'pointer' } : undefined}
                   onClick={focusable ? () => onFocusMonth!(m) : undefined}
                 >
                   {monthShortLabel(m)}
                 </text>
-
               </g>
             );
           })}
 
-          {/* Yttre band: en jämn sub-sektor per aktivitet i månaden, färgad per
-              kategori — det lugna grundutseendet. Den hovrade aktiviteten
-              lyfts en aning utåt och ritas sist (ovanpå periodspannet). */}
-          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
-            const a = monthSliceAngles(m);
-            const monthItems = byMonth[m];
-            return monthItems.map((it, idx) => {
-              const isHovered = hover?.item.id === it.id;
-              if (isHovered) return null; // ritas efter periodspannet nedan
-              const span = (a.end - a.start) / Math.max(1, monthItems.length);
-              const s0 = a.start + idx * span;
-              const e0 = s0 + span;
-              const hasFocus = !!focusIds && focusIds.size > 0;
-              const inFocus = !hasFocus || focusIds!.has(it.id);
-              const bold = emphasis === 'bold';
-              const dimmed = !!hover || !inFocus;
-              const arcOpacity = dimmed ? (inFocus ? 0.45 : bold ? 0.38 : 0.18) : 1;
-              const gradientSuffix = bold && inFocus ? '-strong' : '';
-              const d = roundedAnnulusSectorPath(CX, CY, 172, 250, s0 + 0.9, e0 - 0.9, 7);
-              // Stagger: sveper medurs runt året (månad → aktivitet).
-              const delay = (m - 1) * 45 + idx * 25;
-              return (
+          {/* Kategoriringar: mjukt tonad bana + aktiviteterna som bågar. */}
+          {rings.map((ring, i) => {
+            const r0 = ringInner(i);
+            const r1 = r0 + ringWidth;
+            const lanes = Math.min(MAX_LANES, ring.layout.laneCount);
+            const laneWidth = ringWidth / lanes;
+            return (
+              <g key={`ring-${ring.id}`}>
+                {/* Banan: en full cirkelring i kategorins ton. */}
                 <path
-                  key={it.id}
-                  d={d}
-                  fill={`url(#mx-aw-grad-${gradientKey(it.category)}${gradientSuffix})`}
-                  filter="url(#mx-aw-shadow)"
-                  className={`mx-wheel-band transition-opacity ${onPick ? 'cursor-pointer' : ''}`}
-                  style={{ opacity: arcOpacity, animationDelay: `${delay}ms` }}
-                  onClick={onPick ? () => onPick(it) : undefined}
-                  onMouseEnter={(ev) => track(it, ev)}
-                  onMouseMove={(ev) => track(it, ev)}
+                  d={annulusSectorPath(CX, CY, r0, r1, 0, 359.999)}
+                  fill={ring.color}
+                  fillOpacity={0.08}
                 />
-              );
-            });
+                {ring.layout.arcs.map((arc, idx) => {
+                  const it = arc.item;
+                  const isHovered = hover?.item.id === it.id;
+                  const inFocus = !hasFocus || focusIds!.has(it.id);
+                  const lane = Math.min(lanes - 1, arc.lane);
+                  const li0 = r0 + lane * laneWidth;
+                  const li1 = li0 + laneWidth;
+                  // Två nyanser växelvis → intilliggande bågar skiljs åt utan outline.
+                  const shade = idx % 2 === 0 ? 0.92 : 0.66;
+                  let opacity = shade;
+                  if (hover && !isHovered) opacity = shade * 0.4;
+                  else if (!inFocus) opacity = bold ? 0.28 : 0.18;
+                  else if (isHovered) opacity = 1;
+                  const d = roundedAnnulusSectorPath(CX, CY, li0, li1, arc.start, arc.end, 3);
+                  return (
+                    <path
+                      key={it.id}
+                      d={d}
+                      fill={ring.color}
+                      stroke="var(--color-surface)"
+                      strokeWidth={2}
+                      paintOrder="stroke"
+                      className={`mx-wheel-band transition-opacity ${onPick ? 'cursor-pointer' : ''}`}
+                      style={{ opacity, animationDelay: `${Math.round(arc.start * 1.2)}ms` }}
+                      onClick={onPick ? () => onPick(it) : undefined}
+                      onMouseEnter={(ev) => track(it, ev)}
+                      onMouseMove={(ev) => track(it, ev)}
+                    />
+                  );
+                })}
+              </g>
+            );
           })}
 
-          {/* Hovrad PERIOD: hela spannet (start → slut) sträcks ut som en mjuk
-              båge över månaderna den löper, bakom det lyfta bandet. */}
-          {hover && hoverSpan ? (
-            <path
-              d={roundedAnnulusSectorPath(CX, CY, 172, 250, hoverSpan.start + 0.9, hoverSpan.end - 0.9, 7)}
-              fill={`url(#mx-aw-grad-${gradientKey(hover.item.category)}-hover)`}
-              stroke={annualWheelCategoryColorVar(hover.item.category, categories)}
-              strokeOpacity={0.35}
-              strokeWidth={1}
-              strokeDasharray="3 3"
-              filter="url(#mx-aw-shadow)"
+          {/* Månadsavdelare genom ringarna (tunna, i ytfärg) — kvartalen lite tydligare. */}
+          {Array.from({ length: 12 }, (_, i) => i * 30).map((deg) => {
+            const a = polarPoint(CX, CY, RINGS_R0 - 1, deg);
+            const b = polarPoint(CX, CY, OUTER_R + 1, deg);
+            const quarter = deg % 90 === 0;
+            return (
+              <line
+                key={`sep-${deg}`}
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                stroke="var(--color-surface)"
+                strokeWidth={quarter ? 3 : 1.5}
+                pointerEvents="none"
+              />
+            );
+          })}
+
+          {/* Kategorinamn längs varje ring (toppen) — med ljus halo så det läses ovanpå bågar. */}
+          {rings.map((ring, i) => (
+            <text
+              key={`lbl-${ring.id}`}
+              fontSize={Math.min(9.5, Math.max(7.5, ringWidth * 0.42))}
+              fontWeight={700}
+              letterSpacing={0.6}
+              className="fill-foreground-muted uppercase"
+              style={{ paintOrder: 'stroke', stroke: 'var(--color-surface)', strokeWidth: 3, strokeLinejoin: 'round' }}
               pointerEvents="none"
-            />
-          ) : null}
+            >
+              <textPath href={`#mx-aw-tp-${i}`} startOffset="50%" textAnchor="middle" dominantBaseline="central">
+                {ring.label}
+              </textPath>
+            </text>
+          ))}
 
-          {/* Det hovrade bandet — lyft utåt, alltid överst. */}
-          {hover
-            ? (() => {
-                const it = hover.item;
-                const m = it.month ?? 0;
-                const monthItems = byMonth[m] ?? [];
-                const idx = monthItems.findIndex((x) => x.id === it.id);
-                if (m < 1 || idx === -1) return null;
-                const a = monthSliceAngles(m);
-                const span = (a.end - a.start) / Math.max(1, monthItems.length);
-                const s0 = a.start + idx * span;
-                const e0 = s0 + span;
-                const d = roundedAnnulusSectorPath(CX, CY, 174, 256, s0 + 0.9, e0 - 0.9, 7);
-                return (
-                  <path
-                    key={`hover-${it.id}`}
-                    d={d}
-                    fill={`url(#mx-aw-grad-${gradientKey(it.category)}-hover)`}
-                    filter="url(#mx-aw-shadow-hover)"
-                    className={onPick ? 'cursor-pointer' : undefined}
-                    onClick={onPick ? () => onPick(it) : undefined}
-                    onMouseMove={(ev) => track(it, ev)}
-                  />
-                );
-              })()
-            : null}
-
-          {/* "Idag"-markör: en svart prick utanför hjulet vid dagens datum. */}
-          {todayDot ? (
+          {/* "Idag": hårlinje + prick utanför hjulet. */}
+          {todayLine && todayDot ? (
             <g className="mx-wheel-hand" style={{ pointerEvents: 'none' }}>
-              <circle cx={todayDot.x} cy={todayDot.y} r={10} fill="var(--color-foreground)" opacity={0.1} />
+              <line
+                x1={todayLine.a.x}
+                y1={todayLine.a.y}
+                x2={todayLine.b.x}
+                y2={todayLine.b.y}
+                stroke="var(--color-foreground)"
+                strokeWidth={1}
+                strokeOpacity={0.5}
+              />
+              <circle cx={todayDot.x} cy={todayDot.y} r={9} fill="var(--color-foreground)" opacity={0.08} />
               <circle
                 cx={todayDot.x}
                 cy={todayDot.y}
-                r={4.5}
+                r={4}
                 fill="var(--color-foreground)"
                 stroke="var(--color-surface)"
                 strokeWidth={1.5}
@@ -381,12 +336,37 @@ export function Wheel({
         </g>
 
         {/* Mitt: år + nedräkning till nästa aktivitet. */}
-        <circle cx={CX} cy={CY} r={68} fill="url(#mx-aw-core)" stroke="var(--color-canvas-muted)" strokeWidth={1.5} />
+        <circle cx={CX} cy={CY} r={CORE_R} fill="url(#mx-aw-core)" stroke="var(--color-canvas-muted)" strokeWidth={1.5} />
         {next ? (
           <>
             <text
               x={CX}
-              y={CY - 12}
+              y={CY - 10}
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="fill-foreground"
+              fontSize={22}
+              fontWeight={700}
+            >
+              {year}
+            </text>
+            <text
+              x={CX}
+              y={CY + 12}
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="fill-foreground-muted"
+              fontSize={11}
+              fontWeight={600}
+            >
+              {next.ongoing ? 'Pågår nu' : `Nästa ${countdownLabel(next.days)}`}
+            </text>
+          </>
+        ) : (
+          <>
+            <text
+              x={CX}
+              y={CY - 6}
               textAnchor="middle"
               dominantBaseline="central"
               className="fill-foreground"
@@ -397,36 +377,11 @@ export function Wheel({
             </text>
             <text
               x={CX}
-              y={CY + 13}
-              textAnchor="middle"
-              dominantBaseline="central"
-              className="fill-foreground-muted"
-              fontSize={12}
-              fontWeight={600}
-            >
-              {next.ongoing ? 'Pågår nu' : `Nästa ${countdownLabel(next.days)}`}
-            </text>
-          </>
-        ) : (
-          <>
-            <text
-              x={CX}
-              y={CY - 8}
-              textAnchor="middle"
-              dominantBaseline="central"
-              className="fill-foreground"
-              fontSize={26}
-              fontWeight={700}
-            >
-              {year}
-            </text>
-            <text
-              x={CX}
-              y={CY + 16}
+              y={CY + 15}
               textAnchor="middle"
               dominantBaseline="central"
               className="fill-foreground-subtle"
-              fontSize={11}
+              fontSize={10.5}
             >
               Årshjul
             </text>
