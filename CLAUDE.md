@@ -3099,6 +3099,23 @@ select-värden i migration 1700000110): `affarsplan_strategi`,
   `suggestions`) — ingen ny surface-migration behövs.
 - **RBAC/isolation:** allt går via användarens auth-token (`getServerPb`) →
   owner-only RLS (§ 21.4) gäller; bolagslistan scopas av tenant + medlems-RLS.
+- **Uppladdningens robusthet (2026-09).** "Ladda upp" i `/filer` felade
+  med SDK:ns generiska "Failed to create record." utan orsak. Skrivvägen är nu
+  delad (`lib/user-files.server.ts`, `createUserFileRecord`) mellan
+  `/api/filer`, `uploadUserFileAction` och agentens `documents/save.ts`:
+  användartoken först, **superuser-fallback vid 400/403** (PB v0.23.4:s tysta
+  rule-nekande, § 21.3 — en PB-instans som inte kört migration 1700000111 bär
+  fortfarande `= tenant`-joinen i `user_files.createRule`); `owner`/`tenant`
+  sätts alltid server-side från den inloggade och verifieras efter
+  skrivningen (fallbacken är robusthet, inte behörighet). Förvalideringen
+  (`lib/user-file-upload.ts`, ren + enhetstestad) speglar migrationens mime-
+  whitelist/25 MB, härleder mime ur filändelsen när webbläsaren inte
+  rapporterar någon (Windows `.md`) och låter `.csv` vinna över Excel-
+  märkningen. PB:s fältfel översätts till svenska via den delade
+  `lib/pb-error.ts` (`describePbError`, enhetstestad — årshjulet använder
+  samma modul): en fil vars innehåll inte matchar whitelisten ger nu
+  "Filens innehåll matchar inte ett tillåtet format…" i stället för ett
+  odiagnostiserbart fel. Loggen är PII-fri (status + fältnycklar).
 - **Migration** (1700000110) är nytt, oföränderligt filnummer.
   Kategoriseringsfälten (`topic`/`topic_status`/`topic_confidence`/`startup`/
   `categorized_at`) **speglas i `scripts/setup-via-api.mjs`** (patchCollection
@@ -3828,7 +3845,10 @@ Tabellen
 visar en period i **varje** månad den löper (`monthsForAnnualWheelItem`) och
 bara taggar som faktiskt används som kolumner (`annualWheelTagsInUse`). En
 pågående period visas som "Pågår nu" i navet (`nextUpcomingItem` →
-`ongoing`).
+`ongoing`). **Klick i hjulet** fokuserar månaden i listan "Per månad" (månadsringen
+växlar fokus, ett aktivitetsband fokuserar sin startmånad och lyfter fram raden
+en kort stund) — redigering sker via pennan i listan, aldrig genom att klicka
+i hjulet, så en genomgång kan klickas igenom utan att dialoger öppnas.
 
 **Serier (upprepning).** "Nyhetsbrev den 15:e varje månad" skapas i ETT steg:
 `expandAnnualWheelSeries` (ren, enhetstestad) expanderar basen till
@@ -3953,6 +3973,17 @@ av tre olika miljöskäl. Alla tre är nu täckta i `lib/core/write/annual-wheel
    (least privilege). Fel i skrivlagret visas nu på svenska med PB:s
    fältdetaljer ("Kunde inte spara aktiviteten. (category: …)").
 
+5. **Flera fält i EN skrivning (`updateAnnualWheelItemFields`).** Redigerings-
+   dialogen skrev tidigare ett fält i taget, och varje steg validerades mot
+   postens GAMLA övriga datumfält — att flytta en period från jan–feb till
+   mars–april föll på "Periodens slut måste ligga efter starten" när `month`
+   skrevs först (mars mot det gamla slutet februari), trots att resultatet var
+   giltigt. Nu skickar dialogen alla ändrade fält i ett anrop
+   (`updateAnnualWheelItemFieldsAction`), skrivlagret validerar perioden mot
+   det SAMMANLAGDA nya tillståndet, skriver en gång och audit-loggar per fält
+   (samma `agent_actions`-format som förut). `updateAnnualWheelItemField`
+   (chatt-verktyget) är ett tunt omslag över samma funktion.
+
 **Deploy-invariant:** `verify-baseline.mjs` (`verifyAppWritableFields`)
 asserterar att `annual_wheel_items` HAR `day`/`tags`/`responsible`/`end_month`/
 `end_day` och att det deprecerade `track` INTE är obligatoriskt. Schemadrift fäller därmed deployen i
@@ -3986,6 +4017,24 @@ på skärm och projektor.
   (`calc(100dvh - 236px)` i både höjd och bredd) — procent-höjder inne i
   flex/grid kollapsade till 0 och gjorde hjulet osynligt på projektorn.
 - Riskklass n/a (ren presentation av redan synlig data, ingen AI).
+
+**Period (kvartal/månad) + sortering (2026-09).** Hjulets kvartalsring är
+klickbar precis som månadsringen: markera **Q4** så lyfts kvartalet och dess
+tre månader i hjulet, övriga band tonas ned (`focusIds`), "Per månad"-listan
+visar bara okt–dec och verksamhetstabellen bara de raderna. Samma state
+(`AnnualWheelPeriodKey` = `all` | `q1`–`q4` | `m1`–`m12`) styrs av
+Period-väljaren i filterraden, kvartals-chipsen (med antal) och klick i
+hjulet — att klicka det redan valda kvartalet/månaden släpper markeringen
+(`toggleAnnualWheelPeriod`). En kampanj matchar en period om NÅGON av dess
+månader ligger i den (`itemInAnnualWheelPeriod`, samma regel som tabellen);
+odaterade poster listas oförändrat som helårsaktiviteter. Sortering-väljaren
+(`AnnualWheelSort` = `date` | `category` | `tag` | `title`) styr ordningen i
+listor OCH tabellceller: **datum är default** (hela månaden före dagsatta,
+sedan dag, sedan titel), kategori följer legend-ordningen (raderade sist),
+tagg följer taxonomin — alla med datum som sekundär ordning
+(`compareAnnualWheelItems`/`sortAnnualWheelItems`, `groupItemsByMonth(items,
+sort, categoryOrder)`). All logik är ren och enhetstestad i
+`@platform/shared`; ingen ny dataväg, inga nya fält, riskklass n/a.
 
 **Redigeringsdialogen** (`EditorModal`) är sektionsindelad (*Vad / När /
 Taggar*) med klistrad topp- och bottenrad; period och upprepning är
@@ -4095,7 +4144,12 @@ npm-dependency (§ 10.2).
 1. Användaren håller in mikrofonknappen i chatten. `MediaRecorder` spelar in
    (Opus/webm när webbläsaren stödjer det), max **120 sekunder** — klienten
    stoppar automatiskt vid taket.
-2. Klippet POST:as till `/api/chat/voice` (route handler → inte bunden av
+2. Klippet **konverteras i webbläsaren till 16 kHz mono WAV**
+   (`lib/audio/wav.ts`, Web Audio API, ingen dependency) — Mistrals
+   transkriberings-endpoint accepterar inte webbläsarformaten webm/opus och
+   mp4/AAC (avvisas med 400). Fail-soft: kan klippet inte avkodas skickas
+   originalet, och serverns 4xx-fel bär numera Mistrals felorsak i klartext.
+   Därefter POST:as det till `/api/chat/voice` (route handler → inte bunden av
    `serverActions.bodySizeLimit`, samma mönster som § 18.2/§ 26.3).
    Auth-cookien är `SameSite=Lax` → cross-site POST saknar cookie (CSRF-skydd,
    § 17.8).
@@ -4414,7 +4468,9 @@ segment).
    `timeslice`, sådana chunkar är inte självständigt avkodbara; det FÖRSTA
    segmentet är kort, `MEETING_FIRST_SEGMENT_SECONDS` = 20 s, så live-texten —
    eller ett konfigurationsfel — syns snabbt även i korta möten). Varje segment
-   POSTas till `/api/chat/meeting/segment` (staff-only, rate-limitad 40/5 min,
+   **konverteras till 16 kHz mono WAV i webbläsaren** (`lib/audio/wav.ts`,
+   § 31.2 — Voxtral avvisar webm/opus- och mp4-klipp med 400) och POSTas till
+   `/api/chat/meeting/segment` (staff-only, rate-limitad 40/5 min,
    ägar-verifierad, samma Voxtral-klient + validering som § 31), texten
    **personnummer-saneras** (§ 15.6-regexen — folk säger personnummer högt) och
    appendas på raden. Live-transkriptet växer i panelen. Robusthet: wake lock,
@@ -4432,10 +4488,13 @@ segment).
    kostar max ett segment; "Återuppta granskningen"-bannern i `/chatt` öppnar
    det oavslutade mötet.
 4. **Granskning (människa-i-loopen, art. 14):** redigerbart transkript;
-   "Generera protokoll" (`meeting-protocol.ts`: isolerad mistral-medium→small,
-   kedje-summering >60 KB, budget-spärren § 9.6 prövas, transkriptet är DATA
-   inte instruktioner); "Dela upp i repliker" (LLM-gissad turindelning — REN
-   textbearbetning, anonyma "Talare 1/2", ≤40 KB).
+   protokollutkastet (sammanfattning/beslut/åtgärdspunkter) **genereras
+   automatiskt när granskningen öppnas** (även vid återupptagen granskning;
+   fel sväljs — knappen "Generera protokoll" finns kvar och visar orsaken;
+   inget sparas automatiskt) via `meeting-protocol.ts` (isolerad
+   mistral-medium→small, kedje-summering >60 KB, budget-spärren § 9.6 prövas,
+   transkriptet är DATA inte instruktioner); "Dela upp i repliker" (LLM-gissad
+   turindelning — REN textbearbetning, anonyma "Talare 1/2", ≤40 KB).
 5. **Spara:** `saveMeetingToStartupAction` — en MÄNSKLIG knapptryckning (inte
    agent-skriv) → coachen får därför välja **konfidentiell**, vilket
    chatt-agentens `create_startup_note` med rätta aldrig får (§ 33). Skapar
@@ -4487,3 +4546,107 @@ persisterad/loggad, når aldrig AI-kontexten. Fail-soft utan koppling.
   `ai_usage_events` (surface `dashboard_chat`) och räknas mot månadstaket;
   protokollgenereringen kör `assertWithinAiBudget`; hårda tak på längd,
   segment, chunk-antal och turindelningsstorlek.
+
+---
+
+## 35. Mobil app-läge — PWA (hemskärm), bottom-meny & mobilpolish
+
+### 35.1 Översikt
+
+Plattformen är en **installerbar PWA**: den kan läggas på hemskärmen (iOS
+Safari, Android Chrome, desktop Chrome/Edge) och körs då i standalone-läge
+utan webbläsar-krom. På mobil/surfplatta (≤ 1024 px, samma brytpunkt som
+rail-drawern) visas en **bottom-meny** med fem platser där **chatten är den
+upphöjda mittknappen**; "Mer" öppnar den befintliga sidmenyn (drawern) med
+hela navigationen och kontomenyn. Inga nya beroenden (ingen `next-pwa`) —
+service workern och manifestet är handskrivna och versionerade i repot.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `apps/web/src/app/manifest.ts` | Web App Manifest (`/manifest.webmanifest`): namn, start-URL `/chatt`, `display: standalone`, brand-färger, ikoner, genvägar |
+| `apps/web/public/icons/*.png` + `apps/web/public/favicon.ico` | Favicon (16/32/48 i ICO + PNG) och app-ikoner (192/512, maskable 512, apple-touch-icon 180) — Movexum-wordmarken i vitt på **svart** (`#000000`) |
+| `apps/web/scripts/render-pwa-icons.mjs` | Rastrerar favicon, app-ikoner och `public/brand/movexum-wordmark-dark.png` (vit wordmark, transparent) från Sora via headless Chromium + canvas-nedskalning (ingen npm-dep); kör om vid brand-ändring |
+| `apps/web/public/sw.js` | Service worker: nät-först för navigeringar (aldrig cachade sidor), cache-first för `/_next/static`, fonter, ikoner; offline-fallback |
+| `apps/web/src/components/pwa/PwaRegister.tsx` | Registrerar SW:n (bara i produktion + säker kontext), tar över direkt vid ny deploy |
+| `apps/web/src/components/pwa/InstallPrompt.tsx` | "Använd Movexum som app"-hint: `beforeinstallprompt` (Android/Chrome) eller iOS-instruktion; avfärdas 30 dagar |
+| `apps/web/src/lib/pwa.ts` (+ `.test.ts`) | Rena hjälpare: standalone-detektion, iOS-Safari-detektion, avfärdande |
+| `apps/web/src/app/offline/page.tsx` | Statisk offline-sida (förcachad av SW:n, renderas utan AppShell) |
+| `apps/web/src/lib/mobile-nav.ts` (+ `.test.ts`) | Ren urvalslogik för bottom-menyns fem platser (RBAC-filtrerad, prioriterade kandidater) |
+| `apps/web/src/lib/module-icons.ts` | Ikon per modul-id — delas av railen och bottom-menyn |
+| `apps/web/src/components/proto/MobileBottomNav.tsx` | Bottom-menyn (klient): aktiv-markering, badge, "Mer" → drawer, döljs när tangentbordet är uppe |
+| `apps/web/src/app/prototype.css` (§ "Mobil app-läge") | Bottom-meny, install-hint, `display-mode: standalone`, safe-area, helhöjds-ytor |
+
+### 35.2 Bottom-menyn
+
+- **Platser:** `[vänster 1] [vänster 2] [MITT] [höger 1] [Mer]`. Urvalet görs
+  server-side i `ProtoShell` via `buildMobileNav` med **samma
+  `canAccessModuleForUser` som railen** (menyn är UI-kurering, aldrig
+  säkerhetsgräns — RLS/RBAC ligger kvar i § 21).
+- **Staff/observer:** Översikt (`inkorg`, med olästa-badge) · Bolag
+  (`startups`) · **Chatt** (`idag`) · Pågående (`pagaende`) · Mer. Avstängda
+  moduler hoppas över och nästa kandidat tar platsen (uppdrag, årshjul, filer …).
+- **Ren `startup_member`** (§ 22): Aktiviteter · Filer · **Översikt**
+  (`min_oversikt` — chatten finns inte för medlemmar, § 21.5) · De minimis ·
+  Mer. Chatten exponeras aldrig (enhetstestat).
+- **Mittknappen** är en upphöjd cirkel i mörkblå (`#002c40`, vit ikon); i dark
+  mode ljusblå (`#4fc4ea`, mörkblå ikon) — samma mappning som `--color-brand`
+  (§ 3.2). Aktiv sida markeras med accentfärg; inga ad-hoc-färger.
+- **Tangentbord:** när ett textfält får fokus sätts `body.mx-bnav-hidden` →
+  menyn glider ned och `--mx-bnav-total` nollas så chattens komposer får hela
+  den krympta viewporten (`interactiveWidget: resizes-content` i `viewport`).
+- **Layout:** `.mx-view` får `padding-bottom: var(--mx-bnav-total)`; fasta
+  helhöjds-ytor (`.mx-page`, `.mx-workspace`) räknar i stället bort menyn ur
+  sin `100dvh`-höjd (`:has(> .mx-page)` nollar paddingen). Safe-area-insets
+  (`env(safe-area-inset-bottom/top)`) respekteras överallt; `viewport-fit=cover`.
+
+### 35.3 PWA — säkerhet och dataminimering (bindande)
+
+- **Service workern cachar ALDRIG sidor eller API-svar.** Navigeringar går
+  alltid till nätet (fallback = förcachad `/offline`); `/api/`, PocketBase och
+  server actions rörs inte. Bara oföränderliga, publika resurser (`/_next/static`,
+  `/fonts`, `/icons`, `/brand`) cachas. Inloggad domändata/PII hamnar därmed
+  aldrig i en SW-cache (GDPR § 5, § 21-isolering bevaras).
+- **`/offline` renderas utan AppShell** (root-layouten, som `/login`), så den
+  förcachade HTML:en aldrig innehåller användarnamn, bolagslista eller
+  tenant-data.
+- **CSP (§ 10.3):** `worker-src 'self'` tillagd i `middleware.ts` — utan den
+  faller browsern tillbaka på `script-src`, där `'strict-dynamic'` ignorerar
+  `'self'` och registreringen blockeras i produktion. `manifest-src 'self'`
+  fanns redan. Inga externa origins, inga CDN.
+- **Publika sökvägar:** `/manifest.webmanifest`, `/sw.js`, `/icons/` och
+  `/offline` är undantagna auth-redirecten i middleware:n — de hämtas av
+  browsern utan cookies och innehåller ingen data.
+- **HTTP-cache:** `/sw.js` skickas med `Cache-Control: no-cache` (next.config)
+  så en ny deploy tar över direkt (`SKIP_WAITING` + ett reload) — en gammal
+  flik kör inte vidare mot inaktuella statiska filer (samma princip som
+  `ChunkReloadListener`).
+- **Kräver https:** service workern registreras bara i säker kontext (https /
+  localhost) och bara i produktion (dev-servern får aldrig en cache framför
+  sig). På http-staging (sslip.io utan cert, § 10.3) fungerar allt som förut —
+  bara utan offline-fallback och utan installations-prompt.
+- **Install-hinten** lagrar bara en tidsstämpel i `localStorage`
+  (`movexum-install-dismissed-at`) — bekvämlighet, ingen datakälla.
+- **Riskklass (EU AI Act):** n/a — ren klient-/navigationsfunktion, ingen
+  AI-inferens, ingen ny dataväg. Inga nya kollektioner, fält eller migrationer.
+
+### 35.4 Standalone-läge
+
+`@media (display-mode: standalone)`: `overscroll-behavior-y: none` (inget
+pull-to-refresh-hopp), topbar/rail respekterar `safe-area-inset-top`,
+`-webkit-touch-callout: none` på navigering.
+
+**Svart ikon- och kromfärg (2026-09).** Favicon och hemskärmsikon är
+Movexum-wordmarken i vitt på **svart** (`#000000`) — inte mörkblå. Därför är
+`manifest.ts` (`theme_color` + `background_color`), `viewport.themeColor` i
+`app/layout.tsx` (webbläsarens adressfält/flikrad och desktop-PWA:ns
+fönsterram, i BÅDA färglägena) och `appleWebApp.statusBarStyle` (`black`,
+opak svart statusrad på iOS) satta till svart så ikon, splash och
+webbläsarfönster hänger ihop. Byt till `black-translucent` först om hela
+topbaren designas om för att ligga under statusraden. Ikonerna, `favicon.ico`
+och den vita wordmark-PNG:n renderas om med
+`node apps/web/scripts/render-pwa-icons.mjs` (Chromium via `CHROME_BIN` eller
+Playwrights katalog) om wordmark/färg ändras — uppdatera i så fall även
+`manifest.ts`/`layout.tsx` (färgerna) och bumpa `VERSION` i `public/sw.js`
+(ikonerna cachas cache-first) i samma PR (§ 2/§ 5).

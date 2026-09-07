@@ -13,6 +13,7 @@ import {
 } from '@platform/shared';
 import { Icon } from '@/components/proto/Icon';
 import { pickRecorderMime } from '@/components/VoiceInputButton';
+import { VOICE_WAV_MIME, convertBlobToWav } from '@/lib/audio/wav';
 import {
   discardMeetingAction,
   endMeetingAction,
@@ -181,6 +182,9 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
       setStartupId(res.meeting.startupId);
       setTranscript(res.meeting.transcript);
       setPhase('review');
+      // Protokollet persisteras inte i mötesraden — ta fram ett nytt utkast
+      // direkt vid återupptagen granskning (samma auto-flöde som vid avslut).
+      autoGenerateProtocol(res.meeting.transcript);
     })();
     return () => {
       cancelled = true;
@@ -284,7 +288,14 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
 
   function enqueueUpload(blob: Blob, mime: string, index: number) {
     setSegments((prev) => [...prev, { index, text: '', status: 'pending' }]);
-    uploadChainRef.current = uploadChainRef.current.then(() => uploadSegment(blob, mime, index));
+    uploadChainRef.current = uploadChainRef.current.then(async () => {
+      // Voxtrals transkriberings-endpoint accepterar inte webbläsarens
+      // inspelningsformat (webm/opus, mp4/AAC) — konvertera segmentet till
+      // 16 kHz mono WAV innan uppladdning. Fail-soft: kan klippet inte
+      // avkodas skickas originalet, och servern svarar med Mistrals orsak.
+      const wav = await convertBlobToWav(blob);
+      return uploadSegment(wav ?? blob, wav ? VOICE_WAV_MIME : mime, index);
+    });
   }
 
   const startSegment = useCallback((stream: MediaStream) => {
@@ -446,6 +457,26 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
       );
     }
     setPhase('review');
+    autoGenerateProtocol(ended.transcript);
+  }
+
+  /**
+   * Tar fram protokollutkastet (sammanfattning/beslut/åtgärdspunkter) direkt
+   * när granskningen öppnas — mötet ska sammanställas utan extra klick.
+   * Människa-i-loopen är intakt (art. 14): utkastet granskas/redigeras och
+   * INGET sparas automatiskt. Fel sväljs här — knappen "Generera protokoll"
+   * finns kvar och visar orsaken vid ett manuellt försök.
+   */
+  function autoGenerateProtocol(currentTranscript: string) {
+    const meetingId = meetingIdRef.current;
+    if (!meetingId || !currentTranscript.trim()) return;
+    setAiBusy('protocol');
+    void generateMeetingProtocolAction(meetingId)
+      .then((res) => {
+        if (res.protocol) setProtocol((cur) => cur || res.protocol || '');
+      })
+      .catch(() => undefined)
+      .finally(() => setAiBusy(null));
   }
 
   async function discardMeeting() {

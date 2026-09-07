@@ -9,6 +9,7 @@ import {
   logAgentAction,
   schemaDriftMessage,
   updateAnnualWheelItemField,
+  updateAnnualWheelItemFields,
   type AnnualWheelWritableField
 } from '@/lib/core/write';
 import type { Actor } from '@/lib/core/write';
@@ -217,6 +218,46 @@ export async function updateAnnualWheelItemAction(
   );
   if (!result.ok) {
     console.error('[arshjul] update failed', { tenant: user.tenant, field, error: result.error });
+    return { error: result.error };
+  }
+
+  revalidate();
+  return {
+    ok: true,
+    ...(heal.warning ? { warning: heal.warning } : {}),
+    ...(heal.notice ? { notice: heal.notice } : {})
+  };
+}
+
+/**
+ * Uppdaterar FLERA fält på en årshjuls-post i en skrivning. Redigerings-
+ * dialogen använder denna så att en periods start och slut valideras som en
+ * helhet — ett fält i taget föll på "slutet måste ligga efter starten" när
+ * starten flyttades innan det gamla slutet var uppdaterat (§ 30.4).
+ */
+export async function updateAnnualWheelItemFieldsAction(
+  itemId: string,
+  changes: Partial<Record<AnnualWheelWritableField, unknown>>
+): Promise<AnnualWheelActionState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: 'Ej inloggad.' };
+  if (!hasRole(user.roles, EDIT_ROLES)) return { error: 'Åtkomst nekad.' };
+  if (!itemId) return { error: 'Post saknas.' };
+
+  const heal = await healSchema();
+  const pb = await getServerPb();
+  const result = await updateAnnualWheelItemFields(
+    pb,
+    userActor(user),
+    { itemId, changes },
+    { fallbackPb: superuserPb }
+  );
+  if (!result.ok) {
+    console.error('[arshjul] update failed', {
+      tenant: user.tenant,
+      fields: Object.keys(changes),
+      error: result.error
+    });
     return { error: result.error };
   }
 

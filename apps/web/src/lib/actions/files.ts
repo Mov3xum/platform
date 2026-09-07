@@ -8,6 +8,8 @@ import { categorizeFile, type StartupOption } from '@/lib/ai/file-categorize';
 import { indexUserFile } from '@/lib/ai/rag';
 import { logAiUsage, logIndexUsage } from '@/lib/ai/usage';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
+import { createUserFileRecord } from '@/lib/user-files.server';
+import { describeUserFileCreateError, validateUserFileUpload } from '@/lib/user-file-upload';
 import {
   isFileTopic,
   resolveFileTopic,
@@ -18,25 +20,7 @@ import {
 } from '@platform/shared';
 import type PocketBase from 'pocketbase';
 
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB — matchar migrationen
 const MAX_FILENAME = 255;
-
-const UPLOAD_MIME_KIND: Record<string, UserFileDocKind> = {
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-  'application/vnd.ms-excel': 'xlsx',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
-  'application/pdf': 'pdf'
-};
-const ALLOWED_UPLOAD_MIMES = new Set([
-  ...Object.keys(UPLOAD_MIME_KIND),
-  'text/plain',
-  'text/markdown',
-  'text/csv',
-  'image/png',
-  'image/jpeg',
-  'image/webp'
-]);
 
 export interface UserFileListItem {
   id: string;
@@ -173,34 +157,33 @@ export async function uploadUserFileAction(formData: FormData): Promise<FileActi
   const pb = await getServerPb();
   const file = formData.get('file');
   if (!(file instanceof File)) return { error: 'Ingen fil vald.' };
-  if (file.size > MAX_UPLOAD_BYTES) return { error: 'Filen är större än 25 MB.' };
-  const mime = (file.type || '').toLowerCase();
-  if (!ALLOWED_UPLOAD_MIMES.has(mime)) {
-    return { error: `Filformatet ${mime || 'okänt'} stöds inte.` };
-  }
-  const filename = file.name.slice(0, MAX_FILENAME) || 'fil';
+  // Delad förvalidering (mime-whitelist speglar migration 1700000085).
+  const check = validateUserFileUpload({ name: file.name, size: file.size, type: file.type });
+  if (!check.ok) return { error: check.error };
+  let fileId: string;
   try {
-    const fd = new FormData();
-    fd.append('tenant', user.tenant);
-    fd.append('owner', user.id);
-    fd.append('file', file, filename);
-    fd.append('filename', filename);
-    fd.append('mime', mime);
-    fd.append('size_bytes', String(file.size));
-    fd.append('source', 'upload');
-    fd.append('doc_kind', UPLOAD_MIME_KIND[mime] || 'other');
-    fd.append('topic_status', 'pending');
-    const rec = await pb.collection('user_files').create(fd);
-    // Best-effort AI-kategorisering direkt vid uppladdning (fail-soft → filen
-    // hamnar i granskningskön om AI:n är osäker eller fallerar).
-    await categorizeAndStore(pb, user.tenant, user.id, rec.id as string).catch(() => {});
-    // Best-effort RAG-indexering så chatten kan köra mot filen (§ 27).
-    await extractAndIndexUserFile(pb, user.tenant, user.id, rec.id as string).catch(() => {});
-    revalidatePath('/filer');
-    return { fileId: rec.id as string };
+    // Delad skrivväg med superuser-fallback vid PB v0.23.4:s tysta rule-
+    // nekande (§ 21.3); owner/tenant sätts server-side från den inloggade.
+    const rec = await createUserFileRecord(pb, user, {
+      file,
+      filename: check.filename,
+      mime: check.mime,
+      sizeBytes: file.size,
+      source: 'upload',
+      docKind: check.docKind,
+      extra: { topic_status: 'pending' }
+    });
+    fileId = rec.id;
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Kunde inte ladda upp filen.' };
+    return { error: describeUserFileCreateError(err) };
   }
+  // Best-effort AI-kategorisering direkt vid uppladdning (fail-soft → filen
+  // hamnar i granskningskön om AI:n är osäker eller fallerar).
+  await categorizeAndStore(pb, user.tenant, user.id, fileId).catch(() => {});
+  // Best-effort RAG-indexering så chatten kan köra mot filen (§ 27).
+  await extractAndIndexUserFile(pb, user.tenant, user.id, fileId).catch(() => {});
+  revalidatePath('/filer');
+  return { fileId };
 }
 
 // ─── AI-kategorisering (CLAUDE.md § 24) ──────────────────────────────────────

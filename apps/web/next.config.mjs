@@ -38,7 +38,18 @@ const securityHeaders = [
 const nextConfig = {
   reactStrictMode: true,
   async headers() {
-    return [{ source: '/:path*', headers: securityHeaders }];
+    return [
+      { source: '/:path*', headers: securityHeaders },
+      // Service workern får aldrig HTTP-cachas — annars kan en gammal worker
+      // ligga kvar upp till 24 h efter en deploy (CLAUDE.md § 35).
+      {
+        source: '/sw.js',
+        headers: [
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
+          { key: 'Service-Worker-Allowed', value: '/' }
+        ]
+      }
+    ];
   },
   async redirects() {
     return [
