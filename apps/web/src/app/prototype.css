@@ -973,6 +973,8 @@ select.mx-input:focus {
 .mx-t-lg { font-size: 17px; }
 .mx-t-up { text-transform: uppercase; letter-spacing: 1.5px; }
 .mx-tnum { font-variant-numeric: tabular-nums; }
+/* Inline scroll-yta med uttonade kanter (masken sätts per element av FadeScroll). */
+.mx-fade-scroll { scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease; }
 .mx-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .mx-mt-1 { margin-top: 4px; }
