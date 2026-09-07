@@ -9,11 +9,11 @@
  *    ikoner och brand-SVG:er (cache-first, versionerade filnamn).
  * Registreras bara i produktion (PwaRegister.tsx).
  */
-const VERSION = 'mx-pwa-v1';
+const VERSION = 'mx-pwa-v2'; // v2: svart favicon/ikoner (wordmark) — bump så gamla ikoner rensas
 const STATIC_CACHE = `${VERSION}-static`;
 const OFFLINE_URL = '/offline';
 
-const PRECACHE = [OFFLINE_URL, '/icons/icon-192.png', '/icons/icon-512.png'];
+const PRECACHE = [OFFLINE_URL, '/favicon.ico', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -39,6 +39,7 @@ function isStaticAsset(url) {
   if (url.origin !== self.location.origin) return false;
   const p = url.pathname;
   return (
+    p === '/favicon.ico' ||
     p.startsWith('/_next/static/') ||
     p.startsWith('/fonts/') ||
     p.startsWith('/icons/') ||

@@ -18,14 +18,22 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: 'Movexum',
-    statusBarStyle: 'default'
+    // Svart statusrad i hemskärmsläge — matchar ikonens och manifestets
+    // svarta bakgrund.
+    statusBarStyle: 'black'
   },
   formatDetection: { telephone: false },
   icons: {
+    // Favicon = Movexum-wordmarken i vitt på svart (renderad av
+    // scripts/render-pwa-icons.mjs). ICO:n bär 16/32/48 px för flikar och
+    // bokmärken; PNG:erna används av Android/desktop-PWA.
     icon: [
+      { url: '/favicon.ico', sizes: '16x16 32x32 48x48', type: 'image/x-icon' },
+      { url: '/icons/favicon-32.png', sizes: '32x32', type: 'image/png' },
       { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
       { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }
     ],
+    shortcut: [{ url: '/favicon.ico' }],
     apple: [{ url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }]
   }
 };
@@ -38,10 +46,9 @@ export const viewport: Viewport = {
   // Låt det virtuella tangentbordet krympa layouten (Chrome/Android) så att
   // chattens komposer och bottom-menyn aldrig hamnar bakom tangentbordet.
   interactiveWidget: 'resizes-content',
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
-    { media: '(prefers-color-scheme: dark)', color: '#000000' }
-  ]
+  // Svart webbläsarkrom (adressfält/flikrad på mobil, fönsterram i
+  // desktop-PWA) i båda lägena — samma svarta yta som favicon/hemskärmsikon.
+  themeColor: '#000000'
 };
 
 export default async function RootLayout({
