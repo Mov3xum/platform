@@ -3099,6 +3099,23 @@ select-värden i migration 1700000110): `affarsplan_strategi`,
   `suggestions`) — ingen ny surface-migration behövs.
 - **RBAC/isolation:** allt går via användarens auth-token (`getServerPb`) →
   owner-only RLS (§ 21.4) gäller; bolagslistan scopas av tenant + medlems-RLS.
+- **Uppladdningens robusthet (2026-09).** "Ladda upp" i `/filer` felade
+  med SDK:ns generiska "Failed to create record." utan orsak. Skrivvägen är nu
+  delad (`lib/user-files.server.ts`, `createUserFileRecord`) mellan
+  `/api/filer`, `uploadUserFileAction` och agentens `documents/save.ts`:
+  användartoken först, **superuser-fallback vid 400/403** (PB v0.23.4:s tysta
+  rule-nekande, § 21.3 — en PB-instans som inte kört migration 1700000111 bär
+  fortfarande `= tenant`-joinen i `user_files.createRule`); `owner`/`tenant`
+  sätts alltid server-side från den inloggade och verifieras efter
+  skrivningen (fallbacken är robusthet, inte behörighet). Förvalideringen
+  (`lib/user-file-upload.ts`, ren + enhetstestad) speglar migrationens mime-
+  whitelist/25 MB, härleder mime ur filändelsen när webbläsaren inte
+  rapporterar någon (Windows `.md`) och låter `.csv` vinna över Excel-
+  märkningen. PB:s fältfel översätts till svenska via den delade
+  `lib/pb-error.ts` (`describePbError`, enhetstestad — årshjulet använder
+  samma modul): en fil vars innehåll inte matchar whitelisten ger nu
+  "Filens innehåll matchar inte ett tillåtet format…" i stället för ett
+  odiagnostiserbart fel. Loggen är PII-fri (status + fältnycklar).
 - **Migration** (1700000110) är nytt, oföränderligt filnummer.
   Kategoriseringsfälten (`topic`/`topic_status`/`topic_confidence`/`startup`/
   `categorized_at`) **speglas i `scripts/setup-via-api.mjs`** (patchCollection

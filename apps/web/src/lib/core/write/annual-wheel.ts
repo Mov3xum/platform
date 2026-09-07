@@ -21,6 +21,7 @@ import {
 import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
 import { listAnnualWheelCategoryKeys } from '@/lib/annual-wheel/categories';
+import { describePbError, pbFieldErrors, pbStatus } from '@/lib/pb-error';
 
 /**
  * PB-target för BÅDE läsning och skrivning är kollektionens NAMN, inte dess
@@ -38,47 +39,8 @@ const RESPONSIBLE_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor', 'observ
 /** Fält som kräver migration 1700000138/1700000139/1700000141 för att lagras. */
 const SCHEMA_FIELDS = ['day', 'tags', 'responsible', 'end_month', 'end_day'] as const;
 
-interface PbFieldError {
-  message?: string;
-}
-
 function statusOf(err: unknown): number | null {
-  const s = (err as { status?: unknown })?.status;
-  return typeof s === 'number' ? s : null;
-}
-
-/** Fältnycklar som PocketBase klagade på (t.ex. { track: 'Cannot be blank.' }). */
-function pbFieldErrors(err: unknown): Record<string, string> {
-  const data = (err as { response?: { data?: unknown }; data?: { data?: unknown } })?.response
-    ?.data as Record<string, PbFieldError> | undefined;
-  const nested = (err as { data?: { data?: unknown } })?.data?.data as
-    | Record<string, PbFieldError>
-    | undefined;
-  const source = nested ?? data;
-  if (!source || typeof source !== 'object') return {};
-  const out: Record<string, string> = {};
-  for (const [field, detail] of Object.entries(source)) {
-    const message = detail && typeof detail === 'object' ? detail.message : undefined;
-    if (typeof message === 'string') out[field] = message;
-  }
-  return out;
-}
-
-/**
- * PocketBase-fel som en LÄSBAR mening. SDK:ns `err.message` är alltid den
- * generiska "Failed to create record." — de användbara detaljerna ligger i
- * `response.data` per fält. Utan detta blev varje misslyckad skrivning en
- * odiagnostiserbar "Kunde inte skapa årshjuls-post".
- */
-function describePbError(err: unknown, fallback: string): string {
-  const fields = pbFieldErrors(err);
-  const parts = Object.entries(fields).map(([field, message]) => `${field}: ${message}`);
-  const raw = err instanceof Error && err.message ? err.message : '';
-  // SDK:ns generiska engelska meddelanden ersätts med fallback-texten; PB:s
-  // fältdetaljer (det som faktiskt förklarar felet) behålls.
-  const generic = /^Failed to (create|update|delete) record\.?$/i.test(raw) || !raw;
-  const base = generic ? fallback : raw;
-  return parts.length > 0 ? `${base} (${parts.join('; ')})` : base;
+  return pbStatus(err) ?? null;
 }
 
 /**
