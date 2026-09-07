@@ -172,20 +172,6 @@ export function Wheel({
             <stop offset="0" stopColor="var(--color-surface)" />
             <stop offset="1" stopColor="var(--color-canvas-subtle)" />
           </radialGradient>
-          {/* Textbanor för kategorinamnen — längs ringens mitt, centrerade i toppen. */}
-          {rings.map((ring, i) => {
-            const r = ringInner(i) + ringWidth / 2;
-            const a = polarPoint(CX, CY, r, -40);
-            const b = polarPoint(CX, CY, r, 40);
-            return (
-              <path
-                key={`tp-${ring.id}`}
-                id={`mx-aw-tp-${i}`}
-                d={`M ${a.x.toFixed(3)} ${a.y.toFixed(3)} A ${r} ${r} 0 0 1 ${b.x.toFixed(3)} ${b.y.toFixed(3)}`}
-                fill="none"
-              />
-            );
-          })}
         </defs>
 
         <g key={`wheel-${year}`}>
@@ -293,22 +279,42 @@ export function Wheel({
             );
           })}
 
-          {/* Kategorinamn längs varje ring (toppen) — med ljus halo så det läses ovanpå bågar. */}
-          {rings.map((ring, i) => (
-            <text
-              key={`lbl-${ring.id}`}
-              fontSize={Math.min(9.5, Math.max(7.5, ringWidth * 0.42))}
-              fontWeight={700}
-              letterSpacing={0.6}
-              className="fill-foreground-muted uppercase"
-              style={{ paintOrder: 'stroke', stroke: 'var(--color-surface)', strokeWidth: 3, strokeLinejoin: 'round' }}
-              pointerEvents="none"
-            >
-              <textPath href={`#mx-aw-tp-${i}`} startOffset="50%" textAnchor="middle" dominantBaseline="central">
-                {ring.label}
-              </textPath>
-            </text>
-          ))}
+          {/* Kategorirubriker: raka etiketter i en ryggrad klockan tolv — en per
+              ring, i ringens mitt, med ljus bakgrund så de läses ovanpå bågarna. */}
+          {rings.map((ring, i) => {
+            const cy = CY - (ringInner(i) + ringWidth / 2);
+            const fontSize = Math.min(11, Math.max(9, ringWidth * 0.5));
+            const h = Math.min(ringWidth - 1, fontSize + 7);
+            // Bredd uppskattas ur teckenantal (SVG kan inte mäta text i SSR).
+            const w = Math.round(ring.label.length * fontSize * 0.56 + 22);
+            return (
+              <g key={`lbl-${ring.id}`} pointerEvents="none">
+                <rect
+                  x={CX - w / 2}
+                  y={cy - h / 2}
+                  width={w}
+                  height={h}
+                  rx={h / 2}
+                  fill="var(--color-surface)"
+                  fillOpacity={0.96}
+                  stroke={ring.color}
+                  strokeOpacity={0.35}
+                  strokeWidth={1}
+                />
+                <circle cx={CX - w / 2 + 8} cy={cy} r={2.6} fill={ring.color} />
+                <text
+                  x={CX - w / 2 + 14}
+                  y={cy}
+                  dominantBaseline="central"
+                  fontSize={fontSize}
+                  fontWeight={600}
+                  className="fill-foreground"
+                >
+                  {ring.label}
+                </text>
+              </g>
+            );
+          })}
 
           {/* "Idag": hårlinje + prick utanför hjulet. */}
           {todayLine && todayDot ? (

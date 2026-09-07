@@ -3818,8 +3818,9 @@ månad en 30°-sektor, en period en båge från start till slut. Överlappande
 aktiviteter i samma kategori packas i körfält (`packAnnualWheelArcs`, max
 tre synliga) så inget ritas ovanpå något annat; intilliggande bågar skiljs
 åt med en 2 px yta-gap och två växlande nyanser av kategorins brand-token,
-aldrig outline. Kategorinamnet löper längs ringens topp (textPath med ljus
-halo), ringbanan är en svag ton av samma färg, månads-/kvartalsavdelare är
+aldrig outline. Kategorinamnen sitter som raka etiketter i en ryggrad
+klockan tolv (en per ring, ljus pill med färgprick — läsbara även på smala
+ringar), ringbanan är en svag ton av samma färg, månads-/kvartalsavdelare är
 tunna linjer i ytfärg och "idag" är en hårlinje genom ringarna + en prick
 utanför hjulet. Hovring lyfter bågen och visar kortet med fullständigt
 datum ("15 januari – 28 februari 2026"), taggar och ansvarig.
