@@ -6,6 +6,8 @@ import { extractPdfText, extractXlsxText } from '@/lib/ai/attachments';
 import { logAiUsage } from '@/lib/ai/usage';
 import { indexUserFile } from '@/lib/ai/rag';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
+import { createUserFileRecord } from '@/lib/user-files.server';
+import { describeUserFileCreateError, validateUserFileUpload } from '@/lib/user-file-upload';
 import {
   isFileTopic,
   resolveFileTopic,
@@ -18,7 +20,6 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_FILENAME = 255;
 const MAX_INDEX_PER_RUN = 40;
 const RAG_MAX_TEXT_CHARS = 300_000;
@@ -26,24 +27,6 @@ const EXTRACTABLE_FILTER =
   '(doc_kind = "pdf" || doc_kind = "xlsx" || mime = "application/pdf" || ' +
   'mime ~ "spreadsheetml" || mime = "application/vnd.ms-excel" || ' +
   'mime = "text/plain" || mime = "text/markdown" || mime = "text/csv")';
-
-const UPLOAD_MIME_KIND: Record<string, UserFileDocKind> = {
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-  'application/vnd.ms-excel': 'xlsx',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
-  'application/pdf': 'pdf'
-};
-
-const ALLOWED_UPLOAD_MIMES = new Set([
-  ...Object.keys(UPLOAD_MIME_KIND),
-  'text/plain',
-  'text/markdown',
-  'text/csv',
-  'image/png',
-  'image/jpeg',
-  'image/webp'
-]);
 
 export interface FileListItem {
   id: string;
@@ -242,29 +225,38 @@ export async function POST(req: Request) {
   if (action === 'upload') {
     const file = formData?.get('file');
     if (!(file instanceof File)) return NextResponse.json({ error: 'Ingen fil vald.' }, { status: 400 });
-    if (file.size > MAX_UPLOAD_BYTES) return NextResponse.json({ error: 'Filen är större än 25 MB.' }, { status: 400 });
-    const mime = (file.type || '').toLowerCase();
-    if (!ALLOWED_UPLOAD_MIMES.has(mime)) {
-      return NextResponse.json({ error: `Filformatet ${mime || 'okänt'} stöds inte.` }, { status: 400 });
-    }
-    const filename = file.name.slice(0, MAX_FILENAME) || 'fil';
+    // Delad förvalidering (mime-whitelist speglar migration 1700000085, ändelse-
+    // fallback när webbläsaren inte rapporterar typ) — § 17/§ 24.
+    const check = validateUserFileUpload({ name: file.name, size: file.size, type: file.type });
+    if (!check.ok) return NextResponse.json({ error: check.error }, { status: 400 });
+    let rec: { id: string };
     try {
-      const fd = new FormData();
-      fd.append('tenant', user.tenant);
-      fd.append('owner', user.id);
-      fd.append('file', file, filename);
-      fd.append('filename', filename);
-      fd.append('mime', mime);
-      fd.append('size_bytes', String(file.size));
-      fd.append('source', 'upload');
-      fd.append('doc_kind', UPLOAD_MIME_KIND[mime] || 'other');
-      fd.append('topic_status', 'pending');
-      const rec = await pb.collection('user_files').create(fd);
-      await categorizeAndStore(pb, user.tenant, user.id, rec.id as string).catch(() => {});
-      return NextResponse.json({ ok: true, fileId: rec.id });
+      // Skapas via den delade skrivvägen: användartoken först, superuser-
+      // fallback vid PB v0.23.4:s tysta rule-nekande (§ 21.3). owner/tenant
+      // sätts server-side från den inloggade — aldrig från klienten.
+      rec = await createUserFileRecord(pb, user, {
+        file,
+        filename: check.filename,
+        mime: check.mime,
+        sizeBytes: file.size,
+        source: 'upload',
+        docKind: check.docKind,
+        extra: { topic_status: 'pending' }
+      });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : 'Kunde inte ladda upp filen.' }, { status: 500 });
+      // Läsbart fel i stället för SDK:ns generiska "Failed to create record.".
+      return NextResponse.json({ error: describeUserFileCreateError(err) }, { status: 500 });
     }
+    // Best-effort AI-kategorisering + RAG-indexering (fail-soft) — samma som
+    // server-actionen; uppladdningen är redan lyckad här.
+    await categorizeAndStore(pb, user.tenant, user.id, rec.id).catch(() => {});
+    try {
+      const full = (await pb.collection('user_files').getOne(rec.id)) as unknown as UserFile;
+      await extractAndIndexFile(pb, user.tenant, user.id, full).catch(() => 0);
+    } catch {
+      /* fail-soft */
+    }
+    return NextResponse.json({ ok: true, fileId: rec.id });
   }
 
   if (action === 'categorize-all') {
