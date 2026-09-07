@@ -41,7 +41,7 @@ export function ProtoTopBar() {
       <RailReopenButton />
       <div className="mx-crumb">
         {crumbs.map((c, i) => (
-          <span key={c.href + i} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span key={c.href + i} className="mx-crumb-part">
             {i > 0 && <span className="mx-sep">/</span>}
             <Link href={c.href} className={`mx-seg${c.now ? ' now' : ''}`}>
               {c.label}

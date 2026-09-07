@@ -749,7 +749,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           onSendToChat={sendMeetingPromptToChat}
         />
       )}
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         {resumableMeetings.length > 0 && !meetingPanel && (
           <div className="flex items-center justify-between gap-3 border-b border-default bg-movexum-pastell-gul px-4 py-2">
             <p className="min-w-0 truncate text-[12.5px] text-movexum-morkgul">

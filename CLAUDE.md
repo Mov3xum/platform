@@ -4576,6 +4576,20 @@ service workern och manifestet är handskrivna och versionerade i repot.
   helhöjds-ytor (`.mx-page`, `.mx-workspace`) räknar i stället bort menyn ur
   sin `100dvh`-höjd (`:has(> .mx-page)` nollar paddingen). Safe-area-insets
   (`env(safe-area-inset-bottom/top)`) respekteras överallt; `viewport-fit=cover`.
+- **Ingen sida får bli bredare än skärmen (2026-09).** Skalets grid-spår
+  är `minmax(0, 1fr)` (inte `1fr`, vars minimum är min-content) i både
+  `.mx-app` och `.mx-main-col`, och `.mx-topbar`/`.mx-view` har `min-width: 0`.
+  Tidigare tvingade brödsmulornas `nowrap`-text (t.ex. ett bolags-id eller
+  "Projekt & uppdrag") upp hela kolumnen till 400–415 px → viewporten
+  zoomade ut och allt såg ocentrerat ut. Brödsmulorna renderas med klassen
+  `mx-crumb-part` (ingen inline-`display`, som slog ut mobilregeln som bara
+  visar sista segmentet). På telefon (≤ 768 px) scrollar alla `table` i
+  `.mx-view` horisontellt inom sin yta och `.mx-startup-tabs` scrollar i
+  sidled; `html, body { overflow-x: clip }` är skyddsnätet. Flex-kolumner
+  bredvid en sidopanel behöver `min-w-0` (chattens huvudkolumn), och
+  knapp-/chip-rader `flex-wrap`. Verifiera med en riktig 390 px-viewport
+  (CDP-enhetsemulering) — headless Chromiums fönster kan inte bli smalare
+  än ~500 px, så `--window-size=390` ger falska resultat.
 
 ### 35.3 PWA — säkerhet och dataminimering (bindande)
 
