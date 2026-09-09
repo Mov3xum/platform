@@ -68,7 +68,6 @@ import {
   type NextAnnualWheelItem
 } from '@platform/shared';
 import { Icon } from '@/components/proto/Icon';
-import { FadeScroll } from '@/components/FadeScroll';
 import { NextCaption, Wheel } from './Wheel';
 import {
   CategoryShareBar,
@@ -777,6 +776,7 @@ export function AnnualWheelView({
             </div>
           ) : null}
 
+          {/* Inline (boxlös, § 30.5bis) — ingen egen scrollruta; listan flödar med sidan. */}
           <div className={`min-w-0 ${undated.length > 0 ? 'border-t border-default pt-4' : ''}`}>
             <div className="mb-1 flex items-center justify-between gap-2">
               <h3 className="font-heading text-[14px] font-semibold text-foreground">
@@ -802,7 +802,7 @@ export function AnnualWheelView({
                 Inga aktiviteter matchar filtret för {year}.
               </p>
             ) : (
-              <FadeScroll maxHeight={520} className="pr-1">
+              <div>
                 {byMonth
                   .slice(1)
                   .map((monthItems, idx) => ({ monthItems, m: idx + 1 }))
@@ -841,7 +841,7 @@ export function AnnualWheelView({
                       </p>
                     ) : null
                   )}
-              </FadeScroll>
+              </div>
             )}
           </div>
         </section>
