@@ -42,6 +42,26 @@ export function orgPostTabFor(kind: OrgPostKind): OrgPostTab {
   return 'board';
 }
 
+/** URL-slug per flik (`/hem?flik=…`) — delas av sidan, fliken, skrivlagret och aktivitetsloggen. */
+export const ORG_POST_TAB_SLUGS: Record<OrgPostTab, string> = {
+  board: 'anslagstavla',
+  instruction: 'sa-gor-vi',
+  training: 'internutbildningar'
+};
+
+export const ORG_POST_TAB_PARAM = 'flik';
+
+export function orgPostTabFromSlug(slug: string | undefined | null): OrgPostTab {
+  const hit = (Object.keys(ORG_POST_TAB_SLUGS) as OrgPostTab[]).find((k) => ORG_POST_TAB_SLUGS[k] === slug);
+  return hit ?? 'board';
+}
+
+/** Länk till Hemmaplan med rätt flik öppen för en inläggstyp. */
+export function orgPostHomePath(kind: OrgPostKind): string {
+  const tab = orgPostTabFor(kind);
+  return tab === 'board' ? '/hem' : `/hem?${ORG_POST_TAB_PARAM}=${ORG_POST_TAB_SLUGS[tab]}`;
+}
+
 /**
  * Målgrupp. `staff` = Movexum-personal + observer (default);
  * `all` = även bolagsmedlemmar (visas på "Min översikt" för medlemmar).

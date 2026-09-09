@@ -9,13 +9,13 @@ import { Icon } from '@/components/proto/Icon';
 import { TimeAgo } from '@/components/home/TimeAgo';
 import { OrgPostList, type BoardPost } from '@/components/home/OrgPostList';
 import { PlatformIntro } from '@/components/home/PlatformIntro';
-import { HomeBoardTabs, homeTabFromSlug, type HomeTabDef } from '@/components/home/HomeBoardTabs';
+import { HomeBoardTabs, type HomeTabDef } from '@/components/home/HomeBoardTabs';
 import { OmvarldFeed, type OmvarldSourceStatus } from '@/components/home/OmvarldFeed';
 import { AutoRefresh } from '@/components/home/AutoRefresh';
 import { chatMarkdownToHtml } from '@/lib/safe-html';
 import { listOrgPosts } from '@/lib/org-posts/data';
 import { loadActivityFeed } from '@/lib/feed/activity-feed';
-import { fetchWebFeedItems } from '@/lib/ai/web';
+import { fetchWebFeedItems, listWebSources } from '@/lib/ai/web';
 import { listAnnualWheelCategories } from '@/lib/annual-wheel/categories';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import type { DashboardActivity } from '@/components/DashboardChat';
@@ -32,6 +32,7 @@ import {
   mergeOmvarldItems,
   orgPostExcerpt,
   orgPostTabFor,
+  orgPostTabFromSlug,
   selectLiveOrgPosts,
   sortOrgPosts,
   stockholmCalendarParts,
@@ -234,7 +235,7 @@ function Kpi({
       {hint && <div className="mt-1 truncate text-[11.5px] text-foreground-subtle">{hint}</div>}
     </>
   );
-  const cls = 'min-w-0 flex-1 px-5 py-1 first:pl-0 last:pr-0';
+  const cls = 'min-w-0 py-1 xl:flex-1 xl:px-5 xl:first:pl-0 xl:last:pr-0';
   return href ? (
     <Link href={href} className={`${cls} group rounded-lg transition hover:bg-canvas-subtle`}>
       {body}
@@ -266,7 +267,7 @@ export default async function HemPage({
   if (!canAccessModuleForUser(user.roles, 'hem', user.enabledModules)) redirect('/chatt');
 
   const { flik } = await searchParams;
-  const initialTab: OrgPostTab = homeTabFromSlug(flik);
+  const initialTab: OrgPostTab = orgPostTabFromSlug(flik);
 
   const pb = await getServerPb();
   const now = new Date();
@@ -440,15 +441,22 @@ export default async function HemPage({
     18,
     4
   );
-  const omvarldSources: OmvarldSourceStatus[] = webFeeds.map((f) => ({
-    key: f.source,
-    label: f.label,
-    ok: f.ok,
-    stale: f.stale,
-    fetched_at: f.fetched_at,
-    error: f.error,
-    count: f.items.length
-  }));
+  const sourceDefs = new Map(listWebSources().map((src) => [src.key, src]));
+  const omvarldSources: OmvarldSourceStatus[] = webFeeds.map((f) => {
+    const def = sourceDefs.get(f.source);
+    return {
+      key: f.source,
+      label: f.label,
+      ok: f.ok,
+      stale: f.stale,
+      fetched_at: f.fetched_at,
+      error: f.error,
+      count: f.items.length,
+      country: def?.country ?? 'EU',
+      description: def?.description ?? '',
+      covers: def?.covers ?? ''
+    };
+  });
 
   // ── Header ───────────────────────────────────────────────────────────────
   const firstName = user.name.split(' ')[0] || user.email;
@@ -494,25 +502,19 @@ export default async function HemPage({
                 </div>
               )}
             </div>
-            <div className="flex divide-x divide-default overflow-x-auto xl:max-w-[62%]">
-              <Kpi label="Aktiva bolag" value={activeStartups} hint="i inkubatorn just nu" icon="people" href="/startups" />
+            <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 xl:flex xl:gap-0 xl:divide-x xl:divide-default">
+              <Kpi label="Bolag" value={activeStartups} hint="aktiva i inkubatorn" icon="people" href="/startups" />
               <Kpi
-                label="Nya inflöden"
+                label="Inflöden"
                 value={newLeads}
                 delta={leadsDelta}
                 hint="senaste 7 dagarna"
                 icon="compass"
                 href="/inflode/leads"
               />
-              <Kpi
-                label="Pågående workshops"
-                value={runningWorkshops}
-                hint="bolag mitt i en workshop"
-                icon="cap"
-                href="/pagaende"
-              />
-              <Kpi label="Mina uppgifter" value={myOpenTasks} hint="öppna, tilldelade dig" icon="check" href="/inkorg" />
-              <Kpi label="På agendan" value={agendaCount} hint="närmaste 14 dagarna" icon="calendar" href="/arshjul" />
+              <Kpi label="Workshops" value={runningWorkshops} hint="pågår hos bolagen" icon="cap" href="/pagaende" />
+              <Kpi label="Uppgifter" value={myOpenTasks} hint="öppna, dina" icon="check" href="/inkorg" />
+              <Kpi label="Agenda" value={agendaCount} hint="inom 14 dagar" icon="calendar" href="/arshjul" />
             </div>
           </div>
 

@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { Icon } from '@/components/proto/Icon';
-import type { OrgPostTab } from '@platform/shared';
+import { ORG_POST_TAB_PARAM, ORG_POST_TAB_SLUGS, type OrgPostTab } from '@platform/shared';
 
 /**
  * Flikarna på Hemmaplan (CLAUDE.md § 37): Anslagstavla · Så gör vi ·
@@ -10,19 +10,6 @@ import type { OrgPostTab } from '@platform/shared';
  * servern; fliken speglas i URL:en (`?flik=…`) så att länkar från chatten och
  * aktivitetsloggen kan öppna rätt flik direkt. Ingen dataväg.
  */
-
-export const HOME_TAB_PARAM = 'flik';
-
-const TAB_SLUGS: Record<OrgPostTab, string> = {
-  board: 'anslagstavla',
-  instruction: 'sa-gor-vi',
-  training: 'internutbildningar'
-};
-
-export function homeTabFromSlug(slug: string | undefined): OrgPostTab {
-  const hit = (Object.keys(TAB_SLUGS) as OrgPostTab[]).find((k) => TAB_SLUGS[k] === slug);
-  return hit ?? 'board';
-}
 
 export interface HomeTabDef {
   id: OrgPostTab;
@@ -48,8 +35,8 @@ export function HomeBoardTabs({
     setActive(id);
     try {
       const url = new URL(window.location.href);
-      if (id === 'board') url.searchParams.delete(HOME_TAB_PARAM);
-      else url.searchParams.set(HOME_TAB_PARAM, TAB_SLUGS[id]);
+      if (id === 'board') url.searchParams.delete(ORG_POST_TAB_PARAM);
+      else url.searchParams.set(ORG_POST_TAB_PARAM, ORG_POST_TAB_SLUGS[id]);
       window.history.replaceState(window.history.state, '', url);
     } catch {
       /* URL-synk är bekvämlighet */

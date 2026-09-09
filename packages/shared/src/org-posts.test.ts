@@ -7,6 +7,8 @@ import {
   isSafeOrgPostLink,
   orgPostExcerpt,
   orgPostTabFor,
+  orgPostTabFromSlug,
+  orgPostHomePath,
   selectLiveOrgPosts,
   sortOrgPosts,
   validateOrgPostInput,
@@ -153,4 +155,15 @@ test('training är en egen inläggstyp med egen flik på Hemmaplan', () => {
   assert.equal(orgPostTabFor('instruction'), 'instruction');
   assert.equal(orgPostTabFor('news'), 'board');
   assert.equal(orgPostTabFor('celebration'), 'board');
+});
+
+test('flik-slugs: URL ↔ flik ↔ inläggstyp hänger ihop', () => {
+  assert.equal(orgPostTabFromSlug('internutbildningar'), 'training');
+  assert.equal(orgPostTabFromSlug('sa-gor-vi'), 'instruction');
+  assert.equal(orgPostTabFromSlug('anslagstavla'), 'board');
+  assert.equal(orgPostTabFromSlug(undefined), 'board');
+  assert.equal(orgPostTabFromSlug('okänd'), 'board');
+  assert.equal(orgPostHomePath('training'), '/hem?flik=internutbildningar');
+  assert.equal(orgPostHomePath('instruction'), '/hem?flik=sa-gor-vi');
+  assert.equal(orgPostHomePath('news'), '/hem');
 });

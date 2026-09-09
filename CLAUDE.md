@@ -605,14 +605,19 @@ publika RSS-flöden från EU-källor och bakar in resultatet i Mistral-
 prompten via `{{web.<key>}}`-tokens. Whitelisten finns i
 `apps/web/src/lib/ai/web.ts` (`WEB_SOURCES`):
 
-| Nyckel | Källa | Land |
-| --- | --- | --- |
-| `breakit` | Breakit (svenska startups) | SE |
-| `sifted` | Sifted (EU tech) | EU |
-| `di_digital` | Dagens industri Digital | SE |
-| `vinnova` | Vinnova utlysningar | SE |
-| `eic` | European Innovation Council | EU |
-| `almi` | Almi pressmeddelanden | SE |
+| Nyckel | Källa | Land | Vad den är och vad den ger oss |
+| --- | --- | --- | --- |
+| `breakit` | Breakit | SE | Sveriges ledande startup-/tech-nyhetssajt: finansieringsrundor, grundare, exits, branschtrender. |
+| `sifted` | Sifted | EU | Europeisk techmedia (FT-backad): startup-scenen i hela Europa, VC-trender, sektoranalyser. |
+| `di_digital` | Di Digital | SE | Dagens industris techredaktion: svensk tech ur näringslivs-/investerarperspektiv, noteringar, reglering. |
+| `vinnova` | Vinnova | SE | Innovationsmyndighetens **aktuella utlysningar** med sista ansökningsdag — bidrag till innovationsprojekt, deeptech, verifiering. |
+| `eic` | European Innovation Council | EU | EU-kommissionens innovationsråd: EIC Accelerator/Pathfinder/Transition, cut-off-datum, resultat. |
+| `almi` | Almi | SE | Statligt lån-/riskkapital-/affärsutvecklingsbolag: pressmeddelanden om låneprodukter, Almi Invest, regionala program. |
+
+Varje källa är definierad i `WEB_SOURCES` med `country`, `description` och
+`covers` — det som visas under "Om källorna" på Hemmaplan (§ 37.4). Ett
+tillägg görs alltid här (+ `WebSourceKey` i `@platform/shared`) med
+motivering, aldrig som fri URL.
 
 **Säkerhet och kostnad:**
 - URL:er utanför whitelisten kan **aldrig** hämtas (SSRF-skydd).
