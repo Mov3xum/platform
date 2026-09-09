@@ -584,6 +584,17 @@ integrity (§ 10).
 felkonfiguration aldrig tyst bryter en kunds chatt mitt i månaden — sätt env:en
 eller tenant-taket för att aktivera.
 
+**0-värden i loggen (migration 1700000145, 2026-09).** PB tolkar 0 som
+"tomt" för ett `required` nummerfält, och 1700000058 skapade `tokens_in`/
+`tokens_out`/`cost_estimate_usd` som required → `logAiUsage` (fail-soft)
+svalde "Cannot be blank." och raden skrevs ALDRIG för embeddings
+(`mistral-embed`, tokens_out = 0 — hela RAG-förbrukningen § 26/§ 27 saknades
+i /insights, /admin/ai-miljo och månadstaket), för Voxtral-anrop med tom text
+(§ 31/§ 34) och för modeller utan prisrad (cost = 0). Migration 1700000145 gör
+talfälten valfria (`min: 0` kvar); speglas i `setup-via-api.mjs`. Logga
+aldrig-någonsin runt problemet genom att skicka "1 token" — bokför det
+faktiska värdet.
+
 ### 9.7 Bannrar och varningstexter
 
 Alla toolbox-sidor ska visa:
