@@ -11,13 +11,14 @@ function canAccess(roles: Role[], id: string, enabled: string[] | undefined): bo
   return isModuleEnabled(enabled, id);
 }
 
-test('staff får chatten i mitten, översikt + bolag till vänster och pågående till höger', () => {
+test('staff får chatten i mitten, hem + översikt till vänster och pågående till höger', () => {
   const nav = buildMobileNav(['coach'], undefined, { inkorg: 3 }, canAccess);
   assert.ok(nav);
   assert.equal(nav.center.id, 'idag');
   assert.equal(nav.center.href, '/chatt');
-  assert.deepEqual(nav.left.map((i) => i.id), ['inkorg', 'startups']);
-  assert.equal(nav.left[0]!.count, 3);
+  assert.deepEqual(nav.left.map((i) => i.id), ['hem', 'inkorg']);
+  assert.equal(nav.left[0]!.href, '/hem');
+  assert.equal(nav.left[1]!.count, 3);
   assert.deepEqual(nav.right.map((i) => i.id), ['pagaende']);
 });
 

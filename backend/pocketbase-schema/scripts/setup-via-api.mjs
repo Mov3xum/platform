@@ -3460,6 +3460,41 @@ await convertSelectFieldToText('annual_wheel_items', 'category', { min: 1, max: 
 // 1700000139 så en bootstrappad instans också får dem redigerbara.
 await seedAnnualWheelCategories();
 
+// Migration 1700000144: org_posts — Hemmaplans anslagstavla (§ 37). Nyheter,
+// info, instruktioner och firanden till organisationen. Läsning: staff/observer
+// ELLER audience="all" (då även bolagsmedlemmar, t.ex. på "Min översikt").
+// createRule roll-lös (§ 21.3 — rollen enforce:as i server-actionen);
+// update/delete: författaren själv eller admin/incubator_lead.
+await ensureCollection({
+  id: 'org_posts_collection',
+  name: 'org_posts',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'author', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 160 },
+    { name: 'body', type: 'text', required: false, max: 20000 },
+    // MÅSTE spegla ORG_POST_KINDS / ORG_POST_AUDIENCES i packages/shared/src/org-posts.ts.
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['news', 'notice', 'instruction', 'celebration'] },
+    { name: 'audience', type: 'select', required: true, maxSelect: 1, values: ['staff', 'all'] },
+    { name: 'pinned', type: 'bool', required: false },
+    { name: 'published_at', type: 'date', required: false },
+    { name: 'expires_at', type: 'date', required: false },
+    { name: 'link_url', type: 'text', required: false, max: 500 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_org_posts_tenant ON org_posts (tenant)',
+    'CREATE INDEX idx_org_posts_tenant_pinned ON org_posts (tenant, pinned)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || audience = "all")`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || audience = "all")`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`
+});
+
 // Backfill: en tidigare körning hann skapa chat_threads/deep_jobs UTAN
 // created/updated (REST API:t auto-lägger dem inte). ensureCollection
 // synkar bara regler på en befintlig collection, så lägg till de saknade
@@ -3776,7 +3811,10 @@ const FORCE_CREATE_RULES = {
   annual_wheel_items: `${ANY_AUTH} && @request.auth.tenant != ""`,
   // Årshjuls-kategorier (§ 30, migration 1700000139) — create är roll-lös per
   // § 21.3; superadmin-kravet ligger i server-actionen + update/delete-reglerna.
-  annual_wheel_categories: `${ANY_AUTH} && @request.auth.tenant != ""`
+  annual_wheel_categories: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Hemmaplans anslagstavla (§ 37, migration 1700000144) — roll-enforcement i
+  // server-actionen.
+  org_posts: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
 log('Forcerar robusta createRules...');

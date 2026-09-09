@@ -57,7 +57,7 @@ import type {
   SprintXScore,
   EducationDocumentAssignment
 } from '@platform/shared';
-import { educationDocumentKindLabels } from '@platform/shared';
+import { educationDocumentKindLabels, formatStockholmDateTime } from '@platform/shared';
 import { Icon } from '@/components/proto';
 import { DocumentCompleteButton } from '@/app/education/documents/DocumentCompleteButton';
 import { AgreementsSection, type AgreementView } from '@/components/intric/AgreementsSection';
@@ -1059,7 +1059,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                           {assignment.expand?.meeting ? (
                             <p className="mt-1 text-xs text-foreground-subtle">
                               📅 Möte: {assignment.expand.meeting.name} ·{' '}
-                              {new Date(assignment.expand.meeting.starts_at).toLocaleString('sv-SE')}
+                              {formatStockholmDateTime(assignment.expand.meeting.starts_at)}
                             </p>
                           ) : null}
                           {fileUrl ? (
@@ -1418,7 +1418,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                         {assignment.expand?.meeting ? (
                           <p className="mt-1 text-xs text-foreground-subtle">
                             📅 Möte: {assignment.expand.meeting.name} ·{' '}
-                            {new Date(assignment.expand.meeting.starts_at).toLocaleString('sv-SE')}
+                            {formatStockholmDateTime(assignment.expand.meeting.starts_at)}
                           </p>
                         ) : null}
                       </div>

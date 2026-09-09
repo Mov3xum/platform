@@ -2735,8 +2735,9 @@ enda utloggningsvägen för en inloggad användare.
 - `isPureStartupMember` = har `startup_member` men ingen
   staff-/observer-roll. Multi-roll (t.ex. coach + startup_member) behåller
   hela staff-railen.
-- Hemvy: en ren medlem som landar på `/chatt` redirectas till `/min-oversikt`
-  (rail-logon pekar dit); staff har kvar Hemmaplan/Chatt.
+- Hemvy: en ren medlem som landar på `/chatt` eller `/hem` redirectas till
+  `/min-oversikt` (rail-logon pekar dit); staff landar på Hemmaplan (`/hem`,
+  § 37) och har chatten som egen rail-post.
 
 ### 22.3 Regelefterlevnad
 
@@ -4603,9 +4604,10 @@ service workern och manifestet är handskrivna och versionerade i repot.
   server-side i `ProtoShell` via `buildMobileNav` med **samma
   `canAccessModuleForUser` som railen** (menyn är UI-kurering, aldrig
   säkerhetsgräns — RLS/RBAC ligger kvar i § 21).
-- **Staff/observer:** Översikt (`inkorg`, med olästa-badge) · Bolag
-  (`startups`) · **Chatt** (`idag`) · Pågående (`pagaende`) · Mer. Avstängda
-  moduler hoppas över och nästa kandidat tar platsen (uppdrag, årshjul, filer …).
+- **Staff/observer:** Hem (`hem`, § 37) · Översikt (`inkorg`, med
+  olästa-badge) · **Chatt** (`idag`) · Pågående (`pagaende`) · Mer. Avstängda
+  moduler hoppas över och nästa kandidat tar platsen (bolag, uppdrag, årshjul,
+  filer …).
 - **Ren `startup_member`** (§ 22): Aktiviteter · Filer · **Översikt**
   (`min_oversikt` — chatten finns inte för medlemmar, § 21.5) · De minimis ·
   Mer. Chatten exponeras aldrig (enhetstestat).
@@ -4797,3 +4799,153 @@ roll**:
   (ersätter `disabledModules`); cookie-kompaktmodellen har `enabled_modules`.
 - **GDPR/riskklass:** inga personuppgifter (bara modul-id:n), ingen
   AI-inferens → n/a.
+
+---
+
+## 37. Hemmaplan — organisationens startsida (intranät)
+
+### 37.1 Översikt
+
+`/hem` (modul `hem`, titel **Hemmaplan**, först i "Översikt"-railen) är den
+sida personalen landar på efter inloggning (`/` och `/dashboard` redirectar
+dit; PWA:ns `start_url` pekar dit). En ren `startup_member` redirectas
+oförändrat till `/min-oversikt` (§ 22). Sidan är en **intranätsstartsida**
+i samma uttryck som chattens startvy (centrerad kolumn ≤ 760 px, hälsning i
+Sora, eyebrow-rubriker, rundade listor — inga stora kort, inga färgytor):
+
+1. **Hälsning** — svensk tidshälsning, datumrad med ISO-vecka
+   (`swedishDateLine`), en "puls"-rad (aktiva bolag · nya inflöden i veckan ·
+   punkter på agendan) och rollfiltrerade genvägs-chips.
+2. **Anslagstavla** — inlägg från Movexum till organisationen
+   (`org_posts`): nyheter, info och firanden. Fästa inlägg först.
+3. **Så gör vi** — instruktioner (`kind='instruction'`) som hopfällda rader,
+   så rutiner är lätta att hitta utan att dominera sidan.
+4. **Den här veckan** — årshjulets poster + planerade events 14 dagar framåt,
+   grupperade per dag ("Idag/Imorgon/Torsdag/20 sep").
+5. **Bolagsnytt** — den samlade aktivitetsloggen (§ 32), samma laddare som
+   chatten.
+6. **Omvärld** — senaste posterna från EU-whitelistade RSS-källor (§ 9.8).
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/org-posts.ts` (+ `.test.ts`) | Ren domänlogik för inlägg: typer, validering, synlighet (schemalagt/utgånget/målgrupp), sortering, RBAC-hjälpare |
+| `packages/shared/src/home.ts` (+ `.test.ts`) | Datumrad i svensk tid, veckoagenda (`buildHomeAgenda`), sammanslagning av omvärldsflöden (`mergeOmvarldItems`) |
+| `backend/pocketbase-schema/migrations/1700000144_create_org_posts.js` | Collection `org_posts` |
+| `apps/web/src/lib/org-posts/data.ts` | Enda läsvägen (`listOrgPosts`, fail-soft) |
+| `apps/web/src/lib/actions/org-posts.ts` | Server actions: skapa/ändra/fäst/radera (RBAC, validering, superuser-fallback, audit) |
+| `apps/web/src/lib/feed/activity-feed.ts` | Delad feed-laddare (`activities` + `agent_actions`) för `/chatt` OCH `/hem` |
+| `apps/web/src/lib/ai/web.ts` | `fetchWebFeedItems` — strukturerade RSS-poster med in-process-cache (30 min) |
+| `apps/web/src/app/hem/page.tsx` | Sidan (server; alla källor parallellt via `Promise.allSettled`) |
+| `apps/web/src/components/home/OrgPostList.tsx` | Anslagstavlan (client): redigerare, utfällning, fäst/redigera/ta bort |
+| `apps/web/src/components/home/TimeAgo.tsx` | Hydreringssäker relativ tid |
+
+### 37.2 Datamodell — `org_posts` (migration 1700000144)
+
+`tenant` (cascadeDelete), `author` (→ users, ingen cascade — inlägget lever
+vidare anonymt), `title` (≤ 160), `body` (markdown ≤ 20 000, renderas ALLTID
+via `lib/safe-html`), `kind` (`news | notice | instruction | celebration` —
+MÅSTE spegla `ORG_POST_KINDS`), `audience` (`staff | all`), `pinned`,
+`published_at` (tomt = direkt; framtid = schemalagt), `expires_at` (tomt =
+utgår aldrig), `link_url` (intern sökväg `/…` eller https — validerat i
+`isSafeOrgPostLink`, aldrig `javascript:`/`data:`), autodate explicit
+(§ 28.5). Speglad i `setup-via-api.mjs` (collection-def + `FORCE_CREATE_RULES`).
+
+**Målgrupp.** `staff` (default) syns för Movexum-personal + observer; `all`
+syns dessutom för bolagsmedlemmar — på **"Min översikt"** (§ 21bis) under
+"Från Movexum". list/view-regeln: `auth && tenant && (STAFF_OR_OBSERVER ||
+audience = "all")` med `:each ?=` (§ 21.3). Kollektionen är därför
+medvetet INTE i `MUST_BE_STAFF_OR_OBSERVER` i `verify-baseline.mjs`.
+
+### 37.3 RBAC och skrivväg
+
+- **Skriva:** admin/incubator_lead/coach/mentor (`ORG_POST_AUTHOR_ROLES`).
+  **Ändra/fästa/radera:** författaren själv eller admin/incubator_lead
+  (`canEditOrgPost`, speglat i PB:s update/delete-regler). `observer` läser.
+- createRule refererar bara auth-fält (§ 21.3); rollen enforce:as i
+  server-actionen; tenant + author stämplas server-side. Superuser-fallback
+  BARA vid PB v0.23.4:s tysta regel-nekande (400/403/404), efter verifierad
+  roll och tenant (§ 18.3/§ 20.5-mönstret).
+- Varje mutation loggas i `agent_actions` (PII-fritt: rubrik/typ/målgrupp;
+  radering som `update` + `deleted`, § 30.6-konventionen) och mappas i
+  `lib/feed/agent-log.ts` → syns i Bolagsnytt/`/aktivitet` med länk till `/hem`.
+- Schemalagda (ännu inte publicerade) inlägg syns bara för författare, märkta
+  "Schemalagt". Utgångna inlägg visas inte alls (radera eller förläng).
+
+### 37.4 Omvärldsbevakning på startsidan
+
+`fetchWebFeedItems` återanvänder `WEB_SOURCES`-whitelisten, timeout och
+RSS-parsern i `lib/ai/web.ts` (SSRF-skydd oförändrat) men cachar
+**strukturerade poster** in-process i 30 min — `web_cache` lagrar bara den
+prompt-formaterade texten och ger tomma `items` vid cache-träff. Fail-soft:
+en källa som inte svarar behåller sin senaste (utgångna) cache eller hoppas
+över; svarar ingen källa visas en lugn tom-text. Länkarna öppnas hos källan
+(`rel="noopener noreferrer"`). Ingen AI-inferens, inget innehåll lagras.
+
+### 37.5 Regelefterlevnad
+
+- **Riskklass (EU AI Act):** n/a — ingen AI-inferens på sidan; bolagsnytt
+  och omvärld är deterministisk presentation av befintlig data.
+- **GDPR § 5:** inlägg är verksamhetsinformation; `author` är en intern
+  användarrelation (visningsnamn visas internt, aldrig e-post). UI:t är
+  fritext → skriv inte personuppgifter i inlägg (samma princip som
+  `onboarding_progress`). `org_posts` är **läsbar** för chattens
+  `query_collection` (RLS + fältmaskning, § 9.3) så agenten kan svara på
+  "vad står på anslagstavlan?" — ingen ny PII-väg, inga nya fält i
+  `lib/ai/context.ts`.
+- **GDPR art. 17:** `cascadeDelete` på tenant; författar-relationen nollas
+  vid användarradering.
+- **XSS (§ 10.3):** markdown renderas via `chatMarkdownToHtml` (escapad) på
+  servern; klienten sätter bara den färdiga HTML:en. Länkar valideras.
+- **ISO 27001 A.8.32:** ny oföränderlig migration (1700000144).
+- **§ 21-isolering:** startsidan är staff/observer; en medlem når bara
+  `audience=all`-inlägg via RLS, och aldrig bolagsnytt/omvärld/agenda på `/hem`.
+
+---
+
+## 38. Svensk tid i kalender & events (Europe/Stockholm)
+
+Servern (Coolify-container på UpCloud) kör i **UTC**. All kalender-/eventlogik
+ska ändå räkna i **svensk tid** — både klockslag som personalen skriver in
+och gränser som "idag", "pågår nu" och "avslutat". Incident 2026-09: ett
+event den 8 september stod som "Live nu" den 9:e, och tider från
+formulären förskjöts två timmar i sommartid.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/event-time.ts` (+ `.test.ts`) | Ren, enhetstestad tidsmodul: väggklocka/offset i Stockholm, `parseDateTimeInput`, `toStockholmDateTimeInputValue`, `stockholmDateKey`/`stockholmDayDiff`, `eventPhase`, `formatStockholmDateTime` |
+| `apps/web/src/lib/actions/events.ts` | Skapa/uppdatera event — tolkar formulärtider via `parseDateTimeInput` |
+| `apps/web/src/lib/core/write/validators.ts` | `validateIsoDateTime` (chatt-agentens `create_event`) — samma tolkning |
+| `apps/web/src/lib/assignments/collaboration.ts`, `lib/actions/tasks.ts` | Möten från tilldelningar / Outlook — samma tolkning |
+| `apps/web/src/app/events/{page,[id]/page}.tsx`, `components/overview/AgendaStrip.tsx`, `lib/overview/aggregate.ts` | Fas + visning i svensk tid |
+
+**Regler (bindande):**
+
+- **Offsetlösa klockslag är svensk tid.** `<input type="datetime-local">`,
+  `"YYYY-MM-DDTHH:mm"` från tilldelningsformulären och agentens
+  `"2026-09-10 14:00"` saknar tidszon och MÅSTE gå genom `parseDateTimeInput`
+  (aldrig `new Date(str)`/`Date.parse(str)` direkt — det tolkar som serverns
+  UTC). Strängar med explicit `Z`/`±hh:mm` (Outlook, ISO från agenten) tas som
+  de är. Formulären fyller i tillbaka via `toStockholmDateTimeInputValue`, så
+  spara → redigera → spara ger samma klockslag.
+- **Eventets fas följer klockan, inte bara statusfältet** (`eventPhase`):
+  `cancelled`/`completed` i fältet vinner alltid; ett event vars slut
+  (`ends_at`, annars slutet av startdagens svenska dygn) har passerat är
+  **avslutat** oavsett om fältet säger `live`/`planned`; `live` = fältet
+  `live` ELLER klockan mellan start och slut; annars `upcoming`. Ingen
+  skrivning sker — fältet lämnas orört, detaljsidan visar den härledda fasen
+  och noterar när fältet släpar. "Live nu"/"Kommande"/"Avslutade" på
+  `/events`, LIVE-chippen på detaljsidan och agendan på översikten använder
+  fasen.
+- **"Idag"/dygnsgränser räknas på svenska kalenderdatum**
+  (`stockholmDateKey`/`stockholmDayDiff`), aldrig `getDate()`/
+  `toISOString().slice(0,10)` på servern.
+- **Visning:** `formatStockholmDateTime`/`formatStockholmTimeOrNull` (eller
+  `toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' })`) — aldrig
+  `toLocaleString('sv-SE')` utan tidszon i serverkomponenter.
+- **Årshjulet (§ 30)** räknar på hela kalenderdagar i klientens lokala tid
+  (klientkomponent, `useMemo(() => new Date())`) och berörs inte.
+- Riskklass n/a (ingen AI-inferens), inga nya fält/kollektioner, ingen PII.
