@@ -1113,7 +1113,11 @@ export function buildChatTools(
               enum: [...EVENT_TYPES],
               description: 'Typ av event. Default other.'
             },
-            starts_at: { type: 'string', description: 'Starttid, t.ex. 2026-09-10T14:00:00+02:00.' },
+            starts_at: {
+              type: 'string',
+              description:
+                'Starttid i ISO-format, t.ex. 2026-09-10T14:00:00+02:00. Utan tidszon tolkas klockslaget som svensk tid.'
+            },
             ends_at: { type: 'string', description: 'Valfri sluttid (ISO).' },
             location: { type: 'string', description: 'Valfri plats (max 200 tecken).' },
             description: { type: 'string', description: 'Valfri beskrivning.' }

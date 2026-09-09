@@ -56,7 +56,7 @@ export default async function ArshjulPresentationPage({ searchParams }: { search
   const initialResponsible = first(params.resp);
   const monthParam = Number(first(params.month));
   const initialMonth = Number.isInteger(monthParam) && monthParam >= 1 && monthParam <= 12 ? monthParam : null;
-  if (!canAccessModuleForUser(user.roles, 'arshjul', user.disabledModules)) redirect('/chatt');
+  if (!canAccessModuleForUser(user.roles, 'arshjul', user.enabledModules)) redirect('/chatt');
 
   const pb = await getServerPb();
   const [res, categories, people] = await Promise.all([

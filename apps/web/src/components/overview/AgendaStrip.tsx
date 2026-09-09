@@ -1,18 +1,16 @@
 import Link from 'next/link';
 import { Icon } from '@/components/proto/Icon';
 import type { AgendaItem, OutlookState } from '@/lib/overview/status';
+import { SWEDISH_TIMEZONE, formatStockholmTimeOrNull, stockholmDayDiff } from '@platform/shared';
 
-const TZ = 'Europe/Stockholm';
-
-function startOfDay(d: Date): number {
-  return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
-}
+const TZ = SWEDISH_TIMEZONE;
 
 function dayLabel(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  const dayMs = 24 * 60 * 60 * 1000;
-  const diff = Math.round((startOfDay(d) - startOfDay(new Date())) / dayMs);
+  // "Idag"/"Imorgon" räknas på SVENSKA kalenderdygn — servern kör i UTC, så
+  // ett möte 00:30 svensk tid vore annars "igår".
+  const diff = stockholmDayDiff(new Date(), d);
   if (diff === 0) return 'Idag';
   if (diff === 1) return 'Imorgon';
   return d.toLocaleDateString('sv-SE', {
@@ -23,19 +21,8 @@ function dayLabel(iso: string): string {
   });
 }
 
-function timeLabel(iso: string): string | null {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  const parts = new Intl.DateTimeFormat('sv-SE', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: TZ
-  }).format(d);
-  // Datumfält utan klockslag lagras som midnatt → visa inget klockslag.
-  if (parts === '00:00') return null;
-  return parts;
-}
+// Datumfält utan klockslag lagras som midnatt → visa inget klockslag.
+const timeLabel = formatStockholmTimeOrNull;
 
 function AgendaCard({ item }: { item: AgendaItem }) {
   const time = timeLabel(item.startsAt);

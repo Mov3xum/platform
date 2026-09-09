@@ -131,6 +131,7 @@ export async function createAgentMemoryAction(
   }
 
   revalidatePath('/installningar');
+  revalidatePath('/installningar/ai-minne');
   return { success: true };
 }
 
@@ -173,6 +174,7 @@ export async function updateAgentMemoryAction(
   }
 
   revalidatePath('/installningar');
+  revalidatePath('/installningar/ai-minne');
   return { success: true };
 }
 
@@ -206,5 +208,6 @@ export async function deleteAgentMemoryAction(id: string): Promise<AgentMemoryAc
   }
 
   revalidatePath('/installningar');
+  revalidatePath('/installningar/ai-minne');
   return { success: true };
 }

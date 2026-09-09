@@ -8,6 +8,7 @@ import {
   isCompassFlowType,
   isCompassInputType,
   normalizeCompassChoices,
+  parseDateTimeInput,
   sanitizeDay,
   sanitizeMonth,
   slugifyCompassKey,
@@ -383,9 +384,12 @@ export function validateIsoDateTime(
   if (s === null || s.trim() === '') {
     return { ok: false, error: `${fieldName} saknas (ange datum/tid, t.ex. 2026-09-10 14:00).` };
   }
-  const ms = Date.parse(s.trim());
-  if (!Number.isFinite(ms)) {
+  // Utan explicit offset tolkas tidpunkten som svensk tid (Europe/Stockholm),
+  // aldrig som serverns UTC-klocka — agenten skriver "2026-09-10 14:00" och
+  // menar svenskt klockslag.
+  const parsed = parseDateTimeInput(s);
+  if (!parsed) {
     return { ok: false, error: `${fieldName} är ingen giltig tidpunkt (använd ISO-format).` };
   }
-  return { ok: true, value: new Date(ms).toISOString() };
+  return { ok: true, value: parsed.toISOString() };
 }

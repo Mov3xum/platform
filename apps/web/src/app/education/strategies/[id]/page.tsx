@@ -15,7 +15,7 @@ export default async function StrategyPage({
 }) {
   const { id } = await params;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) notFound();
+  if (!canAccessModuleForUser(user.roles, 'education', user.enabledModules)) notFound();
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
 

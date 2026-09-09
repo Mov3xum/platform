@@ -37,7 +37,7 @@ export default async function InflodeAnalysisPage({
   searchParams?: Promise<{ days?: string; view?: string }>;
 }) {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'inflode', user.disabledModules)) {
+  if (!canAccessModuleForUser(user.roles, 'inflode', user.enabledModules)) {
     redirect('/dashboard');
   }
   // Analys är staff-only (aggregerad lead-data, CLAUDE.md § 21).

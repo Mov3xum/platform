@@ -92,7 +92,7 @@ export default async function IntegrationerPage({
 }) {
   const params = (await searchParams) ?? {};
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'integrationer', user.disabledModules))
+  if (!canAccessModuleForUser(user.roles, 'integrationer', user.enabledModules))
     redirect('/dashboard');
 
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);

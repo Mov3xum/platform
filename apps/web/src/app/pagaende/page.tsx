@@ -9,6 +9,7 @@ import { Icon } from '@/components/proto/Icon';
 import { WorkshopAssignmentStatusBadge } from '@/components/Badges';
 import { activityTypeLabels, type ActivityType } from '@/lib/labels';
 import { escFilter } from '@/lib/pb-filter';
+import { formatStockholmDateTime } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,7 +91,7 @@ function resourceNames(users?: UserRef[]): string {
 
 export default async function PagaendePage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'pagaende', user.disabledModules)) redirect('/chatt');
+  if (!canAccessModuleForUser(user.roles, 'pagaende', user.enabledModules)) redirect('/chatt');
   const pb = await getServerPb();
   // Tilldelningarna läses via en robust klient (PB v0.23.4 rule-eval, § 21.3).
   // Sidan är redan staff/observer-gated ovan och frågorna är tenant-scopade.
@@ -232,7 +233,7 @@ export default async function PagaendePage() {
                             {w.expand?.meeting ? (
                               <span>
                                 📅 {w.expand.meeting.name} ·{' '}
-                                {new Date(w.expand.meeting.starts_at).toLocaleString('sv-SE')}
+                                {formatStockholmDateTime(w.expand.meeting.starts_at)}
                               </span>
                             ) : null}
                           </div>
@@ -272,7 +273,7 @@ export default async function PagaendePage() {
                             {d.expand?.meeting ? (
                               <span>
                                 📅 {d.expand.meeting.name} ·{' '}
-                                {new Date(d.expand.meeting.starts_at).toLocaleString('sv-SE')}
+                                {formatStockholmDateTime(d.expand.meeting.starts_at)}
                               </span>
                             ) : null}
                           </div>

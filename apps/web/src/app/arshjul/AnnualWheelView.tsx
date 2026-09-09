@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -311,6 +311,15 @@ export function AnnualWheelView({
   );
   const [loadMode, setLoadMode] = useState<LoadMode>('active');
   const categoryCounts = useMemo(() => countItemsByCategory(filtered, categories), [filtered, categories]);
+  // Antal per kategori för kryssrute-menyn — räknas UTAN kategorifiltret så
+  // en avbockad kategori fortfarande visar hur många aktiviteter den döljer.
+  const categoryPickerCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const it of filterAnnualWheelItems(items, { year, tag, responsible })) {
+      map.set(it.category, (map.get(it.category) ?? 0) + 1);
+    }
+    return map;
+  }, [items, year, tag, responsible]);
   const quarterCounts = useMemo(() => countItemsByQuarter(filtered), [filtered]);
   // Ansvarig-fördelning räknas före ansvarig-filtret så staplarna kan användas som filter.
   const responsibleCounts = useMemo(
@@ -573,20 +582,12 @@ export function AnnualWheelView({
           onChange={(v) => setYear(Number(v))}
           options={years.map((y) => ({ value: String(y), label: String(y) }))}
         />
-        <FilterSelect
-          label="Kategori"
-          value={
-            selectedCategories.size === 0 ? 'all' : selectedCategories.size === 1 ? categoryList[0] : '__multi'
-          }
-          onChange={(v) => setSelectedCategories(v === 'all' ? new Set() : new Set([v]))}
-          options={[
-            { value: 'all', label: 'Alla kategorier' },
-            ...(selectedCategories.size > 1
-              ? [{ value: '__multi', label: `${selectedCategories.size} kategorier valda` }]
-              : []),
-            ...categories.map((c) => ({ value: c.id, label: c.label })),
-            ...orphanCategories.map((c) => ({ value: c, label: `${c} (borttagen)` }))
-          ]}
+        <CategoryFilter
+          categories={categories}
+          orphans={orphanCategories}
+          selected={selectedCategories}
+          counts={categoryPickerCounts}
+          onChange={setSelectedCategories}
         />
         <FilterSelect
           label="Tagg"
@@ -1180,6 +1181,165 @@ function ItemPill({
         </button>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * Kategorifilter med kryssrutor — bocka i/ur de kategorier som ska visas.
+ * Internt är tomt val = "alla" (samma state som legenden och hjulets ringar),
+ * men menyn visar det som att ALLA rutor är ibockade: att bocka ur en kategori
+ * väljer då resten, och när alla åter är ibockade nollställs valet till "alla".
+ */
+function CategoryFilter({
+  categories,
+  orphans,
+  selected,
+  counts,
+  onChange
+}: {
+  categories: AnnualWheelCategoryDef[];
+  orphans: string[];
+  selected: ReadonlySet<AnnualWheelCategory>;
+  counts: ReadonlyMap<string, number>;
+  onChange: (next: ReadonlySet<AnnualWheelCategory>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const rows: { id: string; label: string; color: string; orphan: boolean }[] = [
+    ...categories.map((c) => ({ id: c.id, label: c.label, color: annualWheelColorVar(c.token), orphan: false })),
+    ...orphans.map((key) => ({ id: key, label: key, color: annualWheelColorVar(undefined), orphan: true }))
+  ];
+  const allIds = rows.map((r) => r.id);
+  const showAll = selected.size === 0;
+  const isChecked = (id: string) => showAll || selected.has(id);
+  const checkedCount = showAll ? allIds.length : allIds.filter((id) => selected.has(id)).length;
+
+  function toggle(id: string) {
+    const next = new Set<AnnualWheelCategory>(showAll ? allIds : selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    // Alla ibockade igen → tillbaka till "alla" (tomt val), så hjul/legend
+    // inte tonar ned något i onödan.
+    onChange(next.size >= allIds.length ? new Set() : next);
+  }
+
+  function solo(id: string) {
+    onChange(new Set([id]));
+  }
+
+  const summary = showAll
+    ? 'Alla kategorier'
+    : checkedCount === 1
+      ? (rows.find((r) => selected.has(r.id))?.label ?? '1 kategori')
+      : `${checkedCount} av ${allIds.length} kategorier`;
+
+  return (
+    <div ref={ref} className="relative flex items-center gap-1.5 text-[12px] text-foreground-subtle">
+      <span>Kategori</span>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title="Bocka i eller ur de kategorier som ska visas"
+        className={`inline-flex items-center gap-1.5 rounded-lg border bg-surface px-2 py-1.5 text-[13px] text-foreground ${
+          showAll ? 'border-default' : 'border-brand/40'
+        }`}
+      >
+        {!showAll ? (
+          <span className="flex items-center -space-x-0.5" aria-hidden>
+            {rows
+              .filter((r) => selected.has(r.id))
+              .slice(0, 4)
+              .map((r) => (
+                <span key={r.id} className="inline-block h-2.5 w-2.5 rounded-sm ring-1 ring-surface" style={{ background: r.color }} />
+              ))}
+          </span>
+        ) : null}
+        <span>{summary}</span>
+        <Icon name="chevdown" size={12} />
+      </button>
+      {open ? (
+        <div
+          role="listbox"
+          aria-multiselectable
+          aria-label="Kategorier att visa"
+          className="absolute left-0 top-full z-30 mt-1 min-w-[240px] rounded-xl border border-default bg-surface p-1.5 shadow-lg shadow-movexum-svart/10"
+        >
+          <div className="flex items-center justify-between gap-2 px-2 pb-1.5 pt-1 text-[11.5px] text-foreground-subtle">
+            <span>
+              {checkedCount} av {allIds.length} visas
+            </span>
+            <button
+              type="button"
+              onClick={() => onChange(new Set())}
+              disabled={showAll}
+              className="font-medium text-brand hover:underline disabled:cursor-default disabled:text-foreground-subtle disabled:no-underline"
+            >
+              Visa alla
+            </button>
+          </div>
+          <ul className="max-h-72 overflow-y-auto">
+            {rows.map((r) => {
+              const checked = isChecked(r.id);
+              const n = counts.get(r.id) ?? 0;
+              return (
+                <li key={r.id} className="group flex items-center gap-1">
+                  <label
+                    className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] hover:bg-canvas-subtle ${
+                      checked ? 'text-foreground' : 'text-foreground-subtle'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(r.id)}
+                      className="h-3.5 w-3.5 shrink-0 accent-[var(--color-brand)]"
+                      aria-label={`Visa ${r.label}`}
+                    />
+                    <span
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+                      style={{ background: r.color, opacity: checked ? 1 : 0.4 }}
+                      aria-hidden
+                    />
+                    <span className="truncate">
+                      {r.label}
+                      {r.orphan ? <span className="text-foreground-subtle"> (borttagen)</span> : null}
+                    </span>
+                    <span className="mx-tnum ml-auto text-[11px] text-foreground-subtle">{n}</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => solo(r.id)}
+                    title={`Visa bara ${r.label}`}
+                    className="shrink-0 rounded-md px-1.5 py-1 text-[11px] font-medium text-brand opacity-0 hover:bg-brand/10 focus:opacity-100 group-hover:opacity-100"
+                  >
+                    Bara
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

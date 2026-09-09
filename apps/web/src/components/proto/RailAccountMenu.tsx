@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Icon } from './Icon';
-import { logoutAction } from '@/lib/actions/auth';
+import { LOGOUT_PATH } from '@/lib/auth-paths';
 
 /**
  * Kontoblocket längst ned i sidmenyn. Hela raden (avatar + namn) är en
@@ -15,9 +15,13 @@ import { logoutAction } from '@/lib/actions/auth';
  * bara nedanför två formulär på /konto. Att logga ut ska gå från den plats
  * där man ser vem man är inloggad som.
  *
- * Utloggningen är ett `<form action={logoutAction}>` (server action), inte en
- * onClick-fetch — den fungerar även om JS inte hunnit hydrera, och cookien
- * rensas server-side precis som förut.
+ * Utloggningen är ett vanligt HTML-formulär (`method="post"`) mot route-
+ * handlern `/api/auth/logout` — INTE en server action och inte en
+ * onClick-fetch. Den fungerar även om JS inte hunnit hydrera, cookien rensas
+ * server-side och svaret är en 303 → /login (hård navigering). En server
+ * action här slog ut hela sidan i den globala felvyn vid minsta fel i
+ * action-rundturen, eftersom railen ligger i root-layouten utanför sidans
+ * error.tsx-gräns (t.ex. gammal flik mot ny deploy).
  */
 
 interface Props {
@@ -79,7 +83,7 @@ export function RailAccountMenu({ name, email, role, initial }: Props) {
             <Icon name="gear" size={13} />
             Mitt konto
           </Link>
-          <form action={logoutAction}>
+          <form method="post" action={LOGOUT_PATH}>
             <button type="submit" className="mx-rail-account-item" role="menuitem">
               <Icon name="logout" size={13} />
               Logga ut

@@ -16,12 +16,17 @@ import type { StartupStatus } from '@/lib/labels';
 import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
 import { DeMinimisSection } from '@/app/startups/[id]/DeMinimisSection';
 import { DocumentCompleteButton } from '@/app/education/documents/DocumentCompleteButton';
+import { OrgPostList, type BoardPost } from '@/components/home/OrgPostList';
+import { chatMarkdownToHtml } from '@/lib/safe-html';
+import { listOrgPosts } from '@/lib/org-posts/data';
 import {
   educationDocumentKindLabels,
   isPureStartupMember,
   type EducationDocumentAssignment,
   type StartupPhase,
-  type Tool
+  type Tool,
+  orgPostExcerpt,
+  selectLiveOrgPosts
 } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
@@ -88,7 +93,7 @@ function Empty({ children }: { children: React.ReactNode }) {
 
 export default async function MinOversiktPage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'min_oversikt', user.disabledModules)) {
+  if (!canAccessModuleForUser(user.roles, 'min_oversikt', user.enabledModules)) {
     redirect('/chatt');
   }
 
@@ -209,6 +214,22 @@ export default async function MinOversiktPage() {
     }
   }
 
+  // Anslagstavlan (§ 37): inlägg riktade till hela organisationen
+  // (audience=all) visas för bolagsmedlemmen — RLS släpper bara igenom dem.
+  let orgPosts: BoardPost[] = [];
+  if (isPureMember) {
+    const now = new Date();
+    const posts = await listOrgPosts(pb, user.tenant, 30);
+    orgPosts = selectLiveOrgPosts(posts, user.roles, now)
+      .slice(0, 6)
+      .map((p) => ({
+        ...p,
+        bodyHtml: p.body ? chatMarkdownToHtml(p.body) : '',
+        excerpt: orgPostExcerpt(p.body),
+        scheduled: false
+      }));
+  }
+
   // Egna + bolagets öppna uppgifter (ej klara/avbrutna).
   let tasks: TaskRecord[] = [];
   try {
@@ -301,6 +322,20 @@ export default async function MinOversiktPage() {
               </div>
             </div>
           </section>
+        ) : null}
+
+        {/* Från Movexum — anslagstavlan (audience=all), bara för bolagsmedlemmar. */}
+        {isPureMember && orgPosts.length > 0 ? (
+          <OrgPostList
+            posts={orgPosts}
+            userId={user.id}
+            roles={user.roles}
+            canAuthor={false}
+            variant="board"
+            label="Från Movexum"
+            description="Nyheter och information till alla bolag i programmet"
+            emptyText="Inget att visa just nu."
+          />
         ) : null}
 
         {/* De minimis */}

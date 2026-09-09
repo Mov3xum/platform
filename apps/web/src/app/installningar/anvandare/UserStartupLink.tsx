@@ -26,7 +26,7 @@ export function UserStartupLink({
   const [state, formAction, pending] = useActionState(updateUserStartupLinkAction, initialState);
 
   return (
-    <form action={formAction} className="flex flex-col items-end gap-1">
+    <form action={formAction} className="flex flex-col items-start gap-1">
       <div className="flex items-center gap-2">
         <input type="hidden" name="user_id" value={userId} />
         <label className="sr-only" htmlFor={`startup-${userId}`}>

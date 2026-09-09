@@ -1335,10 +1335,10 @@ export interface ModuleGroup {
 }
 
 export const RAIL_GROUPS: ModuleGroup[] = [
-  { label: 'Översikt', modules: ['idag', 'min_oversikt', 'inkorg', 'pagaende', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
+  { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'pagaende', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'anvandare', 'installningar', 'min_profil'] }
+  { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'installningar', 'min_profil'] }
 ];
 
 /**
@@ -1369,6 +1369,14 @@ export function isPureStartupMember(roles: Role[] | undefined): boolean {
 }
 
 export const coreModules: ModuleDefinition[] = [
+  {
+    id: 'hem',
+    title: 'Hemmaplan',
+    description:
+      'Organisationens startsida — anslagstavla med nyheter, info och instruktioner, bolagsnytt, omvärldsbevakning och veckans agenda.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/hem'
+  },
   {
     id: 'idag',
     title: 'Chatt',
@@ -1523,16 +1531,19 @@ export const coreModules: ModuleDefinition[] = [
     route: '/integrationer'
   },
   {
+    // Användaradministrationen bor under Inställningar (sektion "Användare");
+    // modulen finns kvar för `canAccessModule`-kompatibilitet men visas inte
+    // som egen rail-post (Inställningar-hubben länkar dit).
     id: 'anvandare',
     title: 'Användare',
-    description: 'Hantera plattformsanvändare — skapa bolagsmedlemmar och tilldela bolag.',
+    description: 'Hantera plattformsanvändare — roller, bolagskoppling, åtkomst och lösenord.',
     rolesAllowed: ['admin', 'incubator_lead'],
-    route: '/admin/users'
+    route: '/installningar/anvandare'
   },
   {
     id: 'installningar',
     title: 'Inställningar',
-    description: 'Moduler, tenants, integrationer och infrastruktur.',
+    description: 'Användare, moduler, AI-inställningar, varumärke och drift.',
     rolesAllowed: ['admin', 'incubator_lead'],
     route: '/installningar'
   },
@@ -1603,6 +1614,33 @@ export * from './compass-authoring';
 // ─── Mötesläge i chatten (ren möteslogik, enhetstestad, § 34) ────────────────
 export * from './meeting';
 export * from './greeting';
+// ─── Modulåtkomst per användare (allow-lista + rollstandard, enhetstestad) ───
+export * from './module-access';
+import { isToggleableModule, resolveEnabledModules } from './module-access';
+
+/** Togglebara modul-id:n som minst en av rollerna tillåter (rail-ordning). */
+export function allowedModuleIdsForRoles(roles: readonly Role[] | undefined): string[] {
+  const set = new Set(roles ?? []);
+  return coreModules
+    .filter((m) => isToggleableModule(m.id) && m.rolesAllowed.some((r) => set.has(r)))
+    .map((m) => m.id);
+}
+
+/**
+ * Användarens effektiva allow-lista (§ 36.3) — `resolveEnabledModules` med
+ * rollens tillåtna moduler ur `coreModules` som fallback när ingen lista är
+ * lagrad. Används av sessionen och användaradministrationen (samma regel).
+ */
+export function resolveUserModules(input: {
+  roles: readonly Role[] | undefined;
+  stored?: unknown;
+  legacyDisabled?: unknown;
+}): string[] {
+  return resolveEnabledModules({ ...input, allowedForRoles: allowedModuleIdsForRoles(input.roles) });
+}
+export * from './event-time';
+export * from './org-posts';
+export * from './home';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */

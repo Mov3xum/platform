@@ -934,7 +934,7 @@ export default function DashboardChat({
       )}
 
       <div className="mt-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <VoiceInputButton
             disabled={isProcessingFiles}
             onError={(message) => setLocalError(message || null)}
@@ -1301,8 +1301,8 @@ export default function DashboardChat({
         </div>
       )}
       {!isActive ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto py-10">
-          <div className="mx-auto flex w-full max-w-[720px] flex-col px-6">
+        <div className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto py-10">
+          <div className="mx-auto my-auto flex w-full max-w-[720px] flex-col px-6">
             {greeting && (
               <h1 className="font-heading text-[28px] font-semibold tracking-tight text-foreground md:text-[34px]">
                 {greeting}

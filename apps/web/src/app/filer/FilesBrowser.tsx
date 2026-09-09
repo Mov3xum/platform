@@ -224,7 +224,7 @@ export default function FilesBrowser({
               {files.length} filer · {folderCount} mappar · {formatBytes(totalBytes)} totalt
             </p>
           </div>
-          <div className="flex flex-shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={sortWithAi}

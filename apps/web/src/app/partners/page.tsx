@@ -15,7 +15,7 @@ function sanitizeRecordIds(ids: string[]): string[] {
 export default async function PartnersPage() {
   const user = await requireUser();
 
-  if (!canAccessModuleForUser(user.roles, 'partners', user.disabledModules)) {
+  if (!canAccessModuleForUser(user.roles, 'partners', user.enabledModules)) {
     return (
       <PageShell title="Partneröversikt">
         <div className="mx-auto max-w-md py-12 text-center">
