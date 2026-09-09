@@ -3,6 +3,7 @@
 import PocketBase from 'pocketbase';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
+import { getSuperuserPb as getSharedSuperuserPb } from '@/lib/integrations/credentials';
 import { hasRole } from '@/lib/rbac';
 import { coreModules } from '@platform/shared';
 import { revalidatePath } from 'next/cache';
@@ -130,6 +131,16 @@ export async function saveModuleTogglesAction(
   return { success: true };
 }
 
+/**
+ * Sparar användarspecifika avaktiverade moduler (Inställningar → Användare).
+ *
+ * `users.updateRule` är `@request.auth.id = id` (migration 1700000002), dvs.
+ * en användare får bara uppdatera sig själv. En admin som sparar en ANNAN
+ * användares modulåtkomst med sin egen token nekas därför tyst av PB (404)
+ * — "Kunde inte spara användarinställningar". Skrivningen går därför via
+ * superuser, exakt som `updateUserRolesAction` (lib/actions/users.ts):
+ * RBAC (admin) + tenant-korsverifiering INNAN skrivningen är säkerhetsgränsen.
+ */
 export async function saveUserModuleTogglesAction(
   _prev: SaveModuleTogglesState,
   formData: FormData
@@ -157,19 +168,47 @@ export async function saveUserModuleTogglesAction(
     return { error: 'Ogiltigt format på moduldata.' };
   }
 
-  const pb = await getServerPb();
+  const suResult = await getSharedSuperuserPb();
+  if (!suResult.ok) {
+    console.error('[settings] saveUserModuleToggles: superuser unavailable', {
+      reason: suResult.reason
+    });
+    return {
+      error:
+        suResult.reason === 'missing_credentials'
+          ? 'Serverfel: superuser-credentials saknas. Kontakta administratören.'
+          : 'Serverfel: kunde inte autentisera superuser.'
+    };
+  }
+  const pb = suResult.pb;
+
+  // Tenant-isolation: målanvändaren läses via superuser (users.viewRule kan
+  // också nekas tyst, § 21.3) och korsverifieras mot inloggad admins tenant
+  // INNAN skrivningen.
   try {
     const target = await pb.collection('users').getOne<{ tenant?: string }>(userId, {
       fields: 'id,tenant'
     });
-    if (!target.tenant || target.tenant !== user.tenant) {
+    if (!target.tenant || String(target.tenant) !== user.tenant) {
       return { error: 'Kan bara uppdatera användare i din tenant.' };
     }
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    console.error('[settings] saveUserModuleToggles: target lookup failed', { userId, status });
+    return { error: 'Användaren kunde inte hittas.' };
+  }
+
+  try {
     await pb.collection('users').update(userId, {
       disabled_modules: disabledModules
     });
   } catch (err) {
-    console.error('[settings] saveUserModuleToggles failed', { userId, tenantId: user.tenant, err });
+    const status = (err as { status?: number }).status;
+    console.error('[settings] saveUserModuleToggles failed', {
+      userId,
+      tenantId: user.tenant,
+      status
+    });
     return { error: 'Kunde inte spara användarinställningar. Försök igen.' };
   }
 
