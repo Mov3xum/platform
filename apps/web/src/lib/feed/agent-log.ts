@@ -87,6 +87,14 @@ const FLOW_LABELS: Record<string, string> = {
   quiz: 'quiz'
 };
 
+/** Anslagstavlans inläggstyper (§ 37). */
+const ORG_POST_KIND_LABELS: Record<string, string> = {
+  news: 'nyhet',
+  notice: 'info',
+  instruction: 'instruktion',
+  celebration: 'firande'
+};
+
 /** Kanban-kolumnernas etiketter (§ 15.7). */
 const TASK_COLUMN_LABELS: Record<string, string> = {
   backlog: 'Backlogg',
@@ -379,6 +387,37 @@ function mapRow(
         detail: str(after.cron_expression) || undefined,
         href: toolId ? `/toolbox/${toolId}` : '/toolbox',
         icon: 'clock'
+      };
+    }
+
+    case 'org_posts': {
+      const title = str(after.title);
+      if (action === 'create') {
+        return {
+          title: `Nytt på anslagstavlan: "${title || 'utan rubrik'}"`,
+          detail: ORG_POST_KIND_LABELS[str(after.kind)],
+          href: '/hem',
+          icon: 'home'
+        };
+      }
+      if (after.deleted === true) {
+        return { title: `Anslagstavlan: "${title || 'ett inlägg'}" togs bort`, href: '/hem', icon: 'home' };
+      }
+      if (row.field === 'pinned') {
+        return {
+          title: after.pinned === true
+            ? `Anslagstavlan: "${title || 'ett inlägg'}" fästes`
+            : `Anslagstavlan: "${title || 'ett inlägg'}" lossades`,
+          href: '/hem',
+          icon: 'home'
+        };
+      }
+      return {
+        title: title
+          ? `Anslagstavlan: "${title}" ${changedVerb}`
+          : `Anslagstavlan: ett inlägg ${changedVerb}`,
+        href: '/hem',
+        icon: 'home'
       };
     }
 

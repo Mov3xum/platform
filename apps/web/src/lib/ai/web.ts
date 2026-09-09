@@ -148,7 +148,51 @@ async function fetchOne(pb: PocketBase, src: WebSource): Promise<WebFetchResult>
     };
   }
 
-  // Live-fetch med timeout
+  // Live-fetch (delad med Hemmaplans flödesläsning nedan).
+  const live = await fetchRawFeed(src);
+  if (!live.ok) {
+    return {
+      source: src.key,
+      label: src.label,
+      url: src.url,
+      fetched_at: new Date().toISOString(),
+      cached: false,
+      ok: false,
+      error: live.error,
+      body: '',
+      items: []
+    };
+  }
+
+  const items = live.items;
+  const body = formatItemsAsText(src.label, items).slice(0, MAX_BYTES_PER_SOURCE);
+  const fetched_at = live.fetched_at;
+
+  // Skriv till cache (fail-soft)
+  await writeCache(pb, src.key, body, fetched_at).catch(() => {});
+
+  return {
+    source: src.key,
+    label: src.label,
+    url: src.url,
+    fetched_at,
+    cached: false,
+    ok: true,
+    body,
+    items
+  };
+}
+
+type RawFeed =
+  | { ok: true; items: WebFeedItem[]; fetched_at: string }
+  | { ok: false; error: string };
+
+/**
+ * Hämtar och parsar ETT whitelistat flöde med timeout. Ingen cache här —
+ * anroparna cachar (PB `web_cache` för prompt-texten, in-process-cache för
+ * Hemmaplans poster). URL:en kommer alltid från WEB_SOURCES (SSRF-skydd).
+ */
+async function fetchRawFeed(src: WebSource): Promise<RawFeed> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -161,54 +205,64 @@ async function fetchOne(pb: PocketBase, src: WebSource): Promise<WebFetchResult>
       // Servar Coolify-deploy: ingen Next-cache, RSS hanteras av vår egen cache.
       cache: 'no-store'
     });
-
-    if (!response.ok) {
-      return {
-        source: src.key,
-        label: src.label,
-        url: src.url,
-        fetched_at: new Date().toISOString(),
-        cached: false,
-        ok: false,
-        error: `HTTP ${response.status}`,
-        body: '',
-        items: []
-      };
-    }
-
+    if (!response.ok) return { ok: false, error: `HTTP ${response.status}` };
     const raw = await response.text();
-    const items = parseRssItems(raw).slice(0, MAX_ITEMS_PER_FEED);
-    const body = formatItemsAsText(src.label, items).slice(0, MAX_BYTES_PER_SOURCE);
-    const fetched_at = new Date().toISOString();
-
-    // Skriv till cache (fail-soft)
-    await writeCache(pb, src.key, body, fetched_at).catch(() => {});
-
     return {
-      source: src.key,
-      label: src.label,
-      url: src.url,
-      fetched_at,
-      cached: false,
       ok: true,
-      body,
-      items
+      items: parseRssItems(raw).slice(0, MAX_ITEMS_PER_FEED),
+      fetched_at: new Date().toISOString()
     };
   } catch (err) {
-    return {
-      source: src.key,
-      label: src.label,
-      url: src.url,
-      fetched_at: new Date().toISOString(),
-      cached: false,
-      ok: false,
-      error: err instanceof Error ? err.message : 'fetch failed',
-      body: '',
-      items: []
-    };
+    return { ok: false, error: err instanceof Error ? err.message : 'fetch failed' };
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hemmaplans omvärldsbevakning (CLAUDE.md § 37) — strukturerade poster
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `web_cache` lagrar den prompt-formaterade TEXTEN (inte posterna), så en
+// cache-träff där ger tomma `items`. Startsidan behöver rubrik/länk/datum per
+// post → egen in-process-cache (samma 30 min-TTL, samma whitelist, samma
+// timeout/fail-soft). Ett Node-processminne räcker: Next-servern är en
+// persistent process (samma mönster som connector-cachen § 13.6).
+
+export interface WebFeedResult {
+  source: WebSourceKey;
+  label: string;
+  url: string;
+  fetched_at: string;
+  cached: boolean;
+  ok: boolean;
+  error?: string;
+  items: WebFeedItem[];
+}
+
+const FEED_ITEM_CACHE = new Map<WebSourceKey, { fetched_at: string; items: WebFeedItem[] }>();
+
+export async function fetchWebFeedItems(sources: WebSourceKey[]): Promise<WebFeedResult[]> {
+  const valid = sources.filter((s): s is WebSourceKey => Boolean(WEB_SOURCE_MAP[s]));
+  return Promise.all(
+    valid.map(async (key): Promise<WebFeedResult> => {
+      const src = WEB_SOURCE_MAP[key];
+      const hit = FEED_ITEM_CACHE.get(key);
+      if (hit && Date.now() - new Date(hit.fetched_at).getTime() < CACHE_TTL_MS) {
+        return { source: key, label: src.label, url: src.url, fetched_at: hit.fetched_at, cached: true, ok: true, items: hit.items };
+      }
+      const live = await fetchRawFeed(src);
+      if (!live.ok) {
+        // Behåll en utgången cache-post hellre än ett tomt flöde (fail-soft).
+        if (hit) {
+          return { source: key, label: src.label, url: src.url, fetched_at: hit.fetched_at, cached: true, ok: true, items: hit.items };
+        }
+        return { source: key, label: src.label, url: src.url, fetched_at: new Date().toISOString(), cached: false, ok: false, error: live.error, items: [] };
+      }
+      FEED_ITEM_CACHE.set(key, { fetched_at: live.fetched_at, items: live.items });
+      return { source: key, label: src.label, url: src.url, fetched_at: live.fetched_at, cached: false, ok: true, items: live.items };
+    })
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
