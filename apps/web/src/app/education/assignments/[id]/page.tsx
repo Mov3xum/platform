@@ -21,11 +21,11 @@ export default async function WorkshopAssignmentPage({
   // länkad startup_member, annars notFound().
   const pb = await getAssignmentReadPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
-  const canAccessEducation = canAccessModuleForUser(user.roles, 'education', user.disabledModules);
+  const canAccessEducation = canAccessModuleForUser(user.roles, 'education', user.enabledModules);
   const canAccessMemberActivities = canAccessModuleForUser(
     user.roles,
     'mina_aktiviteter',
-    user.disabledModules
+    user.enabledModules
   );
 
   let assignment: WorkshopAssignment;

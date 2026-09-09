@@ -52,7 +52,7 @@ export default async function IntegrationRecordsPage({
   const { slug } = await params;
   const { type, page } = await searchParams;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'integrationer', user.disabledModules)) {
+  if (!canAccessModuleForUser(user.roles, 'integrationer', user.enabledModules)) {
     redirect('/dashboard');
   }
 

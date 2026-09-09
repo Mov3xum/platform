@@ -18,7 +18,7 @@ import type { EducationDocument, EducationDocumentAssignment, WorkshopArea } fro
 
 export default async function EducationDocumentsPage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) redirect('/chatt');
+  if (!canAccessModuleForUser(user.roles, 'education', user.enabledModules)) redirect('/chatt');
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
   const isStartupMember = hasRole(user.roles, ['startup_member']);

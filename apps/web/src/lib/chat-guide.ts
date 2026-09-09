@@ -177,6 +177,15 @@ const GUIDE: ChatGuideSection[] = [
         description:
           'Skapa en workshop med mål, instruktioner och textmoduler. Bild/film och publicering görs i byggaren i /education.',
         examples: ['Skapa en workshop om prissättning med tre moduler']
+      },
+      {
+        title: 'Hemmaplan: internutbildningar, anslagstavla & rutiner',
+        description:
+          'Lägg upp, uppdatera, fäst eller låt inlägg utgå på startsidan — fliken Internutbildningar administreras helt via chatten.',
+        examples: [
+          'Lägg upp en internutbildning om GDPR i coachning torsdag 14:00 med länk till materialet i kunskapsbasen',
+          'Fäst internutbildningen om pitchcoaching överst och låt den utgå sista oktober'
+        ]
       }
     ]
   },

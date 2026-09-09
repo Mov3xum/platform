@@ -2,6 +2,7 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { escFilter } from '@/lib/pb-filter';
 import type { AssignableResource } from '@/lib/assignments/types';
+import { parseDateTimeInput } from '@platform/shared';
 
 export type { AssignableResource, AssignmentCollabOptions } from '@/lib/assignments/types';
 
@@ -184,11 +185,13 @@ export async function createAssignmentMeeting(
   const title = meeting.title.trim().slice(0, 200);
   if (!title) return null;
 
-  const startMs = Date.parse(meeting.startsAt);
-  if (!Number.isFinite(startMs)) return null;
-  const startIso = new Date(startMs).toISOString();
-  const endMs = Date.parse(meeting.endsAt ?? '');
-  const endIso = Number.isFinite(endMs) ? new Date(endMs).toISOString() : null;
+  // "YYYY-MM-DDTHH:mm" från formuläret saknar tidszon → svensk tid, inte
+  // serverns UTC (annars hamnar mötet två timmar fel i sommartid).
+  const start = parseDateTimeInput(meeting.startsAt);
+  if (!start) return null;
+  const startIso = start.toISOString();
+  const end = meeting.endsAt ? parseDateTimeInput(meeting.endsAt) : null;
+  const endIso = end && end.getTime() >= start.getTime() ? end.toISOString() : null;
 
   let eventId: string | null = null;
   try {

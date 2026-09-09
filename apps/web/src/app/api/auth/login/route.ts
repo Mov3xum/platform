@@ -125,6 +125,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         avatar: model.avatar,
         linked_startups: model.linked_startups,
         disabled_modules: model.disabled_modules,
+        enabled_modules: model.enabled_modules,
         expand: expandTenant
           ? { tenant: { id: expandTenant.id, name: expandTenant.name, slug: expandTenant.slug } }
           : undefined

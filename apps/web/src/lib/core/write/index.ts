@@ -27,6 +27,7 @@ export { createMissionDraft, MISSION_TYPES } from './missions';
 export { addStartupKpi, addCapitalRound, createStartupNote, CAPITAL_TYPES } from './crm';
 export { registerDeMinimisSupport, FORORDNINGAR } from './de-minimis';
 export { scheduleAgent } from './schedules';
+export { createOrgPost, updateOrgPostFields, type OrgPostChanges } from './org-posts';
 export { logAgentAction } from './audit';
 export {
   canWriteField,

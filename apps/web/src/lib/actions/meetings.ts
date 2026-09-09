@@ -8,6 +8,7 @@ import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import { writeWithFallback } from '@/lib/core/write/helpers';
 import {
   MEETING_COLLECTION,
+  describeMeetingStoreError,
   loadOwnedMeeting,
   meetingWriteWithFallback,
   type MeetingRow
@@ -214,7 +215,7 @@ export async function startMeetingAction(
     );
     return { meetingId: created.id };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Kunde inte starta mötet.' };
+    return { error: describeMeetingStoreError(err, 'Kunde inte starta mötet.') };
   }
 }
 

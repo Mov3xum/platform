@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function OnboardingManagePage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) redirect('/chatt');
+  if (!canAccessModuleForUser(user.roles, 'education', user.enabledModules)) redirect('/chatt');
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) redirect('/education');
   const canDelete = hasRole(user.roles, ['admin', 'incubator_lead']);
 

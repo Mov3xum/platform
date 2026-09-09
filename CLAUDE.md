@@ -584,6 +584,17 @@ integrity (§ 10).
 felkonfiguration aldrig tyst bryter en kunds chatt mitt i månaden — sätt env:en
 eller tenant-taket för att aktivera.
 
+**0-värden i loggen (migration 1700000145, 2026-09).** PB tolkar 0 som
+"tomt" för ett `required` nummerfält, och 1700000058 skapade `tokens_in`/
+`tokens_out`/`cost_estimate_usd` som required → `logAiUsage` (fail-soft)
+svalde "Cannot be blank." och raden skrevs ALDRIG för embeddings
+(`mistral-embed`, tokens_out = 0 — hela RAG-förbrukningen § 26/§ 27 saknades
+i /insights, /admin/ai-miljo och månadstaket), för Voxtral-anrop med tom text
+(§ 31/§ 34) och för modeller utan prisrad (cost = 0). Migration 1700000145 gör
+talfälten valfria (`min: 0` kvar); speglas i `setup-via-api.mjs`. Logga
+aldrig-någonsin runt problemet genom att skicka "1 token" — bokför det
+faktiska värdet.
+
 ### 9.7 Bannrar och varningstexter
 
 Alla toolbox-sidor ska visa:
@@ -2718,17 +2729,26 @@ bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
 öppnar en meny med **Mitt konto** och **Logga ut**. Tidigare var raden en ren
 `<div>` där bara ett litet kugghjul länkade till `/konto` — ett klick på det
 egna namnet gjorde ingenting, och utloggningen låg begravd under två formulär
-på `/konto`. Utloggningen är ett `<form action={logoutAction}>` (server
-action), inte en onClick-fetch: cookien rensas server-side precis som förut och
-knappen fungerar även innan JS hunnit hydrera. `Navbar`/`LogoutButton` renderas
-bara för UTLOGGADE besökare, så railens meny är den enda utloggningsvägen för
-en inloggad användare.
+på `/konto`. **Utloggningen är en vanlig formulär-POST (`method="post"`) mot
+route-handlern `/api/auth/logout`** (`LOGOUT_PATH` i `lib/auth-paths.ts`) —
+INTE en server action: handlern rensar cookien och svarar 303 → `/login`, dvs.
+en hård navigering så root-layouten läser om cookien (samma mönster som
+inloggningen via `/api/auth/login`). Knappen fungerar även innan JS hunnit
+hydrera. Den tidigare server-actionen (`logoutAction`) är borttagen: railen
+ligger i root-layouten UTANFÖR sidans `error.tsx`-gräns, så varje fel i
+action-rundturen (gammal flik mot ny deploy → "Failed to find Server Action",
+icke-RSC-svar från proxyn) slog ut hela sidan i den globala felvyn "Något gick
+fel" medan användaren förblev inloggad (staging 2026-09). Sökvägen är publik i
+middleware:n så utloggning fungerar även med utgången cookie. `Navbar`/
+`LogoutButton` renderas bara för UTLOGGADE besökare, så railens meny är den
+enda utloggningsvägen för en inloggad användare.
 
 - `isPureStartupMember` = har `startup_member` men ingen
   staff-/observer-roll. Multi-roll (t.ex. coach + startup_member) behåller
   hela staff-railen.
-- Hemvy: en ren medlem som landar på `/chatt` redirectas till `/min-oversikt`
-  (rail-logon pekar dit); staff har kvar Hemmaplan/Chatt.
+- Hemvy: en ren medlem som landar på `/chatt` eller `/hem` redirectas till
+  `/min-oversikt` (rail-logon pekar dit); staff landar på Hemmaplan (`/hem`,
+  § 37) och har chatten som egen rail-post.
 
 ### 22.3 Regelefterlevnad
 
@@ -3865,9 +3885,14 @@ i hjulet, så en genomgång kan klickas igenom utan att dialoger öppnas.
 `expandAnnualWheelSeries` (ren, enhetstestad) expanderar basen till
 förekomster (varje/varannan månad, varje kvartal, t.o.m. vald månad; dagen
 klampas mot månadslängden; perioder flyttas med hela steget och förekomster
-som skulle spilla över årsskiftet utelämnas; hårt tak 12). Både UI-actionen
-och chatt-verktyget `create_annual_wheel_item` (parametrarna `repeat` +
-`repeat_until_month`) går genom `createAnnualWheelSeries` i det delade
+som skulle spilla över årsskiftet utelämnas; hårt tak 12). **Varje år
+(`yearly`, 2026-09):** samma datum i varje år t.o.m. valt slutår (default
+basåret + 2, hårt tak `ANNUAL_WHEEL_MAX_SERIES_YEARS` = 10) — fungerar även
+för helårsaktiviteter utan månad (en förekomst per år), 29 feb klampas till
+28 feb ett vanligt år, och varje förekomst skapas med sitt eget `year`.
+Både UI-actionen och chatt-verktyget `create_annual_wheel_item`
+(parametrarna `repeat` + `repeat_until_month`/`repeat_until_year`) går genom
+`createAnnualWheelSeries` i det delade
 skrivlagret, som skapar varje förekomst via `createAnnualWheelItem` — samma
 whitelist, validering, tenant-stämpel och audit per rad. En delvis lyckad
 serie rapporteras som fel MED antalet redan skapade, aldrig som tyst succé.
@@ -4010,13 +4035,26 @@ railen för exakt den sökvägen (som `/m/` och `/login`); RBAC är oförändrat
 `focusIds` tonar ned resten, `hoverCard={false}`) så hjulet ser likadant ut
 på skärm och projektor.
 
-- **Två lägen:** *Just nu* (default) — panelen visar *Pågår nu / Den här
-  veckan / Kommande 30 dagar* (`buildAnnualWheelAgenda`, ren + enhetstestad;
-  varje post hamnar i EN hink, den mest akuta) och hjulet lyfter fram exakt
-  dessa. *Månad* (← →, eller klick på en sektor) — bläddra månad för månad,
-  panelen listar månadens aktiviteter (perioder syns i varje månad de löper).
-- **Tangenter:** ← → månad · Mellanslag/Home = tillbaka till idag · F =
-  helskärm (`requestFullscreen`) · Esc = stäng. I helskärm betyder Esc bara
+- **Tre lägen:** *Just nu* (default, bara innevarande år) — panelen visar
+  *Pågår nu / Den här veckan / Kommande 30 dagar* (`buildAnnualWheelAgenda`,
+  ren + enhetstestad; varje post hamnar i EN hink, den mest akuta) och hjulet
+  lyfter fram exakt dessa. *Månad* (← →, eller klick på en sektor) — bläddra
+  månad för månad, panelen listar månadens aktiviteter (perioder syns i varje
+  månad de löper). *Översikt* (O, Shift+← → bläddrar ÅR) — årsöversikt i
+  panelen med samma rena dashboard-logik som `/arshjul` (§ 30.5bis):
+  nyckeltal, beläggning per månad med föregående år, kategorier och kvartal.
+- **Filter — fritt valbara i vyn (2026-09):** kategori-flerval via legenden
+  eller klick i hjulets ringar (samma `selectedCategories`/`onToggleCategory`
+  som redigeringsvyn — hjulet visar alla ringar, valda lyfts, övriga tonas;
+  panelen följer hela filtret), tagg, ansvarig och år som selects i panelens
+  filterrad, "Rensa filter". Tidigare fanns inget kategorifilter alls i
+  presentationsläget, så "visa bara Event" var omöjligt. "Presentera"-länken
+  på `/arshjul` tar med aktuellt urval som query (`year`, `cat`, `tag`,
+  `resp`, `month`); `presentation/page.tsx` validerar bara format och klienten
+  faller tyst tillbaka på "alla" för okända värden. Ingen ny dataväg — samma
+  läsning som förut (alla år laddas redan), bara klient-filter.
+- **Tangenter:** ← → månad · Shift+← → år · O = översikt · Mellanslag/Home =
+  tillbaka till idag · F = helskärm (`requestFullscreen`) · Esc = stäng. I helskärm betyder Esc bara
   "lämna helskärm" (webbläsaren sköter det, `fullscreenRef` håller kvar vyn
   en stund efter `fullscreenchange`); utanför helskärm navigerar Esc till
   `/arshjul`.
@@ -4166,10 +4204,15 @@ npm-dependency (§ 10.2).
    § 17.8).
 3. Routen verifierar inloggning + staff-roll, rate-limit (40 anrop/5 min och
    användare) och validerar mime + storlek med den delade helpern.
-4. `transcribeAudio` skickar ljudet till Voxtral (`POST /v1/audio/transcriptions`,
-   `language=sv`) och returnerar texten. Token-utfallet loggas i
-   `ai_usage_events` (surface `dashboard_chat`, modell `voxtral-*`) så
-   `/insights` och `/admin/ai-miljo` (§ 28) räknar med rösten.
+4. Routen mäter först klippets ljudnivå (WAV-PCM, `@platform/shared`
+   audio-level.ts): ett effektivt tyst klipp svaras "Inspelningen var helt
+   tyst" (422) **utan** Voxtral-anrop. Annars skickar `transcribeSpeech`
+   (`lib/ai/voice.ts`) ljudet till Voxtral (`POST /v1/audio/transcriptions`,
+   `language=sv`) och returnerar texten; blir svaret tomt görs ETT omförsök
+   utan språkhint (autodetekt). Token-utfallet loggas i `ai_usage_events`
+   (surface `dashboard_chat`, modell `voxtral-*`) — **även för tomma svar**
+   (Voxtral debiterar ljudingången; `VoiceError.usage` bär förbrukningen) —
+   så `/insights` och `/admin/ai-miljo` (§ 28) räknar med rösten.
 5. Texten hamnar i **chattrutan** — den skickas INTE automatiskt. Användaren
    läser igenom, rättar och trycker skicka själv.
 6. Därefter är det en helt vanlig chatt-turn: agenten planerar, läser data och
@@ -4264,8 +4307,9 @@ INNAN fallbacken används.
   utan granskning skulle ta bort människa-i-loopen precis där agenten kan
   skriva i databasen.
 - Talsyntes (agenten som svarar med röst) är inte i scope.
-- Språket är låst till svenska (`language=sv`) — det höjer träffsäkerheten på
-  domänord markant. Ett språkval per användare kan läggas till senare utan
+- Språket är svenska som default (`language=sv`) — det höjer träffsäkerheten
+  på domänord markant; ger hinten tom text görs ett omförsök med autodetekt
+  (`transcribeSpeech`). Ett språkval per användare kan läggas till senare utan
   brytande ändring.
 - Resultatprofiler för quiz (`result_buckets`) och publicering ställs in i
   modul-admin, inte via chatten.
@@ -4454,7 +4498,10 @@ ALLA operationer, även admin utestängd): `tenant`/`owner` (cascadeDelete),
 `MeetingSegment[] { index, text, at?, speaker? }`, 2 MB),
 `consent_confirmed_at`, `started_at`, `ended_at`. **Denylistad i
 `lib/ai/redaction.ts`** → `query_collection` exponerar den aldrig. Owner-only
-⇒ migration-only (§ 27-precedens). `speaker`-fältet är reserverat från dag 1
+⇒ ingen collection-def i `setup-via-api.mjs` (§ 27-precedens), men
+kollektionens **existens** är ett hårt baseline-invariant i
+`verify-baseline.mjs` (§ 23.4:s compass-precedens) eftersom PB-migrationer
+bara körs när PB-imagen byggs om. `speaker`-fältet är reserverat från dag 1
 för Fas 3 (talarindelning) så framtida diarisering inte kräver
 datamodelländring.
 
@@ -4495,9 +4542,30 @@ segment).
    PB v0.23.4:s tysta regel-nekande** (400/403/404, § 21.3-klassen) — ägar-/
    tenant-checken i koden är den hårda gränsen, fallbacken är robusthet
    (samma mönster som § 18.3/§ 20.5/§ 30.4). Tak: 3 h / 160 segment
-   (art. 15). Tystnad (Voxtral 422) = tomt segment, inte fel. En kraschad flik
-   kostar max ett segment; "Återuppta granskningen"-bannern i `/chatt` öppnar
-   det oavslutade mötet.
+   (art. 15). En kraschad flik kostar max ett segment; "Återuppta
+   granskningen"-bannern i `/chatt` öppnar det oavslutade mötet.
+   **Tomt resultat är aldrig tyst (2026-09).** Incident: mötet slutade som
+   "tomt överallt" — blank live-ruta, tomt transkript, inget protokoll, båda
+   segment-anropen 200 och inget fel — eftersom Voxtrals tomma svar (422)
+   tolkades som "tystnad" och bara renderades som ingenting. Nu mäts
+   segmentets **ljudnivå** (topp/RMS på WAV-PCM, ren + enhetstestad
+   `@platform/shared` audio-level.ts) på BÅDA sidor: (1) klienten visar en
+   **mikrofonmätare** under inspelningen och varnar efter ~6 s helt tyst
+   ingång ("Mikrofonen fångar inget ljud") — en avstängd/fel vald mikrofon
+   syns alltså innan första segmentet ens är uppladdat; (2) servern skickar
+   INTE effektivt tysta segment till Voxtral (`silent: true`, ingen kostnad)
+   och svarar med `warning` när ljud fanns men ingen text kom tillbaka —
+   live-rutan visar "(tyst avsnitt)" respektive orsaken, och granskningen
+   förklarar varför ett transkript blev tomt (tyst mikrofon vs. ljud som
+   inte kunde tolkas). (3) `transcribeSpeech` (`lib/ai/voice.ts`) gör ETT
+   nytt försök **utan språkhint** (autodetekt) när svaret med `language=sv`
+   blir tomt — skydd mot att språkkoden tyst ger tom text; gäller även
+   röstknappen § 31, som dessutom svarar "Inspelningen var helt tyst" utan
+   Voxtral-anrop. Nivåmätningen är rent numerisk (ingen röstidentifiering,
+   § 31.4) och lagras aldrig. Saknas kollektionen på instansen (migrationen
+   inte körd) säger `startMeetingAction` det uttryckligen i stället för PB:s
+   generiska 404, och `verify-baseline.mjs` fäller deployen
+   (`meeting_transcripts` i must-exist-listan).
 4. **Granskning (människa-i-loopen, art. 14):** redigerbart transkript;
    protokollutkastet (sammanfattning/beslut/åtgärdspunkter) **genereras
    automatiskt när granskningen öppnas** (även vid återupptagen granskning;
@@ -4595,9 +4663,10 @@ service workern och manifestet är handskrivna och versionerade i repot.
   server-side i `ProtoShell` via `buildMobileNav` med **samma
   `canAccessModuleForUser` som railen** (menyn är UI-kurering, aldrig
   säkerhetsgräns — RLS/RBAC ligger kvar i § 21).
-- **Staff/observer:** Översikt (`inkorg`, med olästa-badge) · Bolag
-  (`startups`) · **Chatt** (`idag`) · Pågående (`pagaende`) · Mer. Avstängda
-  moduler hoppas över och nästa kandidat tar platsen (uppdrag, årshjul, filer …).
+- **Staff/observer:** Hem (`hem`, § 37) · Översikt (`inkorg`, med
+  olästa-badge) · **Chatt** (`idag`) · Pågående (`pagaende`) · Mer. Avstängda
+  moduler hoppas över och nästa kandidat tar platsen (bolag, uppdrag, årshjul,
+  filer …).
 - **Ren `startup_member`** (§ 22): Aktiviteter · Filer · **Översikt**
   (`min_oversikt` — chatten finns inte för medlemmar, § 21.5) · De minimis ·
   Mer. Chatten exponeras aldrig (enhetstestat).
@@ -4675,3 +4744,341 @@ och den vita wordmark-PNG:n renderas om med
 Playwrights katalog) om wordmark/färg ändras — uppdatera i så fall även
 `manifest.ts`/`layout.tsx` (färgerna) och bumpa `VERSION` i `public/sw.js`
 (ikonerna cachas cache-first) i samma PR (§ 2/§ 5).
+
+---
+
+## 36. Inställningar — hub med undersidor & användaradministration
+
+### 36.1 Struktur
+
+`/installningar` (admin/incubator_lead) är en **översikt med kort**, inte en
+lång sida med allt innehåll. Varje område är en egen undersida; hubben visar
+bara en sammanfattning per kort (antal användare, förbrukad AI-kostnad, antal
+minnesnoteringar, logotypstatus, driftstatus) och länkar in.
+Sektionsregistret `apps/web/src/lib/settings-sections.ts` är källa av sanning
+(slug, titel, ikon, grupp, rollkrav) och delas av hubben, undersidornas flikar
+(`SettingsSectionPage` i `app/installningar/shared.tsx`) och topbarens
+brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
+
+| Route | Innehåll |
+|---|---|
+| `/installningar` | Hub: kort per sektion grupperade i *Organisation & åtkomst*, *AI & automation*, *Utseende* |
+| `/installningar/anvandare` | **Användare** — alla konton i tenanten med sök/rollfilter, "Ny användare", och per konto: roller, kopplat bolag, **moduler i sidofältet** (§ 36.3), nytt lösenord, radering |
+| `/installningar/moduler` | Borttagen (redirect → `/installningar/anvandare`) — den globala tenant-togglingen finns inte längre, § 36.3 |
+| `/installningar/organisation` | Tenants, infra-status, dataresidens |
+| `/installningar/ai-kostnad` | AI-kostnadstak (§ 9.6) |
+| `/installningar/ai-minne` | AI-minne (`agent_memory`, § 16.4) |
+| `/installningar/utseende` | Tenant-logotyp |
+
+`/admin/users` är en legacy-route som redirectar till `/installningar/anvandare`;
+modulen `anvandare` pekar dit men visas inte längre som egen rail-post
+(hubben länkar). Modulvalet per person ligger i användarens detaljvy
+(`ModulePicker`, § 36.3).
+
+### 36.2 Användaradministration — RBAC & regelefterlevnad
+
+Server-actions i `lib/actions/users.ts` (`updateUserRolesAction`,
+`resetUserPasswordAction`, `deleteUserAction`) + ren, enhetstestad logik i
+`lib/users/validate.ts` (`canManageUser`, `validateRolesUpdate`,
+`validateNewPassword`, `validateDeleteConfirmation`).
+
+- **RBAC (ISO 27001 A.5.15–A.5.18):** `hasRole(admin|incubator_lead)` +
+  `assignableRolesFor` (incubator_lead kan aldrig tilldela `admin`) +
+  `canManageUser` (incubator_lead rör aldrig admin-konton). Aldrig inline
+  rollkoll. Självskydd: egna administrationsroller kan inte tas bort, eget
+  lösenord byts på `/konto`, eget konto kan inte raderas här.
+- **Tenant-isolation:** målanvändaren läses via superuser och korsverifieras
+  mot inloggad staffs tenant INNAN varje skrivning (`loadManagedTarget`).
+  Listan på `/installningar/anvandare` läses via superuser med tenant-filter
+  satt server-side — PocketBase döljer andra användares `email` för vanliga
+  tokens (`emailVisibility`), och adressen behövs för administration. Fallback
+  till användarens token (RLS) om superuser saknas.
+- **GDPR:** inga nya fält/kollektioner. Radering = art. 17-flöde (typad
+  e-postbekräftelse; PB vägrar radera konton som refereras av obligatoriska
+  relationer → tydligt fel, ingen tyst halvradering). Lösenord loggas aldrig;
+  loggar innehåller bara status/id.
+- **Riskklass (EU AI Act):** n/a — ren administration, ingen AI-inferens.
+
+### 36.3 Moduler i sidofältet — per person, med rollstandard
+
+**Sidofältet följer vad som är ibockat på personens profil**, inte en global
+inställning. Tidigare fanns en tenant-bred deny-lista (`tenants.disabled_modules`,
+`/installningar/moduler`) plus en per-användar-deny-lista, vilket gav alla
+samma meny. Nu gäller en **allow-lista per användare** med **standard per
+roll**:
+
+- **Datamodell:** `users.enabled_modules` (json-array, migration
+  **1700000144**, speglad i `setup-via-api.mjs`). `null` = "aldrig justerad"
+  ⇒ appen använder **allt rollen tillåter** minus ev. legacy
+  `users.disabled_modules` (`resolveUserModules`), dvs. exakt vad kontot såg
+  före skiftet — ett befintligt konto tappar aldrig tyst en sida som
+  sidguards/korslänkar förutsätter (t.ex. `/pagaende` → `/mina-aktiviteter`,
+  § 22). `tenants.disabled_modules` lämnas orörd i schemat men **läses inte
+  längre** — den globala togglingen är borttagen.
+- **Rollstandard** (`DEFAULT_MODULES_BY_ROLE` i
+  `packages/shared/src/module-access.ts`, ren + enhetstestad) gäller vid
+  **kontoskapande**: unionen av rollernas listor förbockas i "Ny användare"
+  (`createUserAction`) och är målet för "Återställ till rollens standard".
+  Admin/incubator_lead ser i princip allt; coach/mentor/observer/partner får
+  en smalare standard (men alltid `mina_aktiviteter`, `de_minimis` och — för
+  staff — `kunskapsbas`, så § 20.4/§ 22/§ 26-flödena fungerar direkt); en
+  `startup_member` får exakt medlems-railen (§ 22). Testen låser att varje
+  standardmodul faktiskt tillåts av rollen.
+- **Rollbyte:** `updateUserRolesAction` skriver moduler i samma anrop
+  (`enabledModulesAfterRoleChange`): personens val behålls, den nya
+  rolluppsättningens standard läggs till och moduler de nya rollerna inte
+  tillåter släpps — en befordran ger aldrig en krympt meny. `null` lämnas
+  orört (följer rollen automatiskt).
+- **Alltid-på** (`ALWAYS_ON_MODULE_IDS`): `installningar`/`anvandare` (annars
+  kan en admin låsa sig ute) samt de dolda legacy-id:na (`onboarding`,
+  `activity_feed`, `partners`). `toolbox`/`dashboard` är alias som följer
+  `agenter`/`idag`.
+- **Var det ändras:** Inställningar → Användare → personen → *Moduler i
+  sidofältet* (`ModulePicker`, grupperat som railen) och i "Ny användare".
+  För en REN bolagsmedlem visar pickern bara medlems-railens moduler
+  (`rolesAllowed` är bredare för `startup_member`, men railen renderar aldrig
+  annat än `MEMBER_RAIL` — en kryssruta för "Chatt" vore en no-op).
+  Server-action `updateUserModulesAction` (`lib/actions/users.ts`) — samma
+  RBAC som övrig användaradministration (`loadManagedTarget`:
+  admin/incubator_lead, tenant-korsverifierad, incubator_lead rör aldrig
+  admin-konton). **OBS: medveten vidgning** — den gamla per-användar-togglingen
+  var admin-only; nu får även incubator_lead styra moduler (samma krets som
+  roller/lösenord). Ingen eskaleringsväg: listan saneras mot målanvändarens
+  roller.
+- **Schema-drift (§ 24.4/§ 30.4-invarianten):** PB släpper okända fält tyst.
+  Efter varje skrivning läses posten tillbaka; saknas `enabled_modules` i
+  schemat svarar `updateUserModulesAction` med ett tydligt fel (kör migration
+  1700000144) och `createUserAction` flaggar det i bekräftelsen — aldrig en
+  tyst lyckad no-op.
+- **Säkerhetsgräns oförändrad:** `canAccessModuleForUser(roles, id,
+  enabledModules)` = `canAccessModule` (rollen, `rolesAllowed`) **och**
+  `isModuleEnabled`. Listan saneras server-side mot vad MÅLANVÄNDARENS roller
+  får (`validateEnabledModules`) — den kan aldrig ge mer än rollen, och
+  PB-RLS (§ 21) gäller oförändrat. Sessionen bär `SessionUser.enabledModules`
+  (ersätter `disabledModules`); cookie-kompaktmodellen har `enabled_modules`.
+- **GDPR/riskklass:** inga personuppgifter (bara modul-id:n), ingen
+  AI-inferens → n/a.
+
+---
+
+## 37. Hemmaplan — organisationens startsida (intranät)
+
+### 37.1 Översikt
+
+`/hem` (modul `hem`, titel **Hemmaplan**, först i "Översikt"-railen) är den
+sida personalen landar på efter inloggning (`/` och `/dashboard` redirectar
+dit; PWA:ns `start_url` pekar dit). En ren `startup_member` redirectas
+oförändrat till `/min-oversikt` (§ 22). Sidan är en **boxlös dashboard i
+full bredd** (2026-09; samma uttryck som årshjulets dashboard § 30.5bis:
+hårlinjer, eyebrow-etiketter, inga stora kort eller färgytor) med en
+12-kolumners grid — huvudspalt (8/12) + sidospalt (4/12) från `xl`, en kolumn
+på mindre skärmar:
+
+1. **Hälsning + nyckeltalsrad** — svensk tidshälsning, datumrad med ISO-vecka
+   (`swedishDateLine`), rollfiltrerade genvägs-chips och fem KPI-tiles med
+   avdelare: aktiva bolag, nya inflöden 7 d (med delta mot föregående 7 d),
+   pågående workshops, egna öppna uppgifter, punkter på agendan 14 d. Alla
+   räknas via `getList(1,1).totalItems` med användarens token; en räkning som
+   felar visar "–", aldrig 0.
+2. **Flikar** (`HomeBoardTabs`, huvudspalten): **Anslagstavla** (news/notice/
+   celebration), **Så gör vi** (hårdkodad plattformsintro `PlatformIntro` +
+   dynamiska `instruction`-inlägg som hopfällda rader) och
+   **Internutbildningar** (`kind='training'`). Aktiv flik speglas i URL:en
+   (`?flik=anslagstavla|sa-gor-vi|internutbildningar`) så länkar från chatten
+   och aktivitetsloggen öppnar rätt flik; `orgPostTabFor(kind)` i
+   `@platform/shared` är mappningen typ → flik.
+3. **Bolagsnytt** (huvudspalten) — den samlade aktivitetsloggen (§ 32), samma
+   laddare som chatten.
+4. **Den här veckan** (sidospalten) — årshjulets poster + planerade events
+   14 dagar framåt, grupperade per dag ("Idag/Imorgon/Torsdag/20 sep").
+5. **Omvärld** (sidospalten, `OmvarldFeed`) — senaste posterna från
+   EU-whitelistade RSS-källor (§ 9.8) med källfilter-chips och en ärlig
+   statusrad per källa (§ 37.4).
+
+`AutoRefresh` (klient) kör `router.refresh()` var 10:e minut och när fliken
+blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdning.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/org-posts.ts` (+ `.test.ts`) | Ren domänlogik för inlägg: typer, validering, synlighet (schemalagt/utgånget/målgrupp), sortering, RBAC-hjälpare |
+| `packages/shared/src/home.ts` (+ `.test.ts`) | Datumrad i svensk tid, veckoagenda (`buildHomeAgenda`), sammanslagning av omvärldsflöden (`mergeOmvarldItems`) |
+| `backend/pocketbase-schema/migrations/1700000144_create_org_posts.js` | Collection `org_posts` |
+| `apps/web/src/lib/org-posts/data.ts` | Enda läsvägen (`listOrgPosts`, fail-soft) |
+| `apps/web/src/lib/actions/org-posts.ts` | Server actions: skapa/ändra/fäst/radera (RBAC, validering, superuser-fallback, audit) |
+| `apps/web/src/lib/feed/activity-feed.ts` | Delad feed-laddare (`activities` + `agent_actions`) för `/chatt` OCH `/hem` |
+| `apps/web/src/lib/ai/web.ts` | `fetchWebFeedItems` — strukturerade RSS-poster med in-process-cache (30 min) |
+| `apps/web/src/app/hem/page.tsx` | Sidan (server; alla källor parallellt via `Promise.allSettled`) |
+| `apps/web/src/components/home/OrgPostList.tsx` | Inläggslistan (client): redigerare, utfällning, fäst/redigera/ta bort — används i alla tre flikarna (`kinds` begränsar typvalet per flik) |
+| `apps/web/src/components/home/HomeBoardTabs.tsx` | Flikarna Anslagstavla · Så gör vi · Internutbildningar (client, URL-synk `?flik=`) |
+| `apps/web/src/components/home/PlatformIntro.tsx` | Hårdkodad plattformsintro (statisk, native `<details>`) under "Så gör vi" |
+| `apps/web/src/components/home/OmvarldFeed.tsx` | Omvärldsflödet (client): källfilter + statusrad (live/utgången cache/nere) |
+| `apps/web/src/components/home/AutoRefresh.tsx` | Periodisk `router.refresh()` (10 min + vid synlig flik) |
+| `apps/web/src/components/home/TimeAgo.tsx` | Hydreringssäker relativ tid |
+| `apps/web/src/lib/ai/rss.ts` (+ `rss.test.ts`) | REN RSS/Atom-parser (ingen IO) — testad mot fixturer i Breakit-/Sifted-/EIC-/Vinnova-form |
+| `apps/web/src/lib/core/write/org-posts.ts` | Skrivlager: `createOrgPost`/`updateOrgPostFields` (delas av chatt-verktygen) |
+| `backend/pocketbase-schema/migrations/1700000145_extend_org_posts_kind_training.js` | `org_posts.kind` += `training` (union) |
+
+### 37.2 Datamodell — `org_posts` (migration 1700000144)
+
+`tenant` (cascadeDelete), `author` (→ users, ingen cascade — inlägget lever
+vidare anonymt), `title` (≤ 160), `body` (markdown ≤ 20 000, renderas ALLTID
+via `lib/safe-html`), `kind` (`news | notice | instruction | celebration | training` —
+MÅSTE spegla `ORG_POST_KINDS`; `training` = Internutbildningar-fliken, lagt
+som union i **migration 1700000145** och speglat i `setup-via-api.mjs` via
+`patchCollection`), `audience` (`staff | all`), `pinned`,
+`published_at` (tomt = direkt; framtid = schemalagt), `expires_at` (tomt =
+utgår aldrig), `link_url` (intern sökväg `/…` eller https — validerat i
+`isSafeOrgPostLink`, aldrig `javascript:`/`data:`), autodate explicit
+(§ 28.5). Speglad i `setup-via-api.mjs` (collection-def + `FORCE_CREATE_RULES`).
+
+**Målgrupp.** `staff` (default) syns för Movexum-personal + observer; `all`
+syns dessutom för bolagsmedlemmar — på **"Min översikt"** (§ 21bis) under
+"Från Movexum". list/view-regeln: `auth && tenant && (STAFF_OR_OBSERVER ||
+audience = "all")` med `:each ?=` (§ 21.3). Kollektionen är därför
+medvetet INTE i `MUST_BE_STAFF_OR_OBSERVER` i `verify-baseline.mjs`.
+
+### 37.3 RBAC och skrivväg
+
+- **Skriva:** admin/incubator_lead/coach/mentor (`ORG_POST_AUTHOR_ROLES`).
+  **Ändra/fästa/radera:** författaren själv eller admin/incubator_lead
+  (`canEditOrgPost`, speglat i PB:s update/delete-regler). `observer` läser.
+- createRule refererar bara auth-fält (§ 21.3); rollen enforce:as i
+  server-actionen; tenant + author stämplas server-side. Superuser-fallback
+  BARA vid PB v0.23.4:s tysta regel-nekande (400/403/404), efter verifierad
+  roll och tenant (§ 18.3/§ 20.5-mönstret).
+- Varje mutation loggas i `agent_actions` (PII-fritt: rubrik/typ/målgrupp;
+  radering som `update` + `deleted`, § 30.6-konventionen) och mappas i
+  `lib/feed/agent-log.ts` → syns i Bolagsnytt/`/aktivitet` med länk till `/hem`.
+- Schemalagda (ännu inte publicerade) inlägg syns bara för författare, märkta
+  "Schemalagt". Utgångna inlägg visas inte alls (radera eller förläng).
+
+**Administration via chatten (Internutbildningar m.fl.).** Den interaktiva
+staff-chatten har verktygen `create_org_post` och `update_org_post`
+(`lib/ai/tools.ts`, gate = agent-actor + `includeWrites`, § 16.3/§ 33) som går
+genom det delade skrivlagret `lib/core/write/org-posts.ts`: rollpolicy i
+`writable-fields.ts` (`org_posts`, `STAFF_FULL` — agenten ärver den inloggades
+roll), `canEditOrgPost` för ändringar (författare eller admin/incubator_lead —
+samma regel som UI:t och PB:s updateRule), validering via den delade
+`validateOrgPostInput` (hela det sammanslagna inlägget valideras vid
+fältuppdatering), personnummer-sanering av rubrik/text på skrivvägen och
+`agent_actions`-audit (PII-fritt) → raden syns i Bolagsnytt/`/aktivitet` med
+länk till rätt flik. `kind=training` är den tänkta huvudanvändningen ("lägg
+upp en internutbildning om GDPR på torsdag med länk till materialet", "fäst
+den överst", "låt den utgå sista oktober"); befintliga inlägg slås upp via
+`query_collection` på `org_posts`. Radering görs inte av agenten (sätt
+`expires_at` i stället — inlägget döljs; radera i UI:t). Guidad i
+`CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden (§ 33.3). Riskklass n/a
+(deterministisk mutation, ingen AI-inferens).
+
+### 37.4 Omvärldsbevakning på startsidan
+
+Så fungerar flödet, steg för steg (`lib/ai/web.ts` + `lib/ai/rss.ts`):
+
+1. **Källor = fast EU-whitelist** (`WEB_SOURCES`, § 9.8: Breakit, Sifted, Di
+   Digital, Vinnova, Almi, EIC). Bara dessa URL:er kan hämtas (SSRF-skydd);
+   inga API-nycklar, inga tredjeparts-aggregatorer — vi läser källornas egna
+   publika RSS/Atom-flöden direkt.
+2. **Hämtning:** alla källor parallellt, 8 s timeout per källa, egen
+   User-Agent, `cache: 'no-store'` (Next får aldrig cacha svaret). Svaret
+   måste **se ut som ett flöde** (`looksLikeFeed`) — en 200-sida med HTML
+   (bot-skydd, omdirigering, "sidan finns inte") rapporteras som fel i stället
+   för att tyst bli ett tomt flöde.
+3. **Parsning** (`rss.ts`, ren + enhetstestad mot fixturer): RSS 2.0, Atom och
+   RDF/dc; CDATA, `content:encoded`, dubbelkodade entiteter; Atom-länkar
+   väljs som `rel=alternate` (aldrig `self`/`enclosure`), `guid`/`origLink`
+   som fallback; datum normaliseras från RFC 822/ISO till ISO (otolkbart →
+   inget datum, aldrig ett fejkat). All HTML strippas till ren text; länkar
+   tillåts bara som http(s). Max 8 poster/källa, 400 tecken sammanfattning.
+4. **Cache = stale-while-revalidate** (in-process, per källa): färsk < 15 min
+   → returneras direkt; 15 min – 24 h → returneras DIREKT märkt `stale` medan
+   en bakgrundshämtning uppdaterar (deduplicerad per källa via en inflight-
+   karta, så samtidiga sidladdningar ger EN begäran mot nyhetskällan); saknas
+   cache (eller > 24 h) inväntas hämtningen. Misslyckas en uppdatering
+   behålls de senaste lyckade posterna + felorsaken.
+5. **Sammanslagning** (`mergeOmvarldItems`, ren): nyast först över alla
+   källor, dedupe på länk, max 4 per källa så en pratig källa inte tränger ut
+   de andra; poster utan länk visas inte.
+6. **UI** (`OmvarldFeed`): källchips med statusprick (grön = live, gul = från
+   utgången cache/uppdateras, orange = nere med felorsak i tooltip), filter
+   per källa, relativ tid per post och en ärlig fotnot om vilka källor som
+   svarade. `AutoRefresh` (10 min) gör att en uppdaterad cache når skärmen
+   utan omladdning — "realtid" i praktiken = nyhetskällans egen
+   publiceringsfördröjning + max 15 min.
+
+`web_cache` (PB) lagrar bara den prompt-formaterade texten för agenterna
+(30 min) och ger tomma `items` vid cache-träff — startsidans poster ligger
+enbart i process-minnet. Fail-soft överallt: svarar ingen källa visas en lugn
+tom-text. Länkarna öppnas hos källan (`rel="noopener noreferrer"`). Ingen
+AI-inferens, inget innehåll lagras i databasen. **Relevans:** urvalet styrs
+av källorna (svensk startup-press, EU-tech, svenska/europeiska
+finansiärer/utlysningar) — vill man bredda/smalna läggs källan till i
+`WEB_SOURCES` (+ `WebSourceKey` i `@platform/shared`), aldrig som fri URL.
+
+### 37.5 Regelefterlevnad
+
+- **Riskklass (EU AI Act):** n/a — ingen AI-inferens på sidan; bolagsnytt
+  och omvärld är deterministisk presentation av befintlig data.
+- **GDPR § 5:** inlägg är verksamhetsinformation; `author` är en intern
+  användarrelation (visningsnamn visas internt, aldrig e-post). UI:t är
+  fritext → skriv inte personuppgifter i inlägg (samma princip som
+  `onboarding_progress`). `org_posts` är **läsbar** för chattens
+  `query_collection` (RLS + fältmaskning, § 9.3) så agenten kan svara på
+  "vad står på anslagstavlan?" — ingen ny PII-väg, inga nya fält i
+  `lib/ai/context.ts`.
+- **GDPR art. 17:** `cascadeDelete` på tenant; författar-relationen nollas
+  vid användarradering.
+- **XSS (§ 10.3):** markdown renderas via `chatMarkdownToHtml` (escapad) på
+  servern; klienten sätter bara den färdiga HTML:en. Länkar valideras.
+- **ISO 27001 A.8.32:** ny oföränderlig migration (1700000144).
+- **§ 21-isolering:** startsidan är staff/observer; en medlem når bara
+  `audience=all`-inlägg via RLS, och aldrig bolagsnytt/omvärld/agenda på `/hem`.
+
+---
+
+## 38. Svensk tid i kalender & events (Europe/Stockholm)
+
+Servern (Coolify-container på UpCloud) kör i **UTC**. All kalender-/eventlogik
+ska ändå räkna i **svensk tid** — både klockslag som personalen skriver in
+och gränser som "idag", "pågår nu" och "avslutat". Incident 2026-09: ett
+event den 8 september stod som "Live nu" den 9:e, och tider från
+formulären förskjöts två timmar i sommartid.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/event-time.ts` (+ `.test.ts`) | Ren, enhetstestad tidsmodul: väggklocka/offset i Stockholm, `parseDateTimeInput`, `toStockholmDateTimeInputValue`, `stockholmDateKey`/`stockholmDayDiff`, `eventPhase`, `formatStockholmDateTime` |
+| `apps/web/src/lib/actions/events.ts` | Skapa/uppdatera event — tolkar formulärtider via `parseDateTimeInput` |
+| `apps/web/src/lib/core/write/validators.ts` | `validateIsoDateTime` (chatt-agentens `create_event`) — samma tolkning |
+| `apps/web/src/lib/assignments/collaboration.ts`, `lib/actions/tasks.ts` | Möten från tilldelningar / Outlook — samma tolkning |
+| `apps/web/src/app/events/{page,[id]/page}.tsx`, `components/overview/AgendaStrip.tsx`, `lib/overview/aggregate.ts` | Fas + visning i svensk tid |
+
+**Regler (bindande):**
+
+- **Offsetlösa klockslag är svensk tid.** `<input type="datetime-local">`,
+  `"YYYY-MM-DDTHH:mm"` från tilldelningsformulären och agentens
+  `"2026-09-10 14:00"` saknar tidszon och MÅSTE gå genom `parseDateTimeInput`
+  (aldrig `new Date(str)`/`Date.parse(str)` direkt — det tolkar som serverns
+  UTC). Strängar med explicit `Z`/`±hh:mm` (Outlook, ISO från agenten) tas som
+  de är. Formulären fyller i tillbaka via `toStockholmDateTimeInputValue`, så
+  spara → redigera → spara ger samma klockslag.
+- **Eventets fas följer klockan, inte bara statusfältet** (`eventPhase`):
+  `cancelled`/`completed` i fältet vinner alltid; ett event vars slut
+  (`ends_at`, annars slutet av startdagens svenska dygn) har passerat är
+  **avslutat** oavsett om fältet säger `live`/`planned`; `live` = fältet
+  `live` ELLER klockan mellan start och slut; annars `upcoming`. Ingen
+  skrivning sker — fältet lämnas orört, detaljsidan visar den härledda fasen
+  och noterar när fältet släpar. "Live nu"/"Kommande"/"Avslutade" på
+  `/events`, LIVE-chippen på detaljsidan och agendan på översikten använder
+  fasen.
+- **"Idag"/dygnsgränser räknas på svenska kalenderdatum**
+  (`stockholmDateKey`/`stockholmDayDiff`), aldrig `getDate()`/
+  `toISOString().slice(0,10)` på servern.
+- **Visning:** `formatStockholmDateTime`/`formatStockholmTimeOrNull` (eller
+  `toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' })`) — aldrig
+  `toLocaleString('sv-SE')` utan tidszon i serverkomponenter.
+- **Årshjulet (§ 30)** räknar på hela kalenderdagar i klientens lokala tid
+  (klientkomponent, `useMemo(() => new Date())`) och berörs inte.
+- Riskklass n/a (ingen AI-inferens), inga nya fält/kollektioner, ingen PII.

@@ -48,7 +48,7 @@ interface WheelRow {
  */
 export default async function ArshjulPage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'arshjul', user.disabledModules)) redirect('/chatt');
+  if (!canAccessModuleForUser(user.roles, 'arshjul', user.enabledModules)) redirect('/chatt');
 
   const canEdit = hasRole(user.roles, EDIT_ROLES);
   const canManageCategories = hasRole(user.roles, CATEGORY_MANAGE_ROLES);

@@ -13,6 +13,7 @@
 // 16/32 px), och PNG:n plockas ut via --dump-dom som en data-URL.
 // Maskable-varianten håller motivet inom Androids inre "safe zone".
 import { execFileSync } from 'node:child_process';
+import zlib from 'node:zlib';
 import { mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -126,13 +127,85 @@ function render(chrome, job) {
   console.log('✓', job.out.replace(webRoot + '/', ''));
 }
 
-// ICO-container med PNG-poster (stöds av alla moderna webbläsare).
+// ICO-container med KLASSISKA BMP-poster (32-bit BGRA + AND-mask) — stöds av
+// alla webbläsare och av Windows-skalet, till skillnad från PNG-i-ICO som
+// äldre/vissa klienter ignorerar. PNG:n avkodas här utan npm-dep (zlib +
+// PNG-filter 0–4, 8-bit RGB/RGBA, ej interlaced — exakt vad canvas ger).
+function decodePng(buf) {
+  if (buf.readUInt32BE(0) !== 0x89504e47) throw new Error('Inte en PNG');
+  let pos = 8;
+  let w = 0, h = 0, colorType = 0, bitDepth = 0, interlace = 0;
+  const idat = [];
+  while (pos < buf.length) {
+    const len = buf.readUInt32BE(pos);
+    const type = buf.toString('ascii', pos + 4, pos + 8);
+    const data = buf.subarray(pos + 8, pos + 8 + len);
+    if (type === 'IHDR') {
+      w = data.readUInt32BE(0); h = data.readUInt32BE(4);
+      bitDepth = data[8]; colorType = data[9]; interlace = data[12];
+    } else if (type === 'IDAT') idat.push(data);
+    else if (type === 'IEND') break;
+    pos += 12 + len;
+  }
+  if (bitDepth !== 8 || interlace !== 0 || (colorType !== 2 && colorType !== 6)) {
+    throw new Error(`PNG-variant stöds ej (depth ${bitDepth}, type ${colorType}, interlace ${interlace})`);
+  }
+  const bpp = colorType === 6 ? 4 : 3;
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = w * bpp;
+  const out = Buffer.alloc(w * h * 4);
+  let prev = Buffer.alloc(stride);
+  for (let y = 0; y < h; y++) {
+    const filter = raw[y * (stride + 1)];
+    const line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? line[i - bpp] : 0;
+      const b = prev[i];
+      const c = i >= bpp ? prev[i - bpp] : 0;
+      let v = line[i];
+      if (filter === 1) v += a;
+      else if (filter === 2) v += b;
+      else if (filter === 3) v += (a + b) >> 1;
+      else if (filter === 4) {
+        const pp = a + b - c;
+        const pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c);
+        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      }
+      line[i] = v & 0xff;
+    }
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4;
+      out[o] = line[x * bpp]; out[o + 1] = line[x * bpp + 1]; out[o + 2] = line[x * bpp + 2];
+      out[o + 3] = bpp === 4 ? line[x * bpp + 3] : 255;
+    }
+    prev = line;
+  }
+  return { w, h, rgba: out };
+}
+
+function bmpIcoEntry({ w, h, rgba }) {
+  const xorSize = w * h * 4;
+  const andStride = Math.ceil(w / 32) * 4;
+  const andSize = andStride * h;
+  const buf = Buffer.alloc(40 + xorSize + andSize);
+  buf.writeUInt32LE(40, 0); buf.writeInt32LE(w, 4); buf.writeInt32LE(h * 2, 8);
+  buf.writeUInt16LE(1, 12); buf.writeUInt16LE(32, 14); buf.writeUInt32LE(0, 16);
+  buf.writeUInt32LE(xorSize + andSize, 20);
+  let o = 40;
+  for (let y = h - 1; y >= 0; y--) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      buf[o++] = rgba[i + 2]; buf[o++] = rgba[i + 1]; buf[o++] = rgba[i]; buf[o++] = rgba[i + 3];
+    }
+  }
+  // AND-masken lämnas 0 (helt opak) — alfakanalen i BGRA styr transparens.
+  return buf;
+}
+
 function writeIco(pngPaths, out) {
   const entries = pngPaths.map((p) => {
-    const data = readFileSync(p);
-    const w = data.readUInt32BE(16);
-    const h = data.readUInt32BE(20);
-    return { data, w: w >= 256 ? 0 : w, h: h >= 256 ? 0 : h };
+    const img = decodePng(readFileSync(p));
+    return { data: bmpIcoEntry(img), w: img.w >= 256 ? 0 : img.w, h: img.h >= 256 ? 0 : img.h };
   });
   const header = Buffer.alloc(6);
   header.writeUInt16LE(0, 0);

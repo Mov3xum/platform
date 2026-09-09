@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -25,6 +25,8 @@ import {
   packAnnualWheelArcs,
   expandAnnualWheelSeries,
   ANNUAL_WHEEL_REPEATS,
+  ANNUAL_WHEEL_DEFAULT_SERIES_YEARS,
+  ANNUAL_WHEEL_MAX_SERIES_YEARS,
   ANNUAL_WHEEL_TAG_GROUP_LABELS,
   ANNUAL_WHEEL_QUARTERS,
   ANNUAL_WHEEL_SORTS,
@@ -128,23 +130,25 @@ interface FormState {
   notes: string;
   repeat: AnnualWheelRepeat; // 'none' = engångsaktivitet
   repeatUntilMonth: string; // '' = december
+  repeatUntilYear: string; // '' = basåret + 2 (bara 'yearly')
 }
 
 /** Hur många aktiviteter en serie skulle skapa (för förhandsbeskedet i UI:t). */
 function seriesPreviewCount(form: FormState): number {
-  if (form.month === '') return 1;
+  if (form.month === '' && form.repeat !== 'yearly') return 1;
   return Math.max(
     1,
     expandAnnualWheelSeries(
       {
         year: form.year,
-        month: Number(form.month),
+        month: form.month === '' ? null : Number(form.month),
         day: form.day === '' ? null : Number(form.day),
         end_month: form.endMonth === '' ? null : Number(form.endMonth),
         end_day: form.endDay === '' ? null : Number(form.endDay)
       },
       form.repeat,
-      form.repeatUntilMonth === '' ? 12 : Number(form.repeatUntilMonth)
+      form.repeatUntilMonth === '' ? 12 : Number(form.repeatUntilMonth),
+      form.repeatUntilYear === '' ? null : Number(form.repeatUntilYear)
     ).length
   );
 }
@@ -306,6 +310,15 @@ export function AnnualWheelView({
   );
   const [loadMode, setLoadMode] = useState<LoadMode>('active');
   const categoryCounts = useMemo(() => countItemsByCategory(filtered, categories), [filtered, categories]);
+  // Antal per kategori för kryssrute-menyn — räknas UTAN kategorifiltret så
+  // en avbockad kategori fortfarande visar hur många aktiviteter den döljer.
+  const categoryPickerCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const it of filterAnnualWheelItems(items, { year, tag, responsible })) {
+      map.set(it.category, (map.get(it.category) ?? 0) + 1);
+    }
+    return map;
+  }, [items, year, tag, responsible]);
   const quarterCounts = useMemo(() => countItemsByQuarter(filtered), [filtered]);
   // Ansvarig-fördelning räknas före ansvarig-filtret så staplarna kan användas som filter.
   const responsibleCounts = useMemo(
@@ -323,6 +336,18 @@ export function AnnualWheelView({
     (tag !== 'all' ? 1 : 0) +
     (responsible !== 'all' ? 1 : 0) +
     (period !== 'all' ? 1 : 0);
+
+  // "Presentera" tar med aktuellt urval (år, kategorier, tagg, ansvarig, ev. månad).
+  const presentationHref = useMemo(() => {
+    const q = new URLSearchParams();
+    q.set('year', String(year));
+    if (categoryList.length > 0) q.set('cat', categoryList.join(','));
+    if (tag !== 'all') q.set('tag', tag);
+    if (responsible !== 'all') q.set('resp', responsible);
+    const m = periodMonth(period);
+    if (m !== null) q.set('month', String(m));
+    return `/arshjul/presentation?${q.toString()}`;
+  }, [year, categoryList, tag, responsible, period]);
 
   function toggleMonthFocus(m: number) {
     setPeriod((cur) => toggleAnnualWheelPeriod(cur, monthPeriodKey(m)));
@@ -359,6 +384,7 @@ export function AnnualWheelView({
       endDay: '',
       repeat: 'none',
       repeatUntilMonth: '',
+      repeatUntilYear: '',
       // Taggar är valfria — förifyll bara den man redan filtrerar på.
       tags: tag !== 'all' && tag !== 'none' ? [tag] : [],
       category: categoryList[0] ?? categories[0]?.id ?? 'ledning',
@@ -380,6 +406,7 @@ export function AnnualWheelView({
       // Serier expanderas vid skapandet — en befintlig post redigeras enskilt.
       repeat: 'none',
       repeatUntilMonth: '',
+      repeatUntilYear: '',
       tags: [...(item.tags ?? [])],
       category: item.category,
       responsible: item.responsible ?? '',
@@ -455,7 +482,8 @@ export function AnnualWheelView({
           responsible: form.responsible || null,
           notes: form.notes.trim() || undefined,
           repeat: form.repeat,
-          repeatUntilMonth: form.repeatUntilMonth === '' ? null : Number(form.repeatUntilMonth)
+          repeatUntilMonth: form.repeatUntilMonth === '' ? null : Number(form.repeatUntilMonth),
+          repeatUntilYear: form.repeatUntilYear === '' ? null : Number(form.repeatUntilYear)
         });
         if (res?.error) {
           setError(res.error);
@@ -553,20 +581,12 @@ export function AnnualWheelView({
           onChange={(v) => setYear(Number(v))}
           options={years.map((y) => ({ value: String(y), label: String(y) }))}
         />
-        <FilterSelect
-          label="Kategori"
-          value={
-            selectedCategories.size === 0 ? 'all' : selectedCategories.size === 1 ? categoryList[0] : '__multi'
-          }
-          onChange={(v) => setSelectedCategories(v === 'all' ? new Set() : new Set([v]))}
-          options={[
-            { value: 'all', label: 'Alla kategorier' },
-            ...(selectedCategories.size > 1
-              ? [{ value: '__multi', label: `${selectedCategories.size} kategorier valda` }]
-              : []),
-            ...categories.map((c) => ({ value: c.id, label: c.label })),
-            ...orphanCategories.map((c) => ({ value: c, label: `${c} (borttagen)` }))
-          ]}
+        <CategoryFilter
+          categories={categories}
+          orphans={orphanCategories}
+          selected={selectedCategories}
+          counts={categoryPickerCounts}
+          onChange={setSelectedCategories}
         />
         <FilterSelect
           label="Tagg"
@@ -635,9 +655,9 @@ export function AnnualWheelView({
             </button>
           ) : null}
           <Link
-            href="/arshjul/presentation"
+            href={presentationHref}
             className="inline-flex items-center gap-1.5 rounded-lg border border-default px-3 py-1.5 text-[13px] font-medium text-foreground-muted hover:border-strong hover:text-foreground"
-            title="Helskärmsläge för måndagsgenomgången"
+            title="Helskärmsläge för måndagsgenomgången — tar med aktuellt urval"
           >
             <Icon name="external" size={14} /> Presentera
           </Link>
@@ -756,6 +776,7 @@ export function AnnualWheelView({
             </div>
           ) : null}
 
+          {/* Inline (boxlös, § 30.5bis) — ingen egen scrollruta; listan flödar med sidan. */}
           <div className={`min-w-0 ${undated.length > 0 ? 'border-t border-default pt-4' : ''}`}>
             <div className="mb-1 flex items-center justify-between gap-2">
               <h3 className="font-heading text-[14px] font-semibold text-foreground">
@@ -781,7 +802,7 @@ export function AnnualWheelView({
                 Inga aktiviteter matchar filtret för {year}.
               </p>
             ) : (
-              <div className="max-h-[520px] overflow-y-auto pr-1">
+              <div>
                 {byMonth
                   .slice(1)
                   .map((monthItems, idx) => ({ monthItems, m: idx + 1 }))
@@ -1053,7 +1074,44 @@ function DateBadge({ item }: { item: AnnualWheelItem }) {
   const month = item.month ?? null;
   const day = item.day ?? null;
   if (isAnnualWheelPeriod(item)) {
-    // Kampanj: "JAN → FEB" i stället för en enskild dag.
+    const endMonth = item.end_month ?? null;
+    const endDay = item.end_day ?? null;
+    const sameMonth = endMonth === month;
+    if (day && endDay) {
+      // Flerdagars-event med datum: visa från- och till-DAG ("26 → 27" + AUG),
+      // inte månad-till-månad. Går perioden över ett månadsskifte visas
+      // respektive månad under varje dag ("30 AUG → 2 SEP").
+      return (
+        <span
+          className="flex h-9 w-9 shrink-0 flex-col items-center justify-center rounded-lg border border-default bg-canvas-subtle leading-none"
+          aria-hidden
+        >
+          {sameMonth ? (
+            <>
+              <span className="mx-tnum flex items-center gap-0.5 text-[11px] font-semibold text-foreground">
+                {day}
+                <span className="text-[8px] text-foreground-subtle">→</span>
+                {endDay}
+              </span>
+              <span className="mt-0.5 text-[8px] font-semibold uppercase tracking-wide text-foreground-subtle">
+                {monthShortLabel(month)}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="mx-tnum text-[9px] font-semibold text-foreground">
+                {day} <span className="text-[7px] uppercase text-foreground-subtle">{monthShortLabel(month)}</span>
+              </span>
+              <span className="my-px text-[7px] text-foreground-subtle">→</span>
+              <span className="mx-tnum text-[9px] font-semibold text-foreground">
+                {endDay} <span className="text-[7px] uppercase text-foreground-subtle">{monthShortLabel(endMonth)}</span>
+              </span>
+            </>
+          )}
+        </span>
+      );
+    }
+    // Kampanj utan dagar: "JAN → FEB".
     return (
       <span
         className="flex h-9 w-9 shrink-0 flex-col items-center justify-center rounded-lg border border-default bg-canvas-subtle leading-none"
@@ -1064,7 +1122,7 @@ function DateBadge({ item }: { item: AnnualWheelItem }) {
         </span>
         <span className="my-0.5 text-[8px] text-foreground-subtle">→</span>
         <span className="text-[8.5px] font-semibold uppercase tracking-wide text-foreground">
-          {monthShortLabel(item.end_month ?? null)}
+          {monthShortLabel(endMonth)}
         </span>
       </span>
     );
@@ -1163,6 +1221,165 @@ function ItemPill({
   );
 }
 
+/**
+ * Kategorifilter med kryssrutor — bocka i/ur de kategorier som ska visas.
+ * Internt är tomt val = "alla" (samma state som legenden och hjulets ringar),
+ * men menyn visar det som att ALLA rutor är ibockade: att bocka ur en kategori
+ * väljer då resten, och när alla åter är ibockade nollställs valet till "alla".
+ */
+function CategoryFilter({
+  categories,
+  orphans,
+  selected,
+  counts,
+  onChange
+}: {
+  categories: AnnualWheelCategoryDef[];
+  orphans: string[];
+  selected: ReadonlySet<AnnualWheelCategory>;
+  counts: ReadonlyMap<string, number>;
+  onChange: (next: ReadonlySet<AnnualWheelCategory>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const rows: { id: string; label: string; color: string; orphan: boolean }[] = [
+    ...categories.map((c) => ({ id: c.id, label: c.label, color: annualWheelColorVar(c.token), orphan: false })),
+    ...orphans.map((key) => ({ id: key, label: key, color: annualWheelColorVar(undefined), orphan: true }))
+  ];
+  const allIds = rows.map((r) => r.id);
+  const showAll = selected.size === 0;
+  const isChecked = (id: string) => showAll || selected.has(id);
+  const checkedCount = showAll ? allIds.length : allIds.filter((id) => selected.has(id)).length;
+
+  function toggle(id: string) {
+    const next = new Set<AnnualWheelCategory>(showAll ? allIds : selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    // Alla ibockade igen → tillbaka till "alla" (tomt val), så hjul/legend
+    // inte tonar ned något i onödan.
+    onChange(next.size >= allIds.length ? new Set() : next);
+  }
+
+  function solo(id: string) {
+    onChange(new Set([id]));
+  }
+
+  const summary = showAll
+    ? 'Alla kategorier'
+    : checkedCount === 1
+      ? (rows.find((r) => selected.has(r.id))?.label ?? '1 kategori')
+      : `${checkedCount} av ${allIds.length} kategorier`;
+
+  return (
+    <div ref={ref} className="relative flex items-center gap-1.5 text-[12px] text-foreground-subtle">
+      <span>Kategori</span>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title="Bocka i eller ur de kategorier som ska visas"
+        className={`inline-flex items-center gap-1.5 rounded-lg border bg-surface px-2 py-1.5 text-[13px] text-foreground ${
+          showAll ? 'border-default' : 'border-brand/40'
+        }`}
+      >
+        {!showAll ? (
+          <span className="flex items-center -space-x-0.5" aria-hidden>
+            {rows
+              .filter((r) => selected.has(r.id))
+              .slice(0, 4)
+              .map((r) => (
+                <span key={r.id} className="inline-block h-2.5 w-2.5 rounded-sm ring-1 ring-surface" style={{ background: r.color }} />
+              ))}
+          </span>
+        ) : null}
+        <span>{summary}</span>
+        <Icon name="chevdown" size={12} />
+      </button>
+      {open ? (
+        <div
+          role="listbox"
+          aria-multiselectable
+          aria-label="Kategorier att visa"
+          className="absolute left-0 top-full z-30 mt-1 min-w-[240px] rounded-xl border border-default bg-surface p-1.5 shadow-lg shadow-movexum-svart/10"
+        >
+          <div className="flex items-center justify-between gap-2 px-2 pb-1.5 pt-1 text-[11.5px] text-foreground-subtle">
+            <span>
+              {checkedCount} av {allIds.length} visas
+            </span>
+            <button
+              type="button"
+              onClick={() => onChange(new Set())}
+              disabled={showAll}
+              className="font-medium text-brand hover:underline disabled:cursor-default disabled:text-foreground-subtle disabled:no-underline"
+            >
+              Visa alla
+            </button>
+          </div>
+          <ul className="max-h-72 overflow-y-auto">
+            {rows.map((r) => {
+              const checked = isChecked(r.id);
+              const n = counts.get(r.id) ?? 0;
+              return (
+                <li key={r.id} className="group flex items-center gap-1">
+                  <label
+                    className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] hover:bg-canvas-subtle ${
+                      checked ? 'text-foreground' : 'text-foreground-subtle'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(r.id)}
+                      className="h-3.5 w-3.5 shrink-0 accent-[var(--color-brand)]"
+                      aria-label={`Visa ${r.label}`}
+                    />
+                    <span
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+                      style={{ background: r.color, opacity: checked ? 1 : 0.4 }}
+                      aria-hidden
+                    />
+                    <span className="truncate">
+                      {r.label}
+                      {r.orphan ? <span className="text-foreground-subtle"> (borttagen)</span> : null}
+                    </span>
+                    <span className="mx-tnum ml-auto text-[11px] text-foreground-subtle">{n}</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => solo(r.id)}
+                    title={`Visa bara ${r.label}`}
+                    className="shrink-0 rounded-md px-1.5 py-1 text-[11px] font-medium text-brand opacity-0 hover:bg-brand/10 focus:opacity-100 group-hover:opacity-100"
+                  >
+                    Bara
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function FilterSelect({
   label,
   value,
@@ -1235,7 +1452,13 @@ export function EditorModal({
 
   function toggleRepeat(on: boolean) {
     setRepeatOpen(on);
-    setForm({ ...form, repeat: on ? 'monthly' : 'none', repeatUntilMonth: on ? form.repeatUntilMonth : '' });
+    // Utan månad är "varje år" den enda meningsfulla upprepningen.
+    setForm({
+      ...form,
+      repeat: on ? (form.month === '' ? 'yearly' : 'monthly') : 'none',
+      repeatUntilMonth: on ? form.repeatUntilMonth : '',
+      repeatUntilYear: on ? form.repeatUntilYear : ''
+    });
   }
 
   const inputCls =
@@ -1352,12 +1575,18 @@ export function EditorModal({
                       ...form,
                       month,
                       day: clampedDay(form.year, month, form.day),
-                      // Utan månad finns varken period eller serie.
-                      ...(month === '' ? { endMonth: '', endDay: '', repeat: 'none' as AnnualWheelRepeat } : {})
+                      // Utan månad finns ingen period, och bara ÅRLIG upprepning.
+                      ...(month === ''
+                        ? {
+                            endMonth: '',
+                            endDay: '',
+                            repeat: (form.repeat === 'yearly' ? 'yearly' : 'none') as AnnualWheelRepeat
+                          }
+                        : {})
                     });
                     if (month === '') {
                       setPeriodOpen(false);
-                      setRepeatOpen(false);
+                      if (form.repeat !== 'yearly') setRepeatOpen(false);
                     }
                   }}
                   className={inputCls}
@@ -1453,10 +1682,11 @@ export function EditorModal({
                 hint={
                   repeatOpen && form.repeat !== 'none'
                     ? `Skapar ${seriesPreviewCount(form)} aktiviteter — en per förekomst`
-                    : 'Varje månad, varannan eller varje kvartal'
+                    : hasMonth
+                      ? 'Varje månad, varannan, varje kvartal eller varje år'
+                      : 'Varje år (helårsaktivitet)'
                 }
                 checked={repeatOpen}
-                disabled={!hasMonth}
                 onChange={toggleRepeat}
               >
                 <div className="grid grid-cols-2 gap-3">
@@ -1466,29 +1696,50 @@ export function EditorModal({
                       onChange={(e) => setForm({ ...form, repeat: e.target.value as AnnualWheelRepeat })}
                       className={inputCls}
                     >
-                      {ANNUAL_WHEEL_REPEATS.filter((r) => r.id !== 'none').map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="T.o.m.">
-                    <select
-                      value={form.repeatUntilMonth}
-                      onChange={(e) => setForm({ ...form, repeatUntilMonth: e.target.value })}
-                      className={inputCls}
-                    >
-                      <option value="">December</option>
-                      {Array.from({ length: 12 }, (_, i) => i + 1)
-                        .filter((m) => m >= Number(form.month))
-                        .map((m) => (
-                          <option key={m} value={String(m)}>
-                            {monthLongLabel(m)}
+                      {ANNUAL_WHEEL_REPEATS.filter((r) => r.id !== 'none' && (hasMonth || r.id === 'yearly')).map(
+                        (r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.label}
                           </option>
-                        ))}
+                        )
+                      )}
                     </select>
                   </Field>
+                  {form.repeat === 'yearly' ? (
+                    <Field label="T.o.m. år">
+                      <select
+                        value={form.repeatUntilYear}
+                        onChange={(e) => setForm({ ...form, repeatUntilYear: e.target.value })}
+                        className={inputCls}
+                      >
+                        <option value="">{form.year + ANNUAL_WHEEL_DEFAULT_SERIES_YEARS - 1} (tre år)</option>
+                        {Array.from({ length: ANNUAL_WHEEL_MAX_SERIES_YEARS - 1 }, (_, i) => form.year + 1 + i).map(
+                          (y) => (
+                            <option key={y} value={String(y)}>
+                              {y}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </Field>
+                  ) : (
+                    <Field label="T.o.m.">
+                      <select
+                        value={form.repeatUntilMonth}
+                        onChange={(e) => setForm({ ...form, repeatUntilMonth: e.target.value })}
+                        className={inputCls}
+                      >
+                        <option value="">December</option>
+                        {Array.from({ length: 12 }, (_, i) => i + 1)
+                          .filter((m) => m >= Number(form.month))
+                          .map((m) => (
+                            <option key={m} value={String(m)}>
+                              {monthLongLabel(m)}
+                            </option>
+                          ))}
+                      </select>
+                    </Field>
+                  )}
                 </div>
               </ToggleRow>
             ) : null}

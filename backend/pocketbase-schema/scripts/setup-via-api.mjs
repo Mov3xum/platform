@@ -654,6 +654,12 @@ await patchUsersCollection([
   }
 ]);
 
+// 4a. users — modulåtkomst per användare (migration 1700000144, § 36.3) ----
+// Allow-lista över modul-id:n som syns i sidofältet. null = rollens standard.
+await patchUsersCollection([
+  { name: 'enabled_modules', type: 'json', required: false, maxSize: 4000 }
+]);
+
 // 4b. users — kompetensmodell (migration 1700000130, CLAUDE.md § 29) ---------
 // Speglar CompetenceId i packages/shared/src/competences.ts. Yrkeskompetens
 // (berättigat intresse) — sätts av användaren själv (updateRule oförändrad).
@@ -2183,9 +2189,12 @@ await ensureCollection({
     { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
     { name: 'surface', type: 'select', required: true, maxSelect: 1, values: ['toolbox', 'tool_chat', 'dashboard_chat', 'startup_chat', 'intl', 'suggestions', 'workshop_run', 'connector_chat'] },
     { name: 'model', type: 'text', required: true, max: 100 },
-    { name: 'tokens_in', type: 'number', required: true, min: 0 },
-    { name: 'tokens_out', type: 'number', required: true, min: 0 },
-    { name: 'cost_estimate_usd', type: 'number', required: true, min: 0 },
+    // Migration 1700000145: talfälten är VALFRIA — PB tolkar 0 som "tomt" för
+    // ett required nummerfält, vilket tyst tappade alla events med tokens_out
+    // = 0 (embeddings, tomma Voxtral-svar) eller cost = 0 (§ 9.6, § 28).
+    { name: 'tokens_in', type: 'number', required: false, min: 0 },
+    { name: 'tokens_out', type: 'number', required: false, min: 0 },
+    { name: 'cost_estimate_usd', type: 'number', required: false, min: 0 },
     { name: 'tool_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'error', type: 'text', required: false, max: 500 }
   ],
@@ -2199,6 +2208,14 @@ await ensureCollection({
   createRule: `${ANY_AUTH} && @request.auth.id = user`,
   updateRule: null,
   deleteRule: null
+});
+
+// Migration 1700000145 (befintliga installs): släpp required på talfälten så
+// att 0-värden (embeddings, tomma Voxtral-svar, okänd prismodell) kan lagras.
+await patchCollection('ai_usage_events', [], {
+  tokens_in: { required: false },
+  tokens_out: { required: false },
+  cost_estimate_usd: { required: false }
 });
 
 // Migration 1700000059: startup_financials — årsmetrics per bolag.
@@ -3454,6 +3471,46 @@ await convertSelectFieldToText('annual_wheel_items', 'category', { min: 1, max: 
 // 1700000139 så en bootstrappad instans också får dem redigerbara.
 await seedAnnualWheelCategories();
 
+// Migration 1700000144: org_posts — Hemmaplans anslagstavla (§ 37). Nyheter,
+// info, instruktioner och firanden till organisationen. Läsning: staff/observer
+// ELLER audience="all" (då även bolagsmedlemmar, t.ex. på "Min översikt").
+// createRule roll-lös (§ 21.3 — rollen enforce:as i server-actionen);
+// update/delete: författaren själv eller admin/incubator_lead.
+await ensureCollection({
+  id: 'org_posts_collection',
+  name: 'org_posts',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'author', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 160 },
+    { name: 'body', type: 'text', required: false, max: 20000 },
+    // MÅSTE spegla ORG_POST_KINDS / ORG_POST_AUDIENCES i packages/shared/src/org-posts.ts.
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['news', 'notice', 'instruction', 'celebration', 'training'] },
+    { name: 'audience', type: 'select', required: true, maxSelect: 1, values: ['staff', 'all'] },
+    { name: 'pinned', type: 'bool', required: false },
+    { name: 'published_at', type: 'date', required: false },
+    { name: 'expires_at', type: 'date', required: false },
+    { name: 'link_url', type: 'text', required: false, max: 500 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_org_posts_tenant ON org_posts (tenant)',
+    'CREATE INDEX idx_org_posts_tenant_pinned ON org_posts (tenant, pinned)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || audience = "all")`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || audience = "all")`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`
+});
+// Migration 1700000145: org_posts.kind += 'training' (Internutbildningar-fliken,
+// § 37). Union — ensureCollection synkar inte fält på en befintlig collection.
+await patchCollection('org_posts', [], {
+  kind: { values: ['news', 'notice', 'instruction', 'celebration', 'training'] }
+});
+
 // Backfill: en tidigare körning hann skapa chat_threads/deep_jobs UTAN
 // created/updated (REST API:t auto-lägger dem inte). ensureCollection
 // synkar bara regler på en befintlig collection, så lägg till de saknade
@@ -3770,33 +3827,40 @@ const FORCE_CREATE_RULES = {
   annual_wheel_items: `${ANY_AUTH} && @request.auth.tenant != ""`,
   // Årshjuls-kategorier (§ 30, migration 1700000139) — create är roll-lös per
   // § 21.3; superadmin-kravet ligger i server-actionen + update/delete-reglerna.
-  annual_wheel_categories: `${ANY_AUTH} && @request.auth.tenant != ""`
+  annual_wheel_categories: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Hemmaplans anslagstavla (§ 37, migration 1700000144) — roll-enforcement i
+  // server-actionen.
+  org_posts: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
-log('Forcerar robusta createRules...');
-for (const [collectionName, desiredRule] of Object.entries(FORCE_CREATE_RULES)) {
-  let collection;
-  try {
-    collection = await pb.collections.getOne(collectionName);
-  } catch (err) {
-    if (err?.status === 404) {
-      warn(`createRule-sync: collection "${collectionName}" finns inte — hoppar`);
-      continue;
+async function enforceCreateRules(passLabel) {
+  log(`Forcerar robusta createRules${passLabel ? ` (${passLabel})` : ''}...`);
+  for (const [collectionName, desiredRule] of Object.entries(FORCE_CREATE_RULES)) {
+    let collection;
+    try {
+      collection = await pb.collections.getOne(collectionName);
+    } catch (err) {
+      if (err?.status === 404) {
+        warn(`createRule-sync: collection "${collectionName}" finns inte — hoppar`);
+        continue;
+      }
+      throw err;
     }
-    throw err;
-  }
 
-  if (collection.createRule === desiredRule) continue;
+    if (collection.createRule === desiredRule) continue;
 
-  await pb.collections.update(collectionName, { createRule: desiredRule });
-  const refreshed = await pb.collections.getOne(collectionName);
-  if (refreshed.createRule !== desiredRule) {
-    throw new Error(
-      `createRule-sync misslyckades för "${collectionName}". Förväntat: ${desiredRule}. Fick: ${refreshed.createRule}`
-    );
+    await pb.collections.update(collectionName, { createRule: desiredRule });
+    const refreshed = await pb.collections.getOne(collectionName);
+    if (refreshed.createRule !== desiredRule) {
+      throw new Error(
+        `createRule-sync misslyckades för "${collectionName}". Förväntat: ${desiredRule}. Fick: ${refreshed.createRule}`
+      );
+    }
+    ok(`createRule synkad: ${collectionName}`);
   }
-  ok(`createRule synkad: ${collectionName}`);
 }
+
+await enforceCreateRules('pass 1');
 
 // 23. svep alla list/view/update/delete-regler: `?=` → `:each ?=` -----------
 // PB v0.23.4 matchar inte `?=` mot multi-värde-fält (auth.roles,
@@ -3826,6 +3890,11 @@ log('Sveper list/view/update/delete-regler (?= → :each ?=)...');
     ok(`regel-operator fixad: ${collection.name} (${Object.keys(patch).join(', ')})`);
   }
 }
+
+// Kör en extra createRule-pass EFTER operator-svepet så att createRules
+// alltid är sista sanningen i scriptet (self-healing-jobbet verifierar just
+// detta direkt efter setup-via-api-körningen).
+await enforceCreateRules('pass 2');
 
 console.log('\n✓ Klart. Logga in på <din-web-url>/login med:');
 console.log(`  E-post:   ${APP_USER_EMAIL}`);

@@ -157,6 +157,18 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
       user: { kind: 'roles', roles: STAFF_FULL },
       agent: { kind: 'deny', reason: 'Aktivering av en workshop görs av en människa i /education.' }
     }
+  },
+  // Hemmaplans inlägg (§ 37). Alla fält får ändras av författar-kretsen; agenten
+  // ärver rollen. Publiceringsfälten är ofarliga här (inlägget är internt).
+  org_posts: {
+    title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    body: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    kind: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    audience: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    pinned: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    published_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    expires_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    link_url: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } }
   }
 };
 
@@ -202,6 +214,13 @@ const CREATE_POLICIES: Record<
   },
   incubator_events: {
     user: { kind: 'roles', roles: EVENT_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  // Hemmaplans inlägg (§ 37): anslagstavla, "Så gör vi" och internutbildningar.
+  // Samma krets som ORG_POST_AUTHOR_ROLES; ändring kräver dessutom
+  // canEditOrgPost (författare/moderator) i skrivlagret.
+  org_posts: {
+    user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'allow' }
   },
   // Uppdrag skapas som UTKAST (status 'draft') av agenten — teamet kopplas på

@@ -232,7 +232,13 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   'automatiskt mot EU-taken och blockeras vid överskridande), lägga in KPI:er ' +
   'och mottaget kapital (`add_startup_kpi`/`add_capital_round`), schemalägga ' +
   'AI-agenter (`schedule_agent`, kräver admin/incubator_lead) och skriva ' +
-  'icke-konfidentiella anteckningar på bolagskort (`create_startup_note`). ' +
+  'icke-konfidentiella anteckningar på bolagskort (`create_startup_note`), ' +
+  'samt administrera Hemmaplan (startsidan): anslagstavlan, "Så gör vi" och ' +
+  'INTERNUTBILDNINGAR (`create_org_post` med kind=training / ' +
+  '`update_org_post` — "lägg upp en internutbildning om GDPR med länk till ' +
+  'materialet", "fäst utbildningen om pitchcoaching överst", "låt inlägget ' +
+  'utgå på fredag"). Befintliga inlägg läser du via `query_collection` på ' +
+  '`org_posts`. ' +
   'Slå alltid upp id:n via `query_collection` först. Publicering, ' +
   'teamtilldelning och inbjudningar gör en människa i UI:t — säg det när det ' +
   'är nästa steg.\n';

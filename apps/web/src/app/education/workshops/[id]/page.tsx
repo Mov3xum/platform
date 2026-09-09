@@ -26,7 +26,7 @@ const BLOCK_TYPE_EMOJIS: Record<string, string> = {
 export default async function WorkshopDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) notFound();
+  if (!canAccessModuleForUser(user.roles, 'education', user.enabledModules)) notFound();
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
 
