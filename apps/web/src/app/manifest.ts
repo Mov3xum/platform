@@ -15,10 +15,10 @@ export default function manifest(): MetadataRoute.Manifest {
     id: '/',
     name: 'Movexum',
     short_name: 'Movexum',
-    description: 'Movexums inkubatorplattform — chatt, bolag, aktiviteter och verktyg.',
+    description: 'Movexums inkubatorplattform — hemmaplan, chatt, bolag, aktiviteter och verktyg.',
     lang: 'sv',
     dir: 'ltr',
-    start_url: '/chatt?source=pwa',
+    start_url: '/hem?source=pwa',
     scope: '/',
     display: 'standalone',
     display_override: ['standalone', 'minimal-ui'],
@@ -32,6 +32,7 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
     ],
     shortcuts: [
+      { name: 'Hemmaplan', url: '/hem', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
       { name: 'Chatt', url: '/chatt', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
       { name: 'Bolag', url: '/startups', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
       { name: 'Min översikt', url: '/inkorg', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] }
