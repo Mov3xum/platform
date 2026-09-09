@@ -81,7 +81,7 @@ export default async function IntegrationDetailPage({
 }) {
   const { slug } = await params;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'integrationer', user.disabledModules)) {
+  if (!canAccessModuleForUser(user.roles, 'integrationer', user.enabledModules)) {
     redirect('/dashboard');
   }
 

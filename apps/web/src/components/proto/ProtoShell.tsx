@@ -17,7 +17,7 @@ interface Props {
 
 export function ProtoShell({ user, children, counts, switchableStartups }: Props) {
   // Bottom-menyn (§ 35) — samma RBAC-filter som railen, beräknad server-side.
-  const mobileNav = buildMobileNav(user.roles, user.disabledModules, counts ?? {}, canAccessModuleForUser);
+  const mobileNav = buildMobileNav(user.roles, user.enabledModules, counts ?? {}, canAccessModuleForUser);
 
   return (
     <MobileRailProvider>
@@ -30,7 +30,7 @@ export function ProtoShell({ user, children, counts, switchableStartups }: Props
           tenantLogoLightUrl: user.tenantLogoLightUrl,
           tenantLogoDarkUrl: user.tenantLogoDarkUrl,
           roles: user.roles,
-          disabledModules: user.disabledModules
+          enabledModules: user.enabledModules
         }}
         counts={counts}
         switchableStartups={switchableStartups}

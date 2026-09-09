@@ -168,3 +168,33 @@ test('validateDeleteConfirmation: kräver exakt e-post (skiftlägesokänsligt)',
   assert.equal(validateDeleteConfirmation('anna@bolag.se', 'bert@bolag.se').ok, false);
   assert.equal(validateDeleteConfirmation('', 'anna@bolag.se').ok, false);
 });
+
+// ── Modulåtkomst per användare (§ 36.3) ─────────────────────────────────────
+import { toggleableModulesForRoles, validateEnabledModules } from './validate';
+import { ALWAYS_ON_MODULE_IDS, defaultModulesForRoles } from '@platform/shared';
+
+test('toggleableModulesForRoles: bara rollens moduler, aldrig alltid-på/legacy', () => {
+  const coach = toggleableModulesForRoles(['coach']).map((m) => m.id);
+  assert.ok(coach.includes('startups'));
+  assert.ok(coach.includes('inflode'));
+  assert.ok(!coach.includes('rapporter'), 'rapporter är admin/incubator_lead-only');
+  for (const id of ALWAYS_ON_MODULE_IDS) assert.ok(!coach.includes(id), `${id} ska inte kunna togglas`);
+  assert.ok(!coach.includes('toolbox'), 'legacy-alias visas inte');
+  assert.deepEqual(toggleableModulesForRoles(undefined), []);
+});
+
+test('validateEnabledModules: saknat värde ⇒ rollens standard, annars sanerad lista', () => {
+  const dflt = validateEnabledModules(undefined, ['mentor']);
+  assert.ok(dflt.ok);
+  assert.deepEqual(dflt.value, defaultModulesForRoles(['mentor']));
+
+  const explicit = validateEnabledModules(JSON.stringify(['startups', 'rapporter', 'installningar']), ['coach']);
+  assert.ok(explicit.ok);
+  assert.deepEqual(explicit.value, ['startups'], 'rapporter (utanför rollen) och installningar (alltid-på) filtreras');
+
+  const empty = validateEnabledModules('[]', ['coach']);
+  assert.ok(empty.ok);
+  assert.deepEqual(empty.value, []);
+
+  assert.equal(validateEnabledModules('nope', ['coach']).ok, false);
+});

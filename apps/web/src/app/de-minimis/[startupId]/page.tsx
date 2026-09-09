@@ -37,7 +37,7 @@ export default async function DeMinimisStartupPage({
   params: Promise<{ startupId: string }>;
 }) {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'de_minimis', user.disabledModules)) redirect('/chatt');
+  if (!canAccessModuleForUser(user.roles, 'de_minimis', user.enabledModules)) redirect('/chatt');
 
   const { startupId } = await params;
   const pb = await getServerPb();

@@ -3,13 +3,11 @@ import { getServerPb } from '@/lib/auth.server';
 import { escFilter } from '@/lib/pb-filter';
 import { hasRole } from '@/lib/rbac';
 import { Chip } from '@/components/proto';
-import { coreModules } from '@platform/shared';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailItem, RailStat, RailNote } from '@/components/PageRail';
 import { getBudgetStatus } from '@/lib/ai/budget.server';
 import { getInfraHealth, healthStateLabel, type HealthState } from '@/lib/health';
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS, settingsSectionsFor } from '@/lib/settings-sections';
-import { HIDDEN_MODULE_IDS } from '@/lib/settings-constants';
 import { requireSettingsUser, SettingsCard, settingsTabsFor } from './shared';
 
 export const dynamic = 'force-dynamic';
@@ -54,18 +52,6 @@ export default async function InstallningarPage() {
     console.error('[installningar] failed to count users', { tenant: user.tenant, error });
   }
 
-  let disabledModules: string[] = [];
-  try {
-    const t = await pb.collection('tenants').getOne<{ disabled_modules?: unknown }>(user.tenant);
-    if (Array.isArray(t.disabled_modules)) {
-      disabledModules = t.disabled_modules.filter((v): v is string => typeof v === 'string');
-    }
-  } catch {
-    /* fältet saknas → alla moduler på */
-  }
-  const manageableModules = coreModules.filter((m) => !HIDDEN_MODULE_IDS.includes(m.id));
-  const activeModules = manageableModules.filter((m) => !disabledModules.includes(m.id)).length;
-
   let memoryCount = 0;
   try {
     const mem = await pb.collection('agent_memory').getList(1, 1, { filter: tenantFilter, fields: 'id' });
@@ -104,20 +90,13 @@ export default async function InstallningarPage() {
   > = {
     anvandare: {
       stat: `${userCount} användare`,
-      hint: `${memberCount} bolagsmedlem${memberCount === 1 ? '' : 'mar'} · ${userCount - memberCount} personal & övriga`,
+      hint: `${memberCount} bolagsmedlem${memberCount === 1 ? '' : 'mar'} · ${userCount - memberCount} personal & övriga · moduler per person`,
       status:
         unverifiedCount > 0 ? (
           <Chip variant="yellow" mono>
             {unverifiedCount} ej verifierad{unverifiedCount === 1 ? '' : 'e'}
           </Chip>
         ) : undefined
-    },
-    moduler: {
-      stat: `${activeModules} av ${manageableModules.length} aktiva`,
-      hint:
-        disabledModules.length > 0
-          ? `${disabledModules.length} avstängd${disabledModules.length === 1 ? '' : 'a'}`
-          : 'Alla moduler är på'
     },
     organisation: {
       stat: `${tenantCount} ${tenantCount === 1 ? 'tenant' : 'tenants'} · ${startupCount} bolag`,
@@ -166,7 +145,7 @@ export default async function InstallningarPage() {
         <div className="grid grid-cols-2 gap-2 px-2">
           <RailStat label="Användare" value={userCount} />
           <RailStat label="Bolag" value={startupCount} />
-          <RailStat label="Moduler" value={activeModules} hint={`av ${manageableModules.length} aktiva`} />
+          <RailStat label="Personal" value={userCount - memberCount} hint="staff & övriga" />
           <RailStat label="AI-minne" value={memoryCount} hint="inlärda noteringar" />
         </div>
       </RailSection>

@@ -34,7 +34,7 @@ interface WheelRow {
  */
 export default async function ArshjulPresentationPage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'arshjul', user.disabledModules)) redirect('/chatt');
+  if (!canAccessModuleForUser(user.roles, 'arshjul', user.enabledModules)) redirect('/chatt');
 
   const pb = await getServerPb();
   const [res, categories, people] = await Promise.all([

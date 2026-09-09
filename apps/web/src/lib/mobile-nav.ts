@@ -5,8 +5,8 @@
  * "Mer" (öppnar hela sidmenyn). Mittknappen är chatten för alla som får se
  * den; en ren bolagsmedlem (som saknar chatt, § 21.5) får sin hemvy i
  * mitten i stället. Kandidatlistorna är prioritetsordnade och filtreras med
- * samma RBAC-funktion som railen — menyn är ren UI-kurering, aldrig en
- * säkerhetsgräns.
+ * samma RBAC-funktion som railen (roll + användarens allow-lista, § 36.3) —
+ * menyn är ren UI-kurering, aldrig en säkerhetsgräns.
  */
 import { coreModules, isPureStartupMember, type Role } from '@platform/shared';
 import { MODULE_ICONS } from './module-icons';
@@ -25,7 +25,7 @@ export interface MobileNav {
   right: MobileNavItem[];
 }
 
-type CanAccess = (roles: Role[], moduleId: string, disabledModules: string[] | undefined) => boolean;
+type CanAccess = (roles: Role[], moduleId: string, enabledModules: string[] | undefined) => boolean;
 
 /** Korta etiketter för smal skärm (railen har längre titlar). */
 const MOBILE_LABELS: Record<string, string> = {
@@ -70,13 +70,13 @@ function toItem(id: string, counts: Record<string, number>, labelOverride?: stri
 
 export function buildMobileNav(
   roles: Role[],
-  disabledModules: string[] | undefined,
+  enabledModules: string[] | undefined,
   counts: Record<string, number>,
   canAccess: CanAccess
 ): MobileNav | null {
   const member = isPureStartupMember(roles);
   const plan = member ? MEMBER : STAFF;
-  const ok = (id: string) => canAccess(roles, id, disabledModules);
+  const ok = (id: string) => canAccess(roles, id, enabledModules);
 
   const centerId = plan.center.find(ok);
   if (!centerId) return null;

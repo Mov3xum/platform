@@ -61,7 +61,7 @@ export default async function ToolboxPage({
   const categoryFilter = isToolCategory(params.category) ? params.category : undefined;
 
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'agenter', user.disabledModules)) {
+  if (!canAccessModuleForUser(user.roles, 'agenter', user.enabledModules)) {
     redirect('/chatt');
   }
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);

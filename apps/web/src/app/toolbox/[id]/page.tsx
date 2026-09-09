@@ -23,7 +23,7 @@ export default async function ToolDetailPage({
   const { id } = await params;
   const { startup: defaultStartupId } = await searchParams;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'agenter', user.disabledModules)) notFound();
+  if (!canAccessModuleForUser(user.roles, 'agenter', user.enabledModules)) notFound();
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
 

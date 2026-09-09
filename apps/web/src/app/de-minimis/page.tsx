@@ -40,7 +40,7 @@ interface StartupRow {
 
 export default async function DeMinimisIndexPage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'de_minimis', user.disabledModules)) redirect('/chatt');
+  if (!canAccessModuleForUser(user.roles, 'de_minimis', user.enabledModules)) redirect('/chatt');
 
   const pb = await getServerPb();
   const isStaffOrObserver = hasRole(user.roles, [

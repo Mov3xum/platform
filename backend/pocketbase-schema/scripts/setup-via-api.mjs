@@ -654,6 +654,12 @@ await patchUsersCollection([
   }
 ]);
 
+// 4a. users — modulåtkomst per användare (migration 1700000144, § 36.3) ----
+// Allow-lista över modul-id:n som syns i sidofältet. null = rollens standard.
+await patchUsersCollection([
+  { name: 'enabled_modules', type: 'json', required: false, maxSize: 4000 }
+]);
+
 // 4b. users — kompetensmodell (migration 1700000130, CLAUDE.md § 29) ---------
 // Speglar CompetenceId i packages/shared/src/competences.ts. Yrkeskompetens
 // (berättigat intresse) — sätts av användaren själv (updateRule oförändrad).

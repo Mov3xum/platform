@@ -11,6 +11,7 @@ import {
   canManageUser,
   ROLE_LABELS,
   validateDeleteConfirmation,
+  validateEnabledModules,
   validateNewPassword,
   validateNewUserInput,
   validateRolesUpdate
@@ -73,6 +74,15 @@ export async function createUserAction(
   }
   const { email, displayName, password, role, startupId } = validated.value;
 
+  // 2b. Moduler i sidofältet (§ 36.3): rollens standard är förbockad i
+  //     formuläret; staff kan lägga till/ta bort innan kontot skapas. Saknas
+  //     fältet helt används rollens standard. Bara moduler rollen tillåter.
+  const modulesRaw = formData.get('enabled_modules');
+  const modules = validateEnabledModules(modulesRaw === null ? undefined : modulesRaw, [role]);
+  if (!modules.ok) {
+    return { status: 'error', message: modules.message };
+  }
+
   // 3. Superuser-klient (createRule = null kräver superuser)
   const suResult = await getSuperuserPb();
   if (!suResult.ok) {
@@ -117,7 +127,8 @@ export async function createUserAction(
       tenant: user.tenant,
       roles: [role],
       verified: true,
-      linked_startups: linkedStartups
+      linked_startups: linkedStartups,
+      enabled_modules: modules.value
     });
   } catch (err: unknown) {
     const e = err as PbError;
@@ -349,6 +360,45 @@ export async function updateUserRolesAction(
   revalidatePath('/', 'layout');
   const labels = validated.value.map((r) => ROLE_LABELS[r]).join(', ');
   return { status: 'ok', message: `Roller sparade: ${labels}.` };
+}
+
+/**
+ * Sätter vilka moduler som visas i sidofältet för en användare (§ 36.3).
+ * Allow-listan valideras mot MÅLANVÄNDARENS roller — den kan aldrig ge mer
+ * än rollen tillåter. Skrivs via superuser (users.updateRule är
+ * "@request.auth.id = id"); RBAC + tenant-check i `loadManagedTarget` är
+ * säkerhetsgränsen. Ingen personuppgift — bara modul-id:n.
+ */
+export async function updateUserModulesAction(
+  _prev: UpdateUserState,
+  formData: FormData
+): Promise<UpdateUserState> {
+  const actor = await requireUser();
+  const userId = String(formData.get('user_id') ?? '').trim();
+  const loaded = await loadManagedTarget(actor, userId);
+  if (!loaded.ok) return { status: 'error', message: loaded.message };
+
+  const validated = validateEnabledModules(
+    formData.get('enabled_modules') ?? '[]',
+    loaded.target.roles as Role[]
+  );
+  if (!validated.ok) return { status: 'error', message: validated.message };
+
+  try {
+    await loaded.pb.collection('users').update(userId, { enabled_modules: validated.value });
+  } catch (err: unknown) {
+    const e = err as PbError;
+    console.error('[updateUserModules] failed', { status: e.status });
+    return { status: 'error', message: 'Kunde inte spara modulerna. Försök igen.' };
+  }
+
+  revalidatePath('/installningar/anvandare');
+  revalidatePath('/', 'layout');
+  const n = validated.value.length;
+  return {
+    status: 'ok',
+    message: `${n} modul${n === 1 ? '' : 'er'} visas i sidofältet. Ändringen syns vid nästa sidladdning.`
+  };
 }
 
 /** Sätter ett nytt initialt lösenord åt en annan användare. */

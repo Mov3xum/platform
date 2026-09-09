@@ -88,7 +88,7 @@ function Empty({ children }: { children: React.ReactNode }) {
 
 export default async function MinOversiktPage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'min_oversikt', user.disabledModules)) {
+  if (!canAccessModuleForUser(user.roles, 'min_oversikt', user.enabledModules)) {
     redirect('/chatt');
   }
 

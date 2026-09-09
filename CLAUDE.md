@@ -4692,8 +4692,8 @@ Playwrights katalog) om wordmark/färg ändras — uppdatera i så fall även
 
 `/installningar` (admin/incubator_lead) är en **översikt med kort**, inte en
 lång sida med allt innehåll. Varje område är en egen undersida; hubben visar
-bara en sammanfattning per kort (antal användare, aktiva moduler, förbrukad
-AI-kostnad, antal minnesnoteringar, logotypstatus, driftstatus) och länkar in.
+bara en sammanfattning per kort (antal användare, förbrukad AI-kostnad, antal
+minnesnoteringar, logotypstatus, driftstatus) och länkar in.
 Sektionsregistret `apps/web/src/lib/settings-sections.ts` är källa av sanning
 (slug, titel, ikon, grupp, rollkrav) och delas av hubben, undersidornas flikar
 (`SettingsSectionPage` i `app/installningar/shared.tsx`) och topbarens
@@ -4702,8 +4702,8 @@ brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
 | Route | Innehåll |
 |---|---|
 | `/installningar` | Hub: kort per sektion grupperade i *Organisation & åtkomst*, *AI & automation*, *Utseende* |
-| `/installningar/anvandare` | **Användare** — alla konton i tenanten med sök/rollfilter, "Ny användare", och per konto: roller, kopplat bolag, modulåtkomst (admin), nytt lösenord, radering |
-| `/installningar/moduler` | Tenant-bred modul-toggling (`AdminToggles`) |
+| `/installningar/anvandare` | **Användare** — alla konton i tenanten med sök/rollfilter, "Ny användare", och per konto: roller, kopplat bolag, **moduler i sidofältet** (§ 36.3), nytt lösenord, radering |
+| `/installningar/moduler` | Borttagen (redirect → `/installningar/anvandare`) — den globala tenant-togglingen finns inte längre, § 36.3 |
 | `/installningar/organisation` | Tenants, infra-status, dataresidens |
 | `/installningar/ai-kostnad` | AI-kostnadstak (§ 9.6) |
 | `/installningar/ai-minne` | AI-minne (`agent_memory`, § 16.4) |
@@ -4711,8 +4711,8 @@ brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
 
 `/admin/users` är en legacy-route som redirectar till `/installningar/anvandare`;
 modulen `anvandare` pekar dit men visas inte längre som egen rail-post
-(hubben länkar). Per-användar-modultogglarna (`UserModuleToggles`) är borttagna
-som separat komponent — de ligger i användarens detaljvy.
+(hubben länkar). Modulvalet per person ligger i användarens detaljvy
+(`ModulePicker`, § 36.3).
 
 ### 36.2 Användaradministration — RBAC & regelefterlevnad
 
@@ -4737,3 +4737,43 @@ Server-actions i `lib/actions/users.ts` (`updateUserRolesAction`,
   relationer → tydligt fel, ingen tyst halvradering). Lösenord loggas aldrig;
   loggar innehåller bara status/id.
 - **Riskklass (EU AI Act):** n/a — ren administration, ingen AI-inferens.
+
+### 36.3 Moduler i sidofältet — per person, med rollstandard
+
+**Sidofältet följer vad som är ibockat på personens profil**, inte en global
+inställning. Tidigare fanns en tenant-bred deny-lista (`tenants.disabled_modules`,
+`/installningar/moduler`) plus en per-användar-deny-lista, vilket gav alla
+samma meny. Nu gäller en **allow-lista per användare** med **standard per
+roll**:
+
+- **Datamodell:** `users.enabled_modules` (json-array, migration
+  **1700000144**, speglad i `setup-via-api.mjs`). `null` = "aldrig justerad"
+  ⇒ appen använder rollens standard minus ev. legacy `users.disabled_modules`
+  (`resolveEnabledModules`), så ingen ser mindre än sin rollstandard efter
+  deployen. `tenants.disabled_modules` lämnas orörd i schemat men **läses inte
+  längre** — den globala togglingen är borttagen.
+- **Rollstandard** (`DEFAULT_MODULES_BY_ROLE` i
+  `packages/shared/src/module-access.ts`, ren + enhetstestad): unionen av
+  rollernas listor förbockas när kontot skapas (`createUserAction`) och kan
+  återställas via "Återställ till rollens standard". Admin/incubator_lead ser
+  i princip allt; coach/mentor/observer/partner får en smalare standard; en
+  `startup_member` får exakt medlems-railen (§ 22). Testen låser att varje
+  standardmodul faktiskt tillåts av rollen.
+- **Alltid-på** (`ALWAYS_ON_MODULE_IDS`): `installningar`/`anvandare` (annars
+  kan en admin låsa sig ute) samt de dolda legacy-id:na (`onboarding`,
+  `activity_feed`, `partners`). `toolbox`/`dashboard` är alias som följer
+  `agenter`/`idag`.
+- **Var det ändras:** Inställningar → Användare → personen → *Moduler i
+  sidofältet* (`ModulePicker`, grupperat som railen) och i "Ny användare".
+  Server-action `updateUserModulesAction` (`lib/actions/users.ts`) — samma
+  RBAC som övrig användaradministration (`loadManagedTarget`:
+  admin/incubator_lead, tenant-korsverifierad, incubator_lead rör aldrig
+  admin-konton).
+- **Säkerhetsgräns oförändrad:** `canAccessModuleForUser(roles, id,
+  enabledModules)` = `canAccessModule` (rollen, `rolesAllowed`) **och**
+  `isModuleEnabled`. Listan saneras server-side mot vad MÅLANVÄNDARENS roller
+  får (`validateEnabledModules`) — den kan aldrig ge mer än rollen, och
+  PB-RLS (§ 21) gäller oförändrat. Sessionen bär `SessionUser.enabledModules`
+  (ersätter `disabledModules`); cookie-kompaktmodellen har `enabled_modules`.
+- **GDPR/riskklass:** inga personuppgifter (bara modul-id:n), ingen
+  AI-inferens → n/a.

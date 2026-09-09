@@ -1606,6 +1606,8 @@ export * from './compass-authoring';
 // ─── Mötesläge i chatten (ren möteslogik, enhetstestad, § 34) ────────────────
 export * from './meeting';
 export * from './greeting';
+// ─── Modulåtkomst per användare (allow-lista + rollstandard, enhetstestad) ───
+export * from './module-access';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */
