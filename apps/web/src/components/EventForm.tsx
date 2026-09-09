@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
-import type { EventStatus, EventType } from '@platform/shared';
+import { toStockholmDateTimeInputValue, type EventStatus, type EventType } from '@platform/shared';
 import type { EventActionState } from '@/lib/actions/events';
 
 const TYPE_OPTIONS: Array<{ value: EventType; label: string }> = [
@@ -46,12 +46,10 @@ interface Props {
   submitLabel?: string;
 }
 
+// Formuläret visar och tar emot SVENSK tid (Europe/Stockholm) oavsett var
+// webbläsaren eller servern står — servern tolkar värdet likadant.
 function toLocalDateTimeValue(iso?: string): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return toStockholmDateTimeInputValue(iso);
 }
 
 export function EventForm({ action, initial, submitLabel = 'Spara' }: Props) {
@@ -91,7 +89,7 @@ export function EventForm({ action, initial, submitLabel = 'Spara' }: Props) {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label className="block text-sm font-medium text-foreground-muted">Startar</label>
+          <label className="block text-sm font-medium text-foreground-muted">Startar (svensk tid)</label>
           <input
             type="datetime-local"
             name="starts_at"
@@ -101,7 +99,7 @@ export function EventForm({ action, initial, submitLabel = 'Spara' }: Props) {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-foreground-muted">Slutar</label>
+          <label className="block text-sm font-medium text-foreground-muted">Slutar (svensk tid)</label>
           <input
             type="datetime-local"
             name="ends_at"
