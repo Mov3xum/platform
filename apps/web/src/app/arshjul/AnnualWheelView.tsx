@@ -1074,7 +1074,44 @@ function DateBadge({ item }: { item: AnnualWheelItem }) {
   const month = item.month ?? null;
   const day = item.day ?? null;
   if (isAnnualWheelPeriod(item)) {
-    // Kampanj: "JAN → FEB" i stället för en enskild dag.
+    const endMonth = item.end_month ?? null;
+    const endDay = item.end_day ?? null;
+    const sameMonth = endMonth === month;
+    if (day && endDay) {
+      // Flerdagars-event med datum: visa från- och till-DAG ("26 → 27" + AUG),
+      // inte månad-till-månad. Går perioden över ett månadsskifte visas
+      // respektive månad under varje dag ("30 AUG → 2 SEP").
+      return (
+        <span
+          className="flex h-9 w-9 shrink-0 flex-col items-center justify-center rounded-lg border border-default bg-canvas-subtle leading-none"
+          aria-hidden
+        >
+          {sameMonth ? (
+            <>
+              <span className="mx-tnum flex items-center gap-0.5 text-[11px] font-semibold text-foreground">
+                {day}
+                <span className="text-[8px] text-foreground-subtle">→</span>
+                {endDay}
+              </span>
+              <span className="mt-0.5 text-[8px] font-semibold uppercase tracking-wide text-foreground-subtle">
+                {monthShortLabel(month)}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="mx-tnum text-[9px] font-semibold text-foreground">
+                {day} <span className="text-[7px] uppercase text-foreground-subtle">{monthShortLabel(month)}</span>
+              </span>
+              <span className="my-px text-[7px] text-foreground-subtle">→</span>
+              <span className="mx-tnum text-[9px] font-semibold text-foreground">
+                {endDay} <span className="text-[7px] uppercase text-foreground-subtle">{monthShortLabel(endMonth)}</span>
+              </span>
+            </>
+          )}
+        </span>
+      );
+    }
+    // Kampanj utan dagar: "JAN → FEB".
     return (
       <span
         className="flex h-9 w-9 shrink-0 flex-col items-center justify-center rounded-lg border border-default bg-canvas-subtle leading-none"
@@ -1085,7 +1122,7 @@ function DateBadge({ item }: { item: AnnualWheelItem }) {
         </span>
         <span className="my-0.5 text-[8px] text-foreground-subtle">→</span>
         <span className="text-[8.5px] font-semibold uppercase tracking-wide text-foreground">
-          {monthShortLabel(item.end_month ?? null)}
+          {monthShortLabel(endMonth)}
         </span>
       </span>
     );
