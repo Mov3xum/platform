@@ -740,17 +740,23 @@ export function buildChatTools(
             },
             repeat: {
               type: 'string',
-              enum: ['none', 'monthly', 'bimonthly', 'quarterly'],
+              enum: ['none', 'monthly', 'bimonthly', 'quarterly', 'yearly'],
               description:
                 'Skapar en HEL SERIE i ett anrop när aktiviteten återkommer ' +
-                '("nyhetsbrev varje månad", "avstämning varje kvartal"). Anropa ' +
-                'INTE verktyget en gång per månad — använd det här i stället.'
+                '("nyhetsbrev varje månad", "avstämning varje kvartal", "bokslut ' +
+                'varje år"). Anropa INTE verktyget en gång per månad/år — använd ' +
+                'det här i stället. `yearly` fungerar även utan month (helårsaktivitet).'
             },
             repeat_until_month: {
               type: 'integer',
               minimum: 1,
               maximum: 12,
-              description: 'Sista månad serien sträcker sig till (default december).'
+              description: 'Sista månad serien sträcker sig till (default december). Gäller inte yearly.'
+            },
+            repeat_until_year: {
+              type: 'integer',
+              description:
+                'Bara repeat=yearly: sista år serien sträcker sig till (default basåret + 2, max 10 år).'
             },
             tags: {
               type: 'array',
@@ -3064,7 +3070,8 @@ async function runCreateAnnualWheelItem(
     category: typeof args.category === 'string' ? args.category : '',
     notes: typeof args.notes === 'string' ? args.notes : undefined,
     repeat: typeof args.repeat === 'string' ? args.repeat : 'none',
-    repeat_until_month: num(args.repeat_until_month)
+    repeat_until_month: num(args.repeat_until_month),
+    repeat_until_year: num(args.repeat_until_year)
   });
 
   if (!result.ok) return { ok: false, error: result.error };
@@ -3074,6 +3081,7 @@ async function runCreateAnnualWheelItem(
       item_ids: result.value.itemIds,
       created: result.value.created,
       months: result.value.months,
+      years: result.value.years,
       logged_in: 'agent_actions'
     }
   };
