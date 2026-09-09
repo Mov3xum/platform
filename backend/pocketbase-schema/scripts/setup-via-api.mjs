@@ -3817,30 +3817,34 @@ const FORCE_CREATE_RULES = {
   org_posts: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
-log('Forcerar robusta createRules...');
-for (const [collectionName, desiredRule] of Object.entries(FORCE_CREATE_RULES)) {
-  let collection;
-  try {
-    collection = await pb.collections.getOne(collectionName);
-  } catch (err) {
-    if (err?.status === 404) {
-      warn(`createRule-sync: collection "${collectionName}" finns inte — hoppar`);
-      continue;
+async function enforceCreateRules(passLabel) {
+  log(`Forcerar robusta createRules${passLabel ? ` (${passLabel})` : ''}...`);
+  for (const [collectionName, desiredRule] of Object.entries(FORCE_CREATE_RULES)) {
+    let collection;
+    try {
+      collection = await pb.collections.getOne(collectionName);
+    } catch (err) {
+      if (err?.status === 404) {
+        warn(`createRule-sync: collection "${collectionName}" finns inte — hoppar`);
+        continue;
+      }
+      throw err;
     }
-    throw err;
-  }
 
-  if (collection.createRule === desiredRule) continue;
+    if (collection.createRule === desiredRule) continue;
 
-  await pb.collections.update(collectionName, { createRule: desiredRule });
-  const refreshed = await pb.collections.getOne(collectionName);
-  if (refreshed.createRule !== desiredRule) {
-    throw new Error(
-      `createRule-sync misslyckades för "${collectionName}". Förväntat: ${desiredRule}. Fick: ${refreshed.createRule}`
-    );
+    await pb.collections.update(collectionName, { createRule: desiredRule });
+    const refreshed = await pb.collections.getOne(collectionName);
+    if (refreshed.createRule !== desiredRule) {
+      throw new Error(
+        `createRule-sync misslyckades för "${collectionName}". Förväntat: ${desiredRule}. Fick: ${refreshed.createRule}`
+      );
+    }
+    ok(`createRule synkad: ${collectionName}`);
   }
-  ok(`createRule synkad: ${collectionName}`);
 }
+
+await enforceCreateRules('pass 1');
 
 // 23. svep alla list/view/update/delete-regler: `?=` → `:each ?=` -----------
 // PB v0.23.4 matchar inte `?=` mot multi-värde-fält (auth.roles,
@@ -3870,6 +3874,11 @@ log('Sveper list/view/update/delete-regler (?= → :each ?=)...');
     ok(`regel-operator fixad: ${collection.name} (${Object.keys(patch).join(', ')})`);
   }
 }
+
+// Kör en extra createRule-pass EFTER operator-svepet så att createRules
+// alltid är sista sanningen i scriptet (self-healing-jobbet verifierar just
+// detta direkt efter setup-via-api-körningen).
+await enforceCreateRules('pass 2');
 
 console.log('\n✓ Klart. Logga in på <din-web-url>/login med:');
 console.log(`  E-post:   ${APP_USER_EMAIL}`);
