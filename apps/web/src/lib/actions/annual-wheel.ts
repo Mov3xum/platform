@@ -151,10 +151,12 @@ export async function createAnnualWheelItemAction(input: {
   category: string;
   responsible?: string | null;
   notes?: string;
-  /** 'none' | 'monthly' | 'bimonthly' | 'quarterly' — skapar en hel serie. */
+  /** 'none' | 'monthly' | 'bimonthly' | 'quarterly' | 'yearly' — skapar en hel serie. */
   repeat?: string;
   /** Sista månad serien får sträcka sig till (default december). */
   repeatUntilMonth?: number | null;
+  /** Bara `yearly`: sista år (default basåret + 2). */
+  repeatUntilYear?: number | null;
 }): Promise<AnnualWheelActionState> {
   const user = await getCurrentUser();
   if (!user) return { error: 'Ej inloggad.' };
@@ -177,7 +179,8 @@ export async function createAnnualWheelItemAction(input: {
       responsible: input.responsible ?? null,
       notes: input.notes,
       repeat: input.repeat,
-      repeat_until_month: input.repeatUntilMonth ?? 12
+      repeat_until_month: input.repeatUntilMonth ?? 12,
+      repeat_until_year: input.repeatUntilYear ?? null
     },
     { fallbackPb: superuserPb }
   );

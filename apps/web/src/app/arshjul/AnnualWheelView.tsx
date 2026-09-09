@@ -25,6 +25,8 @@ import {
   packAnnualWheelArcs,
   expandAnnualWheelSeries,
   ANNUAL_WHEEL_REPEATS,
+  ANNUAL_WHEEL_DEFAULT_SERIES_YEARS,
+  ANNUAL_WHEEL_MAX_SERIES_YEARS,
   ANNUAL_WHEEL_TAG_GROUP_LABELS,
   ANNUAL_WHEEL_QUARTERS,
   ANNUAL_WHEEL_SORTS,
@@ -129,23 +131,25 @@ interface FormState {
   notes: string;
   repeat: AnnualWheelRepeat; // 'none' = engångsaktivitet
   repeatUntilMonth: string; // '' = december
+  repeatUntilYear: string; // '' = basåret + 2 (bara 'yearly')
 }
 
 /** Hur många aktiviteter en serie skulle skapa (för förhandsbeskedet i UI:t). */
 function seriesPreviewCount(form: FormState): number {
-  if (form.month === '') return 1;
+  if (form.month === '' && form.repeat !== 'yearly') return 1;
   return Math.max(
     1,
     expandAnnualWheelSeries(
       {
         year: form.year,
-        month: Number(form.month),
+        month: form.month === '' ? null : Number(form.month),
         day: form.day === '' ? null : Number(form.day),
         end_month: form.endMonth === '' ? null : Number(form.endMonth),
         end_day: form.endDay === '' ? null : Number(form.endDay)
       },
       form.repeat,
-      form.repeatUntilMonth === '' ? 12 : Number(form.repeatUntilMonth)
+      form.repeatUntilMonth === '' ? 12 : Number(form.repeatUntilMonth),
+      form.repeatUntilYear === '' ? null : Number(form.repeatUntilYear)
     ).length
   );
 }
@@ -325,6 +329,18 @@ export function AnnualWheelView({
     (responsible !== 'all' ? 1 : 0) +
     (period !== 'all' ? 1 : 0);
 
+  // "Presentera" tar med aktuellt urval (år, kategorier, tagg, ansvarig, ev. månad).
+  const presentationHref = useMemo(() => {
+    const q = new URLSearchParams();
+    q.set('year', String(year));
+    if (categoryList.length > 0) q.set('cat', categoryList.join(','));
+    if (tag !== 'all') q.set('tag', tag);
+    if (responsible !== 'all') q.set('resp', responsible);
+    const m = periodMonth(period);
+    if (m !== null) q.set('month', String(m));
+    return `/arshjul/presentation?${q.toString()}`;
+  }, [year, categoryList, tag, responsible, period]);
+
   function toggleMonthFocus(m: number) {
     setPeriod((cur) => toggleAnnualWheelPeriod(cur, monthPeriodKey(m)));
   }
@@ -360,6 +376,7 @@ export function AnnualWheelView({
       endDay: '',
       repeat: 'none',
       repeatUntilMonth: '',
+      repeatUntilYear: '',
       // Taggar är valfria — förifyll bara den man redan filtrerar på.
       tags: tag !== 'all' && tag !== 'none' ? [tag] : [],
       category: categoryList[0] ?? categories[0]?.id ?? 'ledning',
@@ -381,6 +398,7 @@ export function AnnualWheelView({
       // Serier expanderas vid skapandet — en befintlig post redigeras enskilt.
       repeat: 'none',
       repeatUntilMonth: '',
+      repeatUntilYear: '',
       tags: [...(item.tags ?? [])],
       category: item.category,
       responsible: item.responsible ?? '',
@@ -456,7 +474,8 @@ export function AnnualWheelView({
           responsible: form.responsible || null,
           notes: form.notes.trim() || undefined,
           repeat: form.repeat,
-          repeatUntilMonth: form.repeatUntilMonth === '' ? null : Number(form.repeatUntilMonth)
+          repeatUntilMonth: form.repeatUntilMonth === '' ? null : Number(form.repeatUntilMonth),
+          repeatUntilYear: form.repeatUntilYear === '' ? null : Number(form.repeatUntilYear)
         });
         if (res?.error) {
           setError(res.error);
@@ -636,9 +655,9 @@ export function AnnualWheelView({
             </button>
           ) : null}
           <Link
-            href="/arshjul/presentation"
+            href={presentationHref}
             className="inline-flex items-center gap-1.5 rounded-lg border border-default px-3 py-1.5 text-[13px] font-medium text-foreground-muted hover:border-strong hover:text-foreground"
-            title="Helskärmsläge för måndagsgenomgången"
+            title="Helskärmsläge för måndagsgenomgången — tar med aktuellt urval"
           >
             <Icon name="external" size={14} /> Presentera
           </Link>
@@ -1236,7 +1255,13 @@ export function EditorModal({
 
   function toggleRepeat(on: boolean) {
     setRepeatOpen(on);
-    setForm({ ...form, repeat: on ? 'monthly' : 'none', repeatUntilMonth: on ? form.repeatUntilMonth : '' });
+    // Utan månad är "varje år" den enda meningsfulla upprepningen.
+    setForm({
+      ...form,
+      repeat: on ? (form.month === '' ? 'yearly' : 'monthly') : 'none',
+      repeatUntilMonth: on ? form.repeatUntilMonth : '',
+      repeatUntilYear: on ? form.repeatUntilYear : ''
+    });
   }
 
   const inputCls =
@@ -1353,12 +1378,18 @@ export function EditorModal({
                       ...form,
                       month,
                       day: clampedDay(form.year, month, form.day),
-                      // Utan månad finns varken period eller serie.
-                      ...(month === '' ? { endMonth: '', endDay: '', repeat: 'none' as AnnualWheelRepeat } : {})
+                      // Utan månad finns ingen period, och bara ÅRLIG upprepning.
+                      ...(month === ''
+                        ? {
+                            endMonth: '',
+                            endDay: '',
+                            repeat: (form.repeat === 'yearly' ? 'yearly' : 'none') as AnnualWheelRepeat
+                          }
+                        : {})
                     });
                     if (month === '') {
                       setPeriodOpen(false);
-                      setRepeatOpen(false);
+                      if (form.repeat !== 'yearly') setRepeatOpen(false);
                     }
                   }}
                   className={inputCls}
@@ -1454,10 +1485,11 @@ export function EditorModal({
                 hint={
                   repeatOpen && form.repeat !== 'none'
                     ? `Skapar ${seriesPreviewCount(form)} aktiviteter — en per förekomst`
-                    : 'Varje månad, varannan eller varje kvartal'
+                    : hasMonth
+                      ? 'Varje månad, varannan, varje kvartal eller varje år'
+                      : 'Varje år (helårsaktivitet)'
                 }
                 checked={repeatOpen}
-                disabled={!hasMonth}
                 onChange={toggleRepeat}
               >
                 <div className="grid grid-cols-2 gap-3">
@@ -1467,29 +1499,50 @@ export function EditorModal({
                       onChange={(e) => setForm({ ...form, repeat: e.target.value as AnnualWheelRepeat })}
                       className={inputCls}
                     >
-                      {ANNUAL_WHEEL_REPEATS.filter((r) => r.id !== 'none').map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="T.o.m.">
-                    <select
-                      value={form.repeatUntilMonth}
-                      onChange={(e) => setForm({ ...form, repeatUntilMonth: e.target.value })}
-                      className={inputCls}
-                    >
-                      <option value="">December</option>
-                      {Array.from({ length: 12 }, (_, i) => i + 1)
-                        .filter((m) => m >= Number(form.month))
-                        .map((m) => (
-                          <option key={m} value={String(m)}>
-                            {monthLongLabel(m)}
+                      {ANNUAL_WHEEL_REPEATS.filter((r) => r.id !== 'none' && (hasMonth || r.id === 'yearly')).map(
+                        (r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.label}
                           </option>
-                        ))}
+                        )
+                      )}
                     </select>
                   </Field>
+                  {form.repeat === 'yearly' ? (
+                    <Field label="T.o.m. år">
+                      <select
+                        value={form.repeatUntilYear}
+                        onChange={(e) => setForm({ ...form, repeatUntilYear: e.target.value })}
+                        className={inputCls}
+                      >
+                        <option value="">{form.year + ANNUAL_WHEEL_DEFAULT_SERIES_YEARS - 1} (tre år)</option>
+                        {Array.from({ length: ANNUAL_WHEEL_MAX_SERIES_YEARS - 1 }, (_, i) => form.year + 1 + i).map(
+                          (y) => (
+                            <option key={y} value={String(y)}>
+                              {y}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </Field>
+                  ) : (
+                    <Field label="T.o.m.">
+                      <select
+                        value={form.repeatUntilMonth}
+                        onChange={(e) => setForm({ ...form, repeatUntilMonth: e.target.value })}
+                        className={inputCls}
+                      >
+                        <option value="">December</option>
+                        {Array.from({ length: 12 }, (_, i) => i + 1)
+                          .filter((m) => m >= Number(form.month))
+                          .map((m) => (
+                            <option key={m} value={String(m)}>
+                              {monthLongLabel(m)}
+                            </option>
+                          ))}
+                      </select>
+                    </Field>
+                  )}
                 </div>
               </ToggleRow>
             ) : null}

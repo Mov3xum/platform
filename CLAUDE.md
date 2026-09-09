@@ -3865,9 +3865,14 @@ i hjulet, så en genomgång kan klickas igenom utan att dialoger öppnas.
 `expandAnnualWheelSeries` (ren, enhetstestad) expanderar basen till
 förekomster (varje/varannan månad, varje kvartal, t.o.m. vald månad; dagen
 klampas mot månadslängden; perioder flyttas med hela steget och förekomster
-som skulle spilla över årsskiftet utelämnas; hårt tak 12). Både UI-actionen
-och chatt-verktyget `create_annual_wheel_item` (parametrarna `repeat` +
-`repeat_until_month`) går genom `createAnnualWheelSeries` i det delade
+som skulle spilla över årsskiftet utelämnas; hårt tak 12). **Varje år
+(`yearly`, 2026-09):** samma datum i varje år t.o.m. valt slutår (default
+basåret + 2, hårt tak `ANNUAL_WHEEL_MAX_SERIES_YEARS` = 10) — fungerar även
+för helårsaktiviteter utan månad (en förekomst per år), 29 feb klampas till
+28 feb ett vanligt år, och varje förekomst skapas med sitt eget `year`.
+Både UI-actionen och chatt-verktyget `create_annual_wheel_item`
+(parametrarna `repeat` + `repeat_until_month`/`repeat_until_year`) går genom
+`createAnnualWheelSeries` i det delade
 skrivlagret, som skapar varje förekomst via `createAnnualWheelItem` — samma
 whitelist, validering, tenant-stämpel och audit per rad. En delvis lyckad
 serie rapporteras som fel MED antalet redan skapade, aldrig som tyst succé.
@@ -4010,13 +4015,26 @@ railen för exakt den sökvägen (som `/m/` och `/login`); RBAC är oförändrat
 `focusIds` tonar ned resten, `hoverCard={false}`) så hjulet ser likadant ut
 på skärm och projektor.
 
-- **Två lägen:** *Just nu* (default) — panelen visar *Pågår nu / Den här
-  veckan / Kommande 30 dagar* (`buildAnnualWheelAgenda`, ren + enhetstestad;
-  varje post hamnar i EN hink, den mest akuta) och hjulet lyfter fram exakt
-  dessa. *Månad* (← →, eller klick på en sektor) — bläddra månad för månad,
-  panelen listar månadens aktiviteter (perioder syns i varje månad de löper).
-- **Tangenter:** ← → månad · Mellanslag/Home = tillbaka till idag · F =
-  helskärm (`requestFullscreen`) · Esc = stäng. I helskärm betyder Esc bara
+- **Tre lägen:** *Just nu* (default, bara innevarande år) — panelen visar
+  *Pågår nu / Den här veckan / Kommande 30 dagar* (`buildAnnualWheelAgenda`,
+  ren + enhetstestad; varje post hamnar i EN hink, den mest akuta) och hjulet
+  lyfter fram exakt dessa. *Månad* (← →, eller klick på en sektor) — bläddra
+  månad för månad, panelen listar månadens aktiviteter (perioder syns i varje
+  månad de löper). *Översikt* (O, Shift+← → bläddrar ÅR) — årsöversikt i
+  panelen med samma rena dashboard-logik som `/arshjul` (§ 30.5bis):
+  nyckeltal, beläggning per månad med föregående år, kategorier och kvartal.
+- **Filter — fritt valbara i vyn (2026-09):** kategori-flerval via legenden
+  eller klick i hjulets ringar (samma `selectedCategories`/`onToggleCategory`
+  som redigeringsvyn — hjulet visar alla ringar, valda lyfts, övriga tonas;
+  panelen följer hela filtret), tagg, ansvarig och år som selects i panelens
+  filterrad, "Rensa filter". Tidigare fanns inget kategorifilter alls i
+  presentationsläget, så "visa bara Event" var omöjligt. "Presentera"-länken
+  på `/arshjul` tar med aktuellt urval som query (`year`, `cat`, `tag`,
+  `resp`, `month`); `presentation/page.tsx` validerar bara format och klienten
+  faller tyst tillbaka på "alla" för okända värden. Ingen ny dataväg — samma
+  läsning som förut (alla år laddas redan), bara klient-filter.
+- **Tangenter:** ← → månad · Shift+← → år · O = översikt · Mellanslag/Home =
+  tillbaka till idag · F = helskärm (`requestFullscreen`) · Esc = stäng. I helskärm betyder Esc bara
   "lämna helskärm" (webbläsaren sköter det, `fullscreenRef` håller kvar vyn
   en stund efter `fullscreenchange`); utanför helskärm navigerar Esc till
   `/arshjul`.
