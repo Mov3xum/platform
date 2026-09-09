@@ -1338,7 +1338,7 @@ export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['idag', 'min_oversikt', 'inkorg', 'pagaende', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'anvandare', 'installningar', 'min_profil'] }
+  { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'installningar', 'min_profil'] }
 ];
 
 /**
@@ -1523,16 +1523,19 @@ export const coreModules: ModuleDefinition[] = [
     route: '/integrationer'
   },
   {
+    // Användaradministrationen bor under Inställningar (sektion "Användare");
+    // modulen finns kvar för `canAccessModule`-kompatibilitet men visas inte
+    // som egen rail-post (Inställningar-hubben länkar dit).
     id: 'anvandare',
     title: 'Användare',
-    description: 'Hantera plattformsanvändare — skapa bolagsmedlemmar och tilldela bolag.',
+    description: 'Hantera plattformsanvändare — roller, bolagskoppling, åtkomst och lösenord.',
     rolesAllowed: ['admin', 'incubator_lead'],
-    route: '/admin/users'
+    route: '/installningar/anvandare'
   },
   {
     id: 'installningar',
     title: 'Inställningar',
-    description: 'Moduler, tenants, integrationer och infrastruktur.',
+    description: 'Användare, moduler, AI-inställningar, varumärke och drift.',
     rolesAllowed: ['admin', 'incubator_lead'],
     route: '/installningar'
   },

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useMemo } from 'react';
 import { coreModules } from '@platform/shared';
+import { SETTINGS_ROUTE_LABELS } from '@/lib/settings-sections';
 import { RailReopenButton } from './MobileRail';
 
 function buildCrumbs(pathname: string): { label: string; href: string; now: boolean }[] {
@@ -21,11 +22,14 @@ function buildCrumbs(pathname: string): { label: string; href: string; now: bool
   } else {
     crumbs.push({ label: seg[0], href: '/' + seg[0], now: seg.length === 1 });
   }
-  // further segments shown as plain labels
+  // further segments: känd undersida (t.ex. Inställningar-sektion) får sin
+  // riktiga titel, övriga visas som avhumaniserade segment.
   for (let i = 1; i < seg.length; i++) {
+    const href = '/' + seg.slice(0, i + 1).join('/');
+    const known = SETTINGS_ROUTE_LABELS[href];
     crumbs.push({
-      label: decodeURIComponent(seg[i]).replace(/[-_]/g, ' '),
-      href: '/' + seg.slice(0, i + 1).join('/'),
+      label: known ?? decodeURIComponent(seg[i]).replace(/[-_]/g, ' '),
+      href,
       now: i === seg.length - 1
     });
   }

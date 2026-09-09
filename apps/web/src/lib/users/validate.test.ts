@@ -1,7 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ALL_ROLES } from '@platform/shared';
-import { assignableRolesFor, validateNewUserInput } from './validate';
+import {
+  assignableRolesFor,
+  canManageUser,
+  validateDeleteConfirmation,
+  validateNewPassword,
+  validateNewUserInput,
+  validateRolesUpdate
+} from './validate';
 
 const allRoles = { assignableRoles: [...ALL_ROLES] };
 
@@ -103,4 +110,61 @@ test('assignableRolesFor: incubator_lead får alla utom admin', () => {
   assert.ok(!roles.includes('admin'));
   assert.ok(roles.includes('startup_member'));
   assert.ok(roles.includes('incubator_lead'));
+});
+
+// ── Administration av befintliga användare ───────────────────────────────
+
+test('canManageUser: admin får hantera alla, incubator_lead inte admin-konton', () => {
+  assert.equal(canManageUser(['admin'], ['admin']), true);
+  assert.equal(canManageUser(['incubator_lead'], ['coach']), true);
+  assert.equal(canManageUser(['incubator_lead'], ['admin', 'coach']), false);
+  assert.equal(canManageUser(['incubator_lead'], undefined), true);
+});
+
+test('validateRolesUpdate: accepterar JSON-sträng, dedupar och normaliserar', () => {
+  const res = validateRolesUpdate('["coach","coach"," mentor "]', {
+    assignableRoles: [...ALL_ROLES],
+    isSelf: false
+  });
+  assert.equal(res.ok, true);
+  if (res.ok) assert.deepEqual(res.value, ['coach', 'mentor']);
+});
+
+test('validateRolesUpdate: kräver minst en roll och giltiga roller', () => {
+  assert.equal(validateRolesUpdate([], { assignableRoles: [...ALL_ROLES], isSelf: false }).ok, false);
+  assert.equal(
+    validateRolesUpdate(['superuser'], { assignableRoles: [...ALL_ROLES], isSelf: false }).ok,
+    false
+  );
+  assert.equal(validateRolesUpdate('not json', { assignableRoles: [...ALL_ROLES], isSelf: false }).ok, false);
+});
+
+test('validateRolesUpdate: incubator_lead kan inte tilldela admin', () => {
+  const res = validateRolesUpdate(['admin'], {
+    assignableRoles: assignableRolesFor(['incubator_lead']),
+    isSelf: false
+  });
+  assert.equal(res.ok, false);
+});
+
+test('validateRolesUpdate: egna administrationsroller kan inte tas bort', () => {
+  const res = validateRolesUpdate(['coach'], { assignableRoles: [...ALL_ROLES], isSelf: true });
+  assert.equal(res.ok, false);
+  const ok = validateRolesUpdate(['incubator_lead', 'coach'], {
+    assignableRoles: [...ALL_ROLES],
+    isSelf: true
+  });
+  assert.equal(ok.ok, true);
+});
+
+test('validateNewPassword: 8–72 tecken', () => {
+  assert.equal(validateNewPassword('kort').ok, false);
+  assert.equal(validateNewPassword('a'.repeat(73)).ok, false);
+  assert.equal(validateNewPassword('hunter2hunter').ok, true);
+});
+
+test('validateDeleteConfirmation: kräver exakt e-post (skiftlägesokänsligt)', () => {
+  assert.equal(validateDeleteConfirmation('Anna@Bolag.se ', 'anna@bolag.se').ok, true);
+  assert.equal(validateDeleteConfirmation('anna@bolag.se', 'bert@bolag.se').ok, false);
+  assert.equal(validateDeleteConfirmation('', 'anna@bolag.se').ok, false);
 });

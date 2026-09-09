@@ -6,7 +6,7 @@ import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { coreModules } from '@platform/shared';
 import { revalidatePath } from 'next/cache';
-import { MAX_TENANT_LOGO_BYTES } from '@/lib/settings-constants';
+import { HIDDEN_MODULE_IDS, MAX_TENANT_LOGO_BYTES } from '@/lib/settings-constants';
 
 export type SaveModuleTogglesState = {
   error?: string;
@@ -24,8 +24,6 @@ export type SaveAiBudgetState = {
 };
 
 const MAX_AI_BUDGET_USD = 1000000;
-
-const HIDDEN_MODULE_IDS = ['dashboard', 'toolbox', 'onboarding', 'activity_feed', 'partners'];
 
 const ALLOWED_MODULE_IDS = new Set(
   coreModules.filter((m) => !HIDDEN_MODULE_IDS.includes(m.id)).map((m) => m.id)
@@ -176,7 +174,7 @@ export async function saveUserModuleTogglesAction(
   }
 
   revalidatePath('/', 'layout');
-  revalidatePath('/installningar');
+  revalidatePath('/installningar/anvandare');
 
   return { success: true };
 }
@@ -222,6 +220,7 @@ export async function saveAiBudgetAction(
   }
 
   revalidatePath('/installningar');
+  revalidatePath('/installningar/ai-kostnad');
   return { success: true };
 }
 
@@ -284,6 +283,7 @@ export async function uploadTenantLogoAction(
 
   revalidatePath('/', 'layout');
   revalidatePath('/installningar');
+  revalidatePath('/installningar/utseende');
 
   return { success: true };
 }
@@ -333,6 +333,7 @@ export async function deleteTenantLogoAction(
 
   revalidatePath('/', 'layout');
   revalidatePath('/installningar');
+  revalidatePath('/installningar/utseende');
 
   return { success: true };
 }
