@@ -55,6 +55,8 @@ import {
   addStartupKpi,
   addCapitalRound,
   createStartupNote,
+  createOrgPost,
+  updateOrgPostFields,
   CAPITAL_TYPES,
   registerDeMinimisSupport,
   FORORDNINGAR,
@@ -126,6 +128,8 @@ const DOMAIN_WRITE_TOOLS = new Set([
   'add_capital_round',
   'schedule_agent',
   'create_startup_note',
+  'create_org_post',
+  'update_org_post',
   'memory_write'
 ]);
 
@@ -1269,6 +1273,75 @@ export function buildChatTools(
     tools.push({
       type: 'function',
       function: {
+        name: 'create_org_post',
+        description:
+          'Skapar ett inlägg på Hemmaplan (startsidan, org_posts). kind styr ' +
+          'vilken flik det hamnar under: news/notice/celebration = Anslagstavlan, ' +
+          'instruction = "Så gör vi", training = INTERNUTBILDNINGAR (pass, guider ' +
+          'och material kollegorna ska gå igenom — "lägg upp en internutbildning ' +
+          'om GDPR", "planera ett pass om pitchcoaching nästa torsdag"). Brödtexten ' +
+          'är markdown (## rubriker, - punkter, **fet**). Inlägget publiceras direkt ' +
+          'om published_at utelämnas. Skriv aldrig personuppgifter.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Rubrik (max 160 tecken).' },
+            body: { type: 'string', description: 'Brödtext i markdown (max 20 000 tecken).' },
+            kind: {
+              type: 'string',
+              enum: ['news', 'notice', 'instruction', 'celebration', 'training'],
+              description: 'Inläggstyp — avgör fliken. Default news.'
+            },
+            audience: {
+              type: 'string',
+              enum: ['staff', 'all'],
+              description: 'staff = Movexum-teamet (default); all = även bolagen (syns på Min översikt).'
+            },
+            pinned: { type: 'boolean', description: 'Fäst överst i sin flik.' },
+            published_at: {
+              type: 'string',
+              description: 'ISO-datum för schemalagd publicering (framtid). Utelämna = direkt.'
+            },
+            expires_at: { type: 'string', description: 'ISO-datum då inlägget döljs. Utelämna = utgår aldrig.' },
+            link_url: {
+              type: 'string',
+              description: 'Valfri länk: intern sökväg (/education/…) eller https-URL.'
+            }
+          },
+          required: ['title']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'update_org_post',
+        description:
+          'Uppdaterar ett befintligt inlägg på Hemmaplan (org_posts): rubrik, text, ' +
+          'typ/flik, målgrupp, fäst, publicerings-/utgångsdatum eller länk. Slå upp ' +
+          'post_id via query_collection på org_posts först. Bara författaren ' +
+          'eller admin/incubator lead får ändra andras inlägg. För att "ta bort" ' +
+          'sätter du expires_at till nu (inlägget döljs; radering görs i UI:t).',
+        parameters: {
+          type: 'object',
+          properties: {
+            post_id: { type: 'string', description: 'PocketBase-id för inlägget.' },
+            title: { type: 'string' },
+            body: { type: 'string', description: 'Ny brödtext i markdown (ersätter hela texten).' },
+            kind: { type: 'string', enum: ['news', 'notice', 'instruction', 'celebration', 'training'] },
+            audience: { type: 'string', enum: ['staff', 'all'] },
+            pinned: { type: 'boolean' },
+            published_at: { type: 'string', description: 'ISO-datum, eller tom sträng för att publicera direkt.' },
+            expires_at: { type: 'string', description: 'ISO-datum, eller tom sträng för att aldrig utgå.' },
+            link_url: { type: 'string', description: 'Intern sökväg eller https-URL, eller tom sträng.' }
+          },
+          required: ['post_id']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
         name: 'request_approval',
         description:
           'Visar en Godkänn/Avbryt-knapp för användaren i chatten. Använd ' +
@@ -1642,6 +1715,20 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: 'Schemalägger agent' };
     case 'create_startup_note':
       return { tool: name, label: 'Skriver anteckning' };
+    case 'create_org_post': {
+      const kind = typeof args.kind === 'string' ? args.kind : '';
+      return {
+        tool: name,
+        label:
+          kind === 'training'
+            ? 'Lägger upp internutbildning'
+            : kind === 'instruction'
+              ? 'Skriver instruktion'
+              : 'Skriver på anslagstavlan'
+      };
+    }
+    case 'update_org_post':
+      return { tool: name, label: 'Uppdaterar inlägg på Hemmaplan' };
     case 'request_approval':
       return { tool: name, label: 'Ber om ditt godkännande' };
     case 'start_meeting':
@@ -2530,6 +2617,10 @@ export async function dispatchToolCall(
       return runScheduleAgent(args, ctx);
     case 'create_startup_note':
       return runCreateStartupNote(args, ctx);
+    case 'create_org_post':
+      return runCreateOrgPost(args, ctx);
+    case 'update_org_post':
+      return runUpdateOrgPost(args, ctx);
     case 'request_approval':
       return runRequestApproval(args, ctx);
     case 'start_meeting':
@@ -3588,6 +3679,74 @@ async function runCreateStartupNote(
       startup: result.value.startupName,
       confidential: false,
       path: result.value.startupPath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateOrgPost(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createOrgPost(ctx.pb, actor, {
+    title: argStr(args, 'title'),
+    body: typeof args.body === 'string' ? args.body : '',
+    kind: argStr(args, 'kind') || 'news',
+    audience: argStr(args, 'audience') || 'staff',
+    pinned: args.pinned === true,
+    publishedAt: argStr(args, 'published_at') || null,
+    expiresAt: argStr(args, 'expires_at') || null,
+    linkUrl: argStr(args, 'link_url') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      post_id: result.value.postId,
+      title: result.value.title,
+      kind: result.value.kind,
+      kind_label: result.value.kindLabel,
+      audience: result.value.audience,
+      pinned: result.value.pinned,
+      path: result.value.homePath,
+      note:
+        result.value.kind === 'training'
+          ? 'Internutbildningen syns nu under fliken Internutbildningar på Hemmaplan.'
+          : 'Inlägget syns nu på Hemmaplan.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runUpdateOrgPost(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const changes: Record<string, unknown> = {};
+  for (const key of ['title', 'body', 'kind', 'audience', 'published_at', 'expires_at', 'link_url'] as const) {
+    if (typeof args[key] === 'string') changes[key] = args[key];
+  }
+  if (typeof args.pinned === 'boolean') changes.pinned = args.pinned;
+
+  const result = await updateOrgPostFields(ctx.pb, actor, argStr(args, 'post_id'), changes);
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      post_id: result.value.postId,
+      title: result.value.title,
+      kind: result.value.kind,
+      kind_label: result.value.kindLabel,
+      audience: result.value.audience,
+      pinned: result.value.pinned,
+      updated_fields: Object.keys(changes),
+      path: result.value.homePath,
       logged_in: 'agent_actions'
     }
   };

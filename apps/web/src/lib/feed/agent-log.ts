@@ -92,7 +92,8 @@ const ORG_POST_KIND_LABELS: Record<string, string> = {
   news: 'nyhet',
   notice: 'info',
   instruction: 'instruktion',
-  celebration: 'firande'
+  celebration: 'firande',
+  training: 'internutbildning'
 };
 
 /** Kanban-kolumnernas etiketter (§ 15.7). */
@@ -392,12 +393,20 @@ function mapRow(
 
     case 'org_posts': {
       const title = str(after.title);
+      const kind = str(after.kind);
+      const homeHref =
+        kind === 'training' ? '/hem?flik=internutbildningar' : kind === 'instruction' ? '/hem?flik=sa-gor-vi' : '/hem';
       if (action === 'create') {
         return {
-          title: `Nytt på anslagstavlan: "${title || 'utan rubrik'}"`,
-          detail: ORG_POST_KIND_LABELS[str(after.kind)],
-          href: '/hem',
-          icon: 'home'
+          title:
+            kind === 'training'
+              ? `Ny internutbildning: "${title || 'utan rubrik'}"`
+              : kind === 'instruction'
+                ? `Ny instruktion: "${title || 'utan rubrik'}"`
+                : `Nytt på anslagstavlan: "${title || 'utan rubrik'}"`,
+          detail: ORG_POST_KIND_LABELS[kind],
+          href: homeHref,
+          icon: kind === 'training' ? 'cap' : 'home'
         };
       }
       if (after.deleted === true) {

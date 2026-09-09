@@ -2,6 +2,15 @@ import 'server-only';
 import { escFilter } from '@/lib/pb-filter';
 import type PocketBase from 'pocketbase';
 import type { WebSourceKey } from '@platform/shared';
+import {
+  MAX_ITEMS_PER_FEED,
+  formatItemsAsText,
+  looksLikeFeed,
+  parseRssItems,
+  type WebFeedItem
+} from './rss';
+
+export { parseRssItems, type WebFeedItem };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Web-fetch för AI-agenter — EU-källor, sanerat, cachat.
@@ -61,8 +70,11 @@ const WEB_SOURCE_MAP: Record<WebSourceKey, WebSource> = Object.fromEntries(
 const MAX_BYTES_PER_SOURCE = 8 * 1024; // 8 KB per källa
 const MAX_TOTAL_BYTES = 32 * 1024; // 32 KB totalt
 const FETCH_TIMEOUT_MS = 8_000;
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 min
-const MAX_ITEMS_PER_FEED = 8;
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 min (prompt-kontext för agenter)
+// Hemmaplans flöde uppdateras tätare — det är en nyhetsvy, inte en prompt.
+const HOME_FEED_TTL_MS = 15 * 60 * 1000; // 15 min
+// En källa som varit nere länge ska inte visa dagsgamla poster som "senaste".
+const HOME_FEED_MAX_STALE_MS = 24 * 60 * 60 * 1000;
 
 export interface WebFetchResult {
   source: WebSourceKey;
@@ -74,13 +86,6 @@ export interface WebFetchResult {
   error?: string;
   body: string; // saniterad text-blob, redo för att stoppa in i prompten
   items: WebFeedItem[];
-}
-
-export interface WebFeedItem {
-  title: string;
-  link: string;
-  pubDate?: string;
-  summary: string;
 }
 
 export function listWebSources(): readonly WebSource[] {
@@ -207,11 +212,14 @@ async function fetchRawFeed(src: WebSource): Promise<RawFeed> {
     });
     if (!response.ok) return { ok: false, error: `HTTP ${response.status}` };
     const raw = await response.text();
-    return {
-      ok: true,
-      items: parseRssItems(raw).slice(0, MAX_ITEMS_PER_FEED),
-      fetched_at: new Date().toISOString()
-    };
+    // En 200-sida med HTML (omdirigering till startsida, bot-skydd, "sidan
+    // finns inte") ska inte tolkas som ett tomt flöde — säg vad det var.
+    if (!looksLikeFeed(raw)) {
+      return { ok: false, error: 'Svaret var inte ett RSS/Atom-flöde (HTML-sida?)' };
+    }
+    // Ett tomt men giltigt flöde (t.ex. Vinnova utan öppna utlysningar) är ok.
+    const items = parseRssItems(raw).slice(0, MAX_ITEMS_PER_FEED);
+    return { ok: true, items, fetched_at: new Date().toISOString() };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'fetch failed' };
   } finally {
@@ -235,32 +243,86 @@ export interface WebFeedResult {
   url: string;
   fetched_at: string;
   cached: boolean;
+  /** true när posterna kommer från en utgången cache (bakgrundsuppdatering pågår). */
+  stale: boolean;
   ok: boolean;
   error?: string;
   items: WebFeedItem[];
 }
 
-const FEED_ITEM_CACHE = new Map<WebSourceKey, { fetched_at: string; items: WebFeedItem[] }>();
+interface FeedCacheEntry {
+  fetched_at: string;
+  items: WebFeedItem[];
+  /** Senaste fel vid uppdateringsförsök (posterna är då från en äldre lyckad hämtning). */
+  lastError?: string;
+}
 
+const FEED_ITEM_CACHE = new Map<WebSourceKey, FeedCacheEntry>();
+// Deduplicerar samtidiga hämtningar av samma källa (flera sidladdningar under
+// samma sekund ska ge EN nätverksbegäran mot nyhetskällan).
+const FEED_INFLIGHT = new Map<WebSourceKey, Promise<RawFeed>>();
+
+function ageMs(entry: FeedCacheEntry): number {
+  return Date.now() - new Date(entry.fetched_at).getTime();
+}
+
+function refreshSource(key: WebSourceKey, src: WebSource): Promise<RawFeed> {
+  const inflight = FEED_INFLIGHT.get(key);
+  if (inflight) return inflight;
+  const p = fetchRawFeed(src)
+    .then((live) => {
+      const prev = FEED_ITEM_CACHE.get(key);
+      if (live.ok) {
+        FEED_ITEM_CACHE.set(key, { fetched_at: live.fetched_at, items: live.items });
+      } else if (prev) {
+        // Behåll de senaste lyckade posterna men notera felet (visas i UI:t).
+        FEED_ITEM_CACHE.set(key, { ...prev, lastError: live.error });
+      }
+      return live;
+    })
+    .finally(() => {
+      FEED_INFLIGHT.delete(key);
+    });
+  FEED_INFLIGHT.set(key, p);
+  return p;
+}
+
+/**
+ * Hemmaplans nyhetsflöde. Cache-strategi: **stale-while-revalidate**.
+ *
+ * 1. Färsk cache (< 15 min) → returneras direkt, ingen nätverksbegäran.
+ * 2. Utgången cache (15 min – 24 h) → returneras DIREKT (märkt `stale`) medan
+ *    en bakgrundshämtning uppdaterar cachen; nästa sidladdning får de nya
+ *    posterna. Sidan väntar aldrig på en långsam nyhetskälla.
+ * 3. Ingen (eller > 24 h gammal) cache → hämtningen inväntas (max 8 s/källa,
+ *    alla källor parallellt). Misslyckas den visas källan som nere med
+ *    felorsak — aldrig ett tyst tomt flöde.
+ *
+ * Whitelist, timeout, SSRF-skydd och sanering är samma som för agenternas
+ * web-kontext (`fetchWebContext`). Inget innehåll lagras i databasen.
+ */
 export async function fetchWebFeedItems(sources: WebSourceKey[]): Promise<WebFeedResult[]> {
   const valid = sources.filter((s): s is WebSourceKey => Boolean(WEB_SOURCE_MAP[s]));
   return Promise.all(
     valid.map(async (key): Promise<WebFeedResult> => {
       const src = WEB_SOURCE_MAP[key];
+      const base = { source: key, label: src.label, url: src.url };
       const hit = FEED_ITEM_CACHE.get(key);
-      if (hit && Date.now() - new Date(hit.fetched_at).getTime() < CACHE_TTL_MS) {
-        return { source: key, label: src.label, url: src.url, fetched_at: hit.fetched_at, cached: true, ok: true, items: hit.items };
+
+      if (hit && ageMs(hit) < HOME_FEED_TTL_MS) {
+        return { ...base, fetched_at: hit.fetched_at, cached: true, stale: false, ok: true, error: hit.lastError, items: hit.items };
       }
-      const live = await fetchRawFeed(src);
-      if (!live.ok) {
-        // Behåll en utgången cache-post hellre än ett tomt flöde (fail-soft).
-        if (hit) {
-          return { source: key, label: src.label, url: src.url, fetched_at: hit.fetched_at, cached: true, ok: true, items: hit.items };
-        }
-        return { source: key, label: src.label, url: src.url, fetched_at: new Date().toISOString(), cached: false, ok: false, error: live.error, items: [] };
+      if (hit && ageMs(hit) < HOME_FEED_MAX_STALE_MS) {
+        // Utgången men användbar: svara direkt, uppdatera i bakgrunden.
+        void refreshSource(key, src).catch(() => {});
+        return { ...base, fetched_at: hit.fetched_at, cached: true, stale: true, ok: true, error: hit.lastError, items: hit.items };
       }
-      FEED_ITEM_CACHE.set(key, { fetched_at: live.fetched_at, items: live.items });
-      return { source: key, label: src.label, url: src.url, fetched_at: live.fetched_at, cached: false, ok: true, items: live.items };
+
+      const live = await refreshSource(key, src);
+      if (live.ok) {
+        return { ...base, fetched_at: live.fetched_at, cached: false, stale: false, ok: true, items: live.items };
+      }
+      return { ...base, fetched_at: new Date().toISOString(), cached: false, stale: false, ok: false, error: live.error, items: [] };
     })
   );
 }
@@ -304,75 +366,4 @@ async function writeCache(
     /* none */
   }
   await pb.collection('web_cache').create({ source, body, fetched_at });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RSS-parsning + sanering — regex-baserad, ingen extern dep
-// ─────────────────────────────────────────────────────────────────────────────
-
-const ITEM_RE = /<(?:item|entry)\b[\s\S]*?<\/(?:item|entry)>/gi;
-const TITLE_RE = /<title[^>]*>([\s\S]*?)<\/title>/i;
-const LINK_RE = /<link[^>]*?>([^<]+)<\/link>|<link[^>]*?href=["']([^"']+)["'][^>]*\/?>/i;
-const DESC_RE = /<(?:description|summary|content)[^>]*>([\s\S]*?)<\/(?:description|summary|content)>/i;
-const DATE_RE = /<(?:pubDate|updated|published)[^>]*>([\s\S]*?)<\/(?:pubDate|updated|published)>/i;
-
-export function parseRssItems(xml: string): WebFeedItem[] {
-  if (!xml) return [];
-  const items: WebFeedItem[] = [];
-  const matches = xml.match(ITEM_RE) ?? [];
-  for (const block of matches.slice(0, MAX_ITEMS_PER_FEED * 2)) {
-    const titleMatch = block.match(TITLE_RE);
-    const linkMatch = block.match(LINK_RE);
-    const descMatch = block.match(DESC_RE);
-    const dateMatch = block.match(DATE_RE);
-
-    const title = stripAll(titleMatch?.[1] || '');
-    if (!title) continue;
-    const link = sanitizeUrl(stripAll(linkMatch?.[1] || linkMatch?.[2] || ''));
-    const summary = stripAll(descMatch?.[1] || '').slice(0, 400);
-    const pubDate = stripAll(dateMatch?.[1] || '');
-
-    items.push({ title, link, summary, pubDate: pubDate || undefined });
-    if (items.length >= MAX_ITEMS_PER_FEED) break;
-  }
-  return items;
-}
-
-function formatItemsAsText(label: string, items: WebFeedItem[]): string {
-  if (items.length === 0) return `[${label}] Inga publicerade poster.`;
-  const lines: string[] = [`[${label}]`];
-  for (const item of items) {
-    const date = item.pubDate ? ` (${item.pubDate})` : '';
-    lines.push(`- ${item.title}${date}`);
-    if (item.summary) lines.push(`  ${item.summary}`);
-    if (item.link) lines.push(`  ${item.link}`);
-  }
-  return lines.join('\n');
-}
-
-function stripAll(s: string): string {
-  return decodeEntities(stripCdata(s).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim());
-}
-
-function stripCdata(s: string): string {
-  return s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
-}
-
-function decodeEntities(s: string): string {
-  return s
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_m, code) => String.fromCharCode(Number(code)))
-    .replace(/&nbsp;/g, ' ');
-}
-
-// Tillåter bara http(s)-länkar. Filtrerar bort javascript:, data: m.fl.
-function sanitizeUrl(url: string): string {
-  if (!url) return '';
-  if (!/^https?:\/\//i.test(url)) return '';
-  if (url.length > 500) return url.slice(0, 500);
-  return url;
 }

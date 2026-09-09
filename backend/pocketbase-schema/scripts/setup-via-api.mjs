@@ -3477,7 +3477,7 @@ await ensureCollection({
     { name: 'title', type: 'text', required: true, min: 1, max: 160 },
     { name: 'body', type: 'text', required: false, max: 20000 },
     // MÅSTE spegla ORG_POST_KINDS / ORG_POST_AUDIENCES i packages/shared/src/org-posts.ts.
-    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['news', 'notice', 'instruction', 'celebration'] },
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['news', 'notice', 'instruction', 'celebration', 'training'] },
     { name: 'audience', type: 'select', required: true, maxSelect: 1, values: ['staff', 'all'] },
     { name: 'pinned', type: 'bool', required: false },
     { name: 'published_at', type: 'date', required: false },
@@ -3493,6 +3493,11 @@ await ensureCollection({
   createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`
+});
+// Migration 1700000145: org_posts.kind += 'training' (Internutbildningar-fliken,
+// § 37). Union — ensureCollection synkar inte fält på en befintlig collection.
+await patchCollection('org_posts', [], {
+  kind: { values: ['news', 'notice', 'instruction', 'celebration', 'training'] }
 });
 
 // Backfill: en tidigare körning hann skapa chat_threads/deep_jobs UTAN

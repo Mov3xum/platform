@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/proto/Icon';
 import { TimeAgo } from './TimeAgo';
@@ -49,10 +49,16 @@ interface Props {
   variant?: 'board' | 'compact';
   /** Förvald typ i "Nytt inlägg"-redigeraren. */
   newKind?: OrgPostKind;
-  /** Rubrik för listan (eyebrow). */
-  label: string;
+  /** Rubrik för listan (eyebrow). Utelämnas när listan ligger i en flik som redan har rubrik. */
+  label?: string;
   description?: string;
   emptyText: string;
+  /** Etikett på "nytt"-knappen (default följer variant). */
+  newLabel?: string;
+  /** Begränsa typvalet i redigeraren (t.ex. bara `training` i Internutbildningar-fliken). */
+  kinds?: readonly OrgPostKind[];
+  /** Renderas ovanför listan (t.ex. hårdkodad plattformsintro i "Så gör vi"). */
+  children?: ReactNode;
 }
 
 const KIND_CHIP: Record<OrgPostKind, string> = {
@@ -61,14 +67,17 @@ const KIND_CHIP: Record<OrgPostKind, string> = {
   instruction:
     'bg-movexum-pastell-lila text-movexum-morklila dark:bg-movexum-morklila/40 dark:text-movexum-pastell-lila',
   celebration:
-    'bg-movexum-pastell-gul text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul'
+    'bg-movexum-pastell-gul text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul',
+  training:
+    'bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron'
 };
 
 const KIND_ICON: Record<OrgPostKind, string> = {
   news: 'spark',
   notice: 'bell',
   instruction: 'doc',
-  celebration: 'star'
+  celebration: 'star',
+  training: 'cap'
 };
 
 const EXPAND_THRESHOLD = 320;
@@ -114,12 +123,14 @@ function Editor({
   initial,
   editing,
   onDone,
-  onCancel
+  onCancel,
+  kinds = ORG_POST_KINDS
 }: {
   initial: Draft;
   editing: OrgPost | null;
   onDone: () => void;
   onCancel: () => void;
+  kinds?: readonly OrgPostKind[];
 }) {
   const [draft, setDraft] = useState<Draft>(initial);
   const [error, setError] = useState<string | null>(null);
@@ -155,7 +166,7 @@ function Editor({
       className="rounded-2xl border border-strong bg-surface p-4 shadow-sm shadow-movexum-svart/5"
     >
       <div className="mb-3 flex flex-wrap gap-1.5">
-        {ORG_POST_KINDS.map((k) => {
+        {kinds.map((k) => {
           const active = draft.kind === k;
           return (
             <button
@@ -283,7 +294,10 @@ export function OrgPostList({
   newKind = 'news',
   label,
   description,
-  emptyText
+  emptyText,
+  newLabel,
+  kinds,
+  children
 }: Props) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
@@ -323,11 +337,13 @@ export function OrgPostList({
 
   return (
     <section>
-      <div className="mb-3 flex items-end justify-between gap-3">
+      <div className={`flex items-end justify-between gap-3 ${label || (canAuthor && !creating) ? 'mb-3' : ''}`}>
         <div>
-          <h2 className="font-heading text-[13px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
-            {label}
-          </h2>
+          {label && (
+            <h2 className="font-heading text-[13px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
+              {label}
+            </h2>
+          )}
           {description && <p className="mt-0.5 text-[12px] text-foreground-subtle">{description}</p>}
         </div>
         {canAuthor && !creating && (
@@ -340,7 +356,7 @@ export function OrgPostList({
             className="inline-flex items-center gap-1.5 rounded-xl border border-default bg-surface px-3 py-1.5 text-[12.5px] font-medium text-foreground transition hover:border-strong hover:shadow-sm hover:shadow-movexum-svart/5"
           >
             <Icon name="plus" size={13} />
-            {compact ? 'Ny instruktion' : 'Nytt inlägg'}
+            {newLabel ?? (compact ? 'Ny instruktion' : 'Nytt inlägg')}
           </button>
         )}
       </div>
@@ -350,6 +366,7 @@ export function OrgPostList({
           <Editor
             initial={emptyDraft(newKind)}
             editing={null}
+            kinds={kinds}
             onDone={() => {
               setCreating(false);
               router.refresh();
@@ -360,6 +377,8 @@ export function OrgPostList({
       )}
 
       {error && <p className="mb-2 text-[12px] text-movexum-morkorange">{error}</p>}
+
+      {children}
 
       {posts.length === 0 && !creating ? (
         <div className="rounded-2xl border border-dashed border-default px-4 py-8 text-center text-[13px] text-foreground-subtle">
@@ -380,6 +399,7 @@ export function OrgPostList({
                   <Editor
                     initial={draftFrom(post)}
                     editing={post}
+                    kinds={kinds}
                     onDone={() => {
                       setEditingId(null);
                       router.refresh();
