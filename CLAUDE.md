@@ -4683,3 +4683,57 @@ och den vita wordmark-PNG:n renderas om med
 Playwrights katalog) om wordmark/färg ändras — uppdatera i så fall även
 `manifest.ts`/`layout.tsx` (färgerna) och bumpa `VERSION` i `public/sw.js`
 (ikonerna cachas cache-first) i samma PR (§ 2/§ 5).
+
+---
+
+## 36. Inställningar — hub med undersidor & användaradministration
+
+### 36.1 Struktur
+
+`/installningar` (admin/incubator_lead) är en **översikt med kort**, inte en
+lång sida med allt innehåll. Varje område är en egen undersida; hubben visar
+bara en sammanfattning per kort (antal användare, aktiva moduler, förbrukad
+AI-kostnad, antal minnesnoteringar, logotypstatus, driftstatus) och länkar in.
+Sektionsregistret `apps/web/src/lib/settings-sections.ts` är källa av sanning
+(slug, titel, ikon, grupp, rollkrav) och delas av hubben, undersidornas flikar
+(`SettingsSectionPage` i `app/installningar/shared.tsx`) och topbarens
+brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
+
+| Route | Innehåll |
+|---|---|
+| `/installningar` | Hub: kort per sektion grupperade i *Organisation & åtkomst*, *AI & automation*, *Utseende* |
+| `/installningar/anvandare` | **Användare** — alla konton i tenanten med sök/rollfilter, "Ny användare", och per konto: roller, kopplat bolag, modulåtkomst (admin), nytt lösenord, radering |
+| `/installningar/moduler` | Tenant-bred modul-toggling (`AdminToggles`) |
+| `/installningar/organisation` | Tenants, infra-status, dataresidens |
+| `/installningar/ai-kostnad` | AI-kostnadstak (§ 9.6) |
+| `/installningar/ai-minne` | AI-minne (`agent_memory`, § 16.4) |
+| `/installningar/utseende` | Tenant-logotyp |
+
+`/admin/users` är en legacy-route som redirectar till `/installningar/anvandare`;
+modulen `anvandare` pekar dit men visas inte längre som egen rail-post
+(hubben länkar). Per-användar-modultogglarna (`UserModuleToggles`) är borttagna
+som separat komponent — de ligger i användarens detaljvy.
+
+### 36.2 Användaradministration — RBAC & regelefterlevnad
+
+Server-actions i `lib/actions/users.ts` (`updateUserRolesAction`,
+`resetUserPasswordAction`, `deleteUserAction`) + ren, enhetstestad logik i
+`lib/users/validate.ts` (`canManageUser`, `validateRolesUpdate`,
+`validateNewPassword`, `validateDeleteConfirmation`).
+
+- **RBAC (ISO 27001 A.5.15–A.5.18):** `hasRole(admin|incubator_lead)` +
+  `assignableRolesFor` (incubator_lead kan aldrig tilldela `admin`) +
+  `canManageUser` (incubator_lead rör aldrig admin-konton). Aldrig inline
+  rollkoll. Självskydd: egna administrationsroller kan inte tas bort, eget
+  lösenord byts på `/konto`, eget konto kan inte raderas här.
+- **Tenant-isolation:** målanvändaren läses via superuser och korsverifieras
+  mot inloggad staffs tenant INNAN varje skrivning (`loadManagedTarget`).
+  Listan på `/installningar/anvandare` läses via superuser med tenant-filter
+  satt server-side — PocketBase döljer andra användares `email` för vanliga
+  tokens (`emailVisibility`), och adressen behövs för administration. Fallback
+  till användarens token (RLS) om superuser saknas.
+- **GDPR:** inga nya fält/kollektioner. Radering = art. 17-flöde (typad
+  e-postbekräftelse; PB vägrar radera konton som refereras av obligatoriska
+  relationer → tydligt fel, ingen tyst halvradering). Lösenord loggas aldrig;
+  loggar innehåller bara status/id.
+- **Riskklass (EU AI Act):** n/a — ren administration, ingen AI-inferens.

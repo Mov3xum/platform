@@ -106,3 +106,92 @@ export function validateNewUserInput(
     }
   };
 }
+
+// ── Administration av BEFINTLIGA användare (roller, lösenord, radering) ─────
+//
+// Ren logik som delas av server-actions i `lib/actions/users.ts` och
+// enhetstesterna. Principer (CLAUDE.md § 10.3 A.5.15–A.5.18):
+// - Ingen privilegieeskalering: bara admin får röra admin-konton eller
+//   tilldela admin-rollen.
+// - Ingen självutlåsning: den inloggade kan inte ta bort sina egna
+//   administrationsroller eller radera sig själv här.
+
+/** Får aktören administrera (ändra roller/lösenord, radera) målanvändaren? */
+export function canManageUser(
+  actorRoles: readonly string[] | undefined,
+  targetRoles: readonly string[] | undefined
+): boolean {
+  if (actorRoles?.includes('admin')) return true;
+  // incubator_lead får hantera alla utom admin-konton.
+  return !(targetRoles ?? []).includes('admin');
+}
+
+export type RolesUpdateResult = { ok: true; value: Role[] } | { ok: false; message: string };
+
+/**
+ * Validerar en ny rolluppsättning för en befintlig användare.
+ * `raw` kan vara en JSON-sträng (formulär) eller en array.
+ */
+export function validateRolesUpdate(
+  raw: unknown,
+  opts: { assignableRoles: Role[]; isSelf: boolean }
+): RolesUpdateResult {
+  let parsed: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { ok: false, message: 'Ogiltigt format på rolldata.' };
+    }
+  }
+  if (!Array.isArray(parsed)) {
+    return { ok: false, message: 'Ogiltigt format på rolldata.' };
+  }
+  const roles = Array.from(
+    new Set(parsed.filter((r): r is string => typeof r === 'string').map((r) => r.trim()))
+  );
+  if (roles.length === 0) {
+    return { ok: false, message: 'Användaren måste ha minst en roll.' };
+  }
+  for (const r of roles) {
+    if (!(ALL_ROLES as string[]).includes(r)) {
+      return { ok: false, message: `Ogiltig roll: ${r}.` };
+    }
+    if (!opts.assignableRoles.includes(r as Role)) {
+      return { ok: false, message: 'Du har inte behörighet att tilldela den rollen.' };
+    }
+  }
+  const value = roles as Role[];
+  if (opts.isSelf && !value.includes('admin') && !value.includes('incubator_lead')) {
+    return {
+      ok: false,
+      message: 'Du kan inte ta bort dina egna administrationsroller — be en annan administratör.'
+    };
+  }
+  return { ok: true, value };
+}
+
+export type PasswordResult = { ok: true; value: string } | { ok: false; message: string };
+
+export function validateNewPassword(raw: unknown): PasswordResult {
+  const password = String(raw ?? '');
+  if (password.length < 8) {
+    return { ok: false, message: 'Lösenordet måste vara minst 8 tecken.' };
+  }
+  if (password.length > 72) {
+    return { ok: false, message: 'Lösenordet är för långt (max 72 tecken).' };
+  }
+  return { ok: true, value: password };
+}
+
+/** Radering kräver att aktören skriver in målanvändarens e-post (skydd mot felklick). */
+export function validateDeleteConfirmation(
+  rawConfirm: unknown,
+  targetEmail: string
+): { ok: true } | { ok: false; message: string } {
+  const confirm = String(rawConfirm ?? '').trim().toLowerCase();
+  if (!confirm || confirm !== targetEmail.trim().toLowerCase()) {
+    return { ok: false, message: 'Skriv användarens e-postadress exakt för att bekräfta raderingen.' };
+  }
+  return { ok: true };
+}
