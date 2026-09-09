@@ -66,6 +66,7 @@ import {
   type NextAnnualWheelItem
 } from '@platform/shared';
 import { Icon } from '@/components/proto/Icon';
+import { FadeScroll } from '@/components/FadeScroll';
 import { NextCaption, Wheel } from './Wheel';
 import {
   CategoryShareBar,
@@ -781,7 +782,7 @@ export function AnnualWheelView({
                 Inga aktiviteter matchar filtret för {year}.
               </p>
             ) : (
-              <div className="max-h-[520px] overflow-y-auto pr-1">
+              <FadeScroll maxHeight={520} className="pr-1">
                 {byMonth
                   .slice(1)
                   .map((monthItems, idx) => ({ monthItems, m: idx + 1 }))
@@ -820,7 +821,7 @@ export function AnnualWheelView({
                       </p>
                     ) : null
                   )}
-              </div>
+              </FadeScroll>
             )}
           </div>
         </section>
