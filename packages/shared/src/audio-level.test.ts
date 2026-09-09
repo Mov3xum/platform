@@ -121,5 +121,6 @@ test('measureWavLevel: tyst WAV klassas tyst, ton gör det inte', () => {
 
 test('formatAudioLevel: dB-etikett utan PII', () => {
   assert.equal(formatAudioLevel({ peak: 0, rms: 0 }), 'peak −∞ dB, rms −∞ dB');
-  assert.equal(formatAudioLevel({ peak: 0.1, rms: 0.01 }), 'peak -20 dB, rms -40 dB');
+  assert.equal(formatAudioLevel({ peak: 0.1, rms: 0.01 }), 'peak −20 dB, rms −40 dB');
+  assert.equal(formatAudioLevel({ peak: 1, rms: 1 }), 'peak 0 dB, rms 0 dB');
 });

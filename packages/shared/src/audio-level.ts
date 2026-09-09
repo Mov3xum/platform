@@ -153,6 +153,7 @@ export function measureWavLevel(bytes: Uint8Array): (AudioLevel & { seconds: num
 
 /** Kort, PII-fri etikett för loggar/UI ("peak −38 dB, rms −61 dB"). */
 export function formatAudioLevel(level: AudioLevel): string {
-  const db = (v: number) => (v <= 0 ? '−∞' : `${Math.round(20 * Math.log10(v))}`);
+  const db = (v: number) =>
+    v <= 0 ? '−∞' : String(Math.round(20 * Math.log10(v))).replace('-', '−');
   return `peak ${db(level.peak)} dB, rms ${db(level.rms)} dB`;
 }

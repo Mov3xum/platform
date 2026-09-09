@@ -353,14 +353,27 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     setSegments((prev) => prev.map((s) => (s.index === index ? { ...s, ...patch } : s)));
   }
 
-  async function uploadSegment(blob: Blob, mime: string, index: number, attempt = 0): Promise<void> {
+  async function uploadSegment(
+    blob: Blob | null,
+    mime: string,
+    index: number,
+    attempt = 0
+  ): Promise<void> {
     const meetingId = meetingIdRef.current;
     if (!meetingId || discardedRef.current) return;
     try {
       const form = new FormData();
       form.append('meetingId', meetingId);
       form.append('segmentIndex', String(index));
-      form.append('audio', new File([blob], `segment-${index}`, { type: mime }));
+      if (blob) {
+        form.append('audio', new File([blob], `segment-${index}`, { type: mime }));
+      } else {
+        // Klienten mätte segmentet som effektivt tyst: registrera det UTAN
+        // ljud (index-kontinuitet för luck-markören) — ingen uppladdning av
+        // ~2,9 MB tystnad, inget Voxtral-anrop. Servern mäter själv när ljud
+        // skickas; klienten är aldrig säkerhetsgränsen.
+        form.append('silent', '1');
+      }
       const res = await fetch('/api/chat/meeting/segment', { method: 'POST', body: form });
       const data = (await res.json().catch(() => ({}))) as {
         text?: string;
@@ -406,6 +419,9 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
       // 16 kHz mono WAV innan uppladdning. Fail-soft: kan klippet inte
       // avkodas skickas originalet, och servern svarar med Mistrals orsak.
       const converted = await convertBlobToWavDetailed(blob);
+      if (converted && isEffectivelySilent(converted.level)) {
+        return uploadSegment(null, VOICE_WAV_MIME, index);
+      }
       return uploadSegment(converted?.wav ?? blob, converted ? VOICE_WAV_MIME : mime, index);
     });
   }

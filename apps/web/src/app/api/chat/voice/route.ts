@@ -112,6 +112,18 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ text: result.text, language: result.language });
   } catch (err) {
     if (err instanceof VoiceError) {
+      // Ett tomt svar (422) nådde ändå Voxtral och kostar — bokför (§ 9.6).
+      if (err.usage && (err.usage.tokensIn > 0 || err.usage.tokensOut > 0)) {
+        const pb = await getServerPb();
+        await logAiUsage(pb, {
+          tenant: user.tenant,
+          userId: user.id,
+          surface: 'dashboard_chat',
+          model: err.model || voiceModel(),
+          tokensIn: err.usage.tokensIn,
+          tokensOut: err.usage.tokensOut
+        });
+      }
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
     // PII-fri logg: aldrig ljudet, aldrig transkriptet.

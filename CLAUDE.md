@@ -4175,10 +4175,15 @@ npm-dependency (§ 10.2).
    § 17.8).
 3. Routen verifierar inloggning + staff-roll, rate-limit (40 anrop/5 min och
    användare) och validerar mime + storlek med den delade helpern.
-4. `transcribeAudio` skickar ljudet till Voxtral (`POST /v1/audio/transcriptions`,
-   `language=sv`) och returnerar texten. Token-utfallet loggas i
-   `ai_usage_events` (surface `dashboard_chat`, modell `voxtral-*`) så
-   `/insights` och `/admin/ai-miljo` (§ 28) räknar med rösten.
+4. Routen mäter först klippets ljudnivå (WAV-PCM, `@platform/shared`
+   audio-level.ts): ett effektivt tyst klipp svaras "Inspelningen var helt
+   tyst" (422) **utan** Voxtral-anrop. Annars skickar `transcribeSpeech`
+   (`lib/ai/voice.ts`) ljudet till Voxtral (`POST /v1/audio/transcriptions`,
+   `language=sv`) och returnerar texten; blir svaret tomt görs ETT omförsök
+   utan språkhint (autodetekt). Token-utfallet loggas i `ai_usage_events`
+   (surface `dashboard_chat`, modell `voxtral-*`) — **även för tomma svar**
+   (Voxtral debiterar ljudingången; `VoiceError.usage` bär förbrukningen) —
+   så `/insights` och `/admin/ai-miljo` (§ 28) räknar med rösten.
 5. Texten hamnar i **chattrutan** — den skickas INTE automatiskt. Användaren
    läser igenom, rättar och trycker skicka själv.
 6. Därefter är det en helt vanlig chatt-turn: agenten planerar, läser data och
@@ -4273,8 +4278,9 @@ INNAN fallbacken används.
   utan granskning skulle ta bort människa-i-loopen precis där agenten kan
   skriva i databasen.
 - Talsyntes (agenten som svarar med röst) är inte i scope.
-- Språket är låst till svenska (`language=sv`) — det höjer träffsäkerheten på
-  domänord markant. Ett språkval per användare kan läggas till senare utan
+- Språket är svenska som default (`language=sv`) — det höjer träffsäkerheten
+  på domänord markant; ger hinten tom text görs ett omförsök med autodetekt
+  (`transcribeSpeech`). Ett språkval per användare kan läggas till senare utan
   brytande ändring.
 - Resultatprofiler för quiz (`result_buckets`) och publicering ställs in i
   modul-admin, inte via chatten.
@@ -4463,7 +4469,10 @@ ALLA operationer, även admin utestängd): `tenant`/`owner` (cascadeDelete),
 `MeetingSegment[] { index, text, at?, speaker? }`, 2 MB),
 `consent_confirmed_at`, `started_at`, `ended_at`. **Denylistad i
 `lib/ai/redaction.ts`** → `query_collection` exponerar den aldrig. Owner-only
-⇒ migration-only (§ 27-precedens). `speaker`-fältet är reserverat från dag 1
+⇒ ingen collection-def i `setup-via-api.mjs` (§ 27-precedens), men
+kollektionens **existens** är ett hårt baseline-invariant i
+`verify-baseline.mjs` (§ 23.4:s compass-precedens) eftersom PB-migrationer
+bara körs när PB-imagen byggs om. `speaker`-fältet är reserverat från dag 1
 för Fas 3 (talarindelning) så framtida diarisering inte kräver
 datamodelländring.
 

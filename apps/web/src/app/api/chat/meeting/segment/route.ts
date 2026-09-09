@@ -80,19 +80,27 @@ export async function POST(request: Request): Promise<Response> {
   const meetingId = String(form.get('meetingId') || '').trim();
   const segmentIndex = Number(form.get('segmentIndex'));
   const entry = form.get('audio');
+  // Klienten mätte segmentet som effektivt tyst och skickar det UTAN ljud —
+  // det registreras som ett tomt segment (index-kontinuiteten bevaras så
+  // luck-markören inte felaktigt sätts) utan Voxtral-anrop. Ett falskt
+  // "tyst" från en klient ger bara ett tomt segment — ingen behörighetsväg.
+  const clientSilent = String(form.get('silent') || '') === '1';
   if (!meetingId) {
     return NextResponse.json({ error: 'meetingId saknas.' }, { status: 400 });
   }
   if (!Number.isInteger(segmentIndex) || segmentIndex < 0 || segmentIndex >= MAX_MEETING_SEGMENTS) {
     return NextResponse.json({ error: 'Ogiltigt segmentindex.' }, { status: 400 });
   }
-  if (!(entry instanceof File) || entry.size === 0) {
+  const hasAudio = entry instanceof File && entry.size > 0;
+  if (!hasAudio && !clientSilent) {
     return NextResponse.json({ error: 'Ingen inspelning skickades.' }, { status: 400 });
   }
-  if (entry.size > MAX_VOICE_BYTES) {
+  if (hasAudio && entry.size > MAX_VOICE_BYTES) {
     return NextResponse.json({ error: 'Segmentet är för stort.' }, { status: 413 });
   }
-  const validation = validateVoiceClip(entry.type, entry.size);
+  const validation = hasAudio
+    ? validateVoiceClip(entry.type, entry.size)
+    : ({ ok: true, mime: 'audio/wav' } as const);
   if (!validation.ok) {
     return NextResponse.json({ error: validation.error }, { status: 400 });
   }
@@ -118,13 +126,15 @@ export async function POST(request: Request): Promise<Response> {
   // Varje anrop räknas mot fönstret — det är kostnaden vi skyddar.
   recordFailure(rateKey, RATE_WINDOW_MS);
 
-  const buffer = Buffer.from(await entry.arrayBuffer());
+  const buffer = hasAudio ? Buffer.from(await entry.arrayBuffer()) : Buffer.alloc(0);
 
   // Ljudnivå (bara mätbar för PCM-WAV — klienten konverterar alltid dit när
   // webbläsaren kan avkoda klippet). null = okänd nivå (annat format).
-  const measured = measureWavLevel(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength));
+  const measured = hasAudio
+    ? measureWavLevel(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength))
+    : null;
   const level: AudioLevel | null = measured ? { peak: measured.peak, rms: measured.rms } : null;
-  const silent = level ? isEffectivelySilent(level) : false;
+  const silent = !hasAudio || (level ? isEffectivelySilent(level) : false);
 
   let text = '';
   let warning: string | undefined;
@@ -151,6 +161,17 @@ export async function POST(request: Request): Promise<Response> {
         // Ingen text trots ljud (eller okänd nivå). Tomt segment så luck-
         // detekteringen inte felmarkerar det som bortfall — men ALDRIG tyst:
         // klienten får en varning och loggen en PII-fri nivåetikett.
+        // Anropen nådde Voxtral och kostar (ljudingången debiteras) → bokför.
+        if (err.usage && (err.usage.tokensIn > 0 || err.usage.tokensOut > 0)) {
+          await logAiUsage(pb, {
+            tenant: user.tenant,
+            userId: user.id,
+            surface: 'dashboard_chat',
+            model: err.model || model,
+            tokensIn: err.usage.tokensIn,
+            tokensOut: err.usage.tokensOut
+          });
+        }
         text = '';
         warning = level
           ? 'Segmentet innehöll ljud men AI-tjänsten kunde inte tolka något tal.'
