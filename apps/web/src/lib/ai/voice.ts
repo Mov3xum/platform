@@ -233,6 +233,35 @@ export async function transcribeAudio(
   throw lastError ?? new VoiceError('Okänt fel vid transkribering.', 502);
 }
 
+/**
+ * Transkriberar TAL: samma som `transcribeAudio`, men om resultatet blir tomt
+ * (422) trots ett språkhint görs ETT nytt försök utan hint (autodetekt).
+ * Skyddar mot att en språkkod modellen inte tolkar som väntat tyst ger tom
+ * text — ett tomt svar kostar nästan inget, så det extra försöket är billigt
+ * och sker bara i det tvetydiga fallet. Kastar 422 vidare om även autodetekt
+ * inte hör någon text (då är klippet med största sannolikhet tyst — anroparen
+ * bör mäta nivån, `@platform/shared` audio-level.ts, innan det anropar).
+ */
+export async function transcribeSpeech(
+  audio: Buffer,
+  mime: string,
+  options: TranscribeOptions = {}
+): Promise<TranscriptionResult> {
+  const language = (options.language ?? 'sv').trim();
+  try {
+    return await transcribeAudio(audio, mime, { language });
+  } catch (err) {
+    if (err instanceof VoiceError && err.status === 422 && language) {
+      console.warn('[voice] tomt transkript med språkhint — försöker autodetekt', {
+        language,
+        model: voiceModel()
+      });
+      return transcribeAudio(audio, mime, { language: '' });
+    }
+    throw err;
+  }
+}
+
 function toVoiceError(status: number, body: string): VoiceError {
   if (status === 429) {
     return new VoiceError(

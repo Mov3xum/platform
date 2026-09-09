@@ -4504,9 +4504,30 @@ segment).
    PB v0.23.4:s tysta regel-nekande** (400/403/404, § 21.3-klassen) — ägar-/
    tenant-checken i koden är den hårda gränsen, fallbacken är robusthet
    (samma mönster som § 18.3/§ 20.5/§ 30.4). Tak: 3 h / 160 segment
-   (art. 15). Tystnad (Voxtral 422) = tomt segment, inte fel. En kraschad flik
-   kostar max ett segment; "Återuppta granskningen"-bannern i `/chatt` öppnar
-   det oavslutade mötet.
+   (art. 15). En kraschad flik kostar max ett segment; "Återuppta
+   granskningen"-bannern i `/chatt` öppnar det oavslutade mötet.
+   **Tomt resultat är aldrig tyst (2026-09).** Incident: mötet slutade som
+   "tomt överallt" — blank live-ruta, tomt transkript, inget protokoll, båda
+   segment-anropen 200 och inget fel — eftersom Voxtrals tomma svar (422)
+   tolkades som "tystnad" och bara renderades som ingenting. Nu mäts
+   segmentets **ljudnivå** (topp/RMS på WAV-PCM, ren + enhetstestad
+   `@platform/shared` audio-level.ts) på BÅDA sidor: (1) klienten visar en
+   **mikrofonmätare** under inspelningen och varnar efter ~6 s helt tyst
+   ingång ("Mikrofonen fångar inget ljud") — en avstängd/fel vald mikrofon
+   syns alltså innan första segmentet ens är uppladdat; (2) servern skickar
+   INTE effektivt tysta segment till Voxtral (`silent: true`, ingen kostnad)
+   och svarar med `warning` när ljud fanns men ingen text kom tillbaka —
+   live-rutan visar "(tyst avsnitt)" respektive orsaken, och granskningen
+   förklarar varför ett transkript blev tomt (tyst mikrofon vs. ljud som
+   inte kunde tolkas). (3) `transcribeSpeech` (`lib/ai/voice.ts`) gör ETT
+   nytt försök **utan språkhint** (autodetekt) när svaret med `language=sv`
+   blir tomt — skydd mot att språkkoden tyst ger tom text; gäller även
+   röstknappen § 31, som dessutom svarar "Inspelningen var helt tyst" utan
+   Voxtral-anrop. Nivåmätningen är rent numerisk (ingen röstidentifiering,
+   § 31.4) och lagras aldrig. Saknas kollektionen på instansen (migrationen
+   inte körd) säger `startMeetingAction` det uttryckligen i stället för PB:s
+   generiska 404, och `verify-baseline.mjs` fäller deployen
+   (`meeting_transcripts` i must-exist-listan).
 4. **Granskning (människa-i-loopen, art. 14):** redigerbart transkript;
    protokollutkastet (sammanfattning/beslut/åtgärdspunkter) **genereras
    automatiskt när granskningen öppnas** (även vid återupptagen granskning;

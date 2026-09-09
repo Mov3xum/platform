@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { transcribeAudio, VoiceError, voiceModel } from '@/lib/ai/voice';
+import { transcribeSpeech, VoiceError, voiceModel } from '@/lib/ai/voice';
 import { logAiUsage } from '@/lib/ai/usage';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
@@ -13,8 +13,12 @@ import {
 import {
   MAX_MEETING_SEGMENTS,
   MAX_VOICE_BYTES,
+  formatAudioLevel,
+  isEffectivelySilent,
+  measureWavLevel,
   normalizeMeetingSegments,
   validateVoiceClip,
+  type AudioLevel,
   type MeetingSegment
 } from '@platform/shared';
 import type { Role } from '@platform/shared';
@@ -32,6 +36,12 @@ import type { Role } from '@platform/shared';
  *
  * Personnummer saneras INNAN texten lagras (§ 15.6-regexen) — deltagare säger
  * personnummer högt i möten.
+ *
+ * Tomt resultat är ALDRIG tyst: segmentets ljudnivå mäts (WAV-PCM,
+ * `@platform/shared` audio-level.ts) så svaret kan säga om segmentet var
+ * TYST (`silent: true` — Voxtral anropas inte alls, ingen kostnad) eller om
+ * det fanns ljud som AI-tjänsten inte kunde tolka (`warning`). Utan den
+ * skillnaden slutar en avstängd mikrofon som ett oförklarat tomt transkript.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -110,34 +120,57 @@ export async function POST(request: Request): Promise<Response> {
 
   const buffer = Buffer.from(await entry.arrayBuffer());
 
+  // Ljudnivå (bara mätbar för PCM-WAV — klienten konverterar alltid dit när
+  // webbläsaren kan avkoda klippet). null = okänd nivå (annat format).
+  const measured = measureWavLevel(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength));
+  const level: AudioLevel | null = measured ? { peak: measured.peak, rms: measured.rms } : null;
+  const silent = level ? isEffectivelySilent(level) : false;
+
   let text = '';
+  let warning: string | undefined;
   let model = voiceModel();
-  try {
-    const result = await transcribeAudio(buffer, validation.mime);
-    text = sanitizePersonnummer(result.text);
-    model = result.model || model;
-    await logAiUsage(pb, {
-      tenant: user.tenant,
-      userId: user.id,
-      surface: 'dashboard_chat',
-      model,
-      tokensIn: result.usage.tokensIn,
-      tokensOut: result.usage.tokensOut
-    });
-  } catch (err) {
-    // Tystnad i ett mötessegment är normalt (ingen pratade på 90 s) — det är
-    // INTE ett fel: registrera ett tomt segment så luck-detekteringen inte
-    // felmarkerar det som bortfall.
-    if (err instanceof VoiceError && err.status === 422) {
-      text = '';
-    } else if (err instanceof VoiceError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
-    } else {
-      console.error('[meeting-segment] oväntat fel', {
+  if (silent) {
+    // Effektivt tyst (avstängd/frånkopplad mikrofon eller ingen som pratar):
+    // skicka inte tystnad till Voxtral — tomt segment, ingen kostnad.
+    text = '';
+  } else {
+    try {
+      const result = await transcribeSpeech(buffer, validation.mime);
+      text = sanitizePersonnummer(result.text);
+      model = result.model || model;
+      await logAiUsage(pb, {
+        tenant: user.tenant,
         userId: user.id,
-        error: err instanceof Error ? err.message : 'okänt'
+        surface: 'dashboard_chat',
+        model,
+        tokensIn: result.usage.tokensIn,
+        tokensOut: result.usage.tokensOut
       });
-      return NextResponse.json({ error: 'Kunde inte transkribera segmentet.' }, { status: 500 });
+    } catch (err) {
+      if (err instanceof VoiceError && err.status === 422) {
+        // Ingen text trots ljud (eller okänd nivå). Tomt segment så luck-
+        // detekteringen inte felmarkerar det som bortfall — men ALDRIG tyst:
+        // klienten får en varning och loggen en PII-fri nivåetikett.
+        text = '';
+        warning = level
+          ? 'Segmentet innehöll ljud men AI-tjänsten kunde inte tolka något tal.'
+          : 'AI-tjänsten hörde ingen text i segmentet.';
+        console.warn('[meeting-segment] tomt transkript', {
+          userId: user.id,
+          segmentIndex,
+          mime: validation.mime,
+          seconds: measured ? Math.round(measured.seconds) : undefined,
+          level: level ? formatAudioLevel(level) : 'okänd'
+        });
+      } else if (err instanceof VoiceError) {
+        return NextResponse.json({ error: err.message }, { status: err.status });
+      } else {
+        console.error('[meeting-segment] oväntat fel', {
+          userId: user.id,
+          error: err instanceof Error ? err.message : 'okänt'
+        });
+        return NextResponse.json({ error: 'Kunde inte transkribera segmentet.' }, { status: 500 });
+      }
     }
   }
 
@@ -163,5 +196,5 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: 'Kunde inte spara segmentet.' }, { status: 500 });
   }
 
-  return NextResponse.json({ text, segmentIndex });
+  return NextResponse.json({ text, segmentIndex, silent, warning, level });
 }
