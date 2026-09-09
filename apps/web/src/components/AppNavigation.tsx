@@ -24,7 +24,7 @@ import { Logo } from './Logo';
 
 type NavProps = {
   roles: Role[];
-  disabledModules?: string[];
+  enabledModules?: string[];
   assignedWorkshopCount?: number;
 };
 
@@ -49,13 +49,13 @@ function isRouteActive(currentPath: string, route: string) {
 
 function NavLinks({
   roles,
-  disabledModules,
+  enabledModules,
   assignedWorkshopCount = 0,
   closeOnNavigate = false
 }: NavProps & { closeOnNavigate?: boolean }) {
   const pathname = usePathname();
   const modules = coreModules.filter((module) =>
-    canAccessModuleForUser(roles, module.id, disabledModules)
+    canAccessModuleForUser(roles, module.id, enabledModules)
   );
 
   return (
@@ -112,13 +112,13 @@ function NavLinks({
   );
 }
 
-export function DesktopNavigation({ roles, disabledModules, assignedWorkshopCount = 0 }: NavProps) {
+export function DesktopNavigation({ roles, enabledModules, assignedWorkshopCount = 0 }: NavProps) {
   return (
-    <NavLinks roles={roles} disabledModules={disabledModules} assignedWorkshopCount={assignedWorkshopCount} />
+    <NavLinks roles={roles} enabledModules={enabledModules} assignedWorkshopCount={assignedWorkshopCount} />
   );
 }
 
-export function MobileNavigation({ roles, disabledModules, assignedWorkshopCount = 0 }: NavProps) {
+export function MobileNavigation({ roles, enabledModules, assignedWorkshopCount = 0 }: NavProps) {
   return (
     <Dialog.Root>
       <Dialog.Trigger asChild>
@@ -158,7 +158,7 @@ export function MobileNavigation({ roles, disabledModules, assignedWorkshopCount
               <nav className="flex-1">
                 <NavLinks
                   roles={roles}
-                  disabledModules={disabledModules}
+                  enabledModules={enabledModules}
                   assignedWorkshopCount={assignedWorkshopCount}
                   closeOnNavigate
                 />

@@ -39,18 +39,8 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     slug: 'anvandare',
     href: '/installningar/anvandare',
     title: 'Användare',
-    description: 'Se och administrera alla användare — roller, bolagskoppling, åtkomst och lösenord.',
+    description: 'Se och administrera alla användare — roller, bolagskoppling, vilka moduler som visas och lösenord.',
     icon: 'people',
-    group: 'access',
-    roles: STAFF_ADMIN
-  },
-  {
-    id: 'moduler',
-    slug: 'moduler',
-    href: '/installningar/moduler',
-    title: 'Moduler',
-    description: 'Slå på och av vilka delar av plattformen som är aktiva för din organisation.',
-    icon: 'menu',
     group: 'access',
     roles: STAFF_ADMIN
   },

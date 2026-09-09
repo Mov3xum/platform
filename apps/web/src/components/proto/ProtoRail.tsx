@@ -24,7 +24,7 @@ interface ProtoRailProps {
     tenantLogoLightUrl?: string;
     tenantLogoDarkUrl?: string;
     roles: Role[];
-    disabledModules?: string[];
+    enabledModules?: string[];
   };
   counts?: Record<string, number>;
   switchableStartups?: SwitchableStartup[];
@@ -66,7 +66,7 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
           // Ren bolagsmedlem → dedikerad, kortare rail (CLAUDE.md § 22).
           <div>
             {MEMBER_RAIL.filter((item) =>
-              canAccessModuleForUser(user.roles, item.id, user.disabledModules)
+              canAccessModuleForUser(user.roles, item.id, user.enabledModules)
             ).map((item) => (
               <ModuleNavItem
                 key={item.id}
@@ -84,7 +84,7 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
               .filter(
                 (m) =>
                   m !== undefined &&
-                  canAccessModuleForUser(user.roles, m.id, user.disabledModules)
+                  canAccessModuleForUser(user.roles, m.id, user.enabledModules)
               );
 
           if (groupModules.length === 0) return null;

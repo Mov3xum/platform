@@ -141,6 +141,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
           avatar: m.avatar,
           linked_startups: m.linked_startups,
           disabled_modules: m.disabled_modules,
+          enabled_modules: m.enabled_modules,
           expand: expandTenant
             ? { tenant: { id: expandTenant.id, name: expandTenant.name, slug: expandTenant.slug } }
             : undefined

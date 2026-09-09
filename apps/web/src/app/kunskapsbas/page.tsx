@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function KunskapsbasPage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'kunskapsbas', user.disabledModules)) {
+  if (!canAccessModuleForUser(user.roles, 'kunskapsbas', user.enabledModules)) {
     redirect('/chatt');
   }
   const files = await listOrgKnowledgeAction();

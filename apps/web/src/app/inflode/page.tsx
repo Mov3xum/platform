@@ -33,7 +33,7 @@ export default async function InflodeDashboardPage({
   const user = await requireUser();
   // Bolagsisolering (CLAUDE.md § 21): inflöde/leads är tenant-bred och får
   // aldrig nås av en ren startup_member.
-  if (!canAccessModuleForUser(user.roles, 'inflode', user.disabledModules)) {
+  if (!canAccessModuleForUser(user.roles, 'inflode', user.enabledModules)) {
     redirect('/dashboard');
   }
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);

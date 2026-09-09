@@ -155,7 +155,7 @@ export default async function HemPage() {
   // Bolagsmedlemmens hemvy är "Min översikt" (§ 22) — inlägg med audience=all
   // visas där.
   if (isPureStartupMember(user.roles)) redirect('/min-oversikt');
-  if (!canAccessModuleForUser(user.roles, 'hem', user.disabledModules)) redirect('/chatt');
+  if (!canAccessModuleForUser(user.roles, 'hem', user.enabledModules)) redirect('/chatt');
 
   const pb = await getServerPb();
   const now = new Date();
@@ -284,7 +284,7 @@ export default async function HemPage() {
     { id: 'education', label: 'Utbildning', icon: 'cap' },
     { id: 'kunskapsbas', label: 'Kunskapsbas', icon: 'doc' }
   ]
-    .filter((s) => canAccessModuleForUser(user.roles, s.id, user.disabledModules))
+    .filter((s) => canAccessModuleForUser(user.roles, s.id, user.enabledModules))
     .map((s) => ({ ...s, href: coreModules.find((m) => m.id === s.id)?.route ?? '/' }));
 
   return (

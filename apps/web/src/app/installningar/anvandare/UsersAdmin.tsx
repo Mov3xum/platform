@@ -1,18 +1,18 @@
 'use client';
 
 import { useActionState, useMemo, useState, type ReactNode } from 'react';
-import { ALL_ROLES, type Role } from '@platform/shared';
-import { Avatar, Chip, Toggle } from '@/components/proto';
+import { ALL_ROLES, defaultModulesForRoles, type Role } from '@platform/shared';
+import { Avatar, Chip } from '@/components/proto';
 import { Icon } from '@/components/proto/Icon';
 import {
   deleteUserAction,
   resetUserPasswordAction,
+  updateUserModulesAction,
   updateUserRolesAction,
   type UpdateUserState
 } from '@/lib/actions/users';
-import { saveUserModuleTogglesAction, type SaveModuleTogglesState } from '@/lib/actions/settings';
-import { canManageUser, ROLE_LABELS } from '@/lib/users/validate';
-import type { ModuleToggleItem } from '../AdminToggles';
+import { canManageUser, ROLE_LABELS, toggleableModulesForRoles } from '@/lib/users/validate';
+import { ModulePicker } from './ModulePicker';
 import { UserForm, type StartupOption } from './UserForm';
 import { UserStartupLink } from './UserStartupLink';
 
@@ -23,22 +23,20 @@ export interface ManagedUser {
   roles: Role[];
   verified: boolean;
   linkedStartups: { id: string; name: string }[];
-  disabledModules: string[];
+  /** Effektiv allow-lista över moduler i sidofältet (§ 36.3). */
+  enabledModules: string[];
   createdAt: string;
 }
 
 interface UsersAdminProps {
   users: ManagedUser[];
   startups: StartupOption[];
-  /** Tom lista = inloggad är inte admin → modulåtkomst visas inte. */
-  modules: ModuleToggleItem[];
   assignableRoles: Role[];
   actorId: string;
   isAdmin: boolean;
 }
 
 const initialUpdate: UpdateUserState = { status: 'idle' };
-const initialToggles: SaveModuleTogglesState = {};
 
 const ROLE_CHIP: Record<Role, 'purple' | 'cyan' | 'green' | 'yellow' | 'brown' | 'default' | 'copper'> = {
   admin: 'purple',
@@ -195,49 +193,39 @@ function RolesForm({
   );
 }
 
-/* ── Modulåtkomst (admin) ────────────────────────────────────────────── */
+/* ── Moduler i sidofältet (§ 36.3) ───────────────────────────────────── */
 
-function ModulesForm({ user, modules }: { user: ManagedUser; modules: ModuleToggleItem[] }) {
-  const [state, setState] = useState<Record<string, boolean>>(() =>
-    modules.reduce<Record<string, boolean>>((acc, m) => {
-      acc[m.id] = !user.disabledModules.includes(m.id);
-      return acc;
-    }, {})
+function ModulesForm({ user }: { user: ManagedUser }) {
+  const modules = useMemo(() => toggleableModulesForRoles(user.roles), [user.roles]);
+  const defaults = useMemo(
+    () => defaultModulesForRoles(user.roles).filter((id) => modules.some((m) => m.id === id)),
+    [user.roles, modules]
   );
-  const [result, formAction, pending] = useActionState(saveUserModuleTogglesAction, initialToggles);
-  const payload = useMemo(
-    () => JSON.stringify(modules.filter((m) => !state[m.id]).map((m) => m.id)),
-    [modules, state]
+  const [selected, setSelected] = useState<string[]>(() =>
+    user.enabledModules.filter((id) => modules.some((m) => m.id === id))
   );
-  const offCount = modules.filter((m) => !state[m.id]).length;
+  const [state, formAction, pending] = useActionState(updateUserModulesAction, initialUpdate);
+  const payload = useMemo(() => JSON.stringify(selected), [selected]);
+  const dirty = useMemo(
+    () =>
+      selected.length !== user.enabledModules.length ||
+      selected.some((id) => !user.enabledModules.includes(id)),
+    [selected, user.enabledModules]
+  );
 
   return (
     <Panel
-      title="Modulåtkomst"
-      description={
-        offCount === 0
-          ? 'Användaren ser alla moduler som är aktiva för organisationen.'
-          : `${offCount} modul${offCount === 1 ? '' : 'er'} dold${offCount === 1 ? '' : 'a'} för den här användaren.`
-      }
+      title="Moduler i sidofältet"
+      description="Bocka i vad personen ska se i menyn. Rollens standard är förvald; lägg till eller ta bort fritt. Rollen sätter fortfarande den yttre gränsen."
     >
       <form action={formAction} className="space-y-3">
         <input type="hidden" name="user_id" value={user.id} />
-        <input type="hidden" name="disabled_modules" value={payload} />
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {modules.map((m) => (
-            <label key={m.id} className="flex items-center gap-2 text-[12.5px] text-foreground">
-              <Toggle checked={state[m.id]} onChange={(next) => setState((s) => ({ ...s, [m.id]: next }))} />
-              <span>{m.name}</span>
-            </label>
-          ))}
-        </div>
+        <input type="hidden" name="enabled_modules" value={payload} />
+        <ModulePicker modules={modules} selected={selected} defaults={defaults} onChange={setSelected} />
         <div className="flex items-center justify-end gap-3">
-          {result?.error && <span className="text-[12px] text-movexum-morkorange">{result.error}</span>}
-          {result?.success && !pending && (
-            <span className="text-[12px] text-movexum-morkgron dark:text-movexum-gron">Sparat!</span>
-          )}
-          <button type="submit" className="mx-btn mx-primary mx-sm" disabled={pending}>
-            {pending ? 'Sparar…' : 'Spara åtkomst'}
+          <StatusLine state={state} />
+          <button type="submit" className="mx-btn mx-primary mx-sm" disabled={pending || !dirty}>
+            {pending ? 'Sparar…' : 'Spara moduler'}
           </button>
         </div>
       </form>
@@ -337,7 +325,6 @@ function UserRow({
   open,
   onToggle,
   startups,
-  modules,
   assignableRoles,
   actorId,
   isAdmin
@@ -346,7 +333,6 @@ function UserRow({
   open: boolean;
   onToggle: () => void;
   startups: StartupOption[];
-  modules: ModuleToggleItem[];
   assignableRoles: Role[];
   actorId: string;
   isAdmin: boolean;
@@ -436,7 +422,7 @@ function UserRow({
                 </Panel>
               )}
 
-              {isAdmin && modules.length > 0 && <ModulesForm user={user} modules={modules} />}
+              <ModulesForm user={user} />
 
               {!isSelf && (
                 <div className="grid gap-3 lg:grid-cols-2">
@@ -457,7 +443,6 @@ function UserRow({
 export function UsersAdmin({
   users,
   startups,
-  modules,
   assignableRoles,
   actorId,
   isAdmin
@@ -576,7 +561,6 @@ export function UsersAdmin({
                 open={openId === u.id}
                 onToggle={() => setOpenId((cur) => (cur === u.id ? null : u.id))}
                 startups={startups}
-                modules={modules}
                 assignableRoles={assignableRoles}
                 actorId={actorId}
                 isAdmin={isAdmin}

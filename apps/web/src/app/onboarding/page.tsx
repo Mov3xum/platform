@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function OnboardingPage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'onboarding', user.disabledModules)) {
+  if (!canAccessModuleForUser(user.roles, 'onboarding', user.enabledModules)) {
     redirect('/dashboard');
   }
 

@@ -81,7 +81,7 @@ export default async function AktivitetPage({
 }) {
   const { kind } = await searchParams;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'activity_feed', user.disabledModules)) redirect('/chatt');
+  if (!canAccessModuleForUser(user.roles, 'activity_feed', user.enabledModules)) redirect('/chatt');
   const pb = await getServerPb();
 
   const filterParts: string[] = [];

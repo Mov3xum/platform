@@ -3,16 +3,9 @@
 import PocketBase from 'pocketbase';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
-import { getSuperuserPb as getSharedSuperuserPb } from '@/lib/integrations/credentials';
 import { hasRole } from '@/lib/rbac';
-import { coreModules } from '@platform/shared';
 import { revalidatePath } from 'next/cache';
-import { HIDDEN_MODULE_IDS, MAX_TENANT_LOGO_BYTES } from '@/lib/settings-constants';
-
-export type SaveModuleTogglesState = {
-  error?: string;
-  success?: boolean;
-};
+import { MAX_TENANT_LOGO_BYTES } from '@/lib/settings-constants';
 
 export type UploadTenantLogoState = {
   error?: string;
@@ -25,10 +18,6 @@ export type SaveAiBudgetState = {
 };
 
 const MAX_AI_BUDGET_USD = 1000000;
-
-const ALLOWED_MODULE_IDS = new Set(
-  coreModules.filter((m) => !HIDDEN_MODULE_IDS.includes(m.id)).map((m) => m.id)
-);
 
 const PB_URL = getServerPbUrl();
 
@@ -66,156 +55,6 @@ async function getSuperuserPb(): Promise<PocketBase | null> {
     });
     return null;
   }
-}
-
-/**
- * Sparar listan av avaktiverade moduler för inloggad användares tenant.
- * Kräver admin- eller incubator_lead-roll.
- */
-export async function saveModuleTogglesAction(
-  _prev: SaveModuleTogglesState,
-  formData: FormData
-): Promise<SaveModuleTogglesState> {
-  const user = await requireUser();
-  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
-    return { error: 'Åtkomst nekad.' };
-  }
-
-  const raw = formData.get('disabled_modules');
-  let disabledModules: string[] = [];
-  try {
-    const parsed = raw ? (JSON.parse(String(raw)) as unknown) : [];
-    if (!Array.isArray(parsed)) {
-      return { error: 'Ogiltigt format på moduldata.' };
-    }
-    disabledModules = parsed
-      .filter((v): v is string => typeof v === 'string')
-      .filter((id) => ALLOWED_MODULE_IDS.has(id));
-  } catch (err) {
-    console.error('[settings] saveModuleToggles parse failed', {
-      tenantId: user.tenant,
-      error: err
-    });
-    return { error: 'Ogiltigt format på moduldata.' };
-  }
-
-  const pb = await getServerPb();
-  try {
-    await pb.collection('tenants').update(user.tenant, {
-      disabled_modules: disabledModules
-    });
-  } catch (err) {
-    if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
-      console.error('[settings] saveModuleToggles failed', { tenantId: user.tenant });
-      return { error: 'Kunde inte spara inställningar. Försök igen.' };
-    }
-
-    const superuserPb = await getSuperuserPb();
-    if (!superuserPb) {
-      console.error('[settings] saveModuleToggles failed', { tenantId: user.tenant });
-      return { error: 'Kunde inte spara inställningar. Försök igen.' };
-    }
-
-    try {
-      await superuserPb.collection('tenants').update(user.tenant, {
-        disabled_modules: disabledModules
-      });
-    } catch {
-      console.error('[settings] saveModuleToggles failed (fallback)', { tenantId: user.tenant });
-      return { error: 'Kunde inte spara inställningar. Försök igen.' };
-    }
-  }
-
-  revalidatePath('/', 'layout');
-
-  return { success: true };
-}
-
-/**
- * Sparar användarspecifika avaktiverade moduler (Inställningar → Användare).
- *
- * `users.updateRule` är `@request.auth.id = id` (migration 1700000002), dvs.
- * en användare får bara uppdatera sig själv. En admin som sparar en ANNAN
- * användares modulåtkomst med sin egen token nekas därför tyst av PB (404)
- * — "Kunde inte spara användarinställningar". Skrivningen går därför via
- * superuser, exakt som `updateUserRolesAction` (lib/actions/users.ts):
- * RBAC (admin) + tenant-korsverifiering INNAN skrivningen är säkerhetsgränsen.
- */
-export async function saveUserModuleTogglesAction(
-  _prev: SaveModuleTogglesState,
-  formData: FormData
-): Promise<SaveModuleTogglesState> {
-  const user = await requireUser();
-  if (!hasRole(user.roles, ['admin'])) {
-    return { error: 'Endast admin kan uppdatera användarspecifika moduler.' };
-  }
-
-  const userId = String(formData.get('user_id') || '').trim();
-  if (!userId) return { error: 'Saknar användar-ID.' };
-
-  const raw = formData.get('disabled_modules');
-  let disabledModules: string[] = [];
-  try {
-    const parsed = raw ? (JSON.parse(String(raw)) as unknown) : [];
-    if (!Array.isArray(parsed)) {
-      return { error: 'Ogiltigt format på moduldata.' };
-    }
-    disabledModules = parsed
-      .filter((v): v is string => typeof v === 'string')
-      .filter((id) => ALLOWED_MODULE_IDS.has(id));
-  } catch (err) {
-    console.error('[settings] saveUserModuleToggles parse failed', { userId, error: err });
-    return { error: 'Ogiltigt format på moduldata.' };
-  }
-
-  const suResult = await getSharedSuperuserPb();
-  if (!suResult.ok) {
-    console.error('[settings] saveUserModuleToggles: superuser unavailable', {
-      reason: suResult.reason
-    });
-    return {
-      error:
-        suResult.reason === 'missing_credentials'
-          ? 'Serverfel: superuser-credentials saknas. Kontakta administratören.'
-          : 'Serverfel: kunde inte autentisera superuser.'
-    };
-  }
-  const pb = suResult.pb;
-
-  // Tenant-isolation: målanvändaren läses via superuser (users.viewRule kan
-  // också nekas tyst, § 21.3) och korsverifieras mot inloggad admins tenant
-  // INNAN skrivningen.
-  try {
-    const target = await pb.collection('users').getOne<{ tenant?: string }>(userId, {
-      fields: 'id,tenant'
-    });
-    if (!target.tenant || String(target.tenant) !== user.tenant) {
-      return { error: 'Kan bara uppdatera användare i din tenant.' };
-    }
-  } catch (err) {
-    const status = (err as { status?: number }).status;
-    console.error('[settings] saveUserModuleToggles: target lookup failed', { userId, status });
-    return { error: 'Användaren kunde inte hittas.' };
-  }
-
-  try {
-    await pb.collection('users').update(userId, {
-      disabled_modules: disabledModules
-    });
-  } catch (err) {
-    const status = (err as { status?: number }).status;
-    console.error('[settings] saveUserModuleToggles failed', {
-      userId,
-      tenantId: user.tenant,
-      status
-    });
-    return { error: 'Kunde inte spara användarinställningar. Försök igen.' };
-  }
-
-  revalidatePath('/', 'layout');
-  revalidatePath('/installningar/anvandare');
-
-  return { success: true };
 }
 
 /**
