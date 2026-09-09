@@ -2718,11 +2718,19 @@ bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
 öppnar en meny med **Mitt konto** och **Logga ut**. Tidigare var raden en ren
 `<div>` där bara ett litet kugghjul länkade till `/konto` — ett klick på det
 egna namnet gjorde ingenting, och utloggningen låg begravd under två formulär
-på `/konto`. Utloggningen är ett `<form action={logoutAction}>` (server
-action), inte en onClick-fetch: cookien rensas server-side precis som förut och
-knappen fungerar även innan JS hunnit hydrera. `Navbar`/`LogoutButton` renderas
-bara för UTLOGGADE besökare, så railens meny är den enda utloggningsvägen för
-en inloggad användare.
+på `/konto`. **Utloggningen är en vanlig formulär-POST (`method="post"`) mot
+route-handlern `/api/auth/logout`** (`LOGOUT_PATH` i `lib/auth-paths.ts`) —
+INTE en server action: handlern rensar cookien och svarar 303 → `/login`, dvs.
+en hård navigering så root-layouten läser om cookien (samma mönster som
+inloggningen via `/api/auth/login`). Knappen fungerar även innan JS hunnit
+hydrera. Den tidigare server-actionen (`logoutAction`) är borttagen: railen
+ligger i root-layouten UTANFÖR sidans `error.tsx`-gräns, så varje fel i
+action-rundturen (gammal flik mot ny deploy → "Failed to find Server Action",
+icke-RSC-svar från proxyn) slog ut hela sidan i den globala felvyn "Något gick
+fel" medan användaren förblev inloggad (staging 2026-09). Sökvägen är publik i
+middleware:n så utloggning fungerar även med utgången cookie. `Navbar`/
+`LogoutButton` renderas bara för UTLOGGADE besökare, så railens meny är den
+enda utloggningsvägen för en inloggad användare.
 
 - `isPureStartupMember` = har `startup_member` men ingen
   staff-/observer-roll. Multi-roll (t.ex. coach + startup_member) behåller

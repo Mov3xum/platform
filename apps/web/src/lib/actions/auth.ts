@@ -195,14 +195,6 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   }
 }
 
-export async function logoutAction(): Promise<void> {
-  const store = await cookies();
-  store.delete(AUTH_COOKIE);
-  // Purge the cached authenticated root layout so the sidebar/AppShell is dropped.
-  revalidatePath('/', 'layout');
-  redirect('/login');
-}
-
 export async function requestPasswordResetAction(
   _prev: ResetPasswordState,
   formData: FormData
