@@ -10,6 +10,7 @@ import {
   assignableRolesFor,
   canManageUser,
   ROLE_LABELS,
+  enabledModulesAfterRoleChange,
   validateDeleteConfirmation,
   validateEnabledModules,
   validateNewPassword,
@@ -118,8 +119,9 @@ export async function createUserAction(
   }
 
   // 5. Skapa verifierad användare med vald roll.
+  let createdId = '';
   try {
-    await pb.collection('users').create({
+    const created = await pb.collection('users').create<{ id: string }>({
       email,
       password,
       passwordConfirm: password,
@@ -130,6 +132,7 @@ export async function createUserAction(
       linked_startups: linkedStartups,
       enabled_modules: modules.value
     });
+    createdId = created.id;
   } catch (err: unknown) {
     const e = err as PbError;
     if (e.status === 400) {
@@ -154,16 +157,45 @@ export async function createUserAction(
   revalidatePath('/installningar/anvandare');
   revalidatePath('/installningar');
 
+  // Schema-drift (§ 36.3): kontot finns, men modulvalet kan ha släppts tyst.
+  let modulesNote = '';
+  if (createdId && !(await enabledModulesFieldPresent(pb, createdId))) {
+    console.error('[createUser] enabled_modules missing in schema — migration 1700000144 not applied');
+    modulesNote = ` OBS: ${MODULES_SCHEMA_HINT}`;
+  }
+
   const roleLabel = ROLE_LABELS[role];
   return {
     status: 'ok',
-    message: startupName
-      ? `Användaren ${email} skapades som ${roleLabel} och länkades till ${startupName}.`
-      : `Användaren ${email} skapades som ${roleLabel}.`,
+    message:
+      (startupName
+        ? `Användaren ${email} skapades som ${roleLabel} och länkades till ${startupName}.`
+        : `Användaren ${email} skapades som ${roleLabel}.`) + modulesNote,
     createdEmail: email,
     startupName
   };
 }
+
+/**
+ * PocketBase släpper okända fält TYST vid create/update. Saknar instansen
+ * migration 1700000144 (`users.enabled_modules`) skulle en sparning annars
+ * rapportera "sparat" utan att något lagrats (CLAUDE.md § 24.4/§ 30.4-
+ * invarianten: aldrig tyst lyckad no-op). Läser tillbaka posten och svarar
+ * `false` om fältet inte finns i schemat.
+ */
+async function enabledModulesFieldPresent(pb: PocketBase, userId: string): Promise<boolean> {
+  try {
+    const rec = await pb
+      .collection('users')
+      .getOne<Record<string, unknown>>(userId, { fields: 'id,enabled_modules' });
+    return Object.prototype.hasOwnProperty.call(rec, 'enabled_modules');
+  } catch {
+    return false;
+  }
+}
+
+const MODULES_SCHEMA_HINT =
+  'Modulvalet kunde inte sparas: fältet users.enabled_modules saknas i PocketBase-schemat. Kör migration 1700000144 (eller setup-via-api.mjs) och försök igen.';
 
 // Koppla en BEFINTLIG användare till ett bolag (eller ta bort kopplingen).
 //
@@ -348,8 +380,26 @@ export async function updateUserRolesAction(
   });
   if (!validated.ok) return { status: 'error', message: validated.message };
 
+  // Moduler i sidofältet följer med rollbytet (§ 36.3): personens val behålls,
+  // den nya rolluppsättningens standard läggs till och moduler de nya rollerna
+  // inte tillåter släpps — en befordran ger aldrig en krympt meny. En aldrig
+  // justerad lista (null) lämnas orörd (den följer rollen automatiskt).
+  let storedModules: unknown = null;
   try {
-    await loaded.pb.collection('users').update(userId, { roles: validated.value });
+    const cur = await loaded.pb
+      .collection('users')
+      .getOne<{ enabled_modules?: unknown }>(userId, { fields: 'id,enabled_modules' });
+    storedModules = cur.enabled_modules ?? null;
+  } catch {
+    storedModules = null;
+  }
+  const nextModules = enabledModulesAfterRoleChange(storedModules, validated.value);
+
+  try {
+    await loaded.pb.collection('users').update(userId, {
+      roles: validated.value,
+      ...(nextModules ? { enabled_modules: nextModules } : {})
+    });
   } catch (err: unknown) {
     const e = err as PbError;
     console.error('[updateUserRoles] failed', { status: e.status });
@@ -390,6 +440,10 @@ export async function updateUserModulesAction(
     const e = err as PbError;
     console.error('[updateUserModules] failed', { status: e.status });
     return { status: 'error', message: 'Kunde inte spara modulerna. Försök igen.' };
+  }
+  if (!(await enabledModulesFieldPresent(loaded.pb, userId))) {
+    console.error('[updateUserModules] enabled_modules missing in schema — migration 1700000144 not applied');
+    return { status: 'error', message: MODULES_SCHEMA_HINT };
   }
 
   revalidatePath('/installningar/anvandare');

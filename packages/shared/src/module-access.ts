@@ -17,34 +17,37 @@
 import type { Role } from './index';
 
 /**
- * Standardmoduler per roll — det som är ibockat när ett konto skapas.
- * Flera roller ⇒ unionen av rollernas standard.
+ * Standardmoduler per roll — det som är FÖRBOCKAT när ett konto skapas (och
+ * det "Återställ till rollens standard" återgår till). Flera roller ⇒ unionen.
+ * Befintliga konton utan lagrad lista styrs INTE av den här listan (se
+ * `resolveEnabledModules`) — de behåller allt rollen tillåter.
  */
 export const DEFAULT_MODULES_BY_ROLE: Record<Role, readonly string[]> = {
   admin: [
     'idag', 'inkorg', 'pagaende', 'arshjul', 'filer', 'uppdrag', 'inflode',
     'startups', 'de_minimis', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
-    'integrationer', 'min_profil'
+    'integrationer', 'min_profil', 'mina_aktiviteter'
   ],
   incubator_lead: [
     'idag', 'inkorg', 'pagaende', 'arshjul', 'filer', 'uppdrag', 'inflode',
     'startups', 'de_minimis', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
-    'integrationer', 'min_profil'
+    'integrationer', 'min_profil', 'mina_aktiviteter'
   ],
   coach: [
-    'idag', 'inkorg', 'pagaende', 'arshjul', 'filer', 'uppdrag', 'inflode',
-    'startups', 'events', 'education', 'agenter', 'kunskapsbas', 'min_profil'
+    'idag', 'inkorg', 'mina_aktiviteter', 'pagaende', 'arshjul', 'filer',
+    'uppdrag', 'inflode', 'startups', 'de_minimis', 'events', 'education',
+    'agenter', 'kunskapsbas', 'min_profil'
   ],
   mentor: [
-    'idag', 'inkorg', 'pagaende', 'filer', 'uppdrag', 'startups', 'education',
-    'agenter', 'min_profil'
+    'idag', 'inkorg', 'mina_aktiviteter', 'pagaende', 'filer', 'uppdrag',
+    'startups', 'de_minimis', 'education', 'agenter', 'kunskapsbas', 'min_profil'
   ],
-  partner: ['idag', 'inkorg', 'filer', 'uppdrag', 'community', 'min_profil'],
+  partner: ['idag', 'inkorg', 'filer', 'uppdrag', 'investerare', 'community', 'min_profil'],
   observer: [
-    'idag', 'inkorg', 'pagaende', 'arshjul', 'filer', 'startups', 'events',
-    'community'
+    'idag', 'inkorg', 'mina_aktiviteter', 'pagaende', 'arshjul', 'filer',
+    'startups', 'de_minimis', 'events', 'community'
   ],
   startup_member: ['min_oversikt', 'mina_aktiviteter', 'filer', 'de_minimis', 'community']
 };
@@ -96,13 +99,20 @@ export function defaultModulesForRoles(roles: readonly Role[] | undefined): stri
  *   (okända/otogglebara id:n filtreras bort). Tom array är ett giltigt val
  *   ("inga extra moduler").
  * - `stored` saknas (konto skapat före migration 1700000144, eller aldrig
- *   justerat) ⇒ rollens standard MINUS ev. legacy `disabled_modules` på
- *   användaren, så en tidigare per-person-avstängning respekteras.
+ *   justerat) ⇒ ALLT rollen tillåter (`allowedForRoles`, = det användaren
+ *   såg före skiftet) MINUS ev. legacy `disabled_modules` på användaren.
+ *   Rollstandarden (`DEFAULT_MODULES_BY_ROLE`) gäller alltså bara vid
+ *   kontoskapande — ett befintligt konto tappar aldrig tyst en sida som
+ *   sidguards/korslänkar (t.ex. /pagaende → /mina-aktiviteter) förutsätter.
+ *   Anroparen skickar `allowedForRoles` (härlett ur `coreModules`, som den
+ *   här modulen inte kan importera utan cirkulärt beroende).
  */
 export function resolveEnabledModules(input: {
   roles: readonly Role[] | undefined;
   stored?: unknown;
   legacyDisabled?: unknown;
+  /** Togglebara modul-id:n som rollerna tillåter; saknas ⇒ rollstandard. */
+  allowedForRoles?: readonly string[];
 }): string[] {
   if (Array.isArray(input.stored)) {
     return uniq(
@@ -116,7 +126,10 @@ export function resolveEnabledModules(input: {
       ? input.legacyDisabled.filter((v): v is string => typeof v === 'string')
       : []
   );
-  return defaultModulesForRoles(input.roles).filter((id) => !disabled.has(id));
+  const base = input.allowedForRoles
+    ? input.allowedForRoles.filter((id) => isToggleableModule(id))
+    : defaultModulesForRoles(input.roles);
+  return uniq(base).filter((id) => !disabled.has(id));
 }
 
 /**

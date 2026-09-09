@@ -2,7 +2,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import PocketBase from 'pocketbase';
-import { resolveEnabledModules, type Role } from '@platform/shared';
+import { resolveUserModules, type Role } from '@platform/shared';
 import { getPublicPbUrl, getServerPbUrl } from '@/lib/pb-url';
 
 const SERVER_PB_URL = getServerPbUrl();
@@ -106,11 +106,11 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     : undefined;
 
   // Modulåtkomst per användare (§ 36.3): allow-listan `enabled_modules` är
-  // sanningen; saknas den (konto före migration 1700000144) gäller rollens
-  // standard minus ev. legacy `disabled_modules` på användaren. Tenantens
-  // gamla globala `disabled_modules` läses INTE längre.
+  // sanningen; saknas den (konto före migration 1700000144) gäller allt
+  // rollen tillåter minus ev. legacy `disabled_modules` på användaren.
+  // Tenantens gamla globala `disabled_modules` läses INTE längre.
   const roles = ((m.roles as string[]) || []) as Role[];
-  const enabledModules = resolveEnabledModules({
+  const enabledModules = resolveUserModules({
     roles,
     stored: m.enabled_modules,
     legacyDisabled: m.disabled_modules

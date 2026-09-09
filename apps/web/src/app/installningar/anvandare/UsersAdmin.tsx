@@ -2,7 +2,7 @@
 
 import { useActionState, useMemo, useState, type ReactNode } from 'react';
 import { ALL_ROLES, defaultModulesForRoles, type Role } from '@platform/shared';
-import { Avatar, Chip, Toggle } from '@/components/proto';
+import { Avatar, Chip } from '@/components/proto';
 import { Icon } from '@/components/proto/Icon';
 import {
   deleteUserAction,

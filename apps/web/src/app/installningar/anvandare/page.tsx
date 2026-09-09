@@ -2,7 +2,7 @@ import { getServerPb } from '@/lib/auth.server';
 import { escFilter } from '@/lib/pb-filter';
 import { hasRole } from '@/lib/rbac';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
-import { resolveEnabledModules, type Role } from '@platform/shared';
+import { resolveUserModules, type Role } from '@platform/shared';
 import { assignableRolesFor } from '@/lib/users/validate';
 import { requireSettingsUser, SettingsSectionPage } from '../shared';
 import { UsersAdmin, type ManagedUser } from './UsersAdmin';
@@ -72,8 +72,8 @@ export default async function AnvandarePage() {
         verified: m.verified !== false,
         linkedStartups: m.expand?.linked_startups ?? [],
         // Samma upplösning som sessionen (§ 36.3): lagrad allow-lista, annars
-        // rollens standard minus ev. legacy disabled_modules.
-        enabledModules: resolveEnabledModules({
+        // allt rollen tillåter minus ev. legacy disabled_modules.
+        enabledModules: resolveUserModules({
           roles,
           stored: m.enabled_modules,
           legacyDisabled: m.disabled_modules

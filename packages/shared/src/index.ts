@@ -1608,6 +1608,28 @@ export * from './meeting';
 export * from './greeting';
 // ─── Modulåtkomst per användare (allow-lista + rollstandard, enhetstestad) ───
 export * from './module-access';
+import { isToggleableModule, resolveEnabledModules } from './module-access';
+
+/** Togglebara modul-id:n som minst en av rollerna tillåter (rail-ordning). */
+export function allowedModuleIdsForRoles(roles: readonly Role[] | undefined): string[] {
+  const set = new Set(roles ?? []);
+  return coreModules
+    .filter((m) => isToggleableModule(m.id) && m.rolesAllowed.some((r) => set.has(r)))
+    .map((m) => m.id);
+}
+
+/**
+ * Användarens effektiva allow-lista (§ 36.3) — `resolveEnabledModules` med
+ * rollens tillåtna moduler ur `coreModules` som fallback när ingen lista är
+ * lagrad. Används av sessionen och användaradministrationen (samma regel).
+ */
+export function resolveUserModules(input: {
+  roles: readonly Role[] | undefined;
+  stored?: unknown;
+  legacyDisabled?: unknown;
+}): string[] {
+  return resolveEnabledModules({ ...input, allowedForRoles: allowedModuleIdsForRoles(input.roles) });
+}
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */

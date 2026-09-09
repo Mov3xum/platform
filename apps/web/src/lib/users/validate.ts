@@ -5,8 +5,10 @@
 
 import {
   ALL_ROLES,
+  MEMBER_RAIL,
   coreModules,
   defaultModulesForRoles,
+  isPureStartupMember,
   isToggleableModule,
   sanitizeEnabledModules,
   type Role
@@ -218,13 +220,39 @@ export interface ToggleableModule {
 /**
  * Moduler som kan bockas i/ur för en användare med de här rollerna — dvs.
  * togglebara moduler (inte alltid-på/legacy) som minst en av rollerna får se.
- * Ordningen följer `coreModules` (samma som railen).
+ * Ordningen följer `coreModules` (samma som railen). En REN bolagsmedlem får
+ * bara medlems-railens moduler (§ 22): `rolesAllowed` är medvetet bredare för
+ * `startup_member` (isoleringen ligger i sidguards + RLS, § 21.5), men railen
+ * renderar aldrig annat än `MEMBER_RAIL` — en kryssruta för t.ex. "Chatt"
+ * vore en no-op som lovar något UI:t inte levererar.
  */
 export function toggleableModulesForRoles(roles: readonly Role[] | undefined): ToggleableModule[] {
   const set = new Set(roles ?? []);
+  const memberOnly = isPureStartupMember(roles ? [...roles] : undefined)
+    ? new Set(MEMBER_RAIL.map((m) => m.id))
+    : null;
   return coreModules
     .filter((m) => isToggleableModule(m.id) && m.rolesAllowed.some((r) => set.has(r)))
+    .filter((m) => !memberOnly || memberOnly.has(m.id))
     .map((m) => ({ id: m.id, title: m.title, description: m.description }));
+}
+
+/**
+ * Allow-lista efter rollbyte (§ 36.3): behåller personens val, lägger till
+ * den nya rolluppsättningens standardmoduler (så en befordran inte ger en
+ * krympt meny) och släpper moduler de nya rollerna inte längre tillåter.
+ * `stored === null` (aldrig justerad) lämnas orört.
+ */
+export function enabledModulesAfterRoleChange(
+  stored: unknown,
+  newRoles: readonly Role[]
+): string[] | null {
+  if (!Array.isArray(stored)) return null;
+  const allowed = new Set(toggleableModulesForRoles(newRoles).map((m) => m.id));
+  const kept = stored.filter((v): v is string => typeof v === 'string');
+  return Array.from(new Set([...kept, ...defaultModulesForRoles(newRoles)])).filter((id) =>
+    allowed.has(id)
+  );
 }
 
 /**

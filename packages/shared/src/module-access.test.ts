@@ -44,20 +44,38 @@ test('flera roller ger unionen av standarderna utan dubbletter', () => {
   assert.deepEqual(defaultModulesForRoles(undefined), []);
 });
 
-test('resolveEnabledModules: lagrad lista vinner, annars rollstandard minus legacy-avstängning', () => {
+test('resolveEnabledModules: lagrad lista vinner, annars allt rollen tillåter minus legacy-avstängning', () => {
   assert.deepEqual(
     resolveEnabledModules({ roles: ['coach'], stored: ['idag', 'startups', 'installningar', 42] }),
     ['idag', 'startups']
   );
   assert.deepEqual(resolveEnabledModules({ roles: ['coach'], stored: [] }), []);
+  const allowed = coreModules
+    .filter((m) => m.rolesAllowed.includes('coach'))
+    .map((m) => m.id);
   const fallback = resolveEnabledModules({
     roles: ['coach'],
     stored: null,
-    legacyDisabled: ['arshjul', 'inflode']
+    legacyDisabled: ['arshjul', 'inflode'],
+    allowedForRoles: allowed
   });
   assert.ok(fallback.includes('idag'));
+  assert.ok(fallback.includes('community'), 'ett befintligt konto tappar inte sidor rollen tillåter');
+  assert.ok(!fallback.includes('installningar'), 'alltid-på ligger aldrig i listan');
   assert.ok(!fallback.includes('arshjul'));
   assert.ok(!fallback.includes('inflode'));
+  // Utan allowedForRoles (ingen modul-lista känd) ⇒ rollstandard.
+  assert.deepEqual(resolveEnabledModules({ roles: ['partner'] }), defaultModulesForRoles(['partner']));
+});
+
+test('rollstandarden täcker sidor som staff-korslänkar förutsätter (§ 22, § 20.4, § 26)', () => {
+  for (const role of ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'] as const) {
+    assert.ok(DEFAULT_MODULES_BY_ROLE[role].includes('mina_aktiviteter'), `${role}: /pagaende → /mina-aktiviteter`);
+  }
+  for (const role of ['coach', 'mentor', 'observer'] as const) {
+    assert.ok(DEFAULT_MODULES_BY_ROLE[role].includes('de_minimis'), `${role}: § 20.4`);
+  }
+  assert.ok(DEFAULT_MODULES_BY_ROLE.mentor.includes('kunskapsbas'), 'mentor är staff i § 26');
 });
 
 test('isModuleEnabled: alltid-på passerar, alias följer målet, undefined begränsar inte', () => {

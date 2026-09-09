@@ -4748,27 +4748,47 @@ roll**:
 
 - **Datamodell:** `users.enabled_modules` (json-array, migration
   **1700000144**, speglad i `setup-via-api.mjs`). `null` = "aldrig justerad"
-  ⇒ appen använder rollens standard minus ev. legacy `users.disabled_modules`
-  (`resolveEnabledModules`), så ingen ser mindre än sin rollstandard efter
-  deployen. `tenants.disabled_modules` lämnas orörd i schemat men **läses inte
+  ⇒ appen använder **allt rollen tillåter** minus ev. legacy
+  `users.disabled_modules` (`resolveUserModules`), dvs. exakt vad kontot såg
+  före skiftet — ett befintligt konto tappar aldrig tyst en sida som
+  sidguards/korslänkar förutsätter (t.ex. `/pagaende` → `/mina-aktiviteter`,
+  § 22). `tenants.disabled_modules` lämnas orörd i schemat men **läses inte
   längre** — den globala togglingen är borttagen.
 - **Rollstandard** (`DEFAULT_MODULES_BY_ROLE` i
-  `packages/shared/src/module-access.ts`, ren + enhetstestad): unionen av
-  rollernas listor förbockas när kontot skapas (`createUserAction`) och kan
-  återställas via "Återställ till rollens standard". Admin/incubator_lead ser
-  i princip allt; coach/mentor/observer/partner får en smalare standard; en
+  `packages/shared/src/module-access.ts`, ren + enhetstestad) gäller vid
+  **kontoskapande**: unionen av rollernas listor förbockas i "Ny användare"
+  (`createUserAction`) och är målet för "Återställ till rollens standard".
+  Admin/incubator_lead ser i princip allt; coach/mentor/observer/partner får
+  en smalare standard (men alltid `mina_aktiviteter`, `de_minimis` och — för
+  staff — `kunskapsbas`, så § 20.4/§ 22/§ 26-flödena fungerar direkt); en
   `startup_member` får exakt medlems-railen (§ 22). Testen låser att varje
   standardmodul faktiskt tillåts av rollen.
+- **Rollbyte:** `updateUserRolesAction` skriver moduler i samma anrop
+  (`enabledModulesAfterRoleChange`): personens val behålls, den nya
+  rolluppsättningens standard läggs till och moduler de nya rollerna inte
+  tillåter släpps — en befordran ger aldrig en krympt meny. `null` lämnas
+  orört (följer rollen automatiskt).
 - **Alltid-på** (`ALWAYS_ON_MODULE_IDS`): `installningar`/`anvandare` (annars
   kan en admin låsa sig ute) samt de dolda legacy-id:na (`onboarding`,
   `activity_feed`, `partners`). `toolbox`/`dashboard` är alias som följer
   `agenter`/`idag`.
 - **Var det ändras:** Inställningar → Användare → personen → *Moduler i
   sidofältet* (`ModulePicker`, grupperat som railen) och i "Ny användare".
+  För en REN bolagsmedlem visar pickern bara medlems-railens moduler
+  (`rolesAllowed` är bredare för `startup_member`, men railen renderar aldrig
+  annat än `MEMBER_RAIL` — en kryssruta för "Chatt" vore en no-op).
   Server-action `updateUserModulesAction` (`lib/actions/users.ts`) — samma
   RBAC som övrig användaradministration (`loadManagedTarget`:
   admin/incubator_lead, tenant-korsverifierad, incubator_lead rör aldrig
-  admin-konton).
+  admin-konton). **OBS: medveten vidgning** — den gamla per-användar-togglingen
+  var admin-only; nu får även incubator_lead styra moduler (samma krets som
+  roller/lösenord). Ingen eskaleringsväg: listan saneras mot målanvändarens
+  roller.
+- **Schema-drift (§ 24.4/§ 30.4-invarianten):** PB släpper okända fält tyst.
+  Efter varje skrivning läses posten tillbaka; saknas `enabled_modules` i
+  schemat svarar `updateUserModulesAction` med ett tydligt fel (kör migration
+  1700000144) och `createUserAction` flaggar det i bekräftelsen — aldrig en
+  tyst lyckad no-op.
 - **Säkerhetsgräns oförändrad:** `canAccessModuleForUser(roles, id,
   enabledModules)` = `canAccessModule` (rollen, `rolesAllowed`) **och**
   `isModuleEnabled`. Listan saneras server-side mot vad MÅLANVÄNDARENS roller
