@@ -1335,7 +1335,7 @@ export interface ModuleGroup {
 }
 
 export const RAIL_GROUPS: ModuleGroup[] = [
-  { label: 'Översikt', modules: ['idag', 'min_oversikt', 'inkorg', 'pagaende', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
+  { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'pagaende', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'installningar', 'min_profil'] }
@@ -1369,6 +1369,14 @@ export function isPureStartupMember(roles: Role[] | undefined): boolean {
 }
 
 export const coreModules: ModuleDefinition[] = [
+  {
+    id: 'hem',
+    title: 'Hemmaplan',
+    description:
+      'Organisationens startsida — anslagstavla med nyheter, info och instruktioner, bolagsnytt, omvärldsbevakning och veckans agenda.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/hem'
+  },
   {
     id: 'idag',
     title: 'Chatt',
@@ -1607,6 +1615,8 @@ export * from './compass-authoring';
 export * from './meeting';
 export * from './greeting';
 export * from './event-time';
+export * from './org-posts';
+export * from './home';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */
