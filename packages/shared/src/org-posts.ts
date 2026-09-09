@@ -8,14 +8,15 @@
 import type { Role } from './index';
 
 /** Inläggstyper — fast vokabulär (samma mönster som file-topics/competences). */
-export const ORG_POST_KINDS = ['news', 'notice', 'instruction', 'celebration'] as const;
+export const ORG_POST_KINDS = ['news', 'notice', 'instruction', 'celebration', 'training'] as const;
 export type OrgPostKind = (typeof ORG_POST_KINDS)[number];
 
 export const ORG_POST_KIND_LABELS: Record<OrgPostKind, string> = {
   news: 'Nyhet',
   notice: 'Info',
   instruction: 'Instruktion',
-  celebration: 'Firande'
+  celebration: 'Firande',
+  training: 'Internutbildning'
 };
 
 /** Kort hjälptext per typ (visas i redigeraren). */
@@ -23,8 +24,23 @@ export const ORG_POST_KIND_HINTS: Record<OrgPostKind, string> = {
   news: 'Något som hänt — i portföljen, i organisationen eller i omvärlden.',
   notice: 'Praktisk information till kollegorna: lokaler, system, deadlines.',
   instruction: 'Så gör vi: rutiner och checklistor som ska vara lätta att hitta.',
-  celebration: 'Något att fira — en milstolpe, en investering, ett nytt bolag.'
+  celebration: 'Något att fira — en milstolpe, en investering, ett nytt bolag.',
+  training:
+    'Internutbildning för kollegorna: ett pass, en guide eller ett material att gå igenom. Administreras även via chatten.'
 };
+
+/**
+ * Inläggstyper som visas under respektive flik på Hemmaplan. `board` =
+ * anslagstavlan (nyheter/info/firanden), `instruction` = "Så gör vi",
+ * `training` = "Internutbildningar". En typ hör alltid till exakt en flik.
+ */
+export type OrgPostTab = 'board' | 'instruction' | 'training';
+
+export function orgPostTabFor(kind: OrgPostKind): OrgPostTab {
+  if (kind === 'instruction') return 'instruction';
+  if (kind === 'training') return 'training';
+  return 'board';
+}
 
 /**
  * Målgrupp. `staff` = Movexum-personal + observer (default);

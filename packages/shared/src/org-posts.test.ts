@@ -6,6 +6,7 @@ import {
   isOrgPostLive,
   isSafeOrgPostLink,
   orgPostExcerpt,
+  orgPostTabFor,
   selectLiveOrgPosts,
   sortOrgPosts,
   validateOrgPostInput,
@@ -142,4 +143,14 @@ test('orgPostExcerpt strippar markdown och kapar med ellips', () => {
   const ex = orgPostExcerpt(long, 50);
   assert.equal(ex.length, 50);
   assert.ok(ex.endsWith('…'));
+});
+
+test('training är en egen inläggstyp med egen flik på Hemmaplan', () => {
+  const v = validateOrgPostInput({ title: 'GDPR-genomgång', kind: 'training' });
+  assert.ok(v.ok);
+  if (v.ok) assert.equal(v.value.kind, 'training');
+  assert.equal(orgPostTabFor('training'), 'training');
+  assert.equal(orgPostTabFor('instruction'), 'instruction');
+  assert.equal(orgPostTabFor('news'), 'board');
+  assert.equal(orgPostTabFor('celebration'), 'board');
 });

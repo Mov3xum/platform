@@ -4868,22 +4868,35 @@ roll**:
 `/hem` (modul `hem`, titel **Hemmaplan**, först i "Översikt"-railen) är den
 sida personalen landar på efter inloggning (`/` och `/dashboard` redirectar
 dit; PWA:ns `start_url` pekar dit). En ren `startup_member` redirectas
-oförändrat till `/min-oversikt` (§ 22). Sidan är en **intranätsstartsida**
-i samma uttryck som chattens startvy (centrerad kolumn ≤ 760 px, hälsning i
-Sora, eyebrow-rubriker, rundade listor — inga stora kort, inga färgytor):
+oförändrat till `/min-oversikt` (§ 22). Sidan är en **boxlös dashboard i
+full bredd** (2026-09; samma uttryck som årshjulets dashboard § 30.5bis:
+hårlinjer, eyebrow-etiketter, inga stora kort eller färgytor) med en
+12-kolumners grid — huvudspalt (8/12) + sidospalt (4/12) från `xl`, en kolumn
+på mindre skärmar:
 
-1. **Hälsning** — svensk tidshälsning, datumrad med ISO-vecka
-   (`swedishDateLine`), en "puls"-rad (aktiva bolag · nya inflöden i veckan ·
-   punkter på agendan) och rollfiltrerade genvägs-chips.
-2. **Anslagstavla** — inlägg från Movexum till organisationen
-   (`org_posts`): nyheter, info och firanden. Fästa inlägg först.
-3. **Så gör vi** — instruktioner (`kind='instruction'`) som hopfällda rader,
-   så rutiner är lätta att hitta utan att dominera sidan.
-4. **Den här veckan** — årshjulets poster + planerade events 14 dagar framåt,
-   grupperade per dag ("Idag/Imorgon/Torsdag/20 sep").
-5. **Bolagsnytt** — den samlade aktivitetsloggen (§ 32), samma laddare som
-   chatten.
-6. **Omvärld** — senaste posterna från EU-whitelistade RSS-källor (§ 9.8).
+1. **Hälsning + nyckeltalsrad** — svensk tidshälsning, datumrad med ISO-vecka
+   (`swedishDateLine`), rollfiltrerade genvägs-chips och fem KPI-tiles med
+   avdelare: aktiva bolag, nya inflöden 7 d (med delta mot föregående 7 d),
+   pågående workshops, egna öppna uppgifter, punkter på agendan 14 d. Alla
+   räknas via `getList(1,1).totalItems` med användarens token; en räkning som
+   felar visar "–", aldrig 0.
+2. **Flikar** (`HomeBoardTabs`, huvudspalten): **Anslagstavla** (news/notice/
+   celebration), **Så gör vi** (hårdkodad plattformsintro `PlatformIntro` +
+   dynamiska `instruction`-inlägg som hopfällda rader) och
+   **Internutbildningar** (`kind='training'`). Aktiv flik speglas i URL:en
+   (`?flik=anslagstavla|sa-gor-vi|internutbildningar`) så länkar från chatten
+   och aktivitetsloggen öppnar rätt flik; `orgPostTabFor(kind)` i
+   `@platform/shared` är mappningen typ → flik.
+3. **Bolagsnytt** (huvudspalten) — den samlade aktivitetsloggen (§ 32), samma
+   laddare som chatten.
+4. **Den här veckan** (sidospalten) — årshjulets poster + planerade events
+   14 dagar framåt, grupperade per dag ("Idag/Imorgon/Torsdag/20 sep").
+5. **Omvärld** (sidospalten, `OmvarldFeed`) — senaste posterna från
+   EU-whitelistade RSS-källor (§ 9.8) med källfilter-chips och en ärlig
+   statusrad per källa (§ 37.4).
+
+`AutoRefresh` (klient) kör `router.refresh()` var 10:e minut och när fliken
+blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdning.
 
 **Kritiska filer:**
 
@@ -4897,15 +4910,24 @@ Sora, eyebrow-rubriker, rundade listor — inga stora kort, inga färgytor):
 | `apps/web/src/lib/feed/activity-feed.ts` | Delad feed-laddare (`activities` + `agent_actions`) för `/chatt` OCH `/hem` |
 | `apps/web/src/lib/ai/web.ts` | `fetchWebFeedItems` — strukturerade RSS-poster med in-process-cache (30 min) |
 | `apps/web/src/app/hem/page.tsx` | Sidan (server; alla källor parallellt via `Promise.allSettled`) |
-| `apps/web/src/components/home/OrgPostList.tsx` | Anslagstavlan (client): redigerare, utfällning, fäst/redigera/ta bort |
+| `apps/web/src/components/home/OrgPostList.tsx` | Inläggslistan (client): redigerare, utfällning, fäst/redigera/ta bort — används i alla tre flikarna (`kinds` begränsar typvalet per flik) |
+| `apps/web/src/components/home/HomeBoardTabs.tsx` | Flikarna Anslagstavla · Så gör vi · Internutbildningar (client, URL-synk `?flik=`) |
+| `apps/web/src/components/home/PlatformIntro.tsx` | Hårdkodad plattformsintro (statisk, native `<details>`) under "Så gör vi" |
+| `apps/web/src/components/home/OmvarldFeed.tsx` | Omvärldsflödet (client): källfilter + statusrad (live/utgången cache/nere) |
+| `apps/web/src/components/home/AutoRefresh.tsx` | Periodisk `router.refresh()` (10 min + vid synlig flik) |
 | `apps/web/src/components/home/TimeAgo.tsx` | Hydreringssäker relativ tid |
+| `apps/web/src/lib/ai/rss.ts` (+ `rss.test.ts`) | REN RSS/Atom-parser (ingen IO) — testad mot fixturer i Breakit-/Sifted-/EIC-/Vinnova-form |
+| `apps/web/src/lib/core/write/org-posts.ts` | Skrivlager: `createOrgPost`/`updateOrgPostFields` (delas av chatt-verktygen) |
+| `backend/pocketbase-schema/migrations/1700000145_extend_org_posts_kind_training.js` | `org_posts.kind` += `training` (union) |
 
 ### 37.2 Datamodell — `org_posts` (migration 1700000144)
 
 `tenant` (cascadeDelete), `author` (→ users, ingen cascade — inlägget lever
 vidare anonymt), `title` (≤ 160), `body` (markdown ≤ 20 000, renderas ALLTID
-via `lib/safe-html`), `kind` (`news | notice | instruction | celebration` —
-MÅSTE spegla `ORG_POST_KINDS`), `audience` (`staff | all`), `pinned`,
+via `lib/safe-html`), `kind` (`news | notice | instruction | celebration | training` —
+MÅSTE spegla `ORG_POST_KINDS`; `training` = Internutbildningar-fliken, lagt
+som union i **migration 1700000145** och speglat i `setup-via-api.mjs` via
+`patchCollection`), `audience` (`staff | all`), `pinned`,
 `published_at` (tomt = direkt; framtid = schemalagt), `expires_at` (tomt =
 utgår aldrig), `link_url` (intern sökväg `/…` eller https — validerat i
 `isSafeOrgPostLink`, aldrig `javascript:`/`data:`), autodate explicit
@@ -4932,15 +4954,67 @@ medvetet INTE i `MUST_BE_STAFF_OR_OBSERVER` i `verify-baseline.mjs`.
 - Schemalagda (ännu inte publicerade) inlägg syns bara för författare, märkta
   "Schemalagt". Utgångna inlägg visas inte alls (radera eller förläng).
 
+**Administration via chatten (Internutbildningar m.fl.).** Den interaktiva
+staff-chatten har verktygen `create_org_post` och `update_org_post`
+(`lib/ai/tools.ts`, gate = agent-actor + `includeWrites`, § 16.3/§ 33) som går
+genom det delade skrivlagret `lib/core/write/org-posts.ts`: rollpolicy i
+`writable-fields.ts` (`org_posts`, `STAFF_FULL` — agenten ärver den inloggades
+roll), `canEditOrgPost` för ändringar (författare eller admin/incubator_lead —
+samma regel som UI:t och PB:s updateRule), validering via den delade
+`validateOrgPostInput` (hela det sammanslagna inlägget valideras vid
+fältuppdatering), personnummer-sanering av rubrik/text på skrivvägen och
+`agent_actions`-audit (PII-fritt) → raden syns i Bolagsnytt/`/aktivitet` med
+länk till rätt flik. `kind=training` är den tänkta huvudanvändningen ("lägg
+upp en internutbildning om GDPR på torsdag med länk till materialet", "fäst
+den överst", "låt den utgå sista oktober"); befintliga inlägg slås upp via
+`query_collection` på `org_posts`. Radering görs inte av agenten (sätt
+`expires_at` i stället — inlägget döljs; radera i UI:t). Guidad i
+`CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden (§ 33.3). Riskklass n/a
+(deterministisk mutation, ingen AI-inferens).
+
 ### 37.4 Omvärldsbevakning på startsidan
 
-`fetchWebFeedItems` återanvänder `WEB_SOURCES`-whitelisten, timeout och
-RSS-parsern i `lib/ai/web.ts` (SSRF-skydd oförändrat) men cachar
-**strukturerade poster** in-process i 30 min — `web_cache` lagrar bara den
-prompt-formaterade texten och ger tomma `items` vid cache-träff. Fail-soft:
-en källa som inte svarar behåller sin senaste (utgångna) cache eller hoppas
-över; svarar ingen källa visas en lugn tom-text. Länkarna öppnas hos källan
-(`rel="noopener noreferrer"`). Ingen AI-inferens, inget innehåll lagras.
+Så fungerar flödet, steg för steg (`lib/ai/web.ts` + `lib/ai/rss.ts`):
+
+1. **Källor = fast EU-whitelist** (`WEB_SOURCES`, § 9.8: Breakit, Sifted, Di
+   Digital, Vinnova, Almi, EIC). Bara dessa URL:er kan hämtas (SSRF-skydd);
+   inga API-nycklar, inga tredjeparts-aggregatorer — vi läser källornas egna
+   publika RSS/Atom-flöden direkt.
+2. **Hämtning:** alla källor parallellt, 8 s timeout per källa, egen
+   User-Agent, `cache: 'no-store'` (Next får aldrig cacha svaret). Svaret
+   måste **se ut som ett flöde** (`looksLikeFeed`) — en 200-sida med HTML
+   (bot-skydd, omdirigering, "sidan finns inte") rapporteras som fel i stället
+   för att tyst bli ett tomt flöde.
+3. **Parsning** (`rss.ts`, ren + enhetstestad mot fixturer): RSS 2.0, Atom och
+   RDF/dc; CDATA, `content:encoded`, dubbelkodade entiteter; Atom-länkar
+   väljs som `rel=alternate` (aldrig `self`/`enclosure`), `guid`/`origLink`
+   som fallback; datum normaliseras från RFC 822/ISO till ISO (otolkbart →
+   inget datum, aldrig ett fejkat). All HTML strippas till ren text; länkar
+   tillåts bara som http(s). Max 8 poster/källa, 400 tecken sammanfattning.
+4. **Cache = stale-while-revalidate** (in-process, per källa): färsk < 15 min
+   → returneras direkt; 15 min – 24 h → returneras DIREKT märkt `stale` medan
+   en bakgrundshämtning uppdaterar (deduplicerad per källa via en inflight-
+   karta, så samtidiga sidladdningar ger EN begäran mot nyhetskällan); saknas
+   cache (eller > 24 h) inväntas hämtningen. Misslyckas en uppdatering
+   behålls de senaste lyckade posterna + felorsaken.
+5. **Sammanslagning** (`mergeOmvarldItems`, ren): nyast först över alla
+   källor, dedupe på länk, max 4 per källa så en pratig källa inte tränger ut
+   de andra; poster utan länk visas inte.
+6. **UI** (`OmvarldFeed`): källchips med statusprick (grön = live, gul = från
+   utgången cache/uppdateras, orange = nere med felorsak i tooltip), filter
+   per källa, relativ tid per post och en ärlig fotnot om vilka källor som
+   svarade. `AutoRefresh` (10 min) gör att en uppdaterad cache når skärmen
+   utan omladdning — "realtid" i praktiken = nyhetskällans egen
+   publiceringsfördröjning + max 15 min.
+
+`web_cache` (PB) lagrar bara den prompt-formaterade texten för agenterna
+(30 min) och ger tomma `items` vid cache-träff — startsidans poster ligger
+enbart i process-minnet. Fail-soft överallt: svarar ingen källa visas en lugn
+tom-text. Länkarna öppnas hos källan (`rel="noopener noreferrer"`). Ingen
+AI-inferens, inget innehåll lagras i databasen. **Relevans:** urvalet styrs
+av källorna (svensk startup-press, EU-tech, svenska/europeiska
+finansiärer/utlysningar) — vill man bredda/smalna läggs källan till i
+`WEB_SOURCES` (+ `WebSourceKey` i `@platform/shared`), aldrig som fri URL.
 
 ### 37.5 Regelefterlevnad
 
