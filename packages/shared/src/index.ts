@@ -1614,6 +1614,7 @@ export * from './compass-authoring';
 // ─── Mötesläge i chatten (ren möteslogik, enhetstestad, § 34) ────────────────
 export * from './meeting';
 export * from './greeting';
+export * from './event-time';
 export * from './org-posts';
 export * from './home';
 

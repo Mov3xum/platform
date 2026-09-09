@@ -7,7 +7,13 @@ import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { Chip } from '@/components/proto';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailStat, RailItem } from '@/components/PageRail';
-import type { EventSignup, EventSignupStage, IncubatorEvent } from '@platform/shared';
+import {
+  eventPhase,
+  stockholmWallClock,
+  type EventSignup,
+  type EventSignupStage,
+  type IncubatorEvent
+} from '@platform/shared';
 
 const STAGE_ORDER: EventSignupStage[] = [
   'signup',
@@ -33,8 +39,12 @@ const STAGE_ACCENT: Record<EventSignupStage, string> = {
 
 const MONTHS_SV = ['Jan', 'Feb', 'Mar', 'Apr', 'Maj', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dec'];
 
-function shortMonth(d: Date): string {
-  return MONTHS_SV[d.getMonth()];
+/** "Sep 8" i svensk tid — servern kör i UTC, så getMonth()/getDate() vore fel runt midnatt. */
+function shortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const wc = stockholmWallClock(d);
+  return `${MONTHS_SV[wc.month - 1]} ${wc.day}`;
 }
 
 function ageString(iso: string): string {
@@ -68,14 +78,16 @@ export default async function EventsPage() {
     /* ignore */
   }
 
-  const liveEvent = events.find((e) => e.status === 'live') || null;
-  const now = Date.now();
+  // Fasen följer klockan (svensk tid), inte bara statusfältet: ett event som
+  // var igår är avslutat även om ingen bytt från "live" — och "Live nu" visas
+  // bara medan eventet faktiskt pågår.
+  const now = new Date();
+  const phaseOf = (e: IncubatorEvent) => eventPhase(e, now);
+  const liveEvent = events.find((e) => phaseOf(e) === 'live') || null;
   const upcoming = events
-    .filter((e) => e.status === 'planned' && new Date(e.starts_at).getTime() >= now - 86400000)
+    .filter((e) => phaseOf(e) === 'upcoming')
     .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime());
-  const past = events
-    .filter((e) => e.status === 'completed' || new Date(e.starts_at).getTime() < now - 86400000)
-    .slice(0, 12);
+  const past = events.filter((e) => phaseOf(e) === 'completed').slice(0, 12);
 
   const funnelEvent = liveEvent || upcoming[0] || null;
 
@@ -155,7 +167,7 @@ export default async function EventsPage() {
               icon="calendar"
               iconTone="brand"
               title={e.name}
-              meta={`${shortMonth(new Date(e.starts_at))} ${new Date(e.starts_at).getDate()} · ${e.signups_count ?? 0} anmälda`}
+              meta={`${shortDate(e.starts_at)} · ${e.signups_count ?? 0} anmälda`}
               href={`/events/${e.id}`}
             />
           ))

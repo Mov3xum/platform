@@ -4841,3 +4841,51 @@ en källa som inte svarar behåller sin senaste (utgångna) cache eller hoppas
 - **ISO 27001 A.8.32:** ny oföränderlig migration (1700000144).
 - **§ 21-isolering:** startsidan är staff/observer; en medlem når bara
   `audience=all`-inlägg via RLS, och aldrig bolagsnytt/omvärld/agenda på `/hem`.
+
+---
+
+## 38. Svensk tid i kalender & events (Europe/Stockholm)
+
+Servern (Coolify-container på UpCloud) kör i **UTC**. All kalender-/eventlogik
+ska ändå räkna i **svensk tid** — både klockslag som personalen skriver in
+och gränser som "idag", "pågår nu" och "avslutat". Incident 2026-09: ett
+event den 8 september stod som "Live nu" den 9:e, och tider från
+formulären förskjöts två timmar i sommartid.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/event-time.ts` (+ `.test.ts`) | Ren, enhetstestad tidsmodul: väggklocka/offset i Stockholm, `parseDateTimeInput`, `toStockholmDateTimeInputValue`, `stockholmDateKey`/`stockholmDayDiff`, `eventPhase`, `formatStockholmDateTime` |
+| `apps/web/src/lib/actions/events.ts` | Skapa/uppdatera event — tolkar formulärtider via `parseDateTimeInput` |
+| `apps/web/src/lib/core/write/validators.ts` | `validateIsoDateTime` (chatt-agentens `create_event`) — samma tolkning |
+| `apps/web/src/lib/assignments/collaboration.ts`, `lib/actions/tasks.ts` | Möten från tilldelningar / Outlook — samma tolkning |
+| `apps/web/src/app/events/{page,[id]/page}.tsx`, `components/overview/AgendaStrip.tsx`, `lib/overview/aggregate.ts` | Fas + visning i svensk tid |
+
+**Regler (bindande):**
+
+- **Offsetlösa klockslag är svensk tid.** `<input type="datetime-local">`,
+  `"YYYY-MM-DDTHH:mm"` från tilldelningsformulären och agentens
+  `"2026-09-10 14:00"` saknar tidszon och MÅSTE gå genom `parseDateTimeInput`
+  (aldrig `new Date(str)`/`Date.parse(str)` direkt — det tolkar som serverns
+  UTC). Strängar med explicit `Z`/`±hh:mm` (Outlook, ISO från agenten) tas som
+  de är. Formulären fyller i tillbaka via `toStockholmDateTimeInputValue`, så
+  spara → redigera → spara ger samma klockslag.
+- **Eventets fas följer klockan, inte bara statusfältet** (`eventPhase`):
+  `cancelled`/`completed` i fältet vinner alltid; ett event vars slut
+  (`ends_at`, annars slutet av startdagens svenska dygn) har passerat är
+  **avslutat** oavsett om fältet säger `live`/`planned`; `live` = fältet
+  `live` ELLER klockan mellan start och slut; annars `upcoming`. Ingen
+  skrivning sker — fältet lämnas orört, detaljsidan visar den härledda fasen
+  och noterar när fältet släpar. "Live nu"/"Kommande"/"Avslutade" på
+  `/events`, LIVE-chippen på detaljsidan och agendan på översikten använder
+  fasen.
+- **"Idag"/dygnsgränser räknas på svenska kalenderdatum**
+  (`stockholmDateKey`/`stockholmDayDiff`), aldrig `getDate()`/
+  `toISOString().slice(0,10)` på servern.
+- **Visning:** `formatStockholmDateTime`/`formatStockholmTimeOrNull` (eller
+  `toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' })`) — aldrig
+  `toLocaleString('sv-SE')` utan tidszon i serverkomponenter.
+- **Årshjulet (§ 30)** räknar på hela kalenderdagar i klientens lokala tid
+  (klientkomponent, `useMemo(() => new Date())`) och berörs inte.
+- Riskklass n/a (ingen AI-inferens), inga nya fält/kollektioner, ingen PII.

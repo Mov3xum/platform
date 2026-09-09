@@ -13,7 +13,7 @@ import {
 import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
 import { unionParticipantIds } from '@/lib/missions-server';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
-import type { Mission } from '@platform/shared';
+import { parseDateTimeInput, type Mission } from '@platform/shared';
 
 /**
  * Server actions för CRM-uppgifter (`tasks`, migration 1700000077).
@@ -61,11 +61,11 @@ export async function logMeetingAsTaskAction(
   if (!subject) return { error: 'Mötet saknar ämne.' };
   if (!startupId) return { error: 'Inget bolag angivet.' };
 
-  const startMs = Date.parse(startsAt);
-  if (!Number.isFinite(startMs)) return { error: 'Ogiltig starttid.' };
-  const endMs = Date.parse(endsAt);
-  const dueIso = Number.isFinite(endMs) ? new Date(endMs).toISOString() : undefined;
-  const startIso = new Date(startMs).toISOString();
+  const start = parseDateTimeInput(startsAt);
+  if (!start) return { error: 'Ogiltig starttid.' };
+  const end = endsAt ? parseDateTimeInput(endsAt) : null;
+  const dueIso = end ? end.toISOString() : undefined;
+  const startIso = start.toISOString();
 
   const pb = await getServerPb();
 
@@ -95,7 +95,7 @@ export async function logMeetingAsTaskAction(
   }
 
   // Möte som redan passerat loggas som klart; framtida som öppet.
-  const status = startMs < Date.now() ? 'done' : 'open';
+  const status = start.getTime() < Date.now() ? 'done' : 'open';
 
   try {
     await pb.collection('tasks').create({
