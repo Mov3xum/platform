@@ -48,7 +48,7 @@ import {
 export const dynamic = 'force-dynamic';
 
 /**
- * Hemmaplan (CLAUDE.md § 37) — organisationens startsida efter inloggning,
+ * Dashboard (CLAUDE.md § 37) — organisationens startsida efter inloggning,
  * som en boxlös dashboard i full bredd (samma uttryck som årshjulets
  * dashboard, § 30.5bis): nyckeltalsrad → flikar (Anslagstavla · Så gör vi ·
  * Internutbildningar) + Bolagsnytt i huvudspalten, veckans agenda + omvärld i

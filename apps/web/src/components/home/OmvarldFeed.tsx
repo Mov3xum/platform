@@ -6,7 +6,7 @@ import { TimeAgo } from './TimeAgo';
 import type { OmvarldItem } from '@platform/shared';
 
 /**
- * Omvärldsbevakningen på Hemmaplan (CLAUDE.md § 37.4) — klientdelen.
+ * Omvärldsbevakningen på dashboarden (CLAUDE.md § 37.4) — klientdelen.
  * Servern har redan hämtat, sanerat och slagit ihop flödena (EU-whitelist,
  * stale-while-revalidate); här sker bara filtrering per källa och en ärlig
  * statusrad: vilka källor som svarade, hur färska posterna är och vilka som

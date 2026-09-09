@@ -18,7 +18,7 @@ import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
 
 /**
- * Hemmaplans inlägg (`org_posts`, § 37) via det delade skrivlagret — så att
+ * dashboardens inlägg (`org_posts`, § 37) via det delade skrivlagret — så att
  * chatten kan administrera anslagstavlan, "Så gör vi" och framför allt
  * fliken INTERNUTBILDNINGAR ("lägg upp en internutbildning om GDPR på
  * torsdag …") med exakt samma regler som UI:t:

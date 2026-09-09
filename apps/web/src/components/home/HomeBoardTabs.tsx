@@ -5,7 +5,7 @@ import { Icon } from '@/components/proto/Icon';
 import { ORG_POST_TAB_PARAM, ORG_POST_TAB_SLUGS, type OrgPostTab } from '@platform/shared';
 
 /**
- * Flikarna på Hemmaplan (CLAUDE.md § 37): Anslagstavla · Så gör vi ·
+ * Flikarna på dashboarden (CLAUDE.md § 37): Anslagstavla · Så gör vi ·
  * Internutbildningar. Ren UI-kurering — innehållet är redan RLS-filtrerat av
  * servern; fliken speglas i URL:en (`?flik=…`) så att länkar från chatten och
  * aktivitetsloggen kan öppna rätt flik direkt. Ingen dataväg.

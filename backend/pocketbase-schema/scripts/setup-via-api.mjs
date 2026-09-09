@@ -3460,7 +3460,7 @@ await convertSelectFieldToText('annual_wheel_items', 'category', { min: 1, max: 
 // 1700000139 så en bootstrappad instans också får dem redigerbara.
 await seedAnnualWheelCategories();
 
-// Migration 1700000144: org_posts — Hemmaplans anslagstavla (§ 37). Nyheter,
+// Migration 1700000144: org_posts — dashboardens anslagstavla (§ 37). Nyheter,
 // info, instruktioner och firanden till organisationen. Läsning: staff/observer
 // ELLER audience="all" (då även bolagsmedlemmar, t.ex. på "Min översikt").
 // createRule roll-lös (§ 21.3 — rollen enforce:as i server-actionen);
@@ -3817,7 +3817,7 @@ const FORCE_CREATE_RULES = {
   // Årshjuls-kategorier (§ 30, migration 1700000139) — create är roll-lös per
   // § 21.3; superadmin-kravet ligger i server-actionen + update/delete-reglerna.
   annual_wheel_categories: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  // Hemmaplans anslagstavla (§ 37, migration 1700000144) — roll-enforcement i
+  // dashboardens anslagstavla (§ 37, migration 1700000144) — roll-enforcement i
   // server-actionen.
   org_posts: `${ANY_AUTH} && @request.auth.tenant != ""`
 };

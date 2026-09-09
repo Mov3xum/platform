@@ -147,7 +147,7 @@ test('orgPostExcerpt strippar markdown och kapar med ellips', () => {
   assert.ok(ex.endsWith('…'));
 });
 
-test('training är en egen inläggstyp med egen flik på Hemmaplan', () => {
+test('training är en egen inläggstyp med egen flik på dashboarden', () => {
   const v = validateOrgPostInput({ title: 'GDPR-genomgång', kind: 'training' });
   assert.ok(v.ok);
   if (v.ok) assert.equal(v.value.kind, 'training');

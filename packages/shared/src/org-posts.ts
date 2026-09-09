@@ -1,4 +1,4 @@
-// Hemmaplan — organisationens anslagstavla (CLAUDE.md § 37).
+// Dashboard — organisationens anslagstavla (CLAUDE.md § 37).
 //
 // Ren, testbar domänlogik för inlägg på startsidan: inläggstyper, validering,
 // synlighetsregler (publicerat / utgånget / målgrupp) och sortering (fästa
@@ -30,7 +30,7 @@ export const ORG_POST_KIND_HINTS: Record<OrgPostKind, string> = {
 };
 
 /**
- * Inläggstyper som visas under respektive flik på Hemmaplan. `board` =
+ * Inläggstyper som visas under respektive flik på dashboarden. `board` =
  * anslagstavlan (nyheter/info/firanden), `instruction` = "Så gör vi",
  * `training` = "Internutbildningar". En typ hör alltid till exakt en flik.
  */
@@ -56,7 +56,7 @@ export function orgPostTabFromSlug(slug: string | undefined | null): OrgPostTab 
   return hit ?? 'board';
 }
 
-/** Länk till Hemmaplan med rätt flik öppen för en inläggstyp. */
+/** Länk till dashboarden med rätt flik öppen för en inläggstyp. */
 export function orgPostHomePath(kind: OrgPostKind): string {
   const tab = orgPostTabFor(kind);
   return tab === 'board' ? '/hem' : `/hem?${ORG_POST_TAB_PARAM}=${ORG_POST_TAB_SLUGS[tab]}`;

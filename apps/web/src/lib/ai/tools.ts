@@ -1275,7 +1275,7 @@ export function buildChatTools(
       function: {
         name: 'create_org_post',
         description:
-          'Skapar ett inlägg på Hemmaplan (startsidan, org_posts). kind styr ' +
+          'Skapar ett inlägg på dashboarden (startsidan, org_posts). kind styr ' +
           'vilken flik det hamnar under: news/notice/celebration = Anslagstavlan, ' +
           'instruction = "Så gör vi", training = INTERNUTBILDNINGAR (pass, guider ' +
           'och material kollegorna ska gå igenom — "lägg upp en internutbildning ' +
@@ -1317,7 +1317,7 @@ export function buildChatTools(
       function: {
         name: 'update_org_post',
         description:
-          'Uppdaterar ett befintligt inlägg på Hemmaplan (org_posts): rubrik, text, ' +
+          'Uppdaterar ett befintligt inlägg på dashboarden (org_posts): rubrik, text, ' +
           'typ/flik, målgrupp, fäst, publicerings-/utgångsdatum eller länk. Slå upp ' +
           'post_id via query_collection på org_posts först. Bara författaren ' +
           'eller admin/incubator lead får ändra andras inlägg. För att "ta bort" ' +
@@ -1728,7 +1728,7 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       };
     }
     case 'update_org_post':
-      return { tool: name, label: 'Uppdaterar inlägg på Hemmaplan' };
+      return { tool: name, label: 'Uppdaterar inlägg på dashboarden' };
     case 'request_approval':
       return { tool: name, label: 'Ber om ditt godkännande' };
     case 'start_meeting':
@@ -3714,8 +3714,8 @@ async function runCreateOrgPost(
       path: result.value.homePath,
       note:
         result.value.kind === 'training'
-          ? 'Internutbildningen syns nu under fliken Internutbildningar på Hemmaplan.'
-          : 'Inlägget syns nu på Hemmaplan.',
+          ? 'Internutbildningen syns nu under fliken Internutbildningar på dashboarden.'
+          : 'Inlägget syns nu på dashboarden.',
       logged_in: 'agent_actions'
     }
   };

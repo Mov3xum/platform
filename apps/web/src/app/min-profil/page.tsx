@@ -28,7 +28,7 @@ export default async function MinProfilPage() {
   return (
     <div className="mx-view-pad mx-narrow">
       <PageHead
-        crumb="Hemmaplan / Min profil"
+        crumb="Dashboard / Min profil"
         title="Min profil"
         subtitle="Din titel och dina kompetenser. Detta används för att sätta ihop tvärfunktionella team utifrån ett uppdrags behov."
       />

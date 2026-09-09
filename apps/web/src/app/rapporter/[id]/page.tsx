@@ -71,7 +71,7 @@ export default async function ReportDetailPage({
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb={`Hemmaplan / Rapportering / ${report.recipient_label}`}
+        crumb={`Dashboard / Rapportering / ${report.recipient_label}`}
         title={report.title}
         subtitle={`${report.period_label} — ${report.completion || 0}% ifyllt.`}
         actions={

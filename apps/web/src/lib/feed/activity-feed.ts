@@ -6,7 +6,7 @@ import { loadAgentLogEntries } from './agent-log';
 /**
  * Den samlade aktivitetsloggen (CLAUDE.md § 32) som EN kronologisk lista:
  * bolagshändelser (`activities`) + systemloggen (`agent_actions` via
- * skrivlagret). Delas av chatten (`/chatt`) och Hemmaplan (`/hem`) så de två
+ * skrivlagret). Delas av chatten (`/chatt`) och Dashboard (`/hem`) så de två
  * ytorna aldrig får divergerande feed-logik.
  *
  * Läser med användarens egen token → RLS gäller (§ 21). Fail-soft per källa:

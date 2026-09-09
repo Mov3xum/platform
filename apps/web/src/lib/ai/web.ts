@@ -107,7 +107,7 @@ const MAX_BYTES_PER_SOURCE = 8 * 1024; // 8 KB per källa
 const MAX_TOTAL_BYTES = 32 * 1024; // 32 KB totalt
 const FETCH_TIMEOUT_MS = 8_000;
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 min (prompt-kontext för agenter)
-// Hemmaplans flöde uppdateras tätare — det är en nyhetsvy, inte en prompt.
+// dashboardens flöde uppdateras tätare — det är en nyhetsvy, inte en prompt.
 const HOME_FEED_TTL_MS = 15 * 60 * 1000; // 15 min
 // En källa som varit nere länge ska inte visa dagsgamla poster som "senaste".
 const HOME_FEED_MAX_STALE_MS = 24 * 60 * 60 * 1000;
@@ -189,7 +189,7 @@ async function fetchOne(pb: PocketBase, src: WebSource): Promise<WebFetchResult>
     };
   }
 
-  // Live-fetch (delad med Hemmaplans flödesläsning nedan).
+  // Live-fetch (delad med dashboardens flödesläsning nedan).
   const live = await fetchRawFeed(src);
   if (!live.ok) {
     return {
@@ -231,7 +231,7 @@ type RawFeed =
 /**
  * Hämtar och parsar ETT whitelistat flöde med timeout. Ingen cache här —
  * anroparna cachar (PB `web_cache` för prompt-texten, in-process-cache för
- * Hemmaplans poster). URL:en kommer alltid från WEB_SOURCES (SSRF-skydd).
+ * dashboardens poster). URL:en kommer alltid från WEB_SOURCES (SSRF-skydd).
  */
 async function fetchRawFeed(src: WebSource): Promise<RawFeed> {
   const controller = new AbortController();
@@ -264,7 +264,7 @@ async function fetchRawFeed(src: WebSource): Promise<RawFeed> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Hemmaplans omvärldsbevakning (CLAUDE.md § 37) — strukturerade poster
+// dashboardens omvärldsbevakning (CLAUDE.md § 37) — strukturerade poster
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // `web_cache` lagrar den prompt-formaterade TEXTEN (inte posterna), så en
@@ -324,7 +324,7 @@ function refreshSource(key: WebSourceKey, src: WebSource): Promise<RawFeed> {
 }
 
 /**
- * Hemmaplans nyhetsflöde. Cache-strategi: **stale-while-revalidate**.
+ * dashboardens nyhetsflöde. Cache-strategi: **stale-while-revalidate**.
  *
  * 1. Färsk cache (< 15 min) → returneras direkt, ingen nätverksbegäran.
  * 2. Utgången cache (15 min – 24 h) → returneras DIREKT (märkt `stale`) medan
