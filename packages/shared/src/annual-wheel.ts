@@ -594,6 +594,8 @@ export interface AnnualWheelItem {
 export interface AnnualWheelFilter {
   year?: number;
   category?: AnnualWheelCategory | 'all';
+  /** Flera kategorier samtidigt (tom lista = alla). Kombineras med `category` (AND). */
+  categories?: readonly AnnualWheelCategory[];
   /** `none` = bara otaggade poster. */
   tag?: AnnualWheelTag | 'all' | 'none';
   /** Users-id, `none` = bara poster utan ansvarig. */
@@ -618,6 +620,8 @@ export function filterAnnualWheelItems(
     if (typeof filter.year === 'number' && it.year !== filter.year) return false;
     if (filter.period && !itemInAnnualWheelPeriod(it, filter.period)) return false;
     if (filter.category && filter.category !== 'all' && it.category !== filter.category) return false;
+    if (filter.categories && filter.categories.length > 0 && !filter.categories.includes(it.category))
+      return false;
     if (filter.tag && filter.tag !== 'all') {
       const tags = it.tags ?? [];
       if (filter.tag === 'none') {
@@ -1307,7 +1311,7 @@ export function buildAnnualWheelAgenda<
 
 // ─── Serier (upprepade aktiviteter) ──────────────────────────────────────────
 
-export type AnnualWheelRepeat = 'none' | 'monthly' | 'bimonthly' | 'quarterly';
+export type AnnualWheelRepeat = 'none' | 'monthly' | 'bimonthly' | 'quarterly' | 'yearly';
 
 export interface AnnualWheelRepeatDef {
   id: AnnualWheelRepeat;
@@ -1320,8 +1324,14 @@ export const ANNUAL_WHEEL_REPEATS: readonly AnnualWheelRepeatDef[] = [
   { id: 'none', label: 'Upprepas inte', stepMonths: 0 },
   { id: 'monthly', label: 'Varje månad', stepMonths: 1 },
   { id: 'bimonthly', label: 'Varannan månad', stepMonths: 2 },
-  { id: 'quarterly', label: 'Varje kvartal', stepMonths: 3 }
+  { id: 'quarterly', label: 'Varje kvartal', stepMonths: 3 },
+  { id: 'yearly', label: 'Varje år', stepMonths: 0 }
 ] as const;
+
+/** Hårt tak för en årlig serie (basåret inräknat) — årshjulet är ingen evighetskalender. */
+export const ANNUAL_WHEEL_MAX_SERIES_YEARS = 10;
+/** Default-slut för en årlig serie när inget anges: basåret + 2 (tre år). */
+export const ANNUAL_WHEEL_DEFAULT_SERIES_YEARS = 3;
 
 export function isAnnualWheelRepeat(value: unknown): value is AnnualWheelRepeat {
   return (
@@ -1334,7 +1344,10 @@ export function annualWheelRepeatStep(repeat: unknown): number {
 }
 
 export interface AnnualWheelOccurrence {
-  month: number;
+  /** Verksamhetsår förekomsten hamnar i (skiljer sig bara för årliga serier). */
+  year: number;
+  /** null = helårsaktivitet (bara möjligt i en ÅRLIG serie). */
+  month: number | null;
   day: number | null;
   end_month: number | null;
   end_day: number | null;
@@ -1356,6 +1369,10 @@ export function clampDayToMonth(year: number, month: number, day: number | null)
  * • Perioder flyttas med hela steget (start OCH slut) och förekomster vars
  *   slut skulle passera december utelämnas — årshjulet är ett kalenderår.
  * • Hård övre gräns på 12 förekomster (ett år).
+ * • `yearly`: samma datum varje ÅR t.o.m. `untilYear` (default basåret + 2,
+ *   hårt tak `ANNUAL_WHEEL_MAX_SERIES_YEARS`). Fungerar även för helårs-
+ *   aktiviteter (ingen månad) — de får en förekomst per år. Dagen klampas
+ *   mot årets månadslängd (29 feb → 28 feb ett vanligt år).
  */
 export function expandAnnualWheelSeries(
   base: {
@@ -1366,15 +1383,39 @@ export function expandAnnualWheelSeries(
     end_day?: number | null;
   },
   repeat: AnnualWheelRepeat,
-  untilMonth = 12
+  untilMonth = 12,
+  untilYear: number | null = null
 ): AnnualWheelOccurrence[] {
   const startMonth = sanitizeMonth(base.month);
   const baseOccurrence: AnnualWheelOccurrence = {
+    year: base.year,
     month: startMonth ?? 0,
     day: startMonth === null ? null : clampDayToMonth(base.year, startMonth, sanitizeDay(base.day)),
     end_month: sanitizeMonth(base.end_month),
     end_day: sanitizeDay(base.end_day)
   };
+
+  if (repeat === 'yearly') {
+    const maxYear = base.year + ANNUAL_WHEEL_MAX_SERIES_YEARS - 1;
+    const requested =
+      typeof untilYear === 'number' && Number.isFinite(untilYear)
+        ? Math.trunc(untilYear)
+        : base.year + ANNUAL_WHEEL_DEFAULT_SERIES_YEARS - 1;
+    const last = Math.min(maxYear, Math.max(base.year, requested));
+    const out: AnnualWheelOccurrence[] = [];
+    for (let y = base.year; y <= last; y++) {
+      const endMonth = sanitizeMonth(base.end_month);
+      out.push({
+        year: y,
+        month: startMonth,
+        day: startMonth === null ? null : clampDayToMonth(y, startMonth, sanitizeDay(base.day)),
+        end_month: endMonth,
+        end_day: endMonth === null ? null : clampDayToMonth(y, endMonth, sanitizeDay(base.end_day))
+      });
+    }
+    return out;
+  }
+
   const step = annualWheelRepeatStep(repeat);
   if (startMonth === null || step <= 0) {
     return startMonth === null ? [] : [baseOccurrence];
@@ -1389,6 +1430,7 @@ export function expandAnnualWheelSeries(
     const occEnd = endMonth === null ? null : m + spanMonths;
     if (occEnd !== null && occEnd > 12) break; // perioden skulle spilla över årsskiftet
     out.push({
+      year: base.year,
       month: m,
       day: clampDayToMonth(base.year, m, sanitizeDay(base.day)),
       end_month: occEnd,

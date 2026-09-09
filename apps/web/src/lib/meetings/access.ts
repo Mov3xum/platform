@@ -72,6 +72,26 @@ export async function loadOwnedMeeting(
 }
 
 /**
+ * Gör om ett fel från mötes-lagret till ett ÅTGÄRDBART svenskt meddelande.
+ * PB svarar 404 ("The requested resource wasn't found.") när kollektionen
+ * saknas — dvs. när migration 1700000142 aldrig körts mot instansen (PB-
+ * migrationer körs bara när PB-imagen byggs om, § 30.4). Utan översättningen
+ * ser användaren bara ett intetsägande fel och funktionen ser "trasig" ut.
+ */
+export function describeMeetingStoreError(err: unknown, fallback: string): string {
+  const status = statusOf(err);
+  if (status === 404) {
+    return (
+      'Mötesfunktionen är inte installerad på servern: kollektionen ' +
+      '`meeting_transcripts` saknas (migration 1700000142 har inte körts mot ' +
+      'PocketBase-instansen). Kör migrationerna/redeploya PB och försök igen.'
+    );
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
+/**
  * Skriver (create/update/delete) med superuser-fallback vid 400/403/404.
  * 404 ingår eftersom PB svarar 404 när en update-/delete-regel tyst nekar
  * raden. Anroparen har ALLTID ägar-verifierat raden (loadOwnedMeeting) eller

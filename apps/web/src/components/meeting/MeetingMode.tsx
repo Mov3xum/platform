@@ -9,11 +9,13 @@ import {
   MEETING_SEGMENT_SECONDS,
   MIN_VOICE_BYTES,
   formatMeetingClock,
+  isEffectivelySilent,
+  measureFloatLevel,
   validateVoiceClip
 } from '@platform/shared';
 import { Icon } from '@/components/proto/Icon';
 import { pickRecorderMime } from '@/components/VoiceInputButton';
-import { VOICE_WAV_MIME, convertBlobToWav } from '@/lib/audio/wav';
+import { VOICE_WAV_MIME, convertBlobToWavDetailed } from '@/lib/audio/wav';
 import {
   discardMeetingAction,
   endMeetingAction,
@@ -70,7 +72,17 @@ interface LiveSegment {
   index: number;
   text: string;
   status: 'pending' | 'done' | 'failed';
+  /** Servern mätte segmentet som effektivt tyst (ingen kostnad, ingen text). */
+  silent?: boolean;
+  /** Ljud fanns men AI-tjänsten kunde inte tolka något tal (serverns orsak). */
+  warning?: string;
 }
+
+// Så länge (i mätintervall om 200 ms) mikrofonen får vara helt tyst innan
+// panelen varnar — ~6 s täcker naturliga pauser men fångar en avstängd/fel
+// vald mikrofon långt innan första segmentet (20 s) är uppladdat.
+const MIC_SILENT_TICKS_BEFORE_WARNING = 30;
+const LEVEL_METER_INTERVAL_MS = 200;
 
 interface WakeLockSentinelLike {
   release: () => Promise<void>;
@@ -99,6 +111,17 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
   const [segmentError, setSegmentError] = useState<string | null>(null);
   const segmentErrorRef = useRef<string | null>(null);
   const failedCountRef = useRef(0);
+  // Segment som kom tillbaka TOMMA: tysta (ingen ljudnivå) respektive med ljud
+  // men utan tolkbart tal — avgör vilken förklaring granskningen ska ge när
+  // transkriptet blev tomt.
+  const silentCountRef = useRef(0);
+  const emptyWithAudioRef = useRef(0);
+  // Live-mätare på mikrofonen (ren nivåmätning, ingen röstanalys § 31.4).
+  const [inputLevel, setInputLevel] = useState(0);
+  const [micSilent, setMicSilent] = useState(false);
+  const micSilentTicksRef = useRef(0);
+  const meterCtxRef = useRef<AudioContext | null>(null);
+  const meterTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Granskning
   const [transcript, setTranscript] = useState('');
@@ -235,6 +258,78 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     streamRef.current = null;
   }, []);
 
+  // ── Mikrofonmätare: visar direkt om mikrofonen fångar något alls ──────────
+  // Utan den syns en avstängd/fel vald mikrofon först som ett tomt transkript
+  // efter mötet. Ren nivåmätning (topp/RMS) — ingen röstidentifiering.
+  const stopLevelMeter = useCallback(() => {
+    if (meterTimerRef.current) clearInterval(meterTimerRef.current);
+    meterTimerRef.current = null;
+    void meterCtxRef.current?.close().catch(() => undefined);
+    meterCtxRef.current = null;
+    micSilentTicksRef.current = 0;
+    setInputLevel(0);
+    setMicSilent(false);
+  }, []);
+
+  /**
+   * Skapas SYNKRONT i klick-händelsen (innan getUserMedia/server-anropet
+   * hunnit vänta) — webbläsarens autoplay-policy låter en AudioContext starta
+   * bara inom användaraktiveringen; skapad senare blir den `suspended` och
+   * mätaren skulle läsa nollor och FALSKT varna för tyst mikrofon.
+   */
+  const createMeterContext = useCallback((): AudioContext | null => {
+    try {
+      const w = window as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
+      const Ctor = w.AudioContext ?? w.webkitAudioContext;
+      return Ctor ? new Ctor() : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const startLevelMeter = useCallback(
+    (stream: MediaStream, ctx: AudioContext | null) => {
+      stopLevelMeter();
+      if (!ctx) return;
+      try {
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        // Stort tidsfönster (~340 ms vid 48 kHz) så varje mätning täcker
+        // hela intervallet — annars fångar en 43 ms-glimt bara delar av
+        // talet och mätaren fladdrar/visar falskt låga nivåer.
+        analyser.fftSize = 16384;
+        source.connect(analyser);
+        void ctx.resume().catch(() => undefined);
+        meterCtxRef.current = ctx;
+        const buf = new Float32Array(analyser.fftSize);
+        meterTimerRef.current = setInterval(() => {
+          if (!recordingRef.current) return;
+          // En kontext som inte kör (autoplay-spärr) ger bara nollor — visa
+          // då ingen varning alls hellre än en falsk "tyst mikrofon".
+          if (ctx.state !== 'running') {
+            micSilentTicksRef.current = 0;
+            setMicSilent(false);
+            return;
+          }
+          analyser.getFloatTimeDomainData(buf);
+          const level = measureFloatLevel(buf);
+          // Peak-hold med avklingning så stapeln är läsbar för ögat.
+          setInputLevel((prev) => Math.max(level.peak, prev * 0.7));
+          if (isEffectivelySilent(level)) {
+            micSilentTicksRef.current += 1;
+          } else {
+            micSilentTicksRef.current = 0;
+          }
+          setMicSilent(micSilentTicksRef.current >= MIC_SILENT_TICKS_BEFORE_WARNING);
+        }, LEVEL_METER_INTERVAL_MS);
+      } catch {
+        void ctx.close().catch(() => undefined);
+        /* mätaren är en hjälp, aldrig ett krav */
+      }
+    },
+    [stopLevelMeter]
+  );
+
   // Städa vid unmount (panelen stängs mitt i något).
   useEffect(() => {
     return () => {
@@ -249,6 +344,8 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
       void wakeLockRef.current?.release().catch(() => undefined);
+      if (meterTimerRef.current) clearInterval(meterTimerRef.current);
+      void meterCtxRef.current?.close().catch(() => undefined);
     };
   }, []);
 
@@ -256,18 +353,46 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     setSegments((prev) => prev.map((s) => (s.index === index ? { ...s, ...patch } : s)));
   }
 
-  async function uploadSegment(blob: Blob, mime: string, index: number, attempt = 0): Promise<void> {
+  async function uploadSegment(
+    blob: Blob | null,
+    mime: string,
+    index: number,
+    attempt = 0
+  ): Promise<void> {
     const meetingId = meetingIdRef.current;
     if (!meetingId || discardedRef.current) return;
     try {
       const form = new FormData();
       form.append('meetingId', meetingId);
       form.append('segmentIndex', String(index));
-      form.append('audio', new File([blob], `segment-${index}`, { type: mime }));
+      if (blob) {
+        form.append('audio', new File([blob], `segment-${index}`, { type: mime }));
+      } else {
+        // Klienten mätte segmentet som effektivt tyst: registrera det UTAN
+        // ljud (index-kontinuitet för luck-markören) — ingen uppladdning av
+        // ~2,9 MB tystnad, inget Voxtral-anrop. Servern mäter själv när ljud
+        // skickas; klienten är aldrig säkerhetsgränsen.
+        form.append('silent', '1');
+      }
       const res = await fetch('/api/chat/meeting/segment', { method: 'POST', body: form });
-      const data = (await res.json().catch(() => ({}))) as { text?: string; error?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        text?: string;
+        error?: string;
+        silent?: boolean;
+        warning?: string;
+      };
       if (!res.ok) throw new Error(data.error || 'Uppladdningen misslyckades.');
-      updateSegment(index, { text: data.text || '', status: 'done' });
+      const text = data.text || '';
+      if (!text) {
+        if (data.silent) silentCountRef.current += 1;
+        else emptyWithAudioRef.current += 1;
+      }
+      updateSegment(index, {
+        text,
+        status: 'done',
+        silent: !text && Boolean(data.silent),
+        warning: !text && !data.silent ? data.warning || undefined : undefined
+      });
     } catch (err) {
       if (attempt === 0 && !discardedRef.current) {
         await sleep(1500);
@@ -293,8 +418,11 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
       // inspelningsformat (webm/opus, mp4/AAC) — konvertera segmentet till
       // 16 kHz mono WAV innan uppladdning. Fail-soft: kan klippet inte
       // avkodas skickas originalet, och servern svarar med Mistrals orsak.
-      const wav = await convertBlobToWav(blob);
-      return uploadSegment(wav ?? blob, wav ? VOICE_WAV_MIME : mime, index);
+      const converted = await convertBlobToWavDetailed(blob);
+      if (converted && isEffectivelySilent(converted.level)) {
+        return uploadSegment(null, VOICE_WAV_MIME, index);
+      }
+      return uploadSegment(converted?.wav ?? blob, converted ? VOICE_WAV_MIME : mime, index);
     });
   }
 
@@ -354,10 +482,14 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
       return;
     }
 
+    // Mätarens ljudkontext skapas här, inom klicket (se createMeterContext).
+    const meterCtx = createMeterContext();
+
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
+      void meterCtx?.close().catch(() => undefined);
       const name = err instanceof Error ? err.name : '';
       setError(
         name === 'NotAllowedError'
@@ -374,6 +506,7 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     });
     if (started.error || !started.meetingId) {
       stream.getTracks().forEach((t) => t.stop());
+      void meterCtx?.close().catch(() => undefined);
       setError(started.error || 'Kunde inte starta mötet.');
       return;
     }
@@ -386,11 +519,14 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     elapsedRef.current = 0;
     segmentErrorRef.current = null;
     failedCountRef.current = 0;
+    silentCountRef.current = 0;
+    emptyWithAudioRef.current = 0;
     setSegmentError(null);
     setSegments([]);
     setElapsed(0);
     setPhase('recording');
     void requestWakeLock();
+    startLevelMeter(stream, meterCtx);
     startSegment(stream);
     tickRef.current = setInterval(() => {
       elapsedRef.current += 1;
@@ -425,6 +561,7 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     if (segTimerRef.current) clearTimeout(segTimerRef.current);
     if (tickRef.current) clearInterval(tickRef.current);
     setPhase('finishing');
+    stopLevelMeter();
     await stopRecorder();
     releaseStream();
     releaseWakeLock();
@@ -454,6 +591,17 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
           (ended.transcript.trim()
             ? ' De markeras som luckor i transkriptet.'
             : ' Transkriptet blev därför tomt.')
+      );
+    } else if (!ended.transcript.trim()) {
+      // Tomt utan uppladdningsfel — förklara VARFÖR utifrån nivåmätningen,
+      // annars ser funktionen bara "trasig" ut.
+      setError(
+        emptyWithAudioRef.current > 0
+          ? `Ljud spelades in men AI-tjänsten kunde inte tolka något tal i ${emptyWithAudioRef.current} segment. ` +
+              'Prova igen närmare mikrofonen, med mindre bakgrundsljud — och kontrollera att rätt mikrofon är vald.'
+          : silentCountRef.current > 0
+            ? 'Mikrofonen fångade inget ljud under mötet — transkriptet är tomt. Kontrollera att rätt mikrofon är vald i webbläsaren/datorn och att den inte är avstängd, och starta ett nytt möte.'
+            : 'Inget segment hann laddas upp — transkriptet är tomt.'
       );
     }
     setPhase('review');
@@ -489,6 +637,7 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     recordingRef.current = false;
     if (segTimerRef.current) clearTimeout(segTimerRef.current);
     if (tickRef.current) clearInterval(tickRef.current);
+    stopLevelMeter();
     try {
       recorderRef.current?.stop();
     } catch {
@@ -580,6 +729,9 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
   const doneSegments = segments.filter((s) => s.status === 'done');
   const failedSegments = segments.filter((s) => s.status === 'failed');
   const pendingCount = segments.filter((s) => s.status === 'pending').length;
+  const hasLiveText = doneSegments.some((s) => s.text);
+  const silentDone = doneSegments.filter((s) => s.silent).length;
+  const emptyWithAudioDone = doneSegments.filter((s) => !s.text && !s.silent).length;
 
   const heading =
     phase === 'setup'
@@ -725,6 +877,33 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
                 -sekunderssegment. Lämna gärna fliken öppen — skärmen hålls vaken under
                 inspelningen.
               </p>
+              {/* Mikrofonmätare — visar direkt om mikrofonen fångar ljud. */}
+              <div className="flex items-center gap-2.5" aria-live="polite">
+                <span className="text-[11.5px] font-medium uppercase tracking-[0.06em] text-foreground-subtle">
+                  Mikrofon
+                </span>
+                <span
+                  className="relative h-2 flex-1 overflow-hidden rounded-full bg-canvas-muted"
+                  role="meter"
+                  aria-label="Mikrofonnivå"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(Math.min(1, inputLevel * 3) * 100)}
+                >
+                  <span
+                    className={`absolute inset-y-0 left-0 rounded-full transition-[width] duration-150 ${
+                      micSilent ? 'bg-movexum-orange' : 'bg-movexum-gron'
+                    }`}
+                    style={{ width: `${Math.round(Math.min(1, inputLevel * 3) * 100)}%` }}
+                  />
+                </span>
+              </div>
+              {micSilent && (
+                <p className="rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange">
+                  Mikrofonen fångar inget ljud. Kontrollera att rätt mikrofon är vald i webbläsaren
+                  och datorn och att den inte är avstängd — annars blir transkriptet tomt.
+                </p>
+              )}
               <div className="flex min-h-[180px] flex-col gap-2 rounded-xl border border-default bg-canvas-subtle p-3">
                 {doneSegments.length === 0 && pendingCount === 0 ? (
                   <p className="text-[13px] italic text-foreground-subtle">
@@ -737,7 +916,20 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
                         <p key={s.index} className="text-[13.5px] leading-relaxed text-foreground">
                           {s.text}
                         </p>
-                      ) : null
+                      ) : s.silent ? (
+                        <p key={s.index} className="text-[12px] italic text-foreground-subtle">
+                          (tyst avsnitt — inget ljud i segmentet)
+                        </p>
+                      ) : (
+                        <p key={s.index} className="text-[12px] text-movexum-morkorange dark:text-movexum-pastell-orange">
+                          {s.warning || 'Ingen text kunde tolkas i segmentet.'}
+                        </p>
+                      )
+                    )}
+                    {!hasLiveText && pendingCount === 0 && silentDone > 0 && emptyWithAudioDone === 0 && (
+                      <p className="text-[12.5px] text-foreground-subtle">
+                        Hittills har inget ljud fångats — kontrollera mikrofonen ovan.
+                      </p>
                     )}
                     {pendingCount > 0 && (
                       <p className="inline-flex items-center gap-2 text-[12.5px] text-foreground-subtle">

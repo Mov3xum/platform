@@ -141,6 +141,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
           avatar: m.avatar,
           linked_startups: m.linked_startups,
           disabled_modules: m.disabled_modules,
+          enabled_modules: m.enabled_modules,
           expand: expandTenant
             ? { tenant: { id: expandTenant.id, name: expandTenant.name, slug: expandTenant.slug } }
             : undefined
@@ -193,14 +194,6 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     const msg = outerErr instanceof Error ? outerErr.message : String(outerErr);
     return { error: `Oväntat serverfel: ${msg}` };
   }
-}
-
-export async function logoutAction(): Promise<void> {
-  const store = await cookies();
-  store.delete(AUTH_COOKIE);
-  // Purge the cached authenticated root layout so the sidebar/AppShell is dropped.
-  revalidatePath('/', 'layout');
-  redirect('/login');
 }
 
 export async function requestPasswordResetAction(

@@ -132,6 +132,9 @@ export function middleware(req: NextRequest) {
     pathname.startsWith('/reset-password/') ||
     pathname.startsWith('/_next') ||
     pathname === '/api/auth/login' ||
+    // Utloggning ska fungera även utan (giltig) cookie — annars 307:ar
+    // middleware:n formulär-POST:en till /login med bevarad POST-metod.
+    pathname === '/api/auth/logout' ||
     pathname.startsWith('/api/health') ||
     // Startupkompassen — publika, oinloggade intag-moduler (quiz/formulär/chatt)
     // och deras anonyma API-flöden.

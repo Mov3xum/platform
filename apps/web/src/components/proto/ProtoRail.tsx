@@ -24,7 +24,7 @@ interface ProtoRailProps {
     tenantLogoLightUrl?: string;
     tenantLogoDarkUrl?: string;
     roles: Role[];
-    disabledModules?: string[];
+    enabledModules?: string[];
   };
   counts?: Record<string, number>;
   switchableStartups?: SwitchableStartup[];
@@ -39,8 +39,8 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
       .slice(0, 2)
       .toUpperCase() || '??';
 
-  // Ren bolagsmedlem har "Min översikt" som hemvy (staff → Hemmaplan/Chatt).
-  const homeHref = isPureStartupMember(user.roles) ? '/min-oversikt' : '/chatt';
+  // Ren bolagsmedlem har "Min översikt" som hemvy (staff → Hemmaplan, § 37).
+  const homeHref = isPureStartupMember(user.roles) ? '/min-oversikt' : '/hem';
 
   return (
     <aside id="mx-rail" className="mx-rail" aria-label="Huvudnavigation">
@@ -66,7 +66,7 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
           // Ren bolagsmedlem → dedikerad, kortare rail (CLAUDE.md § 22).
           <div>
             {MEMBER_RAIL.filter((item) =>
-              canAccessModuleForUser(user.roles, item.id, user.disabledModules)
+              canAccessModuleForUser(user.roles, item.id, user.enabledModules)
             ).map((item) => (
               <ModuleNavItem
                 key={item.id}
@@ -84,7 +84,7 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
               .filter(
                 (m) =>
                   m !== undefined &&
-                  canAccessModuleForUser(user.roles, m.id, user.disabledModules)
+                  canAccessModuleForUser(user.roles, m.id, user.enabledModules)
               );
 
           if (groupModules.length === 0) return null;

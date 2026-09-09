@@ -228,7 +228,7 @@ export default async function InsightsPage({
   const days = RANGE_DAYS[range];
 
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'insights', user.disabledModules)) {
+  if (!canAccessModuleForUser(user.roles, 'insights', user.enabledModules)) {
     redirect('/chatt');
   }
   if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {

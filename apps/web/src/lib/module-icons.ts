@@ -1,9 +1,10 @@
 /** Ikon per modul-id (proto/Icon.tsx-namn). Delas av railen och bottom-menyn. */
 export const MODULE_ICONS: Record<string, string> = {
+  hem: 'home',
   idag: 'message',
   min_oversikt: 'home',
   mina_aktiviteter: 'flow',
-  inkorg: 'home',
+  inkorg: 'inbox',
   pagaende: 'spark',
   arshjul: 'calendar',
   uppdrag: 'flow',

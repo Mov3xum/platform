@@ -175,7 +175,11 @@ html.dark {
 
 .mx-app {
   display: grid;
-  grid-template-columns: var(--mx-rail-w) 1fr;
+  /* minmax(0, 1fr) — ett 1fr-spår har min-content som minimum och växer
+     annars förbi viewporten när något barn (brödsmulor, tabell, chatt-
+     kolumn) har en bred min-content; då blir hela sidan bredare än skärmen
+     på mobil (§ 35). */
+  grid-template-columns: var(--mx-rail-w) minmax(0, 1fr);
   gap: 0;
   padding: 0;
   min-height: 100vh;
@@ -420,6 +424,9 @@ html.dark {
 .mx-main-col {
   display: grid;
   grid-template-rows: var(--mx-topbar-h) 1fr;
+  /* Explicit kolumnspår med 0 som minimum — annars sätter topbarens/vyns
+     min-content spårets bredd och kolumnen spiller utanför viewporten. */
+  grid-template-columns: minmax(0, 1fr);
   min-height: 100vh;
   background: var(--mx-app-gradient);
   min-width: 0;
@@ -437,6 +444,8 @@ html.dark {
   z-index: 20;
   font-size: 13px;
   height: var(--mx-topbar-h);
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* Burger som bor i sidmenyns header (kollapsar railen / stänger drawern). */
@@ -493,6 +502,13 @@ html.dark {
   min-width: 0;
 }
 
+.mx-crumb-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .mx-crumb .mx-seg {
   font-size: 13px;
   font-weight: 500;
@@ -544,6 +560,7 @@ html.dark {
 .mx-view {
   overflow-x: hidden;
   position: relative;
+  min-width: 0;
 }
 
 .mx-view-pad {
@@ -973,6 +990,8 @@ select.mx-input:focus {
 .mx-t-lg { font-size: 17px; }
 .mx-t-up { text-transform: uppercase; letter-spacing: 1.5px; }
 .mx-tnum { font-variant-numeric: tabular-nums; }
+/* Inline scroll-yta med uttonade kanter (masken sätts per element av FadeScroll). */
+.mx-fade-scroll { scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease; }
 .mx-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .mx-mt-1 { margin-top: 4px; }
@@ -1314,8 +1333,15 @@ body.mx-rail-locked {
 
 @media (max-width: 1024px) {
   .mx-app {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     padding: 0;
+  }
+
+  /* Skyddsnät: inget får göra dokumentet bredare än skärmen. `clip` (inte
+     hidden) skapar ingen scroll-container och bryter inte sticky-topbaren. */
+  html,
+  body {
+    overflow-x: clip;
   }
 
   /* Mobil: railen är en drawer → reopen-knappen är alltid synlig
@@ -1380,7 +1406,7 @@ body.mx-rail-locked {
     transition: grid-template-columns 220ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   .mx-app.mx-rail-desktop-collapsed {
-    grid-template-columns: 0px 1fr;
+    grid-template-columns: 0px minmax(0, 1fr);
   }
   .mx-rail {
     transition: opacity 160ms ease, visibility 160ms;
@@ -1447,11 +1473,15 @@ body.mx-rail-locked {
   }
 
   /* On small screens show only the last crumb segment to save space */
-  .mx-crumb > span:not(:last-child) {
+  .mx-crumb > .mx-crumb-part:not(:last-child) {
     display: none;
   }
-  .mx-crumb > span:last-child .mx-sep {
+  .mx-crumb > .mx-crumb-part:last-child .mx-sep {
     display: none;
+  }
+  .mx-crumb > .mx-crumb-part:last-child {
+    min-width: 0;
+    max-width: 100%;
   }
   .mx-crumb .mx-seg {
     font-size: 14px;
@@ -1461,6 +1491,36 @@ body.mx-rail-locked {
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 100%;
+    min-width: 0;
+  }
+
+  /* Alla tabeller scrollar horisontellt inom sin yta på telefon i stället
+     för att trycka ut sidan (events, inställningar, statistik). */
+  .mx-view table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Flikrader (bolagskort, Startupkompassen, utbildning) scrollar i sidled
+     i stället för att spilla utanför skärmen. */
+  .mx-startup-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin-left: -18px;
+    margin-right: -18px;
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .mx-startup-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .mx-startup-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
 
   .mx-view-pad {
@@ -2189,8 +2249,11 @@ html.dark .mx-tab-badge {
     justify-content: flex-end;
     gap: 3px;
     height: var(--mx-bnav-h);
-    min-width: 44px;
+    min-width: 0;
     padding: 6px 2px 8px;
+    box-sizing: border-box;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
     border: 0;
     background: none;
     color: var(--mx-muted);
@@ -2234,7 +2297,9 @@ html.dark .mx-tab-badge {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    line-height: 1.1;
+    height: 12px;
+    line-height: 12px;
+    flex: none;
   }
 
   .mx-bnav-badge {
@@ -2255,17 +2320,24 @@ html.dark .mx-tab-badge {
     box-sizing: content-box;
   }
 
-  /* Mittknappen — upphöjd, brand-färgad, chatten. */
+  /* Mittknappen — upphöjd, brand-färgad, chatten. Layouten går uppifrån
+     (flex-start) med fasta mått så knappen aldrig kan hamna över etiketten:
+     -18 + 54 + 4 = etiketten börjar på 40 px, 12 px hög, 12 px marginal
+     kvar till menyns underkant. */
   .mx-bnav-center {
     color: var(--mx-ink);
+    justify-content: flex-start;
+    gap: 4px;
+    padding-top: 0;
   }
 
   .mx-bnav-center-btn {
     display: grid;
     place-items: center;
-    width: 56px;
-    height: 56px;
-    margin-top: -22px;
+    flex: none;
+    width: 54px;
+    height: 54px;
+    margin-top: -18px;
     border-radius: 999px;
     background: #002c40;
     color: #ffffff;
@@ -2353,7 +2425,7 @@ html.dark .mx-tab-badge {
     position: fixed;
     left: 12px;
     right: 12px;
-    bottom: calc(var(--mx-bnav-total) + 10px);
+    bottom: calc(var(--mx-bnav-total) + 30px);
     z-index: 49;
     display: flex;
     align-items: center;

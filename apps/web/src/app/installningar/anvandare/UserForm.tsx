@@ -1,10 +1,11 @@
 'use client';
 
-import { useActionState, useRef, useState } from 'react';
+import { useActionState, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { type Role } from '@platform/shared';
+import { defaultModulesForRoles, type Role } from '@platform/shared';
 import { createUserAction, type CreateUserState } from '@/lib/actions/users';
-import { ROLE_LABELS } from '@/lib/users/validate';
+import { ROLE_LABELS, toggleableModulesForRoles } from '@/lib/users/validate';
+import { ModulePicker } from './ModulePicker';
 
 export type StartupOption = { id: string; name: string };
 
@@ -36,11 +37,25 @@ export function UserForm({
     : (assignableRoles[0] ?? 'observer');
   const [role, setRole] = useState<Role>(defaultRole);
 
+  // Moduler i sidofältet (§ 36.3): rollens standard förbockas och byts när
+  // rollen byts; staff kan lägga till/ta bort innan kontot skapas.
+  const modules = useMemo(() => toggleableModulesForRoles([role]), [role]);
+  const moduleDefaults = useMemo(
+    () => defaultModulesForRoles([role]).filter((id) => modules.some((m) => m.id === id)),
+    [role, modules]
+  );
+  const [selectedModules, setSelectedModules] = useState<string[]>(moduleDefaults);
+  const changeRole = (next: Role) => {
+    setRole(next);
+    const nextModules = toggleableModulesForRoles([next]);
+    setSelectedModules(defaultModulesForRoles([next]).filter((id) => nextModules.some((m) => m.id === id)));
+  };
+
   // Återställ formuläret efter en lyckad registrering så nästa person kan läggas in.
   if (state.status === 'ok' && formRef.current && password !== '') {
     formRef.current.reset();
     setPassword('');
-    setRole(defaultRole);
+    changeRole(defaultRole);
   }
 
   const needsStartup = role === 'startup_member';
@@ -96,7 +111,7 @@ export function UserForm({
             name="role"
             required
             value={role}
-            onChange={(e) => setRole(e.target.value as Role)}
+            onChange={(e) => changeRole(e.target.value as Role)}
             className={`mt-1 ${inputClass}`}
           >
             {assignableRoles.map((r) => (
@@ -146,6 +161,21 @@ export function UserForm({
               </p>
             </div>
           ))}
+
+        <div>
+          <span className="block text-sm font-medium text-foreground">Moduler i sidofältet</span>
+          <p className="mb-2 mt-1 text-xs text-foreground-subtle">
+            Rollens standard är förbockad. Lägg till eller ta bort — det går att ändra
+            när som helst på personens profil under Användare.
+          </p>
+          <input type="hidden" name="enabled_modules" value={JSON.stringify(selectedModules)} />
+          <ModulePicker
+            modules={modules}
+            selected={selectedModules}
+            defaults={moduleDefaults}
+            onChange={setSelectedModules}
+          />
+        </div>
 
         <div>
           <label htmlFor="password" className="block text-sm font-medium text-foreground">
