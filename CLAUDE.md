@@ -584,6 +584,17 @@ integrity (§ 10).
 felkonfiguration aldrig tyst bryter en kunds chatt mitt i månaden — sätt env:en
 eller tenant-taket för att aktivera.
 
+**0-värden i loggen (migration 1700000145, 2026-09).** PB tolkar 0 som
+"tomt" för ett `required` nummerfält, och 1700000058 skapade `tokens_in`/
+`tokens_out`/`cost_estimate_usd` som required → `logAiUsage` (fail-soft)
+svalde "Cannot be blank." och raden skrevs ALDRIG för embeddings
+(`mistral-embed`, tokens_out = 0 — hela RAG-förbrukningen § 26/§ 27 saknades
+i /insights, /admin/ai-miljo och månadstaket), för Voxtral-anrop med tom text
+(§ 31/§ 34) och för modeller utan prisrad (cost = 0). Migration 1700000145 gör
+talfälten valfria (`min: 0` kvar); speglas i `setup-via-api.mjs`. Logga
+aldrig-någonsin runt problemet genom att skicka "1 token" — bokför det
+faktiska värdet.
+
 ### 9.7 Bannrar och varningstexter
 
 Alla toolbox-sidor ska visa:
@@ -4193,10 +4204,15 @@ npm-dependency (§ 10.2).
    § 17.8).
 3. Routen verifierar inloggning + staff-roll, rate-limit (40 anrop/5 min och
    användare) och validerar mime + storlek med den delade helpern.
-4. `transcribeAudio` skickar ljudet till Voxtral (`POST /v1/audio/transcriptions`,
-   `language=sv`) och returnerar texten. Token-utfallet loggas i
-   `ai_usage_events` (surface `dashboard_chat`, modell `voxtral-*`) så
-   `/insights` och `/admin/ai-miljo` (§ 28) räknar med rösten.
+4. Routen mäter först klippets ljudnivå (WAV-PCM, `@platform/shared`
+   audio-level.ts): ett effektivt tyst klipp svaras "Inspelningen var helt
+   tyst" (422) **utan** Voxtral-anrop. Annars skickar `transcribeSpeech`
+   (`lib/ai/voice.ts`) ljudet till Voxtral (`POST /v1/audio/transcriptions`,
+   `language=sv`) och returnerar texten; blir svaret tomt görs ETT omförsök
+   utan språkhint (autodetekt). Token-utfallet loggas i `ai_usage_events`
+   (surface `dashboard_chat`, modell `voxtral-*`) — **även för tomma svar**
+   (Voxtral debiterar ljudingången; `VoiceError.usage` bär förbrukningen) —
+   så `/insights` och `/admin/ai-miljo` (§ 28) räknar med rösten.
 5. Texten hamnar i **chattrutan** — den skickas INTE automatiskt. Användaren
    läser igenom, rättar och trycker skicka själv.
 6. Därefter är det en helt vanlig chatt-turn: agenten planerar, läser data och
@@ -4291,8 +4307,9 @@ INNAN fallbacken används.
   utan granskning skulle ta bort människa-i-loopen precis där agenten kan
   skriva i databasen.
 - Talsyntes (agenten som svarar med röst) är inte i scope.
-- Språket är låst till svenska (`language=sv`) — det höjer träffsäkerheten på
-  domänord markant. Ett språkval per användare kan läggas till senare utan
+- Språket är svenska som default (`language=sv`) — det höjer träffsäkerheten
+  på domänord markant; ger hinten tom text görs ett omförsök med autodetekt
+  (`transcribeSpeech`). Ett språkval per användare kan läggas till senare utan
   brytande ändring.
 - Resultatprofiler för quiz (`result_buckets`) och publicering ställs in i
   modul-admin, inte via chatten.
@@ -4481,7 +4498,10 @@ ALLA operationer, även admin utestängd): `tenant`/`owner` (cascadeDelete),
 `MeetingSegment[] { index, text, at?, speaker? }`, 2 MB),
 `consent_confirmed_at`, `started_at`, `ended_at`. **Denylistad i
 `lib/ai/redaction.ts`** → `query_collection` exponerar den aldrig. Owner-only
-⇒ migration-only (§ 27-precedens). `speaker`-fältet är reserverat från dag 1
+⇒ ingen collection-def i `setup-via-api.mjs` (§ 27-precedens), men
+kollektionens **existens** är ett hårt baseline-invariant i
+`verify-baseline.mjs` (§ 23.4:s compass-precedens) eftersom PB-migrationer
+bara körs när PB-imagen byggs om. `speaker`-fältet är reserverat från dag 1
 för Fas 3 (talarindelning) så framtida diarisering inte kräver
 datamodelländring.
 
@@ -4522,9 +4542,30 @@ segment).
    PB v0.23.4:s tysta regel-nekande** (400/403/404, § 21.3-klassen) — ägar-/
    tenant-checken i koden är den hårda gränsen, fallbacken är robusthet
    (samma mönster som § 18.3/§ 20.5/§ 30.4). Tak: 3 h / 160 segment
-   (art. 15). Tystnad (Voxtral 422) = tomt segment, inte fel. En kraschad flik
-   kostar max ett segment; "Återuppta granskningen"-bannern i `/chatt` öppnar
-   det oavslutade mötet.
+   (art. 15). En kraschad flik kostar max ett segment; "Återuppta
+   granskningen"-bannern i `/chatt` öppnar det oavslutade mötet.
+   **Tomt resultat är aldrig tyst (2026-09).** Incident: mötet slutade som
+   "tomt överallt" — blank live-ruta, tomt transkript, inget protokoll, båda
+   segment-anropen 200 och inget fel — eftersom Voxtrals tomma svar (422)
+   tolkades som "tystnad" och bara renderades som ingenting. Nu mäts
+   segmentets **ljudnivå** (topp/RMS på WAV-PCM, ren + enhetstestad
+   `@platform/shared` audio-level.ts) på BÅDA sidor: (1) klienten visar en
+   **mikrofonmätare** under inspelningen och varnar efter ~6 s helt tyst
+   ingång ("Mikrofonen fångar inget ljud") — en avstängd/fel vald mikrofon
+   syns alltså innan första segmentet ens är uppladdat; (2) servern skickar
+   INTE effektivt tysta segment till Voxtral (`silent: true`, ingen kostnad)
+   och svarar med `warning` när ljud fanns men ingen text kom tillbaka —
+   live-rutan visar "(tyst avsnitt)" respektive orsaken, och granskningen
+   förklarar varför ett transkript blev tomt (tyst mikrofon vs. ljud som
+   inte kunde tolkas). (3) `transcribeSpeech` (`lib/ai/voice.ts`) gör ETT
+   nytt försök **utan språkhint** (autodetekt) när svaret med `language=sv`
+   blir tomt — skydd mot att språkkoden tyst ger tom text; gäller även
+   röstknappen § 31, som dessutom svarar "Inspelningen var helt tyst" utan
+   Voxtral-anrop. Nivåmätningen är rent numerisk (ingen röstidentifiering,
+   § 31.4) och lagras aldrig. Saknas kollektionen på instansen (migrationen
+   inte körd) säger `startMeetingAction` det uttryckligen i stället för PB:s
+   generiska 404, och `verify-baseline.mjs` fäller deployen
+   (`meeting_transcripts` i must-exist-listan).
 4. **Granskning (människa-i-loopen, art. 14):** redigerbart transkript;
    protokollutkastet (sammanfattning/beslut/åtgärdspunkter) **genereras
    automatiskt när granskningen öppnas** (även vid återupptagen granskning;

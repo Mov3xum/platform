@@ -9,13 +9,21 @@
  * så ingen kvalitet förloras, och ett 90-sekunderssegment blir ~2,9 MB (långt
  * under 20 MB-taket i @platform/shared voice.ts).
  *
+ * Konverteringen mäter samtidigt ljudNIVÅN (topp/RMS, `@platform/shared`
+ * audio-level.ts) så att anroparen kan skilja "tyst segment" från "ljud som
+ * inte kunde tolkas" — utan den mätningen slutar en avstängd mikrofon som ett
+ * oförklarat tomt transkript (§ 34.3).
+ *
  * Ren webbläsarkod utan beroenden (AudioContext + OfflineAudioContext).
  * Fail-soft: kan klippet inte avkodas returneras null och anroparen skickar
  * originalformatet som förut — servern svarar då med Mistrals felorsak.
  *
  * Integritet: allt sker i minnet i användarens webbläsare — inget ljud lagras
- * och ingen ny dataväg tillkommer (§ 31-dataflödet oförändrat).
+ * och ingen ny dataväg tillkommer (§ 31-dataflödet oförändrat). Nivåmätningen
+ * är rent numerisk (ingen röstidentifiering, § 31.4).
  */
+
+import { measureFloatLevel, type AudioLevel } from '@platform/shared';
 
 export const VOICE_WAV_SAMPLE_RATE = 16000;
 export const VOICE_WAV_MIME = 'audio/wav';
@@ -74,12 +82,21 @@ function encodeWavPcm16(samples: Float32Array, sampleRate: number): Blob {
   return new Blob([buffer], { type: VOICE_WAV_MIME });
 }
 
+export interface WavConversion {
+  /** 16 kHz mono 16-bit PCM WAV. */
+  wav: Blob;
+  /** Uppmätt nivå på det konverterade ljudet (topp/RMS, 0..1). */
+  level: AudioLevel;
+  /** Klippets längd i sekunder. */
+  seconds: number;
+}
+
 /**
- * Konverterar ett inspelat klipp (webm/ogg/mp4 …) till 16 kHz mono WAV.
- * Returnerar null när webbläsaren inte kan avkoda klippet — anroparen
- * skickar då originalet (fail-soft, aldrig ett hårt stopp).
+ * Konverterar ett inspelat klipp (webm/ogg/mp4 …) till 16 kHz mono WAV och
+ * mäter nivån. Returnerar null när webbläsaren inte kan avkoda klippet —
+ * anroparen skickar då originalet (fail-soft, aldrig ett hårt stopp).
  */
-export async function convertBlobToWav(blob: Blob): Promise<Blob | null> {
+export async function convertBlobToWavDetailed(blob: Blob): Promise<WavConversion | null> {
   try {
     if (!blob || blob.size === 0) return null;
     const Ctor = getAudioContextCtor();
@@ -104,9 +121,20 @@ export async function convertBlobToWav(blob: Blob): Promise<Blob | null> {
     source.connect(offline.destination);
     source.start();
     const rendered = await offline.startRendering();
+    const samples = rendered.getChannelData(0);
 
-    return encodeWavPcm16(rendered.getChannelData(0), VOICE_WAV_SAMPLE_RATE);
+    return {
+      wav: encodeWavPcm16(samples, VOICE_WAV_SAMPLE_RATE),
+      level: measureFloatLevel(samples),
+      seconds: decoded.duration
+    };
   } catch {
     return null;
   }
+}
+
+/** Bakåtkompatibel variant: bara WAV-bloben (eller null). */
+export async function convertBlobToWav(blob: Blob): Promise<Blob | null> {
+  const result = await convertBlobToWavDetailed(blob);
+  return result ? result.wav : null;
 }

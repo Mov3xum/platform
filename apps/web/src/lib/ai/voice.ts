@@ -47,6 +47,15 @@ const REQUEST_TIMEOUT_MS = 60_000;
 export class VoiceError extends Error {
   /** HTTP-status att svara klienten med. */
   status: number;
+  /**
+   * Förbrukning för anrop som FAKTISKT nådde Voxtral men gav tom text (422).
+   * Voxtral debiterar på ljudingången, inte på utdatatexten — ett tomt svar
+   * är inte gratis och MÅSTE bokföras i `ai_usage_events` av anroparen
+   * (§ 9.6 kostnadsspärr, § 28 miljödashboard).
+   */
+  usage?: { tokensIn: number; tokensOut: number };
+  /** Modellen som svarade (för kostnadsloggning per modell). */
+  model?: string;
 
   constructor(message: string, status = 400) {
     super(message);
@@ -210,7 +219,10 @@ export async function transcribeAudio(
       }
       const result = parseTranscription(payload, model);
       if (!result.text) {
-        throw new VoiceError('Ingen text kunde höras i inspelningen. Försök igen.', 422);
+        const empty = new VoiceError('Ingen text kunde höras i inspelningen. Försök igen.', 422);
+        empty.usage = result.usage;
+        empty.model = result.model;
+        throw empty;
       }
       return result;
     }
@@ -231,6 +243,57 @@ export async function transcribeAudio(
   }
 
   throw lastError ?? new VoiceError('Okänt fel vid transkribering.', 502);
+}
+
+/**
+ * Transkriberar TAL: samma som `transcribeAudio`, men om resultatet blir tomt
+ * (422) trots ett språkhint görs ETT nytt försök utan hint (autodetekt).
+ * Skyddar mot att en språkkod modellen inte tolkar som väntat tyst ger tom
+ * text. Omförsöket sker bara i det tvetydiga fallet, och anroparen bör mäta
+ * nivån först (`@platform/shared` audio-level.ts) så att tystnad aldrig
+ * skickas alls. Kastar 422 vidare om även autodetekt inte hör någon text.
+ *
+ * Kostnad: Voxtral debiterar på ljudingången, så BÅDA anropen bokförs —
+ * förbrukningen summeras på resultatet respektive på det slutliga 422-felet
+ * (`VoiceError.usage`), och anroparen loggar den i `ai_usage_events` även i
+ * fel-grenen (§ 9.6, § 31.4, § 34.5).
+ */
+export async function transcribeSpeech(
+  audio: Buffer,
+  mime: string,
+  options: TranscribeOptions = {}
+): Promise<TranscriptionResult> {
+  const language = (options.language ?? 'sv').trim();
+  try {
+    return await transcribeAudio(audio, mime, { language });
+  } catch (err) {
+    if (!(err instanceof VoiceError) || err.status !== 422 || !language) throw err;
+    const first = err.usage ?? { tokensIn: 0, tokensOut: 0 };
+    console.warn('[voice] tomt transkript med språkhint — försöker autodetekt', {
+      language,
+      model: err.model || voiceModel()
+    });
+    try {
+      const second = await transcribeAudio(audio, mime, { language: '' });
+      return {
+        ...second,
+        usage: {
+          tokensIn: first.tokensIn + second.usage.tokensIn,
+          tokensOut: first.tokensOut + second.usage.tokensOut
+        }
+      };
+    } catch (retryErr) {
+      if (retryErr instanceof VoiceError && retryErr.status === 422) {
+        const again = retryErr.usage ?? { tokensIn: 0, tokensOut: 0 };
+        retryErr.usage = {
+          tokensIn: first.tokensIn + again.tokensIn,
+          tokensOut: first.tokensOut + again.tokensOut
+        };
+        retryErr.model = retryErr.model || err.model;
+      }
+      throw retryErr;
+    }
+  }
 }
 
 function toVoiceError(status: number, body: string): VoiceError {

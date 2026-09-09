@@ -2189,9 +2189,12 @@ await ensureCollection({
     { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
     { name: 'surface', type: 'select', required: true, maxSelect: 1, values: ['toolbox', 'tool_chat', 'dashboard_chat', 'startup_chat', 'intl', 'suggestions', 'workshop_run', 'connector_chat'] },
     { name: 'model', type: 'text', required: true, max: 100 },
-    { name: 'tokens_in', type: 'number', required: true, min: 0 },
-    { name: 'tokens_out', type: 'number', required: true, min: 0 },
-    { name: 'cost_estimate_usd', type: 'number', required: true, min: 0 },
+    // Migration 1700000145: talfälten är VALFRIA — PB tolkar 0 som "tomt" för
+    // ett required nummerfält, vilket tyst tappade alla events med tokens_out
+    // = 0 (embeddings, tomma Voxtral-svar) eller cost = 0 (§ 9.6, § 28).
+    { name: 'tokens_in', type: 'number', required: false, min: 0 },
+    { name: 'tokens_out', type: 'number', required: false, min: 0 },
+    { name: 'cost_estimate_usd', type: 'number', required: false, min: 0 },
     { name: 'tool_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'error', type: 'text', required: false, max: 500 }
   ],
@@ -2205,6 +2208,14 @@ await ensureCollection({
   createRule: `${ANY_AUTH} && @request.auth.id = user`,
   updateRule: null,
   deleteRule: null
+});
+
+// Migration 1700000145 (befintliga installs): släpp required på talfälten så
+// att 0-värden (embeddings, tomma Voxtral-svar, okänd prismodell) kan lagras.
+await patchCollection('ai_usage_events', [], {
+  tokens_in: { required: false },
+  tokens_out: { required: false },
+  cost_estimate_usd: { required: false }
 });
 
 // Migration 1700000059: startup_financials — årsmetrics per bolag.
