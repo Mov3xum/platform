@@ -141,6 +141,7 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
       steps: m.steps,
       approval_request: m.approval_request,
       meeting_request: m.meeting_request,
+      sources: m.sources,
       model: m.role === 'assistant' ? m.model : undefined,
       // Turens tokens (in + ut, per-turn-metadata § 9.9) → inline miljöchip
       // under varje assistant-svar.

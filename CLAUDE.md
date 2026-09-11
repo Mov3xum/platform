@@ -640,15 +640,51 @@ motivering, aldrig som fri URL.
 - Hämtade källor + `fetched_at` loggas i `tool_runs.input.web_sources`
   (krav från EU AI Act art. 13 — transparens om underlag).
 
-**Dashboardchatt (`/idag`).** Webbkälle-toggeln i dashboardchatten
-hämtar EU-whitelisten ovan (default `breakit`, `sifted`, `vinnova`) via
-samma cache/SSRF-skydd — Wikipedia (US/Wikimedia) används **inte** längre
-(bröt mot EU-suveränitetspolicyn). När en agent väljs i chatten hämtas
-dessutom agentens egna `web_sources` och dess `prompt_template` renderas
-(mot portföljkontext för `ai_system_wide`-agenter; `{{startup.*}}` blir
-tomt för per-bolag-agenter som istället låter modellen hämta detaljer via
-sina query-verktyg). Samma EU-suveränitets- och transparensgarantier
-gäller alltså som i `/toolbox`.
+**Dashboardchatt (`/chatt`) — "Webbkällor" = riktig internetsökning
+(2026-09).** Toggeln gjorde tidigare INGEN webbsökning: den klistrade bara in
+rubriker från tre RSS-flöden i systemprompten, så "hur många startups finns i
+Sverige?" gav "jag har inte tillgång till nationell statistik". Nu exponerar
+toggeln verktyget **`web_search`** i agent-loopen (`lib/ai/tools.ts` →
+`lib/ai/web-search.ts`): ett isolerat `/v1/conversations`-anrop med Mistrals
+inbyggda `web_search`-connector (Mistral AI, FR/EU — samma leverantör och
+DPA, ingen ny tredjepart; `callMistralConversation` returnerar nu även
+`references`, tolkade av den rena, enhetstestade `web-search-parse.ts`).
+Eftersom connectorn bara finns i conversations-API:t — inte i
+chat.completions som loopen kör — körs sökningen som ett function-verktyg,
+så modellen kan **kombinera internet med databasen/kunskapsbasen i samma
+resonemang** (`WEB_SEARCH_GUIDANCE` i `guidance.ts`; när toggeln är av
+injiceras `WEB_SEARCH_OFF_HINT` så modellen pekar på knappen i stället för
+att bara säga "jag har inte tillgång").
+- **Dataflöde/GDPR § 5:** den sanerade sökfrågan är det ENDA som lämnar
+  plattformen (`sanitizeWebQuery`: personnummer maskas, 300 tecken); ingen
+  chatt-historik och ingen bolagskontext skickas med sub-anropet, och
+  guidningen förbjuder intern data/PII i `query`. Hämtat webbinnehåll
+  behandlas som DATA, inte instruktioner (§ 9.3, även för webbsidor).
+- **Transparens (art. 13):** hämtade källor (titel + URL, bara http(s))
+  persisteras som `ToolRunMessage.sources` (`WebSearchSourceRef` i
+  `@platform/shared`) och visas som chips "Källor från webben" under svaret
+  (`DashboardChat`); steg-etiketten "Söker på internet" är PII-fri (§ 17.8).
+  `safe-html.ts` renderar nu http(s)-länkar (`[text](url)` och nakna URL:er)
+  som `<a rel="noopener noreferrer">` — andra protokoll blir aldrig länkar
+  (enhetstestat i `safe-html-links.test.ts`).
+- **Opt-in per tur:** verktyget finns bara när användaren slagit på toggeln.
+  Sökmodell: `mistral-medium-latest` med fallback till Large vid 429/5xx;
+  `MISTRAL_WEB_SEARCH_TOOL=web_search_premium` (Coolify) byter till
+  premium-connectorn. Tokens loggas i `ai_usage_events` (surface
+  `dashboard_chat`) och räknas mot månadstaket (§ 9.6). **Känd begränsning:**
+  Mistral debiterar dessutom en fast avgift per sökanrop som inte kan
+  uttryckas i tokens — `cost_estimate_usd` underskattar därför sökturer.
+- **Riskklass (art. 11): begränsad** — publik informationssökning på
+  personalens uttryckliga initiativ, människa-i-loopen, ingen profilering.
+- RSS-blocket (default `breakit`, `sifted`, `vinnova`, samma cache/SSRF-
+  skydd) injiceras fortfarande som billig omvärldskontext när toggeln är på.
+  Wikipedia (US/Wikimedia) används **inte** (EU-suveränitet).
+
+När en agent väljs i chatten hämtas dessutom agentens egna `web_sources`
+och dess `prompt_template` renderas (mot portföljkontext för
+`ai_system_wide`-agenter; `{{startup.*}}` blir tomt för per-bolag-agenter
+som istället låter modellen hämta detaljer via sina query-verktyg). Samma
+EU-suveränitets- och transparensgarantier gäller alltså som i `/toolbox`.
 
 ### 9.9 Chattläge, modellval och bilagor
 
@@ -886,6 +922,7 @@ omsättning.
 | `ai_industry_pulse` | begränsad | Aggregerar publika nyheter, ingen profilering |
 | `ai_funding_radar` | begränsad | Matchar utlysningar mot bolagsfas, vägledande |
 | `ai_portfolio_risk` | begränsad | Bara whitelistade fält, rankar bolag — ej personer |
+| `web_search` (chatt-verktyg, § 9.8) | begränsad | Internetsökning via Mistral Web Search (EU) på personalens opt-in; bara sanerad sökfråga lämnar plattformen; källor visas |
 | `edu_irl_levels` | minimal | Generellt utbildningsmaterial |
 | `template_pitch_deck` | n/a | Statisk mall, ingen AI-inferens |
 
@@ -4971,6 +5008,12 @@ blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdn
 | `apps/web/src/components/home/HomeTimeline.tsx` | Tidslinje 7/14/30 dagar (dagslinjal + band i körfält, djuplänk `/arshjul?item=`) |
 | `apps/web/src/components/home/CompanyNews.tsx` | Bolagsnytt som vertikal tidslinje |
 | `apps/web/src/components/home/OrgPostList.tsx` | Inläggslistan (client): toppnyhet + notiser i spalter / numrerad handbok; redigerare, fäst/redigera/ta bort — används i alla tre flikarna (`kinds` begränsar typvalet per flik) |
+| `apps/web/src/components/home/PostComposer.tsx` | Redigeraren (client, § 37.6): verktygsrad, kortkommandon, emoji-väljare, media-uppladdning (knapp/dra-och-släpp/klistra in), förhandsgranskning |
+| `apps/web/src/components/home/EmojiPicker.tsx` + `lib/emoji/data.ts` + `lib/emoji-search.ts` | Fullt emoji-paket (genererat lokalt, ingen CDN), sök sv/en, hudton, senast använda |
+| `apps/web/src/components/home/PostMedia.tsx` | Bildgalleri + lightbox, film inline, dokument-chips — delas av inläggsvyn och förhandsgranskningen |
+| `apps/web/src/lib/markdown-edit.ts` (+ `.test.ts`) | Ren textmanipulation för verktygsraden (omslut, radprefix, länk, fortsätt lista) |
+| `apps/web/src/app/api/hem/media/route.ts` | Upload-route (staff-only) → `org_post_media`, returnerar validerad `OrgPostMedia` |
+| `backend/pocketbase-schema/migrations/1700000147_create_org_post_media.js` | Collection `org_post_media` + `org_posts.media` (json) |
 | `apps/web/src/components/home/HomeBoardTabs.tsx` | Avdelningsrubrikerna Anslagstavla · Internutbildningar (client, URL-synk `?flik=`; slug-logiken i `@platform/shared`) |
 | `apps/web/src/components/home/OmvarldFeed.tsx` | Omvärldsflödet (client) som tidslinjelista i samma språk som Bolagsnytt: källfilter + statusrad (live/utgången cache/nere) |
 | `apps/web/src/components/home/AutoRefresh.tsx` | Periodisk `router.refresh()` (10 min + vid synlig flik) |
@@ -4989,7 +5032,8 @@ som union i **migration 1700000145** och speglat i `setup-via-api.mjs` via
 `patchCollection`), `audience` (`staff | all`), `pinned`,
 `published_at` (tomt = direkt; framtid = schemalagt), `expires_at` (tomt =
 utgår aldrig), `link_url` (intern sökväg `/…` eller https — validerat i
-`isSafeOrgPostLink`, aldrig `javascript:`/`data:`), autodate explicit
+`isSafeOrgPostLink`, aldrig `javascript:`/`data:`), `media` (json,
+`OrgPostMedia[]` — § 37.6, migration **1700000147**), autodate explicit
 (§ 28.5). Speglad i `setup-via-api.mjs` (collection-def + `FORCE_CREATE_RULES`).
 
 **Målgrupp.** `staff` (default) syns för Movexum-personal + observer; `all`
@@ -5095,6 +5139,72 @@ finansiärer/utlysningar) — vill man bredda/smalna läggs källan till i
   `audience=all`-inlägg via RLS, och aldrig bolagsnytt/omvärld/agenda på `/hem`.
 
 ---
+
+### 37.6 Anslagstavlans redigerare — emoji, formatering & media
+
+Inläggen skrivs i `PostComposer` (client) som ersätter den tidigare rena
+textrutan. Lagringen är fortfarande **markdown i `org_posts.body`** (ingen
+HTML lagras, ingen WYSIWYG-DOM) — det som ändrats är redigeringsytan och
+renderarens delmängd:
+
+- **Verktygsrad + kortkommandon:** fet (Ctrl+B), kursiv (Ctrl+I), kod
+  (Ctrl+E), rubrik, punkt-/numrerad lista (Ctrl+Shift+8/7), checklista,
+  citat, länk (Ctrl+K), emoji (Ctrl+.), media. Enter i en lista fortsätter
+  listan (nästa nummer / ny checkruta), Enter på tom listrad avslutar den;
+  Ctrl+Enter publicerar. All textmanipulation är ren och enhetstestad i
+  `lib/markdown-edit.ts` (komponenten applicerar bara `{ value, start, end }`).
+- **Markdown-delmängden (`lib/safe-html.ts`)** är utökad — gäller ALLA ytor
+  som renderar via helpern (chatten, anslagstavlan): `*kursiv*`/`_kursiv_`,
+  `~~struken~~`, `` `kod` ``, `[text](url)`, automatiskt länkade
+  https-adresser, `> citat`, `---`, `- [ ]`/`- [x]`. **XSS-gränsen är
+  oförändrad:** allt escapas först; en länk släpps bara igenom som `<a href>`
+  om adressen är en intern sökväg (`/…`, inte `//…`) eller http(s) —
+  `javascript:`/`data:` visas som ren text (`isSafeHref`, låst i
+  `safe-html.test.ts`). Externa länkar får `rel="noopener noreferrer"`.
+- **Fullt emoji-paket:** `lib/emoji/data.ts` är GENERERAD av
+  `apps/web/scripts/generate-emoji-data.py` — en handkurerad lista i nio
+  kategorier (1 400+ emoji, inkl. flaggor) vars namn slås upp lokalt via
+  Pythons `unicodedata`; **ingen extern datakälla, ingen CDN** (§ 1). Sök på
+  engelska Unicode-namn och svenska sökord (`lib/emoji-search.ts`, ren +
+  enhetstestad: "hjärta" → ❤️ före 💔 via huvudord-rankning), hudton
+  (Fitzpatrick-modifierare bara på `SKIN_TONE_BASES`), "senast använda" i
+  `localStorage` (`movexum-emoji-recent`, bekvämlighet — ingen datakälla).
+  Katalogen (~40 KB) laddas lazy första gången väljaren öppnas.
+- **Media (bilder, film, dokument):** filer laddas upp DIREKT vid val (knapp,
+  dra-och-släpp på hela redigeraren, eller klistra in en bild) via
+  route-handlern `/api/hem/media` (§ 18.2-mönstret: inte bunden av
+  `serverActions.bodySizeLimit`; XHR med progress) till kollektionen
+  **`org_post_media`** (migration 1700000147; riktiga PB-filer, tokenlös publik
+  URL som `workshop_media`). Inlägget lagrar bara metadata i `org_posts.media`
+  (`OrgPostMedia[]`: id, url, kind, name, mime, size_bytes, ev. width/height —
+  max 8/inlägg). **`validateOrgPostInput` accepterar BARA URL:er till
+  org_post_media-filer** (`isOrgPostMediaUrl`, id måste matcha) — aldrig fria
+  bildlänkar (inget hotlink, ingen tracking-pixel). Mime/storlek valideras
+  med samma delade `validateOrgPostMediaFile` i klient OCH route (bild 15 MB,
+  film 200 MB, dokument PDF/Word/PowerPoint/Excel 50 MB; ändelse-fallback när
+  webbläsaren inte rapporterar mime). Visning via `PostMedia`: galleri
+  (1/2/3/4+ med "+N"), lightbox med piltangenter, `<video controls>`,
+  dokument-chips med typ + storlek. Hopfällda notiser visar en kompakt
+  tumnagelrad.
+- **Förhandsgranskning** renderar med exakt samma `chatMarkdownToHtml` +
+  `PostMedia` som inläggsvyn, så det man ser är det som publiceras.
+- **Schema-drift (§ 24.4/§ 30.4-invarianten):** PB släpper okända fält tyst.
+  Server-actionen läser tillbaka posten när media skickats och svarar med en
+  `warning` (visas som gul banner) om `org_posts.media` saknas i schemat —
+  aldrig en tyst lyckad no-op. Speglat i `setup-via-api.mjs`
+  (`org_post_media` + `patchCollection('org_posts', media)`).
+- **RBAC/GDPR:** upload-routen kräver `ORG_POST_AUTHOR_ROLES` (createRule är
+  roll-lös per § 21.3), tenant stämplas server-side, rate-limit 60/10 min per
+  användare, superuser-fallback bara vid PB v0.23.4:s tysta regel-nekande.
+  `org_post_media` list/view = auth + tenant (samma klass som `workshop_media`;
+  filen är ändå publik via URL — ladda inte upp personuppgifter, UI:t är
+  verksamhetsmaterial). `cascadeDelete` på tenant. Chatt-agenten kan **inte**
+  sätta `media` (`writable-fields.ts`: `agent: deny` — den kan inte ladda upp
+  filer och ska inte peka om bilagor); befintliga bilagor följer med orörda
+  när agenten uppdaterar text via `update_org_post`.
+- **Riskklass (EU AI Act):** n/a — ren redigerings-/presentationsfunktion,
+  ingen AI-inferens. Emoji-/mediadata når aldrig AI-kontexten annat än som
+  brödtext i `org_posts.body` (redan läsbar via `query_collection`, § 37.5).
 
 ## 38. Svensk tid i kalender & events (Europe/Stockholm)
 

@@ -91,6 +91,199 @@ export const ORG_POST_TITLE_MAX = 160;
 export const ORG_POST_BODY_MAX = 20_000;
 export const ORG_POST_LINK_MAX = 500;
 
+// ── Media på inlägg (bilder, film, dokument) — § 37.6 ───────────────────────
+
+/** MÅSTE spegla `kind`-select i migration 1700000147 (org_post_media). */
+export const ORG_POST_MEDIA_KINDS = ['image', 'video', 'file'] as const;
+export type OrgPostMediaKind = (typeof ORG_POST_MEDIA_KINDS)[number];
+
+/** Max antal filer per inlägg. */
+export const ORG_POST_MEDIA_MAX = 8;
+export const ORG_POST_MEDIA_NAME_MAX = 200;
+export const ORG_POST_MEDIA_URL_MAX = 600;
+
+export const ORG_POST_IMAGE_MAX_BYTES = 15 * 1024 * 1024; // 15 MB
+export const ORG_POST_VIDEO_MAX_BYTES = 200 * 1024 * 1024; // 200 MB
+export const ORG_POST_FILE_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+
+/** Tillåtna mime-typer per slag. MÅSTE spegla `file.mimeTypes` i migration 1700000147. */
+export const ORG_POST_MEDIA_MIMES: Record<OrgPostMediaKind, readonly string[]> = {
+  image: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+  video: ['video/mp4', 'video/webm', 'video/quicktime'],
+  file: [
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  ]
+};
+
+/** Ändelse → mime när webbläsaren inte rapporterar någon (Windows, § 24.4-läxan). */
+const EXT_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+};
+
+/** Slår upp vilket slag en mime-typ (eller filnamn) hör till. */
+export function orgPostMediaKindFor(mime: string, filename = ''): OrgPostMediaKind | null {
+  let m = (mime || '').toLowerCase().split(';')[0].trim();
+  if (!m || m === 'application/octet-stream') {
+    const ext = filename.toLowerCase().split('.').pop() || '';
+    m = EXT_MIME[ext] || m;
+  }
+  for (const kind of ORG_POST_MEDIA_KINDS) {
+    if (ORG_POST_MEDIA_MIMES[kind].includes(m)) return kind;
+  }
+  return null;
+}
+
+export function resolveOrgPostMediaMime(mime: string, filename = ''): string {
+  const m = (mime || '').toLowerCase().split(';')[0].trim();
+  if (m && m !== 'application/octet-stream') return m;
+  const ext = filename.toLowerCase().split('.').pop() || '';
+  return EXT_MIME[ext] || m;
+}
+
+export type OrgPostMediaFileValidation =
+  | { ok: true; kind: OrgPostMediaKind; mime: string }
+  | { ok: false; error: string };
+
+function mbLabel(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
+/**
+ * Förvalidering av en fil som ska laddas upp till anslagstavlan — delas av
+ * klient (innan uppladdning) och route-handlern (säkerhetsgränsen).
+ */
+export function validateOrgPostMediaFile(file: {
+  type: string;
+  size: number;
+  name?: string;
+}): OrgPostMediaFileValidation {
+  const mime = resolveOrgPostMediaMime(file.type, file.name);
+  const kind = orgPostMediaKindFor(mime, file.name);
+  if (!kind) {
+    return {
+      ok: false,
+      error: 'Filtypen stöds inte. Välj bild (PNG, JPG, WEBP, GIF), film (MP4, WebM, MOV) eller dokument (PDF, Word, PowerPoint, Excel).'
+    };
+  }
+  if (!Number.isFinite(file.size) || file.size <= 0) return { ok: false, error: 'Filen verkar vara tom.' };
+  const max =
+    kind === 'image' ? ORG_POST_IMAGE_MAX_BYTES : kind === 'video' ? ORG_POST_VIDEO_MAX_BYTES : ORG_POST_FILE_MAX_BYTES;
+  if (file.size > max) {
+    const what = kind === 'image' ? 'Bilden' : kind === 'video' ? 'Filmen' : 'Dokumentet';
+    return { ok: false, error: `${what} är för stor (max ${mbLabel(max)}).` };
+  }
+  return { ok: true, kind, mime };
+}
+
+/** En fil på ett inlägg — pekar på en org_post_media-post via publik fil-URL. */
+export interface OrgPostMedia {
+  /** org_post_media-postens id. */
+  id: string;
+  /** Tokenlös publik fil-URL (`…/api/files/org_post_media/<id>/<fil>`). */
+  url: string;
+  kind: OrgPostMediaKind;
+  /** Ursprungligt filnamn (visas för dokument). */
+  name: string;
+  mime: string;
+  size_bytes: number;
+  /** Bildmått om kända (för stabil layout innan bilden laddats). */
+  width?: number;
+  height?: number;
+}
+
+const MEDIA_URL_RE = /^https?:\/\/[^\s"'<>]+\/api\/files\/org_post_media\/([A-Za-z0-9_-]+)\/[^\s"'<>?#]+$/i;
+
+/**
+ * Är url:en en fil-URL till org_post_media? Bara sådana får lagras på ett
+ * inlägg — aldrig fria bildlänkar (inget hotlink, ingen tracking-pixel, XSS-
+ * säkert som src/href).
+ */
+export function isOrgPostMediaUrl(url: string, id?: string): boolean {
+  if (!url || url.length > ORG_POST_MEDIA_URL_MAX) return false;
+  const m = url.match(MEDIA_URL_RE);
+  if (!m) return false;
+  return id ? m[1] === id : true;
+}
+
+export type OrgPostMediaValidation = { ok: true; value: OrgPostMedia[] } | { ok: false; error: string };
+
+/** Validerar/normaliserar media-listan från formulär/PB (okänt → avvisas). */
+export function validateOrgPostMedia(raw: unknown): OrgPostMediaValidation {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, value: [] };
+  let list: unknown = raw;
+  if (typeof list === 'string') {
+    try {
+      list = JSON.parse(list);
+    } catch {
+      return { ok: false, error: 'Medialistan kunde inte läsas.' };
+    }
+  }
+  if (!Array.isArray(list)) return { ok: false, error: 'Medialistan har fel format.' };
+  if (list.length > ORG_POST_MEDIA_MAX) {
+    return { ok: false, error: `Högst ${ORG_POST_MEDIA_MAX} filer per inlägg.` };
+  }
+  const out: OrgPostMedia[] = [];
+  const seen = new Set<string>();
+  for (const item of list) {
+    const o = (item ?? {}) as Record<string, unknown>;
+    const id = String(o.id ?? '').trim();
+    const url = String(o.url ?? '').trim();
+    const kind = o.kind;
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) return { ok: false, error: 'En fil saknar giltigt id.' };
+    if (!isOrgPostMediaUrl(url, id)) return { ok: false, error: 'En fil har en ogiltig adress.' };
+    if (typeof kind !== 'string' || !(ORG_POST_MEDIA_KINDS as readonly string[]).includes(kind)) {
+      return { ok: false, error: 'En fil har okänt slag.' };
+    }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const size = Number(o.size_bytes);
+    const width = Number(o.width);
+    const height = Number(o.height);
+    const media: OrgPostMedia = {
+      id,
+      url,
+      kind: kind as OrgPostMediaKind,
+      name: String(o.name ?? '').trim().slice(0, ORG_POST_MEDIA_NAME_MAX),
+      mime: String(o.mime ?? '').trim().slice(0, 150),
+      size_bytes: Number.isFinite(size) && size >= 0 ? Math.round(size) : 0
+    };
+    if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+      media.width = Math.round(width);
+      media.height = Math.round(height);
+    }
+    out.push(media);
+  }
+  return { ok: true, value: out };
+}
+
+/** Läser media-listan från en PB-rad tolerant (aldrig kasta i en läsväg). */
+export function coerceOrgPostMedia(raw: unknown): OrgPostMedia[] {
+  const v = validateOrgPostMedia(raw);
+  return v.ok ? v.value : [];
+}
+
+export function formatOrgPostMediaSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} kB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0).replace('.', ',')} MB`;
+}
+
 /** Roller som får skriva inlägg. Speglas i PB-reglerna (migration 1700000144). */
 export const ORG_POST_AUTHOR_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 /** Roller som får redigera/radera ANDRAS inlägg (utöver författaren själv). */
@@ -114,6 +307,8 @@ export interface OrgPost {
   expires_at?: string | null;
   /** Valfri länk (intern sökväg eller https-URL). */
   link_url?: string | null;
+  /** Bilder/film/dokument (§ 37.6). */
+  media?: OrgPostMedia[];
   created: string;
   updated?: string;
 }
@@ -127,6 +322,7 @@ export interface OrgPostInput {
   published_at?: string | null;
   expires_at?: string | null;
   link_url?: string | null;
+  media: OrgPostMedia[];
 }
 
 export type OrgPostValidation =
@@ -195,6 +391,9 @@ export function validateOrgPostInput(raw: Record<string, unknown>): OrgPostValid
 
   const pinned = raw.pinned === true || raw.pinned === 'true' || raw.pinned === 'on' || raw.pinned === 1;
 
+  const media = validateOrgPostMedia(raw.media);
+  if (!media.ok) return media;
+
   return {
     ok: true,
     value: {
@@ -205,7 +404,8 @@ export function validateOrgPostInput(raw: Record<string, unknown>): OrgPostValid
       pinned,
       published_at: published,
       expires_at: expires,
-      link_url: link || null
+      link_url: link || null,
+      media: media.value
     }
   };
 }
@@ -299,10 +499,14 @@ export function selectLiveOrgPosts<T extends OrgPost>(
 export function orgPostExcerpt(body: string, max = 180): string {
   const plain = body
     .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*]\s+\[( |x|X)\]\s+/gm, '')
     .replace(/^\s*[-*]\s+/gm, '')
     .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/^\s*(-{3,}|\*{3,})\s*$/gm, '')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/\s+/g, ' ')

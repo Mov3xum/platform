@@ -63,6 +63,15 @@ const GUIDE: ChatGuideSection[] = [
         description:
           'Chatten söker i organisationens uppladdade material (/kunskapsbas) och i dina egna filer (/filer).',
         examples: ['Vad säger vår coachningsprocess om det första bolagsmötet?']
+      },
+      {
+        title: 'Sök på internet (Webbkällor)',
+        description:
+          'Slå på Webbkällor (jordglobsknappen under chattrutan) så söker chatten på internet via Mistral Web Search (EU) — statistik, nyheter, utlysningar, regler och publika uppgifter om bolag — och visar källorna under svaret. Kombinera gärna med intern data i samma fråga.',
+        examples: [
+          'Hur många startups finns i Sverige, och hur många har vi i portföljen?',
+          'Vilka Vinnova-utlysningar är öppna just nu som passar våra deeptech-bolag?'
+        ]
       }
     ]
   },
