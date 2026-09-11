@@ -4,8 +4,8 @@ import { useState, type ReactNode } from 'react';
 import { HOME_TAB_PARAM, HOME_TAB_SLUGS, type OrgPostTab } from '@platform/shared';
 
 /**
- * Flikarna på Dashboard (CLAUDE.md § 37): Anslagstavla · Så gör vi ·
- * Internutbildningar — som redaktionella avdelningsrubriker (stora Sora-ord i
+ * Flikarna på Dashboard (CLAUDE.md § 37): Anslagstavla · Internutbildningar —
+ * som redaktionella avdelningsrubriker (stora Sora-ord i
  * rad, det aktiva i ink med ett kort brand-streck under, övriga tonade) i
  * stället för generiska flikar. Ren UI-kurering — innehållet är redan
  * RLS-filtrerat av servern; fliken speglas i URL:en (`?flik=…`) så att
@@ -32,7 +32,7 @@ export function HomeBoardTabs({
 }: {
   tabs: HomeTabDef[];
   initial: OrgPostTab;
-  panels: Record<OrgPostTab, ReactNode>;
+  panels: Partial<Record<OrgPostTab, ReactNode>>;
 }) {
   const [active, setActive] = useState<OrgPostTab>(initial);
   const current = tabs.find((t) => t.id === active) ?? tabs[0];

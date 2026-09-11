@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import { PageShell } from '@/components/PageShell';
 import { Icon } from '@/components/proto/Icon';
 import { OrgPostList, type BoardPost } from '@/components/home/OrgPostList';
-import { PlatformIntro } from '@/components/home/PlatformIntro';
 import { HomeTimelineStrip } from '@/components/home/HomeTimeline';
 import { CompanyNews } from '@/components/home/CompanyNews';
 import { HomeBoardTabs, type HomeTabDef } from '@/components/home/HomeBoardTabs';
@@ -30,7 +29,7 @@ import {
  * förstasida i stället för en dashboard: inga kort eller boxar, och samma
  * typskala som chatten (§ 37.1). Nyckeltalen är en boxlös siffer-rad under
  * hälsningen, agendan en tidslinje i full bredd (7/14/30 dagar), avdelningarna
- * (Anslagstavla · Så gör vi · Internutbildningar) Sora-rubriker i rad, och i
+ * (Anslagstavla · Internutbildningar) Sora-rubriker i rad, och i
  * sidospalten ligger Bolagsnytt och Omvärld som två likadana tidslinjelistor.
  * Ingen dataväg, ingen AI-inferens.
  */
@@ -151,71 +150,6 @@ function StatFigure({
   );
 }
 
-/**
- * Dekorativ årsring i mastheadet — ett eko av årshjulet: fyra tunna ringar
- * och en brand-båge som visar hur långt året har kommit. Ren SVG i
- * brand-token (följer dark mode), ingen data utöver dagens datum.
- */
-function YearRing({ today }: { today: Date }) {
-  const start = new Date(today.getFullYear(), 0, 1);
-  const dayOfYear = Math.round((today.getTime() - start.getTime()) / 86_400_000);
-  const share = Math.min(1, Math.max(0, dayOfYear / 365));
-  const r = 118;
-  const c = 2 * Math.PI * r;
-  return (
-    <svg
-      viewBox="0 0 300 300"
-      aria-hidden
-      className="pointer-events-none absolute -top-6 right-0 hidden h-[150px] w-[150px] text-brand md:block"
-    >
-      {[52, 78, 104].map((rr) => (
-        <circle key={rr} cx="150" cy="150" r={rr} fill="none" stroke="currentColor" strokeOpacity="0.08" strokeWidth="1" />
-      ))}
-      <circle cx="150" cy="150" r={r} fill="none" stroke="currentColor" strokeOpacity="0.1" strokeWidth="10" />
-      <circle
-        cx="150"
-        cy="150"
-        r={r}
-        fill="none"
-        stroke="currentColor"
-        strokeOpacity="0.55"
-        strokeWidth="10"
-        strokeLinecap="round"
-        strokeDasharray={`${c * share} ${c}`}
-        transform="rotate(-90 150 150)"
-      />
-      {Array.from({ length: 12 }, (_, i) => {
-        const a = (i / 12) * 2 * Math.PI - Math.PI / 2;
-        return (
-          <line
-            key={i}
-            x1={150 + Math.cos(a) * 130}
-            y1={150 + Math.sin(a) * 130}
-            x2={150 + Math.cos(a) * 136}
-            y2={150 + Math.sin(a) * 136}
-            stroke="currentColor"
-            strokeOpacity="0.25"
-            strokeWidth="1.5"
-          />
-        );
-      })}
-      <text
-        x="150"
-        y="154"
-        textAnchor="middle"
-        fontSize="11"
-        fontWeight="600"
-        letterSpacing="2"
-        fill="currentColor"
-        fillOpacity="0.45"
-        className="font-heading"
-      >
-        {today.getFullYear()}
-      </text>
-    </svg>
-  );
-}
-
 export function HomeFrontPage({
   hello,
   dateLine,
@@ -253,14 +187,13 @@ export function HomeFrontPage({
       <div className="flex min-h-0 flex-1 overflow-y-auto">
         <div className="w-full px-5 pb-16 pt-5 md:px-8 lg:px-10">
           {/* ── Masthead ─────────────────────────────────────────────────── */}
-          <header className="relative">
-            <YearRing today={today} />
-            <div className="relative flex items-center justify-between border-b border-foreground pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-foreground">
+          <header>
+            <div className="flex items-center justify-between border-b border-foreground pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-foreground">
               <span>{dateLine.split(' · ')[0]}</span>
               <span className="mx-tnum hidden text-foreground-subtle sm:inline">{dateLine.split(' · ')[1]}</span>
               <span className="relative bg-canvas pl-2 text-foreground-subtle">Hemmaplan</span>
             </div>
-            <div className="relative max-w-[46rem] pt-6">
+            <div className="max-w-[46rem] pt-6">
               <h1 className="font-heading text-[28px] font-semibold leading-[1.05] tracking-tight text-foreground md:text-[34px]">
                 {hello}
               </h1>
@@ -284,7 +217,7 @@ export function HomeFrontPage({
             </div>
 
             {/* Nyckeltalen — en boxlös siffer-rad fördelad över bredden. */}
-            <div className="relative mt-6 flex flex-wrap gap-x-10 gap-y-5 border-t border-default pt-5">
+            <div className="mt-6 flex flex-wrap gap-x-10 gap-y-5 border-t border-default pt-5">
               <StatFigure label="Aktiva bolag" value={activeStartups} hint="i inkubatorn just nu" href="/startups" />
               <StatFigure
                 label="Nya inflöden"
@@ -373,22 +306,6 @@ export function HomeFrontPage({
                       }
                     />
                   ),
-                  instruction: (
-                    <OrgPostList
-                      posts={byTab.instruction}
-                      userId={userId}
-                      roles={roles}
-                      canAuthor={canAuthor}
-                      variant="compact"
-                      newKind="instruction"
-                      kinds={['instruction']}
-                      newLabel="Ny instruktion"
-                      label={byTab.instruction.length > 0 ? 'Våra rutiner' : undefined}
-                      emptyText="Inga egna rutiner än. Lägg in sådant som kollegorna ofta frågar om — onboarding av bolag, mötesrutiner, hur vi loggar tid."
-                    >
-                      <PlatformIntro />
-                    </OrgPostList>
-                  ),
                   training: (
                     <OrgPostList
                       posts={byTab.training}
@@ -436,7 +353,7 @@ export function HomeFrontPage({
                   title="Startups, finansiering & utlysningar"
                   description="Live från EU-baserade källor"
                 />
-                <OmvarldFeed items={omvarld} sources={omvarldSources} max={10} />
+                <OmvarldFeed items={omvarld} sources={omvarldSources} max={6} />
               </section>
             </aside>
           </div>

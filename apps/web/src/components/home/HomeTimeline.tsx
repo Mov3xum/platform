@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Fragment } from 'react';
 import type { HomeTimeline } from '@platform/shared';
 
 /**
@@ -87,47 +88,60 @@ export function HomeTimelineStrip({ timeline }: { timeline: HomeTimeline }) {
           />
         )}
 
-        {/* Band: bakgrunden täcker postens faktiska dagar, etiketten får flyta ut
-            över lediga dagar i samma körfält (labelTo) så titeln syns även för
-            endagsposter. */}
+        {/* Band: hela etikettytan (labelTo) är en ljus box så texten aldrig hamnar
+            utanför en ruta; postens FAKTISKA dagar markeras med den fylligare
+            tonen inuti boxen. Etiketten får därmed flyta ut över lediga dagar i
+            samma körfält utan att sticka ut. */}
         {spans.map((s) => {
           const isEvent = s.item.source === 'event';
-          const trueCols = s.to - s.from + 1;
-          const labelCols = s.labelTo - s.from + 1;
-          const bandWidth = `${(trueCols / labelCols) * 100}%`;
+          const hugs = s.labelTo > s.to; // etiketten får luft bortom de faktiska dagarna
           const bandTone = isEvent
             ? 'bg-movexum-pastell-lila group-hover:bg-movexum-lila/30 dark:bg-movexum-morklila/50 dark:group-hover:bg-movexum-morklila/80'
             : 'bg-brand/10 group-hover:bg-brand/20 dark:bg-brand/20 dark:group-hover:bg-brand/30';
+          const boxTone = isEvent
+            ? 'bg-movexum-pastell-lila/60 dark:bg-movexum-morklila/35'
+            : 'bg-brand/[0.06] dark:bg-brand/15';
           const textTone = isEvent ? 'text-movexum-morklila dark:text-movexum-pastell-lila' : 'text-brand';
           const radius = `${s.clippedStart ? 'rounded-l-sm' : 'rounded-l-full'} ${
             s.clippedEnd ? 'rounded-r-sm' : 'rounded-r-full'
           }`;
           const timeMeta = isEvent && s.item.meta ? s.item.meta.split(' · ')[0] : undefined;
+          // Bandet (faktiska dagar) ritas som eget grid-element BAKOM etiketten;
+          // etikett-boxen ligger ovanpå, kramar texten (justify-self-start) och
+          // är aldrig smalare än bandet — så texten hamnar alltid i en ruta men
+          // rutan låtsas inte att aktiviteten pågår längre än den gör.
           return (
-            <Link
-              key={s.item.id}
-              href={s.item.href}
-              title={`${s.item.title}${s.item.meta ? ` — ${s.item.meta}` : ''}`}
-              className={`group relative z-10 mx-0.5 flex min-w-0 items-center py-1.5 text-[12px] font-medium leading-none ${textTone}`}
-              style={{ gridColumn: `${s.from + 1} / ${s.labelTo + 2}`, gridRow: s.lane + 2 }}
-            >
+            <Fragment key={s.item.id}>
               <span
                 aria-hidden
-                className={`absolute inset-y-0 left-0 transition ${bandTone} ${radius}`}
-                style={{ width: bandWidth }}
+                className={`z-0 mx-0.5 ${bandTone} ${radius}`}
+                style={{ gridColumn: `${s.from + 1} / ${s.to + 2}`, gridRow: s.lane + 2 }}
               />
-              <span className="relative flex min-w-0 items-center gap-1.5 px-2.5">
-                <span
-                  aria-hidden
-                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${isEvent ? 'bg-movexum-lila dark:bg-movexum-ljuslila' : 'bg-current'}`}
-                />
-                {timeMeta && <span className="mx-tnum shrink-0 opacity-70">{timeMeta}</span>}
-                <span className="truncate group-hover:underline group-hover:underline-offset-4">{s.item.title}</span>
-                {!isEvent && s.item.meta && labelCols >= 3 && (
-                  <span className="hidden truncate opacity-60 md:inline">· {s.item.meta}</span>
-                )}
-              </span>
-            </Link>
+              <Link
+                href={s.item.href}
+                title={`${s.item.title}${s.item.meta ? ` — ${s.item.meta}` : ''}`}
+                className={`group z-10 mx-0.5 inline-flex max-w-full items-center justify-self-start overflow-hidden py-1.5 text-[12px] font-medium leading-none ${textTone} ${radius} ${
+                  hugs ? boxTone : ''
+                }`}
+                style={{
+                  gridColumn: `${s.from + 1} / ${s.labelTo + 2}`,
+                  gridRow: s.lane + 2,
+                  minWidth: `${((s.to - s.from + 1) / (s.labelTo - s.from + 1)) * 100}%`
+                }}
+              >
+                <span className="flex min-w-0 max-w-full items-center gap-1.5 px-2.5">
+                  <span
+                    aria-hidden
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${isEvent ? 'bg-movexum-lila dark:bg-movexum-ljuslila' : 'bg-current'}`}
+                  />
+                  {timeMeta && <span className="mx-tnum shrink-0 opacity-70">{timeMeta}</span>}
+                  <span className="truncate group-hover:underline group-hover:underline-offset-4">{s.item.title}</span>
+                  {!isEvent && s.item.meta && s.labelTo - s.from + 1 >= 3 && (
+                    <span className="hidden truncate opacity-60 md:inline">· {s.item.meta}</span>
+                  )}
+                </span>
+              </Link>
+            </Fragment>
           );
         })}
 
