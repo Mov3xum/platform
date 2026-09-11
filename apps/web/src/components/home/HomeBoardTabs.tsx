@@ -1,28 +1,22 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { Icon } from '@/components/proto/Icon';
-import type { OrgPostTab } from '@platform/shared';
+import { HOME_TAB_PARAM, HOME_TAB_SLUGS, type OrgPostTab } from '@platform/shared';
 
 /**
  * Flikarna på Hemmaplan (CLAUDE.md § 37): Anslagstavla · Så gör vi ·
- * Internutbildningar. Ren UI-kurering — innehållet är redan RLS-filtrerat av
- * servern; fliken speglas i URL:en (`?flik=…`) så att länkar från chatten och
- * aktivitetsloggen kan öppna rätt flik direkt. Ingen dataväg.
+ * Internutbildningar — som redaktionella avdelningsrubriker (stora Sora-ord i
+ * rad, det aktiva i ink med ett kort brand-streck under, övriga tonade) i
+ * stället för generiska flikar. Ren UI-kurering — innehållet är redan
+ * RLS-filtrerat av servern; fliken speglas i URL:en (`?flik=…`) så att
+ * länkar från chatten och aktivitetsloggen kan öppna rätt flik. Ingen dataväg.
  */
 
-export const HOME_TAB_PARAM = 'flik';
-
-const TAB_SLUGS: Record<OrgPostTab, string> = {
-  board: 'anslagstavla',
-  instruction: 'sa-gor-vi',
-  training: 'internutbildningar'
-};
-
-export function homeTabFromSlug(slug: string | undefined): OrgPostTab {
-  const hit = (Object.keys(TAB_SLUGS) as OrgPostTab[]).find((k) => TAB_SLUGS[k] === slug);
-  return hit ?? 'board';
-}
+// OBS: slug-mappningen och `homeTabFromSlug` bor i @platform/shared (ren
+// modul). Den låg tidigare här — men en funktion exporterad ur en
+// 'use client'-modul får inte anropas från en serverkomponent (page.tsx
+// gjorde det → "Attempted to call homeTabFromSlug() from the server",
+// hela Hemmaplan föll i felvyn "Något gick fel", staging 2026-09).
 
 export interface HomeTabDef {
   id: OrgPostTab;
@@ -49,7 +43,7 @@ export function HomeBoardTabs({
     try {
       const url = new URL(window.location.href);
       if (id === 'board') url.searchParams.delete(HOME_TAB_PARAM);
-      else url.searchParams.set(HOME_TAB_PARAM, TAB_SLUGS[id]);
+      else url.searchParams.set(HOME_TAB_PARAM, HOME_TAB_SLUGS[id]);
       window.history.replaceState(window.history.state, '', url);
     } catch {
       /* URL-synk är bekvämlighet */
@@ -58,41 +52,38 @@ export function HomeBoardTabs({
 
   return (
     <section className="min-w-0">
-      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-default">
-        <div role="tablist" aria-label="Från Movexum" className="-mb-px flex gap-1 overflow-x-auto">
-          {tabs.map((t) => {
-            const on = t.id === active;
-            return (
-              <button
-                key={t.id}
-                role="tab"
-                type="button"
-                aria-selected={on}
-                onClick={() => select(t.id)}
-                className={`inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-[13px] font-medium transition ${
-                  on
-                    ? 'border-brand text-foreground'
-                    : 'border-transparent text-foreground-subtle hover:text-foreground'
+      <div role="tablist" aria-label="Från Movexum" className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+        {tabs.map((t) => {
+          const on = t.id === active;
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              type="button"
+              aria-selected={on}
+              onClick={() => select(t.id)}
+              className={`group relative inline-flex items-baseline gap-1.5 pb-2 font-heading text-[20px] font-semibold tracking-tight transition md:text-[22px] ${
+                on ? 'text-foreground' : 'text-foreground-subtle hover:text-foreground-muted'
+              }`}
+            >
+              {t.label}
+              {t.count > 0 && (
+                <sup className={`mx-tnum text-[11px] font-semibold ${on ? 'text-brand' : 'text-foreground-subtle'}`}>
+                  {t.count}
+                </sup>
+              )}
+              <span
+                aria-hidden
+                className={`absolute bottom-0 left-0 h-[3px] rounded-full bg-brand transition-all duration-300 ${
+                  on ? 'w-8' : 'w-0 group-hover:w-4'
                 }`}
-              >
-                <Icon name={t.icon} size={13} className={on ? 'text-brand' : ''} />
-                {t.label}
-                {t.count > 0 && (
-                  <span
-                    className={`mx-tnum rounded-full px-1.5 py-px text-[10.5px] font-semibold ${
-                      on ? 'bg-brand/10 text-brand' : 'bg-canvas-muted text-foreground-subtle'
-                    }`}
-                  >
-                    {t.count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-        <p className="hidden pb-2 text-[12px] text-foreground-subtle md:block">{current?.description}</p>
+              />
+            </button>
+          );
+        })}
       </div>
-      <div role="tabpanel" className="pt-4">
+      <p className="mt-1 text-[12.5px] text-foreground-subtle">{current?.description}</p>
+      <div role="tabpanel" className="pt-5">
         {panels[active]}
       </div>
     </section>

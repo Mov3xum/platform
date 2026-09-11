@@ -4,8 +4,8 @@ import { Icon } from '@/components/proto/Icon';
 /**
  * Hårdkodad plattformsintro under "Så gör vi" på Hemmaplan (CLAUDE.md § 37).
  * Statiskt innehåll (medvetet inte dynamiskt) — en kort orientering för nya
- * kollegor om vad som finns var. Native <details> → ingen klient-JS, ingen
- * dataväg. Håll texten kort; rutiner som ändras skrivs som instruktioner
+ * kollegor om vad som finns var. Numrerad handbok (stora kapitelnumror, hårlinjer — inga boxar); native
+ * <details> → ingen klient-JS, ingen dataväg. Håll texten kort; rutiner som ändras skrivs som instruktioner
  * i listan under (dynamiska inlägg).
  */
 
@@ -101,49 +101,54 @@ const INTRO: IntroSection[] = [
 
 export function PlatformIntro() {
   return (
-    <div className="mb-4 overflow-hidden rounded-2xl border border-default bg-surface">
-      <div className="flex items-center gap-2 border-b border-default bg-canvas-subtle px-4 py-2">
-        <Icon name="help" size={13} className="text-brand" />
-        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-foreground-subtle">
-          Kom igång med plattformen
+    <div className="mb-6">
+      <div className="mb-1 flex items-baseline gap-3">
+        <span className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-brand">Handbok</span>
+        <span className="text-[11.5px] text-foreground-subtle">
+          {INTRO.length} kapitel — kort orientering för nya kollegor
         </span>
-        <span className="ml-auto text-[11px] text-foreground-subtle">{INTRO.length} avsnitt</span>
       </div>
-      {INTRO.map((s, i) => (
-        <details key={s.title} className={`group ${i > 0 ? 'border-t border-default' : ''}`}>
-          <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2.5 transition hover:bg-canvas-subtle [&::-webkit-details-marker]:hidden">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-canvas-muted text-foreground-muted">
-              <Icon name={s.icon} size={13} />
-            </span>
-            <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-foreground">{s.title}</span>
-            <Icon
-              name="chevdown"
-              size={12}
-              className="shrink-0 text-foreground-subtle transition group-open:rotate-180"
-            />
-          </summary>
-          <div className="px-4 pb-4 pl-14">
-            <p className="text-[13.5px] leading-relaxed text-foreground-muted">{s.lead}</p>
-            <ul className="mt-2 space-y-1">
-              {s.points.map((p) => (
-                <li key={p} className="flex gap-2 text-[13px] leading-relaxed text-foreground-muted">
-                  <span className="mt-[9px] h-1 w-1 shrink-0 rounded-full bg-foreground-subtle" />
-                  <span>{p}</span>
-                </li>
-              ))}
-            </ul>
-            {s.href && (
-              <Link
-                href={s.href}
-                className="mt-2.5 inline-flex items-center gap-1 text-[12.5px] font-medium text-link hover:underline"
-              >
-                {s.hrefLabel ?? 'Öppna'}
-                <Icon name="arrow-up-right" size={11} />
-              </Link>
-            )}
-          </div>
-        </details>
-      ))}
+      <ol className="border-t border-default">
+        {INTRO.map((s, i) => (
+          <li key={s.title} className="border-b border-default">
+            <details className="group">
+              <summary className="flex cursor-pointer list-none items-baseline gap-4 py-3 transition hover:text-brand [&::-webkit-details-marker]:hidden">
+                <span className="mx-tnum w-8 shrink-0 font-heading text-[22px] font-light leading-none tracking-tight text-foreground-subtle transition group-open:text-brand">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <span className="min-w-0 flex-1 font-heading text-[15px] font-semibold leading-snug text-foreground">
+                  {s.title}
+                </span>
+                <Icon
+                  name="plus"
+                  size={14}
+                  className="shrink-0 self-center text-foreground-subtle transition group-open:rotate-45 group-open:text-brand"
+                />
+              </summary>
+              <div className="pb-5 pl-12 pr-6">
+                <p className="max-w-[62ch] text-[14px] leading-relaxed text-foreground-muted">{s.lead}</p>
+                <ul className="mt-3 max-w-[62ch] space-y-1.5">
+                  {s.points.map((p) => (
+                    <li key={p} className="flex gap-3 text-[13px] leading-relaxed text-foreground-muted">
+                      <span className="mt-[10px] h-px w-3 shrink-0 bg-brand/60" />
+                      <span>{p}</span>
+                    </li>
+                  ))}
+                </ul>
+                {s.href && (
+                  <Link
+                    href={s.href}
+                    className="mt-3 inline-flex items-center gap-1 text-[12.5px] font-semibold text-link underline decoration-link/30 underline-offset-4 transition hover:decoration-link"
+                  >
+                    {s.hrefLabel ?? 'Öppna'}
+                    <Icon name="arrow-up-right" size={11} />
+                  </Link>
+                )}
+              </div>
+            </details>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

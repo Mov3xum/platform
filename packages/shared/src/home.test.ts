@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildHomeAgenda,
+  buildHomeTimeline,
   homeDayLabel,
   mergeOmvarldItems,
   swedishDateLine,
@@ -96,4 +97,85 @@ test('mergeOmvarldItems: nyast först, dedupe på länk, max per källa', () => 
     ['B1', 'V1', 'B2', 'B3', 'utan datum']
   );
   assert.equal(merged[0]!.source, 'Breakit');
+});
+
+test('buildHomeTimeline: dagremsa, klippning mot fönstret och körfältspackning', () => {
+  const today = new Date(2026, 8, 9); // onsdag
+  const tl = buildHomeTimeline(
+    [
+      item({ id: 'passerad', start: new Date(2026, 8, 1), end: new Date(2026, 8, 5) }),
+      item({ id: 'pågår', start: new Date(2026, 8, 7), end: new Date(2026, 8, 10) }),
+      item({ id: 'idag', start: new Date(2026, 8, 9) }),
+      item({ id: 'imorgon', start: new Date(2026, 8, 10) }),
+      item({ id: 'lång', start: new Date(2026, 8, 20), end: new Date(2026, 9, 5) }),
+      item({ id: 'bortom', start: new Date(2026, 9, 1) })
+    ],
+    today,
+    14
+  );
+  assert.equal(tl.days.length, 14);
+  assert.equal(tl.days[0].isToday, true);
+  assert.equal(tl.days[0].weekday, 'on');
+  assert.equal(tl.days[0].monthLabel, 'sep');
+  assert.equal(tl.days[3].isWeekend, true); // lördag 12 sep
+  // 1 oktober ligger på index 22 → utanför fönstret; ingen ny månadsetikett.
+  assert.ok(tl.days.slice(1).every((d) => d.monthLabel === undefined));
+
+  const ids = tl.spans.map((s) => s.item.id);
+  assert.deepEqual(ids, ['pågår', 'idag', 'imorgon', 'lång']);
+  const pagar = tl.spans[0];
+  assert.equal(pagar.from, 0);
+  assert.equal(pagar.to, 1);
+  assert.equal(pagar.clippedStart, true);
+  assert.equal(pagar.lane, 0);
+  // "idag" krockar med det pågående bandet → nästa körfält.
+  assert.equal(tl.spans[1].lane, 1);
+  // "imorgon" (index 1): körfält 1 är ledigt men "idag" slutar vägg-i-vägg → nytt körfält
+  // öppnas (max tre) så båda etiketterna får luft.
+  assert.equal(tl.spans[2].lane, 2);
+  // "lång" börjar dag 11, slutar bortom fönstret → klippt; hamnar i körfältet
+  // vars föregående band slutade tidigast ("idag", körfält 1).
+  const lang = tl.spans[3];
+  assert.equal(lang.from, 11);
+  assert.equal(lang.to, 13);
+  assert.equal(lang.clippedEnd, true);
+  assert.equal(lang.lane, 1);
+  assert.equal(tl.lanes, 3);
+  // Etiketten får flyta ut över lediga dagar fram till nästa band i körfältet.
+  assert.equal(pagar.labelTo, 13); // körfält 0: inget mer band efter det pågående
+  assert.equal(tl.spans[1].labelTo, 10); // "idag": fram till "lång" i körfält 1
+  assert.equal(tl.spans[2].labelTo, 13); // "imorgon": ensam i körfält 2
+  assert.equal(lang.labelTo, 13);
+});
+
+test('buildHomeTimeline: endagsposter i rad fördelas så etiketterna får luft', () => {
+  const today = new Date(2026, 8, 9);
+  const tl = buildHomeTimeline(
+    [
+      item({ id: 'a', start: new Date(2026, 8, 9) }),
+      item({ id: 'b', start: new Date(2026, 8, 10) }),
+      item({ id: 'c', start: new Date(2026, 8, 11) }),
+      item({ id: 'd', start: new Date(2026, 8, 12) })
+    ],
+    today,
+    14
+  );
+  assert.deepEqual(
+    tl.spans.map((s) => [s.item.id, s.lane]),
+    [
+      ['a', 0],
+      ['b', 1], // vägg-i-vägg med a → nytt körfält
+      ['c', 0], // körfält 0 har mest luft (a slutade dag 0, ej granne) → återanvänds
+      ['d', 1]
+    ]
+  );
+  assert.equal(tl.lanes, 2);
+  assert.equal(tl.spans[0].labelTo, 1); // a får dag 9–10 för sin etikett
+});
+
+test('buildHomeTimeline: tomt underlag ger bara dagremsan', () => {
+  const tl = buildHomeTimeline([], new Date(2026, 8, 9), 7);
+  assert.equal(tl.days.length, 7);
+  assert.equal(tl.spans.length, 0);
+  assert.equal(tl.lanes, 0);
 });

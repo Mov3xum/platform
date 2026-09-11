@@ -42,6 +42,27 @@ export function orgPostTabFor(kind: OrgPostKind): OrgPostTab {
   return 'board';
 }
 
+/** Query-parametern som pekar ut fliken på Hemmaplan (`/hem?flik=…`). */
+export const HOME_TAB_PARAM = 'flik';
+
+/** URL-slug per flik — delas av server (page/agent-log) och klient (flikarna). */
+export const HOME_TAB_SLUGS: Record<OrgPostTab, string> = {
+  board: 'anslagstavla',
+  instruction: 'sa-gor-vi',
+  training: 'internutbildningar'
+};
+
+/** Slug → flik; okänd/saknad slug ger anslagstavlan. Ren, får anropas från servern. */
+export function homeTabFromSlug(slug: string | undefined): OrgPostTab {
+  const hit = (Object.keys(HOME_TAB_SLUGS) as OrgPostTab[]).find((k) => HOME_TAB_SLUGS[k] === slug);
+  return hit ?? 'board';
+}
+
+/** Intern länk till Hemmaplan med rätt flik öppen (anslagstavlan = bara `/hem`). */
+export function homeTabHref(tab: OrgPostTab): string {
+  return tab === 'board' ? '/hem' : `/hem?${HOME_TAB_PARAM}=${HOME_TAB_SLUGS[tab]}`;
+}
+
 /**
  * Målgrupp. `staff` = Movexum-personal + observer (default);
  * `all` = även bolagsmedlemmar (visas på "Min översikt" för medlemmar).
