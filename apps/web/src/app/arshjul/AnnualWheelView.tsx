@@ -114,6 +114,12 @@ interface Props {
   canManageCategories: boolean;
   /** Schemadrift som inte kunde repareras automatiskt (server-side check). */
   schemaNotice?: string | null;
+  /**
+   * Djuplänk (`/arshjul?item=<id>`, t.ex. från Hemmaplans kalender): posten
+   * öppnas i sin helhet vid inläsning — redigeringsdialogen för staff,
+   * annars fokus + markering i månadslistan.
+   */
+  openItemId?: string | null;
 }
 
 interface FormState {
@@ -167,7 +173,8 @@ export function AnnualWheelView({
   canEdit,
   people,
   canManageCategories,
-  schemaNotice = null
+  schemaNotice = null,
+  openItemId = null
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -372,6 +379,29 @@ export function AnnualWheelView({
     });
     window.setTimeout(() => setHighlightId((cur) => (cur === item.id ? null : cur)), 2400);
   }
+
+  // Djuplänk från Hemmaplan: öppna posten i sin helhet direkt vid inläsning.
+  // Query-parametern tas bort ur URL:en efteråt så en omladdning inte öppnar
+  // dialogen igen.
+  const openedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!openItemId || openedRef.current === openItemId) return;
+    const item = items.find((i) => i.id === openItemId);
+    if (!item) return;
+    openedRef.current = openItemId;
+    setYear(item.year);
+    if (item.month != null) setPeriod(monthPeriodKey(item.month));
+    pickFromWheel(item);
+    if (canEdit) openEdit(item);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('item');
+      window.history.replaceState(window.history.state, '', url);
+    } catch {
+      /* bekvämlighet */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openItemId, items]);
 
   function openCreate() {
     setError(null);

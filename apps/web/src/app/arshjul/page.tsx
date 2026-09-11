@@ -46,8 +46,16 @@ interface WheelRow {
  * § 21). Läser via användarens auth-token → PB-RLS gäller. Redigering kräver
  * staff-roll och går via det delade skrivlagret (samma kärna som chatt-agenten).
  */
-export default async function ArshjulPage() {
+export default async function ArshjulPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ item?: string }>;
+}) {
   const user = await requireUser();
+  // Djuplänk från Hemmaplans kalender (`?item=<id>`) — bara formatvalidering
+  // här; posten slås upp i klienten mot den redan RLS-filtrerade listan.
+  const { item: rawItem } = (await searchParams) ?? {};
+  const openItemId = typeof rawItem === 'string' && /^[a-zA-Z0-9_-]{1,40}$/.test(rawItem) ? rawItem : null;
   if (!canAccessModuleForUser(user.roles, 'arshjul', user.enabledModules)) redirect('/chatt');
 
   const canEdit = hasRole(user.roles, EDIT_ROLES);
@@ -130,6 +138,7 @@ export default async function ArshjulPage() {
         people={people}
         canManageCategories={canManageCategories}
         schemaNotice={schemaNotice}
+        openItemId={openItemId}
       />
     </PageShell>
   );

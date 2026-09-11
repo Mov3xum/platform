@@ -4883,9 +4883,9 @@ på canvasen med hårlinjer, och typskalan är **samma som chatten** (hälsning
 all IO och skickar färdig data:
 
 1. **Masthead** — folio-rad (datum · ISO-vecka · "Hemmaplan") under en
-   ink-linje, hälsningen i Sora, "Gå direkt till"-raden som textlänkar
-   (rollfiltrerade) och en liten dekorativ **årsring** (`YearRing`, inline-
-   SVG i brand-token, döljs under `md`). Under det en **boxlös siffer-rad**
+   ink-linje, hälsningen i Sora och "Gå direkt till"-raden som textlänkar
+   (rollfiltrerade). (Den dekorativa årsringen togs bort 2026-09.) Under det
+   en **boxlös siffer-rad**
    (`StatFigure`): fem nyckeltal fördelade över bredden — stor tabulär siffra
    i Sora, etikett i kapitäler, hint och delta — varje figur är en länk till
    sin vy. En räkning som felade visas som "–", aldrig som 0.
@@ -4897,9 +4897,16 @@ all IO och skickar färdig data:
    scrollar i sidled) med årshjulets poster och events som **band** över
    sina dagar — perioder långa, endagsposter korta; överlappande band packas
    i körfält av den rena, enhetstestade `buildHomeTimeline`, som även räknar
-   ut hur långt en etikett får flyta ut över lediga dagar (`labelTo`). Events
-   i lila, årshjulet i brand-ton. Fönstret kan korsa årsskiftet →
-   `page.tsx` läser båda åren vid behov.
+   ut hur långt en etikett får flyta ut över lediga dagar (`labelTo`) — hela
+   etikettytan ritas som en ljus box (texten hamnar aldrig utanför en ruta)
+   och postens faktiska dagar med fylligare ton inuti. Events i lila,
+   årshjulet i brand-ton. Fönstret kan korsa årsskiftet → `page.tsx` läser
+   båda åren vid behov. **Klick på en årshjulspost** öppnar den i sin helhet:
+   länken är `/arshjul?item=<id>` och `AnnualWheelView` (`openItemId`) sätter
+   år + månadsfokus, markerar raden och öppnar redigeringsdialogen för staff
+   (observer får fokus + markering). Parametern formatvalideras i
+   `arshjul/page.tsx` och tas bort ur URL:en efter öppning. Events länkar som
+   förut till `/events/<id>`.
    **Kategori-synlighet:** bara årshjulskategorier med `show_on_home`
    (migration **1700000146**, bool, backfillat `true`; speglat i
    `setup-via-api.mjs`) visas — superadmin bockar i/ur **"Hemmaplan"** per
@@ -4907,19 +4914,23 @@ all IO och skickar färdig data:
    Filtret görs server-side i `page.tsx` via `annualWheelHiddenOnHome`
    (ren, enhetstestad); saknat fält tolkas som "visas", bara ett uttryckligt
    `false` döljer. Posterna finns kvar oförändrat i `/arshjul` (§ 30.3).
-3. **Från Movexum** (huvudspalt 8/12) — avdelningarna **Anslagstavla · Så
-   gör vi · Internutbildningar** som Sora-ord i rad (`HomeBoardTabs`; aktiv =
-   ink med kort brand-streck, antal som upphöjd siffra), URL-synk
-   `?flik=anslagstavla|sa-gor-vi|internutbildningar`. Anslagstavlan och
-   Internutbildningar sätts som en tidningssida: **första inlägget som
-   toppnyhet** (typ-eyebrow i färg, hela texten upp till 1 400 tecken),
-   resten som **notiser i två spalter** med hårlinjer. "Så gör vi" är en
-   **numrerad handbok** (01, 02 … i ljus Sora, `+` som vrids vid öppning):
-   först den hårdkodade plattformsintron (`PlatformIntro`), sedan egna
-   rutiner i samma språk. Redigeraren är inline med brand-toppstreck.
-4. **Sidospalten** (4/12; på mobil under avdelningarna) — **två likadana
-   listor**: **Bolagsnytt** (`CompanyNews`, den samlade aktivitetsloggen § 32)
-   och under den **Omvärld** (`OmvarldFeed`, § 37.4) — båda som **vertikal
+3. **Från Movexum** (huvudspalt 8/12) — avdelningarna **Anslagstavla ·
+   Internutbildningar** som Sora-ord i rad (`HomeBoardTabs`; aktiv = ink med
+   kort brand-streck, antal som upphöjd siffra), URL-synk
+   `?flik=anslagstavla|internutbildningar`. Båda sätts som en tidningssida:
+   **första inlägget som toppnyhet** (typ-eyebrow i färg, hela texten upp
+   till 1 400 tecken), resten som **notiser i två spalter** med hårlinjer.
+   Redigeraren är inline med brand-toppstreck. **"Så gör vi" (instruktioner +
+   den hårdkodade plattformsintron) är borttagen från Hemmaplan (2026-09)**;
+   `?flik=sa-gor-vi` landar på anslagstavlan och `kind=instruction`-inlägg
+   visas inte på startsidan (inläggstypen finns kvar i datamodellen).
+   `OrgPostList` behåller `variant="compact"` (numrerad handbok) för
+   framtida bruk.
+4. **Sidospalten** (4/12; på mobil under avdelningarna) — **två likadana,
+   korta listor** så båda syns direkt: **Bolagsnytt** (`CompanyNews`, de
+   senaste **6** ur den samlade aktivitetsloggen § 32, "Hela loggen" →
+   `/aktivitet`) och under den **Omvärld** (`OmvarldFeed`, § 37.4, max 6) —
+   båda som **vertikal
    tidslinje** med hårlinje, färgprickar (lila = AI-utfört/verktyg, grön =
    utbildning, gul = avtal/möte, brand = övrigt; Movexum-blå = extern källa),
    eyebrow med tid + bolag/källa och "AI"-märkning (art. 13). Omvärlden har
@@ -4955,13 +4966,12 @@ blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdn
 | `apps/web/src/lib/feed/activity-feed.ts` | Delad feed-laddare (`activities` + `agent_actions`) för `/chatt` OCH `/hem` |
 | `apps/web/src/lib/ai/web.ts` | `fetchWebFeedItems` — strukturerade RSS-poster med in-process-cache (30 min) |
 | `apps/web/src/app/hem/page.tsx` | Sidan (server; alla källor parallellt via `Promise.allSettled`) |
-| `apps/web/src/components/home/HomeFrontPage.tsx` | Layouten (server): masthead + siffer-rad + årsring, tidslinje med fönsterval, spalter — ren presentation av data från `page.tsx` |
+| `apps/web/src/components/home/HomeFrontPage.tsx` | Layouten (server): masthead + siffer-rad, tidslinje med fönsterval, spalter — ren presentation av data från `page.tsx` |
 | `backend/pocketbase-schema/migrations/1700000146_extend_annual_wheel_categories_show_on_home.js` | `annual_wheel_categories.show_on_home` (visas kategorin i kalendern på Hemmaplan?) |
-| `apps/web/src/components/home/HomeTimeline.tsx` | 14-dagars tidslinje (dagslinjal + band i körfält) |
+| `apps/web/src/components/home/HomeTimeline.tsx` | Tidslinje 7/14/30 dagar (dagslinjal + band i körfält, djuplänk `/arshjul?item=`) |
 | `apps/web/src/components/home/CompanyNews.tsx` | Bolagsnytt som vertikal tidslinje |
 | `apps/web/src/components/home/OrgPostList.tsx` | Inläggslistan (client): toppnyhet + notiser i spalter / numrerad handbok; redigerare, fäst/redigera/ta bort — används i alla tre flikarna (`kinds` begränsar typvalet per flik) |
-| `apps/web/src/components/home/HomeBoardTabs.tsx` | Avdelningsrubrikerna Anslagstavla · Så gör vi · Internutbildningar (client, URL-synk `?flik=`; slug-logiken i `@platform/shared`) |
-| `apps/web/src/components/home/PlatformIntro.tsx` | Hårdkodad plattformsintro (statisk, native `<details>`) under "Så gör vi" |
+| `apps/web/src/components/home/HomeBoardTabs.tsx` | Avdelningsrubrikerna Anslagstavla · Internutbildningar (client, URL-synk `?flik=`; slug-logiken i `@platform/shared`) |
 | `apps/web/src/components/home/OmvarldFeed.tsx` | Omvärldsflödet (client) som tidslinjelista i samma språk som Bolagsnytt: källfilter + statusrad (live/utgången cache/nere) |
 | `apps/web/src/components/home/AutoRefresh.tsx` | Periodisk `router.refresh()` (10 min + vid synlig flik) |
 | `apps/web/src/components/home/TimeAgo.tsx` | Hydreringssäker relativ tid |

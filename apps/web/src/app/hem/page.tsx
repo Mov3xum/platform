@@ -129,7 +129,9 @@ export default async function HemPage({
   if (!canAccessModuleForUser(user.roles, 'hem', user.enabledModules)) redirect('/chatt');
 
   const { flik, dagar } = await searchParams;
-  const initialTab: OrgPostTab = homeTabFromSlug(flik);
+  // "Så gör vi" är borttagen från Hemmaplan (2026-09) — en gammal länk landar på anslagstavlan.
+  const parsedTab = homeTabFromSlug(flik);
+  const initialTab: OrgPostTab = parsedTab === 'instruction' ? 'board' : parsedTab;
   const windowDays = parseHomeWindowDays(dagar);
 
   const pb = await getServerPb();
@@ -155,7 +157,8 @@ export default async function HemPage({
     runningWorkshops
   ] = await Promise.all([
     listOrgPosts(pb, user.tenant).catch(() => [] as OrgPost[]),
-    loadActivityFeed(pb, user.tenant, 10).catch(() => [] as DashboardActivity[]),
+    // Hemmaplan visar bara de senaste 6 — Omvärld ligger direkt under i samma spalt.
+    loadActivityFeed(pb, user.tenant, 6).catch(() => [] as DashboardActivity[]),
     fetchWebFeedItems(OMVARLD_SOURCES).catch(() => []),
     listForTenant<WheelRow>('annual_wheel_items', {
       // Fönstret (max 30 dagar) kan korsa årsskiftet → ta med nästa år vid behov.
@@ -246,13 +249,6 @@ export default async function HemPage({
       description: 'Nyheter, information och sådant att fira — från Movexum till organisationen'
     },
     {
-      id: 'instruction',
-      label: 'Så gör vi',
-      icon: 'doc',
-      count: byTab.instruction.length,
-      description: 'Plattformsintro och rutiner som ska vara lätta att hitta'
-    },
-    {
       id: 'training',
       label: 'Internutbildningar',
       icon: 'cap',
@@ -283,7 +279,8 @@ export default async function HemPage({
       end: range.end,
       allDay: true,
       source: 'arshjul',
-      href: '/arshjul',
+      // Djuplänk: öppnar aktiviteten i sin helhet på /arshjul (inte bara sidan).
+      href: `/arshjul?item=${encodeURIComponent(r.id)}`,
       meta: r.category ? categoryLabel.get(r.category) ?? r.category : undefined
     });
   }
