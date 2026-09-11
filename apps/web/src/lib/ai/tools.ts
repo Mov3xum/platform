@@ -1337,7 +1337,8 @@ export function buildChatTools(
           'instruction = "Så gör vi", training = INTERNUTBILDNINGAR (pass, guider ' +
           'och material kollegorna ska gå igenom — "lägg upp en internutbildning ' +
           'om GDPR", "planera ett pass om pitchcoaching nästa torsdag"). Brödtexten ' +
-          'är markdown (## rubriker, - punkter, **fet**). Inlägget publiceras direkt ' +
+          'är markdown (## rubriker, - punkter, **fet**, *kursiv*, [länk](url), > citat, - [ ] checkrutor). ' +
+          'Bilder/film/dokument laddas upp av en människa i UI:t. Inlägget publiceras direkt ' +
           'om published_at utelämnas. Skriv aldrig personuppgifter.',
         parameters: {
           type: 'object',
