@@ -12,12 +12,14 @@ import { AGG_OPS, computeAggregate, type AggOp } from './aggregate';
 import type { MistralToolCall, MistralToolDefinition } from './mistral';
 import { searchOrgKnowledge, searchUserFiles, renderKnowledgeHits } from './rag';
 import { logAiUsage } from './usage';
+import { runWebSearch } from './web-search';
 import { escFilter } from '@/lib/pb-filter';
 import {
   type ApprovalRequestRef,
   type GeneratedFileRef,
   type InlineVisualRef,
   type MeetingRequestRef,
+  type WebSearchSourceRef,
   MAX_MEETING_TITLE,
   FILE_TOPIC_IDS,
   isFileTopic,
@@ -265,6 +267,13 @@ export interface BuildToolsOptions {
    * (§ 16.3 människa-i-loopen).
    */
   includeWrites?: boolean;
+  /**
+   * Exponera `web_search` (Mistral Web Search, FR/EU): riktig internetsökning
+   * som ett function-verktyg i agent-loopen. Sätts BARA när användaren slagit
+   * på "Webbkällor" i chatten (uttryckligt opt-in, transparens art. 13).
+   * Sökfrågan är det enda som lämnar plattformen (saneras i web-search.ts).
+   */
+  includeWebSearch?: boolean;
 }
 
 export function buildChatTools(
@@ -578,6 +587,48 @@ export function buildChatTools(
               description: 'Max antal textstycken att hämta (1-12, default 6).',
               minimum: 1,
               maximum: 12
+            }
+          },
+          required: ['query']
+        }
+      }
+    });
+  }
+
+  // Webbsökning (opt-in via "Webbkällor"-toggeln). Read-only mot externa,
+  // publika källor; ingen intern data får läggas i frågan (guidance +
+  // sanering). Källorna pushas till ctx.webSources för visning under svaret.
+  if (options.includeWebSearch) {
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'web_search',
+        description:
+          'SÖKER PÅ INTERNET (Mistral Web Search, EU) och returnerar en kort ' +
+          'faktasammanställning med numrerade källor (titel + URL). Använd för ' +
+          'allt som INTE finns i plattformens databas eller kunskapsbas: ' +
+          'nationell/branschstatistik, aktuella nyheter, utlysningar och ' +
+          'deadlines, regler och lagar, omvärldsbevakning, publik information om ' +
+          'bolag/investerare/konkurrenter, definitioner. Ställ EN tydlig, ' +
+          'självständig fråga per anrop (som en sökning), på svenska eller ' +
+          'engelska. Kör flera anrop parallellt om frågan har flera delar. ' +
+          'VIKTIGT: lägg ALDRIG intern data, anteckningar, siffror ur databasen ' +
+          'eller personuppgifter i `query` — bara publika namn/ämnen. Ange ' +
+          'källorna i svaret.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description:
+                'Sökfrågan, formulerad som en självständig fråga eller sökning ' +
+                '(t.ex. "antal startups i Sverige 2025 statistik").'
+            },
+            focus: {
+              type: 'string',
+              description:
+                'Valfritt: vad du framför allt vill ha ut (t.ex. "en aktuell ' +
+                'siffra med källa och år", "sista ansökningsdag").'
             }
           },
           required: ['query']
@@ -1681,6 +1732,9 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       };
     case 'search_my_files':
       return { tool: name, label: 'Söker i dina filer' };
+    case 'web_search':
+      // Etiketten är medvetet utan sökfrågan (steg-etiketter är PII-fria, § 17.8).
+      return { tool: name, label: 'Söker på internet' };
     case 'update_startup_field':
       return { tool: name, label: 'Uppdaterar bolagsuppgift' };
     case 'create_startup_activity':
@@ -1798,6 +1852,12 @@ export interface ToolDispatchContext {
    * mänskligt klick i mötespanelen. Max en per tur.
    */
   meetingRequests?: MeetingRequestRef[];
+  /**
+   * Mutabel sink: `web_search` pushar hämtade webbkällor (titel + URL) hit så
+   * chatt-lagret kan visa "Källor" under assistant-svaret och persistera dem
+   * på meddelandet (transparens om underlag, EU AI Act art. 13).
+   */
+  webSources?: WebSearchSourceRef[];
 }
 
 export interface ToolResult {
@@ -2256,6 +2316,64 @@ function logKnowledgeUsage(
   }
 }
 
+/**
+ * `web_search` — riktig internetsökning via Mistral Web Search (§ 9.8). Ett
+ * isolerat conversations-anrop per sökning; bara den sanerade frågan lämnar
+ * plattformen. Tokens loggas i `ai_usage_events` (surface dashboard_chat)
+ * så sökningen räknas mot månadstaket (§ 9.6). Fel returneras som tydligt
+ * verktygsfel så modellen kan säga det rakt ut i stället för att gissa.
+ */
+async function runWebSearchTool(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const query = typeof args.query === 'string' ? args.query.trim() : '';
+  if (!query) return { ok: false, error: 'query saknas.' };
+  const focus = typeof args.focus === 'string' ? args.focus : undefined;
+
+  let result;
+  try {
+    result = await runWebSearch({ query, focus });
+  } catch (err) {
+    console.warn('[web_search] failed', {
+      tenant: ctx.tenantId,
+      error: err instanceof Error ? err.message : err
+    });
+    return {
+      ok: false,
+      error:
+        'Webbsökningen misslyckades just nu (tjänsten svarade inte). Säg det ' +
+        'rakt ut för användaren och svara utifrån intern data om det går — ' +
+        'hitta inte på externa uppgifter.'
+    };
+  }
+
+  if (ctx.actor?.id && (result.usage.tokensIn > 0 || result.usage.tokensOut > 0)) {
+    void logAiUsage(ctx.pb, {
+      tenant: ctx.tenantId,
+      userId: ctx.actor.id,
+      surface: 'dashboard_chat',
+      model: result.model,
+      tokensIn: result.usage.tokensIn,
+      tokensOut: result.usage.tokensOut
+    });
+  }
+
+  if (ctx.webSources) {
+    for (const ref of result.references) {
+      if (!ctx.webSources.some((r) => r.url === ref.url)) ctx.webSources.push(ref);
+    }
+  }
+
+  return {
+    ok: true,
+    data: {
+      result: result.forModel,
+      sources: result.references
+    }
+  };
+}
+
 async function runSearchKnowledge(
   args: Record<string, unknown>,
   ctx: ToolDispatchContext
@@ -2583,6 +2701,8 @@ export async function dispatchToolCall(
       return runReadKnowledgeDocument(args, ctx);
     case 'search_my_files':
       return runSearchMyFiles(args, ctx);
+    case 'web_search':
+      return runWebSearchTool(args, ctx);
     case 'update_startup_field':
       return runUpdateStartupField(args, ctx);
     case 'create_startup_activity':

@@ -7,6 +7,8 @@ import {
   resolveChatProviders,
   type ChatProvider
 } from './mistral-endpoints';
+import { parseConversationOutputs } from './web-search-parse';
+import type { WebSearchSourceRef } from '@platform/shared';
 
 export const EMBEDDING_MODEL = 'mistral-embed';
 const MAX_TOKENS = 4000;
@@ -65,7 +67,12 @@ export interface MistralToolDefinition {
 // image_generation, document_library) skickas inline i tools-arrayen som
 // {type: '<id>'} utan function-blob. Se lib/ai/builtins.ts.
 export interface MistralBuiltinToolDefinition {
-  type: 'web_search' | 'code_interpreter' | 'image_generation' | 'document_library';
+  type:
+    | 'web_search'
+    | 'web_search_premium'
+    | 'code_interpreter'
+    | 'image_generation'
+    | 'document_library';
 }
 
 // MCP-connectors aktiverade i workspacet refereras via {type:'mcp', connector_id}.
@@ -85,6 +92,11 @@ export interface MistralResponse {
   text: string;
   toolCalls: MistralToolCall[];
   finishReason: string;
+  /**
+   * Webbkällor (tool_reference-chunkar) när en built-in `web_search` körts via
+   * /v1/conversations. Tom/undefined för chat.completions-anrop.
+   */
+  references?: WebSearchSourceRef[];
   usage: {
     prompt_tokens: number;
     completion_tokens: number;
@@ -651,11 +663,7 @@ export async function callMistralConversation(
 
     if (response.ok) {
       const data = (await response.json()) as {
-        outputs?: Array<{
-          type?: string;
-          role?: string;
-          content?: string | Array<{ type?: string; text?: string }>;
-        }>;
+        outputs?: unknown;
         usage?: {
           prompt_tokens?: number;
           completion_tokens?: number;
@@ -663,28 +671,23 @@ export async function callMistralConversation(
         };
       };
 
-      // Extrahera assistent-text från outputs[] (message.output-entries).
-      // ToolExecutionEntry m.fl. ignoreras — vi visar bara modellens text.
-      let text = '';
-      for (const out of data.outputs ?? []) {
-        if (out.type !== 'message.output' || out.role !== 'assistant') continue;
-        if (typeof out.content === 'string') {
-          text += (text ? '\n\n' : '') + out.content;
-        } else if (Array.isArray(out.content)) {
-          for (const chunk of out.content) {
-            if (chunk.type === 'text' && typeof chunk.text === 'string') {
-              text += (text ? '\n\n' : '') + chunk.text;
-            }
-          }
-        }
-      }
+      // Extrahera assistent-text + webbkällor ur outputs[] (message.output-
+      // entries; tool_reference-chunkar blir källor). Ren, enhetstestad
+      // tolkning i web-search-parse.ts. ToolExecutionEntry m.fl. ignoreras.
+      const parsed = parseConversationOutputs(data.outputs);
 
       const usage = {
         prompt_tokens: data.usage?.prompt_tokens ?? 0,
         completion_tokens: data.usage?.completion_tokens ?? 0
       };
 
-      return { text, toolCalls: [], finishReason: 'stop', usage };
+      return {
+        text: parsed.text,
+        toolCalls: [],
+        finishReason: 'stop',
+        usage,
+        references: parsed.references
+      };
     }
 
     const errorBody = await response.text().catch(() => '');

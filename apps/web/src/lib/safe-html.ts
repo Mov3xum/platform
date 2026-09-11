@@ -6,7 +6,9 @@
  * `dangerouslySetInnerHTML` — annars uppstår stored/reflected XSS.
  *
  * - `escapeHtml`     → ren textutmatning (ingen markup tillåts).
- * - `inlineMarkdown` → escapar först, tillåter därefter endast **fet** text.
+ * - `inlineMarkdown` → escapar först, tillåter därefter endast **fet** text
+ *   och http(s)-länkar (`[text](https://…)` eller nakna URL:er → `<a>` med
+ *   rel="noopener noreferrer"; andra protokoll blir aldrig länkar).
  *   Oparade `**` strippas så att råa asterisker aldrig når UI:t.
  * - `markdownToHtml` → liten markdown-delmängd (rubriker, listor, fet,
  *   stycken). Allt textinnehåll escapas; endast hårdkodade klasser/taggar
@@ -25,8 +27,37 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
-export function inlineMarkdown(s: string): string {
+const LINK_CLASS = 'text-link underline underline-offset-2 break-all hover:text-brand';
+const LINK_ATTRS = `class="${LINK_CLASS}" target="_blank" rel="noopener noreferrer"`;
+
+/**
+ * Länkar i redan HTML-escapad text. Bara http(s)-URL:er blir `<a>` — allt
+ * annat (javascript:, data:, relativa sökvägar) lämnas som text. Två former:
+ * markdown `[text](https://…)` och nakna `https://…`. Eftersom texten är
+ * escapad FÖRE detta steg är href-värdet alltid attribut-säkert (`"` → &quot;,
+ * `&` → &amp; — webbläsaren avkodar entiteter i attribut). Nakna URL:er som
+ * redan sitter i ett href/anchor-innehåll (föregås av `"` eller `>`) rörs inte.
+ */
+function linkifyEscaped(escaped: string): string {
   return (
+    escaped
+      .replace(
+        /\[([^\]\n]+)\]\((https?:\/\/[^\s)<"]+)\)/g,
+        (_m, label: string, url: string) => `<a href="${url}" ${LINK_ATTRS}>${label}</a>`
+      )
+      // Stannar före escapade citattecken/vinkelparenteser så att en URL
+      // aldrig "äter" text som skulle kunna se ut som ett attribut.
+      .replace(/(?<![">\w/])(https?:\/\/(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<"])+)/g, (m: string) => {
+        // Avslutande skiljetecken hör till meningen, inte länken.
+        const trailing = /[.,;:!?)]+$/.exec(m)?.[0] ?? '';
+        const url = trailing ? m.slice(0, -trailing.length) : m;
+        return `<a href="${url}" ${LINK_ATTRS}>${url}</a>${trailing}`;
+      })
+  );
+}
+
+export function inlineMarkdown(s: string): string {
+  return linkifyEscaped(
     escapeHtml(s)
       .replace(
         /\*\*(.*?)\*\*/g,
