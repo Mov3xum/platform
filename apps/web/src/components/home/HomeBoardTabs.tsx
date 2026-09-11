@@ -51,7 +51,7 @@ export function HomeBoardTabs({
 
   return (
     <section className="min-w-0">
-      <div role="tablist" aria-label="Från Movexum" className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+      <div role="tablist" aria-label="Från Movexum" className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
         {tabs.map((t) => {
           const on = t.id === active;
           return (
@@ -61,28 +61,28 @@ export function HomeBoardTabs({
               type="button"
               aria-selected={on}
               onClick={() => select(t.id)}
-              className={`group relative inline-flex items-baseline gap-1.5 pb-2 font-heading text-[20px] font-semibold tracking-tight transition md:text-[22px] ${
+              className={`group relative inline-flex items-baseline gap-1.5 pb-2 font-heading text-[16px] font-semibold tracking-tight transition md:text-[17px] ${
                 on ? 'text-foreground' : 'text-foreground-subtle hover:text-foreground-muted'
               }`}
             >
               {t.label}
               {t.count > 0 && (
-                <sup className={`mx-tnum text-[11px] font-semibold ${on ? 'text-brand' : 'text-foreground-subtle'}`}>
+                <sup className={`mx-tnum text-[10px] font-semibold ${on ? 'text-brand' : 'text-foreground-subtle'}`}>
                   {t.count}
                 </sup>
               )}
               <span
                 aria-hidden
                 className={`absolute bottom-0 left-0 h-[3px] rounded-full bg-brand transition-all duration-300 ${
-                  on ? 'w-8' : 'w-0 group-hover:w-4'
+                  on ? 'w-6' : 'w-0 group-hover:w-3'
                 }`}
               />
             </button>
           );
         })}
       </div>
-      <p className="mt-1 text-[12.5px] text-foreground-subtle">{current?.description}</p>
-      <div role="tabpanel" className="pt-5">
+      <p className="mt-1 text-[12px] text-foreground-subtle">{current?.description}</p>
+      <div role="tabpanel" className="pt-4">
         {panels[active]}
       </div>
     </section>

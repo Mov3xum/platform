@@ -24,7 +24,7 @@ const INTRO: IntroSection[] = [
     title: 'Så hänger plattformen ihop',
     lead: 'Movexum OS är vårt gemensamma arbetsrum: allt om bolagen, programmet och verksamheten på ett ställe — EU-suveränt, utan externa molntjänster utanför Europa.',
     points: [
-      'Dashboard är startsidan: anslagstavla, rutiner, internutbildningar, veckans agenda, bolagsnytt och omvärld.',
+      'Hemmaplan är startsidan: anslagstavla, rutiner, internutbildningar, veckans agenda, bolagsnytt och omvärld.',
       'Sidomenyn följer din roll och dina moduler — saknar du en sida, be en admin slå på den under Inställningar → Användare.',
       'Allt som skrivs i plattformen loggas i aktivitetsloggen med vem, vad och när.'
     ]
@@ -112,11 +112,11 @@ export function PlatformIntro() {
         {INTRO.map((s, i) => (
           <li key={s.title} className="border-b border-default">
             <details className="group">
-              <summary className="flex cursor-pointer list-none items-baseline gap-4 py-3 transition hover:text-brand [&::-webkit-details-marker]:hidden">
-                <span className="mx-tnum w-8 shrink-0 font-heading text-[22px] font-light leading-none tracking-tight text-foreground-subtle transition group-open:text-brand">
+              <summary className="flex cursor-pointer list-none items-baseline gap-4 py-2.5 transition hover:text-brand [&::-webkit-details-marker]:hidden">
+                <span className="mx-tnum w-7 shrink-0 font-heading text-[18px] font-light leading-none tracking-tight text-foreground-subtle transition group-open:text-brand">
                   {String(i + 1).padStart(2, '0')}
                 </span>
-                <span className="min-w-0 flex-1 font-heading text-[15px] font-semibold leading-snug text-foreground">
+                <span className="min-w-0 flex-1 font-heading text-[14px] font-semibold leading-snug text-foreground">
                   {s.title}
                 </span>
                 <Icon
@@ -125,8 +125,8 @@ export function PlatformIntro() {
                   className="shrink-0 self-center text-foreground-subtle transition group-open:rotate-45 group-open:text-brand"
                 />
               </summary>
-              <div className="pb-5 pl-12 pr-6">
-                <p className="max-w-[62ch] text-[14px] leading-relaxed text-foreground-muted">{s.lead}</p>
+              <div className="pb-4 pl-11 pr-6">
+                <p className="max-w-[62ch] text-[13.5px] leading-relaxed text-foreground-muted">{s.lead}</p>
                 <ul className="mt-3 max-w-[62ch] space-y-1.5">
                   {s.points.map((p) => (
                     <li key={p} className="flex gap-3 text-[13px] leading-relaxed text-foreground-muted">

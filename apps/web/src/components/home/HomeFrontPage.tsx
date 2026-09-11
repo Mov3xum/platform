@@ -10,16 +10,29 @@ import { HomeBoardTabs, type HomeTabDef } from '@/components/home/HomeBoardTabs'
 import { OmvarldFeed, type OmvarldSourceStatus } from '@/components/home/OmvarldFeed';
 import { AutoRefresh } from '@/components/home/AutoRefresh';
 import type { DashboardActivity } from '@/components/DashboardChat';
-import { buildHomeTimeline, type HomeAgendaItem, type OmvarldItem, type OrgPostTab, type Role } from '@platform/shared';
+import {
+  HOME_TAB_PARAM,
+  HOME_TAB_SLUGS,
+  HOME_WINDOW_OPTIONS,
+  HOME_WINDOW_PARAM,
+  buildHomeTimeline,
+  homeWindowLabel,
+  type HomeAgendaItem,
+  type HomeWindowDays,
+  type OmvarldItem,
+  type OrgPostTab,
+  type Role
+} from '@platform/shared';
 
 /**
  * Dashboard-layouten (CLAUDE.md § 37) — ren presentation av redan laddad,
  * RLS-filtrerad data (page.tsx äger all IO). Satt som en redaktionell
- * förstasida i stället för en dashboard: inga kort eller boxar. Nyckeltalen
- * vävs in som löpande text med länkade siffror, agendan är en 14-dagars
- * tidslinje i full bredd, avdelningarna (Anslagstavla · Så gör vi ·
- * Internutbildningar) är stora Sora-rubriker, Bolagsnytt en vertikal
- * tidslinje och omvärlden en tidningsspalt. Ingen dataväg, ingen AI-inferens.
+ * förstasida i stället för en dashboard: inga kort eller boxar, och samma
+ * typskala som chatten (§ 37.1). Nyckeltalen är en boxlös siffer-rad under
+ * hälsningen, agendan en tidslinje i full bredd (7/14/30 dagar), avdelningarna
+ * (Anslagstavla · Så gör vi · Internutbildningar) Sora-rubriker i rad, och i
+ * sidospalten ligger Bolagsnytt och Omvärld som två likadana tidslinjelistor.
+ * Ingen dataväg, ingen AI-inferens.
  */
 
 export interface HomeShortcut {
@@ -34,16 +47,17 @@ export interface HomeFrontPageProps {
   dateLine: string;
   today: Date;
   shortcuts: HomeShortcut[];
-  /** Nyckeltal — null när räkningen felade (utelämnas i ingressen, visas aldrig som 0). */
+  /** Nyckeltal — null när räkningen felade (visas som "–", aldrig som 0). */
   counts: {
     activeStartups: number | null;
     newLeads: number | null;
     leadsDelta: number | null;
     runningWorkshops: number | null;
     myOpenTasks: number | null;
-    agendaCount: number;
   };
+  /** Agendaposter (redan filtrerade på kategori-synlighet) — fönstret klipps här. */
   agendaItems: HomeAgendaItem[];
+  windowDays: HomeWindowDays;
   tabs: HomeTabDef[];
   initialTab: OrgPostTab;
   byTab: Record<OrgPostTab, BoardPost[]>;
@@ -71,18 +85,16 @@ function SectionHead({
   linkLabel?: string;
 }) {
   return (
-    <div className="mb-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+    <div className="mb-3 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
       <div className="min-w-0">
-        <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-brand">{eyebrow}</div>
-        <h2 className="mt-0.5 font-heading text-[20px] font-semibold tracking-tight text-foreground md:text-[22px]">
-          {title}
-        </h2>
-        {description && <p className="mt-0.5 text-[12.5px] text-foreground-subtle">{description}</p>}
+        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-brand">{eyebrow}</div>
+        <h2 className="mt-0.5 font-heading text-[16px] font-semibold tracking-tight text-foreground">{title}</h2>
+        {description && <p className="mt-0.5 text-[12px] text-foreground-subtle">{description}</p>}
       </div>
       {href && (
         <Link
           href={href}
-          className="inline-flex items-center gap-1 pb-1 text-[12.5px] font-semibold text-foreground underline decoration-default underline-offset-4 transition hover:text-brand hover:decoration-brand"
+          className="inline-flex items-center gap-1 pb-1 text-[12px] font-semibold text-foreground underline decoration-default underline-offset-4 transition hover:text-brand hover:decoration-brand"
         >
           {linkLabel ?? 'Alla'}
           <Icon name="arrow-up-right" size={11} />
@@ -92,14 +104,49 @@ function SectionHead({
   );
 }
 
-/** Ett nyckeltal invävt i löpande text — länkad, tabulär siffra i Sora. */
-function Figure({ value, href, children }: { value: number; href: string; children: ReactNode }) {
+/**
+ * Ett nyckeltal i siffer-raden — som ett stat-kort utan kortet: stor tabulär
+ * siffra i Sora, etikett i kapitäler, valfri hint och delta. Hela figuren är
+ * en länk till sin vy. `null` visas som "–" (räkningen felade), aldrig som 0.
+ */
+function StatFigure({
+  label,
+  value,
+  hint,
+  href,
+  delta
+}: {
+  label: string;
+  value: number | null;
+  hint?: string;
+  href: string;
+  delta?: number | null;
+}) {
   return (
-    <Link
-      href={href}
-      className="whitespace-nowrap font-heading font-semibold text-foreground underline decoration-brand/30 decoration-2 underline-offset-[5px] transition hover:text-brand hover:decoration-brand"
-    >
-      <span className="mx-tnum">{value.toLocaleString('sv-SE')}</span> {children}
+    <Link href={href} className="group min-w-0 flex-1 basis-[120px]">
+      <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle transition group-hover:text-brand">
+        {label}
+      </span>
+      <span className="mt-1 flex items-baseline gap-2">
+        <span className="mx-tnum font-heading text-[26px] font-semibold leading-none tracking-[-0.02em] text-foreground">
+          {value === null ? '–' : value.toLocaleString('sv-SE')}
+        </span>
+        {typeof delta === 'number' && (
+          <span
+            className={`mx-tnum text-[11px] font-semibold ${
+              delta > 0
+                ? 'text-movexum-gron dark:text-movexum-ljusgron'
+                : delta < 0
+                  ? 'text-movexum-orange'
+                  : 'text-foreground-subtle'
+            }`}
+            title="Jämfört med föregående 7 dagar"
+          >
+            {delta > 0 ? `+${delta}` : delta < 0 ? `−${Math.abs(delta)}` : '±0'}
+          </span>
+        )}
+      </span>
+      {hint && <span className="mt-0.5 block truncate text-[11px] text-foreground-subtle">{hint}</span>}
     </Link>
   );
 }
@@ -119,7 +166,7 @@ function YearRing({ today }: { today: Date }) {
     <svg
       viewBox="0 0 300 300"
       aria-hidden
-      className="pointer-events-none absolute -top-10 right-0 hidden h-[260px] w-[260px] text-brand md:block lg:h-[300px] lg:w-[300px] xl:right-2"
+      className="pointer-events-none absolute -top-6 right-0 hidden h-[150px] w-[150px] text-brand md:block"
     >
       {[52, 78, 104].map((rr) => (
         <circle key={rr} cx="150" cy="150" r={rr} fill="none" stroke="currentColor" strokeOpacity="0.08" strokeWidth="1" />
@@ -176,6 +223,7 @@ export function HomeFrontPage({
   shortcuts,
   counts,
   agendaItems,
+  windowDays,
   tabs,
   initialTab,
   byTab,
@@ -186,100 +234,39 @@ export function HomeFrontPage({
   omvarld,
   omvarldSources
 }: HomeFrontPageProps) {
-  const { activeStartups, newLeads, leadsDelta, runningWorkshops, myOpenTasks, agendaCount } = counts;
-  const timeline = buildHomeTimeline(agendaItems, today, 14);
+  const { activeStartups, newLeads, leadsDelta, runningWorkshops, myOpenTasks } = counts;
+  const timeline = buildHomeTimeline(agendaItems, today, windowDays);
+  const agendaCount = timeline.spans.length;
 
-  // Ingressen: nyckeltalen som löpande text. Bara kända värden vävs in — en
-  // räkning som felade utelämnas i stället för att visas som 0.
-  const sentences: ReactNode[] = [];
-  if (activeStartups !== null) {
-    sentences.push(
-      <span key="s">
-        Just nu är{' '}
-        <Figure value={activeStartups} href="/startups">
-          bolag
-        </Figure>{' '}
-        aktiva i inkubatorn.
-      </span>
-    );
-  }
-  if (newLeads !== null) {
-    sentences.push(
-      <span key="l">
-        Senaste veckan kom{' '}
-        <Figure value={newLeads} href="/inflode/leads">
-          {newLeads === 1 ? 'nytt inflöde' : 'nya inflöden'}
-        </Figure>
-        {leadsDelta !== null && (
-          <span className="text-foreground-subtle">
-            {' '}
-            ({leadsDelta > 0 ? `+${leadsDelta}` : leadsDelta < 0 ? `−${Math.abs(leadsDelta)}` : 'oförändrat'} mot veckan innan)
-          </span>
-        )}
-        .
-      </span>
-    );
-  }
-  if (runningWorkshops !== null) {
-    sentences.push(
-      <span key="w">
-        <Figure value={runningWorkshops} href="/pagaende">
-          bolag
-        </Figure>{' '}
-        {runningWorkshops === 1 ? 'är mitt i en workshop' : 'är mitt i workshops'}
-        {myOpenTasks !== null ? ' och ' : '.'}
-      </span>
-    );
-  }
-  if (myOpenTasks !== null) {
-    sentences.push(
-      <span key="t">
-        {runningWorkshops === null ? 'Du har ' : 'du har '}
-        <Figure value={myOpenTasks} href="/inkorg">
-          {myOpenTasks === 1 ? 'öppen uppgift' : 'öppna uppgifter'}
-        </Figure>
-        .
-      </span>
-    );
-  }
-  sentences.push(
-    <span key="a">
-      De närmaste två veckorna står{' '}
-      <Figure value={agendaCount} href="/arshjul">
-        {agendaCount === 1 ? 'punkt' : 'punkter'}
-      </Figure>{' '}
-      på agendan.
-    </span>
-  );
+  // Länk till samma sida med annat kalenderfönster — fliken bevaras i URL:en.
+  const windowHref = (days: HomeWindowDays) => {
+    const params = new URLSearchParams();
+    if (initialTab !== 'board') params.set(HOME_TAB_PARAM, HOME_TAB_SLUGS[initialTab]);
+    if (days !== 7) params.set(HOME_WINDOW_PARAM, String(days));
+    const q = params.toString();
+    return q ? `/hem?${q}` : '/hem';
+  };
 
   return (
     <PageShell title="" scroll={false} noPad>
       <AutoRefresh />
       <div className="flex min-h-0 flex-1 overflow-y-auto">
-        <div className="w-full px-5 pb-20 pt-6 md:px-8 lg:px-12">
+        <div className="w-full px-5 pb-16 pt-5 md:px-8 lg:px-10">
           {/* ── Masthead ─────────────────────────────────────────────────── */}
-          <header className="relative overflow-hidden">
+          <header className="relative">
             <YearRing today={today} />
-            <div className="relative flex items-center justify-between border-b border-foreground pb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-foreground">
+            <div className="relative flex items-center justify-between border-b border-foreground pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-foreground">
               <span>{dateLine.split(' · ')[0]}</span>
               <span className="mx-tnum hidden text-foreground-subtle sm:inline">{dateLine.split(' · ')[1]}</span>
-              <span className="relative bg-canvas pl-2 text-foreground-subtle">Dashboard</span>
+              <span className="relative bg-canvas pl-2 text-foreground-subtle">Hemmaplan</span>
             </div>
-            <div className="relative max-w-[46rem] pt-8 md:pt-10">
-              <h1 className="font-heading text-[40px] font-semibold leading-[1.02] tracking-[-0.025em] text-foreground md:text-[56px]">
+            <div className="relative max-w-[46rem] pt-6">
+              <h1 className="font-heading text-[28px] font-semibold leading-[1.05] tracking-tight text-foreground md:text-[34px]">
                 {hello}
               </h1>
-              <p className="mt-5 max-w-[40rem] text-[17px] leading-[1.7] text-foreground-muted md:text-[19px]">
-                {sentences.map((node, i) => (
-                  <span key={i}>
-                    {node}
-                    {i < sentences.length - 1 ? ' ' : ''}
-                  </span>
-                ))}
-              </p>
               {shortcuts.length > 0 && (
-                <p className="mt-6 flex flex-wrap items-center gap-x-1 gap-y-2 text-[13px] text-foreground-subtle">
-                  <span className="mr-2 font-semibold uppercase tracking-[0.14em] text-[10.5px]">Gå direkt till</span>
+                <p className="mt-3 flex flex-wrap items-center gap-x-1 gap-y-1.5 text-[12.5px] text-foreground-subtle">
+                  <span className="mr-2 text-[10px] font-semibold uppercase tracking-[0.14em]">Gå direkt till</span>
                   {shortcuts.map((s, i) => (
                     <span key={s.id} className="inline-flex items-center">
                       {i > 0 && <span aria-hidden className="mx-2 h-1 w-1 rounded-full bg-foreground-subtle/50" />}
@@ -295,24 +282,76 @@ export function HomeFrontPage({
                 </p>
               )}
             </div>
+
+            {/* Nyckeltalen — en boxlös siffer-rad fördelad över bredden. */}
+            <div className="relative mt-6 flex flex-wrap gap-x-10 gap-y-5 border-t border-default pt-5">
+              <StatFigure label="Aktiva bolag" value={activeStartups} hint="i inkubatorn just nu" href="/startups" />
+              <StatFigure
+                label="Nya inflöden"
+                value={newLeads}
+                delta={leadsDelta}
+                hint="senaste 7 dagarna"
+                href="/inflode/leads"
+              />
+              <StatFigure
+                label="Pågående workshops"
+                value={runningWorkshops}
+                hint="bolag mitt i en workshop"
+                href="/pagaende"
+              />
+              <StatFigure label="Mina uppgifter" value={myOpenTasks} hint="öppna, tilldelade dig" href="/inkorg" />
+              <StatFigure label="På agendan" value={agendaCount} hint={homeWindowLabel(windowDays).toLowerCase()} href="/arshjul" />
+            </div>
           </header>
 
           {/* ── Tidslinje ────────────────────────────────────────────────── */}
-          <section className="mt-12 border-t border-default pt-6">
-            <SectionHead
-              eyebrow="Kalender"
-              title="De närmaste fjorton dagarna"
-              description="Årshjulet och eventkalendern på en linje — lila är events, blått är verksamhetsårshjulet"
-              href="/arshjul"
-              linkLabel="Öppna årshjulet"
-            />
+          <section className="mt-8 border-t border-default pt-5">
+            <div className="mb-3 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-brand">Kalender</div>
+                <h2 className="mt-0.5 font-heading text-[16px] font-semibold tracking-tight text-foreground">
+                  {homeWindowLabel(windowDays)}
+                </h2>
+                <p className="mt-0.5 text-[12px] text-foreground-subtle">
+                  Årshjulet och eventkalendern på en linje — lila är events, blått är verksamhetsårshjulet
+                </p>
+              </div>
+              <div className="flex items-center gap-4 pb-1 text-[12px]">
+                <span className="flex items-center gap-2" role="group" aria-label="Kalenderfönster">
+                  {HOME_WINDOW_OPTIONS.map((d) => {
+                    const on = d === windowDays;
+                    return (
+                      <Link
+                        key={d}
+                        href={windowHref(d)}
+                        aria-current={on ? 'true' : undefined}
+                        className={`mx-tnum font-semibold transition ${
+                          on
+                            ? 'text-foreground underline decoration-brand decoration-2 underline-offset-[6px]'
+                            : 'text-foreground-subtle hover:text-foreground'
+                        }`}
+                      >
+                        {d === 30 ? 'Månad' : `${d} dagar`}
+                      </Link>
+                    );
+                  })}
+                </span>
+                <Link
+                  href="/arshjul"
+                  className="inline-flex items-center gap-1 font-semibold text-foreground underline decoration-default underline-offset-4 transition hover:text-brand hover:decoration-brand"
+                >
+                  Öppna årshjulet
+                  <Icon name="arrow-up-right" size={11} />
+                </Link>
+              </div>
+            </div>
             <HomeTimelineStrip timeline={timeline} />
           </section>
 
-          <div className="mt-12 grid grid-cols-1 gap-x-14 gap-y-12 border-t border-default pt-8 xl:grid-cols-12">
+          <div className="mt-8 grid grid-cols-1 gap-x-12 gap-y-8 border-t border-default pt-6 xl:grid-cols-12">
             {/* ── Från Movexum (huvudspalt) ─────────────────────────────── */}
             <section className="min-w-0 xl:col-span-8">
-              <div className="mb-3 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-brand">Från Movexum</div>
+              <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-brand">Från Movexum</div>
               <HomeBoardTabs
                 tabs={tabs}
                 initial={initialTab}
@@ -362,8 +401,8 @@ export function HomeFrontPage({
                       newLabel="Ny internutbildning"
                       emptyText="Inga internutbildningar upplagda än. Be chatten: ”Lägg upp en internutbildning om GDPR i coachning på torsdag med länk till materialet.”"
                     >
-                      <p className="mb-5 flex max-w-[60ch] items-start gap-3 text-[13px] leading-relaxed text-foreground-muted">
-                        <Icon name="sparkle" size={14} className="mt-0.5 shrink-0 text-movexum-lila dark:text-movexum-ljuslila" />
+                      <p className="mb-4 flex max-w-[60ch] items-start gap-3 text-[12.5px] leading-relaxed text-foreground-muted">
+                        <Icon name="sparkle" size={13} className="mt-0.5 shrink-0 text-movexum-lila dark:text-movexum-ljuslila" />
                         <span>
                           Den här avdelningen sköts via{' '}
                           <Link href="/chatt" className="font-semibold text-link underline decoration-link/30 underline-offset-4 hover:decoration-link">
@@ -379,28 +418,27 @@ export function HomeFrontPage({
               />
             </section>
 
-
-            {/* ── Bolagsnytt (sidospalt; på mobil mellan avdelningarna och omvärlden) ── */}
-            <aside className="min-w-0 border-t border-default pt-8 xl:col-span-4 xl:row-span-2 xl:border-t-0 xl:border-l xl:pl-10 xl:pt-0">
-              <SectionHead
-                eyebrow="Portföljen"
-                title="Bolagsnytt"
-                description="Det senaste i portföljen och det som gjorts i systemet"
-                href="/aktivitet"
-                linkLabel="Hela loggen"
-              />
-              <CompanyNews feed={feed} />
+            {/* ── Sidospalt: Bolagsnytt + Omvärld som två likadana listor ── */}
+            <aside className="min-w-0 space-y-8 border-t border-default pt-6 xl:col-span-4 xl:border-t-0 xl:border-l xl:pl-10 xl:pt-0">
+              <section>
+                <SectionHead
+                  eyebrow="Portföljen"
+                  title="Bolagsnytt"
+                  description="Det senaste i portföljen och det som gjorts i systemet"
+                  href="/aktivitet"
+                  linkLabel="Hela loggen"
+                />
+                <CompanyNews feed={feed} />
+              </section>
+              <section className="border-t border-default pt-6">
+                <SectionHead
+                  eyebrow="Omvärld"
+                  title="Startups, finansiering & utlysningar"
+                  description="Live från EU-baserade källor"
+                />
+                <OmvarldFeed items={omvarld} sources={omvarldSources} max={10} />
+              </section>
             </aside>
-
-            {/* ── Omvärld (huvudspalt) ──────────────────────────────────── */}
-            <section className="min-w-0 border-t border-default pt-8 xl:col-span-8">
-              <SectionHead
-                eyebrow="Omvärld"
-                title="Startups, finansiering & utlysningar"
-                description="Live från EU-baserade källor — Breakit, Sifted, Di Digital, Vinnova, Almi, EIC"
-              />
-              <OmvarldFeed items={omvarld} sources={omvarldSources} max={11} />
-            </section>
           </div>
         </div>
       </div>

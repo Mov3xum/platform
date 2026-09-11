@@ -81,14 +81,14 @@ export function CompanyNews({ feed }: { feed: DashboardActivity[] }) {
                   <Icon name={activityIcon(act)} size={12} />
                 )}
               </span>
-              <span className="text-[13.5px] font-medium leading-snug text-foreground group-hover:underline group-hover:decoration-brand/40 group-hover:underline-offset-4">
+              <span className="text-[13px] font-medium leading-snug text-foreground group-hover:underline group-hover:decoration-brand/40 group-hover:underline-offset-4">
                 {act.title}
               </span>
             </span>
           </>
         );
         return (
-          <li key={act.id} className="relative pb-4 last:pb-0" title={act.actorName ? `Av ${act.actorName}` : undefined}>
+          <li key={act.id} className="relative pb-3.5 last:pb-0" title={act.actorName ? `Av ${act.actorName}` : undefined}>
             {href ? (
               <Link href={href} className="group block">
                 {body}

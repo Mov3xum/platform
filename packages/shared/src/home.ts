@@ -325,3 +325,23 @@ export function buildHomeTimeline(items: readonly HomeAgendaItem[], today: Date,
 
   return { days: dayList, spans, lanes: laneEnds.length };
 }
+
+// ─── Kalenderfönster på Hemmaplan ────────────────────────────────────────────
+
+/** Query-parametern som styr kalenderfönstret (`/hem?dagar=7|14|30`). */
+export const HOME_WINDOW_PARAM = 'dagar';
+export const HOME_WINDOW_OPTIONS = [7, 14, 30] as const;
+export type HomeWindowDays = (typeof HOME_WINDOW_OPTIONS)[number];
+export const HOME_WINDOW_DEFAULT: HomeWindowDays = 7;
+
+/** Okänt/saknat värde ger default (7 dagar). */
+export function parseHomeWindowDays(raw: string | undefined | null): HomeWindowDays {
+  const n = Number(raw);
+  return (HOME_WINDOW_OPTIONS as readonly number[]).includes(n) ? (n as HomeWindowDays) : HOME_WINDOW_DEFAULT;
+}
+
+export function homeWindowLabel(days: HomeWindowDays): string {
+  if (days === 7) return 'De närmaste sju dagarna';
+  if (days === 14) return 'De närmaste fjorton dagarna';
+  return 'Den närmaste månaden';
+}
