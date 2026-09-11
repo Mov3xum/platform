@@ -3912,6 +3912,8 @@ ansvarig i UI:t.
 - **`annual_wheel_categories`** (1700000139): `tenant` (cascadeDelete), `key`
   (slug ≤ 40 tecken — det som lagras på posterna, **oföränderlig**), `label`
   (≤ 60), `token` (select över Movexums brand-färger, § 2.2), `sort_order`,
+  `show_on_home` (bool, **migration 1700000146** — visas kategorins
+  aktiviteter i kalendern på Hemmaplan § 37; backfillat `true`, saknat = visas),
   `created_by`. Unikt index `(tenant, key)` → idempotent. Migrationen seedar
   `styrelse`/`ledning`/`gemensamt` (grön/gul/lila) per tenant, så befintliga
   poster behåller sin färg.
@@ -4869,52 +4871,59 @@ roll**:
 sida personalen landar på efter inloggning (`/` och `/dashboard` redirectar
 dit; PWA:ns `start_url` pekar dit). En ren `startup_member` redirectas
 oförändrat till `/min-oversikt` (§ 22). **Uttryck (2026-09): en redaktionell
-förstasida, inte en dashboard.** Inga kort, inga boxar, inga KPI-tiles —
-allt flyter inline på canvasen med hårlinjer och stora Sora-rubriker
-(`components/home/HomeFrontPage.tsx` äger layouten; `app/hem/page.tsx` äger
-all IO och skickar färdig data):
+förstasida, inte en dashboard** — inga kort, inga boxar; allt flyter inline
+på canvasen med hårlinjer, och typskalan är **samma som chatten** (hälsning
+28/34 px, sektionsrubriker 16 px, brödtext 13 px).
+`components/home/HomeFrontPage.tsx` äger layouten; `app/hem/page.tsx` äger
+all IO och skickar färdig data:
 
-1. **Masthead** — en folio-rad (datum · ISO-vecka · "Hemmaplan") under en
-   ink-linje, hälsningen i stor Sora (56 px), och **ingressen: nyckeltalen
-   som löpande text** ("Just nu är **74 bolag** aktiva i inkubatorn. Senaste
-   veckan kom **3 nya inflöden** (+2 mot veckan innan) …") där varje siffra
-   är en understruken länk (`Figure`) till sin vy. En räkning som felade
-   utelämnas ur meningen — visas aldrig som 0. "Gå direkt till"-raden är
-   textlänkar med punktavdelare (rollfiltrerade). Till höger en dekorativ
-   **årsring** (`YearRing`, inline-SVG i brand-token): ett eko av årshjulet
-   med en båge som visar hur långt året kommit — döljs under `md`.
-2. **De närmaste fjorton dagarna** (full bredd) — en **tidslinje**
-   (`HomeTimelineStrip`): dagslinjal (idag som fylld brand-cirkel, helger
-   tonade, månadsetikett vid skifte) med årshjulets poster och events som
-   **band** över sina dagar. Perioder blir långa band, endagsposter korta;
-   överlappande band packas i körfält av den rena, enhetstestade
-   `buildHomeTimeline` (`@platform/shared` home.ts) som även räknar ut hur
-   långt en etikett får flyta ut över lediga dagar (`labelTo`) så att en
-   endagspost visar sin titel i stället för att klippas. Events i lila,
-   årshjulet i brand-ton — tonade ytor med ink-text (dark mode följer).
-   Scrollar i sidled på smala skärmar.
+1. **Masthead** — folio-rad (datum · ISO-vecka · "Hemmaplan") under en
+   ink-linje, hälsningen i Sora, "Gå direkt till"-raden som textlänkar
+   (rollfiltrerade) och en liten dekorativ **årsring** (`YearRing`, inline-
+   SVG i brand-token, döljs under `md`). Under det en **boxlös siffer-rad**
+   (`StatFigure`): fem nyckeltal fördelade över bredden — stor tabulär siffra
+   i Sora, etikett i kapitäler, hint och delta — varje figur är en länk till
+   sin vy. En räkning som felade visas som "–", aldrig som 0.
+2. **Kalendern** (full bredd) — en **tidslinje** (`HomeTimelineStrip`) med
+   valbart fönster **7 · 14 dagar · Månad** (`?dagar=7|14|30`,
+   `parseHomeWindowDays` i `@platform/shared` home.ts; **default 7 dagar**;
+   fliken bevaras i länkarna). Dagslinjal (idag som fylld brand-cirkel, helger
+   tonade, månadsetikett vid skifte; kolumnbredd efter fönster, månaden
+   scrollar i sidled) med årshjulets poster och events som **band** över
+   sina dagar — perioder långa, endagsposter korta; överlappande band packas
+   i körfält av den rena, enhetstestade `buildHomeTimeline`, som även räknar
+   ut hur långt en etikett får flyta ut över lediga dagar (`labelTo`). Events
+   i lila, årshjulet i brand-ton. Fönstret kan korsa årsskiftet →
+   `page.tsx` läser båda åren vid behov.
+   **Kategori-synlighet:** bara årshjulskategorier med `show_on_home`
+   (migration **1700000146**, bool, backfillat `true`; speglat i
+   `setup-via-api.mjs`) visas — superadmin bockar i/ur **"Hemmaplan"** per
+   kategori i `/arshjul` → Kategorier (t.ex. Event ja, Styrelse & VD nej).
+   Filtret görs server-side i `page.tsx` via `annualWheelHiddenOnHome`
+   (ren, enhetstestad); saknat fält tolkas som "visas", bara ett uttryckligt
+   `false` döljer. Posterna finns kvar oförändrat i `/arshjul` (§ 30.3).
 3. **Från Movexum** (huvudspalt 8/12) — avdelningarna **Anslagstavla · Så
-   gör vi · Internutbildningar** som stora Sora-ord i rad (`HomeBoardTabs`;
-   aktiv = ink med kort brand-streck, antal som upphöjd siffra), URL-synk
+   gör vi · Internutbildningar** som Sora-ord i rad (`HomeBoardTabs`; aktiv =
+   ink med kort brand-streck, antal som upphöjd siffra), URL-synk
    `?flik=anslagstavla|sa-gor-vi|internutbildningar`. Anslagstavlan och
    Internutbildningar sätts som en tidningssida: **första inlägget som
-   toppnyhet** (typ-eyebrow i färg, 28 px rubrik, hela texten upp till
-   1 400 tecken), resten som **notiser i två spalter** med hårlinjer. "Så gör
-   vi" är en **numrerad handbok** (01, 02 … i ljus Sora, `+` som vrids vid
-   öppning): först den hårdkodade plattformsintron (`PlatformIntro`), sedan
-   egna rutiner i samma språk. Redigeraren är inline med brand-toppstreck.
-4. **Bolagsnytt** (sidospalt 4/12; på mobil mellan avdelningarna och
-   omvärlden) — den samlade aktivitetsloggen (§ 32) som **vertikal tidslinje**
-   (`CompanyNews`): hårlinje med färgprickar (lila = AI-utfört/verktyg, grön
-   = utbildning, gul = avtal/möte, brand = övrigt), relativ tid + bolag som
-   eyebrow, "AI"-märkning (art. 13).
-5. **Omvärld** (huvudspalt, under avdelningarna) — `OmvarldFeed` som
-   **tidningsspalt**: källfilter som understrukna textlänkar med statusprick,
-   första posten som toppnyhet (22 px rubrik + ingress), resten som notiser i
-   två spalter; ärlig statusrad per källa (§ 37.4).
+   toppnyhet** (typ-eyebrow i färg, hela texten upp till 1 400 tecken),
+   resten som **notiser i två spalter** med hårlinjer. "Så gör vi" är en
+   **numrerad handbok** (01, 02 … i ljus Sora, `+` som vrids vid öppning):
+   först den hårdkodade plattformsintron (`PlatformIntro`), sedan egna
+   rutiner i samma språk. Redigeraren är inline med brand-toppstreck.
+4. **Sidospalten** (4/12; på mobil under avdelningarna) — **två likadana
+   listor**: **Bolagsnytt** (`CompanyNews`, den samlade aktivitetsloggen § 32)
+   och under den **Omvärld** (`OmvarldFeed`, § 37.4) — båda som **vertikal
+   tidslinje** med hårlinje, färgprickar (lila = AI-utfört/verktyg, grön =
+   utbildning, gul = avtal/möte, brand = övrigt; Movexum-blå = extern källa),
+   eyebrow med tid + bolag/källa och "AI"-märkning (art. 13). Omvärlden har
+   källfilter som understrukna textlänkar med statusprick och en ärlig
+   statusrad per källa.
 
 Nyckeltalen läses fortfarande via `getList(1,1).totalItems` med användarens
-token. Ingen ny dataväg, inga nya fält/kollektioner; riskklass n/a.
+token. Ingen ny dataväg; enda nya fältet är `annual_wheel_categories.show_on_home`
+(icke-PII konfiguration); riskklass n/a.
 
 **Client-/server-gränsen (läxa från staging 2026-09).** Slug-mappningen för
 flikarna (`HOME_TAB_PARAM`, `HOME_TAB_SLUGS`, `homeTabFromSlug`, `homeTabHref`)
@@ -4934,20 +4943,21 @@ blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdn
 | Fil | Syfte |
 |-----|-------|
 | `packages/shared/src/org-posts.ts` (+ `.test.ts`) | Ren domänlogik för inlägg: typer, validering, synlighet (schemalagt/utgånget/målgrupp), sortering, RBAC-hjälpare |
-| `packages/shared/src/home.ts` (+ `.test.ts`) | Datumrad i svensk tid, veckoagenda (`buildHomeAgenda`), tidslinje med körfältspackning (`buildHomeTimeline`), sammanslagning av omvärldsflöden (`mergeOmvarldItems`) |
+| `packages/shared/src/home.ts` (+ `.test.ts`) | Datumrad i svensk tid, veckoagenda (`buildHomeAgenda`), tidslinje med körfältspackning (`buildHomeTimeline`), kalenderfönster (`parseHomeWindowDays`, 7/14/30), sammanslagning av omvärldsflöden (`mergeOmvarldItems`) |
 | `backend/pocketbase-schema/migrations/1700000144_create_org_posts.js` | Collection `org_posts` |
 | `apps/web/src/lib/org-posts/data.ts` | Enda läsvägen (`listOrgPosts`, fail-soft) |
 | `apps/web/src/lib/actions/org-posts.ts` | Server actions: skapa/ändra/fäst/radera (RBAC, validering, superuser-fallback, audit) |
 | `apps/web/src/lib/feed/activity-feed.ts` | Delad feed-laddare (`activities` + `agent_actions`) för `/chatt` OCH `/hem` |
 | `apps/web/src/lib/ai/web.ts` | `fetchWebFeedItems` — strukturerade RSS-poster med in-process-cache (30 min) |
 | `apps/web/src/app/hem/page.tsx` | Sidan (server; alla källor parallellt via `Promise.allSettled`) |
-| `apps/web/src/components/home/HomeFrontPage.tsx` | Layouten (server): masthead med ingress-siffror + årsring, tidslinje, spalter — ren presentation av data från `page.tsx` |
+| `apps/web/src/components/home/HomeFrontPage.tsx` | Layouten (server): masthead + siffer-rad + årsring, tidslinje med fönsterval, spalter — ren presentation av data från `page.tsx` |
+| `backend/pocketbase-schema/migrations/1700000146_extend_annual_wheel_categories_show_on_home.js` | `annual_wheel_categories.show_on_home` (visas kategorin i kalendern på Hemmaplan?) |
 | `apps/web/src/components/home/HomeTimeline.tsx` | 14-dagars tidslinje (dagslinjal + band i körfält) |
 | `apps/web/src/components/home/CompanyNews.tsx` | Bolagsnytt som vertikal tidslinje |
 | `apps/web/src/components/home/OrgPostList.tsx` | Inläggslistan (client): toppnyhet + notiser i spalter / numrerad handbok; redigerare, fäst/redigera/ta bort — används i alla tre flikarna (`kinds` begränsar typvalet per flik) |
 | `apps/web/src/components/home/HomeBoardTabs.tsx` | Avdelningsrubrikerna Anslagstavla · Så gör vi · Internutbildningar (client, URL-synk `?flik=`; slug-logiken i `@platform/shared`) |
 | `apps/web/src/components/home/PlatformIntro.tsx` | Hårdkodad plattformsintro (statisk, native `<details>`) under "Så gör vi" |
-| `apps/web/src/components/home/OmvarldFeed.tsx` | Omvärldsflödet (client): källfilter + statusrad (live/utgången cache/nere) |
+| `apps/web/src/components/home/OmvarldFeed.tsx` | Omvärldsflödet (client) som tidslinjelista i samma språk som Bolagsnytt: källfilter + statusrad (live/utgången cache/nere) |
 | `apps/web/src/components/home/AutoRefresh.tsx` | Periodisk `router.refresh()` (10 min + vid synlig flik) |
 | `apps/web/src/components/home/TimeAgo.tsx` | Hydreringssäker relativ tid |
 | `apps/web/src/lib/ai/rss.ts` (+ `rss.test.ts`) | REN RSS/Atom-parser (ingen IO) — testad mot fixturer i Breakit-/Sifted-/EIC-/Vinnova-form |

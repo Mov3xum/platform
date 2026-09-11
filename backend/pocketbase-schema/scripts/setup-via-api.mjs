@@ -3401,9 +3401,9 @@ async function convertSelectFieldToText(collectionName, fieldName, opts = {}) {
 /** Seedar default-kategorierna per tenant (idempotent). */
 async function seedAnnualWheelCategories() {
   const defaults = [
-    { key: 'styrelse', label: 'Styrelse', token: 'gron', sort_order: 0 },
-    { key: 'ledning', label: 'Ledning', token: 'gul', sort_order: 1 },
-    { key: 'gemensamt', label: 'Gemensamt', token: 'lila', sort_order: 2 }
+    { key: 'styrelse', label: 'Styrelse', token: 'gron', sort_order: 0, show_on_home: true },
+    { key: 'ledning', label: 'Ledning', token: 'gul', sort_order: 1, show_on_home: true },
+    { key: 'gemensamt', label: 'Gemensamt', token: 'lila', sort_order: 2, show_on_home: true }
   ];
   let tenants;
   try {
@@ -3449,6 +3449,8 @@ await ensureCollection({
       values: ['morkbla', 'djupbla', 'bla', 'morklila', 'lila', 'ljuslila', 'morkgron', 'gron', 'ljusgron', 'morkgul', 'gul', 'morkorange', 'orange']
     },
     { name: 'sort_order', type: 'number', required: false, onlyInt: true, min: 0, max: 999 },
+    // Migration 1700000146: visas kategorin i kalendern på Hemmaplan (§ 37)?
+    { name: 'show_on_home', type: 'bool', required: false },
     { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],
   indexes: [
@@ -3461,6 +3463,10 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${ADMIN_EACH}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${ADMIN_EACH}`
 });
+
+// Migration 1700000146: `show_on_home` på befintliga installationer (bool,
+// valfritt; appen tolkar saknat/true som "visas").
+await patchCollection('annual_wheel_categories', [{ name: 'show_on_home', type: 'bool', required: false }]);
 
 // Migration 1700000140: `annual_wheel_items.category` blir TEXT (dynamiska
 // kategorier). ensureCollection/patchCollection byter inte fälttyp, så gör det

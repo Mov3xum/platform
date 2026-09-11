@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   buildHomeAgenda,
   buildHomeTimeline,
+  homeWindowLabel,
+  parseHomeWindowDays,
   homeDayLabel,
   mergeOmvarldItems,
   swedishDateLine,
@@ -178,4 +180,13 @@ test('buildHomeTimeline: tomt underlag ger bara dagremsan', () => {
   assert.equal(tl.days.length, 7);
   assert.equal(tl.spans.length, 0);
   assert.equal(tl.lanes, 0);
+});
+
+test('parseHomeWindowDays: 7/14/30 accepteras, allt annat ger default 7', () => {
+  assert.equal(parseHomeWindowDays(undefined), 7);
+  assert.equal(parseHomeWindowDays('14'), 14);
+  assert.equal(parseHomeWindowDays('30'), 30);
+  assert.equal(parseHomeWindowDays('99'), 7);
+  assert.equal(parseHomeWindowDays('abc'), 7);
+  assert.equal(homeWindowLabel(30), 'Den närmaste månaden');
 });

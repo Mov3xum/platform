@@ -395,6 +395,8 @@ export interface AnnualWheelCategoryActionState extends AnnualWheelActionState {
 export async function createAnnualWheelCategoryAction(input: {
   label: string;
   token: string;
+  /** Visas kategorins aktiviteter i kalendern på Hemmaplan (§ 37)? Default true. */
+  showOnHome?: boolean;
 }): Promise<AnnualWheelCategoryActionState> {
   const auth = await requireCategoryAdmin();
   if (!auth.ok) return { error: auth.error };
@@ -429,6 +431,7 @@ export async function createAnnualWheelCategoryAction(input: {
         label,
         token,
         sort_order: Math.min(999, nextSort),
+        show_on_home: input.showOnHome !== false,
         created_by: user.id
       })
     );
@@ -446,17 +449,17 @@ export async function createAnnualWheelCategoryAction(input: {
     action_type: 'create',
     collection: CATEGORY_COLLECTION,
     record_id: createdId,
-    after_value: { key, label, token }
+    after_value: { key, label, token, show_on_home: input.showOnHome !== false }
   });
 
   revalidate();
   return { ok: true, key };
 }
 
-/** Byter namn/färg/ordning på en kategori (superadmin). Nyckeln är låst. */
+/** Byter namn/färg/ordning/Hemmaplan-synlighet på en kategori (superadmin). Nyckeln är låst. */
 export async function updateAnnualWheelCategoryAction(
   recordId: string,
-  input: { label?: string; token?: string; sortOrder?: number }
+  input: { label?: string; token?: string; sortOrder?: number; showOnHome?: boolean }
 ): Promise<AnnualWheelCategoryActionState> {
   const auth = await requireCategoryAdmin();
   if (!auth.ok) return { error: auth.error };
@@ -480,6 +483,7 @@ export async function updateAnnualWheelCategoryAction(
     if (!Number.isFinite(n) || n < 0 || n > 999) return { error: 'Ogiltig ordning.' };
     payload.sort_order = Math.trunc(n);
   }
+  if (input.showOnHome !== undefined) payload.show_on_home = input.showOnHome === true;
   if (Object.keys(payload).length === 0) return { ok: true, key: found.row.key };
 
   try {

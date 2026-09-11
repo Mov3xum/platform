@@ -15,6 +15,8 @@ const DAY_MIN_PX = 60;
 export function HomeTimelineStrip({ timeline }: { timeline: HomeTimeline }) {
   const { days, spans, lanes } = timeline;
   const cols = days.length;
+  // Kolumnbredd efter fönster: en vecka får breda dagar, en månad smala (scrollar i sidled).
+  const dayMinPx = cols <= 7 ? 96 : cols <= 14 ? DAY_MIN_PX : 44;
   const laneRows = Math.max(lanes, 1);
 
   return (
@@ -22,11 +24,11 @@ export function HomeTimelineStrip({ timeline }: { timeline: HomeTimeline }) {
       <div
         className="relative grid"
         style={{
-          gridTemplateColumns: `repeat(${cols}, minmax(${DAY_MIN_PX}px, 1fr))`,
+          gridTemplateColumns: `repeat(${cols}, minmax(${dayMinPx}px, 1fr))`,
           gridTemplateRows: `auto repeat(${laneRows}, minmax(30px, auto))`,
           columnGap: 0,
           rowGap: 6,
-          minWidth: cols * DAY_MIN_PX
+          minWidth: cols * dayMinPx
         }}
       >
         {/* Dagslinjal */}
@@ -134,7 +136,7 @@ export function HomeTimelineStrip({ timeline }: { timeline: HomeTimeline }) {
             className="self-center py-2 text-[12.5px] text-foreground-subtle"
             style={{ gridColumn: `1 / ${cols + 1}`, gridRow: 2 }}
           >
-            Inget inplanerat de närmaste två veckorna — lägg in i årshjulet eller be chatten.
+            Inget inplanerat i perioden — lägg in i årshjulet eller be chatten.
           </p>
         )}
       </div>

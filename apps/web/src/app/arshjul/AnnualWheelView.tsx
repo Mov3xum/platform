@@ -2013,6 +2013,7 @@ function CategoryManagerModal({
   const [newToken, setNewToken] = useState<AnnualWheelColorToken>(
     ANNUAL_WHEEL_COLOR_TOKENS[0].id
   );
+  const [newShowOnHome, setNewShowOnHome] = useState(true);
 
   // Hur många aktiviteter använder respektive kategori (styr radera-knappen).
   const usage = useMemo(() => {
@@ -2046,7 +2047,7 @@ function CategoryManagerModal({
       return;
     }
     run(async () => {
-      const res = await createAnnualWheelCategoryAction({ label, token: newToken });
+      const res = await createAnnualWheelCategoryAction({ label, token: newToken, showOnHome: newShowOnHome });
       if (!res?.error) setNewLabel('');
       return res;
     });
@@ -2061,6 +2062,11 @@ function CategoryManagerModal({
   function recolor(cat: AnnualWheelCategoryDef, token: string) {
     if (!cat.recordId || token === cat.token) return;
     run(() => updateAnnualWheelCategoryAction(cat.recordId!, { token }));
+  }
+
+  function toggleHome(cat: AnnualWheelCategoryDef, showOnHome: boolean) {
+    if (!cat.recordId) return;
+    run(() => updateAnnualWheelCategoryAction(cat.recordId!, { showOnHome }));
   }
 
   function remove(cat: AnnualWheelCategoryDef) {
@@ -2085,7 +2091,10 @@ function CategoryManagerModal({
         </h3>
         <p className="mt-1 text-[12px] text-foreground-muted">
           Kategorierna styr hjulets legend och färg. Bara superadmin kan lägga till eller ta bort
-          dem. En kategori som används av aktiviteter måste tömmas först.
+          dem. En kategori som används av aktiviteter måste tömmas först. Bocken{' '}
+          <span className="font-medium text-foreground">Hemmaplan</span> avgör om kategorins
+          aktiviteter visas i kalendern på startsidan för hela organisationen (t.ex. Event ja,
+          Styrelse &amp; VD nej).
         </p>
 
         <ul className="mt-4 space-y-2">
@@ -2121,8 +2130,21 @@ function CategoryManagerModal({
                     </option>
                   ))}
                 </select>
+                <label
+                  className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-[11px] text-foreground-muted"
+                  title="Visa kategorins aktiviteter i kalendern på Hemmaplan"
+                >
+                  <input
+                    type="checkbox"
+                    checked={c.showOnHome !== false}
+                    disabled={pending || !persisted}
+                    onChange={(e) => toggleHome(c, e.target.checked)}
+                    className="accent-brand"
+                  />
+                  Hemmaplan
+                </label>
                 <span
-                  className="w-16 shrink-0 text-right text-[11px] text-foreground-subtle"
+                  className="w-12 shrink-0 text-right text-[11px] text-foreground-subtle"
                   title="Antal aktiviteter i kategorin"
                 >
                   {used} st
@@ -2182,6 +2204,15 @@ function CategoryManagerModal({
               <Icon name="plus" size={14} /> Lägg till
             </button>
           </div>
+          <label className="mt-2 inline-flex cursor-pointer items-center gap-1.5 text-[12px] text-foreground-muted">
+            <input
+              type="checkbox"
+              checked={newShowOnHome}
+              onChange={(e) => setNewShowOnHome(e.target.checked)}
+              className="accent-brand"
+            />
+            Visa i kalendern på Hemmaplan
+          </label>
           {previewKey ? (
             <p className="mt-1.5 text-[11px] text-foreground-subtle">
               Nyckel: <span className="mx-tnum">{previewKey}</span> (kan inte ändras senare)

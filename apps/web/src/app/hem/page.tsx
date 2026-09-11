@@ -17,7 +17,7 @@ import {
   ORG_POST_AUTHOR_ROLES,
   SWEDISH_TIMEZONE,
   annualWheelItemDateRange,
-  buildHomeAgenda,
+  annualWheelHiddenOnHome,
   canRolesSeeOrgPost,
   coreModules,
   homeTabFromSlug,
@@ -27,6 +27,7 @@ import {
   mergeOmvarldItems,
   orgPostExcerpt,
   orgPostTabFor,
+  parseHomeWindowDays,
   selectLiveOrgPosts,
   sortOrgPosts,
   stockholmCalendarParts,
@@ -124,7 +125,7 @@ async function countOrNull(run: () => Promise<{ totalItems: number }>): Promise<
 export default async function HemPage({
   searchParams
 }: {
-  searchParams: Promise<{ flik?: string }>;
+  searchParams: Promise<{ flik?: string; dagar?: string }>;
 }) {
   const user = await requireUser();
   // Bolagsmedlemmens hemvy är "Min översikt" (§ 22) — inlägg med audience=all
@@ -132,13 +133,15 @@ export default async function HemPage({
   if (isPureStartupMember(user.roles)) redirect('/min-oversikt');
   if (!canAccessModuleForUser(user.roles, 'hem', user.enabledModules)) redirect('/chatt');
 
-  const { flik } = await searchParams;
+  const { flik, dagar } = await searchParams;
   const initialTab: OrgPostTab = homeTabFromSlug(flik);
+  const windowDays = parseHomeWindowDays(dagar);
 
   const pb = await getServerPb();
   const now = new Date();
   const today = stockholmToday(now);
   const year = today.getFullYear();
+  const windowEndYear = new Date(year, today.getMonth(), today.getDate() + windowDays).getFullYear();
   const weekAgo = pbDate(new Date(now.getTime() - 7 * 86_400_000));
   const twoWeeksAgo = pbDate(new Date(now.getTime() - 14 * 86_400_000));
   const yesterday = pbDate(new Date(now.getTime() - 86_400_000));
@@ -159,7 +162,11 @@ export default async function HemPage({
     listOrgPosts(pb, user.tenant).catch(() => [] as OrgPost[]),
     loadActivityFeed(pb, user.tenant, 10).catch(() => [] as DashboardActivity[]),
     fetchWebFeedItems(OMVARLD_SOURCES).catch(() => []),
-    listForTenant<WheelRow>('annual_wheel_items', { filter: `year = ${year}`, perPage: 500 }).catch(() => ({
+    listForTenant<WheelRow>('annual_wheel_items', {
+      // Fönstret (max 30 dagar) kan korsa årsskiftet → ta med nästa år vid behov.
+      filter: windowEndYear > year ? `year = ${year} || year = ${windowEndYear}` : `year = ${year}`,
+      perPage: 500
+    }).catch(() => ({
       items: [] as WheelRow[]
     })),
     listAnnualWheelCategories(pb, user.tenant).catch(() => []),
@@ -263,8 +270,12 @@ export default async function HemPage({
 
   // ── Veckans agenda (årshjul + events) ────────────────────────────────────
   const categoryLabel = new Map(categories.map((c) => [c.id, c.label]));
+  // Kategorier som superadmin valt att INTE visa på Hemmaplan (t.ex. Styrelse & VD)
+  // filtreras bort innan tidslinjen byggs — de finns kvar i /arshjul (§ 30.3).
+  const hiddenCategories = annualWheelHiddenOnHome(categories);
   const agendaItems: HomeAgendaItem[] = [];
   for (const r of wheelRows) {
+    if (r.category && hiddenCategories.has(r.category)) continue;
     const range = annualWheelItemDateRange({
       year: typeof r.year === 'number' ? r.year : Number(r.year) || year,
       month: r.month,
@@ -298,8 +309,6 @@ export default async function HemPage({
         .join(' · ')
     });
   }
-  const agenda = buildHomeAgenda(agendaItems, today, 14, 10);
-  const agendaCount = agenda.reduce((n, g) => n + g.items.length, 0);
 
   // ── Omvärld ──────────────────────────────────────────────────────────────
   const omvarld = mergeOmvarldItems(
@@ -340,8 +349,9 @@ export default async function HemPage({
       dateLine={dateLine}
       today={today}
       shortcuts={shortcuts}
-      counts={{ activeStartups, newLeads, leadsDelta, runningWorkshops, myOpenTasks, agendaCount }}
+      counts={{ activeStartups, newLeads, leadsDelta, runningWorkshops, myOpenTasks }}
       agendaItems={agendaItems}
+      windowDays={windowDays}
       tabs={tabs}
       initialTab={initialTab}
       byTab={byTab}

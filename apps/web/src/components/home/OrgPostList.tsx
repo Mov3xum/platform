@@ -524,14 +524,14 @@ export function OrgPostList({
                     className="flex min-w-0 flex-1 items-baseline gap-4 py-3 text-left transition hover:text-brand"
                   >
                     <span
-                      className={`mx-tnum w-8 shrink-0 font-heading text-[22px] font-light leading-none tracking-tight transition ${
+                      className={`mx-tnum w-7 shrink-0 font-heading text-[18px] font-light leading-none tracking-tight transition ${
                         isOpen ? 'text-brand' : 'text-foreground-subtle'
                       }`}
                     >
                       {String(i + 1).padStart(2, '0')}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block font-heading text-[15px] font-semibold leading-snug text-foreground">
+                      <span className="block font-heading text-[14px] font-semibold leading-snug text-foreground">
                         {post.title}
                       </span>
                       <span className="mt-0.5 flex flex-wrap items-center gap-x-3">{badges(post)}</span>
@@ -545,10 +545,10 @@ export function OrgPostList({
                   {canEdit && <div className="self-center">{menuButton(post)}</div>}
                 </div>
                 {isOpen && (
-                  <div className="pb-5 pl-12 pr-6">
+                  <div className="pb-4 pl-11 pr-6">
                     {post.bodyHtml && (
                       <div
-                        className="mx-post-body max-w-[62ch] text-[14px] leading-relaxed text-foreground-muted"
+                        className="mx-post-body max-w-[62ch] text-[13.5px] leading-relaxed text-foreground-muted"
                         // Renderad av lib/safe-html på servern (escapad markdown).
                         dangerouslySetInnerHTML={{ __html: post.bodyHtml }}
                       />
@@ -583,7 +583,7 @@ export function OrgPostList({
                       </span>
                       {badges(lead)}
                     </div>
-                    <h3 className="mt-1.5 font-heading text-[24px] font-semibold leading-tight tracking-tight text-foreground md:text-[28px]">
+                    <h3 className="mt-1 font-heading text-[18px] font-semibold leading-snug tracking-tight text-foreground md:text-[20px]">
                       {lead.title}
                     </h3>
                     <p className="mt-1.5 text-[12px] text-foreground-subtle">
@@ -592,13 +592,13 @@ export function OrgPostList({
                     </p>
                     {(expanded.has(lead.id) || lead.body.length <= LEAD_THRESHOLD) && lead.bodyHtml ? (
                       <div
-                        className="mx-post-body mt-3 max-w-[66ch] text-[15px] leading-relaxed text-foreground-muted"
+                        className="mx-post-body mt-2.5 max-w-[66ch] text-[13.5px] leading-relaxed text-foreground-muted"
                         // Renderad av lib/safe-html på servern (escapad markdown).
                         dangerouslySetInnerHTML={{ __html: lead.bodyHtml }}
                       />
                     ) : (
                       lead.excerpt && (
-                        <p className="mt-3 max-w-[66ch] text-[15px] leading-relaxed text-foreground-muted">{lead.excerpt}</p>
+                        <p className="mt-2.5 max-w-[66ch] text-[13.5px] leading-relaxed text-foreground-muted">{lead.excerpt}</p>
                       )
                     )}
                     <div className="mt-3 flex flex-wrap items-center gap-4">
@@ -622,7 +622,7 @@ export function OrgPostList({
           )}
 
           {rest.length > 0 && (
-            <ul className={`grid grid-cols-1 gap-x-8 border-t border-default md:grid-cols-2 ${lead ? 'mt-6' : ''}`}>
+            <ul className={`grid grid-cols-1 gap-x-8 border-t border-default md:grid-cols-2 ${lead ? 'mt-5' : ''}`}>
               {rest.map((post) => {
                 if (!post) return null;
                 const canEdit = canEditOrgPost({ id: userId, roles }, post);
@@ -647,7 +647,7 @@ export function OrgPostList({
                           </span>
                           {badges(post)}
                         </div>
-                        <h3 className="mt-1 font-heading text-[16px] font-semibold leading-snug text-foreground">{post.title}</h3>
+                        <h3 className="mt-1 font-heading text-[14.5px] font-semibold leading-snug text-foreground">{post.title}</h3>
                         <p className="mt-0.5 text-[11.5px] text-foreground-subtle">
                           {post.author_name ? `${post.author_name} · ` : ''}
                           <TimeAgo iso={post.published_at || post.created} />
