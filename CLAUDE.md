@@ -584,6 +584,17 @@ integrity (§ 10).
 felkonfiguration aldrig tyst bryter en kunds chatt mitt i månaden — sätt env:en
 eller tenant-taket för att aktivera.
 
+**0-värden i loggen (migration 1700000145, 2026-09).** PB tolkar 0 som
+"tomt" för ett `required` nummerfält, och 1700000058 skapade `tokens_in`/
+`tokens_out`/`cost_estimate_usd` som required → `logAiUsage` (fail-soft)
+svalde "Cannot be blank." och raden skrevs ALDRIG för embeddings
+(`mistral-embed`, tokens_out = 0 — hela RAG-förbrukningen § 26/§ 27 saknades
+i /insights, /admin/ai-miljo och månadstaket), för Voxtral-anrop med tom text
+(§ 31/§ 34) och för modeller utan prisrad (cost = 0). Migration 1700000145 gör
+talfälten valfria (`min: 0` kvar); speglas i `setup-via-api.mjs`. Logga
+aldrig-någonsin runt problemet genom att skicka "1 token" — bokför det
+faktiska värdet.
+
 ### 9.7 Bannrar och varningstexter
 
 Alla toolbox-sidor ska visa:
@@ -3879,9 +3890,14 @@ i hjulet, så en genomgång kan klickas igenom utan att dialoger öppnas.
 `expandAnnualWheelSeries` (ren, enhetstestad) expanderar basen till
 förekomster (varje/varannan månad, varje kvartal, t.o.m. vald månad; dagen
 klampas mot månadslängden; perioder flyttas med hela steget och förekomster
-som skulle spilla över årsskiftet utelämnas; hårt tak 12). Både UI-actionen
-och chatt-verktyget `create_annual_wheel_item` (parametrarna `repeat` +
-`repeat_until_month`) går genom `createAnnualWheelSeries` i det delade
+som skulle spilla över årsskiftet utelämnas; hårt tak 12). **Varje år
+(`yearly`, 2026-09):** samma datum i varje år t.o.m. valt slutår (default
+basåret + 2, hårt tak `ANNUAL_WHEEL_MAX_SERIES_YEARS` = 10) — fungerar även
+för helårsaktiviteter utan månad (en förekomst per år), 29 feb klampas till
+28 feb ett vanligt år, och varje förekomst skapas med sitt eget `year`.
+Både UI-actionen och chatt-verktyget `create_annual_wheel_item`
+(parametrarna `repeat` + `repeat_until_month`/`repeat_until_year`) går genom
+`createAnnualWheelSeries` i det delade
 skrivlagret, som skapar varje förekomst via `createAnnualWheelItem` — samma
 whitelist, validering, tenant-stämpel och audit per rad. En delvis lyckad
 serie rapporteras som fel MED antalet redan skapade, aldrig som tyst succé.
@@ -4024,13 +4040,26 @@ railen för exakt den sökvägen (som `/m/` och `/login`); RBAC är oförändrat
 `focusIds` tonar ned resten, `hoverCard={false}`) så hjulet ser likadant ut
 på skärm och projektor.
 
-- **Två lägen:** *Just nu* (default) — panelen visar *Pågår nu / Den här
-  veckan / Kommande 30 dagar* (`buildAnnualWheelAgenda`, ren + enhetstestad;
-  varje post hamnar i EN hink, den mest akuta) och hjulet lyfter fram exakt
-  dessa. *Månad* (← →, eller klick på en sektor) — bläddra månad för månad,
-  panelen listar månadens aktiviteter (perioder syns i varje månad de löper).
-- **Tangenter:** ← → månad · Mellanslag/Home = tillbaka till idag · F =
-  helskärm (`requestFullscreen`) · Esc = stäng. I helskärm betyder Esc bara
+- **Tre lägen:** *Just nu* (default, bara innevarande år) — panelen visar
+  *Pågår nu / Den här veckan / Kommande 30 dagar* (`buildAnnualWheelAgenda`,
+  ren + enhetstestad; varje post hamnar i EN hink, den mest akuta) och hjulet
+  lyfter fram exakt dessa. *Månad* (← →, eller klick på en sektor) — bläddra
+  månad för månad, panelen listar månadens aktiviteter (perioder syns i varje
+  månad de löper). *Översikt* (O, Shift+← → bläddrar ÅR) — årsöversikt i
+  panelen med samma rena dashboard-logik som `/arshjul` (§ 30.5bis):
+  nyckeltal, beläggning per månad med föregående år, kategorier och kvartal.
+- **Filter — fritt valbara i vyn (2026-09):** kategori-flerval via legenden
+  eller klick i hjulets ringar (samma `selectedCategories`/`onToggleCategory`
+  som redigeringsvyn — hjulet visar alla ringar, valda lyfts, övriga tonas;
+  panelen följer hela filtret), tagg, ansvarig och år som selects i panelens
+  filterrad, "Rensa filter". Tidigare fanns inget kategorifilter alls i
+  presentationsläget, så "visa bara Event" var omöjligt. "Presentera"-länken
+  på `/arshjul` tar med aktuellt urval som query (`year`, `cat`, `tag`,
+  `resp`, `month`); `presentation/page.tsx` validerar bara format och klienten
+  faller tyst tillbaka på "alla" för okända värden. Ingen ny dataväg — samma
+  läsning som förut (alla år laddas redan), bara klient-filter.
+- **Tangenter:** ← → månad · Shift+← → år · O = översikt · Mellanslag/Home =
+  tillbaka till idag · F = helskärm (`requestFullscreen`) · Esc = stäng. I helskärm betyder Esc bara
   "lämna helskärm" (webbläsaren sköter det, `fullscreenRef` håller kvar vyn
   en stund efter `fullscreenchange`); utanför helskärm navigerar Esc till
   `/arshjul`.
@@ -4180,10 +4209,15 @@ npm-dependency (§ 10.2).
    § 17.8).
 3. Routen verifierar inloggning + staff-roll, rate-limit (40 anrop/5 min och
    användare) och validerar mime + storlek med den delade helpern.
-4. `transcribeAudio` skickar ljudet till Voxtral (`POST /v1/audio/transcriptions`,
-   `language=sv`) och returnerar texten. Token-utfallet loggas i
-   `ai_usage_events` (surface `dashboard_chat`, modell `voxtral-*`) så
-   `/insights` och `/admin/ai-miljo` (§ 28) räknar med rösten.
+4. Routen mäter först klippets ljudnivå (WAV-PCM, `@platform/shared`
+   audio-level.ts): ett effektivt tyst klipp svaras "Inspelningen var helt
+   tyst" (422) **utan** Voxtral-anrop. Annars skickar `transcribeSpeech`
+   (`lib/ai/voice.ts`) ljudet till Voxtral (`POST /v1/audio/transcriptions`,
+   `language=sv`) och returnerar texten; blir svaret tomt görs ETT omförsök
+   utan språkhint (autodetekt). Token-utfallet loggas i `ai_usage_events`
+   (surface `dashboard_chat`, modell `voxtral-*`) — **även för tomma svar**
+   (Voxtral debiterar ljudingången; `VoiceError.usage` bär förbrukningen) —
+   så `/insights` och `/admin/ai-miljo` (§ 28) räknar med rösten.
 5. Texten hamnar i **chattrutan** — den skickas INTE automatiskt. Användaren
    läser igenom, rättar och trycker skicka själv.
 6. Därefter är det en helt vanlig chatt-turn: agenten planerar, läser data och
@@ -4278,8 +4312,9 @@ INNAN fallbacken används.
   utan granskning skulle ta bort människa-i-loopen precis där agenten kan
   skriva i databasen.
 - Talsyntes (agenten som svarar med röst) är inte i scope.
-- Språket är låst till svenska (`language=sv`) — det höjer träffsäkerheten på
-  domänord markant. Ett språkval per användare kan läggas till senare utan
+- Språket är svenska som default (`language=sv`) — det höjer träffsäkerheten
+  på domänord markant; ger hinten tom text görs ett omförsök med autodetekt
+  (`transcribeSpeech`). Ett språkval per användare kan läggas till senare utan
   brytande ändring.
 - Resultatprofiler för quiz (`result_buckets`) och publicering ställs in i
   modul-admin, inte via chatten.
@@ -4468,7 +4503,10 @@ ALLA operationer, även admin utestängd): `tenant`/`owner` (cascadeDelete),
 `MeetingSegment[] { index, text, at?, speaker? }`, 2 MB),
 `consent_confirmed_at`, `started_at`, `ended_at`. **Denylistad i
 `lib/ai/redaction.ts`** → `query_collection` exponerar den aldrig. Owner-only
-⇒ migration-only (§ 27-precedens). `speaker`-fältet är reserverat från dag 1
+⇒ ingen collection-def i `setup-via-api.mjs` (§ 27-precedens), men
+kollektionens **existens** är ett hårt baseline-invariant i
+`verify-baseline.mjs` (§ 23.4:s compass-precedens) eftersom PB-migrationer
+bara körs när PB-imagen byggs om. `speaker`-fältet är reserverat från dag 1
 för Fas 3 (talarindelning) så framtida diarisering inte kräver
 datamodelländring.
 
@@ -4509,9 +4547,30 @@ segment).
    PB v0.23.4:s tysta regel-nekande** (400/403/404, § 21.3-klassen) — ägar-/
    tenant-checken i koden är den hårda gränsen, fallbacken är robusthet
    (samma mönster som § 18.3/§ 20.5/§ 30.4). Tak: 3 h / 160 segment
-   (art. 15). Tystnad (Voxtral 422) = tomt segment, inte fel. En kraschad flik
-   kostar max ett segment; "Återuppta granskningen"-bannern i `/chatt` öppnar
-   det oavslutade mötet.
+   (art. 15). En kraschad flik kostar max ett segment; "Återuppta
+   granskningen"-bannern i `/chatt` öppnar det oavslutade mötet.
+   **Tomt resultat är aldrig tyst (2026-09).** Incident: mötet slutade som
+   "tomt överallt" — blank live-ruta, tomt transkript, inget protokoll, båda
+   segment-anropen 200 och inget fel — eftersom Voxtrals tomma svar (422)
+   tolkades som "tystnad" och bara renderades som ingenting. Nu mäts
+   segmentets **ljudnivå** (topp/RMS på WAV-PCM, ren + enhetstestad
+   `@platform/shared` audio-level.ts) på BÅDA sidor: (1) klienten visar en
+   **mikrofonmätare** under inspelningen och varnar efter ~6 s helt tyst
+   ingång ("Mikrofonen fångar inget ljud") — en avstängd/fel vald mikrofon
+   syns alltså innan första segmentet ens är uppladdat; (2) servern skickar
+   INTE effektivt tysta segment till Voxtral (`silent: true`, ingen kostnad)
+   och svarar med `warning` när ljud fanns men ingen text kom tillbaka —
+   live-rutan visar "(tyst avsnitt)" respektive orsaken, och granskningen
+   förklarar varför ett transkript blev tomt (tyst mikrofon vs. ljud som
+   inte kunde tolkas). (3) `transcribeSpeech` (`lib/ai/voice.ts`) gör ETT
+   nytt försök **utan språkhint** (autodetekt) när svaret med `language=sv`
+   blir tomt — skydd mot att språkkoden tyst ger tom text; gäller även
+   röstknappen § 31, som dessutom svarar "Inspelningen var helt tyst" utan
+   Voxtral-anrop. Nivåmätningen är rent numerisk (ingen röstidentifiering,
+   § 31.4) och lagras aldrig. Saknas kollektionen på instansen (migrationen
+   inte körd) säger `startMeetingAction` det uttryckligen i stället för PB:s
+   generiska 404, och `verify-baseline.mjs` fäller deployen
+   (`meeting_transcripts` i must-exist-listan).
 4. **Granskning (människa-i-loopen, art. 14):** redigerbart transkript;
    protokollutkastet (sammanfattning/beslut/åtgärdspunkter) **genereras
    automatiskt när granskningen öppnas** (även vid återupptagen granskning;
@@ -4814,32 +4873,63 @@ roll**:
 `/hem` (modul `hem`, titel **Dashboard**, först i "Översikt"-railen) är den
 sida personalen landar på efter inloggning (`/` och `/dashboard` redirectar
 dit; PWA:ns `start_url` pekar dit). En ren `startup_member` redirectas
-oförändrat till `/min-oversikt` (§ 22). Sidan är en **boxlös dashboard i
-full bredd** (2026-09; samma uttryck som årshjulets dashboard § 30.5bis:
-hårlinjer, eyebrow-etiketter, inga stora kort eller färgytor) med en
-12-kolumners grid — huvudspalt (8/12) + sidospalt (4/12) från `xl`, en kolumn
-på mindre skärmar:
+oförändrat till `/min-oversikt` (§ 22). **Uttryck (2026-09): en redaktionell
+förstasida, inte en dashboard.** Inga kort, inga boxar, inga KPI-tiles —
+allt flyter inline på canvasen med hårlinjer och stora Sora-rubriker
+(`components/home/HomeFrontPage.tsx` äger layouten; `app/hem/page.tsx` äger
+all IO och skickar färdig data):
 
-1. **Hälsning + nyckeltalsrad** — svensk tidshälsning, datumrad med ISO-vecka
-   (`swedishDateLine`), rollfiltrerade genvägs-chips och fem KPI-tiles med
-   avdelare: aktiva bolag, nya inflöden 7 d (med delta mot föregående 7 d),
-   pågående workshops, egna öppna uppgifter, punkter på agendan 14 d. Alla
-   räknas via `getList(1,1).totalItems` med användarens token; en räkning som
-   felar visar "–", aldrig 0.
-2. **Flikar** (`HomeBoardTabs`, huvudspalten): **Anslagstavla** (news/notice/
-   celebration), **Så gör vi** (hårdkodad plattformsintro `PlatformIntro` +
-   dynamiska `instruction`-inlägg som hopfällda rader) och
-   **Internutbildningar** (`kind='training'`). Aktiv flik speglas i URL:en
-   (`?flik=anslagstavla|sa-gor-vi|internutbildningar`) så länkar från chatten
-   och aktivitetsloggen öppnar rätt flik; `orgPostTabFor(kind)` i
-   `@platform/shared` är mappningen typ → flik.
-3. **Bolagsnytt** (huvudspalten) — den samlade aktivitetsloggen (§ 32), samma
-   laddare som chatten.
-4. **Den här veckan** (sidospalten) — årshjulets poster + planerade events
-   14 dagar framåt, grupperade per dag ("Idag/Imorgon/Torsdag/20 sep").
-5. **Omvärld** (sidospalten, `OmvarldFeed`) — senaste posterna från
-   EU-whitelistade RSS-källor (§ 9.8) med källfilter-chips och en ärlig
-   statusrad per källa (§ 37.4).
+1. **Masthead** — en folio-rad (datum · ISO-vecka · "Hemmaplan") under en
+   ink-linje, hälsningen i stor Sora (56 px), och **ingressen: nyckeltalen
+   som löpande text** ("Just nu är **74 bolag** aktiva i inkubatorn. Senaste
+   veckan kom **3 nya inflöden** (+2 mot veckan innan) …") där varje siffra
+   är en understruken länk (`Figure`) till sin vy. En räkning som felade
+   utelämnas ur meningen — visas aldrig som 0. "Gå direkt till"-raden är
+   textlänkar med punktavdelare (rollfiltrerade). Till höger en dekorativ
+   **årsring** (`YearRing`, inline-SVG i brand-token): ett eko av årshjulet
+   med en båge som visar hur långt året kommit — döljs under `md`.
+2. **De närmaste fjorton dagarna** (full bredd) — en **tidslinje**
+   (`HomeTimelineStrip`): dagslinjal (idag som fylld brand-cirkel, helger
+   tonade, månadsetikett vid skifte) med årshjulets poster och events som
+   **band** över sina dagar. Perioder blir långa band, endagsposter korta;
+   överlappande band packas i körfält av den rena, enhetstestade
+   `buildHomeTimeline` (`@platform/shared` home.ts) som även räknar ut hur
+   långt en etikett får flyta ut över lediga dagar (`labelTo`) så att en
+   endagspost visar sin titel i stället för att klippas. Events i lila,
+   årshjulet i brand-ton — tonade ytor med ink-text (dark mode följer).
+   Scrollar i sidled på smala skärmar.
+3. **Från Movexum** (huvudspalt 8/12) — avdelningarna **Anslagstavla · Så
+   gör vi · Internutbildningar** som stora Sora-ord i rad (`HomeBoardTabs`;
+   aktiv = ink med kort brand-streck, antal som upphöjd siffra), URL-synk
+   `?flik=anslagstavla|sa-gor-vi|internutbildningar`. Anslagstavlan och
+   Internutbildningar sätts som en tidningssida: **första inlägget som
+   toppnyhet** (typ-eyebrow i färg, 28 px rubrik, hela texten upp till
+   1 400 tecken), resten som **notiser i två spalter** med hårlinjer. "Så gör
+   vi" är en **numrerad handbok** (01, 02 … i ljus Sora, `+` som vrids vid
+   öppning): först den hårdkodade plattformsintron (`PlatformIntro`), sedan
+   egna rutiner i samma språk. Redigeraren är inline med brand-toppstreck.
+4. **Bolagsnytt** (sidospalt 4/12; på mobil mellan avdelningarna och
+   omvärlden) — den samlade aktivitetsloggen (§ 32) som **vertikal tidslinje**
+   (`CompanyNews`): hårlinje med färgprickar (lila = AI-utfört/verktyg, grön
+   = utbildning, gul = avtal/möte, brand = övrigt), relativ tid + bolag som
+   eyebrow, "AI"-märkning (art. 13).
+5. **Omvärld** (huvudspalt, under avdelningarna) — `OmvarldFeed` som
+   **tidningsspalt**: källfilter som understrukna textlänkar med statusprick,
+   första posten som toppnyhet (22 px rubrik + ingress), resten som notiser i
+   två spalter; ärlig statusrad per källa (§ 37.4).
+
+Nyckeltalen läses fortfarande via `getList(1,1).totalItems` med användarens
+token. Ingen ny dataväg, inga nya fält/kollektioner; riskklass n/a.
+
+**Client-/server-gränsen (läxa från staging 2026-09).** Slug-mappningen för
+flikarna (`HOME_TAB_PARAM`, `HOME_TAB_SLUGS`, `homeTabFromSlug`, `homeTabHref`)
+bor i `@platform/shared` (`org-posts.ts`, ren + enhetstestad). Den låg först i
+den `'use client'`-märkta `HomeBoardTabs.tsx` och anropades från
+serverkomponenten `page.tsx` → Next kastar "Attempted to call
+homeTabFromSlug() from the server but homeTabFromSlug is on the client" och
+HELA Hemmaplan föll i felvyn "Något gick fel" (digest, ingen stacktrace för
+användaren). Exportera aldrig hjälpfunktioner ur en `'use client'`-modul för
+serverbruk — lägg dem i en ren modul.
 
 `AutoRefresh` (klient) kör `router.refresh()` var 10:e minut och när fliken
 blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdning.
@@ -4849,15 +4939,18 @@ blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdn
 | Fil | Syfte |
 |-----|-------|
 | `packages/shared/src/org-posts.ts` (+ `.test.ts`) | Ren domänlogik för inlägg: typer, validering, synlighet (schemalagt/utgånget/målgrupp), sortering, RBAC-hjälpare |
-| `packages/shared/src/home.ts` (+ `.test.ts`) | Datumrad i svensk tid, veckoagenda (`buildHomeAgenda`), sammanslagning av omvärldsflöden (`mergeOmvarldItems`) |
+| `packages/shared/src/home.ts` (+ `.test.ts`) | Datumrad i svensk tid, veckoagenda (`buildHomeAgenda`), tidslinje med körfältspackning (`buildHomeTimeline`), sammanslagning av omvärldsflöden (`mergeOmvarldItems`) |
 | `backend/pocketbase-schema/migrations/1700000144_create_org_posts.js` | Collection `org_posts` |
 | `apps/web/src/lib/org-posts/data.ts` | Enda läsvägen (`listOrgPosts`, fail-soft) |
 | `apps/web/src/lib/actions/org-posts.ts` | Server actions: skapa/ändra/fäst/radera (RBAC, validering, superuser-fallback, audit) |
 | `apps/web/src/lib/feed/activity-feed.ts` | Delad feed-laddare (`activities` + `agent_actions`) för `/chatt` OCH `/hem` |
 | `apps/web/src/lib/ai/web.ts` | `fetchWebFeedItems` — strukturerade RSS-poster med in-process-cache (30 min) |
 | `apps/web/src/app/hem/page.tsx` | Sidan (server; alla källor parallellt via `Promise.allSettled`) |
-| `apps/web/src/components/home/OrgPostList.tsx` | Inläggslistan (client): redigerare, utfällning, fäst/redigera/ta bort — används i alla tre flikarna (`kinds` begränsar typvalet per flik) |
-| `apps/web/src/components/home/HomeBoardTabs.tsx` | Flikarna Anslagstavla · Så gör vi · Internutbildningar (client, URL-synk `?flik=`) |
+| `apps/web/src/components/home/HomeFrontPage.tsx` | Layouten (server): masthead med ingress-siffror + årsring, tidslinje, spalter — ren presentation av data från `page.tsx` |
+| `apps/web/src/components/home/HomeTimeline.tsx` | 14-dagars tidslinje (dagslinjal + band i körfält) |
+| `apps/web/src/components/home/CompanyNews.tsx` | Bolagsnytt som vertikal tidslinje |
+| `apps/web/src/components/home/OrgPostList.tsx` | Inläggslistan (client): toppnyhet + notiser i spalter / numrerad handbok; redigerare, fäst/redigera/ta bort — används i alla tre flikarna (`kinds` begränsar typvalet per flik) |
+| `apps/web/src/components/home/HomeBoardTabs.tsx` | Avdelningsrubrikerna Anslagstavla · Så gör vi · Internutbildningar (client, URL-synk `?flik=`; slug-logiken i `@platform/shared`) |
 | `apps/web/src/components/home/PlatformIntro.tsx` | Hårdkodad plattformsintro (statisk, native `<details>`) under "Så gör vi" |
 | `apps/web/src/components/home/OmvarldFeed.tsx` | Omvärldsflödet (client): källfilter + statusrad (live/utgången cache/nere) |
 | `apps/web/src/components/home/AutoRefresh.tsx` | Periodisk `router.refresh()` (10 min + vid synlig flik) |

@@ -207,3 +207,121 @@ export function mergeOmvarldItems(
   }
   return out;
 }
+
+// ─── Tidslinje (14-dagarsremsan på Hemmaplan) ────────────────────────────────
+
+export interface HomeTimelineDay {
+  date: Date;
+  /** "må", "ti" … */
+  weekday: string;
+  day: number;
+  isToday: boolean;
+  isWeekend: boolean;
+  /** Satt på första dagen i fönstret och på varje månadsskifte ("sep", "okt"). */
+  monthLabel?: string;
+}
+
+export interface HomeTimelineSpan {
+  item: HomeAgendaItem;
+  /** Dagindex (0-baserat) i fönstret där bandet börjar/slutar (klippt mot fönstret). */
+  from: number;
+  to: number;
+  /** true när bandet egentligen började före fönstret / fortsätter efter. */
+  clippedStart: boolean;
+  clippedEnd: boolean;
+  /** Radposition (0-baserad) — överlappande band packas i körfält. */
+  lane: number;
+  /**
+   * Sista dagindex etiketten får sträcka sig över (in i lediga dagar i samma
+   * körfält, fram till nästa band) — så att en endagspost kan visa sin titel
+   * i stället för att klippas i en smal kolumn. ≥ `to`.
+   */
+  labelTo: number;
+}
+
+export interface HomeTimeline {
+  days: HomeTimelineDay[];
+  spans: HomeTimelineSpan[];
+  lanes: number;
+}
+
+const WEEKDAYS_SHORT_SV = ['sö', 'må', 'ti', 'on', 'to', 'fr', 'lö'];
+
+/**
+ * Lägger agendaposterna på en dagremsa från `today` och `days` dagar framåt:
+ * varje post blir ett band över de dagar den löper (klippt mot fönstret) och
+ * överlappande band packas i körfält så inget ritas ovanpå något annat.
+ * Passerade poster utelämnas; poster som börjar bortom fönstret också.
+ * Rent och deterministiskt (sorterat på start, längst band först, sedan titel).
+ */
+export function buildHomeTimeline(items: readonly HomeAgendaItem[], today: Date, days = 14): HomeTimeline {
+  const t0 = startOfDay(today);
+  const dayList: HomeTimelineDay[] = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(t0);
+    d.setDate(d.getDate() + i);
+    const monthStart = i === 0 || d.getDate() === 1;
+    dayList.push({
+      date: d,
+      weekday: WEEKDAYS_SHORT_SV[d.getDay()],
+      day: d.getDate(),
+      isToday: i === 0,
+      isWeekend: d.getDay() === 0 || d.getDay() === 6,
+      monthLabel: monthStart ? MONTHS_SV[d.getMonth()].slice(0, 3) : undefined
+    });
+  }
+
+  const raw = items
+    .filter((it) => !Number.isNaN(it.start.getTime()))
+    .map((it) => {
+      const end = it.end && !Number.isNaN(it.end.getTime()) ? it.end : it.start;
+      const from = dayDiff(t0, it.start);
+      const to = dayDiff(t0, end);
+      return { it, from, to };
+    })
+    .filter(({ from, to }) => to >= 0 && from < days)
+    .map(({ it, from, to }) => ({
+      item: it,
+      from: Math.max(0, from),
+      to: Math.min(days - 1, to),
+      clippedStart: from < 0,
+      clippedEnd: to > days - 1
+    }))
+    .sort((a, b) => {
+      if (a.from !== b.from) return a.from - b.from;
+      const la = a.to - a.from;
+      const lb = b.to - b.from;
+      if (la !== lb) return lb - la;
+      return a.item.title.localeCompare(b.item.title, 'sv');
+    });
+
+  // Körfältspackning: bland lediga körfält väljs det vars föregående band
+  // slutade tidigast (mest luft för dess etikett). Ligger även det bandet
+  // vägg-i-vägg med det nya öppnas hellre ett nytt körfält (upp till
+  // MAX_COMFORT_LANES) så endagsposter får plats att visa sin titel.
+  const MAX_COMFORT_LANES = 3;
+  const laneEnds: number[] = [];
+  const spans: HomeTimelineSpan[] = raw.map((s) => {
+    let lane = -1;
+    for (let i = 0; i < laneEnds.length; i++) {
+      if (laneEnds[i] < s.from && (lane === -1 || laneEnds[i] < laneEnds[lane])) lane = i;
+    }
+    const adjacent = lane !== -1 && laneEnds[lane] === s.from - 1;
+    if (lane === -1 || (adjacent && laneEnds.length < MAX_COMFORT_LANES)) {
+      lane = laneEnds.length;
+      laneEnds.push(s.to);
+    } else {
+      laneEnds[lane] = s.to;
+    }
+    return { ...s, lane, labelTo: s.to };
+  });
+  // Etikettutrymme: fram till dagen före nästa band i samma körfält.
+  for (const s of spans) {
+    const next = spans
+      .filter((o) => o !== s && o.lane === s.lane && o.from > s.to)
+      .reduce<number | null>((min, o) => (min === null || o.from < min ? o.from : min), null);
+    s.labelTo = next === null ? days - 1 : next - 1;
+  }
+
+  return { days: dayList, spans, lanes: laneEnds.length };
+}

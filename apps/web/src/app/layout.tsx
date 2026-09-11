@@ -8,6 +8,9 @@ import { PwaRegister } from '@/components/pwa/PwaRegister';
 import { getCurrentUser } from '@/lib/auth.server';
 import './globals.css';
 
+// Bumpa när favicon/app-ikonerna renderas om (cache-busting, se `icons` nedan).
+const ICON_VERSION = 2;
+
 export const metadata: Metadata = {
   title: 'Movexum Inkubatorplattform',
   description: 'Modulär plattform för Movexums inkubatorer',
@@ -26,15 +29,17 @@ export const metadata: Metadata = {
   icons: {
     // Favicon = Movexum-wordmarken i vitt på svart (renderad av
     // scripts/render-pwa-icons.mjs). ICO:n bär 16/32/48 px för flikar och
-    // bokmärken; PNG:erna används av Android/desktop-PWA.
+    // bokmärken; PNG:erna används av Android/desktop-PWA. `?v=` är
+    // cache-busting: webbläsare cachar favicons aggressivt, så bumpa
+    // ICON_VERSION när ikonen byts, annars ligger den gamla kvar i fliken.
     icon: [
-      { url: '/favicon.ico', sizes: '16x16 32x32 48x48', type: 'image/x-icon' },
-      { url: '/icons/favicon-32.png', sizes: '32x32', type: 'image/png' },
-      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }
+      { url: `/favicon.ico?v=${ICON_VERSION}`, sizes: '16x16 32x32 48x48', type: 'image/x-icon' },
+      { url: `/icons/favicon-32.png?v=${ICON_VERSION}`, sizes: '32x32', type: 'image/png' },
+      { url: `/icons/icon-192.png?v=${ICON_VERSION}`, sizes: '192x192', type: 'image/png' },
+      { url: `/icons/icon-512.png?v=${ICON_VERSION}`, sizes: '512x512', type: 'image/png' }
     ],
-    shortcut: [{ url: '/favicon.ico' }],
-    apple: [{ url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }]
+    shortcut: [{ url: `/favicon.ico?v=${ICON_VERSION}` }],
+    apple: [{ url: `/icons/apple-touch-icon.png?v=${ICON_VERSION}`, sizes: '180x180', type: 'image/png' }]
   }
 };
 

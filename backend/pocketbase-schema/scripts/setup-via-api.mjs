@@ -2189,9 +2189,12 @@ await ensureCollection({
     { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
     { name: 'surface', type: 'select', required: true, maxSelect: 1, values: ['toolbox', 'tool_chat', 'dashboard_chat', 'startup_chat', 'intl', 'suggestions', 'workshop_run', 'connector_chat'] },
     { name: 'model', type: 'text', required: true, max: 100 },
-    { name: 'tokens_in', type: 'number', required: true, min: 0 },
-    { name: 'tokens_out', type: 'number', required: true, min: 0 },
-    { name: 'cost_estimate_usd', type: 'number', required: true, min: 0 },
+    // Migration 1700000145: talfälten är VALFRIA — PB tolkar 0 som "tomt" för
+    // ett required nummerfält, vilket tyst tappade alla events med tokens_out
+    // = 0 (embeddings, tomma Voxtral-svar) eller cost = 0 (§ 9.6, § 28).
+    { name: 'tokens_in', type: 'number', required: false, min: 0 },
+    { name: 'tokens_out', type: 'number', required: false, min: 0 },
+    { name: 'cost_estimate_usd', type: 'number', required: false, min: 0 },
     { name: 'tool_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'error', type: 'text', required: false, max: 500 }
   ],
@@ -2205,6 +2208,14 @@ await ensureCollection({
   createRule: `${ANY_AUTH} && @request.auth.id = user`,
   updateRule: null,
   deleteRule: null
+});
+
+// Migration 1700000145 (befintliga installs): släpp required på talfälten så
+// att 0-värden (embeddings, tomma Voxtral-svar, okänd prismodell) kan lagras.
+await patchCollection('ai_usage_events', [], {
+  tokens_in: { required: false },
+  tokens_out: { required: false },
+  cost_estimate_usd: { required: false }
 });
 
 // Migration 1700000059: startup_financials — årsmetrics per bolag.
@@ -3822,30 +3833,34 @@ const FORCE_CREATE_RULES = {
   org_posts: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
-log('Forcerar robusta createRules...');
-for (const [collectionName, desiredRule] of Object.entries(FORCE_CREATE_RULES)) {
-  let collection;
-  try {
-    collection = await pb.collections.getOne(collectionName);
-  } catch (err) {
-    if (err?.status === 404) {
-      warn(`createRule-sync: collection "${collectionName}" finns inte — hoppar`);
-      continue;
+async function enforceCreateRules(passLabel) {
+  log(`Forcerar robusta createRules${passLabel ? ` (${passLabel})` : ''}...`);
+  for (const [collectionName, desiredRule] of Object.entries(FORCE_CREATE_RULES)) {
+    let collection;
+    try {
+      collection = await pb.collections.getOne(collectionName);
+    } catch (err) {
+      if (err?.status === 404) {
+        warn(`createRule-sync: collection "${collectionName}" finns inte — hoppar`);
+        continue;
+      }
+      throw err;
     }
-    throw err;
-  }
 
-  if (collection.createRule === desiredRule) continue;
+    if (collection.createRule === desiredRule) continue;
 
-  await pb.collections.update(collectionName, { createRule: desiredRule });
-  const refreshed = await pb.collections.getOne(collectionName);
-  if (refreshed.createRule !== desiredRule) {
-    throw new Error(
-      `createRule-sync misslyckades för "${collectionName}". Förväntat: ${desiredRule}. Fick: ${refreshed.createRule}`
-    );
+    await pb.collections.update(collectionName, { createRule: desiredRule });
+    const refreshed = await pb.collections.getOne(collectionName);
+    if (refreshed.createRule !== desiredRule) {
+      throw new Error(
+        `createRule-sync misslyckades för "${collectionName}". Förväntat: ${desiredRule}. Fick: ${refreshed.createRule}`
+      );
+    }
+    ok(`createRule synkad: ${collectionName}`);
   }
-  ok(`createRule synkad: ${collectionName}`);
 }
+
+await enforceCreateRules('pass 1');
 
 // 23. svep alla list/view/update/delete-regler: `?=` → `:each ?=` -----------
 // PB v0.23.4 matchar inte `?=` mot multi-värde-fält (auth.roles,
@@ -3875,6 +3890,11 @@ log('Sveper list/view/update/delete-regler (?= → :each ?=)...');
     ok(`regel-operator fixad: ${collection.name} (${Object.keys(patch).join(', ')})`);
   }
 }
+
+// Kör en extra createRule-pass EFTER operator-svepet så att createRules
+// alltid är sista sanningen i scriptet (self-healing-jobbet verifierar just
+// detta direkt efter setup-via-api-körningen).
+await enforceCreateRules('pass 2');
 
 console.log('\n✓ Klart. Logga in på <din-web-url>/login med:');
 console.log(`  E-post:   ${APP_USER_EMAIL}`);

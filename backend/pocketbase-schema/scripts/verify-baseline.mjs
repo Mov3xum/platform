@@ -182,6 +182,11 @@ async function verifyCollectionsExist() {
     'compass_responses',
     'compass_security_events',
     'compass_brand',
+    // Mötesläge i chatten (§ 34) — skapas BARA av migration 1700000142
+    // (owner-only ⇒ speglas inte som collection-def i setup-via-api.mjs).
+    // Saknas den felar "Starta mötet" med ett 404 från PB; gör den till ett
+    // hårt invariant så att en instans utan migrationen fälls i deployen.
+    'meeting_transcripts',
     // Övrigt
     'web_cache'
   ];

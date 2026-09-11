@@ -925,3 +925,25 @@ test('filterAnnualWheelItems accepts several categories at once (empty list = al
   );
   assert.equal(filterAnnualWheelItems(items, { categories: ['styrelse'], category: 'ledning' }).length, 0);
 });
+
+test('expandAnnualWheelSeries repeats yearly, also for undated items, with clamped days and a hard cap', () => {
+  const dated = expandAnnualWheelSeries({ year: 2028, month: 2, day: 29 }, 'yearly', 12, 2030);
+  assert.deepEqual(
+    dated.map((o) => [o.year, o.month, o.day]),
+    [
+      [2028, 2, 29],
+      [2029, 2, 28],
+      [2030, 2, 28]
+    ]
+  );
+  // Helårsaktivitet får en förekomst per år.
+  const undated = expandAnnualWheelSeries({ year: 2026, month: null }, 'yearly', 12, 2027);
+  assert.deepEqual(undated.map((o) => [o.year, o.month]), [[2026, null], [2027, null]]);
+  // Default: tre år. Tak: tio år. Slut före basåret → bara basåret.
+  assert.equal(expandAnnualWheelSeries({ year: 2026, month: 5 }, 'yearly').length, 3);
+  assert.equal(expandAnnualWheelSeries({ year: 2026, month: 5 }, 'yearly', 12, 2099).length, 10);
+  assert.equal(expandAnnualWheelSeries({ year: 2026, month: 5 }, 'yearly', 12, 2020).length, 1);
+  // Perioden följer med och slutdagen klampas.
+  const period = expandAnnualWheelSeries({ year: 2027, month: 1, end_month: 2, end_day: 29 }, 'yearly', 12, 2028);
+  assert.deepEqual(period.map((o) => [o.year, o.end_month, o.end_day]), [[2027, 2, 28], [2028, 2, 29]]);
+});

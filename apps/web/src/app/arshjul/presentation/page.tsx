@@ -32,8 +32,30 @@ interface WheelRow {
  * (användarens auth-token → PB-RLS, § 21); root-layouten tar bort railen för
  * exakt den här sökvägen. Ren läsvy: inga skrivningar, ingen ny dataväg.
  */
-export default async function ArshjulPresentationPage() {
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+function first(v: string | string[] | undefined): string | null {
+  const s = Array.isArray(v) ? v[0] : v;
+  return typeof s === 'string' && s.trim() ? s.trim() : null;
+}
+
+export default async function ArshjulPresentationPage({ searchParams }: { searchParams?: SearchParams }) {
   const user = await requireUser();
+  // Startfilter från /arshjul ("Presentera" tar med aktuellt urval). Allt
+  // valideras i klienten mot de faktiska kategorierna/personerna — ett okänt
+  // värde faller tyst tillbaka på "alla".
+  const params = (await searchParams) ?? {};
+  const yearParam = Number(first(params.year));
+  const initialYear = Number.isInteger(yearParam) && yearParam >= 2000 && yearParam <= 2100 ? yearParam : null;
+  const initialCategories = (first(params.cat) ?? '')
+    .split(',')
+    .map((c) => c.trim())
+    .filter(Boolean)
+    .slice(0, 50);
+  const initialTag = first(params.tag);
+  const initialResponsible = first(params.resp);
+  const monthParam = Number(first(params.month));
+  const initialMonth = Number.isInteger(monthParam) && monthParam >= 1 && monthParam <= 12 ? monthParam : null;
   if (!canAccessModuleForUser(user.roles, 'arshjul', user.enabledModules)) redirect('/chatt');
 
   const pb = await getServerPb();
@@ -64,5 +86,16 @@ export default async function ArshjulPresentationPage() {
     notes: r.notes || undefined
   }));
 
-  return <AnnualWheelPresentation items={items} categories={categories} />;
+  return (
+    <AnnualWheelPresentation
+      items={items}
+      categories={categories}
+      people={people}
+      initialMonth={initialMonth}
+      initialYear={initialYear}
+      initialCategories={initialCategories}
+      initialTag={initialTag}
+      initialResponsible={initialResponsible}
+    />
+  );
 }

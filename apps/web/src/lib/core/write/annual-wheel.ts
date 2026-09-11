@@ -339,10 +339,12 @@ export async function createAnnualWheelItem(
 // ─── Serier (upprepade aktiviteter) ──────────────────────────────────────────
 
 export interface CreateAnnualWheelSeriesParams extends CreateAnnualWheelItemParams {
-  /** 'none' | 'monthly' | 'bimonthly' | 'quarterly'. */
+  /** 'none' | 'monthly' | 'bimonthly' | 'quarterly' | 'yearly'. */
   repeat?: string;
   /** Sista månad serien får sträcka sig till (1–12, default december). */
   repeat_until_month?: number | null;
+  /** Bara `yearly`: sista år serien får sträcka sig till (default basåret + 2, tak 10 år). */
+  repeat_until_year?: number | null;
 }
 
 export interface CreatedAnnualWheelSeriesResult {
@@ -350,6 +352,8 @@ export interface CreatedAnnualWheelSeriesResult {
   created: number;
   /** Månaderna som faktiskt skapades (för ett tydligt svar till användaren). */
   months: number[];
+  /** Åren som faktiskt skapades (årlig serie → ett per år; annars bara basåret). */
+  years: number[];
   schemaMissing?: string[];
 }
 
@@ -383,7 +387,8 @@ export async function createAnnualWheelSeries(
       end_day: params.end_day ?? null
     },
     repeat,
-    params.repeat_until_month ?? 12
+    params.repeat_until_month ?? 12,
+    params.repeat_until_year ?? null
   );
 
   // Odaterad aktivitet (helår) kan inte upprepas — skapa den en gång.
@@ -394,12 +399,14 @@ export async function createAnnualWheelSeries(
       itemIds: [single.value.itemId],
       created: 1,
       months: [],
+      years: [year.value],
       ...(single.value.schemaMissing ? { schemaMissing: single.value.schemaMissing } : {})
     });
   }
 
   const itemIds: string[] = [];
   const months: number[] = [];
+  const years: number[] = [];
   let schemaMissing: string[] | undefined;
 
   for (const occurrence of occurrences) {
@@ -408,6 +415,7 @@ export async function createAnnualWheelSeries(
       actor,
       {
         ...params,
+        year: occurrence.year,
         month: occurrence.month,
         day: occurrence.day,
         end_month: occurrence.end_month,
@@ -428,7 +436,8 @@ export async function createAnnualWheelSeries(
       );
     }
     itemIds.push(result.value.itemId);
-    months.push(occurrence.month);
+    if (occurrence.month !== null) months.push(occurrence.month);
+    if (!years.includes(occurrence.year)) years.push(occurrence.year);
     if (result.value.schemaMissing) schemaMissing = result.value.schemaMissing;
   }
 
@@ -436,6 +445,7 @@ export async function createAnnualWheelSeries(
     itemIds,
     created: itemIds.length,
     months,
+    years,
     ...(schemaMissing ? { schemaMissing } : {})
   });
 }

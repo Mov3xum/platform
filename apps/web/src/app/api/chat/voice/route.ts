@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { transcribeAudio, VoiceError, voiceModel } from '@/lib/ai/voice';
+import { transcribeSpeech, VoiceError, voiceModel } from '@/lib/ai/voice';
 import { logAiUsage } from '@/lib/ai/usage';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
-import { MAX_VOICE_BYTES, validateVoiceClip } from '@platform/shared';
+import {
+  MAX_VOICE_BYTES,
+  isEffectivelySilent,
+  measureWavLevel,
+  validateVoiceClip
+} from '@platform/shared';
 import type { Role } from '@platform/shared';
 
 /**
@@ -78,8 +83,21 @@ export async function POST(request: Request): Promise<Response> {
 
   const buffer = Buffer.from(await entry.arrayBuffer());
 
+  // Effektivt tyst klipp (avstängd/fel mikrofon): säg det rakt ut i stället
+  // för att skicka tystnad till Voxtral och svara "ingen text kunde höras".
+  const level = measureWavLevel(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength));
+  if (level && isEffectivelySilent(level)) {
+    return NextResponse.json(
+      {
+        error:
+          'Inspelningen var helt tyst — kontrollera att rätt mikrofon är vald och att den inte är avstängd.'
+      },
+      { status: 422 }
+    );
+  }
+
   try {
-    const result = await transcribeAudio(buffer, validation.mime);
+    const result = await transcribeSpeech(buffer, validation.mime);
 
     const pb = await getServerPb();
     await logAiUsage(pb, {
@@ -94,6 +112,18 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ text: result.text, language: result.language });
   } catch (err) {
     if (err instanceof VoiceError) {
+      // Ett tomt svar (422) nådde ändå Voxtral och kostar — bokför (§ 9.6).
+      if (err.usage && (err.usage.tokensIn > 0 || err.usage.tokensOut > 0)) {
+        const pb = await getServerPb();
+        await logAiUsage(pb, {
+          tenant: user.tenant,
+          userId: user.id,
+          surface: 'dashboard_chat',
+          model: err.model || voiceModel(),
+          tokensIn: err.usage.tokensIn,
+          tokensOut: err.usage.tokensOut
+        });
+      }
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
     // PII-fri logg: aldrig ljudet, aldrig transkriptet.

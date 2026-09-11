@@ -12,7 +12,9 @@ import {
   selectLiveOrgPosts,
   sortOrgPosts,
   validateOrgPostInput,
-  type OrgPost
+  type OrgPost,
+  homeTabFromSlug,
+  homeTabHref
 } from './org-posts';
 
 function post(over: Partial<OrgPost>): OrgPost {
@@ -157,7 +159,7 @@ test('training är en egen inläggstyp med egen flik på dashboarden', () => {
   assert.equal(orgPostTabFor('celebration'), 'board');
 });
 
-test('flik-slugs: URL ↔ flik ↔ inläggstyp hänger ihop', () => {
+test('flik-slugs och hjälpare: URL ↔ flik ↔ inläggstyp hänger ihop', () => {
   assert.equal(orgPostTabFromSlug('internutbildningar'), 'training');
   assert.equal(orgPostTabFromSlug('sa-gor-vi'), 'instruction');
   assert.equal(orgPostTabFromSlug('anslagstavla'), 'board');
@@ -166,4 +168,11 @@ test('flik-slugs: URL ↔ flik ↔ inläggstyp hänger ihop', () => {
   assert.equal(orgPostHomePath('training'), '/hem?flik=internutbildningar');
   assert.equal(orgPostHomePath('instruction'), '/hem?flik=sa-gor-vi');
   assert.equal(orgPostHomePath('news'), '/hem');
+  assert.equal(homeTabFromSlug(undefined), 'board');
+  assert.equal(homeTabFromSlug('nonsens'), 'board');
+  assert.equal(homeTabFromSlug('sa-gor-vi'), 'instruction');
+  assert.equal(homeTabFromSlug('internutbildningar'), 'training');
+  assert.equal(homeTabHref('board'), '/hem');
+  assert.equal(homeTabHref('training'), '/hem?flik=internutbildningar');
+  assert.equal(homeTabFromSlug(homeTabHref('instruction').split('=')[1]), 'instruction');
 });

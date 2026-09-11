@@ -10,13 +10,15 @@ on:
     branches:
       - main
       - staging
+      - production
   # Tillåt manuell körning och körning på feature-branchar (t.ex. agent-PR:ar
-  # som ännu inte pekar mot main/staging).
+  # som ännu inte pekar mot main/staging/production).
   workflow_dispatch:
   push:
     branches-ignore:
       - main
       - staging
+      - production
 
 permissions:
   contents: read
