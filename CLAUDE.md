@@ -616,14 +616,19 @@ publika RSS-flöden från EU-källor och bakar in resultatet i Mistral-
 prompten via `{{web.<key>}}`-tokens. Whitelisten finns i
 `apps/web/src/lib/ai/web.ts` (`WEB_SOURCES`):
 
-| Nyckel | Källa | Land |
-| --- | --- | --- |
-| `breakit` | Breakit (svenska startups) | SE |
-| `sifted` | Sifted (EU tech) | EU |
-| `di_digital` | Dagens industri Digital | SE |
-| `vinnova` | Vinnova utlysningar | SE |
-| `eic` | European Innovation Council | EU |
-| `almi` | Almi pressmeddelanden | SE |
+| Nyckel | Källa | Land | Vad den är och vad den ger oss |
+| --- | --- | --- | --- |
+| `breakit` | Breakit | SE | Sveriges ledande startup-/tech-nyhetssajt: finansieringsrundor, grundare, exits, branschtrender. |
+| `sifted` | Sifted | EU | Europeisk techmedia (FT-backad): startup-scenen i hela Europa, VC-trender, sektoranalyser. |
+| `di_digital` | Di Digital | SE | Dagens industris techredaktion: svensk tech ur näringslivs-/investerarperspektiv, noteringar, reglering. |
+| `vinnova` | Vinnova | SE | Innovationsmyndighetens **aktuella utlysningar** med sista ansökningsdag — bidrag till innovationsprojekt, deeptech, verifiering. |
+| `eic` | European Innovation Council | EU | EU-kommissionens innovationsråd: EIC Accelerator/Pathfinder/Transition, cut-off-datum, resultat. |
+| `almi` | Almi | SE | Statligt lån-/riskkapital-/affärsutvecklingsbolag: pressmeddelanden om låneprodukter, Almi Invest, regionala program. |
+
+Varje källa är definierad i `WEB_SOURCES` med `country`, `description` och
+`covers` — det som visas under "Om källorna" på dashboarden (§ 37.4). Ett
+tillägg görs alltid här (+ `WebSourceKey` i `@platform/shared`) med
+motivering, aldrig som fri URL.
 
 **Säkerhet och kostnad:**
 - URL:er utanför whitelisten kan **aldrig** hämtas (SSRF-skydd).
@@ -2747,7 +2752,7 @@ enda utloggningsvägen för en inloggad användare.
   staff-/observer-roll. Multi-roll (t.ex. coach + startup_member) behåller
   hela staff-railen.
 - Hemvy: en ren medlem som landar på `/chatt` eller `/hem` redirectas till
-  `/min-oversikt` (rail-logon pekar dit); staff landar på Hemmaplan (`/hem`,
+  `/min-oversikt` (rail-logon pekar dit); staff landar på dashboarden (`/hem`,
   § 37) och har chatten som egen rail-post.
 
 ### 22.3 Regelefterlevnad
@@ -4861,11 +4866,11 @@ roll**:
 
 ---
 
-## 37. Hemmaplan — organisationens startsida (intranät)
+## 37. Dashboard — organisationens startsida (intranät)
 
 ### 37.1 Översikt
 
-`/hem` (modul `hem`, titel **Hemmaplan**, först i "Översikt"-railen) är den
+`/hem` (modul `hem`, titel **Dashboard**, först i "Översikt"-railen) är den
 sida personalen landar på efter inloggning (`/` och `/dashboard` redirectar
 dit; PWA:ns `start_url` pekar dit). En ren `startup_member` redirectas
 oförändrat till `/min-oversikt` (§ 22). **Uttryck (2026-09): en redaktionell

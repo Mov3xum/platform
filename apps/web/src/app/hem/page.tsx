@@ -9,7 +9,7 @@ import type { HomeTabDef } from '@/components/home/HomeBoardTabs';
 import { chatMarkdownToHtml } from '@/lib/safe-html';
 import { listOrgPosts } from '@/lib/org-posts/data';
 import { loadActivityFeed } from '@/lib/feed/activity-feed';
-import { fetchWebFeedItems } from '@/lib/ai/web';
+import { fetchWebFeedItems, listWebSources } from '@/lib/ai/web';
 import { listAnnualWheelCategories } from '@/lib/annual-wheel/categories';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import type { DashboardActivity } from '@/components/DashboardChat';
@@ -42,12 +42,11 @@ import {
 export const dynamic = 'force-dynamic';
 
 /**
- * Hemmaplan (CLAUDE.md § 37) — organisationens startsida efter inloggning.
+ * Dashboard (CLAUDE.md § 37) — organisationens startsida efter inloggning.
  * Den här filen äger all IO: allt läses med användarens token (RLS, § 21) och
  * varje källa är fail-soft — en källa som inte svarar tar aldrig ned sidan.
- * Layouten (redaktionell förstasida utan boxar) ligger i
- * `components/home/HomeFrontPage.tsx` och får bara färdig data. Ingen
- * AI-inferens på sidan (riskklass n/a).
+ * Layouten ligger i `components/home/HomeFrontPage.tsx` och får bara färdig
+ * data. Ingen AI-inferens på sidan (riskklass n/a).
  */
 
 interface WheelRow {
@@ -119,16 +118,12 @@ async function countOrNull(run: () => Promise<{ totalItems: number }>): Promise<
   }
 }
 
-// ─── Sidan ────────────────────────────────────────────────────────────────────
-
 export default async function HemPage({
   searchParams
 }: {
   searchParams: Promise<{ flik?: string }>;
 }) {
   const user = await requireUser();
-  // Bolagsmedlemmens hemvy är "Min översikt" (§ 22) — inlägg med audience=all
-  // visas där.
   if (isPureStartupMember(user.roles)) redirect('/min-oversikt');
   if (!canAccessModuleForUser(user.roles, 'hem', user.enabledModules)) redirect('/chatt');
 
@@ -222,10 +217,8 @@ export default async function HemPage({
   const categories = categoriesRes;
   const events = eventsRes.items;
 
-  // ── Flikarna: anslagstavla / så gör vi / internutbildningar ─────────────
   const canAuthor = hasRole(user.roles, ORG_POST_AUTHOR_ROLES);
   const live = selectLiveOrgPosts(allPosts, user.roles, now);
-  // Författare ser dessutom schemalagda (ej utgångna) inlägg, märkta.
   const scheduled = canAuthor
     ? sortOrgPosts(
         allPosts.filter(
@@ -261,7 +254,6 @@ export default async function HemPage({
     }
   ];
 
-  // ── Veckans agenda (årshjul + events) ────────────────────────────────────
   const categoryLabel = new Map(categories.map((c) => [c.id, c.label]));
   const agendaItems: HomeAgendaItem[] = [];
   for (const r of wheelRows) {
@@ -301,23 +293,28 @@ export default async function HemPage({
   const agenda = buildHomeAgenda(agendaItems, today, 14, 10);
   const agendaCount = agenda.reduce((n, g) => n + g.items.length, 0);
 
-  // ── Omvärld ──────────────────────────────────────────────────────────────
   const omvarld = mergeOmvarldItems(
     webFeeds.filter((f) => f.ok).map((f) => ({ sourceKey: f.source, source: f.label, items: f.items })),
     18,
     4
   );
-  const omvarldSources: OmvarldSourceStatus[] = webFeeds.map((f) => ({
-    key: f.source,
-    label: f.label,
-    ok: f.ok,
-    stale: f.stale,
-    fetched_at: f.fetched_at,
-    error: f.error,
-    count: f.items.length
-  }));
+  const sourceDefs = new Map(listWebSources().map((src) => [src.key, src]));
+  const omvarldSources: OmvarldSourceStatus[] = webFeeds.map((f) => {
+    const def = sourceDefs.get(f.source);
+    return {
+      key: f.source,
+      label: f.label,
+      ok: f.ok,
+      stale: f.stale,
+      fetched_at: f.fetched_at,
+      error: f.error,
+      count: f.items.length,
+      country: def?.country ?? 'EU',
+      description: def?.description ?? '',
+      covers: def?.covers ?? ''
+    };
+  });
 
-  // ── Header ───────────────────────────────────────────────────────────────
   const firstName = user.name.split(' ')[0] || user.email;
   const hello = `${swedishGreeting(now)}, ${firstName}.`;
   const dateLine = swedishDateLine(now);

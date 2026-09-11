@@ -9,11 +9,11 @@ import { RailReopenButton } from './MobileRail';
 
 function buildCrumbs(pathname: string): { label: string; href: string; now: boolean }[] {
   if (pathname === '/' || pathname === '/hem') {
-    return [{ label: 'Hemmaplan', href: '/hem', now: true }];
+    return [{ label: 'Dashboard', href: '/hem', now: true }];
   }
   const seg = pathname.split('/').filter(Boolean);
   const crumbs: { label: string; href: string; now: boolean }[] = [
-    { label: 'Hemmaplan', href: '/hem', now: false }
+    { label: 'Dashboard', href: '/hem', now: false }
   ];
   // first segment = module
   const mod = coreModules.find((m) => m.route === '/' + seg[0]);

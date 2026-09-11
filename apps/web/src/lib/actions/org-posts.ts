@@ -17,7 +17,7 @@ import {
 } from '@platform/shared';
 
 /**
- * Hemmaplans anslagstavla (CLAUDE.md § 37) — server actions.
+ * dashboardens anslagstavla (CLAUDE.md § 37) — server actions.
  *
  * RBAC: skriva = admin/incubator_lead/coach/mentor (`ORG_POST_AUTHOR_ROLES`);
  * ändra/radera = författaren själv eller admin/incubator_lead (`canEditOrgPost`).

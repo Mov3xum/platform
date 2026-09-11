@@ -6,6 +6,7 @@ import {
   canEditOrgPost,
   isOrgPostAudience,
   isOrgPostKind,
+  orgPostHomePath,
   validateOrgPostInput,
   type OrgPostAudience,
   type OrgPostKind
@@ -17,7 +18,7 @@ import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
 
 /**
- * Hemmaplans inlägg (`org_posts`, § 37) via det delade skrivlagret — så att
+ * dashboardens inlägg (`org_posts`, § 37) via det delade skrivlagret — så att
  * chatten kan administrera anslagstavlan, "Så gör vi" och framför allt
  * fliken INTERNUTBILDNINGAR ("lägg upp en internutbildning om GDPR på
  * torsdag …") med exakt samma regler som UI:t:
@@ -83,11 +84,6 @@ interface OrgPostRow {
   link_url?: string;
 }
 
-function homePathFor(kind: OrgPostKind): string {
-  if (kind === 'training') return '/hem?flik=internutbildningar';
-  if (kind === 'instruction') return '/hem?flik=sa-gor-vi';
-  return '/hem';
-}
 
 function toPayload(v: ReturnType<typeof validateOrgPostInput>): Record<string, unknown> {
   if (!v.ok) return {};
@@ -171,7 +167,7 @@ export async function createOrgPost(
     kindLabel: ORG_POST_KIND_LABELS[v.value.kind],
     audience: v.value.audience,
     pinned: v.value.pinned,
-    homePath: homePathFor(v.value.kind)
+    homePath: orgPostHomePath(v.value.kind)
   });
 }
 
@@ -269,6 +265,6 @@ export async function updateOrgPostFields(
     kindLabel: ORG_POST_KIND_LABELS[v.value.kind],
     audience: v.value.audience,
     pinned: v.value.pinned,
-    homePath: homePathFor(v.value.kind)
+    homePath: orgPostHomePath(v.value.kind)
   });
 }

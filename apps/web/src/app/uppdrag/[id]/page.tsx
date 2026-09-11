@@ -233,7 +233,7 @@ export default async function MissionDetailPage({
       style={{ padding: '20px 24px 0', display: 'flex', flexDirection: 'column', gap: 16 }}
     >
       <PageHead
-        crumb="Hemmaplan / Projekt & uppdrag / Detalj"
+        crumb="Dashboard / Projekt & uppdrag / Detalj"
         title={mission.title}
         subtitle={`${mission.type === 'project' ? 'Projekt' : 'Uppdrag'} · ${mission.id.slice(0, 8)} · ${mission.type.replace('_', ' ')}`}
         actions={

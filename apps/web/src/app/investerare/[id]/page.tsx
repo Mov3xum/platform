@@ -101,7 +101,7 @@ export default async function InvestorDetailPage({
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb={`Hemmaplan / Investerarrelationer / ${investor.name}`}
+        crumb={`Dashboard / Investerarrelationer / ${investor.name}`}
         title={investor.name}
         subtitle={
           investor.stage_focus?.length

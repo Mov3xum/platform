@@ -1,7 +1,7 @@
 /**
  * RSS/Atom-parsning — REN modul (ingen IO, inget `server-only`) så den kan
  * enhetstestas mot riktiga flödesfixturer (`rss.test.ts`). Används av
- * `lib/ai/web.ts` för både AI-agenternas web-kontext (§ 9.8) och Hemmaplans
+ * `lib/ai/web.ts` för både AI-agenternas web-kontext (§ 9.8) och dashboardens
  * omvärldsbevakning (§ 37.4).
  *
  * Regex-baserad utan extern dependency (§ 9.8): tål RSS 2.0 (Breakit, Di,

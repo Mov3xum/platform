@@ -1,4 +1,4 @@
-// Hemmaplan — rena hjälpare för startsidan (CLAUDE.md § 37).
+// Dashboard — rena hjälpare för startsidan (CLAUDE.md § 37).
 //
 // Datumrad i svensk tid, sammanslagen agenda (årshjul + events) för "den här
 // veckan" och sammanslagning av omvärldsflöden. Ingen IO, ingen PII —

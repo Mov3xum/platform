@@ -24,42 +24,78 @@ export { parseRssItems, type WebFeedItem };
 //   och hålla körningskostnaden låg.
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface WebSource {
+export interface WebSource {
   key: WebSourceKey;
   label: string;
   url: string;
+  /** Land/region för residency-transparens (§ 10.2). */
+  country: 'SE' | 'EU';
+  /** Vem som står bakom källan och vad den bevakar — visas i UI:t. */
+  description: string;
+  /** Vilken typ av innehåll flödet ger oss. */
+  covers: string;
 }
 
+/**
+ * EU-whitelist för omvärldsbevakning (§ 9.8 / § 37.4). Varje källa är
+ * definierad med vem som står bakom den och vad den ger oss, så att UI:t
+ * kan förklara flödet och så att ett tillägg alltid motiveras här — aldrig
+ * som fri URL. Alla källor läses via deras egna publika RSS/Atom-flöden.
+ */
 export const WEB_SOURCES: readonly WebSource[] = [
   {
     key: 'breakit',
     label: 'Breakit',
-    url: 'https://www.breakit.se/feed/artiklar'
+    url: 'https://www.breakit.se/feed/artiklar',
+    country: 'SE',
+    description:
+      'Sveriges ledande nyhetssajt om startups, techbolag och riskkapital (Stockholm). Redaktionellt nyhetsflöde med artiklar om finansieringsrundor, grundare, exits och branschtrender.',
+    covers: 'Svenska startup-nyheter, investeringar och exits'
   },
   {
     key: 'sifted',
     label: 'Sifted',
-    url: 'https://sifted.eu/feed'
+    url: 'https://sifted.eu/feed',
+    country: 'EU',
+    description:
+      'Europeisk techmedia (London, grundad med stöd av Financial Times) som bevakar startup-ekosystemet i hela Europa — Norden, DACH, Frankrike, Storbritannien — med analyser, rankningar och finansieringsdata.',
+    covers: 'Europeisk startup-scen, VC-trender och sektoranalyser'
   },
   {
     key: 'di_digital',
     label: 'Di Digital',
-    url: 'https://www.di.se/digital/rss'
+    url: 'https://www.di.se/digital/rss',
+    country: 'SE',
+    description:
+      'Dagens industris techredaktion. Näringslivsperspektiv på svenska tech- och tillväxtbolag, börsnoteringar, storbolagens digitalisering och regulatoriska frågor.',
+    covers: 'Svensk tech ur ett näringslivs- och investerarperspektiv'
   },
   {
     key: 'vinnova',
     label: 'Vinnova',
-    url: 'https://www.vinnova.se/aktuella-utlysningar/rss/'
-  },
-  {
-    key: 'eic',
-    label: 'European Innovation Council',
-    url: 'https://eic.ec.europa.eu/news_en?rss=1'
+    url: 'https://www.vinnova.se/aktuella-utlysningar/rss/',
+    country: 'SE',
+    description:
+      'Sveriges innovationsmyndighet. Flödet listar aktuella utlysningar — bidrag till innovationsprojekt, deeptech, verifiering och samverkan — med sista ansökningsdag. Direkt relevant för bolagens finansieringsplaner och för Movexums stödrådgivning.',
+    covers: 'Öppna utlysningar och finansieringsmöjligheter för innovationsprojekt'
   },
   {
     key: 'almi',
     label: 'Almi',
-    url: 'https://www.almi.se/om-almi/press/pressmeddelanden/rss/'
+    url: 'https://www.almi.se/om-almi/press/pressmeddelanden/rss/',
+    country: 'SE',
+    description:
+      'Statligt ägt bolag för lån, riskkapital (Almi Invest) och affärsutveckling till små och medelstora företag. Pressmeddelanden om nya låneprodukter, investeringar, regionala satsningar och program.',
+    covers: 'Lån, riskkapital och program för tillväxtbolag i Sverige'
+  },
+  {
+    key: 'eic',
+    label: 'European Innovation Council',
+    url: 'https://eic.ec.europa.eu/news_en?rss=1',
+    country: 'EU',
+    description:
+      'EU-kommissionens innovationsråd (Horisont Europa). Nyheter om EIC Accelerator, Pathfinder och Transition — de största europeiska bidrags- och equity-programmen för deeptech och skalbara startups — samt cut-off-datum och resultat.',
+    covers: 'EU-finansiering (Accelerator/Pathfinder), cut-off-datum och EU-innovationspolitik'
   }
 ] as const;
 
@@ -71,7 +107,7 @@ const MAX_BYTES_PER_SOURCE = 8 * 1024; // 8 KB per källa
 const MAX_TOTAL_BYTES = 32 * 1024; // 32 KB totalt
 const FETCH_TIMEOUT_MS = 8_000;
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 min (prompt-kontext för agenter)
-// Hemmaplans flöde uppdateras tätare — det är en nyhetsvy, inte en prompt.
+// dashboardens flöde uppdateras tätare — det är en nyhetsvy, inte en prompt.
 const HOME_FEED_TTL_MS = 15 * 60 * 1000; // 15 min
 // En källa som varit nere länge ska inte visa dagsgamla poster som "senaste".
 const HOME_FEED_MAX_STALE_MS = 24 * 60 * 60 * 1000;
@@ -153,7 +189,7 @@ async function fetchOne(pb: PocketBase, src: WebSource): Promise<WebFetchResult>
     };
   }
 
-  // Live-fetch (delad med Hemmaplans flödesläsning nedan).
+  // Live-fetch (delad med dashboardens flödesläsning nedan).
   const live = await fetchRawFeed(src);
   if (!live.ok) {
     return {
@@ -195,7 +231,7 @@ type RawFeed =
 /**
  * Hämtar och parsar ETT whitelistat flöde med timeout. Ingen cache här —
  * anroparna cachar (PB `web_cache` för prompt-texten, in-process-cache för
- * Hemmaplans poster). URL:en kommer alltid från WEB_SOURCES (SSRF-skydd).
+ * dashboardens poster). URL:en kommer alltid från WEB_SOURCES (SSRF-skydd).
  */
 async function fetchRawFeed(src: WebSource): Promise<RawFeed> {
   const controller = new AbortController();
@@ -228,7 +264,7 @@ async function fetchRawFeed(src: WebSource): Promise<RawFeed> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Hemmaplans omvärldsbevakning (CLAUDE.md § 37) — strukturerade poster
+// dashboardens omvärldsbevakning (CLAUDE.md § 37) — strukturerade poster
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // `web_cache` lagrar den prompt-formaterade TEXTEN (inte posterna), så en
@@ -288,7 +324,7 @@ function refreshSource(key: WebSourceKey, src: WebSource): Promise<RawFeed> {
 }
 
 /**
- * Hemmaplans nyhetsflöde. Cache-strategi: **stale-while-revalidate**.
+ * dashboardens nyhetsflöde. Cache-strategi: **stale-while-revalidate**.
  *
  * 1. Färsk cache (< 15 min) → returneras direkt, ingen nätverksbegäran.
  * 2. Utgången cache (15 min – 24 h) → returneras DIREKT (märkt `stale`) medan

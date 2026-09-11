@@ -25,7 +25,7 @@ import {
 } from '@platform/shared';
 
 /**
- * Anslagstavlan på Hemmaplan (CLAUDE.md § 37) — klientdelen.
+ * Anslagstavlan på dashboarden (CLAUDE.md § 37) — klientdelen.
  *
  * Servern renderar markdown → HTML via lib/safe-html (`bodyHtml`) och skickar
  * PII-fri metadata; här sköts bara UI-tillstånd (redigerare, utfällning, meny)

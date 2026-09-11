@@ -8,7 +8,7 @@ import {
 } from '@platform/shared';
 
 /**
- * Hemmaplans anslagstavla (CLAUDE.md § 37) — EN läsväg som delas av
+ * dashboardens anslagstavla (CLAUDE.md § 37) — EN läsväg som delas av
  * startsidan (`/hem`), "Min översikt" (bolagsmedlemmar, audience=all) och
  * server-actions. Läsningen går via den pb-instans anroparen skickar in
  * (användarens auth-token → PB-RLS gäller, § 21: staff/observer ser tenantens

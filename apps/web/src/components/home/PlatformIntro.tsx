@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Icon } from '@/components/proto/Icon';
 
 /**
- * Hårdkodad plattformsintro under "Så gör vi" på Hemmaplan (CLAUDE.md § 37).
+ * Hårdkodad plattformsintro under "Så gör vi" på dashboarden (CLAUDE.md § 37).
  * Statiskt innehåll (medvetet inte dynamiskt) — en kort orientering för nya
  * kollegor om vad som finns var. Numrerad handbok (stora kapitelnumror, hårlinjer — inga boxar); native
  * <details> → ingen klient-JS, ingen dataväg. Håll texten kort; rutiner som ändras skrivs som instruktioner
@@ -24,7 +24,7 @@ const INTRO: IntroSection[] = [
     title: 'Så hänger plattformen ihop',
     lead: 'Movexum OS är vårt gemensamma arbetsrum: allt om bolagen, programmet och verksamheten på ett ställe — EU-suveränt, utan externa molntjänster utanför Europa.',
     points: [
-      'Hemmaplan är startsidan: anslagstavla, rutiner, internutbildningar, veckans agenda, bolagsnytt och omvärld.',
+      'Dashboard är startsidan: anslagstavla, rutiner, internutbildningar, veckans agenda, bolagsnytt och omvärld.',
       'Sidomenyn följer din roll och dina moduler — saknar du en sida, be en admin slå på den under Inställningar → Användare.',
       'Allt som skrivs i plattformen loggas i aktivitetsloggen med vem, vad och när.'
     ]
