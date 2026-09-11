@@ -10,7 +10,9 @@ import {
   selectLiveOrgPosts,
   sortOrgPosts,
   validateOrgPostInput,
-  type OrgPost
+  type OrgPost,
+  homeTabFromSlug,
+  homeTabHref
 } from './org-posts';
 
 function post(over: Partial<OrgPost>): OrgPost {
@@ -153,4 +155,14 @@ test('training är en egen inläggstyp med egen flik på Hemmaplan', () => {
   assert.equal(orgPostTabFor('instruction'), 'instruction');
   assert.equal(orgPostTabFor('news'), 'board');
   assert.equal(orgPostTabFor('celebration'), 'board');
+});
+
+test('homeTabFromSlug/homeTabHref: slug ↔ flik, okänd slug ger anslagstavlan', () => {
+  assert.equal(homeTabFromSlug(undefined), 'board');
+  assert.equal(homeTabFromSlug('nonsens'), 'board');
+  assert.equal(homeTabFromSlug('sa-gor-vi'), 'instruction');
+  assert.equal(homeTabFromSlug('internutbildningar'), 'training');
+  assert.equal(homeTabHref('board'), '/hem');
+  assert.equal(homeTabHref('training'), '/hem?flik=internutbildningar');
+  assert.equal(homeTabFromSlug(homeTabHref('instruction').split('=')[1]), 'instruction');
 });

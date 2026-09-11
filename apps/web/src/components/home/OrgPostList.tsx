@@ -30,6 +30,10 @@ import {
  * Servern renderar markdown → HTML via lib/safe-html (`bodyHtml`) och skickar
  * PII-fri metadata; här sköts bara UI-tillstånd (redigerare, utfällning, meny)
  * och anrop till server-actions, som är säkerhetsgränsen (RBAC + validering).
+ *
+ * Uttryck (2026-09): inga kort — anslagstavlan sätts som en tidningssida
+ * (första inlägget som toppnyhet, resten som notiser i spalter) och rutinerna
+ * som en numrerad handbok med hårlinjer.
  */
 
 export interface BoardPost extends OrgPost {
@@ -72,6 +76,14 @@ const KIND_CHIP: Record<OrgPostKind, string> = {
     'bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron'
 };
 
+const KIND_TONE: Record<OrgPostKind, string> = {
+  news: 'text-brand',
+  notice: 'text-foreground-muted',
+  instruction: 'text-movexum-lila dark:text-movexum-ljuslila',
+  celebration: 'text-movexum-morkgul',
+  training: 'text-movexum-gron dark:text-movexum-ljusgron'
+};
+
 const KIND_ICON: Record<OrgPostKind, string> = {
   news: 'spark',
   notice: 'bell',
@@ -81,6 +93,8 @@ const KIND_ICON: Record<OrgPostKind, string> = {
 };
 
 const EXPAND_THRESHOLD = 320;
+/** Toppnyheten får visa hela texten upp till den här längden innan "Läs hela" behövs. */
+const LEAD_THRESHOLD = 1400;
 
 type Draft = {
   title: string;
@@ -163,7 +177,7 @@ function Editor({
         e.preventDefault();
         submit();
       }}
-      className="rounded-2xl border border-strong bg-surface p-4 shadow-sm shadow-movexum-svart/5"
+      className="border-t-2 border-brand pt-4"
     >
       <div className="mb-3 flex flex-wrap gap-1.5">
         {kinds.map((k) => {
@@ -334,6 +348,105 @@ export function OrgPostList({
   }
 
   const compact = variant === 'compact';
+  const [lead, ...rest] = compact ? [null, ...posts] : posts;
+
+  const menuButton = (post: BoardPost) => (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setMenuFor((cur) => (cur === post.id ? null : post.id));
+        }}
+        className="flex h-7 w-7 items-center justify-center rounded-md text-foreground-subtle opacity-50 transition hover:bg-canvas-muted hover:text-foreground group-hover:opacity-100"
+        aria-label="Fler val (fäst, redigera, ta bort)"
+        aria-haspopup="menu"
+        aria-expanded={menuFor === post.id}
+      >
+        <Icon name="more" size={15} fill="currentColor" />
+      </button>
+      {menuFor === post.id && (
+        <div
+          role="menu"
+          onClick={(e) => e.stopPropagation()}
+          className="absolute right-0 top-8 z-10 w-40 overflow-hidden rounded-xl border border-default bg-surface py-1 text-[13px] shadow-md shadow-movexum-svart/10"
+        >
+          <button
+            type="button"
+            onClick={() => run(() => setOrgPostPinnedAction(post.id, !post.pinned))}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-foreground transition hover:bg-canvas-subtle"
+          >
+            <Icon name="star" size={12} /> {post.pinned ? 'Lossa' : 'Fäst överst'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMenuFor(null);
+              setCreating(false);
+              setEditingId(post.id);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-foreground transition hover:bg-canvas-subtle"
+          >
+            <Icon name="pencil" size={12} /> Redigera
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!window.confirm(`Ta bort "${post.title}"?`)) return;
+              run(() => deleteOrgPostAction(post.id));
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-movexum-morkorange transition hover:bg-movexum-pastell-orange"
+          >
+            <Icon name="trash" size={12} /> Ta bort
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  const badges = (post: BoardPost) => (
+    <>
+      {post.pinned && (
+        <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-movexum-morkgul">
+          <Icon name="star" size={10} fill="currentColor" /> Fäst
+        </span>
+      )}
+      {post.scheduled && (
+        <span className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-movexum-morkgul">Schemalagt</span>
+      )}
+      {post.audience === 'all' && (
+        <span className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-foreground-subtle" title="Visas även för bolagen">
+          Hela organisationen
+        </span>
+      )}
+    </>
+  );
+
+  const openLink = (post: BoardPost) =>
+    post.link_url ? (
+      <a
+        href={post.link_url}
+        target={post.link_url.startsWith('/') ? undefined : '_blank'}
+        rel={post.link_url.startsWith('/') ? undefined : 'noopener noreferrer'}
+        className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-link underline decoration-link/30 underline-offset-4 transition hover:decoration-link"
+      >
+        Öppna
+        <Icon name="arrow-up-right" size={11} />
+      </a>
+    ) : null;
+
+  const editorFor = (post: BoardPost) => (
+    <Editor
+      initial={draftFrom(post)}
+      editing={post}
+      kinds={kinds}
+      onDone={() => {
+        setEditingId(null);
+        router.refresh();
+      }}
+      onCancel={() => setEditingId(null)}
+    />
+  );
 
   return (
     <section>
@@ -353,16 +466,18 @@ export function OrgPostList({
               setEditingId(null);
               setCreating(true);
             }}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-default bg-surface px-3 py-1.5 text-[12.5px] font-medium text-foreground transition hover:border-strong hover:shadow-sm hover:shadow-movexum-svart/5"
+            className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-brand transition hover:underline hover:decoration-brand/40 hover:underline-offset-4"
           >
-            <Icon name="plus" size={13} />
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand text-brand-foreground">
+              <Icon name="plus" size={11} stroke={2.2} />
+            </span>
             {newLabel ?? (compact ? 'Ny instruktion' : 'Nytt inlägg')}
           </button>
         )}
       </div>
 
       {creating && (
-        <div className="mb-3">
+        <div className="mb-5">
           <Editor
             initial={emptyDraft(newKind)}
             editing={null}
@@ -381,191 +496,195 @@ export function OrgPostList({
       {children}
 
       {posts.length === 0 && !creating ? (
-        <div className="rounded-2xl border border-dashed border-default px-4 py-8 text-center text-[13px] text-foreground-subtle">
-          {emptyText}
-        </div>
-      ) : (
-        <ul className="overflow-hidden rounded-2xl border border-default bg-surface">
-          {posts.map((post, i) => {
+        <p className="flex max-w-[60ch] items-start gap-3 text-[13.5px] leading-relaxed text-foreground-subtle">
+          <span aria-hidden className="mt-[10px] h-px w-6 shrink-0 bg-brand/60" />
+          <span>{emptyText}</span>
+        </p>
+      ) : compact ? (
+        /* Så gör vi: numrerade rutiner i samma handboksspråk som plattformsintron. */
+        <ol className="border-t border-default">
+          {rest.map((post, i) => {
+            if (!post) return null;
             const canEdit = canEditOrgPost({ id: userId, roles }, post);
             const isOpen = expanded.has(post.id);
-            const long = post.body.length > EXPAND_THRESHOLD;
-            const showBody = compact ? isOpen : isOpen || !long;
-            const rowBorder = i > 0 ? 'border-t border-default' : '';
-
             if (editingId === post.id) {
               return (
-                <li key={post.id} className={`${rowBorder} p-2`}>
-                  <Editor
-                    initial={draftFrom(post)}
-                    editing={post}
-                    kinds={kinds}
-                    onDone={() => {
-                      setEditingId(null);
-                      router.refresh();
-                    }}
-                    onCancel={() => setEditingId(null)}
-                  />
+                <li key={post.id} className="border-b border-default py-3">
+                  {editorFor(post)}
                 </li>
               );
             }
-
             return (
-              <li key={post.id} className={`group relative ${rowBorder} px-4 ${compact ? 'py-2.5' : 'py-3.5'}`}>
-                <div className="flex items-start gap-3">
-                  {!compact && (
+              <li key={post.id} className="group border-b border-default">
+                <div className="flex items-baseline gap-4">
+                  <button
+                    type="button"
+                    onClick={() => toggle(post.id)}
+                    aria-expanded={isOpen}
+                    className="flex min-w-0 flex-1 items-baseline gap-4 py-3 text-left transition hover:text-brand"
+                  >
                     <span
-                      className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${KIND_CHIP[post.kind]}`}
+                      className={`mx-tnum w-8 shrink-0 font-heading text-[22px] font-light leading-none tracking-tight transition ${
+                        isOpen ? 'text-brand' : 'text-foreground-subtle'
+                      }`}
                     >
-                      <Icon name={KIND_ICON[post.kind]} size={13} />
+                      {String(i + 1).padStart(2, '0')}
                     </span>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      {compact ? (
-                        <button
-                          type="button"
-                          onClick={() => toggle(post.id)}
-                          className="flex min-w-0 items-center gap-2 text-left"
-                          aria-expanded={isOpen}
-                        >
-                          <Icon
-                            name="chevdown"
-                            size={12}
-                            className={`shrink-0 text-foreground-subtle transition ${isOpen ? 'rotate-180' : '-rotate-90'}`}
-                          />
-                          <span className="truncate text-[13.5px] font-medium text-foreground">{post.title}</span>
-                        </button>
-                      ) : (
-                        <h3 className="font-heading text-[15px] font-semibold leading-snug text-foreground">
-                          {post.title}
-                        </h3>
-                      )}
-                      {post.pinned && (
-                        <Icon name="star" size={11} className="shrink-0 text-movexum-gul" fill="currentColor" />
-                      )}
-                      {post.scheduled && (
-                        <span className="rounded-md bg-movexum-pastell-gul px-1.5 py-0.5 text-[10px] font-medium text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
-                          Schemalagt
-                        </span>
-                      )}
-                      {post.audience === 'all' && (
-                        <span
-                          className="rounded-md bg-canvas-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground-subtle"
-                          title="Visas även för bolagen"
-                        >
-                          Hela organisationen
-                        </span>
-                      )}
-                    </div>
-
-                    {!compact && (
-                      <p className="mt-0.5 text-[11.5px] text-foreground-subtle">
-                        {post.author_name ? `${post.author_name} · ` : ''}
-                        <TimeAgo iso={post.published_at || post.created} />
-                      </p>
-                    )}
-
-                    {showBody && post.bodyHtml && (
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-heading text-[15px] font-semibold leading-snug text-foreground">
+                        {post.title}
+                      </span>
+                      <span className="mt-0.5 flex flex-wrap items-center gap-x-3">{badges(post)}</span>
+                    </span>
+                    <Icon
+                      name="plus"
+                      size={14}
+                      className={`shrink-0 self-center text-foreground-subtle transition ${isOpen ? 'rotate-45 text-brand' : ''}`}
+                    />
+                  </button>
+                  {canEdit && <div className="self-center">{menuButton(post)}</div>}
+                </div>
+                {isOpen && (
+                  <div className="pb-5 pl-12 pr-6">
+                    {post.bodyHtml && (
                       <div
-                        className={`mx-post-body text-[13.5px] leading-relaxed text-foreground-muted ${compact ? 'mt-2 pl-5' : 'mt-2'}`}
+                        className="mx-post-body max-w-[62ch] text-[14px] leading-relaxed text-foreground-muted"
                         // Renderad av lib/safe-html på servern (escapad markdown).
                         dangerouslySetInnerHTML={{ __html: post.bodyHtml }}
                       />
                     )}
-                    {!compact && !isOpen && long && (
-                      <p className="mt-2 text-[13.5px] leading-relaxed text-foreground-muted">{post.excerpt}</p>
-                    )}
-
-                    <div className="mt-2 flex flex-wrap items-center gap-3 text-[12px]">
-                      {!compact && long && (
-                        <button
-                          type="button"
-                          onClick={() => toggle(post.id)}
-                          className="inline-flex items-center gap-1 text-foreground-subtle transition hover:text-foreground"
-                        >
-                          {isOpen ? 'Visa mindre' : 'Läs mer'}
-                          <Icon name="chevdown" size={11} className={isOpen ? 'rotate-180 transition' : 'transition'} />
-                        </button>
-                      )}
-                      {post.link_url && (showBody || !compact) && (
-                        <a
-                          href={post.link_url}
-                          target={post.link_url.startsWith('/') ? undefined : '_blank'}
-                          rel={post.link_url.startsWith('/') ? undefined : 'noopener noreferrer'}
-                          className="inline-flex items-center gap-1 text-link transition hover:underline"
-                        >
-                          Öppna
-                          <Icon name="arrow-up-right" size={11} />
-                        </a>
-                      )}
-                      {compact && isOpen && (
-                        <span className="text-foreground-subtle">
-                          {post.author_name ? `${post.author_name} · ` : ''}
-                          <TimeAgo iso={post.updated || post.created} />
-                        </span>
-                      )}
+                    <div className="mt-3 flex flex-wrap items-center gap-4 text-[12px] text-foreground-subtle">
+                      {openLink(post)}
+                      <span>
+                        {post.author_name ? `${post.author_name} · ` : ''}
+                        <TimeAgo iso={post.updated || post.created} />
+                      </span>
                     </div>
                   </div>
-
-                  {canEdit && (
-                    <div className="relative shrink-0">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setMenuFor((cur) => (cur === post.id ? null : post.id));
-                        }}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-foreground-subtle opacity-60 transition hover:bg-canvas-muted hover:text-foreground group-hover:opacity-100"
-                        aria-label="Fler val (fäst, redigera, ta bort)"
-                        aria-haspopup="menu"
-                        aria-expanded={menuFor === post.id}
-                      >
-                        <Icon name="more" size={15} fill="currentColor" />
-                      </button>
-                      {menuFor === post.id && (
-                        <div
-                          role="menu"
-                          onClick={(e) => e.stopPropagation()}
-                          className="absolute right-0 top-8 z-10 w-40 overflow-hidden rounded-xl border border-default bg-surface py-1 text-[13px] shadow-md shadow-movexum-svart/10"
-                        >
-                          <button
-                            type="button"
-                            onClick={() => run(() => setOrgPostPinnedAction(post.id, !post.pinned))}
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-foreground transition hover:bg-canvas-subtle"
-                          >
-                            <Icon name="star" size={12} /> {post.pinned ? 'Lossa' : 'Fäst överst'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setMenuFor(null);
-                              setCreating(false);
-                              setEditingId(post.id);
-                            }}
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-foreground transition hover:bg-canvas-subtle"
-                          >
-                            <Icon name="pencil" size={12} /> Redigera
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!window.confirm(`Ta bort "${post.title}"?`)) return;
-                              run(() => deleteOrgPostAction(post.id));
-                            }}
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-movexum-morkorange transition hover:bg-movexum-pastell-orange"
-                          >
-                            <Icon name="trash" size={12} /> Ta bort
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                )}
               </li>
             );
           })}
-        </ul>
+        </ol>
+      ) : (
+        /* Anslagstavla / Internutbildningar: första inlägget som toppnyhet, resten som notiser i spalter. */
+        <div>
+          {lead && (
+            <article className="group relative">
+              {editingId === lead.id ? (
+                editorFor(lead)
+              ) : (
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className={`inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] ${KIND_TONE[lead.kind]}`}>
+                        <Icon name={KIND_ICON[lead.kind]} size={11} />
+                        {ORG_POST_KIND_LABELS[lead.kind]}
+                      </span>
+                      {badges(lead)}
+                    </div>
+                    <h3 className="mt-1.5 font-heading text-[24px] font-semibold leading-tight tracking-tight text-foreground md:text-[28px]">
+                      {lead.title}
+                    </h3>
+                    <p className="mt-1.5 text-[12px] text-foreground-subtle">
+                      {lead.author_name ? `${lead.author_name} · ` : ''}
+                      <TimeAgo iso={lead.published_at || lead.created} />
+                    </p>
+                    {(expanded.has(lead.id) || lead.body.length <= LEAD_THRESHOLD) && lead.bodyHtml ? (
+                      <div
+                        className="mx-post-body mt-3 max-w-[66ch] text-[15px] leading-relaxed text-foreground-muted"
+                        // Renderad av lib/safe-html på servern (escapad markdown).
+                        dangerouslySetInnerHTML={{ __html: lead.bodyHtml }}
+                      />
+                    ) : (
+                      lead.excerpt && (
+                        <p className="mt-3 max-w-[66ch] text-[15px] leading-relaxed text-foreground-muted">{lead.excerpt}</p>
+                      )
+                    )}
+                    <div className="mt-3 flex flex-wrap items-center gap-4">
+                      {lead.body.length > LEAD_THRESHOLD && (
+                        <button
+                          type="button"
+                          onClick={() => toggle(lead.id)}
+                          className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-foreground transition hover:text-brand"
+                        >
+                          {expanded.has(lead.id) ? 'Visa mindre' : 'Läs hela'}
+                          <Icon name="chevdown" size={11} className={expanded.has(lead.id) ? 'rotate-180 transition' : 'transition'} />
+                        </button>
+                      )}
+                      {openLink(lead)}
+                    </div>
+                  </div>
+                  {canEditOrgPost({ id: userId, roles }, lead) && menuButton(lead)}
+                </div>
+              )}
+            </article>
+          )}
+
+          {rest.length > 0 && (
+            <ul className={`grid grid-cols-1 gap-x-8 border-t border-default md:grid-cols-2 ${lead ? 'mt-6' : ''}`}>
+              {rest.map((post) => {
+                if (!post) return null;
+                const canEdit = canEditOrgPost({ id: userId, roles }, post);
+                const isOpen = expanded.has(post.id);
+                const long = post.body.length > EXPAND_THRESHOLD;
+                const showBody = isOpen || !long;
+                if (editingId === post.id) {
+                  return (
+                    <li key={post.id} className="border-b border-default py-3 md:col-span-2">
+                      {editorFor(post)}
+                    </li>
+                  );
+                }
+                return (
+                  <li key={post.id} className={`group relative border-b border-default py-4 ${isOpen ? 'md:col-span-2' : ''}`}>
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <span className={`inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] ${KIND_TONE[post.kind]}`}>
+                            <Icon name={KIND_ICON[post.kind]} size={10} />
+                            {ORG_POST_KIND_LABELS[post.kind]}
+                          </span>
+                          {badges(post)}
+                        </div>
+                        <h3 className="mt-1 font-heading text-[16px] font-semibold leading-snug text-foreground">{post.title}</h3>
+                        <p className="mt-0.5 text-[11.5px] text-foreground-subtle">
+                          {post.author_name ? `${post.author_name} · ` : ''}
+                          <TimeAgo iso={post.published_at || post.created} />
+                        </p>
+                        {showBody && post.bodyHtml ? (
+                          <div
+                            className="mx-post-body mt-2 max-w-[66ch] text-[13.5px] leading-relaxed text-foreground-muted"
+                            // Renderad av lib/safe-html på servern (escapad markdown).
+                            dangerouslySetInnerHTML={{ __html: post.bodyHtml }}
+                          />
+                        ) : (
+                          post.excerpt && (
+                            <p className="mt-2 line-clamp-3 text-[13.5px] leading-relaxed text-foreground-muted">{post.excerpt}</p>
+                          )
+                        )}
+                        <div className="mt-2 flex flex-wrap items-center gap-4">
+                          {long && (
+                            <button
+                              type="button"
+                              onClick={() => toggle(post.id)}
+                              className="inline-flex items-center gap-1 text-[12px] font-semibold text-foreground transition hover:text-brand"
+                            >
+                              {isOpen ? 'Visa mindre' : 'Läs mer'}
+                              <Icon name="chevdown" size={11} className={isOpen ? 'rotate-180 transition' : 'transition'} />
+                            </button>
+                          )}
+                          {openLink(post)}
+                        </div>
+                      </div>
+                      {canEdit && menuButton(post)}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
       )}
     </section>
   );
