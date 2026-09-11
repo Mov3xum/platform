@@ -4,6 +4,7 @@ import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import {
   ORG_POST_KIND_LABELS,
   canEditOrgPost,
+  coerceOrgPostMedia,
   isOrgPostAudience,
   isOrgPostKind,
   orgPostHomePath,
@@ -82,8 +83,8 @@ interface OrgPostRow {
   published_at?: string;
   expires_at?: string;
   link_url?: string;
+  media?: unknown;
 }
-
 
 function toPayload(v: ReturnType<typeof validateOrgPostInput>): Record<string, unknown> {
   if (!v.ok) return {};
@@ -129,7 +130,9 @@ export async function createOrgPost(
     pinned: params.pinned === true,
     published_at: params.publishedAt ?? null,
     expires_at: params.expiresAt ?? null,
-    link_url: params.linkUrl ?? null
+    link_url: params.linkUrl ?? null,
+    // Media laddas upp av en människa i UI:t (§ 37.6) — agenten skapar textinlägg.
+    media: []
   });
   if (!v.ok) return fail('INVALID_VALUE', v.error);
   const payload = toPayload(v);
@@ -206,7 +209,7 @@ export async function updateOrgPostFields(
     actor,
     ORG_POSTS_WRITE_COLLECTION,
     id,
-    'id,tenant,author,title,body,kind,audience,pinned,published_at,expires_at,link_url'
+    'id,tenant,author,title,body,kind,audience,pinned,published_at,expires_at,link_url,media'
   );
   if (!existing) return fail('NOT_FOUND', 'Inlägget hittades inte i din organisation.');
   if (!canEditOrgPost({ id: actor.id, roles: actor.roles }, { author: existing.author ?? '' })) {
@@ -221,7 +224,9 @@ export async function updateOrgPostFields(
     pinned: existing.pinned === true,
     published_at: existing.published_at || null,
     expires_at: existing.expires_at || null,
-    link_url: existing.link_url || null
+    link_url: existing.link_url || null,
+    // Befintliga bilagor följer med orörda — `media` är inte ett agent-fält.
+    media: coerceOrgPostMedia(existing.media)
   };
   for (const f of fields) merged[f] = changes[f];
   if (merged.kind !== undefined && !isOrgPostKind(merged.kind)) {

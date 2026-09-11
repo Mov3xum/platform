@@ -168,7 +168,13 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     pinned: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     published_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     expires_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
-    link_url: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } }
+    link_url: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    // Bilder/film/dokument laddas upp av en människa i UI:t (§ 37.6); agenten
+    // kan inte ladda upp filer och får inte peka om bilagor.
+    media: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Media på inlägg laddas upp av en människa på startsidan.' }
+    }
   }
 };
 
