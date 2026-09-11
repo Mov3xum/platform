@@ -640,15 +640,51 @@ motivering, aldrig som fri URL.
 - Hämtade källor + `fetched_at` loggas i `tool_runs.input.web_sources`
   (krav från EU AI Act art. 13 — transparens om underlag).
 
-**Dashboardchatt (`/idag`).** Webbkälle-toggeln i dashboardchatten
-hämtar EU-whitelisten ovan (default `breakit`, `sifted`, `vinnova`) via
-samma cache/SSRF-skydd — Wikipedia (US/Wikimedia) används **inte** längre
-(bröt mot EU-suveränitetspolicyn). När en agent väljs i chatten hämtas
-dessutom agentens egna `web_sources` och dess `prompt_template` renderas
-(mot portföljkontext för `ai_system_wide`-agenter; `{{startup.*}}` blir
-tomt för per-bolag-agenter som istället låter modellen hämta detaljer via
-sina query-verktyg). Samma EU-suveränitets- och transparensgarantier
-gäller alltså som i `/toolbox`.
+**Dashboardchatt (`/chatt`) — "Webbkällor" = riktig internetsökning
+(2026-09).** Toggeln gjorde tidigare INGEN webbsökning: den klistrade bara in
+rubriker från tre RSS-flöden i systemprompten, så "hur många startups finns i
+Sverige?" gav "jag har inte tillgång till nationell statistik". Nu exponerar
+toggeln verktyget **`web_search`** i agent-loopen (`lib/ai/tools.ts` →
+`lib/ai/web-search.ts`): ett isolerat `/v1/conversations`-anrop med Mistrals
+inbyggda `web_search`-connector (Mistral AI, FR/EU — samma leverantör och
+DPA, ingen ny tredjepart; `callMistralConversation` returnerar nu även
+`references`, tolkade av den rena, enhetstestade `web-search-parse.ts`).
+Eftersom connectorn bara finns i conversations-API:t — inte i
+chat.completions som loopen kör — körs sökningen som ett function-verktyg,
+så modellen kan **kombinera internet med databasen/kunskapsbasen i samma
+resonemang** (`WEB_SEARCH_GUIDANCE` i `guidance.ts`; när toggeln är av
+injiceras `WEB_SEARCH_OFF_HINT` så modellen pekar på knappen i stället för
+att bara säga "jag har inte tillgång").
+- **Dataflöde/GDPR § 5:** den sanerade sökfrågan är det ENDA som lämnar
+  plattformen (`sanitizeWebQuery`: personnummer maskas, 300 tecken); ingen
+  chatt-historik och ingen bolagskontext skickas med sub-anropet, och
+  guidningen förbjuder intern data/PII i `query`. Hämtat webbinnehåll
+  behandlas som DATA, inte instruktioner (§ 9.3, även för webbsidor).
+- **Transparens (art. 13):** hämtade källor (titel + URL, bara http(s))
+  persisteras som `ToolRunMessage.sources` (`WebSearchSourceRef` i
+  `@platform/shared`) och visas som chips "Källor från webben" under svaret
+  (`DashboardChat`); steg-etiketten "Söker på internet" är PII-fri (§ 17.8).
+  `safe-html.ts` renderar nu http(s)-länkar (`[text](url)` och nakna URL:er)
+  som `<a rel="noopener noreferrer">` — andra protokoll blir aldrig länkar
+  (enhetstestat i `safe-html-links.test.ts`).
+- **Opt-in per tur:** verktyget finns bara när användaren slagit på toggeln.
+  Sökmodell: `mistral-medium-latest` med fallback till Large vid 429/5xx;
+  `MISTRAL_WEB_SEARCH_TOOL=web_search_premium` (Coolify) byter till
+  premium-connectorn. Tokens loggas i `ai_usage_events` (surface
+  `dashboard_chat`) och räknas mot månadstaket (§ 9.6). **Känd begränsning:**
+  Mistral debiterar dessutom en fast avgift per sökanrop som inte kan
+  uttryckas i tokens — `cost_estimate_usd` underskattar därför sökturer.
+- **Riskklass (art. 11): begränsad** — publik informationssökning på
+  personalens uttryckliga initiativ, människa-i-loopen, ingen profilering.
+- RSS-blocket (default `breakit`, `sifted`, `vinnova`, samma cache/SSRF-
+  skydd) injiceras fortfarande som billig omvärldskontext när toggeln är på.
+  Wikipedia (US/Wikimedia) används **inte** (EU-suveränitet).
+
+När en agent väljs i chatten hämtas dessutom agentens egna `web_sources`
+och dess `prompt_template` renderas (mot portföljkontext för
+`ai_system_wide`-agenter; `{{startup.*}}` blir tomt för per-bolag-agenter
+som istället låter modellen hämta detaljer via sina query-verktyg). Samma
+EU-suveränitets- och transparensgarantier gäller alltså som i `/toolbox`.
 
 ### 9.9 Chattläge, modellval och bilagor
 
@@ -886,6 +922,7 @@ omsättning.
 | `ai_industry_pulse` | begränsad | Aggregerar publika nyheter, ingen profilering |
 | `ai_funding_radar` | begränsad | Matchar utlysningar mot bolagsfas, vägledande |
 | `ai_portfolio_risk` | begränsad | Bara whitelistade fält, rankar bolag — ej personer |
+| `web_search` (chatt-verktyg, § 9.8) | begränsad | Internetsökning via Mistral Web Search (EU) på personalens opt-in; bara sanerad sökfråga lämnar plattformen; källor visas |
 | `edu_irl_levels` | minimal | Generellt utbildningsmaterial |
 | `template_pitch_deck` | n/a | Statisk mall, ingen AI-inferens |
 

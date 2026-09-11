@@ -364,10 +364,23 @@ export interface ApprovalRequestRef {
   summary: string;
 }
 
+// En webbkälla som chattens `web_search`-verktyg (Mistral Web Search, EU)
+// hämtade under en tur. Persisteras på assistant-meddelandet så att källorna
+// visas under svaret även när tråden öppnas igen (EU AI Act art. 13 —
+// transparens om underlag). Innehåller bara publik metadata (titel + URL).
+export interface WebSearchSourceRef {
+  title: string;
+  url: string;
+  /** Leverantörens källetikett (t.ex. domän) — valfri. */
+  source?: string;
+}
+
 export interface ToolRunMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   attachments?: ToolRunAttachmentRef[];
+  // Webbkällor som agenten hämtade via `web_search` för detta (assistant-)turn.
+  sources?: WebSearchSourceRef[];
   // Agent-genererade dokument knutna till detta (assistant-)turn.
   generated_files?: GeneratedFileRef[];
   // Inline-visualiseringar (diagram/nyckeltal) knutna till detta (assistant-)turn.

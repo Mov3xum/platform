@@ -95,7 +95,7 @@ function renderInline(raw: string, c: InlineClasses): string {
   //    måste vara säker — annars visas bara texten.
   s = s.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_, text: string, href: string) => {
     const inner = emphasis(text, c);
-    return isSafeHref(href) ? stash(anchor(href, inner, c.a)) : inner;
+    return isSafeHref(href) ? stash(anchor(href, inner, c.a)) : `[${inner}](${href})`;
   });
 
   s = emphasis(s, c);
@@ -103,7 +103,12 @@ function renderInline(raw: string, c: InlineClasses): string {
   // 3. Automatisk länkning av bara https-adresser (aldrig inuti redan
   //    stashade länkar — de är tokens nu). Avslutande skiljetecken lämnas utanför.
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s<]+?)([.,;:!?)]*)(?=\s|$)/g, (_, pre: string, url: string, tail: string) =>
-    isSafeHref(url) ? `${pre}${stash(anchor(url, url, c.a))}${tail}` : `${pre}${url}${tail}`
+    {
+      const entityStart = url.search(/&quot;|&#39;|&lt;|&gt;/);
+      const safePart = entityStart === -1 ? url : url.slice(0, entityStart);
+      const remainder = entityStart === -1 ? '' : url.slice(entityStart);
+      return isSafeHref(safePart) ? `${pre}${stash(anchor(safePart, safePart, c.a))}${remainder}${tail}` : `${pre}${url}${tail}`;
+    }
   );
 
   return s.replace(TOKEN_RE, (_, i: string) => slots[Number(i)] ?? '');
