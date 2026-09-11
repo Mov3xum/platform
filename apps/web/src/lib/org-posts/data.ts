@@ -1,6 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import {
+  coerceOrgPostMedia,
   isOrgPostAudience,
   isOrgPostKind,
   sortOrgPosts,
@@ -34,6 +35,7 @@ interface OrgPostRow {
   published_at?: string;
   expires_at?: string;
   link_url?: string;
+  media?: unknown;
   created: string;
   updated?: string;
   expand?: { author?: { display_name?: string; email?: string } };
@@ -55,6 +57,7 @@ export function rowToOrgPost(r: OrgPostRow): OrgPost {
     published_at: r.published_at || null,
     expires_at: r.expires_at || null,
     link_url: r.link_url || null,
+    media: coerceOrgPostMedia(r.media),
     created: r.created,
     updated: r.updated
   };

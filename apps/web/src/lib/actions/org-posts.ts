@@ -34,6 +34,35 @@ export interface OrgPostActionState {
   ok?: boolean;
   error?: string;
   id?: string;
+  /** Sparat, men med ett förbehåll (t.ex. bilagor som schemat inte kunde ta emot). */
+  warning?: string;
+}
+
+const MEDIA_SCHEMA_WARNING =
+  'Inlägget sparades men bilagorna kunde inte lagras — PocketBase saknar fältet org_posts.media (kör migration 1700000147).';
+
+/**
+ * PB släpper okända fält tyst (§ 24.4/§ 30.4-invarianten). Skickade vi media
+ * läser vi tillbaka posten och säger ifrån om fältet saknas i schemat —
+ * aldrig en tyst lyckad no-op.
+ */
+async function mediaPersisted(pb: PocketBase, id: string, expected: number): Promise<boolean> {
+  if (expected === 0) return true;
+  const read = async (client: PocketBase) => {
+    const row = await client.collection(ORG_POSTS_COLLECTION).getOne<{ media?: unknown }>(id, { fields: 'id,media' });
+    return row.media !== undefined && row.media !== null;
+  };
+  try {
+    return await read(pb);
+  } catch {
+    const su = await superuser();
+    if (!su) return true; // kan inte verifiera — anta ok, ingen falsk varning
+    try {
+      return await read(su);
+    } catch {
+      return true;
+    }
+  }
 }
 
 function revalidate() {
@@ -103,7 +132,9 @@ function toPayload(value: OrgPostInput): Record<string, unknown> {
     pinned: value.pinned,
     published_at: value.published_at ?? '',
     expires_at: value.expires_at ?? '',
-    link_url: value.link_url ?? ''
+    link_url: value.link_url ?? '',
+    // Bara validerade org_post_media-referenser (validateOrgPostInput) — aldrig fria URL:er.
+    media: value.media
   };
 }
 
@@ -144,11 +175,13 @@ export async function createOrgPostAction(
       title: v.value.title,
       kind: v.value.kind,
       audience: v.value.audience,
-      pinned: v.value.pinned
+      pinned: v.value.pinned,
+      media_count: v.value.media.length
     }
   });
   revalidate();
-  return { ok: true, id: created.id };
+  const persisted = await mediaPersisted(pb, created.id, v.value.media.length);
+  return { ok: true, id: created.id, warning: persisted ? undefined : MEDIA_SCHEMA_WARNING };
 }
 
 export async function updateOrgPostAction(
@@ -189,10 +222,16 @@ export async function updateOrgPostAction(
     collection: ORG_POSTS_COLLECTION,
     record_id: id,
     before_value: { title: existing.title },
-    after_value: { title: v.value.title, kind: v.value.kind, audience: v.value.audience }
+    after_value: {
+      title: v.value.title,
+      kind: v.value.kind,
+      audience: v.value.audience,
+      media_count: v.value.media.length
+    }
   });
   revalidate();
-  return { ok: true, id };
+  const persisted = await mediaPersisted(pb, id, v.value.media.length);
+  return { ok: true, id, warning: persisted ? undefined : MEDIA_SCHEMA_WARNING };
 }
 
 export async function setOrgPostPinnedAction(id: string, pinned: boolean): Promise<OrgPostActionState> {

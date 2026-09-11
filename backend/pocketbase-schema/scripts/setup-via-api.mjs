@@ -3516,6 +3516,48 @@ await ensureCollection({
 await patchCollection('org_posts', [], {
   kind: { values: ['news', 'notice', 'instruction', 'celebration', 'training'] }
 });
+// Migration 1700000147: org_post_media (bilder/film/dokument på anslagstavlan,
+// § 37.6) + org_posts.media (json-lista med fil-referenser). Samma mönster som
+// workshop_media: riktiga PB-filer, tokenlös publik URL, roll-lös createRule.
+await ensureCollection({
+  id: 'org_post_media_collection',
+  name: 'org_post_media',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'uploaded_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    // MÅSTE spegla ORG_POST_MEDIA_KINDS / ORG_POST_MEDIA_MIMES i packages/shared/src/org-posts.ts.
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['image', 'video', 'file'] },
+    {
+      name: 'file',
+      type: 'file',
+      required: true,
+      maxSelect: 1,
+      maxSize: 209715200,
+      mimeTypes: [
+        'image/png', 'image/jpeg', 'image/webp', 'image/gif',
+        'video/mp4', 'video/webm', 'video/quicktime',
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      ],
+      thumbs: ['600x0', '1200x0']
+    },
+    { name: 'name', type: 'text', required: false, max: 200 },
+    { name: 'mime', type: 'text', required: false, max: 150 },
+    { name: 'size_bytes', type: 'number', required: false, min: 0 }
+  ],
+  indexes: ['CREATE INDEX idx_org_post_media_tenant ON org_post_media (tenant)'],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
+});
+await patchCollection('org_posts', [{ name: 'media', type: 'json', required: false, maxSize: 20000 }]);
 
 // Backfill: en tidigare körning hann skapa chat_threads/deep_jobs UTAN
 // created/updated (REST API:t auto-lägger dem inte). ensureCollection
@@ -3836,7 +3878,8 @@ const FORCE_CREATE_RULES = {
   annual_wheel_categories: `${ANY_AUTH} && @request.auth.tenant != ""`,
   // dashboardens anslagstavla (§ 37, migration 1700000144) — roll-enforcement i
   // server-actionen.
-  org_posts: `${ANY_AUTH} && @request.auth.tenant != ""`
+  org_posts: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  org_post_media: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
 async function enforceCreateRules(passLabel) {

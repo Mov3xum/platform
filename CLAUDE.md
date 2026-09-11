@@ -4960,6 +4960,12 @@ blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdn
 | `apps/web/src/components/home/HomeTimeline.tsx` | 14-dagars tidslinje (dagslinjal + band i körfält) |
 | `apps/web/src/components/home/CompanyNews.tsx` | Bolagsnytt som vertikal tidslinje |
 | `apps/web/src/components/home/OrgPostList.tsx` | Inläggslistan (client): toppnyhet + notiser i spalter / numrerad handbok; redigerare, fäst/redigera/ta bort — används i alla tre flikarna (`kinds` begränsar typvalet per flik) |
+| `apps/web/src/components/home/PostComposer.tsx` | Redigeraren (client, § 37.6): verktygsrad, kortkommandon, emoji-väljare, media-uppladdning (knapp/dra-och-släpp/klistra in), förhandsgranskning |
+| `apps/web/src/components/home/EmojiPicker.tsx` + `lib/emoji/data.ts` + `lib/emoji-search.ts` | Fullt emoji-paket (genererat lokalt, ingen CDN), sök sv/en, hudton, senast använda |
+| `apps/web/src/components/home/PostMedia.tsx` | Bildgalleri + lightbox, film inline, dokument-chips — delas av inläggsvyn och förhandsgranskningen |
+| `apps/web/src/lib/markdown-edit.ts` (+ `.test.ts`) | Ren textmanipulation för verktygsraden (omslut, radprefix, länk, fortsätt lista) |
+| `apps/web/src/app/api/hem/media/route.ts` | Upload-route (staff-only) → `org_post_media`, returnerar validerad `OrgPostMedia` |
+| `backend/pocketbase-schema/migrations/1700000147_create_org_post_media.js` | Collection `org_post_media` + `org_posts.media` (json) |
 | `apps/web/src/components/home/HomeBoardTabs.tsx` | Avdelningsrubrikerna Anslagstavla · Så gör vi · Internutbildningar (client, URL-synk `?flik=`; slug-logiken i `@platform/shared`) |
 | `apps/web/src/components/home/PlatformIntro.tsx` | Hårdkodad plattformsintro (statisk, native `<details>`) under "Så gör vi" |
 | `apps/web/src/components/home/OmvarldFeed.tsx` | Omvärldsflödet (client) som tidslinjelista i samma språk som Bolagsnytt: källfilter + statusrad (live/utgången cache/nere) |
@@ -4979,7 +4985,8 @@ som union i **migration 1700000145** och speglat i `setup-via-api.mjs` via
 `patchCollection`), `audience` (`staff | all`), `pinned`,
 `published_at` (tomt = direkt; framtid = schemalagt), `expires_at` (tomt =
 utgår aldrig), `link_url` (intern sökväg `/…` eller https — validerat i
-`isSafeOrgPostLink`, aldrig `javascript:`/`data:`), autodate explicit
+`isSafeOrgPostLink`, aldrig `javascript:`/`data:`), `media` (json,
+`OrgPostMedia[]` — § 37.6, migration **1700000147**), autodate explicit
 (§ 28.5). Speglad i `setup-via-api.mjs` (collection-def + `FORCE_CREATE_RULES`).
 
 **Målgrupp.** `staff` (default) syns för Movexum-personal + observer; `all`
@@ -5085,6 +5092,72 @@ finansiärer/utlysningar) — vill man bredda/smalna läggs källan till i
   `audience=all`-inlägg via RLS, och aldrig bolagsnytt/omvärld/agenda på `/hem`.
 
 ---
+
+### 37.6 Anslagstavlans redigerare — emoji, formatering & media
+
+Inläggen skrivs i `PostComposer` (client) som ersätter den tidigare rena
+textrutan. Lagringen är fortfarande **markdown i `org_posts.body`** (ingen
+HTML lagras, ingen WYSIWYG-DOM) — det som ändrats är redigeringsytan och
+renderarens delmängd:
+
+- **Verktygsrad + kortkommandon:** fet (Ctrl+B), kursiv (Ctrl+I), kod
+  (Ctrl+E), rubrik, punkt-/numrerad lista (Ctrl+Shift+8/7), checklista,
+  citat, länk (Ctrl+K), emoji (Ctrl+.), media. Enter i en lista fortsätter
+  listan (nästa nummer / ny checkruta), Enter på tom listrad avslutar den;
+  Ctrl+Enter publicerar. All textmanipulation är ren och enhetstestad i
+  `lib/markdown-edit.ts` (komponenten applicerar bara `{ value, start, end }`).
+- **Markdown-delmängden (`lib/safe-html.ts`)** är utökad — gäller ALLA ytor
+  som renderar via helpern (chatten, anslagstavlan): `*kursiv*`/`_kursiv_`,
+  `~~struken~~`, `` `kod` ``, `[text](url)`, automatiskt länkade
+  https-adresser, `> citat`, `---`, `- [ ]`/`- [x]`. **XSS-gränsen är
+  oförändrad:** allt escapas först; en länk släpps bara igenom som `<a href>`
+  om adressen är en intern sökväg (`/…`, inte `//…`) eller http(s) —
+  `javascript:`/`data:` visas som ren text (`isSafeHref`, låst i
+  `safe-html.test.ts`). Externa länkar får `rel="noopener noreferrer"`.
+- **Fullt emoji-paket:** `lib/emoji/data.ts` är GENERERAD av
+  `apps/web/scripts/generate-emoji-data.py` — en handkurerad lista i nio
+  kategorier (1 400+ emoji, inkl. flaggor) vars namn slås upp lokalt via
+  Pythons `unicodedata`; **ingen extern datakälla, ingen CDN** (§ 1). Sök på
+  engelska Unicode-namn och svenska sökord (`lib/emoji-search.ts`, ren +
+  enhetstestad: "hjärta" → ❤️ före 💔 via huvudord-rankning), hudton
+  (Fitzpatrick-modifierare bara på `SKIN_TONE_BASES`), "senast använda" i
+  `localStorage` (`movexum-emoji-recent`, bekvämlighet — ingen datakälla).
+  Katalogen (~40 KB) laddas lazy första gången väljaren öppnas.
+- **Media (bilder, film, dokument):** filer laddas upp DIREKT vid val (knapp,
+  dra-och-släpp på hela redigeraren, eller klistra in en bild) via
+  route-handlern `/api/hem/media` (§ 18.2-mönstret: inte bunden av
+  `serverActions.bodySizeLimit`; XHR med progress) till kollektionen
+  **`org_post_media`** (migration 1700000147; riktiga PB-filer, tokenlös publik
+  URL som `workshop_media`). Inlägget lagrar bara metadata i `org_posts.media`
+  (`OrgPostMedia[]`: id, url, kind, name, mime, size_bytes, ev. width/height —
+  max 8/inlägg). **`validateOrgPostInput` accepterar BARA URL:er till
+  org_post_media-filer** (`isOrgPostMediaUrl`, id måste matcha) — aldrig fria
+  bildlänkar (inget hotlink, ingen tracking-pixel). Mime/storlek valideras
+  med samma delade `validateOrgPostMediaFile` i klient OCH route (bild 15 MB,
+  film 200 MB, dokument PDF/Word/PowerPoint/Excel 50 MB; ändelse-fallback när
+  webbläsaren inte rapporterar mime). Visning via `PostMedia`: galleri
+  (1/2/3/4+ med "+N"), lightbox med piltangenter, `<video controls>`,
+  dokument-chips med typ + storlek. Hopfällda notiser visar en kompakt
+  tumnagelrad.
+- **Förhandsgranskning** renderar med exakt samma `chatMarkdownToHtml` +
+  `PostMedia` som inläggsvyn, så det man ser är det som publiceras.
+- **Schema-drift (§ 24.4/§ 30.4-invarianten):** PB släpper okända fält tyst.
+  Server-actionen läser tillbaka posten när media skickats och svarar med en
+  `warning` (visas som gul banner) om `org_posts.media` saknas i schemat —
+  aldrig en tyst lyckad no-op. Speglat i `setup-via-api.mjs`
+  (`org_post_media` + `patchCollection('org_posts', media)`).
+- **RBAC/GDPR:** upload-routen kräver `ORG_POST_AUTHOR_ROLES` (createRule är
+  roll-lös per § 21.3), tenant stämplas server-side, rate-limit 60/10 min per
+  användare, superuser-fallback bara vid PB v0.23.4:s tysta regel-nekande.
+  `org_post_media` list/view = auth + tenant (samma klass som `workshop_media`;
+  filen är ändå publik via URL — ladda inte upp personuppgifter, UI:t är
+  verksamhetsmaterial). `cascadeDelete` på tenant. Chatt-agenten kan **inte**
+  sätta `media` (`writable-fields.ts`: `agent: deny` — den kan inte ladda upp
+  filer och ska inte peka om bilagor); befintliga bilagor följer med orörda
+  när agenten uppdaterar text via `update_org_post`.
+- **Riskklass (EU AI Act):** n/a — ren redigerings-/presentationsfunktion,
+  ingen AI-inferens. Emoji-/mediadata når aldrig AI-kontexten annat än som
+  brödtext i `org_posts.body` (redan läsbar via `query_collection`, § 37.5).
 
 ## 38. Svensk tid i kalender & events (Europe/Stockholm)
 

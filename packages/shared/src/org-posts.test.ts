@@ -176,3 +176,81 @@ test('flik-slugs och hjälpare: URL ↔ flik ↔ inläggstyp hänger ihop', () =
   assert.equal(homeTabHref('training'), '/hem?flik=internutbildningar');
   assert.equal(homeTabFromSlug(homeTabHref('instruction').split('=')[1]), 'instruction');
 });
+
+// ── Media (§ 37.6) ───────────────────────────────────────────────────────────
+
+import {
+  formatOrgPostMediaSize,
+  isOrgPostMediaUrl,
+  orgPostMediaKindFor,
+  validateOrgPostMedia,
+  validateOrgPostMediaFile
+} from './org-posts';
+
+const MEDIA_URL = 'https://pb.movexum.se/api/files/org_post_media/abc123/bild_x9.png';
+
+test('validateOrgPostMediaFile: slag + tak per typ, ändelse-fallback för mime', () => {
+  assert.deepEqual(validateOrgPostMediaFile({ type: 'image/png', size: 1000 }), { ok: true, kind: 'image', mime: 'image/png' });
+  assert.equal(validateOrgPostMediaFile({ type: '', size: 1000, name: 'film.mov' }).ok, true);
+  assert.equal(orgPostMediaKindFor('application/pdf'), 'file');
+  assert.equal(orgPostMediaKindFor('', 'deck.PPTX'), 'file');
+  assert.equal(orgPostMediaKindFor('text/html'), null);
+  const big = validateOrgPostMediaFile({ type: 'image/jpeg', size: 16 * 1024 * 1024 });
+  assert.equal(big.ok, false);
+  assert.equal(validateOrgPostMediaFile({ type: 'application/x-msdownload', size: 10 }).ok, false);
+  assert.equal(validateOrgPostMediaFile({ type: 'image/png', size: 0 }).ok, false);
+});
+
+test('isOrgPostMediaUrl släpper bara igenom org_post_media-filer (inget hotlink)', () => {
+  assert.equal(isOrgPostMediaUrl(MEDIA_URL), true);
+  assert.equal(isOrgPostMediaUrl(MEDIA_URL, 'abc123'), true);
+  assert.equal(isOrgPostMediaUrl(MEDIA_URL, 'annan'), false);
+  assert.equal(isOrgPostMediaUrl('https://evil.example/tracker.gif'), false);
+  assert.equal(isOrgPostMediaUrl('https://pb.movexum.se/api/files/workshop_media/x/y.png'), false);
+  assert.equal(isOrgPostMediaUrl('javascript:alert(1)'), false);
+  assert.equal(isOrgPostMediaUrl(`${MEDIA_URL}?token=x`), false);
+});
+
+test('validateOrgPostMedia normaliserar, dedupar och cappar listan', () => {
+  const ok = validateOrgPostMedia([
+    { id: 'abc123', url: MEDIA_URL, kind: 'image', name: 'bild.png', mime: 'image/png', size_bytes: '1234', width: 800, height: 600 },
+    { id: 'abc123', url: MEDIA_URL, kind: 'image' }
+  ]);
+  assert.ok(ok.ok);
+  if (!ok.ok) return;
+  assert.equal(ok.value.length, 1);
+  assert.equal(ok.value[0].size_bytes, 1234);
+  assert.equal(ok.value[0].width, 800);
+  assert.equal(validateOrgPostMedia(JSON.stringify(ok.value)).ok, true);
+  assert.deepEqual(validateOrgPostMedia(null), { ok: true, value: [] });
+  assert.equal(validateOrgPostMedia([{ id: 'abc123', url: MEDIA_URL, kind: 'audio' }]).ok, false);
+  assert.equal(validateOrgPostMedia([{ id: 'x', url: 'https://evil.example/a.png', kind: 'image' }]).ok, false);
+  const many = Array.from({ length: 9 }, (_, i) => ({
+    id: `id${i}`,
+    url: `https://pb.movexum.se/api/files/org_post_media/id${i}/f.png`,
+    kind: 'image'
+  }));
+  assert.equal(validateOrgPostMedia(many).ok, false);
+});
+
+test('validateOrgPostInput tar med media och avvisar ogiltig media', () => {
+  const ok = validateOrgPostInput({ title: 'Med bild', media: [{ id: 'abc123', url: MEDIA_URL, kind: 'image' }] });
+  assert.ok(ok.ok);
+  if (ok.ok) assert.equal(ok.value.media.length, 1);
+  const bad = validateOrgPostInput({ title: 'x', media: [{ id: 'abc123', url: 'https://evil.example/x.png', kind: 'image' }] });
+  assert.equal(bad.ok, false);
+  const none = validateOrgPostInput({ title: 'x' });
+  assert.ok(none.ok);
+  if (none.ok) assert.deepEqual(none.value.media, []);
+});
+
+test('orgPostExcerpt strippar citat, avdelare, checkrutor, kursiv och länkar', () => {
+  assert.equal(orgPostExcerpt('> Citat\n---\n- [x] klart *nu* ~~inte~~ [länk](https://a.se) 🎉'), 'Citat klart nu inte länk 🎉');
+});
+
+test('formatOrgPostMediaSize', () => {
+  assert.equal(formatOrgPostMediaSize(512), '512 B');
+  assert.equal(formatOrgPostMediaSize(2048), '2 kB');
+  assert.equal(formatOrgPostMediaSize(2.5 * 1024 * 1024), '2,5 MB');
+  assert.equal(formatOrgPostMediaSize(0), '');
+});
