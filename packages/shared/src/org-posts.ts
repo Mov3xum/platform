@@ -1,4 +1,4 @@
-// Dashboard — organisationens anslagstavla (CLAUDE.md § 37).
+// Hemmaplan — organisationens anslagstavla (CLAUDE.md § 37).
 //
 // Ren, testbar domänlogik för inlägg på startsidan: inläggstyper, validering,
 // synlighetsregler (publicerat / utgånget / målgrupp) och sortering (fästa
@@ -30,7 +30,7 @@ export const ORG_POST_KIND_HINTS: Record<OrgPostKind, string> = {
 };
 
 /**
- * Inläggstyper som visas under respektive flik på dashboarden. `board` =
+ * Inläggstyper som visas under respektive flik på Hemmaplan. `board` =
  * anslagstavlan (nyheter/info/firanden), `instruction` = "Så gör vi",
  * `training` = "Internutbildningar". En typ hör alltid till exakt en flik.
  */
@@ -42,23 +42,23 @@ export function orgPostTabFor(kind: OrgPostKind): OrgPostTab {
   return 'board';
 }
 
-/** Query-parametern som pekar ut fliken på Dashboard (`/hem?flik=…`). */
-export const HOME_TAB_PARAM = 'flik';
+/** Query-parametern som pekar ut fliken på Hemmaplan (`/hem?flik=…`). */
+export const ORG_POST_TAB_PARAM = 'flik';
 
 /** URL-slug per flik — delas av server (page/agent-log) och klient (flikarna). */
-export const HOME_TAB_SLUGS: Record<OrgPostTab, string> = {
+export const ORG_POST_TAB_SLUGS: Record<OrgPostTab, string> = {
   board: 'anslagstavla',
   instruction: 'sa-gor-vi',
   training: 'internutbildningar'
 };
 
-/** Bakåtkompatibla alias för äldre anropare på org-post-* namnen. */
-export const ORG_POST_TAB_PARAM = HOME_TAB_PARAM;
-export const ORG_POST_TAB_SLUGS = HOME_TAB_SLUGS;
+/** Bakåtkompatibla alias för äldre anropare på home-* namnen. */
+export const HOME_TAB_PARAM = ORG_POST_TAB_PARAM;
+export const HOME_TAB_SLUGS = ORG_POST_TAB_SLUGS;
 
 /** Slug → flik; okänd/saknad slug ger anslagstavlan. Ren, får anropas från servern. */
 export function homeTabFromSlug(slug: string | undefined | null): OrgPostTab {
-  const hit = (Object.keys(HOME_TAB_SLUGS) as OrgPostTab[]).find((k) => HOME_TAB_SLUGS[k] === slug);
+  const hit = (Object.keys(ORG_POST_TAB_SLUGS) as OrgPostTab[]).find((k) => ORG_POST_TAB_SLUGS[k] === slug);
   return hit ?? 'board';
 }
 
@@ -66,9 +66,9 @@ export function orgPostTabFromSlug(slug: string | undefined | null): OrgPostTab 
   return homeTabFromSlug(slug);
 }
 
-/** Intern länk till Dashboard med rätt flik öppen (anslagstavlan = bara `/hem`). */
+/** Intern länk till Hemmaplan med rätt flik öppen (anslagstavlan = bara `/hem`). */
 export function homeTabHref(tab: OrgPostTab): string {
-  return tab === 'board' ? '/hem' : `/hem?${HOME_TAB_PARAM}=${HOME_TAB_SLUGS[tab]}`;
+  return tab === 'board' ? '/hem' : `/hem?${ORG_POST_TAB_PARAM}=${ORG_POST_TAB_SLUGS[tab]}`;
 }
 
 export function orgPostHomePath(kind: OrgPostKind): string {

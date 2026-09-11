@@ -258,7 +258,7 @@ export function HomeFrontPage({
             <div className="relative flex items-center justify-between border-b border-foreground pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-foreground">
               <span>{dateLine.split(' · ')[0]}</span>
               <span className="mx-tnum hidden text-foreground-subtle sm:inline">{dateLine.split(' · ')[1]}</span>
-              <span className="relative bg-canvas pl-2 text-foreground-subtle">Dashboard</span>
+              <span className="relative bg-canvas pl-2 text-foreground-subtle">Hemmaplan</span>
             </div>
             <div className="relative max-w-[46rem] pt-6">
               <h1 className="font-heading text-[28px] font-semibold leading-[1.05] tracking-tight text-foreground md:text-[34px]">

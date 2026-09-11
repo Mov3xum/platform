@@ -63,7 +63,7 @@ export default async function NewMissionPage() {
   return (
     <div className="mx-view-pad mx-narrow">
       <PageHead
-        crumb="Dashboard / Projekt & uppdrag / Nytt"
+        crumb="Hemmaplan / Projekt & uppdrag / Nytt"
         title="Nytt projekt"
         subtitle="Bjud in deltagare, koppla bolag och starta samarbetet. Stegen i flödet skapas utifrån typ."
         actions={

@@ -24,7 +24,7 @@ const INTRO: IntroSection[] = [
     title: 'Så hänger plattformen ihop',
     lead: 'Movexum OS är vårt gemensamma arbetsrum: allt om bolagen, programmet och verksamheten på ett ställe — EU-suveränt, utan externa molntjänster utanför Europa.',
     points: [
-      'Dashboard är startsidan: anslagstavla, rutiner, internutbildningar, veckans agenda, bolagsnytt och omvärld.',
+      'Hemmaplan är startsidan: anslagstavla, rutiner, internutbildningar, veckans agenda, bolagsnytt och omvärld.',
       'Sidomenyn följer din roll och dina moduler — saknar du en sida, be en admin slå på den under Inställningar → Användare.',
       'Allt som skrivs i plattformen loggas i aktivitetsloggen med vem, vad och när.'
     ]

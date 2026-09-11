@@ -26,7 +26,7 @@ export interface OmvarldSourceStatus {
   error?: string;
   count: number;
   /** SE/EU — residency-transparens. */
-  country: string;
+  country: 'SE' | 'EU';
   /** Vem som står bakom källan och vad den bevakar. */
   description: string;
   covers: string;
