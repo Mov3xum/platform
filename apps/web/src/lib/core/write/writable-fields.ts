@@ -158,7 +158,7 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
       agent: { kind: 'deny', reason: 'Aktivering av en workshop görs av en människa i /education.' }
     }
   },
-  // Hemmaplans inlägg (§ 37). Alla fält får ändras av författar-kretsen; agenten
+  // dashboardens inlägg (§ 37). Alla fält får ändras av författar-kretsen; agenten
   // ärver rollen. Publiceringsfälten är ofarliga här (inlägget är internt).
   org_posts: {
     title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
@@ -216,7 +216,7 @@ const CREATE_POLICIES: Record<
     user: { kind: 'roles', roles: EVENT_MANAGE },
     agent: { kind: 'allow' }
   },
-  // Hemmaplans inlägg (§ 37): anslagstavla, "Så gör vi" och internutbildningar.
+  // dashboardens inlägg (§ 37): anslagstavla, "Så gör vi" och internutbildningar.
   // Samma krets som ORG_POST_AUTHOR_ROLES; ändring kräver dessutom
   // canEditOrgPost (författare/moderator) i skrivlagret.
   org_posts: {

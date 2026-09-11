@@ -25,6 +25,11 @@ export interface OmvarldSourceStatus {
   fetched_at: string;
   error?: string;
   count: number;
+  /** SE/EU — residency-transparens. */
+  country: string;
+  /** Vem som står bakom källan och vad den bevakar. */
+  description: string;
+  covers: string;
 }
 
 export function OmvarldFeed({
@@ -65,8 +70,8 @@ export function OmvarldFeed({
               type="button"
               disabled={!s.ok || s.count === 0}
               onClick={() => setFilter((f) => (f === s.key ? null : s.key))}
-              title={s.ok ? `${s.count} poster` : s.error ? `Nere: ${s.error}` : 'Nere'}
-              className={`inline-flex items-center gap-1 font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
+              title={s.ok ? `${s.covers || s.label} · ${s.count} poster` : s.error ? `Nere: ${s.error}` : 'Nere'}
+              className={`inline-flex items-center gap-1.5 font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
                 filter === s.key
                   ? 'text-foreground underline decoration-brand decoration-2 underline-offset-[5px]'
                   : 'text-foreground-subtle hover:text-foreground'
@@ -120,7 +125,39 @@ export function OmvarldFeed({
         </ol>
       )}
 
-      <p className="mt-3 text-[10.5px] leading-relaxed text-foreground-subtle">
+      <details className="group mt-3 rounded-xl border border-default">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-[11.5px] font-medium text-foreground-muted transition hover:text-foreground [&::-webkit-details-marker]:hidden">
+          <Icon name="globe" size={12} className="shrink-0 text-brand" />
+          Om källorna
+          <span className="text-foreground-subtle">· {sources.length} EU-baserade flöden</span>
+          <Icon name="chevdown" size={11} className="ml-auto shrink-0 text-foreground-subtle transition group-open:rotate-180" />
+        </summary>
+        <ul className="divide-y divide-default border-t border-default">
+          {sources.map((s) => (
+            <li key={s.key} className="px-3 py-2.5">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span
+                  aria-hidden
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    !s.ok ? 'bg-movexum-orange' : s.stale ? 'bg-movexum-gul' : 'bg-movexum-gron'
+                  }`}
+                />
+                <span className="text-[12.5px] font-semibold text-foreground">{s.label}</span>
+                <span className="rounded-md bg-canvas-muted px-1.5 py-px text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
+                  {s.country}
+                </span>
+                <span className="text-[11px] text-foreground-subtle">{s.covers}</span>
+              </div>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-foreground-muted">{s.description}</p>
+              {!s.ok && s.error ? (
+                <p className="mt-1 text-[11px] text-movexum-morkorange">Svarar inte just nu: {s.error}</p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </details>
+
+      <p className="mt-3 text-[11px] leading-relaxed text-foreground-subtle">
         {okSources.length > 0 ? (
           <>
             Live från {okSources.map((s) => s.label).join(', ')}

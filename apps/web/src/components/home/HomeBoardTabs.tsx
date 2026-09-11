@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { HOME_TAB_PARAM, HOME_TAB_SLUGS, type OrgPostTab } from '@platform/shared';
 
 /**
- * Flikarna på Hemmaplan (CLAUDE.md § 37): Anslagstavla · Så gör vi ·
+ * Flikarna på Dashboard (CLAUDE.md § 37): Anslagstavla · Så gör vi ·
  * Internutbildningar — som redaktionella avdelningsrubriker (stora Sora-ord i
  * rad, det aktiva i ink med ett kort brand-streck under, övriga tonade) i
  * stället för generiska flikar. Ren UI-kurering — innehållet är redan
@@ -16,8 +16,7 @@ import { HOME_TAB_PARAM, HOME_TAB_SLUGS, type OrgPostTab } from '@platform/share
 // modul). Den låg tidigare här — men en funktion exporterad ur en
 // 'use client'-modul får inte anropas från en serverkomponent (page.tsx
 // gjorde det → "Attempted to call homeTabFromSlug() from the server",
-// hela Hemmaplan föll i felvyn "Något gick fel", staging 2026-09).
-
+// hela Dashboard föll i felvyn "Något gick fel", staging 2026-09).
 export interface HomeTabDef {
   id: OrgPostTab;
   label: string;

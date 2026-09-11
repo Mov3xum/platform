@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 /**
- * Håller Hemmaplan färsk utan att användaren laddar om: server-datan
+ * Håller Dashboard färsk utan att användaren laddar om: server-datan
  * (`router.refresh()`) hämtas om med jämna mellanrum och när fliken blir
  * synlig igen efter att ha legat i bakgrunden. Samma mönster som årshjulets
  * presentationsläge (§ 30.5). Ren klient-bekvämlighet — ingen dataväg.

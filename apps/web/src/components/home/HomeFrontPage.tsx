@@ -25,7 +25,7 @@ import {
 } from '@platform/shared';
 
 /**
- * Hemmaplans layout (CLAUDE.md § 37) — ren presentation av redan laddad,
+ * Dashboard-layouten (CLAUDE.md § 37) — ren presentation av redan laddad,
  * RLS-filtrerad data (page.tsx äger all IO). Satt som en redaktionell
  * förstasida i stället för en dashboard: inga kort eller boxar, och samma
  * typskala som chatten (§ 37.1). Nyckeltalen är en boxlös siffer-rad under
@@ -258,7 +258,7 @@ export function HomeFrontPage({
             <div className="relative flex items-center justify-between border-b border-foreground pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-foreground">
               <span>{dateLine.split(' · ')[0]}</span>
               <span className="mx-tnum hidden text-foreground-subtle sm:inline">{dateLine.split(' · ')[1]}</span>
-              <span className="relative bg-canvas pl-2 text-foreground-subtle">Hemmaplan</span>
+              <span className="relative bg-canvas pl-2 text-foreground-subtle">Dashboard</span>
             </div>
             <div className="relative max-w-[46rem] pt-6">
               <h1 className="font-heading text-[28px] font-semibold leading-[1.05] tracking-tight text-foreground md:text-[34px]">

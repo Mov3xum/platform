@@ -233,7 +233,7 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   'och mottaget kapital (`add_startup_kpi`/`add_capital_round`), schemalägga ' +
   'AI-agenter (`schedule_agent`, kräver admin/incubator_lead) och skriva ' +
   'icke-konfidentiella anteckningar på bolagskort (`create_startup_note`), ' +
-  'samt administrera Hemmaplan (startsidan): anslagstavlan, "Så gör vi" och ' +
+  'samt administrera Dashboard (startsidan): anslagstavlan, "Så gör vi" och ' +
   'INTERNUTBILDNINGAR (`create_org_post` med kind=training / ' +
   '`update_org_post` — "lägg upp en internutbildning om GDPR med länk till ' +
   'materialet", "fäst utbildningen om pitchcoaching överst", "låt inlägget ' +

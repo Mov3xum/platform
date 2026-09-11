@@ -65,7 +65,7 @@ export default async function ChattPage() {
       fields: 'id,connector_kind,connector_id,label'
     }),
     // Bolagshändelser + systemlogg i EN kronologisk feed (§ 32) — samma
-    // laddare som Hemmaplan (`/hem`) så de två ytorna aldrig divergerar.
+    // laddare som Dashboard (`/hem`) så de två ytorna aldrig divergerar.
     loadActivityFeed(pb, user.tenant, 60)
   ]);
 

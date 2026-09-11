@@ -39,7 +39,7 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
       .slice(0, 2)
       .toUpperCase() || '??';
 
-  // Ren bolagsmedlem har "Min översikt" som hemvy (staff → Hemmaplan, § 37).
+  // Ren bolagsmedlem har "Min översikt" som hemvy (staff → Dashboard, § 37).
   const homeHref = isPureStartupMember(user.roles) ? '/min-oversikt' : '/hem';
 
   return (
