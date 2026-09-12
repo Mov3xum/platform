@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MEETING_GAP_MARKER,
+  MEETING_TURN_PREFIX,
   MAX_MEETING_SEGMENTS,
   assembleMeetingTranscript,
   formatMeetingClock,
@@ -73,6 +74,65 @@ test('assembleMeetingTranscript prefixar talar-etikett när den finns', () => {
     { index: 1, text: 'Bra — två nya kunder.', speaker: 'Talare 2' }
   ]);
   assert.equal(text, 'Talare 1: Hur går försäljningen? Talare 2: Bra — två nya kunder.');
+});
+
+test('normalizeMeetingSegments läser talarturer och språk, filtrerar tomma turer', () => {
+  const [seg] = normalizeMeetingSegments([
+    {
+      index: 0,
+      text: 'Hur går det? Bra.',
+      language: 'SV',
+      turns: [
+        { speaker: 'S1', text: ' Hur går det? ' },
+        { speaker: 'S2', text: '   ' },
+        { speaker: 'S2', text: 'Bra.' },
+        'skräp',
+        { text: 'utan talare' }
+      ]
+    }
+  ]);
+  assert.equal(seg.language, 'sv');
+  assert.deepEqual(seg.turns, [
+    { speaker: 'S1', text: 'Hur går det?' },
+    { speaker: 'S2', text: 'Bra.' },
+    { speaker: '?', text: 'utan talare' }
+  ]);
+  const [plain] = normalizeMeetingSegments([{ index: 0, text: 'x', turns: [], language: 'not a code' }]);
+  assert.equal(plain.turns, undefined);
+  assert.equal(plain.language, undefined);
+});
+
+test('assembleMeetingTranscript renderar diariserade turer som repliker med talstreck', () => {
+  const text = assembleMeetingTranscript([
+    { index: 0, text: 'Inledning utan turer.' },
+    {
+      index: 1,
+      text: 'Hur går försäljningen? Bra — två nya kunder.',
+      turns: [
+        { speaker: 'S1', text: 'Hur går försäljningen?' },
+        { speaker: 'S2', text: 'Bra — två nya kunder.' }
+      ]
+    },
+    { index: 2, text: 'Avslutning.' }
+  ]);
+  assert.equal(
+    text,
+    [
+      'Inledning utan turer.',
+      `${MEETING_TURN_PREFIX}Hur går försäljningen?`,
+      `${MEETING_TURN_PREFIX}Bra — två nya kunder.`,
+      'Avslutning.'
+    ].join('\n\n')
+  );
+});
+
+test('assembleMeetingTranscript: en enda tur är vanlig text (inga talstreck, inga etiketter)', () => {
+  const text = assembleMeetingTranscript([
+    { index: 0, text: 'Bara en person pratar.', turns: [{ speaker: 'S1', text: 'Bara en person pratar.' }] },
+    { index: 1, text: 'Fortsätter.' }
+  ]);
+  assert.equal(text, 'Bara en person pratar. Fortsätter.');
+  assert.ok(!text.includes('S1'));
 });
 
 test('assembleMeetingTranscript på tom input ger tom sträng', () => {

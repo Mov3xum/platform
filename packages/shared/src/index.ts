@@ -1626,7 +1626,9 @@ export * from './voice';
 export * from './compass-authoring';
 // ─── Mötesläge i chatten (ren möteslogik, enhetstestad, § 34) ────────────────
 export * from './meeting';
+export * from './meeting-segmenter';
 export * from './audio-level';
+export * from './audio-pcm';
 export * from './greeting';
 // ─── Modulåtkomst per användare (allow-lista + rollstandard, enhetstestad) ───
 export * from './module-access';

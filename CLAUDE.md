@@ -4251,8 +4251,10 @@ npm-dependency (§ 10.2).
 4. Routen mäter först klippets ljudnivå (WAV-PCM, `@platform/shared`
    audio-level.ts): ett effektivt tyst klipp svaras "Inspelningen var helt
    tyst" (422) **utan** Voxtral-anrop. Annars skickar `transcribeSpeech`
-   (`lib/ai/voice.ts`) ljudet till Voxtral (`POST /v1/audio/transcriptions`,
-   `language=sv`) och returnerar texten; blir svaret tomt görs ETT omförsök
+   (`lib/ai/voice.ts`) ljudet till transkriberingstjänsten
+   (`POST /v1/audio/transcriptions`, med språkhint `sv` när modellen stödjer
+   det — se "Språkhint & parametertrappa" nedan) plus domänordlistan som
+   kontext-bias, och returnerar texten; blir svaret tomt görs ETT omförsök
    utan språkhint (autodetekt). Token-utfallet loggas i `ai_usage_events`
    (surface `dashboard_chat`, modell `voxtral-*`) — **även för tomma svar**
    (Voxtral debiterar ljudingången; `VoiceError.usage` bär förbrukningen) —
@@ -4269,11 +4271,50 @@ förklaring i tooltip:en**; den döljs aldrig tyst (en osynlig knapp går inte a
 felsöka). Samma sak om webbläsaren saknar `MediaRecorder`.
 
 **Konfiguration:** `MISTRAL_API_KEY` (befintlig) räcker.
-`MISTRAL_VOICE_MODEL` (valfri, default `voxtral-mini-latest`) och
+`MISTRAL_VOICE_MODEL` (valfri, default `voxtral-mini-latest`),
+`MISTRAL_VOICE_LANGUAGE` (valfri, default `sv`; `auto` = inget hint) och
 `MISTRAL_API_BASE_URL` (befintlig) kan överstyra i Coolify — aldrig i kod
 (ISO 27001 A.8.24). Saknas nyckeln felar röstinmatningen **tydligt** (503,
 "röstinmatning är inte konfigurerad") i stället för att tyst göra ingenting
 (SOC 2 availability, § 10.4).
+
+**Språkhint & parametertrappa (incident 2026-09-11).** Mistrals
+transkriberings-endpoint (Voxtral Transcribe 2) validerar `language` mot en
+fast lista — `ar, en, de, es, fr, hi, it, nl, pt, zh, ru, ko, ja` — och svarar
+**400** på `sv`. Klienten skickade alltid `language=sv`, 400 räknades som
+request-fel (aldrig retry) och autodetekt-omförsöket låg bara i tom-svar-
+grenen (422) → VARJE segment föll och både röstknappen och hela mötesläget
+gav tomt transkript ("Got unsupported language `sv`"). Nu kör
+`transcribeSpeech` en **parametertrappa** per provider (ren, enhetstestad
+logik i `lib/ai/voice-transcription.ts`): (1) 400 "unsupported language" →
+hintet släpps och anropet görs om DIREKT (ett 400 avvisas innan ljudet
+bearbetas — ingen kostnad), och avvisningen **minns per provider+modell** i
+processen (`LanguageHintMemory`, 6 h TTL) så efterföljande segment går rätt
+från början; (2) annat 400 med extraparametrar (kontext-bias/diarisering) →
+utan dem; (3) tomt svar med hint → ett omförsök med autodetekt (bokförs);
+(4) 429/5xx/nätverk → backoff-retry, uttömt → **failover till nästa
+provider** (aldrig vid 4xx, samma princip som § 9.2). Svaret bär modellens
+rapporterade `language`; mötespanelen varnar när ett avsnitt tolkats som ett
+annat språk än svenska.
+
+**Kontext-bias ("egen ordlista").** Voxtral tar `context_bias` (lista av
+termer modellen ska föredra), Whisper-servrar tar samma termer som `prompt`.
+Vi skickar den fasta domänordlistan `MEETING_CONTEXT_VOCABULARY` (Movexum,
+Vinnova, Almi, de minimis, IRL-nivå …) och — i mötesläget — bolagets namn
+(whitelistat fält, § 9.3). ALDRIG mötestitel, personnamn eller annan PII
+(GDPR § 5); `buildContextBias` dedupe:ar och cappar (40 termer/60 tecken).
+
+**Självhostad svensk modell (valfri EU-provider, dormant tills env är satt).**
+Voxtral listar inte svenska bland sina officiellt stödda språk; för svensk
+transkribering i klass med dedikerade svenska tjänster kan operatören peka
+en **självhostad, OpenAI-kompatibel** endpoint (speaches / faster-whisper-
+server / whisper.cpp med **KB-Whisper**, Kungliga bibliotekets svensktränade
+Whisper, Apache 2.0) på UpCloud (EU): `MOVEXUM_STT_BASE_URL` (+ valfri
+`MOVEXUM_STT_API_KEY`, `MOVEXUM_STT_MODEL` default `KBLab/kb-whisper-large`,
+`MOVEXUM_STT_LANGUAGE` default `sv`). Den går då FÖRST och Voxtral blir
+fallback vid nätverk/kapacitet (`resolveSpeechProviders`, enhetstestad).
+Ingen ny tredjepart, inget ljud lämnar EU, samma dataflöde (§ 10.2); usage
+loggas med providerns modellnamn (0 tokens → 0 kostnad).
 
 ### 31.3 Nya skrivverktyg (Startupkompassen + workshops)
 
@@ -4351,10 +4392,12 @@ INNAN fallbacken används.
   utan granskning skulle ta bort människa-i-loopen precis där agenten kan
   skriva i databasen.
 - Talsyntes (agenten som svarar med röst) är inte i scope.
-- Språket är svenska som default (`language=sv`) — det höjer träffsäkerheten
-  på domänord markant; ger hinten tom text görs ett omförsök med autodetekt
-  (`transcribeSpeech`). Ett språkval per användare kan läggas till senare utan
-  brytande ändring.
+- Språkhintet är svenska som default (`MISTRAL_VOICE_LANGUAGE`, § 31.2) men
+  Voxtral Transcribe 2 stödjer det INTE — hintet släpps då automatiskt och
+  modellen autodetekterar (svenskan transkriberas då utanför modellens
+  officiellt stödda språk; kvaliteten kan variera). Den svensktränade
+  självhostade providern (§ 31.2) är vägen till dedikerad svensk kvalitet.
+  Ett språkval per användare kan läggas till senare utan brytande ändring.
 - Resultatprofiler för quiz (`result_buckets`) och publicering ställs in i
   modul-admin, inte via chatten.
 - Workshop-block från agenten är textburna (`instruction`, `exercise`,
@@ -4566,12 +4609,23 @@ segment).
    användaren — coachen bekräftar `MEETING_CONSENT_TEXT` ("deltagarna är
    informerade…"); `consent_confirmed_at` stämplas; utan bock vägrar
    `startMeetingAction`. Synlig pulserande indikator + timer hela mötet.
-3. **Inspelning:** MediaRecorder **startas om** per segment (~90 s — INTE
-   `timeslice`, sådana chunkar är inte självständigt avkodbara; det FÖRSTA
-   segmentet är kort, `MEETING_FIRST_SEGMENT_SECONDS` = 20 s, så live-texten —
-   eller ett konfigurationsfel — syns snabbt även i korta möten). Varje segment
-   **konverteras till 16 kHz mono WAV i webbläsaren** (`lib/audio/wav.ts`,
-   § 31.2 — Voxtral avvisar webm/opus- och mp4-klipp med 400) och POSTas till
+3. **Inspelning (kontinuerlig PCM, 2026-09):** ljudet fångas som EN obruten
+   PCM-ström via Web Audio (`lib/audio/pcm-recorder.ts`, ScriptProcessorNode
+   — ingen worklet-fil att nonce:a under CSP:ns `strict-dynamic`) och klipps
+   av den rena, enhetstestade `MeetingSegmenter` (`@platform/shared`
+   meeting-segmenter.ts) **i en paus i talet** mellan
+   `MEETING_MIN_SEGMENT_SECONDS` = 60 s och `MEETING_SEGMENT_SECONDS` = 90 s
+   (hårt tak utan paus); det FÖRSTA segmentet klipps i första pausen efter
+   8 s, senast vid 20 s, så live-texten — eller ett konfigurationsfel — syns
+   snabbt även i korta möten. Paus = ≥ 500 ms under en adaptiv brusnivå
+   (RMS mot rummets golv, cappad) — rent numeriskt, ingen röstanalys.
+   Tidigare startades MediaRecorder om per segment: varje omstart tappade
+   några hundra millisekunder tal i skarven och klippte var 90:e sekund
+   mitt i ord. Samma ström driver mikrofonmätaren (en ljudväg att felsöka).
+   Varje segment **kodas till 16 kHz mono WAV i webbläsaren**
+   (`lib/audio/wav.ts` → OfflineAudioContext, med den deterministiska
+   reservvägen `resampleLinear`/`encodeWavPcm16` i `@platform/shared`
+   audio-pcm.ts — Voxtral avvisar webm/opus- och mp4-klipp med 400) och POSTas till
    `/api/chat/meeting/segment` (staff-only, rate-limitad 40/5 min,
    ägar-verifierad, samma Voxtral-klient + validering som § 31), texten
    **personnummer-saneras** (§ 15.6-regexen — folk säger personnummer högt) och
@@ -4585,9 +4639,15 @@ segment).
    routen, delade i `lib/meetings/access.ts`) har **superuser-fallback vid
    PB v0.23.4:s tysta regel-nekande** (400/403/404, § 21.3-klassen) — ägar-/
    tenant-checken i koden är den hårda gränsen, fallbacken är robusthet
-   (samma mönster som § 18.3/§ 20.5/§ 30.4). Tak: 3 h / 160 segment
+   (samma mönster som § 18.3/§ 20.5/§ 30.4). Tak: 3 h / 240 segment
    (art. 15). En kraschad flik kostar max ett segment; "Återuppta
    granskningen"-bannern i `/chatt` öppnar det oavslutade mötet.
+   Segment-routen skickar **kontext-bias** (bolagets namn + domänordlistan,
+   § 31.2) och — bara när `MOVEXUM_MEETING_DIARIZATION=1` (§ 34.4) —
+   `diarize=true`; talarturer lagras som `MeetingSegment.turns`
+   (segmentlokala, anonyma "S1/S2"), och modellens rapporterade `language`
+   lagras per segment (PII-fri diagnostik: panelen varnar när ett avsnitt
+   tolkats som ett annat språk än svenska).
    **Tomt resultat är aldrig tyst (2026-09).** Incident: mötet slutade som
    "tomt överallt" — blank live-ruta, tomt transkript, inget protokoll, båda
    segment-anropen 200 och inget fel — eftersom Voxtrals tomma svar (422)
@@ -4640,11 +4700,22 @@ persisterad/loggad, når aldrig AI-kontexten. Fail-soft utan koppling.
   röstprofiler görs.
 - **Fas 2 (implementerad):** LLM-gissad turindelning på språkliga grunder —
   ingen ljudanalys alls.
-- **Fas 3 (INTE implementerad — grindad):** akustisk diarisering till anonyma
-  etiketter ("Talare 1/2") som coachen döper manuellt. Kräver
-  leverantörsstöd (Voxtral saknar diarisering i API:t) ELLER en självhostad
-  EU-komponent = nytt beroende ⇒ **maintainer-beslut + DPIA-tillägg innan
-  bygge**. `MeetingSegment.speaker` är förberett.
+- **Fas 3 (implementerad, env-gated — AV som default):** Voxtral Transcribe 2
+  har inbyggd diarisering (`diarize=true` → `segments[].speaker_id`; samma
+  leverantör, samma DPA, ingen ny komponent — grindens förutsättning är
+  uppfylld, DPIA-tillägget finns i `docs/privacy/dpia-meeting-transcription.md`
+  § 6). Aktiveringen är maintainerns beslut: `MOVEXUM_MEETING_DIARIZATION=1`
+  i Coolify. **Begränsning som styr designen:** varje segment diariseras för
+  sig och ljudet finns inte kvar att jämföra mot (och röstavtryck byggs
+  aldrig), så talar-id:n är **segmentlokala** — "S1" i två segment är inte
+  nödvändigtvis samma person. Därför renderas turerna som repliker med
+  **talstreck** (`MEETING_TURN_PREFIX`), aldrig som numrerade talare; den
+  språkliga turindelningen (Fas 2, `structureMeetingTranscript`) får de
+  akustiska gränserna som hårda gränser och sätter konsekventa
+  "Talare 1/2"-etiketter, som coachen döper. En segmentövergripande
+  talaridentitet skulle kräva att ljudet sparas till mötets slut = brott mot
+  § 34.2 och ett nytt DPIA-beslut — byggs inte. `MeetingSegment.speaker`
+  förblir reserverat.
 
 ### 34.5 Regelefterlevnad
 

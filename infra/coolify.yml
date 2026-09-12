@@ -74,6 +74,19 @@ services:
       MOVEXUM_FORCE_HTTPS: ${MOVEXUM_FORCE_HTTPS:-}
       MOVEXUM_ALLOW_INSECURE_COOKIES: ${MOVEXUM_ALLOW_INSECURE_COOKIES:-}
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      # Tal-till-text (CLAUDE.md § 31.2/§ 34). Alla valfria — utan dem körs
+      # Voxtral (voxtral-mini-latest) med autodetekt när modellen avvisar
+      # språkhintet `sv`. MOVEXUM_STT_BASE_URL pekar en självhostad,
+      # OpenAI-kompatibel EU-endpoint med svensktränad modell (KB-Whisper) som
+      # då går först; Voxtral blir fallback. Diarisering är AV tills
+      # MOVEXUM_MEETING_DIARIZATION=1 (maintainer-beslut, DPIA § 6).
+      MISTRAL_VOICE_MODEL: ${MISTRAL_VOICE_MODEL:-}
+      MISTRAL_VOICE_LANGUAGE: ${MISTRAL_VOICE_LANGUAGE:-}
+      MOVEXUM_STT_BASE_URL: ${MOVEXUM_STT_BASE_URL:-}
+      MOVEXUM_STT_API_KEY: ${MOVEXUM_STT_API_KEY:-}
+      MOVEXUM_STT_MODEL: ${MOVEXUM_STT_MODEL:-}
+      MOVEXUM_STT_LANGUAGE: ${MOVEXUM_STT_LANGUAGE:-}
+      MOVEXUM_MEETING_DIARIZATION: ${MOVEXUM_MEETING_DIARIZATION:-}
       # Superuser-credentials krävs för fallback-skapande av records när
       # PB:s createRule failar transient (se workshops.ts). Sätt
       # POCKETBASE_SUPERUSER_EMAIL/PASSWORD som secrets i Coolify

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { transcribeSpeech, VoiceError, voiceModel } from '@/lib/ai/voice';
+import { MEETING_CONTEXT_VOCABULARY, buildContextBias } from '@/lib/ai/voice-transcription';
 import { logAiUsage } from '@/lib/ai/usage';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import {
@@ -97,7 +98,10 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    const result = await transcribeSpeech(buffer, validation.mime);
+    // Domänordlista som kontext-bias (bara verksamhetstermer, ingen PII).
+    const result = await transcribeSpeech(buffer, validation.mime, {
+      contextBias: buildContextBias(MEETING_CONTEXT_VOCABULARY)
+    });
 
     const pb = await getServerPb();
     await logAiUsage(pb, {

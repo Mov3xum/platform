@@ -63,8 +63,11 @@ const TURN_SYSTEM_PROMPT =
   'Talare 1: ...\nTalare 2: ...\n' +
   'Regler: ändra INTE ordalydelsen (bara radbrytningar och talar-etiketter), ' +
   'utelämna ingenting, lägg inte till något. Använd ALDRIG namn — bara ' +
-  '"Talare 1", "Talare 2" osv, konsekvent genom hela texten. Detta är en ' +
-  'språklig gissning, ingen röstanalys.';
+  '"Talare 1", "Talare 2" osv, konsekvent genom hela texten. Rader som börjar ' +
+  'med talstreck ("– ") markerar talarbyten som upptäckts i ljudet — behandla ' +
+  'dem som säkra gränser mellan repliker (men avgör själv VILKEN talare det är, ' +
+  'etiketterna kan ha börjat om mellan avsnitten). Detta är en språklig ' +
+  'gissning, ingen röstanalys.';
 
 export interface MeetingAiResult {
   ok: boolean;
