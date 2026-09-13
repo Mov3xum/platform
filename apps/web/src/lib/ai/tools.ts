@@ -14,6 +14,7 @@ import { searchOrgKnowledge, searchUserFiles, renderKnowledgeHits } from './rag'
 import { logAiUsage } from './usage';
 import { runWebSearch } from './web-search';
 import { escFilter } from '@/lib/pb-filter';
+import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import {
   type ApprovalRequestRef,
   type GeneratedFileRef,
@@ -21,6 +22,9 @@ import {
   type MeetingRequestRef,
   type WebSearchSourceRef,
   MAX_MEETING_TITLE,
+  MEETING_KIND_LABELS,
+  normalizeMeetingCounterpart,
+  normalizeMeetingKind,
   FILE_TOPIC_IDS,
   isFileTopic,
   ANNUAL_WHEEL_TAG_IDS,
@@ -1435,18 +1439,34 @@ export function buildChatTools(
           'Förbereder MÖTESLÄGET i chatten (§ 34): visar ett möteskort med en ' +
           '"Starta mötet"-knapp för användaren. Använd när användaren vill ' +
           'starta/spela in/transkribera ett möte (t.ex. "starta ett möte med ' +
-          'Fixkod"). Ange bolagsnamnet som användaren sa — det fuzzy-matchas ' +
-          'mot bolagslistan och förifylls (användaren kan byta). Du kan ALDRIG ' +
+          'Fixkod", "spela in ledningsgruppsmötet", "möte med Region Gävleborg"). ' +
+          'Mötestyp: `startup` (bolag i portföljen — ange bolagsnamnet, det ' +
+          'fuzzy-matchas och förifylls), `internal` (Movexum-internt: ' +
+          'ledningsgrupp, styrelse, team) eller `external` (partner, kommun, ' +
+          'investerare, annan part som INTE är ett portföljbolag). För ' +
+          'internal/external anger du motparten/forumet i `counterpart` (en ' +
+          'organisation eller ett forum — aldrig personnamn). Du kan ALDRIG ' +
           'starta själva inspelningen — det, och samtyckesbekräftelsen, är ' +
           'alltid ett mänskligt klick. Anropa EN gång och avsluta sedan svaret ' +
           'KORT (t.ex. "Klart — tryck på Starta mötet när ni är redo").',
         parameters: {
           type: 'object',
           properties: {
+            kind: {
+              type: 'string',
+              enum: ['startup', 'internal', 'external'],
+              description:
+                'Mötestyp. Default `startup`. `internal` = Movexum-internt, `external` = extern part som inte är ett portföljbolag.'
+            },
             startup_name: {
               type: 'string',
               description:
-                'Bolaget mötet gäller, som användaren uttryckte det (fuzzy-matchas). Valfritt.'
+                'Bolaget mötet gäller (bara kind=startup), som användaren uttryckte det (fuzzy-matchas). Valfritt.'
+            },
+            counterpart: {
+              type: 'string',
+              description:
+                'Vem/vad mötet gäller för internal/external, t.ex. "Ledningsgruppen", "Region Gävleborg", "Almi". Organisation/forum — inga personnamn. Valfritt.'
             },
             title: {
               type: 'string',
@@ -3109,14 +3129,22 @@ async function runStartMeeting(
     };
   }
 
-  const query = typeof args.startup_name === 'string' ? args.startup_name.trim() : '';
+  const kind = normalizeMeetingKind(args.kind);
+  const query =
+    kind === 'startup' && typeof args.startup_name === 'string' ? args.startup_name.trim() : '';
+  const counterpart =
+    kind === 'startup' ? '' : sanitizePersonnummer(normalizeMeetingCounterpart(args.counterpart));
   const title =
     typeof args.title === 'string' ? args.title.trim().slice(0, MAX_MEETING_TITLE) : '';
 
-  const request: MeetingRequestRef = {};
+  const request: MeetingRequestRef = { kind };
   if (title) request.title = title;
+  if (counterpart) request.counterpart = counterpart;
 
-  let matchNote = '';
+  let matchNote =
+    kind === 'startup'
+      ? ''
+      : `${MEETING_KIND_LABELS[kind]}${counterpart ? ` med ${counterpart}` : ''} är förifyllt — protokollet sparas som fil i användarens Filer, inte på ett bolagskort.`;
   if (query) {
     try {
       const rows = await ctx.pb
@@ -3149,8 +3177,10 @@ async function runStartMeeting(
   return {
     ok: true,
     data: {
+      kind,
       startup_id: request.startup_id,
       startup_name: request.startup_name,
+      counterpart: request.counterpart,
       note:
         'Möteskortet visas nu under ditt svar. ' +
         matchNote +

@@ -245,11 +245,18 @@ export const APPROVAL_GUIDANCE =
 export const MEETING_GUIDANCE =
   '\n\nMÖTEN — spela in och dokumentera (§ 34):\n' +
   '- Vill användaren starta/spela in/transkribera ett möte ("starta ett möte ' +
-  'med X"): anropa `start_meeting` med bolagsnamnet som användaren sa (det ' +
-  'fuzzy-matchas) och ev. titel. Kortet med "Starta mötet"-knappen visas då ' +
-  'under ditt svar — avsluta KORT. Du kan ALDRIG starta inspelningen själv: ' +
-  'användaren bekräftar först att deltagarna är informerade (samtyckesgrind) ' +
-  'och trycker själv på start.\n' +
+  'med X"): anropa `start_meeting`. Tre mötestyper: `startup` (bolag i ' +
+  'portföljen — ange bolagsnamnet som användaren sa, det fuzzy-matchas), ' +
+  '`internal` (Movexum-internt: ledningsgrupp, styrelse, teammöte) och ' +
+  '`external` (partner, kommun, investerare, annan inkubator — en part som ' +
+  'INTE är ett portföljbolag). För internt/externt anger du motparten/forumet ' +
+  'i `counterpart` (organisation, aldrig personnamn). Osäker på typ? Är ' +
+  'namnet inget portföljbolag → `external`. Kortet med "Starta mötet"-knappen ' +
+  'visas då under ditt svar — avsluta KORT. Du kan ALDRIG starta inspelningen ' +
+  'själv: användaren bekräftar först att deltagarna är informerade ' +
+  '(samtyckesgrind) och trycker själv på start.\n' +
+  '- Bolagsmöten sparas som anteckning på bolagskortet; interna/externa möten ' +
+  'sparas som Markdown-fil i användarens Filer (sök via `search_my_files`).\n' +
   '- Under mötet transkriberas allt som sägs live (Voxtral, Mistral EU) i ' +
   'segment; ljudet lagras aldrig. Efteråt granskar coachen transkriptet, kan ' +
   'generera ett protokollutkast och sparar det på valt bolagskort som ' +

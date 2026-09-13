@@ -4568,6 +4568,7 @@ nästa steg/uppföljningsmöte ur åtgärdspunkterna via befintliga § 33-verkty
 | `packages/shared/src/meeting.ts` (+ `.test.ts`) | Ren, enhetstestad möteslogik: segment-/längdtak, samtyckestext, transkript-sammanfogning med luck-markering, purge-fönster, `MeetingRequestRef` |
 | `backend/pocketbase-schema/migrations/1700000142_create_meeting_transcripts.js` | Collection `meeting_transcripts` (STRIKT ägaren-bara, autodate explicit) |
 | `backend/pocketbase-schema/migrations/1700000143_extend_activity_kinds_meeting.js` | `activities.kind` += `meeting` (union) |
+| `backend/pocketbase-schema/migrations/1700000148_extend_meeting_transcripts_kind.js` | `meeting_transcripts.kind` (startup/internal/external) + `counterpart` (fritext) — mötestyp |
 | `apps/web/src/app/api/chat/meeting/segment/route.ts` | Segment-upload (route handler, § 18.2-mönstret): Voxtral + personnummer-sanering + usage-logg |
 | `apps/web/src/lib/actions/meetings.ts` | Livscykel: starta (samtyckesgrind)/avsluta/kasta/spara+purge/återuppta + Outlook-förifyllnad |
 | `apps/web/src/lib/ai/meeting-protocol.ts` | Isolerade Mistral-körningar: protokollutkast (kedje-summering för långa möten) + LLM-gissad turindelning |
@@ -4583,7 +4584,22 @@ ALLA operationer, även admin utestängd): `tenant`/`owner` (cascadeDelete),
 `startup` (valfri, ingen cascade), `status`
 (`recording → ended → saved/discarded`), `title`, `segments` (json,
 `MeetingSegment[] { index, text, at?, speaker? }`, 2 MB),
-`consent_confirmed_at`, `started_at`, `ended_at`. **Denylistad i
+`consent_confirmed_at`, `started_at`, `ended_at`, samt **mötestyp**
+(migration **1700000148**): `kind` (`startup` | `internal` | `external`,
+saknat = `startup`) och `counterpart` (fritext ≤ 200 — vem/vad ett internt/
+externt möte gäller: organisation eller forum, t.ex. "Ledningsgruppen",
+"Region Gävleborg"; UI:t uppmanar att INTE skriva personnamn, GDPR § 5).
+`startup` bär bara på bolagsmöten. `MeetingKind`-typen, etiketter,
+normalisering och filnamnsbyggaren är rena, enhetstestade helpers i
+`@platform/shared` meeting.ts. **Sparmål per typ:** bolagsmöte → `notes` på
+bolagskortet (som förut); internt/externt → **Markdown-fil i coachens egna
+Filer** (`user_files`, strikt ägaren-bara § 17.2, `topic =
+rapporter_uppfoljning`, `topic_status = confirmed`, indexeras direkt för
+`search_my_files` § 27) — `notes` kräver ett bolag och ett internt protokoll
+hör inte hemma på något bolagskort. Ingen ny kollektion. **Schema-drift:**
+ett internt/externt möte på en instans utan 1700000148 avvisas tydligt av
+`startMeetingAction` (PB släpper okända fält tyst — annars hade det blivit
+ett bolagsmöte utan bolag). **Denylistad i
 `lib/ai/redaction.ts`** → `query_collection` exponerar den aldrig. Owner-only
 ⇒ ingen collection-def i `setup-via-api.mjs` (§ 27-precedens), men
 kollektionens **existens** är ett hårt baseline-invariant i
@@ -4601,10 +4617,15 @@ segment).
 ### 34.3 Flöde
 
 1. **Start:** chip i komposern ELLER röst → `start_meeting` (agent-verktyg,
-   UX-sink som `request_approval`: fuzzy-matchar bolagsnamn via
-   `rankCandidates`, pushar `MeetingRequestRef` på assistant-svaret;
-   persisteras i `ToolRunMessage.meeting_request`). Agenten kan ALDRIG starta
-   inspelningen — kortets knapp, och samtyckesgrinden, är mänskliga klick.
+   UX-sink som `request_approval`: tar `kind` (startup/internal/external),
+   fuzzy-matchar bolagsnamn via `rankCandidates` för bolagsmöten, tar
+   `counterpart` (personnummer-sanerad fritext) för internt/externt, pushar
+   `MeetingRequestRef` på assistant-svaret; persisteras i
+   `ToolRunMessage.meeting_request`). Panelens uppstart har typväljaren
+   **Bolagsmöte / Internt möte / Externt möte**: bolagsmöte visar
+   bolagsväljaren, de andra ett fritextfält "Vilket forum/team?" respektive
+   "Vem är mötet med?". Agenten kan ALDRIG starta inspelningen — kortets
+   knapp, och samtyckesgrinden, är mänskliga klick.
 2. **Samtyckesgrind (GDPR art. 7/13):** mötet spelar in ANDRA människor än
    användaren — coachen bekräftar `MEETING_CONSENT_TEXT` ("deltagarna är
    informerade…"); `consent_confirmed_at` stämplas; utan bock vägrar
@@ -4679,10 +4700,18 @@ segment).
    transkriptet är DATA inte instruktioner); "Dela upp i repliker" (LLM-gissad
    turindelning — REN textbearbetning, anonyma "Talare 1/2", ≤40 KB).
 5. **Spara:** `saveMeetingToStartupAction` — en MÄNSKLIG knapptryckning (inte
-   agent-skriv) → coachen får därför välja **konfidentiell**, vilket
-   chatt-agentens `create_startup_note` med rätta aldrig får (§ 33). Skapar
+   agent-skriv). **Bolagsmöte:** coachen får välja **konfidentiell**, vilket
+   chatt-agentens `create_startup_note` med rätta aldrig får (§ 33); skapar
    `notes`-rad (author = coachen, AI-disclaimer-rad i bodyn), `activities`-rad
    (`kind='meeting'`, PII-fri titel, fail-soft) och purgar mötesraden.
+   **Internt/externt möte:** skapar en Markdown-fil ("Mötesanteckning – <motpart>
+   – <datum>.md") i coachens Filer via den delade `createUserFileRecord`
+   (§ 24.4), indexerar den för `search_my_files` (best-effort) och purgar
+   mötesraden; ingen `activities`-rad (kollektionen kräver ett bolag) och ingen
+   konfidentiell-flagga (filen är redan strikt ägaren-bara). Granskningsvyn
+   visar sparmålet för vald typ, och "Föreslå uppgifter i chatten" föreslår
+   uppgifter/events/anslagstavla i stället för bolagskort för interna/externa
+   möten.
 6. **Vidare i chatten:** "Föreslå uppgifter i chatten" skickar protokollet som
    en vanlig user-tur (mänskligt klick, § 33-mönstret) → agenten föreslår/
    utför `create_task`/`update_startup_field`/`create_event` med

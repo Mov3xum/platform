@@ -81,6 +81,80 @@ export const MEETING_GAP_MARKER =
 
 export type MeetingStatus = 'recording' | 'ended' | 'saved' | 'discarded';
 
+/**
+ * Mötestyp (migration 1700000148). `startup` = möte om/med ett bolag i
+ * portföljen (protokollet sparas på bolagskortet); `internal` = Movexum-
+ * internt (ledningsgrupp, styrelse, team …); `external` = med en part som
+ * inte är ett portföljbolag (partner, kommun, investerare, annan inkubator).
+ * För internt/externt anger coachen i fritext vem/vad mötet gäller
+ * (`counterpart`) och protokollet sparas som fil i coachens Filer.
+ */
+export type MeetingKind = 'startup' | 'internal' | 'external';
+
+export const MEETING_KINDS: readonly MeetingKind[] = ['startup', 'internal', 'external'];
+
+export const MEETING_KIND_LABELS: Record<MeetingKind, string> = {
+  startup: 'Bolagsmöte',
+  internal: 'Internt möte',
+  external: 'Externt möte'
+};
+
+export const MEETING_KIND_HINTS: Record<MeetingKind, string> = {
+  startup: 'Möte med eller om ett bolag i portföljen — protokollet sparas på bolagskortet.',
+  internal: 'Movexum-internt (ledningsgrupp, styrelse, team) — protokollet sparas som fil i dina Filer.',
+  external: 'Med en extern part (partner, kommun, investerare) — protokollet sparas som fil i dina Filer.'
+};
+
+/** Tak för fritextetiketten "vem/vad gäller mötet" (organisation/forum — inga personnamn). */
+export const MAX_MEETING_COUNTERPART = 200;
+
+export function isMeetingKind(value: unknown): value is MeetingKind {
+  return typeof value === 'string' && (MEETING_KINDS as readonly string[]).includes(value);
+}
+
+/** Saknat/okänt värde (omigrerad instans, äldre rad) tolkas som bolagsmöte. */
+export function normalizeMeetingKind(value: unknown): MeetingKind {
+  return isMeetingKind(value) ? value : 'startup';
+}
+
+/** Trimmar och cappar motparts-etiketten; tom sträng när inget angetts. */
+export function normalizeMeetingCounterpart(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.replace(/\s+/g, ' ').trim().slice(0, MAX_MEETING_COUNTERPART);
+}
+
+/**
+ * Läsbar etikett för vem/vad mötet gäller — bolagsnamnet för bolagsmöten,
+ * annars motparten (eller typens namn när inget angetts).
+ */
+export function meetingSubjectLabel(input: {
+  kind: MeetingKind;
+  startupName?: string;
+  counterpart?: string;
+}): string {
+  if (input.kind === 'startup') return input.startupName?.trim() || 'Bolag ej valt';
+  return input.counterpart?.trim() || MEETING_KIND_LABELS[input.kind];
+}
+
+/**
+ * Filnamn för ett internt/externt mötesprotokoll i Filer. Deterministiskt,
+ * filsystemsäkert (inga snedstreck/kontrolltecken), cappat.
+ */
+export function meetingProtocolFilename(input: {
+  kind: MeetingKind;
+  counterpart?: string;
+  title?: string;
+  dateIso: string;
+}): string {
+  const date = /^\d{4}-\d{2}-\d{2}/.test(input.dateIso) ? input.dateIso.slice(0, 10) : 'datum';
+  // Ämne/titel cappas var för sig så att datumet alltid ryms i namnet.
+  const subject = meetingSubjectLabel({ kind: input.kind, counterpart: input.counterpart }).slice(0, 70);
+  const title = (input.title ?? '').trim().slice(0, 40);
+  const raw = ['Mötesanteckning', subject, title, date].filter(Boolean).join(' – ');
+  const safe = raw.replace(/[\\/:*?"<>|]/g, '').replace(/[\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim();
+  return `${safe.slice(0, 120)}.md`;
+}
+
 export const RESUMABLE_MEETING_STATUSES: readonly MeetingStatus[] = [
   'recording',
   'ended'
@@ -134,6 +208,10 @@ export interface MeetingTranscriptRecord {
   owner: string;
   startup?: string;
   status: MeetingStatus;
+  /** Mötestyp (migration 1700000148); saknat = `startup`. */
+  kind?: MeetingKind;
+  /** Vem/vad mötet gäller för internt/externt (fritext, organisation/forum). */
+  counterpart?: string;
   title?: string;
   segments?: MeetingSegment[];
   consent_confirmed_at?: string;
@@ -270,9 +348,13 @@ export function isStaleMeeting(
  * mänskligt klick; agenten kan aldrig starta en inspelning själv.
  */
 export interface MeetingRequestRef {
+  /** Mötestyp (default `startup`). */
+  kind?: MeetingKind;
   /** Förifyllt bolag (fuzzy-matchat av agenten) — coachen kan byta. */
   startup_id?: string;
   startup_name?: string;
+  /** Förifylld motpart för internt/externt möte (fritext). */
+  counterpart?: string;
   /** Förifylld mötestitel. */
   title?: string;
 }

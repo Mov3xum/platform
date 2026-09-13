@@ -29,6 +29,10 @@ export interface MeetingRow {
   owner: string;
   startup?: string;
   status: MeetingStatus;
+  /** Mötestyp (migration 1700000148); saknat = bolagsmöte. */
+  kind?: string;
+  /** Motpart för internt/externt möte (fritext). */
+  counterpart?: string;
   title?: string;
   segments?: unknown;
   consent_confirmed_at?: string;

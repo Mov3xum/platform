@@ -2,9 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  MAX_MEETING_COUNTERPART,
   MAX_MEETING_SECONDS,
   MAX_MEETING_SEGMENTS,
   MEETING_CONSENT_TEXT,
+  MEETING_KINDS,
+  MEETING_KIND_HINTS,
+  MEETING_KIND_LABELS,
+  type MeetingKind,
   MEETING_FIRST_SEGMENT_SECONDS,
   MEETING_MIN_SEGMENT_SECONDS,
   MEETING_SEGMENT_SECONDS,
@@ -59,8 +64,12 @@ import {
  */
 
 export interface MeetingInitial {
+  /** Mötestyp (default `startup`). */
+  kind?: MeetingKind;
   startupId?: string;
   startupName?: string;
+  /** Förifylld motpart för internt/externt möte. */
+  counterpart?: string;
   title?: string;
   /** Återuppta ett tidigare möte (status recording/ended) i granskningsläget. */
   resumeMeetingId?: string;
@@ -128,6 +137,8 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
   const [phase, setPhase] = useState<Phase>('setup');
   const [error, setError] = useState<string | null>(null);
   const [startups, setStartups] = useState<MeetingStartupOption[]>([]);
+  const [kind, setKind] = useState<MeetingKind>(initial?.kind ?? 'startup');
+  const [counterpart, setCounterpart] = useState(initial?.counterpart || '');
   const [startupId, setStartupId] = useState(initial?.startupId || '');
   const [title, setTitle] = useState(initial?.title || '');
   const [consent, setConsent] = useState(false);
@@ -160,7 +171,13 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
   const [aiBusy, setAiBusy] = useState<null | 'protocol' | 'turns'>(null);
   const [includeTranscript, setIncludeTranscript] = useState(true);
   const [confidential, setConfidential] = useState(false);
-  const [savedInfo, setSavedInfo] = useState<{ startupName: string; startupId: string } | null>(null);
+  const [savedInfo, setSavedInfo] = useState<{
+    kind: MeetingKind;
+    subject: string;
+    startupId?: string;
+    fileId?: string;
+    filename?: string;
+  } | null>(null);
 
   const meetingIdRef = useRef<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -231,6 +248,8 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
       }
       meetingIdRef.current = res.meeting.id;
       setTitle(res.meeting.title);
+      setKind(res.meeting.kind);
+      setCounterpart(res.meeting.counterpart);
       setStartupId(res.meeting.startupId);
       setTranscript(res.meeting.transcript);
       setPhase('review');
@@ -463,7 +482,9 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     }
 
     const started = await startMeetingAction({
-      startupId: startupId || null,
+      kind,
+      startupId: kind === 'startup' ? startupId || null : null,
+      counterpart: kind === 'startup' ? null : counterpart || null,
       title: title || null,
       consentConfirmed: consent
     });
@@ -631,7 +652,7 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
   async function saveMeeting() {
     const meetingId = meetingIdRef.current;
     if (!meetingId) return;
-    if (!startupId) {
+    if (kind === 'startup' && !startupId) {
       setError('Välj vilket bolagskort mötet ska sparas på.');
       return;
     }
@@ -642,29 +663,39 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     setError(null);
     setPhase('saving');
     const res = await saveMeetingToStartupAction(meetingId, {
-      startupId,
-      confidential,
+      startupId: kind === 'startup' ? startupId : undefined,
+      confidential: kind === 'startup' ? confidential : false,
       includeTranscript,
       protocolText: protocol,
       transcriptText: includeTranscript ? transcript : undefined
     });
-    if (res.error || !res.startupId) {
+    if (res.error || (!res.startupId && !res.fileId)) {
       setError(res.error || 'Kunde inte spara mötet.');
       setPhase('review');
       return;
     }
-    setSavedInfo({ startupId: res.startupId, startupName: res.startupName || 'bolaget' });
+    setSavedInfo({
+      kind: res.kind ?? kind,
+      subject: res.subject || res.startupName || counterpart || 'mötet',
+      startupId: res.startupId,
+      fileId: res.fileId,
+      filename: res.filename
+    });
     setPhase('saved');
   }
 
   function suggestActionsInChat() {
     if (!onSendToChat || !savedInfo) return;
     const basis = protocol.trim() || transcript.trim().slice(0, 4000);
+    const isStartup = savedInfo.kind === 'startup';
     onSendToChat(
-      `Här är protokollet från mötet med ${savedInfo.startupName}${title ? ` ("${title}")` : ''}:\n\n` +
+      `Här är protokollet från ${isStartup ? `mötet med ${savedInfo.subject}` : `${MEETING_KIND_LABELS[savedInfo.kind].toLowerCase()}t${savedInfo.subject ? ` med ${savedInfo.subject}` : ''}`}${title ? ` ("${title}")` : ''}:\n\n` +
         `${basis}\n\n` +
-        'Föreslå utifrån åtgärdspunkterna vilka kanban-kort som bör skapas på bolagets tavla, ' +
-        'om nästa steg bör uppdateras och om ett uppföljningsmöte bör bokas — och genomför det vi kommer överens om.'
+        (isStartup
+          ? 'Föreslå utifrån åtgärdspunkterna vilka kanban-kort som bör skapas på bolagets tavla, ' +
+            'om nästa steg bör uppdateras och om ett uppföljningsmöte bör bokas — och genomför det vi kommer överens om.'
+          : 'Föreslå utifrån åtgärdspunkterna vilka uppgifter, events i kalendern eller inlägg på anslagstavlan ' +
+            'som bör skapas, och om ett uppföljningsmöte bör bokas — och genomför det vi kommer överens om.')
     );
     onClose();
   }
@@ -757,23 +788,71 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
                   className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground placeholder:text-foreground-subtle focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
                 />
               </label>
-              <label className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-1.5">
                 <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
-                  Bolag (kan väljas/ändras efter mötet)
+                  Typ av möte
                 </span>
-                <select
-                  value={startupId}
-                  onChange={(e) => setStartupId(e.target.value)}
-                  className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
-                >
-                  <option value="">— Välj senare —</option>
-                  {startups.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
+                <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Typ av möte">
+                  {MEETING_KINDS.map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="radio"
+                      aria-checked={kind === k}
+                      onClick={() => setKind(k)}
+                      className={`rounded-xl border px-3 py-1.5 text-[13px] font-medium transition ${
+                        kind === k
+                          ? 'border-brand bg-brand text-brand-foreground'
+                          : 'border-default bg-canvas text-foreground-muted hover:border-strong hover:text-foreground'
+                      }`}
+                    >
+                      {MEETING_KIND_LABELS[k]}
+                    </button>
                   ))}
-                </select>
-              </label>
+                </div>
+                <p className="text-[12px] text-foreground-subtle">{MEETING_KIND_HINTS[kind]}</p>
+              </div>
+
+              {kind === 'startup' ? (
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    Bolag (kan väljas/ändras efter mötet)
+                  </span>
+                  <select
+                    value={startupId}
+                    onChange={(e) => setStartupId(e.target.value)}
+                    className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+                  >
+                    <option value="">— Välj senare —</option>
+                    {startups.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    {kind === 'internal' ? 'Vilket forum/team?' : 'Vem är mötet med?'}
+                  </span>
+                  <input
+                    type="text"
+                    value={counterpart}
+                    onChange={(e) => setCounterpart(e.target.value)}
+                    maxLength={MAX_MEETING_COUNTERPART}
+                    placeholder={
+                      kind === 'internal'
+                        ? 'T.ex. Ledningsgruppen, Styrelsen, Coachteamet'
+                        : 'T.ex. Region Gävleborg, Almi, Gävle kommun'
+                    }
+                    className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground placeholder:text-foreground-subtle focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+                  />
+                  <span className="text-[11.5px] text-foreground-subtle">
+                    Organisation eller forum — skriv inte personnamn.
+                  </span>
+                </label>
+              )}
 
               <label className="flex items-start gap-2.5 rounded-xl border border-default bg-canvas-subtle p-3">
                 <input
@@ -1009,23 +1088,37 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
                 )}
               </div>
 
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
-                  Spara på bolagskort
-                </span>
-                <select
-                  value={startupId}
-                  onChange={(e) => setStartupId(e.target.value)}
-                  className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
-                >
-                  <option value="">— Välj bolag —</option>
-                  {startups.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {kind === 'startup' ? (
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    Spara på bolagskort
+                  </span>
+                  <select
+                    value={startupId}
+                    onChange={(e) => setStartupId(e.target.value)}
+                    className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+                  >
+                    <option value="">— Välj bolag —</option>
+                    {startups.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    Sparas i dina Filer
+                  </span>
+                  <p className="rounded-xl border border-default bg-canvas-subtle px-3 py-2 text-[13px] text-foreground">
+                    {MEETING_KIND_LABELS[kind]}
+                    {counterpart ? ` med ${counterpart}` : ''} — protokollet sparas som en
+                    Markdown-fil under <span className="font-medium">Rapporter &amp; uppföljning</span>{' '}
+                    i Filer (bara du ser den) och blir sökbar i chatten.
+                  </p>
+                </div>
+              )}
 
               <div className="flex flex-col gap-2">
                 <label className="flex items-center gap-2 text-[13px] text-foreground">
@@ -1037,19 +1130,22 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
                   />
                   Bifoga hela transkriptet i anteckningen (annars sparas bara protokollet)
                 </label>
-                <label className="flex items-center gap-2 text-[13px] text-foreground">
-                  <input
-                    type="checkbox"
-                    checked={confidential}
-                    onChange={(e) => setConfidential(e.target.checked)}
-                    className="h-4 w-4 accent-[var(--color-brand)]"
-                  />
-                  Konfidentiell anteckning (visas bara för behöriga och exkluderas ur all AI-kontext)
-                </label>
+                {kind === 'startup' && (
+                  <label className="flex items-center gap-2 text-[13px] text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={confidential}
+                      onChange={(e) => setConfidential(e.target.checked)}
+                      className="h-4 w-4 accent-[var(--color-brand)]"
+                    />
+                    Konfidentiell anteckning (visas bara för behöriga och exkluderas ur all AI-kontext)
+                  </label>
+                )}
               </div>
 
               <p className="rounded-xl bg-movexum-pastell-gul px-3 py-2 text-[12px] text-movexum-morkgul">
-                När du sparar raderas råtranskriptet permanent — anteckningen på bolagskortet blir
+                När du sparar raderas råtranskriptet permanent —{' '}
+                {kind === 'startup' ? 'anteckningen på bolagskortet' : 'filen i dina Filer'} blir
                 den enda kopian. Osparade möten raderas automatiskt efter 7 dagar.
               </p>
 
@@ -1065,7 +1161,7 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
                 <button
                   type="button"
                   onClick={saveMeeting}
-                  disabled={phase === 'saving' || !startupId}
+                  disabled={phase === 'saving' || (kind === 'startup' && !startupId)}
                   className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-[13.5px] font-medium text-brand-foreground transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {phase === 'saving' ? (
@@ -1088,11 +1184,23 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
           {phase === 'saved' && savedInfo && (
             <div className="flex flex-col items-start gap-4">
               <p className="text-[14px] leading-relaxed text-foreground">
-                Mötesanteckningen är sparad på{' '}
-                <a href={`/startups/${savedInfo.startupId}`} className="font-medium text-link underline">
-                  {savedInfo.startupName}
-                </a>{' '}
-                och syns i aktivitetsfeeden. Råtranskriptet är raderat.
+                {savedInfo.kind === 'startup' && savedInfo.startupId ? (
+                  <>
+                    Mötesanteckningen är sparad på{' '}
+                    <a href={`/startups/${savedInfo.startupId}`} className="font-medium text-link underline">
+                      {savedInfo.subject}
+                    </a>{' '}
+                    och syns i aktivitetsfeeden. Råtranskriptet är raderat.
+                  </>
+                ) : (
+                  <>
+                    Mötesanteckningen{savedInfo.filename ? ` "${savedInfo.filename}"` : ''} är sparad i{' '}
+                    <a href="/filer" className="font-medium text-link underline">
+                      dina Filer
+                    </a>{' '}
+                    under Rapporter &amp; uppföljning och är sökbar i chatten. Råtranskriptet är raderat.
+                  </>
+                )}
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 {onSendToChat && (protocol.trim() || transcript.trim()) && (
