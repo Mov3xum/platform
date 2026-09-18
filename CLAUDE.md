@@ -616,14 +616,19 @@ publika RSS-flöden från EU-källor och bakar in resultatet i Mistral-
 prompten via `{{web.<key>}}`-tokens. Whitelisten finns i
 `apps/web/src/lib/ai/web.ts` (`WEB_SOURCES`):
 
-| Nyckel | Källa | Land |
-| --- | --- | --- |
-| `breakit` | Breakit (svenska startups) | SE |
-| `sifted` | Sifted (EU tech) | EU |
-| `di_digital` | Dagens industri Digital | SE |
-| `vinnova` | Vinnova utlysningar | SE |
-| `eic` | European Innovation Council | EU |
-| `almi` | Almi pressmeddelanden | SE |
+| Nyckel | Källa | Land | Vad den är och vad den ger oss |
+| --- | --- | --- | --- |
+| `breakit` | Breakit | SE | Sveriges ledande startup-/tech-nyhetssajt: finansieringsrundor, grundare, exits, branschtrender. |
+| `sifted` | Sifted | EU | Europeisk techmedia (FT-backad): startup-scenen i hela Europa, VC-trender, sektoranalyser. |
+| `di_digital` | Di Digital | SE | Dagens industris techredaktion: svensk tech ur näringslivs-/investerarperspektiv, noteringar, reglering. |
+| `vinnova` | Vinnova | SE | Innovationsmyndighetens **aktuella utlysningar** med sista ansökningsdag — bidrag till innovationsprojekt, deeptech, verifiering. |
+| `eic` | European Innovation Council | EU | EU-kommissionens innovationsråd: EIC Accelerator/Pathfinder/Transition, cut-off-datum, resultat. |
+| `almi` | Almi | SE | Statligt lån-/riskkapital-/affärsutvecklingsbolag: pressmeddelanden om låneprodukter, Almi Invest, regionala program. |
+
+Varje källa är definierad i `WEB_SOURCES` med `country`, `description` och
+`covers` — det som visas under "Om källorna" på dashboarden (§ 37.4). Ett
+tillägg görs alltid här (+ `WebSourceKey` i `@platform/shared`) med
+motivering, aldrig som fri URL.
 
 **Säkerhet och kostnad:**
 - URL:er utanför whitelisten kan **aldrig** hämtas (SSRF-skydd).
@@ -635,15 +640,51 @@ prompten via `{{web.<key>}}`-tokens. Whitelisten finns i
 - Hämtade källor + `fetched_at` loggas i `tool_runs.input.web_sources`
   (krav från EU AI Act art. 13 — transparens om underlag).
 
-**Dashboardchatt (`/idag`).** Webbkälle-toggeln i dashboardchatten
-hämtar EU-whitelisten ovan (default `breakit`, `sifted`, `vinnova`) via
-samma cache/SSRF-skydd — Wikipedia (US/Wikimedia) används **inte** längre
-(bröt mot EU-suveränitetspolicyn). När en agent väljs i chatten hämtas
-dessutom agentens egna `web_sources` och dess `prompt_template` renderas
-(mot portföljkontext för `ai_system_wide`-agenter; `{{startup.*}}` blir
-tomt för per-bolag-agenter som istället låter modellen hämta detaljer via
-sina query-verktyg). Samma EU-suveränitets- och transparensgarantier
-gäller alltså som i `/toolbox`.
+**Dashboardchatt (`/chatt`) — "Webbkällor" = riktig internetsökning
+(2026-09).** Toggeln gjorde tidigare INGEN webbsökning: den klistrade bara in
+rubriker från tre RSS-flöden i systemprompten, så "hur många startups finns i
+Sverige?" gav "jag har inte tillgång till nationell statistik". Nu exponerar
+toggeln verktyget **`web_search`** i agent-loopen (`lib/ai/tools.ts` →
+`lib/ai/web-search.ts`): ett isolerat `/v1/conversations`-anrop med Mistrals
+inbyggda `web_search`-connector (Mistral AI, FR/EU — samma leverantör och
+DPA, ingen ny tredjepart; `callMistralConversation` returnerar nu även
+`references`, tolkade av den rena, enhetstestade `web-search-parse.ts`).
+Eftersom connectorn bara finns i conversations-API:t — inte i
+chat.completions som loopen kör — körs sökningen som ett function-verktyg,
+så modellen kan **kombinera internet med databasen/kunskapsbasen i samma
+resonemang** (`WEB_SEARCH_GUIDANCE` i `guidance.ts`; när toggeln är av
+injiceras `WEB_SEARCH_OFF_HINT` så modellen pekar på knappen i stället för
+att bara säga "jag har inte tillgång").
+- **Dataflöde/GDPR § 5:** den sanerade sökfrågan är det ENDA som lämnar
+  plattformen (`sanitizeWebQuery`: personnummer maskas, 300 tecken); ingen
+  chatt-historik och ingen bolagskontext skickas med sub-anropet, och
+  guidningen förbjuder intern data/PII i `query`. Hämtat webbinnehåll
+  behandlas som DATA, inte instruktioner (§ 9.3, även för webbsidor).
+- **Transparens (art. 13):** hämtade källor (titel + URL, bara http(s))
+  persisteras som `ToolRunMessage.sources` (`WebSearchSourceRef` i
+  `@platform/shared`) och visas som chips "Källor från webben" under svaret
+  (`DashboardChat`); steg-etiketten "Söker på internet" är PII-fri (§ 17.8).
+  `safe-html.ts` renderar nu http(s)-länkar (`[text](url)` och nakna URL:er)
+  som `<a rel="noopener noreferrer">` — andra protokoll blir aldrig länkar
+  (enhetstestat i `safe-html-links.test.ts`).
+- **Opt-in per tur:** verktyget finns bara när användaren slagit på toggeln.
+  Sökmodell: `mistral-medium-latest` med fallback till Large vid 429/5xx;
+  `MISTRAL_WEB_SEARCH_TOOL=web_search_premium` (Coolify) byter till
+  premium-connectorn. Tokens loggas i `ai_usage_events` (surface
+  `dashboard_chat`) och räknas mot månadstaket (§ 9.6). **Känd begränsning:**
+  Mistral debiterar dessutom en fast avgift per sökanrop som inte kan
+  uttryckas i tokens — `cost_estimate_usd` underskattar därför sökturer.
+- **Riskklass (art. 11): begränsad** — publik informationssökning på
+  personalens uttryckliga initiativ, människa-i-loopen, ingen profilering.
+- RSS-blocket (default `breakit`, `sifted`, `vinnova`, samma cache/SSRF-
+  skydd) injiceras fortfarande som billig omvärldskontext när toggeln är på.
+  Wikipedia (US/Wikimedia) används **inte** (EU-suveränitet).
+
+När en agent väljs i chatten hämtas dessutom agentens egna `web_sources`
+och dess `prompt_template` renderas (mot portföljkontext för
+`ai_system_wide`-agenter; `{{startup.*}}` blir tomt för per-bolag-agenter
+som istället låter modellen hämta detaljer via sina query-verktyg). Samma
+EU-suveränitets- och transparensgarantier gäller alltså som i `/toolbox`.
 
 ### 9.9 Chattläge, modellval och bilagor
 
@@ -881,6 +922,7 @@ omsättning.
 | `ai_industry_pulse` | begränsad | Aggregerar publika nyheter, ingen profilering |
 | `ai_funding_radar` | begränsad | Matchar utlysningar mot bolagsfas, vägledande |
 | `ai_portfolio_risk` | begränsad | Bara whitelistade fält, rankar bolag — ej personer |
+| `web_search` (chatt-verktyg, § 9.8) | begränsad | Internetsökning via Mistral Web Search (EU) på personalens opt-in; bara sanerad sökfråga lämnar plattformen; källor visas |
 | `edu_irl_levels` | minimal | Generellt utbildningsmaterial |
 | `template_pitch_deck` | n/a | Statisk mall, ingen AI-inferens |
 
@@ -2747,7 +2789,7 @@ enda utloggningsvägen för en inloggad användare.
   staff-/observer-roll. Multi-roll (t.ex. coach + startup_member) behåller
   hela staff-railen.
 - Hemvy: en ren medlem som landar på `/chatt` eller `/hem` redirectas till
-  `/min-oversikt` (rail-logon pekar dit); staff landar på Hemmaplan (`/hem`,
+  `/min-oversikt` (rail-logon pekar dit); staff landar på dashboarden (`/hem`,
   § 37) och har chatten som egen rail-post.
 
 ### 22.3 Regelefterlevnad
@@ -3912,6 +3954,8 @@ ansvarig i UI:t.
 - **`annual_wheel_categories`** (1700000139): `tenant` (cascadeDelete), `key`
   (slug ≤ 40 tecken — det som lagras på posterna, **oföränderlig**), `label`
   (≤ 60), `token` (select över Movexums brand-färger, § 2.2), `sort_order`,
+  `show_on_home` (bool, **migration 1700000146** — visas kategorins
+  aktiviteter i kalendern på Hemmaplan § 37; backfillat `true`, saknat = visas),
   `created_by`. Unikt index `(tenant, key)` → idempotent. Migrationen seedar
   `styrelse`/`ledning`/`gemensamt` (grön/gul/lila) per tenant, så befintliga
   poster behåller sin färg.
@@ -4207,8 +4251,10 @@ npm-dependency (§ 10.2).
 4. Routen mäter först klippets ljudnivå (WAV-PCM, `@platform/shared`
    audio-level.ts): ett effektivt tyst klipp svaras "Inspelningen var helt
    tyst" (422) **utan** Voxtral-anrop. Annars skickar `transcribeSpeech`
-   (`lib/ai/voice.ts`) ljudet till Voxtral (`POST /v1/audio/transcriptions`,
-   `language=sv`) och returnerar texten; blir svaret tomt görs ETT omförsök
+   (`lib/ai/voice.ts`) ljudet till transkriberingstjänsten
+   (`POST /v1/audio/transcriptions`, med språkhint `sv` när modellen stödjer
+   det — se "Språkhint & parametertrappa" nedan) plus domänordlistan som
+   kontext-bias, och returnerar texten; blir svaret tomt görs ETT omförsök
    utan språkhint (autodetekt). Token-utfallet loggas i `ai_usage_events`
    (surface `dashboard_chat`, modell `voxtral-*`) — **även för tomma svar**
    (Voxtral debiterar ljudingången; `VoiceError.usage` bär förbrukningen) —
@@ -4225,11 +4271,50 @@ förklaring i tooltip:en**; den döljs aldrig tyst (en osynlig knapp går inte a
 felsöka). Samma sak om webbläsaren saknar `MediaRecorder`.
 
 **Konfiguration:** `MISTRAL_API_KEY` (befintlig) räcker.
-`MISTRAL_VOICE_MODEL` (valfri, default `voxtral-mini-latest`) och
+`MISTRAL_VOICE_MODEL` (valfri, default `voxtral-mini-latest`),
+`MISTRAL_VOICE_LANGUAGE` (valfri, default `sv`; `auto` = inget hint) och
 `MISTRAL_API_BASE_URL` (befintlig) kan överstyra i Coolify — aldrig i kod
 (ISO 27001 A.8.24). Saknas nyckeln felar röstinmatningen **tydligt** (503,
 "röstinmatning är inte konfigurerad") i stället för att tyst göra ingenting
 (SOC 2 availability, § 10.4).
+
+**Språkhint & parametertrappa (incident 2026-09-11).** Mistrals
+transkriberings-endpoint (Voxtral Transcribe 2) validerar `language` mot en
+fast lista — `ar, en, de, es, fr, hi, it, nl, pt, zh, ru, ko, ja` — och svarar
+**400** på `sv`. Klienten skickade alltid `language=sv`, 400 räknades som
+request-fel (aldrig retry) och autodetekt-omförsöket låg bara i tom-svar-
+grenen (422) → VARJE segment föll och både röstknappen och hela mötesläget
+gav tomt transkript ("Got unsupported language `sv`"). Nu kör
+`transcribeSpeech` en **parametertrappa** per provider (ren, enhetstestad
+logik i `lib/ai/voice-transcription.ts`): (1) 400 "unsupported language" →
+hintet släpps och anropet görs om DIREKT (ett 400 avvisas innan ljudet
+bearbetas — ingen kostnad), och avvisningen **minns per provider+modell** i
+processen (`LanguageHintMemory`, 6 h TTL) så efterföljande segment går rätt
+från början; (2) annat 400 med extraparametrar (kontext-bias/diarisering) →
+utan dem; (3) tomt svar med hint → ett omförsök med autodetekt (bokförs);
+(4) 429/5xx/nätverk → backoff-retry, uttömt → **failover till nästa
+provider** (aldrig vid 4xx, samma princip som § 9.2). Svaret bär modellens
+rapporterade `language`; mötespanelen varnar när ett avsnitt tolkats som ett
+annat språk än svenska.
+
+**Kontext-bias ("egen ordlista").** Voxtral tar `context_bias` (lista av
+termer modellen ska föredra), Whisper-servrar tar samma termer som `prompt`.
+Vi skickar den fasta domänordlistan `MEETING_CONTEXT_VOCABULARY` (Movexum,
+Vinnova, Almi, de minimis, IRL-nivå …) och — i mötesläget — bolagets namn
+(whitelistat fält, § 9.3). ALDRIG mötestitel, personnamn eller annan PII
+(GDPR § 5); `buildContextBias` dedupe:ar och cappar (40 termer/60 tecken).
+
+**Självhostad svensk modell (valfri EU-provider, dormant tills env är satt).**
+Voxtral listar inte svenska bland sina officiellt stödda språk; för svensk
+transkribering i klass med dedikerade svenska tjänster kan operatören peka
+en **självhostad, OpenAI-kompatibel** endpoint (speaches / faster-whisper-
+server / whisper.cpp med **KB-Whisper**, Kungliga bibliotekets svensktränade
+Whisper, Apache 2.0) på UpCloud (EU): `MOVEXUM_STT_BASE_URL` (+ valfri
+`MOVEXUM_STT_API_KEY`, `MOVEXUM_STT_MODEL` default `KBLab/kb-whisper-large`,
+`MOVEXUM_STT_LANGUAGE` default `sv`). Den går då FÖRST och Voxtral blir
+fallback vid nätverk/kapacitet (`resolveSpeechProviders`, enhetstestad).
+Ingen ny tredjepart, inget ljud lämnar EU, samma dataflöde (§ 10.2); usage
+loggas med providerns modellnamn (0 tokens → 0 kostnad).
 
 ### 31.3 Nya skrivverktyg (Startupkompassen + workshops)
 
@@ -4307,10 +4392,12 @@ INNAN fallbacken används.
   utan granskning skulle ta bort människa-i-loopen precis där agenten kan
   skriva i databasen.
 - Talsyntes (agenten som svarar med röst) är inte i scope.
-- Språket är svenska som default (`language=sv`) — det höjer träffsäkerheten
-  på domänord markant; ger hinten tom text görs ett omförsök med autodetekt
-  (`transcribeSpeech`). Ett språkval per användare kan läggas till senare utan
-  brytande ändring.
+- Språkhintet är svenska som default (`MISTRAL_VOICE_LANGUAGE`, § 31.2) men
+  Voxtral Transcribe 2 stödjer det INTE — hintet släpps då automatiskt och
+  modellen autodetekterar (svenskan transkriberas då utanför modellens
+  officiellt stödda språk; kvaliteten kan variera). Den svensktränade
+  självhostade providern (§ 31.2) är vägen till dedikerad svensk kvalitet.
+  Ett språkval per användare kan läggas till senare utan brytande ändring.
 - Resultatprofiler för quiz (`result_buckets`) och publicering ställs in i
   modul-admin, inte via chatten.
 - Workshop-block från agenten är textburna (`instruction`, `exercise`,
@@ -4481,6 +4568,7 @@ nästa steg/uppföljningsmöte ur åtgärdspunkterna via befintliga § 33-verkty
 | `packages/shared/src/meeting.ts` (+ `.test.ts`) | Ren, enhetstestad möteslogik: segment-/längdtak, samtyckestext, transkript-sammanfogning med luck-markering, purge-fönster, `MeetingRequestRef` |
 | `backend/pocketbase-schema/migrations/1700000142_create_meeting_transcripts.js` | Collection `meeting_transcripts` (STRIKT ägaren-bara, autodate explicit) |
 | `backend/pocketbase-schema/migrations/1700000143_extend_activity_kinds_meeting.js` | `activities.kind` += `meeting` (union) |
+| `backend/pocketbase-schema/migrations/1700000148_extend_meeting_transcripts_kind.js` | `meeting_transcripts.kind` (startup/internal/external) + `counterpart` (fritext) — mötestyp |
 | `apps/web/src/app/api/chat/meeting/segment/route.ts` | Segment-upload (route handler, § 18.2-mönstret): Voxtral + personnummer-sanering + usage-logg |
 | `apps/web/src/lib/actions/meetings.ts` | Livscykel: starta (samtyckesgrind)/avsluta/kasta/spara+purge/återuppta + Outlook-förifyllnad |
 | `apps/web/src/lib/ai/meeting-protocol.ts` | Isolerade Mistral-körningar: protokollutkast (kedje-summering för långa möten) + LLM-gissad turindelning |
@@ -4496,7 +4584,22 @@ ALLA operationer, även admin utestängd): `tenant`/`owner` (cascadeDelete),
 `startup` (valfri, ingen cascade), `status`
 (`recording → ended → saved/discarded`), `title`, `segments` (json,
 `MeetingSegment[] { index, text, at?, speaker? }`, 2 MB),
-`consent_confirmed_at`, `started_at`, `ended_at`. **Denylistad i
+`consent_confirmed_at`, `started_at`, `ended_at`, samt **mötestyp**
+(migration **1700000148**): `kind` (`startup` | `internal` | `external`,
+saknat = `startup`) och `counterpart` (fritext ≤ 200 — vem/vad ett internt/
+externt möte gäller: organisation eller forum, t.ex. "Ledningsgruppen",
+"Region Gävleborg"; UI:t uppmanar att INTE skriva personnamn, GDPR § 5).
+`startup` bär bara på bolagsmöten. `MeetingKind`-typen, etiketter,
+normalisering och filnamnsbyggaren är rena, enhetstestade helpers i
+`@platform/shared` meeting.ts. **Sparmål per typ:** bolagsmöte → `notes` på
+bolagskortet (som förut); internt/externt → **Markdown-fil i coachens egna
+Filer** (`user_files`, strikt ägaren-bara § 17.2, `topic =
+rapporter_uppfoljning`, `topic_status = confirmed`, indexeras direkt för
+`search_my_files` § 27) — `notes` kräver ett bolag och ett internt protokoll
+hör inte hemma på något bolagskort. Ingen ny kollektion. **Schema-drift:**
+ett internt/externt möte på en instans utan 1700000148 avvisas tydligt av
+`startMeetingAction` (PB släpper okända fält tyst — annars hade det blivit
+ett bolagsmöte utan bolag). **Denylistad i
 `lib/ai/redaction.ts`** → `query_collection` exponerar den aldrig. Owner-only
 ⇒ ingen collection-def i `setup-via-api.mjs` (§ 27-precedens), men
 kollektionens **existens** är ett hårt baseline-invariant i
@@ -4514,20 +4617,36 @@ segment).
 ### 34.3 Flöde
 
 1. **Start:** chip i komposern ELLER röst → `start_meeting` (agent-verktyg,
-   UX-sink som `request_approval`: fuzzy-matchar bolagsnamn via
-   `rankCandidates`, pushar `MeetingRequestRef` på assistant-svaret;
-   persisteras i `ToolRunMessage.meeting_request`). Agenten kan ALDRIG starta
-   inspelningen — kortets knapp, och samtyckesgrinden, är mänskliga klick.
+   UX-sink som `request_approval`: tar `kind` (startup/internal/external),
+   fuzzy-matchar bolagsnamn via `rankCandidates` för bolagsmöten, tar
+   `counterpart` (personnummer-sanerad fritext) för internt/externt, pushar
+   `MeetingRequestRef` på assistant-svaret; persisteras i
+   `ToolRunMessage.meeting_request`). Panelens uppstart har typväljaren
+   **Bolagsmöte / Internt möte / Externt möte**: bolagsmöte visar
+   bolagsväljaren, de andra ett fritextfält "Vilket forum/team?" respektive
+   "Vem är mötet med?". Agenten kan ALDRIG starta inspelningen — kortets
+   knapp, och samtyckesgrinden, är mänskliga klick.
 2. **Samtyckesgrind (GDPR art. 7/13):** mötet spelar in ANDRA människor än
    användaren — coachen bekräftar `MEETING_CONSENT_TEXT` ("deltagarna är
    informerade…"); `consent_confirmed_at` stämplas; utan bock vägrar
    `startMeetingAction`. Synlig pulserande indikator + timer hela mötet.
-3. **Inspelning:** MediaRecorder **startas om** per segment (~90 s — INTE
-   `timeslice`, sådana chunkar är inte självständigt avkodbara; det FÖRSTA
-   segmentet är kort, `MEETING_FIRST_SEGMENT_SECONDS` = 20 s, så live-texten —
-   eller ett konfigurationsfel — syns snabbt även i korta möten). Varje segment
-   **konverteras till 16 kHz mono WAV i webbläsaren** (`lib/audio/wav.ts`,
-   § 31.2 — Voxtral avvisar webm/opus- och mp4-klipp med 400) och POSTas till
+3. **Inspelning (kontinuerlig PCM, 2026-09):** ljudet fångas som EN obruten
+   PCM-ström via Web Audio (`lib/audio/pcm-recorder.ts`, ScriptProcessorNode
+   — ingen worklet-fil att nonce:a under CSP:ns `strict-dynamic`) och klipps
+   av den rena, enhetstestade `MeetingSegmenter` (`@platform/shared`
+   meeting-segmenter.ts) **i en paus i talet** mellan
+   `MEETING_MIN_SEGMENT_SECONDS` = 60 s och `MEETING_SEGMENT_SECONDS` = 90 s
+   (hårt tak utan paus); det FÖRSTA segmentet klipps i första pausen efter
+   8 s, senast vid 20 s, så live-texten — eller ett konfigurationsfel — syns
+   snabbt även i korta möten. Paus = ≥ 500 ms under en adaptiv brusnivå
+   (RMS mot rummets golv, cappad) — rent numeriskt, ingen röstanalys.
+   Tidigare startades MediaRecorder om per segment: varje omstart tappade
+   några hundra millisekunder tal i skarven och klippte var 90:e sekund
+   mitt i ord. Samma ström driver mikrofonmätaren (en ljudväg att felsöka).
+   Varje segment **kodas till 16 kHz mono WAV i webbläsaren**
+   (`lib/audio/wav.ts` → OfflineAudioContext, med den deterministiska
+   reservvägen `resampleLinear`/`encodeWavPcm16` i `@platform/shared`
+   audio-pcm.ts — Voxtral avvisar webm/opus- och mp4-klipp med 400) och POSTas till
    `/api/chat/meeting/segment` (staff-only, rate-limitad 40/5 min,
    ägar-verifierad, samma Voxtral-klient + validering som § 31), texten
    **personnummer-saneras** (§ 15.6-regexen — folk säger personnummer högt) och
@@ -4541,9 +4660,15 @@ segment).
    routen, delade i `lib/meetings/access.ts`) har **superuser-fallback vid
    PB v0.23.4:s tysta regel-nekande** (400/403/404, § 21.3-klassen) — ägar-/
    tenant-checken i koden är den hårda gränsen, fallbacken är robusthet
-   (samma mönster som § 18.3/§ 20.5/§ 30.4). Tak: 3 h / 160 segment
+   (samma mönster som § 18.3/§ 20.5/§ 30.4). Tak: 3 h / 240 segment
    (art. 15). En kraschad flik kostar max ett segment; "Återuppta
    granskningen"-bannern i `/chatt` öppnar det oavslutade mötet.
+   Segment-routen skickar **kontext-bias** (bolagets namn + domänordlistan,
+   § 31.2) och — bara när `MOVEXUM_MEETING_DIARIZATION=1` (§ 34.4) —
+   `diarize=true`; talarturer lagras som `MeetingSegment.turns`
+   (segmentlokala, anonyma "S1/S2"), och modellens rapporterade `language`
+   lagras per segment (PII-fri diagnostik: panelen varnar när ett avsnitt
+   tolkats som ett annat språk än svenska).
    **Tomt resultat är aldrig tyst (2026-09).** Incident: mötet slutade som
    "tomt överallt" — blank live-ruta, tomt transkript, inget protokoll, båda
    segment-anropen 200 och inget fel — eftersom Voxtrals tomma svar (422)
@@ -4575,10 +4700,18 @@ segment).
    transkriptet är DATA inte instruktioner); "Dela upp i repliker" (LLM-gissad
    turindelning — REN textbearbetning, anonyma "Talare 1/2", ≤40 KB).
 5. **Spara:** `saveMeetingToStartupAction` — en MÄNSKLIG knapptryckning (inte
-   agent-skriv) → coachen får därför välja **konfidentiell**, vilket
-   chatt-agentens `create_startup_note` med rätta aldrig får (§ 33). Skapar
+   agent-skriv). **Bolagsmöte:** coachen får välja **konfidentiell**, vilket
+   chatt-agentens `create_startup_note` med rätta aldrig får (§ 33); skapar
    `notes`-rad (author = coachen, AI-disclaimer-rad i bodyn), `activities`-rad
    (`kind='meeting'`, PII-fri titel, fail-soft) och purgar mötesraden.
+   **Internt/externt möte:** skapar en Markdown-fil ("Mötesanteckning – <motpart>
+   – <datum>.md") i coachens Filer via den delade `createUserFileRecord`
+   (§ 24.4), indexerar den för `search_my_files` (best-effort) och purgar
+   mötesraden; ingen `activities`-rad (kollektionen kräver ett bolag) och ingen
+   konfidentiell-flagga (filen är redan strikt ägaren-bara). Granskningsvyn
+   visar sparmålet för vald typ, och "Föreslå uppgifter i chatten" föreslår
+   uppgifter/events/anslagstavla i stället för bolagskort för interna/externa
+   möten.
 6. **Vidare i chatten:** "Föreslå uppgifter i chatten" skickar protokollet som
    en vanlig user-tur (mänskligt klick, § 33-mönstret) → agenten föreslår/
    utför `create_task`/`update_startup_field`/`create_event` med
@@ -4596,11 +4729,22 @@ persisterad/loggad, når aldrig AI-kontexten. Fail-soft utan koppling.
   röstprofiler görs.
 - **Fas 2 (implementerad):** LLM-gissad turindelning på språkliga grunder —
   ingen ljudanalys alls.
-- **Fas 3 (INTE implementerad — grindad):** akustisk diarisering till anonyma
-  etiketter ("Talare 1/2") som coachen döper manuellt. Kräver
-  leverantörsstöd (Voxtral saknar diarisering i API:t) ELLER en självhostad
-  EU-komponent = nytt beroende ⇒ **maintainer-beslut + DPIA-tillägg innan
-  bygge**. `MeetingSegment.speaker` är förberett.
+- **Fas 3 (implementerad, env-gated — AV som default):** Voxtral Transcribe 2
+  har inbyggd diarisering (`diarize=true` → `segments[].speaker_id`; samma
+  leverantör, samma DPA, ingen ny komponent — grindens förutsättning är
+  uppfylld, DPIA-tillägget finns i `docs/privacy/dpia-meeting-transcription.md`
+  § 6). Aktiveringen är maintainerns beslut: `MOVEXUM_MEETING_DIARIZATION=1`
+  i Coolify. **Begränsning som styr designen:** varje segment diariseras för
+  sig och ljudet finns inte kvar att jämföra mot (och röstavtryck byggs
+  aldrig), så talar-id:n är **segmentlokala** — "S1" i två segment är inte
+  nödvändigtvis samma person. Därför renderas turerna som repliker med
+  **talstreck** (`MEETING_TURN_PREFIX`), aldrig som numrerade talare; den
+  språkliga turindelningen (Fas 2, `structureMeetingTranscript`) får de
+  akustiska gränserna som hårda gränser och sätter konsekventa
+  "Talare 1/2"-etiketter, som coachen döper. En segmentövergripande
+  talaridentitet skulle kräva att ljudet sparas till mötets slut = brott mot
+  § 34.2 och ett nytt DPIA-beslut — byggs inte. `MeetingSegment.speaker`
+  förblir reserverat.
 
 ### 34.5 Regelefterlevnad
 
@@ -4861,39 +5005,88 @@ roll**:
 
 ---
 
-## 37. Hemmaplan — organisationens startsida (intranät)
+## 37. Dashboard — organisationens startsida (intranät)
 
 ### 37.1 Översikt
 
-`/hem` (modul `hem`, titel **Hemmaplan**, först i "Översikt"-railen) är den
+`/hem` (modul `hem`, titel **Dashboard**, först i "Översikt"-railen) är den
 sida personalen landar på efter inloggning (`/` och `/dashboard` redirectar
 dit; PWA:ns `start_url` pekar dit). En ren `startup_member` redirectas
-oförändrat till `/min-oversikt` (§ 22). Sidan är en **boxlös dashboard i
-full bredd** (2026-09; samma uttryck som årshjulets dashboard § 30.5bis:
-hårlinjer, eyebrow-etiketter, inga stora kort eller färgytor) med en
-12-kolumners grid — huvudspalt (8/12) + sidospalt (4/12) från `xl`, en kolumn
-på mindre skärmar:
+oförändrat till `/min-oversikt` (§ 22). **Uttryck (2026-09): en redaktionell
+förstasida, inte en dashboard** — inga kort, inga boxar; allt flyter inline
+på canvasen med hårlinjer, och typskalan är **samma som chatten** (hälsning
+28/34 px, sektionsrubriker 16 px, brödtext 13 px).
+`components/home/HomeFrontPage.tsx` äger layouten; `app/hem/page.tsx` äger
+all IO och skickar färdig data:
 
-1. **Hälsning + nyckeltalsrad** — svensk tidshälsning, datumrad med ISO-vecka
-   (`swedishDateLine`), rollfiltrerade genvägs-chips och fem KPI-tiles med
-   avdelare: aktiva bolag, nya inflöden 7 d (med delta mot föregående 7 d),
-   pågående workshops, egna öppna uppgifter, punkter på agendan 14 d. Alla
-   räknas via `getList(1,1).totalItems` med användarens token; en räkning som
-   felar visar "–", aldrig 0.
-2. **Flikar** (`HomeBoardTabs`, huvudspalten): **Anslagstavla** (news/notice/
-   celebration), **Så gör vi** (hårdkodad plattformsintro `PlatformIntro` +
-   dynamiska `instruction`-inlägg som hopfällda rader) och
-   **Internutbildningar** (`kind='training'`). Aktiv flik speglas i URL:en
-   (`?flik=anslagstavla|sa-gor-vi|internutbildningar`) så länkar från chatten
-   och aktivitetsloggen öppnar rätt flik; `orgPostTabFor(kind)` i
-   `@platform/shared` är mappningen typ → flik.
-3. **Bolagsnytt** (huvudspalten) — den samlade aktivitetsloggen (§ 32), samma
-   laddare som chatten.
-4. **Den här veckan** (sidospalten) — årshjulets poster + planerade events
-   14 dagar framåt, grupperade per dag ("Idag/Imorgon/Torsdag/20 sep").
-5. **Omvärld** (sidospalten, `OmvarldFeed`) — senaste posterna från
-   EU-whitelistade RSS-källor (§ 9.8) med källfilter-chips och en ärlig
-   statusrad per källa (§ 37.4).
+1. **Masthead** — folio-rad (datum · ISO-vecka · "Hemmaplan") under en
+   ink-linje, hälsningen i Sora och "Gå direkt till"-raden som textlänkar
+   (rollfiltrerade). (Den dekorativa årsringen togs bort 2026-09.) Under det
+   en **boxlös siffer-rad**
+   (`StatFigure`): fem nyckeltal fördelade över bredden — stor tabulär siffra
+   i Sora, etikett i kapitäler, hint och delta — varje figur är en länk till
+   sin vy. En räkning som felade visas som "–", aldrig som 0.
+2. **Kalendern** (full bredd) — en **tidslinje** (`HomeTimelineStrip`) med
+   valbart fönster **7 · 14 dagar · Månad** (`?dagar=7|14|30`,
+   `parseHomeWindowDays` i `@platform/shared` home.ts; **default 7 dagar**;
+   fliken bevaras i länkarna). Dagslinjal (idag som fylld brand-cirkel, helger
+   tonade, månadsetikett vid skifte; kolumnbredd efter fönster, månaden
+   scrollar i sidled) med årshjulets poster och events som **band** över
+   sina dagar — perioder långa, endagsposter korta; överlappande band packas
+   i körfält av den rena, enhetstestade `buildHomeTimeline`, som även räknar
+   ut hur långt en etikett får flyta ut över lediga dagar (`labelTo`) — hela
+   etikettytan ritas som en ljus box (texten hamnar aldrig utanför en ruta)
+   och postens faktiska dagar med fylligare ton inuti. Events i lila,
+   årshjulet i brand-ton. Fönstret kan korsa årsskiftet → `page.tsx` läser
+   båda åren vid behov. **Klick på en årshjulspost** öppnar den i sin helhet:
+   länken är `/arshjul?item=<id>` och `AnnualWheelView` (`openItemId`) sätter
+   år + månadsfokus, markerar raden och öppnar redigeringsdialogen för staff
+   (observer får fokus + markering). Parametern formatvalideras i
+   `arshjul/page.tsx` och tas bort ur URL:en efter öppning. Events länkar som
+   förut till `/events/<id>`.
+   **Kategori-synlighet:** bara årshjulskategorier med `show_on_home`
+   (migration **1700000146**, bool, backfillat `true`; speglat i
+   `setup-via-api.mjs`) visas — superadmin bockar i/ur **"Hemmaplan"** per
+   kategori i `/arshjul` → Kategorier (t.ex. Event ja, Styrelse & VD nej).
+   Filtret görs server-side i `page.tsx` via `annualWheelHiddenOnHome`
+   (ren, enhetstestad); saknat fält tolkas som "visas", bara ett uttryckligt
+   `false` döljer. Posterna finns kvar oförändrat i `/arshjul` (§ 30.3).
+3. **Från Movexum** (huvudspalt 8/12) — avdelningarna **Anslagstavla ·
+   Internutbildningar** som Sora-ord i rad (`HomeBoardTabs`; aktiv = ink med
+   kort brand-streck, antal som upphöjd siffra), URL-synk
+   `?flik=anslagstavla|internutbildningar`. Båda sätts som en tidningssida:
+   **första inlägget som toppnyhet** (typ-eyebrow i färg, hela texten upp
+   till 1 400 tecken), resten som **notiser i två spalter** med hårlinjer.
+   Redigeraren är inline med brand-toppstreck. **"Så gör vi" (instruktioner +
+   den hårdkodade plattformsintron) är borttagen från Hemmaplan (2026-09)**;
+   `?flik=sa-gor-vi` landar på anslagstavlan och `kind=instruction`-inlägg
+   visas inte på startsidan (inläggstypen finns kvar i datamodellen).
+   `OrgPostList` behåller `variant="compact"` (numrerad handbok) för
+   framtida bruk.
+4. **Sidospalten** (4/12; på mobil under avdelningarna) — **två likadana,
+   korta listor** så båda syns direkt: **Bolagsnytt** (`CompanyNews`, de
+   senaste **6** ur den samlade aktivitetsloggen § 32, "Hela loggen" →
+   `/aktivitet`) och under den **Omvärld** (`OmvarldFeed`, § 37.4, max 6) —
+   båda som **vertikal
+   tidslinje** med hårlinje, färgprickar (lila = AI-utfört/verktyg, grön =
+   utbildning, gul = avtal/möte, brand = övrigt; Movexum-blå = extern källa),
+   eyebrow med tid + bolag/källa och "AI"-märkning (art. 13). Omvärlden har
+   källfilter som understrukna textlänkar med statusprick och en ärlig
+   statusrad per källa.
+
+Nyckeltalen läses fortfarande via `getList(1,1).totalItems` med användarens
+token. Ingen ny dataväg; enda nya fältet är `annual_wheel_categories.show_on_home`
+(icke-PII konfiguration); riskklass n/a.
+
+**Client-/server-gränsen (läxa från staging 2026-09).** Slug-mappningen för
+flikarna (`HOME_TAB_PARAM`, `HOME_TAB_SLUGS`, `homeTabFromSlug`, `homeTabHref`)
+bor i `@platform/shared` (`org-posts.ts`, ren + enhetstestad). Den låg först i
+den `'use client'`-märkta `HomeBoardTabs.tsx` och anropades från
+serverkomponenten `page.tsx` → Next kastar "Attempted to call
+homeTabFromSlug() from the server but homeTabFromSlug is on the client" och
+HELA Hemmaplan föll i felvyn "Något gick fel" (digest, ingen stacktrace för
+användaren). Exportera aldrig hjälpfunktioner ur en `'use client'`-modul för
+serverbruk — lägg dem i en ren modul.
 
 `AutoRefresh` (klient) kör `router.refresh()` var 10:e minut och när fliken
 blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdning.
@@ -4903,17 +5096,26 @@ blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdn
 | Fil | Syfte |
 |-----|-------|
 | `packages/shared/src/org-posts.ts` (+ `.test.ts`) | Ren domänlogik för inlägg: typer, validering, synlighet (schemalagt/utgånget/målgrupp), sortering, RBAC-hjälpare |
-| `packages/shared/src/home.ts` (+ `.test.ts`) | Datumrad i svensk tid, veckoagenda (`buildHomeAgenda`), sammanslagning av omvärldsflöden (`mergeOmvarldItems`) |
+| `packages/shared/src/home.ts` (+ `.test.ts`) | Datumrad i svensk tid, veckoagenda (`buildHomeAgenda`), tidslinje med körfältspackning (`buildHomeTimeline`), kalenderfönster (`parseHomeWindowDays`, 7/14/30), sammanslagning av omvärldsflöden (`mergeOmvarldItems`) |
 | `backend/pocketbase-schema/migrations/1700000144_create_org_posts.js` | Collection `org_posts` |
 | `apps/web/src/lib/org-posts/data.ts` | Enda läsvägen (`listOrgPosts`, fail-soft) |
 | `apps/web/src/lib/actions/org-posts.ts` | Server actions: skapa/ändra/fäst/radera (RBAC, validering, superuser-fallback, audit) |
 | `apps/web/src/lib/feed/activity-feed.ts` | Delad feed-laddare (`activities` + `agent_actions`) för `/chatt` OCH `/hem` |
 | `apps/web/src/lib/ai/web.ts` | `fetchWebFeedItems` — strukturerade RSS-poster med in-process-cache (30 min) |
 | `apps/web/src/app/hem/page.tsx` | Sidan (server; alla källor parallellt via `Promise.allSettled`) |
-| `apps/web/src/components/home/OrgPostList.tsx` | Inläggslistan (client): redigerare, utfällning, fäst/redigera/ta bort — används i alla tre flikarna (`kinds` begränsar typvalet per flik) |
-| `apps/web/src/components/home/HomeBoardTabs.tsx` | Flikarna Anslagstavla · Så gör vi · Internutbildningar (client, URL-synk `?flik=`) |
-| `apps/web/src/components/home/PlatformIntro.tsx` | Hårdkodad plattformsintro (statisk, native `<details>`) under "Så gör vi" |
-| `apps/web/src/components/home/OmvarldFeed.tsx` | Omvärldsflödet (client): källfilter + statusrad (live/utgången cache/nere) |
+| `apps/web/src/components/home/HomeFrontPage.tsx` | Layouten (server): masthead + siffer-rad, tidslinje med fönsterval, spalter — ren presentation av data från `page.tsx` |
+| `backend/pocketbase-schema/migrations/1700000146_extend_annual_wheel_categories_show_on_home.js` | `annual_wheel_categories.show_on_home` (visas kategorin i kalendern på Hemmaplan?) |
+| `apps/web/src/components/home/HomeTimeline.tsx` | Tidslinje 7/14/30 dagar (dagslinjal + band i körfält, djuplänk `/arshjul?item=`) |
+| `apps/web/src/components/home/CompanyNews.tsx` | Bolagsnytt som vertikal tidslinje |
+| `apps/web/src/components/home/OrgPostList.tsx` | Inläggslistan (client): toppnyhet + notiser i spalter / numrerad handbok; redigerare, fäst/redigera/ta bort — används i alla tre flikarna (`kinds` begränsar typvalet per flik) |
+| `apps/web/src/components/home/PostComposer.tsx` | Redigeraren (client, § 37.6): verktygsrad, kortkommandon, emoji-väljare, media-uppladdning (knapp/dra-och-släpp/klistra in), förhandsgranskning |
+| `apps/web/src/components/home/EmojiPicker.tsx` + `lib/emoji/data.ts` + `lib/emoji-search.ts` | Fullt emoji-paket (genererat lokalt, ingen CDN), sök sv/en, hudton, senast använda |
+| `apps/web/src/components/home/PostMedia.tsx` | Bildgalleri + lightbox, film inline, dokument-chips — delas av inläggsvyn och förhandsgranskningen |
+| `apps/web/src/lib/markdown-edit.ts` (+ `.test.ts`) | Ren textmanipulation för verktygsraden (omslut, radprefix, länk, fortsätt lista) |
+| `apps/web/src/app/api/hem/media/route.ts` | Upload-route (staff-only) → `org_post_media`, returnerar validerad `OrgPostMedia` |
+| `backend/pocketbase-schema/migrations/1700000147_create_org_post_media.js` | Collection `org_post_media` + `org_posts.media` (json) |
+| `apps/web/src/components/home/HomeBoardTabs.tsx` | Avdelningsrubrikerna Anslagstavla · Internutbildningar (client, URL-synk `?flik=`; slug-logiken i `@platform/shared`) |
+| `apps/web/src/components/home/OmvarldFeed.tsx` | Omvärldsflödet (client) som tidslinjelista i samma språk som Bolagsnytt: källfilter + statusrad (live/utgången cache/nere) |
 | `apps/web/src/components/home/AutoRefresh.tsx` | Periodisk `router.refresh()` (10 min + vid synlig flik) |
 | `apps/web/src/components/home/TimeAgo.tsx` | Hydreringssäker relativ tid |
 | `apps/web/src/lib/ai/rss.ts` (+ `rss.test.ts`) | REN RSS/Atom-parser (ingen IO) — testad mot fixturer i Breakit-/Sifted-/EIC-/Vinnova-form |
@@ -4930,7 +5132,8 @@ som union i **migration 1700000145** och speglat i `setup-via-api.mjs` via
 `patchCollection`), `audience` (`staff | all`), `pinned`,
 `published_at` (tomt = direkt; framtid = schemalagt), `expires_at` (tomt =
 utgår aldrig), `link_url` (intern sökväg `/…` eller https — validerat i
-`isSafeOrgPostLink`, aldrig `javascript:`/`data:`), autodate explicit
+`isSafeOrgPostLink`, aldrig `javascript:`/`data:`), `media` (json,
+`OrgPostMedia[]` — § 37.6, migration **1700000147**), autodate explicit
 (§ 28.5). Speglad i `setup-via-api.mjs` (collection-def + `FORCE_CREATE_RULES`).
 
 **Målgrupp.** `staff` (default) syns för Movexum-personal + observer; `all`
@@ -5036,6 +5239,72 @@ finansiärer/utlysningar) — vill man bredda/smalna läggs källan till i
   `audience=all`-inlägg via RLS, och aldrig bolagsnytt/omvärld/agenda på `/hem`.
 
 ---
+
+### 37.6 Anslagstavlans redigerare — emoji, formatering & media
+
+Inläggen skrivs i `PostComposer` (client) som ersätter den tidigare rena
+textrutan. Lagringen är fortfarande **markdown i `org_posts.body`** (ingen
+HTML lagras, ingen WYSIWYG-DOM) — det som ändrats är redigeringsytan och
+renderarens delmängd:
+
+- **Verktygsrad + kortkommandon:** fet (Ctrl+B), kursiv (Ctrl+I), kod
+  (Ctrl+E), rubrik, punkt-/numrerad lista (Ctrl+Shift+8/7), checklista,
+  citat, länk (Ctrl+K), emoji (Ctrl+.), media. Enter i en lista fortsätter
+  listan (nästa nummer / ny checkruta), Enter på tom listrad avslutar den;
+  Ctrl+Enter publicerar. All textmanipulation är ren och enhetstestad i
+  `lib/markdown-edit.ts` (komponenten applicerar bara `{ value, start, end }`).
+- **Markdown-delmängden (`lib/safe-html.ts`)** är utökad — gäller ALLA ytor
+  som renderar via helpern (chatten, anslagstavlan): `*kursiv*`/`_kursiv_`,
+  `~~struken~~`, `` `kod` ``, `[text](url)`, automatiskt länkade
+  https-adresser, `> citat`, `---`, `- [ ]`/`- [x]`. **XSS-gränsen är
+  oförändrad:** allt escapas först; en länk släpps bara igenom som `<a href>`
+  om adressen är en intern sökväg (`/…`, inte `//…`) eller http(s) —
+  `javascript:`/`data:` visas som ren text (`isSafeHref`, låst i
+  `safe-html.test.ts`). Externa länkar får `rel="noopener noreferrer"`.
+- **Fullt emoji-paket:** `lib/emoji/data.ts` är GENERERAD av
+  `apps/web/scripts/generate-emoji-data.py` — en handkurerad lista i nio
+  kategorier (1 400+ emoji, inkl. flaggor) vars namn slås upp lokalt via
+  Pythons `unicodedata`; **ingen extern datakälla, ingen CDN** (§ 1). Sök på
+  engelska Unicode-namn och svenska sökord (`lib/emoji-search.ts`, ren +
+  enhetstestad: "hjärta" → ❤️ före 💔 via huvudord-rankning), hudton
+  (Fitzpatrick-modifierare bara på `SKIN_TONE_BASES`), "senast använda" i
+  `localStorage` (`movexum-emoji-recent`, bekvämlighet — ingen datakälla).
+  Katalogen (~40 KB) laddas lazy första gången väljaren öppnas.
+- **Media (bilder, film, dokument):** filer laddas upp DIREKT vid val (knapp,
+  dra-och-släpp på hela redigeraren, eller klistra in en bild) via
+  route-handlern `/api/hem/media` (§ 18.2-mönstret: inte bunden av
+  `serverActions.bodySizeLimit`; XHR med progress) till kollektionen
+  **`org_post_media`** (migration 1700000147; riktiga PB-filer, tokenlös publik
+  URL som `workshop_media`). Inlägget lagrar bara metadata i `org_posts.media`
+  (`OrgPostMedia[]`: id, url, kind, name, mime, size_bytes, ev. width/height —
+  max 8/inlägg). **`validateOrgPostInput` accepterar BARA URL:er till
+  org_post_media-filer** (`isOrgPostMediaUrl`, id måste matcha) — aldrig fria
+  bildlänkar (inget hotlink, ingen tracking-pixel). Mime/storlek valideras
+  med samma delade `validateOrgPostMediaFile` i klient OCH route (bild 15 MB,
+  film 200 MB, dokument PDF/Word/PowerPoint/Excel 50 MB; ändelse-fallback när
+  webbläsaren inte rapporterar mime). Visning via `PostMedia`: galleri
+  (1/2/3/4+ med "+N"), lightbox med piltangenter, `<video controls>`,
+  dokument-chips med typ + storlek. Hopfällda notiser visar en kompakt
+  tumnagelrad.
+- **Förhandsgranskning** renderar med exakt samma `chatMarkdownToHtml` +
+  `PostMedia` som inläggsvyn, så det man ser är det som publiceras.
+- **Schema-drift (§ 24.4/§ 30.4-invarianten):** PB släpper okända fält tyst.
+  Server-actionen läser tillbaka posten när media skickats och svarar med en
+  `warning` (visas som gul banner) om `org_posts.media` saknas i schemat —
+  aldrig en tyst lyckad no-op. Speglat i `setup-via-api.mjs`
+  (`org_post_media` + `patchCollection('org_posts', media)`).
+- **RBAC/GDPR:** upload-routen kräver `ORG_POST_AUTHOR_ROLES` (createRule är
+  roll-lös per § 21.3), tenant stämplas server-side, rate-limit 60/10 min per
+  användare, superuser-fallback bara vid PB v0.23.4:s tysta regel-nekande.
+  `org_post_media` list/view = auth + tenant (samma klass som `workshop_media`;
+  filen är ändå publik via URL — ladda inte upp personuppgifter, UI:t är
+  verksamhetsmaterial). `cascadeDelete` på tenant. Chatt-agenten kan **inte**
+  sätta `media` (`writable-fields.ts`: `agent: deny` — den kan inte ladda upp
+  filer och ska inte peka om bilagor); befintliga bilagor följer med orörda
+  när agenten uppdaterar text via `update_org_post`.
+- **Riskklass (EU AI Act):** n/a — ren redigerings-/presentationsfunktion,
+  ingen AI-inferens. Emoji-/mediadata når aldrig AI-kontexten annat än som
+  brödtext i `org_posts.body` (redan läsbar via `query_collection`, § 37.5).
 
 ## 38. Svensk tid i kalender & events (Europe/Stockholm)
 

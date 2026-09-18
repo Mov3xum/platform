@@ -24,7 +24,9 @@ import {
   SEARCH_STRATEGY_GUIDANCE,
   DOMAIN_GLOSSARY,
   AUTHORING_GUIDANCE,
-  CHAT_WRITE_ACTIONS_GUIDANCE
+  CHAT_WRITE_ACTIONS_GUIDANCE,
+  WEB_SEARCH_GUIDANCE,
+  WEB_SEARCH_OFF_HINT
 } from '@/lib/ai/guidance';
 import { buildChatTools, buildMemoryRecallBlock } from '@/lib/ai/tools';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
@@ -428,7 +430,8 @@ export async function sendChatMessage(
       webBlock,
       agentBlock,
       att.images,
-      options.agentId
+      options.agentId,
+      options.includeWebContext === true
     );
   }
 
@@ -469,7 +472,8 @@ async function runStaffChatWithTools(
   webBlock: string,
   agentBlock: string,
   images: Array<{ dataUrl: string }>,
-  agentId?: string
+  agentId?: string,
+  includeWebSearch = false
 ): Promise<ChatActionResult> {
   let collections: Awaited<ReturnType<typeof getExposedCollections>> = [];
   let schemaSummary = '';
@@ -507,7 +511,8 @@ async function runStaffChatWithTools(
     agentId
   };
 
-  const tools = buildChatTools(collections, { actor, includeMemory: true });
+  // "Webbkällor" = riktig internetsökning (`web_search`, § 9.8) utöver RSS-blocket.
+  const tools = buildChatTools(collections, { actor, includeMemory: true, includeWebSearch });
 
   const today = new Date().toISOString().slice(0, 10);
   const identityBlock =
@@ -524,6 +529,7 @@ async function runStaffChatWithTools(
     STAFF_TOOL_GUIDANCE +
     AUTHORING_GUIDANCE +
     SEARCH_STRATEGY_GUIDANCE +
+    (includeWebSearch ? WEB_SEARCH_GUIDANCE : WEB_SEARCH_OFF_HINT) +
     DOMAIN_GLOSSARY +
     memoryBlock +
     `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +

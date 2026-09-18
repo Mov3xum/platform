@@ -64,6 +64,7 @@ import {
   quarterForMonth,
   quarterSliceAngles,
   resolveAnnualWheelCategories,
+  annualWheelHiddenOnHome,
   roundedAnnulusSectorPath,
   sanitizeAnnualWheelTags,
   slugifyAnnualWheelCategoryKey,
@@ -946,4 +947,21 @@ test('expandAnnualWheelSeries repeats yearly, also for undated items, with clamp
   // Perioden följer med och slutdagen klampas.
   const period = expandAnnualWheelSeries({ year: 2027, month: 1, end_month: 2, end_day: 29 }, 'yearly', 12, 2028);
   assert.deepEqual(period.map((o) => [o.year, o.end_month, o.end_day]), [[2027, 2, 28], [2028, 2, 29]]);
+});
+
+test('resolveAnnualWheelCategories: show_on_home saknat = visas, false = döljs', () => {
+  const resolved = resolveAnnualWheelCategories([
+    { id: 'a', key: 'styrelse', label: 'Styrelse', token: 'gron', sort_order: 0 },
+    { id: 'b', key: 'event', label: 'Event', token: 'lila', sort_order: 1, show_on_home: true },
+    { id: 'c', key: 'vd', label: 'VD', token: 'gul', sort_order: 2, show_on_home: false }
+  ]);
+  assert.deepEqual(
+    resolved.map((c) => [c.id, c.showOnHome]),
+    [
+      ['styrelse', true],
+      ['event', true],
+      ['vd', false]
+    ]
+  );
+  assert.deepEqual([...annualWheelHiddenOnHome(resolved)], ['vd']);
 });

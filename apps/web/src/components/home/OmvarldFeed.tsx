@@ -6,11 +6,14 @@ import { TimeAgo } from './TimeAgo';
 import type { OmvarldItem } from '@platform/shared';
 
 /**
- * Omvärldsbevakningen på Hemmaplan (CLAUDE.md § 37.4) — klientdelen.
- * Servern har redan hämtat, sanerat och slagit ihop flödena (EU-whitelist,
- * stale-while-revalidate); här sker bara filtrering per källa och en ärlig
- * statusrad: vilka källor som svarade, hur färska posterna är och vilka som
- * är nere (med felorsak i tooltip). Länkar öppnas hos källan.
+ * Omvärldsbevakningen på Hemmaplan (CLAUDE.md § 37.4) — klientdelen, satt
+ * som SAMMA vertikala tidslinje som Bolagsnytt (hårlinje + prickar, eyebrow
+ * med källa och tid) så att interna och externa nyheter läses som två listor
+ * i samma språk i sidospalten. Servern har redan hämtat, sanerat och slagit
+ * ihop flödena (EU-whitelist, stale-while-revalidate); här sker bara
+ * filtrering per källa och en ärlig statusrad: vilka källor som svarade, hur
+ * färska posterna är och vilka som är nere (med felorsak i tooltip). Länkar
+ * öppnas hos källan.
  */
 
 export interface OmvarldSourceStatus {
@@ -22,6 +25,11 @@ export interface OmvarldSourceStatus {
   fetched_at: string;
   error?: string;
   count: number;
+  /** SE/EU — residency-transparens. */
+  country: 'SE' | 'EU';
+  /** Vem som står bakom källan och vad den bevakar. */
+  description: string;
+  covers: string;
 }
 
 export function OmvarldFeed({
@@ -44,12 +52,14 @@ export function OmvarldFeed({
   return (
     <div>
       {sources.length > 1 && (
-        <div className="mb-3 flex flex-wrap gap-1">
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px]">
           <button
             type="button"
             onClick={() => setFilter(null)}
-            className={`rounded-full px-2.5 py-1 text-[11.5px] font-medium transition ${
-              filter === null ? 'bg-brand text-brand-foreground' : 'bg-canvas-muted text-foreground-muted hover:text-foreground'
+            className={`font-semibold transition ${
+              filter === null
+                ? 'text-foreground underline decoration-brand decoration-2 underline-offset-[5px]'
+                : 'text-foreground-subtle hover:text-foreground'
             }`}
           >
             Alla
@@ -60,9 +70,11 @@ export function OmvarldFeed({
               type="button"
               disabled={!s.ok || s.count === 0}
               onClick={() => setFilter((f) => (f === s.key ? null : s.key))}
-              title={s.ok ? `${s.count} poster` : s.error ? `Nere: ${s.error}` : 'Nere'}
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                filter === s.key ? 'bg-brand text-brand-foreground' : 'bg-canvas-muted text-foreground-muted hover:text-foreground'
+              title={s.ok ? `${s.covers || s.label} · ${s.count} poster` : s.error ? `Nere: ${s.error}` : 'Nere'}
+              className={`inline-flex items-center gap-1.5 font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                filter === s.key
+                  ? 'text-foreground underline decoration-brand decoration-2 underline-offset-[5px]'
+                  : 'text-foreground-subtle hover:text-foreground'
               }`}
             >
               <span
@@ -78,50 +90,72 @@ export function OmvarldFeed({
       )}
 
       {visible.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-default px-4 py-8 text-center text-[13px] text-foreground-subtle">
+        <p className="text-[12.5px] leading-relaxed text-foreground-subtle">
           {items.length === 0
             ? 'Omvärldsflödena svarar inte just nu. Sidan försöker igen automatiskt.'
             : 'Inga poster från den källan just nu.'}
-        </div>
+        </p>
       ) : (
-        <ul className="divide-y divide-default">
+        <ol className="relative ml-[5px] border-l border-default pl-5">
           {visible.map((item) => (
-            <li key={item.link}>
-              <a
-                href={item.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group -mx-2 flex gap-3 rounded-xl px-2 py-2.5 transition hover:bg-canvas-subtle"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-foreground-subtle">
-                    <span className="truncate">{item.source}</span>
-                    {item.pubDate && (
-                      <>
-                        <span aria-hidden>·</span>
-                        <TimeAgo iso={item.pubDate} className="shrink-0 normal-case tracking-normal font-medium" />
-                      </>
-                    )}
-                  </div>
-                  <p className="mt-0.5 line-clamp-2 text-[13.5px] font-medium leading-snug text-foreground">
-                    {item.title}
-                  </p>
-                  {item.summary && (
-                    <p className="mt-0.5 line-clamp-2 text-[12px] leading-relaxed text-foreground-muted">
-                      {item.summary}
-                    </p>
-                  )}
-                </div>
-                <Icon
-                  name="external"
-                  size={12}
-                  className="mt-1 shrink-0 text-foreground-subtle transition group-hover:text-foreground"
+            <li key={item.link} className="relative pb-3.5 last:pb-0">
+              <a href={item.link} target="_blank" rel="noopener noreferrer" className="group block">
+                <span
+                  aria-hidden
+                  className="absolute -left-[25px] top-[6px] h-[9px] w-[9px] rounded-full bg-movexum-bla ring-4 ring-canvas"
                 />
+                <span className="flex items-center gap-2 text-[10.5px] uppercase tracking-[0.12em] text-foreground-subtle">
+                  <span className="truncate">{item.source}</span>
+                  {item.pubDate && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <TimeAgo iso={item.pubDate} className="shrink-0 normal-case tracking-normal" />
+                    </>
+                  )}
+                </span>
+                <span className="mt-0.5 flex items-start gap-2">
+                  <span className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground group-hover:underline group-hover:decoration-brand/40 group-hover:underline-offset-4">
+                    {item.title}
+                  </span>
+                  <Icon name="external" size={11} className="mt-[3px] shrink-0 text-foreground-subtle" />
+                </span>
               </a>
             </li>
           ))}
-        </ul>
+        </ol>
       )}
+
+      <details className="group mt-3 rounded-xl border border-default">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-[11.5px] font-medium text-foreground-muted transition hover:text-foreground [&::-webkit-details-marker]:hidden">
+          <Icon name="globe" size={12} className="shrink-0 text-brand" />
+          Om källorna
+          <span className="text-foreground-subtle">· {sources.length} EU-baserade flöden</span>
+          <Icon name="chevdown" size={11} className="ml-auto shrink-0 text-foreground-subtle transition group-open:rotate-180" />
+        </summary>
+        <ul className="divide-y divide-default border-t border-default">
+          {sources.map((s) => (
+            <li key={s.key} className="px-3 py-2.5">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span
+                  aria-hidden
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    !s.ok ? 'bg-movexum-orange' : s.stale ? 'bg-movexum-gul' : 'bg-movexum-gron'
+                  }`}
+                />
+                <span className="text-[12.5px] font-semibold text-foreground">{s.label}</span>
+                <span className="rounded-md bg-canvas-muted px-1.5 py-px text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
+                  {s.country}
+                </span>
+                <span className="text-[11px] text-foreground-subtle">{s.covers}</span>
+              </div>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-foreground-muted">{s.description}</p>
+              {!s.ok && s.error ? (
+                <p className="mt-1 text-[11px] text-movexum-morkorange">Svarar inte just nu: {s.error}</p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </details>
 
       <p className="mt-3 text-[11px] leading-relaxed text-foreground-subtle">
         {okSources.length > 0 ? (

@@ -119,7 +119,7 @@ export default async function EventDetailPage({
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb={`Hemmaplan / Events / ${event.name}`}
+        crumb={`Dashboard / Events / ${event.name}`}
         title={event.name}
         subtitle={event.description || `Event av typen ${event.type}`}
         actions={

@@ -1,6 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import {
+  coerceOrgPostMedia,
   isOrgPostAudience,
   isOrgPostKind,
   sortOrgPosts,
@@ -8,7 +9,7 @@ import {
 } from '@platform/shared';
 
 /**
- * Hemmaplans anslagstavla (CLAUDE.md § 37) — EN läsväg som delas av
+ * dashboardens anslagstavla (CLAUDE.md § 37) — EN läsväg som delas av
  * startsidan (`/hem`), "Min översikt" (bolagsmedlemmar, audience=all) och
  * server-actions. Läsningen går via den pb-instans anroparen skickar in
  * (användarens auth-token → PB-RLS gäller, § 21: staff/observer ser tenantens
@@ -34,6 +35,7 @@ interface OrgPostRow {
   published_at?: string;
   expires_at?: string;
   link_url?: string;
+  media?: unknown;
   created: string;
   updated?: string;
   expand?: { author?: { display_name?: string; email?: string } };
@@ -55,6 +57,7 @@ export function rowToOrgPost(r: OrgPostRow): OrgPost {
     published_at: r.published_at || null,
     expires_at: r.expires_at || null,
     link_url: r.link_url || null,
+    media: coerceOrgPostMedia(r.media),
     created: r.created,
     updated: r.updated
   };

@@ -4,8 +4,10 @@ import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import {
   ORG_POST_KIND_LABELS,
   canEditOrgPost,
+  coerceOrgPostMedia,
   isOrgPostAudience,
   isOrgPostKind,
+  orgPostHomePath,
   validateOrgPostInput,
   type OrgPostAudience,
   type OrgPostKind
@@ -17,7 +19,7 @@ import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
 
 /**
- * Hemmaplans inlägg (`org_posts`, § 37) via det delade skrivlagret — så att
+ * dashboardens inlägg (`org_posts`, § 37) via det delade skrivlagret — så att
  * chatten kan administrera anslagstavlan, "Så gör vi" och framför allt
  * fliken INTERNUTBILDNINGAR ("lägg upp en internutbildning om GDPR på
  * torsdag …") med exakt samma regler som UI:t:
@@ -81,12 +83,7 @@ interface OrgPostRow {
   published_at?: string;
   expires_at?: string;
   link_url?: string;
-}
-
-function homePathFor(kind: OrgPostKind): string {
-  if (kind === 'training') return '/hem?flik=internutbildningar';
-  if (kind === 'instruction') return '/hem?flik=sa-gor-vi';
-  return '/hem';
+  media?: unknown;
 }
 
 function toPayload(v: ReturnType<typeof validateOrgPostInput>): Record<string, unknown> {
@@ -133,7 +130,9 @@ export async function createOrgPost(
     pinned: params.pinned === true,
     published_at: params.publishedAt ?? null,
     expires_at: params.expiresAt ?? null,
-    link_url: params.linkUrl ?? null
+    link_url: params.linkUrl ?? null,
+    // Media laddas upp av en människa i UI:t (§ 37.6) — agenten skapar textinlägg.
+    media: []
   });
   if (!v.ok) return fail('INVALID_VALUE', v.error);
   const payload = toPayload(v);
@@ -171,7 +170,7 @@ export async function createOrgPost(
     kindLabel: ORG_POST_KIND_LABELS[v.value.kind],
     audience: v.value.audience,
     pinned: v.value.pinned,
-    homePath: homePathFor(v.value.kind)
+    homePath: orgPostHomePath(v.value.kind)
   });
 }
 
@@ -210,7 +209,7 @@ export async function updateOrgPostFields(
     actor,
     ORG_POSTS_WRITE_COLLECTION,
     id,
-    'id,tenant,author,title,body,kind,audience,pinned,published_at,expires_at,link_url'
+    'id,tenant,author,title,body,kind,audience,pinned,published_at,expires_at,link_url,media'
   );
   if (!existing) return fail('NOT_FOUND', 'Inlägget hittades inte i din organisation.');
   if (!canEditOrgPost({ id: actor.id, roles: actor.roles }, { author: existing.author ?? '' })) {
@@ -225,7 +224,9 @@ export async function updateOrgPostFields(
     pinned: existing.pinned === true,
     published_at: existing.published_at || null,
     expires_at: existing.expires_at || null,
-    link_url: existing.link_url || null
+    link_url: existing.link_url || null,
+    // Befintliga bilagor följer med orörda — `media` är inte ett agent-fält.
+    media: coerceOrgPostMedia(existing.media)
   };
   for (const f of fields) merged[f] = changes[f];
   if (merged.kind !== undefined && !isOrgPostKind(merged.kind)) {
@@ -269,6 +270,6 @@ export async function updateOrgPostFields(
     kindLabel: ORG_POST_KIND_LABELS[v.value.kind],
     audience: v.value.audience,
     pinned: v.value.pinned,
-    homePath: homePathFor(v.value.kind)
+    homePath: orgPostHomePath(v.value.kind)
   });
 }

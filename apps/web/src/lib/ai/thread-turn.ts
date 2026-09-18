@@ -145,6 +145,8 @@ export async function executeThreadTurn(
   const promptText = displayText + att.textBlock;
   const userMessages = [...history, { role: 'user' as const, content: promptText }];
 
+  // "Webbkällor" = riktig internetsökning (verktyget `web_search`, § 9.8) PLUS
+  // ett litet block med aktuella EU-RSS-rubriker som billig omvärldskontext.
   const webBlock = options.includeWebContext
     ? await buildWebBlock(pb, DEFAULT_CHAT_WEB_SOURCES)
     : '';
@@ -174,6 +176,7 @@ export async function executeThreadTurn(
   const turn = await runStaffChatTurn(pb, user, {
     userMessages,
     webBlock,
+    includeWebSearch: options.includeWebContext === true,
     agentBlock,
     images: att.images,
     agentId: thread.agent,
@@ -207,6 +210,7 @@ export async function executeThreadTurn(
     steps: steps.length > 0 ? steps : undefined,
     approval_request: turn.result.approvalRequest,
     meeting_request: turn.result.meetingRequest,
+    sources: turn.result.sources.length > 0 ? turn.result.sources : undefined,
     at: new Date().toISOString()
   };
 

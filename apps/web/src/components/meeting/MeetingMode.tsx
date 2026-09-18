@@ -2,20 +2,29 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  MAX_MEETING_COUNTERPART,
   MAX_MEETING_SECONDS,
   MAX_MEETING_SEGMENTS,
   MEETING_CONSENT_TEXT,
+  MEETING_KINDS,
+  MEETING_KIND_HINTS,
+  MEETING_KIND_LABELS,
+  type MeetingKind,
   MEETING_FIRST_SEGMENT_SECONDS,
+  MEETING_MIN_SEGMENT_SECONDS,
   MEETING_SEGMENT_SECONDS,
-  MIN_VOICE_BYTES,
   formatMeetingClock,
   isEffectivelySilent,
-  measureFloatLevel,
-  validateVoiceClip
+  type AudioLevel
 } from '@platform/shared';
 import { Icon } from '@/components/proto/Icon';
-import { pickRecorderMime } from '@/components/VoiceInputButton';
-import { VOICE_WAV_MIME, convertBlobToWavDetailed } from '@/lib/audio/wav';
+import {
+  PcmRecorder,
+  createCaptureContext,
+  supportsPcmCapture,
+  type PcmSegment
+} from '@/lib/audio/pcm-recorder';
+import { VOICE_WAV_MIME, renderSamplesToWavDetailed } from '@/lib/audio/wav';
 import {
   discardMeetingAction,
   endMeetingAction,
@@ -35,11 +44,14 @@ import {
  *   1. Uppstart — välj bolag/titel och bekräfta SAMTYCKESGRINDEN (GDPR art. 7:
  *      mötet spelar in andra människor än användaren själv). Ingen inspelning
  *      utan bocken.
- *   2. Inspelning — MediaRecorder STARTAS OM var ~90:e sekund så varje segment
- *      blir en komplett fil som transkriberas direkt (Voxtral, Mistral EU) och
- *      dyker upp i live-transkriptet. Ljudet lämnar aldrig webbläsaren annat än
- *      i själva segment-anropet och lagras aldrig. En krasch kostar max ett
- *      segment — redan uppladdade segment finns kvar server-side.
+ *   2. Inspelning — ljudet fångas som EN obruten PCM-ström (Web Audio,
+ *      `lib/audio/pcm-recorder.ts`) och klipps i PAUSER i talet (60–90 s;
+ *      första segmentet 8–20 s så att texten syns snabbt). Varje segment
+ *      kodas till 16 kHz WAV, transkriberas direkt (Voxtral, Mistral EU —
+ *      eller en självhostad svensk modell när operatören satt upp en, § 31)
+ *      och dyker upp i live-transkriptet. Ljudet lämnar aldrig webbläsaren
+ *      annat än i själva segment-anropet och lagras aldrig. En krasch kostar
+ *      max ett segment — redan uppladdade segment finns kvar server-side.
  *   3. Granskning — redigerbart transkript, AI-protokollutkast och LLM-gissad
  *      turindelning (anonyma "Talare 1"-etiketter — ingen röstanalys, § 31.4).
  *   4. Sparande — en MÄNSKLIG knapptryckning som lägger protokollet som
@@ -52,8 +64,12 @@ import {
  */
 
 export interface MeetingInitial {
+  /** Mötestyp (default `startup`). */
+  kind?: MeetingKind;
   startupId?: string;
   startupName?: string;
+  /** Förifylld motpart för internt/externt möte. */
+  counterpart?: string;
   title?: string;
   /** Återuppta ett tidigare möte (status recording/ended) i granskningsläget. */
   resumeMeetingId?: string;
@@ -76,13 +92,38 @@ interface LiveSegment {
   silent?: boolean;
   /** Ljud fanns men AI-tjänsten kunde inte tolka något tal (serverns orsak). */
   warning?: string;
+  /** Språk modellen rapporterade — visas när det inte är svenska. */
+  language?: string;
 }
 
-// Så länge (i mätintervall om 200 ms) mikrofonen får vara helt tyst innan
-// panelen varnar — ~6 s täcker naturliga pauser men fångar en avstängd/fel
-// vald mikrofon långt innan första segmentet (20 s) är uppladdat.
-const MIC_SILENT_TICKS_BEFORE_WARNING = 30;
-const LEVEL_METER_INTERVAL_MS = 200;
+// Så länge mikrofonen får vara helt tyst innan panelen varnar — ~6 s täcker
+// naturliga pauser men fångar en avstängd/fel vald mikrofon långt innan
+// första segmentet (8–20 s) är uppladdat.
+const MIC_SILENT_WARNING_MS = 6000;
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: 'engelska',
+  de: 'tyska',
+  fr: 'franska',
+  es: 'spanska',
+  it: 'italienska',
+  nl: 'nederländska',
+  pt: 'portugisiska',
+  ru: 'ryska',
+  ar: 'arabiska',
+  hi: 'hindi',
+  zh: 'kinesiska',
+  ja: 'japanska',
+  ko: 'koreanska',
+  no: 'norska',
+  nb: 'norska',
+  da: 'danska',
+  fi: 'finska'
+};
+
+function languageLabel(code: string): string {
+  return LANGUAGE_NAMES[code] ?? code;
+}
 
 interface WakeLockSentinelLike {
   release: () => Promise<void>;
@@ -96,6 +137,8 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
   const [phase, setPhase] = useState<Phase>('setup');
   const [error, setError] = useState<string | null>(null);
   const [startups, setStartups] = useState<MeetingStartupOption[]>([]);
+  const [kind, setKind] = useState<MeetingKind>(initial?.kind ?? 'startup');
+  const [counterpart, setCounterpart] = useState(initial?.counterpart || '');
   const [startupId, setStartupId] = useState(initial?.startupId || '');
   const [title, setTitle] = useState(initial?.title || '');
   const [consent, setConsent] = useState(false);
@@ -116,12 +159,11 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
   // transkriptet blev tomt.
   const silentCountRef = useRef(0);
   const emptyWithAudioRef = useRef(0);
-  // Live-mätare på mikrofonen (ren nivåmätning, ingen röstanalys § 31.4).
+  // Live-mätare på mikrofonen (ren nivåmätning, ingen röstanalys § 31.4) —
+  // drivs av samma PCM-ström som inspelningen.
   const [inputLevel, setInputLevel] = useState(0);
   const [micSilent, setMicSilent] = useState(false);
-  const micSilentTicksRef = useRef(0);
-  const meterCtxRef = useRef<AudioContext | null>(null);
-  const meterTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const micSilentSinceRef = useRef<number | null>(null);
 
   // Granskning
   const [transcript, setTranscript] = useState('');
@@ -129,14 +171,19 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
   const [aiBusy, setAiBusy] = useState<null | 'protocol' | 'turns'>(null);
   const [includeTranscript, setIncludeTranscript] = useState(true);
   const [confidential, setConfidential] = useState(false);
-  const [savedInfo, setSavedInfo] = useState<{ startupName: string; startupId: string } | null>(null);
+  const [savedInfo, setSavedInfo] = useState<{
+    kind: MeetingKind;
+    subject: string;
+    startupId?: string;
+    fileId?: string;
+    filename?: string;
+  } | null>(null);
 
   const meetingIdRef = useRef<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const segTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recorderRef = useRef<PcmRecorder | null>(null);
+  const captureCtxRef = useRef<AudioContext | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const nextIndexRef = useRef(0);
   const recordingRef = useRef(false);
   const discardedRef = useRef(false);
   const elapsedRef = useRef(0);
@@ -146,13 +193,12 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
   // ── Miljökontroll: mikrofonen finns bara i säker kontext (https/localhost) ──
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const hasApi =
-      typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
-    if (hasApi) return;
+    if (supportsPcmCapture()) return;
+    const hasMic = !!navigator.mediaDevices?.getUserMedia;
     setBlockedReason(
-      window.isSecureContext === false
+      !hasMic && window.isSecureContext === false
         ? 'Mötesinspelning kräver en säker anslutning (https) — webbläsaren stänger av mikrofonen på http.'
-        : 'Din webbläsare stöder inte ljudinspelning (MediaRecorder saknas). Prova Chrome, Edge, Firefox eller Safari 14+.'
+        : 'Din webbläsare stöder inte ljudinspelning (Web Audio saknas). Prova Chrome, Edge, Firefox eller Safari 14+.'
     );
   }, []);
 
@@ -202,6 +248,8 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
       }
       meetingIdRef.current = res.meeting.id;
       setTitle(res.meeting.title);
+      setKind(res.meeting.kind);
+      setCounterpart(res.meeting.counterpart);
       setStartupId(res.meeting.startupId);
       setTranscript(res.meeting.transcript);
       setPhase('review');
@@ -235,6 +283,8 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     function onVisibility() {
       if (document.visibilityState === 'visible' && recordingRef.current) {
         void requestWakeLock();
+        // Ljudkontexten kan ha pausats medan fliken var dold — väck den.
+        void captureCtxRef.current?.resume().catch(() => undefined);
       }
     }
     document.addEventListener('visibilitychange', onVisibility);
@@ -253,88 +303,27 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, []);
 
-  const releaseStream = useCallback(() => {
+  /** Stoppar inspelaren (levererar sista segmentet), mikrofonen och ljudkontexten. */
+  const stopCapture = useCallback(() => {
+    try {
+      recorderRef.current?.stop();
+    } catch {
+      /* redan stoppad */
+    }
+    recorderRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-  }, []);
-
-  // ── Mikrofonmätare: visar direkt om mikrofonen fångar något alls ──────────
-  // Utan den syns en avstängd/fel vald mikrofon först som ett tomt transkript
-  // efter mötet. Ren nivåmätning (topp/RMS) — ingen röstidentifiering.
-  const stopLevelMeter = useCallback(() => {
-    if (meterTimerRef.current) clearInterval(meterTimerRef.current);
-    meterTimerRef.current = null;
-    void meterCtxRef.current?.close().catch(() => undefined);
-    meterCtxRef.current = null;
-    micSilentTicksRef.current = 0;
+    void captureCtxRef.current?.close().catch(() => undefined);
+    captureCtxRef.current = null;
+    micSilentSinceRef.current = null;
     setInputLevel(0);
     setMicSilent(false);
   }, []);
-
-  /**
-   * Skapas SYNKRONT i klick-händelsen (innan getUserMedia/server-anropet
-   * hunnit vänta) — webbläsarens autoplay-policy låter en AudioContext starta
-   * bara inom användaraktiveringen; skapad senare blir den `suspended` och
-   * mätaren skulle läsa nollor och FALSKT varna för tyst mikrofon.
-   */
-  const createMeterContext = useCallback((): AudioContext | null => {
-    try {
-      const w = window as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
-      const Ctor = w.AudioContext ?? w.webkitAudioContext;
-      return Ctor ? new Ctor() : null;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const startLevelMeter = useCallback(
-    (stream: MediaStream, ctx: AudioContext | null) => {
-      stopLevelMeter();
-      if (!ctx) return;
-      try {
-        const source = ctx.createMediaStreamSource(stream);
-        const analyser = ctx.createAnalyser();
-        // Stort tidsfönster (~340 ms vid 48 kHz) så varje mätning täcker
-        // hela intervallet — annars fångar en 43 ms-glimt bara delar av
-        // talet och mätaren fladdrar/visar falskt låga nivåer.
-        analyser.fftSize = 16384;
-        source.connect(analyser);
-        void ctx.resume().catch(() => undefined);
-        meterCtxRef.current = ctx;
-        const buf = new Float32Array(analyser.fftSize);
-        meterTimerRef.current = setInterval(() => {
-          if (!recordingRef.current) return;
-          // En kontext som inte kör (autoplay-spärr) ger bara nollor — visa
-          // då ingen varning alls hellre än en falsk "tyst mikrofon".
-          if (ctx.state !== 'running') {
-            micSilentTicksRef.current = 0;
-            setMicSilent(false);
-            return;
-          }
-          analyser.getFloatTimeDomainData(buf);
-          const level = measureFloatLevel(buf);
-          // Peak-hold med avklingning så stapeln är läsbar för ögat.
-          setInputLevel((prev) => Math.max(level.peak, prev * 0.7));
-          if (isEffectivelySilent(level)) {
-            micSilentTicksRef.current += 1;
-          } else {
-            micSilentTicksRef.current = 0;
-          }
-          setMicSilent(micSilentTicksRef.current >= MIC_SILENT_TICKS_BEFORE_WARNING);
-        }, LEVEL_METER_INTERVAL_MS);
-      } catch {
-        void ctx.close().catch(() => undefined);
-        /* mätaren är en hjälp, aldrig ett krav */
-      }
-    },
-    [stopLevelMeter]
-  );
 
   // Städa vid unmount (panelen stängs mitt i något).
   useEffect(() => {
     return () => {
       recordingRef.current = false;
-      if (segTimerRef.current) clearTimeout(segTimerRef.current);
       if (tickRef.current) clearInterval(tickRef.current);
       try {
         recorderRef.current?.stop();
@@ -343,14 +332,30 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
       }
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
+      void captureCtxRef.current?.close().catch(() => undefined);
       void wakeLockRef.current?.release().catch(() => undefined);
-      if (meterTimerRef.current) clearInterval(meterTimerRef.current);
-      void meterCtxRef.current?.close().catch(() => undefined);
     };
   }, []);
 
   function updateSegment(index: number, patch: Partial<LiveSegment>) {
     setSegments((prev) => prev.map((s) => (s.index === index ? { ...s, ...patch } : s)));
+  }
+
+  // ── Mikrofonmätare: visar direkt om mikrofonen fångar något alls ──────────
+  // Utan den syns en avstängd/fel vald mikrofon först som ett tomt transkript
+  // efter mötet. Ren nivåmätning (topp/RMS) — ingen röstidentifiering.
+  function handleLevel(level: AudioLevel) {
+    if (!recordingRef.current) return;
+    // Peak-hold med avklingning så stapeln är läsbar för ögat.
+    setInputLevel((prev) => Math.max(level.peak, prev * 0.7));
+    const now = Date.now();
+    if (isEffectivelySilent(level)) {
+      if (micSilentSinceRef.current === null) micSilentSinceRef.current = now;
+      setMicSilent(now - micSilentSinceRef.current >= MIC_SILENT_WARNING_MS);
+    } else {
+      micSilentSinceRef.current = null;
+      setMicSilent(false);
+    }
   }
 
   async function uploadSegment(
@@ -380,6 +385,7 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
         error?: string;
         silent?: boolean;
         warning?: string;
+        language?: string;
       };
       if (!res.ok) throw new Error(data.error || 'Uppladdningen misslyckades.');
       const text = data.text || '';
@@ -391,7 +397,8 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
         text,
         status: 'done',
         silent: !text && Boolean(data.silent),
-        warning: !text && !data.silent ? data.warning || undefined : undefined
+        warning: !text && !data.silent ? data.warning || undefined : undefined,
+        language: text && data.language ? data.language : undefined
       });
     } catch (err) {
       if (attempt === 0 && !discardedRef.current) {
@@ -411,65 +418,25 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     }
   }
 
-  function enqueueUpload(blob: Blob, mime: string, index: number) {
-    setSegments((prev) => [...prev, { index, text: '', status: 'pending' }]);
+  /**
+   * Ett klippt PCM-segment från inspelaren: kodas till 16 kHz WAV och laddas
+   * upp i ordning. Tysta segment (avstängd mikrofon, ingen som pratar)
+   * registreras utan ljud — ingen kostnad.
+   */
+  function enqueueSegment(segment: PcmSegment) {
+    if (discardedRef.current || segment.index >= MAX_MEETING_SEGMENTS) return;
+    setSegments((prev) => [...prev, { index: segment.index, text: '', status: 'pending' }]);
     uploadChainRef.current = uploadChainRef.current.then(async () => {
-      // Voxtrals transkriberings-endpoint accepterar inte webbläsarens
-      // inspelningsformat (webm/opus, mp4/AAC) — konvertera segmentet till
-      // 16 kHz mono WAV innan uppladdning. Fail-soft: kan klippet inte
-      // avkodas skickas originalet, och servern svarar med Mistrals orsak.
-      const converted = await convertBlobToWavDetailed(blob);
-      if (converted && isEffectivelySilent(converted.level)) {
-        return uploadSegment(null, VOICE_WAV_MIME, index);
+      if (isEffectivelySilent(segment.level)) {
+        return uploadSegment(null, VOICE_WAV_MIME, segment.index);
       }
-      return uploadSegment(converted?.wav ?? blob, converted ? VOICE_WAV_MIME : mime, index);
+      const converted = await renderSamplesToWavDetailed(segment.samples, segment.sampleRate);
+      if (isEffectivelySilent(converted.level)) {
+        return uploadSegment(null, VOICE_WAV_MIME, segment.index);
+      }
+      return uploadSegment(converted.wav, VOICE_WAV_MIME, segment.index);
     });
   }
-
-  const startSegment = useCallback((stream: MediaStream) => {
-    if (!recordingRef.current) return;
-    const mimeType = pickRecorderMime();
-    let recorder: MediaRecorder;
-    try {
-      recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    } catch {
-      recordingRef.current = false;
-      setError('Din webbläsare stöder inte något ljudformat vi kan transkribera.');
-      return;
-    }
-    const index = nextIndexRef.current++;
-    const chunks: BlobPart[] = [];
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunks.push(e.data);
-    };
-    recorder.onstop = () => {
-      const type = recorder.mimeType || mimeType || 'audio/webm';
-      const blob = new Blob(chunks, { type });
-      const validation = validateVoiceClip(type, blob.size);
-      if (
-        !discardedRef.current &&
-        blob.size >= MIN_VOICE_BYTES &&
-        validation.ok &&
-        index < MAX_MEETING_SEGMENTS
-      ) {
-        enqueueUpload(blob, type, index);
-      }
-      if (recordingRef.current) startSegment(stream);
-    };
-    recorderRef.current = recorder;
-    recorder.start();
-    // Första segmentet hålls kort så att live-texten (eller ett fel) syns
-    // snabbt — därefter ~90-sekunderssegment (MEETING_FIRST_SEGMENT_SECONDS).
-    const segmentSeconds = index === 0 ? MEETING_FIRST_SEGMENT_SECONDS : MEETING_SEGMENT_SECONDS;
-    segTimerRef.current = setTimeout(() => {
-      try {
-        recorder.stop();
-      } catch {
-        /* redan stoppad */
-      }
-    }, segmentSeconds * 1000);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   async function beginRecording() {
     setError(null);
@@ -482,14 +449,29 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
       return;
     }
 
-    // Mätarens ljudkontext skapas här, inom klicket (se createMeterContext).
-    const meterCtx = createMeterContext();
+    // Ljudkontexten skapas HÄR, synkront i klick-händelsen (innan getUserMedia/
+    // server-anropet hunnit vänta) — autoplay-policyn låter en AudioContext
+    // starta bara inom användaraktiveringen; skapad senare blir den
+    // `suspended`, inspelaren får inga samples och mätaren visar nollor.
+    const captureCtx = createCaptureContext();
+    if (!captureCtx) {
+      setError('Kunde inte starta ljudinspelningen i den här webbläsaren.');
+      return;
+    }
 
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          // Rumsljud: brusreducering och auto-nivå hjälper talmodellen; ekosläckning
+          // tar bort en ev. högtalare i rummet. Bara hintar — webbläsaren avgör.
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
     } catch (err) {
-      void meterCtx?.close().catch(() => undefined);
+      void captureCtx.close().catch(() => undefined);
       const name = err instanceof Error ? err.name : '';
       setError(
         name === 'NotAllowedError'
@@ -500,34 +482,45 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     }
 
     const started = await startMeetingAction({
-      startupId: startupId || null,
+      kind,
+      startupId: kind === 'startup' ? startupId || null : null,
+      counterpart: kind === 'startup' ? null : counterpart || null,
       title: title || null,
       consentConfirmed: consent
     });
     if (started.error || !started.meetingId) {
       stream.getTracks().forEach((t) => t.stop());
-      void meterCtx?.close().catch(() => undefined);
+      void captureCtx.close().catch(() => undefined);
       setError(started.error || 'Kunde inte starta mötet.');
       return;
     }
 
     meetingIdRef.current = started.meetingId;
     streamRef.current = stream;
+    captureCtxRef.current = captureCtx;
     discardedRef.current = false;
     recordingRef.current = true;
-    nextIndexRef.current = 0;
     elapsedRef.current = 0;
     segmentErrorRef.current = null;
     failedCountRef.current = 0;
     silentCountRef.current = 0;
     emptyWithAudioRef.current = 0;
+    micSilentSinceRef.current = null;
     setSegmentError(null);
     setSegments([]);
     setElapsed(0);
+    setMicSilent(false);
     setPhase('recording');
     void requestWakeLock();
-    startLevelMeter(stream, meterCtx);
-    startSegment(stream);
+
+    const recorder = new PcmRecorder(captureCtx, stream, {
+      onSegment: enqueueSegment,
+      onLevel: handleLevel,
+      onError: (message) => setError(message)
+    });
+    recorderRef.current = recorder;
+    recorder.start();
+
     tickRef.current = setInterval(() => {
       elapsedRef.current += 1;
       setElapsed(elapsedRef.current);
@@ -535,35 +528,13 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     }, 1000);
   }
 
-  function stopRecorder(): Promise<void> {
-    return new Promise((resolve) => {
-      const rec = recorderRef.current;
-      if (!rec || rec.state === 'inactive') {
-        resolve();
-        return;
-      }
-      const prev = rec.onstop;
-      rec.onstop = function (this: MediaRecorder, ev: Event) {
-        prev?.call(this, ev);
-        resolve();
-      };
-      try {
-        rec.stop();
-      } catch {
-        resolve();
-      }
-    });
-  }
-
   async function finishMeeting() {
     if (!recordingRef.current) return;
     recordingRef.current = false;
-    if (segTimerRef.current) clearTimeout(segTimerRef.current);
     if (tickRef.current) clearInterval(tickRef.current);
     setPhase('finishing');
-    stopLevelMeter();
-    await stopRecorder();
-    releaseStream();
+    // stop() levererar det sista segmentet synkront innan mikrofonen släpps.
+    stopCapture();
     releaseWakeLock();
     // Vänta in transkriberingskön så granskningen visar hela mötet.
     await uploadChainRef.current;
@@ -635,15 +606,8 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     if (!window.confirm(label)) return;
     discardedRef.current = true;
     recordingRef.current = false;
-    if (segTimerRef.current) clearTimeout(segTimerRef.current);
     if (tickRef.current) clearInterval(tickRef.current);
-    stopLevelMeter();
-    try {
-      recorderRef.current?.stop();
-    } catch {
-      /* redan stoppad */
-    }
-    releaseStream();
+    stopCapture();
     releaseWakeLock();
     const meetingId = meetingIdRef.current;
     if (meetingId) await discardMeetingAction(meetingId);
@@ -688,7 +652,7 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
   async function saveMeeting() {
     const meetingId = meetingIdRef.current;
     if (!meetingId) return;
-    if (!startupId) {
+    if (kind === 'startup' && !startupId) {
       setError('Välj vilket bolagskort mötet ska sparas på.');
       return;
     }
@@ -699,29 +663,39 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     setError(null);
     setPhase('saving');
     const res = await saveMeetingToStartupAction(meetingId, {
-      startupId,
-      confidential,
+      startupId: kind === 'startup' ? startupId : undefined,
+      confidential: kind === 'startup' ? confidential : false,
       includeTranscript,
       protocolText: protocol,
       transcriptText: includeTranscript ? transcript : undefined
     });
-    if (res.error || !res.startupId) {
+    if (res.error || (!res.startupId && !res.fileId)) {
       setError(res.error || 'Kunde inte spara mötet.');
       setPhase('review');
       return;
     }
-    setSavedInfo({ startupId: res.startupId, startupName: res.startupName || 'bolaget' });
+    setSavedInfo({
+      kind: res.kind ?? kind,
+      subject: res.subject || res.startupName || counterpart || 'mötet',
+      startupId: res.startupId,
+      fileId: res.fileId,
+      filename: res.filename
+    });
     setPhase('saved');
   }
 
   function suggestActionsInChat() {
     if (!onSendToChat || !savedInfo) return;
     const basis = protocol.trim() || transcript.trim().slice(0, 4000);
+    const isStartup = savedInfo.kind === 'startup';
     onSendToChat(
-      `Här är protokollet från mötet med ${savedInfo.startupName}${title ? ` ("${title}")` : ''}:\n\n` +
+      `Här är protokollet från ${isStartup ? `mötet med ${savedInfo.subject}` : `${MEETING_KIND_LABELS[savedInfo.kind].toLowerCase()}t${savedInfo.subject ? ` med ${savedInfo.subject}` : ''}`}${title ? ` ("${title}")` : ''}:\n\n` +
         `${basis}\n\n` +
-        'Föreslå utifrån åtgärdspunkterna vilka kanban-kort som bör skapas på bolagets tavla, ' +
-        'om nästa steg bör uppdateras och om ett uppföljningsmöte bör bokas — och genomför det vi kommer överens om.'
+        (isStartup
+          ? 'Föreslå utifrån åtgärdspunkterna vilka kanban-kort som bör skapas på bolagets tavla, ' +
+            'om nästa steg bör uppdateras och om ett uppföljningsmöte bör bokas — och genomför det vi kommer överens om.'
+          : 'Föreslå utifrån åtgärdspunkterna vilka uppgifter, events i kalendern eller inlägg på anslagstavlan ' +
+            'som bör skapas, och om ett uppföljningsmöte bör bokas — och genomför det vi kommer överens om.')
     );
     onClose();
   }
@@ -732,6 +706,9 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
   const hasLiveText = doneSegments.some((s) => s.text);
   const silentDone = doneSegments.filter((s) => s.silent).length;
   const emptyWithAudioDone = doneSegments.filter((s) => !s.text && !s.silent).length;
+  const foreignLanguages = Array.from(
+    new Set(doneSegments.map((s) => s.language).filter((l): l is string => !!l && l !== 'sv'))
+  );
 
   const heading =
     phase === 'setup'
@@ -811,23 +788,71 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
                   className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground placeholder:text-foreground-subtle focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
                 />
               </label>
-              <label className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-1.5">
                 <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
-                  Bolag (kan väljas/ändras efter mötet)
+                  Typ av möte
                 </span>
-                <select
-                  value={startupId}
-                  onChange={(e) => setStartupId(e.target.value)}
-                  className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
-                >
-                  <option value="">— Välj senare —</option>
-                  {startups.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
+                <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Typ av möte">
+                  {MEETING_KINDS.map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="radio"
+                      aria-checked={kind === k}
+                      onClick={() => setKind(k)}
+                      className={`rounded-xl border px-3 py-1.5 text-[13px] font-medium transition ${
+                        kind === k
+                          ? 'border-brand bg-brand text-brand-foreground'
+                          : 'border-default bg-canvas text-foreground-muted hover:border-strong hover:text-foreground'
+                      }`}
+                    >
+                      {MEETING_KIND_LABELS[k]}
+                    </button>
                   ))}
-                </select>
-              </label>
+                </div>
+                <p className="text-[12px] text-foreground-subtle">{MEETING_KIND_HINTS[kind]}</p>
+              </div>
+
+              {kind === 'startup' ? (
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    Bolag (kan väljas/ändras efter mötet)
+                  </span>
+                  <select
+                    value={startupId}
+                    onChange={(e) => setStartupId(e.target.value)}
+                    className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+                  >
+                    <option value="">— Välj senare —</option>
+                    {startups.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    {kind === 'internal' ? 'Vilket forum/team?' : 'Vem är mötet med?'}
+                  </span>
+                  <input
+                    type="text"
+                    value={counterpart}
+                    onChange={(e) => setCounterpart(e.target.value)}
+                    maxLength={MAX_MEETING_COUNTERPART}
+                    placeholder={
+                      kind === 'internal'
+                        ? 'T.ex. Ledningsgruppen, Styrelsen, Coachteamet'
+                        : 'T.ex. Region Gävleborg, Almi, Gävle kommun'
+                    }
+                    className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground placeholder:text-foreground-subtle focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+                  />
+                  <span className="text-[11.5px] text-foreground-subtle">
+                    Organisation eller forum — skriv inte personnamn.
+                  </span>
+                </label>
+              )}
 
               <label className="flex items-start gap-2.5 rounded-xl border border-default bg-canvas-subtle p-3">
                 <input
@@ -872,10 +897,10 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
           {(phase === 'recording' || phase === 'finishing') && (
             <div className="flex flex-col gap-3">
               <p className="text-[12.5px] text-foreground-subtle">
-                Transkriberas löpande — första texten dyker upp efter ca{' '}
-                {MEETING_FIRST_SEGMENT_SECONDS} sekunder, därefter i ~{MEETING_SEGMENT_SECONDS}
-                -sekunderssegment. Lämna gärna fliken öppen — skärmen hålls vaken under
-                inspelningen.
+                Transkriberas löpande i pauserna i samtalet — första texten dyker upp inom ca{' '}
+                {MEETING_FIRST_SEGMENT_SECONDS} sekunder, därefter ungefär varje{' '}
+                {MEETING_MIN_SEGMENT_SECONDS}–{MEETING_SEGMENT_SECONDS} sekunder. Lämna gärna
+                fliken öppen — skärmen hålls vaken under inspelningen.
               </p>
               {/* Mikrofonmätare — visar direkt om mikrofonen fångar ljud. */}
               <div className="flex items-center gap-2.5" aria-live="polite">
@@ -902,6 +927,14 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
                 <p className="rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange">
                   Mikrofonen fångar inget ljud. Kontrollera att rätt mikrofon är vald i webbläsaren
                   och datorn och att den inte är avstängd — annars blir transkriptet tomt.
+                </p>
+              )}
+              {foreignLanguages.length > 0 && (
+                <p className="rounded-xl bg-movexum-pastell-gul px-3 py-2 text-[12.5px] text-movexum-morkgul">
+                  AI-tjänsten tolkade ett eller flera avsnitt som{' '}
+                  {foreignLanguages.map(languageLabel).join(', ')} — kontrollera texten. Talas
+                  svenska bör en svensktränad modell användas (se inställningarna för
+                  transkribering).
                 </p>
               )}
               <div className="flex min-h-[180px] flex-col gap-2 rounded-xl border border-default bg-canvas-subtle p-3">
@@ -1055,23 +1088,37 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
                 )}
               </div>
 
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
-                  Spara på bolagskort
-                </span>
-                <select
-                  value={startupId}
-                  onChange={(e) => setStartupId(e.target.value)}
-                  className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
-                >
-                  <option value="">— Välj bolag —</option>
-                  {startups.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {kind === 'startup' ? (
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    Spara på bolagskort
+                  </span>
+                  <select
+                    value={startupId}
+                    onChange={(e) => setStartupId(e.target.value)}
+                    className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+                  >
+                    <option value="">— Välj bolag —</option>
+                    {startups.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    Sparas i dina Filer
+                  </span>
+                  <p className="rounded-xl border border-default bg-canvas-subtle px-3 py-2 text-[13px] text-foreground">
+                    {MEETING_KIND_LABELS[kind]}
+                    {counterpart ? ` med ${counterpart}` : ''} — protokollet sparas som en
+                    Markdown-fil under <span className="font-medium">Rapporter &amp; uppföljning</span>{' '}
+                    i Filer (bara du ser den) och blir sökbar i chatten.
+                  </p>
+                </div>
+              )}
 
               <div className="flex flex-col gap-2">
                 <label className="flex items-center gap-2 text-[13px] text-foreground">
@@ -1083,19 +1130,22 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
                   />
                   Bifoga hela transkriptet i anteckningen (annars sparas bara protokollet)
                 </label>
-                <label className="flex items-center gap-2 text-[13px] text-foreground">
-                  <input
-                    type="checkbox"
-                    checked={confidential}
-                    onChange={(e) => setConfidential(e.target.checked)}
-                    className="h-4 w-4 accent-[var(--color-brand)]"
-                  />
-                  Konfidentiell anteckning (visas bara för behöriga och exkluderas ur all AI-kontext)
-                </label>
+                {kind === 'startup' && (
+                  <label className="flex items-center gap-2 text-[13px] text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={confidential}
+                      onChange={(e) => setConfidential(e.target.checked)}
+                      className="h-4 w-4 accent-[var(--color-brand)]"
+                    />
+                    Konfidentiell anteckning (visas bara för behöriga och exkluderas ur all AI-kontext)
+                  </label>
+                )}
               </div>
 
               <p className="rounded-xl bg-movexum-pastell-gul px-3 py-2 text-[12px] text-movexum-morkgul">
-                När du sparar raderas råtranskriptet permanent — anteckningen på bolagskortet blir
+                När du sparar raderas råtranskriptet permanent —{' '}
+                {kind === 'startup' ? 'anteckningen på bolagskortet' : 'filen i dina Filer'} blir
                 den enda kopian. Osparade möten raderas automatiskt efter 7 dagar.
               </p>
 
@@ -1111,7 +1161,7 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
                 <button
                   type="button"
                   onClick={saveMeeting}
-                  disabled={phase === 'saving' || !startupId}
+                  disabled={phase === 'saving' || (kind === 'startup' && !startupId)}
                   className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-[13.5px] font-medium text-brand-foreground transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {phase === 'saving' ? (
@@ -1134,11 +1184,23 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
           {phase === 'saved' && savedInfo && (
             <div className="flex flex-col items-start gap-4">
               <p className="text-[14px] leading-relaxed text-foreground">
-                Mötesanteckningen är sparad på{' '}
-                <a href={`/startups/${savedInfo.startupId}`} className="font-medium text-link underline">
-                  {savedInfo.startupName}
-                </a>{' '}
-                och syns i aktivitetsfeeden. Råtranskriptet är raderat.
+                {savedInfo.kind === 'startup' && savedInfo.startupId ? (
+                  <>
+                    Mötesanteckningen är sparad på{' '}
+                    <a href={`/startups/${savedInfo.startupId}`} className="font-medium text-link underline">
+                      {savedInfo.subject}
+                    </a>{' '}
+                    och syns i aktivitetsfeeden. Råtranskriptet är raderat.
+                  </>
+                ) : (
+                  <>
+                    Mötesanteckningen{savedInfo.filename ? ` "${savedInfo.filename}"` : ''} är sparad i{' '}
+                    <a href="/filer" className="font-medium text-link underline">
+                      dina Filer
+                    </a>{' '}
+                    under Rapporter &amp; uppföljning och är sökbar i chatten. Råtranskriptet är raderat.
+                  </>
+                )}
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 {onSendToChat && (protocol.trim() || transcript.trim()) && (

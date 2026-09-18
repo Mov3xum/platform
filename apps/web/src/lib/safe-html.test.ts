@@ -61,3 +61,43 @@ test('chatMarkdownToHtml renderar fetstil/listor utan råa asterisker och escapa
   assert.match(html, /<ul/);
   assert.match(html, /<ol/);
 });
+
+// ── Utökad delmängd (anslagstavlan, CLAUDE.md § 37.6) ────────────────────────
+
+test('inlineMarkdown: kursiv, struken, kod och markdown-länk', () => {
+  const out = inlineMarkdown('*kursiv* ~~borta~~ `kod <b>` [Movexum](https://movexum.se)');
+  assert.match(out, /<em class="[^"]*">kursiv<\/em>/);
+  assert.match(out, /<del class="[^"]*">borta<\/del>/);
+  assert.match(out, /<code class="[^"]*">kod &lt;b&gt;<\/code>/);
+  assert.match(out, /<a href="https:\/\/movexum.se" class="[^"]*" target="_blank" rel="noopener noreferrer">Movexum<\/a>/);
+});
+
+test('inlineMarkdown: asterisker inuti ord och tal är inte kursiv', () => {
+  assert.equal(inlineMarkdown('2*3*4 och snake_case_namn'), '2*3*4 och snake_case_namn');
+});
+
+test('inlineMarkdown: bara säkra href släpps igenom, annars visas texten', () => {
+  assert.ok(!inlineMarkdown('[x](javascript:alert(1))').includes('<a'));
+  assert.ok(!inlineMarkdown('[x](data:text/html,hej)').includes('<a'));
+  assert.ok(!inlineMarkdown('[x](//evil.example)').includes('<a'));
+  const internal = inlineMarkdown('[bolag](/startups/abc)');
+  assert.match(internal, /<a href="\/startups\/abc" class="[^"]*">bolag<\/a>/);
+  assert.ok(!internal.includes('target='));
+  // Citattecken i url:en escapas och kan inte bryta attributet.
+  const q = inlineMarkdown('[x](https://a.se/"onmouseover="alert(1))');
+  assert.ok(!q.includes('" onmouseover'), q);
+});
+
+test('inlineMarkdown: automatisk länkning av bara https-adresser', () => {
+  const out = inlineMarkdown('Se https://vinnova.se/utlysningar, tack.');
+  assert.match(out, /<a href="https:\/\/vinnova.se\/utlysningar" [^>]*>https:\/\/vinnova.se\/utlysningar<\/a>, tack\./);
+});
+
+test('markdownToHtml: citat, avdelare, checkrutor och emoji passerar oskadda', () => {
+  const html = markdownToHtml('> Ett citat\n> rad två\n\n---\n\n- [x] klart 🎉\n- [ ] kvar');
+  assert.match(html, /<blockquote class="[^"]*">Ett citat<br>rad två<\/blockquote>/);
+  assert.match(html, /<hr class="[^"]*">/);
+  assert.ok(html.includes('☑'));
+  assert.ok(html.includes('☐'));
+  assert.ok(html.includes('🎉'));
+});

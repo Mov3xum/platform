@@ -90,6 +90,11 @@ export interface AnnualWheelCategoryDef {
   recordId?: string;
   /** True för de inbyggda defaults (kan inte raderas när de är fallback). */
   builtin?: boolean;
+  /**
+   * Visas kategorins aktiviteter i kalendern på Hemmaplan (§ 37)? Default
+   * true; saknat fält (omigrerad instans) tolkas också som true.
+   */
+  showOnHome?: boolean;
 }
 
 /**
@@ -97,9 +102,9 @@ export interface AnnualWheelCategoryDef {
  * fallback när `annual_wheel_categories` saknas eller är tom.
  */
 export const DEFAULT_ANNUAL_WHEEL_CATEGORIES: readonly AnnualWheelCategoryDef[] = [
-  { id: 'styrelse', label: 'Styrelse', token: 'gron', sortOrder: 0, builtin: true },
-  { id: 'ledning', label: 'Ledning', token: 'gul', sortOrder: 1, builtin: true },
-  { id: 'gemensamt', label: 'Gemensamt', token: 'lila', sortOrder: 2, builtin: true }
+  { id: 'styrelse', label: 'Styrelse', token: 'gron', sortOrder: 0, builtin: true, showOnHome: true },
+  { id: 'ledning', label: 'Ledning', token: 'gul', sortOrder: 1, builtin: true, showOnHome: true },
+  { id: 'gemensamt', label: 'Gemensamt', token: 'lila', sortOrder: 2, builtin: true, showOnHome: true }
 ] as const;
 
 /** Bakåtkompatibelt alias (äldre importer). */
@@ -225,6 +230,7 @@ interface AnnualWheelCategoryRow {
   label?: unknown;
   token?: unknown;
   sort_order?: unknown;
+  show_on_home?: unknown;
 }
 
 /**
@@ -253,7 +259,9 @@ export function resolveAnnualWheelCategories(
       label: label.slice(0, ANNUAL_WHEEL_CATEGORY_LABEL_MAX),
       token: isAnnualWheelColorToken(row.token) ? row.token : DEFAULT_ANNUAL_WHEEL_COLOR_TOKEN,
       sortOrder: Number.isFinite(sortRaw) ? Math.trunc(sortRaw as number) : 999,
-      recordId: typeof row.id === 'string' && row.id ? row.id : undefined
+      recordId: typeof row.id === 'string' && row.id ? row.id : undefined,
+      // Saknat fält (omigrerad instans) = visas; bara ett uttryckligt false döljer.
+      showOnHome: row.show_on_home !== false
     });
   }
   if (out.length === 0) return [...DEFAULT_ANNUAL_WHEEL_CATEGORIES];
@@ -1764,4 +1772,13 @@ export function countItemsByQuarter(items: readonly AnnualWheelItem[]): AnnualWh
     count: counts[q],
     share: dated > 0 ? counts[q] / dated : 0
   }));
+}
+
+/**
+ * Kategorinycklar vars aktiviteter får visas i kalendern på Hemmaplan (§ 37).
+ * En kategori döljs BARA när `showOnHome` är uttryckligen false; okända
+ * kategorier (t.ex. en raderad nyckel på en gammal post) filtreras inte här.
+ */
+export function annualWheelHiddenOnHome(categories: readonly AnnualWheelCategoryDef[]): Set<string> {
+  return new Set(categories.filter((c) => c.showOnHome === false).map((c) => c.id));
 }

@@ -1,6 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { escFilter } from '@/lib/pb-filter';
+import { isOrgPostKind, orgPostHomePath } from '@platform/shared';
 
 /**
  * Samlad händelselogg för aktivitetsfeeden (CLAUDE.md § 32).
@@ -394,8 +395,7 @@ function mapRow(
     case 'org_posts': {
       const title = str(after.title);
       const kind = str(after.kind);
-      const homeHref =
-        kind === 'training' ? '/hem?flik=internutbildningar' : kind === 'instruction' ? '/hem?flik=sa-gor-vi' : '/hem';
+      const homeHref = isOrgPostKind(kind) ? orgPostHomePath(kind) : '/hem';
       if (action === 'create') {
         return {
           title:

@@ -12,13 +12,19 @@ import { AGG_OPS, computeAggregate, type AggOp } from './aggregate';
 import type { MistralToolCall, MistralToolDefinition } from './mistral';
 import { searchOrgKnowledge, searchUserFiles, renderKnowledgeHits } from './rag';
 import { logAiUsage } from './usage';
+import { runWebSearch } from './web-search';
 import { escFilter } from '@/lib/pb-filter';
+import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import {
   type ApprovalRequestRef,
   type GeneratedFileRef,
   type InlineVisualRef,
   type MeetingRequestRef,
+  type WebSearchSourceRef,
   MAX_MEETING_TITLE,
+  MEETING_KIND_LABELS,
+  normalizeMeetingCounterpart,
+  normalizeMeetingKind,
   FILE_TOPIC_IDS,
   isFileTopic,
   ANNUAL_WHEEL_TAG_IDS,
@@ -265,6 +271,13 @@ export interface BuildToolsOptions {
    * (§ 16.3 människa-i-loopen).
    */
   includeWrites?: boolean;
+  /**
+   * Exponera `web_search` (Mistral Web Search, FR/EU): riktig internetsökning
+   * som ett function-verktyg i agent-loopen. Sätts BARA när användaren slagit
+   * på "Webbkällor" i chatten (uttryckligt opt-in, transparens art. 13).
+   * Sökfrågan är det enda som lämnar plattformen (saneras i web-search.ts).
+   */
+  includeWebSearch?: boolean;
 }
 
 export function buildChatTools(
@@ -578,6 +591,48 @@ export function buildChatTools(
               description: 'Max antal textstycken att hämta (1-12, default 6).',
               minimum: 1,
               maximum: 12
+            }
+          },
+          required: ['query']
+        }
+      }
+    });
+  }
+
+  // Webbsökning (opt-in via "Webbkällor"-toggeln). Read-only mot externa,
+  // publika källor; ingen intern data får läggas i frågan (guidance +
+  // sanering). Källorna pushas till ctx.webSources för visning under svaret.
+  if (options.includeWebSearch) {
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'web_search',
+        description:
+          'SÖKER PÅ INTERNET (Mistral Web Search, EU) och returnerar en kort ' +
+          'faktasammanställning med numrerade källor (titel + URL). Använd för ' +
+          'allt som INTE finns i plattformens databas eller kunskapsbas: ' +
+          'nationell/branschstatistik, aktuella nyheter, utlysningar och ' +
+          'deadlines, regler och lagar, omvärldsbevakning, publik information om ' +
+          'bolag/investerare/konkurrenter, definitioner. Ställ EN tydlig, ' +
+          'självständig fråga per anrop (som en sökning), på svenska eller ' +
+          'engelska. Kör flera anrop parallellt om frågan har flera delar. ' +
+          'VIKTIGT: lägg ALDRIG intern data, anteckningar, siffror ur databasen ' +
+          'eller personuppgifter i `query` — bara publika namn/ämnen. Ange ' +
+          'källorna i svaret.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description:
+                'Sökfrågan, formulerad som en självständig fråga eller sökning ' +
+                '(t.ex. "antal startups i Sverige 2025 statistik").'
+            },
+            focus: {
+              type: 'string',
+              description:
+                'Valfritt: vad du framför allt vill ha ut (t.ex. "en aktuell ' +
+                'siffra med källa och år", "sista ansökningsdag").'
             }
           },
           required: ['query']
@@ -1281,12 +1336,13 @@ export function buildChatTools(
       function: {
         name: 'create_org_post',
         description:
-          'Skapar ett inlägg på Hemmaplan (startsidan, org_posts). kind styr ' +
+          'Skapar ett inlägg på dashboarden (startsidan, org_posts). kind styr ' +
           'vilken flik det hamnar under: news/notice/celebration = Anslagstavlan, ' +
           'instruction = "Så gör vi", training = INTERNUTBILDNINGAR (pass, guider ' +
           'och material kollegorna ska gå igenom — "lägg upp en internutbildning ' +
           'om GDPR", "planera ett pass om pitchcoaching nästa torsdag"). Brödtexten ' +
-          'är markdown (## rubriker, - punkter, **fet**). Inlägget publiceras direkt ' +
+          'är markdown (## rubriker, - punkter, **fet**, *kursiv*, [länk](url), > citat, - [ ] checkrutor). ' +
+          'Bilder/film/dokument laddas upp av en människa i UI:t. Inlägget publiceras direkt ' +
           'om published_at utelämnas. Skriv aldrig personuppgifter.',
         parameters: {
           type: 'object',
@@ -1323,7 +1379,7 @@ export function buildChatTools(
       function: {
         name: 'update_org_post',
         description:
-          'Uppdaterar ett befintligt inlägg på Hemmaplan (org_posts): rubrik, text, ' +
+          'Uppdaterar ett befintligt inlägg på dashboarden (org_posts): rubrik, text, ' +
           'typ/flik, målgrupp, fäst, publicerings-/utgångsdatum eller länk. Slå upp ' +
           'post_id via query_collection på org_posts först. Bara författaren ' +
           'eller admin/incubator lead får ändra andras inlägg. För att "ta bort" ' +
@@ -1383,18 +1439,34 @@ export function buildChatTools(
           'Förbereder MÖTESLÄGET i chatten (§ 34): visar ett möteskort med en ' +
           '"Starta mötet"-knapp för användaren. Använd när användaren vill ' +
           'starta/spela in/transkribera ett möte (t.ex. "starta ett möte med ' +
-          'Fixkod"). Ange bolagsnamnet som användaren sa — det fuzzy-matchas ' +
-          'mot bolagslistan och förifylls (användaren kan byta). Du kan ALDRIG ' +
+          'Fixkod", "spela in ledningsgruppsmötet", "möte med Region Gävleborg"). ' +
+          'Mötestyp: `startup` (bolag i portföljen — ange bolagsnamnet, det ' +
+          'fuzzy-matchas och förifylls), `internal` (Movexum-internt: ' +
+          'ledningsgrupp, styrelse, team) eller `external` (partner, kommun, ' +
+          'investerare, annan part som INTE är ett portföljbolag). För ' +
+          'internal/external anger du motparten/forumet i `counterpart` (en ' +
+          'organisation eller ett forum — aldrig personnamn). Du kan ALDRIG ' +
           'starta själva inspelningen — det, och samtyckesbekräftelsen, är ' +
           'alltid ett mänskligt klick. Anropa EN gång och avsluta sedan svaret ' +
           'KORT (t.ex. "Klart — tryck på Starta mötet när ni är redo").',
         parameters: {
           type: 'object',
           properties: {
+            kind: {
+              type: 'string',
+              enum: ['startup', 'internal', 'external'],
+              description:
+                'Mötestyp. Default `startup`. `internal` = Movexum-internt, `external` = extern part som inte är ett portföljbolag.'
+            },
             startup_name: {
               type: 'string',
               description:
-                'Bolaget mötet gäller, som användaren uttryckte det (fuzzy-matchas). Valfritt.'
+                'Bolaget mötet gäller (bara kind=startup), som användaren uttryckte det (fuzzy-matchas). Valfritt.'
+            },
+            counterpart: {
+              type: 'string',
+              description:
+                'Vem/vad mötet gäller för internal/external, t.ex. "Ledningsgruppen", "Region Gävleborg", "Almi". Organisation/forum — inga personnamn. Valfritt.'
             },
             title: {
               type: 'string',
@@ -1681,6 +1753,9 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       };
     case 'search_my_files':
       return { tool: name, label: 'Söker i dina filer' };
+    case 'web_search':
+      // Etiketten är medvetet utan sökfrågan (steg-etiketter är PII-fria, § 17.8).
+      return { tool: name, label: 'Söker på internet' };
     case 'update_startup_field':
       return { tool: name, label: 'Uppdaterar bolagsuppgift' };
     case 'create_startup_activity':
@@ -1734,7 +1809,7 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       };
     }
     case 'update_org_post':
-      return { tool: name, label: 'Uppdaterar inlägg på Hemmaplan' };
+      return { tool: name, label: 'Uppdaterar inlägg på dashboarden' };
     case 'request_approval':
       return { tool: name, label: 'Ber om ditt godkännande' };
     case 'start_meeting':
@@ -1798,6 +1873,12 @@ export interface ToolDispatchContext {
    * mänskligt klick i mötespanelen. Max en per tur.
    */
   meetingRequests?: MeetingRequestRef[];
+  /**
+   * Mutabel sink: `web_search` pushar hämtade webbkällor (titel + URL) hit så
+   * chatt-lagret kan visa "Källor" under assistant-svaret och persistera dem
+   * på meddelandet (transparens om underlag, EU AI Act art. 13).
+   */
+  webSources?: WebSearchSourceRef[];
 }
 
 export interface ToolResult {
@@ -2256,6 +2337,64 @@ function logKnowledgeUsage(
   }
 }
 
+/**
+ * `web_search` — riktig internetsökning via Mistral Web Search (§ 9.8). Ett
+ * isolerat conversations-anrop per sökning; bara den sanerade frågan lämnar
+ * plattformen. Tokens loggas i `ai_usage_events` (surface dashboard_chat)
+ * så sökningen räknas mot månadstaket (§ 9.6). Fel returneras som tydligt
+ * verktygsfel så modellen kan säga det rakt ut i stället för att gissa.
+ */
+async function runWebSearchTool(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const query = typeof args.query === 'string' ? args.query.trim() : '';
+  if (!query) return { ok: false, error: 'query saknas.' };
+  const focus = typeof args.focus === 'string' ? args.focus : undefined;
+
+  let result;
+  try {
+    result = await runWebSearch({ query, focus });
+  } catch (err) {
+    console.warn('[web_search] failed', {
+      tenant: ctx.tenantId,
+      error: err instanceof Error ? err.message : err
+    });
+    return {
+      ok: false,
+      error:
+        'Webbsökningen misslyckades just nu (tjänsten svarade inte). Säg det ' +
+        'rakt ut för användaren och svara utifrån intern data om det går — ' +
+        'hitta inte på externa uppgifter.'
+    };
+  }
+
+  if (ctx.actor?.id && (result.usage.tokensIn > 0 || result.usage.tokensOut > 0)) {
+    void logAiUsage(ctx.pb, {
+      tenant: ctx.tenantId,
+      userId: ctx.actor.id,
+      surface: 'dashboard_chat',
+      model: result.model,
+      tokensIn: result.usage.tokensIn,
+      tokensOut: result.usage.tokensOut
+    });
+  }
+
+  if (ctx.webSources) {
+    for (const ref of result.references) {
+      if (!ctx.webSources.some((r) => r.url === ref.url)) ctx.webSources.push(ref);
+    }
+  }
+
+  return {
+    ok: true,
+    data: {
+      result: result.forModel,
+      sources: result.references
+    }
+  };
+}
+
 async function runSearchKnowledge(
   args: Record<string, unknown>,
   ctx: ToolDispatchContext
@@ -2583,6 +2722,8 @@ export async function dispatchToolCall(
       return runReadKnowledgeDocument(args, ctx);
     case 'search_my_files':
       return runSearchMyFiles(args, ctx);
+    case 'web_search':
+      return runWebSearchTool(args, ctx);
     case 'update_startup_field':
       return runUpdateStartupField(args, ctx);
     case 'create_startup_activity':
@@ -2988,14 +3129,22 @@ async function runStartMeeting(
     };
   }
 
-  const query = typeof args.startup_name === 'string' ? args.startup_name.trim() : '';
+  const kind = normalizeMeetingKind(args.kind);
+  const query =
+    kind === 'startup' && typeof args.startup_name === 'string' ? args.startup_name.trim() : '';
+  const counterpart =
+    kind === 'startup' ? '' : sanitizePersonnummer(normalizeMeetingCounterpart(args.counterpart));
   const title =
     typeof args.title === 'string' ? args.title.trim().slice(0, MAX_MEETING_TITLE) : '';
 
-  const request: MeetingRequestRef = {};
+  const request: MeetingRequestRef = { kind };
   if (title) request.title = title;
+  if (counterpart) request.counterpart = counterpart;
 
-  let matchNote = '';
+  let matchNote =
+    kind === 'startup'
+      ? ''
+      : `${MEETING_KIND_LABELS[kind]}${counterpart ? ` med ${counterpart}` : ''} är förifyllt — protokollet sparas som fil i användarens Filer, inte på ett bolagskort.`;
   if (query) {
     try {
       const rows = await ctx.pb
@@ -3028,8 +3177,10 @@ async function runStartMeeting(
   return {
     ok: true,
     data: {
+      kind,
       startup_id: request.startup_id,
       startup_name: request.startup_name,
+      counterpart: request.counterpart,
       note:
         'Möteskortet visas nu under ditt svar. ' +
         matchNote +
@@ -3722,8 +3873,8 @@ async function runCreateOrgPost(
       path: result.value.homePath,
       note:
         result.value.kind === 'training'
-          ? 'Internutbildningen syns nu under fliken Internutbildningar på Hemmaplan.'
-          : 'Inlägget syns nu på Hemmaplan.',
+          ? 'Internutbildningen syns nu under fliken Internutbildningar på dashboarden.'
+          : 'Inlägget syns nu på dashboarden.',
       logged_in: 'agent_actions'
     }
   };

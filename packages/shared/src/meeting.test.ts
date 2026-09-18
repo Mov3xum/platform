@@ -2,7 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MEETING_GAP_MARKER,
+  MEETING_TURN_PREFIX,
+  MAX_MEETING_COUNTERPART,
   MAX_MEETING_SEGMENTS,
+  isMeetingKind,
+  meetingProtocolFilename,
+  meetingSubjectLabel,
+  normalizeMeetingCounterpart,
+  normalizeMeetingKind,
   assembleMeetingTranscript,
   formatMeetingClock,
   isResumableMeetingStatus,
@@ -73,6 +80,107 @@ test('assembleMeetingTranscript prefixar talar-etikett när den finns', () => {
     { index: 1, text: 'Bra — två nya kunder.', speaker: 'Talare 2' }
   ]);
   assert.equal(text, 'Talare 1: Hur går försäljningen? Talare 2: Bra — två nya kunder.');
+});
+
+test('normalizeMeetingSegments läser talarturer och språk, filtrerar tomma turer', () => {
+  const [seg] = normalizeMeetingSegments([
+    {
+      index: 0,
+      text: 'Hur går det? Bra.',
+      language: 'SV',
+      turns: [
+        { speaker: 'S1', text: ' Hur går det? ' },
+        { speaker: 'S2', text: '   ' },
+        { speaker: 'S2', text: 'Bra.' },
+        'skräp',
+        { text: 'utan talare' }
+      ]
+    }
+  ]);
+  assert.equal(seg.language, 'sv');
+  assert.deepEqual(seg.turns, [
+    { speaker: 'S1', text: 'Hur går det?' },
+    { speaker: 'S2', text: 'Bra.' },
+    { speaker: '?', text: 'utan talare' }
+  ]);
+  const [plain] = normalizeMeetingSegments([{ index: 0, text: 'x', turns: [], language: 'not a code' }]);
+  assert.equal(plain.turns, undefined);
+  assert.equal(plain.language, undefined);
+});
+
+test('assembleMeetingTranscript renderar diariserade turer som repliker med talstreck', () => {
+  const text = assembleMeetingTranscript([
+    { index: 0, text: 'Inledning utan turer.' },
+    {
+      index: 1,
+      text: 'Hur går försäljningen? Bra — två nya kunder.',
+      turns: [
+        { speaker: 'S1', text: 'Hur går försäljningen?' },
+        { speaker: 'S2', text: 'Bra — två nya kunder.' }
+      ]
+    },
+    { index: 2, text: 'Avslutning.' }
+  ]);
+  assert.equal(
+    text,
+    [
+      'Inledning utan turer.',
+      `${MEETING_TURN_PREFIX}Hur går försäljningen?`,
+      `${MEETING_TURN_PREFIX}Bra — två nya kunder.`,
+      'Avslutning.'
+    ].join('\n\n')
+  );
+});
+
+test('assembleMeetingTranscript: en enda tur är vanlig text (inga talstreck, inga etiketter)', () => {
+  const text = assembleMeetingTranscript([
+    { index: 0, text: 'Bara en person pratar.', turns: [{ speaker: 'S1', text: 'Bara en person pratar.' }] },
+    { index: 1, text: 'Fortsätter.' }
+  ]);
+  assert.equal(text, 'Bara en person pratar. Fortsätter.');
+  assert.ok(!text.includes('S1'));
+});
+
+test('mötestyp: okänt/saknat ⇒ startup, motpart trimmas och cappas', () => {
+  assert.equal(normalizeMeetingKind(undefined), 'startup');
+  assert.equal(normalizeMeetingKind('skräp'), 'startup');
+  assert.equal(normalizeMeetingKind('internal'), 'internal');
+  assert.equal(normalizeMeetingKind('external'), 'external');
+  assert.equal(isMeetingKind('startup'), true);
+  assert.equal(isMeetingKind(''), false);
+  assert.equal(normalizeMeetingCounterpart('  Region   Gävleborg '), 'Region Gävleborg');
+  assert.equal(normalizeMeetingCounterpart(null), '');
+  assert.equal(normalizeMeetingCounterpart('x'.repeat(500)).length, MAX_MEETING_COUNTERPART);
+});
+
+test('meetingSubjectLabel: bolagsnamn för bolagsmöte, motpart/typ annars', () => {
+  assert.equal(meetingSubjectLabel({ kind: 'startup', startupName: 'Fixkod AB' }), 'Fixkod AB');
+  assert.equal(meetingSubjectLabel({ kind: 'startup' }), 'Bolag ej valt');
+  assert.equal(meetingSubjectLabel({ kind: 'internal', counterpart: 'Ledningsgrupp' }), 'Ledningsgrupp');
+  assert.equal(meetingSubjectLabel({ kind: 'external' }), 'Externt möte');
+  // Motparten ignoreras för bolagsmöten — bolaget är alltid ämnet.
+  assert.equal(
+    meetingSubjectLabel({ kind: 'startup', startupName: 'Fixkod AB', counterpart: 'Almi' }),
+    'Fixkod AB'
+  );
+});
+
+test('meetingProtocolFilename är filsystemsäkert, daterat och cappat', () => {
+  const name = meetingProtocolFilename({
+    kind: 'external',
+    counterpart: 'Region Gävleborg / Näringsliv: "Q3"',
+    title: 'Uppföljning',
+    dateIso: '2026-09-13T10:00:00.000Z'
+  });
+  assert.ok(name.endsWith('.md'));
+  assert.ok(name.startsWith('Mötesanteckning – Region Gävleborg'));
+  assert.ok(!/[\\/:*?"<>|]/.test(name));
+  assert.ok(name.includes('2026-09-13'));
+  assert.ok(name.includes('Uppföljning'));
+  const long = meetingProtocolFilename({ kind: 'internal', counterpart: 'x'.repeat(300), dateIso: 'nej' });
+  assert.ok(long.length <= 124);
+  assert.ok(long.includes('datum'));
+  assert.equal(meetingProtocolFilename({ kind: 'internal', dateIso: '2026-01-02' }), 'Mötesanteckning – Internt möte – 2026-01-02.md');
 });
 
 test('assembleMeetingTranscript på tom input ger tom sträng', () => {

@@ -7,7 +7,8 @@ import type {
   ApprovalRequestRef,
   GeneratedFileRef,
   InlineVisualRef,
-  MeetingRequestRef
+  MeetingRequestRef,
+  WebSearchSourceRef
 } from '@platform/shared';
 import {
   AI_IMPACT_SOURCE_LABEL,
@@ -76,6 +77,8 @@ export interface UiMessage {
   approval_request?: ApprovalRequestRef;
   /** Agenten har förberett mötesläget (§ 34) — "Starta mötet"-kort. */
   meeting_request?: MeetingRequestRef;
+  /** Webbkällor agenten hämtade via `web_search` (§ 9.8) — visas som chips under svaret. */
+  sources?: WebSearchSourceRef[];
 }
 
 // Ett pågående verktygssteg under en streamande turn.
@@ -972,7 +975,11 @@ export default function DashboardChat({
                 ? 'bg-movexum-pastell-bla text-movexum-djupbla'
                 : 'border border-default text-foreground-subtle hover:text-foreground'
             }`}
-            title="Inkludera aktuella publika EU-källor (Breakit, Sifted, Vinnova)"
+            title={
+              includeWebContext
+                ? 'Webbkällor PÅ: chatten söker på internet (Mistral Web Search, EU) när frågan kräver det och visar källorna under svaret. Dessutom hämtas aktuella rubriker från Breakit, Sifted och Vinnova.'
+                : 'Slå på för att låta chatten söka på internet (Mistral Web Search, EU) — statistik, nyheter, utlysningar, regler och publika uppgifter om bolag. Bara sökfrågan lämnar plattformen; intern data och personuppgifter skickas aldrig.'
+            }
           >
             <Icon name="globe" size={12} />
             Webbkällor
@@ -1085,6 +1092,38 @@ export default function DashboardChat({
     );
   }
 
+  // Webbkällor (§ 9.8): chips med titel + domän under svaret, öppnas hos
+  // källan i ny flik. Bara http(s)-URL:er persisteras (dedupeReferences).
+  function renderSources(sources?: WebSearchSourceRef[]) {
+    if (!sources || sources.length === 0) return null;
+    return (
+      <div className="mt-3">
+        <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-foreground-subtle">
+          Källor från webben
+        </p>
+        <ul className="flex flex-wrap gap-2">
+          {sources.map((src) => (
+            <li key={src.url}>
+              <a
+                href={src.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex max-w-[280px] items-center gap-1.5 rounded-full border border-default bg-canvas-subtle px-2.5 py-1 text-[12px] text-foreground transition hover:border-strong hover:bg-canvas-muted"
+                title={src.url}
+              >
+                <Icon name="globe" size={11} />
+                <span className="truncate">{src.title}</span>
+                {src.source && (
+                  <span className="shrink-0 text-foreground-subtle">· {src.source}</span>
+                )}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
   // Godkännandekort (§ 33): visas bara på det SENASTE assistant-svaret och
   // bara medan inget nytt körs/köas — ett klick skickar "Godkänn"/"Avbryt"
   // som en vanlig user-tur, varpå kortet försvinner (meddelandet är inte
@@ -1137,12 +1176,17 @@ export default function DashboardChat({
           Mötesläge förberett
         </p>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground">
-          {req.startup_name
-            ? `Möte med ${req.startup_name}${req.title ? ` — ${req.title}` : ''}. `
-            : req.title
-              ? `${req.title}. `
-              : ''}
-          Allt som sägs transkriberas live och kan sparas på bolagskortet efter granskning.
+          {req.kind && req.kind !== 'startup'
+            ? `${req.kind === 'internal' ? 'Internt möte' : 'Externt möte'}${
+                req.counterpart ? ` med ${req.counterpart}` : ''
+              }${req.title ? ` — ${req.title}` : ''}. Allt som sägs transkriberas live och kan sparas som fil i dina Filer efter granskning.`
+            : `${
+                req.startup_name
+                  ? `Möte med ${req.startup_name}${req.title ? ` — ${req.title}` : ''}. `
+                  : req.title
+                    ? `${req.title}. `
+                    : ''
+              }Allt som sägs transkriberas live och kan sparas på bolagskortet efter granskning.`}
         </p>
         <div className="mt-3 flex items-center gap-2">
           <button
@@ -1582,6 +1626,7 @@ export default function DashboardChat({
                       />
                       {renderVisuals(msg.visuals)}
                       {renderGeneratedFiles(msg.generated_files)}
+                      {renderSources(msg.sources)}
                       {renderApprovalRequest(msg, i === messages.length - 1)}
                       {renderMeetingRequest(msg, i === messages.length - 1)}
                       {typeof msg.tokens === 'number' && msg.tokens > 0 && (

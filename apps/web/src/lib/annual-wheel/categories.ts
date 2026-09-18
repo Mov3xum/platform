@@ -33,6 +33,7 @@ interface CategoryRow {
   label?: string;
   token?: string;
   sort_order?: number;
+  show_on_home?: boolean;
 }
 
 export const ANNUAL_WHEEL_CATEGORY_PAGE_SIZE = 200;
@@ -106,6 +107,7 @@ export async function ensureAnnualWheelCategoriesMaterialized(
         label: def.label,
         token: def.token,
         sort_order: def.sortOrder ?? 0,
+        show_on_home: true,
         ...(createdBy ? { created_by: createdBy } : {})
       });
     } catch (err) {

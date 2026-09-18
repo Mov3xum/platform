@@ -32,7 +32,7 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
     ],
     shortcuts: [
-      { name: 'Hemmaplan', url: '/hem', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
+      { name: 'Dashboard', url: '/hem', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
       { name: 'Chatt', url: '/chatt', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
       { name: 'Bolag', url: '/startups', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
       { name: 'Min översikt', url: '/inkorg', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] }

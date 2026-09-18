@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// CLAUDE.md § 37 — Hemmaplan. Lägger 'training' (Internutbildning) i
+// CLAUDE.md § 37 — Dashboard. Lägger 'training' (Internutbildning) i
 // org_posts.kind som UNION (aldrig ersätt values-listan — § 21.3-läxan från
 // migration 1700000049/1700000126) så att fliken "Internutbildningar" på
 // startsidan kan fyllas — via UI:t eller via chatt-verktygen

@@ -14,13 +14,18 @@
  */
 
 /**
- * Segmentlängd i sekunder. Klienten STARTAR OM MediaRecorder per segment
- * (inte `timeslice` — sådana chunkar är inte självständigt avkodbara) så att
- * varje segment blir en komplett fil som kan transkriberas direkt. Kort nog
- * för live-känsla och liten förlust vid krasch; lång nog för att inte klippa
- * meningar oftare än nödvändigt.
+ * LÄNGSTA segment i sekunder (hårt tak). Klienten fångar ljudet som en
+ * kontinuerlig PCM-ström (Web Audio, ingen MediaRecorder-omstart — omstarten
+ * tappade några hundra millisekunder tal i varje skarv) och klipper helst i
+ * en PAUS i talet mellan `MEETING_MIN_SEGMENT_SECONDS` och det här taket, så
+ * att ord aldrig delas mitt itu. Nås taket utan paus klipps segmentet ändå.
+ * Kort nog för live-känsla och liten förlust vid krasch; lång nog för att
+ * ge modellen sammanhang. Se `meeting-segmenter.ts`.
  */
 export const MEETING_SEGMENT_SECONDS = 90;
+
+/** Tidigast klipp (i en paus) för ordinarie segment. */
+export const MEETING_MIN_SEGMENT_SECONDS = 60;
 
 /**
  * Det FÖRSTA segmentet hålls kort så att live-transkriptet syns snabbt —
@@ -32,11 +37,24 @@ export const MEETING_SEGMENT_SECONDS = 90;
  */
 export const MEETING_FIRST_SEGMENT_SECONDS = 20;
 
+/** Tidigast klipp (i en paus) för det första segmentet. */
+export const MEETING_FIRST_SEGMENT_MIN_SECONDS = 8;
+
+/**
+ * Så lång sammanhängande tystnad (ms) som räknas som en paus att klippa i.
+ * Naturliga andningspauser mellan meningar är 300–800 ms; 500 ms fångar dem
+ * utan att klippa mitt i en tvekan inne i en mening.
+ */
+export const MEETING_PAUSE_MS = 500;
+
 /** Hårt tak på möteslängd (robusthet/kostnad, EU AI Act art. 15). */
 export const MAX_MEETING_SECONDS = 3 * 60 * 60;
 
-/** Hårt tak på antal segment per möte (3 h à 90 s = 120; marginal för retries). */
-export const MAX_MEETING_SEGMENTS = 160;
+/**
+ * Hårt tak på antal segment per möte. 3 h med klipp tidigast var 60:e sekund
+ * = 180 segment; marginalen täcker det korta första segmentet och retries.
+ */
+export const MAX_MEETING_SEGMENTS = 240;
 
 /** Osparade möten purgas efter så här många dagar (lagringsminimering). */
 export const MEETING_STALE_DAYS = 7;
@@ -63,6 +81,80 @@ export const MEETING_GAP_MARKER =
 
 export type MeetingStatus = 'recording' | 'ended' | 'saved' | 'discarded';
 
+/**
+ * Mötestyp (migration 1700000148). `startup` = möte om/med ett bolag i
+ * portföljen (protokollet sparas på bolagskortet); `internal` = Movexum-
+ * internt (ledningsgrupp, styrelse, team …); `external` = med en part som
+ * inte är ett portföljbolag (partner, kommun, investerare, annan inkubator).
+ * För internt/externt anger coachen i fritext vem/vad mötet gäller
+ * (`counterpart`) och protokollet sparas som fil i coachens Filer.
+ */
+export type MeetingKind = 'startup' | 'internal' | 'external';
+
+export const MEETING_KINDS: readonly MeetingKind[] = ['startup', 'internal', 'external'];
+
+export const MEETING_KIND_LABELS: Record<MeetingKind, string> = {
+  startup: 'Bolagsmöte',
+  internal: 'Internt möte',
+  external: 'Externt möte'
+};
+
+export const MEETING_KIND_HINTS: Record<MeetingKind, string> = {
+  startup: 'Möte med eller om ett bolag i portföljen — protokollet sparas på bolagskortet.',
+  internal: 'Movexum-internt (ledningsgrupp, styrelse, team) — protokollet sparas som fil i dina Filer.',
+  external: 'Med en extern part (partner, kommun, investerare) — protokollet sparas som fil i dina Filer.'
+};
+
+/** Tak för fritextetiketten "vem/vad gäller mötet" (organisation/forum — inga personnamn). */
+export const MAX_MEETING_COUNTERPART = 200;
+
+export function isMeetingKind(value: unknown): value is MeetingKind {
+  return typeof value === 'string' && (MEETING_KINDS as readonly string[]).includes(value);
+}
+
+/** Saknat/okänt värde (omigrerad instans, äldre rad) tolkas som bolagsmöte. */
+export function normalizeMeetingKind(value: unknown): MeetingKind {
+  return isMeetingKind(value) ? value : 'startup';
+}
+
+/** Trimmar och cappar motparts-etiketten; tom sträng när inget angetts. */
+export function normalizeMeetingCounterpart(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.replace(/\s+/g, ' ').trim().slice(0, MAX_MEETING_COUNTERPART);
+}
+
+/**
+ * Läsbar etikett för vem/vad mötet gäller — bolagsnamnet för bolagsmöten,
+ * annars motparten (eller typens namn när inget angetts).
+ */
+export function meetingSubjectLabel(input: {
+  kind: MeetingKind;
+  startupName?: string;
+  counterpart?: string;
+}): string {
+  if (input.kind === 'startup') return input.startupName?.trim() || 'Bolag ej valt';
+  return input.counterpart?.trim() || MEETING_KIND_LABELS[input.kind];
+}
+
+/**
+ * Filnamn för ett internt/externt mötesprotokoll i Filer. Deterministiskt,
+ * filsystemsäkert (inga snedstreck/kontrolltecken), cappat.
+ */
+export function meetingProtocolFilename(input: {
+  kind: MeetingKind;
+  counterpart?: string;
+  title?: string;
+  dateIso: string;
+}): string {
+  const date = /^\d{4}-\d{2}-\d{2}/.test(input.dateIso) ? input.dateIso.slice(0, 10) : 'datum';
+  // Ämne/titel cappas var för sig så att datumet alltid ryms i namnet.
+  const subject = meetingSubjectLabel({ kind: input.kind, counterpart: input.counterpart }).slice(0, 70);
+  const title = (input.title ?? '').trim().slice(0, 40);
+  const raw = ['Mötesanteckning', subject, title, date].filter(Boolean).join(' – ');
+  const safe = raw.replace(/[\\/:*?"<>|]/g, '').replace(/[\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim();
+  return `${safe.slice(0, 120)}.md`;
+}
+
 export const RESUMABLE_MEETING_STATUSES: readonly MeetingStatus[] = [
   'recording',
   'ended'
@@ -73,9 +165,27 @@ export function isResumableMeetingStatus(status: string): boolean {
 }
 
 /**
- * Ett transkriberat segment. `speaker` är reserverat från dag 1 för framtida
- * talarindelning (Fas 3 — diarisering UTAN identitet, anonyma etiketter som
- * en människa döper; biometrisk röstidentifiering byggs ALDRIG, § 31.4).
+ * En talartur inom ETT segment (Fas 3-diarisering, § 34.4 — env-gated).
+ * Etiketten är SEGMENTLOKAL och anonym ("S1", "S2"): ljudet finns inte kvar
+ * att jämföra mot mellan segment och röstavtryck byggs aldrig, så "S1" i två
+ * olika segment är inte nödvändigtvis samma person. Transkriptet renderar
+ * därför turerna som repliker med talstreck, inte med numrerade talare —
+ * numreringen sätter den språkliga turindelningen (Fas 2) eller coachen.
+ */
+export interface MeetingTurn {
+  speaker: string;
+  text: string;
+}
+
+export const MAX_MEETING_TURNS_PER_SEGMENT = 200;
+
+/** Markör för en replik (talarbyte upptäckt i ljudet). */
+export const MEETING_TURN_PREFIX = '– ';
+
+/**
+ * Ett transkriberat segment. `speaker` är reserverat för en framtida
+ * segmentövergripande talarindelning (anonyma etiketter som en människa
+ * döper; biometrisk röstidentifiering byggs ALDRIG, § 31.4).
  */
 export interface MeetingSegment {
   /** Ordningsnummer (0-baserat) — sätts av klienten, används för luck-detektering. */
@@ -86,6 +196,10 @@ export interface MeetingSegment {
   at?: string;
   /** Reserverad anonym talar-etikett ("Talare 1") — aldrig en identitet. */
   speaker?: string;
+  /** Talarturer inom segmentet när diarisering var på (annars utelämnat). */
+  turns?: MeetingTurn[];
+  /** Språkkod modellen rapporterade för segmentet (diagnostik, PII-fri). */
+  language?: string;
 }
 
 export interface MeetingTranscriptRecord {
@@ -94,6 +208,10 @@ export interface MeetingTranscriptRecord {
   owner: string;
   startup?: string;
   status: MeetingStatus;
+  /** Mötestyp (migration 1700000148); saknat = `startup`. */
+  kind?: MeetingKind;
+  /** Vem/vad mötet gäller för internt/externt (fritext, organisation/forum). */
+  counterpart?: string;
   title?: string;
   segments?: MeetingSegment[];
   consent_confirmed_at?: string;
@@ -101,6 +219,22 @@ export interface MeetingTranscriptRecord {
   ended_at?: string;
   created: string;
   updated: string;
+}
+
+/** Normaliserar ett segments talarturer: bara `{speaker, text}` med text, cappat. */
+export function normalizeMeetingTurns(raw: unknown): MeetingTurn[] {
+  if (!Array.isArray(raw)) return [];
+  const out: MeetingTurn[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const text = typeof rec.text === 'string' ? rec.text.replace(/\s+/g, ' ').trim() : '';
+    if (!text) continue;
+    const speaker = typeof rec.speaker === 'string' && rec.speaker.trim() ? rec.speaker.trim() : '?';
+    out.push({ speaker, text });
+    if (out.length >= MAX_MEETING_TURNS_PER_SEGMENT) break;
+  }
+  return out;
 }
 
 /** Normaliserar en segments-array från DB: filtrerar skräp, dedupe:ar på index. */
@@ -116,6 +250,11 @@ export function normalizeMeetingSegments(raw: unknown): MeetingSegment[] {
     const seg: MeetingSegment = { index, text };
     if (typeof rec.at === 'string' && rec.at) seg.at = rec.at;
     if (typeof rec.speaker === 'string' && rec.speaker) seg.speaker = rec.speaker;
+    if (typeof rec.language === 'string' && /^[a-z]{2,3}(-[a-z]{2,4})?$/i.test(rec.language)) {
+      seg.language = rec.language.toLowerCase();
+    }
+    const turns = normalizeMeetingTurns(rec.turns);
+    if (turns.length > 0) seg.turns = turns;
     // Sista skrivningen för ett index vinner (retry-uppladdningar).
     byIndex.set(index, seg);
   }
@@ -154,6 +293,16 @@ export function assembleMeetingTranscript(raw: unknown): string {
       continue;
     }
     inGap = false;
+    // Diariserat segment med MINST två talarbyten: varje tur blir en egen
+    // replik med talstreck (aldrig numrerade talare — etiketterna är
+    // segmentlokala, se MeetingTurn). En enda tur är bara vanlig text.
+    if (seg.turns && seg.turns.length >= 2) {
+      flush();
+      for (const turn of seg.turns) {
+        parts.push(`${MEETING_TURN_PREFIX}${turn.text}`);
+      }
+      continue;
+    }
     const clean = seg.text.replace(/\s+/g, ' ').trim();
     if (clean) {
       buffer.push(seg.speaker ? `${seg.speaker}: ${clean}` : clean);
@@ -199,9 +348,13 @@ export function isStaleMeeting(
  * mänskligt klick; agenten kan aldrig starta en inspelning själv.
  */
 export interface MeetingRequestRef {
+  /** Mötestyp (default `startup`). */
+  kind?: MeetingKind;
   /** Förifyllt bolag (fuzzy-matchat av agenten) — coachen kan byta. */
   startup_id?: string;
   startup_name?: string;
+  /** Förifylld motpart för internt/externt möte (fritext). */
+  counterpart?: string;
   /** Förifylld mötestitel. */
   title?: string;
 }

@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// CLAUDE.md § 37 — Hemmaplan (organisationens startsida). Anslagstavlan:
+// CLAUDE.md § 37 — Dashboard (organisationens startsida). Anslagstavlan:
 // nyheter, info, instruktioner och firanden som staff skriver till
 // organisationen. Ren verksamhetsinformation (ingen PII utöver författar-
 // relationen, som är en intern användare).

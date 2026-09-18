@@ -14,7 +14,9 @@ import {
   AUTHORING_GUIDANCE,
   APPROVAL_GUIDANCE,
   MEETING_GUIDANCE,
-  CHAT_WRITE_ACTIONS_GUIDANCE
+  CHAT_WRITE_ACTIONS_GUIDANCE,
+  WEB_SEARCH_GUIDANCE,
+  WEB_SEARCH_OFF_HINT
 } from './guidance';
 import { routeChatModels } from './model-router';
 import { getModelMeta, isAllowedModel, modelSupportsVision } from './models';
@@ -29,6 +31,7 @@ import type {
   InlineVisualRef,
   MeetingRequestRef,
   Role,
+  WebSearchSourceRef,
   WebSourceKey
 } from '@platform/shared';
 
@@ -329,12 +332,20 @@ export interface StaffTurnResult {
   approvalRequest?: ApprovalRequestRef;
   /** Möteskort (`start_meeting`, § 34) — "Starta mötet"-knapp i UI:t. */
   meetingRequest?: MeetingRequestRef;
+  /** Webbkällor agenten hämtade via `web_search` (visas under svaret). */
+  sources: WebSearchSourceRef[];
 }
 
 export interface RunStaffChatTurnOptions {
   /** Hela samtalshistoriken (user/assistant) utan system-meddelande. */
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** Färdigt block med aktuella EU-RSS-rubriker (komplement till webbsökning). */
   webBlock?: string;
+  /**
+   * Exponera `web_search` (riktig internetsökning, § 9.8). Sätts när
+   * användaren slagit på "Webbkällor" — uttryckligt opt-in per tur.
+   */
+  includeWebSearch?: boolean;
   agentBlock?: string;
   images?: Array<{ dataUrl: string }>;
   /** Agent-id (persona) — sätts på actorn för audit. */
@@ -409,7 +420,8 @@ export async function runStaffChatTurn(
     ? buildChatTools(collections, {
         actor,
         includeMemory: true,
-        includeDocuments: opts.includeDocuments
+        includeDocuments: opts.includeDocuments,
+        includeWebSearch: opts.includeWebSearch
       })
     : undefined;
 
@@ -440,7 +452,8 @@ export async function runStaffChatTurn(
       AUTHORING_GUIDANCE +
       MEETING_GUIDANCE +
       SEARCH_STRATEGY_GUIDANCE +
-      KNOWLEDGE_GUIDANCE
+      KNOWLEDGE_GUIDANCE +
+      (opts.includeWebSearch ? WEB_SEARCH_GUIDANCE : WEB_SEARCH_OFF_HINT)
     : '';
 
   const systemContent =
@@ -466,6 +479,7 @@ export async function runStaffChatTurn(
   const inlineVisuals: InlineVisualRef[] = [];
   const approvalRequests: ApprovalRequestRef[] = [];
   const meetingRequests: MeetingRequestRef[] = [];
+  const webSources: WebSearchSourceRef[] = [];
   const surface: AiUsageSurface = opts.surface ?? 'dashboard_chat';
 
   // Modellval efter komplexitet (ej längre default small). Bilder → vision.
@@ -491,7 +505,8 @@ export async function runStaffChatTurn(
         generatedFiles,
         inlineVisuals,
         approvalRequests,
-        meetingRequests
+        meetingRequests,
+        webSources
       },
       maxIterations: MAX_TOOL_ITERATIONS,
       onStep: opts.onStep,
@@ -520,7 +535,8 @@ export async function runStaffChatTurn(
         generatedFiles,
         visuals: inlineVisuals,
         approvalRequest: approvalRequests[0],
-        meetingRequest: meetingRequests[0]
+        meetingRequest: meetingRequests[0],
+        sources: webSources
       }
     };
   } catch (err) {
