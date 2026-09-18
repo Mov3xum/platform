@@ -1176,12 +1176,17 @@ export default function DashboardChat({
           Mötesläge förberett
         </p>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground">
-          {req.startup_name
-            ? `Möte med ${req.startup_name}${req.title ? ` — ${req.title}` : ''}. `
-            : req.title
-              ? `${req.title}. `
-              : ''}
-          Allt som sägs transkriberas live och kan sparas på bolagskortet efter granskning.
+          {req.kind && req.kind !== 'startup'
+            ? `${req.kind === 'internal' ? 'Internt möte' : 'Externt möte'}${
+                req.counterpart ? ` med ${req.counterpart}` : ''
+              }${req.title ? ` — ${req.title}` : ''}. Allt som sägs transkriberas live och kan sparas som fil i dina Filer efter granskning.`
+            : `${
+                req.startup_name
+                  ? `Möte med ${req.startup_name}${req.title ? ` — ${req.title}` : ''}. `
+                  : req.title
+                    ? `${req.title}. `
+                    : ''
+              }Allt som sägs transkriberas live och kan sparas på bolagskortet efter granskning.`}
         </p>
         <div className="mt-3 flex items-center gap-2">
           <button

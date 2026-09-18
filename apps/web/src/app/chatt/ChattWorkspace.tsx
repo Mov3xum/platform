@@ -792,8 +792,10 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
           onOpenMeeting={() => setMeetingPanel({})}
           onStartMeeting={(req: MeetingRequestRef) =>
             setMeetingPanel({
+              kind: req.kind,
               startupId: req.startup_id,
               startupName: req.startup_name,
+              counterpart: req.counterpart,
               title: req.title
             })
           }

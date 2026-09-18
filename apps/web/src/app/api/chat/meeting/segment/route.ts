@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { transcribeSpeech, VoiceError, voiceModel } from '@/lib/ai/voice';
+import {
+  MEETING_CONTEXT_VOCABULARY,
+  buildContextBias,
+  isDiarizationEnabled
+} from '@/lib/ai/voice-transcription';
 import { logAiUsage } from '@/lib/ai/usage';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
@@ -138,6 +143,8 @@ export async function POST(request: Request): Promise<Response> {
 
   let text = '';
   let warning: string | undefined;
+  let language: string | undefined;
+  let turns: MeetingSegment['turns'];
   let model = voiceModel();
   if (silent) {
     // Effektivt tyst (avstängd/frånkopplad mikrofon eller ingen som pratar):
@@ -145,8 +152,23 @@ export async function POST(request: Request): Promise<Response> {
     text = '';
   } else {
     try {
-      const result = await transcribeSpeech(buffer, validation.mime);
+      // Kontext-bias ("egen ordlista"): bolagets namn först, sedan den fasta
+      // domänordlistan. Bara verksamhetstermer — mötestiteln utelämnas
+      // medvetet (kan innehålla personnamn; GDPR § 5).
+      const contextBias = buildContextBias([
+        await meetingStartupName(pb, meeting.startup, user.tenant),
+        ...MEETING_CONTEXT_VOCABULARY
+      ]);
+      const result = await transcribeSpeech(buffer, validation.mime, {
+        contextBias,
+        diarize: isDiarizationEnabled(process.env)
+      });
       text = sanitizePersonnummer(result.text);
+      language = result.language;
+      // Talarturer (diarisering på): personnummer-saneras per tur, som texten.
+      if (result.turns && result.turns.length > 1) {
+        turns = result.turns.map((t) => ({ speaker: t.speaker, text: sanitizePersonnummer(t.text) }));
+      }
       model = result.model || model;
       await logAiUsage(pb, {
         tenant: user.tenant,
@@ -200,6 +222,8 @@ export async function POST(request: Request): Promise<Response> {
     text,
     at: new Date().toISOString()
   };
+  if (language) segment.language = language;
+  if (turns) segment.turns = turns;
   const updated = [...existing.filter((s) => s.index !== segmentIndex), segment];
 
   try {
@@ -217,5 +241,26 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: 'Kunde inte spara segmentet.' }, { status: 500 });
   }
 
-  return NextResponse.json({ text, segmentIndex, silent, warning, level });
+  return NextResponse.json({ text, segmentIndex, silent, warning, level, language });
+}
+
+/**
+ * Bolagets namn (whitelistat fält, § 9.3) för kontext-biasen — läses med
+ * användarens token (RLS) och tenant-verifieras. Fail-soft: tomt vid fel.
+ */
+async function meetingStartupName(
+  pb: Awaited<ReturnType<typeof getServerPb>>,
+  startupId: string | undefined,
+  tenant: string
+): Promise<string> {
+  if (!startupId) return '';
+  try {
+    const s = await pb
+      .collection('startups')
+      .getOne<{ tenant?: string; name?: string }>(startupId, { fields: 'id,tenant,name' });
+    if (String(s.tenant ?? '') !== tenant) return '';
+    return typeof s.name === 'string' ? s.name : '';
+  } catch {
+    return '';
+  }
 }

@@ -31,13 +31,22 @@ import {
 import {
   MAX_MEETING_NOTE_CHARS,
   MAX_MEETING_TITLE,
+  MEETING_KIND_LABELS,
   assembleMeetingTranscript,
   isResumableMeetingStatus,
   isStaleMeeting,
+  meetingProtocolFilename,
+  meetingSubjectLabel,
+  normalizeMeetingCounterpart,
+  normalizeMeetingKind,
   normalizeMeetingSegments,
+  type MeetingKind,
   type MeetingSegment,
   type MeetingStatus
 } from '@platform/shared';
+import { createUserFileRecord } from '@/lib/user-files.server';
+import { indexUserFile } from '@/lib/ai/rag';
+import { logIndexUsage } from '@/lib/ai/usage';
 import type PocketBase from 'pocketbase';
 
 /**
@@ -75,6 +84,10 @@ export interface MeetingStartupOption {
 export interface MeetingDto {
   id: string;
   status: MeetingStatus;
+  /** Mötestyp (startup/internal/external); saknat fält ⇒ startup. */
+  kind: MeetingKind;
+  /** Motpart för internt/externt möte (fritext). */
+  counterpart: string;
   title: string;
   startupId: string;
   startupName: string;
@@ -107,6 +120,8 @@ function toDto(row: MeetingRow, resolvedStartupName: string): MeetingDto {
   return {
     id: row.id,
     status: row.status,
+    kind: normalizeMeetingKind(row.kind),
+    counterpart: normalizeMeetingCounterpart(row.counterpart),
     title: row.title || '',
     startupId: row.startup || '',
     startupName: resolvedStartupName,
@@ -165,7 +180,11 @@ export async function listMeetingStartupsAction(): Promise<{
 }
 
 export interface StartMeetingInput {
+  /** Mötestyp (default `startup`). */
+  kind?: MeetingKind | null;
   startupId?: string | null;
+  /** Motpart för internt/externt möte (fritext: organisation/forum, inga personnamn). */
+  counterpart?: string | null;
   title?: string | null;
   /** Coachens bekräftelse av samtyckesgrinden (MEETING_CONSENT_TEXT). */
   consentConfirmed: boolean;
@@ -189,7 +208,11 @@ export async function startMeetingAction(
 
     await purgeStaleMeetings(pb, user.id);
 
-    const startupId = (input.startupId || '').trim();
+    const kind = normalizeMeetingKind(input.kind);
+    const counterpart = kind === 'startup' ? '' : normalizeMeetingCounterpart(input.counterpart);
+    // Bolag hör bara till bolagsmöten; internt/externt bär i stället en
+    // motparts-etikett (fritext, cappad — ingen relation, ingen PII avsedd).
+    const startupId = kind === 'startup' ? (input.startupId || '').trim() : '';
     if (startupId) {
       const name = await startupName(pb, user.tenant, startupId);
       if (!name) return { error: 'Bolaget hittades inte i din organisation.' };
@@ -200,10 +223,12 @@ export async function startMeetingAction(
     // tenant/owner sätts explicit från den verifierade användaren, aldrig
     // från klienten, så fallbacken ändrar ingen behörighetsgräns.
     const created = await meetingWriteWithFallback(pb, (client) =>
-      client.collection(COLLECTION).create<{ id: string }>({
+      client.collection(COLLECTION).create<{ id: string; kind?: string }>({
         tenant: user.tenant,
         owner: user.id,
         startup: startupId || null,
+        kind,
+        counterpart,
         status: 'recording',
         title: String(input.title || '')
           .trim()
@@ -213,6 +238,19 @@ export async function startMeetingAction(
         started_at: nowIso
       })
     );
+    // Schema-drift (§ 30.4-invarianten): PB släpper okända fält TYST. Ett
+    // internt/externt möte på en instans utan migration 1700000148 skulle då
+    // tyst bli ett bolagsmöte utan bolag — säg det i stället.
+    if (kind !== 'startup' && normalizeMeetingKind(created.kind) !== kind) {
+      await meetingWriteWithFallback(pb, (client) =>
+        client.collection(COLLECTION).delete(created.id)
+      ).catch(() => undefined);
+      return {
+        error:
+          'Mötestyper (internt/externt) kräver migration 1700000148 på PocketBase-instansen. ' +
+          'Kör migrationerna/redeploya PB, eller starta mötet som bolagsmöte så länge.'
+      };
+    }
     return { meetingId: created.id };
   } catch (err) {
     return { error: describeMeetingStoreError(err, 'Kunde inte starta mötet.') };
@@ -355,7 +393,8 @@ export async function structureMeetingTranscriptAction(
 }
 
 export interface SaveMeetingInput {
-  startupId: string;
+  /** Krävs för bolagsmöten; ignoreras för interna/externa (de sparas i Filer). */
+  startupId?: string;
   /** Konfidentiell anteckning — coachens MÄNSKLIGA val (agentvägen får aldrig). */
   confidential: boolean;
   /** Bifoga hela transkriptet i anteckningen (annars bara protokollet). */
@@ -372,20 +411,41 @@ export interface SaveMeetingInput {
  * arkivet). Personnummer saneras på skrivvägen (§ 15.6-regexen) — folk säger
  * personnummer högt i möten.
  */
+export interface SaveMeetingResult {
+  error?: string;
+  kind?: MeetingKind;
+  /** Bolagsmöte: anteckningen på bolagskortet. */
+  noteId?: string;
+  startupId?: string;
+  startupName?: string;
+  /** Internt/externt möte: filen i Filer. */
+  fileId?: string;
+  filename?: string;
+  /** Läsbar etikett för vem/vad mötet gällde. */
+  subject?: string;
+}
+
+/**
+ * Sparar mötet — bolagsmöten som anteckning på bolagskortet (+ feed-rad),
+ * interna/externa möten som Markdown-fil i coachens personliga Filer
+ * (`user_files`, strikt ägaren-bara § 17.2 — `notes` kräver ett bolag och
+ * ett internt protokoll ska inte ligga på något bolagskort). Därefter
+ * PURGAS råtranskriptet (lagringsminimering — anteckningen/filen är
+ * arkivet). Personnummer saneras på skrivvägen (§ 15.6-regexen) — folk
+ * säger personnummer högt i möten.
+ */
 export async function saveMeetingToStartupAction(
   meetingId: string,
   input: SaveMeetingInput
-): Promise<{ error?: string; noteId?: string; startupId?: string; startupName?: string }> {
+): Promise<SaveMeetingResult> {
   try {
     const user = await requireStaff();
     const pb = await getServerPb();
     const row = await loadOwnedMeeting(pb, meetingId, user);
     if (!row) return { error: 'Mötet hittades inte.' };
 
-    const startupId = (input.startupId || '').trim();
-    if (!startupId) return { error: 'Välj vilket bolagskort mötet ska sparas på.' };
-    const name = await startupName(pb, user.tenant, startupId);
-    if (!name) return { error: 'Bolaget hittades inte i din organisation.' };
+    const kind = normalizeMeetingKind(row.kind);
+    const counterpart = normalizeMeetingCounterpart(row.counterpart);
 
     const protocol = sanitizePersonnummer(String(input.protocolText || '').trim());
     const transcript = input.includeTranscript
@@ -398,7 +458,76 @@ export async function saveMeetingToStartupAction(
     }
 
     const title = (row.title || '').trim();
-    const dateLabel = (row.started_at || new Date().toISOString()).slice(0, 10);
+    const dateIso = row.started_at || new Date().toISOString();
+    const dateLabel = dateIso.slice(0, 10);
+
+    if (kind !== 'startup') {
+      // ── Internt/externt: Markdown-fil i ägarens Filer ──────────────────
+      const subject = meetingSubjectLabel({ kind, counterpart });
+      const md: string[] = [];
+      md.push(`# Mötesanteckning — ${subject}${title ? ` — ${title}` : ''}`);
+      md.push(`${MEETING_KIND_LABELS[kind]} · ${dateLabel}`);
+      if (protocol) md.push(protocol);
+      if (transcript) md.push(`## Transkript (AI-transkriberat, Voxtral)\n\n${transcript}`);
+      md.push('_Genererat med stöd av AI (Voxtral/Mistral, EU) – verifierat av coach före sparande._');
+      const content = md.join('\n\n').slice(0, MAX_MEETING_NOTE_CHARS);
+      const bytes = new TextEncoder().encode(content);
+      const filename = meetingProtocolFilename({ kind, counterpart, title, dateIso });
+
+      let file: { id: string };
+      try {
+        file = await createUserFileRecord(
+          pb,
+          { id: user.id, tenant: user.tenant },
+          {
+            file: new Blob([bytes], { type: 'text/markdown' }),
+            filename,
+            mime: 'text/markdown',
+            sizeBytes: bytes.byteLength,
+            // Protokollet är AI-utkast + mänsklig redigering — märks som
+            // genererat (art. 50) och sorteras direkt under Rapporter &
+            // uppföljning (§ 24) utan AI-klassning.
+            source: 'agent_generated',
+            docKind: 'other',
+            extra: { topic: 'rapporter_uppfoljning', topic_status: 'confirmed' }
+          }
+        );
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : 'Kunde inte spara filen i Filer.' };
+      }
+
+      // Gör protokollet sökbart i chatten direkt (`search_my_files`, § 27) —
+      // texten är redan personnummer-sanerad. Best-effort: ett indexfel får
+      // aldrig stoppa sparandet (filen finns; "Gör sökbara i chatten" i /filer
+      // kan köras i efterhand).
+      try {
+        await pb.collection('user_files').update(file.id, { extracted_text: content });
+        const idx = await indexUserFile(pb, {
+          tenant: user.tenant,
+          owner: user.id,
+          sourceId: file.id,
+          text: content
+        });
+        void logIndexUsage(pb, { tenant: user.tenant, userId: user.id }, idx.usage);
+      } catch {
+        /* fail-soft */
+      }
+
+      await meetingWriteWithFallback(pb, (client) =>
+        client.collection(COLLECTION).delete(row.id)
+      ).catch(() => undefined);
+
+      revalidatePath('/filer');
+      revalidatePath('/chatt');
+      return { kind, fileId: file.id, filename, subject };
+    }
+
+    // ── Bolagsmöte: anteckning på bolagskortet ───────────────────────────
+    const startupId = (input.startupId || '').trim();
+    if (!startupId) return { error: 'Välj vilket bolagskort mötet ska sparas på.' };
+    const name = await startupName(pb, user.tenant, startupId);
+    if (!name) return { error: 'Bolaget hittades inte i din organisation.' };
+
     const parts: string[] = [];
     parts.push(`Mötesanteckning${title ? ` — ${title}` : ''} (${dateLabel})`);
     if (protocol) parts.push(protocol);
@@ -448,7 +577,7 @@ export async function saveMeetingToStartupAction(
     revalidatePath(`/startups/${startupId}`);
     revalidatePath('/aktivitet');
     revalidatePath('/chatt');
-    return { noteId: note.id, startupId, startupName: name };
+    return { kind, noteId: note.id, startupId, startupName: name, subject: name };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte spara mötet.' };
   }
