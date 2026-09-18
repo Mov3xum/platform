@@ -3076,6 +3076,40 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
 });
 
+// Migration 1700000142 + 1700000148: meeting_transcripts — owner-only
+// mötesarbetsdata i chatten. Speglas här så en PB-instans utan körda migrationer
+// kan självläka i deploy-jobbet innan verify-baseline asserterar existens.
+await ensureCollection({
+  id: 'meeting_transcripts_col',
+  name: 'meeting_transcripts',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'owner', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['recording', 'ended', 'saved', 'discarded'] },
+    { name: 'kind', type: 'select', required: false, maxSelect: 1, values: ['startup', 'internal', 'external'] },
+    { name: 'counterpart', type: 'text', required: false, max: 200 },
+    { name: 'title', type: 'text', required: false, max: 200 },
+    { name: 'segments', type: 'json', required: false, maxSize: 2000000 },
+    { name: 'consent_confirmed_at', type: 'date', required: false },
+    { name: 'started_at', type: 'date', required: false },
+    { name: 'ended_at', type: 'date', required: false },
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+  ],
+  indexes: [
+    'CREATE INDEX idx_mt_owner ON meeting_transcripts (owner)',
+    'CREATE INDEX idx_mt_tenant ON meeting_transcripts (tenant)',
+    'CREATE INDEX idx_mt_owner_status ON meeting_transcripts (owner, status)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${OWNER_DIRECT}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
+});
+
 // Migration 1700000085: user_files — personligt filarkiv (/filer).
 // STRIKT ägaren-bara. file-fält: mime-whitelist + 25 MB tak (A.8.9).
 await ensureCollection({
