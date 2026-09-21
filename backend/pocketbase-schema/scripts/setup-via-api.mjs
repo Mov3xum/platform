@@ -2625,7 +2625,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
 });
@@ -2648,7 +2648,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: null,
   deleteRule: null
 });
@@ -2672,7 +2672,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
 });
@@ -2694,7 +2694,7 @@ await ensureCollection({
   indexes: ['CREATE UNIQUE INDEX idx_de_minimis_regelverk_kod ON de_minimis_regelverk (kod)'],
   listRule: ANY_AUTH,
   viewRule: ANY_AUTH,
-  createRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`,
+  createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`,
   deleteRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`
 });
@@ -2724,7 +2724,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
 });
@@ -2745,7 +2745,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
 });
@@ -2794,7 +2794,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
 });
@@ -3035,7 +3035,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${OWNER_DIRECT}`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
 });
@@ -3071,7 +3071,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${OWNER_DIRECT}`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
 });
@@ -3153,7 +3153,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${OWNER_DIRECT}`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
 });
