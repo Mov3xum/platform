@@ -62,6 +62,7 @@ import {
   type AnnualWheelColorToken,
   type AnnualWheelItem,
   type AnnualWheelPeriodKey,
+  type AnnualWheelOccurrence,
   type AnnualWheelRepeat,
   type AnnualWheelSort,
   type AnnualWheelTag,
@@ -139,24 +140,44 @@ interface FormState {
   repeatUntilYear: string; // '' = basåret + 2 (bara 'yearly')
 }
 
-/** Hur många aktiviteter en serie skulle skapa (för förhandsbeskedet i UI:t). */
-function seriesPreviewCount(form: FormState): number {
-  if (form.month === '' && form.repeat !== 'yearly') return 1;
-  return Math.max(
-    1,
-    expandAnnualWheelSeries(
-      {
-        year: form.year,
-        month: form.month === '' ? null : Number(form.month),
-        day: form.day === '' ? null : Number(form.day),
-        end_month: form.endMonth === '' ? null : Number(form.endMonth),
-        end_day: form.endDay === '' ? null : Number(form.endDay)
-      },
-      form.repeat,
-      form.repeatUntilMonth === '' ? 12 : Number(form.repeatUntilMonth),
-      form.repeatUntilYear === '' ? null : Number(form.repeatUntilYear)
-    ).length
+/** Förekomsterna en serie skulle skapa (för förhandsbeskedet i UI:t). */
+function seriesPreview(form: FormState): AnnualWheelOccurrence[] {
+  if (form.month === '' && form.repeat !== 'yearly') return [];
+  return expandAnnualWheelSeries(
+    {
+      year: form.year,
+      month: form.month === '' ? null : Number(form.month),
+      day: form.day === '' ? null : Number(form.day),
+      end_month: form.endMonth === '' ? null : Number(form.endMonth),
+      end_day: form.endDay === '' ? null : Number(form.endDay)
+    },
+    form.repeat,
+    form.repeatUntilMonth === '' ? 12 : Number(form.repeatUntilMonth),
+    form.repeatUntilYear === '' ? null : Number(form.repeatUntilYear)
   );
+}
+
+/**
+ * Förhandsbesked som säger VAD serien blir, inte bara hur många: "3 aktiviteter
+ * — en per år, 2026–2028" respektive "8 aktiviteter — en per månad, maj–dec".
+ * Så att "varje år" aldrig kan förväxlas med "varje månad" innan man sparar.
+ */
+function seriesPreviewLabel(form: FormState): string {
+  const occ = seriesPreview(form);
+  const count = Math.max(1, occ.length);
+  if (form.repeat === 'yearly') {
+    const first = occ[0]?.year ?? form.year;
+    const last = occ[occ.length - 1]?.year ?? form.year;
+    return count === 1
+      ? 'Skapar 1 aktivitet (bara det här året)'
+      : `Skapar ${count} aktiviteter — en per år, ${first}–${last}`;
+  }
+  const months = occ.map((o) => o.month).filter((m): m is number => m !== null);
+  const span =
+    months.length > 1 ? `, ${monthShortLabel(months[0])}–${monthShortLabel(months[months.length - 1])}` : '';
+  const cadence =
+    form.repeat === 'monthly' ? 'en per månad' : form.repeat === 'bimonthly' ? 'en varannan månad' : 'en per kvartal';
+  return count === 1 ? 'Skapar 1 aktivitet' : `Skapar ${count} aktiviteter — ${cadence}${span}`;
 }
 
 /** Ordnings-okänslig jämförelse av två tagguppsättningar. */
@@ -1480,10 +1501,14 @@ export function EditorModal({
 
   function toggleRepeat(on: boolean) {
     setRepeatOpen(on);
-    // Utan månad är "varje år" den enda meningsfulla upprepningen.
+    // "Upprepa" i ett årshjul betyder i första hand SAMMA DATUM VARJE ÅR —
+    // det är därför standardvalet (för daterade OCH odaterade aktiviteter).
+    // Varje månad/varannan/kvartal väljs uttryckligen i "Hur ofta"; tidigare
+    // förvaldes 'monthly' för daterade poster, vilket gjorde att ett "upprepa"
+    // tyst blev en förekomst i varje månad under året.
     setForm({
       ...form,
-      repeat: on ? (form.month === '' ? 'yearly' : 'monthly') : 'none',
+      repeat: on ? 'yearly' : 'none',
       repeatUntilMonth: on ? form.repeatUntilMonth : '',
       repeatUntilYear: on ? form.repeatUntilYear : ''
     });
@@ -1709,10 +1734,10 @@ export function EditorModal({
                 label="Upprepa"
                 hint={
                   repeatOpen && form.repeat !== 'none'
-                    ? `Skapar ${seriesPreviewCount(form)} aktiviteter — en per förekomst`
+                    ? seriesPreviewLabel(form)
                     : hasMonth
-                      ? 'Varje månad, varannan, varje kvartal eller varje år'
-                      : 'Varje år (helårsaktivitet)'
+                      ? 'Samma datum varje år — eller varje månad/kvartal'
+                      : 'Samma helårsaktivitet varje år'
                 }
                 checked={repeatOpen}
                 onChange={toggleRepeat}
@@ -1724,13 +1749,15 @@ export function EditorModal({
                       onChange={(e) => setForm({ ...form, repeat: e.target.value as AnnualWheelRepeat })}
                       className={inputCls}
                     >
-                      {ANNUAL_WHEEL_REPEATS.filter((r) => r.id !== 'none' && (hasMonth || r.id === 'yearly')).map(
-                        (r) => (
+                      {/* Varje år först — det är standardvalet och det vanligaste i ett årshjul. */}
+                      {[...ANNUAL_WHEEL_REPEATS]
+                        .filter((r) => r.id !== 'none' && (hasMonth || r.id === 'yearly'))
+                        .sort((a, b) => Number(b.id === 'yearly') - Number(a.id === 'yearly'))
+                        .map((r) => (
                           <option key={r.id} value={r.id}>
                             {r.label}
                           </option>
-                        )
-                      )}
+                        ))}
                     </select>
                   </Field>
                   {form.repeat === 'yearly' ? (
