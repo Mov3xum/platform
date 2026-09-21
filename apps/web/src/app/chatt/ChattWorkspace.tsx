@@ -139,6 +139,7 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
       generated_files: m.generated_files,
       visuals: m.visuals,
       steps: m.steps,
+      actions: m.actions,
       approval_request: m.approval_request,
       meeting_request: m.meeting_request,
       sources: m.sources,

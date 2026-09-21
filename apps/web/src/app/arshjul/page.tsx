@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { listForTenant } from '@/lib/pb.server';
+import { listAllForTenant } from '@/lib/pb.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
 import {
@@ -78,14 +78,26 @@ export default async function ArshjulPage({
   }
 
   const pb = await getServerPb();
+  // ALLA poster, paginerat (inte en sida om 500 — då försvann nya poster tyst
+  // så fort tenanten passerat 500 rader). Ett läsfel visas som banner i
+  // stället för ett tomt hjul: "0 aktiviteter" fick tidigare betyda både
+  // "inga" och "kunde inte läsa", vilket är omöjligt att felsöka.
+  let readNotice: string | null = null;
   const [res, categories] = await Promise.all([
-    listForTenant<WheelRow>('annual_wheel_items', {
-      sort: 'year,month',
-      perPage: 500
-    }).catch(() => ({ items: [] as WheelRow[] })),
+    listAllForTenant<WheelRow>('annual_wheel_items', { sort: 'year,month,id' }).catch((err: unknown) => {
+      const status = (err as { status?: number })?.status;
+      readNotice =
+        'Aktiviteterna kunde inte läsas från databasen' +
+        (status ? ` (HTTP ${status})` : '') +
+        ' — hjulet visar därför ingenting just nu. Ladda om sidan; kvarstår felet, be en administratör kontrollera annual_wheel_items (migrationer/behörighetsregler).';
+      return { items: [] as WheelRow[], total: 0, complete: true };
+    }),
     // Dynamiska kategorier per tenant (§ 30) — fail-soft till defaults.
     listAnnualWheelCategories(pb, user.tenant)
   ]);
+  if (!res.complete) {
+    readNotice = `Visar ${res.items.length} av ${res.total} aktiviteter — listan är kapad. Arkivera eller radera gamla år så att allt kan visas.`;
+  }
 
   const fallbackCategory = categories[0]?.id ?? 'gemensamt';
 
@@ -138,6 +150,7 @@ export default async function ArshjulPage({
         people={people}
         canManageCategories={canManageCategories}
         schemaNotice={schemaNotice}
+        readNotice={readNotice}
         openItemId={openItemId}
       />
     </PageShell>

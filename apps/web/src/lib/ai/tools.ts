@@ -1,4 +1,5 @@
 import 'server-only';
+import { DOMAIN_WRITE_TOOLS } from './write-receipt';
 import type PocketBase from 'pocketbase';
 import {
   composeFilter,
@@ -45,6 +46,7 @@ import {
   updateStartupField,
   createAnnualWheelSeries,
   updateAnnualWheelItemField,
+  schemaDriftMessage,
   createCompassModule,
   addCompassQuestion,
   updateCompassModuleField,
@@ -110,34 +112,10 @@ const MAX_APPROVAL_SUMMARY = 500;
 // Verktyg som muterar domändata (eller minnet). När en godkännandefråga redan
 // är ställd i turen spärras dessa tills användaren svarat — modellen ska
 // avsluta svaret och vänta på Godkänn/Avbryt. Läsverktyg och artefakter
-// (generate_document/render_visual) spärras inte. OBS: detta är UX-flödets
-// spärr, inte säkerhetsgränsen — den är och förblir RBAC + skrivlagrets
-// whitelist (lib/core/write).
-const DOMAIN_WRITE_TOOLS = new Set([
-  'update_startup_field',
-  'create_startup_activity',
-  'update_activity_field',
-  'create_annual_wheel_item',
-  'update_annual_wheel_item',
-  'create_compass_module',
-  'add_compass_question',
-  'update_compass_module_field',
-  'create_workshop',
-  'assign_workshop',
-  'assign_education_document',
-  'create_task',
-  'move_task',
-  'create_event',
-  'create_mission',
-  'register_de_minimis_support',
-  'add_startup_kpi',
-  'add_capital_round',
-  'schedule_agent',
-  'create_startup_note',
-  'create_org_post',
-  'update_org_post',
-  'memory_write'
-]);
+// (generate_document/render_visual) spärras inte. Listan bor i den rena
+// `write-receipt.ts` (delas med kvittobyggaren, § 33.4). OBS: detta är
+// UX-flödets spärr, inte säkerhetsgränsen — den är och förblir RBAC +
+// skrivlagrets whitelist (lib/core/write).
 
 // Display-fält vi försöker läsa ur en expanderad relation när group_by är en
 // relation, i prioordning. Bara icke-PII-etiketter (namn/titel) — aldrig
@@ -764,7 +742,12 @@ export function buildChatTools(
           'Använd när personalen ber dig planera in aktiviteter (t.ex. "lägg ' +
           'bokslut i april", "LinkedIn-kampanj mars–maj" eller "nyhetsbrev den ' +
           '15:e varje månad"). Perioder anges med end_month/end_day och ' +
-          'återkommande aktiviteter med repeat — ett anrop räcker.',
+          'återkommande aktiviteter med repeat — ett anrop räcker. Hitta ALDRIG ' +
+          'på månad/dag/år som användaren inte angett: saknas datum → fråga, ' +
+          'eller utelämna month (helårsaktivitet) och säg det. Svaret bär ' +
+          '`verified` (posten lästes tillbaka med användarens behörighet) och ' +
+          '`href` — länka dit i ditt svar. Vid `ok:false` sparades inget: ' +
+          'rätta (t.ex. giltig kategori ur felmeddelandet) och anropa igen.',
         parameters: {
           type: 'object',
           properties: {
@@ -3317,6 +3300,35 @@ async function runCreateAnnualWheelItem(
   });
 
   if (!result.ok) return { ok: false, error: result.error };
+
+  // Verifiera genom ÅTERLÄSNING med samma token som /arshjul läser med. Ett
+  // create kan lyckas medan list/view-regeln nekar (eller schemat släpper
+  // fält tyst) — då vore posten "sparad" men osynlig för användaren. Vi
+  // rapporterar det som varning i stället för att låtsas att allt gick bra.
+  const warnings: string[] = [];
+  if (result.value.schemaMissing && result.value.schemaMissing.length > 0) {
+    warnings.push(schemaDriftMessage(result.value.schemaMissing));
+  }
+  const firstId = result.value.itemIds[0];
+  let verified = false;
+  let stored: { year?: unknown; month?: unknown; category?: unknown } | null = null;
+  if (firstId) {
+    try {
+      stored = await ctx.pb
+        .collection('annual_wheel_items')
+        .getOne<{ year?: unknown; month?: unknown; category?: unknown }>(firstId, {
+          fields: 'id,year,month,category'
+        });
+      verified = true;
+    } catch {
+      warnings.push(
+        `Posten skapades (id ${firstId}) men kunde INTE läsas tillbaka med din ` +
+          'behörighet — den kan vara osynlig i /arshjul. Be en administratör ' +
+          'kontrollera list-/view-reglerna för annual_wheel_items.'
+      );
+    }
+  }
+  const href = firstId ? `/arshjul?item=${encodeURIComponent(firstId)}` : '/arshjul';
   return {
     ok: true,
     data: {
@@ -3324,8 +3336,12 @@ async function runCreateAnnualWheelItem(
       created: result.value.created,
       months: result.value.months,
       years: result.value.years,
+      verified,
+      stored,
+      href,
       logged_in: 'agent_actions'
-    }
+    },
+    ...(warnings.length > 0 ? { warning: warnings.join(' ') } : {})
   };
 }
 
@@ -3358,6 +3374,7 @@ async function runUpdateAnnualWheelItem(
       field: result.value.field,
       before: result.value.before,
       after: result.value.after,
+      href: `/arshjul?item=${encodeURIComponent(result.value.itemId)}`,
       logged_in: 'agent_actions'
     }
   };

@@ -215,6 +215,35 @@ export const AUTHORING_GUIDANCE =
  * `request_approval`. Delas av alla interaktiva staff-chatt-ytor så policyn
  * aldrig divergerar.
  */
+/**
+ * Kvitto & ärlighet vid skrivningar (§ 33.4). Bakgrund: modellen rapporterade
+ * "alla fem är upplagda" trots två `ok:false`, och påstod sig ha "justerat"
+ * poster utan något nytt verktygsanrop. Systemet renderar nu ett
+ * deterministiskt kvitto ur verktygsresultaten — reglerna här ser till att
+ * texten inte säger emot det. Delas av alla interaktiva staff-chatt-ytor.
+ */
+export const WRITE_HONESTY_GUIDANCE =
+  '\n\nKVITTO & ÄRLIGHET VID SKRIVNINGAR (bindande):\n' +
+  '- Varje skrivverktyg svarar {ok:true|false}. BARA ok:true betyder att något ' +
+  'sparades. ok:false = INGET sparades för det anropet, oavsett hur du ' +
+  'formulerade dig innan.\n' +
+  '- Misslyckas ett anrop med ett åtgärdbart fel (t.ex. "Okänd kategori … ' +
+  'Giltiga kategorier: a, b, c"): rätta argumenten och anropa verktyget IGEN i ' +
+  'samma svar. Skriv aldrig att du "justerat"/"rättat" något utan ett nytt ' +
+  'anrop som svarade ok:true.\n' +
+  '- Redovisa utfallet post för post: vad som sparades (med länk från `href` ' +
+  'när verktyget ger en) och vad som INTE gick, med felorsaken. Skriv aldrig ' +
+  '"alla är upplagda" om något anrop misslyckades. Användaren ser ett ' +
+  'systemkvitto med det faktiska utfallet under ditt svar — din text får ' +
+  'aldrig säga något annat än kvittot.\n' +
+  '- Hitta aldrig på datum, månader, år, belopp eller namn som användaren inte ' +
+  'angett. Saknas t.ex. månad för en årshjulspost: fråga, eller skapa den utan ' +
+  'månad (helår) och säg det tydligt. Klistrad UI-text ("0 av 4 objekt gjorda", ' +
+  '"Lägg till ett objekt", "Visa i panelvy") är inte aktiviteter — hoppa över ' +
+  'den och nämn att du gjorde det.\n' +
+  '- Skriv aldrig i imperfekt om något du inte hunnit göra ("jag har lagt in") ' +
+  'förrän verktyget svarat. Lova aldrig att göra det senare (§ 17.8).';
+
 export const APPROVAL_GUIDANCE =
   '\n\nGODKÄNNANDE — fråga inte i onödan:\n' +
   '- Har användaren tydligt bett om en RUTINÅTGÄRD — skapa utkast (moduler, ' +

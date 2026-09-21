@@ -355,6 +355,29 @@ export interface AgentActivityStep {
   ok?: boolean; // utfall (sätts när steget är klart)
 }
 
+// Kvitto på en SKRIVNING agenten utförde (eller försökte utföra) under en
+// turn. Byggs DETERMINISTISKT server-side av verktygsresultatet — aldrig av
+// modellens text — och persisteras på assistant-meddelandet. UI:t renderar
+// "Utfört i systemet" så att användaren ser det faktiska utfallet även om
+// modellen formulerar sig fel (§ 33.4). PII-fritt: verktygsetikett, utfall,
+// skrivlagrets felmeddelande, post-id:n och en intern länk.
+export interface AgentActionReceipt {
+  tool: string;
+  label: string;
+  /** true = skrivlagret bekräftade skrivningen. false = INGET sparades. */
+  ok: boolean;
+  /** Skrivlagrets fel när ok=false (cappat). */
+  error?: string;
+  /** Kort beskrivning av vad som skrevs, t.ex. "Bokslut · 1 post · april 2026". */
+  summary?: string;
+  /** Varning vid delvis lyckat (t.ex. schema-drift eller misslyckad återläsning). */
+  warning?: string;
+  /** Intern länk för att kontrollera resultatet (t.ex. /arshjul?item=<id>). */
+  href?: string;
+  /** Skapade/ändrade post-id:n. */
+  record_ids?: string[];
+}
+
 // Godkännandefråga från agenten (verktyget `request_approval`): agenten vill
 // utföra en KRITISK åtgärd och väntar på användarens beslut. UI:t renderar en
 // Godkänn/Avbryt-knapp på assistant-meddelandet; beslutet skickas som nästa
@@ -387,6 +410,9 @@ export interface ToolRunMessage {
   visuals?: InlineVisualRef[];
   // Verktygssteg agenten utförde för detta (assistant-)turn.
   steps?: AgentActivityStep[];
+  // Deterministiska kvitton på SKRIVNINGAR i detta (assistant-)turn — sanningen
+  // om vad som faktiskt sparades, oberoende av modellens text (§ 33.4).
+  actions?: AgentActionReceipt[];
   // Godkännandefråga (assistant): agenten väntar på Godkänn/Avbryt innan en
   // kritisk åtgärd utförs. Renderas som knappar när meddelandet är senast.
   approval_request?: ApprovalRequestRef;

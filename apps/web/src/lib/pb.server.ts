@@ -124,6 +124,53 @@ export async function listForTenant<T = Record<string, unknown>>(
   });
 }
 
+/** Sidstorlek + hårt tak för `listAllForTenant` (robusthet § 10). */
+const LIST_ALL_BATCH = 500;
+const LIST_ALL_MAX_ROWS = 10_000;
+
+export interface ListAllResult<T> {
+  items: T[];
+  /** PB:s totala antal matchande rader. */
+  total: number;
+  /** false när taket LIST_ALL_MAX_ROWS nåddes — anroparen ska visa det. */
+  complete: boolean;
+}
+
+/**
+ * Läser ALLA tenantens rader i en kollektion genom att paginera — inte en
+ * enda sida. Bakgrund: `/arshjul` läste `getList(1, 500)`; en tenant med
+ * fler än 500 poster (serier ger snabbt 12 rader per aktivitet och år)
+ * tappade tyst allt bortom sidan, så nya poster "sparades" men syntes inte.
+ * Samma tenant-/medlems-scope som `listForTenant`; reads går via användarens
+ * token (RLS § 21). Taket rapporteras via `complete` — aldrig en tyst kapning.
+ */
+export async function listAllForTenant<T = Record<string, unknown>>(
+  collection: string,
+  options: Omit<ListOptions, 'page' | 'perPage'> & {
+    tenantField?: string;
+    scopeToStartupField?: string;
+    maxRows?: number;
+  } = {}
+): Promise<ListAllResult<T>> {
+  const maxRows = Math.max(1, Math.min(options.maxRows ?? LIST_ALL_MAX_ROWS, LIST_ALL_MAX_ROWS));
+  const items: T[] = [];
+  let total = 0;
+  for (let page = 1; ; page++) {
+    const res = await listForTenant<T>(collection, {
+      ...options,
+      page,
+      perPage: LIST_ALL_BATCH
+    });
+    total = res.totalItems;
+    items.push(...res.items);
+    // Stoppvillkor på FAKTISKT antal lästa rader (inte sidnummer × batch) så
+    // en instans som klampar perPage lägre än vår batch ändå läser allt.
+    if (res.items.length === 0 || items.length >= total) break;
+    if (items.length >= maxRows) return { items: items.slice(0, maxRows), total, complete: false };
+  }
+  return { items, total, complete: true };
+}
+
 export async function getOneForTenant<T = Record<string, unknown>>(
   collection: string,
   id: string,

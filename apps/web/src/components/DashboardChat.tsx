@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChatAttachment } from '@/lib/actions/chat';
 import type {
+  AgentActionReceipt,
   AgentActivityStep,
   ApprovalRequestRef,
   GeneratedFileRef,
@@ -69,6 +70,8 @@ export interface UiMessage {
   generated_files?: GeneratedFileRef[];
   visuals?: InlineVisualRef[];
   steps?: AgentActivityStep[];
+  /** Systemkvitto (§ 33.4): deterministiska kvitton på skrivningar i turen. */
+  actions?: AgentActionReceipt[];
   /** Turens tokens (in + ut) → inline token-/miljöchip under svaret. */
   tokens?: number;
   /** Modellen som faktiskt svarade (per-turn-metadata, transparens art. 13). */
@@ -1124,6 +1127,83 @@ export default function DashboardChat({
     );
   }
 
+  // Systemkvitto (§ 33.4): "Utfört i systemet" — byggt server-side ur
+  // verktygsresultaten, ALDRIG ur modellens text. Det är detta blocket
+  // användaren ska lita på; säger texten något annat är det texten som har
+  // fel. Misslyckade skrivningar visas i Movexum-orange (ingen röd, § 2.3).
+  function renderActions(actions?: AgentActionReceipt[]) {
+    if (!actions || actions.length === 0) return null;
+    const total = actions.length;
+    const failed = actions.filter((a) => !a.ok).length;
+    const partial = actions.filter((a) => a.ok && a.warning).length;
+    const succeeded = total - failed;
+    const allGood = failed === 0 && partial === 0;
+    return (
+      <div
+        className={
+          'mt-3 max-w-[640px] rounded-2xl border p-3.5 ' +
+          (failed > 0
+            ? 'border-movexum-orange/60 bg-movexum-pastell-orange/40 dark:bg-movexum-morkorange/20'
+            : partial > 0
+              ? 'border-movexum-gul/60 bg-movexum-pastell-gul/50 dark:bg-movexum-morkgul/20'
+              : 'border-default bg-canvas-subtle')
+        }
+        role="status"
+      >
+        <p className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+          <Icon name={allGood ? 'check' : 'alert'} size={11} />
+          Utfört i systemet · {succeeded} av {total} {total === 1 ? 'skrivning' : 'skrivningar'} sparade
+          {failed > 0 ? ` · ${failed} misslyckades` : ''}
+        </p>
+        <ul className="mt-2 flex flex-col gap-1.5">
+          {actions.map((a, i) => (
+            <li key={i} className="flex items-start gap-2 text-[12.5px] leading-snug">
+              <span
+                className={
+                  'mt-0.5 shrink-0 ' +
+                  (a.ok
+                    ? 'text-movexum-morkgron dark:text-movexum-ljusgron'
+                    : 'text-movexum-morkorange dark:text-movexum-orange')
+                }
+                aria-label={a.ok ? 'Sparat' : 'Inte sparat'}
+              >
+                <Icon name={a.ok ? 'check' : 'x'} size={12} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="text-foreground">{a.label}</span>
+                {a.summary ? <span className="text-foreground-muted"> — {a.summary}</span> : null}
+                {!a.ok ? (
+                  <span className="block text-movexum-morkorange dark:text-movexum-orange">
+                    Inte sparat: {a.error ?? 'okänt fel'}
+                  </span>
+                ) : null}
+                {a.ok && a.warning ? (
+                  <span className="block text-movexum-morkgul dark:text-movexum-gul">{a.warning}</span>
+                ) : null}
+              </span>
+              {a.ok && a.href ? (
+                <a
+                  href={a.href}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full border border-default bg-surface px-2 py-0.5 text-[11.5px] text-link hover:border-strong"
+                  title="Öppna och kontrollera"
+                >
+                  Öppna
+                  <Icon name="arrow" size={10} />
+                </a>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+        {failed > 0 ? (
+          <p className="mt-2 text-[11.5px] text-foreground-muted">
+            Det som är markerat som inte sparat finns inte i systemet, oavsett vad svaret ovan säger. Be
+            chatten försöka igen med rättade uppgifter, eller lägg in det manuellt.
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   // Godkännandekort (§ 33): visas bara på det SENASTE assistant-svaret och
   // bara medan inget nytt körs/köas — ett klick skickar "Godkänn"/"Avbryt"
   // som en vanlig user-tur, varpå kortet försvinner (meddelandet är inte
@@ -1624,6 +1704,7 @@ export default function DashboardChat({
                         className="max-w-[640px] text-[14.5px] leading-relaxed text-foreground"
                         dangerouslySetInnerHTML={{ __html: chatMarkdownToHtml(msg.content) }}
                       />
+                      {renderActions(msg.actions)}
                       {renderVisuals(msg.visuals)}
                       {renderGeneratedFiles(msg.generated_files)}
                       {renderSources(msg.sources)}
