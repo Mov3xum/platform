@@ -3926,7 +3926,14 @@ växlar fokus, ett aktivitetsband fokuserar sin startmånad och lyfter fram rade
 en kort stund) — redigering sker via pennan i listan, aldrig genom att klicka
 i hjulet, så en genomgång kan klickas igenom utan att dialoger öppnas.
 
-**Serier (upprepning).** "Nyhetsbrev den 15:e varje månad" skapas i ETT steg:
+**Serier (upprepning).** **Standardvalet när "Upprepa" slås på är "Varje
+år"** (2026-09) — för både daterade och odaterade aktiviteter; varje månad/
+varannan/kvartal väljs uttryckligen i "Hur ofta" (listan visar Varje år
+först). Tidigare förvaldes `monthly` för daterade poster, så ett "upprepa
+varje år" i praktiken blev en förekomst i varje månad under året.
+Förhandsbeskedet säger nu VAD serien blir ("3 aktiviteter — en per år,
+2026–2028" / "8 aktiviteter — en per månad, maj–dec"), inte bara antalet.
+"Nyhetsbrev den 15:e varje månad" skapas i ETT steg:
 `expandAnnualWheelSeries` (ren, enhetstestad) expanderar basen till
 förekomster (varje/varannan månad, varje kvartal, t.o.m. vald månad; dagen
 klampas mot månadslängden; perioder flyttas med hela steget och förekomster
