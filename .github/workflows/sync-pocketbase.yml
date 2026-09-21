@@ -114,9 +114,9 @@ jobs:
               echo
               echo "✓ Coolify deploy triggered via API."
               exit 0
+            else
+              redeploy_status=$?
             fi
-
-            redeploy_status=$?
             if [ "$redeploy_status" -eq 1 ]; then
               exit 1
             fi
