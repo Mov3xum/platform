@@ -54,43 +54,8 @@ jobs:
             exit 0
           fi
 
-          build_coolify_base_candidates() {
-            node - "$COOLIFY_BASE_URL" <<'NODE'
-          const raw = (process.argv[2] || '').trim();
-          if (!raw) process.exit(1);
+          mapfile -t coolify_bases < <(node .github/scripts/coolify-base-candidates.mjs "$COOLIFY_BASE_URL")
 
-          const seen = new Set();
-          const add = (value) => {
-            if (!value) return;
-            const normalized = value.replace(/\/+$/, '');
-            if (!normalized || seen.has(normalized)) return;
-            seen.add(normalized);
-            console.log(normalized);
-          };
-
-          const prefixed = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
-          let parsed;
-          try {
-            parsed = new URL(prefixed);
-          } catch {
-            process.exit(1);
-          }
-
-          const path = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.replace(/\/+$/, '') : '';
-          const hostWithPath = `${parsed.host}${path}`;
-          const hostnameWithPath = `${parsed.hostname}${path}`;
-
-          add(`${parsed.protocol}//${parsed.host}${path}`);
-          add(`https://${hostWithPath}`);
-          add(`http://${hostWithPath}`);
-          if (parsed.port === '8000') {
-            add(`https://${hostnameWithPath}`);
-            add(`http://${hostnameWithPath}`);
-          }
-          NODE
-          }
-
-          mapfile -t coolify_bases < <(build_coolify_base_candidates)
           if [ "${#coolify_bases[@]}" -eq 0 ]; then
             echo "::error::COOLIFY_BASE_URL är ogiltig. Ange API-origin eller publik host."
             exit 1

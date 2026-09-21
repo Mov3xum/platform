@@ -62,43 +62,8 @@ jobs:
             exit 1
           fi
 
-          build_coolify_base_candidates() {
-            node - "$COOLIFY_BASE_URL" <<'NODE'
-          const raw = (process.argv[2] || '').trim();
-          if (!raw) process.exit(1);
+          mapfile -t coolify_bases < <(node .github/scripts/coolify-base-candidates.mjs "$COOLIFY_BASE_URL")
 
-          const seen = new Set();
-          const add = (value) => {
-            if (!value) return;
-            const normalized = value.replace(/\/+$/, '');
-            if (!normalized || seen.has(normalized)) return;
-            seen.add(normalized);
-            console.log(normalized);
-          };
-
-          const prefixed = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
-          let parsed;
-          try {
-            parsed = new URL(prefixed);
-          } catch {
-            process.exit(1);
-          }
-
-          const path = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.replace(/\/+$/, '') : '';
-          const hostWithPath = `${parsed.host}${path}`;
-          const hostnameWithPath = `${parsed.hostname}${path}`;
-
-          add(`${parsed.protocol}//${parsed.host}${path}`);
-          add(`https://${hostWithPath}`);
-          add(`http://${hostWithPath}`);
-          if (parsed.port === '8000') {
-            add(`https://${hostnameWithPath}`);
-            add(`http://${hostnameWithPath}`);
-          }
-          NODE
-          }
-
-          mapfile -t coolify_bases < <(build_coolify_base_candidates)
           if [ "${#coolify_bases[@]}" -eq 0 ]; then
             echo "Invalid COOLIFY_BASE_URL secret. Set it to the Coolify API origin or public host."
             exit 1
@@ -131,7 +96,7 @@ jobs:
               else
                 echo "No response body was captured from Coolify."
               fi
-              return 1
+              return 3
             fi
 
             if [ "$http_code" = "404" ]; then
@@ -166,10 +131,14 @@ jobs:
               v4_status=$?
             fi
 
+            if [ "$v4_status" -eq 1 ]; then
+              exit 1
+            fi
+
             if [ "$v4_status" -eq 2 ]; then
               echo "Endpoint not found, trying legacy path..."
             else
-              echo "Primary deploy endpoint failed (status=$v4_status), trying legacy path..."
+              echo "Transport failure on primary deploy endpoint (status=$v4_status), trying legacy path..."
             fi
 
             if try_deploy "$deploy_v1"; then
@@ -177,10 +146,14 @@ jobs:
             fi
 
             v1_status=$?
+            if [ "$v1_status" -eq 1 ]; then
+              exit 1
+            fi
+
             if [ "$v4_status" -eq 2 ] && [ "$v1_status" -eq 2 ]; then
               echo "Both Coolify deploy endpoints returned 404 for base URL $coolify_base."
             else
-              echo "Coolify deploy failed on both endpoints for base URL $coolify_base."
+              echo "Coolify deploy endpoints were unreachable for base URL $coolify_base."
             fi
           done
 
