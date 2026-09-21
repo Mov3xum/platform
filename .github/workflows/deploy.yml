@@ -74,8 +74,10 @@ jobs:
 
           encoded_identifier=$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "$COOLIFY_APP_UUID")
           deploy_param="uuid"
+          legacy_app_uuid="$COOLIFY_APP_UUID"
           if [[ "$COOLIFY_APP_UUID" == *:* ]]; then
             deploy_param="tag"
+            legacy_app_uuid="${COOLIFY_APP_UUID%%:*}"
           fi
 
           try_deploy() {
@@ -125,7 +127,7 @@ jobs:
           for coolify_base in "${coolify_bases[@]}"; do
             echo "Trying Coolify base URL candidate: $coolify_base"
             deploy_v4="$coolify_base/api/v1/deploy?$deploy_param=$encoded_identifier&force=false"
-            deploy_v1="$coolify_base/api/v1/applications/$COOLIFY_APP_UUID/start?force=false"
+            deploy_v1="$coolify_base/api/v1/applications/$legacy_app_uuid/start?force=false"
 
             v4_status=0
             if try_deploy "$deploy_v4"; then
@@ -136,6 +138,11 @@ jobs:
 
             if [ "$v4_status" -eq 1 ]; then
               exit 1
+            fi
+
+            if [ "$deploy_param" = "tag" ] && [ "$v4_status" -eq 2 ]; then
+              echo "Skipping legacy Coolify fallback for tag-based deploy."
+              continue
             fi
 
             if [ "$v4_status" -eq 2 ]; then
