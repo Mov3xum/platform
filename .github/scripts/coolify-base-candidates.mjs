@@ -18,7 +18,6 @@ const add = (value) => {
 };
 
 add(parsed.origin);
-add(`${parsed.protocol}//${parsed.host}`);
 if (parsed.port === '8000') {
   add(`https://${parsed.hostname}`);
   add(`http://${parsed.hostname}`);
