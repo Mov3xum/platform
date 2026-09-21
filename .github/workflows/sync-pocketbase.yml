@@ -104,7 +104,7 @@ jobs:
             local curl_status=0
             rm -f /tmp/coolify-response.json
             http_code=$(curl -sS -X POST \
-              -H "Authorization: ${COOLIFY_TOKEN}" \
+              -H "Authorization: Bearer $COOLIFY_TOKEN" \
               -H "Accept: application/json" \
               -o /tmp/coolify-response.json \
               -w "%{http_code}" \
