@@ -49,13 +49,58 @@ jobs:
             exit 0
           fi
 
+          build_coolify_base_candidates() {
+            node - "$COOLIFY_BASE_URL" <<'NODE'
+          const raw = (process.argv[2] || '').trim();
+          if (!raw) process.exit(1);
+
+          const seen = new Set();
+          const add = (value) => {
+            if (!value) return;
+            const normalized = value.replace(/\/+$/, '');
+            if (!normalized || seen.has(normalized)) return;
+            seen.add(normalized);
+            console.log(normalized);
+          };
+
+          const prefixed = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
+          let parsed;
+          try {
+            parsed = new URL(prefixed);
+          } catch {
+            process.exit(1);
+          }
+
+          const path = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.replace(/\/+$/, '') : '';
+          const hostWithPath = `${parsed.hostname}${path}`;
+
+          add(`${parsed.protocol}//${parsed.host}${path}`);
+          add(`https://${hostWithPath}`);
+          add(`http://${hostWithPath}`);
+          NODE
+          }
+
+          mapfile -t coolify_bases < <(build_coolify_base_candidates)
+          if [ "${#coolify_bases[@]}" -eq 0 ]; then
+            echo "::error::COOLIFY_BASE_URL är ogiltig. Ange API-origin eller publik host."
+            exit 1
+          fi
+
           encoded_identifier=$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "$COOLIFY_APP_UUID")
-          curl --fail-with-body -sS -X POST \
-            -H "Authorization: Bearer $COOLIFY_TOKEN" \
-            -H "Accept: application/json" \
-            "$COOLIFY_BASE_URL/api/v1/deploy?uuid=$encoded_identifier&force=true"
-          echo
-          echo "✓ Coolify deploy triggered via API."
+          for coolify_base in "${coolify_bases[@]}"; do
+            echo "Trying Coolify API base: $coolify_base"
+            if curl --fail-with-body -sS -X POST \
+              -H "Authorization: ******" \
+              -H "Accept: application/json" \
+              "$coolify_base/api/v1/deploy?uuid=$encoded_identifier&force=true"; then
+              echo
+              echo "✓ Coolify deploy triggered via API."
+              exit 0
+            fi
+          done
+
+          echo "::error::Coolify deploy kunde inte triggas via någon base URL-kandidat. Kontrollera COOLIFY_BASE_URL/Coolify-domänen."
+          exit 1
 
   api-sync:
     name: Self-healing rule sync via API (production)

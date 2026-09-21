@@ -65,64 +65,117 @@ jobs:
             exit 1
           fi
 
+          build_coolify_base_candidates() {
+            node - "$COOLIFY_BASE_URL" <<'NODE'
+          const raw = (process.argv[2] || '').trim();
+          if (!raw) process.exit(1);
+
+          const seen = new Set();
+          const add = (value) => {
+            if (!value) return;
+            const normalized = value.replace(/\/+$/, '');
+            if (!normalized || seen.has(normalized)) return;
+            seen.add(normalized);
+            console.log(normalized);
+          };
+
+          const prefixed = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
+          let parsed;
+          try {
+            parsed = new URL(prefixed);
+          } catch {
+            process.exit(1);
+          }
+
+          const path = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.replace(/\/+$/, '') : '';
+          const hostWithPath = `${parsed.hostname}${path}`;
+
+          add(`${parsed.protocol}//${parsed.host}${path}`);
+          add(`https://${hostWithPath}`);
+          add(`http://${hostWithPath}`);
+          NODE
+          }
+
+          mapfile -t coolify_bases < <(build_coolify_base_candidates)
+          if [ "${#coolify_bases[@]}" -eq 0 ]; then
+            echo "Invalid COOLIFY_BASE_URL secret. Set it to the Coolify API origin or public host."
+            exit 1
+          fi
+
           encoded_identifier=$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "$COOLIFY_APP_UUID")
           deploy_param="uuid"
           if [[ "$COOLIFY_APP_UUID" == *:* ]]; then
             deploy_param="tag"
           fi
 
-          deploy_v4="$COOLIFY_BASE_URL/api/v1/deploy?$deploy_param=$encoded_identifier&force=false"
-          deploy_v1="$COOLIFY_BASE_URL/api/v1/applications/$COOLIFY_APP_UUID/start?force=false"
-
           try_deploy() {
             local endpoint="$1"
             echo "Trying Coolify endpoint: $endpoint"
 
             local http_code
+            local curl_status=0
+            rm -f /tmp/coolify-response.json
             http_code=$(curl -sS -X POST \
-              -H "Authorization: Bearer $COOLIFY_TOKEN" \
+              -H "Authorization: ******" \
               -H "Accept: application/json" \
               -o /tmp/coolify-response.json \
               -w "%{http_code}" \
-              "$endpoint")
+              "$endpoint") || curl_status=$?
 
             if [ "$http_code" = "404" ]; then
               return 2
             fi
 
             if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-              cat /tmp/coolify-response.json
+              if [ -f /tmp/coolify-response.json ]; then
+                cat /tmp/coolify-response.json
+              fi
               return 0
             fi
 
             echo "Coolify deploy failed with HTTP $http_code"
-            cat /tmp/coolify-response.json
+            if [ "$curl_status" -ne 0 ]; then
+              echo "curl exited with status $curl_status"
+            fi
+            if [ -f /tmp/coolify-response.json ]; then
+              cat /tmp/coolify-response.json
+            else
+              echo "No response body was captured from Coolify."
+            fi
             return 1
           }
 
-          v4_status=0
-          if try_deploy "$deploy_v4"; then
-            exit 0
-          else
-            v4_status=$?
-          fi
+          for coolify_base in "${coolify_bases[@]}"; do
+            echo "Trying Coolify base URL candidate: $coolify_base"
+            deploy_v4="$coolify_base/api/v1/deploy?$deploy_param=$encoded_identifier&force=false"
+            deploy_v1="$coolify_base/api/v1/applications/$COOLIFY_APP_UUID/start?force=false"
 
-          if [ "$v4_status" -eq 2 ]; then
-            echo "Endpoint not found, trying legacy path..."
-          else
-            echo "Primary deploy endpoint failed (status=$v4_status), trying legacy path..."
-          fi
+            v4_status=0
+            if try_deploy "$deploy_v4"; then
+              exit 0
+            else
+              v4_status=$?
+            fi
 
-          if try_deploy "$deploy_v1"; then
-            exit 0
-          fi
+            if [ "$v4_status" -eq 2 ]; then
+              echo "Endpoint not found, trying legacy path..."
+            else
+              echo "Primary deploy endpoint failed (status=$v4_status), trying legacy path..."
+            fi
 
-          v1_status=$?
-          if [ "$v4_status" -eq 2 ] && [ "$v1_status" -eq 2 ]; then
-            echo "Both Coolify deploy endpoints returned 404. Verify COOLIFY_BASE_URL and that COOLIFY_APP_UUID_STAGING contains the Coolify app UUID."
-          else
-            echo "Coolify deploy failed on both endpoints. Verify COOLIFY_BASE_URL, COOLIFY_TOKEN, and COOLIFY_APP_UUID_STAGING."
-          fi
+            if try_deploy "$deploy_v1"; then
+              exit 0
+            fi
+
+            v1_status=$?
+            if [ "$v4_status" -eq 2 ] && [ "$v1_status" -eq 2 ]; then
+              echo "Both Coolify deploy endpoints returned 404 for base URL $coolify_base."
+            else
+              echo "Coolify deploy failed on both endpoints for base URL $coolify_base."
+            fi
+          done
+
+          echo "Coolify deploy failed for all base URL candidates. Verify COOLIFY_BASE_URL, COOLIFY_TOKEN, and COOLIFY_APP_UUID_STAGING."
           exit 1
 
       - name: Bootstrap PocketBase schema for staging
