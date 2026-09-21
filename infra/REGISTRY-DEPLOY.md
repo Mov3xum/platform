@@ -67,3 +67,27 @@ Coolify ska återstå.
 GHCR lagrar bara den **kompilerade app-imagen** (kod) — ingen PII, ingen
 kunddata, ingen PocketBase-data. Källkoden ligger redan på GitHub, så detta
 inför ingen ny dataöverföring. Runtime körs fortsatt EU-only på UpCloud.
+
+## Felsökning: deploy-triggern mot Coolify
+
+Alla fyra workflows (`deploy.yml`, `deploy-production.yml`,
+`sync-pocketbase*.yml`) triggar Coolify via **ett** delat, testat skript:
+`.github/scripts/coolify-deploy.sh` (tester i `coolify-deploy.test.mjs`,
+körs i `yarn test`). Det gör en förkontroll (`GET /api/v1/version`), försöker
+om vid tillfälligt avbrott (~3 min) och skriver en `::error::` som säger
+VILKET fel det är:
+
+| Loggen säger | Betyder | Gör |
+| --- | --- | --- |
+| `svarar inte alls … INFRASTRUKTURFEL` | Coolify nere / port stängd / flyttad bakom domän | SSH: `docker ps --filter name=coolify`, `docker logs coolify`, `df -h`; uppdatera `COOLIFY_BASE_URL` om instansen fått domän |
+| `svarar men returnerar HTTP 5xx … trasig internt` | Coolify uppe men db/redis/kö trasig | `docker logs coolify`, `docker ps` (coolify-db, coolify-redis), disk |
+| `avvisade API-tokenen (HTTP 401/403)` | `COOLIFY_TOKEN` ogiltig | Nytt token i Coolify → Keys & Tokens |
+| `404 på båda deploy-endpointsen` | `COOLIFY_APP_UUID_*` fel, eller base-URL pekar på en app i stället för Coolify | Kopiera UUID:t ur appens URL i Coolify |
+| `::warning:: … använder http://` | Tokenen går i klartext | Ge Coolify en domän med TLS och peka secreten dit |
+
+Secrets: `COOLIFY_BASE_URL` (Coolify-instansens origin — inte en deployad
+apps URL), `COOLIFY_TOKEN`, `COOLIFY_APP_UUID_STAGING` /
+`COOLIFY_APP_UUID_PRODUCTION` (eller en färdig
+`COOLIFY_DEPLOY_WEBHOOK_STAGING` / `_PRODUCTION`, som vinner). Skriptet
+provar aldrig andra origins än den konfigurerade — ett `refused` är ett
+infrastrukturfel, se `docs/incidents/2026-09-21-coolify-deploy-unreachable.md`.
