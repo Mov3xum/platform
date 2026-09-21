@@ -88,11 +88,16 @@ jobs:
           }
 
           const path = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.replace(/\/+$/, '') : '';
-          const hostWithPath = `${parsed.hostname}${path}`;
+          const hostWithPath = `${parsed.host}${path}`;
+          const hostnameWithPath = `${parsed.hostname}${path}`;
 
           add(`${parsed.protocol}//${parsed.host}${path}`);
           add(`https://${hostWithPath}`);
           add(`http://${hostWithPath}`);
+          if (parsed.port === '8000') {
+            add(`https://${hostnameWithPath}`);
+            add(`http://${hostnameWithPath}`);
+          }
           NODE
           }
 
@@ -116,11 +121,21 @@ jobs:
             local curl_status=0
             rm -f /tmp/coolify-response.json
             http_code=$(curl -sS -X POST \
-              -H "Authorization: ******" \
+              -H "Authorization: Bearer $COOLIFY_TOKEN" \
               -H "Accept: application/json" \
               -o /tmp/coolify-response.json \
               -w "%{http_code}" \
               "$endpoint") || curl_status=$?
+
+            if [ "$curl_status" -ne 0 ]; then
+              echo "curl exited with status $curl_status"
+              if [ -f /tmp/coolify-response.json ]; then
+                cat /tmp/coolify-response.json
+              else
+                echo "No response body was captured from Coolify."
+              fi
+              return 1
+            fi
 
             if [ "$http_code" = "404" ]; then
               return 2
@@ -134,9 +149,6 @@ jobs:
             fi
 
             echo "Coolify deploy failed with HTTP $http_code"
-            if [ "$curl_status" -ne 0 ]; then
-              echo "curl exited with status $curl_status"
-            fi
             if [ -f /tmp/coolify-response.json ]; then
               cat /tmp/coolify-response.json
             else

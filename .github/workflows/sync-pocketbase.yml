@@ -77,11 +77,16 @@ jobs:
           }
 
           const path = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.replace(/\/+$/, '') : '';
-          const hostWithPath = `${parsed.hostname}${path}`;
+          const hostWithPath = `${parsed.host}${path}`;
+          const hostnameWithPath = `${parsed.hostname}${path}`;
 
           add(`${parsed.protocol}//${parsed.host}${path}`);
           add(`https://${hostWithPath}`);
           add(`http://${hostWithPath}`);
+          if (parsed.port === '8000') {
+            add(`https://${hostnameWithPath}`);
+            add(`http://${hostnameWithPath}`);
+          }
           NODE
           }
 
@@ -92,15 +97,63 @@ jobs:
           fi
 
           encoded_identifier=$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "$COOLIFY_APP_UUID")
-          for coolify_base in "${coolify_bases[@]}"; do
-            echo "Trying Coolify API base: $coolify_base"
-            if curl --fail-with-body -sS -X POST \
+
+          try_redeploy() {
+            local endpoint="$1"
+            local http_code
+            local curl_status=0
+            rm -f /tmp/coolify-response.json
+            http_code=$(curl -sS -X POST \
               -H "Authorization: ******" \
               -H "Accept: application/json" \
-              "$coolify_base/api/v1/deploy?uuid=$encoded_identifier&force=true"; then
+              -o /tmp/coolify-response.json \
+              -w "%{http_code}" \
+              "$endpoint") || curl_status=$?
+
+            if [ "$curl_status" -ne 0 ]; then
+              echo "curl exited with status $curl_status"
+              if [ -f /tmp/coolify-response.json ]; then
+                cat /tmp/coolify-response.json
+              else
+                echo "No response body was captured from Coolify."
+              fi
+              return 2
+            fi
+
+            if [ "$http_code" = "404" ]; then
+              if [ -f /tmp/coolify-response.json ]; then
+                cat /tmp/coolify-response.json
+              fi
+              return 2
+            fi
+
+            if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+              if [ -f /tmp/coolify-response.json ]; then
+                cat /tmp/coolify-response.json
+              fi
+              return 0
+            fi
+
+            echo "Coolify redeploy failed with HTTP $http_code"
+            if [ -f /tmp/coolify-response.json ]; then
+              cat /tmp/coolify-response.json
+            else
+              echo "No response body was captured from Coolify."
+            fi
+            return 1
+          }
+
+          for coolify_base in "${coolify_bases[@]}"; do
+            echo "Trying Coolify API base: $coolify_base"
+            if try_redeploy "$coolify_base/api/v1/deploy?uuid=$encoded_identifier&force=true"; then
               echo
               echo "✓ Coolify deploy triggered via API."
               exit 0
+            fi
+
+            redeploy_status=$?
+            if [ "$redeploy_status" -eq 1 ]; then
+              exit 1
             fi
           done
 
