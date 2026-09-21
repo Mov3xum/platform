@@ -208,6 +208,8 @@ export async function executeThreadTurn(
     generated_files: turn.result.generatedFiles.length > 0 ? turn.result.generatedFiles : undefined,
     visuals: turn.result.visuals.length > 0 ? turn.result.visuals : undefined,
     steps: steps.length > 0 ? steps : undefined,
+    // Systemkvitto (§ 33.4): vad som FAKTISKT sparades — oberoende av texten.
+    actions: turn.result.receipts.length > 0 ? turn.result.receipts : undefined,
     approval_request: turn.result.approvalRequest,
     meeting_request: turn.result.meetingRequest,
     sources: turn.result.sources.length > 0 ? turn.result.sources : undefined,

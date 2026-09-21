@@ -16,6 +16,13 @@ import { buildSchemaSummary, getExposedCollections } from './schema';
 import { selectRelevantCollections, buildScopedSchemaSummary } from './schema-scope';
 import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from './guidance';
 import { assertWithinAiBudget } from './budget.server';
+import {
+  buildActionReceipt,
+  FAILED_WRITE_WARNING,
+  isWriteTool,
+  summarizeReceiptsForModel
+} from './write-receipt';
+import type { AgentActionReceipt } from '@platform/shared';
 
 // Hur många gånger modellen får anropa verktyg och få tillbaka resultat
 // innan vi tvingar fram ett slutsvar. Skyddar mot oändliga loopar och
@@ -81,6 +88,12 @@ export interface AgentLoopResult {
   toolCallsMade: number;
   /** True om maxIterations nåddes utan att modellen gav ett slutsvar. */
   hitIterationCap: boolean;
+  /**
+   * Deterministiska kvitton på varje SKRIVNING i turen (§ 33.4) — byggda ur
+   * verktygsresultaten, aldrig ur modellens text. Tomt när inga skrivverktyg
+   * anropades.
+   */
+  receipts: AgentActionReceipt[];
 }
 
 /**
@@ -114,6 +127,12 @@ export async function runAgentLoop(
   // angreppssätt — i stället för att köra om frågan (§ 10 robusthet).
   const seenCalls = new Map<string, ToolResult>();
 
+  // Kvitton på skrivningar — sanningen om vad som faktiskt sparades. Byggs
+  // per anrop direkt ur verktygsresultatet (§ 33.4) och returneras till
+  // anroparen för persistens/rendering. Ett upprepat (dubblett-vaktat) anrop
+  // kvitteras inte igen — det utfördes inte igen.
+  const receipts: AgentActionReceipt[] = [];
+
   // Hård kostnadsspärr per tenant/månad (EU AI Act art. 15 robusthet). No-op
   // när inget tak är satt; kastar AiBudgetExceededError när månadsbudgeten är
   // slut så att en skenande loop/fan-out inte kan bränna obegränsat.
@@ -138,7 +157,8 @@ export async function runAgentLoop(
         text: result.text || 'Inget svar från modellen.',
         iterations: iteration + 1,
         toolCallsMade,
-        hitIterationCap: false
+        hitIterationCap: false,
+        receipts
       };
     }
 
@@ -159,7 +179,7 @@ export async function runAgentLoop(
       options.onStep?.({ phase: 'start', id: call.id, tool: descs[i].tool, label: descs[i].label })
     );
     const toolResults = await Promise.all(
-      toolCalls.map(async (call): Promise<ToolResult> => {
+      toolCalls.map(async (call, index): Promise<ToolResult> => {
         const key = `${call.function.name}|${call.function.arguments ?? ''}`;
         const previous = seenCalls.get(key);
         if (previous) {
@@ -177,6 +197,27 @@ export async function runAgentLoop(
         }
         const result = await dispatchToolCall(call, options.toolContext);
         seenCalls.set(key, result);
+        if (isWriteTool(call.function.name)) {
+          let args: Record<string, unknown> = {};
+          try {
+            args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+          } catch {
+            /* kvittot klarar sig utan argument */
+          }
+          const receipt = buildActionReceipt({
+            tool: call.function.name,
+            label: descs[index]?.label ?? call.function.name,
+            args,
+            result
+          });
+          if (receipt) receipts.push(receipt);
+          // Ett misslyckat skrivanrop får en EXPLICIT instruktion: rätta och
+          // försök igen, eller redovisa felet — påstå aldrig att det utfördes.
+          // Utan den behandlade modellen `ok:false` som en bagatell.
+          if (!result.ok) {
+            return { ...result, warning: [result.warning, FAILED_WRITE_WARNING].filter(Boolean).join(' ') };
+          }
+        }
         return result;
       })
     );
@@ -203,6 +244,9 @@ export async function runAgentLoop(
   // explicit instruktion svarar modellen ofta med TOM text här (den "vill"
   // anropa fler verktyg) och användaren får bara fallback-raden. Be den
   // därför uttryckligen sammanfatta det den FAKTISKT hann hitta.
+  // Kvittot matas in som DATA så att slutsvaret bygger på vad som faktiskt
+  // sparades — inte på vad modellen "minns" att den gjorde (§ 33.4).
+  const receiptBlock = summarizeReceiptsForModel(receipts);
   conversation.push({
     role: 'user',
     content:
@@ -210,7 +254,12 @@ export async function runAgentLoop(
       'nått. Anropa inga fler verktyg. Sammanfatta nu det du faktiskt hittade ' +
       'i verktygsresultaten ovan och ge användaren ditt bästa svar. Om något ' +
       'inte hanns med: säg kort vad som saknas och föreslå en mer avgränsad ' +
-      'följdfråga.'
+      'följdfråga.' +
+      (receiptBlock
+        ? `\n\n${receiptBlock}\n\nRedovisa EXAKT detta utfall för användaren — ` +
+          'det som står som INTE SPARAT är inte utfört, säg det rakt ut med ' +
+          'felorsaken och vad som krävs för att det ska gå.'
+        : '')
   });
   const finalCall = await callMistralWithFallback(options.models, conversation, {
     toolChoice: 'none',
@@ -228,7 +277,8 @@ export async function runAgentLoop(
       'Frågan krävde fler steg än tillåtet. Prova att bryta ner den i mindre delar.',
     iterations: maxIterations,
     toolCallsMade,
-    hitIterationCap: true
+    hitIterationCap: true,
+    receipts
   };
 }
 

@@ -115,6 +115,8 @@ interface Props {
   canManageCategories: boolean;
   /** Schemadrift som inte kunde repareras automatiskt (server-side check). */
   schemaNotice?: string | null;
+  /** Läsfel/kapning från sidan — visas som banner i stället för ett tomt hjul. */
+  readNotice?: string | null;
   /**
    * Djuplänk (`/arshjul?item=<id>`, t.ex. från Hemmaplans kalender): posten
    * öppnas i sin helhet vid inläsning — redigeringsdialogen för staff,
@@ -195,6 +197,7 @@ export function AnnualWheelView({
   people,
   canManageCategories,
   schemaNotice = null,
+  readNotice = null,
   openItemId = null
 }: Props) {
   const router = useRouter();
@@ -577,6 +580,12 @@ export function AnnualWheelView({
               {repairing ? 'Reparerar…' : 'Försök reparera'}
             </button>
           ) : null}
+        </div>
+      ) : null}
+      {readNotice ? (
+        <div className="flex items-start gap-2 rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange">
+          <Icon name="alert" size={14} />
+          <span className="flex-1">{readNotice}</span>
         </div>
       ) : null}
       {notice ? (

@@ -13,6 +13,7 @@ import {
   KNOWLEDGE_GUIDANCE,
   AUTHORING_GUIDANCE,
   APPROVAL_GUIDANCE,
+  WRITE_HONESTY_GUIDANCE,
   MEETING_GUIDANCE,
   CHAT_WRITE_ACTIONS_GUIDANCE,
   WEB_SEARCH_GUIDANCE,
@@ -25,6 +26,7 @@ import { withAttachedImages } from './chat-input';
 import { logAiUsage } from './usage';
 import type { Actor } from '@/lib/core/write';
 import type {
+  AgentActionReceipt,
   AiUsageSurface,
   ApprovalRequestRef,
   GeneratedFileRef,
@@ -334,6 +336,12 @@ export interface StaffTurnResult {
   meetingRequest?: MeetingRequestRef;
   /** Webbkällor agenten hämtade via `web_search` (visas under svaret). */
   sources: WebSearchSourceRef[];
+  /**
+   * Deterministiska kvitton på skrivningar i turen (§ 33.4) — byggda ur
+   * verktygsresultaten, aldrig ur modellens text. Persisteras som
+   * `ToolRunMessage.actions` och renderas som "Utfört i systemet".
+   */
+  receipts: AgentActionReceipt[];
 }
 
 export interface RunStaffChatTurnOptions {
@@ -448,6 +456,7 @@ export async function runStaffChatTurn(
     : '';
   const toolGuidanceBlocks = useTools
     ? STAFF_TOOL_GUIDANCE +
+      WRITE_HONESTY_GUIDANCE +
       APPROVAL_GUIDANCE +
       AUTHORING_GUIDANCE +
       MEETING_GUIDANCE +
@@ -536,7 +545,8 @@ export async function runStaffChatTurn(
         visuals: inlineVisuals,
         approvalRequest: approvalRequests[0],
         meetingRequest: meetingRequests[0],
-        sources: webSources
+        sources: webSources,
+        receipts: result.receipts
       }
     };
   } catch (err) {

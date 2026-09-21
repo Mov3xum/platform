@@ -4074,6 +4074,11 @@ av tre olika miljöskäl. Alla tre är nu täckta i `lib/core/write/annual-wheel
    (samma `agent_actions`-format som förut). `updateAnnualWheelItemField`
    (chatt-verktyget) är ett tunt omslag över samma funktion.
 
+6. **Läsvägen paginerar (2026-09).** `/arshjul` läser alla poster via
+   `listAllForTenant` (sort `year,month,id`) — inte en sida om 500 — och
+   visar läsfel/kapning som banner (§ 33.4). Chatt-verktyget läser dessutom
+   tillbaka varje skapad post och kvitterar deterministiskt.
+
 **Deploy-invariant:** `verify-baseline.mjs` (`verifyAppWritableFields`)
 asserterar att `annual_wheel_items` HAR `day`/`tags`/`responsible`/`end_month`/
 `end_day` och att det deprecerade `track` INTE är obligatoriskt. Schemadrift fäller därmed deployen i
@@ -4555,6 +4560,50 @@ Chatten (`/chatt`) har en inbyggd guide ("Vad kan chatten göra?") som nås via
   Exemplen är generiska (inga riktiga bolagsnamn, ingen PII).
 - **Riskklass:** n/a — statiskt UI-innehåll, ingen dataväg, ingen AI-inferens.
   Transparensbannern (§ 9.7) visas i guidens sidfot.
+
+---
+
+### 33.4 Systemkvitto — chatten får aldrig säga något annat än systemet
+
+**Incident 2026-09-21.** Chatten ombads lägga fem aktiviteter i årshjulet.
+Aktivitetsspåret visade två ✕ (ogiltig kategori), ändå skrev modellen att
+alla fem var upplagda och att den "justerat kategorierna" — utan ett enda nytt
+verktygsanrop. Modellen var ensam källa till vad som hänt, och ett `ok:false`
+matades tillbaka som rå JSON utan konsekvens. Sedan dess gäller:
+
+- **Kvittot byggs av systemet, aldrig av modellen.** `runAgentLoop` bygger ett
+  `AgentActionReceipt` per SKRIVNING (verktyg i `DOMAIN_WRITE_TOOLS`,
+  `lib/ai/write-receipt.ts` — ren, enhetstestad) direkt ur verktygsresultatet:
+  utfall, skrivlagrets felmeddelande, post-id:n, kort sammanfattning och en
+  intern länk (`/arshjul?item=<id>`, `board_path`, `path` …). Kvittona
+  persisteras som `ToolRunMessage.actions` (`@platform/shared`) och renderas
+  i chatten som **"Utfört i systemet · N av M sparade"** under svaret
+  (`DashboardChat.renderActions`), med "Öppna"-länk per sparad post och
+  orange (§ 2.3) markering + felorsak per misslyckad. Det blocket är
+  sanningen; säger texten något annat är det texten som har fel.
+- **Misslyckade skrivanrop får en explicit instruktion** (`FAILED_WRITE_WARNING`
+  fästs på verktygsresultatet i loopen): inget sparades — rätta argumenten och
+  anropa igen i samma svar, eller redovisa felet; påstå aldrig att det
+  utfördes. `WRITE_HONESTY_GUIDANCE` (`guidance.ts`, delad av båda
+  chatt-ytorna) låser samma regler i systemprompten och förbjuder påhittade
+  datum (klistrad UI-text som "0 av 4 objekt gjorda" är inte en aktivitet).
+- **Steg-taket ljuger inte.** När `maxIterations` nås matas kvittot in som
+  DATA i den tvingade slutrundan, så sammanfattningen bygger på vad som
+  faktiskt sparades — inte på vad modellen "minns".
+- **Årshjulet verifierar genom återläsning.** `create_annual_wheel_item` läser
+  tillbaka posten med användarens egen token (samma som `/arshjul` läser med)
+  och svarar `verified` + `href`; misslyckad återläsning eller schema-drift
+  (`schemaMissing`, som tidigare tappades på vägen) blir en `warning` i
+  kvittot i stället för ett tyst "ok".
+- **Läsvägen kapar inte tyst.** `/arshjul` läste EN sida om 500 rader — en
+  tenant med fler poster (serier ger 12 rader per aktivitet och år) tappade
+  allt bortom sidan, så nya poster "sparades" men syntes inte. Nu paginerar
+  `listAllForTenant` (`pb.server.ts`, tak 10 000 med `complete:false`), och
+  ett läsfel visas som banner (`readNotice`) i stället för ett tomt hjul.
+- **Riskklass/PII:** n/a — deterministisk presentation av verktygsresultat;
+  kvittot innehåller etikett, utfall, skrivlagrets fel (redan PII-fritt),
+  id:n och intern länk. Inga nya fält i PB, inga nya kollektioner, ingen ny
+  dataväg (återläsningen går via samma token och RLS).
 
 ---
 
