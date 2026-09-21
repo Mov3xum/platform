@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { LogOut } from 'lucide-react';
 import { requireUser } from '@/lib/auth.server';
-import { logoutAction } from '@/lib/actions/auth';
+import { LOGOUT_PATH } from '@/lib/auth-paths';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailItem, RailEmpty } from '@/components/PageRail';
 import { ProfileForm, PasswordForm } from './AccountForms';
@@ -69,7 +69,7 @@ export default async function KontoPage() {
                 Inloggad som <span className="font-medium text-foreground">{user.email}</span>
               </p>
             </div>
-            <form action={logoutAction}>
+            <form method="post" action={LOGOUT_PATH}>
               <button
                 type="submit"
                 className="inline-flex items-center gap-2 rounded-lg border border-default bg-surface px-4 py-2 text-sm font-medium text-foreground-muted transition hover:border-strong hover:bg-canvas-muted hover:text-foreground"

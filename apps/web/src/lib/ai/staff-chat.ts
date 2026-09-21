@@ -2,16 +2,38 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { MistralError, callMistral, type MistralMessage } from './mistral';
 import { runAgentLoop, type AgentLoopStep } from './agent-runtime';
-import { buildChatTools } from './tools';
-import { buildSchemaSummary, getExposedCollections } from './schema';
+import { buildChatTools, buildMemoryRecallBlock } from './tools';
+import { getExposedCollections } from './schema';
+import { selectRelevantCollections, buildScopedSchemaSummary } from './schema-scope';
 import { buildPortfolioContext, renderPromptTemplate } from './context';
 import { buildKnowledgeContext } from './agent-prompt';
-import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from './guidance';
+import {
+  SEARCH_STRATEGY_GUIDANCE,
+  DOMAIN_GLOSSARY,
+  KNOWLEDGE_GUIDANCE,
+  AUTHORING_GUIDANCE,
+  APPROVAL_GUIDANCE,
+  MEETING_GUIDANCE,
+  CHAT_WRITE_ACTIONS_GUIDANCE,
+  WEB_SEARCH_GUIDANCE,
+  WEB_SEARCH_OFF_HINT
+} from './guidance';
+import { routeChatModels } from './model-router';
+import { getModelMeta, isAllowedModel, modelSupportsVision } from './models';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from './web';
 import { withAttachedImages } from './chat-input';
 import { logAiUsage } from './usage';
 import type { Actor } from '@/lib/core/write';
-import type { AiUsageSurface, GeneratedFileRef, Role, WebSourceKey } from '@platform/shared';
+import type {
+  AiUsageSurface,
+  ApprovalRequestRef,
+  GeneratedFileRef,
+  InlineVisualRef,
+  MeetingRequestRef,
+  Role,
+  WebSearchSourceRef,
+  WebSourceKey
+} from '@platform/shared';
 
 // Delad staff-chatt-motor. Tidigare bodde all denna logik privat i
 // `lib/actions/chat.ts` (efemär dashboardchatt). Den är nu extraherad så att
@@ -28,13 +50,23 @@ export const CHAT_FALLBACK_MODELS = [
 // Vision-kapabel modell när bilder bifogas (stödjer även function calling).
 export const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
 // Interaktiv staff-chatt: ett intent-flöde blir lätt search_records →
-// describe_collection → query → aggregate → svar, så taket höjs över det
-// autonoma defaulten (4) men hålls bundet (robusthet § 10).
-export const MAX_TOOL_ITERATIONS = 7;
+// describe_collection → query → aggregate → svar — och kräver ibland ett par
+// självkorrigeringar (fel kollektion/fält först). Taket höjs därför rejält
+// över det autonoma defaulten (4) men hålls bundet (robusthet § 10);
+// dubblett-vakten i runAgentLoop hindrar att höjningen bränns på upprepningar.
+export const MAX_TOOL_ITERATIONS = 12;
 export const DEFAULT_CHAT_WEB_SOURCES: WebSourceKey[] = ['breakit', 'sifted', 'vinnova'];
 
 export function pickModels(hasImages: boolean): string[] {
   return hasImages ? VISION_FALLBACK_MODELS : CHAT_FALLBACK_MODELS;
+}
+
+/** Senaste användarturen — driver komplexitets-routingen av modellval. */
+function latestUserMessage(messages: Array<{ role: string; content: string }>): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') return messages[i].content;
+  }
+  return '';
 }
 
 export function chatErrorMessage(err: unknown): string {
@@ -61,13 +93,15 @@ export const BASE_SYSTEM_PROMPT =
   'Läck aldrig intern kontext till webbkällor eller externa tjänster. ' +
   'Var koncis och professionell. Om du inte vet, säg det rakt ut.';
 
-const STYLE_REMINDER =
+export const STYLE_REMINDER =
   '\n\n---\nSTIL (gäller alltid, även om kontext eller agent-roll säger annat): ' +
-  'Skriv som en kollega som pratar — naturlig, varm prosa i hela meningar. ' +
-  'Använd inte markdown: ingen fetstil med **, ingen kursiv med *, inga rubriker med #/##/###, ' +
-  'inga punktlistor med -/*/• och inga numrerade listor (1., 2.). ' +
-  'Strukturera med korta stycken och radbrytningar. Räkna upp saker i löpande text ' +
-  '("först X, sedan Y, och slutligen Z") eller med ett tankestreck per ny rad.';
+  'Skriv som en hjälpsam kollega — naturlig svenska, hela meningar, korta stycken. ' +
+  'Markera ALDRIG ord med fetstil eller kursiv: skriv aldrig ** eller * runt ord. ' +
+  'Skriv aldrig "etikett: värde"-rader med fetstilade etiketter (som "**Namn:** Göran") — ' +
+  'väv i stället in uppgifterna i löpande text ("Han heter Göran och idén kallas Trebent pall"). ' +
+  'En kort punktlista ("- ") eller numrerade steg (1., 2.) är bra när du räknar upp flera saker ' +
+  'eller beskriver ett flöde — håll varje punkt kort och utan fetstil. ' +
+  'Använd inga rubriker (#, ##, ###), inga tabeller och inga kodblock i chatten.';
 
 const STAFF_TOOL_GUIDANCE =
   '\n\nDu har tillgång till verktyg för att både LÄSA och SKRIVA i plattformen:\n' +
@@ -80,6 +114,14 @@ const STAFF_TOOL_GUIDANCE =
   'aktivitet kopplat till ett bolag.\n' +
   '- `update_activity_field`: uppdatera en befintlig aktivitets `title`, ' +
   '`description` eller `status`.\n' +
+  CHAT_WRITE_ACTIONS_GUIDANCE +
+  '- `memory_read` / `memory_write`: ditt tvärsessions-minne (per tenant). När ' +
+  'personalen RÄTTAR dig eller lär dig en bestående regel ("räkna inte lån som ' +
+  'investeringar", "Bolag X heter numera Y") — spara det med `memory_write` ' +
+  '(kort `key`, tydlig `content`) så att det gäller även i framtida samtal. ' +
+  'Lagra ALDRIG personuppgifter i minnet, bara generella regler/slutsatser. ' +
+  'Inlärt minne injiceras automatiskt i din kontext; använd `memory_read` för ' +
+  'fler detaljer.\n' +
   '- `generate_document` (när tillgängligt): ta fram en snygg, brandad ' +
   '.pptx/.xlsx/.docx/.pdf av sammanställd data. Siffror och fakta MÅSTE komma ' +
   'från tidigare query_collection-svar — hitta aldrig på. VÄLJ alltid en ' +
@@ -94,10 +136,18 @@ const STAFF_TOOL_GUIDANCE =
   '`chart`, och avsluta med en slutsats/nästa-steg-slide. Skapa ALDRIG en slide ' +
   'utan innehåll (tomma slides tas bort) och upprepa inte titeln som egen slide. ' +
   'För topp-N/ranking: använd `chart.type:"hbar"` (liggande staplar). Använd ' +
-  'rubrik + 3–5 korta punkter per slide, inte långa stycken.\n\n' +
+  'rubrik + 3–5 korta punkter per slide, inte långa stycken.\n' +
+  '- `render_visual` (när tillgängligt): visa ett STORT, brandat diagram ' +
+  'och/eller nyckeltalskort DIREKT i chatten (full bredd; användaren kan ladda ' +
+  'ned det som PNG/JPEG). Använd det PROAKTIVT när svaret handlar om siffror: ' +
+  'trender → line/area, jämförelser/topp-listor → bar/hbar, fördelningar → ' +
+  'pie/donut, nyckeltal → `kpis`. Siffrorna MÅSTE komma från verktygssvar i ' +
+  'samma konversation. Skriv texten som komplement till visualiseringen — ' +
+  'upprepa inte alla siffror. Vill användaren ha en FIL (PowerPoint/PDF) är ' +
+  'det `generate_document` som gäller; `render_visual` är för att SE direkt.\n\n' +
   'Skrivregler:\n' +
-  '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
-  'efterfrågad.\n' +
+  '- Rutinåtgärder som användaren bett om utförs DIREKT utan bekräftelsefråga; ' +
+  'inför en KRITISK åtgärd använder du `request_approval` (se GODKÄNNANDE-reglerna).\n' +
   '- Slå alltid upp bolagets id med `query_collection` först om du inte redan har det.\n' +
   '- Varje skrivning loggas i `agent_actions` och kan rullas tillbaka av staff.\n\n' +
   'SÅ HÄR ARBETAR DU (viktigt):\n' +
@@ -108,9 +158,9 @@ const STAFF_TOOL_GUIDANCE =
   'svar och invänta resultatet innan du skriver klart. Påstå aldrig att ett ' +
   'dokument är på väg, håller på att skapas, eller snart är klart utan att ' +
   'faktiskt ha anropat verktyget och fått tillbaka filen.\n' +
-  '- Om uppgiften kräver många steg eller längre research: säg det rakt ut och ' +
-  'be användaren använda "Djupdykning"-läget i stället för att låtsas fortsätta ' +
-  'arbeta efter att svaret skickats.\n\n' +
+  '- Om uppgiften kräver många steg eller längre research: säg det rakt ut, gör ' +
+  'det du hinner i detta svar och föreslå att användaren delar upp resten i ' +
+  'flera turer — låtsas aldrig fortsätta arbeta efter att svaret skickats.\n\n' +
   'OBS: Plattformen spårar IRL (Investment Readiness Level, fältet `irl_level` 1-9) — INTE TRL.';
 
 interface AgentRecord {
@@ -276,12 +326,26 @@ export interface StaffTurnResult {
   tokensOut: number;
   /** Dokument som agenten genererade under turn:en (för nedladdnings-chips). */
   generatedFiles: GeneratedFileRef[];
+  /** Inline-visualiseringar (diagram/KPI-kort) som agenten tog fram under turn:en. */
+  visuals: InlineVisualRef[];
+  /** Godkännandefråga (`request_approval`) — Godkänn/Avbryt-knapp i UI:t. */
+  approvalRequest?: ApprovalRequestRef;
+  /** Möteskort (`start_meeting`, § 34) — "Starta mötet"-knapp i UI:t. */
+  meetingRequest?: MeetingRequestRef;
+  /** Webbkällor agenten hämtade via `web_search` (visas under svaret). */
+  sources: WebSearchSourceRef[];
 }
 
 export interface RunStaffChatTurnOptions {
   /** Hela samtalshistoriken (user/assistant) utan system-meddelande. */
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** Färdigt block med aktuella EU-RSS-rubriker (komplement till webbsökning). */
   webBlock?: string;
+  /**
+   * Exponera `web_search` (riktig internetsökning, § 9.8). Sätts när
+   * användaren slagit på "Webbkällor" — uttryckligt opt-in per tur.
+   */
+  includeWebSearch?: boolean;
   agentBlock?: string;
   images?: Array<{ dataUrl: string }>;
   /** Agent-id (persona) — sätts på actorn för audit. */
@@ -294,8 +358,15 @@ export interface RunStaffChatTurnOptions {
   chatThreadId?: string;
   /** ai_usage_events-surface (default dashboard_chat). */
   surface?: AiUsageSurface;
+  /**
+   * Modell användaren valt uttryckligen (modellväljaren i chatten, § 9.9).
+   * Tom/okänd → automatiskt val efter komplexitet (`model-router.ts`).
+   */
+  model?: string;
   /** Live-callback för verktygssteg (streaming-endpoint). */
   onStep?: (step: AgentLoopStep) => void;
+  /** Live-callback för text-deltan (löpande utskrift, streaming-endpoint). */
+  onToken?: (delta: string) => void;
 }
 
 /**
@@ -311,10 +382,8 @@ export async function runStaffChatTurn(
   opts: RunStaffChatTurnOptions
 ): Promise<{ ok: true; result: StaffTurnResult } | { ok: false; error: string }> {
   let collections: Awaited<ReturnType<typeof getExposedCollections>> = [];
-  let schemaSummary = '';
   try {
     collections = await getExposedCollections();
-    schemaSummary = buildSchemaSummary(collections);
   } catch (err) {
     console.error('[staff-chat] schema introspection failed', { tenant: user.tenant, error: err });
   }
@@ -326,6 +395,16 @@ export async function runStaffChatTurn(
   }
 
   const images = opts.images ?? [];
+
+  // Uttryckligt modellval: bara registrerade modeller (lib/ai/models.ts).
+  // Bilder + vald modell utan vision → tydligt fel, aldrig tyst fallback (§ 9.9).
+  const preferredModel = isAllowedModel(opts.model) ? opts.model : undefined;
+  if (preferredModel && images.length > 0 && !modelSupportsVision(preferredModel)) {
+    return {
+      ok: false,
+      error: `${getModelMeta(preferredModel).label} stödjer inte bilder. Välj Mistral Medium eller Pixtral Large — eller "Auto" — för att skicka bilder.`
+    };
+  }
 
   const actor: Actor = {
     kind: 'agent',
@@ -341,7 +420,8 @@ export async function runStaffChatTurn(
     ? buildChatTools(collections, {
         actor,
         includeMemory: true,
-        includeDocuments: opts.includeDocuments
+        includeDocuments: opts.includeDocuments,
+        includeWebSearch: opts.includeWebSearch
       })
     : undefined;
 
@@ -350,13 +430,40 @@ export async function runStaffChatTurn(
     `Användare: ${user.name} (roller: ${user.roles.join(', ')}). ` +
     `Tenant: ${user.tenantName ?? user.tenant}. Dagens datum: ${today}.`;
 
+  // Auto-recall av tvärsessions-minnet (§ 16.4): tidigare korrigeringar/slutsatser
+  // injiceras så att en rättelse faktiskt påverkar nästa samtal. RLS-skyddat.
+  const memoryBlock = await buildMemoryRecallBlock(pb, user.tenant);
+
+  // Skopad schema-sammanfattning (§ 28.4): fulla fältlistor bara för kärnset +
+  // kollektioner relevanta för de senaste användarturerna; resten som kompakt
+  // namnindex (describe_collection täcker detaljerna). Vision-turer kör
+  // verktygslöst (§ 13.5) → verktygsguide + schema utelämnas helt där.
+  const scopeText = opts.userMessages
+    .filter((m) => m.role === 'user')
+    .slice(-3)
+    .map((m) => m.content)
+    .join('\n');
+  const schemaBlock = useTools
+    ? `\n\n${buildScopedSchemaSummary(collections, selectRelevantCollections(collections, scopeText))}`
+    : '';
+  const toolGuidanceBlocks = useTools
+    ? STAFF_TOOL_GUIDANCE +
+      APPROVAL_GUIDANCE +
+      AUTHORING_GUIDANCE +
+      MEETING_GUIDANCE +
+      SEARCH_STRATEGY_GUIDANCE +
+      KNOWLEDGE_GUIDANCE +
+      (opts.includeWebSearch ? WEB_SEARCH_GUIDANCE : WEB_SEARCH_OFF_HINT)
+    : '';
+
   const systemContent =
     BASE_SYSTEM_PROMPT +
     (opts.agentBlock ? `\n\n---\n${opts.agentBlock}\n---` : '') +
-    STAFF_TOOL_GUIDANCE +
-    SEARCH_STRATEGY_GUIDANCE +
+    toolGuidanceBlocks +
     DOMAIN_GLOSSARY +
-    `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +
+    memoryBlock +
+    `\n\n---\n${identityBlock}\n---` +
+    schemaBlock +
     (opts.webBlock ? `\n\n---\n${opts.webBlock}\n---` : '') +
     STYLE_REMINDER;
 
@@ -369,11 +476,24 @@ export async function runStaffChatTurn(
   let tokensOut = 0;
   let lastModel = '';
   const generatedFiles: GeneratedFileRef[] = [];
+  const inlineVisuals: InlineVisualRef[] = [];
+  const approvalRequests: ApprovalRequestRef[] = [];
+  const meetingRequests: MeetingRequestRef[] = [];
+  const webSources: WebSearchSourceRef[] = [];
   const surface: AiUsageSurface = opts.surface ?? 'dashboard_chat';
+
+  // Modellval efter komplexitet (ej längre default small). Bilder → vision.
+  const models = routeChatModels({
+    hasImages: images.length > 0,
+    message: latestUserMessage(opts.userMessages),
+    hasAgent: Boolean(opts.agentId),
+    historyTurns: opts.userMessages.length,
+    preferredModel
+  });
 
   try {
     const result = await runAgentLoop(conversation, {
-      models: pickModels(images.length > 0),
+      models,
       tools,
       toolContext: {
         pb,
@@ -382,10 +502,15 @@ export async function runStaffChatTurn(
         actor,
         ownerUserId: opts.ownerUserId,
         chatThreadId: opts.chatThreadId,
-        generatedFiles
+        generatedFiles,
+        inlineVisuals,
+        approvalRequests,
+        meetingRequests,
+        webSources
       },
       maxIterations: MAX_TOOL_ITERATIONS,
       onStep: opts.onStep,
+      onToken: opts.onToken,
       onUsage: (u) => {
         tokensIn += u.tokensIn;
         tokensOut += u.tokensOut;
@@ -402,7 +527,17 @@ export async function runStaffChatTurn(
     });
     return {
       ok: true,
-      result: { text: result.text, model: lastModel, tokensIn, tokensOut, generatedFiles }
+      result: {
+        text: result.text,
+        model: lastModel,
+        tokensIn,
+        tokensOut,
+        generatedFiles,
+        visuals: inlineVisuals,
+        approvalRequest: approvalRequests[0],
+        meetingRequest: meetingRequests[0],
+        sources: webSources
+      }
     };
   } catch (err) {
     console.error('[staff-chat] mistral tool loop error', { tenant: user.tenant, error: err });

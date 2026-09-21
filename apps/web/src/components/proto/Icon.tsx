@@ -62,6 +62,7 @@ export const ICON_PATHS: Record<string, string> = {
   'panel-right':
     'M3 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z M15 4v17',
   'arrow-up-right': 'M7 17l10-10 M7 7h10v10',
+  logout: 'M9 4H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h3 M14 8l4 4-4 4 M18 12H9',
   mic: 'M9 2h6v12a3 3 0 0 1-6 0z M5 11a7 7 0 0 0 14 0 M12 18v4',
   bot: 'M4 8h16v10H4z M12 8V4 M9 13h.01 M15 13h.01 M8 18h8',
   'rotate-ccw': 'M1 4v6h6 M3.5 15a9 9 0 1 0 2.1-9.4L1 10',
@@ -70,7 +71,21 @@ export const ICON_PATHS: Record<string, string> = {
   edit3: 'M12 20h9 M16.5 3.5a2 2 0 0 1 3 3L7 19l-4 1 1-4z',
   x: 'M6 6l12 12 M18 6l-12 12',
   message: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
-  back: 'M19 12H5 M12 19l-7-7 7-7'
+  help: 'M12 22a10 10 0 1 0-10-10 10 10 0 0 0 10 10z M9.3 9.2a2.7 2.7 0 0 1 5.4.3c0 1.7-2.7 2.1-2.7 3.5 M12 16.8h.01',
+  back: 'M19 12H5 M12 19l-7-7 7-7',
+  // Anslagstavlans redigerare (§ 37.6)
+  bold: 'M7 4h6a3.5 3.5 0 0 1 0 7H7z M7 11h7a3.5 3.5 0 0 1 0 7H7z',
+  italic: 'M10 4h8 M6 20h8 M14 4l-4 16',
+  heading: 'M5 4v16 M13 4v16 M5 12h8 M17 10l2-1v11',
+  'list-ul': 'M9 6h11 M9 12h11 M9 18h11 M4 6h.01 M4 12h.01 M4 18h.01',
+  'list-ol': 'M10 6h10 M10 12h10 M10 18h10 M4 4h1v4 M4 8h2 M3.5 14.5a1.5 1.5 0 0 1 3 0c0 1-3 2-3 3.5h3',
+  quote: 'M6 15a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3h1v5H4 M16 15a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3h1v5h-3',
+  smile: 'M12 22a10 10 0 1 0-10-10 10 10 0 0 0 10 10z M8 14s1.5 2 4 2 4-2 4-2 M9 9h.01 M15 9h.01',
+  video: 'M3 7a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M16 10l5-3v10l-5-3',
+  eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  code: 'M8 8l-4 4 4 4 M16 8l4 4-4 4 M14 5l-4 14',
+  'file-text': 'M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M14 3v5h5 M9 13h7 M9 17h7',
+  expand: 'M15 3h6v6 M9 21H3v-6 M21 3l-7 7 M3 21l7-7'
 };
 
 export type IconName = keyof typeof ICON_PATHS | string;

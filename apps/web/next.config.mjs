@@ -26,15 +26,30 @@ const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   {
+    // `microphone=(self)` krävs för röstinmatningen i chatten (CLAUDE.md § 31):
+    // getUserMedia blockeras annars av policyn, även på samma origin. Kameran
+    // och övriga känsliga API:er är fortsatt helt avstängda (minsta behörighet,
+    // ISO 27001 A.8.9) och inga tredjeparts-origins tillåts.
     key: 'Permissions-Policy',
-    value: 'camera=(), microphone=(), geolocation=(), browsing-topics=()'
+    value: 'camera=(), microphone=(self), geolocation=(), browsing-topics=()'
   }
 ];
 
 const nextConfig = {
   reactStrictMode: true,
   async headers() {
-    return [{ source: '/:path*', headers: securityHeaders }];
+    return [
+      { source: '/:path*', headers: securityHeaders },
+      // Service workern får aldrig HTTP-cachas — annars kan en gammal worker
+      // ligga kvar upp till 24 h efter en deploy (CLAUDE.md § 35).
+      {
+        source: '/sw.js',
+        headers: [
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
+          { key: 'Service-Worker-Allowed', value: '/' }
+        ]
+      }
+    ];
   },
   async redirects() {
     return [
@@ -49,19 +64,19 @@ const nextConfig = {
   // For monorepo: tell Next.js the workspace root so file-tracing picks up
   // packages/shared and the right yarn.lock.
   outputFileTracingRoot: join(__dirname, '..', '..'),
-  // Node-only server libraries that MUST NOT be webpack-bundled. pdf-parse
-  // (PDF text extraction for chat/file uploads) pins its own pdf.js build and
-  // reads files via dynamic require()/fs; exceljs (XLSX generation) does the
-  // same. When webpack bundles them into the standalone server chunks their
-  // internal requires are rewritten and they throw at runtime in production
-  // ("kunde inte ladda upp fil PDF"). Kept external they are required natively
-  // and correctly file-traced into .next/standalone/node_modules.
+  // Node-only server libraries that MUST NOT be webpack-bundled. pdfjs-dist
+  // (PDF text extraction for chat/file uploads, replaces pdf-parse) probes for
+  // optional native canvas at runtime; exceljs (XLSX generation) reads files
+  // via dynamic require()/fs. When webpack bundles them into the standalone
+  // server chunks their internal requires are rewritten and they throw at
+  // runtime in production ("kunde inte ladda upp fil PDF"). Kept external they
+  // are required natively and correctly file-traced into .next/standalone/node_modules.
   //
   // NOTE: the pure-JS doc libs (pdf-lib, pptxgenjs, docx) are deliberately NOT
   // listed — they bundle fine, and @vercel/nft traces docx's CJS entry
   // incompletely, so externalizing it would break the DOCX renderer.
   serverExternalPackages: [
-    'pdf-parse',
+    'pdfjs-dist',
     'exceljs',
   ],
   images: {

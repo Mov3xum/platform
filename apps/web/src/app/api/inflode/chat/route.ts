@@ -2,11 +2,13 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { MistralError } from '@/lib/ai/mistral';
 import { intakeReply, type CompassChatMessage } from '@/lib/compass/chat';
+import { buildModuleChatSystemPrompt } from '@/lib/compass/public';
 import {
-  appendMessage,
-  createConversation,
-  getModuleBySlug
-} from '@/lib/compass/store';
+  getOrCreateChatConversation,
+  persistChatTurnAndUpsertLead
+} from '@/lib/compass/chat-lead';
+import { getModuleBySlug, listQuestionsForModule } from '@/lib/compass/store';
+import { PREVIEW_SOURCE_KEY, type CompassModule } from '@/lib/compass/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -60,10 +62,12 @@ export async function POST(req: Request) {
 
   let systemPrompt: string | undefined;
   let model: string | undefined;
+  let mod: CompassModule | null = null;
   if (user && body.moduleSlug) {
-    const mod = await getModuleBySlug(pb, user.tenant, body.moduleSlug);
+    mod = await getModuleBySlug(pb, user.tenant, body.moduleSlug);
     if (mod) {
-      if (mod.system_prompt) systemPrompt = mod.system_prompt;
+      const questions = await listQuestionsForModule(pb, mod.id);
+      systemPrompt = buildModuleChatSystemPrompt(mod, questions);
       if (mod.model) model = mod.model;
     }
   }
@@ -95,27 +99,28 @@ export async function POST(req: Request) {
     );
   }
 
-  // Best-effort persist — bara när det finns en inloggad användare med tenant
+  // GARANTERA en lead för samtalet — bara när det finns en inloggad användare
+  // med tenant. Samma upsert-kärna som den publika modul-chatten, så
+  // AI-intag-chatten faktiskt "dyker upp som lead" i Startupkompassen (det som
+  // sidans subtitle lovar). Idempotent per session via conversation.lead.
+  // Best-effort: chatten ska aldrig fela på persistens/extraktion.
   if (user) {
     try {
-      const conv = await createConversation(pb, user.tenant, {
-        moduleSlug: body.moduleSlug,
-        sessionToken
-      });
+      // Default AI-intag har ingen modul → stabil sessionsnyckel 'ai-intag'.
+      const convKey = body.moduleSlug || 'ai-intag';
+      const conv = await getOrCreateChatConversation(pb, user.tenant, convKey, sessionToken);
       if (conv) {
-        const lastUser = history[history.length - 1];
-        if (lastUser) {
-          await appendMessage(pb, conv.id, {
-            role: 'user',
-            content: lastUser.content
-          });
-        }
-        await appendMessage(pb, conv.id, {
-          role: 'assistant',
-          content: reply.text,
-          tokens_in: reply.tokensIn,
-          tokens_out: reply.tokensOut,
-          model: reply.model
+        await persistChatTurnAndUpsertLead(pb, {
+          tenant: user.tenant,
+          conversation: conv,
+          history,
+          reply,
+          moduleName: mod?.name || 'AI-intag',
+          // Intern staff-test-chatt = förhandsgranskning → leadet skapas (så
+          // pipelinen kan verifieras) men exkluderas från all statistik.
+          sourceKey: PREVIEW_SOURCE_KEY,
+          // Bara en riktig modul-slug attribueras i analytics (inte sentineln).
+          landingModule: body.moduleSlug
         });
       }
     } catch {

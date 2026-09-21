@@ -21,6 +21,7 @@ export const PB_COLLECTIONS = {
   reports: 'incubator_reports_collection',
   alumni: 'alumni_collection',
   missionComments: 'mission_comments_collection',
+  missionDocuments: 'mission_documents_collection',
   notifications: 'notifications_collection',
   startupPhaseHistory: 'startup_phase_history_collection',
   // De minimis-modul (migrationer 1700000093–1700000095)
@@ -29,5 +30,14 @@ export const PB_COLLECTIONS = {
   deMinimisUnitOrgnr: 'de_minimis_unit_orgnr_collection',
   deMinimisStod: 'de_minimis_stod_collection',
   agreements: 'agreements_collection',
-  agreementSignatures: 'agreement_signatures_collection'
+  agreementSignatures: 'agreement_signatures_collection',
+  // Tenant-bred kunskapsbas + RAG-index (migrationer 1700000118–1700000119, § 26)
+  orgKnowledge: 'org_knowledge_col',
+  orgKnowledgeChunks: 'org_knowledge_chunks_col',
+  // Personligt filarkiv-RAG-index (migration 1700000121, § 27)
+  userFileChunks: 'user_file_chunks_col',
+  // Årshjul — verksamhetskalender (migration 1700000133, § 30)
+  annualWheelItems: 'annual_wheel_items_collection',
+  // Dynamiska årshjuls-kategorier per tenant (migration 1700000139, § 30)
+  annualWheelCategories: 'annual_wheel_categories_collection'
 } as const;

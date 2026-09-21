@@ -7,6 +7,7 @@ import {
   type EncryptedBlob
 } from '@/lib/integrations/crypto';
 import { refreshAccessToken } from './oauth';
+import { escFilter } from '@/lib/pb-filter';
 import type { OAuthProvider, OAuthTokens } from './types';
 
 /**
@@ -40,7 +41,7 @@ export async function findIntegrationRow(
   provider: string
 ): Promise<AppIntegrationRow | null> {
   try {
-    const filter = `user = "${userId}" && provider = "${provider}"`;
+    const filter = `user = "${escFilter(userId)}" && provider = "${escFilter(provider)}"`;
     const list = await pb
       .collection('user_app_integrations')
       .getList<AppIntegrationRow>(1, 1, { filter });

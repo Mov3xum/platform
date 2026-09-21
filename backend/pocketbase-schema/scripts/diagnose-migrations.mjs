@@ -32,6 +32,7 @@ import PocketBase from 'pocketbase';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -108,10 +109,15 @@ async function main() {
   const pb = new PocketBase(PB_URL);
   pb.autoCancellation(false);
 
-  try {
-    await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
-  } catch (err) {
-    console.error(`✗ Superuser-auth misslyckades för ${SU_EMAIL}: ${err?.message || err}`);
+  const authError = await authenticateSuperuserWithRetry(pb, SU_EMAIL, SU_PASSWORD, {
+    onRetry: (err, attempt, maxAttempts, delayMs) => {
+      warn(
+        `superuser-auth misslyckades (försök ${attempt}/${maxAttempts}): ${err?.message || err} — försöker igen om ${delayMs}ms`
+      );
+    }
+  });
+  if (authError) {
+    console.error(`✗ Superuser-auth misslyckades för ${SU_EMAIL}: ${authError?.message || authError}`);
     process.exit(1);
   }
   ok(`Autentiserad som superuser ${SU_EMAIL}`);

@@ -19,11 +19,12 @@ export function ServerChart({
   className?: string;
 }) {
   const raw = renderChartSvg(spec, { width, height });
-  // ECharts SSR-SVG har redan en `viewBox` → gör bara rot-svg:ns width/height
-  // fluida så diagrammet fyller containern och behåller proportionerna.
+  // ECharts SSR-SVG har redan en `viewBox` → gör rot-svg:ns width fluid och ta
+  // BORT height-attributet helt (viewBox ger proportionerna). `height="auto"`
+  // är ogiltigt för <svg> och spammade konsolen med "Expected length"-fel.
   const svg = raw
     .replace(/width="\d+(?:px)?"/, 'width="100%"')
-    .replace(/height="\d+(?:px)?"/, 'height="auto"');
+    .replace(/\sheight="\d+(?:px)?"/, '');
 
   return (
     <div

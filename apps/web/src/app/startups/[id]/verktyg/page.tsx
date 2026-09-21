@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import { getOneForTenant } from '@/lib/pb.server';
+import { escFilter } from '@/lib/pb-filter';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModule, hasRole } from '@/lib/rbac';
 import { ToolsTab } from '@/components/intric/ToolsTab';
@@ -93,7 +94,7 @@ export default async function StartupVerktygPage({
       sort: 'name'
     }),
     pb.collection('startup_team_members').getList(1, 30, {
-      filter: `startup = "${id}"`,
+      filter: `startup = "${escFilter(id)}"`,
       sort: '-is_founder,name',
       expand: 'user'
     }),

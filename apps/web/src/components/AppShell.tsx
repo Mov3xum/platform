@@ -1,4 +1,5 @@
 import { type Role, type StartupPhase } from '@platform/shared';
+import { escFilter } from '@/lib/pb-filter';
 import type { SessionUser } from '@/lib/auth.server';
 import { getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
@@ -29,7 +30,7 @@ const getAssignedWorkshopCount = unstable_cache(
     const pb = await getServerPb();
     const linkedFilter = linkedStartups.map((id) => `startup = "${id}"`).join(' || ');
     const result = await pb.collection(PB_COLLECTIONS.workshopAssignments).getList(1, 1, {
-      filter: `tenant = "${tenant}" && status != "done" && (${linkedFilter})`
+      filter: `tenant = "${escFilter(tenant)}" && status != "done" && (${linkedFilter})`
     });
     return result.totalItems;
   },

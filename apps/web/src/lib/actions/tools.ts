@@ -1260,7 +1260,7 @@ export async function deleteToolAction(toolId: string): Promise<ToolActionState>
 
   try {
     const runs = await pb.collection('tool_runs').getFullList<{ id: string }>({
-      filter: `tenant = "${user.tenant}" && tool = "${toolId}"`,
+      filter: `tenant = "${escFilter(user.tenant)}" && tool = "${escFilter(toolId)}"`,
       fields: 'id'
     });
     for (const r of runs) {

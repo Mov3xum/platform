@@ -3,6 +3,7 @@ import type PocketBase from 'pocketbase';
 import type { SessionUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { escFilter } from '@/lib/pb-filter';
+import { eventPhase, startOfStockholmDay, toPocketBaseDateTime } from '@platform/shared';
 import {
   findIntegrationRow,
   getActiveTokens,
@@ -78,6 +79,7 @@ interface ActivityRow {
 interface EventRow {
   id: string;
   name: string;
+  status?: string;
   starts_at: string;
   ends_at?: string;
   location?: string;
@@ -142,8 +144,12 @@ export async function getOverviewData(
     (startupClause ? ` || ${startupClause}` : '') +
     `) && status != "cancelled"`;
 
-  const todayDate = new Date().toISOString().slice(0, 10);
-  const eventFilter = `tenant = "${tenant}" && starts_at >= "${todayDate}" && status != "cancelled"`;
+  // Dygnsgränsen är 00:00 SVENSK tid uttryckt som UTC-ögonblick i PB-format
+  // (servern kör i UTC — ett rent "YYYY-MM-DD" hade tappat events mellan
+  // 00:00 och 02:00 svensk tid, och efter 22:00 UTC vore "idag" morgondagen).
+  const now = new Date();
+  const todayStart = toPocketBaseDateTime(startOfStockholmDay(now));
+  const eventFilter = `tenant = "${tenant}" && starts_at >= "${todayStart}" && status != "cancelled"`;
 
   const [tasksRes, activitiesRes, eventsRes] = await Promise.allSettled([
     pb.collection('tasks').getList<TaskRow>(1, 100, {
@@ -210,6 +216,8 @@ export async function getOverviewData(
 
   if (eventsRes.status === 'fulfilled') {
     for (const e of eventsRes.value.items) {
+      // Ett event vars tid redan passerat är inte "kommande", oavsett statusfält.
+      if (eventPhase(e, now) === 'completed') continue;
       agenda.push({
         id: e.id,
         source: 'event',
@@ -233,7 +241,6 @@ export async function getOverviewData(
           row,
           provider: outlookCalendarProvider
         });
-        const now = new Date();
         const horizon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
         const evs = await fetchCalendarEvents({
           tokens,

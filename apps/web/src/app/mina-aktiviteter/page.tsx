@@ -97,7 +97,7 @@ export default async function MinaAktiviteterPage({
   searchParams: Promise<{ startup?: string }>;
 }) {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'mina_aktiviteter', user.disabledModules)) {
+  if (!canAccessModuleForUser(user.roles, 'mina_aktiviteter', user.enabledModules)) {
     redirect('/chatt');
   }
 

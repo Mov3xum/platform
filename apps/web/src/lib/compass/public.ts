@@ -1,7 +1,10 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
-import type { CompassModule, CompassQuestion } from './types';
+import { getPublicPbUrl } from '@/lib/pb-url';
+import type { CompassModule, CompassQuestion, NextModuleLink } from './types';
+
+export type { NextModuleLink };
 
 // Publik (oinloggad) resolvning av Startupkompass-moduler.
 //
@@ -32,18 +35,95 @@ export async function resolvePublicModule(
     return null;
   }
 
+  // Slå upp en AKTIV + PUBLIK modul. Vi matchar i första hand på den globalt
+  // unika `public_slug` (CLAUDE.md § 23.2). Som defensiv fallback matchar vi
+  // även på den interna `slug` — fortfarande begränsat till is_active +
+  // public_url_enabled, och tenant härleds ALLTID FRÅN modulen (aldrig från
+  // request-bodyn). Det gör flödet robust mot att en delad länk/klient skickar
+  // den interna sluggen i stället för den publika (symptomet "Modul saknas
+  // eller är inte publik." på resultatsteget trots att modulen är publicerad).
+  const tryFilter = async (expr: string): Promise<CompassModule | null> => {
+    try {
+      return await su.pb
+        .collection('compass_modules')
+        .getFirstListItem<CompassModule>(su.pb.filter(expr, { s: slug }));
+    } catch {
+      return null;
+    }
+  };
+
+  const mod =
+    (await tryFilter('public_slug = {:s} && is_active = true && public_url_enabled = true')) ||
+    (await tryFilter('slug = {:s} && is_active = true && public_url_enabled = true'));
+
+  if (!mod) {
+    console.error('[compass] public module not found for slug', slug);
+    return null;
+  }
+  if (!mod.tenant) return null;
+  return { pb: su.pb, module: mod, tenant: mod.tenant };
+}
+
+// Resolvar den kedjade nästa-modulens publika länk (migration 1700000124).
+// Returnerar bara en länk om nästa-modulen finns i SAMMA tenant, är aktiv +
+// publik och har en public_slug — annars null (ingen "fortsätt"-CTA visas).
+// Körs med superuser-klienten (publik sida saknar session); tenant-likhet
+// kontrolleras explicit så kedjan aldrig korsar tenant-gränsen.
+export async function getNextModuleLink(
+  pb: PocketBase,
+  module: Pick<CompassModule, 'next_module' | 'tenant'>
+): Promise<NextModuleLink | null> {
+  const nextId = (module.next_module || '').trim();
+  if (!nextId) return null;
   try {
-    const mod = await su.pb
+    const next = await pb
       .collection('compass_modules')
-      .getFirstListItem<CompassModule>(
-        su.pb.filter('public_slug = {:s} && is_active = true && public_url_enabled = true', {
-          s: slug
-        })
-      );
-    if (!mod.tenant) return null;
-    return { pb: su.pb, module: mod, tenant: mod.tenant };
+      .getOne<CompassModule>(nextId);
+    if (next.tenant !== module.tenant || !next.is_active || !next.public_url_enabled) {
+      return null;
+    }
+    // resolvePublicModule matchar i andra hand på den interna sluggen, så en
+    // aktiv + publik modul utan egen public_slug är ändå nåbar — kedjan ska
+    // inte tyst brytas bara för att public_slug-fältet lämnats tomt.
+    const slug = next.public_slug || next.slug;
+    if (!slug) return null;
+    return { slug, label: next.welcome_title || next.name };
   } catch {
     return null;
+  }
+}
+
+export interface PublicTenantBranding {
+  logoLightUrl?: string;
+  logoDarkUrl?: string;
+  name?: string;
+}
+
+// Hämtar tenantens uppladdade logotyp (från /installningar) för den publika
+// modulsidan. Logofälten serveras tokenlöst via PocketBase (samma mönster som
+// auth.server.ts + compass-hero, CLAUDE.md § 18.2) → fungerar för en anonym
+// besökare. Returnerar tomt objekt om tenant/logo saknas (text-wordmark visas).
+export async function getPublicTenantBranding(
+  pb: PocketBase,
+  tenantId: string
+): Promise<PublicTenantBranding> {
+  if (!tenantId) return {};
+  try {
+    const tenant = await pb
+      .collection('tenants')
+      .getOne<{ id: string; name?: string; logo_light?: string; logo_dark?: string }>(tenantId);
+    const base = getPublicPbUrl().replace(/\/$/, '');
+    const fileUrl = (filename?: string) =>
+      filename
+        ? `${base}/api/files/tenants/${tenantId}/${encodeURIComponent(filename)}`
+        : undefined;
+    return {
+      name: tenant.name,
+      logoLightUrl: fileUrl(tenant.logo_light),
+      logoDarkUrl: fileUrl(tenant.logo_dark)
+    };
+  } catch {
+    return {};
   }
 }
 
@@ -128,4 +208,53 @@ export async function getPublicModuleQuestions(
   } catch {
     return [];
   }
+}
+
+export function buildModuleChatSystemPrompt(
+  module: Pick<CompassModule, 'name' | 'chat_persona' | 'system_prompt'>,
+  questions: CompassQuestion[]
+): string | undefined {
+  const segments: string[] = [];
+
+  if (module.chat_persona) {
+    segments.push(`Du agerar som "${module.chat_persona}".`);
+  }
+
+  if (module.system_prompt) {
+    segments.push(module.system_prompt);
+  }
+
+  if (questions.length > 0) {
+    const guide = questions
+      .map((question, index) => {
+        const lines = [`${index + 1}. ${question.key}: ${question.prompt}`];
+        lines.push(`   Typ: ${question.input_type}${question.required ? ' (obligatorisk)' : ''}`);
+        if (question.help_text) lines.push(`   Hjälp: ${question.help_text}`);
+        if (question.choices?.length) {
+          lines.push(
+            '   Alternativ: ' +
+              question.choices
+                .map((choice) => {
+                  const next = choice.next_key ? ` → ${choice.next_key}` : '';
+                  return `${choice.label} [${choice.value}]${next}`;
+                })
+                .join(' · ')
+          );
+        }
+        return lines.join('\n');
+      })
+      .join('\n\n');
+
+    segments.push(
+      [
+        'Frågebank för modulen:',
+        'Använd frågorna som en dynamisk intervjuguide.',
+        'Ställ en fråga i taget, anpassa ordningen efter användarens svar och hoppa till choice.next_key när det finns ett angivet nästa steg.',
+        'När du har tillräckligt underlag, sammanfatta kort och fortsätt till nästa relevanta fråga eller be om kontaktuppgifter om de saknas.',
+        guide
+      ].join('\n')
+    );
+  }
+
+  return segments.length > 0 ? segments.join('\n\n') : undefined;
 }

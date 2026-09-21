@@ -57,7 +57,7 @@ import type {
   SprintXScore,
   EducationDocumentAssignment
 } from '@platform/shared';
-import { educationDocumentKindLabels } from '@platform/shared';
+import { educationDocumentKindLabels, formatStockholmDateTime } from '@platform/shared';
 import { Icon } from '@/components/proto';
 import { DocumentCompleteButton } from '@/app/education/documents/DocumentCompleteButton';
 import { AgreementsSection, type AgreementView } from '@/components/intric/AgreementsSection';
@@ -327,34 +327,34 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
     toolRunsResult
   ] = await Promise.allSettled([
     pb.collection('startup_team_members').getList<TeamMemberRecord>(1, 50, {
-      filter: `startup = "${id}"`,
+      filter: `startup = "${escFilter(id)}"`,
       sort: '-is_founder,name'
     }),
     pb.collection('milestones').getList<MilestoneRecord>(1, 50, {
-      filter: `startup = "${id}"`,
+      filter: `startup = "${escFilter(id)}"`,
       sort: 'target_date'
     }),
     pb.collection('activities').getList<ActivityRecord>(1, 50, {
-      filter: `startup = "${id}"`,
+      filter: `startup = "${escFilter(id)}"`,
       sort: '-due_date',
       expand: 'tool,tool_run'
     }),
     pb.collection('notes').getList<NoteRecord>(1, 50, {
-      filter: `startup = "${id}"`,
+      filter: `startup = "${escFilter(id)}"`,
       sort: '-created',
       expand: 'author'
     }),
     pb.collection('agreements').getList<AgreementRecord>(1, 50, {
-      filter: `startup = "${id}"`,
+      filter: `startup = "${escFilter(id)}"`,
       sort: '-created'
     }),
     pb.collection('partner_engagements').getList<PartnerEngagementRecord>(1, 50, {
-      filter: `startup = "${id}"`,
+      filter: `startup = "${escFilter(id)}"`,
       sort: '-started_at',
       expand: 'partner'
     }),
     pb.collection('activities').getList<ToolActivityRecord>(1, 50, {
-      filter: `startup = "${id}" && kind = "tool_run"`,
+      filter: `startup = "${escFilter(id)}" && kind = "tool_run"`,
       sort: '-created',
       expand: 'tool,tool_run'
     }),
@@ -364,20 +364,20 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       expand: 'workshop,assigned_by,collaborators,meeting'
     }),
     pb.collection('startup_financials').getList<FinancialsRow>(1, 5, {
-      filter: `startup = "${id}"`,
+      filter: `startup = "${escFilter(id)}"`,
       sort: '-year'
     }),
     pb.collection('startup_phase_history').getList<PhaseHistoryRecord>(1, 50, {
-      filter: `startup = "${id}"`,
+      filter: `startup = "${escFilter(id)}"`,
       sort: '-entered_at',
       expand: 'created_by'
     }),
     pb.collection('startup_contacts').getList<StartupContactRecord>(1, 100, {
-      filter: `startup = "${id}"`,
+      filter: `startup = "${escFilter(id)}"`,
       expand: 'contact'
     }),
     pb.collection('tasks').getList<TaskRecord>(1, 50, {
-      filter: `startup = "${id}" && tenant = "${user.tenant}"`,
+      filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
       sort: '-starts_at'
     }),
     assignPb
@@ -388,7 +388,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
         expand: 'document,completed_by,collaborators,meeting'
       }),
     pb.collection('tool_runs').getList<ToolRunRecord>(1, 100, {
-      filter: `startup = "${id}" && tenant = "${user.tenant}"`,
+      filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
       sort: '-created',
       expand: 'tool,assigned_to'
     })
@@ -1059,7 +1059,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                           {assignment.expand?.meeting ? (
                             <p className="mt-1 text-xs text-foreground-subtle">
                               📅 Möte: {assignment.expand.meeting.name} ·{' '}
-                              {new Date(assignment.expand.meeting.starts_at).toLocaleString('sv-SE')}
+                              {formatStockholmDateTime(assignment.expand.meeting.starts_at)}
                             </p>
                           ) : null}
                           {fileUrl ? (
@@ -1418,7 +1418,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                         {assignment.expand?.meeting ? (
                           <p className="mt-1 text-xs text-foreground-subtle">
                             📅 Möte: {assignment.expand.meeting.name} ·{' '}
-                            {new Date(assignment.expand.meeting.starts_at).toLocaleString('sv-SE')}
+                            {formatStockholmDateTime(assignment.expand.meeting.starts_at)}
                           </p>
                         ) : null}
                       </div>

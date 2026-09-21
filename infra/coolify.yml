@@ -67,7 +67,26 @@ services:
       POCKETBASE_URL: ${POCKETBASE_URL:-http://pocketbase:8080}
       NEXT_PUBLIC_POCKETBASE_URL: ${NEXT_PUBLIC_POCKETBASE_URL:-http://pocketbase:8080}
       NODE_ENV: production
+      # HTTPS-beteende (infra/SSL.md): MOVEXUM_FORCE_HTTPS=true slår på appens
+      # opt-in http→https-redirect — sätt FÖRST när hosten har giltigt cert.
+      # MOVEXUM_ALLOW_INSECURE_COOKIES=true är escape-hatchen för medvetet
+      # http-serverade deploys (vinner alltid).
+      MOVEXUM_FORCE_HTTPS: ${MOVEXUM_FORCE_HTTPS:-}
+      MOVEXUM_ALLOW_INSECURE_COOKIES: ${MOVEXUM_ALLOW_INSECURE_COOKIES:-}
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      # Tal-till-text (CLAUDE.md § 31.2/§ 34). Alla valfria — utan dem körs
+      # Voxtral (voxtral-mini-latest) med autodetekt när modellen avvisar
+      # språkhintet `sv`. MOVEXUM_STT_BASE_URL pekar en självhostad,
+      # OpenAI-kompatibel EU-endpoint med svensktränad modell (KB-Whisper) som
+      # då går först; Voxtral blir fallback. Diarisering är AV tills
+      # MOVEXUM_MEETING_DIARIZATION=1 (maintainer-beslut, DPIA § 6).
+      MISTRAL_VOICE_MODEL: ${MISTRAL_VOICE_MODEL:-}
+      MISTRAL_VOICE_LANGUAGE: ${MISTRAL_VOICE_LANGUAGE:-}
+      MOVEXUM_STT_BASE_URL: ${MOVEXUM_STT_BASE_URL:-}
+      MOVEXUM_STT_API_KEY: ${MOVEXUM_STT_API_KEY:-}
+      MOVEXUM_STT_MODEL: ${MOVEXUM_STT_MODEL:-}
+      MOVEXUM_STT_LANGUAGE: ${MOVEXUM_STT_LANGUAGE:-}
+      MOVEXUM_MEETING_DIARIZATION: ${MOVEXUM_MEETING_DIARIZATION:-}
       # Superuser-credentials krävs för fallback-skapande av records när
       # PB:s createRule failar transient (se workshops.ts). Sätt
       # POCKETBASE_SUPERUSER_EMAIL/PASSWORD som secrets i Coolify

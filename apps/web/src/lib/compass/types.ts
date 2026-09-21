@@ -32,12 +32,29 @@ export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
   declined: 'Avböjd'
 };
 
+/**
+ * Lead-källa för INTERNA förhandsgranskningar (admin-preview på /inflode/m/…
+ * och staff-test-chatten /inflode/chat). Leads med den här källan skapas så
+ * att staff kan verifiera hela pipelinen, men EXKLUDERAS från all statistik
+ * (dashboard, analys, CSV-export) — de är test, inte inflöde.
+ */
+export const PREVIEW_SOURCE_KEY = 'preview';
+export const PREVIEW_SOURCE_LABEL = 'Förhandsgranskning';
+
 export type FlowType = 'chat' | 'wizard' | 'quiz';
 
 export const FLOW_TYPE_LABEL: Record<FlowType, string> = {
   chat: 'AI-chatt',
   wizard: 'Formulär',
   quiz: 'Quiz'
+};
+
+/** Besökarens eget val i intag-flödet (migration 1700000125). */
+export type ContactPreference = 'contact_me' | 'self_reach';
+
+export const CONTACT_PREFERENCE_LABEL: Record<ContactPreference, string> = {
+  contact_me: 'Vill bli kontaktad av Movexum',
+  self_reach: 'Hör av sig själv när hen är redo'
 };
 
 export type SecurityEventKind =
@@ -104,6 +121,10 @@ export interface Lead {
   tags?: string[];
   consent_at?: string;
   last_contact_at?: string;
+  /** AI-genererad sammanställning av det inskickade (migration 1700000125). */
+  ai_summary?: string;
+  /** Besökarens kontaktpreferens (migration 1700000125). */
+  contact_preference?: ContactPreference;
   // Quiz-resultat (Startupkompassen)
   quiz_result_bucket?: string;
   quiz_score?: number;
@@ -173,6 +194,10 @@ export interface CompassModule {
   hero_eyebrow?: string;
   welcome_title?: string;
   welcome_body?: string;
+  /** Omslagsbild (filnamn på compass_modules.hero_image, migration 1700000122). */
+  hero_image?: string;
+  /** Omslagsvideo (filnamn på compass_modules.hero_video, migration 1700000141). */
+  hero_video?: string;
   chat_persona?: string;
   /** Max antal AI-utbyten i chat-flödet (0 = obegränsat). */
   max_exchanges?: number;
@@ -186,6 +211,26 @@ export interface CompassModule {
   notify_emails?: string;
   /** Quiz-resultatprofiler (flow_type === 'quiz'). */
   result_buckets?: ResultBucket[];
+  /**
+   * Nästa modul i kedjan (relation→compass_modules, migration 1700000124).
+   * När satt erbjuds besökaren att fortsätta till den modulen efter att den
+   * här slutförts. Pekar alltid på en modul i samma tenant (verifieras i
+   * server-actionen).
+   */
+  next_module?: string;
+  /**
+   * Kopplat event/aktivitet (relation→incubator_events, migration 1700000138).
+   * Ren referens — staff ser vilket event/aktivitet i CRM:t ("Aktiviteter",
+   * § 15.2) modulen hör till. Pekar alltid på ett event i samma tenant
+   * (verifieras i server-actionen).
+   */
+  linked_event?: string;
+  /**
+   * Steg 4-valet "Skapa lead i Startupkompassen när modulen slutförs"
+   * (migration 1700000125). SAKNAT fält (oapplicerad migration) tolkas som
+   * true — bara ett uttryckligt false stänger av lead-skapandet.
+   */
+  create_lead?: boolean;
   created: string;
   updated: string;
 }
@@ -205,9 +250,18 @@ export interface CompassQuestion {
     score?: number;
     bucket?: string;
     buckets?: Record<string, number>;
+    next_key?: string;
   }[];
   required?: boolean;
   sort_order?: number;
+}
+
+/** Kedjad nästa-modul-länk (migration 1700000124) — visas efter slutfört flöde. */
+export interface NextModuleLink {
+  /** Publik slug — länkmål blir /m/<slug>. */
+  slug: string;
+  /** Visningsnamn på "fortsätt"-knappen. */
+  label: string;
 }
 
 export interface Attribution {

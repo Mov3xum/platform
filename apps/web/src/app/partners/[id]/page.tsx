@@ -21,7 +21,7 @@ export default async function PartnerDetailPage({
 }) {
   const { id } = await params;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'partners', user.disabledModules)) {
+  if (!canAccessModuleForUser(user.roles, 'partners', user.enabledModules)) {
     redirect('/dashboard');
   }
 

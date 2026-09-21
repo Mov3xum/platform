@@ -34,7 +34,7 @@ export default async function ToolRunDetailPage({
 }) {
   const { id } = await params;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'agenter', user.disabledModules)) notFound();
+  if (!canAccessModuleForUser(user.roles, 'agenter', user.enabledModules)) notFound();
   const pb = await getServerPb();
 
   let run: ToolRun;

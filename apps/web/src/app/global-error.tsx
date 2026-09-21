@@ -34,8 +34,7 @@ export default function GlobalError({
           dangerouslySetInnerHTML={{
             __html: `
 @font-face{font-family:"Sora Variable";font-style:normal;font-weight:100 800;font-display:swap;src:url("/fonts/sora-variable.woff2") format("woff2");}
-@font-face{font-family:"Nunito Sans Variable";font-style:normal;font-weight:200 1000;font-display:swap;src:url("/fonts/nunito-sans-variable.woff2") format("woff2");}
-@font-face{font-family:"JetBrains Mono Variable";font-style:normal;font-weight:100 800;font-display:swap;src:url("/fonts/jetbrains-mono-variable.woff2") format("woff2");}`
+@font-face{font-family:"Nunito Sans Variable";font-style:normal;font-weight:200 1000;font-display:swap;src:url("/fonts/nunito-sans-variable.woff2") format("woff2");}`
           }}
         />
       </head>
@@ -80,7 +79,7 @@ export default function GlobalError({
                 marginTop: 16,
                 fontSize: 12,
                 color: '#737373',
-                fontFamily: '"JetBrains Mono Variable", ui-monospace, monospace'
+                fontFamily: '"Nunito Sans Variable", "Nunito Sans", system-ui, sans-serif'
               }}
             >
               Felreferens: {error.digest}

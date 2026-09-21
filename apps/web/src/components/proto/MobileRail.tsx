@@ -93,18 +93,46 @@ export function MobileRailBackdrop() {
   );
 }
 
-export function MobileMenuButton() {
-  const { toggle, open } = useMobileRail();
+function isDesktop(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(min-width: 1025px)').matches;
+}
+
+/**
+ * Burger som bor INNE i sidmenyn (rail-headern). Kollapsar railen på desktop
+ * och stänger drawern på mobil.
+ */
+export function RailToggleButton() {
+  const { setOpen, toggleDesktopCollapse } = useMobileRail();
   return (
     <button
       type="button"
-      onClick={toggle}
-      aria-label={open ? 'Stäng meny' : 'Öppna meny'}
+      onClick={() => (isDesktop() ? toggleDesktopCollapse() : setOpen(false))}
+      aria-label="Dölj meny"
+      aria-controls="mx-rail"
+      className="mx-rail-toggle-btn"
+    >
+      <Icon name="menu" size={18} />
+    </button>
+  );
+}
+
+/**
+ * Kontextuell trigger som BARA visas när railen är dold (desktop-kollapsad
+ * eller stängd drawer på mobil) — enda sättet att ta fram menyn igen. Ligger
+ * i sökvägs-raden mot bakgrunden, inte i en egen header.
+ */
+export function RailReopenButton() {
+  const { open, setOpen, toggleDesktopCollapse } = useMobileRail();
+  return (
+    <button
+      type="button"
+      onClick={() => (isDesktop() ? toggleDesktopCollapse() : setOpen(true))}
+      aria-label="Öppna meny"
       aria-expanded={open}
       aria-controls="mx-rail"
-      className="mx-mobile-menu-btn"
+      className="mx-rail-reopen-btn"
     >
-      <Icon name={open ? 'close' : 'menu'} size={20} />
+      <Icon name="menu" size={20} />
     </button>
   );
 }

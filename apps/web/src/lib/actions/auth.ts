@@ -9,8 +9,6 @@ import { getServerPbUrl } from '@/lib/pb-url';
 import { parseVerificationToken } from '@/lib/verification-token';
 import { checkRateLimit, recordFailure, clearFailures } from '@/lib/rate-limit';
 
-const PB_URL = getServerPbUrl();
-
 // Brute-force-skydd: per IP+e-post (riktad gissning) och per IP (spraying).
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_PER_ACCOUNT = 8;
@@ -88,7 +86,8 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
       return { error: `För många inloggningsförsök. Försök igen om ca ${retryMin} min.` };
     }
 
-    const pb = new PocketBase(PB_URL);
+    const pbUrl = getServerPbUrl();
+    const pb = new PocketBase(pbUrl);
 
     try {
       await pb.collection('users').authWithPassword(email, password, { expand: 'tenant' });
@@ -113,7 +112,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
         return { error: 'Users-collectionen saknas i PocketBase — har migrationerna körts?' };
       }
       if (!e.status) {
-        return { error: `Kunde inte nå PocketBase (${PB_URL}). Kontrollera POCKETBASE_URL/NEXT_PUBLIC_POCKETBASE_URL.` };
+        return { error: `Kunde inte nå PocketBase (${pbUrl}). Kontrollera POCKETBASE_URL/NEXT_PUBLIC_POCKETBASE_URL.` };
       }
       return { error: e.data?.message || e.message || 'Inloggning misslyckades. Försök igen.' };
     }
@@ -142,6 +141,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
           avatar: m.avatar,
           linked_startups: m.linked_startups,
           disabled_modules: m.disabled_modules,
+          enabled_modules: m.enabled_modules,
           expand: expandTenant
             ? { tenant: { id: expandTenant.id, name: expandTenant.name, slug: expandTenant.slug } }
             : undefined
@@ -196,14 +196,6 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   }
 }
 
-export async function logoutAction(): Promise<void> {
-  const store = await cookies();
-  store.delete(AUTH_COOKIE);
-  // Purge the cached authenticated root layout so the sidebar/AppShell is dropped.
-  revalidatePath('/', 'layout');
-  redirect('/login');
-}
-
 export async function requestPasswordResetAction(
   _prev: ResetPasswordState,
   formData: FormData
@@ -214,7 +206,8 @@ export async function requestPasswordResetAction(
     return { error: 'E-post krävs.' };
   }
 
-  const pb = new PocketBase(PB_URL);
+  const pbUrl = getServerPbUrl();
+  const pb = new PocketBase(pbUrl);
 
   try {
     await pb.collection('users').requestPasswordReset(email);
@@ -250,7 +243,8 @@ export async function confirmPasswordResetAction(
     return { error: 'Lösenordet måste vara minst 8 tecken.' };
   }
 
-  const pb = new PocketBase(PB_URL);
+  const pbUrl = getServerPbUrl();
+  const pb = new PocketBase(pbUrl);
 
   try {
     await pb.collection('users').confirmPasswordReset(token, password, passwordConfirm);
@@ -284,7 +278,8 @@ export async function verifyEmailAction(token: string): Promise<VerifyEmailState
     return { error: 'Serverfel: kan inte verifiera kontot just nu. Kontakta administratören.' };
   }
 
-  const pb = new PocketBase(PB_URL);
+  const pbUrl = getServerPbUrl();
+  const pb = new PocketBase(pbUrl);
 
   try {
     // Authenticate as PocketBase superuser to update the verified field

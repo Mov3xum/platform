@@ -15,7 +15,7 @@ export default async function OnboardingPreviewPage({
 }) {
   const { id } = await params;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) redirect('/dashboard');
+  if (!canAccessModuleForUser(user.roles, 'education', user.enabledModules)) redirect('/dashboard');
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) redirect('/education');
 
   const pb = await getServerPb();

@@ -1,7 +1,7 @@
 name: Sync PocketBase schema (production)
 
-# Produktionsmotsvarighet till sync-pocketbase.yml. Triggar när migrationer
-# eller setup-scriptet ändras på main. Två steg:
+# Produktionsmotsvarighet till sync-pocketbase.yml. Körs manuellt eller via
+# workflow_call. Två steg:
 #  1. Trigga Coolify-redeploy av PRODUKTIONS-stacken (PB + web) så nya
 #     migrations i backend/pocketbase-schema/migrations/ bakas in i PB-imagen
 #     och körs vid PB:s uppstart.
@@ -15,11 +15,7 @@ name: Sync PocketBase schema (production)
 #     ELLER COOLIFY_APP_UUID_PRODUCTION — för stack-redeploy
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'backend/pocketbase-schema/**'
-      - '.github/workflows/sync-pocketbase-production.yml'
+  workflow_call:
   workflow_dispatch:
 
 jobs:

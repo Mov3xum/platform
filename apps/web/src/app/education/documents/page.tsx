@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { escFilter } from '@/lib/pb-filter';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
@@ -17,7 +18,7 @@ import type { EducationDocument, EducationDocumentAssignment, WorkshopArea } fro
 
 export default async function EducationDocumentsPage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) redirect('/chatt');
+  if (!canAccessModuleForUser(user.roles, 'education', user.enabledModules)) redirect('/chatt');
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
   const isStartupMember = hasRole(user.roles, ['startup_member']);
@@ -31,13 +32,32 @@ export default async function EducationDocumentsPage() {
   try {
     documents = (
       await pb.collection(PB_COLLECTIONS.educationDocuments).getList<EducationDocument>(1, 200, {
-        filter: `tenant = "${user.tenant}"`,
+        filter: `tenant = "${escFilter(user.tenant)}"`,
         sort: '-created',
         expand: 'area'
       })
     ).items;
   } catch (error) {
-    console.error('[education/documents] failed to load documents', { tenant: user.tenant, error });
+    // En valfri detalj (t.ex. `expand: 'area'` mot en instans där
+    // område-migrationen ännu inte applicerats) får ALDRIG dölja hela listan.
+    // Försök igen utan expand så uppladdade dokument fortfarande syns.
+    console.error('[education/documents] failed to load documents (retrying without expand)', {
+      tenant: user.tenant,
+      error
+    });
+    try {
+      documents = (
+        await pb.collection(PB_COLLECTIONS.educationDocuments).getList<EducationDocument>(1, 200, {
+          filter: `tenant = "${escFilter(user.tenant)}"`,
+          sort: '-created'
+        })
+      ).items;
+    } catch (retryError) {
+      console.error('[education/documents] failed to load documents', {
+        tenant: user.tenant,
+        error: retryError
+      });
+    }
   }
 
   try {
@@ -49,7 +69,7 @@ export default async function EducationDocumentsPage() {
       await pb
         .collection(PB_COLLECTIONS.educationDocumentAssignments)
         .getList<EducationDocumentAssignment>(1, 500, {
-          filter: `tenant = "${user.tenant}"${linkedFilter}`,
+          filter: `tenant = "${escFilter(user.tenant)}"${linkedFilter}`,
           sort: '-created',
           expand: 'document,startup,completed_by'
         })
@@ -62,7 +82,7 @@ export default async function EducationDocumentsPage() {
     try {
       startups = (
         await pb.collection('startups').getList<{ id: string; name: string }>(1, 300, {
-          filter: `tenant = "${user.tenant}"`,
+          filter: `tenant = "${escFilter(user.tenant)}"`,
           sort: 'name',
           fields: 'id,name'
         })
@@ -75,7 +95,7 @@ export default async function EducationDocumentsPage() {
     try {
       areas = (
         await pb.collection(PB_COLLECTIONS.workshopAreas).getList<WorkshopArea>(1, 200, {
-          filter: `tenant = "${user.tenant}"`,
+          filter: `tenant = "${escFilter(user.tenant)}"`,
           sort: 'name'
         })
       ).items;
@@ -174,14 +194,23 @@ export default async function EducationDocumentsPage() {
     }
   }
   const documentGroups: { id: string; label: string; documents: EducationDocument[] }[] = [];
+  const renderedAreaIds = new Set<string>();
   for (const area of areas) {
     const docs = documentsByArea.get(area.id);
     if (docs && docs.length > 0) {
       documentGroups.push({ id: area.id, label: area.name, documents: docs });
+      renderedAreaIds.add(area.id);
     }
   }
-  if (documentsWithoutArea.length > 0) {
-    documentGroups.push({ id: '__none__', label: 'Utan område', documents: documentsWithoutArea });
+  // Dokument vars område inte finns i `areas` (område raderat, eller `areas`
+  // kunde inte laddas) får ALDRIG försvinna tyst — samla dem under "Utan område".
+  const orphanedDocuments: EducationDocument[] = [];
+  for (const [areaId, docs] of documentsByArea) {
+    if (!renderedAreaIds.has(areaId)) orphanedDocuments.push(...docs);
+  }
+  const ungroupedDocuments = [...documentsWithoutArea, ...orphanedDocuments];
+  if (ungroupedDocuments.length > 0) {
+    documentGroups.push({ id: '__none__', label: 'Utan område', documents: ungroupedDocuments });
   }
 
   // ── Staff-vy: ladda upp, tilldela, hantera ─────────────────────────────────

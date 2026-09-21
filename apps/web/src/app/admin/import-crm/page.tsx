@@ -7,18 +7,16 @@ import { ImportForm } from './ImportForm';
 
 export const dynamic = 'force-dynamic';
 
-export default async function ImportCrmPage() {
+export default async function ImportPage() {
   const user = await requireUser();
-  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+  if (!hasRole(user.roles, ['admin'])) {
     redirect('/');
   }
 
   return (
     <PageShell
-      title="Importera CRM-export"
-      meta={
-        <span className="text-sm text-foreground-muted">Administrationskonsol</span>
-      }
+      title="Importera Excel-data"
+      meta={<span className="text-sm text-foreground-muted">Administrationskonsol</span>}
       actions={
         <Link
           href="/integrationer"
@@ -28,84 +26,54 @@ export default async function ImportCrmPage() {
         </Link>
       }
     >
-      <div className="mx-auto max-w-3xl space-y-6">
+      <div className="mx-auto max-w-4xl space-y-6">
         <section className="rounded-3xl border border-default bg-surface p-6">
-          <h2 className="text-base font-semibold text-foreground">Vad gör importen?</h2>
+          <h2 className="text-base font-semibold text-foreground">Generell import</h2>
           <p className="mt-2 text-sm text-foreground-muted">
-            Läser Movexums tidigare CRM-export (Excel, 12 ark) och skriver
-            idempotent till plattformens kollektioner. Befintliga rader
-            uppdateras, nya skapas — inga rader raderas.
+            Ladda upp valfri Excel-fil och mappa varje ark mot en befintlig
+            tabell i databasen. Du väljer själv vilken tabell ett ark ska
+            skrivas till och vilken kolumn som hör till vilket fält — inga nya
+            tabeller skapas. Befintliga rader uppdateras (upsert) via de
+            nyckelfält du markerar; allt annat skapas som nya rader. Inget
+            raderas.
           </p>
           <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-foreground-muted">
             <li>
-              <strong>Företag</strong> →{' '}
-              <code className="rounded bg-canvas-muted px-1 py-0.5 font-mono text-xs">
-                startups
-              </code>{' '}
-              (uppslag på org-nr, annars namn) + fashistorik från
-              Inträde-kolumnerna
+              <strong>Steg 1–2:</strong> ladda upp filen och justera mappningen
+              per ark. Auto-förslag fylls i — ändra fritt.
             </li>
             <li>
-              <strong>Personer</strong> →{' '}
-              <code className="rounded bg-canvas-muted px-1 py-0.5 font-mono text-xs">
-                contacts
-              </code>{' '}
-              (kräver GDPR-samtycke)
+              <strong>Steg 3:</strong> förhandsgranska. Du ser exakt vad som
+              kommer med, vilka kolumner som inte mappats och vilka rader som
+              hoppas över (och varför) — utan att något sparas.
             </li>
             <li>
-              <strong>Företag-Person</strong> →{' '}
-              <code className="rounded bg-canvas-muted px-1 py-0.5 font-mono text-xs">
-                startup_contacts
-              </code>
-            </li>
-            <li>
-              <strong>Aktiviteter / Deltagare</strong> →{' '}
-              <code className="rounded bg-canvas-muted px-1 py-0.5 font-mono text-xs">
-                incubator_events
-              </code>{' '}
-              /{' '}
-              <code className="rounded bg-canvas-muted px-1 py-0.5 font-mono text-xs">
-                event_signups
-              </code>
-            </li>
-            <li>
-              <strong>Kapital / IPR / Avtal / ToDo / Mätetal</strong> →{' '}
-              <code className="rounded bg-canvas-muted px-1 py-0.5 font-mono text-xs">
-                capital_rounds
-              </code>
-              ,{' '}
-              <code className="rounded bg-canvas-muted px-1 py-0.5 font-mono text-xs">
-                intellectual_property
-              </code>
-              ,{' '}
-              <code className="rounded bg-canvas-muted px-1 py-0.5 font-mono text-xs">
-                agreements
-              </code>
-              ,{' '}
-              <code className="rounded bg-canvas-muted px-1 py-0.5 font-mono text-xs">
-                tasks
-              </code>
-              ,{' '}
-              <code className="rounded bg-canvas-muted px-1 py-0.5 font-mono text-xs">
-                startup_kpis
-              </code>
+              <strong>Steg 4:</strong> bekräfta importen.
             </li>
           </ul>
         </section>
 
         <section className="rounded-3xl border border-default bg-canvas-subtle p-6 text-sm text-foreground-muted">
           <p className="font-medium text-foreground">
-            GDPR-skydd (CLAUDE.md § 15.4 / § 15.6)
+            Säkerhet &amp; dataskydd (CLAUDE.md § 9.3 / § 10 / § 21)
           </p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li>
-              Personer <strong>utan GDPR-samtycke hoppas över</strong> och
-              listas som varning.
+              Endast <strong>administratörer</strong> kan köra importen.
             </li>
             <li>
-              Kolumnen <code className="font-mono text-xs">Person nr</code> läses
-              aldrig in. Personnummer i Info-/anteckningsfält ersätts med{' '}
-              <code className="font-mono text-xs">[REDACTED]</code>.
+              Bara domäntabeller kan väljas — system- och hemlighetstabeller
+              (användare, credentials, privata trådar) är aldrig valbara.
+            </li>
+            <li>
+              Varje rad <strong>tenant-stämplas</strong> automatiskt så
+              isoleringen bevaras.
+            </li>
+            <li>
+              <strong>Personnummer</strong> i textfält ersätts med{' '}
+              <code className="font-mono text-xs">[REDACTED]</code>. Fält märkta{' '}
+              <span className="text-movexum-morkorange">⚠ PII</span> kräver
+              rättslig grund.
             </li>
             <li>
               Filen läses lokalt på servern (Coolify / UpCloud, EU). Inget

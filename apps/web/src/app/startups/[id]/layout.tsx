@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModule } from '@/lib/rbac';
 import { getOneForTenant } from '@/lib/pb.server';
+import { escFilter } from '@/lib/pb-filter';
 import { StartupWorkspaceShell } from '@/components/intric/StartupWorkspaceShell';
 import { RightPanel, type KnowledgeItem } from '@/components/intric/RightPanel';
 import type { StartupPhase } from '@platform/shared';
@@ -94,11 +95,11 @@ export default async function StartupLayout({
   // Knowledge sources: aktiviteter + anteckningar (icke-konfidentiella) + milstolpar + AI-resultat
   const [notesRes, milestonesRes, toolsRes, runsRes, activitiesRes] = await Promise.allSettled([
     pb.collection('notes').getList<NoteRow>(1, 12, {
-      filter: `startup = "${id}" && confidential = false`,
+      filter: `startup = "${escFilter(id)}" && confidential = false`,
       sort: '-created'
     }),
     pb.collection('milestones').getList<MilestoneRow>(1, 6, {
-      filter: `startup = "${id}"`,
+      filter: `startup = "${escFilter(id)}"`,
       sort: '-updated'
     }),
     pb.collection('tools').getList<ToolRow>(1, 50, {
@@ -114,7 +115,7 @@ export default async function StartupLayout({
       fields: 'id,tool,created,status'
     }),
     pb.collection('activities').getList<ActivityRow>(1, 20, {
-      filter: `startup = "${id}"`,
+      filter: `startup = "${escFilter(id)}"`,
       sort: '-created',
       fields: 'id,title,description,kind,type,created'
     })

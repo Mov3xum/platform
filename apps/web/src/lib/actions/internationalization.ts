@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { getAssignmentReadPb } from '@/lib/assignments/read';
 import { hasRole } from '@/lib/rbac';
 import { callMistral, estimateCostUsd } from '@/lib/ai/mistral';
 import { logAiUsage } from '@/lib/ai/usage';
@@ -39,13 +40,32 @@ export type IntlActionState = {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+// Aktivitetslogg-skrivningar är sekundära — en schema-mismatch (t.ex. en
+// PB-backend utan migration 1700000126:s kind-värden) får inte avbryta
+// huvudmutationen. Fail-soft + serverlogg (samma mönster som workshops.ts).
+async function tryActivityWrite<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error(`[intl] ${label} failed (fail-soft)`, {
+      message: err instanceof Error ? err.message : String(err ?? '')
+    });
+    return null;
+  }
+}
+
 async function loadAssignment(assignmentId: string) {
   const user = await requireUser();
   const pb = await getServerPb();
 
+  // Robust läsning (PB v0.23.4 rule-eval kan tyst ge 404 för behörig
+  // användare, § 21.3); behörigheten verifieras i app-koden direkt nedan och
+  // skrivningar går via användarens token (`pb`).
+  const readPb = await getAssignmentReadPb();
+
   let assignment: WorkshopAssignment & Record<string, unknown>;
   try {
-    assignment = await pb
+    assignment = await readPb
       .collection(PB_COLLECTIONS.workshopAssignments)
       .getOne<WorkshopAssignment & Record<string, unknown>>(assignmentId, {
         expand: 'workshop,startup'
@@ -439,18 +459,20 @@ export async function coachReviewDecisionAction(
     last_saved_at: now
   });
 
-  await pb.collection('activities').create({
-    startup: assignment.startup,
-    type: 'workshop',
-    title: `Internationaliseringsstrategi – coach ${decision === 'approved' ? 'godkänd' : 'returnerad'}`,
-    status: decision === 'approved' ? 'done' : 'in_progress',
-    kind: 'workshop_assignment',
-    workshop: assignment.workshop,
-    workshop_assignment: assignment.id,
-    owner: user.id,
-    completed_at: decision === 'approved' ? now : null,
-    due_date: now.slice(0, 10)
-  });
+  await tryActivityWrite('coach-decision activity create', () =>
+    pb.collection('activities').create({
+      startup: assignment.startup,
+      type: 'workshop',
+      title: `Internationaliseringsstrategi – coach ${decision === 'approved' ? 'godkänd' : 'returnerad'}`,
+      status: decision === 'approved' ? 'done' : 'in_progress',
+      kind: 'workshop_assignment',
+      workshop: assignment.workshop,
+      workshop_assignment: assignment.id,
+      owner: user.id,
+      completed_at: decision === 'approved' ? now : null,
+      due_date: now.slice(0, 10)
+    })
+  );
 
   revalidatePath(`/education/assignments/${assignmentId}`);
   return {};
@@ -550,18 +572,20 @@ export async function commitIntlStrategyAction(
     last_saved_at: now
   });
 
-  await pb.collection('activities').create({
-    startup: assignment.startup,
-    type: 'workshop',
-    title: 'Internationaliseringsstrategi – committad',
-    status: 'done',
-    kind: 'workshop_assignment',
-    workshop: assignment.workshop,
-    workshop_assignment: assignment.id,
-    owner: user.id,
-    completed_at: now,
-    due_date: now.slice(0, 10)
-  });
+  await tryActivityWrite('commit activity create', () =>
+    pb.collection('activities').create({
+      startup: assignment.startup,
+      type: 'workshop',
+      title: 'Internationaliseringsstrategi – committad',
+      status: 'done',
+      kind: 'workshop_assignment',
+      workshop: assignment.workshop,
+      workshop_assignment: assignment.id,
+      owner: user.id,
+      completed_at: now,
+      due_date: now.slice(0, 10)
+    })
+  );
 
   revalidatePath(`/education/assignments/${assignmentId}`);
   revalidatePath('/education');

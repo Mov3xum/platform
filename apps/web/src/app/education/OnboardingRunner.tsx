@@ -52,7 +52,10 @@ export function OnboardingRunner({
   const textareaClass =
     'mt-3 w-full rounded-2xl border border-default bg-surface px-4 py-2.5 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
 
-  const locked = completed || preview;
+  // Preview är fullt interaktivt (staff testar flödet som ett bolag) — bara en
+  // slutförd körning låser fälten. Inga svar sparas i preview: spara-/slutför-
+  // knapparna renderas inte alls (se Actions nedan).
+  const locked = completed;
 
   return (
     <div className="space-y-8">
@@ -83,7 +86,8 @@ export function OnboardingRunner({
 
       {preview ? (
         <p className="rounded-xl bg-movexum-pastell-gul px-3 py-2 text-sm text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
-          Förhandsgranskning — inga svar sparas i detta läge.
+          Förhandsgranskning/testläge — testa flödet fritt, precis som ett bolag ser det. Inga svar
+          sparas.
         </p>
       ) : null}
 

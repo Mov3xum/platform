@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { logoutAction } from '@/lib/actions/auth';
+import { LOGOUT_PATH } from '@/lib/auth-paths';
 
 type Props = {
   user: {
@@ -116,7 +116,7 @@ export function NavbarMobileMenu({ user, modules }: Props) {
           className="border-t border-default px-4 py-4"
           style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
         >
-          <form action={logoutAction}>
+          <form method="post" action={LOGOUT_PATH}>
             <button
               type="submit"
               className="inline-flex w-full items-center justify-center rounded-full border border-default bg-surface px-4 py-3 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle hover:text-foreground"

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { notFound, redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
@@ -15,7 +16,14 @@ import {
 import { deleteEventFormAction } from '@/lib/actions/events';
 import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
 import { SignupDeleteButton } from './SignupDeleteButton';
-import type { EventSignup, EventSignupStage, IncubatorEvent } from '@platform/shared';
+import {
+  EVENT_PHASE_LABEL,
+  eventPhase,
+  formatStockholmDateTime,
+  type EventSignup,
+  type EventSignupStage,
+  type IncubatorEvent
+} from '@platform/shared';
 
 const STAGE_ORDER: EventSignupStage[] = [
   'signup',
@@ -49,16 +57,9 @@ const STAGE_VARIANT: Record<
   admitted: 'green'
 };
 
+/** Alltid svensk tid — servern kör i UTC. */
 function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString('sv-SE', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  return formatStockholmDateTime(iso) || iso;
 }
 
 export default async function EventDetailPage({
@@ -80,11 +81,13 @@ export default async function EventDetailPage({
     notFound();
   }
   if (!event || event.tenant !== user.tenant) notFound();
+  // Fasen följer klockan i svensk tid — "LIVE" visas bara medan eventet pågår.
+  const phase = eventPhase(event, new Date());
 
   let signups: EventSignup[] = [];
   try {
     const res = await pb.collection(PB_COLLECTIONS.eventSignups).getList<EventSignup>(1, 500, {
-      filter: `tenant = "${user.tenant}" && event = "${id}"`,
+      filter: `tenant = "${escFilter(user.tenant)}" && event = "${escFilter(id)}"`,
       sort: '-created',
       expand: 'startup'
     });
@@ -116,7 +119,7 @@ export default async function EventDetailPage({
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb={`Hemmaplan / Events / ${event.name}`}
+        crumb={`Dashboard / Events / ${event.name}`}
         title={event.name}
         subtitle={event.description || `Event av typen ${event.type}`}
         actions={
@@ -124,7 +127,7 @@ export default async function EventDetailPage({
             <Link href="/events" className="mx-btn">
               ← Tillbaka
             </Link>
-            {event.status === 'live' && (
+            {phase === 'live' && (
               <Chip variant="active" mono dot>
                 LIVE
               </Chip>
@@ -170,7 +173,22 @@ export default async function EventDetailPage({
             <Meta label="Plats" value={<span className="mx-t-13 mx-fw-6">{event.location}</span>} />
           )}
           <Meta label="Typ" value={<Chip mono>{event.type}</Chip>} />
-          <Meta label="Status" value={<Chip mono>{event.status}</Chip>} />
+          <Meta
+            label="Status"
+            value={
+              <span className="inline-flex flex-wrap items-center gap-1.5">
+                <Chip mono>{EVENT_PHASE_LABEL[phase]}</Chip>
+                {phase === 'completed' && event.status !== 'completed' && (
+                  <span
+                    className="text-[11px] text-foreground-subtle"
+                    title="Statusfältet är fortfarande satt till ett tidigare värde; eventets tid har passerat."
+                  >
+                    (tiden har passerat · fält: {event.status})
+                  </span>
+                )}
+              </span>
+            }
+          />
           <Meta
             label="Anmälda"
             value={<span className="mx-disp mx-fw-6 mx-t-15">{event.signups_count || 0}</span>}

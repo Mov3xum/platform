@@ -9,10 +9,13 @@ import {
   buildChatTools,
   describeToolCall,
   dispatchToolCall,
-  type ToolDispatchContext
+  type ToolDispatchContext,
+  type ToolResult
 } from './tools';
 import { buildSchemaSummary, getExposedCollections } from './schema';
+import { selectRelevantCollections, buildScopedSchemaSummary } from './schema-scope';
 import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from './guidance';
+import { assertWithinAiBudget } from './budget.server';
 
 // Hur många gånger modellen får anropa verktyg och få tillbaka resultat
 // innan vi tvingar fram ett slutsvar. Skyddar mot oändliga loopar och
@@ -62,6 +65,12 @@ export interface RunAgentLoopOptions {
    * live-aktivitetsspår. Synkron — får inte blockera loopen.
    */
   onStep?: (step: AgentLoopStep) => void;
+  /**
+   * Anropas med varje text-delta medan modellen strömmar sitt svar (för
+   * löpande utskrift i chatten). En tur som bara anropar verktyg strömmar
+   * ingen text. Synkron — får inte blockera loopen.
+   */
+  onToken?: (delta: string) => void;
 }
 
 export interface AgentLoopResult {
@@ -98,10 +107,23 @@ export async function runAgentLoop(
     options.tools && options.tools.length > 0 ? options.tools : undefined;
   let toolCallsMade = 0;
 
+  // Dubblett-vakt: en modell som kör fast upprepar gärna EXAKT samma
+  // verktygsanrop (samma namn + argument) tur efter tur och bränner hela
+  // steg-taket utan framsteg. Vi cachar varje anrops resultat och svarar på
+  // upprepningar med det cachade resultatet + en explicit uppmaning att byta
+  // angreppssätt — i stället för att köra om frågan (§ 10 robusthet).
+  const seenCalls = new Map<string, ToolResult>();
+
+  // Hård kostnadsspärr per tenant/månad (EU AI Act art. 15 robusthet). No-op
+  // när inget tak är satt; kastar AiBudgetExceededError när månadsbudgeten är
+  // slut så att en skenande loop/fan-out inte kan bränna obegränsat.
+  await assertWithinAiBudget(options.toolContext.pb, options.toolContext.tenantId);
+
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     const result = await callMistralWithFallback(options.models, conversation, {
       tools,
-      toolChoice: tools ? 'auto' : undefined
+      toolChoice: tools ? 'auto' : undefined,
+      onToken: options.onToken
     });
 
     await options.onUsage?.({
@@ -126,15 +148,45 @@ export async function runAgentLoop(
       tool_calls: toolCalls
     });
 
-    for (const call of toolCalls) {
-      const desc = describeToolCall(call);
-      options.onStep?.({ phase: 'start', id: call.id, tool: desc.tool, label: desc.label });
-      const toolResult = await dispatchToolCall(call, options.toolContext);
+    // Verktygsanropen i EN tur är oberoende av varandra (modellen har redan
+    // bestämt alla innan den ser något resultat) → kör dem samtidigt i stället
+    // för seriellt. Det gör att t.ex. flera query_collection mot olika bolag
+    // tar ~en rundturs tid i stället för N (CLAUDE.md § 10 robusthet/latens).
+    // Det delade skriv-/dispatch-lagret är idempotent och tenant-scopat per
+    // anrop, så samtidighet ändrar inte säkerhets- eller RBAC-garantierna.
+    const descs = toolCalls.map((call) => describeToolCall(call));
+    toolCalls.forEach((call, i) =>
+      options.onStep?.({ phase: 'start', id: call.id, tool: descs[i].tool, label: descs[i].label })
+    );
+    const toolResults = await Promise.all(
+      toolCalls.map(async (call): Promise<ToolResult> => {
+        const key = `${call.function.name}|${call.function.arguments ?? ''}`;
+        const previous = seenCalls.get(key);
+        if (previous) {
+          // Kör INTE om — returnera det tidigare resultatet med en tydlig
+          // instruktion så modellen slutar loopa på samma anrop.
+          return {
+            ...previous,
+            repeated: true,
+            warning:
+              'Du har redan kört EXAKT detta verktygsanrop i denna tur — detta är ' +
+              'samma resultat igen. Upprepa det inte: ändra angreppssätt (annan ' +
+              'kollektion, annat filter/sort, describe_collection för giltiga fält) ' +
+              'eller svara användaren nu utifrån det du redan hittat.'
+          };
+        }
+        const result = await dispatchToolCall(call, options.toolContext);
+        seenCalls.set(key, result);
+        return result;
+      })
+    );
+    toolCalls.forEach((call, i) => {
+      const toolResult = toolResults[i];
       options.onStep?.({
         phase: 'end',
         id: call.id,
-        tool: desc.tool,
-        label: desc.label,
+        tool: descs[i].tool,
+        label: descs[i].label,
         ok: toolResult.ok
       });
       toolCallsMade++;
@@ -144,12 +196,25 @@ export async function runAgentLoop(
         name: call.function.name,
         content: JSON.stringify(toolResult).slice(0, MAX_TOOL_RESULT_CHARS)
       });
-    }
+    });
   }
 
-  // Iterations-taket nått — tvinga ett slutsvar utan verktyg.
+  // Iterations-taket nått — tvinga ett slutsvar utan verktyg. Utan en
+  // explicit instruktion svarar modellen ofta med TOM text här (den "vill"
+  // anropa fler verktyg) och användaren får bara fallback-raden. Be den
+  // därför uttryckligen sammanfatta det den FAKTISKT hann hitta.
+  conversation.push({
+    role: 'user',
+    content:
+      'SYSTEM (data, inte användarens ord): Steg-taket för verktygsanrop är ' +
+      'nått. Anropa inga fler verktyg. Sammanfatta nu det du faktiskt hittade ' +
+      'i verktygsresultaten ovan och ge användaren ditt bästa svar. Om något ' +
+      'inte hanns med: säg kort vad som saknas och föreslå en mer avgränsad ' +
+      'följdfråga.'
+  });
   const finalCall = await callMistralWithFallback(options.models, conversation, {
-    toolChoice: 'none'
+    toolChoice: 'none',
+    onToken: options.onToken
   });
   await options.onUsage?.({
     model: finalCall.modelUsed,
@@ -310,7 +375,7 @@ export interface ReadToolSurface {
 export async function buildReadToolSurface(
   pb: PocketBase,
   tenantId: string,
-  options: { includeMemory?: boolean } = {}
+  options: { includeMemory?: boolean; scopeText?: string } = {}
 ): Promise<ReadToolSurface | null> {
   let collections: Awaited<ReturnType<typeof getExposedCollections>>;
   try {
@@ -324,6 +389,17 @@ export async function buildReadToolSurface(
   // memory_read när includeMemory är satt; memory_write kräver agent-actor
   // och ges därför aldrig i en autonom körning).
   const tools = buildChatTools(collections, { includeMemory: options.includeMemory });
+
+  // Med `scopeText` (t.ex. djupjobbets instruktion + delstegets mål) skopas
+  // schema-sammanfattningen: fältlistor bara för relevanta kollektioner,
+  // resten som kompakt index + describe_collection (§ 28.4). Utan scopeText
+  // behålls den fulla sammanfattningen (toolbox/schemalagda körningar).
+  const summary = options.scopeText
+    ? buildScopedSchemaSummary(
+        collections,
+        selectRelevantCollections(collections, options.scopeText)
+      )
+    : buildSchemaSummary(collections);
   return {
     tools,
     toolContext: { pb, tenantId, collections },
@@ -331,6 +407,6 @@ export async function buildReadToolSurface(
       READ_TOOL_GUIDANCE +
       SEARCH_STRATEGY_GUIDANCE +
       DOMAIN_GLOSSARY +
-      `\n\n${buildSchemaSummary(collections)}`
+      `\n\n${summary}`
   };
 }

@@ -10,7 +10,7 @@ import type {
   LeadStatus,
   SecurityEventKind
 } from './types';
-import { LEAD_STATUS_ORDER } from './types';
+import { LEAD_STATUS_ORDER, PREVIEW_SOURCE_KEY } from './types';
 
 /* ────────────────────────────────────────────────────────────────────
    Läs-fallback — PB v0.23.4 rule-eval-bugg (CLAUDE.md § 21.3)
@@ -54,6 +54,35 @@ async function readWithFallback<T>(
 }
 
 /* ────────────────────────────────────────────────────────────────────
+   Skriv-fallback — samma PB v0.23.4 rule-eval-bugg (CLAUDE.md § 21.3)
+   ────────────────────────────────────────────────────────────────────
+   Spegelbilden av `readWithFallback`. Lead-skrivningar (create/update) går via
+   den inloggades auth-token så RLS-lagret bevaras (defense-in-depth). Men
+   `compass_leads.createRule` är en roll-/tenant-regel, och PB v0.23.4 kan TYST
+   neka den (`?=` mot multi-value `@request.auth.roles`) — även för en behörig
+   admin. Symptomet är exakt det rapporterade: "jag interagerar med en modul men
+   blir aldrig upplagd som lead" — create:en avvisas tyst och leadet skapas
+   aldrig. Modul-/frågeskrivningar hade redan denna fallback (`writeWithFallback`
+   i lib/actions/compass.ts); lead-skrivningarna saknade den.
+
+   Vi försöker därför alltid användartoken FÖRST och faller bara tillbaka på en
+   superuser-skrivning när den nekas/felar. Tenant stämplas explicit av anroparen
+   (aldrig från en request-body), så tenant-isoleringen består även i fallbacken.
+   De PUBLIKA flödena skickar redan in en superuser-klient → no-op för dem. */
+async function writeWithFallback<T>(
+  pb: PocketBase,
+  run: (client: PocketBase) => Promise<T>
+): Promise<T> {
+  try {
+    return await run(pb);
+  } catch {
+    const su = await getSuperuserPb();
+    if (su.ok) return run(su.pb);
+    throw new Error('compass write failed (primary + superuser unavailable)');
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────
    Lead sources — gemensam lookup (ingen tenant)
    ──────────────────────────────────────────────────────────────────── */
 
@@ -72,18 +101,23 @@ export async function listLeadSources(pb: PocketBase): Promise<LeadSource[]> {
    Leads
    ──────────────────────────────────────────────────────────────────── */
 
-export async function listLeads(
-  pb: PocketBase,
-  tenant: string,
-  options: {
-    status?: LeadStatus;
-    q?: string;
-    sourceKey?: string;
-    landingModule?: string;
-    page?: number;
-    perPage?: number;
-  } = {}
-): Promise<{ items: Lead[]; totalItems: number; totalPages: number }> {
+export interface LeadListOptions {
+  status?: LeadStatus;
+  q?: string;
+  sourceKey?: string;
+  landingModule?: string;
+  page?: number;
+  perPage?: number;
+  /**
+   * Exkludera interna förhandsgranskningar (source_key = 'preview') — används
+   * av statistik/export/dashboard. Ignoreras när ett explicit källfilter är
+   * satt (så staff kan filtrera fram just förhandsgranskningarna).
+   */
+  excludePreview?: boolean;
+}
+
+/** Delad filterbyggare för lead-listning/-export (bunden syntax, § 10.3). */
+function buildLeadFilter(pb: PocketBase, tenant: string, options: LeadListOptions): string {
   const filters: string[] = ['tenant = {:tenant}'];
   const params: Record<string, unknown> = { tenant };
   if (options.status) {
@@ -93,6 +127,9 @@ export async function listLeads(
   if (options.sourceKey) {
     filters.push('source_key = {:src}');
     params.src = options.sourceKey;
+  } else if (options.excludePreview) {
+    filters.push('source_key != {:pv}');
+    params.pv = PREVIEW_SOURCE_KEY;
   }
   if (options.landingModule) {
     filters.push('landing_module = {:lm}');
@@ -104,21 +141,76 @@ export async function listLeads(
     );
     params.q = options.q;
   }
+  return pb.filter(filters.join(' && '), params);
+}
 
-  const filter = pb.filter(filters.join(' && '), params);
-  try {
-    const res = await readWithFallback(
+export async function listLeads(
+  pb: PocketBase,
+  tenant: string,
+  options: LeadListOptions = {}
+): Promise<{ items: Lead[]; totalItems: number; totalPages: number }> {
+  const filter = buildLeadFilter(pb, tenant, options);
+  const fetchPage = (sort?: string) =>
+    readWithFallback(
       pb,
       (client) =>
         client.collection('compass_leads').getList<Lead>(options.page ?? 1, options.perPage ?? 25, {
           filter,
-          sort: '-created'
+          ...(sort ? { sort } : {})
         }),
       (r) => r.totalItems === 0
     );
+  try {
+    const res = await fetchPage('-created');
     return { items: res.items, totalItems: res.totalItems, totalPages: res.totalPages };
   } catch {
-    return { items: [], totalItems: 0, totalPages: 0 };
+    // Schemat kan sakna `created` (kollektion skapad innan migration
+    // 1700000126) → sorteringen 400:ar. Lista då osorterat och vänd ordningen
+    // (PB:s defaultordning är äldst-först) så leads aldrig "försvinner".
+    try {
+      const res = await fetchPage();
+      return {
+        items: [...res.items].reverse(),
+        totalItems: res.totalItems,
+        totalPages: res.totalPages
+      };
+    } catch {
+      return { items: [], totalItems: 0, totalPages: 0 };
+    }
+  }
+}
+
+/**
+ * Hämtar ALLA leads som matchar filtret (för CSV-export till intressent-/
+ * ägarrapportering). Staff-gejtad i export-routen; exporten audit-loggas med
+ * `lead_export` (PII lämnar systemet — ISO 27001 A.8.15).
+ */
+export async function listLeadsForExport(
+  pb: PocketBase,
+  tenant: string,
+  options: LeadListOptions = {}
+): Promise<Lead[]> {
+  const filter = buildLeadFilter(pb, tenant, options);
+  const fetchAll = (sort?: string) =>
+    readWithFallback(
+      pb,
+      (client) =>
+        client.collection('compass_leads').getFullList<Lead>({
+          filter,
+          ...(sort ? { sort } : {}),
+          batch: 500
+        }),
+      (rows) => rows.length === 0
+    );
+  try {
+    return await fetchAll('-created');
+  } catch {
+    // Saknat `created`-fält (innan migration 1700000126) → osorterad retry.
+    try {
+      return (await fetchAll()).reverse();
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -143,6 +235,24 @@ export async function getLead(
   }
 }
 
+/**
+ * PII-fri beskrivning av ett PB-fel för serverloggen: status, meddelande och
+ * VILKA fält som avvisades (aldrig deras värden). Utan denna logg är ett
+ * misslyckat lead-skapande helt osynligt — symptomet "fyllt i flera formulär
+ * utan att en lead skapats" gick inte att felsöka.
+ */
+function describePbError(err: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (err instanceof Error) out.message = err.message;
+  if (typeof err === 'object' && err !== null) {
+    const e = err as { status?: number; response?: { data?: Record<string, unknown> } };
+    if (typeof e.status === 'number') out.status = e.status;
+    const data = e.response?.data;
+    if (data && typeof data === 'object') out.rejectedFields = Object.keys(data);
+  }
+  return out;
+}
+
 export async function createLead(
   pb: PocketBase,
   tenant: string,
@@ -155,8 +265,18 @@ export async function createLead(
       source_key: 'ai-chat',
       ...data
     };
-    return await pb.collection('compass_leads').create<Lead>(payload);
-  } catch {
+    return await writeWithFallback(pb, (client) =>
+      client.collection('compass_leads').create<Lead>(payload)
+    );
+  } catch (err) {
+    // Logga ALLTID grundorsaken (PII-fritt) — anroparen avgör om felet ska
+    // bubbla upp till besökaren (hård lead-garanti, CLAUDE.md § 23.6).
+    console.error('[compass] createLead failed', {
+      tenant,
+      source_key: data.source_key,
+      landing_module: data.landing_module,
+      ...describePbError(err)
+    });
     return null;
   }
 }
@@ -170,7 +290,9 @@ export async function updateLead(
   const existing = await getLead(pb, tenant, id);
   if (!existing) return null;
   try {
-    return await pb.collection('compass_leads').update<Lead>(id, patch);
+    return await writeWithFallback(pb, (client) =>
+      client.collection('compass_leads').update<Lead>(id, patch)
+    );
   } catch {
     return null;
   }
@@ -188,7 +310,11 @@ export async function countLeadsByStatus(
     accepted: 0,
     declined: 0
   };
-  const filter = pb.filter('tenant = {:tenant}', { tenant });
+  // Förhandsgranskningar (preview) räknas aldrig i tratt/statistik.
+  const filter = pb.filter('tenant = {:tenant} && source_key != {:pv}', {
+    tenant,
+    pv: PREVIEW_SOURCE_KEY
+  });
   try {
     const all = await readWithFallback(
       pb,
@@ -250,13 +376,15 @@ export async function createConversation(
   data: { moduleSlug?: string; sessionToken?: string; leadId?: string }
 ): Promise<Conversation | null> {
   try {
-    return await pb.collection('compass_conversations').create<Conversation>({
-      tenant,
-      module_slug: data.moduleSlug,
-      session_token: data.sessionToken,
-      lead: data.leadId,
-      status: 'active'
-    });
+    return await writeWithFallback(pb, (client) =>
+      client.collection('compass_conversations').create<Conversation>({
+        tenant,
+        module_slug: data.moduleSlug,
+        session_token: data.sessionToken,
+        lead: data.leadId,
+        status: 'active'
+      })
+    );
   } catch {
     return null;
   }
@@ -288,14 +416,24 @@ export async function listMessages(
   pb: PocketBase,
   conversationId: string
 ): Promise<{ role: 'user' | 'assistant' | 'system'; content: string }[]> {
+  const filter = pb.filter('conversation = {:c}', { c: conversationId });
   try {
     const res = await pb.collection('compass_messages').getFullList<{
       role: 'user' | 'assistant' | 'system';
       content: string;
-    }>({ filter: pb.filter('conversation = {:c}', { c: conversationId }), sort: 'created', batch: 200 });
+    }>({ filter, sort: 'created', batch: 200 });
     return res;
   } catch {
-    return [];
+    // Saknat `created`-fält (innan migration 1700000126) → osorterad retry
+    // (PB:s defaultordning är äldst-först = samma ordning som sort `created`).
+    try {
+      return await pb.collection('compass_messages').getFullList<{
+        role: 'user' | 'assistant' | 'system';
+        content: string;
+      }>({ filter, batch: 200 });
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -409,6 +547,14 @@ export interface ModuleConversion {
   converted: number;
 }
 
+export interface QuizBucketBreakdown {
+  /** Modulens slug (landing_module). */
+  module: string;
+  /** Resultatprofilens nyckel (quiz_result_bucket). */
+  bucket: string;
+  count: number;
+}
+
 /** Snabba analytics — räknar leads per dimension från ett enda batch-hämta. */
 export async function getLeadAnalytics(
   pb: PocketBase,
@@ -418,35 +564,59 @@ export async function getLeadAnalytics(
   bySource: AttributionBreakdown[];
   byCampaign: CampaignBreakdown[];
   byModule: ModuleConversion[];
+  /** Fördelning av quiz-resultatprofiler per modul (beslutsdata). */
+  byQuizBucket: QuizBucketBreakdown[];
   weekly: { week: string; total: number; accepted: number }[];
   total: number;
   accepted: number;
   converted: number;
 }> {
   try {
-    const filterParts = ['tenant = {:tenant}'];
-    const params: Record<string, unknown> = { tenant };
-    if (windowDays && windowDays > 0) {
-      const cutoff = new Date(Date.now() - windowDays * 86400_000).toISOString();
-      filterParts.push('created >= {:cutoff}');
-      params.cutoff = cutoff;
+    // Förhandsgranskningar (preview) exkluderas ur all analys.
+    const baseParts = ['tenant = {:tenant}', 'source_key != {:pv}'];
+    const baseParams: Record<string, unknown> = { tenant, pv: PREVIEW_SOURCE_KEY };
+    // OBS: bind cutoff som Date-objekt — SDK:n serialiserar då till PB:s
+    // lagringsformat ('YYYY-MM-DD HH:MM:SS.sssZ', mellanslag). En ISO-STRÄNG
+    // ('...T...') jämförs lexikografiskt fel mot lagrade värden samma dag
+    // (' ' < 'T') och tappar upp till en dags leads vid fönsterkanten.
+    const cutoffDate =
+      windowDays && windowDays > 0
+        ? new Date(Date.now() - windowDays * 86400_000)
+        : undefined;
+    const fetchLeads = (filter: string) =>
+      readWithFallback(
+        pb,
+        (client) =>
+          client.collection('compass_leads').getFullList<Lead>({
+            filter,
+            fields:
+              'id,status,source_key,utm_source,utm_medium,utm_campaign,landing_module,quiz_result_bucket,converted_startup,converted_at,created',
+            batch: 1000
+          }),
+        (rows) => rows.length === 0
+      );
+    let leads: Lead[];
+    try {
+      leads = await fetchLeads(
+        pb.filter(
+          cutoffDate ? [...baseParts, 'created >= {:cutoff}'].join(' && ') : baseParts.join(' && '),
+          cutoffDate ? { ...baseParams, cutoff: cutoffDate } : baseParams
+        )
+      );
+    } catch (err) {
+      // Saknat `created`-fält (innan migration 1700000126) → datumfiltret
+      // 400:ar. Hämta utan cutoff och fönstra i JS (rader utan created kan
+      // inte tidsplaceras och utelämnas ur perioden).
+      if (!cutoffDate) throw err;
+      const cutoffMs = cutoffDate.getTime();
+      const all = await fetchLeads(pb.filter(baseParts.join(' && '), baseParams));
+      leads = all.filter((l) => l.created && new Date(l.created).getTime() >= cutoffMs);
     }
-    const analyticsFilter = pb.filter(filterParts.join(' && '), params);
-    const leads = await readWithFallback(
-      pb,
-      (client) =>
-        client.collection('compass_leads').getFullList<Lead>({
-          filter: analyticsFilter,
-          fields:
-            'id,status,source_key,utm_source,utm_medium,utm_campaign,landing_module,converted_startup,converted_at,created',
-          batch: 1000
-        }),
-      (rows) => rows.length === 0
-    );
 
     const sourceMap = new Map<string, AttributionBreakdown>();
     const campaignMap = new Map<string, CampaignBreakdown>();
     const moduleMap = new Map<string, ModuleConversion>();
+    const quizBucketMap = new Map<string, QuizBucketBreakdown>();
     const weekMap = new Map<string, { week: string; total: number; accepted: number }>();
 
     let accepted = 0;
@@ -499,21 +669,40 @@ export async function getLeadAnalytics(
         if (isConverted) m.converted++;
       }
 
-      // Weekly bucket
-      const wkKey = weekKey(lead.created);
-      let w = weekMap.get(wkKey);
-      if (!w) {
-        w = { week: wkKey, total: 0, accepted: 0 };
-        weekMap.set(wkKey, w);
+      // Quiz-resultatfördelning per modul
+      const bucket = (lead.quiz_result_bucket || '').trim();
+      if (bucket) {
+        const key = `${slug}|${bucket}`;
+        let qb = quizBucketMap.get(key);
+        if (!qb) {
+          qb = { module: slug, bucket, count: 0 };
+          quizBucketMap.set(key, qb);
+        }
+        qb.count++;
       }
-      w.total++;
-      if (isAccepted) w.accepted++;
+
+      // Weekly bucket — rader utan `created` (backfillade innan migration
+      // 1700000127) kan inte tidsplaceras och utelämnas ur veckotrenden
+      // (de räknas fortfarande i totalen ovan).
+      if (lead.created) {
+        const wkKey = weekKey(lead.created);
+        let w = weekMap.get(wkKey);
+        if (!w) {
+          w = { week: wkKey, total: 0, accepted: 0 };
+          weekMap.set(wkKey, w);
+        }
+        w.total++;
+        if (isAccepted) w.accepted++;
+      }
     }
 
     return {
       bySource: [...sourceMap.values()].sort((a, b) => b.total - a.total),
       byCampaign: [...campaignMap.values()].sort((a, b) => b.total - a.total),
       byModule: [...moduleMap.values()].sort((a, b) => b.total - a.total),
+      byQuizBucket: [...quizBucketMap.values()].sort(
+        (a, b) => a.module.localeCompare(b.module) || b.count - a.count
+      ),
       weekly: [...weekMap.values()].sort((a, b) => (a.week > b.week ? 1 : -1)),
       total: leads.length,
       accepted,
@@ -524,6 +713,7 @@ export async function getLeadAnalytics(
       bySource: [],
       byCampaign: [],
       byModule: [],
+      byQuizBucket: [],
       weekly: [],
       total: 0,
       accepted: 0,
@@ -615,24 +805,51 @@ export async function getCompassDashboard(
   try {
     const now = Date.now();
     const sinceMs = now - periodDays * 86400_000;
-    const prevSinceIso = new Date(now - periodDays * 2 * 86400_000).toISOString();
+    const prevSince = new Date(now - periodDays * 2 * 86400_000);
 
-    const windowFilter = pb.filter('tenant = {:tenant} && created >= {:cutoff}', {
-      tenant,
-      cutoff: prevSinceIso
-    });
-    const [funnelCounts, windowLeads] = await Promise.all([
-      countLeadsByStatus(pb, tenant),
+    // Förhandsgranskningar (preview) exkluderas ur KPI:er/trend.
+    const fetchWindow = (filter: string) =>
       readWithFallback(
         pb,
         (client) =>
           client.collection('compass_leads').getFullList<DashboardLeadRow>({
-            filter: windowFilter,
+            filter,
             fields: 'status,score,source_key,created',
             batch: 1000
           }),
         (rows) => rows.length === 0
-      )
+      );
+    // Fönster-läsningen får ALDRIG fälla tratten (countLeadsByStatus räknar
+    // utan datumfilter): saknat `created`-fält (innan migration 1700000126)
+    // 400:ar datumfiltret → hämta då utan cutoff och fönstra i JS.
+    const fetchWindowLeads = async (): Promise<DashboardLeadRow[]> => {
+      try {
+        // Date-objekt (inte ISO-sträng) — se kommentaren i getLeadAnalytics.
+        return await fetchWindow(
+          pb.filter('tenant = {:tenant} && created >= {:cutoff} && source_key != {:pv}', {
+            tenant,
+            cutoff: prevSince,
+            pv: PREVIEW_SOURCE_KEY
+          })
+        );
+      } catch {
+        try {
+          const all = await fetchWindow(
+            pb.filter('tenant = {:tenant} && source_key != {:pv}', {
+              tenant,
+              pv: PREVIEW_SOURCE_KEY
+            })
+          );
+          const prevSinceMs = prevSince.getTime();
+          return all.filter((l) => l.created && new Date(l.created).getTime() >= prevSinceMs);
+        } catch {
+          return []; // degraderat läge: tratt/totaler visas ändå
+        }
+      }
+    };
+    const [funnelCounts, windowLeads] = await Promise.all([
+      countLeadsByStatus(pb, tenant),
+      fetchWindowLeads()
     ]);
 
     const totalLeads = LEAD_STATUS_ORDER.reduce((s, k) => s + (funnelCounts[k] || 0), 0);
@@ -720,17 +937,24 @@ export async function listSecurityEvents(
     filters.push('kind = {:k}');
     params.k = options.kind;
   }
+  const filter = pb.filter(filters.join(' && '), params);
   try {
     return await pb.collection('compass_security_events').getList(
       options.page ?? 1,
       options.perPage ?? 50,
-      {
-        filter: pb.filter(filters.join(' && '), params),
-        sort: '-created',
-        expand: 'actor'
-      }
+      { filter, sort: '-created', expand: 'actor' }
     );
   } catch {
-    return { items: [], totalItems: 0, totalPages: 0 };
+    // Saknat `created`-fält (innan migration 1700000126) → osorterad retry.
+    try {
+      const res = await pb.collection('compass_security_events').getList(
+        options.page ?? 1,
+        options.perPage ?? 50,
+        { filter, expand: 'actor' }
+      );
+      return { ...res, items: [...res.items].reverse() };
+    } catch {
+      return { items: [], totalItems: 0, totalPages: 0 };
+    }
   }
 }

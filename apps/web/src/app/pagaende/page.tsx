@@ -9,6 +9,7 @@ import { Icon } from '@/components/proto/Icon';
 import { WorkshopAssignmentStatusBadge } from '@/components/Badges';
 import { activityTypeLabels, type ActivityType } from '@/lib/labels';
 import { escFilter } from '@/lib/pb-filter';
+import { formatStockholmDateTime } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,7 +91,7 @@ function resourceNames(users?: UserRef[]): string {
 
 export default async function PagaendePage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'pagaende', user.disabledModules)) redirect('/chatt');
+  if (!canAccessModuleForUser(user.roles, 'pagaende', user.enabledModules)) redirect('/chatt');
   const pb = await getServerPb();
   // Tilldelningarna läses via en robust klient (PB v0.23.4 rule-eval, § 21.3).
   // Sidan är redan staff/observer-gated ovan och frågorna är tenant-scopade.
@@ -101,17 +102,17 @@ export default async function PagaendePage() {
   const emptyList = { items: [] as never[] };
   const [workshopsRes, docsRes, activitiesRes] = await Promise.allSettled([
     assignPb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopRow>(1, 200, {
-      filter: `tenant = "${tenant}" && status != "done"`,
+      filter: `tenant = "${escFilter(tenant)}" && status != "done"`,
       sort: '-created',
       expand: 'workshop,startup,assigned_by,collaborators,meeting'
     }),
     assignPb.collection(PB_COLLECTIONS.educationDocumentAssignments).getList<DocRow>(1, 200, {
-      filter: `tenant = "${tenant}" && status != "completed"`,
+      filter: `tenant = "${escFilter(tenant)}" && status != "completed"`,
       sort: '-created',
       expand: 'document,startup,collaborators,meeting'
     }),
     pb.collection('activities').getList<ActivityRow>(1, 200, {
-      filter: `startup.tenant = "${tenant}" && (status = "planned" || status = "in_progress") && (kind = "manual" || kind = "")`,
+      filter: `startup.tenant = "${escFilter(tenant)}" && (status = "planned" || status = "in_progress") && (kind = "manual" || kind = "")`,
       sort: '-created',
       expand: 'startup,owner'
     })
@@ -232,7 +233,7 @@ export default async function PagaendePage() {
                             {w.expand?.meeting ? (
                               <span>
                                 📅 {w.expand.meeting.name} ·{' '}
-                                {new Date(w.expand.meeting.starts_at).toLocaleString('sv-SE')}
+                                {formatStockholmDateTime(w.expand.meeting.starts_at)}
                               </span>
                             ) : null}
                           </div>
@@ -272,7 +273,7 @@ export default async function PagaendePage() {
                             {d.expand?.meeting ? (
                               <span>
                                 📅 {d.expand.meeting.name} ·{' '}
-                                {new Date(d.expand.meeting.starts_at).toLocaleString('sv-SE')}
+                                {formatStockholmDateTime(d.expand.meeting.starts_at)}
                               </span>
                             ) : null}
                           </div>

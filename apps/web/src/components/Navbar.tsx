@@ -8,7 +8,7 @@ import { coreModules } from '@platform/shared';
 
 export function Navbar({ user }: { user: SessionUser | null }) {
   const visibleModules = user
-    ? coreModules.filter((m) => canAccessModuleForUser(user.roles, m.id, user.disabledModules))
+    ? coreModules.filter((m) => canAccessModuleForUser(user.roles, m.id, user.enabledModules))
     : [];
 
   return (

@@ -2,7 +2,7 @@
    Movexum OS — Prototyp-shell + UI-system
    Mappat mot Movexums grafiska profil (se CLAUDE.md §2).
    Identitet:
-   1. Sora display + JetBrains Mono till IDs / labels / timestamps
+   1. Sora display + Nunito Sans till IDs / labels / timestamps
    2. Radius-skala: 8 / 14 / 26 — aldrig blandat
    3. Movexum Mörkblå #002c40 som signaturfärg på rail + accenter
    ============================================================ */
@@ -81,10 +81,12 @@
   --mx-st-danger:   #d67e47;
   --mx-st-danger-bg:#f1e5df;
 
-  /* Type — använder Movexums fonter via fonts.css */
+  /* Type — ENBART Sora + Nunito Sans (§ 2.4). `--mx-mono` behålls som
+     variabelnamn för bakåtkompatibilitet men pekar på Nunito Sans (med
+     tabular-nums via .mx-tnum där siffror behöver linjera) — ingen JetBrains. */
   --mx-display: "Sora Variable", "Sora", system-ui, sans-serif;
   --mx-ui:      "Nunito Sans Variable", "Nunito Sans", system-ui, sans-serif;
-  --mx-mono:    "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+  --mx-mono:    "Nunito Sans Variable", "Nunito Sans", system-ui, sans-serif;
 
   /* Radii — LÅSTA 8 / 14 / 26 */
   --mx-r-sm: 8px;
@@ -173,7 +175,11 @@ html.dark {
 
 .mx-app {
   display: grid;
-  grid-template-columns: var(--mx-rail-w) 1fr;
+  /* minmax(0, 1fr) — ett 1fr-spår har min-content som minimum och växer
+     annars förbi viewporten när något barn (brödsmulor, tabell, chatt-
+     kolumn) har en bred min-content; då blir hela sidan bredare än skärmen
+     på mobil (§ 35). */
+  grid-template-columns: var(--mx-rail-w) minmax(0, 1fr);
   gap: 0;
   padding: 0;
   min-height: 100vh;
@@ -297,6 +303,86 @@ html.dark {
   gap: 10px;
 }
 
+/* Kontomenyn i railens fot (§ 22). Hela raden är klickbar — tidigare var
+   bara kugghjulet en länk, så ett klick på det egna namnet gjorde ingenting. */
+.mx-rail-account {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.mx-rail-account-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 6px 6px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--mx-r-sm);
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background .14s ease, border-color .14s ease;
+}
+
+.mx-rail-account-btn:hover {
+  background: var(--mx-rail-hover-bg);
+  border-color: var(--mx-line);
+}
+
+.mx-rail-account-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.mx-rail-account-chev {
+  color: var(--mx-rail-fg-mute);
+  flex-shrink: 0;
+  transition: transform .15s ease;
+}
+
+.mx-rail-account-chev.mx-open {
+  transform: rotate(180deg);
+}
+
+/* Öppnas UPPÅT — blocket sitter längst ned i railen. */
+.mx-rail-account-pop {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  background: var(--mx-canvas);
+  border: 1px solid var(--mx-line);
+  border-radius: var(--mx-r-md);
+  box-shadow: var(--mx-sh-3);
+  z-index: 60;
+  overflow: hidden;
+  padding: 4px;
+}
+
+.mx-rail-account-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--mx-r-sm);
+  background: transparent;
+  color: var(--mx-ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s ease;
+}
+
+.mx-rail-account-item:hover {
+  background: var(--mx-paper-2);
+}
+
 .mx-rail-user-av {
   width: 28px; height: 28px;
   border-radius: 50%;
@@ -310,6 +396,8 @@ html.dark {
 }
 
 .mx-rail-user-name {
+  /* Renderas som <span> i kontomenyn — block krävs för ellipsen. */
+  display: block;
   font-size: 12px;
   font-weight: 600;
   color: var(--mx-rail-fg-strong);
@@ -320,6 +408,7 @@ html.dark {
 }
 
 .mx-rail-user-role {
+  display: block;
   font-family: var(--mx-mono);
   font-size: 9px;
   letter-spacing: 1px;
@@ -335,28 +424,73 @@ html.dark {
 .mx-main-col {
   display: grid;
   grid-template-rows: var(--mx-topbar-h) 1fr;
+  /* Explicit kolumnspår med 0 som minimum — annars sätter topbarens/vyns
+     min-content spårets bredd och kolumnen spiller utanför viewporten. */
+  grid-template-columns: minmax(0, 1fr);
   min-height: 100vh;
   background: var(--mx-app-gradient);
   min-width: 0;
 }
 
+/* Sökvägsrad mot bakgrunden — ingen egen yta, ingen blur, ingen vit remsa. */
 .mx-topbar {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 0 20px;
-  background: var(--mx-topbar-bg);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: transparent;
   position: sticky;
   top: 0;
   z-index: 20;
   font-size: 13px;
   height: var(--mx-topbar-h);
+  min-width: 0;
+  overflow: hidden;
 }
 
-.mx-desktop-rail-btn {
+/* Burger som bor i sidmenyns header (kollapsar railen / stänger drawern). */
+.mx-rail-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  border: 0;
+  border-radius: var(--mx-r-sm);
+  background: none;
+  color: var(--mx-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background .12s, color .12s;
+}
+
+.mx-rail-toggle-btn:hover {
+  background: var(--mx-rail-hover-bg);
+  color: var(--mx-ink);
+}
+
+/* Kontextuell trigger i sökvägsraden — visas BARA när railen är dold. */
+.mx-rail-reopen-btn {
   display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: 0 -4px 0 -8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--mx-ink);
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mx-rail-reopen-btn:hover,
+.mx-rail-reopen-btn:focus-visible {
+  background: var(--mx-rail-hover-bg);
+  outline: none;
 }
 
 .mx-crumb {
@@ -365,6 +499,13 @@ html.dark {
   gap: 8px;
   color: var(--mx-muted);
   font-weight: 500;
+  min-width: 0;
+}
+
+.mx-crumb-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -419,6 +560,7 @@ html.dark {
 .mx-view {
   overflow-x: hidden;
   position: relative;
+  min-width: 0;
 }
 
 .mx-view-pad {
@@ -848,6 +990,8 @@ select.mx-input:focus {
 .mx-t-lg { font-size: 17px; }
 .mx-t-up { text-transform: uppercase; letter-spacing: 1.5px; }
 .mx-tnum { font-variant-numeric: tabular-nums; }
+/* Inline scroll-yta med uttonade kanter (masken sätts per element av FadeScroll). */
+.mx-fade-scroll { scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease; }
 .mx-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .mx-mt-1 { margin-top: 4px; }
@@ -873,6 +1017,279 @@ select.mx-input:focus {
 }
 .mx-fadein { animation: mx-fadein .25s ease-out both; }
 
+/* ── Startupkompassen — chatt-yta (publik + förhandsgranskning) ──────
+   Paper/ink-känsla (§ 2.3). Mörkblå #002c40 = fast brand på besökarens
+   bubblor/avatar; assistentens bubblor är paper-ytor. */
+.mx-chat {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  min-height: 480px;
+  background: var(--mx-paper);
+  border: 1px solid var(--mx-line);
+  border-radius: var(--mx-r-lg);
+  box-shadow: var(--mx-sh-2);
+  overflow: hidden;
+}
+.mx-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--mx-line-soft);
+  background: var(--mx-paper);
+}
+.mx-chat-ava {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: #002c40;
+  color: #fff;
+  font-family: var(--mx-display);
+  font-weight: 700;
+  font-size: 14px;
+  box-shadow: 0 3px 10px -3px rgba(0, 44, 64, 0.5);
+}
+.mx-chat-log {
+  padding: 20px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background:
+    radial-gradient(130% 80% at 50% 0%, rgba(0, 44, 64, 0.03), transparent 62%),
+    var(--mx-paper-2);
+}
+.mx-chat-row { display: flex; align-items: flex-end; gap: 9px; }
+.mx-chat-row.user { justify-content: flex-end; }
+.mx-chat-row.bot { justify-content: flex-start; }
+.mx-chat-mini {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: #002c40;
+  color: #fff;
+  font-family: var(--mx-display);
+  font-weight: 700;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.mx-bubble {
+  max-width: 76%;
+  padding: 11px 15px;
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mx-bubble.bot {
+  background: var(--mx-paper);
+  color: var(--mx-ink);
+  border: 1px solid var(--mx-line);
+  border-radius: 16px 16px 16px 5px;
+  box-shadow: var(--mx-sh-1);
+}
+.mx-bubble.user {
+  background: #002c40;
+  color: #fff;
+  border-radius: 16px 16px 5px 16px;
+  box-shadow: 0 3px 12px -4px rgba(0, 44, 64, 0.55);
+}
+.mx-chat-typing { display: inline-flex; align-items: center; gap: 5px; padding: 3px 2px; }
+.mx-chat-typing i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mx-muted);
+  animation: mx-typing 1.2s ease-in-out infinite;
+}
+.mx-chat-typing i:nth-child(2) { animation-delay: 0.16s; }
+.mx-chat-typing i:nth-child(3) { animation-delay: 0.32s; }
+@keyframes mx-typing {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+.mx-chat-err {
+  align-self: center;
+  max-width: 90%;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: var(--mx-st-danger-bg);
+  color: #4b2718;
+  font-size: 13px;
+}
+.mx-chat-foot {
+  display: flex;
+  gap: 9px;
+  padding: 13px 14px;
+  border-top: 1px solid var(--mx-line-soft);
+  background: var(--mx-paper);
+}
+.mx-chat-foot .mx-input { border-radius: var(--mx-r-pill); }
+.mx-chat-send { flex: none; border-radius: var(--mx-r-pill); }
+
+/* ── Startupkompassen — publik landningssida (/m/<slug>) ─────────────
+   Fristående, oinloggad yta. 2026-känsla: mjuk aurora-backdrop ur
+   Movexums palett (CLAUDE.md §2.2), luftig typografi och ett upphöjt
+   glas-kort över bakgrunden. */
+.mx-compass-landing {
+  position: relative;
+  min-height: 100vh;
+  padding: 0 20px 96px;
+  display: flex;
+  justify-content: center;
+  background: var(--mx-canvas);
+  isolation: isolate;
+}
+/* Aurora-backdrop bakom hela sidan — låg alpha så vit canvas lyser igenom. */
+.mx-compass-landing::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(58% 48% at 86% -6%, rgba(0, 168, 222, 0.11), transparent 60%),
+    radial-gradient(52% 44% at 6% 6%, rgba(97, 56, 181, 0.08), transparent 60%),
+    radial-gradient(60% 50% at 50% 114%, rgba(74, 125, 74, 0.07), transparent 62%),
+    var(--mx-canvas);
+}
+.mx-compass-wrap {
+  width: 100%;
+  max-width: 920px;
+  display: grid;
+  gap: 30px;
+  align-content: start;
+  padding-top: 30px;
+}
+
+/* Topbar — wordmark + målgruppspill */
+.mx-compass-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.mx-compass-brand {
+  display: inline-flex;
+  align-items: center;
+  color: var(--mx-ink);
+}
+.mx-compass-aud {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 15px;
+  border-radius: var(--mx-r-pill);
+  font-family: var(--mx-ui);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  background: var(--mx-copper-tint);
+  color: var(--mx-brown-ink);
+  border: 1px solid rgba(214, 126, 71, 0.22);
+}
+
+.mx-compass-hero {
+  border-radius: var(--mx-r-lg);
+  overflow: hidden;
+  border: 1px solid var(--mx-line);
+  box-shadow: var(--mx-sh-2);
+  background: var(--mx-paper);
+}
+.mx-compass-hero-img {
+  display: block;
+  width: 100%;
+  height: clamp(180px, 34vw, 300px);
+  object-fit: cover;
+}
+.mx-compass-head { display: grid; gap: 14px; }
+.mx-compass-eyebrow {
+  font-family: var(--mx-mono);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.mx-compass-title {
+  font-family: var(--mx-display);
+  font-size: clamp(26px, 3.4vw, 38px);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--mx-ink);
+}
+.mx-compass-body {
+  font-size: clamp(16px, 1.5vw, 18px);
+  line-height: 1.62;
+  margin: 0;
+  max-width: 600px;
+  color: var(--mx-muted);
+}
+
+/* Flöde-kort — upphöjt glas (ingen accent-strimma upptill) */
+.mx-compass-card {
+  position: relative;
+  background: rgba(255, 255, 255, 0.86);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--mx-line);
+  border-radius: var(--mx-r-lg);
+  box-shadow: var(--mx-sh-3);
+  padding: clamp(24px, 3vw, 36px);
+  overflow: hidden;
+}
+/* Chat-flödet bär sitt eget chrome → kortet bara wrappar */
+.mx-compass-card-chat {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  overflow: visible;
+}
+
+/* Samtyckesgrind */
+.mx-consent { display: grid; gap: 16px; }
+.mx-consent-cta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.mx-compass-foot {
+  font-family: var(--mx-mono);
+  font-size: 11.5px;
+  text-align: center;
+  color: var(--mx-muted-2);
+  letter-spacing: 0.02em;
+}
+
+/* Mobilanpassning — tightare luft, mjukare kort, läsbar rubrik på smal skärm. */
+@media (max-width: 640px) {
+  .mx-compass-landing { padding: 0 14px 64px; }
+  .mx-compass-wrap { gap: 22px; padding-top: 18px; }
+  .mx-compass-topbar { gap: 10px; }
+  .mx-compass-head { gap: 10px; }
+  .mx-compass-title { font-size: clamp(23px, 7vw, 30px); line-height: 1.12; }
+  .mx-compass-body { font-size: 15px; line-height: 1.55; }
+  .mx-compass-card { padding: 20px 16px; border-radius: var(--mx-r-md); }
+  .mx-compass-hero-img { height: clamp(150px, 42vw, 220px); }
+  /* Knapprad i quiz/wizard staplar snyggt och fyller bredden på mobil. */
+  .mx-compass-card .mx-consent-cta { width: 100%; }
+  .mx-compass-card .mx-consent-cta .mx-btn { flex: 1 1 auto; justify-content: center; }
+}
+
 /* Scrollbar polish för main view */
 .mx-view::-webkit-scrollbar { width: 10px; height: 10px; }
 .mx-view::-webkit-scrollbar-track { background: transparent; }
@@ -884,30 +1301,8 @@ select.mx-input:focus {
 .mx-view::-webkit-scrollbar-thumb:hover { background: var(--mx-muted-2); }
 
 /* ============================================================
-   Mobile menu button + backdrop
+   Rail backdrop (mobil drawer)
    ============================================================ */
-
-.mx-mobile-menu-btn {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  margin: 0 -4px 0 -8px;
-  border: 0;
-  background: transparent;
-  color: var(--mx-ink);
-  border-radius: 8px;
-  cursor: pointer;
-  flex-shrink: 0;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.mx-mobile-menu-btn:hover,
-.mx-mobile-menu-btn:focus-visible {
-  background: var(--mx-paper-2);
-  outline: none;
-}
 
 .mx-rail-backdrop {
   position: fixed;
@@ -938,12 +1333,25 @@ body.mx-rail-locked {
 
 @media (max-width: 1024px) {
   .mx-app {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     padding: 0;
   }
 
-  .mx-mobile-menu-btn {
+  /* Skyddsnät: inget får göra dokumentet bredare än skärmen. `clip` (inte
+     hidden) skapar ingen scroll-container och bryter inte sticky-topbaren. */
+  html,
+  body {
+    overflow-x: clip;
+  }
+
+  /* Mobil: railen är en drawer → reopen-knappen är alltid synlig
+     (när drawern är stängd) som enda väg att öppna menyn. */
+  .mx-rail-reopen-btn {
     display: inline-flex;
+  }
+
+  .mx-app.mx-rail-is-open .mx-rail-reopen-btn {
+    display: none;
   }
 
   .mx-rail {
@@ -998,7 +1406,7 @@ body.mx-rail-locked {
     transition: grid-template-columns 220ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   .mx-app.mx-rail-desktop-collapsed {
-    grid-template-columns: 0px 1fr;
+    grid-template-columns: 0px minmax(0, 1fr);
   }
   .mx-rail {
     transition: opacity 160ms ease, visibility 160ms;
@@ -1010,24 +1418,10 @@ body.mx-rail-locked {
     overflow: hidden;
   }
 
-  /* Toggle button — only on desktop */
-  .mx-desktop-rail-btn {
+  /* Desktop: reopen-knappen i sökvägsraden visas BARA när railen är
+     kollapsad — annars sköts dölj/visa från burgern inne i sidmenyn. */
+  .mx-app.mx-rail-desktop-collapsed .mx-rail-reopen-btn {
     display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: var(--mx-r-sm);
-    border: 0;
-    background: none;
-    color: var(--mx-muted);
-    cursor: pointer;
-    transition: background .12s, color .12s;
-    flex-shrink: 0;
-  }
-  .mx-desktop-rail-btn:hover {
-    background: var(--mx-rail-hover-bg);
-    color: var(--mx-ink);
   }
 }
 
@@ -1079,11 +1473,15 @@ body.mx-rail-locked {
   }
 
   /* On small screens show only the last crumb segment to save space */
-  .mx-crumb > span:not(:last-child) {
+  .mx-crumb > .mx-crumb-part:not(:last-child) {
     display: none;
   }
-  .mx-crumb > span:last-child .mx-sep {
+  .mx-crumb > .mx-crumb-part:last-child .mx-sep {
     display: none;
+  }
+  .mx-crumb > .mx-crumb-part:last-child {
+    min-width: 0;
+    max-width: 100%;
   }
   .mx-crumb .mx-seg {
     font-size: 14px;
@@ -1093,6 +1491,36 @@ body.mx-rail-locked {
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 100%;
+    min-width: 0;
+  }
+
+  /* Alla tabeller scrollar horisontellt inom sin yta på telefon i stället
+     för att trycka ut sidan (events, inställningar, statistik). */
+  .mx-view table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Flikrader (bolagskort, Startupkompassen, utbildning) scrollar i sidled
+     i stället för att spilla utanför skärmen. */
+  .mx-startup-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin-left: -18px;
+    margin-right: -18px;
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .mx-startup-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .mx-startup-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
 
   .mx-view-pad {
@@ -1317,9 +1745,9 @@ html.dark .mx-field select:focus {
   box-shadow: 0 0 0 2px rgba(79, 196, 234, 0.18);
 }
 
-/* Topbar smälter med canvas — ingen blur, ingen lila ton */
+/* Topbar är transparent även i dark mode — bara sökvägen mot bakgrunden. */
 html.dark .mx-topbar {
-  background: var(--mx-canvas);
+  background: transparent;
 }
 
 /* Status chips — fortfarande färgade men med dämpad bakgrund */
@@ -1625,8 +2053,7 @@ html.dark .mx-page-head h1 {
 
 .mx-page-shell-head {
   padding: 18px 24px 0;
-  border-bottom: 1px solid var(--mx-rail-divider);
-  background: var(--mx-canvas);
+  background: transparent;
   flex-shrink: 0;
 }
 
@@ -1669,8 +2096,7 @@ html.dark .mx-page-head h1 {
 /* Bolags-header i workspace */
 .mx-startup-head {
   padding: 18px 24px 0;
-  border-bottom: 1px solid var(--mx-line);
-  background: var(--mx-canvas);
+  background: transparent;
 }
 
 .mx-startup-head-row {
@@ -1761,4 +2187,354 @@ html.dark .mx-page-head h1 {
 html.dark .mx-tab-badge {
   background: #4fc4ea;
   color: #002c40;
+}
+
+/* ============================================================
+   Mobil app-läge (CLAUDE.md § 35) — bottom-meny, install-hint,
+   standalone (hemskärm) och tangentbordshantering.
+   ============================================================ */
+
+:root {
+  /* Bottom-menyns höjd exkl. safe-area. 0 på desktop (menyn är dold). */
+  --mx-bnav-h: 0px;
+  --mx-bnav-total: 0px;
+}
+
+.mx-bnav {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  :root {
+    --mx-bnav-h: 64px;
+    --mx-bnav-total: calc(var(--mx-bnav-h) + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* När tangentbordet är uppe döljs menyn (MobileBottomNav) och ytan återtas. */
+  body.mx-bnav-hidden {
+    --mx-bnav-total: 0px;
+  }
+
+  .mx-bnav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 50;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    align-items: end;
+    height: var(--mx-bnav-h);
+    padding: 0 6px env(safe-area-inset-bottom, 0px);
+    box-sizing: content-box;
+    background: color-mix(in srgb, var(--mx-canvas) 93%, transparent);
+    -webkit-backdrop-filter: saturate(160%) blur(16px);
+    backdrop-filter: saturate(160%) blur(16px);
+    border-top: 1px solid var(--mx-line);
+    box-shadow: 0 -8px 24px -16px rgba(10, 10, 10, 0.18);
+    transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  }
+
+  body.mx-bnav-hidden .mx-bnav {
+    transform: translateY(110%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .mx-bnav-item,
+  .mx-bnav-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 3px;
+    height: var(--mx-bnav-h);
+    min-width: 0;
+    padding: 6px 2px 8px;
+    box-sizing: border-box;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    border: 0;
+    background: none;
+    color: var(--mx-muted);
+    font-family: inherit;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    text-decoration: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    transition: color 120ms ease;
+  }
+
+  .mx-bnav-item.active {
+    color: var(--mx-rail-accent, #002c40);
+  }
+
+  .mx-bnav-ico {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 30px;
+    border-radius: 12px;
+    transition: background 120ms ease;
+  }
+
+  .mx-bnav-item.active .mx-bnav-ico {
+    background: var(--mx-rail-active-bg, rgba(0, 44, 64, 0.08));
+  }
+
+  .mx-bnav-item:active .mx-bnav-ico {
+    background: var(--mx-rail-hover-bg, rgba(10, 10, 10, 0.05));
+  }
+
+  .mx-bnav-label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    height: 12px;
+    line-height: 12px;
+    flex: none;
+  }
+
+  .mx-bnav-badge {
+    position: absolute;
+    top: -2px;
+    right: 2px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: #002c40;
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 17px;
+    text-align: center;
+    border: 2px solid var(--mx-canvas);
+    box-sizing: content-box;
+  }
+
+  /* Mittknappen — upphöjd, brand-färgad, chatten. Layouten går uppifrån
+     (flex-start) med fasta mått så knappen aldrig kan hamna över etiketten:
+     -18 + 54 + 4 = etiketten börjar på 40 px, 12 px hög, 12 px marginal
+     kvar till menyns underkant. */
+  .mx-bnav-center {
+    color: var(--mx-ink);
+    justify-content: flex-start;
+    gap: 4px;
+    padding-top: 0;
+  }
+
+  .mx-bnav-center-btn {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 54px;
+    height: 54px;
+    margin-top: -18px;
+    border-radius: 999px;
+    background: #002c40;
+    color: #ffffff;
+    box-shadow:
+      0 0 0 5px var(--mx-canvas),
+      0 10px 24px -8px rgba(0, 44, 64, 0.55);
+    transition: transform 140ms ease, box-shadow 140ms ease;
+  }
+
+  .mx-bnav-center:active .mx-bnav-center-btn {
+    transform: scale(0.94);
+  }
+
+  .mx-bnav-center.active .mx-bnav-center-btn {
+    box-shadow:
+      0 0 0 5px var(--mx-canvas),
+      0 0 0 7px rgba(0, 44, 64, 0.22),
+      0 10px 24px -8px rgba(0, 44, 64, 0.55);
+  }
+
+  html.dark .mx-bnav {
+    background: color-mix(in srgb, var(--mx-canvas) 82%, transparent);
+    border-top-color: var(--mx-line-strong);
+    box-shadow: 0 -8px 24px -16px rgba(0, 0, 0, 0.6);
+  }
+
+  html.dark .mx-bnav-item.active {
+    color: var(--mx-rail-accent);
+  }
+
+  html.dark .mx-bnav-badge,
+  html.dark .mx-bnav-center-btn {
+    background: #4fc4ea;
+    color: #002c40;
+  }
+
+  html.dark .mx-bnav-center-btn {
+    box-shadow:
+      0 0 0 5px var(--mx-canvas),
+      0 10px 24px -8px rgba(79, 196, 234, 0.35);
+  }
+
+  html.dark .mx-bnav-center.active .mx-bnav-center-btn {
+    box-shadow:
+      0 0 0 5px var(--mx-canvas),
+      0 0 0 7px rgba(79, 196, 234, 0.25),
+      0 10px 24px -8px rgba(79, 196, 234, 0.35);
+  }
+
+  /* Innehållet slutar ovanför menyn. */
+  .mx-view {
+    padding-bottom: var(--mx-bnav-total);
+  }
+
+  /* Fasta helhöjds-ytor (chatt, bolagsarbetsyta) räknar bort menyn själva
+     i stället för att få padding — annars scrollar dokumentet i onödan. */
+  .mx-view:has(> .mx-page),
+  .mx-view:has(> .mx-workspace) {
+    padding-bottom: 0;
+  }
+
+  .mx-page,
+  .mx-workspace {
+    height: calc(100dvh - var(--mx-topbar-h) - var(--mx-bnav-total));
+  }
+
+  .mx-main-col {
+    min-height: 100dvh;
+  }
+
+  /* Drawern (railen) lämnar plats för safe-area — bottom-menyn ligger under
+     backdropen (z 60) när drawern är öppen. */
+  .mx-rail-foot {
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Install-hint ("Lägg till på hemskärmen") — flyter ovanför bottom-menyn. */
+.mx-install-hint {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .mx-install-hint {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(var(--mx-bnav-total) + 30px);
+    z-index: 49;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 10px 10px 12px;
+    border-radius: var(--mx-r-md, 14px);
+    background: var(--mx-paper, #ffffff);
+    border: 1px solid var(--mx-line);
+    box-shadow: var(--mx-sh-2);
+    color: var(--mx-ink);
+    font-size: 12.5px;
+    line-height: 1.35;
+  }
+
+  body.mx-bnav-hidden .mx-install-hint {
+    display: none;
+  }
+
+  .mx-install-icon {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border-radius: 11px;
+    background: #002c40;
+    color: #f2f2f2;
+  }
+
+  .mx-install-glyph {
+    font-family: var(--font-heading, "Sora Variable", system-ui, sans-serif);
+    font-weight: 700;
+    font-size: 24px;
+    line-height: 1;
+    letter-spacing: -0.04em;
+    transform: translateY(-1px);
+  }
+
+  .mx-install-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .mx-install-text strong {
+    font-weight: 700;
+    color: var(--mx-ink);
+  }
+
+  .mx-install-text span {
+    color: var(--mx-muted);
+  }
+
+  .mx-install-inline-ico {
+    display: inline-block;
+    vertical-align: -2px;
+    margin: 0 1px;
+  }
+
+  .mx-install-close {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    border: 0;
+    border-radius: 10px;
+    background: none;
+    color: var(--mx-muted);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mx-install-close:active {
+    background: var(--mx-rail-hover-bg, rgba(10, 10, 10, 0.05));
+  }
+}
+
+/* Standalone (hemskärms-app): inget "pull-to-refresh"-hopp, ingen
+   markering vid långtryck på navigering, och topbaren respekterar en ev.
+   status-bar-inset. */
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  html {
+    overscroll-behavior-y: none;
+  }
+
+  .mx-topbar {
+    padding-top: env(safe-area-inset-top, 0px);
+    height: calc(var(--mx-topbar-h) + env(safe-area-inset-top, 0px));
+  }
+
+  .mx-main-col {
+    grid-template-rows: calc(var(--mx-topbar-h) + env(safe-area-inset-top, 0px)) 1fr;
+  }
+
+  .mx-page,
+  .mx-workspace {
+    height: calc(100dvh - var(--mx-topbar-h) - env(safe-area-inset-top, 0px) - var(--mx-bnav-total));
+  }
+
+  .mx-rail-head {
+    padding-top: calc(20px + env(safe-area-inset-top, 0px));
+  }
+
+  .mx-bnav-item,
+  .mx-bnav-center,
+  .mx-rail-item {
+    -webkit-touch-callout: none;
+  }
 }

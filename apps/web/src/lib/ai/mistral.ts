@@ -1,8 +1,16 @@
 import 'server-only';
 import { getModelMeta } from './models';
+import {
+  conversationsUrl,
+  embeddingsUrl,
+  primaryBase,
+  resolveChatProviders,
+  type ChatProvider
+} from './mistral-endpoints';
+import { parseConversationOutputs } from './web-search-parse';
+import type { WebSearchSourceRef } from '@platform/shared';
 
-const MISTRAL_API_URL = 'https://api.mistral.ai/v1/chat/completions';
-const MISTRAL_CONVERSATIONS_URL = 'https://api.mistral.ai/v1/conversations';
+export const EMBEDDING_MODEL = 'mistral-embed';
 const MAX_TOKENS = 4000;
 const MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 1000;
@@ -59,7 +67,12 @@ export interface MistralToolDefinition {
 // image_generation, document_library) skickas inline i tools-arrayen som
 // {type: '<id>'} utan function-blob. Se lib/ai/builtins.ts.
 export interface MistralBuiltinToolDefinition {
-  type: 'web_search' | 'code_interpreter' | 'image_generation' | 'document_library';
+  type:
+    | 'web_search'
+    | 'web_search_premium'
+    | 'code_interpreter'
+    | 'image_generation'
+    | 'document_library';
 }
 
 // MCP-connectors aktiverade i workspacet refereras via {type:'mcp', connector_id}.
@@ -79,6 +92,11 @@ export interface MistralResponse {
   text: string;
   toolCalls: MistralToolCall[];
   finishReason: string;
+  /**
+   * Webbkällor (tool_reference-chunkar) när en built-in `web_search` körts via
+   * /v1/conversations. Tom/undefined för chat.completions-anrop.
+   */
+  references?: WebSearchSourceRef[];
   usage: {
     prompt_tokens: number;
     completion_tokens: number;
@@ -93,6 +111,13 @@ export interface CallMistralOptions {
   toolChoice?: 'auto' | 'none' | 'any';
   temperature?: number;
   maxTokens?: number;
+  /**
+   * När satt strömmas svaret token-för-token: varje text-delta forwardas
+   * direkt via `onToken` (för live-utskrift i chatten) medan funktionen ändå
+   * returnerar hela det ackumulerade svaret (text + tool_calls + usage). En
+   * tur som bara anropar verktyg strömmar ingen text (delta.content är tom).
+   */
+  onToken?: (delta: string) => void;
 }
 
 export class MistralError extends Error {
@@ -169,8 +194,8 @@ export async function callMistral(
   messages: MistralMessage[],
   options: CallMistralOptions = {}
 ): Promise<MistralResponse> {
-  const apiKey = process.env.MISTRAL_API_KEY;
-  if (!apiKey) {
+  const providers = resolveChatProviders(process.env);
+  if (providers.length === 0) {
     throw new MistralError('MISTRAL_API_KEY saknas i miljövariablerna.', 0);
   }
 
@@ -180,6 +205,7 @@ export async function callMistral(
     max_tokens: options.maxTokens ?? MAX_TOKENS,
     temperature: options.temperature ?? 0.3
   };
+  if (options.onToken) body.stream = true;
 
   const combinedTools: MistralAnyTool[] = [];
   if (options.tools && options.tools.length > 0) {
@@ -205,16 +231,50 @@ export async function callMistral(
     body.tool_choice = options.toolChoice ?? 'auto';
   }
 
+  // Primär provider (Mistral EU) först, sedan en valfri självhostad EU-fallback
+  // (degraderat läge, § 10.4). Vid kapacitet/utfall byter vi provider; vid
+  // request-fel (4xx, t.ex. auth) kastar vi direkt — fallbacken hjälper inte.
   let lastError: MistralError | null = null;
+  for (let p = 0; p < providers.length; p++) {
+    const provider = providers[p];
+    try {
+      return await attemptChatProvider(provider, body, options.onToken);
+    } catch (err) {
+      lastError = err instanceof MistralError ? err : new MistralError(String(err), 0);
+      const status = lastError.status;
+      const retryable = status === 0 || RETRYABLE_STATUSES.has(status);
+      const hasFallback = p < providers.length - 1;
+      if (!retryable || !hasFallback) throw lastError;
+      console.warn('[mistral] provider failed, degrading to fallback', {
+        from: provider.label,
+        to: providers[p + 1].label,
+        status
+      });
+    }
+  }
+  // Unreachable — loopen returnerar eller kastar.
+  throw lastError ?? new MistralError('Okänt fel vid AI-anrop.', 0);
+}
 
+/**
+ * Kör MAX_ATTEMPTS-loopen med backoff mot EN provider (url + nyckel).
+ * Returnerar svaret eller kastar MistralError. Bryts ut så att den yttre
+ * provider-loopen kan falla över till EU-fallbacken vid utfall/kapacitet.
+ */
+async function attemptChatProvider(
+  provider: ChatProvider,
+  body: Record<string, unknown>,
+  onToken?: (delta: string) => void
+): Promise<MistralResponse> {
+  let lastError: MistralError | null = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let response: Response;
     try {
-      response = await fetch(MISTRAL_API_URL, {
+      response = await fetch(provider.url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`
+          Authorization: `Bearer ${provider.apiKey}`
         },
         body: JSON.stringify(body)
       });
@@ -229,6 +289,15 @@ export async function callMistral(
         continue;
       }
       throw lastError;
+    }
+
+    if (response.ok && onToken) {
+      // Strömmande läge: HTTP-statusen var OK, så ev. retry/fallback (429/5xx)
+      // har redan hanterats ovan. Härifrån läser vi SSE-strömmen och
+      // forwardar text-deltan live. readChatStream rethrowar bara om INGET
+      // hann strömmas (säkert att retrya) — annars returneras det partiella
+      // svaret så vi aldrig dubbelskriver redan utskriven text.
+      return await readChatStream(response, onToken);
     }
 
     if (response.ok) {
@@ -266,6 +335,121 @@ export async function callMistral(
 
   // Unreachable — loop either returns or throws.
   throw lastError ?? new MistralError('Okänt fel vid AI-anrop.', 0);
+}
+
+/**
+ * Läser en Mistral chat-completions SSE-ström (`stream: true`) och forwardar
+ * varje text-delta via `onToken` medan den ackumulerar hela svaret (text +
+ * tool_calls + usage) till samma `MistralResponse`-form som det icke-strömmande
+ * fallet. Tool-call-deltan slås ihop per `index`. Kastar bara om strömmen
+ * bryts INNAN något hann tas emot (då är retry säkert); annars returneras det
+ * partiella svaret så vi aldrig dubbelskriver redan utströmmad text.
+ */
+async function readChatStream(
+  response: Response,
+  onToken: (delta: string) => void
+): Promise<MistralResponse> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new MistralError('AI-strömmen saknar kropp.', 503);
+
+  const decoder = new TextDecoder();
+  let buf = '';
+  let text = '';
+  let finishReason = '';
+  const usage = { prompt_tokens: 0, completion_tokens: 0 };
+  const toolAcc = new Map<number, { id: string; name: string; args: string }>();
+
+  const handleData = (payload: string) => {
+    if (!payload || payload === '[DONE]') return;
+    let json: {
+      choices?: Array<{
+        delta?: {
+          content?: string | null;
+          tool_calls?: Array<{
+            index?: number;
+            id?: string;
+            function?: { name?: string; arguments?: string };
+          }>;
+        };
+        finish_reason?: string | null;
+      }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+    try {
+      json = JSON.parse(payload);
+    } catch {
+      return;
+    }
+    const choice = json.choices?.[0];
+    const delta = choice?.delta;
+    if (delta) {
+      if (typeof delta.content === 'string' && delta.content) {
+        text += delta.content;
+        onToken(delta.content);
+      }
+      if (Array.isArray(delta.tool_calls)) {
+        for (const tc of delta.tool_calls) {
+          const idx = typeof tc.index === 'number' ? tc.index : 0;
+          const cur = toolAcc.get(idx) ?? { id: '', name: '', args: '' };
+          if (tc.id) cur.id = tc.id;
+          if (tc.function?.name) cur.name = tc.function.name;
+          if (typeof tc.function?.arguments === 'string') cur.args += tc.function.arguments;
+          toolAcc.set(idx, cur);
+        }
+      }
+    }
+    if (choice?.finish_reason) finishReason = choice.finish_reason;
+    if (json.usage) {
+      if (typeof json.usage.prompt_tokens === 'number') usage.prompt_tokens = json.usage.prompt_tokens;
+      if (typeof json.usage.completion_tokens === 'number') usage.completion_tokens = json.usage.completion_tokens;
+    }
+  };
+
+  const drainLines = () => {
+    let nl: number;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (line.startsWith('data:')) handleData(line.slice(5).trim());
+    }
+  };
+
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      drainLines();
+    }
+    const rest = buf.trim();
+    if (rest.startsWith('data:')) handleData(rest.slice(5).trim());
+  } catch (err) {
+    // Bröt strömmen innan något togs emot → säkert att retrya/falla över.
+    if (!text && toolAcc.size === 0) {
+      throw new MistralError(
+        err instanceof Error ? err.message : 'AI-strömmen bröts.',
+        503
+      );
+    }
+    // Annars: behåll det partiella svaret (texten är redan utskriven).
+  }
+
+  const toolCalls: MistralToolCall[] = Array.from(toolAcc.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, t]) => ({
+      id: t.id,
+      type: 'function' as const,
+      function: { name: t.name, arguments: t.args }
+    }))
+    .filter((t) => t.function.name);
+
+  // Strömmen returnerar inte alltid usage i sista chunken — uppskatta grovt
+  // ur textlängden så kostnadsloggningen inte blir noll.
+  if (usage.completion_tokens === 0 && text) {
+    usage.completion_tokens = Math.ceil(text.length / 4);
+  }
+
+  return { text, toolCalls, finishReason: finishReason || 'stop', usage };
 }
 
 function backoffMs(attempt: number, retryAfterMs: number | null): number {
@@ -326,7 +510,17 @@ export function estimateCostUsd(
     'mistral-large-latest': [2.0, 6.0],
     'mistral-medium-latest': [0.4, 1.2],
     'mistral-small-latest': [0.1, 0.3],
-    'pixtral-large-latest': [0.15, 0.15]
+    'pixtral-large-latest': [0.15, 0.15],
+    // Embeddings: ~€0.1/1M input-tokens, ingen output (vektorn räknas inte som
+    // completion-tokens). Utan denna rad skulle estimateCostUsd defaulta till
+    // Large-tier och kraftigt överskatta RAG-kostnaden.
+    'mistral-embed': [0.1, 0.0],
+    // Voxtral (röstinmatning, § 31). Ljudtokens debiteras som input; en
+    // transkribering ger bara den transkriberade texten som output. Utan
+    // dessa rader skulle estimateCostUsd defaulta till Large-tier och
+    // kraftigt överskatta rösttranskriberingen.
+    'voxtral-mini-latest': [0.04, 0.04],
+    'voxtral-small-latest': [0.1, 0.3]
   };
   const [inPrice, outPrice] = pricing[model] ?? [2.0, 6.0];
   return (tokensIn / 1_000_000) * inPrice + (tokensOut / 1_000_000) * outPrice;
@@ -447,7 +641,7 @@ export async function callMistralConversation(
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let response: Response;
     try {
-      response = await fetch(MISTRAL_CONVERSATIONS_URL, {
+      response = await fetch(conversationsUrl(primaryBase(process.env)), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -469,11 +663,7 @@ export async function callMistralConversation(
 
     if (response.ok) {
       const data = (await response.json()) as {
-        outputs?: Array<{
-          type?: string;
-          role?: string;
-          content?: string | Array<{ type?: string; text?: string }>;
-        }>;
+        outputs?: unknown;
         usage?: {
           prompt_tokens?: number;
           completion_tokens?: number;
@@ -481,28 +671,23 @@ export async function callMistralConversation(
         };
       };
 
-      // Extrahera assistent-text från outputs[] (message.output-entries).
-      // ToolExecutionEntry m.fl. ignoreras — vi visar bara modellens text.
-      let text = '';
-      for (const out of data.outputs ?? []) {
-        if (out.type !== 'message.output' || out.role !== 'assistant') continue;
-        if (typeof out.content === 'string') {
-          text += (text ? '\n\n' : '') + out.content;
-        } else if (Array.isArray(out.content)) {
-          for (const chunk of out.content) {
-            if (chunk.type === 'text' && typeof chunk.text === 'string') {
-              text += (text ? '\n\n' : '') + chunk.text;
-            }
-          }
-        }
-      }
+      // Extrahera assistent-text + webbkällor ur outputs[] (message.output-
+      // entries; tool_reference-chunkar blir källor). Ren, enhetstestad
+      // tolkning i web-search-parse.ts. ToolExecutionEntry m.fl. ignoreras.
+      const parsed = parseConversationOutputs(data.outputs);
 
       const usage = {
         prompt_tokens: data.usage?.prompt_tokens ?? 0,
         completion_tokens: data.usage?.completion_tokens ?? 0
       };
 
-      return { text, toolCalls: [], finishReason: 'stop', usage };
+      return {
+        text: parsed.text,
+        toolCalls: [],
+        finishReason: 'stop',
+        usage,
+        references: parsed.references
+      };
     }
 
     const errorBody = await response.text().catch(() => '');
@@ -517,4 +702,84 @@ export async function callMistralConversation(
   }
 
   throw lastError ?? new MistralError('Okänt fel vid AI-anrop.', 0);
+}
+
+// ── /v1/embeddings — mistral-embed (RAG-index, § 26) ────────────────────────
+
+export interface EmbeddingResult {
+  /** En vektor per input-text, i samma ordning. */
+  vectors: number[][];
+  usage: { prompt_tokens: number; completion_tokens: number };
+}
+
+/**
+ * Skapar embeddings för en batch texter via Mistrals /v1/embeddings
+ * (mistral-embed, körs på Mistral AI:s EU-infrastruktur). Samma retry-/
+ * backoff-policy som callMistral. Tom input → tom vektorlista (inget anrop).
+ * Throws MistralError vid slutligt fel.
+ */
+export async function embedTexts(inputs: string[]): Promise<EmbeddingResult> {
+  if (inputs.length === 0) {
+    return { vectors: [], usage: { prompt_tokens: 0, completion_tokens: 0 } };
+  }
+  const apiKey = process.env.MISTRAL_API_KEY;
+  if (!apiKey) {
+    throw new MistralError('MISTRAL_API_KEY saknas i miljövariablerna.', 0);
+  }
+
+  const body = JSON.stringify({ model: EMBEDDING_MODEL, input: inputs });
+  let lastError: MistralError | null = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(embeddingsUrl(primaryBase(process.env)), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`
+        },
+        body
+      });
+    } catch (err) {
+      lastError = new MistralError(
+        err instanceof Error ? err.message : 'Nätverksfel mot AI-tjänsten.',
+        503
+      );
+      if (attempt < MAX_ATTEMPTS) {
+        await sleep(backoffMs(attempt, null));
+        continue;
+      }
+      throw lastError;
+    }
+
+    if (response.ok) {
+      const data = (await response.json()) as {
+        data?: Array<{ embedding?: number[]; index?: number }>;
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
+      };
+      // Sortera på `index` för att garantera samma ordning som input.
+      const rows = (data.data ?? [])
+        .slice()
+        .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+      const vectors = rows.map((r) => (Array.isArray(r.embedding) ? r.embedding : []));
+      return {
+        vectors,
+        usage: {
+          prompt_tokens: data.usage?.prompt_tokens ?? 0,
+          completion_tokens: data.usage?.completion_tokens ?? 0
+        }
+      };
+    }
+
+    const errorBody = await response.text().catch(() => '');
+    lastError = classifyError(response.status, errorBody);
+    if (!RETRYABLE_STATUSES.has(response.status) || attempt >= MAX_ATTEMPTS) {
+      throw lastError;
+    }
+    const retryAfter = parseRetryAfter(response.headers.get('retry-after'));
+    await sleep(backoffMs(attempt, retryAfter));
+  }
+
+  throw lastError ?? new MistralError('Okänt fel vid embedding-anrop.', 0);
 }

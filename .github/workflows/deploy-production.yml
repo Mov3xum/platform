@@ -1,8 +1,12 @@
 name: Deploy to Coolify Production
 
+# Produktionsgrenen är `production` (default-grenen är `staging`; `main` är
+# en historisk gren som inte längre tas emot mergar — se CLAUDE.md § 10.3
+# A.8.32 om change management). Triggas på push till `production`.
 on:
   push:
     branches:
+      - production
       - main
 
 jobs:

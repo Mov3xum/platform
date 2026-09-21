@@ -6,7 +6,7 @@ import { OnboardingFlowForm } from '../../OnboardingFlowForm';
 
 export default async function NewOnboardingFlowPage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) redirect('/dashboard');
+  if (!canAccessModuleForUser(user.roles, 'education', user.enabledModules)) redirect('/dashboard');
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) {
     redirect('/education');
   }

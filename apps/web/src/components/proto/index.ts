@@ -7,7 +7,8 @@ export { ModuleNavItem } from './ModuleNavItem';
 export {
   MobileRailProvider,
   MobileRailBackdrop,
-  MobileMenuButton,
+  RailToggleButton,
+  RailReopenButton,
   useMobileRail
 } from './MobileRail';
 export {

@@ -109,6 +109,10 @@ export interface InflowNotificationFields {
   organization?: string;
   ideaSummary?: string;
   ideaCategory?: string;
+  /** Besökarens kontaktpreferens (läsbar etikett, migration 1700000125). */
+  contactPreference?: string;
+  /** AI-sammanställning av det inskickade (migration 1700000125). */
+  aiSummary?: string;
   /** Direktlänk till leadet i /inflode/leads/<id> (om APP-URL är satt). */
   leadUrl?: string;
 }
@@ -188,7 +192,14 @@ export async function sendInflowNotification(
                 ${row('Organisation', fields.organization)}
                 ${row('Kategori', fields.ideaCategory)}
                 ${row('Idé / sammanfattning', fields.ideaSummary)}
+                ${row('Kontaktpreferens', fields.contactPreference)}
+                ${row('AI-sammanställning', fields.aiSummary)}
               </table>
+              ${
+                fields.aiSummary
+                  ? `<p style="margin:12px 0 0;font-size:11px;color:#999999;">Sammanställningen är genererad av AI – verifiera innan delning.</p>`
+                  : ''
+              }
               ${
                 fields.leadUrl
                   ? `<table cellpadding="0" cellspacing="0" style="margin-top:28px;">

@@ -9,10 +9,14 @@ import {
   Chip,
   Icon
 } from '@/components/proto';
+import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
 import { getLead, listAssignableStaff, listLeadSources, listModules } from '@/lib/compass/store';
 import {
+  CONTACT_PREFERENCE_LABEL,
   LEAD_STATUS_LABEL,
   LEAD_STATUS_ORDER,
+  PREVIEW_SOURCE_KEY,
+  PREVIEW_SOURCE_LABEL,
   type LeadStatus
 } from '@/lib/compass/types';
 import { type StartupPhase } from '@platform/shared';
@@ -58,8 +62,12 @@ export default async function LeadDetailPage({
   ]);
   if (!lead) notFound();
   const source = sources.find((s) => s.key === lead.source_key);
+  // landing_module lagras som modulens public_slug (publika flöden) eller
+  // interna slug (admin-preview) → matcha mot båda.
   const landingModule = lead.landing_module
-    ? modules.find((m) => m.slug === lead.landing_module)
+    ? modules.find(
+        (m) => m.public_slug === lead.landing_module || m.slug === lead.landing_module
+      )
     : undefined;
 
   const canConvert = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
@@ -101,6 +109,19 @@ export default async function LeadDetailPage({
         }
       />
 
+      {lead.source_key === PREVIEW_SOURCE_KEY && (
+        <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-paper-2)' }}>
+          <div className="mx-flex mx-items-c mx-gap-2 mx-t-13 mx-muted">
+            <Icon name="shield" size={14} />
+            <span>
+              <strong>Intern förhandsgranskning.</strong> Det här leadet skapades av
+              Movexum-personal i testläge och räknas inte i statistik, analys eller
+              CSV-export. Radera det gärna när testet är klart.
+            </span>
+          </div>
+        </Card>
+      )}
+
       {alreadyConverted && (
         <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-cyan-tint-2)' }}>
           <div className="mx-flex mx-items-c mx-gap-2 mx-t-13">
@@ -126,6 +147,17 @@ export default async function LeadDetailPage({
               <Field label="E-post" value={lead.email} mono />
               <Field label="Telefon" value={lead.phone} mono />
               <Field label="Organisation" value={lead.organization} />
+              {lead.contact_preference && (
+                <div>
+                  <div className="mx-label">Kontaktpreferens</div>
+                  <Chip
+                    variant={lead.contact_preference === 'contact_me' ? 'active' : 'draft'}
+                    mono
+                  >
+                    {CONTACT_PREFERENCE_LABEL[lead.contact_preference]}
+                  </Chip>
+                </div>
+              )}
             </div>
           </Card>
 
@@ -133,6 +165,17 @@ export default async function LeadDetailPage({
             <CardHead label="Idé" />
             <div style={{ padding: 16, display: 'grid', gap: 10 }}>
               <Field label="Sammanfattning" value={lead.idea_summary} multiline />
+              {lead.ai_summary && (
+                <div>
+                  <div className="mx-label">AI-sammanställning av det inskickade</div>
+                  <div className="mx-t-13" style={{ lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                    {lead.ai_summary}
+                  </div>
+                  <div className="mx-mono mx-t-xs mx-muted" style={{ marginTop: 4 }}>
+                    Genererat av AI – verifiera innan delning
+                  </div>
+                </div>
+              )}
               <Field label="Kategori" value={lead.idea_category} />
               {lead.tags && lead.tags.length > 0 && (
                 <div>
@@ -415,12 +458,14 @@ export default async function LeadDetailPage({
             <CardHead label="Källa & attribution" />
             <div style={{ padding: 16, display: 'grid', gap: 8 }}>
               <div className="mx-flex mx-items-c mx-gap-2">
-                <Chip variant="cyan" mono>
-                  {source?.label || lead.source_key}
+                <Chip variant={lead.source_key === PREVIEW_SOURCE_KEY ? 'draft' : 'cyan'} mono>
+                  {lead.source_key === PREVIEW_SOURCE_KEY
+                    ? PREVIEW_SOURCE_LABEL
+                    : source?.label || lead.source_key}
                 </Chip>
-                {landingModule && (
+                {(landingModule || lead.landing_module) && (
                   <span className="mx-mono mx-t-xs mx-muted">
-                    via {landingModule.name}
+                    via {landingModule?.name || lead.landing_module}
                   </span>
                 )}
               </div>
@@ -528,13 +573,13 @@ export default async function LeadDetailPage({
             <CardHead label="Farlig zon" />
             <form action={deleteLeadAction} style={{ padding: 16 }}>
               <input type="hidden" name="id" value={lead.id} />
-              <button
-                type="submit"
+              <ConfirmSubmitButton
+                confirmText={`Radera leadet "${lead.name || 'Anonym'}" permanent? Konversationer och svar raderas också (hård cascade) — detta kan inte ångras.`}
                 className="mx-btn"
                 style={{ width: '100%', color: '#4b2718', borderColor: '#d67e47' }}
               >
                 <Icon name="trash" size={13} /> Radera lead permanent
-              </button>
+              </ConfirmSubmitButton>
               <div
                 className="mx-mono mx-t-xs mx-muted"
                 style={{ marginTop: 8, textAlign: 'center' }}

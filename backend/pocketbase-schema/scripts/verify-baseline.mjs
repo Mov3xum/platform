@@ -5,6 +5,7 @@
  */
 
 import PocketBase from 'pocketbase';
+import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -181,6 +182,11 @@ async function verifyCollectionsExist() {
     'compass_responses',
     'compass_security_events',
     'compass_brand',
+    // Mötesläge i chatten (§ 34) — skapas BARA av migration 1700000142
+    // (owner-only ⇒ speglas inte som collection-def i setup-via-api.mjs).
+    // Saknas den felar "Starta mötet" med ett 404 från PB; gör den till ett
+    // hårt invariant så att en instans utan migrationen fälls i deployen.
+    'meeting_transcripts',
     // Övrigt
     'web_cache'
   ];
@@ -259,6 +265,54 @@ async function verifyNoBrokenCreateRules() {
   ok(`createRule-svep: inga roll-checks/tenant-joins (${all.length} kollektioner)`);
 }
 
+// Global invariant (CLAUDE.md § 21.3): list/view/update/delete-regler får
+// ALDRIG använda bart `?=` mot multi-värde-auth-fälten `@request.auth.roles`
+// / `@request.auth.linked_startups` (eller `@request.auth.id ?= recipients`).
+// PB v0.23.4 matchar inte `?=` mot multi-värde-fält — uttrycket blir TYST
+// falskt även för en behörig användare → list ger tomt/400 och view ger 404
+// för ALLA användartokens (det var så workshop-tilldelningar blev osynliga
+// för bolagsmedlemmar). Svep-migrationen 1700000108 skulle rätta detta men
+// var en tyst no-op (JSVM exponerar regler som Go-`*string`-pekare, inte
+// strängar); migration 1700000127 gör om svepet pekarsäkert. Den här
+// kontrollen fäller deployen om mönstret någonsin återinförs.
+const BARE_MULTI_VALUE_PATTERNS = [
+  /@request\.auth\.roles\s*\?=/, // `:each ?=` matchar inte (tecknet efter fältet är `:`)
+  /@request\.auth\.linked_startups\s*\?=/,
+  /@request\.auth\.id\s*\?=\s*recipients/
+];
+
+async function verifyNoBareMultiValueOperators() {
+  let all;
+  try {
+    all = await pb.collections.getFullList({ $autoCancel: false });
+  } catch (err) {
+    fail(`Kunde inte lista kollektioner för operator-svep:\n${describeError(err)}`);
+  }
+  const offenders = [];
+  for (const col of all) {
+    if (col.system) continue;
+    for (const key of ['listRule', 'viewRule', 'updateRule', 'deleteRule']) {
+      const rule = col[key];
+      if (typeof rule !== 'string' || rule.trim() === '') continue;
+      for (const pattern of BARE_MULTI_VALUE_PATTERNS) {
+        if (pattern.test(rule)) {
+          offenders.push(`${col.name}.${key}: ${JSON.stringify(rule)}`);
+          break;
+        }
+      }
+    }
+  }
+  if (offenders.length) {
+    fail(
+      'Trasiga regel-operatorer (bart `?=` mot multi-värde-auth-fält — PB ' +
+        'v0.23.4 nekar då TYST alla användartokens, CLAUDE.md § 21.3):\n' +
+        offenders.map((o) => `  - ${o}`).join('\n') +
+        '\nKör migration 1700000127 (pekarsäkert `:each ?=`-svep) eller rätta regeln.'
+    );
+  }
+  ok(`operator-svep: inga bara \`?=\` mot multi-värde-auth-fält (${all.length} kollektioner)`);
+}
+
 // Bolagsisolering (CLAUDE.md § 21, migration 1700000096). En ren
 // startup_member får bara se sina egna bolags rader. Vi verifierar att
 // list/view-reglerna scope:ar till `linked_startups` för de startup-scopade
@@ -302,7 +356,20 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'startup_service_costs',
   'startup_readiness_assessments',
   'startup_state_aid_periods',
-  'mission_comments'
+  'mission_comments',
+  // Tenant-bred AI-kunskapsbas (migrationer 1700000118–119, § 26). Tenant-bred,
+  // potentiellt PII-haltig fritext → staff/observer-only. Isolerings-assertionen
+  // är skild från bootstrap-spegling (kollektionerna är migration-only); detta
+  // svep fångar en framtida regression som öppnar list/view för startup_member.
+  'org_knowledge',
+  'org_knowledge_chunks',
+  // Årshjul (migration 1700000133, § 30). Tenant-bred intern verksamhets-
+  // planering (styrelse/ledning) → staff/observer-only; en ren startup_member
+  // ska inte se Movexums interna kalender.
+  'annual_wheel_items',
+  // Årshjulets dynamiska kategorier (migration 1700000139, § 30). Samma
+  // isolering som posterna — de beskriver Movexums interna kalender.
+  'annual_wheel_categories'
 ];
 
 // Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa
@@ -361,6 +428,88 @@ function verifyStartupMemberIsolation(collections) {
   }
 
   ok('Bolagsisolering (§ 21) + cross-tenant-scope (1700000112) verifierad');
+}
+
+// ── AI-fältmaskning: live-schema-svep mot tyst PII-regression ────────────────
+// CLAUDE.md § 9.3 / § 10.5 punkt 10. AI-chattens query_collection maskar PII
+// per FÄLTNAMN (substring) i `apps/web/src/lib/ai/redaction.ts`. Risken: ett
+// NYTT fält vars namn dodgar substring-maskern (svensk/variant-stavning som
+// `kön`, `epost`, `personnr`) hamnar i en EXPONERAD (icke-denylistad) kollektion
+// och läcker till modellen. redaction.test.ts låser policyn mot koden; det här
+// svepet låser den mot det FAKTISKT deployade schemat och failar deployen.
+
+// Spegel av PII_FIELD_PATTERNS (redaction.ts) — maskerns FAKTISKA täckning.
+// Källa av sanning är redaction.ts + redaction.test.ts; håll i synk här så
+// svepet vet vad som redan maskas. (Avvikelse ger bara en över-strikt fail.)
+const MASKED_PATTERNS = [
+  'password', 'tokenkey', 'token_key', 'session_token', 'email', 'person_nr',
+  'personnummer', 'ssn', 'phone', 'telefon', 'mobil', 'avatar', 'gender',
+  'identifies_as', 'street_address', 'postal_code', 'org_nr',
+  'organisationsnummer', 'ip_hash'
+];
+
+// Spegel av COLLECTION_DENYLIST (redaction.ts) — helt utestängda kollektioner.
+const AI_DENYLIST = new Set([
+  'users', 'tenants', 'verification_tokens', 'pending_signups',
+  'tenant_integrations', 'user_app_integrations', 'user_mistral_connectors',
+  'chat_threads', 'user_files', 'user_file_chunks', 'deep_jobs',
+  'org_knowledge', 'org_knowledge_chunks', 'agent_memory'
+]);
+
+// PII-stavningar som substring-maskern INTE redan fångar. Förankrade till `_`
+// eller sträng-gräns så att `konferens`/`kontakt`/`postnummer` inte falsk-larmar.
+const PII_GAP_PATTERNS = [
+  /(^|_)k[oö]n(_|$)/i,                       // kön/kon (GDPR art. 9 — gender)
+  /(^|_)e[-_]?post\w*(_|$)/i,                // epost/e-post/e_post(adress)
+  /(^|_)(gatu|hem|post)?adress(_|$)/i,       // adress/postadress/gatuadress
+  /(^|_)p(erson)?nr(_|$)/i,                  // pnr/personnr
+  /(^|_)(f[oö]delse\w*|birth\w*|dob)(_|$)/i  // födelsedatum/birthdate/dob
+];
+
+// Granskade fält som matchar heuristiken men som INTE är PII ("whitelistade").
+// Format: "<collection>.<field>". Lägg till med motivering vid behov.
+const PII_SWEEP_ALLOWLIST = new Set([]);
+
+function isMaskedByPatterns(fieldName) {
+  const lower = fieldName.toLowerCase();
+  return MASKED_PATTERNS.some((p) => lower.includes(p));
+}
+
+async function verifyAiPiiMasking() {
+  let all;
+  try {
+    all = await pb.collections.getFullList({ $autoCancel: false });
+  } catch (err) {
+    fail(`Kunde inte lista kollektioner för PII-maskningssvep:\n${describeError(err)}`);
+  }
+  const offenders = [];
+  let swept = 0;
+  for (const col of all) {
+    if (col.system) continue;
+    if (AI_DENYLIST.has(col.name)) continue; // helt utestängd → kan inte läcka
+    swept++;
+    for (const field of col.fields || []) {
+      const name = field.name;
+      if (!name) continue;
+      if (isMaskedByPatterns(name)) continue; // redan maskad
+      if (PII_SWEEP_ALLOWLIST.has(`${col.name}.${name}`)) continue;
+      if (PII_GAP_PATTERNS.some((re) => re.test(name))) {
+        offenders.push(`${col.name}.${name}`);
+      }
+    }
+  }
+  if (offenders.length) {
+    fail(
+      'AI-PII-maskning: fält som ser ut som personuppgifter men som varken maskas\n' +
+        'eller ligger i en denylistad kollektion (skulle läcka till modellen via\n' +
+        'query_collection, CLAUDE.md § 9.3):\n' +
+        offenders.map((o) => `  - ${o}`).join('\n') +
+        '\nÅtgärd: lägg fältnamnets mönster i PII_FIELD_PATTERNS (redaction.ts +\n' +
+        'spegeln i detta skript), ELLER denylista kollektionen, ELLER — om fältet\n' +
+        'bevisligen inte är PII — lägg "<collection>.<field>" i PII_SWEEP_ALLOWLIST.'
+    );
+  }
+  ok(`AI-PII-maskningssvep: inga oskyddade PII-fält (${swept} exponerade kollektioner)`);
 }
 
 function verifyRlsAndRbac(collections) {
@@ -668,16 +817,80 @@ async function verifyHealthEndpoint() {
   ok('PocketBase health endpoint responded successfully');
 }
 
+/**
+ * Fält som koden SKRIVER men som en instans kan sakna om en migration inte
+ * applicerats. PocketBase släpper okända fält TYST vid create/update, så
+ * driften märks bara som "datumet försvann" / "det går inte att skapa" i
+ * UI:t — därför fälls deployen här i stället.
+ *
+ * `required`-kontrollen fångar det omvända: ett fält som koden slutat skriva
+ * (deprecerade `annual_wheel_items.track`) men som fortfarande är
+ * obligatoriskt i schemat → varje create svarar 400.
+ */
+const REQUIRED_APP_FIELDS = [
+  // Årshjul (§ 30): day = migration 1700000138, tags/responsible = 1700000139.
+  // day = 1700000138, tags/responsible = 1700000139, end_* = 1700000141.
+  { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible', 'end_month', 'end_day'] }
+];
+
+const MUST_NOT_BE_REQUIRED = [
+  { collection: 'annual_wheel_items', fields: ['track'] }
+];
+
+function verifyAppWritableFields(collections) {
+  const byName = collections instanceof Map
+    ? collections
+    : new Map((Array.isArray(collections) ? collections : Object.values(collections)).map((c) => [c.name, c]));
+
+  for (const { collection, fields } of REQUIRED_APP_FIELDS) {
+    const col = byName.get(collection);
+    if (!col) continue; // frånvaro fångas av verifyCollectionsExist
+    const colFields = col.fields || col.schema || [];
+    const present = new Set(colFields.map((f) => f.name));
+    const missing = fields.filter((f) => !present.has(f));
+    if (missing.length > 0) {
+      fail(
+        `Collection "${collection}" saknar fält som appen skriver: ${missing.join(', ')}.\n` +
+          'PocketBase släpper okända fält tyst → värdena försvinner utan felmeddelande.\n' +
+          'Kör migrationerna (auto-migrate i custom-imagen) eller setup-via-api.mjs mot instansen.\n' +
+          'Diagnos: node backend/pocketbase-schema/scripts/diagnose-migrations.mjs'
+      );
+    }
+    ok(`collection "${collection}" har appens skrivbara fält (${fields.join(', ')})`);
+  }
+
+  for (const { collection, fields } of MUST_NOT_BE_REQUIRED) {
+    const col = byName.get(collection);
+    if (!col) continue;
+    const colFields = col.fields || col.schema || [];
+    for (const name of fields) {
+      const field = colFields.find((f) => f.name === name);
+      if (field && field.required) {
+        fail(
+          `Field "${collection}.${name}" är obligatoriskt men skrivs inte längre av appen ` +
+            '→ varje create avvisas med 400. Kör migration 1700000139 eller setup-via-api.mjs.'
+        );
+      }
+    }
+    ok(`collection "${collection}" har inga deprecerade obligatoriska fält`);
+  }
+}
+
 async function main() {
   log(`PB: ${PB_URL}`);
   await verifyHealthEndpoint();
 
   const authUrl = `${PB_URL.replace(/\/$/, '')}/api/collections/_superusers/auth-with-password`;
-  try {
-    await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
-  } catch (err) {
+  const authError = await authenticateSuperuserWithRetry(pb, SU_EMAIL, SU_PASSWORD, {
+    onRetry: (err, attempt, maxAttempts, delayMs) => {
+      log(
+        `superuser auth failed (attempt ${attempt}/${maxAttempts}): ${describeError(err)} — retrying in ${delayMs}ms`
+      );
+    }
+  });
+  if (authError) {
     fail(
-      `Superuser auth failed for ${SU_EMAIL} at ${authUrl}\n${describeError(err)}\n` +
+      `Superuser auth failed for ${SU_EMAIL} at ${authUrl}\n${describeError(authError)}\n` +
       `Check PB_SU_EMAIL/PB_SU_PASSWORD secrets, that PB is reachable, and that PB v0.23+ exposes /api/collections/_superusers/auth-with-password.`
     );
   }
@@ -685,7 +898,10 @@ async function main() {
 
   const collections = await verifyCollectionsExist();
   verifyRlsAndRbac(collections);
+  verifyAppWritableFields(collections);
   await verifyNoBrokenCreateRules();
+  await verifyNoBareMultiValueOperators();
+  await verifyAiPiiMasking();
   await verifyAppUser();
   await verifyAppUserCanCreate(pb, APP_USER_EMAIL, APP_USER_PASSWORD);
 

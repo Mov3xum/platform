@@ -2,7 +2,13 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { PublicModuleRunner } from '@/components/compass/PublicModuleRunner';
-import { resolvePublicModule, getPublicModuleQuestions } from '@/lib/compass/public';
+import {
+  resolvePublicModule,
+  getPublicModuleQuestions,
+  getPublicTenantBranding,
+  getNextModuleLink
+} from '@/lib/compass/public';
+import { moduleHeroImageUrl, moduleHeroVideoUrl } from '@/lib/compass/media';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,68 +40,97 @@ export default async function PublicModulePage({
   const resolved = await resolvePublicModule(slug);
   if (!resolved) notFound();
 
-  const { pb, module } = resolved;
-  const questions =
-    module.flow_type === 'chat' ? [] : await getPublicModuleQuestions(pb, module.id);
+  const { pb, module, tenant } = resolved;
+  const [questions, branding, nextModule] = await Promise.all([
+    module.flow_type === 'chat'
+      ? Promise.resolve([])
+      : getPublicModuleQuestions(pb, module.id),
+    getPublicTenantBranding(pb, tenant),
+    getNextModuleLink(pb, module)
+  ]);
+  const hasTenantLogo = Boolean(branding.logoLightUrl || branding.logoDarkUrl);
 
-  const accent = module.theme_color && /^#[0-9a-fA-F]{3,8}$/.test(module.theme_color)
-    ? module.theme_color
-    : undefined;
+  const accent =
+    module.theme_color && /^#[0-9a-fA-F]{3,8}$/.test(module.theme_color)
+      ? module.theme_color
+      : '#002c40';
+  const heroImageUrl = moduleHeroImageUrl(module);
+  const heroVideoUrl = moduleHeroVideoUrl(module);
+  const isChat = module.flow_type === 'chat';
+
+  const title = module.welcome_title || module.name;
+  const eyebrow = module.hero_eyebrow || 'STARTUPKOMPASSEN';
+  // Undvik dubblerad rubrik när eyebrow råkar vara identisk med titeln.
+  const showEyebrow = eyebrow.trim().toLowerCase() !== (title || '').trim().toLowerCase();
+  const body = module.welcome_body || module.description;
 
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        background: 'var(--mx-canvas, #ffffff)',
-        padding: '24px 16px 64px'
-      }}
-    >
-      <div style={{ maxWidth: 720, margin: '0 auto', display: 'grid', gap: 24 }}>
-        {/* Toppbar: logotyp + modul-badge */}
-        <div className="mx-flex mx-items-c mx-gap-3" style={{ flexWrap: 'wrap' }}>
-          <Logo height={28} variant="auto" href="/" />
-          <span
-            className="mx-chip mx-mono mx-t-xs"
-            style={{ background: 'var(--mx-paper-2)', color: 'var(--mx-ink)' }}
-          >
-            {module.name}
+    <main className="mx-compass-landing" style={{ ['--mx-accent' as string]: accent }}>
+      <div className="mx-compass-wrap">
+        {/* Topbar — wordmark (mörkblå) + valfri målgruppspill */}
+        <header className="mx-compass-topbar">
+          <span className="mx-compass-brand">
+            {/* Tenantens uppladdade logotyp (från /installningar) om den finns,
+                annars text-wordmarken. Den publika sidan är alltid ljus. */}
+            <Logo
+              variant="light"
+              href="/"
+              height={hasTenantLogo ? 52 : 40}
+              width={hasTenantLogo ? 260 : 200}
+              logoLightUrl={branding.logoLightUrl}
+              logoDarkUrl={branding.logoDarkUrl}
+            />
           </span>
-        </div>
-
-        {/* Hero */}
-        <header style={{ display: 'grid', gap: 8 }}>
-          <div
-            className="mx-mono mx-t-xs mx-t-up mx-fw-6"
-            style={{ color: accent || '#002c40', letterSpacing: '0.08em' }}
-          >
-            {module.hero_eyebrow || 'STARTUPKOMPASSEN'}
-          </div>
-          <h1 className="mx-disp" style={{ fontSize: 36, fontWeight: 700, lineHeight: 1.1, margin: 0 }}>
-            {module.welcome_title || module.name}
-          </h1>
-          {(module.welcome_body || module.description) && (
-            <p className="mx-t-15 mx-muted" style={{ lineHeight: 1.6, margin: 0, maxWidth: 560 }}>
-              {module.welcome_body || module.description}
-            </p>
+          {module.target_audience && (
+            <span className="mx-compass-aud">{module.target_audience}</span>
           )}
         </header>
 
+        {/* Omslag — video vinner när båda finns (bilden blir startbild).
+            Visas bara när media laddats upp (ingen blå gradient-fallback;
+            titeln visas ändå i hero-texten nedan) */}
+        {heroVideoUrl ? (
+          <div className="mx-compass-hero">
+            <video
+              src={heroVideoUrl}
+              className="mx-compass-hero-img"
+              controls
+              playsInline
+              preload="metadata"
+              poster={heroImageUrl ?? undefined}
+            />
+          </div>
+        ) : heroImageUrl ? (
+          <div className="mx-compass-hero">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={heroImageUrl} alt="" className="mx-compass-hero-img" />
+          </div>
+        ) : null}
+
+        {/* Hero-text */}
+        <div className="mx-compass-head">
+          {showEyebrow && (
+            <div className="mx-compass-eyebrow" style={{ color: accent }}>
+              {eyebrow}
+            </div>
+          )}
+          <h1 className="mx-compass-title">{title}</h1>
+          {body && <p className="mx-compass-body">{body}</p>}
+        </div>
+
         {/* Flöde */}
-        <section
-          style={{
-            background: module.flow_type === 'chat' ? 'transparent' : 'var(--mx-paper)',
-            border: module.flow_type === 'chat' ? 'none' : '1px solid var(--mx-line)',
-            borderRadius: 'var(--mx-r-lg, 16px)',
-            padding: module.flow_type === 'chat' ? 0 : 24,
-            boxShadow: module.flow_type === 'chat' ? 'none' : 'var(--mx-sh-2)'
-          }}
-        >
-          <PublicModuleRunner module={module} questions={questions} />
+        <section className={`mx-compass-card${isChat ? ' mx-compass-card-chat' : ''}`}>
+          <PublicModuleRunner
+            module={module}
+            questions={questions}
+            brandName={branding.name}
+            nextModule={nextModule}
+          />
         </section>
 
         {/* Transparens (EU AI Act art. 50 för chat) + EU-suveränitet */}
-        <footer className="mx-mono mx-t-xs mx-muted" style={{ textAlign: 'center' }}>
-          {module.flow_type === 'chat'
+        <footer className="mx-compass-foot">
+          {isChat
             ? 'Drivs av Mistral / Le Chat (EU-suveränt) · Genererat av AI – verifiera innan delning'
             : 'Dina svar hanteras inom EU och delas aldrig vidare.'}
         </footer>

@@ -1,5 +1,3 @@
-import Link from 'next/link';
-import { Icon } from './Icon';
 import {
   coreModules,
   RAIL_GROUPS,
@@ -9,30 +7,13 @@ import {
 } from '@platform/shared';
 import { canAccessModuleForUser } from '@/lib/rbac';
 import { ModuleNavItem } from './ModuleNavItem';
+import { RailToggleButton } from './MobileRail';
 import { Logo } from '@/components/Logo';
 import { StartupSwitcher, type SwitchableStartup } from './StartupSwitcher';
+import { RailAccountMenu } from './RailAccountMenu';
+import { MODULE_ICONS } from '@/lib/module-icons';
 
-const moduleIcons: Record<string, string> = {
-  idag: 'message',
-  min_oversikt: 'home',
-  mina_aktiviteter: 'flow',
-  inkorg: 'home',
-  pagaende: 'spark',
-  uppdrag: 'flow',
-  inflode: 'spark',
-  startups: 'people',
-  de_minimis: 'shield',
-  investerare: 'graph',
-  events: 'spark',
-  community: 'people',
-  education: 'cap',
-  rapporter: 'doc',
-  agenter: 'bolt',
-  insights: 'graph',
-  integrationer: 'link',
-  anvandare: 'user',
-  installningar: 'gear'
-};
+const moduleIcons = MODULE_ICONS;
 
 interface ProtoRailProps {
   user: {
@@ -43,7 +24,7 @@ interface ProtoRailProps {
     tenantLogoLightUrl?: string;
     tenantLogoDarkUrl?: string;
     roles: Role[];
-    disabledModules?: string[];
+    enabledModules?: string[];
   };
   counts?: Record<string, number>;
   switchableStartups?: SwitchableStartup[];
@@ -58,8 +39,8 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
       .slice(0, 2)
       .toUpperCase() || '??';
 
-  // Ren bolagsmedlem har "Min översikt" som hemvy (staff → Hemmaplan/Chatt).
-  const homeHref = isPureStartupMember(user.roles) ? '/min-oversikt' : '/chatt';
+  // Ren bolagsmedlem har "Min översikt" som hemvy (staff → Dashboard, § 37).
+  const homeHref = isPureStartupMember(user.roles) ? '/min-oversikt' : '/hem';
 
   return (
     <aside id="mx-rail" className="mx-rail" aria-label="Huvudnavigation">
@@ -73,6 +54,7 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
           logoLightUrl={user.tenantLogoLightUrl}
           logoDarkUrl={user.tenantLogoDarkUrl}
         />
+        <RailToggleButton />
       </div>
 
       {switchableStartups.length > 0 && (
@@ -84,7 +66,7 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
           // Ren bolagsmedlem → dedikerad, kortare rail (CLAUDE.md § 22).
           <div>
             {MEMBER_RAIL.filter((item) =>
-              canAccessModuleForUser(user.roles, item.id, user.disabledModules)
+              canAccessModuleForUser(user.roles, item.id, user.enabledModules)
             ).map((item) => (
               <ModuleNavItem
                 key={item.id}
@@ -102,7 +84,7 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
               .filter(
                 (m) =>
                   m !== undefined &&
-                  canAccessModuleForUser(user.roles, m.id, user.disabledModules)
+                  canAccessModuleForUser(user.roles, m.id, user.enabledModules)
               );
 
           if (groupModules.length === 0) return null;
@@ -126,19 +108,12 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
       </nav>
 
       <div className="mx-rail-foot">
-        <div className="mx-rail-user-av">{initial}</div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="mx-rail-user-name">{user.name || user.email}</div>
-          <div className="mx-rail-user-role">{user.roles[0]?.replace('_', ' ') || ''}</div>
-        </div>
-        <Link
-          href="/konto"
-          className="mx-icon-btn"
-          style={{ color: 'rgba(255,255,255,.5)' }}
-          aria-label="Mitt konto"
-        >
-          <Icon name="gear" size={14} />
-        </Link>
+        <RailAccountMenu
+          name={user.name}
+          email={user.email}
+          role={user.roles[0]?.replace('_', ' ') || ''}
+          initial={initial}
+        />
       </div>
     </aside>
   );

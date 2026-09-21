@@ -13,11 +13,12 @@ import {
   updateLead
 } from '@/lib/compass/store';
 import { marketScanLead, reviewLead, scoreLead } from '@/lib/compass/chat';
+import { logAgentAction } from '@/lib/core/write';
 import {
   LEAD_STATUS_ORDER,
   type LeadStatus
 } from '@/lib/compass/types';
-import { ALL_PHASES, type StartupPhase } from '@platform/shared';
+import { ALL_PHASES, validateWorkshopMediaFile, type StartupPhase } from '@platform/shared';
 
 const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
 const CONVERT_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
@@ -417,6 +418,14 @@ function slugify(s: string): string {
     .slice(0, 60);
 }
 
+function toErrorCode(err: unknown): string {
+  const msg = (err instanceof Error ? err.message : String(err || '')).toLowerCase();
+  if (/public_slug|unique|upptagen/.test(msg)) return 'public_slug_taken';
+  if (/missing.+collection|not found|404/.test(msg)) return 'collections_missing';
+  if (/forbidden|401|403/.test(msg)) return 'forbidden';
+  return 'create_failed';
+}
+
 export async function createModuleAction(formData: FormData) {
   const user = await requireUser();
   if (!hasRole(user.roles, [...MANAGE_ROLES])) {
@@ -435,7 +444,9 @@ export async function createModuleAction(formData: FormData) {
   }
 
   const slug = slugify(slugRaw || name);
-  if (!slug) throw new Error('Slug kunde inte genereras');
+  if (!slug) {
+    redirect('/inflode/admin/modules/new?error=slug_invalid');
+  }
   const publicSlugRaw = slugify(String(formData.get('public_slug') || '') || slug);
 
   const pb = await getServerPb();
@@ -454,10 +465,13 @@ export async function createModuleAction(formData: FormData) {
         flow_type: flowType,
         is_active: isActive,
         public_url_enabled: publicEnabled,
+        // Nya moduler skapar lead som default (steg 4-valet, migration 1700000125).
+        create_lead: true,
         sort_order: 999
       })
     );
   }
+  let createdId = '';
   try {
     let rec;
     try {
@@ -466,10 +480,22 @@ export async function createModuleAction(formData: FormData) {
       rec = await createWith(`${publicSlugRaw}-${Math.random().toString(36).slice(2, 6)}`);
     }
     createdSlug = rec.slug;
+    createdId = String(rec.id);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Okänt fel';
-    throw new Error(`Kunde inte skapa modul: ${msg}`);
+    const code = toErrorCode(err);
+    redirect(`/inflode/admin/modules/new?error=${code}`);
   }
+
+  // Ändringslogg (CLAUDE.md § 32): UI-skapade moduler loggas i `agent_actions`
+  // med samma format som chatt-agentens `create_compass_module`, så den
+  // samlade aktivitetsloggen ser skapandet oavsett väg. Fail-soft i helpern.
+  await logAgentAction(pb, {
+    actor: { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles },
+    action_type: 'create',
+    collection: 'compass_modules',
+    record_id: createdId,
+    after_value: { slug: createdSlug, name, flow_type: flowType }
+  });
 
   await logSecurity(pb, user.tenant, {
     actor: user.id,
@@ -518,6 +544,8 @@ export async function updateModuleAction(formData: FormData) {
     require_email: formData.get('require_email') === 'on',
     require_phone: formData.get('require_phone') === 'on',
     require_organization: formData.get('require_organization') === 'on',
+    // Steg 4: "Skapa lead i Startupkompassen när modulen slutförs".
+    create_lead: formData.get('create_lead') === 'on',
     notify_emails: String(formData.get('notify_emails') || '').trim().slice(0, 1000),
     is_active: formData.get('is_active') === 'on',
     public_url_enabled: formData.get('public_url_enabled') === 'on'
@@ -526,6 +554,71 @@ export async function updateModuleAction(formData: FormData) {
   // Publik slug (global unik). Bara sätt om angiven — tom lämnar oförändrad.
   const publicSlug = slugify(String(formData.get('public_slug') || ''));
   if (publicSlug) patch.public_slug = publicSlug;
+
+  // Nästa modul i kedjan (migration 1700000124). Tom = nollställ (avsluta
+  // flödet). En satt relation måste peka på en ANNAN modul i SAMMA tenant —
+  // klienten är aldrig säkerhetsgränsen (CLAUDE.md § 10.5 punkt 7).
+  const nextModuleRaw = String(formData.get('next_module') || '').trim();
+  if (!nextModuleRaw) {
+    patch.next_module = '';
+  } else if (nextModuleRaw === id) {
+    throw new Error('En modul kan inte kedjas till sig själv.');
+  } else {
+    // Läs målmodulen med användartoken först; PB v0.23.4 kan TYST neka
+    // view-regeln (roll mot multi-value-fält, CLAUDE.md § 21.3) vilket fick
+    // kedje-sparandet att fela med "kunde inte hittas" för behörig staff →
+    // superuser-fallback. Tenant-likheten verifieras EXPLICIT oavsett klient.
+    let target: { tenant?: string } | null = null;
+    try {
+      target = await pb.collection('compass_modules').getOne(nextModuleRaw);
+    } catch {
+      const su = await getSuperuserPb();
+      if (su.ok) {
+        try {
+          target = await su.pb.collection('compass_modules').getOne(nextModuleRaw);
+        } catch {
+          target = null;
+        }
+      }
+    }
+    if (!target) {
+      throw new Error('Vald nästa modul kunde inte hittas.');
+    }
+    if (target.tenant !== user.tenant) {
+      throw new Error('Nästa modul tillhör en annan tenant.');
+    }
+    patch.next_module = nextModuleRaw;
+  }
+
+  // Kopplat event/aktivitet (migration 1700000138). Tom = nollställ. En satt
+  // relation måste peka på ett event i SAMMA tenant — klienten är aldrig
+  // säkerhetsgränsen (CLAUDE.md § 10.5 punkt 7). Samma fallback-mönster som
+  // next_module (PB v0.23.4 kan TYST neka view-regeln för behörig staff).
+  const linkedEventRaw = String(formData.get('linked_event') || '').trim();
+  if (!linkedEventRaw) {
+    patch.linked_event = '';
+  } else {
+    let targetEvent: { tenant?: string } | null = null;
+    try {
+      targetEvent = await pb.collection('incubator_events').getOne(linkedEventRaw);
+    } catch {
+      const su = await getSuperuserPb();
+      if (su.ok) {
+        try {
+          targetEvent = await su.pb.collection('incubator_events').getOne(linkedEventRaw);
+        } catch {
+          targetEvent = null;
+        }
+      }
+    }
+    if (!targetEvent) {
+      throw new Error('Valt event kunde inte hittas.');
+    }
+    if (targetEvent.tenant !== user.tenant) {
+      throw new Error('Eventet tillhör en annan tenant.');
+    }
+    patch.linked_event = linkedEventRaw;
+  }
 
   // Quiz-resultatprofiler skickas som JSON från ResultBucketsEditor.
   const bucketsRaw = String(formData.get('result_buckets') || '').trim();
@@ -544,6 +637,27 @@ export async function updateModuleAction(formData: FormData) {
   }
   const model = String(formData.get('model') || '');
   if (model) patch.model = model;
+
+  // Omslagsbild (hero_image): ladda upp en ny bild, eller rensa den befintliga.
+  // serverActions.bodySizeLimit är 32 MB → en bild på upp till 15 MB ryms.
+  const heroImage = formData.get('hero_image');
+  const removeHero = formData.get('remove_hero_image') === 'on';
+  if (heroImage instanceof File && heroImage.size > 0) {
+    const check = validateWorkshopMediaFile(
+      { type: heroImage.type, size: heroImage.size },
+      'image'
+    );
+    if (!check.ok) throw new Error(check.error);
+    // Node/undici-gotcha (samma som /api/education/media): materialisera till
+    // Buffer och slå om i en ny File innan vidaresändning till PocketBase, annars
+    // kan filen skickas med tom body.
+    const buffer = Buffer.from(await heroImage.arrayBuffer());
+    patch.hero_image = new File([buffer], heroImage.name || `omslag-${Date.now()}`, {
+      type: heroImage.type || 'application/octet-stream'
+    });
+  } else if (removeHero) {
+    patch.hero_image = null;
+  }
 
   try {
     await writeWithFallback(pb, (c) => c.collection('compass_modules').update(id, patch));
@@ -603,21 +717,121 @@ export async function deleteModuleAction(formData: FormData) {
 const INPUT_TYPES = ['short_text', 'long_text', 'choice', 'multi_choice', 'scale', 'email', 'phone'] as const;
 
 /**
- * Tolkar en multi-hink-spec som `builder:2 explorer:1 potential:0` (mellanslag-
- * eller kommaseparerade `hink:poäng`-par). Returnerar undefined om strängen inte
- * är en sådan spec (då faller parsern tillbaka på enkel `poäng`/`hink`-kolumn).
+ * Tolkar svarsalternativ för en quiz-/formulärfråga. EN rad per val, EN poäng
+ * per val:
+ *
+ *   värde | etikett | poäng
+ *
+ * `poäng` är frivillig (default ingen poäng = 0 i summeringen). Poängen summeras
+ * server-side (`scoreQuiz`) och totalen jämförs mot resultatprofilernas
+ * `min`/`max`-intervall (`resolveBucket`). Inga hinkar, multi-hinkar eller
+ * branching i inmatningen — det höll vi enkelt med avsikt.
  */
-function parseBucketSpec(raw: string | undefined): Record<string, number> | undefined {
+function parseQuestionChoices(raw: string):
+  | { value: string; label: string; score?: number }[]
+  | undefined {
   if (!raw) return undefined;
-  const tokens = raw.split(/[\s,]+/).map((t) => t.trim()).filter(Boolean);
-  if (tokens.length === 0) return undefined;
-  const map: Record<string, number> = {};
-  for (const tok of tokens) {
-    const m = tok.match(/^([\p{L}0-9_-]+):(-?\d+(?:\.\d+)?)$/u);
-    if (!m) return undefined; // inte en hink-spec → låt enkel-parsern ta över
-    map[slugify(m[1])] = Number(m[2]);
+
+  return raw
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .map((l) => {
+      const parts = l.split('|').map((s) => s.trim());
+      const value = parts[0];
+      const label = parts[1] || value;
+      const choice: { value: string; label: string; score?: number } = {
+        value: slugify(value || l),
+        label
+      };
+
+      const score = Number(parts[2]);
+      if (parts[2] !== undefined && parts[2] !== '' && Number.isFinite(score)) {
+        choice.score = score;
+      }
+
+      return choice;
+    });
+}
+
+type ParsedChoice = {
+  value: string;
+  label: string;
+  score?: number;
+  buckets?: Record<string, number>;
+};
+
+/** Normaliserar en hink-/profilnyckel till ett säkert, kort format. */
+function normalizeBucketKey(raw: string): string {
+  return raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+}
+
+/**
+ * Tolkar svarsalternativ från den visuella fråge-editorn (`QuestionsManager`).
+ * Klienten skickar en JSON-array med `{ value, label, score?, buckets? }` —
+ * `buckets` = poäng per resultatprofil (topp-hink-läge, t.ex.
+ * `{ green: 2, yellow: 0, red: 0 }`). Allt valideras/saneras här server-side;
+ * klienten är aldrig säkerhetsgränsen (CLAUDE.md § 10.5 punkt 7). Tomma/0-poäng
+ * utelämnas så lagringen hålls minimal.
+ */
+function parseChoicesJson(raw: string): ParsedChoice[] | undefined {
+  if (!raw) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
   }
-  return Object.keys(map).length > 0 ? map : undefined;
+  if (!Array.isArray(parsed)) return undefined;
+
+  const out: ParsedChoice[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const label = String(rec.label ?? rec.value ?? '').trim().slice(0, 200);
+    const value = slugify(String(rec.value ?? rec.label ?? ''));
+    if (!value || !label) continue;
+
+    const choice: ParsedChoice = { value, label };
+
+    if (rec.buckets && typeof rec.buckets === 'object' && !Array.isArray(rec.buckets)) {
+      const buckets: Record<string, number> = {};
+      for (const [k, v] of Object.entries(rec.buckets as Record<string, unknown>)) {
+        const key = normalizeBucketKey(k);
+        const n = Number(v);
+        if (key && Number.isFinite(n) && n !== 0) buckets[key] = n;
+      }
+      if (Object.keys(buckets).length > 0) choice.buckets = buckets;
+    }
+
+    const score = Number(rec.score);
+    if (rec.score !== undefined && rec.score !== '' && Number.isFinite(score) && score !== 0) {
+      choice.score = score;
+    }
+
+    out.push(choice);
+  }
+  return out;
+}
+
+/**
+ * Härleder valen för en fråga: föredrar den strukturerade `choices_json` från
+ * den visuella editorn, faller annars tillbaka på det äldre
+ * `värde | etikett | poäng`-textfältet (bakåtkompatibelt). Returnerar undefined
+ * för fråge-typer utan val.
+ */
+function resolveChoices(formData: FormData, inputType: string): ParsedChoice[] | undefined {
+  if (inputType !== 'choice' && inputType !== 'multi_choice') return undefined;
+  const jsonRaw = String(formData.get('choices_json') || '').trim();
+  if (jsonRaw) return parseChoicesJson(jsonRaw);
+  const choicesRaw = String(formData.get('choices') || '').trim();
+  return choicesRaw ? parseQuestionChoices(choicesRaw) : undefined;
 }
 
 export async function addQuestionAction(formData: FormData) {
@@ -632,54 +846,16 @@ export async function addQuestionAction(formData: FormData) {
   const helpText = String(formData.get('help_text') || '').trim();
   const inputType = String(formData.get('input_type') || 'short_text');
   const required = formData.get('required') === 'on';
-  const choicesRaw = String(formData.get('choices') || '').trim();
 
   if (!moduleId || !key || !prompt) throw new Error('Modul, nyckel och fråga krävs');
   if (!INPUT_TYPES.includes(inputType as (typeof INPUT_TYPES)[number])) {
     throw new Error('Ogiltig input_type');
   }
 
-  // Två format per rad stöds:
-  //   • Enkel/intervall: `värde | etikett | poäng | hink`
-  //     (poäng + hink frivilliga; en hink per val).
-  //   • Multi-hink: `värde | etikett | builder:2 explorer:1 potential:0`
-  //     (ett val fördelar poäng över flera profiler — företräde framför hink).
-  let choices:
-    | { value: string; label: string; score?: number; bucket?: string; buckets?: Record<string, number> }[]
-    | undefined;
-  if (choicesRaw && (inputType === 'choice' || inputType === 'multi_choice')) {
-    choices = choicesRaw
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0)
-      .map((l) => {
-        const parts = l.split('|').map((s) => s.trim());
-        const value = parts[0];
-        const label = parts[1] || value;
-        const choice: {
-          value: string;
-          label: string;
-          score?: number;
-          bucket?: string;
-          buckets?: Record<string, number>;
-        } = {
-          value: slugify(value || l),
-          label
-        };
-        // Multi-hink kan stå i poäng- eller hink-kolumnen (`builder:2 explorer:1`).
-        const buckets = parseBucketSpec(parts[2]) || parseBucketSpec(parts[3]);
-        if (buckets) {
-          choice.buckets = buckets;
-        } else {
-          const score = Number(parts[2]);
-          if (parts[2] !== undefined && parts[2] !== '' && Number.isFinite(score)) {
-            choice.score = score;
-          }
-          if (parts[3]) choice.bucket = slugify(parts[3]);
-        }
-        return choice;
-      });
-  }
+  // Val + poäng från den visuella editorn (`choices_json`) eller det äldre
+  // textfältet. `buckets` ger poäng per resultatprofil; totalen avgör vinnande
+  // profil (`scoreQuiz`/`resolveBucket`, packages/shared/compass-quiz.ts).
+  const choices = resolveChoices(formData, inputType);
 
   const pb = await getServerPb();
   // Verify module ownership
@@ -702,6 +878,51 @@ export async function addQuestionAction(formData: FormData) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
     throw new Error(`Kunde inte skapa fråga: ${msg}`);
+  }
+
+  revalidatePath(`/inflode/admin/modules/${moduleSlug}`);
+}
+
+export async function updateQuestionAction(formData: FormData) {
+  const user = await requireUser();
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
+    throw new Error('Forbidden');
+  }
+  const id = String(formData.get('id') || '');
+  const moduleId = String(formData.get('module_id') || '');
+  const moduleSlug = String(formData.get('module_slug') || '');
+  const key = slugify(String(formData.get('key') || ''));
+  const prompt = String(formData.get('prompt') || '').trim();
+  const helpText = String(formData.get('help_text') || '').trim();
+  const inputType = String(formData.get('input_type') || 'short_text');
+  const required = formData.get('required') === 'on';
+
+  if (!id || !moduleId || !key || !prompt) throw new Error('Modul, nyckel och fråga krävs');
+  if (!INPUT_TYPES.includes(inputType as (typeof INPUT_TYPES)[number])) {
+    throw new Error('Ogiltig input_type');
+  }
+
+  const choices = resolveChoices(formData, inputType);
+
+  const pb = await getServerPb();
+  const mod = await pb.collection('compass_modules').getOne(moduleId);
+  if (mod.tenant !== user.tenant) throw new Error('Forbidden');
+
+  try {
+    await writeWithFallback(pb, (c) =>
+      c.collection('compass_questions').update(id, {
+        module: moduleId,
+        key,
+        prompt,
+        help_text: helpText || undefined,
+        input_type: inputType,
+        required,
+        choices
+      })
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Okänt fel';
+    throw new Error(`Kunde inte uppdatera fråga: ${msg}`);
   }
 
   revalidatePath(`/inflode/admin/modules/${moduleSlug}`);

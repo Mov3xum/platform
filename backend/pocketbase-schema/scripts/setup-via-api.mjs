@@ -24,6 +24,7 @@
  */
 
 import PocketBase from 'pocketbase';
+import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -32,8 +33,6 @@ const APP_USER_PASSWORD = process.env.APP_USER_PASSWORD;
 
 const APP_USER_EMAIL = 'hampus@movexum.se';
 const APP_USER_NAME = 'Hampus Granström';
-const PB_AUTH_RETRY_ATTEMPTS = Number(process.env.PB_AUTH_RETRY_ATTEMPTS || 12);
-const PB_AUTH_RETRY_DELAY_MS = Number(process.env.PB_AUTH_RETRY_DELAY_MS || 5000);
 
 if (!PB_URL_RAW || !SU_EMAIL || !SU_PASSWORD) {
   console.error('Missing env vars. Required: PB_URL, PB_SU_EMAIL, PB_SU_PASSWORD');
@@ -62,16 +61,11 @@ function describeError(err) {
   return parts.length > 0 ? parts.join(' | ') : String(err);
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function shouldRetrySuperuserAuth(err) {
-  const status = Number(err?.status || 0);
-  if ([408, 425, 429, 500, 502, 503, 504].includes(status)) return true;
-
-  const code = String(err?.originalError?.code || err?.cause?.code || '').toUpperCase();
-  return ['ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENOTFOUND', 'ETIMEDOUT'].includes(code);
+function containsErrorCode(value, expectedCode, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return false;
+  seen.add(value);
+  if (value.code === expectedCode) return true;
+  return Object.values(value).some((nested) => containsErrorCode(nested, expectedCode, seen));
 }
 
 // Normalisera defensivt:
@@ -158,6 +152,31 @@ async function normalizeFields(fields, context = 'collection') {
   return resolved;
 }
 
+async function findExistingCollection(definition) {
+  const candidates = [definition?.name, definition?.id].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      return await pb.collections.getOne(candidate);
+    } catch (err) {
+      if (err?.status !== 404) throw err;
+    }
+  }
+
+  return null;
+}
+
+function isAlreadyExistingCollectionError(err) {
+  if (err?.status !== 400) return false;
+  const data = err?.response?.data || err?.data?.data || {};
+  const nameCode = data?.name?.code;
+  const idCode = data?.id?.code;
+  return (
+    nameCode === 'validation_collection_name_exists' ||
+    idCode === 'validation_invalid_or_existing_id'
+  );
+}
+
 async function ensureCollection(definition) {
   const normalizedDefinition = {
     ...definition,
@@ -165,64 +184,76 @@ async function ensureCollection(definition) {
   };
 
   try {
-    const existing = await pb.collections.getOne(definition.name);
-    const desiredRules = {
-      listRule: normalizedDefinition.listRule ?? null,
-      viewRule: normalizedDefinition.viewRule ?? null,
-      createRule: normalizedDefinition.createRule ?? null,
-      updateRule: normalizedDefinition.updateRule ?? null,
-      deleteRule: normalizedDefinition.deleteRule ?? null
-    };
-    const needsRuleSync =
-      (existing.listRule ?? null) !== desiredRules.listRule ||
-      (existing.viewRule ?? null) !== desiredRules.viewRule ||
-      (existing.createRule ?? null) !== desiredRules.createRule ||
-      (existing.updateRule ?? null) !== desiredRules.updateRule ||
-      (existing.deleteRule ?? null) !== desiredRules.deleteRule;
+    const existing = await findExistingCollection(definition);
+    if (existing) {
+      const desiredRules = {
+        listRule: normalizedDefinition.listRule ?? null,
+        viewRule: normalizedDefinition.viewRule ?? null,
+        createRule: normalizedDefinition.createRule ?? null,
+        updateRule: normalizedDefinition.updateRule ?? null,
+        deleteRule: normalizedDefinition.deleteRule ?? null
+      };
+      const needsRuleSync =
+        (existing.listRule ?? null) !== desiredRules.listRule ||
+        (existing.viewRule ?? null) !== desiredRules.viewRule ||
+        (existing.createRule ?? null) !== desiredRules.createRule ||
+        (existing.updateRule ?? null) !== desiredRules.updateRule ||
+        (existing.deleteRule ?? null) !== desiredRules.deleteRule;
 
-    // Detect fields present in the desired definition but missing from the
-    // existing collection. This can happen when a migration adds a new field
-    // AFTER the collection was first created (e.g. migration 1700000092 adds
-    // `user` to `event_signups`). Rules that reference such a field will be
-    // rejected with HTTP 400 unless the field is added first.
-    const existingFieldNames = new Set((existing.fields || []).map((f) => f.name));
-    const missingFields = (normalizedDefinition.fields || []).filter(
-      (f) => f && f.name && !existingFieldNames.has(f.name)
-    );
-    const needsFieldSync = missingFields.length > 0;
+      // Detect fields present in the desired definition but missing from the
+      // existing collection. This can happen when a migration adds a new field
+      // AFTER the collection was first created (e.g. migration 1700000092 adds
+      // `user` to `event_signups`). Rules that reference such a field will be
+      // rejected with HTTP 400 unless the field is added first.
+      const existingFieldNames = new Set((existing.fields || []).map((f) => f.name));
+      const missingFields = (normalizedDefinition.fields || []).filter(
+        (f) => f && f.name && !existingFieldNames.has(f.name)
+      );
+      const needsFieldSync = missingFields.length > 0;
 
-    if (needsRuleSync || needsFieldSync) {
-      // When adding missing fields we must send the full fields array
-      // (existing + new) because PocketBase replaces the array on update.
-      const updatePayload = { ...desiredRules };
-      if (needsFieldSync) {
-        updatePayload.fields = [...(existing.fields || []), ...missingFields];
+      if (needsRuleSync || needsFieldSync) {
+        // When adding missing fields we must send the full fields array
+        // (existing + new) because PocketBase replaces the array on update.
+        const updatePayload = { ...desiredRules };
+        if (needsFieldSync) {
+          updatePayload.fields = [...(existing.fields || []), ...missingFields];
+        }
+        try {
+          await pb.collections.update(definition.name, updatePayload);
+        } catch (err) {
+          const what = needsFieldSync && needsRuleSync ? 'field+rule-sync' : needsFieldSync ? 'field-sync' : 'rule-sync';
+          throw new Error(`collection "${definition.name}" ${what} failed: ${describeError(err)}`);
+        }
+        if (needsFieldSync && needsRuleSync) {
+          ok(`collection "${definition.name}" finns redan — fält och regler synkade`);
+        } else if (needsFieldSync) {
+          ok(`collection "${definition.name}" finns redan — fält synkade`);
+        } else {
+          ok(`collection "${definition.name}" finns redan — regler synkade`);
+        }
+        return;
       }
-      try {
-        await pb.collections.update(definition.name, updatePayload);
-      } catch (err) {
-        const what = needsFieldSync && needsRuleSync ? 'field+rule-sync' : needsFieldSync ? 'field-sync' : 'rule-sync';
-        throw new Error(`collection "${definition.name}" ${what} failed: ${describeError(err)}`);
-      }
-      if (needsFieldSync && needsRuleSync) {
-        ok(`collection "${definition.name}" finns redan — fält och regler synkade`);
-      } else if (needsFieldSync) {
-        ok(`collection "${definition.name}" finns redan — fält synkade`);
-      } else {
-        ok(`collection "${definition.name}" finns redan — regler synkade`);
-      }
+
+      warn(`collection "${definition.name}" finns redan — hoppar över`);
       return;
     }
-
-    warn(`collection "${definition.name}" finns redan — hoppar över`);
-    return;
   } catch (e) {
-    if (e?.status !== 404) throw e;
+    throw e;
   }
 
   try {
     await pb.collections.create(normalizedDefinition);
   } catch (err) {
+    // Idempotency guard: in some environments the pre-check can miss an
+    // already existing collection and create then returns name/id conflict.
+    // Treat that as "already exists" instead of hard-failing sync.
+    if (isAlreadyExistingCollectionError(err)) {
+      const existing = await findExistingCollection(definition);
+      if (existing) {
+        warn(`collection "${definition.name}" finns redan (upptäckt vid create) — fortsätter`);
+        return;
+      }
+    }
     console.error(
       `\n✗ create collection failed: ${definition.name}\n` +
       `${describeError(err)}\n` +
@@ -435,11 +466,11 @@ const ANY_AUTH = '@request.auth.id != ""';
 const TENANT_DIRECT = '@request.auth.tenant = tenant';
 const TENANT_VIA_STARTUP = '@request.auth.tenant = startup.tenant';
 const TENANTS_UPDATE_RULE =
-  '@request.auth.id != "" && (@request.auth.roles ?= "admin" || (@request.auth.roles ?= "incubator_lead" && @request.auth.tenant = id))';
+  '@request.auth.id != "" && (@request.auth.roles:each ?= "admin" || (@request.auth.roles:each ?= "incubator_lead" && @request.auth.tenant = id))';
 const STAFF_ROLES =
-  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach")';
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach")';
 const STAFF_OR_LEAD =
-  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead")';
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead")';
 // `:each ?=`-variant — korrekt operator mot multi-select `roles` i PB v0.23.4
 // (se migration 1700000107 / § 21.3). Använd den för nyligen rättade regler.
 const STAFF_OR_LEAD_EACH =
@@ -448,7 +479,7 @@ const COMPASS_STAFF_EACH =
   '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach")';
 const ADMIN_EACH = '@request.auth.roles:each ?= "admin"';
 const STAFF_INCL_MENTOR =
-  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "mentor")';
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "mentor")';
 
 // ----------------------------------------------------------------------------
 // Main
@@ -459,26 +490,13 @@ log(`Superuser: ${SU_EMAIL}`);
 
 {
   const authUrl = `${PB_URL.replace(/\/$/, '')}/api/collections/_superusers/auth-with-password`;
-  let authError = null;
-
-  for (let attempt = 1; attempt <= PB_AUTH_RETRY_ATTEMPTS; attempt++) {
-    try {
-      await pb.collection('_superusers').authWithPassword(SU_EMAIL, SU_PASSWORD);
-      authError = null;
-      break;
-    } catch (err) {
-      authError = err;
-      const retryable = shouldRetrySuperuserAuth(err);
-      if (!retryable || attempt === PB_AUTH_RETRY_ATTEMPTS) {
-        break;
-      }
-
+  const authError = await authenticateSuperuserWithRetry(pb, SU_EMAIL, SU_PASSWORD, {
+    onRetry: (err, attempt, maxAttempts, delayMs) => {
       warn(
-        `superuser auth failed (attempt ${attempt}/${PB_AUTH_RETRY_ATTEMPTS}): ${describeError(err)} — retrying in ${PB_AUTH_RETRY_DELAY_MS}ms`
+        `superuser auth failed (attempt ${attempt}/${maxAttempts}): ${describeError(err)} — retrying in ${delayMs}ms`
       );
-      await sleep(PB_AUTH_RETRY_DELAY_MS);
     }
-  }
+  });
 
   if (authError) {
     console.error(
@@ -625,7 +643,7 @@ await ensureCollection({
   viewRule: READ_OWN_THIS_DIRECT,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // 4. users — add linked_startups -------------------------------------------
@@ -634,6 +652,28 @@ await patchUsersCollection([
     name: 'linked_startups', type: 'relation', required: false,
     collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 50
   }
+]);
+
+// 4a. users — modulåtkomst per användare (migration 1700000144, § 36.3) ----
+// Allow-lista över modul-id:n som syns i sidofältet. null = rollens standard.
+await patchUsersCollection([
+  { name: 'enabled_modules', type: 'json', required: false, maxSize: 4000 }
+]);
+
+// 4b. users — kompetensmodell (migration 1700000130, CLAUDE.md § 29) ---------
+// Speglar CompetenceId i packages/shared/src/competences.ts. Yrkeskompetens
+// (berättigat intresse) — sätts av användaren själv (updateRule oförändrad).
+await patchUsersCollection([
+  {
+    name: 'competences', type: 'select', required: false, maxSelect: 14,
+    values: [
+      'affarscoaching', 'affarsutveckling', 'projektledning', 'kommunikation',
+      'hr_personal', 'juridik', 'finansiering_kapital', 'ai_teknik', 'hallbarhet',
+      'internationalisering', 'boost_chamber', 'design', 'branschspecifik', 'annat'
+    ]
+  },
+  { name: 'title', type: 'text', required: false, max: 120 },
+  { name: 'bio', type: 'text', required: false, max: 1000 }
 ]);
 
 // 5. partners ---------------------------------------------------------------
@@ -654,7 +694,7 @@ await ensureCollection({
   viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // 6. startup_team_members ---------------------------------------------------
@@ -762,7 +802,7 @@ await ensureCollection({
 
 // 8. activities -------------------------------------------------------------
 const STAFF_OR_OWNER =
-  '(@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.id = owner)';
+  '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.id = owner)';
 await ensureCollection({
   id: 'activities_collection',
   name: 'activities',
@@ -808,7 +848,7 @@ await ensureCollection({
   viewRule: `${READ_OWN_STARTUP_VIA} && (confidential = false || ${STAFF_OR_OBSERVER_READ} || @request.auth.id = author)`,
   createRule: `${ANY_AUTH} && @request.auth.id = author`,
   updateRule: `${ANY_AUTH} && @request.auth.id = author`,
-  deleteRule: `${ANY_AUTH} && (@request.auth.id = author || @request.auth.roles ?= "admin")`
+  deleteRule: `${ANY_AUTH} && (@request.auth.id = author || @request.auth.roles:each ?= "admin")`
 });
 
 // 10. agreements ------------------------------------------------------------
@@ -845,7 +885,7 @@ await ensureCollection({
   // via server-action + superuser-fallback).
   createRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_LEAD}`,
   updateRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && ${STAFF_OR_LEAD}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_VIA_STARTUP} && @request.auth.roles:each ?= "admin"`
 });
 
 // 10b. agreement_signatures (1700000094) — oföränderligt signeringsbevis (AES)
@@ -998,10 +1038,10 @@ const EDUCATION_IMAGE_FIELD = {
 // 14.5 workshop_areas (pre-create for workshops.area relation) -------------
 const WORKSHOP_AREAS_CREATE_RULE =
   '@request.auth.id != "" && @request.auth.tenant != "" && (' +
-  '@request.auth.roles ?= "admin" || ' +
-  '@request.auth.roles ?= "incubator_lead" || ' +
-  '@request.auth.roles ?= "coach" || ' +
-  '@request.auth.roles ?= "mentor")';
+  '@request.auth.roles:each ?= "admin" || ' +
+  '@request.auth.roles:each ?= "incubator_lead" || ' +
+  '@request.auth.roles:each ?= "coach" || ' +
+  '@request.auth.roles:each ?= "mentor")';
 // update/delete utan `?=`-roll-check: PB v0.23 evaluerar dem intermittent
 // fel (samma bugg som migration 1700000049/1700000086). Roll-/tenant-skydd
 // görs i server-actionlagret innan PB-anropet.
@@ -1100,8 +1140,8 @@ await ensureCollection({
     'CREATE INDEX idx_workshop_assignments_workshop ON workshop_assignments (workshop)',
     'CREATE INDEX idx_workshop_assignments_status ON workshop_assignments (status)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles:each ?= "startup_member" && @request.auth.linked_startups:each ?= startup))`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles:each ?= "startup_member" && @request.auth.linked_startups:each ?= startup))`,
   createRule: `${ANY_AUTH} && @request.auth.id = assigned_by`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
@@ -1135,8 +1175,8 @@ await ensureCollection({
     'CREATE INDEX idx_workshop_runs_startup ON workshop_runs (startup)',
     'CREATE INDEX idx_workshop_runs_workshop ON workshop_runs (workshop)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles ?= "startup_member" && @request.auth.linked_startups ?= startup))`,
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles:each ?= "startup_member" && @request.auth.linked_startups:each ?= startup))`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_INCL_MENTOR} || (@request.auth.roles:each ?= "startup_member" && @request.auth.linked_startups:each ?= startup))`,
   createRule: `${ANY_AUTH} && @request.auth.id = triggered_by`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.id = triggered_by`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
@@ -1304,11 +1344,11 @@ await ensureCollection({
     'CREATE INDEX idx_missions_status ON missions (status)',
     'CREATE INDEX idx_missions_due ON missions (due_date)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP_REL} || @request.auth.id = mentor || @request.auth.id ?= recipients)`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP_REL} || @request.auth.id = mentor || @request.auth.id ?= recipients)`,
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP_REL} || @request.auth.id = mentor || recipients:each ?= @request.auth.id)`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || ${MEMBER_OF_STARTUP_REL} || @request.auth.id = mentor || recipients:each ?= @request.auth.id)`,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000051: mission_comments — trådad kommentarsfunktion.
@@ -1349,6 +1389,49 @@ await patchCollection('mission_comments', [
     maxSelect: 1
   }
 ]);
+
+// Migration 1700000133: mission_documents — uppladdad dokumentation per uppdrag
+// (CLAUDE.md § 29). Staff-/observer-läsning; createRule roll-lös (§ 21.3),
+// roll-enforce i upload-routen. Autodate explicit (PB v0.23, § 28.5).
+await ensureCollection({
+  id: 'mission_documents_collection',
+  name: 'mission_documents',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'mission', type: 'relation', required: true, collectionId: 'missions_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: false, max: 200 },
+    {
+      name: 'file', type: 'file', required: true, maxSelect: 1, maxSize: 26214400, thumbs: [],
+      mimeTypes: [
+        'application/pdf',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain', 'text/markdown', 'text/csv',
+        'image/png', 'image/jpeg', 'image/webp'
+      ]
+    },
+    { name: 'filename', type: 'text', required: false, max: 300 },
+    { name: 'mime', type: 'text', required: false, max: 150 },
+    { name: 'size_bytes', type: 'number', required: false },
+    { name: 'uploaded_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+  ],
+  indexes: [
+    'CREATE INDEX idx_mission_documents_tenant ON mission_documents (tenant)',
+    'CREATE INDEX idx_mission_documents_mission ON mission_documents (mission)'
+  ],
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
 
 // Migration 1700000052: notifications — in-app-aviseringar för samarbete.
 await ensureCollection({
@@ -1462,7 +1545,7 @@ await ensureCollection({
   viewRule: READ_OWN_STARTUP_DIRECT,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000071: contacts — externa kontakter utan plattformskonto.
@@ -1599,8 +1682,8 @@ await ensureCollection({
   ],
   listRule: READ_OWN_STARTUP_DIRECT,
   viewRule: READ_OWN_STARTUP_DIRECT,
-  createRule: `${ANY_AUTH} && (@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "startup_member")`,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.roles ?= "admin" || @request.auth.roles ?= "incubator_lead" || @request.auth.roles ?= "coach" || @request.auth.roles ?= "startup_member")`,
+  createRule: `${ANY_AUTH} && (@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "startup_member")`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "startup_member")`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
 });
 
@@ -1742,7 +1825,7 @@ await ensureCollection({
   viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000031: deals — investerar-bolag-matchning.
@@ -1771,7 +1854,8 @@ await ensureCollection({
 });
 
 // Migration 1700000032: incubator_events — pitch-event, konferenser etc.
-// Inkluderar counter-fält från 1700000067.
+// Inkluderar counter-fält från 1700000067 + CRM-fält (1700000073) +
+// activity_id/source_created/source_updated (1700000134, § 15.2).
 await ensureCollection({
   id: 'incubator_events_collection',
   name: 'incubator_events',
@@ -1789,7 +1873,19 @@ await ensureCollection({
     { name: 'signups_count', type: 'number', required: false, min: 0 },
     { name: 'attended_count', type: 'number', required: false, min: 0 },
     { name: 'leads_count', type: 'number', required: false, min: 0 },
-    { name: 'admitted_count', type: 'number', required: false, min: 0 }
+    { name: 'admitted_count', type: 'number', required: false, min: 0 },
+    // CRM-fält (migration 1700000073) — Excel-arket "Aktiviteter".
+    { name: 'organizer', type: 'text', required: false, max: 200 },
+    { name: 'target_audience', type: 'text', required: false, max: 200 },
+    { name: 'event_url', type: 'url', required: false },
+    { name: 'internal_comment', type: 'editor', required: false },
+    { name: 'outcome', type: 'editor', required: false },
+    { name: 'owner', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'participant_count', type: 'number', required: false, min: 0 },
+    // Externt Excel-id + källtidsstämplar (migration 1700000134).
+    { name: 'activity_id', type: 'text', required: false, max: 100 },
+    { name: 'source_created', type: 'date', required: false },
+    { name: 'source_updated', type: 'date', required: false }
   ],
   indexes: [
     'CREATE INDEX idx_events_tenant ON incubator_events (tenant)',
@@ -1801,6 +1897,23 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
 });
+
+// Befintliga instanser: ensureCollection synkar bara regler, inte fält. Lägg
+// till CRM-/import-fälten explicit (idempotent — patchCollection hoppar över
+// de som redan finns). Annars droppar PB dem vid import → "Ej importerade
+// kolumner" (§ 15.2).
+await patchCollection('incubator_events', [
+  { name: 'organizer', type: 'text', required: false, max: 200 },
+  { name: 'target_audience', type: 'text', required: false, max: 200 },
+  { name: 'event_url', type: 'url', required: false },
+  { name: 'internal_comment', type: 'editor', required: false },
+  { name: 'outcome', type: 'editor', required: false },
+  { name: 'owner', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+  { name: 'participant_count', type: 'number', required: false, min: 0 },
+  { name: 'activity_id', type: 'text', required: false, max: 100 },
+  { name: 'source_created', type: 'date', required: false },
+  { name: 'source_updated', type: 'date', required: false }
+]);
 
 // Migration 1700000033: event_signups — registreringar för events.
 await ensureCollection({
@@ -1844,12 +1957,17 @@ await ensureCollection({
     { name: 'starts_at', type: 'date', required: false },
     { name: 'due_at', type: 'date', required: false },
     { name: 'completed_at', type: 'date', required: false },
-    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['open', 'in_progress', 'blocked', 'done', 'cancelled'] },
+    // Migration 1700000129: + backlog/review (bolagskanbanens 6 kolumner).
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['open', 'in_progress', 'blocked', 'done', 'cancelled', 'backlog', 'review'] },
     { name: 'owner', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
-    { name: 'link_kind', type: 'select', required: true, maxSelect: 1, values: ['none', 'startup', 'contact', 'event'] },
+    // Migration 1700000129: Movexum-kollegor på kanban-kortet.
+    { name: 'assignees', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 20 },
+    // Migration 1700000131: + 'mission' (tvärfunktionella team, § 29).
+    { name: 'link_kind', type: 'select', required: true, maxSelect: 1, values: ['none', 'startup', 'contact', 'event', 'mission'] },
     { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'contact', type: 'relation', required: false, collectionId: 'contacts_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
-    { name: 'event', type: 'relation', required: false, collectionId: 'incubator_events_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+    { name: 'event', type: 'relation', required: false, collectionId: 'incubator_events_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'mission', type: 'relation', required: false, collectionId: 'missions_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],
   indexes: [
     'CREATE INDEX idx_tasks_tenant ON tasks (tenant)',
@@ -1920,7 +2038,7 @@ await ensureCollection({
   viewRule: READ_STAFF_OR_OBSERVER,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000041: integration_providers — global katalog över leverantörer.
@@ -1947,9 +2065,9 @@ await ensureCollection({
   ],
   listRule: ANY_AUTH,
   viewRule: ANY_AUTH,
-  createRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`,
-  updateRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`,
-  deleteRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`
+  createRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`,
+  updateRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`,
+  deleteRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000041: tenant_integrations — per-tenant kopplingsstatus.
@@ -1979,7 +2097,7 @@ await ensureCollection({
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000054: integration_records — normaliserad data från syncs.
@@ -2071,9 +2189,12 @@ await ensureCollection({
     { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
     { name: 'surface', type: 'select', required: true, maxSelect: 1, values: ['toolbox', 'tool_chat', 'dashboard_chat', 'startup_chat', 'intl', 'suggestions', 'workshop_run', 'connector_chat'] },
     { name: 'model', type: 'text', required: true, max: 100 },
-    { name: 'tokens_in', type: 'number', required: true, min: 0 },
-    { name: 'tokens_out', type: 'number', required: true, min: 0 },
-    { name: 'cost_estimate_usd', type: 'number', required: true, min: 0 },
+    // Migration 1700000145: talfälten är VALFRIA — PB tolkar 0 som "tomt" för
+    // ett required nummerfält, vilket tyst tappade alla events med tokens_out
+    // = 0 (embeddings, tomma Voxtral-svar) eller cost = 0 (§ 9.6, § 28).
+    { name: 'tokens_in', type: 'number', required: false, min: 0 },
+    { name: 'tokens_out', type: 'number', required: false, min: 0 },
+    { name: 'cost_estimate_usd', type: 'number', required: false, min: 0 },
     { name: 'tool_run', type: 'relation', required: false, collectionId: 'tool_runs_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'error', type: 'text', required: false, max: 500 }
   ],
@@ -2087,6 +2208,14 @@ await ensureCollection({
   createRule: `${ANY_AUTH} && @request.auth.id = user`,
   updateRule: null,
   deleteRule: null
+});
+
+// Migration 1700000145 (befintliga installs): släpp required på talfälten så
+// att 0-värden (embeddings, tomma Voxtral-svar, okänd prismodell) kan lagras.
+await patchCollection('ai_usage_events', [], {
+  tokens_in: { required: false },
+  tokens_out: { required: false },
+  cost_estimate_usd: { required: false }
 });
 
 // Migration 1700000059: startup_financials — årsmetrics per bolag.
@@ -2113,7 +2242,7 @@ await ensureCollection({
   viewRule: READ_OWN_STARTUP_DIRECT,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000061: agent_actions — audit-logg för dataändringar via skrivlager.
@@ -2496,7 +2625,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
 });
@@ -2519,7 +2648,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: null,
   deleteRule: null
 });
@@ -2543,7 +2672,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`
 });
@@ -2565,9 +2694,9 @@ await ensureCollection({
   indexes: ['CREATE UNIQUE INDEX idx_de_minimis_regelverk_kod ON de_minimis_regelverk (kod)'],
   listRule: ANY_AUTH,
   viewRule: ANY_AUTH,
-  createRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`,
-  updateRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`,
-  deleteRule: `${ANY_AUTH} && @request.auth.roles ?= "admin"`
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`,
+  deleteRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`
 });
 
 for (const regel of [
@@ -2595,7 +2724,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
 });
@@ -2616,7 +2745,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
 });
@@ -2665,7 +2794,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${STAFF_INCL_MENTOR}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
 });
@@ -2752,7 +2881,7 @@ await ensureCollection({
   viewRule: READ_OWN_STARTUP_DIRECT,
   createRule: ANY_AUTH,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles ?= "admin"`
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
 // Migration 1700000102: service_time_entries — loggad tid per bolag (Vinnova).
@@ -2906,7 +3035,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${OWNER_DIRECT}`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
 });
@@ -2942,7 +3071,41 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${OWNER_DIRECT}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
+});
+
+// Migration 1700000142 + 1700000148: meeting_transcripts — owner-only
+// mötesarbetsdata i chatten. Speglas här så en PB-instans utan körda migrationer
+// kan självläka i deploy-jobbet innan verify-baseline asserterar existens.
+await ensureCollection({
+  id: 'meeting_transcripts_col',
+  name: 'meeting_transcripts',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'owner', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['recording', 'ended', 'saved', 'discarded'] },
+    { name: 'kind', type: 'select', required: false, maxSelect: 1, values: ['startup', 'internal', 'external'] },
+    { name: 'counterpart', type: 'text', required: false, max: 200 },
+    { name: 'title', type: 'text', required: false, max: 200 },
+    { name: 'segments', type: 'json', required: false, maxSize: 2000000 },
+    { name: 'consent_confirmed_at', type: 'date', required: false },
+    { name: 'started_at', type: 'date', required: false },
+    { name: 'ended_at', type: 'date', required: false },
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+  ],
+  indexes: [
+    'CREATE INDEX idx_mt_owner ON meeting_transcripts (owner)',
+    'CREATE INDEX idx_mt_tenant ON meeting_transcripts (tenant)',
+    'CREATE INDEX idx_mt_owner_status ON meeting_transcripts (owner, status)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${OWNER_DIRECT}`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
 });
@@ -2990,10 +3153,445 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
-  createRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${OWNER_DIRECT}`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
 });
+
+// Migration 1700000110: user_files AI-kategorisering (ämnes-/bolagsmappar, § 24).
+// Utan dessa fält no-op:ar "Var hör filen hemma?"-dialogen tyst (PB släpper
+// okända fält vid update) → filer går inte att sortera in i ämne/bolag.
+await patchCollection('user_files', [
+  {
+    name: 'topic',
+    type: 'select',
+    required: false,
+    maxSelect: 1,
+    values: [
+      'affarsplan_strategi',
+      'finansiering_kapital',
+      'hallbarhet_esg',
+      'internationalisering',
+      'pitch_material',
+      'juridik_avtal',
+      'rapporter_uppfoljning',
+      'osorterat'
+    ]
+  },
+  {
+    name: 'topic_status',
+    type: 'select',
+    required: false,
+    maxSelect: 1,
+    values: ['pending', 'auto', 'needs_review', 'confirmed']
+  },
+  { name: 'topic_confidence', type: 'number', required: false, min: 0, max: 1 },
+  {
+    name: 'startup',
+    type: 'relation',
+    required: false,
+    collectionId: 'startups_collection',
+    cascadeDelete: false,
+    minSelect: 0,
+    maxSelect: 1
+  },
+  { name: 'categorized_at', type: 'date', required: false }
+]);
+
+// Migration 1700000120: user_files RAG-fält (personlig fil-QA).
+await patchCollection('user_files', [
+  { name: 'extracted_text', type: 'text', required: false, max: 320000 },
+  { name: 'indexed', type: 'bool', required: false },
+  { name: 'chunk_count', type: 'number', required: false, min: 0, onlyInt: true }
+]);
+
+// Migration 1700000118: org_knowledge — tenant-bred kunskapsbas.
+await ensureCollection({
+  id: 'org_knowledge_col',
+  name: 'org_knowledge',
+  type: 'base',
+  fields: [
+    // PB v0.23 auto-lägger INTE created/updated — deklarera explicit (appen
+    // sorterar på -created; migration 1700000125 backfillar befintliga installs).
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: false, max: 300 },
+    { name: 'filename', type: 'text', required: true, min: 1, max: 300 },
+    { name: 'mime', type: 'text', required: false, max: 120 },
+    { name: 'size_bytes', type: 'number', required: false, min: 0, onlyInt: true },
+    {
+      name: 'file',
+      type: 'file',
+      required: false,
+      maxSelect: 1,
+      maxSize: 26214400,
+      // Migration 1700000122: även Word (DOCX) + PowerPoint (PPTX) —
+      // OOXML-text extraheras dependency-fritt (CLAUDE.md § 26.5).
+      // Migration 1700000130: även bilder (PNG/JPG/WebP) — text via Pixtral-
+      // bildigenkänning (CLAUDE.md § 26 / § 28).
+      mimeTypes: [
+        'application/pdf',
+        'text/plain',
+        'text/markdown',
+        'text/csv',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'image/png',
+        'image/jpeg',
+        'image/webp'
+      ]
+    },
+    { name: 'extracted_text', type: 'text', required: false, max: 320000 },
+    { name: 'char_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'redacted', type: 'bool', required: false },
+    {
+      name: 'topic',
+      type: 'select',
+      required: false,
+      maxSelect: 1,
+      values: [
+        'affarsplan_strategi',
+        'finansiering_kapital',
+        'hallbarhet_esg',
+        'internationalisering',
+        'pitch_material',
+        'juridik_avtal',
+        'rapporter_uppfoljning',
+        'osorterat'
+      ]
+    },
+    { name: 'indexed', type: 'bool', required: false },
+    { name: 'chunk_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'source_ref', type: 'text', required: false, max: 300 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_org_knowledge_tenant ON org_knowledge (tenant)',
+    'CREATE INDEX idx_org_knowledge_topic ON org_knowledge (topic)'
+  ],
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
+// Migration 1700000119: org_knowledge_chunks — RAG-index för tenant-kunskapsbas.
+await ensureCollection({
+  id: 'org_knowledge_chunks_col',
+  name: 'org_knowledge_chunks',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'source', type: 'relation', required: true, collectionId: 'org_knowledge_col', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'chunk_index', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'text', type: 'text', required: false, max: 8000 },
+    { name: 'embedding', type: 'json', required: false, maxSize: 200000 },
+    { name: 'token_count', type: 'number', required: false, min: 0, onlyInt: true }
+  ],
+  indexes: [
+    'CREATE INDEX idx_org_knowledge_chunks_tenant ON org_knowledge_chunks (tenant)',
+    'CREATE INDEX idx_org_knowledge_chunks_source ON org_knowledge_chunks (source)'
+  ],
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
+// Migration 1700000121: user_file_chunks — RAG-index för personligt filarkiv.
+await ensureCollection({
+  id: 'user_file_chunks_col',
+  name: 'user_file_chunks',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'owner', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'source', type: 'relation', required: true, collectionId: 'user_files_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'chunk_index', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'text', type: 'text', required: false, max: 8000 },
+    { name: 'embedding', type: 'json', required: false, maxSize: 200000 },
+    { name: 'token_count', type: 'number', required: false, min: 0, onlyInt: true }
+  ],
+  indexes: [
+    'CREATE INDEX idx_user_file_chunks_owner ON user_file_chunks (owner)',
+    'CREATE INDEX idx_user_file_chunks_source ON user_file_chunks (source)',
+    'CREATE INDEX idx_user_file_chunks_tenant ON user_file_chunks (tenant)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  createRule: `${ANY_AUTH} && ${OWNER_DIRECT}`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${OWNER_DIRECT}`
+});
+
+// Migration 1700000133: annual_wheel_items — Movexums verksamhetsårshjul (§ 30).
+// Tenant-bred STAFF/OBSERVER-data (intern styrelse-/ledningsplanering) — en ren
+// startup_member ska inte se den (§ 21). createRule refererar bara auth-fält
+// (§ 21.3); roll-enforcement i server-action + delat skrivlager. Ingen PII.
+await ensureCollection({
+  id: 'annual_wheel_items_collection',
+  name: 'annual_wheel_items',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'year', type: 'number', required: true, onlyInt: true, min: 2000, max: 2100 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'month', type: 'number', required: false, onlyInt: true, min: 1, max: 12 },
+    { name: 'day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 },
+    // Migration 1700000139: taggar (valfria, flera) ersätter obligatoriskt spår;
+    // `track` är deprecerat men behålls valfritt så data inte tappas.
+    {
+      name: 'track', type: 'select', required: false, maxSelect: 1,
+      values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt']
+    },
+    {
+      name: 'tags', type: 'select', required: false, maxSelect: 13,
+      values: ['kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt', 'linkedin', 'nyhetsbrev', 'event', 'pr', 'webinar', 'annonsering']
+    },
+    { name: 'end_month', type: 'number', required: false, onlyInt: true, min: 1, max: 12 },
+    { name: 'end_day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 },
+    { name: 'category', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'notes', type: 'text', required: false, max: 2000 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_annual_wheel_items_tenant ON annual_wheel_items (tenant)',
+    'CREATE INDEX idx_annual_wheel_items_tenant_year ON annual_wheel_items (tenant, year)'
+  ],
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
+// Migration 1700000138: valfritt specifikt datum (`day`) på årshjuls-poster.
+// patchCollection lägger fältet på en redan bootstrappad instans (idempotent).
+await patchCollection('annual_wheel_items', [
+  { name: 'day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 }
+]);
+
+// ── Hjälpare för årshjulets dynamiska kategorier (§ 30) ─────────────────────
+
+/**
+ * Byter en select-kolumn till text UTAN att tappa data: fältets id behålls, så
+ * PocketBase gör en fält-UPPDATERING i stället för drop+create (båda är TEXT i
+ * SQLite). Idempotent — hoppar över om fältet redan är text.
+ */
+async function convertSelectFieldToText(collectionName, fieldName, opts = {}) {
+  let collection;
+  try {
+    collection = await pb.collections.getOne(collectionName);
+  } catch (err) {
+    if (err?.status === 404) {
+      warn(`${collectionName}: finns inte — hoppar fälttyp-konvertering`);
+      return;
+    }
+    throw err;
+  }
+  const fields = [...(collection.fields || [])];
+  const idx = fields.findIndex((f) => f.name === fieldName);
+  if (idx === -1) {
+    warn(`${collectionName}.${fieldName}: fältet saknas — hoppar konvertering`);
+    return;
+  }
+  if (fields[idx].type === 'text') {
+    warn(`${collectionName}.${fieldName} är redan text — hoppar`);
+    return;
+  }
+  fields[idx] = {
+    id: fields[idx].id,
+    name: fieldName,
+    type: 'text',
+    required: !!fields[idx].required,
+    min: opts.min ?? 0,
+    max: opts.max ?? 0
+  };
+  try {
+    await pb.collections.update(collectionName, { fields });
+  } catch (err) {
+    if (!containsErrorCode(err, 'validation_field_type_change')) throw err;
+
+    warn(
+      `${collectionName}.${fieldName}: PocketBase REST kan inte ändra fälttyp från select till text — ` +
+        'hoppar över; migration 1700000140 måste köras av PocketBase-containern'
+    );
+    return;
+  }
+  ok(`${collectionName}.${fieldName} konverterad till text`);
+}
+
+/** Seedar default-kategorierna per tenant (idempotent). */
+async function seedAnnualWheelCategories() {
+  const defaults = [
+    { key: 'styrelse', label: 'Styrelse', token: 'gron', sort_order: 0, show_on_home: true },
+    { key: 'ledning', label: 'Ledning', token: 'gul', sort_order: 1, show_on_home: true },
+    { key: 'gemensamt', label: 'Gemensamt', token: 'lila', sort_order: 2, show_on_home: true }
+  ];
+  let tenants;
+  try {
+    tenants = await pb.collection('tenants').getFullList();
+  } catch (err) {
+    warn(`kunde inte lista tenants för kategori-seed: ${describeError(err)}`);
+    return;
+  }
+  for (const tenant of tenants) {
+    for (const def of defaults) {
+      const existing = await pb
+        .collection('annual_wheel_categories')
+        .getFirstListItem(pb.filter('tenant = {:t} && key = {:k}', { t: tenant.id, k: def.key }))
+        .catch(() => null);
+      if (existing) continue;
+      try {
+        await pb.collection('annual_wheel_categories').create({ tenant: tenant.id, ...def });
+        ok(`årshjuls-kategori "${def.key}" seedad för tenant ${tenant.id}`);
+      } catch (err) {
+        warn(`kategori-seed "${def.key}" misslyckades: ${describeError(err)}`);
+      }
+    }
+  }
+}
+
+// Migration 1700000139: annual_wheel_categories — DYNAMISKA kategorier per
+// tenant (§ 30). Bara superadmin (`admin`) får skapa/ändra/radera dem →
+// update/delete-reglerna kräver admin; createRule refererar bara auth-fält
+// (§ 21.3) och rollen enforce:as i server-actionen. Läsning staff/observer-only.
+await ensureCollection({
+  id: 'annual_wheel_categories_collection',
+  name: 'annual_wheel_categories',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'key', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'label', type: 'text', required: true, min: 1, max: 60 },
+    {
+      name: 'token', type: 'select', required: true, maxSelect: 1,
+      // MÅSTE spegla AnnualWheelColorToken i packages/shared/src/annual-wheel.ts.
+      values: ['morkbla', 'djupbla', 'bla', 'morklila', 'lila', 'ljuslila', 'morkgron', 'gron', 'ljusgron', 'morkgul', 'gul', 'morkorange', 'orange']
+    },
+    { name: 'sort_order', type: 'number', required: false, onlyInt: true, min: 0, max: 999 },
+    // Migration 1700000146: visas kategorin i kalendern på Hemmaplan (§ 37)?
+    { name: 'show_on_home', type: 'bool', required: false },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_annual_wheel_categories_tenant_key ON annual_wheel_categories (tenant, key)',
+    'CREATE INDEX idx_annual_wheel_categories_tenant ON annual_wheel_categories (tenant)'
+  ],
+  listRule: READ_STAFF_OR_OBSERVER,
+  viewRule: READ_STAFF_OR_OBSERVER,
+  createRule: ANY_AUTH,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${ADMIN_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${ADMIN_EACH}`
+});
+
+// Migration 1700000146: `show_on_home` på befintliga installationer (bool,
+// valfritt; appen tolkar saknat/true som "visas").
+await patchCollection('annual_wheel_categories', [{ name: 'show_on_home', type: 'bool', required: false }]);
+
+// Migration 1700000140: `annual_wheel_items.category` blir TEXT (dynamiska
+// kategorier). ensureCollection/patchCollection byter inte fälttyp, så gör det
+// explicit — fältets id BEHÅLLS så PB gör en uppdatering (värdena följer med).
+await convertSelectFieldToText('annual_wheel_items', 'category', { min: 1, max: 40 });
+
+// Seed default-kategorierna per tenant (idempotent) — speglar migration
+// 1700000139 så en bootstrappad instans också får dem redigerbara.
+await seedAnnualWheelCategories();
+
+// Migration 1700000144: org_posts — dashboardens anslagstavla (§ 37). Nyheter,
+// info, instruktioner och firanden till organisationen. Läsning: staff/observer
+// ELLER audience="all" (då även bolagsmedlemmar, t.ex. på "Min översikt").
+// createRule roll-lös (§ 21.3 — rollen enforce:as i server-actionen);
+// update/delete: författaren själv eller admin/incubator_lead.
+await ensureCollection({
+  id: 'org_posts_collection',
+  name: 'org_posts',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'author', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 160 },
+    { name: 'body', type: 'text', required: false, max: 20000 },
+    // MÅSTE spegla ORG_POST_KINDS / ORG_POST_AUDIENCES i packages/shared/src/org-posts.ts.
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['news', 'notice', 'instruction', 'celebration', 'training'] },
+    { name: 'audience', type: 'select', required: true, maxSelect: 1, values: ['staff', 'all'] },
+    { name: 'pinned', type: 'bool', required: false },
+    { name: 'published_at', type: 'date', required: false },
+    { name: 'expires_at', type: 'date', required: false },
+    { name: 'link_url', type: 'text', required: false, max: 500 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_org_posts_tenant ON org_posts (tenant)',
+    'CREATE INDEX idx_org_posts_tenant_pinned ON org_posts (tenant, pinned)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || audience = "all")`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || audience = "all")`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`
+});
+// Migration 1700000145: org_posts.kind += 'training' (Internutbildningar-fliken,
+// § 37). Union — ensureCollection synkar inte fält på en befintlig collection.
+await patchCollection('org_posts', [], {
+  kind: { values: ['news', 'notice', 'instruction', 'celebration', 'training'] }
+});
+// Migration 1700000147: org_post_media (bilder/film/dokument på anslagstavlan,
+// § 37.6) + org_posts.media (json-lista med fil-referenser). Samma mönster som
+// workshop_media: riktiga PB-filer, tokenlös publik URL, roll-lös createRule.
+await ensureCollection({
+  id: 'org_post_media_collection',
+  name: 'org_post_media',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'uploaded_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    // MÅSTE spegla ORG_POST_MEDIA_KINDS / ORG_POST_MEDIA_MIMES i packages/shared/src/org-posts.ts.
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['image', 'video', 'file'] },
+    {
+      name: 'file',
+      type: 'file',
+      required: true,
+      maxSelect: 1,
+      maxSize: 209715200,
+      mimeTypes: [
+        'image/png', 'image/jpeg', 'image/webp', 'image/gif',
+        'video/mp4', 'video/webm', 'video/quicktime',
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      ],
+      thumbs: ['600x0', '1200x0']
+    },
+    { name: 'name', type: 'text', required: false, max: 200 },
+    { name: 'mime', type: 'text', required: false, max: 150 },
+    { name: 'size_bytes', type: 'number', required: false, min: 0 }
+  ],
+  indexes: ['CREATE INDEX idx_org_post_media_tenant ON org_post_media (tenant)'],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
+});
+await patchCollection('org_posts', [{ name: 'media', type: 'json', required: false, maxSize: 20000 }]);
 
 // Backfill: en tidigare körning hann skapa chat_threads/deep_jobs UTAN
 // created/updated (REST API:t auto-lägger dem inte). ensureCollection
@@ -3006,6 +3604,52 @@ const AUTODATE_FIELDS = [
 await patchCollection('chat_threads', AUTODATE_FIELDS);
 await patchCollection('deep_jobs', AUTODATE_FIELDS);
 await patchCollection('user_files', AUTODATE_FIELDS);
+// Migration 1700000125: RAG-kollektionerna skapades utan created/updated —
+// /kunskapsbas-listan sorterar på -created och nyckelords-fallbacken på
+// -updated, så utan fälten 400:ar PB och listan/sökningen blir tyst tom.
+await patchCollection('org_knowledge', AUTODATE_FIELDS);
+await patchCollection('org_knowledge_chunks', AUTODATE_FIELDS);
+await patchCollection('user_file_chunks', AUTODATE_FIELDS);
+// Årshjul (§ 30): säkerställ autodate även om en tidigare körning skapade
+// collectionen innan fälten lades till (idempotent).
+await patchCollection('annual_wheel_items', AUTODATE_FIELDS);
+
+// Migration 1700000128: generellt autodate-svep — PB v0.23 auto-lägger inte
+// created/updated, och flera äldre kollektioner (tool_runs, ai_usage_events
+// m.fl.) skapades utan dem → HTTP 400 på varje created-filter/-sortering
+// (/insights, /admin/ai-miljo, månadsbudget-spärren). Sveper ALLA
+// bas-kollektioner så bootstrap-vägen aldrig återinför buggen.
+{
+  const allForAutodate = await pb.collections.getFullList();
+  for (const c of allForAutodate) {
+    if (c.system || c.type !== 'base' || c.name.startsWith('_')) continue;
+    const fieldNames = new Set((c.fields || []).map((f) => f.name));
+    if (!fieldNames.has('created') || !fieldNames.has('updated')) {
+      await patchCollection(c.name, AUTODATE_FIELDS);
+    }
+  }
+}
+
+// Migration 1700000122/1700000130: org_knowledge.file accepterar även Word/
+// PowerPoint (OOXML-text, § 26.5) och bilder (PNG/JPG/WebP — text via Pixtral-
+// bildigenkänning, § 26 / § 28). ensureCollection uppdaterar inte befintliga
+// fält-options — patcha mime-whitelisten explicit.
+await patchCollection('org_knowledge', [], {
+  file: {
+    mimeTypes: [
+      'application/pdf',
+      'text/plain',
+      'text/markdown',
+      'text/csv',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'image/png',
+      'image/jpeg',
+      'image/webp'
+    ]
+  }
+});
 
 // Migration 1700000087/1700000088: cover-image `image` field på workshops +
 // workshop_areas. ensureCollection ovan lägger till fältet på NYA installs;
@@ -3020,6 +3664,37 @@ await patchCollection('workshop_areas', [{ ...EDUCATION_IMAGE_FIELD }]);
 await patchCollection('education_documents', [
   { name: 'area', type: 'relation', required: false, collectionId: 'workshop_areas_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
 ]);
+
+// Migration 1700000129: bolagskanban (fliken "Aktiviteter" på bolagskortet) —
+// tasks.status += backlog/review (6 kolumner) + tasks.assignees (Movexum-
+// kollegor på kortet). Inline-defen ovan täcker NYA installs; patchen täcker
+// BEFINTLIGA (idempotent på fältnamn/values).
+await patchCollection('tasks', [
+  { name: 'assignees', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 20 }
+], {
+  status: { values: ['open', 'in_progress', 'blocked', 'done', 'cancelled', 'backlog', 'review'], maxSelect: 1 }
+});
+
+// Migration 1700000139 (§ 30): årshjulets `track` (obligatoriskt spår) ersätts
+// av valfria `tags` (flera) + valfri `responsible`. Inline-defen ovan täcker
+// NYA installs; patchen täcker BEFINTLIGA — utan `required: false` på track
+// skulle en bootstrappad instans avvisa nya aktiviteter (400) eftersom appen
+// inte längre skriver fältet. Idempotent.
+// Migration 1700000141 utökar taggarna med marknadskanaler och lägger till
+// periodfälten (end_month/end_day) för kampanjer som löper över tid.
+const ANNUAL_WHEEL_TAG_VALUES = [
+  'kampanjer', 'verksamhetsrapporter', 'projekt', 'team', 'ledningsgrupp', 'projektstyrgrupper', 'ovrigt',
+  'linkedin', 'nyhetsbrev', 'event', 'pr', 'webinar', 'annonsering'
+];
+await patchCollection('annual_wheel_items', [
+  { name: 'tags', type: 'select', required: false, maxSelect: ANNUAL_WHEEL_TAG_VALUES.length, values: ANNUAL_WHEEL_TAG_VALUES },
+  { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+  { name: 'end_month', type: 'number', required: false, onlyInt: true, min: 1, max: 12 },
+  { name: 'end_day', type: 'number', required: false, onlyInt: true, min: 1, max: 31 }
+], {
+  track: { required: false },
+  tags: { values: ANNUAL_WHEEL_TAG_VALUES, maxSelect: ANNUAL_WHEEL_TAG_VALUES.length }
+});
 
 // =========================================================================
 // 18d. Field-patches på befintliga collections (porterade från migrations
@@ -3132,6 +3807,12 @@ await patchTenantsCollection([
   { name: 'default_hourly_rate_sek', type: 'number', required: false, min: 0, max: 100000 }
 ]);
 
+// Per-tenant AI-kostnadstak (USD/månad). 0/tomt = ärver env-default
+// MOVEXUM_MONTHLY_AI_BUDGET_USD (CLAUDE.md § 9.6). Migration 1700000122.
+await patchTenantsCollection([
+  { name: 'monthly_ai_budget_usd', type: 'number', required: false, min: 0, max: 1000000 }
+]);
+
 // 19. seed Movexum tenant ---------------------------------------------------
 const tenant = await ensureRecord('tenants', 'slug = "movexum"', {
   name: 'Movexum',
@@ -3207,6 +3888,12 @@ const FORCE_CREATE_RULES = {
   chat_threads: `${ANY_AUTH} && @request.auth.id = owner`,
   deep_jobs: `${ANY_AUTH} && @request.auth.id = owner`,
   user_files: `${ANY_AUTH} && @request.auth.id = owner`,
+  // Mötesläge (§ 34, migration 1700000142) — STRIKT ägaren-bara, samma
+  // mönster som chat_threads/user_files ovan.
+  meeting_transcripts: `${ANY_AUTH} && @request.auth.id = owner`,
+  org_knowledge: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  org_knowledge_chunks: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  user_file_chunks: `${ANY_AUTH} && @request.auth.id = owner`,
   ai_usage_events: `${ANY_AUTH} && @request.auth.id = user`,
   tool_run_feedback: `${ANY_AUTH} && @request.auth.id = user`,
   agent_actions: `${ANY_AUTH} && @request.auth.id = actor`,
@@ -3217,33 +3904,46 @@ const FORCE_CREATE_RULES = {
   compass_modules: `${ANY_AUTH} && @request.auth.tenant != ""`,
   compass_brand: `${ANY_AUTH} && @request.auth.tenant != ""`,
   compass_lead_sources: ANY_AUTH,
-  integration_providers: ANY_AUTH
+  integration_providers: ANY_AUTH,
+  // Årshjul (§ 30) — roll-enforcement i server-action + delat skrivlager.
+  annual_wheel_items: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Årshjuls-kategorier (§ 30, migration 1700000139) — create är roll-lös per
+  // § 21.3; superadmin-kravet ligger i server-actionen + update/delete-reglerna.
+  annual_wheel_categories: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // dashboardens anslagstavla (§ 37, migration 1700000144) — roll-enforcement i
+  // server-actionen.
+  org_posts: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  org_post_media: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
-log('Forcerar robusta createRules...');
-for (const [collectionName, desiredRule] of Object.entries(FORCE_CREATE_RULES)) {
-  let collection;
-  try {
-    collection = await pb.collections.getOne(collectionName);
-  } catch (err) {
-    if (err?.status === 404) {
-      warn(`createRule-sync: collection "${collectionName}" finns inte — hoppar`);
-      continue;
+async function enforceCreateRules(passLabel) {
+  log(`Forcerar robusta createRules${passLabel ? ` (${passLabel})` : ''}...`);
+  for (const [collectionName, desiredRule] of Object.entries(FORCE_CREATE_RULES)) {
+    let collection;
+    try {
+      collection = await pb.collections.getOne(collectionName);
+    } catch (err) {
+      if (err?.status === 404) {
+        warn(`createRule-sync: collection "${collectionName}" finns inte — hoppar`);
+        continue;
+      }
+      throw err;
     }
-    throw err;
-  }
 
-  if (collection.createRule === desiredRule) continue;
+    if (collection.createRule === desiredRule) continue;
 
-  await pb.collections.update(collectionName, { createRule: desiredRule });
-  const refreshed = await pb.collections.getOne(collectionName);
-  if (refreshed.createRule !== desiredRule) {
-    throw new Error(
-      `createRule-sync misslyckades för "${collectionName}". Förväntat: ${desiredRule}. Fick: ${refreshed.createRule}`
-    );
+    await pb.collections.update(collectionName, { createRule: desiredRule });
+    const refreshed = await pb.collections.getOne(collectionName);
+    if (refreshed.createRule !== desiredRule) {
+      throw new Error(
+        `createRule-sync misslyckades för "${collectionName}". Förväntat: ${desiredRule}. Fick: ${refreshed.createRule}`
+      );
+    }
+    ok(`createRule synkad: ${collectionName}`);
   }
-  ok(`createRule synkad: ${collectionName}`);
 }
+
+await enforceCreateRules('pass 1');
 
 // 23. svep alla list/view/update/delete-regler: `?=` → `:each ?=` -----------
 // PB v0.23.4 matchar inte `?=` mot multi-värde-fält (auth.roles,
@@ -3273,6 +3973,11 @@ log('Sveper list/view/update/delete-regler (?= → :each ?=)...');
     ok(`regel-operator fixad: ${collection.name} (${Object.keys(patch).join(', ')})`);
   }
 }
+
+// Kör en extra createRule-pass EFTER operator-svepet så att createRules
+// alltid är sista sanningen i scriptet (self-healing-jobbet verifierar just
+// detta direkt efter setup-via-api-körningen).
+await enforceCreateRules('pass 2');
 
 console.log('\n✓ Klart. Logga in på <din-web-url>/login med:');
 console.log(`  E-post:   ${APP_USER_EMAIL}`);

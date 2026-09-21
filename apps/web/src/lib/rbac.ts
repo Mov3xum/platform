@@ -1,4 +1,4 @@
-import { ALL_ROLES, coreModules, type Role } from '@platform/shared';
+import { ALL_ROLES, coreModules, isModuleEnabled, type Role } from '@platform/shared';
 import type { Tool } from '@platform/shared';
 
 export { ALL_ROLES };
@@ -14,15 +14,19 @@ export const canAccessModule = (userRoles: Role[] | undefined, moduleId: string)
   return hasRole(userRoles, mod.rolesAllowed);
 };
 
+/**
+ * Rollbehörighet (`rolesAllowed`) OCH användarens per-person-allow-lista
+ * (`users.enabled_modules`, CLAUDE.md § 36.3). Rollen är den hårda gränsen;
+ * allow-listan är UI-kurering och kan aldrig ge mer än rollen tillåter.
+ * `enabledModules === undefined` begränsar inte (legacy-anropare).
+ */
 export const canAccessModuleForUser = (
   userRoles: Role[] | undefined,
   moduleId: string,
-  disabledModules: string[] | undefined
+  enabledModules: readonly string[] | undefined
 ): boolean => {
-  if (Array.isArray(disabledModules) && disabledModules.includes(moduleId)) {
-    return false;
-  }
-  return canAccessModule(userRoles, moduleId);
+  if (!canAccessModule(userRoles, moduleId)) return false;
+  return isModuleEnabled(enabledModules, moduleId);
 };
 
 export const requireRole = (userRoles: Role[] | undefined, allowed: Role[]): void => {

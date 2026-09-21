@@ -1,0 +1,1239 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  MAX_MEETING_COUNTERPART,
+  MAX_MEETING_SECONDS,
+  MAX_MEETING_SEGMENTS,
+  MEETING_CONSENT_TEXT,
+  MEETING_KINDS,
+  MEETING_KIND_HINTS,
+  MEETING_KIND_LABELS,
+  type MeetingKind,
+  MEETING_FIRST_SEGMENT_SECONDS,
+  MEETING_MIN_SEGMENT_SECONDS,
+  MEETING_SEGMENT_SECONDS,
+  formatMeetingClock,
+  isEffectivelySilent,
+  type AudioLevel
+} from '@platform/shared';
+import { Icon } from '@/components/proto/Icon';
+import {
+  PcmRecorder,
+  createCaptureContext,
+  supportsPcmCapture,
+  type PcmSegment
+} from '@/lib/audio/pcm-recorder';
+import { VOICE_WAV_MIME, renderSamplesToWavDetailed } from '@/lib/audio/wav';
+import {
+  discardMeetingAction,
+  endMeetingAction,
+  generateMeetingProtocolAction,
+  getMeetingAction,
+  getMeetingPrefillAction,
+  listMeetingStartupsAction,
+  saveMeetingToStartupAction,
+  startMeetingAction,
+  structureMeetingTranscriptAction,
+  type MeetingStartupOption
+} from '@/lib/actions/meetings';
+
+/**
+ * Mötesläget i chatten (CLAUDE.md § 34). Hela flödet i en panel:
+ *
+ *   1. Uppstart — välj bolag/titel och bekräfta SAMTYCKESGRINDEN (GDPR art. 7:
+ *      mötet spelar in andra människor än användaren själv). Ingen inspelning
+ *      utan bocken.
+ *   2. Inspelning — ljudet fångas som EN obruten PCM-ström (Web Audio,
+ *      `lib/audio/pcm-recorder.ts`) och klipps i PAUSER i talet (60–90 s;
+ *      första segmentet 8–20 s så att texten syns snabbt). Varje segment
+ *      kodas till 16 kHz WAV, transkriberas direkt (Voxtral, Mistral EU —
+ *      eller en självhostad svensk modell när operatören satt upp en, § 31)
+ *      och dyker upp i live-transkriptet. Ljudet lämnar aldrig webbläsaren
+ *      annat än i själva segment-anropet och lagras aldrig. En krasch kostar
+ *      max ett segment — redan uppladdade segment finns kvar server-side.
+ *   3. Granskning — redigerbart transkript, AI-protokollutkast och LLM-gissad
+ *      turindelning (anonyma "Talare 1"-etiketter — ingen röstanalys, § 31.4).
+ *   4. Sparande — en MÄNSKLIG knapptryckning som lägger protokollet som
+ *      anteckning på valt bolagskort (valbar konfidentiell). Råtranskriptet
+ *      purgas då (lagringsminimering).
+ *
+ * Människa-i-loopen i varje steg (EU AI Act art. 14): agenten kan förbereda
+ * panelen (`start_meeting`) men aldrig starta inspelningen, aldrig bekräfta
+ * samtycket och aldrig spara.
+ */
+
+export interface MeetingInitial {
+  /** Mötestyp (default `startup`). */
+  kind?: MeetingKind;
+  startupId?: string;
+  startupName?: string;
+  /** Förifylld motpart för internt/externt möte. */
+  counterpart?: string;
+  title?: string;
+  /** Återuppta ett tidigare möte (status recording/ended) i granskningsläget. */
+  resumeMeetingId?: string;
+}
+
+interface Props {
+  initial?: MeetingInitial;
+  onClose: () => void;
+  /** Skickar en färdig prompt som en vanlig chatt-tur (t.ex. åtgärdsförslag). */
+  onSendToChat?: (prompt: string) => void;
+}
+
+type Phase = 'setup' | 'recording' | 'finishing' | 'review' | 'saving' | 'saved';
+
+interface LiveSegment {
+  index: number;
+  text: string;
+  status: 'pending' | 'done' | 'failed';
+  /** Servern mätte segmentet som effektivt tyst (ingen kostnad, ingen text). */
+  silent?: boolean;
+  /** Ljud fanns men AI-tjänsten kunde inte tolka något tal (serverns orsak). */
+  warning?: string;
+  /** Språk modellen rapporterade — visas när det inte är svenska. */
+  language?: string;
+}
+
+// Så länge mikrofonen får vara helt tyst innan panelen varnar — ~6 s täcker
+// naturliga pauser men fångar en avstängd/fel vald mikrofon långt innan
+// första segmentet (8–20 s) är uppladdat.
+const MIC_SILENT_WARNING_MS = 6000;
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: 'engelska',
+  de: 'tyska',
+  fr: 'franska',
+  es: 'spanska',
+  it: 'italienska',
+  nl: 'nederländska',
+  pt: 'portugisiska',
+  ru: 'ryska',
+  ar: 'arabiska',
+  hi: 'hindi',
+  zh: 'kinesiska',
+  ja: 'japanska',
+  ko: 'koreanska',
+  no: 'norska',
+  nb: 'norska',
+  da: 'danska',
+  fi: 'finska'
+};
+
+function languageLabel(code: string): string {
+  return LANGUAGE_NAMES[code] ?? code;
+}
+
+interface WakeLockSentinelLike {
+  release: () => Promise<void>;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
+  const [phase, setPhase] = useState<Phase>('setup');
+  const [error, setError] = useState<string | null>(null);
+  const [startups, setStartups] = useState<MeetingStartupOption[]>([]);
+  const [kind, setKind] = useState<MeetingKind>(initial?.kind ?? 'startup');
+  const [counterpart, setCounterpart] = useState(initial?.counterpart || '');
+  const [startupId, setStartupId] = useState(initial?.startupId || '');
+  const [title, setTitle] = useState(initial?.title || '');
+  const [consent, setConsent] = useState(false);
+  const [prefillNote, setPrefillNote] = useState<string | null>(null);
+  const [blockedReason, setBlockedReason] = useState<string | null>(null);
+
+  // Inspelning
+  const [elapsed, setElapsed] = useState(0);
+  const [segments, setSegments] = useState<LiveSegment[]>([]);
+  // Senaste transkriberings-/uppladdningsfelet från servern — visas för
+  // användaren i stället för att sväljas (annars är ett kort möte med ETT
+  // fallerat segment bara "tomt transkript" utan förklaring).
+  const [segmentError, setSegmentError] = useState<string | null>(null);
+  const segmentErrorRef = useRef<string | null>(null);
+  const failedCountRef = useRef(0);
+  // Segment som kom tillbaka TOMMA: tysta (ingen ljudnivå) respektive med ljud
+  // men utan tolkbart tal — avgör vilken förklaring granskningen ska ge när
+  // transkriptet blev tomt.
+  const silentCountRef = useRef(0);
+  const emptyWithAudioRef = useRef(0);
+  // Live-mätare på mikrofonen (ren nivåmätning, ingen röstanalys § 31.4) —
+  // drivs av samma PCM-ström som inspelningen.
+  const [inputLevel, setInputLevel] = useState(0);
+  const [micSilent, setMicSilent] = useState(false);
+  const micSilentSinceRef = useRef<number | null>(null);
+
+  // Granskning
+  const [transcript, setTranscript] = useState('');
+  const [protocol, setProtocol] = useState('');
+  const [aiBusy, setAiBusy] = useState<null | 'protocol' | 'turns'>(null);
+  const [includeTranscript, setIncludeTranscript] = useState(true);
+  const [confidential, setConfidential] = useState(false);
+  const [savedInfo, setSavedInfo] = useState<{
+    kind: MeetingKind;
+    subject: string;
+    startupId?: string;
+    fileId?: string;
+    filename?: string;
+  } | null>(null);
+
+  const meetingIdRef = useRef<string | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<PcmRecorder | null>(null);
+  const captureCtxRef = useRef<AudioContext | null>(null);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingRef = useRef(false);
+  const discardedRef = useRef(false);
+  const elapsedRef = useRef(0);
+  const uploadChainRef = useRef<Promise<void>>(Promise.resolve());
+  const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
+
+  // ── Miljökontroll: mikrofonen finns bara i säker kontext (https/localhost) ──
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (supportsPcmCapture()) return;
+    const hasMic = !!navigator.mediaDevices?.getUserMedia;
+    setBlockedReason(
+      !hasMic && window.isSecureContext === false
+        ? 'Mötesinspelning kräver en säker anslutning (https) — webbläsaren stänger av mikrofonen på http.'
+        : 'Din webbläsare stöder inte ljudinspelning (Web Audio saknas). Prova Chrome, Edge, Firefox eller Safari 14+.'
+    );
+  }, []);
+
+  // ── Bolagslista + Outlook-förifyllnad (fail-soft) ───────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await listMeetingStartupsAction();
+      if (!cancelled && res.startups) setStartups(res.startups);
+      if (!cancelled && res.error) setError(res.error);
+    })();
+    if (!initial?.resumeMeetingId && !initial?.startupId && !initial?.title) {
+      void (async () => {
+        const prefill = await getMeetingPrefillAction();
+        if (cancelled) return;
+        if (prefill.title) {
+          setTitle((cur) => cur || prefill.title || '');
+          setPrefillNote(
+            prefill.startupName
+              ? `Förifyllt från ditt pågående Outlook-möte (${prefill.startupName}).`
+              : 'Mötestiteln är förifylld från ditt pågående Outlook-möte.'
+          );
+        }
+        if (prefill.startupId) setStartupId((cur) => cur || prefill.startupId || '');
+      })();
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Återuppta ett oavslutat möte direkt i granskningen ─────────────────────
+  useEffect(() => {
+    const resumeId = initial?.resumeMeetingId;
+    if (!resumeId) return;
+    let cancelled = false;
+    void (async () => {
+      // Ett möte som lämnades i 'recording' (kraschad flik) kan inte återuppta
+      // själva inspelningen (strömmen är borta) — avsluta det och granska
+      // det som hann transkriberas.
+      const res = await endMeetingAction(resumeId);
+      if (cancelled) return;
+      if (res.error || !res.meeting) {
+        setError(res.error || 'Kunde inte återuppta mötet.');
+        return;
+      }
+      meetingIdRef.current = res.meeting.id;
+      setTitle(res.meeting.title);
+      setKind(res.meeting.kind);
+      setCounterpart(res.meeting.counterpart);
+      setStartupId(res.meeting.startupId);
+      setTranscript(res.meeting.transcript);
+      setPhase('review');
+      // Protokollet persisteras inte i mötesraden — ta fram ett nytt utkast
+      // direkt vid återupptagen granskning (samma auto-flöde som vid avslut).
+      autoGenerateProtocol(res.meeting.transcript);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial?.resumeMeetingId]);
+
+  // ── Wake lock: håll skärmen vaken under inspelning (mic dör annars) ─────────
+  const requestWakeLock = useCallback(async () => {
+    try {
+      const wl = (navigator as { wakeLock?: { request: (t: 'screen') => Promise<WakeLockSentinelLike> } })
+        .wakeLock;
+      if (wl) wakeLockRef.current = await wl.request('screen');
+    } catch {
+      /* wake lock är en förbättring, aldrig ett krav */
+    }
+  }, []);
+
+  const releaseWakeLock = useCallback(() => {
+    void wakeLockRef.current?.release().catch(() => undefined);
+    wakeLockRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    function onVisibility() {
+      if (document.visibilityState === 'visible' && recordingRef.current) {
+        void requestWakeLock();
+        // Ljudkontexten kan ha pausats medan fliken var dold — väck den.
+        void captureCtxRef.current?.resume().catch(() => undefined);
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [requestWakeLock]);
+
+  // ── Varna innan fliken stängs mitt i en inspelning ─────────────────────────
+  useEffect(() => {
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (recordingRef.current) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    }
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
+
+  /** Stoppar inspelaren (levererar sista segmentet), mikrofonen och ljudkontexten. */
+  const stopCapture = useCallback(() => {
+    try {
+      recorderRef.current?.stop();
+    } catch {
+      /* redan stoppad */
+    }
+    recorderRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    void captureCtxRef.current?.close().catch(() => undefined);
+    captureCtxRef.current = null;
+    micSilentSinceRef.current = null;
+    setInputLevel(0);
+    setMicSilent(false);
+  }, []);
+
+  // Städa vid unmount (panelen stängs mitt i något).
+  useEffect(() => {
+    return () => {
+      recordingRef.current = false;
+      if (tickRef.current) clearInterval(tickRef.current);
+      try {
+        recorderRef.current?.stop();
+      } catch {
+        /* redan stoppad */
+      }
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      void captureCtxRef.current?.close().catch(() => undefined);
+      void wakeLockRef.current?.release().catch(() => undefined);
+    };
+  }, []);
+
+  function updateSegment(index: number, patch: Partial<LiveSegment>) {
+    setSegments((prev) => prev.map((s) => (s.index === index ? { ...s, ...patch } : s)));
+  }
+
+  // ── Mikrofonmätare: visar direkt om mikrofonen fångar något alls ──────────
+  // Utan den syns en avstängd/fel vald mikrofon först som ett tomt transkript
+  // efter mötet. Ren nivåmätning (topp/RMS) — ingen röstidentifiering.
+  function handleLevel(level: AudioLevel) {
+    if (!recordingRef.current) return;
+    // Peak-hold med avklingning så stapeln är läsbar för ögat.
+    setInputLevel((prev) => Math.max(level.peak, prev * 0.7));
+    const now = Date.now();
+    if (isEffectivelySilent(level)) {
+      if (micSilentSinceRef.current === null) micSilentSinceRef.current = now;
+      setMicSilent(now - micSilentSinceRef.current >= MIC_SILENT_WARNING_MS);
+    } else {
+      micSilentSinceRef.current = null;
+      setMicSilent(false);
+    }
+  }
+
+  async function uploadSegment(
+    blob: Blob | null,
+    mime: string,
+    index: number,
+    attempt = 0
+  ): Promise<void> {
+    const meetingId = meetingIdRef.current;
+    if (!meetingId || discardedRef.current) return;
+    try {
+      const form = new FormData();
+      form.append('meetingId', meetingId);
+      form.append('segmentIndex', String(index));
+      if (blob) {
+        form.append('audio', new File([blob], `segment-${index}`, { type: mime }));
+      } else {
+        // Klienten mätte segmentet som effektivt tyst: registrera det UTAN
+        // ljud (index-kontinuitet för luck-markören) — ingen uppladdning av
+        // ~2,9 MB tystnad, inget Voxtral-anrop. Servern mäter själv när ljud
+        // skickas; klienten är aldrig säkerhetsgränsen.
+        form.append('silent', '1');
+      }
+      const res = await fetch('/api/chat/meeting/segment', { method: 'POST', body: form });
+      const data = (await res.json().catch(() => ({}))) as {
+        text?: string;
+        error?: string;
+        silent?: boolean;
+        warning?: string;
+        language?: string;
+      };
+      if (!res.ok) throw new Error(data.error || 'Uppladdningen misslyckades.');
+      const text = data.text || '';
+      if (!text) {
+        if (data.silent) silentCountRef.current += 1;
+        else emptyWithAudioRef.current += 1;
+      }
+      updateSegment(index, {
+        text,
+        status: 'done',
+        silent: !text && Boolean(data.silent),
+        warning: !text && !data.silent ? data.warning || undefined : undefined,
+        language: text && data.language ? data.language : undefined
+      });
+    } catch (err) {
+      if (attempt === 0 && !discardedRef.current) {
+        await sleep(1500);
+        return uploadSegment(blob, mime, index, 1);
+      }
+      // Segmentet är förlorat — servern markerar luckan i transkriptet
+      // (saknat index ⇒ lucka-markör), så coachen ser aldrig ett tyst hål.
+      // ORSAKEN visas för användaren (Voxtral-/konfigurations-/behörighetsfel
+      // ska aldrig sväljas till ett oförklarat tomt transkript).
+      const message =
+        err instanceof Error && err.message ? err.message : 'Uppladdningen misslyckades.';
+      segmentErrorRef.current = message;
+      failedCountRef.current += 1;
+      setSegmentError(message);
+      updateSegment(index, { status: 'failed' });
+    }
+  }
+
+  /**
+   * Ett klippt PCM-segment från inspelaren: kodas till 16 kHz WAV och laddas
+   * upp i ordning. Tysta segment (avstängd mikrofon, ingen som pratar)
+   * registreras utan ljud — ingen kostnad.
+   */
+  function enqueueSegment(segment: PcmSegment) {
+    if (discardedRef.current || segment.index >= MAX_MEETING_SEGMENTS) return;
+    setSegments((prev) => [...prev, { index: segment.index, text: '', status: 'pending' }]);
+    uploadChainRef.current = uploadChainRef.current.then(async () => {
+      if (isEffectivelySilent(segment.level)) {
+        return uploadSegment(null, VOICE_WAV_MIME, segment.index);
+      }
+      const converted = await renderSamplesToWavDetailed(segment.samples, segment.sampleRate);
+      if (isEffectivelySilent(converted.level)) {
+        return uploadSegment(null, VOICE_WAV_MIME, segment.index);
+      }
+      return uploadSegment(converted.wav, VOICE_WAV_MIME, segment.index);
+    });
+  }
+
+  async function beginRecording() {
+    setError(null);
+    if (blockedReason) {
+      setError(blockedReason);
+      return;
+    }
+    if (!consent) {
+      setError('Bekräfta att deltagarna är informerade innan mötet startas.');
+      return;
+    }
+
+    // Ljudkontexten skapas HÄR, synkront i klick-händelsen (innan getUserMedia/
+    // server-anropet hunnit vänta) — autoplay-policyn låter en AudioContext
+    // starta bara inom användaraktiveringen; skapad senare blir den
+    // `suspended`, inspelaren får inga samples och mätaren visar nollor.
+    const captureCtx = createCaptureContext();
+    if (!captureCtx) {
+      setError('Kunde inte starta ljudinspelningen i den här webbläsaren.');
+      return;
+    }
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          // Rumsljud: brusreducering och auto-nivå hjälper talmodellen; ekosläckning
+          // tar bort en ev. högtalare i rummet. Bara hintar — webbläsaren avgör.
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+    } catch (err) {
+      void captureCtx.close().catch(() => undefined);
+      const name = err instanceof Error ? err.name : '';
+      setError(
+        name === 'NotAllowedError'
+          ? 'Mikrofonen är blockerad. Tillåt mikrofon för sidan och försök igen.'
+          : 'Kunde inte starta mikrofonen.'
+      );
+      return;
+    }
+
+    const started = await startMeetingAction({
+      kind,
+      startupId: kind === 'startup' ? startupId || null : null,
+      counterpart: kind === 'startup' ? null : counterpart || null,
+      title: title || null,
+      consentConfirmed: consent
+    });
+    if (started.error || !started.meetingId) {
+      stream.getTracks().forEach((t) => t.stop());
+      void captureCtx.close().catch(() => undefined);
+      setError(started.error || 'Kunde inte starta mötet.');
+      return;
+    }
+
+    meetingIdRef.current = started.meetingId;
+    streamRef.current = stream;
+    captureCtxRef.current = captureCtx;
+    discardedRef.current = false;
+    recordingRef.current = true;
+    elapsedRef.current = 0;
+    segmentErrorRef.current = null;
+    failedCountRef.current = 0;
+    silentCountRef.current = 0;
+    emptyWithAudioRef.current = 0;
+    micSilentSinceRef.current = null;
+    setSegmentError(null);
+    setSegments([]);
+    setElapsed(0);
+    setMicSilent(false);
+    setPhase('recording');
+    void requestWakeLock();
+
+    const recorder = new PcmRecorder(captureCtx, stream, {
+      onSegment: enqueueSegment,
+      onLevel: handleLevel,
+      onError: (message) => setError(message)
+    });
+    recorderRef.current = recorder;
+    recorder.start();
+
+    tickRef.current = setInterval(() => {
+      elapsedRef.current += 1;
+      setElapsed(elapsedRef.current);
+      if (elapsedRef.current >= MAX_MEETING_SECONDS) void finishMeeting();
+    }, 1000);
+  }
+
+  async function finishMeeting() {
+    if (!recordingRef.current) return;
+    recordingRef.current = false;
+    if (tickRef.current) clearInterval(tickRef.current);
+    setPhase('finishing');
+    // stop() levererar det sista segmentet synkront innan mikrofonen släpps.
+    stopCapture();
+    releaseWakeLock();
+    // Vänta in transkriberingskön så granskningen visar hela mötet.
+    await uploadChainRef.current;
+    const meetingId = meetingIdRef.current;
+    if (!meetingId) {
+      setPhase('setup');
+      return;
+    }
+    const res = await endMeetingAction(meetingId);
+    if (res.error || !res.meeting) {
+      setError(res.error || 'Kunde inte avsluta mötet — försök igen.');
+      setPhase('review');
+      return;
+    }
+    const ended = res.meeting;
+    setTranscript(ended.transcript);
+    if (ended.startupId) setStartupId((cur) => cur || ended.startupId);
+    // Föll segment bort ska granskningen förklara VARFÖR — särskilt när hela
+    // transkriptet blev tomt (ett kort möte har bara ett enda segment).
+    if (failedCountRef.current > 0) {
+      const reason = segmentErrorRef.current;
+      setError(
+        `${failedCountRef.current} segment kunde inte transkriberas` +
+          (reason ? `: ${reason}` : '.') +
+          (ended.transcript.trim()
+            ? ' De markeras som luckor i transkriptet.'
+            : ' Transkriptet blev därför tomt.')
+      );
+    } else if (!ended.transcript.trim()) {
+      // Tomt utan uppladdningsfel — förklara VARFÖR utifrån nivåmätningen,
+      // annars ser funktionen bara "trasig" ut.
+      setError(
+        emptyWithAudioRef.current > 0
+          ? `Ljud spelades in men AI-tjänsten kunde inte tolka något tal i ${emptyWithAudioRef.current} segment. ` +
+              'Prova igen närmare mikrofonen, med mindre bakgrundsljud — och kontrollera att rätt mikrofon är vald.'
+          : silentCountRef.current > 0
+            ? 'Mikrofonen fångade inget ljud under mötet — transkriptet är tomt. Kontrollera att rätt mikrofon är vald i webbläsaren/datorn och att den inte är avstängd, och starta ett nytt möte.'
+            : 'Inget segment hann laddas upp — transkriptet är tomt.'
+      );
+    }
+    setPhase('review');
+    autoGenerateProtocol(ended.transcript);
+  }
+
+  /**
+   * Tar fram protokollutkastet (sammanfattning/beslut/åtgärdspunkter) direkt
+   * när granskningen öppnas — mötet ska sammanställas utan extra klick.
+   * Människa-i-loopen är intakt (art. 14): utkastet granskas/redigeras och
+   * INGET sparas automatiskt. Fel sväljs här — knappen "Generera protokoll"
+   * finns kvar och visar orsaken vid ett manuellt försök.
+   */
+  function autoGenerateProtocol(currentTranscript: string) {
+    const meetingId = meetingIdRef.current;
+    if (!meetingId || !currentTranscript.trim()) return;
+    setAiBusy('protocol');
+    void generateMeetingProtocolAction(meetingId)
+      .then((res) => {
+        if (res.protocol) setProtocol((cur) => cur || res.protocol || '');
+      })
+      .catch(() => undefined)
+      .finally(() => setAiBusy(null));
+  }
+
+  async function discardMeeting() {
+    const label =
+      phase === 'recording'
+        ? 'Avbryta inspelningen och radera transkriptet?'
+        : 'Radera mötet och transkriptet permanent?';
+    if (!window.confirm(label)) return;
+    discardedRef.current = true;
+    recordingRef.current = false;
+    if (tickRef.current) clearInterval(tickRef.current);
+    stopCapture();
+    releaseWakeLock();
+    const meetingId = meetingIdRef.current;
+    if (meetingId) await discardMeetingAction(meetingId);
+    onClose();
+  }
+
+  async function refreshTranscriptFromServer() {
+    const meetingId = meetingIdRef.current;
+    if (!meetingId) return;
+    const res = await getMeetingAction(meetingId);
+    if (res.meeting) setTranscript(res.meeting.transcript);
+  }
+
+  async function runProtocol() {
+    const meetingId = meetingIdRef.current;
+    if (!meetingId) return;
+    setError(null);
+    setAiBusy('protocol');
+    try {
+      const res = await generateMeetingProtocolAction(meetingId);
+      if (res.error) setError(res.error);
+      else if (res.protocol) setProtocol(res.protocol);
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  async function runTurnSplit() {
+    const meetingId = meetingIdRef.current;
+    if (!meetingId) return;
+    setError(null);
+    setAiBusy('turns');
+    try {
+      const res = await structureMeetingTranscriptAction(meetingId);
+      if (res.error) setError(res.error);
+      else if (res.transcript) setTranscript(res.transcript);
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  async function saveMeeting() {
+    const meetingId = meetingIdRef.current;
+    if (!meetingId) return;
+    if (kind === 'startup' && !startupId) {
+      setError('Välj vilket bolagskort mötet ska sparas på.');
+      return;
+    }
+    if (!protocol.trim() && !transcript.trim()) {
+      setError('Det finns inget protokoll eller transkript att spara.');
+      return;
+    }
+    setError(null);
+    setPhase('saving');
+    const res = await saveMeetingToStartupAction(meetingId, {
+      startupId: kind === 'startup' ? startupId : undefined,
+      confidential: kind === 'startup' ? confidential : false,
+      includeTranscript,
+      protocolText: protocol,
+      transcriptText: includeTranscript ? transcript : undefined
+    });
+    if (res.error || (!res.startupId && !res.fileId)) {
+      setError(res.error || 'Kunde inte spara mötet.');
+      setPhase('review');
+      return;
+    }
+    setSavedInfo({
+      kind: res.kind ?? kind,
+      subject: res.subject || res.startupName || counterpart || 'mötet',
+      startupId: res.startupId,
+      fileId: res.fileId,
+      filename: res.filename
+    });
+    setPhase('saved');
+  }
+
+  function suggestActionsInChat() {
+    if (!onSendToChat || !savedInfo) return;
+    const basis = protocol.trim() || transcript.trim().slice(0, 4000);
+    const isStartup = savedInfo.kind === 'startup';
+    onSendToChat(
+      `Här är protokollet från ${isStartup ? `mötet med ${savedInfo.subject}` : `${MEETING_KIND_LABELS[savedInfo.kind].toLowerCase()}t${savedInfo.subject ? ` med ${savedInfo.subject}` : ''}`}${title ? ` ("${title}")` : ''}:\n\n` +
+        `${basis}\n\n` +
+        (isStartup
+          ? 'Föreslå utifrån åtgärdspunkterna vilka kanban-kort som bör skapas på bolagets tavla, ' +
+            'om nästa steg bör uppdateras och om ett uppföljningsmöte bör bokas — och genomför det vi kommer överens om.'
+          : 'Föreslå utifrån åtgärdspunkterna vilka uppgifter, events i kalendern eller inlägg på anslagstavlan ' +
+            'som bör skapas, och om ett uppföljningsmöte bör bokas — och genomför det vi kommer överens om.')
+    );
+    onClose();
+  }
+
+  const doneSegments = segments.filter((s) => s.status === 'done');
+  const failedSegments = segments.filter((s) => s.status === 'failed');
+  const pendingCount = segments.filter((s) => s.status === 'pending').length;
+  const hasLiveText = doneSegments.some((s) => s.text);
+  const silentDone = doneSegments.filter((s) => s.silent).length;
+  const emptyWithAudioDone = doneSegments.filter((s) => !s.text && !s.silent).length;
+  const foreignLanguages = Array.from(
+    new Set(doneSegments.map((s) => s.language).filter((l): l is string => !!l && l !== 'sv'))
+  );
+
+  const heading =
+    phase === 'setup'
+      ? 'Starta ett möte'
+      : phase === 'recording'
+        ? 'Mötet spelas in'
+        : phase === 'finishing'
+          ? 'Avslutar mötet…'
+          : phase === 'saved'
+            ? 'Mötet är sparat'
+            : 'Granska mötet';
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-movexum-svart/60 p-4 backdrop-blur-sm md:p-8"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Mötesläge"
+    >
+      <div className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-default bg-surface shadow-xl shadow-movexum-svart/20">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3 border-b border-default px-5 py-3.5">
+          <span className="inline-flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-movexum-pastell-lila text-movexum-morklila">
+              <Icon name="mic" size={15} />
+            </span>
+            <span className="font-heading text-[15px] font-semibold text-foreground">{heading}</span>
+            {phase === 'recording' && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-movexum-lila px-2.5 py-0.5 text-[12px] font-medium tabular-nums text-movexum-vit">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-movexum-vit" aria-hidden="true" />
+                {formatMeetingClock(elapsed)}
+              </span>
+            )}
+          </span>
+          {phase !== 'recording' && phase !== 'finishing' && phase !== 'saving' && (
+            <button
+              type="button"
+              onClick={phase === 'review' ? discardMeeting : onClose}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground"
+              title={phase === 'review' ? 'Kasta mötet' : 'Stäng'}
+              aria-label={phase === 'review' ? 'Kasta mötet' : 'Stäng'}
+            >
+              <Icon name="x" size={14} />
+            </button>
+          )}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {error && (
+            <div className="mb-3 rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange">
+              {error}
+            </div>
+          )}
+
+          {/* ── Uppstart ── */}
+          {phase === 'setup' && (
+            <div className="flex flex-col gap-4">
+              <p className="text-[13.5px] leading-relaxed text-foreground-muted">
+                Allt som sägs transkriberas live (Voxtral, Mistral — EU-suveränt) och kan efter
+                granskning sparas som anteckning på ett bolagskort. Ljudet lagras aldrig.
+              </p>
+              {prefillNote && (
+                <p className="rounded-xl bg-movexum-pastell-bla px-3 py-2 text-[12.5px] text-movexum-djupbla">
+                  {prefillNote}
+                </p>
+              )}
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                  Mötestitel (valfri)
+                </span>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  maxLength={200}
+                  placeholder="T.ex. Coachmöte september"
+                  className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground placeholder:text-foreground-subtle focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+                />
+              </label>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                  Typ av möte
+                </span>
+                <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Typ av möte">
+                  {MEETING_KINDS.map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="radio"
+                      aria-checked={kind === k}
+                      onClick={() => setKind(k)}
+                      className={`rounded-xl border px-3 py-1.5 text-[13px] font-medium transition ${
+                        kind === k
+                          ? 'border-brand bg-brand text-brand-foreground'
+                          : 'border-default bg-canvas text-foreground-muted hover:border-strong hover:text-foreground'
+                      }`}
+                    >
+                      {MEETING_KIND_LABELS[k]}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[12px] text-foreground-subtle">{MEETING_KIND_HINTS[kind]}</p>
+              </div>
+
+              {kind === 'startup' ? (
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    Bolag (kan väljas/ändras efter mötet)
+                  </span>
+                  <select
+                    value={startupId}
+                    onChange={(e) => setStartupId(e.target.value)}
+                    className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+                  >
+                    <option value="">— Välj senare —</option>
+                    {startups.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    {kind === 'internal' ? 'Vilket forum/team?' : 'Vem är mötet med?'}
+                  </span>
+                  <input
+                    type="text"
+                    value={counterpart}
+                    onChange={(e) => setCounterpart(e.target.value)}
+                    maxLength={MAX_MEETING_COUNTERPART}
+                    placeholder={
+                      kind === 'internal'
+                        ? 'T.ex. Ledningsgruppen, Styrelsen, Coachteamet'
+                        : 'T.ex. Region Gävleborg, Almi, Gävle kommun'
+                    }
+                    className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground placeholder:text-foreground-subtle focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+                  />
+                  <span className="text-[11.5px] text-foreground-subtle">
+                    Organisation eller forum — skriv inte personnamn.
+                  </span>
+                </label>
+              )}
+
+              <label className="flex items-start gap-2.5 rounded-xl border border-default bg-canvas-subtle p-3">
+                <input
+                  type="checkbox"
+                  checked={consent}
+                  onChange={(e) => setConsent(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-[var(--color-brand)]"
+                />
+                <span className="text-[13px] leading-relaxed text-foreground">
+                  {MEETING_CONSENT_TEXT}
+                </span>
+              </label>
+
+              {blockedReason && (
+                <p className="rounded-xl bg-movexum-pastell-gul px-3 py-2 text-[12.5px] text-movexum-morkgul">
+                  {blockedReason}
+                </p>
+              )}
+
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-xl border border-default px-4 py-2 text-[13px] font-medium text-foreground-muted transition hover:border-strong hover:text-foreground"
+                >
+                  Avbryt
+                </button>
+                <button
+                  type="button"
+                  onClick={beginRecording}
+                  disabled={!consent || !!blockedReason}
+                  className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-[13px] font-medium text-brand-foreground transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Icon name="mic" size={13} />
+                  Starta mötet
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Inspelning ── */}
+          {(phase === 'recording' || phase === 'finishing') && (
+            <div className="flex flex-col gap-3">
+              <p className="text-[12.5px] text-foreground-subtle">
+                Transkriberas löpande i pauserna i samtalet — första texten dyker upp inom ca{' '}
+                {MEETING_FIRST_SEGMENT_SECONDS} sekunder, därefter ungefär varje{' '}
+                {MEETING_MIN_SEGMENT_SECONDS}–{MEETING_SEGMENT_SECONDS} sekunder. Lämna gärna
+                fliken öppen — skärmen hålls vaken under inspelningen.
+              </p>
+              {/* Mikrofonmätare — visar direkt om mikrofonen fångar ljud. */}
+              <div className="flex items-center gap-2.5" aria-live="polite">
+                <span className="text-[11.5px] font-medium uppercase tracking-[0.06em] text-foreground-subtle">
+                  Mikrofon
+                </span>
+                <span
+                  className="relative h-2 flex-1 overflow-hidden rounded-full bg-canvas-muted"
+                  role="meter"
+                  aria-label="Mikrofonnivå"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(Math.min(1, inputLevel * 3) * 100)}
+                >
+                  <span
+                    className={`absolute inset-y-0 left-0 rounded-full transition-[width] duration-150 ${
+                      micSilent ? 'bg-movexum-orange' : 'bg-movexum-gron'
+                    }`}
+                    style={{ width: `${Math.round(Math.min(1, inputLevel * 3) * 100)}%` }}
+                  />
+                </span>
+              </div>
+              {micSilent && (
+                <p className="rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange">
+                  Mikrofonen fångar inget ljud. Kontrollera att rätt mikrofon är vald i webbläsaren
+                  och datorn och att den inte är avstängd — annars blir transkriptet tomt.
+                </p>
+              )}
+              {foreignLanguages.length > 0 && (
+                <p className="rounded-xl bg-movexum-pastell-gul px-3 py-2 text-[12.5px] text-movexum-morkgul">
+                  AI-tjänsten tolkade ett eller flera avsnitt som{' '}
+                  {foreignLanguages.map(languageLabel).join(', ')} — kontrollera texten. Talas
+                  svenska bör en svensktränad modell användas (se inställningarna för
+                  transkribering).
+                </p>
+              )}
+              <div className="flex min-h-[180px] flex-col gap-2 rounded-xl border border-default bg-canvas-subtle p-3">
+                {doneSegments.length === 0 && pendingCount === 0 ? (
+                  <p className="text-[13px] italic text-foreground-subtle">
+                    Transkriptet dyker upp här allteftersom ni pratar…
+                  </p>
+                ) : (
+                  <>
+                    {doneSegments.map((s) =>
+                      s.text ? (
+                        <p key={s.index} className="text-[13.5px] leading-relaxed text-foreground">
+                          {s.text}
+                        </p>
+                      ) : s.silent ? (
+                        <p key={s.index} className="text-[12px] italic text-foreground-subtle">
+                          (tyst avsnitt — inget ljud i segmentet)
+                        </p>
+                      ) : (
+                        <p key={s.index} className="text-[12px] text-movexum-morkorange dark:text-movexum-pastell-orange">
+                          {s.warning || 'Ingen text kunde tolkas i segmentet.'}
+                        </p>
+                      )
+                    )}
+                    {!hasLiveText && pendingCount === 0 && silentDone > 0 && emptyWithAudioDone === 0 && (
+                      <p className="text-[12.5px] text-foreground-subtle">
+                        Hittills har inget ljud fångats — kontrollera mikrofonen ovan.
+                      </p>
+                    )}
+                    {pendingCount > 0 && (
+                      <p className="inline-flex items-center gap-2 text-[12.5px] text-foreground-subtle">
+                        <span className="h-3 w-3 animate-spin rounded-full border border-foreground-subtle border-t-transparent" aria-hidden />
+                        Transkriberar {pendingCount} segment…
+                      </p>
+                    )}
+                  </>
+                )}
+                {failedSegments.length > 0 && (
+                  <p className="text-[12px] text-movexum-morkorange">
+                    {failedSegments.length} segment kunde inte transkriberas
+                    {segmentError ? ` (${segmentError})` : ''} — de markeras som luckor i
+                    transkriptet.
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={discardMeeting}
+                  disabled={phase === 'finishing'}
+                  className="rounded-xl px-3 py-2 text-[12.5px] text-movexum-morkorange transition hover:bg-movexum-pastell-orange disabled:opacity-40"
+                >
+                  Avbryt utan att spara
+                </button>
+                <button
+                  type="button"
+                  onClick={finishMeeting}
+                  disabled={phase === 'finishing'}
+                  className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-[13.5px] font-medium text-brand-foreground transition hover:bg-brand-hover disabled:opacity-60"
+                >
+                  {phase === 'finishing' ? (
+                    <>
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand-foreground border-t-transparent" aria-hidden />
+                      Väntar in transkriberingen…
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="check" size={13} />
+                      Avsluta mötet
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Granskning ── */}
+          {(phase === 'review' || phase === 'saving') && (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    Transkript (redigerbart)
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={runTurnSplit}
+                      disabled={aiBusy !== null || !transcript.trim()}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-default px-2.5 py-1 text-[12px] font-medium text-foreground-muted transition hover:border-strong hover:text-foreground disabled:opacity-40"
+                      title='Dela upp texten i anonyma repliker ("Talare 1/2") — en språklig gissning, ingen röstanalys. Du kan döpa talarna själv efteråt.'
+                    >
+                      {aiBusy === 'turns' ? (
+                        <span className="h-3 w-3 animate-spin rounded-full border border-foreground-subtle border-t-transparent" aria-hidden />
+                      ) : (
+                        <Icon name="people" size={12} />
+                      )}
+                      Dela upp i repliker
+                    </button>
+                    <button
+                      type="button"
+                      onClick={refreshTranscriptFromServer}
+                      disabled={aiBusy !== null}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-default px-2.5 py-1 text-[12px] font-medium text-foreground-muted transition hover:border-strong hover:text-foreground disabled:opacity-40"
+                      title="Hämta om originaltranskriptet från servern (ångra redigeringar)"
+                    >
+                      Återställ
+                    </button>
+                  </span>
+                </div>
+                <textarea
+                  value={transcript}
+                  onChange={(e) => setTranscript(e.target.value)}
+                  rows={8}
+                  className="rounded-xl border border-default bg-canvas px-3 py-2 text-[13.5px] leading-relaxed text-foreground focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+                  placeholder="Tomt transkript — ingen text kunde höras i mötet."
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    Protokoll
+                  </span>
+                  <button
+                    type="button"
+                    onClick={runProtocol}
+                    disabled={aiBusy !== null || !transcript.trim()}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-movexum-pastell-lila px-2.5 py-1 text-[12px] font-medium text-movexum-morklila transition hover:bg-movexum-lila hover:text-movexum-vit disabled:opacity-40"
+                    title="Generera ett protokollutkast (sammanfattning, beslut, åtgärdspunkter) med AI — granska och redigera innan du sparar"
+                  >
+                    {aiBusy === 'protocol' ? (
+                      <span className="h-3 w-3 animate-spin rounded-full border border-movexum-morklila border-t-transparent" aria-hidden />
+                    ) : (
+                      <Icon name="sparkle" size={12} />
+                    )}
+                    {protocol ? 'Generera om' : 'Generera protokoll'}
+                  </button>
+                </div>
+                <textarea
+                  value={protocol}
+                  onChange={(e) => setProtocol(e.target.value)}
+                  rows={7}
+                  className="rounded-xl border border-default bg-canvas px-3 py-2 text-[13.5px] leading-relaxed text-foreground focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+                  placeholder="Skriv protokollet själv, eller låt AI ta fram ett utkast som du granskar."
+                />
+                {protocol && (
+                  <p className="text-[11.5px] text-foreground-subtle">
+                    Genererat av AI – verifiera innan delning.
+                  </p>
+                )}
+              </div>
+
+              {kind === 'startup' ? (
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    Spara på bolagskort
+                  </span>
+                  <select
+                    value={startupId}
+                    onChange={(e) => setStartupId(e.target.value)}
+                    className="rounded-xl border border-default bg-canvas px-3 py-2 text-[14px] text-foreground focus:border-strong focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+                  >
+                    <option value="">— Välj bolag —</option>
+                    {startups.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                    Sparas i dina Filer
+                  </span>
+                  <p className="rounded-xl border border-default bg-canvas-subtle px-3 py-2 text-[13px] text-foreground">
+                    {MEETING_KIND_LABELS[kind]}
+                    {counterpart ? ` med ${counterpart}` : ''} — protokollet sparas som en
+                    Markdown-fil under <span className="font-medium">Rapporter &amp; uppföljning</span>{' '}
+                    i Filer (bara du ser den) och blir sökbar i chatten.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 text-[13px] text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={includeTranscript}
+                    onChange={(e) => setIncludeTranscript(e.target.checked)}
+                    className="h-4 w-4 accent-[var(--color-brand)]"
+                  />
+                  Bifoga hela transkriptet i anteckningen (annars sparas bara protokollet)
+                </label>
+                {kind === 'startup' && (
+                  <label className="flex items-center gap-2 text-[13px] text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={confidential}
+                      onChange={(e) => setConfidential(e.target.checked)}
+                      className="h-4 w-4 accent-[var(--color-brand)]"
+                    />
+                    Konfidentiell anteckning (visas bara för behöriga och exkluderas ur all AI-kontext)
+                  </label>
+                )}
+              </div>
+
+              <p className="rounded-xl bg-movexum-pastell-gul px-3 py-2 text-[12px] text-movexum-morkgul">
+                När du sparar raderas råtranskriptet permanent —{' '}
+                {kind === 'startup' ? 'anteckningen på bolagskortet' : 'filen i dina Filer'} blir
+                den enda kopian. Osparade möten raderas automatiskt efter 7 dagar.
+              </p>
+
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={discardMeeting}
+                  disabled={phase === 'saving'}
+                  className="rounded-xl px-3 py-2 text-[12.5px] text-movexum-morkorange transition hover:bg-movexum-pastell-orange disabled:opacity-40"
+                >
+                  Kasta mötet
+                </button>
+                <button
+                  type="button"
+                  onClick={saveMeeting}
+                  disabled={phase === 'saving' || (kind === 'startup' && !startupId)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-[13.5px] font-medium text-brand-foreground transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {phase === 'saving' ? (
+                    <>
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand-foreground border-t-transparent" aria-hidden />
+                      Sparar…
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="check" size={13} />
+                      Spara på bolagskortet
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Sparat ── */}
+          {phase === 'saved' && savedInfo && (
+            <div className="flex flex-col items-start gap-4">
+              <p className="text-[14px] leading-relaxed text-foreground">
+                {savedInfo.kind === 'startup' && savedInfo.startupId ? (
+                  <>
+                    Mötesanteckningen är sparad på{' '}
+                    <a href={`/startups/${savedInfo.startupId}`} className="font-medium text-link underline">
+                      {savedInfo.subject}
+                    </a>{' '}
+                    och syns i aktivitetsfeeden. Råtranskriptet är raderat.
+                  </>
+                ) : (
+                  <>
+                    Mötesanteckningen{savedInfo.filename ? ` "${savedInfo.filename}"` : ''} är sparad i{' '}
+                    <a href="/filer" className="font-medium text-link underline">
+                      dina Filer
+                    </a>{' '}
+                    under Rapporter &amp; uppföljning och är sökbar i chatten. Råtranskriptet är raderat.
+                  </>
+                )}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                {onSendToChat && (protocol.trim() || transcript.trim()) && (
+                  <button
+                    type="button"
+                    onClick={suggestActionsInChat}
+                    className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-[13px] font-medium text-brand-foreground transition hover:bg-brand-hover"
+                    title="Skickar protokollet till chatten och ber agenten föreslå uppgifter, nästa steg och uppföljning"
+                  >
+                    <Icon name="sparkle" size={13} />
+                    Föreslå uppgifter i chatten
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-xl border border-default px-4 py-2 text-[13px] font-medium text-foreground-muted transition hover:border-strong hover:text-foreground"
+                >
+                  Stäng
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-default px-5 py-2.5">
+          <p className="text-[11px] text-foreground-subtle">
+            AI-transkribering drivs av Voxtral (Mistral, Frankrike — EU-suveränt). Ljudet lagras
+            aldrig; ingen röstigenkänning eller biometrisk analys görs. Genererat av AI – verifiera
+            innan delning.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}

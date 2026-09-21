@@ -1,13 +1,20 @@
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { loadOwnedThread, executeThreadTurn } from '@/lib/ai/thread-turn';
+import {
+  loadOwnedThread,
+  createOwnedThread,
+  executeThreadTurn,
+  friendlyThreadError
+} from '@/lib/ai/thread-turn';
 import type { ChatAttachment } from '@/lib/ai/chat-input';
-import type { Role } from '@platform/shared';
+import { isAllowedModel } from '@/lib/ai/models';
+import type { ChatThread, Role } from '@platform/shared';
 
 // Streamande chatt-turn för /chatt. Kör samma delade turn-/persistenslogik
 // som server-action-fallbacken (`executeThreadTurn`) men strömmar agentens
-// verktygssteg ("Läser bolagsdata", "Skapar PowerPoint") live till klienten
-// medan turen körs, och avslutar med hela det sparade meddelandeflödet.
+// verktygssteg ("Läser bolagen", "Skapar PowerPoint") OCH själva svaret
+// token-för-token live till klienten medan turen körs, och avslutar med hela
+// det sparade meddelandeflödet.
 //
 // Säkerhet: samma RBAC som sendThreadMessageAction (staff-only), ägar-/
 // tenant-verifierad tråd, ingen ny dataväg (executeThreadTurn äger
@@ -33,9 +40,11 @@ export async function POST(req: Request): Promise<Response> {
 
   let body: {
     threadId?: unknown;
+    agentId?: unknown;
     text?: unknown;
     includeWebContext?: unknown;
     attachments?: unknown;
+    model?: unknown;
   };
   try {
     body = (await req.json()) as typeof body;
@@ -44,8 +53,14 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const threadId = typeof body.threadId === 'string' ? body.threadId.trim() : '';
+  const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : '';
   const text = typeof body.text === 'string' ? body.text : '';
-  if (!threadId) return jsonError('threadId saknas.', 400);
+
+  // Modellval (§ 9.9): tomt = automatiskt; annat än registrerade modeller
+  // avvisas (input-validering § 10.5 p. 7) i stället för att tyst ignoreras.
+  const rawModel = typeof body.model === 'string' ? body.model.trim() : '';
+  if (rawModel && !isAllowedModel(rawModel)) return jsonError('Okänd modell.', 400);
+  const model = rawModel || undefined;
 
   const includeWebContext = body.includeWebContext === true;
   const attachments = Array.isArray(body.attachments)
@@ -53,8 +68,26 @@ export async function POST(req: Request): Promise<Response> {
     : undefined;
 
   const pb = await getServerPb();
-  const thread = await loadOwnedThread(pb, threadId, user);
-  if (!thread) return jsonError('Tråden hittades inte.', 404);
+
+  // Utan threadId skapas tråden HÄR (inte via createThreadAction). Det gör
+  // hela skickavägen fetch-baserad: server action-id:n byts vid varje deploy
+  // (en stale flik får då UnrecognizedActionError), men en route handler
+  // påverkas inte — chatten fortsätter fungera i flikar som laddades före
+  // deployen. Klienten får det nya id:t som första NDJSON-event.
+  let thread: ChatThread;
+  if (threadId) {
+    const loaded = await loadOwnedThread(pb, threadId, user);
+    if (!loaded) return jsonError('Tråden hittades inte.', 404);
+    thread = loaded;
+  } else {
+    try {
+      thread = await createOwnedThread(pb, user, agentId || undefined);
+    } catch (err) {
+      // 4xx (inte 5xx) så klienten visar felet direkt i stället för att
+      // försöka server-action-fallbacken, som skulle fallera likadant.
+      return jsonError(friendlyThreadError(err, 'Kunde inte skapa tråd.'), 400);
+    }
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -67,10 +100,15 @@ export async function POST(req: Request): Promise<Response> {
         }
       };
       try {
+        // Skickas alltid först så klienten känner till tråden (särskilt när
+        // den skapades ovan) även om själva turen skulle fela.
+        send({ type: 'thread', threadId: thread.id });
         const result = await executeThreadTurn(pb, user, thread, text, {
           includeWebContext,
           attachments,
-          onStep: (step) => send({ type: 'step', ...step })
+          model,
+          onStep: (step) => send({ type: 'step', ...step }),
+          onToken: (delta) => send({ type: 'token', delta })
         });
         if (result.error) send({ type: 'error', error: result.error });
         else send({ type: 'final', messages: result.messages });

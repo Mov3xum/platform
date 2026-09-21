@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { notFound } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
@@ -25,7 +26,7 @@ const BLOCK_TYPE_EMOJIS: Record<string, string> = {
 export default async function WorkshopDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) notFound();
+  if (!canAccessModuleForUser(user.roles, 'education', user.enabledModules)) notFound();
   const pb = await getServerPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
 
@@ -61,7 +62,7 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
     try {
       startups = (
         await pb.collection('startups').getList<{ id: string; name: string }>(1, 200, {
-          filter: `tenant = "${user.tenant}" && status = "active"`,
+          filter: `tenant = "${escFilter(user.tenant)}" && status = "active"`,
           sort: 'name',
           fields: 'id,name'
         })
@@ -75,7 +76,7 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
   try {
     recentAssignments = (
       await pb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopAssignment>(1, 10, {
-        filter: `tenant = "${user.tenant}" && workshop = "${id}"`,
+        filter: `tenant = "${escFilter(user.tenant)}" && workshop = "${escFilter(id)}"`,
         sort: '-created',
         expand: 'startup'
       })
@@ -108,6 +109,12 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
           </div>
           {isStaff ? (
             <div className="flex items-center gap-2">
+              <Link
+                href={`/education/workshops/${id}/preview`}
+                className="inline-flex items-center justify-center rounded-full bg-brand px-4 py-1.5 text-xs font-semibold text-brand-foreground transition hover:bg-brand-hover"
+              >
+                Förhandsgranska &amp; testa
+              </Link>
               <Link
                 href={`/education/workshops/${id}/edit`}
                 className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-4 py-1.5 text-xs font-semibold text-foreground-muted transition hover:bg-canvas-subtle"

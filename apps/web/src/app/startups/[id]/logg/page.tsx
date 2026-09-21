@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { escFilter } from '@/lib/pb-filter';
 import { getOneForTenant } from '@/lib/pb.server';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModule } from '@/lib/rbac';
@@ -86,7 +87,7 @@ export default async function StartupLogPage({
   let activities: ActivityRow[] = [];
   try {
     const res = await pb.collection('activities').getList<ActivityRow>(1, 100, {
-      filter: `startup = "${id}"`,
+      filter: `startup = "${escFilter(id)}"`,
       sort: '-created',
       expand: 'owner,tool,tool_run'
     });

@@ -10,11 +10,13 @@ Movexum-wordmark för UI **och** för genererade dokument (PPTX/XLSX/DOCX/PDF).
 - `movexum-wordmark-dark.svg` — vit wordmark (mörkt läge)
 - `movexum-wordmark.svg` — flex (`currentColor`)
 
-## PNG (genererade dokument) — **lägg till dessa**
+## PNG (genererade dokument)
 
 Dokument-renderarna (`apps/web/src/lib/documents/`) kan **inte** bädda in SVG —
-office-format och pdf-lib kräver raster. Lägg därför till PNG-versioner med
-**transparent bakgrund** här:
+office-format och pdf-lib kräver raster. PNG-versioner med **transparent
+bakgrund** ligger här. `movexum-wordmark-dark.png` (1200×280) genereras av
+`apps/web/scripts/render-pwa-icons.mjs` (samma resurs som favicon/app-ikonerna,
+CLAUDE.md § 35.4); `movexum-wordmark-light.png` saknas ännu:
 
 | Fil | Innehåll | Används på |
 | --- | --- | --- |

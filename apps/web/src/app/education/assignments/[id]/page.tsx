@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getServerPb, requireUser } from '@/lib/auth.server';
+import { requireUser } from '@/lib/auth.server';
+import { getAssignmentReadPb } from '@/lib/assignments/read';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { WorkshopAssignmentStatusBadge } from '@/components/Badges';
@@ -14,9 +15,18 @@ export default async function WorkshopAssignmentPage({
 }) {
   const { id } = await params;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) notFound();
-  const pb = await getServerPb();
+  // Robust läsning av tilldelningen (PB v0.23.4 rule-eval kan tyst ge 404 för
+  // en annars behörig användare, § 21.3 — se lib/assignments/read.ts).
+  // Behörigheten avgörs i app-koden direkt nedan: tenant-match + staff eller
+  // länkad startup_member, annars notFound().
+  const pb = await getAssignmentReadPb();
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
+  const canAccessEducation = canAccessModuleForUser(user.roles, 'education', user.enabledModules);
+  const canAccessMemberActivities = canAccessModuleForUser(
+    user.roles,
+    'mina_aktiviteter',
+    user.enabledModules
+  );
 
   let assignment: WorkshopAssignment;
   try {
@@ -29,9 +39,15 @@ export default async function WorkshopAssignmentPage({
 
   if (assignment.tenant !== user.tenant) notFound();
   const isLinkedStartup = user.linkedStartups.includes(String(assignment.startup));
-  if (!isStaff && !(hasRole(user.roles, ['startup_member']) && isLinkedStartup)) {
+  const isStaffViewer = isStaff && canAccessEducation;
+  const isLinkedStartupMember =
+    hasRole(user.roles, ['startup_member']) && isLinkedStartup && canAccessMemberActivities;
+  if (!isStaffViewer && !isLinkedStartupMember) {
     notFound();
   }
+
+  const backHref = isStaffViewer ? '/education' : '/mina-aktiviteter';
+  const backLabel = isStaffViewer ? 'Till utbildning' : 'Till aktiviteter';
 
   const workshop = assignment.expand?.workshop;
   const startup = assignment.expand?.startup;
@@ -53,8 +69,8 @@ export default async function WorkshopAssignmentPage({
   return (
     <main className="mx-auto max-w-5xl px-6 py-10 lg:px-8">
       <div className="mb-6">
-        <Link href="/education" className="text-sm text-foreground-muted hover:text-foreground">
-          ← Till utbildning
+        <Link href={backHref} className="text-sm text-foreground-muted hover:text-foreground">
+          ← {backLabel}
         </Link>
       </div>
 

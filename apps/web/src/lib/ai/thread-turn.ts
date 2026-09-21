@@ -31,8 +31,12 @@ export interface ThreadTurnUser {
 export interface ThreadTurnOptions {
   includeWebContext?: boolean;
   attachments?: ChatAttachment[];
+  /** Uttryckligt modellval från chatten (tomt = automatiskt, § 9.9). */
+  model?: string;
   /** Live-callback för verktygssteg (forwardas av streaming-endpointen). */
   onStep?: (step: AgentLoopStep) => void;
+  /** Live-callback för text-deltan (löpande utskrift, streaming-endpoint). */
+  onToken?: (delta: string) => void;
 }
 
 /** Laddar en tråd och verifierar ägarskap + tenant (defense-in-depth). */
@@ -48,6 +52,58 @@ export async function loadOwnedThread(
   } catch {
     return null;
   }
+}
+
+/**
+ * Skapar en ny ägar-scopad tråd. Delas av server-actionen
+ * (`createThreadAction`) OCH streaming-endpointen (`/api/chat/stream`), som
+ * skapar tråden själv när klienten saknar en — så fungerar "skicka" även i en
+ * flik vars build är äldre än serverns (server action-id:n byts vid deploy,
+ * men route-handler-fetchen påverkas inte). Kastar vidare PB-fel; anroparen
+ * översätter via `friendlyThreadError`.
+ */
+export async function createOwnedThread(
+  pb: PocketBase,
+  user: { id: string; tenant: string },
+  agentId?: string
+): Promise<ChatThread> {
+  const data: Record<string, unknown> = {
+    tenant: user.tenant,
+    owner: user.id,
+    status: 'active',
+    pinned: false,
+    messages: [],
+    last_message_at: new Date().toISOString()
+  };
+  if (agentId) data.agent = agentId;
+  return (await pb.collection('chat_threads').create(data)) as unknown as ChatThread;
+}
+
+/**
+ * Översätter PocketBase-fel till begripliga meddelanden. Speciellt: en 404 med
+ * "no rows in result set" (eller "missing or invalid collection context")
+ * betyder att själva kollektionen saknas på den körande PB-instansen —
+ * migrationerna är inte deployade (migrations bakas in i PB-imagen och
+ * appliceras vid start, se backend/pocketbase-schema/Dockerfile). Samma
+ * signaturhantering som lib/actions/workshops.ts. Delas av server-actions och
+ * streaming-endpointen (ingen divergerande kopia).
+ */
+export function friendlyThreadError(err: unknown, fallback: string): string {
+  const e = err as { status?: number; message?: string; response?: unknown };
+  const msg = (e?.message || '').toLowerCase();
+  const details = JSON.stringify(e?.response ?? {}).toLowerCase();
+  const missingCollection =
+    msg.includes('missing or invalid collection context') ||
+    details.includes('missing or invalid collection context') ||
+    (e?.status === 404 && (details.includes('no rows in result set') || msg.includes('no rows in result set')));
+  if (missingCollection) {
+    console.error('[chat-threads] saknad kollektion / serverkonfiguration', {
+      status: e?.status,
+      message: e?.message
+    });
+    return 'Chatten kan inte sparas just nu på grund av en serverkonfiguration — chatt-tabellerna saknas på servern. Be en administratör att deploya om PocketBase så att de senaste migrationerna (chat_threads, deep_jobs, user_files) appliceras.';
+  }
+  return e?.message || fallback;
 }
 
 /**
@@ -89,6 +145,8 @@ export async function executeThreadTurn(
   const promptText = displayText + att.textBlock;
   const userMessages = [...history, { role: 'user' as const, content: promptText }];
 
+  // "Webbkällor" = riktig internetsökning (verktyget `web_search`, § 9.8) PLUS
+  // ett litet block med aktuella EU-RSS-rubriker som billig omvärldskontext.
   const webBlock = options.includeWebContext
     ? await buildWebBlock(pb, DEFAULT_CHAT_WEB_SOURCES)
     : '';
@@ -118,6 +176,7 @@ export async function executeThreadTurn(
   const turn = await runStaffChatTurn(pb, user, {
     userMessages,
     webBlock,
+    includeWebSearch: options.includeWebContext === true,
     agentBlock,
     images: att.images,
     agentId: thread.agent,
@@ -125,7 +184,9 @@ export async function executeThreadTurn(
     ownerUserId: user.id,
     chatThreadId: thread.id,
     surface: 'dashboard_chat',
-    onStep
+    model: options.model,
+    onStep,
+    onToken: options.onToken
   });
 
   if (!turn.ok) return { error: turn.error };
@@ -145,7 +206,11 @@ export async function executeThreadTurn(
       turn.result.tokensOut
     ),
     generated_files: turn.result.generatedFiles.length > 0 ? turn.result.generatedFiles : undefined,
+    visuals: turn.result.visuals.length > 0 ? turn.result.visuals : undefined,
     steps: steps.length > 0 ? steps : undefined,
+    approval_request: turn.result.approvalRequest,
+    meeting_request: turn.result.meetingRequest,
+    sources: turn.result.sources.length > 0 ? turn.result.sources : undefined,
     at: new Date().toISOString()
   };
 

@@ -9,7 +9,8 @@ import {
   EXTRACTION_SYSTEM_PROMPT,
   INTAKE_SYSTEM_PROMPT,
   MARKET_SCAN_SYSTEM_PROMPT,
-  SCORING_SYSTEM_PROMPT
+  SCORING_SYSTEM_PROMPT,
+  SUBMISSION_SUMMARY_SYSTEM_PROMPT
 } from './prompts';
 import type { AiReview, MarketScan } from './types';
 
@@ -55,6 +56,52 @@ export async function intakeReply(
     tokensOut: res.usage.completion_tokens,
     model: res.modelUsed
   };
+}
+
+// Personnummer-sanering (samma regex som CRM-importen, CLAUDE.md § 15.6).
+// Körs på BÅDE indata till modellen och den lagrade sammanställningen
+// (defense-in-depth — personnummer lagras aldrig, § 9.4).
+const PERSONNUMMER_RE = /\d{6,8}[-+]?\d{4}/g;
+function redactPersonnummer(s: string): string {
+  return s.replace(PERSONNUMMER_RE, '[REDACTED]');
+}
+
+export interface SubmissionEntry {
+  question: string;
+  answer: string;
+}
+
+/**
+ * AI-sammanställning av det besökaren skickade in (formulär/quiz) — lagras på
+ * leadet (`ai_summary`, migration 1700000125). Best-effort: returnerar null
+ * vid fel och får ALDRIG blockera lead-skapandet (lead-garantin, § 23.6).
+ * Riskklass: begränsad — intern sammanfattning av besökarens egna svar,
+ * granskas av människa i /inflode/leads (EU AI Act art. 50-disclaimer i UI).
+ */
+export async function summarizeSubmission(
+  entries: SubmissionEntry[],
+  moduleName: string,
+  resultLine?: string
+): Promise<string | null> {
+  if (entries.length === 0 && !resultLine) return null;
+  const transcript = [
+    `Modul: ${moduleName}`,
+    resultLine ? `Resultat: ${resultLine}` : '',
+    ...entries.map((e) => `Fråga: ${e.question}\nSvar: ${e.answer}`)
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  try {
+    const res = await callMistral(SCORING_MODEL, [
+      { role: 'system', content: SUBMISSION_SUMMARY_SYSTEM_PROMPT },
+      { role: 'user', content: redactPersonnummer(transcript).slice(0, 12000) }
+    ]);
+    const text = redactPersonnummer(res.text.trim());
+    return text ? text.slice(0, 6000) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Extraherar lead-data från en konversation. Returnerar null på fel. */

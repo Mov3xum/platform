@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
@@ -65,7 +66,7 @@ export default async function InvesterarePage() {
 
   try {
     const res = await pb.collection(PB_COLLECTIONS.investors).getList<Investor>(1, 100, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: `tenant = "${escFilter(user.tenant)}"`,
       sort: '-updated'
     });
     investors = res.items;
@@ -75,7 +76,7 @@ export default async function InvesterarePage() {
 
   try {
     const res = await pb.collection(PB_COLLECTIONS.deals).getList<DealWithExpand>(1, 200, {
-      filter: `tenant = "${user.tenant}"`,
+      filter: `tenant = "${escFilter(user.tenant)}"`,
       sort: '-last_activity',
       expand: 'startup,investor'
     });

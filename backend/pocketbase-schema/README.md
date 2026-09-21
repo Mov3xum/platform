@@ -33,7 +33,50 @@ Sätt följande repo-secrets för staging:
 - `PB_SU_EMAIL_STAGING` (valfritt, default `hampus@movexum.se`)
 - `APP_USER_PASSWORD_STAGING` (valfritt om app-user redan finns)
 
-Koden i web-appen behöver `NEXT_PUBLIC_POCKETBASE_URL` pekande på PB:s publika domän.
+Produktion (`main`) har ett eget par utan fallback — se tabellen nedan.
+
+Koden i web-appen behöver `NEXT_PUBLIC_POCKETBASE_URL_<MILJÖ>` pekande på PB:s publika domän (`apps/web/src/lib/pb-url.ts` väljer par utifrån `MOVEXUM_ENV`).
+
+### Miljöer: staging (`staging`) och produktion (`main`)
+
+Det finns två separata PocketBase-instanser. Använd rätt adress och rätt
+secret-par per miljö — de delar inget.
+
+| Miljö | Git-gren | PB-adress | Repo-secrets (CI) | Web-appens env (Coolify) |
+|---|---|---|---|---|
+| Staging | `staging` | `https://pocketbase-r10nklch8dkune7s0flczb89.212.147.227.223.sslip.io` (samma som `apps/web/.env.production`) | `PB_URL_STAGING`, `PB_SU_EMAIL_STAGING`, `PB_SU_PASSWORD_STAGING`, `APP_USER_PASSWORD_STAGING` | `POCKETBASE_URL_STAGING`, `NEXT_PUBLIC_POCKETBASE_URL_STAGING`, `POCKETBASE_SUPERUSER_EMAIL/PASSWORD` |
+| Produktion | `main` | Värdet i secreten `PB_URL_PRODUCTION` (skrivs inte i repot; kontrollera i Coolify → PB-production → Domains) | `PB_URL_PRODUCTION`, `PB_SU_EMAIL_PRODUCTION`, `PB_SU_PASSWORD_PRODUCTION`, `APP_USER_PASSWORD_PRODUCTION` | `POCKETBASE_URL_PRODUCTION`, `NEXT_PUBLIC_POCKETBASE_URL_PRODUCTION`, `POCKETBASE_SUPERUSER_EMAIL/PASSWORD` |
+
+Egna domäner (`pb-staging.movexum.se` / `pb.movexum.se`) är bara ett
+**förslag** i `infra/SSL.md` — de har ingen DNS-post ännu och svarar
+`DNS_PROBE_FINISHED_NXDOMAIN`. Sätt upp A-post + Coolify-domän enligt
+SSL.md innan de används, och uppdatera då tabellen ovan samt secrets/env.
+
+### Logga in
+
+Två separata inloggningar per miljö:
+
+1. **PocketBase-adminpanelen (superuser):** `<PB-adress>/_/`. Kontot är en
+   `_superusers`-rad — samma e-post/lösen som `PB_SU_EMAIL_*`/
+   `PB_SU_PASSWORD_*` (CI) och `POCKETBASE_SUPERUSER_EMAIL/PASSWORD`
+   (web-appen). På en fresh instans skapas superusern vid första
+   `/_/`-besöket. Tappat lösen återställs i PB-containern (ta backup av
+   `pb_data` först):
+
+   ```bash
+   /pb/pocketbase superuser upsert hampus@movexum.se '<nytt-lösen>' --dir=/pb_data
+   ```
+
+   Uppdatera sedan secrets i Coolify + GitHub så de matchar.
+2. **Webbappen:** `<web-adress>/login` med app-användaren `hampus@movexum.se`
+   i `users` (seedad av migration `1700000013_seed_app_admin.js` med
+   `APP_ADMIN_INITIAL_PASSWORD`).
+
+Felsökning: får du **404 på `/_/`** når requesten inte PocketBase — testa
+`<PB-adress>/api/health` (ska ge JSON med `"code":200`); 404 där också betyder
+fel host. Får du **429** vid superuser-login är det PB 0.23:s inbyggda
+rate-limit på `_superusers/auth-with-password` (samma som CI-skripten
+retry:ar mot via `scripts/lib/pb-auth-retry.mjs`) — vänta en halv minut.
 
 ## Datamodell
 
@@ -135,8 +178,10 @@ Om PB redan körs (t.ex. från en raw `pocketbase/pocketbase`-image utan vår Do
 Kräver att du har en PocketBase superuser (`_superusers`-rad) — den skapas vid första `/_/`-besök på en fresh PB.
 
 ```bash
-# Kör från repo-roten
-PB_URL='https://pocketbase-r10nkich8dkune7s0flczb89.212.147.227.223.sslip.io' \
+# Kör från repo-roten. Staging-adressen nedan är samma som i
+# apps/web/.env.production; för produktion (main) använder du värdet i
+# secreten PB_URL_PRODUCTION (se miljötabellen ovan).
+PB_URL='https://pocketbase-r10nklch8dkune7s0flczb89.212.147.227.223.sslip.io' \
 PB_SU_EMAIL='hampus@movexum.se' \
 PB_SU_PASSWORD='<ditt PB-superuser-lösen>' \
 APP_USER_PASSWORD='<lösen för login i webappen (krävs bara om app-user saknas)>' \
@@ -169,6 +214,7 @@ mot vad som faktiskt finns i en körande instans och listar vilka
 create-migrationer som inte har applicerats:
 
 ```bash
+# PB_URL = staging- eller produktionsadressen ur miljötabellen ovan
 PB_URL='https://<din-pb-domän>' \
 PB_SU_EMAIL='hampus@movexum.se' \
 PB_SU_PASSWORD='<superuser-lösen>' \

@@ -1,14 +1,19 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import type { CompassQuestion } from '@/lib/compass/types';
+import type { CompassQuestion, NextModuleLink } from '@/lib/compass/types';
 import { QuestionInput, readAttribution } from './QuestionInput';
+import { NextModuleCta } from './NextModuleCta';
+import { ContactPreferencePicker } from './ContactPreferencePicker';
+import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 
 interface Props {
   moduleSlug: string;
   questions: CompassQuestion[];
   successMessage?: string;
   redirectUrl?: string;
+  /** Kedjad nästa modul (migration 1700000124). */
+  nextModule?: NextModuleLink | null;
   /**
    * Endpoint-bas för submit. Default = inloggad admin-preview (/api/inflode).
    * Den publika sidan skickar `/api/public/m` (oinloggat flöde).
@@ -24,10 +29,15 @@ export function ModuleWizard({
   successMessage,
   redirectUrl,
   apiBase = '/api/inflode/m',
-  consent
+  consent,
+  nextModule
 }: Props) {
   const [step, setStep] = useState(0);
+  // Besökta steg (för "Tillbaka") — hopplogik (next_key) kan skippa frågor,
+  // så step-1 är inte alltid den fråga besökaren faktiskt såg senast.
+  const [trail, setTrail] = useState<number[]>([]);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
+  const [contactPreference, setContactPreference] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +68,11 @@ export function ModuleWizard({
             Du skickas vidare till <a href={redirectUrl}>{redirectUrl}</a>…
           </p>
         )}
+        {!redirectUrl && nextModule && (
+          <div style={{ maxWidth: 460, margin: '20px auto 0' }}>
+            <NextModuleCta next={nextModule} prompt="Fortsätt till nästa steg" />
+          </div>
+        )}
       </div>
     );
   }
@@ -72,8 +87,10 @@ export function ModuleWizard({
     }
     setError(null);
 
-    if (step + 1 < total) {
-      setStep(step + 1);
+    const nextStep = resolveNextQuestionIndex(questions, step, value);
+    if (nextStep < total) {
+      setTrail((t) => [...t, step]);
+      setStep(nextStep);
       return;
     }
 
@@ -83,9 +100,19 @@ export function ModuleWizard({
       const res = await fetch(`${apiBase}/${encodeURIComponent(moduleSlug)}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers, attribution, consent })
+        body: JSON.stringify({
+          answers,
+          attribution,
+          consent,
+          contact_preference: contactPreference || undefined
+        })
       });
-      if (!res.ok) throw new Error(`Servern svarade ${res.status}`);
+      if (!res.ok) {
+        // Visa serverns riktiga felmeddelande (t.ex. "kunde inte sparas") i
+        // stället för en naken statuskod — lead-garantin ska synas (§ 23.6).
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || `Servern svarade ${res.status}`);
+      }
       setDone(true);
       if (redirectUrl) {
         setTimeout(() => {
@@ -148,6 +175,11 @@ export function ModuleWizard({
       {/* Input */}
       <QuestionInput question={q} value={current} onChange={setValue} />
 
+      {/* Kontaktpreferens — visas på sista frågan, innan inskick. */}
+      {step + 1 === total && (
+        <ContactPreferencePicker value={contactPreference} onChange={setContactPreference} />
+      )}
+
       {error && (
         <div
           className="mx-t-12"
@@ -166,8 +198,14 @@ export function ModuleWizard({
         <button
           type="button"
           className="mx-btn"
-          disabled={step === 0 || submitting}
-          onClick={() => setStep((s) => Math.max(0, s - 1))}
+          disabled={trail.length === 0 || submitting}
+          onClick={() => {
+            const prev = trail[trail.length - 1];
+            if (prev === undefined) return;
+            setTrail((t) => t.slice(0, -1));
+            setStep(prev);
+            setError(null);
+          }}
         >
           ← Tillbaka
         </button>

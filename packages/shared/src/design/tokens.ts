@@ -111,7 +111,7 @@ export const colors = {
 export const typography = {
   fontHeading: 'var(--font-heading, "Sora Variable", system-ui, sans-serif)',
   fontBody: 'var(--font-body, "Nunito Sans Variable", system-ui, sans-serif)',
-  fontMono: 'var(--font-mono, "JetBrains Mono Variable", monospace)',
+  fontMono: 'var(--font-mono, "Nunito Sans Variable", system-ui, sans-serif)',
 
   sizes: {
     xs: '0.75rem',

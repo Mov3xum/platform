@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { escFilter } from '@/lib/pb-filter';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { requireRole, canRunTool } from '@/lib/rbac';
 import {
@@ -104,7 +105,7 @@ export async function upsertScheduleAction(
   try {
     const existing = await pb
       .collection('tool_schedules')
-      .getFirstListItem(`tenant = "${user.tenant}" && tool = "${input.toolId}"`);
+      .getFirstListItem(`tenant = "${escFilter(user.tenant)}" && tool = "${escFilter(input.toolId)}"`);
     existingId = existing.id as string;
   } catch {
     /* not found — create */

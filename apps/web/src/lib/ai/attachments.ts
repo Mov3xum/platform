@@ -54,15 +54,93 @@ function isTextMime(mime: string): boolean {
 }
 
 export async function extractPdfText(buffer: Buffer): Promise<string> {
-  // Dynamisk import för att hålla pdf-parse Node-only och utanför edge-bundles.
-  // pdf-parse/lib/pdf-parse.js bypasser modulens debug-mode som annars vill
-  // läsa en test-PDF vid import.
-  const mod = await import('pdf-parse/lib/pdf-parse.js' as string);
-  const pdfParse = (mod.default ?? mod) as (
-    data: Buffer | Uint8Array
-  ) => Promise<{ text: string }>;
-  const result = await pdfParse(buffer);
-  return result.text ?? '';
+  // pdfjs-dist (Mozilla pdf.js, ren JS, körs lokalt — inga nätverksanrop).
+  // Ersätter pdf-parse, vars inbäddade pdf.js från 2018 inte kunde läsa
+  // moderna PDF:er med object streams/xref streams (PDF 1.5+, standard i
+  // Word-/Google Docs-exporter) → "Invalid PDF structure" och uppladdningen
+  // avvisades. Dynamisk import håller biblioteket Node-only och utanför
+  // edge-bundles; legacy-builden kör utan worker och utan DOM.
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  // Ladda worker-modulen explicit med literal specifier. Den sätter
+  // `globalThis.pdfjsWorker`, som pdf.mjs använder i stället för sin egen
+  // dynamiska import av en BERÄKNAD sökväg — den importen kan @vercel/nft
+  // inte file-tracea, så pdf.worker.mjs saknades i standalone-imagen och
+  // varje PDF-uppladdning föll med `Setting up fake worker failed`. En
+  // literal specifier traceas som vilken import som helst → filen följer
+  // med till .next/standalone/node_modules.
+  if (!(globalThis as { pdfjsWorker?: unknown }).pdfjsWorker) {
+    // @ts-expect-error — pdfjs-dist skeppar ingen typdeklaration för worker-entryn.
+    await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
+  }
+  const task = pdfjs.getDocument({
+    // Kopiera till en egen Uint8Array — pdfjs tar ownership och kan neutra
+    // (detach:a) buffern den får.
+    data: new Uint8Array(buffer),
+    // Säkerhet/robusthet: ingen eval (CSP §10.3), inga systemfonter/DOM-fonter
+    // behövs för ren textextraktion.
+    isEvalSupported: false,
+    disableFontFace: true,
+    useSystemFonts: false
+  });
+  const doc = await task.promise;
+  try {
+    const pages: string[] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      let pageText = '';
+      for (const item of content.items) {
+        if (!('str' in item)) continue;
+        pageText += item.str;
+        pageText += item.hasEOL ? '\n' : ' ';
+      }
+      page.cleanup();
+      const trimmed = pageText.trim();
+      if (trimmed) pages.push(trimmed);
+    }
+    return pages.join('\n\n');
+  } finally {
+    await doc.destroy();
+  }
+}
+
+/** Extraherar läsbar text ur en DOCX-buffer (`word/document.xml`). */
+export async function extractDocxText(buffer: Buffer): Promise<string> {
+  const { readZipMap, extractEntry } = await import('@/lib/import/zip');
+  const { docxXmlToText } = await import('@/lib/import/ooxml-text');
+  const byName = readZipMap(buffer);
+  const entry = byName.get('word/document.xml');
+  if (!entry) throw new Error('DOCX saknar word/document.xml.');
+  return docxXmlToText(extractEntry(buffer, entry).toString('utf8'));
+}
+
+/**
+ * Extraherar läsbar text ur en PPTX-buffer. Slides ligger i
+ * `ppt/slides/slideN.xml` — vi tar dem i numerisk ordning och separerar varje
+ * slide med en rubrikrad så strukturen bevaras för retrieval.
+ */
+export async function extractPptxText(buffer: Buffer): Promise<string> {
+  const { readZipMap, extractEntry } = await import('@/lib/import/zip');
+  const { pptxSlideXmlToText } = await import('@/lib/import/ooxml-text');
+  const byName = readZipMap(buffer);
+  const slideRe = /^ppt\/slides\/slide(\d+)\.xml$/;
+  const slides = [...byName.keys()]
+    .map((name) => {
+      const m = slideRe.exec(name);
+      return m ? { name, n: parseInt(m[1], 10) } : null;
+    })
+    .filter((s): s is { name: string; n: number } => s !== null)
+    .sort((a, b) => a.n - b.n);
+  if (slides.length === 0) throw new Error('PPTX saknar slides (ppt/slides/slideN.xml).');
+
+  const parts: string[] = [];
+  for (const s of slides) {
+    const entry = byName.get(s.name);
+    if (!entry) continue;
+    const text = pptxSlideXmlToText(extractEntry(buffer, entry).toString('utf8')).trim();
+    if (text) parts.push(`# Slide ${s.n}\n${text}`);
+  }
+  return parts.join('\n\n');
 }
 
 /**

@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = ['/', '/login', '/reset-password', '/verify-email'];
+const PUBLIC_PATHS = ['/', '/login', '/reset-password', '/verify-email', '/offline'];
+
+// PWA-resurser (CLAUDE.md § 35): manifest, service worker och ikoner hämtas
+// av webbläsaren utan cookies och måste därför vara publika. De innehåller
+// ingen data — bara statisk app-metadata.
+const PWA_PUBLIC_PREFIXES = ['/manifest.webmanifest', '/sw.js', '/icons/'];
 const AUTH_COOKIE = 'pb_auth';
 
 /**
@@ -29,16 +34,24 @@ function buildCsp(nonce: string | null, isHttps: boolean): string {
     `script-src ${scriptSrc}`,
     // Next.js + Tailwind injicerar inline-styles; style-injektion är lågrisk.
     `style-src 'self' 'unsafe-inline'`,
-    // PocketBase-filer (avatarer/loggor) kan ligga på annan origin, ev. http
-    // i staging. Bilder kan inte exekvera kod.
+    // PocketBase-filer (avatarer/loggor/videos) kan ligga på annan origin, ev.
+    // http i staging. Bilder och media kan inte exekvera kod.
     `img-src 'self' data: blob: https: http:`,
+    // workshop_media-videos laddas från PocketBase-origin (kan vara extern,
+    // ev. http i staging). Utan explicit media-src faller browsern tillbaka
+    // på default-src 'self' och blockerar uppspelning.
+    `media-src 'self' https: http:`,
     `font-src 'self'`,
     `connect-src 'self'`,
     `frame-src 'none'`,
     `frame-ancestors 'none'`,
     `form-action 'self'`,
     `object-src 'none'`,
-    `manifest-src 'self'`
+    `manifest-src 'self'`,
+    // Service workern (public/sw.js, § 35) — utan explicit worker-src faller
+    // browsern tillbaka på script-src, där 'strict-dynamic' ignorerar 'self'
+    // och registreringen blockeras i produktion.
+    `worker-src 'self'`
   ];
   // upgrade-insecure-requests tvingar browsern att uppgradera ALLA subresurser
   // (CSS/JS/fonter/bilder) till https. På en http-serverad deploy (staging utan
@@ -52,6 +65,11 @@ function buildCsp(nonce: string | null, isHttps: boolean): string {
 
 function withSecurityContext(req: NextRequest, nonce: string | null, csp: string): NextResponse {
   const requestHeaders = new Headers(req.headers);
+  // Exponera den faktiska request-pathen för root-layouten (server component
+  // saknar annars tillgång till pathname). Vi sätter ALLTID värdet — och
+  // skriver över ev. klient-medskickad x-pathname — så layouten kan avgöra om
+  // sidan är en publik, oinloggad yta (t.ex. /m/<slug>) utan att kunna luras.
+  requestHeaders.set('x-pathname', req.nextUrl.pathname);
   if (nonce) {
     // Next.js läser nonce från CSP-headern på request och applicerar den på
     // sina egna script-taggar. x-nonce läses av layouten för ThemeScript.
@@ -68,8 +86,45 @@ export function middleware(req: NextRequest) {
   // Bakom Coolify-proxyn rapporterar req.nextUrl.protocol ofta http även vid
   // https → lita på x-forwarded-proto. Saknas signalen antar vi http (säkrare
   // default: hellre utelämna upgrade-insecure-requests än att bryta sidan).
-  const forwardedProto = req.headers.get('x-forwarded-proto') || req.headers.get('x-forwarded-protocol');
+  // Vid kedjade proxies kan headern vara kommaseparerad ("https, http") —
+  // första värdet är klientens faktiska protokoll.
+  const forwardedProtoRaw =
+    req.headers.get('x-forwarded-proto') || req.headers.get('x-forwarded-protocol');
+  const forwardedProto = forwardedProtoRaw
+    ? forwardedProtoRaw.split(',')[0]!.trim().toLowerCase()
+    : null;
   const isHttps = (forwardedProto ?? req.nextUrl.protocol.replace(':', '')) === 'https';
+
+  // Force-HTTPS (CLAUDE.md § 10.3 A.8.9) — app-nivå-redirect som defense-in-
+  // depth ovanpå Coolifys proxy-toggle (infra/SSL.md). OPT-IN via env
+  // `MOVEXUM_FORCE_HTTPS=true`: slå BARA på när ett giltigt cert faktiskt
+  // finns på hosten. Default AV — staging/production har körts http-only på
+  // sslip.io-hosts där Let's Encrypt-cert inte kan utfärdas (global kvot, se
+  // infra/SSL.md), och en på-per-default-redirect gjorde då hela plattformen
+  // onåbar (308 → https-lyssnare utan giltigt cert). Redirecta dessutom
+  // ENBART när en edge-proxy uttryckligen rapporterat att klienten kom in
+  // över http (`x-forwarded-proto: http`) — saknas headern är requesten
+  // container-intern (Coolify-healthchecks, PB-hookarnas anrop mot
+  // http://moveum-web:3000) och får ALDRIG redirectas.
+  // `MOVEXUM_ALLOW_INSECURE_COOKIES=true` vinner alltid (samma escape-hatch
+  // som Secure-cookies). Interna endpoints undantas som extra skydd.
+  const forceHttps = process.env.MOVEXUM_FORCE_HTTPS === 'true';
+  const allowInsecure = process.env.MOVEXUM_ALLOW_INSECURE_COOKIES === 'true';
+  const isInternalPath =
+    pathname.startsWith('/api/health') || pathname.startsWith('/api/internal/');
+  if (isProd && forceHttps && !allowInsecure && forwardedProto === 'http' && !isInternalPath) {
+    const url = req.nextUrl.clone();
+    url.protocol = 'https:';
+    // Traefik bevarar Host, men respektera x-forwarded-host om proxyn satt den.
+    const forwardedHost = req.headers.get('x-forwarded-host');
+    if (forwardedHost) url.host = forwardedHost.split(',')[0]!.trim();
+    // Explicit port (t.ex. :3000 vid direktaccess via proxy) hör inte hemma
+    // på den publika https-URL:en.
+    url.port = '';
+    // 308 = permanent + bevarar HTTP-metoden (POST förblir POST).
+    return NextResponse.redirect(url, 308);
+  }
+
   const csp = buildCsp(nonce, isHttps);
 
   const isPublic =
@@ -77,12 +132,16 @@ export function middleware(req: NextRequest) {
     pathname.startsWith('/reset-password/') ||
     pathname.startsWith('/_next') ||
     pathname === '/api/auth/login' ||
+    // Utloggning ska fungera även utan (giltig) cookie — annars 307:ar
+    // middleware:n formulär-POST:en till /login med bevarad POST-metod.
+    pathname === '/api/auth/logout' ||
     pathname.startsWith('/api/health') ||
     // Startupkompassen — publika, oinloggade intag-moduler (quiz/formulär/chatt)
     // och deras anonyma API-flöden.
     pathname === '/m' ||
     pathname.startsWith('/m/') ||
-    pathname.startsWith('/api/public/');
+    pathname.startsWith('/api/public/') ||
+    PWA_PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
 
   let res: NextResponse;
   if (isPublic) {

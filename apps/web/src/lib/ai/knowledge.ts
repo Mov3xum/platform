@@ -1,7 +1,11 @@
 import 'server-only';
 
-import { extractPdfText, extractXlsxText } from './attachments';
+import { extractPdfText, extractXlsxText, extractDocxText, extractPptxText } from './attachments';
+import { extractImageText, isVisionImageMime, VisionError } from './vision';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
+
+const MIME_DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const MIME_PPTX = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
 // Extraktion + sanering av en kunskapsbas-fil (tool_knowledge). Texten
 // extraheras EN gång här vid uppladdning, saneras (personnummer → [REDACTED],
@@ -16,8 +20,15 @@ const ALLOWED_MIME_TYPES = new Set([
   'text/plain',
   'text/markdown',
   'text/csv',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  MIME_DOCX,
+  MIME_PPTX
 ]);
+
+// Bilder (PNG/JPG/WebP, `isVisionImageMime`) accepteras BARA när anroparen
+// sätter `allowImages` (den tenant-breda kunskapsbasen, § 26). Texten
+// "extraheras" då via Pixtral-bildigenkänning i stället för en parser. Per-agent-
+// basen (tool_knowledge) lämnas oförändrad.
 
 export class KnowledgeError extends Error {
   constructor(message: string) {
@@ -39,6 +50,14 @@ export interface ExtractedKnowledge {
   mime: string;
   filename: string;
   sizeBytes: number;
+  /**
+   * Token-utfall när texten "extraherades" via Pixtral-bildigenkänning (bild-
+   * uppladdning). Sätts bara för bilder så att anroparen kan logga kostnaden i
+   * `ai_usage_events` per vision-modell. Undefined för parser-baserade format.
+   */
+  visionUsage?: { tokensIn: number; tokensOut: number };
+  /** Vision-modellen som faktiskt svarade (för per-modell-kostnadsloggning). */
+  visionModel?: string;
 }
 
 /**
@@ -47,21 +66,49 @@ export interface ExtractedKnowledge {
  * till per-turn-attachments). Kastar KnowledgeError vid valideringsfel eller
  * om filen inte ger någon text.
  */
-export async function extractKnowledgeFromFile(file: File): Promise<ExtractedKnowledge> {
+export async function extractKnowledgeFromFile(
+  file: File,
+  options: { maxTextBytes?: number; maxFileBytes?: number; allowImages?: boolean } = {}
+): Promise<ExtractedKnowledge> {
+  // Per-agent kunskapsbas (tool_knowledge) injicerar hela texten i prompten och
+  // håller sig snål (50 KB) + 10 MB/fil. Den tenant-breda kunskapsbasen
+  // (org_knowledge, §26) chunkar + embeddar i stället, så den får både extrahera
+  // mer text och ta emot större filer per fil (matchar PB-schemats 25 MB).
+  const maxTextBytes = options.maxTextBytes ?? MAX_TEXT_BYTES;
+  const maxFileBytes = options.maxFileBytes ?? MAX_FILE_BYTES;
   const mime = file.type || 'application/octet-stream';
-  if (!ALLOWED_MIME_TYPES.has(mime)) {
+  const isImage = Boolean(options.allowImages) && isVisionImageMime(mime);
+  if (!ALLOWED_MIME_TYPES.has(mime) && !isImage) {
+    const imageHint = options.allowImages ? ', bild (PNG/JPG/WebP)' : '';
     throw new KnowledgeError(
-      `Filtypen "${mime}" stöds inte i kunskapsbasen (${file.name}). Tillåtet: PDF, text, Markdown, CSV, Excel.`
+      `Filtypen "${mime}" stöds inte i kunskapsbasen (${file.name}). Tillåtet: PDF, Word, PowerPoint, Excel, text, Markdown, CSV${imageHint}.`
     );
   }
-  if (file.size > MAX_FILE_BYTES) {
-    throw new KnowledgeError(`Filen "${file.name}" är för stor (max 10 MB).`);
+  if (file.size > maxFileBytes) {
+    const maxMb = Math.round(maxFileBytes / (1024 * 1024));
+    throw new KnowledgeError(`Filen "${file.name}" är för stor (max ${maxMb} MB).`);
   }
 
   const buf = Buffer.from(await file.arrayBuffer());
   let raw = '';
+  let visionUsage: { tokensIn: number; tokensOut: number } | undefined;
+  let visionModel: string | undefined;
 
-  if (mime === 'application/pdf') {
+  if (isImage) {
+    // Bildigenkänning via Pixtral (EU): transkribera + beskriv → sökbar text.
+    try {
+      const result = await extractImageText(buf, mime);
+      raw = result.text;
+      visionUsage = result.usage;
+      visionModel = result.model;
+    } catch (err) {
+      throw new KnowledgeError(
+        err instanceof VisionError
+          ? `${err.message} (${file.name})`
+          : `Kunde inte tolka bilden "${file.name}".`
+      );
+    }
+  } else if (mime === 'application/pdf') {
     try {
       raw = await extractPdfText(buf);
     } catch (err) {
@@ -77,6 +124,22 @@ export async function extractKnowledgeFromFile(file: File): Promise<ExtractedKno
         `Kunde inte läsa Excel "${file.name}": ${err instanceof Error ? err.message : 'okänt fel'}`
       );
     }
+  } else if (mime === MIME_DOCX) {
+    try {
+      raw = await extractDocxText(buf);
+    } catch (err) {
+      throw new KnowledgeError(
+        `Kunde inte läsa Word "${file.name}": ${err instanceof Error ? err.message : 'okänt fel'}`
+      );
+    }
+  } else if (mime === MIME_PPTX) {
+    try {
+      raw = await extractPptxText(buf);
+    } catch (err) {
+      throw new KnowledgeError(
+        `Kunde inte läsa PowerPoint "${file.name}": ${err instanceof Error ? err.message : 'okänt fel'}`
+      );
+    }
   } else {
     raw = buf.toString('utf8');
   }
@@ -84,13 +147,14 @@ export async function extractKnowledgeFromFile(file: File): Promise<ExtractedKno
   const trimmed = raw.trim();
   if (!trimmed) {
     throw new KnowledgeError(
-      `Ingen läsbar text kunde extraheras ur "${file.name}".`
+      `Ingen läsbar text kunde extraheras ur "${file.name}". Är det en skannad ` +
+        'bild-PDF? Kör OCR eller exportera om dokumentet med text.'
     );
   }
 
   const sanitized = sanitizePersonnummer(trimmed);
   const redacted = sanitized !== trimmed;
-  const text = truncateUtf8(sanitized, MAX_TEXT_BYTES);
+  const text = truncateUtf8(sanitized, maxTextBytes);
 
   return {
     text,
@@ -98,6 +162,8 @@ export async function extractKnowledgeFromFile(file: File): Promise<ExtractedKno
     redacted,
     mime,
     filename: file.name,
-    sizeBytes: file.size
+    sizeBytes: file.size,
+    visionUsage,
+    visionModel
   };
 }

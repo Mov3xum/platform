@@ -8,7 +8,10 @@ import {
   saveWorkshopProgressAction,
   submitForCoachReviewAction,
   coachReviewDecisionAction,
-  commitWorkshopDocumentAction
+  commitWorkshopDocumentAction,
+  previewWorkshopAiChatAction,
+  previewPipelineBlockAction,
+  previewWorkshopReportAction
 } from '@/lib/actions/workshops';
 import type { WorkshopAssignment, WorkshopModule } from '@platform/shared';
 
@@ -16,9 +19,22 @@ interface WorkshopRunnerProps {
   assignment: WorkshopAssignment;
   modules: WorkshopModule[];
   isStaff?: boolean;
+  /**
+   * Staff-testläge (CLAUDE.md § 18.5): fullt interaktivt — precis som bolaget
+   * ser workshopen — men INGENTING persisteras. AI-momenten körs via
+   * preview-actions mot ett fiktivt exempelbolag; coach-granskning och commit
+   * simuleras lokalt. `assignment` är då ett syntetiskt objekt (id används
+   * aldrig) och `assignment.workshop` pekar på workshopen som testas.
+   */
+  preview?: boolean;
 }
 
-export function WorkshopRunner({ assignment, modules, isStaff = false }: WorkshopRunnerProps) {
+export function WorkshopRunner({
+  assignment,
+  modules,
+  isStaff = false,
+  preview = false
+}: WorkshopRunnerProps) {
   const [answers, setAnswers] = useState<Record<string, unknown>>(
     (assignment.answers_json as Record<string, unknown>) || {}
   );
@@ -64,6 +80,13 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
   const [pendingSave, startSave] = useTransition();
   const [pendingAi, startAi] = useTransition();
   const [pendingComplete, startComplete] = useTransition();
+
+  // Testläge: lokalt simulerad commit + lokal AI-chatlogg (matas in i
+  // testrapporten så den speglar det bolaget skulle få).
+  const [previewCommitted, setPreviewCommitted] = useState(false);
+  const [previewThread, setPreviewThread] = useState<Array<{ question: string; answer: string }>>(
+    []
+  );
 
   const allBlocks = useMemo(() => modules.flatMap((m) => m.blocks), [modules]);
 
@@ -125,16 +148,59 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
     return saveWorkshopProgressAction(assignment.id, { progress, answers, artifacts });
   };
 
+  // Delad körning för ai_pipeline-block ("Kör" + "Kör om") — i testläget går
+  // anropet mot preview-actionen med de lokala svaren/artefakterna i stället
+  // för tilldelningen.
+  const runPipeline = (blockId: string, outputKey: string) => {
+    setError(null);
+    setMessage(null);
+    setPendingPipelineBlockId(blockId);
+    startAi(async () => {
+      const res = preview
+        ? await previewPipelineBlockAction(String(assignment.workshop), blockId, answers, artifacts)
+        : await runPipelineBlockAction(assignment.id, blockId);
+      setPendingPipelineBlockId(null);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      if (res.output) {
+        setPipelineOutputs((prev) => ({
+          ...prev,
+          [outputKey]: res.output!
+        }));
+        setArtifacts((prev) => ({
+          ...prev,
+          [outputKey]: res.output
+        }));
+      }
+      setMessage(preview ? 'Analys klar (testläge — inget sparas).' : 'Analys klar.');
+    });
+  };
+
   const textareaClass =
     'mt-3 w-full rounded-2xl border border-default bg-surface px-4 py-2.5 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
 
-  const isDone = assignment.status === 'done';
+  const isDone = !preview && assignment.status === 'done';
+  const isCommitted = Boolean(documentUrl) || (preview && previewCommitted);
 
   return (
     <div className="space-y-8">
+      {/* Preview banner */}
+      {preview ? (
+        <p className="rounded-xl bg-movexum-pastell-gul px-3 py-2 text-sm text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
+          Förhandsgranskning/testläge — du ser och testar workshopen precis som ett bolag gör.
+          Ingenting sparas, och AI-momenten körs mot ett fiktivt exempelbolag i stället för
+          riktig bolagsdata.
+        </p>
+      ) : null}
+
       {/* Status bar */}
       <div className="rounded-2xl border border-default bg-canvas-subtle/40 p-4 text-sm text-foreground-muted">
-        Status: <span className="font-semibold text-foreground">{assignment.status}</span>
+        Status:{' '}
+        <span className="font-semibold text-foreground">
+          {preview ? 'testläge' : assignment.status}
+        </span>
         {!isDone && (
           <>
             {' '}· Obligatoriska moment kvar:{' '}
@@ -332,30 +398,7 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
                               <button
                                 type="button"
                                 disabled={isPending}
-                                onClick={() => {
-                                  setError(null);
-                                  setMessage(null);
-                                  setPendingPipelineBlockId(block.id);
-                                  startAi(async () => {
-                                    const res = await runPipelineBlockAction(
-                                      assignment.id,
-                                      block.id
-                                    );
-                                    setPendingPipelineBlockId(null);
-                                    if (res.error) { setError(res.error); return; }
-                                    if (res.output) {
-                                      setPipelineOutputs((prev) => ({
-                                        ...prev,
-                                        [outputKey]: res.output!
-                                      }));
-                                      setArtifacts((prev) => ({
-                                        ...prev,
-                                        [outputKey]: res.output
-                                      }));
-                                    }
-                                    setMessage('Analys klar.');
-                                  });
-                                }}
+                                onClick={() => runPipeline(block.id, outputKey)}
                                 className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-4 py-2 text-sm font-semibold text-foreground-muted transition hover:bg-canvas-subtle disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {isPending ? 'Analyserar…' : 'Kör om analys'}
@@ -366,30 +409,7 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
                           <button
                             type="button"
                             disabled={isPending || isDone}
-                            onClick={() => {
-                              setError(null);
-                              setMessage(null);
-                              setPendingPipelineBlockId(block.id);
-                              startAi(async () => {
-                                const res = await runPipelineBlockAction(
-                                  assignment.id,
-                                  block.id
-                                );
-                                setPendingPipelineBlockId(null);
-                                if (res.error) { setError(res.error); return; }
-                                if (res.output) {
-                                  setPipelineOutputs((prev) => ({
-                                    ...prev,
-                                    [outputKey]: res.output!
-                                  }));
-                                  setArtifacts((prev) => ({
-                                    ...prev,
-                                    [outputKey]: res.output
-                                  }));
-                                }
-                                setMessage('Analys klar.');
-                              });
-                            }}
+                            onClick={() => runPipeline(block.id, outputKey)}
                             className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {isPending ? 'Analyserar…' : `Kör ${block.title}`}
@@ -417,18 +437,34 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
                         setError(null);
                         setMessage(null);
                         startAi(async () => {
-                          const result = await runWorkshopAiChatAction(assignment.id, question);
+                          const result = preview
+                            ? await previewWorkshopAiChatAction(
+                                String(assignment.workshop),
+                                question,
+                                answers
+                              )
+                            : await runWorkshopAiChatAction(assignment.id, question);
                           if (result.error) {
                             setError(result.error);
                             return;
                           }
                           setAiAnswers((prev) => ({ ...prev, [block.id]: result.answer ?? '' }));
                           setAiThreadCount((prev) => prev + 1);
+                          if (preview) {
+                            setPreviewThread((prev) => [
+                              ...prev,
+                              { question, answer: result.answer ?? '' }
+                            ]);
+                          }
                           setAnswers((prev) => ({
                             ...prev,
                             [`${block.id}__ai_done`]: 'done'
                           }));
-                          setMessage('AI-svar sparat på workshopen.');
+                          setMessage(
+                            preview
+                              ? 'AI-svar genererat (testläge — inget sparas).'
+                              : 'AI-svar sparat på workshopen.'
+                          );
                           setAiQuestions((prev) => ({ ...prev, [block.id]: '' }));
                         });
                       }}
@@ -448,12 +484,16 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
                 ) : block.type === 'coach_review' ? (
                   // Generic coach review block: works for ANY workshop
                   <div className="mt-4 space-y-4">
-                    {documentUrl ? (
+                    {isCommitted ? (
                       <p className="rounded-xl bg-movexum-pastell-gron px-3 py-2 text-sm font-medium text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron">
                         ✓ Committad.{' '}
-                        <a href={documentUrl} className="font-semibold underline">
-                          Visa dokument →
-                        </a>
+                        {documentUrl ? (
+                          <a href={documentUrl} className="font-semibold underline">
+                            Visa dokument →
+                          </a>
+                        ) : (
+                          <span>(testläge — inget dokument skapades)</span>
+                        )}
                       </p>
                     ) : coachDecision === 'approved' ? (
                       <p className="rounded-xl bg-movexum-pastell-gron px-3 py-2 text-sm text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron">
@@ -474,6 +514,12 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
                           type="button"
                           disabled={pendingCoach || isDone}
                           onClick={() => {
+                            if (preview) {
+                              setCoachReviewSubmitted(true);
+                              setCoachDecision(null);
+                              setMessage('Testläge: skickad till coach igen (inget sparas).');
+                              return;
+                            }
                             startCoach(async () => {
                               const res = await submitForCoachReviewAction(assignment.id);
                               if (res.error) { setError(res.error); return; }
@@ -496,6 +542,13 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
                         type="button"
                         disabled={pendingCoach || isDone}
                         onClick={() => {
+                          if (preview) {
+                            setCoachReviewSubmitted(true);
+                            setMessage(
+                              'Testläge: markerad som skickad till coach (inget sparas). Testa coach-granskningen nedan.'
+                            );
+                            return;
+                          }
                           startCoach(async () => {
                             const res = await submitForCoachReviewAction(assignment.id);
                             if (res.error) { setError(res.error); return; }
@@ -510,7 +563,7 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
                     )}
 
                     {/* Staff coach review form */}
-                    {isStaff && coachReviewSubmitted && !documentUrl && (
+                    {isStaff && coachReviewSubmitted && !isCommitted && (
                       <div className="mt-4 space-y-3 rounded-2xl border border-movexum-lila/30 bg-movexum-pastell-lila/40 p-4 dark:border-movexum-morklila/30 dark:bg-movexum-morklila/10">
                         <p className="text-xs font-semibold uppercase tracking-wide text-movexum-lila dark:text-movexum-ljuslila">
                           🎓 Coach-granskning
@@ -527,6 +580,14 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
                             type="button"
                             disabled={pendingCoach}
                             onClick={() => {
+                              if (preview) {
+                                if (coachNotesInput.trim()) {
+                                  setArtifacts((prev) => ({ ...prev, coach_notes: coachNotesInput }));
+                                }
+                                setCoachDecision('approved');
+                                setMessage('Testläge: godkänd av coach (inget sparas).');
+                                return;
+                              }
                               startCoach(async () => {
                                 const res = await coachReviewDecisionAction(assignment.id, 'approved', coachNotesInput);
                                 if (res.error) { setError(res.error); return; }
@@ -542,6 +603,14 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
                             type="button"
                             disabled={pendingCoach}
                             onClick={() => {
+                              if (preview) {
+                                if (coachNotesInput.trim()) {
+                                  setArtifacts((prev) => ({ ...prev, coach_notes: coachNotesInput }));
+                                }
+                                setCoachDecision('returned');
+                                setMessage('Testläge: returnerad för revidering (inget sparas).');
+                                return;
+                              }
                               startCoach(async () => {
                                 const res = await coachReviewDecisionAction(assignment.id, 'returned', coachNotesInput);
                                 if (res.error) { setError(res.error); return; }
@@ -561,17 +630,23 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
                 ) : block.type === 'commit_document' ? (
                   // Generic commit block: locks workshop into a committed living document
                   <div className="mt-4 space-y-3">
-                    {documentUrl ? (
+                    {isCommitted ? (
                       <div className="space-y-3">
                         <p className="rounded-xl bg-movexum-pastell-gron px-3 py-2 text-sm font-medium text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron">
                           ✓ Committad – levande dokument skapat.
                         </p>
-                        <a
-                          href={documentUrl}
-                          className="inline-flex items-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
-                        >
-                          Öppna dokument →
-                        </a>
+                        {documentUrl ? (
+                          <a
+                            href={documentUrl}
+                            className="inline-flex items-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
+                          >
+                            Öppna dokument →
+                          </a>
+                        ) : (
+                          <p className="text-xs text-foreground-subtle">
+                            Testläge — i skarpt läge skapas här ett levande dokument på bolagskortet.
+                          </p>
+                        )}
                       </div>
                     ) : coachDecision !== 'approved' ? (
                       <div className="rounded-2xl border border-default bg-canvas-subtle/60 px-4 py-3">
@@ -584,6 +659,13 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
                         type="button"
                         disabled={pendingCommit || isDone}
                         onClick={() => {
+                          if (preview) {
+                            setPreviewCommitted(true);
+                            setMessage(
+                              'Testläge: committad (inget sparas). I skarpt läge skapas nu det levande dokumentet på bolagskortet.'
+                            );
+                            return;
+                          }
                           startCommit(async () => {
                             const res = await commitWorkshopDocumentAction(assignment.id);
                             if (res.error) { setError(res.error); return; }
@@ -619,25 +701,27 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
       {/* Actions */}
       {!isDone && (
         <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            disabled={pendingSave}
-            onClick={() => {
-              setError(null);
-              setMessage(null);
-              startSave(async () => {
-                const result = await saveProgress();
-                if (result.error) {
-                  setError(result.error);
-                  return;
-                }
-                setMessage('Progression sparad.');
-              });
-            }}
-            className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-5 py-2.5 text-sm font-semibold text-foreground-muted transition hover:bg-canvas-subtle disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {pendingSave ? 'Sparar…' : 'Spara progression'}
-          </button>
+          {!preview && (
+            <button
+              type="button"
+              disabled={pendingSave}
+              onClick={() => {
+                setError(null);
+                setMessage(null);
+                startSave(async () => {
+                  const result = await saveProgress();
+                  if (result.error) {
+                    setError(result.error);
+                    return;
+                  }
+                  setMessage('Progression sparad.');
+                });
+              }}
+              className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-5 py-2.5 text-sm font-semibold text-foreground-muted transition hover:bg-canvas-subtle disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {pendingSave ? 'Sparar…' : 'Spara progression'}
+            </button>
+          )}
           <button
             type="button"
             disabled={pendingComplete || !completedRequired}
@@ -645,6 +729,22 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
               setError(null);
               setMessage(null);
               startComplete(async () => {
+                if (preview) {
+                  const result = await previewWorkshopReportAction(
+                    String(assignment.workshop),
+                    answers,
+                    previewThread
+                  );
+                  if (result.error) {
+                    setError(result.error);
+                    return;
+                  }
+                  if (result.reportMd) setGeneratedReport(result.reportMd);
+                  setMessage(
+                    'Testrapport genererad (inget sparas). I skarpt läge sparas rapporten på bolagskortet.'
+                  );
+                  return;
+                }
                 const saveResult = await saveProgress();
                 if (saveResult.error) {
                   setError(saveResult.error);
@@ -663,7 +763,11 @@ export function WorkshopRunner({ assignment, modules, isStaff = false }: Worksho
             }}
             className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {pendingComplete ? 'Genererar rapport…' : 'Slutför & generera rapport'}
+            {pendingComplete
+              ? 'Genererar rapport…'
+              : preview
+                ? 'Testa slutförande & rapport'
+                : 'Slutför & generera rapport'}
           </button>
         </div>
       )}

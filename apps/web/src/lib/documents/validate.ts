@@ -65,7 +65,7 @@ function validateTable(raw: unknown): TableSpec | undefined {
   return out;
 }
 
-function validateChart(raw: unknown): ChartSpec | undefined {
+export function validateChart(raw: unknown): ChartSpec | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const c = raw as Record<string, unknown>;
   const types: ChartSpec['type'][] = ['bar', 'hbar', 'line', 'area', 'pie', 'donut'];
@@ -90,7 +90,7 @@ function validateChart(raw: unknown): ChartSpec | undefined {
   return out;
 }
 
-function validateKpis(raw: unknown): KpiSpec[] | undefined {
+export function validateKpis(raw: unknown): KpiSpec[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const kpis = raw.slice(0, MAX_KPIS).map((k) => {
     const o = (k && typeof k === 'object' ? k : {}) as Record<string, unknown>;

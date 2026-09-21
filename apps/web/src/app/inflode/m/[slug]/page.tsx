@@ -5,6 +5,7 @@ import { PageHead, Card, Chip, Icon } from '@/components/proto';
 import { getModuleBySlug, listQuestionsForModule } from '@/lib/compass/store';
 import { CompassChat } from '@/components/compass/CompassChat';
 import { ModuleWizard } from '@/components/compass/ModuleWizard';
+import { ModuleQuiz } from '@/components/compass/ModuleQuiz';
 import { FLOW_TYPE_LABEL } from '@/lib/compass/types';
 
 export const dynamic = 'force-dynamic';
@@ -40,6 +41,17 @@ export default async function ModulePage({
         }
       />
 
+      <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-paper-2)' }}>
+        <div className="mx-flex mx-items-c mx-gap-2 mx-t-12 mx-muted" style={{ flexWrap: 'wrap' }}>
+          <Icon name="shield" size={13} />
+          <span>
+            Förhandsgranskning — leads härifrån markeras som{' '}
+            <strong>Förhandsgranskning</strong> och räknas inte i statistik eller export.
+            Den publika sidan ligger på <code className="mx-mono">/m/[publik-slug]</code>.
+          </span>
+        </div>
+      </Card>
+
       {mod.intro_message && (
         <Card style={{ padding: 16, marginBottom: 16 }}>
           <div className="mx-t-13" style={{ lineHeight: 1.5 }}>
@@ -67,6 +79,17 @@ export default async function ModulePage({
             initialAssistantMessage={mod.intro_message || undefined}
           />
         </div>
+      ) : mod.flow_type === 'quiz' ? (
+        <Card style={{ padding: 24 }}>
+          <ModuleQuiz
+            moduleSlug={mod.slug}
+            questions={questions}
+            requireEmail={mod.require_email}
+            requirePhone={mod.require_phone}
+            requireOrganization={mod.require_organization}
+            successMessage={mod.success_message}
+          />
+        </Card>
       ) : (
         <Card style={{ padding: 24 }}>
           <ModuleWizard

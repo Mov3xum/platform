@@ -2,11 +2,20 @@
 
 // Movexum OS — Formulär för nytt projekt/uppdrag.
 // Klientkomponent för useFormState + multi-select av deltagare och bolag.
+// CLAUDE.md § 29: AI-teamförslag — beskriv uppdraget, låt AI:n föreslå
+// kompetenser + kandidater, koppla på med ett klick (människa-i-loopen).
 
 import { useActionState, useMemo, useState } from 'react';
 import { Card, Icon } from '@/components/proto';
-import type { MissionParticipantRole, MissionType, MissionVisibility } from '@platform/shared';
+import {
+  COMPETENCE_LABELS,
+  type CompetenceId,
+  type MissionParticipantRole,
+  type MissionType,
+  type MissionVisibility
+} from '@platform/shared';
 import type { MissionActionState } from '@/lib/actions/missions';
+import { suggestTeamAction, type SuggestTeamResult } from '@/lib/actions/team';
 
 interface UserOption {
   id: string;
@@ -61,8 +70,14 @@ export function NewMissionForm({
   const [state, formAction, pending] = useActionState(action, {} as MissionActionState);
   const [type, setType] = useState<MissionType>('project');
   const [visibility, setVisibility] = useState<MissionVisibility>('tenant');
+  const [description, setDescription] = useState('');
   const [selectedStartups, setSelectedStartups] = useState<string[]>([]);
   const [participants, setParticipants] = useState<ParticipantDraft[]>([]);
+
+  // AI-teamförslag
+  const [suggestion, setSuggestion] = useState<Extract<SuggestTeamResult, { ok: true }> | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   const userById = useMemo(() => {
     const map = new Map<string, UserOption>();
@@ -79,8 +94,11 @@ export function NewMissionForm({
     setSelectedStartups((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
   };
 
-  const addParticipant = (id: string) => {
-    setParticipants((prev) => [...prev, { user_id: id, role: 'contributor' }]);
+  const addParticipant = (id: string, role: MissionParticipantRole = 'contributor') => {
+    if (id === currentUserId) return;
+    setParticipants((prev) =>
+      prev.some((p) => p.user_id === id) ? prev : [...prev, { user_id: id, role }]
+    );
   };
   const removeParticipant = (id: string) => {
     setParticipants((prev) => prev.filter((p) => p.user_id !== id));
@@ -88,6 +106,37 @@ export function NewMissionForm({
   const setRole = (id: string, role: MissionParticipantRole) => {
     setParticipants((prev) => prev.map((p) => (p.user_id === id ? { ...p, role } : p)));
   };
+
+  async function runSuggest() {
+    setSuggestError(null);
+    setSuggesting(true);
+    try {
+      const res = await suggestTeamAction({
+        description,
+        startupId: selectedStartups[0]
+      });
+      if (!res.ok) {
+        setSuggestError(res.error);
+        setSuggestion(null);
+      } else {
+        setSuggestion(res);
+      }
+    } catch {
+      setSuggestError('Något gick fel när teamförslaget skulle hämtas.');
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  function applyWholeTeam() {
+    if (!suggestion) return;
+    for (const m of suggestion.members) {
+      if (m.kind === 'user') addParticipant(m.id, m.role === 'lead' ? 'contributor' : m.role);
+    }
+  }
+
+  const internalMembers = suggestion?.members.filter((m) => m.kind === 'user') ?? [];
+  const externalMembers = suggestion?.members.filter((m) => m.kind === 'contact') ?? [];
 
   // Skicka full participants_json inkl. utfärdaren som lead
   const submittedParticipants: ParticipantDraft[] = [
@@ -136,12 +185,14 @@ export function NewMissionForm({
 
           <div className="mx-field">
             <label className="mx-label" htmlFor="description">
-              Beskrivning
+              Beskrivning av uppdraget
             </label>
             <textarea
               id="description"
               name="description"
-              placeholder="Kort om uppdraget — vad ska göras, varför?"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Beskriv uppdraget/utmaningen — vad ska göras, varför? Detta ligger till grund för AI-teamförslaget."
             />
           </div>
 
@@ -184,6 +235,171 @@ export function NewMissionForm({
             </select>
           </div>
         </div>
+      </Card>
+
+      {/* ── AI-teamförslag (CLAUDE.md § 29) ───────────────────────────── */}
+      <Card style={{ padding: 18 }}>
+        <div className="mx-flex mx-items-c mx-gap-2 mx-mb-2">
+          <Icon name="sparkle" size={14} />
+          <div className="mx-fw-6 mx-t-14">Föreslå team med AI</div>
+        </div>
+        <div className="mx-t-12 mx-muted mx-mb-3">
+          Utifrån beskrivningen ovan föreslår AI:n vilka kompetenser uppdraget
+          kräver och vilka kollegor som kan kopplas på. Du bestämmer — inget
+          tilldelas automatiskt. AI-verktyg drivs av Mistral (Frankrike, EU).
+        </div>
+        <button
+          type="button"
+          className="mx-btn mx-sm"
+          onClick={runSuggest}
+          disabled={suggesting || description.trim().length < 10}
+        >
+          <Icon name="sparkle" size={12} />
+          {suggesting ? 'Analyserar…' : 'Föreslå kompetenser & team'}
+        </button>
+        {description.trim().length < 10 && (
+          <div className="mx-t-12 mx-muted mx-mt-2">
+            Skriv en beskrivning av uppdraget först (minst en mening).
+          </div>
+        )}
+
+        {suggestError && (
+          <div className="mx-t-13 mx-mt-2" style={{ color: '#4b2718' }}>
+            {suggestError}
+          </div>
+        )}
+
+        {suggestion && (
+          <div className="mx-flex mx-col mx-gap-3 mx-mt-3">
+            {suggestion.summary && (
+              <div className="mx-t-13">{suggestion.summary}</div>
+            )}
+
+            {suggestion.needsReview && (
+              <div
+                className="mx-card"
+                style={{ padding: 10, background: 'var(--mx-st-warn-bg, #f8f1da)', color: '#4b2718' }}
+              >
+                <div className="mx-t-12 mx-fw-6">
+                  AI:n är osäker — granska förslaget noga och välj manuellt.
+                </div>
+              </div>
+            )}
+
+            {suggestion.neededCompetences.length > 0 && (
+              <div>
+                <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6 mx-mb-2">
+                  Kompetenser uppdraget kräver
+                </div>
+                <div className="mx-flex mx-gap-2 mx-wrap">
+                  {suggestion.neededCompetences.map((c: CompetenceId) => (
+                    <span key={c} className="mx-chip mx-mono">
+                      {COMPETENCE_LABELS[c]}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {internalMembers.length > 0 && (
+              <div>
+                <div className="mx-flex mx-items-c mx-justify-b mx-mb-2">
+                  <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6">
+                    Föreslagna kollegor
+                  </div>
+                  <button type="button" className="mx-btn mx-sm mx-ghost" onClick={applyWholeTeam}>
+                    <Icon name="plus" size={11} /> Lägg till alla
+                  </button>
+                </div>
+                <ul className="mx-flex mx-col mx-gap-2">
+                  {internalMembers.map((m) => {
+                    const added = participants.some((p) => p.user_id === m.id) || m.id === currentUserId;
+                    return (
+                      <li
+                        key={m.id}
+                        className="mx-flex mx-items-c mx-gap-2"
+                        style={{ padding: '8px 10px', background: 'var(--mx-paper-3)', borderRadius: 8 }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="mx-t-13 mx-fw-6">
+                            {m.name}
+                            {m.title ? <span className="mx-muted mx-fw-4"> · {m.title}</span> : null}
+                            <span className="mx-mono mx-t-xs mx-muted"> · {ROLE_LABELS[m.role]}</span>
+                          </div>
+                          {m.reason && <div className="mx-t-12 mx-muted">{m.reason}</div>}
+                          {m.competences.length > 0 && (
+                            <div className="mx-flex mx-gap-1 mx-wrap mx-mt-1">
+                              {m.competences.map((c) => (
+                                <span key={c} className="mx-mono mx-t-xs mx-muted">
+                                  #{COMPETENCE_LABELS[c]}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <span className="mx-mono mx-t-xs mx-muted" title="AI:ns säkerhet">
+                          {Math.round(m.confidence * 100)}%
+                        </span>
+                        {m.id === currentUserId ? (
+                          <span className="mx-mono mx-t-xs mx-muted">Du</span>
+                        ) : added ? (
+                          <span className="mx-mono mx-t-xs" style={{ color: '#1d3a1f' }}>
+                            <Icon name="check" size={11} /> Tillagd
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="mx-btn mx-sm"
+                            onClick={() => addParticipant(m.id, m.role === 'lead' ? 'contributor' : m.role)}
+                          >
+                            <Icon name="plus" size={11} /> Lägg till
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+
+            {externalMembers.length > 0 && (
+              <div>
+                <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6 mx-mb-2">
+                  Externa kompetenser att koppla på
+                </div>
+                <ul className="mx-flex mx-col mx-gap-1">
+                  {externalMembers.map((m) => (
+                    <li key={m.id} className="mx-t-12">
+                      <span className="mx-fw-6">{m.name}</span>
+                      {m.title ? <span className="mx-muted"> · {m.title}</span> : null}
+                      {m.reason ? <span className="mx-muted"> — {m.reason}</span> : null}
+                    </li>
+                  ))}
+                </ul>
+                <div className="mx-t-12 mx-muted mx-mt-1">
+                  Externa kontakter kopplas via bolagets kontaktregister — de blir
+                  inte uppdragsdeltagare här.
+                </div>
+              </div>
+            )}
+
+            {suggestion.externalNote && (
+              <div
+                className="mx-card"
+                style={{ padding: 10, background: 'var(--mx-paper-3)' }}
+              >
+                <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6 mx-mb-1">
+                  Kompetensgap
+                </div>
+                <div className="mx-t-12">{suggestion.externalNote}</div>
+              </div>
+            )}
+
+            <div className="mx-mono mx-t-xs mx-muted">
+              Genererat av AI – verifiera innan du sätter teamet.
+            </div>
+          </div>
+        )}
       </Card>
 
       <Card style={{ padding: 18 }}>

@@ -2,11 +2,11 @@
  * Movexum brand-typsnitt (self-hosted, EU-suveränt — inga CDN-anrop):
  *   - Sora (rubriker)
  *   - Nunito Sans (brödtext, upright + italic)
- *   - JetBrains Mono (kod/data, § 2.4)
  *
- * Sora + Nunito Sans är de enda godkända text-typsnitten enligt grafiska
- * profilen. Inga andra familjer (Inter/Fraunces/Helvetica/Arial) får
- * användas. Licenser ligger bredvid filerna (SIL OFL, *-OFL.txt).
+ * Sora + Nunito Sans är de ENDA tillåtna typsnitten. Inga andra familjer
+ * (JetBrains Mono/Inter/Fraunces/Helvetica/Arial) får användas — `font-mono`
+ * och `--mx-mono` är ommappade till Nunito Sans. Licenser ligger bredvid
+ * filerna (SIL OFL, *-OFL.txt).
  */
 
 @font-face {
@@ -31,12 +31,4 @@
   font-weight: 200 1000;
   font-display: swap;
   src: url("/fonts/nunito-sans-italic-variable.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "JetBrains Mono Variable";
-  font-style: normal;
-  font-weight: 100 800;
-  font-display: swap;
-  src: url("/fonts/jetbrains-mono-variable.woff2") format("woff2");
 }

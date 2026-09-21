@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { escFilter } from '@/lib/pb-filter';
 import { notFound, redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
@@ -84,7 +85,7 @@ export default async function InvestorDetailPage({
   let deals: DealWithExpand[] = [];
   try {
     const res = await pb.collection(PB_COLLECTIONS.deals).getList<DealWithExpand>(1, 50, {
-      filter: `tenant = "${user.tenant}" && investor = "${id}"`,
+      filter: `tenant = "${escFilter(user.tenant)}" && investor = "${escFilter(id)}"`,
       sort: '-last_activity',
       expand: 'startup'
     });
@@ -100,7 +101,7 @@ export default async function InvestorDetailPage({
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb={`Hemmaplan / Investerarrelationer / ${investor.name}`}
+        crumb={`Dashboard / Investerarrelationer / ${investor.name}`}
         title={investor.name}
         subtitle={
           investor.stage_focus?.length

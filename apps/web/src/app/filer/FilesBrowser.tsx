@@ -9,16 +9,7 @@ import {
   DEFAULT_FILE_TOPIC,
   type FileTopic
 } from '@platform/shared';
-import {
-  listFilesAction,
-  getFileDownloadUrlAction,
-  renameFileAction,
-  deleteFileAction,
-  uploadUserFileAction,
-  categorizeAllFilesAction,
-  setFileTopicAction,
-  type UserFileListItem
-} from '@/lib/actions/files';
+import { type UserFileListItem } from '@/lib/actions/files';
 
 type StartupOption = { id: string; name: string };
 type View = 'amnen' | 'bolag';
@@ -55,6 +46,7 @@ export default function FilesBrowser({
   const [view, setView] = useState<View>('amnen');
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [sortQueue, setSortQueue] = useState<UserFileListItem[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -66,7 +58,13 @@ export default function FilesBrowser({
   }, [startups]);
 
   async function refresh() {
-    setFiles(await listFilesAction());
+    const res = await fetch('/api/filer', { cache: 'no-store' });
+    if (!res.ok) {
+      setError('Kunde inte läsa filer.');
+      return;
+    }
+    const data = (await res.json()) as { files?: UserFileListItem[] };
+    setFiles(data.files || []);
   }
 
   // ── Gruppering ────────────────────────────────────────────────────────────
@@ -110,23 +108,31 @@ export default function FilesBrowser({
   // ── Filåtgärder ─────────────────────────────────────────────────────────
   async function download(f: UserFileListItem) {
     setError(null);
-    const res = await getFileDownloadUrlAction(f.id);
-    if (res.url) window.open(res.url, '_blank', 'noopener,noreferrer');
-    else setError(res.error || 'Kunde inte hämta filen.');
+    window.open(`/api/files/${encodeURIComponent(f.id)}`, '_blank', 'noopener,noreferrer');
   }
 
   async function rename(f: UserFileListItem) {
     const name = window.prompt('Byt filnamn', f.filename);
     if (name == null) return;
-    const res = await renameFileAction(f.id, name);
-    if (res.error) setError(res.error);
+    const res = await fetch('/api/filer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'rename', fileId: f.id, filename: name })
+    });
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok || data.error) setError(data.error || 'Kunde inte byta namn.');
     else await refresh();
   }
 
   async function remove(f: UserFileListItem) {
     if (!window.confirm(`Radera "${f.filename}"? Detta kan inte ångras.`)) return;
-    const res = await deleteFileAction(f.id);
-    if (res.error) setError(res.error);
+    const res = await fetch('/api/filer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', fileId: f.id })
+    });
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok || data.error) setError(data.error || 'Kunde inte radera filen.');
     else await refresh();
   }
 
@@ -135,10 +141,12 @@ export default function FilesBrowser({
     if (!file) return;
     setError(null);
     const fd = new FormData();
+    fd.append('action', 'upload');
     fd.append('file', file);
     startTransition(async () => {
-      const res = await uploadUserFileAction(fd);
-      if (res.error) setError(res.error);
+      const res = await fetch('/api/filer', { method: 'POST', body: fd });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok || data.error) setError(data.error || 'Kunde inte ladda upp filen.');
       else await refresh();
       if (fileInputRef.current) fileInputRef.current.value = '';
     });
@@ -146,10 +154,38 @@ export default function FilesBrowser({
 
   function sortWithAi() {
     setError(null);
+    setNotice(null);
     startTransition(async () => {
-      const res = await categorizeAllFilesAction();
-      if (res.error) setError(res.error);
+      const res = await fetch('/api/filer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'categorize-all' })
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok || data.error) setError(data.error || 'Kunde inte kategorisera filerna.');
       else await refresh();
+    });
+  }
+
+  function indexForChat() {
+    setError(null);
+    setNotice(null);
+    startTransition(async () => {
+      const res = await fetch('/api/filer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'index-my-files' })
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; indexed?: number; skipped?: number };
+      if (!res.ok || data.error) {
+        setError(data.error || 'Kunde inte indexera filerna.');
+        return;
+      }
+      await refresh();
+      const parts: string[] = [];
+      if (data.indexed) parts.push(`${data.indexed} fil${data.indexed === 1 ? '' : 'er'} sökbara i chatten`);
+      if (data.skipped) parts.push(`${data.skipped} hoppades över (PowerPoint/Word/bild — exportera till PDF)`);
+      setNotice(parts.length ? parts.join(' · ') : 'Inga nya filer att indexera.');
     });
   }
 
@@ -188,7 +224,7 @@ export default function FilesBrowser({
               {files.length} filer · {folderCount} mappar · {formatBytes(totalBytes)} totalt
             </p>
           </div>
-          <div className="flex flex-shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={sortWithAi}
@@ -197,6 +233,16 @@ export default function FilesBrowser({
             >
               <Icon name="sparkle" size={14} />
               Sortera med AI
+            </button>
+            <button
+              type="button"
+              onClick={indexForChat}
+              disabled={isPending}
+              title="Gör dina text-filer (PDF/Excel/text) sökbara i AI-chatten"
+              className="inline-flex items-center gap-2 rounded-xl border border-default px-3 py-2 text-[13px] font-medium text-foreground transition hover:border-strong disabled:opacity-50"
+            >
+              <Icon name="search" size={14} />
+              Gör sökbara i chatten
             </button>
             <button
               type="button"
@@ -221,6 +267,12 @@ export default function FilesBrowser({
       {error && (
         <div className="rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange">
           {error}
+        </div>
+      )}
+
+      {notice && (
+        <div className="rounded-xl bg-movexum-pastell-gron px-3 py-2 text-[12.5px] text-movexum-morkgron">
+          {notice}
         </div>
       )}
 
@@ -515,9 +567,14 @@ function FileSortDialog({
     if (!file) return;
     setError(null);
     startTransition(async () => {
-      const res = await setFileTopicAction(file.id, topic, company || null);
-      if (res.error) {
-        setError(res.error);
+      const res = await fetch('/api/filer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set-topic', fileId: file.id, topic, startupId: company || null })
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok || data.error) {
+        setError(data.error || 'Kunde inte spara ämnet.');
         return;
       }
       await onSaved();

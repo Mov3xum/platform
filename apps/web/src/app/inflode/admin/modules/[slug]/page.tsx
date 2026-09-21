@@ -2,20 +2,20 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { PageHead, Card, CardHead, Chip, Icon } from '@/components/proto';
+import { PageHead, Card, CardHead, Icon } from '@/components/proto';
 import {
   getLeadAnalytics,
   getModuleBySlug,
+  listModules,
   listQuestionsForModule
 } from '@/lib/compass/store';
 import { FLOW_TYPE_LABEL } from '@/lib/compass/types';
-import {
-  addQuestionAction,
-  deleteModuleAction,
-  deleteQuestionAction,
-  updateModuleAction
-} from '@/lib/actions/compass';
+import { deleteModuleAction } from '@/lib/actions/compass';
+import { listEvents } from '@/lib/actions/events';
 import { ShareModule } from '@/components/compass/ShareModule';
+import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
+import { ModuleEditor } from '@/components/compass/ModuleEditor';
+import { moduleHeroImageUrl, moduleHeroVideoUrl } from '@/lib/compass/media';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,16 +23,6 @@ const MODEL_OPTIONS = [
   { value: 'mistral-large-latest', label: 'Mistral Large (rikast)' },
   { value: 'mistral-medium-latest', label: 'Mistral Medium' },
   { value: 'mistral-small-latest', label: 'Mistral Small (snabb/billig)' }
-];
-
-const INPUT_TYPES = [
-  { value: 'short_text', label: 'Kort text' },
-  { value: 'long_text', label: 'Lång text' },
-  { value: 'email', label: 'E-post' },
-  { value: 'phone', label: 'Telefon' },
-  { value: 'choice', label: 'Enkelval' },
-  { value: 'multi_choice', label: 'Flerval' },
-  { value: 'scale', label: 'Skala 1–10' }
 ];
 
 export default async function EditModulePage({
@@ -49,16 +39,52 @@ export default async function EditModulePage({
   const mod = await getModuleBySlug(pb, user.tenant, slug);
   if (!mod) notFound();
 
-  const [questions, analytics] = await Promise.all([
+  const [questions, analytics, allModules, events] = await Promise.all([
     listQuestionsForModule(pb, mod.id),
-    getLeadAnalytics(pb, user.tenant, 365)
+    getLeadAnalytics(pb, user.tenant, 365),
+    listModules(pb, user.tenant),
+    listEvents()
   ]);
-  const metrics = analytics.byModule.find((m) => m.slug === mod.slug);
+  // Publika flöden lagrar landing_module som modulens PUBLIKA slug, interna
+  // förhandsgranskningar som den interna — slå ihop bägge så statistiken
+  // stämmer (tidigare visades 0 leads när public_slug skilde sig från slug).
+  const metricRows = analytics.byModule.filter(
+    (m) => m.slug === mod.slug || (mod.public_slug && m.slug === mod.public_slug)
+  );
+  const metrics =
+    metricRows.length > 0
+      ? metricRows.reduce(
+          (acc, m) => ({
+            total: acc.total + m.total,
+            accepted: acc.accepted + m.accepted,
+            converted: acc.converted + m.converted
+          }),
+          { total: 0, accepted: 0, converted: 0 }
+        )
+      : undefined;
+  const heroImageUrl = moduleHeroImageUrl(mod);
+  const heroVideoUrl = moduleHeroVideoUrl(mod);
+  // Övriga moduler i tenanten — kandidater för "nästa modul"-kedjan (ej sig själv).
+  const otherModules = allModules
+    .filter((m) => m.id !== mod.id)
+    .map((m) => ({
+      id: m.id,
+      name: m.name,
+      public_slug: m.public_slug,
+      is_active: m.is_active,
+      public_url_enabled: m.public_url_enabled
+    }));
+  // Tenantens event/aktiviteter — kandidater för modulens event-koppling.
+  const eventOptions = events.map((e) => ({
+    id: e.id,
+    name: e.name,
+    starts_at: e.starts_at
+  }));
 
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb={`Startupkompassen / Admin / Moduler / ${mod.name}`}
+        crumb={`Startupkompassen / Moduler / ${mod.name}`}
         title={mod.name}
         subtitle={`${mod.public_slug ? `/m/${mod.public_slug}` : '(ingen publik länk)'} · ${FLOW_TYPE_LABEL[mod.flow_type]} · ${mod.is_active ? 'Aktiv' : 'Utkast'}`}
         actions={
@@ -80,7 +106,10 @@ export default async function EditModulePage({
             <Stat label="Accepterade" value={metrics.accepted} />
             <Stat label="Konverterade bolag" value={metrics.converted} />
             <span className="mx-grow" />
-            <Link href={`/inflode/leads?landing=${mod.slug}`} className="mx-btn mx-sm mx-ghost">
+            <Link
+              href={`/inflode/leads?landing=${encodeURIComponent(mod.public_slug || mod.slug)}`}
+              className="mx-btn mx-sm mx-ghost"
+            >
               Visa leads från modulen →
             </Link>
           </div>
@@ -88,485 +117,56 @@ export default async function EditModulePage({
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
-        <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-          {/* Inställningar */}
+        {/* Stegvis editor — ETT steg i taget, frågorna har ett eget steg */}
+        <div style={{ minWidth: 0 }}>
           <Card>
-            <CardHead label="Grundinställningar" />
-            <form
-              action={updateModuleAction}
-              style={{ padding: 16, display: 'grid', gap: 12 }}
-            >
-              <input type="hidden" name="id" value={mod.id} />
-              <label className="mx-label">
-                Namn
-                <input
-                  type="text"
-                  name="name"
-                  defaultValue={mod.name}
-                  required
-                  className="mx-input"
-                  style={{ marginTop: 4 }}
-                />
-              </label>
-              <label className="mx-label">
-                Beskrivning
-                <textarea
-                  name="description"
-                  defaultValue={mod.description || ''}
-                  className="mx-textarea"
-                  style={{ marginTop: 4, minHeight: 60 }}
-                />
-              </label>
-              <label className="mx-label">
-                Målgrupp
-                <input
-                  type="text"
-                  name="target_audience"
-                  defaultValue={mod.target_audience || ''}
-                  className="mx-input"
-                  style={{ marginTop: 4 }}
-                  placeholder="Vem är modulen till för?"
-                />
-              </label>
-              <label className="mx-label">
-                Publik länk (slug) — modulen blir svarbar på <code>/m/[slug]</code>
-                <input
-                  type="text"
-                  name="public_slug"
-                  defaultValue={mod.public_slug || ''}
-                  className="mx-input"
-                  style={{ marginTop: 4, fontFamily: 'var(--mx-mono)' }}
-                  placeholder="t.ex. ar-du-entreprenor (globalt unik)"
-                />
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <label className="mx-label">
-                  Eyebrow (liten text ovanför rubriken)
-                  <input
-                    type="text"
-                    name="hero_eyebrow"
-                    defaultValue={mod.hero_eyebrow || ''}
-                    className="mx-input"
-                    style={{ marginTop: 4 }}
-                    placeholder="STARTUPKOMPASSEN"
-                  />
-                </label>
-                <label className="mx-label">
-                  Välkomstrubrik
-                  <input
-                    type="text"
-                    name="welcome_title"
-                    defaultValue={mod.welcome_title || ''}
-                    className="mx-input"
-                    style={{ marginTop: 4 }}
-                    placeholder="Visas stort på publika sidan"
-                  />
-                </label>
-              </div>
-              <label className="mx-label">
-                Välkomsttext (ingress på publika sidan)
-                <textarea
-                  name="welcome_body"
-                  defaultValue={mod.welcome_body || ''}
-                  className="mx-textarea"
-                  style={{ marginTop: 4, minHeight: 50 }}
-                />
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <label className="mx-label">
-                  Flow-typ
-                  <select
-                    name="flow_type"
-                    defaultValue={mod.flow_type}
-                    className="mx-input"
-                    style={{ marginTop: 4 }}
-                  >
-                    <option value="chat">AI-chatt</option>
-                    <option value="wizard">Formulär</option>
-                    <option value="quiz">Quiz</option>
-                  </select>
-                </label>
-                <label className="mx-label">
-                  AI-modell (chat)
-                  <select
-                    name="model"
-                    defaultValue={mod.model || 'mistral-large-latest'}
-                    className="mx-input"
-                    style={{ marginTop: 4 }}
-                  >
-                    {MODEL_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <label className="mx-label">
-                Intro-meddelande (visas högst upp på modul-sidan)
-                <textarea
-                  name="intro_message"
-                  defaultValue={mod.intro_message || ''}
-                  className="mx-textarea"
-                  style={{ marginTop: 4, minHeight: 50 }}
-                />
-              </label>
-              <label className="mx-label">
-                Tack-meddelande (efter inskickat)
-                <textarea
-                  name="success_message"
-                  defaultValue={mod.success_message || ''}
-                  className="mx-textarea"
-                  style={{ marginTop: 4, minHeight: 50 }}
-                  placeholder="t.ex. Tack! Vi hör av oss inom 3 arbetsdagar."
-                />
-              </label>
-              <label className="mx-label">
-                Redirect-URL (frivillig — leadet skickas vidare efter inskickning)
-                <input
-                  type="url"
-                  name="redirect_url"
-                  defaultValue={mod.redirect_url || ''}
-                  className="mx-input"
-                  style={{ marginTop: 4 }}
-                  placeholder="https://..."
-                />
-              </label>
-              <label className="mx-label">
-                Samtyckesnotis (GDPR)
-                <textarea
-                  name="consent_note"
-                  defaultValue={mod.consent_note || ''}
-                  className="mx-textarea"
-                  style={{ marginTop: 4, minHeight: 50 }}
-                  placeholder="Du samtycker till att Movexum kontaktar dig och lagrar dina uppgifter inom EU…"
-                />
-              </label>
-              <label className="mx-label">
-                Notifiera inflöde till (e-post)
-                <input
-                  type="text"
-                  name="notify_emails"
-                  defaultValue={mod.notify_emails || ''}
-                  className="mx-input"
-                  style={{ marginTop: 4 }}
-                  placeholder="inflode@movexum.se, namn@movexum.se"
-                />
-                <span className="mx-t-12 mx-muted" style={{ display: 'block', marginTop: 4 }}>
-                  En eller flera adresser (kommaseparerade) som får ett mejl när ett
-                  nytt inflöde kommer in. Lämna tom för att använda standardadressen
-                  (<code className="mx-mono">MOVEXUM_INFLOW_EMAIL</code>).
-                </span>
-              </label>
-              <label className="mx-label">
-                System-prompt (för AI-chat-flöden)
-                <textarea
-                  name="system_prompt"
-                  defaultValue={mod.system_prompt || ''}
-                  className="mx-textarea"
-                  style={{ marginTop: 4, minHeight: 120, fontFamily: 'var(--mx-mono)' }}
-                  placeholder="Lämna tom för standard-prompten. Skriv egen om du vill att AI:n ska bete sig annorlunda — t.ex. för en specifik kohort."
-                />
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <label className="mx-label">
-                  Assistent-namn (AI-chatt)
-                  <input
-                    type="text"
-                    name="chat_persona"
-                    defaultValue={mod.chat_persona || ''}
-                    className="mx-input"
-                    style={{ marginTop: 4 }}
-                    placeholder="t.ex. Movexums AI-rådgivare"
-                  />
-                </label>
-                <label className="mx-label">
-                  Max antal AI-utbyten (0 = obegränsat)
-                  <input
-                    type="number"
-                    name="max_exchanges"
-                    defaultValue={mod.max_exchanges ?? 0}
-                    min={0}
-                    max={100}
-                    className="mx-input"
-                    style={{ marginTop: 4 }}
-                  />
-                </label>
-              </div>
-              <label className="mx-label">
-                Tema-färg (frivillig)
-                <input
-                  type="text"
-                  name="theme_color"
-                  defaultValue={mod.theme_color || ''}
-                  className="mx-input"
-                  style={{ marginTop: 4 }}
-                  placeholder="#002c40"
-                />
-              </label>
-              <div className="mx-flex mx-items-c mx-gap-3 mx-wrap">
-                <label
-                  className="mx-flex mx-items-c mx-gap-2 mx-t-13"
-                  style={{ cursor: 'pointer' }}
-                >
-                  <input
-                    type="checkbox"
-                    name="is_active"
-                    defaultChecked={!!mod.is_active}
-                  />
-                  <span>Aktiv (synlig på översikten)</span>
-                </label>
-                <label
-                  className="mx-flex mx-items-c mx-gap-2 mx-t-13"
-                  style={{ cursor: 'pointer' }}
-                >
-                  <input
-                    type="checkbox"
-                    name="public_url_enabled"
-                    defaultChecked={!!mod.public_url_enabled}
-                  />
-                  <span>Markera som publik URL (för delning)</span>
-                </label>
-              </div>
-              <div className="mx-flex mx-items-c mx-gap-3 mx-wrap">
-                <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
-                  <input type="checkbox" name="require_email" defaultChecked={!!mod.require_email} />
-                  <span>E-post obligatoriskt</span>
-                </label>
-                <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
-                  <input type="checkbox" name="require_phone" defaultChecked={!!mod.require_phone} />
-                  <span>Telefon obligatoriskt</span>
-                </label>
-                <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    name="require_organization"
-                    defaultChecked={!!mod.require_organization}
-                  />
-                  <span>Organisation obligatoriskt</span>
-                </label>
-              </div>
-              {mod.flow_type === 'quiz' && (
-                <label className="mx-label">
-                  Resultatprofiler (JSON) — för quiz. Varje val i en fråga kan peka på en
-                  hink via <code>värde | etikett | poäng | hink</code>.
-                  <textarea
-                    name="result_buckets"
-                    defaultValue={
-                      mod.result_buckets && mod.result_buckets.length
-                        ? JSON.stringify(mod.result_buckets, null, 2)
-                        : ''
-                    }
-                    className="mx-textarea"
-                    style={{ marginTop: 4, minHeight: 160, fontFamily: 'var(--mx-mono)', fontSize: 11 }}
-                    placeholder={
-                      '[\n  {"key":"green","title":"Redo","body":"...","tips":["..."],"min":14,"max":21,"cta":{"label":"Boka","url":"/m/grundare"}}\n]'
-                    }
-                  />
-                </label>
-              )}
-              <div
-                className="mx-flex mx-items-c mx-gap-2"
-                style={{ justifyContent: 'flex-end' }}
-              >
-                <button type="submit" className="mx-btn mx-primary">
-                  <Icon name="check" size={13} /> Spara
-                </button>
-              </div>
-            </form>
+            <ModuleEditor
+              module={mod}
+              heroImageUrl={heroImageUrl}
+              heroVideoUrl={heroVideoUrl}
+              modelOptions={MODEL_OPTIONS}
+              otherModules={otherModules}
+              events={eventOptions}
+              questions={questions}
+            />
           </Card>
-
-          {/* Frågor */}
-          {mod.flow_type !== 'chat' && (
-            <Card>
-              <CardHead
-                label="Frågor"
-                right={
-                  <span className="mx-mono mx-t-xs mx-muted">
-                    {questions.length} {questions.length === 1 ? 'fråga' : 'frågor'}
-                  </span>
-                }
-              />
-              <div style={{ padding: 16 }}>
-                {questions.length === 0 ? (
-                  <div className="mx-muted mx-t-13" style={{ marginBottom: 12 }}>
-                    Inga frågor ännu. Lägg till din första nedan.
-                  </div>
-                ) : (
-                  <div style={{ display: 'grid', gap: 6, marginBottom: 16 }}>
-                    {questions.map((q, i) => (
-                      <div
-                        key={q.id}
-                        className="mx-flex mx-items-c mx-gap-2"
-                        style={{
-                          padding: 10,
-                          borderRadius: 8,
-                          background: 'var(--mx-paper-2)',
-                          border: '1px solid var(--mx-line-soft)'
-                        }}
-                      >
-                        <span
-                          className="mx-mono mx-t-xs mx-muted"
-                          style={{ minWidth: 24 }}
-                        >
-                          {i + 1}
-                        </span>
-                        <Chip mono>{q.input_type}</Chip>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div className="mx-t-13 mx-fw-6 mx-truncate">{q.prompt}</div>
-                          <div className="mx-mono mx-t-xs mx-muted mx-truncate">
-                            {q.key}
-                            {q.required && ' · obligatorisk'}
-                          </div>
-                        </div>
-                        <form action={deleteQuestionAction}>
-                          <input type="hidden" name="id" value={q.id} />
-                          <input type="hidden" name="module_slug" value={mod.slug} />
-                          <button
-                            type="submit"
-                            className="mx-btn mx-sm"
-                            style={{ color: '#4b2718' }}
-                          >
-                            <Icon name="trash" size={11} />
-                          </button>
-                        </form>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Lägg till fråga */}
-                <details>
-                  <summary
-                    className="mx-btn mx-sm"
-                    style={{ display: 'inline-flex', cursor: 'pointer' }}
-                  >
-                    <Icon name="plus" size={11} /> Ny fråga
-                  </summary>
-                  <form
-                    action={addQuestionAction}
-                    style={{
-                      marginTop: 12,
-                      padding: 12,
-                      borderRadius: 10,
-                      background: 'var(--mx-paper-2)',
-                      display: 'grid',
-                      gap: 8
-                    }}
-                  >
-                    <input type="hidden" name="module_id" value={mod.id} />
-                    <input type="hidden" name="module_slug" value={mod.slug} />
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                      <label className="mx-label">
-                        Nyckel (mappar till lead-fält om matchande)
-                        <input
-                          type="text"
-                          name="key"
-                          required
-                          className="mx-input"
-                          style={{ marginTop: 4 }}
-                          placeholder="t.ex. idea_summary, email, role"
-                        />
-                      </label>
-                      <label className="mx-label">
-                        Input-typ
-                        <select
-                          name="input_type"
-                          className="mx-input"
-                          defaultValue="short_text"
-                          style={{ marginTop: 4 }}
-                        >
-                          {INPUT_TYPES.map((it) => (
-                            <option key={it.value} value={it.value}>
-                              {it.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                    <label className="mx-label">
-                      Fråga (texten som visas)
-                      <input
-                        type="text"
-                        name="prompt"
-                        required
-                        className="mx-input"
-                        style={{ marginTop: 4 }}
-                      />
-                    </label>
-                    <label className="mx-label">
-                      Hjälptext (valfri)
-                      <input
-                        type="text"
-                        name="help_text"
-                        className="mx-input"
-                        style={{ marginTop: 4 }}
-                      />
-                    </label>
-                    <label className="mx-label">
-                      Val (en per rad). Format <code>värde | etikett | poäng | hink</code> för
-                      en hink per val, eller <code>värde | etikett | builder:2 explorer:1</code>{' '}
-                      för att fördela poäng över flera profiler. Poäng/hink är frivilliga och
-                      styr quiz-poängsättningen.
-                      <textarea
-                        name="choices"
-                        className="mx-textarea"
-                        style={{ marginTop: 4, minHeight: 60, fontFamily: 'var(--mx-mono)' }}
-                        placeholder="problem | Att lösa problem | builder:2 explorer:0&#10;frihet | Frihet och självständighet | builder:1 explorer:1&#10;hog | Hög | 3"
-                      />
-                    </label>
-                    <div className="mx-flex mx-items-c mx-gap-3">
-                      <label
-                        className="mx-flex mx-items-c mx-gap-2 mx-t-13"
-                        style={{ cursor: 'pointer' }}
-                      >
-                        <input type="checkbox" name="required" />
-                        Obligatorisk
-                      </label>
-                      <span className="mx-grow" />
-                      <button type="submit" className="mx-btn mx-primary">
-                        <Icon name="plus" size={12} /> Lägg till fråga
-                      </button>
-                    </div>
-                  </form>
-                </details>
-              </div>
-            </Card>
-          )}
         </div>
 
-        {/* Höger: dela, exempel-URL, ta bort */}
-        <div style={{ display: 'grid', gap: 16 }}>
-          <ShareModule slug={mod.slug} name={mod.name} publicSlug={mod.public_slug} />
+        {/* Höger: dela + ta bort */}
+        <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
+          <ShareModule
+            slug={mod.slug}
+            name={mod.name}
+            publicSlug={mod.public_slug}
+            isPublished={Boolean(mod.is_active && mod.public_url_enabled)}
+          />
 
           <Card>
-            <CardHead label="Kampanj-länk-byggare" />
+            <CardHead label="Kampanjlänkar" />
             <div style={{ padding: 16 }}>
-              <div className="mx-muted mx-t-12" style={{ marginBottom: 8 }}>
-                Lägg på UTM-parametrar för att mäta var leads kommer ifrån:
-              </div>
-              <div
-                style={{
-                  padding: 10,
-                  borderRadius: 8,
-                  background: 'var(--mx-paper-2)',
-                  border: '1px solid var(--mx-line-soft)',
-                  fontFamily: 'var(--mx-mono)',
-                  fontSize: 11,
-                  lineHeight: 1.5,
-                  wordBreak: 'break-all'
-                }}
-              >
-                /m/{mod.public_slug || '[ange-publik-slug]'}?utm_source=<em>linkedin</em>&amp;utm_medium=<em>post</em>&amp;utm_campaign=<em>varomgang26</em>
-              </div>
-              <div className="mx-t-12 mx-muted" style={{ marginTop: 10 }}>
-                Mätningen syns på översikten och per modul. Stöder:{' '}
-                <code className="mx-mono">utm_source</code>,{' '}
-                <code className="mx-mono">utm_medium</code>,{' '}
-                <code className="mx-mono">utm_campaign</code>,{' '}
-                <code className="mx-mono">utm_term</code>,{' '}
-                <code className="mx-mono">utm_content</code>.
-              </div>
+              <details>
+                <summary className="mx-t-13" style={{ cursor: 'pointer' }}>
+                  Mät var leads kommer ifrån (UTM)
+                </summary>
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: 10,
+                    borderRadius: 8,
+                    background: 'var(--mx-paper-2)',
+                    border: '1px solid var(--mx-line-soft)',
+                    fontFamily: 'var(--mx-mono)',
+                    fontSize: 11,
+                    lineHeight: 1.5,
+                    wordBreak: 'break-all'
+                  }}
+                >
+                  /m/{mod.public_slug || '[publik-länk]'}?utm_source=<em>linkedin</em>&amp;utm_medium=<em>post</em>&amp;utm_campaign=<em>varomgang26</em>
+                </div>
+                <div className="mx-t-12 mx-muted" style={{ marginTop: 8 }}>
+                  Mätningen syns på översikten och per modul.
+                </div>
+              </details>
             </div>
           </Card>
 
@@ -574,18 +174,18 @@ export default async function EditModulePage({
             <CardHead label="Farlig zon" />
             <form action={deleteModuleAction} style={{ padding: 16 }}>
               <input type="hidden" name="id" value={mod.id} />
-              <button
-                type="submit"
+              <ConfirmSubmitButton
+                confirmText={`Radera modulen "${mod.name}"? Alla frågor raderas också och den publika länken slutar fungera — detta kan inte ångras. Befintliga leads bevaras.`}
                 className="mx-btn"
                 style={{ width: '100%', color: '#4b2718', borderColor: '#d67e47' }}
               >
                 <Icon name="trash" size={13} /> Radera modul
-              </button>
+              </ConfirmSubmitButton>
               <div
                 className="mx-mono mx-t-xs mx-muted"
                 style={{ marginTop: 8, textAlign: 'center' }}
               >
-                Frågor raderas också (cascade). Befintliga leads bevaras.
+                Frågorna raderas också. Befintliga leads bevaras.
               </div>
             </form>
           </Card>

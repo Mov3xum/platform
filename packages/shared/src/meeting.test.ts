@@ -1,0 +1,225 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  MEETING_GAP_MARKER,
+  MEETING_TURN_PREFIX,
+  MAX_MEETING_COUNTERPART,
+  MAX_MEETING_SEGMENTS,
+  isMeetingKind,
+  meetingProtocolFilename,
+  meetingSubjectLabel,
+  normalizeMeetingCounterpart,
+  normalizeMeetingKind,
+  assembleMeetingTranscript,
+  formatMeetingClock,
+  isResumableMeetingStatus,
+  isStaleMeeting,
+  meetingTranscriptChars,
+  normalizeMeetingSegments
+} from './meeting';
+
+test('normalizeMeetingSegments sorterar på index och dedupe:ar (sista vinner)', () => {
+  const segments = normalizeMeetingSegments([
+    { index: 2, text: 'tredje' },
+    { index: 0, text: 'första (gammal)' },
+    { index: 1, text: 'andra' },
+    { index: 0, text: 'första (retry)' }
+  ]);
+  assert.deepEqual(
+    segments.map((s) => s.text),
+    ['första (retry)', 'andra', 'tredje']
+  );
+});
+
+test('normalizeMeetingSegments filtrerar skräp och ogiltiga index', () => {
+  const segments = normalizeMeetingSegments([
+    null,
+    'sträng',
+    { index: -1, text: 'negativ' },
+    { index: 1.5, text: 'decimal' },
+    { index: MAX_MEETING_SEGMENTS + 1, text: 'över taket' },
+    { index: 0, text: 'giltig' },
+    { index: 3 } // saknad text → tom sträng (tystnad)
+  ]);
+  assert.equal(segments.length, 2);
+  assert.equal(segments[0].text, 'giltig');
+  assert.equal(segments[1].text, '');
+});
+
+test('assembleMeetingTranscript fogar ihop text och normaliserar whitespace', () => {
+  const text = assembleMeetingTranscript([
+    { index: 0, text: '  Vi pratade om   nästa steg. ' },
+    { index: 1, text: 'Beslut: ansöka till Vinnova.' }
+  ]);
+  assert.equal(text, 'Vi pratade om nästa steg. Beslut: ansöka till Vinnova.');
+});
+
+test('assembleMeetingTranscript markerar saknade segment som EN lucka per svit', () => {
+  const text = assembleMeetingTranscript([
+    { index: 0, text: 'Inledning.' },
+    // index 1 + 2 saknas (uppladdning föll)
+    { index: 3, text: 'Avslutning.' }
+  ]);
+  assert.equal(text, `Inledning.\n\n${MEETING_GAP_MARKER}\n\nAvslutning.`);
+  assert.equal(text.split(MEETING_GAP_MARKER).length - 1, 1);
+});
+
+test('assembleMeetingTranscript hoppar tysta segment utan lucka-markör', () => {
+  const text = assembleMeetingTranscript([
+    { index: 0, text: 'Före tystnaden.' },
+    { index: 1, text: '' }, // tystnad — inget fel
+    { index: 2, text: 'Efter tystnaden.' }
+  ]);
+  assert.equal(text, 'Före tystnaden. Efter tystnaden.');
+  assert.ok(!text.includes(MEETING_GAP_MARKER));
+});
+
+test('assembleMeetingTranscript prefixar talar-etikett när den finns', () => {
+  const text = assembleMeetingTranscript([
+    { index: 0, text: 'Hur går försäljningen?', speaker: 'Talare 1' },
+    { index: 1, text: 'Bra — två nya kunder.', speaker: 'Talare 2' }
+  ]);
+  assert.equal(text, 'Talare 1: Hur går försäljningen? Talare 2: Bra — två nya kunder.');
+});
+
+test('normalizeMeetingSegments läser talarturer och språk, filtrerar tomma turer', () => {
+  const [seg] = normalizeMeetingSegments([
+    {
+      index: 0,
+      text: 'Hur går det? Bra.',
+      language: 'SV',
+      turns: [
+        { speaker: 'S1', text: ' Hur går det? ' },
+        { speaker: 'S2', text: '   ' },
+        { speaker: 'S2', text: 'Bra.' },
+        'skräp',
+        { text: 'utan talare' }
+      ]
+    }
+  ]);
+  assert.equal(seg.language, 'sv');
+  assert.deepEqual(seg.turns, [
+    { speaker: 'S1', text: 'Hur går det?' },
+    { speaker: 'S2', text: 'Bra.' },
+    { speaker: '?', text: 'utan talare' }
+  ]);
+  const [plain] = normalizeMeetingSegments([{ index: 0, text: 'x', turns: [], language: 'not a code' }]);
+  assert.equal(plain.turns, undefined);
+  assert.equal(plain.language, undefined);
+});
+
+test('assembleMeetingTranscript renderar diariserade turer som repliker med talstreck', () => {
+  const text = assembleMeetingTranscript([
+    { index: 0, text: 'Inledning utan turer.' },
+    {
+      index: 1,
+      text: 'Hur går försäljningen? Bra — två nya kunder.',
+      turns: [
+        { speaker: 'S1', text: 'Hur går försäljningen?' },
+        { speaker: 'S2', text: 'Bra — två nya kunder.' }
+      ]
+    },
+    { index: 2, text: 'Avslutning.' }
+  ]);
+  assert.equal(
+    text,
+    [
+      'Inledning utan turer.',
+      `${MEETING_TURN_PREFIX}Hur går försäljningen?`,
+      `${MEETING_TURN_PREFIX}Bra — två nya kunder.`,
+      'Avslutning.'
+    ].join('\n\n')
+  );
+});
+
+test('assembleMeetingTranscript: en enda tur är vanlig text (inga talstreck, inga etiketter)', () => {
+  const text = assembleMeetingTranscript([
+    { index: 0, text: 'Bara en person pratar.', turns: [{ speaker: 'S1', text: 'Bara en person pratar.' }] },
+    { index: 1, text: 'Fortsätter.' }
+  ]);
+  assert.equal(text, 'Bara en person pratar. Fortsätter.');
+  assert.ok(!text.includes('S1'));
+});
+
+test('mötestyp: okänt/saknat ⇒ startup, motpart trimmas och cappas', () => {
+  assert.equal(normalizeMeetingKind(undefined), 'startup');
+  assert.equal(normalizeMeetingKind('skräp'), 'startup');
+  assert.equal(normalizeMeetingKind('internal'), 'internal');
+  assert.equal(normalizeMeetingKind('external'), 'external');
+  assert.equal(isMeetingKind('startup'), true);
+  assert.equal(isMeetingKind(''), false);
+  assert.equal(normalizeMeetingCounterpart('  Region   Gävleborg '), 'Region Gävleborg');
+  assert.equal(normalizeMeetingCounterpart(null), '');
+  assert.equal(normalizeMeetingCounterpart('x'.repeat(500)).length, MAX_MEETING_COUNTERPART);
+});
+
+test('meetingSubjectLabel: bolagsnamn för bolagsmöte, motpart/typ annars', () => {
+  assert.equal(meetingSubjectLabel({ kind: 'startup', startupName: 'Fixkod AB' }), 'Fixkod AB');
+  assert.equal(meetingSubjectLabel({ kind: 'startup' }), 'Bolag ej valt');
+  assert.equal(meetingSubjectLabel({ kind: 'internal', counterpart: 'Ledningsgrupp' }), 'Ledningsgrupp');
+  assert.equal(meetingSubjectLabel({ kind: 'external' }), 'Externt möte');
+  // Motparten ignoreras för bolagsmöten — bolaget är alltid ämnet.
+  assert.equal(
+    meetingSubjectLabel({ kind: 'startup', startupName: 'Fixkod AB', counterpart: 'Almi' }),
+    'Fixkod AB'
+  );
+});
+
+test('meetingProtocolFilename är filsystemsäkert, daterat och cappat', () => {
+  const name = meetingProtocolFilename({
+    kind: 'external',
+    counterpart: 'Region Gävleborg / Näringsliv: "Q3"',
+    title: 'Uppföljning',
+    dateIso: '2026-09-13T10:00:00.000Z'
+  });
+  assert.ok(name.endsWith('.md'));
+  assert.ok(name.startsWith('Mötesanteckning – Region Gävleborg'));
+  assert.ok(!/[\\/:*?"<>|]/.test(name));
+  assert.ok(name.includes('2026-09-13'));
+  assert.ok(name.includes('Uppföljning'));
+  const long = meetingProtocolFilename({ kind: 'internal', counterpart: 'x'.repeat(300), dateIso: 'nej' });
+  assert.ok(long.length <= 124);
+  assert.ok(long.includes('datum'));
+  assert.equal(meetingProtocolFilename({ kind: 'internal', dateIso: '2026-01-02' }), 'Mötesanteckning – Internt möte – 2026-01-02.md');
+});
+
+test('assembleMeetingTranscript på tom input ger tom sträng', () => {
+  assert.equal(assembleMeetingTranscript([]), '');
+  assert.equal(assembleMeetingTranscript(undefined), '');
+  assert.equal(assembleMeetingTranscript('skräp'), '');
+});
+
+test('meetingTranscriptChars summerar segmentens textlängd', () => {
+  assert.equal(
+    meetingTranscriptChars([
+      { index: 0, text: 'abc' },
+      { index: 1, text: 'de' }
+    ]),
+    5
+  );
+});
+
+test('formatMeetingClock formaterar m:ss och h:mm:ss', () => {
+  assert.equal(formatMeetingClock(0), '0:00');
+  assert.equal(formatMeetingClock(65), '1:05');
+  assert.equal(formatMeetingClock(3600), '1:00:00');
+  assert.equal(formatMeetingClock(3725), '1:02:05');
+  assert.equal(formatMeetingClock(-5), '0:00');
+  assert.equal(formatMeetingClock(Number.NaN), '0:00');
+});
+
+test('isResumableMeetingStatus: recording/ended ja, saved/discarded nej', () => {
+  assert.equal(isResumableMeetingStatus('recording'), true);
+  assert.equal(isResumableMeetingStatus('ended'), true);
+  assert.equal(isResumableMeetingStatus('saved'), false);
+  assert.equal(isResumableMeetingStatus('discarded'), false);
+  assert.equal(isResumableMeetingStatus(''), false);
+});
+
+test('isStaleMeeting: äldre än purge-fönstret ⇒ true, färsk/ogiltig ⇒ false', () => {
+  const now = new Date('2026-09-02T12:00:00Z');
+  assert.equal(isStaleMeeting('2026-08-20T12:00:00Z', now), true);
+  assert.equal(isStaleMeeting('2026-09-01T12:00:00Z', now), false);
+  assert.equal(isStaleMeeting(undefined, now), false);
+  assert.equal(isStaleMeeting('inte-ett-datum', now), false);
+});

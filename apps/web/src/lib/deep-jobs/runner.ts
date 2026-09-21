@@ -8,7 +8,11 @@ import {
   type AgentLoopUsage
 } from '@/lib/ai/agent-runtime';
 import { buildChatTools } from '@/lib/ai/tools';
-import { getExposedCollections, buildSchemaSummary } from '@/lib/ai/schema';
+import { getExposedCollections } from '@/lib/ai/schema';
+import {
+  selectRelevantCollections,
+  buildScopedSchemaSummary
+} from '@/lib/ai/schema-scope';
 import { buildAgentSystemPrompt } from '@/lib/ai/agent-prompt';
 import { logAiUsage } from '@/lib/ai/usage';
 import { planDeepJob } from './planner';
@@ -18,6 +22,7 @@ import type {
   DeepJob,
   DeepJobSubtask,
   GeneratedFileRef,
+  InlineVisualRef,
   Role,
   ToolRunMessage
 } from '@platform/shared';
@@ -120,7 +125,15 @@ export async function runDeepJob(deepJobId: string): Promise<DeepJobResult> {
     });
 
     const collections = await getExposedCollections().catch(() => []);
-    const schemaSummary = collections.length > 0 ? buildSchemaSummary(collections) : '';
+    // Skopat schema till planeringen (§ 28.4): planeraren behöver namn +
+    // beskrivningar för att lägga delsteg — inte alla fältlistor.
+    const schemaSummary =
+      collections.length > 0
+        ? buildScopedSchemaSummary(
+            collections,
+            selectRelevantCollections(collections, job.instruction)
+          )
+        : '';
 
     // ── Planering ──────────────────────────────────────────────────────
     const plan: DeepJobSubtask[] = await planDeepJob(MODELS, job.instruction, schemaSummary, onUsage);
@@ -159,7 +172,13 @@ export async function runDeepJob(deepJobId: string): Promise<DeepJobResult> {
         /* audit-raden är best-effort */
       }
 
-      const surface = await buildReadToolSurface(pb, job.tenant, { includeMemory: true });
+      const surface = await buildReadToolSurface(pb, job.tenant, {
+        includeMemory: true,
+        // Skopa schema-detaljerna till jobbets instruktion + delstegets mål
+        // (§ 28.4) — varje subtask är ett eget anrop som annars bär hela
+        // schema-sammanfattningen.
+        scopeText: `${job.instruction}\n${st.goal}`
+      });
       const sysContent =
         buildAgentSystemPrompt(
           'Du är en analytiker som löser ETT avgränsat delsteg i ett större jobb. ' +
@@ -231,6 +250,7 @@ export async function runDeepJob(deepJobId: string): Promise<DeepJobResult> {
       }
     ];
     const generatedFiles: GeneratedFileRef[] = [];
+    const inlineVisuals: InlineVisualRef[] = [];
     let draft = '';
     try {
       const loop = await runAgentLoop(aggConv, {
@@ -243,7 +263,8 @@ export async function runDeepJob(deepJobId: string): Promise<DeepJobResult> {
           actor,
           ownerUserId: job.owner,
           chatThreadId: job.thread,
-          generatedFiles
+          generatedFiles,
+          inlineVisuals
         },
         maxIterations: AGG_MAX_ITER,
         onUsage
@@ -265,6 +286,7 @@ export async function runDeepJob(deepJobId: string): Promise<DeepJobResult> {
       tokens_out: tokensOut,
       cost_usd: costUsd,
       generated_files: generatedFiles.length > 0 ? generatedFiles : undefined,
+      visuals: inlineVisuals.length > 0 ? inlineVisuals : undefined,
       at: new Date().toISOString()
     };
     await pb.collection('chat_threads').update(job.thread, {

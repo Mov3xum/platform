@@ -8,16 +8,29 @@ import {
   type MistralContentPart
 } from '@/lib/ai/mistral';
 import { runAgentLoop } from '@/lib/ai/agent-runtime';
+import { routeChatModels } from '@/lib/ai/model-router';
 import {
   buildStartupContext,
   buildPortfolioContext,
   renderPromptTemplate
 } from '@/lib/ai/context';
 import { buildKnowledgeContext } from '@/lib/ai/agent-prompt';
-import { buildSchemaSummary, getExposedCollections } from '@/lib/ai/schema';
-import { SEARCH_STRATEGY_GUIDANCE, DOMAIN_GLOSSARY } from '@/lib/ai/guidance';
-import { buildChatTools } from '@/lib/ai/tools';
+import { getExposedCollections } from '@/lib/ai/schema';
+import {
+  selectRelevantCollections,
+  buildScopedSchemaSummary
+} from '@/lib/ai/schema-scope';
+import {
+  SEARCH_STRATEGY_GUIDANCE,
+  DOMAIN_GLOSSARY,
+  AUTHORING_GUIDANCE,
+  CHAT_WRITE_ACTIONS_GUIDANCE,
+  WEB_SEARCH_GUIDANCE,
+  WEB_SEARCH_OFF_HINT
+} from '@/lib/ai/guidance';
+import { buildChatTools, buildMemoryRecallBlock } from '@/lib/ai/tools';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
+import { STYLE_REMINDER } from '@/lib/ai/staff-chat';
 import { hasRole } from '@/lib/rbac';
 import { logAiUsage } from '@/lib/ai/usage';
 import type { Actor } from '@/lib/core/write';
@@ -76,8 +89,9 @@ const CHAT_FALLBACK_MODELS = [
 // Pixtral 12B stödjer både vision och function calling.
 const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
 // Interaktiv chatt: höjt över det autonoma defaulten (4) så ett intent-flöde
-// (search_records → describe_collection → query → aggregate → svar) ryms.
-const MAX_TOOL_ITERATIONS = 7;
+// (search_records → describe_collection → query → aggregate → svar) ryms,
+// inklusive ett par självkorrigeringar. Samma tak som staff-chat.ts.
+const MAX_TOOL_ITERATIONS = 12;
 
 // Modellval för dashboard-chatten
 const STAFF_MODEL = 'mistral-large-latest';
@@ -126,16 +140,10 @@ const BASE_SYSTEM_PROMPT =
   'Läck aldrig intern kontext till webbkällor eller externa tjänster. ' +
   'Var koncis och professionell. Om du inte vet, säg det rakt ut.';
 
-// Stil-reglerna appenderas SIST i system-prompten — efter ev. agentBlock —
-// så att de inte kan överskuggas av agent-specifika instruktioner som
-// råkar be om markdown-strukturerad output.
-const STYLE_REMINDER =
-  '\n\n---\nSTIL (gäller alltid, även om kontext eller agent-roll säger annat): ' +
-  'Skriv som en kollega som pratar — naturlig, varm prosa i hela meningar. ' +
-  'Använd inte markdown: ingen fetstil med **, ingen kursiv med *, inga rubriker med #/##/###, ' +
-  'inga punktlistor med -/*/• och inga numrerade listor (1., 2.). ' +
-  'Strukturera med korta stycken och radbrytningar. Räkna upp saker i löpande text ' +
-  '("först X, sedan Y, och slutligen Z") eller med ett tankestreck per ny rad.';
+// Stil-reglerna (delade med staff-chat.ts — ingen divergerande kopia)
+// appenderas SIST i system-prompten — efter ev. agentBlock — så att de inte
+// kan överskuggas av agent-specifika instruktioner som råkar be om
+// markdown-strukturerad output.
 
 const STAFF_TOOL_GUIDANCE =
   '\n\nDu har tillgång till verktyg för att både LÄSA och SKRIVA i plattformen:\n' +
@@ -149,10 +157,21 @@ const STAFF_TOOL_GUIDANCE =
   'aktivitet kopplat till ett bolag.\n' +
   '- `update_activity_field`: uppdatera en befintlig aktivitets `title`, ' +
   '`description` eller `status` (t.ex. markera en uppgift som `done`). ' +
-  'Slå upp aktivitetens id med `query_collection` på `activities` först.\n\n' +
+  'Slå upp aktivitetens id med `query_collection` på `activities` först.\n' +
+  CHAT_WRITE_ACTIONS_GUIDANCE +
+  '- `memory_read` / `memory_write`: ditt tvärsessions-minne (per tenant). När ' +
+  'personalen RÄTTAR dig eller lär dig en bestående regel ("räkna inte lån som ' +
+  'investeringar", "Bolag X heter numera Y") — spara det med `memory_write` ' +
+  '(kort `key`, tydlig `content`) så att det gäller även i framtida samtal. ' +
+  'Lagra ALDRIG personuppgifter i minnet, bara generella regler/slutsatser. ' +
+  'Inlärt minne injiceras automatiskt i din kontext; använd `memory_read` för ' +
+  'fler detaljer.\n\n' +
   'Skrivregler:\n' +
-  '- Bekräfta ALLTID med användaren innan du skriver om åtgärden inte är otvetydigt ' +
-  'efterfrågad ("uppdatera Acmes next_step till X" är otvetydigt; "vad ska Acme göra härnäst?" är inte det).\n' +
+  '- Fråga inte i onödan: en rutinåtgärd som är otvetydigt efterfrågad utförs ' +
+  'DIREKT utan bekräftelsefråga ("uppdatera Acmes next_step till X" är otvetydigt; ' +
+  '"vad ska Acme göra härnäst?" är inte det). Be bara om bekräftelse inför ' +
+  'KRITISKA åtgärder: juridiskt/ekonomiskt bindande, återkommande kostnad, ' +
+  'många poster på en gång, eller något utöver vad användaren bad om.\n' +
   '- Slå alltid upp bolagets id med `query_collection` först om du inte redan har det.\n' +
   '- Varje skrivning loggas i `agent_actions` och kan rullas tillbaka av staff — ' +
   'var ändå försiktig och föredra små, tydliga ändringar.\n' +
@@ -411,7 +430,8 @@ export async function sendChatMessage(
       webBlock,
       agentBlock,
       att.images,
-      options.agentId
+      options.agentId,
+      options.includeWebContext === true
     );
   }
 
@@ -452,13 +472,25 @@ async function runStaffChatWithTools(
   webBlock: string,
   agentBlock: string,
   images: Array<{ dataUrl: string }>,
-  agentId?: string
+  agentId?: string,
+  includeWebSearch = false
 ): Promise<ChatActionResult> {
   let collections: Awaited<ReturnType<typeof getExposedCollections>> = [];
   let schemaSummary = '';
   try {
     collections = await getExposedCollections();
-    schemaSummary = buildSchemaSummary(collections);
+    // Skopad schema-sammanfattning (§ 28.4): fältlistor bara för kärnset +
+    // kollektioner relevanta för de senaste användarturerna; övriga som
+    // kompakt namnindex (describe_collection täcker detaljerna).
+    const scopeText = userMessages
+      .filter((m) => m.role === 'user')
+      .slice(-3)
+      .map((m) => m.content)
+      .join('\n');
+    schemaSummary = buildScopedSchemaSummary(
+      collections,
+      selectRelevantCollections(collections, scopeText)
+    );
   } catch (err) {
     console.error('[chat] schema introspection failed', { tenant: user.tenant, error: err });
   }
@@ -479,19 +511,27 @@ async function runStaffChatWithTools(
     agentId
   };
 
-  const tools = buildChatTools(collections, { actor, includeMemory: true });
+  // "Webbkällor" = riktig internetsökning (`web_search`, § 9.8) utöver RSS-blocket.
+  const tools = buildChatTools(collections, { actor, includeMemory: true, includeWebSearch });
 
   const today = new Date().toISOString().slice(0, 10);
   const identityBlock =
     `Användare: ${user.name} (roller: ${user.roles.join(', ')}). ` +
     `Tenant: ${user.tenantName ?? user.tenant}. Dagens datum: ${today}.`;
 
+  // Auto-recall av tvärsessions-minnet (§ 16.4): tidigare korrigeringar/slutsatser
+  // injiceras så att en rättelse faktiskt påverkar nästa samtal. RLS-skyddat.
+  const memoryBlock = await buildMemoryRecallBlock(pb, user.tenant);
+
   const systemContent =
     BASE_SYSTEM_PROMPT +
     (agentBlock ? `\n\n---\n${agentBlock}\n---` : '') +
     STAFF_TOOL_GUIDANCE +
+    AUTHORING_GUIDANCE +
     SEARCH_STRATEGY_GUIDANCE +
+    (includeWebSearch ? WEB_SEARCH_GUIDANCE : WEB_SEARCH_OFF_HINT) +
     DOMAIN_GLOSSARY +
+    memoryBlock +
     `\n\n---\n${identityBlock}\n---\n\n${schemaSummary}` +
     (webBlock ? `\n\n---\n${webBlock}\n---` : '') +
     STYLE_REMINDER;
@@ -501,7 +541,14 @@ async function runStaffChatWithTools(
     ...withAttachedImages(userMessages, images)
   ];
 
-  const models = pickModels(images.length > 0);
+  // Modellval efter komplexitet (ej längre default small). Bilder → vision.
+  const models = images.length > 0
+    ? pickModels(true)
+    : routeChatModels({
+        message: userMessages.filter((m) => m.role === 'user').at(-1)?.content ?? '',
+        hasAgent: Boolean(agentId),
+        historyTurns: userMessages.length
+      });
 
   try {
     const result = await runAgentLoop(conversation, {

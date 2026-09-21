@@ -15,7 +15,7 @@ type WorkshopWithArea = Workshop & { expand?: { area?: WorkshopArea } };
 
 export default async function WorkshopsManagePage() {
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'education', user.disabledModules)) redirect('/chatt');
+  if (!canAccessModuleForUser(user.roles, 'education', user.enabledModules)) redirect('/chatt');
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor'])) redirect('/education');
   const pb = await getServerPb();
 
@@ -79,6 +79,12 @@ export default async function WorkshopsManagePage() {
 
                 <div className="flex shrink-0 items-center gap-2">
                   <WorkshopStatusBadge status={w.status} />
+                  <Link
+                    href={`/education/workshops/${w.id}/preview`}
+                    className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-semibold text-foreground-muted transition hover:bg-canvas-subtle"
+                  >
+                    Förhandsgranska
+                  </Link>
                   <Link
                     href={`/education/workshops/${w.id}/edit`}
                     className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-semibold text-foreground-muted transition hover:bg-canvas-subtle"

@@ -21,6 +21,8 @@ interface Props {
   avatarInitial?: string;
   /** Max antal användarmeddelanden (0/odefinierat = obegränsat). */
   maxExchanges?: number;
+  /** Skickas till publika chat-routen där modulen har en samtyckesgrind. */
+  consent?: boolean;
 }
 
 function readAttribution(): Attribution {
@@ -47,7 +49,8 @@ export function CompassChat({
   endpoint = '/api/inflode/chat',
   title = 'Inflöde',
   avatarInitial = 'I',
-  maxExchanges = 0
+  maxExchanges = 0,
+  consent
 }: Props) {
   const [messages, setMessages] = useState<Msg[]>(() => [
     { role: 'assistant', content: initialAssistantMessage || DEFAULT_GREETING }
@@ -86,10 +89,16 @@ export function CompassChat({
           messages: next.map((m) => ({ role: m.role, content: m.content })),
           moduleSlug,
           sessionToken,
-          attribution
+          attribution,
+          consent
         })
       });
-      if (!res.ok) throw new Error(`Servern svarade ${res.status}`);
+      if (!res.ok) {
+        // Servern skickar vänliga, svenska felmeddelanden (rate limit,
+        // Mistral-överbelastning m.m.) — visa dem i stället för rå statuskod.
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || `Servern svarade ${res.status}`);
+      }
       const data = (await res.json()) as { reply?: string };
       if (!data.reply) throw new Error('Ingen replik från servern');
       setMessages((m) => [...m, { role: 'assistant', content: data.reply ?? '' }]);
@@ -101,45 +110,10 @@ export function CompassChat({
   }
 
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateRows: 'auto 1fr auto',
-        height: '100%',
-        minHeight: 480,
-        background: 'var(--mx-paper)',
-        border: '1px solid var(--mx-line)',
-        borderRadius: 'var(--mx-r-lg)',
-        boxShadow: 'var(--mx-sh-2)',
-        overflow: 'hidden'
-      }}
-    >
+    <div className="mx-chat">
       {/* Header */}
-      <div
-        style={{
-          padding: '12px 16px',
-          borderBottom: '1px solid var(--mx-line-soft)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10
-        }}
-      >
-        <div
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 8,
-            background: '#002c40',
-            display: 'grid',
-            placeItems: 'center',
-            color: 'white',
-            fontFamily: 'var(--mx-display)',
-            fontWeight: 700,
-            fontSize: 13
-          }}
-        >
-          {avatarInitial}
-        </div>
+      <div className="mx-chat-head">
+        <div className="mx-chat-ava">{avatarInitial}</div>
         <div style={{ minWidth: 0 }}>
           <div className="mx-disp mx-fw-6 mx-t-13">{title}</div>
           <div className="mx-mono mx-t-xs mx-muted mx-t-up">
@@ -158,61 +132,43 @@ export function CompassChat({
       </div>
 
       {/* Log */}
-      <div
-        ref={logRef}
-        role="log"
-        aria-live="polite"
-        style={{
-          padding: 16,
-          overflowY: 'auto',
-          display: 'grid',
-          gap: 10,
-          background: 'var(--mx-paper-2)'
-        }}
-      >
+      <div ref={logRef} className="mx-chat-log" role="log" aria-live="polite">
         {messages.map((m, i) => (
-          <Bubble key={i} role={m.role}>
+          <Bubble key={i} role={m.role} avatarInitial={avatarInitial}>
             {m.content}
           </Bubble>
         ))}
-        {pending && <Bubble role="assistant"><em className="mx-muted">…skriver</em></Bubble>}
-        {error && (
-          <div
-            className="mx-t-12"
-            style={{
-              padding: '8px 12px',
-              borderRadius: 10,
-              background: 'var(--mx-st-danger-bg)',
-              color: '#4b2718'
-            }}
-          >
-            {error}
+        {pending && (
+          <div className="mx-chat-row bot mx-fadein">
+            <div className="mx-chat-mini" aria-hidden>
+              {avatarInitial}
+            </div>
+            <div className="mx-bubble bot" aria-label="Assistenten skriver">
+              <span className="mx-chat-typing">
+                <i />
+                <i />
+                <i />
+              </span>
+            </div>
           </div>
         )}
+        {error && <div className="mx-chat-err">{error}</div>}
       </div>
 
       {/* Input */}
-      <form
-        onSubmit={onSubmit}
-        style={{
-          padding: 12,
-          borderTop: '1px solid var(--mx-line-soft)',
-          display: 'flex',
-          gap: 8
-        }}
-      >
+      <form onSubmit={onSubmit} className="mx-chat-foot">
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={reachedLimit ? 'Samtalet är avslutat' : 'Skriv ditt svar...'}
+          placeholder={reachedLimit ? 'Samtalet är avslutat' : 'Skriv ditt svar…'}
           className="mx-input"
           disabled={pending || reachedLimit}
           aria-label="Ditt meddelande"
         />
         <button
           type="submit"
-          className="mx-btn mx-primary"
+          className="mx-btn mx-primary mx-chat-send"
           disabled={pending || reachedLimit || input.trim().length === 0}
         >
           Skicka →
@@ -222,35 +178,33 @@ export function CompassChat({
   );
 }
 
-function Bubble({ role, children }: { role: 'user' | 'assistant'; children: React.ReactNode }) {
+function Bubble({
+  role,
+  avatarInitial,
+  children
+}: {
+  role: 'user' | 'assistant';
+  avatarInitial: string;
+  children: React.ReactNode;
+}) {
   const isUser = role === 'user';
   return (
-    <div
-      style={{
-        display: 'flex',
-        justifyContent: isUser ? 'flex-end' : 'flex-start'
-      }}
-    >
-      <div
-        style={{
-          maxWidth: '78%',
-          padding: '10px 14px',
-          borderRadius: isUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-          background: isUser ? '#002c40' : 'var(--mx-paper)',
-          color: isUser ? 'white' : 'var(--mx-ink)',
-          border: isUser ? 'none' : '1px solid var(--mx-line)',
-          fontSize: 13,
-          lineHeight: 1.5,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word'
-        }}
-      >
-        {children}
-      </div>
+    <div className={`mx-chat-row ${isUser ? 'user' : 'bot'} mx-fadein`}>
+      {!isUser && (
+        <div className="mx-chat-mini" aria-hidden>
+          {avatarInitial}
+        </div>
+      )}
+      <div className={`mx-bubble ${isUser ? 'user' : 'bot'}`}>{children}</div>
     </div>
   );
 }
 
 function generateToken(): string {
+  // Sessionstoken nycklar konversationen (och därmed lead-upserten) på
+  // servern — använd kryptografiskt stark slump när webbläsaren stödjer det.
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `s_${crypto.randomUUID()}`;
+  }
   return `s_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
 }

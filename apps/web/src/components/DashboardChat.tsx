@@ -2,12 +2,46 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChatAttachment } from '@/lib/actions/chat';
-import type { AgentActivityStep, GeneratedFileRef } from '@platform/shared';
+import type {
+  AgentActivityStep,
+  ApprovalRequestRef,
+  GeneratedFileRef,
+  InlineVisualRef,
+  MeetingRequestRef,
+  WebSearchSourceRef
+} from '@platform/shared';
+import {
+  AI_IMPACT_SOURCE_LABEL,
+  formatAiImpact,
+  formatTokens
+} from '@platform/shared';
 import {
   extractPdfFromDataUrlAction,
   extractXlsxFromDataUrlAction
 } from '@/lib/actions/chat-attachments';
+import { isStaleDeploymentError, STALE_DEPLOYMENT_MESSAGE } from '@/lib/action-error';
 import { Icon } from '@/components/proto/Icon';
+import VoiceInputButton from '@/components/VoiceInputButton';
+import ChatHelpGuide from '@/components/ChatHelpGuide';
+import {
+  AVAILABLE_MODELS,
+  isAllowedModel,
+  modelCostTier,
+  modelSupportsVision
+} from '@/lib/ai/models';
+import type { Role } from '@platform/shared';
+import { chatMarkdownToHtml } from '@/lib/safe-html';
+
+// Markör som visas i slutet av den streamande texten. Injiceras i den redan
+// säkert renderade HTML:en (chatMarkdownToHtml escapar all modell-text).
+const STREAM_CURSOR =
+  '<span class="ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[2px] animate-pulse bg-foreground-subtle align-middle" aria-hidden="true"></span>';
+
+function withStreamCursor(html: string): string {
+  return html.endsWith('</p>')
+    ? `${html.slice(0, -4)}${STREAM_CURSOR}</p>`
+    : html + STREAM_CURSOR;
+}
 
 const MAX_ATTACHMENTS = 5;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -33,7 +67,18 @@ export interface UiMessage {
   role: 'user' | 'assistant';
   content: string;
   generated_files?: GeneratedFileRef[];
+  visuals?: InlineVisualRef[];
   steps?: AgentActivityStep[];
+  /** Turens tokens (in + ut) → inline token-/miljöchip under svaret. */
+  tokens?: number;
+  /** Modellen som faktiskt svarade (per-turn-metadata, transparens art. 13). */
+  model?: string;
+  /** Agenten väntar på Godkänn/Avbryt inför en kritisk åtgärd (§ 33). */
+  approval_request?: ApprovalRequestRef;
+  /** Agenten har förberett mötesläget (§ 34) — "Starta mötet"-kort. */
+  meeting_request?: MeetingRequestRef;
+  /** Webbkällor agenten hämtade via `web_search` (§ 9.8) — visas som chips under svaret. */
+  sources?: WebSearchSourceRef[];
 }
 
 // Ett pågående verktygssteg under en streamande turn.
@@ -44,7 +89,174 @@ export interface LiveStep {
   ok?: boolean;
 }
 
-// Kompakt aktivitetsspår ("Läser bolagsdata", "Skapar PowerPoint"). Visas
+// Ett köat meddelande — skrivet medan en turn körs, körs när den är klar.
+export interface QueuedItem {
+  id: string;
+  content: string;
+}
+
+/** Visningsnamn för en modell — registrerade modeller får sin etikett, övriga visas med rått id. */
+function modelLabel(id: string | undefined): string {
+  if (!id) return '';
+  return AVAILABLE_MODELS.find((m) => m.id === id)?.label ?? id;
+}
+
+const AUTO_MODEL_RECOMMENDATION =
+  'Väljer själv efter frågan: Small för enkla uppslag, Medium för sammanställningar, Large för analys och rapporter.';
+
+/**
+ * Modellväljare i komposern (§ 9.9). "Auto" låter `model-router` välja efter
+ * frågans komplexitet; ett uttryckligt val blir startmodell (kedjan faller
+ * ändå över vid kapacitetstak). Modeller + rekommendationer kommer från
+ * registret i lib/ai/models.ts — aldrig inline. Menyn öppnas uppåt eftersom
+ * komposern ligger i botten av vyn.
+ */
+function ModelPicker({
+  value,
+  hasImages,
+  onChange
+}: {
+  value: string;
+  hasImages: boolean;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const current = AVAILABLE_MODELS.find((m) => m.id === value);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  function pick(id: string) {
+    onChange(id);
+    setOpen(false);
+  }
+
+  const optionBase =
+    'flex w-full items-start gap-3 px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-40';
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium transition ${
+          current
+            ? 'bg-movexum-pastell-lila text-movexum-morklila'
+            : 'border border-default text-foreground-subtle hover:border-strong hover:text-foreground'
+        }`}
+        title={
+          current
+            ? `Modell: ${current.label} — ${current.recommendation}`
+            : `Modell: Auto — ${AUTO_MODEL_RECOMMENDATION}`
+        }
+      >
+        <Icon name="zap" size={12} />
+        {current ? current.label : 'Auto'}
+        <Icon name="chevdown" size={10} className={`transition ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Välj AI-modell"
+          className="absolute bottom-full left-0 z-20 mb-2 w-[300px] overflow-hidden rounded-2xl border border-default bg-surface py-1 shadow-lg shadow-movexum-svart/10"
+        >
+          <p className="px-3 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
+            Modell för nästa svar
+          </p>
+          <button
+            type="button"
+            role="option"
+            aria-selected={!current}
+            onClick={() => pick('')}
+            className={`${optionBase} ${!current ? 'bg-canvas-muted' : 'hover:bg-canvas-subtle'}`}
+          >
+            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-movexum-pastell-lila text-movexum-morklila">
+              <Icon name="sparkle" size={12} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2 text-[13px] font-medium text-foreground">
+                Auto
+                <span className="rounded-full bg-movexum-pastell-gron px-1.5 py-px text-[10px] font-semibold text-movexum-morkgron">
+                  Rekommenderas
+                </span>
+              </span>
+              <span className="block text-[11.5px] leading-snug text-foreground-subtle">
+                {AUTO_MODEL_RECOMMENDATION}
+              </span>
+            </span>
+            {!current && <Icon name="check" size={13} className="mt-1 shrink-0 text-movexum-morklila" />}
+          </button>
+          <div className="my-1 border-t border-default" />
+          {AVAILABLE_MODELS.map((m) => {
+            const selected = m.id === value;
+            const noVision = hasImages && !m.supportsVision;
+            const tier = modelCostTier(m);
+            return (
+              <button
+                key={m.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                disabled={noVision}
+                onClick={() => pick(m.id)}
+                className={`${optionBase} ${selected ? 'bg-canvas-muted' : 'hover:bg-canvas-subtle'}`}
+                title={noVision ? 'Stödjer inte bilder — ta bort bilden eller välj en vision-modell' : undefined}
+              >
+                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-movexum-pastell-bla text-movexum-djupbla">
+                  <Icon name={m.supportsVision ? 'image' : 'bolt'} size={12} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2 text-[13px] font-medium text-foreground">
+                    {m.label}
+                    <span
+                      className="text-[10.5px] font-semibold tracking-wide text-foreground-subtle"
+                      title={`Kostnadsnivå ${tier} av 3 · $${m.priceInPerMillion.toFixed(2)}/$${m.priceOutPerMillion.toFixed(2)} per 1M tokens (in/ut)`}
+                    >
+                      {'€'.repeat(tier)}
+                      <span className="opacity-30">{'€'.repeat(3 - tier)}</span>
+                    </span>
+                    {m.supportsVision && (
+                      <span className="rounded-full bg-movexum-pastell-bla px-1.5 py-px text-[10px] font-semibold text-movexum-djupbla">
+                        Bilder
+                      </span>
+                    )}
+                  </span>
+                  <span className="block text-[11.5px] leading-snug text-foreground-subtle">
+                    {noVision ? 'Stödjer inte bilder.' : m.recommendation}
+                  </span>
+                </span>
+                {selected && <Icon name="check" size={13} className="mt-1 shrink-0 text-movexum-morklila" />}
+              </button>
+            );
+          })}
+          <p className="border-t border-default px-3 pb-1.5 pt-2 text-[10.5px] leading-snug text-foreground-subtle">
+            Alla modeller körs hos Mistral (EU). Är modellen överbelastad faller chatten
+            automatiskt över till nästa.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Kompakt aktivitetsspår ("Läser bolagen", "Skapar PowerPoint"). Visas
 // live medan turen körs (running → spinner) och persiterat under färdiga svar.
 function ActivityTrail({
   items
@@ -155,6 +367,60 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+// ── Inline-visualiseringar (diagram/nyckeltal) ──────────────────────────────
+// SVG:n kommer redan escapad/cappad från servern (render_visual). Den visas
+// som <img src=data:image/svg+xml…> (ingen dangerouslySetInnerHTML) och
+// rastreras klient-side till PNG/JPEG vid nedladdning.
+
+function svgDataUrl(svg: string): string {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function visualFilename(title: string | undefined, ext: string): string {
+  const slug =
+    (title || 'visualisering')
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'visualisering';
+  return `${slug}-${new Date().toISOString().slice(0, 10)}.${ext}`;
+}
+
+// Rastrerar SVG:n till PNG/JPEG i 2x-upplösning och triggar nedladdning.
+// Vit bakgrund fylls alltid (JPEG saknar alfakanal; SVG:n är redan vit).
+async function downloadVisualImage(v: InlineVisualRef, format: 'png' | 'jpeg'): Promise<void> {
+  const img = await loadImage(svgDataUrl(v.svg));
+  const scale = 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(v.width * scale);
+  canvas.height = Math.round(v.height * scale);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Kunde inte skapa bilden');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const blob: Blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('Kunde inte skapa bilden'))),
+      format === 'png' ? 'image/png' : 'image/jpeg',
+      0.92
+    );
+  });
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = visualFilename(v.title, format === 'png' ? 'png' : 'jpg');
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+}
+
 const DOC_ICON: Record<string, string> = {
   pptx: 'image',
   xlsx: 'doc',
@@ -190,13 +456,25 @@ export interface DashboardActivity {
   startupName?: string;
   startupId?: string;
   toolIcon?: string;
+  /** Egen länk (systemloggrader: årshjulet, modul-admin …). Vinner över startupId. */
+  href?: string;
+  /** Ikonnamn satt av servern (systemloggrader). */
+  icon?: string;
+  /** Vem som utförde åtgärden — visas som tooltip. */
+  actorName?: string;
+  /** true när åtgärden gjordes av AI-agenten i chatten (art. 13-transparens). */
+  viaAgent?: boolean;
 }
 
-// Relativ, svensk tidsangivelse ("nyss", "2 tim sedan", "igår").
-function relativeTime(iso: string): string {
+// Relativ, svensk tidsangivelse ("nyss", "2 tim sedan", "igår"). `now` skickas
+// in explicit (Date.now() efter mount) — beräknas den under server-renderingen
+// skiljer sig texten från klientens hydrering (klockskev/minutgräns/tidszon)
+// och React kastar hydration-fel #418 ("text mismatch") som klientrenderar om
+// hela trädet.
+function relativeTime(iso: string, now: number): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return '';
-  const diff = Math.max(0, Date.now() - then);
+  const diff = Math.max(0, now - then);
   const min = Math.round(diff / 60000);
   if (min < 1) return 'nyss';
   if (min < 60) return `${min} min sedan`;
@@ -208,28 +486,35 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
 }
 
-// Ikon + färgton per aktivitetstyp/-sort. Färgerna är Movexum-pasteller (§2.3).
+// Ikon per aktivitetstyp/-sort. Färgtonen är medvetet neutral (samma diskreta
+// paper-yta för alla) — bara ikonen skiljer typerna åt, så loggen blir lugn.
+const ACTIVITY_SWATCH = 'bg-canvas-muted text-foreground-subtle';
+
 function activityVisual(act: DashboardActivity): { icon: string; swatch: string } {
-  if (act.kind === 'tool_run')
-    return { icon: 'sparkle', swatch: 'bg-movexum-pastell-lila text-movexum-morklila' };
-  if (act.kind === 'integration_sync')
-    return { icon: 'cloud', swatch: 'bg-movexum-pastell-bla text-movexum-djupbla' };
-  if (act.kind === 'workshop_run' || act.kind === 'workshop_assignment')
-    return { icon: 'cap', swatch: 'bg-movexum-pastell-gron text-movexum-morkgron' };
-  switch (act.type) {
-    case 'meeting':
-      return { icon: 'calendar', swatch: 'bg-movexum-pastell-bla text-movexum-djupbla' };
-    case 'call':
-      return { icon: 'people', swatch: 'bg-movexum-pastell-gron text-movexum-morkgron' };
-    case 'email':
-      return { icon: 'inbox', swatch: 'bg-movexum-pastell-gul text-movexum-morkgul' };
-    case 'task':
-      return { icon: 'check', swatch: 'bg-movexum-pastell-gron text-movexum-morkgron' };
-    case 'workshop':
-      return { icon: 'cap', swatch: 'bg-movexum-pastell-gron text-movexum-morkgron' };
-    default:
-      return { icon: 'dot', swatch: 'bg-canvas-muted text-foreground-subtle' };
-  }
+  let icon = 'dot';
+  if (act.icon) icon = act.icon;
+  else if (act.kind === 'tool_run') icon = 'sparkle';
+  else if (act.kind === 'integration_sync') icon = 'cloud';
+  else if (act.kind === 'workshop_run' || act.kind === 'workshop_assignment') icon = 'cap';
+  else
+    switch (act.type) {
+      case 'meeting':
+        icon = 'calendar';
+        break;
+      case 'call':
+        icon = 'people';
+        break;
+      case 'email':
+        icon = 'inbox';
+        break;
+      case 'task':
+        icon = 'check';
+        break;
+      case 'workshop':
+        icon = 'cap';
+        break;
+    }
+  return { icon, swatch: ACTIVITY_SWATCH };
 }
 
 interface Props {
@@ -237,24 +522,42 @@ interface Props {
   agents?: DashboardAgent[];
   connectors?: DashboardConnector[];
   activities?: DashboardActivity[];
+  /** Inloggad användares roller — styr vilka delar hjälp-guiden visar (§ 33.3). */
+  userRoles?: Role[];
   greeting?: string;
   // Kontrollerade props (ChattWorkspace äger tillståndet)
   messages: UiMessage[];
   isPending: boolean;
   error: string | null;
   activeAgent: DashboardAgent | null;
-  // Djupt jobb (kontrolleras av ChattWorkspace)
-  deepRunning?: boolean;
-  deepProgress?: number;
+  // Modellval (§ 9.9): '' = automatiskt efter frågans komplexitet, annars ett
+  // registrerat modell-id från lib/ai/models.ts. Ägs av ChattWorkspace så att
+  // ÄVEN Godkänn-/mötesturer följer valet.
+  model?: string;
+  onModelChange?: (model: string) => void;
   // Live-aktivitetsspår för den pågående turen (streaming).
   liveSteps?: LiveStep[];
+  // Svaret medan det strömmas in token-för-token (löpande utskrift).
+  liveText?: string;
+  // Meddelanden som köats medan en turn körs (körs när den blir klar).
+  queued?: QueuedItem[];
+  // Ändras när en annan tråd öppnas → återställ scroll-läget till botten.
+  resetSignal?: string;
   onPickAgent: (a: DashboardAgent | null) => void;
   onReset: () => void;
   onSubmit: (
     text: string,
-    opts: { includeWebContext: boolean; attachments: ChatAttachment[]; deepJob: boolean }
+    opts: { includeWebContext: boolean; attachments: ChatAttachment[] }
   ) => void;
   onDownload: (file: GeneratedFileRef) => void;
+  // Ta bort ett ännu icke-körat köat meddelande.
+  onCancelQueued?: (id: string) => void;
+  // Svar på agentens godkännandefråga (Godkänn/Avbryt-knapparna, § 33).
+  onApproval?: (approved: boolean) => void;
+  // Öppna mötesläget (§ 34) — chip i komposern.
+  onOpenMeeting?: () => void;
+  // Starta mötesläget från agentens möteskort (`start_meeting`, § 34).
+  onStartMeeting?: (req: MeetingRequestRef) => void;
 }
 
 const AGENT_TONES = [
@@ -276,34 +579,65 @@ export default function DashboardChat({
   agents = [],
   connectors = [],
   activities = [],
+  userRoles = [],
   greeting,
   messages,
   isPending,
   error,
   activeAgent,
-  deepRunning = false,
-  deepProgress = 0,
+  model = '',
+  onModelChange,
   liveSteps = [],
+  liveText = '',
+  queued = [],
+  resetSignal,
   onPickAgent,
   onReset,
   onSubmit,
-  onDownload
+  onDownload,
+  onCancelQueued,
+  onApproval,
+  onOpenMeeting,
+  onStartMeeting
 }: Props) {
   const [input, setInput] = useState('');
+  // Hjälp-guiden ("Vad kan chatten göra?") — rollspecifik, § 33.3.
+  const [showGuide, setShowGuide] = useState(false);
   const [includeWebContext, setIncludeWebContext] = useState(false);
-  const [deepMode, setDeepMode] = useState(false);
   const [showAssistants, setShowAssistants] = useState(false);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  // Fullskärmsvy för en inline-visualisering (stort över hela ytan).
+  const [lightbox, setLightbox] = useState<InlineVisualRef | null>(null);
+  // Aktivitetsloggen visar de fem senaste; "Visa fler" utökar stegvis så att
+  // hela historiken kan läsas som en logg utan att startvyn blir lång.
+  const ACTIVITY_STEP = 15;
+  const [visibleActivities, setVisibleActivities] = useState(5);
+  // Klockan för relativa tider sätts först EFTER mount: servern och klienten
+  // renderar då exakt samma text ("") vid hydreringen, och tiderna fylls i
+  // direkt därefter. Se kommentaren vid `relativeTime`.
+  const [clockNow, setClockNow] = useState<number | null>(null);
+  useEffect(() => {
+    setClockNow(Date.now());
+  }, []);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // "Fäst vid botten" — auto-scrollar bara när användaren redan är nära botten.
+  // Scrollar hen uppåt (för att läsa/jämföra) låter vi vyn vara kvar där medan
+  // svaret strömmar in, och visar en "till senaste"-knapp i stället.
+  const [stickToBottom, setStickToBottom] = useState(true);
 
   const isActive = messages.length > 0 || isPending;
   const shownError = localError || error;
+  // Bara registrerade modell-id:n räknas som ett val (t.ex. ett gammalt
+  // localStorage-värde efter att registret ändrats → Auto).
+  const selectedModel = isAllowedModel(model) ? model : '';
+  const hasImageAttachment = attachments.some((a) => a.kind === 'image');
 
   function autoGrow() {
     const el = inputRef.current;
@@ -316,11 +650,45 @@ export default function DashboardChat({
     autoGrow();
   }, [input]);
 
+  // Auto-scroll bara om användaren är "fäst" vid botten. Streamande text
+  // använder instant scroll (smooth slåss med token-flödet och rycker).
   useEffect(() => {
+    if (!stickToBottom) return;
+    requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ block: 'end' });
+    });
+  }, [messages.length, isPending, liveSteps.length, liveText, queued.length, stickToBottom]);
+
+  // Uppdaterar "fäst vid botten" när användaren scrollar. ~120 px tolerans så
+  // små avvikelser fortfarande räknas som "vid botten".
+  function onScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setStickToBottom(distanceFromBottom < 120);
+  }
+
+  function scrollToBottom() {
+    setStickToBottom(true);
     requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     });
-  }, [messages.length, isPending, liveSteps.length]);
+  }
+
+  // Byte av tråd (eller ny chatt) → börja om fäst vid botten.
+  useEffect(() => {
+    setStickToBottom(true);
+  }, [resetSignal]);
+
+  // Stäng fullskärmsvyn med Escape.
+  useEffect(() => {
+    if (!lightbox) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setLightbox(null);
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [lightbox]);
 
   async function addFiles(files: FileList | File[]) {
     const list = Array.from(files);
@@ -404,7 +772,14 @@ export default function DashboardChat({
             });
           }
         } catch (err) {
-          setLocalError(`${file.name}: kunde inte läsa filen.`);
+          // PDF-/Excel-extraktionen går via server actions — efter en deploy
+          // kastar en stale flik UnrecognizedActionError; säg då "ladda om"
+          // i stället för det missvisande "kunde inte läsa filen".
+          setLocalError(
+            isStaleDeploymentError(err)
+              ? STALE_DEPLOYMENT_MESSAGE
+              : `${file.name}: kunde inte läsa filen.`
+          );
           console.error('[DashboardChat] file read failed', err);
         }
       }
@@ -418,42 +793,49 @@ export default function DashboardChat({
     setAttachments((prev) => prev.filter((a) => a.uid !== uid));
   }
 
-  function toggleDeepMode() {
-    setDeepMode((v) => {
-      const next = !v;
-      // Djupa jobb tar bara en instruktion — bilagor/webbkällor gäller inte.
-      if (next) {
-        setAttachments([]);
-        setIncludeWebContext(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-        if (imageInputRef.current) imageInputRef.current.value = '';
-      }
-      return next;
-    });
+  /**
+   * Röstinmatning (§ 31): transkriptet läggs i rutan i stället för att skickas
+   * automatiskt, så att människan läser igenom och skickar själv
+   * (människa-i-loopen, EU AI Act art. 14). Flera inspelningar staplas på
+   * varandra med mellanslag.
+   */
+  function appendTranscript(text: string) {
+    const addition = text.trim();
+    if (!addition) return;
+    setInput((prev) => (prev.trim() ? `${prev.trim()} ${addition}` : addition));
+    inputRef.current?.focus();
   }
 
   function submit() {
     const text = input.trim();
-    // Djupt jobb kräver en instruktion (text); annars krävs text eller bilaga.
-    if (deepMode ? !text : !text && attachments.length === 0) return;
-    if (isPending) return;
+    if (!text && attachments.length === 0) return;
+    // Bilder + vald modell utan vision → stoppa här med tydligt fel (servern
+    // avvisar också, § 9.9 — aldrig tyst fallback).
+    if (hasImageAttachment && selectedModel && !modelSupportsVision(selectedModel)) {
+      setLocalError(
+        `${modelLabel(selectedModel)} stödjer inte bilder. Välj Mistral Medium, Pixtral Large eller Auto.`
+      );
+      return;
+    }
+    // Medan en turn körs blockerar vi INTE — ChattWorkspace köar meddelandet
+    // och kör det när den pågående turen är klar (löpande feedback). Bilagor
+    // hör till just det köade meddelandet.
+    if (isProcessingFiles) return;
     setLocalError(null);
-    const sentAttachments: ChatAttachment[] = deepMode
-      ? []
-      : attachments.map((a) => ({
-          name: a.name,
-          mime: a.mime,
-          kind: a.kind,
-          text: a.text,
-          dataUrl: a.dataUrl
-        }));
-    const wasDeep = deepMode;
+    // Användaren skickade aktivt → hoppa till botten så det egna meddelandet syns.
+    setStickToBottom(true);
+    const sentAttachments: ChatAttachment[] = attachments.map((a) => ({
+      name: a.name,
+      mime: a.mime,
+      kind: a.kind,
+      text: a.text,
+      dataUrl: a.dataUrl
+    }));
     setInput('');
     setAttachments([]);
-    setDeepMode(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (imageInputRef.current) imageInputRef.current.value = '';
-    onSubmit(text, { includeWebContext, attachments: sentAttachments, deepJob: wasDeep });
+    onSubmit(text, { includeWebContext, attachments: sentAttachments });
   }
 
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -463,27 +845,15 @@ export default function DashboardChat({
     }
   }
 
+  // Går att skicka även medan en turn körs (meddelandet köas då). Vi blockerar
+  // bara medan en bilaga fortfarande läses in.
   const canSubmit =
-    !isPending &&
-    !isProcessingFiles &&
-    (deepMode ? input.trim().length > 0 : input.trim().length > 0 || attachments.length > 0);
+    !isProcessingFiles && (input.trim().length > 0 || attachments.length > 0);
+  // Om en turn redan kör (eller det finns kö) hamnar nästa meddelande i kön.
+  const willQueue = isPending || queued.length > 0;
 
   const inputPill = (
     <div className="rounded-2xl border border-default bg-surface px-4 py-3 shadow-sm shadow-movexum-svart/5 transition focus-within:border-strong focus-within:ring-2 focus-within:ring-movexum-pastell-lila dark:focus-within:ring-movexum-morklila">
-      {deepRunning && (
-        <div className="mb-2 rounded-xl bg-movexum-pastell-lila px-3 py-2">
-          <div className="flex items-center justify-between text-[12px] font-medium text-movexum-morklila">
-            <span className="inline-flex items-center gap-1.5">
-              <Icon name="sparkle" size={12} />
-              Djupdykning pågår — planerar, hämtar data och sammanställer ett utkast…
-            </span>
-            <span>{deepProgress}%</span>
-          </div>
-          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-canvas-muted">
-            <div className="h-full bg-movexum-lila transition-all" style={{ width: `${deepProgress}%` }} />
-          </div>
-        </div>
-      )}
       {attachments.length > 0 && (
         <ul className="mb-2 flex flex-wrap gap-2">
           {attachments.map((a) => (
@@ -520,13 +890,12 @@ export default function DashboardChat({
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKey}
         placeholder={
-          deepMode
-            ? 'Beskriv vad djupdykningen ska göra (planeras och körs i flera steg)…'
+          willQueue
+            ? 'Skriv ett meddelande — det köas och körs när det pågående svaret är klart…'
             : activeAgent
               ? `Fråga ${activeAgent.name}…`
               : 'Fråga om portföljen, ett bolag eller en aktivitet…'
         }
-        disabled={isPending}
         rows={1}
         className="block w-full resize-none bg-transparent text-[15px] leading-6 text-foreground placeholder:text-foreground-subtle focus:outline-none disabled:opacity-50"
       />
@@ -568,11 +937,16 @@ export default function DashboardChat({
       )}
 
       <div className="mt-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <VoiceInputButton
+            disabled={isProcessingFiles}
+            onError={(message) => setLocalError(message || null)}
+            onTranscript={appendTranscript}
+          />
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isPending || isProcessingFiles || deepMode || attachments.length >= MAX_ATTACHMENTS}
+            disabled={isProcessingFiles || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title={`Bifoga fil (PNG, JPG, WebP, PDF, XLSX, TXT, MD, CSV · max ${MAX_ATTACHMENTS} filer · 10 MB/fil)`}
             aria-label="Bifoga fil"
@@ -585,7 +959,7 @@ export default function DashboardChat({
           <button
             type="button"
             onClick={() => imageInputRef.current?.click()}
-            disabled={isPending || deepMode || attachments.length >= MAX_ATTACHMENTS}
+            disabled={attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title={`Bifoga bild (PNG, JPG, WebP · max ${MAX_ATTACHMENTS} bilagor · 10 MB/fil)`}
             aria-label="Bifoga bild"
@@ -596,33 +970,36 @@ export default function DashboardChat({
             type="button"
             onClick={() => setIncludeWebContext((v) => !v)}
             aria-pressed={includeWebContext}
-            disabled={isPending || deepMode}
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition ${
               includeWebContext
                 ? 'bg-movexum-pastell-bla text-movexum-djupbla'
                 : 'border border-default text-foreground-subtle hover:text-foreground'
             }`}
-            title="Inkludera aktuella publika EU-källor (Breakit, Sifted, Vinnova)"
+            title={
+              includeWebContext
+                ? 'Webbkällor PÅ: chatten söker på internet (Mistral Web Search, EU) när frågan kräver det och visar källorna under svaret. Dessutom hämtas aktuella rubriker från Breakit, Sifted och Vinnova.'
+                : 'Slå på för att låta chatten söka på internet (Mistral Web Search, EU) — statistik, nyheter, utlysningar, regler och publika uppgifter om bolag. Bara sökfrågan lämnar plattformen; intern data och personuppgifter skickas aldrig.'
+            }
           >
             <Icon name="globe" size={12} />
             Webbkällor
           </button>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={deepMode}
-            onClick={toggleDeepMode}
-            disabled={isPending || deepRunning}
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
-              deepMode
-                ? 'bg-movexum-lila text-movexum-vit shadow-sm shadow-movexum-svart/10'
-                : 'border border-default text-foreground-subtle hover:border-strong hover:text-foreground'
-            }`}
-            title="Djupdykning: planerar, hämtar data i flera steg och sammanställer ett utkast (ev. dokument) i tråden"
-          >
-            <Icon name="sparkle" size={12} />
-            Djupdykning
-          </button>
+          <ModelPicker
+            value={selectedModel}
+            hasImages={hasImageAttachment}
+            onChange={(id) => onModelChange?.(id)}
+          />
+          {onOpenMeeting && (
+            <button
+              type="button"
+              onClick={onOpenMeeting}
+              className="inline-flex items-center gap-1.5 rounded-full border border-default px-3 py-1 text-[12px] font-medium text-foreground-subtle transition hover:border-strong hover:text-foreground"
+              title="Mötesläge: spela in ett möte, få allt transkriberat live och spara protokollet på ett bolagskort"
+            >
+              <Icon name="mic" size={12} />
+              Möte
+            </button>
+          )}
           {!isActive && agents.length > 0 && (
             <button
               type="button"
@@ -640,15 +1017,25 @@ export default function DashboardChat({
               Assistenter
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setShowGuide(true)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-default px-3 py-1 text-[12px] text-foreground-subtle transition hover:border-strong hover:text-foreground"
+            title="Vad kan chatten göra? Öppna guiden med exempel för din roll"
+          >
+            <Icon name="help" size={12} />
+            Hjälp
+          </button>
         </div>
         <button
           type="button"
           onClick={submit}
           disabled={!canSubmit}
-          aria-label="Skicka"
+          aria-label={willQueue ? 'Köa meddelande' : 'Skicka'}
+          title={willQueue ? 'Köa meddelande (körs när pågående svar är klart)' : 'Skicka'}
           className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-brand text-brand-foreground transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-40"
         >
-          <Icon name="arrow" size={16} />
+          <Icon name={willQueue ? 'plus' : 'arrow'} size={16} />
         </button>
       </div>
     </div>
@@ -705,17 +1092,275 @@ export default function DashboardChat({
     );
   }
 
+  // Webbkällor (§ 9.8): chips med titel + domän under svaret, öppnas hos
+  // källan i ny flik. Bara http(s)-URL:er persisteras (dedupeReferences).
+  function renderSources(sources?: WebSearchSourceRef[]) {
+    if (!sources || sources.length === 0) return null;
+    return (
+      <div className="mt-3">
+        <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-foreground-subtle">
+          Källor från webben
+        </p>
+        <ul className="flex flex-wrap gap-2">
+          {sources.map((src) => (
+            <li key={src.url}>
+              <a
+                href={src.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex max-w-[280px] items-center gap-1.5 rounded-full border border-default bg-canvas-subtle px-2.5 py-1 text-[12px] text-foreground transition hover:border-strong hover:bg-canvas-muted"
+                title={src.url}
+              >
+                <Icon name="globe" size={11} />
+                <span className="truncate">{src.title}</span>
+                {src.source && (
+                  <span className="shrink-0 text-foreground-subtle">· {src.source}</span>
+                )}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  // Godkännandekort (§ 33): visas bara på det SENASTE assistant-svaret och
+  // bara medan inget nytt körs/köas — ett klick skickar "Godkänn"/"Avbryt"
+  // som en vanlig user-tur, varpå kortet försvinner (meddelandet är inte
+  // längre senast). Knappen är UX, inte säkerhetsgränsen (RBAC/skrivlagret).
+  function renderApprovalRequest(msg: UiMessage, isLast: boolean) {
+    if (!msg.approval_request || !isLast || !onApproval) return null;
+    if (isPending || queued.length > 0) return null;
+    return (
+      <div className="mt-3 max-w-[640px] rounded-2xl border border-default bg-canvas-subtle p-3.5">
+        <p className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+          <Icon name="check" size={11} />
+          Väntar på ditt godkännande
+        </p>
+        <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground">
+          {msg.approval_request.summary}
+        </p>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onApproval(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-[13px] font-medium text-brand-foreground transition hover:bg-brand-hover"
+          >
+            <Icon name="check" size={13} />
+            Godkänn
+          </button>
+          <button
+            type="button"
+            onClick={() => onApproval(false)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-default px-4 py-2 text-[13px] font-medium text-foreground-muted transition hover:border-strong hover:text-foreground"
+          >
+            <Icon name="x" size={12} />
+            Avbryt
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Möteskort (§ 34): agenten har förberett mötesläget via `start_meeting`.
+  // Visas som "Starta mötet"-knapp på det senaste assistant-svaret — själva
+  // starten (och samtyckesgrinden) är alltid ett mänskligt klick i panelen.
+  function renderMeetingRequest(msg: UiMessage, isLast: boolean) {
+    if (!msg.meeting_request || !isLast || !onStartMeeting) return null;
+    if (isPending || queued.length > 0) return null;
+    const req = msg.meeting_request;
+    return (
+      <div className="mt-3 max-w-[640px] rounded-2xl border border-default bg-canvas-subtle p-3.5">
+        <p className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+          <Icon name="mic" size={11} />
+          Mötesläge förberett
+        </p>
+        <p className="mt-1.5 text-[13.5px] leading-relaxed text-foreground">
+          {req.kind && req.kind !== 'startup'
+            ? `${req.kind === 'internal' ? 'Internt möte' : 'Externt möte'}${
+                req.counterpart ? ` med ${req.counterpart}` : ''
+              }${req.title ? ` — ${req.title}` : ''}. Allt som sägs transkriberas live och kan sparas som fil i dina Filer efter granskning.`
+            : `${
+                req.startup_name
+                  ? `Möte med ${req.startup_name}${req.title ? ` — ${req.title}` : ''}. `
+                  : req.title
+                    ? `${req.title}. `
+                    : ''
+              }Allt som sägs transkriberas live och kan sparas på bolagskortet efter granskning.`}
+        </p>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onStartMeeting(req)}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-[13px] font-medium text-brand-foreground transition hover:bg-brand-hover"
+          >
+            <Icon name="mic" size={13} />
+            Starta mötet
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function visualDownload(v: InlineVisualRef, format: 'png' | 'jpeg') {
+    void downloadVisualImage(v, format).catch(() => {
+      setLocalError('Kunde inte ladda ned bilden — försök igen.');
+    });
+  }
+
+  function visualDownloadButtons(v: InlineVisualRef, size: 'sm' | 'lg' = 'sm') {
+    const cls =
+      size === 'lg'
+        ? 'inline-flex items-center gap-1.5 rounded-lg border border-default bg-canvas-subtle px-3 py-1.5 text-[12.5px] font-medium text-foreground transition hover:border-strong hover:bg-canvas-muted'
+        : 'inline-flex items-center gap-1 rounded-lg border border-default bg-canvas-subtle px-2 py-1 text-[11.5px] font-medium text-foreground transition hover:border-strong hover:bg-canvas-muted';
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => visualDownload(v, 'png')}
+          className={cls}
+          title="Ladda ned som PNG-bild"
+        >
+          <Icon name="download" size={size === 'lg' ? 13 : 12} />
+          PNG
+        </button>
+        <button
+          type="button"
+          onClick={() => visualDownload(v, 'jpeg')}
+          className={cls}
+          title="Ladda ned som JPEG-bild"
+        >
+          <Icon name="download" size={size === 'lg' ? 13 : 12} />
+          JPEG
+        </button>
+      </>
+    );
+  }
+
+  // Inline-visualiseringar — visas i chattens fulla bredd; klick öppnar
+  // fullskärmsvyn, och PNG/JPEG laddas ned direkt från kortet.
+  function renderVisuals(visuals?: InlineVisualRef[]) {
+    if (!visuals || visuals.length === 0) return null;
+    return (
+      <div className="mt-3 flex w-full flex-col gap-4">
+        {visuals.map((v) => (
+          <figure
+            key={v.id}
+            className="w-full overflow-hidden rounded-2xl border border-default bg-surface shadow-lg shadow-movexum-svart/5"
+          >
+            <figcaption className="flex items-center justify-between gap-2 border-b border-default px-4 py-2.5">
+              <span className="inline-flex min-w-0 items-center gap-2">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-movexum-pastell-bla text-movexum-djupbla">
+                  <Icon name="graph" size={13} />
+                </span>
+                <span className="truncate font-heading text-[13px] font-semibold text-foreground">
+                  {v.title || (v.kind === 'stats' ? 'Nyckeltal' : 'Diagram')}
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center gap-1.5">
+                {visualDownloadButtons(v)}
+                <button
+                  type="button"
+                  onClick={() => setLightbox(v)}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground"
+                  title="Visa i fullskärm"
+                  aria-label="Visa i fullskärm"
+                >
+                  <Icon name="external" size={13} />
+                </button>
+              </span>
+            </figcaption>
+            <button
+              type="button"
+              onClick={() => setLightbox(v)}
+              className="block w-full cursor-zoom-in bg-movexum-vit"
+              title="Klicka för fullskärm"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={svgDataUrl(v.svg)}
+                alt={v.title || 'Visualisering'}
+                className="block w-full"
+              />
+            </button>
+          </figure>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className={`flex min-h-0 flex-1 flex-col ${className}`}>
+      {showGuide && (
+        <ChatHelpGuide
+          roles={userRoles}
+          onClose={() => setShowGuide(false)}
+          onUseExample={(text) => {
+            // Exemplet läggs i chattrutan men skickas INTE — användaren
+            // läser, justerar och skickar själv (människa-i-loopen).
+            setInput(text);
+            setShowGuide(false);
+            inputRef.current?.focus();
+          }}
+        />
+      )}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-movexum-svart/70 p-4 backdrop-blur-sm md:p-8"
+          role="dialog"
+          aria-modal="true"
+          aria-label={lightbox.title || 'Visualisering i fullskärm'}
+          onClick={() => setLightbox(null)}
+        >
+          <div
+            className="flex max-h-full w-full max-w-[1320px] flex-col overflow-hidden rounded-2xl border border-default bg-surface shadow-xl shadow-movexum-svart/20"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-default px-4 py-3">
+              <span className="truncate font-heading text-[15px] font-semibold text-foreground">
+                {lightbox.title || (lightbox.kind === 'stats' ? 'Nyckeltal' : 'Diagram')}
+              </span>
+              <span className="flex shrink-0 items-center gap-2">
+                {visualDownloadButtons(lightbox, 'lg')}
+                <button
+                  type="button"
+                  onClick={() => setLightbox(null)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground"
+                  title="Stäng"
+                  aria-label="Stäng fullskärmsvyn"
+                >
+                  <Icon name="x" size={15} />
+                </button>
+              </span>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto bg-movexum-vit">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={svgDataUrl(lightbox.svg)}
+                alt={lightbox.title || 'Visualisering'}
+                className="block w-full"
+              />
+            </div>
+          </div>
+        </div>
+      )}
       {!isActive ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto py-10">
-          <div className="mx-auto flex w-full max-w-[720px] flex-col px-6">
+        <div className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto py-10">
+          <div className="mx-auto my-auto flex w-full max-w-[720px] flex-col px-6">
             {greeting && (
               <h1 className="font-heading text-[28px] font-semibold tracking-tight text-foreground md:text-[34px]">
                 {greeting}
               </h1>
             )}
             <p className="mt-2 text-[14px] text-foreground-subtle">Vad kan jag hjälpa dig med idag?</p>
+            <button
+              type="button"
+              onClick={() => setShowGuide(true)}
+              className="mt-2 inline-flex items-center gap-1.5 self-start text-[13px] text-link transition hover:underline"
+            >
+              <Icon name="help" size={13} />
+              Vad kan chatten göra? Se guiden med exempel
+            </button>
 
             {activeAgent && (
               <div className="mt-5 flex items-center gap-2">
@@ -821,7 +1466,7 @@ export default function DashboardChat({
                       Aktivitet
                     </h2>
                     <p className="mt-0.5 text-[12px] text-foreground-subtle">
-                      Senaste händelserna i portföljen
+                      Det senaste i portföljen och det du gjort i systemet
                     </p>
                   </div>
                   <a href="/aktivitet" className="text-[12px] text-foreground-subtle transition hover:text-foreground">
@@ -833,57 +1478,98 @@ export default function DashboardChat({
                     Inga händelser än. Aktiviteter från bolagen dyker upp här.
                   </div>
                 ) : (
-                  <ul className="overflow-hidden rounded-2xl border border-default bg-surface">
-                    {activities.map((act, i) => {
-                      const v = activityVisual(act);
-                      const inner = (
-                        <>
-                          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${v.swatch}`}>
-                            {act.toolIcon ? (
-                              <span className="text-[15px] leading-none">{act.toolIcon}</span>
-                            ) : (
-                              <Icon name={v.icon} size={15} />
-                            )}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-[13.5px] font-medium text-foreground">{act.title}</p>
-                            <p className="mt-0.5 flex items-center gap-1.5 text-[12px] text-foreground-subtle">
-                              {act.startupName && (
-                                <>
-                                  <span className="truncate font-medium text-foreground-muted">
-                                    {act.startupName}
-                                  </span>
-                                  <span aria-hidden>·</span>
-                                </>
+                  <>
+                    <ul className="overflow-hidden rounded-2xl border border-default bg-surface">
+                      {activities.slice(0, visibleActivities).map((act, i) => {
+                        const v = activityVisual(act);
+                        const href =
+                          act.href ?? (act.startupId ? `/startups/${act.startupId}` : undefined);
+                        const inner = (
+                          <>
+                            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${v.swatch}`}>
+                              {act.toolIcon ? (
+                                <span className="text-[13px] leading-none">{act.toolIcon}</span>
+                              ) : (
+                                <Icon name={v.icon} size={13} />
                               )}
-                              <span className="shrink-0">{relativeTime(act.created)}</span>
-                            </p>
-                          </div>
-                          {act.startupId && (
-                            <Icon
-                              name="arrow-up-right"
-                              size={14}
-                              className="shrink-0 text-foreground-subtle transition group-hover:text-foreground"
-                            />
-                          )}
-                        </>
-                      );
-                      const rowClass = `group flex items-center gap-3 px-4 py-3 transition ${
-                        i > 0 ? 'border-t border-default' : ''
-                      } ${act.startupId ? 'hover:bg-canvas-subtle' : ''}`;
-                      return (
-                        <li key={act.id}>
-                          {act.startupId ? (
-                            <a href={`/startups/${act.startupId}`} className={rowClass}>
-                              {inner}
-                            </a>
-                          ) : (
-                            <div className={rowClass}>{inner}</div>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
+                            </span>
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                              <p className="truncate text-[13px] font-medium text-foreground">{act.title}</p>
+                              {act.startupName && (
+                                <span className="shrink-0 truncate text-[12px] text-foreground-muted">
+                                  {act.startupName}
+                                </span>
+                              )}
+                              {act.viaAgent && (
+                                <span
+                                  className="inline-flex shrink-0 items-center gap-1 rounded-md bg-canvas-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground-subtle"
+                                  title="Utfört via AI-chatten"
+                                >
+                                  <Icon name="sparkle" size={9} />
+                                  AI
+                                </span>
+                              )}
+                            </div>
+                            <span className="shrink-0 text-[11.5px] text-foreground-subtle">
+                              {clockNow === null ? '' : relativeTime(act.created, clockNow)}
+                            </span>
+                            {href && (
+                              <Icon
+                                name="arrow-up-right"
+                                size={13}
+                                className="shrink-0 text-foreground-subtle transition group-hover:text-foreground"
+                              />
+                            )}
+                          </>
+                        );
+                        const rowClass = `group flex items-center gap-2.5 px-4 py-2 transition ${
+                          i > 0 ? 'border-t border-default' : ''
+                        } ${href ? 'hover:bg-canvas-subtle' : ''}`;
+                        const rowTitle = act.actorName ? `Av ${act.actorName}` : undefined;
+                        return (
+                          <li key={act.id}>
+                            {href ? (
+                              <a href={href} className={rowClass} title={rowTitle}>
+                                {inner}
+                              </a>
+                            ) : (
+                              <div className={rowClass} title={rowTitle}>
+                                {inner}
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {activities.length > 5 && (
+                      <div className="mt-2 flex items-center justify-center gap-2">
+                        {visibleActivities < activities.length && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setVisibleActivities((v) =>
+                                Math.min(activities.length, v + ACTIVITY_STEP)
+                              )
+                            }
+                            className="flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-[12px] text-foreground-subtle transition hover:bg-canvas-subtle hover:text-foreground"
+                          >
+                            {`Visa ${Math.min(activities.length - visibleActivities, ACTIVITY_STEP)} till`}
+                            <Icon name="chevdown" size={13} />
+                          </button>
+                        )}
+                        {visibleActivities > 5 && (
+                          <button
+                            type="button"
+                            onClick={() => setVisibleActivities(5)}
+                            className="flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-[12px] text-foreground-subtle transition hover:bg-canvas-subtle hover:text-foreground"
+                          >
+                            Visa färre
+                            <Icon name="chevdown" size={13} className="rotate-180" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </section>
             )}
@@ -895,7 +1581,8 @@ export default function DashboardChat({
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex-1 overflow-y-auto">
+          <div className="relative min-h-0 flex-1">
+            <div ref={scrollRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto">
             <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-6 py-6">
               <div className="flex items-center justify-between">
                 {activeAgent ? (
@@ -928,14 +1615,29 @@ export default function DashboardChat({
                   </div>
                 ) : (
                   <div key={i} className="flex justify-start">
-                    <div className="max-w-[85%]">
+                    {/* Full bredd när visualiseringar finns — de ska visas stort över hela ytan. */}
+                    <div className={msg.visuals && msg.visuals.length > 0 ? 'w-full min-w-0' : 'max-w-[85%]'}>
                       {msg.steps && msg.steps.length > 0 && (
                         <ActivityTrail items={msg.steps.map((s) => ({ label: s.label, ok: s.ok }))} />
                       )}
-                      <div className="whitespace-pre-wrap text-[14.5px] leading-relaxed text-foreground">
-                        {msg.content}
-                      </div>
+                      <div
+                        className="max-w-[640px] text-[14.5px] leading-relaxed text-foreground"
+                        dangerouslySetInnerHTML={{ __html: chatMarkdownToHtml(msg.content) }}
+                      />
+                      {renderVisuals(msg.visuals)}
                       {renderGeneratedFiles(msg.generated_files)}
+                      {renderSources(msg.sources)}
+                      {renderApprovalRequest(msg, i === messages.length - 1)}
+                      {renderMeetingRequest(msg, i === messages.length - 1)}
+                      {typeof msg.tokens === 'number' && msg.tokens > 0 && (
+                        <p
+                          className="mt-1.5 text-[11px] tabular-nums text-foreground-subtle"
+                          title={`${AI_IMPACT_SOURCE_LABEL}. Uppskattningen tillämpas på turens totala tokens (in + ut) — varje verktygssteg kräver ett eget modellanrop som bearbetar hela kontexten igen.`}
+                        >
+                          {formatTokens(msg.tokens)} tokens · {formatAiImpact(msg.tokens)}
+                          {msg.model ? ` · ${modelLabel(msg.model)}` : ''}
+                        </p>
+                      )}
                     </div>
                   </div>
                 )
@@ -947,17 +1649,62 @@ export default function DashboardChat({
                     <ActivityTrail
                       items={liveSteps.map((s) => ({ label: s.label, running: s.running, ok: s.ok }))}
                     />
-                    <div className="inline-flex gap-1 text-foreground-subtle" aria-label="Arbetar">
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '0ms' }} />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '150ms' }} />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '300ms' }} />
-                    </div>
+                    {liveText ? (
+                      <div
+                        className="text-[14.5px] leading-relaxed text-foreground"
+                        dangerouslySetInnerHTML={{
+                          __html: withStreamCursor(chatMarkdownToHtml(liveText))
+                        }}
+                      />
+                    ) : (
+                      <div className="inline-flex gap-1 text-foreground-subtle" aria-label="Arbetar">
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '0ms' }} />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '150ms' }} />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-subtle" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
 
+              {/* Köade meddelanden — skrivna medan turen körs, körs i tur och ordning. */}
+              {queued.map((q) => (
+                <div key={q.id} className="flex justify-end">
+                  <div className="group relative max-w-[78%] rounded-2xl rounded-tr-md border border-dashed border-strong bg-canvas-subtle px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground-muted">
+                    <span className="mb-1 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-foreground-subtle">
+                      <Icon name="clock" size={11} />
+                      I kö
+                      {onCancelQueued && (
+                        <button
+                          type="button"
+                          onClick={() => onCancelQueued(q.id)}
+                          className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground"
+                          aria-label="Ta bort ur kö"
+                          title="Ta bort ur kö"
+                        >
+                          <Icon name="x" size={10} />
+                        </button>
+                      )}
+                    </span>
+                    {q.content}
+                  </div>
+                </div>
+              ))}
+
               <div ref={bottomRef} />
             </div>
+            </div>
+            {!stickToBottom && (
+              <button
+                type="button"
+                onClick={scrollToBottom}
+                className="absolute bottom-4 left-1/2 z-10 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-default bg-surface text-foreground-muted shadow-md shadow-movexum-svart/10 transition hover:border-strong hover:text-foreground"
+                title="Till senaste"
+                aria-label="Scrolla till senaste meddelandet"
+              >
+                <Icon name="chevdown" size={18} />
+              </button>
+            )}
           </div>
 
           <div className="border-t border-default bg-canvas">

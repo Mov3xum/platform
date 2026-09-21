@@ -1,5 +1,6 @@
 import type { EducationDocumentKind } from './education-documents';
 import type { FileTopic, FileTopicStatus } from './file-topics';
+import type { MeetingRequestRef } from './meeting';
 
 export type Role =
   | 'admin'
@@ -329,6 +330,21 @@ export interface GeneratedFileRef {
   preview_svg?: string;
 }
 
+// Inline-visualisering (diagram och/eller nyckeltalskort) renderad
+// deterministiskt server-side som brandad SVG och bifogad ett assistant-svar.
+// Visas i full bredd i chatten och kan laddas ned som PNG/JPEG (rastreras
+// klient-side). Ingen ny dataväg — innehållet kommer från verktygssvar
+// agenten redan sett i samma konversation. Escapad vid rendering; cappad
+// i storlek.
+export interface InlineVisualRef {
+  id: string;
+  kind: 'chart' | 'stats';
+  title?: string;
+  svg: string;
+  width: number;
+  height: number;
+}
+
 // Ett verktygssteg agenten utförde under en turn. Live-streamas till UI:t
 // medan turen körs och persisteras på assistant-meddelandet så återöppnade
 // trådar visar vad agenten gjorde. Etiketter är PII-fria (kollektionsnivå /
@@ -339,14 +355,45 @@ export interface AgentActivityStep {
   ok?: boolean; // utfall (sätts när steget är klart)
 }
 
+// Godkännandefråga från agenten (verktyget `request_approval`): agenten vill
+// utföra en KRITISK åtgärd och väntar på användarens beslut. UI:t renderar en
+// Godkänn/Avbryt-knapp på assistant-meddelandet; beslutet skickas som nästa
+// user-tur ("Godkänn"/"Avbryt"). Bara en per assistant-tur.
+export interface ApprovalRequestRef {
+  /** Kort beskrivning av exakt vad som utförs vid godkännande. */
+  summary: string;
+}
+
+// En webbkälla som chattens `web_search`-verktyg (Mistral Web Search, EU)
+// hämtade under en tur. Persisteras på assistant-meddelandet så att källorna
+// visas under svaret även när tråden öppnas igen (EU AI Act art. 13 —
+// transparens om underlag). Innehåller bara publik metadata (titel + URL).
+export interface WebSearchSourceRef {
+  title: string;
+  url: string;
+  /** Leverantörens källetikett (t.ex. domän) — valfri. */
+  source?: string;
+}
+
 export interface ToolRunMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   attachments?: ToolRunAttachmentRef[];
+  // Webbkällor som agenten hämtade via `web_search` för detta (assistant-)turn.
+  sources?: WebSearchSourceRef[];
   // Agent-genererade dokument knutna till detta (assistant-)turn.
   generated_files?: GeneratedFileRef[];
+  // Inline-visualiseringar (diagram/nyckeltal) knutna till detta (assistant-)turn.
+  visuals?: InlineVisualRef[];
   // Verktygssteg agenten utförde för detta (assistant-)turn.
   steps?: AgentActivityStep[];
+  // Godkännandefråga (assistant): agenten väntar på Godkänn/Avbryt innan en
+  // kritisk åtgärd utförs. Renderas som knappar när meddelandet är senast.
+  approval_request?: ApprovalRequestRef;
+  // Möteskort (assistant, § 34): agenten har förberett mötesläget (verktyget
+  // `start_meeting`). UI:t renderar en "Starta mötet"-knapp — inspelningen
+  // startas ALLTID av ett mänskligt klick, aldrig av agenten själv.
+  meeting_request?: MeetingRequestRef;
   model?: string; // modell som producerade detta turn (assistant)
   tokens_in?: number;
   tokens_out?: number;
@@ -514,6 +561,10 @@ export interface UserFile {
   topic_confidence?: number; // 0..1, AI:ns självskattade säkerhet (transparens)
   startup?: string; // valfri bolagskoppling (relation) för "Bolag"-vyn
   categorized_at?: string;
+  // RAG: sökbar i ägarens egen chatt via search_my_files (migration 1700000120–121, § 27).
+  extracted_text?: string;
+  indexed?: boolean;
+  chunk_count?: number;
   created: string;
   updated: string;
 }
@@ -1073,6 +1124,22 @@ export interface Mission {
   };
 }
 
+// Uppladdad dokumentation kopplad till ett uppdrag (CLAUDE.md § 29,
+// migration 1700000133). Ersätter den tidigare artefakt-/länklistan.
+export interface MissionDocument {
+  id: string;
+  tenant: string;
+  mission: string;
+  title?: string;
+  file: string;
+  filename?: string;
+  mime?: string;
+  size_bytes?: number;
+  uploaded_by?: string;
+  created: string;
+  updated: string;
+}
+
 // ─── Kommentarer & notiser för samarbete ─────────────────────────────────────
 
 export interface MissionComment {
@@ -1281,10 +1348,10 @@ export interface ModuleGroup {
 }
 
 export const RAIL_GROUPS: ModuleGroup[] = [
-  { label: 'Översikt', modules: ['idag', 'min_oversikt', 'inkorg', 'pagaende', 'filer', 'inflode', 'uppdrag'] },
+  { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'pagaende', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'insights', 'integrationer', 'anvandare', 'installningar'] }
+  { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'installningar', 'min_profil'] }
 ];
 
 /**
@@ -1315,6 +1382,14 @@ export function isPureStartupMember(roles: Role[] | undefined): boolean {
 }
 
 export const coreModules: ModuleDefinition[] = [
+  {
+    id: 'hem',
+    title: 'Hemmaplan',
+    description:
+      'Organisationens startsida — anslagstavla med nyheter, info och instruktioner, bolagsnytt, omvärldsbevakning och veckans agenda.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/hem'
+  },
   {
     id: 'idag',
     title: 'Chatt',
@@ -1353,6 +1428,14 @@ export const coreModules: ModuleDefinition[] = [
     route: '/pagaende'
   },
   {
+    id: 'arshjul',
+    title: 'Årshjul',
+    description:
+      'Movexums verksamhetsårshjul — alla återkommande aktiviteter (styrelse/ledning) över året som hjul och tabell. Bygg och styr manuellt eller via chatten; filtrera per kategori, spår och år.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/arshjul'
+  },
+  {
     id: 'filer',
     title: 'Filer',
     description: 'Dina genererade och uppladdade filer — bara du ser dem.',
@@ -1365,6 +1448,13 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Skapa och samarbeta på projekt och uppdrag — bjud in roller, kommentera och följ flöden.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer'],
     route: '/uppdrag'
+  },
+  {
+    id: 'min_profil',
+    title: 'Min profil',
+    description: 'Din yrkestitel och dina kompetenser — driver matchningen av tvärfunktionella team.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner'],
+    route: '/min-profil'
   },
   {
     id: 'inflode',
@@ -1431,6 +1521,14 @@ export const coreModules: ModuleDefinition[] = [
     route: '/toolbox'
   },
   {
+    id: 'kunskapsbas',
+    title: 'Kunskapsbas',
+    description:
+      'Organisationens AI-kunskapsbas — ladda upp Movexum-material (processer, mallar, policys, rapporter, presentationer) så chatten kan svara på frågor om verksamheten och koppla det mot databasen.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor'],
+    route: '/kunskapsbas'
+  },
+  {
     id: 'insights',
     title: 'Usage insights',
     description:
@@ -1446,16 +1544,19 @@ export const coreModules: ModuleDefinition[] = [
     route: '/integrationer'
   },
   {
+    // Användaradministrationen bor under Inställningar (sektion "Användare");
+    // modulen finns kvar för `canAccessModule`-kompatibilitet men visas inte
+    // som egen rail-post (Inställningar-hubben länkar dit).
     id: 'anvandare',
     title: 'Användare',
-    description: 'Hantera plattformsanvändare — skapa bolagsmedlemmar och tilldela bolag.',
+    description: 'Hantera plattformsanvändare — roller, bolagskoppling, åtkomst och lösenord.',
     rolesAllowed: ['admin', 'incubator_lead'],
-    route: '/admin/users'
+    route: '/installningar/anvandare'
   },
   {
     id: 'installningar',
     title: 'Inställningar',
-    description: 'Moduler, tenants, integrationer och infrastruktur.',
+    description: 'Användare, moduler, AI-inställningar, varumärke och drift.',
     rolesAllowed: ['admin', 'incubator_lead'],
     route: '/installningar'
   },
@@ -1510,8 +1611,87 @@ export * from './onboarding';
 export * from './education-documents';
 // ─── De minimis-modul (ren beräkningslogik, enhetstestad) ────────────────────
 export * from './de-minimis';
+// ─── Årshjul (ren domän-/geometrilogik, enhetstestad) ────────────────────────
+export * from './annual-wheel';
 export * from './agreements';
 export * from './reporting';
 // ─── Startupkompassen — quiz-poängsättning (ren logik, enhetstestad) ─────────
 export * from './compass-quiz';
 export * from './file-topics';
+// ─── Kompetenstaxonomi (tvärfunktionella team, ren logik, enhetstestad) ──────
+export * from './competences';
+// ─── AI-miljöpåverkan (tokens → CO₂e/vatten, ren logik, enhetstestad) ────────
+export * from './ai-impact';
+export * from './voice';
+export * from './compass-authoring';
+// ─── Mötesläge i chatten (ren möteslogik, enhetstestad, § 34) ────────────────
+export * from './meeting';
+export * from './meeting-segmenter';
+export * from './audio-level';
+export * from './audio-pcm';
+export * from './greeting';
+// ─── Modulåtkomst per användare (allow-lista + rollstandard, enhetstestad) ───
+export * from './module-access';
+import { isToggleableModule, resolveEnabledModules } from './module-access';
+
+/** Togglebara modul-id:n som minst en av rollerna tillåter (rail-ordning). */
+export function allowedModuleIdsForRoles(roles: readonly Role[] | undefined): string[] {
+  const set = new Set(roles ?? []);
+  return coreModules
+    .filter((m) => isToggleableModule(m.id) && m.rolesAllowed.some((r) => set.has(r)))
+    .map((m) => m.id);
+}
+
+/**
+ * Användarens effektiva allow-lista (§ 36.3) — `resolveEnabledModules` med
+ * rollens tillåtna moduler ur `coreModules` som fallback när ingen lista är
+ * lagrad. Används av sessionen och användaradministrationen (samma regel).
+ */
+export function resolveUserModules(input: {
+  roles: readonly Role[] | undefined;
+  stored?: unknown;
+  legacyDisabled?: unknown;
+}): string[] {
+  return resolveEnabledModules({ ...input, allowedForRoles: allowedModuleIdsForRoles(input.roles) });
+}
+export * from './event-time';
+export * from './org-posts';
+export * from './home';
+
+// ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
+/** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */
+export interface OrgKnowledge {
+  id: string;
+  tenant: string;
+  title?: string;
+  filename: string;
+  mime?: string;
+  size_bytes?: number;
+  file?: string;
+  extracted_text?: string;
+  char_count?: number;
+  redacted?: boolean;
+  /** Ämnesetikett (samma taxonomi som FileTopic i file-topics.ts). */
+  topic?: string;
+  /** True när chunkning + embeddings (RAG-index) byggts. */
+  indexed?: boolean;
+  chunk_count?: number;
+  /** Reserverat för framtida SharePoint-sync (extern fil-id/eTag). */
+  source_ref?: string;
+  created_by?: string;
+  created: string;
+  updated: string;
+}
+
+/** Ett embeddat textstycke ur en OrgKnowledge-källa (RAG-index). */
+export interface OrgKnowledgeChunk {
+  id: string;
+  tenant: string;
+  source: string;
+  chunk_index?: number;
+  text?: string;
+  embedding?: number[];
+  token_count?: number;
+  created: string;
+  updated: string;
+}

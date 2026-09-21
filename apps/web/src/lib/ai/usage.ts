@@ -51,3 +51,37 @@ export async function logAiUsage(
     });
   }
 }
+
+/**
+ * Loggar en RAG-indexkörnings token-utfall. Embeddings (mistral-embed) och en
+ * ev. contextual-retrieval-generering (mistral-small) loggas som SEPARATA
+ * events eftersom modellen — och därmed kostnaden — skiljer sig. Fail-soft via
+ * `logAiUsage`. Default surface `suggestions` (samma som RAG-sök).
+ */
+export async function logIndexUsage(
+  pb: PocketBase,
+  who: { tenant: string; userId: string; surface?: AiUsageSurface },
+  usage: { tokensIn: number; tokensOut: number; context?: { tokensIn: number; tokensOut: number } }
+): Promise<void> {
+  const surface = who.surface ?? 'suggestions';
+  if (usage.tokensIn > 0 || usage.tokensOut > 0) {
+    await logAiUsage(pb, {
+      tenant: who.tenant,
+      userId: who.userId,
+      surface,
+      model: 'mistral-embed',
+      tokensIn: usage.tokensIn,
+      tokensOut: usage.tokensOut
+    });
+  }
+  if (usage.context && (usage.context.tokensIn > 0 || usage.context.tokensOut > 0)) {
+    await logAiUsage(pb, {
+      tenant: who.tenant,
+      userId: who.userId,
+      surface,
+      model: 'mistral-small-latest',
+      tokensIn: usage.context.tokensIn,
+      tokensOut: usage.context.tokensOut
+    });
+  }
+}

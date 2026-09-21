@@ -3,9 +3,12 @@
 import PocketBase from 'pocketbase';
 import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { getAssignmentReadPb } from '@/lib/assignments/read';
 import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { buildStartupContext } from '@/lib/ai/context';
+import { logAgentAction } from '@/lib/core/write';
+import { logAiUsage } from '@/lib/ai/usage';
 import { callMistral, estimateCostUsd } from '@/lib/ai/mistral';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import {
@@ -350,13 +353,39 @@ export type WorkshopAreaActionState = {
   success?: string;
 };
 
+// Aktivitetslogg-skrivningar är sekundära till själva tilldelnings-/status-
+// mutationen. En schema-mismatch (t.ex. en PB-backend som ännu inte fått
+// migration 1700000126, som återställer activities.kind-värdena
+// workshop_assignment/workshop_run) får inte avbryta flödet halvvägs — då
+// blir tilldelningen skapad men ser trasig ut, och användaren får ett fel
+// som inte kan ångra den redan skrivna raden. Fail-soft + serverlogg.
+async function tryActivityWrite<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (err) {
+    const pbError = toPbErrorLike(err);
+    console.error(`[workshops] ${label} failed (fail-soft)`, {
+      statusCode: pbError.status,
+      message: err instanceof Error ? err.message : String(err ?? ''),
+      response: pbError.response ?? null
+    });
+    return null;
+  }
+}
+
 async function loadAssignmentWithAccessCheck(assignmentId: string) {
   const user = await requireUser();
   const pb = await getServerPb();
 
+  // Läs tilldelningen via den robusta klienten (PB v0.23.4 rule-eval kan tyst
+  // ge 404 för en annars behörig användare, § 21.3 / lib/assignments/read.ts).
+  // Behörigheten avgörs i app-koden direkt nedan (tenant + roll/medlemskap);
+  // efterföljande SKRIVNINGAR går via användarens token (`pb`) så RLS gäller.
+  const readPb = await getAssignmentReadPb();
+
   let assignment: WorkshopAssignment & Record<string, unknown>;
   try {
-    assignment = await pb
+    assignment = await readPb
       .collection(PB_COLLECTIONS.workshopAssignments)
       .getOne<WorkshopAssignment & Record<string, unknown>>(assignmentId, {
         expand: 'workshop,startup'
@@ -468,9 +497,22 @@ export async function createWorkshopAction(
     });
   };
 
+  // Ändringslogg (CLAUDE.md § 32): UI-skapade workshops loggas i
+  // `agent_actions` med samma format som chatt-agentens `create_workshop`,
+  // så den samlade aktivitetsloggen ser skapandet oavsett väg. Fail-soft.
+  const logWorkshopCreated = (recordId: string) =>
+    logAgentAction(pb, {
+      actor: { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles },
+      action_type: 'create',
+      collection: 'workshops',
+      record_id: recordId,
+      after_value: { key, title, status, modules: modules.length }
+    });
+
   try {
     const record = await pb.collection(PB_COLLECTIONS.workshops).create(payload);
     const imgResult = await applyImageUpdate(pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
+    await logWorkshopCreated(String(record.id));
     revalidatePath('/education');
     revalidatePath('/education/workshops');
     return { workshopId: String(record.id), warning: imageWarning(imgResult) };
@@ -490,6 +532,7 @@ export async function createWorkshopAction(
         try {
           const record = await suResult.pb.collection(PB_COLLECTIONS.workshops).create(payload);
           const imgResult = await applyImageUpdate(suResult.pb, PB_COLLECTIONS.workshops, String(record.id), imageFile, false);
+          await logWorkshopCreated(String(record.id));
           revalidatePath('/education');
           revalidatePath('/education/workshops');
           return { workshopId: String(record.id), warning: imageWarning(imgResult) };
@@ -1232,20 +1275,26 @@ export async function assignWorkshopToStartupAction(
       assignment = await writePb.collection(PB_COLLECTIONS.workshopAssignments).create(assignmentData);
     }
 
-    const activity = await writePb.collection('activities').create({
-      startup: startupId,
-      type: 'workshop',
-      title: `${workshop.title} – tilldelad workshop`,
-      status: 'planned',
-      kind: 'workshop_assignment',
-      workshop: workshopId,
-      workshop_assignment: assignment.id,
-      owner: user.id,
-      due_date: dueDate || new Date().toISOString().slice(0, 10)
-    });
+    // Fail-soft: tilldelningsraden är redan skriven — ett aktivitetslogg-fel
+    // (t.ex. saknade kind-värden före migration 1700000126) får inte få hela
+    // tilldelningen att se misslyckad ut.
+    const activity = await tryActivityWrite('assignment activity create', () =>
+      writePb.collection('activities').create({
+        startup: startupId,
+        type: 'workshop',
+        title: `${workshop.title} – tilldelad workshop`,
+        status: 'planned',
+        kind: 'workshop_assignment',
+        workshop: workshopId,
+        workshop_assignment: assignment.id,
+        owner: user.id,
+        due_date: dueDate || new Date().toISOString().slice(0, 10)
+      })
+    );
 
     // ── Samarbete: medarbetar-tasks + ev. möte (CLAUDE.md § 18.4) ──────────
-    const update: Record<string, unknown> = { activity: activity.id };
+    const update: Record<string, unknown> = {};
+    if (activity) update.activity = activity.id;
     const collaboratorIds = options?.collaboratorIds ?? [];
     if (collaboratorIds.length > 0) {
       const linked = await createCollaboratorTasks({
@@ -1271,15 +1320,23 @@ export async function assignWorkshopToStartupAction(
       if (meetingId) update.meeting = meetingId;
     }
 
-    await writePb.collection(PB_COLLECTIONS.workshopAssignments).update(String(assignment.id), update);
+    if (Object.keys(update).length > 0) {
+      await writePb.collection(PB_COLLECTIONS.workshopAssignments).update(String(assignment.id), update);
+    }
 
     revalidatePath('/education');
     revalidatePath('/dashboard');
     revalidatePath('/aktivitet');
     revalidatePath('/pagaende');
+    revalidatePath('/mina-aktiviteter');
     revalidatePath('/inkorg');
     revalidatePath(`/startups/${startupId}`);
-    return { assignmentId: String(assignment.id) };
+    return {
+      assignmentId: String(assignment.id),
+      warning: activity
+        ? undefined
+        : 'Workshopen tilldelades, men aktivitetsloggen kunde inte skrivas (uppdatera/omdistribuera PocketBase-backenden, migration 1700000126).'
+    };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte tilldela workshop.' };
   }
@@ -1313,15 +1370,18 @@ export async function saveWorkshopProgressAction(
 
     if (assignment.activity) {
       const workshopTitle = assignment.expand?.workshop?.title ?? 'Workshop';
-      await pb.collection('activities').update(String(assignment.activity), {
-        status: nextStatus,
-        title: `${workshopTitle} – pågår`
-      });
+      await tryActivityWrite('progress activity update', () =>
+        pb.collection('activities').update(String(assignment.activity), {
+          status: nextStatus,
+          title: `${workshopTitle} – pågår`
+        })
+      );
     }
 
     revalidatePath(`/education/assignments/${assignmentId}`);
     revalidatePath('/education');
     revalidatePath('/dashboard');
+    revalidatePath('/mina-aktiviteter');
     if (assignment.startup) revalidatePath(`/startups/${assignment.startup}`);
     return { assignmentId };
   } catch (err) {
@@ -1408,19 +1468,23 @@ export async function runWorkshopAiChatAction(
       last_saved_at: now
     });
 
-    await pb.collection('activities').create({
-      startup: assignment.startup,
-      type: 'workshop',
-      title: `${workshop.title} – AI-chattmoment`,
-      status: 'done',
-      kind: 'workshop_run',
-      workshop: assignment.workshop,
-      workshop_assignment: assignment.id,
-      workshop_run: run.id,
-      owner: user.id,
-      completed_at: now,
-      due_date: now.slice(0, 10)
-    });
+    // Fail-soft: svaret är redan sparat på tilldelningen — aktivitetsloggen
+    // får inte fälla hela chatten (jfr migration 1700000126).
+    await tryActivityWrite('ai-chat activity create', () =>
+      pb.collection('activities').create({
+        startup: assignment.startup,
+        type: 'workshop',
+        title: `${workshop.title} – AI-chattmoment`,
+        status: 'done',
+        kind: 'workshop_run',
+        workshop: assignment.workshop,
+        workshop_assignment: assignment.id,
+        workshop_run: run.id,
+        owner: user.id,
+        completed_at: now,
+        due_date: now.slice(0, 10)
+      })
+    );
 
     revalidatePath(`/education/assignments/${assignmentId}`);
     revalidatePath('/aktivitet');
@@ -1433,6 +1497,45 @@ export async function runWorkshopAiChatAction(
     });
     return { error: err instanceof Error ? err.message : 'AI-chatten misslyckades.' };
   }
+}
+
+// Bygger den läsbara sammanställning av workshopsvaren som matas in i
+// rapportgenereringen. Delas av completeWorkshopAction (skarpt läge) och
+// previewWorkshopReportAction (testläge, § 18.5) så prompt-underlaget aldrig
+// divergerar mellan det bolaget får och det staff testar.
+function buildWorkshopAnswersText(
+  modules: WorkshopModule[],
+  answers: Record<string, unknown>,
+  aiThread: Array<Record<string, unknown>>
+): string {
+  const answerLines: string[] = [];
+  for (const mod of modules) {
+    answerLines.push(`\n## ${mod.title}`);
+    if (mod.description) answerLines.push(mod.description);
+    for (const block of mod.blocks) {
+      answerLines.push(`\n### ${block.title} (${block.type})`);
+      if (block.instructions) answerLines.push(`_${block.instructions}_`);
+      if (block.desired_result) answerLines.push(`Önskat resultat: ${block.desired_result}`);
+      const answer = answers[block.id];
+      if (answer && typeof answer === 'string' && answer.trim()) {
+        answerLines.push(`Svar: ${answer.trim()}`);
+      } else if (block.type === 'test' && answer) {
+        const selected = String(answer);
+        const option = (block.options ?? []).find((o) => o.id === selected);
+        answerLines.push(`Valt svar: ${option?.text ?? selected}`);
+      }
+    }
+  }
+
+  if (aiThread.length > 0) {
+    answerLines.push('\n## AI-chattlogg');
+    for (const entry of aiThread) {
+      answerLines.push(`**Fråga:** ${String(entry.question ?? '')}`);
+      answerLines.push(`**Svar:** ${String(entry.answer ?? '')}`);
+    }
+  }
+
+  return answerLines.join('\n');
 }
 
 export async function completeWorkshopAction(
@@ -1456,35 +1559,12 @@ export async function completeWorkshopAction(
       ? [{ id: 'main', title: workshopTitle, blocks: toWorkshopBlocks(workshop?.content_blocks) }]
       : [];
 
-  const answerLines: string[] = [];
-  for (const mod of modules) {
-    answerLines.push(`\n## ${mod.title}`);
-    if (mod.description) answerLines.push(mod.description);
-    for (const block of mod.blocks) {
-      answerLines.push(`\n### ${block.title} (${block.type})`);
-      if (block.instructions) answerLines.push(`_${block.instructions}_`);
-      if (block.desired_result) answerLines.push(`Önskat resultat: ${block.desired_result}`);
-      const answer = answers[block.id];
-      if (answer && typeof answer === 'string' && answer.trim()) {
-        answerLines.push(`Svar: ${answer.trim()}`);
-      } else if (block.type === 'test' && answer) {
-        const selected = String(answer);
-        const option = (block.options ?? []).find((o) => o.id === selected);
-        answerLines.push(`Valt svar: ${option?.text ?? selected}`);
-      }
-    }
-  }
-
   const aiThread = Array.isArray(assignment.ai_thread_json) ? assignment.ai_thread_json : [];
-  if (aiThread.length > 0) {
-    answerLines.push('\n## AI-chattlogg');
-    for (const entry of aiThread as Array<Record<string, unknown>>) {
-      answerLines.push(`**Fråga:** ${String(entry.question ?? '')}`);
-      answerLines.push(`**Svar:** ${String(entry.answer ?? '')}`);
-    }
-  }
-
-  const answersText = answerLines.join('\n');
+  const answersText = buildWorkshopAnswersText(
+    modules,
+    answers,
+    aiThread as Array<Record<string, unknown>>
+  );
   const startupName = sanitizeForPrompt(assignment.expand?.startup?.name ?? 'Startup');
 
   let reportMd = '';
@@ -1532,19 +1612,23 @@ export async function completeWorkshopAction(
       completed_at: now
     });
 
-    await pb.collection('activities').create({
-      startup: assignment.startup,
-      type: 'workshop',
-      title: `${workshopTitle} – rapport genererad`,
-      status: 'done',
-      kind: 'workshop_run',
-      workshop: assignment.workshop,
-      workshop_assignment: assignment.id,
-      workshop_run: run.id,
-      owner: user.id,
-      completed_at: now,
-      due_date: now.slice(0, 10)
-    });
+    // Fail-soft: rapporten är redan genererad och loggad i workshop_runs —
+    // ett aktivitetslogg-fel får inte kasta bort den (jfr 1700000126).
+    await tryActivityWrite('report activity create', () =>
+      pb.collection('activities').create({
+        startup: assignment.startup,
+        type: 'workshop',
+        title: `${workshopTitle} – rapport genererad`,
+        status: 'done',
+        kind: 'workshop_run',
+        workshop: assignment.workshop,
+        workshop_assignment: assignment.id,
+        workshop_run: run.id,
+        owner: user.id,
+        completed_at: now,
+        due_date: now.slice(0, 10)
+      })
+    );
   } catch (err) {
     console.error('[workshops] report generation failed', {
       assignmentId,
@@ -1571,31 +1655,40 @@ export async function completeWorkshopAction(
       last_saved_at: now
     });
 
+    // Fail-soft: statusen är redan satt till 'done' ovan — ett fel i
+    // aktivitetsloggen får inte lämna tilldelningen i ett "klar men flödet
+    // felade"-läge utan rapport/återkoppling (jfr migration 1700000126).
     if (assignment.activity) {
-      await pb.collection('activities').update(String(assignment.activity), {
-        status: 'done',
-        title: `${workshopTitle} – slutförd`,
-        completed_at: now
-      });
+      await tryActivityWrite('complete activity update', () =>
+        pb.collection('activities').update(String(assignment.activity), {
+          status: 'done',
+          title: `${workshopTitle} – slutförd`,
+          completed_at: now
+        })
+      );
     }
 
-    await pb.collection('activities').create({
-      startup: assignment.startup,
-      type: 'workshop',
-      title: `${workshopTitle} – takeaway sparad`,
-      status: 'done',
-      kind: 'workshop_assignment',
-      workshop: assignment.workshop,
-      workshop_assignment: assignment.id,
-      owner: assignment.owner || assignment.assigned_by || null,
-      completed_at: now,
-      due_date: now.slice(0, 10)
-    });
+    await tryActivityWrite('complete activity create', () =>
+      pb.collection('activities').create({
+        startup: assignment.startup,
+        type: 'workshop',
+        title: `${workshopTitle} – takeaway sparad`,
+        status: 'done',
+        kind: 'workshop_assignment',
+        workshop: assignment.workshop,
+        workshop_assignment: assignment.id,
+        owner: assignment.owner || assignment.assigned_by || null,
+        completed_at: now,
+        due_date: now.slice(0, 10)
+      })
+    );
 
     revalidatePath(`/education/assignments/${assignmentId}`);
     revalidatePath('/education');
     revalidatePath('/dashboard');
     revalidatePath('/aktivitet');
+    revalidatePath('/pagaende');
+    revalidatePath('/mina-aktiviteter');
     if (assignment.startup) revalidatePath(`/startups/${assignment.startup}`);
     return { assignmentId, reportMd };
   } catch (err) {
@@ -1766,17 +1859,19 @@ export async function submitForCoachReviewAction(
   });
 
   const workshop = assignment.expand?.workshop as Workshop | undefined;
-  await pb.collection('activities').create({
-    startup: assignment.startup,
-    type: 'workshop',
-    title: `${workshop?.title ?? 'Workshop'} – skickad till coach`,
-    status: 'in_progress',
-    kind: 'workshop_assignment',
-    workshop: assignment.workshop,
-    workshop_assignment: assignment.id,
-    owner: user.id,
-    due_date: now.slice(0, 10)
-  });
+  await tryActivityWrite('coach-review activity create', () =>
+    pb.collection('activities').create({
+      startup: assignment.startup,
+      type: 'workshop',
+      title: `${workshop?.title ?? 'Workshop'} – skickad till coach`,
+      status: 'in_progress',
+      kind: 'workshop_assignment',
+      workshop: assignment.workshop,
+      workshop_assignment: assignment.id,
+      owner: user.id,
+      due_date: now.slice(0, 10)
+    })
+  );
 
   revalidatePath(`/education/assignments/${assignmentId}`);
   return { assignmentId };
@@ -1894,15 +1989,293 @@ export async function commitWorkshopDocumentAction(
   });
 
   if (assignment.activity) {
-    await pb.collection('activities').update(String(assignment.activity), {
-      status: 'done',
-      title: `${workshop?.title ?? 'Workshop'} – committad`,
-      completed_at: now
-    });
+    await tryActivityWrite('commit activity update', () =>
+      pb.collection('activities').update(String(assignment.activity), {
+        status: 'done',
+        title: `${workshop?.title ?? 'Workshop'} – committad`,
+        completed_at: now
+      })
+    );
   }
 
   revalidatePath(`/education/assignments/${assignmentId}`);
   revalidatePath('/education');
   if (assignment.startup) revalidatePath(`/startups/${assignment.startup}`);
   return { assignmentId, documentUrl };
+}
+
+// ── Förhandsgranskning / testläge (CLAUDE.md § 18.5) ─────────────────────────
+// Staff kan testa en workshop direkt efter att den skapats — precis som ett
+// bolag kommer att uppleva den — utan tilldelning och utan att något
+// persisteras. AI-momenten körs på riktigt (samma modeller och promptar som i
+// skarpt läge) men mot ett FIKTIVT exempelbolag i stället för
+// buildStartupContext: ingen bolagsdata läses och ingen PII kan nå prompten.
+// Token-utfallet loggas i ai_usage_events (surface 'workshop_run') så
+// testkörningar syns i kostnadsuppföljningen och räknas mot månadstaket
+// (§ 9.6). Inga workshop_runs-/activities-rader skrivs — testkörningar ska
+// inte förorena bolagsstatistiken eller aktivitetsfeeden.
+
+const PREVIEW_STARTUP_CONTEXT = {
+  name: 'Exempelbolaget AB',
+  phase: 'incubate',
+  irl_level: 4,
+  status: 'active',
+  sector: 'SaaS',
+  team_size: 3,
+  pitch: 'Exempelbolaget hjälper småföretag att automatisera sin fakturahantering.',
+  next_step: 'Validera betalningsvilja hos tio pilotkunder',
+  notering: 'FIKTIVT exempelbolag för förhandsgranskning — inte ett riktigt bolag.'
+} as const;
+
+// Svar/artefakter i testläget kommer direkt från klienten (det finns ingen
+// DB-rad att läsa) och valideras/cappas därför hårt innan de når prompten
+// (input-validering + defense-in-depth mot prompt-explosion, § 10.5 punkt 7).
+const PREVIEW_MAX_TOTAL_CHARS = 30_000;
+const PREVIEW_MAX_VALUE_CHARS = 4_000;
+
+function capPreviewRecord(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  const out: Record<string, unknown> = {};
+  let total = 0;
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    let capped: unknown;
+    if (typeof raw === 'string') capped = raw.slice(0, PREVIEW_MAX_VALUE_CHARS);
+    else if (typeof raw === 'boolean' || typeof raw === 'number') capped = raw;
+    else if (Array.isArray(raw)) capped = raw.slice(0, 50).map((x) => String(x).slice(0, 500));
+    else continue;
+    total +=
+      key.length +
+      (typeof capped === 'string'
+        ? capped.length
+        : Array.isArray(capped)
+          ? capped.join('').length
+          : 8);
+    if (total > PREVIEW_MAX_TOTAL_CHARS) break;
+    out[key.slice(0, 200)] = capped;
+  }
+  return out;
+}
+
+function capPreviewThread(value: unknown): Array<{ question: string; answer: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 20).map((entry) => {
+    const e = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<string, unknown>;
+    return {
+      question: String(e.question ?? '').slice(0, PREVIEW_MAX_VALUE_CHARS),
+      answer: String(e.answer ?? '').slice(0, PREVIEW_MAX_VALUE_CHARS)
+    };
+  });
+}
+
+async function loadWorkshopForPreview(workshopId: string) {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' as const };
+  const pb = await getServerPb();
+  let workshop: Workshop;
+  try {
+    workshop = await pb.collection(PB_COLLECTIONS.workshops).getOne<Workshop>(workshopId);
+  } catch {
+    return { error: 'Workshopen hittades inte.' as const };
+  }
+  if (workshop.tenant !== user.tenant) return { error: 'Åtkomst nekad.' as const };
+  return { user, pb, workshop };
+}
+
+function resolvePreviewModules(workshop: Workshop): WorkshopModule[] {
+  const rawModules = Array.isArray(workshop.modules) ? (workshop.modules as WorkshopModule[]) : [];
+  if (rawModules.length > 0) return rawModules;
+  const rawBlocks = Array.isArray(workshop.content_blocks)
+    ? toWorkshopBlocks(workshop.content_blocks)
+    : [];
+  return rawBlocks.length > 0
+    ? [{ id: 'module_main', title: workshop.title, blocks: rawBlocks }]
+    : [];
+}
+
+export async function previewWorkshopAiChatAction(
+  workshopId: string,
+  question: string,
+  answersInput?: Record<string, unknown>
+): Promise<WorkshopActionState & { answer?: string }> {
+  const loaded = await loadWorkshopForPreview(workshopId);
+  if ('error' in loaded) return { error: loaded.error };
+  const { user, pb, workshop } = loaded;
+
+  const trimmedQuestion = question.trim().slice(0, PREVIEW_MAX_VALUE_CHARS);
+  if (!trimmedQuestion) return { error: 'Frågan får inte vara tom.' };
+  const answers = capPreviewRecord(answersInput);
+
+  try {
+    // Samma prompt-struktur som runWorkshopAiChatAction — bara kontexten byts
+    // mot exempelbolaget, så staff testar exakt det bolaget kommer att möta.
+    const result = await callMistral('mistral-medium-latest', [
+      {
+        role: 'system',
+        content: workshop.ai_system_prompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT
+      },
+      {
+        role: 'user',
+        content:
+          `Workshop: ${workshop.title}\n` +
+          `Mål: ${workshop.goal || ''}\n` +
+          `Outputkrav: ${workshop.output_requirements || ''}\n` +
+          `Nuvarande svar: ${JSON.stringify(answers, null, 2)}\n` +
+          `Startup-kontekst: ${JSON.stringify(PREVIEW_STARTUP_CONTEXT, null, 2)}\n` +
+          `Fråga: ${trimmedQuestion}`
+      }
+    ]);
+
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'workshop_run',
+      model: 'mistral-medium-latest',
+      tokensIn: result.usage.prompt_tokens,
+      tokensOut: result.usage.completion_tokens
+    });
+
+    return { workshopId, answer: result.text };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'AI-chatten misslyckades.' };
+  }
+}
+
+export async function previewPipelineBlockAction(
+  workshopId: string,
+  blockId: string,
+  answersInput?: Record<string, unknown>,
+  artifactsInput?: Record<string, unknown>
+): Promise<WorkshopActionState & { output?: string }> {
+  const loaded = await loadWorkshopForPreview(workshopId);
+  if ('error' in loaded) return { error: loaded.error };
+  const { user, pb, workshop } = loaded;
+
+  const allModules = resolvePreviewModules(workshop);
+  const block = allModules.flatMap((m) => m.blocks).find((b) => b.id === blockId);
+  if (!block) return { error: `Blocket "${blockId}" hittades inte i workshopen.` };
+  if (block.type !== 'ai_pipeline') return { error: 'Blocket är inte av typen ai_pipeline.' };
+  if (!block.pipeline_system_prompt?.trim()) {
+    return { error: 'AI-pipeline-blocket saknar system-prompt. Konfigurera det i byggaren.' };
+  }
+
+  const model = (block.pipeline_model ?? 'mistral-medium-latest') as string;
+  const answers = capPreviewRecord(answersInput);
+  const artifacts = capPreviewRecord(artifactsInput);
+
+  if (block.pipeline_requires_key) {
+    const prereq = artifacts[block.pipeline_requires_key];
+    if (!prereq || String(prereq).trim().length === 0) {
+      return {
+        error: `Slutför föregående steg (nyckel: ${block.pipeline_requires_key}) innan du kör detta block.`
+      };
+    }
+  }
+
+  // Samma innehållsstruktur som runPipelineBlockAction (svar + tidigare
+  // analyser + kontext) — kontexten är exempelbolaget i stället för bolagsdata.
+  const s = (v: unknown, max = 2000) =>
+    String(v ?? '(ej angivet)').replace(/[<>]/g, '').slice(0, max);
+
+  const answerLines: string[] = ['## Svar från workshopen'];
+  for (const mod of allModules) {
+    answerLines.push(`\n### ${mod.title}`);
+    for (const b of mod.blocks) {
+      const val = answers[b.id];
+      if (val && typeof val === 'string' && val.trim()) {
+        answerLines.push(`**${b.title}:** ${s(val)}`);
+      }
+    }
+  }
+
+  const prevOutputLines: string[] = [];
+  for (const mod of allModules) {
+    for (const b of mod.blocks) {
+      if (b.type === 'ai_pipeline' && b.pipeline_output_key && b.id !== blockId) {
+        const prevOut = artifacts[b.pipeline_output_key];
+        if (prevOut && String(prevOut).trim()) {
+          prevOutputLines.push(`\n## ${b.title} (tidigare analys)\n${s(prevOut, 3000)}`);
+        }
+      }
+    }
+  }
+
+  const userContent = [
+    `## Startup-kontext\n${JSON.stringify(PREVIEW_STARTUP_CONTEXT, null, 2)}`,
+    answerLines.join('\n'),
+    ...prevOutputLines
+  ].join('\n\n');
+
+  try {
+    const result = await callMistral(model, [
+      { role: 'system', content: block.pipeline_system_prompt },
+      { role: 'user', content: userContent }
+    ]);
+
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'workshop_run',
+      model,
+      tokensIn: result.usage.prompt_tokens,
+      tokensOut: result.usage.completion_tokens
+    });
+
+    return { workshopId, output: result.text };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Pipeline-anropet misslyckades.' };
+  }
+}
+
+export async function previewWorkshopReportAction(
+  workshopId: string,
+  answersInput?: Record<string, unknown>,
+  aiThreadInput?: Array<Record<string, unknown>>
+): Promise<WorkshopActionState> {
+  const loaded = await loadWorkshopForPreview(workshopId);
+  if ('error' in loaded) return { error: loaded.error };
+  const { user, pb, workshop } = loaded;
+
+  const sanitizeForPrompt = (v: string) => v.replace(/[<>]/g, '').slice(0, 200);
+  const workshopTitle = sanitizeForPrompt(workshop.title ?? 'Workshop');
+  const modules = resolvePreviewModules(workshop);
+  const answers = capPreviewRecord(answersInput);
+  const aiThread = capPreviewThread(aiThreadInput);
+  const answersText = buildWorkshopAnswersText(modules, answers, aiThread);
+
+  try {
+    // Samma rapportprompt som completeWorkshopAction — kontexten är
+    // exempelbolaget, och rapporten sparas ingenstans (visas bara i testläget).
+    const result = await callMistral('mistral-medium-latest', [
+      {
+        role: 'system',
+        content: workshop.ai_system_prompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT
+      },
+      {
+        role: 'user',
+        content:
+          `Generera en strukturerad workshop-rapport på svenska för ${sanitizeForPrompt(
+            PREVIEW_STARTUP_CONTEXT.name
+          )}.\n\n` +
+          `Workshop: ${workshopTitle}\n` +
+          `Mål: ${sanitizeForPrompt(workshop.goal ?? '')}\n\n` +
+          `Startup-kontext: ${JSON.stringify(PREVIEW_STARTUP_CONTEXT, null, 2)}\n\n` +
+          `Workshopsvar:\n${answersText}\n\n` +
+          `Rapporten ska innehålla: sammanfattning, nyckelinsikter, prioriterade åtgärder och nästa steg. ` +
+          `Formatera med tydliga rubriker och punktlistor. Max 600 ord.`
+      }
+    ]);
+
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'workshop_run',
+      model: 'mistral-medium-latest',
+      tokensIn: result.usage.prompt_tokens,
+      tokensOut: result.usage.completion_tokens
+    });
+
+    return { workshopId, reportMd: result.text };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Rapportgenereringen misslyckades.' };
+  }
 }

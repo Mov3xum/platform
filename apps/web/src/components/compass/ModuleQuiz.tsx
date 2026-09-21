@@ -1,8 +1,11 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import type { CompassQuestion, ResultBucket } from '@/lib/compass/types';
+import type { CompassQuestion, ResultBucket, NextModuleLink } from '@/lib/compass/types';
 import { QuestionInput, readAttribution } from './QuestionInput';
+import { NextModuleCta } from './NextModuleCta';
+import { ContactPreferencePicker } from './ContactPreferencePicker';
+import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 
 interface Props {
   moduleSlug: string;
@@ -14,6 +17,12 @@ interface Props {
   requirePhone?: boolean;
   requireOrganization?: boolean;
   successMessage?: string;
+  /** Modulens visningsnamn — används i det nedladdningsbara resultatet. */
+  moduleName?: string;
+  /** Tenantens namn — visas i det nedladdningsbara resultatet. */
+  brandName?: string;
+  /** Kedjad nästa modul (migration 1700000124). */
+  nextModule?: NextModuleLink | null;
 }
 
 interface QuizResult {
@@ -32,12 +41,20 @@ export function ModuleQuiz({
   requireEmail,
   requirePhone,
   requireOrganization,
-  successMessage
+  successMessage,
+  moduleName,
+  brandName,
+  nextModule
 }: Props) {
   const [step, setStep] = useState(0);
+  // Besökta steg (för "Tillbaka") — hopplogik (next_key) kan skippa frågor,
+  // så step-1 är inte alltid den fråga besökaren faktiskt såg senast.
+  const [trail, setTrail] = useState<number[]>([]);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [contact, setContact] = useState<Record<string, string>>({});
+  const [contactPreference, setContactPreference] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [result, setResult] = useState<QuizResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const attribution = useMemo(readAttribution, []);
@@ -56,6 +73,19 @@ export function ModuleQuiz({
   // ── Resultatskärm ────────────────────────────────────────────────────────
   if (result) {
     const b = result.bucket;
+    // Kedjan (next_module, validerad server-side) har företräde framför en
+    // resultatprofil-CTA som pekar på en intern /m/-länk — sådana länkar kan
+    // vara hårdkodade mot en slug som inte längre finns/är publik (trasig
+    // kedja). Externa CTA-länkar lämnas orörda.
+    const bucketCta = b?.cta;
+    const ctaIsInternalModuleLink = Boolean(bucketCta?.url?.startsWith('/m/'));
+    const primaryCta =
+      bucketCta && ctaIsInternalModuleLink && nextModule
+        ? { label: bucketCta.label, url: `/m/${encodeURIComponent(nextModule.slug)}` }
+        : bucketCta;
+    // Visa den fristående "fortsätt"-rutan bara när kedjan inte redan tagit
+    // över den primära CTA:n (annars dubbla knappar till samma mål).
+    const showNextBox = Boolean(nextModule && !(bucketCta && ctaIsInternalModuleLink));
     return (
       <div style={{ display: 'grid', gap: 16 }}>
         <div className="mx-mono mx-t-xs mx-t-up mx-muted">{successMessage || 'Ditt resultat'}</div>
@@ -88,13 +118,69 @@ export function ModuleQuiz({
             </ul>
           </div>
         )}
-        {b?.cta && (
-          <a href={b.cta.url} className="mx-btn mx-primary" style={{ justifySelf: 'start' }}>
-            {b.cta.label} →
-          </a>
+        <div className="mx-flex mx-items-c mx-gap-2 mx-wrap">
+          {primaryCta && (
+            <a href={primaryCta.url} className="mx-btn mx-primary">
+              {primaryCta.label} →
+            </a>
+          )}
+          <button type="button" className="mx-btn" onClick={downloadResult} disabled={downloading}>
+            {downloading ? 'Skapar PDF…' : '↓ Ladda ner mitt resultat (PDF)'}
+          </button>
+        </div>
+        {showNextBox && nextModule && (
+          <NextModuleCta next={nextModule} prompt="Fortsätt till nästa steg" />
+        )}
+        {error && (
+          <div
+            className="mx-t-12"
+            style={{ padding: '8px 12px', borderRadius: 10, background: 'var(--mx-st-danger-bg)', color: '#4b2718' }}
+          >
+            {error}
+          </div>
         )}
       </div>
     );
+  }
+
+  // Laddar ner resultatprofilen som en brandad PDF (Sora/Nunito) i stället för
+  // ett HTML-dokument som öppnas i webbläsaren. Rendringen sker server-side
+  // (pdf-lib, EU-suveränt) — vi skickar bara den profil besökaren redan ser,
+  // ingen ny dataväg.
+  async function downloadResult() {
+    if (!result || downloading) return;
+    const b = result.bucket;
+    setDownloading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/public/result-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: b?.title || 'Tack för dina svar!',
+          body: b?.body,
+          tips: b?.tips,
+          moduleName: moduleName,
+          brandName: brandName,
+          accent: '#002c40'
+        })
+      });
+      if (!res.ok) throw new Error(`Servern svarade ${res.status}`);
+      const blob = await res.blob();
+      const today = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `startupkompassen-resultat-${today}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      setError('Kunde inte skapa PDF:en. Försök igen.');
+    } finally {
+      setDownloading(false);
+    }
   }
 
   function setValue(value: string | string[]) {
@@ -110,7 +196,13 @@ export function ModuleQuiz({
       const res = await fetch(`${apiBase}/${encodeURIComponent(moduleSlug)}/quiz-result`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers, contact, attribution, consent })
+        body: JSON.stringify({
+          answers,
+          contact,
+          attribution,
+          consent,
+          contact_preference: contactPreference || undefined
+        })
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -136,7 +228,9 @@ export function ModuleQuiz({
         return;
       }
       setError(null);
-      setStep(step + 1);
+      const nextStep = resolveNextQuestionIndex(questions, step, value);
+      setTrail((t) => [...t, step]);
+      setStep(nextStep >= total ? total : nextStep);
       return;
     }
 
@@ -147,6 +241,10 @@ export function ModuleQuiz({
     }
     if (requirePhone && !contact.phone) {
       setError('Telefon krävs.');
+      return;
+    }
+    if (requireOrganization && !contact.organization) {
+      setError('Organisation krävs.');
       return;
     }
     setError(null);
@@ -207,7 +305,7 @@ export function ModuleQuiz({
           )}
           {requireOrganization && (
             <label className="mx-label">
-              Organisation
+              Organisation *
               <input
                 className="mx-input"
                 style={{ marginTop: 4 }}
@@ -216,6 +314,7 @@ export function ModuleQuiz({
               />
             </label>
           )}
+          <ContactPreferencePicker value={contactPreference} onChange={setContactPreference} />
         </div>
       ) : (
         <div>
@@ -250,8 +349,14 @@ export function ModuleQuiz({
         <button
           type="button"
           className="mx-btn"
-          disabled={step === 0 || submitting}
-          onClick={() => setStep((s) => Math.max(0, s - 1))}
+          disabled={trail.length === 0 || submitting}
+          onClick={() => {
+            const prev = trail[trail.length - 1];
+            if (prev === undefined) return;
+            setTrail((t) => t.slice(0, -1));
+            setStep(prev);
+            setError(null);
+          }}
         >
           ← Tillbaka
         </button>

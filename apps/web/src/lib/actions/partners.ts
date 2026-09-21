@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
+import { escFilter } from '@/lib/pb-filter';
 import type { Partner, Role } from '@platform/shared';
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead'];
@@ -110,7 +111,7 @@ export async function deletePartnerAction(id: string): Promise<PartnerActionStat
 
   try {
     const engagements = await pb.collection('partner_engagements').getFullList<{ id: string }>({
-      filter: `tenant = "${user.tenant}" && partner = "${id}"`,
+      filter: `tenant = "${escFilter(user.tenant)}" && partner = "${escFilter(id)}"`,
       fields: 'id'
     });
     for (const e of engagements) {

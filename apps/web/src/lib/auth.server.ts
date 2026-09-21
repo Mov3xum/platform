@@ -2,7 +2,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import PocketBase from 'pocketbase';
-import type { Role } from '@platform/shared';
+import { resolveUserModules, type Role } from '@platform/shared';
 import { getPublicPbUrl, getServerPbUrl } from '@/lib/pb-url';
 
 const SERVER_PB_URL = getServerPbUrl();
@@ -21,7 +21,8 @@ export interface SessionUser {
   avatarUrl?: string;
   tenantLogoLightUrl?: string;
   tenantLogoDarkUrl?: string;
-  disabledModules: string[];
+  /** Effektiv allow-lista över moduler i sidofältet (§ 36.3). */
+  enabledModules: string[];
 }
 
 interface CookiePayload {
@@ -86,7 +87,6 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     id: string;
     name: string;
     slug: string;
-    disabled_modules?: unknown;
     logo_light?: string;
     logo_dark?: string;
   }) | undefined;
@@ -105,25 +105,22 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     ? `${PUBLIC_PB_URL}/api/files/tenants/${tenantId}/${logoDarkFilename}`
     : undefined;
 
-  // Hämta disabled_modules från tenant + user (user har företräde som extra avstängningar).
-  let disabledModules: string[] = [];
-  const tenantDisabled = tenant?.disabled_modules;
-  const userDisabled = m.disabled_modules;
-  const tenantList = Array.isArray(tenantDisabled)
-    ? tenantDisabled.filter((v): v is string => typeof v === 'string')
-    : [];
-  const userList = Array.isArray(userDisabled)
-    ? userDisabled.filter((v): v is string => typeof v === 'string')
-    : [];
-  if (tenantList.length > 0 || userList.length > 0) {
-    disabledModules = Array.from(new Set([...tenantList, ...userList]));
-  }
+  // Modulåtkomst per användare (§ 36.3): allow-listan `enabled_modules` är
+  // sanningen; saknas den (konto före migration 1700000144) gäller allt
+  // rollen tillåter minus ev. legacy `disabled_modules` på användaren.
+  // Tenantens gamla globala `disabled_modules` läses INTE längre.
+  const roles = ((m.roles as string[]) || []) as Role[];
+  const enabledModules = resolveUserModules({
+    roles,
+    stored: m.enabled_modules,
+    legacyDisabled: m.disabled_modules
+  });
 
   return {
     id: m.id as string,
     email: (m.email as string) || '',
     name: (m.display_name as string) || (m.email as string) || '',
-    roles: ((m.roles as string[]) || []) as Role[],
+    roles,
     tenant: tenantId,
     tenantSlug: tenant?.slug,
     tenantName: tenant?.name,
@@ -131,7 +128,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     avatarUrl,
     tenantLogoLightUrl,
     tenantLogoDarkUrl,
-    disabledModules
+    enabledModules
   };
 }
 

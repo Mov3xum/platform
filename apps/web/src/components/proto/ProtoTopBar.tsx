@@ -4,16 +4,16 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useMemo } from 'react';
 import { coreModules } from '@platform/shared';
-import { MobileMenuButton, useMobileRail } from './MobileRail';
-import { Icon } from './Icon';
+import { SETTINGS_ROUTE_LABELS } from '@/lib/settings-sections';
+import { RailReopenButton } from './MobileRail';
 
 function buildCrumbs(pathname: string): { label: string; href: string; now: boolean }[] {
-  if (pathname === '/' || pathname === '/chatt') {
-    return [{ label: 'Hemmaplan', href: '/chatt', now: true }];
+  if (pathname === '/' || pathname === '/hem') {
+    return [{ label: 'Hemmaplan', href: '/hem', now: true }];
   }
   const seg = pathname.split('/').filter(Boolean);
   const crumbs: { label: string; href: string; now: boolean }[] = [
-    { label: 'Hemmaplan', href: '/chatt', now: false }
+    { label: 'Hemmaplan', href: '/hem', now: false }
   ];
   // first segment = module
   const mod = coreModules.find((m) => m.route === '/' + seg[0]);
@@ -22,11 +22,14 @@ function buildCrumbs(pathname: string): { label: string; href: string; now: bool
   } else {
     crumbs.push({ label: seg[0], href: '/' + seg[0], now: seg.length === 1 });
   }
-  // further segments shown as plain labels
+  // further segments: känd undersida (t.ex. Inställningar-sektion) får sin
+  // riktiga titel, övriga visas som avhumaniserade segment.
   for (let i = 1; i < seg.length; i++) {
+    const href = '/' + seg.slice(0, i + 1).join('/');
+    const known = SETTINGS_ROUTE_LABELS[href];
     crumbs.push({
-      label: decodeURIComponent(seg[i]).replace(/[-_]/g, ' '),
-      href: '/' + seg.slice(0, i + 1).join('/'),
+      label: known ?? decodeURIComponent(seg[i]).replace(/[-_]/g, ' '),
+      href,
       now: i === seg.length - 1
     });
   }
@@ -36,23 +39,13 @@ function buildCrumbs(pathname: string): { label: string; href: string; now: bool
 export function ProtoTopBar() {
   const pathname = usePathname();
   const crumbs = useMemo(() => buildCrumbs(pathname), [pathname]);
-  const { toggleDesktopCollapse } = useMobileRail();
 
   return (
     <div className="mx-topbar">
-      <MobileMenuButton />
-      <button
-        type="button"
-        onClick={toggleDesktopCollapse}
-        className="mx-desktop-rail-btn"
-        aria-label="Visa/dölj navigering"
-        title="Visa/dölj navigering"
-      >
-        <Icon name="menu" size={18} />
-      </button>
+      <RailReopenButton />
       <div className="mx-crumb">
         {crumbs.map((c, i) => (
-          <span key={c.href + i} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span key={c.href + i} className="mx-crumb-part">
             {i > 0 && <span className="mx-sep">/</span>}
             <Link href={c.href} className={`mx-seg${c.now ? ' now' : ''}`}>
               {c.label}
