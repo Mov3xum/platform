@@ -3908,10 +3908,13 @@ banan eller på en båge) väljer kategorin OCH sätter månadsfokus, så listan
 "Per månad" visar just den kategorins aktiviteter i den månaden; klick i fler
 ringar lägger till kategorier (flera kan vara valda samtidigt), klick på samma
 ring + månad igen avmarkerar. Rubrik-pillen väljer kategorin utan månad;
-legenden under hjulet är samma flerval med "Visa alla". Hjulet visar alltid
-ALLA kategorier (bara år/tagg/ansvarig filtrerar det) så fler ringar går att
-klicka — valda ringar behåller full färg, övriga tonas ned. Dubbelklick på en
-båge öppnar redigeringen. Kategorifiltret är därmed ett set
+legenden under hjulet är samma flerval med "Visa alla". **Hjulet följer
+kategorivalet (2026-09):** bara valda kategorier ritas som ringar — de övriga
+filtreras bort ur den visuella vyn (tomt val = alla ringar), så man fritt
+väljer exakt vilka kategorier som ska synas. Fler kategorier läggs till via
+legenden eller dropdownen; ett klick på en ring i hjulet avmarkerar den
+kategorin. (Tidigare visade hjulet alltid alla ringar och tonade bara ned de
+ovalda.) Dubbelklick på en båge öppnar redigeringen. Kategorifiltret är därmed ett set
 (`filterAnnualWheelItems({ categories })`, enhetstestat); dropdownen speglar
 det ("N kategorier valda").
 Tabellen
@@ -4089,8 +4092,8 @@ på skärm och projektor.
   nyckeltal, beläggning per månad med föregående år, kategorier och kvartal.
 - **Filter — fritt valbara i vyn (2026-09):** kategori-flerval via legenden
   eller klick i hjulets ringar (samma `selectedCategories`/`onToggleCategory`
-  som redigeringsvyn — hjulet visar alla ringar, valda lyfts, övriga tonas;
-  panelen följer hela filtret), tagg, ansvarig och år som selects i panelens
+  som redigeringsvyn — hjulet ritar bara de valda kategoriernas ringar,
+  tomt val = alla; panelen följer hela filtret), tagg, ansvarig och år som selects i panelens
   filterrad, "Rensa filter". Tidigare fanns inget kategorifilter alls i
   presentationsläget, så "visa bara Event" var omöjligt. "Presentera"-länken
   på `/arshjul` tar med aktuellt urval som query (`year`, `cat`, `tag`,

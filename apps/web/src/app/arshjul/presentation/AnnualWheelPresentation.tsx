@@ -158,16 +158,14 @@ export function AnnualWheelPresentation({
   const fullscreenRef = useRef(false);
 
   const categoryList = useMemo(() => [...selectedCategories], [selectedCategories]);
-  // Hjulet visar ALLA kategorier (valda lyfts, övriga tonas) så fler ringar
-  // går att klicka; panelen/översikten följer hela filtret.
-  const wheelItems = useMemo(
-    () => filterAnnualWheelItems(items, { year, tag, responsible }),
-    [items, year, tag, responsible]
-  );
   const yearItems = useMemo(
     () => filterAnnualWheelItems(items, { year, categories: categoryList, tag, responsible }),
     [items, year, categoryList, tag, responsible]
   );
+  // Hjulet följer kategorivalet: bara valda kategorier ritas som ringar
+  // (tomt val = alla). Fler kategorier väljs i legenden — ett klick på en
+  // ring i hjulet avmarkerar den kategorin.
+  const wheelItems = yearItems;
   const prevYearItems = useMemo(
     () => filterAnnualWheelItems(items, { year: year - 1, categories: categoryList, tag, responsible }),
     [items, year, categoryList, tag, responsible]
