@@ -255,12 +255,10 @@ export function AnnualWheelView({
     () => filterAnnualWheelItems(items, { year, categories: categoryList, tag, responsible }),
     [items, year, categoryList, tag, responsible]
   );
-  // Hjulet visar ALLA kategorier (bara år/tagg/ansvarig filtrerar) så att man
-  // kan klicka i fler ringar — valda kategorier markeras i stället.
-  const wheelItems = useMemo(
-    () => filterAnnualWheelItems(items, { year, tag, responsible }),
-    [items, year, tag, responsible]
-  );
+  // Hjulet följer kategorivalet: bara valda kategorier ritas som ringar
+  // (tomt val = alla). Fler kategorier väljs i legenden eller dropdownen —
+  // ett klick på en ring i hjulet avmarkerar den kategorin.
+  const wheelItems = filtered;
   // Kategoriernas legend-ordning styr sorteringen "Kategori".
   const categoryOrder = useMemo(() => categories.map((c) => c.id), [categories]);
   const byMonth = useMemo(
