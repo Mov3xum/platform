@@ -99,17 +99,15 @@ jobs:
 
           if try_deploy "$deploy_v4"; then
             exit 0
-          elif [ $? -eq 2 ]; then
-            echo "Endpoint not found, trying legacy path..."
-          else
-            exit 1
           fi
+
+          echo "Primary Coolify deploy endpoint failed, trying legacy path..."
 
           if try_deploy "$deploy_v1"; then
             exit 0
           fi
 
-          echo "Both Coolify deploy endpoints returned 404. Verify COOLIFY_BASE_URL and that COOLIFY_APP_UUID_PRODUCTION contains the Coolify app UUID."
+          echo "Both Coolify deploy endpoints failed. Verify COOLIFY_BASE_URL and that COOLIFY_APP_UUID_PRODUCTION contains the Coolify app UUID."
           exit 1
 
       - name: Bootstrap PocketBase schema for production
