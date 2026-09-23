@@ -64,6 +64,7 @@ import { AgreementsSection, type AgreementView } from '@/components/intric/Agree
 import { pbFileUrl } from '@/lib/pb-file';
 import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
 import { DeMinimisSection } from './DeMinimisSection';
+import { StartupProcurementsSection } from './StartupProcurementsSection';
 
 interface StartupRecord {
   id: string;
@@ -976,6 +977,10 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
             canManage={canManageStartupDeMinimis(user, id)}
           />
         </Section>
+
+        {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer']) && (
+          <StartupProcurementsSection pb={pb} tenantId={user.tenant} startupId={id} />
+        )}
 
         <Section id="documents" title="Dokument">
           <p className="text-sm text-foreground-muted">

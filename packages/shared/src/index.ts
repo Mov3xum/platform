@@ -1375,7 +1375,7 @@ export interface ModuleGroup {
 
 export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'pagaende', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
+  { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'upphandlingar', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'installningar', 'min_profil'] }
 ];
@@ -1503,6 +1503,14 @@ export const coreModules: ModuleDefinition[] = [
       'Stöd av mindre betydelse per bolag — rullande treårssummor mot takbeloppen, varningar och försäkran inför ny stödansökan.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
     route: '/de-minimis'
+  },
+  {
+    id: 'upphandlingar',
+    title: 'Upphandlingar',
+    description:
+      'Upphandlingar och excellens-insatser för bolagen — ladda upp underlaget, följ avrop, milstolpar och slutrapporter enligt uppföljningsregler, och utvärdera leverantören.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/upphandlingar'
   },
   {
     id: 'investerare',
@@ -1683,6 +1691,7 @@ export function resolveUserModules(input: {
 export * from './event-time';
 export * from './org-posts';
 export * from './home';
+export * from './procurement';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */

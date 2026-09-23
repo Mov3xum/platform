@@ -25,19 +25,19 @@ import type { Role } from './index';
 export const DEFAULT_MODULES_BY_ROLE: Record<Role, readonly string[]> = {
   admin: [
     'idag', 'inkorg', 'pagaende', 'arshjul', 'filer', 'uppdrag', 'inflode',
-    'startups', 'de_minimis', 'investerare', 'events', 'community',
+    'startups', 'de_minimis', 'upphandlingar', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
     'integrationer', 'min_profil', 'mina_aktiviteter'
   ],
   incubator_lead: [
     'idag', 'inkorg', 'pagaende', 'arshjul', 'filer', 'uppdrag', 'inflode',
-    'startups', 'de_minimis', 'investerare', 'events', 'community',
+    'startups', 'de_minimis', 'upphandlingar', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
     'integrationer', 'min_profil', 'mina_aktiviteter'
   ],
   coach: [
     'idag', 'inkorg', 'mina_aktiviteter', 'pagaende', 'arshjul', 'filer',
-    'uppdrag', 'inflode', 'startups', 'de_minimis', 'events', 'education',
+    'uppdrag', 'inflode', 'startups', 'de_minimis', 'upphandlingar', 'events', 'education',
     'agenter', 'kunskapsbas', 'min_profil'
   ],
   mentor: [

@@ -12,6 +12,7 @@ export const MODULE_ICONS: Record<string, string> = {
   inflode: 'spark',
   startups: 'people',
   de_minimis: 'shield',
+  upphandlingar: 'briefcase',
   investerare: 'graph',
   events: 'spark',
   community: 'people',

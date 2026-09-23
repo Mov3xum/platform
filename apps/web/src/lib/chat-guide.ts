@@ -210,6 +210,17 @@ const GUIDE: ChatGuideSection[] = [
         examples: ['Registrera 50 000 kr de minimis-stöd från Almi för bolaget, beslut 1 september']
       },
       {
+        title: 'Upphandlingar & excellens-insatser',
+        description:
+          'Registrera en upphandling ur ett bifogat underlag, lägg in avrop per bolag och godkänn milstolpar — uppföljningsuppgifterna skapas och stängs automatiskt enligt reglerna i /upphandlingar.',
+        examples: [
+          'Registrera upphandlingen i det bifogade underlaget',
+          'Lägg in ett avrop av grundpaketet för bolaget från 1 oktober',
+          'Godkänn milstolpe 1 för bolagets avrop',
+          'Vilka avrop har försenade milstolpar eller saknar slutrapport?'
+        ]
+      },
+      {
         title: 'Schemalägg AI-agenter',
         description:
           'Låt en agent köras automatiskt på ett schema — resultatet landar i verktygslådan och aktivitetsfeeden.',

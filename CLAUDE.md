@@ -923,6 +923,8 @@ omsättning.
 | `ai_funding_radar` | begränsad | Matchar utlysningar mot bolagsfas, vägledande |
 | `ai_portfolio_risk` | begränsad | Bara whitelistade fält, rankar bolag — ej personer |
 | `web_search` (chatt-verktyg, § 9.8) | begränsad | Internetsökning via Mistral Web Search (EU) på personalens opt-in; bara sanerad sökfråga lämnar plattformen; källor visas |
+| `procurement-extract` (AI-utläsning av upphandlingsunderlag, § 39.3) | begränsad | Läser ut strukturerade uppgifter ur ett dokument staff själva laddat upp till ett förifyllt utkast; människan granskar och sparar; ingen profilering |
+| `create_procurement` / `create_procurement_calloff` / `update_procurement_calloff` (chatt-verktyg, § 39.4) | n/a | Deterministiska mutationer via det delade skrivlagret; uppföljningsregler expanderas utan inferens |
 | `edu_irl_levels` | minimal | Generellt utbildningsmaterial |
 | `template_pitch_deck` | n/a | Statisk mall, ingen AI-inferens |
 
@@ -1777,7 +1779,7 @@ actor krävs). Tabellen visar vad som tillkommer per yta:
 
 | Körning | Actor | Tillkommer utöver läs-/sökverktygen |
 |---|---|---|
-| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`, samt § 33: `assign_workshop`, `assign_education_document`, `create_task`/`move_task`, `create_event`, `create_mission`, `register_de_minimis_support`, `add_startup_kpi`, `add_capital_round`, `schedule_agent`, `create_startup_note`), `memory_read` + `memory_write` |
+| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`, samt § 33: `assign_workshop`, `assign_education_document`, `create_task`/`move_task`, `create_event`, `create_mission`, `register_de_minimis_support`, `add_startup_kpi`, `add_capital_round`, `schedule_agent`, `create_startup_note`, samt § 39: `create_procurement`, `create_procurement_calloff`, `update_procurement_calloff`), `memory_read` + `memory_write` |
 | Toolbox (staff) | — (read-only) | `memory_read` |
 | Toolbox (icke-staff) | — (read-only) | — |
 | Schemalagd | — (read-only) | `memory_read` |
@@ -5410,3 +5412,181 @@ formulären förskjöts två timmar i sommartid.
 - **Årshjulet (§ 30)** räknar på hela kalenderdagar i klientens lokala tid
   (klientkomponent, `useMemo(() => new Date())`) och berörs inte.
 - Riskklass n/a (ingen AI-inferens), inga nya fält/kollektioner, ingen PII.
+
+## 39. Upphandlingar & excellens-insatser — regelstyrd uppföljning
+
+### 39.1 Översikt
+
+`/upphandlingar` (modul `upphandlingar`, "Portfölj"-railen, staff/observer)
+låter Movexum lägga in **vilken upphandling som helst** — t.ex. ramavtalet
+"AI-stött utvecklings- och leveransstöd för inkubatorbolag" — och följa den
+per **avrop/bolag** med milstolpar, slutrapport, betalningsandel,
+statsstödsflagga och **leverantörsutvärdering**, enligt **uppföljningsregler**
+som systemet expanderar till uppgifter och håller i synk själv. Insatser kan
+flaggas som **excellens-insatser** (t.ex. Vinnova Excellent incubator) och
+filtreras/regelstyras separat. Underlaget laddas upp och **läses ut av AI**
+till ett förifyllt formulär (§ 39.3) — den bifogade upphandlingsbeskrivningen
+är bara ett exempel, modulen är generisk.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/procurement.ts` (+ `.test.ts`) | Ren, enhetstestad domänlogik: statusar, fas (`calloffPhase`), avvikelser (`calloffAlerts`), avropsmall (`CalloffTemplate`, `defaultCalloffDates`), utvärdering (`scoreProcurementEvaluation`), regelmodell + `planProcurementFollowups`/`diffProcurementFollowups`, standardregler, `parseProcurementDraft` |
+| `backend/pocketbase-schema/migrations/1700000149–153_*.js` | `procurements`, `procurement_calloffs`, `procurement_rules`, tasks-utökning (`link_kind` += `procurement`, `procurement`, `procurement_calloff`, `rule_key`), `procurement_documents` |
+| `apps/web/src/lib/core/write/procurements.ts` | Skrivlager: create/update upphandling + avrop, milstolpar, utvärdering, regler, dokumentkoppling — whitelist + validering + `agent_actions` |
+| `apps/web/src/lib/procurements/followups.ts` | **Uppföljningssynken** (regler → `tasks`, idempotent via `rule_key`) |
+| `apps/web/src/lib/procurements/data.ts` | Enda läsvägen (fail-soft) + lazy materialisering av standardregler |
+| `apps/web/src/lib/ai/procurement-extract.ts` | Isolerad Mistral-utläsning av underlag → `ProcurementDraft` |
+| `apps/web/src/app/api/procurements/documents/route.ts` | Upload-route (staff-only, rate-limitad): extraktion + sanering + AI-utkast |
+| `apps/web/src/lib/actions/procurements.ts` | Server actions (RBAC, synk efter varje mutation) |
+| `apps/web/src/app/upphandlingar/**` | Lista, ny (uppladdning + förifyllt formulär), detalj (avrop, uppföljningar, regler, underlag), redigera, `/regler` |
+| `apps/web/src/app/startups/[id]/StartupProcurementsSection.tsx` | Bolagskortets vy över bolagets avrop |
+| `apps/web/src/lib/ai/tools.ts` | Chatt-verktygen `create_procurement`, `create_procurement_calloff`, `update_procurement_calloff` |
+
+### 39.2 Datamodell & uppföljningsregler
+
+- **`procurements`** (1700000149): `tenant`, `title`, `supplier` (FÖRETAGSNAMN),
+  `procedure` (ramavtal/direktupphandling/förenklat/öppet/annat),
+  `diarienummer`, `description`, `status` (planning → tender_open →
+  evaluation → awarded → active → ended | cancelled), `tender_deadline`,
+  `contract_start`/`contract_end`, `extension_option_months`,
+  `estimated_value_sek`, `estimated_calloffs`, `is_excellence_activity`,
+  `evaluation_criteria` (json, viktade kriterier för LEVERANTÖRENS leverans
+  per avrop — default fem ur upphandlingsbeskrivningen), **`calloff_template`**
+  (json: `milestone_1_days`, `duration_days`, etiketter — upphandlingens EGNA
+  milstolpar, förifyller avropen), `agreement` (→ `agreements`, § 19),
+  `responsible` (→ users, får uppföljningarna), `notes`, `created_by`.
+- **`procurement_calloffs`** (1700000150): avrop per bolag — `procurement`
+  (cascade), `startup` (cascade), `title`, `status` (planned/active/completed/
+  cancelled = människans ord), datumen `started_at`, `ends_at`,
+  `milestone_1_due`/`_approved_at`, `milestone_2_due`/`_approved_at`,
+  `final_report_received_at`, `amount_sek`, `movexum_share_pct`,
+  `state_aid_relevant` (påminner om de minimis § 20), `is_excellence_activity`,
+  utvärdering (`evaluation_scores` json, `evaluation_score` 0–5 viktat,
+  `evaluation_summary`, `evaluated_at/_by`), `notes`. **Fasen härleds av
+  klockan** (`calloffPhase`: planned → setup → coaching → awaiting_report →
+  awaiting_evaluation → done; § 38-principen) och avvikelser (`calloffAlerts`:
+  M1/M2 försenad, slutrapport saknas, utvärdering saknas) lagras aldrig.
+- **`procurement_rules`** (1700000151): en regel = "`offset_days` från
+  `anchor` ska uppgiften `task_title` finnas, `repeat` (once/monthly/
+  quarterly), så länge `condition` gäller". Ankare per scope: upphandling
+  (`tender_deadline`, `contract_start`, `contract_end`) eller avrop
+  (`calloff_start/_end`, `milestone_1/2_due`, `milestone_1/2_approved`).
+  **Villkoret är det smarta:** `milestone_1_pending`, `milestone_2_pending`,
+  `final_report_missing`, `not_evaluated`, `tender_not_awarded` eller
+  `always` — uppgiften finns bara medan villkoret gäller och **auto-stängs**
+  när det upphör (M1 godkänns → "stäm av M1" stängs). `applies_to`
+  (`all`/`excellence`) ger regler bara för excellens-insatser. `procurement`
+  tom = tenant-bred regel; satt = **bara den upphandlingen** (regler som lästs
+  ut ur ett underlag). Standardreglerna (`DEFAULT_PROCUREMENT_RULES`, åtta st
+  ur Movexums upphandlingsbeskrivning: avstämning 14 d före M1, M1 försenad,
+  avstämning före M2, begär slutrapport +7 d, utvärdera +14 d,
+  kvartalsavstämning med leverantören, förlängningsbeslut 90 d före
+  avtalsslut, anbudsutvärdering) **materialiseras lazy per tenant** första
+  gången modulen öppnas och redigeras sedan fritt i `/upphandlingar/regler`
+  (admin/incubator_lead).
+- **Uppföljningar ÄR `tasks`** (1700000152, § 15.7-mönstret): `link_kind =
+  'procurement'`, `procurement`, `procurement_calloff` och **`rule_key`**
+  (`<regel>:<mål>:<n>`, **unikt partiellt index** `(tenant, rule_key)` →
+  parallella synkar kan aldrig dubblera; 400 tolkas som "finns redan").
+  **`startup` sätts MEDVETET INTE** på genererade kort: tasks-RLS ger en
+  bolagsmedlem läsning av rader med sitt bolag som `startup`, och
+  uppföljningarna är intern avtalsdata ("besluta om hävning", leverantör).
+  Bolagets kanban (`/startups/[id]/aktiviteter`) hämtar dem i stället via
+  `procurement_calloff.startup` — för en ren medlem ger RLS tomt (§ 21). `syncProcurementFollowups`
+  (ren plan + diff i `@platform/shared`, IO i `followups.ts`) körs **efter
+  varje mutation** (upphandling, avrop, regel) och **lazy när `/upphandlingar`
+  öppnas** — ingen cron, ingen AI: skapar saknade kort (ägare = ansvarig →
+  skapare → aktören), flyttar datum/titel, auto-stänger (`done`) kort vars
+  villkor upphört eller vars regel/mål försvunnit. Kort en människa redan
+  stängt rörs aldrig. En sammanfattningsrad loggas i `agent_actions`
+  (`collection = 'procurement_followups'`) → feeden visar "N nya
+  uppföljningar" (§ 32), inte en rad per kort. Saknas `rule_key` i schemat
+  stoppas synken med tydligt fel (aldrig dubbletter); `verify-baseline.mjs`
+  asserterar fälten (`REQUIRED_APP_FIELDS`).
+- **Utvärdering:** viktat medel 0–5 över upphandlingens kriterier
+  (`scoreProcurementEvaluation`; opoängsatta kriterier räknas inte men
+  rapporteras som `missing` — visas, aldrig som "komplett");
+  `aggregateProcurementScore` ger leverantörens betyg på upphandlingen.
+
+### 39.3 Uppladdning & AI-utläsning av underlag
+
+`procurement_documents` (1700000153): filen (PDF/Word/PowerPoint/Excel/text,
+25 MB) lagras som riktig PB-fil; texten extraheras EN gång med
+kunskapsbasens pipe (§ 26.3), **personnummer-saneras** (§ 15.6) och cachas i
+`extracted_text`; `analysis` = det normaliserade utkastet. Routen
+`/api/procurements/documents` (§ 18.2-mönstret, staff-only, 20/10 min per
+användare, superuser-fallback per § 21.3) kör därefter
+`extractProcurementDraft` (mistral-medium → large vid 429, temp 0, snäv
+system-prompt: dokumentinnehåll är DATA, inte instruktioner; max 60 000
+tecken) → ETT JSON-objekt som **`parseProcurementDraft`** (ren, enhetstestad)
+tvingar in i modellen: okända statusar/ankare/villkor kastas, datum/tal
+valideras, slut-före-start nollas, saknade fält listas i `missing`,
+`confidence` < 0,5 flaggas "granska noga". Utkastet **förifyller formuläret**
+på `/upphandlingar/ny` (titel, leverantör, förfarande, datum, värde,
+kriterier, avropsmall) och listar **föreslagna regler** som människan bockar
+i → sparas som upphandlingsspecifika regler. **Ingenting skrivs till
+`procurements` förrän människan trycker Spara** (art. 14). Fail-soft: kan
+utkastet inte läsas ut sparas dokumentet ändå och formuläret fylls manuellt.
+På detaljsidan laddas fler underlag upp utan utläsning (`analyze=false`).
+Tokens loggas i `ai_usage_events` (surface `suggestions`, § 9.6) och
+**månadstaket (`assertWithinAiBudget`) prövas före modellanropet** — nått tak
+sparar dokumentet ändå och returnerar ett tydligt `analysisError`. Filfältet
+är **`protected`** (kräver fil-token) och serveras enbart via den
+tenant-scopade proxyn `/api/procurements/documents/[id]/file`
+(staff/observer i samma tenant, strömmas server-side — § 19-mönstret);
+`procurement_documents` är **denylistad** i `lib/ai/redaction.ts`
+(`extracted_text`/`analysis` är fritext ur tredjepartsdokument som kan
+innehålla kontaktpersoner i löptext — fältmaskning per fältnamn räcker
+inte).
+
+### 39.4 Chatten
+
+Verktygen `create_procurement` (läser ut uppgifterna ur ett bifogat underlag
+i chatten), `create_procurement_calloff` (avrop per bolag; milstolpar från
+avropsmallen) och `update_procurement_calloff` (godkänn M1/M2, bocka av
+slutrapport, ändra datum/belopp) går genom samma skrivlager och kör synken
+direkt — kvittot (§ 33.4) visar hur många uppföljningar som skapades/
+stängdes. **Agent-nekat:** utvärderingens poäng/omdöme (mänskligt omdöme om
+leverantören), utvärderingskriterier, avtalskoppling, ansvarig, byte av
+bolag på ett avrop och ALLA regler (styrning — `/upphandlingar/regler`).
+Läsning via `query_collection` på `procurements`/`procurement_calloffs`/
+`procurement_rules` (RLS + fältmaskning § 9.3); `procurement_documents` är
+denylistad (§ 39.3). Guidad i `CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden.
+
+### 39.5 Regelefterlevnad
+
+- **Riskklass (EU AI Act art. 11):** uppföljningsmotorn n/a (deterministisk
+  regelexpansion, ingen inferens); AI-utläsningen **begränsad** — beslutsstöd
+  ur ett dokument staff själva laddat upp, människa granskar och sparar,
+  ingen profilering av individer, ingen autopublicering. Transparensbanner
+  (§ 9.7) i uppladdningsytan och dokumentpanelen.
+- **GDPR § 5:** inga personuppgifter i modellen — leverantören är ett
+  företagsnamn, `responsible`/`evaluated_by`/`created_by` är interna
+  användarrelationer (visningsnamn, aldrig e-post), org-nr/kontaktperson
+  lagras medvetet INTE (CRM:t § 15 hanterar kontakter). Fritext (beskrivning,
+  anteckningar, omdöme, uppgiftstitlar) personnummer-saneras på skrivvägen;
+  underlagets text saneras vid extraktion; UI:t uppmanar att inte ladda upp
+  personuppgifter och att utvärdera LEVERANSEN, inte personer. Rättslig grund
+  = berättigat intresse (inkubatordrift, avtalsuppföljning, statsstödskontroll).
+- **GDPR art. 17:** `cascadeDelete` tenant → upphandling → avrop/regler/
+  dokument/genererade uppgifter; en raderad användare nollställer bara
+  relationerna.
+- **§ 21 RLS:** list/view staff/observer-only på alla fyra kollektionerna
+  (`MUST_BE_STAFF_OR_OBSERVER` i `verify-baseline.mjs`); createRules
+  roll-lösa (§ 21.3) med roll-enforcement i server-action/route/skrivlager;
+  regler ändras bara av admin/incubator_lead (PB-regel + action). En ren
+  `startup_member` ser varken modulen (railen) eller bolagskortssektionen.
+- **ISO 27001 A.8.15 / SOC 2:** varje mutation — inklusive radering
+  (`deleted: true`, § 30.6-konventionen) — auditeras i `agent_actions`
+  (PII-fritt: titel/leverantör/status/datum/belopp; fritextfält
+  `description`/`notes`/`evaluation_summary` loggas BARA som längd) och syns
+  i den samlade loggen (§ 32). `responsible` valideras till staff/observer i
+  tenanten (aldrig en bolagsmedlem). Standardreglerna seedas bara efter en
+  LYCKAD tom läsning — ett läsfel tolkas aldrig som "inga regler" (annars
+  dubbleras regler och uppgifter vid varje sidladdning). Migrationer 1700000149–153 är nya,
+  oföränderliga filnummer, speglade i `setup-via-api.mjs` (kollektioner +
+  `FORCE_CREATE_RULES` + tasks-patch med hela `link_kind`-listan).
+- **Statsstöd:** `state_aid_relevant` på avropet är en påminnelse — själva
+  registreringen görs i de minimis-modulen (§ 20) med dess `kanBevilja`-spärr.

@@ -317,7 +317,16 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   '`update_org_post` — "lägg upp en internutbildning om GDPR med länk till ' +
   'materialet", "fäst utbildningen om pitchcoaching överst", "låt inlägget ' +
   'utgå på fredag"). Befintliga inlägg läser du via `query_collection` på ' +
-  '`org_posts`. ' +
+  '`org_posts`. UPPHANDLINGAR & excellens-insatser (§ 39): registrera en ' +
+  'upphandling (`create_procurement` — läs ut uppgifterna ur ett bifogat ' +
+  'underlag), avrop per bolag (`create_procurement_calloff`, milstolpar ' +
+  'förifylls från upphandlingens avropsmall) och godkänn milstolpar/bocka av ' +
+  'slutrapport (`update_procurement_calloff`). Uppföljningsuppgifter skapas ' +
+  'och auto-stängs av reglerna — säg hur många som skapades (står i ' +
+  'verktygssvaret). Frågor om läget ("vilka avrop är försenade?") besvaras ' +
+  'via `query_collection` på procurements/procurement_calloffs och tasks ' +
+  '(link_kind = procurement). Utvärderingen av leverantören (poäng) och ' +
+  'reglerna sätts av en människa i /upphandlingar. ' +
   'Slå alltid upp id:n via `query_collection` först. Publicering, ' +
   'teamtilldelning och inbjudningar gör en människa i UI:t — säg det när det ' +
   'är nästa steg.\n';

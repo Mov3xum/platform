@@ -28,6 +28,25 @@ export { addStartupKpi, addCapitalRound, createStartupNote, CAPITAL_TYPES } from
 export { registerDeMinimisSupport, FORORDNINGAR } from './de-minimis';
 export { scheduleAgent } from './schedules';
 export { createOrgPost, updateOrgPostFields, type OrgPostChanges } from './org-posts';
+// Upphandlingar & excellens-insatser (§ 39)
+export {
+  createProcurement,
+  updateProcurementFields,
+  createProcurementCalloff,
+  updateProcurementCalloffFields,
+  evaluateProcurementCalloff,
+  upsertProcurementRule,
+  deleteProcurementRule,
+  attachProcurementDocument,
+  deleteProcurementDocument,
+  procurementPath,
+  PROCUREMENT_WRITABLE_FIELDS,
+  CALLOFF_WRITABLE_FIELDS,
+  type ProcurementChanges,
+  type CalloffChanges,
+  type ProcurementWritableField,
+  type CalloffWritableField
+} from './procurements';
 export { logAgentAction } from './audit';
 export {
   canWriteField,

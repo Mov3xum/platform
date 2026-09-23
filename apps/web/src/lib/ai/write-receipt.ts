@@ -43,6 +43,9 @@ export const DOMAIN_WRITE_TOOLS: ReadonlySet<string> = new Set([
   'create_startup_note',
   'create_org_post',
   'update_org_post',
+  'create_procurement',
+  'create_procurement_calloff',
+  'update_procurement_calloff',
   'memory_write'
 ]);
 
@@ -207,6 +210,14 @@ export function buildActionReceipt(input: BuildReceiptInput): AgentActionReceipt
     case 'update_activity_field':
     case 'update_compass_module_field': {
       summary = fieldChangeSummary(data);
+      break;
+    }
+    case 'create_procurement':
+    case 'create_procurement_calloff':
+    case 'update_procurement_calloff': {
+      const base = genericSummary(args, data);
+      const followups = str(data.followups);
+      summary = [base, followups].filter(Boolean).join(' · ');
       break;
     }
     default:
