@@ -5,7 +5,6 @@ import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
 import { Icon } from '@/components/proto';
 import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
-import { pbFileUrl } from '@/lib/pb-file';
 import { deleteProcurementFormAction } from '@/lib/actions/procurements';
 import {
   criteriaOf,
@@ -14,8 +13,7 @@ import {
   listProcurementDocuments,
   listProcurementRules,
   templateOf,
-  todayKey,
-  DOCUMENTS
+  todayKey
 } from '@/lib/procurements/data';
 import {
   PROCUREMENT_PROCEDURE_LABELS,
@@ -127,7 +125,7 @@ export default async function UpphandlingPage({
     id: d.id,
     title: d.title,
     filename: d.filename || 'dokument',
-    url: pbFileUrl(DOCUMENTS, d.id, d.file),
+    url: d.file ? `/api/procurements/documents/${d.id}/file` : null,
     sizeBytes: d.size_bytes,
     analyzed: Boolean(d.analyzed_at),
     created: d.created
@@ -234,11 +232,16 @@ export default async function UpphandlingPage({
                           </span>
                           <span>· {TASK_STATUS_LABEL[t.status] ?? t.status}</span>
                           {t.expand?.owner && <span>· {t.expand.owner.display_name || t.expand.owner.email?.split('@')[0]}</span>}
-                          {t.startup && (
-                            <Link href={`/startups/${t.startup}/aktiviteter`} className="text-link hover:underline">
-                              · {t.expand?.startup?.name ?? 'bolagets tavla'}
-                            </Link>
-                          )}
+                          {(() => {
+                            const c = t.procurement_calloff ? views.find((v) => v.id === t.procurement_calloff) : null;
+                            const sid = t.startup ?? c?.startupId ?? null;
+                            const sname = t.expand?.startup?.name ?? c?.startupName ?? 'bolagets tavla';
+                            return sid ? (
+                              <Link href={`/startups/${sid}/aktiviteter`} className="text-link hover:underline">
+                                · {sname}
+                              </Link>
+                            ) : null;
+                          })()}
                           {!t.rule_key && <span>· manuell</span>}
                         </div>
                       </li>

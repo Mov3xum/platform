@@ -56,7 +56,11 @@ migrate(
     }
 
     const indexes = Array.isArray(tasks.indexes) ? Array.from(tasks.indexes) : [];
-    const idx = 'CREATE INDEX idx_tasks_tenant_rule_key ON tasks (tenant, rule_key)';
+    // UNIKT (partiellt: bara regelgenererade kort) — två parallella synkar
+    // kan aldrig skapa samma uppföljning två gånger; synken tolkar 400 som
+    // "finns redan".
+    const idx =
+      "CREATE UNIQUE INDEX idx_tasks_tenant_rule_key ON tasks (tenant, rule_key) WHERE rule_key != ''";
     if (!indexes.some((i) => String(i).includes('idx_tasks_tenant_rule_key'))) {
       tasks.indexes = [...indexes, idx];
     }

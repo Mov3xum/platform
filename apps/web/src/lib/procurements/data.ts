@@ -190,19 +190,24 @@ export interface ProcurementRuleRow extends ProcurementRule {
   created_by?: string | null;
 }
 
+/** Strikt läsning — kastar vid fel (används av seed-logiken så ett läsfel aldrig tolkas som "tom"). */
+async function listProcurementRulesStrict(pb: PocketBase, tenantId: string): Promise<ProcurementRuleRow[]> {
+  const res = await pb.collection(RULES).getFullList<ProcurementRuleRow>({
+    filter: tenantFilter(pb, tenantId),
+    sort: 'scope,anchor,offset_days',
+    batch: 200
+  });
+  return res.map((r) => ({
+    ...r,
+    procurement: r.procurement || null,
+    offset_days: Number(r.offset_days ?? 0),
+    active: r.active !== false
+  }));
+}
+
 export async function listProcurementRules(pb: PocketBase, tenantId: string): Promise<ProcurementRuleRow[]> {
   try {
-    const res = await pb.collection(RULES).getFullList<ProcurementRuleRow>({
-      filter: tenantFilter(pb, tenantId),
-      sort: 'scope,anchor,offset_days',
-      batch: 200
-    });
-    return res.map((r) => ({
-      ...r,
-      procurement: r.procurement || null,
-      offset_days: Number(r.offset_days ?? 0),
-      active: r.active !== false
-    }));
+    return await listProcurementRulesStrict(pb, tenantId);
   } catch {
     return [];
   }
@@ -222,9 +227,23 @@ export async function ensureProcurementRules(
   tenantId: string,
   actorId: string
 ): Promise<ProcurementRuleRow[]> {
-  const existing = await listProcurementRules(pb, tenantId);
+  // Seeda BARA efter en LYCKAD, tom läsning: ett läsfel (PB v0.23.4:s tysta
+  // regel-nekande, schemadrift) får aldrig tolkas som "inga regler" — då
+  // skulle åtta nya regler (och dubbla uppgifter) skapas vid varje laddning.
+  let existing: ProcurementRuleRow[];
+  try {
+    existing = await listProcurementRulesStrict(pb, tenantId);
+  } catch (err) {
+    console.warn('[procurements] rules read failed — skipping seed', {
+      tenant: tenantId,
+      error: err instanceof Error ? err.message : err
+    });
+    return [];
+  }
   // Bara tenant-breda regler räknas: upphandlingsspecifika regler (ur ett
-  // uppladdat underlag) betyder inte att standardreglerna finns.
+  // uppladdat underlag) betyder inte att standardreglerna finns. Vill man
+  // stänga av standardreglerna: inaktivera dem — raderas ALLA tenant-breda
+  // regler materialiseras de igen.
   if (existing.some((r) => !r.procurement)) return existing;
   const create = async (client: PocketBase) => {
     for (const rule of DEFAULT_PROCUREMENT_RULES) {

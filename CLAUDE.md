@@ -923,6 +923,8 @@ omsättning.
 | `ai_funding_radar` | begränsad | Matchar utlysningar mot bolagsfas, vägledande |
 | `ai_portfolio_risk` | begränsad | Bara whitelistade fält, rankar bolag — ej personer |
 | `web_search` (chatt-verktyg, § 9.8) | begränsad | Internetsökning via Mistral Web Search (EU) på personalens opt-in; bara sanerad sökfråga lämnar plattformen; källor visas |
+| `procurement-extract` (AI-utläsning av upphandlingsunderlag, § 39.3) | begränsad | Läser ut strukturerade uppgifter ur ett dokument staff själva laddat upp till ett förifyllt utkast; människan granskar och sparar; ingen profilering |
+| `create_procurement` / `create_procurement_calloff` / `update_procurement_calloff` (chatt-verktyg, § 39.4) | n/a | Deterministiska mutationer via det delade skrivlagret; uppföljningsregler expanderas utan inferens |
 | `edu_irl_levels` | minimal | Generellt utbildningsmaterial |
 | `template_pitch_deck` | n/a | Statisk mall, ingen AI-inferens |
 
@@ -1777,7 +1779,7 @@ actor krävs). Tabellen visar vad som tillkommer per yta:
 
 | Körning | Actor | Tillkommer utöver läs-/sökverktygen |
 |---|---|---|
-| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`, samt § 33: `assign_workshop`, `assign_education_document`, `create_task`/`move_task`, `create_event`, `create_mission`, `register_de_minimis_support`, `add_startup_kpi`, `add_capital_round`, `schedule_agent`, `create_startup_note`), `memory_read` + `memory_write` |
+| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`, samt § 33: `assign_workshop`, `assign_education_document`, `create_task`/`move_task`, `create_event`, `create_mission`, `register_de_minimis_support`, `add_startup_kpi`, `add_capital_round`, `schedule_agent`, `create_startup_note`, samt § 39: `create_procurement`, `create_procurement_calloff`, `update_procurement_calloff`), `memory_read` + `memory_write` |
 | Toolbox (staff) | — (read-only) | `memory_read` |
 | Toolbox (icke-staff) | — (read-only) | — |
 | Schemalagd | — (read-only) | `memory_read` |
@@ -5485,9 +5487,14 @@ till ett förifyllt formulär (§ 39.3) — den bifogade upphandlingsbeskrivning
   gången modulen öppnas och redigeras sedan fritt i `/upphandlingar/regler`
   (admin/incubator_lead).
 - **Uppföljningar ÄR `tasks`** (1700000152, § 15.7-mönstret): `link_kind =
-  'procurement'`, `procurement`, `procurement_calloff`, `startup` (så kortet
-  syns på bolagets kanban och i "Min översikt") och **`rule_key`**
-  (`<regel>:<mål>:<n>`) som gör synken idempotent. `syncProcurementFollowups`
+  'procurement'`, `procurement`, `procurement_calloff` och **`rule_key`**
+  (`<regel>:<mål>:<n>`, **unikt partiellt index** `(tenant, rule_key)` →
+  parallella synkar kan aldrig dubblera; 400 tolkas som "finns redan").
+  **`startup` sätts MEDVETET INTE** på genererade kort: tasks-RLS ger en
+  bolagsmedlem läsning av rader med sitt bolag som `startup`, och
+  uppföljningarna är intern avtalsdata ("besluta om hävning", leverantör).
+  Bolagets kanban (`/startups/[id]/aktiviteter`) hämtar dem i stället via
+  `procurement_calloff.startup` — för en ren medlem ger RLS tomt (§ 21). `syncProcurementFollowups`
   (ren plan + diff i `@platform/shared`, IO i `followups.ts`) körs **efter
   varje mutation** (upphandling, avrop, regel) och **lazy när `/upphandlingar`
   öppnas** — ingen cron, ingen AI: skapar saknade kort (ägare = ansvarig →
@@ -5523,7 +5530,16 @@ i → sparas som upphandlingsspecifika regler. **Ingenting skrivs till
 `procurements` förrän människan trycker Spara** (art. 14). Fail-soft: kan
 utkastet inte läsas ut sparas dokumentet ändå och formuläret fylls manuellt.
 På detaljsidan laddas fler underlag upp utan utläsning (`analyze=false`).
-Tokens loggas i `ai_usage_events` (surface `suggestions`, § 9.6).
+Tokens loggas i `ai_usage_events` (surface `suggestions`, § 9.6) och
+**månadstaket (`assertWithinAiBudget`) prövas före modellanropet** — nått tak
+sparar dokumentet ändå och returnerar ett tydligt `analysisError`. Filfältet
+är **`protected`** (kräver fil-token) och serveras enbart via den
+tenant-scopade proxyn `/api/procurements/documents/[id]/file`
+(staff/observer i samma tenant, strömmas server-side — § 19-mönstret);
+`procurement_documents` är **denylistad** i `lib/ai/redaction.ts`
+(`extracted_text`/`analysis` är fritext ur tredjepartsdokument som kan
+innehålla kontaktpersoner i löptext — fältmaskning per fältnamn räcker
+inte).
 
 ### 39.4 Chatten
 
@@ -5536,8 +5552,8 @@ stängdes. **Agent-nekat:** utvärderingens poäng/omdöme (mänskligt omdöme o
 leverantören), utvärderingskriterier, avtalskoppling, ansvarig, byte av
 bolag på ett avrop och ALLA regler (styrning — `/upphandlingar/regler`).
 Läsning via `query_collection` på `procurements`/`procurement_calloffs`/
-`procurement_rules`/`procurement_documents` (inte denylistade; RLS +
-fältmaskning § 9.3). Guidad i `CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden.
+`procurement_rules` (RLS + fältmaskning § 9.3); `procurement_documents` är
+denylistad (§ 39.3). Guidad i `CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden.
 
 ### 39.5 Regelefterlevnad
 
@@ -5562,9 +5578,14 @@ fältmaskning § 9.3). Guidad i `CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden.
   roll-lösa (§ 21.3) med roll-enforcement i server-action/route/skrivlager;
   regler ändras bara av admin/incubator_lead (PB-regel + action). En ren
   `startup_member` ser varken modulen (railen) eller bolagskortssektionen.
-- **ISO 27001 A.8.15 / SOC 2:** varje mutation auditeras i `agent_actions`
-  (PII-fritt: titel/leverantör/status/datum/belopp — aldrig anteckningstext)
-  och syns i den samlade loggen (§ 32). Migrationer 1700000149–153 är nya,
+- **ISO 27001 A.8.15 / SOC 2:** varje mutation — inklusive radering
+  (`deleted: true`, § 30.6-konventionen) — auditeras i `agent_actions`
+  (PII-fritt: titel/leverantör/status/datum/belopp; fritextfält
+  `description`/`notes`/`evaluation_summary` loggas BARA som längd) och syns
+  i den samlade loggen (§ 32). `responsible` valideras till staff/observer i
+  tenanten (aldrig en bolagsmedlem). Standardreglerna seedas bara efter en
+  LYCKAD tom läsning — ett läsfel tolkas aldrig som "inga regler" (annars
+  dubbleras regler och uppgifter vid varje sidladdning). Migrationer 1700000149–153 är nya,
   oföränderliga filnummer, speglade i `setup-via-api.mjs` (kollektioner +
   `FORCE_CREATE_RULES` + tasks-patch med hela `link_kind`-listan).
 - **Statsstöd:** `state_aid_relevant` på avropet är en påminnelse — själva

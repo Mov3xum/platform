@@ -10,6 +10,7 @@ import {
   deleteProcurementDocument,
   deleteProcurementRule,
   evaluateProcurementCalloff,
+  logAgentAction,
   updateProcurementCalloffFields,
   updateProcurementFields,
   upsertProcurementRule,
@@ -155,6 +156,13 @@ export async function deleteProcurementAction(procurementId: string): Promise<Pr
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte radera upphandlingen.' };
   }
+  await logAgentAction(pb, {
+    actor: actorOf(user),
+    action_type: 'update',
+    collection: PROCUREMENTS,
+    record_id: p.id,
+    after_value: { deleted: true, title: p.title, supplier: p.supplier ?? undefined }
+  });
   revalidate();
   return { ok: true, path: '/upphandlingar' };
 }
@@ -247,6 +255,13 @@ export async function deleteCalloffAction(calloffId: string): Promise<Procuremen
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte radera avropet.' };
   }
+  await logAgentAction(pb, {
+    actor: s.actor,
+    action_type: 'update',
+    collection: CALLOFFS,
+    record_id: c.id,
+    after_value: { deleted: true, procurement: c.procurement, startup_name: c.startup_name ?? undefined, title: c.title ?? undefined }
+  });
   const sync = await syncWarning(s.actor, c.procurement);
   revalidate(c.procurement, c.startup);
   return { ok: true, path: `/upphandlingar/${c.procurement}`, ...sync };

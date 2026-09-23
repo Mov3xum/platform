@@ -6,7 +6,9 @@
 // extraheras EN gång vid uppladdning, personnummer-saneras (§ 15.6) och
 // cachas i `extracted_text`; AI-utkastet (`ProcurementDraft`) som lästs ut
 // ur texten sparas i `analysis` så det kan visas/återanvändas utan nytt
-// modellanrop. `procurement` är valfri: underlaget laddas upp FÖRE
+// modellanrop. Filen är `protected` (tokenkrav) och serveras via en
+// tenant-scopad proxy; kollektionen är denylistad för query_collection
+// (fritext ur tredjepartsdokument, § 9.3). `procurement` är valfri: underlaget laddas upp FÖRE
 // upphandlingen skapas och kopplas när utkastet sparas (cascadeDelete).
 //
 // RLS: list/view = staff/observer-only (intern avtalsdata). createRule
@@ -58,6 +60,10 @@ migrate(
           name: 'file',
           type: 'file',
           required: true,
+          // Avtals-/prisunderlag är intern data → skyddad fil, serveras via
+          // den tenant-scopade proxyn /api/procurements/documents/[id]/file
+          // (samma mönster som avtals-PDF:er, § 19).
+          protected: true,
           maxSelect: 1,
           maxSize: 26214400, // 25 MB
           mimeTypes: [

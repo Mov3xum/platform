@@ -63,8 +63,11 @@ export default async function StartupActivitiesPage({
     pb
       .collection('tasks')
       .getList<TaskRow>(1, 200, {
+        // Regelgenererade upphandlingsuppföljningar (§ 39) bär bolaget via
+        // avropet, inte via `startup` (tasks-RLS skulle annars visa intern
+        // avtalsdata för bolagsmedlemmar); staff ser dem här via relationen.
         filter: pb.filter(
-          'tenant = {:t} && startup = {:s} && status != "cancelled"',
+          'tenant = {:t} && (startup = {:s} || procurement_calloff.startup = {:s}) && status != "cancelled"',
           { t: user.tenant, s: id }
         ),
         sort: '-created',

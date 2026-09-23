@@ -24,8 +24,8 @@ import {
  * idempotent via `tasks.rule_key`:
  *
  *   - saknad uppgift vars villkor gäller → skapas (öppen, med förfallodag,
- *     kopplad till upphandling/avrop/bolag så den syns på bolagets kanban
- *     och i "Min översikt");
+ *     kopplad till upphandling/avrop — bolagets kanban hittar den via
+ *     `procurement_calloff.startup`; ägaren ser den i "Min översikt");
  *   - befintlig öppen uppgift vars datum/titel flyttats → uppdateras;
  *   - öppen uppgift vars villkor UPPHÖRT (milstolpen godkändes, rapporten
  *     kom, avropet hävdes, regeln togs bort) → auto-stängs (`done`) med
@@ -109,8 +109,12 @@ export async function syncProcurementFollowups(
       rule_key: w.key,
       due_at: w.dueDate
     };
+    // MEDVETET inget `startup` på kortet: tasks-RLS ger en bolagsmedlem
+    // läsning av rader med sitt bolag som `startup`, och uppföljningarna är
+    // intern avtalsdata ("besluta om hävning", leverantörsnamn). Bolaget
+    // nås via `procurement_calloff.startup` (bolagets kanban filtrerar på
+    // båda) — RLS på tasks blir då gränsen även för en ren medlem (§ 21).
     if (w.calloffId) payload.procurement_calloff = w.calloffId;
-    if (w.startupId) payload.startup = w.startupId;
     try {
       const created = await writeWithFallback(pb, (client) =>
         client.collection('tasks').create<{ id: string; rule_key?: string; procurement?: string }>(payload)
@@ -123,6 +127,9 @@ export async function syncProcurementFollowups(
       }
       result.created++;
     } catch (err) {
+      // 400 på det unika indexet (tenant, rule_key) = en parallell synk hann
+      // först (två flikar, lazy-synk + action) — kortet finns redan.
+      if ((err as { status?: number }).status === 400) continue;
       errors.push(err instanceof Error ? err.message : 'skapande misslyckades');
     }
   }

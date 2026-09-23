@@ -65,6 +65,11 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // Embedding-vektorerna är dessutom ointressanta/bullriga för en LLM att läsa rått.
   'org_knowledge',
   'org_knowledge_chunks',
+  // Uppladdat upphandlingsunderlag (1700000153, § 39.3): `extracted_text`/
+  // `analysis` är fritext ur tredjepartsdokument (kan innehålla kontakt-
+  // personer i löptext som fältmaskning per fältNAMN inte fångar). Når AI
+  // enbart via den isolerade utläsningen vid uppladdning — aldrig rått.
+  'procurement_documents',
   'agent_memory' // agentens tvärsessions-scratchpad (1700000079)
 ]);
 

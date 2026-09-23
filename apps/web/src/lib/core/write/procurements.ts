@@ -40,6 +40,21 @@ import type { ValidationResult } from './validators';
 const PROCUREMENTS = 'procurements';
 const CALLOFFS = 'procurement_calloffs';
 const RULES = 'procurement_rules';
+const STAFF_OR_OBSERVER_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'];
+
+/**
+ * Fritextfält auditeras BARA som längd (§ 33.2-konventionen) — anteckningar
+ * och beskrivningar ska inte hamna i `agent_actions` (läsbar via
+ * query_collection). Strukturerade fält loggas som de är.
+ */
+const FREE_TEXT_FIELDS = new Set(['description', 'notes', 'evaluation_summary']);
+function auditValue(field: string, value: unknown): unknown {
+  if (field === 'evaluation_criteria' || field === 'calloff_template') return undefined;
+  if (FREE_TEXT_FIELDS.has(field)) {
+    return value === null || value === undefined ? null : { length: String(value).length };
+  }
+  return value;
+}
 
 export function procurementPath(id: string): string {
   return `/upphandlingar/${id}`;
@@ -212,6 +227,12 @@ async function verifyRelations(
       'id,tenant,roles'
     );
     if (!u) return 'Ansvarig hittades inte i din organisation.';
+    // Ansvarig får uppföljningarna → måste vara Movexum-personal (samma
+    // krets som ser modulen), aldrig en bolagsmedlem.
+    const roles = Array.isArray(u.roles) ? u.roles : [];
+    if (!roles.some((r) => STAFF_OR_OBSERVER_ROLES.includes(r))) {
+      return 'Ansvarig måste vara Movexum-personal (admin, incubator lead, coach, mentor eller observer).';
+    }
   }
   if (payload.startup) {
     const s = await getRecordInTenant(pb, actor, 'startups', String(payload.startup), 'id,tenant');
@@ -318,8 +339,8 @@ export async function updateProcurementFields(
       collection: PROCUREMENTS,
       record_id: row.id,
       field,
-        before_value: field === 'evaluation_criteria' || field === 'calloff_template' ? undefined : row[field],
-      after_value: field === 'evaluation_criteria' || field === 'calloff_template' ? undefined : after
+        before_value: auditValue(field, row[field]),
+      after_value: auditValue(field, after)
     });
   }
 
@@ -585,8 +606,8 @@ export async function updateProcurementCalloffFields(
       collection: CALLOFFS,
       record_id: row.id,
       field,
-      before_value: row[field],
-      after_value: after
+      before_value: auditValue(field, row[field]),
+      after_value: auditValue(field, after)
     });
   }
 

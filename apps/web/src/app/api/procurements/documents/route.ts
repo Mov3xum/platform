@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
-import { getPublicPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { extractKnowledgeFromFile, KnowledgeError } from '@/lib/ai/knowledge';
 import { extractProcurementDraft } from '@/lib/ai/procurement-extract';
 import { logAiUsage } from '@/lib/ai/usage';
+import { AiBudgetExceededError, assertWithinAiBudget } from '@/lib/ai/budget.server';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { getProcurement, todayKey, DOCUMENTS } from '@/lib/procurements/data';
 import type { Role } from '@platform/shared';
@@ -168,11 +168,30 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
-  const base = getPublicPbUrl().replace(/\/$/, '');
-  const url = rec.file ? `${base}/api/files/${DOCUMENTS}/${rec.id}/${encodeURIComponent(rec.file)}` : null;
+  // Filen är `protected` — nås bara via den tenant-scopade proxyn.
+  const url = rec.file ? `/api/procurements/documents/${rec.id}/file` : null;
 
   if (!analyze) {
     return NextResponse.json({ id: rec.id, url, filename: extracted.filename, draft: null, redacted: extracted.redacted });
+  }
+
+  // Månadstaket (§ 9.6) prövas FÖRE modellanropet — dokumentet är redan
+  // sparat, så ett nått tak ger ett tydligt analysError i stället för fel.
+  try {
+    await assertWithinAiBudget(pb, user.tenant);
+  } catch (err) {
+    if (err instanceof AiBudgetExceededError) {
+      return NextResponse.json({
+        id: rec.id,
+        url,
+        filename: extracted.filename,
+        redacted: extracted.redacted,
+        charCount: extracted.charCount,
+        draft: null,
+        analysisError: 'Månadens AI-kostnadstak är nått — fyll i uppgifterna manuellt.'
+      });
+    }
+    throw err;
   }
 
   // AI-utkast (fail-soft). Token-utfall loggas i ai_usage_events (§ 9.6).

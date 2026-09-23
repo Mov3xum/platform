@@ -1976,7 +1976,9 @@ await ensureCollection({
     'CREATE INDEX idx_tasks_due ON tasks (due_at)',
     'CREATE INDEX idx_tasks_startup ON tasks (startup)',
     'CREATE INDEX idx_tasks_contact ON tasks (contact)',
-    'CREATE INDEX idx_tasks_event ON tasks (event)'
+    'CREATE INDEX idx_tasks_event ON tasks (event)',
+    // Migration 1700000152 (§ 39): idempotensnyckel för regelgenererade kort.
+    "CREATE UNIQUE INDEX idx_tasks_tenant_rule_key ON tasks (tenant, rule_key) WHERE rule_key != ''"
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || @request.auth.id = owner || ${MEMBER_OF_STARTUP_REL})`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_READ} || @request.auth.id = owner || ${MEMBER_OF_STARTUP_REL})`,
@@ -3722,7 +3724,7 @@ await ensureCollection({
     { name: 'procurement', type: 'relation', required: false, collectionId: 'procurements_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
     { name: 'title', type: 'text', required: false, max: 200 },
     {
-      name: 'file', type: 'file', required: true, maxSelect: 1, maxSize: 26214400,
+      name: 'file', type: 'file', required: true, maxSelect: 1, maxSize: 26214400, protected: true,
       mimeTypes: [
         'application/pdf',
         'application/msword',
