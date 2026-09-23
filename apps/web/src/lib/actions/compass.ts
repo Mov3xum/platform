@@ -412,7 +412,15 @@ async function writeWithFallback<T>(
   }
 }
 
-type ModuleRow = { id: string; tenant?: string; slug: string; name?: string };
+type ModuleRow = {
+  id: string;
+  tenant?: string;
+  slug: string;
+  name?: string;
+  public_slug?: string;
+  is_active?: boolean;
+  public_url_enabled?: boolean;
+};
 
 /**
  * Läser en modul och verifierar att den tillhör den inloggades tenant.
@@ -550,6 +558,27 @@ export async function createModuleAction(formData: FormData) {
   redirect(`/inflode/admin/modules/${createdSlug}`);
 }
 
+// Vad Spara-knappen ska göra utöver att spara fälten. `publish` bockar i
+// Aktiv + Publicerad publikt och säkrar en publik slug; `unpublish` stänger
+// den publika länken. Okänt värde = vanlig sparning.
+type ModuleSaveIntent = 'save' | 'publish' | 'unpublish';
+
+function parseSaveIntent(v: unknown): ModuleSaveIntent {
+  return v === 'publish' || v === 'unpublish' ? v : 'save';
+}
+
+function moduleEditorPath(slug: string, params: Record<string, string>): string {
+  const qs = new URLSearchParams(params).toString();
+  return `/inflode/admin/modules/${slug}${qs ? `?${qs}` : ''}`;
+}
+
+/**
+ * Sparar modulformuläret (alla steg postas i ETT anrop, § 23.7) och
+ * redirectar tillbaka till editorn med `?ok=` eller `?error=` så att
+ * användaren alltid får ett kvitto — tidigare returnerade actionen tyst
+ * (ingen redirect, ingen banner) och fel kastades rakt in i den globala
+ * felvyn, vilket upplevdes som att "Spara & klart" inte gjorde någonting.
+ */
 export async function updateModuleAction(formData: FormData) {
   const user = await requireUser();
   if (!hasRole(user.roles, [...MANAGE_ROLES])) {
@@ -561,7 +590,38 @@ export async function updateModuleAction(formData: FormData) {
   const pb = await getServerPb();
   // Verifiera tenant (superuser-fallback vid tyst nekad view-regel, § 21.3).
   const existing = await getModuleInTenant(pb, id, user.tenant);
+  const intent = parseSaveIntent(formData.get('intent'));
 
+  let errorMessage: string | null = null;
+  try {
+    await applyModuleUpdate(pb, user, existing, formData, intent);
+  } catch (err) {
+    errorMessage = err instanceof Error ? err.message : 'Okänt fel';
+  }
+
+  revalidatePath('/inflode');
+  revalidatePath('/inflode/admin/modules');
+  revalidatePath(`/inflode/admin/modules/${existing.slug}`);
+
+  // redirect() kastar — måste ligga UTANFÖR try/catch.
+  if (errorMessage) {
+    redirect(moduleEditorPath(existing.slug, { error: errorMessage.slice(0, 300) }));
+  }
+  redirect(
+    moduleEditorPath(existing.slug, {
+      ok: intent === 'publish' ? 'published' : intent === 'unpublish' ? 'unpublished' : 'saved'
+    })
+  );
+}
+
+async function applyModuleUpdate(
+  pb: PocketBase,
+  user: { id: string; tenant: string },
+  existing: ModuleRow,
+  formData: FormData,
+  intent: ModuleSaveIntent
+): Promise<void> {
+  const id = existing.id;
   const maxExchangesRaw = String(formData.get('max_exchanges') || '').trim();
   const maxExchanges = Number(maxExchangesRaw);
 
@@ -594,6 +654,19 @@ export async function updateModuleAction(formData: FormData) {
   // Publik slug (global unik). Bara sätt om angiven — tom lämnar oförändrad.
   const publicSlug = slugify(String(formData.get('public_slug') || ''));
   if (publicSlug) patch.public_slug = publicSlug;
+
+  // Publicera-/Avpublicera-knappen vinner över kryssrutorna: den ska aldrig
+  // kunna "misslyckas tyst" för att en ruta glömts. Publicering kräver en
+  // publik slug — saknas den härleds den ur den interna sluggen.
+  if (intent === 'publish') {
+    patch.is_active = true;
+    patch.public_url_enabled = true;
+    if (!publicSlug && !existing.public_slug) {
+      patch.public_slug = slugify(existing.slug);
+    }
+  } else if (intent === 'unpublish') {
+    patch.public_url_enabled = false;
+  }
 
   // Nästa modul i kedjan (migration 1700000124). Tom = nollställ (avsluta
   // flödet). En satt relation måste peka på en ANNAN modul i SAMMA tenant —
@@ -712,14 +785,71 @@ export async function updateModuleAction(formData: FormData) {
 
   await logSecurity(pb, user.tenant, {
     actor: user.id,
-    kind: patch.is_active ? 'module_publish' : 'module_unpublish',
+    kind: patch.is_active && patch.public_url_enabled ? 'module_publish' : 'module_unpublish',
     subject: existing.slug,
-    meta: { event: 'module_updated', name: patch.name }
+    meta: { event: 'module_updated', name: patch.name, intent }
   });
+}
+
+/**
+ * Publicera/avpublicera en modul direkt från översikten (en knapp per rad),
+ * utan att gå via editorn. Publicera = Aktiv + Publicerad publikt + säkrad
+ * publik slug; avpublicera = stäng den publika länken (modulen förblir aktiv
+ * för interna förhandsgranskningar). Redirectar tillbaka till listan med
+ * `?ok=`/`?error=` som kvitto.
+ */
+export async function setModulePublishedAction(formData: FormData) {
+  const user = await requireUser();
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
+    throw new Error('Forbidden');
+  }
+  const id = String(formData.get('id') || '');
+  if (!id) throw new Error('Invalid input');
+  const publish = formData.get('published') === 'on';
+
+  const pb = await getServerPb();
+  const existing = await getModuleInTenant(pb, id, user.tenant);
+
+  let errorMessage: string | null = null;
+  try {
+    const patch: Record<string, unknown> = publish
+      ? {
+          is_active: true,
+          public_url_enabled: true,
+          ...(existing.public_slug ? {} : { public_slug: slugify(existing.slug) })
+        }
+      : { public_url_enabled: false };
+    try {
+      await writeWithFallback(pb, (c) => c.collection('compass_modules').update(id, patch));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Okänt fel';
+      if (/public_slug|unique/i.test(msg)) {
+        throw new Error(
+          'Den publika länken (slug) är upptagen — öppna modulen och välj en annan innan du publicerar.'
+        );
+      }
+      throw new Error(`Kunde inte ${publish ? 'publicera' : 'avpublicera'} modulen: ${msg}`);
+    }
+    await logSecurity(pb, user.tenant, {
+      actor: user.id,
+      kind: publish ? 'module_publish' : 'module_unpublish',
+      subject: existing.slug,
+      meta: { event: 'module_publish_toggle', name: existing.name }
+    });
+  } catch (err) {
+    errorMessage = err instanceof Error ? err.message : 'Okänt fel';
+  }
 
   revalidatePath('/inflode');
   revalidatePath('/inflode/admin/modules');
   revalidatePath(`/inflode/admin/modules/${existing.slug}`);
+
+  const params = new URLSearchParams(
+    errorMessage
+      ? { error: errorMessage.slice(0, 300) }
+      : { ok: publish ? 'published' : 'unpublished', module: existing.slug }
+  );
+  redirect(`/inflode/admin/modules?${params.toString()}`);
 }
 
 export async function deleteModuleAction(formData: FormData) {

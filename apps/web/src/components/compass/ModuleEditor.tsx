@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { Icon } from '@/components/proto';
 import { updateModuleAction } from '@/lib/actions/compass';
 import { QuestionsManager } from './QuestionsManager';
@@ -29,8 +29,15 @@ interface EventOption {
   starts_at?: string;
 }
 
+export interface ModuleEditorNotice {
+  kind: 'ok' | 'error';
+  text: string;
+}
+
 interface Props {
   module: CompassModule;
+  /** Kvitto från senaste sparning (läses ur ?ok= / ?error= av sidan). */
+  notice?: ModuleEditorNotice | null;
   heroImageUrl: string | null;
   heroVideoUrl: string | null;
   modelOptions: ModelOption[];
@@ -48,6 +55,7 @@ interface Props {
  */
 export function ModuleEditor({
   module: mod,
+  notice = null,
   heroImageUrl,
   heroVideoUrl,
   modelOptions,
@@ -57,6 +65,33 @@ export function ModuleEditor({
 }: Props) {
   const [step, setStep] = useState(0);
   const [flowType, setFlowType] = useState<FlowType>(mod.flow_type);
+  const [isPending, startTransition] = useTransition();
+  const [pendingIntent, setPendingIntent] = useState<string | null>(null);
+  const isPublished = Boolean(mod.is_active && mod.public_url_enabled);
+
+  // Actionen redirectar tillbaka med ?ok=/?error= — bannern nedan visar det.
+  // Klienten behåller sitt steg (samma komponentinstans), så användaren står
+  // kvar där hen tryckte Spara.
+  useEffect(() => {
+    if (notice) setPendingIntent(null);
+  }, [notice]);
+
+  // Submit via transition så knapparna kan visa pending-läge trots att de
+  // ligger UTANFÖR <form> (form-attributet; useFormStatus når dem inte).
+  // Knappens name/value (intent) skickas med explicit — FormData(form,
+  // submitter) stöds inte i alla webbläsare.
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const intent = submitter?.value || 'save';
+    const fd = new FormData(form);
+    fd.set('intent', intent);
+    setPendingIntent(intent);
+    startTransition(async () => {
+      await updateModuleAction(fd);
+    });
+  }
 
   const steps = [
     { key: 'basics', label: 'Grunder' },
@@ -125,7 +160,33 @@ export function ModuleEditor({
       </div>
 
       <div style={{ padding: 16, display: 'grid', gap: 12 }}>
-        <form id={FORM_ID} action={updateModuleAction} style={{ display: 'grid', gap: 12 }}>
+        {notice && (
+          <div
+            role={notice.kind === 'error' ? 'alert' : 'status'}
+            className="mx-t-13 mx-flex mx-items-c mx-gap-2"
+            style={{
+              padding: '10px 12px',
+              borderRadius: 10,
+              border: `1px solid ${
+                notice.kind === 'error'
+                  ? 'var(--movexum-morkorange)'
+                  : 'var(--movexum-gron)'
+              }`,
+              background:
+                notice.kind === 'error'
+                  ? 'var(--movexum-pastell-orange)'
+                  : 'var(--movexum-pastell-gron)',
+              color:
+                notice.kind === 'error'
+                  ? 'var(--movexum-morkorange)'
+                  : 'var(--movexum-morkgron)'
+            }}
+          >
+            <Icon name={notice.kind === 'error' ? 'alert' : 'check'} size={13} />
+            <span>{notice.text}</span>
+          </div>
+        )}
+        <form id={FORM_ID} onSubmit={handleSubmit} style={{ display: 'grid', gap: 12 }}>
           <input type="hidden" name="id" value={mod.id} />
 
           {/* ── Steg 1: Grunder ─────────────────────────────────────────── */}
@@ -501,7 +562,8 @@ export function ModuleEditor({
                 </label>
               </div>
               <span className="mx-t-12 mx-muted">
-                Länken fungerar när båda är ibockade och du har sparat.
+                Länken fungerar när båda är ibockade och du har sparat. Knappen{' '}
+                <strong>Publicera</strong> bockar i båda och sparar i ett steg.
               </span>
             </div>
           </Step>
@@ -546,8 +608,21 @@ export function ModuleEditor({
           ← Föregående
         </button>
         <div className="mx-flex mx-items-c mx-gap-2">
-          <button type="submit" form={FORM_ID} className="mx-btn">
-            <Icon name="check" size={13} /> Spara
+          {isPublished && (
+            <span className="mx-t-12 mx-muted mx-flex mx-items-c mx-gap-1">
+              <Icon name="globe" size={12} /> Publicerad
+            </span>
+          )}
+          <button
+            type="submit"
+            form={FORM_ID}
+            name="intent"
+            value="save"
+            className="mx-btn"
+            disabled={isPending}
+          >
+            <Icon name="check" size={13} />{' '}
+            {isPending && pendingIntent === 'save' ? 'Sparar…' : 'Spara'}
           </button>
           {!isLast ? (
             <button
@@ -557,9 +632,31 @@ export function ModuleEditor({
             >
               Nästa →
             </button>
+          ) : isPublished ? (
+            <button
+              type="submit"
+              form={FORM_ID}
+              name="intent"
+              value="unpublish"
+              className="mx-btn"
+              disabled={isPending}
+              title="Stänger den publika länken /m/… — modulen förblir aktiv för förhandsgranskning."
+            >
+              <Icon name="eye" size={13} />{' '}
+              {isPending && pendingIntent === 'unpublish' ? 'Avpublicerar…' : 'Avpublicera'}
+            </button>
           ) : (
-            <button type="submit" form={FORM_ID} className="mx-btn mx-primary">
-              <Icon name="check" size={13} /> Spara & klart
+            <button
+              type="submit"
+              form={FORM_ID}
+              name="intent"
+              value="publish"
+              className="mx-btn mx-primary"
+              disabled={isPending}
+              title="Sparar alla steg, bockar i Aktiv + Publicerad publikt och öppnar länken /m/…"
+            >
+              <Icon name="globe" size={13} />{' '}
+              {isPending && pendingIntent === 'publish' ? 'Publicerar…' : 'Publicera'}
             </button>
           )}
         </div>
