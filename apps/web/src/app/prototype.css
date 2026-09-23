@@ -1135,16 +1135,23 @@ select.mx-input:focus {
 .mx-chat-send { flex: none; border-radius: var(--mx-r-pill); }
 
 /* ── Startupkompassen — publik landningssida (/m/<slug>) ─────────────
-   Fristående, oinloggad yta. 2026-känsla: mjuk aurora-backdrop ur
-   Movexums palett (CLAUDE.md §2.2), luftig typografi och ett upphöjt
-   glas-kort över bakgrunden. */
+   Fristående, oinloggad yta. Kompositionen styrs av modulens MALL
+   (`data-layout`, CLAUDE.md § 23.7): classic | split_left | split_right |
+   cover | panel | minimal. Gemensamt: luftig Sora-typografi, Movexums
+   palett (§ 2.2), accentfärg via --mx-accent (modulens theme_color,
+   default mörkblå) och ett upphöjt kort för själva flödet. */
 .mx-compass-landing {
+  --mx-accent: #002c40;
+  --mx-compass-max: 920px;
+  --mx-compass-radius: 26px;
   position: relative;
   min-height: 100vh;
-  padding: 0 20px 96px;
+  min-height: 100dvh;
+  padding: 0 20px 72px;
   display: flex;
   justify-content: center;
   background: var(--mx-canvas);
+  color: var(--mx-ink);
   isolation: isolate;
 }
 /* Aurora-backdrop bakom hela sidan — låg alpha så vit canvas lyser igenom. */
@@ -1162,11 +1169,29 @@ select.mx-input:focus {
 }
 .mx-compass-wrap {
   width: 100%;
-  max-width: 920px;
+  max-width: var(--mx-compass-max);
   display: grid;
   gap: 30px;
   align-content: start;
-  padding-top: 30px;
+  padding-top: 26px;
+}
+.mx-compass-stage { display: grid; gap: 28px; min-width: 0; }
+.mx-compass-content { display: grid; gap: 26px; min-width: 0; }
+
+/* Accentfärgen driver CTA:er, fokus och progress i hela flödet. */
+.mx-compass-landing .mx-btn.mx-primary {
+  background: var(--mx-accent);
+  border-color: var(--mx-accent);
+  box-shadow: 0 8px 20px -10px color-mix(in srgb, var(--mx-accent) 70%, transparent);
+}
+.mx-compass-landing .mx-btn.mx-primary:hover {
+  background: color-mix(in srgb, var(--mx-accent) 88%, #000);
+  border-color: color-mix(in srgb, var(--mx-accent) 88%, #000);
+}
+.mx-compass-landing .mx-input:focus,
+.mx-compass-landing .mx-textarea:focus {
+  border-color: var(--mx-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mx-accent) 14%, transparent);
 }
 
 /* Topbar — wordmark + målgruppspill */
@@ -1196,35 +1221,83 @@ select.mx-input:focus {
   border: 1px solid rgba(214, 126, 71, 0.22);
 }
 
-.mx-compass-hero {
-  border-radius: var(--mx-r-lg);
+/* Media (bild/video) — samma element i alla mallar, mallen bestämmer form. */
+.mx-compass-media { margin: 0; width: 100%; height: 100%; }
+.mx-compass-media-el {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.mx-compass-visual {
+  position: relative;
+  border-radius: var(--mx-compass-radius);
   overflow: hidden;
   border: 1px solid var(--mx-line);
   box-shadow: var(--mx-sh-2);
   background: var(--mx-paper);
+  min-width: 0;
 }
-.mx-compass-hero-img {
-  display: block;
+/* Brand-panel när mallen vill ha bild men ingen laddats upp. */
+.mx-compass-visual-fallback {
+  position: relative;
   width: 100%;
-  height: clamp(180px, 34vw, 300px);
-  object-fit: cover;
+  height: 100%;
+  min-height: 320px;
+  display: flex;
+  align-items: flex-end;
+  padding: 26px;
+  color: #fff;
+  background:
+    radial-gradient(70% 60% at 100% 0%, rgba(0, 168, 222, 0.35), transparent 60%),
+    radial-gradient(60% 50% at 0% 100%, rgba(97, 56, 181, 0.35), transparent 60%),
+    linear-gradient(160deg, var(--mx-accent), color-mix(in srgb, var(--mx-accent) 55%, #005470));
+  overflow: hidden;
 }
-.mx-compass-head { display: grid; gap: 14px; }
+.mx-compass-rings {
+  position: absolute;
+  inset: auto -18% -22% auto;
+  width: 86%;
+  height: auto;
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.16);
+  stroke-width: 1.2;
+  animation: mx-compass-spin 80s linear infinite;
+  transform-origin: 50% 50%;
+}
+.mx-compass-needle { fill: rgba(255, 255, 255, 0.10); stroke: none; }
+@keyframes mx-compass-spin { to { transform: rotate(360deg); } }
+.mx-compass-visual-tag {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  font-family: var(--mx-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.mx-compass-visual-tag span + span { opacity: 0.7; font-weight: 600; }
+
+/* Hero-text */
+.mx-compass-head { display: grid; gap: 14px; min-width: 0; }
 .mx-compass-eyebrow {
   font-family: var(--mx-mono);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
+  color: var(--mx-accent);
 }
 .mx-compass-title {
   font-family: var(--mx-display);
-  font-size: clamp(26px, 3.4vw, 38px);
+  font-size: clamp(28px, 3.6vw, 42px);
   font-weight: 700;
-  line-height: 1.08;
-  letter-spacing: -0.02em;
+  line-height: 1.06;
+  letter-spacing: -0.025em;
   margin: 0;
   color: var(--mx-ink);
+  text-wrap: balance;
 }
 .mx-compass-body {
   font-size: clamp(16px, 1.5vw, 18px);
@@ -1232,19 +1305,21 @@ select.mx-input:focus {
   margin: 0;
   max-width: 600px;
   color: var(--mx-muted);
+  text-wrap: pretty;
 }
 
-/* Flöde-kort — upphöjt glas (ingen accent-strimma upptill) */
+/* Flöde-kort — upphöjt glas */
 .mx-compass-card {
   position: relative;
-  background: rgba(255, 255, 255, 0.86);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.88);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border: 1px solid var(--mx-line);
-  border-radius: var(--mx-r-lg);
+  border-radius: var(--mx-compass-radius);
   box-shadow: var(--mx-sh-3);
   padding: clamp(24px, 3vw, 36px);
   overflow: hidden;
+  color: var(--mx-ink);
 }
 /* Chat-flödet bär sitt eget chrome → kortet bara wrappar */
 .mx-compass-card-chat {
@@ -1256,6 +1331,92 @@ select.mx-input:focus {
   padding: 0;
   overflow: visible;
 }
+.mx-compass-chatbox { height: 70vh; min-height: 520px; }
+.mx-compass-landing .mx-chat { border-radius: var(--mx-compass-radius); box-shadow: var(--mx-sh-3); color: var(--mx-ink); }
+.mx-compass-landing .mx-chat-ava,
+.mx-compass-landing .mx-chat-mini,
+.mx-compass-landing .mx-bubble.user { background: var(--mx-accent); }
+
+/* Frågeflöde (quiz/formulär) — progress + svarsalternativ i accentfärg */
+.mx-qprogress {
+  height: 4px;
+  border-radius: 99px;
+  background: var(--mx-line-soft);
+  overflow: hidden;
+}
+.mx-qprogress > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--mx-accent, #002c40);
+  transition: width 320ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.mx-qprompt {
+  font-family: var(--mx-display);
+  font-size: clamp(20px, 2vw, 24px);
+  font-weight: 600;
+  line-height: 1.28;
+  letter-spacing: -0.015em;
+  color: var(--mx-ink);
+  text-wrap: balance;
+}
+.mx-qchoices { display: grid; gap: 10px; }
+.mx-qchoice {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--mx-line);
+  background: var(--mx-paper);
+  color: var(--mx-ink);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+.mx-qchoice:hover {
+  border-color: color-mix(in srgb, var(--mx-accent, #002c40) 45%, var(--mx-line));
+  transform: translateY(-1px);
+  box-shadow: var(--mx-sh-1);
+}
+.mx-qchoice.is-selected {
+  border-color: var(--mx-accent, #002c40);
+  background: var(--mx-accent, #002c40);
+  color: #fff;
+  box-shadow: 0 10px 24px -14px color-mix(in srgb, var(--mx-accent, #002c40) 80%, transparent);
+}
+.mx-qchoice.is-selected.is-multi {
+  background: color-mix(in srgb, var(--mx-accent, #002c40) 8%, var(--mx-paper));
+  color: var(--mx-ink);
+}
+.mx-qchoice input { position: absolute; opacity: 0; pointer-events: none; }
+.mx-qchoice-key {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 99px;
+  display: grid;
+  place-items: center;
+  font-family: var(--mx-mono);
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--mx-paper-3);
+  border: 1px solid var(--mx-line-soft);
+  color: var(--mx-ink-soft);
+}
+.mx-qchoice.is-selected .mx-qchoice-key {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: transparent;
+  color: #fff;
+}
+.mx-qchoice.is-selected.is-multi .mx-qchoice-key {
+  background: var(--mx-accent, #002c40);
+  color: #fff;
+}
+.mx-qchoice:focus-within { outline: 2px solid color-mix(in srgb, var(--mx-accent, #002c40) 40%, transparent); outline-offset: 2px; }
 
 /* Samtyckesgrind */
 .mx-consent { display: grid; gap: 16px; }
@@ -1275,20 +1436,268 @@ select.mx-input:focus {
   letter-spacing: 0.02em;
 }
 
-/* Mobilanpassning — tightare luft, mjukare kort, läsbar rubrik på smal skärm. */
+/* ── Mall: Klassisk ─────────────────────────────────────────────────── */
+.mx-compass-landing[data-layout='classic'] .mx-compass-visual { height: clamp(200px, 36vw, 340px); }
+
+/* ── Mall: Bild till vänster / höger ───────────────────────────────── */
+.mx-compass-landing[data-layout='split_left'],
+.mx-compass-landing[data-layout='split_right'] { --mx-compass-max: 1200px; }
+.mx-compass-landing[data-layout='split_left'] .mx-compass-stage,
+.mx-compass-landing[data-layout='split_right'] .mx-compass-stage {
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 44px;
+  align-items: start;
+}
+.mx-compass-landing[data-layout='split_right'] .mx-compass-stage { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+.mx-compass-landing[data-layout='split_right'] .mx-compass-visual { order: 2; }
+.mx-compass-landing[data-layout='split_left'] .mx-compass-visual,
+.mx-compass-landing[data-layout='split_right'] .mx-compass-visual {
+  position: sticky;
+  top: 24px;
+  height: calc(100vh - 150px);
+  height: calc(100dvh - 150px);
+  min-height: 520px;
+  max-height: 880px;
+}
+.mx-compass-landing[data-layout='split_left'] .mx-compass-content,
+.mx-compass-landing[data-layout='split_right'] .mx-compass-content { padding-top: 6px; }
+.mx-compass-landing[data-layout='split_left'] .mx-compass-chatbox,
+.mx-compass-landing[data-layout='split_right'] .mx-compass-chatbox {
+  height: calc(100vh - 300px);
+  height: calc(100dvh - 300px);
+  min-height: 480px;
+}
+
+/* ── Mall: Heltäckande ─────────────────────────────────────────────── */
+.mx-compass-landing[data-layout='cover'] {
+  --mx-compass-max: 760px;
+  color: #fff;
+  background: #002c40;
+}
+.mx-compass-landing[data-layout='cover']::before { display: none; }
+.mx-compass-cover-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background:
+    radial-gradient(70% 60% at 100% 0%, rgba(0, 168, 222, 0.30), transparent 60%),
+    radial-gradient(60% 50% at 0% 100%, rgba(97, 56, 181, 0.30), transparent 60%),
+    linear-gradient(160deg, var(--mx-accent), color-mix(in srgb, var(--mx-accent) 55%, #005470));
+}
+.mx-compass-cover-bg .mx-compass-media { position: absolute; inset: 0; }
+.mx-compass-cover-bg .mx-compass-media-el { transform: scale(1.02); }
+.mx-compass-cover-veil {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(0, 20, 30, 0.55) 0%, rgba(0, 20, 30, 0.25) 40%, rgba(0, 20, 30, 0.62) 100%),
+    linear-gradient(90deg, rgba(0, 20, 30, 0.35), transparent 60%);
+}
+.mx-compass-landing[data-layout='cover'] .mx-compass-brand { color: #fff; }
+.mx-compass-landing[data-layout='cover'] .mx-compass-aud {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.26);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.mx-compass-landing[data-layout='cover'] .mx-compass-eyebrow { color: rgba(255, 255, 255, 0.78); }
+.mx-compass-landing[data-layout='cover'] .mx-compass-title { color: #fff; text-shadow: 0 2px 24px rgba(0, 0, 0, 0.25); }
+.mx-compass-landing[data-layout='cover'] .mx-compass-body { color: rgba(255, 255, 255, 0.84); }
+.mx-compass-landing[data-layout='cover'] .mx-compass-head { text-align: center; justify-items: center; padding-top: clamp(16px, 6vh, 56px); }
+.mx-compass-landing[data-layout='cover'] .mx-compass-card {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.55);
+}
+.mx-compass-landing[data-layout='cover'] .mx-compass-foot { color: rgba(255, 255, 255, 0.6); }
+
+/* ── Mall: Färgpanel ───────────────────────────────────────────────── */
+.mx-compass-landing[data-layout='panel'] { --mx-compass-max: 1040px; }
+.mx-compass-landing[data-layout='panel'] .mx-compass-stage { gap: 0; }
+.mx-compass-panel {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
+  align-items: center;
+  padding: clamp(28px, 4vw, 56px);
+  padding-bottom: calc(clamp(28px, 4vw, 56px) + 56px);
+  border-radius: var(--mx-compass-radius);
+  color: #fff;
+  background:
+    radial-gradient(70% 60% at 100% 0%, rgba(0, 168, 222, 0.28), transparent 60%),
+    radial-gradient(50% 60% at 0% 100%, rgba(97, 56, 181, 0.28), transparent 60%),
+    linear-gradient(160deg, var(--mx-accent), color-mix(in srgb, var(--mx-accent) 60%, #005470));
+  overflow: hidden;
+  box-shadow: var(--mx-sh-3);
+}
+.mx-compass-panel.has-media { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+.mx-compass-panel-glow {
+  position: absolute;
+  inset: auto -10% -40% auto;
+  width: 60%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.12), transparent 65%);
+  pointer-events: none;
+}
+.mx-compass-panel .mx-compass-eyebrow { color: rgba(255, 255, 255, 0.78); }
+.mx-compass-panel .mx-compass-title { color: #fff; }
+.mx-compass-panel .mx-compass-body { color: rgba(255, 255, 255, 0.84); }
+.mx-compass-panel .mx-compass-visual {
+  aspect-ratio: 4 / 3;
+  border-radius: 20px;
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.5);
+}
+.mx-compass-landing[data-layout='panel'] .mx-compass-content {
+  margin: -56px clamp(12px, 4vw, 48px) 0;
+  position: relative;
+  z-index: 1;
+}
+.mx-compass-landing[data-layout='panel'] .mx-compass-card { background: rgba(255, 255, 255, 0.96); }
+.mx-compass-landing[data-layout='panel'] .mx-compass-card-chat { margin-top: 0; }
+
+/* ── Mall: Minimal ─────────────────────────────────────────────────── */
+.mx-compass-landing[data-layout='minimal'] { --mx-compass-max: 720px; }
+.mx-compass-landing[data-layout='minimal']::before { display: none; }
+.mx-compass-landing[data-layout='minimal'] .mx-compass-wrap { gap: 40px; padding-top: 34px; }
+.mx-compass-landing[data-layout='minimal'] .mx-compass-head {
+  padding-top: 28px;
+  border-top: 1px solid var(--mx-ink);
+}
+.mx-compass-landing[data-layout='minimal'] .mx-compass-title { font-size: clamp(32px, 5vw, 54px); letter-spacing: -0.03em; }
+.mx-compass-landing[data-layout='minimal'] .mx-compass-card {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border: none;
+  border-top: 1px solid var(--mx-line-strong);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 28px 0 0;
+  overflow: visible;
+}
+.mx-compass-landing[data-layout='minimal'] .mx-compass-card-chat { border-top: none; padding-top: 0; }
+.mx-compass-landing[data-layout='minimal'] .mx-compass-aud {
+  background: transparent;
+  color: var(--mx-ink);
+  border-color: var(--mx-line-strong);
+}
+.mx-compass-landing[data-layout='minimal'] .mx-qchoice { border-radius: 10px; }
+
+/* Rörelse av för den som bett om det */
+@media (prefers-reduced-motion: reduce) {
+  .mx-compass-rings { animation: none; }
+  .mx-qchoice, .mx-qprogress > i { transition: none; }
+}
+
+/* Surfplatta/mobil — mallarna faller till en kolumn, bilden blir banner. */
+@media (max-width: 900px) {
+  .mx-compass-landing[data-layout='split_left'] .mx-compass-stage,
+  .mx-compass-landing[data-layout='split_right'] .mx-compass-stage { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .mx-compass-landing[data-layout='split_left'] .mx-compass-visual,
+  .mx-compass-landing[data-layout='split_right'] .mx-compass-visual {
+    position: static;
+    order: 0;
+    height: clamp(200px, 44vw, 320px);
+    min-height: 0;
+  }
+  .mx-compass-landing[data-layout='split_left'] .mx-compass-chatbox,
+  .mx-compass-landing[data-layout='split_right'] .mx-compass-chatbox { height: 70vh; min-height: 480px; }
+  .mx-compass-panel.has-media { grid-template-columns: minmax(0, 1fr); }
+  .mx-compass-panel .mx-compass-visual { aspect-ratio: 16 / 9; }
+  .mx-compass-landing[data-layout='panel'] .mx-compass-content { margin-left: 8px; margin-right: 8px; }
+}
 @media (max-width: 640px) {
-  .mx-compass-landing { padding: 0 14px 64px; }
+  .mx-compass-landing { padding: 0 14px 56px; }
   .mx-compass-wrap { gap: 22px; padding-top: 18px; }
+  .mx-compass-stage, .mx-compass-content { gap: 18px; }
   .mx-compass-topbar { gap: 10px; }
   .mx-compass-head { gap: 10px; }
-  .mx-compass-title { font-size: clamp(23px, 7vw, 30px); line-height: 1.12; }
+  .mx-compass-title { font-size: clamp(24px, 7vw, 32px); line-height: 1.1; }
   .mx-compass-body { font-size: 15px; line-height: 1.55; }
   .mx-compass-card { padding: 20px 16px; border-radius: var(--mx-r-md); }
-  .mx-compass-hero-img { height: clamp(150px, 42vw, 220px); }
+  .mx-compass-landing[data-layout='classic'] .mx-compass-visual { height: clamp(150px, 42vw, 220px); border-radius: var(--mx-r-md); }
+  .mx-compass-landing[data-layout='minimal'] .mx-compass-title { font-size: clamp(28px, 8vw, 36px); }
+  .mx-compass-panel { padding: 22px 18px; padding-bottom: 60px; border-radius: var(--mx-r-md); }
+  .mx-compass-landing[data-layout='panel'] .mx-compass-content { margin: -44px 0 0; }
+  .mx-compass-landing[data-layout='cover'] .mx-compass-head { padding-top: 8px; }
+  .mx-compass-chatbox { min-height: 460px; }
   /* Knapprad i quiz/wizard staplar snyggt och fyller bredden på mobil. */
   .mx-compass-card .mx-consent-cta { width: 100%; }
   .mx-compass-card .mx-consent-cta .mx-btn { flex: 1 1 auto; justify-content: center; }
 }
+
+
+/* ── Mallväljare i modul-admin (Startupkompassen § 23.7) ─────────── */
+.mx-layoutpick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+.mx-layoutpick-item {
+  --mx-accent-thumb: #002c40;
+  position: relative;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid var(--mx-line);
+  background: var(--mx-paper);
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.mx-layoutpick-item:hover { border-color: var(--mx-line-strong); transform: translateY(-1px); box-shadow: var(--mx-sh-1); }
+.mx-layoutpick-item.is-active {
+  border-color: #002c40;
+  box-shadow: 0 0 0 3px rgba(0, 44, 64, 0.10), var(--mx-sh-1);
+}
+.mx-layoutpick-item input { position: absolute; opacity: 0; pointer-events: none; }
+.mx-layoutpick-item:focus-within { outline: 2px solid var(--movexum-pastell-lila); outline-offset: 2px; }
+.mx-layoutpick-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--mx-line-soft);
+  overflow: hidden;
+}
+.mx-layoutpick-text { display: grid; gap: 3px; }
+.mx-layoutpick-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--mx-ink);
+}
+.mx-layoutpick-rec {
+  font-family: var(--mx-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: var(--mx-green-tint);
+  color: var(--mx-green-ink);
+}
+.mx-layoutpick-desc { font-size: 12px; line-height: 1.45; color: var(--mx-muted); }
+.mx-layoutpick-hint {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--mx-paper-2);
+  border: 1px solid var(--mx-line-soft);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--mx-ink-soft);
+}
+.dark .mx-layoutpick-item.is-active { border-color: var(--mx-cyan-2); box-shadow: 0 0 0 3px rgba(79, 196, 234, 0.16); }
+.dark .mx-layoutpick-item { --mx-accent-thumb: #4fc4ea; }
 
 /* Scrollbar polish för main view */
 .mx-view::-webkit-scrollbar { width: 10px; height: 10px; }

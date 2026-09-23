@@ -3101,6 +3101,48 @@ migration-only (§ 23.4).
 ingen ny PII-väg; `next_module` är en intern modul-relation och whitelistas
 aldrig i `lib/ai/context.ts`).
 
+**Mallar för hela den publika sidan (`compass_modules.layout`, migration
+1700000154, 2026-09).** Steg 2 i editorn heter **Utseende & mall** (ersätter
+"Landningssida"). I stället för att bara lägga en bild överst väljer staff en
+**mall** som styr hela kompositionen på `/m/<slug>` — presentationsskalet
+`components/compass/PublicModuleLayout.tsx` nycklar allt på `data-layout`,
+CSS:et bor i `prototype.css` ("Startupkompassen — publik landningssida"):
+
+| Mall | Nyckel | Komposition |
+| --- | --- | --- |
+| Klassisk | `classic` | Bild/video som banner överst, rubrik under, flödet i glaskort (= hur sidan såg ut före mallarna; **default**) |
+| Bild till vänster | `split_left` | Bilden fyller vänsterspalten (sticky, hela höjden), flödet till höger |
+| Bild till höger | `split_right` | Speglad split — flödet först, bilden till höger |
+| Heltäckande | `cover` | Bild/video som fast helskärmsbakgrund med mörk ton, vit text, glaskort ovanpå (video autospelas ljudlöst) |
+| Färgpanel | `panel` | Panel i accentfärgen bär rubriken, bilden som bricka i panelen, kortet lyfts upp över panelkanten |
+| Minimal | `minimal` | Ingen bild, inga kort — hårlinjer + stor typografi, flödet inline |
+
+Källan av sanning är den rena, enhetstestade `packages/shared/src/compass-layout.ts`
+(`COMPASS_LAYOUTS`, `COMPASS_LAYOUT_META` med etikett/beskrivning/media-hint,
+`normalizeCompassLayout`). **Saknat/okänt värde ⇒ `classic`**, så en instans
+utan migrationen ändrar aldrig utseendet; sparar man en annan mall mot ett
+schema utan fältet svarar `updateModuleAction` med ett tydligt fel (PB
+släpper okända fält tyst — § 24.4-invarianten). Mallar som är byggda runt en
+bild (`split_*`, `cover`) visar en dekorativ brand-panel i accentfärgen när
+ingen bild laddats upp — sidan ser aldrig tom ut; `minimal` visar aldrig
+media. `theme_color` (accentfärg) driver nu hela flödet: knappar, progress,
+valda svarsalternativ, chatt-avatar/bubblor, färgpanel och heltäckande
+bakgrund (`--mx-accent`). Mallväljaren (`LayoutPicker.tsx`) ritar varje mall
+som en SVG-skiss och markerar vilka mallar som passar vald flödestyp.
+Chatt-agenten kan sätta mallen via `update_compass_module_field` (fält
+`layout`, svenska alias som "bild till vänster"/"heltäckande" tolkas; okänt
+värde avvisas med de giltiga namnen — aldrig tyst `classic`). Compass är
+migration-only (§ 23.4). Riskklass n/a — ren presentation, ingen ny
+dataväg, ingen PII.
+
+**Omslagsbild — robust uppladdning.** `HeroMediaUploader` skalar ned
+rasterbilder **i webbläsaren** före uppladdning (`lib/image-resize.ts`:
+längsta sida 2400 px, WebP/JPEG, PNG med transparens behålls, GIF/SVG rörs
+inte, fail-soft till originalet) — en mobilbild på 10–15 MB blir några hundra
+KB, passerar proxyns body-tak och laddar snabbt på den publika sidan. Svarar
+servern utan JSON (413/502 från proxyn) visas HTTP-statusen med orsak i
+stället för ett generiskt "misslyckades".
+
 ### 23.8 Modul-admin: 404 vid publicering, omslagsmedia & frågeordning (2026-09)
 
 Tre fel i samma yta, en gemensam grundorsak för de två första:

@@ -120,6 +120,9 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     target_audience: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     consent_note: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     flow_type: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    // Mall för den publika sidan (§ 23.7) — ren presentation, normaliseras
+    // (okänt ⇒ classic) i skrivlagret.
+    layout: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     is_active: {
       user: { kind: 'roles', roles: COMPASS_MANAGE },
       agent: { kind: 'deny', reason: 'Publicering av en modul görs av en människa i modul-admin.' }

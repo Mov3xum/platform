@@ -16,8 +16,10 @@ import {
 import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
 import {
+  COMPASS_LAYOUTS,
   MAX_COMPASS_MODULE_NAME,
   MAX_COMPASS_QUESTION_PROMPT,
+  normalizeCompassLayout,
   planCompassQuestionInsert,
   sortCompassQuestions,
   slugifyCompassKey,
@@ -512,6 +514,7 @@ export type CompassModuleWritableField =
   | 'target_audience'
   | 'consent_note'
   | 'flow_type'
+  | 'layout'
   | 'is_active'
   | 'public_url_enabled';
 
@@ -580,6 +583,20 @@ export async function updateCompassModuleField(
       const r = validateBool(params.value, false);
       if (!r.ok) return fail('INVALID_VALUE', r.error);
       value = r.value;
+      break;
+    }
+    case 'layout': {
+      // Strikt: ett värde som inte kan tolkas till en mall avvisas med de
+      // giltiga namnen — aldrig ett tyst "classic" när modellen gissat fel.
+      const raw = typeof params.value === 'string' ? params.value.trim() : '';
+      const normalized = normalizeCompassLayout(raw);
+      if (!raw || (normalized === 'classic' && !/^(classic|klassisk|standard|default)$/i.test(raw))) {
+        return fail(
+          'INVALID_VALUE',
+          `Okänd mall "${raw}". Giltiga mallar: ${COMPASS_LAYOUTS.join(', ')}.`
+        );
+      }
+      value = normalized;
       break;
     }
     default: {

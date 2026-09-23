@@ -6,6 +6,9 @@ import { updateModuleAction } from '@/lib/actions/compass';
 import { QuestionsManager } from './QuestionsManager';
 import { ResultBucketsEditor } from './ResultBucketsEditor';
 import { HeroMediaUploader } from './HeroMediaUploader';
+import { LayoutPicker } from './LayoutPicker';
+import { COMPASS_LAYOUT_META, normalizeCompassLayout } from '@platform/shared';
+import type { CompassLayout } from '@platform/shared';
 import type { CompassModule, CompassQuestion, FlowType } from '@/lib/compass/types';
 
 const FORM_ID = 'compass-module-form';
@@ -65,6 +68,8 @@ export function ModuleEditor({
 }: Props) {
   const [step, setStep] = useState(0);
   const [flowType, setFlowType] = useState<FlowType>(mod.flow_type);
+  const [layout, setLayout] = useState<CompassLayout>(() => normalizeCompassLayout(mod.layout));
+  const layoutMeta = COMPASS_LAYOUT_META[layout];
   const [isPending, startTransition] = useTransition();
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const isPublished = Boolean(mod.is_active && mod.public_url_enabled);
@@ -95,7 +100,7 @@ export function ModuleEditor({
 
   const steps = [
     { key: 'basics', label: 'Grunder' },
-    { key: 'landing', label: 'Landningssida' },
+    { key: 'look', label: 'Utseende & mall' },
     { key: 'questions', label: flowType === 'chat' ? 'Samtal & frågor' : 'Frågor' },
     { key: 'audience', label: 'Målgrupp & uppgifter' },
     { key: 'finish', label: 'Efter slutförande' }
@@ -244,20 +249,44 @@ export function ModuleEditor({
             </label>
           </Step>
 
-          {/* ── Steg 2: Landningssida ───────────────────────────────────── */}
+          {/* ── Steg 2: Utseende & mall ─────────────────────────────────── */}
           <Step active={step === 1}>
-            <div className="mx-muted mx-t-13">Det här är det första besökaren ser.</div>
-            <label className="mx-label">
-              Rubrik
-              <input
-                type="text"
-                name="welcome_title"
-                defaultValue={mod.welcome_title || ''}
-                className="mx-input"
-                style={{ marginTop: 4 }}
-                placeholder={mod.name}
-              />
-            </label>
+            <div className="mx-muted mx-t-13">
+              Det här är det första besökaren ser. Välj en mall för hela sidan — mallen
+              bestämmer var bild, rubrik och {flowType === 'chat' ? 'chatten' : 'frågorna'} hamnar.
+            </div>
+
+            <div>
+              <div className="mx-label" style={{ marginBottom: 8 }}>
+                Mall
+              </div>
+              <LayoutPicker initial={layout} flowType={flowType} onChange={setLayout} />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <label className="mx-label">
+                Rubrik
+                <input
+                  type="text"
+                  name="welcome_title"
+                  defaultValue={mod.welcome_title || ''}
+                  className="mx-input"
+                  style={{ marginTop: 4 }}
+                  placeholder={mod.name}
+                />
+              </label>
+              <label className="mx-label">
+                Liten text ovanför rubriken
+                <input
+                  type="text"
+                  name="hero_eyebrow"
+                  defaultValue={mod.hero_eyebrow || ''}
+                  className="mx-input"
+                  style={{ marginTop: 4 }}
+                  placeholder="STARTUPKOMPASSEN"
+                />
+              </label>
+            </div>
             <label className="mx-label">
               Beskrivning (visas under rubriken)
               <textarea
@@ -268,16 +297,19 @@ export function ModuleEditor({
               />
             </label>
 
-            <div className="mx-label">
-              Bild eller video (visas överst — går att ha båda; då spelas videon
-              med bilden som startbild)
-              <div style={{ marginTop: 6 }}>
-                <HeroMediaUploader
-                  moduleId={mod.id}
-                  initialImageUrl={heroImageUrl}
-                  initialVideoUrl={heroVideoUrl}
-                />
+            <div className="mx-label" style={{ opacity: layoutMeta.media === 'none' ? 0.6 : 1 }}>
+              Bild eller video
+              <div className="mx-layoutpick-hint" style={{ marginTop: 6, marginBottom: 8 }}>
+                <strong>{layoutMeta.label}:</strong> {layoutMeta.mediaHint}
+                {layoutMeta.media !== 'none' && (
+                  <> Finns både bild och video spelas videon, med bilden som startbild.</>
+                )}
               </div>
+              <HeroMediaUploader
+                moduleId={mod.id}
+                initialImageUrl={heroImageUrl}
+                initialVideoUrl={heroVideoUrl}
+              />
             </div>
 
             <details>
@@ -285,17 +317,6 @@ export function ModuleEditor({
                 Fler alternativ
               </summary>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
-                <label className="mx-label">
-                  Liten text ovanför rubriken
-                  <input
-                    type="text"
-                    name="hero_eyebrow"
-                    defaultValue={mod.hero_eyebrow || ''}
-                    className="mx-input"
-                    style={{ marginTop: 4 }}
-                    placeholder="STARTUPKOMPASSEN"
-                  />
-                </label>
                 <label className="mx-label">
                   Accentfärg (hex)
                   <input
@@ -306,6 +327,9 @@ export function ModuleEditor({
                     style={{ marginTop: 4 }}
                     placeholder="#002c40"
                   />
+                  <span className="mx-t-12 mx-muted" style={{ display: 'block', marginTop: 4 }}>
+                    Färgar knappar, progress, färgpanel och heltäckande bakgrund. Tomt = Movexum mörkblå.
+                  </span>
                 </label>
               </div>
             </details>
