@@ -143,6 +143,84 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
   tasks: {
     status: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } }
   },
+  // Upphandlingar (§ 39). Intern inköps-/avtalsdata utan PII — agenten får
+  // uppdatera sakfälten (status, datum, belopp) å den inloggades vägnar.
+  // Utvärderingskriterier, avtalskoppling och ansvarig är mänskliga beslut
+  // (kriterierna är utvärderingens spelregler; ansvarig kräver användar-id).
+  procurements: {
+    title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    supplier: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    procedure: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    diarienummer: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    status: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    tender_deadline: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    contract_start: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    contract_end: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    extension_option_months: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    estimated_value_sek: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    estimated_calloffs: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    is_excellence_activity: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    notes: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    evaluation_criteria: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Utvärderingskriterier sätts av en människa på upphandlingen.' }
+    },
+    agreement: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Avtalskopplingen väljs av en människa på upphandlingen.' }
+    },
+    responsible: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Ansvarig sätts av en människa på upphandlingen.' }
+    }
+  },
+  // Avrop per bolag. Milstolpar godkänns ("godkänn milstolpe 1 för Fixkod")
+  // och slutrapport bockas av via chatten — datumet är den inloggades
+  // uttryckliga beslut. Själva UTVÄRDERINGEN (poäng + omdöme) är ett
+  // mänskligt omdöme om leverantören och görs i UI:t.
+  procurement_calloffs: {
+    title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    status: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    started_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    ends_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    milestone_1_due: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    milestone_1_approved_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    milestone_2_due: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    milestone_2_approved_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    final_report_received_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    amount_sek: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    movexum_share_pct: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    state_aid_relevant: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    is_excellence_activity: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    notes: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    startup: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Bolaget på ett avrop byts av en människa i UI:t.' }
+    },
+    evaluation_scores: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Utvärderingen av leverantören poängsätts av en människa i UI:t.' }
+    },
+    evaluation_summary: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Utvärderingens omdöme skrivs av en människa i UI:t.' }
+    }
+  },
+  // Uppföljningsregler är styrning (vad systemet gör automatiskt) — sätts av
+  // admin/incubator_lead i UI:t, aldrig av agenten.
+  procurement_rules: {
+    name: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    scope: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    anchor: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    offset_days: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    repeat: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    condition: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    applies_to: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    task_title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    task_kind: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    active: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } }
+  },
   // Workshops (§ 18). Agenten får förbereda innehåll i ett UTKAST; att
   // publicera och tilldela bolag är mänskliga beslut.
   workshops: {
@@ -186,6 +264,19 @@ const CREATE_POLICIES: Record<
   activities: {
     user: { kind: 'any-role' },
     agent: { kind: 'allow' }
+  },
+  // Upphandlingar & avrop (§ 39) — registreras av staff; agenten ärver rollen.
+  procurements: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  procurement_calloffs: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  procurement_rules: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' }
   },
   annual_wheel_items: {
     user: { kind: 'roles', roles: STAFF_FULL },

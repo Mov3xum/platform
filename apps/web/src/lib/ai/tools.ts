@@ -65,6 +65,9 @@ import {
   createStartupNote,
   createOrgPost,
   updateOrgPostFields,
+  createProcurement,
+  createProcurementCalloff,
+  updateProcurementCalloffFields,
   CAPITAL_TYPES,
   registerDeMinimisSupport,
   FORORDNINGAR,
@@ -1387,6 +1390,115 @@ export function buildChatTools(
     tools.push({
       type: 'function',
       function: {
+        name: 'create_procurement',
+        description:
+          'Registrerar en upphandling (procurements, § 39) — t.ex. ett ramavtal ' +
+          'Movexum tecknar med en leverantör och avropar för bolagen. Har ' +
+          'användaren bifogat underlaget (förfrågningsunderlag/avtal) läser du ut ' +
+          'titel, leverantör, förfarande, diarienummer, datum och uppskattat värde ' +
+          'ur det. Uppföljningsreglerna (milstolpar, slutrapport, kvartals-' +
+          'avstämning, förlängningsbeslut) sätts upp automatiskt och uppgifter ' +
+          'genereras. Regler per upphandling och utvärderingskriterier ändras av ' +
+          'en människa i /upphandlingar. Skriv aldrig personnamn eller kontaktuppgifter.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Upphandlingens titel (max 200 tecken).' },
+            supplier: { type: 'string', description: 'Leverantörens FÖRETAGSNAMN (tomt tills tilldelning).' },
+            procedure: {
+              type: 'string',
+              enum: ['ramavtal', 'direktupphandling', 'forenklat_forfarande', 'oppet_forfarande', 'annat'],
+              description: 'Upphandlingsförfarande.'
+            },
+            diarienummer: { type: 'string', description: 'Diarienummer/referens.' },
+            description: { type: 'string', description: 'Kort beskrivning: vad, för vem, avrop/betalning (max 5000).' },
+            status: {
+              type: 'string',
+              enum: ['planning', 'tender_open', 'evaluation', 'awarded', 'active', 'ended', 'cancelled'],
+              description: 'Default planning.'
+            },
+            tender_deadline: { type: 'string', description: 'Sista anbudsdag (ÅÅÅÅ-MM-DD).' },
+            contract_start: { type: 'string', description: 'Avtalsstart (ÅÅÅÅ-MM-DD).' },
+            contract_end: { type: 'string', description: 'Avtalsslut utan förlängning (ÅÅÅÅ-MM-DD).' },
+            extension_option_months: { type: 'integer', description: 'Förlängningsoption i månader.' },
+            estimated_value_sek: { type: 'number', description: 'Uppskattat totalt värde i SEK.' },
+            estimated_calloffs: { type: 'integer', description: 'Uppskattat antal avrop/bolag.' },
+            is_excellence_activity: { type: 'boolean', description: 'true = följs upp som excellens-insats.' },
+            notes: { type: 'string', description: 'Interna anteckningar (inga personuppgifter).' }
+          },
+          required: ['title']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_procurement_calloff',
+        description:
+          'Registrerar ett avrop under en upphandling för ett bolag ("Fixkod ' +
+          'avropar grundpaketet från 1 oktober"). Milstolpe 1, avropets slut och ' +
+          'milstolpe 2 förifylls från upphandlingens avropsmall när de utelämnas. ' +
+          'Uppföljningsuppgifter (avstämning inför milstolpar, slutrapport, ' +
+          'utvärdering) skapas automatiskt på bolagets tavla. Slå upp procurement_id ' +
+          'via query_collection på procurements och startup_id via search_records.',
+        parameters: {
+          type: 'object',
+          properties: {
+            procurement_id: { type: 'string', description: 'PocketBase-id för upphandlingen.' },
+            startup_id: { type: 'string', description: 'Bolagets id (valfritt men normalt).' },
+            title: { type: 'string', description: 'Rubrik, t.ex. "Grundpaket" (valfritt).' },
+            status: { type: 'string', enum: ['planned', 'active', 'completed', 'cancelled'], description: 'Default planned.' },
+            started_at: { type: 'string', description: 'Avropsstart (ÅÅÅÅ-MM-DD).' },
+            ends_at: { type: 'string', description: 'Avropets slut (ÅÅÅÅ-MM-DD), annars från mallen.' },
+            milestone_1_due: { type: 'string', description: 'Deadline milstolpe 1, annars från mallen.' },
+            milestone_2_due: { type: 'string', description: 'Deadline milstolpe 2, annars från mallen.' },
+            amount_sek: { type: 'number', description: 'Belopp i SEK.' },
+            movexum_share_pct: { type: 'number', description: 'Movexums betalningsandel i procent (0–100).' },
+            state_aid_relevant: { type: 'boolean', description: 'true om Movexums finansiering kan utgöra statsstöd (de minimis).' },
+            is_excellence_activity: { type: 'boolean', description: 'Överstyr upphandlingens excellens-flagga.' },
+            notes: { type: 'string', description: 'Anteckningar (inga personuppgifter).' }
+          },
+          required: ['procurement_id']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'update_procurement_calloff',
+        description:
+          'Uppdaterar ett avrop: godkänn milstolpe 1/2 (milestone_1_approved_at / ' +
+          'milestone_2_approved_at = dagens datum om användaren säger "godkänn"), ' +
+          'bocka av slutrapport (final_report_received_at), ändra status/datum/belopp. ' +
+          'Uppföljningar vars villkor upphör auto-stängs. Själva UTVÄRDERINGEN ' +
+          '(poäng + omdöme om leverantören) gör en människa i UI:t. Slå upp ' +
+          'calloff_id via query_collection på procurement_calloffs.',
+        parameters: {
+          type: 'object',
+          properties: {
+            calloff_id: { type: 'string', description: 'PocketBase-id för avropet.' },
+            status: { type: 'string', enum: ['planned', 'active', 'completed', 'cancelled'] },
+            title: { type: 'string' },
+            started_at: { type: 'string', description: 'ÅÅÅÅ-MM-DD' },
+            ends_at: { type: 'string', description: 'ÅÅÅÅ-MM-DD' },
+            milestone_1_due: { type: 'string', description: 'ÅÅÅÅ-MM-DD' },
+            milestone_1_approved_at: { type: 'string', description: 'ÅÅÅÅ-MM-DD — godkänner milstolpe 1.' },
+            milestone_2_due: { type: 'string', description: 'ÅÅÅÅ-MM-DD' },
+            milestone_2_approved_at: { type: 'string', description: 'ÅÅÅÅ-MM-DD — godkänner milstolpe 2 (kräver godkänd M1).' },
+            final_report_received_at: { type: 'string', description: 'ÅÅÅÅ-MM-DD — slutrapporten är mottagen.' },
+            amount_sek: { type: 'number' },
+            movexum_share_pct: { type: 'number' },
+            state_aid_relevant: { type: 'boolean' },
+            is_excellence_activity: { type: 'boolean' },
+            notes: { type: 'string' }
+          },
+          required: ['calloff_id']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
         name: 'request_approval',
         description:
           'Visar en Godkänn/Avbryt-knapp för användaren i chatten. Använd ' +
@@ -1793,6 +1905,12 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
     }
     case 'update_org_post':
       return { tool: name, label: 'Uppdaterar inlägg på dashboarden' };
+    case 'create_procurement':
+      return { tool: name, label: 'Registrerar upphandling' };
+    case 'create_procurement_calloff':
+      return { tool: name, label: 'Registrerar avrop' };
+    case 'update_procurement_calloff':
+      return { tool: name, label: 'Uppdaterar avrop' };
     case 'request_approval':
       return { tool: name, label: 'Ber om ditt godkännande' };
     case 'start_meeting':
@@ -2751,6 +2869,12 @@ export async function dispatchToolCall(
       return runCreateOrgPost(args, ctx);
     case 'update_org_post':
       return runUpdateOrgPost(args, ctx);
+    case 'create_procurement':
+      return runCreateProcurement(args, ctx);
+    case 'create_procurement_calloff':
+      return runCreateProcurementCalloff(args, ctx);
+    case 'update_procurement_calloff':
+      return runUpdateProcurementCalloff(args, ctx);
     case 'request_approval':
       return runRequestApproval(args, ctx);
     case 'start_meeting':
@@ -3923,6 +4047,161 @@ async function runUpdateOrgPost(
       pinned: result.value.pinned,
       updated_fields: Object.keys(changes),
       path: result.value.homePath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+// ── Upphandlingar (§ 39) ─────────────────────────────────────────────────────
+//
+// Skrivlagret validerar + auditar; uppföljningssynken (regler → tasks) körs
+// direkt efter så att kvittot kan tala om hur många uppgifter som skapades.
+
+const PROCUREMENT_ARG_KEYS = [
+  'title',
+  'supplier',
+  'procedure',
+  'diarienummer',
+  'description',
+  'status',
+  'tender_deadline',
+  'contract_start',
+  'contract_end',
+  'extension_option_months',
+  'estimated_value_sek',
+  'estimated_calloffs',
+  'is_excellence_activity',
+  'notes'
+] as const;
+
+const CALLOFF_ARG_KEYS = [
+  'title',
+  'status',
+  'started_at',
+  'ends_at',
+  'milestone_1_due',
+  'milestone_1_approved_at',
+  'milestone_2_due',
+  'milestone_2_approved_at',
+  'final_report_received_at',
+  'amount_sek',
+  'movexum_share_pct',
+  'state_aid_relevant',
+  'is_excellence_activity',
+  'notes'
+] as const;
+
+function pickArgs(args: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    const v = args[k];
+    if (v === undefined || v === null) continue;
+    if (typeof v === 'string' && v.trim() === '') continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+async function syncFollowupsNote(
+  ctx: ToolDispatchContext,
+  actor: Actor,
+  procurementId: string
+): Promise<{ note: string; warning?: string }> {
+  const { syncProcurementFollowups } = await import('@/lib/procurements/followups');
+  const res = await syncProcurementFollowups(ctx.pb, actor, procurementId);
+  const parts: string[] = [];
+  if (res.created) parts.push(`${res.created} uppföljningsuppgift(er) skapade`);
+  if (res.updated) parts.push(`${res.updated} flyttade`);
+  if (res.resolved) parts.push(`${res.resolved} auto-stängda`);
+  return {
+    note: parts.length > 0 ? parts.join(', ') + '.' : 'Inga nya uppföljningar behövdes.',
+    warning: res.error
+  };
+}
+
+async function runCreateProcurement(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createProcurement(ctx.pb, actor, {
+    ...pickArgs(args, PROCUREMENT_ARG_KEYS),
+    title: argStr(args, 'title')
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  const sync = await syncFollowupsNote(ctx, actor, result.value.procurementId);
+  return {
+    ok: true,
+    warning: sync.warning,
+    data: {
+      procurement_id: result.value.procurementId,
+      title: result.value.title,
+      path: result.value.path,
+      followups: sync.note,
+      note:
+        'Upphandlingen är registrerad. Avrop per bolag registreras med ' +
+        'create_procurement_calloff; underlaget kan laddas upp på ' +
+        result.value.path +
+        ' och regler/utvärderingskriterier justeras där.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateProcurementCalloff(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createProcurementCalloff(ctx.pb, actor, {
+    ...pickArgs(args, CALLOFF_ARG_KEYS),
+    procurementId: argStr(args, 'procurement_id'),
+    startupId: argStr(args, 'startup_id') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  const sync = await syncFollowupsNote(ctx, actor, result.value.procurementId);
+  return {
+    ok: true,
+    warning: sync.warning,
+    data: {
+      calloff_id: result.value.calloffId,
+      procurement_id: result.value.procurementId,
+      startup_id: result.value.startupId ?? undefined,
+      startup: result.value.startupName ?? undefined,
+      title: result.value.title,
+      path: result.value.path,
+      followups: sync.note,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runUpdateProcurementCalloff(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const changes = pickArgs(args, CALLOFF_ARG_KEYS);
+  const result = await updateProcurementCalloffFields(ctx.pb, actor, argStr(args, 'calloff_id'), changes);
+  if (!result.ok) return { ok: false, error: result.error };
+  const sync = await syncFollowupsNote(ctx, actor, result.value.procurementId);
+  return {
+    ok: true,
+    warning: sync.warning,
+    data: {
+      calloff_id: result.value.calloffId,
+      procurement_id: result.value.procurementId,
+      startup: result.value.startupName ?? undefined,
+      title: result.value.title,
+      updated_fields: result.value.changed,
+      path: result.value.path,
+      followups: sync.note,
       logged_in: 'agent_actions'
     }
   };

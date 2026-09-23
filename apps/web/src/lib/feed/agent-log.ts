@@ -300,13 +300,16 @@ function mapRow(
       if (action === 'create') {
         const startupId = str(after.startup);
         const missionId = str(after.mission);
+        const procurementId = str(after.procurement);
         return {
           title: `Nytt kanban-kort: "${trunc(str(after.description), 60) || 'uppgift'}"`,
           href: startupId
             ? `/startups/${startupId}/aktiviteter`
             : missionId
               ? `/uppdrag/${missionId}`
-              : '/inkorg',
+              : procurementId
+                ? `/upphandlingar/${procurementId}`
+                : '/inkorg',
           icon: 'check'
         };
       }
@@ -427,6 +430,96 @@ function mapRow(
           : `Anslagstavlan: ett inlägg ${changedVerb}`,
         href: '/hem',
         icon: 'home'
+      };
+    }
+
+    // Upphandlingar & excellens-insatser (§ 39).
+    case 'procurements': {
+      const href = row.record_id ? `/upphandlingar/${row.record_id}` : '/upphandlingar';
+      if (action === 'create') {
+        return {
+          title: `Ny upphandling: "${str(after.title) || 'utan titel'}"`,
+          detail: str(after.supplier) || undefined,
+          href,
+          icon: 'briefcase'
+        };
+      }
+      const field = str(row.field);
+      return {
+        title: field
+          ? `Upphandling: ${field} ${changedVerb}`
+          : `En upphandling ${changedVerb}`,
+        detail: field === 'status' ? str(row.after_value) || undefined : undefined,
+        href,
+        icon: 'briefcase'
+      };
+    }
+
+    case 'procurement_calloffs': {
+      const procurementId = str(after.procurement);
+      const startupName = str(after.startup_name);
+      const href = procurementId ? `/upphandlingar/${procurementId}` : '/upphandlingar';
+      if (action === 'create') {
+        return {
+          title: `Nytt avrop: ${startupName || 'bolag'}${str(after.procurement_title) ? ` — ${str(after.procurement_title)}` : ''}`,
+          detail: str(after.title) || undefined,
+          href,
+          icon: 'briefcase'
+        };
+      }
+      const field = str(row.field);
+      const label =
+        field === 'milestone_1_approved_at'
+          ? 'Milstolpe 1 godkänd'
+          : field === 'milestone_2_approved_at'
+            ? 'Milstolpe 2 godkänd'
+            : field === 'final_report_received_at'
+              ? 'Slutrapport mottagen'
+              : field === 'evaluation_score'
+                ? 'Avrop utvärderat'
+                : field
+                  ? `Avrop: ${field} ${changedVerb}`
+                  : `Ett avrop ${changedVerb}`;
+      return {
+        title: startupName ? `${label}: ${startupName}` : label,
+        href,
+        icon: field === 'evaluation_score' ? 'star' : 'check'
+      };
+    }
+
+    case 'procurement_rules': {
+      const name = str(after.name);
+      if (after.deleted === true) {
+        return { title: `Uppföljningsregel borttagen: "${name || 'regel'}"`, href: '/upphandlingar/regler', icon: 'gear' };
+      }
+      return {
+        title: action === 'create' ? `Ny uppföljningsregel: "${name || 'regel'}"` : `Uppföljningsregel ${changedVerb}: "${name || 'regel'}"`,
+        href: '/upphandlingar/regler',
+        icon: 'gear'
+      };
+    }
+
+    case 'procurement_followups': {
+      const created = Number(after.created ?? 0);
+      const resolved = Number(after.resolved ?? 0);
+      const bits = [
+        created > 0 ? `${created} nya uppföljningar` : null,
+        resolved > 0 ? `${resolved} auto-stängda` : null
+      ].filter(Boolean);
+      return {
+        title: `Uppföljning: ${str(after.procurement_title) || 'upphandling'}`,
+        detail: bits.join(' · ') || undefined,
+        href: row.record_id ? `/upphandlingar/${row.record_id}` : '/upphandlingar',
+        icon: 'zap'
+      };
+    }
+
+    case 'procurement_documents': {
+      const procurementId = str(after.procurement);
+      return {
+        title: `Upphandlingsunderlag borttaget: "${str(after.filename) || 'dokument'}"`,
+        href: procurementId ? `/upphandlingar/${procurementId}` : '/upphandlingar',
+        icon: 'doc'
       };
     }
 

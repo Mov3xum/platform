@@ -369,7 +369,14 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'annual_wheel_items',
   // Årshjulets dynamiska kategorier (migration 1700000139, § 30). Samma
   // isolering som posterna — de beskriver Movexums interna kalender.
-  'annual_wheel_categories'
+  'annual_wheel_categories',
+  // Upphandlingar & excellens-insatser (migrationer 1700000149–151, § 39).
+  // Intern inköps-/avtalsdata med avrop per bolag → staff/observer-only; en
+  // ren startup_member ska aldrig se andra bolags avrop eller utvärderingar.
+  'procurements',
+  'procurement_calloffs',
+  'procurement_rules',
+  'procurement_documents'
 ];
 
 // Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa
@@ -830,7 +837,11 @@ async function verifyHealthEndpoint() {
 const REQUIRED_APP_FIELDS = [
   // Årshjul (§ 30): day = migration 1700000138, tags/responsible = 1700000139.
   // day = 1700000138, tags/responsible = 1700000139, end_* = 1700000141.
-  { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible', 'end_month', 'end_day'] }
+  { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible', 'end_month', 'end_day'] },
+  // Upphandlingar (§ 39): regelgenererade uppföljningar = tasks med
+  // procurement-länk + rule_key (migration 1700000152). Saknas fälten
+  // skapas korten utan idempotensnyckel → dubbletter vid varje synk.
+  { collection: 'tasks', fields: ['procurement', 'procurement_calloff', 'rule_key'] }
 ];
 
 const MUST_NOT_BE_REQUIRED = [
