@@ -19,7 +19,13 @@ import {
   LEAD_STATUS_ORDER,
   type LeadStatus
 } from '@/lib/compass/types';
-import { ALL_PHASES, validateWorkshopMediaFile, type StartupPhase } from '@platform/shared';
+import {
+  ALL_PHASES,
+  DEFAULT_COMPASS_LAYOUT,
+  normalizeCompassLayout,
+  validateWorkshopMediaFile,
+  type StartupPhase
+} from '@platform/shared';
 
 const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
 const CONVERT_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
@@ -651,6 +657,13 @@ async function applyModuleUpdate(
     public_url_enabled: formData.get('public_url_enabled') === 'on'
   };
 
+  // Mall för den publika sidan (§ 23.7). Normaliseras alltid (okänt ⇒ classic)
+  // — klienten är aldrig säkerhetsgränsen. Bara satt när formuläret skickar
+  // fältet, så äldre formulär/anrop lämnar mallen orörd.
+  const layoutRaw = formData.get('layout');
+  const wantedLayout = layoutRaw === null ? null : normalizeCompassLayout(String(layoutRaw));
+  if (wantedLayout) patch.layout = wantedLayout;
+
   // Publik slug (global unik). Bara sätt om angiven — tom lämnar oförändrad.
   const publicSlug = slugify(String(formData.get('public_slug') || ''));
   if (publicSlug) patch.public_slug = publicSlug;
@@ -772,8 +785,11 @@ async function applyModuleUpdate(
     patch.hero_image = null;
   }
 
+  let saved: Record<string, unknown> | null = null;
   try {
-    await writeWithFallback(pb, (c) => c.collection('compass_modules').update(id, patch));
+    saved = (await writeWithFallback(pb, (c) =>
+      c.collection('compass_modules').update(id, patch)
+    )) as Record<string, unknown>;
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
     // PB unik-index-fel på public_slug → vänligt meddelande.
@@ -781,6 +797,20 @@ async function applyModuleUpdate(
       throw new Error('Den publika länken (slug) är upptagen — välj en annan.');
     }
     throw new Error(`Kunde inte uppdatera modul: ${msg}`);
+  }
+
+  // Schema-drift (§ 24.4/§ 30.4-invarianten): PB släpper okända fält TYST.
+  // En instans utan migration 1700000154 saknar `layout` → valet hade
+  // "sparats" utan att synas. Säg det rakt ut i stället för en tyst no-op.
+  if (
+    wantedLayout &&
+    wantedLayout !== DEFAULT_COMPASS_LAYOUT &&
+    saved &&
+    !('layout' in saved)
+  ) {
+    throw new Error(
+      'Övriga fält sparades, men mallen kunde inte sparas: fältet layout saknas i databasen (PocketBase-migration 1700000154 är inte applicerad).'
+    );
   }
 
   await logSecurity(pb, user.tenant, {

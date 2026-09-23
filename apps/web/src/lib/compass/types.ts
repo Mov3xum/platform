@@ -2,9 +2,9 @@
 // Hjälper de andra modul-filerna att hålla sig till PocketBase-schemat
 // från migration 1700000039 + 1700000049 + 1700000108.
 
-import type { ResultBucket } from '@platform/shared';
+import type { CompassLayout, ResultBucket } from '@platform/shared';
 
-export type { ResultBucket };
+export type { CompassLayout, ResultBucket };
 
 export type LeadStatus =
   | 'new'
@@ -198,6 +198,12 @@ export interface CompassModule {
   hero_image?: string;
   /** Omslagsvideo (filnamn på compass_modules.hero_video, migration 1700000141). */
   hero_video?: string;
+  /**
+   * Mall för hela den publika sidan (migration 1700000154, § 23.7):
+   * classic | split_left | split_right | cover | panel | minimal. Saknat/okänt
+   * värde ⇒ `classic` via `normalizeCompassLayout` (bakåtkompatibelt).
+   */
+  layout?: CompassLayout | string;
   chat_persona?: string;
   /** Max antal AI-utbyten i chat-flödet (0 = obegränsat). */
   max_exchanges?: number;

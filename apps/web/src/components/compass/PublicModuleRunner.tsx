@@ -61,7 +61,7 @@ export function PublicModuleRunner({ module, questions, brandName, nextModule }:
     // under chatten när modulen är kedjad till en nästa modul.
     return (
       <div style={{ display: 'grid', gap: 16 }}>
-        <div style={{ height: '70vh', minHeight: 520 }}>
+        <div className="mx-compass-chatbox">
           <CompassChat
             endpoint={`${PUBLIC_API_BASE}/${module.public_slug || module.slug}/chat`}
             moduleSlug={module.public_slug || module.slug}

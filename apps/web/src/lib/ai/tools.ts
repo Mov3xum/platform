@@ -959,7 +959,11 @@ export function buildChatTools(
         name: 'update_compass_module_field',
         description:
           'Uppdaterar ETT fält på en befintlig intag-modul (namn, beskrivning, ' +
-          'välkomst-/tacktext, målgrupp, samtyckesnot eller flödestyp). ' +
+          'välkomst-/tacktext, målgrupp, samtyckesnot, flödestyp eller mall). ' +
+          'Fältet `layout` väljer mall för hela den publika sidan: classic ' +
+          '(bild överst), split_left (bild till vänster), split_right (bild till ' +
+          'höger), cover (heltäckande bakgrund), panel (färgpanel) eller minimal ' +
+          '(bara typografi). ' +
           'Publicering (is_active) och publik URL kan du INTE sätta — det gör ' +
           'personalen själv i modul-admin.',
         parameters: {
@@ -975,7 +979,8 @@ export function buildChatTools(
                 'success_message',
                 'target_audience',
                 'consent_note',
-                'flow_type'
+                'flow_type',
+                'layout'
               ],
               description: 'Vilket fält som ska uppdateras.'
             },
