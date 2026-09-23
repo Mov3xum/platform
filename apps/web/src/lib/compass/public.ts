@@ -2,6 +2,7 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { getPublicPbUrl } from '@/lib/pb-url';
+import { sortCompassQuestions } from '@platform/shared';
 import type { CompassModule, CompassQuestion, NextModuleLink } from './types';
 
 export type { NextModuleLink };
@@ -204,7 +205,9 @@ export async function getPublicModuleQuestions(
       sort: 'sort_order',
       batch: 200
     });
-    return res;
+    // Samma deterministiska tiebreak som modul-admin (store.ts) — besökaren
+    // och redaktören ska se exakt samma ordning.
+    return sortCompassQuestions(res);
   } catch {
     return [];
   }
