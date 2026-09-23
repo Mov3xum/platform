@@ -6,15 +6,47 @@ import { PageShell } from '@/components/PageShell';
 import { Card, Chip, Icon } from '@/components/proto';
 import { getLeadAnalytics, listModules } from '@/lib/compass/store';
 import { FLOW_TYPE_LABEL } from '@/lib/compass/types';
+import { setModulePublishedAction } from '@/lib/actions/compass';
+import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
 import { buildInflodeTabs } from '../../_tabs';
 
 export const dynamic = 'force-dynamic';
 
-export default async function AdminModulesPage() {
+// Kvitto efter Publicera/Avpublicera från raden (setModulePublishedAction
+// redirectar hit med ?ok=&module= eller ?error=).
+function noticeFromParams(
+  params: Record<string, string | string[] | undefined>
+): { kind: 'ok' | 'error'; text: string } | null {
+  const pick = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) || '';
+  const ok = pick(params.ok);
+  const moduleSlug = pick(params.module);
+  if (ok === 'published') {
+    return {
+      kind: 'ok',
+      text: `Modulen ${moduleSlug ? `"${moduleSlug}" ` : ''}är publicerad — den publika länken fungerar nu.`
+    };
+  }
+  if (ok === 'unpublished') {
+    return {
+      kind: 'ok',
+      text: `Modulen ${moduleSlug ? `"${moduleSlug}" ` : ''}är avpublicerad — den publika länken är stängd.`
+    };
+  }
+  const err = pick(params.error);
+  if (err) return { kind: 'error', text: err.slice(0, 300) };
+  return null;
+}
+
+export default async function AdminModulesPage({
+  searchParams
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
     redirect('/inflode');
   }
+  const notice = noticeFromParams(searchParams ? await searchParams : {});
   const pb = await getServerPb();
   const [modules, analytics] = await Promise.all([
     listModules(pb, user.tenant),
@@ -54,6 +86,29 @@ export default async function AdminModulesPage() {
         </Link>
       }
     >
+      {notice && (
+        <div
+          role={notice.kind === 'error' ? 'alert' : 'status'}
+          className="mx-t-13 mx-flex mx-items-c mx-gap-2"
+          style={{
+            marginBottom: 12,
+            padding: '10px 12px',
+            borderRadius: 10,
+            border: `1px solid ${
+              notice.kind === 'error' ? 'var(--movexum-morkorange)' : 'var(--movexum-gron)'
+            }`,
+            background:
+              notice.kind === 'error'
+                ? 'var(--movexum-pastell-orange)'
+                : 'var(--movexum-pastell-gron)',
+            color: notice.kind === 'error' ? 'var(--movexum-morkorange)' : 'var(--movexum-morkgron)'
+          }}
+        >
+          <Icon name={notice.kind === 'error' ? 'alert' : 'check'} size={13} />
+          <span>{notice.text}</span>
+        </div>
+      )}
+
       <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-paper-2)' }}>
         <div
           className="mx-flex mx-items-c mx-gap-2 mx-t-12 mx-muted"
@@ -86,6 +141,7 @@ export default async function AdminModulesPage() {
           {modules.map((m) => {
             const metrics = metricsFor(m);
             const nextName = m.next_module ? moduleNameById.get(m.next_module) : undefined;
+            const published = Boolean(m.is_active && m.public_url_enabled);
             return (
               <Card key={m.id} style={{ padding: 14 }}>
                 <div className="mx-flex mx-items-c mx-gap-2">
@@ -133,6 +189,33 @@ export default async function AdminModulesPage() {
                     </div>
                   )}
                   <div className="mx-flex mx-gap-2" style={{ flexShrink: 0 }}>
+                    {/* Publicera/avpublicera direkt från raden — samma
+                        server-action-flöde (RBAC + tenant) som editorn. */}
+                    <form action={setModulePublishedAction} style={{ display: 'contents' }}>
+                      <input type="hidden" name="id" value={m.id} />
+                      {published ? (
+                        <>
+                          <input type="hidden" name="published" value="" />
+                          <ConfirmSubmitButton
+                            confirmText={`Avpublicera "${m.name}"? Den publika länken /m/${m.public_slug || ''} slutar fungera tills du publicerar igen. Befintliga leads bevaras.`}
+                            className="mx-btn mx-sm"
+                          >
+                            <Icon name="eye" size={12} /> Avpublicera
+                          </ConfirmSubmitButton>
+                        </>
+                      ) : (
+                        <>
+                          <input type="hidden" name="published" value="on" />
+                          <button
+                            type="submit"
+                            className="mx-btn mx-sm"
+                            title="Aktiverar modulen och öppnar den publika länken /m/…"
+                          >
+                            <Icon name="globe" size={12} /> Publicera
+                          </button>
+                        </>
+                      )}
+                    </form>
                     {m.public_slug && m.is_active && m.public_url_enabled ? (
                       <a
                         href={`/m/${m.public_slug}`}

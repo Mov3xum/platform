@@ -53,9 +53,9 @@ export default async function NewModulePage({
               margin: '12px 16px 0',
               padding: '10px 12px',
               borderRadius: 10,
-              border: '1px solid var(--mx-movexum-morkorange)',
-              background: 'var(--mx-movexum-pastell-orange)',
-              color: 'var(--mx-movexum-morkorange)'
+              border: '1px solid var(--movexum-morkorange)',
+              background: 'var(--movexum-pastell-orange)',
+              color: 'var(--movexum-morkorange)'
             }}
             className="mx-t-13"
           >

@@ -14,7 +14,7 @@ import { deleteModuleAction } from '@/lib/actions/compass';
 import { listEvents } from '@/lib/actions/events';
 import { ShareModule } from '@/components/compass/ShareModule';
 import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
-import { ModuleEditor } from '@/components/compass/ModuleEditor';
+import { ModuleEditor, type ModuleEditorNotice } from '@/components/compass/ModuleEditor';
 import { moduleHeroImageUrl, moduleHeroVideoUrl } from '@/lib/compass/media';
 
 export const dynamic = 'force-dynamic';
@@ -25,12 +25,36 @@ const MODEL_OPTIONS = [
   { value: 'mistral-small-latest', label: 'Mistral Small (snabb/billig)' }
 ];
 
+// Kvitto efter Spara/Publicera/Avpublicera (updateModuleAction redirectar hit
+// med ?ok= eller ?error=). Texten i ?error= är actionens egna, PII-fria
+// felmeddelande (t.ex. "slug upptagen").
+const OK_TEXT: Record<string, string> = {
+  saved: 'Modulen är sparad.',
+  published: 'Modulen är publicerad — den publika länken fungerar nu.',
+  unpublished: 'Modulen är avpublicerad — den publika länken är stängd.'
+};
+
+function noticeFromParams(
+  params: Record<string, string | string[] | undefined>
+): ModuleEditorNotice | null {
+  const okRaw = params.ok;
+  const ok = Array.isArray(okRaw) ? okRaw[0] : okRaw;
+  if (ok && OK_TEXT[ok]) return { kind: 'ok', text: OK_TEXT[ok] };
+  const errRaw = params.error;
+  const err = Array.isArray(errRaw) ? errRaw[0] : errRaw;
+  if (err) return { kind: 'error', text: err.slice(0, 300) };
+  return null;
+}
+
 export default async function EditModulePage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ slug: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug } = await params;
+  const notice = noticeFromParams(searchParams ? await searchParams : {});
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
     redirect('/inflode');
@@ -86,7 +110,7 @@ export default async function EditModulePage({
       <PageHead
         crumb={`Startupkompassen / Moduler / ${mod.name}`}
         title={mod.name}
-        subtitle={`${mod.public_slug ? `/m/${mod.public_slug}` : '(ingen publik länk)'} · ${FLOW_TYPE_LABEL[mod.flow_type]} · ${mod.is_active ? 'Aktiv' : 'Utkast'}`}
+        subtitle={`${mod.public_slug ? `/m/${mod.public_slug}` : '(ingen publik länk)'} · ${FLOW_TYPE_LABEL[mod.flow_type]} · ${mod.is_active && mod.public_url_enabled ? 'Publicerad' : mod.is_active ? 'Aktiv (ej publik)' : 'Utkast'}`}
         actions={
           <>
             <Link href="/inflode/admin/modules" className="mx-btn">
@@ -122,6 +146,7 @@ export default async function EditModulePage({
           <Card>
             <ModuleEditor
               module={mod}
+              notice={notice}
               heroImageUrl={heroImageUrl}
               heroVideoUrl={heroVideoUrl}
               modelOptions={MODEL_OPTIONS}
