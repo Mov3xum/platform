@@ -43,10 +43,13 @@ function pbErrorMessage(err: unknown): string | undefined {
   return typeof msg === 'string' && msg ? msg : undefined;
 }
 
-// Skriv via app-user-klienten först; superuser-fallback vid 400/403 (PB
-// v0.23.4:s rule-eval-bugg, CLAUDE.md § 21.3). Roll + tenant är ALLTID
-// verifierade i handlern INNAN detta anropas — fallbacken är robusthet,
-// inte behörighetsgränsen.
+// Skriv via app-user-klienten först; superuser-fallback vid 400/403/404 (PB
+// v0.23.4:s rule-eval-bugg, CLAUDE.md § 21.3). 404 ingår: PocketBase svarar
+// "not found" — inte 403 — när update-regeln filtrerar bort posten, och utan
+// fallbacken föll uppladdningen av omslagsbild/-video till ett oförklarat
+// "Kunde inte spara filen på servern." Roll + tenant är ALLTID verifierade i
+// handlern INNAN detta anropas — fallbacken är robusthet, inte
+// behörighetsgränsen.
 async function writeWithFallback<T>(
   pb: PocketBase,
   run: (client: PocketBase) => Promise<T>
@@ -55,7 +58,7 @@ async function writeWithFallback<T>(
     return await run(pb);
   } catch (err) {
     const status = statusOf(err);
-    if (status === 400 || status === 403) {
+    if (status === 400 || status === 403 || status === 404) {
       const su = await getSuperuserPb();
       if (su.ok) return run(su.pb);
     }

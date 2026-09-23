@@ -1770,6 +1770,17 @@ oändliga loopar/token-explosion (§10 robusthet). `conversation` muteras;
 `onUsage` låter varje anropare logga i `ai_usage_events` med rätt
 `surface`.
 
+**Bearbetningsordning i en tur (2026-09).** Modellen kan ge flera
+verktygsanrop i samma tur. LÄSANROP körs parallellt (latens), men SKRIVANROP
+(`DOMAIN_WRITE_TOOLS`) körs **sekventiellt i modellens anropsordning** via den
+rena, enhetstestade `lib/ai/tool-dispatch-order.ts` (`runToolCallsOrdered`).
+Bakgrund: när en Startupkompass-modul byggdes från chatten kördes alla
+`add_compass_question` samtidigt, varje anrop läste "högsta sort_order" innan
+någon skrivit, alla fick samma nummer och besökaren såg frågorna som
+"6, 1, 9". Skapandeordning = anropsordning är en regel för MOTORN — inget ett
+enskilt skrivverktyg ska lösa själv. Resultaten matas tillbaka i ursprunglig
+index-ordning; säkerhets-/RBAC-garantierna är oförändrade.
+
 ### 16.3 Verktygsytor per körningstyp (människa-i-loopen)
 
 De read-only läs-/sökverktygen (`query/count_collection`,
@@ -3089,6 +3100,50 @@ migration-only (§ 23.4).
 **Riskklass:** oförändrad (n/a — navigation + konfiguration, ingen AI-inferens,
 ingen ny PII-väg; `next_module` är en intern modul-relation och whitelistas
 aldrig i `lib/ai/context.ts`).
+
+### 23.8 Modul-admin: 404 vid publicering, omslagsmedia & frågeordning (2026-09)
+
+Tre fel i samma yta, en gemensam grundorsak för de två första:
+
+- **"Publicera modul" gav 404.** `updateModuleAction` (och `delete…`/
+  `addQuestion…`/`updateQuestion…`) läste modulen med användartoken via
+  `getOne` UTAN fallback. PB v0.23.4 kan tyst neka view-regeln för behörig
+  staff (§ 21.3) och svarar då **404** ("The requested resource wasn't
+  found."), som kastades rakt ut. Nu går alla modulläsningar i
+  `lib/actions/compass.ts` genom `getModuleInTenant` (användartoken →
+  superuser-fallback vid 400/403/404 → **explicit tenant-kontroll i koden**,
+  klienten är aldrig säkerhetsgränsen). `deleteQuestionAction` verifierar
+  dessutom fråga → modul → tenant innan fallbacken får radera.
+- **Omslagsbild/-video kunde inte laddas upp.** `writeWithFallback` i
+  `/api/inflode/modules/[id]/media`, `lib/actions/compass.ts` och
+  `lib/core/write/compass.ts` föll bara tillbaka vid 400/403 — men PB svarar
+  **404** (inte 403) när update-/delete-regeln filtrerar bort posten. Nu
+  ingår 404 i fallback-klassen (samma som mötesläget § 34.3). Rutinen är
+  oförändrat robusthet, inte behörighet: roll + tenant är verifierade INNAN.
+- **Frågorna hamnade i fel ordning ("6, 1, 9") när modulen byggdes från
+  chatten.** Tre lager:
+  1. **Motorn:** skrivanrop i en tur körs sekventiellt i anropsordning
+     (§ 16.2, `runToolCallsOrdered`).
+  2. **Skrivlagret** (`lib/core/write/compass.ts`): "läs högsta sort_order →
+     skriv" sker under ett **in-process-lås per modul** (`withModuleLock`),
+     och verktyget `add_compass_question` tar `position` = frågans
+     **absoluta plats** i modulen (1 = första) som modellen instrueras att
+     ALLTID ange när den bygger en modul (`AUTHORING_GUIDANCE`). Den rena,
+     enhetstestade `planCompassQuestionInsert` i `@platform/shared` skjuter
+     in frågan mellan grannarna (heltalsmittpunkt) och numrerar om modulen
+     (10, 20, 30 …) när gapet är slut — så blir ordningen rätt även om
+     anropen bearbetas som "6, 1, 9". Utan position läggs frågan sist
+     (högsta + 10). Modul-admin (`addQuestionAction`) numrerar via samma
+     `nextCompassQuestionSortOrder` — den tidigare `Date.now() % 1e6`-
+     stämpeln började om var tusende sekund och kunde lägga en ny fråga
+     FÖRST.
+  3. **Läsvägen:** `listQuestionsForModule` (admin) och
+     `getPublicModuleQuestions` (besökare) sorterar deterministiskt i JS
+     (`sortCompassQuestions`: sort_order → created → id). PB avgör lika
+     sort_order godtyckligt; `created` i PB:s sort-sträng skulle ge 400 på en
+     instans utan migration 1700000126, därför JS.
+  Kvittot (§ 33.4) visar `position`/`sort_order` per fråga.
+  Riskklass/PII: n/a — inga nya fält, kollektioner eller datavägar.
 
 ---
 

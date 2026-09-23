@@ -14,6 +14,7 @@ import {
 } from '@/lib/compass/store';
 import { marketScanLead, reviewLead, scoreLead } from '@/lib/compass/chat';
 import { logAgentAction } from '@/lib/core/write';
+import { nextCompassQuestionSortOrder } from '@/lib/core/write/compass';
 import {
   LEAD_STATUS_ORDER,
   type LeadStatus
@@ -386,9 +387,12 @@ function statusOf(err: unknown): number | undefined {
   return undefined;
 }
 
-// Skriv via app-user-klienten först; faller tillbaka på superuser vid 400/403
-// (PB v0.23.4:s rule-eval-bugg, CLAUDE.md § 21.3 — annars behöriga staff-
-// skrivningar nekas tyst → server-actionen kastade 500). Samma mönster som
+// Skriv via app-user-klienten först; faller tillbaka på superuser vid
+// 400/403/404 (PB v0.23.4:s rule-eval-bugg, CLAUDE.md § 21.3 — annars
+// behöriga staff-skrivningar nekas tyst → server-actionen kastade 500).
+// 404 ingår: PocketBase svarar "The requested resource wasn't found." — inte
+// 403 — när update-/delete-regeln filtrerar bort posten, så "Publicera" på en
+// modul gav en ClientResponseError 404 för behörig staff. Samma mönster som
 // lib/actions/onboarding.ts + education-documents.ts. Roll + tenant verifieras
 // ALLTID i server-actionen INNAN detta anropas — superusern är en robusthets-
 // fallback, inte behörighetsgränsen.
@@ -400,12 +404,49 @@ async function writeWithFallback<T>(
     return await run(pb);
   } catch (err) {
     const status = statusOf(err);
-    if (status === 400 || status === 403) {
+    if (status === 400 || status === 403 || status === 404) {
       const su = await getSuperuserPb();
       if (su.ok) return run(su.pb);
     }
     throw err;
   }
+}
+
+type ModuleRow = { id: string; tenant?: string; slug: string; name?: string };
+
+/**
+ * Läser en modul och verifierar att den tillhör den inloggades tenant.
+ *
+ * Läsningen görs med användartoken först; PB v0.23.4 kan TYST neka
+ * view-regeln för behörig staff (§ 21.3) och svarar då 404 — det var
+ * grundorsaken till "publicera modul → 404": `updateModuleAction` läste modulen
+ * utan fallback och kastade PB:s ClientResponseError rakt ut. Nu försöker vi
+ * som superuser och gör tenant-kontrollen i koden (det är den faktiska
+ * gränsen här — klienten är aldrig säkerhetsgränsen). Finns modulen inte
+ * alls, eller tillhör den en annan tenant, kastas ett tydligt fel.
+ */
+async function getModuleInTenant(pb: PocketBase, id: string, tenant: string): Promise<ModuleRow> {
+  let row: ModuleRow | null = null;
+  try {
+    row = await pb.collection('compass_modules').getOne<ModuleRow>(id);
+  } catch (err) {
+    const status = statusOf(err);
+    if (status === 400 || status === 403 || status === 404) {
+      const su = await getSuperuserPb();
+      if (su.ok) {
+        try {
+          row = await su.pb.collection('compass_modules').getOne<ModuleRow>(id);
+        } catch {
+          row = null;
+        }
+      }
+    } else {
+      throw err;
+    }
+  }
+  if (!row) throw new Error('Modulen hittades inte.');
+  if (String(row.tenant ?? '') !== tenant) throw new Error('Forbidden');
+  return row;
 }
 
 function slugify(s: string): string {
@@ -518,9 +559,8 @@ export async function updateModuleAction(formData: FormData) {
   if (!id) throw new Error('Invalid input');
 
   const pb = await getServerPb();
-  // Verifiera tenant
-  const existing = await pb.collection('compass_modules').getOne(id);
-  if (existing.tenant !== user.tenant) throw new Error('Forbidden');
+  // Verifiera tenant (superuser-fallback vid tyst nekad view-regel, § 21.3).
+  const existing = await getModuleInTenant(pb, id, user.tenant);
 
   const maxExchangesRaw = String(formData.get('max_exchanges') || '').trim();
   const maxExchanges = Number(maxExchangesRaw);
@@ -691,13 +731,13 @@ export async function deleteModuleAction(formData: FormData) {
   if (!id) throw new Error('Invalid input');
 
   const pb = await getServerPb();
-  const existing = await pb.collection('compass_modules').getOne(id);
-  if (existing.tenant !== user.tenant) throw new Error('Forbidden');
+  const existing = await getModuleInTenant(pb, id, user.tenant);
 
   try {
     await writeWithFallback(pb, (c) => c.collection('compass_modules').delete(id));
-  } catch {
-    // ignore
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Okänt fel';
+    throw new Error(`Kunde inte radera modulen: ${msg}`);
   }
   await logSecurity(pb, user.tenant, {
     actor: user.id,
@@ -858,11 +898,14 @@ export async function addQuestionAction(formData: FormData) {
   const choices = resolveChoices(formData, inputType);
 
   const pb = await getServerPb();
-  // Verify module ownership
-  const mod = await pb.collection('compass_modules').getOne(moduleId);
-  if (mod.tenant !== user.tenant) throw new Error('Forbidden');
+  // Verify module ownership (superuser-fallback vid tyst nekad view-regel).
+  await getModuleInTenant(pb, moduleId, user.tenant);
 
   try {
+    // Samma numrering som chatt-agenten (`nextCompassQuestionSortOrder`):
+    // frågan läggs SIST. Den tidigare `Date.now() % 1e6`-stämpeln börjar om
+    // från 0 var tusende sekund → en ny fråga kunde hamna först.
+    const sortOrder = await nextCompassQuestionSortOrder(pb, moduleId);
     await writeWithFallback(pb, (c) =>
       c.collection('compass_questions').create({
         module: moduleId,
@@ -872,7 +915,7 @@ export async function addQuestionAction(formData: FormData) {
         input_type: inputType,
         required,
         choices,
-        sort_order: Date.now() % 1_000_000
+        sort_order: sortOrder
       })
     );
   } catch (err) {
@@ -905,8 +948,7 @@ export async function updateQuestionAction(formData: FormData) {
   const choices = resolveChoices(formData, inputType);
 
   const pb = await getServerPb();
-  const mod = await pb.collection('compass_modules').getOne(moduleId);
-  if (mod.tenant !== user.tenant) throw new Error('Forbidden');
+  await getModuleInTenant(pb, moduleId, user.tenant);
 
   try {
     await writeWithFallback(pb, (c) =>
@@ -938,10 +980,33 @@ export async function deleteQuestionAction(formData: FormData) {
   if (!id) throw new Error('Invalid input');
 
   const pb = await getServerPb();
+  // Superuser-fallbacken bypassar RLS → verifiera FÖRST att frågan hör till
+  // en modul i den inloggades tenant (frågan → modul → tenant).
+  let question: { module?: string } | null = null;
+  try {
+    question = await pb.collection('compass_questions').getOne<{ module?: string }>(id, {
+      fields: 'id,module'
+    });
+  } catch {
+    const su = await getSuperuserPb();
+    if (su.ok) {
+      try {
+        question = await su.pb
+          .collection('compass_questions')
+          .getOne<{ module?: string }>(id, { fields: 'id,module' });
+      } catch {
+        question = null;
+      }
+    }
+  }
+  if (!question?.module) throw new Error('Frågan hittades inte.');
+  await getModuleInTenant(pb, question.module, user.tenant);
+
   try {
     await writeWithFallback(pb, (c) => c.collection('compass_questions').delete(id));
-  } catch {
-    // ignore
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Okänt fel';
+    throw new Error(`Kunde inte radera frågan: ${msg}`);
   }
   revalidatePath(`/inflode/admin/modules/${moduleSlug}`);
 }

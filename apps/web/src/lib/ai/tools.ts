@@ -899,14 +899,26 @@ export function buildChatTools(
         name: 'add_compass_question',
         description:
           'Lägger till EN fråga i en intag-modul i Startupkompassen. Anropa en ' +
-          'gång per fråga, i den ordning frågorna ska ställas. Modul-id får du ' +
-          'från create_compass_module eller via query_collection mot ' +
-          'compass_modules.',
+          'gång per fråga, i den ordning frågorna ska ställas, och ange ALLTID ' +
+          '`position` (1 för första frågan, 2 för andra …) när du lägger in ' +
+          'flera frågor — det är det som styr ordningen besökaren ser. ' +
+          'Modul-id får du från create_compass_module eller via ' +
+          'query_collection mot compass_modules.',
         parameters: {
           type: 'object',
           properties: {
             module_id: { type: 'string', description: 'PocketBase-id för modulen.' },
             prompt: { type: 'string', description: 'Själva frågan, som besökaren läser den.' },
+            position: {
+              type: 'integer',
+              minimum: 1,
+              description:
+                'Frågans ABSOLUTA plats i modulen: 1 = första frågan besökaren ' +
+                'möter, 2 = andra osv. Numrera frågorna i samma ordning som de ' +
+                'ska ställas när du bygger en modul. Utelämnas position läggs ' +
+                'frågan sist — gör så när du lägger till EN fråga i slutet av ' +
+                'en modul som redan har frågor.'
+            },
             input_type: {
               type: 'string',
               enum: [...COMPASS_INPUT_TYPES],
@@ -3555,6 +3567,13 @@ async function runAddCompassQuestion(
   const moduleId = typeof args.module_id === 'string' ? args.module_id.trim() : '';
   if (!moduleId) return { ok: false, error: 'module_id saknas.' };
 
+  // `position` kan komma som tal eller sträng ("3") beroende på modell.
+  const positionRaw = Number(args.position);
+  const position =
+    args.position !== undefined && args.position !== null && Number.isFinite(positionRaw)
+      ? positionRaw
+      : undefined;
+
   const result = await addCompassQuestion(ctx.pb, actor, {
     moduleId,
     prompt: typeof args.prompt === 'string' ? args.prompt : '',
@@ -3562,7 +3581,8 @@ async function runAddCompassQuestion(
     key: typeof args.key === 'string' ? args.key : undefined,
     helpText: typeof args.help_text === 'string' ? args.help_text : undefined,
     required: typeof args.required === 'boolean' ? args.required : undefined,
-    choices: args.choices
+    choices: args.choices,
+    position
   });
 
   if (!result.ok) return { ok: false, error: result.error };
@@ -3573,6 +3593,8 @@ async function runAddCompassQuestion(
       module_id: result.value.moduleId,
       key: result.value.key,
       input_type: result.value.inputType,
+      position: position ?? null,
+      sort_order: result.value.sortOrder,
       logged_in: 'agent_actions'
     }
   };

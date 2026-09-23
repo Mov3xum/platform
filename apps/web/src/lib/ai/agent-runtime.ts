@@ -22,6 +22,7 @@ import {
   isWriteTool,
   summarizeReceiptsForModel
 } from './write-receipt';
+import { runToolCallsOrdered } from './tool-dispatch-order';
 import type { AgentActionReceipt } from '@platform/shared';
 
 // Hur många gånger modellen får anropa verktyg och få tillbaka resultat
@@ -169,17 +170,23 @@ export async function runAgentLoop(
     });
 
     // Verktygsanropen i EN tur är oberoende av varandra (modellen har redan
-    // bestämt alla innan den ser något resultat) → kör dem samtidigt i stället
-    // för seriellt. Det gör att t.ex. flera query_collection mot olika bolag
-    // tar ~en rundturs tid i stället för N (CLAUDE.md § 10 robusthet/latens).
-    // Det delade skriv-/dispatch-lagret är idempotent och tenant-scopat per
-    // anrop, så samtidighet ändrar inte säkerhets- eller RBAC-garantierna.
+    // bestämt alla innan den ser något resultat). LÄSANROP körs därför
+    // samtidigt — flera query_collection mot olika bolag tar ~en rundturs tid
+    // i stället för N (CLAUDE.md § 10 robusthet/latens). SKRIVANROP körs
+    // däremot SEKVENTIELLT i modellens anropsordning (`runToolCallsOrdered`,
+    // § 16.2): parallella skrivningar gav t.ex. frågor i Startupkompassen
+    // samma sort_order (alla läste "högsta" innan någon skrivit) och
+    // ordningen blev "6, 1, 9". Skapandeordning = anropsordning är en regel
+    // för motorn, inte något varje skrivverktyg ska lösa själv. Det delade
+    // skriv-/dispatch-lagret är tenant-scopat per anrop, så ordningen ändrar
+    // inte säkerhets- eller RBAC-garantierna.
     const descs = toolCalls.map((call) => describeToolCall(call));
     toolCalls.forEach((call, i) =>
       options.onStep?.({ phase: 'start', id: call.id, tool: descs[i].tool, label: descs[i].label })
     );
-    const toolResults = await Promise.all(
-      toolCalls.map(async (call, index): Promise<ToolResult> => {
+    const toolResults = await runToolCallsOrdered(
+      toolCalls,
+      async (call, index): Promise<ToolResult> => {
         const key = `${call.function.name}|${call.function.arguments ?? ''}`;
         const previous = seenCalls.get(key);
         if (previous) {
@@ -219,7 +226,8 @@ export async function runAgentLoop(
           }
         }
         return result;
-      })
+      },
+      { isSequential: (call) => isWriteTool(call.function.name) }
     );
     toolCalls.forEach((call, i) => {
       const toolResult = toolResults[i];

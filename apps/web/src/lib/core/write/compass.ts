@@ -18,6 +18,8 @@ import { fail, ok } from './types';
 import {
   MAX_COMPASS_MODULE_NAME,
   MAX_COMPASS_QUESTION_PROMPT,
+  planCompassQuestionInsert,
+  sortCompassQuestions,
   slugifyCompassKey,
   type CompassFlowType,
   type CompassInputType
@@ -53,10 +55,12 @@ function statusOf(err: unknown): number | undefined {
 }
 
 /**
- * Skriv via användarens token först; faller tillbaka på superuser vid 400/403
- * (PB v0.23.4:s rule-eval-bugg, § 21.3 — samma mönster som
- * `lib/actions/compass.ts`). Roll + tenant är ALLTID verifierade innan detta
- * anropas; superusern är en robusthetsfallback, inte behörighetsgränsen.
+ * Skriv via användarens token först; faller tillbaka på superuser vid
+ * 400/403/404 (PB v0.23.4:s rule-eval-bugg, § 21.3 — samma mönster som
+ * `lib/actions/compass.ts`). 404 ingår eftersom PocketBase svarar "not found"
+ * — inte 403 — när update-/delete-regeln filtrerar bort posten för en i
+ * själva verket behörig användare. Roll + tenant är ALLTID verifierade innan
+ * detta anropas; superusern är en robusthetsfallback, inte behörighetsgränsen.
  */
 async function writeWithFallback<T>(
   pb: PocketBase,
@@ -66,7 +70,7 @@ async function writeWithFallback<T>(
     return await run(pb);
   } catch (err) {
     const status = statusOf(err);
-    if (status === 400 || status === 403) {
+    if (status === 400 || status === 403 || status === 404) {
       const su = await getSuperuserPb();
       if (su.ok) return run(su.pb);
     }
@@ -264,7 +268,13 @@ export interface AddCompassQuestionParams {
   required?: boolean | string;
   /** Endast för choice/multi_choice. Etiketter eller {label, value, score, buckets}. */
   choices?: unknown;
-  /** Sorteringsordning; annars läggs frågan sist. */
+  /**
+   * Frågans ABSOLUTA plats i modulen (1 = första frågan). Ger en
+   * deterministisk ordning oavsett bearbetningsordning
+   * (`planCompassQuestionInsert`). Saknas den läggs frågan sist.
+   */
+  position?: number;
+  /** Explicit sorteringsordning (överstyr position); annars läggs frågan sist. */
   sortOrder?: number;
 }
 
@@ -274,23 +284,71 @@ export interface AddedCompassQuestionResult {
   key: string;
   inputType: CompassInputType;
   prompt: string;
+  /** Det sort_order frågan faktiskt fick (kvitto/transparens). */
+  sortOrder: number;
 }
 
-/** Nästa lediga sorteringsnummer i modulen (frågan hamnar sist). */
-async function nextSortOrder(pb: PocketBase, moduleId: string): Promise<number> {
-  try {
-    const list = await pb.collection(QUESTIONS).getList<{ sort_order?: number }>(1, 1, {
+/**
+ * Befintliga frågors `sort_order` i visningsordning (samma tiebreak som
+ * läsvägen, `sortCompassQuestions`). Läser med användartoken; nekas
+ * läsningen tyst (PB v0.23.4, § 21.3) försöker vi som superuser — tenant-
+ * tillhörigheten är redan verifierad av anroparen.
+ */
+type QuestionOrderRow = { id: string; sort_order?: number; created?: string };
+
+async function listQuestionOrder(pb: PocketBase, moduleId: string): Promise<QuestionOrderRow[]> {
+  const read = (client: PocketBase) =>
+    client.collection(QUESTIONS).getFullList<QuestionOrderRow>({
       filter: `module = "${escFilter(moduleId)}"`,
-      sort: '-sort_order',
-      fields: 'sort_order'
+      sort: 'sort_order',
+      fields: 'id,sort_order,created',
+      batch: 200
     });
-    const highest = Number(list.items[0]?.sort_order ?? 0);
-    return Number.isFinite(highest) ? highest + 10 : 10;
+  try {
+    return sortCompassQuestions(await read(pb));
   } catch {
-    // Kan vi inte läsa ordningen (regel-/schemafel) faller vi tillbaka på en
-    // monoton stämpel — samma trick som `addQuestionAction` — så att frågorna
-    // ändå hamnar i den ordning de skapades.
+    const su = await getSuperuserPb();
+    if (!su.ok) throw new Error('Kunde inte läsa modulens frågor.');
+    return sortCompassQuestions(await read(su.pb));
+  }
+}
+
+/**
+ * Nästa sorteringsnummer för en ny fråga som läggs SIST i modulen — delas av
+ * modul-admin (`addQuestionAction`) och chatt-agenten så att BÅDA vägarna
+ * numrerar på samma sätt. Tidigare använde UI:t `Date.now() % 1e6`, som efter
+ * tusen sekunder börjar om från 0 → en fråga som lades till senare kunde hamna
+ * FÖRE de befintliga. Kan läsningen inte göras alls faller vi tillbaka på en
+ * monoton stämpel så frågorna ändå hamnar i skapandeordning.
+ */
+export async function nextCompassQuestionSortOrder(
+  pb: PocketBase,
+  moduleId: string
+): Promise<number> {
+  try {
+    const rows = await listQuestionOrder(pb, moduleId);
+    return planCompassQuestionInsert(rows.map((r) => r.sort_order)).sortOrder;
+  } catch {
     return Date.now() % 1_000_000;
+  }
+}
+
+/**
+ * In-process-lås per modul: "läs högsta sort_order → skriv" måste vara
+ * atomärt, annars får två samtidiga anrop samma nummer (grundorsaken till
+ * "6, 1, 9"). Agentloopen kör redan skrivanrop sekventiellt (§ 16.2); låset
+ * täcker övriga vägar (två flikar, två turer, modul-admin + chatt).
+ */
+const moduleLocks = new Map<string, Promise<unknown>>();
+
+async function withModuleLock<T>(moduleId: string, fn: () => Promise<T>): Promise<T> {
+  const previous = moduleLocks.get(moduleId) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(fn);
+  moduleLocks.set(moduleId, next);
+  try {
+    return await next;
+  } finally {
+    if (moduleLocks.get(moduleId) === next) moduleLocks.delete(moduleId);
   }
 }
 
@@ -363,27 +421,62 @@ export async function addCompassQuestion(
   const choices = validateCompassChoices(params.choices, inputType.value);
   if (!choices.ok) return fail('INVALID_VALUE', choices.error);
 
-  const sortOrder =
-    typeof params.sortOrder === 'number' && Number.isFinite(params.sortOrder)
-      ? params.sortOrder
-      : await nextSortOrder(pb, moduleId);
+  const positionRaw = Number(params.position);
+  const position =
+    params.position !== undefined && Number.isFinite(positionRaw) && positionRaw >= 1
+      ? Math.floor(positionRaw)
+      : undefined;
 
-  const payload: Record<string, unknown> = {
-    module: moduleId,
-    key,
-    prompt: prompt.value,
-    input_type: inputType.value,
-    required: required.value,
-    sort_order: sortOrder
-  };
-  if (helpText.value) payload.help_text = helpText.value;
-  if (choices.value) payload.choices = choices.value;
-
+  // Läs-högsta + skriv sker under modul-låset så att numreringen aldrig kan
+  // krocka mellan två samtidiga anrop.
   let record: { id: string };
+  let sortOrder: number;
   try {
-    record = await writeWithFallback(pb, (client) =>
-      client.collection(QUESTIONS).create(payload)
-    );
+    ({ record, sortOrder } = await withModuleLock(moduleId, async () => {
+      let order: number;
+      if (typeof params.sortOrder === 'number' && Number.isFinite(params.sortOrder)) {
+        order = params.sortOrder;
+      } else if (position === undefined) {
+        order = await nextCompassQuestionSortOrder(pb, moduleId);
+      } else {
+        // Absolut plats (1 = första frågan i modulen): skjut in mellan
+        // grannarna; är gapet slut numreras de befintliga om FÖRST, så att
+        // ordningen är korrekt även när anropen bearbetas i annan ordning
+        // än positionerna ("6, 1, 9").
+        const rows = await listQuestionOrder(pb, moduleId);
+        const plan = planCompassQuestionInsert(
+          rows.map((r) => r.sort_order),
+          position
+        );
+        if (plan.renumber) {
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i]!;
+            const target = plan.renumber[i]!;
+            if (row.sort_order === target) continue;
+            await writeWithFallback(pb, (client) =>
+              client.collection(QUESTIONS).update(row.id, { sort_order: target })
+            );
+          }
+        }
+        order = plan.sortOrder;
+      }
+
+      const payload: Record<string, unknown> = {
+        module: moduleId,
+        key,
+        prompt: prompt.value,
+        input_type: inputType.value,
+        required: required.value,
+        sort_order: order
+      };
+      if (helpText.value) payload.help_text = helpText.value;
+      if (choices.value) payload.choices = choices.value;
+
+      const created = await writeWithFallback(pb, (client) =>
+        client.collection(QUESTIONS).create(payload)
+      );
+      return { record: created as { id: string }, sortOrder: order };
+    }));
   } catch (err) {
     console.error('[write:compass] kunde inte skapa fråga', {
       tenant: actor.tenant,
@@ -398,7 +491,7 @@ export async function addCompassQuestion(
     action_type: 'create',
     collection: QUESTIONS,
     record_id: String(record.id),
-    after_value: { module: moduleId, key, input_type: inputType.value }
+    after_value: { module: moduleId, key, input_type: inputType.value, sort_order: sortOrder }
   });
 
   return ok({
@@ -406,7 +499,8 @@ export async function addCompassQuestion(
     moduleId,
     key,
     inputType: inputType.value,
-    prompt: prompt.value
+    prompt: prompt.value,
+    sortOrder
   });
 }
 

@@ -189,7 +189,11 @@ export const AUTHORING_GUIDANCE =
   'aldrig. (2) Framgår namn, typ och innehåll: skapa DIREKT utan att be om ' +
   'lov — modulen blir ett opublicerat utkast, så inget når webben förrän en ' +
   'människa publicerar. (3) Skapa modulen och lägg sedan till ' +
-  'frågorna EN i taget med `add_compass_question`, i rätt ordning. ' +
+  'frågorna EN i taget med `add_compass_question`, i rätt ordning och med ' +
+  '`position` = 1, 2, 3 … (frågans absoluta plats i modulen, i den ordning ' +
+  'besökaren ska möta dem — numrera alltid när du bygger en modul; det är ' +
+  'position som avgör ordningen, inte i vilken ordning anropen råkar köras; ' +
+  'utelämna position bara när EN fråga ska läggas sist i en befintlig modul). ' +
   '(4) Berätta att modulen är ett OPUBLICERAT utkast och länka till ' +
   '`admin_path` som verktyget returnerar. Du kan inte publicera modulen eller ' +
   'slå på dess publika URL — det gör personalen själv.\n' +

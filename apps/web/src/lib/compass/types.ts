@@ -254,6 +254,8 @@ export interface CompassQuestion {
   }[];
   required?: boolean;
   sort_order?: number;
+  /** Autodate (migration 1700000126) — tiebreak i `sortCompassQuestions`. */
+  created?: string;
 }
 
 /** Kedjad nästa-modul-länk (migration 1700000124) — visas efter slutfört flöde. */
