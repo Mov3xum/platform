@@ -516,7 +516,7 @@ export async function createModuleAction(formData: FormData) {
   // igen som `ar-du-redo-2`. Modulens visningsnamn påverkas inte.
   async function createWith(internalSlug: string, publicSlug: string) {
     return writeWithFallback(pb, (client) =>
-      client.collection('compass_modules').create({
+      client.collection('compass_modules').create<{ id: string; slug: string }>({
         tenant: user.tenant,
         slug: internalSlug,
         public_slug: publicSlug,
