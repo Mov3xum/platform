@@ -3131,9 +3131,26 @@ bakgrund (`--mx-accent`). Mallväljaren (`LayoutPicker.tsx`) ritar varje mall
 som en SVG-skiss och markerar vilka mallar som passar vald flödestyp.
 Chatt-agenten kan sätta mallen via `update_compass_module_field` (fält
 `layout`, svenska alias som "bild till vänster"/"heltäckande" tolkas; okänt
-värde avvisas med de giltiga namnen — aldrig tyst `classic`). Compass är
-migration-only (§ 23.4). Riskklass n/a — ren presentation, ingen ny
-dataväg, ingen PII.
+värde avvisas med de giltiga namnen — aldrig tyst `classic`). **Spegling i
+`setup-via-api.mjs`:** trots § 23.4 har bootstrap-skriptet en inline-def för
+`compass_modules` (regel-sync), och den saknade alla fält som lagts till av
+senare migrationer (`hero_image`, `hero_video`, `next_module`,
+`linked_event`, `create_lead`, `layout`). Eftersom `ensureCollection` bara
+LÄGGER TILL saknade fält (aldrig tar bort) är de nu speglade där, så en
+instans som synkas via workflowen "Sync PocketBase" i stället för PB:s
+auto-migrate också får fälten — utan det "sparades" mallen mot ett schema
+utan `layout` och avvisades av actionens schema-drift-kontroll. Riskklass
+n/a — ren presentation, ingen ny dataväg, ingen PII.
+
+**Felsökbara fel vid skapa/spara (2026-09).** `createModuleAction` svalde
+tidigare varje fel till "Kunde inte skapa modulen. Försök igen." och gjorde
+dessutom ett andra, likadant försök (suffixad `public_slug`) oavsett orsak.
+Nu loggas status + PB-fältkoder PII-fritt, suffix-försöket görs BARA vid
+public_slug-konflikt, och orsaken (via `describePbError`) visas under
+bannern på `/inflode/admin/modules/new` (`?detail=`). Ett 400/403/404 som
+inte kunde tas över av superuser-reserven pekar uttryckligen på
+`POCKETBASE_SUPERUSER_EMAIL/PASSWORD` i web-appens miljö samt createRule
+(§ 21.3). `updateModuleAction` gör detsamma i `?error=`.
 
 **Omslagsbild — robust uppladdning.** `HeroMediaUploader` skalar ned
 rasterbilder **i webbläsaren** före uppladdning (`lib/image-resize.ts`:

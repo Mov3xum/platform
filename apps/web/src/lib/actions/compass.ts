@@ -15,6 +15,7 @@ import {
 import { marketScanLead, reviewLead, scoreLead } from '@/lib/compass/chat';
 import { logAgentAction } from '@/lib/core/write';
 import { nextCompassQuestionSortOrder } from '@/lib/core/write/compass';
+import { describePbError, pbFieldCodes, pbStatus } from '@/lib/pb-error';
 import {
   LEAD_STATUS_ORDER,
   type LeadStatus
@@ -527,18 +528,46 @@ export async function createModuleAction(formData: FormData) {
     );
   }
   let createdId = '';
+  let createError: { code: string; detail: string } | null = null;
   try {
     let rec;
     try {
       rec = await createWith(publicSlugRaw);
-    } catch {
+    } catch (firstErr) {
+      // Bara en unik-konflikt på public_slug motiverar ett nytt försök med
+      // suffix — andra fel (regel-nekande, saknat fält, nere PB) skulle bara
+      // upprepas och dölja den riktiga orsaken bakom ett andra, likadant fel.
+      if (toErrorCode(firstErr) !== 'public_slug_taken' && !pbFieldCodes(firstErr).public_slug) {
+        throw firstErr;
+      }
       rec = await createWith(`${publicSlugRaw}-${Math.random().toString(36).slice(2, 6)}`);
     }
     createdSlug = rec.slug;
     createdId = String(rec.id);
   } catch (err) {
-    const code = toErrorCode(err);
-    redirect(`/inflode/admin/modules/new?error=${code}`);
+    // PII-fri logg (CLAUDE.md § 10.3 A.8.15): status + fältnycklar/koder,
+    // aldrig innehåll. Tidigare svaldes felet till ett generiskt
+    // "Kunde inte skapa modulen" som inte gick att felsöka.
+    const status = pbStatus(err);
+    console.error('[compass] createModuleAction failed', {
+      tenantId: user.tenant,
+      userId: user.id,
+      status,
+      fieldCodes: pbFieldCodes(err),
+      message: err instanceof Error ? err.message : String(err ?? '')
+    });
+    const detail = describePbError(
+      err,
+      status === 400 || status === 403 || status === 404
+        ? `PocketBase nekade skrivningen (HTTP ${status}) och superuser-reserven kunde inte ta över — kontrollera POCKETBASE_SUPERUSER_EMAIL/PASSWORD i web-appens miljö samt compass_modules.createRule (CLAUDE.md § 21.3).`
+        : 'Okänt fel från PocketBase.'
+    );
+    createError = { code: toErrorCode(err), detail: detail.slice(0, 400) };
+  }
+  if (createError) {
+    // redirect() kastar — måste ligga UTANFÖR try/catch.
+    const qs = new URLSearchParams({ error: createError.code, detail: createError.detail });
+    redirect(`/inflode/admin/modules/new?${qs.toString()}`);
   }
 
   // Ändringslogg (CLAUDE.md § 32): UI-skapade moduler loggas i `agent_actions`
@@ -793,10 +822,26 @@ async function applyModuleUpdate(
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
     // PB unik-index-fel på public_slug → vänligt meddelande.
-    if (/public_slug|unique/i.test(msg)) {
+    if (/public_slug|unique/i.test(msg) || pbFieldCodes(err).public_slug) {
       throw new Error('Den publika länken (slug) är upptagen — välj en annan.');
     }
-    throw new Error(`Kunde inte uppdatera modul: ${msg}`);
+    const status = pbStatus(err);
+    console.error('[compass] updateModuleAction failed', {
+      tenantId: user.tenant,
+      userId: user.id,
+      moduleId: id,
+      status,
+      fieldCodes: pbFieldCodes(err),
+      message: msg
+    });
+    throw new Error(
+      describePbError(
+        err,
+        status === 400 || status === 403 || status === 404
+          ? `Kunde inte uppdatera modulen: PocketBase nekade skrivningen (HTTP ${status}) och superuser-reserven kunde inte ta över — kontrollera POCKETBASE_SUPERUSER_EMAIL/PASSWORD i web-appens miljö.`
+          : `Kunde inte uppdatera modulen: ${msg}`
+      )
+    );
   }
 
   // Schema-drift (§ 24.4/§ 30.4-invarianten): PB släpper okända fält TYST.
