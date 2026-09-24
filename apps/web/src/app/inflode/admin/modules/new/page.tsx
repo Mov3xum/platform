@@ -10,6 +10,8 @@ export const dynamic = 'force-dynamic';
 const ERROR_TEXT: Record<string, string> = {
   slug_invalid: 'Länken kunde inte skapas från namnet. Prova ett tydligare namn.',
   public_slug_taken: 'Länken är upptagen. Prova ett annat namn.',
+  slug_taken:
+    'Det finns redan en modul med det här namnet i er organisation, och ett automatiskt suffix gick inte heller. Välj ett annat namn.',
   collections_missing:
     'Startupkompassen-kollektioner saknas i PocketBase. Kör migrationer/redeploy av PocketBase och försök igen.',
   forbidden: 'Du saknar behörighet att skapa moduler.',

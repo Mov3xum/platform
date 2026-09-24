@@ -15,7 +15,7 @@ import {
 import { marketScanLead, reviewLead, scoreLead } from '@/lib/compass/chat';
 import { logAgentAction } from '@/lib/core/write';
 import { nextCompassQuestionSortOrder } from '@/lib/core/write/compass';
-import { describePbError, pbFieldCodes, pbStatus } from '@/lib/pb-error';
+import { describePbError, pbFieldCodes, pbFieldErrors, pbStatus } from '@/lib/pb-error';
 import {
   LEAD_STATUS_ORDER,
   type LeadStatus
@@ -507,14 +507,18 @@ export async function createModuleAction(formData: FormData) {
 
   const pb = await getServerPb();
   let createdSlug = slug;
-  // public_slug är GLOBALT unik (migration 1700000108). Vi kan inte läsa andra
-  // tenants moduler med användartoken, så vi försöker den rena sluggen och
-  // faller tillbaka på ett suffix om DB:n nekar pga unik-konflikt.
-  async function createWith(publicSlug: string) {
+  // Två unika index kan krocka: (tenant, slug) — den interna sluggen som
+  // härleds ur namnet — och den GLOBALT unika public_slug (migration
+  // 1700000108). Ett namn som redan använts av en annan modul i tenanten gav
+  // tidigare "Kunde inte skapa modulen" utan orsak: bara public_slug fick ett
+  // suffix i omförsöket, aldrig den interna sluggen. Nu suffixas BÅDA vid
+  // krock och försöket görs om (max tre gånger), så "Är du redo?" kan skapas
+  // igen som `ar-du-redo-2`. Modulens visningsnamn påverkas inte.
+  async function createWith(internalSlug: string, publicSlug: string) {
     return writeWithFallback(pb, (client) =>
       client.collection('compass_modules').create({
         tenant: user.tenant,
-        slug: createdSlug,
+        slug: internalSlug,
         public_slug: publicSlug,
         name,
         description,
@@ -527,21 +531,32 @@ export async function createModuleAction(formData: FormData) {
       })
     );
   }
+  function isSlugConflict(err: unknown): boolean {
+    const codes = pbFieldCodes(err);
+    const msgs = pbFieldErrors(err);
+    return Boolean(
+      codes.slug || codes.public_slug || codes.tenant ||
+      /unique/i.test(`${msgs.slug ?? ''} ${msgs.public_slug ?? ''} ${msgs.tenant ?? ''}`)
+    );
+  }
   let createdId = '';
   let createError: { code: string; detail: string } | null = null;
   try {
-    let rec;
-    try {
-      rec = await createWith(publicSlugRaw);
-    } catch (firstErr) {
-      // Bara en unik-konflikt på public_slug motiverar ett nytt försök med
-      // suffix — andra fel (regel-nekande, saknat fält, nere PB) skulle bara
-      // upprepas och dölja den riktiga orsaken bakom ett andra, likadant fel.
-      if (toErrorCode(firstErr) !== 'public_slug_taken' && !pbFieldCodes(firstErr).public_slug) {
-        throw firstErr;
+    let rec: { slug: string; id: string } | null = null;
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 3 && !rec; attempt++) {
+      const suffix = attempt === 0 ? '' : `-${attempt + 1}`;
+      try {
+        rec = await createWith(`${slug}${suffix}`, `${publicSlugRaw}${suffix}`);
+      } catch (err) {
+        lastErr = err;
+        // Bara en unik-krock motiverar ett nytt försök med suffix — andra fel
+        // (regel-nekande, saknat fält, nere PB) skulle bara upprepas och dölja
+        // den riktiga orsaken bakom ett andra, likadant fel.
+        if (!isSlugConflict(err)) throw err;
       }
-      rec = await createWith(`${publicSlugRaw}-${Math.random().toString(36).slice(2, 6)}`);
     }
+    if (!rec) throw lastErr ?? new Error('Kunde inte skapa modulen.');
     createdSlug = rec.slug;
     createdId = String(rec.id);
   } catch (err) {
@@ -549,20 +564,33 @@ export async function createModuleAction(formData: FormData) {
     // aldrig innehåll. Tidigare svaldes felet till ett generiskt
     // "Kunde inte skapa modulen" som inte gick att felsöka.
     const status = pbStatus(err);
+    const fieldCodes = pbFieldCodes(err);
     console.error('[compass] createModuleAction failed', {
       tenantId: user.tenant,
       userId: user.id,
       status,
-      fieldCodes: pbFieldCodes(err),
+      fieldCodes,
       message: err instanceof Error ? err.message : String(err ?? '')
     });
-    const detail = describePbError(
-      err,
-      status === 400 || status === 403 || status === 404
-        ? `PocketBase nekade skrivningen (HTTP ${status}) och superuser-reserven kunde inte ta över — kontrollera POCKETBASE_SUPERUSER_EMAIL/PASSWORD i web-appens miljö samt compass_modules.createRule (CLAUDE.md § 21.3).`
-        : 'Okänt fel från PocketBase.'
-    );
-    createError = { code: toErrorCode(err), detail: detail.slice(0, 400) };
+    const hasFieldErrors = Object.keys(fieldCodes).length > 0;
+    let code = toErrorCode(err);
+    let detail: string;
+    if (isSlugConflict(err)) {
+      code = 'slug_taken';
+      detail = describePbError(err, 'Namnet (länken) används redan av en annan modul, även med suffix.');
+    } else if (hasFieldErrors) {
+      // Valideringsfel från PB — superuser-reserven hjälper inte här och ska
+      // inte pekas ut; fältdetaljerna ÄR orsaken.
+      detail = describePbError(err, `PocketBase avvisade värdena (HTTP ${status ?? '?'}).`);
+    } else {
+      detail = describePbError(
+        err,
+        status === 400 || status === 403 || status === 404
+          ? `PocketBase nekade skrivningen (HTTP ${status}) utan fältfel och superuser-reserven kunde inte ta över — kontrollera POCKETBASE_SUPERUSER_EMAIL/PASSWORD i web-appens miljö samt compass_modules.createRule (CLAUDE.md § 21.3).`
+          : 'Okänt fel från PocketBase.'
+      );
+    }
+    createError = { code, detail: detail.slice(0, 400) };
   }
   if (createError) {
     // redirect() kastar — måste ligga UTANFÖR try/catch.
@@ -834,12 +862,15 @@ async function applyModuleUpdate(
       fieldCodes: pbFieldCodes(err),
       message: msg
     });
+    const hasFieldErrors = Object.keys(pbFieldCodes(err)).length > 0;
     throw new Error(
       describePbError(
         err,
-        status === 400 || status === 403 || status === 404
-          ? `Kunde inte uppdatera modulen: PocketBase nekade skrivningen (HTTP ${status}) och superuser-reserven kunde inte ta över — kontrollera POCKETBASE_SUPERUSER_EMAIL/PASSWORD i web-appens miljö.`
-          : `Kunde inte uppdatera modulen: ${msg}`
+        hasFieldErrors
+          ? `Kunde inte uppdatera modulen: PocketBase avvisade värdena (HTTP ${status ?? '?'}).`
+          : status === 400 || status === 403 || status === 404
+            ? `Kunde inte uppdatera modulen: PocketBase nekade skrivningen (HTTP ${status}) utan fältfel och superuser-reserven kunde inte ta över — kontrollera POCKETBASE_SUPERUSER_EMAIL/PASSWORD i web-appens miljö.`
+            : `Kunde inte uppdatera modulen: ${msg}`
       )
     );
   }
