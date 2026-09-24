@@ -31,6 +31,9 @@ export default async function NewModulePage({
   const errorKeyRaw = params.error;
   const errorKey = Array.isArray(errorKeyRaw) ? errorKeyRaw[0] : errorKeyRaw;
   const errorText = errorKey ? ERROR_TEXT[errorKey] || ERROR_TEXT.create_failed : null;
+  // Orsaken från actionen (PB:s fältdetaljer / status) — PII-fri, cappad.
+  const detailRaw = params.detail;
+  const errorDetail = (Array.isArray(detailRaw) ? detailRaw[0] : detailRaw)?.slice(0, 400) || null;
 
   return (
     <div className="mx-view-pad mx-narrow">
@@ -59,7 +62,12 @@ export default async function NewModulePage({
             }}
             className="mx-t-13"
           >
-            {errorText}
+            <div>{errorText}</div>
+            {errorDetail && (
+              <div className="mx-t-12" style={{ marginTop: 6, opacity: 0.9, lineHeight: 1.45 }}>
+                Orsak: {errorDetail}
+              </div>
+            )}
           </div>
         )}
         <form

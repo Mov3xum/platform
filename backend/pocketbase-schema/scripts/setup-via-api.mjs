@@ -2451,7 +2451,44 @@ await ensureCollection({
     { name: 'require_email', type: 'bool', required: false },
     { name: 'require_phone', type: 'bool', required: false },
     { name: 'require_organization', type: 'bool', required: false },
-    { name: 'notify_emails', type: 'text', required: false, max: 1000 }
+    { name: 'notify_emails', type: 'text', required: false, max: 1000 },
+    // Fält som lagts till av senare migrationer (1700000122/124/125/138/141/
+    // 154). ensureCollection lägger BARA till saknade fält, aldrig tar bort —
+    // så en instans som reconcile:as via detta skript (i stället för PB:s
+    // auto-migrate) får samma schema som appen förväntar sig. Utan dem
+    // släpper PB fälten tyst vid skrivning (omslagsbild, kedja, mall …).
+    {
+      name: 'hero_image',
+      type: 'file',
+      required: false,
+      maxSelect: 1,
+      maxSize: 15728640,
+      mimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml'],
+      thumbs: []
+    },
+    {
+      name: 'hero_video',
+      type: 'file',
+      required: false,
+      maxSelect: 1,
+      maxSize: 209715200,
+      mimeTypes: [
+        'video/mp4',
+        'video/webm',
+        'video/ogg',
+        'video/quicktime',
+        'video/x-msvideo',
+        'video/x-matroska',
+        'video/mpeg'
+      ],
+      thumbs: []
+    },
+    { name: 'next_module', type: 'relation', required: false, collectionId: 'compass_modules_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'linked_event', type: 'relation', required: false, collectionId: 'incubator_events_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'create_lead', type: 'bool', required: false },
+    // Mall för den publika sidan (CLAUDE.md § 23.7) — MÅSTE spegla
+    // COMPASS_LAYOUTS i packages/shared/src/compass-layout.ts.
+    { name: 'layout', type: 'select', required: false, maxSelect: 1, values: ['classic', 'split_left', 'split_right', 'cover', 'panel', 'minimal'] }
   ],
   indexes: [
     'CREATE UNIQUE INDEX idx_compass_modules_tenant_slug ON compass_modules (tenant, slug)',
