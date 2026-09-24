@@ -3145,12 +3145,19 @@ n/a — ren presentation, ingen ny dataväg, ingen PII.
 **Felsökbara fel vid skapa/spara (2026-09).** `createModuleAction` svalde
 tidigare varje fel till "Kunde inte skapa modulen. Försök igen." och gjorde
 dessutom ett andra, likadant försök (suffixad `public_slug`) oavsett orsak.
-Nu loggas status + PB-fältkoder PII-fritt, suffix-försöket görs BARA vid
-public_slug-konflikt, och orsaken (via `describePbError`) visas under
-bannern på `/inflode/admin/modules/new` (`?detail=`). Ett 400/403/404 som
-inte kunde tas över av superuser-reserven pekar uttryckligen på
-`POCKETBASE_SUPERUSER_EMAIL/PASSWORD` i web-appens miljö samt createRule
-(§ 21.3). `updateModuleAction` gör detsamma i `?error=`.
+Nu loggas status + PB-fältkoder PII-fritt och orsaken (via
+`describePbError`) visas under bannern på `/inflode/admin/modules/new`
+(`?detail=`). **Namnkollision:** `compass_modules` har ett unikt index på
+`(tenant, slug)` (utöver det partiella på `public_slug`), så en ny modul med
+samma namn som en befintlig svarade `slug: Value must be unique.; tenant:
+Value must be unique.` — och det gamla omförsöket suffixade bara
+`public_slug`, aldrig den interna sluggen. Nu suffixas BÅDA (`-2`, `-3`,
+max tre försök) enbart när PB rapporterar en unik-konflikt
+(`isSlugConflict`); går inte det heller visas `slug_taken` ("välj ett annat
+namn"). Superuser-hintet (`POCKETBASE_SUPERUSER_EMAIL/PASSWORD` + createRule,
+§ 21.3) visas BARA för ett 400/403/404 UTAN fältfel — ett valideringsfel
+är aldrig ett behörighetsfel. `updateModuleAction` gör detsamma i
+`?error=`.
 
 **Omslagsbild — robust uppladdning.** `HeroMediaUploader` skalar ned
 rasterbilder **i webbläsaren** före uppladdning (`lib/image-resize.ts`:
