@@ -11,7 +11,7 @@ function canAccess(roles: Role[], id: string, enabled: string[] | undefined): bo
   return isModuleEnabled(enabled, id);
 }
 
-test('staff får chatten i mitten, hem + översikt till vänster och pågående till höger', () => {
+test('staff får chatten i mitten, hem + översikt till vänster och årshjulet till höger', () => {
   const nav = buildMobileNav(['coach'], undefined, { inkorg: 3 }, canAccess);
   assert.ok(nav);
   assert.equal(nav.center.id, 'idag');
@@ -19,7 +19,7 @@ test('staff får chatten i mitten, hem + översikt till vänster och pågående 
   assert.deepEqual(nav.left.map((i) => i.id), ['hem', 'inkorg']);
   assert.equal(nav.left[0]!.href, '/hem');
   assert.equal(nav.left[1]!.count, 3);
-  assert.deepEqual(nav.right.map((i) => i.id), ['pagaende']);
+  assert.deepEqual(nav.right.map((i) => i.id), ['arshjul']);
 });
 
 test('ren bolagsmedlem får sin hemvy i mitten och bara medlems-moduler runtom', () => {
