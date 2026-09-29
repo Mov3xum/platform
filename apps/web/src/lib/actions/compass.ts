@@ -895,7 +895,7 @@ async function applyModuleUpdate(
   // "sparats" utan att synas. Säg det rakt ut i stället för en tyst no-op.
   if (wantedPurpose === 'survey' && saved && !('purpose' in saved)) {
     throw new Error(
-      'Övriga fält sparades, men syftet "enkät" kunde inte sparas: fältet purpose saknas i databasen (PocketBase-migration 1700000156 är inte applicerad).'
+      'Övriga fält sparades, men syftet "enkät" kunde inte sparas: fältet purpose saknas i databasen (PocketBase-migration 1700000160 är inte applicerad).'
     );
   }
   if (

@@ -38,7 +38,14 @@ import {
   GOAL_INDICATOR_UNITS,
   METRIC_KEYS,
   METRIC_DEFINITIONS,
-  SURVEY_TEMPLATES
+  SURVEY_TEMPLATES,
+  AGENT_MEMORY_CATEGORIES,
+  AGENT_MEMORY_CATEGORY_IDS,
+  agentMemoryCategoryLabel,
+  inferAgentMemoryCategory,
+  normalizeAgentMemoryCategory,
+  resolveAgentMemoryCategory,
+  type AgentMemoryCategory
 } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
 import { validateChart, validateKpis } from '@/lib/documents/validate';
@@ -72,6 +79,11 @@ import {
   createStartupNote,
   createOrgPost,
   updateOrgPostFields,
+  createContact,
+  updateContactFields,
+  requestContactUse,
+  decideContactRequest,
+  type ContactChanges,
   createProcurement,
   createProcurementCalloff,
   updateProcurementCalloffFields,
@@ -1442,6 +1454,113 @@ export function buildChatTools(
     tools.push({
       type: 'function',
       function: {
+        name: 'create_contact',
+        description:
+          'Lägger till en extern kontakt i Movexums gemensamma KONTAKTBOK (contacts, § 45) — ' +
+          'investerare, rådgivare, handläggare på myndigheter, partners, akademi, media. Den ' +
+          'inloggade blir kontaktägare (ägare/kön sätts av en människa i UI:t). Kontaktuppgifter ' +
+          '(e-post/telefon) anges bara om användaren själv gett dem i klartext. INNAN du skapar: ' +
+          'kontrollera med `search_records` på `contacts` att personen inte redan finns, och ' +
+          'sätt `gdpr_confirmed` till true bara när användaren bekräftat att personen informerats ' +
+          'om att uppgifterna lagras (fråga annars först — GDPR § 15.4). Skriv aldrig personnummer.',
+        parameters: {
+          type: 'object',
+          properties: {
+            first_name: { type: 'string', description: 'Förnamn (max 100).' },
+            last_name: { type: 'string', description: 'Efternamn (valfritt).' },
+            organization: { type: 'string', description: 'Organisation/företag (max 200).' },
+            primary_role: { type: 'string', description: 'Titel/roll, t.ex. "Handläggare", "Investment manager".' },
+            category: {
+              type: 'string',
+              enum: ['investerare', 'radgivare', 'myndighet', 'partner', 'akademi', 'media', 'leverantor', 'alumn', 'annan'],
+              description: 'Kategori. Fritext som "VC" eller "Region" normaliseras.'
+            },
+            email: { type: 'string', description: 'E-post — bara om användaren angett den.' },
+            phone: { type: 'string', description: 'Telefon — bara om användaren angett den.' },
+            kommun: { type: 'string', description: 'Kommun/ort.' },
+            skills: { type: 'string', description: 'Kompetenser/områden, kommaseparerat.' },
+            info: { type: 'string', description: 'Kort info: hur vi känner personen, vad hen kan hjälpa med (max 4000). Inga personnummer.' },
+            gdpr_confirmed: {
+              type: 'boolean',
+              description: 'true = användaren har bekräftat att personen informerats om lagringen (krävs).'
+            }
+          },
+          required: ['first_name', 'gdpr_confirmed']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'update_contact_field',
+        description:
+          'Uppdaterar verksamhetsfält på en kontakt i kontaktboken: first_name, last_name, ' +
+          'organization, primary_role, category, kommun, skills, info. Kontaktuppgifter ' +
+          '(e-post/telefon), ägare och kön ändras av en människa i UI:t. Slå upp contact_id ' +
+          'via `search_records` på `contacts` först — gissa aldrig.',
+        parameters: {
+          type: 'object',
+          properties: {
+            contact_id: { type: 'string', description: 'PocketBase-id för kontakten.' },
+            field: {
+              type: 'string',
+              enum: ['first_name', 'last_name', 'organization', 'primary_role', 'category', 'kommun', 'skills', 'info'],
+              description: 'Fält att ändra.'
+            },
+            value: { type: 'string', description: 'Nytt värde (tom sträng rensar valfria fält).' }
+          },
+          required: ['contact_id', 'field', 'value']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'request_contact_use',
+        description:
+          'Ber kontaktens ÄGARE om bekräftelse att använda en kontakt i kontaktboken för ett ' +
+          'SPECIFIKT syfte — t.ex. koppla ihop den med ett bolag ("dela kontakten med bolaget X"). ' +
+          'Skapar en förfrågan (contact_requests) som ägaren godkänner/avböjer i UI:t eller ' +
+          'chatten; vid godkännande med startup_id kopplas kontakten till bolagskortet och bolaget ' +
+          'ser den under Delade kontakter. Är användaren själv ägare godkänns förfrågan direkt. ' +
+          'Slå upp contact_id (`search_records` på `contacts`) och startup_id (`search_records` ' +
+          'på `startups`) först. Syftet ska vara konkret (vad, för vem).',
+        parameters: {
+          type: 'object',
+          properties: {
+            contact_id: { type: 'string', description: 'PocketBase-id för kontakten.' },
+            purpose: { type: 'string', description: 'Vad kontakten ska användas till (max 2000). Inga personnummer.' },
+            startup_id: { type: 'string', description: 'Valfritt: bolag kontakten ska delas med vid godkännande.' },
+            startup_role: { type: 'string', description: 'Valfritt: kontaktens roll gentemot bolaget (t.ex. Mentor, Investerare).' }
+          },
+          required: ['contact_id', 'purpose']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'decide_contact_request',
+        description:
+          'Godkänner eller avböjer en väntande förfrågan om att använda en kontakt som ' +
+          'användaren ÄGER (eller är admin/incubator lead för). Bara på användarens uttryckliga ' +
+          'begäran ("godkänn Annas förfrågan om Vinnova-kontakten"). Slå upp request_id via ' +
+          '`query_collection` på `contact_requests` (status = "pending") först. Vid godkännande med ' +
+          'bolag kopplas kontakten till bolaget automatiskt.',
+        parameters: {
+          type: 'object',
+          properties: {
+            request_id: { type: 'string', description: 'PocketBase-id för förfrågan.' },
+            decision: { type: 'string', enum: ['approved', 'declined'], description: 'Beslut.' },
+            note: { type: 'string', description: 'Valfri kommentar till den som frågade (max 2000).' }
+          },
+          required: ['request_id', 'decision']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
         name: 'create_procurement',
         description:
           'Registrerar en upphandling (procurements, § 39) — t.ex. ett ramavtal ' +
@@ -1711,14 +1830,22 @@ export function buildChatTools(
         description:
           'Läser agentens tvärsessions-minne för denna tenant. Utan `key` ' +
           'listas alla minnesnycklar med innehåll; med `key` returneras just ' +
-          'den noteringen. Använd för att minnas tidigare slutsatser eller ' +
-          'pågående trådar mellan körningar.',
+          'den noteringen. Varje notering har en `category` (' +
+          AGENT_MEMORY_CATEGORY_IDS.join(', ') +
+          '); filtrera med `category` för att bara läsa en sorts noteringar. ' +
+          'Använd för att minnas tidigare slutsatser eller pågående trådar ' +
+          'mellan körningar.',
         parameters: {
           type: 'object',
           properties: {
             key: {
               type: 'string',
               description: 'Valfri nyckel att läsa. Lämna tomt för att lista allt.'
+            },
+            category: {
+              type: 'string',
+              enum: [...AGENT_MEMORY_CATEGORY_IDS],
+              description: 'Valfritt kategorifilter.'
             }
           }
         }
@@ -1733,7 +1860,10 @@ export function buildChatTools(
             'Sparar/uppdaterar en notering i agentens tvärsessions-minne (per ' +
             'tenant). Använd för slutsatser värda att minnas till nästa körning. ' +
             'Lagra ALDRIG personuppgifter — bara aggregerade observationer. ' +
-            'Skriver över en befintlig nyckel.',
+            'Skriver över en befintlig nyckel. Ange ALLTID `category` så att ' +
+            'personalen får överblick över minnet: ' +
+            AGENT_MEMORY_CATEGORIES.map((c) => `${c.id} = ${c.description}`).join(' | ') +
+            '.',
           parameters: {
             type: 'object',
             properties: {
@@ -1744,9 +1874,16 @@ export function buildChatTools(
               content: {
                 type: 'string',
                 description: 'Innehåll att spara (max 8000 tecken).'
+              },
+              category: {
+                type: 'string',
+                enum: [...AGENT_MEMORY_CATEGORY_IDS],
+                description:
+                  'Vilken sorts notering det är (en av kategorierna). Utelämnas den ' +
+                  'härleds en kategori ur nyckel + innehåll.'
               }
             },
-            required: ['key', 'content']
+            required: ['key', 'content', 'category']
           }
         }
       });
@@ -2032,6 +2169,14 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
     }
     case 'update_org_post':
       return { tool: name, label: 'Uppdaterar inlägg på dashboarden' };
+    case 'create_contact':
+      return { tool: name, label: 'Lägger till kontakt i kontaktboken' };
+    case 'update_contact_field':
+      return { tool: name, label: 'Uppdaterar kontakt' };
+    case 'request_contact_use':
+      return { tool: name, label: 'Skickar förfrågan till kontaktägaren' };
+    case 'decide_contact_request':
+      return { tool: name, label: 'Avgör förfrågan om kontakt' };
     case 'create_procurement':
       return { tool: name, label: 'Registrerar upphandling' };
     case 'create_procurement_calloff':
@@ -3002,6 +3147,14 @@ export async function dispatchToolCall(
       return runCreateOrgPost(args, ctx);
     case 'update_org_post':
       return runUpdateOrgPost(args, ctx);
+    case 'create_contact':
+      return runCreateContact(args, ctx);
+    case 'update_contact_field':
+      return runUpdateContactField(args, ctx);
+    case 'request_contact_use':
+      return runRequestContactUse(args, ctx);
+    case 'decide_contact_request':
+      return runDecideContactRequest(args, ctx);
     case 'create_procurement':
       return runCreateProcurement(args, ctx);
     case 'create_procurement_calloff':
@@ -3061,11 +3214,14 @@ export async function buildMemoryRecallBlock(
       .getList(1, MEMORY_RECALL_MAX_ROWS, {
         filter: `tenant = "${escFilter(tenantId)}"`,
         sort: '-updated',
-        fields: 'key,content,updated'
+        fields: 'key,content,category,updated'
       });
-    const lines: string[] = [];
+    // Grupperat per kategori (taxonomins ordning) så modellen ser strukturen
+    // — samma indelning som personalen ser på /installningar/ai-minne.
+    const byCategory = new Map<AgentMemoryCategory, string[]>();
     let budget = MEMORY_RECALL_TOTAL_CHARS;
     let omitted = 0;
+    let count = 0;
     for (const m of result.items) {
       const key = typeof m.key === 'string' ? m.key.trim() : '';
       const content = typeof m.content === 'string' ? m.content.trim() : '';
@@ -3080,9 +3236,19 @@ export async function buildMemoryRecallBlock(
         continue;
       }
       budget -= line.length;
-      lines.push(line);
+      const { category } = resolveAgentMemoryCategory({ category: m.category, key, content });
+      const bucket = byCategory.get(category);
+      if (bucket) bucket.push(line);
+      else byCategory.set(category, [line]);
+      count++;
     }
-    if (lines.length === 0) return '';
+    if (count === 0) return '';
+    const lines: string[] = [];
+    for (const def of AGENT_MEMORY_CATEGORIES) {
+      const bucket = byCategory.get(def.id);
+      if (!bucket || bucket.length === 0) continue;
+      lines.push(`[${def.label}]`, ...bucket);
+    }
     return (
       '\n\nINLÄRT MINNE (dina egna tidigare slutsatser och korrigeringar du fått ' +
       'av personalen, per tenant — § agent_memory). Behandla det som vägledning ' +
@@ -3105,6 +3271,16 @@ async function runMemoryRead(
   ctx: ToolDispatchContext
 ): Promise<ToolResult> {
   const key = typeof args.key === 'string' ? args.key.trim() : '';
+  const categoryFilter =
+    args.category === undefined || args.category === null || args.category === ''
+      ? null
+      : normalizeAgentMemoryCategory(args.category);
+  if (args.category && !categoryFilter) {
+    return {
+      ok: false,
+      error: `Okänd category. Giltiga: ${AGENT_MEMORY_CATEGORY_IDS.join(', ')}.`
+    };
+  }
   let filter = `tenant = "${escFilter(ctx.tenantId)}"`;
   if (key) filter += ` && key = "${escFilter(key)}"`;
   try {
@@ -3113,17 +3289,31 @@ async function runMemoryRead(
       .getList(1, MAX_MEMORY_ROWS, {
         filter,
         sort: '-updated',
-        fields: 'key,content,updated'
+        fields: 'key,content,category,updated'
       });
+    // Kategorifiltret appliceras i JS: äldre rader saknar lagrad kategori och
+    // får den härledd — ett PB-filter skulle tappa dem.
+    const items = result.items
+      .map((m) => {
+        const { category, categorySource } = resolveAgentMemoryCategory({
+          category: m.category,
+          key: typeof m.key === 'string' ? m.key : '',
+          content: typeof m.content === 'string' ? m.content : ''
+        });
+        return {
+          key: m.key,
+          content: m.content,
+          category,
+          category_source: categorySource,
+          updated: m.updated
+        };
+      })
+      .filter((m) => !categoryFilter || m.category === categoryFilter);
     return {
       ok: true,
       data: {
-        count: result.totalItems,
-        items: result.items.map((m) => ({
-          key: m.key,
-          content: m.content,
-          updated: m.updated
-        }))
+        count: categoryFilter ? items.length : result.totalItems,
+        items
       }
     };
   } catch (err) {
@@ -3151,6 +3341,19 @@ async function runMemoryWrite(
   if (content.length > MAX_MEMORY_CONTENT) {
     return { ok: false, error: `content för långt (max ${MAX_MEMORY_CONTENT} tecken).` };
   }
+  // Kategori: ett angivet men okänt värde avvisas (aldrig tyst "övrigt");
+  // ett utelämnat värde härleds deterministiskt ur nyckel + innehåll.
+  const hasCategoryArg =
+    args.category !== undefined && args.category !== null && args.category !== '';
+  const category = hasCategoryArg
+    ? normalizeAgentMemoryCategory(args.category)
+    : inferAgentMemoryCategory(key, content);
+  if (!category) {
+    return {
+      ok: false,
+      error: `Okänd category. Giltiga: ${AGENT_MEMORY_CATEGORY_IDS.join(', ')}.`
+    };
+  }
 
   const filter = `tenant = "${escFilter(ctx.tenantId)}" && key = "${escFilter(key)}"`;
   try {
@@ -3163,18 +3366,26 @@ async function runMemoryWrite(
         .collection(AGENT_MEMORY_COLLECTION)
         .update((existing as { id: string }).id, {
           content,
+          category,
           updated_by: actor.id
         });
-      return { ok: true, data: { key, action: 'updated' } };
+      return {
+        ok: true,
+        data: { key, category, category_label: agentMemoryCategoryLabel(category), action: 'updated' }
+      };
     }
     await ctx.pb.collection(AGENT_MEMORY_COLLECTION).create({
       tenant: ctx.tenantId,
       key,
       content,
+      category,
       created_by: actor.id,
       updated_by: actor.id
     });
-    return { ok: true, data: { key, action: 'created' } };
+    return {
+      ok: true,
+      data: { key, category, category_label: agentMemoryCategoryLabel(category), action: 'created' }
+    };
   } catch (err) {
     return {
       ok: false,
@@ -4204,6 +4415,154 @@ async function runUpdateOrgPost(
       pinned: result.value.pinned,
       updated_fields: Object.keys(changes),
       path: result.value.homePath,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+// ── Kontaktboken (§ 45) ──────────────────────────────────────────────────────
+//
+// Skrivlagret (lib/core/write/contacts.ts) äger validering, ägar-/rollkontroll,
+// GDPR-kravet, audit och notiser — verktygen är tunna skal.
+
+async function runCreateContact(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  if (args.gdpr_confirmed !== true) {
+    return {
+      ok: false,
+      error:
+        'gdpr_confirmed saknas: fråga användaren om personen har informerats om att Movexum lagrar ' +
+        'kontaktuppgifterna (GDPR) innan kontakten skapas, och skicka gdpr_confirmed=true först då.'
+    };
+  }
+  const result = await createContact(ctx.pb, actor, {
+    firstName: argStr(args, 'first_name'),
+    lastName: argStr(args, 'last_name') || null,
+    organization: argStr(args, 'organization') || null,
+    primaryRole: argStr(args, 'primary_role') || null,
+    category: argStr(args, 'category') || null,
+    email: argStr(args, 'email') || null,
+    phone: argStr(args, 'phone') || null,
+    kommun: argStr(args, 'kommun') || null,
+    skills: argStr(args, 'skills') || null,
+    info: argStr(args, 'info') || null,
+    gdprConsent: true
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      contact_id: result.value.contactId,
+      name: result.value.name,
+      organization: result.value.organization,
+      owner_ids: result.value.ownerIds,
+      path: result.value.path,
+      note: 'Kontakten finns nu i kontaktboken med den inloggade som ägare. Fler ägare, kön och kontaktuppgifter sätts i UI:t.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runUpdateContactField(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  const field = argStr(args, 'field');
+  if (!field) return { ok: false, error: 'field saknas.' };
+  const changes: ContactChanges = { [field]: typeof args.value === 'string' ? args.value : '' } as ContactChanges;
+  const result = await updateContactFields(ctx.pb, actor, argStr(args, 'contact_id'), changes);
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      contact_id: result.value.contactId,
+      name: result.value.name,
+      field,
+      after: typeof args.value === 'string' ? args.value : '',
+      path: result.value.path,
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runRequestContactUse(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  const result = await requestContactUse(ctx.pb, actor, {
+    contactId: argStr(args, 'contact_id'),
+    purpose: argStr(args, 'purpose'),
+    startupId: argStr(args, 'startup_id') || null,
+    startupRole: argStr(args, 'startup_role') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  const v = result.value;
+  return {
+    ok: true,
+    warning: v.warning,
+    data: {
+      request_id: v.requestId,
+      status: v.status,
+      contact_id: v.contactId,
+      name: v.contactName,
+      startup: v.startupName,
+      startup_id: v.startupId,
+      owner_ids: v.ownerIds,
+      path: v.path,
+      note: v.selfApproved
+        ? v.startupName
+          ? `Användaren äger kontakten — den är nu kopplad till ${v.startupName}.`
+          : 'Användaren äger kontakten — användningen är registrerad och godkänd direkt.'
+        : v.ownerIds.length > 0
+          ? 'Förfrågan är skickad till kontaktens ägare som får en notis. Kontakten kopplas till bolaget först när ägaren godkänt.'
+          : 'Kontakten saknar ägare — förfrågan gick till admin/incubator lead.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runDecideContactRequest(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  const decision = argStr(args, 'decision');
+  if (decision !== 'approved' && decision !== 'declined') {
+    return { ok: false, error: 'decision måste vara approved eller declined.' };
+  }
+  const result = await decideContactRequest(ctx.pb, actor, {
+    requestId: argStr(args, 'request_id'),
+    decision,
+    note: argStr(args, 'note') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  const v = result.value;
+  return {
+    ok: true,
+    warning: v.warning,
+    data: {
+      request_id: v.requestId,
+      status: v.status,
+      contact_id: v.contactId,
+      name: v.contactName,
+      startup: v.startupName,
+      linked: v.linked,
+      path: v.path,
+      note:
+        decision === 'approved'
+          ? v.linked && v.startupName
+            ? `Godkänd — ${v.contactName} är nu kopplad till ${v.startupName}. Den som frågade har fått en notis.`
+            : 'Godkänd. Den som frågade har fått en notis.'
+          : 'Avböjd. Den som frågade har fått en notis.',
       logged_in: 'agent_actions'
     }
   };

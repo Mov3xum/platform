@@ -423,6 +423,9 @@ export interface ToolRunMessage {
   model?: string; // modell som producerade detta turn (assistant)
   tokens_in?: number;
   tokens_out?: number;
+  // Antal modellanrop i turen (1 + ett per verktygssteg). Förklarar varför
+  // tokens_in är mångfalt större än svaret (§ 9.6/§ 28). Saknas på äldre turer.
+  api_calls?: number;
   cost_usd?: number;
   at: string; // ISO
   error?: string;
@@ -1192,7 +1195,20 @@ export type NotificationKind =
   | 'assigned'
   | 'status_change'
   | 'stage_advance'
-  | 'due_soon';
+  | 'due_soon'
+  // Kontaktboken (§ 45.3, migration 1700000158)
+  | 'contact_request'
+  | 'contact_decision';
+
+/** Notistyper som fanns i schemat före migration 1700000158 (fallback i `notify`). */
+export const LEGACY_NOTIFICATION_KINDS: readonly NotificationKind[] = [
+  'comment',
+  'mention',
+  'assigned',
+  'status_change',
+  'stage_advance',
+  'due_soon'
+];
 
 export interface NotificationPayload {
   title: string;
@@ -1375,9 +1391,9 @@ export interface ModuleGroup {
 
 export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'pagaende', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'upphandlingar', 'investerare', 'events', 'community'] },
+  { label: 'Portfölj', modules: ['kompassen', 'startups', 'kontakter', 'de_minimis', 'upphandlingar', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'installningar', 'min_profil'] }
+  { label: 'System', modules: ['agenter', 'kunskapsbas', 'integrationer', 'installningar', 'min_profil'] }
 ];
 
 /**
@@ -1441,8 +1457,8 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'inkorg',
-    title: 'Min översikt',
-    description: 'Allt som är ditt på ett ställe — uppgifter, aktiviteter, möten och events att planera och följa upp.',
+    title: 'Mina uppgifter',
+    description: 'Allt som är ditt på ett ställe — uppgifter, aktiviteter, möten, events och notiser att planera och följa upp.',
     rolesAllowed: ALL_ROLES,
     route: '/inkorg'
   },
@@ -1478,8 +1494,9 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'uppdrag',
-    title: 'Projekt & uppdrag',
-    description: 'Skapa och samarbeta på projekt och uppdrag — bjud in roller, kommentera och följ flöden.',
+    title: 'Tvärfunktionella team',
+    description:
+      'Sätt upp tvärfunktionella team runt ett uppdrag eller projekt. AI:n föreslår Movexum-kollegor utifrån de kompetenstaggar de angett under Min profil; bjud in roller, kommentera och följ flöden.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer'],
     route: '/uppdrag'
   },
@@ -1519,6 +1536,14 @@ export const coreModules: ModuleDefinition[] = [
       'Upphandlingar och excellens-insatser för bolagen — ladda upp underlaget, följ avrop, milstolpar och slutrapporter enligt uppföljningsregler, och utvärdera leverantören.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
     route: '/upphandlingar'
+  },
+  {
+    id: 'kontakter',
+    title: 'Kontaktbok',
+    description:
+      'Movexums gemensamma kontaktbok — externa kontakter med interna ägare. Be ägaren om bekräftelse att använda en kontakt för ett syfte och dela den med ett bolag via systemet. Lägg in manuellt, importera eller via chatten.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/kontakter'
   },
   {
     id: 'investerare',
@@ -1572,11 +1597,13 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'insights',
-    title: 'Usage insights',
+    // Bor sedan 2026-09 under Inställningar → AI-analys (ingen egen rail-post;
+    // id:t finns kvar för sparade enabled_modules-listor).
+    title: 'AI-analys',
     description:
-      'Spåra hur AI och plattformen används i din organisation — identifiera värdedrivare och adoption per modul.',
+      'Hur AI:n används i din organisation — körningar, tokens, kostnad, kvalitetsfeedback och miljöpåverkan.',
     rolesAllowed: ['admin', 'incubator_lead'],
-    route: '/insights'
+    route: '/installningar/ai-analys'
   },
   {
     id: 'integrationer',
@@ -1705,6 +1732,8 @@ export * from './metrics';
 export * from './goals';
 export * from './compass-survey';
 export * from './procurement';
+export * from './contacts';
+export * from './agent-memory';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */

@@ -152,7 +152,7 @@ export interface Conversation {
   lead?: string;
   module_slug?: string;
   session_token?: string;
-  /** Enkätens subjekt (migration 1700000156, § 43). */
+  /** Enkätens subjekt (migration 1700000160, § 43). */
   subject_kind?: SurveySubjectKind;
   subject_id?: string;
   extracted_data?: Record<string, unknown>;
@@ -179,7 +179,7 @@ export interface CompassModule {
   name: string;
   description?: string;
   flow_type: FlowType;
-  /** Intag (lead) eller enkät (svar utan lead) — saknat = intake (migration 1700000156, § 43). */
+  /** Intag (lead) eller enkät (svar utan lead) — saknat = intake (migration 1700000160, § 43). */
   purpose?: CompassPurpose;
   /** Vad en enkät handlar om: bolag/event/partner/personal. */
   subject_kind?: SurveySubjectKind;

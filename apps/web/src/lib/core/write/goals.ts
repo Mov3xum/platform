@@ -39,7 +39,7 @@ import { fail, ok } from './types';
  *    k-anonyma aggregat (§ 43), `manual` skriver den mänskliga bedömningen.
  *  - **PocketBase har inget null för tal** (JSON-null blir 0). Därför bär
  *    `goal_indicators.has_target` och `goal_status_entries.has_value`
- *    (migration 1700000156) om talet är känt — läsvägen tolkar `0` utan
+ *    (migration 1700000160) om talet är känt — läsvägen tolkar `0` utan
  *    flagga som null. Ett "kunde inte räknas" sparas alltså aldrig som 0.
  *  - Art. 9-aggregat (`aggregate_only`, § 41.2) persisteras ALDRIG i
  *    statusen och når aldrig agenten — de räknas live i UI:t för behöriga.

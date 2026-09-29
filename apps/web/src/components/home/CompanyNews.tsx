@@ -16,6 +16,7 @@ function activityIcon(act: DashboardActivity): string {
   if (act.kind === 'tool_run') return 'sparkle';
   if (act.kind === 'integration_sync') return 'cloud';
   if (act.kind === 'workshop_run' || act.kind === 'workshop_assignment') return 'cap';
+  if (act.kind === 'mission') return 'flow';
   switch (act.type) {
     case 'meeting':
       return 'calendar';

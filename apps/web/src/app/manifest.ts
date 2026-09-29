@@ -35,7 +35,7 @@ export default function manifest(): MetadataRoute.Manifest {
       { name: 'Dashboard', url: '/hem', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
       { name: 'Chatt', url: '/chatt', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
       { name: 'Bolag', url: '/startups', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
-      { name: 'Min översikt', url: '/inkorg', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] }
+      { name: 'Mina uppgifter', url: '/inkorg', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] }
     ]
   };
 }

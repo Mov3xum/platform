@@ -61,6 +61,26 @@ export {
   type RecordGoalStatusInput,
   type RecordGoalStatusResult
 } from './goals';
+// Kontaktboken (§ 45)
+export {
+  createContact,
+  updateContactFields,
+  deleteContact,
+  requestContactUse,
+  decideContactRequest,
+  withdrawContactRequest,
+  importContacts,
+  contactPath,
+  CONTACT_WRITABLE_FIELDS,
+  type ContactInput,
+  type ContactChanges,
+  type ContactWritableField,
+  type ContactResult,
+  type ContactRequestResult,
+  type DecidedContactRequestResult,
+  type ImportContactsOptions,
+  type ImportContactsResult
+} from './contacts';
 export { logAgentAction } from './audit';
 export {
   canWriteField,

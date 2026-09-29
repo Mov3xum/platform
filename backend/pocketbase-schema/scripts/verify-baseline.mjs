@@ -148,6 +148,8 @@ async function verifyCollectionsExist() {
     'startup_financials',
     // CRM / bolagsisolering (§ 21)
     'startup_contacts',
+    // Kontaktboken (§ 45, migration 1700000157) — förfrågningar om kontaktanvändning.
+    'contact_requests',
     'capital_rounds',
     'intellectual_property',
     'startup_kpis',
@@ -377,12 +379,16 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'procurement_calloffs',
   'procurement_rules',
   'procurement_documents',
-  // Målstyrning & verksamhetsplan (migration 1700000155, § 42). Tenant-bred
+  // Målstyrning & verksamhetsplan (migration 1700000159, § 42). Tenant-bred
   // intern styrning (VP-mål, kvartalsstatus) → staff/observer-only.
   'goal_periods',
   'goals',
   'goal_indicators',
-  'goal_status_entries'
+  'goal_status_entries',
+  // Kontaktboken (§ 45, migration 1700000157). Förfrågningar innehåller syfte
+  // + vem som frågar om vilken extern kontakt → staff/observer-only; bolagen
+  // ser DELADE kontakter via den kurerade vyn på Mitt bolag, inte här.
+  'contact_requests'
 ];
 
 // Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa
@@ -847,11 +853,19 @@ const REQUIRED_APP_FIELDS = [
   // Upphandlingar (§ 39): regelgenererade uppföljningar = tasks med
   // procurement-länk + rule_key (migration 1700000152). Saknas fälten
   // skapas korten utan idempotensnyckel → dubbletter vid varje synk.
-  { collection: 'tasks', fields: ['procurement', 'procurement_calloff', 'rule_key'] }
+  { collection: 'tasks', fields: ['procurement', 'procurement_calloff', 'rule_key'] },
+  // Kontaktboken (§ 45, migration 1700000156): utan owners/organization/
+  // category "sparas" ägare/kategori tyst bort (PB släpper okända fält).
+  { collection: 'contacts', fields: ['owners', 'organization', 'category'] },
+  // AI-minne (§ 16.4): kategori per notering = migration 1700000155. Saknas
+  // fältet "sparas" kategorin från UI/memory_write men försvinner tyst.
+  { collection: 'agent_memory', fields: ['category'] }
 ];
 
 const MUST_NOT_BE_REQUIRED = [
-  { collection: 'annual_wheel_items', fields: ['track'] }
+  { collection: 'annual_wheel_items', fields: ['track'] },
+  // Kontaktboken (§ 45): efternamn valfritt (chatten/Outlook-export ger ofta bara ett namnfält).
+  { collection: 'contacts', fields: ['last_name'] }
 ];
 
 function verifyAppWritableFields(collections) {

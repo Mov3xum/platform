@@ -79,6 +79,15 @@ export interface RunAgentLoopOptions {
    * ingen text. Synkron — får inte blockera loopen.
    */
   onToken?: (delta: string) => void;
+  /**
+   * Självläkning för skopad verktygsyta (`lib/ai/tool-scope.ts`): när modellen
+   * anropar ett verktyg som INTE skickades i `tools` (den känner alla namn via
+   * guidance-blocken) slås definitionen upp här; hittas den läggs den till i
+   * verktygslistan för resten av turen och anropet körs. Utan resolver, eller
+   * vid okänt namn, går anropet till dispatchen som svarar "Okänt verktyg".
+   * Läggs ALDRIG till i autonoma körningar (read-only-ytan sätter ingen).
+   */
+  resolveTool?: (name: string) => MistralToolDefinition | undefined;
 }
 
 export interface AgentLoopResult {
@@ -117,8 +126,11 @@ export async function runAgentLoop(
   options: RunAgentLoopOptions
 ): Promise<AgentLoopResult> {
   const maxIterations = options.maxIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
-  const tools =
-    options.tools && options.tools.length > 0 ? options.tools : undefined;
+  // Kopia — självläkningen (resolveTool) får lägga till verktyg under turen
+  // utan att mutera anroparens lista.
+  let tools =
+    options.tools && options.tools.length > 0 ? [...options.tools] : undefined;
+  const offered = new Set((tools ?? []).map((t) => t.function.name));
   let toolCallsMade = 0;
 
   // Dubblett-vakt: en modell som kör fast upprepar gärna EXAKT samma
@@ -168,6 +180,21 @@ export async function runAgentLoop(
       content: result.text || null,
       tool_calls: toolCalls
     });
+
+    // Skopad verktygsyta (§ 28.4): ett anrop till ett verktyg som inte
+    // skickades i den här turen laddas ur den fulla katalogen så att nästa
+    // anrop mot Mistral bär dess schema — och anropet körs som vanligt.
+    if (tools && options.resolveTool) {
+      for (const call of toolCalls) {
+        const name = call.function.name;
+        if (offered.has(name)) continue;
+        const def = options.resolveTool(name);
+        if (def) {
+          tools.push(def);
+          offered.add(name);
+        }
+      }
+    }
 
     // Verktygsanropen i EN tur är oberoende av varandra (modellen har redan
     // bestämt alla innan den ser något resultat). LÄSANROP körs därför

@@ -1,6 +1,11 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
-import type { Notification, NotificationKind, NotificationPayload } from '@platform/shared';
+import {
+  LEGACY_NOTIFICATION_KINDS,
+  type Notification,
+  type NotificationKind,
+  type NotificationPayload
+} from '@platform/shared';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 
 export interface NotifyParams {
@@ -39,30 +44,44 @@ export async function notify(pb: PocketBase, params: NotifyParams): Promise<void
   );
   if (targets.length === 0) return;
 
+  const create = (userId: string, useKind: NotificationKind) =>
+    pb.collection(PB_COLLECTIONS.notifications).create({
+      tenant,
+      user: userId,
+      kind: useKind,
+      actor: actorId || null,
+      mission: missionId || null,
+      comment: commentId || null,
+      payload_json: payload
+    });
+
   const chunkSize = 5;
   for (let i = 0; i < targets.length; i += chunkSize) {
     const chunk = targets.slice(i, i + chunkSize);
     await Promise.all(
-      chunk.map((userId) =>
-        pb
-          .collection(PB_COLLECTIONS.notifications)
-          .create({
-            tenant,
-            user: userId,
+      chunk.map(async (userId) => {
+        try {
+          await create(userId, kind);
+        } catch (err: unknown) {
+          // Nya notistyper (t.ex. kontaktbokens, migration 1700000158) mot ett
+          // schema där migrationen inte körts avvisas med 400 — faller då
+          // tillbaka på `assigned` så notisen aldrig tappas tyst (§ 45.3).
+          const status = (err as { status?: number } | null)?.status;
+          if (status === 400 && !LEGACY_NOTIFICATION_KINDS.includes(kind)) {
+            try {
+              await create(userId, 'assigned');
+              return;
+            } catch {
+              /* faller igenom till fel-loggen */
+            }
+          }
+          console.error('[notify] failed', {
+            userId,
             kind,
-            actor: actorId || null,
-            mission: missionId || null,
-            comment: commentId || null,
-            payload_json: payload
-          })
-          .catch((err: unknown) => {
-            console.error('[notify] failed', {
-              userId,
-              kind,
-              error: err instanceof Error ? err.message : err
-            });
-          })
-      )
+            error: err instanceof Error ? err.message : err
+          });
+        }
+      })
     );
   }
 }

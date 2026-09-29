@@ -160,9 +160,9 @@ const GUIDE: ChatGuideSection[] = [
         examples: ['Boka en pitchträning torsdag 14:00 i Gävle']
       },
       {
-        title: 'Uppdrag',
+        title: 'Tvärfunktionella team',
         description:
-          'Skapa ett uppdrags-utkast (t.ex. en bolagsutmaning). Teamet kopplas på — gärna med AI-teamförslaget — och uppdraget startas i /uppdrag.',
+          'Skapa ett uppdrags-utkast (t.ex. en bolagsutmaning). Teamet kopplas på i Tvärfunktionella team (/uppdrag) — gärna med AI-teamförslaget, som matchar Movexum-kollegor på deras kompetenstaggar.',
         examples: ['Skapa ett uppdrag kring bolagets exportsatsning, deadline sista oktober']
       }
     ]
@@ -208,6 +208,17 @@ const GUIDE: ChatGuideSection[] = [
         description:
           'Registrera mottaget stöd — posten prövas automatiskt mot förordningens tak och det samlade taket (300 000 EUR) och blockeras vid överskridande.',
         examples: ['Registrera 50 000 kr de minimis-stöd från Almi för bolaget, beslut 1 september']
+      },
+      {
+        title: 'Kontaktboken',
+        description:
+          'Lägg till externa kontakter i Movexums gemensamma kontaktbok, be kontaktägaren om att få använda en kontakt för ett syfte och dela den med ett bolag — ägaren godkänner i chatten eller på kontaktkortet.',
+        examples: [
+          'Lägg till Anna Andersson på Vinnova som kontakt, handläggare för innovationsbidrag — hon är informerad om att vi sparar uppgifterna',
+          'Vem äger våra investerarkontakter i Gävle?',
+          'Be om att få koppla ihop Vinnova-kontakten med bolaget inför deras ansökan',
+          'Godkänn förfrågan om min Almi-kontakt'
+        ]
       },
       {
         title: 'Upphandlingar & excellens-insatser',

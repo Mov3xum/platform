@@ -74,7 +74,7 @@ migrate(
     if (convChanged) app.save(conversations);
 
     // goal_indicators: source += 'survey' (union, ersätt aldrig listan) +
-    // survey_module-relation. Fail-soft om målstyrningen (1700000155) saknas.
+    // survey_module-relation. Fail-soft om målstyrningen (1700000159) saknas.
     try {
       const indicators = app.findCollectionByNameOrId('goal_indicators');
       let indChanged = false;

@@ -4,7 +4,7 @@
  * Samma modul-/frågemotor som intaget bär kundnöjdhet, NPS, partnerenkät och
  * medarbetarindex. Här finns vokabulären (syfte, subjekt), färdiga mallar
  * och aggregeringen med k-anonymitet — så att UI, routar, skrivlager och
- * målstyrning (§ 42) räknar på exakt samma sätt.
+ * målstyrning (§ 42) räknar på exakt samma sätt (migration 1700000160).
  *
  * Ingen PII i den här modulen: aggregat, etiketter, mallar.
  */

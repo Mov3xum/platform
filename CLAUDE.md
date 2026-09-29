@@ -575,8 +575,8 @@ integrity (§ 10).
 - **Global default:** env `MOVEXUM_MONTHLY_AI_BUDGET_USD` (Coolify, aldrig i
   kod). Osatt/0 = av.
 - **Per-tenant override:** `tenants.monthly_ai_budget_usd` (migration
-  1700000122), justeras av admin/incubator_lead i **`/installningar` → "AI-
-  kostnadstak"** (server action `saveAiBudgetAction`). Värde > 0 överstyr env-
+  1700000122), justeras av admin/incubator_lead i **Inställningar → AI-analys →
+  Kostnadstak** (`/installningar/ai-analys`, server action `saveAiBudgetAction`). Värde > 0 överstyr env-
   defaulten; 0/tomt ärver den. UI:t visar förbrukat-hittills via
   `getBudgetStatus` (gul ≥ 80 %, orange ≥ 95 % — ingen röd, § 2.3).
 
@@ -1498,7 +1498,10 @@ individer.
   den nya direkt; annars behålls den gamla.
 - **Dataminimering:** vi cachar INGA tredjeparts-data i vår DB —
   vi hämtar live från providern vid varje sidladdning. Bara tokens
-  lagras.
+  lagras. **Enda undantag (§ 44):** "Mina uppgifter" håller det härledda
+  agendaresultatet (titel/tid/plats/länk, aldrig tokens) 60 s i
+  processminnet per användare så sidans pollning inte gör ett Graph-anrop
+  per omladdning; cachen töms vid bortkoppling (`invalidateOutlookCache`).
 - **CRM-matchning (Outlook ↔ bolagskort):** mötesdeltagares och
   organisatörers e-post läses **transient** (i minnet, per request) i
   `providers/outlook_calendar/{calendar,match}.ts` enbart för att matcha
@@ -1643,6 +1646,10 @@ policy (§ 9.3, läsbart med fältmaskning) sedan skiftet 2026-06:
 - **Personnummer:** lagras ALDRIG. Om Excel-importen innehåller
   personnummer i Info-fältet → importen ska sanera bort detta i
   förbehandling.
+- **Kontaktboken (§ 45, 2026-09):** `contacts` utökades i migrationerna 1700000156–0158 till
+  Movexums gemensamma kontaktbok med interna **ägare** (`owners`),
+  `organization`, `category` och förfrågningar (`contact_requests`) om att
+  använda en kontakt för ett syfte. Reglerna ovan gäller oförändrat.
 
 ### 15.5 RBAC-mönster
 
@@ -1725,8 +1732,8 @@ och drar kort mellan kolumnerna.
   (Att göra), `in_progress` (Pågår), `review` (Granskas), `blocked`
   (Blockerad), `done` (Klar). `cancelled` finns kvar i enumet men visas inte
   på tavlan. `lib/overview/status.ts` mappar `backlog`→todo och
-  `review`→waiting så korten inte försvinner ur 4-kolumnsboarden i
-  "Min översikt".
+  `review`→waiting så korten inte försvinner ur kanban-vyn i
+  "Mina uppgifter" (§ 44).
 - **RBAC:** skapa/tilldela = staff (admin/incubator_lead/coach/mentor),
   flytta = staff eller ägare — verifieras i server-actions (tenant-check +
   `hasRole`) ovanpå `tasks`-API-reglerna (oförändrade). Tilldelade kollegor
@@ -1825,6 +1832,41 @@ managed-agents memory stores, men EU-suveränt och striktare scope:at).
   erasure-flödet (samma mönster som `tool_run_feedback`).
 - **Riskklass:** minimal (intern agent-scratchpad, ingen profilering av
   individer).
+
+**Kategorier för överblick (migration `1700000155`, 2026-09).** Minnet växer
+fritt med varje korrigering, så `/installningar/ai-minne` grupperar
+noteringarna i en **fast, liten taxonomi** (`packages/shared/src/agent-memory.ts`,
+ren + enhetstestad, samma mönster som `file-topics.ts`/`competences.ts`):
+`terminologi` (vad ord betyder hos er), `datatolkning` (hur fält/typer ska
+räknas och filtreras), `arbetssatt` (svarsformat/preferenser), `bolag`
+(bestående fakta om enskilda bolag), `portfolj` (observationer över
+portföljen/omvärlden), `processer` (Movexums rutiner) och `ovrigt`.
+- **Fält:** `agent_memory.category` — valfri PB-select över taxonomin.
+  Speglad i `setup-via-api.mjs` (`patchCollection`) och asserterad i
+  `verify-baseline.mjs` (`REQUIRED_APP_FIELDS`) eftersom PB släpper okända
+  fält tyst (§ 24.4/§ 30.4-invarianten); server-actionerna läser dessutom
+  tillbaka posten efter skrivning och varnar om kategorin inte fastnade.
+- **Saknad kategori härleds deterministiskt** (`inferAgentMemoryCategory`:
+  nyckelordsträffar, nyckeln väger dubbelt — INGEN AI-inferens) och märks
+  "Härledd kategori" i UI:t tills en människa bekräftar eller flyttar den
+  (`setAgentMemoryCategoryAction`). Ingen backfill i migrationen — människan
+  bekräftar, migrationen gissar inte.
+- **Chatten:** `memory_write` kräver `category` (verktygsschemat listar
+  kategorierna med beskrivning; okänt värde avvisas med de giltiga namnen,
+  aldrig tyst `ovrigt`); `memory_read` tar ett valfritt `category`-filter
+  (appliceras i JS så härledda äldre rader ingår) och returnerar
+  `category`/`category_source`. Auto-recall-blocket (`buildMemoryRecallBlock`)
+  grupperas per kategori i taxonomins ordning — samma indelning som
+  personalen ser. Kvittot (§ 33.4) för `memory_write` länkar till
+  `/installningar/ai-minne?kategori=<id>`.
+- **UI:** kategorichips med antal, sök (rubrik/innehåll/bolag), scope-filter
+  (hela tenanten/per bolag), filter "Härledd kategori", grupperade sektioner
+  med rubrik + beskrivning, långa noteringar hopfällda ("Visa hela"),
+  kategori-select i redigera/lägg till (skapa-formuläret förhandsvisar den
+  härledda kategorin), "Flytta till kategori" per notering. Läsvägen
+  paginerar (tak 5 000, kapning visas som banner — § 33.4).
+- **PII/riskklass oförändrad:** kategorin är metadata om vilken SORTS regel
+  noteringen är; inga nya datavägar, kollektionen är fortsatt denylistad.
 
 ### 16.5 Kvalitetsverifiering (grader-pass)
 
@@ -2278,7 +2320,7 @@ aktivitetsfeeden: "**\<bolag\> slutförde \<dokument\>**".
 När staff tilldelar en workshop eller ett utbildningsdokument kan de skriva
 **instruktioner**, bjuda in andra **Movexum-resurser** (coacher/mentorer) som
 medarbetare, och i samma steg skapa ett **möte** med de inbjudna. Inbjudna
-resurser ser tilldelningen i sin "Min översikt" (personlig uppgift) och mötet i
+resurser ser tilldelningen i sina "Mina uppgifter" (personlig uppgift) och mötet i
 sin agenda. Sidan **`/pagaende`** ger hela Movexum en tenant-bred översikt över
 allt som pågår med bolagen (workshops, utbildningsdokument, öppna aktiviteter),
 grupperat per bolag.
@@ -3724,26 +3766,30 @@ konservativ uppskattning — alla värden märks "≈" i UI:t.
 | Fil | Syfte |
 |-----|-------|
 | `packages/shared/src/ai-impact.ts` (+ `.test.ts`) | Ren, enhetstestad beräknings-/formatteringslogik (tokens → CO₂e/vatten, sv-SE-formattering) |
-| `apps/web/src/app/chatt/ChattWorkspace.tsx` | Summerar konversationens tokens från per-turn-metadata (§ 9.9) |
-| `apps/web/src/components/DashboardChat.tsx` | Token-/miljöchip under chatten ("X tokens · ≈ Y g CO₂e · Z ml vatten") |
-| `apps/web/src/app/insights/page.tsx` | Tenant-vy: CO₂e/vatten i Översikt-railen + admin-länk till systemdashboarden |
-| `apps/web/src/app/admin/ai-miljo/page.tsx` | Systemvid dashboard: total tokenanvändning + utsläpp **per tenant** för vald period |
+| `apps/web/src/lib/ai/tool-scope.ts` (+ `.test.ts`) | Skopad verktygsyta per tur (§ 28.4) — halverar prompt-tokens per anrop |
+| `apps/web/src/app/installningar/ai-analys/{page,paths}.tsx` | Sektionen AI-analys med undervyerna Kostnadstak / Användning / Miljöpåverkan (§ 36.1) |
+| `apps/web/src/app/installningar/ai-analys/UsageView.tsx` | Vyn Användning (f.d. `/insights`): körningar, tokens, kostnad, feedback; CO₂e/vatten i railen |
+| `apps/web/src/app/installningar/ai-analys/MiljoView.tsx` | Vyn Miljöpåverkan (f.d. `/admin/ai-miljo`, admin-only): tokens + utsläpp **per tenant** för vald period |
 
 ### 28.2 Ytor
 
-- **Chatten (`/chatt`):** INLINE under varje assistant-svar visas turens
-  tokens (`tokens_in` + `tokens_out` ur per-turn-metadatan i `messages[]`)
-  plus uppskattad CO₂e/vatten. Tooltipen anger källan (EU AI Act art. 13)
-  och förklarar varför siffran kan kännas hög: varje verktygssteg i
-  agent-loopen (§ 16.2) är ett EGET modellanrop som bearbetar hela
-  kontexten (systemprompt + schema-sammanfattning + guidance + historik +
-  verktygsresultat) igen, och Mistral debiterar prompt-tokens per anrop —
-  en tur med 2–3 verktygsanrop landar därför normalt på tiotusentals
-  tokens. Det är verklig, korrekt summerad förbrukning (`onUsage` per
-  API-anrop i `runAgentLoop`), inte ett räknefel.
-- **`/insights` (staff):** tenantens period-tokens omräknade till CO₂e/vatten
-  i Översikt-railen (samma `ai_usage_events`-summa som token-statet).
-- **`/admin/ai-miljo` (ADMIN-ONLY):** period-väljare (innevarande månad /
+- **Chatten (`/chatt`) visar INGA token- eller miljösiffror (2026-09).**
+  Under varje assistant-svar står bara modellen som svarade (transparens
+  art. 13) — samma uttryck som Claude och ChatGPT. Den tidigare inline-
+  chipen ("133 034 tokens · ≈ 379 g CO₂e · 15 l vatten") summerade in + ut
+  över ALLA anrop i turen (varje verktygssteg är ett eget anrop utan
+  prompt-cache som läser om systemprompt, verktyg, historik och
+  verktygsresultat) och jämfördes av användarna med de få hundra ord de
+  själva skrev — korrekt summerad förbrukning (`onUsage` per API-anrop) men
+  missvisande läst som "kostnaden för mitt meddelande". Per-turn-metadatan
+  (`tokens_in`/`tokens_out`/`api_calls` i `messages[]`, § 9.9) och
+  `ai_usage_events` loggas oförändrat och redovisas per period i
+  `/insights` och `/admin/ai-miljo` nedan — inte i konversationen.
+- **Inställningar → AI-analys → Användning** (`/installningar/ai-analys?vy=anvandning`,
+  staff; `/insights` redirectar hit): tenantens period-tokens omräknade till
+  CO₂e/vatten i railen (samma `ai_usage_events`-summa som token-statet).
+- **Inställningar → AI-analys → Miljöpåverkan** (`?vy=miljo`, ADMIN-ONLY;
+  `/admin/ai-miljo` redirectar hit): period-väljare (innevarande månad /
   7/30/90 dagar), KPI-kort (tokens, CO₂e, vatten, anrop, kostnad) och tabell
   **per tenant**. Läser `ai_usage_events` över alla tenants via
   `getSuperuserPb()` (RLS:en är tenant-scopad) — RBAC-gaten är `admin`-roll,
@@ -3788,6 +3834,26 @@ exponering** (best practice), utan att kvalitet tappas:
   instruerar redan "describe före filter"); dispatch-felet vid okänt
   kollektionsnamn listar alla giltiga namn → självläkande till priset av
   en extra iteration (taket är 7, § 9.3).
+- **Skopad verktygsyta (2026-09, `lib/ai/tool-scope.ts`, ren + enhetstestad):**
+  verktygsschemana var den största posten — alla ~40 definitioner (≈ 12 000
+  tokens) skickades i VARJE anrop. Nu passerar läs-/sök-/minnes-/dokument-/
+  webbverktygen och de GENERISKA skrivverktygen (`ALWAYS_ON_WRITE_TOOLS`:
+  bolagsfält, aktiviteter, uppgifter, anteckning, godkännande, minne)
+  alltid, medan domänspecifika skrivverktyg (årshjul, Startupkompassen,
+  workshops, events/möte, uppdrag, de minimis, KPI/kapital, scheman,
+  anslagstavla, upphandlingar — `TOOL_DOMAINS`) bara skickas när de senaste
+  tre användarturerna, senaste assistant-svaret eller agentens persona
+  matchar domänens synonymstammar (deterministiskt, ingen extra LLM-runda).
+  **Självläkning:** anropar modellen ändå ett verktyg som inte skickades (den
+  känner namnen via guidance-blocken) slår `runAgentLoop` upp definitionen
+  via `resolveTool` (`makeToolResolver(fullTools)`), lägger till den för
+  resten av turen och kör anropet — samma mönster som uppskjutna verktyg i
+  Claude Code. Ingen funktion försvinner, och säkerhetsgränsen är oförändrad
+  (RBAC/tenant/whitelist ligger i det delade skrivlagret som dispatchen
+  alltid går genom; autonoma körningar sätter ingen resolver). Gäller
+  trådchatten (`staff-chat.ts`) och den efemära `/idag`-chatten
+  (`lib/actions/chat.ts`). Testet låser att varje `DOMAIN_WRITE_TOOLS`-namn
+  är antingen alltid-på eller i exakt en domän.
 - **Enum-duplicering borttagen:** de fem läsverktygens scheman bär inte
   längre alla kollektionsnamn som `enum` (namnen finns i indexet; Mistral
   gör ingen constrained decoding på enum — det var bara prompt-tokens).
@@ -3830,7 +3896,8 @@ externt (t.ex. annan inkubator). Funktionen "sätt upp ett team utifrån en
 beskrivning av ett uppdrag där relevanta kompetenser kopplas på" byggs ovanpå
 den befintliga **uppdrags-/missionsmodellen** (`/uppdrag`, §-spine i
 `lib/actions/missions.ts` + `missions-server.ts`) snarare än som en parallell
-yta. Tre delar: (1) kompetensmodell på personer, (2) AI-matchning
+yta. Modulen heter i railen **"Tvärfunktionella team"** (id `uppdrag`, route
+`/uppdrag` oförändrad; hette tidigare "Projekt & uppdrag"). Tre delar: (1) kompetensmodell på personer, (2) AI-matchning
 beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 
 **Kritiska filer:**
@@ -3841,7 +3908,7 @@ beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 | `backend/pocketbase-schema/migrations/1700000134_extend_users_competences.js` | `users.competences` (select), `users.title`, `users.bio` |
 | `apps/web/src/lib/actions/profile.ts` + `app/min-profil/**` | Självservice-profil (titel/bio/kompetenser) |
 | `apps/web/src/lib/ai/team-match.ts` | `matchTeam` — isolerad Mistral-körning: beskrivning → kompetenser + kandidater (samma mönster som `file-categorize.ts`) |
-| `apps/web/src/lib/actions/team.ts` | `suggestTeamAction` — laddar kandidater (users+contacts), kör matcharen, loggar usage |
+| `apps/web/src/lib/actions/team.ts` | `suggestTeamAction` — laddar kandidater (BARA staff-users med kompetenstaggar), kör matcharen, loggar usage |
 | `apps/web/src/app/uppdrag/new/NewMissionForm.tsx` | AI-teamförslag inbäddat i nytt-uppdrag-formuläret |
 | `backend/pocketbase-schema/migrations/1700000135_extend_tasks_mission_link.js` | `tasks.link_kind += 'mission'` + `tasks.mission` |
 | `apps/web/src/lib/assignments/collaboration.ts` | `createMissionMemberTasks` (personlig uppgift per teammedlem) |
@@ -3853,6 +3920,9 @@ beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 | `apps/web/src/app/api/missions/[id]/documents/route.ts` | Upload-route för dokumentation (staff-only) |
 | `apps/web/src/app/uppdrag/[id]/MissionDocuments.tsx` | Dokumentation-panel (ladda upp/lista/radera) |
 | `backend/pocketbase-schema/migrations/1700000136_seed_competence_gap_agent.js` | Portfölj-agent `ai_competence_gap` (kompetensbehov/gap, Fas 3) |
+| `backend/pocketbase-schema/migrations/1700000155_extend_activity_kinds_mission.js` | `activities.kind` += `mission` (slutfört team → rad på bolagskortet) |
+| `apps/web/src/lib/missions/completion.ts` | `logMissionCompletion` — aktivitetsrad per kopplat bolag när uppdraget når `done` |
+| `apps/web/src/app/startups/[id]/StartupMissionsSection.tsx` | Bolagskortets sektion "Tvärfunktionella team" (sammanställning av slutförda + pågående) |
 
 ### 29.2 Kompetensmodell (Fas 0)
 
@@ -3860,9 +3930,10 @@ beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 `file-topics.ts`). Migration 1700000130 lägger fälten på `users`:
 `competences` (multi-select, MÅSTE spegla `CompetenceId`), `title`, `bio`.
 Användaren sätter dem själv på `/min-profil` (updateRule `@request.auth.id = id`
-oförändrad). Externa resurser återanvänder `contacts.skills` (fritext) —
-`inferCompetencesFromText` mappar dem heuristiskt till taxonomin (bara för att
-berika kandidatlistan, aldrig en säkerhetsgräns).
+oförändrad). **Kompetenstaggarna är matchningens enda underlag** (2026-09):
+externa CRM-kontakter (`contacts.skills`) är INTE längre kandidater —
+`inferCompetencesFromText` finns kvar i `competences.ts` som ren helper men
+används inte av matcharen.
 
 ### 29.3 AI-teammatchning (Fas 1)
 
@@ -3871,12 +3942,20 @@ körning (temp 0) — egen snäv system-prompt (INTE agent-/chatt-ytan): beskriv
 + ev. bolagskontext + kandidatlista (id/namn/kompetens, **ingen PII**) →
 JSON: föreslagna kompetenser (validerade mot taxonomin), kandidater (validerade
 mot listan, roll/motivering/confidence) och ev. `external_note` (kompetensgap).
-`suggestTeamAction` (staff-only) laddar interna users (staff med competences) +
-externa contacts (skills), kör matcharen och loggar i `ai_usage_events` (surface
-`suggestions`). `NewMissionForm` visar förslaget; staff kopplar på kandidater med
-ett klick — **inget tilldelas automatiskt** (människa-i-loopen, EU AI Act
-art. 14). Externa kontakter blir inte uppdragsdeltagare (de hör till CRM:t) utan
-visas som "extern kompetens att koppla på".
+`suggestTeamAction` (staff-only) laddar kandidater = **riktiga användare i
+systemet** i tenanten med staff-roll (admin/incubator_lead/coach/mentor) som
+**själva angett minst en kompetenstagg** under Min profil — bolagsmedlemmar,
+observatörer, partners och externa CRM-kontakter är aldrig kandidater (teamen är
+interna Movexum-team; incident 2026-09: alla användare + CRM-kontakter dök upp i
+förslaget). Finns ingen taggad kollega görs inget Mistral-anrop — actionen
+svarar med en tydlig uppmaning att fylla i Min profil. Därefter körs matcharen
+och usage loggas i `ai_usage_events` (surface `suggestions`). `NewMissionForm`
+visar förslaget (+ hur många kollegor som kan matchas); staff kopplar på
+kandidater med ett klick — **inget tilldelas automatiskt** (människa-i-loopen,
+EU AI Act art. 14). `external_note` (kompetensgap) kvarstår som fri text för
+kompetens som saknas internt. **Deltagar-pickern** (nytt team + panelen på
+teamkortet) listar av samma skäl bara Movexum-personal; @mention i kommentarer
+ser fortsatt hela tenanten.
 
 ### 29.4 Team-arbetsyta (Fas 2)
 
@@ -3888,6 +3967,32 @@ mönster som assignment-collaboration (§ 18.4). Uppdragskortet
 kompetenstäckning** + varje medlems kompetenser, så staff ser om teamet är
 tvärfunktionellt nog.
 
+**Sammanställning på bolagskortet (2026-09).** När ett team/uppdrag når
+status `done` — via statusväljaren (`updateMissionStatus`) ELLER genom att
+sista steget bockas av (`advanceStage`) — sammanställs det på varje kopplat
+bolagskort (`/startups/[id]`, sektionen **"Tvärfunktionella team"**,
+ankare `#team-uppdrag`, egen post i bolagskortets hopp-nav):
+- `logMissionCompletion` (`lib/missions/completion.ts`) skriver en
+  `activities`-rad per bolag (`kind='mission'`, migration **1700000155**,
+  speglad i `setup-via-api.mjs`; `type='task'`, `status='done'`, titel
+  "Tvärfunktionellt team slutfört: <titel>") så slutförandet syns i
+  bolagskortets Aktiviteter, i Bolagsnytt/`/aktivitet` (eget filter
+  "Tvärfunktionella team", ikon `flow`) och i chattens feed. Fyrar bara på
+  övergången till `done` (`isMissionCompletionTransition`), är fail-soft
+  (en instans utan migrationen blockerar aldrig statusändringen) och
+  superuser-faller bara vid PB v0.23.4:s tysta regel-nekande (§ 21.3).
+- `StartupMissionsSection` läser uppdragen **live** (ingen kopia lagras)
+  via `startup = id || startups ~ id` + exakt JS-verifiering av kopplingen,
+  och visar slutförda team med typ, slutförandedatum (sista klara stegets
+  tid, annars `updated`), team (ansvarig + deltagare — visningsnamn, aldrig
+  e-post), stegen, beskrivning (HTML strippad, cappad) och
+  `mission_documents` som länkar; därunder pågående team kompakt. Reads går
+  via användarens token → § 21-RLS: bolagsmedlem ser bara sitt bolags
+  uppdrag och får tom dokumentlista (staff/observer-only). Renderas inte alls
+  utan kopplade uppdrag.
+- GDPR § 5: bara verksamhetsdata (titel, typ, datum, interna visningsnamn);
+  inga nya fält i `lib/ai/context.ts`; riskklass n/a (ingen AI-inferens).
+
 **Uppdragskanban (tavla inne på uppdraget).** Samma 6-kolumners `tasks`-tavla
 som bolagskanbanen (§ 15.7) finns nu direkt på uppdragskortet. Den
 presentationella tavlan är extraherad till `components/kanban/TaskKanban.tsx`
@@ -3897,7 +4002,7 @@ mission). Mission-board-actions (`createMissionBoardTaskAction` /
 `moveMissionBoardTaskAction`, `lib/actions/tasks.ts`) tillåter **staff ELLER
 uppdragsdeltagare** att skapa/flytta kort; tilldelning av kollegor
 (`setTaskAssigneesAction`) är fortsatt staff-only. Korten skapas med
-`link_kind='mission'` + `mission`-FK och syns i medlemmarnas "Min översikt".
+`link_kind='mission'` + `mission`-FK och syns i medlemmarnas "Mina uppgifter".
 
 **Dokumentation (ersätter artefakter).** Den tidigare artefakt-/länklistan i
 `MissionFlow` är borttagen. I stället laddar staff upp riktiga filer i
@@ -4574,6 +4679,35 @@ Dashboarden visar de 5 senaste och expanderar stegvis ("Visa fler", +15 åt
 gången) upp till 60 poster; "Alla" leder till `/aktivitet` som har ett eget
 filter **Ändringslogg** (`?kind=log`).
 
+**Loggen under chatten är PERSONLIG (2026-09).** `/chatt` visade tidigare den
+tenant-breda feeden (bolagshändelser + hela skrivlagrets logg) och "fastnade"
+på gamla poster, eftersom det mesta en person faktiskt gör — laddar upp en
+fil, läggs in i ett tvärfunktionellt team, bjuds in till ett event, laddar upp
+ett utbildningsdokument — aldrig når `activities` eller `agent_actions`. Nu
+läser `loadPersonalActivityFeed` (`lib/feed/activity-feed.ts`) allt den
+inloggade själv är inblandad i: `agent_actions` med **`actor = jag`** (egna
+skrivningar via skrivlagret: inlägg, årshjul, kompassmoduler, workshops,
+kanban-kort, events, uppdrag, upphandlingar …) plus direkta källor lästa
+med användarens egen token (RLS § 21, `getList(1,20)` per källa, fail-soft):
+`org_knowledge` (created_by), `education_documents`
+(uploaded_by), `missions` (issuer/mentor/`recipients ~ jag` — tidpunkt =
+mitt `participants_json.added_at` när jag lades till i efterhand), `tasks`
+(owner/`assignees ~ jag`), `event_signups` (user), `workshop_assignments` och
+`education_document_assignments` (assigned_by/`collaborators ~ jag`), `notes`
+(author — aldrig `body`), `mission_documents` (uploaded_by), `tool_runs`
+(triggered_by — aldrig messages/output), `agreements` (assigned_by) och
+`activities` (owner). Mappningen till du-formulerade rader ("Du ingår i
+teamet för uppdraget …", "Du laddade upp … till kunskapsbasen") är ren och enhetstestad i
+`lib/personal-feed.ts`; en direkt rad hoppas över när samma post redan finns
+i skrivlagrets logg (dedupe på `collection:record_id`). Multi-relationer
+filtreras med `~` (LIKE på JSON-listan) för att inte träffa `?=`-buggen
+(§ 21.3). Portföljbred feed finns oförändrat på `/hem` (Bolagsnytt,
+`loadActivityFeed`) och `/aktivitet`. **Det personliga filarkivet
+(`user_files`, Filer) loggas medvetet INTE** — det är privat arbetsyta och
+ska inte kännas övervakad; det som visas är gemensamt material och det som
+rör andra. Ingen ny dataväg, inga nya fält: rader från staff-only-
+kollektioner når bara den som RLS redan låter läsa dem. Riskklass n/a.
+
 ### 32.2 Ingen ny dataväg
 
 - **RLS:** läsningen sker med användarens egen token — `agent_actions`-reglerna
@@ -4992,7 +5126,7 @@ service workern och manifestet är handskrivna och versionerade i repot.
   server-side i `ProtoShell` via `buildMobileNav` med **samma
   `canAccessModuleForUser` som railen** (menyn är UI-kurering, aldrig
   säkerhetsgräns — RLS/RBAC ligger kvar i § 21).
-- **Staff/observer:** Hem (`hem`, § 37) · Översikt (`inkorg`, med
+- **Staff/observer:** Hem (`hem`, § 37) · Uppgifter (`inkorg`, § 44, med
   olästa-badge) · **Chatt** (`idag`) · Pågående (`pagaende`) · Mer. Avstängda
   moduler hoppas över och nästa kandidat tar platsen (bolag, uppdrag, årshjul,
   filer …).
@@ -5095,7 +5229,7 @@ brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
 | `/installningar/anvandare` | **Användare** — alla konton i tenanten med sök/rollfilter, "Ny användare", och per konto: roller, kopplat bolag, **moduler i sidofältet** (§ 36.3), nytt lösenord, radering |
 | `/installningar/moduler` | Borttagen (redirect → `/installningar/anvandare`) — den globala tenant-togglingen finns inte längre, § 36.3 |
 | `/installningar/organisation` | Tenants, infra-status, dataresidens |
-| `/installningar/ai-kostnad` | AI-kostnadstak (§ 9.6) |
+| `/installningar/ai-analys` | **AI-analys** — tre undervyer via `?vy=`: **Kostnadstak** (default, § 9.6), **Användning** (f.d. `/insights`: körningar, tokens, kostnad, kvalitetsfeedback § 9.10, adoption) och **Miljöpåverkan** (f.d. `/admin/ai-miljo`, admin-only, § 28.2). `/insights`, `/admin/ai-miljo` och `/installningar/ai-kostnad` är legacy-routes som redirectar hit (perioden bevaras). Modulen `insights` heter "AI-analys", har ingen egen rail-post längre och pekar hit. |
 | `/installningar/ai-minne` | AI-minne (`agent_memory`, § 16.4) |
 | `/installningar/utseende` | Tenant-logotyp |
 
@@ -5205,12 +5339,14 @@ på canvasen med hårlinjer, och typskalan är **samma som chatten** (hälsning
 all IO och skickar färdig data:
 
 1. **Masthead** — folio-rad (datum · ISO-vecka · "Översikt") under en
-   ink-linje, hälsningen i Sora och "Gå direkt till"-raden som textlänkar
-   (rollfiltrerade). (Den dekorativa årsringen togs bort 2026-09.) Under det
-   en **boxlös siffer-rad**
-   (`StatFigure`): fem nyckeltal fördelade över bredden — stor tabulär siffra
-   i Sora, etikett i kapitäler, hint och delta — varje figur är en länk till
-   sin vy. En räkning som felade visas som "–", aldrig som 0.
+   ink-linje och hälsningen i Sora. (Den dekorativa årsringen och
+   "Gå direkt till"-raden med snabblänkar togs bort 2026-09 — railen och
+   bottom-menyn är navigationen.) Under det en **boxlös siffer-rad**
+   (`StatFigure`): fyra nyckeltal fördelade över bredden (aktiva bolag, nya
+   inflöden, mina uppgifter, på agendan; "Pågående workshops" togs bort
+   2026-09) — stor tabulär siffra i Sora, etikett i kapitäler, hint och
+   delta — varje figur är en länk till sin vy. En räkning som felade visas
+   som "–", aldrig som 0.
 2. **Kalendern** (full bredd) — en **tidslinje** (`HomeTimelineStrip`) med
    valbart fönster **7 · 14 dagar · Månad** (`?dagar=7|14|30`,
    `parseHomeWindowDays` i `@platform/shared` home.ts; **default 7 dagar**;
@@ -5850,7 +5986,7 @@ varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
 
 | Fil | Syfte |
 |-----|-------|
-| `backend/pocketbase-schema/migrations/1700000155_create_goals.js` | `goal_periods`, `goals`, `goal_indicators`, `goal_status_entries` |
+| `backend/pocketbase-schema/migrations/1700000159_create_goals.js` | `goal_periods`, `goals`, `goal_indicators`, `goal_status_entries` |
 | `packages/shared/src/goals.ts` (+ `.test.ts`) | Vokabulär (fokusområden, team, statusar, källor), validering (delas av UI och chatt), `buildGoalTree`, `rollupGoalStatuses`, `suggestStatusFromValue`, `progressTowardsTarget`, `quarterOfDate` |
 | `apps/web/src/lib/core/write/goals.ts` | Skrivlager: `createGoalPeriod`/`setGoalPeriodStatus`, `createGoal`/`updateGoalField`, `createGoalIndicator`, `recordGoalStatus` (idempotent upsert per kvartal) |
 | `apps/web/src/lib/goals/data.ts` | Enda läsvägen (`loadGoalWorkspace`, fail-soft, live-värden via `computeMetrics`) |
@@ -5874,7 +6010,7 @@ varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
   `direction`.
 - **PocketBase har inget null för tal** — JSON-`null` lagras som `0`. Därför
   bär `goal_indicators.has_target` och `goal_status_entries.has_value`
-  (migration 1700000156) om talet är känt; läsvägen (`lib/goals/data.ts`)
+  (migration 1700000160) om talet är känt; läsvägen (`lib/goals/data.ts`)
   normaliserar `0` utan flagga till `null`, och ett "kunde inte räknas"
   sparas aldrig som 0.
 - **`goal_status_entries`**: `indicator`, `quarter` 1–4, `status`
@@ -5955,7 +6091,7 @@ Mål & VP (§ 42).
 
 | Fil | Syfte |
 |-----|-------|
-| `backend/pocketbase-schema/migrations/1700000156_extend_compass_surveys.js` | `compass_modules.purpose/subject_kind/anonymous`, `compass_conversations.subject_kind/subject_id`, `goal_indicators.source += survey` + `survey_module` + `has_target`, `goal_status_entries.has_value` |
+| `backend/pocketbase-schema/migrations/1700000160_extend_compass_surveys.js` | `compass_modules.purpose/subject_kind/anonymous`, `compass_conversations.subject_kind/subject_id`, `goal_indicators.source += survey` + `survey_module` + `has_target`, `goal_status_entries.has_value` |
 | `packages/shared/src/compass-survey.ts` (+ `.test.ts`) | Vokabulär, `isSurveyModule`, `SURVEY_TEMPLATES` (kundnojdhet, nps_event, partnerenkat, medarbetarindex), `aggregateSurvey` (k-anonymitet, medel, fördelning, NPS), `satisfiedShare` |
 | `apps/web/src/lib/compass/survey.ts` | `storeSurveyResponse` (publika routen), `loadSurveyAggregate` (RLS via användarens token), `listSurveyModules` |
 | `apps/web/src/lib/compass/lead-capture.ts` | `moduleWantsLead` ⇒ false för enkäter — ENDA grinden, routarna är orörda utom enkätgrenen |
@@ -5996,3 +6132,257 @@ direkta identifierare. Compass är migration-only (§ 23.4) men
 `compass_modules` inline-def i `setup-via-api.mjs` speglar de nya fälten
 (§ 23.7-precedensen), och `goal_indicators`/`goal_status_entries` speglar
 `survey_module`/`has_target`/`has_value`.
+## 44. Mina uppgifter (`/inkorg`) — personlig att-göra-vy
+
+### 44.1 Översikt
+
+`/inkorg` (modul `inkorg`, titel **Mina uppgifter**, alla roller) samlar allt
+som är "mitt": uppgifter (`tasks`) och aktiviteter (`activities`) jag äger
+eller som hör till bolag jag coachar/är länkad till, kommande events +
+Outlook-möten, notiser och uppdrag jag deltar i. Sidan hette tidigare "Min
+översikt", vilket kolliderade med `/hem` ("Översikt"/Dashboard, § 37) och
+`/min-oversikt` ("Mitt bolag"/medlemmens "Min översikt", § 21bis) — bytt
+2026-09.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `apps/web/src/lib/overview/group.ts` (+ `.test.ts`) | Ren, enhetstestad tidsindelning (`dueBucket`, `groupByDue`, `isOverdue`, `formatDueLabel`, räkningar) — svenska kalenderdygn (§ 38) |
+| `apps/web/src/lib/overview/status.ts` | Board-modell (`WorkItem`, kolumner, status-mappning tasks/activities) |
+| `apps/web/src/lib/overview/aggregate.ts` | `getOverviewData` (tasks + activities + events + Outlook, fail-soft MED `readNotices`), `listStartupOptions` |
+| `apps/web/src/components/overview/OverviewWork.tsx` | Klient-container: optimistiskt state, alla mutationer, vyväxling lista/tavla |
+| `apps/web/src/components/overview/{OverviewList,OverviewBoard}.tsx` | Tidsindelad lista (default) respektive kanban (presentationella) |
+| `apps/web/src/components/overview/{WorkItemCard,WorkItemEditor,QuickAdd,AgendaStrip}.tsx` | Kort med handlingar, inline-redigering, snabbtillägg, agenda |
+| `apps/web/src/lib/actions/tasks.ts` | `createTaskAction`, `updateTaskStatusAction`, `updateTaskDetailsAction`, `deleteTaskAction` |
+| `apps/web/src/lib/actions/overview-activities.ts` | `updateActivityStatusAction`, `updateActivityDetailsAction` (via skrivlagret) |
+| `apps/web/src/app/inkorg/page.tsx` | Sidan: agenda, huvudspalt (uppgifter) + högerspalt (notiser, uppdrag) |
+
+### 44.2 Regler (bindande)
+
+- **Tidsindelad lista är default**, kanban är växlingsbar vy (valet sparas
+  per webbläsare i `localStorage` `movexum-overview-view` — bekvämlighet,
+  ingen datakälla). Hinkar i fast ordning: Försenat · Idag · Denna vecka
+  (1–7 dagar) · Senare · Utan datum; klara poster ligger hopfällda under
+  "Klart nyligen". Rubriksiffran räknar **bara öppna** poster + antal
+  försenade.
+- **"Försenad" räknas på svenskt kalenderdygn** (`dueDayDiff` →
+  `stockholmDayDiff`), aldrig mot `Date.now()`: `due_at` lagras utan
+  klockslag (UTC-midnatt), så en jämförelse mot nu gjorde "idag" försenad
+  från 00:01 (bugg 2026-09). Etiketter/inputvärden härleds på samma sätt.
+- **Klara poster visas bara i `DONE_WINDOW_DAYS` = 7 dagar** efter
+  `completed_at` (filter i `aggregate.ts`) — annars växer "Klar" för evigt
+  och äter av läs-taket (`PAGE_SIZE` = 200). Kapning (`totalItems` >
+  hämtade) och läsfel per källa rapporteras i `readNotices` och visas som
+  orange banner (§ 33.4-principen: aldrig "Allt klart" när läsningen
+  misslyckades).
+- **Kortets handlingar:** titeln länkar till bolagets kanban
+  (`/startups/<id>/aktiviteter`), bolagskortet (aktivitet) eller uppdraget;
+  penna = inline-redigering (titel, datum, bolag för uppgifter; titel +
+  datum för aktiviteter); papperskorg = radera (bara uppgifter, med
+  bekräftelse); "Flytta till"-select = tangentbordsväg motsvarande
+  drag-and-drop; "Markera klar". Ägaravataren visas BARA när ägaren är någon
+  annan än den inloggade; "Uppgift"-chippen är borttagen (bara "Aktivitet"
+  märks ut).
+- **RBAC** (ISO 27001 A.5.15–A.5.18): redigera/flytta = staff eller ägare
+  (speglar `tasks.updateRule`); radera = admin/incubator_lead eller ägare
+  (speglar `tasks.deleteRule`); allt verifieras i server-action med tenant-
+  kontroll i koden, indata typkontrolleras (`validateDateOnly`) och
+  redigering/radering auditeras i `agent_actions` (radering som `update` +
+  `deleted`, § 30.6). Skrivningar via användartoken med `writeWithFallback`
+  (superuser BARA vid PB v0.23.4:s tysta regel-nekande, § 21.3); 404-
+  fallbacken är **opt-in** (`fallbackOn404`) och används bara för
+  raderingen, där `tasks.deleteRule` (bart `?=` mot roller) annars tyst
+  nekar en admin som inte äger kortet. Aktiviteters titel/datum går genom
+  det delade, auditade skrivlagret (`updateActivityField`; `due_date` nytt
+  whitelistat fält för människa, `agent: deny` — agentens verktygsyta § 33
+  är oförändrad); båda fälten valideras innan första skrivningen.
+- **Polymorfa länkar skyddas.** `link_kind`/`startup` ändras BARA när kortet
+  är fristående eller bolagskopplat (`canRelinkStartup`); uppdrags-,
+  kontakt-, event- och upphandlingskort behåller sin länk, och editorn döljer
+  bolagsvalet för dem. Ett `startup` på en upphandlingsuppföljning skulle ge
+  bolagsmedlemmar läsrätt till intern avtalsdata via tasks-RLS (§ 39.2/§ 21).
+  Uppföljningar med `rule_key`/`link_kind='procurement'` kan inte raderas
+  här (synken skulle återskapa dem) — markera klar eller ändra regeln.
+- **Snabbtillägget** tar titel + valfritt datum + valfritt bolag
+  (`createTaskAction`, tenant-verifierat bolag) så nya kort får en plats i
+  tidsindelningen direkt.
+- **Notiser i högerspalten** (≥ 1280 px; under huvudspalten på mindre
+  skärm) med olästa-antal även vid sidtiteln (`#notiser`-ankare). Tom agenda
+  kollapsar till en rad i stället för en stor tom ruta.
+- **Pollning:** `useLiveWorkspace` på fokus + 60 s (tidigare 15 s), pausad
+  under interaktion. **Outlook-agendan cachas 60 s i processminnet per
+  användare** (`outlookCache` i `aggregate.ts`) — bara det härledda
+  agendaresultatet (titel/tid/plats/länk), aldrig tokens, aldrig i DB; ett
+  fel (Graph ELLER uppslaget av kopplingen) cachas inte, utgångna poster
+  rensas vid varje skrivning och `disconnectAppIntegrationAction` tömmer
+  cachen direkt (GDPR art. 7.3). Medvetet, litet avsteg från "live vid varje
+  sidladdning" (§ 14.4, dokumenterat där) så pollningen inte gör ett
+  Microsoft Graph-anrop per omladdning.
+- **GDPR/AI:** inga nya fält eller kollektioner; `contactName` på kortet är
+  fortsatt UI-only (§ 15.3). Riskklass n/a (ingen AI-inferens).
+
+
+## 45. Kontaktboken — gemensam kontaktbok med interna ägare & förfrågningar
+
+### 45.1 Översikt
+
+`/kontakter` (modul `kontakter`, titel **Kontaktbok**, "Portfölj"-railen,
+staff/observer) är Movexums gemensamma bok över **externa kontakter**
+(investerare, rådgivare, handläggare på myndigheter, partners, akademi,
+media, leverantörer, alumner) — för Movexums personal, **inte** för bolagen
+direkt. Varje kontakt har **en eller flera interna ägare** (kollegan som har
+relationen). Vill en kollega **använda** en kontakt för ett specifikt syfte —
+typiskt koppla ihop den med ett bolag — skickas en **förfrågan** till ägaren,
+som godkänner eller avböjer; vid godkännande med bolag delas kontakten med
+bolaget **via systemet** (kopplingen i `startup_contacts` + vyn "Delade
+kontakter" på Mitt bolag). Kontakter läggs in manuellt, via **import**
+(CSV/Excel/Outlook-export) eller via **chatten** — alla vägar går genom det
+delade skrivlagret (§ 16).
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/contacts.ts` (+ `.test.ts`) | Ren, enhetstestad domänlogik: kategorier, roller, statusövergångar för förfrågningar, ägar-/beslutsbehörighet, dedupe-nycklar, CSV-parser, rubrikmappning + importrader |
+| `backend/pocketbase-schema/migrations/1700000156_extend_contacts_kontaktbok.js` | `contacts` += `owners`, `organization`, `category`, `created_by`, autodate; `last_name` valfritt |
+| `backend/pocketbase-schema/migrations/1700000157_create_contact_requests.js` | Collection `contact_requests` |
+| `backend/pocketbase-schema/migrations/1700000158_extend_notification_kinds_contact.js` | `notifications.kind` += `contact_request`, `contact_decision` (union) |
+| `apps/web/src/lib/contacts/data.ts` | Enda läsvägen (fail-soft) + `listSharedContactsForStartup` (kurerad superuser-vy för bolag) + `listStaffUsers` |
+| `apps/web/src/lib/core/write/contacts.ts` | Skrivlager: `createContact`, `updateContactFields`, `deleteContact`, `requestContactUse`, `decideContactRequest`, `withdrawContactRequest`, `importContacts` — whitelist + validering + GDPR-krav + audit + notiser |
+| `apps/web/src/lib/actions/contacts.ts` | Server actions (RBAC) inkl. import preview/commit |
+| `apps/web/src/app/kontakter/**` | Lista (sök/filter/ägare), kontaktkort med förfrågningspanel, redigera, förfrågningar, import |
+| `apps/web/src/app/startups/[id]/StartupContactsSection.tsx` | Bolagskortets "Kontakter" (staff/observer) |
+| `apps/web/src/app/min-oversikt/SharedContactsCard.tsx` | "Delade kontakter" på Mitt bolag (bolagsmedlem) |
+| `apps/web/src/lib/ai/tools.ts` | Chatt-verktygen `create_contact`, `update_contact_field`, `request_contact_use`, `decide_contact_request` |
+
+### 45.2 Datamodell
+
+- **`contacts`** (1700000071 + **1700000156**): utöver CRM-fälten (§ 15.2)
+  `owners` (relation → users, multi ≤ 20, `cascadeDelete:false`),
+  `organization` (text 200), `category` (select — MÅSTE spegla
+  `CONTACT_CATEGORIES`: investerare/radgivare/myndighet/partner/akademi/
+  media/leverantor/alumn/annan), `created_by`, autodate. `last_name` är nu
+  **valfritt** (chatten och Outlook-exporter ger ofta ett namnfält).
+  Skrivlagret kräver **minst en ägare** (default = den som lägger in) och
+  `gdpr_consent=true` vid skapande (§ 15.4); ägare valideras mot tenantens
+  Movexum-personal (`CONTACT_BOOK_ROLES`) — aldrig bolagsmedlemmar.
+  Dubblettkontroll på e-post (annars namn + organisation, `contactDedupeKey`).
+- **`contact_requests`** (**1700000157**): `tenant`, `contact` (cascade),
+  `requester`, `owners` (snapshot vid frågetillfället), `purpose`
+  (obligatoriskt, personnummer-sanerat), `startup` (valfritt, cascade),
+  `startup_role` (blir `startup_contacts.role`), `status`
+  (`pending → approved | declined | withdrawn`, MÅSTE spegla
+  `CONTACT_REQUEST_STATUSES`), `decision_note`, `decided_by`, `decided_at`,
+  autodate. **En avgjord förfrågan är slutgiltig** (`contactRequestTransition`)
+  — ny användning = ny förfrågan, så raden är ett audit-spår för vad
+  kontakten använts till (GDPR art. 5 ändamålsbegränsning).
+- **Delning med bolag = `startup_contacts`** (§ 15.2, befintlig M2M): skapas
+  idempotent (`ensureStartupLink`, unikt index) när en förfrågan med
+  `startup` godkänns. Ingen ny kollektion för delning.
+
+### 45.3 Flöde — förfrågan & beslut
+
+1. Kollega öppnar kontaktkortet → **"Be om att använda kontakten"**: syfte +
+   ev. bolag + roll → `requestContactUse` skapar `pending`-rad och
+   **notifierar alla ägare** (`notify`, kind `contact_request`; saknar
+   kontakten ägare går notisen till admin/incubator_lead). Är frågaren
+   **själv ägare** godkänns förfrågan direkt (`isSelfApprovedRequest`) — den
+   registreras ändå (audit) och ev. bolagskoppling skapas på plats.
+2. Ägaren ser förfrågan i **Mina uppgifter → Notiser**, under
+   `/kontakter/forfragningar` ("Väntar på ditt svar", badge i fliken) och på
+   kontaktkortet → **Godkänn/Avböj** (+ valfri kommentar).
+   `canDecideContactRequest`: ägare NU (inte snapshotten — en nytillkommen
+   ägare ska kunna svara) eller admin/incubator_lead som eskaleringsväg;
+   aldrig frågaren själv (om hen inte är ägare). Frågaren kan **återkalla**
+   (`canWithdrawContactRequest`).
+3. Vid **godkännande med bolag** kopplas kontakten till bolagskortet
+   (`startup_contacts`), frågaren notifieras (`contact_decision`) och bolaget
+   ser kontakten under **"Delade kontakter"** på Mitt bolag med namn,
+   organisation, roll, e-post, telefon och **syftet**.
+4. Allt loggas i `agent_actions` (`contacts`, `contact_requests`,
+   `contact_import`) och syns i den samlade loggen (§ 32) med länk till
+   kontaktkortet (`?request=<id>` markerar förfrågan).
+
+### 45.4 Åtkomst & isolering
+
+- **Kontaktboken är staff/observer-only** (list/view på `contacts` sedan
+  1700000112; `contact_requests` likaså, asserterat i `verify-baseline.mjs`
+  `MUST_BE_STAFF_OR_OBSERVER`). Alla staff **ser** hela boken inkl.
+  kontaktuppgifter — styrningen ligger i förfrågningsflödet (ägaren avgör
+  **användning**), inte i att dölja fält för kollegor. Skriva = staff
+  (`CONTACT_BOOK_ROLES`); radera + avgöra över ägarens huvud =
+  admin/incubator_lead (`CONTACT_BOOK_ADMIN_ROLES`). `observer` läser.
+- **Bolagsmedlemmar** når aldrig kontaktboken (modulen är inte i
+  medlems-railen § 22, `contacts` är staff-only). De ser **enbart** kontakter
+  som delats med deras bolag via en godkänd förfrågan, genom den kurerade
+  `listSharedContactsForStartup` (superuser EFTER verifierat medlemskap i
+  `min-oversikt/page.tsx` — samma mönster som § 18.3/§ 20.4). Bolagskortets
+  `StartupContactsSection` (staff/observer) läser med användarens token.
+- createRules är roll-lösa per § 21.3; roll enforce:as i server-action +
+  skrivlager. `updateRule` på `contact_requests`: frågaren (återkalla) eller
+  staff (avgöra — ägarkontrollen ligger i koden). Skrivningar via
+  användartoken med superuser-fallback bara vid PB v0.23.4:s tysta
+  regel-nekande (§ 21.3).
+
+### 45.5 Import
+
+`/kontakter/import`: CSV (`;`/`,`/tabb auto, citat, BOM) eller `.xlsx`
+(dependency-fria `parseXlsx`, största arket) → **förhandsgranskning**
+(rubrikmappning mot svenska/engelska/Outlook-/Google-alias i
+`mapContactImportHeaders`, okända kolumner listas som ignorerade, dubbletter
+inom filen slås ihop, PII-fria varningar per radnummer) → **bekräfta** →
+`importContacts` upsert:ar (nyckel e-post, annars namn + organisation):
+befintliga rader uppdateras bara med icke-tomma värden och får importens
+ägare **tillagd** (aldrig borttagen). Kolumnen **Ägare** (e-post till
+Movexum-kollega) sätter ägare per rad; annars valda standardägare (default
+importören). **GDPR:** en `Samtycke/GDPR`-kolumn respekteras per rad
+(`Nej` hoppas alltid över); saknas kolumnen krävs importörens uttryckliga
+bekräftelse (`consent_confirmed`). Max 10 MB / 5 000 rader. Importen loggar
+**en** sammanfattningsrad i `agent_actions` (`contact_import`) — inte en per
+kontakt. Personnummer saneras i `info` (§ 15.6).
+
+### 45.6 Chatten
+
+Fyra verktyg i den interaktiva staff-chatten (§ 16.3, domän `contacts` i
+`tool-scope.ts`, kvitton § 33.4): `create_contact` (kräver
+`gdpr_confirmed=true` — modellen instrueras att fråga användaren först;
+dubblettkontroll via `search_records`; den inloggade blir ägare),
+`update_contact_field` (bara verksamhetsfält), `request_contact_use` (syfte +
+ev. bolag → notis till ägaren; självgodkänt för ägaren) och
+`decide_contact_request` (ägaren avgör på uttrycklig begäran). **Agent-nekat**
+(`writable-fields.ts`): `email`/`phone` (kontaktuppgifter skrivs av en
+människa i UI:t — agenten kan inte verifiera dem), `owners` (kan inte slå upp
+användar-id:n, `users` denylistad) och `gender` (GDPR art. 9). Läsning via
+`search_records`/`query_collection` på `contacts`/`contact_requests` med den
+befintliga fältmaskningen (§ 9.3) — modellen ser namn/organisation/roll/
+kategori/ägare, **aldrig e-post, telefon eller kön**. Guidad i
+`CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden (§ 33.3).
+
+### 45.7 Regelefterlevnad
+
+- **GDPR § 5/§ 6:** rättslig grund = berättigat intresse (inkubatordrift,
+  matchning av bolag mot externa resurser) + information/samtycke vid
+  registrering (`gdpr_consent` krävs, § 15.4). Ändamålsbegränsning
+  operationaliseras av förfrågningsflödet (syfte per användning, ägaren
+  godkänner). Direkt-PII (e-post/telefon) loggas ALDRIG i `agent_actions`
+  (bara att fältet ändrades); feed-rader bygger på namn + organisation.
+  `info`/`purpose`/`decision_note` personnummer-saneras. `gender` (art. 9)
+  sätts bara av admin/incubator_lead/coach i UI:t, aldrig av agenten, och är
+  fältmaskat i AI-kontexten.
+- **GDPR art. 15–17:** kontaktkortet ger fullständig vy; radering
+  (admin/incubator_lead) cascade-städar `contact_requests` och
+  `startup_contacts`. Ägar-/skaparrelationer nollställs vid användarradering.
+- **§ 21 / ISO 27001 A.5.15–A.5.18:** staff/observer-only RLS + kurerad
+  medlemsvy; roller i skrivlagret; ägare valideras till Movexum-personal.
+- **ISO 27001 A.8.15 / SOC 2 CC7.2:** varje mutation auditeras (PII-fritt);
+  förfrågningar är oföränderliga efter beslut.
+- **EU AI Act:** n/a — deterministiska mutationer via skrivlagret, ingen
+  AI-inferens (chatten föreslår/utför på användarens begäran, ägaren beslutar).
+- **Migrationer** 1700000156–158 är nya, oföränderliga filnummer, speglade i
+  `setup-via-api.mjs` (patch av `contacts`, `contact_requests`-def,
+  `FORCE_CREATE_RULES`, notistyper) och `verify-baseline.mjs`
+  (`contact_requests` must-exist + staff/observer; `contacts.owners/
+  organization/category` i `REQUIRED_APP_FIELDS`; `last_name` ej required).
+  `notify()` faller tillbaka på kind `assigned` mot ett schema utan
+  1700000158 så en förfrågan aldrig tappas tyst.

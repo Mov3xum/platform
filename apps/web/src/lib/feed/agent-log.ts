@@ -31,6 +31,10 @@ export interface AgentLogEntry {
   href?: string;
   /** Ikonnamn i `components/proto/Icon`. */
   icon: string;
+  /** Källrad i loggen — låter den personliga feeden (§ 32) dedupa direkta rader. */
+  collection?: string;
+  recordId?: string;
+  actionType?: 'create' | 'update' | 'revert';
 }
 
 interface AgentActionRow {
@@ -471,6 +475,68 @@ function mapRow(
         icon: 'target'
       };
     }
+    // Kontaktboken (§ 45). Aldrig e-post/telefon i loggen — bara namn/organisation.
+    case 'contacts': {
+      const name = str(after.name) || 'en kontakt';
+      const href = row.record_id ? `/kontakter/${row.record_id}` : '/kontakter';
+      if (action === 'create') {
+        return {
+          title: `Ny kontakt i kontaktboken: ${name}`,
+          detail: str(after.organization) || undefined,
+          href,
+          icon: 'user'
+        };
+      }
+      if (after.deleted === true) {
+        return { title: `Kontaktboken: ${name} togs bort`, href: '/kontakter', icon: 'user' };
+      }
+      const field = str(row.field);
+      return {
+        title: `Kontaktboken: ${name} — ${field ? FIELD_LABELS[field] ?? field : 'uppgifter'} ${changedVerb}`,
+        href,
+        icon: 'user'
+      };
+    }
+    case 'contact_requests': {
+      const name = str(after.contact_name) || 'en kontakt';
+      const contactId = str(after.contact);
+      const href = contactId ? `/kontakter/${contactId}?request=${row.record_id ?? ''}` : '/kontakter/forfragningar';
+      const startupName = str(after.startup_name);
+      if (action === 'create') {
+        const status = str(after.status);
+        return {
+          title:
+            status === 'approved'
+              ? `Kontakt använd: ${name}${startupName ? ` → ${startupName}` : ''}`
+              : `Förfrågan om kontakt: ${name}${startupName ? ` → ${startupName}` : ''}`,
+          detail: str(after.purpose) || undefined,
+          href,
+          icon: 'send'
+        };
+      }
+      const value = str(after.value);
+      return {
+        title:
+          value === 'approved'
+            ? `Förfrågan godkänd: ${name}${startupName ? ` → ${startupName}` : ''}`
+            : value === 'declined'
+              ? `Förfrågan avböjd: ${name}`
+              : value === 'withdrawn'
+                ? `Förfrågan återkallad: ${name}`
+                : `Förfrågan om ${name} ${changedVerb}`,
+        href,
+        icon: value === 'approved' ? 'check' : 'send'
+      };
+    }
+    case 'contact_import': {
+      const created = typeof after.created === 'number' ? after.created : 0;
+      const updated = typeof after.updated === 'number' ? after.updated : 0;
+      return {
+        title: `Kontakter importerade: ${created} nya, ${updated} uppdaterade`,
+        href: '/kontakter',
+        icon: 'upload'
+      };
+    }
 
     // Upphandlingar & excellens-insatser (§ 39).
     case 'procurements': {
@@ -588,12 +654,18 @@ function mapRow(
 export async function loadAgentLogEntries(
   pb: PocketBase,
   tenant: string,
-  perPage = 60
+  perPage = 60,
+  opts: {
+    /** Bara rader där denna användare är actor (den personliga loggen på `/chatt`). */
+    actorId?: string;
+  } = {}
 ): Promise<AgentLogEntry[]> {
   let rows: AgentActionRow[] = [];
   try {
     const res = await pb.collection('agent_actions').getList<AgentActionRow>(1, perPage, {
-      filter: pb.filter('tenant = {:tenant}', { tenant }),
+      filter: opts.actorId
+        ? pb.filter('tenant = {:tenant} && actor = {:actor}', { tenant, actor: opts.actorId })
+        : pb.filter('tenant = {:tenant}', { tenant }),
       sort: '-created',
       expand: 'actor'
     });
@@ -637,7 +709,10 @@ export async function loadAgentLogEntries(
       viaAgent: row.actor_kind === 'agent',
       created: row.created,
       href: mapped.href,
-      icon: mapped.icon
+      icon: mapped.icon,
+      collection: row.collection,
+      recordId: row.record_id,
+      actionType: row.action_type
     });
   }
   return entries;

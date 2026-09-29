@@ -55,12 +55,13 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     roles: STAFF_ADMIN
   },
   {
-    id: 'ai-kostnad',
-    slug: 'ai-kostnad',
-    href: '/installningar/ai-kostnad',
-    title: 'AI-kostnadstak',
-    description: 'Månadstak för AI-kostnad och förbrukning hittills.',
-    icon: 'bolt',
+    id: 'ai-analys',
+    slug: 'ai-analys',
+    href: '/installningar/ai-analys',
+    title: 'AI-analys',
+    description:
+      'Kostnadstak per månad, användning (körningar, tokens, kostnad, kvalitetsfeedback) och miljöpåverkan.',
+    icon: 'graph',
     group: 'ai',
     roles: STAFF_ADMIN
   },

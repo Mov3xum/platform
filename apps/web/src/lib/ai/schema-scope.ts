@@ -53,7 +53,7 @@ const STEM_TO_COLLECTIONS: ReadonlyArray<readonly [readonly string[], readonly s
   ],
   [['fas', 'phase', 'boost', 'inkubation', 'prescale', 'acceleration'], ['startup_phase_history']],
   [['team', 'grundare', 'medgrundare', 'founder'], ['startup_team_members']],
-  [['kontakt', 'person', 'mentor'], ['contacts', 'startup_contacts']],
+  [['kontakt', 'person', 'mentor', 'kontaktbok', 'ägare', 'agare', 'förfrågan', 'forfragan'], ['contacts', 'startup_contacts', 'contact_requests']],
   [
     ['ekonomi', 'omsättning', 'omsattning', 'bokslut', 'anställd', 'anstalld', 'intäkt', 'intakt', 'revenue', 'årsredovisning', 'arsredovisning'],
     ['startup_financials']

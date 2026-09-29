@@ -6,7 +6,7 @@
  * manuell bedömning) → kvartalsstatus. Det som tidigare låg i slides
  * ("I fas / Försenad / Ej startad / Klar") blir data med tidsserie.
  *
- * Select-värdena här speglas i migration 1700000155 och `setup-via-api.mjs`.
+ * Select-värdena här speglas i migration 1700000159 och `setup-via-api.mjs`.
  * Ingen AI-inferens → riskklass n/a.
  */
 
@@ -137,7 +137,7 @@ export interface GoalIndicator {
   label: string;
   source: GoalIndicatorSource;
   metric_key?: string | null;
-  /** Enkätmodul (compass_modules) för `source = survey` (migration 1700000156). */
+  /** Enkätmodul (compass_modules) för `source = survey` (migration 1700000160). */
   survey_module?: string | null;
   target?: number | null;
   unit: GoalIndicatorUnit;

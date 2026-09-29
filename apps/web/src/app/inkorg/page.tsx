@@ -9,8 +9,9 @@ import { listNotificationsForUser } from '@/lib/notifications-server';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import type { ToolRunStatus, Mission } from '@platform/shared';
 import { ASSIGN_STATUS, formatDeadline, formatRelativeDate, daysUntil } from '@/components/intric/constants';
-import { getOverviewData } from '@/lib/overview/aggregate';
-import { OverviewBoard } from '@/components/overview/OverviewBoard';
+import { getOverviewData, listStartupOptions } from '@/lib/overview/aggregate';
+import { openCount, overdueCount } from '@/lib/overview/group';
+import { OverviewWork } from '@/components/overview/OverviewWork';
 import { AgendaStrip } from '@/components/overview/AgendaStrip';
 import { QuickAdd } from '@/components/overview/QuickAdd';
 
@@ -119,27 +120,27 @@ export default async function InkorgPage() {
   const isFounder = hasRole(user.roles, ['startup_member']);
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
 
-  // ── Aggregerad board + agenda ─────────────────────────────
-  const overview = await getOverviewData(pb, user);
-
-  // ── Notiser ───────────────────────────────────────────────
-  const notifications = await listNotificationsForUser(pb, user.id, { limit: 50 });
-
-  // ── Mina projekt/uppdrag (där jag är deltagare) ───────────
-  let myMissions: Mission[] = [];
-  try {
-    const res = await pb.collection(PB_COLLECTIONS.missions).getList<Mission>(1, 50, {
-      filter: pb.filter(
-        '(issuer = {:u} || recipients = {:u} || mentor = {:u}) && status != "done" && status != "archived"',
-        { u: user.id }
-      ),
-      sort: '-updated',
-      expand: 'startup'
-    });
-    myMissions = res.items;
-  } catch {
-    myMissions = [];
-  }
+  // ── Aggregerad lista/tavla + agenda, notiser, uppdrag, bolagsval — parallellt ──
+  const [overview, notifications, myMissions, startupOptions] = await Promise.all([
+    getOverviewData(pb, user),
+    listNotificationsForUser(pb, user.id, { limit: 50 }),
+    (async (): Promise<Mission[]> => {
+      try {
+        const res = await pb.collection(PB_COLLECTIONS.missions).getList<Mission>(1, 50, {
+          filter: pb.filter(
+            '(issuer = {:u} || recipients = {:u} || mentor = {:u}) && status != "done" && status != "archived"',
+            { u: user.id }
+          ),
+          sort: '-updated',
+          expand: 'startup'
+        });
+        return res.items;
+      } catch {
+        return [];
+      }
+    })(),
+    isStaff ? listStartupOptions(pb, user.tenant) : Promise.resolve([])
+  ]);
 
   // ── Tool-runs för founders (behåll befintligt) ────────────
   let runs: RunRow[] = [];
@@ -164,73 +165,107 @@ export default async function InkorgPage() {
   const väntar = runs.filter((r) => r.status === 'ready_for_review');
   const unreadCount = notifications.filter((n) => !n.read_at).length;
   const firstName = user.name?.split(' ')[0] || user.name;
+  const now = new Date();
+  const open = openCount(overview.items);
+  const overdue = overdueCount(overview.items, now);
 
   return (
     <PageShell
-      title="Min översikt"
-      meta={<span className="text-[12px] text-foreground-subtle">Hej {firstName || 'där'}.</span>}
+      title="Mina uppgifter"
+      meta={
+        <span className="flex flex-wrap items-center gap-2 text-[12px] text-foreground-subtle">
+          <span>Hej {firstName || 'där'}.</span>
+          {unreadCount > 0 && (
+            <a
+              href="#notiser"
+              className="inline-flex items-center gap-1 rounded-full bg-brand px-2 py-0.5 text-[10.5px] font-semibold text-brand-foreground"
+            >
+              <Icon name="bell" size={10} /> {unreadCount} olästa
+            </a>
+          )}
+        </span>
+      }
     >
-      <div className="space-y-8 py-6">
+      <div className="space-y-6 py-6">
+        {overview.readNotices.length > 0 && (
+          <div
+            role="status"
+            className="flex items-start gap-2 rounded-xl border border-movexum-orange/50 bg-surface px-3 py-2 text-[12.5px] text-foreground"
+          >
+            <Icon name="alert" size={14} className="mt-0.5 shrink-0 text-movexum-orange" />
+            <div className="flex-1 space-y-0.5">
+              {overview.readNotices.map((n) => (
+                <p key={n}>{n}</p>
+              ))}
+            </div>
+          </div>
+        )}
+
         <AgendaStrip items={overview.agenda} outlookState={overview.outlookState} />
 
-        <section>
-          <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
-            Mina åtaganden{' '}
-            <span className="font-mono normal-case tracking-normal">{overview.items.length}</span>
-          </h2>
-          {isStaff && (
-            <div className="mb-4">
-              <QuickAdd />
-            </div>
-          )}
-          {overview.items.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-default p-10 text-center">
-              <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-canvas-muted text-foreground-subtle">
-                <Icon name="check" size={18} />
-              </div>
-              <p className="text-[13px] text-foreground-subtle">
-                Inga öppna uppgifter eller aktiviteter just nu. Allt klart.
-              </p>
-            </div>
-          ) : (
-            <OverviewBoard items={overview.items} editable={overview.boardEditable} />
-          )}
-        </section>
+        <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="min-w-0 space-y-8">
+            <section>
+              <h2 className="mb-3 flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+                Att göra
+                <span className="font-mono normal-case tracking-normal">{open}</span>
+                {overdue > 0 && (
+                  <span className="rounded-md bg-movexum-pastell-orange px-1.5 py-0.5 font-mono normal-case tracking-normal text-movexum-morkorange">
+                    {overdue} försenade
+                  </span>
+                )}
+              </h2>
+              {isStaff && (
+                <div className="mb-4">
+                  <QuickAdd startupOptions={startupOptions} />
+                </div>
+              )}
+              <OverviewWork
+                items={overview.items}
+                editable={overview.boardEditable}
+                meId={user.id}
+                startupOptions={startupOptions}
+              />
+            </section>
 
-        {isFounder && runs.length > 0 && (
-          <section>
-            <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
-              AI-uppdrag från coach
-            </h2>
-            <ToolRunSection label="Att göra nu" items={todo} />
-            <ToolRunSection label="Pågående" items={pågående} />
-            <ToolRunSection label="Inväntar coach" items={väntar} />
-          </section>
-        )}
-
-        <section>
-          <div className="mb-3 flex items-center gap-2">
-            <h2 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
-              Notiser
-            </h2>
-            {unreadCount > 0 && (
-              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1.5 text-[10px] font-semibold text-brand-foreground">
-                {unreadCount}
-              </span>
+            {isFounder && runs.length > 0 && (
+              <section>
+                <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+                  AI-uppdrag från coach
+                </h2>
+                <ToolRunSection label="Att göra nu" items={todo} />
+                <ToolRunSection label="Pågående" items={pågående} />
+                <ToolRunSection label="Inväntar coach" items={väntar} />
+              </section>
             )}
           </div>
-          <NotificationList notifications={notifications} />
-        </section>
 
-        {myMissions.length > 0 && (
-          <section>
-            <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
-              Mina projekt & uppdrag{' '}
-              <span className="font-mono normal-case tracking-normal">{myMissions.length}</span>
-            </h2>
-            <MissionInboxList missions={myMissions} />
-          </section>
-        )}
+          <aside className="min-w-0 space-y-8">
+            <section id="notiser">
+              <div className="mb-3 flex items-center gap-2">
+                <h2 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+                  Notiser
+                </h2>
+                {unreadCount > 0 && (
+                  <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1.5 text-[10px] font-semibold text-brand-foreground">
+                    {unreadCount}
+                  </span>
+                )}
+              </div>
+              <NotificationList notifications={notifications} />
+            </section>
+
+            {myMissions.length > 0 && (
+              <section>
+                <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+                  Mina projekt & uppdrag{' '}
+                  <span className="font-mono normal-case tracking-normal">{myMissions.length}</span>
+                </h2>
+                <MissionInboxList missions={myMissions} />
+              </section>
+            )}
+          </aside>
+        </div>
       </div>
     </PageShell>
   );

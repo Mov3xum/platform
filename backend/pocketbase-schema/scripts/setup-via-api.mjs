@@ -2489,7 +2489,7 @@ await ensureCollection({
     // Mall för den publika sidan (CLAUDE.md § 23.7) — MÅSTE spegla
     // COMPASS_LAYOUTS i packages/shared/src/compass-layout.ts.
     { name: 'layout', type: 'select', required: false, maxSelect: 1, values: ['classic', 'split_left', 'split_right', 'cover', 'panel', 'minimal'] },
-    // Migration 1700000156 (§ 43): Startupkompassen som enkätmotor. MÅSTE
+    // Migration 1700000160 (§ 43): Startupkompassen som enkätmotor. MÅSTE
     // spegla COMPASS_PURPOSES / SURVEY_SUBJECT_KINDS i compass-survey.ts.
     { name: 'purpose', type: 'select', required: false, maxSelect: 1, values: ['intake', 'survey'] },
     { name: 'subject_kind', type: 'select', required: false, maxSelect: 1, values: ['none', 'startup', 'event', 'partner', 'staff'] },
@@ -2630,6 +2630,19 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
 });
+
+// Migration 1700000155: agent_memory.category (kategori för överblick på
+// /installningar/ai-minne). Värdena speglar AGENT_MEMORY_CATEGORIES i
+// packages/shared/src/agent-memory.ts.
+await patchCollection('agent_memory', [
+  {
+    name: 'category',
+    type: 'select',
+    required: false,
+    maxSelect: 1,
+    values: ['terminologi', 'datatolkning', 'arbetssatt', 'bolag', 'portfolj', 'processer', 'ovrigt']
+  }
+]);
 
 // Migration 1700000080: tool_knowledge.
 await ensureCollection({
@@ -3799,7 +3812,7 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
 });
-// Migration 1700000155: Målstyrning & verksamhetsplan (§ 42) —
+// Migration 1700000159: Målstyrning & verksamhetsplan (§ 42) —
 // goal_periods → goals → goal_indicators → goal_status_entries. Select-värdena
 // MÅSTE spegla packages/shared/src/goals.ts. list/view staff/observer-only,
 // createRule roll-lös (§ 21.3); år/mål/indikatorer ändras av
@@ -3862,7 +3875,7 @@ await ensureCollection({
     { name: 'label', type: 'text', required: true, min: 1, max: 200 },
     { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['computed', 'manual', 'survey'] },
     { name: 'metric_key', type: 'text', required: false, max: 60 },
-    // Migration 1700000156: enkätkälla (§ 43) + känt-flagga för måltalet (PB lagrar null som 0).
+    // Migration 1700000160: enkätkälla (§ 43) + känt-flagga för måltalet (PB lagrar null som 0).
     { name: 'survey_module', type: 'relation', required: false, collectionId: 'compass_modules_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'target', type: 'number', required: false },
     { name: 'has_target', type: 'bool', required: false },
@@ -3893,7 +3906,7 @@ await ensureCollection({
     { name: 'quarter', type: 'number', required: true, onlyInt: true, min: 1, max: 4 },
     { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['on_track', 'delayed', 'not_started', 'done'] },
     { name: 'value', type: 'number', required: false },
-    // Migration 1700000156: känt-flagga för värdet (PB lagrar null som 0).
+    // Migration 1700000160: känt-flagga för värdet (PB lagrar null som 0).
     { name: 'has_value', type: 'bool', required: false },
     { name: 'comment', type: 'text', required: false, max: 2000 },
     { name: 'recorded_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
@@ -3907,6 +3920,70 @@ await ensureCollection({
   createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+
+const AUTODATE_FIELDS = [
+  { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+  { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+];
+
+// Migration 1700000156: contacts → kontaktboken (§ 45). Interna ägare,
+// organisation, kategori, skapare + autodate; last_name görs valfritt.
+// patchCollection lägger BARA till saknade fält/uppdaterar angivna props.
+await patchCollection(
+  'contacts',
+  [
+    { name: 'owners', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 20 },
+    { name: 'organization', type: 'text', required: false, max: 200 },
+    // MÅSTE spegla CONTACT_CATEGORIES i packages/shared/src/contacts.ts.
+    { name: 'category', type: 'select', required: false, maxSelect: 1, values: ['investerare', 'radgivare', 'myndighet', 'partner', 'akademi', 'media', 'leverantor', 'alumn', 'annan'] },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    ...AUTODATE_FIELDS
+  ],
+  { last_name: { required: false, min: 0 } }
+);
+
+// Migration 1700000157: contact_requests — förfrågan om att använda en kontakt
+// för ett specifikt syfte (§ 45.3). list/view staff/observer-only; createRule
+// roll-lös (§ 21.3); update: frågaren (återkalla) eller staff (avgöra —
+// ägarkontrollen ligger i skrivlagret).
+await ensureCollection({
+  id: 'contact_requests_collection',
+  name: 'contact_requests',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'contact', type: 'relation', required: true, collectionId: 'contacts_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'requester', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'owners', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 20 },
+    { name: 'purpose', type: 'text', required: true, min: 1, max: 2000 },
+    { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+    { name: 'startup_role', type: 'text', required: false, max: 100 },
+    // MÅSTE spegla CONTACT_REQUEST_STATUSES i packages/shared/src/contacts.ts.
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['pending', 'approved', 'declined', 'withdrawn'] },
+    { name: 'decision_note', type: 'text', required: false, max: 2000 },
+    { name: 'decided_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'decided_at', type: 'date', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_contact_requests_tenant ON contact_requests (tenant)',
+    'CREATE INDEX idx_contact_requests_contact ON contact_requests (contact)',
+    'CREATE INDEX idx_contact_requests_tenant_status ON contact_requests (tenant, status)',
+    'CREATE INDEX idx_contact_requests_requester ON contact_requests (requester)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = requester || ${STAFF_EACH})`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+
+// Migration 1700000158: notifications.kind += contact_request/contact_decision
+// (union — ensureCollection synkar inte fält på befintlig collection).
+await patchCollection('notifications', [], {
+  kind: { values: ['comment', 'mention', 'assigned', 'status_change', 'stage_advance', 'due_soon', 'contact_request', 'contact_decision'] }
 });
 // Migration 1700000152: tasks.link_kind += 'procurement' + relationer +
 // rule_key (idempotensnyckel för regelgenererade uppföljningar). Union över
@@ -3925,10 +4002,6 @@ await patchCollection(
 // created/updated (REST API:t auto-lägger dem inte). ensureCollection
 // synkar bara regler på en befintlig collection, så lägg till de saknade
 // autodate-fälten explicit. Idempotent (hoppar över om de redan finns).
-const AUTODATE_FIELDS = [
-  { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
-  { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
-];
 await patchCollection('chat_threads', AUTODATE_FIELDS);
 await patchCollection('deep_jobs', AUTODATE_FIELDS);
 await patchCollection('user_files', AUTODATE_FIELDS);
@@ -4071,6 +4144,10 @@ await patchActivitiesKindValues([
   'workshop_assignment', 'workshop_run'
 ]);
 
+// Migration 1700000155: activities.kind += 'mission' (tvärfunktionellt team
+// slutfört → rad på varje kopplat bolagskort, CLAUDE.md § 29.4).
+await patchActivitiesKindValues(['mission']);
+
 // Migration 1700000057: tool_runs chat-mode (messages, attachments) + output_md optional.
 await patchToolRunsCollection(
   [
@@ -4192,7 +4269,7 @@ const FORCE_CREATE_RULES = {
   tool_schedules: `${ANY_AUTH} && @request.auth.tenant != ""`,
   startup_phase_history: `${ANY_AUTH} && @request.auth.tenant != ""`,
   contacts: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  // Målstyrning (migration 1700000155, § 42) — roll-lösa createRules, roll i skrivlagret.
+  // Målstyrning (migration 1700000159, § 42) — roll-lösa createRules, roll i skrivlagret.
   goal_periods: `${ANY_AUTH} && @request.auth.tenant != ""`,
   goals: `${ANY_AUTH} && @request.auth.tenant != ""`,
   goal_indicators: `${ANY_AUTH} && @request.auth.tenant != ""`,
@@ -4252,7 +4329,9 @@ const FORCE_CREATE_RULES = {
   procurements: `${ANY_AUTH} && @request.auth.tenant != ""`,
   procurement_calloffs: `${ANY_AUTH} && @request.auth.tenant != ""`,
   procurement_rules: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  procurement_documents: `${ANY_AUTH} && @request.auth.tenant != ""`
+  procurement_documents: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Kontaktboken (§ 45, migration 1700000157) — roll-enforcement i skrivlagret.
+  contact_requests: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
 async function enforceCreateRules(passLabel) {

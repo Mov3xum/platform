@@ -6,7 +6,8 @@
 // bedömning) → goal_status_entries (kvartalsstatus). Ersätter PowerPoint-
 // uppföljningen "I fas / Försenad / Ej startad / Klar".
 //
-// Select-värdena MÅSTE spegla packages/shared/src/goals.ts.
+// Select-värdena MÅSTE spegla packages/shared/src/goals.ts. Filnumret
+// fortsätter efter staging-branchens migrationsserie.
 //
 // RLS: list/view staff/observer (tenant-bred verksamhetsstyrning — en ren
 // startup_member ser inte Movexums interna mål); createRule roll-lös

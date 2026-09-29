@@ -53,7 +53,7 @@ export interface GoalWorkspace {
   surveys: Record<string, SurveyIndicatorValue>;
   /** Enkätmoduler att välja i indikatorformuläret. */
   surveyModules: Pick<CompassModule, 'id' | 'name' | 'slug'>[];
-  /** true när kollektionerna saknas (migration 1700000155 ej körd). */
+  /** true när kollektionerna saknas (migration 1700000159 ej körd). */
   schemaMissing: boolean;
 }
 

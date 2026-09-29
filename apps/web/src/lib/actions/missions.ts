@@ -19,6 +19,7 @@ import {
 import { deriveRecipientsFromParticipants, getMissionContext, unionParticipantIds } from '@/lib/missions-server';
 import { createMissionMemberTasks } from '@/lib/assignments/collaboration';
 import { notify } from '@/lib/notifications-server';
+import { isMissionCompletionTransition, logMissionCompletion } from '@/lib/missions/completion';
 
 const MEMBER_ROLES: Role[] = ALL_ROLES.filter((r) => r !== 'observer');
 
@@ -287,6 +288,11 @@ export async function updateMissionStatus(
   try {
     await pb.collection(PB_COLLECTIONS.missions).update(id, { status });
 
+    // § 29.4 — slutfört team sammanställs på kopplade bolagskort.
+    if (isMissionCompletionTransition(mission.status, status)) {
+      await logMissionCompletion(pb, mission, user.id);
+    }
+
     await notify(pb, {
       tenant: user.tenant,
       recipients: ctx.allParticipantIds,
@@ -354,6 +360,11 @@ export async function advanceStage(id: string, stageId: string, note?: string): 
     await pb
       .collection(PB_COLLECTIONS.missions)
       .update(id, { stages_json: stages, status: nextStatus });
+
+    // § 29.4 — sista steget klart ⇒ teamet slutfört ⇒ bolagskortet.
+    if (isMissionCompletionTransition(mission.status, nextStatus)) {
+      await logMissionCompletion(pb, mission, user.id);
+    }
 
     await notify(pb, {
       tenant: user.tenant,

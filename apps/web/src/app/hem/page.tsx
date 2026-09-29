@@ -19,7 +19,6 @@ import {
   annualWheelItemDateRange,
   annualWheelHiddenOnHome,
   canRolesSeeOrgPost,
-  coreModules,
   homeTabFromSlug,
   isOrgPostExpired,
   isOrgPostScheduled,
@@ -289,24 +288,12 @@ export default async function HemPage({
   const newLeads = leadsNow.value;
   const leadsDelta = metricDelta(leadsNow.value, leadsBefore.value);
 
-  const shortcuts = [
-    { id: 'idag', label: 'Ny chatt', icon: 'message' },
-    { id: 'startups', label: 'Bolag', icon: 'people' },
-    { id: 'arshjul', label: 'Årshjul', icon: 'calendar' },
-    { id: 'inflode', label: 'Startupkompassen', icon: 'compass' },
-    { id: 'education', label: 'Utbildning', icon: 'cap' },
-    { id: 'kunskapsbas', label: 'Kunskapsbas', icon: 'doc' }
-  ]
-    .filter((s) => canAccessModuleForUser(user.roles, s.id, user.enabledModules))
-    .map((s) => ({ ...s, href: coreModules.find((m) => m.id === s.id)?.route ?? '/' }));
-
   return (
     <HomeFrontPage
       hello={hello}
       dateLine={dateLine}
       today={today}
-      shortcuts={shortcuts}
-      counts={{ activeStartups, newLeads, leadsDelta, runningWorkshops, myOpenTasks }}
+      counts={{ activeStartups, newLeads, leadsDelta, myOpenTasks }}
       agendaItems={agendaItems}
       windowDays={windowDays}
       tabs={tabs}

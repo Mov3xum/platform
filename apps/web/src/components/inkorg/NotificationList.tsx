@@ -9,7 +9,9 @@ const KIND_LABEL: Record<NotificationKind, string> = {
   assigned: 'Tilldelad',
   status_change: 'Status ändrad',
   stage_advance: 'Steg klart',
-  due_soon: 'Deadline närmar sig'
+  due_soon: 'Deadline närmar sig',
+  contact_request: 'Förfrågan om kontakt',
+  contact_decision: 'Svar på din förfrågan'
 };
 
 const KIND_ICON: Record<NotificationKind, string> = {
@@ -18,7 +20,9 @@ const KIND_ICON: Record<NotificationKind, string> = {
   assigned: 'inbox',
   status_change: 'badge-check',
   stage_advance: 'check',
-  due_soon: 'clock'
+  due_soon: 'clock',
+  contact_request: 'user',
+  contact_decision: 'check'
 };
 
 function fmtRelative(iso: string) {

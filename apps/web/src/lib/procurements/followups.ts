@@ -22,6 +22,10 @@ import {
  * auto-stäng till motorn. Länkfälten `procurement`/`procurement_calloff` gör
  * att bolagets kanban hittar korten via `procurement_calloff.startup`; inget
  * `startup` sätts på kortet (§ 39.2, RLS § 21).
+ * Synken körs efter varje mutation och lazy när `/upphandlingar` öppnas;
+ * den är idempotent via `tasks.rule_key`, och mänskligt stängda kort rörs aldrig.
+ * Nya kort får upphandlingens ansvarige, annars skaparen eller den som utlöste
+ * synken. En PII-fri sammanfattningsrad loggas bara när något ändrats.
  */
 
 export interface FollowupSyncResult extends FollowupSyncCounts {

@@ -94,7 +94,7 @@ export function GoalsView({
   if (schemaMissing) {
     return (
       <div className="mx-auto max-w-3xl rounded-xl border border-movexum-morkgul/30 bg-movexum-pastell-gul p-4 text-sm text-movexum-morkgul dark:bg-movexum-morkgul/20 dark:text-movexum-pastell-gul">
-        Målstyrningens kollektioner saknas på den här instansen. Kör migration 1700000155 (eller synka via
+        Målstyrningens kollektioner saknas på den här instansen. Kör migration 1700000159 (eller synka via
         <code className="mx-1">setup-via-api.mjs</code>) och ladda om.
       </div>
     );

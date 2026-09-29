@@ -11,7 +11,7 @@ export type { AssignableResource, AssignmentCollabOptions } from '@/lib/assignme
  *
  * När staff tilldelar en workshop eller ett utbildningsdokument kan de:
  *   • bjuda in andra Movexum-resurser (coacher/mentorer) som medarbetare
- *     → varje resurs får en personlig `tasks`-rad (syns i "Min översikt")
+ *     → varje resurs får en personlig `tasks`-rad (syns i "Mina uppgifter")
  *   • skapa ett möte → `incubator_events` + `event_signups` per inbjuden resurs
  *     (mötet syns i allas agenda-strip eftersom den listar tenantens events)
  *
@@ -79,7 +79,7 @@ interface CollaboratorTaskInput {
 
 /**
  * Skapar en personlig uppgift per inbjuden resurs så att tilldelningen dyker
- * upp i deras "Min översikt". Fail-soft per rad. Returnerar id:n som faktiskt
+ * upp i deras "Mina uppgifter". Fail-soft per rad. Returnerar id:n som faktiskt
  * blev medarbetare (för lagring på tilldelningen).
  */
 export async function createCollaboratorTasks(
@@ -122,7 +122,7 @@ interface MissionMemberTaskInput {
 
 /**
  * Skapar en personlig uppgift per teammedlem kopplad till ett uppdrag
- * (link_kind='mission', § 29) så att den dyker upp i medlemmens "Min översikt".
+ * (link_kind='mission', § 29) så att den dyker upp i medlemmens "Mina uppgifter".
  * Fail-soft per rad. Returnerar id:n som faktiskt fick en task. Validerar att
  * varje mottagare är staff i tenanten (defense-in-depth) — tvärfunktionella
  * team bemannas av Movexum-resurser.
