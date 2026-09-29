@@ -5777,3 +5777,52 @@ eller datavägar i denna refaktor — upphandlingens beteende är bevisat
 oförändrat av de befintliga testerna i `procurement.test.ts` (körs orörda)
 plus ett likhetstest generisk väg ↔ publikt namn. Audit-raden per synk är
 PII-fri (titel + räknare) som förut.
+
+---
+
+## 41. Metrikregister — en indikator, en definition, en beräkning
+
+### 41.1 Översikt
+
+Verksamhetens nyckeltal räknades tidigare på flera ställen (startsidans
+sifferrad, kompassens dashboard, Vinnova-underlaget, översikten). Registret
+samlar dem så att startsidan, målcockpiten (kommande, § 4.1 i
+`docs/strategy/movexum-os-analys-verksamhetsdag-2026-09.md`),
+programansvarig-cockpiten och rapporterna konsumerar **samma** definition och
+**samma** beräkning.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/metrics.ts` (+ `.test.ts`) | Katalog (`METRIC_DEFINITIONS`: etikett, enhet, riktning, känslighet, scope, periodisk) + ren, enhetstestad beräkningslogik: `phaseConversion` (kohort, frist i månader, `pending`), `countPhaseEntries`, `medianDaysInPhase`, `shareWithThreshold` (k-anonymitet), `trailingPeriods`/`yearPeriod`, `formatMetricValue` |
+| `apps/web/src/lib/metrics/registry.ts` | IO: en `compute` per `MetricKey` mot PocketBase — `computeMetric`/`computeMetrics` |
+| `apps/web/src/app/hem/page.tsx` | Första konsumenten: sifferraden läser registret i stället för inline-`totalItems` |
+
+### 41.2 Regler (bindande)
+
+- **Lägg aldrig till en inline-räkning i en sida** för ett tal som är eller
+  kan bli ett verksamhetsmål — lägg en `MetricKey` i katalogen och en
+  `compute` i registret. UI:t formaterar med `formatMetricValue`.
+- **Läs med användarens token** (RLS § 21). Registret tar aldrig superuser.
+  Filter binds med `pb.filter()` (§ 10.3).
+- **Ärliga värden:** `null` = kunde inte beräknas (visas "–", aldrig 0);
+  `complete:false` = kapat underlag (visa som nedre gräns, aldrig exakt);
+  `note` är PII-fri. Konverteringar med frist (`conv_inc_to_acc_8m`)
+  rapporterar `pending` — bolag som inte haft tiden räknas INTE i nämnaren,
+  så en färsk kohort aldrig ser ut att misslyckas.
+- **Art. 9-aggregat (`sensitivity: 'aggregate_only'`, t.ex.
+  `women_led_share`):** bara räknare lämnar databasen (inga rader hämtas),
+  värdet går genom `shareWithThreshold` (k = `AGGREGATE_MIN_GROUP` = 5) och
+  är `null` under tröskeln, visas aldrig per bolag och exponeras inte som
+  chatt-verktyg. `founder_gender` är oförändrat svartlistat i
+  `lib/ai/context.ts` och fältmaskat i `redaction.ts` (§ 9.3).
+- **`scope: 'user'`-mått** (t.ex. `my_open_tasks`) är personliga siffror och
+  får inte användas som tenant-mål.
+- **Perioder** är ISO-datum, `from` inklusive och `to` exklusive.
+  `trailingPeriods` inkluderar dagens datum.
+
+### 41.3 Regelefterlevnad
+
+Ingen AI-inferens → riskklass n/a. Inga nya kollektioner eller fält, ingen ny
+dataväg — registret läser bara det sidorna redan läste, via samma token.
+Startsidans siffror är oförändrade i betydelse (aktiva bolag, nya leads
+senaste 7 dagarna med delta, pågående workshops, egna öppna uppgifter).
