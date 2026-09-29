@@ -69,13 +69,9 @@ test('uppgifter länkar till uppdrag/upphandling/inkorg beroende på koppling', 
   );
 });
 
-test('filer, kunskapsbas, utbildningsdokument och agentkörningar', () => {
+test('kunskapsbas, utbildningsdokument och agentkörningar', () => {
   const items = buildPersonalFeedItems({
     me: ME,
-    userFiles: [
-      { id: 'f1', filename: 'budget.xlsx', source: 'upload', created: '2026-09-05T00:00:00Z' },
-      { id: 'f2', filename: 'rapport.pptx', source: 'agent_generated', created: '2026-09-06T00:00:00Z' }
-    ],
     orgKnowledge: [{ id: 'k1', title: 'Processhandbok', created: '2026-09-07T00:00:00Z' }],
     educationDocuments: [{ id: 'e1', title: 'IRL-guide', created: '2026-09-08T00:00:00Z' }],
     toolRuns: [
@@ -84,9 +80,6 @@ test('filer, kunskapsbas, utbildningsdokument och agentkörningar', () => {
     ]
   });
   const byId = new Map(items.map((i) => [i.id, i]));
-  assert.equal(byId.get('file-f1')!.title, 'Du laddade upp filen "budget.xlsx"');
-  assert.equal(byId.get('file-f1')!.icon, 'upload');
-  assert.equal(byId.get('file-f2')!.title, 'Dokument genererat åt dig: "rapport.pptx"');
   assert.equal(byId.get('knowledge-k1')!.title, 'Du laddade upp "Processhandbok" till kunskapsbasen');
   assert.equal(byId.get('edudoc-e1')!.href, '/education/documents');
   assert.equal(byId.get('run-r1')!.title, 'Du körde agenten "Kvartalsrapport"');

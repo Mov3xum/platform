@@ -16,7 +16,6 @@ import {
   type OwnActivityRow,
   type TaskRow,
   type ToolRunRow,
-  type UserFileRow,
   type WorkshopAssignmentRow
 } from '@/lib/personal-feed';
 
@@ -97,7 +96,7 @@ export async function loadActivityFeed(
 /**
  * Den PERSONLIGA loggen under chatten (`/chatt`, § 32): allt den inloggade
  * själv är inblandad i — det hen gjort (skrivlagrets logg med `actor = jag`,
- * filer, kunskapsbas, dokument, anteckningar, agentkörningar, tilldelningar)
+ * kunskapsbas, dokument, anteckningar, agentkörningar, tilldelningar)
  * och det hen dragits in i (uppdragsteam, uppgifter, inbjudningar,
  * medarbetarskap). Tenant-bred portföljdata visas i stället på `/hem`
  * (Bolagsnytt) och `/aktivitet`.
@@ -123,9 +122,8 @@ export async function loadPersonalActivityFeed(
 
   const settled = await Promise.allSettled([
     loadAgentLogEntries(pb, tenant, Math.min(limit, 60), { actorId: userId }),
-    list<UserFileRow>('user_files', 'tenant = {:tenant} && owner = {:me}', {
-      fields: 'id,filename,source,created'
-    }),
+    // `user_files` (det personliga filarkivet) loggas medvetet INTE — privat
+    // arbetsyta, ska inte kännas övervakad.
     list<OrgKnowledgeRow>('org_knowledge', 'tenant = {:tenant} && created_by = {:me}', {
       fields: 'id,title,filename,created'
     }),
@@ -202,19 +200,18 @@ export async function loadPersonalActivityFeed(
   const direct = buildPersonalFeedItems({
     me: userId,
     loggedKeys,
-    userFiles: items<UserFileRow>(1),
-    orgKnowledge: items<OrgKnowledgeRow>(2),
-    educationDocuments: items<EducationDocumentRow>(3),
-    missions: items<MissionRow>(4),
-    tasks: items<TaskRow>(5),
-    eventSignups: items<EventSignupRow>(6),
-    workshopAssignments: items<WorkshopAssignmentRow>(7),
-    documentAssignments: items<DocumentAssignmentRow>(8),
-    notes: items<NoteRow>(9),
-    missionDocuments: items<MissionDocumentRow>(10),
-    toolRuns: items<ToolRunRow>(11),
-    agreements: items<AgreementRow>(12),
-    activities: items<OwnActivityRow>(13)
+    orgKnowledge: items<OrgKnowledgeRow>(1),
+    educationDocuments: items<EducationDocumentRow>(2),
+    missions: items<MissionRow>(3),
+    tasks: items<TaskRow>(4),
+    eventSignups: items<EventSignupRow>(5),
+    workshopAssignments: items<WorkshopAssignmentRow>(6),
+    documentAssignments: items<DocumentAssignmentRow>(7),
+    notes: items<NoteRow>(8),
+    missionDocuments: items<MissionDocumentRow>(9),
+    toolRuns: items<ToolRunRow>(10),
+    agreements: items<AgreementRow>(11),
+    activities: items<OwnActivityRow>(12)
   });
 
   const merged: DashboardActivity[] = [

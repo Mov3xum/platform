@@ -8,11 +8,12 @@
  * direkta källorna till feed-poster i du-form. IO:t (vilka rader som läses,
  * med användarens egen token → RLS) ligger i `lib/feed/activity-feed.ts`.
  *
- * PII: titlarna byggs av verksamhetsdata (filnamn, uppdrags-/workshop-
- * titlar, bolagsnamn, eventnamn) — aldrig e-post, aldrig anteckningstext.
- * Loggen visas bara för personen själv (filtret är `= jag`), så ett filnamn
- * ur det strikt ägaren-bara filarkivet (§ 17.2) exponeras aldrig för någon
- * annan.
+ * PII: titlarna byggs av verksamhetsdata (dokumenttitlar, uppdrags-/
+ * workshop-titlar, bolagsnamn, eventnamn) — aldrig e-post, aldrig
+ * anteckningstext. Det PERSONLIGA filarkivet (`user_files`, § 17.2) loggas
+ * medvetet INTE: det är privat arbetsyta och ska inte kännas övervakad. Det
+ * som syns är gemensamt material (kunskapsbas, utbildningsdokument,
+ * uppdragsdokumentation) och det som rör andra.
  */
 
 export interface PersonalFeedItem {
@@ -27,13 +28,6 @@ export interface PersonalFeedItem {
 interface StartupRef {
   id?: string;
   name?: string;
-}
-
-export interface UserFileRow {
-  id: string;
-  filename?: string;
-  source?: string;
-  created: string;
 }
 
 export interface OrgKnowledgeRow {
@@ -145,7 +139,6 @@ export interface OwnActivityRow {
 export interface PersonalFeedSources {
   /** Den inloggades user-id. */
   me: string;
-  userFiles?: UserFileRow[];
   orgKnowledge?: OrgKnowledgeRow[];
   educationDocuments?: EducationDocumentRow[];
   missions?: MissionRow[];
@@ -193,20 +186,6 @@ export function buildPersonalFeedItems(src: PersonalFeedSources): PersonalFeedIt
   const me = src.me;
   const logged = src.loggedKeys ?? new Set<string>();
   const out: PersonalFeedItem[] = [];
-
-  for (const f of src.userFiles ?? []) {
-    const generated = f.source === 'agent_generated';
-    out.push({
-      id: `file-${f.id}`,
-      title: generated
-        ? `Dokument genererat åt dig: ${q(f.filename, 'fil')}`
-        : `Du laddade upp filen ${q(f.filename, 'fil')}`,
-      detail: 'Filer',
-      created: f.created,
-      href: '/filer',
-      icon: generated ? 'file-text' : 'upload'
-    });
-  }
 
   for (const k of src.orgKnowledge ?? []) {
     out.push({

@@ -4581,7 +4581,7 @@ inloggade själv är inblandad i: `agent_actions` med **`actor = jag`** (egna
 skrivningar via skrivlagret: inlägg, årshjul, kompassmoduler, workshops,
 kanban-kort, events, uppdrag, upphandlingar …) plus direkta källor lästa
 med användarens egen token (RLS § 21, `getList(1,20)` per källa, fail-soft):
-`user_files` (owner), `org_knowledge` (created_by), `education_documents`
+`org_knowledge` (created_by), `education_documents`
 (uploaded_by), `missions` (issuer/mentor/`recipients ~ jag` — tidpunkt =
 mitt `participants_json.added_at` när jag lades till i efterhand), `tasks`
 (owner/`assignees ~ jag`), `event_signups` (user), `workshop_assignments` och
@@ -4589,15 +4589,16 @@ mitt `participants_json.added_at` när jag lades till i efterhand), `tasks`
 (author — aldrig `body`), `mission_documents` (uploaded_by), `tool_runs`
 (triggered_by — aldrig messages/output), `agreements` (assigned_by) och
 `activities` (owner). Mappningen till du-formulerade rader ("Du ingår i
-teamet för uppdraget …", "Du laddade upp filen …") är ren och enhetstestad i
+teamet för uppdraget …", "Du laddade upp … till kunskapsbasen") är ren och enhetstestad i
 `lib/personal-feed.ts`; en direkt rad hoppas över när samma post redan finns
 i skrivlagrets logg (dedupe på `collection:record_id`). Multi-relationer
 filtreras med `~` (LIKE på JSON-listan) för att inte träffa `?=`-buggen
 (§ 21.3). Portföljbred feed finns oförändrat på `/hem` (Bolagsnytt,
-`loadActivityFeed`) och `/aktivitet`. Ingen ny dataväg, inga nya fält:
-filnamn ur det ägaren-bara arkivet visas bara för ägaren själv (filtret är
-`= jag`), och rader från staff-only-kollektioner når bara den som RLS redan
-låter läsa dem. Riskklass n/a.
+`loadActivityFeed`) och `/aktivitet`. **Det personliga filarkivet
+(`user_files`, Filer) loggas medvetet INTE** — det är privat arbetsyta och
+ska inte kännas övervakad; det som visas är gemensamt material och det som
+rör andra. Ingen ny dataväg, inga nya fält: rader från staff-only-
+kollektioner når bara den som RLS redan låter läsa dem. Riskklass n/a.
 
 ### 32.2 Ingen ny dataväg
 
