@@ -184,7 +184,7 @@ export default function FilesBrowser({
       await refresh();
       const parts: string[] = [];
       if (data.indexed) parts.push(`${data.indexed} fil${data.indexed === 1 ? '' : 'er'} sökbara i chatten`);
-      if (data.skipped) parts.push(`${data.skipped} hoppades över (PowerPoint/Word/bild — exportera till PDF)`);
+      if (data.skipped) parts.push(`${data.skipped} hoppades över (ingen text kunde läsas ut — t.ex. bild eller skannad PDF)`);
       setNotice(parts.length ? parts.join(' · ') : 'Inga nya filer att indexera.');
     });
   }
@@ -238,7 +238,7 @@ export default function FilesBrowser({
               type="button"
               onClick={indexForChat}
               disabled={isPending}
-              title="Gör dina text-filer (PDF/Excel/text) sökbara i AI-chatten"
+              title="Gör dina filer (PDF, Excel, Word, PowerPoint, text) sökbara i AI-chatten"
               className="inline-flex items-center gap-2 rounded-xl border border-default px-3 py-2 text-[13px] font-medium text-foreground transition hover:border-strong disabled:opacity-50"
             >
               <Icon name="search" size={14} />

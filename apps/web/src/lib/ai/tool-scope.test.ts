@@ -23,6 +23,7 @@ const CATALOG: T[] = [
   'search_knowledge',
   'read_knowledge_document',
   'search_my_files',
+  'read_my_file',
   'web_search',
   ...DOMAIN_WRITE_TOOLS,
   'request_approval',
@@ -56,7 +57,7 @@ test('domänverktyg och alltid-på överlappar inte', () => {
 
 test('en ren läsfråga skickar läs-/sök-/minnes-/dokumentverktyg + generiska skrivverktyg, inga domänverktyg', () => {
   const out = names(scopeTools(CATALOG, 'Hur många aktiva bolag har vi i portföljen?'));
-  for (const n of ['query_collection', 'search_knowledge', 'search_my_files', 'web_search', 'memory_read', 'generate_document', 'render_visual']) {
+  for (const n of ['query_collection', 'search_knowledge', 'search_my_files', 'read_my_file', 'web_search', 'memory_read', 'generate_document', 'render_visual']) {
     assert.ok(out.includes(n), n);
   }
   for (const n of ALWAYS_ON_WRITE_TOOLS) assert.ok(out.includes(n), n);

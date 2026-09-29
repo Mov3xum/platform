@@ -79,3 +79,34 @@ test('rankCandidates respects the limit', () => {
   const ranked = rankCandidates('a', rows, getTexts, { limit: 1, threshold: 0 });
   assert.equal(ranked.length, 1);
 });
+
+
+// ── Filnamn (read_my_file / search_my_files-fallback, § 27) ─────────────────
+// Incident 2026-09: en fil som tydligt låg i Filer "hittades inte" eftersom
+// sökningen aldrig matchade på filnamn. Lås att filnamn med understreck och
+// filändelse matchar både exakt och med vardagsspråk/accent-avvikelse.
+
+const files = [
+  { id: 'a', filename: 'Idebeskrivning_Movexum_NY.pptx' },
+  { id: 'b', filename: 'Kvartalsrapport Q2 2026.pdf' },
+  { id: 'c', filename: 'budget-2026.xlsx' }
+];
+const getFilename = (f: { filename: string }) => [f.filename];
+
+test('rankCandidates matches an exact filename with underscores and extension', () => {
+  const ranked = rankCandidates('Idebeskrivning_Movexum_NY.pptx', files, getFilename, { threshold: 0.4 });
+  assert.equal(ranked[0]?.item.id, 'a');
+  assert.equal(ranked[0]?.score, 1);
+});
+
+test('rankCandidates matches a filename spoken in everyday words (accent, no extension)', () => {
+  const ranked = rankCandidates('idébeskrivning movexum', files, getFilename, { threshold: 0.4 });
+  assert.equal(ranked[0]?.item.id, 'a');
+  assert.equal(ranked.length, 1);
+});
+
+test('rankCandidates does not confuse unrelated filenames', () => {
+  const ranked = rankCandidates('kvartalsrapport q2', files, getFilename, { threshold: 0.4 });
+  assert.equal(ranked[0]?.item.id, 'b');
+  assert.equal(ranked.length, 1);
+});

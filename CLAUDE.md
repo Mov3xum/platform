@@ -3691,8 +3691,10 @@ når deras egna filer, via verktyget `search_my_files`.
 | `backend/pocketbase-schema/migrations/1700000120_extend_user_files_rag.js` | `extracted_text`/`indexed`/`chunk_count` på `user_files` |
 | `backend/pocketbase-schema/migrations/1700000121_create_user_file_chunks.js` | Collection `user_file_chunks` (RAG-index, owner-only) |
 | `apps/web/src/lib/ai/rag.ts` | Delad RAG-kärna + `indexUserFile`/`searchUserFiles` |
-| `apps/web/src/lib/ai/tools.ts` | Verktyget `search_my_files` (agent-actor, owner-scopat) |
-| `apps/web/src/lib/actions/files.ts` | Extraktion + indexering vid uppladdning + `indexMyFilesAction` |
+| `apps/web/src/lib/ai/tools.ts` | Verktygen `search_my_files` (fragment-RAG + filnamns-fallback) och `read_my_file` (lista/läs HELA filer) — agent-actor, owner-scopade |
+| `apps/web/src/lib/user-files-index.server.ts` | **ENDA** extraktions-/indexeringsvägen för personliga filer (format-lista, PB-filter, `extractAndIndexUserFile`) — delad av route och action |
+| `apps/web/src/lib/actions/files.ts` | Uppladdning (server action) + `indexMyFilesAction` — anropar den delade modulen |
+| `apps/web/src/app/api/filer/route.ts` | Uppladdning/indexering via route handler (det /filer faktiskt använder) — anropar den delade modulen |
 | `apps/web/src/app/filer/FilesBrowser.tsx` | Knappen "Gör sökbara i chatten" |
 
 ### 27.2 Datamodell
@@ -3707,16 +3709,38 @@ når deras egna filer, via verktyget `search_my_files`.
 
 ### 27.3 Flöde
 
-1. Vid uppladdning (`uploadUserFileAction`) extraheras text ur PDF/Excel/text/
-   CSV/Markdown, **personnummer-saneras** och cachas i `user_files.extracted_text`,
-   chunkas + embeddas till `user_file_chunks` (best-effort, fail-soft).
-   Befintliga filer indexeras via knappen **"Gör sökbara i chatten"** på `/filer`
-   (`indexMyFilesAction`, capad 40/körning).
+1. Vid uppladdning (`/api/filer` från `/filer`, eller `uploadUserFileAction`)
+   extraheras text ur PDF/Excel/**Word/PowerPoint**/text/CSV/Markdown,
+   **personnummer-saneras** och cachas i `user_files.extracted_text`, chunkas +
+   embeddas till `user_file_chunks` (best-effort, fail-soft). Befintliga filer
+   indexeras via knappen **"Gör sökbara i chatten"** på `/filer` (capad
+   40/körning). **Incident 2026-09:** routen och server-actionen hade varsin
+   kopia av extraktionen, och routens kunde bara PDF/Excel/text — en PowerPoint
+   som laddades upp via `/filer` fick aldrig text, och "Gör sökbara" hoppade
+   dessutom över den i sitt PB-filter. Nu finns EN modul
+   (`lib/user-files-index.server.ts`) med format-listan, PB-filtret
+   (`EXTRACTABLE_USER_FILE_FILTER`, MÅSTE spegla `extractableUserFileKinds`)
+   och indexeraren; route och action anropar den. Skriv aldrig en ny
+   extraktionskopia.
 2. I chatten anropar modellen `search_my_files` → frågan embeddas, rankas mot
    **användarens egna** chunkar (owner = den inloggade) och de bästa styckena
    matas tillbaka. Faller tillbaka på `~`-nyckelordssökning över `extracted_text`.
-3. PowerPoint/Word/bilder indexeras inte (ingen textextraktion ännu) — exportera
-   till PDF. Återanvänder samma RAG-kärna som § 26 (ingen divergerande kopia).
+   **Ger innehållssökningen inget** matchas frågan mot **filnamnen** i ägarens
+   katalog (`rankCandidates`, samma fuzzy som `search_records`) och träffarna
+   returneras som `files_matching_name` — verktyget säger aldrig "hittade inte"
+   om en fil som tydligt finns.
+3. **`read_my_file`** (spegel av `read_knowledge_document`, § 26.3 p. 4): utan
+   `query`/`file_id` returneras KATALOGEN (filnamn, typ, ämne, bolag,
+   `indexed`); med `query` fuzzy-matchas filnamnet (tolerant mot felstavning,
+   understreck, filändelse — enhetstestat i `fuzzy.test.ts`); med `file_id`
+   (eller entydig namnträff) returneras hela den sanerade `extracted_text`
+   sidvis (`offset`/`next_offset`). Finns filen men saknar text svarar
+   verktyget `has_text: false` med orsak (ej indexerad / format utan textlager)
+   — modellen instrueras (`KNOWLEDGE_GUIDANCE`) att säga exakt det och ALDRIG
+   påstå att filen saknas innan den listat filerna. `search_my_files` matchar
+   aldrig på filnamn, så en fil som nämns vid namn går alltid via `read_my_file`.
+4. Bilder indexeras inte (ingen OCR). Återanvänder samma RAG-kärna som § 26
+   (ingen divergerande kopia).
 
 ### 27.4 Säkerhet och regelefterlevnad
 
@@ -3727,9 +3751,11 @@ når deras egna filer, via verktyget `search_my_files`.
   och index vid radering/erasure. Originalfilen lämnas orörd.
 - **§ 9.3 / denylist:** `user_files` + `user_file_chunks` är **denylistade i
   `lib/ai/redaction.ts`** → det generiska `query_collection` exponerar dem
-  ALDRIG. Innehållet når modellen enbart via det ägar-scopade `search_my_files`.
-- **Ägar-isolering (§ 21):** `search_my_files` exponeras BARA för agent-actor
-  (interaktiv staff-chatt/tråd) och scope:as till `ctx.actor.id` i dispatchern —
+  ALDRIG. Innehållet når modellen enbart via de ägar-scopade `search_my_files`
+  och `read_my_file` (samma redan sanerade `extracted_text` — ingen ny dataväg).
+- **Ägar-isolering (§ 21):** `search_my_files`/`read_my_file` exponeras BARA för
+  agent-actor (interaktiv staff-chatt/tråd) och scope:as till `ctx.actor.id`
+  (owner + tenant i varje filter, oavsett pb-typ) i dispatchern —
   kan aldrig läsa en annan användares filer. Saknas en inloggad agent-actor
   (autonoma körningar) returneras ett fel, inte data. PB-reglerna (owner-only) är
   den hårda gränsen; reads går via användarens auth-token.
