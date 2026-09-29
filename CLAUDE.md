@@ -5202,12 +5202,14 @@ på canvasen med hårlinjer, och typskalan är **samma som chatten** (hälsning
 all IO och skickar färdig data:
 
 1. **Masthead** — folio-rad (datum · ISO-vecka · "Översikt") under en
-   ink-linje, hälsningen i Sora och "Gå direkt till"-raden som textlänkar
-   (rollfiltrerade). (Den dekorativa årsringen togs bort 2026-09.) Under det
-   en **boxlös siffer-rad**
-   (`StatFigure`): fem nyckeltal fördelade över bredden — stor tabulär siffra
-   i Sora, etikett i kapitäler, hint och delta — varje figur är en länk till
-   sin vy. En räkning som felade visas som "–", aldrig som 0.
+   ink-linje och hälsningen i Sora. (Den dekorativa årsringen och
+   "Gå direkt till"-raden med snabblänkar togs bort 2026-09 — railen och
+   bottom-menyn är navigationen.) Under det en **boxlös siffer-rad**
+   (`StatFigure`): fyra nyckeltal fördelade över bredden (aktiva bolag, nya
+   inflöden, mina uppgifter, på agendan; "Pågående workshops" togs bort
+   2026-09) — stor tabulär siffra i Sora, etikett i kapitäler, hint och
+   delta — varje figur är en länk till sin vy. En räkning som felade visas
+   som "–", aldrig som 0.
 2. **Kalendern** (full bredd) — en **tidslinje** (`HomeTimelineStrip`) med
    valbart fönster **7 · 14 dagar · Månad** (`?dagar=7|14|30`,
    `parseHomeWindowDays` i `@platform/shared` home.ts; **default 7 dagar**;

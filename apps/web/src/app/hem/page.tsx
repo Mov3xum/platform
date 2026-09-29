@@ -11,7 +11,6 @@ import { listOrgPosts } from '@/lib/org-posts/data';
 import { loadActivityFeed } from '@/lib/feed/activity-feed';
 import { fetchWebFeedItems, listWebSources } from '@/lib/ai/web';
 import { listAnnualWheelCategories } from '@/lib/annual-wheel/categories';
-import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import type { DashboardActivity } from '@/components/DashboardChat';
 import {
   ORG_POST_AUTHOR_ROLES,
@@ -19,7 +18,6 @@ import {
   annualWheelItemDateRange,
   annualWheelHiddenOnHome,
   canRolesSeeOrgPost,
-  coreModules,
   homeTabFromSlug,
   isOrgPostExpired,
   isOrgPostScheduled,
@@ -153,8 +151,7 @@ export default async function HemPage({
     activeStartups,
     newLeads,
     prevLeads,
-    myOpenTasks,
-    runningWorkshops
+    myOpenTasks
   ] = await Promise.all([
     listOrgPosts(pb, user.tenant).catch(() => [] as OrgPost[]),
     // Översikt visar bara de senaste 6 — Omvärld ligger direkt under i samma spalt.
@@ -209,12 +206,6 @@ export default async function HemPage({
           tenant: user.tenant,
           me: user.id
         }),
-        fields: 'id'
-      })
-    ),
-    countOrNull(() =>
-      pb.collection(PB_COLLECTIONS.workshopAssignments).getList(1, 1, {
-        filter: pb.filter('tenant = {:tenant} && status = "in_progress"', { tenant: user.tenant }),
         fields: 'id'
       })
     )
@@ -326,24 +317,12 @@ export default async function HemPage({
   const dateLine = swedishDateLine(now);
   const leadsDelta = newLeads !== null && prevLeads !== null ? newLeads - prevLeads : null;
 
-  const shortcuts = [
-    { id: 'idag', label: 'Ny chatt', icon: 'message' },
-    { id: 'startups', label: 'Bolag', icon: 'people' },
-    { id: 'arshjul', label: 'Årshjul', icon: 'calendar' },
-    { id: 'inflode', label: 'Startupkompassen', icon: 'compass' },
-    { id: 'education', label: 'Utbildning', icon: 'cap' },
-    { id: 'kunskapsbas', label: 'Kunskapsbas', icon: 'doc' }
-  ]
-    .filter((s) => canAccessModuleForUser(user.roles, s.id, user.enabledModules))
-    .map((s) => ({ ...s, href: coreModules.find((m) => m.id === s.id)?.route ?? '/' }));
-
   return (
     <HomeFrontPage
       hello={hello}
       dateLine={dateLine}
       today={today}
-      shortcuts={shortcuts}
-      counts={{ activeStartups, newLeads, leadsDelta, runningWorkshops, myOpenTasks }}
+      counts={{ activeStartups, newLeads, leadsDelta, myOpenTasks }}
       agendaItems={agendaItems}
       windowDays={windowDays}
       tabs={tabs}
