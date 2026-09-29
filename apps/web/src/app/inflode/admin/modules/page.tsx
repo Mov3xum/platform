@@ -137,17 +137,24 @@ export default async function AdminModulesPage({
           </Link>
         </Card>
       ) : (
-        <div style={{ display: 'grid', gap: 10 }}>
+        // minmax(0, 1fr): ett 1fr-spår har min-content som minimum, så
+        // nowrap-raderna (slug/beskrivning, rubrik + chips) tvingade annars
+        // korten bredare än vyn → sidled-scroll (CLAUDE.md § 35.2).
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10 }}>
           {modules.map((m) => {
             const metrics = metricsFor(m);
             const nextName = m.next_module ? moduleNameById.get(m.next_module) : undefined;
             const published = Boolean(m.is_active && m.public_url_enabled);
             return (
-              <Card key={m.id} style={{ padding: 14 }}>
-                <div className="mx-flex mx-items-c mx-gap-2">
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="mx-flex mx-items-c mx-gap-2">
-                      <span className="mx-disp mx-fw-6 mx-t-13 mx-truncate">
+              <Card key={m.id} style={{ padding: 14, minWidth: 0 }}>
+                <div className="mx-flex mx-items-c mx-gap-2" style={{ flexWrap: 'wrap' }}>
+                  <div style={{ flex: '1 1 280px', minWidth: 0 }}>
+                    <div className="mx-flex mx-items-c mx-gap-2" style={{ flexWrap: 'wrap' }}>
+                      <span
+                        className="mx-disp mx-fw-6 mx-t-13 mx-truncate"
+                        style={{ minWidth: 0, maxWidth: '100%' }}
+                        title={m.name}
+                      >
                         {m.name}
                       </span>
                       <Chip variant={m.flow_type === 'chat' ? 'cyan' : 'default'} mono>
@@ -168,7 +175,11 @@ export default async function AdminModulesPage({
                         </Chip>
                       )}
                     </div>
-                    <div className="mx-t-12 mx-muted mx-truncate" style={{ marginTop: 4 }}>
+                    <div
+                      className="mx-t-12 mx-muted mx-truncate"
+                      style={{ marginTop: 4 }}
+                      title={m.description || undefined}
+                    >
                       {/* Den publika delningslänken är det staff faktiskt använder. */}
                       <code className="mx-mono">
                         {m.public_slug ? `/m/${m.public_slug}` : `/inflode/m/${m.slug}`}
@@ -188,7 +199,7 @@ export default async function AdminModulesPage({
                       </div>
                     </div>
                   )}
-                  <div className="mx-flex mx-gap-2" style={{ flexShrink: 0 }}>
+                  <div className="mx-flex mx-gap-2" style={{ flexShrink: 0, flexWrap: 'wrap' }}>
                     {/* Publicera/avpublicera direkt från raden — samma
                         server-action-flöde (RBAC + tenant) som editorn. */}
                     <form action={setModulePublishedAction} style={{ display: 'contents' }}>
