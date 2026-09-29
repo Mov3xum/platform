@@ -16,6 +16,7 @@ import type { StartupStatus } from '@/lib/labels';
 import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
 import { DeMinimisSection } from '@/app/startups/[id]/DeMinimisSection';
 import { SharedContactsCard } from './SharedContactsCard';
+import { StartupSupportChecksSection } from '@/app/startups/[id]/StartupSupportChecksSection';
 import { DocumentCompleteButton } from '@/app/education/documents/DocumentCompleteButton';
 import { OrgPostList, type BoardPost } from '@/components/home/OrgPostList';
 import { chatMarkdownToHtml } from '@/lib/safe-html';
@@ -360,6 +361,15 @@ export default async function MinOversiktPage() {
 
         {/* § 45.4 — kontakter Movexum delat med bolaget via kontaktboken */}
         <SharedContactsCard tenantId={user.tenant} startupId={linkedId} />
+
+        {/* § 46.7 — bolagets stödcheckar: status, nästa steg, beviljat/utbetalt */}
+        <StartupSupportChecksSection
+          pb={pb}
+          tenantId={user.tenant}
+          startupId={linkedId}
+          isStaff={isStaff}
+          canApply={isStaff || isLinkedMember}
+        />
 
         {/* Tilldelade verktyg — för bolagsmedlemmar samlat under "Aktiviteter". */}
         {!isPureMember ? (

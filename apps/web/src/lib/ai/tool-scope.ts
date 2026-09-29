@@ -118,6 +118,11 @@ export const TOOL_DOMAINS: readonly ToolDomain[] = [
     stems: ['mål', 'målsättning', 'måluppföljning', 'måltal', 'indikator', 'fokusområde', 'verksamhetsplan', 'kvartalsstatus']
   },
   {
+    id: 'support_checks',
+    tools: ['create_funding_project', 'create_support_check_type', 'create_support_check_application'],
+    stems: ['stödcheck', 'stodcheck', 'check', 'excellenscheck', 'resecheck', 'stödansök', 'stodansok', 'finansieringsprojekt', 'arbetspaket', 'projektbudget', 'vinnova excellens', 'tvv', 'tillväxtverket', 'tillvaxtverket']
+  },
+  {
     id: 'procurement',
     tools: ['create_procurement', 'create_procurement_calloff', 'update_procurement_calloff'],
     stems: ['upphandling', 'avrop', 'leverantör', 'leverantor', 'ramavtal', 'milstolpe', 'slutrapport', 'excellens', 'anbud']

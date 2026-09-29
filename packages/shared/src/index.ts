@@ -1198,7 +1198,12 @@ export type NotificationKind =
   | 'due_soon'
   // Kontaktboken (§ 45.3, migration 1700000158)
   | 'contact_request'
-  | 'contact_decision';
+  | 'contact_decision'
+  // Stödcheckar (§ 46, migration 1700000169)
+  | 'support_check_submitted'
+  | 'support_check_changes'
+  | 'support_check_decision'
+  | 'support_check_comment';
 
 /** Notistyper som fanns i schemat före migration 1700000158 (fallback i `notify`). */
 export const LEGACY_NOTIFICATION_KINDS: readonly NotificationKind[] = [
@@ -1391,7 +1396,7 @@ export interface ModuleGroup {
 
 export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'pagaende', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['kompassen', 'startups', 'kontakter', 'de_minimis', 'upphandlingar', 'investerare', 'events', 'community'] },
+  { label: 'Portfölj', modules: ['kompassen', 'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'kunskapsbas', 'integrationer', 'installningar', 'min_profil'] }
 ];
@@ -1536,6 +1541,22 @@ export const coreModules: ModuleDefinition[] = [
       'Upphandlingar och excellens-insatser för bolagen — ladda upp underlaget, följ avrop, milstolpar och slutrapporter enligt uppföljningsregler, och utvärdera leverantören.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
     route: '/upphandlingar'
+  },
+  {
+    id: 'checkar',
+    title: 'Stödcheckar',
+    description:
+      'Digitala stödcheckar (excellens, resa, AI-verktyg …) som bolagen ansöker om: digital ansökningsmall med signering, bedömning med kompletteringar, finansiering per projekt/arbetspaket och automatisk de minimis-/kapitalbokföring vid beslut.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
+    route: '/checkar'
+  },
+  {
+    id: 'projekt',
+    title: 'Finansieringsprojekt',
+    description:
+      'Projekt och arbetspaket som stöd tas ur (Vinnova Excellens, TVV, EoI …) med budget, upparbetning och kassabok över beviljade checkar.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/projekt'
   },
   {
     id: 'kontakter',
@@ -1734,6 +1755,8 @@ export * from './compass-survey';
 export * from './procurement';
 export * from './contacts';
 export * from './agent-memory';
+export * from './funding';
+export * from './support-checks';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */

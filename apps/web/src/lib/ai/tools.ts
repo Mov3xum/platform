@@ -87,6 +87,9 @@ import {
   createProcurement,
   createProcurementCalloff,
   updateProcurementCalloffFields,
+  createFundingProject,
+  createSupportCheckType,
+  createSupportCheckApplication,
   CAPITAL_TYPES,
   registerDeMinimisSupport,
   FORORDNINGAR,
@@ -1667,6 +1670,114 @@ export function buildChatTools(
         }
       }
     });
+    // Stödcheckar & finansieringsprojekt (§ 46). Inskick/signering, utlåtanden,
+    // finansiering, beslut och utbetalning är MÄNSKLIGA handlingar i /checkar —
+    // agenten registrerar konfiguration och utkast.
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_funding_project',
+        description:
+          'Skapar ett finansieringsprojekt (funding_projects, § 46.3) — kassan ' +
+          'stödcheckar tas ur, t.ex. "Vinnova Excellens 2026–2027" eller ett ' +
+          'TVV-projekt. Arbetspaket (AP) läggs till av en människa på /projekt. ' +
+          'Kräver admin/incubator_lead.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Projektets titel (max 200).' },
+            kind: { type: 'string', enum: ['vinnova', 'tillvaxtverket', 'region', 'eu', 'own', 'other'], description: 'Finansiärstyp.' },
+            status: { type: 'string', enum: ['planned', 'active', 'ended', 'cancelled'], description: 'Default active.' },
+            funder: { type: 'string', description: 'Finansiärens namn (fritext).' },
+            diarienummer: { type: 'string' },
+            description: { type: 'string' },
+            budget_sek: { type: 'number', description: 'Budget för stöd till bolag i SEK.' },
+            starts_at: { type: 'string', description: 'ÅÅÅÅ-MM-DD' },
+            ends_at: { type: 'string', description: 'ÅÅÅÅ-MM-DD' },
+            default_state_aid_basis: { type: 'string', enum: ['de_minimis', 'art22', 'none'], description: 'Default statsstödsgrund för checkar ur projektet.' },
+            default_stodgivare: { type: 'string', description: 'Stödgivare på de minimis-posterna, t.ex. "Movexum (Vinnova Excellens)".' }
+          },
+          required: ['title']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_support_check_type',
+        description:
+          'Skapar en checktyp (support_check_types, § 46) som bolagen kan ansöka ' +
+          'om: excellenscheck, resecheck, AI-verktygscheck … med tak per check, ' +
+          'behörighetskrav (minsta IRL-nivå), krav på slutrapport och default-' +
+          'finansiering (projekt + statsstödsgrund). Bedömningskriterier och ' +
+          'obligatorisk workshop justeras av en människa på /checkar/typer. ' +
+          'Slå upp funding_project via query_collection på funding_projects. ' +
+          'Kräver admin/incubator_lead.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'T.ex. "Resecheck internationalisering".' },
+            kind: { type: 'string', enum: ['excellence', 'travel', 'internationalization', 'ai_tools', 'other'] },
+            description: { type: 'string', description: 'Text till bolagen: vad checken är och vad som krävs.' },
+            max_amount_sek: { type: 'number' },
+            min_irl_level: { type: 'integer', description: '1–9, tomt = inget krav.' },
+            requires_final_report: { type: 'boolean', description: 'Default true.' },
+            report_due_days: { type: 'integer', description: 'Slutrapport senast N dagar efter insatsens slut (default 30).' },
+            changes_due_days: { type: 'integer', description: 'Kompletteringsfrist i dagar (default 14).' },
+            is_excellence_activity: { type: 'boolean' },
+            funding_project: { type: 'string', description: 'Id för default-projektet (valfritt).' },
+            default_state_aid_basis: { type: 'string', enum: ['de_minimis', 'art22', 'none'] },
+            active: { type: 'boolean', description: 'Öppen för ansökningar (default true).' },
+            opens_at: { type: 'string', description: 'ÅÅÅÅ-MM-DD' },
+            closes_at: { type: 'string', description: 'ÅÅÅÅ-MM-DD' }
+          },
+          required: ['title']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_support_check_application',
+        description:
+          'Skapar ett UTKAST till ansökan om stödcheck för ett bolag ' +
+          '(support_check_applications, § 46) med insatserna ur användarens ' +
+          'beskrivning: rubrik, vad/mål/tidplan, kostnad, spetskompetens. ' +
+          'Utkastet skickas in och SIGNERAS av firmatecknaren i /checkar — ' +
+          'agenten kan aldrig skicka in, bedöma, sätta finansiering eller ' +
+          'besluta. Slå upp check_type_id via query_collection på ' +
+          'support_check_types och startup_id via search_records. Skriv inga ' +
+          'personnummer; deltagare anges som roller.',
+        parameters: {
+          type: 'object',
+          properties: {
+            check_type_id: { type: 'string', description: 'Id för checktypen.' },
+            startup_id: { type: 'string', description: 'Bolagets id.' },
+            title: { type: 'string', description: 'Rubrik på ansökan.' },
+            activities: {
+              type: 'array',
+              description: 'Insatser i prioriteringsordning (max 6).',
+              items: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string' },
+                  description: { type: 'string', description: 'Vad, mål, omfattning, varför prioriterat, grov tidplan.' },
+                  participants: { type: 'string', description: 'Vem från bolaget medverkar (roller).' },
+                  cost_sek: { type: 'number', description: 'Grov uppskattad kostnad i SEK.' },
+                  expert_need: { type: 'string', description: 'Behov av spetskompetens.' },
+                  ends_at: { type: 'string', description: 'Planerat slutdatum ÅÅÅÅ-MM-DD.' }
+                },
+                required: ['title', 'description']
+              }
+            },
+            requested_amount_sek: { type: 'number', description: 'Sökt belopp; tomt = summan av insatserna.' },
+            activity_end_date: { type: 'string', description: 'ÅÅÅÅ-MM-DD' },
+            applicant_note: { type: 'string', description: 'Följebrev / hur resurser avsätts.' }
+          },
+          required: ['check_type_id', 'startup_id', 'activities']
+        }
+      }
+    });
     // Målstyrning & verksamhetsplan (§ 42). Måltal, årsstatus och manuella
     // värden sätts av en människa i /mal — agenten föreslår i text.
     tools.push({
@@ -2183,6 +2294,12 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: 'Registrerar avrop' };
     case 'update_procurement_calloff':
       return { tool: name, label: 'Uppdaterar avrop' };
+    case 'create_funding_project':
+      return { tool: name, label: 'Skapar finansieringsprojekt' };
+    case 'create_support_check_type':
+      return { tool: name, label: 'Skapar checktyp' };
+    case 'create_support_check_application':
+      return { tool: name, label: 'Skapar ansökningsutkast' };
     case 'create_goal':
       return { tool: name, label: 'Lägger till verksamhetsmål' };
     case 'add_goal_indicator':
@@ -3161,6 +3278,12 @@ export async function dispatchToolCall(
       return runCreateProcurementCalloff(args, ctx);
     case 'update_procurement_calloff':
       return runUpdateProcurementCalloff(args, ctx);
+    case 'create_funding_project':
+      return runCreateFundingProject(args, ctx);
+    case 'create_support_check_type':
+      return runCreateSupportCheckType(args, ctx);
+    case 'create_support_check_application':
+      return runCreateSupportCheckApplication(args, ctx);
     case 'create_goal':
       return runCreateGoal(args, ctx);
     case 'add_goal_indicator':
@@ -4632,6 +4755,83 @@ async function syncFollowupsNote(
   return {
     note: parts.length > 0 ? parts.join(', ') + '.' : 'Inga nya uppföljningar behövdes.',
     warning: res.error
+  };
+}
+
+// ── Stödcheckar & finansieringsprojekt (§ 46) ──────────────────────────────
+
+const FUNDING_PROJECT_ARG_KEYS = [
+  'title', 'kind', 'status', 'funder', 'diarienummer', 'description', 'budget_sek', 'starts_at', 'ends_at',
+  'default_state_aid_basis', 'default_stodgivare'
+] as const;
+
+const CHECK_TYPE_ARG_KEYS = [
+  'title', 'kind', 'description', 'max_amount_sek', 'min_irl_level', 'requires_final_report', 'report_due_days',
+  'changes_due_days', 'is_excellence_activity', 'funding_project', 'default_state_aid_basis', 'active', 'opens_at', 'closes_at'
+] as const;
+
+async function runCreateFundingProject(args: Record<string, unknown>, ctx: ToolDispatchContext): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  const result = await createFundingProject(ctx.pb, actor, { ...pickArgs(args, FUNDING_PROJECT_ARG_KEYS), title: argStr(args, 'title') });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      project_id: result.value.projectId,
+      title: result.value.title,
+      path: result.value.path,
+      note: 'Projektet är skapat. Arbetspaket (AP) och ansvarig läggs till av en människa på ' + result.value.path + '.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateSupportCheckType(args: Record<string, unknown>, ctx: ToolDispatchContext): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  const result = await createSupportCheckType(ctx.pb, actor, { ...pickArgs(args, CHECK_TYPE_ARG_KEYS), title: argStr(args, 'title') });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      check_type_id: result.value.typeId,
+      title: result.value.title,
+      path: result.value.path,
+      note: 'Checktypen är skapad med standardkriterier. Bedömningskriterier, obligatorisk workshop och arbetspaket justeras på ' + result.value.path + '.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runCreateSupportCheckApplication(args: Record<string, unknown>, ctx: ToolDispatchContext): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  const result = await createSupportCheckApplication(ctx.pb, actor, {
+    checkTypeId: argStr(args, 'check_type_id'),
+    startupId: argStr(args, 'startup_id'),
+    title: args.title,
+    activities: args.activities,
+    requested_amount_sek: args.requested_amount_sek,
+    activity_end_date: args.activity_end_date,
+    applicant_note: args.applicant_note
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      application_id: result.value.applicationId,
+      startup_id: result.value.startupId,
+      startup: result.value.startupName,
+      title: result.value.title,
+      status: 'draft',
+      path: result.value.path,
+      note:
+        'Utkastet är sparat. Bolagets firmatecknare (eller staff) granskar, skickar in och signerar det på ' +
+        result.value.path +
+        ' — först då startar bedömningen.',
+      logged_in: 'agent_actions'
+    }
   };
 }
 

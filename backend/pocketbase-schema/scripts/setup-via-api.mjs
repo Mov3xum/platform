@@ -3981,9 +3981,348 @@ await ensureCollection({
 
 // Migration 1700000158: notifications.kind += contact_request/contact_decision
 // (union — ensureCollection synkar inte fält på befintlig collection).
+// + migration 1700000169 (stödcheckar § 46): support_check_*-notiser.
 await patchCollection('notifications', [], {
-  kind: { values: ['comment', 'mention', 'assigned', 'status_change', 'stage_advance', 'due_soon', 'contact_request', 'contact_decision'] }
+  kind: {
+    values: [
+      'comment', 'mention', 'assigned', 'status_change', 'stage_advance', 'due_soon', 'contact_request', 'contact_decision',
+      'support_check_submitted', 'support_check_changes', 'support_check_decision', 'support_check_comment'
+    ]
+  }
 });
+// Migrationer 1700000161–170: stödcheckar & finansieringsprojekt (§ 46).
+// funding_projects → funding_work_packages (kassa + redovisningsenhet),
+// support_check_types (konfiguration) → support_check_applications (ENDA
+// SANNINGEN för ett ärende) → revisions (oföränderliga signeringsbevis),
+// comments (kompletteringspunkter), documents (bilagor), rules (uppföljning).
+// Select-värdena MÅSTE spegla packages/shared/src/{funding,support-checks}.ts.
+await ensureCollection({
+  id: 'funding_projects_collection',
+  name: 'funding_projects',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['vinnova', 'tillvaxtverket', 'region', 'eu', 'own', 'other'] },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['planned', 'active', 'ended', 'cancelled'] },
+    { name: 'funder', type: 'text', required: false, max: 200 },
+    { name: 'diarienummer', type: 'text', required: false, max: 80 },
+    { name: 'description', type: 'text', required: false, max: 5000 },
+    { name: 'budget_sek', type: 'number', required: false, min: 0 },
+    { name: 'starts_at', type: 'date', required: false },
+    { name: 'ends_at', type: 'date', required: false },
+    { name: 'default_state_aid_basis', type: 'select', required: false, maxSelect: 1, values: ['de_minimis', 'art22', 'none'] },
+    { name: 'default_stodgivare', type: 'text', required: false, max: 200 },
+    { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_funding_projects_tenant ON funding_projects (tenant)',
+    'CREATE INDEX idx_funding_projects_tenant_status ON funding_projects (tenant, status)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+await ensureCollection({
+  id: 'funding_work_packages_collection',
+  name: 'funding_work_packages',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'project', type: 'relation', required: true, collectionId: 'funding_projects_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'code', type: 'text', required: false, max: 20 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'description', type: 'text', required: false, max: 2000 },
+    { name: 'budget_sek', type: 'number', required: false, min: 0 },
+    { name: 'starts_at', type: 'date', required: false },
+    { name: 'ends_at', type: 'date', required: false },
+    { name: 'sort_order', type: 'number', required: false, onlyInt: true },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_funding_work_packages_tenant ON funding_work_packages (tenant)',
+    'CREATE INDEX idx_funding_work_packages_project ON funding_work_packages (project)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+await ensureCollection({
+  id: 'support_check_types_collection',
+  name: 'support_check_types',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['excellence', 'travel', 'internationalization', 'ai_tools', 'other'] },
+    { name: 'description', type: 'text', required: false, max: 5000 },
+    { name: 'active', type: 'bool', required: false },
+    { name: 'max_amount_sek', type: 'number', required: false, min: 0 },
+    { name: 'funding_project', type: 'relation', required: false, collectionId: 'funding_projects_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'default_work_package', type: 'relation', required: false, collectionId: 'funding_work_packages_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'default_state_aid_basis', type: 'select', required: false, maxSelect: 1, values: ['de_minimis', 'art22', 'none'] },
+    { name: 'requires_workshop', type: 'relation', required: false, collectionId: 'workshops_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'min_irl_level', type: 'number', required: false, onlyInt: true, min: 0, max: 9 },
+    { name: 'requires_final_report', type: 'bool', required: false },
+    { name: 'report_due_days', type: 'number', required: false, onlyInt: true, min: 0, max: 365 },
+    { name: 'changes_due_days', type: 'number', required: false, onlyInt: true, min: 1, max: 180 },
+    { name: 'is_excellence_activity', type: 'bool', required: false },
+    { name: 'criteria', type: 'json', required: false, maxSize: 20000 },
+    { name: 'opens_at', type: 'date', required: false },
+    { name: 'closes_at', type: 'date', required: false },
+    { name: 'sort_order', type: 'number', required: false, onlyInt: true },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_support_check_types_tenant ON support_check_types (tenant)',
+    'CREATE INDEX idx_support_check_types_tenant_active ON support_check_types (tenant, active)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+const SC_USER_REL = (name) => ({ name, type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 });
+await ensureCollection({
+  id: 'support_check_applications_collection',
+  name: 'support_check_applications',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'check_type', type: 'relation', required: true, collectionId: 'support_check_types_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: false, max: 200 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft', 'submitted', 'changes_requested', 'under_review', 'approved', 'rejected', 'paid', 'closed', 'withdrawn'] },
+    { name: 'activities', type: 'json', required: false, maxSize: 60000 },
+    { name: 'requested_amount_sek', type: 'number', required: false, min: 0 },
+    { name: 'approved_amount_sek', type: 'number', required: false, min: 0 },
+    { name: 'activity_end_date', type: 'date', required: false },
+    { name: 'applicant_note', type: 'text', required: false, max: 5000 },
+    { name: 'revision', type: 'number', required: false, onlyInt: true, min: 0 },
+    { name: 'submitted_at', type: 'date', required: false },
+    SC_USER_REL('submitted_by'),
+    { name: 'changes_requested_at', type: 'date', required: false },
+    { name: 'changes_due_at', type: 'date', required: false },
+    { name: 'changes_request_note', type: 'text', required: false, max: 4000 },
+    SC_USER_REL('changes_requested_by'),
+    { name: 'coach_statement', type: 'text', required: false, max: 8000 },
+    SC_USER_REL('coach_statement_by'),
+    { name: 'coach_statement_at', type: 'date', required: false },
+    { name: 'controller_statement', type: 'text', required: false, max: 8000 },
+    SC_USER_REL('controller_statement_by'),
+    { name: 'controller_statement_at', type: 'date', required: false },
+    { name: 'assessment_scores', type: 'json', required: false, maxSize: 20000 },
+    { name: 'assessment_score', type: 'number', required: false, min: 0, max: 5 },
+    SC_USER_REL('assessed_by'),
+    { name: 'assessed_at', type: 'date', required: false },
+    { name: 'funding_project', type: 'relation', required: false, collectionId: 'funding_projects_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'funding_work_package', type: 'relation', required: false, collectionId: 'funding_work_packages_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'state_aid_basis', type: 'select', required: false, maxSelect: 1, values: ['de_minimis', 'art22', 'none'] },
+    { name: 'funding_note', type: 'text', required: false, max: 2000 },
+    SC_USER_REL('funding_set_by'),
+    { name: 'funding_set_at', type: 'date', required: false },
+    { name: 'decision_note', type: 'text', required: false, max: 4000 },
+    SC_USER_REL('decided_by'),
+    { name: 'decided_at', type: 'date', required: false },
+    { name: 'paid_at', type: 'date', required: false },
+    { name: 'paid_amount_sek', type: 'number', required: false, min: 0 },
+    { name: 'paid_note', type: 'text', required: false, max: 1000 },
+    { name: 'final_report_received_at', type: 'date', required: false },
+    { name: 'report_due_at', type: 'date', required: false },
+    { name: 'closed_at', type: 'date', required: false },
+    { name: 'de_minimis_stod', type: 'relation', required: false, collectionId: 'de_minimis_stod_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'capital_round', type: 'relation', required: false, collectionId: 'capital_rounds_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'is_excellence_activity', type: 'bool', required: false },
+    SC_USER_REL('created_by')
+  ],
+  indexes: [
+    'CREATE INDEX idx_support_check_applications_tenant ON support_check_applications (tenant)',
+    'CREATE INDEX idx_support_check_applications_startup ON support_check_applications (startup)',
+    'CREATE INDEX idx_support_check_applications_type ON support_check_applications (check_type)',
+    'CREATE INDEX idx_support_check_applications_tenant_status ON support_check_applications (tenant, status)',
+    'CREATE INDEX idx_support_check_applications_project ON support_check_applications (funding_project)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${MEMBER_OF_STARTUP_REL})`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${MEMBER_OF_STARTUP_REL})`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || ${MEMBER_OF_STARTUP_REL})`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+await ensureCollection({
+  id: 'support_check_revisions_collection',
+  name: 'support_check_revisions',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'application', type: 'relation', required: true, collectionId: 'support_check_applications_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'revision', type: 'number', required: true, onlyInt: true, min: 1 },
+    { name: 'snapshot', type: 'json', required: true, maxSize: 80000 },
+    { name: 'document_hash', type: 'text', required: true, min: 64, max: 64 },
+    { name: 'signer', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'signer_name', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'signer_email', type: 'text', required: false, max: 200 },
+    { name: 'signed_at', type: 'date', required: true },
+    { name: 'ip_hash', type: 'text', required: false, max: 64 },
+    { name: 'user_agent', type: 'text', required: false, max: 300 },
+    { name: 'intent_text', type: 'text', required: true, max: 1000 },
+    { name: 'method', type: 'select', required: true, maxSelect: 1, values: ['aes', 'bankid'] }
+  ],
+  indexes: [
+    'CREATE INDEX idx_support_check_revisions_tenant ON support_check_revisions (tenant)',
+    'CREATE INDEX idx_support_check_revisions_startup ON support_check_revisions (startup)',
+    'CREATE UNIQUE INDEX idx_support_check_revisions_unique ON support_check_revisions (application, revision)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${MEMBER_OF_STARTUP_REL})`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${MEMBER_OF_STARTUP_REL})`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: null,
+  deleteRule: null
+});
+await ensureCollection({
+  id: 'support_check_comments_collection',
+  name: 'support_check_comments',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'application', type: 'relation', required: true, collectionId: 'support_check_applications_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'author', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'section', type: 'select', required: true, maxSelect: 1, values: ['general', 'activities', 'budget', 'participants', 'attachments', 'funding'] },
+    { name: 'body', type: 'text', required: true, min: 1, max: 4000 },
+    { name: 'visible_to_applicant', type: 'bool', required: false },
+    { name: 'revision', type: 'number', required: false, onlyInt: true, min: 0 },
+    { name: 'resolved_at', type: 'date', required: false },
+    { name: 'resolved_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_support_check_comments_tenant ON support_check_comments (tenant)',
+    'CREATE INDEX idx_support_check_comments_application ON support_check_comments (application)',
+    'CREATE INDEX idx_support_check_comments_startup ON support_check_comments (startup)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || (${MEMBER_OF_STARTUP_REL} && visible_to_applicant = true))`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || (${MEMBER_OF_STARTUP_REL} && visible_to_applicant = true))`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_EACH})`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+await ensureCollection({
+  id: 'support_check_documents_collection',
+  name: 'support_check_documents',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'application', type: 'relation', required: true, collectionId: 'support_check_applications_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: false, max: 200 },
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['attachment', 'final_report', 'receipt', 'signed_application', 'other'] },
+    {
+      name: 'file',
+      type: 'file',
+      required: true,
+      protected: true,
+      maxSelect: 1,
+      maxSize: 26214400,
+      mimeTypes: [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'text/plain',
+        'text/markdown',
+        'image/png',
+        'image/jpeg'
+      ],
+      thumbs: []
+    },
+    { name: 'filename', type: 'text', required: false, max: 300 },
+    { name: 'mime', type: 'text', required: false, max: 150 },
+    { name: 'size_bytes', type: 'number', required: false },
+    { name: 'revision', type: 'number', required: false, onlyInt: true, min: 0 },
+    { name: 'uploaded_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_support_check_documents_tenant ON support_check_documents (tenant)',
+    'CREATE INDEX idx_support_check_documents_application ON support_check_documents (application)',
+    'CREATE INDEX idx_support_check_documents_startup ON support_check_documents (startup)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${MEMBER_OF_STARTUP_REL})`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${MEMBER_OF_STARTUP_REL})`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || ${MEMBER_OF_STARTUP_REL})`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || @request.auth.id = uploaded_by)`
+});
+await ensureCollection({
+  id: 'support_check_rules_collection',
+  name: 'support_check_rules',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'name', type: 'text', required: true, min: 1, max: 120 },
+    { name: 'check_type', type: 'relation', required: false, collectionId: 'support_check_types_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+    { name: 'anchor', type: 'select', required: true, maxSelect: 1, values: ['submitted_at', 'changes_requested_at', 'decided_at', 'paid_at', 'activity_end'] },
+    { name: 'offset_days', type: 'number', required: false, onlyInt: true, min: -730, max: 730 },
+    { name: 'repeat', type: 'select', required: true, maxSelect: 1, values: ['once', 'monthly', 'quarterly'] },
+    { name: 'condition', type: 'select', required: true, maxSelect: 1, values: ['always', 'awaiting_review', 'awaiting_controller', 'awaiting_decision', 'changes_pending', 'not_paid', 'report_missing'] },
+    { name: 'applies_to', type: 'select', required: true, maxSelect: 1, values: ['all', 'excellence'] },
+    { name: 'task_title', type: 'text', required: true, min: 1, max: 300 },
+    { name: 'task_kind', type: 'select', required: true, maxSelect: 1, values: ['followup', 'meeting', 'admin', 'email', 'call', 'prep', 'other'] },
+    { name: 'active', type: 'bool', required: false },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_support_check_rules_tenant ON support_check_rules (tenant)',
+    'CREATE INDEX idx_support_check_rules_type ON support_check_rules (check_type)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+// Migration 1700000168: tasks.link_kind += 'support_check' + relation (union
+// över hela values-listan, patchCollection ERSÄTTER values).
+await patchCollection(
+  'tasks',
+  [
+    { name: 'support_check_application', type: 'relation', required: false, collectionId: 'support_check_applications_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 }
+  ],
+  { link_kind: { values: ['none', 'startup', 'contact', 'event', 'mission', 'procurement', 'support_check'], maxSelect: 1 } }
+);
+// Migration 1700000169: activities.kind += support_check; notifications.kind += support_check_*.
+await patchActivitiesKindValues(['support_check']);
+// notifications.kind-unionen (inkl. support_check_*) görs i det samlade
+// patchCollection('notifications')-anropet längre ned (patchCollection ERSÄTTER values).
+// Migration 1700000170: bakåtlänk från kapitalrad/de minimis-post till ansökan.
+for (const name of ['capital_rounds', 'de_minimis_stod']) {
+  await patchCollection(name, [
+    { name: 'support_check_application', type: 'relation', required: false, collectionId: 'support_check_applications_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ]);
+}
+
 // Migration 1700000160: goal_indicators.source += 'survey' (§ 43) — inline-
 // defen ovan bär redan fälten, men ensureCollection synkar inte select-värden
 // på en befintlig collection. Hela listan (patchCollection ERSÄTTER values).
@@ -4334,7 +4673,17 @@ const FORCE_CREATE_RULES = {
   procurement_rules: `${ANY_AUTH} && @request.auth.tenant != ""`,
   procurement_documents: `${ANY_AUTH} && @request.auth.tenant != ""`,
   // Kontaktboken (§ 45, migration 1700000157) — roll-enforcement i skrivlagret.
-  contact_requests: `${ANY_AUTH} && @request.auth.tenant != ""`
+  contact_requests: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167) —
+  // roll-/medlemskontroll i skrivlagret och route-handlers.
+  funding_projects: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  funding_work_packages: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  support_check_types: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  support_check_applications: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  support_check_revisions: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  support_check_comments: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  support_check_documents: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  support_check_rules: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
 async function enforceCreateRules(passLabel) {

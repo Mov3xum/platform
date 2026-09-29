@@ -337,6 +337,17 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   'via `query_collection` på procurements/procurement_calloffs och tasks ' +
   '(link_kind = procurement). Utvärderingen av leverantören (poäng) och ' +
   'reglerna sätts av en människa i /upphandlingar. ' +
+  'STÖDCHECKAR (§ 46, /checkar): bolagen ansöker digitalt om excellens-/rese-/' +
+  'AI-verktygscheckar. Du kan skapa finansieringsprojekt (`create_funding_project`, ' +
+  'kassan stödet tas ur), checktyper (`create_support_check_type`) och ett UTKAST till ' +
+  'ansökan för ett bolag (`create_support_check_application` med insatser: vad/mål/' +
+  'tidplan, kostnad, spetskompetens). Inskick + signering (firmatecknare), utlåtanden, ' +
+  'bedömning, komplettering, FINANSIERING (projekt/arbetspaket/statsstödsgrund), beslut ' +
+  'och utbetalning är mänskliga handlingar i /checkar — föreslå i text. Vid beviljande ' +
+  'skapar systemet de minimis-post och kapitalrad automatiskt. Läget läser du via ' +
+  '`query_collection` på support_check_types/funding_projects/funding_work_packages och ' +
+  'tasks (link_kind = support_check); själva ansökningarna (insatser, utlåtanden) är ' +
+  'inte läsbara för dig — hänvisa till /checkar. ' +
   'MÅL & VERKSAMHETSPLAN (§ 42, /mal): lägg till mål under ett fokusområde ' +
   '(`create_goal`), indikatorer på ett mål (`add_goal_indicator` — computed ' +
   'kopplar till ett nyckeltal som räknas ur data, manual = bedömning) och ' +

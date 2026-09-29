@@ -189,6 +189,15 @@ async function verifyCollectionsExist() {
     // Saknas den felar "Starta mötet" med ett 404 från PB; gör den till ett
     // hårt invariant så att en instans utan migrationen fälls i deployen.
     'meeting_transcripts',
+    // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167).
+    'funding_projects',
+    'funding_work_packages',
+    'support_check_types',
+    'support_check_applications',
+    'support_check_revisions',
+    'support_check_comments',
+    'support_check_documents',
+    'support_check_rules',
     // Övrigt
     'web_cache'
   ];
@@ -343,7 +352,12 @@ const MUST_SCOPE_TO_MEMBER = [
   'de_minimis_units',
   'de_minimis_unit_orgnr',
   'de_minimis_stod',
-  'event_signups'
+  'event_signups',
+  // Stödcheckar (§ 46): bolaget ser sina egna ansökningar/bevis/kommentarer/bilagor.
+  'support_check_applications',
+  'support_check_revisions',
+  'support_check_comments',
+  'support_check_documents'
 ];
 
 const MUST_BE_STAFF_OR_OBSERVER = [
@@ -388,7 +402,12 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // Kontaktboken (§ 45, migration 1700000157). Förfrågningar innehåller syfte
   // + vem som frågar om vilken extern kontakt → staff/observer-only; bolagen
   // ser DELADE kontakter via den kurerade vyn på Mitt bolag, inte här.
-  'contact_requests'
+  'contact_requests',
+  // Finansieringsprojekt/arbetspaket och stödcheck-regler (§ 46). Intern
+  // projektekonomi och uppföljningsstyrning → staff/observer-only.
+  'funding_projects',
+  'funding_work_packages',
+  'support_check_rules'
 ];
 
 // Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa
@@ -863,7 +882,12 @@ const REQUIRED_APP_FIELDS = [
   // Målstyrning (§ 42, migration 1700000159) + enkätkälla (§ 43, migration
   // 1700000160): utan flaggorna sparas "okänt" som 0 och en enkätindikator tappar sin källa.
   { collection: 'goal_indicators', fields: ['has_target', 'survey_module'] },
-  { collection: 'goal_status_entries', fields: ['has_value'] }
+  { collection: 'goal_status_entries', fields: ['has_value'] },
+  // Stödcheckar (§ 46, migrationer 1700000168/170): uppföljningskort länkas via
+  // tasks.support_check_application; bokföringsspåren länkar tillbaka till ansökan.
+  { collection: 'tasks', fields: ['support_check_application'] },
+  { collection: 'capital_rounds', fields: ['support_check_application'] },
+  { collection: 'de_minimis_stod', fields: ['support_check_application'] }
 ];
 
 const MUST_NOT_BE_REQUIRED = [

@@ -65,6 +65,7 @@ import { pbFileUrl } from '@/lib/pb-file';
 import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
 import { DeMinimisSection } from './DeMinimisSection';
 import { StartupProcurementsSection } from './StartupProcurementsSection';
+import { StartupSupportChecksSection } from './StartupSupportChecksSection';
 import { StartupContactsSection } from './StartupContactsSection';
 import { StartupMissionsSection } from './StartupMissionsSection';
 
@@ -672,6 +673,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ['#phase-history', `Fashistorik (${phaseHistory.totalItems})`],
           ['#kunskap', 'Kunskap'],
           ['#de-minimis', 'De minimis'],
+          ['#stodcheckar', 'Stöd & checkar'],
           ['#notes', `Anteckningar (${notes.totalItems})`],
           ['#activities', `Aktiviteter (${activities.totalItems})`],
           ['#documents', 'Dokument'],
@@ -980,6 +982,15 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
             canManage={canManageStartupDeMinimis(user, id)}
           />
         </Section>
+
+        {/* § 46.7 — stödcheckar: ansökan är sanningen, sektionen läser live */}
+        <StartupSupportChecksSection
+          pb={pb}
+          tenantId={user.tenant}
+          startupId={id}
+          isStaff={hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'])}
+          canApply={hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']) || user.linkedStartups.includes(id)}
+        />
 
         {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer']) && (
           <StartupProcurementsSection pb={pb} tenantId={user.tenant} startupId={id} />

@@ -628,6 +628,105 @@ function mapRow(
       };
     }
 
+    // Stödcheckar & finansieringsprojekt (§ 46).
+    case 'support_check_types': {
+      const title = str(after.title);
+      if (after.deleted === true) return { title: `Checktyp borttagen: "${title || 'checktyp'}"`, href: '/checkar/typer', icon: 'check' };
+      return {
+        title: action === 'create' ? `Ny checktyp: "${title || 'checktyp'}"` : `Checktyp ${changedVerb}${row.field ? ` (${fieldLabel(str(row.field))})` : ''}`,
+        href: row.record_id ? `/checkar/typer/${row.record_id}` : '/checkar/typer',
+        icon: 'check'
+      };
+    }
+    case 'support_check_applications': {
+      const href = row.record_id ? `/checkar/${row.record_id}` : '/checkar';
+      const startupName = str(after.startup_name);
+      const who = startupName ? `${startupName}: ` : '';
+      if (action === 'create') {
+        return { title: `${who}ny ansökan om ${str(after.check_type_title) || 'stödcheck'}`, detail: str(after.title) || undefined, href, icon: 'check' };
+      }
+      const field = str(row.field);
+      if (field === 'status') {
+        const status = str(after.status);
+        const label: Record<string, string> = {
+          submitted: 'Ansökan inskickad och signerad',
+          changes_requested: 'Komplettering begärd',
+          under_review: 'Under bedömning',
+          approved: `Stödcheck beviljad${typeof after.approved_amount_sek === 'number' ? ` ${Math.round(after.approved_amount_sek).toLocaleString('sv-SE')} kr` : ''}`,
+          rejected: 'Ansökan avslagen',
+          paid: `Stödcheck utbetald${typeof after.paid_amount_sek === 'number' ? ` ${Math.round(after.paid_amount_sek).toLocaleString('sv-SE')} kr` : ''}`,
+          closed: 'Stödcheck avslutad',
+          withdrawn: 'Ansökan återkallad'
+        };
+        return {
+          title: `${who}${label[status] ?? `status ${changedVerb}`}`,
+          detail: str(after.project_title) || undefined,
+          href,
+          icon: status === 'approved' || status === 'paid' ? 'shield' : 'check'
+        };
+      }
+      const fieldTitle: Record<string, string> = {
+        coach_statement: 'Coachutlåtande lämnat',
+        controller_statement: 'Controllerutlåtande lämnat',
+        assessment_score: 'Ansökan bedömd',
+        funding: 'Finansiering satt',
+        final_report_received_at: 'Slutrapport mottagen',
+        draft: 'Ansökan uppdaterad'
+      };
+      return { title: `${who}${fieldTitle[field] ?? `ansökan ${changedVerb}`}`, href, icon: 'check' };
+    }
+    case 'support_check_comments': {
+      const appId = str(after.application);
+      return {
+        title: `${str(after.startup_name) ? `${str(after.startup_name)}: ` : ''}${action === 'create' ? (after.visible_to_applicant ? 'kompletteringspunkt' : 'intern kommentar') : 'punkt ' + changedVerb}`,
+        href: appId ? `/checkar/${appId}#kommentarer` : '/checkar',
+        icon: 'message'
+      };
+    }
+    case 'support_check_documents': {
+      const appId = str(after.application);
+      return {
+        title: after.deleted === true ? `Bilaga borttagen: "${str(after.filename) || 'fil'}"` : `${str(after.startup_name) ? `${str(after.startup_name)}: ` : ''}bilaga uppladdad — ${str(after.filename) || 'fil'}`,
+        href: appId ? `/checkar/${appId}` : '/checkar',
+        icon: 'doc'
+      };
+    }
+    case 'support_check_rules': {
+      const name = str(after.name);
+      if (after.deleted === true) return { title: `Uppföljningsregel borttagen: "${name || 'regel'}"`, href: '/checkar/regler', icon: 'gear' };
+      return { title: action === 'create' ? `Ny uppföljningsregel (stödcheckar): "${name || 'regel'}"` : `Uppföljningsregel ${changedVerb}: "${name || 'regel'}"`, href: '/checkar/regler', icon: 'gear' };
+    }
+    case 'support_check_followups': {
+      const created = Number(after.created ?? 0);
+      const resolved = Number(after.resolved ?? 0);
+      const bits = [created > 0 ? `${created} nya uppföljningar` : null, resolved > 0 ? `${resolved} auto-stängda` : null].filter(Boolean);
+      return {
+        title: `Uppföljning: ${str(after.startup_name) || 'stödcheck'}${str(after.application_title) ? ` — ${str(after.application_title)}` : ''}`,
+        detail: bits.join(' · ') || undefined,
+        href: row.record_id ? `/checkar/${row.record_id}` : '/checkar',
+        icon: 'zap'
+      };
+    }
+    case 'funding_projects': {
+      const title = str(after.title);
+      if (after.deleted === true) return { title: `Finansieringsprojekt borttaget: "${title || 'projekt'}"`, href: '/projekt', icon: 'graph' };
+      return {
+        title: action === 'create' ? `Nytt finansieringsprojekt: "${title || 'projekt'}"` : `Finansieringsprojekt ${changedVerb}${row.field ? ` (${fieldLabel(str(row.field))})` : ''}`,
+        href: row.record_id ? `/projekt/${row.record_id}` : '/projekt',
+        icon: 'graph'
+      };
+    }
+    case 'funding_work_packages': {
+      const projectId = str(after.project);
+      const label = `${str(after.code) ? `${str(after.code)} ` : ''}${str(after.title) || 'arbetspaket'}`;
+      return {
+        title: after.deleted === true ? `Arbetspaket borttaget: ${label}` : action === 'create' ? `Nytt arbetspaket: ${label}` : `Arbetspaket ${changedVerb}: ${label}`,
+        detail: str(after.project_title) || undefined,
+        href: projectId ? `/projekt/${projectId}` : '/projekt',
+        icon: 'graph'
+      };
+    }
+
     case 'notes': {
       const startupId = str(after.startup);
       return {
