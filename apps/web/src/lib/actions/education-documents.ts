@@ -174,7 +174,6 @@ export async function assignDocumentToStartupAction(
   }
 
   revalidatePath('/education/documents');
-  revalidatePath('/pagaende');
   revalidatePath('/inkorg');
   revalidatePath(`/startups/${startupId}`);
   return { ok: true };

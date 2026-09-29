@@ -2323,9 +2323,9 @@ När staff tilldelar en workshop eller ett utbildningsdokument kan de skriva
 **instruktioner**, bjuda in andra **Movexum-resurser** (coacher/mentorer) som
 medarbetare, och i samma steg skapa ett **möte** med de inbjudna. Inbjudna
 resurser ser tilldelningen i sina "Mina uppgifter" (personlig uppgift) och mötet i
-sin agenda. Sidan **`/pagaende`** ger hela Movexum en tenant-bred översikt över
-allt som pågår med bolagen (workshops, utbildningsdokument, öppna aktiviteter),
-grupperat per bolag.
+sin agenda. (Den tenant-breda översiktssidan "Pågående" (`/pagaende`) är
+borttagen 2026-09 — läget per bolag följs på bolagskortet och via
+`/mina-aktiviteter?startup=<id>`.)
 
 **Kritiska filer:**
 
@@ -2336,7 +2336,6 @@ grupperat per bolag.
 | `apps/web/src/lib/assignments/types.ts` | `AssignableResource` + `AssignmentCollabOptions` (server-fria typer) |
 | `apps/web/src/lib/assignments/collaboration.ts` | `listAssignableResourcesForTenant`, `createCollaboratorTasks`, `createAssignmentMeeting` (server-only) |
 | `apps/web/src/components/assignments/AssignmentCollabFields.tsx` | Delade formulärfält (instruktioner, resurs-checkboxar, möte) |
-| `apps/web/src/app/pagaende/page.tsx` | Tenant-bred "Pågående"-översikt per bolag |
 
 **Flöde.** `assignWorkshopToStartupAction` / `assignDocumentToStartupAction` tar
 ett valfritt `options`-objekt (`instructions`, `collaboratorIds`, `meeting`). För
@@ -2767,7 +2766,7 @@ kollektion som återinför läckan fälls innan deploy. Speglas i
 
 `coreModules` (`packages/shared/src/modules.ts`) exkluderar redan
 `startup_member` från `aktivitet`/`activity_feed`, `inflode`, `rapporter`,
-`partners`, `investerare`, `insights`, `pagaende`. Sidorna `redirect('/dashboard')`
+`partners`, `investerare`, `insights`. Sidorna `redirect('/dashboard')`
 när modulen saknas — guards lades till på `/investerare` och `/inflode` (saknade
 dem). Chatt-ytorna `/idag`, `/chatt`, `/filer` redirectar redan non-staff →
 en ren `startup_member` når aldrig dashboard-/tråd-chatten, så AI-chattens
@@ -2804,7 +2803,7 @@ bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
    dokument och verktyg. Medlemmen öppnar och genomför dem direkt; en
    **progressbar** visar hur stor andel som slutförts (workshops `done` +
    dokument `completed` / totalt). Staff/coach kan granska ett bolags progress
-   via `?startup=<id>` (länk från `/pagaende`).
+   via `?startup=<id>` (länk från bolagskortet).
 3. **Filer** (`/filer`) — avtal (`agreements`) kopplade till bolaget och
    dokument som blivit output av aktiviteter (utbildningsdokument), plus
    medlemmens egna genererade/uppladdade filer.
@@ -5155,9 +5154,8 @@ service workern och manifestet är handskrivna och versionerade i repot.
   `canAccessModuleForUser` som railen** (menyn är UI-kurering, aldrig
   säkerhetsgräns — RLS/RBAC ligger kvar i § 21).
 - **Staff/observer:** Hem (`hem`, § 37) · Uppgifter (`inkorg`, § 44, med
-  olästa-badge) · **Chatt** (`idag`) · Pågående (`pagaende`) · Mer. Avstängda
-  moduler hoppas över och nästa kandidat tar platsen (bolag, uppdrag, årshjul,
-  filer …).
+  olästa-badge) · **Chatt** (`idag`) · Årshjul (`arshjul`) · Mer. Avstängda
+  moduler hoppas över och nästa kandidat tar platsen (uppdrag, events, filer …).
 - **Ren `startup_member`** (§ 22): Aktiviteter · Filer · **Översikt**
   (`min_oversikt` — chatten finns inte för medlemmar, § 21.5) · De minimis ·
   Mer. Chatten exponeras aldrig (enhetstestat).
@@ -5303,7 +5301,7 @@ roll**:
   ⇒ appen använder **allt rollen tillåter** minus ev. legacy
   `users.disabled_modules` (`resolveUserModules`), dvs. exakt vad kontot såg
   före skiftet — ett befintligt konto tappar aldrig tyst en sida som
-  sidguards/korslänkar förutsätter (t.ex. `/pagaende` → `/mina-aktiviteter`,
+  sidguards/korslänkar förutsätter (t.ex. bolagskortet → `/mina-aktiviteter`,
   § 22). `tenants.disabled_modules` lämnas orörd i schemat men **läses inte
   längre** — den globala togglingen är borttagen.
 - **Rollstandard** (`DEFAULT_MODULES_BY_ROLE` i
