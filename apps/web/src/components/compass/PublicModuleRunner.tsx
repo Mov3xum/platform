@@ -93,6 +93,7 @@ export function PublicModuleRunner({ module, questions, brandName, nextModule, s
         moduleName={module.welcome_title || module.name}
         brandName={brandName}
         nextModule={nextModule}
+        subject={subject}
       />
     );
   }

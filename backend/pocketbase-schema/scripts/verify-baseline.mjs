@@ -847,7 +847,11 @@ const REQUIRED_APP_FIELDS = [
   // Upphandlingar (§ 39): regelgenererade uppföljningar = tasks med
   // procurement-länk + rule_key (migration 1700000152). Saknas fälten
   // skapas korten utan idempotensnyckel → dubbletter vid varje synk.
-  { collection: 'tasks', fields: ['procurement', 'procurement_calloff', 'rule_key'] }
+  { collection: 'tasks', fields: ['procurement', 'procurement_calloff', 'rule_key'] },
+  // Målstyrning (§ 42) + enkätkälla (§ 43, migration 1700000156): utan
+  // flaggorna sparas "okänt" som 0 och en enkätindikator tappar sin källa.
+  { collection: 'goal_indicators', fields: ['has_target', 'survey_module'] },
+  { collection: 'goal_status_entries', fields: ['has_value'] }
 ];
 
 const MUST_NOT_BE_REQUIRED = [

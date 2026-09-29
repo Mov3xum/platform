@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { isSurveyModule } from '@platform/shared';
+import { moduleWantsLead } from '@/lib/compass/lead-capture';
 import { MistralError } from '@/lib/ai/mistral';
 import { intakeReply, type CompassChatMessage } from '@/lib/compass/chat';
 import {
@@ -76,6 +78,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   if (module.flow_type !== 'chat') {
     return NextResponse.json({ error: 'Modulen är inte en chatt.' }, { status: 400 });
   }
+  // En ENKÄT (§ 43) körs aldrig som AI-chatt: svaren skulle bli sessions-
+  // bundna och skickas till modellen. Skrivvägarna förbjuder kombinationen,
+  // men routen är säkerhetsgränsen.
+  if (isSurveyModule(module)) {
+    return NextResponse.json({ error: 'En enkät kan inte köras som chatt.' }, { status: 400 });
+  }
 
   // Samtyckesgrind (GDPR art. 7) — samma server-side-krav som submit/quiz.
   // Utan detta kunde en direkt POST kringgå klientens grind trots att leadet
@@ -131,7 +139,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
         landingModule: slug,
         attribution: pickAttribution(body.attribution),
         notifyModule: module,
-        createLead: module.create_lead !== false
+        createLead: moduleWantsLead(module)
       });
     }
   } catch {

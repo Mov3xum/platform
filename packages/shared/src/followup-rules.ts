@@ -325,7 +325,10 @@ export const FOLLOWUP_RESERVED_TASK_FIELDS: ReadonlySet<string> = new Set([
   'kind',
   'description',
   'due_at',
-  'completed_at'
+  'completed_at',
+  'id',
+  'assignees',
+  'created_by'
 ]);
 
 /** Kastar om länkfälten försöker skriva över ett reserverat fält. */

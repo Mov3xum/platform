@@ -24,10 +24,13 @@
 //       ingen cascade — raderas modulen lever indikatorn utan källa och
 //       visas som "saknar källa").
 //     • has_target (bool) — PocketBase lagrar JSON-null för tal som 0, så
-//       flaggan säger om måltalet är känt (§ 42.3). Saknad flagga på en
-//       befintlig rad ⇒ talet tolkas som känt (dagens beteende).
+//       flaggan säger om måltalet är känt (§ 42.3). Befintliga rader
+//       backfillas: `has_target = target != 0` (ett lagrat 0 var aldrig ett
+//       känt måltal — det var JSON-null). Läsvägen tolkar `false` som null;
+//       saknat fält (omigrerad instans) som känt.
 //   goal_status_entries (§ 42):
-//     • has_value (bool) — samma princip för det uppmätta värdet.
+//     • has_value (bool) — samma princip för det uppmätta värdet, backfillat
+//       `has_value = value != 0`.
 //
 // GDPR § 5: enkätsvar lagras utan koppling till person; för
 // `anonymous` finns inte ens en session. Compass-familjen är migration-only
@@ -105,6 +108,14 @@ migrate(
         indChanged = true;
       }
       if (indChanged) app.save(indicators);
+      // Backfill: rader skapade innan flaggan fanns. 0 = JSON-null (okänt).
+      for (const row of app.findAllRecords('goal_indicators')) {
+        if (row.getBool('has_target')) continue;
+        const known = Number(row.get('target') || 0) !== 0;
+        if (!known) continue;
+        row.set('has_target', true);
+        app.save(row);
+      }
     } catch (e) {
       // goal_indicators saknas — målstyrningen är inte migrerad ännu.
     }
@@ -113,6 +124,13 @@ migrate(
       if (!entries.fields.getByName('has_value')) {
         entries.fields.add(new Field({ name: 'has_value', type: 'bool', required: false }));
         app.save(entries);
+      }
+      for (const row of app.findAllRecords('goal_status_entries')) {
+        if (row.getBool('has_value')) continue;
+        const known = Number(row.get('value') || 0) !== 0;
+        if (!known) continue;
+        row.set('has_value', true);
+        app.save(row);
       }
     } catch (e) {
       // goal_status_entries saknas — målstyrningen är inte migrerad ännu.

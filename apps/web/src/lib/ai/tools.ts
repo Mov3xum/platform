@@ -4371,23 +4371,27 @@ async function runSetGoalStatus(args: Record<string, unknown>, ctx: ToolDispatch
     comment: argStr(args, 'comment') || null
   });
   if (!result.ok) return { ok: false, error: result.error };
-  const m = result.value.metric;
+  const r = result.value.reading;
   const sensitive = result.value.aggregateOnly;
+  const skipped = result.value.skipReason;
   return {
     ok: true,
     warning:
-      !sensitive && m && m.value === null
-        ? `Värdet kunde inte beräknas${m.note ? `: ${m.note}` : '.'} Statusen är sparad utan värde — säg det.`
-        : undefined,
+      !sensitive && r && r.value === null
+        ? `Värdet kunde inte beräknas${r.note ? `: ${r.note}` : '.'} Statusen är sparad utan nytt värde — säg det.`
+        : !sensitive && skipped
+          ? `${skipped} Säg det till användaren.`
+          : undefined,
     data: {
       entry_id: result.value.entry.id,
       indicator_id: result.value.entry.indicator,
       quarter: result.value.entry.quarter,
       status: result.value.entry.status,
-      // Art. 9-aggregat lämnar aldrig skrivlagret mot modellen (§ 41.2).
-      value: sensitive ? undefined : (result.value.entry.value ?? null),
-      value_note: sensitive ? 'Indikatorn är ett känsligt aggregat — värdet visas bara för behöriga i /mal.' : undefined,
-      value_complete: m ? m.complete : true,
+      // Känsliga aggregat/anonyma enkäter lämnar aldrig skrivlagret mot modellen (§ 41.2, § 43.2).
+      value: sensitive || (skipped && !result.value.valueWritten && result.value.entry.value === null) ? undefined : (result.value.entry.value ?? null),
+      value_note: sensitive ? 'Indikatorn är ett känsligt aggregat — värdet visas bara för behöriga i /mal.' : skipped,
+      value_written: result.value.valueWritten,
+      value_complete: r ? r.complete : true,
       path: goalsPath(),
       logged_in: 'agent_actions'
     }

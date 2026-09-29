@@ -6,6 +6,7 @@ import {
   GOAL_STATUS_LABELS,
   QUARTERS,
   formatMetricValue,
+  isAggregateOnlyIndicator,
   rollupGoalStatuses,
   type GoalIndicatorNode,
   type MetricKey,
@@ -168,9 +169,10 @@ export function GoalsPresentation({
                           <h3 className="text-[16px] font-semibold text-foreground">{g.goal.title}</h3>
                           <span className="text-[12px] text-foreground-subtle">{GOAL_OWNER_TEAM_LABELS[g.goal.owner_team]}</span>
                         </div>
-                        {g.indicators.length > 0 && (
+                        {g.indicators.some((ind) => !isAggregateOnlyIndicator(ind.indicator)) && (
                           <ul className="mt-2 divide-y divide-default">
-                            {g.indicators.map((ind) => (
+                            {/* Art. 9-aggregat visas aldrig på projektorn (§ 41.2) — bara i /mal för behöriga. */}
+                            {g.indicators.filter((ind) => !isAggregateOnlyIndicator(ind.indicator)).map((ind) => (
                               <IndicatorLine key={ind.indicator.id} node={ind} quarter={quarter} metrics={metrics} survey={surveys[ind.indicator.id]} />
                             ))}
                           </ul>

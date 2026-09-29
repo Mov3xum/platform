@@ -5,8 +5,12 @@ import {
   isSurveyModule,
   isValidSurveySubjectId,
   normalizeSurveySubjectKind,
+  parseDateTimeInput,
+  toPocketBaseDateTime,
+  validateSurveyAnswer,
   type SurveyAggregate,
-  type SurveyAnswerRow
+  type SurveyAnswerRow,
+  type SurveySubjectKind
 } from '@platform/shared';
 import { writeWithFallback } from '@/lib/core/write/helpers';
 import { listQuestionsForModule } from './store';
@@ -19,9 +23,15 @@ import type { CompassModule, CompassQuestion } from './types';
  * Svaren lagras per fråga i den befintliga `compass_responses` via en
  * `compass_conversations`-rad som bär SUBJEKTET (bolag/event/partner) —
  * inget lead, ingen session_token, ingen ip-hash. För `anonymous`-moduler
- * finns därmed inte något alls som pekar på en person. Aggregat går alltid
- * genom `aggregateSurvey` (k-anonymitet) — inga råsvar lämnar den här
- * modulen förutom till staff-UI:t som redan ser dem via RLS.
+ * lagras inte heller subjektet (ett `?om=<id>` på en anonym personalenkät
+ * hade annars kunnat binda svaren till en namngiven anställd). Varje svar
+ * valideras mot sin fråga (`validateSurveyAnswer`) innan det lagras — ett
+ * enskilt publikt inskick kan inte styra ett VP-mål med ett påhittat tal.
+ * Aggregat går alltid genom `aggregateSurvey` (k-anonymitet).
+ *
+ * `compass_responses` är denylistad för chattens `query_collection`
+ * (`lib/ai/redaction.ts`): råsvar når aldrig modellen; målstyrningen får
+ * bara aggregatet.
  */
 
 const CONVERSATIONS = 'compass_conversations';
@@ -29,27 +39,74 @@ const RESPONSES = 'compass_responses';
 /** Hårt tak för aggregat-läsningen (robusthet § 10) — räcker för tusentals svar. */
 const MAX_RESPONSE_ROWS = 20_000;
 
+/** Kollektion per subjekttyp — subjektet måste FINNAS i modulens tenant. */
+const SUBJECT_COLLECTIONS: Partial<Record<SurveySubjectKind, string>> = {
+  startup: 'startups',
+  event: 'incubator_events',
+  partner: 'partners'
+};
+
 export interface StoreSurveyResponseInput {
   module: CompassModule;
   questions: CompassQuestion[];
   answers: Record<string, string | string[]>;
-  /** Subjekt ur `?om=<id>`; valideras, aldrig fritext. */
+  /** Subjekt ur `?om=<id>`; valideras (format + existens i tenant), aldrig fritext. */
   subjectId?: unknown;
+}
+
+export interface StoredSurveyResponse {
+  id: string;
+  /** Antal svar som lagrades (giltiga svar på modulens frågor). */
+  stored: number;
+  /** Antal svar som föll på validering (räknas inte som fel — de lagras bara inte). */
+  rejected: number;
+}
+
+async function subjectExists(pb: PocketBase, tenant: string, kind: SurveySubjectKind, id: string): Promise<boolean> {
+  const collection = SUBJECT_COLLECTIONS[kind];
+  if (!collection) return false; // none/staff har inget subjekt att peka på
+  try {
+    const row = await pb.collection(collection).getOne<{ tenant?: string }>(id, { fields: 'id,tenant' });
+    return String(row.tenant ?? '') === tenant;
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Lagrar ett enkätinskick. Anropas av de publika routarna med den
  * superuser-klient `resolvePublicModule` gav (tenant härleds ALLTID från
- * modulen). Returnerar konversations-id eller null vid fel.
+ * modulen). Returnerar null när inskicket inte kunde lagras HELT — anroparen
+ * ska då fela högt (samma garanti som lead-garantin § 23.6).
  */
 export async function storeSurveyResponse(
   pb: PocketBase,
   tenant: string,
   input: StoreSurveyResponseInput
-): Promise<{ id: string } | null> {
+): Promise<StoredSurveyResponse | null> {
   if (!isSurveyModule(input.module)) return null;
   const subjectKind = normalizeSurveySubjectKind(input.module.subject_kind);
-  const subjectId = subjectKind !== 'none' && isValidSurveySubjectId(input.subjectId) ? input.subjectId : '';
+  const anonymous = input.module.anonymous === true;
+  let subjectId = '';
+  if (!anonymous && subjectKind !== 'none' && subjectKind !== 'staff' && isValidSurveySubjectId(input.subjectId)) {
+    subjectId = (await subjectExists(pb, tenant, subjectKind, input.subjectId)) ? input.subjectId : '';
+  }
+
+  // Validera FÖRST — ett inskick utan ett enda giltigt svar lagras inte alls.
+  const byKey = new Map(input.questions.map((q) => [q.key, q]));
+  const valid: Array<{ question: CompassQuestion; value: string }> = [];
+  let rejected = 0;
+  for (const [key, raw] of Object.entries(input.answers)) {
+    const q = byKey.get(key);
+    if (!q) continue; // okänd nyckel — släpps (whitelist = modulens frågor)
+    const value = validateSurveyAnswer(q, raw);
+    if (value === null) {
+      rejected++;
+      continue;
+    }
+    valid.push({ question: q, value });
+  }
+  if (valid.length === 0) return null;
 
   let conversation: { id: string };
   try {
@@ -70,25 +127,34 @@ export async function storeSurveyResponse(
     return null;
   }
 
-  const byKey = new Map(input.questions.map((q) => [q.key, q]));
-  for (const [key, raw] of Object.entries(input.answers)) {
-    const q = byKey.get(key);
-    if (!q) continue; // okänd nyckel — släpps (whitelist = modulens frågor)
-    const value = (Array.isArray(raw) ? raw.join(', ') : String(raw ?? '')).trim().slice(0, 8000);
-    if (!value) continue;
+  let stored = 0;
+  let failed = 0;
+  for (const { question, value } of valid) {
     try {
       await writeWithFallback(pb, (c) =>
-        c.collection(RESPONSES).create({ conversation: conversation.id, question: q.id, value })
+        c.collection(RESPONSES).create({ conversation: conversation.id, question: question.id, value })
       );
+      stored++;
     } catch (err) {
+      failed++;
       console.warn('[compass:survey] svar kunde inte lagras', {
         module: input.module.slug,
-        question: q.key,
+        question: question.key,
         status: (err as { status?: number }).status
       });
     }
   }
-  return conversation;
+  // Partiellt inskick är ett fel (§ 10.4 processing integrity): rulla tillbaka
+  // konversationen så halva svar aldrig räknas, och låt routen fela högt.
+  if (failed > 0) {
+    try {
+      await writeWithFallback(pb, (c) => c.collection(CONVERSATIONS).delete(conversation.id));
+    } catch {
+      /* best-effort */
+    }
+    return null;
+  }
+  return { id: conversation.id, stored, rejected };
 }
 
 interface ConversationRow {
@@ -105,14 +171,25 @@ interface ResponseRow {
 export interface SurveyAggregateOptions {
   /** Begränsa till ett subjekt (t.ex. ett bolag). */
   subjectId?: string;
-  /** ISO-datum, `from` inkl., `to` exkl. (conversation.created). */
+  /** ISO-datum, `from` inkl., `to` exkl. (conversation.created, svensk dygnsgräns § 38). */
   period?: { from: string; to: string };
+}
+
+/** PB-datetime för svensk midnatt på ett ISO-datum (§ 38 — servern kör UTC). */
+function pbDay(day: string): string {
+  const at = parseDateTimeInput(`${day}T00:00`);
+  return toPocketBaseDateTime(at ?? new Date(`${day}T00:00:00Z`));
 }
 
 /**
  * Läser och aggregerar en enkätmoduls svar med den INKOMMANDE klienten
  * (användarens token → RLS via conversation.tenant, § 21.7). Fail-soft:
  * läsfel ⇒ tomt aggregat (0 respondenter, inte synligt).
+ *
+ * Enkätkonversationer identifieras på `module_slug` + satt `subject_kind`
+ * (intag-konversationer saknar subjekt), så gamla intag-chattar på samma
+ * slug räknas aldrig in. Känd begränsning: byts modulens interna slug tappas
+ * historiken ur aggregatet.
  */
 export async function loadSurveyAggregate(
   pb: PocketBase,
@@ -126,7 +203,7 @@ export async function loadSurveyAggregate(
 
   let conversations: ConversationRow[] = [];
   try {
-    const filters = ['tenant = {:t}', 'module_slug = {:m}'];
+    const filters = ['tenant = {:t}', 'module_slug = {:m}', 'subject_kind != ""'];
     const params: Record<string, unknown> = { t: tenant, m: module.slug };
     if (opts.subjectId && isValidSurveySubjectId(opts.subjectId)) {
       filters.push('subject_id = {:s}');
@@ -134,8 +211,8 @@ export async function loadSurveyAggregate(
     }
     if (opts.period) {
       filters.push('created >= {:from} && created < {:to}');
-      params.from = `${opts.period.from} 00:00:00.000Z`;
-      params.to = `${opts.period.to} 00:00:00.000Z`;
+      params.from = pbDay(opts.period.from);
+      params.to = pbDay(opts.period.to);
     }
     conversations = await pb.collection(CONVERSATIONS).getFullList<ConversationRow>({
       filter: pb.filter(filters.join(' && '), params),

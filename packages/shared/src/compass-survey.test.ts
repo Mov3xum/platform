@@ -10,6 +10,7 @@ import {
   normalizeCompassPurpose,
   normalizeSurveySubjectKind,
   satisfiedShare,
+  validateSurveyAnswer,
   type SurveyAnswerRow
 } from './compass-survey.ts';
 import { isCompassInputType } from './compass-authoring.ts';
@@ -77,8 +78,8 @@ test('aggregateSurvey: medel, fördelning, NPS och samlat score vid k+', () => {
   assert.equal(text.count, 6);
 });
 
-test('satisfiedShare: andel ≥ 4 med k-anonymitet', () => {
-  const r = rows(5, (i) => [5, 4, 2, 4, 3][i], () => 5);
+test('satisfiedShare: andel ≥ 7 av 10 med respondenttröskel', () => {
+  const r = rows(5, (i) => [9, 7, 3, 8, 5][i], () => 5);
   assert.equal(satisfiedShare(r, 'nojdhet'), 60);
   assert.equal(satisfiedShare(rows(3, () => 5, () => 5), 'nojdhet'), null);
 });
@@ -99,4 +100,28 @@ test('mallarna är giltiga: unika nycklar, kända frågetyper, minst en skalfrå
   }
   assert.equal(findSurveyTemplate('medarbetarindex')?.anonymous, true);
   assert.equal(findSurveyTemplate('nope'), null);
+});
+
+test('validateSurveyAnswer: skala måste vara heltal 1–10, val måste finnas, fritext cappas', () => {
+  const scale = { input_type: 'scale' };
+  assert.equal(validateSurveyAnswer(scale, '7'), '7');
+  assert.equal(validateSurveyAnswer(scale, '100000'), null);
+  assert.equal(validateSurveyAnswer(scale, '0'), null);
+  assert.equal(validateSurveyAnswer(scale, '7,5'), null);
+  assert.equal(validateSurveyAnswer(scale, ''), null);
+  const choice = { input_type: 'choice', choices: [{ value: 'a' }, { value: 'b' }] };
+  assert.equal(validateSurveyAnswer(choice, 'b'), 'b');
+  assert.equal(validateSurveyAnswer(choice, 'zzz'), null);
+  const multi = { input_type: 'multi_choice', choices: [{ value: 'a' }, { value: 'b' }] };
+  assert.equal(validateSurveyAnswer(multi, ['b', 'x', 'a', 'a']), 'b, a');
+  assert.equal(validateSurveyAnswer(multi, ['x']), null);
+  assert.equal(validateSurveyAnswer({ input_type: 'long_text' }, 'x'.repeat(3000))?.length, 2000);
+  assert.equal(validateSurveyAnswer({ input_type: 'email' }, 'inte en adress'), null);
+});
+
+test('aggregateSurvey ignorerar skalvärden utanför 1–10 (extra skydd)', () => {
+  const r: SurveyAnswerRow[] = [];
+  for (let i = 0; i < 6; i++) r.push({ response_id: `r${i}`, question_key: 'nojdhet', value: i === 0 ? '100000' : '8' });
+  const agg = aggregateSurvey(r, [questions[0]]);
+  assert.equal(agg.questions[0].mean, 8);
 });

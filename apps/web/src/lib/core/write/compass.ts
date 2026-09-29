@@ -27,6 +27,7 @@ import {
   type CompassInputType,
   SURVEY_TEMPLATES,
   findSurveyTemplate,
+  isSurveyModule,
   normalizeCompassPurpose,
   normalizeSurveySubjectKind,
   type CompassPurpose
@@ -273,6 +274,29 @@ export async function createCompassModule(
       error: err instanceof Error ? err.message : 'okänt'
     });
     return fail('DB_ERROR', 'Kunde inte skapa modulen i Startupkompassen.');
+  }
+
+  // § 24.4-invarianten: PB släpper okända fält tyst. En instans utan
+  // migration 1700000156 skulle skapa en "enkät" som INTAG (och kvittot
+  // hade ljugit, § 33.4). Läs tillbaka; saknas fältet rullas modulen tillbaka.
+  if (purpose === 'survey') {
+    let saved: Record<string, unknown> | null = null;
+    try {
+      saved = await pb.collection(MODULES).getOne<Record<string, unknown>>(String(record.id));
+    } catch {
+      saved = null;
+    }
+    if (saved && !('purpose' in saved)) {
+      try {
+        await writeWithFallback(pb, (client) => client.collection(MODULES).delete(String(record.id)));
+      } catch {
+        /* best-effort rollback */
+      }
+      return fail(
+        'DB_ERROR',
+        'Enkäten kunde inte skapas: fältet purpose saknas i databasen (PocketBase-migration 1700000156 är inte applicerad).'
+      );
+    }
   }
 
   await logAgentAction(pb, {
@@ -626,6 +650,9 @@ export async function updateCompassModuleField(
     case 'flow_type': {
       const r = validateCompassFlowType(params.value);
       if (!r.ok) return fail('INVALID_VALUE', r.error);
+      if (r.value === 'chat' && isSurveyModule(existing as { purpose?: string })) {
+        return fail('INVALID_VALUE', 'En enkät är ett formulär eller quiz — inte en AI-chatt (§ 43).');
+      }
       value = r.value;
       break;
     }

@@ -123,11 +123,12 @@ export async function recordGoalStatusAction(input: {
   const res = await recordGoalStatus(await getServerPb(), g.actor, input);
   if (!res.ok) return { error: res.error };
   revalidate();
-  const m = res.value.metric;
-  const notice =
-    m && m.value === null
-      ? `Status sparad. Värdet kunde inte beräknas${m.note ? `: ${m.note}` : '.'}`
-      : m && !m.complete
+  const r = res.value.reading;
+  const notice = res.value.skipReason
+    ? `Status sparad. ${res.value.skipReason}`
+    : r && r.value === null
+      ? `Status sparad. Värdet kunde inte beräknas${r.note ? `: ${r.note}` : '.'}`
+      : r && !r.complete
         ? 'Status sparad. Underlaget kapades — värdet är en nedre gräns.'
         : 'Status sparad.';
   return { ok: true, id: res.value.entry.id, notice };
