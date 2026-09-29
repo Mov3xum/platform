@@ -3854,7 +3854,8 @@ externt (t.ex. annan inkubator). Funktionen "sätt upp ett team utifrån en
 beskrivning av ett uppdrag där relevanta kompetenser kopplas på" byggs ovanpå
 den befintliga **uppdrags-/missionsmodellen** (`/uppdrag`, §-spine i
 `lib/actions/missions.ts` + `missions-server.ts`) snarare än som en parallell
-yta. Tre delar: (1) kompetensmodell på personer, (2) AI-matchning
+yta. Modulen heter i railen **"Tvärfunktionella team"** (id `uppdrag`, route
+`/uppdrag` oförändrad; hette tidigare "Projekt & uppdrag"). Tre delar: (1) kompetensmodell på personer, (2) AI-matchning
 beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 
 **Kritiska filer:**
@@ -3865,7 +3866,7 @@ beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 | `backend/pocketbase-schema/migrations/1700000134_extend_users_competences.js` | `users.competences` (select), `users.title`, `users.bio` |
 | `apps/web/src/lib/actions/profile.ts` + `app/min-profil/**` | Självservice-profil (titel/bio/kompetenser) |
 | `apps/web/src/lib/ai/team-match.ts` | `matchTeam` — isolerad Mistral-körning: beskrivning → kompetenser + kandidater (samma mönster som `file-categorize.ts`) |
-| `apps/web/src/lib/actions/team.ts` | `suggestTeamAction` — laddar kandidater (users+contacts), kör matcharen, loggar usage |
+| `apps/web/src/lib/actions/team.ts` | `suggestTeamAction` — laddar kandidater (BARA staff-users med kompetenstaggar), kör matcharen, loggar usage |
 | `apps/web/src/app/uppdrag/new/NewMissionForm.tsx` | AI-teamförslag inbäddat i nytt-uppdrag-formuläret |
 | `backend/pocketbase-schema/migrations/1700000135_extend_tasks_mission_link.js` | `tasks.link_kind += 'mission'` + `tasks.mission` |
 | `apps/web/src/lib/assignments/collaboration.ts` | `createMissionMemberTasks` (personlig uppgift per teammedlem) |
@@ -3877,6 +3878,9 @@ beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 | `apps/web/src/app/api/missions/[id]/documents/route.ts` | Upload-route för dokumentation (staff-only) |
 | `apps/web/src/app/uppdrag/[id]/MissionDocuments.tsx` | Dokumentation-panel (ladda upp/lista/radera) |
 | `backend/pocketbase-schema/migrations/1700000136_seed_competence_gap_agent.js` | Portfölj-agent `ai_competence_gap` (kompetensbehov/gap, Fas 3) |
+| `backend/pocketbase-schema/migrations/1700000155_extend_activity_kinds_mission.js` | `activities.kind` += `mission` (slutfört team → rad på bolagskortet) |
+| `apps/web/src/lib/missions/completion.ts` | `logMissionCompletion` — aktivitetsrad per kopplat bolag när uppdraget når `done` |
+| `apps/web/src/app/startups/[id]/StartupMissionsSection.tsx` | Bolagskortets sektion "Tvärfunktionella team" (sammanställning av slutförda + pågående) |
 
 ### 29.2 Kompetensmodell (Fas 0)
 
@@ -3884,9 +3888,10 @@ beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 `file-topics.ts`). Migration 1700000130 lägger fälten på `users`:
 `competences` (multi-select, MÅSTE spegla `CompetenceId`), `title`, `bio`.
 Användaren sätter dem själv på `/min-profil` (updateRule `@request.auth.id = id`
-oförändrad). Externa resurser återanvänder `contacts.skills` (fritext) —
-`inferCompetencesFromText` mappar dem heuristiskt till taxonomin (bara för att
-berika kandidatlistan, aldrig en säkerhetsgräns).
+oförändrad). **Kompetenstaggarna är matchningens enda underlag** (2026-09):
+externa CRM-kontakter (`contacts.skills`) är INTE längre kandidater —
+`inferCompetencesFromText` finns kvar i `competences.ts` som ren helper men
+används inte av matcharen.
 
 ### 29.3 AI-teammatchning (Fas 1)
 
@@ -3895,12 +3900,20 @@ körning (temp 0) — egen snäv system-prompt (INTE agent-/chatt-ytan): beskriv
 + ev. bolagskontext + kandidatlista (id/namn/kompetens, **ingen PII**) →
 JSON: föreslagna kompetenser (validerade mot taxonomin), kandidater (validerade
 mot listan, roll/motivering/confidence) och ev. `external_note` (kompetensgap).
-`suggestTeamAction` (staff-only) laddar interna users (staff med competences) +
-externa contacts (skills), kör matcharen och loggar i `ai_usage_events` (surface
-`suggestions`). `NewMissionForm` visar förslaget; staff kopplar på kandidater med
-ett klick — **inget tilldelas automatiskt** (människa-i-loopen, EU AI Act
-art. 14). Externa kontakter blir inte uppdragsdeltagare (de hör till CRM:t) utan
-visas som "extern kompetens att koppla på".
+`suggestTeamAction` (staff-only) laddar kandidater = **riktiga användare i
+systemet** i tenanten med staff-roll (admin/incubator_lead/coach/mentor) som
+**själva angett minst en kompetenstagg** under Min profil — bolagsmedlemmar,
+observatörer, partners och externa CRM-kontakter är aldrig kandidater (teamen är
+interna Movexum-team; incident 2026-09: alla användare + CRM-kontakter dök upp i
+förslaget). Finns ingen taggad kollega görs inget Mistral-anrop — actionen
+svarar med en tydlig uppmaning att fylla i Min profil. Därefter körs matcharen
+och usage loggas i `ai_usage_events` (surface `suggestions`). `NewMissionForm`
+visar förslaget (+ hur många kollegor som kan matchas); staff kopplar på
+kandidater med ett klick — **inget tilldelas automatiskt** (människa-i-loopen,
+EU AI Act art. 14). `external_note` (kompetensgap) kvarstår som fri text för
+kompetens som saknas internt. **Deltagar-pickern** (nytt team + panelen på
+teamkortet) listar av samma skäl bara Movexum-personal; @mention i kommentarer
+ser fortsatt hela tenanten.
 
 ### 29.4 Team-arbetsyta (Fas 2)
 
@@ -3911,6 +3924,32 @@ mönster som assignment-collaboration (§ 18.4). Uppdragskortet
 (`/uppdrag/[id]`) visar `TeamCompetencePanel`: teamets **samlade
 kompetenstäckning** + varje medlems kompetenser, så staff ser om teamet är
 tvärfunktionellt nog.
+
+**Sammanställning på bolagskortet (2026-09).** När ett team/uppdrag når
+status `done` — via statusväljaren (`updateMissionStatus`) ELLER genom att
+sista steget bockas av (`advanceStage`) — sammanställs det på varje kopplat
+bolagskort (`/startups/[id]`, sektionen **"Tvärfunktionella team"**,
+ankare `#team-uppdrag`, egen post i bolagskortets hopp-nav):
+- `logMissionCompletion` (`lib/missions/completion.ts`) skriver en
+  `activities`-rad per bolag (`kind='mission'`, migration **1700000155**,
+  speglad i `setup-via-api.mjs`; `type='task'`, `status='done'`, titel
+  "Tvärfunktionellt team slutfört: <titel>") så slutförandet syns i
+  bolagskortets Aktiviteter, i Bolagsnytt/`/aktivitet` (eget filter
+  "Tvärfunktionella team", ikon `flow`) och i chattens feed. Fyrar bara på
+  övergången till `done` (`isMissionCompletionTransition`), är fail-soft
+  (en instans utan migrationen blockerar aldrig statusändringen) och
+  superuser-faller bara vid PB v0.23.4:s tysta regel-nekande (§ 21.3).
+- `StartupMissionsSection` läser uppdragen **live** (ingen kopia lagras)
+  via `startup = id || startups ~ id` + exakt JS-verifiering av kopplingen,
+  och visar slutförda team med typ, slutförandedatum (sista klara stegets
+  tid, annars `updated`), team (ansvarig + deltagare — visningsnamn, aldrig
+  e-post), stegen, beskrivning (HTML strippad, cappad) och
+  `mission_documents` som länkar; därunder pågående team kompakt. Reads går
+  via användarens token → § 21-RLS: bolagsmedlem ser bara sitt bolags
+  uppdrag och får tom dokumentlista (staff/observer-only). Renderas inte alls
+  utan kopplade uppdrag.
+- GDPR § 5: bara verksamhetsdata (titel, typ, datum, interna visningsnamn);
+  inga nya fält i `lib/ai/context.ts`; riskklass n/a (ingen AI-inferens).
 
 **Uppdragskanban (tavla inne på uppdraget).** Samma 6-kolumners `tasks`-tavla
 som bolagskanbanen (§ 15.7) finns nu direkt på uppdragskortet. Den

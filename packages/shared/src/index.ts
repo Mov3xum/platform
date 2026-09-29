@@ -1473,8 +1473,9 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'uppdrag',
-    title: 'Projekt & uppdrag',
-    description: 'Skapa och samarbeta på projekt och uppdrag — bjud in roller, kommentera och följ flöden.',
+    title: 'Tvärfunktionella team',
+    description:
+      'Sätt upp tvärfunktionella team runt ett uppdrag eller projekt. AI:n föreslår Movexum-kollegor utifrån de kompetenstaggar de angett under Min profil; bjud in roller, kommentera och följ flöden.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer'],
     route: '/uppdrag'
   },
