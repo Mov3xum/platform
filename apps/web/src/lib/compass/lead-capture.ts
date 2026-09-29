@@ -1,5 +1,6 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
+import { isSurveyModule } from '@platform/shared';
 import { summarizeSubmission, type SubmissionEntry } from './chat';
 import { updateLead } from './store';
 import type { CompassModule, CompassQuestion, ContactPreference, Lead } from './types';
@@ -18,7 +19,9 @@ import type { CompassModule, CompassQuestion, ContactPreference, Lead } from './
  * uttryckligt false stänger av lead-skapandet, så en oapplicerad migration
  * aldrig tyst tappar inflöden.
  */
-export function moduleWantsLead(module: Pick<CompassModule, 'create_lead'>): boolean {
+export function moduleWantsLead(module: Pick<CompassModule, 'create_lead' | 'purpose'>): boolean {
+  // En ENKÄT (§ 43) skapar aldrig lead — svaren lagras per fråga i stället.
+  if (isSurveyModule(module)) return false;
   return module.create_lead !== false;
 }
 

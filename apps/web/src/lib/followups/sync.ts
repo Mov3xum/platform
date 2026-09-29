@@ -1,6 +1,12 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
-import { diffFollowups, type ExistingFollowupTask, type FollowupPlan, type PlannedFollowupItem } from '@platform/shared';
+import {
+  assertSafeFollowupLinkFields,
+  diffFollowups,
+  type ExistingFollowupTask,
+  type FollowupPlan,
+  type PlannedFollowupItem
+} from '@platform/shared';
 import { logAgentAction, type Actor } from '@/lib/core/write';
 import { writeWithFallback } from '@/lib/core/write/helpers';
 
@@ -74,7 +80,13 @@ export async function syncFollowupTasks<X extends object>(
   const errors: string[] = [];
 
   for (const w of diff.toCreate) {
+    // Länkfälten FÖRST och synkens fasta fält efter — en adapter kan aldrig
+    // skriva över tenant/startup/owner/rule_key (§ 40.2); reserverade nycklar
+    // avvisas dessutom uttryckligen.
+    const links = spec.linkFields(w);
+    assertSafeFollowupLinkFields(links);
     const payload: Record<string, unknown> = {
+      ...links,
       tenant: actor.tenant,
       kind: w.kind,
       description: w.title,
@@ -82,8 +94,7 @@ export async function syncFollowupTasks<X extends object>(
       owner: spec.owner,
       link_kind: spec.linkKind,
       rule_key: w.key,
-      due_at: w.dueDate,
-      ...spec.linkFields(w)
+      due_at: w.dueDate
     };
     try {
       const created = await writeWithFallback(pb, (client) =>

@@ -98,6 +98,7 @@ export async function createGoalIndicatorAction(input: {
   label: string;
   source: string;
   metric_key?: string;
+  survey_module?: string;
   target?: string;
   unit?: string;
   direction?: string;

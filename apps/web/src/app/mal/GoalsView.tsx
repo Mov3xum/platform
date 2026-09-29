@@ -17,6 +17,7 @@ import {
   METRIC_KEYS,
   QUARTERS,
   formatMetricValue,
+  isAggregateOnlyIndicator,
   progressTowardsTarget,
   rollupGoalStatuses,
   suggestStatusFromValue,
@@ -37,7 +38,9 @@ import {
   setGoalPeriodStatusAction,
   type GoalActionState
 } from '@/lib/actions/goals';
-import type { GoalWorkspace } from '@/lib/goals/data';
+import type { GoalWorkspace, SurveyIndicatorValue } from '@/lib/goals/data';
+
+type SurveyModuleOption = GoalWorkspace['surveyModules'][number];
 
 /**
  * Målträdet (CLAUDE.md § 42): fokusområde → mål → indikator med Q1–Q4 och
@@ -84,7 +87,7 @@ export function GoalsView({
   canReport: boolean;
   canManage: boolean;
 }) {
-  const { periods, period, tree, metrics, schemaMissing } = workspace;
+  const { periods, period, tree, metrics, surveys, surveyModules, schemaMissing } = workspace;
   const rollup = rollupGoalStatuses(tree, quarter);
   const yearHref = (y: number, q: Quarter = quarter) => `/mal?ar=${y}&q=${q}`;
 
@@ -170,6 +173,8 @@ export function GoalsView({
                   node={node}
                   quarter={quarter}
                   metrics={metrics}
+                  surveys={surveys}
+                  surveyModules={surveyModules}
                   focused={focusGoal === node.goal.id}
                   canReport={canReport && period.status !== 'closed'}
                   canManage={canManage && period.status !== 'closed'}
@@ -190,6 +195,8 @@ function GoalCard({
   node,
   quarter,
   metrics,
+  surveys,
+  surveyModules,
   focused,
   canReport,
   canManage
@@ -197,6 +204,8 @@ function GoalCard({
   node: GoalNode;
   quarter: Quarter;
   metrics: Partial<Record<MetricKey, MetricValue>>;
+  surveys: Record<string, SurveyIndicatorValue>;
+  surveyModules: SurveyModuleOption[];
   focused: boolean;
   canReport: boolean;
   canManage: boolean;
@@ -232,13 +241,13 @@ function GoalCard({
             </thead>
             <tbody>
               {node.indicators.map((ind) => (
-                <IndicatorRow key={ind.indicator.id} node={ind} quarter={quarter} metrics={metrics} canReport={canReport} />
+                <IndicatorRow key={ind.indicator.id} node={ind} quarter={quarter} metrics={metrics} survey={surveys[ind.indicator.id]} canReport={canReport} />
               ))}
             </tbody>
           </table>
         </div>
       )}
-      {canManage && <NewIndicatorForm goalId={node.goal.id} />}
+      {canManage && <NewIndicatorForm goalId={node.goal.id} surveyModules={surveyModules} />}
     </div>
   );
 }
@@ -247,17 +256,35 @@ function IndicatorRow({
   node,
   quarter,
   metrics,
+  survey,
   canReport
 }: {
   node: GoalIndicatorNode;
   quarter: Quarter;
   metrics: Partial<Record<MetricKey, MetricValue>>;
+  survey?: SurveyIndicatorValue;
   canReport: boolean;
 }) {
   const { indicator } = node;
   const live = indicator.source === 'computed' && indicator.metric_key ? metrics[indicator.metric_key as MetricKey] : undefined;
+  const aggregateOnly = isAggregateOnlyIndicator(indicator);
   const latestManual = node.latest?.value ?? null;
-  const current = indicator.source === 'computed' ? (live?.value ?? null) : latestManual;
+  const current =
+    indicator.source === 'computed'
+      ? (live?.value ?? null)
+      : indicator.source === 'survey'
+        ? (survey?.value ?? null)
+        : latestManual;
+  const liveNote =
+    indicator.source === 'survey'
+      ? survey
+        ? survey.visible
+          ? `${survey.respondents} svar`
+          : `Visas först vid minst ${survey.minGroup} svar (${survey.respondents} hittills).`
+        : 'Enkätmodulen saknas.'
+      : aggregateOnly && !live
+        ? 'Känsligt aggregat — visas bara för admin/incubator_lead/coach.'
+        : live?.note;
   const unit = { unit: indicator.unit === 'bool' ? 'count' : indicator.unit } as const;
   const suggestion = suggestStatusFromValue(indicator, current);
   const [open, setOpen] = useState(false);
@@ -270,7 +297,9 @@ function IndicatorRow({
           <div className="text-[11px] text-foreground-subtle">
             {indicator.source === 'computed' && indicator.metric_key
               ? `Beräknas: ${METRIC_DEFINITIONS[indicator.metric_key as MetricKey]?.label ?? indicator.metric_key}`
-              : 'Manuell bedömning'}
+              : indicator.source === 'survey'
+                ? 'Enkät i Startupkompassen (medel 1–10)'
+                : 'Manuell bedömning'}
           </div>
         </td>
         <td className="py-2 pr-3 tabular-nums text-foreground">
@@ -287,7 +316,7 @@ function IndicatorRow({
               </>
             )}
           </div>
-          {live?.note && <div className="text-[11px] text-foreground-subtle">{live.note}</div>}
+          {liveNote && <div className="text-[11px] text-foreground-subtle">{liveNote}</div>}
           {suggestion && indicator.unit !== 'bool' && (
             <div className="text-[11px] text-foreground-subtle">Förslag: {GOAL_STATUS_LABELS[suggestion]}</div>
           )}
@@ -349,6 +378,7 @@ function StatusForm({
   const [state, setState] = useState<GoalActionState | null>(null);
   const [pending, start] = useTransition();
   const manual = node.indicator.source === 'manual';
+  const sourceLabel = node.indicator.source === 'survey' ? 'Värde (ur enkäten)' : 'Värde (ur data)';
 
   return (
     <form
@@ -382,11 +412,11 @@ function StatusForm({
         </select>
       </div>
       <div>
-        <label className={labelClass}>{manual ? 'Värde' : 'Värde (ur data)'}</label>
+        <label className={labelClass}>{manual ? 'Värde' : sourceLabel}</label>
         {manual ? (
           <input className={inputClass} inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} placeholder="t.ex. 4,2" />
         ) : (
-          <p className="py-2 text-xs text-foreground-subtle">Hämtas ur metrikregistret när du sparar.</p>
+          <p className="py-2 text-xs text-foreground-subtle">Hämtas automatiskt när du sparar.</p>
         )}
       </div>
       <div>
@@ -548,11 +578,12 @@ function NewGoalForm({ periodId, area }: { periodId: string; area: (typeof GOAL_
   );
 }
 
-function NewIndicatorForm({ goalId }: { goalId: string }) {
+function NewIndicatorForm({ goalId, surveyModules }: { goalId: string; surveyModules: SurveyModuleOption[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState('');
-  const [source, setSource] = useState<'computed' | 'manual'>('computed');
+  const [source, setSource] = useState<'computed' | 'manual' | 'survey'>('computed');
+  const [surveyModule, setSurveyModule] = useState<string>(surveyModules[0]?.id ?? '');
   const [metricKey, setMetricKey] = useState<string>(METRIC_KEYS.find((k) => METRIC_DEFINITIONS[k].scope === 'tenant') ?? 'active_startups');
   const [target, setTarget] = useState('');
   const [unit, setUnit] = useState<string>('bool');
@@ -579,6 +610,7 @@ function NewIndicatorForm({ goalId }: { goalId: string }) {
             label,
             source,
             metric_key: source === 'computed' ? metricKey : undefined,
+            survey_module: source === 'survey' ? surveyModule : undefined,
             target,
             unit: source === 'manual' ? unit : undefined
           });
@@ -598,8 +630,11 @@ function NewIndicatorForm({ goalId }: { goalId: string }) {
       </div>
       <div>
         <label className={labelClass}>Mätkälla</label>
-        <select className={inputClass} value={source} onChange={(e) => setSource(e.target.value as 'computed' | 'manual')}>
+        <select className={inputClass} value={source} onChange={(e) => setSource(e.target.value as 'computed' | 'manual' | 'survey')}>
           <option value="computed">Beräknas ur data</option>
+          <option value="survey" disabled={surveyModules.length === 0}>
+            Enkät i Startupkompassen{surveyModules.length === 0 ? ' (ingen enkätmodul ännu)' : ''}
+          </option>
           <option value="manual">Manuell bedömning</option>
         </select>
       </div>
@@ -615,6 +650,18 @@ function NewIndicatorForm({ goalId }: { goalId: string }) {
               ))}
             </select>
             {def && <p className="mt-1 text-[11px] text-foreground-subtle">{def.description}</p>}
+          </>
+        ) : source === 'survey' ? (
+          <>
+            <label className={labelClass}>Enkätmodul</label>
+            <select className={inputClass} value={surveyModule} onChange={(e) => setSurveyModule(e.target.value)}>
+              {surveyModules.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-foreground-subtle">Medel av skalfrågorna (1–10), k-anonymt. Skapa enkäter i Startupkompassen.</p>
           </>
         ) : (
           <>

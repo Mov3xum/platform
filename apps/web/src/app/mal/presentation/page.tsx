@@ -27,6 +27,6 @@ export default async function MalPresentationPage({
   const quarter = quarterRaw >= 1 && quarterRaw <= 4 ? (quarterRaw as 1 | 2 | 3 | 4) : currentQuarter();
 
   const pb = await getServerPb();
-  const ws = await loadGoalWorkspace(pb, user.tenant, user.id, year);
+  const ws = await loadGoalWorkspace(pb, user.tenant, user.id, user.roles, year);
   return <GoalsPresentation workspace={ws} initialQuarter={quarter} />;
 }

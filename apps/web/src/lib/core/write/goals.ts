@@ -2,7 +2,9 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import {
+  isAggregateOnlyIndicator,
   isGoalPeriodStatus,
+  isSurveyModule,
   quarterOfDate,
   stockholmDateKey,
   validateGoalIndicatorInput,
@@ -18,6 +20,7 @@ import {
   type MetricValue
 } from '@platform/shared';
 import { computeMetric } from '@/lib/metrics/registry';
+import { loadSurveyAggregate } from '@/lib/compass/survey';
 import { canCreateRecord, canWriteField } from './writable-fields';
 import { logAgentAction } from './audit';
 import { getRecordInTenant, writeWithFallback } from './helpers';
@@ -30,13 +33,23 @@ import { fail, ok } from './types';
  * (`writable-fields`), validering (`@platform/shared/goals.ts`),
  * tenant-stämpel och `agent_actions`-audit aldrig divergerar.
  *
- * Invariant "en indikator, en källa": för `source = computed` läses värdet
- * ALLTID ur metrikregistret vid statusrapportering — ett manuellt värde
- * avvisas. För `source = manual` skrivs det bedömda värdet.
+ * Invarianter:
+ *  - "En indikator, en källa": `computed` läser värdet ur metrikregistret
+ *    vid statusrapportering (manuellt värde avvisas), `survey` ur enkätens
+ *    k-anonyma aggregat (§ 43), `manual` skriver den mänskliga bedömningen.
+ *  - **PocketBase har inget null för tal** (JSON-null blir 0). Därför bär
+ *    `goal_indicators.has_target` och `goal_status_entries.has_value`
+ *    (migration 1700000156) om talet är känt — läsvägen tolkar `0` utan
+ *    flagga som null. Ett "kunde inte räknas" sparas alltså aldrig som 0.
+ *  - Art. 9-aggregat (`aggregate_only`, § 41.2) persisteras ALDRIG i
+ *    statusen och når aldrig agenten — de räknas live i UI:t för behöriga.
+ *  - En statusuppdatering rör bara de fält som faktiskt angetts: ett
+ *    manuellt värde eller en kommentar raderas inte av ett anrop som bara
+ *    byter status (SOC 2 processing integrity).
  *
  * PB-target är kollektionens NAMN (§ 30.4 p. 1). Ingen PII: mål, tal,
- * teamnamn; kommentarer personnummer-saneras (§ 15.6) och auditeras bara
- * som längd (§ 33.2).
+ * teamnamn; fritext personnummer-saneras (§ 15.6) och auditeras bara som
+ * längd (§ 33.2).
  */
 
 export const GOAL_PERIODS = 'goal_periods';
@@ -61,6 +74,11 @@ function pbError(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? `${fallback} (${err.message})` : fallback;
 }
 
+/** Tal + känt-flagga (PB kan inte lagra null för tal). */
+function numberWithFlag(value: number | null, flag: string): Record<string, unknown> {
+  return value === null ? { [flag]: false } : { [flag]: true };
+}
+
 // ── Verksamhetsår ────────────────────────────────────────────────────────────
 
 export async function createGoalPeriod(
@@ -72,7 +90,7 @@ export async function createGoalPeriod(
   if (!gate.ok) return fail('FORBIDDEN', gate.reason ?? 'Saknar behörighet.');
   const year = Number(input.year);
   if (!Number.isInteger(year) || year < 2000 || year > 2100) return fail('INVALID_VALUE', 'Året måste vara 2000–2100.');
-  const title = String(input.title ?? '').trim().slice(0, 120) || `Verksamhetsplan ${year}`;
+  const title = sanitizePersonnummer(String(input.title ?? '').trim().slice(0, 120)) || `Verksamhetsplan ${year}`;
   try {
     const row = await writeWithFallback(pb, (c) =>
       c.collection(GOAL_PERIODS).create<GoalPeriod>({
@@ -127,6 +145,19 @@ export async function setGoalPeriodStatus(
   }
 }
 
+async function loadOpenPeriod(
+  pb: PocketBase,
+  actor: Actor,
+  periodId: string
+): Promise<GoalPeriod | { error: WriteResult<never> }> {
+  const period = await getRecordInTenant<GoalPeriod>(pb, actor, GOAL_PERIODS, periodId, 'id,tenant,year,status');
+  if (!period) return { error: fail('NOT_FOUND', 'Verksamhetsåret hittades inte.') };
+  if (period.status === 'closed') {
+    return { error: fail('STATE_TRANSITION', 'Verksamhetsåret är avslutat — det kan inte ändras.') };
+  }
+  return period;
+}
+
 // ── Mål ──────────────────────────────────────────────────────────────────────
 
 export async function createGoal(
@@ -138,9 +169,8 @@ export async function createGoal(
   if (!gate.ok) return fail('FORBIDDEN', gate.reason ?? 'Saknar behörighet.');
   const v = validateGoalInput(input);
   if (!v.ok) return fail('INVALID_VALUE', v.error);
-  const period = await getRecordInTenant<GoalPeriod>(pb, actor, GOAL_PERIODS, input.period, 'id,tenant,year,status');
-  if (!period) return fail('NOT_FOUND', 'Verksamhetsåret hittades inte.');
-  if (period.status === 'closed') return fail('STATE_TRANSITION', 'Verksamhetsåret är avslutat — mål kan inte läggas till.');
+  const period = await loadOpenPeriod(pb, actor, input.period);
+  if ('error' in period) return period.error;
 
   let sortOrder = 0;
   try {
@@ -199,6 +229,8 @@ export async function updateGoalField(
   if (!gate.ok) return fail('FIELD_NOT_WRITABLE', gate.reason ?? 'Fältet är inte skrivbart.');
   const goal = await getRecordInTenant<Goal>(pb, actor, GOALS, goalId, 'id,tenant,period,focus_area,title,description,owner_team');
   if (!goal) return fail('NOT_FOUND', 'Målet hittades inte.');
+  const period = await loadOpenPeriod(pb, actor, goal.period);
+  if ('error' in period) return period.error;
   const merged = { ...goal, [field]: value };
   const v = validateGoalInput(merged);
   if (!v.ok) return fail('INVALID_VALUE', v.error);
@@ -232,7 +264,16 @@ export async function updateGoalField(
 export async function createGoalIndicator(
   pb: PocketBase,
   actor: Actor,
-  input: { goal: string; label: unknown; source: unknown; metric_key?: unknown; target?: unknown; unit?: unknown; direction?: unknown }
+  input: {
+    goal: string;
+    label: unknown;
+    source: unknown;
+    metric_key?: unknown;
+    survey_module?: unknown;
+    target?: unknown;
+    unit?: unknown;
+    direction?: unknown;
+  }
 ): Promise<WriteResult<GoalIndicator>> {
   const gate = canCreateRecord(actor, GOAL_INDICATORS);
   if (!gate.ok) return fail('FORBIDDEN', gate.reason ?? 'Saknar behörighet.');
@@ -243,8 +284,29 @@ export async function createGoalIndicator(
   }
   const v = validateGoalIndicatorInput(input);
   if (!v.ok) return fail('INVALID_VALUE', v.error);
+
+  // Art. 9-aggregat (§ 41.2): aldrig via agenten — inte ens som indikator.
+  if (actor.kind === 'agent' && isAggregateOnlyIndicator(v.value)) {
+    return fail('FIELD_NOT_WRITABLE', 'Den metriken är ett känsligt aggregat och väljs av en människa i /mal.');
+  }
+
   const goal = await getRecordInTenant<Goal>(pb, actor, GOALS, input.goal, 'id,tenant,period,title');
   if (!goal) return fail('NOT_FOUND', 'Målet hittades inte.');
+  const period = await loadOpenPeriod(pb, actor, goal.period);
+  if ('error' in period) return period.error;
+
+  if (v.value.source === 'survey') {
+    const mod = await getRecordInTenant<{ id: string; tenant: string; purpose?: string; name?: string }>(
+      pb,
+      actor,
+      'compass_modules',
+      v.value.survey_module as string,
+      'id,tenant,purpose,name'
+    );
+    if (!mod) return fail('NOT_FOUND', 'Enkätmodulen hittades inte i tenanten.');
+    if (!isSurveyModule(mod)) return fail('INVALID_VALUE', `"${mod.name ?? 'Modulen'}" är ingen enkätmodul (syfte = enkät).`);
+  }
+
   try {
     const row = await writeWithFallback(pb, (c) =>
       c.collection(GOAL_INDICATORS).create<GoalIndicator>({
@@ -253,7 +315,9 @@ export async function createGoalIndicator(
         label: sanitizePersonnummer(v.value.label),
         source: v.value.source,
         metric_key: v.value.metric_key ?? '',
-        target: v.value.target,
+        survey_module: v.value.survey_module ?? '',
+        target: v.value.target ?? 0,
+        ...numberWithFlag(v.value.target, 'has_target'),
         unit: v.value.unit,
         direction: v.value.direction,
         sort_order: 0,
@@ -271,10 +335,11 @@ export async function createGoalIndicator(
         goal: goal.id,
         source: v.value.source,
         metric_key: v.value.metric_key,
+        survey_module: v.value.survey_module,
         target: v.value.target
       }
     });
-    return ok(row);
+    return ok({ ...row, target: v.value.target });
   } catch (err) {
     return fail('DB_ERROR', pbError(err, 'Kunde inte skapa indikatorn.'));
   }
@@ -286,15 +351,18 @@ export interface RecordGoalStatusInput {
   indicator: string;
   quarter: unknown;
   status: unknown;
-  /** Bara för manuella indikatorer; beräknade får värdet ur registret. */
+  /** Bara för manuella indikatorer; beräknade/enkät får värdet ur registret/aggregatet. */
   value?: unknown;
+  /** `undefined`/`null` = rör inte befintlig kommentar; `''` = rensa. */
   comment?: unknown;
 }
 
 export interface RecordGoalStatusResult {
   entry: GoalStatusEntry;
-  /** Registrets värde när indikatorn är beräknad (null om det inte kunde räknas). */
+  /** Registrets värde när indikatorn är beräknad (utelämnas för art. 9-aggregat). */
   metric?: MetricValue;
+  /** true när indikatorn är ett känsligt aggregat — värdet visas bara live för behöriga. */
+  aggregateOnly: boolean;
   created: boolean;
 }
 
@@ -314,43 +382,64 @@ export async function recordGoalStatus(
     actor,
     GOAL_INDICATORS,
     input.indicator,
-    'id,tenant,goal,label,source,metric_key,target,unit,direction'
+    'id,tenant,goal,label,source,metric_key,survey_module,target,unit,direction'
   );
   if (!indicator) return fail('NOT_FOUND', 'Indikatorn hittades inte.');
   const goal = await getRecordInTenant<Goal>(pb, actor, GOALS, indicator.goal, 'id,tenant,period,title');
   if (!goal) return fail('NOT_FOUND', 'Målet hittades inte.');
-  const period = await getRecordInTenant<GoalPeriod>(pb, actor, GOAL_PERIODS, goal.period, 'id,tenant,year,status');
-  if (!period) return fail('NOT_FOUND', 'Verksamhetsåret hittades inte.');
-  if (period.status === 'closed') return fail('STATE_TRANSITION', 'Verksamhetsåret är avslutat.');
+  const period = await loadOpenPeriod(pb, actor, goal.period);
+  if ('error' in period) return period.error;
 
-  let value: number | null = v.value.value;
+  const aggregateOnly = isAggregateOnlyIndicator(indicator);
+  let value: number | null = null;
+  let valueProvided = false;
   let metric: MetricValue | undefined;
+
   if (indicator.source === 'computed') {
     if (v.value.value !== null) {
       return fail('INVALID_VALUE', `"${indicator.label}" beräknas ur data — värdet kan inte anges manuellt.`);
     }
-    metric = await computeMetric(indicator.metric_key as MetricKey, {
-      pb,
-      tenant: actor.tenant,
-      period: yearPeriod(period.year),
-      today: stockholmDateKey(new Date())
-    });
-    value = metric.value;
+    if (!aggregateOnly) {
+      metric = await computeMetric(indicator.metric_key as MetricKey, {
+        pb,
+        tenant: actor.tenant,
+        period: yearPeriod(period.year),
+        today: stockholmDateKey(new Date())
+      });
+      value = metric.value;
+      valueProvided = true;
+    }
+    // Art. 9-aggregat: ingen snapshot — värdet räknas live i UI:t för behöriga.
+  } else if (indicator.source === 'survey') {
+    if (v.value.value !== null) {
+      return fail('INVALID_VALUE', `"${indicator.label}" hämtas ur enkäten — värdet kan inte anges manuellt.`);
+    }
+    if (indicator.survey_module) {
+      const mod = await getRecordInTenant<{ id: string; tenant: string; slug: string }>(
+        pb,
+        actor,
+        'compass_modules',
+        indicator.survey_module,
+        'id,tenant,slug'
+      );
+      if (mod) {
+        const agg = await loadSurveyAggregate(pb, actor.tenant, mod, { period: yearPeriod(period.year) });
+        value = agg.score;
+        valueProvided = true;
+        metric = {
+          key: 'active_startups', // placeholder-nyckel: MetricValue kräver en MetricKey; enkäten är ingen registermetrik
+          value: agg.score,
+          complete: true,
+          note: agg.visible ? undefined : `Visas först vid minst ${agg.minGroup} svar (${agg.respondents} hittills).`
+        };
+      }
+    }
   } else if (v.value.value !== null) {
     const w = canWriteField(actor, GOAL_STATUS_ENTRIES, 'value');
     if (!w.ok) return fail('FIELD_NOT_WRITABLE', w.reason ?? 'Värdet sätts av en människa.');
+    value = v.value.value;
+    valueProvided = true;
   }
-
-  const comment = v.value.comment ? sanitizePersonnummer(v.value.comment) : '';
-  const payload = {
-    tenant: actor.tenant,
-    indicator: indicator.id,
-    quarter: v.value.quarter,
-    status: v.value.status,
-    value,
-    comment,
-    recorded_by: actor.id
-  };
 
   // Idempotent upsert på (tenant, indicator, quarter).
   let existing: GoalStatusEntry | null = null;
@@ -367,6 +456,27 @@ export async function recordGoalStatus(
     existing = null;
   }
 
+  // Bara angivna fält skrivs: status alltid; värde när det finns/räknats;
+  // kommentar när anroparen skickat en (tom sträng rensar).
+  const commentProvided = input.comment !== undefined && input.comment !== null;
+  const comment = commentProvided ? (v.value.comment ? sanitizePersonnummer(v.value.comment) : '') : undefined;
+  const payload: Record<string, unknown> = {
+    tenant: actor.tenant,
+    indicator: indicator.id,
+    quarter: v.value.quarter,
+    status: v.value.status,
+    recorded_by: actor.id
+  };
+  if (valueProvided) {
+    payload.value = value ?? 0;
+    payload.has_value = value !== null;
+  } else if (!existing) {
+    payload.value = 0;
+    payload.has_value = false;
+  }
+  if (comment !== undefined) payload.comment = comment;
+  else if (!existing) payload.comment = '';
+
   try {
     const entry = existing
       ? await writeWithFallback(pb, (c) => c.collection(GOAL_STATUS_ENTRIES).update<GoalStatusEntry>(existing!.id, payload))
@@ -381,15 +491,17 @@ export async function recordGoalStatus(
       after_value: {
         status: v.value.status,
         quarter: v.value.quarter,
-        value,
+        // Art. 9-aggregat loggas aldrig som tal (agent_actions är läsbar för chatten).
+        value: aggregateOnly || !valueProvided ? undefined : value,
         indicator_label: indicator.label,
         goal_title: goal.title,
         goal: goal.id,
         year: period.year,
-        comment: comment ? { length: comment.length } : null
+        comment: comment ? { length: comment.length } : undefined
       }
     });
-    return ok({ entry, metric, created: !existing });
+    const normalized: GoalStatusEntry = { ...entry, value: valueProvided ? value : (existing?.value ?? null) };
+    return ok({ entry: normalized, metric, aggregateOnly, created: !existing });
   } catch (err) {
     if (!existing && !opts.retried && (err as { status?: number }).status === 400) {
       // Unika indexet: en parallell rapportering hann först — försök EN gång till som update.

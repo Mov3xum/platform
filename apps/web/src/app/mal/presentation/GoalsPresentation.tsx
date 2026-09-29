@@ -18,7 +18,7 @@ import {
   formatPresentationLongDate,
   usePresentationShell
 } from '@/components/presentation/PresentationShell';
-import type { GoalWorkspace } from '@/lib/goals/data';
+import type { GoalWorkspace, SurveyIndicatorValue } from '@/lib/goals/data';
 import { StatusChip } from '../ui';
 
 /**
@@ -35,7 +35,7 @@ export function GoalsPresentation({
   workspace: GoalWorkspace;
   initialQuarter: Quarter;
 }) {
-  const { periods, period, tree, metrics } = workspace;
+  const { periods, period, tree, metrics, surveys } = workspace;
   const [quarter, setQuarter] = useState<Quarter>(initialQuarter);
   const years = useMemo(() => periods.map((p) => p.year).sort((a, b) => a - b), [periods]);
 
@@ -171,7 +171,7 @@ export function GoalsPresentation({
                         {g.indicators.length > 0 && (
                           <ul className="mt-2 divide-y divide-default">
                             {g.indicators.map((ind) => (
-                              <IndicatorLine key={ind.indicator.id} node={ind} quarter={quarter} metrics={metrics} />
+                              <IndicatorLine key={ind.indicator.id} node={ind} quarter={quarter} metrics={metrics} survey={surveys[ind.indicator.id]} />
                             ))}
                           </ul>
                         )}
@@ -193,16 +193,23 @@ export function GoalsPresentation({
 function IndicatorLine({
   node,
   quarter,
-  metrics
+  metrics,
+  survey
 }: {
   node: GoalIndicatorNode;
   quarter: Quarter;
   metrics: Partial<Record<MetricKey, MetricValue>>;
+  survey?: SurveyIndicatorValue;
 }) {
   const { indicator } = node;
   const entry = node.byQuarter[quarter];
   const live = indicator.source === 'computed' && indicator.metric_key ? metrics[indicator.metric_key as MetricKey] : undefined;
-  const current = indicator.source === 'computed' ? (live?.value ?? null) : (entry?.value ?? node.latest?.value ?? null);
+  const current =
+    indicator.source === 'computed'
+      ? (live?.value ?? null)
+      : indicator.source === 'survey'
+        ? (survey?.value ?? null)
+        : (entry?.value ?? node.latest?.value ?? null);
   const unit = { unit: indicator.unit === 'bool' ? 'count' : indicator.unit } as const;
   const isBool = indicator.unit === 'bool';
   return (

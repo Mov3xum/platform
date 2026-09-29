@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   FOLLOWUP_RULE_MAX_OCCURRENCES,
+  assertSafeFollowupLinkFields,
   diffFollowups,
   fillFollowupTemplate,
   planFollowups,
@@ -173,4 +174,10 @@ test('procurement-adaptern: keyPrefix är tomt så redan skapade kort (rule_key 
   const existing = plan.wanted.map((w, i) => ({ id: `t${i}`, rule_key: w.key, status: 'open', due_at: w.dueDate, description: w.title }));
   const diff = diffProcurementFollowups(plan, existing);
   assert.equal(diff.toCreate.length + diff.toUpdate.length + diff.toResolve.length, 0);
+});
+
+test('assertSafeFollowupLinkFields: startup/tenant/rule_key får aldrig sättas av en adapter', () => {
+  assert.doesNotThrow(() => assertSafeFollowupLinkFields({ procurement: 'p1', procurement_calloff: 'c1' }));
+  assert.throws(() => assertSafeFollowupLinkFields({ startup: 's1' }), /startup/);
+  assert.throws(() => assertSafeFollowupLinkFields({ tenant: 't', rule_key: 'x' }), /tenant, rule_key/);
 });

@@ -5,6 +5,7 @@ import {
   GOAL_FOCUS_AREAS,
   buildGoalTree,
   computedMetricKeys,
+  isAggregateOnlyIndicator,
   progressTowardsTarget,
   quarterOfDate,
   rollupGoalStatuses,
@@ -97,7 +98,7 @@ test('validateGoalInput: fokusområde, titel, team', () => {
 test('validateGoalIndicatorInput: computed ärver enhet/riktning från registret, manual får ingen metrik', () => {
   const computed = validateGoalIndicatorInput({ label: 'Alumni', source: 'computed', metric_key: 'alumni_count', target: '5' });
   assert.ok(computed.ok);
-  assert.deepEqual(computed.value, { label: 'Alumni', source: 'computed', metric_key: 'alumni_count', target: 5, unit: 'count', direction: 'higher' });
+  assert.deepEqual(computed.value, { label: 'Alumni', source: 'computed', metric_key: 'alumni_count', survey_module: null, target: 5, unit: 'count', direction: 'higher' });
   assert.equal(validateGoalIndicatorInput({ label: 'x', source: 'computed', metric_key: 'nope' }).ok, false);
   const personal = validateGoalIndicatorInput({ label: 'x', source: 'computed', metric_key: 'my_open_tasks' });
   assert.equal(personal.ok, false);
@@ -105,8 +106,20 @@ test('validateGoalIndicatorInput: computed ärver enhet/riktning från registret
   assert.equal(validateGoalIndicatorInput({ label: 'x', source: 'manual', metric_key: 'alumni_count' }).ok, false);
   const manual = validateGoalIndicatorInput({ label: 'Onboarding används', source: 'manual', target: '', unit: '' });
   assert.ok(manual.ok);
-  assert.deepEqual(manual.value, { label: 'Onboarding används', source: 'manual', metric_key: null, target: null, unit: 'bool', direction: 'higher' });
+  assert.deepEqual(manual.value, { label: 'Onboarding används', source: 'manual', metric_key: null, survey_module: null, target: null, unit: 'bool', direction: 'higher' });
   assert.equal(validateGoalIndicatorInput({ label: 'x', source: 'manual', target: 'abc' }).ok, false);
+  // Enkät: kräver modul-id, ingen metrik.
+  assert.equal(validateGoalIndicatorInput({ label: 'x', source: 'survey' }).ok, false);
+  assert.equal(validateGoalIndicatorInput({ label: 'x', source: 'survey', survey_module: 'abc123', metric_key: 'alumni_count' }).ok, false);
+  const survey = validateGoalIndicatorInput({ label: 'Kundnöjdhet', source: 'survey', survey_module: 'abc123', target: '8' });
+  assert.ok(survey.ok);
+  assert.deepEqual(survey.value, { label: 'Kundnöjdhet', source: 'survey', metric_key: null, survey_module: 'abc123', target: 8, unit: 'count', direction: 'higher' });
+});
+
+test('isAggregateOnlyIndicator pekar ut art. 9-metriker', () => {
+  assert.equal(isAggregateOnlyIndicator({ source: 'computed', metric_key: 'women_led_share' }), true);
+  assert.equal(isAggregateOnlyIndicator({ source: 'computed', metric_key: 'alumni_count' }), false);
+  assert.equal(isAggregateOnlyIndicator({ source: 'manual', metric_key: null }), false);
 });
 
 test('validateGoalStatusInput', () => {

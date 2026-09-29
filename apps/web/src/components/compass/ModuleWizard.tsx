@@ -21,6 +21,8 @@ interface Props {
   apiBase?: string;
   /** Skickas i submit-body för publika flöden där samtycke krävs. */
   consent?: boolean;
+  /** Enkätens subjekt (`?om=<id>`, § 43) — skickas med i submit-body. */
+  subject?: string | null;
 }
 
 export function ModuleWizard({
@@ -30,6 +32,7 @@ export function ModuleWizard({
   redirectUrl,
   apiBase = '/api/inflode/m',
   consent,
+  subject,
   nextModule
 }: Props) {
   const [step, setStep] = useState(0);
@@ -104,7 +107,8 @@ export function ModuleWizard({
           answers,
           attribution,
           consent,
-          contact_preference: contactPreference || undefined
+          contact_preference: contactPreference || undefined,
+          subject: subject || undefined
         })
       });
       if (!res.ok) {

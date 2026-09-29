@@ -37,7 +37,8 @@ import {
   GOAL_STATUSES,
   GOAL_INDICATOR_UNITS,
   METRIC_KEYS,
-  METRIC_DEFINITIONS
+  METRIC_DEFINITIONS,
+  SURVEY_TEMPLATES
 } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
 import { validateChart, validateKpis } from '@/lib/documents/validate';
@@ -898,7 +899,23 @@ export function buildChatTools(
             description: { type: 'string', description: 'Kort intern beskrivning av modulens syfte.' },
             intro_message: { type: 'string', description: 'Välkomsttext besökaren möter först.' },
             success_message: { type: 'string', description: 'Tacktext när besökaren är klar.' },
-            target_audience: { type: 'string', description: 'Vilken målgrupp modulen riktar sig till.' }
+            target_audience: { type: 'string', description: 'Vilken målgrupp modulen riktar sig till.' },
+            purpose: {
+              type: 'string',
+              enum: ['intake', 'survey'],
+              description: 'intake (default) = intag som skapar lead; survey = ENKÄT som samlar svar utan lead (§ 43) — kundnöjdhet, NPS, partnerenkät, medarbetarindex.'
+            },
+            subject_kind: {
+              type: 'string',
+              enum: ['none', 'startup', 'event', 'partner', 'staff'],
+              description: 'Bara för survey: vad enkäten handlar om.'
+            },
+            anonymous: { type: 'boolean', description: 'Bara för survey: anonym (inga identifierare; aggregat vid ≥ 5 svar). Använd för medarbetarindex.' },
+            survey_template: {
+              type: 'string',
+              enum: SURVEY_TEMPLATES.map((t) => t.key),
+              description: 'Färdig enkätmall som skapar frågorna direkt: ' + SURVEY_TEMPLATES.map((t) => `${t.key} = ${t.name}`).join('; ') + '. Mallen sätter syfte, subjekt, anonymitet och samtyckestext.'
+            }
           },
           required: ['name', 'flow_type']
         }
@@ -1574,8 +1591,9 @@ export function buildChatTools(
             source: { type: 'string', enum: ['computed', 'manual'] },
             metric_key: {
               type: 'string',
-              enum: METRIC_KEYS.filter((k) => METRIC_DEFINITIONS[k].scope === 'tenant'),
-              description: 'Bara för computed: ' + METRIC_KEYS.filter((k) => METRIC_DEFINITIONS[k].scope === 'tenant').map((k) => `${k} = ${METRIC_DEFINITIONS[k].label}`).join('; ')
+              // Bara tenant-mått utan känslighet: art. 9-aggregat (§ 41.2) väljs av en människa i /mal.
+              enum: AGENT_METRIC_KEYS,
+              description: 'Bara för computed: ' + AGENT_METRIC_KEYS.map((k) => `${k} = ${METRIC_DEFINITIONS[k].label}`).join('; ')
             },
             unit: { type: 'string', enum: [...GOAL_INDICATOR_UNITS], description: 'Bara för manual (default bool).' }
           },
@@ -3645,7 +3663,11 @@ async function runCreateCompassModule(
     introMessage: typeof args.intro_message === 'string' ? args.intro_message : undefined,
     successMessage: typeof args.success_message === 'string' ? args.success_message : undefined,
     targetAudience: typeof args.target_audience === 'string' ? args.target_audience : undefined,
-    consentNote: typeof args.consent_note === 'string' ? args.consent_note : undefined
+    consentNote: typeof args.consent_note === 'string' ? args.consent_note : undefined,
+    purpose: typeof args.purpose === 'string' ? args.purpose : undefined,
+    subjectKind: typeof args.subject_kind === 'string' ? args.subject_kind : undefined,
+    anonymous: typeof args.anonymous === 'boolean' ? args.anonymous : undefined,
+    surveyTemplate: typeof args.survey_template === 'string' ? args.survey_template : undefined
   });
 
   if (!result.ok) return { ok: false, error: result.error };
@@ -3656,11 +3678,15 @@ async function runCreateCompassModule(
       slug: result.value.slug,
       name: result.value.name,
       flow_type: result.value.flowType,
+      purpose: result.value.purpose,
+      template_questions: result.value.templateQuestions || undefined,
       admin_path: result.value.adminPath,
       published: false,
       next_step:
-        'Lägg till frågorna med add_compass_question. Modulen är ett ' +
-        'opublicerat utkast tills personalen publicerar den i modul-admin.',
+        result.value.templateQuestions > 0
+          ? 'Mallens frågor är skapade. Modulen är ett opublicerat utkast tills personalen publicerar den i modul-admin; enkäten kopplas som indikator i /mal.'
+          : 'Lägg till frågorna med add_compass_question. Modulen är ett ' +
+            'opublicerat utkast tills personalen publicerar den i modul-admin.',
       logged_in: 'agent_actions'
     }
   };
@@ -4252,6 +4278,11 @@ async function syncFollowupsNote(
 
 // ── Målstyrning & verksamhetsplan (§ 42) ────────────────────────────────────
 
+/** Metriker agenten får föreslå som indikator: tenant-scope och inget art. 9-aggregat. */
+const AGENT_METRIC_KEYS = METRIC_KEYS.filter(
+  (k) => METRIC_DEFINITIONS[k].scope === 'tenant' && METRIC_DEFINITIONS[k].sensitivity !== 'aggregate_only'
+);
+
 async function resolveGoalPeriod(
   ctx: ToolDispatchContext,
   tenant: string,
@@ -4341,15 +4372,21 @@ async function runSetGoalStatus(args: Record<string, unknown>, ctx: ToolDispatch
   });
   if (!result.ok) return { ok: false, error: result.error };
   const m = result.value.metric;
+  const sensitive = result.value.aggregateOnly;
   return {
     ok: true,
-    warning: m && m.value === null ? `Värdet kunde inte beräknas${m.note ? `: ${m.note}` : '.'} Statusen är sparad utan värde — säg det.` : undefined,
+    warning:
+      !sensitive && m && m.value === null
+        ? `Värdet kunde inte beräknas${m.note ? `: ${m.note}` : '.'} Statusen är sparad utan värde — säg det.`
+        : undefined,
     data: {
       entry_id: result.value.entry.id,
       indicator_id: result.value.entry.indicator,
       quarter: result.value.entry.quarter,
       status: result.value.entry.status,
-      value: result.value.entry.value ?? null,
+      // Art. 9-aggregat lämnar aldrig skrivlagret mot modellen (§ 41.2).
+      value: sensitive ? undefined : (result.value.entry.value ?? null),
+      value_note: sensitive ? 'Indikatorn är ett känsligt aggregat — värdet visas bara för behöriga i /mal.' : undefined,
       value_complete: m ? m.complete : true,
       path: goalsPath(),
       logged_in: 'agent_actions'

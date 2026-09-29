@@ -1790,7 +1790,7 @@ actor krävs). Tabellen visar vad som tillkommer per yta:
 
 | Körning | Actor | Tillkommer utöver läs-/sökverktygen |
 |---|---|---|
-| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`, samt § 33: `assign_workshop`, `assign_education_document`, `create_task`/`move_task`, `create_event`, `create_mission`, `register_de_minimis_support`, `add_startup_kpi`, `add_capital_round`, `schedule_agent`, `create_startup_note`, samt § 39: `create_procurement`, `create_procurement_calloff`, `update_procurement_calloff`), `memory_read` + `memory_write` |
+| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`, samt § 33: `assign_workshop`, `assign_education_document`, `create_task`/`move_task`, `create_event`, `create_mission`, `register_de_minimis_support`, `add_startup_kpi`, `add_capital_round`, `schedule_agent`, `create_startup_note`, samt § 39: `create_procurement`, `create_procurement_calloff`, `update_procurement_calloff`, samt § 42: `create_goal`, `add_goal_indicator`, `set_goal_status`), `memory_read` + `memory_write` |
 | Toolbox (staff) | — (read-only) | `memory_read` |
 | Toolbox (icke-staff) | — (read-only) | — |
 | Schemalagd | — (read-only) | `memory_read` |
@@ -5761,7 +5761,10 @@ domänen.
 - **`startup` sätts ALDRIG av synken** på genererade kort (RLS § 21 ger en
   bolagsmedlem läsning av rader med sitt bolag som `startup`; regelkort kan
   vara intern data). Domänen länkar via sitt eget fält och kanbanen filtrerar
-  på det (§ 39.2-precedensen).
+  på det (§ 39.2-precedensen). Motorn tvingar det: `linkFields` spreadas
+  FÖRE de fasta fälten och `assertSafeFollowupLinkFields` kastar om en
+  adapter försöker sätta `startup`/`tenant`/`owner`/`rule_key` m.fl.
+  (`FOLLOWUP_RESERVED_TASK_FIELDS`, enhetstestat).
 - **Schema-drift stoppar hellre än dubblerar:** `requiredFields` i
   `FollowupSyncSpec` läses tillbaka på den skapade posten; saknas
   `rule_key`/länkfältet avbryts synken med `followupSchemaError(hint)` som
@@ -5814,9 +5817,10 @@ programansvarig-cockpiten och rapporterna konsumerar **samma** definition och
   så en färsk kohort aldrig ser ut att misslyckas.
 - **Art. 9-aggregat (`sensitivity: 'aggregate_only'`, t.ex.
   `women_led_share`):** bara räknare lämnar databasen (inga rader hämtas),
-  värdet går genom `shareWithThreshold` (k = `AGGREGATE_MIN_GROUP` = 5) och
-  är `null` under tröskeln, visas aldrig per bolag och exponeras inte som
-  chatt-verktyg. `founder_gender` är oförändrat svartlistat i
+  värdet går genom `shareWithThreshold` (k = `AGGREGATE_MIN_GROUP` = 5,
+  gäller BÅDA grupperna — 0 %/100 % ger `null`), returneras utan räknare/
+  nämnare, visas aldrig per bolag, persisteras aldrig som snapshot och
+  exponeras inte som chatt-verktyg. `founder_gender` är oförändrat svartlistat i
   `lib/ai/context.ts` och fältmaskat i `redaction.ts` (§ 9.3).
 - **`scope: 'user'`-mått** (t.ex. `my_open_tasks`) är personliga siffror och
   får inte användas som tenant-mål.
@@ -5862,10 +5866,17 @@ varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
   `inflode_varumarke` | `kundvarde_kvalitet` | `organisation_digitalisering`
   | `tematisk_accelerator`), `title`, `description`, `owner_team` (`ledning`
   | `marknad` | `projekt` | `coach` | `gemensamt`), `sort_order`.
-- **`goal_indicators`**: `goal`, `label`, `source` (`computed` | `manual`),
-  `metric_key` (en `MetricKey` ur § 41 — bara `scope: 'tenant'`; enhet och
-  riktning ÄRVS från definitionen så UI och register aldrig säger olika),
-  `target`, `unit` (`count` | `pct` | `days` | `bool`), `direction`.
+- **`goal_indicators`**: `goal`, `label`, `source` (`computed` | `manual` |
+  `survey`), `metric_key` (en `MetricKey` ur § 41 — bara `scope: 'tenant'`;
+  enhet och riktning ÄRVS från definitionen så UI och register aldrig säger
+  olika), `survey_module` (→ `compass_modules` med `purpose = survey`, § 43),
+  `target` + **`has_target`**, `unit` (`count` | `pct` | `days` | `bool`),
+  `direction`.
+- **PocketBase har inget null för tal** — JSON-`null` lagras som `0`. Därför
+  bär `goal_indicators.has_target` och `goal_status_entries.has_value`
+  (migration 1700000156) om talet är känt; läsvägen (`lib/goals/data.ts`)
+  normaliserar `0` utan flagga till `null`, och ett "kunde inte räknas"
+  sparas aldrig som 0.
 - **`goal_status_entries`**: `indicator`, `quarter` 1–4, `status`
   (`on_track` | `delayed` | `not_started` | `done`), `value`, `comment`,
   `recorded_by`. Unikt index `(tenant, indicator, quarter)` → idempotent
@@ -5874,10 +5885,23 @@ varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
 ### 42.3 Regler (bindande)
 
 - **En indikator, en källa.** `recordGoalStatus` läser värdet ur registret
-  för `computed` (periodfönster = kalenderåret, `yearPeriod`) och **avvisar**
-  ett manuellt angivet värde; `null` (kunde inte räknas) sparas som `null`
-  med registrets PII-fria `note` i svaret — aldrig som 0. `manual` sparar det
-  bedömda värdet.
+  för `computed` (periodfönster = kalenderåret, `yearPeriod`), ur enkätens
+  k-anonyma aggregat för `survey` (§ 43) och **avvisar** ett manuellt
+  angivet värde för båda; `null` (kunde inte räknas) sparas med
+  `has_value = false` och registrets PII-fria `note` i svaret — aldrig som 0.
+  `manual` sparar det bedömda värdet.
+- **En statusuppdatering rör bara angivna fält.** Byter ett anrop bara
+  status raderas varken ett tidigare manuellt värde eller kommentaren
+  (`comment` = `undefined`/`null` ⇒ orörd, `''` ⇒ rensad). SOC 2 processing
+  integrity.
+- **Art. 9-aggregat (`aggregate_only`, t.ex. `women_led_share`):**
+  persisteras ALDRIG i `goal_status_entries` (ingen kvartals-snapshot att
+  räkna skillnader ur), räknas live i `/mal` **bara** för
+  admin/incubator_lead/coach (`AGGREGATE_ONLY_VIEWER_ROLES`), kan inte väljas
+  av agenten (`add_goal_indicator` nekar, enumen utesluter metriken) och
+  utelämnas ur verktygssvar och audit. `shareWithThreshold` kräver dessutom
+  att BÅDA grupperna är ≥ 5 (homogena grupper avslöjar varje post). DPIA:
+  `docs/privacy/dpia-startups.md`.
 - **RBAC:** år, mål och indikatorer = admin/incubator_lead (VP-beslut);
   kvartalsstatus = hela staben (varje team rapporterar sina mål). Agenten
   ärver den inloggades roll (`writable-fields.ts`) och får **aldrig** sätta
@@ -5891,8 +5915,7 @@ varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
   och auditeras bara som längd; audit-raderna är PII-fria (titel, status,
   kvartal, tal) och mappas i `feed/agent-log.ts` → syns i Bolagsnytt/
   `/aktivitet` med djuplänk `/mal?ar=<år>&q=<kvartal>&mal=<id>`.
-- **Art. 9:** `women_led_share` kan väljas som indikator; värdet som lagras
-  är registrets k-anonyma aggregat (§ 41.2), aldrig något per bolag.
+- **Art. 9:** se punkten om `aggregate_only` ovan — inget värde lagras.
 
 ### 42.4 Regelefterlevnad
 
@@ -5912,3 +5935,64 @@ helskärm F, Esc-beteendet; `PresentationFrame` ritar topprad + hint-rad).
 Domäntangenter: ← → kvartal, Shift ← → år. Sökvägarna som slipper railen
 ligger i `PRESENTATION_PATHS` (`lib/auth-paths.ts`) — lägg en ny
 presentationsyta där, inte i `layout.tsx`.
+
+---
+
+## 43. Startupkompassen som enkätmotor — kundnöjdhet, NPS, partnerenkät, medarbetarindex
+
+### 43.1 Översikt
+
+Verksamhetsplanens indikatorer *kundnöjdhet 4/5*, *NPS 70 %*,
+*partnernöjdhet 80 %* och *medarbetarindex* saknade datakälla. I stället för
+en ny formulärmotor bär **Startupkompassen** (§ 23) även enkäter: en modul
+får ett **syfte** (`purpose`: `intake` = dagens intag som skapar lead, eller
+`survey` = enkät som samlar svar utan lead), ett **subjekt** (`subject_kind`:
+bolag/event/partner/personal — skickas i länken som `/m/<slug>?om=<id>`) och
+kan vara **anonym**. Svaren lagras per fråga i den befintliga
+`compass_responses` via en `compass_conversations`-rad som bär subjektet;
+aggregatet räknas k-anonymt och kopplas som indikator (`source = survey`) i
+Mål & VP (§ 42).
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000156_extend_compass_surveys.js` | `compass_modules.purpose/subject_kind/anonymous`, `compass_conversations.subject_kind/subject_id`, `goal_indicators.source += survey` + `survey_module` + `has_target`, `goal_status_entries.has_value` |
+| `packages/shared/src/compass-survey.ts` (+ `.test.ts`) | Vokabulär, `isSurveyModule`, `SURVEY_TEMPLATES` (kundnojdhet, nps_event, partnerenkat, medarbetarindex), `aggregateSurvey` (k-anonymitet, medel, fördelning, NPS), `satisfiedShare` |
+| `apps/web/src/lib/compass/survey.ts` | `storeSurveyResponse` (publika routen), `loadSurveyAggregate` (RLS via användarens token), `listSurveyModules` |
+| `apps/web/src/lib/compass/lead-capture.ts` | `moduleWantsLead` ⇒ false för enkäter — ENDA grinden, routarna är orörda utom enkätgrenen |
+| `apps/web/src/components/compass/ModuleEditor.tsx` | Steg 1 "Syfte": intag/enkät, subjekt, anonym |
+| `apps/web/src/lib/core/write/compass.ts` | `createCompassModule` tar `purpose`/`subjectKind`/`anonymous`/`surveyTemplate` (mallen skapar frågorna via `addCompassQuestion`) |
+
+### 43.2 Regler (bindande)
+
+- **En enkät skapar aldrig lead.** `moduleWantsLead` returnerar false för
+  `purpose = survey`; `create_lead` tvingas false i `createModuleAction`,
+  `updateModuleAction` och skrivlagret. Saknat `purpose` ⇒ `intake` (en
+  oapplicerad migration ändrar aldrig beteendet); att spara `survey` mot ett
+  schema utan fältet avvisas tydligt (§ 24.4-invarianten).
+- **Anonymitet är strukturell:** enkätinskick skapar ingen `session_token`,
+  ingen `visitor_ip_hash`, inget lead och ingen `compass_security_events`-rad
+  med IP. Rate-limit per IP finns bara i processminnet.
+- **k-anonymitet (k = 5):** `aggregateSurvey` visar inga värden under fem
+  respondenter; NPS kräver fem numeriska svar; fritext aggregeras aldrig
+  (bara räknas). Medarbetarindex bryts aldrig ned per team.
+- **Subjekt** valideras till id-format (`isValidSurveySubjectId`), tenant
+  härleds alltid från modulen. Okända frågenycklar i svaret släpps (whitelist
+  = modulens frågor).
+- **Skalan är 1–10** (Startupkompassens `scale`-fråga). Enkätindikatorns
+  värde i § 42 är medel av skalfrågorna (NPS-frågor exkluderade); NPS-frågor
+  identifieras på nyckeln (`nps`).
+- **Chatten:** `create_compass_module` tar `purpose`/`subject_kind`/
+  `anonymous`/`survey_template`; enkäten skapas som opublicerat utkast och
+  kopplas som indikator av en människa i `/mal`. Utskick av inbjudningar via
+  e-post är INTE byggt (kommer med DPIA-omprövning, `docs/privacy/dpia-surveys.md`).
+
+### 43.3 Regelefterlevnad
+
+Riskklass: n/a (ingen inferens; AI-sammanställningen § 23.6 körs bara för
+intag). GDPR: rättslig grund berättigat intresse + samtyckesgrind; DPIA-
+tillägg i `docs/privacy/dpia-surveys.md`. `compass_responses` nås av chattens
+`query_collection` under RLS + fältmaskning (§ 9.3) — svaren innehåller inga
+direkta identifierare. Compass är migration-only (§ 23.4) men
+`compass_modules` inline-def i `setup-via-api.mjs` speglar de nya fälten
+(§ 23.7-precedensen), och `goal_indicators`/`goal_status_entries` speglar
+`survey_module`/`has_target`/`has_value`.

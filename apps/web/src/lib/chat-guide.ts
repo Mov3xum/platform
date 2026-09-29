@@ -221,14 +221,19 @@ const GUIDE: ChatGuideSection[] = [
         ]
       },
       {
-        title: 'Mål & verksamhetsplan',
+        title: 'Mål & indikatorer i verksamhetsplanen',
         description:
-          'Lägg till mål och indikatorer i årets verksamhetsplan och rapportera kvartalsstatus — beräknade indikatorer hämtar värdet ur data. Måltal och årets status sätter ledningen i /mal.',
+          'Lägg till mål under ett fokusområde och indikatorer som räknas ur data eller bedöms manuellt. Måltal och årets status sätter ledningen i /mal.',
+        roles: SCHEDULE_MANAGE,
         examples: [
-          'Lägg till målet "Konvertering 50 % från ink till acc inom 8 månader" under Kundvärde och kvalitetssäkring, coachgruppen',
-          'Markera medarbetarindex som försenad i Q3, kommentar: väntar på enkätmotor',
-          'Hur ligger vi mot målen i Q3?'
+          'Lägg till målet "Konvertering 50 % från ink till acc inom 8 månader" under Kundvärde och kvalitetssäkring, coachgruppen'
         ]
+      },
+      {
+        title: 'Rapportera kvartalsstatus på målen',
+        description:
+          'Markera en indikator som I fas, Försenad, Ej startad eller Klar för ett kvartal, med kort motivering. Beräknade indikatorer hämtar värdet ur data.',
+        examples: ['Markera medarbetarindex som försenad i Q3, kommentar: väntar på enkätmotor', 'Hur ligger vi mot målen i Q3?']
       },
       {
         title: 'Schemalägg AI-agenter',

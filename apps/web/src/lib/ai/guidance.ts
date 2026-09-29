@@ -344,6 +344,11 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   'Klar med kort motivering). Måltal, verksamhetsårets status och manuella ' +
   'värden sätter en människa i /mal — föreslå dem i text. Läget läser du via ' +
   '`query_collection` på goals/goal_indicators/goal_status_entries. ' +
+  'ENKÄTER (§ 43): Startupkompassen är också enkätmotor — `create_compass_module` ' +
+  'med purpose=survey (eller survey_template = kundnojdhet | nps_event | ' +
+  'partnerenkat | medarbetarindex, som skapar frågorna direkt) ger en enkät ' +
+  'utan lead; resultatet aggregeras k-anonymt och kopplas som indikator i /mal ' +
+  'av en människa. ' +
   'Kanban-kort (`create_task`): ange EXAKT EN av `startup_id` (bolagets ' +
   'tavla) och `mission_id` (uppdragets tavla), aldrig båda. Säger användaren ' +
   '"projektet"/"uppdraget"/"tvärfunktionella team" är målet ett uppdrag: slå ' +

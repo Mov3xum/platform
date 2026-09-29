@@ -306,3 +306,32 @@ export function diffFollowups<X extends object>(
   }
   return { toCreate, toUpdate, toResolve };
 }
+
+// ─── Skydd för synkens fasta fält ───────────────────────────────────────────
+
+/**
+ * Fält synken själv äger på ett genererat kort. En adapters `linkFields` får
+ * ALDRIG sätta dem — särskilt inte `startup` (RLS § 21 skulle ge en
+ * bolagsmedlem läsning av intern data, § 40.2) eller `tenant`/`rule_key`
+ * (idempotens och isolering). Kontrolleras i `syncFollowupTasks`.
+ */
+export const FOLLOWUP_RESERVED_TASK_FIELDS: ReadonlySet<string> = new Set([
+  'tenant',
+  'startup',
+  'owner',
+  'status',
+  'link_kind',
+  'rule_key',
+  'kind',
+  'description',
+  'due_at',
+  'completed_at'
+]);
+
+/** Kastar om länkfälten försöker skriva över ett reserverat fält. */
+export function assertSafeFollowupLinkFields(fields: Record<string, unknown>): void {
+  const bad = Object.keys(fields).filter((k) => FOLLOWUP_RESERVED_TASK_FIELDS.has(k));
+  if (bad.length > 0) {
+    throw new Error(`Uppföljningsadaptern får inte sätta ${bad.join(', ')} på genererade kort (§ 40.2).`);
+  }
+}

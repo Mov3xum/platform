@@ -14,6 +14,8 @@ interface Props {
   brandName?: string;
   /** Kedjad nästa modul (migration 1700000124) — visas efter slutfört flöde. */
   nextModule?: NextModuleLink | null;
+  /** Enkätens subjekt ur `?om=<id>` (§ 43). */
+  subject?: string | null;
 }
 
 const PUBLIC_API_BASE = '/api/public/m';
@@ -28,7 +30,7 @@ const FLOW_LABEL: Record<string, string> = {
 // Publik (oinloggad) körning av en Startupkompass-modul. Visar en
 // samtyckesgrind före all datainsamling (GDPR art. 7) och dispatchar sedan
 // till rätt flöde. Skickar consent=true till de publika API-routarna.
-export function PublicModuleRunner({ module, questions, brandName, nextModule }: Props) {
+export function PublicModuleRunner({ module, questions, brandName, nextModule, subject }: Props) {
   const hasConsentGate = Boolean(module.consent_note);
   const [consented, setConsented] = useState(!hasConsentGate);
 
@@ -104,6 +106,7 @@ export function PublicModuleRunner({ module, questions, brandName, nextModule }:
       successMessage={module.success_message}
       redirectUrl={module.redirect_url}
       nextModule={nextModule}
+      subject={subject}
     />
   );
 }

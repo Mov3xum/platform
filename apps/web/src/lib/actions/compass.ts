@@ -25,7 +25,9 @@ import {
   DEFAULT_COMPASS_LAYOUT,
   normalizeCompassLayout,
   validateWorkshopMediaFile,
-  type StartupPhase
+  type StartupPhase,
+  normalizeCompassPurpose,
+  normalizeSurveySubjectKind
 } from '@platform/shared';
 
 const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
@@ -493,6 +495,7 @@ export async function createModuleAction(formData: FormData) {
   const flowType = String(formData.get('flow_type') || 'chat');
   const publicEnabled = formData.get('public_url_enabled') === 'on';
   const isActive = formData.get('is_active') === 'on';
+  const purpose = normalizeCompassPurpose(formData.get('purpose'));
 
   if (!name) throw new Error('Modul måste ha ett namn');
   if (!FLOW_TYPES.includes(flowType as (typeof FLOW_TYPES)[number])) {
@@ -525,8 +528,10 @@ export async function createModuleAction(formData: FormData) {
         flow_type: flowType,
         is_active: isActive,
         public_url_enabled: publicEnabled,
-        // Nya moduler skapar lead som default (steg 4-valet, migration 1700000125).
-        create_lead: true,
+        // Nya moduler skapar lead som default (steg 4-valet, migration 1700000125);
+        // en ENKÄT (§ 43) gör det aldrig.
+        purpose,
+        create_lead: purpose !== 'survey',
         sort_order: 999
       })
     );
@@ -688,6 +693,10 @@ async function applyModuleUpdate(
   const maxExchangesRaw = String(formData.get('max_exchanges') || '').trim();
   const maxExchanges = Number(maxExchangesRaw);
 
+  // Syfte (§ 43). Bara satt när formuläret skickar fältet (äldre formulär
+  // lämnar det orört); normaliseras alltid — okänt ⇒ intake.
+  const purposeRaw = formData.get('purpose');
+  const wantedPurpose = purposeRaw === null ? null : normalizeCompassPurpose(String(purposeRaw));
   const patch: Record<string, unknown> = {
     name: String(formData.get('name') || '').trim(),
     description: String(formData.get('description') || '').trim(),
@@ -707,8 +716,9 @@ async function applyModuleUpdate(
     require_email: formData.get('require_email') === 'on',
     require_phone: formData.get('require_phone') === 'on',
     require_organization: formData.get('require_organization') === 'on',
-    // Steg 4: "Skapa lead i Startupkompassen när modulen slutförs".
-    create_lead: formData.get('create_lead') === 'on',
+    // Steg 4: "Skapa lead i Startupkompassen när modulen slutförs" — en
+    // ENKÄT (§ 43) skapar aldrig lead oavsett kryssruta.
+    create_lead: wantedPurpose === 'survey' ? false : formData.get('create_lead') === 'on',
     notify_emails: String(formData.get('notify_emails') || '').trim().slice(0, 1000),
     is_active: formData.get('is_active') === 'on',
     public_url_enabled: formData.get('public_url_enabled') === 'on'
@@ -720,6 +730,11 @@ async function applyModuleUpdate(
   const layoutRaw = formData.get('layout');
   const wantedLayout = layoutRaw === null ? null : normalizeCompassLayout(String(layoutRaw));
   if (wantedLayout) patch.layout = wantedLayout;
+  if (wantedPurpose) {
+    patch.purpose = wantedPurpose;
+    patch.subject_kind = normalizeSurveySubjectKind(formData.get('subject_kind'));
+    patch.anonymous = wantedPurpose === 'survey' && formData.get('anonymous') === 'on';
+  }
 
   // Publik slug (global unik). Bara sätt om angiven — tom lämnar oförändrad.
   const publicSlug = slugify(String(formData.get('public_slug') || ''));
@@ -878,6 +893,11 @@ async function applyModuleUpdate(
   // Schema-drift (§ 24.4/§ 30.4-invarianten): PB släpper okända fält TYST.
   // En instans utan migration 1700000154 saknar `layout` → valet hade
   // "sparats" utan att synas. Säg det rakt ut i stället för en tyst no-op.
+  if (wantedPurpose === 'survey' && saved && !('purpose' in saved)) {
+    throw new Error(
+      'Övriga fält sparades, men syftet "enkät" kunde inte sparas: fältet purpose saknas i databasen (PocketBase-migration 1700000156 är inte applicerad).'
+    );
+  }
   if (
     wantedLayout &&
     wantedLayout !== DEFAULT_COMPASS_LAYOUT &&

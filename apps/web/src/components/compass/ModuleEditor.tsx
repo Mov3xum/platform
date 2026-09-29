@@ -7,7 +7,14 @@ import { QuestionsManager } from './QuestionsManager';
 import { ResultBucketsEditor } from './ResultBucketsEditor';
 import { HeroMediaUploader } from './HeroMediaUploader';
 import { LayoutPicker } from './LayoutPicker';
-import { COMPASS_LAYOUT_META, normalizeCompassLayout } from '@platform/shared';
+import { COMPASS_LAYOUT_META, normalizeCompassLayout,
+  COMPASS_PURPOSES,
+  COMPASS_PURPOSE_LABELS,
+  SURVEY_SUBJECT_KINDS,
+  SURVEY_SUBJECT_KIND_LABELS,
+  normalizeCompassPurpose,
+  type CompassPurpose
+} from '@platform/shared';
 import type { CompassLayout } from '@platform/shared';
 import type { CompassModule, CompassQuestion, FlowType } from '@/lib/compass/types';
 
@@ -68,6 +75,7 @@ export function ModuleEditor({
 }: Props) {
   const [step, setStep] = useState(0);
   const [flowType, setFlowType] = useState<FlowType>(mod.flow_type);
+  const [purpose, setPurpose] = useState<CompassPurpose>(normalizeCompassPurpose(mod.purpose));
   const [layout, setLayout] = useState<CompassLayout>(() => normalizeCompassLayout(mod.layout));
   const layoutMeta = COMPASS_LAYOUT_META[layout];
   const [isPending, startTransition] = useTransition();
@@ -247,6 +255,57 @@ export function ModuleEditor({
                 placeholder="Visas bara för er — inte för besökaren."
               />
             </label>
+
+            {/* Syfte (§ 43): intag skapar lead; enkät samlar svar utan lead. */}
+            <div>
+              <div className="mx-label" style={{ marginBottom: 6 }}>
+                Syfte
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {COMPASS_PURPOSES.map((p) => (
+                  <label
+                    key={p}
+                    className="mx-flex mx-items-c mx-gap-2 mx-t-13"
+                    style={{ cursor: 'pointer', border: '1px solid var(--mx-line)', borderRadius: 10, padding: '8px 10px' }}
+                  >
+                    <input
+                      type="radio"
+                      name="purpose"
+                      value={p}
+                      checked={purpose === p}
+                      onChange={() => setPurpose(p)}
+                    />
+                    <span>{COMPASS_PURPOSE_LABELS[p]}</span>
+                  </label>
+                ))}
+              </div>
+              {purpose === 'survey' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 10 }}>
+                  <label className="mx-label">
+                    Enkäten handlar om
+                    <select name="subject_kind" defaultValue={mod.subject_kind || 'none'} className="mx-input" style={{ marginTop: 4 }}>
+                      {SURVEY_SUBJECT_KINDS.map((k) => (
+                        <option key={k} value={k}>
+                          {SURVEY_SUBJECT_KIND_LABELS[k]}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="mx-t-12 mx-muted" style={{ display: 'block', marginTop: 4 }}>
+                      Subjektet skickas i länken som <code>?om=&lt;id&gt;</code> (t.ex. bolagets id).
+                    </span>
+                  </label>
+                  <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer', alignSelf: 'end' }}>
+                    <input type="checkbox" name="anonymous" defaultChecked={mod.anonymous === true} />
+                    <span>Anonym enkät — inga identifierare alls; resultat visas först vid minst 5 svar</span>
+                  </label>
+                </div>
+              )}
+              {purpose === 'survey' && (
+                <div className="mx-t-12 mx-muted" style={{ marginTop: 6 }}>
+                  En enkät skapar aldrig lead. Svaren aggregeras med k-anonymitet och kan kopplas som indikator i Mål &amp; VP.
+                </div>
+              )}
+            </div>
           </Step>
 
           {/* ── Steg 2: Utseende & mall ─────────────────────────────────── */}

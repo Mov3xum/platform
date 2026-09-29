@@ -2488,7 +2488,12 @@ await ensureCollection({
     { name: 'create_lead', type: 'bool', required: false },
     // Mall för den publika sidan (CLAUDE.md § 23.7) — MÅSTE spegla
     // COMPASS_LAYOUTS i packages/shared/src/compass-layout.ts.
-    { name: 'layout', type: 'select', required: false, maxSelect: 1, values: ['classic', 'split_left', 'split_right', 'cover', 'panel', 'minimal'] }
+    { name: 'layout', type: 'select', required: false, maxSelect: 1, values: ['classic', 'split_left', 'split_right', 'cover', 'panel', 'minimal'] },
+    // Migration 1700000156 (§ 43): Startupkompassen som enkätmotor. MÅSTE
+    // spegla COMPASS_PURPOSES / SURVEY_SUBJECT_KINDS i compass-survey.ts.
+    { name: 'purpose', type: 'select', required: false, maxSelect: 1, values: ['intake', 'survey'] },
+    { name: 'subject_kind', type: 'select', required: false, maxSelect: 1, values: ['none', 'startup', 'event', 'partner', 'staff'] },
+    { name: 'anonymous', type: 'bool', required: false }
   ],
   indexes: [
     'CREATE UNIQUE INDEX idx_compass_modules_tenant_slug ON compass_modules (tenant, slug)',
@@ -3855,9 +3860,12 @@ await ensureCollection({
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'goal', type: 'relation', required: true, collectionId: 'goals_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'label', type: 'text', required: true, min: 1, max: 200 },
-    { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['computed', 'manual'] },
+    { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['computed', 'manual', 'survey'] },
     { name: 'metric_key', type: 'text', required: false, max: 60 },
+    // Migration 1700000156: enkätkälla (§ 43) + känt-flagga för måltalet (PB lagrar null som 0).
+    { name: 'survey_module', type: 'relation', required: false, collectionId: 'compass_modules_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'target', type: 'number', required: false },
+    { name: 'has_target', type: 'bool', required: false },
     { name: 'unit', type: 'select', required: true, maxSelect: 1, values: ['count', 'pct', 'days', 'bool'] },
     { name: 'direction', type: 'select', required: true, maxSelect: 1, values: ['higher', 'lower'] },
     { name: 'sort_order', type: 'number', required: false, onlyInt: true, min: 0, max: 100000 },
@@ -3885,6 +3893,8 @@ await ensureCollection({
     { name: 'quarter', type: 'number', required: true, onlyInt: true, min: 1, max: 4 },
     { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['on_track', 'delayed', 'not_started', 'done'] },
     { name: 'value', type: 'number', required: false },
+    // Migration 1700000156: känt-flagga för värdet (PB lagrar null som 0).
+    { name: 'has_value', type: 'bool', required: false },
     { name: 'comment', type: 'text', required: false, max: 2000 },
     { name: 'recorded_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],
@@ -4182,6 +4192,11 @@ const FORCE_CREATE_RULES = {
   tool_schedules: `${ANY_AUTH} && @request.auth.tenant != ""`,
   startup_phase_history: `${ANY_AUTH} && @request.auth.tenant != ""`,
   contacts: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Målstyrning (migration 1700000155, § 42) — roll-lösa createRules, roll i skrivlagret.
+  goal_periods: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  goals: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  goal_indicators: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  goal_status_entries: `${ANY_AUTH} && @request.auth.tenant != ""`,
   startup_contacts: `${ANY_AUTH} && @request.auth.tenant != ""`,
   capital_rounds: `${ANY_AUTH} && @request.auth.tenant != ""`,
   intellectual_property: `${ANY_AUTH} && @request.auth.tenant != ""`,

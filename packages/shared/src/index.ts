@@ -1703,6 +1703,7 @@ export * from './home';
 export * from './followup-rules';
 export * from './metrics';
 export * from './goals';
+export * from './compass-survey';
 export * from './procurement';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────

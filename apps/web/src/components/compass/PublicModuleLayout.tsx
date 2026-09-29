@@ -11,6 +11,8 @@ interface Props {
   questions: CompassQuestion[];
   branding: PublicTenantBranding;
   nextModule: NextModuleLink | null;
+  /** Enkätens subjekt ur `?om=<id>` (§ 43), redan validerat av sidan. */
+  subject?: string | null;
 }
 
 const FLOW_WORD: Record<string, string> = {
@@ -29,7 +31,7 @@ const FLOW_WORD: Record<string, string> = {
  * eller lead-garantin. All styling bor i prototype.css under
  * "Startupkompassen — publik landningssida" och nycklas på `data-layout`.
  */
-export function PublicModuleLayout({ module, questions, branding, nextModule }: Props) {
+export function PublicModuleLayout({ module, questions, branding, nextModule, subject }: Props) {
   const layout: CompassLayout = normalizeCompassLayout(module.layout);
   const meta = COMPASS_LAYOUT_META[layout];
   const hasTenantLogo = Boolean(branding.logoLightUrl || branding.logoDarkUrl);
@@ -126,6 +128,7 @@ export function PublicModuleLayout({ module, questions, branding, nextModule }: 
         questions={questions}
         brandName={branding.name}
         nextModule={nextModule}
+        subject={subject}
       />
     </section>
   );

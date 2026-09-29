@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { SURVEY_SUBJECT_PARAM, isValidSurveySubjectId } from '@platform/shared';
 import { PublicModuleLayout } from '@/components/compass/PublicModuleLayout';
 import {
   resolvePublicModule,
@@ -32,11 +33,17 @@ export async function generateMetadata({
 // Kompositionen styrs av modulens MALL (`layout`, § 23.7) i PublicModuleLayout;
 // sidan här äger bara datahämtningen.
 export default async function PublicModulePage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug } = await params;
+  const sp = await searchParams;
+  // Enkätens subjekt (§ 43): `?om=<id>` — bara ett id-format släpps vidare.
+  const subjectRaw = sp[SURVEY_SUBJECT_PARAM];
+  const subject = isValidSurveySubjectId(subjectRaw) ? subjectRaw : null;
   const resolved = await resolvePublicModule(slug);
   if (!resolved) notFound();
 
@@ -55,6 +62,7 @@ export default async function PublicModulePage({
       questions={questions}
       branding={branding}
       nextModule={nextModule}
+      subject={subject}
     />
   );
 }

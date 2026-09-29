@@ -77,9 +77,13 @@ test('medianDaysInPhase: öppna vistelser räknas till idag', () => {
   assert.equal(medianDaysInPhase(rows, 'paus', '2026-09-29'), null);
 });
 
-test('shareWithThreshold skyddar små grupper; sharePct gör det inte', () => {
-  assert.equal(shareWithThreshold(2, 4), null);
-  assert.equal(shareWithThreshold(2, 5), 40);
+test('shareWithThreshold skyddar små OCH homogena grupper; sharePct gör det inte', () => {
+  assert.equal(shareWithThreshold(2, 4), null, 'för liten nämnare');
+  assert.equal(shareWithThreshold(2, 5), null, 'räknaren under k');
+  assert.equal(shareWithThreshold(5, 10), 50);
+  assert.equal(shareWithThreshold(10, 10), null, '100 % avslöjar alla');
+  assert.equal(shareWithThreshold(0, 12), null, '0 % avslöjar alla');
+  assert.equal(shareWithThreshold(6, 14), 42.9);
   assert.equal(shareWithThreshold(0, 0), null);
   assert.equal(sharePct(1, 3), 33.3);
   assert.equal(sharePct(0, 0), null);

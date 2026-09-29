@@ -198,9 +198,10 @@ export const PROGRAM_PHASES: readonly StartupPhase[] = ['incubation', 'prescale'
 export const AGGREGATE_MIN_GROUP = 5;
 
 /**
- * Andel med k-anonymitet: returnerar null när nämnaren är mindre än `k`, så
- * ett aggregat över en särskild kategori aldrig kan peka ut ett enskilt
- * bolag/person. Används för ALLA `aggregate_only`-mått.
+ * Andel med k-anonymitet: returnerar null när nämnaren är mindre än `k`,
+ * OCH när någon av de två grupperna (räknaren eller resten) är mindre än
+ * `k` — en homogen grupp (0 % eller 100 %) skulle annars avslöja varje
+ * enskild post. Används för ALLA `aggregate_only`-mått (art. 9, § 10.2).
  */
 export function shareWithThreshold(
   numerator: number,
@@ -208,6 +209,7 @@ export function shareWithThreshold(
   k: number = AGGREGATE_MIN_GROUP
 ): number | null {
   if (denominator < k || denominator <= 0) return null;
+  if (numerator < k || denominator - numerator < k) return null;
   return Math.round((numerator / denominator) * 1000) / 10;
 }
 

@@ -75,11 +75,12 @@ export function isGoalStatus(v: unknown): v is GoalStatus {
   return (GOAL_STATUSES as readonly string[]).includes(String(v));
 }
 
-export const GOAL_INDICATOR_SOURCES = ['computed', 'manual'] as const;
+export const GOAL_INDICATOR_SOURCES = ['computed', 'manual', 'survey'] as const;
 export type GoalIndicatorSource = (typeof GOAL_INDICATOR_SOURCES)[number];
 export const GOAL_INDICATOR_SOURCE_LABELS: Record<GoalIndicatorSource, string> = {
   computed: 'Beräknas ur data',
-  manual: 'Manuell bedömning'
+  manual: 'Manuell bedömning',
+  survey: 'Enkät (Startupkompassen)'
 };
 export function isGoalIndicatorSource(v: unknown): v is GoalIndicatorSource {
   return (GOAL_INDICATOR_SOURCES as readonly string[]).includes(String(v));
@@ -136,11 +137,27 @@ export interface GoalIndicator {
   label: string;
   source: GoalIndicatorSource;
   metric_key?: string | null;
+  /** Enkätmodul (compass_modules) för `source = survey` (migration 1700000156). */
+  survey_module?: string | null;
   target?: number | null;
   unit: GoalIndicatorUnit;
   direction: GoalDirection;
   sort_order?: number | null;
 }
+
+/**
+ * Beräknade indikatorer över en GDPR art. 9-metrik (`aggregate_only`):
+ * värdet får bara visas live för admin/incubator_lead/coach, persisteras
+ * aldrig i kvartalsstatusen och når aldrig agenten (§ 41.2, § 42.3).
+ */
+export function isAggregateOnlyIndicator(indicator: Pick<GoalIndicator, 'source' | 'metric_key'>): boolean {
+  return indicator.source === 'computed' && isMetricKey(indicator.metric_key)
+    ? METRIC_DEFINITIONS[indicator.metric_key].sensitivity === 'aggregate_only'
+    : false;
+}
+
+/** Roller som får se art. 9-aggregat (§ 10.2: admin/incubator_lead/coach). */
+export const AGGREGATE_ONLY_VIEWER_ROLES: readonly string[] = ['admin', 'incubator_lead', 'coach'];
 
 export interface GoalStatusEntry {
   id: string;
@@ -215,10 +232,13 @@ export interface GoalIndicatorInput {
   label: string;
   source: GoalIndicatorSource;
   metric_key: MetricKey | null;
+  survey_module: string | null;
   target: number | null;
   unit: GoalIndicatorUnit;
   direction: GoalDirection;
 }
+
+const SURVEY_MODULE_ID = /^[a-zA-Z0-9_-]{1,64}$/;
 
 function parseNumber(v: unknown): number | null | undefined {
   if (v === null || v === undefined || v === '') return null;
@@ -235,6 +255,7 @@ export function validateGoalIndicatorInput(raw: {
   label?: unknown;
   source?: unknown;
   metric_key?: unknown;
+  survey_module?: unknown;
   target?: unknown;
   unit?: unknown;
   direction?: unknown;
@@ -243,7 +264,7 @@ export function validateGoalIndicatorInput(raw: {
   if (!label) return { ok: false, error: 'Indikatorn behöver en etikett.' };
   if (label.length > GOAL_TITLE_MAX) return { ok: false, error: `Etiketten får vara max ${GOAL_TITLE_MAX} tecken.` };
   if (!isGoalIndicatorSource(raw.source)) {
-    return { ok: false, error: 'Ogiltig mätkälla (computed eller manual).' };
+    return { ok: false, error: 'Ogiltig mätkälla (computed, manual eller survey).' };
   }
   const target = parseNumber(raw.target);
   if (target === undefined) return { ok: false, error: 'Måltalet måste vara ett tal.' };
@@ -262,9 +283,30 @@ export function validateGoalIndicatorInput(raw: {
         label,
         source: 'computed',
         metric_key: raw.metric_key,
+        survey_module: null,
         target,
         unit: def.unit,
         direction: def.higherIsBetter ? 'higher' : 'lower'
+      }
+    };
+  }
+
+  if (raw.source === 'survey') {
+    if (!SURVEY_MODULE_ID.test(String(raw.survey_module ?? ''))) {
+      return { ok: false, error: 'En enkätindikator måste peka på en enkätmodul i Startupkompassen.' };
+    }
+    if (raw.metric_key) return { ok: false, error: 'En enkätindikator har ingen metrik.' };
+    // Enkätens samlade score är ett medel på skalan 1–10 (Startupkompassens skalfråga).
+    return {
+      ok: true,
+      value: {
+        label,
+        source: 'survey',
+        metric_key: null,
+        survey_module: String(raw.survey_module),
+        target,
+        unit: 'count',
+        direction: 'higher'
       }
     };
   }
@@ -274,7 +316,7 @@ export function validateGoalIndicatorInput(raw: {
   if (!isGoalIndicatorUnit(unit)) return { ok: false, error: 'Ogiltig enhet.' };
   const direction = raw.direction === undefined || raw.direction === '' ? 'higher' : raw.direction;
   if (!isGoalDirection(direction)) return { ok: false, error: 'Ogiltig riktning (higher eller lower).' };
-  return { ok: true, value: { label, source: 'manual', metric_key: null, target, unit, direction } };
+  return { ok: true, value: { label, source: 'manual', metric_key: null, survey_module: null, target, unit, direction } };
 }
 
 export interface GoalStatusInput {

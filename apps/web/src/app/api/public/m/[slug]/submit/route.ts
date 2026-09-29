@@ -13,6 +13,8 @@ import {
   parseContactPreference
 } from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
+import { storeSurveyResponse } from '@/lib/compass/survey';
+import { isSurveyModule } from '@platform/shared';
 import { findMissingRequiredAlongPath } from '@/lib/compass/question-flow';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import type { Attribution } from '@/lib/compass/types';
@@ -28,6 +30,8 @@ interface SubmitBody {
   attribution?: Attribution;
   consent?: boolean;
   contact_preference?: string;
+  /** Enkätens subjekt ur `?om=<id>` (§ 43) — valideras server-side. */
+  subject?: string;
 }
 
 function clientIp(req: Request): string {
@@ -74,6 +78,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
       { error: `Fältet "${missing.prompt}" är obligatoriskt.` },
       { status: 400 }
     );
+  }
+
+  // ENKÄT (§ 43): svaren lagras per fråga mot subjektet — inget lead, ingen
+  // session, ingen ip-hash. Misslyckas lagringen felar vi högt (samma
+  // garanti som lead-garantin § 23.6): svaren får inte tyst försvinna.
+  if (isSurveyModule(module)) {
+    const stored = await storeSurveyResponse(pb, tenant, { module, questions, answers, subjectId: body.subject });
+    if (!stored) {
+      return NextResponse.json(
+        { error: 'Dina svar kunde inte sparas just nu. Försök igen om en stund.' },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json({ ok: true });
   }
 
   // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead.

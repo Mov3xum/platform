@@ -8,7 +8,9 @@ import {
   phaseConversion,
   sharePct,
   shareWithThreshold,
+  parseDateTimeInput,
   stockholmDateKey,
+  toPocketBaseDateTime,
   type MetricKey,
   type MetricPeriod,
   type MetricValue,
@@ -56,9 +58,10 @@ async function countWhere(pb: PocketBase, collection: string, filter: string): P
   return res.totalItems;
 }
 
-/** PB-datetime-gräns ur ett ISO-datum (`2026-09-22` → `2026-09-22 00:00:00.000Z`). */
+/** PB-datetime för svensk midnatt på ett ISO-datum (§ 38 — servern kör UTC). */
 function pbDay(day: string): string {
-  return `${day} 00:00:00.000Z`;
+  const at = parseDateTimeInput(`${day}T00:00`);
+  return toPocketBaseDateTime(at ?? new Date(`${day}T00:00:00Z`));
 }
 
 function requirePeriod(ctx: MetricContext, key: MetricKey): MetricPeriod {
@@ -201,10 +204,13 @@ const COMPUTERS: Record<MetricKey, Computer> = {
       countWhere(ctx.pb, 'startups', base + ' && founder_gender != "" && founder_gender != "uppger_ej"'),
       countWhere(ctx.pb, 'startups', base + ' && founder_gender = "kvinna"')
     ]);
+    // Varken räknare eller nämnare lämnar funktionen — bara den k-anonyma andelen.
     const v = shareWithThreshold(women, known);
     return value('women_led_share', v, {
-      denominator: known,
-      note: v === null ? `Visas först när minst ${AGGREGATE_MIN_GROUP} bolag har känd grundarprofil.` : undefined
+      note:
+        v === null
+          ? `Visas först när båda grupperna är minst ${AGGREGATE_MIN_GROUP} bolag (art. 9-skydd).`
+          : undefined
     });
   }
 };

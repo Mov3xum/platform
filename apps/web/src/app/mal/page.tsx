@@ -33,7 +33,7 @@ export default async function MalPage({
   const focusGoal = typeof sp.mal === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(sp.mal) ? sp.mal : null;
 
   const pb = await getServerPb();
-  const ws = await loadGoalWorkspace(pb, user.tenant, user.id, year);
+  const ws = await loadGoalWorkspace(pb, user.tenant, user.id, user.roles, year);
 
   return (
     <PageShell
