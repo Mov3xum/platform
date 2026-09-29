@@ -74,7 +74,15 @@ Två separata inloggningar per miljö:
 
 Felsökning: får du **404 på `/_/`** når requesten inte PocketBase — testa
 `<PB-adress>/api/health` (ska ge JSON med `"code":200`); 404 där också betyder
-fel host. Får du **429** vid superuser-login är det PB 0.23:s inbyggda
+fel host. **Snabbaste kollen från webbappen:** `<web-adress>/api/health`
+(publik, ingen inloggning) visar vilken PB-adress web-containern faktiskt
+resolvat för sin `MOVEXUM_ENV` och hur den svarar (`pocketbase` = OK,
+`proxy_404` = Coolify/Traefik saknar router för hosten → domänen är inte
+tillagd på PB-resursen eller resursen är inte omdeployad, `html` = adressen
+pekar på web-appen/annan tjänst, `unreachable` = DNS/cert). Inloggningen ger
+samma diagnos i sitt felmeddelande. OBS: `users` är PocketBases inbyggda
+auth-kollektion och kan inte saknas — ett 404 vid inloggning är i praktiken
+alltid fel host/domän, inte en oapplicerad migration. Får du **429** vid superuser-login är det PB 0.23:s inbyggda
 rate-limit på `_superusers/auth-with-password` (samma som CI-skripten
 retry:ar mot via `scripts/lib/pb-auth-retry.mjs`) — vänta en halv minut.
 

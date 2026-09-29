@@ -50,6 +50,11 @@ function localDefault(): string {
     : 'http://localhost:8080';
 }
 
+/** Vilken miljö (`MOVEXUM_ENV`) URL-resolutionen kör mot — för diagnostik. */
+export function getPbEnvTarget(): 'staging' | 'production' {
+  return target();
+}
+
 export function getServerPbUrl(): string {
   const suffix = target().toUpperCase(); // STAGING | PRODUCTION
   return (
