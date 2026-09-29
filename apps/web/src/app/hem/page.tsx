@@ -129,7 +129,7 @@ export default async function HemPage({
   if (!canAccessModuleForUser(user.roles, 'hem', user.enabledModules)) redirect('/chatt');
 
   const { flik, dagar } = await searchParams;
-  // "Så gör vi" är borttagen från Hemmaplan (2026-09) — en gammal länk landar på anslagstavlan.
+  // "Så gör vi" är borttagen från Översikt (2026-09) — en gammal länk landar på anslagstavlan.
   const parsedTab = homeTabFromSlug(flik);
   const initialTab: OrgPostTab = parsedTab === 'instruction' ? 'board' : parsedTab;
   const windowDays = parseHomeWindowDays(dagar);
@@ -157,7 +157,7 @@ export default async function HemPage({
     runningWorkshops
   ] = await Promise.all([
     listOrgPosts(pb, user.tenant).catch(() => [] as OrgPost[]),
-    // Hemmaplan visar bara de senaste 6 — Omvärld ligger direkt under i samma spalt.
+    // Översikt visar bara de senaste 6 — Omvärld ligger direkt under i samma spalt.
     loadActivityFeed(pb, user.tenant, 6).catch(() => [] as DashboardActivity[]),
     fetchWebFeedItems(OMVARLD_SOURCES).catch(() => []),
     listForTenant<WheelRow>('annual_wheel_items', {
@@ -258,7 +258,7 @@ export default async function HemPage({
   ];
 
   const categoryLabel = new Map(categories.map((c) => [c.id, c.label]));
-  // Kategorier som superadmin valt att INTE visa på Hemmaplan (t.ex. Styrelse & VD)
+  // Kategorier som superadmin valt att INTE visa på Översikt (t.ex. Styrelse & VD)
   // filtreras bort innan tidslinjen byggs — de finns kvar i /arshjul (§ 30.3).
   const hiddenCategories = annualWheelHiddenOnHome(categories);
   const agendaItems: HomeAgendaItem[] = [];

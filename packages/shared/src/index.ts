@@ -1410,7 +1410,7 @@ export function isPureStartupMember(roles: Role[] | undefined): boolean {
 export const coreModules: ModuleDefinition[] = [
   {
     id: 'hem',
-    title: 'Hemmaplan',
+    title: 'Översikt',
     description:
       'Organisationens startsida — anslagstavla med nyheter, info och instruktioner, bolagsnytt, omvärldsbevakning och veckans agenda.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],

@@ -1,4 +1,4 @@
-// Hemmaplan — organisationens anslagstavla (CLAUDE.md § 37).
+// Översikt — organisationens anslagstavla (CLAUDE.md § 37).
 //
 // Ren, testbar domänlogik för inlägg på startsidan: inläggstyper, validering,
 // synlighetsregler (publicerat / utgånget / målgrupp) och sortering (fästa
@@ -30,7 +30,7 @@ export const ORG_POST_KIND_HINTS: Record<OrgPostKind, string> = {
 };
 
 /**
- * Inläggstyper som visas under respektive flik på Hemmaplan. `board` =
+ * Inläggstyper som visas under respektive flik på Översikt. `board` =
  * anslagstavlan (nyheter/info/firanden), `instruction` = "Så gör vi",
  * `training` = "Internutbildningar". En typ hör alltid till exakt en flik.
  */
@@ -42,7 +42,7 @@ export function orgPostTabFor(kind: OrgPostKind): OrgPostTab {
   return 'board';
 }
 
-/** Query-parametern som pekar ut fliken på Hemmaplan (`/hem?flik=…`). */
+/** Query-parametern som pekar ut fliken på Översikt (`/hem?flik=…`). */
 export const ORG_POST_TAB_PARAM = 'flik';
 
 /** URL-slug per flik — delas av server (page/agent-log) och klient (flikarna). */
@@ -66,7 +66,7 @@ export function orgPostTabFromSlug(slug: string | undefined | null): OrgPostTab 
   return homeTabFromSlug(slug);
 }
 
-/** Intern länk till Hemmaplan med rätt flik öppen (anslagstavlan = bara `/hem`). */
+/** Intern länk till Översikt med rätt flik öppen (anslagstavlan = bara `/hem`). */
 export function homeTabHref(tab: OrgPostTab): string {
   return tab === 'board' ? '/hem' : `/hem?${ORG_POST_TAB_PARAM}=${ORG_POST_TAB_SLUGS[tab]}`;
 }

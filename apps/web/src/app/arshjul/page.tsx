@@ -52,7 +52,7 @@ export default async function ArshjulPage({
   searchParams?: Promise<{ item?: string }>;
 }) {
   const user = await requireUser();
-  // Djuplänk från Hemmaplans kalender (`?item=<id>`) — bara formatvalidering
+  // Djuplänk från Översiktens kalender (`?item=<id>`) — bara formatvalidering
   // här; posten slås upp i klienten mot den redan RLS-filtrerade listan.
   const { item: rawItem } = (await searchParams) ?? {};
   const openItemId = typeof rawItem === 'string' && /^[a-zA-Z0-9_-]{1,40}$/.test(rawItem) ? rawItem : null;

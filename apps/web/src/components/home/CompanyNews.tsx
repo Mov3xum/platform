@@ -4,7 +4,7 @@ import { TimeAgo } from './TimeAgo';
 import type { DashboardActivity } from '@/components/DashboardChat';
 
 /**
- * Bolagsnytt på Hemmaplan (CLAUDE.md § 37/§ 32) — den samlade aktivitets-
+ * Bolagsnytt på Översikt (CLAUDE.md § 37/§ 32) — den samlade aktivitets-
  * loggen som en vertikal tidslinje: en hårlinje med prickar, relativ tid i
  * gutter:n, AI-utförda åtgärder märkta med gnista (art. 13). Ren presentation
  * av redan RLS-filtrerad feed; ingen dataväg.
