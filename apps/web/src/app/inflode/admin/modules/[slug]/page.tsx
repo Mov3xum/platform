@@ -13,6 +13,7 @@ import { FLOW_TYPE_LABEL } from '@/lib/compass/types';
 import { deleteModuleAction } from '@/lib/actions/compass';
 import { listEvents } from '@/lib/actions/events';
 import { ShareModule } from '@/components/compass/ShareModule';
+import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
 import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
 import { ModuleEditor } from '@/components/compass/ModuleEditor';
 import { moduleHeroImageUrl, moduleHeroVideoUrl } from '@/lib/compass/media';
@@ -139,6 +140,14 @@ export default async function EditModulePage({
             name={mod.name}
             publicSlug={mod.public_slug}
             isPublished={Boolean(mod.is_active && mod.public_url_enabled)}
+          />
+
+          <FollowUpSurveys
+            pb={pb}
+            tenant={user.tenant}
+            kind="compass_module"
+            id={mod.id}
+            canCreate
           />
 
           <Card>

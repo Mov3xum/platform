@@ -1864,6 +1864,17 @@ export function EditorModal({
         </div>
 
         <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-default bg-surface/95 px-5 py-3 backdrop-blur-sm">
+          {form.id ? (
+            // Uppföljning av en kampanj/aktivitet (§ 39.4): öppnar "Ny enkät"
+            // förkopplad till posten. Bara för sparade poster (id krävs).
+            <Link
+              href={`/inflode/utvardering/new?for=${encodeURIComponent(`annual_wheel:${form.id}`)}`}
+              className="mr-auto inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-[13px] text-foreground-muted hover:text-brand"
+              title="Skapa en enkät som följer upp den här aktiviteten"
+            >
+              <Icon name="link" size={13} /> Skapa uppföljning
+            </Link>
+          ) : null}
           <button
             type="button"
             onClick={onClose}

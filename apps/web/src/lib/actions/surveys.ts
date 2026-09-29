@@ -7,10 +7,16 @@ import { requireUser, getServerPb } from '@/lib/auth.server';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { hasRole } from '@/lib/rbac';
 import { getSurvey, newPublicSlug } from '@/lib/surveys/store';
+import { getRecordInTenant } from '@/lib/core/write/helpers';
+import type { Role } from '@platform/shared';
 import {
+  SURVEY_LINK_DEFAULT_KIND,
   SURVEY_TEMPLATES,
   isSurveyKind,
   normalizeSurveyQuestions,
+  parseSurveyLinkRef,
+  type SurveyLinkKind,
+  type SurveyLinkRef,
   type SurveyQuestion
 } from '@platform/shared';
 
@@ -47,15 +53,63 @@ function cap(v: FormDataEntryValue | null, max: number): string {
   return String(v ?? '').trim().slice(0, max);
 }
 
+// Källa → PB-kollektion + namnfält. Källan läses tenant-verifierat (§ 21) så en
+// enkät aldrig kan kopplas till en annan tenants post; etiketten härleds
+// server-side och tas ALDRIG från klienten.
+const LINK_SOURCE: Record<SurveyLinkKind, { collection: string; nameField: string }> = {
+  annual_wheel: { collection: 'annual_wheel_items', nameField: 'title' },
+  event: { collection: 'incubator_events', nameField: 'name' },
+  workshop: { collection: 'workshops', nameField: 'title' },
+  mission: { collection: 'missions', nameField: 'title' },
+  startup: { collection: 'startups', nameField: 'name' },
+  compass_module: { collection: 'compass_modules', nameField: 'name' }
+};
+
+export interface ResolvedSurveyLink extends SurveyLinkRef {
+  label: string;
+  /** Bara kompassmoduler — för länken tillbaka. */
+  slug?: string;
+}
+
+/** Slår upp källan för en `?for=<kind>:<id>`-referens i den inloggades tenant. */
+export async function resolveSurveyLink(
+  pb: PocketBase,
+  user: { id: string; tenant: string; roles: string[] },
+  raw: unknown
+): Promise<ResolvedSurveyLink | null> {
+  const ref = parseSurveyLinkRef(raw);
+  if (!ref) return null;
+  const src = LINK_SOURCE[ref.kind];
+  const row = await getRecordInTenant<{ id: string; tenant?: string; slug?: string } & Record<string, unknown>>(
+    pb,
+    { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+    src.collection,
+    ref.id,
+    `id,tenant,slug,${src.nameField}`
+  );
+  if (!row) return null;
+  const label = String(row[src.nameField] ?? '').trim().slice(0, 200);
+  return { ...ref, label: label || `${ref.kind} ${ref.id}`, slug: typeof row.slug === 'string' ? row.slug : undefined };
+}
+
 /** Skapar en enkät från en mall och skickar staff vidare till byggaren. */
 export async function createSurveyAction(formData: FormData) {
   const user = await requireManager();
-  const kindRaw = String(formData.get('kind') || 'custom');
+  const pb = await getServerPb();
+
+  // Valfri källa (§ 39.4). En referens som inte kan verifieras avvisas —
+  // aldrig en tyst fristående enkät när staff trodde den var kopplad.
+  const forRaw = formData.get('for');
+  let link: ResolvedSurveyLink | null = null;
+  if (typeof forRaw === 'string' && forRaw) {
+    link = await resolveSurveyLink(pb, user, forRaw);
+    if (!link) throw new Error('Det som enkäten skulle följa upp hittades inte.');
+  }
+
+  const kindRaw = String(formData.get('kind') || (link ? SURVEY_LINK_DEFAULT_KIND[link.kind] : 'custom'));
   const kind = isSurveyKind(kindRaw) ? kindRaw : 'custom';
   const tpl = SURVEY_TEMPLATES[kind];
-  const name = cap(formData.get('name'), 160) || tpl.label;
-
-  const pb = await getServerPb();
+  const name = cap(formData.get('name'), 160) || (link ? `Uppföljning: ${link.label}` : tpl.label);
   let created: { id: string } | null = null;
   // Den slumpade sluggen kolliderar i praktiken aldrig; ett unikt-index-fel
   // (400) ger ett nytt försök i stället för ett hårt fel.
@@ -71,7 +125,10 @@ export async function createSurveyAction(formData: FormData) {
       questions: tpl.questions,
       is_active: false,
       public_slug: newPublicSlug(),
-      created_by: user.id
+      created_by: user.id,
+      link_kind: link?.kind ?? '',
+      link_id: link?.id ?? '',
+      link_label: link?.label ?? ''
     };
     try {
       created = await writeWithFallback(pb, (c) =>
@@ -85,6 +142,14 @@ export async function createSurveyAction(formData: FormData) {
     }
   }
   revalidatePath('/inflode/utvardering');
+  if (link) {
+    // Schema-drift (§ 24.4-invarianten): PB släpper okända fält tyst. Läs
+    // tillbaka och varna i stället för att låtsas att kopplingen finns.
+    const back = await getSurvey(pb, user.tenant, created!.id);
+    if (back && !back.link_kind) {
+      redirect(`/inflode/utvardering/${created!.id}?varning=koppling`);
+    }
+  }
   redirect(`/inflode/utvardering/${created!.id}`);
 }
 

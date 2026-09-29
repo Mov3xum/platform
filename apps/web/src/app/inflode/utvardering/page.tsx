@@ -6,6 +6,7 @@ import { PageShell } from '@/components/PageShell';
 import { Card, Chip, Icon } from '@/components/proto';
 import { listSurveys } from '@/lib/surveys/store';
 import { SURVEY_KIND_LABEL } from '@platform/shared';
+import { SurveyLinkChip } from '@/components/surveys/SurveyLinkChip';
 import { buildInflodeTabs } from '../_tabs';
 
 export const dynamic = 'force-dynamic';
@@ -36,7 +37,9 @@ export default async function SurveysPage() {
           <Icon name="shield" size={13} />
           <span>
             Enkäter besvaras anonymt på <code className="mx-mono">/u/[länk]</code> med egen QR-kod.
-            Inga namn, e-postadresser eller IP-adresser sparas — bara svaren.
+            Inga namn, e-postadresser eller IP-adresser sparas — bara svaren. En uppföljning kan
+            också skapas direkt från en aktivitet i årshjulet, ett event, en workshop, ett uppdrag
+            eller ett bolagskort.
           </span>
         </div>
       </Card>
@@ -76,6 +79,11 @@ export default async function SurveysPage() {
                     <code className="mx-mono">/u/{s.public_slug}</code> · {s.questions.length} frågor
                     {s.description ? ` · ${s.description}` : ''}
                   </div>
+                  {s.link_kind && (
+                    <div style={{ marginTop: 6 }}>
+                      <SurveyLinkChip kind={s.link_kind} id={s.link_id} label={s.link_label} />
+                    </div>
+                  )}
                 </div>
                 <div className="mx-mono mx-t-xs" style={{ textAlign: 'right', flexShrink: 0 }}>
                   <div className="mx-fw-6 mx-ink-soft">{counts.get(s.id) ?? 0} svar</div>

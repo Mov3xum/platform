@@ -8,6 +8,7 @@ import { ConfirmDeleteButton } from '@/components/surveys/ConfirmDeleteButton';
 import { SurveyResults } from '@/components/surveys/SurveyResults';
 import { deleteSurveyAction } from '@/lib/actions/surveys';
 import { getSurvey, getSurveyResults } from '@/lib/surveys/store';
+import { SurveyLinkChip } from '@/components/surveys/SurveyLinkChip';
 import { buildInflodeTabs } from '../../_tabs';
 
 export const dynamic = 'force-dynamic';
@@ -17,10 +18,10 @@ export default async function SurveyDetailPage({
   searchParams
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ vy?: string }>;
+  searchParams: Promise<{ vy?: string; varning?: string }>;
 }) {
   const { id } = await params;
-  const { vy } = await searchParams;
+  const { vy, varning } = await searchParams;
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) redirect('/inflode');
   const pb = await getServerPb();
@@ -34,7 +35,12 @@ export default async function SurveyDetailPage({
     <PageShell
       title="Marknadsverktyg"
       tabs={buildInflodeTabs()}
-      meta={<span className="text-[12px] text-foreground-subtle">Utvärdering / {survey.name}</span>}
+      meta={
+        <span className="mx-flex mx-items-c mx-gap-2 text-[12px] text-foreground-subtle">
+          Utvärdering / {survey.name}
+          <SurveyLinkChip kind={survey.link_kind} id={survey.link_id} label={survey.link_label} />
+        </span>
+      }
       actions={
         <>
           <Link
@@ -52,6 +58,23 @@ export default async function SurveyDetailPage({
         </>
       }
     >
+      {varning === 'koppling' && (
+        <div
+          role="alert"
+          className="mx-t-13"
+          style={{
+            padding: '10px 12px',
+            borderRadius: 10,
+            marginBottom: 12,
+            maxWidth: 820,
+            background: 'var(--movexum-pastell-gul)',
+            color: 'var(--movexum-morkgul)'
+          }}
+        >
+          Enkäten skapades, men kopplingen till källan kunde inte sparas — PocketBase saknar
+          fälten från migration 1700000150. Kör migrationen och skapa uppföljningen igen.
+        </div>
+      )}
       {results ? (
         <SurveyResults summary={results.summary} total={results.total} incomplete={results.incomplete} />
       ) : (

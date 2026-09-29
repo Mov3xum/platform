@@ -8,6 +8,7 @@ import { WorkshopAssignForm } from '../../WorkshopAssignForm';
 import { listAssignableResourcesForTenant, type AssignableResource } from '@/lib/assignments/collaboration';
 import { WorkshopStatusBadge } from '@/components/Badges';
 import { deleteWorkshopFormAction } from '@/lib/actions/workshops';
+import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
 import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
 import { pbFileUrl } from '@/lib/pb-file';
 import type { Workshop, WorkshopAssignment, WorkshopBlock, WorkshopModule } from '@platform/shared';
@@ -141,6 +142,14 @@ export default async function WorkshopDetailPage({ params }: { params: Promise<{
         <p className="mt-3 text-xs text-foreground-subtle">
           {modules.length} modul{modules.length !== 1 ? 'er' : ''} · {totalBlocks} block
         </p>
+        <FollowUpSurveys
+          pb={pb}
+          tenant={user.tenant}
+          kind="workshop"
+          id={id}
+          canCreate={hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])}
+          compact
+        />
       </header>
 
       <div className="grid gap-8 lg:grid-cols-3">

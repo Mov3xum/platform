@@ -8,6 +8,9 @@ import {
   computeNps,
   normalizeSurveyQuestions,
   validateSurveyAnswers,
+  parseSurveyLinkRef,
+  surveyLinkHref,
+  surveyLinkRefParam,
   type SurveyQuestion
 } from './survey.ts';
 
@@ -84,4 +87,17 @@ test('mallar: alla typer har giltiga, normaliserade frågor', () => {
     const t = SURVEY_TEMPLATES[kind];
     assert.equal(normalizeSurveyQuestions(t.questions).length, t.questions.length, kind);
   }
+});
+
+test('länkreferens: tolkar bara kända typer och ofarliga id:n', () => {
+  assert.deepEqual(parseSurveyLinkRef('event:abc123'), { kind: 'event', id: 'abc123' });
+  assert.equal(parseSurveyLinkRef('users:abc'), null);
+  assert.equal(parseSurveyLinkRef('event:'), null);
+  assert.equal(parseSurveyLinkRef('event:a b'), null);
+  assert.equal(parseSurveyLinkRef(42), null);
+  const ref = parseSurveyLinkRef('annual_wheel:x1')!;
+  assert.equal(surveyLinkRefParam(ref), 'annual_wheel:x1');
+  assert.equal(surveyLinkHref(ref), '/arshjul?item=x1');
+  assert.equal(surveyLinkHref({ kind: 'compass_module', id: 'm' }, 'slug-x'), '/inflode/admin/modules/slug-x');
+  assert.equal(surveyLinkHref({ kind: 'compass_module', id: 'm' }), '/inflode/admin/modules');
 });

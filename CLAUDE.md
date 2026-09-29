@@ -5477,3 +5477,38 @@ på en publik, oinloggad länk `/u/<public_slug>` med QR-kod. Svaren är
   programmet).
 - **Migration** 1700000149 är ett nytt, oföränderligt filnummer.
 
+### 39.4 Uppföljning från en källa (aktivitet, kampanj, event, workshop …)
+
+En enkät kan skapas **från det den ska följa upp** i stället för fristående.
+Knappen **"Skapa uppföljning"** finns på eventets detaljsida (`/events/[id]`),
+uppdragskortet (`/uppdrag/[id]`), workshop-sidan
+(`/education/workshops/[id]`), bolagskortet (`/startups/[id]`, sektion
+*Uppföljning*), kompassmodulens redigeringssida och i årshjulets
+redigeringsdialog (sparad aktivitet/kampanj). Den öppnar
+`/inflode/utvardering/new?for=<kind>:<id>` med källan förvald, rätt mall
+(`SURVEY_LINK_DEFAULT_KIND`: event → Event, workshop → Utbildning, uppdrag/bolag
+→ Uppföljning) och namnet "Uppföljning: <källa>". Samma sidor listar redan
+skapade uppföljningar med status + länkar till resultat/redigering
+(`components/surveys/FollowUpSurveys.tsx`, server, läser med användarens token).
+
+- **Datamodell (migration 1700000150):** `surveys.link_kind` (select — MÅSTE
+  spegla `SURVEY_LINK_KINDS`: `annual_wheel | event | workshop | mission |
+  startup | compass_module`), `link_id` (text ≤ 64), `link_label` (text ≤ 200).
+  **Polymorf, ingen relation**: en raderad källa bryter aldrig enkäten
+  (etiketten lever kvar, länken leder till en 404/lista). Migration-only.
+- **Säkerhet:** referensen (`parseSurveyLinkRef`, ren + enhetstestad: bara
+  kända typer + `[a-zA-Z0-9_-]`-id) slås upp **tenant-verifierat** via
+  `getRecordInTenant` (`resolveSurveyLink` i `lib/actions/surveys.ts`) både när
+  sidan renderas och i `createSurveyAction`; etiketten härleds server-side ur
+  källans namn/titel och tas ALDRIG från klienten. En okänd referens ger en
+  synlig varning (sidan) respektive ett fel (actionen) — aldrig en tyst
+  fristående enkät. Schema-drift: efter skapandet läses posten tillbaka; saknas
+  `link_kind` visas `?varning=koppling` (kör migration 1700000150).
+- **Visning:** `SurveyLinkChip` ("Följer upp: Event · Frukostträff") i
+  enkätlistan och på byggar-/resultatsidan, med länk tillbaka via
+  `surveyLinkHref` (kompassmoduler kräver slug → utan slug landar man på
+  modullistan).
+- **GDPR/AI/riskklass:** oförändrat (§ 39.3) — kopplingen är verksamhetsdata
+  (typ + id + titel), ingen PII, ingen AI-inferens; `survey_responses` förblir
+  denylistad.
+

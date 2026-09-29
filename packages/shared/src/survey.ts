@@ -415,3 +415,92 @@ export const SURVEY_TEMPLATES: Record<SurveyKind, SurveyTemplate> = {
     questions: [q('helhet', 'rating', 'Helhetsbetyg', true)]
   }
 };
+
+// ── Uppföljning av något (koppling till källa) ────────────────────────────────
+//
+// En enkät kan skapas "från" en aktivitet i årshjulet (kampanj), ett event, en
+// workshop, ett uppdrag, ett bolag eller en Startupkompass-modul. Kopplingen är
+// polymorf och lagras som (link_kind, link_id, link_label) på `surveys` — inga
+// relationer, så en raderad källa bryter aldrig enkäten (etiketten lever kvar).
+
+export type SurveyLinkKind =
+  | 'annual_wheel'
+  | 'event'
+  | 'workshop'
+  | 'mission'
+  | 'startup'
+  | 'compass_module';
+
+export const SURVEY_LINK_KINDS: SurveyLinkKind[] = [
+  'annual_wheel',
+  'event',
+  'workshop',
+  'mission',
+  'startup',
+  'compass_module'
+];
+
+export const SURVEY_LINK_KIND_LABEL: Record<SurveyLinkKind, string> = {
+  annual_wheel: 'Aktivitet i årshjulet',
+  event: 'Event',
+  workshop: 'Workshop',
+  mission: 'Uppdrag',
+  startup: 'Bolag',
+  compass_module: 'Startupkompass-modul'
+};
+
+/** Mallen som passar bäst som utgångspunkt för en uppföljning av källan. */
+export const SURVEY_LINK_DEFAULT_KIND: Record<SurveyLinkKind, SurveyKind> = {
+  annual_wheel: 'custom',
+  event: 'event',
+  workshop: 'course',
+  mission: 'followup',
+  startup: 'followup',
+  compass_module: 'custom'
+};
+
+export interface SurveyLinkRef {
+  kind: SurveyLinkKind;
+  id: string;
+}
+
+export function isSurveyLinkKind(v: unknown): v is SurveyLinkKind {
+  return typeof v === 'string' && (SURVEY_LINK_KINDS as string[]).includes(v);
+}
+
+const LINK_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+/** Tolkar `?for=<kind>:<id>` — bara kända typer och ofarliga id:n. */
+export function parseSurveyLinkRef(raw: unknown): SurveyLinkRef | null {
+  if (typeof raw !== 'string') return null;
+  const i = raw.indexOf(':');
+  if (i <= 0) return null;
+  const kind = raw.slice(0, i);
+  const id = raw.slice(i + 1);
+  if (!isSurveyLinkKind(kind) || !LINK_ID_RE.test(id)) return null;
+  return { kind, id };
+}
+
+export function surveyLinkRefParam(ref: SurveyLinkRef): string {
+  return `${ref.kind}:${ref.id}`;
+}
+
+/** Intern länk tillbaka till källan. `slug` behövs bara för kompassmoduler. */
+export function surveyLinkHref(ref: SurveyLinkRef, slug?: string): string {
+  switch (ref.kind) {
+    case 'annual_wheel':
+      return `/arshjul?item=${encodeURIComponent(ref.id)}`;
+    case 'event':
+      return `/events/${encodeURIComponent(ref.id)}`;
+    case 'workshop':
+      return `/education/workshops/${encodeURIComponent(ref.id)}`;
+    case 'mission':
+      return `/uppdrag/${encodeURIComponent(ref.id)}`;
+    case 'startup':
+      return `/startups/${encodeURIComponent(ref.id)}`;
+    case 'compass_module':
+      return slug
+        ? `/inflode/admin/modules/${encodeURIComponent(slug)}`
+        : '/inflode/admin/modules';
+  }
+}

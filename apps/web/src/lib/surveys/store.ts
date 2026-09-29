@@ -6,7 +6,9 @@ import {
   aggregateSurvey,
   normalizeSurveyQuestions,
   type SurveyAnswers,
+  isSurveyLinkKind,
   type SurveyKind,
+  type SurveyLinkKind,
   type SurveyQuestion,
   type SurveySummary
 } from '@platform/shared';
@@ -29,6 +31,10 @@ export interface Survey {
   questions: SurveyQuestion[];
   is_active: boolean;
   public_slug: string;
+  /** Källa enkäten följer upp (§ 39.4) — null när enkäten är fristående. */
+  link_kind: SurveyLinkKind | null;
+  link_id: string;
+  link_label: string;
   created: string;
   updated: string;
 }
@@ -45,6 +51,9 @@ interface SurveyRecord {
   questions?: unknown;
   is_active?: boolean;
   public_slug?: string;
+  link_kind?: string;
+  link_id?: string;
+  link_label?: string;
   created?: string;
   updated?: string;
 }
@@ -62,6 +71,9 @@ export function toSurvey(r: SurveyRecord): Survey {
     questions: normalizeSurveyQuestions(r.questions),
     is_active: r.is_active === true,
     public_slug: r.public_slug || '',
+    link_kind: isSurveyLinkKind(r.link_kind) ? r.link_kind : null,
+    link_id: r.link_id || '',
+    link_label: r.link_label || '',
     created: r.created || '',
     updated: r.updated || ''
   };
@@ -129,6 +141,35 @@ export async function listSurveys(
     })
   );
   return { surveys: rows.map(toSurvey), counts };
+}
+
+/** Enkäter som följer upp en given källa (visas på källans sida). Fail-soft. */
+export async function listSurveysForLink(
+  pb: PocketBase,
+  tenant: string,
+  kind: SurveyLinkKind,
+  id: string
+): Promise<Survey[]> {
+  try {
+    const rows = await withFallback(
+      pb,
+      (c) =>
+        c.collection('surveys').getFullList<SurveyRecord>({
+          filter: c.filter('tenant = {:t} && link_kind = {:k} && link_id = {:i}', {
+            t: tenant,
+            k: kind,
+            i: id
+          }),
+          sort: '-created'
+        }),
+      (r) => r.length === 0
+    );
+    return rows.map(toSurvey);
+  } catch {
+    // Saknad migration 1700000150 (okänt fält → 400) eller läsfel: visa
+    // ingenting hellre än att fälla källans sida.
+    return [];
+  }
 }
 
 export async function getSurvey(

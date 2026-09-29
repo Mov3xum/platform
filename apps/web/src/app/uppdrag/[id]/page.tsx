@@ -24,6 +24,7 @@ import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
 import { TeamCompetencePanel, type TeamMemberView } from './TeamCompetencePanel';
 import { MissionTaskBoard } from './MissionTaskBoard';
 import { MissionDocuments, type MissionDocView } from './MissionDocuments';
+import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
 import { sanitizeCompetences } from '@platform/shared';
 import type { Mission, MissionComment, MissionParticipant, MissionDocument, CompetenceId, Role } from '@platform/shared';
 
@@ -319,6 +320,13 @@ export default async function MissionDetailPage({
             missionId={mission.id}
             documents={documents}
             canManage={isStaff}
+          />
+          <FollowUpSurveys
+            pb={pb}
+            tenant={user.tenant}
+            kind="mission"
+            id={mission.id}
+            canCreate={hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])}
           />
         </div>
       </div>
