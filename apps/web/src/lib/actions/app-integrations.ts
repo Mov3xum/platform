@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
+import { invalidateOutlookCache } from '@/lib/overview/aggregate';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { getAppProvider } from '@/lib/app-integrations/registry';
 import { buildAuthorizeUrl } from '@/lib/app-integrations/oauth';
@@ -101,6 +102,9 @@ export async function disconnectAppIntegrationAction(input: {
   if (!row) return { error: 'Ingen koppling hittades.' };
 
   await disconnectIntegration(pb, row.id);
+  // Agenda-cachen på "Mina uppgifter" (§ 40) får inte visa möten efter
+  // återkallat samtycke (GDPR art. 7.3).
+  if (input.provider === 'outlook_calendar') invalidateOutlookCache(user.id);
 
   revalidatePath('/integrationer');
   revalidatePath(`/integrationer/${input.provider.replace(/_/g, '-')}`);

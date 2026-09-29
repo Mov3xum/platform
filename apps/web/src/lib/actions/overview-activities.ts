@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { updateActivityField } from '@/lib/core/write/activities';
+import { validateDateOnly, validateNonEmptyText } from '@/lib/core/write/validators';
 import type { Actor } from '@/lib/core/write/types';
 import { toRawStatus, type BoardStatus } from '@/lib/overview/status';
 
@@ -84,11 +85,21 @@ export async function updateActivityDetailsAction(input: {
   dueDate?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   const user = await requireUser();
+
+  // Validera BÅDA fälten innan första skrivningen så en ändring aldrig blir
+  // halvsparad (titel sparad, datum avvisat).
+  const activityId = typeof input?.activityId === 'string' ? input.activityId.trim() : '';
+  if (!activityId) return { ok: false, error: 'Aktiviteten saknas.' };
+  const title = validateNonEmptyText(input?.title, 'title', 200);
+  if (!title.ok) return { ok: false, error: title.error };
+  const due = validateDateOnly(typeof input?.dueDate === 'string' ? input.dueDate.trim() : '', 'Datum');
+  if (!due.ok) return { ok: false, error: due.error };
+
   const pb = await getServerPb();
 
   let row: { id: string; owner?: string; expand?: { startup?: { tenant?: string } } };
   try {
-    row = await pb.collection('activities').getOne(input.activityId, {
+    row = await pb.collection('activities').getOne(activityId, {
       fields: 'id,owner,startup,expand.startup.tenant',
       expand: 'startup'
     });
@@ -112,16 +123,16 @@ export async function updateActivityDetailsAction(input: {
   };
 
   const titleRes = await updateActivityField(pb, actor, {
-    activityId: input.activityId,
+    activityId,
     field: 'title',
-    value: input.title
+    value: title.value
   });
   if (!titleRes.ok) return { ok: false, error: titleRes.error };
 
   const dueRes = await updateActivityField(pb, actor, {
-    activityId: input.activityId,
+    activityId,
     field: 'due_date',
-    value: (input.dueDate ?? '').trim() || null
+    value: due.value
   });
   if (!dueRes.ok) return { ok: false, error: dueRes.error };
 

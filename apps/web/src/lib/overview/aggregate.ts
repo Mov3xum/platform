@@ -44,6 +44,20 @@ const PAGE_SIZE = 200;
 const OUTLOOK_CACHE_TTL_MS = 60_000;
 const outlookCache = new Map<string, { at: number; items: AgendaItem[]; state: OutlookState }>();
 
+/** Töm cachen för en användare — anropas när Outlook kopplas bort (GDPR art. 7.3). */
+export function invalidateOutlookCache(userId: string): void {
+  outlookCache.delete(userId);
+}
+
+function setOutlookCache(userId: string, entry: { items: AgendaItem[]; state: OutlookState }) {
+  const now = Date.now();
+  // Rensa utgångna poster så Map:en inte växer med antalet användare.
+  for (const [k, v] of outlookCache) {
+    if (now - v.at >= OUTLOOK_CACHE_TTL_MS) outlookCache.delete(k);
+  }
+  outlookCache.set(userId, { at: now, ...entry });
+}
+
 const TASK_STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
 const ACTIVITY_STAFF_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
 const EDIT_ROLES = [
@@ -80,6 +94,7 @@ interface TaskRow {
   owner?: string;
   startup?: string;
   mission?: string;
+  link_kind?: string;
   expand?: { owner?: UserRef; startup?: StartupRef; contact?: ContactRef };
 }
 
@@ -233,6 +248,7 @@ export async function getOverviewData(
         startupId: t.startup || undefined,
         startupName: t.expand?.startup?.name,
         missionId: t.mission || undefined,
+        linkKind: t.link_kind || undefined,
         contactName: contactName(t.expand?.contact),
         canEdit: isTaskStaff || (!!t.owner && t.owner === user.id)
       });
@@ -285,6 +301,7 @@ export async function getOverviewData(
     agenda.push(...cached.items);
   } else {
     const outlookItems: AgendaItem[] = [];
+    let lookupFailed = false;
     try {
       const row = await findIntegrationRow(pb, user.id, 'outlook_calendar');
       if (row && row.status === 'active' && row.auth_data) {
@@ -326,11 +343,13 @@ export async function getOverviewData(
         outlookState = 'error';
       }
     } catch {
+      // Ett tillfälligt fel i själva uppslaget får inte cachas som "ej ansluten".
       outlookState = 'disconnected';
+      lookupFailed = true;
     }
     // Bara ett lyckat/entydigt resultat cachas — ett fel provas om nästa gång.
-    if (outlookState !== 'error') {
-      outlookCache.set(user.id, { at: now.getTime(), items: outlookItems, state: outlookState });
+    if (outlookState !== 'error' && !lookupFailed) {
+      setOutlookCache(user.id, { items: outlookItems, state: outlookState });
     }
     agenda.push(...outlookItems);
   }

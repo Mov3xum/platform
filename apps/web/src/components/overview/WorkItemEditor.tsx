@@ -35,7 +35,10 @@ export function WorkItemEditor({
   const [startupId, setStartupId] = useState(item.startupId ?? '');
   const [error, setError] = useState<string | null>(null);
   const maxLen = item.source === 'task' ? 500 : 200;
-  const canPickStartup = item.source === 'task';
+  // Bara fristående/bolagskopplade uppgifter får byta bolag — kort som hör
+  // till uppdrag, kontakt, event eller upphandling behåller sin länk.
+  const canPickStartup =
+    item.source === 'task' && (!item.linkKind || item.linkKind === 'none' || item.linkKind === 'startup');
   // Ett bolag som inte finns i listan (t.ex. avslutat) behålls som val.
   const options =
     item.startupId && !startupOptions.some((s) => s.id === item.startupId)

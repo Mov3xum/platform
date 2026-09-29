@@ -7,10 +7,12 @@ import type { Actor } from './types';
  * Delade robusthetshjälpare för skrivlagret (§ 16, § 33).
  *
  * `writeWithFallback`: skriv via användarens token först; falla tillbaka på
- * superuser vid 400/403/404 (PB v0.23.4:s rule-eval-bugg, § 21.3 — samma
- * mönster som `lib/core/write/compass.ts` och `lib/actions/workshops.ts`; PB
- * svarar 404, inte 403, när update-/delete-regeln filtrerar bort posten,
- * § 23.8). Roll +
+ * superuser vid 400/403 (PB v0.23.4:s rule-eval-bugg, § 21.3 — samma mönster
+ * som `lib/core/write/compass.ts` och `lib/actions/workshops.ts`). PB svarar
+ * 404, inte 403, när en update-/delete-regel filtrerar bort posten (§ 23.8);
+ * den klassen är OPT-IN (`fallbackOn404`) så att bara anropare som verifierat
+ * roll + tenant för exakt den regeln (t.ex. tasks.deleteRule med bart `?=`)
+ * vidgar fallbacken. Roll +
  * tenant är ALLTID verifierade av anroparen innan fallbacken används —
  * superusern är en robusthetsfallback, inte behörighetsgränsen.
  *
@@ -29,13 +31,14 @@ function statusOf(err: unknown): number | undefined {
 
 export async function writeWithFallback<T>(
   pb: PocketBase,
-  run: (client: PocketBase) => Promise<T>
+  run: (client: PocketBase) => Promise<T>,
+  options: { fallbackOn404?: boolean } = {}
 ): Promise<T> {
   try {
     return await run(pb);
   } catch (err) {
     const status = statusOf(err);
-    if (status === 400 || status === 403 || status === 404) {
+    if (status === 400 || status === 403 || (status === 404 && options.fallbackOn404)) {
       const su = await getSuperuserPb();
       if (su.ok) return run(su.pb);
     }

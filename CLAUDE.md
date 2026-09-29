@@ -1498,7 +1498,10 @@ individer.
   den nya direkt; annars behålls den gamla.
 - **Dataminimering:** vi cachar INGA tredjeparts-data i vår DB —
   vi hämtar live från providern vid varje sidladdning. Bara tokens
-  lagras.
+  lagras. **Enda undantag (§ 40):** "Mina uppgifter" håller det härledda
+  agendaresultatet (titel/tid/plats/länk, aldrig tokens) 60 s i
+  processminnet per användare så sidans pollning inte gör ett Graph-anrop
+  per omladdning; cachen töms vid bortkoppling (`invalidateOutlookCache`).
 - **CRM-matchning (Outlook ↔ bolagskort):** mötesdeltagares och
   organisatörers e-post läses **transient** (i minnet, per request) i
   `providers/outlook_calendar/{calendar,match}.ts` enbart för att matcha
@@ -5767,12 +5770,23 @@ Outlook-möten, notiser och uppdrag jag deltar i. Sidan hette tidigare "Min
 - **RBAC** (ISO 27001 A.5.15–A.5.18): redigera/flytta = staff eller ägare
   (speglar `tasks.updateRule`); radera = admin/incubator_lead eller ägare
   (speglar `tasks.deleteRule`); allt verifieras i server-action med tenant-
-  kontroll i koden. Skrivningar via användartoken med `writeWithFallback`
-  (superuser BARA vid PB v0.23.4:s tysta regel-nekande, § 21.3 — delete-
-  regeln använder bart `?=` mot roller och nekar annars tyst en admin som
-  inte äger kortet). Aktiviteters titel/datum går genom det delade, auditade
-  skrivlagret (`updateActivityField`; `due_date` nytt whitelistat fält för
-  människa, `agent: deny` — agentens verktygsyta § 33 är oförändrad).
+  kontroll i koden, indata typkontrolleras (`validateDateOnly`) och
+  redigering/radering auditeras i `agent_actions` (radering som `update` +
+  `deleted`, § 30.6). Skrivningar via användartoken med `writeWithFallback`
+  (superuser BARA vid PB v0.23.4:s tysta regel-nekande, § 21.3); 404-
+  fallbacken är **opt-in** (`fallbackOn404`) och används bara för
+  raderingen, där `tasks.deleteRule` (bart `?=` mot roller) annars tyst
+  nekar en admin som inte äger kortet. Aktiviteters titel/datum går genom
+  det delade, auditade skrivlagret (`updateActivityField`; `due_date` nytt
+  whitelistat fält för människa, `agent: deny` — agentens verktygsyta § 33
+  är oförändrad); båda fälten valideras innan första skrivningen.
+- **Polymorfa länkar skyddas.** `link_kind`/`startup` ändras BARA när kortet
+  är fristående eller bolagskopplat (`canRelinkStartup`); uppdrags-,
+  kontakt-, event- och upphandlingskort behåller sin länk, och editorn döljer
+  bolagsvalet för dem. Ett `startup` på en upphandlingsuppföljning skulle ge
+  bolagsmedlemmar läsrätt till intern avtalsdata via tasks-RLS (§ 39.2/§ 21).
+  Uppföljningar med `rule_key`/`link_kind='procurement'` kan inte raderas
+  här (synken skulle återskapa dem) — markera klar eller ändra regeln.
 - **Snabbtillägget** tar titel + valfritt datum + valfritt bolag
   (`createTaskAction`, tenant-verifierat bolag) så nya kort får en plats i
   tidsindelningen direkt.
@@ -5783,8 +5797,11 @@ Outlook-möten, notiser och uppdrag jag deltar i. Sidan hette tidigare "Min
   under interaktion. **Outlook-agendan cachas 60 s i processminnet per
   användare** (`outlookCache` i `aggregate.ts`) — bara det härledda
   agendaresultatet (titel/tid/plats/länk), aldrig tokens, aldrig i DB; ett
-  fel cachas inte. Medvetet, litet avsteg från "live vid varje sidladdning"
-  (§ 14.4) så pollningen inte gör ett Microsoft Graph-anrop per omladdning.
+  fel (Graph ELLER uppslaget av kopplingen) cachas inte, utgångna poster
+  rensas vid varje skrivning och `disconnectAppIntegrationAction` tömmer
+  cachen direkt (GDPR art. 7.3). Medvetet, litet avsteg från "live vid varje
+  sidladdning" (§ 14.4, dokumenterat där) så pollningen inte gör ett
+  Microsoft Graph-anrop per omladdning.
 - **GDPR/AI:** inga nya fält eller kollektioner; `contactName` på kortet är
   fortsatt UI-only (§ 15.3). Riskklass n/a (ingen AI-inferens).
 

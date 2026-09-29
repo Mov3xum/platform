@@ -100,6 +100,12 @@ export interface WorkItem {
   startupName?: string;
   /** Uppdraget kortet hör till (tasks.link_kind='mission', § 29) — ger "Öppna"-länk. */
   missionId?: string;
+  /**
+   * tasks.link_kind (none/startup/contact/event/mission/procurement). Bara
+   * `none`/`startup` får byta bolag i editorn — en upphandlingsuppföljning
+   * (§ 39.2) får ALDRIG få ett `startup` (skulle ge bolagsmedlemmar läsrätt).
+   */
+  linkKind?: string;
   /** Endast UI för ägaren — får ALDRIG skickas till AI-kontext (§15.3). */
   contactName?: string;
   /** Förberäknad per-item RBAC (staff eller ägare). */
