@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useId, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { SUPPORT_CHECK_INTENT_TEXT } from '@platform/shared';
+import { SUPPORT_CHECK_INTENT_TEXT, SUPPORT_CHECK_STAFF_INTENT_TEXT } from '@platform/shared';
 import { recordFinalReportAction, submitApplicationAction, withdrawApplicationAction } from '@/lib/actions/support-checks';
 import { Icon } from '@/components/proto';
 import { Notice, btnGhost, btnPrimary, inputClass, labelClass } from '../ui';
@@ -21,6 +21,7 @@ export function ApplicantPanel({
   canSubmit,
   canWithdraw,
   canReport,
+  isApplicant,
   requestedSek,
   activityCount,
   openIssues
@@ -31,6 +32,8 @@ export function ApplicantPanel({
   canSubmit: boolean;
   canWithdraw: boolean;
   canReport: boolean;
+  /** Bolagets egen firmatecknare (true) eller Movexum-personal som skickar in på bolagets uppdrag (false). */
+  isApplicant: boolean;
   requestedSek: number | null;
   activityCount: number;
   openIssues: number;
@@ -104,19 +107,20 @@ export function ApplicantPanel({
             });
           }}
         >
-          <h3 className="text-sm font-semibold text-foreground">Intyg och signering (firmatecknare)</h3>
+          <h3 className="text-sm font-semibold text-foreground">{isApplicant ? 'Intyg och signering (firmatecknare)' : 'Inskick på bolagets uppdrag (Movexum)'}</h3>
           <p className="text-xs text-foreground-muted">
             Ansökan {requestedSek !== null ? `om ${Math.round(requestedSek).toLocaleString('sv-SE')} kr ` : ''}fryses i den version du signerar och får en innehålls-hash som bevis (avancerad elektronisk signatur). Ändringar efter signering kräver ny signering.
+            {!isApplicant && ' Du intygar bara att inskicket sker på bolagets uppdrag — intyget om uppgifternas riktighet lämnas av bolaget.'}
           </p>
           <div>
             <label htmlFor={`${uid}-name`} className={labelClass}>
-              Fullständigt namn (som firmatecknare)
+              {isApplicant ? 'Fullständigt namn (som firmatecknare)' : 'Ditt fullständiga namn'}
             </label>
             <input id={`${uid}-name`} className={inputClass} value={signerName} onChange={(e) => setSignerName(e.target.value)} required maxLength={200} />
           </div>
           <label className="flex items-start gap-2 text-xs text-foreground-muted">
             <input type="checkbox" checked={intent} onChange={(e) => setIntent(e.target.checked)} className="mt-0.5" />
-            <span>{SUPPORT_CHECK_INTENT_TEXT}</span>
+            <span>{isApplicant ? SUPPORT_CHECK_INTENT_TEXT : SUPPORT_CHECK_STAFF_INTENT_TEXT}</span>
           </label>
           <div className="flex gap-2">
             <button type="submit" className={btnPrimary} disabled={pending || !signerName.trim() || !intent}>

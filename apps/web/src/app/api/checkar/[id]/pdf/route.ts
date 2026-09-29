@@ -61,7 +61,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       activityEndDate: snapshot?.activity_end_date ?? app.activity_end_date ?? null,
       applicantNote: snapshot?.applicant_note ?? app.applicant_note ?? null,
       submittedAt: app.submitted_at,
-      signature: latest ? { signerName: latest.signer_name, signedAt: latest.signed_at, documentHash: latest.document_hash, revision: latest.revision } : null,
+      signature: latest ? { signerName: latest.signer_name, signedAt: latest.signed_at, documentHash: latest.document_hash, revision: latest.revision, intentText: latest.intent_text } : null,
       internal
     });
     const filename = safeFilename(`ansokan-${type?.title ?? 'stodcheck'}-${app.startup_name ?? 'bolag'}`, 'pdf');

@@ -1709,8 +1709,9 @@ export function buildChatTools(
           'Skapar en checktyp (support_check_types, § 46) som bolagen kan ansöka ' +
           'om: excellenscheck, resecheck, AI-verktygscheck … med tak per check, ' +
           'behörighetskrav (minsta IRL-nivå), krav på slutrapport och default-' +
-          'finansiering (projekt + statsstödsgrund). Bedömningskriterier och ' +
-          'obligatorisk workshop justeras av en människa på /checkar/typer. ' +
+          'finansiering (projekt + statsstödsgrund). Typen skapas som INAKTIVT ' +
+          'utkast — en människa öppnar den för ansökningar, sätter bedömnings-' +
+          'kriterier och obligatorisk workshop på /checkar/typer. ' +
           'Slå upp funding_project via query_collection på funding_projects. ' +
           'Kräver admin/incubator_lead.',
         parameters: {
@@ -1727,7 +1728,6 @@ export function buildChatTools(
             is_excellence_activity: { type: 'boolean' },
             funding_project: { type: 'string', description: 'Id för default-projektet (valfritt).' },
             default_state_aid_basis: { type: 'string', enum: ['de_minimis', 'art22', 'none'] },
-            active: { type: 'boolean', description: 'Öppen för ansökningar (default true).' },
             opens_at: { type: 'string', description: 'ÅÅÅÅ-MM-DD' },
             closes_at: { type: 'string', description: 'ÅÅÅÅ-MM-DD' }
           },

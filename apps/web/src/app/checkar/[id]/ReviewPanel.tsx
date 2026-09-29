@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import {
   FUNDING_BASES,
   FUNDING_BASIS_LABELS,
+  fundingEditable,
+  isSupportCheckStatus,
   scoreSupportCheckAssessment,
   type SupportCheckCriterion
 } from '@platform/shared';
@@ -103,7 +105,8 @@ export function ReviewPanel({
   const decisionOpen = state.status === 'submitted' || state.status === 'under_review';
   const preview = scoreSupportCheckAssessment(criteria, Object.fromEntries(Object.entries(scores).filter(([, v]) => v !== '').map(([k, v]) => [k, Number(v)])));
   const wps = funding.workPackages.filter((w) => w.project === project);
-  const fundingLocked = !(state.status === 'submitted' || state.status === 'under_review' || state.status === 'changes_requested' || state.status === 'approved');
+  // Samma regel som skrivlagret (`fundingEditable`): låst från beslutet — bokföringen gjordes mot den finansiering som gällde då.
+  const fundingLocked = !(isSupportCheckStatus(state.status) && fundingEditable(state.status));
 
   return (
     <div className="space-y-5">

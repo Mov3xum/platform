@@ -177,8 +177,9 @@ export async function deleteFundingProject(pb: PocketBase, actor: Actor, project
     if (used.totalItems > 0) {
       return fail('STATE_TRANSITION', `Projektet har ${used.totalItems} beviljad(e) stödcheck(ar) och kan inte raderas — avsluta det i stället.`);
     }
-  } catch {
-    /* saknat schema → tillåt */
+  } catch (err) {
+    // Fail-closed: kan vi inte bevisa att projektet är obelastat raderar vi inte.
+    return fail('DB_ERROR', describeError(err, 'Kunde inte kontrollera om projektet belastas av stödcheckar — raderingen avbröts.'));
   }
   try {
     await writeWithFallback(pb, (c) => c.collection(FUNDING_PROJECTS).delete(row.id));

@@ -12,7 +12,8 @@
 //
 // RLS: medlem-scopad via `startup` (bolaget ser sina egna bevis),
 // staff/observer hela tenanten. createRule roll-lös (§ 21.3) — skrivningen
-// görs av skrivlagret efter verifierad behörighet. ip lagras BARA som
+// görs av skrivlagret efter verifierad behörighet, och beviset kan bara
+// skapas i den signerandes eget namn (`@request.body.signer = @request.auth.id`). ip lagras BARA som
 // SHA-256-hash (GDPR § 5).
 
 const ANY_AUTH = '@request.auth.id != ""';
@@ -91,7 +92,7 @@ migrate(
       ],
       listRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF_OR_OBSERVER} || ${MEMBER})`,
       viewRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF_OR_OBSERVER} || ${MEMBER})`,
-      createRule: `${ANY_AUTH} && ${ANY_TENANT}`,
+      createRule: `${ANY_AUTH} && ${ANY_TENANT} && @request.body.signer = @request.auth.id`,
       updateRule: null,
       deleteRule: null
     });

@@ -331,12 +331,19 @@ export async function listRules(pb: PocketBase, tenantId: string): Promise<RuleR
   }
 }
 
+const RULE_SEED_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'];
+
 /**
  * Materialiserar standardreglerna första gången modulen används. Seedar
  * BARA efter en LYCKAD, tom läsning (ett läsfel får aldrig tolkas som "inga
- * regler" — § 39.5-läxan) och bara när inga tenant-breda regler finns.
+ * regler" — § 39.5-läxan), bara när inga tenant-breda regler finns och BARA
+ * när anroparen är staff: `support_check_rules` är staff/observer-only (RLS
+ * § 21), så en bolagsmedlems token får alltid en tom lista — den tomheten
+ * betyder "får inte läsa", inte "inga regler", och får aldrig utlösa en seed.
  */
-export async function ensureSupportCheckRules(pb: PocketBase, tenantId: string, actorId: string): Promise<RuleRow[]> {
+export async function ensureSupportCheckRules(pb: PocketBase, tenantId: string, actor: { id: string; roles: readonly string[] }): Promise<RuleRow[]> {
+  const actorId = actor.id;
+  if (!actor.roles.some((r) => RULE_SEED_ROLES.includes(r))) return listRules(pb, tenantId);
   let existing: RuleRow[];
   try {
     existing = await listRulesStrict(pb, tenantId);

@@ -17,9 +17,14 @@
 // RLS (§ 21): medlem-scopad — bolaget ser SINA ansökningar
 // (`linked_startups:each ?= startup`), staff/observer hela tenanten.
 // createRule roll-lös (§ 21.3): bolagsmedlem OCH staff får skapa — behörighet
-// (länkat bolag) enforce:as i skrivlagret. update: staff eller länkad medlem
-// (skrivlagret begränsar medlemmen till utkast/komplettering). delete
-// admin/incubator_lead. Autodate explicit (§ 28.5).
+// (länkat bolag) enforce:as i skrivlagret. Reglerna är dessutom FÄLTLÅSTA
+// (`@request.body.<fält>:isset = false`) så att en användartoken via
+// direkt-API aldrig når längre än rollen: bolagsmedlem/coach kan inte sätta
+// finansiering, beslut eller utbetalning (ledningsfält), och medlemmen kan
+// inte skriva utlåtanden/bedömning/komplettering eller byta tenant/bolag/
+// checktyp. Ett create måste vara ett utkast. Skrivlagret är fortsatt den
+// primära gränsen — detta är defense-in-depth. delete admin/incubator_lead.
+// Autodate explicit (§ 28.5).
 
 const ANY_AUTH = '@request.auth.id != ""';
 const ANY_TENANT = '@request.auth.tenant != ""';
@@ -30,6 +35,61 @@ const STAFF =
   '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "mentor")';
 const STAFF_OR_LEAD = '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead")';
 const MEMBER = '@request.auth.linked_startups:each ?= startup';
+
+// Fält som BARA ledningen (admin/incubator_lead) får skriva.
+const LEAD_ONLY_FIELDS = [
+  'funding_project',
+  'funding_work_package',
+  'state_aid_basis',
+  'funding_note',
+  'funding_set_by',
+  'funding_set_at',
+  'approved_amount_sek',
+  'decision_note',
+  'decided_by',
+  'decided_at',
+  'paid_at',
+  'paid_amount_sek',
+  'paid_note',
+  'de_minimis_stod',
+  'capital_round'
+];
+// Fält som bolagsmedlemmen aldrig får skriva (granskningens + identitetens).
+const REVIEW_FIELDS = [
+  'tenant',
+  'startup',
+  'check_type',
+  'created_by',
+  'changes_request_note',
+  'changes_requested_by',
+  'coach_statement',
+  'coach_statement_by',
+  'coach_statement_at',
+  'controller_statement',
+  'controller_statement_by',
+  'controller_statement_at',
+  'assessment_scores',
+  'assessment_score',
+  'assessed_by',
+  'assessed_at',
+  'is_excellence_activity',
+  'report_due_at'
+];
+// Ansökans innehåll — låst för medlemmen utanför utkast/komplettering.
+const CONTENT_FIELDS = ['title', 'activities', 'requested_amount_sek', 'activity_end_date', 'applicant_note'];
+const unset = (fields) => fields.map((f) => `@request.body.${f}:isset = false`).join(' && ');
+const LEAD_FIELDS_UNSET = `(${unset(LEAD_ONLY_FIELDS)})`;
+const REVIEW_FIELDS_UNSET = `(${unset(REVIEW_FIELDS)})`;
+const CONTENT_FIELDS_UNSET = `(${unset(CONTENT_FIELDS)})`;
+const statusIn = (values) => `(@request.body.status:isset = false || ${values.map((v) => `@request.body.status = "${v}"`).join(' || ')})`;
+// Staff (coach/mentor) får driva ärendet fram till beslut; beslut/utbetalning = ledning.
+const STAFF_STATUS = statusIn(['draft', 'submitted', 'changes_requested', 'under_review', 'closed', 'withdrawn']);
+// Medlemmen: skicka in (från utkast/komplettering) eller återkalla.
+const MEMBER_STATUS = statusIn(['submitted', 'withdrawn']);
+const MEMBER_UPDATE =
+  `(${MEMBER} && ${LEAD_FIELDS_UNSET} && ${REVIEW_FIELDS_UNSET} && ${MEMBER_STATUS} && ` +
+  `(status = "draft" || status = "changes_requested" || ((status = "submitted" || status = "under_review" || status = "paid") && ${CONTENT_FIELDS_UNSET})))`;
+const STAFF_UPDATE = `(${STAFF} && ${LEAD_FIELDS_UNSET} && ${STAFF_STATUS})`;
 
 migrate(
   (app) => {
@@ -73,7 +133,9 @@ migrate(
           type: 'relation',
           required: true,
           collectionId: typesCol.id,
-          cascadeDelete: true,
+          // Ingen cascade: en checktyp med ansökningar får inte raderas
+          // (skrivlagret vägrar); ett ärende ska aldrig försvinna tyst.
+          cascadeDelete: false,
           minSelect: 1,
           maxSelect: 1
         },
@@ -186,8 +248,8 @@ migrate(
       ],
       listRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF_OR_OBSERVER} || ${MEMBER})`,
       viewRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF_OR_OBSERVER} || ${MEMBER})`,
-      createRule: `${ANY_AUTH} && ${ANY_TENANT}`,
-      updateRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF} || ${MEMBER})`,
+      createRule: `${ANY_AUTH} && ${ANY_TENANT} && (@request.body.status:isset = false || @request.body.status = "draft") && ${LEAD_FIELDS_UNSET}`,
+      updateRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF_OR_LEAD} || ${STAFF_UPDATE} || ${MEMBER_UPDATE})`,
       deleteRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${STAFF_OR_LEAD}`
     });
     return app.save(collection);

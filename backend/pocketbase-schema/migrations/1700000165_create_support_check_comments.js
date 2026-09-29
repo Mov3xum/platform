@@ -9,7 +9,8 @@
 // punkter finns — det enforce:as i skrivlagret.
 //
 // RLS: staff/observer ser allt; bolagsmedlem ser BARA synliga kommentarer på
-// sitt bolags ansökningar. createRule roll-lös (§ 21.3); update: författaren
+// sitt bolags ansökningar. createRule roll-lös (§ 21.3) men författaren måste
+// vara den inloggade (`@request.body.author = @request.auth.id`); update: författaren
 // eller staff (lösa/redigera); delete admin/incubator_lead. Fritext
 // personnummer-saneras på skrivvägen; auditeras bara som längd.
 
@@ -103,7 +104,7 @@ migrate(
       ],
       listRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF_OR_OBSERVER} || ${MEMBER_VISIBLE})`,
       viewRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF_OR_OBSERVER} || ${MEMBER_VISIBLE})`,
-      createRule: `${ANY_AUTH} && ${ANY_TENANT}`,
+      createRule: `${ANY_AUTH} && ${ANY_TENANT} && @request.body.author = @request.auth.id`,
       updateRule: `${ANY_AUTH} && ${TENANT_MATCH} && (@request.auth.id = author || ${STAFF})`,
       deleteRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${STAFF_OR_LEAD}`
     });

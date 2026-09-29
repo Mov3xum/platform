@@ -152,11 +152,11 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
   tasks: {
     status: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } }
   },
-  // Upphandlingar (§ 39). Intern inköps-/avtalsdata utan PII — agenten får
-  // uppdatera sakfälten (status, datum, belopp) å den inloggades vägnar.
-  // Utvärderingskriterier, avtalskoppling och ansvarig är mänskliga beslut
-  // (kriterierna är utvärderingens spelregler; ansvarig kräver användar-id).
   // ── Stödcheckar & finansieringsprojekt (§ 46) ─────────────────────────────
+  // Ledningen (admin/incubator_lead) äger projekt, checktyper och regler;
+  // agenten får skapa UTKAST (checktyp inaktiv, ansökan i status draft) men
+  // aldrig publicera en checktyp (`active`), skriva bedömningens spelregler
+  // (`criteria`) eller röra statusar, utlåtanden, finansiering och beslut.
   funding_projects: {
     title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
     kind: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
@@ -184,7 +184,7 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
     kind: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
     description: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
-    active: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    active: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'En checktyp öppnas för ansökningar av en människa i /checkar/typer — agenten skapar den som inaktivt utkast.' } },
     max_amount_sek: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
     funding_project: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
     default_work_package: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
@@ -195,7 +195,7 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     report_due_days: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
     changes_due_days: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
     is_excellence_activity: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
-    criteria: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    criteria: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Bedömningskriterierna är bedömningens spelregler och sätts av en människa i /checkar/typer (standardkriterierna används tills dess).' } },
     opens_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
     closes_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
     sort_order: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
@@ -230,6 +230,10 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     name: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /checkar/regler.' } },
     active: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /checkar/regler.' } }
   },
+  // Upphandlingar (§ 39). Intern inköps-/avtalsdata utan PII — agenten får
+  // uppdatera sakfälten (status, datum, belopp) å den inloggades vägnar.
+  // Utvärderingskriterier, avtalskoppling och ansvarig är mänskliga beslut
+  // (kriterierna är utvärderingens spelregler; ansvarig kräver användar-id).
   procurements: {
     title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     supplier: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },

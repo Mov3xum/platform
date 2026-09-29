@@ -8,8 +8,10 @@
 //
 // RLS: medlem-scopad via `startup` (bolaget ser sina egna bilagor),
 // staff/observer hela tenanten. createRule roll-lös (§ 21.3) — uploads går
-// via route-handlern som verifierar länkat bolag/staff. update: staff eller
-// länkad medlem; delete staff eller uppladdaren. Ladda inte upp
+// via route-handlern som verifierar länkat bolag/staff och måste bära den
+// inloggade som `uploaded_by`. update: BARA staff (en medlem byter aldrig
+// fil/typ på en inskickad bilaga — ladda upp en ny i stället); delete staff
+// eller uppladdaren. Ladda inte upp
 // personuppgifter (UI varnar); kollektionen är denylistad för AI.
 
 const ANY_AUTH = '@request.auth.id != ""';
@@ -17,9 +19,9 @@ const ANY_TENANT = '@request.auth.tenant != ""';
 const TENANT_MATCH = '@request.auth.tenant = tenant';
 const STAFF_OR_OBSERVER =
   '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "mentor" || @request.auth.roles:each ?= "observer")';
+const MEMBER = '@request.auth.linked_startups:each ?= startup';
 const STAFF =
   '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach" || @request.auth.roles:each ?= "mentor")';
-const MEMBER = '@request.auth.linked_startups:each ?= startup';
 
 migrate(
   (app) => {
@@ -112,8 +114,8 @@ migrate(
       ],
       listRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF_OR_OBSERVER} || ${MEMBER})`,
       viewRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF_OR_OBSERVER} || ${MEMBER})`,
-      createRule: `${ANY_AUTH} && ${ANY_TENANT}`,
-      updateRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF} || ${MEMBER})`,
+      createRule: `${ANY_AUTH} && ${ANY_TENANT} && @request.body.uploaded_by = @request.auth.id`,
+      updateRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${STAFF}`,
       deleteRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF} || @request.auth.id = uploaded_by)`
     });
     return app.save(collection);

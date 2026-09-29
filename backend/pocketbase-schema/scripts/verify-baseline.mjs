@@ -422,6 +422,25 @@ const MUST_SCOPE_CROSS_TENANT = [
   { name: 'tenants', token: '@request.auth.tenant = id' }
 ];
 
+// Oföränderliga bevis-/historikkollektioner (ISO 27001 A.8.32): update/delete
+// får BARA vara superuser (regel = null). Signeringsbevis (§ 19, § 46.4) och
+// agent-versionshistorik (§ 16.6) får aldrig kunna skrivas om via API:t.
+const MUST_BE_IMMUTABLE = ['agreement_signatures', 'tool_versions', 'support_check_revisions'];
+
+function verifyImmutableCollections(collections) {
+  for (const name of MUST_BE_IMMUTABLE) {
+    const col = collections.get(name);
+    if (!col) continue; // kollektion saknas i denna instans — hoppa
+    for (const ruleName of ['updateRule', 'deleteRule']) {
+      const rule = col[ruleName];
+      if (rule !== null && rule !== undefined) {
+        fail(`Oföränderlighet: ${name}.${ruleName} måste vara null (endast superuser), är \`${String(rule)}\`.`);
+      }
+    }
+  }
+  ok('Oföränderliga bevis-/historikkollektioner (A.8.32) verifierade');
+}
+
 function verifyStartupMemberIsolation(collections) {
   for (const name of MUST_SCOPE_TO_MEMBER) {
     const col = collections.get(name);
@@ -643,6 +662,7 @@ function verifyRlsAndRbac(collections) {
   }
 
   verifyStartupMemberIsolation(collections);
+  verifyImmutableCollections(collections);
 
   ok('RLS/RBAC baseline checks passed (createRules är säkra)');
 }

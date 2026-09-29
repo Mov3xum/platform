@@ -248,9 +248,9 @@ export const TERMINAL_SUPPORT_CHECK_STATUSES: readonly SupportCheckStatus[] = ['
 /** Statusar där bolaget får redigera ansökan. */
 export const EDITABLE_SUPPORT_CHECK_STATUSES: readonly SupportCheckStatus[] = ['draft', 'changes_requested'];
 
-/** Statusar där finansieringsblocket får ändras utan korrigering (före utbetalning). */
+/** Statusar där finansieringsblocket får ändras — fram till beslutet. Ett beviljat ärende har redan bokförts mot projektet/de minimis; ändra genom att återkalla och besluta på nytt. */
 export function fundingEditable(status: SupportCheckStatus): boolean {
-  return status === 'submitted' || status === 'under_review' || status === 'changes_requested' || status === 'approved';
+  return status === 'submitted' || status === 'under_review' || status === 'changes_requested';
 }
 
 // ─── Ansökan (radform) ─────────────────────────────────────────────────────
@@ -580,6 +580,19 @@ export function buildRevisionSnapshot(input: {
     document_ids: [...(input.document_ids ?? [])].sort()
   };
 }
+
+/**
+ * Avsiktsförklaringen Movexum-personal bekräftar när ansökan skickas in på
+ * bolagets uppdrag (t.ex. efter ett möte). Skiljer sig från firmatecknarens
+ * intyg: personalen intygar INTE bolagets uppgifter utan att inskicket sker
+ * på bolagets uttryckliga uppdrag — så beviset aldrig påstår mer än vad som
+ * faktiskt hänt (eIDAS art. 26 b: signaturen ska vara knuten till den som
+ * signerar).
+ */
+export const SUPPORT_CHECK_STAFF_INTENT_TEXT =
+  'Jag intygar att jag skickar in denna ansökan på bolagets uttryckliga uppdrag som Movexum-personal, ' +
+  'att bolaget har tagit del av och godkänt innehållet i exakt den version vars innehålls-hash anges i ' +
+  'signeringsbeviset, och att intyget om uppgifternas riktighet lämnas av bolaget — inte av mig.';
 
 /** Avsiktsförklaringen firmatecknaren bekräftar (eIDAS art. 26 — avancerad elektronisk signatur). */
 export const SUPPORT_CHECK_INTENT_TEXT =

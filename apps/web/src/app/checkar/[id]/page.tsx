@@ -230,6 +230,7 @@ export default async function CheckPage({ params }: { params: Promise<{ id: stri
                 canSubmit={canSubmit}
                 canWithdraw={canWithdraw}
                 canReport={canReport && isMember && !isStaff}
+                isApplicant={role === 'applicant'}
                 requestedSek={app.requested_amount_sek ?? null}
                 activityCount={app.activities.length}
                 openIssues={openIssues}

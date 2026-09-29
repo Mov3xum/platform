@@ -12,6 +12,7 @@ import {
   DEFAULT_VAXELKURS_SEK_PER_EUR,
   EDITABLE_SUPPORT_CHECK_STATUSES,
   SUPPORT_CHECK_INTENT_TEXT,
+  SUPPORT_CHECK_STAFF_INTENT_TEXT,
   SUPPORT_CHECK_KINDS,
   SUPPORT_CHECK_STATUS_LABELS,
   activitiesEndDate,
@@ -271,9 +272,13 @@ export interface CheckTypeResult {
 export async function createSupportCheckType(pb: PocketBase, actor: Actor, changes: CheckTypeChanges & { title: string }): Promise<WriteResult<CheckTypeResult>> {
   const policy = canCreateRecord(actor, CHECK_TYPES);
   if (!policy.ok) return policyFail(actor, policy.reason);
-  const validated = await validateTypeChanges(actor, { active: true, requires_final_report: true, ...changes });
+  // Agenten skapar alltid ett INAKTIVT utkast (`active` är agent-nekat i
+  // writable-fields) — en människa öppnar typen för ansökningar i /checkar/typer.
+  const { active: requestedActive, ...rest } = changes;
+  const validated = await validateTypeChanges(actor, actor.kind === 'agent' ? { requires_final_report: true, ...rest } : { active: true, requires_final_report: true, ...rest, ...(requestedActive === undefined ? {} : { active: requestedActive }) });
   if (!validated.ok) return validated;
   const payload = validated.value;
+  if (actor.kind === 'agent') payload.active = false;
   const relErr = await verifyTypeRelations(pb, actor, payload);
   if (relErr) return fail('NOT_FOUND', relErr);
   if (!payload.criteria || (payload.criteria as unknown[]).length === 0) payload.criteria = DEFAULT_SUPPORT_CHECK_CRITERIA.map((c) => ({ ...c }));
@@ -331,8 +336,10 @@ export async function deleteSupportCheckType(pb: PocketBase, actor: Actor, typeI
   try {
     const used = await pb.collection(APPLICATIONS).getList(1, 1, { filter: pb.filter('tenant = {:t} && check_type = {:c}', { t: actor.tenant, c: row.id }), fields: 'id' });
     if (used.totalItems > 0) return fail('STATE_TRANSITION', `Checktypen har ${used.totalItems} ansökningar och kan inte raderas — avaktivera den i stället.`);
-  } catch {
-    /* saknat schema */
+  } catch (err) {
+    // Fail-closed: kan vi inte bevisa att typen är oanvänd raderar vi inte
+    // (check_type saknar cascade — ett ärende får aldrig bli föräldralöst).
+    return fail('DB_ERROR', describeError(err, 'Kunde inte kontrollera om checktypen används — raderingen avbröts.'));
   }
   try {
     await writeWithFallback(pb, (c) => c.collection(CHECK_TYPES).delete(row.id));
@@ -645,8 +652,10 @@ export async function submitSupportCheckApplication(pb: PocketBase, actor: Actor
       if (open.totalItems > 0) {
         return fail('STATE_TRANSITION', `${open.totalItems} kompletteringspunkt(er) är fortfarande olösta — svara på dem så att granskaren kan bocka av, eller be granskaren lösa dem.`);
       }
-    } catch {
-      /* fail-open: kunde inte läsa → blockera inte inskicket */
+    } catch (err) {
+      // Fail-closed: kompletteringskravet är en del av granskningen — kan vi
+      // inte kontrollera det skickas ansökan inte in.
+      return fail('DB_ERROR', describeError(err, 'Kunde inte kontrollera kompletteringspunkterna — försök igen.'));
     }
   }
 
@@ -687,7 +696,10 @@ export async function submitSupportCheckApplication(pb: PocketBase, actor: Actor
         signed_at: now,
         ip_hash: input.ipHash ? String(input.ipHash).slice(0, 64) : '',
         user_agent: input.userAgent ? String(input.userAgent).slice(0, 300) : '',
-        intent_text: SUPPORT_CHECK_INTENT_TEXT,
+        // Firmatecknaren intygar uppgifterna; Movexum-personal som skickar in
+        // på bolagets uppdrag intygar BARA uppdraget (§ 46.4) — beviset påstår
+        // aldrig mer än vad som hänt.
+        intent_text: role === 'applicant' ? SUPPORT_CHECK_INTENT_TEXT : SUPPORT_CHECK_STAFF_INTENT_TEXT,
         method: 'aes'
       })
     );
@@ -711,7 +723,7 @@ export async function submitSupportCheckApplication(pb: PocketBase, actor: Actor
     return fail('DB_ERROR', describeError(err, 'Signaturen sparades men ansökan kunde inte markeras som inskickad.'));
   }
   const name = await startupName(pb, actor, row.startup);
-  await auditStatus(pb, actor, row, 'submitted', { revision, startup: row.startup, startup_name: name, requested_amount_sek: requested, document_hash: documentHash });
+  await auditStatus(pb, actor, row, 'submitted', { revision, startup: row.startup, startup_name: name, requested_amount_sek: requested, document_hash: documentHash, submitted_by_role: role });
 
   const warnings: string[] = [];
   const recipients = await staffRecipientsForStartup(pb, actor.tenant, row.startup);
@@ -960,6 +972,16 @@ export interface DecisionResult extends ApplicationResult {
   capitalRoundId: string | null;
 }
 
+/** Hittar en bokföringspost som redan länkar till ansökan (idempotent beslut). Läsfel → null (vi skapar då; dubblett fångas av kanBevilja/audit). */
+async function findLinkedRecord(pb: PocketBase, collection: 'de_minimis_stod' | 'capital_rounds', applicationId: string): Promise<string | null> {
+  try {
+    const res = await pb.collection(collection).getList<{ id: string }>(1, 1, { filter: pb.filter('support_check_application = {:a}', { a: applicationId }), fields: 'id' });
+    return res.items[0]?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Beslut i beslutsgruppen (ledning). Vid BEVILJAT skapas spåren i ett svep:
  * de minimis-post (om statsstödsgrunden är de minimis — `kanBevilja`
@@ -1015,9 +1037,16 @@ export async function decideSupportCheckApplication(pb: PocketBase, actor: Actor
   const activities = normalizeSupportCheckActivities(row.activities);
   const purpose = `${type?.title || 'Stödcheck'}: ${activities.map((a) => a.title).filter(Boolean).join(', ') || title}`.slice(0, 500);
 
+  // Idempotens: ett tidigare, avbrutet beslut kan redan ha bokfört spåren
+  // (posterna länkar tillbaka via `support_check_application`). Återanvänd
+  // dem i stället för att dubbelregistrera stödet.
+  const existingDm = basis === 'de_minimis' ? await findLinkedRecord(pb, 'de_minimis_stod', row.id) : null;
+  const existingCap = await findLinkedRecord(pb, 'capital_rounds', row.id);
+  const createdHere: Array<{ collection: 'de_minimis_stod' | 'capital_rounds'; id: string }> = [];
+
   // 1. De minimis-post (fail-closed mot taket).
-  let deMinimisStodId: string | null = null;
-  if (basis === 'de_minimis') {
+  let deMinimisStodId: string | null = existingDm;
+  if (basis === 'de_minimis' && !deMinimisStodId) {
     const sekPerEur = input.sekPerEur && input.sekPerEur > 0 ? input.sekPerEur : DEFAULT_VAXELKURS_SEK_PER_EUR;
     const dm = await registerDeMinimisSupport(pb, actor, {
       startupId: row.startup,
@@ -1031,6 +1060,7 @@ export async function decideSupportCheckApplication(pb: PocketBase, actor: Actor
     });
     if (!dm.ok) return fail(dm.code ?? 'DB_ERROR', `Beslutet avbröts — de minimis-registreringen misslyckades: ${dm.error}`);
     deMinimisStodId = dm.value.stodId;
+    createdHere.push({ collection: 'de_minimis_stod', id: deMinimisStodId });
     warnings.push(...dm.value.warnings);
     try {
       await writeWithFallback(pb, (c) => c.collection('de_minimis_stod').update(deMinimisStodId!, { support_check_application: row.id }), { fallbackOn404: true });
@@ -1040,27 +1070,32 @@ export async function decideSupportCheckApplication(pb: PocketBase, actor: Actor
   }
 
   // 2. Kapitalrad (mottaget kapital, mjuk finansiering).
-  let capitalRoundId: string | null = null;
-  const cap = await addCapitalRound(pb, actor, {
-    startupId: row.startup,
-    type: 'soft_funding',
-    source: `Movexum – ${type?.title || 'stödcheck'} (${project.title || project.funder || 'projekt'})`.slice(0, 200),
-    amountSek: approved,
-    receivedAt: t,
-    purpose
-  });
-  if (cap.ok) {
-    capitalRoundId = cap.value.roundId;
-    try {
-      await writeWithFallback(pb, (c) => c.collection('capital_rounds').update(capitalRoundId!, { support_check_application: row.id }), { fallbackOn404: true });
-    } catch {
-      warnings.push('Kapitalraden kunde inte länkas tillbaka till ansökan (kör migration 1700000170).');
+  let capitalRoundId: string | null = existingCap;
+  if (!capitalRoundId) {
+    const cap = await addCapitalRound(pb, actor, {
+      startupId: row.startup,
+      type: 'soft_funding',
+      source: `Movexum – ${type?.title || 'stödcheck'} (${project.title || project.funder || 'projekt'})`.slice(0, 200),
+      amountSek: approved,
+      receivedAt: t,
+      purpose
+    });
+    if (cap.ok) {
+      capitalRoundId = cap.value.roundId;
+      createdHere.push({ collection: 'capital_rounds', id: capitalRoundId });
+      try {
+        await writeWithFallback(pb, (c) => c.collection('capital_rounds').update(capitalRoundId!, { support_check_application: row.id }), { fallbackOn404: true });
+      } catch {
+        warnings.push('Kapitalraden kunde inte länkas tillbaka till ansökan (kör migration 1700000170).');
+      }
+    } else {
+      warnings.push(`Kapitalraden kunde inte skapas: ${cap.error}`);
     }
-  } else {
-    warnings.push(`Kapitalraden kunde inte skapas: ${cap.error}`);
   }
 
-  // 3. Status.
+  // 3. Status. Misslyckas den rullas spåren som skapades i DETTA anrop
+  // tillbaka (med audit) så statsstödsregistret aldrig bär ett stöd som
+  // inte beviljats; spår från ett tidigare försök lämnas (de återanvänds).
   try {
     await updateApp(pb, row.id, {
       status: 'approved',
@@ -1072,7 +1107,31 @@ export async function decideSupportCheckApplication(pb: PocketBase, actor: Actor
       capital_round: capitalRoundId
     });
   } catch (err) {
-    return fail('DB_ERROR', describeError(err, 'Bokföringen skapades men ansökan kunde inte markeras som beviljad — kontakta admin.'));
+    const notReversed: string[] = [];
+    for (const rec of createdHere) {
+      try {
+        await writeWithFallback(pb, (c) => c.collection(rec.collection).delete(rec.id), { fallbackOn404: true });
+        await logAgentAction(pb, {
+          actor,
+          action_type: 'revert',
+          collection: rec.collection,
+          record_id: rec.id,
+          before_value: { startup: row.startup, startup_name: name, amount_sek: approved, support_check_application: row.id },
+          after_value: { reversed: true, reason: 'decision_status_update_failed' }
+        });
+      } catch {
+        notReversed.push(rec.collection === 'de_minimis_stod' ? 'de minimis-posten' : 'kapitalraden');
+      }
+    }
+    return fail(
+      'DB_ERROR',
+      describeError(
+        err,
+        notReversed.length > 0
+          ? `Ansökan kunde inte markeras som beviljad och ${notReversed.join(' och ')} kunde inte återföras — kontakta admin (posterna länkar till ansökan ${row.id}).`
+          : 'Ansökan kunde inte markeras som beviljad — bokföringen återfördes. Försök igen.'
+      )
+    );
   }
   await auditStatus(pb, actor, row, 'approved', {
     startup: row.startup,
@@ -1221,33 +1280,56 @@ export async function withdrawSupportCheckApplication(pb: PocketBase, actor: Act
       if (!id) continue;
       const rec = await getRecordInTenant<Record<string, unknown> & { id: string; tenant?: string }>(pb, actor, collection, id, '*');
       if (!rec) continue;
+      // Fail-closed: kan stödet inte återföras ur registret återkallas inte
+      // ärendet — ett "återkallat" ärende med kvarstående de minimis-post
+      // skulle ge ett felaktigt takunderlag (§ 20.3).
       try {
         await writeWithFallback(pb, (c) => c.collection(collection).delete(rec.id), { fallbackOn404: true });
-        await logAgentAction(pb, {
-          actor,
-          action_type: 'revert',
-          collection,
-          record_id: rec.id,
-          before_value: {
-            startup: row.startup,
-            startup_name: name,
-            amount: rec.belopp_eur ?? rec.amount_sek ?? null,
-            date: rec.beslutsdatum ?? rec.received_at ?? null,
-            support_check_application: row.id
-          },
-          after_value: { reversed: true, reason_length: reason.length }
-        });
       } catch (err) {
-        warnings.push(`${collection === 'de_minimis_stod' ? 'De minimis-posten' : 'Kapitalraden'} kunde inte återföras: ${err instanceof Error ? err.message : 'fel'}.`);
+        return fail('DB_ERROR', describeError(err, `${collection === 'de_minimis_stod' ? 'De minimis-posten' : 'Kapitalraden'} kunde inte återföras — återkallelsen avbröts.`));
       }
+      await logAgentAction(pb, {
+        actor,
+        action_type: 'revert',
+        collection,
+        record_id: rec.id,
+        before_value: {
+          startup: row.startup,
+          startup_name: name,
+          unit: rec.unit ?? null,
+          amount_eur: rec.belopp_eur ?? null,
+          amount_sek: rec.belopp_sek ?? rec.amount_sek ?? null,
+          forordning: rec.forordning ?? null,
+          date: rec.beslutsdatum ?? rec.received_at ?? null,
+          support_check_application: row.id
+        },
+        after_value: { reversed: true, reason_length: reason.length }
+      });
     }
   }
+  // Anledningen sparas som en synlig kommentar (bolagets/staffens egen text),
+  // aldrig i `decision_note` — det fältet tillhör beslutsgruppen och är
+  // ledningslåst i PB-reglerna.
+  const withdrawnPayload: Record<string, unknown> = { status: 'withdrawn', closed_at: today() };
+  if (row.status === 'approved') {
+    withdrawnPayload.de_minimis_stod = null;
+    withdrawnPayload.capital_round = null;
+  }
   try {
-    await updateApp(pb, row.id, { status: 'withdrawn', decision_note: reason ? `Återkallad: ${reason}` : row.decision_note ?? '', de_minimis_stod: null, capital_round: null, closed_at: today() });
+    await updateApp(pb, row.id, withdrawnPayload);
   } catch (err) {
     return fail('DB_ERROR', describeError(err, 'Kunde inte återkalla ansökan.'));
   }
   await auditStatus(pb, actor, row, 'withdrawn', { startup: row.startup, startup_name: name, reason_length: reason.length, reversed_bookkeeping: row.status === 'approved' });
+  if (reason) {
+    try {
+      await writeWithFallback(pb, (c) =>
+        c.collection(COMMENTS).create({ tenant: actor.tenant, application: row.id, startup: row.startup, author: actor.id, section: 'general', body: `Återkallad: ${reason}`, visible_to_applicant: true, revision: Number(row.revision) || 0 })
+      );
+    } catch {
+      warnings.push('Anledningen kunde inte sparas som kommentar.');
+    }
+  }
   const type = await loadType(pb, actor, row.check_type);
   if (role !== 'applicant') {
     await notifySafe(pb, { tenant: actor.tenant, recipients: await memberRecipientsForStartup(pb, actor.tenant, row.startup), kind: 'support_check_decision', actorId: actor.id, title: `Ansökan om ${type?.title || 'stödcheck'} återkallad`, snippet: appTitle(row, type), href: supportCheckPath(row.id) }, warnings);
@@ -1302,7 +1384,7 @@ export async function addSupportCheckComment(pb: PocketBase, actor: Actor, appli
   const type = await loadType(pb, actor, row.check_type);
   const recipients = role === 'applicant' ? await staffRecipientsForStartup(pb, actor.tenant, row.startup) : visible ? await memberRecipientsForStartup(pb, actor.tenant, row.startup) : [];
   if (recipients.length > 0) {
-    await notifySafe(pb, { tenant: actor.tenant, recipients, kind: 'support_check_comment', actorId: actor.id, title: `${role === 'applicant' ? name : 'Movexum'} kommenterade ansökan om ${type?.title || 'stödcheck'}`, snippet: body.value.slice(0, 120), href: `${supportCheckPath(row.id)}#kommentarer` }, warnings);
+    await notifySafe(pb, { tenant: actor.tenant, recipients, kind: 'support_check_comment', actorId: actor.id, title: `${role === 'applicant' ? name : 'Movexum'} kommenterade ansökan om ${type?.title || 'stödcheck'}`, snippet: sanitizePersonnummer(body.value).slice(0, 120), href: `${supportCheckPath(row.id)}#kommentarer` }, warnings);
   }
   return ok({ commentId: created.id, applicationId: row.id, path: supportCheckPath(row.id) });
 }
@@ -1338,7 +1420,7 @@ export async function deleteSupportCheckDocument(pb: PocketBase, actor: Actor, d
   } catch (err) {
     return fail('DB_ERROR', describeError(err, 'Kunde inte ta bort dokumentet.'));
   }
-  await logAgentAction(pb, { actor, action_type: 'update', collection: DOCUMENTS, record_id: doc.id, after_value: { deleted: true, filename: doc.filename, application: doc.application } });
+  await logAgentAction(pb, { actor, action_type: 'update', collection: DOCUMENTS, record_id: doc.id, after_value: { deleted: true, extension: String(doc.filename ?? '').toLowerCase().split('.').pop() ?? '', application: doc.application } });
   return ok({ documentId: doc.id, applicationId: String(doc.application) });
 }
 

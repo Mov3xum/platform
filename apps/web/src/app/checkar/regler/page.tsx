@@ -17,7 +17,7 @@ export default async function CheckReglerPage() {
   if (!canAccessModuleForUser(user.roles, 'checkar', user.enabledModules)) redirect('/hem');
   const pb = await getServerPb();
   const canManage = hasRole(user.roles, LEAD_ROLES);
-  const [rules, types] = await Promise.all([hasRole(user.roles, STAFF_ROLES) ? ensureSupportCheckRules(pb, user.tenant, user.id) : listRules(pb, user.tenant), listCheckTypes(pb, user.tenant)]);
+  const [rules, types] = await Promise.all([hasRole(user.roles, STAFF_ROLES) ? ensureSupportCheckRules(pb, user.tenant, user) : listRules(pb, user.tenant), listCheckTypes(pb, user.tenant)]);
   return (
     <PageShell title="Uppföljningsregler för stödcheckar" meta={<BackLink href="/checkar" label="Stödcheckar" />}>
       <div className="mx-auto w-full max-w-4xl space-y-4">

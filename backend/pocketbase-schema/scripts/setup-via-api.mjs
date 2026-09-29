@@ -4095,6 +4095,22 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
 const SC_USER_REL = (name) => ({ name, type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 });
+// Fältlåsta regler (spegel av migration 1700000163): ledningsfält, gransknings-
+// fält och innehållsfält låses per roll via `@request.body.<fält>:isset`.
+const SC_LEAD_ONLY_FIELDS = ['funding_project', 'funding_work_package', 'state_aid_basis', 'funding_note', 'funding_set_by', 'funding_set_at', 'approved_amount_sek', 'decision_note', 'decided_by', 'decided_at', 'paid_at', 'paid_amount_sek', 'paid_note', 'de_minimis_stod', 'capital_round'];
+const SC_REVIEW_FIELDS = ['tenant', 'startup', 'check_type', 'created_by', 'changes_request_note', 'changes_requested_by', 'coach_statement', 'coach_statement_by', 'coach_statement_at', 'controller_statement', 'controller_statement_by', 'controller_statement_at', 'assessment_scores', 'assessment_score', 'assessed_by', 'assessed_at', 'is_excellence_activity', 'report_due_at'];
+const SC_CONTENT_FIELDS = ['title', 'activities', 'requested_amount_sek', 'activity_end_date', 'applicant_note'];
+const scUnset = (fields) => `(${fields.map((f) => `@request.body.${f}:isset = false`).join(' && ')})`;
+const scStatusIn = (values) => `(@request.body.status:isset = false || ${values.map((v) => `@request.body.status = "${v}"`).join(' || ')})`;
+const SC_LEAD_FIELDS_UNSET = scUnset(SC_LEAD_ONLY_FIELDS);
+const SC_STAFF_UPDATE = `(${STAFF_EACH} && ${SC_LEAD_FIELDS_UNSET} && ${scStatusIn(['draft', 'submitted', 'changes_requested', 'under_review', 'closed', 'withdrawn'])})`;
+const SC_MEMBER_UPDATE =
+  `(${MEMBER_OF_STARTUP_REL} && ${SC_LEAD_FIELDS_UNSET} && ${scUnset(SC_REVIEW_FIELDS)} && ${scStatusIn(['submitted', 'withdrawn'])} && ` +
+  `(status = "draft" || status = "changes_requested" || ((status = "submitted" || status = "under_review" || status = "paid") && ${scUnset(SC_CONTENT_FIELDS)})))`;
+const SC_APPLICATION_CREATE = `${ANY_AUTH} && @request.auth.tenant != "" && (@request.body.status:isset = false || @request.body.status = "draft") && ${SC_LEAD_FIELDS_UNSET}`;
+const SC_REVISION_CREATE = `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.signer = @request.auth.id`;
+const SC_COMMENT_CREATE = `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.author = @request.auth.id`;
+const SC_DOCUMENT_CREATE = `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.uploaded_by = @request.auth.id`;
 await ensureCollection({
   id: 'support_check_applications_collection',
   name: 'support_check_applications',
@@ -4103,7 +4119,7 @@ await ensureCollection({
     { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
     { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
-    { name: 'check_type', type: 'relation', required: true, collectionId: 'support_check_types_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'check_type', type: 'relation', required: true, collectionId: 'support_check_types_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
     { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'title', type: 'text', required: false, max: 200 },
     { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft', 'submitted', 'changes_requested', 'under_review', 'approved', 'rejected', 'paid', 'closed', 'withdrawn'] },
@@ -4158,8 +4174,8 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${MEMBER_OF_STARTUP_REL})`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${MEMBER_OF_STARTUP_REL})`,
-  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || ${MEMBER_OF_STARTUP_REL})`,
+  createRule: SC_APPLICATION_CREATE,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || ${SC_STAFF_UPDATE} || ${SC_MEMBER_UPDATE})`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
 await ensureCollection({
@@ -4191,7 +4207,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${MEMBER_OF_STARTUP_REL})`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${MEMBER_OF_STARTUP_REL})`,
-  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  createRule: SC_REVISION_CREATE,
   updateRule: null,
   deleteRule: null
 });
@@ -4220,7 +4236,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || (${MEMBER_OF_STARTUP_REL} && visible_to_applicant = true))`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || (${MEMBER_OF_STARTUP_REL} && visible_to_applicant = true))`,
-  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  createRule: SC_COMMENT_CREATE,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_EACH})`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
@@ -4269,8 +4285,8 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${MEMBER_OF_STARTUP_REL})`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${MEMBER_OF_STARTUP_REL})`,
-  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || ${MEMBER_OF_STARTUP_REL})`,
+  createRule: SC_DOCUMENT_CREATE,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || @request.auth.id = uploaded_by)`
 });
 await ensureCollection({
@@ -4329,7 +4345,9 @@ for (const name of ['capital_rounds', 'de_minimis_stod']) {
 await patchCollection('goal_indicators', [], { source: { values: ['computed', 'manual', 'survey'] } });
 // Migration 1700000152: tasks.link_kind += 'procurement' + relationer +
 // rule_key (idempotensnyckel för regelgenererade uppföljningar). Union över
-// hela values-listan (patchCollection ERSÄTTER values).
+// hela values-listan (patchCollection ERSÄTTER values) — därför bär listan
+// även 'support_check' (1700000168), som patchas OVAN och annars skulle
+// skrivas bort här.
 await patchCollection(
   'tasks',
   [
@@ -4337,7 +4355,7 @@ await patchCollection(
     { name: 'procurement_calloff', type: 'relation', required: false, collectionId: 'procurement_calloffs_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
     { name: 'rule_key', type: 'text', required: false, max: 120 }
   ],
-  { link_kind: { values: ['none', 'startup', 'contact', 'event', 'mission', 'procurement'], maxSelect: 1 } }
+  { link_kind: { values: ['none', 'startup', 'contact', 'event', 'mission', 'procurement', 'support_check'], maxSelect: 1 } }
 );
 
 // Backfill: en tidigare körning hann skapa chat_threads/deep_jobs UTAN
@@ -4679,10 +4697,10 @@ const FORCE_CREATE_RULES = {
   funding_projects: `${ANY_AUTH} && @request.auth.tenant != ""`,
   funding_work_packages: `${ANY_AUTH} && @request.auth.tenant != ""`,
   support_check_types: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  support_check_applications: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  support_check_revisions: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  support_check_comments: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  support_check_documents: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  support_check_applications: SC_APPLICATION_CREATE,
+  support_check_revisions: SC_REVISION_CREATE,
+  support_check_comments: SC_COMMENT_CREATE,
+  support_check_documents: SC_DOCUMENT_CREATE,
   support_check_rules: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 

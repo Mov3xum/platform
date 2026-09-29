@@ -5,6 +5,7 @@ import { headers } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
+import { getSuperuserPb } from '@/lib/integrations/credentials';
 import {
   addSupportCheckComment,
   assessSupportCheckApplication,
@@ -77,9 +78,24 @@ function revalidate(applicationId?: string, startupId?: string | null) {
   revalidatePath('/inkorg');
 }
 
+/**
+ * Uppföljningssynk efter en mutation (§ 46.6). Reglerna och uppgifterna är
+ * staff-data (RLS § 21): en bolagsmedlems token kan varken läsa reglerna
+ * eller skapa kort åt coachen. När en MEDLEM utlöser synken (inskick,
+ * återkallelse, slutrapport) körs den därför med superuser-klienten — EFTER
+ * att skrivlagret redan verifierat medlemskapet i den lyckade mutationen —
+ * och seedar aldrig regler (`ensureSupportCheckRules` seedar bara för staff).
+ * Saknas superuser hoppas synken över; staffens lazy synk på /checkar tar
+ * igen det.
+ */
 async function syncNotice(actor: Actor, applicationId: string): Promise<{ warning?: string; notice?: string }> {
   try {
-    const pb = await getServerPb();
+    let pb = await getServerPb();
+    if (!hasRole(actor.roles, STAFF_ROLES)) {
+      const su = await getSuperuserPb();
+      if (!su.ok) return {};
+      pb = su.pb;
+    }
     const res = await syncSupportCheckFollowups(pb, actor, applicationId);
     const parts: string[] = [];
     if (res.created) parts.push(`${res.created} ny${res.created === 1 ? '' : 'a'} uppföljning${res.created === 1 ? '' : 'ar'}`);

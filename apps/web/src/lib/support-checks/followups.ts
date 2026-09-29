@@ -55,7 +55,7 @@ export async function syncSupportCheckFollowups(
   if (!app) return { applicationId, created: 0, updated: 0, resolved: 0, error: 'Ansökan hittades inte.' };
   const [types, rules] = await Promise.all([
     listCheckTypes(pb, actor.tenant),
-    opts.rules ? Promise.resolve(opts.rules) : ensureSupportCheckRules(pb, actor.tenant, actor.id)
+    opts.rules ? Promise.resolve(opts.rules) : ensureSupportCheckRules(pb, actor.tenant, actor)
   ]);
   let existing: TaskRow[];
   try {
@@ -86,7 +86,7 @@ export async function syncAllSupportCheckFollowups(pb: PocketBase, actor: Actor)
   const apps = await listApplications(pb, actor.tenant, {
     statuses: ['submitted', 'changes_requested', 'under_review', 'approved', 'paid']
   });
-  const rules = await ensureSupportCheckRules(pb, actor.tenant, actor.id);
+  const rules = await ensureSupportCheckRules(pb, actor.tenant, actor);
   const out: SupportCheckSyncResult[] = [];
   const schemaError = followupSchemaError(SCHEMA_HINT);
   for (const a of apps) {

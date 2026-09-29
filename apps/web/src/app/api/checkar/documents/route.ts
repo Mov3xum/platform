@@ -6,6 +6,7 @@ import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { logAgentAction } from '@/lib/core/write';
 import { DOCUMENTS, getApplication } from '@/lib/support-checks/data';
 import { EDITABLE_SUPPORT_CHECK_STATUSES, type Role } from '@platform/shared';
+import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 
 /**
  * Ladda upp en bilaga till en stödcheckansökan (CLAUDE.md § 46). Route
@@ -82,7 +83,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!applicationId) return NextResponse.json({ error: 'Ansökan saknas.' }, { status: 400 });
   const kindRaw = String(form.get('kind') ?? 'attachment');
   const kind = KINDS.has(kindRaw) ? kindRaw : 'attachment';
-  const title = String(form.get('title') ?? '').trim().slice(0, 200);
+  const title = sanitizePersonnummer(String(form.get('title') ?? '').trim().slice(0, 200));
 
   const pb = await getServerPb();
   const app = await getApplication(pb, user.tenant, applicationId);
@@ -131,7 +132,8 @@ export async function POST(request: Request): Promise<Response> {
     action_type: 'create',
     collection: DOCUMENTS,
     record_id: rec.id,
-    after_value: { application: app.id, startup: app.startup, startup_name: app.startup_name ?? undefined, kind, filename, size_bytes: entry.size }
+    // PII-fri audit: filnamn kan bära personnamn — logga bara typ, ändelse och storlek.
+    after_value: { application: app.id, startup: app.startup, startup_name: app.startup_name ?? undefined, kind, extension: filename.toLowerCase().split('.').pop() ?? '', mime, size_bytes: entry.size }
   });
   return NextResponse.json({ id: rec.id, filename, kind });
 }

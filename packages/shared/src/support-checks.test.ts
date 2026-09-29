@@ -103,7 +103,8 @@ test('statusmaskinen: bolaget får skicka in men inte besluta; ledningen ärver 
   assert.equal(canTransitionSupportCheck('paid', 'withdrawn', 'lead'), false);
   assert.equal(canTransitionSupportCheck('approved', 'withdrawn', 'lead'), true);
   assert.equal(canTransitionSupportCheck('closed', 'submitted', 'lead'), false);
-  assert.equal(fundingEditable('approved'), true);
+  assert.equal(fundingEditable('under_review'), true);
+  assert.equal(fundingEditable('approved'), false);
   assert.equal(fundingEditable('paid'), false);
 });
 

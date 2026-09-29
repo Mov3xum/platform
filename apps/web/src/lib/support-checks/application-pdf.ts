@@ -151,6 +151,8 @@ export interface ApplicationPdfInput {
     signedAt: string;
     documentHash: string;
     revision: number;
+    /** Avsiktstexten som signerades (firmatecknare eller Movexum på uppdrag). */
+    intentText?: string | null;
   } | null;
   /** Interna delar (bara när PDF:en hämtas av staff). */
   internal?: {
@@ -238,9 +240,11 @@ export async function buildApplicationPdf(input: ApplicationPdfInput): Promise<B
 
   ctx.y -= 6;
   drawLines(ctx, 'Intyg', { size: 13, font: 'heading', color: PRIMARY, gap: 4 });
-  drawLines(ctx, SUPPORT_CHECK_INTENT_TEXT, { size: 9.5, color: INK_SOFT, gap: 8 });
+  // Den avsiktsförklaring som faktiskt signerades (firmatecknare eller
+  // Movexum på bolagets uppdrag) — aldrig en annan text än bevisets.
+  drawLines(ctx, input.signature?.intentText || SUPPORT_CHECK_INTENT_TEXT, { size: 9.5, color: INK_SOFT, gap: 8 });
   if (input.signature) {
-    labelValue(ctx, 'Signerad av (firmatecknare)', input.signature.signerName);
+    labelValue(ctx, input.signature.intentText && input.signature.intentText !== SUPPORT_CHECK_INTENT_TEXT ? 'Inskickad av (Movexum, på bolagets uppdrag)' : 'Signerad av (firmatecknare)', input.signature.signerName);
     labelValue(ctx, 'Signerad', new Date(input.signature.signedAt).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' }));
     labelValue(ctx, 'Signerad version', String(input.signature.revision));
     labelValue(ctx, 'Innehålls-hash (SHA-256)', input.signature.documentHash);
