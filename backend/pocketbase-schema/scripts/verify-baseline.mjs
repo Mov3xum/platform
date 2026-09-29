@@ -841,7 +841,10 @@ const REQUIRED_APP_FIELDS = [
   // Upphandlingar (§ 39): regelgenererade uppföljningar = tasks med
   // procurement-länk + rule_key (migration 1700000152). Saknas fälten
   // skapas korten utan idempotensnyckel → dubbletter vid varje synk.
-  { collection: 'tasks', fields: ['procurement', 'procurement_calloff', 'rule_key'] }
+  { collection: 'tasks', fields: ['procurement', 'procurement_calloff', 'rule_key'] },
+  // AI-minne (§ 16.4): kategori per notering = migration 1700000155. Saknas
+  // fältet "sparas" kategorin från UI/memory_write men försvinner tyst.
+  { collection: 'agent_memory', fields: ['category'] }
 ];
 
 const MUST_NOT_BE_REQUIRED = [

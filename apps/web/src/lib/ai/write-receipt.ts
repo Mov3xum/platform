@@ -220,6 +220,16 @@ export function buildActionReceipt(input: BuildReceiptInput): AgentActionReceipt
       summary = [base, followups].filter(Boolean).join(' · ');
       break;
     }
+    case 'memory_write': {
+      // Minnesnoteringen syns på /installningar/ai-minne, filtrerad på sin
+      // kategori så personalen hittar den direkt bland många noteringar.
+      const key = str(data.key) ?? str(args.key);
+      const label = str(data.category_label);
+      summary = [key, label ? `kategori: ${label}` : null].filter(Boolean).join(' · ');
+      const cat = str(data.category);
+      href = cat ? `/installningar/ai-minne?kategori=${encodeURIComponent(cat)}` : '/installningar/ai-minne';
+      break;
+    }
     default:
       summary = genericSummary(args, data);
   }

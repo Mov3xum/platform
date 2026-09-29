@@ -4,8 +4,13 @@ import PocketBase from 'pocketbase';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
-import { escFilter } from '@/lib/pb-filter';
 import { revalidatePath } from 'next/cache';
+import {
+  AGENT_MEMORY_CATEGORY_IDS,
+  inferAgentMemoryCategory,
+  normalizeAgentMemoryCategory,
+  type AgentMemoryCategory
+} from '@platform/shared';
 
 // Server actions för det tvärsessions-minne (`agent_memory`, CLAUDE.md § 16.4)
 // som AI-chatten lär sig av personalens korrigeringar. Ger admin/incubator_lead
@@ -25,7 +30,60 @@ const PB_URL = getServerPbUrl();
 export type AgentMemoryActionState = {
   error?: string;
   success?: boolean;
+  /** Icke-blockerande upplysning (t.ex. schema-drift). */
+  warning?: string;
 };
+
+const SCHEMA_DRIFT_HINT =
+  'PocketBase saknar fältet agent_memory.category (migration 1700000155). ' +
+  'Kategorin sparades inte — kör migrationerna eller setup-via-api.mjs mot instansen.';
+
+/**
+ * Tolkar kategori-input från formuläret. Tomt → härledd ur nyckel + innehåll
+ * (samma deterministiska regel som chatten). Okänt värde → fel, aldrig tyst
+ * "övrigt".
+ */
+function resolveCategoryInput(
+  raw: unknown,
+  key: string,
+  content: string
+): { category: AgentMemoryCategory } | { error: string } {
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  if (!trimmed) return { category: inferAgentMemoryCategory(key, content) };
+  const cat = normalizeAgentMemoryCategory(trimmed);
+  if (!cat) {
+    return { error: `Okänd kategori. Giltiga: ${AGENT_MEMORY_CATEGORY_IDS.join(', ')}.` };
+  }
+  return { category: cat };
+}
+
+/**
+ * Läser tillbaka posten och kontrollerar att kategorin faktiskt fastnade —
+ * PB släpper okända fält tyst (§ 24.4/§ 30.4-invarianten), så en instans
+ * utan migration 1700000155 skulle annars "spara" utan att något ändrades.
+ */
+async function verifyCategoryPersisted(
+  pb: PocketBase,
+  su: PocketBase | null,
+  id: string,
+  expected: AgentMemoryCategory
+): Promise<string | undefined> {
+  const read = async (client: PocketBase) =>
+    client.collection(COLLECTION).getOne<{ category?: unknown }>(id, { fields: 'id,category' });
+  try {
+    let rec: { category?: unknown };
+    try {
+      rec = await read(pb);
+    } catch {
+      if (!su) return undefined; // kan inte verifiera — blockera inte sparandet
+      rec = await read(su);
+    }
+    if (rec.category !== expected) return SCHEMA_DRIFT_HINT;
+  } catch {
+    /* verifieringen är best-effort */
+  }
+  return undefined;
+}
 
 async function getSuperuserPb(): Promise<PocketBase | null> {
   const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
@@ -80,6 +138,8 @@ export async function createAgentMemoryAction(
   if (content.length > MAX_CONTENT) {
     return { error: `Innehållet får vara max ${MAX_CONTENT} tecken.` };
   }
+  const cat = resolveCategoryInput(formData.get('category'), key, content);
+  if ('error' in cat) return { error: cat.error };
 
   const pb = await getServerPb();
 
@@ -100,17 +160,22 @@ export async function createAgentMemoryAction(
     startup: startupId || '',
     key,
     content,
+    category: cat.category,
     created_by: user.id,
     updated_by: user.id
   };
 
+  let createdId = '';
+  let su: PocketBase | null = null;
   try {
-    await pb.collection(COLLECTION).create(payload);
+    const rec = await pb.collection(COLLECTION).create<{ id: string }>(payload);
+    createdId = rec.id;
   } catch (err) {
-    const su = await getSuperuserPb();
+    su = await getSuperuserPb();
     if (su) {
       try {
-        await su.collection(COLLECTION).create(payload);
+        const rec = await su.collection(COLLECTION).create<{ id: string }>(payload);
+        createdId = rec.id;
       } catch (fallbackErr) {
         // Krockar mot unik-index (tenant, startup, key) → duplikat.
         const msg = fallbackErr instanceof Error ? fallbackErr.message : '';
@@ -130,15 +195,24 @@ export async function createAgentMemoryAction(
     }
   }
 
+  const warning = createdId
+    ? await verifyCategoryPersisted(pb, su, createdId, cat.category)
+    : undefined;
+
   revalidatePath('/installningar');
   revalidatePath('/installningar/ai-minne');
-  return { success: true };
+  return { success: true, warning };
 }
 
-/** Uppdaterar innehållet i en befintlig minnesnotering (nyckeln är låst). */
+/**
+ * Uppdaterar innehåll och/eller kategori i en befintlig minnesnotering
+ * (nyckeln är låst). `category` utelämnad = rör inte kategorin; tom sträng =
+ * härled ur nyckel + innehåll.
+ */
 export async function updateAgentMemoryAction(
   id: string,
-  content: string
+  content: string,
+  category?: string
 ): Promise<AgentMemoryActionState> {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
@@ -152,15 +226,33 @@ export async function updateAgentMemoryAction(
   }
 
   const pb = await getServerPb();
-  if (!(await assertInTenant(pb, id, user.tenant))) {
+  let existing: { tenant?: string; key?: string } | null = null;
+  try {
+    existing = await pb
+      .collection(COLLECTION)
+      .getOne<{ tenant?: string; key?: string }>(id, { fields: 'id,tenant,key' });
+  } catch {
+    existing = null;
+  }
+  if (!existing || existing.tenant !== user.tenant) {
     return { error: 'Noteringen finns inte i din tenant.' };
   }
 
-  const patch = { content: next, updated_by: user.id };
+  let resolvedCategory: AgentMemoryCategory | null = null;
+  if (category !== undefined) {
+    const cat = resolveCategoryInput(category, existing.key ?? '', next);
+    if ('error' in cat) return { error: cat.error };
+    resolvedCategory = cat.category;
+  }
+
+  const patch: Record<string, unknown> = { content: next, updated_by: user.id };
+  if (resolvedCategory) patch.category = resolvedCategory;
+
+  let su: PocketBase | null = null;
   try {
     await pb.collection(COLLECTION).update(id, patch);
   } catch (err) {
-    const su = await getSuperuserPb();
+    su = await getSuperuserPb();
     if (!su) {
       console.error('[agent-memory] update failed', { tenant: user.tenant, id });
       return { error: 'Kunde inte spara ändringen. Försök igen.' };
@@ -173,9 +265,62 @@ export async function updateAgentMemoryAction(
     }
   }
 
+  const warning = resolvedCategory
+    ? await verifyCategoryPersisted(pb, su, id, resolvedCategory)
+    : undefined;
+
   revalidatePath('/installningar');
   revalidatePath('/installningar/ai-minne');
-  return { success: true };
+  return { success: true, warning };
+}
+
+/**
+ * Sätter bara kategorin på en notering (bekräfta en härledd kategori eller
+ * flytta noteringen till en annan). Innehållet rörs inte.
+ */
+export async function setAgentMemoryCategoryAction(
+  id: string,
+  category: string
+): Promise<AgentMemoryActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+    return { error: 'Åtkomst nekad.' };
+  }
+  if (!id) return { error: 'Saknar id.' };
+  const cat = normalizeAgentMemoryCategory(category);
+  if (!cat) {
+    return { error: `Okänd kategori. Giltiga: ${AGENT_MEMORY_CATEGORY_IDS.join(', ')}.` };
+  }
+
+  const pb = await getServerPb();
+  if (!(await assertInTenant(pb, id, user.tenant))) {
+    return { error: 'Noteringen finns inte i din tenant.' };
+  }
+
+  const patch = { category: cat, updated_by: user.id };
+  let su: PocketBase | null = null;
+  try {
+    await pb.collection(COLLECTION).update(id, patch);
+  } catch {
+    su = await getSuperuserPb();
+    if (!su) {
+      console.error('[agent-memory] set category failed', { tenant: user.tenant, id });
+      return { error: 'Kunde inte spara kategorin. Försök igen.' };
+    }
+    try {
+      await su.collection(COLLECTION).update(id, patch);
+    } catch {
+      console.error('[agent-memory] set category failed (fallback)', { tenant: user.tenant, id });
+      return { error: 'Kunde inte spara kategorin. Försök igen.' };
+    }
+  }
+
+  const drift = await verifyCategoryPersisted(pb, su, id, cat);
+  if (drift) return { error: drift };
+
+  revalidatePath('/installningar');
+  revalidatePath('/installningar/ai-minne');
+  return { success: true, warning: undefined };
 }
 
 /** Raderar en minnesnotering. */

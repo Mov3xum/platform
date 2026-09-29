@@ -2626,6 +2626,19 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
 });
 
+// Migration 1700000155: agent_memory.category (kategori för överblick på
+// /installningar/ai-minne). Värdena speglar AGENT_MEMORY_CATEGORIES i
+// packages/shared/src/agent-memory.ts.
+await patchCollection('agent_memory', [
+  {
+    name: 'category',
+    type: 'select',
+    required: false,
+    maxSelect: 1,
+    values: ['terminologi', 'datatolkning', 'arbetssatt', 'bolag', 'portfolj', 'processer', 'ovrigt']
+  }
+]);
+
 // Migration 1700000080: tool_knowledge.
 await ensureCollection({
   id: 'tool_knowledge_col',

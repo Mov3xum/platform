@@ -31,7 +31,14 @@ import {
   ANNUAL_WHEEL_TAG_IDS,
   COMPASS_FLOW_TYPES,
   COMPASS_INPUT_TYPES,
-  MAX_COMPASS_CHOICES
+  MAX_COMPASS_CHOICES,
+  AGENT_MEMORY_CATEGORIES,
+  AGENT_MEMORY_CATEGORY_IDS,
+  agentMemoryCategoryLabel,
+  inferAgentMemoryCategory,
+  normalizeAgentMemoryCategory,
+  resolveAgentMemoryCategory,
+  type AgentMemoryCategory
 } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
 import { validateChart, validateKpis } from '@/lib/documents/validate';
@@ -1608,14 +1615,22 @@ export function buildChatTools(
         description:
           'Läser agentens tvärsessions-minne för denna tenant. Utan `key` ' +
           'listas alla minnesnycklar med innehåll; med `key` returneras just ' +
-          'den noteringen. Använd för att minnas tidigare slutsatser eller ' +
-          'pågående trådar mellan körningar.',
+          'den noteringen. Varje notering har en `category` (' +
+          AGENT_MEMORY_CATEGORY_IDS.join(', ') +
+          '); filtrera med `category` för att bara läsa en sorts noteringar. ' +
+          'Använd för att minnas tidigare slutsatser eller pågående trådar ' +
+          'mellan körningar.',
         parameters: {
           type: 'object',
           properties: {
             key: {
               type: 'string',
               description: 'Valfri nyckel att läsa. Lämna tomt för att lista allt.'
+            },
+            category: {
+              type: 'string',
+              enum: [...AGENT_MEMORY_CATEGORY_IDS],
+              description: 'Valfritt kategorifilter.'
             }
           }
         }
@@ -1630,7 +1645,10 @@ export function buildChatTools(
             'Sparar/uppdaterar en notering i agentens tvärsessions-minne (per ' +
             'tenant). Använd för slutsatser värda att minnas till nästa körning. ' +
             'Lagra ALDRIG personuppgifter — bara aggregerade observationer. ' +
-            'Skriver över en befintlig nyckel.',
+            'Skriver över en befintlig nyckel. Ange ALLTID `category` så att ' +
+            'personalen får överblick över minnet: ' +
+            AGENT_MEMORY_CATEGORIES.map((c) => `${c.id} = ${c.description}`).join(' | ') +
+            '.',
           parameters: {
             type: 'object',
             properties: {
@@ -1641,9 +1659,16 @@ export function buildChatTools(
               content: {
                 type: 'string',
                 description: 'Innehåll att spara (max 8000 tecken).'
+              },
+              category: {
+                type: 'string',
+                enum: [...AGENT_MEMORY_CATEGORY_IDS],
+                description:
+                  'Vilken sorts notering det är (en av kategorierna). Utelämnas den ' +
+                  'härleds en kategori ur nyckel + innehåll.'
               }
             },
-            required: ['key', 'content']
+            required: ['key', 'content', 'category']
           }
         }
       });
@@ -2946,11 +2971,14 @@ export async function buildMemoryRecallBlock(
       .getList(1, MEMORY_RECALL_MAX_ROWS, {
         filter: `tenant = "${escFilter(tenantId)}"`,
         sort: '-updated',
-        fields: 'key,content,updated'
+        fields: 'key,content,category,updated'
       });
-    const lines: string[] = [];
+    // Grupperat per kategori (taxonomins ordning) så modellen ser strukturen
+    // — samma indelning som personalen ser på /installningar/ai-minne.
+    const byCategory = new Map<AgentMemoryCategory, string[]>();
     let budget = MEMORY_RECALL_TOTAL_CHARS;
     let omitted = 0;
+    let count = 0;
     for (const m of result.items) {
       const key = typeof m.key === 'string' ? m.key.trim() : '';
       const content = typeof m.content === 'string' ? m.content.trim() : '';
@@ -2965,9 +2993,19 @@ export async function buildMemoryRecallBlock(
         continue;
       }
       budget -= line.length;
-      lines.push(line);
+      const { category } = resolveAgentMemoryCategory({ category: m.category, key, content });
+      const bucket = byCategory.get(category);
+      if (bucket) bucket.push(line);
+      else byCategory.set(category, [line]);
+      count++;
     }
-    if (lines.length === 0) return '';
+    if (count === 0) return '';
+    const lines: string[] = [];
+    for (const def of AGENT_MEMORY_CATEGORIES) {
+      const bucket = byCategory.get(def.id);
+      if (!bucket || bucket.length === 0) continue;
+      lines.push(`[${def.label}]`, ...bucket);
+    }
     return (
       '\n\nINLÄRT MINNE (dina egna tidigare slutsatser och korrigeringar du fått ' +
       'av personalen, per tenant — § agent_memory). Behandla det som vägledning ' +
@@ -2990,6 +3028,16 @@ async function runMemoryRead(
   ctx: ToolDispatchContext
 ): Promise<ToolResult> {
   const key = typeof args.key === 'string' ? args.key.trim() : '';
+  const categoryFilter =
+    args.category === undefined || args.category === null || args.category === ''
+      ? null
+      : normalizeAgentMemoryCategory(args.category);
+  if (args.category && !categoryFilter) {
+    return {
+      ok: false,
+      error: `Okänd category. Giltiga: ${AGENT_MEMORY_CATEGORY_IDS.join(', ')}.`
+    };
+  }
   let filter = `tenant = "${escFilter(ctx.tenantId)}"`;
   if (key) filter += ` && key = "${escFilter(key)}"`;
   try {
@@ -2998,17 +3046,31 @@ async function runMemoryRead(
       .getList(1, MAX_MEMORY_ROWS, {
         filter,
         sort: '-updated',
-        fields: 'key,content,updated'
+        fields: 'key,content,category,updated'
       });
+    // Kategorifiltret appliceras i JS: äldre rader saknar lagrad kategori och
+    // får den härledd — ett PB-filter skulle tappa dem.
+    const items = result.items
+      .map((m) => {
+        const { category, categorySource } = resolveAgentMemoryCategory({
+          category: m.category,
+          key: typeof m.key === 'string' ? m.key : '',
+          content: typeof m.content === 'string' ? m.content : ''
+        });
+        return {
+          key: m.key,
+          content: m.content,
+          category,
+          category_source: categorySource,
+          updated: m.updated
+        };
+      })
+      .filter((m) => !categoryFilter || m.category === categoryFilter);
     return {
       ok: true,
       data: {
-        count: result.totalItems,
-        items: result.items.map((m) => ({
-          key: m.key,
-          content: m.content,
-          updated: m.updated
-        }))
+        count: categoryFilter ? items.length : result.totalItems,
+        items
       }
     };
   } catch (err) {
@@ -3036,6 +3098,19 @@ async function runMemoryWrite(
   if (content.length > MAX_MEMORY_CONTENT) {
     return { ok: false, error: `content för långt (max ${MAX_MEMORY_CONTENT} tecken).` };
   }
+  // Kategori: ett angivet men okänt värde avvisas (aldrig tyst "övrigt");
+  // ett utelämnat värde härleds deterministiskt ur nyckel + innehåll.
+  const hasCategoryArg =
+    args.category !== undefined && args.category !== null && args.category !== '';
+  const category = hasCategoryArg
+    ? normalizeAgentMemoryCategory(args.category)
+    : inferAgentMemoryCategory(key, content);
+  if (!category) {
+    return {
+      ok: false,
+      error: `Okänd category. Giltiga: ${AGENT_MEMORY_CATEGORY_IDS.join(', ')}.`
+    };
+  }
 
   const filter = `tenant = "${escFilter(ctx.tenantId)}" && key = "${escFilter(key)}"`;
   try {
@@ -3048,18 +3123,26 @@ async function runMemoryWrite(
         .collection(AGENT_MEMORY_COLLECTION)
         .update((existing as { id: string }).id, {
           content,
+          category,
           updated_by: actor.id
         });
-      return { ok: true, data: { key, action: 'updated' } };
+      return {
+        ok: true,
+        data: { key, category, category_label: agentMemoryCategoryLabel(category), action: 'updated' }
+      };
     }
     await ctx.pb.collection(AGENT_MEMORY_COLLECTION).create({
       tenant: ctx.tenantId,
       key,
       content,
+      category,
       created_by: actor.id,
       updated_by: actor.id
     });
-    return { ok: true, data: { key, action: 'created' } };
+    return {
+      ok: true,
+      data: { key, category, category_label: agentMemoryCategoryLabel(category), action: 'created' }
+    };
   } catch (err) {
     return {
       ok: false,
