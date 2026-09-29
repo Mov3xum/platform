@@ -1,7 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import {
-  aggregateSurvey,
+  aggregateCompassSurvey,
   isSurveyModule,
   isValidSurveySubjectId,
   normalizeSurveySubjectKind,
@@ -199,7 +199,7 @@ export async function loadSurveyAggregate(
 ): Promise<SurveyAggregate> {
   const questions = await listQuestionsForModule(pb, module.id);
   const npsKeys = questions.filter((q) => /(^|_)nps($|_)/.test(q.key)).map((q) => q.key);
-  const empty = aggregateSurvey([], questions, { npsKeys });
+  const empty = aggregateCompassSurvey([], questions, { npsKeys });
 
   let conversations: ConversationRow[] = [];
   try {
@@ -257,7 +257,7 @@ export async function loadSurveyAggregate(
     });
     return empty;
   }
-  return aggregateSurvey(rows, questions, { npsKeys });
+  return aggregateCompassSurvey(rows, questions, { npsKeys });
 }
 
 /** Enkätmoduler i tenanten (för indikator-väljaren i /mal). */

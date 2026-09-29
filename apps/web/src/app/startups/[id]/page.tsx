@@ -64,6 +64,7 @@ import { AgreementsSection, type AgreementView } from '@/components/intric/Agree
 import { pbFileUrl } from '@/lib/pb-file';
 import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
 import { DeMinimisSection } from './DeMinimisSection';
+import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
 import { StartupProcurementsSection } from './StartupProcurementsSection';
 import { StartupSupportChecksSection } from './StartupSupportChecksSection';
 import { StartupContactsSection } from './StartupContactsSection';
@@ -980,6 +981,17 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
             startupId={id}
             startupName={startup.name}
             canManage={canManageStartupDeMinimis(user, id)}
+          />
+        </Section>
+
+        <Section id="uppfoljning" title="Uppföljning">
+          <FollowUpSurveys
+            pb={pb}
+            tenant={user.tenant}
+            kind="startup"
+            id={id}
+            canCreate={hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])}
+            compact
           />
         </Section>
 

@@ -39,7 +39,7 @@ import {
   GOAL_INDICATOR_UNITS,
   METRIC_KEYS,
   METRIC_DEFINITIONS,
-  SURVEY_TEMPLATES,
+  COMPASS_SURVEY_TEMPLATES,
   AGENT_MEMORY_CATEGORIES,
   AGENT_MEMORY_CATEGORY_IDS,
   agentMemoryCategoryLabel,
@@ -973,8 +973,8 @@ export function buildChatTools(
             anonymous: { type: 'boolean', description: 'Bara för survey: anonym (inga identifierare; aggregat vid ≥ 5 svar). Använd för medarbetarindex.' },
             survey_template: {
               type: 'string',
-              enum: SURVEY_TEMPLATES.map((t) => t.key),
-              description: 'Färdig enkätmall som skapar frågorna direkt: ' + SURVEY_TEMPLATES.map((t) => `${t.key} = ${t.name}`).join('; ') + '. Mallen sätter syfte, subjekt, anonymitet och samtyckestext.'
+              enum: COMPASS_SURVEY_TEMPLATES.map((t) => t.key),
+              description: 'Färdig enkätmall som skapar frågorna direkt: ' + COMPASS_SURVEY_TEMPLATES.map((t) => `${t.key} = ${t.name}`).join('; ') + '. Mallen sätter syfte, subjekt, anonymitet och samtyckestext.'
             }
           },
           required: ['name', 'flow_type']

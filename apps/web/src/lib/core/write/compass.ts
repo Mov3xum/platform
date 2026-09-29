@@ -25,7 +25,7 @@ import {
   slugifyCompassKey,
   type CompassFlowType,
   type CompassInputType,
-  SURVEY_TEMPLATES,
+  COMPASS_SURVEY_TEMPLATES,
   findSurveyTemplate,
   isSurveyModule,
   normalizeCompassPurpose,
@@ -198,7 +198,7 @@ export async function createCompassModule(
   // Enkätmall (§ 43) styr syfte/subjekt/anonymitet/samtyckestext och tvingar formulär-flöde.
   const template = params.surveyTemplate ? findSurveyTemplate(params.surveyTemplate) : null;
   if (params.surveyTemplate && !template) {
-    return fail('INVALID_VALUE', `Okänd enkätmall. Giltiga: ${SURVEY_TEMPLATES.map((t) => t.key).join(', ')}.`);
+    return fail('INVALID_VALUE', `Okänd enkätmall. Giltiga: ${COMPASS_SURVEY_TEMPLATES.map((t) => t.key).join(', ')}.`);
   }
   const purpose: CompassPurpose = template ? 'survey' : normalizeCompassPurpose(params.purpose);
   const subjectKind = normalizeSurveySubjectKind(template ? template.subject_kind : params.subjectKind);

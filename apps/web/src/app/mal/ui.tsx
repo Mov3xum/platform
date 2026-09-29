@@ -24,4 +24,3 @@ export function StatusChip({ status, small }: { status: GoalStatus | 'unreported
     </span>
   );
 }
-

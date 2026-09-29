@@ -136,10 +136,18 @@ export function middleware(req: NextRequest) {
     // middleware:n formulär-POST:en till /login med bevarad POST-metod.
     pathname === '/api/auth/logout' ||
     pathname.startsWith('/api/health') ||
+    // Interna system-endpoints (PB-hookar → run-schedule/run-trigger/
+    // send-survey) autentiserar sig själva med MOVEXUM_SCHEDULE_SECRET
+    // (§ 12.3) och har ingen cookie — utan undantag 307:ar middleware:n
+    // hookens POST till /login.
+    pathname.startsWith('/api/internal/') ||
     // Startupkompassen — publika, oinloggade intag-moduler (quiz/formulär/chatt)
     // och deras anonyma API-flöden.
     pathname === '/m' ||
     pathname.startsWith('/m/') ||
+    // Marknadsverktyg → Utvärdering (§ 39): anonyma enkäter på /u/<slug>.
+    pathname === '/u' ||
+    pathname.startsWith('/u/') ||
     pathname.startsWith('/api/public/') ||
     PWA_PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
 

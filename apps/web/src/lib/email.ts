@@ -246,3 +246,88 @@ export async function sendInflowNotification(
     throw new Error(`Kunde inte skicka inflödesnotis (fel ${res.status}).`);
   }
 }
+
+export interface SurveyInviteFields {
+  /** Enkätens rubrik (welcome_title/name). */
+  title: string;
+  /** Publik länk till enkäten (/u/<slug>). */
+  url: string;
+  /** Vad enkäten följer upp (t.ex. eventets namn). */
+  eventName?: string;
+  /** Valfri inledande text från enkäten. */
+  intro?: string;
+}
+
+/**
+ * Skickar en enkätinbjudan till deltagare (CLAUDE.md § 47.5). Ett mejl per
+ * mottagare (ingen synlig mottagarlista — GDPR § 5), i små batchar. Returnerar
+ * antal lyckade/misslyckade; en enskild adress som Resend avvisar stoppar
+ * inte de övriga. Innehållet HTML-escapas (§ 10.3).
+ */
+export async function sendSurveyInvites(
+  recipients: string[],
+  fields: SurveyInviteFields
+): Promise<{ sent: number; failed: number }> {
+  const apiKey = getResendApiKey();
+  const to = recipients.filter((r) => r && r.includes('@'));
+  if (to.length === 0) return { sent: 0, failed: 0 };
+
+  const esc = (s: string) =>
+    s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  const subject = fields.eventName
+    ? `Hur var ${fields.eventName}? Två minuter för din feedback`
+    : `${fields.title} – två minuter för din feedback`;
+  const html = `<!DOCTYPE html>
+<html lang="sv">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${esc(fields.title)}</title></head>
+<body style="margin:0;padding:0;background:#f2f2f2;font-family:'Nunito Sans','Nunito Sans Variable',system-ui,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f2f2;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;padding:40px;max-width:560px;">
+        <tr><td style="padding-bottom:24px;"><span style="font-size:22px;font-weight:700;color:#121212;letter-spacing:-0.5px;">movexum</span></td></tr>
+        <tr><td>
+          <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#121212;">${esc(fields.title)}</h1>
+          ${fields.eventName ? `<p style="margin:0 0 12px;font-size:14px;color:#3f3f3f;">Tack för att du deltog i <strong>${esc(fields.eventName)}</strong>.</p>` : ''}
+          <p style="margin:0 0 20px;font-size:14px;line-height:1.5;color:#3f3f3f;">${esc(fields.intro || 'Vi vill gärna veta vad du tyckte. Enkäten tar ett par minuter och är helt anonym — inga namn eller e-postadresser sparas med dina svar.')}</p>
+          <a href="${esc(fields.url)}" style="display:inline-block;background:#002c40;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 20px;border-radius:999px;">Svara på enkäten</a>
+          <p style="margin:20px 0 0;font-size:12px;color:#6b6b6b;">Om knappen inte fungerar, kopiera länken: <span style="word-break:break-all;">${esc(fields.url)}</span></p>
+          <p style="margin:16px 0 0;font-size:11px;color:#8a8a8a;">Du får det här mejlet eftersom du var anmäld till aktiviteten. Det är ett engångsutskick — svaren hanteras inom EU.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  let sent = 0;
+  let failed = 0;
+  const BATCH = 10;
+  for (let i = 0; i < to.length; i += BATCH) {
+    const chunk = to.slice(i, i + BATCH);
+    const results = await Promise.all(
+      chunk.map(async (addr) => {
+        try {
+          const res = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({ from: FROM_EMAIL, to: [addr], subject, html })
+          });
+          if (!res.ok) {
+            // PII-fritt: status, aldrig adressen.
+            console.error(`[email] Resend survey invite error ${res.status}`);
+            return false;
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      })
+    );
+    for (const ok of results) ok ? sent++ : failed++;
+  }
+  return { sent, failed };
+}

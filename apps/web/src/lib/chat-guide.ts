@@ -181,7 +181,7 @@ const GUIDE: ChatGuideSection[] = [
           'Bygg intag-moduler (quiz, formulär eller AI-chatt) med frågor — som opublicerade utkast. Publicering görs i modul-admin.',
         roles: COMPASS_MANAGE,
         examples: [
-          'Gör ett quiz i Startupkompassen som heter "Är du redo för inkubator?" med fem frågor'
+          'Gör ett quiz i Startupkompassen (Marknadsverktyg) som heter "Är du redo för inkubator?" med fem frågor'
         ]
       },
       {

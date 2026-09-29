@@ -16,6 +16,7 @@ import {
 import { deleteEventFormAction } from '@/lib/actions/events';
 import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
 import { SignupDeleteButton } from './SignupDeleteButton';
+import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
 import {
   EVENT_PHASE_LABEL,
   eventPhase,
@@ -307,6 +308,15 @@ export default async function EventDetailPage({
           </div>
         </Card>
       </div>
+
+      <SectionHead title="Uppföljning" label="enkät" />
+      <FollowUpSurveys
+        pb={pb}
+        tenant={user.tenant}
+        kind="event"
+        id={event.id}
+        canCreate={hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])}
+      />
 
       <SectionHead title="Notes" label="metadata" />
       <Card style={{ padding: 16 }}>

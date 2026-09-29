@@ -63,6 +63,9 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // verksamhetsmaterial + dess embeddings) når AI ENBART via det kurerade
   // `search_knowledge`-verktyget — aldrig via det generiska query_collection.
   // Embedding-vektorerna är dessutom ointressanta/bullriga för en LLM att läsa rått.
+  // Enkätsvar (§ 39): fritextsvar går inte att fältmaska → aldrig via generiska
+  // query_collection. Staff når dem i /inflode/utvardering (RLS, aggregerat).
+  'survey_responses',
   'org_knowledge',
   'org_knowledge_chunks',
   // Uppladdat upphandlingsunderlag (1700000153, § 39.3): `extracted_text`/

@@ -40,7 +40,7 @@ export default async function NewModulePage({
   return (
     <div className="mx-view-pad mx-narrow">
       <PageHead
-        crumb="Startupkompassen / Moduler / Ny"
+        crumb="Marknadsverktyg / Startupkompassen / Ny"
         title="Skapa modul"
         subtitle="Ge modulen ett namn och välj typ. Resten bygger du steg för steg efteråt."
         actions={

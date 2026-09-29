@@ -6809,3 +6809,150 @@ finansieringsblocket. "Ny ansökan" finns för staff och länkad medlem.
   (migration 1700000169; `notify()` faller tillbaka på `assigned` mot ett
   schema utan migrationen).
 - **Migrationer** 1700000161–170 är nya, oföränderliga filnummer.
+
+---
+
+## 47. Marknadsverktyg → Utvärdering (digitala enkäter)
+
+### 47.1 Översikt
+
+`/inflode` (Marknadsverktyg) har flikarna Dashboard · Analys · Leads ·
+**Startupkompassen** (intag-moduler, § 23) · **Utvärdering**. Utvärdering låter
+admin/incubator_lead/coach bygga **digitala enkäter i webbläsaren** för
+uppföljning (workshop-/event-utvärdering, inkubatorprogram, alumni) och dela dem
+på en publik, oinloggad länk `/u/<public_slug>` med QR-kod. Svaren är
+**anonyma** och visas aggregerade (medel, fördelning, NPS, fritext) i
+`/inflode/utvardering/<id>?vy=resultat`.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/survey.ts` (+ `.test.ts`) | Ren, enhetstestad logik: frågetyper, normalisering, server-validering av svar, aggregering, NPS, mallar |
+| `backend/pocketbase-schema/migrations/1700000149_create_surveys.js` | Collections `surveys` + `survey_responses` |
+| `apps/web/src/lib/surveys/{store,public}.ts` | Läsvägar (användartoken → superuser-fallback) och publik resolvning |
+| `apps/web/src/lib/actions/surveys.ts` | Server actions: skapa (från mall) / spara / radera |
+| `apps/web/src/app/inflode/utvardering/**` | Lista, ny (mallval), byggare + resultat |
+| `apps/web/src/components/surveys/*` | `SurveyBuilder`, `SurveyRunner` (delas av publik sida + förhandsgranskning), `SurveyResults` |
+| `apps/web/src/app/u/[slug]/page.tsx` + `app/api/public/u/[slug]/submit/route.ts` | Publik enkät + anonymt inskick |
+
+### 47.2 Datamodell och regler
+
+- **`surveys`**: `tenant`, `name`, `kind` (`course|event|program|followup|custom`
+  — MÅSTE spegla `SURVEY_KINDS`), texter, `questions` (json, `SurveyQuestion[]`),
+  `is_active`, `public_slug` (slumpad, globalt unik via partiellt index),
+  `created_by`. Sju frågetyper: betyg 1–5, NPS 0–10, ja/nej, enval, flerval, kort
+  och lång text; max 40 frågor, 12 alternativ.
+- **`survey_responses`**: `tenant`, `survey` (cascadeDelete), `answers` (json),
+  `channel` (valfri utm_source, validerad `[a-zA-Z0-9_.-]`). **Ingen** e-post, IP,
+  användarrelation eller user agent lagras (GDPR § 5; enkäter är anonyma by
+  design). `createRule = null` (endast superuser): inskick sker bara via den
+  publika route-handlern.
+- list/view = staff/observer (`:each ?=`, § 21.3); createRule på `surveys`
+  refererar bara auth-fält (rollen enforce:as i server-action); update/delete =
+  admin/incubator_lead/coach. Migration-only (speglas inte i `setup-via-api.mjs`,
+  § 23.4-precedens).
+
+### 47.3 Säkerhet och regelefterlevnad
+
+- **Publik yta (§ 23.2-mönstret):** `/u/` och `/api/public/` är publika i
+  middleware; root-layouten renderar utan AppShell. Enkäten resolvas på sin
+  slug via superuser, **tenant härleds från enkäten** och stämplas på svaret —
+  aldrig från request-bodyn. Inskicket rate-limitas (10/min och IP, transient).
+- **Server-validering:** `validateSurveyAnswers` rensar okända nycklar, kräver
+  obligatoriska frågor, kontrollerar intervall/alternativ och cappar text
+  (klienten är aldrig säkerhetsgränsen). Svar renderas som React-text (ingen
+  `dangerouslySetInnerHTML`).
+- **AI:** ingen AI-inferens → riskklass n/a, ingen banner. `survey_responses`
+  är **denylistad** i `lib/ai/redaction.ts` (fritext går inte att fältmaska) →
+  aldrig via `query_collection`. Inga nya fält i `lib/ai/context.ts`.
+- **GDPR:** fritext är den enda PII-risken (respondenten kan skriva vad som
+  helst); staff-UI:t visar bara aggregat + fritext till behörig personal.
+  cascadeDelete på tenant/survey ger art. 17-städning; "Radera enkät" tar bort
+  alla svar. Rättslig grund: berättigat intresse (uppföljning/förbättring av
+  programmet).
+- **Migration** 1700000149 är ett nytt, oföränderligt filnummer.
+
+### 47.4 Uppföljning från en källa (aktivitet, kampanj, event, workshop …)
+
+En enkät kan skapas **från det den ska följa upp** i stället för fristående.
+Knappen **"Skapa uppföljning"** finns på eventets detaljsida (`/events/[id]`),
+uppdragskortet (`/uppdrag/[id]`), workshop-sidan
+(`/education/workshops/[id]`), bolagskortet (`/startups/[id]`, sektion
+*Uppföljning*), kompassmodulens redigeringssida och i årshjulets
+redigeringsdialog (sparad aktivitet/kampanj). Den öppnar
+`/inflode/utvardering/new?for=<kind>:<id>` med källan förvald, rätt mall
+(`SURVEY_LINK_DEFAULT_KIND`: event → Event, workshop → Utbildning, uppdrag/bolag
+→ Uppföljning) och namnet "Uppföljning: <källa>". Samma sidor listar redan
+skapade uppföljningar med status + länkar till resultat/redigering
+(`components/surveys/FollowUpSurveys.tsx`, server, läser med användarens token).
+
+- **Datamodell (migration 1700000150):** `surveys.link_kind` (select — MÅSTE
+  spegla `SURVEY_LINK_KINDS`: `annual_wheel | event | workshop | mission |
+  startup | compass_module`), `link_id` (text ≤ 64), `link_label` (text ≤ 200).
+  **Polymorf, ingen relation**: en raderad källa bryter aldrig enkäten
+  (etiketten lever kvar, länken leder till en 404/lista). Migration-only.
+- **Säkerhet:** referensen (`parseSurveyLinkRef`, ren + enhetstestad: bara
+  kända typer + `[a-zA-Z0-9_-]`-id) slås upp **tenant-verifierat** via
+  `getRecordInTenant` (`resolveSurveyLink` i `lib/actions/surveys.ts`) både när
+  sidan renderas och i `createSurveyAction`; etiketten härleds server-side ur
+  källans namn/titel och tas ALDRIG från klienten. En okänd referens ger en
+  synlig varning (sidan) respektive ett fel (actionen) — aldrig en tyst
+  fristående enkät. Schema-drift: efter skapandet läses posten tillbaka; saknas
+  `link_kind` visas `?varning=koppling` (kör migration 1700000150).
+- **Visning:** `SurveyLinkChip` ("Följer upp: Event · Frukostträff") i
+  enkätlistan och på byggar-/resultatsidan, med länk tillbaka via
+  `surveyLinkHref` (kompassmoduler kräver slug → utan slug landar man på
+  modullistan).
+- **GDPR/AI/riskklass:** oförändrat (§ 47.3) — kopplingen är verksamhetsdata
+  (typ + id + titel), ingen PII, ingen AI-inferens; `survey_responses` förblir
+  denylistad.
+
+### 47.5 Utskick till deltagare (e-post efter ett event)
+
+En enkät som följer upp ett **event** (§ 47.4, `link_kind = 'event'`) kan
+skickas till eventets anmälda deltagare — antingen direkt ("Skicka nu") eller
+**automatiskt** vid en vald tidpunkt (förslag: 09:00 svensk tid dagen efter
+eventet, `defaultSurveySendAt`, ren + enhetstestad, § 38-dygnsgränser). Panelen
+`SurveySendPanel` ligger under byggaren på `/inflode/utvardering/<id>` och visar
+antal mottagare, schemalagd tid, utfört utskick och "Skicka igen".
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/survey.ts` | `collectSurveyRecipients` (validera + dedupe + tak 500), `defaultSurveySendAt` |
+| `backend/pocketbase-schema/migrations/1700000151_extend_surveys_dispatch.js` | `surveys.send_at`/`sent_at`/`sent_count`/`send_base_url` |
+| `backend/pocketbase-schema/hooks/survey_dispatch_tick.pb.js` | PB-cron varje minut: `send_at <= now && sent_at = ''` → provisoriskt lås (+1 h) → POST `/api/internal/send-survey` |
+| `apps/web/src/app/api/internal/send-survey/route.ts` | Intern endpoint (delat secret `MOVEXUM_SCHEDULE_SECRET`, timing-safe, § 12.3) |
+| `apps/web/src/lib/surveys/dispatch.ts` | `dispatchSurveyInvites` — delad kärna för "Skicka nu" OCH cron (superuser, tenant-verifierad) |
+| `apps/web/src/lib/surveys/recipients.ts` | `countSurveyRecipients` — bara ett tal till klienten |
+| `apps/web/src/lib/email.ts` | `sendSurveyInvites` (Resend, ett mejl per mottagare, batchar om 10, HTML-escapat) |
+| `apps/web/src/lib/actions/surveys.ts` | `sendSurveyNowAction` / `scheduleSurveySendAction` / `cancelSurveySendAction` |
+| `apps/web/src/components/surveys/SurveySendPanel.tsx` | Panelen (client) |
+
+- **Dataminimering (GDPR § 5):** deltagarnas e-post läses **transient** ur
+  `event_signups.email` vid själva utskicket och lagras ALDRIG på enkäten —
+  bara `sent_at` + `sent_count`. Loggar innehåller status, aldrig adresser.
+  Ett mejl per mottagare (ingen synlig mottagarlista). Enkätlänken är den
+  vanliga anonyma `/u/<slug>` (+ `utm_source=event`) — svaren kan inte kopplas
+  till personen. **Rättslig grund:** berättigat intresse (ett engångsmejl till
+  den som själv anmält sig till aktiviteten; mejlet säger det uttryckligen).
+  Ingen prenumeration skapas → ingen avprenumeration behövs.
+- **Människa-i-loopen:** både "Skicka nu" och schemaläggning är mänskliga
+  klick av admin/incubator_lead/coach; chatt-agenten har inget verktyg för
+  utskick. "Skicka nu" kräver bekräftelsedialog; "Skicka igen" kräver `force`.
+- **Säkerhet:** `dispatchSurveyInvites` körs med superuser (cron saknar
+  session) och verifierar därför uttryckligen att eventet tillhör enkätens
+  tenant; deltagarlistan filtreras på `event + tenant`. Enkätlänkens origin
+  (`send_base_url`) sätts från **staffs egen request** (`x-forwarded-host`/
+  `host`) när utskicket schemaläggs, så cron-vägen aldrig gissar domän.
+  `/api/internal/` är undantaget auth-redirecten i `middleware.ts` (hookarna
+  har ingen cookie; endpointen autentiserar med det delade secretet).
+- **Robusthet:** tak 500 mottagare, batch om 10, en avvisad adress stoppar
+  inte de andra; tom deltagarlista markerar ändå `sent_at` (cron försöker inte
+  om varje timme); provisoriskt lås som schedule_tick. Schema-drift: efter
+  schemaläggning läses posten tillbaka och saknat `send_at` ger tydligt fel
+  (kör migration 1700000151) — aldrig en tyst no-op.
+- **EU-suveränitet/riskklass:** Resend (befintlig leverantör, § 23.5), ingen
+  AI-inferens → riskklass n/a. `survey_responses` förblir denylistad.

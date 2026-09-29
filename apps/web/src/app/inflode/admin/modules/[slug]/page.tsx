@@ -13,6 +13,7 @@ import { FLOW_TYPE_LABEL } from '@/lib/compass/types';
 import { deleteModuleAction } from '@/lib/actions/compass';
 import { listEvents } from '@/lib/actions/events';
 import { ShareModule } from '@/components/compass/ShareModule';
+import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
 import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
 import { ModuleEditor, type ModuleEditorNotice } from '@/components/compass/ModuleEditor';
 import { moduleHeroImageUrl, moduleHeroVideoUrl } from '@/lib/compass/media';
@@ -108,7 +109,7 @@ export default async function EditModulePage({
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb={`Startupkompassen / Moduler / ${mod.name}`}
+        crumb={`Marknadsverktyg / Startupkompassen / ${mod.name}`}
         title={mod.name}
         subtitle={`${mod.public_slug ? `/m/${mod.public_slug}` : '(ingen publik länk)'} · ${FLOW_TYPE_LABEL[mod.flow_type]} · ${mod.is_active && mod.public_url_enabled ? 'Publicerad' : mod.is_active ? 'Aktiv (ej publik)' : 'Utkast'}`}
         actions={
@@ -164,6 +165,14 @@ export default async function EditModulePage({
             name={mod.name}
             publicSlug={mod.public_slug}
             isPublished={Boolean(mod.is_active && mod.public_url_enabled)}
+          />
+
+          <FollowUpSurveys
+            pb={pb}
+            tenant={user.tenant}
+            kind="compass_module"
+            id={mod.id}
+            canCreate
           />
 
           <Card>

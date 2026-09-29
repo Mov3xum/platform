@@ -71,7 +71,12 @@ export default async function RootLayout({
   // ytor. De ska ALDRIG visa systemets vänstermeny/AppShell — även om en
   // inloggad medarbetare öppnar den publika länken ska sidan se ut som den
   // gör för en anonym besökare (en ren, isolerad chatt-/formulär-yta).
-  const isPublicModule = pathname === '/m' || pathname.startsWith('/m/');
+  const isPublicModule =
+    pathname === '/m' ||
+    pathname.startsWith('/m/') ||
+    // Publika enkäter (§ 39) är likaså fristående ytor.
+    pathname === '/u' ||
+    pathname.startsWith('/u/');
 
   // Inloggningssidan är en fristående, helsides split-screen-yta (bild +
   // formulär) som bär sin egen branding — den ska aldrig visa den utloggade

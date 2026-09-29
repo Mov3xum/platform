@@ -1,4 +1,4 @@
-// Startupkompassen — Dashboard (översikt över inflödet)
+// Marknadsverktyg — Dashboard (översikt över inflödet)
 
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
@@ -138,7 +138,7 @@ export default async function InflodeDashboardPage({
   );
 
   return (
-    <PageShell title="Startupkompassen" tabs={tabs} actions={actions} rightPanel={rail}>
+    <PageShell title="Marknadsverktyg" tabs={tabs} actions={actions} rightPanel={rail}>
       <div className="space-y-6 py-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-[13px] text-foreground-muted">
@@ -151,7 +151,7 @@ export default async function InflodeDashboardPage({
         {isStaff && kpis.totalLeads === 0 && modules.length === 0 && (
           <section className="rounded-2xl border border-dashed border-default bg-canvas-subtle p-8 text-center">
             <h2 className="font-heading text-[17px] font-semibold text-foreground">
-              Kom igång med Startupkompassen
+              Kom igång med Marknadsverktyg
             </h2>
             <p className="mx-auto mt-2 max-w-[520px] text-[13px] leading-relaxed text-foreground-muted">
               Bygg en intag-modul (quiz, formulär eller AI-chatt), deploya den publikt
