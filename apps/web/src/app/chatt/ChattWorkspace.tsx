@@ -144,12 +144,11 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
       meeting_request: m.meeting_request,
       sources: m.sources,
       model: m.role === 'assistant' ? m.model : undefined,
-      // Turens tokens (in + ut, per-turn-metadata § 9.9) → inline miljöchip
-      // under varje assistant-svar.
-      tokens:
-        m.role === 'assistant'
-          ? (Number(m.tokens_in) || 0) + (Number(m.tokens_out) || 0)
-          : undefined
+      // Per-turn-metadata (§ 9.9) → den begripliga token-raden under svaret
+      // (§ 28.2): synligt bara det modellen genererade, kontexten på begäran.
+      tokens_in: m.role === 'assistant' ? m.tokens_in : undefined,
+      tokens_out: m.role === 'assistant' ? m.tokens_out : undefined,
+      api_calls: m.role === 'assistant' ? m.api_calls : undefined
     }));
 }
 

@@ -30,6 +30,7 @@ import {
   WEB_SEARCH_OFF_HINT
 } from '@/lib/ai/guidance';
 import { buildChatTools, buildMemoryRecallBlock } from '@/lib/ai/tools';
+import { makeToolResolver, scopeTools } from '@/lib/ai/tool-scope';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
 import { STYLE_REMINDER } from '@/lib/ai/staff-chat';
 import { hasRole } from '@/lib/rbac';
@@ -478,16 +479,16 @@ async function runStaffChatWithTools(
 ): Promise<ChatActionResult> {
   let collections: Awaited<ReturnType<typeof getExposedCollections>> = [];
   let schemaSummary = '';
+  // Skopad schema-sammanfattning (§ 28.4): fältlistor bara för kärnset +
+  // kollektioner relevanta för de senaste användarturerna; övriga som
+  // kompakt namnindex (describe_collection täcker detaljerna).
+  const scopeText = userMessages
+    .filter((m) => m.role === 'user')
+    .slice(-3)
+    .map((m) => m.content)
+    .join('\n');
   try {
     collections = await getExposedCollections();
-    // Skopad schema-sammanfattning (§ 28.4): fältlistor bara för kärnset +
-    // kollektioner relevanta för de senaste användarturerna; övriga som
-    // kompakt namnindex (describe_collection täcker detaljerna).
-    const scopeText = userMessages
-      .filter((m) => m.role === 'user')
-      .slice(-3)
-      .map((m) => m.content)
-      .join('\n');
     schemaSummary = buildScopedSchemaSummary(
       collections,
       selectRelevantCollections(collections, scopeText)
@@ -513,7 +514,12 @@ async function runStaffChatWithTools(
   };
 
   // "Webbkällor" = riktig internetsökning (`web_search`, § 9.8) utöver RSS-blocket.
-  const tools = buildChatTools(collections, { actor, includeMemory: true, includeWebSearch });
+  // Skopad verktygsyta (§ 28.4, `tool-scope.ts`) — samma som trådchatten.
+  const fullTools = buildChatTools(collections, { actor, includeMemory: true, includeWebSearch });
+  const tools = scopeTools(
+    fullTools,
+    [scopeText, userMessages.filter((m) => m.role === 'assistant').at(-1)?.content ?? '', agentBlock ?? ''].join('\n')
+  );
 
   const today = new Date().toISOString().slice(0, 10);
   const identityBlock =
@@ -557,6 +563,7 @@ async function runStaffChatWithTools(
       tools,
       toolContext: { pb, tenantId: user.tenant, collections, actor },
       maxIterations: MAX_TOOL_ITERATIONS,
+      resolveTool: makeToolResolver(fullTools),
       onUsage: (u) =>
         logAiUsage(pb, {
           tenant: user.tenant,

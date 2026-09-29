@@ -3724,23 +3724,30 @@ konservativ uppskattning — alla värden märks "≈" i UI:t.
 | Fil | Syfte |
 |-----|-------|
 | `packages/shared/src/ai-impact.ts` (+ `.test.ts`) | Ren, enhetstestad beräknings-/formatteringslogik (tokens → CO₂e/vatten, sv-SE-formattering) |
-| `apps/web/src/app/chatt/ChattWorkspace.tsx` | Summerar konversationens tokens från per-turn-metadata (§ 9.9) |
-| `apps/web/src/components/DashboardChat.tsx` | Token-/miljöchip under chatten ("X tokens · ≈ Y g CO₂e · Z ml vatten") |
+| `apps/web/src/lib/chat-usage.ts` (+ `.test.ts`) | Ren text-byggare för token-raden under ett svar ("N tokens genererade" + kontext-detalj) |
+| `apps/web/src/lib/ai/tool-scope.ts` (+ `.test.ts`) | Skopad verktygsyta per tur (§ 28.4) — halverar prompt-tokens per anrop |
 | `apps/web/src/app/insights/page.tsx` | Tenant-vy: CO₂e/vatten i Översikt-railen + admin-länk till systemdashboarden |
 | `apps/web/src/app/admin/ai-miljo/page.tsx` | Systemvid dashboard: total tokenanvändning + utsläpp **per tenant** för vald period |
 
 ### 28.2 Ytor
 
-- **Chatten (`/chatt`):** INLINE under varje assistant-svar visas turens
-  tokens (`tokens_in` + `tokens_out` ur per-turn-metadatan i `messages[]`)
-  plus uppskattad CO₂e/vatten. Tooltipen anger källan (EU AI Act art. 13)
-  och förklarar varför siffran kan kännas hög: varje verktygssteg i
-  agent-loopen (§ 16.2) är ett EGET modellanrop som bearbetar hela
-  kontexten (systemprompt + schema-sammanfattning + guidance + historik +
-  verktygsresultat) igen, och Mistral debiterar prompt-tokens per anrop —
-  en tur med 2–3 verktygsanrop landar därför normalt på tiotusentals
-  tokens. Det är verklig, korrekt summerad förbrukning (`onUsage` per
-  API-anrop i `runAgentLoop`), inte ett räknefel.
+- **Chatten (`/chatt`) — begriplig token-rad, som Claude/ChatGPT (2026-09).**
+  Under varje assistant-svar visas modellen (transparens art. 13) och det
+  modellen faktiskt GENERERADE ("2 334 tokens genererade") — jämförbart med
+  ett svar i Claude eller ChatGPT. Hela kontexten visas bara bakom
+  "Detaljer": "Kontext som modellen läste: 130 700 tokens över 6 anrop —
+  varje verktygssteg är ett eget anrop som läser om systemprompt, verktyg,
+  historik och verktygsresultat (Mistral har ingen prompt-cache)". Texten
+  byggs av den rena, enhetstestade `lib/chat-usage.ts` (`describeTurnUsage`);
+  antalet anrop persisteras som `ToolRunMessage.api_calls` (räknas i
+  `runStaffChatTurn`, skrivs i `thread-turn.ts`; saknas på äldre turer).
+  Den tidigare inline-chipen ("133 034 tokens · ≈ 379 g CO₂e · 15 l vatten")
+  summerade in + ut över ALLA anrop i turen och jämfördes av användarna med
+  de få hundra ord de själva skrev — korrekt summerad förbrukning (`onUsage`
+  per API-anrop), men missvisande läst som "kostnaden för mitt meddelande".
+  CO₂e/vatten visas därför inte längre inline; per-turn-metadatan
+  (`tokens_in`/`tokens_out`, § 9.9) och `ai_usage_events` loggas oförändrat
+  och redovisas i `/insights` och `/admin/ai-miljo` nedan.
 - **`/insights` (staff):** tenantens period-tokens omräknade till CO₂e/vatten
   i Översikt-railen (samma `ai_usage_events`-summa som token-statet).
 - **`/admin/ai-miljo` (ADMIN-ONLY):** period-väljare (innevarande månad /
@@ -3788,6 +3795,26 @@ exponering** (best practice), utan att kvalitet tappas:
   instruerar redan "describe före filter"); dispatch-felet vid okänt
   kollektionsnamn listar alla giltiga namn → självläkande till priset av
   en extra iteration (taket är 7, § 9.3).
+- **Skopad verktygsyta (2026-09, `lib/ai/tool-scope.ts`, ren + enhetstestad):**
+  verktygsschemana var den största posten — alla ~40 definitioner (≈ 12 000
+  tokens) skickades i VARJE anrop. Nu passerar läs-/sök-/minnes-/dokument-/
+  webbverktygen och de GENERISKA skrivverktygen (`ALWAYS_ON_WRITE_TOOLS`:
+  bolagsfält, aktiviteter, uppgifter, anteckning, godkännande, minne)
+  alltid, medan domänspecifika skrivverktyg (årshjul, Startupkompassen,
+  workshops, events/möte, uppdrag, de minimis, KPI/kapital, scheman,
+  anslagstavla, upphandlingar — `TOOL_DOMAINS`) bara skickas när de senaste
+  tre användarturerna, senaste assistant-svaret eller agentens persona
+  matchar domänens synonymstammar (deterministiskt, ingen extra LLM-runda).
+  **Självläkning:** anropar modellen ändå ett verktyg som inte skickades (den
+  känner namnen via guidance-blocken) slår `runAgentLoop` upp definitionen
+  via `resolveTool` (`makeToolResolver(fullTools)`), lägger till den för
+  resten av turen och kör anropet — samma mönster som uppskjutna verktyg i
+  Claude Code. Ingen funktion försvinner, och säkerhetsgränsen är oförändrad
+  (RBAC/tenant/whitelist ligger i det delade skrivlagret som dispatchen
+  alltid går genom; autonoma körningar sätter ingen resolver). Gäller
+  trådchatten (`staff-chat.ts`) och den efemära `/idag`-chatten
+  (`lib/actions/chat.ts`). Testet låser att varje `DOMAIN_WRITE_TOOLS`-namn
+  är antingen alltid-på eller i exakt en domän.
 - **Enum-duplicering borttagen:** de fem läsverktygens scheman bär inte
   längre alla kollektionsnamn som `enum` (namnen finns i indexet; Mistral
   gör ingen constrained decoding på enum — det var bara prompt-tokens).

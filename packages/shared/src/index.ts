@@ -423,6 +423,9 @@ export interface ToolRunMessage {
   model?: string; // modell som producerade detta turn (assistant)
   tokens_in?: number;
   tokens_out?: number;
+  // Antal modellanrop i turen (1 + ett per verktygssteg). Förklarar varför
+  // tokens_in är mångfalt större än svaret (§ 28.2). Saknas på äldre turer.
+  api_calls?: number;
   cost_usd?: number;
   at: string; // ISO
   error?: string;

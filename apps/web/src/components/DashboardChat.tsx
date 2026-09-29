@@ -12,11 +12,6 @@ import type {
   WebSearchSourceRef
 } from '@platform/shared';
 import {
-  AI_IMPACT_SOURCE_LABEL,
-  formatAiImpact,
-  formatTokens
-} from '@platform/shared';
-import {
   extractPdfFromDataUrlAction,
   extractXlsxFromDataUrlAction
 } from '@/lib/actions/chat-attachments';
@@ -32,6 +27,7 @@ import {
 } from '@/lib/ai/models';
 import type { Role } from '@platform/shared';
 import { chatMarkdownToHtml } from '@/lib/safe-html';
+import { describeTurnUsage } from '@/lib/chat-usage';
 
 // Markör som visas i slutet av den streamande texten. Injiceras i den redan
 // säkert renderade HTML:en (chatMarkdownToHtml escapar all modell-text).
@@ -72,10 +68,13 @@ export interface UiMessage {
   steps?: AgentActivityStep[];
   /** Systemkvitto (§ 33.4): deterministiska kvitton på skrivningar i turen. */
   actions?: AgentActionReceipt[];
-  /** Turens tokens (in + ut) → inline token-/miljöchip under svaret. */
-  tokens?: number;
   /** Modellen som faktiskt svarade (per-turn-metadata, transparens art. 13). */
   model?: string;
+  /** Per-turn-tokens (§ 9.9) för den begripliga token-raden (§ 28.2). */
+  tokens_in?: number;
+  tokens_out?: number;
+  /** Antal modellanrop i turen (1 + ett per verktygssteg). */
+  api_calls?: number;
   /** Agenten väntar på Godkänn/Avbryt inför en kritisk åtgärd (§ 33). */
   approval_request?: ApprovalRequestRef;
   /** Agenten har förberett mötesläget (§ 34) — "Starta mötet"-kort. */
@@ -611,6 +610,8 @@ export default function DashboardChat({
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  // Index på det svar vars kontext-/tokendetaljer är utfällda (§ 28.2).
+  const [usageDetailFor, setUsageDetailFor] = useState<number | null>(null);
   // Fullskärmsvy för en inline-visualisering (stort över hela ytan).
   const [lightbox, setLightbox] = useState<InlineVisualRef | null>(null);
   // Aktivitetsloggen visar de fem senaste; "Visa fler" utökar stegvis så att
@@ -1131,6 +1132,48 @@ export default function DashboardChat({
   // verktygsresultaten, ALDRIG ur modellens text. Det är detta blocket
   // användaren ska lita på; säger texten något annat är det texten som har
   // fel. Misslyckade skrivningar visas i Movexum-orange (ingen röd, § 2.3).
+  /**
+   * Raden under ett svar (§ 28.2): modell + det modellen faktiskt genererade
+   * — jämförbart med ett svar i Claude/ChatGPT. Hela kontexten (systemprompt,
+   * verktyg, historik, verktygsresultat × antal anrop) visas bara på begäran,
+   * med förklaring, så siffran inte läses som "kostnaden för mitt meddelande".
+   * Miljö- och periodstatistik bor i /insights och /admin/ai-miljo.
+   */
+  function renderTurnUsage(msg: UiMessage, index: number) {
+    const usage = describeTurnUsage({
+      tokensIn: msg.tokens_in,
+      tokensOut: msg.tokens_out,
+      apiCalls: msg.api_calls
+    });
+    if (!msg.model && !usage.headline) return null;
+    const open = usageDetailFor === index;
+    return (
+      <div className="mt-1.5 text-[11px] text-foreground-subtle">
+        <p className="tabular-nums">
+          {msg.model ? modelLabel(msg.model) : null}
+          {msg.model && usage.headline ? ' · ' : ''}
+          {usage.headline}
+          {usage.detail && (
+            <>
+              {' · '}
+              <button
+                type="button"
+                onClick={() => setUsageDetailFor(open ? null : index)}
+                className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+                aria-expanded={open}
+              >
+                {open ? 'Dölj detaljer' : 'Detaljer'}
+              </button>
+            </>
+          )}
+        </p>
+        {open && usage.detail && (
+          <p className="mt-1 max-w-[560px] leading-relaxed">{usage.detail}</p>
+        )}
+      </div>
+    );
+  }
+
   function renderActions(actions?: AgentActionReceipt[]) {
     if (!actions || actions.length === 0) return null;
     const total = actions.length;
@@ -1710,15 +1753,7 @@ export default function DashboardChat({
                       {renderSources(msg.sources)}
                       {renderApprovalRequest(msg, i === messages.length - 1)}
                       {renderMeetingRequest(msg, i === messages.length - 1)}
-                      {typeof msg.tokens === 'number' && msg.tokens > 0 && (
-                        <p
-                          className="mt-1.5 text-[11px] tabular-nums text-foreground-subtle"
-                          title={`${AI_IMPACT_SOURCE_LABEL}. Uppskattningen tillämpas på turens totala tokens (in + ut) — varje verktygssteg kräver ett eget modellanrop som bearbetar hela kontexten igen.`}
-                        >
-                          {formatTokens(msg.tokens)} tokens · {formatAiImpact(msg.tokens)}
-                          {msg.model ? ` · ${modelLabel(msg.model)}` : ''}
-                        </p>
-                      )}
+                      {renderTurnUsage(msg, i)}
                     </div>
                   </div>
                 )
