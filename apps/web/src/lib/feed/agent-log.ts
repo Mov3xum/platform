@@ -261,6 +261,24 @@ function mapRow(
       };
     }
 
+    case 'surveys': {
+      const href = row.record_id ? `/inflode/utvardering/${row.record_id}` : '/inflode/utvardering';
+      const name = str(after.name);
+      if (action === 'create') {
+        return {
+          title: `Ny enkät under Utvärdering: "${name || 'utan namn'}"`,
+          detail: after.link_label ? `följer upp ${str(after.link_label)}` : 'opublicerad',
+          href,
+          icon: 'compass'
+        };
+      }
+      return {
+        title: name ? `Utvärdering: enkäten "${name}" ${changedVerb}` : `Utvärdering: en enkät ${changedVerb}`,
+        href,
+        icon: 'compass'
+      };
+    }
+
     case 'workshops': {
       if (action === 'create') {
         return {

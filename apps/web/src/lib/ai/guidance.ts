@@ -157,6 +157,16 @@ export const DOMAIN_GLOSSARY =
   '(inkubation), prescale, acceleration. "Antagen till BC" härleds ur en rad i ' +
   '`startup_phase_history` med `phase = "boost_chamber"` — det finns inget eget ' +
   'fält för det.\n' +
+  '- "Marknadsverktyget" (sidan /inflode) har flikarna Dashboard, Analys, ' +
+  'Leads, Startupkompassen och Utvärdering. "Startupkompassen" = de publika ' +
+  'INTAG-modulerna (`compass_modules`: quiz/formulär/AI-chatt som skapar ' +
+  'leads). "Utvärdering" = de digitala ENKÄTERNA (`surveys`: anonyma ' +
+  'utvärderingar efter event/workshop/program, resultat i /inflode/' +
+  'utvardering). "Skapa en enkät (under utvärdering) i marknadsverktyget", ' +
+  '"utvärdera communityfrukosten", "uppföljningsenkät" ⇒ `create_survey` — ' +
+  'ALDRIG ett utbildningsdokument, en workshop eller en kompassmodul. ' +
+  'Befintliga enkäter läser du via `query_collection` på `surveys` (svaren ' +
+  'är inte läsbara för dig — hänvisa till resultatvyn).\n' +
   '- "Inflöde"/"inflöden"/"leads" (nya intresseanmälningar via Startupkompassen, ' +
   'sidan /inflode) = kollektionen `compass_leads` — INTE `startups`. "Vårt ' +
   'senaste inflöde" → `query_collection(collection:"compass_leads", ' +
@@ -220,6 +230,16 @@ export const AUTHORING_GUIDANCE =
   'instruktioner och (valfritt) moduler med textmoment. Film och bild laddas ' +
   'upp av en människa i byggaren, och det är också hon som publicerar och ' +
   'tilldelar bolag.\n' +
+  '- `create_survey`: skapar en ENKÄT under Marknadsverktyget → Utvärdering ' +
+  '(/inflode/utvardering) — det är enkätverktyget för utvärdering av event, ' +
+  'communityfrukostar, workshops och program. Välj `kind` (event/course/' +
+  'program/followup/custom) och ange egna `questions` när personalen ' +
+  'beskrivit dem, annars mallens. Följer enkäten upp ett konkret event/' +
+  'workshop/bolag: slå upp posten och ange `link_kind` + `link_id`. Enkäten ' +
+  'blir OPUBLICERAD; personalen publicerar och skickar ut i byggaren. Använd ' +
+  '`create_compass_module` med purpose=survey BARA när personalen uttryckligen ' +
+  'vill ha en Startupkompass-enkät kopplad som indikator i /mal (kundnöjdhet/' +
+  'NPS/partner/medarbetarindex, § 43).\n' +
   '- `create_annual_wheel_item`: lägger in aktiviteter i verksamhetskalendern ' +
   '(en post per månad om den återkommer).\n' +
   '- GEMENSAM REGEL: skapa ALLT i samma svar (inget "jag återkommer" och ' +
@@ -369,11 +389,13 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   'Klar med kort motivering). Måltal, verksamhetsårets status och manuella ' +
   'värden sätter en människa i /mal — föreslå dem i text. Läget läser du via ' +
   '`query_collection` på goals/goal_indicators/goal_status_entries. ' +
-  'ENKÄTER (§ 43): Startupkompassen är också enkätmotor — `create_compass_module` ' +
-  'med purpose=survey (eller survey_template = kundnojdhet | nps_event | ' +
-  'partnerenkat | medarbetarindex, som skapar frågorna direkt) ger en enkät ' +
-  'utan lead; resultatet aggregeras k-anonymt och kopplas som indikator i /mal ' +
-  'av en människa. ' +
+  'ENKÄTER: "enkät"/"utvärdering"/"uppföljning efter event" ⇒ `create_survey` ' +
+  '(Marknadsverktyget → Utvärdering, § 47) — anonyma svar, publik länk, ' +
+  'resultat i /inflode/utvardering. Indikator-enkäter för /mal (§ 43: ' +
+  'kundnöjdhet | NPS | partnerenkät | medarbetarindex) byggs i stället med ' +
+  '`create_compass_module` purpose=survey / survey_template = kundnojdhet | ' +
+  'nps_event | partnerenkat | medarbetarindex — bara när personalen ' +
+  'uttryckligen ber om det. ' +
   'KONTAKTBOKEN (§ 45): Movexums gemensamma bok över externa kontakter ' +
   '(investerare, rådgivare, myndigheter, partners) med interna ÄGARE. Läs ' +
   'via `search_records`/`query_collection` på `contacts` (namn, organisation, ' +

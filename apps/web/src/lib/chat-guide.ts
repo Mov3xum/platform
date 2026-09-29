@@ -185,6 +185,16 @@ const GUIDE: ChatGuideSection[] = [
         ]
       },
       {
+        title: 'Enkäter under Utvärdering (Marknadsverktyg)',
+        description:
+          'Skapa en digital enkät för utvärdering av ett event, en communityfrukost, en workshop eller programmet — med egna frågor eller från mall. Enkäten skapas opublicerad; du granskar, publicerar och skickar ut den i /inflode/utvardering.',
+        roles: COMPASS_MANAGE,
+        examples: [
+          'Skapa en enkät under Utvärdering för communityfrukosten med tre betygsfrågor och en fritextfråga',
+          'Gör en uppföljningsenkät till workshopen om prissättning'
+        ]
+      },
+      {
         title: 'Workshop-utkast',
         description:
           'Skapa en workshop med mål, instruktioner och textmoduler. Bild/film och publicering görs i byggaren i /education.',

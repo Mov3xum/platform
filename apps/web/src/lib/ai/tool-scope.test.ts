@@ -84,6 +84,13 @@ test('kompassmodul + upphandling i samma kontext aktiverar båda domänerna', ()
   assert.ok(!domains.has('org_posts'));
 });
 
+test('enkät under Utvärdering i Marknadsverktyget aktiverar create_survey', () => {
+  const out = names(scopeTools(CATALOG, 'skapa en enkät under utvärdering i marknadsverktyget för communityfrukosten'));
+  assert.ok(out.includes('create_survey'));
+  assert.ok(matchToolDomains('gör en uppföljning efter frukostträffen').has('surveys'));
+  assert.ok(!matchToolDomains('Hur många aktiva bolag har vi?').has('surveys'));
+});
+
 test('målfråga aktiverar målstyrningens skrivverktyg', () => {
   const out = names(scopeTools(CATALOG, 'Skapa ett nytt mål och lägg till en indikator'));
   for (const tool of ['create_goal', 'add_goal_indicator', 'set_goal_status']) {

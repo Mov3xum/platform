@@ -1829,7 +1829,7 @@ actor krävs). Tabellen visar vad som tillkommer per yta:
 
 | Körning | Actor | Tillkommer utöver läs-/sökverktygen |
 |---|---|---|
-| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`, samt § 33: `assign_workshop`, `assign_education_document`, `create_task`/`move_task`, `create_event`, `create_mission`, `register_de_minimis_support`, `add_startup_kpi`, `add_capital_round`, `schedule_agent`, `create_startup_note`, samt § 39: `create_procurement`, `create_procurement_calloff`, `update_procurement_calloff`, samt § 42: `create_goal`, `add_goal_indicator`, `set_goal_status`, samt § 46: `create_funding_project`, `create_support_check_type`, `create_support_check_application`), `memory_read` + `memory_write` |
+| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`, samt § 33: `assign_workshop`, `assign_education_document`, `create_task`/`move_task`, `create_event`, `create_mission`, `register_de_minimis_support`, `add_startup_kpi`, `add_capital_round`, `schedule_agent`, `create_startup_note`, samt § 39: `create_procurement`, `create_procurement_calloff`, `update_procurement_calloff`, samt § 42: `create_goal`, `add_goal_indicator`, `set_goal_status`, samt § 46: `create_funding_project`, `create_support_check_type`, `create_support_check_application`, samt § 47.6: `create_survey`), `memory_read` + `memory_write` |
 | Toolbox (staff) | — (read-only) | `memory_read` |
 | Toolbox (icke-staff) | — (read-only) | — |
 | Schemalagd | — (read-only) | `memory_read` |
@@ -6902,6 +6902,42 @@ på en publik, oinloggad länk `/u/<public_slug>` med QR-kod. Svaren är
   alla svar. Rättslig grund: berättigat intresse (uppföljning/förbättring av
   programmet).
 - **Migration** 1700000149 är ett nytt, oföränderligt filnummer.
+
+### 47.6 Chatten — `create_survey` (2026-09)
+
+**Incident:** efter namnbytet Startupkompassen → Marknadsverktyg bad
+personalen chatten "skapa en enkät under Utvärdering i marknadsverktyget"
+och fick tre gånger i rad förslag om Word-dokument, utbildningsdokument
+och workshops — det fanns inget chatt-verktyg som skrev till `surveys`,
+och ordlistan kände inte till flikarna. Nu:
+
+- **Verktyget `create_survey`** (interaktiv staff-chatt, § 16.3, domän
+  `surveys` i `tool-scope.ts`) går genom det delade skrivlagret
+  `lib/core/write/surveys.ts` (`createSurvey`): rollpolicy
+  admin/incubator_lead/coach (samma krets som `MANAGE_ROLES` i
+  `lib/actions/surveys.ts`, via `writable-fields.ts`), namn/`kind`/texter/
+  frågor valideras (`normalizeSurveyQuestions` — angivna men helt ogiltiga
+  frågor är ett FEL, aldrig en tyst mall-ersättning), utelämnade frågor ger
+  mallens (`SURVEY_TEMPLATES[kind]`), all fritext personnummer-saneras,
+  valfri källa (`link_kind` + `link_id`, § 47.4) slås upp tenant-verifierat
+  via den delade `SURVEY_LINK_SOURCE` (UI-actionen använder samma karta),
+  `public_slug` slumpas med omförsök, och raden auditeras i `agent_actions`
+  (`collection = 'surveys'`, PII-fritt) → syns i Bolagsnytt/`/aktivitet`
+  med länk till `/inflode/utvardering/<id>`. Kvittot (§ 33.4) länkar dit.
+- **Människa-i-loopen (art. 14):** enkäten skapas ALLTID `is_active:false`;
+  `is_active` och `send_at` är agent-nekade — publicering (då börjar
+  `/u/<slug>` ta emot svar) och utskick till deltagare (§ 47.5) görs av en
+  människa i byggaren. `survey_responses` förblir denylistad; agenten kan
+  läsa `surveys` via `query_collection` men aldrig svaren.
+- **Ordlistan (`DOMAIN_GLOSSARY`)** förklarar Marknadsverktygets flikar:
+  Startupkompassen = intag-moduler (`compass_modules`), Utvärdering =
+  enkäter (`surveys`); "enkät"/"utvärdering"/"uppföljningsenkät" ⇒
+  `create_survey`, medan `create_compass_module purpose=survey` (§ 43) bara
+  används på uttrycklig begäran om en indikator-enkät för /mal.
+  `AUTHORING_GUIDANCE`, `CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden
+  (§ 33.3) är uppdaterade i samma anda.
+- **Riskklass/PII:** n/a — deterministisk mutation via skrivlagret, inga nya
+  fält eller kollektioner, ingen ny AI-dataväg.
 
 ### 47.4 Uppföljning från en källa (aktivitet, kampanj, event, workshop …)
 

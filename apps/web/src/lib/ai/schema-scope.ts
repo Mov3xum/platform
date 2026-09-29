@@ -83,9 +83,11 @@ const STEM_TO_COLLECTIONS: ReadonlyArray<readonly [readonly string[], readonly s
   [['dokument'], ['education_documents', 'education_document_assignments']],
   [['onboarding', 'introduktion'], ['onboarding_flows', 'onboarding_progress']],
   [
-    ['lead', 'inflöde', 'inflode', 'kompass', 'intag', 'quiz'],
+    ['lead', 'inflöde', 'inflode', 'kompass', 'intag', 'quiz', 'marknadsverktyg'],
     ['compass_leads', 'compass_modules']
   ],
+  // Marknadsverktyget → Utvärdering (§ 47): enkäterna (svaren är denylistade).
+  [['enkät', 'enkat', 'utvärdering', 'utvardering', 'nps', 'survey', 'marknadsverktyg'], ['surveys']],
   [['agent', 'verktyg', 'körning', 'korning', 'toolbox'], ['tools', 'tool_runs']],
   [['token', 'kostnad', 'förbruk', 'forbruk', 'spend'], ['ai_usage_events']],
   [['deal', 'investerare', 'investor'], ['deals', 'investors']],
