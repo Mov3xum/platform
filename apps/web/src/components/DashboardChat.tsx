@@ -499,6 +499,7 @@ function activityVisual(act: DashboardActivity): { icon: string; swatch: string 
   else if (act.kind === 'tool_run') icon = 'sparkle';
   else if (act.kind === 'integration_sync') icon = 'cloud';
   else if (act.kind === 'workshop_run' || act.kind === 'workshop_assignment') icon = 'cap';
+  else if (act.kind === 'mission') icon = 'flow';
   else
     switch (act.type) {
       case 'meeting':

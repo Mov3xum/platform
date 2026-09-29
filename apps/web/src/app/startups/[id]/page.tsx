@@ -65,6 +65,7 @@ import { pbFileUrl } from '@/lib/pb-file';
 import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
 import { DeMinimisSection } from './DeMinimisSection';
 import { StartupProcurementsSection } from './StartupProcurementsSection';
+import { StartupMissionsSection } from './StartupMissionsSection';
 
 interface StartupRecord {
   id: string;
@@ -682,7 +683,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ['#partners', `Partners (${engagements.totalItems})`],
           ['#financials', `Finansiell historik (${financials.totalItems})`],
           ['#tools', `Verktyg (${toolActivities.totalItems})`],
-          ['#workshops', `Workshops (${workshopAssignments.totalItems})`]
+          ['#workshops', `Workshops (${workshopAssignments.totalItems})`],
+          ['#team-uppdrag', 'Tvärfunktionella team']
         ].map(([href, label]) => (
           <a
             key={href}
@@ -981,6 +983,9 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
         {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer']) && (
           <StartupProcurementsSection pb={pb} tenantId={user.tenant} startupId={id} />
         )}
+
+        {/* § 29.4 — slutförda tvärfunktionella team sammanställs på bolagskortet */}
+        <StartupMissionsSection pb={pb} tenantId={user.tenant} startupId={id} />
 
         <Section id="documents" title="Dokument">
           <p className="text-sm text-foreground-muted">

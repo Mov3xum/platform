@@ -3957,6 +3957,10 @@ await patchActivitiesKindValues([
   'workshop_assignment', 'workshop_run'
 ]);
 
+// Migration 1700000155: activities.kind += 'mission' (tvärfunktionellt team
+// slutfört → rad på varje kopplat bolagskort, CLAUDE.md § 29.4).
+await patchActivitiesKindValues(['mission']);
+
 // Migration 1700000057: tool_runs chat-mode (messages, attachments) + output_md optional.
 await patchToolRunsCollection(
   [

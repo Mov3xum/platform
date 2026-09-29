@@ -3854,6 +3854,9 @@ beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 | `apps/web/src/app/api/missions/[id]/documents/route.ts` | Upload-route för dokumentation (staff-only) |
 | `apps/web/src/app/uppdrag/[id]/MissionDocuments.tsx` | Dokumentation-panel (ladda upp/lista/radera) |
 | `backend/pocketbase-schema/migrations/1700000136_seed_competence_gap_agent.js` | Portfölj-agent `ai_competence_gap` (kompetensbehov/gap, Fas 3) |
+| `backend/pocketbase-schema/migrations/1700000155_extend_activity_kinds_mission.js` | `activities.kind` += `mission` (slutfört team → rad på bolagskortet) |
+| `apps/web/src/lib/missions/completion.ts` | `logMissionCompletion` — aktivitetsrad per kopplat bolag när uppdraget når `done` |
+| `apps/web/src/app/startups/[id]/StartupMissionsSection.tsx` | Bolagskortets sektion "Tvärfunktionella team" (sammanställning av slutförda + pågående) |
 
 ### 29.2 Kompetensmodell (Fas 0)
 
@@ -3897,6 +3900,32 @@ mönster som assignment-collaboration (§ 18.4). Uppdragskortet
 (`/uppdrag/[id]`) visar `TeamCompetencePanel`: teamets **samlade
 kompetenstäckning** + varje medlems kompetenser, så staff ser om teamet är
 tvärfunktionellt nog.
+
+**Sammanställning på bolagskortet (2026-09).** När ett team/uppdrag når
+status `done` — via statusväljaren (`updateMissionStatus`) ELLER genom att
+sista steget bockas av (`advanceStage`) — sammanställs det på varje kopplat
+bolagskort (`/startups/[id]`, sektionen **"Tvärfunktionella team"**,
+ankare `#team-uppdrag`, egen post i bolagskortets hopp-nav):
+- `logMissionCompletion` (`lib/missions/completion.ts`) skriver en
+  `activities`-rad per bolag (`kind='mission'`, migration **1700000155**,
+  speglad i `setup-via-api.mjs`; `type='task'`, `status='done'`, titel
+  "Tvärfunktionellt team slutfört: <titel>") så slutförandet syns i
+  bolagskortets Aktiviteter, i Bolagsnytt/`/aktivitet` (eget filter
+  "Tvärfunktionella team", ikon `flow`) och i chattens feed. Fyrar bara på
+  övergången till `done` (`isMissionCompletionTransition`), är fail-soft
+  (en instans utan migrationen blockerar aldrig statusändringen) och
+  superuser-faller bara vid PB v0.23.4:s tysta regel-nekande (§ 21.3).
+- `StartupMissionsSection` läser uppdragen **live** (ingen kopia lagras)
+  via `startup = id || startups ~ id` + exakt JS-verifiering av kopplingen,
+  och visar slutförda team med typ, slutförandedatum (sista klara stegets
+  tid, annars `updated`), team (ansvarig + deltagare — visningsnamn, aldrig
+  e-post), stegen, beskrivning (HTML strippad, cappad) och
+  `mission_documents` som länkar; därunder pågående team kompakt. Reads går
+  via användarens token → § 21-RLS: bolagsmedlem ser bara sitt bolags
+  uppdrag och får tom dokumentlista (staff/observer-only). Renderas inte alls
+  utan kopplade uppdrag.
+- GDPR § 5: bara verksamhetsdata (titel, typ, datum, interna visningsnamn);
+  inga nya fält i `lib/ai/context.ts`; riskklass n/a (ingen AI-inferens).
 
 **Uppdragskanban (tavla inne på uppdraget).** Samma 6-kolumners `tasks`-tavla
 som bolagskanbanen (§ 15.7) finns nu direkt på uppdragskortet. Den
