@@ -1111,15 +1111,22 @@ export function buildChatTools(
         name: 'create_task',
         description:
           'Skapar ett kanban-kort (uppgift). Koppla det till ett bolags tavla ' +
-          '(startup_id), ett uppdrags tavla (mission_id) eller lämna fristående. ' +
-          'Kollegor tilldelas av en människa på tavlan — gissa aldrig vem som ' +
-          'ska göra uppgiften.',
+          '(startup_id), ett uppdrags tavla (mission_id) eller lämna fristående — ' +
+          'ange EXAKT EN av startup_id/mission_id, aldrig båda. "Projektet"/' +
+          '"uppdraget"/"tvärfunktionella team" = ett uppdrag (missions): slå upp ' +
+          'det med search_records på missions och använd id:t från träffen, gissa ' +
+          'aldrig. Kollegor tilldelas av en människa på tavlan — gissa aldrig vem ' +
+          'som ska göra uppgiften.',
         parameters: {
           type: 'object',
           properties: {
             description: { type: 'string', description: 'Kortets text (max 500 tecken).' },
             startup_id: { type: 'string', description: 'Bolagets id (valfritt).' },
-            mission_id: { type: 'string', description: 'Uppdragets id (valfritt, ej ihop med startup_id).' },
+            mission_id: {
+              type: 'string',
+              description:
+                'Uppdragets id (valfritt, ej ihop med startup_id). Hämta det via search_records på missions.'
+            },
             status: {
               type: 'string',
               enum: ['backlog', 'open', 'in_progress', 'review', 'blocked', 'done'],
