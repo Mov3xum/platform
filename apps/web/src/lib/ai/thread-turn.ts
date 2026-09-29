@@ -200,6 +200,7 @@ export async function executeThreadTurn(
     model: turn.result.model || undefined,
     tokens_in: turn.result.tokensIn,
     tokens_out: turn.result.tokensOut,
+    api_calls: turn.result.calls > 0 ? turn.result.calls : undefined,
     cost_usd: estimateCostUsd(
       turn.result.model || 'mistral-large-latest',
       turn.result.tokensIn,

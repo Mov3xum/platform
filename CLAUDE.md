@@ -575,8 +575,8 @@ integrity (§ 10).
 - **Global default:** env `MOVEXUM_MONTHLY_AI_BUDGET_USD` (Coolify, aldrig i
   kod). Osatt/0 = av.
 - **Per-tenant override:** `tenants.monthly_ai_budget_usd` (migration
-  1700000122), justeras av admin/incubator_lead i **`/installningar` → "AI-
-  kostnadstak"** (server action `saveAiBudgetAction`). Värde > 0 överstyr env-
+  1700000122), justeras av admin/incubator_lead i **Inställningar → AI-analys →
+  Kostnadstak** (`/installningar/ai-analys`, server action `saveAiBudgetAction`). Värde > 0 överstyr env-
   defaulten; 0/tomt ärver den. UI:t visar förbrukat-hittills via
   `getBudgetStatus` (gul ≥ 80 %, orange ≥ 95 % — ingen röd, § 2.3).
 
@@ -3724,26 +3724,30 @@ konservativ uppskattning — alla värden märks "≈" i UI:t.
 | Fil | Syfte |
 |-----|-------|
 | `packages/shared/src/ai-impact.ts` (+ `.test.ts`) | Ren, enhetstestad beräknings-/formatteringslogik (tokens → CO₂e/vatten, sv-SE-formattering) |
-| `apps/web/src/app/chatt/ChattWorkspace.tsx` | Summerar konversationens tokens från per-turn-metadata (§ 9.9) |
-| `apps/web/src/components/DashboardChat.tsx` | Token-/miljöchip under chatten ("X tokens · ≈ Y g CO₂e · Z ml vatten") |
-| `apps/web/src/app/insights/page.tsx` | Tenant-vy: CO₂e/vatten i Översikt-railen + admin-länk till systemdashboarden |
-| `apps/web/src/app/admin/ai-miljo/page.tsx` | Systemvid dashboard: total tokenanvändning + utsläpp **per tenant** för vald period |
+| `apps/web/src/lib/ai/tool-scope.ts` (+ `.test.ts`) | Skopad verktygsyta per tur (§ 28.4) — halverar prompt-tokens per anrop |
+| `apps/web/src/app/installningar/ai-analys/{page,paths}.tsx` | Sektionen AI-analys med undervyerna Kostnadstak / Användning / Miljöpåverkan (§ 36.1) |
+| `apps/web/src/app/installningar/ai-analys/UsageView.tsx` | Vyn Användning (f.d. `/insights`): körningar, tokens, kostnad, feedback; CO₂e/vatten i railen |
+| `apps/web/src/app/installningar/ai-analys/MiljoView.tsx` | Vyn Miljöpåverkan (f.d. `/admin/ai-miljo`, admin-only): tokens + utsläpp **per tenant** för vald period |
 
 ### 28.2 Ytor
 
-- **Chatten (`/chatt`):** INLINE under varje assistant-svar visas turens
-  tokens (`tokens_in` + `tokens_out` ur per-turn-metadatan i `messages[]`)
-  plus uppskattad CO₂e/vatten. Tooltipen anger källan (EU AI Act art. 13)
-  och förklarar varför siffran kan kännas hög: varje verktygssteg i
-  agent-loopen (§ 16.2) är ett EGET modellanrop som bearbetar hela
-  kontexten (systemprompt + schema-sammanfattning + guidance + historik +
-  verktygsresultat) igen, och Mistral debiterar prompt-tokens per anrop —
-  en tur med 2–3 verktygsanrop landar därför normalt på tiotusentals
-  tokens. Det är verklig, korrekt summerad förbrukning (`onUsage` per
-  API-anrop i `runAgentLoop`), inte ett räknefel.
-- **`/insights` (staff):** tenantens period-tokens omräknade till CO₂e/vatten
-  i Översikt-railen (samma `ai_usage_events`-summa som token-statet).
-- **`/admin/ai-miljo` (ADMIN-ONLY):** period-väljare (innevarande månad /
+- **Chatten (`/chatt`) visar INGA token- eller miljösiffror (2026-09).**
+  Under varje assistant-svar står bara modellen som svarade (transparens
+  art. 13) — samma uttryck som Claude och ChatGPT. Den tidigare inline-
+  chipen ("133 034 tokens · ≈ 379 g CO₂e · 15 l vatten") summerade in + ut
+  över ALLA anrop i turen (varje verktygssteg är ett eget anrop utan
+  prompt-cache som läser om systemprompt, verktyg, historik och
+  verktygsresultat) och jämfördes av användarna med de få hundra ord de
+  själva skrev — korrekt summerad förbrukning (`onUsage` per API-anrop) men
+  missvisande läst som "kostnaden för mitt meddelande". Per-turn-metadatan
+  (`tokens_in`/`tokens_out`/`api_calls` i `messages[]`, § 9.9) och
+  `ai_usage_events` loggas oförändrat och redovisas per period i
+  `/insights` och `/admin/ai-miljo` nedan — inte i konversationen.
+- **Inställningar → AI-analys → Användning** (`/installningar/ai-analys?vy=anvandning`,
+  staff; `/insights` redirectar hit): tenantens period-tokens omräknade till
+  CO₂e/vatten i railen (samma `ai_usage_events`-summa som token-statet).
+- **Inställningar → AI-analys → Miljöpåverkan** (`?vy=miljo`, ADMIN-ONLY;
+  `/admin/ai-miljo` redirectar hit): period-väljare (innevarande månad /
   7/30/90 dagar), KPI-kort (tokens, CO₂e, vatten, anrop, kostnad) och tabell
   **per tenant**. Läser `ai_usage_events` över alla tenants via
   `getSuperuserPb()` (RLS:en är tenant-scopad) — RBAC-gaten är `admin`-roll,
@@ -3788,6 +3792,26 @@ exponering** (best practice), utan att kvalitet tappas:
   instruerar redan "describe före filter"); dispatch-felet vid okänt
   kollektionsnamn listar alla giltiga namn → självläkande till priset av
   en extra iteration (taket är 7, § 9.3).
+- **Skopad verktygsyta (2026-09, `lib/ai/tool-scope.ts`, ren + enhetstestad):**
+  verktygsschemana var den största posten — alla ~40 definitioner (≈ 12 000
+  tokens) skickades i VARJE anrop. Nu passerar läs-/sök-/minnes-/dokument-/
+  webbverktygen och de GENERISKA skrivverktygen (`ALWAYS_ON_WRITE_TOOLS`:
+  bolagsfält, aktiviteter, uppgifter, anteckning, godkännande, minne)
+  alltid, medan domänspecifika skrivverktyg (årshjul, Startupkompassen,
+  workshops, events/möte, uppdrag, de minimis, KPI/kapital, scheman,
+  anslagstavla, upphandlingar — `TOOL_DOMAINS`) bara skickas när de senaste
+  tre användarturerna, senaste assistant-svaret eller agentens persona
+  matchar domänens synonymstammar (deterministiskt, ingen extra LLM-runda).
+  **Självläkning:** anropar modellen ändå ett verktyg som inte skickades (den
+  känner namnen via guidance-blocken) slår `runAgentLoop` upp definitionen
+  via `resolveTool` (`makeToolResolver(fullTools)`), lägger till den för
+  resten av turen och kör anropet — samma mönster som uppskjutna verktyg i
+  Claude Code. Ingen funktion försvinner, och säkerhetsgränsen är oförändrad
+  (RBAC/tenant/whitelist ligger i det delade skrivlagret som dispatchen
+  alltid går genom; autonoma körningar sätter ingen resolver). Gäller
+  trådchatten (`staff-chat.ts`) och den efemära `/idag`-chatten
+  (`lib/actions/chat.ts`). Testet låser att varje `DOMAIN_WRITE_TOOLS`-namn
+  är antingen alltid-på eller i exakt en domän.
 - **Enum-duplicering borttagen:** de fem läsverktygens scheman bär inte
   längre alla kollektionsnamn som `enum` (namnen finns i indexet; Mistral
   gör ingen constrained decoding på enum — det var bara prompt-tokens).
@@ -5092,7 +5116,7 @@ brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
 | `/installningar/anvandare` | **Användare** — alla konton i tenanten med sök/rollfilter, "Ny användare", och per konto: roller, kopplat bolag, **moduler i sidofältet** (§ 36.3), nytt lösenord, radering |
 | `/installningar/moduler` | Borttagen (redirect → `/installningar/anvandare`) — den globala tenant-togglingen finns inte längre, § 36.3 |
 | `/installningar/organisation` | Tenants, infra-status, dataresidens |
-| `/installningar/ai-kostnad` | AI-kostnadstak (§ 9.6) |
+| `/installningar/ai-analys` | **AI-analys** — tre undervyer via `?vy=`: **Kostnadstak** (default, § 9.6), **Användning** (f.d. `/insights`: körningar, tokens, kostnad, kvalitetsfeedback § 9.10, adoption) och **Miljöpåverkan** (f.d. `/admin/ai-miljo`, admin-only, § 28.2). `/insights`, `/admin/ai-miljo` och `/installningar/ai-kostnad` är legacy-routes som redirectar hit (perioden bevaras). Modulen `insights` heter "AI-analys", har ingen egen rail-post längre och pekar hit. |
 | `/installningar/ai-minne` | AI-minne (`agent_memory`, § 16.4) |
 | `/installningar/utseende` | Tenant-logotyp |
 

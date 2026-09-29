@@ -12,11 +12,6 @@ import type {
   WebSearchSourceRef
 } from '@platform/shared';
 import {
-  AI_IMPACT_SOURCE_LABEL,
-  formatAiImpact,
-  formatTokens
-} from '@platform/shared';
-import {
   extractPdfFromDataUrlAction,
   extractXlsxFromDataUrlAction
 } from '@/lib/actions/chat-attachments';
@@ -72,8 +67,6 @@ export interface UiMessage {
   steps?: AgentActivityStep[];
   /** Systemkvitto (§ 33.4): deterministiska kvitton på skrivningar i turen. */
   actions?: AgentActionReceipt[];
-  /** Turens tokens (in + ut) → inline token-/miljöchip under svaret. */
-  tokens?: number;
   /** Modellen som faktiskt svarade (per-turn-metadata, transparens art. 13). */
   model?: string;
   /** Agenten väntar på Godkänn/Avbryt inför en kritisk åtgärd (§ 33). */
@@ -1131,6 +1124,16 @@ export default function DashboardChat({
   // verktygsresultaten, ALDRIG ur modellens text. Det är detta blocket
   // användaren ska lita på; säger texten något annat är det texten som har
   // fel. Misslyckade skrivningar visas i Movexum-orange (ingen röd, § 2.3).
+  /**
+   * Raden under ett svar: bara modellen som svarade (transparens art. 13) —
+   * som Claude och ChatGPT. Inga token- eller miljösiffror i chatten; de
+   * redovisas per period under Inställningar → AI-analys (§ 28.2).
+   */
+  function renderTurnUsage(msg: UiMessage) {
+    if (!msg.model) return null;
+    return <p className="mt-1.5 text-[11px] text-foreground-subtle">{modelLabel(msg.model)}</p>;
+  }
+
   function renderActions(actions?: AgentActionReceipt[]) {
     if (!actions || actions.length === 0) return null;
     const total = actions.length;
@@ -1710,15 +1713,7 @@ export default function DashboardChat({
                       {renderSources(msg.sources)}
                       {renderApprovalRequest(msg, i === messages.length - 1)}
                       {renderMeetingRequest(msg, i === messages.length - 1)}
-                      {typeof msg.tokens === 'number' && msg.tokens > 0 && (
-                        <p
-                          className="mt-1.5 text-[11px] tabular-nums text-foreground-subtle"
-                          title={`${AI_IMPACT_SOURCE_LABEL}. Uppskattningen tillämpas på turens totala tokens (in + ut) — varje verktygssteg kräver ett eget modellanrop som bearbetar hela kontexten igen.`}
-                        >
-                          {formatTokens(msg.tokens)} tokens · {formatAiImpact(msg.tokens)}
-                          {msg.model ? ` · ${modelLabel(msg.model)}` : ''}
-                        </p>
-                      )}
+                      {renderTurnUsage(msg)}
                     </div>
                   </div>
                 )

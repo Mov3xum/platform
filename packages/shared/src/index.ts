@@ -423,6 +423,9 @@ export interface ToolRunMessage {
   model?: string; // modell som producerade detta turn (assistant)
   tokens_in?: number;
   tokens_out?: number;
+  // Antal modellanrop i turen (1 + ett per verktygssteg). Förklarar varför
+  // tokens_in är mångfalt större än svaret (§ 9.6/§ 28). Saknas på äldre turer.
+  api_calls?: number;
   cost_usd?: number;
   at: string; // ISO
   error?: string;
@@ -1377,7 +1380,7 @@ export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'pagaende', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'upphandlingar', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'installningar', 'min_profil'] }
+  { label: 'System', modules: ['agenter', 'kunskapsbas', 'integrationer', 'installningar', 'min_profil'] }
 ];
 
 /**
@@ -1564,11 +1567,13 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'insights',
-    title: 'Usage insights',
+    // Bor sedan 2026-09 under Inställningar → AI-analys (ingen egen rail-post;
+    // id:t finns kvar för sparade enabled_modules-listor).
+    title: 'AI-analys',
     description:
-      'Spåra hur AI och plattformen används i din organisation — identifiera värdedrivare och adoption per modul.',
+      'Hur AI:n används i din organisation — körningar, tokens, kostnad, kvalitetsfeedback och miljöpåverkan.',
     rolesAllowed: ['admin', 'incubator_lead'],
-    route: '/insights'
+    route: '/installningar/ai-analys'
   },
   {
     id: 'integrationer',
