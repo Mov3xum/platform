@@ -3522,7 +3522,7 @@ await ensureCollection({
       values: ['morkbla', 'djupbla', 'bla', 'morklila', 'lila', 'ljuslila', 'morkgron', 'gron', 'ljusgron', 'morkgul', 'gul', 'morkorange', 'orange']
     },
     { name: 'sort_order', type: 'number', required: false, onlyInt: true, min: 0, max: 999 },
-    // Migration 1700000146: visas kategorin i kalendern på Hemmaplan (§ 37)?
+    // Migration 1700000146: visas kategorin i kalendern på Översikt (§ 37)?
     { name: 'show_on_home', type: 'bool', required: false },
     { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],

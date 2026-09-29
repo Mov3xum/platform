@@ -395,7 +395,7 @@ export interface AnnualWheelCategoryActionState extends AnnualWheelActionState {
 export async function createAnnualWheelCategoryAction(input: {
   label: string;
   token: string;
-  /** Visas kategorins aktiviteter i kalendern på Hemmaplan (§ 37)? Default true. */
+  /** Visas kategorins aktiviteter i kalendern på Översikt (§ 37)? Default true. */
   showOnHome?: boolean;
 }): Promise<AnnualWheelCategoryActionState> {
   const auth = await requireCategoryAdmin();
@@ -456,7 +456,7 @@ export async function createAnnualWheelCategoryAction(input: {
   return { ok: true, key };
 }
 
-/** Byter namn/färg/ordning/Hemmaplan-synlighet på en kategori (superadmin). Nyckeln är låst. */
+/** Byter namn/färg/ordning/Översikt-synlighet på en kategori (superadmin). Nyckeln är låst. */
 export async function updateAnnualWheelCategoryAction(
   recordId: string,
   input: { label?: string; token?: string; sortOrder?: number; showOnHome?: boolean }

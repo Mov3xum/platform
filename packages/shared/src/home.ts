@@ -208,7 +208,7 @@ export function mergeOmvarldItems(
   return out;
 }
 
-// ─── Tidslinje (14-dagarsremsan på Hemmaplan) ────────────────────────────────
+// ─── Tidslinje (14-dagarsremsan på Översikt) ────────────────────────────────
 
 export interface HomeTimelineDay {
   date: Date;
@@ -326,7 +326,7 @@ export function buildHomeTimeline(items: readonly HomeAgendaItem[], today: Date,
   return { days: dayList, spans, lanes: laneEnds.length };
 }
 
-// ─── Kalenderfönster på Hemmaplan ────────────────────────────────────────────
+// ─── Kalenderfönster på Översikt ────────────────────────────────────────────
 
 /** Query-parametern som styr kalenderfönstret (`/hem?dagar=7|14|30`). */
 export const HOME_WINDOW_PARAM = 'dagar';

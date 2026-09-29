@@ -91,7 +91,7 @@ export interface AnnualWheelCategoryDef {
   /** True för de inbyggda defaults (kan inte raderas när de är fallback). */
   builtin?: boolean;
   /**
-   * Visas kategorins aktiviteter i kalendern på Hemmaplan (§ 37)? Default
+   * Visas kategorins aktiviteter i kalendern på Översikt (§ 37)? Default
    * true; saknat fält (omigrerad instans) tolkas också som true.
    */
   showOnHome?: boolean;
@@ -1775,7 +1775,7 @@ export function countItemsByQuarter(items: readonly AnnualWheelItem[]): AnnualWh
 }
 
 /**
- * Kategorinycklar vars aktiviteter får visas i kalendern på Hemmaplan (§ 37).
+ * Kategorinycklar vars aktiviteter får visas i kalendern på Översikt (§ 37).
  * En kategori döljs BARA när `showOnHome` är uttryckligen false; okända
  * kategorier (t.ex. en raderad nyckel på en gammal post) filtreras inte här.
  */

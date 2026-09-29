@@ -15,7 +15,7 @@ export default function manifest(): MetadataRoute.Manifest {
     id: '/',
     name: 'Movexum',
     short_name: 'Movexum',
-    description: 'Movexums inkubatorplattform — hemmaplan, chatt, bolag, aktiviteter och verktyg.',
+    description: 'Movexums inkubatorplattform — översikt, chatt, bolag, aktiviteter och verktyg.',
     lang: 'sv',
     dir: 'ltr',
     start_url: '/hem?source=pwa',

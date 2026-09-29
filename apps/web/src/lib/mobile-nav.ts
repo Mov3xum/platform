@@ -29,9 +29,9 @@ type CanAccess = (roles: Role[], moduleId: string, enabledModules: string[] | un
 
 /** Korta etiketter för smal skärm (railen har längre titlar). */
 const MOBILE_LABELS: Record<string, string> = {
-  hem: 'Hem',
+  hem: 'Översikt',
   idag: 'Chatt',
-  inkorg: 'Översikt',
+  inkorg: 'Min översikt',
   min_oversikt: 'Mitt bolag',
   mina_aktiviteter: 'Aktiviteter',
   startups: 'Bolag',
