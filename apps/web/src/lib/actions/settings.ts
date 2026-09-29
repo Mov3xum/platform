@@ -6,6 +6,7 @@ import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { revalidatePath } from 'next/cache';
 import { MAX_TENANT_LOGO_BYTES } from '@/lib/settings-constants';
+import { missingLoginBrandingFields, validateLoginBrandingInput } from '@platform/shared';
 
 export type UploadTenantLogoState = {
   error?: string;
@@ -15,6 +16,13 @@ export type UploadTenantLogoState = {
 export type SaveAiBudgetState = {
   error?: string;
   success?: boolean;
+};
+
+export type SaveLoginBrandingState = {
+  error?: string;
+  success?: boolean;
+  /** Fält som PB-schemat saknar (migration 1700000172 inte körd) — sparat men syns inte. */
+  warning?: string;
 };
 
 const MAX_AI_BUDGET_USD = 1000000;
@@ -213,5 +221,67 @@ export async function deleteTenantLogoAction(
   revalidatePath('/installningar');
   revalidatePath('/installningar/utseende');
 
+  return { success: true };
+}
+
+/**
+ * Sparar inloggningssidans utseende (mall, accentfärg, rubrik, underrubrik)
+ * för inloggad användares tenant — gäller /login för alla i systemet
+ * (CLAUDE.md § 48). Bild/video laddas upp via route-handlern
+ * /api/installningar/login-media. Kräver admin/incubator_lead.
+ */
+export async function saveLoginBrandingAction(
+  _prev: SaveLoginBrandingState,
+  formData: FormData
+): Promise<SaveLoginBrandingState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+    return { error: 'Åtkomst nekad.' };
+  }
+
+  const validation = validateLoginBrandingInput({
+    layout: formData.get('layout'),
+    accent: formData.get('accent'),
+    headline: formData.get('headline'),
+    tagline: formData.get('tagline')
+  });
+  if (!validation.ok) return { error: validation.error };
+  const payload = validation.value;
+
+  const pb = await getServerPb();
+  let record: Record<string, unknown> | null = null;
+  try {
+    record = await pb.collection('tenants').update(user.tenant, payload);
+  } catch (err) {
+    const superuserPb = await getSuperuserPb();
+    if (!superuserPb) {
+      console.error('[settings] saveLoginBranding failed', { tenantId: user.tenant, err });
+      return { error: 'Kunde inte spara utseendet. Försök igen.' };
+    }
+    try {
+      record = await superuserPb.collection('tenants').update(user.tenant, payload);
+    } catch (fallbackErr) {
+      console.error('[settings] saveLoginBranding failed (fallback)', {
+        tenantId: user.tenant,
+        err,
+        fallbackErr
+      });
+      return { error: 'Kunde inte spara utseendet. Försök igen.' };
+    }
+  }
+
+  revalidatePath('/login');
+  revalidatePath('/installningar');
+  revalidatePath('/installningar/utseende');
+
+  // PB släpper okända fält tyst (§ 24.4-invarianten): läs tillbaka och säg
+  // ifrån när schemat saknar fälten i stället för att låtsas att det sparades.
+  const missing = missingLoginBrandingFields(record);
+  if (missing.length > 0) {
+    return {
+      success: true,
+      warning: `Databasen saknar fälten ${missing.join(', ')} — PocketBase-migrationen 1700000172 är inte applicerad, så valet syns inte på inloggningssidan förrän den körts.`
+    };
+  }
   return { success: true };
 }

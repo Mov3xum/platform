@@ -5328,7 +5328,7 @@ brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
 | `/installningar/organisation` | Tenants, infra-status, dataresidens |
 | `/installningar/ai-analys` | **AI-analys** — tre undervyer via `?vy=`: **Kostnadstak** (default, § 9.6), **Användning** (f.d. `/insights`: körningar, tokens, kostnad, kvalitetsfeedback § 9.10, adoption) och **Miljöpåverkan** (f.d. `/admin/ai-miljo`, admin-only, § 28.2). `/insights`, `/admin/ai-miljo` och `/installningar/ai-kostnad` är legacy-routes som redirectar hit (perioden bevaras). Modulen `insights` heter "AI-analys", har ingen egen rail-post längre och pekar hit. |
 | `/installningar/ai-minne` | AI-minne (`agent_memory`, § 16.4) |
-| `/installningar/utseende` | Tenant-logotyp |
+| `/installningar/utseende` | Tenant-logotyp + **inloggningssidans utseende** (mall, accentfärg, rubrik/underrubrik, bild/video — § 48) |
 
 `/admin/users` är en legacy-route som redirectar till `/installningar/anvandare`;
 modulen `anvandare` pekar dit men visas inte längre som egen rail-post
@@ -6986,3 +6986,90 @@ antal mottagare, schemalagd tid, utfört utskick och "Skicka igen".
   (kör migration 1700000151) — aldrig en tyst no-op.
 - **EU-suveränitet/riskklass:** Resend (befintlig leverantör, § 23.5), ingen
   AI-inferens → riskklass n/a. `survey_responses` förblir denylistad.
+
+## 48. Inloggningssidans utseende — admin-styrd landningssida (/login)
+
+### 48.1 Översikt
+
+Admin/incubator_lead ändrar utseendet på sidan där alla loggar in under
+**Inställningar → Logotyp & varumärke → Inloggningssidan**
+(`/installningar/utseende`): en **mall**, en **accentfärg** (bara Movexums
+brand-tokens), **rubrik + underrubrik** och **bild och/eller video**. Valet
+gäller för **alla användare i systemet** — `/login` är oinloggad och visar
+ett och samma utseende för alla. Knappen "Förhandsgranska inloggningssidan"
+öppnar `/login?forhandsgranska=1`, som för en inloggad admin renderar sidan
+med en förhandsgranskningsbanner i stället för att redirecta.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/login-branding.ts` (+ `.test.ts`) | Ren, enhetstestad domänlogik: mallar (`LOGIN_LAYOUTS` + meta), accenter (`LOGIN_ACCENTS` → `--movexum-*`), textcap, `normalizeLoginBranding`, `validateLoginBrandingInput`, `missingLoginBrandingFields` |
+| `backend/pocketbase-schema/migrations/1700000172_extend_tenants_login_branding.js` | `tenants.login_layout/login_accent/login_headline/login_tagline/login_image/login_video` |
+| `apps/web/src/lib/login-branding.server.ts` | Enda läsvägen: `resolveLoginBrandingTenant` (vilken tenant /login visar), `loadPublicLoginBranding` (fail-soft), `loadTenantLoginBranding` (admin-vyn), `isLoginBrandingTenant` |
+| `apps/web/src/lib/login-branding.ts` | Klient-säkra hjälpare: media-URL via proxy, `LoginBrandingView` |
+| `apps/web/src/app/api/public/login-media/[id]/[filename]/route.ts` | Samma-origin-proxy för bild/video (§ 23.7-mönstret) |
+| `apps/web/src/app/api/installningar/login-media/route.ts` | Upload-route (admin/incubator_lead; route handler så 200 MB-video ryms, § 18.2) |
+| `apps/web/src/lib/actions/settings.ts` | `saveLoginBrandingAction` (mall/färg/texter, återläsning mot schema-drift) |
+| `apps/web/src/app/installningar/LoginBrandingEditor.tsx` | Editorn: mallväljare med SVG-skisser, accentchips, texter, media (återanvänder `HeroMediaUploader` med `endpoint`) |
+| `apps/web/src/components/login/LoginLanding.tsx` | Mallarnas rendering; `app/login/page.tsx` läser utseendet per request |
+
+### 48.2 Mallar och färg
+
+| Mall | Nyckel | Komposition |
+| --- | --- | --- |
+| Centrerad | `centered` | Kortet mitt på sidan, logotyp uppe till vänster; ev. bild/video som mjuk, tonad bakgrund (= hur sidan alltid sett ut; **default**) |
+| Bild till vänster | `split_left` | Media fyller vänster halva (rubrik i vitt över en mörk toning), formuläret till höger |
+| Bild till höger | `split_right` | Speglad split |
+| Heltäckande | `cover` | Media som helskärmsbakgrund med mörk ton, glaskort med formuläret |
+| Färgpanel | `panel` | Panel i accentfärgen med logotyp, rubrik och bilden som bricka; formuläret bredvid |
+
+Saknat/okänt `login_layout` ⇒ `centered` (`normalizeLoginLayout`), så en
+instans utan migrationen ändrar aldrig utseendet. Media-mallar utan bild
+visar en dekorativ panel i accentfärgen — sidan ser aldrig tom ut. Finns
+både bild och video spelas videon ljudlöst i slinga med bilden som
+startbild. Accentfärgen är en **select över brand-tokens**
+(`morkbla` default, `djupbla`, `morklila`, `lila`, `morkgron`, `gron`,
+`morkorange`, `orange`) och renderas som `var(--movexum-<token>)` — ingen
+fri hex i kod eller data (§ 2.2/§ 5). Bara toner som bär vit text får
+väljas. Vit text på panel/omslag använder `text-movexum-vit` (§ 4 p. 1).
+
+### 48.3 Vilken tenant visas — och regler
+
+- **Tenant-resolution (deterministisk):** `/login` har ingen session. Sidan
+  visar utseendet för tenanten `MOVEXUM_LOGIN_TENANT_SLUG` (Coolify-env,
+  valfri) → annars seed-tenanten `movexum` → annars äldsta tenanten. Läses
+  via den cachade superusern (`tenants` list/view kräver auth), delad per
+  request med React `cache`. Editorn varnar när admins egen tenant inte är
+  den som visas (`isLoginBrandingTenant`). En Movexum-deploy har en
+  inkubator-tenant, så admins val gäller alla som loggar in.
+- **Fail-soft (SOC 2 availability):** utan superuser eller vid läsfel
+  renderas standardutseendet — inloggningen blir aldrig 500.
+- **Schema-drift (§ 24.4-invarianten):** PB släpper okända fält tyst.
+  `saveLoginBrandingAction` läser tillbaka posten och svarar med en gul
+  varning när fälten saknas; upload-routen svarar 503 med migrationsnumret;
+  editorn visar samma varning vid sidladdning. `verify-baseline.mjs`
+  asserterar fälten (`REQUIRED_APP_FIELDS`) och `setup-via-api.mjs` speglar
+  dem (`patchTenantsCollection`).
+- **RBAC (ISO 27001 A.5.15–A.5.18):** spara + ladda upp = admin/incubator_lead
+  (samma krets som logotypen), verifierat i server-action/route; tenant är
+  ALLTID den inloggades egen (aldrig från klienten). Skrivning via
+  användartoken (`tenants.updateRule`), superuser-fallback bara vid PB
+  v0.23.4:s tysta regel-nekande (§ 21.3). Upload-routen validerar mime +
+  storlek med den delade `validateWorkshopMediaFile` (bild 15 MB, video
+  200 MB); bilder skalas ned i webbläsaren före uppladdning (§ 23.7).
+- **Media är publikt:** bild/video visas oinloggat och serveras via
+  samma-origin-proxyn `/api/public/login-media/<tenant-id>/<filnamn>`, som
+  ENBART serverar filnamn som är tenantens `login_image`/`login_video`
+  (aldrig logotyper, aldrig andra fält). Ladda inte upp personuppgifter
+  (UI varnar). Ett dygns cache; PB:s slumpsuffix gör URL:en unik per
+  innehåll. `/api/public/` är redan publikt i middleware:n.
+- **GDPR § 5:** inga personuppgifter i modellen (mall, token, marknadstext,
+  filer). Rubrik/underrubrik cappas (120/300 tecken) och plattas. Ingen
+  PII i loggar (tenant-/användar-id, status).
+- **AI:** ingen ny dataväg. `tenants` är fortsatt denylistad (§ 9.3) —
+  chatten kan inte läsa eller sätta utseendet. Riskklass (EU AI Act): n/a
+  — ren presentation/konfiguration, ingen inferens.
+- **Grafisk profil (§ 2–§ 4):** semantiska tokens överallt (dark mode
+  följer), Sora för rubriken via `font-heading`, `<Logo />` för logotypen
+  (tenantens egen logotyp visas när den finns).
+- **Migration** 1700000172 är ett nytt, oföränderligt filnummer.
+
