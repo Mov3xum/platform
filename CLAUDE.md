@@ -1227,7 +1227,7 @@ och kan renderas av samma UI oavsett leverantör.
 | Brevo     | FR (EU)   | Minimal       | Ingen AI. Endast aggregerade metrics synkas — inga e-postadresser. |
 | Howspace  | FI (EU)   | Begränsad     | AI-insights faller under art. 50 (transparenskrav). Vi synkar bara aggregerad statistik. |
 | Allabolag | SE        | Minimal       | Publik bolagsdata (org-nr, bolagsform, kommun, årsredovisningar). Ingen AI, inga personuppgifter för aktiebolag. För enskild firma exkluderas org-nr från AI-prompts (§ 9.3). **Status: implemented (stub)** — handler-skelettet skriver direkt till `startups`-registerfält och `startup_financials` (idempotent via unique-index `(startup, year)`). Produktion kräver leverantörsval via `MOVEXUM_ALLABOLAG_PROVIDER`-env (`mock`/`bolagsverket`/`roaring`/`creditsafe`); utan satt env returnerar handler ett tydligt fel. |
-| Roaring   | SE (EU)   | Begränsad     | **Implementerad (2026-09, § 11.8).** Grunddata, årsredovisningsposter (omsättning, anställda, **balansomslutning, eget kapital**), koncernstruktur och verklig huvudman. Ingen AI. Verklig huvudman är personuppgifter hos leverantören — vi läser dem transient och lagrar BARA andel/kontrollintervall + kontrollgrund per person (aldrig namn/personnummer/födelsedatum). DPA med Roaring AB krävs före produktion. |
+| Roaring   | SE (EU)   | Begränsad     | **Implementerad (2026-09, § 11.8).** Grunddata, årsredovisningsposter (omsättning, anställda, **balansomslutning, eget kapital**), koncernstruktur och verklig huvudman. Ingen AI. Verklig huvudman är personuppgifter hos leverantören — vi läser dem transient och lagrar BARA andel/kontrollintervall + kontrollgrund (fast vokabulär) per person, aldrig namn/personnummer/födelsedatum. De anonyma raderna är **pseudonymiserade personuppgifter** (ett fåmansbolag med en ägare på 75–100 % är indirekt identifierbart mot det publika registret), inte "inga personuppgifter" — DPIA-bedömning + DPA med Roaring AB och kontroll att licensen täcker ändamålet (åtkomsten till registret över verkliga huvudmän är begränsad efter EU-domstolens dom C-37/20) krävs före produktion. |
 | Bolagsverket | SE (myndighet) | Minimal | **Implementerad (2026-09, § 11.8).** API för värdefulla datamängder (kostnadsfritt, OAuth2): officiellt namn, bolagsform, registreringsdatum, SNI, status, säte. Ingen ägarbild, inga bokslutsposter. Primärkälla för grunddata. |
 | Breakit   | SE        | Minimal       | Provider-stub för framtida Premium-paywall. **Status: stub** — själva morgonagenten (`ai_breakit_morning`) använder den publika RSS-feeden via `web.ts`-whitelisten och behöver ingen credential. Premium-aktivering kräver kommersiellt avtal med Breakit + cookie-/session-stöd i `web.ts`. |
 
@@ -1336,14 +1336,30 @@ Finansiell historik och sektionen **Ägarbild** (`#agarbild`). `/integrationer`:
 
 **GDPR § 5 / § 9.3.** Fysiska personer i ägarbilden lagras UTAN namn,
 personnummer och födelsedatum — bara `owner_kind='person'` + andel/intervall
-+ kontrollgrund; `writer.ts` strippar defensivt även om en normaliserare
-skulle ge namn. Enskild firma synkas utan ägarbild (ägaren ÄR personen).
++ kontrollgrund ur en **fast vokabulär** (`controlBasisCategory`: shares/
+votes/board/agreement/other — leverantörens fritext kan bära namn och når
+aldrig databasen). En ägarrad utan giltigt org-nr för **juridisk** person
+(saknat, ogiltigt eller personnummer-derivat = enskild firma) behandlas
+ALLTID som fysisk person: normaliseraren anonymiserar och `writer.ts`
+strippar defensivt en gång till. Enskild firma synkas utan ägarbild (ägaren
+ÄR personen). Raderna är **pseudonymiserade personuppgifter** (indirekt
+identifierbara i fåmansbolag) — DPIA-bedömning krävs, se § 11.3.
+Ägarbilden ersätts "så atomiskt PB tillåter": nya rader skrivs först, gamla
+raderas sist, och ett fel mitt i rullar tillbaka de nya (en halv ägarbild
+kunde annars få screeningen att klassa bolaget som fristående).
+**Bas-URL:** tenantens `base_url`-fält (och env-överstyrningen) valideras av
+`assertAllowedBaseUrl` — https + allowlist (`*.roaring.io`,
+`*.api.bolagsverket.se`), eftersom client secret skickas dit som Basic-auth
+(SSRF-/läckageskydd, A.8.9/A.8.24). **Förhandsgranskningen** nekar enskild
+firma, rate-limitas (20/10 min per användare), audit-loggas PII-fritt i
+`activities` (leverantör + antal, aldrig org-nr) och skriver inget.
 Org-nr för aktiebolag är inte personuppgift (skäl 14). `startup_ownership`
 är **läsbar** för `query_collection` (RLS staff/observer + `org_nr`-maskning)
 och når den KURERADE kontexten via `buildOwnershipContext` i `lib/ai/context.ts`:
-ägare/innehav utan org-nr, personer anonyma, plus **aggregerat**
-grundarägande (summa `equity_pct` + antal ur `startup_team_members` — aldrig
-medlemsraderna). `balance_sheet_sek`/`equity_sek` whitelistas i
+ägare/innehav utan org-nr, personer anonyma, plus grundarägande ur
+`startup_team_members` som **tröskel** (`founders_hold_at_least_75pct`) och
+summa `equity_pct` BARA vid ≥ 2 grundare (en ensam grundares andel vore en
+uppgift om en identifierbar person) — aldrig medlemsraderna. `balance_sheet_sek`/`equity_sek` whitelistas i
 `buildFinancialsContext`. Rättslig grund: berättigat intresse
 (statsstödskontroll, inkubatordrift). Riskklass: n/a för synken (ingen AI);
 Roaring som leverantör = begränsad (personuppgifter i verklig huvudman,
@@ -1688,8 +1704,9 @@ Nya whitelistade fält i `apps/web/src/lib/ai/context.ts`:
 - **`buildFinancialsContext`:** utöver anställda/omsättning/personalkostnad/
   skatt även `balance_sheet_sek`, `equity_sek`, `net_result_sek` (§ 11.8).
 - **`buildOwnershipContext`** (§ 11.8): ägarbild ur `startup_ownership` utan
-  org-nr och utan namn på fysiska personer, samt aggregerat grundarägande
-  (`founder_equity_pct_total`, `founder_count`) — aldrig teammedlemsrader.
+  org-nr och utan namn på fysiska personer, samt grundarägande som tröskel
+  (`founders_hold_at_least_75pct`, `founder_count`) och summa
+  (`founder_equity_pct_total`) bara vid ≥ 2 grundare — aldrig teammedlemsrader.
 - **`buildCapitalRoundsContext`:** `type`, `source`, `amount_sek`,
   `received_at` samt `purpose` (= `notes`, **vad stödet/kapitalet gavs
   för**) per rad. `purpose` personnummer-saneras + cappas (~300 tecken)

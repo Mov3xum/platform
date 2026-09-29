@@ -29,6 +29,14 @@ const OWNER_KIND_LABEL: Record<string, string> = {
   other: 'Okänd'
 };
 
+const CONTROL_LABEL: Record<string, string> = {
+  shares: 'ägande',
+  votes: 'rösträtt',
+  board: 'styrelse/ledning',
+  agreement: 'avtal/stadgar',
+  other: 'annan kontrollgrund'
+};
+
 // "Testa mot org-nr" (§ 11.8): hämtar och visar vad providern tolkade för ett
 // bolag UTAN att skriva något. Syftet är att verifiera fältmappningen mot en
 // riktig leverantörsrespons innan portföljen synkas — därför visas även
@@ -158,7 +166,7 @@ export function RegistryLookupForm({ providerSlug, providerName }: Props) {
                         (typeof o.pct_min === 'number' && typeof o.pct_max === 'number'
                           ? `${o.pct_min}–${o.pct_max} %`
                           : '–')}
-                      {o.control_basis ? ` · ${o.control_basis}` : ''}
+                      {o.control_basis ? ` · ${CONTROL_LABEL[o.control_basis] || o.control_basis}` : ''}
                     </span>
                   </li>
                 ))}

@@ -5,6 +5,7 @@ import {
   invalidateClientCredentialsToken,
   OAuthTokenError
 } from '../../company-registry/oauth';
+import { assertAllowedBaseUrl } from '../../company-registry/types';
 
 // Bolagsverket "API för värdefulla datamängder" (kostnadsfritt, kundanmälan
 // ger client_id/secret). REST/JSON, OAuth2 client credentials:
@@ -19,6 +20,8 @@ import {
 // Testmiljö finns (gw-accept2) — anges som bas-URL i credential-fältet.
 
 export const BOLAGSVERKET_DEFAULT_BASE_URL = 'https://gw.api.bolagsverket.se';
+/** Tillåtna värdar (produktion + acceptansmiljöer) — https + allowlist (§ 10.3). */
+export const BOLAGSVERKET_ALLOWED_HOSTS = ['api.bolagsverket.se'];
 const READ_SCOPE = 'vardefulla-datamangder:read';
 
 export interface BolagsverketCredentials {
@@ -33,10 +36,11 @@ export function readBolagsverketCredentials(
   const clientId = (creds.client_id || '').trim();
   const clientSecret = (creds.client_secret || '').trim();
   if (!clientId || !clientSecret) return null;
-  const baseUrl =
-    (creds.base_url || '').trim().replace(/\/$/, '') ||
-    (process.env.BOLAGSVERKET_API_BASE_URL || '').trim().replace(/\/$/, '') ||
+  const raw =
+    (creds.base_url || '').trim() ||
+    (process.env.BOLAGSVERKET_API_BASE_URL || '').trim() ||
     BOLAGSVERKET_DEFAULT_BASE_URL;
+  const baseUrl = assertAllowedBaseUrl(raw, BOLAGSVERKET_ALLOWED_HOSTS);
   return { clientId, clientSecret, baseUrl };
 }
 

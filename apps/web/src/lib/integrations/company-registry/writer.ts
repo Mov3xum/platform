@@ -1,6 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { escFilter } from '../../pb-filter';
+import { isPersonalOrgNr, isValidOrgNr } from './orgnr';
 import type {
   RegistryCompany,
   RegistryFinancialsYear,
@@ -121,20 +122,26 @@ function ownershipPayload(
   source: RegistrySource,
   syncedAt: string
 ): Record<string, unknown> {
-  const isPerson = entry.owner_kind === 'person';
+  // Defense-in-depth (GDPR § 5): en rad utan giltigt org-nr för JURIDISK
+  // person (saknat, ogiltigt eller personnummer-derivat = enskild firma)
+  // behandlas som fysisk person oavsett vad normaliseraren sa — namn och
+  // org-nr strippas och typen blir 'person'. Kontrollgrund är alltid ett
+  // ord ur den fasta vokabulären (controlBasisCategory), aldrig fritext.
+  const legalEntity =
+    !!entry.org_nr && isValidOrgNr(entry.org_nr) && !isPersonalOrgNr(entry.org_nr);
+  const isPerson = entry.owner_kind === 'person' || !legalEntity;
   return compactPatch({
     tenant: tenantId,
     startup: startupId,
     direction: entry.direction,
-    owner_kind: entry.owner_kind,
-    // Defense-in-depth: fysiska personer lagras ALDRIG med namn eller org-nr.
+    owner_kind: isPerson ? 'person' : entry.owner_kind,
     name: isPerson ? undefined : entry.name?.slice(0, 200),
     org_nr: isPerson ? undefined : entry.org_nr,
     capital_pct: entry.capital_pct,
     voting_pct: entry.voting_pct,
     pct_min: entry.pct_min,
     pct_max: entry.pct_max,
-    control_basis: entry.control_basis?.slice(0, 200),
+    control_basis: entry.control_basis && /^[a-z_]{1,20}$/.test(entry.control_basis) ? entry.control_basis : undefined,
     indirect: entry.indirect === true ? true : undefined,
     relation: 'unknown',
     source,
@@ -142,6 +149,13 @@ function ownershipPayload(
   });
 }
 
+/**
+ * Ersätter källans ägarbild "så atomiskt PB tillåter" (SOC 2 processing
+ * integrity): de NYA raderna skrivs först; felar någon av dem rullas de nya
+ * tillbaka och de gamla står orörda kvar (ägarbilden blir aldrig halv, vilket
+ * annars kunde få screeningen att klassa bolaget som fristående). Först när
+ * alla nya finns raderas de gamla.
+ */
 async function replaceOwnership(
   pb: PocketBase,
   tenantId: string,
@@ -150,21 +164,41 @@ async function replaceOwnership(
   source: RegistrySource,
   syncedAt: string
 ): Promise<number> {
-  const filter = `startup = "${escFilter(startupId)}" && source = "${escFilter(source)}"`;
+  const filter = `startup = "${escFilter(startupId)}" && source = "${escFilter(source)}" && synced_at != "${escFilter(syncedAt)}"`;
   const existing = await pb
     .collection('startup_ownership')
     .getFullList<OwnershipRow>({ filter, fields: 'id' });
+
+  const created: string[] = [];
+  try {
+    for (const entry of entries) {
+      const row = await pb
+        .collection('startup_ownership')
+        .create<OwnershipRow>(ownershipPayload(entry, tenantId, startupId, source, syncedAt));
+      created.push(row.id);
+    }
+  } catch (err) {
+    for (const id of created) {
+      try {
+        await pb.collection('startup_ownership').delete(id);
+      } catch {
+        /* best-effort rollback */
+      }
+    }
+    throw err;
+  }
+
   for (const row of existing) {
-    await pb.collection('startup_ownership').delete(row.id);
+    try {
+      await pb.collection('startup_ownership').delete(row.id);
+    } catch (err) {
+      console.error('[company-registry] stale ownership row not deleted', {
+        startupId,
+        status: statusOf(err)
+      });
+    }
   }
-  let written = 0;
-  for (const entry of entries) {
-    await pb
-      .collection('startup_ownership')
-      .create(ownershipPayload(entry, tenantId, startupId, source, syncedAt));
-    written++;
-  }
-  return written;
+  return created.length;
 }
 
 export async function applyRegistryCompany(

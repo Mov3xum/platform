@@ -95,9 +95,12 @@ interface OwnershipEntry {
 
 interface OwnershipContext {
   entries: OwnershipEntry[];
-  /** Summerad kapitalandel för registrerade grundare (startup_team_members.is_founder). */
+  /** Summerad kapitalandel för registrerade grundare — BARA när ≥ 2 grundare
+   * (en ensam grundares andel vore en uppgift om en identifierbar person). */
   founder_equity_pct_total?: number;
   founder_count?: number;
+  /** Vinnovas 75 %-kriterium som tröskel (aldrig exakt andel för en person). */
+  founders_hold_at_least_75pct?: boolean;
   synced_at?: string;
 }
 
@@ -456,9 +459,10 @@ export async function buildOwnershipContext(
 
   let founderTotal: number | undefined;
   let founderCount: number | undefined;
+  let foundersHold75: boolean | undefined;
   try {
     const team = await pb.collection('startup_team_members').getList(1, 50, {
-      filter: `startup = "${escFilter(startupId)}" && is_founder = true`,
+      filter: `startup = "${escFilter(startupId)}" && startup.tenant = "${escFilter(tenantId)}" && is_founder = true`,
       fields: 'id,equity_pct'
     });
     founderCount = team.items.length;
@@ -466,7 +470,10 @@ export async function buildOwnershipContext(
       const v = (m as Record<string, unknown>).equity_pct;
       return typeof v === 'number' ? acc + v : acc;
     }, 0);
-    if (founderCount > 0) founderTotal = Math.round(sum * 100) / 100;
+    // Summan är ett aggregat först vid ≥ 2 grundare (§ 9.3: teammedlemmar är
+    // svartlistade — en ensam grundares andel får aldrig nå prompten).
+    if (founderCount >= 2) founderTotal = Math.round(sum * 100) / 100;
+    if (founderCount > 0) foundersHold75 = sum >= 75;
   } catch {
     /* fail-soft */
   }
@@ -487,7 +494,10 @@ export async function buildOwnershipContext(
     if (num(r.voting_pct) !== undefined) entry.voting_pct = num(r.voting_pct);
     if (num(r.pct_min) !== undefined) entry.pct_min = num(r.pct_min);
     if (num(r.pct_max) !== undefined) entry.pct_max = num(r.pct_max);
-    if (typeof r.control_basis === 'string' && r.control_basis) entry.control_basis = r.control_basis;
+    // Fast vokabulär (shares/votes/board/agreement/other) — aldrig fritext.
+    if (typeof r.control_basis === 'string' && /^[a-z_]{1,20}$/.test(r.control_basis)) {
+      entry.control_basis = r.control_basis;
+    }
     if (r.indirect === true) entry.indirect = true;
     return entry;
   });
@@ -502,6 +512,7 @@ export async function buildOwnershipContext(
     entries,
     founder_equity_pct_total: founderTotal,
     founder_count: founderCount,
+    founders_hold_at_least_75pct: foundersHold75,
     synced_at: synced || undefined
   };
 }

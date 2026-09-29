@@ -5,6 +5,7 @@ import {
   invalidateClientCredentialsToken,
   OAuthTokenError
 } from '../../company-registry/oauth';
+import { assertAllowedBaseUrl } from '../../company-registry/types';
 
 // Roaring (roaring.io, Stockholm) — REST/JSON, OAuth2 client credentials.
 //
@@ -25,8 +26,12 @@ function env(name: string, fallback: string): string {
   return v || fallback;
 }
 
+/** Tillåtna värdar — tenanten anger fältet själv, så https + allowlist (§ 10.3). */
+export const ROARING_ALLOWED_HOSTS = ['roaring.io'];
+
 export function roaringBaseUrl(creds: Record<string, string>): string {
-  return (creds.base_url || '').trim() || env('ROARING_API_BASE_URL', ROARING_DEFAULT_BASE_URL);
+  const raw = (creds.base_url || '').trim() || env('ROARING_API_BASE_URL', ROARING_DEFAULT_BASE_URL);
+  return assertAllowedBaseUrl(raw, ROARING_ALLOWED_HOSTS);
 }
 
 export const ROARING_PATHS = {
@@ -48,6 +53,7 @@ export interface RoaringCredentials {
   baseUrl: string;
 }
 
+/** Returnerar null när id/secret saknas; kastar (PII-fritt) vid otillåten bas-URL. */
 export function readRoaringCredentials(creds: Record<string, string>): RoaringCredentials | null {
   const clientId = (creds.client_id || '').trim();
   const clientSecret = (creds.client_secret || '').trim();

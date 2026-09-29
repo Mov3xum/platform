@@ -53,7 +53,12 @@ export const roaringHandler: CompanyRegistryHandler = createCompanyRegistryHandl
   throttleMs: 250,
 
   async testConnection(creds) {
-    const c = readRoaringCredentials(creds);
+    let c;
+    try {
+      c = readRoaringCredentials(creds);
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Ogiltig bas-URL.' };
+    }
     if (!c) return { ok: false, error: 'Client ID och client secret krävs.' };
     try {
       await roaringToken(c);

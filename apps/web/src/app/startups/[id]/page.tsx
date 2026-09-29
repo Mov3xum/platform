@@ -445,8 +445,10 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   } catch {
     ownershipRows = [];
   }
+  // Synk kräver admin/incubator_lead (speglar syncStartupFromRegistryAction).
+  const canSyncRegistry = hasRole(user.roles, ['admin', 'incubator_lead']);
   let connectedRegistries: ConnectedRegistryProvider[] = [];
-  if (canEdit) {
+  if (canSyncRegistry) {
     try {
       const registrySlugs = new Set(listCompanyRegistrySlugs());
       const res = await pb
@@ -1226,7 +1228,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           {ownershipRows.length === 0 ? (
             <Empty>
               Ingen ägarbild synkad än.
-              {canEdit && startup.org_nr && connectedRegistries.some((p) => p.slug === 'roaring')
+              {canSyncRegistry && startup.org_nr && connectedRegistries.some((p) => p.slug === 'roaring')
                 ? ' Kör "Synka från Roaring" under Finansiell historik.'
                 : ' Anslut Roaring under Integrationer för att hämta den.'}
             </Empty>
@@ -1256,7 +1258,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                           <span className="ml-2 text-xs text-foreground-subtle mx-tnum">{o.org_nr}</span>
                         ) : null}
                         {o.control_basis ? (
-                          <p className="text-xs text-foreground-subtle">{o.control_basis}</p>
+                          <p className="text-xs text-foreground-subtle">{controlBasisLabel(o.control_basis)}</p>
                         ) : null}
                       </td>
                       <td className="px-3 py-2 text-foreground-muted">{ownerKindLabel(o.owner_kind)}</td>
@@ -1406,7 +1408,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               Årsvis nyckeltal från årsredovisningar och manuella inlägg. Källa
               visas per rad.
             </p>
-            {canEdit && startup.org_nr && connectedRegistries.length > 0 ? (
+            {canSyncRegistry && startup.org_nr && connectedRegistries.length > 0 ? (
               <div className="flex flex-wrap items-center gap-2">
                 {connectedRegistries.map((p) => (
                   <RegistrySyncButton
@@ -1417,7 +1419,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                   />
                 ))}
               </div>
-            ) : canEdit && startup.org_nr ? (
+            ) : canSyncRegistry && startup.org_nr ? (
               <Link href="/integrationer" className="text-xs text-link hover:underline">
                 Anslut ett bolagsregister (Roaring/Bolagsverket) för att synka →
               </Link>
@@ -1713,6 +1715,17 @@ function ownerKindLabel(kind: OwnershipRow['owner_kind']): string {
     default:
       return 'Okänd';
   }
+}
+
+function controlBasisLabel(v: string): string {
+  const map: Record<string, string> = {
+    shares: 'Ägande (aktier/kapital)',
+    votes: 'Rösträtt',
+    board: 'Rätt att utse styrelse/ledning',
+    agreement: 'Kontroll via avtal/stadgar',
+    other: 'Annan kontrollgrund'
+  };
+  return map[v] || v;
 }
 
 function formatPctOrRange(exact?: number, min?: number, max?: number): string {

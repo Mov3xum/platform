@@ -47,7 +47,12 @@ export const bolagsverketHandler: CompanyRegistryHandler = createCompanyRegistry
   throttleMs: 200,
 
   async testConnection(creds) {
-    const c = readBolagsverketCredentials(creds);
+    let c;
+    try {
+      c = readBolagsverketCredentials(creds);
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Ogiltig bas-URL.' };
+    }
     if (!c) return { ok: false, error: 'Client ID och client secret krävs.' };
     try {
       await bolagsverketToken(c);

@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  assertAllowedBaseUrl,
   asIsoDate,
+  controlBasisCategory,
   asNumber,
   asPct,
   dedupeOwnership,
@@ -73,4 +75,23 @@ test('dedupeOwnership tar bort identiska rader', () => {
     { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50 }
   ]);
   assert.equal(rows.length, 2);
+});
+
+test('controlBasisCategory ger fast vokabulär', () => {
+  assert.equal(controlBasisCategory('Äger aktier'), 'shares');
+  assert.equal(controlBasisCategory('Voting rights'), 'votes');
+  assert.equal(controlBasisCategory('Rätt att utse styrelse'), 'board');
+  assert.equal(controlBasisCategory('Kontroll via avtal med X'), 'agreement');
+  assert.equal(controlBasisCategory('???'), 'other');
+  assert.equal(controlBasisCategory(''), undefined);
+});
+
+test('assertAllowedBaseUrl kräver https och känd värd', () => {
+  assert.equal(assertAllowedBaseUrl('https://api.roaring.io/', ['roaring.io']), 'https://api.roaring.io');
+  assert.equal(assertAllowedBaseUrl('https://gw-accept2.api.bolagsverket.se', ['api.bolagsverket.se']), 'https://gw-accept2.api.bolagsverket.se');
+  assert.throws(() => assertAllowedBaseUrl('http://api.roaring.io', ['roaring.io']), /https/);
+  assert.throws(() => assertAllowedBaseUrl('https://pocketbase:8080', ['roaring.io']), /tillåts inte/);
+  assert.throws(() => assertAllowedBaseUrl('https://evil-roaring.io', ['roaring.io']), /tillåts inte/);
+  assert.throws(() => assertAllowedBaseUrl('https://user:pw@api.roaring.io', ['roaring.io']), /inloggning/);
+  assert.throws(() => assertAllowedBaseUrl('not a url', ['roaring.io']), /giltig/);
 });

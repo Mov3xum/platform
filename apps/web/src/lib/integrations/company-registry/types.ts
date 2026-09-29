@@ -204,6 +204,45 @@ export function inferOwnerKindFromName(name: string | undefined, fallback: Owner
   return fallback;
 }
 
+/**
+ * Kontrollgrund som FAST vokabulär — leverantörens fritext ("Äger aktier",
+ * "Kontroll via avtal med …") kan bära namn och når därför aldrig databasen
+ * eller AI-kontexten oöversatt. Okänt → 'other'.
+ */
+export type ControlBasis = 'shares' | 'votes' | 'board' | 'agreement' | 'other';
+
+export function controlBasisCategory(raw: unknown): ControlBasis | undefined {
+  const s = asString(raw)?.toLowerCase();
+  if (!s) return undefined;
+  if (/styrelse|board|director|ledning|utse|appoint/.test(s)) return 'board';
+  if (/avtal|agreement|contract|stadg|bylaw|articles/.test(s)) return 'agreement';
+  if (/röst|rost|vot/.test(s)) return 'votes';
+  if (/aktie|share|äg|ag[ae]r|own|kapital|capital|equity/.test(s)) return 'shares';
+  return 'other';
+}
+
+/**
+ * Bas-URL för en bolagsregister-leverantör måste vara https och peka på en
+ * känd värd — tenanten anger fältet själv, och client secret skickas dit via
+ * Basic-auth (SSRF-/hemlighetsläckage-skydd, CLAUDE.md § 10.3 A.8.9/A.8.24).
+ * Returnerar den normaliserade URL:en (utan avslutande snedstreck) eller
+ * kastar med ett PII-fritt fel.
+ */
+export function assertAllowedBaseUrl(raw: string, allowedHostSuffixes: string[]): string {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    throw new Error('Bas-URL:en är inte en giltig adress.');
+  }
+  if (url.protocol !== 'https:') throw new Error('Bas-URL:en måste använda https.');
+  if (url.username || url.password) throw new Error('Bas-URL:en får inte innehålla inloggning.');
+  const host = url.hostname.toLowerCase();
+  const ok = allowedHostSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+  if (!ok) throw new Error(`Bas-URL:ens värd tillåts inte (${host}).`);
+  return `${url.protocol}//${url.host}${url.pathname.replace(/\/$/, '')}`;
+}
+
 /** Tar bort dubbletter (samma riktning + org-nr, eller identisk person-rad). */
 export function dedupeOwnership(entries: RegistryOwnershipEntry[]): RegistryOwnershipEntry[] {
   const seen = new Set<string>();

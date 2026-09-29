@@ -16,12 +16,13 @@
  * och kontrollgrund per person — inget namn, inget födelsedatum, inget
  * personnummer lämnar den här funktionen.
  */
-import { normalizeOrgNr } from '../../company-registry/orgnr';
+import { isPersonalOrgNr, isValidOrgNr, normalizeOrgNr } from '../../company-registry/orgnr';
 import {
   asIsoDate,
   asNumber,
   asPct,
   asString,
+  controlBasisCategory,
   dedupeOwnership,
   inferOwnerKindFromName,
   mapBolagStatus,
@@ -218,7 +219,7 @@ function toNode(raw: unknown, depth = 0): GroupNode | undefined {
   if (!raw || typeof raw !== 'object' || depth > 8) return undefined;
   const rec = raw as Record<string, unknown>;
   const node: GroupNode = {
-    id: normalizeOrgNr(asString(pickFirst(rec, ['companyId', 'orgNr', 'organisationNumber', 'registrationNumber', 'id']))) || undefined,
+    id: normalizeOrgNr(asString(pickFirst(rec, ['companyId', 'orgNr', 'organisationNumber', 'registrationNumber']))) || undefined,
     name: asString(pickFirst(rec, ['companyName', 'name', 'legalName'])),
     pct: asPct(pickFirst(rec, PCT_PATHS)),
     votes: asPct(pickFirst(rec, VOTES_PATHS)),
@@ -255,12 +256,31 @@ function findPath(node: GroupNode, orgNr: string, trail: GroupNode[]): GroupNode
   return undefined;
 }
 
+/** Sant bara för ett giltigt org-nr som tillhör en JURIDISK person. */
+export function isLegalEntityOrgNr(id: string | undefined): id is string {
+  return !!id && isValidOrgNr(id) && !isPersonalOrgNr(id);
+}
+
+/**
+ * En nod utan giltigt org-nr för juridisk person (saknat id, ogiltigt id,
+ * eller ett personnummer-derivat = enskild firma/fysisk person) blir en
+ * ANONYM person-rad: inget namn, inget org-nr — bara andel (GDPR § 5).
+ */
 function companyEntry(
   n: GroupNode,
   direction: 'owner' | 'holding',
   indirect: boolean
 ): RegistryOwnershipEntry | undefined {
   if (!n.id && !n.name) return undefined;
+  if (!isLegalEntityOrgNr(n.id)) {
+    return {
+      direction,
+      owner_kind: 'person',
+      capital_pct: n.pct,
+      voting_pct: n.votes,
+      indirect: indirect || undefined
+    };
+  }
   return {
     direction,
     owner_kind: inferOwnerKindFromName(n.name, 'company'),
@@ -370,17 +390,21 @@ export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]):
   for (const item of list) {
     if (!item || typeof item !== 'object') continue;
     const o = item as Record<string, unknown>;
-    // Juridisk person som huvudman (ovanligt men förekommer) — behåll org-nr/namn.
-    const legalOrgNr = normalizeOrgNr(asString(pickFirst(o, ['companyId', 'organisationNumber', 'orgNr'])));
+    // Juridisk person som huvudman (ovanligt men förekommer) — behåll org-nr/
+    // namn BARA när org-nr:et är giltigt och inte ett personnummer-derivat.
+    const candidateOrgNr = normalizeOrgNr(asString(pickFirst(o, ['companyId', 'organisationNumber', 'orgNr'])));
+    const legalOrgNr = isLegalEntityOrgNr(candidateOrgNr || undefined) ? candidateOrgNr : null;
     const capitalRaw = pickFirst(o, BO_CAPITAL_PATHS);
     const votesRaw = pickFirst(o, BO_VOTES_PATHS);
     const capital = parsePctInterval(capitalRaw);
     const votes = parsePctInterval(votesRaw);
-    const control = asString(pickFirst(o, BO_CONTROL_PATHS));
+    // Kontrollgrund mappas till fast vokabulär — leverantörens fritext når
+    // aldrig databasen (kan bära namn).
+    const control = controlBasisCategory(pickFirst(o, BO_CONTROL_PATHS));
     const entry: RegistryOwnershipEntry = {
       direction: 'owner',
       owner_kind: legalOrgNr ? 'company' : 'person',
-      control_basis: control?.slice(0, 200)
+      control_basis: control
     };
     if (legalOrgNr) {
       entry.org_nr = legalOrgNr;

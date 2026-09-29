@@ -4701,6 +4701,7 @@ const FORCE_CREATE_RULES = {
   // Deras create-migrationer återinförde `?=`-roll-checks/tenant-joins i
   // createRule (PB v0.23.4-buggarna). Roll-enforcement görs i server-actions.
   startup_financials: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  startup_ownership: `${ANY_AUTH} && @request.auth.tenant != ""`,
   tool_schedules: `${ANY_AUTH} && @request.auth.tenant != ""`,
   startup_phase_history: `${ANY_AUTH} && @request.auth.tenant != ""`,
   contacts: `${ANY_AUTH} && @request.auth.tenant != ""`,

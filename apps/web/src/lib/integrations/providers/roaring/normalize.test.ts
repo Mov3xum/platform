@@ -100,7 +100,7 @@ test('koncernstruktur: bolaget hittas i trädet → direkt/indirekt ägare + inn
             ownedPercentage: 90,
             groupCompanies: [
               { companyId: '5595728790', companyName: 'Combly AB', ownedPercentage: 100, groupCompanies: [
-                { companyId: '5590000001', companyName: 'Dotter AB', ownedPercentage: 51 }
+                { companyId: '5594429630', companyName: 'Dotter AB', ownedPercentage: 51 }
               ] }
             ]
           }
@@ -119,7 +119,7 @@ test('koncernstruktur: bolaget hittas i trädet → direkt/indirekt ägare + inn
   const indirect = owners.find((o) => o.org_nr === '5567036271');
   assert.equal(indirect?.indirect, true);
   assert.equal(holdings.length, 1);
-  assert.equal(holdings[0].org_nr, '5590000001');
+  assert.equal(holdings[0].org_nr, '5594429630');
   assert.equal(holdings[0].capital_pct, 51);
 });
 
@@ -161,7 +161,7 @@ test('verklig huvudman: anonyma person-rader — aldrig namn eller personnummer'
   }
   assert.equal(rows[0].pct_min, 25);
   assert.equal(rows[0].pct_max, 50);
-  assert.equal(rows[0].control_basis, 'Äger aktier');
+  assert.equal(rows[0].control_basis, 'shares');
   assert.equal(rows[1].pct_min, 75);
   assert.equal(rows[1].pct_max, 100);
 });
@@ -184,4 +184,58 @@ test('normalizeRoaringCompany: samlar notes från alla delar', () => {
   const company = normalizeRoaringCompany('5595728790', { overview: { records: [] }, financials: { records: [] } }, { isPersonal: false });
   assert.ok(company.notes.length >= 2);
   assert.deepEqual(company.startup, {});
+});
+
+test('koncernstruktur: nod utan org-nr eller med personnummer-derivat blir anonym person', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringGroupStructure(
+    {
+      records: [
+        {
+          companyId: '5595728790',
+          companyName: 'Combly AB',
+          owners: [
+            { companyName: 'Anna Testsson', ownedPercentage: 45 },
+            { companyId: '8501011234', companyName: 'Annas Firma', ownedPercentage: 10 },
+            { companyId: '5594427808', companyName: 'Wellgo Health AB', ownedPercentage: 45 }
+          ]
+        }
+      ]
+    },
+    '5595728790',
+    notes
+  );
+  assert.equal(rows.length, 3);
+  const persons = rows.filter((r) => r.owner_kind === 'person');
+  assert.equal(persons.length, 2);
+  for (const p of persons) {
+    assert.equal(p.name, undefined);
+    assert.equal(p.org_nr, undefined);
+  }
+  assert.ok(!JSON.stringify(rows).includes('Testsson'));
+  assert.ok(!JSON.stringify(rows).includes('8501011234'));
+  assert.equal(rows.find((r) => r.owner_kind === 'company')?.org_nr, '5594427808');
+});
+
+test('verklig huvudman: kontrollgrund mappas till fast vokabulär, aldrig fritext', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringBeneficialOwners(
+    {
+      records: [
+        {
+          beneficialOwners: [
+            { controlType: 'Kontroll via avtal med Johan Testsson', ownershipPercentInterval: '25-50' },
+            { controlType: 'Rätt att utse styrelse', ownershipPercentInterval: '<25' },
+            { companyId: '8501011234', companyName: 'Enskild Firma', ownershipPercentInterval: '>75' }
+          ]
+        }
+      ]
+    },
+    notes
+  );
+  assert.equal(rows[0].control_basis, 'agreement');
+  assert.equal(rows[1].control_basis, 'board');
+  assert.equal(rows[2].owner_kind, 'person');
+  assert.equal(rows[2].name, undefined);
+  assert.ok(!JSON.stringify(rows).includes('Testsson'));
 });

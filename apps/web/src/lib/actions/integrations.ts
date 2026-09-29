@@ -13,6 +13,8 @@ import { getHandler, listCompanyRegistrySlugs } from '@/lib/integrations/registr
 import { runSync, runRegistrySyncForStartup } from '@/lib/integrations/sync';
 import { loadCredentials } from '@/lib/integrations/credentials';
 import type { RegistryCompany } from '@/lib/integrations/company-registry/types';
+import { isPersonalOrgNr, isValidOrgNr } from '@/lib/integrations/company-registry/orgnr';
+import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { recordActivity } from './record-activity';
 
 export type IntegrationPilotState = {
@@ -450,9 +452,21 @@ export async function previewRegistryLookupAction(
   if (!listCompanyRegistrySlugs().includes(providerSlug)) {
     return { error: 'Okänd bolagsregister-leverantör.' };
   }
-  if (!/^\d{6}-?\d{4}$/.test(orgNr)) {
-    return { error: 'Ange ett organisationsnummer med 10 siffror (t.ex. 559572-8790).' };
+  if (!/^\d{6}-?\d{4}$/.test(orgNr) || !isValidOrgNr(orgNr)) {
+    return { error: 'Ange ett giltigt organisationsnummer med 10 siffror (t.ex. 559572-8790).' };
   }
+  // Enskild firma: org-nr = personnummer → uppslag på en fysisk person görs
+  // aldrig från förhandsgranskningen (GDPR § 5).
+  if (isPersonalOrgNr(orgNr)) {
+    return { error: 'Förhandsgranskning stöds bara för juridiska personer (inte enskild firma).' };
+  }
+  // Rate-limit per användare (20 uppslag / 10 min) — leverantörerna debiterar per anrop.
+  const rateKey = `registry-lookup:${user.id}`;
+  const limited = checkRateLimit(rateKey, 20);
+  if (limited.blocked) {
+    return { error: `För många uppslag — försök igen om ${limited.retryAfterSec} s.` };
+  }
+  recordFailure(rateKey, 10 * 60 * 1000);
   const handler = getHandler(providerSlug);
   if (!handler || handler.kind !== 'company_registry' || !handler.lookup) {
     return { error: 'Leverantören stödjer inte förhandsgranskning.' };
@@ -484,10 +498,24 @@ export async function previewRegistryLookupAction(
   const creds = await loadCredentials(tenantIntegration.id);
   if (!creds) return { error: 'Inloggningsuppgifter saknas eller kunde inte dekrypteras.' };
 
+  let company: RegistryCompany;
   try {
-    const company = await handler.lookup(orgNr, creds);
-    return { company };
+    company = await handler.lookup(orgNr, creds);
   } catch (err) {
     return { error: err instanceof Error ? err.message.slice(0, 300) : 'Uppslaget misslyckades.' };
   }
+  // Audit (ISO 27001 A.8.15): PII-fri rad — leverantör + antal, aldrig org-nr.
+  try {
+    const pb = await getServerPb();
+    await recordActivity(pb, {
+      tenant: user.tenant,
+      kind: 'integration_sync',
+      actor: user.id,
+      title: `${providerSlug}: förhandsgranskning av bolagsuppslag`,
+      meta: `${company.financials.length} årsrader, ${company.ownership.length} ägarrader (inget sparat)`
+    });
+  } catch {
+    /* audit får aldrig blockera */
+  }
+  return { company };
 }
