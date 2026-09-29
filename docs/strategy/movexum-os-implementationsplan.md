@@ -400,6 +400,11 @@ endpointen `/api/internal/run-trigger` och `runTriggeredTool` är oförändrade
 
 ## 5. PR‑sekvens (varje PR körbar och värdeskapande för sig)
 
+> **Status 2026‑09‑29:** PR 1–4 är implementerade på branchen
+> `claude/movexum-os-analysis-7qs3e2` (regelmotor § 40, metrikregister § 41,
+> målstyrning § 42 med chatt‑verktyg och presentationsläge, enkätmotor § 43),
+> efterlevnadsgranskade och byggda. PR 5–10 återstår.
+
 | # | PR | Innehåll | Bevis på icke‑duplicering |
 | --- | --- | --- | --- |
 | 1 | `refactor(followups): generisk regelmotor` | § 2.1. Inga schemaändringar. | `procurement.test.ts` oförändrat grönt + snapshot‑test gammal vs ny väg |
