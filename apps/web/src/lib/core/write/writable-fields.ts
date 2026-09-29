@@ -152,6 +152,84 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
   tasks: {
     status: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } }
   },
+  // ── Stödcheckar & finansieringsprojekt (§ 46) ─────────────────────────────
+  // Ledningen (admin/incubator_lead) äger projekt, checktyper och regler;
+  // agenten får skapa UTKAST (checktyp inaktiv, ansökan i status draft) men
+  // aldrig publicera en checktyp (`active`), skriva bedömningens spelregler
+  // (`criteria`) eller röra statusar, utlåtanden, finansiering och beslut.
+  funding_projects: {
+    title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    kind: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    status: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    funder: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    diarienummer: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    budget_sek: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    starts_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    ends_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    default_state_aid_basis: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    default_stodgivare: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    responsible: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Ansvarig sätts av en människa i /projekt.' } },
+  },
+  funding_work_packages: {
+    code: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    budget_sek: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    starts_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    ends_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    sort_order: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+  },
+  support_check_types: {
+    title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    kind: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    active: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'En checktyp öppnas för ansökningar av en människa i /checkar/typer — agenten skapar den som inaktivt utkast.' } },
+    max_amount_sek: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    funding_project: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    default_work_package: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    default_state_aid_basis: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    requires_workshop: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    min_irl_level: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    requires_final_report: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    report_due_days: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    changes_due_days: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    is_excellence_activity: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    criteria: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Bedömningskriterierna är bedömningens spelregler och sätts av en människa i /checkar/typer (standardkriterierna används tills dess).' } },
+    opens_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    closes_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    sort_order: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+  },
+  support_check_applications: {
+    title: { user: { kind: 'any-role' }, agent: { kind: 'allow' } },
+    activities: { user: { kind: 'any-role' }, agent: { kind: 'allow' } },
+    requested_amount_sek: { user: { kind: 'any-role' }, agent: { kind: 'allow' } },
+    activity_end_date: { user: { kind: 'any-role' }, agent: { kind: 'allow' } },
+    applicant_note: { user: { kind: 'any-role' }, agent: { kind: 'allow' } },
+    status: { user: { kind: 'any-role' }, agent: { kind: 'deny', reason: 'Statusövergångar görs av människor: bolaget skickar in/signerar, staff bedömer, ledningen beslutar.' } },
+    coach_statement: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Coachutlåtandet skrivs av coachen i /checkar (agenten kan föreslå ett utkast i text).' } },
+    controller_statement: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Controllerutlåtandet skrivs av controllern i /checkar.' } },
+    assessment_scores: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Bedömningspoängen sätts av granskaren i /checkar.' } },
+    changes_request_note: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Komplettering begärs av granskaren i /checkar.' } },
+    funding_project: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Finansieringen (projekt/arbetspaket/statsstödsgrund) är ett ekonomiskt beslut som en människa tar i /checkar.' } },
+    funding_work_package: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Finansieringen sätts av en människa i /checkar.' } },
+    state_aid_basis: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Statsstödsgrunden sätts av en människa i /checkar.' } },
+    funding_note: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Finansieringen sätts av en människa i /checkar.' } },
+    approved_amount_sek: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Beviljat belopp beslutas av en människa i /checkar.' } },
+    decision_note: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Beslutet fattas av beslutsgruppen i /checkar.' } },
+    paid_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Utbetalning registreras av en människa i /checkar.' } },
+    paid_amount_sek: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Utbetalning registreras av en människa i /checkar.' } },
+    paid_note: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Utbetalning registreras av en människa i /checkar.' } },
+    final_report_received_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Slutrapport bockas av i /checkar.' } },
+  },
+  support_check_comments: {
+    body: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Kompletteringspunkter skrivs av granskaren i /checkar.' } },
+    resolved_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Punkter bockas av i /checkar.' } }
+  },
+  support_check_rules: {
+    name: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /checkar/regler.' } },
+    active: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /checkar/regler.' } }
+  },
   // Upphandlingar (§ 39). Intern inköps-/avtalsdata utan PII — agenten får
   // uppdatera sakfälten (status, datum, belopp) å den inloggades vägnar.
   // Utvärderingskriterier, avtalskoppling och ansvarig är mänskliga beslut
@@ -370,6 +448,35 @@ const CREATE_POLICIES: Record<
   annual_wheel_items: {
     user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'allow' }
+  },
+  // Stödcheckar & finansieringsprojekt (§ 46). Projekt/arbetspaket/checktyper
+  // = ledning (admin/incubator_lead). Ansökningar skapas av bolagsmedlem
+  // (länkat bolag verifieras i skrivlagret) eller staff; agenten får skapa
+  // ett UTKAST å ett bolags vägnar men aldrig skicka in/signera (mänsklig
+  // firmatecknare, eIDAS). Kommentarer = staff; regler = ledning.
+  funding_projects: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  funding_work_packages: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  support_check_types: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  support_check_applications: {
+    user: { kind: 'any-role' },
+    agent: { kind: 'allow' }
+  },
+  support_check_comments: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'deny', reason: 'Kompletteringspunkter skrivs av granskaren i /checkar.' }
+  },
+  support_check_rules: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /checkar/regler.' }
   },
   // Målstyrning (§ 42): år/mål/indikatorer = ledning; kvartalsstatus = staben.
   goal_periods: {

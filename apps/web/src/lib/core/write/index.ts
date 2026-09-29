@@ -89,6 +89,46 @@ export {
   type ImportContactsOptions,
   type ImportContactsResult
 } from './contacts';
+// Stödcheckar & finansieringsprojekt (§ 46)
+export {
+  createFundingProject,
+  updateFundingProjectFields,
+  deleteFundingProject,
+  createFundingWorkPackage,
+  updateFundingWorkPackageFields,
+  deleteFundingWorkPackage,
+  fundingProjectPath
+} from './funding';
+export {
+  createSupportCheckType,
+  updateSupportCheckTypeFields,
+  deleteSupportCheckType,
+  createSupportCheckApplication,
+  updateSupportCheckDraft,
+  submitSupportCheckApplication,
+  requestSupportCheckChanges,
+  recordSupportCheckStatement,
+  assessSupportCheckApplication,
+  setSupportCheckFunding,
+  decideSupportCheckApplication,
+  markSupportCheckPaid,
+  recordSupportCheckFinalReport,
+  closeSupportCheckApplication,
+  withdrawSupportCheckApplication,
+  addSupportCheckComment,
+  resolveSupportCheckComment,
+  deleteSupportCheckDocument,
+  upsertSupportCheckRule,
+  deleteSupportCheckRule,
+  supportCheckPath,
+  CHECK_TYPE_WRITABLE_FIELDS,
+  type CheckTypeChanges,
+  type CheckTypeWritableField,
+  type ApplicationDraftInput,
+  type ApplicationResult,
+  type AccessContext,
+  type DecisionResult
+} from './support-checks';
 export { logAgentAction } from './audit';
 export {
   canWriteField,

@@ -31,6 +31,10 @@ test('denylist håller ute auth-, credential- och privat-innehåll-kollektioner'
     'deep_jobs',
     'meeting_transcripts', // råa mötestranskript (§34)
     'procurement_documents', // fritext ur uppladdade upphandlingsunderlag (§39.3)
+    'support_check_applications', // insatsernas deltagarfält = personnamn; utlåtanden/beslut (§46)
+    'support_check_revisions', // signeringsbevis (§46)
+    'support_check_comments', // kompletteringspunkter (§46)
+    'support_check_documents', // bilagor (§46)
     'compass_responses', // råa enkät-/intagssvar per fråga — bara aggregatet når målstyrningen (§43)
     'agent_memory' // tvärsessions-minne (§16.4)
   ]) {

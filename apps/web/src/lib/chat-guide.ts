@@ -224,6 +224,17 @@ const GUIDE: ChatGuideSection[] = [
         ]
       },
       {
+        title: 'Stödcheckar & finansieringsprojekt',
+        description:
+          'Skapa finansieringsprojekt (kassan stödet tas ur), checktyper som bolagen kan söka och utkast till ansökningar. Inskick, signering, bedömning, finansiering och beslut görs av människor i /checkar.',
+        roles: SCHEDULE_MANAGE,
+        examples: [
+          'Skapa finansieringsprojektet Vinnova Excellens 2026–2027 med budget 3,1 MSEK, de minimis som default',
+          'Lägg upp en resecheck för internationalisering med tak 50 000 kr som kräver IRL 4 och slutrapport',
+          'Skapa ett ansökningsutkast om excellenscheck för bolaget med insatsen marknadsundersökning Norden, 40 000 kr'
+        ]
+      },
+      {
         title: 'Upphandlingar & excellens-insatser',
         description:
           'Registrera en upphandling ur ett bifogat underlag, lägg in avrop per bolag och godkänn milstolpar — uppföljningsuppgifterna skapas och stängs automatiskt enligt reglerna i /upphandlingar.',

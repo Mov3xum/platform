@@ -504,6 +504,8 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
   - **B. Strikt privat ägaren-bara-innehåll** (att exponera bryter
     § 21-isoleringen): `chat_threads`, `user_files`, `deep_jobs`,
     `agent_memory`, `meeting_transcripts`, `procurement_documents` (§ 39.3)
+    `support_check_applications`/`_revisions`/`_comments`/`_documents`
+    (§ 46 — deltagarnamn, signeringsbevis och bilagor)
     samt `compass_responses` (råa enkät-/intagssvar per fråga, § 43 —
     målstyrningen får bara det k-anonyma aggregatet).
 
@@ -954,6 +956,7 @@ omsättning.
 | `web_search` (chatt-verktyg, § 9.8) | begränsad | Internetsökning via Mistral Web Search (EU) på personalens opt-in; bara sanerad sökfråga lämnar plattformen; källor visas |
 | `procurement-extract` (AI-utläsning av upphandlingsunderlag, § 39.3) | begränsad | Läser ut strukturerade uppgifter ur ett dokument staff själva laddat upp till ett förifyllt utkast; människan granskar och sparar; ingen profilering |
 | `create_procurement` / `create_procurement_calloff` / `update_procurement_calloff` (chatt-verktyg, § 39.4) | n/a | Deterministiska mutationer via det delade skrivlagret; uppföljningsregler expanderas utan inferens |
+| `create_funding_project` / `create_support_check_type` / `create_support_check_application` (chatt-verktyg, § 46) | n/a | Deterministiska utkast via skrivlagret (checktyp inaktiv, ansökan `draft`); inskick, bedömning, finansiering och beslut är agent-nekade |
 | `edu_irl_levels` | minimal | Generellt utbildningsmaterial |
 | `template_pitch_deck` | n/a | Statisk mall, ingen AI-inferens |
 
@@ -1826,7 +1829,7 @@ actor krävs). Tabellen visar vad som tillkommer per yta:
 
 | Körning | Actor | Tillkommer utöver läs-/sökverktygen |
 |---|---|---|
-| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`, samt § 33: `assign_workshop`, `assign_education_document`, `create_task`/`move_task`, `create_event`, `create_mission`, `register_de_minimis_support`, `add_startup_kpi`, `add_capital_round`, `schedule_agent`, `create_startup_note`, samt § 39: `create_procurement`, `create_procurement_calloff`, `update_procurement_calloff`, samt § 42: `create_goal`, `add_goal_indicator`, `set_goal_status`), `memory_read` + `memory_write` |
+| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`, samt § 33: `assign_workshop`, `assign_education_document`, `create_task`/`move_task`, `create_event`, `create_mission`, `register_de_minimis_support`, `add_startup_kpi`, `add_capital_round`, `schedule_agent`, `create_startup_note`, samt § 39: `create_procurement`, `create_procurement_calloff`, `update_procurement_calloff`, samt § 42: `create_goal`, `add_goal_indicator`, `set_goal_status`, samt § 46: `create_funding_project`, `create_support_check_type`, `create_support_check_application`), `memory_read` + `memory_write` |
 | Toolbox (staff) | — (read-only) | `memory_read` |
 | Toolbox (icke-staff) | — (read-only) | — |
 | Schemalagd | — (read-only) | `memory_read` |
@@ -6541,3 +6544,268 @@ kategori/ägare, **aldrig e-post, telefon eller kön**. Guidad i
   organization/category` i `REQUIRED_APP_FIELDS`; `last_name` ej required).
   `notify()` faller tillbaka på kind `assigned` mot ett schema utan
   1700000158 så en förfrågan aldrig tappas tyst.
+
+## 46. Stödcheckar — digital ansökan, bedömning, finansiering & bokföring
+
+### 46.1 Översikt
+
+`/checkar` (modul `checkar`, "Portfölj"-railen; staff/observer + `startup_member`
+för det egna bolaget) digitaliserar Movexums stödcheckar — excellenscheck,
+resecheck, internationaliseringscheck, AI-verktygscheck m.fl. — från
+ansökningsmallen "Aktivitetsplan & ansökan" till beslut, utbetalning och
+uppföljning. **Ansökan är ENDA SANNINGEN för ett ärende:** de minimis-post,
+kapitalrad, uppföljningsuppgifter, aktivitetsrad på bolagskortet och notiser
+skapas ur ansökan och länkar tillbaka till den — beloppen lagras aldrig som
+kopior. `/projekt` (modul `projekt`, staff/observer) är
+**finansieringsprojekten** (Vinnova Excellens, TVV, EoI, Bas …) med
+arbetspaket, budget och kassabok — kassan ett stöd tas ur (§ 46.3).
+
+Modulen är en adapter ovanpå befintliga motorer, inte en ny: formuläret är
+typat (§ 46.2), signeringen följer avtalens AES-modell (§ 19), uppföljningen
+går genom den generiska motorn (§ 40), bokföringen genom de minimis-
+(§ 20) och kapital-skrivlagret (`addCapitalRound`), notiser genom `notify()`.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/support-checks.ts` (+ `.test.ts`) | Ren domänlogik: checktyper, insatser (`normalizeSupportCheckActivities`, `validateActivitiesForSubmit`), statusmaskin (`canTransitionSupportCheck`), härledd fas (`supportCheckPhase`/`supportCheckNextStep`), behörighetschips (`evaluateSupportCheckEligibility`), bedömning (delar viktad 0–5-modell med § 39), revisions-snapshot + `canonicalJson`, kommentarsavsnitt, uppföljningsadapter (`planSupportCheckFollowups`, prefix `check:`), standardregler |
+| `packages/shared/src/funding.ts` | Finansieringsprojekt/arbetspaket: typer, statsstödsgrund (`FundingBasis`: `de_minimis`/`art22`/`none`), `fundingBurn` (upparbetning), `sumFundingLedger`, validering |
+| `backend/pocketbase-schema/migrations/1700000161–170_*.js` | `funding_projects`, `funding_work_packages`, `support_check_types`, `support_check_applications`, `support_check_revisions`, `support_check_comments`, `support_check_documents`, `support_check_rules`; `tasks.link_kind += support_check` + `tasks.support_check_application`; `activities.kind += support_check`; `notifications.kind += support_check_*`; `capital_rounds`/`de_minimis_stod`.`support_check_application` |
+| `apps/web/src/lib/core/write/support-checks.ts` | Skrivlager: checktyper, utkast, inskick+signering, komplettering, utlåtanden, bedömning, finansiering, beslut (med bokföring), utbetalning, slutrapport, avslut, återkallelse, kommentarer, dokument, regler |
+| `apps/web/src/lib/core/write/funding.ts` | Skrivlager: projekt + arbetspaket |
+| `apps/web/src/lib/support-checks/{data,followups,application-pdf}.ts` | Läsväg (RLS), uppföljningssynk (§ 40-adapter), ansökan som PDF |
+| `apps/web/src/lib/funding/data.ts` | Läsväg projekt/arbetspaket + kassabok ur ansökningarna (`buildProjectOverview`) |
+| `apps/web/src/lib/actions/{support-checks,funding}.ts` | Server actions (RBAC → skrivlager → synk) |
+| `apps/web/src/app/api/checkar/documents/route.ts`, `…/documents/[id]/file/route.ts`, `…/[id]/pdf/route.ts` | Bilage-upload (route handler, § 18.2), scopad filproxy, PDF |
+| `apps/web/src/app/checkar/**`, `apps/web/src/app/projekt/**` | Lista, ansökningsformulär, ärendesida (handlingar, handläggning, kommentarer, bilagor, signering, uppföljningar), checktyper, regler; projekt med arbetspaket + kassabok |
+| `apps/web/src/app/startups/[id]/StartupSupportChecksSection.tsx` | Bolagskortets "Stöd & checkar" (även på Mitt bolag § 21bis) |
+
+### 46.2 Ansökan (digital mall) & statusmaskin
+
+Mallens innehåll är typat: `activities` (1–6 **insatser** i
+prioriteringsordning: rubrik, beskrivning [vad/mål/omfattning/varför/tidplan],
+**deltagare** [vem från bolaget — personnamn = PII], kostnad, spetskompetens,
+planerat slut), sökt belopp (tomt = summan av insatserna), planerat slut för
+hela insatsen, följebrev. Skapas som **utkast** av bolagsmedlem (länkat
+bolag) eller staff; redigerbart i `draft` och `changes_requested`.
+
+**Statusar** (`SUPPORT_CHECK_STATUSES`): `draft → submitted →
+under_review → approved → paid → closed`, sidospår `changes_requested`
+(tillbaka till `submitted` vid nytt inskick), `rejected`, `withdrawn`.
+Övergångarna är rollstyrda (`canTransitionSupportCheck`, roller
+`applicant`/`staff`/`lead`; ledning ärver staff, staff ärver bolaget) och
+enforce:as i skrivlagret. **Fasen** som visas (`supportCheckPhase`) följer
+klockan och utlåtandena (§ 38-principen): "väntar på bedömning/controller/
+beslut", "komplettering försenad" (frist passerad), "slutrapport väntas/
+försenad" (insatsens slut + `report_due_days`). `supportCheckNextStep` säger
+vem som väntas agera — samma text på listan, bolagskortet och Mitt bolag.
+
+**Inskick + signering (eIDAS art. 26, AES):** firmatecknaren skriver sitt
+namn och bekräftar `SUPPORT_CHECK_INTENT_TEXT`. Skickar **Movexum-personal**
+in på bolagets uppdrag (t.ex. efter ett möte) bekräftar hen i stället
+`SUPPORT_CHECK_STAFF_INTENT_TEXT` — ett intyg om UPPDRAGET, inte om
+uppgifternas riktighet (rollen avgör i skrivlagret, aldrig klienten; texten
+lagras i beviset och skrivs ut i PDF:n, `submitted_by_role` i audit) — beviset
+påstår aldrig mer än vad som hänt. Skrivlagret fryser en
+kanonisk snapshot (insatser, belopp, bilage-id:n) i den **oföränderliga**
+`support_check_revisions` (update/delete = superuser) med SHA-256-hash,
+signerare, UTC-tid, ip-hash och avsiktstext — samma bevismodell som
+`agreement_signatures`. Varje komplettering ger ny revision och kräver ny
+signering; beslutet pekar på en revision. Agenten kan aldrig skicka in
+(`submitSupportCheckApplication` vägrar agent-actor). Inskick blockeras med
+olösta **synliga** kompletteringspunkter och över checkens tak.
+
+**Behörighetschips** (blockerar aldrig inskick, visas för alla):
+obligatorisk workshop genomförd (`workshop_assignments.status=done`), IRL-
+nivå ≥ krav, de minimis-utrymme (samlat tak − `samladSumma`) mot sökt belopp,
+checkens tak. Underlaget läses med användarens token (`loadEligibilityContext`,
+null = okänt → "?"-chip, aldrig tyst grönt).
+
+### 46.3 Finansiering — projekt, arbetspaket, statsstödsgrund
+
+Två axlar som hålls isär: **var pengarna tas** (finansieringsprojekt +
+arbetspaket) och **på vilken statsstödsgrund** bolaget får stödet
+(`FundingBasis`: de minimis / art. 22 GBER / inget). En TVV-check kan vara
+de minimis, en excellenscheck art. 22. Projektet och checktypen bär bara
+**defaults**; valet görs per ansökan i finansieringsblocket av
+**admin/incubator_lead** (`setSupportCheckFunding`): projekt → arbetspaket
+(måste tillhöra projektet; varning om perioden inte täcker insatsens slut)
+→ grund (varning, aldrig block, när grunden strider mot bolagets aktiva
+`startup_state_aid_periods`). Blocket är ändringsbart **fram till beslutet**
+(`submitted`/`under_review`/`changes_requested`, `fundingEditable`) och
+**låst från `approved`** — bokföringen (de minimis-post, kapitalrad) gjordes
+mot det projekt och den grund som gällde vid beslutet; ändra genom att
+återkalla och besluta på nytt. Ingen ansökan kan beviljas utan satt projekt
++ grund.
+
+`/projekt`: projekt (`kind` vinnova/tillvaxtverket/region/eu/own/other,
+budget, period, default-grund, default-stödgivare) → arbetspaket (kod "AP3",
+titel, budget, period). Upparbetning (`fundingBurn`: beviljat/budget,
+periodandel, signal `ok`/`behind`/`over`) och **kassaboken** räknas live ur
+ansökningarna (`listFundingLedger`) — underlag för rekvisition per
+arbetspaket (bolag, belopp, datum, stödgrund). Projekt/arbetspaket med
+beviljade checkar kan inte raderas.
+
+### 46.4 Beslut — ett anrop, alla spår
+
+`decideSupportCheckApplication` (ledning) gör vid **beviljat** i ordning:
+(1) de minimis-post via `registerDeMinimisSupport` när grunden är de minimis
+(**fail-closed** mot taket, § 20.3; stödgivare = projektets
+`default_stodgivare`, syfte = checktyp + insatsernas rubriker, referens =
+ansökans id), (2) kapitalrad `capital_rounds` typ `soft_funding`, (3) status
+`approved` med länkar `de_minimis_stod`/`capital_round` (och bakåtlänken
+`support_check_application` på båda, migration 1700000170), (4) aktivitetsrad
+`activities.kind='support_check'` på bolagskortet + notis till bolaget.
+Misslyckas de minimis-registreringen ändras **ingen** status — aldrig ett
+halvt godkännande. **Idempotent:** beslutet letar först efter spår som redan
+länkar till ansökan (`support_check_application`) och återanvänder dem, så
+ett omförsök efter ett avbrutet beslut dubbelregistrerar aldrig stödet.
+Kontrollen är **fail-closed** (kan länkarna inte läsas skapas inget), och
+bakåtlänken är själva idempotensnyckeln — kan den inte skrivas rullas
+posten tillbaka och beslutet avbryts. Misslyckas statusskrivningen **rullas
+de spår som skapades i anropet tillbaka** (`revert`-audit) och felet
+redovisas — kan något inte återföras namnges det i felet med ansökans id. Art. 22 → ingen de minimis-post, bara kapitalrad. Avslag
+kräver motivering. `markSupportCheckPaid` sätter `report_due_at` (insatsens
+slut + `report_due_days`). **Återkallelse** efter beviljande (bara ledning,
+före utbetalning) raderar de minimis-posten och kapitalraden med fullständig
+audit (`action_type='revert'`, `before_value` bär belopp, förordning och
+enhet) — statsstödsregistret ska inte innehålla stöd som aldrig lämnades.
+Återföringen är **fail-closed** och stegvis: varje post läses strikt (bara
+404 = "redan borta"), raderas och länken på ansökan nollas DIREKT innan
+nästa post — avbryts flödet står ärendet kvar som beviljat utan att peka på
+en raderad post, och felet namnger vad som redan återförts. Anledningen till
+en återkallelse sparas som synlig kommentar
+(`support_check_comments`), aldrig i beslutsgruppens `decision_note`.
+
+### 46.5 Bedömning & kompletteringar
+
+Coach- och controllerutlåtande (mallens två block) + viktad bedömning 0–5
+mot checktypens kriterier (default: affärsnytta, genomförbarhet, egen insats,
+kostnadsrimlighet, spetskompetens; `scoreSupportCheckAssessment` =
+§ 39-modellen). **Kompletteringspunkter** (`support_check_comments`) per
+avsnitt (`SUPPORT_CHECK_SECTIONS`: hela ansökan, insatserna, kostnad,
+deltagare, bilagor, finansiering [internt]) med `visible_to_applicant`
+(intern coach↔controller-dialog = false) och `resolved_at`. "Begär
+komplettering" sätter `changes_requested` + frist (`changes_due_days`,
+default 14) och notifierar bolaget; bolaget svarar i samma tråd, granskaren
+bockar av, nytt inskick = ny revision. Ledningen kan skicka tillbaka på
+samma sätt (återremiss = komplettering).
+
+### 46.6 Uppföljningsregler (adapter till § 40)
+
+`support_check_rules` har samma kolumner som `procurement_rules` (egen
+kollektion, egen RLS) med ankare `submitted_at`/`changes_requested_at`/
+`decided_at`/`paid_at`/`activity_end` och villkor `awaiting_review`/
+`awaiting_controller`/`awaiting_decision`/`changes_pending`/`not_paid`/
+`report_missing`. Standardregler: bedöm ansökan (coach, +0 d), controllerns
+utlåtande (+7 d), beslut väntar (+21 d), påminn om komplettering (+10 d),
+utbetalning (+14 d efter beslut), slutrapport saknas (+14 d efter insatsens
+slut). Korten är `tasks` med `link_kind='support_check'` +
+`support_check_application`; **nyckelprefix `check:`** (§ 40.2, kolliderar
+aldrig med upphandlingarnas). Ägare = bolagets första coach → ägare →
+skaparen. `startup` sätts inte på korten (§ 21). Synk efter varje mutation
+och lazy när `/checkar` öppnas av staff. **Standardreglerna seedas bara av
+staff** (`ensureSupportCheckRules` tar aktörens roller): reglerna är
+staff/observer-only i RLS, så en bolagsmedlems tomma läsning betyder "får
+inte läsa", inte "inga regler". När en MEDLEM utlöser synken (inskick,
+återkallelse, slutrapport) kör `syncNotice` den med superuser-klienten —
+efter att skrivlagret redan verifierat medlemskapet — utan seed; saknas
+superuser tar staffens lazy synk igen det. **Reglerna läses strikt** i
+synken: ett läsfel avbryter synken med tydligt fel — det tolkas aldrig som
+"inga regler" (vilket skulle auto-stänga varje öppet kort).
+
+### 46.7 Bolagskortet & Mitt bolag
+
+`StartupSupportChecksSection` (sektion `#stodcheckar`, i bolagskortets
+hopp-nav; samma komponent på `/min-oversikt`) läser live: beviljat totalt,
+utbetalt, öppna ärenden, väntar på bolaget (+ försenade), och per ansökan
+fas, nästa steg och vem, belopp, projekt/stödgrund (bara staff). Ingen kopia
+lagras; bolagsmedlem ser via RLS bara sitt bolag och aldrig
+finansieringsblocket. "Ny ansökan" finns för staff och länkad medlem.
+
+### 46.8 Regelefterlevnad
+
+- **RLS (§ 21.3):** `support_check_applications/_revisions/_comments/_documents`
+  medlem-scopade (`linked_startups:each ?= startup`; kommentarer dessutom
+  `visible_to_applicant = true` för medlem); `funding_projects`,
+  `funding_work_packages`, `support_check_rules` staff/observer-only;
+  `support_check_types` läsbar för alla i tenanten (konfiguration utan PII —
+  medlemmen måste se vad som kan sökas). Alla createRules roll-lösa; roll
+  + länkat bolag enforce:as i skrivlagret (`roleFor`) och route-handlers.
+  **Fältlåsta regler (defense-in-depth mot direkt-API med användartoken,
+  migration 1700000163):** `updateRule` på ansökningar låser ledningsfälten
+  (finansiering, beslut, utbetalning, bokföringslänkar) för alla utom
+  admin/incubator_lead, granskningsfälten (utlåtanden, bedömning,
+  komplettering, tenant/bolag/checktyp) för medlemmen, och ansökans innehåll
+  för medlemmen utanför `draft`/`changes_requested`, via
+  `@request.body.<fält>:isset = false`. Identitetsfälten (tenant/bolag/
+  checktyp/skapare) är låsta för alla utom ledningen. Medlemmens statusbyten
+  är **kopplade till nuvarande status** (samma övergångar som
+  `canTransitionSupportCheck` för `applicant`): `submitted` bara från
+  `draft`/`changes_requested` (och bara då får `revision`/`submitted_*`
+  skrivas), `withdrawn` bara före beslut, `final_report_received_at` bara i
+  `paid`; staff får statusar t.o.m. `under_review`/`closed`/`withdrawn`.
+  `createRule` kräver utkast i den inloggades eget namn (`created_by =
+  @request.auth.id`) utan lednings- eller granskningsfält; revisioner/
+  kommentarer/bilagor kan bara skapas i eget namn (`signer`/`author`/
+  `uploaded_by = @request.auth.id`); bilagor uppdateras bara av staff.
+  Skrivlagret är fortsatt den primära gränsen (`writeWithFallback` används
+  först efter verifierad roll/tenant). Asserterat i `verify-baseline.mjs`
+  (`MUST_SCOPE_TO_MEMBER`, `MUST_BE_STAFF_OR_OBSERVER`, `MUST_BE_IMMUTABLE`
+  för `support_check_revisions`/`agreement_signatures`/`tool_versions`,
+  must-exist, `REQUIRED_APP_FIELDS` för
+  `tasks/capital_rounds/de_minimis_stod.support_check_application`); speglat
+  i `setup-via-api.mjs` (inkl. `tasks.link_kind` — 1700000152-patchen där
+  bär `support_check` eftersom `patchCollection` ERSÄTTER values).
+- **GDPR § 5:** `activities[].participants` är personnamn — lagras (mallen
+  kräver det), visas bara för bolaget och Movexums handläggare, når **aldrig**
+  audit (bara fältnycklar/antal) och **aldrig AI**: `support_check_applications`,
+  `_revisions`, `_comments`, `_documents` är **denylistade** i
+  `lib/ai/redaction.ts`. All fritext personnummer-saneras på skrivvägen
+  (§ 15.6). Signeringsbevis: ip bara som SHA-256. Rättslig grund = avtal/
+  berättigat intresse (stödhantering, statsstödskontroll).
+- **GDPR art. 17:** cascade tenant → ansökan → revisioner/kommentarer/
+  bilagor/genererade uppgifter; de minimis-post och kapitalrad behåller
+  historiken (länken nollställs). `check_type` har **ingen** cascade och är
+  **valfri i schemat** (skrivlagret kräver alltid en typ): en checktyp med
+  ansökningar kan inte raderas via appen (skrivlagret vägrar, **fail-closed**
+  när kontrollen inte kan göras; samma för projekt som belastats av
+  beviljade checkar), och eftersom relationen inte är `required` fastnar
+  PB:s tenant-kaskad aldrig på den — vid tenant-radering nollas fältet på
+  ansökningar som ännu inte hunnit kaskadraderas. **Känd begränsning:** `signer`-relationen
+  i revisionerna blockerar radering av användarkontot i PB (`required`) —
+  bevisen är avtalsdata med rättslig grund att behållas; ett erasure-flöde
+  som pseudonymiserar `signer_name`/`signer_email` och nollställer `signer`
+  får byggas i användarraderingen, inte genom att bevisen tas bort.
+  `ip_hash` är osaltad SHA-256 av IP (samma modell som `agreement_signatures`
+  § 19) — ett svagt skydd mot återidentifiering; saltning kräver ett delat
+  hemligt salt och ändras i båda flödena samtidigt.
+- **ISO 27001 A.8.15 / SOC 2:** varje statusövergång, utlåtande, bedömning,
+  finansieringsval, beslut, utbetalning, återkallelse (`revert`), kommentar
+  och bilaga auditeras PII-fritt i `agent_actions` och mappas i
+  `feed/agent-log.ts` (Bolagsnytt/`/aktivitet`, filter "Stödcheckar").
+  Revisionerna är oföränderliga (A.8.32).
+- **EU AI Act:** ingen AI-inferens i flödet → riskklass n/a. Chattverktygen
+  (`create_funding_project`, `create_support_check_type`,
+  `create_support_check_application` = UTKAST) är deterministiska mutationer
+  via skrivlagret; inskick/signering, utlåtanden, bedömning, finansiering,
+  beslut och utbetalning är **agent-nekade** (`writable-fields.ts`) —
+  människan beslutar (art. 14). En checktyp som agenten skapar är alltid
+  ett **inaktivt utkast** (`active` + `criteria` agent-nekade — människan
+  öppnar typen och sätter bedömningens spelregler i /checkar/typer). Ett
+  framtida AI-utkast till coachutlåtande ska läsa den kurerade kontexten,
+  aldrig deltagarfältet.
+- **Kända begränsningar (dokumenterade avvikelser):** (1) interna fält på
+  ansökan (utlåtanden, bedömning, finansiering, beslutsnot) är läsbara för
+  bolagsmedlemmen via API:t — RLS är radnivå, inte fältnivå; UI:t visar dem
+  inte förrän beslutet, och fälten är verksamhetsdata utan PII om
+  tredje part. (2) Bilagor binds inte av innehålls-hashen (bara deras id:n i
+  snapshoten) — en fil kan bytas efter signering av staff; bilagans egen
+  `revision` visar när den laddades upp. (3) Audit loggar filändelse +
+  storlek, aldrig filnamn (kan bära personnamn).
+- **Notiser:** `support_check_submitted` (coacher/ägare/ledning),
+  `support_check_changes`, `support_check_decision`, `support_check_comment`
+  (migration 1700000169; `notify()` faller tillbaka på `assigned` mot ett
+  schema utan migrationen).
+- **Migrationer** 1700000161–170 är nya, oföränderliga filnummer.

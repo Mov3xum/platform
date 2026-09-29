@@ -50,6 +50,9 @@ export const DOMAIN_WRITE_TOOLS: ReadonlySet<string> = new Set([
   'create_procurement',
   'create_procurement_calloff',
   'update_procurement_calloff',
+  'create_funding_project',
+  'create_support_check_type',
+  'create_support_check_application',
   'create_goal',
   'add_goal_indicator',
   'set_goal_status',
@@ -228,6 +231,12 @@ export function buildActionReceipt(input: BuildReceiptInput): AgentActionReceipt
       const base = genericSummary(args, data);
       const status = str(data.status);
       summary = [base, status ? `status: ${status}` : null].filter(Boolean).join(' · ');
+      break;
+    }
+    case 'create_funding_project':
+    case 'create_support_check_type':
+    case 'create_support_check_application': {
+      summary = genericSummary(args, data);
       break;
     }
     case 'create_procurement':

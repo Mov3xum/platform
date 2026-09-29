@@ -13,6 +13,8 @@ export const MODULE_ICONS: Record<string, string> = {
   startups: 'people',
   kontakter: 'user',
   de_minimis: 'shield',
+  checkar: 'check',
+  projekt: 'graph',
   upphandlingar: 'briefcase',
   investerare: 'graph',
   events: 'spark',
