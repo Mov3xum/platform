@@ -4637,6 +4637,35 @@ Dashboarden visar de 5 senaste och expanderar stegvis ("Visa fler", +15 åt
 gången) upp till 60 poster; "Alla" leder till `/aktivitet` som har ett eget
 filter **Ändringslogg** (`?kind=log`).
 
+**Loggen under chatten är PERSONLIG (2026-09).** `/chatt` visade tidigare den
+tenant-breda feeden (bolagshändelser + hela skrivlagrets logg) och "fastnade"
+på gamla poster, eftersom det mesta en person faktiskt gör — laddar upp en
+fil, läggs in i ett tvärfunktionellt team, bjuds in till ett event, laddar upp
+ett utbildningsdokument — aldrig når `activities` eller `agent_actions`. Nu
+läser `loadPersonalActivityFeed` (`lib/feed/activity-feed.ts`) allt den
+inloggade själv är inblandad i: `agent_actions` med **`actor = jag`** (egna
+skrivningar via skrivlagret: inlägg, årshjul, kompassmoduler, workshops,
+kanban-kort, events, uppdrag, upphandlingar …) plus direkta källor lästa
+med användarens egen token (RLS § 21, `getList(1,20)` per källa, fail-soft):
+`org_knowledge` (created_by), `education_documents`
+(uploaded_by), `missions` (issuer/mentor/`recipients ~ jag` — tidpunkt =
+mitt `participants_json.added_at` när jag lades till i efterhand), `tasks`
+(owner/`assignees ~ jag`), `event_signups` (user), `workshop_assignments` och
+`education_document_assignments` (assigned_by/`collaborators ~ jag`), `notes`
+(author — aldrig `body`), `mission_documents` (uploaded_by), `tool_runs`
+(triggered_by — aldrig messages/output), `agreements` (assigned_by) och
+`activities` (owner). Mappningen till du-formulerade rader ("Du ingår i
+teamet för uppdraget …", "Du laddade upp … till kunskapsbasen") är ren och enhetstestad i
+`lib/personal-feed.ts`; en direkt rad hoppas över när samma post redan finns
+i skrivlagrets logg (dedupe på `collection:record_id`). Multi-relationer
+filtreras med `~` (LIKE på JSON-listan) för att inte träffa `?=`-buggen
+(§ 21.3). Portföljbred feed finns oförändrat på `/hem` (Bolagsnytt,
+`loadActivityFeed`) och `/aktivitet`. **Det personliga filarkivet
+(`user_files`, Filer) loggas medvetet INTE** — det är privat arbetsyta och
+ska inte kännas övervakad; det som visas är gemensamt material och det som
+rör andra. Ingen ny dataväg, inga nya fält: rader från staff-only-
+kollektioner når bara den som RLS redan låter läsa dem. Riskklass n/a.
+
 ### 32.2 Ingen ny dataväg
 
 - **RLS:** läsningen sker med användarens egen token — `agent_actions`-reglerna

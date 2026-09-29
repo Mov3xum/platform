@@ -31,6 +31,10 @@ export interface AgentLogEntry {
   href?: string;
   /** Ikonnamn i `components/proto/Icon`. */
   icon: string;
+  /** Källrad i loggen — låter den personliga feeden (§ 32) dedupa direkta rader. */
+  collection?: string;
+  recordId?: string;
+  actionType?: 'create' | 'update' | 'revert';
 }
 
 interface AgentActionRow {
@@ -549,12 +553,18 @@ function mapRow(
 export async function loadAgentLogEntries(
   pb: PocketBase,
   tenant: string,
-  perPage = 60
+  perPage = 60,
+  opts: {
+    /** Bara rader där denna användare är actor (den personliga loggen på `/chatt`). */
+    actorId?: string;
+  } = {}
 ): Promise<AgentLogEntry[]> {
   let rows: AgentActionRow[] = [];
   try {
     const res = await pb.collection('agent_actions').getList<AgentActionRow>(1, perPage, {
-      filter: pb.filter('tenant = {:tenant}', { tenant }),
+      filter: opts.actorId
+        ? pb.filter('tenant = {:tenant} && actor = {:actor}', { tenant, actor: opts.actorId })
+        : pb.filter('tenant = {:tenant}', { tenant }),
       sort: '-created',
       expand: 'actor'
     });
@@ -598,7 +608,10 @@ export async function loadAgentLogEntries(
       viaAgent: row.actor_kind === 'agent',
       created: row.created,
       href: mapped.href,
-      icon: mapped.icon
+      icon: mapped.icon,
+      collection: row.collection,
+      recordId: row.record_id,
+      actionType: row.action_type
     });
   }
   return entries;
