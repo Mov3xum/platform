@@ -34,6 +34,7 @@ const COLLECTIONS: ScopableCollection[] = [
   col('event_signups', ['status']),
   col('contacts', ['first_name']),
   col('milestones', ['title', 'status']),
+  col('missions', ['title', 'status', 'startup']),
   col('web_cache', ['key'], null)
 ];
 
@@ -59,6 +60,18 @@ test('kapital/investering träffar capital_rounds; ekonomi träffar financials',
   assert.ok(a.has('capital_rounds'));
   const b = selectRelevantCollections(COLLECTIONS, 'vad var omsättningen 2025?');
   assert.ok(b.has('startup_financials'));
+});
+
+test('"projektet"/"tvärfunktionella team" mappar till missions, inte bara till bolag', () => {
+  // Incident 2026-09: "lägg till en uppgift i projektet där vi hjälper X" lade
+  // kortet på bolagskortet eftersom "projekt" saknades i synonymkartan.
+  const a = selectRelevantCollections(
+    COLLECTIONS,
+    'lägg till en uppgift i projektet där vi hjälper Equiesum med finansiering'
+  );
+  assert.ok(a.has('missions'));
+  const b = selectRelevantCollections(COLLECTIONS, 'den ska ligga på tvärfunktionella team');
+  assert.ok(b.has('missions'));
 });
 
 test('explicit kollektionsnamn i texten matchar generiskt', () => {

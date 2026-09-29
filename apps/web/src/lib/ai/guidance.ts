@@ -171,7 +171,13 @@ export const DOMAIN_GLOSSARY =
   '"hur många rundor" — filtrera på `type` i ("equity","convertible") och säg ' +
   'uttryckligen att lån/bidrag räknas separat. Vill användaren ha allt mottaget ' +
   'kapital, summera per `type` och redovisa uppdelningen, inte en klumpsumma ' +
-  'kallad "investeringar". `amount_sek` är beloppet; `source` är finansiären.';
+  'kallad "investeringar". `amount_sek` är beloppet; `source` är finansiären.\n' +
+  '- "Projekt", "projektet", "uppdrag" och "tvärfunktionella team" (sidan ' +
+  '/uppdrag) = kollektionen `missions` — INTE bolagskortet. "Projektet där vi ' +
+  'hjälper bolag X med finansiering" är en `missions`-rad kopplad till bolaget, ' +
+  'och en uppgift "i projektet" hör till uppdragets tavla (`create_task` med ' +
+  '`mission_id`), inte till bolagets tavla. Slå upp uppdraget med ' +
+  '`search_records` på `missions` (matcha på titel/bolag) och använd dess id.';
 
 /**
  * Hur agenten FÖRFATTAR saker i plattformen — intag-moduler i
@@ -331,6 +337,12 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   'via `query_collection` på procurements/procurement_calloffs och tasks ' +
   '(link_kind = procurement). Utvärderingen av leverantören (poäng) och ' +
   'reglerna sätts av en människa i /upphandlingar. ' +
+  'Kanban-kort (`create_task`): ange EXAKT EN av `startup_id` (bolagets ' +
+  'tavla) och `mission_id` (uppdragets tavla), aldrig båda. Säger användaren ' +
+  '"projektet"/"uppdraget"/"tvärfunktionella team" är målet ett uppdrag: slå ' +
+  'upp det med `search_records` på `missions` och använd id:t från ' +
+  'sökträffen — gissa aldrig ett id. Går det inte att avgöra om kortet ska ' +
+  'ligga på bolagskortet eller ett uppdrag: FRÅGA innan du skapar. ' +
   'Slå alltid upp id:n via `query_collection` först. Publicering, ' +
   'teamtilldelning och inbjudningar gör en människa i UI:t — säg det när det ' +
   'är nästa steg.\n';

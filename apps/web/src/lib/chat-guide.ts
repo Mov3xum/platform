@@ -188,7 +188,7 @@ const GUIDE: ChatGuideSection[] = [
         examples: ['Skapa en workshop om prissättning med tre moduler']
       },
       {
-        title: 'Hemmaplan: internutbildningar, anslagstavla & rutiner',
+        title: 'Översikt: internutbildningar, anslagstavla & rutiner',
         description:
           'Lägg upp, uppdatera, fäst eller låt inlägg utgå på startsidan — fliken Internutbildningar administreras helt via chatten.',
         examples: [

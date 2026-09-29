@@ -4127,7 +4127,7 @@ ansvarig i UI:t.
   (slug ≤ 40 tecken — det som lagras på posterna, **oföränderlig**), `label`
   (≤ 60), `token` (select över Movexums brand-färger, § 2.2), `sort_order`,
   `show_on_home` (bool, **migration 1700000146** — visas kategorins
-  aktiviteter i kalendern på Hemmaplan § 37; backfillat `true`, saknat = visas),
+  aktiviteter i kalendern på Översikt § 37; backfillat `true`, saknat = visas),
   `created_by`. Unikt index `(tenant, key)` → idempotent. Migrationen seedar
   `styrelse`/`ledning`/`gemensamt` (grön/gul/lila) per tenant, så befintliga
   poster behåller sin färg.
@@ -5240,7 +5240,7 @@ på canvasen med hårlinjer, och typskalan är **samma som chatten** (hälsning
 `components/home/HomeFrontPage.tsx` äger layouten; `app/hem/page.tsx` äger
 all IO och skickar färdig data:
 
-1. **Masthead** — folio-rad (datum · ISO-vecka · "Hemmaplan") under en
+1. **Masthead** — folio-rad (datum · ISO-vecka · "Översikt") under en
    ink-linje, hälsningen i Sora och "Gå direkt till"-raden som textlänkar
    (rollfiltrerade). (Den dekorativa årsringen togs bort 2026-09.) Under det
    en **boxlös siffer-rad**
@@ -5267,7 +5267,7 @@ all IO och skickar färdig data:
    förut till `/events/<id>`.
    **Kategori-synlighet:** bara årshjulskategorier med `show_on_home`
    (migration **1700000146**, bool, backfillat `true`; speglat i
-   `setup-via-api.mjs`) visas — superadmin bockar i/ur **"Hemmaplan"** per
+   `setup-via-api.mjs`) visas — superadmin bockar i/ur **"Översikt"** per
    kategori i `/arshjul` → Kategorier (t.ex. Event ja, Styrelse & VD nej).
    Filtret görs server-side i `page.tsx` via `annualWheelHiddenOnHome`
    (ren, enhetstestad); saknat fält tolkas som "visas", bara ett uttryckligt
@@ -5279,7 +5279,7 @@ all IO och skickar färdig data:
    **första inlägget som toppnyhet** (typ-eyebrow i färg, hela texten upp
    till 1 400 tecken), resten som **notiser i två spalter** med hårlinjer.
    Redigeraren är inline med brand-toppstreck. **"Så gör vi" (instruktioner +
-   den hårdkodade plattformsintron) är borttagen från Hemmaplan (2026-09)**;
+   den hårdkodade plattformsintron) är borttagen från Översikt (2026-09)**;
    `?flik=sa-gor-vi` landar på anslagstavlan och `kind=instruction`-inlägg
    visas inte på startsidan (inläggstypen finns kvar i datamodellen).
    `OrgPostList` behåller `variant="compact"` (numrerad handbok) för
@@ -5305,7 +5305,7 @@ bor i `@platform/shared` (`org-posts.ts`, ren + enhetstestad). Den låg först i
 den `'use client'`-märkta `HomeBoardTabs.tsx` och anropades från
 serverkomponenten `page.tsx` → Next kastar "Attempted to call
 homeTabFromSlug() from the server but homeTabFromSlug is on the client" och
-HELA Hemmaplan föll i felvyn "Något gick fel" (digest, ingen stacktrace för
+HELA Översikt föll i felvyn "Något gick fel" (digest, ingen stacktrace för
 användaren). Exportera aldrig hjälpfunktioner ur en `'use client'`-modul för
 serverbruk — lägg dem i en ren modul.
 
@@ -5325,7 +5325,7 @@ blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdn
 | `apps/web/src/lib/ai/web.ts` | `fetchWebFeedItems` — strukturerade RSS-poster med in-process-cache (30 min) |
 | `apps/web/src/app/hem/page.tsx` | Sidan (server; alla källor parallellt via `Promise.allSettled`) |
 | `apps/web/src/components/home/HomeFrontPage.tsx` | Layouten (server): masthead + siffer-rad, tidslinje med fönsterval, spalter — ren presentation av data från `page.tsx` |
-| `backend/pocketbase-schema/migrations/1700000146_extend_annual_wheel_categories_show_on_home.js` | `annual_wheel_categories.show_on_home` (visas kategorin i kalendern på Hemmaplan?) |
+| `backend/pocketbase-schema/migrations/1700000146_extend_annual_wheel_categories_show_on_home.js` | `annual_wheel_categories.show_on_home` (visas kategorin i kalendern på Översikt?) |
 | `apps/web/src/components/home/HomeTimeline.tsx` | Tidslinje 7/14/30 dagar (dagslinjal + band i körfält, djuplänk `/arshjul?item=`) |
 | `apps/web/src/components/home/CompanyNews.tsx` | Bolagsnytt som vertikal tidslinje |
 | `apps/web/src/components/home/OrgPostList.tsx` | Inläggslistan (client): toppnyhet + notiser i spalter / numrerad handbok; redigerare, fäst/redigera/ta bort — används i alla tre flikarna (`kinds` begränsar typvalet per flik) |
