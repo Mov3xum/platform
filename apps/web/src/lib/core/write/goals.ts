@@ -23,6 +23,7 @@ import {
   type GoalPeriod,
   type GoalPeriodStatus,
   type GoalStatusEntry,
+  type GoalImportGoal,
   type IndicatorReading,
   type MetricKey
 } from '@platform/shared';
@@ -536,6 +537,163 @@ export async function deleteGoal(
   } catch (err) {
     return fail('DB_ERROR', pbError(err, 'Kunde inte ta bort målet.'));
   }
+}
+
+// ── Import från Excel/CSV ──────────────────────────────────────────────────
+
+export interface ImportGoalsResult {
+  created: number;
+  /** Befintliga mål (samma fokusområde + titel + typ) som återanvändes. */
+  reused: number;
+  skipped: number;
+  indicatorsCreated: number;
+  /** PII-fria varningar (radnummer). */
+  warnings: string[];
+}
+
+/**
+ * Importerar tolkade mål (`parseGoalImportRows`, @platform/shared) till ett
+ * verksamhetsår. Varje mål/indikator går genom SAMMA `createGoal`/
+ * `createGoalIndicator` som UI:t och chatten — whitelist, validering,
+ * behörighet per måltyp, tenant-stämpel och audit per rad. Idempotent:
+ * ett mål som redan finns i året (samma fokusområde, titel och måltyp,
+ * för personliga även ägare) återanvänds och får bara SAKNADE indikatorer
+ * (matchade på etikett). Ägare för personliga mål matchas på e-post mot
+ * Movexum-personal i tenanten; okänd e-post ⇒ importören blir ägare
+ * (varning). En sammanfattningsrad loggas som `goal_import` (§ 32).
+ */
+export async function importGoals(
+  pb: PocketBase,
+  actor: Actor,
+  periodId: string,
+  goals: readonly GoalImportGoal[]
+): Promise<WriteResult<ImportGoalsResult>> {
+  const gate = canCreateRecord(actor, GOALS);
+  if (!gate.ok) return fail('FORBIDDEN', gate.reason ?? 'Saknar behörighet.');
+  if (actor.kind !== 'user') return fail('FORBIDDEN', 'Import görs av en människa i /mal.');
+  const period = await loadOpenPeriod(pb, actor, periodId);
+  if ('error' in period) return period.error;
+  const warnings: string[] = [];
+  const result: ImportGoalsResult = { created: 0, reused: 0, skipped: 0, indicatorsCreated: 0, warnings };
+
+  // Movexum-personal per e-post (bara id — e-posten lagras aldrig i loggen).
+  const staffByEmail = new Map<string, string>();
+  const needsOwners = goals.some((g) => g.kind === 'personal' && g.owner_email);
+  if (needsOwners) {
+    try {
+      const res = await pb.collection('users').getList<{ id: string; email?: string; roles?: string[] }>(1, 200, {
+        filter: pb.filter('tenant = {:t}', { t: actor.tenant }),
+        fields: 'id,email,roles'
+      });
+      for (const u of res.items) {
+        if (u.email && Array.isArray(u.roles) && u.roles.some((r) => GOAL_STAFF_ROLES.includes(r))) {
+          staffByEmail.set(u.email.toLowerCase(), u.id);
+        }
+      }
+    } catch {
+      warnings.push('Kunde inte läsa kollegor — personliga mål utan matchad ägare får importören som ägare.');
+    }
+  }
+
+  // Befintliga mål i året (dubblettkontroll).
+  const existing = new Map<string, Goal>();
+  try {
+    const rows = await pb.collection(GOALS).getFullList<Goal>({
+      filter: pb.filter('tenant = {:t} && period = {:p}', { t: actor.tenant, p: period.id }),
+      fields: GOAL_READ_FIELDS,
+      batch: 500
+    });
+    for (const g of rows) existing.set(goalDedupeKey(g), g);
+  } catch {
+    warnings.push('Kunde inte läsa befintliga mål — dubblettkontrollen kan vara ofullständig.');
+  }
+
+  for (const g of goals) {
+    let ownerUser: string | null = null;
+    if (g.kind === 'personal') {
+      ownerUser = g.owner_email ? (staffByEmail.get(g.owner_email.toLowerCase()) ?? null) : null;
+      if (!ownerUser) {
+        if (g.owner_email) warnings.push(`Rad ${g.line}: ägarens e-post matchar ingen Movexum-kollega — du blir ägare.`);
+        ownerUser = actor.id;
+      }
+    }
+    const key = goalDedupeKey({ focus_area: g.focus_area, title: g.title, kind: g.kind, owner_user: ownerUser });
+    let goal = existing.get(key) ?? null;
+    if (goal) {
+      result.reused++;
+    } else {
+      const created = await createGoal(pb, actor, {
+        period: period.id,
+        focus_area: g.focus_area,
+        title: g.title,
+        description: g.description,
+        owner_team: g.owner_team,
+        kind: g.kind,
+        owner_user: ownerUser ?? undefined
+      });
+      if (!created.ok) {
+        result.skipped++;
+        warnings.push(`Rad ${g.line}: målet kunde inte skapas — ${created.error}`);
+        continue;
+      }
+      goal = created.value;
+      existing.set(key, goal);
+      result.created++;
+    }
+
+    if (g.indicators.length === 0) continue;
+    let existingLabels = new Set<string>();
+    try {
+      const inds = await pb.collection(GOAL_INDICATORS).getFullList<{ label: string }>({
+        filter: pb.filter('tenant = {:t} && goal = {:g}', { t: actor.tenant, g: goal.id }),
+        fields: 'label',
+        batch: 200
+      });
+      existingLabels = new Set(inds.map((i) => i.label.trim().toLowerCase()));
+    } catch {
+      /* tom mängd — dubbletter fångas inte, men inget tappas */
+    }
+    for (const ind of g.indicators) {
+      if (existingLabels.has(ind.label.trim().toLowerCase())) {
+        warnings.push(`Rad ${ind.line}: indikatorn finns redan på målet — hoppas över.`);
+        continue;
+      }
+      const created = await createGoalIndicator(pb, actor, {
+        goal: goal.id,
+        label: ind.label,
+        source: ind.source,
+        metric_key: ind.metric_key ?? undefined,
+        target: ind.target,
+        unit: ind.unit
+      });
+      if (!created.ok) {
+        warnings.push(`Rad ${ind.line}: indikatorn kunde inte skapas — ${created.error}`);
+        continue;
+      }
+      existingLabels.add(ind.label.trim().toLowerCase());
+      result.indicatorsCreated++;
+    }
+  }
+
+  await logAgentAction(pb, {
+    actor,
+    action_type: 'create',
+    collection: 'goal_import',
+    record_id: period.id,
+    after_value: {
+      year: period.year,
+      created: result.created,
+      reused: result.reused,
+      skipped: result.skipped,
+      indicators: result.indicatorsCreated
+    }
+  });
+  return ok(result);
+}
+
+function goalDedupeKey(g: Pick<Goal, 'focus_area' | 'title' | 'kind' | 'owner_user'>): string {
+  const kind = goalKindOf(g);
+  return `${g.focus_area}|${kind}|${g.title.trim().toLowerCase()}|${kind === 'personal' ? g.owner_user || '' : ''}`;
 }
 
 // ── Indikatorer ─────────────────────────────────────────────────────────────

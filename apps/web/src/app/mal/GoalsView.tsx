@@ -906,6 +906,11 @@ function PeriodControls({ period }: { period: GoalPeriod }) {
               Återöppna
             </button>
           )}
+          {period.status !== 'closed' && (
+            <Link href={`/mal/import?ar=${period.year}`} className={btnGhost} title="Ladda upp mål från Excel eller CSV">
+              <Icon name="upload" size={12} /> Importera från Excel
+            </Link>
+          )}
           <button type="button" className={btnGhost} disabled={pending} onClick={() => setMode(mode === 'edit' ? 'idle' : 'edit')}>
             <Icon name="pencil" size={12} /> Redigera år
           </button>
