@@ -437,6 +437,69 @@ function mapRow(
       };
     }
 
+    // Kontaktboken (§ 41). Aldrig e-post/telefon i loggen — bara namn/organisation.
+    case 'contacts': {
+      const name = str(after.name) || 'en kontakt';
+      const href = row.record_id ? `/kontakter/${row.record_id}` : '/kontakter';
+      if (action === 'create') {
+        return {
+          title: `Ny kontakt i kontaktboken: ${name}`,
+          detail: str(after.organization) || undefined,
+          href,
+          icon: 'user'
+        };
+      }
+      if (after.deleted === true) {
+        return { title: `Kontaktboken: ${name} togs bort`, href: '/kontakter', icon: 'user' };
+      }
+      const field = str(row.field);
+      return {
+        title: `Kontaktboken: ${name} — ${field ? FIELD_LABELS[field] ?? field : 'uppgifter'} ${changedVerb}`,
+        href,
+        icon: 'user'
+      };
+    }
+    case 'contact_requests': {
+      const name = str(after.contact_name) || 'en kontakt';
+      const contactId = str(after.contact);
+      const href = contactId ? `/kontakter/${contactId}?request=${row.record_id ?? ''}` : '/kontakter/forfragningar';
+      const startupName = str(after.startup_name);
+      if (action === 'create') {
+        const status = str(after.status);
+        return {
+          title:
+            status === 'approved'
+              ? `Kontakt använd: ${name}${startupName ? ` → ${startupName}` : ''}`
+              : `Förfrågan om kontakt: ${name}${startupName ? ` → ${startupName}` : ''}`,
+          detail: str(after.purpose) || undefined,
+          href,
+          icon: 'send'
+        };
+      }
+      const value = str(after.value);
+      return {
+        title:
+          value === 'approved'
+            ? `Förfrågan godkänd: ${name}${startupName ? ` → ${startupName}` : ''}`
+            : value === 'declined'
+              ? `Förfrågan avböjd: ${name}`
+              : value === 'withdrawn'
+                ? `Förfrågan återkallad: ${name}`
+                : `Förfrågan om ${name} ${changedVerb}`,
+        href,
+        icon: value === 'approved' ? 'check' : 'send'
+      };
+    }
+    case 'contact_import': {
+      const created = typeof after.created === 'number' ? after.created : 0;
+      const updated = typeof after.updated === 'number' ? after.updated : 0;
+      return {
+        title: `Kontakter importerade: ${created} nya, ${updated} uppdaterade`,
+        href: '/kontakter',
+        icon: 'upload'
+      };
+    }
+
     // Upphandlingar & excellens-insatser (§ 39).
     case 'procurements': {
       const href = row.record_id ? `/upphandlingar/${row.record_id}` : '/upphandlingar';

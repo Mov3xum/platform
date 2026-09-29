@@ -210,6 +210,17 @@ const GUIDE: ChatGuideSection[] = [
         examples: ['Registrera 50 000 kr de minimis-stöd från Almi för bolaget, beslut 1 september']
       },
       {
+        title: 'Kontaktboken',
+        description:
+          'Lägg till externa kontakter i Movexums gemensamma kontaktbok, be kontaktägaren om att få använda en kontakt för ett syfte och dela den med ett bolag — ägaren godkänner i chatten eller på kontaktkortet.',
+        examples: [
+          'Lägg till Anna Andersson på Vinnova som kontakt, handläggare för innovationsbidrag — hon är informerad om att vi sparar uppgifterna',
+          'Vem äger våra investerarkontakter i Gävle?',
+          'Be om att få koppla ihop Vinnova-kontakten med bolaget inför deras ansökan',
+          'Godkänn förfrågan om min Almi-kontakt'
+        ]
+      },
+      {
         title: 'Upphandlingar & excellens-insatser',
         description:
           'Registrera en upphandling ur ett bifogat underlag, lägg in avrop per bolag och godkänn milstolpar — uppföljningsuppgifterna skapas och stängs automatiskt enligt reglerna i /upphandlingar.',
