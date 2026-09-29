@@ -61,8 +61,11 @@ const GUIDE: ChatGuideSection[] = [
       {
         title: 'Kunskapsbasen & dina filer',
         description:
-          'Chatten söker i organisationens uppladdade material (/kunskapsbas) och i dina egna filer (/filer).',
-        examples: ['Vad säger vår coachningsprocess om det första bolagsmötet?']
+          'Chatten söker i organisationens uppladdade material (/kunskapsbas) och i dina egna filer (/filer). Nämn en fil vid namn så letar chatten upp den även om du stavar lite fel.',
+        examples: [
+          'Vad säger vår coachningsprocess om det första bolagsmötet?',
+          'Sammanfatta pitchdecket jag laddade upp i mina filer'
+        ]
       },
       {
         title: 'Sök på internet (Webbkällor)',
@@ -245,7 +248,7 @@ const GUIDE: ChatGuideSection[] = [
       {
         title: 'Mål & indikatorer i verksamhetsplanen',
         description:
-          'Lägg till mål under ett fokusområde och indikatorer som räknas ur data eller bedöms manuellt. Måltal och årets status sätter ledningen i /mal.',
+          'Lägg till övergripande mål (ledningen) eller ditt eget personliga mål under ett fokusområde, och indikatorer som räknas ur data eller bedöms manuellt. Måltal och årets status sätter ledningen i /mal.',
         roles: SCHEDULE_MANAGE,
         examples: [
           'Lägg till målet "Konvertering 50 % från ink till acc inom 8 månader" under Kundvärde och kvalitetssäkring, coachgruppen'

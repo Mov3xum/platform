@@ -106,11 +106,11 @@ export default async function MinaAktiviteterPage({
   const { startup: startupParam } = await searchParams;
 
   // Bolagsmedlem ser sitt eget bolag; staff/coach kan granska ett specifikt
-  // bolags progress via ?startup=<id> (länkas från bolagskortet/Pågående).
+  // bolags progress via ?startup=<id> (länkas från bolagskortet).
   const targetId = isMember ? user.linkedStartups[0] : startupParam;
 
   if (!targetId) {
-    if (isStaff) redirect('/pagaende');
+    if (isStaff) redirect('/startups');
     return (
       <PageShell title="Aktiviteter">
         <div className="py-6">

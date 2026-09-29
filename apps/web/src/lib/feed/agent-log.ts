@@ -442,23 +442,46 @@ function mapRow(
       const year = str(after.year);
       const href = year ? `/mal?ar=${year}` : '/mal';
       if (action === 'create') return { title: `Nytt verksamhetsår: ${year || 'år'}`, href, icon: 'target' };
+      if (after.deleted === true) {
+        return { title: `Verksamhetsår ${year} borttaget`, detail: after.goals ? `${str(after.goals)} mål` : undefined, href: '/mal', icon: 'target' };
+      }
+      const field = str(row.field);
+      if (field === 'year' || field === 'title') {
+        return { title: `Verksamhetsår ${year} redigerat`, detail: str(after.title) || undefined, href, icon: 'target' };
+      }
       return { title: `Verksamhetsår ${year}: status ${changedVerb}`, detail: str(after.status) || undefined, href, icon: 'target' };
     }
     case 'goals': {
       const year = str(after.year);
       const href = `/mal${year ? `?ar=${year}&` : '?'}mal=${row.record_id ?? ''}`;
+      const kindLabel = str(after.kind) === 'personal' ? 'Personligt mål' : 'Mål';
       if (action === 'create') {
-        return { title: `Nytt mål: "${str(after.title) || 'utan titel'}"`, detail: str(after.owner_team) || undefined, href, icon: 'target' };
+        return {
+          title: `Nytt ${kindLabel.toLowerCase()}: "${str(after.title) || 'utan titel'}"`,
+          detail: str(after.owner_team) || undefined,
+          href,
+          icon: 'target'
+        };
+      }
+      if (after.deleted === true) {
+        return { title: `${kindLabel} "${str(after.title) || ''}" borttaget`, href: year ? `/mal?ar=${year}` : '/mal', icon: 'target' };
       }
       const field = str(row.field);
-      return { title: `Mål "${str(after.title) || ''}": ${field || 'fält'} ${changedVerb}`, href, icon: 'target' };
+      return { title: `${kindLabel} "${str(after.title) || ''}": ${field || 'fält'} ${changedVerb}`, href, icon: 'target' };
     }
     case 'goal_indicators': {
       const goalId = str(after.goal);
+      const href = goalId ? `/mal?mal=${goalId}` : '/mal';
+      if (after.deleted === true) {
+        return { title: `Indikator "${str(after.label) || 'indikator'}" borttagen`, detail: str(after.goal_title) || undefined, href, icon: 'target' };
+      }
+      if (action === 'update') {
+        return { title: `Indikator "${str(after.label) || 'indikator'}" ${changedVerb}`, detail: str(after.goal_title) || undefined, href, icon: 'target' };
+      }
       return {
         title: `Ny indikator: "${str(after.label) || 'indikator'}"`,
         detail: str(after.goal_title) || undefined,
-        href: goalId ? `/mal?mal=${goalId}` : '/mal',
+        href,
         icon: 'target'
       };
     }

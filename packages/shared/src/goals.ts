@@ -51,6 +51,31 @@ export function isGoalOwnerTeam(v: unknown): v is GoalOwnerTeam {
   return (GOAL_OWNER_TEAMS as readonly string[]).includes(String(v));
 }
 
+/**
+ * Måltyp: ett ÖVERGRIPANDE mål gäller organisationen/teamet och sätts av
+ * ledningen; ett PERSONLIGT mål ägs av en enskild medarbetare
+ * (`owner_user`) och sätts av personen själv eller av ledningen.
+ */
+export const GOAL_KINDS = ['overall', 'personal'] as const;
+export type GoalKind = (typeof GOAL_KINDS)[number];
+export const GOAL_KIND_LABELS: Record<GoalKind, string> = {
+  overall: 'Övergripande mål',
+  personal: 'Personligt mål'
+};
+export function isGoalKind(v: unknown): v is GoalKind {
+  return (GOAL_KINDS as readonly string[]).includes(String(v));
+}
+
+/** Saknat/okänt värde (rad från före migration 1700000161) ⇒ övergripande. */
+export function goalKindOf(goal: Pick<Goal, 'kind'>): GoalKind {
+  return goal.kind === 'personal' ? 'personal' : 'overall';
+}
+
+/** Roller som får sätta övergripande mål, ändra år och indikatorer (VP-beslut). */
+export const GOAL_LEAD_ROLES: readonly string[] = ['admin', 'incubator_lead'];
+/** Roller som får sätta personliga mål åt sig själva och rapportera status. */
+export const GOAL_STAFF_ROLES: readonly string[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
+
 export const GOAL_PERIOD_STATUSES = ['draft', 'active', 'closed'] as const;
 export type GoalPeriodStatus = (typeof GOAL_PERIOD_STATUSES)[number];
 export const GOAL_PERIOD_STATUS_LABELS: Record<GoalPeriodStatus, string> = {
@@ -127,6 +152,10 @@ export interface Goal {
   title: string;
   description?: string | null;
   owner_team: GoalOwnerTeam;
+  /** Övergripande (default) eller personligt mål (migration 1700000161). */
+  kind?: GoalKind | null;
+  /** Ägaren av ett personligt mål (users-id). Tomt för övergripande mål. */
+  owner_user?: string | null;
   sort_order?: number | null;
 }
 
@@ -220,13 +249,20 @@ export interface GoalInput {
   title: string;
   description: string | null;
   owner_team: GoalOwnerTeam;
+  kind: GoalKind;
+  /** Bara för personliga mål; alltid null för övergripande. */
+  owner_user: string | null;
 }
+
+const RECORD_ID = /^[a-zA-Z0-9_-]{1,64}$/;
 
 export function validateGoalInput(raw: {
   focus_area?: unknown;
   title?: unknown;
   description?: unknown;
   owner_team?: unknown;
+  kind?: unknown;
+  owner_user?: unknown;
 }): GoalValidation<GoalInput> {
   if (!isGoalFocusArea(raw.focus_area)) {
     return { ok: false, error: `Ogiltigt fokusområde. Giltiga: ${GOAL_FOCUS_AREAS.join(', ')}.` };
@@ -242,10 +278,78 @@ export function validateGoalInput(raw: {
   if (!isGoalOwnerTeam(team)) {
     return { ok: false, error: `Ogiltigt team. Giltiga: ${GOAL_OWNER_TEAMS.join(', ')}.` };
   }
+  const kind = raw.kind === undefined || raw.kind === null || raw.kind === '' ? 'overall' : raw.kind;
+  if (!isGoalKind(kind)) {
+    return { ok: false, error: `Ogiltig måltyp. Giltiga: ${GOAL_KINDS.join(', ')} (övergripande/personligt).` };
+  }
+  const ownerRaw = String(raw.owner_user ?? '').trim();
+  if (kind === 'personal') {
+    if (!ownerRaw) return { ok: false, error: 'Ett personligt mål behöver en ägare (medarbetare).' };
+    if (!RECORD_ID.test(ownerRaw)) return { ok: false, error: 'Ogiltig ägare för det personliga målet.' };
+  }
   return {
     ok: true,
-    value: { focus_area: raw.focus_area, title, description: descriptionRaw || null, owner_team: team }
+    value: {
+      focus_area: raw.focus_area,
+      title,
+      description: descriptionRaw || null,
+      owner_team: team,
+      kind,
+      owner_user: kind === 'personal' ? ownerRaw : null
+    }
   };
+}
+
+export interface GoalPeriodInput {
+  year: number;
+  title: string | null;
+}
+
+/** Verksamhetsår: år 2000–2100, valfri titel (max 120). Tom titel ⇒ "Verksamhetsplan <år>" sätts av skrivlagret. */
+export function validateGoalPeriodInput(raw: { year?: unknown; title?: unknown }): GoalValidation<GoalPeriodInput> {
+  const year = typeof raw.year === 'string' ? Number(raw.year.trim()) : raw.year;
+  if (!Number.isInteger(year) || (year as number) < 2000 || (year as number) > 2100) {
+    return { ok: false, error: 'Året måste vara 2000–2100.' };
+  }
+  const title = String(raw.title ?? '').trim();
+  if (title.length > GOAL_PERIOD_TITLE_MAX) {
+    return { ok: false, error: `Titeln får vara max ${GOAL_PERIOD_TITLE_MAX} tecken.` };
+  }
+  return { ok: true, value: { year: year as number, title: title || null } };
+}
+
+/**
+ * Vem får ändra/ta bort ett mål? Ledningen (admin/incubator_lead) alla;
+ * ägaren av ett PERSONLIGT mål sitt eget. Övergripande mål rörs aldrig av
+ * annan personal än ledningen. Speglas i PB:s update-/deleteRule på `goals`
+ * (migration 1700000161) — koden är säkerhetsgränsen, regeln försvaret på djupet.
+ */
+export function canManageGoal(
+  goal: Pick<Goal, 'kind' | 'owner_user'>,
+  actor: { id: string; roles: readonly string[] }
+): boolean {
+  if (actor.roles.some((r) => GOAL_LEAD_ROLES.includes(r))) return true;
+  if (goalKindOf(goal) !== 'personal') return false;
+  if (!actor.roles.some((r) => GOAL_STAFF_ROLES.includes(r))) return false;
+  return !!goal.owner_user && goal.owner_user === actor.id;
+}
+
+/** Vem får skapa ett mål av en viss typ (och åt vem)? */
+export function canCreateGoalOfKind(
+  input: Pick<GoalInput, 'kind' | 'owner_user'>,
+  actor: { id: string; roles: readonly string[] }
+): { ok: true } | { ok: false; error: string } {
+  const lead = actor.roles.some((r) => GOAL_LEAD_ROLES.includes(r));
+  if (input.kind === 'overall') {
+    return lead ? { ok: true } : { ok: false, error: 'Övergripande mål sätts av admin/incubator_lead (VP-beslut).' };
+  }
+  if (!actor.roles.some((r) => GOAL_STAFF_ROLES.includes(r))) {
+    return { ok: false, error: 'Bara Movexum-personal kan sätta personliga mål.' };
+  }
+  if (!lead && input.owner_user !== actor.id) {
+    return { ok: false, error: 'Du kan bara sätta personliga mål åt dig själv — ledningen kan sätta åt andra.' };
+  }
+  return { ok: true };
 }
 
 export interface GoalIndicatorInput {
@@ -415,7 +519,12 @@ export interface GoalNode {
 export interface GoalFocusAreaNode {
   area: GoalFocusArea;
   label: string;
+  /** Alla mål i området (övergripande först, sedan personliga). */
   goals: GoalNode[];
+  /** Övergripande mål (organisation/team). */
+  overall: GoalNode[];
+  /** Personliga mål (en medarbetares egna). */
+  personal: GoalNode[];
 }
 
 export interface GoalTree {
@@ -447,10 +556,8 @@ export function buildGoalTree(
     indicatorsByGoal.set(i.goal, list);
   }
   let indicatorCount = 0;
-  const areas = GOAL_FOCUS_AREAS.map((area) => ({
-    area,
-    label: GOAL_FOCUS_AREA_LABELS[area],
-    goals: goals
+  const areas = GOAL_FOCUS_AREAS.map((area) => {
+    const nodes = goals
       .filter((g) => g.focus_area === area)
       .sort(bySort<Goal>((g) => g.title))
       .map((goal) => ({
@@ -467,8 +574,11 @@ export function buildGoalTree(
             const latestQ = QUARTERS.filter((q) => byQuarter[q]).pop();
             return { indicator, byQuarter, latest: latestQ ? byQuarter[latestQ]! : null };
           })
-      }))
-  }));
+      }));
+    const overall = nodes.filter((n) => goalKindOf(n.goal) === 'overall');
+    const personal = nodes.filter((n) => goalKindOf(n.goal) === 'personal');
+    return { area, label: GOAL_FOCUS_AREA_LABELS[area], goals: [...overall, ...personal], overall, personal };
+  });
   return { areas, indicatorCount };
 }
 

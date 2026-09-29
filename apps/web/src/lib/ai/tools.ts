@@ -33,6 +33,7 @@ import {
   COMPASS_INPUT_TYPES,
   MAX_COMPASS_CHOICES,
   GOAL_FOCUS_AREAS,
+  GOAL_KINDS,
   GOAL_OWNER_TEAMS,
   GOAL_STATUSES,
   GOAL_INDICATOR_UNITS,
@@ -602,6 +603,50 @@ export function buildChatTools(
             }
           },
           required: ['query']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'read_my_file',
+        description:
+          'LISTAR filerna i ANVÄNDARENS EGNA Filer-yta, ELLER läser HELA innehållet ' +
+          'i EN namngiven fil — till skillnad från search_my_files som bara ' +
+          'returnerar de mest relevanta textstyckena och som ALDRIG matchar på ' +
+          'filnamn. Använd detta så fort användaren nämner en fil vid namn ' +
+          '("Idebeskrivning.pptx", "pitchdecket jag laddade upp", "min rapport") ' +
+          'eller säger att en fil "ligger i Filer", och när du ska ANALYSERA/' +
+          'SAMMANFATTA/BYGGA något utifrån hela filen. Lämna `query` och `file_id` ' +
+          'tomma för att se vilka filer som finns; matcha sedan på namn (`query`, ' +
+          'tolerant mot felstavning) eller läs en exakt fil (`file_id`). Säg ALDRIG ' +
+          'att en fil saknas innan du listat filerna med detta verktyg. Svaret ' +
+          'anger om filen har text eller inte (PowerPoint/Word/PDF/Excel/text ' +
+          'extraheras; bilder saknar text). Bara den inloggade användarens egna ' +
+          'filer nås — aldrig andras.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description:
+                'Filens namn (tolerant mot felstavning, understreck och ' +
+                'filändelse). Lämna tomt för att lista alla filer.'
+            },
+            file_id: {
+              type: 'string',
+              description:
+                'Exakt fil-id (från en tidigare listning) — läser hela den ' +
+                'filen. Vinner över `query` om båda anges.'
+            },
+            offset: {
+              type: 'integer',
+              description:
+                'Teckenoffset för långa filer — fortsätt läsa från denna ' +
+                'position (default 0). Använd `next_offset` från föregående svar.',
+              minimum: 0
+            }
+          }
         }
       }
     });
@@ -1785,9 +1830,12 @@ export function buildChatTools(
       function: {
         name: 'create_goal',
         description:
-          'Lägger till ett verksamhetsmål i årets verksamhetsplan (/mal, § 42) under ' +
-          'ett av Movexums fem fokusområden, med ägande team. Indikatorer med måltal ' +
-          'läggs till med add_goal_indicator (måltalet sätter en människa). ' +
+          'Lägger till ett mål i årets verksamhetsplan (/mal, § 42) under ett av ' +
+          'Movexums fem fokusområden, med ägande team. kind=overall = ÖVERGRIPANDE ' +
+          'mål (organisation/team, kräver admin/incubator_lead); kind=personal = ' +
+          'användarens EGET personliga mål (målet blir alltid den inloggades — du ' +
+          'kan inte sätta personliga mål åt andra). Indikatorer med måltal läggs ' +
+          'till med add_goal_indicator (måltalet sätter en människa). ' +
           'Verksamhetsåret måste finnas (skapas av ledningen i /mal). Skriv aldrig ' +
           'personnamn i mål eller beskrivning.',
         parameters: {
@@ -1797,7 +1845,8 @@ export function buildChatTools(
             focus_area: { type: 'string', enum: [...GOAL_FOCUS_AREAS], description: 'Fokusområde.' },
             title: { type: 'string', description: 'Målet (max 200 tecken), t.ex. "Konvertering 50 % från ink till acc inom 8 månader".' },
             description: { type: 'string', description: 'Valfri beskrivning (max 2000, inga personuppgifter).' },
-            owner_team: { type: 'string', enum: [...GOAL_OWNER_TEAMS], description: 'Ägande team (default gemensamt).' }
+            owner_team: { type: 'string', enum: [...GOAL_OWNER_TEAMS], description: 'Ägande team (default gemensamt).' },
+            kind: { type: 'string', enum: [...GOAL_KINDS], description: 'overall = övergripande (default), personal = mitt personliga mål.' }
           },
           required: ['focus_area', 'title']
         }
@@ -2223,6 +2272,11 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       };
     case 'search_my_files':
       return { tool: name, label: 'Söker i dina filer' };
+    case 'read_my_file':
+      return {
+        tool: name,
+        label: args.query || args.file_id ? 'Läser en av dina filer' : 'Bläddrar i dina filer'
+      };
     case 'web_search':
       // Etiketten är medvetet utan sökfrågan (steg-etiketter är PII-fria, § 17.8).
       return { tool: name, label: 'Söker på internet' };
@@ -3152,11 +3206,39 @@ async function runSearchMyFiles(
   logKnowledgeUsage(ctx, result.usage);
 
   if (result.hits.length === 0) {
+    // Innehållssökningen gav inget — men frågan kan vara ett FILNAMN
+    // ("Idebeskrivning_Movexum_NY.pptx"), och filen kan ligga i Filer utan
+    // text (ej indexerad, eller ett format utan textextraktion). Matcha på
+    // namn i ägarens katalog så modellen aldrig säger "hittade inte" om en fil
+    // som tydligt finns (incident 2026-09).
+    const catalog = await listOwnedFileCatalog(ctx, topic);
+    const byName = rankCandidates(query, catalog, userFileSearchTexts, {
+      limit: 5,
+      threshold: SEARCH_THRESHOLD
+    });
+    if (byName.length > 0) {
+      return {
+        ok: true,
+        data: {
+          matched: 0,
+          files_matching_name: byName.map((r) => ({ ...userFileCatalogEntry(r.item), score: r.score })),
+          note:
+            'Inget textstycke matchade, men filer med MATCHANDE NAMN finns i din ' +
+            'Filer-yta (ovan). Läs en av dem med read_my_file (file_id) — svaret ' +
+            'anger om filen har text (`has_text`); saknar den text: säg det, och ' +
+            'föreslå "Gör sökbara i chatten" på /filer eller ett textbaserat format.'
+        }
+      };
+    }
     return {
       ok: true,
       data: {
         matched: 0,
-        note: 'Inget relevant hittades bland dina uppladdade filer. Filen kan vara ej indexerad än (kör "Gör sökbara i chatten" på /filer) eller så saknas materialet.'
+        total_files: catalog.length,
+        note:
+          'Inget relevant hittades bland dina uppladdade filer, och ingen fil ' +
+          'matchade på namn. Lista filerna med read_my_file (tom query) innan du ' +
+          'säger att materialet saknas.'
       }
     };
   }
@@ -3170,6 +3252,214 @@ async function runSearchMyFiles(
       material: renderKnowledgeHits(result.hits)
     }
   };
+}
+
+// read_my_file — listar/läser HELA filer i ägarens Filer-yta (§ 27).
+const USER_FILES_COLLECTION = 'user_files';
+const MAX_USER_FILE_LIST = 100;
+
+interface UserFileRow {
+  id: string;
+  filename?: string;
+  doc_kind?: string;
+  mime?: string;
+  topic?: string;
+  startup?: string;
+  indexed?: boolean;
+  chunk_count?: number;
+  extracted_text?: string;
+  created?: string;
+  expand?: { startup?: { name?: string } };
+}
+
+/** Texter som filnamnsmatchningen rankar mot (filnamn + ev. kopplat bolag). */
+function userFileSearchTexts(f: UserFileRow): string[] {
+  const texts = [String(f.filename ?? '')];
+  const company = f.expand?.startup?.name;
+  if (company) texts.push(`${company} ${f.filename ?? ''}`);
+  return texts;
+}
+
+/** Kompakt katalog-rad (utan tung extracted_text) för listnings-läget. */
+function userFileCatalogEntry(f: UserFileRow): Record<string, unknown> {
+  return {
+    file_id: String(f.id),
+    filename: String(f.filename || 'Namnlös fil'),
+    doc_kind: f.doc_kind || null,
+    topic: f.topic || null,
+    company: f.expand?.startup?.name || null,
+    // Sökbar i search_my_files (chunkar + embeddings). En fil kan ha
+    // extraherad text utan att vara indexerad (embedding-miss) — läsvägen
+    // (`read_my_file` med file_id) avgör därför `has_text` på den faktiska
+    // texten, inte på flaggan här.
+    indexed: Boolean(f.indexed),
+    created: f.created || null
+  };
+}
+
+/**
+ * Ägarens filkatalog (owner + tenant i filtret, oavsett pb-typ). Utan
+ * `extracted_text` (tung). Fail-soft: tom lista vid läsfel. Sorterad nyast
+ * först när schemat har `created`; annars osorterad (§ 26.4-precedensen).
+ */
+async function listOwnedFileCatalog(ctx: ToolDispatchContext, topic?: string): Promise<UserFileRow[]> {
+  if (!ctx.actor?.id) return [];
+  const parts = [`owner = "${escFilter(ctx.actor.id)}"`, `tenant = "${escFilter(ctx.tenantId)}"`];
+  if (topic) parts.push(`topic = "${escFilter(topic)}"`);
+  const filter = parts.join(' && ');
+  const params = {
+    filter,
+    fields: 'id,filename,doc_kind,mime,topic,startup,indexed,chunk_count,created,expand.startup.name',
+    expand: 'startup'
+  };
+  try {
+    const res = await ctx.pb
+      .collection(USER_FILES_COLLECTION)
+      .getList<UserFileRow>(1, MAX_USER_FILE_LIST, { ...params, sort: '-created' })
+      .catch(() => ctx.pb.collection(USER_FILES_COLLECTION).getList<UserFileRow>(1, MAX_USER_FILE_LIST, params));
+    return res.items;
+  } catch {
+    return [];
+  }
+}
+
+/** Returnerar (ett sid-fönster av) EN fils hela text till modellen. */
+function renderUserFileSlice(doc: UserFileRow, offset: number): ToolResult {
+  const text = String(doc.extracted_text ?? '');
+  const entry = userFileCatalogEntry(doc);
+  if (!text) {
+    return {
+      ok: true,
+      data: {
+        ...entry,
+        has_text: false,
+        note:
+          'Filen FINNS i användarens Filer-yta men saknar extraherad text. Orsak: ' +
+          'antingen är den inte indexerad än (be användaren köra "Gör sökbara i ' +
+          'chatten" på /filer) eller så har formatet inget textlager (bild, ' +
+          'skannad PDF). Säg detta rakt ut — påstå aldrig att filen saknas.'
+      }
+    };
+  }
+  const slice = text.slice(offset, offset + MAX_DOC_CHARS);
+  const truncated = offset + MAX_DOC_CHARS < text.length;
+  return {
+    ok: true,
+    data: {
+      ...entry,
+      has_text: true,
+      char_count: text.length,
+      offset,
+      returned_chars: slice.length,
+      truncated,
+      ...(truncated ? { next_offset: offset + MAX_DOC_CHARS } : {}),
+      content: slice,
+      ...(truncated
+        ? { note: 'Filen är längre — fortsätt med samma verktyg och offset=next_offset.' }
+        : {})
+    }
+  };
+}
+
+/**
+ * Listar ägarens Filer-yta eller läser HELA innehållet i EN namngiven fil
+ * (user_files, § 27). Spegel av `read_knowledge_document` för personliga filer:
+ * `search_my_files` är fragment-RAG och matchar aldrig på filnamn, så en fil
+ * som tydligt ligger i Filer kunde "inte hittas" (incident 2026-09). Strikt
+ * ägaren-bara: owner + tenant enforce:as i varje filter; bara agent-actor
+ * (interaktiv chatt) når hit. Läser den redan personnummer-sanerade
+ * `extracted_text` — ingen ny dataväg utöver det `search_my_files` exponerar.
+ */
+async function runReadMyFile(args: Record<string, unknown>, ctx: ToolDispatchContext): Promise<ToolResult> {
+  if (!ctx.actor || ctx.actor.kind !== 'agent' || !ctx.actor.id) {
+    return { ok: false, error: 'Personliga filer kan bara läsas i en inloggad användares egen chatt.' };
+  }
+  const query = typeof args.query === 'string' ? args.query.trim() : '';
+  const fileId = typeof args.file_id === 'string' ? args.file_id.trim() : '';
+  let offset = 0;
+  if (typeof args.offset === 'number' && Number.isFinite(args.offset)) {
+    offset = Math.max(0, Math.floor(args.offset));
+  }
+
+  const ownerClause =
+    `owner = "${escFilter(ctx.actor.id)}" && tenant = "${escFilter(ctx.tenantId)}"`;
+  const docFields =
+    'id,filename,doc_kind,mime,topic,startup,indexed,chunk_count,created,extracted_text,expand.startup.name';
+
+  const readById = (id: string): Promise<UserFileRow | null> =>
+    ctx.pb
+      .collection(USER_FILES_COLLECTION)
+      .getFirstListItem<UserFileRow>(`id = "${escFilter(id)}" && ${ownerClause}`, {
+        fields: docFields,
+        expand: 'startup'
+      })
+      .catch(() => null);
+
+  try {
+    // 1) Exakt fil via id — owner/tenant enforce:as i filtret.
+    if (fileId) {
+      const doc = await readById(fileId);
+      if (!doc) {
+        return { ok: false, error: `Ingen fil med id '${fileId}' i dina filer. Lista först utan query.` };
+      }
+      return renderUserFileSlice(doc, offset);
+    }
+
+    // 2) Katalogen (ägaren-bara).
+    const files = await listOwnedFileCatalog(ctx);
+    if (files.length === 0) {
+      return { ok: true, data: { matched: 0, note: 'Din Filer-yta är tom — inga filer uppladdade ännu.' } };
+    }
+
+    // 3) Ingen query → katalogen så modellen ser vad som finns.
+    if (!query) {
+      return {
+        ok: true,
+        data: {
+          total: files.length,
+          files: files.map(userFileCatalogEntry),
+          note: 'Ange `query` (filnamn) eller `file_id` för att läsa hela innehållet.'
+        }
+      };
+    }
+
+    // 4) Fuzzy-matcha på filnamn (tolerant mot felstavning/understreck/ändelse).
+    const ranked = rankCandidates(query, files, userFileSearchTexts, {
+      limit: 5,
+      threshold: SEARCH_THRESHOLD
+    });
+    if (ranked.length === 0) {
+      return {
+        ok: true,
+        data: {
+          matched: 0,
+          files: files.map(userFileCatalogEntry),
+          note:
+            'Inget filnamn matchade. Här är filerna i din Filer-yta — välj en via ' +
+            '`file_id`, eller använd search_my_files för att söka i innehållet.'
+        }
+      };
+    }
+
+    // 5) Tvetydigt (två nära toppträffar) → be modellen välja via id.
+    if (ranked.length > 1 && ranked[1].score >= ranked[0].score - 0.1) {
+      return {
+        ok: true,
+        data: {
+          ambiguous: true,
+          candidates: ranked.map((r) => ({ ...userFileCatalogEntry(r.item), score: r.score })),
+          note: 'Flera filer matchar namnet — läs den avsedda via `file_id`.'
+        }
+      };
+    }
+
+    // 6) Entydig träff → läs hela filen (med tung extracted_text).
+    const doc = await readById(String(ranked[0].item.id));
+    if (!doc) return { ok: false, error: 'Filen kunde inte läsas (kan ha raderats).' };
+    return renderUserFileSlice(doc, offset);
+  } catch (err) {
+    return { ok: false, error: pbErrorMessage(err, 'Kunde inte läsa filen.') };
+  }
 }
 
 export async function dispatchToolCall(
@@ -3218,6 +3508,8 @@ export async function dispatchToolCall(
       return runReadKnowledgeDocument(args, ctx);
     case 'search_my_files':
       return runSearchMyFiles(args, ctx);
+    case 'read_my_file':
+      return runReadMyFile(args, ctx);
     case 'web_search':
       return runWebSearchTool(args, ctx);
     case 'update_startup_field':
@@ -4878,7 +5170,8 @@ async function runCreateGoal(args: Record<string, unknown>, ctx: ToolDispatchCon
     focus_area: argStr(args, 'focus_area'),
     title: argStr(args, 'title'),
     description: argStr(args, 'description') || null,
-    owner_team: argStr(args, 'owner_team') || undefined
+    owner_team: argStr(args, 'owner_team') || undefined,
+    kind: argStr(args, 'kind') || undefined
   });
   if (!result.ok) return { ok: false, error: result.error };
   return {
@@ -4886,6 +5179,7 @@ async function runCreateGoal(args: Record<string, unknown>, ctx: ToolDispatchCon
     data: {
       goal_id: result.value.id,
       title: result.value.title,
+      kind: result.value.kind === 'personal' ? 'personal' : 'overall',
       year: period.year,
       path: goalsPath(period.year, result.value.id),
       note: 'Målet är tillagt. Lägg till indikatorer med add_goal_indicator; måltal sätter ledningen i /mal.',

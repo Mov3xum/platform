@@ -1,14 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import type { CompassModule, CompassQuestion, NextModuleLink } from '@/lib/compass/types';
+import type { CompassQuestion, NextModuleLink } from '@/lib/compass/types';
+import type { PublicCompassModule } from '@/lib/compass/public';
 import { CompassChat } from './CompassChat';
 import { ModuleWizard } from './ModuleWizard';
 import { ModuleQuiz } from './ModuleQuiz';
 import { NextModuleCta } from './NextModuleCta';
 
 interface Props {
-  module: CompassModule;
+  module: PublicCompassModule;
   questions: CompassQuestion[];
   /** Tenantens namn — visas i det nedladdningsbara resultatet. */
   brandName?: string;

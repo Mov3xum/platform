@@ -3850,6 +3850,9 @@ await ensureCollection({
     { name: 'title', type: 'text', required: true, min: 1, max: 200 },
     { name: 'description', type: 'text', required: false, max: 2000 },
     { name: 'owner_team', type: 'select', required: true, maxSelect: 1, values: ['ledning', 'marknad', 'projekt', 'coach', 'gemensamt'] },
+    // Migration 1700000161: övergripande vs personligt mål + ägare.
+    { name: 'kind', type: 'select', required: false, maxSelect: 1, values: ['overall', 'personal'] },
+    { name: 'owner_user', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'sort_order', type: 'number', required: false, onlyInt: true, min: 0, max: 100000 },
     { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],
@@ -3860,8 +3863,9 @@ await ensureCollection({
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
   createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+  // Ledningen ELLER ägaren av ett personligt mål (skalär `=` mot single-relation, § 21.3).
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || @request.auth.id = owner_user)`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || @request.auth.id = owner_user)`
 });
 await ensureCollection({
   id: 'goal_indicators_collection',
@@ -4357,6 +4361,12 @@ for (const name of ['capital_rounds', 'de_minimis_stod']) {
 // defen ovan bär redan fälten, men ensureCollection synkar inte select-värden
 // på en befintlig collection. Hela listan (patchCollection ERSÄTTER values).
 await patchCollection('goal_indicators', [], { source: { values: ['computed', 'manual', 'survey'] } });
+// Migration 1700000161: goals.kind (övergripande/personligt) + owner_user —
+// ensureCollection lägger bara till fält på en NY collection.
+await patchCollection('goals', [
+  { name: 'kind', type: 'select', required: false, maxSelect: 1, values: ['overall', 'personal'] },
+  { name: 'owner_user', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+]);
 // Migration 1700000152: tasks.link_kind += 'procurement' + relationer +
 // rule_key (idempotensnyckel för regelgenererade uppföljningar). Union över
 // hela values-listan (patchCollection ERSÄTTER values) — därför bär listan

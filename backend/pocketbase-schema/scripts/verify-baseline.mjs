@@ -907,6 +907,9 @@ const REQUIRED_APP_FIELDS = [
   // 1700000160): utan flaggorna sparas "okänt" som 0 och en enkätindikator tappar sin källa.
   { collection: 'goal_indicators', fields: ['has_target', 'survey_module'] },
   { collection: 'goal_status_entries', fields: ['has_value'] },
+  // Måltyp + ägare (migration 1700000161): utan fälten "sparas" ett personligt
+  // mål tyst som övergripande utan ägare.
+  { collection: 'goals', fields: ['kind', 'owner_user'] },
   // Stödcheckar (§ 46, migrationer 1700000168/170): uppföljningskort länkas via
   // tasks.support_check_application; bokföringsspåren länkar tillbaka till ansökan.
   { collection: 'tasks', fields: ['support_check_application'] },

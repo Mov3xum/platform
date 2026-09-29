@@ -5,7 +5,6 @@ export const MODULE_ICONS: Record<string, string> = {
   min_oversikt: 'home',
   mina_aktiviteter: 'flow',
   inkorg: 'inbox',
-  pagaende: 'spark',
   mal: 'target',
   arshjul: 'calendar',
   uppdrag: 'flow',

@@ -322,6 +322,33 @@ server-varianterna vinner när de är satta. `getPublicPbUrl()` väljer
 staging, inte produktionsdata). Lägg aldrig tillbaka duplicerad
 `process.env.POCKETBASE_URL`-logik i enskilda filer — använd helpern.
 
+**Diagnos av PB-adressen (`lib/pb-health.ts`, ren + enhetstestad; 2026-09).**
+`users` är PocketBases inbyggda auth-kollektion och kan inte saknas, men
+inloggningen svarade "Users-collectionen saknas — har migrationerna körts?" på
+VARJE 404 från SDK:n — även när PB-URL:en inte routades till PocketBase alls
+(Coolifys Traefik svarar "404 page not found" för en host utan router; web-
+appen svarar 404 på `/api/collections/…` om domänen pekar på den). Nu probar
+båda inloggningsvägarna `<PB-url>/api/health` vid 404/5xx/nätverksfel och
+säger vad adressen faktiskt är (`proxy_404` → lägg domänen under Domains på
+PB-resursen och redeploya, `html` → pekar på web-appen, `unreachable` →
+DNS/cert, `pocketbase` → först då kan kollektionen saknas). Web-appens
+`/api/health` (publik, undantagen i middleware) visar resolvad PB-URL +
+samma diagnos för `MOVEXUM_ENV`-miljön — kör den först vid inloggningsfel.
+Ingen PII, inga secrets (URL:en finns redan i klientbundeln). Svaret bär
+`pocketbase.resolved_via` = vilken env-nyckel som gav URL:en; `fallback:*`
+eller `NEXT_PUBLIC_POCKETBASE_URL` i produktion betyder att
+`POCKETBASE_URL_PRODUCTION` saknas/felstavad på web-appen (eller att
+`MOVEXUM_ENV` inte är `production`, då läses `_STAGING`-paret).
+**Runtime, inte build-time:** Next.js inlinar `process.env.NEXT_PUBLIC_*`
+vid bygget (även i serverbundlar), så `pb-url.ts` läser alla nycklar via
+beräknad nyckel (`readEnv`) — ett värde satt i Coolify vinner därmed alltid
+över build-defaulten i `apps/web/.env.production`. Grundorsaken 2026-09:
+staging-PB:s gamla sslip-domän avvecklades (nu `pb-staging.app.movexum.se`),
+produktions-webben resolvade inte `_PRODUCTION`-paret och föll på den
+inbakade, döda adressen. `STAGING_PB_FALLBACK` + `.env.production` pekar nu
+på den nya staging-hosten; resolutionen är ren och enhetstestad
+(`pb-url.test.ts`).
+
 ---
 
 ## 8. Snabbreferens — vanliga klassmappningar
@@ -2326,9 +2353,9 @@ När staff tilldelar en workshop eller ett utbildningsdokument kan de skriva
 **instruktioner**, bjuda in andra **Movexum-resurser** (coacher/mentorer) som
 medarbetare, och i samma steg skapa ett **möte** med de inbjudna. Inbjudna
 resurser ser tilldelningen i sina "Mina uppgifter" (personlig uppgift) och mötet i
-sin agenda. Sidan **`/pagaende`** ger hela Movexum en tenant-bred översikt över
-allt som pågår med bolagen (workshops, utbildningsdokument, öppna aktiviteter),
-grupperat per bolag.
+sin agenda. (Den tenant-breda översiktssidan "Pågående" (`/pagaende`) är
+borttagen 2026-09 — läget per bolag följs på bolagskortet och via
+`/mina-aktiviteter?startup=<id>`.)
 
 **Kritiska filer:**
 
@@ -2339,7 +2366,6 @@ grupperat per bolag.
 | `apps/web/src/lib/assignments/types.ts` | `AssignableResource` + `AssignmentCollabOptions` (server-fria typer) |
 | `apps/web/src/lib/assignments/collaboration.ts` | `listAssignableResourcesForTenant`, `createCollaboratorTasks`, `createAssignmentMeeting` (server-only) |
 | `apps/web/src/components/assignments/AssignmentCollabFields.tsx` | Delade formulärfält (instruktioner, resurs-checkboxar, möte) |
-| `apps/web/src/app/pagaende/page.tsx` | Tenant-bred "Pågående"-översikt per bolag |
 
 **Flöde.** `assignWorkshopToStartupAction` / `assignDocumentToStartupAction` tar
 ett valfritt `options`-objekt (`instructions`, `collaboratorIds`, `meeting`). För
@@ -2770,7 +2796,7 @@ kollektion som återinför läckan fälls innan deploy. Speglas i
 
 `coreModules` (`packages/shared/src/modules.ts`) exkluderar redan
 `startup_member` från `aktivitet`/`activity_feed`, `inflode`, `rapporter`,
-`partners`, `investerare`, `insights`, `pagaende`. Sidorna `redirect('/dashboard')`
+`partners`, `investerare`, `insights`. Sidorna `redirect('/dashboard')`
 när modulen saknas — guards lades till på `/investerare` och `/inflode` (saknade
 dem). Chatt-ytorna `/idag`, `/chatt`, `/filer` redirectar redan non-staff →
 en ren `startup_member` når aldrig dashboard-/tråd-chatten, så AI-chattens
@@ -2807,7 +2833,7 @@ bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
    dokument och verktyg. Medlemmen öppnar och genomför dem direkt; en
    **progressbar** visar hur stor andel som slutförts (workshops `done` +
    dokument `completed` / totalt). Staff/coach kan granska ett bolags progress
-   via `?startup=<id>` (länk från `/pagaende`).
+   via `?startup=<id>` (länk från bolagskortet).
 3. **Filer** (`/filer`) — avtal (`agreements`) kopplade till bolaget och
    dokument som blivit output av aktiviteter (utbildningsdokument), plus
    medlemmens egna genererade/uppladdade filer.
@@ -2902,6 +2928,35 @@ anonym besökare får en ren sida. Läs/skriv sker via **`getSuperuserPb()`**
 **tenant FRÅN modulen** och stämplar den tenanten på ALLA skrivningar — en tenant
 accepteras aldrig från request-bodyn. Filtervärden binds via `pb.filter()`.
 Saknas superuser-credentials degraderar sidan snällt (ingen krasch).
+
+**Superuser-klienten är cachad (2026-09, `lib/integrations/credentials.ts`).**
+`getSuperuserPb()` loggade tidigare in med lösenord vid VARJE anrop. Den
+publika sidan resolvade modulen två gånger per sidvisning (generateMetadata +
+sida) och superuser-reserven i actions/routar (§ 21.3) anropas vid varje tyst
+nekad skrivning — tiotals `_superusers`-inloggningar per minut från
+web-containerns enda IP. PocketBase 0.23 har en inbyggd rate-limit
+(Settings → Application → Rate limiting) vars standardregel `*:auth` är
+**2 anrop / 3 s per IP**; är den påslagen svarar PB 429 → `auth_failed` →
+`/m/<slug>` gav **404 direkt efter publicering** och omslagsbilden föll på
+"Kunde inte spara filen på servern" (reproducerat lokalt). Nu autentiseras
+superusern EN gång per process, token återanvänds så länge den är giltig (tak
+15 min), samtidiga anropare delar en pågående inloggning, ett 429 får ett
+enda omförsök, och `/m/[slug]` delar en resolvning per request via React
+`cache`. Loggen `[superuser] auth failed { status }` skiljer fel lösenord
+(400) från rate-limit (429) och nätverk (0). Inga nya datavägar — samma
+klient, samma RLS-bypass som förut, bara färre inloggningar.
+
+**Intern beskrivning är intern.** `compass_modules.description` ("Intern
+beskrivning" i steg 1, "Visas bara för er — inte för besökaren") renderas
+ALDRIG på `/m/<slug>` — varken som ingress eller i `<meta description>`.
+Ingressen är enbart `welcome_body` (steg 2). Tidigare föll den publika sidan
+tillbaka på `description` när `welcome_body` var tom. Dessutom skickades hela
+`compass_modules`-posten som prop till klientkomponenten `PublicModuleRunner`
+— den låg därmed i RSC-payloaden för varje anonym besökare, inklusive
+`system_prompt`, `notify_emails` (personalens e-post) och `description`. Nu
+passerar bara den **vitlistade projektionen** `toPublicModule()`
+(`PublicCompassModule` i `lib/compass/public.ts`) sidgränsen; lägg till ett
+fält där BARA om det faktiskt renderas mot kund.
 
 ### 23.3 Quiz-poängsättning
 
@@ -3694,8 +3749,10 @@ når deras egna filer, via verktyget `search_my_files`.
 | `backend/pocketbase-schema/migrations/1700000120_extend_user_files_rag.js` | `extracted_text`/`indexed`/`chunk_count` på `user_files` |
 | `backend/pocketbase-schema/migrations/1700000121_create_user_file_chunks.js` | Collection `user_file_chunks` (RAG-index, owner-only) |
 | `apps/web/src/lib/ai/rag.ts` | Delad RAG-kärna + `indexUserFile`/`searchUserFiles` |
-| `apps/web/src/lib/ai/tools.ts` | Verktyget `search_my_files` (agent-actor, owner-scopat) |
-| `apps/web/src/lib/actions/files.ts` | Extraktion + indexering vid uppladdning + `indexMyFilesAction` |
+| `apps/web/src/lib/ai/tools.ts` | Verktygen `search_my_files` (fragment-RAG + filnamns-fallback) och `read_my_file` (lista/läs HELA filer) — agent-actor, owner-scopade |
+| `apps/web/src/lib/user-files-index.server.ts` | **ENDA** extraktions-/indexeringsvägen för personliga filer (format-lista, PB-filter, `extractAndIndexUserFile`) — delad av route och action |
+| `apps/web/src/lib/actions/files.ts` | Uppladdning (server action) + `indexMyFilesAction` — anropar den delade modulen |
+| `apps/web/src/app/api/filer/route.ts` | Uppladdning/indexering via route handler (det /filer faktiskt använder) — anropar den delade modulen |
 | `apps/web/src/app/filer/FilesBrowser.tsx` | Knappen "Gör sökbara i chatten" |
 
 ### 27.2 Datamodell
@@ -3710,16 +3767,38 @@ når deras egna filer, via verktyget `search_my_files`.
 
 ### 27.3 Flöde
 
-1. Vid uppladdning (`uploadUserFileAction`) extraheras text ur PDF/Excel/text/
-   CSV/Markdown, **personnummer-saneras** och cachas i `user_files.extracted_text`,
-   chunkas + embeddas till `user_file_chunks` (best-effort, fail-soft).
-   Befintliga filer indexeras via knappen **"Gör sökbara i chatten"** på `/filer`
-   (`indexMyFilesAction`, capad 40/körning).
+1. Vid uppladdning (`/api/filer` från `/filer`, eller `uploadUserFileAction`)
+   extraheras text ur PDF/Excel/**Word/PowerPoint**/text/CSV/Markdown,
+   **personnummer-saneras** och cachas i `user_files.extracted_text`, chunkas +
+   embeddas till `user_file_chunks` (best-effort, fail-soft). Befintliga filer
+   indexeras via knappen **"Gör sökbara i chatten"** på `/filer` (capad
+   40/körning). **Incident 2026-09:** routen och server-actionen hade varsin
+   kopia av extraktionen, och routens kunde bara PDF/Excel/text — en PowerPoint
+   som laddades upp via `/filer` fick aldrig text, och "Gör sökbara" hoppade
+   dessutom över den i sitt PB-filter. Nu finns EN modul
+   (`lib/user-files-index.server.ts`) med format-listan, PB-filtret
+   (`EXTRACTABLE_USER_FILE_FILTER`, MÅSTE spegla `extractableUserFileKinds`)
+   och indexeraren; route och action anropar den. Skriv aldrig en ny
+   extraktionskopia.
 2. I chatten anropar modellen `search_my_files` → frågan embeddas, rankas mot
    **användarens egna** chunkar (owner = den inloggade) och de bästa styckena
    matas tillbaka. Faller tillbaka på `~`-nyckelordssökning över `extracted_text`.
-3. PowerPoint/Word/bilder indexeras inte (ingen textextraktion ännu) — exportera
-   till PDF. Återanvänder samma RAG-kärna som § 26 (ingen divergerande kopia).
+   **Ger innehållssökningen inget** matchas frågan mot **filnamnen** i ägarens
+   katalog (`rankCandidates`, samma fuzzy som `search_records`) och träffarna
+   returneras som `files_matching_name` — verktyget säger aldrig "hittade inte"
+   om en fil som tydligt finns.
+3. **`read_my_file`** (spegel av `read_knowledge_document`, § 26.3 p. 4): utan
+   `query`/`file_id` returneras KATALOGEN (filnamn, typ, ämne, bolag,
+   `indexed`); med `query` fuzzy-matchas filnamnet (tolerant mot felstavning,
+   understreck, filändelse — enhetstestat i `fuzzy.test.ts`); med `file_id`
+   (eller entydig namnträff) returneras hela den sanerade `extracted_text`
+   sidvis (`offset`/`next_offset`). Finns filen men saknar text svarar
+   verktyget `has_text: false` med orsak (ej indexerad / format utan textlager)
+   — modellen instrueras (`KNOWLEDGE_GUIDANCE`) att säga exakt det och ALDRIG
+   påstå att filen saknas innan den listat filerna. `search_my_files` matchar
+   aldrig på filnamn, så en fil som nämns vid namn går alltid via `read_my_file`.
+4. Bilder indexeras inte (ingen OCR). Återanvänder samma RAG-kärna som § 26
+   (ingen divergerande kopia).
 
 ### 27.4 Säkerhet och regelefterlevnad
 
@@ -3730,9 +3809,11 @@ når deras egna filer, via verktyget `search_my_files`.
   och index vid radering/erasure. Originalfilen lämnas orörd.
 - **§ 9.3 / denylist:** `user_files` + `user_file_chunks` är **denylistade i
   `lib/ai/redaction.ts`** → det generiska `query_collection` exponerar dem
-  ALDRIG. Innehållet når modellen enbart via det ägar-scopade `search_my_files`.
-- **Ägar-isolering (§ 21):** `search_my_files` exponeras BARA för agent-actor
-  (interaktiv staff-chatt/tråd) och scope:as till `ctx.actor.id` i dispatchern —
+  ALDRIG. Innehållet når modellen enbart via de ägar-scopade `search_my_files`
+  och `read_my_file` (samma redan sanerade `extracted_text` — ingen ny dataväg).
+- **Ägar-isolering (§ 21):** `search_my_files`/`read_my_file` exponeras BARA för
+  agent-actor (interaktiv staff-chatt/tråd) och scope:as till `ctx.actor.id`
+  (owner + tenant i varje filter, oavsett pb-typ) i dispatchern —
   kan aldrig läsa en annan användares filer. Saknas en inloggad agent-actor
   (autonoma körningar) returneras ett fel, inte data. PB-reglerna (owner-only) är
   den hårda gränsen; reads går via användarens auth-token.
@@ -5132,9 +5213,8 @@ service workern och manifestet är handskrivna och versionerade i repot.
   `canAccessModuleForUser` som railen** (menyn är UI-kurering, aldrig
   säkerhetsgräns — RLS/RBAC ligger kvar i § 21).
 - **Staff/observer:** Hem (`hem`, § 37) · Uppgifter (`inkorg`, § 44, med
-  olästa-badge) · **Chatt** (`idag`) · Pågående (`pagaende`) · Mer. Avstängda
-  moduler hoppas över och nästa kandidat tar platsen (bolag, uppdrag, årshjul,
-  filer …).
+  olästa-badge) · **Chatt** (`idag`) · Årshjul (`arshjul`) · Mer. Avstängda
+  moduler hoppas över och nästa kandidat tar platsen (uppdrag, events, filer …).
 - **Ren `startup_member`** (§ 22): Aktiviteter · Filer · **Översikt**
   (`min_oversikt` — chatten finns inte för medlemmar, § 21.5) · De minimis ·
   Mer. Chatten exponeras aldrig (enhetstestat).
@@ -5280,7 +5360,7 @@ roll**:
   ⇒ appen använder **allt rollen tillåter** minus ev. legacy
   `users.disabled_modules` (`resolveUserModules`), dvs. exakt vad kontot såg
   före skiftet — ett befintligt konto tappar aldrig tyst en sida som
-  sidguards/korslänkar förutsätter (t.ex. `/pagaende` → `/mina-aktiviteter`,
+  sidguards/korslänkar förutsätter (t.ex. bolagskortet → `/mina-aktiviteter`,
   § 22). `tenants.disabled_modules` lämnas orörd i schemat men **läses inte
   längre** — den globala togglingen är borttagen.
 - **Rollstandard** (`DEFAULT_MODULES_BY_ROLE` i
@@ -6006,7 +6086,14 @@ varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
 - **`goals`**: `period`, `focus_area` (`partner_finansiering` |
   `inflode_varumarke` | `kundvarde_kvalitet` | `organisation_digitalisering`
   | `tematisk_accelerator`), `title`, `description`, `owner_team` (`ledning`
-  | `marknad` | `projekt` | `coach` | `gemensamt`), `sort_order`.
+  | `marknad` | `projekt` | `coach` | `gemensamt`), `sort_order`, samt
+  **måltyp** (migration **1700000161**): `kind` (`overall` = övergripande
+  mål för organisationen/teamet, `personal` = en medarbetares eget mål;
+  saknat värde ⇒ `overall`) och `owner_user` (→ `users`, `cascadeDelete:
+  false`; bara på personliga mål). Trädet (`buildGoalTree`) delar varje
+  fokusområde i `overall`/`personal` (övergripande först); `/mal` och
+  presentationsläget visar dem som två grupper, personliga med ägarens
+  visningsnamn (aldrig e-post).
 - **`goal_indicators`**: `goal`, `label`, `source` (`computed` | `manual` |
   `survey`), `metric_key` (en `MetricKey` ur § 41 — bara `scope: 'tenant'`;
   enhet och riktning ÄRVS från definitionen så UI och register aldrig säger
@@ -6043,11 +6130,34 @@ varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
   utelämnas ur verktygssvar och audit. `shareWithThreshold` kräver dessutom
   att BÅDA grupperna är ≥ 5 (homogena grupper avslöjar varje post). DPIA:
   `docs/privacy/dpia-startups.md`.
-- **RBAC:** år, mål och indikatorer = admin/incubator_lead (VP-beslut);
-  kvartalsstatus = hela staben (varje team rapporterar sina mål). Agenten
-  ärver den inloggades roll (`writable-fields.ts`) och får **aldrig** sätta
-  `target`, `metric_key` på befintliga indikatorer, `goal_periods.status`
-  eller ett manuellt `value` — den föreslår i text, människan beslutar.
+- **RBAC:** år, övergripande mål och indikatorer = admin/incubator_lead
+  (VP-beslut); kvartalsstatus = hela staben (varje team rapporterar sina
+  mål). **Personliga mål** skapas, ändras och tas bort av **ägaren själv**
+  (all Movexum-personal) eller av ledningen, som också kan sätta personliga
+  mål åt andra och byta måltyp/ägare — `canManageGoal`/`canCreateGoalOfKind`
+  i `@platform/shared` (rena, enhetstestade) är regeln; PB:s update-/
+  deleteRule på `goals` är `ledning ELLER @request.auth.id = owner_user`
+  (skalär `=`, § 21.3). Agenten ärver den inloggades roll
+  (`writable-fields.ts`), kan skapa ett personligt mål **bara åt den
+  inloggade** (`owner_user` agent-nekad — `users` är denylistad) och får
+  **aldrig** sätta `target`, `metric_key` på befintliga indikatorer,
+  `goal_periods.status`/`year` eller ett manuellt `value` — den föreslår i
+  text, människan beslutar.
+- **Redigera & ta bort (2026-09).** Ledningen kan redigera verksamhetsårets
+  årtal/titel (`updateGoalPeriod`; årtalet är unikt per tenant → tydligt fel
+  vid krock), återöppna ett avslutat år, och **ta bort året**
+  (`deleteGoalPeriod`, PB-cascade → mål → indikatorer → status; UI:t kräver
+  att årtalet skrivs in). Mål redigeras i en skrivning (`updateGoalFields`:
+  titel/beskrivning/team/fokusområde, för ledningen även måltyp/ägare) och
+  tas bort (`deleteGoal`); indikatorer får ny etikett/måltal
+  (`updateGoalIndicator` — källa/metrik byts aldrig i efterhand, då är det
+  en ny indikator) och tas bort (`deleteGoalIndicator`). Raderingar
+  auditeras som `update` + `deleted: true` (§ 30.6-konventionen) och syns i
+  Bolagsnytt/`/aktivitet`. Schema-drift: ett personligt mål mot en instans
+  utan 1700000161 avvisas med tydligt fel (PB släpper okända fält tyst,
+  § 24.4-invarianten); `verify-baseline.mjs` asserterar `goals.kind`/
+  `owner_user` (`REQUIRED_APP_FIELDS`) och fälten speglas i
+  `setup-via-api.mjs`.
 - **RLS (§ 21.3):** list/view `STAFF_OR_OBSERVER`, createRule roll-lös,
   update/delete `:each ?=`. Alla fyra kollektionerna ligger i
   `MUST_BE_STAFF_OR_OBSERVER` i `verify-baseline.mjs` och speglas i

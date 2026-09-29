@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
+import { describeLoginInfraError, probePocketBase, probeSummary } from '@/lib/pb-health';
 import { checkRateLimit, clearFailures, recordFailure } from '@/lib/rate-limit';
 
 type PbError = {
@@ -87,16 +88,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (e.status === 403) {
       return NextResponse.json({ error: 'Kontot är ej verifierat eller saknar behörighet.' }, { status: 403 });
     }
-    if (e.status === 404) {
+    // 404 betyder INTE nödvändigtvis att `users` saknas (den är PB:s inbyggda
+    // auth-kollektion): Coolifys proxy svarar 404 för en host utan router och
+    // web-appen svarar 404 på /api/collections/… om domänen pekar fel. Proba
+    // /api/health och säg vad adressen faktiskt är (lib/pb-health.ts).
+    if (e.status === 404 || !e.status || e.status >= 500) {
+      const probe = await probePocketBase(pbUrl);
+      console.error('[api/auth/login] PocketBase probe', { pbUrl, kind: probe.kind, summary: probeSummary(probe) });
       return NextResponse.json(
-        { error: 'Users-collectionen saknas i PocketBase — har migrationerna körts?' },
-        { status: 500 }
-      );
-    }
-    if (!e.status) {
-      return NextResponse.json(
-        { error: `Kunde inte nå PocketBase (${pbUrl}). Kontrollera POCKETBASE_URL/NEXT_PUBLIC_POCKETBASE_URL.` },
-        { status: 503 }
+        { error: describeLoginInfraError(pbUrl, probe) },
+        { status: probe.kind === 'pocketbase' && e.status === 404 ? 500 : 503 }
       );
     }
     return NextResponse.json(

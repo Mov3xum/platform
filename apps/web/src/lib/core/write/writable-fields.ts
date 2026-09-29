@@ -378,13 +378,23 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
   // ALDRIG av agenten — den föreslår i text, människan beslutar.
   goal_periods: {
     status: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Verksamhetsårets status (utkast/aktiv/avslutad) ändras av en människa i /mal.' } },
-    title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } }
-  },
-  goals: {
     title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
-    description: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
-    focus_area: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
-    owner_team: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } }
+    year: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Årtalet på ett verksamhetsår ändras av en människa i /mal.' } }
+  },
+  // `goals`: rollpolicyn är hela staben eftersom PERSONLIGA mål ägs av en
+  // enskild medarbetare; skrivlagret (`canManageGoal`/`canCreateGoalOfKind`
+  // i @platform/shared) avgör att övergripande mål bara rörs av ledningen
+  // och personliga bara av ägaren eller ledningen.
+  goals: {
+    title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    focus_area: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    owner_team: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    kind: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    // Agenten kan inte slå upp användar-id:n (`users` denylistad § 9.3); ett
+    // personligt mål via chatten blir alltid den inloggades eget (skrivlagret
+    // sätter ägaren), aldrig någon annans.
+    owner_user: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Ägaren av ett personligt mål väljs av en människa i /mal — via chatten blir målet ditt eget.' } }
   },
   goal_indicators: {
     label: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
@@ -474,7 +484,8 @@ const CREATE_POLICIES: Record<
     agent: { kind: 'deny', reason: 'Ett verksamhetsår skapas av en människa i /mal.' }
   },
   goals: {
-    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    // Staben skapar personliga mål; övergripande kräver ledning (skrivlagret).
+    user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'allow' }
   },
   goal_indicators: {

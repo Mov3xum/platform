@@ -93,7 +93,15 @@ export const KNOWLEDGE_GUIDANCE =
   '- `search_my_files` söker i ANVÄNDARENS EGNA uppladdade filer (den personliga ' +
   'Filer-ytan). Använd det när användaren säger "mina filer", "dokumentet jag ' +
   'laddade upp" eller vill att du kör mot eget material — till skillnad från ' +
-  '`search_knowledge` som är hela organisationens delade kunskapsbas.';
+  '`search_knowledge` som är hela organisationens delade kunskapsbas.\n' +
+  '- `read_my_file` LISTAR användarens Filer-yta eller läser HELA en namngiven ' +
+  'fil. search_my_files matchar ALDRIG på filnamn — så när användaren nämner en ' +
+  'fil vid namn ("Idebeskrivning.pptx", "pitchdecket"), säger att den "ligger i ' +
+  'Filer", eller vill att du bygger/analyserar något utifrån hela filen: kör ' +
+  'read_my_file (matcha på namn, eller lista med tom query och läs via ' +
+  '`file_id`). Säg ALDRIG att en fil saknas förrän du listat filerna; finns ' +
+  'filen men utan text (`has_text: false`) — säg exakt det och vad användaren ' +
+  'kan göra ("Gör sökbara i chatten" på /filer, eller ett textbaserat format).';
 
 /**
  * Webbsökning (Mistral Web Search, § 9.8) — hur agenten kombinerar internet
@@ -349,7 +357,9 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   'tasks (link_kind = support_check); själva ansökningarna (insatser, utlåtanden) är ' +
   'inte läsbara för dig — hänvisa till /checkar. ' +
   'MÅL & VERKSAMHETSPLAN (§ 42, /mal): lägg till mål under ett fokusområde ' +
-  '(`create_goal`), indikatorer på ett mål (`add_goal_indicator` — computed ' +
+  '(`create_goal`; kind=overall = övergripande mål för organisationen, bara ' +
+  'ledningen; kind=personal = användarens EGET personliga mål — aldrig åt ' +
+  'någon annan), indikatorer på ett mål (`add_goal_indicator` — computed ' +
   'kopplar till ett nyckeltal som räknas ur data, manual = bedömning) och ' +
   'rapportera kvartalsstatus (`set_goal_status`: I fas/Försenad/Ej startad/' +
   'Klar med kort motivering). Måltal, verksamhetsårets status och manuella ' +

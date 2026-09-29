@@ -19,6 +19,8 @@ import {
 } from '@platform/shared';
 import { computeMetrics } from '@/lib/metrics/registry';
 import { listSurveyModules, loadSurveyAggregate } from '@/lib/compass/survey';
+import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
+import type { AssignableResource } from '@/lib/assignments/types';
 import type { CompassModule } from '@/lib/compass/types';
 
 /**
@@ -53,6 +55,8 @@ export interface GoalWorkspace {
   surveys: Record<string, SurveyIndicatorValue>;
   /** Enkätmoduler att välja i indikatorformuläret. */
   surveyModules: Pick<CompassModule, 'id' | 'name' | 'slug'>[];
+  /** Movexum-personal (id + visningsnamn, aldrig e-post) — ägare av personliga mål. */
+  people: AssignableResource[];
   /** true när kollektionerna saknas (migration 1700000159 ej körd). */
   schemaMissing: boolean;
 }
@@ -102,9 +106,10 @@ export async function loadGoalWorkspace(
     periods.find((p) => p.status === 'active') ??
     periods[0] ??
     null;
-  const surveyModules = (await listSurveyModules(pb, tenantId)).map((m) => ({ id: m.id, name: m.name, slug: m.slug }));
+  const [surveyModulesRaw, people] = await Promise.all([listSurveyModules(pb, tenantId), listAssignableResourcesForTenant(pb, tenantId)]);
+  const surveyModules = surveyModulesRaw.map((m) => ({ id: m.id, name: m.name, slug: m.slug }));
   if (!period) {
-    return { periods, period: null, tree: buildGoalTree([], [], []), metrics: {}, surveys: {}, surveyModules, schemaMissing };
+    return { periods, period: null, tree: buildGoalTree([], [], []), metrics: {}, surveys: {}, surveyModules, people, schemaMissing };
   }
 
   let goals: Goal[] = [];
@@ -161,7 +166,7 @@ export async function loadGoalWorkspace(
     })
   );
 
-  return { periods, period, tree, metrics, surveys, surveyModules, schemaMissing };
+  return { periods, period, tree, metrics, surveys, surveyModules, people, schemaMissing };
 }
 
 export { isMetricKey };

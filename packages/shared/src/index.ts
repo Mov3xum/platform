@@ -1395,7 +1395,7 @@ export interface ModuleGroup {
 }
 
 export const RAIL_GROUPS: ModuleGroup[] = [
-  { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'pagaende', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
+  { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'kunskapsbas', 'integrationer', 'installningar', 'min_profil'] }
@@ -1466,13 +1466,6 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Allt som är ditt på ett ställe — uppgifter, aktiviteter, möten, events och notiser att planera och följa upp.',
     rolesAllowed: ALL_ROLES,
     route: '/inkorg'
-  },
-  {
-    id: 'pagaende',
-    title: 'Pågående',
-    description: 'Allt som pågår med bolagen — workshops, utbildningar och aktiviteter, samlat per bolag så hela Movexum ser läget.',
-    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
-    route: '/pagaende'
   },
   {
     id: 'mal',

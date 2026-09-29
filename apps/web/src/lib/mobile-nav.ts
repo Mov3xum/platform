@@ -35,7 +35,6 @@ const MOBILE_LABELS: Record<string, string> = {
   min_oversikt: 'Mitt bolag',
   mina_aktiviteter: 'Aktiviteter',
   startups: 'Bolag',
-  pagaende: 'Pågående',
   arshjul: 'Årshjul',
   uppdrag: 'Team',
   filer: 'Filer',
@@ -48,7 +47,7 @@ const MOBILE_LABELS: Record<string, string> = {
 const STAFF = {
   center: ['idag', 'inkorg'],
   left: ['hem', 'inkorg', 'startups', 'uppdrag', 'filer', 'arshjul'],
-  right: ['pagaende', 'arshjul', 'uppdrag', 'events', 'filer', 'education']
+  right: ['arshjul', 'uppdrag', 'events', 'filer', 'education']
 };
 
 const MEMBER = {

@@ -2,7 +2,12 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import {
+  GOAL_LEAD_ROLES,
+  GOAL_STAFF_ROLES,
   INDICATOR_SOURCE_READ_ROLES,
+  canCreateGoalOfKind,
+  canManageGoal,
+  goalKindOf,
   isAggregateOnlyIndicator,
   isGoalPeriodStatus,
   isSurveyModule,
@@ -10,6 +15,7 @@ import {
   stockholmDateKey,
   validateGoalIndicatorInput,
   validateGoalInput,
+  validateGoalPeriodInput,
   validateGoalStatusInput,
   yearPeriod,
   type Goal,
@@ -52,6 +58,16 @@ import { fail, ok } from './types';
  *  - En statusuppdatering rör bara de fält som faktiskt angetts: ett
  *    manuellt värde eller en kommentar raderas inte av ett anrop som bara
  *    byter status (SOC 2 processing integrity).
+ *  - Måltyp (migration 1700000161): ÖVERGRIPANDE mål sätts/ändras/tas bort
+ *    av ledningen; ett PERSONLIGT mål ägs av en medarbetare (`owner_user`)
+ *    som själv får skapa, ändra och ta bort det (ledningen får alltid).
+ *    Agenten kan bara skapa personliga mål åt den inloggade — aldrig åt
+ *    någon annan (`owner_user` agent-nekad). `canManageGoal`/
+ *    `canCreateGoalOfKind` i @platform/shared är regeln; PB-reglerna
+ *    (ledning ELLER ägare) är försvaret på djupet.
+ *  - Radering: verksamhetsår (cascade → mål → indikatorer → status), mål och
+ *    indikatorer tas bort av ledningen (personligt mål även av ägaren).
+ *    Auditeras som `update` + `deleted: true` (§ 30.6-konventionen).
  *
  * PB-target är kollektionens NAMN (§ 30.4 p. 1). Ingen PII: mål, tal,
  * teamnamn; fritext personnummer-saneras (§ 15.6) och auditeras bara som
@@ -94,9 +110,10 @@ export async function createGoalPeriod(
 ): Promise<WriteResult<GoalPeriod>> {
   const gate = canCreateRecord(actor, GOAL_PERIODS);
   if (!gate.ok) return fail('FORBIDDEN', gate.reason ?? 'Saknar behörighet.');
-  const year = Number(input.year);
-  if (!Number.isInteger(year) || year < 2000 || year > 2100) return fail('INVALID_VALUE', 'Året måste vara 2000–2100.');
-  const title = sanitizePersonnummer(String(input.title ?? '').trim().slice(0, 120)) || `Verksamhetsplan ${year}`;
+  const v = validateGoalPeriodInput(input);
+  if (!v.ok) return fail('INVALID_VALUE', v.error);
+  const year = v.value.year;
+  const title = v.value.title ? sanitizePersonnummer(v.value.title) : `Verksamhetsplan ${year}`;
   try {
     const row = await writeWithFallback(pb, (c) =>
       c.collection(GOAL_PERIODS).create<GoalPeriod>({
@@ -151,6 +168,101 @@ export async function setGoalPeriodStatus(
   }
 }
 
+/**
+ * Redigera verksamhetsårets år och/eller titel. Året är unikt per tenant
+ * (unikt index) — en krock rapporteras tydligt. Ett avslutat år kan också
+ * redigeras (rubriken/årtalet är metadata, inte målens innehåll).
+ */
+export async function updateGoalPeriod(
+  pb: PocketBase,
+  actor: Actor,
+  periodId: string,
+  input: { year?: unknown; title?: unknown }
+): Promise<WriteResult<GoalPeriod>> {
+  const gate = canWriteField(actor, GOAL_PERIODS, 'title');
+  if (!gate.ok) return fail('FORBIDDEN', gate.reason ?? 'Saknar behörighet.');
+  const period = await getRecordInTenant<GoalPeriod>(pb, actor, GOAL_PERIODS, periodId, 'id,tenant,year,title,status');
+  if (!period) return fail('NOT_FOUND', 'Verksamhetsåret hittades inte.');
+  const yearChanged = input.year !== undefined && input.year !== null && input.year !== '';
+  if (yearChanged) {
+    const y = canWriteField(actor, GOAL_PERIODS, 'year');
+    if (!y.ok) return fail('FIELD_NOT_WRITABLE', y.reason ?? 'Årtalet ändras av ledningen.');
+  }
+  const v = validateGoalPeriodInput({
+    year: yearChanged ? input.year : period.year,
+    title: input.title === undefined ? (period.title ?? '') : input.title
+  });
+  if (!v.ok) return fail('INVALID_VALUE', v.error);
+  const payload: Record<string, unknown> = {
+    year: v.value.year,
+    title: v.value.title ? sanitizePersonnummer(v.value.title) : `Verksamhetsplan ${v.value.year}`
+  };
+  if (payload.year === period.year && payload.title === (period.title ?? '')) return ok(period);
+  try {
+    const row = await writeWithFallback(pb, (c) => c.collection(GOAL_PERIODS).update<GoalPeriod>(periodId, payload));
+    await logAgentAction(pb, {
+      actor,
+      action_type: 'update',
+      collection: GOAL_PERIODS,
+      record_id: periodId,
+      field: payload.year !== period.year ? 'year' : 'title',
+      before_value: { year: period.year, title: period.title ?? null },
+      after_value: { year: row.year, title: row.title ?? null, status: row.status }
+    });
+    return ok(row);
+  } catch (err) {
+    if ((err as { status?: number }).status === 400 && payload.year !== period.year) {
+      return fail('INVALID_VALUE', `Det finns redan ett verksamhetsår för ${v.value.year}.`);
+    }
+    return fail('DB_ERROR', pbError(err, 'Kunde inte spara verksamhetsåret.'));
+  }
+}
+
+/**
+ * Tar bort ett verksamhetsår MED alla dess mål, indikatorer och kvartals-
+ * statusar (PB cascade). Oåterkalleligt — UI:t kräver att årtalet skrivs in
+ * som bekräftelse. Bara ledningen (`goal_periods` update-policy).
+ */
+export async function deleteGoalPeriod(
+  pb: PocketBase,
+  actor: Actor,
+  periodId: string,
+  opts: { confirmYear?: unknown } = {}
+): Promise<WriteResult<{ id: string; year: number; goals: number }>> {
+  const gate = canWriteField(actor, GOAL_PERIODS, 'status');
+  if (!gate.ok) return fail('FORBIDDEN', gate.reason ?? 'Saknar behörighet.');
+  const period = await getRecordInTenant<GoalPeriod>(pb, actor, GOAL_PERIODS, periodId, 'id,tenant,year,title,status');
+  if (!period) return fail('NOT_FOUND', 'Verksamhetsåret hittades inte.');
+  // Bekräftelsen prövas server-side också — klienten är aldrig gränsen.
+  if (opts.confirmYear !== undefined && String(opts.confirmYear).trim() !== String(period.year)) {
+    return fail('INVALID_VALUE', `Skriv ${period.year} för att bekräfta borttagningen.`);
+  }
+  let goalCount = 0;
+  try {
+    const res = await pb.collection(GOALS).getList(1, 1, {
+      filter: pb.filter('tenant = {:t} && period = {:p}', { t: actor.tenant, p: period.id }),
+      fields: 'id'
+    });
+    goalCount = res.totalItems;
+  } catch {
+    goalCount = 0;
+  }
+  try {
+    await writeWithFallback(pb, (c) => c.collection(GOAL_PERIODS).delete(periodId), { fallbackOn404: true });
+    await logAgentAction(pb, {
+      actor,
+      action_type: 'update',
+      collection: GOAL_PERIODS,
+      record_id: periodId,
+      before_value: { year: period.year, title: period.title ?? null, goals: goalCount },
+      after_value: { deleted: true, year: period.year, title: period.title ?? null, goals: goalCount }
+    });
+    return ok({ id: periodId, year: period.year, goals: goalCount });
+  } catch (err) {
+    return fail('DB_ERROR', pbError(err, 'Kunde inte ta bort verksamhetsåret.'));
+  }
+}
+
 async function loadOpenPeriod(
   pb: PocketBase,
   actor: Actor,
@@ -166,15 +278,59 @@ async function loadOpenPeriod(
 
 // ── Mål ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Ägaren av ett personligt mål måste vara Movexum-personal i actorns tenant
+ * (defense-in-depth; klienten är aldrig säkerhetsgränsen).
+ */
+async function assertGoalOwnerInTenant(pb: PocketBase, actor: Actor, userId: string): Promise<WriteResult<string>> {
+  if (userId === actor.id) return ok(userId);
+  const row = await getRecordInTenant<{ id: string; tenant?: string; roles?: string[] }>(pb, actor, 'users', userId, 'id,tenant,roles');
+  if (!row) return fail('NOT_FOUND', 'Ägaren av det personliga målet hittades inte i organisationen.');
+  const roles = Array.isArray(row.roles) ? row.roles : [];
+  if (!roles.some((r) => GOAL_STAFF_ROLES.includes(r))) {
+    return fail('INVALID_VALUE', 'Ägaren av ett personligt mål måste vara Movexum-personal.');
+  }
+  return ok(row.id);
+}
+
 export async function createGoal(
   pb: PocketBase,
   actor: Actor,
-  input: { period: string; focus_area: unknown; title: unknown; description?: unknown; owner_team?: unknown }
+  input: {
+    period: string;
+    focus_area: unknown;
+    title: unknown;
+    description?: unknown;
+    owner_team?: unknown;
+    /** `overall` (default) eller `personal`. */
+    kind?: unknown;
+    /** Bara personliga mål. Agenten får inte ange någon — målet blir den inloggades. */
+    owner_user?: unknown;
+  }
 ): Promise<WriteResult<Goal>> {
   const gate = canCreateRecord(actor, GOALS);
   if (!gate.ok) return fail('FORBIDDEN', gate.reason ?? 'Saknar behörighet.');
-  const v = validateGoalInput(input);
+  const kindRaw = input.kind === undefined || input.kind === null || input.kind === '' ? 'overall' : input.kind;
+  let ownerRaw: unknown = input.owner_user;
+  if (kindRaw === 'personal') {
+    if (actor.kind === 'agent') {
+      if (ownerRaw && ownerRaw !== actor.id) {
+        const o = canWriteField(actor, GOALS, 'owner_user');
+        if (!o.ok) return fail('FIELD_NOT_WRITABLE', o.reason ?? 'Ägaren väljs av en människa.');
+      }
+      ownerRaw = actor.id;
+    } else if (!ownerRaw) {
+      ownerRaw = actor.id;
+    }
+  }
+  const v = validateGoalInput({ ...input, kind: kindRaw, owner_user: ownerRaw });
   if (!v.ok) return fail('INVALID_VALUE', v.error);
+  const allowed = canCreateGoalOfKind(v.value, actor);
+  if (!allowed.ok) return fail('FORBIDDEN', allowed.error);
+  if (v.value.owner_user) {
+    const owner = await assertGoalOwnerInTenant(pb, actor, v.value.owner_user);
+    if (!owner.ok) return owner as WriteResult<Goal>;
+  }
   const period = await loadOpenPeriod(pb, actor, input.period);
   if ('error' in period) return period.error;
 
@@ -199,6 +355,8 @@ export async function createGoal(
         title: sanitizePersonnummer(v.value.title),
         description: v.value.description ? sanitizePersonnummer(v.value.description) : '',
         owner_team: v.value.owner_team,
+        kind: v.value.kind,
+        owner_user: v.value.owner_user ?? '',
         sort_order: sortOrder,
         created_by: actor.id
       })
@@ -212,18 +370,137 @@ export async function createGoal(
         title: row.title,
         focus_area: v.value.focus_area,
         owner_team: v.value.owner_team,
+        kind: v.value.kind,
+        // Intern användarrelation (aldrig namn/e-post i loggen).
+        owner_user: v.value.owner_user ?? undefined,
         year: period.year,
         description: v.value.description ? { length: v.value.description.length } : null
       }
     });
+    // Schema-drift (§ 24.4-invarianten): PB släpper okända fält tyst.
+    if (v.value.kind === 'personal' && goalKindOf(row) !== 'personal') {
+      return fail(
+        'DB_ERROR',
+        'Målet sparades, men instansen saknar fälten för personliga mål (migration 1700000161) — det blev ett övergripande mål. Kör migrationen och försök igen.'
+      );
+    }
     return ok(row);
   } catch (err) {
     return fail('DB_ERROR', pbError(err, 'Kunde inte skapa målet.'));
   }
 }
 
-export type GoalWritableField = 'title' | 'description' | 'owner_team' | 'focus_area';
+export type GoalWritableField = 'title' | 'description' | 'owner_team' | 'focus_area' | 'kind' | 'owner_user';
+const GOAL_FIELDS: readonly GoalWritableField[] = ['title', 'description', 'owner_team', 'focus_area', 'kind', 'owner_user'];
+const GOAL_READ_FIELDS = 'id,tenant,period,focus_area,title,description,owner_team,kind,owner_user';
 
+async function loadManageableGoal(
+  pb: PocketBase,
+  actor: Actor,
+  goalId: string
+): Promise<{ goal: Goal; period: GoalPeriod } | { error: WriteResult<never> }> {
+  const goal = await getRecordInTenant<Goal>(pb, actor, GOALS, goalId, GOAL_READ_FIELDS);
+  if (!goal) return { error: fail('NOT_FOUND', 'Målet hittades inte.') };
+  if (!canManageGoal(goal, actor)) {
+    return {
+      error: fail(
+        'FORBIDDEN',
+        goalKindOf(goal) === 'personal'
+          ? 'Bara ägaren av det personliga målet eller ledningen kan ändra det.'
+          : 'Övergripande mål ändras av admin/incubator_lead.'
+      )
+    };
+  }
+  const period = await loadOpenPeriod(pb, actor, goal.period);
+  if ('error' in period) return period;
+  return { goal, period };
+}
+
+/**
+ * Uppdaterar ett eller flera fält på ett mål i EN skrivning; hela det
+ * sammanslagna målet valideras (t.ex. byte till personligt kräver ägare).
+ * Övergripande mål: ledningen. Personligt mål: ägaren eller ledningen. Byte av
+ * måltyp/ägare kräver ledning (ett personligt mål kan inte "befordras" av
+ * ägaren själv).
+ */
+export async function updateGoalFields(
+  pb: PocketBase,
+  actor: Actor,
+  goalId: string,
+  patch: Partial<Record<GoalWritableField, unknown>>
+): Promise<WriteResult<Goal>> {
+  const fields = GOAL_FIELDS.filter((f) => patch[f] !== undefined);
+  if (fields.length === 0) return fail('INVALID_VALUE', 'Inget att ändra.');
+  for (const field of fields) {
+    const gate = canWriteField(actor, GOALS, field);
+    if (!gate.ok) return fail('FIELD_NOT_WRITABLE', gate.reason ?? 'Fältet är inte skrivbart.');
+  }
+  const loaded = await loadManageableGoal(pb, actor, goalId);
+  if ('error' in loaded) return loaded.error;
+  const { goal, period } = loaded;
+  const lead = actor.roles.some((r) => GOAL_LEAD_ROLES.includes(r));
+
+  const merged: Record<string, unknown> = { ...goal, kind: goalKindOf(goal) };
+  for (const field of fields) merged[field] = patch[field];
+  // Byte till personligt utan angiven ägare ⇒ den som ändrar (ledningen kan peka ut någon annan).
+  if (merged.kind === 'personal' && !merged.owner_user) merged.owner_user = actor.id;
+  const v = validateGoalInput(merged);
+  if (!v.ok) return fail('INVALID_VALUE', v.error);
+
+  const kindChanged = v.value.kind !== goalKindOf(goal);
+  const ownerChanged = (v.value.owner_user ?? null) !== (goal.owner_user || null);
+  if ((kindChanged || ownerChanged) && !lead) {
+    return fail('FORBIDDEN', 'Måltyp och ägare ändras av admin/incubator_lead.');
+  }
+  if (v.value.kind === 'overall' && !lead) {
+    return fail('FORBIDDEN', 'Övergripande mål ändras av admin/incubator_lead.');
+  }
+  if (ownerChanged && v.value.owner_user) {
+    const owner = await assertGoalOwnerInTenant(pb, actor, v.value.owner_user);
+    if (!owner.ok) return owner as WriteResult<Goal>;
+  }
+
+  const payload: Record<string, unknown> = {};
+  const before: Record<string, unknown> = {};
+  const after: Record<string, unknown> = { title: v.value.title };
+  const put = (field: GoalWritableField, next: unknown, prev: unknown) => {
+    if (next === prev) return;
+    payload[field] = next;
+    before[field] = field === 'description' ? { length: String(prev ?? '').length } : prev;
+    after[field] = field === 'description' ? { length: String(next ?? '').length } : next;
+  };
+  put('title', sanitizePersonnummer(v.value.title), goal.title);
+  put('description', v.value.description ? sanitizePersonnummer(v.value.description) : '', goal.description ?? '');
+  put('owner_team', v.value.owner_team, goal.owner_team);
+  put('focus_area', v.value.focus_area, goal.focus_area);
+  put('kind', v.value.kind, goalKindOf(goal));
+  put('owner_user', v.value.owner_user ?? '', goal.owner_user ?? '');
+  if (Object.keys(payload).length === 0) return ok(goal);
+
+  try {
+    // 404-fallback: PB filtrerar bort posten (inte 403) när updateRule nekar —
+    // en instans utan 1700000161 saknar "ELLER ägaren"-grenen för personliga
+    // mål; roll + ägarskap är redan verifierade ovan (§ 21.3).
+    const row = await writeWithFallback(pb, (c) => c.collection(GOALS).update<Goal>(goalId, payload), { fallbackOn404: true });
+    await logAgentAction(pb, {
+      actor,
+      action_type: 'update',
+      collection: GOALS,
+      record_id: goalId,
+      field: Object.keys(payload).join(','),
+      before_value: before,
+      after_value: { ...after, kind: v.value.kind, year: period.year }
+    });
+    if (payload.kind === 'personal' && goalKindOf(row) !== 'personal') {
+      return fail('DB_ERROR', 'Instansen saknar fälten för personliga mål (migration 1700000161) — måltypen sparades inte.');
+    }
+    return ok(row);
+  } catch (err) {
+    return fail('DB_ERROR', pbError(err, 'Kunde inte uppdatera målet.'));
+  }
+}
+
+/** Ett fält i taget (chatt-verktyget) — tunt omslag över `updateGoalFields`. */
 export async function updateGoalField(
   pb: PocketBase,
   actor: Actor,
@@ -231,37 +508,33 @@ export async function updateGoalField(
   field: GoalWritableField,
   value: unknown
 ): Promise<WriteResult<Goal>> {
-  const gate = canWriteField(actor, GOALS, field);
-  if (!gate.ok) return fail('FIELD_NOT_WRITABLE', gate.reason ?? 'Fältet är inte skrivbart.');
-  const goal = await getRecordInTenant<Goal>(pb, actor, GOALS, goalId, 'id,tenant,period,focus_area,title,description,owner_team');
-  if (!goal) return fail('NOT_FOUND', 'Målet hittades inte.');
-  const period = await loadOpenPeriod(pb, actor, goal.period);
-  if ('error' in period) return period.error;
-  const merged = { ...goal, [field]: value };
-  const v = validateGoalInput(merged);
-  if (!v.ok) return fail('INVALID_VALUE', v.error);
-  const next =
-    field === 'title'
-      ? sanitizePersonnummer(v.value.title)
-      : field === 'description'
-        ? v.value.description
-          ? sanitizePersonnummer(v.value.description)
-          : ''
-        : v.value[field];
+  return updateGoalFields(pb, actor, goalId, { [field]: value });
+}
+
+/** Tar bort ett mål med dess indikatorer och statusar (cascade). Ledning, eller ägaren av ett personligt mål. */
+export async function deleteGoal(
+  pb: PocketBase,
+  actor: Actor,
+  goalId: string
+): Promise<WriteResult<{ id: string; title: string }>> {
+  const gate = canWriteField(actor, GOALS, 'title');
+  if (!gate.ok) return fail('FORBIDDEN', gate.reason ?? 'Saknar behörighet.');
+  const loaded = await loadManageableGoal(pb, actor, goalId);
+  if ('error' in loaded) return loaded.error;
+  const { goal, period } = loaded;
   try {
-    const row = await writeWithFallback(pb, (c) => c.collection(GOALS).update<Goal>(goalId, { [field]: next }));
+    await writeWithFallback(pb, (c) => c.collection(GOALS).delete(goalId), { fallbackOn404: true });
     await logAgentAction(pb, {
       actor,
       action_type: 'update',
       collection: GOALS,
       record_id: goalId,
-      field,
-      before_value: field === 'description' ? { length: String(goal.description ?? '').length } : goal[field],
-      after_value: { title: row.title, [field]: field === 'description' ? { length: String(next ?? '').length } : next }
+      before_value: { title: goal.title, kind: goalKindOf(goal), focus_area: goal.focus_area },
+      after_value: { deleted: true, title: goal.title, kind: goalKindOf(goal), year: period.year }
     });
-    return ok(row);
+    return ok({ id: goalId, title: goal.title });
   } catch (err) {
-    return fail('DB_ERROR', pbError(err, 'Kunde inte uppdatera målet.'));
+    return fail('DB_ERROR', pbError(err, 'Kunde inte ta bort målet.'));
   }
 }
 
@@ -348,6 +621,103 @@ export async function createGoalIndicator(
     return ok({ ...row, target: v.value.target });
   } catch (err) {
     return fail('DB_ERROR', pbError(err, 'Kunde inte skapa indikatorn.'));
+  }
+}
+
+/**
+ * Redigera etikett och/eller måltal på en indikator. Källa/metrik byts inte
+ * i efterhand (då är det en ny indikator — historiken skulle annars ljuga).
+ * Måltalet får bara människor sätta (agent-nekat i whitelisten).
+ */
+export async function updateGoalIndicator(
+  pb: PocketBase,
+  actor: Actor,
+  indicatorId: string,
+  patch: { label?: unknown; target?: unknown }
+): Promise<WriteResult<GoalIndicator>> {
+  const wantsLabel = patch.label !== undefined;
+  const wantsTarget = patch.target !== undefined;
+  if (!wantsLabel && !wantsTarget) return fail('INVALID_VALUE', 'Inget att ändra.');
+  for (const field of [wantsLabel ? 'label' : null, wantsTarget ? 'target' : null]) {
+    if (!field) continue;
+    const gate = canWriteField(actor, GOAL_INDICATORS, field);
+    if (!gate.ok) return fail('FIELD_NOT_WRITABLE', gate.reason ?? 'Fältet är inte skrivbart.');
+  }
+  const indicator = await getRecordInTenant<GoalIndicator & { has_target?: boolean }>(
+    pb,
+    actor,
+    GOAL_INDICATORS,
+    indicatorId,
+    'id,tenant,goal,label,source,metric_key,survey_module,target,has_target,unit,direction'
+  );
+  if (!indicator) return fail('NOT_FOUND', 'Indikatorn hittades inte.');
+  const goal = await getRecordInTenant<Goal>(pb, actor, GOALS, indicator.goal, 'id,tenant,period,title');
+  if (!goal) return fail('NOT_FOUND', 'Målet hittades inte.');
+  const period = await loadOpenPeriod(pb, actor, goal.period);
+  if ('error' in period) return period.error;
+  const currentTarget = indicator.has_target === false ? null : (indicator.target ?? null);
+  const v = validateGoalIndicatorInput({
+    label: wantsLabel ? patch.label : indicator.label,
+    source: indicator.source,
+    metric_key: indicator.metric_key || undefined,
+    survey_module: indicator.survey_module || undefined,
+    target: wantsTarget ? patch.target : currentTarget,
+    unit: indicator.unit,
+    direction: indicator.direction
+  });
+  if (!v.ok) return fail('INVALID_VALUE', v.error);
+  const payload: Record<string, unknown> = {};
+  const label = sanitizePersonnummer(v.value.label);
+  if (wantsLabel && label !== indicator.label) payload.label = label;
+  if (wantsTarget && v.value.target !== currentTarget) {
+    payload.target = v.value.target ?? 0;
+    Object.assign(payload, numberWithFlag(v.value.target, 'has_target'));
+  }
+  if (Object.keys(payload).length === 0) return ok({ ...indicator, target: currentTarget });
+  try {
+    const row = await writeWithFallback(pb, (c) => c.collection(GOAL_INDICATORS).update<GoalIndicator>(indicatorId, payload));
+    await logAgentAction(pb, {
+      actor,
+      action_type: 'update',
+      collection: GOAL_INDICATORS,
+      record_id: indicatorId,
+      field: Object.keys(payload).filter((k) => k !== 'has_target').join(','),
+      before_value: { label: indicator.label, target: currentTarget },
+      after_value: { label, target: wantsTarget ? v.value.target : currentTarget, goal_title: goal.title, goal: goal.id, year: period.year }
+    });
+    return ok({ ...row, target: wantsTarget ? v.value.target : currentTarget });
+  } catch (err) {
+    return fail('DB_ERROR', pbError(err, 'Kunde inte uppdatera indikatorn.'));
+  }
+}
+
+/** Tar bort en indikator med dess kvartalsstatusar (cascade). Ledning. */
+export async function deleteGoalIndicator(
+  pb: PocketBase,
+  actor: Actor,
+  indicatorId: string
+): Promise<WriteResult<{ id: string; label: string }>> {
+  const gate = canWriteField(actor, GOAL_INDICATORS, 'label');
+  if (!gate.ok) return fail('FORBIDDEN', gate.reason ?? 'Saknar behörighet.');
+  const indicator = await getRecordInTenant<GoalIndicator>(pb, actor, GOAL_INDICATORS, indicatorId, 'id,tenant,goal,label,source');
+  if (!indicator) return fail('NOT_FOUND', 'Indikatorn hittades inte.');
+  const goal = await getRecordInTenant<Goal>(pb, actor, GOALS, indicator.goal, 'id,tenant,period,title');
+  if (!goal) return fail('NOT_FOUND', 'Målet hittades inte.');
+  const period = await loadOpenPeriod(pb, actor, goal.period);
+  if ('error' in period) return period.error;
+  try {
+    await writeWithFallback(pb, (c) => c.collection(GOAL_INDICATORS).delete(indicatorId));
+    await logAgentAction(pb, {
+      actor,
+      action_type: 'update',
+      collection: GOAL_INDICATORS,
+      record_id: indicatorId,
+      before_value: { label: indicator.label, source: indicator.source },
+      after_value: { deleted: true, label: indicator.label, goal_title: goal.title, goal: goal.id, year: period.year }
+    });
+    return ok({ id: indicatorId, label: indicator.label });
+  } catch (err) {
+    return fail('DB_ERROR', pbError(err, 'Kunde inte ta bort indikatorn.'));
   }
 }
 
