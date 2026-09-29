@@ -60,10 +60,12 @@ export {
   createGoalIndicator,
   updateGoalIndicator,
   deleteGoalIndicator,
+  importGoals,
   recordGoalStatus,
   currentQuarter,
   goalsPath,
   type GoalWritableField,
+  type ImportGoalsResult,
   type RecordGoalStatusInput,
   type RecordGoalStatusResult
 } from './goals';

@@ -1730,6 +1730,7 @@ export * from './home';
 export * from './followup-rules';
 export * from './metrics';
 export * from './goals';
+export * from './goals-import';
 export * from './compass-survey';
 export * from './procurement';
 export * from './contacts';

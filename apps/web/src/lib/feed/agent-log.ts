@@ -551,6 +551,16 @@ function mapRow(
         icon: value === 'approved' ? 'check' : 'send'
       };
     }
+    case 'goal_import': {
+      const created = typeof after.created === 'number' ? after.created : 0;
+      const indicators = typeof after.indicators === 'number' ? after.indicators : 0;
+      const year = str(after.year);
+      return {
+        title: `Mål importerade${year ? ` till ${year}` : ''}: ${created} nya mål, ${indicators} indikatorer`,
+        href: year ? `/mal?ar=${year}` : '/mal',
+        icon: 'upload'
+      };
+    }
     case 'contact_import': {
       const created = typeof after.created === 'number' ? after.created : 0;
       const updated = typeof after.updated === 'number' ? after.updated : 0;

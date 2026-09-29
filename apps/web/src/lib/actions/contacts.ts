@@ -15,12 +15,11 @@ import {
   type ContactChanges,
   type ImportContactsResult
 } from '@/lib/core/write';
-import { parseXlsx } from '@/lib/import/xlsx';
+import { readTableFile } from '@/lib/import/table-file';
 import {
   CONTACT_BOOK_ROLES,
   dedupeContactImportRows,
   parseContactImportRows,
-  parseDelimitedText,
   type ContactImportRow,
   type ContactRequestDecision,
   type Role
@@ -199,7 +198,6 @@ export async function withdrawContactRequestAction(_prev: ContactActionState, fd
 
 // ── Import ──────────────────────────────────────────────────────────────────
 
-const IMPORT_MAX_BYTES = 10 * 1024 * 1024;
 const IMPORT_MAX_ROWS = 5000;
 
 export type ContactImportPreview = {
@@ -217,42 +215,9 @@ export type ContactImportState =
   | { status: 'preview'; preview: ContactImportPreview }
   | { status: 'done'; result: ImportContactsResult };
 
-function isZip(buf: Buffer): boolean {
-  return buf.length > 4 && buf[0] === 0x50 && buf[1] === 0x4b;
-}
-
-async function readRows(file: File): Promise<{ headers: string[]; rows: string[][]; sheet?: string } | { error: string }> {
-  if (file.size === 0) return { error: 'Filen är tom.' };
-  if (file.size > IMPORT_MAX_BYTES) return { error: 'Filen är större än 10 MB.' };
-  const buf = Buffer.from(await file.arrayBuffer());
-  let table: string[][];
-  let sheet: string | undefined;
-  if (isZip(buf) || /\.xlsx$/i.test(file.name)) {
-    let parsed;
-    try {
-      parsed = parseXlsx(buf);
-    } catch {
-      return { error: 'Kunde inte läsa Excel-filen. Spara som .xlsx eller .csv och försök igen.' };
-    }
-    // Första arket med innehåll (Outlook/Google-exporter har ett ark).
-    let best: { name: string; rows: Record<string, string>[] } | null = null;
-    for (const [name, rows] of parsed.sheets) {
-      if (rows.length > 1 && (!best || rows.length > best.rows.length)) best = { name, rows };
-    }
-    if (!best) return { error: 'Excel-filen innehåller inga rader.' };
-    sheet = best.name;
-    // Kolumnbokstäver → positionsordnade celler (A, B, …, Z, AA …).
-    const cols = new Set<string>();
-    for (const r of best.rows) for (const k of Object.keys(r)) cols.add(k);
-    const order = [...cols].sort((a, b) => a.length - b.length || a.localeCompare(b));
-    table = best.rows.map((r) => order.map((c) => r[c] ?? ''));
-  } else {
-    table = parseDelimitedText(buf.toString('utf8'));
-  }
-  if (table.length < 2) return { error: 'Filen måste ha en rubrikrad och minst en kontaktrad.' };
-  const [headers, ...rows] = table;
-  if (rows.length > IMPORT_MAX_ROWS) return { error: `Max ${IMPORT_MAX_ROWS} kontakter per import.` };
-  return { headers, rows, sheet };
+/** Delad CSV/Excel-läsare (`lib/import/table-file.ts`) — samma som målimporten (§ 42). */
+function readRows(file: File) {
+  return readTableFile(file, { maxRows: IMPORT_MAX_ROWS, rowNoun: 'kontaktrad' });
 }
 
 export async function previewContactImportAction(_prev: ContactImportState, fd: FormData): Promise<ContactImportState> {

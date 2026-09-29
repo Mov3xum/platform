@@ -10,15 +10,18 @@ import {
   deleteGoal,
   deleteGoalIndicator,
   deleteGoalPeriod,
+  importGoals,
   recordGoalStatus,
   setGoalPeriodStatus,
   updateGoalFields,
   updateGoalIndicator,
   updateGoalPeriod,
   type Actor,
-  type GoalWritableField
+  type GoalWritableField,
+  type ImportGoalsResult
 } from '@/lib/core/write';
-import type { Role } from '@platform/shared';
+import { readTableFile } from '@/lib/import/table-file';
+import { GOAL_IMPORT_MAX_ROWS, parseGoalImportRows, type GoalImportField, type GoalImportGoal, type Role } from '@platform/shared';
 
 /**
  * Server actions för målstyrningen (CLAUDE.md § 42). Tunna skal: RBAC här,
@@ -196,4 +199,86 @@ export async function recordGoalStatusAction(input: {
         ? 'Status sparad. Underlaget kapades — värdet är en nedre gräns.'
         : 'Status sparad.';
   return { ok: true, id: res.value.entry.id, notice };
+}
+
+// ── Import från Excel/CSV (§ 42) ────────────────────────────────────────────
+
+export type GoalImportPreview = {
+  periodId: string;
+  year: number;
+  goals: GoalImportGoal[];
+  mappedFields: GoalImportField[];
+  unmappedHeaders: string[];
+  warnings: string[];
+  sheet?: string;
+};
+
+export type GoalImportState =
+  | { status: 'idle' }
+  | { status: 'error'; message: string }
+  | { status: 'preview'; preview: GoalImportPreview }
+  | { status: 'done'; result: ImportGoalsResult; year: number };
+
+async function resolvePeriod(pb: Awaited<ReturnType<typeof getServerPb>>, tenant: string, periodId: string) {
+  try {
+    const row = await pb.collection('goal_periods').getOne<{ id: string; tenant: string; year: number; status: string }>(periodId, {
+      fields: 'id,tenant,year,status'
+    });
+    return row.tenant === tenant ? row : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function previewGoalImportAction(_prev: GoalImportState, fd: FormData): Promise<GoalImportState> {
+  const g = await gate(LEAD_ROLES, 'Bara admin/incubator_lead kan importera mål.');
+  if ('error' in g) return { status: 'error', message: g.error };
+  const periodId = String(fd.get('period') ?? '');
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(periodId)) return { status: 'error', message: 'Välj ett verksamhetsår.' };
+  const pb = await getServerPb();
+  const period = await resolvePeriod(pb, g.actor.tenant, periodId);
+  if (!period) return { status: 'error', message: 'Verksamhetsåret hittades inte.' };
+  if (period.status === 'closed') return { status: 'error', message: `Verksamhetsåret ${period.year} är avslutat — återöppna det först.` };
+  const file = fd.get('file');
+  if (!(file instanceof File)) return { status: 'error', message: 'Ingen fil bifogad.' };
+  const read = await readTableFile(file, { maxRows: GOAL_IMPORT_MAX_ROWS, rowNoun: 'målrad' });
+  if ('error' in read) return { status: 'error', message: read.error };
+  const parsed = parseGoalImportRows(read.headers, read.rows);
+  return {
+    status: 'preview',
+    preview: {
+      periodId: period.id,
+      year: period.year,
+      goals: parsed.goals,
+      mappedFields: parsed.mappedFields,
+      unmappedHeaders: parsed.unmappedHeaders,
+      warnings: parsed.warnings,
+      sheet: read.sheet
+    }
+  };
+}
+
+export async function commitGoalImportAction(_prev: GoalImportState, fd: FormData): Promise<GoalImportState> {
+  const g = await gate(LEAD_ROLES, 'Bara admin/incubator_lead kan importera mål.');
+  if ('error' in g) return { status: 'error', message: g.error };
+  const periodId = String(fd.get('period') ?? '');
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(periodId)) return { status: 'error', message: 'Verksamhetsåret saknas — ladda upp filen igen.' };
+  const raw = fd.get('goals');
+  if (typeof raw !== 'string') return { status: 'error', message: 'Förhandsgranskningen saknas — ladda upp filen igen.' };
+  let goals: GoalImportGoal[];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed) || parsed.length > GOAL_IMPORT_MAX_ROWS) throw new Error('bad');
+    // Rader från klienten är DATA — varje mål/indikator kör genom skrivlagrets validering.
+    goals = parsed as GoalImportGoal[];
+  } catch {
+    return { status: 'error', message: 'Förhandsgranskningen kunde inte tolkas — ladda upp filen igen.' };
+  }
+  const pb = await getServerPb();
+  const period = await resolvePeriod(pb, g.actor.tenant, periodId);
+  if (!period) return { status: 'error', message: 'Verksamhetsåret hittades inte.' };
+  const res = await importGoals(pb, g.actor, period.id, goals);
+  if (!res.ok) return { status: 'error', message: res.error };
+  revalidate();
+  return { status: 'done', result: res.value, year: period.year };
 }

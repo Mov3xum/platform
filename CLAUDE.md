@@ -6101,6 +6101,26 @@ varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
   § 24.4-invarianten); `verify-baseline.mjs` asserterar `goals.kind`/
   `owner_user` (`REQUIRED_APP_FIELDS`) och fälten speglas i
   `setup-via-api.mjs`.
+- **Import från Excel/CSV (`/mal/import`, 2026-09).** Ledningen laddar upp
+  mål till ett öppet verksamhetsår: en rad per mål, eller en rad per
+  indikator med målet upprepat — rader med samma fokusområde + titel (+ typ,
+  för personliga även ägare) slås ihop till ETT mål med flera indikatorer;
+  tomt fokusområde ärver föregående rad (sammanslagna Excel-celler). Den rena,
+  enhetstestade `packages/shared/src/goals-import.ts` (`parseGoalImportRows`,
+  `buildGoalImportTemplateCsv`) mappar rubriker (sv/en-alias) och värden mot
+  både nyckel och etikett ("Inflöde och varumärke", "Personligt", "Beräknas
+  ur data", metrikens etikett); okänd metrik/enkätkälla degraderas till
+  manuell bedömning med varning, aldrig tyst. Filen läses av den delade
+  `lib/import/table-file.ts` (`readTableFile`, samma som kontaktimporten
+  § 45.5 — ingen divergerande kopia). Förhandsgranskning → bekräfta →
+  `importGoals` i skrivlagret, som skapar varje mål/indikator via SAMMA
+  `createGoal`/`createGoalIndicator` (whitelist, validering, behörighet per
+  måltyp, audit per rad) och är **idempotent**: befintliga mål återanvänds
+  och får bara saknade indikatorer (etikett), så importen kan köras om.
+  Personliga mål matchar ägaren på e-post mot Movexum-personal i tenanten
+  (okänd ⇒ importören, varning); e-posten når aldrig loggen. En
+  sammanfattningsrad `goal_import` loggas (§ 32). Varningar är PII-fria
+  (radnummer). Max 2 000 rader/10 MB. Riskklass n/a (ingen AI-inferens).
 - **RLS (§ 21.3):** list/view `STAFF_OR_OBSERVER`, createRule roll-lös,
   update/delete `:each ?=`. Alla fyra kollektionerna ligger i
   `MUST_BE_STAFF_OR_OBSERVER` i `verify-baseline.mjs` och speglas i
