@@ -44,8 +44,8 @@ secret-par per miljö — de delar inget.
 
 | Miljö | Git-gren | PB-adress | Repo-secrets (CI) | Web-appens env (Coolify) |
 |---|---|---|---|---|
-| Staging | `staging` | `https://pocketbase-r10nklch8dkune7s0flczb89.212.147.227.223.sslip.io` (samma som `apps/web/.env.production`) | `PB_URL_STAGING`, `PB_SU_EMAIL_STAGING`, `PB_SU_PASSWORD_STAGING`, `APP_USER_PASSWORD_STAGING` | `POCKETBASE_URL_STAGING`, `NEXT_PUBLIC_POCKETBASE_URL_STAGING`, `POCKETBASE_SUPERUSER_EMAIL/PASSWORD` |
-| Produktion | `main` | Värdet i secreten `PB_URL_PRODUCTION` (skrivs inte i repot; kontrollera i Coolify → PB-production → Domains) | `PB_URL_PRODUCTION`, `PB_SU_EMAIL_PRODUCTION`, `PB_SU_PASSWORD_PRODUCTION`, `APP_USER_PASSWORD_PRODUCTION` | `POCKETBASE_URL_PRODUCTION`, `NEXT_PUBLIC_POCKETBASE_URL_PRODUCTION`, `POCKETBASE_SUPERUSER_EMAIL/PASSWORD` |
+| Staging | `staging` | `https://pb-staging.app.movexum.se` (Coolify-domän på PB-staging; samma som `apps/web/.env.production`. Den gamla sslip-hosten `pocketbase-r10nklch8dkune7s0flczb89.212.147.227.223.sslip.io` är avvecklad) | `PB_URL_STAGING`, `PB_SU_EMAIL_STAGING`, `PB_SU_PASSWORD_STAGING`, `APP_USER_PASSWORD_STAGING` | `POCKETBASE_URL_STAGING`, `NEXT_PUBLIC_POCKETBASE_URL_STAGING`, `POCKETBASE_SUPERUSER_EMAIL/PASSWORD` |
+| Produktion | `main` | `https://pb-app.movexum.se` (= secreten `PB_URL_PRODUCTION`; kontrollera i Coolify → PB-production → Domains) | `PB_URL_PRODUCTION`, `PB_SU_EMAIL_PRODUCTION`, `PB_SU_PASSWORD_PRODUCTION`, `APP_USER_PASSWORD_PRODUCTION` | `POCKETBASE_URL_PRODUCTION`, `NEXT_PUBLIC_POCKETBASE_URL_PRODUCTION`, `POCKETBASE_SUPERUSER_EMAIL/PASSWORD` |
 
 Egna domäner (`pb-staging.movexum.se` / `pb.movexum.se`) är bara ett
 **förslag** i `infra/SSL.md` — de har ingen DNS-post ännu och svarar
@@ -189,7 +189,7 @@ Kräver att du har en PocketBase superuser (`_superusers`-rad) — den skapas vi
 # Kör från repo-roten. Staging-adressen nedan är samma som i
 # apps/web/.env.production; för produktion (main) använder du värdet i
 # secreten PB_URL_PRODUCTION (se miljötabellen ovan).
-PB_URL='https://pocketbase-r10nklch8dkune7s0flczb89.212.147.227.223.sslip.io' \
+PB_URL='https://pb-staging.app.movexum.se' \
 PB_SU_EMAIL='hampus@movexum.se' \
 PB_SU_PASSWORD='<ditt PB-superuser-lösen>' \
 APP_USER_PASSWORD='<lösen för login i webappen (krävs bara om app-user saknas)>' \

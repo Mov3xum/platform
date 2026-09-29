@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getPbEnvTarget, getServerPbUrl } from '@/lib/pb-url';
+import { describePbUrlSource, getServerPbUrl } from '@/lib/pb-url';
 import { probePocketBase, probeSummary } from '@/lib/pb-health';
 
 // Driftdiagnos för web-appen (publik, undantagen auth-redirect + force-https i
@@ -11,15 +11,19 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(): Promise<NextResponse> {
   const pbUrl = getServerPbUrl();
+  const source = describePbUrlSource();
   const probe = await probePocketBase(pbUrl);
   const ok = probe.kind === 'pocketbase';
   return NextResponse.json(
     {
       ok,
       service: 'web',
-      env: getPbEnvTarget(),
+      env: source.target,
       pocketbase: {
         url: pbUrl,
+        // Vilken env-nyckel som gav URL:en (bara namnet). "fallback:*" i
+        // produktion = POCKETBASE_URL_PRODUCTION saknas på web-appen.
+        resolved_via: source.via,
         ok,
         kind: probe.kind,
         status: probe.status ?? null,
