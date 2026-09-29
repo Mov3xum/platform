@@ -11,7 +11,7 @@ import { listOrgPosts } from '@/lib/org-posts/data';
 import { loadActivityFeed } from '@/lib/feed/activity-feed';
 import { fetchWebFeedItems, listWebSources } from '@/lib/ai/web';
 import { listAnnualWheelCategories } from '@/lib/annual-wheel/categories';
-import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { computeMetric, computeMetrics } from '@/lib/metrics/registry';
 import type { DashboardActivity } from '@/components/DashboardChat';
 import {
   ORG_POST_AUTHOR_ROLES,
@@ -19,21 +19,23 @@ import {
   annualWheelItemDateRange,
   annualWheelHiddenOnHome,
   canRolesSeeOrgPost,
-  coreModules,
   homeTabFromSlug,
   isOrgPostExpired,
   isOrgPostScheduled,
   isPureStartupMember,
   mergeOmvarldItems,
+  metricDelta,
   orgPostExcerpt,
   orgPostTabFor,
   parseHomeWindowDays,
   selectLiveOrgPosts,
   sortOrgPosts,
   stockholmCalendarParts,
+  stockholmDateKey,
   stockholmToday,
   swedishDateLine,
   swedishGreeting,
+  trailingPeriods,
   type HomeAgendaItem,
   type OrgPost,
   type OrgPostTab,
@@ -111,14 +113,6 @@ function toBoardPost(post: OrgPost, now: Date): BoardPost {
   };
 }
 
-async function countOrNull(run: () => Promise<{ totalItems: number }>): Promise<number | null> {
-  try {
-    return (await run()).totalItems;
-  } catch {
-    return null;
-  }
-}
-
 export default async function HemPage({
   searchParams
 }: {
@@ -129,7 +123,7 @@ export default async function HemPage({
   if (!canAccessModuleForUser(user.roles, 'hem', user.enabledModules)) redirect('/chatt');
 
   const { flik, dagar } = await searchParams;
-  // "Så gör vi" är borttagen från Hemmaplan (2026-09) — en gammal länk landar på anslagstavlan.
+  // "Så gör vi" är borttagen från Översikt (2026-09) — en gammal länk landar på anslagstavlan.
   const parsedTab = homeTabFromSlug(flik);
   const initialTab: OrgPostTab = parsedTab === 'instruction' ? 'board' : parsedTab;
   const windowDays = parseHomeWindowDays(dagar);
@@ -139,9 +133,11 @@ export default async function HemPage({
   const today = stockholmToday(now);
   const year = today.getFullYear();
   const windowEndYear = new Date(year, today.getMonth(), today.getDate() + windowDays).getFullYear();
-  const weekAgo = pbDate(new Date(now.getTime() - 7 * 86_400_000));
-  const twoWeeksAgo = pbDate(new Date(now.getTime() - 14 * 86_400_000));
   const yesterday = pbDate(new Date(now.getTime() - 86_400_000));
+  // Nyckeltalen räknas av metrikregistret (§ 41) — samma definitioner som målcockpiten.
+  const todayKey = stockholmDateKey(now);
+  const metricCtx = { pb, tenant: user.tenant, userId: user.id, today: todayKey };
+  const leadPeriods = trailingPeriods(todayKey, 7);
 
   const [
     postsRes,
@@ -150,14 +146,12 @@ export default async function HemPage({
     wheelRes,
     categoriesRes,
     eventsRes,
-    activeStartups,
-    newLeads,
-    prevLeads,
-    myOpenTasks,
-    runningWorkshops
+    snapshotMetrics,
+    leadsNow,
+    leadsBefore
   ] = await Promise.all([
     listOrgPosts(pb, user.tenant).catch(() => [] as OrgPost[]),
-    // Hemmaplan visar bara de senaste 6 — Omvärld ligger direkt under i samma spalt.
+    // Översikt visar bara de senaste 6 — Omvärld ligger direkt under i samma spalt.
     loadActivityFeed(pb, user.tenant, 6).catch(() => [] as DashboardActivity[]),
     fetchWebFeedItems(OMVARLD_SOURCES).catch(() => []),
     listForTenant<WheelRow>('annual_wheel_items', {
@@ -179,45 +173,9 @@ export default async function HemPage({
         fields: 'id,name,type,status,starts_at,ends_at,location'
       })
       .catch(() => ({ items: [] as EventRow[] })),
-    countOrNull(() =>
-      pb.collection('startups').getList(1, 1, {
-        filter: pb.filter('tenant = {:tenant} && status = "active"', { tenant: user.tenant }),
-        fields: 'id'
-      })
-    ),
-    countOrNull(() =>
-      pb.collection('compass_leads').getList(1, 1, {
-        filter: pb.filter('tenant = {:tenant} && created >= {:from} && source_key != "preview"', {
-          tenant: user.tenant,
-          from: weekAgo
-        }),
-        fields: 'id'
-      })
-    ),
-    countOrNull(() =>
-      pb.collection('compass_leads').getList(1, 1, {
-        filter: pb.filter(
-          'tenant = {:tenant} && created >= {:from} && created < {:to} && source_key != "preview"',
-          { tenant: user.tenant, from: twoWeeksAgo, to: weekAgo }
-        ),
-        fields: 'id'
-      })
-    ),
-    countOrNull(() =>
-      pb.collection('tasks').getList(1, 1, {
-        filter: pb.filter('tenant = {:tenant} && owner = {:me} && status != "done" && status != "cancelled"', {
-          tenant: user.tenant,
-          me: user.id
-        }),
-        fields: 'id'
-      })
-    ),
-    countOrNull(() =>
-      pb.collection(PB_COLLECTIONS.workshopAssignments).getList(1, 1, {
-        filter: pb.filter('tenant = {:tenant} && status = "in_progress"', { tenant: user.tenant }),
-        fields: 'id'
-      })
-    )
+    computeMetrics(['active_startups', 'workshops_in_progress', 'my_open_tasks'], metricCtx),
+    computeMetric('leads_in_period', { ...metricCtx, period: leadPeriods.current }),
+    computeMetric('leads_in_period', { ...metricCtx, period: leadPeriods.previous })
   ]);
 
   const allPosts = postsRes;
@@ -258,7 +216,7 @@ export default async function HemPage({
   ];
 
   const categoryLabel = new Map(categories.map((c) => [c.id, c.label]));
-  // Kategorier som superadmin valt att INTE visa på Hemmaplan (t.ex. Styrelse & VD)
+  // Kategorier som superadmin valt att INTE visa på Översikt (t.ex. Styrelse & VD)
   // filtreras bort innan tidslinjen byggs — de finns kvar i /arshjul (§ 30.3).
   const hiddenCategories = annualWheelHiddenOnHome(categories);
   const agendaItems: HomeAgendaItem[] = [];
@@ -324,26 +282,18 @@ export default async function HemPage({
   const firstName = user.name.split(' ')[0] || user.email;
   const hello = `${swedishGreeting(now)}, ${firstName}.`;
   const dateLine = swedishDateLine(now);
-  const leadsDelta = newLeads !== null && prevLeads !== null ? newLeads - prevLeads : null;
-
-  const shortcuts = [
-    { id: 'idag', label: 'Ny chatt', icon: 'message' },
-    { id: 'startups', label: 'Bolag', icon: 'people' },
-    { id: 'arshjul', label: 'Årshjul', icon: 'calendar' },
-    { id: 'inflode', label: 'Marknadsverktyg', icon: 'compass' },
-    { id: 'education', label: 'Utbildning', icon: 'cap' },
-    { id: 'kunskapsbas', label: 'Kunskapsbas', icon: 'doc' }
-  ]
-    .filter((s) => canAccessModuleForUser(user.roles, s.id, user.enabledModules))
-    .map((s) => ({ ...s, href: coreModules.find((m) => m.id === s.id)?.route ?? '/' }));
+  const activeStartups = snapshotMetrics.active_startups.value;
+  const runningWorkshops = snapshotMetrics.workshops_in_progress.value;
+  const myOpenTasks = snapshotMetrics.my_open_tasks.value;
+  const newLeads = leadsNow.value;
+  const leadsDelta = metricDelta(leadsNow.value, leadsBefore.value);
 
   return (
     <HomeFrontPage
       hello={hello}
       dateLine={dateLine}
       today={today}
-      shortcuts={shortcuts}
-      counts={{ activeStartups, newLeads, leadsDelta, runningWorkshops, myOpenTasks }}
+      counts={{ activeStartups, newLeads, leadsDelta, myOpenTasks }}
       agendaItems={agendaItems}
       windowDays={windowDays}
       tabs={tabs}

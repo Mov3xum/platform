@@ -31,11 +31,11 @@ export interface Survey {
   questions: SurveyQuestion[];
   is_active: boolean;
   public_slug: string;
-  /** Källa enkäten följer upp (§ 39.4) — null när enkäten är fristående. */
+  /** Källa enkäten följer upp (§ 47.4) — null när enkäten är fristående. */
   link_kind: SurveyLinkKind | null;
   link_id: string;
   link_label: string;
-  /** Utskick till deltagare (§ 39.5) — bara aggregat, aldrig adresser. */
+  /** Utskick till deltagare (§ 47.5) — bara aggregat, aldrig adresser. */
   send_at: string;
   sent_at: string;
   sent_count: number;

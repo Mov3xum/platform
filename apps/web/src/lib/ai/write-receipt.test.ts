@@ -157,3 +157,19 @@ test('totaler och modell-sammanfattning speglar det faktiska utfallet', () => {
   assert.match(text, /✓ SPARAT: Lägger till i årshjulet — C · 1 post · maj · 2026 \(varning: drift\)/);
   assert.equal(summarizeReceiptsForModel([]), '');
 });
+
+test('memory_write → kvitto med nyckel, kategori och länk till AI-minnet filtrerat på kategorin', () => {
+  const r = buildActionReceipt({
+    tool: 'memory_write',
+    label: 'Sparar i minnet',
+    args: { key: 'finansiering/rundor', content: 'Lån räknas inte som investeringar.', category: 'terminologi' },
+    result: {
+      ok: true,
+      data: { key: 'finansiering/rundor', category: 'terminologi', category_label: 'Terminologi & definitioner', action: 'created' }
+    }
+  });
+  assert.ok(r);
+  assert.equal(r.ok, true);
+  assert.equal(r.href, '/installningar/ai-minne?kategori=terminologi');
+  assert.equal(r.summary, 'finansiering/rundor · kategori: Terminologi & definitioner');
+});

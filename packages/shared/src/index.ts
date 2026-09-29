@@ -423,6 +423,9 @@ export interface ToolRunMessage {
   model?: string; // modell som producerade detta turn (assistant)
   tokens_in?: number;
   tokens_out?: number;
+  // Antal modellanrop i turen (1 + ett per verktygssteg). Förklarar varför
+  // tokens_in är mångfalt större än svaret (§ 9.6/§ 28). Saknas på äldre turer.
+  api_calls?: number;
   cost_usd?: number;
   at: string; // ISO
   error?: string;
@@ -1192,7 +1195,25 @@ export type NotificationKind =
   | 'assigned'
   | 'status_change'
   | 'stage_advance'
-  | 'due_soon';
+  | 'due_soon'
+  // Kontaktboken (§ 45.3, migration 1700000158)
+  | 'contact_request'
+  | 'contact_decision'
+  // Stödcheckar (§ 46, migration 1700000169)
+  | 'support_check_submitted'
+  | 'support_check_changes'
+  | 'support_check_decision'
+  | 'support_check_comment';
+
+/** Notistyper som fanns i schemat före migration 1700000158 (fallback i `notify`). */
+export const LEGACY_NOTIFICATION_KINDS: readonly NotificationKind[] = [
+  'comment',
+  'mention',
+  'assigned',
+  'status_change',
+  'stage_advance',
+  'due_soon'
+];
 
 export interface NotificationPayload {
   title: string;
@@ -1374,10 +1395,10 @@ export interface ModuleGroup {
 }
 
 export const RAIL_GROUPS: ModuleGroup[] = [
-  { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'pagaende', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
+  { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
+  { label: 'Portfölj', modules: ['kompassen', 'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'installningar', 'min_profil'] }
+  { label: 'System', modules: ['agenter', 'kunskapsbas', 'integrationer', 'installningar', 'min_profil'] }
 ];
 
 /**
@@ -1410,7 +1431,7 @@ export function isPureStartupMember(roles: Role[] | undefined): boolean {
 export const coreModules: ModuleDefinition[] = [
   {
     id: 'hem',
-    title: 'Hemmaplan',
+    title: 'Översikt',
     description:
       'Organisationens startsida — anslagstavla med nyheter, info och instruktioner, bolagsnytt, omvärldsbevakning och veckans agenda.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
@@ -1441,17 +1462,18 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'inkorg',
-    title: 'Min översikt',
-    description: 'Allt som är ditt på ett ställe — uppgifter, aktiviteter, möten och events att planera och följa upp.',
+    title: 'Mina uppgifter',
+    description: 'Allt som är ditt på ett ställe — uppgifter, aktiviteter, möten, events och notiser att planera och följa upp.',
     rolesAllowed: ALL_ROLES,
     route: '/inkorg'
   },
   {
-    id: 'pagaende',
-    title: 'Pågående',
-    description: 'Allt som pågår med bolagen — workshops, utbildningar och aktiviteter, samlat per bolag så hela Movexum ser läget.',
+    id: 'mal',
+    title: 'Mål & VP',
+    description:
+      'Verksamhetsplanens mål per fokusområde med indikatorer, måltal och kvartalsstatus — beräknade ur data eller manuellt bedömda. Ersätter måluppföljningen i slides.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
-    route: '/pagaende'
+    route: '/mal'
   },
   {
     id: 'arshjul',
@@ -1470,8 +1492,9 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'uppdrag',
-    title: 'Projekt & uppdrag',
-    description: 'Skapa och samarbeta på projekt och uppdrag — bjud in roller, kommentera och följ flöden.',
+    title: 'Tvärfunktionella team',
+    description:
+      'Sätt upp tvärfunktionella team runt ett uppdrag eller projekt. AI:n föreslår Movexum-kollegor utifrån de kompetenstaggar de angett under Min profil; bjud in roller, kommentera och följ flöden.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer'],
     route: '/uppdrag'
   },
@@ -1503,6 +1526,38 @@ export const coreModules: ModuleDefinition[] = [
       'Stöd av mindre betydelse per bolag — rullande treårssummor mot takbeloppen, varningar och försäkran inför ny stödansökan.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
     route: '/de-minimis'
+  },
+  {
+    id: 'upphandlingar',
+    title: 'Upphandlingar',
+    description:
+      'Upphandlingar och excellens-insatser för bolagen — ladda upp underlaget, följ avrop, milstolpar och slutrapporter enligt uppföljningsregler, och utvärdera leverantören.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/upphandlingar'
+  },
+  {
+    id: 'checkar',
+    title: 'Stödcheckar',
+    description:
+      'Digitala stödcheckar (excellens, resa, AI-verktyg …) som bolagen ansöker om: digital ansökningsmall med signering, bedömning med kompletteringar, finansiering per projekt/arbetspaket och automatisk de minimis-/kapitalbokföring vid beslut.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
+    route: '/checkar'
+  },
+  {
+    id: 'projekt',
+    title: 'Finansieringsprojekt',
+    description:
+      'Projekt och arbetspaket som stöd tas ur (Vinnova Excellens, TVV, EoI …) med budget, upparbetning och kassabok över beviljade checkar.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/projekt'
+  },
+  {
+    id: 'kontakter',
+    title: 'Kontaktbok',
+    description:
+      'Movexums gemensamma kontaktbok — externa kontakter med interna ägare. Be ägaren om bekräftelse att använda en kontakt för ett syfte och dela den med ett bolag via systemet. Lägg in manuellt, importera eller via chatten.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/kontakter'
   },
   {
     id: 'investerare',
@@ -1556,11 +1611,13 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'insights',
-    title: 'Usage insights',
+    // Bor sedan 2026-09 under Inställningar → AI-analys (ingen egen rail-post;
+    // id:t finns kvar för sparade enabled_modules-listor).
+    title: 'AI-analys',
     description:
-      'Spåra hur AI och plattformen används i din organisation — identifiera värdedrivare och adoption per modul.',
+      'Hur AI:n används i din organisation — körningar, tokens, kostnad, kvalitetsfeedback och miljöpåverkan.',
     rolesAllowed: ['admin', 'incubator_lead'],
-    route: '/insights'
+    route: '/installningar/ai-analys'
   },
   {
     id: 'integrationer',
@@ -1651,6 +1708,7 @@ export * from './survey';
 export * from './ai-impact';
 export * from './voice';
 export * from './compass-authoring';
+export * from './compass-layout';
 // ─── Mötesläge i chatten (ren möteslogik, enhetstestad, § 34) ────────────────
 export * from './meeting';
 export * from './meeting-segmenter';
@@ -1684,6 +1742,46 @@ export function resolveUserModules(input: {
 export * from './event-time';
 export * from './org-posts';
 export * from './home';
+export * from './followup-rules';
+export * from './metrics';
+export * from './goals';
+export * from './goals-import';
+export {
+  SURVEY_TEMPLATES as COMPASS_SURVEY_TEMPLATES,
+  aggregateSurvey as aggregateCompassSurvey
+} from './compass-survey';
+export type { SurveyTemplate as CompassSurveyTemplate } from './compass-survey';
+export {
+  COMPASS_PURPOSES,
+  COMPASS_PURPOSE_LABELS,
+  normalizeCompassPurpose,
+  isSurveyModule,
+  SURVEY_SUBJECT_KINDS,
+  SURVEY_SUBJECT_KIND_LABELS,
+  normalizeSurveySubjectKind,
+  isValidSurveySubjectId,
+  SURVEY_SUBJECT_PARAM,
+  SURVEY_SCALE_MIN,
+  SURVEY_SCALE_MAX,
+  SURVEY_TEXT_MAX,
+  validateSurveyAnswer,
+  findSurveyTemplate,
+  satisfiedShare
+} from './compass-survey';
+export type {
+  CompassPurpose,
+  SurveySubjectKind,
+  SurveyTemplateQuestion,
+  SurveyAnswerRow,
+  SurveyQuestionLike,
+  SurveyQuestionAggregate,
+  SurveyAggregate
+} from './compass-survey';
+export * from './procurement';
+export * from './contacts';
+export * from './agent-memory';
+export * from './funding';
+export * from './support-checks';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */

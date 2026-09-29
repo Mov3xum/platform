@@ -34,24 +34,15 @@ import {
  * Ingen dataväg, ingen AI-inferens.
  */
 
-export interface HomeShortcut {
-  id: string;
-  label: string;
-  icon: string;
-  href: string;
-}
-
 export interface HomeFrontPageProps {
   hello: string;
   dateLine: string;
   today: Date;
-  shortcuts: HomeShortcut[];
   /** Nyckeltal — null när räkningen felade (visas som "–", aldrig som 0). */
   counts: {
     activeStartups: number | null;
     newLeads: number | null;
     leadsDelta: number | null;
-    runningWorkshops: number | null;
     myOpenTasks: number | null;
   };
   /** Agendaposter (redan filtrerade på kategori-synlighet) — fönstret klipps här. */
@@ -154,7 +145,6 @@ export function HomeFrontPage({
   hello,
   dateLine,
   today,
-  shortcuts,
   counts,
   agendaItems,
   windowDays,
@@ -168,7 +158,7 @@ export function HomeFrontPage({
   omvarld,
   omvarldSources
 }: HomeFrontPageProps) {
-  const { activeStartups, newLeads, leadsDelta, runningWorkshops, myOpenTasks } = counts;
+  const { activeStartups, newLeads, leadsDelta, myOpenTasks } = counts;
   const timeline = buildHomeTimeline(agendaItems, today, windowDays);
   const agendaCount = timeline.spans.length;
 
@@ -191,29 +181,12 @@ export function HomeFrontPage({
             <div className="flex items-center justify-between border-b border-foreground pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-foreground">
               <span>{dateLine.split(' · ')[0]}</span>
               <span className="mx-tnum hidden text-foreground-subtle sm:inline">{dateLine.split(' · ')[1]}</span>
-              <span className="relative bg-canvas pl-2 text-foreground-subtle">Hemmaplan</span>
+              <span className="relative bg-canvas pl-2 text-foreground-subtle">Översikt</span>
             </div>
             <div className="max-w-[46rem] pt-6">
               <h1 className="font-heading text-[28px] font-semibold leading-[1.05] tracking-tight text-foreground md:text-[34px]">
                 {hello}
               </h1>
-              {shortcuts.length > 0 && (
-                <p className="mt-3 flex flex-wrap items-center gap-x-1 gap-y-1.5 text-[12.5px] text-foreground-subtle">
-                  <span className="mr-2 text-[10px] font-semibold uppercase tracking-[0.14em]">Gå direkt till</span>
-                  {shortcuts.map((s, i) => (
-                    <span key={s.id} className="inline-flex items-center">
-                      {i > 0 && <span aria-hidden className="mx-2 h-1 w-1 rounded-full bg-foreground-subtle/50" />}
-                      <Link
-                        href={s.href}
-                        className="inline-flex items-center gap-1.5 font-semibold text-foreground underline decoration-default underline-offset-4 transition hover:text-brand hover:decoration-brand"
-                      >
-                        <Icon name={s.icon} size={12} className="text-brand" />
-                        {s.label}
-                      </Link>
-                    </span>
-                  ))}
-                </p>
-              )}
             </div>
 
             {/* Nyckeltalen — en boxlös siffer-rad fördelad över bredden. */}
@@ -225,12 +198,6 @@ export function HomeFrontPage({
                 delta={leadsDelta}
                 hint="senaste 7 dagarna"
                 href="/inflode/leads"
-              />
-              <StatFigure
-                label="Pågående workshops"
-                value={runningWorkshops}
-                hint="bolag mitt i en workshop"
-                href="/pagaende"
               />
               <StatFigure label="Mina uppgifter" value={myOpenTasks} hint="öppna, tilldelade dig" href="/inkorg" />
               <StatFigure label="På agendan" value={agendaCount} hint={homeWindowLabel(windowDays).toLowerCase()} href="/arshjul" />

@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { isPresentationPath } from '@/lib/auth-paths';
 import { headers } from 'next/headers';
 import { Navbar } from '@/components/Navbar';
 import { ThemeScript } from '@/components/ThemeProvider';
@@ -82,10 +83,10 @@ export default async function RootLayout({
   // toppnavigationen (Navbar). Samma princip som de publika modulerna ovan.
   const isAuthPage = pathname === '/login';
 
-  // Årshjulets presentationsläge (§ 30) är en helskärmsyta för projektorn —
-  // ingen rail, ingen sidmeny. Sidan kräver fortfarande inloggning + staff
-  // (RBAC i page.tsx); bara ramen tas bort.
-  const isPresentation = pathname === '/arshjul/presentation';
+  // Presentationslägen (årshjulet § 30, målcockpiten § 42) är helskärmsytor
+  // för projektorn — ingen rail, ingen sidmeny. Sidorna kräver fortfarande
+  // inloggning + staff (RBAC i page.tsx); bara ramen tas bort.
+  const isPresentation = isPresentationPath(pathname);
 
   // Offline-fallbacken (§ 35) förcachas av service workern. Den renderas
   // utan AppShell så att den cachade HTML:en aldrig innehåller inloggad

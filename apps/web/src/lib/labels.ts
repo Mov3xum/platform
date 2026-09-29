@@ -137,7 +137,9 @@ export type ActivityKind =
   | 'workshop_run'
   | 'education_document'
   | 'onboarding'
-  | 'integration_sync';
+  | 'integration_sync'
+  | 'mission'
+  | 'support_check';
 export const activityKindLabels: Record<ActivityKind, string> = {
   manual: 'Manuell',
   tool_run: 'Verktygskörning',
@@ -145,7 +147,9 @@ export const activityKindLabels: Record<ActivityKind, string> = {
   workshop_run: 'Workshop AI-körning',
   education_document: 'Utbildningsdokument',
   onboarding: 'Onboarding',
-  integration_sync: 'Integrationssynk'
+  integration_sync: 'Integrationssynk',
+  mission: 'Tvärfunktionellt team',
+  support_check: 'Stödcheck'
 };
 
 export type WorkshopStatus = 'draft' | 'active' | 'archived';

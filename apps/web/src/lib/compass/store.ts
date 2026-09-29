@@ -1,4 +1,5 @@
 import 'server-only';
+import { sortCompassQuestions } from '@platform/shared';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import type {
@@ -486,7 +487,10 @@ export async function listQuestionsForModule(
       sort: 'sort_order',
       batch: 200
     });
-    return res;
+    // Deterministisk tiebreak (created, id) i JS — PB avgör lika sort_order
+    // godtyckligt, och `created` i sort-strängen skulle ge 400 på en instans
+    // utan migration 1700000126.
+    return sortCompassQuestions(res);
   } catch {
     return [];
   }

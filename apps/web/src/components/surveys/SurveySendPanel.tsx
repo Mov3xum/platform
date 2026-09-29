@@ -10,7 +10,7 @@ import {
 } from '@/lib/actions/surveys';
 import { formatStockholmDateTime, toStockholmDateTimeInputValue } from '@platform/shared';
 
-// Utskick till eventets deltagare (CLAUDE.md § 39.5). Visas bara för enkäter
+// Utskick till eventets deltagare (CLAUDE.md § 47.5). Visas bara för enkäter
 // som följer upp ett event. Alla knappar är mänskliga klick; adresser visas
 // aldrig här — bara antal.
 

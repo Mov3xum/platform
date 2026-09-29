@@ -68,6 +68,22 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'survey_responses',
   'org_knowledge',
   'org_knowledge_chunks',
+  // Uppladdat upphandlingsunderlag (1700000153, § 39.3): `extracted_text`/
+  // `analysis` är fritext ur tredjepartsdokument (kan innehålla kontakt-
+  // personer i löptext som fältmaskning per fältNAMN inte fångar). Når AI
+  // enbart via den isolerade utläsningen vid uppladdning — aldrig rått.
+  'procurement_documents',
+  // Stödcheckar (§ 46): `activities[].participants` är personnamn (PII) och
+  // utlåtanden/beslut är fritext om bolaget — når AI bara via den kurerade
+  // sammanfattningen, aldrig rått. Bilagor och revisioner (signeringsbevis) likaså.
+  'support_check_applications',
+  'support_check_revisions',
+  'support_check_comments',
+  'support_check_documents',
+  // Råa enkätsvar per respondent (§ 43): anonyma personalenkäter får aldrig
+  // läsas rad för rad av modellen — målstyrningen får bara det k-anonyma
+  // aggregatet via /mal. (Fältet var oanvänt före enkätmotorn.)
+  'compass_responses',
   'agent_memory' // agentens tvärsessions-scratchpad (1700000079)
 ]);
 

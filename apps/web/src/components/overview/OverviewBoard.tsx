@@ -1,9 +1,6 @@
 'use client';
 
-import { useOptimistic, useState, useTransition } from 'react';
-import { useLiveWorkspace } from '@/lib/realtime/tool-runs';
-import { updateTaskStatusAction } from '@/lib/actions/tasks';
-import { updateActivityStatusAction } from '@/lib/actions/overview-activities';
+import { useState } from 'react';
 import {
   BOARD_COLUMNS,
   isDroppableForSource,
@@ -11,46 +8,48 @@ import {
   type WorkItem,
   type WorkItemSource
 } from '@/lib/overview/status';
+import { sortWorkItems } from '@/lib/overview/group';
+import type { StartupOption } from '@/lib/overview/aggregate';
 import { WorkItemCard } from './WorkItemCard';
+import type { WorkItemEdit } from './WorkItemEditor';
 
+/**
+ * Kanban-vyn (fyra kolumner, drag-and-drop). Presentationell — state och
+ * mutationer ägs av `OverviewWork`. Kort utan drag (tangentbord) flyttas via
+ * kortets "Flytta till"-select.
+ */
 export function OverviewBoard({
   items,
-  editable
+  meId,
+  now,
+  editable,
+  pending,
+  startupOptions,
+  onMove,
+  onEdit,
+  onDelete,
+  onDraggingChange
 }: {
   items: WorkItem[];
+  meId: string;
+  now: Date;
   editable: boolean;
+  pending: boolean;
+  startupOptions: StartupOption[];
+  onMove: (item: WorkItem, status: BoardStatus) => void;
+  onEdit: (item: WorkItem, edit: WorkItemEdit) => Promise<boolean>;
+  onDelete: (item: WorkItem) => void;
+  onDraggingChange: (dragging: boolean) => void;
 }) {
-  const [optimistic, setOptimistic] = useOptimistic(
-    items,
-    (state: WorkItem[], next: { id: string; status: BoardStatus }) =>
-      state.map((it) => (it.id === next.id ? { ...it, status: next.status } : it))
-  );
-  const [pending, startTransition] = useTransition();
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragSource, setDragSource] = useState<WorkItemSource | null>(null);
   const [overCol, setOverCol] = useState<BoardStatus | null>(null);
-
-  // Pausa polling under interaktion så optimistiska flyttar inte flimrar.
-  useLiveWorkspace(!pending && dragId === null);
-
-  function move(item: WorkItem, status: BoardStatus) {
-    if (item.status === status) return;
-    if (!item.canEdit) return;
-    if (!isDroppableForSource(item.source, status)) return;
-    startTransition(async () => {
-      setOptimistic({ id: item.id, status });
-      if (item.source === 'task') {
-        await updateTaskStatusAction(item.id, status);
-      } else {
-        await updateActivityStatusAction(item.id, status);
-      }
-    });
-  }
 
   function endDrag() {
     setDragId(null);
     setDragSource(null);
     setOverCol(null);
+    onDraggingChange(false);
   }
 
   return (
@@ -59,9 +58,8 @@ export function OverviewBoard({
       style={{ opacity: pending ? 0.9 : 1, transition: 'opacity .15s' }}
     >
       {BOARD_COLUMNS.map((col) => {
-        const colItems = optimistic.filter((it) => it.status === col.id);
-        const canDropHere =
-          dragSource !== null && isDroppableForSource(dragSource, col.id);
+        const colItems = sortWorkItems(items.filter((it) => it.status === col.id));
+        const canDropHere = dragSource !== null && isDroppableForSource(dragSource, col.id);
         return (
           <div
             key={col.id}
@@ -81,8 +79,8 @@ export function OverviewBoard({
                 ? (e) => {
                     e.preventDefault();
                     const id = e.dataTransfer.getData('text/plain');
-                    const it = optimistic.find((x) => x.id === id);
-                    if (it) move(it, col.id);
+                    const it = items.find((x) => x.id === id);
+                    if (it) onMove(it, col.id);
                     endDrag();
                   }
                 : undefined
@@ -108,15 +106,21 @@ export function OverviewBoard({
                 <WorkItemCard
                   key={`${it.source}-${it.id}`}
                   item={it}
+                  meId={meId}
+                  now={now}
                   editable={editable && it.canEdit}
                   dragging={dragId === it.id}
                   pending={pending}
+                  startupOptions={startupOptions}
                   onDragStart={() => {
                     setDragId(it.id);
                     setDragSource(it.source);
+                    onDraggingChange(true);
                   }}
                   onDragEnd={endDrag}
-                  onComplete={() => move(it, 'done')}
+                  onMove={(s) => onMove(it, s)}
+                  onEdit={(e) => onEdit(it, e)}
+                  onDelete={it.source === 'task' ? () => onDelete(it) : undefined}
                 />
               ))}
               {colItems.length === 0 && (

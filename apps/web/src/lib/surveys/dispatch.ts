@@ -4,7 +4,7 @@ import { sendSurveyInvites } from '@/lib/email';
 import { collectSurveyRecipients } from '@platform/shared';
 import { toSurvey, type Survey } from './store';
 
-// Utskick av enkät till eventets deltagare (CLAUDE.md § 39.5). Delad kärna
+// Utskick av enkät till eventets deltagare (CLAUDE.md § 47.5). Delad kärna
 // för BÅDE staffs "Skicka nu" och cron-vägen (/api/internal/send-survey).
 // Körs med superuser eftersom cron saknar användarsession; därför verifieras
 // tenant-likhet mellan enkät och event uttryckligen. Deltagarnas e-post läses

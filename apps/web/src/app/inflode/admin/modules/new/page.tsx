@@ -10,6 +10,8 @@ export const dynamic = 'force-dynamic';
 const ERROR_TEXT: Record<string, string> = {
   slug_invalid: 'Länken kunde inte skapas från namnet. Prova ett tydligare namn.',
   public_slug_taken: 'Länken är upptagen. Prova ett annat namn.',
+  slug_taken:
+    'Det finns redan en modul med det här namnet i er organisation, och ett automatiskt suffix gick inte heller. Välj ett annat namn.',
   collections_missing:
     'Startupkompassen-kollektioner saknas i PocketBase. Kör migrationer/redeploy av PocketBase och försök igen.',
   forbidden: 'Du saknar behörighet att skapa moduler.',
@@ -31,6 +33,9 @@ export default async function NewModulePage({
   const errorKeyRaw = params.error;
   const errorKey = Array.isArray(errorKeyRaw) ? errorKeyRaw[0] : errorKeyRaw;
   const errorText = errorKey ? ERROR_TEXT[errorKey] || ERROR_TEXT.create_failed : null;
+  // Orsaken från actionen (PB:s fältdetaljer / status) — PII-fri, cappad.
+  const detailRaw = params.detail;
+  const errorDetail = (Array.isArray(detailRaw) ? detailRaw[0] : detailRaw)?.slice(0, 400) || null;
 
   return (
     <div className="mx-view-pad mx-narrow">
@@ -53,13 +58,18 @@ export default async function NewModulePage({
               margin: '12px 16px 0',
               padding: '10px 12px',
               borderRadius: 10,
-              border: '1px solid var(--mx-movexum-morkorange)',
-              background: 'var(--mx-movexum-pastell-orange)',
-              color: 'var(--mx-movexum-morkorange)'
+              border: '1px solid var(--movexum-morkorange)',
+              background: 'var(--movexum-pastell-orange)',
+              color: 'var(--movexum-morkorange)'
             }}
             className="mx-t-13"
           >
-            {errorText}
+            <div>{errorText}</div>
+            {errorDetail && (
+              <div className="mx-t-12" style={{ marginTop: 6, opacity: 0.9, lineHeight: 1.45 }}>
+                Orsak: {errorDetail}
+              </div>
+            )}
           </div>
         )}
         <form

@@ -53,7 +53,7 @@ const STEM_TO_COLLECTIONS: ReadonlyArray<readonly [readonly string[], readonly s
   ],
   [['fas', 'phase', 'boost', 'inkubation', 'prescale', 'acceleration'], ['startup_phase_history']],
   [['team', 'grundare', 'medgrundare', 'founder'], ['startup_team_members']],
-  [['kontakt', 'person', 'mentor'], ['contacts', 'startup_contacts']],
+  [['kontakt', 'person', 'mentor', 'kontaktbok', 'ägare', 'agare', 'förfrågan', 'forfragan'], ['contacts', 'startup_contacts', 'contact_requests']],
   [
     ['ekonomi', 'omsättning', 'omsattning', 'bokslut', 'anställd', 'anstalld', 'intäkt', 'intakt', 'revenue', 'årsredovisning', 'arsredovisning'],
     ['startup_financials']
@@ -90,7 +90,10 @@ const STEM_TO_COLLECTIONS: ReadonlyArray<readonly [readonly string[], readonly s
   [['token', 'kostnad', 'förbruk', 'forbruk', 'spend'], ['ai_usage_events']],
   [['deal', 'investerare', 'investor'], ['deals', 'investors']],
   [['partner'], ['partners', 'partner_engagements']],
-  [['uppdrag', 'mission'], ['missions', 'mission_comments']],
+  [
+    ['uppdrag', 'mission', 'projekt', 'tvärfunktion', 'tvarfunktion'],
+    ['missions', 'mission_comments']
+  ],
   [['strategi'], ['strategies', 'strategy_revisions']],
   [['rapport'], ['incubator_reports', 'startup_financials']],
   [['integration', 'synk', 'brevo', 'howspace'], ['integration_records', 'integration_sync_runs']],

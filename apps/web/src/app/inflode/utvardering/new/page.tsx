@@ -26,7 +26,7 @@ export default async function NewSurveyPage({
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) redirect('/inflode');
   const { for: forRaw } = await searchParams;
 
-  // "Skapa uppföljning" från en aktivitet/event/workshop/… (§ 39.4). Källan
+  // "Skapa uppföljning" från en aktivitet/event/workshop/… (§ 47.4). Källan
   // tenant-verifieras här OCH i server-actionen; en okänd referens visas
   // som varning i stället för att tyst bli en fristående enkät.
   const pb = await getServerPb();

@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
+import { describeLoginInfraError, probePocketBase, probeSummary } from '@/lib/pb-health';
 import { parseVerificationToken } from '@/lib/verification-token';
 import { checkRateLimit, recordFailure, clearFailures } from '@/lib/rate-limit';
 
@@ -108,11 +109,12 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
       if (e.status === 403) {
         return { error: 'Kontot är ej verifierat eller saknar behörighet.' };
       }
-      if (e.status === 404) {
-        return { error: 'Users-collectionen saknas i PocketBase — har migrationerna körts?' };
-      }
-      if (!e.status) {
-        return { error: `Kunde inte nå PocketBase (${pbUrl}). Kontrollera POCKETBASE_URL/NEXT_PUBLIC_POCKETBASE_URL.` };
+      // Se api/auth/login/route.ts: 404 kan lika gärna vara proxyn/web-appen
+      // som svarar på PB-adressen — proba /api/health och säg vad den är.
+      if (e.status === 404 || !e.status || e.status >= 500) {
+        const probe = await probePocketBase(pbUrl);
+        console.error('[loginAction] PocketBase probe', { pbUrl, kind: probe.kind, summary: probeSummary(probe) });
+        return { error: describeLoginInfraError(pbUrl, probe) };
       }
       return { error: e.data?.message || e.message || 'Inloggning misslyckades. Försök igen.' };
     }

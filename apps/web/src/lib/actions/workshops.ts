@@ -1327,7 +1327,6 @@ export async function assignWorkshopToStartupAction(
     revalidatePath('/education');
     revalidatePath('/dashboard');
     revalidatePath('/aktivitet');
-    revalidatePath('/pagaende');
     revalidatePath('/mina-aktiviteter');
     revalidatePath('/inkorg');
     revalidatePath(`/startups/${startupId}`);
@@ -1687,7 +1686,6 @@ export async function completeWorkshopAction(
     revalidatePath('/education');
     revalidatePath('/dashboard');
     revalidatePath('/aktivitet');
-    revalidatePath('/pagaende');
     revalidatePath('/mina-aktiviteter');
     if (assignment.startup) revalidatePath(`/startups/${assignment.startup}`);
     return { assignmentId, reportMd };

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { dispatchSurveyInvites } from '@/lib/surveys/dispatch';
 
 // Intern endpoint som PB-hooken survey_dispatch_tick.pb.js POSTar till
-// (CLAUDE.md § 39.5). Samma auth som run-schedule (§ 12.3): delat secret
+// (CLAUDE.md § 47.5). Samma auth som run-schedule (§ 12.3): delat secret
 // MOVEXUM_SCHEDULE_SECRET i header, jämfört i konstant tid. Body: { surveyId }.
 
 export const runtime = 'nodejs';

@@ -43,6 +43,19 @@ export const DOMAIN_WRITE_TOOLS: ReadonlySet<string> = new Set([
   'create_startup_note',
   'create_org_post',
   'update_org_post',
+  'create_contact',
+  'update_contact_field',
+  'request_contact_use',
+  'decide_contact_request',
+  'create_procurement',
+  'create_procurement_calloff',
+  'update_procurement_calloff',
+  'create_funding_project',
+  'create_support_check_type',
+  'create_support_check_application',
+  'create_goal',
+  'add_goal_indicator',
+  'set_goal_status',
   'memory_write'
 ]);
 
@@ -207,6 +220,41 @@ export function buildActionReceipt(input: BuildReceiptInput): AgentActionReceipt
     case 'update_activity_field':
     case 'update_compass_module_field': {
       summary = fieldChangeSummary(data);
+      break;
+    }
+    case 'update_contact_field': {
+      summary = [str(data.name), fieldChangeSummary(data)].filter(Boolean).join(' · ');
+      break;
+    }
+    case 'request_contact_use':
+    case 'decide_contact_request': {
+      const base = genericSummary(args, data);
+      const status = str(data.status);
+      summary = [base, status ? `status: ${status}` : null].filter(Boolean).join(' · ');
+      break;
+    }
+    case 'create_funding_project':
+    case 'create_support_check_type':
+    case 'create_support_check_application': {
+      summary = genericSummary(args, data);
+      break;
+    }
+    case 'create_procurement':
+    case 'create_procurement_calloff':
+    case 'update_procurement_calloff': {
+      const base = genericSummary(args, data);
+      const followups = str(data.followups);
+      summary = [base, followups].filter(Boolean).join(' · ');
+      break;
+    }
+    case 'memory_write': {
+      // Minnesnoteringen syns på /installningar/ai-minne, filtrerad på sin
+      // kategori så personalen hittar den direkt bland många noteringar.
+      const key = str(data.key) ?? str(args.key);
+      const label = str(data.category_label);
+      summary = [key, label ? `kategori: ${label}` : null].filter(Boolean).join(' · ');
+      const cat = str(data.category);
+      href = cat ? `/installningar/ai-minne?kategori=${encodeURIComponent(cat)}` : '/installningar/ai-minne';
       break;
     }
     default:

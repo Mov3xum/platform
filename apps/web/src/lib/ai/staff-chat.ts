@@ -5,6 +5,7 @@ import { runAgentLoop, type AgentLoopStep } from './agent-runtime';
 import { buildChatTools, buildMemoryRecallBlock } from './tools';
 import { getExposedCollections } from './schema';
 import { selectRelevantCollections, buildScopedSchemaSummary } from './schema-scope';
+import { makeToolResolver, scopeTools } from './tool-scope';
 import { buildPortfolioContext, renderPromptTemplate } from './context';
 import { buildKnowledgeContext } from './agent-prompt';
 import {
@@ -120,7 +121,9 @@ const STAFF_TOOL_GUIDANCE =
   '- `memory_read` / `memory_write`: ditt tvärsessions-minne (per tenant). När ' +
   'personalen RÄTTAR dig eller lär dig en bestående regel ("räkna inte lån som ' +
   'investeringar", "Bolag X heter numera Y") — spara det med `memory_write` ' +
-  '(kort `key`, tydlig `content`) så att det gäller även i framtida samtal. ' +
+  '(kort `key`, tydlig `content` och ALLTID en `category`: terminologi | ' +
+  'datatolkning | arbetssatt | bolag | portfolj | processer | ovrigt) så att det ' +
+  'gäller även i framtida samtal och personalen får överblick per kategori. ' +
   'Lagra ALDRIG personuppgifter i minnet, bara generella regler/slutsatser. ' +
   'Inlärt minne injiceras automatiskt i din kontext; använd `memory_read` för ' +
   'fler detaljer.\n' +
@@ -326,6 +329,8 @@ export interface StaffTurnResult {
   model: string;
   tokensIn: number;
   tokensOut: number;
+  /** Antal modellanrop i turen (1 + ett per verktygssteg) — per-turn-metadata § 9.9. */
+  calls: number;
   /** Dokument som agenten genererade under turn:en (för nedladdnings-chips). */
   generatedFiles: GeneratedFileRef[];
   /** Inline-visualiseringar (diagram/KPI-kort) som agenten tog fram under turn:en. */
@@ -424,7 +429,7 @@ export async function runStaffChatTurn(
 
   // Vision-körningar kör verktygslöst (pixtral saknar tool-stöd, § 13.5).
   const useTools = images.length === 0;
-  const tools = useTools
+  const fullTools = useTools
     ? buildChatTools(collections, {
         actor,
         includeMemory: true,
@@ -454,6 +459,16 @@ export async function runStaffChatTurn(
   const schemaBlock = useTools
     ? `\n\n${buildScopedSchemaSummary(collections, selectRelevantCollections(collections, scopeText))}`
     : '';
+  // Skopad verktygsyta (§ 28.4, `tool-scope.ts`): domänspecifika skrivverktyg
+  // skickas bara när de senaste turerna eller agentens persona matchar
+  // domänen; övriga laddas vid behov via `resolveTool` i loopen. Halverar
+  // ungefär prompt-tokens per anrop utan att någon funktion försvinner.
+  const toolScopeText = [
+    scopeText,
+    opts.userMessages.filter((m) => m.role === 'assistant').at(-1)?.content ?? '',
+    opts.agentBlock ?? ''
+  ].join('\n');
+  const tools = fullTools ? scopeTools(fullTools, toolScopeText) : undefined;
   const toolGuidanceBlocks = useTools
     ? STAFF_TOOL_GUIDANCE +
       WRITE_HONESTY_GUIDANCE +
@@ -483,6 +498,7 @@ export async function runStaffChatTurn(
 
   let tokensIn = 0;
   let tokensOut = 0;
+  let calls = 0;
   let lastModel = '';
   const generatedFiles: GeneratedFileRef[] = [];
   const inlineVisuals: InlineVisualRef[] = [];
@@ -518,11 +534,13 @@ export async function runStaffChatTurn(
         webSources
       },
       maxIterations: MAX_TOOL_ITERATIONS,
+      resolveTool: fullTools ? makeToolResolver(fullTools) : undefined,
       onStep: opts.onStep,
       onToken: opts.onToken,
       onUsage: (u) => {
         tokensIn += u.tokensIn;
         tokensOut += u.tokensOut;
+        calls += 1;
         lastModel = u.model;
         return logAiUsage(pb, {
           tenant: user.tenant,
@@ -541,6 +559,7 @@ export async function runStaffChatTurn(
         model: lastModel,
         tokensIn,
         tokensOut,
+        calls,
         generatedFiles,
         visuals: inlineVisuals,
         approvalRequest: approvalRequests[0],

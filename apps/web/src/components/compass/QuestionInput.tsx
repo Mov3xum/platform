@@ -31,38 +31,12 @@ export function QuestionInput({
       );
     case 'choice':
       return (
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div className="mx-qchoices" role="radiogroup">
           {(question.choices || []).map((c, i) => {
             const selected = value === c.value;
             return (
-              <label
-                key={c.value}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 12,
-                  border: `1px solid ${selected ? '#002c40' : 'var(--mx-line)'}`,
-                  background: selected ? '#002c40' : 'var(--mx-paper)',
-                  color: selected ? 'white' : 'var(--mx-ink)',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10
-                }}
-              >
-                <span
-                  className="mx-mono mx-t-xs"
-                  style={{
-                    minWidth: 22,
-                    height: 22,
-                    borderRadius: 99,
-                    display: 'grid',
-                    placeItems: 'center',
-                    background: selected ? 'rgba(255,255,255,0.18)' : 'var(--mx-paper-2)',
-                    border: `1px solid ${selected ? 'transparent' : 'var(--mx-line-soft)'}`
-                  }}
-                >
+              <label key={c.value} className={`mx-qchoice${selected ? ' is-selected' : ''}`}>
+                <span className="mx-qchoice-key" aria-hidden>
                   {String.fromCharCode(65 + i)}
                 </span>
                 <input
@@ -71,9 +45,8 @@ export function QuestionInput({
                   value={c.value}
                   checked={selected}
                   onChange={() => onChange(c.value)}
-                  style={{ display: 'none' }}
                 />
-                {c.label}
+                <span>{c.label}</span>
               </label>
             );
           })}
@@ -82,26 +55,17 @@ export function QuestionInput({
     case 'multi_choice': {
       const arr = Array.isArray(value) ? value : [];
       return (
-        <div style={{ display: 'grid', gap: 8 }}>
-          {(question.choices || []).map((c) => {
+        <div className="mx-qchoices" role="group">
+          {(question.choices || []).map((c, i) => {
             const selected = arr.includes(c.value);
             return (
               <label
                 key={c.value}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 12,
-                  border: `1px solid ${selected ? '#002c40' : 'var(--mx-line)'}`,
-                  background: selected ? 'var(--mx-cyan-tint-2)' : 'var(--mx-paper)',
-                  color: 'var(--mx-ink)',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10
-                }}
+                className={`mx-qchoice is-multi${selected ? ' is-selected' : ''}`}
               >
+                <span className="mx-qchoice-key" aria-hidden>
+                  {selected ? '✓' : String.fromCharCode(65 + i)}
+                </span>
                 <input
                   type="checkbox"
                   checked={selected}
@@ -109,9 +73,8 @@ export function QuestionInput({
                     if (e.target.checked) onChange([...arr, c.value]);
                     else onChange(arr.filter((v) => v !== c.value));
                   }}
-                  style={{ accentColor: '#002c40' }}
                 />
-                {c.label}
+                <span>{c.label}</span>
               </label>
             );
           })}
@@ -185,7 +148,7 @@ function ScaleInput({
         max={10}
         value={num}
         onChange={(e) => onChange(e.target.value)}
-        style={{ width: '100%', accentColor: '#002c40' }}
+        style={{ width: '100%', accentColor: 'var(--mx-accent, #002c40)' }}
       />
       <div
         className="mx-flex mx-mono mx-t-xs mx-muted"

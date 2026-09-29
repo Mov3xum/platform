@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// CLAUDE.md § 39.5 — Utskick av enkät till eventets deltagare. Bara
+// CLAUDE.md § 47.5 — Utskick av enkät till eventets deltagare. Bara
 // AGGREGAT lagras på enkäten (när, hur många) — aldrig mottagarnas
 // e-postadresser (GDPR § 5; adresserna läses transient ur event_signups vid
 // själva utskicket). `send_at` = schemalagt automatiskt utskick (cron-hooken

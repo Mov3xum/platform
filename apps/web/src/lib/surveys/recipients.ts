@@ -4,7 +4,7 @@ import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { collectSurveyRecipients } from '@platform/shared';
 
 /**
- * Antal deltagare med giltig e-post för ett event (§ 39.5). Läser
+ * Antal deltagare med giltig e-post för ett event (§ 47.5). Läser
  * `event_signups` med användarens token (RLS) och superuser-fallback vid
  * PB v0.23.4:s tysta nekande (§ 21.3), tenant-filtrerat i båda fallen.
  * Returnerar bara ett TAL — adresserna lämnar aldrig servern.

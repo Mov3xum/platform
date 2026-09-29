@@ -4,7 +4,7 @@ import { TimeAgo } from './TimeAgo';
 import type { DashboardActivity } from '@/components/DashboardChat';
 
 /**
- * Bolagsnytt på Hemmaplan (CLAUDE.md § 37/§ 32) — den samlade aktivitets-
+ * Bolagsnytt på Översikt (CLAUDE.md § 37/§ 32) — den samlade aktivitets-
  * loggen som en vertikal tidslinje: en hårlinje med prickar, relativ tid i
  * gutter:n, AI-utförda åtgärder märkta med gnista (art. 13). Ren presentation
  * av redan RLS-filtrerad feed; ingen dataväg.
@@ -16,6 +16,8 @@ function activityIcon(act: DashboardActivity): string {
   if (act.kind === 'tool_run') return 'sparkle';
   if (act.kind === 'integration_sync') return 'cloud';
   if (act.kind === 'workshop_run' || act.kind === 'workshop_assignment') return 'cap';
+  if (act.kind === 'mission') return 'flow';
+  if (act.kind === 'support_check') return 'shield';
   switch (act.type) {
     case 'meeting':
       return 'calendar';

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/proto';
 import { validateWorkshopMediaFile, formatMbLimit, MAX_WORKSHOP_IMAGE_BYTES, MAX_WORKSHOP_VIDEO_BYTES } from '@platform/shared';
 import type { WorkshopMediaKind } from '@platform/shared';
+import { resizeImageFile } from '@/lib/image-resize';
 
 /**
  * Bild + video för landningssidan. Laddar upp direkt när en fil väljs (POST
@@ -54,6 +55,17 @@ export function HeroMediaUploader({
   );
 }
 
+// När servern inte ens svarade med JSON (proxy/413/502) — säg VAD som hände
+// i stället för ett generiskt "misslyckades" som inte går att felsöka.
+function describeHttpFailure(status: number): string {
+  if (status === 413) return 'Filen är för stor för servern/proxyn (413). Välj en mindre fil.';
+  if (status === 401) return 'Du är utloggad — logga in igen och försök på nytt.';
+  if (status === 403) return 'Du saknar behörighet att ändra modulens media.';
+  if (status === 404) return 'Modulen hittades inte (404).';
+  if (status >= 500) return `Servern svarade ${status} — försök igen om en stund.`;
+  return `Uppladdningen misslyckades (HTTP ${status}).`;
+}
+
 function MediaSlot({
   moduleId,
   kind,
@@ -75,15 +87,20 @@ function MediaSlot({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function upload(file: File) {
+  async function upload(original: File) {
     setError(null);
-    const check = validateWorkshopMediaFile({ type: file.type, size: file.size }, kind);
+    const check = validateWorkshopMediaFile({ type: original.type, size: original.size }, kind);
     if (!check.ok) {
       setError(check.error);
       return;
     }
     setBusy(true);
     try {
+      // Bilder skalas ned i webbläsaren (max 2400 px, WebP/JPEG) innan de
+      // skickas — en 12 MB mobilbild blir några hundra KB, laddar snabbt på
+      // den publika sidan och stoppas inte av proxyns body-tak. Fail-soft:
+      // originalet skickas om nedskalningen inte går.
+      const file = kind === 'image' ? await resizeImageFile(original) : original;
       const fd = new FormData();
       fd.set('kind', kind);
       fd.set('file', file);
@@ -93,12 +110,12 @@ function MediaSlot({
       });
       const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
       if (!res.ok || !data.url) {
-        setError(data.error || 'Uppladdningen misslyckades.');
+        setError(data.error || describeHttpFailure(res.status));
         return;
       }
       onChanged(data.url);
     } catch {
-      setError('Uppladdningen misslyckades.');
+      setError('Uppladdningen misslyckades — kontrollera nätverket och försök igen.');
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = '';

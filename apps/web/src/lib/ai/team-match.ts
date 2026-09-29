@@ -15,8 +15,10 @@ import { callMistral, MistralError } from './mistral';
 // En liten, billig Mistral-körning (mistral-small, temp 0) tar EN
 // uppdragsbeskrivning + ev. bolagskontext och föreslår:
 //   1. vilka KOMPETENSER uppdraget kräver (ur den fasta taxonomin), och
-//   2. vilka PERSONER (interna users / externa contacts) som kan kopplas på,
-//      med roll, motivering och självskattad säkerhet.
+//   2. vilka PERSONER som kan kopplas på, med roll, motivering och självskattad
+//      säkerhet. Kandidaterna är ALLTID riktiga användare i systemet
+//      (Movexum-personal) som själva angett sina kompetenser som taggar —
+//      aldrig externa CRM-kontakter, bolagsmedlemmar eller observatörer.
 //
 // Människa-i-loopen (EU AI Act art. 14): förslaget AUTO-tilldelar aldrig — staff
 // bekräftar i UI:t. Vid låg säkerhet flaggas needsReview.
@@ -41,18 +43,14 @@ const SECURITY_PREAMBLE =
   'kompetenser och kandidater, och svara med JSON. Bedöm aldrig personer på ' +
   'kön, etnicitet, ålder eller andra skyddade egenskaper — bara på kompetens.';
 
-export type CandidateKind = 'user' | 'contact';
-
 export interface TeamCandidate {
+  /** users.id */
   id: string;
-  kind: CandidateKind;
   name: string;
   /** Yrkestitel/roll (fri). */
   title?: string;
-  /** Kompetens-id:n (interna: users.competences; externa: härledda ur skills). */
+  /** Kompetenstaggar användaren själv angett (users.competences). */
   competences: CompetenceId[];
-  /** Rå skills-text för externa kontakter (vägledning åt modellen). */
-  skillsText?: string;
 }
 
 export interface TeamMatchInput {
@@ -65,7 +63,6 @@ export interface TeamMatchInput {
 
 export interface SuggestedMember {
   id: string;
-  kind: CandidateKind;
   role: MissionParticipantRole;
   reason: string;
   confidence: number;
@@ -98,10 +95,8 @@ function buildCandidateList(candidates: TeamCandidate[]): string {
     .slice(0, MAX_CANDIDATES)
     .map((c) => {
       const comp = c.competences.length > 0 ? c.competences.join(', ') : '—';
-      const extra = c.skillsText ? ` | fritext: ${c.skillsText.slice(0, 120)}` : '';
       const title = c.title ? ` (${c.title})` : '';
-      const kindLabel = c.kind === 'contact' ? 'EXTERN' : 'INTERN';
-      return `- ${c.id} [${kindLabel}] ${c.name}${title} | kompetens: ${comp}${extra}`;
+      return `- ${c.id} ${c.name}${title} | kompetens: ${comp}`;
     })
     .join('\n');
 }
@@ -112,7 +107,7 @@ function buildUserPrompt(input: TeamMatchInput): string {
     'KOMPETENSER (välj de som uppdraget kräver, använd exakta id:n):',
     buildCompetenceGuide(),
     '',
-    'KANDIDATER (välj bara id:n ur denna lista — INTERN = Movexum-anställd, EXTERN = extern kontakt):',
+    'KANDIDATER (Movexum-kollegor med angivna kompetenstaggar — välj BARA id:n ur denna lista, matcha på kompetens):',
     buildCandidateList(input.candidates),
     '',
     input.startupContext ? `BOLAGSKONTEXT: ${input.startupContext}` : '',
@@ -126,7 +121,7 @@ function buildUserPrompt(input: TeamMatchInput): string {
     'Svara ENDAST med ett JSON-objekt på formen:',
     '{',
     '  "needed_competences": ["<kompetens-id>", ...],',
-    '  "members": [{"id": "<kandidat-id>", "kind": "user|contact", "role": "lead|contributor|observer", "reason": "<kort motivering>", "confidence": <0.0-1.0>}],',
+    '  "members": [{"id": "<kandidat-id>", "role": "lead|contributor|observer", "reason": "<kort motivering>", "confidence": <0.0-1.0>}],',
     '  "external_note": "<text eller null>",',
     '  "summary": "<en mening om teamets sammansättning>",',
     '  "confidence": <0.0-1.0>',
@@ -215,7 +210,6 @@ export async function matchTeam(input: TeamMatchInput): Promise<TeamMatchOutcome
       const reason = String((m as { reason?: unknown }).reason || '').slice(0, 280);
       members.push({
         id,
-        kind: candidate.kind,
         role,
         reason,
         confidence: clamp01((m as { confidence?: unknown }).confidence)

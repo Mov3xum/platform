@@ -24,32 +24,32 @@ import type { Role } from './index';
  */
 export const DEFAULT_MODULES_BY_ROLE: Record<Role, readonly string[]> = {
   admin: [
-    'idag', 'inkorg', 'pagaende', 'arshjul', 'filer', 'uppdrag', 'inflode',
-    'startups', 'de_minimis', 'investerare', 'events', 'community',
+    'idag', 'inkorg', 'mal', 'arshjul', 'filer', 'uppdrag', 'inflode',
+    'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
     'integrationer', 'min_profil', 'mina_aktiviteter'
   ],
   incubator_lead: [
-    'idag', 'inkorg', 'pagaende', 'arshjul', 'filer', 'uppdrag', 'inflode',
-    'startups', 'de_minimis', 'investerare', 'events', 'community',
+    'idag', 'inkorg', 'mal', 'arshjul', 'filer', 'uppdrag', 'inflode',
+    'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
     'integrationer', 'min_profil', 'mina_aktiviteter'
   ],
   coach: [
-    'idag', 'inkorg', 'mina_aktiviteter', 'pagaende', 'arshjul', 'filer',
-    'uppdrag', 'inflode', 'startups', 'de_minimis', 'events', 'education',
+    'idag', 'inkorg', 'mina_aktiviteter', 'arshjul', 'filer',
+    'mal', 'uppdrag', 'inflode', 'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'events', 'education',
     'agenter', 'kunskapsbas', 'min_profil'
   ],
   mentor: [
-    'idag', 'inkorg', 'mina_aktiviteter', 'pagaende', 'filer', 'uppdrag',
-    'startups', 'de_minimis', 'education', 'agenter', 'kunskapsbas', 'min_profil'
+    'idag', 'inkorg', 'mina_aktiviteter', 'filer', 'uppdrag',
+    'mal', 'startups', 'kontakter', 'de_minimis', 'checkar', 'education', 'agenter', 'kunskapsbas', 'min_profil'
   ],
   partner: ['idag', 'inkorg', 'filer', 'uppdrag', 'investerare', 'community', 'min_profil'],
   observer: [
-    'idag', 'inkorg', 'mina_aktiviteter', 'pagaende', 'arshjul', 'filer',
-    'startups', 'de_minimis', 'events', 'community'
+    'idag', 'inkorg', 'mina_aktiviteter', 'arshjul', 'filer',
+    'mal', 'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'events', 'community'
   ],
-  startup_member: ['min_oversikt', 'mina_aktiviteter', 'filer', 'de_minimis', 'community']
+  startup_member: ['min_oversikt', 'mina_aktiviteter', 'filer', 'de_minimis', 'checkar', 'community']
 };
 
 /**
@@ -103,7 +103,7 @@ export function defaultModulesForRoles(roles: readonly Role[] | undefined): stri
  *   såg före skiftet) MINUS ev. legacy `disabled_modules` på användaren.
  *   Rollstandarden (`DEFAULT_MODULES_BY_ROLE`) gäller alltså bara vid
  *   kontoskapande — ett befintligt konto tappar aldrig tyst en sida som
- *   sidguards/korslänkar (t.ex. /pagaende → /mina-aktiviteter) förutsätter.
+ *   sidguards/korslänkar (t.ex. bolagskortet → /mina-aktiviteter) förutsätter.
  *   Anroparen skickar `allowedForRoles` (härlett ur `coreModules`, som den
  *   här modulen inte kan importera utan cirkulärt beroende).
  */

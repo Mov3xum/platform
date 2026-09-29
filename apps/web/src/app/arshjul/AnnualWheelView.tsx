@@ -118,7 +118,7 @@ interface Props {
   /** Läsfel/kapning från sidan — visas som banner i stället för ett tomt hjul. */
   readNotice?: string | null;
   /**
-   * Djuplänk (`/arshjul?item=<id>`, t.ex. från Hemmaplans kalender): posten
+   * Djuplänk (`/arshjul?item=<id>`, t.ex. från Översiktens kalender): posten
    * öppnas i sin helhet vid inläsning — redigeringsdialogen för staff,
    * annars fokus + markering i månadslistan.
    */
@@ -402,7 +402,7 @@ export function AnnualWheelView({
     window.setTimeout(() => setHighlightId((cur) => (cur === item.id ? null : cur)), 2400);
   }
 
-  // Djuplänk från Hemmaplan: öppna posten i sin helhet direkt vid inläsning.
+  // Djuplänk från Översikt: öppna posten i sin helhet direkt vid inläsning.
   // Query-parametern tas bort ur URL:en efteråt så en omladdning inte öppnar
   // dialogen igen.
   const openedRef = useRef<string | null>(null);
@@ -1865,7 +1865,7 @@ export function EditorModal({
 
         <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-default bg-surface/95 px-5 py-3 backdrop-blur-sm">
           {form.id ? (
-            // Uppföljning av en kampanj/aktivitet (§ 39.4): öppnar "Ny enkät"
+            // Uppföljning av en kampanj/aktivitet (§ 47.4): öppnar "Ny enkät"
             // förkopplad till posten. Bara för sparade poster (id krävs).
             <Link
               href={`/inflode/utvardering/new?for=${encodeURIComponent(`annual_wheel:${form.id}`)}`}
@@ -2167,7 +2167,7 @@ function CategoryManagerModal({
         <p className="mt-1 text-[12px] text-foreground-muted">
           Kategorierna styr hjulets legend och färg. Bara superadmin kan lägga till eller ta bort
           dem. En kategori som används av aktiviteter måste tömmas först. Bocken{' '}
-          <span className="font-medium text-foreground">Hemmaplan</span> avgör om kategorins
+          <span className="font-medium text-foreground">Översikt</span> avgör om kategorins
           aktiviteter visas i kalendern på startsidan för hela organisationen (t.ex. Event ja,
           Styrelse &amp; VD nej).
         </p>
@@ -2207,7 +2207,7 @@ function CategoryManagerModal({
                 </select>
                 <label
                   className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-[11px] text-foreground-muted"
-                  title="Visa kategorins aktiviteter i kalendern på Hemmaplan"
+                  title="Visa kategorins aktiviteter i kalendern på Översikt"
                 >
                   <input
                     type="checkbox"
@@ -2216,7 +2216,7 @@ function CategoryManagerModal({
                     onChange={(e) => toggleHome(c, e.target.checked)}
                     className="accent-brand"
                   />
-                  Hemmaplan
+                  Översikt
                 </label>
                 <span
                   className="w-12 shrink-0 text-right text-[11px] text-foreground-subtle"
@@ -2286,7 +2286,7 @@ function CategoryManagerModal({
               onChange={(e) => setNewShowOnHome(e.target.checked)}
               className="accent-brand"
             />
-            Visa i kalendern på Hemmaplan
+            Visa i kalendern på Översikt
           </label>
           {previewKey ? (
             <p className="mt-1.5 text-[11px] text-foreground-subtle">

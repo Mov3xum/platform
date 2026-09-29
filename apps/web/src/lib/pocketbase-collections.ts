@@ -39,5 +39,11 @@ export const PB_COLLECTIONS = {
   // Årshjul — verksamhetskalender (migration 1700000133, § 30)
   annualWheelItems: 'annual_wheel_items_collection',
   // Dynamiska årshjuls-kategorier per tenant (migration 1700000139, § 30)
-  annualWheelCategories: 'annual_wheel_categories_collection'
+  annualWheelCategories: 'annual_wheel_categories_collection',
+  // Upphandlingar & excellens-insatser (migrationer 1700000149–151, § 39).
+  // OBS: appkoden adresserar dessa på NAMN (se § 30.4 p. 1).
+  procurements: 'procurements_collection',
+  procurementCalloffs: 'procurement_calloffs_collection',
+  procurementRules: 'procurement_rules_collection',
+  procurementDocuments: 'procurement_documents_collection'
 } as const;

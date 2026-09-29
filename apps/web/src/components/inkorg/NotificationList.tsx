@@ -9,7 +9,13 @@ const KIND_LABEL: Record<NotificationKind, string> = {
   assigned: 'Tilldelad',
   status_change: 'Status ändrad',
   stage_advance: 'Steg klart',
-  due_soon: 'Deadline närmar sig'
+  due_soon: 'Deadline närmar sig',
+  contact_request: 'Förfrågan om kontakt',
+  contact_decision: 'Svar på din förfrågan',
+  support_check_submitted: 'Ny ansökan om stödcheck',
+  support_check_changes: 'Komplettering begärd',
+  support_check_decision: 'Beslut om stödcheck',
+  support_check_comment: 'Kommentar på ansökan'
 };
 
 const KIND_ICON: Record<NotificationKind, string> = {
@@ -18,7 +24,13 @@ const KIND_ICON: Record<NotificationKind, string> = {
   assigned: 'inbox',
   status_change: 'badge-check',
   stage_advance: 'check',
-  due_soon: 'clock'
+  due_soon: 'clock',
+  contact_request: 'user',
+  contact_decision: 'check',
+  support_check_submitted: 'inbox',
+  support_check_changes: 'alert',
+  support_check_decision: 'shield',
+  support_check_comment: 'message'
 };
 
 function fmtRelative(iso: string) {

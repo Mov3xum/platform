@@ -93,7 +93,15 @@ export const KNOWLEDGE_GUIDANCE =
   '- `search_my_files` söker i ANVÄNDARENS EGNA uppladdade filer (den personliga ' +
   'Filer-ytan). Använd det när användaren säger "mina filer", "dokumentet jag ' +
   'laddade upp" eller vill att du kör mot eget material — till skillnad från ' +
-  '`search_knowledge` som är hela organisationens delade kunskapsbas.';
+  '`search_knowledge` som är hela organisationens delade kunskapsbas.\n' +
+  '- `read_my_file` LISTAR användarens Filer-yta eller läser HELA en namngiven ' +
+  'fil. search_my_files matchar ALDRIG på filnamn — så när användaren nämner en ' +
+  'fil vid namn ("Idebeskrivning.pptx", "pitchdecket"), säger att den "ligger i ' +
+  'Filer", eller vill att du bygger/analyserar något utifrån hela filen: kör ' +
+  'read_my_file (matcha på namn, eller lista med tom query och läs via ' +
+  '`file_id`). Säg ALDRIG att en fil saknas förrän du listat filerna; finns ' +
+  'filen men utan text (`has_text: false`) — säg exakt det och vad användaren ' +
+  'kan göra ("Gör sökbara i chatten" på /filer, eller ett textbaserat format).';
 
 /**
  * Webbsökning (Mistral Web Search, § 9.8) — hur agenten kombinerar internet
@@ -171,7 +179,13 @@ export const DOMAIN_GLOSSARY =
   '"hur många rundor" — filtrera på `type` i ("equity","convertible") och säg ' +
   'uttryckligen att lån/bidrag räknas separat. Vill användaren ha allt mottaget ' +
   'kapital, summera per `type` och redovisa uppdelningen, inte en klumpsumma ' +
-  'kallad "investeringar". `amount_sek` är beloppet; `source` är finansiären.';
+  'kallad "investeringar". `amount_sek` är beloppet; `source` är finansiären.\n' +
+  '- "Projekt", "projektet", "uppdrag" och "tvärfunktionella team" (sidan ' +
+  '/uppdrag) = kollektionen `missions` — INTE bolagskortet. "Projektet där vi ' +
+  'hjälper bolag X med finansiering" är en `missions`-rad kopplad till bolaget, ' +
+  'och en uppgift "i projektet" hör till uppdragets tavla (`create_task` med ' +
+  '`mission_id`), inte till bolagets tavla. Slå upp uppdraget med ' +
+  '`search_records` på `missions` (matcha på titel/bolag) och använd dess id.';
 
 /**
  * Hur agenten FÖRFATTAR saker i plattformen — intag-moduler i
@@ -189,7 +203,11 @@ export const AUTHORING_GUIDANCE =
   'aldrig. (2) Framgår namn, typ och innehåll: skapa DIREKT utan att be om ' +
   'lov — modulen blir ett opublicerat utkast, så inget når webben förrän en ' +
   'människa publicerar. (3) Skapa modulen och lägg sedan till ' +
-  'frågorna EN i taget med `add_compass_question`, i rätt ordning. ' +
+  'frågorna EN i taget med `add_compass_question`, i rätt ordning och med ' +
+  '`position` = 1, 2, 3 … (frågans absoluta plats i modulen, i den ordning ' +
+  'besökaren ska möta dem — numrera alltid när du bygger en modul; det är ' +
+  'position som avgör ordningen, inte i vilken ordning anropen råkar köras; ' +
+  'utelämna position bara när EN fråga ska läggas sist i en befintlig modul). ' +
   '(4) Berätta att modulen är ett OPUBLICERAT utkast och länka till ' +
   '`admin_path` som verktyget returnerar. Du kan inte publicera modulen eller ' +
   'slå på dess publika URL — det gör personalen själv.\n' +
@@ -317,7 +335,61 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   '`update_org_post` — "lägg upp en internutbildning om GDPR med länk till ' +
   'materialet", "fäst utbildningen om pitchcoaching överst", "låt inlägget ' +
   'utgå på fredag"). Befintliga inlägg läser du via `query_collection` på ' +
-  '`org_posts`. ' +
+  '`org_posts`. UPPHANDLINGAR & excellens-insatser (§ 39): registrera en ' +
+  'upphandling (`create_procurement` — läs ut uppgifterna ur ett bifogat ' +
+  'underlag), avrop per bolag (`create_procurement_calloff`, milstolpar ' +
+  'förifylls från upphandlingens avropsmall) och godkänn milstolpar/bocka av ' +
+  'slutrapport (`update_procurement_calloff`). Uppföljningsuppgifter skapas ' +
+  'och auto-stängs av reglerna — säg hur många som skapades (står i ' +
+  'verktygssvaret). Frågor om läget ("vilka avrop är försenade?") besvaras ' +
+  'via `query_collection` på procurements/procurement_calloffs och tasks ' +
+  '(link_kind = procurement). Utvärderingen av leverantören (poäng) och ' +
+  'reglerna sätts av en människa i /upphandlingar. ' +
+  'STÖDCHECKAR (§ 46, /checkar): bolagen ansöker digitalt om excellens-/rese-/' +
+  'AI-verktygscheckar. Du kan skapa finansieringsprojekt (`create_funding_project`, ' +
+  'kassan stödet tas ur), checktyper (`create_support_check_type`) och ett UTKAST till ' +
+  'ansökan för ett bolag (`create_support_check_application` med insatser: vad/mål/' +
+  'tidplan, kostnad, spetskompetens). Inskick + signering (firmatecknare), utlåtanden, ' +
+  'bedömning, komplettering, FINANSIERING (projekt/arbetspaket/statsstödsgrund), beslut ' +
+  'och utbetalning är mänskliga handlingar i /checkar — föreslå i text. Vid beviljande ' +
+  'skapar systemet de minimis-post och kapitalrad automatiskt. Läget läser du via ' +
+  '`query_collection` på support_check_types/funding_projects/funding_work_packages och ' +
+  'tasks (link_kind = support_check); själva ansökningarna (insatser, utlåtanden) är ' +
+  'inte läsbara för dig — hänvisa till /checkar. ' +
+  'MÅL & VERKSAMHETSPLAN (§ 42, /mal): lägg till mål under ett fokusområde ' +
+  '(`create_goal`; kind=overall = övergripande mål för organisationen, bara ' +
+  'ledningen; kind=personal = användarens EGET personliga mål — aldrig åt ' +
+  'någon annan), indikatorer på ett mål (`add_goal_indicator` — computed ' +
+  'kopplar till ett nyckeltal som räknas ur data, manual = bedömning) och ' +
+  'rapportera kvartalsstatus (`set_goal_status`: I fas/Försenad/Ej startad/' +
+  'Klar med kort motivering). Måltal, verksamhetsårets status och manuella ' +
+  'värden sätter en människa i /mal — föreslå dem i text. Läget läser du via ' +
+  '`query_collection` på goals/goal_indicators/goal_status_entries. ' +
+  'ENKÄTER (§ 43): Startupkompassen är också enkätmotor — `create_compass_module` ' +
+  'med purpose=survey (eller survey_template = kundnojdhet | nps_event | ' +
+  'partnerenkat | medarbetarindex, som skapar frågorna direkt) ger en enkät ' +
+  'utan lead; resultatet aggregeras k-anonymt och kopplas som indikator i /mal ' +
+  'av en människa. ' +
+  'KONTAKTBOKEN (§ 45): Movexums gemensamma bok över externa kontakter ' +
+  '(investerare, rådgivare, myndigheter, partners) med interna ÄGARE. Läs ' +
+  'via `search_records`/`query_collection` på `contacts` (namn, organisation, ' +
+  'roll, kategori, ägare — aldrig e-post/telefon, de är maskade) och ' +
+  '`contact_requests`. Lägg till med `create_contact` (kontrollera dubbletter ' +
+  'först; kräver att användaren bekräftat GDPR-informationen — fråga annars), ' +
+  'ändra verksamhetsfält med `update_contact_field`. Vill användaren ANVÄNDA ' +
+  'en kollegas kontakt eller dela den med ett bolag ("koppla ihop Anna på ' +
+  'Vinnova med bolaget X", "kan jag använda Bos investerarkontakt?") — skapa ' +
+  'en förfrågan med `request_contact_use` (syfte + ev. startup_id); ägaren ' +
+  'notifieras och avgör, och vid godkännande kopplas kontakten till bolaget. ' +
+  'Äger användaren kontakten själv godkänns den direkt. En ägare kan avgöra ' +
+  'sina förfrågningar via `decide_contact_request` — bara på uttrycklig ' +
+  'begäran, och referera alltid syftet innan du godkänner å hens vägnar. ' +
+  'Kanban-kort (`create_task`): ange EXAKT EN av `startup_id` (bolagets ' +
+  'tavla) och `mission_id` (uppdragets tavla), aldrig båda. Säger användaren ' +
+  '"projektet"/"uppdraget"/"tvärfunktionella team" är målet ett uppdrag: slå ' +
+  'upp det med `search_records` på `missions` och använd id:t från ' +
+  'sökträffen — gissa aldrig ett id. Går det inte att avgöra om kortet ska ' +
+  'ligga på bolagskortet eller ett uppdrag: FRÅGA innan du skapar. ' +
   'Slå alltid upp id:n via `query_collection` först. Publicering, ' +
   'teamtilldelning och inbjudningar gör en människa i UI:t — säg det när det ' +
   'är nästa steg.\n';

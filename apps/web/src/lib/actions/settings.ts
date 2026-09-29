@@ -98,7 +98,7 @@ export async function saveAiBudgetAction(
   }
 
   revalidatePath('/installningar');
-  revalidatePath('/installningar/ai-kostnad');
+  revalidatePath('/installningar/ai-analys');
   return { success: true };
 }
 

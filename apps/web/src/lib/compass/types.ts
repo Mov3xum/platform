@@ -2,9 +2,9 @@
 // Hjälper de andra modul-filerna att hålla sig till PocketBase-schemat
 // från migration 1700000039 + 1700000049 + 1700000108.
 
-import type { ResultBucket } from '@platform/shared';
+import type { CompassLayout, CompassPurpose, ResultBucket, SurveySubjectKind } from '@platform/shared';
 
-export type { ResultBucket };
+export type { CompassLayout, ResultBucket };
 
 export type LeadStatus =
   | 'new'
@@ -152,6 +152,9 @@ export interface Conversation {
   lead?: string;
   module_slug?: string;
   session_token?: string;
+  /** Enkätens subjekt (migration 1700000160, § 43). */
+  subject_kind?: SurveySubjectKind;
+  subject_id?: string;
   extracted_data?: Record<string, unknown>;
   status?: 'active' | 'completed' | 'abandoned';
   created: string;
@@ -176,6 +179,12 @@ export interface CompassModule {
   name: string;
   description?: string;
   flow_type: FlowType;
+  /** Intag (lead) eller enkät (svar utan lead) — saknat = intake (migration 1700000160, § 43). */
+  purpose?: CompassPurpose;
+  /** Vad en enkät handlar om: bolag/event/partner/personal. */
+  subject_kind?: SurveySubjectKind;
+  /** Anonym enkät: ingen session, ingen ip-hash, inget lead; aggregat vid ≥ 5 svar. */
+  anonymous?: boolean;
   system_prompt?: string;
   consent_note?: string;
   is_active?: boolean;
@@ -198,6 +207,12 @@ export interface CompassModule {
   hero_image?: string;
   /** Omslagsvideo (filnamn på compass_modules.hero_video, migration 1700000141). */
   hero_video?: string;
+  /**
+   * Mall för hela den publika sidan (migration 1700000154, § 23.7):
+   * classic | split_left | split_right | cover | panel | minimal. Saknat/okänt
+   * värde ⇒ `classic` via `normalizeCompassLayout` (bakåtkompatibelt).
+   */
+  layout?: CompassLayout | string;
   chat_persona?: string;
   /** Max antal AI-utbyten i chat-flödet (0 = obegränsat). */
   max_exchanges?: number;
@@ -254,6 +269,8 @@ export interface CompassQuestion {
   }[];
   required?: boolean;
   sort_order?: number;
+  /** Autodate (migration 1700000126) — tiebreak i `sortCompassQuestions`. */
+  created?: string;
 }
 
 /** Kedjad nästa-modul-länk (migration 1700000124) — visas efter slutfört flöde. */

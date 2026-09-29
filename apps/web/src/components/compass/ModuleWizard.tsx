@@ -21,6 +21,8 @@ interface Props {
   apiBase?: string;
   /** Skickas i submit-body för publika flöden där samtycke krävs. */
   consent?: boolean;
+  /** Enkätens subjekt (`?om=<id>`, § 43) — skickas med i submit-body. */
+  subject?: string | null;
 }
 
 export function ModuleWizard({
@@ -30,6 +32,7 @@ export function ModuleWizard({
   redirectUrl,
   apiBase = '/api/inflode/m',
   consent,
+  subject,
   nextModule
 }: Props) {
   const [step, setStep] = useState(0);
@@ -104,7 +107,8 @@ export function ModuleWizard({
           answers,
           attribution,
           consent,
-          contact_preference: contactPreference || undefined
+          contact_preference: contactPreference || undefined,
+          subject: subject || undefined
         })
       });
       if (!res.ok) {
@@ -142,31 +146,15 @@ export function ModuleWizard({
         <span className="mx-grow" />
         <span>{progress}%</span>
       </div>
-      <div
-        style={{
-          height: 4,
-          borderRadius: 99,
-          background: 'var(--mx-line-soft)',
-          overflow: 'hidden'
-        }}
-      >
-        <div
-          style={{
-            height: '100%',
-            width: `${progress}%`,
-            background: '#002c40',
-            transition: 'width 200ms ease'
-          }}
-        />
+      <div className="mx-qprogress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+        <i style={{ width: `${progress}%` }} />
       </div>
 
       {/* Question */}
       <div>
-        <div className="mx-disp" style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.3 }}>
-          {q.prompt}
-        </div>
+        <div className="mx-qprompt">{q.prompt}</div>
         {q.help_text && (
-          <div className="mx-t-12 mx-muted" style={{ marginTop: 8 }}>
+          <div className="mx-t-13 mx-muted" style={{ marginTop: 8, lineHeight: 1.5 }}>
             {q.help_text}
           </div>
         )}

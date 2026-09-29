@@ -23,6 +23,8 @@ interface Props {
   brandName?: string;
   /** Kedjad nästa modul (migration 1700000124). */
   nextModule?: NextModuleLink | null;
+  /** Enkätsubjekt ur `?om=<id>` (§ 43) — skickas med, valideras server-side. */
+  subject?: string | null;
 }
 
 interface QuizResult {
@@ -44,7 +46,8 @@ export function ModuleQuiz({
   successMessage,
   moduleName,
   brandName,
-  nextModule
+  nextModule,
+  subject
 }: Props) {
   const [step, setStep] = useState(0);
   // Besökta steg (för "Tillbaka") — hopplogik (next_key) kan skippa frågor,
@@ -201,7 +204,8 @@ export function ModuleQuiz({
           contact,
           attribution,
           consent,
-          contact_preference: contactPreference || undefined
+          contact_preference: contactPreference || undefined,
+          subject: subject || undefined
         })
       });
       if (!res.ok) {
@@ -259,13 +263,13 @@ export function ModuleQuiz({
         <span className="mx-grow" />
         <span>{progress}%</span>
       </div>
-      <div style={{ height: 4, borderRadius: 99, background: 'var(--mx-line-soft)', overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${progress}%`, background: '#002c40', transition: 'width 200ms ease' }} />
+      <div className="mx-qprogress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+        <i style={{ width: `${progress}%` }} />
       </div>
 
       {onContactStep ? (
         <div style={{ display: 'grid', gap: 12 }}>
-          <div className="mx-disp" style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.3 }}>
+          <div className="mx-qprompt">
             {wantsContact ? 'Lämna dina uppgifter' : 'Vill du att vi hör av oss? (frivilligt)'}
           </div>
           <p className="mx-muted mx-t-12">
@@ -318,11 +322,9 @@ export function ModuleQuiz({
         </div>
       ) : (
         <div>
-          <div className="mx-disp" style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.3 }}>
-            {questions[step]?.prompt}
-          </div>
+          <div className="mx-qprompt">{questions[step]?.prompt}</div>
           {questions[step]?.help_text && (
-            <div className="mx-t-12 mx-muted" style={{ marginTop: 8 }}>
+            <div className="mx-t-13 mx-muted" style={{ marginTop: 8, lineHeight: 1.5 }}>
               {questions[step]?.help_text}
             </div>
           )}

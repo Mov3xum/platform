@@ -143,13 +143,7 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
       approval_request: m.approval_request,
       meeting_request: m.meeting_request,
       sources: m.sources,
-      model: m.role === 'assistant' ? m.model : undefined,
-      // Turens tokens (in + ut, per-turn-metadata § 9.9) → inline miljöchip
-      // under varje assistant-svar.
-      tokens:
-        m.role === 'assistant'
-          ? (Number(m.tokens_in) || 0) + (Number(m.tokens_out) || 0)
-          : undefined
+      model: m.role === 'assistant' ? m.model : undefined
     }));
 }
 

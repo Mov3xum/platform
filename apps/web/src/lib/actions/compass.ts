@@ -14,11 +14,21 @@ import {
 } from '@/lib/compass/store';
 import { marketScanLead, reviewLead, scoreLead } from '@/lib/compass/chat';
 import { logAgentAction } from '@/lib/core/write';
+import { nextCompassQuestionSortOrder } from '@/lib/core/write/compass';
+import { describePbError, pbFieldCodes, pbFieldErrors, pbStatus } from '@/lib/pb-error';
 import {
   LEAD_STATUS_ORDER,
   type LeadStatus
 } from '@/lib/compass/types';
-import { ALL_PHASES, validateWorkshopMediaFile, type StartupPhase } from '@platform/shared';
+import {
+  ALL_PHASES,
+  DEFAULT_COMPASS_LAYOUT,
+  normalizeCompassLayout,
+  validateWorkshopMediaFile,
+  type StartupPhase,
+  normalizeCompassPurpose,
+  normalizeSurveySubjectKind
+} from '@platform/shared';
 
 const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
 const CONVERT_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
@@ -386,9 +396,12 @@ function statusOf(err: unknown): number | undefined {
   return undefined;
 }
 
-// Skriv via app-user-klienten först; faller tillbaka på superuser vid 400/403
-// (PB v0.23.4:s rule-eval-bugg, CLAUDE.md § 21.3 — annars behöriga staff-
-// skrivningar nekas tyst → server-actionen kastade 500). Samma mönster som
+// Skriv via app-user-klienten först; faller tillbaka på superuser vid
+// 400/403/404 (PB v0.23.4:s rule-eval-bugg, CLAUDE.md § 21.3 — annars
+// behöriga staff-skrivningar nekas tyst → server-actionen kastade 500).
+// 404 ingår: PocketBase svarar "The requested resource wasn't found." — inte
+// 403 — när update-/delete-regeln filtrerar bort posten, så "Publicera" på en
+// modul gav en ClientResponseError 404 för behörig staff. Samma mönster som
 // lib/actions/onboarding.ts + education-documents.ts. Roll + tenant verifieras
 // ALLTID i server-actionen INNAN detta anropas — superusern är en robusthets-
 // fallback, inte behörighetsgränsen.
@@ -400,12 +413,59 @@ async function writeWithFallback<T>(
     return await run(pb);
   } catch (err) {
     const status = statusOf(err);
-    if (status === 400 || status === 403) {
+    if (status === 400 || status === 403 || status === 404) {
       const su = await getSuperuserPb();
       if (su.ok) return run(su.pb);
     }
     throw err;
   }
+}
+
+type ModuleRow = {
+  id: string;
+  tenant?: string;
+  slug: string;
+  name?: string;
+  public_slug?: string;
+  is_active?: boolean;
+  public_url_enabled?: boolean;
+  purpose?: string;
+  flow_type?: string;
+};
+
+/**
+ * Läser en modul och verifierar att den tillhör den inloggades tenant.
+ *
+ * Läsningen görs med användartoken först; PB v0.23.4 kan TYST neka
+ * view-regeln för behörig staff (§ 21.3) och svarar då 404 — det var
+ * grundorsaken till "publicera modul → 404": `updateModuleAction` läste modulen
+ * utan fallback och kastade PB:s ClientResponseError rakt ut. Nu försöker vi
+ * som superuser och gör tenant-kontrollen i koden (det är den faktiska
+ * gränsen här — klienten är aldrig säkerhetsgränsen). Finns modulen inte
+ * alls, eller tillhör den en annan tenant, kastas ett tydligt fel.
+ */
+async function getModuleInTenant(pb: PocketBase, id: string, tenant: string): Promise<ModuleRow> {
+  let row: ModuleRow | null = null;
+  try {
+    row = await pb.collection('compass_modules').getOne<ModuleRow>(id);
+  } catch (err) {
+    const status = statusOf(err);
+    if (status === 400 || status === 403 || status === 404) {
+      const su = await getSuperuserPb();
+      if (su.ok) {
+        try {
+          row = await su.pb.collection('compass_modules').getOne<ModuleRow>(id);
+        } catch {
+          row = null;
+        }
+      }
+    } else {
+      throw err;
+    }
+  }
+  if (!row) throw new Error('Modulen hittades inte.');
+  if (String(row.tenant ?? '') !== tenant) throw new Error('Forbidden');
+  return row;
 }
 
 function slugify(s: string): string {
@@ -437,10 +497,14 @@ export async function createModuleAction(formData: FormData) {
   const flowType = String(formData.get('flow_type') || 'chat');
   const publicEnabled = formData.get('public_url_enabled') === 'on';
   const isActive = formData.get('is_active') === 'on';
+  const purpose = normalizeCompassPurpose(formData.get('purpose'));
 
   if (!name) throw new Error('Modul måste ha ett namn');
   if (!FLOW_TYPES.includes(flowType as (typeof FLOW_TYPES)[number])) {
     throw new Error('Ogiltig flow_type');
+  }
+  if (purpose === 'survey' && flowType === 'chat') {
+    throw new Error('En enkät är ett formulär eller quiz — inte en AI-chatt (§ 43).');
   }
 
   const slug = slugify(slugRaw || name);
@@ -451,39 +515,97 @@ export async function createModuleAction(formData: FormData) {
 
   const pb = await getServerPb();
   let createdSlug = slug;
-  // public_slug är GLOBALT unik (migration 1700000108). Vi kan inte läsa andra
-  // tenants moduler med användartoken, så vi försöker den rena sluggen och
-  // faller tillbaka på ett suffix om DB:n nekar pga unik-konflikt.
-  async function createWith(publicSlug: string) {
+  // Två unika index kan krocka: (tenant, slug) — den interna sluggen som
+  // härleds ur namnet — och den GLOBALT unika public_slug (migration
+  // 1700000108). Ett namn som redan använts av en annan modul i tenanten gav
+  // tidigare "Kunde inte skapa modulen" utan orsak: bara public_slug fick ett
+  // suffix i omförsöket, aldrig den interna sluggen. Nu suffixas BÅDA vid
+  // krock och försöket görs om (max tre gånger), så "Är du redo?" kan skapas
+  // igen som `ar-du-redo-2`. Modulens visningsnamn påverkas inte.
+  async function createWith(internalSlug: string, publicSlug: string) {
     return writeWithFallback(pb, (client) =>
-      client.collection('compass_modules').create({
+      client.collection('compass_modules').create<{ id: string; slug: string }>({
         tenant: user.tenant,
-        slug: createdSlug,
+        slug: internalSlug,
         public_slug: publicSlug,
         name,
         description,
         flow_type: flowType,
         is_active: isActive,
         public_url_enabled: publicEnabled,
-        // Nya moduler skapar lead som default (steg 4-valet, migration 1700000125).
-        create_lead: true,
+        // Nya moduler skapar lead som default (steg 4-valet, migration 1700000125);
+        // en ENKÄT (§ 43) gör det aldrig.
+        purpose,
+        create_lead: purpose !== 'survey',
         sort_order: 999
       })
     );
   }
+  function isSlugConflict(err: unknown): boolean {
+    const codes = pbFieldCodes(err);
+    const msgs = pbFieldErrors(err);
+    return Boolean(
+      codes.slug || codes.public_slug || codes.tenant ||
+      /unique/i.test(`${msgs.slug ?? ''} ${msgs.public_slug ?? ''} ${msgs.tenant ?? ''}`)
+    );
+  }
   let createdId = '';
+  let createError: { code: string; detail: string } | null = null;
   try {
-    let rec;
-    try {
-      rec = await createWith(publicSlugRaw);
-    } catch {
-      rec = await createWith(`${publicSlugRaw}-${Math.random().toString(36).slice(2, 6)}`);
+    let rec: { slug: string; id: string } | null = null;
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 3 && !rec; attempt++) {
+      const suffix = attempt === 0 ? '' : `-${attempt + 1}`;
+      try {
+        rec = await createWith(`${slug}${suffix}`, `${publicSlugRaw}${suffix}`);
+      } catch (err) {
+        lastErr = err;
+        // Bara en unik-krock motiverar ett nytt försök med suffix — andra fel
+        // (regel-nekande, saknat fält, nere PB) skulle bara upprepas och dölja
+        // den riktiga orsaken bakom ett andra, likadant fel.
+        if (!isSlugConflict(err)) throw err;
+      }
     }
+    if (!rec) throw lastErr ?? new Error('Kunde inte skapa modulen.');
     createdSlug = rec.slug;
     createdId = String(rec.id);
   } catch (err) {
-    const code = toErrorCode(err);
-    redirect(`/inflode/admin/modules/new?error=${code}`);
+    // PII-fri logg (CLAUDE.md § 10.3 A.8.15): status + fältnycklar/koder,
+    // aldrig innehåll. Tidigare svaldes felet till ett generiskt
+    // "Kunde inte skapa modulen" som inte gick att felsöka.
+    const status = pbStatus(err);
+    const fieldCodes = pbFieldCodes(err);
+    console.error('[compass] createModuleAction failed', {
+      tenantId: user.tenant,
+      userId: user.id,
+      status,
+      fieldCodes,
+      message: err instanceof Error ? err.message : String(err ?? '')
+    });
+    const hasFieldErrors = Object.keys(fieldCodes).length > 0;
+    let code = toErrorCode(err);
+    let detail: string;
+    if (isSlugConflict(err)) {
+      code = 'slug_taken';
+      detail = describePbError(err, 'Namnet (länken) används redan av en annan modul, även med suffix.');
+    } else if (hasFieldErrors) {
+      // Valideringsfel från PB — superuser-reserven hjälper inte här och ska
+      // inte pekas ut; fältdetaljerna ÄR orsaken.
+      detail = describePbError(err, `PocketBase avvisade värdena (HTTP ${status ?? '?'}).`);
+    } else {
+      detail = describePbError(
+        err,
+        status === 400 || status === 403 || status === 404
+          ? `PocketBase nekade skrivningen (HTTP ${status}) utan fältfel och superuser-reserven kunde inte ta över — kontrollera POCKETBASE_SUPERUSER_EMAIL/PASSWORD i web-appens miljö samt compass_modules.createRule (CLAUDE.md § 21.3).`
+          : 'Okänt fel från PocketBase.'
+      );
+    }
+    createError = { code, detail: detail.slice(0, 400) };
+  }
+  if (createError) {
+    // redirect() kastar — måste ligga UTANFÖR try/catch.
+    const qs = new URLSearchParams({ error: createError.code, detail: createError.detail });
+    redirect(`/inflode/admin/modules/new?${qs.toString()}`);
   }
 
   // Ändringslogg (CLAUDE.md § 32): UI-skapade moduler loggas i `agent_actions`
@@ -509,6 +631,27 @@ export async function createModuleAction(formData: FormData) {
   redirect(`/inflode/admin/modules/${createdSlug}`);
 }
 
+// Vad Spara-knappen ska göra utöver att spara fälten. `publish` bockar i
+// Aktiv + Publicerad publikt och säkrar en publik slug; `unpublish` stänger
+// den publika länken. Okänt värde = vanlig sparning.
+type ModuleSaveIntent = 'save' | 'publish' | 'unpublish';
+
+function parseSaveIntent(v: unknown): ModuleSaveIntent {
+  return v === 'publish' || v === 'unpublish' ? v : 'save';
+}
+
+function moduleEditorPath(slug: string, params: Record<string, string>): string {
+  const qs = new URLSearchParams(params).toString();
+  return `/inflode/admin/modules/${slug}${qs ? `?${qs}` : ''}`;
+}
+
+/**
+ * Sparar modulformuläret (alla steg postas i ETT anrop, § 23.7) och
+ * redirectar tillbaka till editorn med `?ok=` eller `?error=` så att
+ * användaren alltid får ett kvitto — tidigare returnerade actionen tyst
+ * (ingen redirect, ingen banner) och fel kastades rakt in i den globala
+ * felvyn, vilket upplevdes som att "Spara & klart" inte gjorde någonting.
+ */
 export async function updateModuleAction(formData: FormData) {
   const user = await requireUser();
   if (!hasRole(user.roles, [...MANAGE_ROLES])) {
@@ -518,13 +661,47 @@ export async function updateModuleAction(formData: FormData) {
   if (!id) throw new Error('Invalid input');
 
   const pb = await getServerPb();
-  // Verifiera tenant
-  const existing = await pb.collection('compass_modules').getOne(id);
-  if (existing.tenant !== user.tenant) throw new Error('Forbidden');
+  // Verifiera tenant (superuser-fallback vid tyst nekad view-regel, § 21.3).
+  const existing = await getModuleInTenant(pb, id, user.tenant);
+  const intent = parseSaveIntent(formData.get('intent'));
 
+  let errorMessage: string | null = null;
+  try {
+    await applyModuleUpdate(pb, user, existing, formData, intent);
+  } catch (err) {
+    errorMessage = err instanceof Error ? err.message : 'Okänt fel';
+  }
+
+  revalidatePath('/inflode');
+  revalidatePath('/inflode/admin/modules');
+  revalidatePath(`/inflode/admin/modules/${existing.slug}`);
+
+  // redirect() kastar — måste ligga UTANFÖR try/catch.
+  if (errorMessage) {
+    redirect(moduleEditorPath(existing.slug, { error: errorMessage.slice(0, 300) }));
+  }
+  redirect(
+    moduleEditorPath(existing.slug, {
+      ok: intent === 'publish' ? 'published' : intent === 'unpublish' ? 'unpublished' : 'saved'
+    })
+  );
+}
+
+async function applyModuleUpdate(
+  pb: PocketBase,
+  user: { id: string; tenant: string },
+  existing: ModuleRow,
+  formData: FormData,
+  intent: ModuleSaveIntent
+): Promise<void> {
+  const id = existing.id;
   const maxExchangesRaw = String(formData.get('max_exchanges') || '').trim();
   const maxExchanges = Number(maxExchangesRaw);
 
+  // Syfte (§ 43). Bara satt när formuläret skickar fältet (äldre formulär
+  // lämnar det orört); normaliseras alltid — okänt ⇒ intake.
+  const purposeRaw = formData.get('purpose');
+  const wantedPurpose = purposeRaw === null ? null : normalizeCompassPurpose(String(purposeRaw));
   const patch: Record<string, unknown> = {
     name: String(formData.get('name') || '').trim(),
     description: String(formData.get('description') || '').trim(),
@@ -544,16 +721,42 @@ export async function updateModuleAction(formData: FormData) {
     require_email: formData.get('require_email') === 'on',
     require_phone: formData.get('require_phone') === 'on',
     require_organization: formData.get('require_organization') === 'on',
-    // Steg 4: "Skapa lead i Startupkompassen när modulen slutförs".
-    create_lead: formData.get('create_lead') === 'on',
+    // Steg 4: "Skapa lead i Startupkompassen när modulen slutförs" — en
+    // ENKÄT (§ 43) skapar aldrig lead oavsett kryssruta.
+    create_lead: wantedPurpose === 'survey' ? false : formData.get('create_lead') === 'on',
     notify_emails: String(formData.get('notify_emails') || '').trim().slice(0, 1000),
     is_active: formData.get('is_active') === 'on',
     public_url_enabled: formData.get('public_url_enabled') === 'on'
   };
 
+  // Mall för den publika sidan (§ 23.7). Normaliseras alltid (okänt ⇒ classic)
+  // — klienten är aldrig säkerhetsgränsen. Bara satt när formuläret skickar
+  // fältet, så äldre formulär/anrop lämnar mallen orörd.
+  const layoutRaw = formData.get('layout');
+  const wantedLayout = layoutRaw === null ? null : normalizeCompassLayout(String(layoutRaw));
+  if (wantedLayout) patch.layout = wantedLayout;
+  if (wantedPurpose) {
+    patch.purpose = wantedPurpose;
+    patch.subject_kind = normalizeSurveySubjectKind(formData.get('subject_kind'));
+    patch.anonymous = wantedPurpose === 'survey' && formData.get('anonymous') === 'on';
+  }
+
   // Publik slug (global unik). Bara sätt om angiven — tom lämnar oförändrad.
   const publicSlug = slugify(String(formData.get('public_slug') || ''));
   if (publicSlug) patch.public_slug = publicSlug;
+
+  // Publicera-/Avpublicera-knappen vinner över kryssrutorna: den ska aldrig
+  // kunna "misslyckas tyst" för att en ruta glömts. Publicering kräver en
+  // publik slug — saknas den härleds den ur den interna sluggen.
+  if (intent === 'publish') {
+    patch.is_active = true;
+    patch.public_url_enabled = true;
+    if (!publicSlug && !existing.public_slug) {
+      patch.public_slug = slugify(existing.slug);
+    }
+  } else if (intent === 'unpublish') {
+    patch.public_url_enabled = false;
+  }
 
   // Nästa modul i kedjan (migration 1700000124). Tom = nollställ (avsluta
   // flödet). En satt relation måste peka på en ANNAN modul i SAMMA tenant —
@@ -635,6 +838,13 @@ export async function updateModuleAction(formData: FormData) {
   if (FLOW_TYPES.includes(flow as (typeof FLOW_TYPES)[number])) {
     patch.flow_type = flow;
   }
+  // En enkät får aldrig bli AI-chatt (§ 43): svaren skulle bli sessionsbundna
+  // och skickas till modellen. Gäller både nytt syfte och ny flödestyp.
+  const effectivePurpose = wantedPurpose ?? normalizeCompassPurpose(existing.purpose);
+  const effectiveFlow = (patch.flow_type as string | undefined) ?? existing.flow_type;
+  if (effectivePurpose === 'survey' && effectiveFlow === 'chat') {
+    throw new Error('En enkät är ett formulär eller quiz — inte en AI-chatt. Byt flödestyp eller syfte.');
+  }
   const model = String(formData.get('model') || '');
   if (model) patch.model = model;
 
@@ -659,27 +869,125 @@ export async function updateModuleAction(formData: FormData) {
     patch.hero_image = null;
   }
 
+  let saved: Record<string, unknown> | null = null;
   try {
-    await writeWithFallback(pb, (c) => c.collection('compass_modules').update(id, patch));
+    saved = (await writeWithFallback(pb, (c) =>
+      c.collection('compass_modules').update(id, patch)
+    )) as Record<string, unknown>;
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
     // PB unik-index-fel på public_slug → vänligt meddelande.
-    if (/public_slug|unique/i.test(msg)) {
+    if (/public_slug|unique/i.test(msg) || pbFieldCodes(err).public_slug) {
       throw new Error('Den publika länken (slug) är upptagen — välj en annan.');
     }
-    throw new Error(`Kunde inte uppdatera modul: ${msg}`);
+    const status = pbStatus(err);
+    console.error('[compass] updateModuleAction failed', {
+      tenantId: user.tenant,
+      userId: user.id,
+      moduleId: id,
+      status,
+      fieldCodes: pbFieldCodes(err),
+      message: msg
+    });
+    const hasFieldErrors = Object.keys(pbFieldCodes(err)).length > 0;
+    throw new Error(
+      describePbError(
+        err,
+        hasFieldErrors
+          ? `Kunde inte uppdatera modulen: PocketBase avvisade värdena (HTTP ${status ?? '?'}).`
+          : status === 400 || status === 403 || status === 404
+            ? `Kunde inte uppdatera modulen: PocketBase nekade skrivningen (HTTP ${status}) utan fältfel och superuser-reserven kunde inte ta över — kontrollera POCKETBASE_SUPERUSER_EMAIL/PASSWORD i web-appens miljö.`
+            : `Kunde inte uppdatera modulen: ${msg}`
+      )
+    );
+  }
+
+  // Schema-drift (§ 24.4/§ 30.4-invarianten): PB släpper okända fält TYST.
+  // En instans utan migration 1700000154 saknar `layout` → valet hade
+  // "sparats" utan att synas. Säg det rakt ut i stället för en tyst no-op.
+  if (wantedPurpose === 'survey' && saved && !('purpose' in saved)) {
+    throw new Error(
+      'Övriga fält sparades, men syftet "enkät" kunde inte sparas: fältet purpose saknas i databasen (PocketBase-migration 1700000160 är inte applicerad).'
+    );
+  }
+  if (
+    wantedLayout &&
+    wantedLayout !== DEFAULT_COMPASS_LAYOUT &&
+    saved &&
+    !('layout' in saved)
+  ) {
+    throw new Error(
+      'Övriga fält sparades, men mallen kunde inte sparas: fältet layout saknas i databasen (PocketBase-migration 1700000154 är inte applicerad).'
+    );
   }
 
   await logSecurity(pb, user.tenant, {
     actor: user.id,
-    kind: patch.is_active ? 'module_publish' : 'module_unpublish',
+    kind: patch.is_active && patch.public_url_enabled ? 'module_publish' : 'module_unpublish',
     subject: existing.slug,
-    meta: { event: 'module_updated', name: patch.name }
+    meta: { event: 'module_updated', name: patch.name, intent }
   });
+}
+
+/**
+ * Publicera/avpublicera en modul direkt från översikten (en knapp per rad),
+ * utan att gå via editorn. Publicera = Aktiv + Publicerad publikt + säkrad
+ * publik slug; avpublicera = stäng den publika länken (modulen förblir aktiv
+ * för interna förhandsgranskningar). Redirectar tillbaka till listan med
+ * `?ok=`/`?error=` som kvitto.
+ */
+export async function setModulePublishedAction(formData: FormData) {
+  const user = await requireUser();
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
+    throw new Error('Forbidden');
+  }
+  const id = String(formData.get('id') || '');
+  if (!id) throw new Error('Invalid input');
+  const publish = formData.get('published') === 'on';
+
+  const pb = await getServerPb();
+  const existing = await getModuleInTenant(pb, id, user.tenant);
+
+  let errorMessage: string | null = null;
+  try {
+    const patch: Record<string, unknown> = publish
+      ? {
+          is_active: true,
+          public_url_enabled: true,
+          ...(existing.public_slug ? {} : { public_slug: slugify(existing.slug) })
+        }
+      : { public_url_enabled: false };
+    try {
+      await writeWithFallback(pb, (c) => c.collection('compass_modules').update(id, patch));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Okänt fel';
+      if (/public_slug|unique/i.test(msg)) {
+        throw new Error(
+          'Den publika länken (slug) är upptagen — öppna modulen och välj en annan innan du publicerar.'
+        );
+      }
+      throw new Error(`Kunde inte ${publish ? 'publicera' : 'avpublicera'} modulen: ${msg}`);
+    }
+    await logSecurity(pb, user.tenant, {
+      actor: user.id,
+      kind: publish ? 'module_publish' : 'module_unpublish',
+      subject: existing.slug,
+      meta: { event: 'module_publish_toggle', name: existing.name }
+    });
+  } catch (err) {
+    errorMessage = err instanceof Error ? err.message : 'Okänt fel';
+  }
 
   revalidatePath('/inflode');
   revalidatePath('/inflode/admin/modules');
   revalidatePath(`/inflode/admin/modules/${existing.slug}`);
+
+  const params = new URLSearchParams(
+    errorMessage
+      ? { error: errorMessage.slice(0, 300) }
+      : { ok: publish ? 'published' : 'unpublished', module: existing.slug }
+  );
+  redirect(`/inflode/admin/modules?${params.toString()}`);
 }
 
 export async function deleteModuleAction(formData: FormData) {
@@ -691,13 +999,13 @@ export async function deleteModuleAction(formData: FormData) {
   if (!id) throw new Error('Invalid input');
 
   const pb = await getServerPb();
-  const existing = await pb.collection('compass_modules').getOne(id);
-  if (existing.tenant !== user.tenant) throw new Error('Forbidden');
+  const existing = await getModuleInTenant(pb, id, user.tenant);
 
   try {
     await writeWithFallback(pb, (c) => c.collection('compass_modules').delete(id));
-  } catch {
-    // ignore
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Okänt fel';
+    throw new Error(`Kunde inte radera modulen: ${msg}`);
   }
   await logSecurity(pb, user.tenant, {
     actor: user.id,
@@ -858,11 +1166,14 @@ export async function addQuestionAction(formData: FormData) {
   const choices = resolveChoices(formData, inputType);
 
   const pb = await getServerPb();
-  // Verify module ownership
-  const mod = await pb.collection('compass_modules').getOne(moduleId);
-  if (mod.tenant !== user.tenant) throw new Error('Forbidden');
+  // Verify module ownership (superuser-fallback vid tyst nekad view-regel).
+  await getModuleInTenant(pb, moduleId, user.tenant);
 
   try {
+    // Samma numrering som chatt-agenten (`nextCompassQuestionSortOrder`):
+    // frågan läggs SIST. Den tidigare `Date.now() % 1e6`-stämpeln börjar om
+    // från 0 var tusende sekund → en ny fråga kunde hamna först.
+    const sortOrder = await nextCompassQuestionSortOrder(pb, moduleId);
     await writeWithFallback(pb, (c) =>
       c.collection('compass_questions').create({
         module: moduleId,
@@ -872,7 +1183,7 @@ export async function addQuestionAction(formData: FormData) {
         input_type: inputType,
         required,
         choices,
-        sort_order: Date.now() % 1_000_000
+        sort_order: sortOrder
       })
     );
   } catch (err) {
@@ -905,8 +1216,7 @@ export async function updateQuestionAction(formData: FormData) {
   const choices = resolveChoices(formData, inputType);
 
   const pb = await getServerPb();
-  const mod = await pb.collection('compass_modules').getOne(moduleId);
-  if (mod.tenant !== user.tenant) throw new Error('Forbidden');
+  await getModuleInTenant(pb, moduleId, user.tenant);
 
   try {
     await writeWithFallback(pb, (c) =>
@@ -938,10 +1248,33 @@ export async function deleteQuestionAction(formData: FormData) {
   if (!id) throw new Error('Invalid input');
 
   const pb = await getServerPb();
+  // Superuser-fallbacken bypassar RLS → verifiera FÖRST att frågan hör till
+  // en modul i den inloggades tenant (frågan → modul → tenant).
+  let question: { module?: string } | null = null;
+  try {
+    question = await pb.collection('compass_questions').getOne<{ module?: string }>(id, {
+      fields: 'id,module'
+    });
+  } catch {
+    const su = await getSuperuserPb();
+    if (su.ok) {
+      try {
+        question = await su.pb
+          .collection('compass_questions')
+          .getOne<{ module?: string }>(id, { fields: 'id,module' });
+      } catch {
+        question = null;
+      }
+    }
+  }
+  if (!question?.module) throw new Error('Frågan hittades inte.');
+  await getModuleInTenant(pb, question.module, user.tenant);
+
   try {
     await writeWithFallback(pb, (c) => c.collection('compass_questions').delete(id));
-  } catch {
-    // ignore
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Okänt fel';
+    throw new Error(`Kunde inte radera frågan: ${msg}`);
   }
   revalidatePath(`/inflode/admin/modules/${moduleSlug}`);
 }

@@ -148,6 +148,8 @@ async function verifyCollectionsExist() {
     'startup_financials',
     // CRM / bolagsisolering (§ 21)
     'startup_contacts',
+    // Kontaktboken (§ 45, migration 1700000157) — förfrågningar om kontaktanvändning.
+    'contact_requests',
     'capital_rounds',
     'intellectual_property',
     'startup_kpis',
@@ -187,6 +189,19 @@ async function verifyCollectionsExist() {
     // Saknas den felar "Starta mötet" med ett 404 från PB; gör den till ett
     // hårt invariant så att en instans utan migrationen fälls i deployen.
     'meeting_transcripts',
+    // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167).
+    'funding_projects',
+    'funding_work_packages',
+    'support_check_types',
+    'support_check_applications',
+    'support_check_revisions',
+    'support_check_comments',
+    'support_check_documents',
+    'support_check_rules',
+    // Oföränderliga bevis-/historikkollektioner (MUST_BE_IMMUTABLE) — måste
+    // finnas i kartan för att asserteras, annars hoppas de tyst.
+    'agreement_signatures',
+    'tool_versions',
     // Övrigt
     'web_cache'
   ];
@@ -341,7 +356,12 @@ const MUST_SCOPE_TO_MEMBER = [
   'de_minimis_units',
   'de_minimis_unit_orgnr',
   'de_minimis_stod',
-  'event_signups'
+  'event_signups',
+  // Stödcheckar (§ 46): bolaget ser sina egna ansökningar/bevis/kommentarer/bilagor.
+  'support_check_applications',
+  'support_check_revisions',
+  'support_check_comments',
+  'support_check_documents'
 ];
 
 const MUST_BE_STAFF_OR_OBSERVER = [
@@ -369,7 +389,29 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'annual_wheel_items',
   // Årshjulets dynamiska kategorier (migration 1700000139, § 30). Samma
   // isolering som posterna — de beskriver Movexums interna kalender.
-  'annual_wheel_categories'
+  'annual_wheel_categories',
+  // Upphandlingar & excellens-insatser (migrationer 1700000149–151, § 39).
+  // Intern inköps-/avtalsdata med avrop per bolag → staff/observer-only; en
+  // ren startup_member ska aldrig se andra bolags avrop eller utvärderingar.
+  'procurements',
+  'procurement_calloffs',
+  'procurement_rules',
+  'procurement_documents',
+  // Målstyrning & verksamhetsplan (migration 1700000159, § 42). Tenant-bred
+  // intern styrning (VP-mål, kvartalsstatus) → staff/observer-only.
+  'goal_periods',
+  'goals',
+  'goal_indicators',
+  'goal_status_entries',
+  // Kontaktboken (§ 45, migration 1700000157). Förfrågningar innehåller syfte
+  // + vem som frågar om vilken extern kontakt → staff/observer-only; bolagen
+  // ser DELADE kontakter via den kurerade vyn på Mitt bolag, inte här.
+  'contact_requests',
+  // Finansieringsprojekt/arbetspaket och stödcheck-regler (§ 46). Intern
+  // projektekonomi och uppföljningsstyrning → staff/observer-only.
+  'funding_projects',
+  'funding_work_packages',
+  'support_check_rules'
 ];
 
 // Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa
@@ -383,6 +425,25 @@ const MUST_SCOPE_CROSS_TENANT = [
   { name: 'compass_questions', token: 'module.tenant' },
   { name: 'tenants', token: '@request.auth.tenant = id' }
 ];
+
+// Oföränderliga bevis-/historikkollektioner (ISO 27001 A.8.32): update/delete
+// får BARA vara superuser (regel = null). Signeringsbevis (§ 19, § 46.4) och
+// agent-versionshistorik (§ 16.6) får aldrig kunna skrivas om via API:t.
+const MUST_BE_IMMUTABLE = ['agreement_signatures', 'tool_versions', 'support_check_revisions'];
+
+function verifyImmutableCollections(collections) {
+  for (const name of MUST_BE_IMMUTABLE) {
+    const col = collections.get(name);
+    if (!col) continue; // kollektion saknas i denna instans — hoppa
+    for (const ruleName of ['updateRule', 'deleteRule']) {
+      const rule = col[ruleName];
+      if (rule !== null && rule !== undefined) {
+        fail(`Oföränderlighet: ${name}.${ruleName} måste vara null (endast superuser), är \`${String(rule)}\`.`);
+      }
+    }
+  }
+  ok('Oföränderliga bevis-/historikkollektioner (A.8.32) verifierade');
+}
 
 function verifyStartupMemberIsolation(collections) {
   for (const name of MUST_SCOPE_TO_MEMBER) {
@@ -605,6 +666,7 @@ function verifyRlsAndRbac(collections) {
   }
 
   verifyStartupMemberIsolation(collections);
+  verifyImmutableCollections(collections);
 
   ok('RLS/RBAC baseline checks passed (createRules är säkra)');
 }
@@ -830,11 +892,35 @@ async function verifyHealthEndpoint() {
 const REQUIRED_APP_FIELDS = [
   // Årshjul (§ 30): day = migration 1700000138, tags/responsible = 1700000139.
   // day = 1700000138, tags/responsible = 1700000139, end_* = 1700000141.
-  { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible', 'end_month', 'end_day'] }
+  { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible', 'end_month', 'end_day'] },
+  // Upphandlingar (§ 39): regelgenererade uppföljningar = tasks med
+  // procurement-länk + rule_key (migration 1700000152). Saknas fälten
+  // skapas korten utan idempotensnyckel → dubbletter vid varje synk.
+  { collection: 'tasks', fields: ['procurement', 'procurement_calloff', 'rule_key'] },
+  // Kontaktboken (§ 45, migration 1700000156): utan owners/organization/
+  // category "sparas" ägare/kategori tyst bort (PB släpper okända fält).
+  { collection: 'contacts', fields: ['owners', 'organization', 'category'] },
+  // AI-minne (§ 16.4): kategori per notering = migration 1700000155. Saknas
+  // fältet "sparas" kategorin från UI/memory_write men försvinner tyst.
+  { collection: 'agent_memory', fields: ['category'] },
+  // Målstyrning (§ 42, migration 1700000159) + enkätkälla (§ 43, migration
+  // 1700000160): utan flaggorna sparas "okänt" som 0 och en enkätindikator tappar sin källa.
+  { collection: 'goal_indicators', fields: ['has_target', 'survey_module'] },
+  { collection: 'goal_status_entries', fields: ['has_value'] },
+  // Måltyp + ägare (migration 1700000161): utan fälten "sparas" ett personligt
+  // mål tyst som övergripande utan ägare.
+  { collection: 'goals', fields: ['kind', 'owner_user'] },
+  // Stödcheckar (§ 46, migrationer 1700000168/170): uppföljningskort länkas via
+  // tasks.support_check_application; bokföringsspåren länkar tillbaka till ansökan.
+  { collection: 'tasks', fields: ['support_check_application'] },
+  { collection: 'capital_rounds', fields: ['support_check_application'] },
+  { collection: 'de_minimis_stod', fields: ['support_check_application'] }
 ];
 
 const MUST_NOT_BE_REQUIRED = [
-  { collection: 'annual_wheel_items', fields: ['track'] }
+  { collection: 'annual_wheel_items', fields: ['track'] },
+  // Kontaktboken (§ 45): efternamn valfritt (chatten/Outlook-export ger ofta bara ett namnfält).
+  { collection: 'contacts', fields: ['last_name'] }
 ];
 
 function verifyAppWritableFields(collections) {

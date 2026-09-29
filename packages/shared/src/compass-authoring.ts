@@ -135,3 +135,109 @@ export function normalizeCompassChoices(raw: unknown): CompassChoice[] {
 
   return out;
 }
+
+/* ────────────────────────────────────────────────────────────────────
+   Frågeordning (sort_order)
+   ──────────────────────────────────────────────────────────────────── */
+
+/** Steg mellan två frågor som läggs efter varandra. */
+export const COMPASS_QUESTION_SORT_STEP = 10;
+
+export interface CompassQuestionInsertPlan {
+  /** `sort_order` för den nya frågan. */
+  sortOrder: number;
+  /**
+   * Satt när gapet mellan grannarna tagit slut: NYA `sort_order` för de
+   * befintliga frågorna (samma ordning som `existingSorted`), som måste
+   * skrivas INNAN den nya frågan skapas. Utelämnad = inga andra rader rörs.
+   */
+  renumber?: number[];
+}
+
+/**
+ * Planerar var en ny fråga hamnar, deterministiskt och oberoende av i vilken
+ * ordning anropen råkar bearbetas.
+ *
+ * - `position` = frågans ABSOLUTA plats i modulen (1 = första frågan). Är
+ *   platsen bortom sista frågan läggs den sist; annars skjuts den in mellan
+ *   grannarna (heltalsmittpunkt). Tar gapet slut numreras modulen om
+ *   (10, 20, 30 …) — `renumber` säger vad de befintliga ska få.
+ * - Ingen position: frågan läggs sist (`högsta + steg`).
+ *
+ * `existingSorted` = befintliga frågors sort_order i visningsordning
+ * (stigande). Ogiltiga värden (NaN, negativa) behandlas som 0. På en tom modul
+ * blir första frågan 10, andra 20 osv.
+ */
+export function planCompassQuestionInsert(
+  existingSorted: readonly (number | null | undefined)[],
+  position?: number | null
+): CompassQuestionInsertPlan {
+  const existing = existingSorted.map((v) => {
+    const n = Number(v ?? 0);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  });
+  const highest = existing.length > 0 ? Math.max(...existing) : 0;
+  const positionRaw = Number(position);
+  const hasPosition =
+    position !== undefined && position !== null && Number.isFinite(positionRaw) && positionRaw >= 1;
+  const index = hasPosition ? Math.floor(positionRaw) - 1 : existing.length;
+
+  if (index >= existing.length) {
+    return { sortOrder: highest + COMPASS_QUESTION_SORT_STEP };
+  }
+
+  const prev = index === 0 ? 0 : existing[index - 1]!;
+  const next = existing[index]!;
+  if (next - prev >= 2) {
+    return { sortOrder: Math.floor((prev + next) / 2) };
+  }
+
+  // Inget gap kvar — numrera om med jämna steg och lägg den nya på sin plats.
+  const renumber: number[] = [];
+  let sortOrder = 0;
+  let cursor = 0;
+  for (let i = 0; i <= existing.length; i++) {
+    cursor += COMPASS_QUESTION_SORT_STEP;
+    if (i === index) {
+      sortOrder = cursor;
+      cursor += COMPASS_QUESTION_SORT_STEP;
+    }
+    if (i < existing.length) renumber.push(cursor);
+  }
+  return { sortOrder, renumber };
+}
+
+/** Minsta gemensamma form för att sortera frågor på läsvägen. */
+export interface CompassQuestionOrderable {
+  id: string;
+  sort_order?: number | null;
+  created?: string | null;
+}
+
+/**
+ * Sorterar frågor deterministiskt: `sort_order` stigande, sedan `created`
+ * (äldst först), sedan `id`. PocketBase avgör lika `sort_order` godtyckligt
+ * (slumpade id:n), vilket är hur "6, 1, 9" uppstod — två frågor som fick
+ * samma sort_order visades i olika ordning varje gång. Görs i JS (inte via
+ * PB:s `sort`-sträng) så att en instans utan `created`-fältet (migration
+ * 1700000126) inte får 400 och en tom lista. Stabil och muterar inte input.
+ */
+export function sortCompassQuestions<T extends CompassQuestionOrderable>(questions: readonly T[]): T[] {
+  const num = (v: number | null | undefined): number => {
+    const n = Number(v ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  };
+  return [...questions].sort((a, b) => {
+    const so = num(a.sort_order) - num(b.sort_order);
+    if (so !== 0) return so;
+    const ca = String(a.created ?? '');
+    const cb = String(b.created ?? '');
+    if (ca !== cb) {
+      // Saknad tidsstämpel sist — en post utan `created` är alltid "okänd".
+      if (!ca) return 1;
+      if (!cb) return -1;
+      return ca < cb ? -1 : 1;
+    }
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+}

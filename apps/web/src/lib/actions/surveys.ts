@@ -100,7 +100,7 @@ export async function createSurveyAction(formData: FormData) {
   const user = await requireManager();
   const pb = await getServerPb();
 
-  // Valfri källa (§ 39.4). En referens som inte kan verifieras avvisas —
+  // Valfri källa (§ 47.4). En referens som inte kan verifieras avvisas —
   // aldrig en tyst fristående enkät när staff trodde den var kopplad.
   const forRaw = formData.get('for');
   let link: ResolvedSurveyLink | null = null;
@@ -222,7 +222,7 @@ export async function deleteSurveyAction(formData: FormData) {
   redirect('/inflode/utvardering');
 }
 
-// ── Utskick till deltagare (§ 39.5) ──────────────────────────────────────────
+// ── Utskick till deltagare (§ 47.5) ──────────────────────────────────────────
 
 /** Origin för enkätlänken — från staffs egen request (proxy-headers först). */
 async function requestOrigin(): Promise<string> {

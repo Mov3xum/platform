@@ -4,7 +4,7 @@ import { Icon } from '@/components/proto';
 import { listSurveysForLink } from '@/lib/surveys/store';
 import { surveyLinkRefParam, type SurveyLinkKind } from '@platform/shared';
 
-// "Uppföljning" på en källas sida (CLAUDE.md § 39.4): listar enkäter som
+// "Uppföljning" på en källas sida (CLAUDE.md § 47.4): listar enkäter som
 // följer upp aktiviteten/eventet/workshopen/… och ger staff en knapp som
 // skapar en ny enkät förkopplad till källan. Server-komponent; läser med
 // användarens token (RLS). canCreate = admin/incubator_lead/coach (samma

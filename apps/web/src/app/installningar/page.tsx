@@ -112,12 +112,12 @@ export default async function InstallningarPage() {
           </Chip>
         )
     },
-    'ai-kostnad': {
+    'ai-analys': {
       stat: `${usd(budgetStatus.spentUsd)} förbrukat denna månad`,
       hint:
         budgetStatus.effectiveUsd > 0
-          ? `Tak ${usd(budgetStatus.effectiveUsd)} · ${budgetPct} % använt`
-          : 'Ingen kostnadsspärr aktiv',
+          ? `Tak ${usd(budgetStatus.effectiveUsd)} · ${budgetPct} % använt · användning & miljö`
+          : 'Ingen kostnadsspärr aktiv · användning & miljö',
       status:
         budgetPct !== null && budgetPct >= 80 ? (
           <Chip variant={budgetPct >= 95 ? 'copper' : 'yellow'} mono>

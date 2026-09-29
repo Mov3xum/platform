@@ -54,6 +54,8 @@ const FILTERS: { id: string; label: string; href: string }[] = [
   { id: 'tool_run', label: 'Verktygskörningar', href: '/aktivitet?kind=tool_run' },
   { id: 'workshop_assignment', label: 'Workshop tilldelning', href: '/aktivitet?kind=workshop_assignment' },
   { id: 'workshop_run', label: 'Workshop AI', href: '/aktivitet?kind=workshop_run' },
+  { id: 'mission', label: 'Tvärfunktionella team', href: '/aktivitet?kind=mission' },
+  { id: 'support_check', label: 'Stödcheckar', href: '/aktivitet?kind=support_check' },
   { id: 'integration_sync', label: 'Integrationssynk', href: '/aktivitet?kind=integration_sync' },
   { id: 'log', label: 'Ändringslogg', href: '/aktivitet?kind=log' }
 ];
@@ -88,6 +90,8 @@ export default async function AktivitetPage({
   if (kind === 'tool_run') filterParts.push('kind = "tool_run"');
   if (kind === 'workshop_assignment') filterParts.push('kind = "workshop_assignment"');
   if (kind === 'workshop_run') filterParts.push('kind = "workshop_run"');
+  if (kind === 'mission') filterParts.push('kind = "mission"');
+  if (kind === 'support_check') filterParts.push('kind = "support_check"');
   if (kind === 'manual') filterParts.push('(kind = "manual" || kind = "")');
 
   let activitiesResult: { items: ActivityRecord[] } = { items: [] };

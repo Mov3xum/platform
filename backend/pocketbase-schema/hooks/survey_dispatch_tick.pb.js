@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// Enkätutskick-ticker (CLAUDE.md § 39.5). Speglar schedule_tick.pb.js:
+// Enkätutskick-ticker (CLAUDE.md § 47.5). Speglar schedule_tick.pb.js:
 // varje minut hittas `surveys` med `send_at <= now` och `sent_at` tomt,
 // raden lås:as provisoriskt (send_at + 1h) och POSTas till
 // `/api/internal/send-survey`, som gör själva utskicket (Resend) och

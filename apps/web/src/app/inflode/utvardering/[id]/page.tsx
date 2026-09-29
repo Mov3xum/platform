@@ -35,7 +35,7 @@ export default async function SurveyDetailPage({
   const showResults = vy === 'resultat';
   const results = showResults ? await getSurveyResults(pb, survey) : null;
 
-  // Utskick (§ 39.5) — bara för event-kopplade enkäter. Antalet räknas
+  // Utskick (§ 47.5) — bara för event-kopplade enkäter. Antalet räknas
   // server-side; adresserna når aldrig klienten.
   let send: { recipientCount: number; defaultSendAt: string } | null = null;
   if (!showResults && survey.link_kind === 'event' && survey.link_id) {

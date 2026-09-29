@@ -1,9 +1,10 @@
 'use client';
 
-// Movexum OS — Formulär för nytt projekt/uppdrag.
+// Movexum OS — Formulär för nytt tvärfunktionellt team (uppdrag/projekt).
 // Klientkomponent för useFormState + multi-select av deltagare och bolag.
 // CLAUDE.md § 29: AI-teamförslag — beskriv uppdraget, låt AI:n föreslå
-// kompetenser + kandidater, koppla på med ett klick (människa-i-loopen).
+// kompetenser + kollegor (riktiga användare med kompetenstaggar), koppla på
+// med ett klick (människa-i-loopen).
 
 import { useActionState, useMemo, useState } from 'react';
 import { Card, Icon } from '@/components/proto';
@@ -20,6 +21,8 @@ import { suggestTeamAction, type SuggestTeamResult } from '@/lib/actions/team';
 interface UserOption {
   id: string;
   label: string;
+  /** Kompetenstaggar användaren angett under Min profil. */
+  competences?: CompetenceId[];
 }
 interface StartupOption {
   id: string;
@@ -131,12 +134,12 @@ export function NewMissionForm({
   function applyWholeTeam() {
     if (!suggestion) return;
     for (const m of suggestion.members) {
-      if (m.kind === 'user') addParticipant(m.id, m.role === 'lead' ? 'contributor' : m.role);
+      addParticipant(m.id, m.role === 'lead' ? 'contributor' : m.role);
     }
   }
 
-  const internalMembers = suggestion?.members.filter((m) => m.kind === 'user') ?? [];
-  const externalMembers = suggestion?.members.filter((m) => m.kind === 'contact') ?? [];
+  const suggestedMembers = suggestion?.members ?? [];
+  const taggedColleagues = otherUsers.filter((u) => (u.competences?.length ?? 0) > 0).length;
 
   // Skicka full participants_json inkl. utfärdaren som lead
   const submittedParticipants: ParticipantDraft[] = [
@@ -245,8 +248,15 @@ export function NewMissionForm({
         </div>
         <div className="mx-t-12 mx-muted mx-mb-3">
           Utifrån beskrivningen ovan föreslår AI:n vilka kompetenser uppdraget
-          kräver och vilka kollegor som kan kopplas på. Du bestämmer — inget
-          tilldelas automatiskt. AI-verktyg drivs av Mistral (Frankrike, EU).
+          kräver och vilka Movexum-kollegor som kan kopplas på. Den matchar bara
+          mot riktiga användare i systemet som angett sina kompetenser som taggar
+          under <strong>Min profil</strong> — inga externa kontakter. Du bestämmer
+          — inget tilldelas automatiskt. AI-verktyg drivs av Mistral (Frankrike,
+          EU).
+        </div>
+        <div className="mx-mono mx-t-xs mx-muted mx-mb-2">
+          {taggedColleagues} {taggedColleagues === 1 ? 'kollega' : 'kollegor'} med
+          kompetenstaggar kan matchas.
         </div>
         <button
           type="button"
@@ -301,7 +311,7 @@ export function NewMissionForm({
               </div>
             )}
 
-            {internalMembers.length > 0 && (
+            {suggestedMembers.length > 0 && (
               <div>
                 <div className="mx-flex mx-items-c mx-justify-b mx-mb-2">
                   <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6">
@@ -312,7 +322,7 @@ export function NewMissionForm({
                   </button>
                 </div>
                 <ul className="mx-flex mx-col mx-gap-2">
-                  {internalMembers.map((m) => {
+                  {suggestedMembers.map((m) => {
                     const added = participants.some((p) => p.user_id === m.id) || m.id === currentUserId;
                     return (
                       <li
@@ -359,27 +369,6 @@ export function NewMissionForm({
                     );
                   })}
                 </ul>
-              </div>
-            )}
-
-            {externalMembers.length > 0 && (
-              <div>
-                <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6 mx-mb-2">
-                  Externa kompetenser att koppla på
-                </div>
-                <ul className="mx-flex mx-col mx-gap-1">
-                  {externalMembers.map((m) => (
-                    <li key={m.id} className="mx-t-12">
-                      <span className="mx-fw-6">{m.name}</span>
-                      {m.title ? <span className="mx-muted"> · {m.title}</span> : null}
-                      {m.reason ? <span className="mx-muted"> — {m.reason}</span> : null}
-                    </li>
-                  ))}
-                </ul>
-                <div className="mx-t-12 mx-muted mx-mt-1">
-                  Externa kontakter kopplas via bolagets kontaktregister — de blir
-                  inte uppdragsdeltagare här.
-                </div>
               </div>
             )}
 
@@ -442,7 +431,8 @@ export function NewMissionForm({
               Deltagare ({participants.length + 1})
             </div>
             <div className="mx-t-12 mx-muted mx-mb-2">
-              Du läggs till automatiskt som ansvarig. Lägg till fler kollegor och välj roll.
+              Du läggs till automatiskt som ansvarig. Lägg till fler Movexum-kollegor
+              och välj roll. Bara personal kan ingå i ett tvärfunktionellt team.
             </div>
             {participants.length > 0 && (
               <ul className="mx-flex mx-col mx-gap-1 mx-mb-2">
@@ -503,13 +493,21 @@ export function NewMissionForm({
                     onClick={() => addParticipant(u.id)}
                     className="mx-chip mx-mono"
                     style={{ cursor: 'pointer' }}
+                    title={
+                      u.competences && u.competences.length > 0
+                        ? u.competences.map((c) => COMPETENCE_LABELS[c]).join(', ')
+                        : 'Inga kompetenstaggar angivna'
+                    }
                   >
                     <Icon name="plus" size={10} /> {u.label}
+                    {u.competences && u.competences.length > 0 ? (
+                      <span className="mx-muted"> · {u.competences.length}</span>
+                    ) : null}
                   </button>
                 ))}
               </div>
             ) : otherUsers.length === 0 ? (
-              <div className="mx-muted mx-t-13">Inga andra användare i din tenant.</div>
+              <div className="mx-muted mx-t-13">Inga andra Movexum-kollegor i din tenant.</div>
             ) : (
               <div className="mx-muted mx-t-12">Alla kollegor är redan tillagda.</div>
             )}
@@ -545,7 +543,7 @@ export function NewMissionForm({
           </a>
           <button type="submit" className="mx-btn mx-primary" disabled={pending}>
             <Icon name="plus" size={13} />
-            {pending ? 'Skapar…' : 'Skapa projekt'}
+            {pending ? 'Skapar…' : 'Skapa team'}
           </button>
         </div>
       </div>

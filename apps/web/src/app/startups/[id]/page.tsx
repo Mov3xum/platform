@@ -65,6 +65,10 @@ import { pbFileUrl } from '@/lib/pb-file';
 import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
 import { DeMinimisSection } from './DeMinimisSection';
 import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
+import { StartupProcurementsSection } from './StartupProcurementsSection';
+import { StartupSupportChecksSection } from './StartupSupportChecksSection';
+import { StartupContactsSection } from './StartupContactsSection';
+import { StartupMissionsSection } from './StartupMissionsSection';
 
 interface StartupRecord {
   id: string;
@@ -670,6 +674,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ['#phase-history', `Fashistorik (${phaseHistory.totalItems})`],
           ['#kunskap', 'Kunskap'],
           ['#de-minimis', 'De minimis'],
+          ['#stodcheckar', 'Stöd & checkar'],
           ['#notes', `Anteckningar (${notes.totalItems})`],
           ['#activities', `Aktiviteter (${activities.totalItems})`],
           ['#documents', 'Dokument'],
@@ -682,7 +687,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ['#partners', `Partners (${engagements.totalItems})`],
           ['#financials', `Finansiell historik (${financials.totalItems})`],
           ['#tools', `Verktyg (${toolActivities.totalItems})`],
-          ['#workshops', `Workshops (${workshopAssignments.totalItems})`]
+          ['#workshops', `Workshops (${workshopAssignments.totalItems})`],
+          ['#team-uppdrag', 'Tvärfunktionella team']
         ].map(([href, label]) => (
           <a
             key={href}
@@ -988,6 +994,27 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
             compact
           />
         </Section>
+
+        {/* § 46.7 — stödcheckar: ansökan är sanningen, sektionen läser live */}
+        <StartupSupportChecksSection
+          pb={pb}
+          tenantId={user.tenant}
+          startupId={id}
+          isStaff={hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'])}
+          canApply={hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']) || user.linkedStartups.includes(id)}
+        />
+
+        {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer']) && (
+          <StartupProcurementsSection pb={pb} tenantId={user.tenant} startupId={id} />
+        )}
+
+        {/* § 45.4 — kontakter ur kontaktboken som delats med bolaget */}
+        {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer']) && (
+          <StartupContactsSection pb={pb} tenantId={user.tenant} startupId={id} />
+        )}
+
+        {/* § 29.4 — slutförda tvärfunktionella team sammanställs på bolagskortet */}
+        <StartupMissionsSection pb={pb} tenantId={user.tenant} startupId={id} />
 
         <Section id="documents" title="Dokument">
           <p className="text-sm text-foreground-muted">

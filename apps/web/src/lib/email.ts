@@ -259,7 +259,7 @@ export interface SurveyInviteFields {
 }
 
 /**
- * Skickar en enkätinbjudan till deltagare (CLAUDE.md § 39.5). Ett mejl per
+ * Skickar en enkätinbjudan till deltagare (CLAUDE.md § 47.5). Ett mejl per
  * mottagare (ingen synlig mottagarlista — GDPR § 5), i små batchar. Returnerar
  * antal lyckade/misslyckade; en enskild adress som Resend avvisar stoppar
  * inte de övriga. Innehållet HTML-escapas (§ 10.3).
