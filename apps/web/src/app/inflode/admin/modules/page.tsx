@@ -9,6 +9,7 @@ import { FLOW_TYPE_LABEL } from '@/lib/compass/types';
 import { setModulePublishedAction } from '@/lib/actions/compass';
 import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
 import { buildInflodeTabs } from '../../_tabs';
+import { isSurveyModule } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,10 +49,11 @@ export default async function AdminModulesPage({
   }
   const notice = noticeFromParams(searchParams ? await searchParams : {});
   const pb = await getServerPb();
-  const [modules, analytics] = await Promise.all([
+  const [allModules, analytics] = await Promise.all([
     listModules(pb, user.tenant),
     getLeadAnalytics(pb, user.tenant, 365)
   ]);
+  const modules = allModules.filter((module) => !isSurveyModule(module));
 
   const metricsBySlug = new Map(analytics.byModule.map((m) => [m.slug, m]));
   // landing_module lagras som publik slug i de publika flödena — slå ihop
@@ -73,16 +75,16 @@ export default async function AdminModulesPage({
 
   return (
     <PageShell
-      title="Startupkompassen"
+      title="Marknadsverktyg"
       tabs={tabs}
       meta={
         <span className="text-[12px] text-foreground-subtle">
-          Intag-moduler · formulär, quiz och AI-chattar
+          Startupkompassen · formulär, quiz och AI-chattar för startupinflöde
         </span>
       }
       actions={
         <Link href="/inflode/admin/modules/new" className="mx-btn mx-primary">
-          <Icon name="plus" size={13} /> Skapa modul
+          <Icon name="plus" size={13} /> Skapa intag
         </Link>
       }
     >
@@ -127,13 +129,13 @@ export default async function AdminModulesPage({
       {modules.length === 0 ? (
         <Card style={{ padding: 32, textAlign: 'center' }}>
           <div className="mx-disp mx-fw-6" style={{ fontSize: 18, marginBottom: 8 }}>
-            Inga moduler ännu
+            Inga formulär ännu
           </div>
           <div className="mx-muted mx-t-13" style={{ marginBottom: 16 }}>
-            Bygg din första intag-modul — välj mellan AI-chatt, formulär eller quiz.
+            Bygg ett formulär, quiz eller AI-intag för startups och nya inflöden.
           </div>
           <Link href="/inflode/admin/modules/new" className="mx-btn mx-primary">
-            <Icon name="plus" size={13} /> Skapa din första modul
+            <Icon name="plus" size={13} /> Skapa första intaget
           </Link>
         </Card>
       ) : (

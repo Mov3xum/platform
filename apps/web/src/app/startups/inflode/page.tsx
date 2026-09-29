@@ -92,7 +92,7 @@ export default async function StartupsInflodePage({
           ))
         )}
       </RailSection>
-      <RailSection label="Moduler">
+      <RailSection label="Startupkompassen">
         {modules.length === 0 ? (
           <div className="px-2 py-3 text-center text-[12px] text-foreground-subtle">Inga moduler.</div>
         ) : (

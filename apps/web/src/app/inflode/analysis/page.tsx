@@ -144,7 +144,7 @@ export default async function InflodeAnalysisPage({
   );
 
   return (
-    <PageShell title="Startupkompassen" tabs={tabs} rightPanel={rail}>
+    <PageShell title="Marknadsverktyg" tabs={tabs} rightPanel={rail}>
       <div className="space-y-6 py-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-[13px] text-foreground-muted">

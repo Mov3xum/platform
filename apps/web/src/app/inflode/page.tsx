@@ -20,6 +20,7 @@ import {
   LEAD_STATUS_LABEL,
   type LeadStatus
 } from '@/lib/compass/types';
+import { isSurveyModule } from '@platform/shared';
 import { buildInflodeTabs } from './_tabs';
 import { DeltaChip, PeriodFilter, formatNumber, formatPct, parsePeriod } from './_ui';
 
@@ -46,7 +47,9 @@ export default async function InflodeDashboardPage({
     isStaff
       ? listLeads(pb, user.tenant, { perPage: 6, excludePreview: true }).then((r) => r.items)
       : Promise.resolve([]),
-    listModules(pb, user.tenant, { onlyActive: !isStaff })
+    listModules(pb, user.tenant, { onlyActive: !isStaff }).then((items) =>
+      items.filter((item) => !isSurveyModule(item))
+    )
   ]);
 
   const { kpis, leadsPerDay, leadsPerSource, funnel } = dashboard;
@@ -116,10 +119,10 @@ export default async function InflodeDashboardPage({
         </RailSection>
       )}
 
-      <RailSection label="Moduler">
+      <RailSection label="Startupkompassen">
         {modules.length === 0 ? (
           <div className="px-2 py-4 text-center text-[12px] text-foreground-subtle">
-            Inga publicerade moduler.
+            Inga publicerade formulär eller intag.
           </div>
         ) : (
           modules.slice(0, 5).map((m) => (
@@ -138,7 +141,7 @@ export default async function InflodeDashboardPage({
   );
 
   return (
-    <PageShell title="Startupkompassen" tabs={tabs} actions={actions} rightPanel={rail}>
+    <PageShell title="Marknadsverktyg" tabs={tabs} actions={actions} rightPanel={rail}>
       <div className="space-y-6 py-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-[13px] text-foreground-muted">
@@ -160,10 +163,10 @@ export default async function InflodeDashboardPage({
             </p>
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
               <Link href="/inflode/admin/modules/new" className="mx-btn mx-primary">
-                <Icon name="plus" size={13} /> Skapa din första modul
+                <Icon name="plus" size={13} /> Skapa ditt första intag
               </Link>
               <Link href="/inflode/admin/modules" className="mx-btn">
-                Visa moduler
+                Visa Startupkompassen
               </Link>
             </div>
           </section>

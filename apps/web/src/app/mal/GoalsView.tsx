@@ -599,7 +599,7 @@ function IndicatorRow({
             {indicator.source === 'computed' && indicator.metric_key
               ? `Beräknas: ${METRIC_DEFINITIONS[indicator.metric_key as MetricKey]?.label ?? indicator.metric_key}`
               : indicator.source === 'survey'
-                ? 'Enkät i Startupkompassen (medel 1–10)'
+                ? 'Enkät i Marknadsverktyget (medel 1–10)'
                 : 'Manuell bedömning'}
           </div>
         </td>
@@ -1163,7 +1163,7 @@ function NewIndicatorForm({ goalId, surveyModules }: { goalId: string; surveyMod
         <select className={inputClass} value={source} onChange={(e) => setSource(e.target.value as 'computed' | 'manual' | 'survey')}>
           <option value="computed">Beräknas ur data</option>
           <option value="survey" disabled={surveyModules.length === 0}>
-            Enkät i Startupkompassen{surveyModules.length === 0 ? ' (ingen enkätmodul ännu)' : ''}
+            Enkät i Marknadsverktyget{surveyModules.length === 0 ? ' (ingen enkät ännu)' : ''}
           </option>
           <option value="manual">Manuell bedömning</option>
         </select>
@@ -1191,7 +1191,7 @@ function NewIndicatorForm({ goalId, surveyModules }: { goalId: string; surveyMod
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-[11px] text-foreground-subtle">Medel av skalfrågorna (1–10), k-anonymt. Skapa enkäter i Startupkompassen.</p>
+            <p className="mt-1 text-[11px] text-foreground-subtle">Medel av skalfrågorna (1–10), k-anonymt. Skapa enkäter under Marknadsverktyg → Utvärderingar.</p>
           </>
         ) : (
           <>

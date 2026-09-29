@@ -1507,8 +1507,8 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'inflode',
-    title: 'Startupkompassen',
-    description: 'Hjärtat i inkubatorns inflöde — fånga, kvalificera och konvertera leads. Bygg quiz, formulär och AI-chattar (Mistral) och deploya dem på egna publika URL:er med QR-koder. Hanteras av admin, coach och incubator_lead.',
+    title: 'Marknadsverktyg',
+    description: 'Bygg Startupkompassens formulär och inflöden samt digitala utvärderingar och enkäter. Hanteras av admin, coach och incubator_lead.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach'],
     route: '/inflode'
   },

@@ -16,6 +16,7 @@ import { ShareModule } from '@/components/compass/ShareModule';
 import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
 import { ModuleEditor, type ModuleEditorNotice } from '@/components/compass/ModuleEditor';
 import { moduleHeroImageUrl, moduleHeroVideoUrl } from '@/lib/compass/media';
+import { isSurveyModule } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,6 +63,7 @@ export default async function EditModulePage({
   const pb = await getServerPb();
   const mod = await getModuleBySlug(pb, user.tenant, slug);
   if (!mod) notFound();
+  const isSurvey = isSurveyModule(mod);
 
   const [questions, analytics, allModules, events] = await Promise.all([
     listQuestionsForModule(pb, mod.id),
@@ -108,12 +110,12 @@ export default async function EditModulePage({
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb={`Startupkompassen / Moduler / ${mod.name}`}
+        crumb={`Marknadsverktyg / ${isSurvey ? 'Utvärderingar' : 'Startupkompassen'} / ${mod.name}`}
         title={mod.name}
         subtitle={`${mod.public_slug ? `/m/${mod.public_slug}` : '(ingen publik länk)'} · ${FLOW_TYPE_LABEL[mod.flow_type]} · ${mod.is_active && mod.public_url_enabled ? 'Publicerad' : mod.is_active ? 'Aktiv (ej publik)' : 'Utkast'}`}
         actions={
           <>
-            <Link href="/inflode/admin/modules" className="mx-btn">
+            <Link href={isSurvey ? '/inflode/evalueringar' : '/inflode/admin/modules'} className="mx-btn">
               <Icon name="arrow" size={13} /> Tillbaka
             </Link>
             <Link href={`/inflode/m/${mod.slug}`} className="mx-btn">
@@ -123,7 +125,7 @@ export default async function EditModulePage({
         }
       />
 
-      {metrics && (
+      {metrics && !isSurvey && (
         <Card style={{ padding: 14, marginBottom: 16, background: 'var(--mx-paper-2)' }}>
           <div className="mx-flex mx-items-c mx-gap-3 mx-t-13 mx-wrap">
             <Stat label="Leads" value={metrics.total} />

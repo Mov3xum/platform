@@ -220,7 +220,7 @@ export function ModuleEditor({
               <div className="mx-label" style={{ marginBottom: 6 }}>
                 Typ av modul
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${purpose === 'survey' ? 2 : 3}, minmax(0, 1fr))`, gap: 8 }}>
                 <FlowOption
                   value="wizard"
                   title="Formulär"
@@ -235,13 +235,15 @@ export function ModuleEditor({
                   current={flowType}
                   onSelect={setFlowType}
                 />
-                <FlowOption
-                  value="chat"
-                  title="AI-chatt"
-                  desc="Ett samtal som ställer frågorna"
-                  current={flowType}
-                  onSelect={setFlowType}
-                />
+                {purpose !== 'survey' && (
+                  <FlowOption
+                    value="chat"
+                    title="AI-chatt"
+                    desc="Ett samtal som ställer frågorna"
+                    current={flowType}
+                    onSelect={setFlowType}
+                  />
+                )}
               </div>
             </div>
 
@@ -273,7 +275,10 @@ export function ModuleEditor({
                       name="purpose"
                       value={p}
                       checked={purpose === p}
-                      onChange={() => setPurpose(p)}
+                      onChange={() => {
+                        setPurpose(p);
+                        if (p === 'survey' && flowType === 'chat') setFlowType('wizard');
+                      }}
                     />
                     <span>{COMPASS_PURPOSE_LABELS[p]}</span>
                   </label>

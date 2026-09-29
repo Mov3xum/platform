@@ -4,6 +4,7 @@ import { requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PageHead, Card, Icon } from '@/components/proto';
 import { createModuleAction } from '@/lib/actions/compass';
+import { normalizeCompassPurpose } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,10 @@ export default async function NewModulePage({
     redirect('/inflode');
   }
   const params = searchParams ? await searchParams : {};
+  const purpose = normalizeCompassPurpose(
+    Array.isArray(params.purpose) ? params.purpose[0] : params.purpose
+  );
+  const isSurvey = purpose === 'survey';
   const errorKeyRaw = params.error;
   const errorKey = Array.isArray(errorKeyRaw) ? errorKeyRaw[0] : errorKeyRaw;
   const errorText = errorKey ? ERROR_TEXT[errorKey] || ERROR_TEXT.create_failed : null;
@@ -40,11 +45,15 @@ export default async function NewModulePage({
   return (
     <div className="mx-view-pad mx-narrow">
       <PageHead
-        crumb="Startupkompassen / Moduler / Ny"
-        title="Skapa modul"
-        subtitle="Ge modulen ett namn och välj typ. Resten bygger du steg för steg efteråt."
+        crumb={isSurvey ? 'Marknadsverktyg / Utvärderingar / Ny' : 'Marknadsverktyg / Startupkompassen / Ny'}
+        title={isSurvey ? 'Skapa utvärdering' : 'Skapa intag'}
+        subtitle={
+          isSurvey
+            ? 'Skapa en digital enkät för uppföljning. Du bygger frågor och utformning steg för steg.'
+            : 'Ge formuläret ett namn och välj typ. Resten bygger du steg för steg efteråt.'
+        }
         actions={
-          <Link href="/inflode/admin/modules" className="mx-btn">
+          <Link href={isSurvey ? '/inflode/evalueringar' : '/inflode/admin/modules'} className="mx-btn">
             <Icon name="arrow" size={13} /> Tillbaka
           </Link>
         }
@@ -79,6 +88,7 @@ export default async function NewModulePage({
           {/* Länkar genereras från namnet; modulen aktiveras direkt men blir
               publik först när det slås på i editorns sista steg. */}
           <input type="hidden" name="is_active" value="on" />
+          {isSurvey && <input type="hidden" name="purpose" value="survey" />}
 
           <label className="mx-label">
             Namn
@@ -99,7 +109,7 @@ export default async function NewModulePage({
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
+                gridTemplateColumns: `repeat(${isSurvey ? 2 : 3}, minmax(0, 1fr))`,
                 gap: 8
               }}
             >
@@ -114,16 +124,18 @@ export default async function NewModulePage({
                 title="Quiz"
                 desc="Frågor med poäng och resultat"
               />
-              <FlowOption
-                value="chat"
-                title="AI-chatt"
-                desc="Ett samtal som ställer frågorna"
-              />
+              {!isSurvey && (
+                <FlowOption
+                  value="chat"
+                  title="AI-chatt"
+                  desc="Ett samtal som ställer frågorna"
+                />
+              )}
             </div>
           </div>
 
           <div className="mx-flex mx-items-c mx-gap-2" style={{ justifyContent: 'flex-end' }}>
-            <Link href="/inflode/admin/modules" className="mx-btn">
+            <Link href={isSurvey ? '/inflode/evalueringar' : '/inflode/admin/modules'} className="mx-btn">
               Avbryt
             </Link>
             <button type="submit" className="mx-btn mx-primary">
