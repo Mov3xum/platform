@@ -8,6 +8,7 @@ import {
   GOAL_FOCUS_AREA_LABELS,
   GOAL_INDICATOR_UNITS,
   GOAL_INDICATOR_UNIT_LABELS,
+  GOAL_KIND_LABELS,
   GOAL_OWNER_TEAMS,
   GOAL_OWNER_TEAM_LABELS,
   GOAL_PERIOD_STATUS_LABELS,
@@ -16,13 +17,17 @@ import {
   METRIC_DEFINITIONS,
   METRIC_KEYS,
   QUARTERS,
+  canManageGoal,
   formatMetricValue,
+  goalKindOf,
   isAggregateOnlyIndicator,
   progressTowardsTarget,
   rollupGoalStatuses,
   suggestStatusFromValue,
   type GoalIndicatorNode,
+  type GoalKind,
   type GoalNode,
+  type GoalPeriod,
   type GoalStatus,
   type MetricKey,
   type MetricValue,
@@ -34,19 +39,28 @@ import {
   createGoalAction,
   createGoalIndicatorAction,
   createGoalPeriodAction,
+  deleteGoalAction,
+  deleteGoalIndicatorAction,
+  deleteGoalPeriodAction,
   recordGoalStatusAction,
   setGoalPeriodStatusAction,
+  updateGoalAction,
+  updateGoalIndicatorAction,
+  updateGoalPeriodAction,
   type GoalActionState
 } from '@/lib/actions/goals';
 import type { GoalWorkspace, SurveyIndicatorValue } from '@/lib/goals/data';
 
 type SurveyModuleOption = GoalWorkspace['surveyModules'][number];
+type PersonOption = GoalWorkspace['people'][number];
 
 /**
- * Målträdet (CLAUDE.md § 42): fokusområde → mål → indikator med Q1–Q4 och
- * live-värde. Ren presentation + formulär som anropar server actions; all
- * validering och behörighet ligger i skrivlagret. Färger följer § 2.3:
- * grön = i fas/klar, gul = försenad, neutral = ej startad — ingen röd.
+ * Målträdet (CLAUDE.md § 42): fokusområde → övergripande mål / personliga mål
+ * → indikator med Q1–Q4 och live-värde. Ren presentation + formulär som
+ * anropar server actions; all validering och behörighet ligger i skrivlagret
+ * (`canManageGoal`/`canCreateGoalOfKind` speglas här bara för att visa rätt
+ * knappar). Färger följer § 2.3: grön = i fas/klar, gul = försenad, neutral =
+ * ej startad — ingen röd; radering markeras i orange.
  */
 
 const inputClass =
@@ -56,6 +70,12 @@ const btnPrimary =
   'inline-flex items-center gap-1.5 rounded-full bg-brand px-3.5 py-1.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-movexum-pastell-lila dark:focus-visible:ring-movexum-morklila';
 const btnGhost =
   'inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1.5 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-movexum-pastell-lila dark:focus-visible:ring-movexum-morklila';
+const btnDanger =
+  'inline-flex items-center gap-1.5 rounded-full border border-movexum-morkorange/40 bg-surface px-3 py-1.5 text-sm font-medium text-movexum-morkorange transition hover:bg-movexum-pastell-orange disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-movexum-pastell-lila dark:hover:bg-movexum-morkorange/20 dark:text-movexum-pastell-orange dark:focus-visible:ring-movexum-morklila';
+const iconBtn =
+  'inline-flex h-7 w-7 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-movexum-pastell-lila dark:focus-visible:ring-movexum-morklila';
+const iconBtnDanger =
+  'inline-flex h-7 w-7 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-movexum-pastell-orange hover:text-movexum-morkorange disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-movexum-pastell-lila dark:hover:bg-movexum-morkorange/20 dark:hover:text-movexum-pastell-orange dark:focus-visible:ring-movexum-morklila';
 
 function Notice({ state }: { state: GoalActionState | null }) {
   if (!state || (!state.error && !state.notice)) return null;
@@ -74,22 +94,33 @@ function Meter({ value }: { value: number | null }) {
   );
 }
 
+function personName(people: PersonOption[], id: string | null | undefined): string | null {
+  if (!id) return null;
+  return people.find((p) => p.id === id)?.name ?? null;
+}
+
 export function GoalsView({
   workspace,
   quarter,
   focusGoal,
+  currentUserId,
   canReport,
   canManage
 }: {
   workspace: GoalWorkspace;
   quarter: Quarter;
   focusGoal: string | null;
+  currentUserId: string;
+  /** Movexum-personal: rapporterar status och sätter egna personliga mål. */
   canReport: boolean;
+  /** Ledning (admin/incubator_lead): år, övergripande mål, indikatorer, personliga mål åt andra. */
   canManage: boolean;
 }) {
-  const { periods, period, tree, metrics, surveys, surveyModules, schemaMissing } = workspace;
+  const { periods, period, tree, metrics, surveys, surveyModules, people, schemaMissing } = workspace;
   const rollup = rollupGoalStatuses(tree, quarter);
   const yearHref = (y: number, q: Quarter = quarter) => `/mal?ar=${y}&q=${q}`;
+  const open = !!period && period.status !== 'closed';
+  const actor = { id: currentUserId, roles: canManage ? ['admin'] : canReport ? ['coach'] : [] };
 
   if (schemaMissing) {
     return (
@@ -157,33 +188,126 @@ export function GoalsView({
             ))}
           </section>
 
-          {canManage && period.status !== 'closed' && <PeriodControls periodId={period.id} status={period.status} />}
+          {canManage && <PeriodControls period={period} />}
 
           {tree.areas.map((area) => (
-            <section key={area.area} className="space-y-4 border-t border-default pt-6">
+            <section key={area.area} className="space-y-5 border-t border-default pt-6">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h2 className="font-heading text-lg font-semibold text-foreground">{area.label}</h2>
                 <span className="text-xs text-foreground-subtle">
-                  {area.goals.length === 0 ? 'Inga mål satta' : `${area.goals.length} mål`}
+                  {area.goals.length === 0
+                    ? 'Inga mål satta'
+                    : `${area.overall.length} övergripande · ${area.personal.length} personliga`}
                 </span>
               </div>
-              {area.goals.map((node) => (
-                <GoalCard
-                  key={node.goal.id}
-                  node={node}
-                  quarter={quarter}
-                  metrics={metrics}
-                  surveys={surveys}
-                  surveyModules={surveyModules}
-                  focused={focusGoal === node.goal.id}
-                  canReport={canReport && period.status !== 'closed'}
-                  canManage={canManage && period.status !== 'closed'}
-                />
-              ))}
-              {canManage && period.status !== 'closed' && <NewGoalForm periodId={period.id} area={area.area} />}
+
+              {/* Övergripande mål */}
+              <GoalGroup
+                kind="overall"
+                nodes={area.overall}
+                quarter={quarter}
+                metrics={metrics}
+                surveys={surveys}
+                surveyModules={surveyModules}
+                people={people}
+                focusGoal={focusGoal}
+                actor={actor}
+                canReport={canReport && open}
+                canManage={canManage && open}
+                canAdd={canManage && open}
+                periodId={period.id}
+                area={area.area}
+                currentUserId={currentUserId}
+              />
+
+              {/* Personliga mål */}
+              <GoalGroup
+                kind="personal"
+                nodes={area.personal}
+                quarter={quarter}
+                metrics={metrics}
+                surveys={surveys}
+                surveyModules={surveyModules}
+                people={people}
+                focusGoal={focusGoal}
+                actor={actor}
+                canReport={canReport && open}
+                canManage={canManage && open}
+                canAdd={canReport && open}
+                periodId={period.id}
+                area={area.area}
+                currentUserId={currentUserId}
+              />
             </section>
           ))}
         </>
+      )}
+    </div>
+  );
+}
+
+// ── Grupp per måltyp ────────────────────────────────────────────────────────
+
+function GoalGroup({
+  kind,
+  nodes,
+  quarter,
+  metrics,
+  surveys,
+  surveyModules,
+  people,
+  focusGoal,
+  actor,
+  canReport,
+  canManage,
+  canAdd,
+  periodId,
+  area,
+  currentUserId
+}: {
+  kind: GoalKind;
+  nodes: GoalNode[];
+  quarter: Quarter;
+  metrics: Partial<Record<MetricKey, MetricValue>>;
+  surveys: Record<string, SurveyIndicatorValue>;
+  surveyModules: SurveyModuleOption[];
+  people: PersonOption[];
+  focusGoal: string | null;
+  actor: { id: string; roles: string[] };
+  canReport: boolean;
+  canManage: boolean;
+  canAdd: boolean;
+  periodId: string;
+  area: (typeof GOAL_FOCUS_AREAS)[number];
+  currentUserId: string;
+}) {
+  if (nodes.length === 0 && !canAdd) return null;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <span className={`h-2 w-2 rounded-full ${kind === 'overall' ? 'bg-brand' : 'bg-movexum-lila'}`} aria-hidden />
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground-subtle">
+          {kind === 'overall' ? 'Övergripande mål' : 'Personliga mål'}
+        </h3>
+      </div>
+      {nodes.map((node) => (
+        <GoalCard
+          key={node.goal.id}
+          node={node}
+          quarter={quarter}
+          metrics={metrics}
+          surveys={surveys}
+          surveyModules={surveyModules}
+          people={people}
+          focused={focusGoal === node.goal.id}
+          canReport={canReport}
+          canManageIndicators={canManage}
+          canEdit={(canManage || canReport) && canManageGoal(node.goal, actor)}
+          isLead={canManage}
+        />
+      ))}
+      {canAdd && (
+        <NewGoalForm periodId={periodId} area={area} kind={kind} isLead={canManage} people={people} currentUserId={currentUserId} />
       )}
     </div>
   );
@@ -197,32 +321,78 @@ function GoalCard({
   metrics,
   surveys,
   surveyModules,
+  people,
   focused,
   canReport,
-  canManage
+  canManageIndicators,
+  canEdit,
+  isLead
 }: {
   node: GoalNode;
   quarter: Quarter;
   metrics: Partial<Record<MetricKey, MetricValue>>;
   surveys: Record<string, SurveyIndicatorValue>;
   surveyModules: SurveyModuleOption[];
+  people: PersonOption[];
   focused: boolean;
   canReport: boolean;
-  canManage: boolean;
+  canManageIndicators: boolean;
+  canEdit: boolean;
+  isLead: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [state, setState] = useState<GoalActionState | null>(null);
+  const [pending, start] = useTransition();
   useEffect(() => {
     if (focused) ref.current?.scrollIntoView({ block: 'center' });
   }, [focused]);
+  const kind = goalKindOf(node.goal);
+  const owner = personName(people, node.goal.owner_user);
+
+  const remove = () => {
+    if (!window.confirm(`Ta bort målet "${node.goal.title}" med alla indikatorer och kvartalsstatusar?`)) return;
+    start(async () => {
+      const res = await deleteGoalAction({ goalId: node.goal.id });
+      setState(res);
+      if (res.ok) router.refresh();
+    });
+  };
+
   return (
     <div ref={ref} id={`mal-${node.goal.id}`} className={`space-y-3 ${focused ? 'rounded-xl ring-2 ring-movexum-pastell-lila dark:ring-movexum-morklila' : ''}`}>
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h3 className="text-[15px] font-semibold text-foreground">{node.goal.title}</h3>
-        <span className="rounded-full bg-canvas-muted px-2 py-0.5 text-[11px] font-semibold text-foreground-muted">
-          {GOAL_OWNER_TEAM_LABELS[node.goal.owner_team]}
-        </span>
-        {node.goal.description && <p className="w-full text-sm text-foreground-muted">{node.goal.description}</p>}
-      </div>
+      {editing ? (
+        <GoalEditForm node={node} isLead={isLead} people={people} onDone={() => setEditing(false)} />
+      ) : (
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h4 className="text-[15px] font-semibold text-foreground">{node.goal.title}</h4>
+          <span className="rounded-full bg-canvas-muted px-2 py-0.5 text-[11px] font-semibold text-foreground-muted">
+            {GOAL_OWNER_TEAM_LABELS[node.goal.owner_team]}
+          </span>
+          {kind === 'personal' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-movexum-pastell-lila px-2 py-0.5 text-[11px] font-semibold text-movexum-morklila dark:bg-movexum-morklila/40 dark:text-movexum-pastell-lila">
+              <Icon name="user" size={10} /> {owner ?? 'Personligt mål'}
+            </span>
+          )}
+          {canEdit && (
+            <span className="ml-auto inline-flex items-center gap-1">
+              <button type="button" className={iconBtn} onClick={() => setEditing(true)} title="Redigera målet" aria-label="Redigera målet" disabled={pending}>
+                <Icon name="pencil" size={13} />
+              </button>
+              <button type="button" className={iconBtnDanger} onClick={remove} title="Ta bort målet" aria-label="Ta bort målet" disabled={pending}>
+                <Icon name="trash" size={13} />
+              </button>
+            </span>
+          )}
+          {node.goal.description && <p className="w-full text-sm text-foreground-muted">{node.goal.description}</p>}
+          {state?.error && (
+            <div className="w-full">
+              <Notice state={state} />
+            </div>
+          )}
+        </div>
+      )}
       {node.indicators.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
@@ -241,14 +411,130 @@ function GoalCard({
             </thead>
             <tbody>
               {node.indicators.map((ind) => (
-                <IndicatorRow key={ind.indicator.id} node={ind} quarter={quarter} metrics={metrics} survey={surveys[ind.indicator.id]} canReport={canReport} />
+                <IndicatorRow
+                  key={ind.indicator.id}
+                  node={ind}
+                  quarter={quarter}
+                  metrics={metrics}
+                  survey={surveys[ind.indicator.id]}
+                  canReport={canReport}
+                  canManage={canManageIndicators}
+                />
               ))}
             </tbody>
           </table>
         </div>
       )}
-      {canManage && <NewIndicatorForm goalId={node.goal.id} surveyModules={surveyModules} />}
+      {canManageIndicators && <NewIndicatorForm goalId={node.goal.id} surveyModules={surveyModules} />}
     </div>
+  );
+}
+
+function GoalEditForm({
+  node,
+  isLead,
+  people,
+  onDone
+}: {
+  node: GoalNode;
+  isLead: boolean;
+  people: PersonOption[];
+  onDone: () => void;
+}) {
+  const router = useRouter();
+  const g = node.goal;
+  const [title, setTitle] = useState(g.title);
+  const [description, setDescription] = useState(g.description ?? '');
+  const [team, setTeam] = useState<string>(g.owner_team);
+  const [area, setArea] = useState<string>(g.focus_area);
+  const [kind, setKind] = useState<GoalKind>(goalKindOf(g));
+  const [owner, setOwner] = useState<string>(g.owner_user ?? '');
+  const [state, setState] = useState<GoalActionState | null>(null);
+  const [pending, start] = useTransition();
+  return (
+    <form
+      className="grid gap-3 rounded-xl border border-default p-3 sm:grid-cols-[1fr_180px_180px]"
+      onSubmit={(e) => {
+        e.preventDefault();
+        start(async () => {
+          const patch: Record<string, string> = { title, description, owner_team: team, focus_area: area };
+          if (isLead) {
+            patch.kind = kind;
+            patch.owner_user = kind === 'personal' ? owner : '';
+          }
+          const res = await updateGoalAction({ goalId: g.id, patch });
+          setState(res);
+          if (res.ok) {
+            router.refresh();
+            onDone();
+          }
+        });
+      }}
+    >
+      <div>
+        <label className={labelClass}>Mål</label>
+        <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} required />
+      </div>
+      <div>
+        <label className={labelClass}>Ägande team</label>
+        <select className={inputClass} value={team} onChange={(e) => setTeam(e.target.value)}>
+          {GOAL_OWNER_TEAMS.map((t) => (
+            <option key={t} value={t}>
+              {GOAL_OWNER_TEAM_LABELS[t]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className={labelClass}>Fokusområde</label>
+        <select className={inputClass} value={area} onChange={(e) => setArea(e.target.value)}>
+          {GOAL_FOCUS_AREAS.map((a) => (
+            <option key={a} value={a}>
+              {GOAL_FOCUS_AREA_LABELS[a]}
+            </option>
+          ))}
+        </select>
+      </div>
+      {isLead && (
+        <>
+          <div>
+            <label className={labelClass}>Måltyp</label>
+            <select className={inputClass} value={kind} onChange={(e) => setKind(e.target.value as GoalKind)}>
+              <option value="overall">{GOAL_KIND_LABELS.overall}</option>
+              <option value="personal">{GOAL_KIND_LABELS.personal}</option>
+            </select>
+          </div>
+          {kind === 'personal' && (
+            <div>
+              <label className={labelClass}>Ägare (medarbetare)</label>
+              <select className={inputClass} value={owner} onChange={(e) => setOwner(e.target.value)} required>
+                <option value="">Välj…</option>
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </>
+      )}
+      <div className="sm:col-span-3">
+        <label className={labelClass}>Beskrivning (valfri, inga personuppgifter)</label>
+        <input className={inputClass} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} />
+      </div>
+      <div className="flex items-end gap-2 sm:col-span-3">
+        <button type="submit" className={btnPrimary} disabled={pending}>
+          Spara
+        </button>
+        <button type="button" className={btnGhost} onClick={onDone}>
+          Avbryt
+        </button>
+      </div>
+      <div className="sm:col-span-3">
+        <Notice state={state} />
+      </div>
+    </form>
   );
 }
 
@@ -257,14 +543,17 @@ function IndicatorRow({
   quarter,
   metrics,
   survey,
-  canReport
+  canReport,
+  canManage
 }: {
   node: GoalIndicatorNode;
   quarter: Quarter;
   metrics: Partial<Record<MetricKey, MetricValue>>;
   survey?: SurveyIndicatorValue;
   canReport: boolean;
+  canManage: boolean;
 }) {
+  const router = useRouter();
   const { indicator } = node;
   const live = indicator.source === 'computed' && indicator.metric_key ? metrics[indicator.metric_key as MetricKey] : undefined;
   const aggregateOnly = isAggregateOnlyIndicator(indicator);
@@ -288,6 +577,18 @@ function IndicatorRow({
   const unit = { unit: indicator.unit === 'bool' ? 'count' : indicator.unit } as const;
   const suggestion = suggestStatusFromValue(indicator, current);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [state, setState] = useState<GoalActionState | null>(null);
+  const [pending, start] = useTransition();
+
+  const remove = () => {
+    if (!window.confirm(`Ta bort indikatorn "${indicator.label}" med alla kvartalsstatusar?`)) return;
+    start(async () => {
+      const res = await deleteGoalIndicatorAction({ indicatorId: indicator.id });
+      setState(res);
+      if (res.ok) router.refresh();
+    });
+  };
 
   return (
     <>
@@ -336,13 +637,39 @@ function IndicatorRow({
           );
         })}
         <td className="py-2 text-right">
-          {canReport && (
-            <button type="button" className={btnGhost} onClick={() => setOpen((v) => !v)}>
-              <Icon name="pencil" size={12} /> Q{quarter}
-            </button>
-          )}
+          <span className="inline-flex items-center gap-1">
+            {canReport && (
+              <button type="button" className={btnGhost} onClick={() => setOpen((v) => !v)}>
+                <Icon name="pencil" size={12} /> Q{quarter}
+              </button>
+            )}
+            {canManage && (
+              <>
+                <button type="button" className={iconBtn} onClick={() => setEditing((v) => !v)} title="Redigera indikatorn" aria-label="Redigera indikatorn" disabled={pending}>
+                  <Icon name="gear" size={13} />
+                </button>
+                <button type="button" className={iconBtnDanger} onClick={remove} title="Ta bort indikatorn" aria-label="Ta bort indikatorn" disabled={pending}>
+                  <Icon name="trash" size={13} />
+                </button>
+              </>
+            )}
+          </span>
         </td>
       </tr>
+      {state?.error && (
+        <tr>
+          <td colSpan={8} className="pb-2">
+            <Notice state={state} />
+          </td>
+        </tr>
+      )}
+      {editing && (
+        <tr className="border-t border-default bg-canvas-subtle">
+          <td colSpan={8} className="p-3">
+            <IndicatorEditForm node={node} onDone={() => setEditing(false)} />
+          </td>
+        </tr>
+      )}
       {open && (
         <tr className="border-t border-default bg-canvas-subtle">
           <td colSpan={8} className="p-3">
@@ -356,6 +683,54 @@ function IndicatorRow({
         </tr>
       )}
     </>
+  );
+}
+
+function IndicatorEditForm({ node, onDone }: { node: GoalIndicatorNode; onDone: () => void }) {
+  const router = useRouter();
+  const { indicator } = node;
+  const [label, setLabel] = useState(indicator.label);
+  const [target, setTarget] = useState(indicator.target === null || indicator.target === undefined ? '' : String(indicator.target));
+  const [state, setState] = useState<GoalActionState | null>(null);
+  const [pending, start] = useTransition();
+  return (
+    <form
+      className="grid gap-3 sm:grid-cols-[1fr_140px_auto]"
+      onSubmit={(e) => {
+        e.preventDefault();
+        start(async () => {
+          const res = await updateGoalIndicatorAction({ indicatorId: indicator.id, label, target });
+          setState(res);
+          if (res.ok) {
+            router.refresh();
+            onDone();
+          }
+        });
+      }}
+    >
+      <div>
+        <label className={labelClass}>Indikator</label>
+        <input className={inputClass} value={label} onChange={(e) => setLabel(e.target.value)} maxLength={200} required />
+      </div>
+      <div>
+        <label className={labelClass}>Måltal</label>
+        <input className={inputClass} inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="–" />
+      </div>
+      <div className="flex items-end gap-2">
+        <button type="submit" className={btnPrimary} disabled={pending}>
+          Spara
+        </button>
+        <button type="button" className={btnGhost} onClick={onDone}>
+          Avbryt
+        </button>
+      </div>
+      <p className="text-[11px] text-foreground-subtle sm:col-span-3">
+        Mätkälla och metrik byts inte i efterhand — ta bort indikatorn och skapa en ny om källan ska ändras.
+      </p>
+      <div className="sm:col-span-3">
+        <Notice state={state} />
+      </div>
+    </form>
   );
 }
 
@@ -438,13 +813,14 @@ function StatusForm({
   );
 }
 
-// ── Formulär för ledningen ──────────────────────────────────────────────────
+// ── Verksamhetsår (ledningen) ───────────────────────────────────────────────
 
 function NewPeriodForm({ existingYears }: { existingYears: number[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const nextYear = Math.max(new Date().getFullYear(), ...existingYears, 0) + (existingYears.length ? 1 : 0);
   const [year, setYear] = useState(String(nextYear));
+  const [title, setTitle] = useState('');
   const [state, setState] = useState<GoalActionState | null>(null);
   const [pending, start] = useTransition();
   if (!open) {
@@ -456,11 +832,11 @@ function NewPeriodForm({ existingYears }: { existingYears: number[] }) {
   }
   return (
     <form
-      className="flex items-end gap-2"
+      className="flex flex-wrap items-end gap-2"
       onSubmit={(e) => {
         e.preventDefault();
         start(async () => {
-          const res = await createGoalPeriodAction({ year: Number(year) });
+          const res = await createGoalPeriodAction({ year: Number(year), title: title || undefined });
           setState(res);
           if (res.ok) {
             router.push(`/mal?ar=${year}`);
@@ -473,6 +849,10 @@ function NewPeriodForm({ existingYears }: { existingYears: number[] }) {
         <label className={labelClass}>År</label>
         <input className={`${inputClass} w-24`} inputMode="numeric" value={year} onChange={(e) => setYear(e.target.value)} />
       </div>
+      <div>
+        <label className={labelClass}>Titel (valfri)</label>
+        <input className={`${inputClass} w-56`} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder={`Verksamhetsplan ${year}`} />
+      </div>
       <button type="submit" className={btnPrimary} disabled={pending}>
         Skapa
       </button>
@@ -484,47 +864,161 @@ function NewPeriodForm({ existingYears }: { existingYears: number[] }) {
   );
 }
 
-function PeriodControls({ periodId, status }: { periodId: string; status: 'draft' | 'active' | 'closed' }) {
+/**
+ * Status (utkast → aktiv → avslutad, samt återöppna), redigera år/titel och
+ * ta bort året. Radering kräver att årtalet skrivs in — den tar bort ALLA
+ * mål, indikatorer och kvartalsstatusar (PB cascade).
+ */
+function PeriodControls({ period }: { period: GoalPeriod }) {
   const router = useRouter();
+  const [mode, setMode] = useState<'idle' | 'edit' | 'delete'>('idle');
+  const [year, setYear] = useState(String(period.year));
+  const [title, setTitle] = useState(period.title ?? '');
+  const [confirmYear, setConfirmYear] = useState('');
   const [state, setState] = useState<GoalActionState | null>(null);
   const [pending, start] = useTransition();
-  const set = (next: string) =>
+
+  const setStatus = (next: string) =>
     start(async () => {
-      const res = await setGoalPeriodStatusAction({ periodId, status: next });
+      const res = await setGoalPeriodStatusAction({ periodId: period.id, status: next });
       setState(res);
       if (res.ok) router.refresh();
     });
+
   return (
-    <div className="flex flex-wrap items-center gap-2 text-sm text-foreground-muted">
-      {status === 'draft' ? (
-        <>
-          <span>Verksamhetsåret är ett utkast.</span>
-          <button type="button" className={btnPrimary} disabled={pending} onClick={() => set('active')}>
-            Aktivera (VP beslutad)
+    <div className="space-y-3 rounded-xl border border-default bg-canvas-subtle/60 p-3">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-foreground-muted">
+        <span className="font-medium text-foreground">{period.title || `Verksamhetsplan ${period.year}`}</span>
+        <span className="rounded-full bg-canvas-muted px-2 py-0.5 text-[11px] font-semibold">{GOAL_PERIOD_STATUS_LABELS[period.status]}</span>
+        <span className="ml-auto inline-flex flex-wrap items-center gap-2">
+          {period.status === 'draft' && (
+            <button type="button" className={btnPrimary} disabled={pending} onClick={() => setStatus('active')}>
+              Aktivera (VP beslutad)
+            </button>
+          )}
+          {period.status === 'active' && (
+            <button type="button" className={btnGhost} disabled={pending} onClick={() => setStatus('closed')}>
+              Avsluta verksamhetsåret
+            </button>
+          )}
+          {period.status === 'closed' && (
+            <button type="button" className={btnGhost} disabled={pending} onClick={() => setStatus('active')} title="Öppna året igen så mål och status kan ändras">
+              Återöppna
+            </button>
+          )}
+          <button type="button" className={btnGhost} disabled={pending} onClick={() => setMode(mode === 'edit' ? 'idle' : 'edit')}>
+            <Icon name="pencil" size={12} /> Redigera år
           </button>
-        </>
-      ) : (
-        <button type="button" className={btnGhost} disabled={pending} onClick={() => set('closed')}>
-          Avsluta verksamhetsåret
-        </button>
+          <button type="button" className={btnDanger} disabled={pending} onClick={() => setMode(mode === 'delete' ? 'idle' : 'delete')}>
+            <Icon name="trash" size={12} /> Ta bort år
+          </button>
+        </span>
+      </div>
+      {period.status === 'closed' && mode === 'idle' && (
+        <p className="text-xs text-foreground-subtle">Året är avslutat — återöppna det för att ändra mål eller rapportera status.</p>
+      )}
+
+      {mode === 'edit' && (
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            start(async () => {
+              const res = await updateGoalPeriodAction({ periodId: period.id, year, title });
+              setState(res);
+              if (res.ok) {
+                setMode('idle');
+                if (Number(year) !== period.year) router.push(`/mal?ar=${year}`);
+                else router.refresh();
+              }
+            });
+          }}
+        >
+          <div>
+            <label className={labelClass}>År</label>
+            <input className={`${inputClass} w-24`} inputMode="numeric" value={year} onChange={(e) => setYear(e.target.value)} />
+          </div>
+          <div className="min-w-[220px] flex-1">
+            <label className={labelClass}>Titel</label>
+            <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder={`Verksamhetsplan ${year}`} />
+          </div>
+          <button type="submit" className={btnPrimary} disabled={pending}>
+            Spara
+          </button>
+          <button type="button" className={btnGhost} onClick={() => setMode('idle')}>
+            Avbryt
+          </button>
+        </form>
+      )}
+
+      {mode === 'delete' && (
+        <form
+          className="space-y-2 rounded-lg border border-movexum-morkorange/30 bg-movexum-pastell-orange/60 p-3 dark:bg-movexum-morkorange/15"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (confirmYear.trim() !== String(period.year)) {
+              setState({ error: `Skriv ${period.year} för att bekräfta.` });
+              return;
+            }
+            start(async () => {
+              const res = await deleteGoalPeriodAction({ periodId: period.id, confirmYear });
+              setState(res);
+              if (res.ok) router.push('/mal');
+            });
+          }}
+        >
+          <p className="text-sm text-movexum-morkorange dark:text-movexum-pastell-orange">
+            Tar bort verksamhetsåret {period.year} <strong>med alla mål, indikatorer och kvartalsstatusar</strong>. Det går inte att ångra.
+          </p>
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <label className={labelClass}>Skriv {period.year} för att bekräfta</label>
+              <input className={`${inputClass} w-32`} inputMode="numeric" value={confirmYear} onChange={(e) => setConfirmYear(e.target.value)} autoFocus />
+            </div>
+            <button type="submit" className={btnDanger} disabled={pending || confirmYear.trim() !== String(period.year)}>
+              <Icon name="trash" size={12} /> Ta bort året
+            </button>
+            <button type="button" className={btnGhost} onClick={() => setMode('idle')}>
+              Avbryt
+            </button>
+          </div>
+        </form>
       )}
       <Notice state={state} />
     </div>
   );
 }
 
-function NewGoalForm({ periodId, area }: { periodId: string; area: (typeof GOAL_FOCUS_AREAS)[number] }) {
+// ── Nytt mål ────────────────────────────────────────────────────────────────
+
+function NewGoalForm({
+  periodId,
+  area,
+  kind,
+  isLead,
+  people,
+  currentUserId
+}: {
+  periodId: string;
+  area: (typeof GOAL_FOCUS_AREAS)[number];
+  kind: GoalKind;
+  isLead: boolean;
+  people: PersonOption[];
+  currentUserId: string;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [team, setTeam] = useState<string>('gemensamt');
+  const [owner, setOwner] = useState<string>(currentUserId);
   const [state, setState] = useState<GoalActionState | null>(null);
   const [pending, start] = useTransition();
   if (!open) {
     return (
       <button type="button" className={btnGhost} onClick={() => setOpen(true)}>
-        <Icon name="plus" size={12} /> Nytt mål i {GOAL_FOCUS_AREA_LABELS[area].toLowerCase()}
+        <Icon name="plus" size={12} />{' '}
+        {kind === 'overall' ? `Nytt övergripande mål i ${GOAL_FOCUS_AREA_LABELS[area].toLowerCase()}` : 'Nytt personligt mål'}
       </button>
     );
   }
@@ -534,7 +1028,15 @@ function NewGoalForm({ periodId, area }: { periodId: string; area: (typeof GOAL_
       onSubmit={(e) => {
         e.preventDefault();
         start(async () => {
-          const res = await createGoalAction({ period: periodId, focus_area: area, title, description, owner_team: team });
+          const res = await createGoalAction({
+            period: periodId,
+            focus_area: area,
+            title,
+            description,
+            owner_team: team,
+            kind,
+            owner_user: kind === 'personal' ? (isLead ? owner : currentUserId) : undefined
+          });
           setState(res);
           if (res.ok) {
             setTitle('');
@@ -546,8 +1048,15 @@ function NewGoalForm({ periodId, area }: { periodId: string; area: (typeof GOAL_
       }}
     >
       <div>
-        <label className={labelClass}>Mål</label>
-        <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} required placeholder="t.ex. Konvertering 50 % från ink till acc inom 8 månader" />
+        <label className={labelClass}>{kind === 'overall' ? 'Övergripande mål' : 'Personligt mål'}</label>
+        <input
+          className={inputClass}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          maxLength={200}
+          required
+          placeholder={kind === 'overall' ? 't.ex. Konvertering 50 % från ink till acc inom 8 månader' : 't.ex. Genomföra 12 coachsamtal per kvartal'}
+        />
       </div>
       <div>
         <label className={labelClass}>Ägande team</label>
@@ -567,6 +1076,22 @@ function NewGoalForm({ periodId, area }: { periodId: string; area: (typeof GOAL_
           Avbryt
         </button>
       </div>
+      {kind === 'personal' && (
+        <div className="sm:col-span-3">
+          <label className={labelClass}>Vems mål</label>
+          {isLead ? (
+            <select className={inputClass} value={owner} onChange={(e) => setOwner(e.target.value)}>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.id === currentUserId ? `${p.name} (jag)` : p.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="py-1 text-sm text-foreground-muted">Ditt eget mål — ledningen kan sätta personliga mål åt andra.</p>
+          )}
+        </div>
+      )}
       <div className="sm:col-span-3">
         <label className={labelClass}>Beskrivning (valfri, inga personuppgifter)</label>
         <input className={inputClass} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} />

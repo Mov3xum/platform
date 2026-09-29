@@ -33,6 +33,7 @@ import {
   COMPASS_INPUT_TYPES,
   MAX_COMPASS_CHOICES,
   GOAL_FOCUS_AREAS,
+  GOAL_KINDS,
   GOAL_OWNER_TEAMS,
   GOAL_STATUSES,
   GOAL_INDICATOR_UNITS,
@@ -1718,9 +1719,12 @@ export function buildChatTools(
       function: {
         name: 'create_goal',
         description:
-          'Lägger till ett verksamhetsmål i årets verksamhetsplan (/mal, § 42) under ' +
-          'ett av Movexums fem fokusområden, med ägande team. Indikatorer med måltal ' +
-          'läggs till med add_goal_indicator (måltalet sätter en människa). ' +
+          'Lägger till ett mål i årets verksamhetsplan (/mal, § 42) under ett av ' +
+          'Movexums fem fokusområden, med ägande team. kind=overall = ÖVERGRIPANDE ' +
+          'mål (organisation/team, kräver admin/incubator_lead); kind=personal = ' +
+          'användarens EGET personliga mål (målet blir alltid den inloggades — du ' +
+          'kan inte sätta personliga mål åt andra). Indikatorer med måltal läggs ' +
+          'till med add_goal_indicator (måltalet sätter en människa). ' +
           'Verksamhetsåret måste finnas (skapas av ledningen i /mal). Skriv aldrig ' +
           'personnamn i mål eller beskrivning.',
         parameters: {
@@ -1730,7 +1734,8 @@ export function buildChatTools(
             focus_area: { type: 'string', enum: [...GOAL_FOCUS_AREAS], description: 'Fokusområde.' },
             title: { type: 'string', description: 'Målet (max 200 tecken), t.ex. "Konvertering 50 % från ink till acc inom 8 månader".' },
             description: { type: 'string', description: 'Valfri beskrivning (max 2000, inga personuppgifter).' },
-            owner_team: { type: 'string', enum: [...GOAL_OWNER_TEAMS], description: 'Ägande team (default gemensamt).' }
+            owner_team: { type: 'string', enum: [...GOAL_OWNER_TEAMS], description: 'Ägande team (default gemensamt).' },
+            kind: { type: 'string', enum: [...GOAL_KINDS], description: 'overall = övergripande (default), personal = mitt personliga mål.' }
           },
           required: ['focus_area', 'title']
         }
@@ -4965,7 +4970,8 @@ async function runCreateGoal(args: Record<string, unknown>, ctx: ToolDispatchCon
     focus_area: argStr(args, 'focus_area'),
     title: argStr(args, 'title'),
     description: argStr(args, 'description') || null,
-    owner_team: argStr(args, 'owner_team') || undefined
+    owner_team: argStr(args, 'owner_team') || undefined,
+    kind: argStr(args, 'kind') || undefined
   });
   if (!result.ok) return { ok: false, error: result.error };
   return {
@@ -4973,6 +4979,7 @@ async function runCreateGoal(args: Record<string, unknown>, ctx: ToolDispatchCon
     data: {
       goal_id: result.value.id,
       title: result.value.title,
+      kind: result.value.kind === 'personal' ? 'personal' : 'overall',
       year: period.year,
       path: goalsPath(period.year, result.value.id),
       note: 'Målet är tillagt. Lägg till indikatorer med add_goal_indicator; måltal sätter ledningen i /mal.',

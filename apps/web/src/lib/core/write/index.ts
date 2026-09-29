@@ -50,10 +50,16 @@ export {
 // Målstyrning & verksamhetsplan (§ 42)
 export {
   createGoalPeriod,
+  updateGoalPeriod,
+  deleteGoalPeriod,
   setGoalPeriodStatus,
   createGoal,
   updateGoalField,
+  updateGoalFields,
+  deleteGoal,
   createGoalIndicator,
+  updateGoalIndicator,
+  deleteGoalIndicator,
   recordGoalStatus,
   currentQuarter,
   goalsPath,

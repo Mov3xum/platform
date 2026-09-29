@@ -237,7 +237,7 @@ const GUIDE: ChatGuideSection[] = [
       {
         title: 'Mål & indikatorer i verksamhetsplanen',
         description:
-          'Lägg till mål under ett fokusområde och indikatorer som räknas ur data eller bedöms manuellt. Måltal och årets status sätter ledningen i /mal.',
+          'Lägg till övergripande mål (ledningen) eller ditt eget personliga mål under ett fokusområde, och indikatorer som räknas ur data eller bedöms manuellt. Måltal och årets status sätter ledningen i /mal.',
         roles: SCHEDULE_MANAGE,
         examples: [
           'Lägg till målet "Konvertering 50 % från ink till acc inom 8 månader" under Kundvärde och kvalitetssäkring, coachgruppen'

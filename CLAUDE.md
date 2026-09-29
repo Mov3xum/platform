@@ -6029,7 +6029,14 @@ varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
 - **`goals`**: `period`, `focus_area` (`partner_finansiering` |
   `inflode_varumarke` | `kundvarde_kvalitet` | `organisation_digitalisering`
   | `tematisk_accelerator`), `title`, `description`, `owner_team` (`ledning`
-  | `marknad` | `projekt` | `coach` | `gemensamt`), `sort_order`.
+  | `marknad` | `projekt` | `coach` | `gemensamt`), `sort_order`, samt
+  **måltyp** (migration **1700000161**): `kind` (`overall` = övergripande
+  mål för organisationen/teamet, `personal` = en medarbetares eget mål;
+  saknat värde ⇒ `overall`) och `owner_user` (→ `users`, `cascadeDelete:
+  false`; bara på personliga mål). Trädet (`buildGoalTree`) delar varje
+  fokusområde i `overall`/`personal` (övergripande först); `/mal` och
+  presentationsläget visar dem som två grupper, personliga med ägarens
+  visningsnamn (aldrig e-post).
 - **`goal_indicators`**: `goal`, `label`, `source` (`computed` | `manual` |
   `survey`), `metric_key` (en `MetricKey` ur § 41 — bara `scope: 'tenant'`;
   enhet och riktning ÄRVS från definitionen så UI och register aldrig säger
@@ -6066,11 +6073,34 @@ varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
   utelämnas ur verktygssvar och audit. `shareWithThreshold` kräver dessutom
   att BÅDA grupperna är ≥ 5 (homogena grupper avslöjar varje post). DPIA:
   `docs/privacy/dpia-startups.md`.
-- **RBAC:** år, mål och indikatorer = admin/incubator_lead (VP-beslut);
-  kvartalsstatus = hela staben (varje team rapporterar sina mål). Agenten
-  ärver den inloggades roll (`writable-fields.ts`) och får **aldrig** sätta
-  `target`, `metric_key` på befintliga indikatorer, `goal_periods.status`
-  eller ett manuellt `value` — den föreslår i text, människan beslutar.
+- **RBAC:** år, övergripande mål och indikatorer = admin/incubator_lead
+  (VP-beslut); kvartalsstatus = hela staben (varje team rapporterar sina
+  mål). **Personliga mål** skapas, ändras och tas bort av **ägaren själv**
+  (all Movexum-personal) eller av ledningen, som också kan sätta personliga
+  mål åt andra och byta måltyp/ägare — `canManageGoal`/`canCreateGoalOfKind`
+  i `@platform/shared` (rena, enhetstestade) är regeln; PB:s update-/
+  deleteRule på `goals` är `ledning ELLER @request.auth.id = owner_user`
+  (skalär `=`, § 21.3). Agenten ärver den inloggades roll
+  (`writable-fields.ts`), kan skapa ett personligt mål **bara åt den
+  inloggade** (`owner_user` agent-nekad — `users` är denylistad) och får
+  **aldrig** sätta `target`, `metric_key` på befintliga indikatorer,
+  `goal_periods.status`/`year` eller ett manuellt `value` — den föreslår i
+  text, människan beslutar.
+- **Redigera & ta bort (2026-09).** Ledningen kan redigera verksamhetsårets
+  årtal/titel (`updateGoalPeriod`; årtalet är unikt per tenant → tydligt fel
+  vid krock), återöppna ett avslutat år, och **ta bort året**
+  (`deleteGoalPeriod`, PB-cascade → mål → indikatorer → status; UI:t kräver
+  att årtalet skrivs in). Mål redigeras i en skrivning (`updateGoalFields`:
+  titel/beskrivning/team/fokusområde, för ledningen även måltyp/ägare) och
+  tas bort (`deleteGoal`); indikatorer får ny etikett/måltal
+  (`updateGoalIndicator` — källa/metrik byts aldrig i efterhand, då är det
+  en ny indikator) och tas bort (`deleteGoalIndicator`). Raderingar
+  auditeras som `update` + `deleted: true` (§ 30.6-konventionen) och syns i
+  Bolagsnytt/`/aktivitet`. Schema-drift: ett personligt mål mot en instans
+  utan 1700000161 avvisas med tydligt fel (PB släpper okända fält tyst,
+  § 24.4-invarianten); `verify-baseline.mjs` asserterar `goals.kind`/
+  `owner_user` (`REQUIRED_APP_FIELDS`) och fälten speglas i
+  `setup-via-api.mjs`.
 - **RLS (§ 21.3):** list/view `STAFF_OR_OBSERVER`, createRule roll-lös,
   update/delete `:each ?=`. Alla fyra kollektionerna ligger i
   `MUST_BE_STAFF_OR_OBSERVER` i `verify-baseline.mjs` och speglas i

@@ -92,7 +92,7 @@ test('validateGoalInput: fokusområde, titel, team', () => {
   assert.equal(validateGoalInput({ focus_area: 'inflode_varumarke', title: '' }).ok, false);
   const ok = validateGoalInput({ focus_area: 'inflode_varumarke', title: ' 50 leads ', description: '' });
   assert.ok(ok.ok);
-  assert.deepEqual(ok.value, { focus_area: 'inflode_varumarke', title: '50 leads', description: null, owner_team: 'gemensamt' });
+  assert.deepEqual(ok.value, { focus_area: 'inflode_varumarke', title: '50 leads', description: null, owner_team: 'gemensamt', kind: 'overall', owner_user: null });
 });
 
 test('validateGoalIndicatorInput: computed ärver enhet/riktning från registret, manual får ingen metrik', () => {
@@ -128,4 +128,85 @@ test('validateGoalStatusInput', () => {
   const ok = validateGoalStatusInput({ quarter: '3', status: 'delayed', value: '4,2', comment: '  väntar på enkät ' });
   assert.ok(ok.ok);
   assert.deepEqual(ok.value, { quarter: 3, status: 'delayed', value: 4.2, comment: 'väntar på enkät' });
+});
+
+// ── Övergripande vs personliga mål + verksamhetsår (migration 1700000161) ──
+
+import { canCreateGoalOfKind, canManageGoal, goalKindOf, validateGoalPeriodInput } from './goals.ts';
+
+test('validateGoalInput: måltyp default övergripande; personligt kräver ägare; ägare rensas för övergripande', () => {
+  const overall = validateGoalInput({ focus_area: 'inflode_varumarke', title: 'x', owner_user: 'u1' });
+  assert.ok(overall.ok);
+  assert.equal(overall.value.kind, 'overall');
+  assert.equal(overall.value.owner_user, null, 'övergripande mål har ingen ägare även om en skickas');
+  const noOwner = validateGoalInput({ focus_area: 'inflode_varumarke', title: 'x', kind: 'personal' });
+  assert.equal(noOwner.ok, false);
+  assert.match((noOwner as { error: string }).error, /ägare/);
+  assert.equal(validateGoalInput({ focus_area: 'inflode_varumarke', title: 'x', kind: 'personal', owner_user: 'bad id!' }).ok, false);
+  assert.equal(validateGoalInput({ focus_area: 'inflode_varumarke', title: 'x', kind: 'team' }).ok, false);
+  const personal = validateGoalInput({ focus_area: 'inflode_varumarke', title: 'Mitt mål', kind: 'personal', owner_user: 'u1' });
+  assert.ok(personal.ok);
+  assert.deepEqual(personal.value, {
+    focus_area: 'inflode_varumarke',
+    title: 'Mitt mål',
+    description: null,
+    owner_team: 'gemensamt',
+    kind: 'personal',
+    owner_user: 'u1'
+  });
+});
+
+test('goalKindOf: saknat/okänt värde är övergripande', () => {
+  assert.equal(goalKindOf({}), 'overall');
+  assert.equal(goalKindOf({ kind: null }), 'overall');
+  assert.equal(goalKindOf({ kind: 'personal' }), 'personal');
+});
+
+test('buildGoalTree delar upp per måltyp — övergripande före personliga', () => {
+  const tree = buildGoalTree(
+    [
+      ...goals,
+      { id: 'p1', tenant: 't', period: 'p', focus_area: 'kundvarde_kvalitet', title: 'Mitt personliga', owner_team: 'coach', kind: 'personal', owner_user: 'u1', sort_order: 0 }
+    ],
+    indicators,
+    entries
+  );
+  const kund = tree.areas.find((a) => a.area === 'kundvarde_kvalitet')!;
+  assert.deepEqual(kund.overall.map((g) => g.goal.id), ['g1', 'g2']);
+  assert.deepEqual(kund.personal.map((g) => g.goal.id), ['p1']);
+  assert.deepEqual(kund.goals.map((g) => g.goal.id), ['g1', 'g2', 'p1'], 'personliga sist trots lägre sort_order');
+});
+
+test('canManageGoal / canCreateGoalOfKind: ledning allt, ägare bara sitt personliga', () => {
+  const lead = { id: 'l', roles: ['incubator_lead'] };
+  const coach = { id: 'c', roles: ['coach'] };
+  const observer = { id: 'o', roles: ['observer'] };
+  const overall = { kind: 'overall' as const, owner_user: null };
+  const mine = { kind: 'personal' as const, owner_user: 'c' };
+  const theirs = { kind: 'personal' as const, owner_user: 'l' };
+  assert.equal(canManageGoal(overall, lead), true);
+  assert.equal(canManageGoal(overall, coach), false);
+  assert.equal(canManageGoal(mine, coach), true);
+  assert.equal(canManageGoal(theirs, coach), false);
+  assert.equal(canManageGoal(mine, observer), false);
+  assert.equal(canManageGoal({ kind: 'personal', owner_user: 'o' }, observer), false, 'observer är inte personal');
+
+  assert.equal(canCreateGoalOfKind({ kind: 'overall', owner_user: null }, lead).ok, true);
+  assert.equal(canCreateGoalOfKind({ kind: 'overall', owner_user: null }, coach).ok, false);
+  assert.equal(canCreateGoalOfKind({ kind: 'personal', owner_user: 'c' }, coach).ok, true);
+  assert.equal(canCreateGoalOfKind({ kind: 'personal', owner_user: 'l' }, coach).ok, false, 'coach sätter inte mål åt andra');
+  assert.equal(canCreateGoalOfKind({ kind: 'personal', owner_user: 'c' }, lead).ok, true, 'ledningen sätter åt andra');
+  assert.equal(canCreateGoalOfKind({ kind: 'personal', owner_user: 'o' }, observer).ok, false);
+});
+
+test('validateGoalPeriodInput', () => {
+  assert.equal(validateGoalPeriodInput({ year: 1999 }).ok, false);
+  assert.equal(validateGoalPeriodInput({ year: '2027.5' }).ok, false);
+  assert.equal(validateGoalPeriodInput({ year: 2027, title: 'x'.repeat(121) }).ok, false);
+  const ok = validateGoalPeriodInput({ year: ' 2027 ', title: '  VP 2027 ' });
+  assert.ok(ok.ok);
+  assert.deepEqual(ok.value, { year: 2027, title: 'VP 2027' });
+  const untitled = validateGoalPeriodInput({ year: 2027 });
+  assert.ok(untitled.ok);
+  assert.equal(untitled.value.title, null);
 });

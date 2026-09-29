@@ -346,7 +346,9 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   '(link_kind = procurement). Utvärderingen av leverantören (poäng) och ' +
   'reglerna sätts av en människa i /upphandlingar. ' +
   'MÅL & VERKSAMHETSPLAN (§ 42, /mal): lägg till mål under ett fokusområde ' +
-  '(`create_goal`), indikatorer på ett mål (`add_goal_indicator` — computed ' +
+  '(`create_goal`; kind=overall = övergripande mål för organisationen, bara ' +
+  'ledningen; kind=personal = användarens EGET personliga mål — aldrig åt ' +
+  'någon annan), indikatorer på ett mål (`add_goal_indicator` — computed ' +
   'kopplar till ett nyckeltal som räknas ur data, manual = bedömning) och ' +
   'rapportera kvartalsstatus (`set_goal_status`: I fas/Försenad/Ej startad/' +
   'Klar med kort motivering). Måltal, verksamhetsårets status och manuella ' +
