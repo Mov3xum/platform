@@ -4095,19 +4095,33 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
 const SC_USER_REL = (name) => ({ name, type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 });
-// Fältlåsta regler (spegel av migration 1700000163): ledningsfält, gransknings-
-// fält och innehållsfält låses per roll via `@request.body.<fält>:isset`.
+// Fältlåsta regler (spegel av migration 1700000163): ledningsfält,
+// identitetsfält, granskningsfält och innehållsfält låses per roll via
+// `@request.body.<fält>:isset`; medlemmens statusbyten är kopplade till
+// nuvarande status.
 const SC_LEAD_ONLY_FIELDS = ['funding_project', 'funding_work_package', 'state_aid_basis', 'funding_note', 'funding_set_by', 'funding_set_at', 'approved_amount_sek', 'decision_note', 'decided_by', 'decided_at', 'paid_at', 'paid_amount_sek', 'paid_note', 'de_minimis_stod', 'capital_round'];
-const SC_REVIEW_FIELDS = ['tenant', 'startup', 'check_type', 'created_by', 'changes_request_note', 'changes_requested_by', 'coach_statement', 'coach_statement_by', 'coach_statement_at', 'controller_statement', 'controller_statement_by', 'controller_statement_at', 'assessment_scores', 'assessment_score', 'assessed_by', 'assessed_at', 'is_excellence_activity', 'report_due_at'];
+const SC_IDENTITY_FIELDS = ['tenant', 'startup', 'check_type', 'created_by'];
+const SC_REVIEW_FIELDS = ['changes_request_note', 'changes_requested_by', 'coach_statement', 'coach_statement_by', 'coach_statement_at', 'controller_statement', 'controller_statement_by', 'controller_statement_at', 'assessment_scores', 'assessment_score', 'assessed_by', 'assessed_at', 'is_excellence_activity', 'report_due_at'];
 const SC_CONTENT_FIELDS = ['title', 'activities', 'requested_amount_sek', 'activity_end_date', 'applicant_note'];
+const SC_SUBMIT_FIELDS = ['revision', 'submitted_at', 'submitted_by'];
 const scUnset = (fields) => `(${fields.map((f) => `@request.body.${f}:isset = false`).join(' && ')})`;
 const scStatusIn = (values) => `(@request.body.status:isset = false || ${values.map((v) => `@request.body.status = "${v}"`).join(' || ')})`;
 const SC_LEAD_FIELDS_UNSET = scUnset(SC_LEAD_ONLY_FIELDS);
-const SC_STAFF_UPDATE = `(${STAFF_EACH} && ${SC_LEAD_FIELDS_UNSET} && ${scStatusIn(['draft', 'submitted', 'changes_requested', 'under_review', 'closed', 'withdrawn'])})`;
+const SC_IDENTITY_UNSET = scUnset(SC_IDENTITY_FIELDS);
+const SC_REVIEW_FIELDS_UNSET = scUnset(SC_REVIEW_FIELDS);
+const SC_STAFF_UPDATE = `(${STAFF_EACH} && ${SC_LEAD_FIELDS_UNSET} && ${SC_IDENTITY_UNSET} && ${scStatusIn(['draft', 'submitted', 'changes_requested', 'under_review', 'closed', 'withdrawn'])})`;
+const SC_MEMBER_EDIT = `(@request.body.status:isset = false && ${scUnset([...SC_SUBMIT_FIELDS, 'closed_at', 'final_report_received_at'])})`;
+const SC_MEMBER_SUBMIT = `(@request.body.status = "submitted" && ${scUnset(['closed_at', 'final_report_received_at'])})`;
+const SC_MEMBER_WITHDRAW = `(@request.body.status = "withdrawn" && ${scUnset([...SC_CONTENT_FIELDS, ...SC_SUBMIT_FIELDS, 'final_report_received_at'])})`;
+const SC_MEMBER_REPORT = `(@request.body.status:isset = false && ${scUnset([...SC_CONTENT_FIELDS, ...SC_SUBMIT_FIELDS, 'closed_at'])})`;
 const SC_MEMBER_UPDATE =
-  `(${MEMBER_OF_STARTUP_REL} && ${SC_LEAD_FIELDS_UNSET} && ${scUnset(SC_REVIEW_FIELDS)} && ${scStatusIn(['submitted', 'withdrawn'])} && ` +
-  `(status = "draft" || status = "changes_requested" || ((status = "submitted" || status = "under_review" || status = "paid") && ${scUnset(SC_CONTENT_FIELDS)})))`;
-const SC_APPLICATION_CREATE = `${ANY_AUTH} && @request.auth.tenant != "" && (@request.body.status:isset = false || @request.body.status = "draft") && ${SC_LEAD_FIELDS_UNSET}`;
+  `(${MEMBER_OF_STARTUP_REL} && ${SC_LEAD_FIELDS_UNSET} && ${SC_IDENTITY_UNSET} && ${SC_REVIEW_FIELDS_UNSET} && (` +
+  `((status = "draft" || status = "changes_requested") && (${SC_MEMBER_EDIT} || ${SC_MEMBER_SUBMIT} || ${SC_MEMBER_WITHDRAW})) || ` +
+  `((status = "submitted" || status = "under_review") && ${SC_MEMBER_WITHDRAW}) || ` +
+  `(status = "paid" && ${SC_MEMBER_REPORT})))`;
+const SC_APPLICATION_CREATE =
+  `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.created_by = @request.auth.id && ` +
+  `(@request.body.status:isset = false || @request.body.status = "draft") && ${SC_LEAD_FIELDS_UNSET} && ${SC_REVIEW_FIELDS_UNSET}`;
 const SC_REVISION_CREATE = `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.signer = @request.auth.id`;
 const SC_COMMENT_CREATE = `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.author = @request.auth.id`;
 const SC_DOCUMENT_CREATE = `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.uploaded_by = @request.auth.id`;
@@ -4119,7 +4133,7 @@ await ensureCollection({
     { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
     { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
-    { name: 'check_type', type: 'relation', required: true, collectionId: 'support_check_types_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'check_type', type: 'relation', required: false, collectionId: 'support_check_types_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'title', type: 'text', required: false, max: 200 },
     { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft', 'submitted', 'changes_requested', 'under_review', 'approved', 'rejected', 'paid', 'closed', 'withdrawn'] },

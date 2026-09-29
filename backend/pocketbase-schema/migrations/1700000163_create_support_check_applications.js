@@ -20,9 +20,11 @@
 // (länkat bolag) enforce:as i skrivlagret. Reglerna är dessutom FÄLTLÅSTA
 // (`@request.body.<fält>:isset = false`) så att en användartoken via
 // direkt-API aldrig når längre än rollen: bolagsmedlem/coach kan inte sätta
-// finansiering, beslut eller utbetalning (ledningsfält), och medlemmen kan
-// inte skriva utlåtanden/bedömning/komplettering eller byta tenant/bolag/
-// checktyp. Ett create måste vara ett utkast. Skrivlagret är fortsatt den
+// finansiering, beslut eller utbetalning (ledningsfält), ingen icke-ledning
+// kan byta tenant/bolag/checktyp/skapare, och medlemmens statusbyten är
+// kopplade till nuvarande status (inskick bara från utkast/komplettering,
+// återkallelse bara före beslut, slutrapport bara när utbetald). Ett create
+// måste vara ett utkast i den inloggades eget namn. Skrivlagret är fortsatt den
 // primära gränsen — detta är defense-in-depth. delete admin/incubator_lead.
 // Autodate explicit (§ 28.5).
 
@@ -54,12 +56,10 @@ const LEAD_ONLY_FIELDS = [
   'de_minimis_stod',
   'capital_round'
 ];
-// Fält som bolagsmedlemmen aldrig får skriva (granskningens + identitetens).
+// Identitetsfält — sätts vid skapandet, ändras aldrig via API:t (ingen roll).
+const IDENTITY_FIELDS = ['tenant', 'startup', 'check_type', 'created_by'];
+// Granskningens fält — bolagsmedlemmen får aldrig skriva dem (inte heller vid create).
 const REVIEW_FIELDS = [
-  'tenant',
-  'startup',
-  'check_type',
-  'created_by',
   'changes_request_note',
   'changes_requested_by',
   'coach_statement',
@@ -77,19 +77,37 @@ const REVIEW_FIELDS = [
 ];
 // Ansökans innehåll — låst för medlemmen utanför utkast/komplettering.
 const CONTENT_FIELDS = ['title', 'activities', 'requested_amount_sek', 'activity_end_date', 'applicant_note'];
-const unset = (fields) => fields.map((f) => `@request.body.${f}:isset = false`).join(' && ');
-const LEAD_FIELDS_UNSET = `(${unset(LEAD_ONLY_FIELDS)})`;
-const REVIEW_FIELDS_UNSET = `(${unset(REVIEW_FIELDS)})`;
-const CONTENT_FIELDS_UNSET = `(${unset(CONTENT_FIELDS)})`;
+// Inskickets fält — medlemmen får bara sätta dem tillsammans med status → submitted.
+const SUBMIT_FIELDS = ['revision', 'submitted_at', 'submitted_by'];
+const unset = (fields) => `(${fields.map((f) => `@request.body.${f}:isset = false`).join(' && ')})`;
+const LEAD_FIELDS_UNSET = unset(LEAD_ONLY_FIELDS);
+const IDENTITY_UNSET = unset(IDENTITY_FIELDS);
+const REVIEW_FIELDS_UNSET = unset(REVIEW_FIELDS);
 const statusIn = (values) => `(@request.body.status:isset = false || ${values.map((v) => `@request.body.status = "${v}"`).join(' || ')})`;
 // Staff (coach/mentor) får driva ärendet fram till beslut; beslut/utbetalning = ledning.
 const STAFF_STATUS = statusIn(['draft', 'submitted', 'changes_requested', 'under_review', 'closed', 'withdrawn']);
-// Medlemmen: skicka in (från utkast/komplettering) eller återkalla.
-const MEMBER_STATUS = statusIn(['submitted', 'withdrawn']);
+// Medlemmen: målstatus är KOPPLAD till nuvarande status (samma övergångar
+// som `canTransitionSupportCheck` för rollen applicant), och fälten som hör
+// till respektive övergång får bara skrivas i just den:
+//   utkast/komplettering → redigera innehåll, skicka in (revision/submitted_*)
+//                          eller återkalla (closed_at);
+//   inskickad/granskas   → bara återkalla;
+//   utbetald             → bara slutrapport (final_report_received_at).
+const MEMBER_EDIT = `(@request.body.status:isset = false && ${unset([...SUBMIT_FIELDS, 'closed_at', 'final_report_received_at'])})`;
+const MEMBER_SUBMIT = `(@request.body.status = "submitted" && ${unset(['closed_at', 'final_report_received_at'])})`;
+const MEMBER_WITHDRAW = `(@request.body.status = "withdrawn" && ${unset([...CONTENT_FIELDS, ...SUBMIT_FIELDS, 'final_report_received_at'])})`;
+const MEMBER_REPORT = `(@request.body.status:isset = false && ${unset([...CONTENT_FIELDS, ...SUBMIT_FIELDS, 'closed_at'])})`;
 const MEMBER_UPDATE =
-  `(${MEMBER} && ${LEAD_FIELDS_UNSET} && ${REVIEW_FIELDS_UNSET} && ${MEMBER_STATUS} && ` +
-  `(status = "draft" || status = "changes_requested" || ((status = "submitted" || status = "under_review" || status = "paid") && ${CONTENT_FIELDS_UNSET})))`;
-const STAFF_UPDATE = `(${STAFF} && ${LEAD_FIELDS_UNSET} && ${STAFF_STATUS})`;
+  `(${MEMBER} && ${LEAD_FIELDS_UNSET} && ${IDENTITY_UNSET} && ${REVIEW_FIELDS_UNSET} && (` +
+  `((status = "draft" || status = "changes_requested") && (${MEMBER_EDIT} || ${MEMBER_SUBMIT} || ${MEMBER_WITHDRAW})) || ` +
+  `((status = "submitted" || status = "under_review") && ${MEMBER_WITHDRAW}) || ` +
+  `(status = "paid" && ${MEMBER_REPORT})))`;
+// Staff: aldrig ledningsfält, aldrig identitetsfält, bara staff-statusar.
+const STAFF_UPDATE = `(${STAFF} && ${LEAD_FIELDS_UNSET} && ${IDENTITY_UNSET} && ${STAFF_STATUS})`;
+// Ett create är alltid ett utkast i den inloggades eget namn utan lednings-/granskningsfält.
+const APPLICATION_CREATE =
+  `${ANY_AUTH} && ${ANY_TENANT} && @request.body.created_by = @request.auth.id && ` +
+  `(@request.body.status:isset = false || @request.body.status = "draft") && ${LEAD_FIELDS_UNSET} && ${REVIEW_FIELDS_UNSET}`;
 
 migrate(
   (app) => {
@@ -131,12 +149,16 @@ migrate(
         {
           name: 'check_type',
           type: 'relation',
-          required: true,
+          // Skrivlagret kräver alltid en typ. I schemat är relationen VALFRI
+          // och utan cascade: en checktyp med ansökningar får inte raderas
+          // (skrivlagret vägrar), och ett ärende ska aldrig försvinna tyst —
+          // men en `required` relation utan cascade skulle få PB att vägra
+          // radera typen även i tenant-kaskaden (art. 17), så fältet nollas
+          // i stället i det fallet.
+          required: false,
           collectionId: typesCol.id,
-          // Ingen cascade: en checktyp med ansökningar får inte raderas
-          // (skrivlagret vägrar); ett ärende ska aldrig försvinna tyst.
           cascadeDelete: false,
-          minSelect: 1,
+          minSelect: 0,
           maxSelect: 1
         },
         {
@@ -248,7 +270,7 @@ migrate(
       ],
       listRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF_OR_OBSERVER} || ${MEMBER})`,
       viewRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF_OR_OBSERVER} || ${MEMBER})`,
-      createRule: `${ANY_AUTH} && ${ANY_TENANT} && (@request.body.status:isset = false || @request.body.status = "draft") && ${LEAD_FIELDS_UNSET}`,
+      createRule: APPLICATION_CREATE,
       updateRule: `${ANY_AUTH} && ${TENANT_MATCH} && (${STAFF_OR_LEAD} || ${STAFF_UPDATE} || ${MEMBER_UPDATE})`,
       deleteRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${STAFF_OR_LEAD}`
     });

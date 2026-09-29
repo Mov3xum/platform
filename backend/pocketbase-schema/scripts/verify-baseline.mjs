@@ -198,6 +198,10 @@ async function verifyCollectionsExist() {
     'support_check_comments',
     'support_check_documents',
     'support_check_rules',
+    // Oföränderliga bevis-/historikkollektioner (MUST_BE_IMMUTABLE) — måste
+    // finnas i kartan för att asserteras, annars hoppas de tyst.
+    'agreement_signatures',
+    'tool_versions',
     // Övrigt
     'web_cache'
   ];

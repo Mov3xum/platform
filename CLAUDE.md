@@ -6530,17 +6530,22 @@ ansökans id), (2) kapitalrad `capital_rounds` typ `soft_funding`, (3) status
 Misslyckas de minimis-registreringen ändras **ingen** status — aldrig ett
 halvt godkännande. **Idempotent:** beslutet letar först efter spår som redan
 länkar till ansökan (`support_check_application`) och återanvänder dem, så
-ett omförsök efter ett avbrutet beslut dubbelregistrerar aldrig stödet;
-misslyckas statusskrivningen **rullas de spår som skapades i anropet
-tillbaka** (`revert`-audit) och felet redovisas — kan något inte återföras
-namnges det i felet med ansökans id. Art. 22 → ingen de minimis-post, bara kapitalrad. Avslag
+ett omförsök efter ett avbrutet beslut dubbelregistrerar aldrig stödet.
+Kontrollen är **fail-closed** (kan länkarna inte läsas skapas inget), och
+bakåtlänken är själva idempotensnyckeln — kan den inte skrivas rullas
+posten tillbaka och beslutet avbryts. Misslyckas statusskrivningen **rullas
+de spår som skapades i anropet tillbaka** (`revert`-audit) och felet
+redovisas — kan något inte återföras namnges det i felet med ansökans id. Art. 22 → ingen de minimis-post, bara kapitalrad. Avslag
 kräver motivering. `markSupportCheckPaid` sätter `report_due_at` (insatsens
 slut + `report_due_days`). **Återkallelse** efter beviljande (bara ledning,
 före utbetalning) raderar de minimis-posten och kapitalraden med fullständig
 audit (`action_type='revert'`, `before_value` bär belopp, förordning och
 enhet) — statsstödsregistret ska inte innehålla stöd som aldrig lämnades.
-Återföringen är **fail-closed**: kan posten inte tas bort återkallas inte
-ärendet. Anledningen till en återkallelse sparas som synlig kommentar
+Återföringen är **fail-closed** och stegvis: varje post läses strikt (bara
+404 = "redan borta"), raderas och länken på ansökan nollas DIREKT innan
+nästa post — avbryts flödet står ärendet kvar som beviljat utan att peka på
+en raderad post, och felet namnger vad som redan återförts. Anledningen till
+en återkallelse sparas som synlig kommentar
 (`support_check_comments`), aldrig i beslutsgruppens `decision_note`.
 
 ### 46.5 Bedömning & kompletteringar
@@ -6576,7 +6581,9 @@ staff/observer-only i RLS, så en bolagsmedlems tomma läsning betyder "får
 inte läsa", inte "inga regler". När en MEDLEM utlöser synken (inskick,
 återkallelse, slutrapport) kör `syncNotice` den med superuser-klienten —
 efter att skrivlagret redan verifierat medlemskapet — utan seed; saknas
-superuser tar staffens lazy synk igen det.
+superuser tar staffens lazy synk igen det. **Reglerna läses strikt** i
+synken: ett läsfel avbryter synken med tydligt fel — det tolkas aldrig som
+"inga regler" (vilket skulle auto-stänga varje öppet kort).
 
 ### 46.7 Bolagskortet & Mitt bolag
 
@@ -6602,10 +6609,16 @@ finansieringsblocket. "Ny ansökan" finns för staff och länkad medlem.
   admin/incubator_lead, granskningsfälten (utlåtanden, bedömning,
   komplettering, tenant/bolag/checktyp) för medlemmen, och ansökans innehåll
   för medlemmen utanför `draft`/`changes_requested`, via
-  `@request.body.<fält>:isset = false`; statusvärden per roll på samma sätt
-  (medlem: `submitted`/`withdrawn`; staff: t.o.m. `under_review`/`closed`).
-  `createRule` kräver utkast utan ledningsfält; revisioner/kommentarer/
-  bilagor kan bara skapas i den inloggades eget namn (`signer`/`author`/
+  `@request.body.<fält>:isset = false`. Identitetsfälten (tenant/bolag/
+  checktyp/skapare) är låsta för alla utom ledningen. Medlemmens statusbyten
+  är **kopplade till nuvarande status** (samma övergångar som
+  `canTransitionSupportCheck` för `applicant`): `submitted` bara från
+  `draft`/`changes_requested` (och bara då får `revision`/`submitted_*`
+  skrivas), `withdrawn` bara före beslut, `final_report_received_at` bara i
+  `paid`; staff får statusar t.o.m. `under_review`/`closed`/`withdrawn`.
+  `createRule` kräver utkast i den inloggades eget namn (`created_by =
+  @request.auth.id`) utan lednings- eller granskningsfält; revisioner/
+  kommentarer/bilagor kan bara skapas i eget namn (`signer`/`author`/
   `uploaded_by = @request.auth.id`); bilagor uppdateras bara av staff.
   Skrivlagret är fortsatt den primära gränsen (`writeWithFallback` används
   först efter verifierad roll/tenant). Asserterat i `verify-baseline.mjs`
@@ -6624,10 +6637,13 @@ finansieringsblocket. "Ny ansökan" finns för staff och länkad medlem.
   berättigat intresse (stödhantering, statsstödskontroll).
 - **GDPR art. 17:** cascade tenant → ansökan → revisioner/kommentarer/
   bilagor/genererade uppgifter; de minimis-post och kapitalrad behåller
-  historiken (länken nollställs). `check_type` har **ingen** cascade — en
-  checktyp med ansökningar kan inte raderas (skrivlagret vägrar,
-  **fail-closed** när kontrollen inte kan göras; samma för projekt som
-  belastats av beviljade checkar). **Känd begränsning:** `signer`-relationen
+  historiken (länken nollställs). `check_type` har **ingen** cascade och är
+  **valfri i schemat** (skrivlagret kräver alltid en typ): en checktyp med
+  ansökningar kan inte raderas via appen (skrivlagret vägrar, **fail-closed**
+  när kontrollen inte kan göras; samma för projekt som belastats av
+  beviljade checkar), och eftersom relationen inte är `required` fastnar
+  PB:s tenant-kaskad aldrig på den — vid tenant-radering nollas fältet på
+  ansökningar som ännu inte hunnit kaskadraderas. **Känd begränsning:** `signer`-relationen
   i revisionerna blockerar radering av användarkontot i PB (`required`) —
   bevisen är avtalsdata med rättslig grund att behållas; ett erasure-flöde
   som pseudonymiserar `signer_name`/`signer_email` och nollställer `signer`

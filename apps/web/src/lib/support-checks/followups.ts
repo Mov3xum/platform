@@ -53,10 +53,16 @@ export async function syncSupportCheckFollowups(
 ): Promise<SupportCheckSyncResult> {
   const app = opts.application ?? (await getApplication(pb, actor.tenant, applicationId));
   if (!app) return { applicationId, created: 0, updated: 0, resolved: 0, error: 'Ansökan hittades inte.' };
-  const [types, rules] = await Promise.all([
-    listCheckTypes(pb, actor.tenant),
-    opts.rules ? Promise.resolve(opts.rules) : ensureSupportCheckRules(pb, actor.tenant, actor)
-  ]);
+  // Reglerna läses STRIKT: ett läsfel avbryter synken i stället för att
+  // tolkas som "inga regler" (vilket skulle auto-stänga varje öppet kort).
+  let rules: SupportCheckRule[];
+  try {
+    rules = opts.rules ?? (await ensureSupportCheckRules(pb, actor.tenant, actor));
+  } catch (err) {
+    console.warn('[support-checks] followup sync: could not read rules', { tenant: actor.tenant, applicationId, error: err instanceof Error ? err.message : err });
+    return { applicationId, created: 0, updated: 0, resolved: 0, error: 'Uppföljningsreglerna kunde inte läsas — synken hoppades över.' };
+  }
+  const types = await listCheckTypes(pb, actor.tenant);
   let existing: TaskRow[];
   try {
     existing = await listRuleTasks(pb, actor.tenant, app.id);
@@ -86,7 +92,13 @@ export async function syncAllSupportCheckFollowups(pb: PocketBase, actor: Actor)
   const apps = await listApplications(pb, actor.tenant, {
     statuses: ['submitted', 'changes_requested', 'under_review', 'approved', 'paid']
   });
-  const rules = await ensureSupportCheckRules(pb, actor.tenant, actor);
+  let rules: SupportCheckRule[];
+  try {
+    rules = await ensureSupportCheckRules(pb, actor.tenant, actor);
+  } catch (err) {
+    console.warn('[support-checks] followup sync: could not read rules', { tenant: actor.tenant, error: err instanceof Error ? err.message : err });
+    return apps.map((a) => ({ applicationId: a.id, created: 0, updated: 0, resolved: 0, error: 'Uppföljningsreglerna kunde inte läsas — synken hoppades över.' }));
+  }
   const out: SupportCheckSyncResult[] = [];
   const schemaError = followupSchemaError(SCHEMA_HINT);
   for (const a of apps) {

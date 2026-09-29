@@ -4798,7 +4798,7 @@ async function runCreateSupportCheckType(args: Record<string, unknown>, ctx: Too
       check_type_id: result.value.typeId,
       title: result.value.title,
       path: result.value.path,
-      note: 'Checktypen är skapad med standardkriterier. Bedömningskriterier, obligatorisk workshop och arbetspaket justeras på ' + result.value.path + '.',
+      note: 'Checktypen är skapad som INAKTIVT utkast med standardkriterier — den är inte öppen för ansökningar förrän en människa aktiverar den på ' + result.value.path + ' (där sätts även bedömningskriterier, obligatorisk workshop och arbetspaket).',
       logged_in: 'agent_actions'
     }
   };

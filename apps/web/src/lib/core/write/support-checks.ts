@@ -894,7 +894,7 @@ export async function setSupportCheckFunding(pb: PocketBase, actor: Actor, appli
   const row = await loadApp(pb, actor, applicationId);
   if (!row) return fail('NOT_FOUND', 'Ansökan hittades inte i din organisation.');
   if (!fundingEditable(row.status)) {
-    return fail('STATE_TRANSITION', `Finansieringen kan inte ändras i status "${SUPPORT_CHECK_STATUS_LABELS[row.status] ?? row.status}" (låst efter utbetalning).`);
+    return fail('STATE_TRANSITION', `Finansieringen kan inte ändras i status "${SUPPORT_CHECK_STATUS_LABELS[row.status] ?? row.status}" (låst från beslutet — återkalla och besluta på nytt för att ändra finansieringen).`);
   }
   const basis = String(input.stateAidBasis || '').trim();
   if (!isFundingBasis(basis)) return fail('INVALID_VALUE', `Statsstödsgrund måste vara en av: ${FUNDING_BASES.join(', ')}.`);
@@ -972,14 +972,41 @@ export interface DecisionResult extends ApplicationResult {
   capitalRoundId: string | null;
 }
 
-/** Hittar en bokföringspost som redan länkar till ansökan (idempotent beslut). Läsfel → null (vi skapar då; dubblett fångas av kanBevilja/audit). */
-async function findLinkedRecord(pb: PocketBase, collection: 'de_minimis_stod' | 'capital_rounds', applicationId: string): Promise<string | null> {
+/**
+ * Hittar en bokföringspost som redan länkar till ansökan (idempotent beslut).
+ * Fail-closed: kan vi inte läsa (schema utan migration 1700000170, RLS-miss)
+ * skapar vi INTE en ny post — det vore en möjlig dubbelregistrering av stöd.
+ */
+async function findLinkedRecord(pb: PocketBase, collection: 'de_minimis_stod' | 'capital_rounds', applicationId: string): Promise<{ ok: true; id: string | null } | { ok: false; error: string }> {
   try {
     const res = await pb.collection(collection).getList<{ id: string }>(1, 1, { filter: pb.filter('support_check_application = {:a}', { a: applicationId }), fields: 'id' });
-    return res.items[0]?.id ?? null;
-  } catch {
-    return null;
+    return { ok: true, id: res.items[0]?.id ?? null };
+  } catch (err) {
+    return { ok: false, error: describeError(err, `Kunde inte kontrollera om ${collection === 'de_minimis_stod' ? 'de minimis-posten' : 'kapitalraden'} redan finns (kör migration 1700000170) — beslutet avbröts.`) };
   }
+}
+
+type CreatedTrace = { collection: 'de_minimis_stod' | 'capital_rounds'; id: string };
+
+/** Rullar tillbaka spår som skapades i ett avbrutet beslut (med revert-audit). Returnerar det som INTE gick att återföra. */
+async function rollbackCreated(pb: PocketBase, actor: Actor, created: CreatedTrace[], ctx: { startup: string; startupName: string; amountSek: number; applicationId: string; reason: string }): Promise<string[]> {
+  const notReversed: string[] = [];
+  for (const rec of created) {
+    try {
+      await writeWithFallback(pb, (c) => c.collection(rec.collection).delete(rec.id), { fallbackOn404: true });
+      await logAgentAction(pb, {
+        actor,
+        action_type: 'revert',
+        collection: rec.collection,
+        record_id: rec.id,
+        before_value: { startup: ctx.startup, startup_name: ctx.startupName, amount_sek: ctx.amountSek, support_check_application: ctx.applicationId },
+        after_value: { reversed: true, reason: ctx.reason }
+      });
+    } catch {
+      notReversed.push(rec.collection === 'de_minimis_stod' ? 'de minimis-posten' : 'kapitalraden');
+    }
+  }
+  return notReversed;
 }
 
 /**
@@ -1040,12 +1067,29 @@ export async function decideSupportCheckApplication(pb: PocketBase, actor: Actor
   // Idempotens: ett tidigare, avbrutet beslut kan redan ha bokfört spåren
   // (posterna länkar tillbaka via `support_check_application`). Återanvänd
   // dem i stället för att dubbelregistrera stödet.
-  const existingDm = basis === 'de_minimis' ? await findLinkedRecord(pb, 'de_minimis_stod', row.id) : null;
+  const existingDm = basis === 'de_minimis' ? await findLinkedRecord(pb, 'de_minimis_stod', row.id) : { ok: true as const, id: null };
+  if (!existingDm.ok) return fail('DB_ERROR', existingDm.error);
   const existingCap = await findLinkedRecord(pb, 'capital_rounds', row.id);
-  const createdHere: Array<{ collection: 'de_minimis_stod' | 'capital_rounds'; id: string }> = [];
+  if (!existingCap.ok) return fail('DB_ERROR', existingCap.error);
+  const createdHere: CreatedTrace[] = [];
+  const rollbackCtx = { startup: row.startup, startupName: name, amountSek: approved, applicationId: row.id };
+  // Bakåtlänken ÄR idempotensnyckeln — kan den inte skrivas rullas posten
+  // tillbaka och beslutet avbryts, annars hittas posten aldrig vid omförsök.
+  const linkBack = async (collection: CreatedTrace['collection'], id: string): Promise<string | null> => {
+    try {
+      await writeWithFallback(pb, (c) => c.collection(collection).update(id, { support_check_application: row.id }), { fallbackOn404: true });
+      return null;
+    } catch (err) {
+      const notReversed = await rollbackCreated(pb, actor, createdHere, { ...rollbackCtx, reason: 'link_back_failed' });
+      return describeError(
+        err,
+        `${collection === 'de_minimis_stod' ? 'De minimis-posten' : 'Kapitalraden'} kunde inte länkas till ansökan (kör migration 1700000170) — beslutet avbröts${notReversed.length ? ` och ${notReversed.join(' och ')} kunde inte återföras (kontakta admin, ansökan ${row.id})` : ' och bokföringen återfördes'}.`
+      );
+    }
+  };
 
   // 1. De minimis-post (fail-closed mot taket).
-  let deMinimisStodId: string | null = existingDm;
+  let deMinimisStodId: string | null = existingDm.id;
   if (basis === 'de_minimis' && !deMinimisStodId) {
     const sekPerEur = input.sekPerEur && input.sekPerEur > 0 ? input.sekPerEur : DEFAULT_VAXELKURS_SEK_PER_EUR;
     const dm = await registerDeMinimisSupport(pb, actor, {
@@ -1062,15 +1106,12 @@ export async function decideSupportCheckApplication(pb: PocketBase, actor: Actor
     deMinimisStodId = dm.value.stodId;
     createdHere.push({ collection: 'de_minimis_stod', id: deMinimisStodId });
     warnings.push(...dm.value.warnings);
-    try {
-      await writeWithFallback(pb, (c) => c.collection('de_minimis_stod').update(deMinimisStodId!, { support_check_application: row.id }), { fallbackOn404: true });
-    } catch {
-      warnings.push('De minimis-posten kunde inte länkas tillbaka till ansökan (kör migration 1700000170).');
-    }
+    const linkErr = await linkBack('de_minimis_stod', deMinimisStodId);
+    if (linkErr) return fail('DB_ERROR', linkErr);
   }
 
   // 2. Kapitalrad (mottaget kapital, mjuk finansiering).
-  let capitalRoundId: string | null = existingCap;
+  let capitalRoundId: string | null = existingCap.id;
   if (!capitalRoundId) {
     const cap = await addCapitalRound(pb, actor, {
       startupId: row.startup,
@@ -1083,11 +1124,8 @@ export async function decideSupportCheckApplication(pb: PocketBase, actor: Actor
     if (cap.ok) {
       capitalRoundId = cap.value.roundId;
       createdHere.push({ collection: 'capital_rounds', id: capitalRoundId });
-      try {
-        await writeWithFallback(pb, (c) => c.collection('capital_rounds').update(capitalRoundId!, { support_check_application: row.id }), { fallbackOn404: true });
-      } catch {
-        warnings.push('Kapitalraden kunde inte länkas tillbaka till ansökan (kör migration 1700000170).');
-      }
+      const linkErr = await linkBack('capital_rounds', capitalRoundId);
+      if (linkErr) return fail('DB_ERROR', linkErr);
     } else {
       warnings.push(`Kapitalraden kunde inte skapas: ${cap.error}`);
     }
@@ -1107,22 +1145,7 @@ export async function decideSupportCheckApplication(pb: PocketBase, actor: Actor
       capital_round: capitalRoundId
     });
   } catch (err) {
-    const notReversed: string[] = [];
-    for (const rec of createdHere) {
-      try {
-        await writeWithFallback(pb, (c) => c.collection(rec.collection).delete(rec.id), { fallbackOn404: true });
-        await logAgentAction(pb, {
-          actor,
-          action_type: 'revert',
-          collection: rec.collection,
-          record_id: rec.id,
-          before_value: { startup: row.startup, startup_name: name, amount_sek: approved, support_check_application: row.id },
-          after_value: { reversed: true, reason: 'decision_status_update_failed' }
-        });
-      } catch {
-        notReversed.push(rec.collection === 'de_minimis_stod' ? 'de minimis-posten' : 'kapitalraden');
-      }
-    }
+    const notReversed = await rollbackCreated(pb, actor, createdHere, { ...rollbackCtx, reason: 'decision_status_update_failed' });
     return fail(
       'DB_ERROR',
       describeError(
@@ -1270,6 +1293,7 @@ export async function withdrawSupportCheckApplication(pb: PocketBase, actor: Act
   const reason = reasonRaw.value ? sanitizePersonnummer(reasonRaw.value) : '';
   const warnings: string[] = [];
   const name = await startupName(pb, actor, row.startup);
+  const reversed: string[] = [];
 
   if (row.status === 'approved') {
     for (const [collection, field] of [
@@ -1278,16 +1302,36 @@ export async function withdrawSupportCheckApplication(pb: PocketBase, actor: Act
     ] as const) {
       const id = row[field] ? String(row[field]) : '';
       if (!id) continue;
-      const rec = await getRecordInTenant<Record<string, unknown> & { id: string; tenant?: string }>(pb, actor, collection, id, '*');
-      if (!rec) continue;
-      // Fail-closed: kan stödet inte återföras ur registret återkallas inte
-      // ärendet — ett "återkallat" ärende med kvarstående de minimis-post
-      // skulle ge ett felaktigt takunderlag (§ 20.3).
+      const label = collection === 'de_minimis_stod' ? 'De minimis-posten' : 'Kapitalraden';
+      // Strikt läsning: 404 = posten är redan borta (länken nollas), andra fel
+      // avbryter — ett läsfel får aldrig tolkas som "inget att återföra".
+      let rec: (Record<string, unknown> & { id: string; tenant?: string }) | null;
       try {
-        await writeWithFallback(pb, (c) => c.collection(collection).delete(rec.id), { fallbackOn404: true });
+        rec = await pb.collection(collection).getOne<Record<string, unknown> & { id: string; tenant?: string }>(id);
       } catch (err) {
-        return fail('DB_ERROR', describeError(err, `${collection === 'de_minimis_stod' ? 'De minimis-posten' : 'Kapitalraden'} kunde inte återföras — återkallelsen avbröts.`));
+        if ((err as { status?: number }).status === 404) rec = null;
+        else return fail('DB_ERROR', describeError(err, `${label} kunde inte läsas — återkallelsen avbröts${reversed.length ? ` (${reversed.join(', ')} är redan återförd)` : ''}.`));
       }
+      if (rec && rec.tenant && rec.tenant !== actor.tenant) return fail('FORBIDDEN', `${label} tillhör en annan organisation.`);
+      if (rec) {
+        // Fail-closed: kan stödet inte återföras ur registret återkallas inte
+        // ärendet — ett "återkallat" ärende med kvarstående de minimis-post
+        // skulle ge ett felaktigt takunderlag (§ 20.3).
+        try {
+          await writeWithFallback(pb, (c) => c.collection(collection).delete(rec!.id), { fallbackOn404: true });
+        } catch (err) {
+          return fail('DB_ERROR', describeError(err, `${label} kunde inte återföras — återkallelsen avbröts${reversed.length ? ` (${reversed.join(', ')} är redan återförd; ärendet är kvar som beviljat utan den länken)` : ''}.`));
+        }
+      }
+      // Nolla länken DIREKT så ärendet aldrig pekar på en raderad post om
+      // nästa steg avbryts.
+      try {
+        await updateApp(pb, row.id, { [field]: null });
+      } catch (err) {
+        return fail('DB_ERROR', describeError(err, `${label} återfördes men länken på ansökan kunde inte nollas — återkallelsen avbröts.`));
+      }
+      reversed.push(label.toLowerCase());
+      if (!rec) continue;
       await logAgentAction(pb, {
         actor,
         action_type: 'revert',

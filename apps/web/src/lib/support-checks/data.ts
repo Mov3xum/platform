@@ -343,14 +343,10 @@ const RULE_SEED_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'];
  */
 export async function ensureSupportCheckRules(pb: PocketBase, tenantId: string, actor: { id: string; roles: readonly string[] }): Promise<RuleRow[]> {
   const actorId = actor.id;
-  if (!actor.roles.some((r) => RULE_SEED_ROLES.includes(r))) return listRules(pb, tenantId);
-  let existing: RuleRow[];
-  try {
-    existing = await listRulesStrict(pb, tenantId);
-  } catch (err) {
-    console.warn('[support-checks] rules read failed — skipping seed', { tenant: tenantId, error: err instanceof Error ? err.message : err });
-    return [];
-  }
+  // Ett läsfel KASTAS vidare (aldrig `[]`): synken skulle annars tolka
+  // "inga regler" och auto-stänga alla öppna uppföljningskort.
+  if (!actor.roles.some((r) => RULE_SEED_ROLES.includes(r))) return listRulesStrict(pb, tenantId);
+  const existing = await listRulesStrict(pb, tenantId);
   if (existing.some((r) => !r.check_type)) return existing;
   const create = async (client: PocketBase) => {
     for (const rule of DEFAULT_SUPPORT_CHECK_RULES) {
@@ -365,10 +361,10 @@ export async function ensureSupportCheckRules(pb: PocketBase, tenantId: string, 
       if (su.ok) await create(su.pb);
     } catch (err) {
       console.error('[support-checks] default rules seed failed', { tenant: tenantId, error: err instanceof Error ? err.message : err });
-      return [];
+      return existing;
     }
   }
-  return listRules(pb, tenantId);
+  return listRulesStrict(pb, tenantId);
 }
 
 // ── Behörighetsunderlag (chips) ─────────────────────────────────────────────
