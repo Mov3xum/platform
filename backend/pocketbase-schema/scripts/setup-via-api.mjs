@@ -4605,6 +4605,33 @@ await patchTenantsCollection([
   { name: 'monthly_ai_budget_usd', type: 'number', required: false, min: 0, max: 1000000 }
 ]);
 
+// Inloggningssidans utseende (CLAUDE.md § 48, migration 1700000172): mall,
+// accentfärg (brand-token), rubrik/underrubrik, bild + video för /login.
+await patchTenantsCollection([
+  { name: 'login_layout', type: 'select', required: false, maxSelect: 1, values: ['centered', 'split_left', 'split_right', 'cover', 'panel'] },
+  { name: 'login_accent', type: 'select', required: false, maxSelect: 1, values: ['morkbla', 'djupbla', 'morklila', 'lila', 'morkgron', 'gron', 'morkorange', 'orange'] },
+  { name: 'login_headline', type: 'text', required: false, max: 120 },
+  { name: 'login_tagline', type: 'text', required: false, max: 300 },
+  {
+    name: 'login_image',
+    type: 'file',
+    required: false,
+    maxSelect: 1,
+    maxSize: 15728640,
+    mimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml'],
+    thumbs: []
+  },
+  {
+    name: 'login_video',
+    type: 'file',
+    required: false,
+    maxSelect: 1,
+    maxSize: 209715200,
+    mimeTypes: ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime'],
+    thumbs: []
+  }
+]);
+
 // 19. seed Movexum tenant ---------------------------------------------------
 const tenant = await ensureRecord('tenants', 'slug = "movexum"', {
   name: 'Movexum',

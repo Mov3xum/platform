@@ -1709,6 +1709,7 @@ export * from './ai-impact';
 export * from './voice';
 export * from './compass-authoring';
 export * from './compass-layout';
+export * from './login-branding';
 // ─── Mötesläge i chatten (ren möteslogik, enhetstestad, § 34) ────────────────
 export * from './meeting';
 export * from './meeting-segmenter';

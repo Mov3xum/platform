@@ -914,7 +914,13 @@ const REQUIRED_APP_FIELDS = [
   // tasks.support_check_application; bokföringsspåren länkar tillbaka till ansökan.
   { collection: 'tasks', fields: ['support_check_application'] },
   { collection: 'capital_rounds', fields: ['support_check_application'] },
-  { collection: 'de_minimis_stod', fields: ['support_check_application'] }
+  { collection: 'de_minimis_stod', fields: ['support_check_application'] },
+  // Inloggningssidans utseende (§ 48, migration 1700000172): utan fälten
+  // "sparas" mall/bild tyst bort och /login förblir standard.
+  {
+    collection: 'tenants',
+    fields: ['login_layout', 'login_accent', 'login_headline', 'login_tagline', 'login_image', 'login_video']
+  }
 ];
 
 /**

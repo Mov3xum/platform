@@ -8,27 +8,41 @@ import type { WorkshopMediaKind } from '@platform/shared';
 import { resizeImageFile } from '@/lib/image-resize';
 
 /**
- * Bild + video för landningssidan. Laddar upp direkt när en fil väljs (POST
- * till /api/inflode/modules/[id]/media — route handler, så stora videos ryms)
- * och visar förhandsvisning på plats. Ingen "Spara" behövs för media.
+ * Bild + video för en landningssida. Laddar upp direkt när en fil väljs
+ * (POST till `endpoint` — en route handler, så stora videos ryms) och visar
+ * förhandsvisning på plats. Ingen "Spara" behövs för media.
+ *
+ * Endpointen tar `kind` (image/video) + `file`, eller `kind` + `remove=on`,
+ * och svarar `{ url }` / `{ removed: true }` / `{ error }`. Används av
+ * Startupkompassens modul-admin (/api/inflode/modules/[id]/media, § 23.7)
+ * och inloggningssidans utseende (/api/installningar/login-media, § 48).
  */
 export function HeroMediaUploader({
   moduleId,
+  endpoint,
   initialImageUrl,
-  initialVideoUrl
+  initialVideoUrl,
+  imageHint,
+  videoHint
 }: {
-  moduleId: string;
+  /** Kompassmodul — bygger default-endpointen när `endpoint` inte anges. */
+  moduleId?: string;
+  endpoint?: string;
   initialImageUrl: string | null;
   initialVideoUrl: string | null;
+  imageHint?: string;
+  videoHint?: string;
 }) {
   const router = useRouter();
   const [imageUrl, setImageUrl] = useState<string | null>(initialImageUrl);
   const [videoUrl, setVideoUrl] = useState<string | null>(initialVideoUrl);
+  const target = endpoint ?? `/api/inflode/modules/${moduleId ?? ''}/media`;
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
       <MediaSlot
-        moduleId={moduleId}
+        endpoint={target}
+        hint={imageHint}
         kind="image"
         label="Bild"
         accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
@@ -40,7 +54,8 @@ export function HeroMediaUploader({
         }}
       />
       <MediaSlot
-        moduleId={moduleId}
+        endpoint={target}
+        hint={videoHint}
         kind="video"
         label="Video"
         accept="video/mp4,video/webm,video/ogg,video/quicktime"
@@ -60,14 +75,15 @@ export function HeroMediaUploader({
 function describeHttpFailure(status: number): string {
   if (status === 413) return 'Filen är för stor för servern/proxyn (413). Välj en mindre fil.';
   if (status === 401) return 'Du är utloggad — logga in igen och försök på nytt.';
-  if (status === 403) return 'Du saknar behörighet att ändra modulens media.';
-  if (status === 404) return 'Modulen hittades inte (404).';
+  if (status === 403) return 'Du saknar behörighet att ändra den här bilden/videon.';
+  if (status === 404) return 'Målet för uppladdningen hittades inte (404).';
   if (status >= 500) return `Servern svarade ${status} — försök igen om en stund.`;
   return `Uppladdningen misslyckades (HTTP ${status}).`;
 }
 
 function MediaSlot({
-  moduleId,
+  endpoint,
+  hint,
   kind,
   label,
   accept,
@@ -75,7 +91,8 @@ function MediaSlot({
   url,
   onChanged
 }: {
-  moduleId: string;
+  endpoint: string;
+  hint?: string;
   kind: WorkshopMediaKind;
   label: string;
   accept: string;
@@ -104,7 +121,7 @@ function MediaSlot({
       const fd = new FormData();
       fd.set('kind', kind);
       fd.set('file', file);
-      const res = await fetch(`/api/inflode/modules/${moduleId}/media`, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         body: fd
       });
@@ -129,7 +146,7 @@ function MediaSlot({
       const fd = new FormData();
       fd.set('kind', kind);
       fd.set('remove', 'on');
-      const res = await fetch(`/api/inflode/modules/${moduleId}/media`, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         body: fd
       });
@@ -207,6 +224,7 @@ function MediaSlot({
       ) : (
         <div className="mx-muted mx-t-12">Ingen {label.toLowerCase()} uppladdad.</div>
       )}
+      {hint && <div className="mx-muted mx-t-12">{hint}</div>}
 
       <input
         ref={inputRef}

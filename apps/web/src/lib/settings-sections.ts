@@ -80,7 +80,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     slug: 'utseende',
     href: '/installningar/utseende',
     title: 'Logotyp & varumärke',
-    description: 'Din organisations logotyp för light och dark mode.',
+    description: 'Logotyp för light/dark mode och inloggningssidans mall, färg, bild och video.',
     icon: 'image',
     group: 'brand',
     roles: STAFF_ADMIN
