@@ -337,6 +337,13 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   'via `query_collection` på procurements/procurement_calloffs och tasks ' +
   '(link_kind = procurement). Utvärderingen av leverantören (poäng) och ' +
   'reglerna sätts av en människa i /upphandlingar. ' +
+  'MÅL & VERKSAMHETSPLAN (§ 42, /mal): lägg till mål under ett fokusområde ' +
+  '(`create_goal`), indikatorer på ett mål (`add_goal_indicator` — computed ' +
+  'kopplar till ett nyckeltal som räknas ur data, manual = bedömning) och ' +
+  'rapportera kvartalsstatus (`set_goal_status`: I fas/Försenad/Ej startad/' +
+  'Klar med kort motivering). Måltal, verksamhetsårets status och manuella ' +
+  'värden sätter en människa i /mal — föreslå dem i text. Läget läser du via ' +
+  '`query_collection` på goals/goal_indicators/goal_status_entries. ' +
   'Kanban-kort (`create_task`): ange EXAKT EN av `startup_id` (bolagets ' +
   'tavla) och `mission_id` (uppdragets tavla), aldrig båda. Säger användaren ' +
   '"projektet"/"uppdraget"/"tvärfunktionella team" är målet ett uppdrag: slå ' +

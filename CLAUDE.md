@@ -5897,5 +5897,9 @@ Ingen AI-inferens → riskklass n/a. Ingen PII i modellen (mål, tal, team).
 `cascadeDelete` tenant → period → mål → indikator → status städar art. 17.
 Reads via användarens token; skrivningar via skrivlagret med
 `writeWithFallback` bara efter verifierad roll + tenant (§ 21.3).
-Presentationsläge och chatt-verktyg (`create_goal`, `set_goal_status`)
-följer i nästa steg av implementationsplanen.
+**Chatten** (§ 16.3, agent-actor + `includeWrites`): `create_goal`,
+`add_goal_indicator`, `set_goal_status` går genom samma skrivlager
+(kvitto § 33.4, `DOMAIN_WRITE_TOOLS`, guidance i
+`CHAT_WRITE_ACTIONS_GUIDANCE`, hjälp-guiden § 33.3). Agenten kan aldrig
+sätta måltal, årsstatus eller manuella värden — den föreslår i text.
+Presentationsläge följer i nästa steg av implementationsplanen.
