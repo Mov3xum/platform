@@ -3197,7 +3197,19 @@ coach + tenant-check i handlern, superuser-fallback per § 21.3, validering via
 `validateWorkshopMediaFile`). Båda filerna är avsiktligt PUBLIKT
 marknadsföringsmaterial (ingen PII) och serveras tokenlöst; på `/m/<slug>`
 vinner videon när båda finns (bilden blir `poster`). Compass är fortsatt
-migration-only (§ 23.4).
+migration-only (§ 23.4). **Serveras via samma-origin-proxy (2026-09):**
+`moduleHeroImageUrl`/`moduleHeroVideoUrl` (`lib/compass/media.ts`) ger
+`/api/public/compass-media/<modul-id>/<filnamn>`, och route-handlern strömmar
+filen från PocketBase server-side (Range vidarebefordras för video, ett dygns
+cache). Tidigare pekade URL:en direkt på PB-hosten — webbläsaren pratar
+annars aldrig med PB, och på sslip.io-staging med otillförlitligt cert
+(`infra/SSL.md`) blockerades bilden tyst medan sidan renderade
+reservgrafiken/accentfärgen trots lyckad uppladdning (incident 2026-09-29;
+samma orsak och lösning som `/api/files/[id]` för `user_files`). Proxyn
+serverar ENBART filnamn som är modulens faktiska `hero_image`/`hero_video`
+(verifieras mot posten via den cachade superusern) — ingen generisk filrelä.
+Tenant-logotyper och avatarer byggs fortfarande som direkta PB-URL:er
+(`auth.server.ts`) och har samma exponering mot ett otillförlitligt cert.
 
 **Riskklass:** oförändrad (n/a — navigation + konfiguration, ingen AI-inferens,
 ingen ny PII-väg; `next_module` är en intern modul-relation och whitelistas
