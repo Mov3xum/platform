@@ -163,7 +163,9 @@ const STAFF_TOOL_GUIDANCE =
   '- `memory_read` / `memory_write`: ditt tvärsessions-minne (per tenant). När ' +
   'personalen RÄTTAR dig eller lär dig en bestående regel ("räkna inte lån som ' +
   'investeringar", "Bolag X heter numera Y") — spara det med `memory_write` ' +
-  '(kort `key`, tydlig `content`) så att det gäller även i framtida samtal. ' +
+  '(kort `key`, tydlig `content` och ALLTID en `category`: terminologi | ' +
+  'datatolkning | arbetssatt | bolag | portfolj | processer | ovrigt) så att det ' +
+  'gäller även i framtida samtal och personalen får överblick per kategori. ' +
   'Lagra ALDRIG personuppgifter i minnet, bara generella regler/slutsatser. ' +
   'Inlärt minne injiceras automatiskt i din kontext; använd `memory_read` för ' +
   'fler detaljer.\n\n' +
