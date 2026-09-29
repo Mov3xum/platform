@@ -3570,7 +3570,8 @@ await seedAnnualWheelCategories();
 
 // Migration 1700000144: org_posts — dashboardens anslagstavla (§ 37). Nyheter,
 // info, instruktioner och firanden till organisationen. Läsning: staff/observer
-// ELLER audience="all" (då även bolagsmedlemmar, t.ex. på "Min översikt").
+// ELLER audience="all"/"startups" (då även bolagsmedlemmar, på "Mitt bolag";
+// 'startups' = bara bolagen, migration 1700000171).
 // createRule roll-lös (§ 21.3 — rollen enforce:as i server-actionen);
 // update/delete: författaren själv eller admin/incubator_lead.
 await ensureCollection({
@@ -3586,7 +3587,7 @@ await ensureCollection({
     { name: 'body', type: 'text', required: false, max: 20000 },
     // MÅSTE spegla ORG_POST_KINDS / ORG_POST_AUDIENCES i packages/shared/src/org-posts.ts.
     { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['news', 'notice', 'instruction', 'celebration', 'training'] },
-    { name: 'audience', type: 'select', required: true, maxSelect: 1, values: ['staff', 'all'] },
+    { name: 'audience', type: 'select', required: true, maxSelect: 1, values: ['staff', 'all', 'startups'] },
     { name: 'pinned', type: 'bool', required: false },
     { name: 'published_at', type: 'date', required: false },
     { name: 'expires_at', type: 'date', required: false },
@@ -3596,16 +3597,18 @@ await ensureCollection({
     'CREATE INDEX idx_org_posts_tenant ON org_posts (tenant)',
     'CREATE INDEX idx_org_posts_tenant_pinned ON org_posts (tenant, pinned)'
   ],
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || audience = "all")`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || audience = "all")`,
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || audience = "all" || audience = "startups")`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || audience = "all" || audience = "startups")`,
   createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`
 });
 // Migration 1700000145: org_posts.kind += 'training' (Internutbildningar-fliken,
-// § 37). Union — ensureCollection synkar inte fält på en befintlig collection.
+// § 37). Migration 1700000171: org_posts.audience += 'startups' (bara bolagen).
+// Union — ensureCollection synkar inte fält på en befintlig collection.
 await patchCollection('org_posts', [], {
-  kind: { values: ['news', 'notice', 'instruction', 'celebration', 'training'] }
+  kind: { values: ['news', 'notice', 'instruction', 'celebration', 'training'] },
+  audience: { values: ['staff', 'all', 'startups'] }
 });
 // Migration 1700000147: org_post_media (bilder/film/dokument på anslagstavlan,
 // § 37.6) + org_posts.media (json-lista med fil-referenser). Samma mönster som

@@ -334,8 +334,12 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   'INTERNUTBILDNINGAR (`create_org_post` med kind=training / ' +
   '`update_org_post` — "lägg upp en internutbildning om GDPR med länk till ' +
   'materialet", "fäst utbildningen om pitchcoaching överst", "låt inlägget ' +
-  'utgå på fredag"). Befintliga inlägg läser du via `query_collection` på ' +
-  '`org_posts`. UPPHANDLINGAR & excellens-insatser (§ 39): registrera en ' +
+  'utgå på fredag"). MÅLGRUPP (`audience`): staff = bara Movexum-teamet ' +
+  '(default), all = teamet OCH bolagen, startups = BARA bolagen (visas för ' +
+  'bolagsmedlemmarna på Mitt bolag) — "publicera till bolagen"/"enbart ' +
+  'bolagen" betyder startups, "till alla" betyder all; är målgruppen otydlig ' +
+  'när inlägget uppenbart riktar sig till bolagen, fråga kort. Befintliga ' +
+  'inlägg läser du via `query_collection` på `org_posts`. UPPHANDLINGAR & excellens-insatser (§ 39): registrera en ' +
   'upphandling (`create_procurement` — läs ut uppgifterna ur ett bifogat ' +
   'underlag), avrop per bolag (`create_procurement_calloff`, milstolpar ' +
   'förifylls från upphandlingens avropsmall) och godkänn milstolpar/bocka av ' +

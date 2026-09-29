@@ -77,15 +77,37 @@ export function orgPostHomePath(kind: OrgPostKind): string {
 
 /**
  * Målgrupp. `staff` = Movexum-personal + observer (default);
- * `all` = även bolagsmedlemmar (visas på "Min översikt" för medlemmar).
+ * `all` = både Movexum-teamet och bolagsmedlemmar (visas på "Mitt bolag" för
+ * medlemmar); `startups` = ENBART bolagen — inlägget är riktat till
+ * bolagsmedlemmarna och visas för dem på "Mitt bolag". Movexum-personal ser
+ * det ändå på dashboarden (de är avsändare och måste kunna redigera/ta bort
+ * det), tydligt märkt "Bara bolagen". MÅSTE speglas som select-värden i PB
+ * (migration 1700000144 + 1700000171) och i PB:s list/view-regler.
  */
-export const ORG_POST_AUDIENCES = ['staff', 'all'] as const;
+export const ORG_POST_AUDIENCES = ['staff', 'all', 'startups'] as const;
 export type OrgPostAudience = (typeof ORG_POST_AUDIENCES)[number];
 
 export const ORG_POST_AUDIENCE_LABELS: Record<OrgPostAudience, string> = {
   staff: 'Movexum-teamet',
-  all: 'Hela organisationen (även bolagen)'
+  all: 'Hela organisationen (teamet och bolagen)',
+  startups: 'Bara bolagen'
 };
+
+/** Kort förklaring per målgrupp (redigeraren + chatt-verktygens beskrivning). */
+export const ORG_POST_AUDIENCE_HINTS: Record<OrgPostAudience, string> = {
+  staff: 'Visas bara för Movexum-personal och observatörer på dashboarden.',
+  all: 'Visas för Movexum-teamet på dashboarden OCH för bolagsmedlemmar på Mitt bolag.',
+  startups:
+    'Riktat till bolagen: visas för bolagsmedlemmar på Mitt bolag. Teamet ser det på dashboarden märkt "Bara bolagen" (avsändare).'
+};
+
+/** Målgrupper som en bolagsmedlem får läsa. */
+export const ORG_POST_MEMBER_AUDIENCES: readonly OrgPostAudience[] = ['all', 'startups'];
+
+/** Är inlägget riktat (helt eller delvis) till bolagen? */
+export function isOrgPostForStartups(post: Pick<OrgPost, 'audience'>): boolean {
+  return ORG_POST_MEMBER_AUDIENCES.includes(post.audience);
+}
 
 export const ORG_POST_TITLE_MAX = 160;
 export const ORG_POST_BODY_MAX = 20_000;
@@ -442,12 +464,13 @@ export function isOrgPostExpired(post: Pick<OrgPost, 'expires_at'>, now: Date = 
 }
 
 /**
- * Får rollerna se inlägget? Staff/observer ser allt i tenanten; en ren
- * bolagsmedlem ser bara `audience = 'all'`. UI-kurering — PB-reglerna är
+ * Får rollerna se inlägget? Staff/observer ser allt i tenanten (även det som
+ * är riktat bara till bolagen — de är avsändare); en ren bolagsmedlem ser
+ * bara `audience = 'all'` eller `'startups'`. UI-kurering — PB-reglerna är
  * säkerhetsgränsen (§ 21).
  */
 export function canRolesSeeOrgPost(roles: Role[] | undefined, post: Pick<OrgPost, 'audience'>): boolean {
-  if (post.audience === 'all') return true;
+  if (isOrgPostForStartups(post)) return true;
   const staffOrObserver: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'];
   return (roles ?? []).some((r) => staffOrObserver.includes(r));
 }

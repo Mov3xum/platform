@@ -13,7 +13,7 @@ import {
  * startsidan (`/hem`), "Min översikt" (bolagsmedlemmar, audience=all) och
  * server-actions. Läsningen går via den pb-instans anroparen skickar in
  * (användarens auth-token → PB-RLS gäller, § 21: staff/observer ser tenantens
- * alla inlägg, en ren medlem bara `audience = "all"`).
+ * alla inlägg, en ren medlem bara `audience = "all"` eller `"startups"`).
  *
  * Fail-soft: saknas kollektionen (instans där migration 1700000144 inte körts)
  * returneras en tom lista — startsidan renderas utan anslagstavla i stället

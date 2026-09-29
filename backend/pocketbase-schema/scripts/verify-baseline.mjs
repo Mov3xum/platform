@@ -917,6 +917,15 @@ const REQUIRED_APP_FIELDS = [
   { collection: 'de_minimis_stod', fields: ['support_check_application'] }
 ];
 
+/**
+ * Select-värden appen skriver (union-migrationer). PB avvisar ett okänt
+ * select-värde med 400 — utan värdet nedan svarar "publicera bara till
+ * bolagen" (§ 37.2, migration 1700000171) med "audience: Invalid value".
+ */
+const REQUIRED_SELECT_VALUES = [
+  { collection: 'org_posts', field: 'audience', values: ['staff', 'all', 'startups'], migration: '1700000171' }
+];
+
 const MUST_NOT_BE_REQUIRED = [
   { collection: 'annual_wheel_items', fields: ['track'] },
   // Kontaktboken (§ 45): efternamn valfritt (chatten/Outlook-export ger ofta bara ett namnfält).
@@ -943,6 +952,23 @@ function verifyAppWritableFields(collections) {
       );
     }
     ok(`collection "${collection}" har appens skrivbara fält (${fields.join(', ')})`);
+  }
+
+  for (const { collection, field, values, migration } of REQUIRED_SELECT_VALUES) {
+    const col = byName.get(collection);
+    if (!col) continue;
+    const colFields = col.fields || col.schema || [];
+    const selectField = colFields.find((f) => f.name === field);
+    if (!selectField) continue; // fångas av REQUIRED_APP_FIELDS om det är listat där
+    const present = new Set(Array.isArray(selectField.values) ? selectField.values : []);
+    const missing = values.filter((v) => !present.has(v));
+    if (missing.length > 0) {
+      fail(
+        `Select "${collection}.${field}" saknar värden som appen skriver: ${missing.join(', ')}.\n` +
+          `PocketBase avvisar värdet med 400 ("Invalid value"). Kör migration ${migration} eller setup-via-api.mjs.`
+      );
+    }
+    ok(`select "${collection}.${field}" har appens värden (${values.join(', ')})`);
   }
 
   for (const { collection, fields } of MUST_NOT_BE_REQUIRED) {

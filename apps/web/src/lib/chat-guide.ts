@@ -193,9 +193,10 @@ const GUIDE: ChatGuideSection[] = [
       {
         title: 'Översikt: internutbildningar, anslagstavla & rutiner',
         description:
-          'Lägg upp, uppdatera, fäst eller låt inlägg utgå på startsidan — fliken Internutbildningar administreras helt via chatten.',
+          'Lägg upp, uppdatera, fäst eller låt inlägg utgå på startsidan — fliken Internutbildningar administreras helt via chatten. Välj målgrupp: bara teamet, hela organisationen eller bara bolagen (visas då på Mitt bolag).',
         examples: [
           'Lägg upp en internutbildning om GDPR i coachning torsdag 14:00 med länk till materialet i kunskapsbasen',
+          'Publicera ett inlägg bara till bolagen: ansökan till Vinnovas innovationscheck öppnar 1 oktober',
           'Fäst internutbildningen om pitchcoaching överst och låt den utgå sista oktober'
         ]
       }

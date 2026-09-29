@@ -17,7 +17,9 @@ import {
   type TextSel
 } from '@/lib/markdown-edit';
 import {
+  ORG_POST_AUDIENCE_HINTS,
   ORG_POST_AUDIENCE_LABELS,
+  ORG_POST_AUDIENCES,
   ORG_POST_BODY_MAX,
   ORG_POST_KINDS,
   ORG_POST_KIND_HINTS,
@@ -650,13 +652,16 @@ export function PostComposer({ initial, editing, onDone, onCancel, kinds = ORG_P
             onChange={(e) => setDraft((d) => ({ ...d, audience: e.target.value as OrgPostAudience }))}
             className="rounded-lg border border-default bg-surface px-2 py-1 text-[12px] text-foreground"
           >
-            {(Object.keys(ORG_POST_AUDIENCE_LABELS) as OrgPostAudience[]).map((a) => (
-              <option key={a} value={a}>
+            {ORG_POST_AUDIENCES.map((a) => (
+              <option key={a} value={a} title={ORG_POST_AUDIENCE_HINTS[a]}>
                 {ORG_POST_AUDIENCE_LABELS[a]}
               </option>
             ))}
           </select>
         </label>
+        {draft.audience !== 'staff' && (
+          <span className="basis-full text-[11.5px] text-foreground-subtle">{ORG_POST_AUDIENCE_HINTS[draft.audience]}</span>
+        )}
         <label className="inline-flex cursor-pointer items-center gap-1.5">
           <input
             type="checkbox"

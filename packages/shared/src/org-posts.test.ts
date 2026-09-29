@@ -94,12 +94,22 @@ test('isOrgPostLive respekterar schemalagd publicering och utgång', () => {
   assert.ok(isOrgPostLive(post({ expires_at: '2026-09-09T12:01:00Z' }), now));
 });
 
-test('canRolesSeeOrgPost: staff/observer ser allt, ren medlem bara audience=all', () => {
+test('canRolesSeeOrgPost: staff/observer ser allt, ren medlem bara audience=all/startups', () => {
   assert.ok(canRolesSeeOrgPost(['coach'], post({ audience: 'staff' })));
   assert.ok(canRolesSeeOrgPost(['observer'], post({ audience: 'staff' })));
+  assert.ok(canRolesSeeOrgPost(['coach'], post({ audience: 'startups' })));
   assert.ok(!canRolesSeeOrgPost(['startup_member'], post({ audience: 'staff' })));
   assert.ok(canRolesSeeOrgPost(['startup_member'], post({ audience: 'all' })));
+  assert.ok(canRolesSeeOrgPost(['startup_member'], post({ audience: 'startups' })));
   assert.ok(!canRolesSeeOrgPost(undefined, post({ audience: 'staff' })));
+});
+
+test('validateOrgPostInput accepterar målgruppen startups (bara bolagen)', () => {
+  const ok = validateOrgPostInput({ title: 'Till bolagen', body: 'x', audience: 'startups' });
+  assert.ok(ok.ok);
+  if (!ok.ok) return;
+  assert.equal(ok.value.audience, 'startups');
+  assert.equal(validateOrgPostInput({ title: 'x', audience: 'partners' }).ok, false);
 });
 
 test('canEditOrgPost: författare eller admin/incubator_lead — aldrig observer', () => {

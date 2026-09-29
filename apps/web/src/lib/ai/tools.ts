@@ -46,7 +46,10 @@ import {
   inferAgentMemoryCategory,
   normalizeAgentMemoryCategory,
   resolveAgentMemoryCategory,
-  type AgentMemoryCategory
+  type AgentMemoryCategory,
+  ORG_POST_AUDIENCE_LABELS,
+  type OrgPostAudience,
+  type OrgPostKind
 } from '@platform/shared';
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
 import { validateChart, validateKpis } from '@/lib/documents/validate';
@@ -1454,8 +1457,12 @@ export function buildChatTools(
             },
             audience: {
               type: 'string',
-              enum: ['staff', 'all'],
-              description: 'staff = Movexum-teamet (default); all = även bolagen (syns på Min översikt).'
+              enum: ['staff', 'all', 'startups'],
+              description:
+                'staff = bara Movexum-teamet (default); all = teamet OCH bolagen; ' +
+                'startups = BARA bolagen (visas för bolagsmedlemmar på Mitt bolag, inte som ' +
+                'teaminfo). Säger användaren "till bolagen"/"enbart bolagen" → startups; ' +
+                '"till alla"/"hela organisationen" → all.'
             },
             pinned: { type: 'boolean', description: 'Fäst överst i sin flik.' },
             published_at: {
@@ -1489,7 +1496,11 @@ export function buildChatTools(
             title: { type: 'string' },
             body: { type: 'string', description: 'Ny brödtext i markdown (ersätter hela texten).' },
             kind: { type: 'string', enum: ['news', 'notice', 'instruction', 'celebration', 'training'] },
-            audience: { type: 'string', enum: ['staff', 'all'] },
+            audience: {
+              type: 'string',
+              enum: ['staff', 'all', 'startups'],
+              description: 'staff = bara teamet; all = teamet och bolagen; startups = bara bolagen.'
+            },
             pinned: { type: 'boolean' },
             published_at: { type: 'string', description: 'ISO-datum, eller tom sträng för att publicera direkt.' },
             expires_at: { type: 'string', description: 'ISO-datum, eller tom sträng för att aldrig utgå.' },
@@ -4767,6 +4778,19 @@ async function runCreateStartupNote(
   };
 }
 
+/** Var syns inlägget? Kvittot ska säga sanningen om målgruppen (§ 33.4). */
+function orgPostAudienceNote(kind: OrgPostKind, audience: OrgPostAudience): string {
+  const where =
+    kind === 'training' ? 'under fliken Internutbildningar på dashboarden' : 'på dashboarden';
+  if (audience === 'startups') {
+    return `Inlägget är riktat bara till bolagen: bolagsmedlemmarna ser det på Mitt bolag. Teamet ser det ${where} märkt "Bara bolagen".`;
+  }
+  if (audience === 'all') {
+    return `Inlägget syns nu ${where} och för bolagsmedlemmarna på Mitt bolag.`;
+  }
+  return `Inlägget syns nu ${where} (bara Movexum-teamet).`;
+}
+
 async function runCreateOrgPost(
   args: Record<string, unknown>,
   ctx: ToolDispatchContext
@@ -4795,10 +4819,8 @@ async function runCreateOrgPost(
       audience: result.value.audience,
       pinned: result.value.pinned,
       path: result.value.homePath,
-      note:
-        result.value.kind === 'training'
-          ? 'Internutbildningen syns nu under fliken Internutbildningar på dashboarden.'
-          : 'Inlägget syns nu på dashboarden.',
+      audience_label: ORG_POST_AUDIENCE_LABELS[result.value.audience],
+      note: orgPostAudienceNote(result.value.kind, result.value.audience),
       logged_in: 'agent_actions'
     }
   };
@@ -4827,6 +4849,7 @@ async function runUpdateOrgPost(
       kind: result.value.kind,
       kind_label: result.value.kindLabel,
       audience: result.value.audience,
+      audience_label: ORG_POST_AUDIENCE_LABELS[result.value.audience],
       pinned: result.value.pinned,
       updated_fields: Object.keys(changes),
       path: result.value.homePath,
