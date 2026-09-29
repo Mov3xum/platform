@@ -9,8 +9,12 @@ import {
   getSuperuserPb,
   saveCredentials
 } from '@/lib/integrations/credentials';
-import { getHandler } from '@/lib/integrations/registry';
+import { getHandler, listCompanyRegistrySlugs } from '@/lib/integrations/registry';
 import { runSync, runRegistrySyncForStartup } from '@/lib/integrations/sync';
+import { loadCredentials } from '@/lib/integrations/credentials';
+import type { RegistryCompany } from '@/lib/integrations/company-registry/types';
+import { isPersonalOrgNr, isValidOrgNr } from '@/lib/integrations/company-registry/orgnr';
+import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { recordActivity } from './record-activity';
 
 export type IntegrationPilotState = {
@@ -319,11 +323,13 @@ export async function syncIntegrationAction(
   };
 }
 
-// Per-startup Allabolag-sync. Triggas från bolagsdetaljvyn när org_nr
-// är ifyllt. Tenant-isolation: verifierar att bolaget tillhör inloggad
-// users tenant via tenant-bunden PB INNAN superuser-skrivningen i
-// runRegistrySyncForStartup (CLAUDE.md § 10.5 punkt 5).
-export async function syncStartupFromAllabolagAction(
+// Per-bolag-synk från en bolagsregister-provider (Allabolag-stubben,
+// Roaring, Bolagsverket — § 11.8). Triggas från bolagskortet när org_nr är
+// ifyllt. Tenant-isolation: verifierar att bolaget tillhör inloggad users
+// tenant via tenant-bunden PB INNAN superuser-skrivningen i
+// runRegistrySyncForStartup (CLAUDE.md § 10.5 punkt 5). Provider-sluggen
+// valideras mot registrets company_registry-handlers — aldrig fri text.
+export async function syncStartupFromRegistryAction(
   _prev: IntegrationSyncState,
   formData: FormData
 ): Promise<IntegrationSyncState> {
@@ -334,6 +340,12 @@ export async function syncStartupFromAllabolagAction(
 
   const startupId = String(formData.get('startup_id') || '').trim();
   if (!startupId) return { error: 'Saknad bolags-id.' };
+  const providerSlug = String(formData.get('provider_slug') || 'allabolag').trim();
+  if (!listCompanyRegistrySlugs().includes(providerSlug)) {
+    return { error: 'Okänd bolagsregister-leverantör.' };
+  }
+  const handler = getHandler(providerSlug);
+  const providerLabel = providerSlug === 'roaring' ? 'Roaring' : providerSlug === 'bolagsverket' ? 'Bolagsverket' : 'Allabolag';
 
   // Steg 1: tenant-bunden read som verifierar att startupId tillhör
   // user.tenant. Misslyckas detta får vi inte gå vidare till superuser.
@@ -352,7 +364,7 @@ export async function syncStartupFromAllabolagAction(
     return { error: 'Bolaget hittades inte.' };
   }
 
-  // Steg 2: hitta tenant_integration för allabolag.
+  // Steg 2: hitta tenant_integration för leverantören.
   const adminResult = await getSuperuserPb();
   if (!adminResult.ok) return { error: 'Serverkonfiguration ofullständig.' };
 
@@ -360,9 +372,9 @@ export async function syncStartupFromAllabolagAction(
   try {
     provider = await adminResult.pb
       .collection('integration_providers')
-      .getFirstListItem<ProviderRow>('slug = "allabolag"');
+      .getFirstListItem<ProviderRow>(`slug = "${escFilter(providerSlug)}"`);
   } catch {
-    return { error: 'Allabolag-leverantören saknas i katalogen.' };
+    return { error: `${providerLabel}-leverantören saknas i katalogen.` };
   }
 
   let tenantIntegration: { id: string; status: string };
@@ -373,10 +385,13 @@ export async function syncStartupFromAllabolagAction(
         `tenant = "${escFilter(user.tenant)}" && provider = "${escFilter(provider.id)}"`
       );
   } catch {
-    return { error: 'Anslut Allabolag först på /integrationer/allabolag.' };
+    return { error: `Anslut ${providerLabel} först på /integrationer/${providerSlug}.` };
   }
   if (tenantIntegration.status !== 'connected') {
-    return { error: 'Allabolag är inte ansluten för denna tenant.' };
+    return { error: `${providerLabel} är inte ansluten för denna tenant.` };
+  }
+  if (!handler || handler.kind !== 'company_registry') {
+    return { error: 'Leverantören stödjer inte per-bolag-synk.' };
   }
 
   const result = await runRegistrySyncForStartup(
@@ -388,19 +403,19 @@ export async function syncStartupFromAllabolagAction(
   const summary =
     result.status === 'failed'
       ? `Synk misslyckades: ${result.errorMessage || 'okänt fel'}`
-      : `Synk klar — ${result.recordsCreated} årsrader uppdaterade.`;
+      : `Synk klar — ${result.recordsUpdated ? 'bolagskortet uppdaterat, ' : ''}${result.recordsCreated} årsrader uppdaterade.`;
 
   await recordActivity(pb, {
     tenant: user.tenant,
     kind: 'integration_sync',
     actor: user.id,
-    title: 'Allabolag synkad (per bolag)',
+    title: `${providerLabel} synkad (per bolag)`,
     meta: summary,
     startup: startupId
   });
 
   revalidatePath(`/startups/${startupId}`);
-  revalidatePath('/integrationer/allabolag');
+  revalidatePath(`/integrationer/${providerSlug}`);
   revalidatePath('/aktivitet');
 
   if (result.status === 'failed') {
@@ -411,4 +426,96 @@ export async function syncStartupFromAllabolagAction(
     recordsCreated: result.recordsCreated,
     recordsUpdated: result.recordsUpdated
   };
+}
+
+// ── Förhandsgranskning mot ett org-nr (§ 11.8) ─────────────────────────────
+// Hämtar + normaliserar ett bolag hos leverantören UTAN att skriva något, så
+// att fältmappningen kan verifieras mot en riktig respons innan portföljen
+// synkas. Returnerar bara whitelistade, PII-fria fält (RegistryCompany):
+// fysiska personer i ägarbilden är redan anonyma i normaliseraren.
+
+export type RegistryLookupState = {
+  error?: string;
+  company?: RegistryCompany;
+};
+
+export async function previewRegistryLookupAction(
+  _prev: RegistryLookupState,
+  formData: FormData
+): Promise<RegistryLookupState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+    return { error: 'Endast inkubatorledning kan testa uppslag.' };
+  }
+  const providerSlug = String(formData.get('provider_slug') || '').trim();
+  const orgNr = String(formData.get('org_nr') || '').trim();
+  if (!listCompanyRegistrySlugs().includes(providerSlug)) {
+    return { error: 'Okänd bolagsregister-leverantör.' };
+  }
+  if (!/^\d{6}-?\d{4}$/.test(orgNr) || !isValidOrgNr(orgNr)) {
+    return { error: 'Ange ett giltigt organisationsnummer med 10 siffror (t.ex. 559572-8790).' };
+  }
+  // Enskild firma: org-nr = personnummer → uppslag på en fysisk person görs
+  // aldrig från förhandsgranskningen (GDPR § 5).
+  if (isPersonalOrgNr(orgNr)) {
+    return { error: 'Förhandsgranskning stöds bara för juridiska personer (inte enskild firma).' };
+  }
+  // Rate-limit per användare (20 uppslag / 10 min) — leverantörerna debiterar per anrop.
+  const rateKey = `registry-lookup:${user.id}`;
+  const limited = checkRateLimit(rateKey, 20);
+  if (limited.blocked) {
+    return { error: `För många uppslag — försök igen om ${limited.retryAfterSec} s.` };
+  }
+  recordFailure(rateKey, 10 * 60 * 1000);
+  const handler = getHandler(providerSlug);
+  if (!handler || handler.kind !== 'company_registry' || !handler.lookup) {
+    return { error: 'Leverantören stödjer inte förhandsgranskning.' };
+  }
+
+  const adminResult = await getSuperuserPb();
+  if (!adminResult.ok) return { error: 'Serverkonfiguration ofullständig.' };
+  let provider: ProviderRow;
+  try {
+    provider = await adminResult.pb
+      .collection('integration_providers')
+      .getFirstListItem<ProviderRow>(`slug = "${escFilter(providerSlug)}"`);
+  } catch {
+    return { error: 'Leverantören saknas i katalogen.' };
+  }
+  let tenantIntegration: { id: string; status: string };
+  try {
+    tenantIntegration = await adminResult.pb
+      .collection('tenant_integrations')
+      .getFirstListItem<{ id: string; status: string }>(
+        `tenant = "${escFilter(user.tenant)}" && provider = "${escFilter(provider.id)}"`
+      );
+  } catch {
+    return { error: 'Anslut leverantören först.' };
+  }
+  if (tenantIntegration.status !== 'connected') {
+    return { error: 'Leverantören är inte ansluten för denna tenant.' };
+  }
+  const creds = await loadCredentials(tenantIntegration.id);
+  if (!creds) return { error: 'Inloggningsuppgifter saknas eller kunde inte dekrypteras.' };
+
+  let company: RegistryCompany;
+  try {
+    company = await handler.lookup(orgNr, creds);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message.slice(0, 300) : 'Uppslaget misslyckades.' };
+  }
+  // Audit (ISO 27001 A.8.15): PII-fri rad — leverantör + antal, aldrig org-nr.
+  try {
+    const pb = await getServerPb();
+    await recordActivity(pb, {
+      tenant: user.tenant,
+      kind: 'integration_sync',
+      actor: user.id,
+      title: `${providerSlug}: förhandsgranskning av bolagsuppslag`,
+      meta: `${company.financials.length} årsrader, ${company.ownership.length} ägarrader (inget sparat)`
+    });
+  } catch {
+    /* audit får aldrig blockera */
+  }
+  return { company };
 }

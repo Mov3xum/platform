@@ -22,7 +22,8 @@ import {
   StartupPhaseHistoryList,
   type PhaseHistoryItem
 } from '@/components/StartupPhaseHistoryList';
-import { AllabolagSyncButton } from './AllabolagSyncButton';
+import { RegistrySyncButton } from './RegistrySyncButton';
+import { listCompanyRegistrySlugs } from '@/lib/integrations/registry';
 import { LogMeetingButton } from './LogMeetingButton';
 import {
   findIntegrationRow,
@@ -129,7 +130,13 @@ interface PhaseHistoryRecord {
   expand?: { created_by?: { id: string; display_name?: string; email: string } };
 }
 
-type FinancialsSource = 'manual' | 'import_excel' | 'allabolag' | 'other';
+type FinancialsSource =
+  | 'manual'
+  | 'import_excel'
+  | 'allabolag'
+  | 'roaring'
+  | 'bolagsverket'
+  | 'other';
 
 interface FinancialsRow {
   id: string;
@@ -138,8 +145,32 @@ interface FinancialsRow {
   revenue_sek?: number;
   personnel_cost_sek?: number;
   corporate_tax_sek?: number;
+  balance_sheet_sek?: number;
+  equity_sek?: number;
   source: FinancialsSource;
   synced_at?: string;
+}
+
+// Ägarbild (§ 11.8, migration 1700000172). Fysiska personer bär aldrig namn.
+interface OwnershipRow {
+  id: string;
+  direction: 'owner' | 'holding';
+  owner_kind: 'company' | 'person' | 'public_body' | 'investor' | 'other';
+  name?: string;
+  org_nr?: string;
+  capital_pct?: number;
+  voting_pct?: number;
+  pct_min?: number;
+  pct_max?: number;
+  control_basis?: string;
+  indirect?: boolean;
+  source: string;
+  synced_at?: string;
+}
+
+interface ConnectedRegistryProvider {
+  slug: string;
+  name: string;
 }
 
 interface NoteRecord {
@@ -400,6 +431,41 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
   ]);
 
   const team = teamResult.status === 'fulfilled' ? teamResult.value : emptyList;
+
+  // Ägarbild + anslutna bolagsregister-providers (§ 11.8). Båda fail-soft:
+  // en instans utan migration 1700000172 visar sektionen som tom, och en
+  // tenant utan anslutna providers får ingen synk-knapp.
+  let ownershipRows: OwnershipRow[] = [];
+  try {
+    const res = await pb.collection('startup_ownership').getList<OwnershipRow>(1, 50, {
+      filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
+      sort: 'direction,-capital_pct'
+    });
+    ownershipRows = res.items;
+  } catch {
+    ownershipRows = [];
+  }
+  // Synk kräver admin/incubator_lead (speglar syncStartupFromRegistryAction).
+  const canSyncRegistry = hasRole(user.roles, ['admin', 'incubator_lead']);
+  let connectedRegistries: ConnectedRegistryProvider[] = [];
+  if (canSyncRegistry) {
+    try {
+      const registrySlugs = new Set(listCompanyRegistrySlugs());
+      const res = await pb
+        .collection('tenant_integrations')
+        .getList<{ status: string; expand?: { provider?: { slug: string; name: string } } }>(1, 50, {
+          filter: `tenant = "${escFilter(user.tenant)}" && status = "connected"`,
+          expand: 'provider',
+          fields: 'id,status,expand.provider.slug,expand.provider.name'
+        });
+      connectedRegistries = res.items
+        .map((r) => r.expand?.provider)
+        .filter((p): p is { slug: string; name: string } => !!p && registrySlugs.has(p.slug))
+        .map((p) => ({ slug: p.slug, name: p.name }));
+    } catch {
+      connectedRegistries = [];
+    }
+  }
   const milestones = milestonesResult.status === 'fulfilled' ? milestonesResult.value : emptyList;
   const activities = activitiesResult.status === 'fulfilled' ? activitiesResult.value : emptyList;
   const notes = notesResult.status === 'fulfilled' ? notesResult.value : emptyList;
@@ -680,6 +746,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ['#documents', 'Dokument'],
           ['#edu-documents', `Utbildningsdokument (${documentAssignments.totalItems})`],
           ['#team', `Personer (${team.totalItems})`],
+          ['#agarbild', 'Ägarbild'],
           ['#milestones', `Inkubatorprocess (${milestones.totalItems})`],
           ['#readiness', 'Bolagsfas & Readiness'],
           ['#partners', `Kapital (${engagements.totalItems})`],
@@ -1152,6 +1219,62 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           )}
         </Section>
 
+        <Section id="agarbild" title="Ägarbild">
+          <p className="mb-3 text-sm text-foreground-muted">
+            Ägare och innehav från bolagsregister (Roaring: koncernstruktur + verklig
+            huvudman). Underlag för art. 22 GBER / de minimis och Vinnovas krav på
+            grundarägande. Fysiska personer visas utan namn.
+          </p>
+          {ownershipRows.length === 0 ? (
+            <Empty>
+              Ingen ägarbild synkad än.
+              {canSyncRegistry && startup.org_nr && connectedRegistries.some((p) => p.slug === 'roaring')
+                ? ' Kör "Synka från Roaring" under Finansiell historik.'
+                : ' Anslut Roaring under Integrationer för att hämta den.'}
+            </Empty>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-default">
+              <table className="w-full text-sm">
+                <thead className="bg-canvas-subtle text-left text-xs uppercase tracking-wider text-foreground-subtle">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Riktning</th>
+                    <th className="px-3 py-2 font-medium">Ägare / innehav</th>
+                    <th className="px-3 py-2 font-medium">Typ</th>
+                    <th className="px-3 py-2 font-medium">Kapital</th>
+                    <th className="px-3 py-2 font-medium">Röster</th>
+                    <th className="px-3 py-2 font-medium">Källa</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ownershipRows.map((o) => (
+                    <tr key={o.id} className="border-t border-default">
+                      <td className="px-3 py-2 text-foreground-muted">
+                        {o.direction === 'owner' ? 'Ägare' : 'Innehav'}
+                        {o.indirect ? <span className="ml-1 text-xs text-foreground-subtle">(indirekt)</span> : null}
+                      </td>
+                      <td className="px-3 py-2 font-medium text-foreground">
+                        {o.owner_kind === 'person' ? 'Fysisk person' : o.name || '–'}
+                        {o.org_nr && o.owner_kind !== 'person' ? (
+                          <span className="ml-2 text-xs text-foreground-subtle mx-tnum">{o.org_nr}</span>
+                        ) : null}
+                        {o.control_basis ? (
+                          <p className="text-xs text-foreground-subtle">{controlBasisLabel(o.control_basis)}</p>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2 text-foreground-muted">{ownerKindLabel(o.owner_kind)}</td>
+                      <td className="px-3 py-2 text-foreground-muted mx-tnum">{formatPctOrRange(o.capital_pct, o.pct_min, o.pct_max)}</td>
+                      <td className="px-3 py-2 text-foreground-muted mx-tnum">{formatPctOrRange(o.voting_pct)}</td>
+                      <td className="px-3 py-2">
+                        <SourceBadge source={(o.source as FinancialsSource) || 'other'} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+
         <Section id="milestones" title="Milstolpar">
           {milestones.items.length === 0 ? (
             <Empty>Inga milstolpar registrerade.</Empty>
@@ -1285,14 +1408,27 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
               Årsvis nyckeltal från årsredovisningar och manuella inlägg. Källa
               visas per rad.
             </p>
-            {canEdit && startup.org_nr ? (
-              <AllabolagSyncButton startupId={id} />
+            {canSyncRegistry && startup.org_nr && connectedRegistries.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {connectedRegistries.map((p) => (
+                  <RegistrySyncButton
+                    key={p.slug}
+                    startupId={id}
+                    providerSlug={p.slug}
+                    providerName={p.name}
+                  />
+                ))}
+              </div>
+            ) : canSyncRegistry && startup.org_nr ? (
+              <Link href="/integrationer" className="text-xs text-link hover:underline">
+                Anslut ett bolagsregister (Roaring/Bolagsverket) för att synka →
+              </Link>
             ) : null}
           </div>
           {!startup.org_nr ? (
             <Empty>
               Fyll i organisationsnummer under "Redigera" för att aktivera
-              Allabolag-synk.
+              synk från bolagsregister.
             </Empty>
           ) : financials.items.length === 0 ? (
             <Empty>Inga årsrader registrerade än.</Empty>
@@ -1304,6 +1440,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                     <th className="px-3 py-2 font-medium">År</th>
                     <th className="px-3 py-2 font-medium">Omsättning</th>
                     <th className="px-3 py-2 font-medium">Anställda</th>
+                    <th className="px-3 py-2 font-medium">Balansomslutning</th>
+                    <th className="px-3 py-2 font-medium">Eget kapital</th>
                     <th className="px-3 py-2 font-medium">Personalkostnad</th>
                     <th className="px-3 py-2 font-medium">Bolagsskatt</th>
                     <th className="px-3 py-2 font-medium">Källa</th>
@@ -1318,6 +1456,12 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                       </td>
                       <td className="px-3 py-2 text-foreground-muted">
                         {row.employees ?? '–'}
+                      </td>
+                      <td className="px-3 py-2 text-foreground-muted">
+                        {formatSek(row.balance_sheet_sek)}
+                      </td>
+                      <td className="px-3 py-2 text-foreground-muted">
+                        {formatSek(row.equity_sek)}
                       </td>
                       <td className="px-3 py-2 text-foreground-muted">
                         {formatSek(row.personnel_cost_sek)}
@@ -1558,6 +1702,38 @@ function KnowledgeRow({
   );
 }
 
+function ownerKindLabel(kind: OwnershipRow['owner_kind']): string {
+  switch (kind) {
+    case 'company':
+      return 'Bolag';
+    case 'person':
+      return 'Fysisk person';
+    case 'public_body':
+      return 'Offentlig / akademi';
+    case 'investor':
+      return 'Investerare';
+    default:
+      return 'Okänd';
+  }
+}
+
+function controlBasisLabel(v: string): string {
+  const map: Record<string, string> = {
+    shares: 'Ägande (aktier/kapital)',
+    votes: 'Rösträtt',
+    board: 'Rätt att utse styrelse/ledning',
+    agreement: 'Kontroll via avtal/stadgar',
+    other: 'Annan kontrollgrund'
+  };
+  return map[v] || v;
+}
+
+function formatPctOrRange(exact?: number, min?: number, max?: number): string {
+  if (typeof exact === 'number') return `${exact.toLocaleString('sv-SE')} %`;
+  if (typeof min === 'number' && typeof max === 'number') return `${min}–${max} %`;
+  return '–';
+}
+
 function formatSek(value?: number): string {
   if (typeof value !== 'number' || Number.isNaN(value)) return '–';
   return `${value.toLocaleString('sv-SE')} kr`;
@@ -1579,6 +1755,16 @@ function SourceBadge({ source }: { source: FinancialsSource }) {
       label: 'Allabolag',
       className:
         'bg-movexum-pastell-bla text-movexum-morkbla dark:bg-movexum-morkbla/60 dark:text-movexum-pastell-bla'
+    },
+    roaring: {
+      label: 'Roaring',
+      className:
+        'bg-movexum-pastell-bla text-movexum-morkbla dark:bg-movexum-morkbla/60 dark:text-movexum-pastell-bla'
+    },
+    bolagsverket: {
+      label: 'Bolagsverket',
+      className:
+        'bg-movexum-pastell-lila text-movexum-morklila dark:bg-movexum-morklila/60 dark:text-movexum-pastell-lila'
     },
     other: {
       label: 'Övrigt',

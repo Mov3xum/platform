@@ -1227,6 +1227,8 @@ och kan renderas av samma UI oavsett leverantör.
 | Brevo     | FR (EU)   | Minimal       | Ingen AI. Endast aggregerade metrics synkas — inga e-postadresser. |
 | Howspace  | FI (EU)   | Begränsad     | AI-insights faller under art. 50 (transparenskrav). Vi synkar bara aggregerad statistik. |
 | Allabolag | SE        | Minimal       | Publik bolagsdata (org-nr, bolagsform, kommun, årsredovisningar). Ingen AI, inga personuppgifter för aktiebolag. För enskild firma exkluderas org-nr från AI-prompts (§ 9.3). **Status: implemented (stub)** — handler-skelettet skriver direkt till `startups`-registerfält och `startup_financials` (idempotent via unique-index `(startup, year)`). Produktion kräver leverantörsval via `MOVEXUM_ALLABOLAG_PROVIDER`-env (`mock`/`bolagsverket`/`roaring`/`creditsafe`); utan satt env returnerar handler ett tydligt fel. |
+| Roaring   | SE (EU)   | Begränsad     | **Implementerad (2026-09, § 11.8).** Grunddata, årsredovisningsposter (omsättning, anställda, **balansomslutning, eget kapital**), koncernstruktur och verklig huvudman. Ingen AI. Verklig huvudman är personuppgifter hos leverantören — vi läser dem transient och lagrar BARA andel/kontrollintervall + kontrollgrund (fast vokabulär) per person, aldrig namn/personnummer/födelsedatum. De anonyma raderna är **pseudonymiserade personuppgifter** (ett fåmansbolag med en ägare på 75–100 % är indirekt identifierbart mot det publika registret), inte "inga personuppgifter" — DPIA-bedömning + DPA med Roaring AB och kontroll att licensen täcker ändamålet (åtkomsten till registret över verkliga huvudmän är begränsad efter EU-domstolens dom C-37/20) krävs före produktion. |
+| Bolagsverket | SE (myndighet) | Minimal | **Implementerad (2026-09, § 11.8).** API för värdefulla datamängder (kostnadsfritt, OAuth2): officiellt namn, bolagsform, registreringsdatum, SNI, status, säte. Ingen ägarbild, inga bokslutsposter. Primärkälla för grunddata. |
 | Breakit   | SE        | Minimal       | Provider-stub för framtida Premium-paywall. **Status: stub** — själva morgonagenten (`ai_breakit_morning`) använder den publika RSS-feeden via `web.ts`-whitelisten och behöver ingen credential. Premium-aktivering kräver kommersiellt avtal med Breakit + cookie-/session-stöd i `web.ts`. |
 
 **Mailchimp avvisad** (CLAUDE.md § 10.2): US-baserad,
@@ -1278,6 +1280,91 @@ brytande ändringar — datamodellen är redan idempotent.
 6. Uppdatera tabellen i 11.3 + ev. ny kategori i `category`-enumet
    (se 1700000053 och 1700000060 för exempel på enum-utökning).
 7. PR-checklista § 10.5 punkt 9: dokumentera dataflödet här.
+
+### 11.8 Bolagsregister-providers: Roaring & Bolagsverket (2026-09)
+
+Underlag för screening mot art. 22 GBER / de minimis och Vinnovas
+målgruppskriterier (`docs/ai/vinnova-statsstod-screening-agent.md`, nivå 3):
+ägarbild, koncernstruktur, balansomslutning och registreringsdatum hämtas nu
+från bolagsregister i stället för att matas in för hand.
+
+**Arkitektur — en skrivväg, tre providers.** `lib/integrations/company-registry/`:
+
+| Fil | Syfte |
+|-----|-------|
+| `types.ts` | REN modul: `RegistryCompany` (startup-patch + årsrader + ägarbild) och tolerant fältläsning (`pickFirst`, `asNumber`, `parsePctInterval`, `mapBolagStatus`) — enhetstestad |
+| `orgnr.ts` | REN modul: normalisering, Luhn, `isPersonalOrgNr` (enskild firma = personnummer) — enhetstestad |
+| `oauth.ts` | Client-credentials-token med process-cache (Basic-auth mot token-endpoint) |
+| `writer.ts` | **ENDA skrivvägen:** `startups` (bara icke-tomma whitelistade fält), `startup_financials` (upsert per år), `startup_ownership` (ersätts per källa) |
+| `handler-factory.ts` | `createCompanyRegistryHandler({ fetchCompany })` — listning, tenant-verifiering, fel-aggregering, `lookup()` (förhandsgranskning utan skrivning) |
+| `providers/roaring/{client,normalize,handler}.ts` | Fyra API:er per bolag: overview (obligatoriskt), economy-overview, group-structure, beneficial-owner (fail-soft) |
+| `providers/bolagsverket/{client,normalize,handler}.ts` | `POST /vardefulla-datamangder/v1/organisationer` |
+| `providers/allabolag/handler.ts` | Stubben går nu genom samma fabrik (oförändrat beteende) |
+
+**Datamodell.** Migration **1700000171**: `startup_financials.balance_sheet_sek`
+/ `equity_sek` / `net_result_sek` + `source` ∪ {`roaring`, `bolagsverket`}.
+Migration **1700000172**: `startup_ownership` — `direction` (owner/holding),
+`owner_kind` (company/person/public_body/investor/other), `name`/`org_nr`
+(BARA juridiska personer), `capital_pct`/`voting_pct` (exakt) eller
+`pct_min`/`pct_max` (intervall från verklig huvudman), `control_basis`,
+`indirect`, `relation` (independent/partner/linked/unknown — reserverat för
+screeningens klassning), `source`, `synced_at`. Migration **1700000173**
+seedar providrarna i katalogen. Alla tre speglas i `setup-via-api.mjs`;
+`verify-baseline.mjs` asserterar `startup_ownership` (must-exist +
+`MUST_BE_STAFF_OR_OBSERVER`) och de nya financials-fälten (`REQUIRED_APP_FIELDS`).
+
+**Fältmappningen kan inte verifieras från byggmiljön** (leverantörernas
+dokumentation nås inte därifrån). Normaliserarna läser därför varje fält från
+en kandidatlista och rapporterar PII-fritt i `notes` vad som saknades, och
+`/integrationer/<slug>` har **"Testa mot org-nr"** (`previewRegistryLookupAction`
+→ `handler.lookup`) som visar exakt vad som skulle skrivas UTAN att spara.
+**Kör den på ett känt bolag (t.ex. med Combly-facit) innan portföljen synkas.**
+Roarings endpoint-versioner och beloppsenhet är env-överstyrbara
+(`ROARING_API_BASE_URL`, `ROARING_OVERVIEW_PATH`, `ROARING_FINANCIALS_PATH`,
+`ROARING_GROUP_STRUCTURE_PATH`, `ROARING_BENEFICIAL_OWNER_PATH`,
+`ROARING_AMOUNT_MULTIPLIER` default 1000 = TSEK→SEK); Bolagsverkets bas-URL
+via credential-fältet eller `BOLAGSVERKET_API_BASE_URL` (testmiljö).
+Credentials (client id/secret) läggs in per tenant på `/integrationer/<slug>`
+och krypteras AES-256-GCM (§ 11.5) — aldrig i kod.
+
+**Ytor.** Bolagskortet: en "Synka från <leverantör>"-knapp per ansluten
+bolagsregister-provider (`RegistrySyncButton`, action
+`syncStartupFromRegistryAction` — sluggen valideras mot registrets
+company_registry-handlers), kolumnerna Balansomslutning/Eget kapital i
+Finansiell historik och sektionen **Ägarbild** (`#agarbild`). `/integrationer`:
+"Synka nu" (hela portföljen), "Testa mot org-nr", täckning per källa.
+
+**GDPR § 5 / § 9.3.** Fysiska personer i ägarbilden lagras UTAN namn,
+personnummer och födelsedatum — bara `owner_kind='person'` + andel/intervall
++ kontrollgrund ur en **fast vokabulär** (`controlBasisCategory`: shares/
+votes/board/agreement/other — leverantörens fritext kan bära namn och når
+aldrig databasen). En ägarrad utan giltigt org-nr för **juridisk** person
+(saknat, ogiltigt eller personnummer-derivat = enskild firma) behandlas
+ALLTID som fysisk person: normaliseraren anonymiserar och `writer.ts`
+strippar defensivt en gång till. Enskild firma synkas utan ägarbild (ägaren
+ÄR personen). Raderna är **pseudonymiserade personuppgifter** (indirekt
+identifierbara i fåmansbolag) — DPIA-bedömning krävs, se § 11.3.
+Ägarbilden ersätts "så atomiskt PB tillåter": nya rader skrivs först, gamla
+raderas sist, och ett fel mitt i rullar tillbaka de nya (en halv ägarbild
+kunde annars få screeningen att klassa bolaget som fristående).
+**Bas-URL:** tenantens `base_url`-fält (och env-överstyrningen) valideras av
+`assertAllowedBaseUrl` — https + allowlist (`*.roaring.io`,
+`*.api.bolagsverket.se`), eftersom client secret skickas dit som Basic-auth
+(SSRF-/läckageskydd, A.8.9/A.8.24). **Förhandsgranskningen** nekar enskild
+firma, rate-limitas (20/10 min per användare), audit-loggas PII-fritt i
+`activities` (leverantör + antal, aldrig org-nr) och skriver inget.
+Org-nr för aktiebolag är inte personuppgift (skäl 14). `startup_ownership`
+är **läsbar** för `query_collection` (RLS staff/observer + `org_nr`-maskning)
+och når den KURERADE kontexten via `buildOwnershipContext` i `lib/ai/context.ts`:
+ägare/innehav utan org-nr, personer anonyma, plus grundarägande ur
+`startup_team_members` som **tröskel** (`founders_hold_at_least_75pct`) och
+summa `equity_pct` BARA vid ≥ 2 grundare (en ensam grundares andel vore en
+uppgift om en identifierbar person) — aldrig medlemsraderna. `balance_sheet_sek`/`equity_sek` whitelistas i
+`buildFinancialsContext`. Rättslig grund: berättigat intresse
+(statsstödskontroll, inkubatordrift). Riskklass: n/a för synken (ingen AI);
+Roaring som leverantör = begränsad (personuppgifter i verklig huvudman,
+transient), Bolagsverket = minimal. Leverantörskontroll (A.5.19): DPA med
+Roaring krävs innan produktion; Bolagsverket är myndighet (öppna data).
 
 ---
 
@@ -1614,6 +1701,12 @@ mappats till nya eller utökade kollektioner enligt nedan.
 Nya whitelistade fält i `apps/web/src/lib/ai/context.ts`:
 
 - **startups:** `city`, `website` (publik bolagsdata).
+- **`buildFinancialsContext`:** utöver anställda/omsättning/personalkostnad/
+  skatt även `balance_sheet_sek`, `equity_sek`, `net_result_sek` (§ 11.8).
+- **`buildOwnershipContext`** (§ 11.8): ägarbild ur `startup_ownership` utan
+  org-nr och utan namn på fysiska personer, samt grundarägande som tröskel
+  (`founders_hold_at_least_75pct`, `founder_count`) och summa
+  (`founder_equity_pct_total`) bara vid ≥ 2 grundare — aldrig teammedlemsrader.
 - **`buildCapitalRoundsContext`:** `type`, `source`, `amount_sek`,
   `received_at` samt `purpose` (= `notes`, **vad stödet/kapitalet gavs
   för**) per rad. `purpose` personnummer-saneras + cappas (~300 tecken)

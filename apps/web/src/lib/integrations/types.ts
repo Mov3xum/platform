@@ -1,4 +1,5 @@
 import 'server-only';
+import type { RegistryCompany } from './company-registry/types';
 
 // The shape every provider must produce. Keeping it minimal +
 // generic means the UI renders any provider without bespoke code,
@@ -40,6 +41,8 @@ export interface SyncContext {
 export interface RegistrySyncResult {
   startupsUpdated: number;
   financialsUpserted: number;
+  /** Ägarbildsrader skrivna till startup_ownership (§ 11.8). */
+  ownershipWritten?: number;
   skipped: number;
   perStartupErrors?: Array<{ startupId: string; error: string }>;
 }
@@ -79,6 +82,14 @@ export interface CompanyRegistryHandler extends BaseIntegrationHandler {
     ctx: SyncContext,
     startupId: string
   ): Promise<RegistrySyncResult>;
+  // Förhandsgranskning: hämtar + normaliserar ett org-nr UTAN att skriva
+  // något. Används av "Testa mot org-nr" på /integrationer/<slug> så att
+  // fältmappningen kan verifieras mot en riktig leverantörsrespons innan
+  // portföljen synkas (§ 11.8).
+  lookup?(
+    orgNr: string,
+    creds: Record<string, string>
+  ): Promise<RegistryCompany>;
 }
 
 export type IntegrationHandler = RecordsHandler | CompanyRegistryHandler;

@@ -110,11 +110,13 @@ function summarizeRegistry(
   providerSlug: string,
   startupsUpdated: number,
   financialsUpserted: number,
-  skipped: number
+  skipped: number,
+  ownershipWritten = 0
 ): string {
   const parts = [
     `${startupsUpdated} bolag uppdaterade, ${financialsUpserted} årsrader synkade`
   ];
+  if (ownershipWritten > 0) parts.push(`${ownershipWritten} ägarrader`);
   if (skipped > 0) parts.push(`${skipped} hoppade över`);
   return `${providerSlug}: ${parts.join(', ')}`;
 }
@@ -172,22 +174,24 @@ async function runRegistrySync(
 ): Promise<{
   startupsUpdated: number;
   financialsUpserted: number;
+  ownershipWritten: number;
   skipped: number;
   fetchError: string | null;
 }> {
   try {
     const result = await handler.syncRegistry(creds, ctx);
-    const firstError = result.perStartupErrors?.[0]?.error;
     return {
       startupsUpdated: result.startupsUpdated,
       financialsUpserted: result.financialsUpserted,
+      ownershipWritten: result.ownershipWritten ?? 0,
       skipped: result.skipped,
-      fetchError: result.skipped > 0 && firstError ? null : null
+      fetchError: null
     };
   } catch (err) {
     return {
       startupsUpdated: 0,
       financialsUpserted: 0,
+      ownershipWritten: 0,
       skipped: 0,
       fetchError: toError(err)
     };
@@ -343,7 +347,8 @@ export async function runRegistrySyncForStartup(
         providerSlug,
         result.startupsUpdated,
         result.financialsUpserted,
-        result.skipped
+        result.skipped,
+        result.ownershipWritten ?? 0
       );
 
   if (syncRunId) {
@@ -502,6 +507,7 @@ export async function runSync(
   let created = 0;
   let updated = 0;
   let skipped = 0;
+  let ownershipWritten = 0;
   let fetchError: string | null = null;
 
   const kind = handler.kind ?? 'records';
@@ -515,6 +521,7 @@ export async function runSync(
     created = result.financialsUpserted;
     updated = result.startupsUpdated;
     skipped = result.skipped;
+    ownershipWritten = result.ownershipWritten;
   } else {
     const result = await runRecordsSync(
       adminPb,
@@ -540,7 +547,7 @@ export async function runSync(
   const summary = fetchError
     ? `${providerSlug}: synk misslyckades`
     : kind === 'company_registry'
-      ? summarizeRegistry(providerSlug, updated, created, skipped)
+      ? summarizeRegistry(providerSlug, updated, created, skipped, ownershipWritten)
       : summarize(providerSlug, created, updated, skipped);
 
   if (syncRunId) {

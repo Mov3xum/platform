@@ -2247,6 +2247,57 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
 
+// Migration 1700000171 (§ 11.8): balansomslutning/eget kapital/resultat +
+// källvärdena roaring/bolagsverket på startup_financials. patchCollection
+// ERSÄTTER values → hela listan anges.
+await patchCollection(
+  'startup_financials',
+  [
+    { name: 'balance_sheet_sek', type: 'number', required: false },
+    { name: 'equity_sek', type: 'number', required: false },
+    { name: 'net_result_sek', type: 'number', required: false }
+  ],
+  { source: { values: ['manual', 'import_excel', 'allabolag', 'other', 'roaring', 'bolagsverket'] } }
+);
+
+// Migration 1700000172 (§ 11.8): startup_ownership — ägarbild från
+// bolagsregister (Roaring) eller manuell. Fysiska personer utan namn/org-nr.
+// Tenant-bred STAFF/OBSERVER-data (§ 21.3); createRule bara auth-fält.
+await ensureCollection({
+  id: 'startup_ownership_col',
+  name: 'startup_ownership',
+  type: 'base',
+  fields: [
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'direction', type: 'select', required: true, maxSelect: 1, values: ['owner', 'holding'] },
+    { name: 'owner_kind', type: 'select', required: true, maxSelect: 1, values: ['company', 'person', 'public_body', 'investor', 'other'] },
+    { name: 'name', type: 'text', required: false, max: 200 },
+    { name: 'org_nr', type: 'text', required: false, max: 20 },
+    { name: 'capital_pct', type: 'number', required: false, min: 0, max: 100 },
+    { name: 'voting_pct', type: 'number', required: false, min: 0, max: 100 },
+    { name: 'pct_min', type: 'number', required: false, min: 0, max: 100 },
+    { name: 'pct_max', type: 'number', required: false, min: 0, max: 100 },
+    { name: 'control_basis', type: 'text', required: false, max: 200 },
+    { name: 'indirect', type: 'bool', required: false },
+    { name: 'relation', type: 'select', required: false, maxSelect: 1, values: ['independent', 'partner', 'linked', 'unknown'] },
+    { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['manual', 'roaring', 'bolagsverket', 'allabolag'] },
+    { name: 'synced_at', type: 'date', required: false },
+    { name: 'note', type: 'text', required: false, max: 500 },
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+  ],
+  indexes: [
+    'CREATE INDEX idx_startup_ownership_tenant ON startup_ownership (tenant)',
+    'CREATE INDEX idx_startup_ownership_startup ON startup_ownership (startup, direction)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_READ}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_READ}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_INCL_MENTOR}`
+});
+
 // Migration 1700000061: agent_actions — audit-logg för dataändringar via skrivlager.
 await ensureCollection({
   id: 'agent_actions_collection',
@@ -4680,6 +4731,7 @@ const FORCE_CREATE_RULES = {
   // Deras create-migrationer återinförde `?=`-roll-checks/tenant-joins i
   // createRule (PB v0.23.4-buggarna). Roll-enforcement görs i server-actions.
   startup_financials: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  startup_ownership: `${ANY_AUTH} && @request.auth.tenant != ""`,
   tool_schedules: `${ANY_AUTH} && @request.auth.tenant != ""`,
   startup_phase_history: `${ANY_AUTH} && @request.auth.tenant != ""`,
   contacts: `${ANY_AUTH} && @request.auth.tenant != ""`,

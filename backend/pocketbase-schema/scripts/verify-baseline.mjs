@@ -146,6 +146,8 @@ async function verifyCollectionsExist() {
     'sprint_x_checkins',
     'startup_phase_history',
     'startup_financials',
+    // Ägarbild från bolagsregister (§ 11.8, migration 1700000172).
+    'startup_ownership',
     // CRM / bolagsisolering (§ 21)
     'startup_contacts',
     // Kontaktboken (§ 45, migration 1700000157) — förfrågningar om kontaktanvändning.
@@ -411,7 +413,11 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // projektekonomi och uppföljningsstyrning → staff/observer-only.
   'funding_projects',
   'funding_work_packages',
-  'support_check_rules'
+  'support_check_rules',
+  // Ägarbild från bolagsregister (§ 11.8, migration 1700000172). Intern
+  // bedömningsdata (koncernstruktur, verklig huvudman som anonym andel) →
+  // staff/observer-only; en ren startup_member ser sitt team på bolagskortet.
+  'startup_ownership'
 ];
 
 // Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa
@@ -903,6 +909,9 @@ const REQUIRED_APP_FIELDS = [
   // AI-minne (§ 16.4): kategori per notering = migration 1700000155. Saknas
   // fältet "sparas" kategorin från UI/memory_write men försvinner tyst.
   { collection: 'agent_memory', fields: ['category'] },
+  // Bolagsregister (§ 11.8, migration 1700000171): utan fälten "sparas"
+  // balansomslutning/eget kapital tyst bort vid synk från Roaring.
+  { collection: 'startup_financials', fields: ['balance_sheet_sek', 'equity_sek', 'net_result_sek'] },
   // Målstyrning (§ 42, migration 1700000159) + enkätkälla (§ 43, migration
   // 1700000160): utan flaggorna sparas "okänt" som 0 och en enkätindikator tappar sin källa.
   { collection: 'goal_indicators', fields: ['has_target', 'survey_module'] },
