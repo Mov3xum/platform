@@ -5547,7 +5547,9 @@ vidare anonymt), `title` (≤ 160), `body` (markdown ≤ 20 000, renderas ALLTID
 via `lib/safe-html`), `kind` (`news | notice | instruction | celebration | training` —
 MÅSTE spegla `ORG_POST_KINDS`; `training` = Internutbildningar-fliken, lagt
 som union i **migration 1700000145** och speglat i `setup-via-api.mjs` via
-`patchCollection`), `audience` (`staff | all`), `pinned`,
+`patchCollection`), `audience` (`staff | all | startups` — MÅSTE spegla
+`ORG_POST_AUDIENCES`; `startups` = **bara bolagen**, lagt som union i
+**migration 1700000171** som även öppnar list/view för medlemmar), `pinned`,
 `published_at` (tomt = direkt; framtid = schemalagt), `expires_at` (tomt =
 utgår aldrig), `link_url` (intern sökväg `/…` eller https — validerat i
 `isSafeOrgPostLink`, aldrig `javascript:`/`data:`), `media` (json,
@@ -5555,10 +5557,19 @@ utgår aldrig), `link_url` (intern sökväg `/…` eller https — validerat i
 (§ 28.5). Speglad i `setup-via-api.mjs` (collection-def + `FORCE_CREATE_RULES`).
 
 **Målgrupp.** `staff` (default) syns för Movexum-personal + observer; `all`
-syns dessutom för bolagsmedlemmar — på **"Min översikt"** (§ 21bis) under
-"Från Movexum". list/view-regeln: `auth && tenant && (STAFF_OR_OBSERVER ||
-audience = "all")` med `:each ?=` (§ 21.3). Kollektionen är därför
-medvetet INTE i `MUST_BE_STAFF_OR_OBSERVER` i `verify-baseline.mjs`.
+syns dessutom för bolagsmedlemmar — på **"Mitt bolag"** (§ 21bis) under
+"Från Movexum"; `startups` (**"Bara bolagen"**, 2026-09) är riktat enbart
+till bolagen: bolagsmedlemmarna ser det på Mitt bolag, och Movexum-teamet ser
+det på dashboarden märkt "Bara bolagen" — teamet är avsändare och måste
+kunna redigera/fästa/ta bort det, så det döljs inte för staff (UI-kurering
+via `canRolesSeeOrgPost`/`isOrgPostForStartups`, ren + enhetstestad).
+list/view-regeln: `auth && tenant && (STAFF_OR_OBSERVER || audience = "all"
+|| audience = "startups")` med `:each ?=` (§ 21.3). Kollektionen är därför
+medvetet INTE i `MUST_BE_STAFF_OR_OBSERVER` i `verify-baseline.mjs`; i
+stället asserterar `REQUIRED_SELECT_VALUES` där att select-värdet
+`startups` finns (PB svarar annars 400 "Invalid value"), och skrivlagret
+översätter det felet till "kör migration 1700000171" i stället för SDK:ns
+generiska "Failed to create record.".
 
 ### 37.3 RBAC och skrivväg
 
@@ -5588,7 +5599,12 @@ fältuppdatering), personnummer-sanering av rubrik/text på skrivvägen och
 länk till rätt flik. `kind=training` är den tänkta huvudanvändningen ("lägg
 upp en internutbildning om GDPR på torsdag med länk till materialet", "fäst
 den överst", "låt den utgå sista oktober"); befintliga inlägg slås upp via
-`query_collection` på `org_posts`. Radering görs inte av agenten (sätt
+`query_collection` på `org_posts`. **Målgrupp via chatten:** `audience`
+tar `staff` (default), `all` eller `startups` — "publicera bara till
+bolagen" ⇒ `startups`, "till alla" ⇒ `all` (guidad i
+`CHAT_WRITE_ACTIONS_GUIDANCE`); kvittot (§ 33.4) säger var inlägget syns
+(`audience_label` + `note`), så texten aldrig lovar teamet något som bara
+bolagen ser. Radering görs inte av agenten (sätt
 `expires_at` i stället — inlägget döljs; radera i UI:t). Guidad i
 `CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden (§ 33.3). Riskklass n/a
 (deterministisk mutation, ingen AI-inferens).
@@ -5652,9 +5668,11 @@ finansiärer/utlysningar) — vill man bredda/smalna läggs källan till i
   vid användarradering.
 - **XSS (§ 10.3):** markdown renderas via `chatMarkdownToHtml` (escapad) på
   servern; klienten sätter bara den färdiga HTML:en. Länkar valideras.
-- **ISO 27001 A.8.32:** ny oföränderlig migration (1700000144).
+- **ISO 27001 A.8.32:** nya oföränderliga migrationer (1700000144,
+  1700000145, 1700000147, 1700000171).
 - **§ 21-isolering:** startsidan är staff/observer; en medlem når bara
-  `audience=all`-inlägg via RLS, och aldrig bolagsnytt/omvärld/agenda på `/hem`.
+  `audience=all`/`startups`-inlägg via RLS, och aldrig bolagsnytt/omvärld/
+  agenda på `/hem`.
 
 ---
 

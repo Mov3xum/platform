@@ -217,7 +217,8 @@ export default async function MinOversiktPage() {
   }
 
   // Anslagstavlan (§ 37): inlägg riktade till hela organisationen
-  // (audience=all) visas för bolagsmedlemmen — RLS släpper bara igenom dem.
+  // (audience=all) eller bara till bolagen (audience=startups) visas för
+  // bolagsmedlemmen — RLS släpper bara igenom dem.
   let orgPosts: BoardPost[] = [];
   if (isPureMember) {
     const now = new Date();
@@ -326,7 +327,7 @@ export default async function MinOversiktPage() {
           </section>
         ) : null}
 
-        {/* Från Movexum — anslagstavlan (audience=all), bara för bolagsmedlemmar. */}
+        {/* Från Movexum — anslagstavlan (audience=all/startups), bara för bolagsmedlemmar. */}
         {isPureMember && orgPosts.length > 0 ? (
           <OrgPostList
             posts={orgPosts}

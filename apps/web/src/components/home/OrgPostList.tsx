@@ -188,8 +188,16 @@ export function OrgPostList({
         <span className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-movexum-morkgul">Schemalagt</span>
       )}
       {post.audience === 'all' && (
-        <span className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-foreground-subtle" title="Visas även för bolagen">
+        <span className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-foreground-subtle" title="Visas för teamet och för bolagen">
           Hela organisationen
+        </span>
+      )}
+      {post.audience === 'startups' && (
+        <span
+          className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-movexum-lila dark:text-movexum-ljuslila"
+          title="Riktat bara till bolagen — visas för bolagsmedlemmarna på Mitt bolag. Teamet ser det här som avsändare."
+        >
+          Bara bolagen
         </span>
       )}
     </>
