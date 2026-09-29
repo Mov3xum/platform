@@ -5,6 +5,7 @@ import { logAgentAction } from './audit';
 import {
   validateActivityKindForWrite,
   validateActivityStatus,
+  validateDateOnly,
   validateNonEmptyText,
   validateOptionalText,
   type ActivityKindForWrite,
@@ -116,7 +117,7 @@ export async function createActivity(
 
 export interface UpdateActivityFieldParams {
   activityId: string;
-  field: 'title' | 'description' | 'status';
+  field: 'title' | 'description' | 'status' | 'due_date';
   value: unknown;
 }
 
@@ -140,9 +141,13 @@ export async function updateActivityField(
     );
   }
 
-  let normalized: string;
+  let normalized: string | null;
   if (params.field === 'status') {
     const r = validateActivityStatus(params.value);
+    if (!r.ok) return fail('INVALID_VALUE', r.error);
+    normalized = r.value;
+  } else if (params.field === 'due_date') {
+    const r = validateDateOnly(params.value, 'due_date');
     if (!r.ok) return fail('INVALID_VALUE', r.error);
     normalized = r.value;
   } else if (params.field === 'title') {
@@ -176,7 +181,12 @@ export async function updateActivityField(
     return fail('TENANT_MISMATCH', 'Åtkomst nekad — aktiviteten tillhör en annan tenant.');
   }
 
-  const before = current[params.field] ?? null;
+  let before = current[params.field] ?? null;
+  // PB returnerar '' för tomt datum och "YYYY-MM-DD 00:00:00.000Z" för ett
+  // satt — normalisera så oförändrat datum blir en no-op (ingen audit-rad).
+  if (params.field === 'due_date') {
+    before = typeof before === 'string' && before ? before.slice(0, 10) : null;
+  }
   if (before === normalized) {
     return ok({
       activityId: params.activityId,

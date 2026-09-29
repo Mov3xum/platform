@@ -25,7 +25,7 @@ import {
  *
  *   - saknad uppgift vars villkor gäller → skapas (öppen, med förfallodag,
  *     kopplad till upphandling/avrop — bolagets kanban hittar den via
- *     `procurement_calloff.startup`; ägaren ser den i "Min översikt");
+ *     `procurement_calloff.startup`; ägaren ser den i "Mina uppgifter");
  *   - befintlig öppen uppgift vars datum/titel flyttats → uppdateras;
  *   - öppen uppgift vars villkor UPPHÖRT (milstolpen godkändes, rapporten
  *     kom, avropet hävdes, regeln togs bort) → auto-stängs (`done`) med

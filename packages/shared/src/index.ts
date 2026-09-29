@@ -1441,8 +1441,8 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'inkorg',
-    title: 'Min översikt',
-    description: 'Allt som är ditt på ett ställe — uppgifter, aktiviteter, möten och events att planera och följa upp.',
+    title: 'Mina uppgifter',
+    description: 'Allt som är ditt på ett ställe — uppgifter, aktiviteter, möten, events och notiser att planera och följa upp.',
     rolesAllowed: ALL_ROLES,
     route: '/inkorg'
   },

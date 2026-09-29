@@ -7,8 +7,10 @@ import type { Actor } from './types';
  * Delade robusthetshjälpare för skrivlagret (§ 16, § 33).
  *
  * `writeWithFallback`: skriv via användarens token först; falla tillbaka på
- * superuser vid 400/403 (PB v0.23.4:s rule-eval-bugg, § 21.3 — samma mönster
- * som `lib/core/write/compass.ts` och `lib/actions/workshops.ts`). Roll +
+ * superuser vid 400/403/404 (PB v0.23.4:s rule-eval-bugg, § 21.3 — samma
+ * mönster som `lib/core/write/compass.ts` och `lib/actions/workshops.ts`; PB
+ * svarar 404, inte 403, när update-/delete-regeln filtrerar bort posten,
+ * § 23.8). Roll +
  * tenant är ALLTID verifierade av anroparen innan fallbacken används —
  * superusern är en robusthetsfallback, inte behörighetsgränsen.
  *
@@ -33,7 +35,7 @@ export async function writeWithFallback<T>(
     return await run(pb);
   } catch (err) {
     const status = statusOf(err);
-    if (status === 400 || status === 403) {
+    if (status === 400 || status === 403 || status === 404) {
       const su = await getSuperuserPb();
       if (su.ok) return run(su.pb);
     }

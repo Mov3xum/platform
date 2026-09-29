@@ -19,13 +19,30 @@ import {
 } from './status';
 
 /**
- * Aggregerar allt som är "mitt" till "Min översikt"-boarden:
- *   • tasks + activities  → WorkItem[] (kanban)
+ * Aggregerar allt som är "mitt" till "Mina uppgifter" (/inkorg):
+ *   • tasks + activities  → WorkItem[] (tidsindelad lista / kanban)
  *   • incubator_events + Outlook-möten → AgendaItem[] (tidsrad)
  *
  * Fail-soft: varje källa har egen felhantering så en enskild källa som
- * fallerar inte tömmer hela vyn. Allt är tenant-scopat (defense-in-depth).
+ * fallerar inte tömmer hela vyn — men felet RAPPORTERAS (`readNotices`) så
+ * sidan aldrig visar "Allt klart" när läsningen egentligen misslyckades
+ * (CLAUDE.md § 33.4). Allt är tenant-scopat (defense-in-depth).
+ *
+ * Klara poster visas bara `DONE_WINDOW_DAYS` dagar efter att de markerats
+ * klara — annars växer "Klar" för evigt och äter av läs-taket.
  */
+
+export const DONE_WINDOW_DAYS = 7;
+const PAGE_SIZE = 200;
+
+/**
+ * Outlook-agendan cachas KORT i processminnet per användare så att sidans
+ * fokus-/intervallpollning inte gör ett Microsoft Graph-anrop per omladdning.
+ * Bara i minnet, aldrig i DB (§ 14.4); tokens cachas inte — bara det
+ * härledda agenda-resultatet (titel/tid/plats/länk).
+ */
+const OUTLOOK_CACHE_TTL_MS = 60_000;
+const outlookCache = new Map<string, { at: number; items: AgendaItem[]; state: OutlookState }>();
 
 const TASK_STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
 const ACTIVITY_STAFF_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
@@ -62,6 +79,7 @@ interface TaskRow {
   starts_at?: string;
   owner?: string;
   startup?: string;
+  mission?: string;
   expand?: { owner?: UserRef; startup?: StartupRef; contact?: ContactRef };
 }
 
@@ -91,6 +109,8 @@ export interface OverviewData {
   agenda: AgendaItem[];
   outlookState: OutlookState;
   boardEditable: boolean;
+  /** Läsfel/kapning per källa — visas som banner, aldrig som "Allt klart". */
+  readNotices: string[];
 }
 
 function ownerName(u?: UserRef): string | undefined {
@@ -134,15 +154,22 @@ export async function getOverviewData(
     .join(' || ');
 
   // ── Parallella, fail-soft källor ────────────────────────────────────
+  // Klara poster bara inom fönstret (completed_at); saknat completed_at på en
+  // klar post = gammal → utelämnas. Öppna poster alltid.
+  const doneSince = toPocketBaseDateTime(
+    new Date(Date.now() - DONE_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+  );
+  const doneClause = `(status != "done" || completed_at >= "${doneSince}")`;
+
   const taskFilter =
     `tenant = "${tenant}" && (owner = "${uid}"` +
     (startupClause ? ` || ${startupClause}` : '') +
-    `) && status != "cancelled"`;
+    `) && status != "cancelled" && ${doneClause}`;
 
   const activityFilter =
     `startup.tenant = "${tenant}" && (owner = "${uid}"` +
     (startupClause ? ` || ${startupClause}` : '') +
-    `) && status != "cancelled"`;
+    `) && status != "cancelled" && ${doneClause}`;
 
   // Dygnsgränsen är 00:00 SVENSK tid uttryckt som UTC-ögonblick i PB-format
   // (servern kör i UTC — ett rent "YYYY-MM-DD" hade tappat events mellan
@@ -152,12 +179,12 @@ export async function getOverviewData(
   const eventFilter = `tenant = "${tenant}" && starts_at >= "${todayStart}" && status != "cancelled"`;
 
   const [tasksRes, activitiesRes, eventsRes] = await Promise.allSettled([
-    pb.collection('tasks').getList<TaskRow>(1, 100, {
+    pb.collection('tasks').getList<TaskRow>(1, PAGE_SIZE, {
       filter: taskFilter,
       sort: 'due_at',
       expand: 'owner,startup,contact'
     }),
-    pb.collection('activities').getList<ActivityRow>(1, 100, {
+    pb.collection('activities').getList<ActivityRow>(1, PAGE_SIZE, {
       filter: activityFilter,
       sort: 'due_date',
       expand: 'owner,startup'
@@ -169,6 +196,25 @@ export async function getOverviewData(
   ]);
 
   const items: WorkItem[] = [];
+  const readNotices: string[] = [];
+
+  if (tasksRes.status === 'rejected') {
+    readNotices.push('Uppgifterna kunde inte läsas just nu — listan kan vara ofullständig.');
+  } else if (tasksRes.value.totalItems > tasksRes.value.items.length) {
+    readNotices.push(
+      `Visar ${tasksRes.value.items.length} av ${tasksRes.value.totalItems} uppgifter — markera klart eller ta bort för att se resten.`
+    );
+  }
+  if (activitiesRes.status === 'rejected') {
+    readNotices.push('Aktiviteterna kunde inte läsas just nu — listan kan vara ofullständig.');
+  } else if (activitiesRes.value.totalItems > activitiesRes.value.items.length) {
+    readNotices.push(
+      `Visar ${activitiesRes.value.items.length} av ${activitiesRes.value.totalItems} aktiviteter.`
+    );
+  }
+  if (eventsRes.status === 'rejected') {
+    readNotices.push('Events kunde inte läsas just nu.');
+  }
 
   if (tasksRes.status === 'fulfilled') {
     for (const t of tasksRes.value.items) {
@@ -186,6 +232,7 @@ export async function getOverviewData(
         ownerName: ownerName(t.expand?.owner),
         startupId: t.startup || undefined,
         startupName: t.expand?.startup?.name,
+        missionId: t.mission || undefined,
         contactName: contactName(t.expand?.contact),
         canEdit: isTaskStaff || (!!t.owner && t.owner === user.id)
       });
@@ -230,53 +277,86 @@ export async function getOverviewData(
     }
   }
 
-  // ── Outlook (live, lagras aldrig) ───────────────────────────────────
+  // ── Outlook (live, lagras aldrig i DB; kort processcache) ───────────
   let outlookState: OutlookState = 'disconnected';
-  try {
-    const row = await findIntegrationRow(pb, user.id, 'outlook_calendar');
-    if (row && row.status === 'active' && row.auth_data) {
-      try {
-        const tokens = await getActiveTokens({
-          pb,
-          row,
-          provider: outlookCalendarProvider
-        });
-        const horizon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-        const evs = await fetchCalendarEvents({
-          tokens,
-          from: now,
-          to: horizon,
-          timezone: 'Europe/Stockholm'
-        });
-        outlookState = 'connected';
-        for (const e of evs) {
-          agenda.push({
-            id: e.id,
-            source: 'outlook',
-            title: e.subject,
-            startsAt: e.start,
-            endsAt: e.end,
-            location: e.location,
-            url: e.webLink,
-            isOnline: e.isOnline
+  const cached = outlookCache.get(user.id);
+  if (cached && now.getTime() - cached.at < OUTLOOK_CACHE_TTL_MS) {
+    outlookState = cached.state;
+    agenda.push(...cached.items);
+  } else {
+    const outlookItems: AgendaItem[] = [];
+    try {
+      const row = await findIntegrationRow(pb, user.id, 'outlook_calendar');
+      if (row && row.status === 'active' && row.auth_data) {
+        try {
+          const tokens = await getActiveTokens({
+            pb,
+            row,
+            provider: outlookCalendarProvider
           });
+          const horizon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+          const evs = await fetchCalendarEvents({
+            tokens,
+            from: now,
+            to: horizon,
+            timezone: 'Europe/Stockholm'
+          });
+          outlookState = 'connected';
+          for (const e of evs) {
+            outlookItems.push({
+              id: e.id,
+              source: 'outlook',
+              title: e.subject,
+              startsAt: e.start,
+              endsAt: e.end,
+              location: e.location,
+              url: e.webLink,
+              isOnline: e.isOnline
+            });
+          }
+        } catch (err) {
+          outlookState = 'error';
+          await markExpired(
+            pb,
+            row.id,
+            err instanceof Error ? err.message : 'Microsoft Graph-fel'
+          );
         }
-      } catch (err) {
+      } else if (row && row.status === 'expired') {
         outlookState = 'error';
-        await markExpired(
-          pb,
-          row.id,
-          err instanceof Error ? err.message : 'Microsoft Graph-fel'
-        );
       }
-    } else if (row && row.status === 'expired') {
-      outlookState = 'error';
+    } catch {
+      outlookState = 'disconnected';
     }
-  } catch {
-    outlookState = 'disconnected';
+    // Bara ett lyckat/entydigt resultat cachas — ett fel provas om nästa gång.
+    if (outlookState !== 'error') {
+      outlookCache.set(user.id, { at: now.getTime(), items: outlookItems, state: outlookState });
+    }
+    agenda.push(...outlookItems);
   }
 
   agenda.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
 
-  return { items, agenda, outlookState, boardEditable };
+  return { items, agenda, outlookState, boardEditable, readNotices };
+}
+
+export interface StartupOption {
+  id: string;
+  name: string;
+}
+
+/** Bolagsalternativ för snabbtillägg/redigering (id + namn; RLS via användarens token). */
+export async function listStartupOptions(pb: PocketBase, tenant: string): Promise<StartupOption[]> {
+  try {
+    const rows = await pb.collection('startups').getList<{ id: string; name?: string }>(1, 200, {
+      filter: pb.filter('tenant = {:t} && status != "rejected"', { t: tenant }),
+      fields: 'id,name',
+      sort: 'name'
+    });
+    return rows.items
+      .filter((s) => Boolean(s.name))
+      .map((s) => ({ id: s.id, name: String(s.name) }));
+  } catch {
+    return [];
+  }
 }

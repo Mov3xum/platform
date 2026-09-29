@@ -85,6 +85,12 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     status: {
       user: { kind: 'any-role' },
       agent: { kind: 'allow' }
+    },
+    // Förfallodatum redigeras i "Mina uppgifter" (§ 40). Agentens verktygsyta
+    // (`update_activity_field`: title/description/status) är oförändrad.
+    due_date: {
+      user: { kind: 'any-role' },
+      agent: { kind: 'deny', reason: 'Förfallodatum på aktiviteter sätts av en människa i UI:t.' }
     }
   },
   // Årshjul (§ 30). Hela aktiviteten är icke-PII verksamhetsplanering, så

@@ -31,7 +31,7 @@ type CanAccess = (roles: Role[], moduleId: string, enabledModules: string[] | un
 const MOBILE_LABELS: Record<string, string> = {
   hem: 'Översikt',
   idag: 'Chatt',
-  inkorg: 'Min översikt',
+  inkorg: 'Uppgifter',
   min_oversikt: 'Mitt bolag',
   mina_aktiviteter: 'Aktiviteter',
   startups: 'Bolag',

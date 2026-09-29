@@ -1,4 +1,4 @@
-// Normaliserad modell för "Min översikt"-boarden. Pure module (ingen IO)
+// Normaliserad modell för "Mina uppgifter" (/inkorg). Pure module (ingen IO)
 // så den kan importeras både server-side (aggregate.ts) och i klient-
 // komponenterna (OverviewBoard m.fl.).
 //
@@ -6,7 +6,7 @@
 //   tasks.status:      open | in_progress | blocked  | done | cancelled
 //                      (+ backlog/review från bolagskanbanen § 15.7 —
 //                       mappas till todo/waiting så korten inte försvinner
-//                       ur den här 4-kolumnsvyn)
+//                       ur kanban-vyn)
 //   activities.status: planned | in_progress | (—)    | done | cancelled
 // `cancelled` filtreras bort helt. Activities saknar "blocked" → kolumnen
 // "Väntar" är inte ett giltigt drop-mål för aktivitetskort.
@@ -98,6 +98,8 @@ export interface WorkItem {
   ownerName?: string;
   startupId?: string;
   startupName?: string;
+  /** Uppdraget kortet hör till (tasks.link_kind='mission', § 29) — ger "Öppna"-länk. */
+  missionId?: string;
   /** Endast UI för ägaren — får ALDRIG skickas till AI-kontext (§15.3). */
   contactName?: string;
   /** Förberäknad per-item RBAC (staff eller ägare). */

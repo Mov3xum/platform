@@ -5,6 +5,7 @@ import type PocketBase from 'pocketbase';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { getOneForTenant } from '@/lib/pb.server';
 import { hasRole } from '@/lib/rbac';
+import { writeWithFallback } from '@/lib/core/write/helpers';
 import { toRawStatus, type BoardStatus } from '@/lib/overview/status';
 import {
   isStartupBoardStatus,
@@ -124,7 +125,7 @@ export async function logMeetingAsTaskAction(
   return { summary: 'Loggad ✓' };
 }
 
-/** Snabb-skapa en fristående uppgift för "Min översikt". Bara staff. */
+/** Snabb-skapa en uppgift från "Mina uppgifter" (valfritt datum + bolag). Bara staff. */
 export async function createTaskAction(input: {
   description: string;
   kind?: string;
@@ -214,6 +215,122 @@ export async function updateTaskStatusAction(
   }
 
   revalidatePath('/inkorg');
+  return { ok: true };
+}
+
+/**
+ * Redigera titel, förfallodatum och bolag på en uppgift från "Mina uppgifter".
+ * Staff eller ägare (speglar tasks.updateRule). Bolaget tenant-verifieras
+ * innan det kopplas; tomt bolag kopplar bort (link_kind → none, om inte
+ * kortet hör till ett uppdrag).
+ */
+export async function updateTaskDetailsAction(input: {
+  taskId: string;
+  description: string;
+  dueAt?: string;
+  startupId?: string;
+}): Promise<TaskActionResult> {
+  const user = await requireUser();
+
+  const description = (input.description ?? '').trim();
+  if (!description) return { ok: false, error: 'Beskrivning krävs.' };
+  if (description.length > 500) {
+    return { ok: false, error: 'Beskrivning får vara max 500 tecken.' };
+  }
+  const dueAt = (input.dueAt ?? '').trim();
+  if (dueAt && !/^\d{4}-\d{2}-\d{2}$/.test(dueAt)) {
+    return { ok: false, error: 'Ogiltigt datum (ÅÅÅÅ-MM-DD).' };
+  }
+  const startupId = (input.startupId ?? '').trim();
+
+  const pb = await getServerPb();
+
+  let row: { id: string; tenant?: string; owner?: string; mission?: string; startup?: string };
+  try {
+    row = await pb
+      .collection('tasks')
+      .getOne(input.taskId, { fields: 'id,tenant,owner,mission,startup' });
+  } catch {
+    return { ok: false, error: 'Uppgiften hittades inte.' };
+  }
+  if (row.tenant !== user.tenant) {
+    return { ok: false, error: 'Åtkomst nekad.' };
+  }
+  const canEdit = hasRole(user.roles, [...STAFF_ROLES]) || row.owner === user.id;
+  if (!canEdit) {
+    return { ok: false, error: 'Du får inte ändra denna uppgift.' };
+  }
+
+  if (startupId) {
+    try {
+      await getOneForTenant('startups', startupId);
+    } catch {
+      return { ok: false, error: 'Bolaget hittades inte i din organisation.' };
+    }
+  }
+
+  const patch: Record<string, unknown> = {
+    description,
+    due_at: dueAt || null,
+    startup: startupId || null
+  };
+  if (!row.mission) patch.link_kind = startupId ? 'startup' : 'none';
+
+  try {
+    // Superuser-fallback bara vid PB v0.23.4:s tysta regel-nekande (§ 21.3);
+    // roll + tenant är verifierade ovan.
+    await writeWithFallback(pb, (client) => client.collection('tasks').update(input.taskId, patch));
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte uppdatera uppgiften.'
+    };
+  }
+
+  revalidatePath('/inkorg');
+  if (row.startup) revalidateStartupBoard(row.startup);
+  if (startupId && startupId !== row.startup) revalidateStartupBoard(startupId);
+  return { ok: true };
+}
+
+/**
+ * Ta bort en uppgift (t.ex. en dubblett) från "Mina uppgifter". Speglar
+ * tasks.deleteRule: admin/incubator_lead eller ägaren. Regeln använder bart
+ * `?=` mot roller (§ 21.3) och kan därför tyst neka en admin som inte äger
+ * kortet → superuser-fallback efter den verifierade roll-/tenant-kollen.
+ */
+export async function deleteTaskAction(taskId: string): Promise<TaskActionResult> {
+  const user = await requireUser();
+  const pb = await getServerPb();
+
+  let row: { id: string; tenant?: string; owner?: string; startup?: string; mission?: string };
+  try {
+    row = await pb
+      .collection('tasks')
+      .getOne(taskId, { fields: 'id,tenant,owner,startup,mission' });
+  } catch {
+    return { ok: false, error: 'Uppgiften hittades inte.' };
+  }
+  if (row.tenant !== user.tenant) {
+    return { ok: false, error: 'Åtkomst nekad.' };
+  }
+  const canDelete = hasRole(user.roles, ['admin', 'incubator_lead']) || row.owner === user.id;
+  if (!canDelete) {
+    return { ok: false, error: 'Bara ägaren eller admin kan ta bort uppgiften.' };
+  }
+
+  try {
+    await writeWithFallback(pb, (client) => client.collection('tasks').delete(taskId));
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte ta bort uppgiften.'
+    };
+  }
+
+  revalidatePath('/inkorg');
+  if (row.startup) revalidateStartupBoard(row.startup);
+  if (row.mission) revalidatePath(`/uppdrag/${row.mission}`);
   return { ok: true };
 }
 

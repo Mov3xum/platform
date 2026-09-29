@@ -12,8 +12,8 @@ import { toRawStatus, type BoardStatus } from '@/lib/overview/status';
 const ACTIVITY_STAFF_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
 
 /**
- * Flytta en aktivitet mellan board-kolumner (drag-and-drop på "Min
- * översikt"). Återanvänder det delade, auditade skrivlagret
+ * Flytta en aktivitet mellan board-kolumner (drag-and-drop på "Mina
+ * uppgifter"). Återanvänder det delade, auditade skrivlagret
  * (`updateActivityField`) som enforce:ar fält-whitelist + tenant +
  * validering. Vi gör en explicit tenant/roll-koll här först också
  * (defense-in-depth + tydligare felmeddelande till boarden).
@@ -68,6 +68,62 @@ export async function updateActivityStatusAction(
   if (!res.ok) {
     return { ok: false, error: res.error };
   }
+
+  revalidatePath('/inkorg');
+  return { ok: true };
+}
+
+/**
+ * Redigera titel + förfallodatum på en aktivitet från "Mina uppgifter".
+ * Går via samma auditade skrivlager fält för fält (`updateActivityField`),
+ * som enforce:ar whitelist (`writable-fields.ts`), tenant och validering.
+ */
+export async function updateActivityDetailsAction(input: {
+  activityId: string;
+  title: string;
+  dueDate?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const user = await requireUser();
+  const pb = await getServerPb();
+
+  let row: { id: string; owner?: string; expand?: { startup?: { tenant?: string } } };
+  try {
+    row = await pb.collection('activities').getOne(input.activityId, {
+      fields: 'id,owner,startup,expand.startup.tenant',
+      expand: 'startup'
+    });
+  } catch {
+    return { ok: false, error: 'Aktiviteten hittades inte.' };
+  }
+  if (row.expand?.startup?.tenant !== user.tenant) {
+    return { ok: false, error: 'Åtkomst nekad.' };
+  }
+  const canEdit =
+    hasRole(user.roles, [...ACTIVITY_STAFF_ROLES]) || row.owner === user.id;
+  if (!canEdit) {
+    return { ok: false, error: 'Du får inte ändra denna aktivitet.' };
+  }
+
+  const actor: Actor = {
+    kind: 'user',
+    id: user.id,
+    tenant: user.tenant,
+    roles: user.roles
+  };
+
+  const titleRes = await updateActivityField(pb, actor, {
+    activityId: input.activityId,
+    field: 'title',
+    value: input.title
+  });
+  if (!titleRes.ok) return { ok: false, error: titleRes.error };
+
+  const dueRes = await updateActivityField(pb, actor, {
+    activityId: input.activityId,
+    field: 'due_date',
+    value: (input.dueDate ?? '').trim() || null
+  });
+  if (!dueRes.ok) return { ok: false, error: dueRes.error };
 
   revalidatePath('/inkorg');
   return { ok: true };
