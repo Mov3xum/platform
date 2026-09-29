@@ -327,7 +327,7 @@ export interface StaffTurnResult {
   model: string;
   tokensIn: number;
   tokensOut: number;
-  /** Antal modellanrop i turen (1 + ett per verktygssteg) — för den begripliga token-raden (§ 28.2). */
+  /** Antal modellanrop i turen (1 + ett per verktygssteg) — per-turn-metadata § 9.9. */
   calls: number;
   /** Dokument som agenten genererade under turn:en (för nedladdnings-chips). */
   generatedFiles: GeneratedFileRef[];

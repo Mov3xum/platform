@@ -143,12 +143,7 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
       approval_request: m.approval_request,
       meeting_request: m.meeting_request,
       sources: m.sources,
-      model: m.role === 'assistant' ? m.model : undefined,
-      // Per-turn-metadata (§ 9.9) → den begripliga token-raden under svaret
-      // (§ 28.2): synligt bara det modellen genererade, kontexten på begäran.
-      tokens_in: m.role === 'assistant' ? m.tokens_in : undefined,
-      tokens_out: m.role === 'assistant' ? m.tokens_out : undefined,
-      api_calls: m.role === 'assistant' ? m.api_calls : undefined
+      model: m.role === 'assistant' ? m.model : undefined
     }));
 }
 

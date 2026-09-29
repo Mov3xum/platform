@@ -3724,30 +3724,24 @@ konservativ uppskattning — alla värden märks "≈" i UI:t.
 | Fil | Syfte |
 |-----|-------|
 | `packages/shared/src/ai-impact.ts` (+ `.test.ts`) | Ren, enhetstestad beräknings-/formatteringslogik (tokens → CO₂e/vatten, sv-SE-formattering) |
-| `apps/web/src/lib/chat-usage.ts` (+ `.test.ts`) | Ren text-byggare för token-raden under ett svar ("N tokens genererade" + kontext-detalj) |
 | `apps/web/src/lib/ai/tool-scope.ts` (+ `.test.ts`) | Skopad verktygsyta per tur (§ 28.4) — halverar prompt-tokens per anrop |
 | `apps/web/src/app/insights/page.tsx` | Tenant-vy: CO₂e/vatten i Översikt-railen + admin-länk till systemdashboarden |
 | `apps/web/src/app/admin/ai-miljo/page.tsx` | Systemvid dashboard: total tokenanvändning + utsläpp **per tenant** för vald period |
 
 ### 28.2 Ytor
 
-- **Chatten (`/chatt`) — begriplig token-rad, som Claude/ChatGPT (2026-09).**
-  Under varje assistant-svar visas modellen (transparens art. 13) och det
-  modellen faktiskt GENERERADE ("2 334 tokens genererade") — jämförbart med
-  ett svar i Claude eller ChatGPT. Hela kontexten visas bara bakom
-  "Detaljer": "Kontext som modellen läste: 130 700 tokens över 6 anrop —
-  varje verktygssteg är ett eget anrop som läser om systemprompt, verktyg,
-  historik och verktygsresultat (Mistral har ingen prompt-cache)". Texten
-  byggs av den rena, enhetstestade `lib/chat-usage.ts` (`describeTurnUsage`);
-  antalet anrop persisteras som `ToolRunMessage.api_calls` (räknas i
-  `runStaffChatTurn`, skrivs i `thread-turn.ts`; saknas på äldre turer).
-  Den tidigare inline-chipen ("133 034 tokens · ≈ 379 g CO₂e · 15 l vatten")
-  summerade in + ut över ALLA anrop i turen och jämfördes av användarna med
-  de få hundra ord de själva skrev — korrekt summerad förbrukning (`onUsage`
-  per API-anrop), men missvisande läst som "kostnaden för mitt meddelande".
-  CO₂e/vatten visas därför inte längre inline; per-turn-metadatan
-  (`tokens_in`/`tokens_out`, § 9.9) och `ai_usage_events` loggas oförändrat
-  och redovisas i `/insights` och `/admin/ai-miljo` nedan.
+- **Chatten (`/chatt`) visar INGA token- eller miljösiffror (2026-09).**
+  Under varje assistant-svar står bara modellen som svarade (transparens
+  art. 13) — samma uttryck som Claude och ChatGPT. Den tidigare inline-
+  chipen ("133 034 tokens · ≈ 379 g CO₂e · 15 l vatten") summerade in + ut
+  över ALLA anrop i turen (varje verktygssteg är ett eget anrop utan
+  prompt-cache som läser om systemprompt, verktyg, historik och
+  verktygsresultat) och jämfördes av användarna med de få hundra ord de
+  själva skrev — korrekt summerad förbrukning (`onUsage` per API-anrop) men
+  missvisande läst som "kostnaden för mitt meddelande". Per-turn-metadatan
+  (`tokens_in`/`tokens_out`/`api_calls` i `messages[]`, § 9.9) och
+  `ai_usage_events` loggas oförändrat och redovisas per period i
+  `/insights` och `/admin/ai-miljo` nedan — inte i konversationen.
 - **`/insights` (staff):** tenantens period-tokens omräknade till CO₂e/vatten
   i Översikt-railen (samma `ai_usage_events`-summa som token-statet).
 - **`/admin/ai-miljo` (ADMIN-ONLY):** period-väljare (innevarande månad /
