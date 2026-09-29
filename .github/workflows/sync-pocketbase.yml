@@ -150,6 +150,15 @@ jobs:
           echo "::error::Kolla PB-containerns hälsa på servern och kör om workflowen när den är uppe."
           exit 1
 
+      - name: Wait for migration-created PocketBase schema
+        env:
+          PB_URL: ${{ steps.pb_ready.outputs.selected_url }}
+          PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL_STAGING || secrets.PB_SU_EMAIL }}
+          PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD_STAGING || secrets.PB_SU_PASSWORD }}
+          PB_SCHEMA_WAIT_TIMEOUT_MS: '900000'
+          NODE_TLS_REJECT_UNAUTHORIZED: '0'
+        run: node backend/pocketbase-schema/scripts/diagnose-migrations.mjs --wait-for-schema
+
       - name: Kör setup-via-api.mjs mot PocketBase
         env:
           PB_URL: ${{ steps.pb_ready.outputs.selected_url }}
