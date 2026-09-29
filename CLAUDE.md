@@ -4244,6 +4244,9 @@ på skärm och projektor.
   var 5:e minut — en skärm som står på hela mötet visar dagens läge.
 - **Vecka:** ISO 8601 (`isoWeekNumber`/`weekRange`, måndag först,
   enhetstestade).
+- **Skalet är delat (2026-09):** klocka, refresh, helskärm och Esc-logiken
+  bor i `components/presentation/PresentationShell.tsx` och används även av
+  målcockpitens presentationsläge (§ 42) — ingen divergerande kopia.
 - Hjulets box har **explicit, viewport-baserad** storlek
   (`calc(100dvh - 236px)` i både höjd och bredd) — procent-höjder inne i
   flex/grid kollapsade till 0 och gjorde hjulet osynligt på projektorn.
@@ -5902,4 +5905,10 @@ Reads via användarens token; skrivningar via skrivlagret med
 (kvitto § 33.4, `DOMAIN_WRITE_TOOLS`, guidance i
 `CHAT_WRITE_ACTIONS_GUIDANCE`, hjälp-guiden § 33.3). Agenten kan aldrig
 sätta måltal, årsstatus eller manuella värden — den föreslår i text.
-Presentationsläge följer i nästa steg av implementationsplanen.
+**Presentationsläge** (`/mal/presentation`, knappen "Presentera"): samma
+delade skal som årshjulet — `components/presentation/PresentationShell.tsx`
+(`usePresentationShell` äger klocka, `router.refresh()` var 5:e minut,
+helskärm F, Esc-beteendet; `PresentationFrame` ritar topprad + hint-rad).
+Domäntangenter: ← → kvartal, Shift ← → år. Sökvägarna som slipper railen
+ligger i `PRESENTATION_PATHS` (`lib/auth-paths.ts`) — lägg en ny
+presentationsyta där, inte i `layout.tsx`.

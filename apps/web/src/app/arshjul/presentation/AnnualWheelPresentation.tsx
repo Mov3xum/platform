@@ -1,7 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ANNUAL_WHEEL_TAGS,
   annualWheelCategoryColorVar,
@@ -33,8 +32,12 @@ import {
   type AnnualWheelTag,
   type AnnualWheelYearStats
 } from '@platform/shared';
-import { Logo } from '@/components/Logo';
 import { Icon } from '@/components/proto/Icon';
+import {
+  PresentationFrame,
+  formatPresentationLongDate,
+  usePresentationShell
+} from '@/components/presentation/PresentationShell';
 import type { AssignableResource } from '@/lib/assignments/types';
 import { Wheel } from '../Wheel';
 import {
@@ -82,17 +85,6 @@ interface Props {
 
 type Mode = 'today' | 'month' | 'year';
 
-const REFRESH_MS = 5 * 60 * 1000;
-
-function formatLongDate(date: Date): string {
-  const s = new Intl.DateTimeFormat('sv-SE', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long'
-  }).format(date);
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
 function formatShortDate(date: Date): string {
   return new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short' }).format(date);
 }
@@ -115,8 +107,12 @@ export function AnnualWheelPresentation({
   initialTag,
   initialResponsible
 }: Props) {
-  const router = useRouter();
-  const [now, setNow] = useState(() => new Date());
+  // Skalet äger klocka, refresh, helskärm och Esc (§ 30.5) — domänens
+  // tangenter (← →, O, mellanslag) ligger i handleDomainKey nedan.
+  const { now, isFullscreen, toggleFullscreen, router } = usePresentationShell({
+    exitHref: '/arshjul',
+    onKey: (e) => handleDomainKey(e)
+  });
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
 
@@ -151,11 +147,6 @@ export function AnnualWheelPresentation({
   });
   const [month, setMonth] = useState<number>(() => (hasInitialMonth ? (initialMonth as number) : currentMonth));
   const [loadMode, setLoadMode] = useState<LoadMode>('active');
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  // Ref för tangenthanteraren: webbläsaren lämnar själv helskärm på Esc och
-  // kan ha nollat fullscreenElement innan vår keydown körs — utan ref skulle
-  // Esc i helskärm kasta ut användaren ur hela presentationen.
-  const fullscreenRef = useRef(false);
 
   const categoryList = useMemo(() => [...selectedCategories], [selectedCategories]);
   const yearItems = useMemo(
@@ -192,17 +183,6 @@ export function AnnualWheelPresentation({
     setTag('all');
     setResponsible('all');
   }
-
-  // Klockan + datan hålls färska — en skärm som står på hela mötet ska inte
-  // visa gårdagens läge.
-  useEffect(() => {
-    const clock = setInterval(() => setNow(new Date()), 60_000);
-    const refresh = setInterval(() => router.refresh(), REFRESH_MS);
-    return () => {
-      clearInterval(clock);
-      clearInterval(refresh);
-    };
-  }, [router]);
 
   const agenda = useMemo(() => buildAnnualWheelAgenda(yearItems, now, 30), [yearItems, now]);
   const week = useMemo(() => weekRange(now), [now]);
@@ -273,83 +253,34 @@ export function AnnualWheelPresentation({
 
   const showOverview = useCallback(() => setMode('year'), []);
 
-  const toggleFullscreen = useCallback(() => {
-    if (typeof document === 'undefined') return;
-    if (document.fullscreenElement) {
-      void document.exitFullscreen();
-    } else {
-      void document.documentElement.requestFullscreen?.();
+  function handleDomainKey(e: KeyboardEvent) {
+    switch (e.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        e.preventDefault();
+        if (e.shiftKey || mode === 'year') stepYear(1);
+        else stepMonth(1);
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        e.preventDefault();
+        if (e.shiftKey || mode === 'year') stepYear(-1);
+        else stepMonth(-1);
+        break;
+      case ' ':
+      case 'Home':
+        e.preventDefault();
+        goToday();
+        break;
+      case 'o':
+      case 'O':
+        e.preventDefault();
+        showOverview();
+        break;
+      default:
+        break;
     }
-  }, []);
-
-  const exit = useCallback(() => {
-    // I helskärm betyder Esc "lämna helskärm" (webbläsaren sköter det) —
-    // presentationen ska ligga kvar. Bara utanför helskärm stänger Esc vyn.
-    if (fullscreenRef.current) {
-      if (typeof document !== 'undefined' && document.fullscreenElement) {
-        void document.exitFullscreen();
-      }
-      return;
-    }
-    router.push('/arshjul');
-  }, [router]);
-
-  useEffect(() => {
-    const onChange = () => {
-      const active = !!document.fullscreenElement;
-      setIsFullscreen(active);
-      // Låt ref:en ligga kvar en stund efter utgång så Esc-keydown som
-      // följer direkt på webbläsarens egen helskärmsutgång inte stänger vyn.
-      if (active) fullscreenRef.current = true;
-      else setTimeout(() => (fullscreenRef.current = false), 400);
-    };
-    document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'SELECT' || target.tagName === 'INPUT')) return;
-      switch (e.key) {
-        case 'ArrowRight':
-        case 'ArrowDown':
-          e.preventDefault();
-          if (e.shiftKey || mode === 'year') stepYear(1);
-          else stepMonth(1);
-          break;
-        case 'ArrowLeft':
-        case 'ArrowUp':
-          e.preventDefault();
-          if (e.shiftKey || mode === 'year') stepYear(-1);
-          else stepMonth(-1);
-          break;
-        case ' ':
-        case 'Home':
-          e.preventDefault();
-          goToday();
-          break;
-        case 'o':
-        case 'O':
-          e.preventDefault();
-          showOverview();
-          break;
-        case 'f':
-        case 'F':
-          e.preventDefault();
-          toggleFullscreen();
-          break;
-        case 'Escape':
-          exit();
-          break;
-        default:
-          break;
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [mode, stepMonth, stepYear, goToday, showOverview, toggleFullscreen, exit]);
+  }
 
   const yearIdx = years.indexOf(year);
   const panelTitle = mode === 'today' ? 'Just nu' : mode === 'month' ? monthLongLabel(month) : `Översikt ${year}`;
@@ -362,12 +293,19 @@ export function AnnualWheelPresentation({
     'rounded-lg border border-default bg-surface px-2 py-1 text-[12.5px] text-foreground-muted hover:border-strong';
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-foreground">
-      {/* Topprad */}
-      <header className="flex shrink-0 items-center justify-between gap-6 border-b border-default px-8 py-4">
-        <div className="flex items-center gap-5">
-          <Logo href="/arshjul" width={120} height={26} />
-          <div className="h-6 w-px bg-canvas-muted" aria-hidden />
+    <PresentationFrame
+      logoHref="/arshjul"
+      isFullscreen={isFullscreen}
+      onToggleFullscreen={toggleFullscreen}
+      onClose={() => router.push('/arshjul')}
+      hints={[
+        { keys: '← →', label: 'Bläddra månad' },
+        { keys: 'Shift ← →', label: 'Bläddra år' },
+        { keys: 'O', label: 'Översikt' },
+        { keys: 'Mellanslag', label: 'Tillbaka till idag' }
+      ]}
+      headerLeft={
+        <>
           <div>
             <div className="flex items-center gap-1.5">
               <button
@@ -399,36 +337,19 @@ export function AnnualWheelPresentation({
               {!isCurrentYear ? <span className="text-foreground-subtle"> · visar {year}</span> : null}
             </p>
           </div>
-        </div>
-        <div className="text-center">
+        </>
+      }
+      headerCenter={
+        <>
           <p className="font-heading text-[20px] font-semibold leading-tight text-foreground">
-            {formatLongDate(now)}
+            {formatPresentationLongDate(now)}
           </p>
           <p className="tabular-nums text-[13px] text-foreground-muted">
             Vecka {weekNo} · {formatShortDate(week.start)} – {formatShortDate(week.end)}
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={toggleFullscreen}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-default px-3 py-1.5 text-[13px] font-medium text-foreground-muted hover:border-strong hover:text-foreground"
-            title="Helskärm (F)"
-          >
-            <Icon name="external" size={14} />
-            {isFullscreen ? 'Lämna helskärm' : 'Helskärm'}
-          </button>
-          <button
-            type="button"
-            onClick={() => router.push('/arshjul')}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-default px-3 py-1.5 text-[13px] font-medium text-foreground-muted hover:border-strong hover:text-foreground"
-            title="Stäng (Esc)"
-          >
-            <Icon name="x" size={14} />
-            Stäng
-          </button>
-        </div>
-      </header>
+        </>
+      }
+    >
 
       {/* Huvudyta */}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-8 px-8 py-6 lg:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]">
@@ -636,16 +557,7 @@ export function AnnualWheelPresentation({
         </aside>
       </div>
 
-      {/* Sidfot: tangenter */}
-      <footer className="flex shrink-0 items-center justify-center gap-6 border-t border-default px-8 py-2.5 text-[12px] text-foreground-subtle">
-        <Hint keys="← →" label="Bläddra månad" />
-        <Hint keys="Shift ← →" label="Bläddra år" />
-        <Hint keys="O" label="Översikt" />
-        <Hint keys="Mellanslag" label="Tillbaka till idag" />
-        <Hint keys="F" label="Helskärm" />
-        <Hint keys="Esc" label="Stäng" />
-      </footer>
-    </div>
+    </PresentationFrame>
   );
 }
 
@@ -815,17 +727,6 @@ function Legend({
         </button>
       ) : null}
     </div>
-  );
-}
-
-function Hint({ keys, label }: { keys: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <kbd className="rounded-md border border-default bg-canvas-subtle px-1.5 py-0.5 font-body text-[11px] font-medium text-foreground-muted">
-        {keys}
-      </kbd>
-      {label}
-    </span>
   );
 }
 

@@ -28,6 +28,7 @@ import {
   type Quarter
 } from '@platform/shared';
 import { Icon } from '@/components/proto';
+import { StatusChip } from './ui';
 import {
   createGoalAction,
   createGoalIndicatorAction,
@@ -52,25 +53,6 @@ const btnPrimary =
   'inline-flex items-center gap-1.5 rounded-full bg-brand px-3.5 py-1.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-movexum-pastell-lila dark:focus-visible:ring-movexum-morklila';
 const btnGhost =
   'inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1.5 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-movexum-pastell-lila dark:focus-visible:ring-movexum-morklila';
-
-const STATUS_TONE: Record<GoalStatus | 'unreported', string> = {
-  on_track: 'bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron',
-  done: 'bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron',
-  delayed: 'bg-movexum-pastell-gul text-movexum-morkgul dark:bg-movexum-morkgul/40 dark:text-movexum-pastell-gul',
-  not_started: 'bg-canvas-muted text-foreground-muted',
-  unreported: 'border border-dashed border-default text-foreground-subtle'
-};
-
-function StatusChip({ status, small }: { status: GoalStatus | 'unreported'; small?: boolean }) {
-  const label = status === 'unreported' ? 'Ej rapporterad' : GOAL_STATUS_LABELS[status];
-  return (
-    <span
-      className={`inline-flex items-center rounded-full font-semibold ${small ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-0.5 text-xs'} ${STATUS_TONE[status]}`}
-    >
-      {label}
-    </span>
-  );
-}
 
 function Notice({ state }: { state: GoalActionState | null }) {
   if (!state || (!state.error && !state.notice)) return null;
@@ -136,7 +118,10 @@ export function GoalsView({
         </div>
         {period && (
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-foreground-subtle">Kvartal</span>
+            <Link href={`/mal/presentation?ar=${period.year}&q=${quarter}`} className={btnGhost} title="Helskärm för projektorn">
+              <Icon name="external" size={12} /> Presentera
+            </Link>
+            <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-foreground-subtle">Kvartal</span>
             {QUARTERS.map((q) => (
               <Link
                 key={q}
