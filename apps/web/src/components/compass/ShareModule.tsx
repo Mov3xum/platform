@@ -11,12 +11,16 @@ interface Props {
   publicSlug?: string;
   /** Aktiv + publicerad publikt — annars ger /m/-länken 404. */
   isPublished?: boolean;
+  /** Publik sökväg — `/m` för Startupkompassen (default), `/u` för enkäter. */
+  basePath?: string;
+  /** Substantiv i rubrik/alt-text (default "modulen"). */
+  noun?: string;
 }
 
 // QR-koden genereras helt lokalt med 'qrcode' (ren JS, inga externa anrop) —
 // EU-suveränt enligt CLAUDE.md § 10.2. Staff kan ladda ner PNG/SVG och
 // publicera på event, affischer eller hemsidor.
-export function ShareModule({ slug, name, publicSlug, isPublished = true }: Props) {
+export function ShareModule({ slug, name, publicSlug, isPublished = true, basePath = '/m', noun = 'modulen' }: Props) {
   const [origin, setOrigin] = useState('');
   const [copied, setCopied] = useState(false);
   const [pngUrl, setPngUrl] = useState('');
@@ -28,7 +32,7 @@ export function ShareModule({ slug, name, publicSlug, isPublished = true }: Prop
 
   // Publik, oinloggad URL via global slug. Saknas public_slug → visa hint.
   const effectiveSlug = publicSlug || '';
-  const url = origin && effectiveSlug ? `${origin}/m/${effectiveSlug}` : '';
+  const url = origin && effectiveSlug ? `${origin}${basePath}/${effectiveSlug}` : '';
 
   useEffect(() => {
     if (!url) return;
@@ -76,7 +80,7 @@ export function ShareModule({ slug, name, publicSlug, isPublished = true }: Prop
 
   return (
     <Card>
-      <CardHead label="Dela modulen" />
+      <CardHead label={`Dela ${noun}`} />
       <div style={{ padding: 16, display: 'grid', gap: 12 }}>
         <div
           style={{
@@ -89,7 +93,7 @@ export function ShareModule({ slug, name, publicSlug, isPublished = true }: Prop
             wordBreak: 'break-all'
           }}
         >
-          {url || (effectiveSlug ? `…/m/${effectiveSlug}` : 'Ange en publik länk (slug) för att dela modulen')}
+          {url || (effectiveSlug ? `…${basePath}/${effectiveSlug}` : 'Ange en publik länk (slug) för att dela ' + noun)}
         </div>
 
         {url && !isPublished && (
@@ -116,7 +120,7 @@ export function ShareModule({ slug, name, publicSlug, isPublished = true }: Prop
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={pngUrl}
-              alt={`QR-kod för modulen ${name}`}
+              alt={`QR-kod för ${noun} ${name}`}
               width={180}
               height={180}
               style={{

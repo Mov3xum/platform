@@ -2810,7 +2810,10 @@ enda utloggningsvägen för en inloggad användare.
 
 ### 23.1 Översikt
 
-`/inflode`-modulen heter i sidmenyn **"Startupkompassen"** (id `inflode`,
+`/inflode`-modulen heter i sidmenyn **"Marknadsverktyg"** (id `inflode`,
+omdöpt från "Startupkompassen" 2026-09; **Startupkompassen** är nu fliken för
+intag-modulerna nedan, och **Utvärdering** är fliken för digitala enkäter, § 39;
+routen är oförändrat `/inflode`). Tidigare hette modulen "Startupkompassen" (id `inflode`,
 route `/inflode`, `rolesAllowed: ['admin','incubator_lead','coach']`). Den är
 inkubatorns inflöde: bygg intag-moduler i tre flödestyper — **quiz** (poäng +
 resultatprofiler), **formulär/wizard** (frågor) och **AI-chatt** (Mistral) —
@@ -5410,3 +5413,67 @@ formulären förskjöts två timmar i sommartid.
 - **Årshjulet (§ 30)** räknar på hela kalenderdagar i klientens lokala tid
   (klientkomponent, `useMemo(() => new Date())`) och berörs inte.
 - Riskklass n/a (ingen AI-inferens), inga nya fält/kollektioner, ingen PII.
+
+---
+
+## 39. Marknadsverktyg → Utvärdering (digitala enkäter)
+
+### 39.1 Översikt
+
+`/inflode` (Marknadsverktyg) har flikarna Dashboard · Analys · Leads ·
+**Startupkompassen** (intag-moduler, § 23) · **Utvärdering**. Utvärdering låter
+admin/incubator_lead/coach bygga **digitala enkäter i webbläsaren** för
+uppföljning (workshop-/event-utvärdering, inkubatorprogram, alumni) och dela dem
+på en publik, oinloggad länk `/u/<public_slug>` med QR-kod. Svaren är
+**anonyma** och visas aggregerade (medel, fördelning, NPS, fritext) i
+`/inflode/utvardering/<id>?vy=resultat`.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/survey.ts` (+ `.test.ts`) | Ren, enhetstestad logik: frågetyper, normalisering, server-validering av svar, aggregering, NPS, mallar |
+| `backend/pocketbase-schema/migrations/1700000149_create_surveys.js` | Collections `surveys` + `survey_responses` |
+| `apps/web/src/lib/surveys/{store,public}.ts` | Läsvägar (användartoken → superuser-fallback) och publik resolvning |
+| `apps/web/src/lib/actions/surveys.ts` | Server actions: skapa (från mall) / spara / radera |
+| `apps/web/src/app/inflode/utvardering/**` | Lista, ny (mallval), byggare + resultat |
+| `apps/web/src/components/surveys/*` | `SurveyBuilder`, `SurveyRunner` (delas av publik sida + förhandsgranskning), `SurveyResults` |
+| `apps/web/src/app/u/[slug]/page.tsx` + `app/api/public/u/[slug]/submit/route.ts` | Publik enkät + anonymt inskick |
+
+### 39.2 Datamodell och regler
+
+- **`surveys`**: `tenant`, `name`, `kind` (`course|event|program|followup|custom`
+  — MÅSTE spegla `SURVEY_KINDS`), texter, `questions` (json, `SurveyQuestion[]`),
+  `is_active`, `public_slug` (slumpad, globalt unik via partiellt index),
+  `created_by`. Sju frågetyper: betyg 1–5, NPS 0–10, ja/nej, enval, flerval, kort
+  och lång text; max 40 frågor, 12 alternativ.
+- **`survey_responses`**: `tenant`, `survey` (cascadeDelete), `answers` (json),
+  `channel` (valfri utm_source, validerad `[a-zA-Z0-9_.-]`). **Ingen** e-post, IP,
+  användarrelation eller user agent lagras (GDPR § 5; enkäter är anonyma by
+  design). `createRule = null` (endast superuser): inskick sker bara via den
+  publika route-handlern.
+- list/view = staff/observer (`:each ?=`, § 21.3); createRule på `surveys`
+  refererar bara auth-fält (rollen enforce:as i server-action); update/delete =
+  admin/incubator_lead/coach. Migration-only (speglas inte i `setup-via-api.mjs`,
+  § 23.4-precedens).
+
+### 39.3 Säkerhet och regelefterlevnad
+
+- **Publik yta (§ 23.2-mönstret):** `/u/` och `/api/public/` är publika i
+  middleware; root-layouten renderar utan AppShell. Enkäten resolvas på sin
+  slug via superuser, **tenant härleds från enkäten** och stämplas på svaret —
+  aldrig från request-bodyn. Inskicket rate-limitas (10/min och IP, transient).
+- **Server-validering:** `validateSurveyAnswers` rensar okända nycklar, kräver
+  obligatoriska frågor, kontrollerar intervall/alternativ och cappar text
+  (klienten är aldrig säkerhetsgränsen). Svar renderas som React-text (ingen
+  `dangerouslySetInnerHTML`).
+- **AI:** ingen AI-inferens → riskklass n/a, ingen banner. `survey_responses`
+  är **denylistad** i `lib/ai/redaction.ts` (fritext går inte att fältmaska) →
+  aldrig via `query_collection`. Inga nya fält i `lib/ai/context.ts`.
+- **GDPR:** fritext är den enda PII-risken (respondenten kan skriva vad som
+  helst); staff-UI:t visar bara aggregat + fritext till behörig personal.
+  cascadeDelete på tenant/survey ger art. 17-städning; "Radera enkät" tar bort
+  alla svar. Rättslig grund: berättigat intresse (uppföljning/förbättring av
+  programmet).
+- **Migration** 1700000149 är ett nytt, oföränderligt filnummer.
+

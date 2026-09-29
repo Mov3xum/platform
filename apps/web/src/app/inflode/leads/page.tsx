@@ -76,7 +76,7 @@ export default async function LeadsPage({
 
   return (
     <PageShell
-      title="Startupkompassen"
+      title="Marknadsverktyg"
       tabs={tabs}
       meta={
         <span className="text-[12px] text-foreground-subtle">

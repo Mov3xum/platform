@@ -84,7 +84,7 @@ export default async function EditModulePage({
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb={`Startupkompassen / Moduler / ${mod.name}`}
+        crumb={`Marknadsverktyg / Startupkompassen / ${mod.name}`}
         title={mod.name}
         subtitle={`${mod.public_slug ? `/m/${mod.public_slug}` : '(ingen publik länk)'} · ${FLOW_TYPE_LABEL[mod.flow_type]} · ${mod.is_active ? 'Aktiv' : 'Utkast'}`}
         actions={

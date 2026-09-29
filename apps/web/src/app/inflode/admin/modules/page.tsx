@@ -41,11 +41,11 @@ export default async function AdminModulesPage() {
 
   return (
     <PageShell
-      title="Startupkompassen"
+      title="Marknadsverktyg"
       tabs={tabs}
       meta={
         <span className="text-[12px] text-foreground-subtle">
-          Intag-moduler · formulär, quiz och AI-chattar
+          Startupkompassen · intag-moduler för startups och inflöde
         </span>
       }
       actions={
@@ -54,6 +54,14 @@ export default async function AdminModulesPage() {
         </Link>
       }
     >
+      <div style={{ marginBottom: 12 }}>
+        <h2 className="mx-disp mx-fw-6" style={{ fontSize: 20 }}>
+          Startupkompassen
+        </h2>
+        <div className="mx-muted mx-t-13" style={{ marginTop: 2 }}>
+          Formulär, quiz och AI-chattar som fångar inflöde och nya startups.
+        </div>
+      </div>
       <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-paper-2)' }}>
         <div
           className="mx-flex mx-items-c mx-gap-2 mx-t-12 mx-muted"

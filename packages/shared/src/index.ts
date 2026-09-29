@@ -1484,8 +1484,8 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'inflode',
-    title: 'Startupkompassen',
-    description: 'Hjärtat i inkubatorns inflöde — fånga, kvalificera och konvertera leads. Bygg quiz, formulär och AI-chattar (Mistral) och deploya dem på egna publika URL:er med QR-koder. Hanteras av admin, coach och incubator_lead.',
+    title: 'Marknadsverktyg',
+    description: 'Inkubatorns marknads- och uppföljningsverktyg — fånga, kvalificera och konvertera leads med Startupkompassen (quiz, formulär och AI-chattar på publika URL:er med QR-koder) och följ upp med digitala enkäter i Utvärdering. Hanteras av admin, coach och incubator_lead.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach'],
     route: '/inflode'
   },
@@ -1646,6 +1646,7 @@ export * from './compass-quiz';
 export * from './file-topics';
 // ─── Kompetenstaxonomi (tvärfunktionella team, ren logik, enhetstestad) ──────
 export * from './competences';
+export * from './survey';
 // ─── AI-miljöpåverkan (tokens → CO₂e/vatten, ren logik, enhetstestad) ────────
 export * from './ai-impact';
 export * from './voice';

@@ -330,7 +330,7 @@ export default async function HemPage({
     { id: 'idag', label: 'Ny chatt', icon: 'message' },
     { id: 'startups', label: 'Bolag', icon: 'people' },
     { id: 'arshjul', label: 'Årshjul', icon: 'calendar' },
-    { id: 'inflode', label: 'Startupkompassen', icon: 'compass' },
+    { id: 'inflode', label: 'Marknadsverktyg', icon: 'compass' },
     { id: 'education', label: 'Utbildning', icon: 'cap' },
     { id: 'kunskapsbas', label: 'Kunskapsbas', icon: 'doc' }
   ]

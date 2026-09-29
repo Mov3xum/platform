@@ -140,6 +140,9 @@ export function middleware(req: NextRequest) {
     // och deras anonyma API-flöden.
     pathname === '/m' ||
     pathname.startsWith('/m/') ||
+    // Marknadsverktyg → Utvärdering (§ 39): anonyma enkäter på /u/<slug>.
+    pathname === '/u' ||
+    pathname.startsWith('/u/') ||
     pathname.startsWith('/api/public/') ||
     PWA_PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
 
