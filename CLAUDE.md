@@ -6991,6 +6991,15 @@ på en publik, oinloggad länk `/u/<public_slug>` med QR-kod. Svaren är
   sidan visar en orange banner med orsaken. PB 404 pekar uttryckligen på
   migration 1700000149 / "Sync PocketBase" i stället för fler omförsök.
   `redirect()` ligger utanför `try/catch` (den kastar).
+- **Workflowen "Sync PocketBase" hängde på `surveys` (2026-09).** Steget
+  "Wait for migration-created PocketBase schema"
+  (`diagnose-migrations.mjs --wait-for-schema`, PR #419) väntade 15 min på
+  att PB-migrationen skulle skapa `surveys`/`survey_responses` och avslutade
+  sedan med kod 1 — så `setup-via-api.mjs` (som nu skapar dem) kördes aldrig:
+  ett cirkelberoende. Väntan är nu **rådgivande** (varning + kod 0 vid
+  timeout eller saknade kollektioner, default 120 s i workflowen); utan
+  `--wait-for-schema` felar diagnostiken som förut. `verify-baseline.mjs`
+  sist i jobbet är den hårda grinden.
 
 ### 47.3 Säkerhet och regelefterlevnad
 
