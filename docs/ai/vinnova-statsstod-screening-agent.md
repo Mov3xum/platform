@@ -207,13 +207,20 @@ människan granskar → sparar):
    "Screena om". Kopplas till `/rapporter/vinnova` som redan läser
    perioder och readiness.
 
-### Nivå 3 — Automatiserad datainhämtning och bevakning (senare)
+### Nivå 3 — Automatiserad datainhämtning och bevakning
 
-- **Bolagsregister-provider** (§ 11.3, `MOVEXUM_ALLABOLAG_PROVIDER`):
-  Bolagsverket/Roaring/Creditsafe ger ägarstruktur, koncernträd,
-  årsredovisning (balansomslutning) → fyller `startup_ownership` +
-  `startup_financials` automatiskt. Kräver leverantörsval, DPA och
-  kostnad — det är det enda som gör steg 1 helt automatiskt.
+- **Bolagsregister-providers — KLART (2026-09, CLAUDE.md § 11.8).**
+  Roaring (grunddata, bokslut inkl. balansomslutning/eget kapital,
+  koncernstruktur, verklig huvudman som anonym andel) och Bolagsverket
+  (officiell grunddata, registreringsdatum, SNI, status) ansluts per tenant
+  på `/integrationer/roaring` resp. `/integrationer/bolagsverket` och
+  fyller `startup_ownership` + `startup_financials` + bolagskortets
+  registerfält. Ägarbilden visas på bolagskortet (sektion "Ägarbild") och
+  når AI-kontexten via `buildOwnershipContext` (utan org-nr, personer
+  anonyma, aggregerat grundarägande). **Innan portföljen synkas:** kör
+  "Testa mot org-nr" på ett känt bolag (Combly) och verifiera
+  fältmappningen — leverantörernas svar kunde inte verifieras från
+  byggmiljön. DPA med Roaring krävs före produktion.
 - **Trigger vid nytt bolag** (`tool_triggers`, `startup_created`): en
   första screening skapas som utkast direkt vid intag.
 - **Årlig omprövning** (`tool_schedules`): "har något hänt?" — bolag som

@@ -18,6 +18,10 @@ import { escFilter } from '@/lib/pb-filter';
 //   • contacts.*             (alla kontaktdetaljer på externa personer)
 //
 // org_nr exkluderas också (för enskild firma = personnummer; defense-in-depth).
+//
+// Ägarbild (§ 11.8): `buildOwnershipContext` exponerar `startup_ownership`
+// utan org-nr och utan namn på fysiska personer, plus AGGREGERAT grundarägande
+// (summa equity_pct + antal) ur startup_team_members — aldrig medlemsraderna.
 const STARTUP_PORTFOLIO_FIELDS = [
   'name',
   'phase',
@@ -63,6 +67,38 @@ interface FinancialsEntry {
   revenue_sek?: number;
   personnel_cost_sek?: number;
   corporate_tax_sek?: number;
+  /** Balansomslutning (tröskelvärde art. 22 GBER / SMF-definitionen, § 11.8). */
+  balance_sheet_sek?: number;
+  /** Eget kapital (Vinnovas "ej marknadsredo"-kriterium). */
+  equity_sek?: number;
+  net_result_sek?: number;
+}
+
+/**
+ * Ägarbild (kurerad, PII-fri delmängd av `startup_ownership`, § 11.8).
+ * Fysiska personer bär ALDRIG namn eller org-nr — bara att det är en person
+ * och andel/intervall. Juridiska personer visas med namn (bolagsnamn är inte
+ * PII); org-nr utelämnas (agenterna behöver det inte, § 9.3-principen).
+ */
+interface OwnershipEntry {
+  direction: 'owner' | 'holding';
+  owner_kind: 'company' | 'person' | 'public_body' | 'investor' | 'other';
+  name?: string;
+  capital_pct?: number;
+  voting_pct?: number;
+  pct_min?: number;
+  pct_max?: number;
+  control_basis?: string;
+  indirect?: boolean;
+  source: string;
+}
+
+interface OwnershipContext {
+  entries: OwnershipEntry[];
+  /** Summerad kapitalandel för registrerade grundare (startup_team_members.is_founder). */
+  founder_equity_pct_total?: number;
+  founder_count?: number;
+  synced_at?: string;
 }
 
 interface MilestoneEntry {
@@ -185,6 +221,8 @@ export interface StartupContext {
   de_minimis_support?: DeMinimisSupportEntry[];
   ipr?: IPREntry[];
   kpis?: KPIEntry[];
+  /** Ägarbild + aggregerat grundarägande (§ 11.8) — underlag för statsstöds-/Vinnova-screening. */
+  ownership?: OwnershipContext;
 }
 
 /** Personnummer-sanering + längdcap för fritext som ska nå AI-prompten.
@@ -318,14 +356,15 @@ export async function buildStartupContext(
     created: n.created as string
   }));
 
-  const [financials, phase_history, capital_rounds, de_minimis_support, ipr, kpis] =
+  const [financials, phase_history, capital_rounds, de_minimis_support, ipr, kpis, ownership] =
     await Promise.all([
       buildFinancialsContext(pb, startupId, tenantId),
       buildPhaseHistoryContext(pb, startupId, tenantId),
       buildCapitalRoundsContext(pb, startupId, tenantId),
       buildDeMinimisSupportContext(pb, startupId, tenantId),
       buildIPRContext(pb, startupId, tenantId),
-      buildKPIsContext(pb, startupId, tenantId)
+      buildKPIsContext(pb, startupId, tenantId),
+      buildOwnershipContext(pb, startupId, tenantId)
     ]);
 
   return {
@@ -338,7 +377,8 @@ export async function buildStartupContext(
     capital_rounds,
     de_minimis_support,
     ipr,
-    kpis
+    kpis,
+    ownership
   };
 }
 
@@ -381,9 +421,89 @@ export async function buildFinancialsContext(
       if (r.corporate_tax_sek !== undefined && r.corporate_tax_sek !== null) {
         entry.corporate_tax_sek = r.corporate_tax_sek as number;
       }
+      if (typeof r.balance_sheet_sek === 'number') entry.balance_sheet_sek = r.balance_sheet_sek;
+      if (typeof r.equity_sek === 'number') entry.equity_sek = r.equity_sek;
+      if (typeof r.net_result_sek === 'number') entry.net_result_sek = r.net_result_sek;
       return entry;
     })
     .sort((a, b) => a.year - b.year);
+}
+
+/**
+ * Ägarbild för statsstöds-/Vinnova-screening (CLAUDE.md § 11.8). Läser
+ * `startup_ownership` (synkad från Roaring eller manuell) och AGGREGERAR
+ * grundarägandet ur `startup_team_members` — bara summan av `equity_pct` för
+ * `is_founder`-rader och antalet, ALDRIG namn eller e-post (teammedlemmar
+ * är svartlistade i § 9.3; aggregatet är inte PII). Tenant-scoped, fail-soft
+ * (undefined om kollektionen saknas eller är tom).
+ */
+export async function buildOwnershipContext(
+  pb: PocketBase,
+  startupId: string,
+  tenantId: string
+): Promise<OwnershipContext | undefined> {
+  const filter = `startup = "${escFilter(startupId)}" && tenant = "${escFilter(tenantId)}"`;
+  let rows: Record<string, unknown>[] = [];
+  try {
+    const result = await pb.collection('startup_ownership').getList(1, 50, {
+      filter,
+      sort: 'direction,-capital_pct'
+    });
+    rows = result.items as unknown as Record<string, unknown>[];
+  } catch {
+    rows = [];
+  }
+
+  let founderTotal: number | undefined;
+  let founderCount: number | undefined;
+  try {
+    const team = await pb.collection('startup_team_members').getList(1, 50, {
+      filter: `startup = "${escFilter(startupId)}" && is_founder = true`,
+      fields: 'id,equity_pct'
+    });
+    founderCount = team.items.length;
+    const sum = team.items.reduce((acc, m) => {
+      const v = (m as Record<string, unknown>).equity_pct;
+      return typeof v === 'number' ? acc + v : acc;
+    }, 0);
+    if (founderCount > 0) founderTotal = Math.round(sum * 100) / 100;
+  } catch {
+    /* fail-soft */
+  }
+
+  if (rows.length === 0 && !founderCount) return undefined;
+
+  const num = (v: unknown) => (typeof v === 'number' ? v : undefined);
+  const entries: OwnershipEntry[] = rows.map((r) => {
+    const kind = String(r.owner_kind || 'other') as OwnershipEntry['owner_kind'];
+    const entry: OwnershipEntry = {
+      direction: r.direction === 'holding' ? 'holding' : 'owner',
+      owner_kind: kind,
+      source: String(r.source || 'manual')
+    };
+    // Namn bara för juridiska personer — defense-in-depth ovanpå writer.ts.
+    if (kind !== 'person' && typeof r.name === 'string' && r.name) entry.name = r.name;
+    if (num(r.capital_pct) !== undefined) entry.capital_pct = num(r.capital_pct);
+    if (num(r.voting_pct) !== undefined) entry.voting_pct = num(r.voting_pct);
+    if (num(r.pct_min) !== undefined) entry.pct_min = num(r.pct_min);
+    if (num(r.pct_max) !== undefined) entry.pct_max = num(r.pct_max);
+    if (typeof r.control_basis === 'string' && r.control_basis) entry.control_basis = r.control_basis;
+    if (r.indirect === true) entry.indirect = true;
+    return entry;
+  });
+
+  const synced = rows
+    .map((r) => (typeof r.synced_at === 'string' ? r.synced_at : ''))
+    .filter(Boolean)
+    .sort()
+    .pop();
+
+  return {
+    entries,
+    founder_equity_pct_total: founderTotal,
+    founder_count: founderCount,
+    synced_at: synced || undefined
+  };
 }
 
 /**

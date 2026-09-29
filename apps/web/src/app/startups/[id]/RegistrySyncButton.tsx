@@ -2,7 +2,7 @@
 
 import { useActionState } from 'react';
 import {
-  syncStartupFromAllabolagAction,
+  syncStartupFromRegistryAction,
   type IntegrationSyncState
 } from '@/lib/actions/integrations';
 
@@ -10,23 +10,28 @@ const initialState: IntegrationSyncState = {};
 
 interface Props {
   startupId: string;
+  providerSlug: string;
+  providerName: string;
 }
 
-export function AllabolagSyncButton({ startupId }: Props) {
+// Per-bolag-synk från en ansluten bolagsregister-provider (§ 11.8). Renderas
+// en gång per ansluten provider (Roaring, Bolagsverket, Allabolag-stubben).
+export function RegistrySyncButton({ startupId, providerSlug, providerName }: Props) {
   const [state, formAction, pending] = useActionState(
-    syncStartupFromAllabolagAction,
+    syncStartupFromRegistryAction,
     initialState
   );
 
   return (
     <form action={formAction} className="flex flex-wrap items-center gap-2">
       <input type="hidden" name="startup_id" value={startupId} />
+      <input type="hidden" name="provider_slug" value={providerSlug} />
       <button
         type="submit"
         disabled={pending}
         className="inline-flex items-center justify-center rounded-full bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:cursor-wait disabled:opacity-60"
       >
-        {pending ? 'Synkar…' : 'Synka från Allabolag'}
+        {pending ? 'Synkar…' : `Synka från ${providerName}`}
       </button>
       {state.error ? (
         <span className="text-xs text-movexum-morkorange dark:text-movexum-pastell-orange">

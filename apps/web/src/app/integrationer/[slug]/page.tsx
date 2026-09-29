@@ -9,6 +9,7 @@ import { getHandler } from '@/lib/integrations/registry';
 import { ConnectForm } from './ConnectForm';
 import { SyncButton } from './SyncButton';
 import { DisconnectForm } from './DisconnectForm';
+import { RegistryLookupForm } from './RegistryLookupForm';
 
 interface ProviderRecord {
   id: string;
@@ -154,7 +155,7 @@ export default async function IntegrationDetailPage({
       const financialsRes = await pb
         .collection('startup_financials')
         .getList<{ startup: string }>(1, 500, {
-          filter: `tenant = "${escFilter(user.tenant)}" && source = "allabolag"`,
+          filter: `tenant = "${escFilter(user.tenant)}" && source = "${escFilter(slug)}"`,
           fields: 'startup'
         });
       const uniqueStartups = new Set(financialsRes.items.map((r) => r.startup));
@@ -349,6 +350,10 @@ export default async function IntegrationDetailPage({
           </section>
         )}
 
+        {isConnected && isRegistry && isStaff && handler?.kind === 'company_registry' && handler.lookup && (
+          <RegistryLookupForm providerSlug={slug} providerName={provider.name} />
+        )}
+
         {isConnected && isRegistry && registryStats && (
           <section>
             <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
@@ -363,7 +368,7 @@ export default async function IntegrationDetailPage({
               </div>
               <div className="rounded-2xl border border-default bg-surface px-4 py-3">
                 <p className="text-[11px] text-foreground-subtle">
-                  Bolag med Allabolag-financials
+                  Bolag med årsrader från {provider.name}
                 </p>
                 <p className="mt-1 text-lg font-semibold text-foreground">
                   {registryStats.startupsWithFinancials}
@@ -375,8 +380,9 @@ export default async function IntegrationDetailPage({
               <code className="mx-1 rounded bg-canvas-subtle px-1 py-0.5 text-[11px]">
                 startup_financials
               </code>
-              — det finns inga separata "poster" att lista här. Se varje bolags
-              "Finansiell historik"-sektion för detaljer.
+              samt <code className="mx-1 rounded bg-canvas-subtle px-1 py-0.5 text-[11px]">startup_ownership</code>
+              (ägarbild) — det finns inga separata "poster" att lista här. Se varje bolags
+              sektioner "Finansiell historik" och "Ägarbild" för detaljer.
             </p>
           </section>
         )}
