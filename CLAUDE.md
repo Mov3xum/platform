@@ -2899,6 +2899,35 @@ anonym besökare får en ren sida. Läs/skriv sker via **`getSuperuserPb()`**
 accepteras aldrig från request-bodyn. Filtervärden binds via `pb.filter()`.
 Saknas superuser-credentials degraderar sidan snällt (ingen krasch).
 
+**Superuser-klienten är cachad (2026-09, `lib/integrations/credentials.ts`).**
+`getSuperuserPb()` loggade tidigare in med lösenord vid VARJE anrop. Den
+publika sidan resolvade modulen två gånger per sidvisning (generateMetadata +
+sida) och superuser-reserven i actions/routar (§ 21.3) anropas vid varje tyst
+nekad skrivning — tiotals `_superusers`-inloggningar per minut från
+web-containerns enda IP. PocketBase 0.23 har en inbyggd rate-limit
+(Settings → Application → Rate limiting) vars standardregel `*:auth` är
+**2 anrop / 3 s per IP**; är den påslagen svarar PB 429 → `auth_failed` →
+`/m/<slug>` gav **404 direkt efter publicering** och omslagsbilden föll på
+"Kunde inte spara filen på servern" (reproducerat lokalt). Nu autentiseras
+superusern EN gång per process, token återanvänds så länge den är giltig (tak
+15 min), samtidiga anropare delar en pågående inloggning, ett 429 får ett
+enda omförsök, och `/m/[slug]` delar en resolvning per request via React
+`cache`. Loggen `[superuser] auth failed { status }` skiljer fel lösenord
+(400) från rate-limit (429) och nätverk (0). Inga nya datavägar — samma
+klient, samma RLS-bypass som förut, bara färre inloggningar.
+
+**Intern beskrivning är intern.** `compass_modules.description` ("Intern
+beskrivning" i steg 1, "Visas bara för er — inte för besökaren") renderas
+ALDRIG på `/m/<slug>` — varken som ingress eller i `<meta description>`.
+Ingressen är enbart `welcome_body` (steg 2). Tidigare föll den publika sidan
+tillbaka på `description` när `welcome_body` var tom. Dessutom skickades hela
+`compass_modules`-posten som prop till klientkomponenten `PublicModuleRunner`
+— den låg därmed i RSC-payloaden för varje anonym besökare, inklusive
+`system_prompt`, `notify_emails` (personalens e-post) och `description`. Nu
+passerar bara den **vitlistade projektionen** `toPublicModule()`
+(`PublicCompassModule` i `lib/compass/public.ts`) sidgränsen; lägg till ett
+fält där BARA om det faktiskt renderas mot kund.
+
 ### 23.3 Quiz-poängsättning
 
 Sker SERVER-side i `/api/public/m/[slug]/quiz-result` (klienten kan inte

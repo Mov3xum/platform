@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { cache } from 'react';
 import { notFound } from 'next/navigation';
 import { SURVEY_SUBJECT_PARAM, isValidSurveySubjectId } from '@platform/shared';
 import { PublicModuleLayout } from '@/components/compass/PublicModuleLayout';
@@ -6,10 +7,15 @@ import {
   resolvePublicModule,
   getPublicModuleQuestions,
   getPublicTenantBranding,
-  getNextModuleLink
+  getNextModuleLink,
+  toPublicModule
 } from '@/lib/compass/public';
 
 export const dynamic = 'force-dynamic';
+
+// generateMetadata OCH sidan behöver modulen — dela EN resolvning per request
+// (React cache) i stället för två superuser-uppslag per sidvisning.
+const resolveOnce = cache((slug: string) => resolvePublicModule(slug));
 
 export async function generateMetadata({
   params
@@ -17,12 +23,13 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const resolved = await resolvePublicModule(slug);
+  const resolved = await resolveOnce(slug);
   if (!resolved) return { title: 'Startupkompassen' };
   const m = resolved.module;
   return {
     title: `${m.welcome_title || m.name} · Startupkompassen`,
-    description: m.welcome_body || m.description || undefined,
+    // Bara den publika ingressen — `description` är INTERN (§ 23.7).
+    description: m.welcome_body || undefined,
     robots: { index: false } // publika intag-länkar indexeras inte
   };
 }
@@ -44,7 +51,7 @@ export default async function PublicModulePage({
   // Enkätens subjekt (§ 43): `?om=<id>` — bara ett id-format släpps vidare.
   const subjectRaw = sp[SURVEY_SUBJECT_PARAM];
   const subject = isValidSurveySubjectId(subjectRaw) ? subjectRaw : null;
-  const resolved = await resolvePublicModule(slug);
+  const resolved = await resolveOnce(slug);
   if (!resolved) notFound();
 
   const { pb, module, tenant } = resolved;
@@ -56,9 +63,11 @@ export default async function PublicModulePage({
     getNextModuleLink(pb, module)
   ]);
 
+  // Bara den vitlistade publika projektionen når klienten — hela posten
+  // (intern beskrivning, systemprompt, notis-e-post …) stannar på servern.
   return (
     <PublicModuleLayout
-      module={module}
+      module={toPublicModule(module)}
       questions={questions}
       branding={branding}
       nextModule={nextModule}

@@ -1,13 +1,13 @@
 import { Logo } from '@/components/Logo';
 import { PublicModuleRunner } from './PublicModuleRunner';
 import { moduleHeroImageUrl, moduleHeroVideoUrl } from '@/lib/compass/media';
-import type { CompassModule, CompassQuestion, NextModuleLink } from '@/lib/compass/types';
-import type { PublicTenantBranding } from '@/lib/compass/public';
+import type { CompassQuestion, NextModuleLink } from '@/lib/compass/types';
+import type { PublicCompassModule, PublicTenantBranding } from '@/lib/compass/public';
 import { COMPASS_LAYOUT_META, normalizeCompassLayout } from '@platform/shared';
 import type { CompassLayout } from '@platform/shared';
 
 interface Props {
-  module: CompassModule;
+  module: PublicCompassModule;
   questions: CompassQuestion[];
   branding: PublicTenantBranding;
   nextModule: NextModuleLink | null;
@@ -49,7 +49,10 @@ export function PublicModuleLayout({ module, questions, branding, nextModule, su
   const eyebrow = module.hero_eyebrow || 'STARTUPKOMPASSEN';
   // Undvik dubblerad rubrik när eyebrow råkar vara identisk med titeln.
   const showEyebrow = eyebrow.trim().toLowerCase() !== (title || '').trim().toLowerCase();
-  const body = module.welcome_body || module.description;
+  // Ingressen är BARA `welcome_body` (steg 2 i editorn). `description` är
+  // modulens INTERNA beskrivning ("Visas bara för er — inte för besökaren")
+  // och får aldrig renderas mot kund.
+  const body = module.welcome_body;
 
   // Heltäckande: vit wordmark på mörk bakgrund. Övriga mallar är ljusa.
   const onDark = layout === 'cover';

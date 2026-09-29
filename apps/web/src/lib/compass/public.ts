@@ -16,6 +16,76 @@ export type { NextModuleLink };
 // stämplas med just den tenanten — aldrig en tenant från request-bodyn.
 // Filtervärden binds via pb.filter() (ingen rå interpolation).
 
+/**
+ * Den delmängd av modulen som får nå en ANONYM besökares webbläsare.
+ *
+ * `PublicModuleLayout`/`PublicModuleRunner` är (delvis) klientkomponenter —
+ * allt som skickas som prop hamnar i RSC-payloaden/HTML:en. Hela
+ * `compass_modules`-posten innehåller internt material som aldrig ska lämna
+ * servern: `description` (intern beskrivning), `system_prompt`,
+ * `notify_emails` (personalens e-post — PII), `model`, `create_lead`,
+ * `next_module`/`linked_event`. Vitlistan här är därför säkerhetsgränsen —
+ * lägg bara till fält som faktiskt renderas mot kund (GDPR § 5, § 23.7).
+ */
+export type PublicCompassModule = Pick<
+  CompassModule,
+  | 'id'
+  | 'slug'
+  | 'public_slug'
+  | 'name'
+  | 'flow_type'
+  | 'purpose'
+  | 'subject_kind'
+  | 'anonymous'
+  | 'layout'
+  | 'theme_color'
+  | 'hero_eyebrow'
+  | 'welcome_title'
+  | 'welcome_body'
+  | 'hero_image'
+  | 'hero_video'
+  | 'target_audience'
+  | 'consent_note'
+  | 'intro_message'
+  | 'chat_persona'
+  | 'max_exchanges'
+  | 'success_message'
+  | 'redirect_url'
+  | 'require_email'
+  | 'require_phone'
+  | 'require_organization'
+>;
+
+export function toPublicModule(m: CompassModule): PublicCompassModule {
+  return {
+    id: m.id,
+    slug: m.slug,
+    public_slug: m.public_slug,
+    name: m.name,
+    flow_type: m.flow_type,
+    purpose: m.purpose,
+    subject_kind: m.subject_kind,
+    anonymous: m.anonymous,
+    layout: m.layout,
+    theme_color: m.theme_color,
+    hero_eyebrow: m.hero_eyebrow,
+    welcome_title: m.welcome_title,
+    welcome_body: m.welcome_body,
+    hero_image: m.hero_image,
+    hero_video: m.hero_video,
+    target_audience: m.target_audience,
+    consent_note: m.consent_note,
+    intro_message: m.intro_message,
+    chat_persona: m.chat_persona,
+    max_exchanges: m.max_exchanges,
+    success_message: m.success_message,
+    redirect_url: m.redirect_url,
+    require_email: m.require_email,
+    require_phone: m.require_phone,
+    require_organization: m.require_organization
+  };
+}
+
 export interface ResolvedPublicModule {
   pb: PocketBase;
   module: CompassModule;
