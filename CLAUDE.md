@@ -6973,8 +6973,24 @@ på en publik, oinloggad länk `/u/<public_slug>` med QR-kod. Svaren är
   publika route-handlern.
 - list/view = staff/observer (`:each ?=`, § 21.3); createRule på `surveys`
   refererar bara auth-fält (rollen enforce:as i server-action); update/delete =
-  admin/incubator_lead/coach. Migration-only (speglas inte i `setup-via-api.mjs`,
-  § 23.4-precedens).
+  admin/incubator_lead/coach. **Speglas i `setup-via-api.mjs` (2026-09)** —
+  inline-defs för `surveys` (inkl. fälten från 1700000150/1700000151) och
+  `survey_responses` + `surveys` i `FORCE_CREATE_RULES` (`survey_responses`
+  medvetet inte: createRule NULL) — och asserteras i `verify-baseline.mjs`
+  (must-exist + `MUST_BE_STAFF_OR_OBSERVER`). Kollektionerna var tidigare
+  migration-only (§ 23.4-precedens); en instans som synkades via
+  "Sync PocketBase" i stället för PB:s auto-migrate saknade dem, `surveys`-
+  create:en fick 404 och `/inflode/utvardering/new` svarade **500**.
+- **"Skapa enkät" kastar aldrig ut ett fel (incident 2026-09).**
+  `createSurveyAction` kastade vid misslyckad PB-skrivning; ett kastat fel i
+  en server action blir i produktion bara "An error occurred in the Server
+  Components render" + digest, så sidan `new` gav 500 utan synlig orsak. Nu
+  loggas status + fältKODER PII-fritt och användaren skickas tillbaka till
+  formuläret med `?error=<link_missing|collection_missing|create_failed>` +
+  `?detail=` (PB:s fältdetaljer via `describePbError`, § 23.7-mönstret);
+  sidan visar en orange banner med orsaken. PB 404 pekar uttryckligen på
+  migration 1700000149 / "Sync PocketBase" i stället för fler omförsök.
+  `redirect()` ligger utanför `try/catch` (den kastar).
 
 ### 47.3 Säkerhet och regelefterlevnad
 
