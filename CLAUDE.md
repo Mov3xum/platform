@@ -3830,7 +3830,8 @@ externt (t.ex. annan inkubator). Funktionen "sätt upp ett team utifrån en
 beskrivning av ett uppdrag där relevanta kompetenser kopplas på" byggs ovanpå
 den befintliga **uppdrags-/missionsmodellen** (`/uppdrag`, §-spine i
 `lib/actions/missions.ts` + `missions-server.ts`) snarare än som en parallell
-yta. Tre delar: (1) kompetensmodell på personer, (2) AI-matchning
+yta. Modulen heter i railen **"Tvärfunktionella team"** (id `uppdrag`, route
+`/uppdrag` oförändrad; hette tidigare "Projekt & uppdrag"). Tre delar: (1) kompetensmodell på personer, (2) AI-matchning
 beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 
 **Kritiska filer:**
@@ -3841,7 +3842,7 @@ beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 | `backend/pocketbase-schema/migrations/1700000134_extend_users_competences.js` | `users.competences` (select), `users.title`, `users.bio` |
 | `apps/web/src/lib/actions/profile.ts` + `app/min-profil/**` | Självservice-profil (titel/bio/kompetenser) |
 | `apps/web/src/lib/ai/team-match.ts` | `matchTeam` — isolerad Mistral-körning: beskrivning → kompetenser + kandidater (samma mönster som `file-categorize.ts`) |
-| `apps/web/src/lib/actions/team.ts` | `suggestTeamAction` — laddar kandidater (users+contacts), kör matcharen, loggar usage |
+| `apps/web/src/lib/actions/team.ts` | `suggestTeamAction` — laddar kandidater (BARA staff-users med kompetenstaggar), kör matcharen, loggar usage |
 | `apps/web/src/app/uppdrag/new/NewMissionForm.tsx` | AI-teamförslag inbäddat i nytt-uppdrag-formuläret |
 | `backend/pocketbase-schema/migrations/1700000135_extend_tasks_mission_link.js` | `tasks.link_kind += 'mission'` + `tasks.mission` |
 | `apps/web/src/lib/assignments/collaboration.ts` | `createMissionMemberTasks` (personlig uppgift per teammedlem) |
@@ -3860,9 +3861,10 @@ beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 `file-topics.ts`). Migration 1700000130 lägger fälten på `users`:
 `competences` (multi-select, MÅSTE spegla `CompetenceId`), `title`, `bio`.
 Användaren sätter dem själv på `/min-profil` (updateRule `@request.auth.id = id`
-oförändrad). Externa resurser återanvänder `contacts.skills` (fritext) —
-`inferCompetencesFromText` mappar dem heuristiskt till taxonomin (bara för att
-berika kandidatlistan, aldrig en säkerhetsgräns).
+oförändrad). **Kompetenstaggarna är matchningens enda underlag** (2026-09):
+externa CRM-kontakter (`contacts.skills`) är INTE längre kandidater —
+`inferCompetencesFromText` finns kvar i `competences.ts` som ren helper men
+används inte av matcharen.
 
 ### 29.3 AI-teammatchning (Fas 1)
 
@@ -3871,12 +3873,20 @@ körning (temp 0) — egen snäv system-prompt (INTE agent-/chatt-ytan): beskriv
 + ev. bolagskontext + kandidatlista (id/namn/kompetens, **ingen PII**) →
 JSON: föreslagna kompetenser (validerade mot taxonomin), kandidater (validerade
 mot listan, roll/motivering/confidence) och ev. `external_note` (kompetensgap).
-`suggestTeamAction` (staff-only) laddar interna users (staff med competences) +
-externa contacts (skills), kör matcharen och loggar i `ai_usage_events` (surface
-`suggestions`). `NewMissionForm` visar förslaget; staff kopplar på kandidater med
-ett klick — **inget tilldelas automatiskt** (människa-i-loopen, EU AI Act
-art. 14). Externa kontakter blir inte uppdragsdeltagare (de hör till CRM:t) utan
-visas som "extern kompetens att koppla på".
+`suggestTeamAction` (staff-only) laddar kandidater = **riktiga användare i
+systemet** i tenanten med staff-roll (admin/incubator_lead/coach/mentor) som
+**själva angett minst en kompetenstagg** under Min profil — bolagsmedlemmar,
+observatörer, partners och externa CRM-kontakter är aldrig kandidater (teamen är
+interna Movexum-team; incident 2026-09: alla användare + CRM-kontakter dök upp i
+förslaget). Finns ingen taggad kollega görs inget Mistral-anrop — actionen
+svarar med en tydlig uppmaning att fylla i Min profil. Därefter körs matcharen
+och usage loggas i `ai_usage_events` (surface `suggestions`). `NewMissionForm`
+visar förslaget (+ hur många kollegor som kan matchas); staff kopplar på
+kandidater med ett klick — **inget tilldelas automatiskt** (människa-i-loopen,
+EU AI Act art. 14). `external_note` (kompetensgap) kvarstår som fri text för
+kompetens som saknas internt. **Deltagar-pickern** (nytt team + panelen på
+teamkortet) listar av samma skäl bara Movexum-personal; @mention i kommentarer
+ser fortsatt hela tenanten.
 
 ### 29.4 Team-arbetsyta (Fas 2)
 

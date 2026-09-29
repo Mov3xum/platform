@@ -37,7 +37,7 @@ const MOBILE_LABELS: Record<string, string> = {
   startups: 'Bolag',
   pagaende: 'Pågående',
   arshjul: 'Årshjul',
-  uppdrag: 'Uppdrag',
+  uppdrag: 'Team',
   filer: 'Filer',
   education: 'Utbildning',
   de_minimis: 'De minimis',

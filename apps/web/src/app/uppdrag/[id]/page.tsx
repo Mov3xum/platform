@@ -1,5 +1,5 @@
-// Movexum OS — Uppdrag/Projekt detalj
-// Visar fullt flöde + artefakter + deltagare + kommentarer för ett enskilt uppdrag.
+// Movexum OS — Tvärfunktionellt team (uppdrag/projekt) — detalj
+// Visar fullt flöde + dokumentation + team + kommentarer för ett enskilt uppdrag.
 
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
@@ -79,21 +79,24 @@ export default async function MissionDetailPage({
   const ctx = getMissionContext(mission, user.id, user.roles);
   if (!ctx.canView) redirect('/uppdrag');
 
-  // Hämta tenant-användare (för @mention-autocomplete + deltagar-picker) inkl.
-  // kompetenser/titel för "Team & kompetenser"-panelen (§ 29).
+  // Hämta tenant-användare (för @mention-autocomplete i kommentarer) inkl.
+  // kompetenser/titel för "Team & kompetenser"-panelen (§ 29). Deltagar-pickern
+  // får bara Movexum-personal — tvärfunktionella team bemannas av staff.
   let users: UserOption[] = [];
+  let teamUsers: UserOption[] = [];
   const userMeta = new Map<string, UserMeta>();
   try {
     const res = await pb.collection('users').getList(1, 200, {
       filter: pb.filter('tenant = {:tenant}', { tenant: user.tenant }),
       sort: 'display_name',
-      fields: 'id,display_name,email,title,competences'
+      fields: 'id,display_name,email,roles,title,competences'
     });
-    users = res.items.map((u) => {
+    for (const u of res.items) {
       const rec = u as unknown as {
         id: string;
         display_name?: string;
         email?: string;
+        roles?: string[];
         title?: string;
         competences?: unknown;
       };
@@ -102,8 +105,12 @@ export default async function MissionDetailPage({
         title: rec.title || undefined,
         competences: sanitizeCompetences(rec.competences)
       });
-      return { id: rec.id, label: rec.display_name || local };
-    });
+      const opt = { id: rec.id, label: rec.display_name || local };
+      users.push(opt);
+      if (Array.isArray(rec.roles) && rec.roles.some((r) => STAFF_ROLES.includes(r as Role))) {
+        teamUsers.push(opt);
+      }
+    }
   } catch {
     /* ignore */
   }
@@ -233,13 +240,13 @@ export default async function MissionDetailPage({
       style={{ padding: '20px 24px 0', display: 'flex', flexDirection: 'column', gap: 16 }}
     >
       <PageHead
-        crumb="Dashboard / Projekt & uppdrag / Detalj"
+        crumb="Dashboard / Tvärfunktionella team / Detalj"
         title={mission.title}
         subtitle={`${mission.type === 'project' ? 'Projekt' : 'Uppdrag'} · ${mission.id.slice(0, 8)} · ${mission.type.replace('_', ' ')}`}
         actions={
           <>
             <Link href="/uppdrag" className="mx-btn mx-sm mx-ghost">
-              <Icon name="arrow" size={12} /> Alla projekt
+              <Icon name="arrow" size={12} /> Alla team
             </Link>
             <Link
               href={{ pathname: '/uppdrag', query: { m: mission.id } }}
@@ -310,7 +317,7 @@ export default async function MissionDetailPage({
           <ParticipantsPanel
             missionId={mission.id}
             issuerId={mission.issuer}
-            users={users}
+            users={teamUsers}
             initialParticipants={participantsForUi}
             canEdit={ctx.canEdit}
           />

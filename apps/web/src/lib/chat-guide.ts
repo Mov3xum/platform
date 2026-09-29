@@ -160,9 +160,9 @@ const GUIDE: ChatGuideSection[] = [
         examples: ['Boka en pitchträning torsdag 14:00 i Gävle']
       },
       {
-        title: 'Uppdrag',
+        title: 'Tvärfunktionella team',
         description:
-          'Skapa ett uppdrags-utkast (t.ex. en bolagsutmaning). Teamet kopplas på — gärna med AI-teamförslaget — och uppdraget startas i /uppdrag.',
+          'Skapa ett uppdrags-utkast (t.ex. en bolagsutmaning). Teamet kopplas på i Tvärfunktionella team (/uppdrag) — gärna med AI-teamförslaget, som matchar Movexum-kollegor på deras kompetenstaggar.',
         examples: ['Skapa ett uppdrag kring bolagets exportsatsning, deadline sista oktober']
       }
     ]

@@ -9,7 +9,6 @@ import {
   type TeamCandidate
 } from '@/lib/ai/team-match';
 import {
-  inferCompetencesFromText,
   sanitizeCompetences,
   type CompetenceId,
   type MissionParticipantRole,
@@ -18,6 +17,13 @@ import {
 
 // CLAUDE.md § 29 — Server action för AI-teamförslag (Fas 1).
 // Staff beskriver ett uppdrag → AI:n föreslår kompetenser + kandidater.
+//
+// Kandidater = RIKTIGA användare i systemet (Movexum-personal i tenanten) som
+// själva angett sina kompetenser som taggar under /min-profil. Bolagsmedlemmar,
+// observatörer och externa CRM-kontakter är ALDRIG kandidater — teamen är
+// interna Movexum-team. En kollega utan kompetenstaggar kan inte matchas och
+// listas därför inte (modellen skulle bara gissa på namn).
+//
 // Människa-i-loopen: förslaget AUTO-tilldelar aldrig (klienten lägger till
 // valda personer i deltagarlistan, som staff sedan bekräftar genom att skapa
 // uppdraget).
@@ -27,7 +33,6 @@ const MATCH_MODEL = 'mistral-small-latest';
 
 export interface SuggestedMemberView {
   id: string;
-  kind: 'user' | 'contact';
   name: string;
   title?: string;
   role: MissionParticipantRole;
@@ -44,6 +49,8 @@ export type SuggestTeamResult =
       externalNote: string | null;
       summary: string;
       needsReview: boolean;
+      /** Antal kollegor som kunde matchas (har kompetenstaggar). */
+      candidateCount: number;
     }
   | { ok: false; error: string };
 
@@ -56,12 +63,40 @@ interface UserRow {
   competences?: unknown;
 }
 
-interface ContactRow {
-  id: string;
-  first_name?: string;
-  last_name?: string;
-  primary_role?: string;
-  skills?: string;
+/**
+ * Laddar matchningsbara kollegor: staff i tenanten med minst en kompetenstagg.
+ * Fail-soft → [] (anroparen förklarar för användaren).
+ */
+async function loadTaggedStaffCandidates(
+  pb: Awaited<ReturnType<typeof getServerPb>>,
+  tenantId: string
+): Promise<TeamCandidate[]> {
+  const candidates: TeamCandidate[] = [];
+  try {
+    const res = await pb.collection('users').getList<UserRow>(1, 200, {
+      filter: `tenant = "${escFilter(tenantId)}"`,
+      sort: 'display_name',
+      fields: 'id,display_name,email,title,roles,competences'
+    });
+    for (const u of res.items) {
+      // Bara Movexum-personal — bolagsmedlemmar/observatörer bemannar inte team.
+      if (!Array.isArray(u.roles) || !u.roles.some((r) => STAFF_ROLES.includes(r as Role))) {
+        continue;
+      }
+      const competences = sanitizeCompetences(u.competences);
+      // Bara den som faktiskt angett kompetenser kan matchas.
+      if (competences.length === 0) continue;
+      candidates.push({
+        id: String(u.id),
+        name: u.display_name || (u.email ? u.email.split('@')[0] : String(u.id)),
+        title: u.title || undefined,
+        competences
+      });
+    }
+  } catch {
+    /* fail-soft */
+  }
+  return candidates;
 }
 
 export async function suggestTeamAction(input: {
@@ -78,61 +113,18 @@ export async function suggestTeamAction(input: {
   }
 
   const pb = await getServerPb();
-  const tenantFilter = `tenant = "${escFilter(user.tenant)}"`;
 
-  // ── Kandidater: interna users med kompetenser ──────────────────────────
-  const candidates: TeamCandidate[] = [];
-  const byId = new Map<string, TeamCandidate>();
-  try {
-    const res = await pb.collection('users').getList<UserRow>(1, 200, {
-      filter: tenantFilter,
-      sort: 'display_name',
-      fields: 'id,display_name,email,title,roles,competences'
-    });
-    for (const u of res.items) {
-      // Bara potentiella resurser (staff) — bolagsmedlemmar bemannar inte team.
-      if (!Array.isArray(u.roles) || !u.roles.some((r) => STAFF_ROLES.includes(r as Role))) {
-        continue;
-      }
-      const comp = sanitizeCompetences(u.competences);
-      const cand: TeamCandidate = {
-        id: String(u.id),
-        kind: 'user',
-        name: u.display_name || (u.email ? u.email.split('@')[0] : String(u.id)),
-        title: u.title || undefined,
-        competences: comp
-      };
-      candidates.push(cand);
-      byId.set(cand.id, cand);
-    }
-  } catch {
-    /* fail-soft */
+  // ── Kandidater: interna kollegor som angett kompetenstaggar ──────────────
+  const candidates = await loadTaggedStaffCandidates(pb, user.tenant);
+  if (candidates.length === 0) {
+    return {
+      ok: false,
+      error:
+        'Ingen kollega har angett sina kompetenser ännu. Be teamet fylla i ' +
+        'kompetenstaggar under Min profil — AI:n matchar bara mot dem.'
+    };
   }
-
-  // ── Kandidater: externa contacts med skills (kompetens härleds) ────────
-  try {
-    const res = await pb.collection('contacts').getList<ContactRow>(1, 200, {
-      filter: tenantFilter,
-      sort: 'last_name',
-      fields: 'id,first_name,last_name,primary_role,skills'
-    });
-    for (const c of res.items) {
-      const name = `${c.first_name || ''} ${c.last_name || ''}`.trim() || String(c.id);
-      const inferred = inferCompetencesFromText(c.skills);
-      const cand: TeamCandidate = {
-        id: String(c.id),
-        kind: 'contact',
-        name,
-        title: c.primary_role || undefined,
-        competences: inferred,
-        skillsText: c.skills || undefined
-      };
-      candidates.push(cand);
-      byId.set(cand.id, cand);
-    }
-  } catch {
-    /* fail-soft — contacts kanske inte finns i tenanten */
-  }
+  const byId = new Map(candidates.map((c) => [c.id, c]));
 
   // ── Valfri bolagskontext (kort etikett, ingen PII) ─────────────────────
   let startupContext: string | undefined;
@@ -165,7 +157,6 @@ export async function suggestTeamAction(input: {
     const cand = byId.get(m.id);
     return {
       id: m.id,
-      kind: m.kind,
       name: cand?.name || m.id,
       title: cand?.title,
       role: m.role,
@@ -181,6 +172,7 @@ export async function suggestTeamAction(input: {
     members,
     externalNote: result.externalNote,
     summary: result.summary,
-    needsReview: result.needsReview
+    needsReview: result.needsReview,
+    candidateCount: candidates.length
   };
 }
