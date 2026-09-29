@@ -1692,6 +1692,7 @@ export function resolveUserModules(input: {
 export * from './event-time';
 export * from './org-posts';
 export * from './home';
+export * from './followup-rules';
 export * from './procurement';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────

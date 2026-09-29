@@ -5607,7 +5607,8 @@ till ett förifyllt formulär (§ 39.3) — den bifogade upphandlingsbeskrivning
   avtalsslut, anbudsutvärdering) **materialiseras lazy per tenant** första
   gången modulen öppnas och redigeras sedan fritt i `/upphandlingar/regler`
   (admin/incubator_lead).
-- **Uppföljningar ÄR `tasks`** (1700000152, § 15.7-mönstret): `link_kind =
+- **Uppföljningar ÄR `tasks`** (1700000152, § 15.7-mönstret; motorn är sedan
+  2026-09 generisk — upphandlingen är dess första adapter, § 40): `link_kind =
   'procurement'`, `procurement`, `procurement_calloff` och **`rule_key`**
   (`<regel>:<mål>:<n>`, **unikt partiellt index** `(tenant, rule_key)` →
   parallella synkar kan aldrig dubblera; 400 tolkas som "finns redan").
@@ -5711,3 +5712,68 @@ denylistad (§ 39.3). Guidad i `CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden.
   `FORCE_CREATE_RULES` + tasks-patch med hela `link_kind`-listan).
 - **Statsstöd:** `state_aid_relevant` på avropet är en påminnelse — själva
   registreringen görs i de minimis-modulen (§ 20) med dess `kanBevilja`-spärr.
+
+---
+
+## 40. Generisk uppföljningsmotor (`followup-rules.ts`)
+
+### 40.1 Översikt
+
+Upphandlingarnas regelstyrda uppföljning (§ 39.2) är generaliserad till en
+**domänoberoende motor** så att kommande moduler (programgateways,
+partnerförnyelse, rekvisitionsdeadlines, personalonboarding — se
+`docs/strategy/movexum-os-implementationsplan.md`) blir **adaptrar, inte nya
+motorer**. Kärnan är ren, IO-fri och enhetstestad; IO-skalet är ett.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/followup-rules.ts` (+ `.test.ts`) | `planFollowups(adapter, rules)` (ankare + offset + upprepning → deterministiska uppgifter med idempotensnyckel), `diffFollowups(plan, existing)` (skapa/flytta/auto-stäng), `validateFollowupRuleBase`, `fillFollowupTemplate`, gemensam vokabulär (`FOLLOWUP_REPEATS`, `FOLLOWUP_TASK_KINDS`, tak) |
+| `packages/shared/src/date-only.ts` | Datumhjälpare på dagnivå (intern modul; publikt via `procurement.ts` som förut) |
+| `apps/web/src/lib/followups/sync.ts` | `syncFollowupTasks(pb, actor, spec)` — det ENDA IO-skalet: skapar/uppdaterar/stänger `tasks`, schema-drift-kontroll, `agent_actions`-sammanfattning |
+| `packages/shared/src/procurement.ts` | Första adaptern: `createProcurementFollowupAdapter` (scope, ankare, villkor, urval, titelvariabler). Publika namn (`planProcurementFollowups`, `diffProcurementFollowups`, `PlannedFollowup` …) är oförändrade omslag |
+| `apps/web/src/lib/procurements/followups.ts` | Tunt domänskal: läser upphandling/avrop/regler, anropar motorn med länkfälten `procurement`/`procurement_calloff` |
+
+### 40.2 Adapter-kontraktet (`FollowupAdapter<Rule, Target, Extra>`)
+
+En adapter byggs **per plan** med domänens kontext stängd över (t.ex.
+upphandlingen + dess avrop) och svarar på: `targets(rule)`, `targetId`,
+`ruleApplies` (urval), `anchorDate`, `untilDate` (upprepning löper t.o.m.),
+`cancelled` (hävt mål → `resolved`), `conditionHolds` (håller kortet öppet),
+`titleVars` (platshållare i `task_title`) och `extra` (domänfält som följer
+med varje planerad post — id:n för länkfälten). Motorn känner aldrig till
+domänen.
+
+**Regler för nya adaptrar (bindande):**
+
+- **`keyPrefix` namnrymmer `tasks.rule_key`** (`prog:`, `partner:`, `fund:`,
+  `onb:`) så två domäner aldrig kolliderar i det unika indexet
+  `(tenant, rule_key)`. **Upphandlingen har medvetet tomt prefix** — nycklarna
+  `${ruleId}:${targetId}:${n}` finns redan på skapade kort, och ett prefix hade
+  brutit idempotensen och dubblerat varje uppföljning vid nästa synk.
+  Enhetstestat i `followup-rules.test.ts`.
+- **Regelns kärna valideras EN gång** (`validateFollowupRuleBase`: namn,
+  offset ±730 heltal, repeat, titel, uppgiftstyp). Domänvalidatorn anropar den
+  först och lägger bara till scope/ankare/villkor — ingen dubblerad tal-/
+  längdvalidering (mönster: `validateProcurementRuleInput`).
+- **`startup` sätts ALDRIG av synken** på genererade kort (RLS § 21 ger en
+  bolagsmedlem läsning av rader med sitt bolag som `startup`; regelkort kan
+  vara intern data). Domänen länkar via sitt eget fält och kanbanen filtrerar
+  på det (§ 39.2-precedensen).
+- **Schema-drift stoppar hellre än dubblerar:** `requiredFields` i
+  `FollowupSyncSpec` läses tillbaka på den skapade posten; saknas
+  `rule_key`/länkfältet avbryts synken med `followupSchemaError(hint)` som
+  namnger migrationen. Batch-synkar matchar på samma meddelande och avbryter
+  efter första målet i stället för N identiska fel.
+- **Ett nytt `tasks.link_kind`-värde** läggs som **union** på enumet i en ny
+  migration (§ 21.3-läxan från 1700000049) och relationsfältet läggs i
+  `REQUIRED_APP_FIELDS` i `verify-baseline.mjs`.
+- **Mänskligt stängda kort rörs aldrig**; auto-stängning sätter `done` +
+  `completed_at`, raderar inget.
+
+### 40.3 Regelefterlevnad
+
+Ingen AI-inferens → riskklass n/a (art. 11). Inga nya kollektioner, fält
+eller datavägar i denna refaktor — upphandlingens beteende är bevisat
+oförändrat av de befintliga testerna i `procurement.test.ts` (körs orörda)
+plus ett likhetstest generisk väg ↔ publikt namn. Audit-raden per synk är
+PII-fri (titel + räknare) som förut.

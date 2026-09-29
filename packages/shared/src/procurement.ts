@@ -10,6 +10,28 @@
  * den delas av sidor, server actions och skrivlagret — och enhetstestas.
  */
 
+import {
+  FOLLOWUP_REPEATS,
+  FOLLOWUP_REPEAT_LABELS,
+  FOLLOWUP_RULE_MAX_OCCURRENCES,
+  FOLLOWUP_RULE_NAME_MAX,
+  FOLLOWUP_RULE_OFFSET_MAX,
+  FOLLOWUP_RULE_TITLE_MAX,
+  FOLLOWUP_TASK_KINDS,
+  diffFollowups,
+  planFollowups,
+  validateFollowupRuleBase,
+  type ExistingFollowupTask,
+  type FollowupAdapter,
+  type FollowupDiff,
+  type FollowupPlan,
+  type FollowupRepeat,
+  type FollowupRuleBase,
+  type FollowupTaskKind,
+  type PlannedFollowupItem
+} from './followup-rules';
+import { addDays, addMonths, compareDateOnly, daysBetween, parseDateOnlyLocal, toDateOnly } from './date-only';
+
 // ─── Upphandling ────────────────────────────────────────────────────────────
 
 export const PROCUREMENT_STATUSES = [
@@ -374,6 +396,11 @@ export function calloffAlerts(c: ProcurementCalloffLike, today: string): Calloff
 }
 
 // ─── Uppföljningsregler ─────────────────────────────────────────────────────
+//
+// Upphandlingarna är första ADAPTERN mot den generiska uppföljningsmotorn
+// (`followup-rules.ts`, § 40): expansion, upprepning, idempotensnyckel och
+// diff ligger där; här finns bara det domänspecifika — scope, ankare,
+// villkor, urval och titelvariabler. Publika namn behålls oförändrade.
 
 export const PROCUREMENT_RULE_SCOPES = ['procurement', 'calloff'] as const;
 export type ProcurementRuleScope = (typeof PROCUREMENT_RULE_SCOPES)[number];
@@ -416,14 +443,10 @@ export const RULE_ANCHORS_BY_SCOPE: Record<ProcurementRuleScope, readonly Procur
   ]
 };
 
-export const PROCUREMENT_RULE_REPEATS = ['once', 'monthly', 'quarterly'] as const;
-export type ProcurementRuleRepeat = (typeof PROCUREMENT_RULE_REPEATS)[number];
-
-export const PROCUREMENT_RULE_REPEAT_LABELS: Record<ProcurementRuleRepeat, string> = {
-  once: 'En gång',
-  monthly: 'Varje månad',
-  quarterly: 'Varje kvartal'
-};
+/** Upprepning och uppgiftstyp är motorns gemensamma vokabulär (aliaser för bakåtkompatibilitet). */
+export const PROCUREMENT_RULE_REPEATS = FOLLOWUP_REPEATS;
+export type ProcurementRuleRepeat = FollowupRepeat;
+export const PROCUREMENT_RULE_REPEAT_LABELS: Record<ProcurementRuleRepeat, string> = FOLLOWUP_REPEAT_LABELS;
 
 /**
  * Villkor — det "smarta" i reglerna. En uppgift skapas bara medan villkoret
@@ -452,43 +475,41 @@ export const PROCUREMENT_RULE_CONDITION_LABELS: Record<ProcurementRuleCondition,
 export const PROCUREMENT_RULE_APPLIES = ['all', 'excellence'] as const;
 export type ProcurementRuleApplies = (typeof PROCUREMENT_RULE_APPLIES)[number];
 
-export const PROCUREMENT_TASK_KINDS = ['followup', 'meeting', 'admin', 'email', 'call', 'prep', 'other'] as const;
-export type ProcurementTaskKind = (typeof PROCUREMENT_TASK_KINDS)[number];
+export const PROCUREMENT_TASK_KINDS = FOLLOWUP_TASK_KINDS;
+export type ProcurementTaskKind = FollowupTaskKind;
 
-export interface ProcurementRule {
-  id: string;
+export interface ProcurementRule extends FollowupRuleBase {
   name: string;
   /** Tom/null = gäller alla upphandlingar i tenanten; annars BARA denna. */
   procurement?: string | null;
   scope: ProcurementRuleScope;
   anchor: ProcurementRuleAnchor;
-  /** Kan vara negativt ("14 dagar före"). */
-  offset_days: number;
-  repeat: ProcurementRuleRepeat;
   condition: ProcurementRuleCondition;
   applies_to: ProcurementRuleApplies;
   /** Mall med {{title}}, {{supplier}}, {{startup}}. */
   task_title: string;
-  task_kind: ProcurementTaskKind;
-  active: boolean;
 }
 
-export const PROCUREMENT_RULE_NAME_MAX = 120;
-export const PROCUREMENT_RULE_TITLE_MAX = 300;
-export const PROCUREMENT_RULE_OFFSET_MAX = 730;
+export const PROCUREMENT_RULE_NAME_MAX = FOLLOWUP_RULE_NAME_MAX;
+export const PROCUREMENT_RULE_TITLE_MAX = FOLLOWUP_RULE_TITLE_MAX;
+export const PROCUREMENT_RULE_OFFSET_MAX = FOLLOWUP_RULE_OFFSET_MAX;
 /** Hårt tak per regel och mål — en kvartalsregel över ett tvåårsavtal ger 8. */
-export const PROCUREMENT_RULE_MAX_OCCURRENCES = 12;
+export const PROCUREMENT_RULE_MAX_OCCURRENCES = FOLLOWUP_RULE_MAX_OCCURRENCES;
 
 export type ProcurementRuleInput = Omit<ProcurementRule, 'id'>;
+
+const CALLOFF_ONLY_CONDITIONS: readonly ProcurementRuleCondition[] = [
+  'milestone_1_pending',
+  'milestone_2_pending',
+  'final_report_missing',
+  'not_evaluated'
+];
 
 export function validateProcurementRuleInput(
   raw: Partial<Record<keyof ProcurementRuleInput, unknown>>
 ): { ok: true; value: ProcurementRuleInput } | { ok: false; error: string } {
-  const name = String(raw.name ?? '').trim();
-  if (!name) return { ok: false, error: 'Regeln behöver ett namn.' };
-  if (name.length > PROCUREMENT_RULE_NAME_MAX) {
-    return { ok: false, error: `Namnet får vara max ${PROCUREMENT_RULE_NAME_MAX} tecken.` };
-  }
+  const base = validateFollowupRuleBase(raw);
+  if (!base.ok) return base;
   const scope = String(raw.scope ?? '');
   if (!(PROCUREMENT_RULE_SCOPES as readonly string[]).includes(scope)) {
     return { ok: false, error: 'Ogiltig omfattning (procurement eller calloff).' };
@@ -500,25 +521,11 @@ export function validateProcurementRuleInput(
       error: `Ankaret "${anchor}" gäller inte för ${scope}. Giltiga: ${RULE_ANCHORS_BY_SCOPE[scope as ProcurementRuleScope].join(', ')}.`
     };
   }
-  const offset = Number(raw.offset_days ?? 0);
-  if (!Number.isInteger(offset) || Math.abs(offset) > PROCUREMENT_RULE_OFFSET_MAX) {
-    return { ok: false, error: `offset_days måste vara ett heltal mellan -${PROCUREMENT_RULE_OFFSET_MAX} och ${PROCUREMENT_RULE_OFFSET_MAX}.` };
-  }
-  const repeat = String(raw.repeat ?? 'once');
-  if (!(PROCUREMENT_RULE_REPEATS as readonly string[]).includes(repeat)) {
-    return { ok: false, error: 'Ogiltig upprepning (once, monthly eller quarterly).' };
-  }
   const condition = String(raw.condition ?? 'always');
   if (!(PROCUREMENT_RULE_CONDITIONS as readonly string[]).includes(condition)) {
     return { ok: false, error: `Ogiltigt villkor. Giltiga: ${PROCUREMENT_RULE_CONDITIONS.join(', ')}.` };
   }
-  const calloffOnly: ProcurementRuleCondition[] = [
-    'milestone_1_pending',
-    'milestone_2_pending',
-    'final_report_missing',
-    'not_evaluated'
-  ];
-  if (scope === 'procurement' && calloffOnly.includes(condition as ProcurementRuleCondition)) {
+  if (scope === 'procurement' && CALLOFF_ONLY_CONDITIONS.includes(condition as ProcurementRuleCondition)) {
     return { ok: false, error: `Villkoret "${condition}" gäller bara avropsregler.` };
   }
   if (scope === 'calloff' && condition === 'tender_not_awarded') {
@@ -528,29 +535,14 @@ export function validateProcurementRuleInput(
   if (!(PROCUREMENT_RULE_APPLIES as readonly string[]).includes(applies)) {
     return { ok: false, error: 'Ogiltigt urval (all eller excellence).' };
   }
-  const taskTitle = String(raw.task_title ?? '').trim();
-  if (!taskTitle) return { ok: false, error: 'Regeln behöver en uppgiftstitel.' };
-  if (taskTitle.length > PROCUREMENT_RULE_TITLE_MAX) {
-    return { ok: false, error: `Uppgiftstiteln får vara max ${PROCUREMENT_RULE_TITLE_MAX} tecken.` };
-  }
-  const taskKind = String(raw.task_kind ?? 'followup');
-  if (!(PROCUREMENT_TASK_KINDS as readonly string[]).includes(taskKind)) {
-    return { ok: false, error: 'Ogiltig uppgiftstyp.' };
-  }
-  const active = raw.active === undefined ? true : Boolean(raw.active);
   return {
     ok: true,
     value: {
-      name,
+      ...base.value,
       scope: scope as ProcurementRuleScope,
       anchor: anchor as ProcurementRuleAnchor,
-      offset_days: offset,
-      repeat: repeat as ProcurementRuleRepeat,
       condition: condition as ProcurementRuleCondition,
-      applies_to: applies as ProcurementRuleApplies,
-      task_title: taskTitle,
-      task_kind: taskKind as ProcurementTaskKind,
-      active
+      applies_to: applies as ProcurementRuleApplies
     }
   };
 }
@@ -560,6 +552,7 @@ export function validateProcurementRuleInput(
  * Materialiseras lazy per tenant första gången modulen öppnas och kan sedan
  * redigeras fritt.
  */
+
 export const DEFAULT_PROCUREMENT_RULES: readonly ProcurementRuleInput[] = [
   {
     name: 'Avstämning inför milstolpe 1',
@@ -661,18 +654,15 @@ export const DEFAULT_PROCUREMENT_RULES: readonly ProcurementRuleInput[] = [
 
 // ─── Planering (expansion regel → uppgifter) ────────────────────────────────
 
-export interface PlannedFollowup {
-  /** Stabil nyckel `${ruleId}:${targetId}:${n}` — idempotens mot `tasks.rule_key`. */
-  key: string;
-  ruleId: string;
+/** Domänfälten som följer med varje planerad uppföljning (länkar till tasks). */
+export interface ProcurementFollowupExtra {
   scope: ProcurementRuleScope;
   procurementId: string;
   calloffId: string | null;
   startupId: string | null;
-  dueDate: string;
-  title: string;
-  kind: ProcurementTaskKind;
 }
+
+export type PlannedFollowup = PlannedFollowupItem<ProcurementFollowupExtra>;
 
 export interface PlanProcurementFollowupsInput {
   procurement: ProcurementLike;
@@ -682,25 +672,10 @@ export interface PlanProcurementFollowupsInput {
   today: string;
 }
 
-export interface PlanProcurementFollowupsResult {
-  /** Uppgifter som SKA finnas öppna (villkoret gäller). */
-  wanted: PlannedFollowup[];
-  /** Uppgifter vars villkor UPPHÖRT — befintliga öppna kort får auto-stängas. */
-  resolved: PlannedFollowup[];
-}
+export type PlanProcurementFollowupsResult = FollowupPlan<ProcurementFollowupExtra>;
 
-function fillTemplate(
-  template: string,
-  vars: { title: string; supplier: string; startup: string }
-): string {
-  return template
-    .replace(/\{\{\s*title\s*\}\}/g, vars.title)
-    .replace(/\{\{\s*supplier\s*\}\}/g, vars.supplier)
-    .replace(/\{\{\s*startup\s*\}\}/g, vars.startup)
-    .replace(/\s{2,}/g, ' ')
-    .trim()
-    .slice(0, 500);
-}
+/** Målet för en regel: upphandlingen själv (scope=procurement) eller ett avrop. */
+type ProcurementTarget = ProcurementCalloffLike | null;
 
 function anchorDate(
   anchor: ProcurementRuleAnchor,
@@ -754,8 +729,44 @@ function conditionHolds(
   }
 }
 
-function repeatStepMonths(repeat: ProcurementRuleRepeat): number {
-  return repeat === 'monthly' ? 1 : repeat === 'quarterly' ? 3 : 0;
+/**
+ * Upphandlingens adapter mot den generiska motorn. `keyPrefix` är TOMT med
+ * avsikt: nycklarna `${ruleId}:${targetId}:${n}` finns redan på skapade kort
+ * (`tasks.rule_key`), och ett prefix hade brutit idempotensen och dubblerat
+ * varje uppföljning vid nästa synk. Nya domäner sätter eget prefix.
+ */
+export function createProcurementFollowupAdapter(
+  p: ProcurementLike,
+  calloffs: readonly ProcurementCalloffLike[]
+): FollowupAdapter<ProcurementRule, ProcurementTarget, ProcurementFollowupExtra> {
+  const procurementCancelled = p.status === 'cancelled';
+  return {
+    keyPrefix: '',
+    targets: (rule) => {
+      if (rule.procurement && rule.procurement !== p.id) return [];
+      return rule.scope === 'procurement' ? [null] : calloffs.slice();
+    },
+    targetId: (_rule, c) => (c ? c.id : p.id),
+    ruleApplies: (rule, c) => {
+      if (rule.applies_to !== 'excellence') return true;
+      return c ? Boolean(c.is_excellence_activity ?? p.is_excellence_activity) : Boolean(p.is_excellence_activity);
+    },
+    anchorDate: (rule, c) => anchorDate(rule.anchor, p, c),
+    untilDate: (rule, c) => (rule.scope === 'procurement' ? p.contract_end : c?.ends_at),
+    cancelled: (_rule, c) => procurementCancelled || (c ? c.status === 'cancelled' : false),
+    conditionHolds: (rule, c) => conditionHolds(rule.condition, p, c),
+    titleVars: (_rule, c) => ({
+      title: c?.title?.trim() || p.title,
+      supplier: p.supplier?.trim() || 'leverantören',
+      startup: c?.startup_name?.trim() || 'bolaget'
+    }),
+    extra: (rule, c) => ({
+      scope: rule.scope,
+      procurementId: p.id,
+      calloffId: c ? c.id : null,
+      startupId: c?.startup || null
+    })
+  };
 }
 
 /**
@@ -769,173 +780,25 @@ function repeatStepMonths(repeat: ProcurementRuleRepeat): number {
 export function planProcurementFollowups(
   input: PlanProcurementFollowupsInput
 ): PlanProcurementFollowupsResult {
-  const { procurement: p, calloffs, rules, today } = input;
-  const wanted: PlannedFollowup[] = [];
-  const resolved: PlannedFollowup[] = [];
-  const procurementCancelled = p.status === 'cancelled';
-
-  const push = (
-    rule: ProcurementRule,
-    c: ProcurementCalloffLike | null,
-    occurrences: string[],
-    holds: boolean
-  ) => {
-    const targetId = c ? c.id : p.id;
-    const vars = {
-      title: c?.title?.trim() || p.title,
-      supplier: p.supplier?.trim() || 'leverantören',
-      startup: c?.startup_name?.trim() || 'bolaget'
-    };
-    occurrences.forEach((dueDate, n) => {
-      const item: PlannedFollowup = {
-        key: `${rule.id}:${targetId}:${n}`,
-        ruleId: rule.id,
-        scope: rule.scope,
-        procurementId: p.id,
-        calloffId: c ? c.id : null,
-        startupId: c?.startup || null,
-        dueDate,
-        title: fillTemplate(rule.task_title, vars),
-        kind: rule.task_kind
-      };
-      (holds ? wanted : resolved).push(item);
-    });
-  };
-
-  for (const rule of rules) {
-    if (!rule.active) continue;
-    if (rule.procurement && rule.procurement !== p.id) continue;
-    const targets: Array<ProcurementCalloffLike | null> =
-      rule.scope === 'procurement' ? [null] : calloffs.slice();
-    for (const c of targets) {
-      const excellence = c ? Boolean(c.is_excellence_activity ?? p.is_excellence_activity) : Boolean(p.is_excellence_activity);
-      if (rule.applies_to === 'excellence' && !excellence) continue;
-      const base = anchorDate(rule.anchor, p, c);
-      if (!base) continue;
-      const start = parseDateOnlyLocal(base);
-      if (!start) continue;
-      const first = addDays(start, rule.offset_days);
-      const untilRaw = rule.scope === 'procurement' ? p.contract_end : c?.ends_at;
-      const until = parseDateOnlyLocal(untilRaw);
-      const step = repeatStepMonths(rule.repeat);
-      const occurrences: string[] = [];
-      if (step === 0) {
-        occurrences.push(toDateOnly(first));
-      } else {
-        for (let n = 0; n < PROCUREMENT_RULE_MAX_OCCURRENCES; n++) {
-          const d = addMonths(first, n * step);
-          if (until && d.getTime() > until.getTime()) break;
-          occurrences.push(toDateOnly(d));
-        }
-      }
-      if (occurrences.length === 0) continue;
-      const cancelled = procurementCancelled || (c ? c.status === 'cancelled' : false);
-      const holds = !cancelled && conditionHolds(rule.condition, p, c);
-      push(rule, c, occurrences, holds);
-    }
-  }
-
-  // Stabil ordning: närmast förfallodag först.
-  wanted.sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.key.localeCompare(b.key));
-  resolved.sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.key.localeCompare(b.key));
-  void today;
-  return { wanted, resolved };
+  const { procurement, calloffs, rules } = input;
+  return planFollowups(createProcurementFollowupAdapter(procurement, calloffs), rules, {
+    maxOccurrences: PROCUREMENT_RULE_MAX_OCCURRENCES
+  });
 }
 
-/**
- * Diff mellan planen och befintliga regelgenererade uppgifter. Ren funktion
- * så synken (IO) blir ett tunt skal: skapa `toCreate`, uppdatera datum/titel
- * i `toUpdate`, auto-stäng `toResolve` (öppna kort vars villkor upphört
- * eller vars regel/mål försvunnit).
- */
-export interface ExistingFollowupTask {
-  id: string;
-  rule_key: string;
-  status: string;
-  due_at?: string | null;
-  description?: string | null;
-}
-
-export interface FollowupDiff {
-  toCreate: PlannedFollowup[];
-  toUpdate: Array<{ taskId: string; dueDate: string; title: string }>;
-  toResolve: string[];
-}
-
-const OPEN_STATUSES = new Set(['backlog', 'open', 'in_progress', 'review', 'blocked']);
+/** Diff mot befintliga kort — motorns generiska diff (bakåtkompatibelt namn). `ExistingFollowupTask` exporteras av `followup-rules.ts`. */
+export type ProcurementFollowupDiff = FollowupDiff<ProcurementFollowupExtra>;
 
 export function diffProcurementFollowups(
   plan: PlanProcurementFollowupsResult,
   existing: readonly ExistingFollowupTask[]
-): FollowupDiff {
-  const byKey = new Map(existing.map((t) => [t.rule_key, t]));
-  const wantedKeys = new Set(plan.wanted.map((w) => w.key));
-  const toCreate: PlannedFollowup[] = [];
-  const toUpdate: FollowupDiff['toUpdate'] = [];
-  for (const w of plan.wanted) {
-    const t = byKey.get(w.key);
-    if (!t) {
-      toCreate.push(w);
-      continue;
-    }
-    if (!OPEN_STATUSES.has(t.status)) continue;
-    const due = (t.due_at || '').slice(0, 10);
-    if (due !== w.dueDate || (t.description || '') !== w.title) {
-      toUpdate.push({ taskId: t.id, dueDate: w.dueDate, title: w.title });
-    }
-  }
-  const toResolve: string[] = [];
-  for (const t of existing) {
-    if (!OPEN_STATUSES.has(t.status)) continue;
-    if (wantedKeys.has(t.rule_key)) continue;
-    toResolve.push(t.id);
-  }
-  return { toCreate, toUpdate, toResolve };
+): ProcurementFollowupDiff {
+  return diffFollowups(plan, existing);
 }
 
-// ─── Datumhjälpare (dag-nivå, lokal kalender — inga tidszoner) ─────────────
+// ─── Datumhjälpare (dag-nivå) — bor i date-only.ts, re-exporteras här ──────
 
-export function parseDateOnlyLocal(value: string | null | undefined): Date | null {
-  if (!value) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
-  if (!m) return null;
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  if (Number.isNaN(d.getTime()) || d.getMonth() !== Number(m[2]) - 1) return null;
-  return d;
-}
-
-export function toDateOnly(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-export function addDays(d: Date, days: number): Date {
-  const out = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  out.setDate(out.getDate() + days);
-  return out;
-}
-
-/** Månadsaddition med klampning (31 jan + 1 mån = 28/29 feb). */
-export function addMonths(d: Date, months: number): Date {
-  const target = new Date(d.getFullYear(), d.getMonth() + months, 1);
-  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
-  target.setDate(Math.min(d.getDate(), lastDay));
-  return target;
-}
-
-export function compareDateOnly(a: string, b: string): number {
-  return a.slice(0, 10).localeCompare(b.slice(0, 10));
-}
-
-/** Hela dagar från `from` till `to` (positivt när `to` ligger efter). */
-export function daysBetween(from: string, to: string): number {
-  const a = parseDateOnlyLocal(from);
-  const b = parseDateOnlyLocal(to);
-  if (!a || !b) return 0;
-  return Math.round((b.getTime() - a.getTime()) / 86_400_000);
-}
+export { parseDateOnlyLocal, toDateOnly, addDays, addMonths, compareDateOnly, daysBetween } from './date-only';
 
 // ─── AI-utkast ur uppladdat underlag (§ 39.3) ───────────────────────────────
 //
