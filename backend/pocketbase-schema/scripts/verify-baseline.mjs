@@ -148,7 +148,7 @@ async function verifyCollectionsExist() {
     'startup_financials',
     // CRM / bolagsisolering (§ 21)
     'startup_contacts',
-    // Kontaktboken (§ 41, migration 1700000157) — förfrågningar om kontaktanvändning.
+    // Kontaktboken (§ 45, migration 1700000157) — förfrågningar om kontaktanvändning.
     'contact_requests',
     'capital_rounds',
     'intellectual_property',
@@ -379,7 +379,13 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'procurement_calloffs',
   'procurement_rules',
   'procurement_documents',
-  // Kontaktboken (§ 41, migration 1700000157). Förfrågningar innehåller syfte
+  // Målstyrning & verksamhetsplan (migration 1700000159, § 42). Tenant-bred
+  // intern styrning (VP-mål, kvartalsstatus) → staff/observer-only.
+  'goal_periods',
+  'goals',
+  'goal_indicators',
+  'goal_status_entries',
+  // Kontaktboken (§ 45, migration 1700000157). Förfrågningar innehåller syfte
   // + vem som frågar om vilken extern kontakt → staff/observer-only; bolagen
   // ser DELADE kontakter via den kurerade vyn på Mitt bolag, inte här.
   'contact_requests'
@@ -848,17 +854,21 @@ const REQUIRED_APP_FIELDS = [
   // procurement-länk + rule_key (migration 1700000152). Saknas fälten
   // skapas korten utan idempotensnyckel → dubbletter vid varje synk.
   { collection: 'tasks', fields: ['procurement', 'procurement_calloff', 'rule_key'] },
-  // Kontaktboken (§ 41, migration 1700000156): utan owners/organization/
+  // Kontaktboken (§ 45, migration 1700000156): utan owners/organization/
   // category "sparas" ägare/kategori tyst bort (PB släpper okända fält).
   { collection: 'contacts', fields: ['owners', 'organization', 'category'] },
   // AI-minne (§ 16.4): kategori per notering = migration 1700000155. Saknas
   // fältet "sparas" kategorin från UI/memory_write men försvinner tyst.
-  { collection: 'agent_memory', fields: ['category'] }
+  { collection: 'agent_memory', fields: ['category'] },
+  // Målstyrning (§ 42, migration 1700000159) + enkätkälla (§ 43, migration
+  // 1700000160): utan flaggorna sparas "okänt" som 0 och en enkätindikator tappar sin källa.
+  { collection: 'goal_indicators', fields: ['has_target', 'survey_module'] },
+  { collection: 'goal_status_entries', fields: ['has_value'] }
 ];
 
 const MUST_NOT_BE_REQUIRED = [
   { collection: 'annual_wheel_items', fields: ['track'] },
-  // Kontaktboken (§ 41): efternamn valfritt (chatten/Outlook-export ger ofta bara ett namnfält).
+  // Kontaktboken (§ 45): efternamn valfritt (chatten/Outlook-export ger ofta bara ett namnfält).
   { collection: 'contacts', fields: ['last_name'] }
 ];
 

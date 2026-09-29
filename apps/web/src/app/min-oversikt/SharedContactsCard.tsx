@@ -1,7 +1,7 @@
 import { listSharedContactsForStartup } from '@/lib/contacts/data';
 
 /**
- * "Delade kontakter" på Mitt bolag (§ 41.4): kontakter ur Movexums kontaktbok
+ * "Delade kontakter" på Mitt bolag (§ 45.4): kontakter ur Movexums kontaktbok
  * som en kollega fått godkänt att dela med bolaget. Anroparen har verifierat
  * att den inloggade är länkad till `startupId` (eller är staff) — läsningen
  * går som superuser eftersom kontaktboken i sig är staff/observer-only.

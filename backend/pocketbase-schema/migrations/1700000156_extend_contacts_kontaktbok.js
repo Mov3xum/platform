@@ -4,7 +4,7 @@
 // CRM-register till Movexums gemensamma kontaktbok:
 //   • `owners`       — en eller flera INTERNA ägare (relation → users, multi).
 //                      Ägaren är den kollega som "har" relationen och som
-//                      avgör förfrågningar om att använda kontakten (§ 41.3).
+//                      avgör förfrågningar om att använda kontakten (§ 45.3).
 //                      required:false i schemat (legacy-rader saknar ägare);
 //                      skrivlagret kräver minst en ägare vid skapande.
 //   • `organization` — organisationen kontakten företräder (text, ej PII).
@@ -71,7 +71,7 @@ migrate(
     });
 
     // Efternamn blir valfritt: kontaktboken tar emot "Anna på Vinnova" från
-    // chatten och Outlook-exporter med bara ett namnfält (§ 41.2).
+    // chatten och Outlook-exporter med bara ett namnfält (§ 45.2).
     const lastName = col.fields.getByName('last_name');
     if (lastName) {
       lastName.required = false;

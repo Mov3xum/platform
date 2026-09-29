@@ -27,7 +27,7 @@ import {
 } from '@platform/shared';
 
 /**
- * Server actions för kontaktboken (CLAUDE.md § 41). Tunna skal: RBAC här,
+ * Server actions för kontaktboken (CLAUDE.md § 45). Tunna skal: RBAC här,
  * validering + whitelist + audit + notiser i det delade skrivlagret
  * (`lib/core/write/contacts.ts`). Klienten är aldrig säkerhetsgränsen.
  */

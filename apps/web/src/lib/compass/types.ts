@@ -2,7 +2,7 @@
 // Hjälper de andra modul-filerna att hålla sig till PocketBase-schemat
 // från migration 1700000039 + 1700000049 + 1700000108.
 
-import type { CompassLayout, ResultBucket } from '@platform/shared';
+import type { CompassLayout, CompassPurpose, ResultBucket, SurveySubjectKind } from '@platform/shared';
 
 export type { CompassLayout, ResultBucket };
 
@@ -152,6 +152,9 @@ export interface Conversation {
   lead?: string;
   module_slug?: string;
   session_token?: string;
+  /** Enkätens subjekt (migration 1700000160, § 43). */
+  subject_kind?: SurveySubjectKind;
+  subject_id?: string;
   extracted_data?: Record<string, unknown>;
   status?: 'active' | 'completed' | 'abandoned';
   created: string;
@@ -176,6 +179,12 @@ export interface CompassModule {
   name: string;
   description?: string;
   flow_type: FlowType;
+  /** Intag (lead) eller enkät (svar utan lead) — saknat = intake (migration 1700000160, § 43). */
+  purpose?: CompassPurpose;
+  /** Vad en enkät handlar om: bolag/event/partner/personal. */
+  subject_kind?: SurveySubjectKind;
+  /** Anonym enkät: ingen session, ingen ip-hash, inget lead; aggregat vid ≥ 5 svar. */
+  anonymous?: boolean;
   system_prompt?: string;
   consent_note?: string;
   is_active?: boolean;

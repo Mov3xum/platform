@@ -476,7 +476,9 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
     `user_app_integrations`, `user_mistral_connectors`.
   - **B. Strikt privat ägaren-bara-innehåll** (att exponera bryter
     § 21-isoleringen): `chat_threads`, `user_files`, `deep_jobs`,
-    `agent_memory`.
+    `agent_memory`, `meeting_transcripts`, `procurement_documents` (§ 39.3)
+    samt `compass_responses` (råa enkät-/intagssvar per fråga, § 43 —
+    målstyrningen får bara det k-anonyma aggregatet).
 
   Allt annat — CRM (`contacts`), compass-inflöde (`compass_*`), de minimis
   (`de_minimis_*`), avtal/signeringsbevis (`agreement_signatures`),
@@ -1498,7 +1500,7 @@ individer.
   den nya direkt; annars behålls den gamla.
 - **Dataminimering:** vi cachar INGA tredjeparts-data i vår DB —
   vi hämtar live från providern vid varje sidladdning. Bara tokens
-  lagras. **Enda undantag (§ 40):** "Mina uppgifter" håller det härledda
+  lagras. **Enda undantag (§ 44):** "Mina uppgifter" håller det härledda
   agendaresultatet (titel/tid/plats/länk, aldrig tokens) 60 s i
   processminnet per användare så sidans pollning inte gör ett Graph-anrop
   per omladdning; cachen töms vid bortkoppling (`invalidateOutlookCache`).
@@ -1646,7 +1648,7 @@ policy (§ 9.3, läsbart med fältmaskning) sedan skiftet 2026-06:
 - **Personnummer:** lagras ALDRIG. Om Excel-importen innehåller
   personnummer i Info-fältet → importen ska sanera bort detta i
   förbehandling.
-- **Kontaktboken (§ 41, 2026-09):** `contacts` är sedan migration 1700000156
+- **Kontaktboken (§ 45, 2026-09):** `contacts` utökades i migrationerna 1700000156–0158 till
   Movexums gemensamma kontaktbok med interna **ägare** (`owners`),
   `organization`, `category` och förfrågningar (`contact_requests`) om att
   använda en kontakt för ett syfte. Reglerna ovan gäller oförändrat.
@@ -1733,7 +1735,7 @@ och drar kort mellan kolumnerna.
   (Blockerad), `done` (Klar). `cancelled` finns kvar i enumet men visas inte
   på tavlan. `lib/overview/status.ts` mappar `backlog`→todo och
   `review`→waiting så korten inte försvinner ur kanban-vyn i
-  "Mina uppgifter" (§ 40).
+  "Mina uppgifter" (§ 44).
 - **RBAC:** skapa/tilldela = staff (admin/incubator_lead/coach/mentor),
   flytta = staff eller ägare — verifieras i server-actions (tenant-check +
   `hasRole`) ovanpå `tasks`-API-reglerna (oförändrade). Tilldelade kollegor
@@ -1797,7 +1799,7 @@ actor krävs). Tabellen visar vad som tillkommer per yta:
 
 | Körning | Actor | Tillkommer utöver läs-/sökverktygen |
 |---|---|---|
-| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`, samt § 33: `assign_workshop`, `assign_education_document`, `create_task`/`move_task`, `create_event`, `create_mission`, `register_de_minimis_support`, `add_startup_kpi`, `add_capital_round`, `schedule_agent`, `create_startup_note`, samt § 39: `create_procurement`, `create_procurement_calloff`, `update_procurement_calloff`), `memory_read` + `memory_write` |
+| Dashboardchatt (staff) | `agent` | skriv (`update_startup_field`, `create_startup_activity`, `update_activity_field`, `create_annual_wheel_item`/`update_annual_wheel_item`, `create_compass_module`/`add_compass_question`/`update_compass_module_field`, `create_workshop`, samt § 33: `assign_workshop`, `assign_education_document`, `create_task`/`move_task`, `create_event`, `create_mission`, `register_de_minimis_support`, `add_startup_kpi`, `add_capital_round`, `schedule_agent`, `create_startup_note`, samt § 39: `create_procurement`, `create_procurement_calloff`, `update_procurement_calloff`, samt § 42: `create_goal`, `add_goal_indicator`, `set_goal_status`), `memory_read` + `memory_write` |
 | Toolbox (staff) | — (read-only) | `memory_read` |
 | Toolbox (icke-staff) | — (read-only) | — |
 | Schemalagd | — (read-only) | `memory_read` |
@@ -4349,6 +4351,9 @@ på skärm och projektor.
   var 5:e minut — en skärm som står på hela mötet visar dagens läge.
 - **Vecka:** ISO 8601 (`isoWeekNumber`/`weekRange`, måndag först,
   enhetstestade).
+- **Skalet är delat (2026-09):** klocka, refresh, helskärm och Esc-logiken
+  bor i `components/presentation/PresentationShell.tsx` och används även av
+  målcockpitens presentationsläge (§ 42) — ingen divergerande kopia.
 - Hjulets box har **explicit, viewport-baserad** storlek
   (`calc(100dvh - 236px)` i både höjd och bredd) — procent-höjder inne i
   flex/grid kollapsade till 0 och gjorde hjulet osynligt på projektorn.
@@ -5123,7 +5128,7 @@ service workern och manifestet är handskrivna och versionerade i repot.
   server-side i `ProtoShell` via `buildMobileNav` med **samma
   `canAccessModuleForUser` som railen** (menyn är UI-kurering, aldrig
   säkerhetsgräns — RLS/RBAC ligger kvar i § 21).
-- **Staff/observer:** Hem (`hem`, § 37) · Uppgifter (`inkorg`, § 40, med
+- **Staff/observer:** Hem (`hem`, § 37) · Uppgifter (`inkorg`, § 44, med
   olästa-badge) · **Chatt** (`idag`) · Pågående (`pagaende`) · Mer. Avstängda
   moduler hoppas över och nästa kandidat tar platsen (bolag, uppdrag, årshjul,
   filer …).
@@ -5743,7 +5748,8 @@ till ett förifyllt formulär (§ 39.3) — den bifogade upphandlingsbeskrivning
   avtalsslut, anbudsutvärdering) **materialiseras lazy per tenant** första
   gången modulen öppnas och redigeras sedan fritt i `/upphandlingar/regler`
   (admin/incubator_lead).
-- **Uppföljningar ÄR `tasks`** (1700000152, § 15.7-mönstret): `link_kind =
+- **Uppföljningar ÄR `tasks`** (1700000152, § 15.7-mönstret; motorn är sedan
+  2026-09 generisk — upphandlingen är dess första adapter, § 40): `link_kind =
   'procurement'`, `procurement`, `procurement_calloff` och **`rule_key`**
   (`<regel>:<mål>:<n>`, **unikt partiellt index** `(tenant, rule_key)` →
   parallella synkar kan aldrig dubblera; 400 tolkas som "finns redan").
@@ -5848,9 +5854,312 @@ denylistad (§ 39.3). Guidad i `CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden.
 - **Statsstöd:** `state_aid_relevant` på avropet är en påminnelse — själva
   registreringen görs i de minimis-modulen (§ 20) med dess `kanBevilja`-spärr.
 
-## 40. Mina uppgifter (`/inkorg`) — personlig att-göra-vy
+---
+
+## 40. Generisk uppföljningsmotor (`followup-rules.ts`)
 
 ### 40.1 Översikt
+
+Upphandlingarnas regelstyrda uppföljning (§ 39.2) är generaliserad till en
+**domänoberoende motor** så att kommande moduler (programgateways,
+partnerförnyelse, rekvisitionsdeadlines, personalonboarding — se
+`docs/strategy/movexum-os-implementationsplan.md`) blir **adaptrar, inte nya
+motorer**. Kärnan är ren, IO-fri och enhetstestad; IO-skalet är ett.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/followup-rules.ts` (+ `.test.ts`) | `planFollowups(adapter, rules)` (ankare + offset + upprepning → deterministiska uppgifter med idempotensnyckel), `diffFollowups(plan, existing)` (skapa/flytta/auto-stäng), `validateFollowupRuleBase`, `fillFollowupTemplate`, gemensam vokabulär (`FOLLOWUP_REPEATS`, `FOLLOWUP_TASK_KINDS`, tak) |
+| `packages/shared/src/date-only.ts` | Datumhjälpare på dagnivå (intern modul; publikt via `procurement.ts` som förut) |
+| `apps/web/src/lib/followups/sync.ts` | `syncFollowupTasks(pb, actor, spec)` — det ENDA IO-skalet: skapar/uppdaterar/stänger `tasks`, schema-drift-kontroll, `agent_actions`-sammanfattning |
+| `packages/shared/src/procurement.ts` | Första adaptern: `createProcurementFollowupAdapter` (scope, ankare, villkor, urval, titelvariabler). Publika namn (`planProcurementFollowups`, `diffProcurementFollowups`, `PlannedFollowup` …) är oförändrade omslag |
+| `apps/web/src/lib/procurements/followups.ts` | Tunt domänskal: läser upphandling/avrop/regler, anropar motorn med länkfälten `procurement`/`procurement_calloff` |
+
+### 40.2 Adapter-kontraktet (`FollowupAdapter<Rule, Target, Extra>`)
+
+En adapter byggs **per plan** med domänens kontext stängd över (t.ex.
+upphandlingen + dess avrop) och svarar på: `targets(rule)`, `targetId`,
+`ruleApplies` (urval), `anchorDate`, `untilDate` (upprepning löper t.o.m.),
+`cancelled` (hävt mål → `resolved`), `conditionHolds` (håller kortet öppet),
+`titleVars` (platshållare i `task_title`) och `extra` (domänfält som följer
+med varje planerad post — id:n för länkfälten). Motorn känner aldrig till
+domänen.
+
+**Regler för nya adaptrar (bindande):**
+
+- **`keyPrefix` namnrymmer `tasks.rule_key`** (`prog:`, `partner:`, `fund:`,
+  `onb:`) så två domäner aldrig kolliderar i det unika indexet
+  `(tenant, rule_key)`. **Upphandlingen har medvetet tomt prefix** — nycklarna
+  `${ruleId}:${targetId}:${n}` finns redan på skapade kort, och ett prefix hade
+  brutit idempotensen och dubblerat varje uppföljning vid nästa synk.
+  Enhetstestat i `followup-rules.test.ts`.
+- **Regelns kärna valideras EN gång** (`validateFollowupRuleBase`: namn,
+  offset ±730 heltal, repeat, titel, uppgiftstyp). Domänvalidatorn anropar den
+  först och lägger bara till scope/ankare/villkor — ingen dubblerad tal-/
+  längdvalidering (mönster: `validateProcurementRuleInput`).
+- **`startup` sätts ALDRIG av synken** på genererade kort (RLS § 21 ger en
+  bolagsmedlem läsning av rader med sitt bolag som `startup`; regelkort kan
+  vara intern data). Domänen länkar via sitt eget fält och kanbanen filtrerar
+  på det (§ 39.2-precedensen). Motorn tvingar det: `linkFields` spreadas
+  FÖRE de fasta fälten och `assertSafeFollowupLinkFields` kastar om en
+  adapter försöker sätta `startup`/`tenant`/`owner`/`rule_key` m.fl.
+  (`FOLLOWUP_RESERVED_TASK_FIELDS`, enhetstestat).
+- **Schema-drift stoppar hellre än dubblerar:** `requiredFields` i
+  `FollowupSyncSpec` läses tillbaka på den skapade posten; saknas
+  `rule_key`/länkfältet avbryts synken med `followupSchemaError(hint)` som
+  namnger migrationen. Batch-synkar matchar på samma meddelande och avbryter
+  efter första målet i stället för N identiska fel.
+- **Ett nytt `tasks.link_kind`-värde** läggs som **union** på enumet i en ny
+  migration (§ 21.3-läxan från 1700000049) och relationsfältet läggs i
+  `REQUIRED_APP_FIELDS` i `verify-baseline.mjs`.
+- **Mänskligt stängda kort rörs aldrig**; auto-stängning sätter `done` +
+  `completed_at`, raderar inget.
+
+### 40.3 Regelefterlevnad
+
+Ingen AI-inferens → riskklass n/a (art. 11). Inga nya kollektioner, fält
+eller datavägar i denna refaktor — upphandlingens beteende är bevisat
+oförändrat av de befintliga testerna i `procurement.test.ts` (körs orörda)
+plus ett likhetstest generisk väg ↔ publikt namn. Audit-raden per synk är
+PII-fri (titel + räknare) som förut.
+
+---
+
+## 41. Metrikregister — en indikator, en definition, en beräkning
+
+### 41.1 Översikt
+
+Verksamhetens nyckeltal räknades tidigare på flera ställen (startsidans
+sifferrad, kompassens dashboard, Vinnova-underlaget, översikten). Registret
+samlar dem så att startsidan, målcockpiten (kommande, § 4.1 i
+`docs/strategy/movexum-os-analys-verksamhetsdag-2026-09.md`),
+programansvarig-cockpiten och rapporterna konsumerar **samma** definition och
+**samma** beräkning.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/metrics.ts` (+ `.test.ts`) | Katalog (`METRIC_DEFINITIONS`: etikett, enhet, riktning, känslighet, scope, periodisk) + ren, enhetstestad beräkningslogik: `phaseConversion` (kohort, frist i månader, `pending`), `countPhaseEntries`, `medianDaysInPhase`, `shareWithThreshold` (k-anonymitet), `trailingPeriods`/`yearPeriod`, `formatMetricValue` |
+| `apps/web/src/lib/metrics/registry.ts` | IO: en `compute` per `MetricKey` mot PocketBase — `computeMetric`/`computeMetrics` |
+| `apps/web/src/app/hem/page.tsx` | Första konsumenten: sifferraden läser registret i stället för inline-`totalItems` |
+
+### 41.2 Regler (bindande)
+
+- **Lägg aldrig till en inline-räkning i en sida** för ett tal som är eller
+  kan bli ett verksamhetsmål — lägg en `MetricKey` i katalogen och en
+  `compute` i registret. UI:t formaterar med `formatMetricValue`.
+- **Läs med användarens token** (RLS § 21). Registret tar aldrig superuser.
+  Filter binds med `pb.filter()` (§ 10.3).
+- **Ärliga värden:** `null` = kunde inte beräknas (visas "–", aldrig 0);
+  `complete:false` = kapat underlag (visa som nedre gräns, aldrig exakt);
+  `note` är PII-fri. Konverteringar med frist (`conv_inc_to_acc_8m`)
+  rapporterar `pending` — bolag som inte haft tiden räknas INTE i nämnaren,
+  så en färsk kohort aldrig ser ut att misslyckas.
+- **Art. 9-aggregat (`sensitivity: 'aggregate_only'`, t.ex.
+  `women_led_share`):** bara räknare lämnar databasen (inga rader hämtas),
+  värdet går genom `shareWithThreshold` (k = `AGGREGATE_MIN_GROUP` = 5,
+  gäller BÅDA grupperna — 0 %/100 % ger `null`), returneras utan räknare/
+  nämnare, visas aldrig per bolag, persisteras aldrig som snapshot och
+  exponeras inte som chatt-verktyg. `founder_gender` är oförändrat svartlistat i
+  `lib/ai/context.ts` och fältmaskat i `redaction.ts` (§ 9.3).
+- **`scope: 'user'`-mått** (t.ex. `my_open_tasks`) är personliga siffror och
+  får inte användas som tenant-mål.
+- **Perioder** är ISO-datum, `from` inklusive och `to` exklusive.
+  `trailingPeriods` inkluderar dagens datum.
+
+### 41.3 Regelefterlevnad
+
+Ingen AI-inferens → riskklass n/a. Inga nya kollektioner eller fält, ingen ny
+dataväg — registret läser bara det sidorna redan läste, via samma token.
+Startsidans siffror är oförändrade i betydelse (aktiva bolag, nya leads
+senaste 7 dagarna med delta, pågående workshops, egna öppna uppgifter).
+
+---
+
+## 42. Mål & verksamhetsplan (`/mal`) — målstyrning som data
+
+### 42.1 Översikt
+
+Måluppföljningen från strategi- och verksamhetsdagarna ("I fas / Försenad /
+Ej startad / Klar" per mål och kvartal) bor nu i systemet i stället för i
+slides. Ett **målträd per verksamhetsår**: fokusområde (Movexums fem) → mål
+med ägande team → indikatorer med måltal → kvartalsstatus. Indikatorer är
+antingen **beräknade** ur metrikregistret (§ 41) — värdet hämtas live och vid
+varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
+("Mål & VP", Översikt-railen, staff/observer).
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000159_create_goals.js` | `goal_periods`, `goals`, `goal_indicators`, `goal_status_entries` |
+| `packages/shared/src/goals.ts` (+ `.test.ts`) | Vokabulär (fokusområden, team, statusar, källor), validering (delas av UI och chatt), `buildGoalTree`, `rollupGoalStatuses`, `suggestStatusFromValue`, `progressTowardsTarget`, `quarterOfDate` |
+| `apps/web/src/lib/core/write/goals.ts` | Skrivlager: `createGoalPeriod`/`setGoalPeriodStatus`, `createGoal`/`updateGoalField`, `createGoalIndicator`, `recordGoalStatus` (idempotent upsert per kvartal) |
+| `apps/web/src/lib/goals/data.ts` | Enda läsvägen (`loadGoalWorkspace`, fail-soft, live-värden via `computeMetrics`) |
+| `apps/web/src/lib/actions/goals.ts` | Server actions (RBAC → skrivlagret) |
+| `apps/web/src/app/mal/{page,GoalsView}.tsx` | Cockpiten: år, kvartal, trafikljus, träd med Q1–Q4, statusformulär, ledningens formulär |
+
+### 42.2 Datamodell
+
+- **`goal_periods`**: `year` (unikt per tenant), `title`, `status`
+  (`draft` → `active` när VP är beslutad → `closed`). Ett avslutat år tar
+  inte emot nya mål eller statusar.
+- **`goals`**: `period`, `focus_area` (`partner_finansiering` |
+  `inflode_varumarke` | `kundvarde_kvalitet` | `organisation_digitalisering`
+  | `tematisk_accelerator`), `title`, `description`, `owner_team` (`ledning`
+  | `marknad` | `projekt` | `coach` | `gemensamt`), `sort_order`.
+- **`goal_indicators`**: `goal`, `label`, `source` (`computed` | `manual` |
+  `survey`), `metric_key` (en `MetricKey` ur § 41 — bara `scope: 'tenant'`;
+  enhet och riktning ÄRVS från definitionen så UI och register aldrig säger
+  olika), `survey_module` (→ `compass_modules` med `purpose = survey`, § 43),
+  `target` + **`has_target`**, `unit` (`count` | `pct` | `days` | `bool`),
+  `direction`.
+- **PocketBase har inget null för tal** — JSON-`null` lagras som `0`. Därför
+  bär `goal_indicators.has_target` och `goal_status_entries.has_value`
+  (migration 1700000160) om talet är känt; läsvägen (`lib/goals/data.ts`)
+  normaliserar `0` utan flagga till `null`, och ett "kunde inte räknas"
+  sparas aldrig som 0.
+- **`goal_status_entries`**: `indicator`, `quarter` 1–4, `status`
+  (`on_track` | `delayed` | `not_started` | `done`), `value`, `comment`,
+  `recorded_by`. Unikt index `(tenant, indicator, quarter)` → idempotent
+  upsert; en parallell rapportering blir en uppdatering, aldrig en dubblett.
+
+### 42.3 Regler (bindande)
+
+- **En indikator, en källa.** `recordGoalStatus` läser värdet ur registret
+  för `computed` (periodfönster = kalenderåret, `yearPeriod`), ur enkätens
+  k-anonyma aggregat för `survey` (§ 43) och **avvisar** ett manuellt
+  angivet värde för båda; `null` (kunde inte räknas) sparas med
+  `has_value = false` och registrets PII-fria `note` i svaret — aldrig som 0.
+  `manual` sparar det bedömda värdet.
+- **En statusuppdatering rör bara angivna fält.** Byter ett anrop bara
+  status raderas varken ett tidigare manuellt värde eller kommentaren
+  (`comment` = `undefined`/`null` ⇒ orörd, `''` ⇒ rensad). SOC 2 processing
+  integrity.
+- **Art. 9-aggregat (`aggregate_only`, t.ex. `women_led_share`):**
+  persisteras ALDRIG i `goal_status_entries` (ingen kvartals-snapshot att
+  räkna skillnader ur), räknas live i `/mal` **bara** för
+  admin/incubator_lead/coach (`AGGREGATE_ONLY_VIEWER_ROLES`), kan inte väljas
+  av agenten (`add_goal_indicator` nekar, enumen utesluter metriken) och
+  utelämnas ur verktygssvar och audit. `shareWithThreshold` kräver dessutom
+  att BÅDA grupperna är ≥ 5 (homogena grupper avslöjar varje post). DPIA:
+  `docs/privacy/dpia-startups.md`.
+- **RBAC:** år, mål och indikatorer = admin/incubator_lead (VP-beslut);
+  kvartalsstatus = hela staben (varje team rapporterar sina mål). Agenten
+  ärver den inloggades roll (`writable-fields.ts`) och får **aldrig** sätta
+  `target`, `metric_key` på befintliga indikatorer, `goal_periods.status`
+  eller ett manuellt `value` — den föreslår i text, människan beslutar.
+- **RLS (§ 21.3):** list/view `STAFF_OR_OBSERVER`, createRule roll-lös,
+  update/delete `:each ?=`. Alla fyra kollektionerna ligger i
+  `MUST_BE_STAFF_OR_OBSERVER` i `verify-baseline.mjs` och speglas i
+  `setup-via-api.mjs`. PB-target är kollektionens NAMN (§ 30.4 p. 1).
+- **Fritext** (`description`, `comment`) personnummer-saneras på skrivvägen
+  och auditeras bara som längd; audit-raderna är PII-fria (titel, status,
+  kvartal, tal) och mappas i `feed/agent-log.ts` → syns i Bolagsnytt/
+  `/aktivitet` med djuplänk `/mal?ar=<år>&q=<kvartal>&mal=<id>`.
+- **Art. 9:** se punkten om `aggregate_only` ovan — inget värde lagras.
+
+### 42.4 Regelefterlevnad
+
+Ingen AI-inferens → riskklass n/a. Ingen PII i modellen (mål, tal, team).
+`cascadeDelete` tenant → period → mål → indikator → status städar art. 17.
+Reads via användarens token; skrivningar via skrivlagret med
+`writeWithFallback` bara efter verifierad roll + tenant (§ 21.3).
+**Chatten** (§ 16.3, agent-actor + `includeWrites`): `create_goal`,
+`add_goal_indicator`, `set_goal_status` går genom samma skrivlager
+(kvitto § 33.4, `DOMAIN_WRITE_TOOLS`, guidance i
+`CHAT_WRITE_ACTIONS_GUIDANCE`, hjälp-guiden § 33.3). Agenten kan aldrig
+sätta måltal, årsstatus eller manuella värden — den föreslår i text.
+**Presentationsläge** (`/mal/presentation`, knappen "Presentera"): samma
+delade skal som årshjulet — `components/presentation/PresentationShell.tsx`
+(`usePresentationShell` äger klocka, `router.refresh()` var 5:e minut,
+helskärm F, Esc-beteendet; `PresentationFrame` ritar topprad + hint-rad).
+Domäntangenter: ← → kvartal, Shift ← → år. Sökvägarna som slipper railen
+ligger i `PRESENTATION_PATHS` (`lib/auth-paths.ts`) — lägg en ny
+presentationsyta där, inte i `layout.tsx`.
+
+---
+
+## 43. Startupkompassen som enkätmotor — kundnöjdhet, NPS, partnerenkät, medarbetarindex
+
+### 43.1 Översikt
+
+Verksamhetsplanens indikatorer *kundnöjdhet 4/5*, *NPS 70 %*,
+*partnernöjdhet 80 %* och *medarbetarindex* saknade datakälla. I stället för
+en ny formulärmotor bär **Startupkompassen** (§ 23) även enkäter: en modul
+får ett **syfte** (`purpose`: `intake` = dagens intag som skapar lead, eller
+`survey` = enkät som samlar svar utan lead), ett **subjekt** (`subject_kind`:
+bolag/event/partner/personal — skickas i länken som `/m/<slug>?om=<id>`) och
+kan vara **anonym**. Svaren lagras per fråga i den befintliga
+`compass_responses` via en `compass_conversations`-rad som bär subjektet;
+aggregatet räknas k-anonymt och kopplas som indikator (`source = survey`) i
+Mål & VP (§ 42).
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000160_extend_compass_surveys.js` | `compass_modules.purpose/subject_kind/anonymous`, `compass_conversations.subject_kind/subject_id`, `goal_indicators.source += survey` + `survey_module` + `has_target`, `goal_status_entries.has_value` |
+| `packages/shared/src/compass-survey.ts` (+ `.test.ts`) | Vokabulär, `isSurveyModule`, `SURVEY_TEMPLATES` (kundnojdhet, nps_event, partnerenkat, medarbetarindex), `aggregateSurvey` (k-anonymitet, medel, fördelning, NPS), `satisfiedShare` |
+| `apps/web/src/lib/compass/survey.ts` | `storeSurveyResponse` (publika routen), `loadSurveyAggregate` (RLS via användarens token), `listSurveyModules` |
+| `apps/web/src/lib/compass/lead-capture.ts` | `moduleWantsLead` ⇒ false för enkäter — ENDA grinden, routarna är orörda utom enkätgrenen |
+| `apps/web/src/components/compass/ModuleEditor.tsx` | Steg 1 "Syfte": intag/enkät, subjekt, anonym |
+| `apps/web/src/lib/core/write/compass.ts` | `createCompassModule` tar `purpose`/`subjectKind`/`anonymous`/`surveyTemplate` (mallen skapar frågorna via `addCompassQuestion`) |
+
+### 43.2 Regler (bindande)
+
+- **En enkät skapar aldrig lead.** `moduleWantsLead` returnerar false för
+  `purpose = survey`; `create_lead` tvingas false i `createModuleAction`,
+  `updateModuleAction` och skrivlagret. Saknat `purpose` ⇒ `intake` (en
+  oapplicerad migration ändrar aldrig beteendet); att spara `survey` mot ett
+  schema utan fältet avvisas tydligt (§ 24.4-invarianten).
+- **Anonymitet är strukturell:** enkätinskick skapar ingen `session_token`,
+  ingen `visitor_ip_hash`, inget lead och ingen `compass_security_events`-rad
+  med IP. Rate-limit per IP finns bara i processminnet. För `anonymous`-
+  moduler lagras **inte heller subjektet** (ett `?om=<id>` ignoreras) och
+  indikatorn får **ingen kvartalssnapshot** i § 42 — aggregatet visas bara
+  live (en tidsserie per anonym personalenkät kunde läsas mot
+  personalförändringar).
+- **Ingen AI-chatt som enkät:** en enkätmodul kan inte ha `flow_type = chat`
+  (avvisas i `createModuleAction`/`applyModuleUpdate` och i skrivlagret;
+  den publika chat-routen svarar 400 för enkätmoduler). Enkäter är
+  deterministiska quiz/formulär.
+- **Svaren valideras före lagring** (`validateSurveyAnswer`): skala = heltal
+  1–10, val måste finnas bland frågans alternativ, fritext cappas till
+  2 000 tecken, okända nycklar släpps. Ett inskick utan ett enda giltigt
+  svar lagras inte; ett partiellt lagrat inskick rullas tillbaka
+  (§ 10.4). `aggregateSurvey` ignorerar dessutom skalvärden utanför 1–10.
+- **Snapshot-rättigheter (§ 42.3):** kvartalsvärdet för en beräknad/enkät-
+  indikator skrivs bara när aktören har en roll i
+  `INDICATOR_SOURCE_READ_ROLES` (admin/incubator_lead/coach — deras token
+  läser hela underlaget); övrig staff rapporterar status utan att röra
+  värdet, och ett okänt värde (null) skriver aldrig över ett känt.
+- **k-anonymitet (k = 5):** `aggregateSurvey` visar inga värden under fem
+  respondenter; NPS kräver fem numeriska svar; fritext aggregeras aldrig
+  (bara räknas). Medarbetarindex bryts aldrig ned per team.
+- **Subjekt** valideras till id-format (`isValidSurveySubjectId`), tenant
+  härleds alltid från modulen. Okända frågenycklar i svaret släpps (whitelist
+  = modulens frågor).
+- **Skalan är 1–10** (Startupkompassens `scale`-fråga). Enkätindikatorns
+  värde i § 42 är medel av skalfrågorna (NPS-frågor exkluderade); NPS-frågor
+  identifieras på nyckeln (`nps`).
+- **Chatten:** `create_compass_module` tar `purpose`/`subject_kind`/
+  `anonymous`/`survey_template`; enkäten skapas som opublicerat utkast och
+  kopplas som indikator av en människa i `/mal`. Utskick av inbjudningar via
+  e-post är INTE byggt (kommer med DPIA-omprövning, `docs/privacy/dpia-surveys.md`).
+
+### 43.3 Regelefterlevnad
+
+Riskklass: n/a (ingen inferens; AI-sammanställningen § 23.6 körs bara för
+intag). GDPR: rättslig grund berättigat intresse + samtyckesgrind; DPIA-
+tillägg i `docs/privacy/dpia-surveys.md`. `compass_responses` är
+**denylistad** i `lib/ai/redaction.ts` — chattens `query_collection`
+exponerar aldrig råsvar; målstyrningen får bara det k-anonyma aggregatet, och
+agentens `set_goal_status` får aldrig värdet för anonyma enkäter eller art. 9-
+aggregat. Compass är migration-only (§ 23.4) men
+`compass_modules` inline-def i `setup-via-api.mjs` speglar de nya fälten
+(§ 23.7-precedensen), och `goal_indicators`/`goal_status_entries` speglar
+`survey_module`/`has_target`/`has_value` (migration 1700000160 backfills the
+flags on existing rows; `verify-baseline.mjs` asserts the fields in
+`REQUIRED_APP_FIELDS`, and `source` values are unioned via `patchCollection`).
+
+## 44. Mina uppgifter (`/inkorg`) — personlig att-göra-vy
+
+### 44.1 Översikt
 
 `/inkorg` (modul `inkorg`, titel **Mina uppgifter**, alla roller) samlar allt
 som är "mitt": uppgifter (`tasks`) och aktiviteter (`activities`) jag äger
@@ -5874,7 +6183,7 @@ Outlook-möten, notiser och uppdrag jag deltar i. Sidan hette tidigare "Min
 | `apps/web/src/lib/actions/overview-activities.ts` | `updateActivityStatusAction`, `updateActivityDetailsAction` (via skrivlagret) |
 | `apps/web/src/app/inkorg/page.tsx` | Sidan: agenda, huvudspalt (uppgifter) + högerspalt (notiser, uppdrag) |
 
-### 40.2 Regler (bindande)
+### 44.2 Regler (bindande)
 
 - **Tidsindelad lista är default**, kanban är växlingsbar vy (valet sparas
   per webbläsare i `localStorage` `movexum-overview-view` — bekvämlighet,
@@ -5939,9 +6248,9 @@ Outlook-möten, notiser och uppdrag jag deltar i. Sidan hette tidigare "Min
   fortsatt UI-only (§ 15.3). Riskklass n/a (ingen AI-inferens).
 
 
-## 41. Kontaktboken — gemensam kontaktbok med interna ägare & förfrågningar
+## 45. Kontaktboken — gemensam kontaktbok med interna ägare & förfrågningar
 
-### 41.1 Översikt
+### 45.1 Översikt
 
 `/kontakter` (modul `kontakter`, titel **Kontaktbok**, "Portfölj"-railen,
 staff/observer) är Movexums gemensamma bok över **externa kontakter**
@@ -5972,7 +6281,7 @@ delade skrivlagret (§ 16).
 | `apps/web/src/app/min-oversikt/SharedContactsCard.tsx` | "Delade kontakter" på Mitt bolag (bolagsmedlem) |
 | `apps/web/src/lib/ai/tools.ts` | Chatt-verktygen `create_contact`, `update_contact_field`, `request_contact_use`, `decide_contact_request` |
 
-### 41.2 Datamodell
+### 45.2 Datamodell
 
 - **`contacts`** (1700000071 + **1700000156**): utöver CRM-fälten (§ 15.2)
   `owners` (relation → users, multi ≤ 20, `cascadeDelete:false`),
@@ -5997,7 +6306,7 @@ delade skrivlagret (§ 16).
   idempotent (`ensureStartupLink`, unikt index) när en förfrågan med
   `startup` godkänns. Ingen ny kollektion för delning.
 
-### 41.3 Flöde — förfrågan & beslut
+### 45.3 Flöde — förfrågan & beslut
 
 1. Kollega öppnar kontaktkortet → **"Be om att använda kontakten"**: syfte +
    ev. bolag + roll → `requestContactUse` skapar `pending`-rad och
@@ -6020,7 +6329,7 @@ delade skrivlagret (§ 16).
    `contact_import`) och syns i den samlade loggen (§ 32) med länk till
    kontaktkortet (`?request=<id>` markerar förfrågan).
 
-### 41.4 Åtkomst & isolering
+### 45.4 Åtkomst & isolering
 
 - **Kontaktboken är staff/observer-only** (list/view på `contacts` sedan
   1700000112; `contact_requests` likaså, asserterat i `verify-baseline.mjs`
@@ -6041,7 +6350,7 @@ delade skrivlagret (§ 16).
   användartoken med superuser-fallback bara vid PB v0.23.4:s tysta
   regel-nekande (§ 21.3).
 
-### 41.5 Import
+### 45.5 Import
 
 `/kontakter/import`: CSV (`;`/`,`/tabb auto, citat, BOM) eller `.xlsx`
 (dependency-fria `parseXlsx`, största arket) → **förhandsgranskning**
@@ -6058,7 +6367,7 @@ bekräftelse (`consent_confirmed`). Max 10 MB / 5 000 rader. Importen loggar
 **en** sammanfattningsrad i `agent_actions` (`contact_import`) — inte en per
 kontakt. Personnummer saneras i `info` (§ 15.6).
 
-### 41.6 Chatten
+### 45.6 Chatten
 
 Fyra verktyg i den interaktiva staff-chatten (§ 16.3, domän `contacts` i
 `tool-scope.ts`, kvitton § 33.4): `create_contact` (kräver
@@ -6075,7 +6384,7 @@ befintliga fältmaskningen (§ 9.3) — modellen ser namn/organisation/roll/
 kategori/ägare, **aldrig e-post, telefon eller kön**. Guidad i
 `CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden (§ 33.3).
 
-### 41.7 Regelefterlevnad
+### 45.7 Regelefterlevnad
 
 - **GDPR § 5/§ 6:** rättslig grund = berättigat intresse (inkubatordrift,
   matchning av bolag mot externa resurser) + information/samtycke vid

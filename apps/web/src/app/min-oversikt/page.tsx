@@ -358,7 +358,7 @@ export default async function MinOversiktPage() {
           />
         </Card>
 
-        {/* § 41.4 — kontakter Movexum delat med bolaget via kontaktboken */}
+        {/* § 45.4 — kontakter Movexum delat med bolaget via kontaktboken */}
         <SharedContactsCard tenantId={user.tenant} startupId={linkedId} />
 
         {/* Tilldelade verktyg — för bolagsmedlemmar samlat under "Aktiviteter". */}

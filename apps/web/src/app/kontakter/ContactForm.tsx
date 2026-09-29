@@ -30,7 +30,7 @@ export interface OwnerOption {
 const initialState: ContactActionState = {};
 
 /**
- * Skapa/redigera kontakt (§ 41.2). Ägare väljs bland Movexum-personal; minst
+ * Skapa/redigera kontakt (§ 45.2). Ägare väljs bland Movexum-personal; minst
  * en krävs (default = du). GDPR-samtycke krävs vid skapande (§ 15.4).
  */
 export function ContactForm({

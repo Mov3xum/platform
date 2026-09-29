@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// CLAUDE.md § 41.3 — Förfrågan om att använda en kontakt i kontaktboken.
+// CLAUDE.md § 45.3 — Förfrågan om att använda en kontakt i kontaktboken.
 // En kollega (requester) ber kontaktens ägare om bekräftelse att använda
 // kontakten för ett SPECIFIKT syfte — t.ex. koppla ihop kontakten med ett
 // bolag. Ägaren godkänner eller avböjer; vid godkännande med `startup` skapas

@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// CLAUDE.md § 41.3 — notiser för kontaktboken. Lägger `contact_request`
+// CLAUDE.md § 45.3 — notiser för kontaktboken. Lägger `contact_request`
 // (en kollega ber dig som kontaktägare om att få använda en kontakt) och
 // `contact_decision` (ägaren har godkänt/avböjt din förfrågan) i
 // notifications.kind. UNION — ersätt aldrig values-listan (§ 21.3-läxan från

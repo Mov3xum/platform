@@ -37,7 +37,7 @@ import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
 
 /**
- * Kontaktboken (CLAUDE.md § 41) — det delade skrivlagret. UI-actions och
+ * Kontaktboken (CLAUDE.md § 45) — det delade skrivlagret. UI-actions och
  * chatt-verktyg går HÄR igenom: rollpolicy (`writable-fields.ts`), validering,
  * tenant-stämpel från actorn och `agent_actions`-audit.
  *
@@ -49,7 +49,7 @@ import { fail, ok } from './types';
  *   personen ska ha informerats/samtyckt enligt Movexums GDPR-rutin.
  * - Ägare valideras mot tenantens Movexum-personal (aldrig bolagsmedlemmar).
  *
- * Förfrågningar (§ 41.3): en avgjord förfrågan är slutgiltig; godkännande med
+ * Förfrågningar (§ 45.3): en avgjord förfrågan är slutgiltig; godkännande med
  * bolag skapar kopplingen i `startup_contacts` (idempotent på unikt index).
  */
 
@@ -897,4 +897,3 @@ export async function importContacts(
 
   return ok({ created, updated, skipped, warnings, dryRun: options.dryRun === true });
 }
-

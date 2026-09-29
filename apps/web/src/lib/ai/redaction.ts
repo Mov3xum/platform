@@ -70,6 +70,10 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // personer i löptext som fältmaskning per fältNAMN inte fångar). Når AI
   // enbart via den isolerade utläsningen vid uppladdning — aldrig rått.
   'procurement_documents',
+  // Råa enkätsvar per respondent (§ 43): anonyma personalenkäter får aldrig
+  // läsas rad för rad av modellen — målstyrningen får bara det k-anonyma
+  // aggregatet via /mal. (Fältet var oanvänt före enkätmotorn.)
+  'compass_responses',
   'agent_memory' // agentens tvärsessions-scratchpad (1700000079)
 ]);
 

@@ -32,6 +32,13 @@ import {
   COMPASS_FLOW_TYPES,
   COMPASS_INPUT_TYPES,
   MAX_COMPASS_CHOICES,
+  GOAL_FOCUS_AREAS,
+  GOAL_OWNER_TEAMS,
+  GOAL_STATUSES,
+  GOAL_INDICATOR_UNITS,
+  METRIC_KEYS,
+  METRIC_DEFINITIONS,
+  SURVEY_TEMPLATES,
   AGENT_MEMORY_CATEGORIES,
   AGENT_MEMORY_CATEGORY_IDS,
   agentMemoryCategoryLabel,
@@ -84,6 +91,11 @@ import {
   registerDeMinimisSupport,
   FORORDNINGAR,
   scheduleAgent,
+  createGoal,
+  createGoalIndicator,
+  recordGoalStatus,
+  currentQuarter,
+  goalsPath,
   type AnnualWheelWritableField,
   type CompassModuleWritableField,
   type Actor,
@@ -899,7 +911,23 @@ export function buildChatTools(
             description: { type: 'string', description: 'Kort intern beskrivning av modulens syfte.' },
             intro_message: { type: 'string', description: 'Välkomsttext besökaren möter först.' },
             success_message: { type: 'string', description: 'Tacktext när besökaren är klar.' },
-            target_audience: { type: 'string', description: 'Vilken målgrupp modulen riktar sig till.' }
+            target_audience: { type: 'string', description: 'Vilken målgrupp modulen riktar sig till.' },
+            purpose: {
+              type: 'string',
+              enum: ['intake', 'survey'],
+              description: 'intake (default) = intag som skapar lead; survey = ENKÄT som samlar svar utan lead (§ 43) — kundnöjdhet, NPS, partnerenkät, medarbetarindex.'
+            },
+            subject_kind: {
+              type: 'string',
+              enum: ['none', 'startup', 'event', 'partner', 'staff'],
+              description: 'Bara för survey: vad enkäten handlar om.'
+            },
+            anonymous: { type: 'boolean', description: 'Bara för survey: anonym (inga identifierare; aggregat vid ≥ 5 svar). Använd för medarbetarindex.' },
+            survey_template: {
+              type: 'string',
+              enum: SURVEY_TEMPLATES.map((t) => t.key),
+              description: 'Färdig enkätmall som skapar frågorna direkt: ' + SURVEY_TEMPLATES.map((t) => `${t.key} = ${t.name}`).join('; ') + '. Mallen sätter syfte, subjekt, anonymitet och samtyckestext.'
+            }
           },
           required: ['name', 'flow_type']
         }
@@ -1428,7 +1456,7 @@ export function buildChatTools(
       function: {
         name: 'create_contact',
         description:
-          'Lägger till en extern kontakt i Movexums gemensamma KONTAKTBOK (contacts, § 41) — ' +
+          'Lägger till en extern kontakt i Movexums gemensamma KONTAKTBOK (contacts, § 45) — ' +
           'investerare, rådgivare, handläggare på myndigheter, partners, akademi, media. Den ' +
           'inloggade blir kontaktägare (ägare/kön sätts av en människa i UI:t). Kontaktuppgifter ' +
           '(e-post/telefon) anges bara om användaren själv gett dem i klartext. INNAN du skapar: ' +
@@ -1636,6 +1664,81 @@ export function buildChatTools(
             notes: { type: 'string' }
           },
           required: ['calloff_id']
+        }
+      }
+    });
+    // Målstyrning & verksamhetsplan (§ 42). Måltal, årsstatus och manuella
+    // värden sätts av en människa i /mal — agenten föreslår i text.
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_goal',
+        description:
+          'Lägger till ett verksamhetsmål i årets verksamhetsplan (/mal, § 42) under ' +
+          'ett av Movexums fem fokusområden, med ägande team. Indikatorer med måltal ' +
+          'läggs till med add_goal_indicator (måltalet sätter en människa). ' +
+          'Verksamhetsåret måste finnas (skapas av ledningen i /mal). Skriv aldrig ' +
+          'personnamn i mål eller beskrivning.',
+        parameters: {
+          type: 'object',
+          properties: {
+            year: { type: 'integer', description: 'Verksamhetsår (default: aktivt år).' },
+            focus_area: { type: 'string', enum: [...GOAL_FOCUS_AREAS], description: 'Fokusområde.' },
+            title: { type: 'string', description: 'Målet (max 200 tecken), t.ex. "Konvertering 50 % från ink till acc inom 8 månader".' },
+            description: { type: 'string', description: 'Valfri beskrivning (max 2000, inga personuppgifter).' },
+            owner_team: { type: 'string', enum: [...GOAL_OWNER_TEAMS], description: 'Ägande team (default gemensamt).' }
+          },
+          required: ['focus_area', 'title']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'add_goal_indicator',
+        description:
+          'Lägger till en indikator på ett mål. source=computed kopplar den till ' +
+          'ett nyckeltal i metrikregistret (värdet räknas ur data automatiskt), ' +
+          'source=manual = kvartalsvis mänsklig bedömning. Måltalet (target) kan du ' +
+          'INTE sätta — föreslå det i text så ledningen sätter det i /mal. Slå upp ' +
+          'goal_id via query_collection på goals.',
+        parameters: {
+          type: 'object',
+          properties: {
+            goal_id: { type: 'string', description: 'Målets id.' },
+            label: { type: 'string', description: 'Indikatorns etikett (max 200).' },
+            source: { type: 'string', enum: ['computed', 'manual'] },
+            metric_key: {
+              type: 'string',
+              // Bara tenant-mått utan känslighet: art. 9-aggregat (§ 41.2) väljs av en människa i /mal.
+              enum: AGENT_METRIC_KEYS,
+              description: 'Bara för computed: ' + AGENT_METRIC_KEYS.map((k) => `${k} = ${METRIC_DEFINITIONS[k].label}`).join('; ')
+            },
+            unit: { type: 'string', enum: [...GOAL_INDICATOR_UNITS], description: 'Bara för manual (default bool).' }
+          },
+          required: ['goal_id', 'label', 'source']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'set_goal_status',
+        description:
+          'Rapporterar kvartalsstatus på en indikator ("markera medarbetarindex som ' +
+          'försenad i Q3, kommentar: väntar på enkätmotor"). För beräknade ' +
+          'indikatorer hämtas värdet ur data automatiskt; ett manuellt värde anges ' +
+          'av en människa i /mal. Slå upp indicator_id via query_collection på ' +
+          'goal_indicators. Kommentaren får inte innehålla personuppgifter.',
+        parameters: {
+          type: 'object',
+          properties: {
+            indicator_id: { type: 'string' },
+            quarter: { type: 'integer', minimum: 1, maximum: 4, description: 'Default: innevarande kvartal.' },
+            status: { type: 'string', enum: [...GOAL_STATUSES], description: 'on_track = I fas, delayed = Försenad, not_started = Ej startad, done = Klar.' },
+            comment: { type: 'string', description: 'Kort motivering (max 2000).' }
+          },
+          required: ['indicator_id', 'status']
         }
       }
     });
@@ -2080,6 +2183,12 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: 'Registrerar avrop' };
     case 'update_procurement_calloff':
       return { tool: name, label: 'Uppdaterar avrop' };
+    case 'create_goal':
+      return { tool: name, label: 'Lägger till verksamhetsmål' };
+    case 'add_goal_indicator':
+      return { tool: name, label: 'Lägger till indikator' };
+    case 'set_goal_status':
+      return { tool: name, label: 'Rapporterar målstatus' };
     case 'request_approval':
       return { tool: name, label: 'Ber om ditt godkännande' };
     case 'start_meeting':
@@ -3052,6 +3161,12 @@ export async function dispatchToolCall(
       return runCreateProcurementCalloff(args, ctx);
     case 'update_procurement_calloff':
       return runUpdateProcurementCalloff(args, ctx);
+    case 'create_goal':
+      return runCreateGoal(args, ctx);
+    case 'add_goal_indicator':
+      return runAddGoalIndicator(args, ctx);
+    case 'set_goal_status':
+      return runSetGoalStatus(args, ctx);
     case 'request_approval':
       return runRequestApproval(args, ctx);
     case 'start_meeting':
@@ -3759,7 +3874,11 @@ async function runCreateCompassModule(
     introMessage: typeof args.intro_message === 'string' ? args.intro_message : undefined,
     successMessage: typeof args.success_message === 'string' ? args.success_message : undefined,
     targetAudience: typeof args.target_audience === 'string' ? args.target_audience : undefined,
-    consentNote: typeof args.consent_note === 'string' ? args.consent_note : undefined
+    consentNote: typeof args.consent_note === 'string' ? args.consent_note : undefined,
+    purpose: typeof args.purpose === 'string' ? args.purpose : undefined,
+    subjectKind: typeof args.subject_kind === 'string' ? args.subject_kind : undefined,
+    anonymous: typeof args.anonymous === 'boolean' ? args.anonymous : undefined,
+    surveyTemplate: typeof args.survey_template === 'string' ? args.survey_template : undefined
   });
 
   if (!result.ok) return { ok: false, error: result.error };
@@ -3770,11 +3889,15 @@ async function runCreateCompassModule(
       slug: result.value.slug,
       name: result.value.name,
       flow_type: result.value.flowType,
+      purpose: result.value.purpose,
+      template_questions: result.value.templateQuestions || undefined,
       admin_path: result.value.adminPath,
       published: false,
       next_step:
-        'Lägg till frågorna med add_compass_question. Modulen är ett ' +
-        'opublicerat utkast tills personalen publicerar den i modul-admin.',
+        result.value.templateQuestions > 0
+          ? 'Mallens frågor är skapade. Modulen är ett opublicerat utkast tills personalen publicerar den i modul-admin; enkäten kopplas som indikator i /mal.'
+          : 'Lägg till frågorna med add_compass_question. Modulen är ett ' +
+            'opublicerat utkast tills personalen publicerar den i modul-admin.',
       logged_in: 'agent_actions'
     }
   };
@@ -4297,7 +4420,7 @@ async function runUpdateOrgPost(
   };
 }
 
-// ── Kontaktboken (§ 41) ──────────────────────────────────────────────────────
+// ── Kontaktboken (§ 45) ──────────────────────────────────────────────────────
 //
 // Skrivlagret (lib/core/write/contacts.ts) äger validering, ägar-/rollkontroll,
 // GDPR-kravet, audit och notiser — verktygen är tunna skal.
@@ -4509,6 +4632,128 @@ async function syncFollowupsNote(
   return {
     note: parts.length > 0 ? parts.join(', ') + '.' : 'Inga nya uppföljningar behövdes.',
     warning: res.error
+  };
+}
+
+// ── Målstyrning & verksamhetsplan (§ 42) ────────────────────────────────────
+
+/** Metriker agenten får föreslå som indikator: tenant-scope och inget art. 9-aggregat. */
+const AGENT_METRIC_KEYS = METRIC_KEYS.filter(
+  (k) => METRIC_DEFINITIONS[k].scope === 'tenant' && METRIC_DEFINITIONS[k].sensitivity !== 'aggregate_only'
+);
+
+async function resolveGoalPeriod(
+  ctx: ToolDispatchContext,
+  tenant: string,
+  year: number | undefined
+): Promise<{ id: string; year: number } | { error: string }> {
+  try {
+    const filter = year
+      ? ctx.pb.filter('tenant = {:t} && year = {:y}', { t: tenant, y: year })
+      : ctx.pb.filter('tenant = {:t} && status = "active"', { t: tenant });
+    const res = await ctx.pb.collection('goal_periods').getList<{ id: string; year: number }>(1, 1, {
+      filter,
+      sort: '-year',
+      fields: 'id,year'
+    });
+    const row = res.items[0];
+    if (row) return { id: row.id, year: row.year };
+  } catch {
+    /* faller till felet nedan */
+  }
+  return {
+    error: year
+      ? `Det finns inget verksamhetsår ${year} i /mal — ledningen skapar det där först.`
+      : 'Det finns inget aktivt verksamhetsår i /mal — ange year eller be ledningen skapa/aktivera året.'
+  };
+}
+
+async function runCreateGoal(args: Record<string, unknown>, ctx: ToolDispatchContext): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  const period = await resolveGoalPeriod(ctx, actor.tenant, argNum(args, 'year'));
+  if ('error' in period) return { ok: false, error: period.error };
+  const result = await createGoal(ctx.pb, actor, {
+    period: period.id,
+    focus_area: argStr(args, 'focus_area'),
+    title: argStr(args, 'title'),
+    description: argStr(args, 'description') || null,
+    owner_team: argStr(args, 'owner_team') || undefined
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      goal_id: result.value.id,
+      title: result.value.title,
+      year: period.year,
+      path: goalsPath(period.year, result.value.id),
+      note: 'Målet är tillagt. Lägg till indikatorer med add_goal_indicator; måltal sätter ledningen i /mal.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runAddGoalIndicator(args: Record<string, unknown>, ctx: ToolDispatchContext): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  const result = await createGoalIndicator(ctx.pb, actor, {
+    goal: argStr(args, 'goal_id'),
+    label: argStr(args, 'label'),
+    source: argStr(args, 'source'),
+    metric_key: argStr(args, 'metric_key') || undefined,
+    unit: argStr(args, 'unit') || undefined
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      indicator_id: result.value.id,
+      goal_id: result.value.goal,
+      label: result.value.label,
+      source: result.value.source,
+      metric_key: result.value.metric_key || undefined,
+      path: goalsPath(undefined, result.value.goal),
+      note: 'Indikatorn saknar måltal tills ledningen sätter det i /mal.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+async function runSetGoalStatus(args: Record<string, unknown>, ctx: ToolDispatchContext): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+  const result = await recordGoalStatus(ctx.pb, actor, {
+    indicator: argStr(args, 'indicator_id'),
+    quarter: argNum(args, 'quarter') ?? currentQuarter(),
+    status: argStr(args, 'status'),
+    comment: argStr(args, 'comment') || null
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  const r = result.value.reading;
+  const sensitive = result.value.aggregateOnly;
+  const skipped = result.value.skipReason;
+  return {
+    ok: true,
+    warning:
+      !sensitive && r && r.value === null
+        ? `Värdet kunde inte beräknas${r.note ? `: ${r.note}` : '.'} Statusen är sparad utan nytt värde — säg det.`
+        : !sensitive && skipped
+          ? `${skipped} Säg det till användaren.`
+          : undefined,
+    data: {
+      entry_id: result.value.entry.id,
+      indicator_id: result.value.entry.indicator,
+      quarter: result.value.entry.quarter,
+      status: result.value.entry.status,
+      // Känsliga aggregat/anonyma enkäter lämnar aldrig skrivlagret mot modellen (§ 41.2, § 43.2).
+      value: sensitive || (skipped && !result.value.valueWritten && result.value.entry.value === null) ? undefined : (result.value.entry.value ?? null),
+      value_note: sensitive ? 'Indikatorn är ett känsligt aggregat — värdet visas bara för behöriga i /mal.' : skipped,
+      value_written: result.value.valueWritten,
+      value_complete: r ? r.complete : true,
+      path: goalsPath(),
+      logged_in: 'agent_actions'
+    }
   };
 }
 

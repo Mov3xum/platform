@@ -2488,7 +2488,12 @@ await ensureCollection({
     { name: 'create_lead', type: 'bool', required: false },
     // Mall för den publika sidan (CLAUDE.md § 23.7) — MÅSTE spegla
     // COMPASS_LAYOUTS i packages/shared/src/compass-layout.ts.
-    { name: 'layout', type: 'select', required: false, maxSelect: 1, values: ['classic', 'split_left', 'split_right', 'cover', 'panel', 'minimal'] }
+    { name: 'layout', type: 'select', required: false, maxSelect: 1, values: ['classic', 'split_left', 'split_right', 'cover', 'panel', 'minimal'] },
+    // Migration 1700000160 (§ 43): Startupkompassen som enkätmotor. MÅSTE
+    // spegla COMPASS_PURPOSES / SURVEY_SUBJECT_KINDS i compass-survey.ts.
+    { name: 'purpose', type: 'select', required: false, maxSelect: 1, values: ['intake', 'survey'] },
+    { name: 'subject_kind', type: 'select', required: false, maxSelect: 1, values: ['none', 'startup', 'event', 'partner', 'staff'] },
+    { name: 'anonymous', type: 'bool', required: false }
   ],
   indexes: [
     'CREATE UNIQUE INDEX idx_compass_modules_tenant_slug ON compass_modules (tenant, slug)',
@@ -3807,13 +3812,121 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
 });
-
+// Migration 1700000159: Målstyrning & verksamhetsplan (§ 42) —
+// goal_periods → goals → goal_indicators → goal_status_entries. Select-värdena
+// MÅSTE spegla packages/shared/src/goals.ts. list/view staff/observer-only,
+// createRule roll-lös (§ 21.3); år/mål/indikatorer ändras av
+// admin/incubator_lead, kvartalsstatus av hela staben.
+await ensureCollection({
+  id: 'goal_periods_collection',
+  name: 'goal_periods',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'year', type: 'number', required: true, onlyInt: true, min: 2000, max: 2100 },
+    { name: 'title', type: 'text', required: false, max: 120 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft', 'active', 'closed'] },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: ['CREATE UNIQUE INDEX idx_goal_periods_tenant_year ON goal_periods (tenant, year)'],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+await ensureCollection({
+  id: 'goals_collection',
+  name: 'goals',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'period', type: 'relation', required: true, collectionId: 'goal_periods_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'focus_area', type: 'select', required: true, maxSelect: 1, values: ['partner_finansiering', 'inflode_varumarke', 'kundvarde_kvalitet', 'organisation_digitalisering', 'tematisk_accelerator'] },
+    { name: 'title', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'description', type: 'text', required: false, max: 2000 },
+    { name: 'owner_team', type: 'select', required: true, maxSelect: 1, values: ['ledning', 'marknad', 'projekt', 'coach', 'gemensamt'] },
+    { name: 'sort_order', type: 'number', required: false, onlyInt: true, min: 0, max: 100000 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_goals_tenant ON goals (tenant)',
+    'CREATE INDEX idx_goals_period ON goals (period)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+await ensureCollection({
+  id: 'goal_indicators_collection',
+  name: 'goal_indicators',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'goal', type: 'relation', required: true, collectionId: 'goals_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'label', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['computed', 'manual', 'survey'] },
+    { name: 'metric_key', type: 'text', required: false, max: 60 },
+    // Migration 1700000160: enkätkälla (§ 43) + känt-flagga för måltalet (PB lagrar null som 0).
+    { name: 'survey_module', type: 'relation', required: false, collectionId: 'compass_modules_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'target', type: 'number', required: false },
+    { name: 'has_target', type: 'bool', required: false },
+    { name: 'unit', type: 'select', required: true, maxSelect: 1, values: ['count', 'pct', 'days', 'bool'] },
+    { name: 'direction', type: 'select', required: true, maxSelect: 1, values: ['higher', 'lower'] },
+    { name: 'sort_order', type: 'number', required: false, onlyInt: true, min: 0, max: 100000 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_goal_indicators_tenant ON goal_indicators (tenant)',
+    'CREATE INDEX idx_goal_indicators_goal ON goal_indicators (goal)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+await ensureCollection({
+  id: 'goal_status_entries_collection',
+  name: 'goal_status_entries',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'indicator', type: 'relation', required: true, collectionId: 'goal_indicators_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'quarter', type: 'number', required: true, onlyInt: true, min: 1, max: 4 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['on_track', 'delayed', 'not_started', 'done'] },
+    { name: 'value', type: 'number', required: false },
+    // Migration 1700000160: känt-flagga för värdet (PB lagrar null som 0).
+    { name: 'has_value', type: 'bool', required: false },
+    { name: 'comment', type: 'text', required: false, max: 2000 },
+    { name: 'recorded_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_goal_status_entries_tenant ON goal_status_entries (tenant)',
+    'CREATE UNIQUE INDEX idx_goal_status_entries_unique ON goal_status_entries (tenant, indicator, quarter)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
 const AUTODATE_FIELDS = [
   { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
   { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
 ];
 
-// Migration 1700000156: contacts → kontaktboken (§ 41). Interna ägare,
+// Migration 1700000156: contacts → kontaktboken (§ 45). Interna ägare,
 // organisation, kategori, skapare + autodate; last_name görs valfritt.
 // patchCollection lägger BARA till saknade fält/uppdaterar angivna props.
 await patchCollection(
@@ -3830,7 +3943,7 @@ await patchCollection(
 );
 
 // Migration 1700000157: contact_requests — förfrågan om att använda en kontakt
-// för ett specifikt syfte (§ 41.3). list/view staff/observer-only; createRule
+// för ett specifikt syfte (§ 45.3). list/view staff/observer-only; createRule
 // roll-lös (§ 21.3); update: frågaren (återkalla) eller staff (avgöra —
 // ägarkontrollen ligger i skrivlagret).
 await ensureCollection({
@@ -3871,6 +3984,10 @@ await ensureCollection({
 await patchCollection('notifications', [], {
   kind: { values: ['comment', 'mention', 'assigned', 'status_change', 'stage_advance', 'due_soon', 'contact_request', 'contact_decision'] }
 });
+// Migration 1700000160: goal_indicators.source += 'survey' (§ 43) — inline-
+// defen ovan bär redan fälten, men ensureCollection synkar inte select-värden
+// på en befintlig collection. Hela listan (patchCollection ERSÄTTER values).
+await patchCollection('goal_indicators', [], { source: { values: ['computed', 'manual', 'survey'] } });
 // Migration 1700000152: tasks.link_kind += 'procurement' + relationer +
 // rule_key (idempotensnyckel för regelgenererade uppföljningar). Union över
 // hela values-listan (patchCollection ERSÄTTER values).
@@ -4155,6 +4272,11 @@ const FORCE_CREATE_RULES = {
   tool_schedules: `${ANY_AUTH} && @request.auth.tenant != ""`,
   startup_phase_history: `${ANY_AUTH} && @request.auth.tenant != ""`,
   contacts: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Målstyrning (migration 1700000159, § 42) — roll-lösa createRules, roll i skrivlagret.
+  goal_periods: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  goals: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  goal_indicators: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  goal_status_entries: `${ANY_AUTH} && @request.auth.tenant != ""`,
   startup_contacts: `${ANY_AUTH} && @request.auth.tenant != ""`,
   capital_rounds: `${ANY_AUTH} && @request.auth.tenant != ""`,
   intellectual_property: `${ANY_AUTH} && @request.auth.tenant != ""`,
@@ -4211,7 +4333,7 @@ const FORCE_CREATE_RULES = {
   procurement_calloffs: `${ANY_AUTH} && @request.auth.tenant != ""`,
   procurement_rules: `${ANY_AUTH} && @request.auth.tenant != ""`,
   procurement_documents: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  // Kontaktboken (§ 41, migration 1700000157) — roll-enforcement i skrivlagret.
+  // Kontaktboken (§ 45, migration 1700000157) — roll-enforcement i skrivlagret.
   contact_requests: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 

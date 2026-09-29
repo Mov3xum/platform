@@ -985,7 +985,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           <StartupProcurementsSection pb={pb} tenantId={user.tenant} startupId={id} />
         )}
 
-        {/* § 41.4 — kontakter ur kontaktboken som delats med bolaget */}
+        {/* § 45.4 — kontakter ur kontaktboken som delats med bolaget */}
         {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer']) && (
           <StartupContactsSection pb={pb} tenantId={user.tenant} startupId={id} />
         )}

@@ -13,7 +13,7 @@ import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { escFilter } from '@/lib/pb-filter';
 
 /**
- * Enda läsvägen för kontaktboken (CLAUDE.md § 41). Reads går via den
+ * Enda läsvägen för kontaktboken (CLAUDE.md § 45). Reads går via den
  * inkommande klienten (användarens token → RLS § 21: `contacts` och
  * `contact_requests` är staff/observer-only). Fail-soft mot ett ännu inte
  * migrerat schema (tom lista, aldrig krasch). Kollektionerna adresseras på
@@ -22,7 +22,7 @@ import { escFilter } from '@/lib/pb-filter';
  * Undantaget är `listSharedContactsForStartup`, som körs som superuser EFTER
  * att anroparen verifierat att den inloggade är medlem i bolaget — det är den
  * kurerade vyn som låter ett bolag se de kontakter som DELATS med det via en
- * godkänd förfrågan (§ 41.4), utan att öppna kontaktboken för medlemmar.
+ * godkänd förfrågan (§ 45.4), utan att öppna kontaktboken för medlemmar.
  */
 
 export const CONTACTS = 'contacts';
@@ -307,7 +307,7 @@ export interface SharedContactView {
 }
 
 /**
- * Kontakter som DELATS med ett bolag via en godkänd förfrågan (§ 41.4).
+ * Kontakter som DELATS med ett bolag via en godkänd förfrågan (§ 45.4).
  * Körs som superuser eftersom `contacts` är staff/observer-only — anroparen
  * MÅSTE ha verifierat att den inloggade är länkad till `startupId` (eller är
  * staff) innan detta anropas. Returnerar bara de fält bolaget behöver för

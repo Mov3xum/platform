@@ -83,6 +83,14 @@ test('kompassmodul + upphandling i samma kontext aktiverar båda domänerna', ()
   assert.ok(!domains.has('org_posts'));
 });
 
+test('målfråga aktiverar målstyrningens skrivverktyg', () => {
+  const out = names(scopeTools(CATALOG, 'Skapa ett nytt mål och lägg till en indikator'));
+  for (const tool of ['create_goal', 'add_goal_indicator', 'set_goal_status']) {
+    assert.ok(out.includes(tool), tool);
+  }
+  assert.ok(!out.includes('create_procurement'));
+});
+
 test('uttryckligt verktygsnamn i texten räknas som träff', () => {
   assert.ok(matchToolDomains('kör schedule_agent för portföljöversikten').has('schedule'));
 });

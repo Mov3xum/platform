@@ -65,7 +65,7 @@ export async function notify(pb: PocketBase, params: NotifyParams): Promise<void
         } catch (err: unknown) {
           // Nya notistyper (t.ex. kontaktbokens, migration 1700000158) mot ett
           // schema där migrationen inte körts avvisas med 400 — faller då
-          // tillbaka på `assigned` så notisen aldrig tappas tyst (§ 41.3).
+          // tillbaka på `assigned` så notisen aldrig tappas tyst (§ 45.3).
           const status = (err as { status?: number } | null)?.status;
           if (status === 400 && !LEGACY_NOTIFICATION_KINDS.includes(kind)) {
             try {

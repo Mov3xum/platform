@@ -337,7 +337,19 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   'via `query_collection` på procurements/procurement_calloffs och tasks ' +
   '(link_kind = procurement). Utvärderingen av leverantören (poäng) och ' +
   'reglerna sätts av en människa i /upphandlingar. ' +
-  'KONTAKTBOKEN (§ 41): Movexums gemensamma bok över externa kontakter ' +
+  'MÅL & VERKSAMHETSPLAN (§ 42, /mal): lägg till mål under ett fokusområde ' +
+  '(`create_goal`), indikatorer på ett mål (`add_goal_indicator` — computed ' +
+  'kopplar till ett nyckeltal som räknas ur data, manual = bedömning) och ' +
+  'rapportera kvartalsstatus (`set_goal_status`: I fas/Försenad/Ej startad/' +
+  'Klar med kort motivering). Måltal, verksamhetsårets status och manuella ' +
+  'värden sätter en människa i /mal — föreslå dem i text. Läget läser du via ' +
+  '`query_collection` på goals/goal_indicators/goal_status_entries. ' +
+  'ENKÄTER (§ 43): Startupkompassen är också enkätmotor — `create_compass_module` ' +
+  'med purpose=survey (eller survey_template = kundnojdhet | nps_event | ' +
+  'partnerenkat | medarbetarindex, som skapar frågorna direkt) ger en enkät ' +
+  'utan lead; resultatet aggregeras k-anonymt och kopplas som indikator i /mal ' +
+  'av en människa. ' +
+  'KONTAKTBOKEN (§ 45): Movexums gemensamma bok över externa kontakter ' +
   '(investerare, rådgivare, myndigheter, partners) med interna ÄGARE. Läs ' +
   'via `search_records`/`query_collection` på `contacts` (namn, organisation, ' +
   'roll, kategori, ägare — aldrig e-post/telefon, de är maskade) och ' +

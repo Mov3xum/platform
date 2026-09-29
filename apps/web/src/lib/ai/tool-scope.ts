@@ -13,7 +13,7 @@
  *    (bolagsfält, aktiviteter, uppgifter, anteckning, godkännande) skickas
  *    alltid.
  * 2. Domänspecifika skrivverktyg (årshjul, Startupkompassen, workshops,
- *    events, uppdrag, de minimis, KPI/kapital, scheman, anslagstavla,
+ *    events, uppdrag, de minimis, KPI/kapital, scheman, anslagstavla, mål,
  *    upphandlingar) skickas bara när de senaste användarturerna — eller
  *    agentens persona — matchar domänen (deterministisk synonymkarta, ingen
  *    extra LLM-runda, ingen latens).
@@ -111,6 +111,11 @@ export const TOOL_DOMAINS: readonly ToolDomain[] = [
     id: 'contacts',
     tools: ['create_contact', 'update_contact_field', 'request_contact_use', 'decide_contact_request'],
     stems: ['kontakt', 'kontaktbok', 'investerar', 'rådgivar', 'radgivar', 'handläggar', 'handlaggar', 'introduc', 'koppla ihop', 'dela med', 'förfråg', 'forfrag', 'godkänn', 'godkann', 'avböj', 'avboj', 'ägare', 'agare']
+  },
+  {
+    id: 'goals',
+    tools: ['create_goal', 'add_goal_indicator', 'set_goal_status'],
+    stems: ['mål', 'målsättning', 'måluppföljning', 'måltal', 'indikator', 'fokusområde', 'verksamhetsplan', 'kvartalsstatus']
   },
   {
     id: 'procurement',

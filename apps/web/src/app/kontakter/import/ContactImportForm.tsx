@@ -16,7 +16,7 @@ const fileInputClass =
   'block w-full rounded-2xl border border-default bg-surface px-4 py-2.5 text-sm text-foreground file:mr-3 file:rounded-xl file:border-0 file:bg-brand file:px-4 file:py-2 file:text-sm file:font-medium file:text-brand-foreground hover:file:bg-brand-hover focus:border-brand focus:outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
 
 /**
- * Import av befintliga kontakter (§ 41.5): CSV eller Excel → förhandsgranskning
+ * Import av befintliga kontakter (§ 45.5): CSV eller Excel → förhandsgranskning
  * (rubrikmappning, dubbletter, varningar) → bekräfta → upsert i skrivlagret.
  * Rader serialiseras tillbaka till servern som DATA och valideras där igen.
  */

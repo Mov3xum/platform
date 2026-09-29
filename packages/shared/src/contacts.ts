@@ -1,4 +1,4 @@
-// Kontaktboken — Movexums gemensamma kontaktbok (CLAUDE.md § 41).
+// Kontaktboken — Movexums gemensamma kontaktbok (CLAUDE.md § 45).
 //
 // Ren, testbar domänlogik för kontakter med interna ägare och förfrågningar
 // om att använda en kontakt för ett specifikt syfte (ev. dela med ett bolag).

@@ -8,7 +8,7 @@ import {
 } from '@platform/shared';
 
 /**
- * Små delade presentationsbitar för kontaktboken (§ 41). Bara semantiska
+ * Små delade presentationsbitar för kontaktboken (§ 45). Bara semantiska
  * tokens + Movexums statusfärger (grön/gul/orange — aldrig röd).
  */
 

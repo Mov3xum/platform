@@ -24,30 +24,30 @@ import type { Role } from './index';
  */
 export const DEFAULT_MODULES_BY_ROLE: Record<Role, readonly string[]> = {
   admin: [
-    'idag', 'inkorg', 'pagaende', 'arshjul', 'filer', 'uppdrag', 'inflode',
+    'idag', 'inkorg', 'pagaende', 'mal', 'arshjul', 'filer', 'uppdrag', 'inflode',
     'startups', 'kontakter', 'de_minimis', 'upphandlingar', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
     'integrationer', 'min_profil', 'mina_aktiviteter'
   ],
   incubator_lead: [
-    'idag', 'inkorg', 'pagaende', 'arshjul', 'filer', 'uppdrag', 'inflode',
+    'idag', 'inkorg', 'pagaende', 'mal', 'arshjul', 'filer', 'uppdrag', 'inflode',
     'startups', 'kontakter', 'de_minimis', 'upphandlingar', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
     'integrationer', 'min_profil', 'mina_aktiviteter'
   ],
   coach: [
     'idag', 'inkorg', 'mina_aktiviteter', 'pagaende', 'arshjul', 'filer',
-    'uppdrag', 'inflode', 'startups', 'kontakter', 'de_minimis', 'upphandlingar', 'events', 'education',
+    'mal', 'uppdrag', 'inflode', 'startups', 'kontakter', 'de_minimis', 'upphandlingar', 'events', 'education',
     'agenter', 'kunskapsbas', 'min_profil'
   ],
   mentor: [
     'idag', 'inkorg', 'mina_aktiviteter', 'pagaende', 'filer', 'uppdrag',
-    'startups', 'kontakter', 'de_minimis', 'education', 'agenter', 'kunskapsbas', 'min_profil'
+    'mal', 'startups', 'kontakter', 'de_minimis', 'education', 'agenter', 'kunskapsbas', 'min_profil'
   ],
   partner: ['idag', 'inkorg', 'filer', 'uppdrag', 'investerare', 'community', 'min_profil'],
   observer: [
     'idag', 'inkorg', 'mina_aktiviteter', 'pagaende', 'arshjul', 'filer',
-    'startups', 'kontakter', 'de_minimis', 'events', 'community'
+    'mal', 'startups', 'kontakter', 'de_minimis', 'events', 'community'
   ],
   startup_member: ['min_oversikt', 'mina_aktiviteter', 'filer', 'de_minimis', 'community']
 };

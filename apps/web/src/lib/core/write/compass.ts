@@ -24,7 +24,13 @@ import {
   sortCompassQuestions,
   slugifyCompassKey,
   type CompassFlowType,
-  type CompassInputType
+  type CompassInputType,
+  SURVEY_TEMPLATES,
+  findSurveyTemplate,
+  isSurveyModule,
+  normalizeCompassPurpose,
+  normalizeSurveySubjectKind,
+  type CompassPurpose
 } from '@platform/shared';
 
 /**
@@ -147,6 +153,12 @@ export interface CreateCompassModuleParams {
   consentNote?: string;
   /** Frivillig slug — härleds annars ur namnet. */
   slug?: string;
+  /** Syfte (§ 43): intake (default) eller survey. */
+  purpose?: string;
+  subjectKind?: string;
+  anonymous?: boolean | string;
+  /** Färdig enkätmall (`SURVEY_TEMPLATES`) — skapar frågorna i samma anrop. */
+  surveyTemplate?: string;
 }
 
 export interface CreatedCompassModuleResult {
@@ -156,6 +168,9 @@ export interface CreatedCompassModuleResult {
   flowType: CompassFlowType;
   /** Relativ adminlänk så att chatten kan visa vart modulen tog vägen. */
   adminPath: string;
+  purpose: CompassPurpose;
+  /** Antal frågor som skapades från enkätmallen (0 utan mall). */
+  templateQuestions: number;
 }
 
 /**
@@ -180,22 +195,35 @@ export async function createCompassModule(
   const name = validateNonEmptyText(params.name, 'name', MAX_COMPASS_MODULE_NAME);
   if (!name.ok) return fail('INVALID_VALUE', name.error);
 
-  const flowType = validateCompassFlowType(params.flowType);
+  // Enkätmall (§ 43) styr syfte/subjekt/anonymitet/samtyckestext och tvingar formulär-flöde.
+  const template = params.surveyTemplate ? findSurveyTemplate(params.surveyTemplate) : null;
+  if (params.surveyTemplate && !template) {
+    return fail('INVALID_VALUE', `Okänd enkätmall. Giltiga: ${SURVEY_TEMPLATES.map((t) => t.key).join(', ')}.`);
+  }
+  const purpose: CompassPurpose = template ? 'survey' : normalizeCompassPurpose(params.purpose);
+  const subjectKind = normalizeSurveySubjectKind(template ? template.subject_kind : params.subjectKind);
+  const anonymousV = validateBool(template ? template.anonymous : params.anonymous, false);
+  if (!anonymousV.ok) return fail('INVALID_VALUE', anonymousV.error);
+
+  const flowType = validateCompassFlowType(template ? 'wizard' : params.flowType);
   if (!flowType.ok) return fail('INVALID_VALUE', flowType.error);
+  if (purpose === 'survey' && flowType.value === 'chat') {
+    return fail('INVALID_VALUE', 'En enkät är ett formulär eller quiz — inte en AI-chatt.');
+  }
 
   const description = validateOptionalText(params.description, 'description', 1000);
   if (!description.ok) return fail('INVALID_VALUE', description.error);
 
-  const introMessage = validateOptionalText(params.introMessage, 'intro_message', 2000);
+  const introMessage = validateOptionalText(params.introMessage ?? template?.intro_message, 'intro_message', 2000);
   if (!introMessage.ok) return fail('INVALID_VALUE', introMessage.error);
 
-  const successMessage = validateOptionalText(params.successMessage, 'success_message', 2000);
+  const successMessage = validateOptionalText(params.successMessage ?? template?.success_message, 'success_message', 2000);
   if (!successMessage.ok) return fail('INVALID_VALUE', successMessage.error);
 
   const targetAudience = validateOptionalText(params.targetAudience, 'target_audience', 500);
   if (!targetAudience.ok) return fail('INVALID_VALUE', targetAudience.error);
 
-  const consentNote = validateOptionalText(params.consentNote, 'consent_note', 2000);
+  const consentNote = validateOptionalText(params.consentNote ?? template?.consent_note, 'consent_note', 2000);
   if (!consentNote.ok) return fail('INVALID_VALUE', consentNote.error);
 
   const baseSlug = slugifyCompassKey(params.slug?.trim() || name.value);
@@ -217,8 +245,12 @@ export async function createCompassModule(
     // Opublicerad tills en människa granskat och publicerat (art. 14).
     is_active: false,
     public_url_enabled: false,
-    // Slutförd körning skapar lead (steg 4-valet, migration 1700000125).
-    create_lead: true,
+    // Slutförd körning skapar lead (steg 4-valet, migration 1700000125) —
+    // aldrig för en enkät (§ 43).
+    create_lead: purpose !== 'survey',
+    purpose,
+    subject_kind: subjectKind,
+    anonymous: purpose === 'survey' ? anonymousV.value : false,
     sort_order: 999
   };
 
@@ -244,20 +276,63 @@ export async function createCompassModule(
     return fail('DB_ERROR', 'Kunde inte skapa modulen i Startupkompassen.');
   }
 
+  // § 24.4-invarianten: PB släpper okända fält tyst. En instans utan
+  // migration 1700000156 skulle skapa en "enkät" som INTAG (och kvittot
+  // hade ljugit, § 33.4). Läs tillbaka; saknas fältet rullas modulen tillbaka.
+  if (purpose === 'survey') {
+    let saved: Record<string, unknown> | null = null;
+    try {
+      saved = await pb.collection(MODULES).getOne<Record<string, unknown>>(String(record.id));
+    } catch {
+      saved = null;
+    }
+    if (saved && !('purpose' in saved)) {
+      try {
+        await writeWithFallback(pb, (client) => client.collection(MODULES).delete(String(record.id)));
+      } catch {
+        /* best-effort rollback */
+      }
+      return fail(
+        'DB_ERROR',
+        'Enkäten kunde inte skapas: fältet purpose saknas i databasen (PocketBase-migration 1700000156 är inte applicerad).'
+      );
+    }
+  }
+
   await logAgentAction(pb, {
     actor,
     action_type: 'create',
     collection: MODULES,
     record_id: String(record.id),
-    after_value: { slug, name: name.value, flow_type: flowType.value }
+    after_value: { slug, name: name.value, flow_type: flowType.value, purpose, template: template?.key }
   });
+
+  // Enkätmallens frågor — i mallens ordning via samma skrivväg som alla
+  // andra frågor (position = absolut plats, § 23.8).
+  let templateQuestions = 0;
+  if (template) {
+    for (const [i, q] of template.questions.entries()) {
+      const added = await addCompassQuestion(pb, actor, {
+        moduleId: String(record.id),
+        prompt: q.prompt,
+        inputType: q.input_type,
+        key: q.key,
+        helpText: q.help_text,
+        required: q.required ?? false,
+        position: i + 1
+      });
+      if (added.ok) templateQuestions++;
+    }
+  }
 
   return ok({
     moduleId: String(record.id),
     slug,
     name: name.value,
     flowType: flowType.value,
-    adminPath: `/inflode/admin/modules/${slug}`
+    adminPath: `/inflode/admin/modules/${slug}`,
+    purpose,
+    templateQuestions
   });
 }
 
@@ -575,6 +650,9 @@ export async function updateCompassModuleField(
     case 'flow_type': {
       const r = validateCompassFlowType(params.value);
       if (!r.ok) return fail('INVALID_VALUE', r.error);
+      if (r.value === 'chat' && isSurveyModule(existing as { purpose?: string })) {
+        return fail('INVALID_VALUE', 'En enkät är ett formulär eller quiz — inte en AI-chatt (§ 43).');
+      }
       value = r.value;
       break;
     }

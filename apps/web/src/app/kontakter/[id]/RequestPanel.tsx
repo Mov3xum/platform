@@ -38,7 +38,7 @@ export interface StartupOption {
 const initial: ContactActionState = {};
 
 /**
- * Förfrågningspanelen på kontaktkortet (§ 41.3): be om att använda kontakten
+ * Förfrågningspanelen på kontaktkortet (§ 45.3): be om att använda kontakten
  * (syfte + ev. bolag), och för ägaren: godkänn/avböj. Beslutet är alltid ett
  * mänskligt klick; skrivlagret verifierar ägarskap server-side.
  */

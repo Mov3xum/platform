@@ -5,7 +5,7 @@ import { listContactRequests, listContactsForStartup, listStaffUsers, staffNameM
 import { contactDisplayName, contactSubtitle } from '@platform/shared';
 
 /**
- * Bolagskortets vy över kontakter kopplade till bolaget (§ 41.4): vilka
+ * Bolagskortets vy över kontakter kopplade till bolaget (§ 45.4): vilka
  * externa kontakter (via kontaktboken) som delats med bolaget, deras roll,
  * ägare och senaste godkända syfte. Läses med användarens token →
  * staff/observer-RLS på `contacts`/`contact_requests`; en ren bolagsmedlem

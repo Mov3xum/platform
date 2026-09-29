@@ -50,6 +50,9 @@ export const DOMAIN_WRITE_TOOLS: ReadonlySet<string> = new Set([
   'create_procurement',
   'create_procurement_calloff',
   'update_procurement_calloff',
+  'create_goal',
+  'add_goal_indicator',
+  'set_goal_status',
   'memory_write'
 ]);
 

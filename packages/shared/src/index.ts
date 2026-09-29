@@ -1196,7 +1196,7 @@ export type NotificationKind =
   | 'status_change'
   | 'stage_advance'
   | 'due_soon'
-  // Kontaktboken (§ 41.3, migration 1700000158)
+  // Kontaktboken (§ 45.3, migration 1700000158)
   | 'contact_request'
   | 'contact_decision';
 
@@ -1390,7 +1390,7 @@ export interface ModuleGroup {
 }
 
 export const RAIL_GROUPS: ModuleGroup[] = [
-  { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'pagaende', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
+  { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'pagaende', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'kontakter', 'de_minimis', 'upphandlingar', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'kunskapsbas', 'integrationer', 'installningar', 'min_profil'] }
@@ -1468,6 +1468,14 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Allt som pågår med bolagen — workshops, utbildningar och aktiviteter, samlat per bolag så hela Movexum ser läget.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
     route: '/pagaende'
+  },
+  {
+    id: 'mal',
+    title: 'Mål & VP',
+    description:
+      'Verksamhetsplanens mål per fokusområde med indikatorer, måltal och kvartalsstatus — beräknade ur data eller manuellt bedömda. Ersätter måluppföljningen i slides.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/mal'
   },
   {
     id: 'arshjul',
@@ -1719,6 +1727,10 @@ export function resolveUserModules(input: {
 export * from './event-time';
 export * from './org-posts';
 export * from './home';
+export * from './followup-rules';
+export * from './metrics';
+export * from './goals';
+export * from './compass-survey';
 export * from './procurement';
 export * from './contacts';
 export * from './agent-memory';

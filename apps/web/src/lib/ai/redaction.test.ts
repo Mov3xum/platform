@@ -31,6 +31,7 @@ test('denylist håller ute auth-, credential- och privat-innehåll-kollektioner'
     'deep_jobs',
     'meeting_transcripts', // råa mötestranskript (§34)
     'procurement_documents', // fritext ur uppladdade upphandlingsunderlag (§39.3)
+    'compass_responses', // råa enkät-/intagssvar per fråga — bara aggregatet når målstyrningen (§43)
     'agent_memory' // tvärsessions-minne (§16.4)
   ]) {
     assert.equal(isDeniedCollection(name), true, `${name} ska vara denylistad`);
@@ -49,7 +50,6 @@ test('domändata är LÄSBAR (låstes upp 2026-06; skyddas av RLS + fältmasknin
     'compass_leads',
     'compass_conversations',
     'compass_messages',
-    'compass_responses',
     'compass_security_events',
     'agent_actions',
     'agreement_signatures',
