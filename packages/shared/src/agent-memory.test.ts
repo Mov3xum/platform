@@ -52,6 +52,7 @@ describe('normalizeAgentMemoryCategory', () => {
 
   it('accepts Swedish spellings and labels', () => {
     assert.equal(normalizeAgentMemoryCategory('portfölj'), 'portfolj');
+    assert.equal(normalizeAgentMemoryCategory('___portfölj___'), 'portfolj');
     assert.equal(normalizeAgentMemoryCategory('arbetssätt'), 'arbetssatt');
     assert.equal(normalizeAgentMemoryCategory('övrigt'), 'ovrigt');
     assert.equal(normalizeAgentMemoryCategory('Terminologi & definitioner'), 'terminologi');

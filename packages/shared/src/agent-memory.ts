@@ -236,15 +236,19 @@ export function normalizeAgentMemoryCategory(value: unknown): AgentMemoryCategor
     .replace(/ö/g, 'o')
     .replace(/ä/g, 'a')
     .replace(/å/g, 'a')
-    .replace(/[^a-z]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  if (isAgentMemoryCategory(folded)) return folded;
+    .replace(/[^a-z]+/g, '_');
+  let start = 0;
+  let end = folded.length;
+  while (start < end && folded.charCodeAt(start) === 95) start += 1;
+  while (end > start && folded.charCodeAt(end - 1) === 95) end -= 1;
+  const normalized = folded.slice(start, end);
+  if (isAgentMemoryCategory(normalized)) return normalized;
   for (const def of AGENT_MEMORY_CATEGORIES) {
     const label = def.label.toLowerCase();
     if (raw === label) return def.id;
     // "Terminologi & definitioner" → första ordet räcker ("terminologi").
     const head = label.split(/[^a-zåäö]+/)[0];
-    if (head && (raw === head || folded === head.replace(/ö/g, 'o').replace(/ä/g, 'a').replace(/å/g, 'a'))) {
+    if (head && (raw === head || normalized === head.replace(/ö/g, 'o').replace(/ä/g, 'a').replace(/å/g, 'a'))) {
       return def.id;
     }
   }
