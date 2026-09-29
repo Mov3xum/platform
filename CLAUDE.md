@@ -1498,7 +1498,10 @@ individer.
   den nya direkt; annars behålls den gamla.
 - **Dataminimering:** vi cachar INGA tredjeparts-data i vår DB —
   vi hämtar live från providern vid varje sidladdning. Bara tokens
-  lagras.
+  lagras. **Enda undantag (§ 40):** "Mina uppgifter" håller det härledda
+  agendaresultatet (titel/tid/plats/länk, aldrig tokens) 60 s i
+  processminnet per användare så sidans pollning inte gör ett Graph-anrop
+  per omladdning; cachen töms vid bortkoppling (`invalidateOutlookCache`).
 - **CRM-matchning (Outlook ↔ bolagskort):** mötesdeltagares och
   organisatörers e-post läses **transient** (i minnet, per request) i
   `providers/outlook_calendar/{calendar,match}.ts` enbart för att matcha
@@ -1725,8 +1728,8 @@ och drar kort mellan kolumnerna.
   (Att göra), `in_progress` (Pågår), `review` (Granskas), `blocked`
   (Blockerad), `done` (Klar). `cancelled` finns kvar i enumet men visas inte
   på tavlan. `lib/overview/status.ts` mappar `backlog`→todo och
-  `review`→waiting så korten inte försvinner ur 4-kolumnsboarden i
-  "Min översikt".
+  `review`→waiting så korten inte försvinner ur kanban-vyn i
+  "Mina uppgifter" (§ 40).
 - **RBAC:** skapa/tilldela = staff (admin/incubator_lead/coach/mentor),
   flytta = staff eller ägare — verifieras i server-actions (tenant-check +
   `hasRole`) ovanpå `tasks`-API-reglerna (oförändrade). Tilldelade kollegor
@@ -2278,7 +2281,7 @@ aktivitetsfeeden: "**\<bolag\> slutförde \<dokument\>**".
 När staff tilldelar en workshop eller ett utbildningsdokument kan de skriva
 **instruktioner**, bjuda in andra **Movexum-resurser** (coacher/mentorer) som
 medarbetare, och i samma steg skapa ett **möte** med de inbjudna. Inbjudna
-resurser ser tilldelningen i sin "Min översikt" (personlig uppgift) och mötet i
+resurser ser tilldelningen i sina "Mina uppgifter" (personlig uppgift) och mötet i
 sin agenda. Sidan **`/pagaende`** ger hela Movexum en tenant-bred översikt över
 allt som pågår med bolagen (workshops, utbildningsdokument, öppna aktiviteter),
 grupperat per bolag.
@@ -3960,7 +3963,7 @@ mission). Mission-board-actions (`createMissionBoardTaskAction` /
 `moveMissionBoardTaskAction`, `lib/actions/tasks.ts`) tillåter **staff ELLER
 uppdragsdeltagare** att skapa/flytta kort; tilldelning av kollegor
 (`setTaskAssigneesAction`) är fortsatt staff-only. Korten skapas med
-`link_kind='mission'` + `mission`-FK och syns i medlemmarnas "Min översikt".
+`link_kind='mission'` + `mission`-FK och syns i medlemmarnas "Mina uppgifter".
 
 **Dokumentation (ersätter artefakter).** Den tidigare artefakt-/länklistan i
 `MissionFlow` är borttagen. I stället laddar staff upp riktiga filer i
@@ -5052,7 +5055,7 @@ service workern och manifestet är handskrivna och versionerade i repot.
   server-side i `ProtoShell` via `buildMobileNav` med **samma
   `canAccessModuleForUser` som railen** (menyn är UI-kurering, aldrig
   säkerhetsgräns — RLS/RBAC ligger kvar i § 21).
-- **Staff/observer:** Hem (`hem`, § 37) · Översikt (`inkorg`, med
+- **Staff/observer:** Hem (`hem`, § 37) · Uppgifter (`inkorg`, § 40, med
   olästa-badge) · **Chatt** (`idag`) · Pågående (`pagaende`) · Mer. Avstängda
   moduler hoppas över och nästa kandidat tar platsen (bolag, uppdrag, årshjul,
   filer …).
@@ -5776,3 +5779,94 @@ denylistad (§ 39.3). Guidad i `CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden.
   `FORCE_CREATE_RULES` + tasks-patch med hela `link_kind`-listan).
 - **Statsstöd:** `state_aid_relevant` på avropet är en påminnelse — själva
   registreringen görs i de minimis-modulen (§ 20) med dess `kanBevilja`-spärr.
+
+## 40. Mina uppgifter (`/inkorg`) — personlig att-göra-vy
+
+### 40.1 Översikt
+
+`/inkorg` (modul `inkorg`, titel **Mina uppgifter**, alla roller) samlar allt
+som är "mitt": uppgifter (`tasks`) och aktiviteter (`activities`) jag äger
+eller som hör till bolag jag coachar/är länkad till, kommande events +
+Outlook-möten, notiser och uppdrag jag deltar i. Sidan hette tidigare "Min
+översikt", vilket kolliderade med `/hem` ("Översikt"/Dashboard, § 37) och
+`/min-oversikt` ("Mitt bolag"/medlemmens "Min översikt", § 21bis) — bytt
+2026-09.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `apps/web/src/lib/overview/group.ts` (+ `.test.ts`) | Ren, enhetstestad tidsindelning (`dueBucket`, `groupByDue`, `isOverdue`, `formatDueLabel`, räkningar) — svenska kalenderdygn (§ 38) |
+| `apps/web/src/lib/overview/status.ts` | Board-modell (`WorkItem`, kolumner, status-mappning tasks/activities) |
+| `apps/web/src/lib/overview/aggregate.ts` | `getOverviewData` (tasks + activities + events + Outlook, fail-soft MED `readNotices`), `listStartupOptions` |
+| `apps/web/src/components/overview/OverviewWork.tsx` | Klient-container: optimistiskt state, alla mutationer, vyväxling lista/tavla |
+| `apps/web/src/components/overview/{OverviewList,OverviewBoard}.tsx` | Tidsindelad lista (default) respektive kanban (presentationella) |
+| `apps/web/src/components/overview/{WorkItemCard,WorkItemEditor,QuickAdd,AgendaStrip}.tsx` | Kort med handlingar, inline-redigering, snabbtillägg, agenda |
+| `apps/web/src/lib/actions/tasks.ts` | `createTaskAction`, `updateTaskStatusAction`, `updateTaskDetailsAction`, `deleteTaskAction` |
+| `apps/web/src/lib/actions/overview-activities.ts` | `updateActivityStatusAction`, `updateActivityDetailsAction` (via skrivlagret) |
+| `apps/web/src/app/inkorg/page.tsx` | Sidan: agenda, huvudspalt (uppgifter) + högerspalt (notiser, uppdrag) |
+
+### 40.2 Regler (bindande)
+
+- **Tidsindelad lista är default**, kanban är växlingsbar vy (valet sparas
+  per webbläsare i `localStorage` `movexum-overview-view` — bekvämlighet,
+  ingen datakälla). Hinkar i fast ordning: Försenat · Idag · Denna vecka
+  (1–7 dagar) · Senare · Utan datum; klara poster ligger hopfällda under
+  "Klart nyligen". Rubriksiffran räknar **bara öppna** poster + antal
+  försenade.
+- **"Försenad" räknas på svenskt kalenderdygn** (`dueDayDiff` →
+  `stockholmDayDiff`), aldrig mot `Date.now()`: `due_at` lagras utan
+  klockslag (UTC-midnatt), så en jämförelse mot nu gjorde "idag" försenad
+  från 00:01 (bugg 2026-09). Etiketter/inputvärden härleds på samma sätt.
+- **Klara poster visas bara i `DONE_WINDOW_DAYS` = 7 dagar** efter
+  `completed_at` (filter i `aggregate.ts`) — annars växer "Klar" för evigt
+  och äter av läs-taket (`PAGE_SIZE` = 200). Kapning (`totalItems` >
+  hämtade) och läsfel per källa rapporteras i `readNotices` och visas som
+  orange banner (§ 33.4-principen: aldrig "Allt klart" när läsningen
+  misslyckades).
+- **Kortets handlingar:** titeln länkar till bolagets kanban
+  (`/startups/<id>/aktiviteter`), bolagskortet (aktivitet) eller uppdraget;
+  penna = inline-redigering (titel, datum, bolag för uppgifter; titel +
+  datum för aktiviteter); papperskorg = radera (bara uppgifter, med
+  bekräftelse); "Flytta till"-select = tangentbordsväg motsvarande
+  drag-and-drop; "Markera klar". Ägaravataren visas BARA när ägaren är någon
+  annan än den inloggade; "Uppgift"-chippen är borttagen (bara "Aktivitet"
+  märks ut).
+- **RBAC** (ISO 27001 A.5.15–A.5.18): redigera/flytta = staff eller ägare
+  (speglar `tasks.updateRule`); radera = admin/incubator_lead eller ägare
+  (speglar `tasks.deleteRule`); allt verifieras i server-action med tenant-
+  kontroll i koden, indata typkontrolleras (`validateDateOnly`) och
+  redigering/radering auditeras i `agent_actions` (radering som `update` +
+  `deleted`, § 30.6). Skrivningar via användartoken med `writeWithFallback`
+  (superuser BARA vid PB v0.23.4:s tysta regel-nekande, § 21.3); 404-
+  fallbacken är **opt-in** (`fallbackOn404`) och används bara för
+  raderingen, där `tasks.deleteRule` (bart `?=` mot roller) annars tyst
+  nekar en admin som inte äger kortet. Aktiviteters titel/datum går genom
+  det delade, auditade skrivlagret (`updateActivityField`; `due_date` nytt
+  whitelistat fält för människa, `agent: deny` — agentens verktygsyta § 33
+  är oförändrad); båda fälten valideras innan första skrivningen.
+- **Polymorfa länkar skyddas.** `link_kind`/`startup` ändras BARA när kortet
+  är fristående eller bolagskopplat (`canRelinkStartup`); uppdrags-,
+  kontakt-, event- och upphandlingskort behåller sin länk, och editorn döljer
+  bolagsvalet för dem. Ett `startup` på en upphandlingsuppföljning skulle ge
+  bolagsmedlemmar läsrätt till intern avtalsdata via tasks-RLS (§ 39.2/§ 21).
+  Uppföljningar med `rule_key`/`link_kind='procurement'` kan inte raderas
+  här (synken skulle återskapa dem) — markera klar eller ändra regeln.
+- **Snabbtillägget** tar titel + valfritt datum + valfritt bolag
+  (`createTaskAction`, tenant-verifierat bolag) så nya kort får en plats i
+  tidsindelningen direkt.
+- **Notiser i högerspalten** (≥ 1280 px; under huvudspalten på mindre
+  skärm) med olästa-antal även vid sidtiteln (`#notiser`-ankare). Tom agenda
+  kollapsar till en rad i stället för en stor tom ruta.
+- **Pollning:** `useLiveWorkspace` på fokus + 60 s (tidigare 15 s), pausad
+  under interaktion. **Outlook-agendan cachas 60 s i processminnet per
+  användare** (`outlookCache` i `aggregate.ts`) — bara det härledda
+  agendaresultatet (titel/tid/plats/länk), aldrig tokens, aldrig i DB; ett
+  fel (Graph ELLER uppslaget av kopplingen) cachas inte, utgångna poster
+  rensas vid varje skrivning och `disconnectAppIntegrationAction` tömmer
+  cachen direkt (GDPR art. 7.3). Medvetet, litet avsteg från "live vid varje
+  sidladdning" (§ 14.4, dokumenterat där) så pollningen inte gör ett
+  Microsoft Graph-anrop per omladdning.
+- **GDPR/AI:** inga nya fält eller kollektioner; `contactName` på kortet är
+  fortsatt UI-only (§ 15.3). Riskklass n/a (ingen AI-inferens).
+
