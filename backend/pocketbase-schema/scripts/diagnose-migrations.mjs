@@ -27,7 +27,11 @@
  *   PB_SU_PASSWORD='<superuser password>' \
  *   node backend/pocketbase-schema/scripts/diagnose-migrations.mjs
  * Add --wait-for-schema to poll until all migration-created collections exist
- * (15 minutes by default; override with PB_SCHEMA_WAIT_TIMEOUT_MS).
+ * (15 minutes by default; override with PB_SCHEMA_WAIT_TIMEOUT_MS). In that
+ * mode the script is ADVISORY: a timeout or missing collections are reported
+ * as warnings and the exit code is 0, so the following setup-via-api.mjs step
+ * (which mirrors a subset of the collections) and verify-baseline.mjs (the
+ * hard gate) can run.
  */
 
 import PocketBase from 'pocketbase';
@@ -160,7 +164,17 @@ async function main() {
     process.exit(1);
   }
   if (timedOut) {
-    console.error(`✗ Migrations-skapade kollektioner saknas efter ${Math.ceil(timeoutMs / 1000)} sekunder.`);
+    // Rådgivande, ALDRIG fatalt (incident 2026-09): väntesteget i workflowen
+    // "Sync PocketBase" körs FÖRE setup-via-api.mjs. Kollektioner som
+    // bootstrap-skriptet speglar (t.ex. `surveys`) skapas först i nästa steg,
+    // och migration-only-kollektioner dyker aldrig upp om PB-imagen inte
+    // byggts om — ett hårt fel här stoppade hela synken i 15 minuter utan
+    // att något kunde läka. verify-baseline.mjs efter synken är den hårda
+    // grinden (must-exist), inte den här väntan.
+    warn(
+      `Migrations-skapade kollektioner saknas fortfarande efter ${Math.ceil(timeoutMs / 1000)} s — ` +
+        'fortsätter ändå. setup-via-api.mjs speglar en delmängd; verify-baseline.mjs avgör efteråt.'
+    );
   }
   ok(`Hittade ${liveNames.size} icke-system-kollektioner i instansen`);
 
@@ -200,7 +214,6 @@ async function main() {
   if (allMissingCollections.size === 0) {
     ok('Alla migrations-skapade kollektioner finns i instansen. Inget gap upptäckt.');
     console.log('======================\n');
-    if (timedOut) process.exit(1);
     return;
   }
 
@@ -214,6 +227,13 @@ async function main() {
       'för migration-only-kollektioner (t.ex. compass_*).'
   );
   console.log('======================\n');
+  // I --wait-for-schema-läge (pre-sync i workflowen) är rapporten rådgivande:
+  // nästa steg (setup-via-api.mjs) kan skapa det som saknas, och
+  // verify-baseline.mjs fäller deployen om det verkligen saknas efteråt.
+  if (waitForSchema) {
+    warn('Rådgivande läge (--wait-for-schema): avslutar med kod 0 så synken kan fortsätta.');
+    return;
+  }
   process.exit(1);
 }
 

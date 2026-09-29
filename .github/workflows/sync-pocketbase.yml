@@ -150,12 +150,18 @@ jobs:
           echo "::error::Kolla PB-containerns hälsa på servern och kör om workflowen när den är uppe."
           exit 1
 
+      # Kort, RÅDGIVANDE väntan på att en nystartad PB-container hunnit köra
+      # sina migrationer. Steget får aldrig fälla jobbet: kollektioner som
+      # setup-via-api.mjs speglar (t.ex. surveys) skapas först i nästa steg,
+      # och migration-only-kollektioner dyker aldrig upp om PB-imagen inte
+      # byggts om — en 15-minuters väntan + hårt fel här stoppade hela synken
+      # (incident 2026-09). verify-baseline.mjs sist är den hårda grinden.
       - name: Wait for migration-created PocketBase schema
         env:
           PB_URL: ${{ steps.pb_ready.outputs.selected_url }}
           PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL_STAGING || secrets.PB_SU_EMAIL }}
           PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD_STAGING || secrets.PB_SU_PASSWORD }}
-          PB_SCHEMA_WAIT_TIMEOUT_MS: '900000'
+          PB_SCHEMA_WAIT_TIMEOUT_MS: '120000'
           NODE_TLS_REJECT_UNAUTHORIZED: '0'
         run: node backend/pocketbase-schema/scripts/diagnose-migrations.mjs --wait-for-schema
 
