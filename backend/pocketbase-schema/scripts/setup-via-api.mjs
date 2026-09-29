@@ -3808,6 +3808,11 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
 });
 
+const AUTODATE_FIELDS = [
+  { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+  { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+];
+
 // Migration 1700000156: contacts → kontaktboken (§ 41). Interna ägare,
 // organisation, kategori, skapare + autodate; last_name görs valfritt.
 // patchCollection lägger BARA till saknade fält/uppdaterar angivna props.
@@ -3883,10 +3888,6 @@ await patchCollection(
 // created/updated (REST API:t auto-lägger dem inte). ensureCollection
 // synkar bara regler på en befintlig collection, så lägg till de saknade
 // autodate-fälten explicit. Idempotent (hoppar över om de redan finns).
-const AUTODATE_FIELDS = [
-  { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
-  { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
-];
 await patchCollection('chat_threads', AUTODATE_FIELDS);
 await patchCollection('deep_jobs', AUTODATE_FIELDS);
 await patchCollection('user_files', AUTODATE_FIELDS);
