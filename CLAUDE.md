@@ -5826,3 +5826,76 @@ Ingen AI-inferens → riskklass n/a. Inga nya kollektioner eller fält, ingen ny
 dataväg — registret läser bara det sidorna redan läste, via samma token.
 Startsidans siffror är oförändrade i betydelse (aktiva bolag, nya leads
 senaste 7 dagarna med delta, pågående workshops, egna öppna uppgifter).
+
+---
+
+## 42. Mål & verksamhetsplan (`/mal`) — målstyrning som data
+
+### 42.1 Översikt
+
+Måluppföljningen från strategi- och verksamhetsdagarna ("I fas / Försenad /
+Ej startad / Klar" per mål och kvartal) bor nu i systemet i stället för i
+slides. Ett **målträd per verksamhetsår**: fokusområde (Movexums fem) → mål
+med ägande team → indikatorer med måltal → kvartalsstatus. Indikatorer är
+antingen **beräknade** ur metrikregistret (§ 41) — värdet hämtas live och vid
+varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
+("Mål & VP", Översikt-railen, staff/observer).
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000155_create_goals.js` | `goal_periods`, `goals`, `goal_indicators`, `goal_status_entries` |
+| `packages/shared/src/goals.ts` (+ `.test.ts`) | Vokabulär (fokusområden, team, statusar, källor), validering (delas av UI och chatt), `buildGoalTree`, `rollupGoalStatuses`, `suggestStatusFromValue`, `progressTowardsTarget`, `quarterOfDate` |
+| `apps/web/src/lib/core/write/goals.ts` | Skrivlager: `createGoalPeriod`/`setGoalPeriodStatus`, `createGoal`/`updateGoalField`, `createGoalIndicator`, `recordGoalStatus` (idempotent upsert per kvartal) |
+| `apps/web/src/lib/goals/data.ts` | Enda läsvägen (`loadGoalWorkspace`, fail-soft, live-värden via `computeMetrics`) |
+| `apps/web/src/lib/actions/goals.ts` | Server actions (RBAC → skrivlagret) |
+| `apps/web/src/app/mal/{page,GoalsView}.tsx` | Cockpiten: år, kvartal, trafikljus, träd med Q1–Q4, statusformulär, ledningens formulär |
+
+### 42.2 Datamodell
+
+- **`goal_periods`**: `year` (unikt per tenant), `title`, `status`
+  (`draft` → `active` när VP är beslutad → `closed`). Ett avslutat år tar
+  inte emot nya mål eller statusar.
+- **`goals`**: `period`, `focus_area` (`partner_finansiering` |
+  `inflode_varumarke` | `kundvarde_kvalitet` | `organisation_digitalisering`
+  | `tematisk_accelerator`), `title`, `description`, `owner_team` (`ledning`
+  | `marknad` | `projekt` | `coach` | `gemensamt`), `sort_order`.
+- **`goal_indicators`**: `goal`, `label`, `source` (`computed` | `manual`),
+  `metric_key` (en `MetricKey` ur § 41 — bara `scope: 'tenant'`; enhet och
+  riktning ÄRVS från definitionen så UI och register aldrig säger olika),
+  `target`, `unit` (`count` | `pct` | `days` | `bool`), `direction`.
+- **`goal_status_entries`**: `indicator`, `quarter` 1–4, `status`
+  (`on_track` | `delayed` | `not_started` | `done`), `value`, `comment`,
+  `recorded_by`. Unikt index `(tenant, indicator, quarter)` → idempotent
+  upsert; en parallell rapportering blir en uppdatering, aldrig en dubblett.
+
+### 42.3 Regler (bindande)
+
+- **En indikator, en källa.** `recordGoalStatus` läser värdet ur registret
+  för `computed` (periodfönster = kalenderåret, `yearPeriod`) och **avvisar**
+  ett manuellt angivet värde; `null` (kunde inte räknas) sparas som `null`
+  med registrets PII-fria `note` i svaret — aldrig som 0. `manual` sparar det
+  bedömda värdet.
+- **RBAC:** år, mål och indikatorer = admin/incubator_lead (VP-beslut);
+  kvartalsstatus = hela staben (varje team rapporterar sina mål). Agenten
+  ärver den inloggades roll (`writable-fields.ts`) och får **aldrig** sätta
+  `target`, `metric_key` på befintliga indikatorer, `goal_periods.status`
+  eller ett manuellt `value` — den föreslår i text, människan beslutar.
+- **RLS (§ 21.3):** list/view `STAFF_OR_OBSERVER`, createRule roll-lös,
+  update/delete `:each ?=`. Alla fyra kollektionerna ligger i
+  `MUST_BE_STAFF_OR_OBSERVER` i `verify-baseline.mjs` och speglas i
+  `setup-via-api.mjs`. PB-target är kollektionens NAMN (§ 30.4 p. 1).
+- **Fritext** (`description`, `comment`) personnummer-saneras på skrivvägen
+  och auditeras bara som längd; audit-raderna är PII-fria (titel, status,
+  kvartal, tal) och mappas i `feed/agent-log.ts` → syns i Bolagsnytt/
+  `/aktivitet` med djuplänk `/mal?ar=<år>&q=<kvartal>&mal=<id>`.
+- **Art. 9:** `women_led_share` kan väljas som indikator; värdet som lagras
+  är registrets k-anonyma aggregat (§ 41.2), aldrig något per bolag.
+
+### 42.4 Regelefterlevnad
+
+Ingen AI-inferens → riskklass n/a. Ingen PII i modellen (mål, tal, team).
+`cascadeDelete` tenant → period → mål → indikator → status städar art. 17.
+Reads via användarens token; skrivningar via skrivlagret med
+`writeWithFallback` bara efter verifierad roll + tenant (§ 21.3).
+Presentationsläge och chatt-verktyg (`create_goal`, `set_goal_status`)
+följer i nästa steg av implementationsplanen.

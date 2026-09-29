@@ -433,6 +433,45 @@ function mapRow(
       };
     }
 
+    // Målstyrning & verksamhetsplan (§ 42).
+    case 'goal_periods': {
+      const year = str(after.year);
+      const href = year ? `/mal?ar=${year}` : '/mal';
+      if (action === 'create') return { title: `Nytt verksamhetsår: ${year || 'år'}`, href, icon: 'target' };
+      return { title: `Verksamhetsår ${year}: status ${changedVerb}`, detail: str(after.status) || undefined, href, icon: 'target' };
+    }
+    case 'goals': {
+      const year = str(after.year);
+      const href = `/mal${year ? `?ar=${year}&` : '?'}mal=${row.record_id ?? ''}`;
+      if (action === 'create') {
+        return { title: `Nytt mål: "${str(after.title) || 'utan titel'}"`, detail: str(after.owner_team) || undefined, href, icon: 'target' };
+      }
+      const field = str(row.field);
+      return { title: `Mål "${str(after.title) || ''}": ${field || 'fält'} ${changedVerb}`, href, icon: 'target' };
+    }
+    case 'goal_indicators': {
+      const goalId = str(after.goal);
+      return {
+        title: `Ny indikator: "${str(after.label) || 'indikator'}"`,
+        detail: str(after.goal_title) || undefined,
+        href: goalId ? `/mal?mal=${goalId}` : '/mal',
+        icon: 'target'
+      };
+    }
+    case 'goal_status_entries': {
+      const status = str(after.status);
+      const label: Record<string, string> = { on_track: 'I fas', delayed: 'Försenad', not_started: 'Ej startad', done: 'Klar' };
+      const goalId = str(after.goal);
+      const year = str(after.year);
+      const q = str(after.quarter);
+      return {
+        title: `Q${q}: "${str(after.indicator_label) || 'indikator'}" → ${label[status] ?? status}`,
+        detail: str(after.goal_title) || undefined,
+        href: `/mal${year ? `?ar=${year}&q=${q}&` : `?q=${q}&`}mal=${goalId}`,
+        icon: 'target'
+      };
+    }
+
     // Upphandlingar & excellens-insatser (§ 39).
     case 'procurements': {
       const href = row.record_id ? `/upphandlingar/${row.record_id}` : '/upphandlingar';

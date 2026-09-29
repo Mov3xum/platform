@@ -47,6 +47,20 @@ export {
   type ProcurementWritableField,
   type CalloffWritableField
 } from './procurements';
+// Målstyrning & verksamhetsplan (§ 42)
+export {
+  createGoalPeriod,
+  setGoalPeriodStatus,
+  createGoal,
+  updateGoalField,
+  createGoalIndicator,
+  recordGoalStatus,
+  currentQuarter,
+  goalsPath,
+  type GoalWritableField,
+  type RecordGoalStatusInput,
+  type RecordGoalStatusResult
+} from './goals';
 export { logAgentAction } from './audit';
 export {
   canWriteField,

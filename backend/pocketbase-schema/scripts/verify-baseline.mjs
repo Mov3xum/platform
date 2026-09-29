@@ -376,7 +376,13 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'procurements',
   'procurement_calloffs',
   'procurement_rules',
-  'procurement_documents'
+  'procurement_documents',
+  // Målstyrning & verksamhetsplan (migration 1700000155, § 42). Tenant-bred
+  // intern styrning (VP-mål, kvartalsstatus) → staff/observer-only.
+  'goal_periods',
+  'goals',
+  'goal_indicators',
+  'goal_status_entries'
 ];
 
 // Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa

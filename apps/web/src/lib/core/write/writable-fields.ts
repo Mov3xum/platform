@@ -256,6 +256,34 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
       user: { kind: 'roles', roles: STAFF_FULL },
       agent: { kind: 'deny', reason: 'Media på inlägg laddas upp av en människa på startsidan.' }
     }
+  },
+  // ── Målstyrning & verksamhetsplan (§ 42) ─────────────────────────────────
+  // Verksamhetsår, mål och indikatorer ägs av ledningen (VP-beslut); status
+  // rapporteras av hela staben. Måltal (`target`) och metriknyckel sätts
+  // ALDRIG av agenten — den föreslår i text, människan beslutar.
+  goal_periods: {
+    status: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Verksamhetsårets status (utkast/aktiv/avslutad) ändras av en människa i /mal.' } },
+    title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } }
+  },
+  goals: {
+    title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    focus_area: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    owner_team: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } }
+  },
+  goal_indicators: {
+    label: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    source: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    metric_key: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    target: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Måltal beslutas av ledningen i /mal — agenten föreslår i text.' } },
+    unit: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    direction: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } }
+  },
+  goal_status_entries: {
+    status: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    comment: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    // Manuellt värde = mänsklig bedömning; beräknade värden hämtar skrivlagret själv ur registret.
+    value: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Uppmätta värden anges av en människa (eller räknas ur data) — inte av agenten.' } }
   }
 };
 
@@ -282,6 +310,23 @@ const CREATE_POLICIES: Record<
     agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' }
   },
   annual_wheel_items: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  // Målstyrning (§ 42): år/mål/indikatorer = ledning; kvartalsstatus = staben.
+  goal_periods: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'deny', reason: 'Ett verksamhetsår skapas av en människa i /mal.' }
+  },
+  goals: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  goal_indicators: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  goal_status_entries: {
     user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'allow' }
   },
