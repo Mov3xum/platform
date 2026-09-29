@@ -69,6 +69,7 @@ import {
   addCompassQuestion,
   updateCompassModuleField,
   createWorkshop,
+  createSurvey,
   assignWorkshop,
   assignEducationDocument,
   createTask,
@@ -1141,6 +1142,76 @@ export function buildChatTools(
             }
           },
           required: ['title']
+        }
+      }
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_survey',
+        description:
+          'Skapar en digital ENKÄT under Marknadsverktyget → fliken ' +
+          'Utvärdering (/inflode/utvardering): utvärdering efter ett event/en ' +
+          'communityfrukost/en workshop, program- eller alumniuppföljning, ' +
+          'kundnöjdhet. Detta är RÄTT verktyg när personalen säger "enkät", ' +
+          '"utvärdering", "uppföljningsenkät" eller "feedback från ' +
+          'deltagarna" — INTE ett utbildningsdokument, INTE en workshop och ' +
+          'INTE en Startupkompass-modul. Svaren är anonyma och samlas på en ' +
+          'publik länk (/u/<slug>). Utan `questions` används mallens frågor ' +
+          'för vald `kind`. Enkäten skapas OPUBLICERAD — personalen granskar ' +
+          'frågorna och publicerar i byggaren (admin_path i svaret). Följer ' +
+          'enkäten upp något konkret (event, workshop, bolag, uppdrag, ' +
+          'årshjulspost, kompassmodul): slå upp posten med search_records och ' +
+          'ange link_kind + link_id, så syns enkäten på den sidan.',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Enkätens namn (max 160 tecken), t.ex. "Utvärdering: Communityfrukost september".' },
+            kind: {
+              type: 'string',
+              enum: ['course', 'event', 'program', 'followup', 'custom'],
+              description:
+                'Mall: course = utbildning/workshop, event = event/träff, ' +
+                'program = inkubatorprogram, followup = uppföljning (bolag/uppdrag), ' +
+                'custom = egen enkät. Default custom.'
+            },
+            description: { type: 'string', description: 'Intern beskrivning (max 500 tecken).' },
+            welcome_title: { type: 'string', description: 'Rubrik besökaren ser (max 160).' },
+            welcome_body: { type: 'string', description: 'Ingress besökaren ser (max 2000).' },
+            thank_you_message: { type: 'string', description: 'Tacktext efter inskick (max 500).' },
+            questions: {
+              type: 'array',
+              description:
+                'Egna frågor i ordning (max 40). Utelämna för mallens frågor.',
+              items: {
+                type: 'object',
+                properties: {
+                  type: {
+                    type: 'string',
+                    enum: ['rating', 'nps', 'yes_no', 'choice', 'multi_choice', 'short_text', 'long_text'],
+                    description:
+                      'rating = betyg 1–5, nps = 0–10, yes_no = ja/nej, choice = ' +
+                      'enval, multi_choice = flerval, short_text/long_text = fritext.'
+                  },
+                  prompt: { type: 'string', description: 'Frågetexten (max 300 tecken).' },
+                  required: { type: 'boolean', description: 'Obligatorisk? Default false.' },
+                  choices: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Bara choice/multi_choice: minst två alternativ (max 12).'
+                  }
+                },
+                required: ['type', 'prompt']
+              }
+            },
+            link_kind: {
+              type: 'string',
+              enum: ['event', 'workshop', 'startup', 'mission', 'annual_wheel', 'compass_module'],
+              description: 'Vad enkäten följer upp (valfritt). Kräver link_id.'
+            },
+            link_id: { type: 'string', description: 'Post-id för källan (från search_records/query_collection).' }
+          },
+          required: ['name']
         }
       }
     });
@@ -2309,6 +2380,8 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
       return { tool: name, label: 'Uppdaterar modulen' };
     case 'create_workshop':
       return { tool: name, label: 'Skapar workshop-utkast' };
+    case 'create_survey':
+      return { tool: name, label: 'Skapar enkät under Utvärdering' };
     case 'assign_workshop':
       return { tool: name, label: 'Tilldelar workshop' };
     case 'assign_education_document':
@@ -3541,6 +3614,8 @@ export async function dispatchToolCall(
       return runUpdateCompassModuleField(args, ctx);
     case 'create_workshop':
       return runCreateWorkshop(args, ctx);
+    case 'create_survey':
+      return runCreateSurvey(args, ctx);
     case 'assign_workshop':
       return runAssignWorkshop(args, ctx);
     case 'assign_education_document':
@@ -4445,6 +4520,48 @@ async function runCreateWorkshop(
       next_step:
         'Workshopen är ett utkast. Personalen kompletterar med bild/film och ' +
         'publicerar den i /education.',
+      logged_in: 'agent_actions'
+    }
+  };
+}
+
+/** Marknadsverktyget → Utvärdering (§ 47): digital enkät som opublicerat utkast. */
+async function runCreateSurvey(
+  args: Record<string, unknown>,
+  ctx: ToolDispatchContext
+): Promise<ToolResult> {
+  const actor = requireAgentActor(ctx);
+  if ('error' in actor) return { ok: false, error: actor.error };
+
+  const result = await createSurvey(ctx.pb, actor, {
+    name: typeof args.name === 'string' ? args.name : '',
+    kind: typeof args.kind === 'string' ? args.kind : undefined,
+    description: typeof args.description === 'string' ? args.description : undefined,
+    welcomeTitle: typeof args.welcome_title === 'string' ? args.welcome_title : undefined,
+    welcomeBody: typeof args.welcome_body === 'string' ? args.welcome_body : undefined,
+    thankYouMessage: typeof args.thank_you_message === 'string' ? args.thank_you_message : undefined,
+    questions: args.questions,
+    linkKind: typeof args.link_kind === 'string' ? args.link_kind : undefined,
+    linkId: typeof args.link_id === 'string' ? args.link_id : undefined
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    data: {
+      survey_id: result.value.surveyId,
+      name: result.value.name,
+      kind: result.value.kind,
+      question_count: result.value.questionCount,
+      admin_path: result.value.adminPath,
+      public_path: result.value.publicPath,
+      link_kind: result.value.linkKind ?? undefined,
+      link_label: result.value.linkLabel || undefined,
+      published: false,
+      next_step:
+        'Enkäten ligger under Marknadsverktyget → Utvärdering som OPUBLICERAD. ' +
+        'Personalen granskar frågorna, publicerar den i byggaren (då börjar den ' +
+        'publika länken ta emot svar) och kan skicka ut den till eventets deltagare.',
       logged_in: 'agent_actions'
     }
   };

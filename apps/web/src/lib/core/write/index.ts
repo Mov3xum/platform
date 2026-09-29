@@ -19,6 +19,14 @@ export {
   type CompassModuleWritableField
 } from './compass';
 export { createWorkshop } from './workshops';
+// Marknadsverktyget → Utvärdering (§ 47)
+export {
+  createSurvey,
+  surveyPath,
+  SURVEY_LINK_SOURCE,
+  type CreateSurveyParams,
+  type CreatedSurveyResult
+} from './surveys';
 // Utökad chatt-skrivyta (§ 33)
 export { assignWorkshop, assignEducationDocument } from './assignments';
 export { createTask, moveTask, TASK_KINDS } from './tasks';

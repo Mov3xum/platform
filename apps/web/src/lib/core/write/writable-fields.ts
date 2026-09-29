@@ -323,6 +323,30 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
       agent: { kind: 'deny', reason: 'Aktivering av en workshop görs av en människa i /education.' }
     }
   },
+  // Marknadsverktyget → Utvärdering (§ 47): digitala enkäter. Agenten får
+  // bygga innehållet (namn, texter, frågor) som OPUBLICERAD enkät; att
+  // publicera (/u/<slug> börjar ta emot svar) och skicka ut till deltagare
+  // är mänskliga beslut i byggaren. Samma krets som `MANAGE_ROLES` i
+  // lib/actions/surveys.ts.
+  surveys: {
+    name: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    kind: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    welcome_title: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    welcome_body: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    thank_you_message: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    questions: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    link_kind: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    link_id: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    is_active: {
+      user: { kind: 'roles', roles: COMPASS_MANAGE },
+      agent: { kind: 'deny', reason: 'Publicering av en enkät görs av en människa i /inflode/utvardering.' }
+    },
+    send_at: {
+      user: { kind: 'roles', roles: COMPASS_MANAGE },
+      agent: { kind: 'deny', reason: 'Utskick till deltagare schemaläggs av en människa i /inflode/utvardering (§ 47.5).' }
+    }
+  },
   // Kontaktboken (§ 45). Verksamhetsfälten får agenten uppdatera; direkt-PII
   // (e-post/telefon) skrivs av en människa i UI:t (agenten kan inte verifiera
   // uppgifterna och ska inte gissa), `gender` är GDPR art. 9 (agent-nekad,
@@ -506,6 +530,11 @@ const CREATE_POLICIES: Record<
   },
   workshops: {
     user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  // Enkäter under Marknadsverktyget → Utvärdering (§ 47) skapas OPUBLICERADE.
+  surveys: {
+    user: { kind: 'roles', roles: COMPASS_MANAGE },
     agent: { kind: 'allow' }
   },
   // ── Utökad chatt-skrivyta (§ 33) ─────────────────────────────────────────

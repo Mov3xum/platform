@@ -30,6 +30,7 @@ export const DOMAIN_WRITE_TOOLS: ReadonlySet<string> = new Set([
   'add_compass_question',
   'update_compass_module_field',
   'create_workshop',
+  'create_survey',
   'assign_workshop',
   'assign_education_document',
   'create_task',

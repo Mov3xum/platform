@@ -68,6 +68,13 @@ export const TOOL_DOMAINS: readonly ToolDomain[] = [
     stems: ['kompass', 'inflöde', 'inflode', 'intag', 'quiz', 'formulär', 'formular', 'wizard', 'modul', 'frågor', 'fragor', 'lead', 'landningssida', 'publik sida']
   },
   {
+    // Marknadsverktyget → Utvärdering (§ 47): digitala enkäter. Breda stammar
+    // med flit — "uppföljning"/"feedback" efter ett event är typiskt en enkät.
+    id: 'surveys',
+    tools: ['create_survey'],
+    stems: ['enkät', 'enkat', 'utvärdering', 'utvardering', 'marknadsverktyg', 'nps', 'kundnöjdhet', 'kundnojdhet', 'nöjdhet', 'nojdhet', 'feedback', 'uppföljning', 'uppfoljning', 'följ upp', 'folj upp', 'frågeformulär', 'frageformular', 'survey']
+  },
+  {
     id: 'education',
     tools: ['create_workshop', 'assign_workshop', 'assign_education_document'],
     stems: ['workshop', 'utbildning', 'kurs', 'lektion', 'dokument', 'tilldela', 'tilldeln', 'övning', 'ovning']

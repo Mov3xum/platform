@@ -10,6 +10,7 @@ import { hasRole } from '@/lib/rbac';
 import { getSurvey, newPublicSlug } from '@/lib/surveys/store';
 import { dispatchSurveyInvites } from '@/lib/surveys/dispatch';
 import { getRecordInTenant } from '@/lib/core/write/helpers';
+import { SURVEY_LINK_SOURCE } from '@/lib/core/write/surveys';
 import type { Role } from '@platform/shared';
 import {
   SURVEY_LINK_DEFAULT_KIND,
@@ -18,7 +19,6 @@ import {
   isSurveyKind,
   normalizeSurveyQuestions,
   parseSurveyLinkRef,
-  type SurveyLinkKind,
   type SurveyLinkRef,
   type SurveyQuestion
 } from '@platform/shared';
@@ -56,17 +56,11 @@ function cap(v: FormDataEntryValue | null, max: number): string {
   return String(v ?? '').trim().slice(0, max);
 }
 
-// Källa → PB-kollektion + namnfält. Källan läses tenant-verifierat (§ 21) så en
-// enkät aldrig kan kopplas till en annan tenants post; etiketten härleds
-// server-side och tas ALDRIG från klienten.
-const LINK_SOURCE: Record<SurveyLinkKind, { collection: string; nameField: string }> = {
-  annual_wheel: { collection: 'annual_wheel_items', nameField: 'title' },
-  event: { collection: 'incubator_events', nameField: 'name' },
-  workshop: { collection: 'workshops', nameField: 'title' },
-  mission: { collection: 'missions', nameField: 'title' },
-  startup: { collection: 'startups', nameField: 'name' },
-  compass_module: { collection: 'compass_modules', nameField: 'name' }
-};
+// Källa → PB-kollektion + namnfält: `SURVEY_LINK_SOURCE` i skrivlagret (delas
+// med chatt-verktyget `create_survey`). Källan läses tenant-verifierat (§ 21)
+// så en enkät aldrig kan kopplas till en annan tenants post; etiketten
+// härleds server-side och tas ALDRIG från klienten.
+const LINK_SOURCE = SURVEY_LINK_SOURCE;
 
 export interface ResolvedSurveyLink extends SurveyLinkRef {
   label: string;
