@@ -1721,6 +1721,7 @@ export * from './org-posts';
 export * from './home';
 export * from './procurement';
 export * from './contacts';
+export * from './agent-memory';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */

@@ -850,7 +850,10 @@ const REQUIRED_APP_FIELDS = [
   { collection: 'tasks', fields: ['procurement', 'procurement_calloff', 'rule_key'] },
   // Kontaktboken (§ 41, migration 1700000156): utan owners/organization/
   // category "sparas" ägare/kategori tyst bort (PB släpper okända fält).
-  { collection: 'contacts', fields: ['owners', 'organization', 'category'] }
+  { collection: 'contacts', fields: ['owners', 'organization', 'category'] },
+  // AI-minne (§ 16.4): kategori per notering = migration 1700000155. Saknas
+  // fältet "sparas" kategorin från UI/memory_write men försvinner tyst.
+  { collection: 'agent_memory', fields: ['category'] }
 ];
 
 const MUST_NOT_BE_REQUIRED = [

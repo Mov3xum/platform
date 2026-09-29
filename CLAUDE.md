@@ -1833,6 +1833,41 @@ managed-agents memory stores, men EU-suveränt och striktare scope:at).
 - **Riskklass:** minimal (intern agent-scratchpad, ingen profilering av
   individer).
 
+**Kategorier för överblick (migration `1700000155`, 2026-09).** Minnet växer
+fritt med varje korrigering, så `/installningar/ai-minne` grupperar
+noteringarna i en **fast, liten taxonomi** (`packages/shared/src/agent-memory.ts`,
+ren + enhetstestad, samma mönster som `file-topics.ts`/`competences.ts`):
+`terminologi` (vad ord betyder hos er), `datatolkning` (hur fält/typer ska
+räknas och filtreras), `arbetssatt` (svarsformat/preferenser), `bolag`
+(bestående fakta om enskilda bolag), `portfolj` (observationer över
+portföljen/omvärlden), `processer` (Movexums rutiner) och `ovrigt`.
+- **Fält:** `agent_memory.category` — valfri PB-select över taxonomin.
+  Speglad i `setup-via-api.mjs` (`patchCollection`) och asserterad i
+  `verify-baseline.mjs` (`REQUIRED_APP_FIELDS`) eftersom PB släpper okända
+  fält tyst (§ 24.4/§ 30.4-invarianten); server-actionerna läser dessutom
+  tillbaka posten efter skrivning och varnar om kategorin inte fastnade.
+- **Saknad kategori härleds deterministiskt** (`inferAgentMemoryCategory`:
+  nyckelordsträffar, nyckeln väger dubbelt — INGEN AI-inferens) och märks
+  "Härledd kategori" i UI:t tills en människa bekräftar eller flyttar den
+  (`setAgentMemoryCategoryAction`). Ingen backfill i migrationen — människan
+  bekräftar, migrationen gissar inte.
+- **Chatten:** `memory_write` kräver `category` (verktygsschemat listar
+  kategorierna med beskrivning; okänt värde avvisas med de giltiga namnen,
+  aldrig tyst `ovrigt`); `memory_read` tar ett valfritt `category`-filter
+  (appliceras i JS så härledda äldre rader ingår) och returnerar
+  `category`/`category_source`. Auto-recall-blocket (`buildMemoryRecallBlock`)
+  grupperas per kategori i taxonomins ordning — samma indelning som
+  personalen ser. Kvittot (§ 33.4) för `memory_write` länkar till
+  `/installningar/ai-minne?kategori=<id>`.
+- **UI:** kategorichips med antal, sök (rubrik/innehåll/bolag), scope-filter
+  (hela tenanten/per bolag), filter "Härledd kategori", grupperade sektioner
+  med rubrik + beskrivning, långa noteringar hopfällda ("Visa hela"),
+  kategori-select i redigera/lägg till (skapa-formuläret förhandsvisar den
+  härledda kategorin), "Flytta till kategori" per notering. Läsvägen
+  paginerar (tak 5 000, kapning visas som banner — § 33.4).
+- **PII/riskklass oförändrad:** kategorin är metadata om vilken SORTS regel
+  noteringen är; inga nya datavägar, kollektionen är fortsatt denylistad.
+
 ### 16.5 Kvalitetsverifiering (grader-pass)
 
 Migration `1700000080` lägger `verify_rubric` (text) på `tools`. När en
