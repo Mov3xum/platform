@@ -17,14 +17,27 @@ import { buildInflodeTabs } from '../../_tabs';
 
 export const dynamic = 'force-dynamic';
 
+// Felkoder från `createSurveyAction` (`CreateSurveyErrorCode`). Orsaken (PB:s
+// fältdetaljer, PII-fri) följer med i `?detail=` och visas under texten så
+// felet går att felsöka — i stället för produktionens anonyma "Något gick fel".
+const ERROR_TEXT: Record<string, string> = {
+  link_missing:
+    'Det som enkäten skulle följa upp hittades inte (raderat eller fel länk). Öppna källan igen och klicka "Skapa uppföljning", eller skapa enkäten utan koppling.',
+  collection_missing:
+    'Enkäter kan inte skapas ännu: kollektionen "surveys" saknas i PocketBase på den här instansen.',
+  create_failed: 'Kunde inte skapa enkäten.'
+};
+
 export default async function NewSurveyPage({
   searchParams
 }: {
-  searchParams: Promise<{ for?: string }>;
+  searchParams: Promise<{ for?: string; error?: string; detail?: string }>;
 }) {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) redirect('/inflode');
-  const { for: forRaw } = await searchParams;
+  const { for: forRaw, error: errorKey, detail: detailRaw } = await searchParams;
+  const errorText = errorKey ? ERROR_TEXT[errorKey] || ERROR_TEXT.create_failed : null;
+  const errorDetail = errorText ? (detailRaw || '').slice(0, 400) : '';
 
   // "Skapa uppföljning" från en aktivitet/event/workshop/… (§ 47.4). Källan
   // tenant-verifieras här OCH i server-actionen; en okänd referens visas
@@ -46,6 +59,26 @@ export default async function NewSurveyPage({
           </div>
         </div>
 
+        {errorText && (
+          <div
+            role="alert"
+            className="mx-t-13"
+            style={{
+              padding: '10px 12px',
+              borderRadius: 10,
+              background: 'var(--movexum-pastell-orange)',
+              color: 'var(--movexum-morkorange)'
+            }}
+          >
+            <div>{errorText}</div>
+            {errorDetail && (
+              <div className="mx-t-12" style={{ marginTop: 4, opacity: 0.9 }}>
+                Orsak: {errorDetail}
+              </div>
+            )}
+          </div>
+        )}
+
         {link && (
           <>
             <input type="hidden" name="for" value={surveyLinkRefParam(link)} />
@@ -66,7 +99,7 @@ export default async function NewSurveyPage({
             </Card>
           </>
         )}
-        {linkMissing && (
+        {linkMissing && errorKey !== 'link_missing' && (
           <div
             role="alert"
             className="mx-t-13"

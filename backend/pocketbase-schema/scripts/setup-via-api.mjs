@@ -3704,6 +3704,79 @@ await ensureCollection({
 });
 await patchCollection('org_posts', [{ name: 'media', type: 'json', required: false, maxSize: 20000 }]);
 
+// Migrationer 1700000149_create_surveys/1700000150/1700000151: Marknadsverktyg
+// → Utvärdering (§ 47). Digitala enkäter (`surveys`) + anonyma svar
+// (`survey_responses`). Speglas här sedan 2026-09: kollektionerna var
+// migration-only, så en instans som synkas via "Sync PocketBase" i stället
+// för PB:s auto-migrate saknade dem → `createSurveyAction` fick 404 och
+// /inflode/utvardering/new svarade 500. `ensureCollection` LÄGGER bara till
+// saknade fält (aldrig tar bort), så fälten från 1700000150 (koppling till
+// källa) och 1700000151 (utskick) ingår. Select-värdena MÅSTE spegla
+// packages/shared/src/survey.ts. list/view staff/observer-only (§ 21.3),
+// createRule roll-lös på `surveys` (rollen enforce:as i server-actionen) och
+// NULL på `survey_responses` (inskick sker bara via den publika route-
+// handlern med superuser, § 23.2-mönstret).
+await ensureCollection({
+  id: 'surveys_col',
+  name: 'surveys',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'name', type: 'text', required: true, min: 1, max: 160 },
+    { name: 'kind', type: 'select', required: false, maxSelect: 1, values: ['course', 'event', 'program', 'followup', 'custom'] },
+    { name: 'description', type: 'text', required: false, max: 500 },
+    { name: 'welcome_title', type: 'text', required: false, max: 160 },
+    { name: 'welcome_body', type: 'text', required: false, max: 2000 },
+    { name: 'thank_you_message', type: 'text', required: false, max: 500 },
+    { name: 'questions', type: 'json', required: false, maxSize: 200000 },
+    { name: 'is_active', type: 'bool', required: false },
+    { name: 'public_slug', type: 'text', required: false, max: 60 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    // 1700000150 — uppföljning av en källa (§ 47.4). Polymorf, ingen relation.
+    { name: 'link_kind', type: 'select', required: false, maxSelect: 1, values: ['annual_wheel', 'event', 'workshop', 'mission', 'startup', 'compass_module'] },
+    { name: 'link_id', type: 'text', required: false, max: 64 },
+    { name: 'link_label', type: 'text', required: false, max: 200 },
+    // 1700000151 — utskick till deltagare (§ 47.5). Aldrig e-postadresser.
+    { name: 'send_at', type: 'date', required: false },
+    { name: 'sent_at', type: 'date', required: false },
+    { name: 'sent_count', type: 'number', required: false, min: 0 },
+    { name: 'send_base_url', type: 'text', required: false, max: 300 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_surveys_tenant ON surveys (tenant)',
+    "CREATE UNIQUE INDEX idx_surveys_public_slug ON surveys (public_slug) WHERE public_slug != ''"
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_READ}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_READ}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_ROLES}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_ROLES}`
+});
+await ensureCollection({
+  id: 'survey_responses_col',
+  name: 'survey_responses',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'survey', type: 'relation', required: true, collectionId: 'surveys_col', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'answers', type: 'json', required: true, maxSize: 200000 },
+    { name: 'channel', type: 'text', required: false, max: 80 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_survey_responses_survey ON survey_responses (survey)',
+    'CREATE INDEX idx_survey_responses_tenant ON survey_responses (tenant)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_READ}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_READ}`,
+  createRule: null,
+  updateRule: null,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_ROLES}`
+});
+
 // Migrationer 1700000149–152: upphandlingar & excellens-insatser (§ 39).
 // procurements → procurement_calloffs (avrop per bolag) → procurement_rules
 // (regelstyrd uppföljning som expanderas till `tasks`). Select-värdena MÅSTE
@@ -4796,6 +4869,10 @@ const FORCE_CREATE_RULES = {
   procurement_calloffs: `${ANY_AUTH} && @request.auth.tenant != ""`,
   procurement_rules: `${ANY_AUTH} && @request.auth.tenant != ""`,
   procurement_documents: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Utvärdering/enkäter (§ 47, migration 1700000149_create_surveys) — rollen
+  // enforce:as i server-actionen. `survey_responses` ska INTE hit: dess
+  // createRule är medvetet NULL (bara superuser via den publika routen).
+  surveys: `${ANY_AUTH} && @request.auth.tenant != ""`,
   // Kontaktboken (§ 45, migration 1700000157) — roll-enforcement i skrivlagret.
   contact_requests: `${ANY_AUTH} && @request.auth.tenant != ""`,
   // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167) —

@@ -191,6 +191,12 @@ async function verifyCollectionsExist() {
     // Saknas den felar "Starta mötet" med ett 404 från PB; gör den till ett
     // hårt invariant så att en instans utan migrationen fälls i deployen.
     'meeting_transcripts',
+    // Marknadsverktyg → Utvärdering (§ 47, migration 1700000149_create_surveys).
+    // Saknas `surveys` svarar PB 404 på "Skapa enkät" (incident 2026-09:
+    // /inflode/utvardering/new gav 500). Speglas numera även i
+    // setup-via-api.mjs; existensen är ett hårt invariant.
+    'surveys',
+    'survey_responses',
     // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167).
     'funding_projects',
     'funding_work_packages',
@@ -399,6 +405,10 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'procurement_calloffs',
   'procurement_rules',
   'procurement_documents',
+  // Utvärdering/enkäter (§ 47). Enkätdefinitioner och anonyma svar (fritext
+  // kan bära PII) → staff/observer-only; bolagen svarar bara via /u/<slug>.
+  'surveys',
+  'survey_responses',
   // Målstyrning & verksamhetsplan (migration 1700000159, § 42). Tenant-bred
   // intern styrning (VP-mål, kvartalsstatus) → staff/observer-only.
   'goal_periods',

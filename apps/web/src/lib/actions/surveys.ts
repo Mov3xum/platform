@@ -10,6 +10,7 @@ import { hasRole } from '@/lib/rbac';
 import { getSurvey, newPublicSlug } from '@/lib/surveys/store';
 import { dispatchSurveyInvites } from '@/lib/surveys/dispatch';
 import { getRecordInTenant } from '@/lib/core/write/helpers';
+import { describePbError, pbFieldCodes, pbStatus } from '@/lib/pb-error';
 import { SURVEY_LINK_SOURCE } from '@/lib/core/write/surveys';
 import type { Role } from '@platform/shared';
 import {
@@ -89,7 +90,23 @@ export async function resolveSurveyLink(
   return { ...ref, label: label || `${ref.kind} ${ref.id}`, slug: typeof row.slug === 'string' ? row.slug : undefined };
 }
 
-/** Skapar en enkät från en mall och skickar staff vidare till byggaren. */
+/**
+ * Felkoder som `createSurveyAction` skickar tillbaka till `/inflode/utvardering/new`
+ * via `?error=` (+ `?detail=` med PB:s fältdetaljer). Texterna bor i sidan.
+ */
+export type CreateSurveyErrorCode = 'link_missing' | 'collection_missing' | 'create_failed';
+
+/**
+ * Skapar en enkät från en mall och skickar staff vidare till byggaren.
+ *
+ * Fel kastas ALDRIG ut ur actionen (incident 2026-09): ett kastat fel i en
+ * server action blir i produktion bara "An error occurred in the Server
+ * Components render" + digest — sidan `new` svarade 500 utan att någon kunde
+ * se varför. Nu loggas orsaken PII-fritt (status + fältKODER, aldrig värden)
+ * och användaren skickas tillbaka till formuläret med `?error=` + `?detail=`
+ * (samma mönster som `createModuleAction`, § 23.7). En saknad `surveys`-
+ * kollektion (PB 404 — migration 1700000149 inte körd) pekas ut uttryckligen.
+ */
 export async function createSurveyAction(formData: FormData) {
   const user = await requireManager();
   const pb = await getServerPb();
@@ -97,10 +114,13 @@ export async function createSurveyAction(formData: FormData) {
   // Valfri källa (§ 47.4). En referens som inte kan verifieras avvisas —
   // aldrig en tyst fristående enkät när staff trodde den var kopplad.
   const forRaw = formData.get('for');
+  const forParam = typeof forRaw === 'string' && forRaw ? forRaw : '';
   let link: ResolvedSurveyLink | null = null;
-  if (typeof forRaw === 'string' && forRaw) {
-    link = await resolveSurveyLink(pb, user, forRaw);
-    if (!link) throw new Error('Det som enkäten skulle följa upp hittades inte.');
+  if (forParam) {
+    link = await resolveSurveyLink(pb, user, forParam);
+    if (!link) {
+      redirect(`/inflode/utvardering/new?${new URLSearchParams({ error: 'link_missing' })}`);
+    }
   }
 
   const kindRaw = String(formData.get('kind') || (link ? SURVEY_LINK_DEFAULT_KIND[link.kind] : 'custom'));
@@ -108,6 +128,7 @@ export async function createSurveyAction(formData: FormData) {
   const tpl = SURVEY_TEMPLATES[kind];
   const name = cap(formData.get('name'), 160) || (link ? `Uppföljning: ${link.label}` : tpl.label);
   let created: { id: string } | null = null;
+  let createError: { code: CreateSurveyErrorCode; detail: string } | null = null;
   // Den slumpade sluggen kolliderar i praktiken aldrig; ett unikt-index-fel
   // (400) ger ett nytt försök i stället för ett hårt fel.
   for (let attempt = 0; attempt < 3 && !created; attempt++) {
@@ -132,22 +153,51 @@ export async function createSurveyAction(formData: FormData) {
         c.collection('surveys').create<{ id: string }>(payload)
       );
     } catch (err) {
-      if (attempt === 2) {
-        console.error('[surveys] create failed', (err as { status?: number })?.status);
-        throw new Error('Kunde inte skapa enkäten. Har migration 1700000149 körts?');
+      const status = pbStatus(err);
+      const fieldCodes = pbFieldCodes(err);
+      // En saknad kollektion (404) blir aldrig bättre av fler försök.
+      if (status === 404 || attempt === 2) {
+        console.error('[surveys] create failed', { tenantId: user.tenant, status, fieldCodes });
+        if (status === 404) {
+          createError = {
+            code: 'collection_missing',
+            detail:
+              'PocketBase svarade 404 för kollektionen "surveys" — migration 1700000149 (Utvärdering) har inte körts på den här instansen. Redeploya PocketBase eller kör "Sync PocketBase" (setup-via-api.mjs) och försök igen.'
+          };
+        } else {
+          createError = {
+            code: 'create_failed',
+            detail: describePbError(
+              err,
+              Object.keys(fieldCodes).length > 0
+                ? `PocketBase avvisade värdena (HTTP ${status ?? '?'}).`
+                : `PocketBase nekade skrivningen (HTTP ${status ?? '?'}).`
+            )
+          };
+        }
+        break;
       }
     }
+  }
+  if (createError || !created) {
+    // redirect() kastar — måste ligga UTANFÖR try/catch.
+    const qs = new URLSearchParams({
+      error: createError?.code ?? 'create_failed',
+      detail: (createError?.detail ?? '').slice(0, 400)
+    });
+    if (forParam) qs.set('for', forParam);
+    redirect(`/inflode/utvardering/new?${qs.toString()}`);
   }
   revalidatePath('/inflode/utvardering');
   if (link) {
     // Schema-drift (§ 24.4-invarianten): PB släpper okända fält tyst. Läs
     // tillbaka och varna i stället för att låtsas att kopplingen finns.
-    const back = await getSurvey(pb, user.tenant, created!.id);
+    const back = await getSurvey(pb, user.tenant, created.id);
     if (back && !back.link_kind) {
-      redirect(`/inflode/utvardering/${created!.id}?varning=koppling`);
+      redirect(`/inflode/utvardering/${created.id}?varning=koppling`);
     }
   }
-  redirect(`/inflode/utvardering/${created!.id}`);
+  redirect(`/inflode/utvardering/${created.id}`);
 }
 
 export interface SaveSurveyInput {
