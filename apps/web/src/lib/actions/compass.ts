@@ -429,6 +429,8 @@ type ModuleRow = {
   public_slug?: string;
   is_active?: boolean;
   public_url_enabled?: boolean;
+  purpose?: string;
+  flow_type?: string;
 };
 
 /**
@@ -500,6 +502,9 @@ export async function createModuleAction(formData: FormData) {
   if (!name) throw new Error('Modul måste ha ett namn');
   if (!FLOW_TYPES.includes(flowType as (typeof FLOW_TYPES)[number])) {
     throw new Error('Ogiltig flow_type');
+  }
+  if (purpose === 'survey' && flowType === 'chat') {
+    throw new Error('En enkät är ett formulär eller quiz — inte en AI-chatt (§ 43).');
   }
 
   const slug = slugify(slugRaw || name);
@@ -832,6 +837,13 @@ async function applyModuleUpdate(
   const flow = String(formData.get('flow_type') || '');
   if (FLOW_TYPES.includes(flow as (typeof FLOW_TYPES)[number])) {
     patch.flow_type = flow;
+  }
+  // En enkät får aldrig bli AI-chatt (§ 43): svaren skulle bli sessionsbundna
+  // och skickas till modellen. Gäller både nytt syfte och ny flödestyp.
+  const effectivePurpose = wantedPurpose ?? normalizeCompassPurpose(existing.purpose);
+  const effectiveFlow = (patch.flow_type as string | undefined) ?? existing.flow_type;
+  if (effectivePurpose === 'survey' && effectiveFlow === 'chat') {
+    throw new Error('En enkät är ett formulär eller quiz — inte en AI-chatt. Byt flödestyp eller syfte.');
   }
   const model = String(formData.get('model') || '');
   if (model) patch.model = model;

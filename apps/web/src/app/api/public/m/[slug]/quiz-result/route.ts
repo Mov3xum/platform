@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { isSurveyModule } from '@platform/shared';
+import { storeSurveyResponse } from '@/lib/compass/survey';
 import { createLead } from '@/lib/compass/store';
 import {
   resolvePublicModule,
@@ -25,6 +27,8 @@ const MAX_PER_WINDOW = 15;
 interface QuizBody {
   answers: Record<string, string | string[]>;
   contact?: { name?: string; email?: string; phone?: string; organization?: string };
+  /** Enkätens subjekt ur `?om=<id>` (§ 43). */
+  subject?: string;
   attribution?: Attribution;
   consent?: boolean;
   contact_preference?: string;
@@ -93,6 +97,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const score = scoreQuiz(quizQuestions, body.answers || {});
   const buckets = isResultBucketArray(module.result_buckets) ? module.result_buckets : [];
   const bucket = resolveBucket(score, buckets);
+
+  // ENKÄT (§ 43): svaren lagras per fråga mot subjektet — inget lead. Fela
+  // högt om lagringen misslyckas (svaren får inte tyst försvinna).
+  if (isSurveyModule(module)) {
+    const stored = await storeSurveyResponse(pb, tenant, {
+      module,
+      questions,
+      answers: body.answers || {},
+      subjectId: body.subject
+    });
+    if (!stored) {
+      return NextResponse.json(
+        { error: 'Dina svar kunde inte sparas just nu. Försök igen om en stund.' },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json({ bucket, score: score.total });
+  }
 
   // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead — visa
   // bara resultatet i så fall.

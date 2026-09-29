@@ -159,6 +159,26 @@ export function isAggregateOnlyIndicator(indicator: Pick<GoalIndicator, 'source'
 /** Roller som får se art. 9-aggregat (§ 10.2: admin/incubator_lead/coach). */
 export const AGGREGATE_ONLY_VIEWER_ROLES: readonly string[] = ['admin', 'incubator_lead', 'coach'];
 
+/**
+ * Roller vars egen token läser HELA indikatorkällan (metrikregistret över
+ * portföljen, enkätaggregatet). Bara de får skriva om en beräknad/enkät-
+ * snapshot vid statusrapportering — en mentor med smalare RLS skulle annars
+ * spara ett partiellt värde som "sanning" (§ 42.3). Övriga rapporterar
+ * status utan att röra värdet.
+ */
+export const INDICATOR_SOURCE_READ_ROLES: readonly string[] = ['admin', 'incubator_lead', 'coach'];
+
+/** Avläsning av en beräknad/enkät-indikator vid statusrapportering (§ 42.3). */
+export interface IndicatorReading {
+  source: 'computed' | 'survey';
+  /** null = kunde inte läsas (för liten grupp, läsfel, ingen data) — visas som "–", aldrig 0. */
+  value: number | null;
+  /** false när underlaget kapades — visa som "≥", aldrig som exakt. */
+  complete: boolean;
+  /** PII-fri förklaring. */
+  note?: string;
+}
+
 export interface GoalStatusEntry {
   id: string;
   tenant: string;

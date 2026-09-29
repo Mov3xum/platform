@@ -476,7 +476,9 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
     `user_app_integrations`, `user_mistral_connectors`.
   - **B. Strikt privat ägaren-bara-innehåll** (att exponera bryter
     § 21-isoleringen): `chat_threads`, `user_files`, `deep_jobs`,
-    `agent_memory`.
+    `agent_memory`, `meeting_transcripts`, `procurement_documents` (§ 39.3)
+    samt `compass_responses` (råa enkät-/intagssvar per fråga, § 43 —
+    målstyrningen får bara det k-anonyma aggregatet).
 
   Allt annat — CRM (`contacts`), compass-inflöde (`compass_*`), de minimis
   (`de_minimis_*`), avtal/signeringsbevis (`agreement_signatures`),
@@ -6107,7 +6109,25 @@ Mål & VP (§ 42).
   schema utan fältet avvisas tydligt (§ 24.4-invarianten).
 - **Anonymitet är strukturell:** enkätinskick skapar ingen `session_token`,
   ingen `visitor_ip_hash`, inget lead och ingen `compass_security_events`-rad
-  med IP. Rate-limit per IP finns bara i processminnet.
+  med IP. Rate-limit per IP finns bara i processminnet. För `anonymous`-
+  moduler lagras **inte heller subjektet** (ett `?om=<id>` ignoreras) och
+  indikatorn får **ingen kvartalssnapshot** i § 42 — aggregatet visas bara
+  live (en tidsserie per anonym personalenkät kunde läsas mot
+  personalförändringar).
+- **Ingen AI-chatt som enkät:** en enkätmodul kan inte ha `flow_type = chat`
+  (avvisas i `createModuleAction`/`applyModuleUpdate` och i skrivlagret;
+  den publika chat-routen svarar 400 för enkätmoduler). Enkäter är
+  deterministiska quiz/formulär.
+- **Svaren valideras före lagring** (`validateSurveyAnswer`): skala = heltal
+  1–10, val måste finnas bland frågans alternativ, fritext cappas till
+  2 000 tecken, okända nycklar släpps. Ett inskick utan ett enda giltigt
+  svar lagras inte; ett partiellt lagrat inskick rullas tillbaka
+  (§ 10.4). `aggregateSurvey` ignorerar dessutom skalvärden utanför 1–10.
+- **Snapshot-rättigheter (§ 42.3):** kvartalsvärdet för en beräknad/enkät-
+  indikator skrivs bara när aktören har en roll i
+  `INDICATOR_SOURCE_READ_ROLES` (admin/incubator_lead/coach — deras token
+  läser hela underlaget); övrig staff rapporterar status utan att röra
+  värdet, och ett okänt värde (null) skriver aldrig över ett känt.
 - **k-anonymitet (k = 5):** `aggregateSurvey` visar inga värden under fem
   respondenter; NPS kräver fem numeriska svar; fritext aggregeras aldrig
   (bara räknas). Medarbetarindex bryts aldrig ned per team.
@@ -6126,12 +6146,17 @@ Mål & VP (§ 42).
 
 Riskklass: n/a (ingen inferens; AI-sammanställningen § 23.6 körs bara för
 intag). GDPR: rättslig grund berättigat intresse + samtyckesgrind; DPIA-
-tillägg i `docs/privacy/dpia-surveys.md`. `compass_responses` nås av chattens
-`query_collection` under RLS + fältmaskning (§ 9.3) — svaren innehåller inga
-direkta identifierare. Compass är migration-only (§ 23.4) men
+tillägg i `docs/privacy/dpia-surveys.md`. `compass_responses` är
+**denylistad** i `lib/ai/redaction.ts` — chattens `query_collection`
+exponerar aldrig råsvar; målstyrningen får bara det k-anonyma aggregatet, och
+agentens `set_goal_status` får aldrig värdet för anonyma enkäter eller art. 9-
+aggregat. Compass är migration-only (§ 23.4) men
 `compass_modules` inline-def i `setup-via-api.mjs` speglar de nya fälten
 (§ 23.7-precedensen), och `goal_indicators`/`goal_status_entries` speglar
-`survey_module`/`has_target`/`has_value`.
+`survey_module`/`has_target`/`has_value` (migration 1700000160 backfills the
+flags on existing rows; `verify-baseline.mjs` asserts the fields in
+`REQUIRED_APP_FIELDS`, and `source` values are unioned via `patchCollection`).
+
 ## 44. Mina uppgifter (`/inkorg`) — personlig att-göra-vy
 
 ### 44.1 Översikt

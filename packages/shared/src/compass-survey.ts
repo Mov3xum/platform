@@ -52,6 +52,50 @@ export function isValidSurveySubjectId(v: unknown): v is string {
 /** Query-parametern den publika länken bär subjektet i: `/m/<slug>?om=<id>`. */
 export const SURVEY_SUBJECT_PARAM = 'om';
 
+/** Startupkompassens skalfråga är 1–10 (QuestionInput `ScaleInput`). */
+export const SURVEY_SCALE_MIN = 1;
+export const SURVEY_SCALE_MAX = 10;
+/** Fritextsvar cappas (dataminimering; fritext aggregeras aldrig). */
+export const SURVEY_TEXT_MAX = 2000;
+
+/**
+ * Validerar och normaliserar ETT publikt enkätsvar mot frågan innan lagring
+ * (§ 10.5 p. 7): skalfrågor måste vara heltal inom 1–10, val måste finnas
+ * bland alternativen, fritext cappas. Ogiltigt ⇒ null (svaret lagras inte).
+ */
+export function validateSurveyAnswer(
+  question: { input_type: string; choices?: { value: string }[] },
+  raw: unknown
+): string | null {
+  const values = Array.isArray(raw) ? raw : [raw];
+  const strings = values.map((v) => (typeof v === 'string' ? v.trim() : typeof v === 'number' ? String(v) : '')).filter(Boolean);
+  if (strings.length === 0) return null;
+  switch (question.input_type) {
+    case 'scale': {
+      const n = Number(strings[0].replace(',', '.'));
+      if (!Number.isInteger(n) || n < SURVEY_SCALE_MIN || n > SURVEY_SCALE_MAX) return null;
+      return String(n);
+    }
+    case 'choice': {
+      const allowed = new Set((question.choices ?? []).map((c) => c.value));
+      return allowed.has(strings[0]) ? strings[0] : null;
+    }
+    case 'multi_choice': {
+      const allowed = new Set((question.choices ?? []).map((c) => c.value));
+      const picked = [...new Set(strings.filter((v) => allowed.has(v)))];
+      return picked.length > 0 ? picked.join(', ') : null;
+    }
+    case 'email':
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(strings[0]) ? strings[0].slice(0, 254) : null;
+    case 'phone':
+      return /^[+\d][\d\s()-]{4,30}$/.test(strings[0]) ? strings[0].slice(0, 50) : null;
+    case 'short_text':
+      return strings.join(', ').slice(0, 500);
+    default:
+      return strings.join('\n').slice(0, SURVEY_TEXT_MAX);
+  }
+}
+
 // ─── Mallar ─────────────────────────────────────────────────────────────────
 
 export interface SurveyTemplateQuestion {
@@ -80,7 +124,7 @@ export const SURVEY_TEMPLATES: readonly SurveyTemplate[] = [
   {
     key: 'kundnojdhet',
     name: 'Kundnöjdhet — bolag',
-    description: 'Kvartalsvis nöjdhet per bolag (skala 1–5). Mål i VP: 4 av 5.',
+    description: 'Kvartalsvis nöjdhet per bolag (skala 1–10). VP-målet 4 av 5 motsvarar 8 av 10.',
     subject_kind: 'startup',
     anonymous: false,
     intro_message: 'Tre snabba frågor om hur ni upplever stödet från Movexum det här kvartalet.',
@@ -111,7 +155,7 @@ export const SURVEY_TEMPLATES: readonly SurveyTemplate[] = [
   {
     key: 'partnerenkat',
     name: 'Partnerenkät',
-    description: 'Årlig nöjdhet hos befintliga partners. Mål i VP: ≥ 80 % nöjda.',
+    description: 'Årlig nöjdhet hos befintliga partners (skala 1–10). Mål i VP: ≥ 80 % nöjda (≥ 7 av 10).',
     subject_kind: 'partner',
     anonymous: false,
     intro_message: 'Som partner till Movexum vill vi veta hur samarbetet fungerar.',
@@ -126,7 +170,7 @@ export const SURVEY_TEMPLATES: readonly SurveyTemplate[] = [
   {
     key: 'medarbetarindex',
     name: 'Medarbetarindex',
-    description: 'Anonym pulsmätning av arbetsmiljö och samarbete (skala 1–5). Visas först vid minst 5 svar.',
+    description: 'Anonym pulsmätning av arbetsmiljö och samarbete (skala 1–10). Visas först vid minst 5 svar.',
     subject_kind: 'staff',
     anonymous: true,
     intro_message: 'Fem frågor om hur det är att jobba på Movexum just nu. Enkäten är anonym.',
@@ -238,7 +282,8 @@ export function aggregateSurvey(
         }
         if (q.input_type === 'scale') {
           const n = toNumber(raw);
-          if (n !== null) {
+          // Extra skydd utöver valideringen vid lagring: värden utanför skalan räknas inte.
+          if (n !== null && n >= SURVEY_SCALE_MIN && n <= SURVEY_SCALE_MAX) {
             sum += n;
             numeric++;
             if (n >= 9) promoters++;
@@ -264,13 +309,13 @@ export function aggregateSurvey(
 }
 
 /**
- * Andel "nöjda" (svar ≥ `threshold` på 1–5) med k-anonymitet — det mått
- * partnermålet "≥ 80 % nöjda" använder.
+ * Andel "nöjda" (svar ≥ `threshold` på skalan 1–10) med respondenttröskel —
+ * det mått partnermålet "≥ 80 % nöjda" använder.
  */
 export function satisfiedShare(
   rows: readonly SurveyAnswerRow[],
   questionKey: string,
-  threshold = 4,
+  threshold = 7,
   k: number = AGGREGATE_MIN_GROUP
 ): number | null {
   const answers = rows.filter((r) => r.question_key === questionKey);

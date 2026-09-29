@@ -3921,7 +3921,6 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
-
 const AUTODATE_FIELDS = [
   { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
   { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
@@ -3985,6 +3984,10 @@ await ensureCollection({
 await patchCollection('notifications', [], {
   kind: { values: ['comment', 'mention', 'assigned', 'status_change', 'stage_advance', 'due_soon', 'contact_request', 'contact_decision'] }
 });
+// Migration 1700000160: goal_indicators.source += 'survey' (§ 43) — inline-
+// defen ovan bär redan fälten, men ensureCollection synkar inte select-värden
+// på en befintlig collection. Hela listan (patchCollection ERSÄTTER values).
+await patchCollection('goal_indicators', [], { source: { values: ['computed', 'manual', 'survey'] } });
 // Migration 1700000152: tasks.link_kind += 'procurement' + relationer +
 // rule_key (idempotensnyckel för regelgenererade uppföljningar). Union över
 // hela values-listan (patchCollection ERSÄTTER values).

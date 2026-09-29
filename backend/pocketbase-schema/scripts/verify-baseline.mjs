@@ -859,7 +859,11 @@ const REQUIRED_APP_FIELDS = [
   { collection: 'contacts', fields: ['owners', 'organization', 'category'] },
   // AI-minne (§ 16.4): kategori per notering = migration 1700000155. Saknas
   // fältet "sparas" kategorin från UI/memory_write men försvinner tyst.
-  { collection: 'agent_memory', fields: ['category'] }
+  { collection: 'agent_memory', fields: ['category'] },
+  // Målstyrning (§ 42, migration 1700000159) + enkätkälla (§ 43, migration
+  // 1700000160): utan flaggorna sparas "okänt" som 0 och en enkätindikator tappar sin källa.
+  { collection: 'goal_indicators', fields: ['has_target', 'survey_module'] },
+  { collection: 'goal_status_entries', fields: ['has_value'] }
 ];
 
 const MUST_NOT_BE_REQUIRED = [

@@ -2,6 +2,7 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import {
+  INDICATOR_SOURCE_READ_ROLES,
   isAggregateOnlyIndicator,
   isGoalPeriodStatus,
   isSurveyModule,
@@ -16,8 +17,8 @@ import {
   type GoalPeriod,
   type GoalPeriodStatus,
   type GoalStatusEntry,
-  type MetricKey,
-  type MetricValue
+  type IndicatorReading,
+  type MetricKey
 } from '@platform/shared';
 import { computeMetric } from '@/lib/metrics/registry';
 import { loadSurveyAggregate } from '@/lib/compass/survey';
@@ -41,8 +42,13 @@ import { fail, ok } from './types';
  *    `goal_indicators.has_target` och `goal_status_entries.has_value`
  *    (migration 1700000160) om talet är känt — läsvägen tolkar `0` utan
  *    flagga som null. Ett "kunde inte räknas" sparas alltså aldrig som 0.
- *  - Art. 9-aggregat (`aggregate_only`, § 41.2) persisteras ALDRIG i
- *    statusen och når aldrig agenten — de räknas live i UI:t för behöriga.
+ *  - Art. 9-aggregat (`aggregate_only`, § 41.2) och ANONYMA enkäter
+ *    persisteras ALDRIG i statusen och når aldrig agenten — de räknas live
+ *    i UI:t för behöriga (ett kvartalsvärde per anonym personalenkät vore en
+ *    tidsserie som kan läsas mot personalomsättning).
+ *  - Snapshotten skrivs bara av en aktör vars token läser hela källan
+ *    (`INDICATOR_SOURCE_READ_ROLES`); ett okänt värde (null) skriver aldrig
+ *    över ett känt.
  *  - En statusuppdatering rör bara de fält som faktiskt angetts: ett
  *    manuellt värde eller en kommentar raderas inte av ett anrop som bara
  *    byter status (SOC 2 processing integrity).
@@ -359,12 +365,18 @@ export interface RecordGoalStatusInput {
 
 export interface RecordGoalStatusResult {
   entry: GoalStatusEntry;
-  /** Registrets värde när indikatorn är beräknad (utelämnas för art. 9-aggregat). */
-  metric?: MetricValue;
+  /** Avläst värde när indikatorn är beräknad/enkät (utelämnas för art. 9-aggregat). */
+  reading?: IndicatorReading;
   /** true när indikatorn är ett känsligt aggregat — värdet visas bara live för behöriga. */
   aggregateOnly: boolean;
+  /** true när ett värde faktiskt skrevs i den här rapporteringen. */
+  valueWritten: boolean;
+  /** PII-fri orsak när värdet medvetet inte skrevs (visas som notis, aldrig som fel). */
+  skipReason?: string;
   created: boolean;
 }
+
+type EntryRow = GoalStatusEntry & { has_value?: boolean };
 
 export async function recordGoalStatus(
   pb: PocketBase,
@@ -391,48 +403,62 @@ export async function recordGoalStatus(
   if ('error' in period) return period.error;
 
   const aggregateOnly = isAggregateOnlyIndicator(indicator);
+  const maySnapshot = actor.roles.some((r) => INDICATOR_SOURCE_READ_ROLES.includes(r));
   let value: number | null = null;
   let valueProvided = false;
-  let metric: MetricValue | undefined;
+  let reading: IndicatorReading | undefined;
+  let skipReason: string | undefined;
 
   if (indicator.source === 'computed') {
     if (v.value.value !== null) {
       return fail('INVALID_VALUE', `"${indicator.label}" beräknas ur data — värdet kan inte anges manuellt.`);
     }
-    if (!aggregateOnly) {
-      metric = await computeMetric(indicator.metric_key as MetricKey, {
+    if (aggregateOnly) {
+      // Art. 9-aggregat: ingen snapshot — värdet räknas live i UI:t för behöriga.
+      skipReason = 'Känsligt aggregat — värdet sparas aldrig, det visas live för behöriga.';
+    } else if (!maySnapshot) {
+      skipReason = 'Bara admin, incubator lead och coach läser hela underlaget — värdet lämnades orört.';
+    } else {
+      const metric = await computeMetric(indicator.metric_key as MetricKey, {
         pb,
         tenant: actor.tenant,
         period: yearPeriod(period.year),
         today: stockholmDateKey(new Date())
       });
+      reading = { source: 'computed', value: metric.value, complete: metric.complete, note: metric.note };
       value = metric.value;
       valueProvided = true;
     }
-    // Art. 9-aggregat: ingen snapshot — värdet räknas live i UI:t för behöriga.
   } else if (indicator.source === 'survey') {
     if (v.value.value !== null) {
       return fail('INVALID_VALUE', `"${indicator.label}" hämtas ur enkäten — värdet kan inte anges manuellt.`);
     }
-    if (indicator.survey_module) {
-      const mod = await getRecordInTenant<{ id: string; tenant: string; slug: string }>(
-        pb,
-        actor,
-        'compass_modules',
-        indicator.survey_module,
-        'id,tenant,slug'
-      );
-      if (mod) {
-        const agg = await loadSurveyAggregate(pb, actor.tenant, mod, { period: yearPeriod(period.year) });
-        value = agg.score;
-        valueProvided = true;
-        metric = {
-          key: 'active_startups', // placeholder-nyckel: MetricValue kräver en MetricKey; enkäten är ingen registermetrik
-          value: agg.score,
-          complete: true,
-          note: agg.visible ? undefined : `Visas först vid minst ${agg.minGroup} svar (${agg.respondents} hittills).`
-        };
-      }
+    const mod = indicator.survey_module
+      ? await getRecordInTenant<{ id: string; tenant: string; slug: string; anonymous?: boolean }>(
+          pb,
+          actor,
+          'compass_modules',
+          indicator.survey_module,
+          'id,tenant,slug,anonymous'
+        )
+      : null;
+    if (!mod) {
+      skipReason = 'Indikatorn saknar enkätmodul — statusen sparas utan värde.';
+    } else if (mod.anonymous === true) {
+      // Anonym enkät: aggregatet visas bara live (§ 43.2) — ingen kvartalsserie.
+      skipReason = 'Anonym enkät — aggregatet visas live och sparas aldrig som kvartalsvärde.';
+    } else if (!maySnapshot) {
+      skipReason = 'Bara admin, incubator lead och coach läser hela underlaget — värdet lämnades orört.';
+    } else {
+      const agg = await loadSurveyAggregate(pb, actor.tenant, mod, { period: yearPeriod(period.year) });
+      reading = {
+        source: 'survey',
+        value: agg.score,
+        complete: true,
+        note: agg.visible ? undefined : `Visas först vid minst ${agg.minGroup} svar (${agg.respondents} hittills).`
+      };
+      value = agg.score;
+      valueProvided = true;
     }
   } else if (v.value.value !== null) {
     const w = canWriteField(actor, GOAL_STATUS_ENTRIES, 'value');
@@ -442,9 +468,9 @@ export async function recordGoalStatus(
   }
 
   // Idempotent upsert på (tenant, indicator, quarter).
-  let existing: GoalStatusEntry | null = null;
+  let existing: EntryRow | null = null;
   try {
-    const res = await pb.collection(GOAL_STATUS_ENTRIES).getList<GoalStatusEntry>(1, 1, {
+    const res = await pb.collection(GOAL_STATUS_ENTRIES).getList<EntryRow>(1, 1, {
       filter: pb.filter('tenant = {:t} && indicator = {:i} && quarter = {:q}', {
         t: actor.tenant,
         i: indicator.id,
@@ -454,6 +480,13 @@ export async function recordGoalStatus(
     existing = res.items[0] ?? null;
   } catch {
     existing = null;
+  }
+  const existingValue: number | null = existing ? (existing.has_value === false ? null : (existing.value ?? null)) : null;
+
+  // Ett okänt värde skriver aldrig över ett känt (SOC 2 processing integrity).
+  if (valueProvided && value === null && existingValue !== null) {
+    valueProvided = false;
+    skipReason = `Värdet kunde inte läsas${reading?.note ? ` (${reading.note})` : ''} — det tidigare värdet behölls.`;
   }
 
   // Bara angivna fält skrivs: status alltid; värde när det finns/räknats;
@@ -491,8 +524,8 @@ export async function recordGoalStatus(
       after_value: {
         status: v.value.status,
         quarter: v.value.quarter,
-        // Art. 9-aggregat loggas aldrig som tal (agent_actions är läsbar för chatten).
-        value: aggregateOnly || !valueProvided ? undefined : value,
+        // Känsliga aggregat/anonyma enkäter loggas aldrig som tal (agent_actions är läsbar för chatten).
+        value: valueProvided ? value : undefined,
         indicator_label: indicator.label,
         goal_title: goal.title,
         goal: goal.id,
@@ -500,8 +533,10 @@ export async function recordGoalStatus(
         comment: comment ? { length: comment.length } : undefined
       }
     });
-    const normalized: GoalStatusEntry = { ...entry, value: valueProvided ? value : (existing?.value ?? null) };
-    return ok({ entry: normalized, metric, aggregateOnly, created: !existing });
+    const { has_value: _flag, ...entryFields } = entry as EntryRow;
+    void _flag;
+    const normalized: GoalStatusEntry = { ...entryFields, value: valueProvided ? value : existingValue };
+    return ok({ entry: normalized, reading, aggregateOnly, valueWritten: valueProvided, skipReason, created: !existing });
   } catch (err) {
     if (!existing && !opts.retried && (err as { status?: number }).status === 400) {
       // Unika indexet: en parallell rapportering hann först — försök EN gång till som update.

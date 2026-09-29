@@ -23,6 +23,8 @@ interface Props {
   brandName?: string;
   /** Kedjad nästa modul (migration 1700000124). */
   nextModule?: NextModuleLink | null;
+  /** Enkätsubjekt ur `?om=<id>` (§ 43) — skickas med, valideras server-side. */
+  subject?: string | null;
 }
 
 interface QuizResult {
@@ -44,7 +46,8 @@ export function ModuleQuiz({
   successMessage,
   moduleName,
   brandName,
-  nextModule
+  nextModule,
+  subject
 }: Props) {
   const [step, setStep] = useState(0);
   // Besökta steg (för "Tillbaka") — hopplogik (next_key) kan skippa frågor,
@@ -201,7 +204,8 @@ export function ModuleQuiz({
           contact,
           attribution,
           consent,
-          contact_preference: contactPreference || undefined
+          contact_preference: contactPreference || undefined,
+          subject: subject || undefined
         })
       });
       if (!res.ok) {
