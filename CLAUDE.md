@@ -5512,3 +5512,52 @@ skapade uppföljningar med status + länkar till resultat/redigering
   (typ + id + titel), ingen PII, ingen AI-inferens; `survey_responses` förblir
   denylistad.
 
+### 39.5 Utskick till deltagare (e-post efter ett event)
+
+En enkät som följer upp ett **event** (§ 39.4, `link_kind = 'event'`) kan
+skickas till eventets anmälda deltagare — antingen direkt ("Skicka nu") eller
+**automatiskt** vid en vald tidpunkt (förslag: 09:00 svensk tid dagen efter
+eventet, `defaultSurveySendAt`, ren + enhetstestad, § 38-dygnsgränser). Panelen
+`SurveySendPanel` ligger under byggaren på `/inflode/utvardering/<id>` och visar
+antal mottagare, schemalagd tid, utfört utskick och "Skicka igen".
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/survey.ts` | `collectSurveyRecipients` (validera + dedupe + tak 500), `defaultSurveySendAt` |
+| `backend/pocketbase-schema/migrations/1700000151_extend_surveys_dispatch.js` | `surveys.send_at`/`sent_at`/`sent_count`/`send_base_url` |
+| `backend/pocketbase-schema/hooks/survey_dispatch_tick.pb.js` | PB-cron varje minut: `send_at <= now && sent_at = ''` → provisoriskt lås (+1 h) → POST `/api/internal/send-survey` |
+| `apps/web/src/app/api/internal/send-survey/route.ts` | Intern endpoint (delat secret `MOVEXUM_SCHEDULE_SECRET`, timing-safe, § 12.3) |
+| `apps/web/src/lib/surveys/dispatch.ts` | `dispatchSurveyInvites` — delad kärna för "Skicka nu" OCH cron (superuser, tenant-verifierad) |
+| `apps/web/src/lib/surveys/recipients.ts` | `countSurveyRecipients` — bara ett tal till klienten |
+| `apps/web/src/lib/email.ts` | `sendSurveyInvites` (Resend, ett mejl per mottagare, batchar om 10, HTML-escapat) |
+| `apps/web/src/lib/actions/surveys.ts` | `sendSurveyNowAction` / `scheduleSurveySendAction` / `cancelSurveySendAction` |
+| `apps/web/src/components/surveys/SurveySendPanel.tsx` | Panelen (client) |
+
+- **Dataminimering (GDPR § 5):** deltagarnas e-post läses **transient** ur
+  `event_signups.email` vid själva utskicket och lagras ALDRIG på enkäten —
+  bara `sent_at` + `sent_count`. Loggar innehåller status, aldrig adresser.
+  Ett mejl per mottagare (ingen synlig mottagarlista). Enkätlänken är den
+  vanliga anonyma `/u/<slug>` (+ `utm_source=event`) — svaren kan inte kopplas
+  till personen. **Rättslig grund:** berättigat intresse (ett engångsmejl till
+  den som själv anmält sig till aktiviteten; mejlet säger det uttryckligen).
+  Ingen prenumeration skapas → ingen avprenumeration behövs.
+- **Människa-i-loopen:** både "Skicka nu" och schemaläggning är mänskliga
+  klick av admin/incubator_lead/coach; chatt-agenten har inget verktyg för
+  utskick. "Skicka nu" kräver bekräftelsedialog; "Skicka igen" kräver `force`.
+- **Säkerhet:** `dispatchSurveyInvites` körs med superuser (cron saknar
+  session) och verifierar därför uttryckligen att eventet tillhör enkätens
+  tenant; deltagarlistan filtreras på `event + tenant`. Enkätlänkens origin
+  (`send_base_url`) sätts från **staffs egen request** (`x-forwarded-host`/
+  `host`) när utskicket schemaläggs, så cron-vägen aldrig gissar domän.
+  `/api/internal/` är undantaget auth-redirecten i `middleware.ts` (hookarna
+  har ingen cookie; endpointen autentiserar med det delade secretet).
+- **Robusthet:** tak 500 mottagare, batch om 10, en avvisad adress stoppar
+  inte de andra; tom deltagarlista markerar ändå `sent_at` (cron försöker inte
+  om varje timme); provisoriskt lås som schedule_tick. Schema-drift: efter
+  schemaläggning läses posten tillbaka och saknat `send_at` ger tydligt fel
+  (kör migration 1700000151) — aldrig en tyst no-op.
+- **EU-suveränitet/riskklass:** Resend (befintlig leverantör, § 23.5), ingen
+  AI-inferens → riskklass n/a. `survey_responses` förblir denylistad.
+

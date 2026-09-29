@@ -35,6 +35,11 @@ export interface Survey {
   link_kind: SurveyLinkKind | null;
   link_id: string;
   link_label: string;
+  /** Utskick till deltagare (§ 39.5) — bara aggregat, aldrig adresser. */
+  send_at: string;
+  sent_at: string;
+  sent_count: number;
+  send_base_url: string;
   created: string;
   updated: string;
 }
@@ -54,6 +59,10 @@ interface SurveyRecord {
   link_kind?: string;
   link_id?: string;
   link_label?: string;
+  send_at?: string;
+  sent_at?: string;
+  sent_count?: number;
+  send_base_url?: string;
   created?: string;
   updated?: string;
 }
@@ -74,6 +83,10 @@ export function toSurvey(r: SurveyRecord): Survey {
     link_kind: isSurveyLinkKind(r.link_kind) ? r.link_kind : null,
     link_id: r.link_id || '',
     link_label: r.link_label || '',
+    send_at: r.send_at || '',
+    sent_at: r.sent_at || '',
+    sent_count: typeof r.sent_count === 'number' ? r.sent_count : 0,
+    send_base_url: r.send_base_url || '',
     created: r.created || '',
     updated: r.updated || ''
   };

@@ -9,6 +9,8 @@ import {
   normalizeSurveyQuestions,
   validateSurveyAnswers,
   parseSurveyLinkRef,
+  collectSurveyRecipients,
+  defaultSurveySendAt,
   surveyLinkHref,
   surveyLinkRefParam,
   type SurveyQuestion
@@ -100,4 +102,27 @@ test('länkreferens: tolkar bara kända typer och ofarliga id:n', () => {
   assert.equal(surveyLinkHref(ref), '/arshjul?item=x1');
   assert.equal(surveyLinkHref({ kind: 'compass_module', id: 'm' }, 'slug-x'), '/inflode/admin/modules/slug-x');
   assert.equal(surveyLinkHref({ kind: 'compass_module', id: 'm' }), '/inflode/admin/modules');
+});
+
+test('mottagare: giltiga, dedupliserade, gemener', () => {
+  const r = collectSurveyRecipients([
+    { email: ' Anna@Example.se ' },
+    { email: 'anna@example.se' },
+    { email: 'ogiltig' },
+    { email: '' },
+    { email: null },
+    { email: 'b@c.io' }
+  ]);
+  assert.deepEqual(r, ['anna@example.se', 'b@c.io']);
+});
+
+test('utskickstid: 09:00 svensk tid dagen efter eventets slut', () => {
+  // Sommartid: 2026-06-10 18:00 svensk tid = 16:00Z → 11 juni 09:00 = 07:00Z
+  const at = defaultSurveySendAt({ ends_at: '2026-06-10T16:00:00.000Z' });
+  assert.equal(at?.toISOString(), '2026-06-11T07:00:00.000Z');
+  // Vintertid, bara start: 2026-01-20 23:30 svensk tid = 22:30Z
+  const w = defaultSurveySendAt({ starts_at: '2026-01-20T22:30:00.000Z' });
+  assert.equal(w?.toISOString(), '2026-01-21T08:00:00.000Z');
+  assert.equal(defaultSurveySendAt({}), null);
+  assert.equal(defaultSurveySendAt({ starts_at: 'nej' }), null);
 });

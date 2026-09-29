@@ -9,6 +9,10 @@ import { SurveyResults } from '@/components/surveys/SurveyResults';
 import { deleteSurveyAction } from '@/lib/actions/surveys';
 import { getSurvey, getSurveyResults } from '@/lib/surveys/store';
 import { SurveyLinkChip } from '@/components/surveys/SurveyLinkChip';
+import { SurveySendPanel } from '@/components/surveys/SurveySendPanel';
+import { countSurveyRecipients } from '@/lib/surveys/recipients';
+import { getRecordInTenant } from '@/lib/core/write/helpers';
+import { defaultSurveySendAt, type Role } from '@platform/shared';
 import { buildInflodeTabs } from '../../_tabs';
 
 export const dynamic = 'force-dynamic';
@@ -30,6 +34,25 @@ export default async function SurveyDetailPage({
 
   const showResults = vy === 'resultat';
   const results = showResults ? await getSurveyResults(pb, survey) : null;
+
+  // Utskick (§ 39.5) — bara för event-kopplade enkäter. Antalet räknas
+  // server-side; adresserna når aldrig klienten.
+  let send: { recipientCount: number; defaultSendAt: string } | null = null;
+  if (!showResults && survey.link_kind === 'event' && survey.link_id) {
+    const ev = await getRecordInTenant<{ id: string; tenant?: string; starts_at?: string; ends_at?: string }>(
+      pb,
+      { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+      'incubator_events',
+      survey.link_id,
+      'id,tenant,starts_at,ends_at'
+    );
+    if (ev) {
+      send = {
+        recipientCount: await countSurveyRecipients(pb, user.tenant, survey.link_id),
+        defaultSendAt: defaultSurveySendAt(ev)?.toISOString() ?? ''
+      };
+    }
+  }
 
   return (
     <PageShell
@@ -80,6 +103,19 @@ export default async function SurveyDetailPage({
       ) : (
         <>
           <SurveyBuilder survey={survey} />
+          {send && (
+            <div style={{ marginTop: 16, maxWidth: 820 }}>
+              <SurveySendPanel
+                surveyId={survey.id}
+                isActive={survey.is_active}
+                recipientCount={send.recipientCount}
+                sendAt={survey.send_at}
+                sentAt={survey.sent_at}
+                sentCount={survey.sent_count}
+                defaultSendAt={send.defaultSendAt}
+              />
+            </div>
+          )}
           <form action={deleteSurveyAction} style={{ marginTop: 24, maxWidth: 820 }}>
             <input type="hidden" name="id" value={survey.id} />
             <ConfirmDeleteButton

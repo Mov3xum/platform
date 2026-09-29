@@ -1,3 +1,5 @@
+import { parseStockholmLocalDateTime, stockholmDateKey } from './event-time';
+
 // Marknadsverktyg → Utvärdering — digitala enkäter (ren, server/React-fri logik).
 //
 // Enkäter byggs i webbläsaren (frågor som JSON på `surveys.questions`) och
@@ -503,4 +505,51 @@ export function surveyLinkHref(ref: SurveyLinkRef, slug?: string): string {
         ? `/inflode/admin/modules/${encodeURIComponent(slug)}`
         : '/inflode/admin/modules';
   }
+}
+
+// ── Utskick till deltagare (§ 39.5) ──────────────────────────────────────────
+
+/** Hårt tak per utskick (robusthet + skydd mot massutskick av misstag). */
+export const SURVEY_MAX_RECIPIENTS = 500;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+/**
+ * Plockar ut giltiga, dedupliserade e-postadresser ur en lista deltagare.
+ * Adresserna används TRANSIENT för själva utskicket och lagras aldrig på
+ * enkäten (GDPR § 5) — bara antalet.
+ */
+export function collectSurveyRecipients(
+  rows: ReadonlyArray<{ email?: string | null }>
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of rows) {
+    const raw = (r.email || '').trim().toLowerCase();
+    if (!raw || raw.length > 254 || !EMAIL_RE.test(raw) || seen.has(raw)) continue;
+    seen.add(raw);
+    out.push(raw);
+    if (out.length >= SURVEY_MAX_RECIPIENTS) break;
+  }
+  return out;
+}
+
+/**
+ * Standardtid för automatiskt utskick: kl. 09:00 svensk tid dagen efter att
+ * eventet slutade (annars dagen efter starten). Returnerar null om eventet
+ * saknar datum. Svenska dygnsgränser (§ 38) — aldrig serverns UTC.
+ */
+export function defaultSurveySendAt(event: {
+  starts_at?: string | null;
+  ends_at?: string | null;
+}): Date | null {
+  const endIso = event.ends_at || event.starts_at;
+  if (!endIso) return null;
+  const end = new Date(endIso);
+  if (Number.isNaN(end.getTime())) return null;
+  const key = stockholmDateKey(end); // YYYY-MM-DD i svensk tid
+  const [y, m, d] = key.split('-').map(Number);
+  const nextDay = new Date(Date.UTC(y, m - 1, d + 1));
+  const nextKey = nextDay.toISOString().slice(0, 10);
+  return parseStockholmLocalDateTime(`${nextKey}T09:00`);
 }

@@ -2,16 +2,19 @@
 
 import type PocketBase from 'pocketbase';
 import { revalidatePath } from 'next/cache';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { hasRole } from '@/lib/rbac';
 import { getSurvey, newPublicSlug } from '@/lib/surveys/store';
+import { dispatchSurveyInvites } from '@/lib/surveys/dispatch';
 import { getRecordInTenant } from '@/lib/core/write/helpers';
 import type { Role } from '@platform/shared';
 import {
   SURVEY_LINK_DEFAULT_KIND,
   SURVEY_TEMPLATES,
+  defaultSurveySendAt,
   isSurveyKind,
   normalizeSurveyQuestions,
   parseSurveyLinkRef,
@@ -217,4 +220,106 @@ export async function deleteSurveyAction(formData: FormData) {
   }
   revalidatePath('/inflode/utvardering');
   redirect('/inflode/utvardering');
+}
+
+// ── Utskick till deltagare (§ 39.5) ──────────────────────────────────────────
+
+/** Origin för enkätlänken — från staffs egen request (proxy-headers först). */
+async function requestOrigin(): Promise<string> {
+  const h = await headers();
+  const proto = h.get('x-forwarded-proto') || 'https';
+  const host = h.get('x-forwarded-host') || h.get('host') || '';
+  return host ? `${proto}://${host}` : '';
+}
+
+export type SendSurveyState = { ok: true; message: string } | { ok: false; error: string };
+
+/** "Skicka nu" — mänskligt klick; utskicket sker direkt. */
+export async function sendSurveyNowAction(formData: FormData): Promise<SendSurveyState> {
+  const user = await requireManager();
+  const id = String(formData.get('id') || '');
+  const pb = await getServerPb();
+  const survey = await getSurvey(pb, user.tenant, id);
+  if (!survey) return { ok: false, error: 'Enkäten hittades inte.' };
+  const origin = await requestOrigin();
+  const res = await dispatchSurveyInvites(survey.id, { baseUrl: origin, force: formData.get('force') === '1' });
+  revalidatePath(`/inflode/utvardering/${survey.id}`);
+  if (!res.ok) return res;
+  return {
+    ok: true,
+    message:
+      res.recipients === 0
+        ? 'Inga deltagare med e-postadress att skicka till.'
+        : `Skickat till ${res.sent} deltagare${res.failed ? ` (${res.failed} misslyckades)` : ''}.`
+  };
+}
+
+/** Schemalägg automatiskt utskick (default: 09:00 dagen efter eventet). */
+export async function scheduleSurveySendAction(formData: FormData): Promise<SendSurveyState> {
+  const user = await requireManager();
+  const id = String(formData.get('id') || '');
+  const pb = await getServerPb();
+  const survey = await getSurvey(pb, user.tenant, id);
+  if (!survey) return { ok: false, error: 'Enkäten hittades inte.' };
+  if (survey.link_kind !== 'event' || !survey.link_id) {
+    return { ok: false, error: 'Bara enkäter kopplade till ett event kan schemaläggas.' };
+  }
+  const origin = await requestOrigin();
+  if (!origin) return { ok: false, error: 'Kunde inte avgöra adressen för enkätlänken.' };
+
+  let sendAt: Date | null = null;
+  const raw = String(formData.get('send_at') || '').trim();
+  if (raw) {
+    const { parseDateTimeInput } = await import('@platform/shared');
+    sendAt = parseDateTimeInput(raw);
+    if (!sendAt) return { ok: false, error: 'Ogiltig tidpunkt.' };
+  } else {
+    const ev = await getRecordInTenant<{ id: string; tenant?: string; starts_at?: string; ends_at?: string }>(
+      pb,
+      { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+      'incubator_events',
+      survey.link_id,
+      'id,tenant,starts_at,ends_at'
+    );
+    if (!ev) return { ok: false, error: 'Eventet hittades inte.' };
+    sendAt = defaultSurveySendAt(ev);
+    if (!sendAt) return { ok: false, error: 'Eventet saknar datum — ange en tidpunkt själv.' };
+  }
+  if (sendAt.getTime() < Date.now() - 60_000) {
+    return { ok: false, error: 'Tidpunkten har redan passerat — använd "Skicka nu".' };
+  }
+  try {
+    await writeWithFallback(pb, (c) =>
+      c.collection('surveys').update(survey.id, {
+        send_at: sendAt!.toISOString(),
+        send_base_url: origin,
+        is_active: true
+      })
+    );
+  } catch (err) {
+    console.error('[surveys] schedule failed', (err as { status?: number })?.status);
+    return { ok: false, error: 'Kunde inte schemalägga utskicket. Har migration 1700000151 körts?' };
+  }
+  // Schema-drift: PB släpper okända fält tyst.
+  const back = await getSurvey(pb, user.tenant, survey.id);
+  if (!back?.send_at) {
+    return { ok: false, error: 'PocketBase saknar utskicksfälten (migration 1700000151). Utskicket är inte schemalagt.' };
+  }
+  revalidatePath(`/inflode/utvardering/${survey.id}`);
+  return { ok: true, message: 'Utskicket är schemalagt.' };
+}
+
+export async function cancelSurveySendAction(formData: FormData): Promise<SendSurveyState> {
+  const user = await requireManager();
+  const id = String(formData.get('id') || '');
+  const pb = await getServerPb();
+  const survey = await getSurvey(pb, user.tenant, id);
+  if (!survey) return { ok: false, error: 'Enkäten hittades inte.' };
+  try {
+    await writeWithFallback(pb, (c) => c.collection('surveys').update(survey.id, { send_at: '' }));
+  } catch {
+    return { ok: false, error: 'Kunde inte avbryta utskicket.' };
+  }
+  revalidatePath(`/inflode/utvardering/${survey.id}`);
+  return { ok: true, message: 'Det schemalagda utskicket är avbrutet.' };
 }
