@@ -1546,7 +1546,7 @@ export default function DashboardChat({
                       Aktivitet
                     </h2>
                     <p className="mt-0.5 text-[12px] text-foreground-subtle">
-                      Det senaste i portföljen och det du gjort i systemet
+                      Det du gjort och det som rör dig i systemet
                     </p>
                   </div>
                   <a href="/aktivitet" className="text-[12px] text-foreground-subtle transition hover:text-foreground">
@@ -1555,7 +1555,7 @@ export default function DashboardChat({
                 </div>
                 {activities.length === 0 ? (
                   <div className="rounded-2xl border border-default bg-surface px-4 py-8 text-center text-[13px] text-foreground-subtle">
-                    Inga händelser än. Aktiviteter från bolagen dyker upp här.
+                    Inget än. Det du gör i systemet — och det du bjuds in till — dyker upp här.
                   </div>
                 ) : (
                   <>
