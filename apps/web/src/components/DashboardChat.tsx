@@ -1127,7 +1127,7 @@ export default function DashboardChat({
   /**
    * Raden under ett svar: bara modellen som svarade (transparens art. 13) —
    * som Claude och ChatGPT. Inga token- eller miljösiffror i chatten; de
-   * redovisas per period i /insights och /admin/ai-miljo (§ 28.2).
+   * redovisas per period under Inställningar → AI-analys (§ 28.2).
    */
   function renderTurnUsage(msg: UiMessage) {
     if (!msg.model) return null;
