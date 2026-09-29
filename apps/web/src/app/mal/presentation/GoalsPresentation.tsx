@@ -6,6 +6,7 @@ import {
   GOAL_STATUS_LABELS,
   QUARTERS,
   formatMetricValue,
+  goalKindOf,
   isAggregateOnlyIndicator,
   rollupGoalStatuses,
   type GoalIndicatorNode,
@@ -36,7 +37,7 @@ export function GoalsPresentation({
   workspace: GoalWorkspace;
   initialQuarter: Quarter;
 }) {
-  const { periods, period, tree, metrics, surveys } = workspace;
+  const { periods, period, tree, metrics, surveys, people } = workspace;
   const [quarter, setQuarter] = useState<Quarter>(initialQuarter);
   const years = useMemo(() => periods.map((p) => p.year).sort((a, b) => a - b), [periods]);
 
@@ -163,11 +164,23 @@ export function GoalsPresentation({
                 <section key={area.area} className="border-t border-default pt-5">
                   <h2 className="font-heading text-[20px] font-semibold text-foreground">{area.label}</h2>
                   <div className="mt-3 space-y-4">
-                    {area.goals.map((g) => (
+                    {area.goals.map((g, idx) => (
                       <div key={g.goal.id}>
+                        {/* Rubrik när personliga mål börjar (övergripande ligger först i trädet). */}
+                        {goalKindOf(g.goal) === 'personal' && (idx === 0 || goalKindOf(area.goals[idx - 1].goal) !== 'personal') && (
+                          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle">Personliga mål</p>
+                        )}
+                        {goalKindOf(g.goal) === 'overall' && idx === 0 && area.personal.length > 0 && (
+                          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle">Övergripande mål</p>
+                        )}
                         <div className="flex flex-wrap items-baseline gap-x-3">
                           <h3 className="text-[16px] font-semibold text-foreground">{g.goal.title}</h3>
                           <span className="text-[12px] text-foreground-subtle">{GOAL_OWNER_TEAM_LABELS[g.goal.owner_team]}</span>
+                          {goalKindOf(g.goal) === 'personal' && (
+                            <span className="text-[12px] text-movexum-lila dark:text-movexum-ljuslila">
+                              {people.find((p) => p.id === g.goal.owner_user)?.name ?? 'Personligt mål'}
+                            </span>
+                          )}
                         </div>
                         {g.indicators.some((ind) => !isAggregateOnlyIndicator(ind.indicator)) && (
                           <ul className="mt-2 divide-y divide-default">

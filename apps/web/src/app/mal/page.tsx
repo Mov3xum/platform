@@ -48,6 +48,7 @@ export default async function MalPage({
         workspace={ws}
         quarter={quarter}
         focusGoal={focusGoal}
+        currentUserId={user.id}
         canReport={hasRole(user.roles, STAFF_ROLES)}
         canManage={hasRole(user.roles, LEAD_ROLES)}
       />
