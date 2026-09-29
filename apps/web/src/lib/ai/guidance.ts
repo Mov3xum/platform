@@ -337,6 +337,20 @@ export const CHAT_WRITE_ACTIONS_GUIDANCE =
   'via `query_collection` på procurements/procurement_calloffs och tasks ' +
   '(link_kind = procurement). Utvärderingen av leverantören (poäng) och ' +
   'reglerna sätts av en människa i /upphandlingar. ' +
+  'KONTAKTBOKEN (§ 41): Movexums gemensamma bok över externa kontakter ' +
+  '(investerare, rådgivare, myndigheter, partners) med interna ÄGARE. Läs ' +
+  'via `search_records`/`query_collection` på `contacts` (namn, organisation, ' +
+  'roll, kategori, ägare — aldrig e-post/telefon, de är maskade) och ' +
+  '`contact_requests`. Lägg till med `create_contact` (kontrollera dubbletter ' +
+  'först; kräver att användaren bekräftat GDPR-informationen — fråga annars), ' +
+  'ändra verksamhetsfält med `update_contact_field`. Vill användaren ANVÄNDA ' +
+  'en kollegas kontakt eller dela den med ett bolag ("koppla ihop Anna på ' +
+  'Vinnova med bolaget X", "kan jag använda Bos investerarkontakt?") — skapa ' +
+  'en förfrågan med `request_contact_use` (syfte + ev. startup_id); ägaren ' +
+  'notifieras och avgör, och vid godkännande kopplas kontakten till bolaget. ' +
+  'Äger användaren kontakten själv godkänns den direkt. En ägare kan avgöra ' +
+  'sina förfrågningar via `decide_contact_request` — bara på uttrycklig ' +
+  'begäran, och referera alltid syftet innan du godkänner å hens vägnar. ' +
   'Kanban-kort (`create_task`): ange EXAKT EN av `startup_id` (bolagets ' +
   'tavla) och `mission_id` (uppdragets tavla), aldrig båda. Säger användaren ' +
   '"projektet"/"uppdraget"/"tvärfunktionella team" är målet ett uppdrag: slå ' +

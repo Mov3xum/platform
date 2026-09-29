@@ -1195,7 +1195,20 @@ export type NotificationKind =
   | 'assigned'
   | 'status_change'
   | 'stage_advance'
-  | 'due_soon';
+  | 'due_soon'
+  // Kontaktboken (§ 41.3, migration 1700000158)
+  | 'contact_request'
+  | 'contact_decision';
+
+/** Notistyper som fanns i schemat före migration 1700000158 (fallback i `notify`). */
+export const LEGACY_NOTIFICATION_KINDS: readonly NotificationKind[] = [
+  'comment',
+  'mention',
+  'assigned',
+  'status_change',
+  'stage_advance',
+  'due_soon'
+];
 
 export interface NotificationPayload {
   title: string;
@@ -1378,7 +1391,7 @@ export interface ModuleGroup {
 
 export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'pagaende', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'upphandlingar', 'investerare', 'events', 'community'] },
+  { label: 'Portfölj', modules: ['kompassen', 'startups', 'kontakter', 'de_minimis', 'upphandlingar', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'kunskapsbas', 'integrationer', 'installningar', 'min_profil'] }
 ];
@@ -1515,6 +1528,14 @@ export const coreModules: ModuleDefinition[] = [
       'Upphandlingar och excellens-insatser för bolagen — ladda upp underlaget, följ avrop, milstolpar och slutrapporter enligt uppföljningsregler, och utvärdera leverantören.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
     route: '/upphandlingar'
+  },
+  {
+    id: 'kontakter',
+    title: 'Kontaktbok',
+    description:
+      'Movexums gemensamma kontaktbok — externa kontakter med interna ägare. Be ägaren om bekräftelse att använda en kontakt för ett syfte och dela den med ett bolag via systemet. Lägg in manuellt, importera eller via chatten.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/kontakter'
   },
   {
     id: 'investerare',
@@ -1699,6 +1720,7 @@ export * from './event-time';
 export * from './org-posts';
 export * from './home';
 export * from './procurement';
+export * from './contacts';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */

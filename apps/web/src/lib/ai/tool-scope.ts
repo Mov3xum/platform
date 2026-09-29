@@ -108,6 +108,11 @@ export const TOOL_DOMAINS: readonly ToolDomain[] = [
     stems: ['anslagstavla', 'inlägg', 'inlagg', 'internutbildning', 'hemmaplan', 'startsida', 'nyhet', 'notis', 'fäst', 'fast ', 'publicera', 'utgå', 'utga']
   },
   {
+    id: 'contacts',
+    tools: ['create_contact', 'update_contact_field', 'request_contact_use', 'decide_contact_request'],
+    stems: ['kontakt', 'kontaktbok', 'investerar', 'rådgivar', 'radgivar', 'handläggar', 'handlaggar', 'introduc', 'koppla ihop', 'dela med', 'förfråg', 'forfrag', 'godkänn', 'godkann', 'avböj', 'avboj', 'ägare', 'agare']
+  },
+  {
     id: 'procurement',
     tools: ['create_procurement', 'create_procurement_calloff', 'update_procurement_calloff'],
     stems: ['upphandling', 'avrop', 'leverantör', 'leverantor', 'ramavtal', 'milstolpe', 'slutrapport', 'excellens', 'anbud']

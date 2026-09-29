@@ -245,6 +245,37 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
       agent: { kind: 'deny', reason: 'Aktivering av en workshop görs av en människa i /education.' }
     }
   },
+  // Kontaktboken (§ 41). Verksamhetsfälten får agenten uppdatera; direkt-PII
+  // (e-post/telefon) skrivs av en människa i UI:t (agenten kan inte verifiera
+  // uppgifterna och ska inte gissa), `gender` är GDPR art. 9 (agent-nekad,
+  // § 9.3) och `owners` kräver användar-id:n agenten inte kan slå upp
+  // (`users` denylistad).
+  contacts: {
+    first_name: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    last_name: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    organization: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    primary_role: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    category: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    kommun: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    skills: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    info: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    email: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Kontaktuppgifter (e-post) ändras av en människa i kontaktboken.' }
+    },
+    phone: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Kontaktuppgifter (telefon) ändras av en människa i kontaktboken.' }
+    },
+    owners: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Kontaktägare sätts av en människa i kontaktboken.' }
+    },
+    gender: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Kön (GDPR art. 9) registreras aldrig av agenten.' }
+    }
+  },
   // dashboardens inlägg (§ 37). Alla fält får ändras av författar-kretsen; agenten
   // ärver rollen. Publiceringsfälten är ofarliga här (inlägget är internt).
   org_posts: {
@@ -272,6 +303,17 @@ const CREATE_POLICIES: Record<
 > = {
   activities: {
     user: { kind: 'any-role' },
+    agent: { kind: 'allow' }
+  },
+  // Kontaktboken (§ 41) — hela staff-kretsen lägger in kontakter och skickar
+  // förfrågningar; agenten ärver rollen. Ägare/kön får agenten aldrig sätta
+  // (fältpolicyn ovan); GDPR-samtycke krävs i skrivlagret.
+  contacts: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  contact_requests: {
+    user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'allow' }
   },
   // Upphandlingar & avrop (§ 39) — registreras av staff; agenten ärver rollen.

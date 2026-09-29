@@ -3794,6 +3794,65 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
 });
+
+// Migration 1700000156: contacts → kontaktboken (§ 41). Interna ägare,
+// organisation, kategori, skapare + autodate; last_name görs valfritt.
+// patchCollection lägger BARA till saknade fält/uppdaterar angivna props.
+await patchCollection(
+  'contacts',
+  [
+    { name: 'owners', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 20 },
+    { name: 'organization', type: 'text', required: false, max: 200 },
+    // MÅSTE spegla CONTACT_CATEGORIES i packages/shared/src/contacts.ts.
+    { name: 'category', type: 'select', required: false, maxSelect: 1, values: ['investerare', 'radgivare', 'myndighet', 'partner', 'akademi', 'media', 'leverantor', 'alumn', 'annan'] },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    ...AUTODATE_FIELDS
+  ],
+  { last_name: { required: false, min: 0 } }
+);
+
+// Migration 1700000157: contact_requests — förfrågan om att använda en kontakt
+// för ett specifikt syfte (§ 41.3). list/view staff/observer-only; createRule
+// roll-lös (§ 21.3); update: frågaren (återkalla) eller staff (avgöra —
+// ägarkontrollen ligger i skrivlagret).
+await ensureCollection({
+  id: 'contact_requests_collection',
+  name: 'contact_requests',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'contact', type: 'relation', required: true, collectionId: 'contacts_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'requester', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'owners', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 20 },
+    { name: 'purpose', type: 'text', required: true, min: 1, max: 2000 },
+    { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+    { name: 'startup_role', type: 'text', required: false, max: 100 },
+    // MÅSTE spegla CONTACT_REQUEST_STATUSES i packages/shared/src/contacts.ts.
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['pending', 'approved', 'declined', 'withdrawn'] },
+    { name: 'decision_note', type: 'text', required: false, max: 2000 },
+    { name: 'decided_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'decided_at', type: 'date', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_contact_requests_tenant ON contact_requests (tenant)',
+    'CREATE INDEX idx_contact_requests_contact ON contact_requests (contact)',
+    'CREATE INDEX idx_contact_requests_tenant_status ON contact_requests (tenant, status)',
+    'CREATE INDEX idx_contact_requests_requester ON contact_requests (requester)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = requester || ${STAFF_EACH})`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+
+// Migration 1700000158: notifications.kind += contact_request/contact_decision
+// (union — ensureCollection synkar inte fält på befintlig collection).
+await patchCollection('notifications', [], {
+  kind: { values: ['comment', 'mention', 'assigned', 'status_change', 'stage_advance', 'due_soon', 'contact_request', 'contact_decision'] }
+});
 // Migration 1700000152: tasks.link_kind += 'procurement' + relationer +
 // rule_key (idempotensnyckel för regelgenererade uppföljningar). Union över
 // hela values-listan (patchCollection ERSÄTTER values).
@@ -4137,7 +4196,9 @@ const FORCE_CREATE_RULES = {
   procurements: `${ANY_AUTH} && @request.auth.tenant != ""`,
   procurement_calloffs: `${ANY_AUTH} && @request.auth.tenant != ""`,
   procurement_rules: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  procurement_documents: `${ANY_AUTH} && @request.auth.tenant != ""`
+  procurement_documents: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Kontaktboken (§ 41, migration 1700000157) — roll-enforcement i skrivlagret.
+  contact_requests: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
 async function enforceCreateRules(passLabel) {

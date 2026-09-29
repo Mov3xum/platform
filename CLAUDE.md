@@ -1646,6 +1646,10 @@ policy (§ 9.3, läsbart med fältmaskning) sedan skiftet 2026-06:
 - **Personnummer:** lagras ALDRIG. Om Excel-importen innehåller
   personnummer i Info-fältet → importen ska sanera bort detta i
   förbehandling.
+- **Kontaktboken (§ 41, 2026-09):** `contacts` är sedan migration 1700000156
+  Movexums gemensamma kontaktbok med interna **ägare** (`owners`),
+  `organization`, `category` och förfrågningar (`contact_requests`) om att
+  använda en kontakt för ett syfte. Reglerna ovan gäller oförändrat.
 
 ### 15.5 RBAC-mönster
 
@@ -5899,3 +5903,167 @@ Outlook-möten, notiser och uppdrag jag deltar i. Sidan hette tidigare "Min
 - **GDPR/AI:** inga nya fält eller kollektioner; `contactName` på kortet är
   fortsatt UI-only (§ 15.3). Riskklass n/a (ingen AI-inferens).
 
+
+## 41. Kontaktboken — gemensam kontaktbok med interna ägare & förfrågningar
+
+### 41.1 Översikt
+
+`/kontakter` (modul `kontakter`, titel **Kontaktbok**, "Portfölj"-railen,
+staff/observer) är Movexums gemensamma bok över **externa kontakter**
+(investerare, rådgivare, handläggare på myndigheter, partners, akademi,
+media, leverantörer, alumner) — för Movexums personal, **inte** för bolagen
+direkt. Varje kontakt har **en eller flera interna ägare** (kollegan som har
+relationen). Vill en kollega **använda** en kontakt för ett specifikt syfte —
+typiskt koppla ihop den med ett bolag — skickas en **förfrågan** till ägaren,
+som godkänner eller avböjer; vid godkännande med bolag delas kontakten med
+bolaget **via systemet** (kopplingen i `startup_contacts` + vyn "Delade
+kontakter" på Mitt bolag). Kontakter läggs in manuellt, via **import**
+(CSV/Excel/Outlook-export) eller via **chatten** — alla vägar går genom det
+delade skrivlagret (§ 16).
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/contacts.ts` (+ `.test.ts`) | Ren, enhetstestad domänlogik: kategorier, roller, statusövergångar för förfrågningar, ägar-/beslutsbehörighet, dedupe-nycklar, CSV-parser, rubrikmappning + importrader |
+| `backend/pocketbase-schema/migrations/1700000156_extend_contacts_kontaktbok.js` | `contacts` += `owners`, `organization`, `category`, `created_by`, autodate; `last_name` valfritt |
+| `backend/pocketbase-schema/migrations/1700000157_create_contact_requests.js` | Collection `contact_requests` |
+| `backend/pocketbase-schema/migrations/1700000158_extend_notification_kinds_contact.js` | `notifications.kind` += `contact_request`, `contact_decision` (union) |
+| `apps/web/src/lib/contacts/data.ts` | Enda läsvägen (fail-soft) + `listSharedContactsForStartup` (kurerad superuser-vy för bolag) + `listStaffUsers` |
+| `apps/web/src/lib/core/write/contacts.ts` | Skrivlager: `createContact`, `updateContactFields`, `deleteContact`, `requestContactUse`, `decideContactRequest`, `withdrawContactRequest`, `importContacts` — whitelist + validering + GDPR-krav + audit + notiser |
+| `apps/web/src/lib/actions/contacts.ts` | Server actions (RBAC) inkl. import preview/commit |
+| `apps/web/src/app/kontakter/**` | Lista (sök/filter/ägare), kontaktkort med förfrågningspanel, redigera, förfrågningar, import |
+| `apps/web/src/app/startups/[id]/StartupContactsSection.tsx` | Bolagskortets "Kontakter" (staff/observer) |
+| `apps/web/src/app/min-oversikt/SharedContactsCard.tsx` | "Delade kontakter" på Mitt bolag (bolagsmedlem) |
+| `apps/web/src/lib/ai/tools.ts` | Chatt-verktygen `create_contact`, `update_contact_field`, `request_contact_use`, `decide_contact_request` |
+
+### 41.2 Datamodell
+
+- **`contacts`** (1700000071 + **1700000156**): utöver CRM-fälten (§ 15.2)
+  `owners` (relation → users, multi ≤ 20, `cascadeDelete:false`),
+  `organization` (text 200), `category` (select — MÅSTE spegla
+  `CONTACT_CATEGORIES`: investerare/radgivare/myndighet/partner/akademi/
+  media/leverantor/alumn/annan), `created_by`, autodate. `last_name` är nu
+  **valfritt** (chatten och Outlook-exporter ger ofta ett namnfält).
+  Skrivlagret kräver **minst en ägare** (default = den som lägger in) och
+  `gdpr_consent=true` vid skapande (§ 15.4); ägare valideras mot tenantens
+  Movexum-personal (`CONTACT_BOOK_ROLES`) — aldrig bolagsmedlemmar.
+  Dubblettkontroll på e-post (annars namn + organisation, `contactDedupeKey`).
+- **`contact_requests`** (**1700000157**): `tenant`, `contact` (cascade),
+  `requester`, `owners` (snapshot vid frågetillfället), `purpose`
+  (obligatoriskt, personnummer-sanerat), `startup` (valfritt, cascade),
+  `startup_role` (blir `startup_contacts.role`), `status`
+  (`pending → approved | declined | withdrawn`, MÅSTE spegla
+  `CONTACT_REQUEST_STATUSES`), `decision_note`, `decided_by`, `decided_at`,
+  autodate. **En avgjord förfrågan är slutgiltig** (`contactRequestTransition`)
+  — ny användning = ny förfrågan, så raden är ett audit-spår för vad
+  kontakten använts till (GDPR art. 5 ändamålsbegränsning).
+- **Delning med bolag = `startup_contacts`** (§ 15.2, befintlig M2M): skapas
+  idempotent (`ensureStartupLink`, unikt index) när en förfrågan med
+  `startup` godkänns. Ingen ny kollektion för delning.
+
+### 41.3 Flöde — förfrågan & beslut
+
+1. Kollega öppnar kontaktkortet → **"Be om att använda kontakten"**: syfte +
+   ev. bolag + roll → `requestContactUse` skapar `pending`-rad och
+   **notifierar alla ägare** (`notify`, kind `contact_request`; saknar
+   kontakten ägare går notisen till admin/incubator_lead). Är frågaren
+   **själv ägare** godkänns förfrågan direkt (`isSelfApprovedRequest`) — den
+   registreras ändå (audit) och ev. bolagskoppling skapas på plats.
+2. Ägaren ser förfrågan i **Mina uppgifter → Notiser**, under
+   `/kontakter/forfragningar` ("Väntar på ditt svar", badge i fliken) och på
+   kontaktkortet → **Godkänn/Avböj** (+ valfri kommentar).
+   `canDecideContactRequest`: ägare NU (inte snapshotten — en nytillkommen
+   ägare ska kunna svara) eller admin/incubator_lead som eskaleringsväg;
+   aldrig frågaren själv (om hen inte är ägare). Frågaren kan **återkalla**
+   (`canWithdrawContactRequest`).
+3. Vid **godkännande med bolag** kopplas kontakten till bolagskortet
+   (`startup_contacts`), frågaren notifieras (`contact_decision`) och bolaget
+   ser kontakten under **"Delade kontakter"** på Mitt bolag med namn,
+   organisation, roll, e-post, telefon och **syftet**.
+4. Allt loggas i `agent_actions` (`contacts`, `contact_requests`,
+   `contact_import`) och syns i den samlade loggen (§ 32) med länk till
+   kontaktkortet (`?request=<id>` markerar förfrågan).
+
+### 41.4 Åtkomst & isolering
+
+- **Kontaktboken är staff/observer-only** (list/view på `contacts` sedan
+  1700000112; `contact_requests` likaså, asserterat i `verify-baseline.mjs`
+  `MUST_BE_STAFF_OR_OBSERVER`). Alla staff **ser** hela boken inkl.
+  kontaktuppgifter — styrningen ligger i förfrågningsflödet (ägaren avgör
+  **användning**), inte i att dölja fält för kollegor. Skriva = staff
+  (`CONTACT_BOOK_ROLES`); radera + avgöra över ägarens huvud =
+  admin/incubator_lead (`CONTACT_BOOK_ADMIN_ROLES`). `observer` läser.
+- **Bolagsmedlemmar** når aldrig kontaktboken (modulen är inte i
+  medlems-railen § 22, `contacts` är staff-only). De ser **enbart** kontakter
+  som delats med deras bolag via en godkänd förfrågan, genom den kurerade
+  `listSharedContactsForStartup` (superuser EFTER verifierat medlemskap i
+  `min-oversikt/page.tsx` — samma mönster som § 18.3/§ 20.4). Bolagskortets
+  `StartupContactsSection` (staff/observer) läser med användarens token.
+- createRules är roll-lösa per § 21.3; roll enforce:as i server-action +
+  skrivlager. `updateRule` på `contact_requests`: frågaren (återkalla) eller
+  staff (avgöra — ägarkontrollen ligger i koden). Skrivningar via
+  användartoken med superuser-fallback bara vid PB v0.23.4:s tysta
+  regel-nekande (§ 21.3).
+
+### 41.5 Import
+
+`/kontakter/import`: CSV (`;`/`,`/tabb auto, citat, BOM) eller `.xlsx`
+(dependency-fria `parseXlsx`, största arket) → **förhandsgranskning**
+(rubrikmappning mot svenska/engelska/Outlook-/Google-alias i
+`mapContactImportHeaders`, okända kolumner listas som ignorerade, dubbletter
+inom filen slås ihop, PII-fria varningar per radnummer) → **bekräfta** →
+`importContacts` upsert:ar (nyckel e-post, annars namn + organisation):
+befintliga rader uppdateras bara med icke-tomma värden och får importens
+ägare **tillagd** (aldrig borttagen). Kolumnen **Ägare** (e-post till
+Movexum-kollega) sätter ägare per rad; annars valda standardägare (default
+importören). **GDPR:** en `Samtycke/GDPR`-kolumn respekteras per rad
+(`Nej` hoppas alltid över); saknas kolumnen krävs importörens uttryckliga
+bekräftelse (`consent_confirmed`). Max 10 MB / 5 000 rader. Importen loggar
+**en** sammanfattningsrad i `agent_actions` (`contact_import`) — inte en per
+kontakt. Personnummer saneras i `info` (§ 15.6).
+
+### 41.6 Chatten
+
+Fyra verktyg i den interaktiva staff-chatten (§ 16.3, domän `contacts` i
+`tool-scope.ts`, kvitton § 33.4): `create_contact` (kräver
+`gdpr_confirmed=true` — modellen instrueras att fråga användaren först;
+dubblettkontroll via `search_records`; den inloggade blir ägare),
+`update_contact_field` (bara verksamhetsfält), `request_contact_use` (syfte +
+ev. bolag → notis till ägaren; självgodkänt för ägaren) och
+`decide_contact_request` (ägaren avgör på uttrycklig begäran). **Agent-nekat**
+(`writable-fields.ts`): `email`/`phone` (kontaktuppgifter skrivs av en
+människa i UI:t — agenten kan inte verifiera dem), `owners` (kan inte slå upp
+användar-id:n, `users` denylistad) och `gender` (GDPR art. 9). Läsning via
+`search_records`/`query_collection` på `contacts`/`contact_requests` med den
+befintliga fältmaskningen (§ 9.3) — modellen ser namn/organisation/roll/
+kategori/ägare, **aldrig e-post, telefon eller kön**. Guidad i
+`CHAT_WRITE_ACTIONS_GUIDANCE` och hjälp-guiden (§ 33.3).
+
+### 41.7 Regelefterlevnad
+
+- **GDPR § 5/§ 6:** rättslig grund = berättigat intresse (inkubatordrift,
+  matchning av bolag mot externa resurser) + information/samtycke vid
+  registrering (`gdpr_consent` krävs, § 15.4). Ändamålsbegränsning
+  operationaliseras av förfrågningsflödet (syfte per användning, ägaren
+  godkänner). Direkt-PII (e-post/telefon) loggas ALDRIG i `agent_actions`
+  (bara att fältet ändrades); feed-rader bygger på namn + organisation.
+  `info`/`purpose`/`decision_note` personnummer-saneras. `gender` (art. 9)
+  sätts bara av admin/incubator_lead/coach i UI:t, aldrig av agenten, och är
+  fältmaskat i AI-kontexten.
+- **GDPR art. 15–17:** kontaktkortet ger fullständig vy; radering
+  (admin/incubator_lead) cascade-städar `contact_requests` och
+  `startup_contacts`. Ägar-/skaparrelationer nollställs vid användarradering.
+- **§ 21 / ISO 27001 A.5.15–A.5.18:** staff/observer-only RLS + kurerad
+  medlemsvy; roller i skrivlagret; ägare valideras till Movexum-personal.
+- **ISO 27001 A.8.15 / SOC 2 CC7.2:** varje mutation auditeras (PII-fritt);
+  förfrågningar är oföränderliga efter beslut.
+- **EU AI Act:** n/a — deterministiska mutationer via skrivlagret, ingen
+  AI-inferens (chatten föreslår/utför på användarens begäran, ägaren beslutar).
+- **Migrationer** 1700000156–158 är nya, oföränderliga filnummer, speglade i
+  `setup-via-api.mjs` (patch av `contacts`, `contact_requests`-def,
+  `FORCE_CREATE_RULES`, notistyper) och `verify-baseline.mjs`
+  (`contact_requests` must-exist + staff/observer; `contacts.owners/
+  organization/category` i `REQUIRED_APP_FIELDS`; `last_name` ej required).
+  `notify()` faller tillbaka på kind `assigned` mot ett schema utan
+  1700000158 så en förfrågan aldrig tappas tyst.

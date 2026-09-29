@@ -65,6 +65,7 @@ import { pbFileUrl } from '@/lib/pb-file';
 import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
 import { DeMinimisSection } from './DeMinimisSection';
 import { StartupProcurementsSection } from './StartupProcurementsSection';
+import { StartupContactsSection } from './StartupContactsSection';
 import { StartupMissionsSection } from './StartupMissionsSection';
 
 interface StartupRecord {
@@ -982,6 +983,11 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
 
         {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer']) && (
           <StartupProcurementsSection pb={pb} tenantId={user.tenant} startupId={id} />
+        )}
+
+        {/* § 41.4 — kontakter ur kontaktboken som delats med bolaget */}
+        {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer']) && (
+          <StartupContactsSection pb={pb} tenantId={user.tenant} startupId={id} />
         )}
 
         {/* § 29.4 — slutförda tvärfunktionella team sammanställs på bolagskortet */}
