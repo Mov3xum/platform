@@ -322,6 +322,33 @@ server-varianterna vinner när de är satta. `getPublicPbUrl()` väljer
 staging, inte produktionsdata). Lägg aldrig tillbaka duplicerad
 `process.env.POCKETBASE_URL`-logik i enskilda filer — använd helpern.
 
+**Diagnos av PB-adressen (`lib/pb-health.ts`, ren + enhetstestad; 2026-09).**
+`users` är PocketBases inbyggda auth-kollektion och kan inte saknas, men
+inloggningen svarade "Users-collectionen saknas — har migrationerna körts?" på
+VARJE 404 från SDK:n — även när PB-URL:en inte routades till PocketBase alls
+(Coolifys Traefik svarar "404 page not found" för en host utan router; web-
+appen svarar 404 på `/api/collections/…` om domänen pekar på den). Nu probar
+båda inloggningsvägarna `<PB-url>/api/health` vid 404/5xx/nätverksfel och
+säger vad adressen faktiskt är (`proxy_404` → lägg domänen under Domains på
+PB-resursen och redeploya, `html` → pekar på web-appen, `unreachable` →
+DNS/cert, `pocketbase` → först då kan kollektionen saknas). Web-appens
+`/api/health` (publik, undantagen i middleware) visar resolvad PB-URL +
+samma diagnos för `MOVEXUM_ENV`-miljön — kör den först vid inloggningsfel.
+Ingen PII, inga secrets (URL:en finns redan i klientbundeln). Svaret bär
+`pocketbase.resolved_via` = vilken env-nyckel som gav URL:en; `fallback:*`
+eller `NEXT_PUBLIC_POCKETBASE_URL` i produktion betyder att
+`POCKETBASE_URL_PRODUCTION` saknas/felstavad på web-appen (eller att
+`MOVEXUM_ENV` inte är `production`, då läses `_STAGING`-paret).
+**Runtime, inte build-time:** Next.js inlinar `process.env.NEXT_PUBLIC_*`
+vid bygget (även i serverbundlar), så `pb-url.ts` läser alla nycklar via
+beräknad nyckel (`readEnv`) — ett värde satt i Coolify vinner därmed alltid
+över build-defaulten i `apps/web/.env.production`. Grundorsaken 2026-09:
+staging-PB:s gamla sslip-domän avvecklades (nu `pb-staging.app.movexum.se`),
+produktions-webben resolvade inte `_PRODUCTION`-paret och föll på den
+inbakade, döda adressen. `STAGING_PB_FALLBACK` + `.env.production` pekar nu
+på den nya staging-hosten; resolutionen är ren och enhetstestad
+(`pb-url.test.ts`).
+
 ---
 
 ## 8. Snabbreferens — vanliga klassmappningar
