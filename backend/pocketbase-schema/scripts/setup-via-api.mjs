@@ -2475,8 +2475,8 @@ await ensureCollection({
   listRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
   viewRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
   createRule: ANY_AUTH,
-  updateRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`,
-  deleteRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`
+  updateRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`
 });
 
 await ensureCollection({
@@ -2587,8 +2587,8 @@ await ensureCollection({
   listRule: `${ANY_AUTH} && @request.auth.tenant = module.tenant`,
   viewRule: `${ANY_AUTH} && @request.auth.tenant = module.tenant`,
   createRule: ANY_AUTH,
-  updateRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`,
-  deleteRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`
+  updateRule: `${ANY_AUTH} && @request.auth.tenant = module.tenant && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && @request.auth.tenant = module.tenant && ${COMPASS_STAFF_EACH}`
 });
 
 await ensureCollection({
@@ -2608,8 +2608,8 @@ await ensureCollection({
   listRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
   viewRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
   createRule: ANY_AUTH,
-  updateRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`,
-  deleteRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`
+  updateRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`
 });
 
 await ensureCollection({
