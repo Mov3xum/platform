@@ -1405,8 +1405,20 @@ en kandidatlista och rapporterar PII-fritt i `notes` vad som saknades, och
 **Kör den på ett känt bolag (t.ex. med Combly-facit) innan portföljen synkas.**
 Roarings endpoint-versioner och beloppsenhet är env-överstyrbara
 (`ROARING_API_BASE_URL`, `ROARING_OVERVIEW_PATH`, `ROARING_FINANCIALS_PATH`,
-`ROARING_GROUP_STRUCTURE_PATH`, `ROARING_BENEFICIAL_OWNER_PATH`,
-`ROARING_AMOUNT_MULTIPLIER` default 1000 = TSEK→SEK); Bolagsverkets bas-URL
+`ROARING_GROUP_STRUCTURE_PATH`, `ROARING_BENEFICIAL_OWNER_PATH` — varje
+`*_PATH` är en **kommaseparerad kandidatlista** i prioritetsordning som provas
+vid 403/404, första svar med data vinner; `ROARING_AMOUNT_MULTIPLIER` default
+1000 = TSEK→SEK). **Verifierat mot Roarings publika dokumentation 2026-09-30
+(`docs/integrations/roaring-sandbox-test.md`):** token = `POST /token`,
+grunddata `/se/company/overview/2.0`, koncern `/se/company/group-structure/1.0`,
+verklig huvudman **`/se/beneficialowner/2.1`** (den tidigare defaulten
+`/se/company/beneficial-owner/1.0` var fel och ligger nu sist som reserv).
+Bokslut-API:ts sökväg (`/se/company/economy-overview/1.1`) är fortsatt
+obekräftad — se runbooken. **Sandbox = samma värd** (`api.roaring.io`): det
+är nyckelparet från utvecklarportalen som avgör om svaren är testdata, så
+`base_url` lämnas tom. Förhandsgranskningen noterar per API vilken sökväg som
+svarade och vilka **fältnycklar** (aldrig värden) svaret bar, så mappningen kan
+verifieras mot sandboxen utan rå JSON. Bolagsverkets bas-URL
 via credential-fältet eller `BOLAGSVERKET_API_BASE_URL` (testmiljö).
 Credentials (client id/secret) läggs in per tenant på `/integrationer/<slug>`
 och krypteras AES-256-GCM (§ 11.5) — aldrig i kod.

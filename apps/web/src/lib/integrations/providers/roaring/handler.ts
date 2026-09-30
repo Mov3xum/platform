@@ -5,11 +5,23 @@ import type { CompanyRegistryHandler } from '../../types';
 import {
   readRoaringCredentials,
   roaringAmountMultiplier,
-  roaringGet,
+  roaringGetFirst,
   roaringToken,
-  ROARING_PATHS
+  ROARING_PATHS,
+  type RoaringFetchOutcome
 } from './client';
-import { normalizeRoaringCompany, type RoaringRawBundle } from './normalize';
+import { describeRecordKeys, normalizeRoaringCompany, type RoaringRawBundle } from './normalize';
+
+/**
+ * Förhandsgranskningens "vad svarade API:t"-not: vilken sökväg som gav data
+ * och vilka FÄLTNYCKLAR svaret bar (aldrig värden — § 11.4). Gör att fält-
+ * mappningen kan verifieras mot sandboxen utan att någon behöver läsa rå JSON.
+ */
+function responseNote(label: string, outcome: RoaringFetchOutcome): string {
+  if (!outcome.ok) return `Roaring ${label} (${outcome.path}): ${outcome.reason}`;
+  const keys = describeRecordKeys(outcome.data);
+  return `Roaring ${label} (${outcome.path}) svarade med fälten: ${keys.length > 0 ? keys.join(', ') : '(tomt)'}`;
+}
 
 // Roaring — bolagsregister-provider (CLAUDE.md § 11.8). Hämtar fyra API:er
 // per bolag (grunddata, bokslut, koncernstruktur, verklig huvudman) och
@@ -47,7 +59,7 @@ export const roaringHandler: CompanyRegistryHandler = createCompanyRegistryHandl
       label: 'Bas-URL (valfri)',
       type: 'text',
       required: false,
-      help: 'Lämna tom för https://api.roaring.io. Sätt bara för sandbox-miljö.'
+      help: 'Lämna tom för https://api.roaring.io. Roarings sandbox använder SAMMA adress — det är nyckelparet (sandbox- eller produktionsapplikation i utvecklarportalen) som avgör om svaren är testdata.'
     }
   ],
   throttleMs: 250,
@@ -73,28 +85,28 @@ export const roaringHandler: CompanyRegistryHandler = createCompanyRegistryHandl
     if (!c) throw new Error('Roaring: client ID/secret saknas.');
     const isPersonal = isPersonalOrgNr(orgNr);
 
-    const overview = await roaringGet(c, ROARING_PATHS.overview(), orgNr);
+    const overview = await roaringGetFirst(c, ROARING_PATHS.overview(), orgNr);
     if (!overview.ok) {
-      throw new Error(`Roaring grunddata: ${overview.reason}`);
+      throw new Error(`Roaring grunddata (${overview.path}): ${overview.reason}`);
     }
 
     const [financials, group, beneficial] = await Promise.all([
-      roaringGet(c, ROARING_PATHS.financials(), orgNr),
-      isPersonal ? Promise.resolve(null) : roaringGet(c, ROARING_PATHS.groupStructure(), orgNr),
-      isPersonal ? Promise.resolve(null) : roaringGet(c, ROARING_PATHS.beneficialOwners(), orgNr)
+      roaringGetFirst(c, ROARING_PATHS.financials(), orgNr),
+      isPersonal ? Promise.resolve(null) : roaringGetFirst(c, ROARING_PATHS.groupStructure(), orgNr),
+      isPersonal ? Promise.resolve(null) : roaringGetFirst(c, ROARING_PATHS.beneficialOwners(), orgNr)
     ]);
 
     const bundle: RoaringRawBundle = { overview: overview.data };
-    const softNotes: string[] = [];
+    const softNotes: string[] = [responseNote('grunddata', overview)];
     if (financials.ok) bundle.financials = financials.data;
-    else softNotes.push(`Roaring bokslut: ${financials.reason}`);
+    softNotes.push(responseNote('bokslut', financials));
     if (group) {
       if (group.ok) bundle.groupStructure = group.data;
-      else softNotes.push(`Roaring koncernstruktur: ${group.reason}`);
+      softNotes.push(responseNote('koncernstruktur', group));
     }
     if (beneficial) {
       if (beneficial.ok) bundle.beneficialOwners = beneficial.data;
-      else softNotes.push(`Roaring verklig huvudman: ${beneficial.reason}`);
+      softNotes.push(responseNote('verklig huvudman', beneficial));
     }
 
     const company = normalizeRoaringCompany(orgNr, bundle, {

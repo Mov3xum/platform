@@ -52,6 +52,45 @@ export function firstRecord(raw: unknown): Record<string, unknown> | undefined {
   return raw as Record<string, unknown>;
 }
 
+/**
+ * Env-lista av endpoint-kandidater ("/a/1.0, /b/2.0"). Tom/whitespace →
+ * fallback. Bara absoluta sökvägar (börjar med "/") behålls — en felskriven
+ * env får aldrig bli en relativ URL mot en annan värd.
+ */
+export function parseRoaringPathList(raw: string | undefined, fallback: string[]): string[] {
+  const list = (raw || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.startsWith('/'))
+    .map((s) => s.replace(/\/$/, ''));
+  return list.length > 0 ? list : fallback;
+}
+
+/**
+ * Fältnycklar (ALDRIG värden) på första posten i ett Roaring-svar, för
+ * förhandsgranskningens "vad svarade API:t"-not. Nycklar är schemainformation,
+ * inte personuppgifter — värden når aldrig noten. Nästlade objekt/listor visas
+ * som `key{…}`/`key[…]` med sina egna första-nivå-nycklar, cappat.
+ */
+export function describeRecordKeys(raw: unknown, max = 40): string[] {
+  const rec = firstRecord(raw);
+  if (!rec) return [];
+  const out: string[] = [];
+  for (const key of Object.keys(rec)) {
+    if (out.length >= max) break;
+    const v = rec[key];
+    if (Array.isArray(v)) {
+      const first = v.find((x) => x && typeof x === 'object') as Record<string, unknown> | undefined;
+      out.push(first ? `${key}[${Object.keys(first).slice(0, 12).join(',')}]` : `${key}[]`);
+    } else if (v && typeof v === 'object') {
+      out.push(`${key}{${Object.keys(v as object).slice(0, 12).join(',')}}`);
+    } else {
+      out.push(key);
+    }
+  }
+  return out;
+}
+
 function allRecords(raw: unknown): Record<string, unknown>[] {
   if (!raw || typeof raw !== 'object') return [];
   const records = (raw as { records?: unknown }).records;
@@ -383,7 +422,12 @@ export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]):
     if (recs.length > 1 || (recs[0] && !BO_LIST_KEYS.some((k) => k in recs[0]))) list = recs;
   }
   if (list.length === 0) {
-    notes.push('Roaring verklig huvudman: inga registrerade huvudmän (eller fält som inte kändes igen).');
+    const flag = pickFirst(rec, ['hasBeneficialOwners']);
+    notes.push(
+      flag === false
+        ? 'Roaring verklig huvudman: bolaget har inga registrerade huvudmän (hasBeneficialOwners=false).'
+        : 'Roaring verklig huvudman: inga registrerade huvudmän (eller fält som inte kändes igen).'
+    );
     return [];
   }
   const out: RegistryOwnershipEntry[] = [];
