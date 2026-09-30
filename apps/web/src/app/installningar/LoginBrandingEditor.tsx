@@ -5,11 +5,14 @@ import { Check, ExternalLink } from 'lucide-react';
 import {
   LOGIN_ACCENTS,
   LOGIN_ACCENT_LABELS,
+  LOGIN_CAPTION_MAX,
+  LOGIN_CAPTION_MAX_LINES,
   LOGIN_HEADLINE_MAX,
   LOGIN_LAYOUTS,
   LOGIN_LAYOUT_META,
   LOGIN_TAGLINE_MAX,
-  loginAccentVar
+  loginAccentVar,
+  loginLayoutHasCaption
 } from '@platform/shared';
 import type { LoginAccent, LoginLayout } from '@platform/shared';
 import { saveLoginBrandingAction, type SaveLoginBrandingState } from '@/lib/actions/settings';
@@ -18,7 +21,7 @@ import { LOGIN_MEDIA_UPLOAD_ENDPOINT, type LoginBrandingView } from '@/lib/login
 
 /**
  * Inloggningssidans utseende (CLAUDE.md § 48): mall, accentfärg, rubrik,
- * underrubrik + bild/video. Mall/färg/texter postas med "Spara"; media
+ * underrubrik, bildtext + bild/video. Mall/färg/texter postas med "Spara"; media
  * laddas upp direkt vid val (route handler, stora videos ryms). Gäller
  * /login för ALLA användare i systemet.
  */
@@ -28,7 +31,7 @@ export function LoginBrandingEditor({
   isLoginTenant
 }: {
   initial: LoginBrandingView;
-  /** Fält som PB-schemat saknar (migration 1700000172 inte körd). */
+  /** Fält som PB-schemat saknar (migration 1700000172/1700000175 inte körd). */
   schemaMissing: string[];
   /** null = kunde inte avgöras (ingen superuser); false = en annan tenant visas på /login. */
   isLoginTenant: boolean | null;
@@ -40,13 +43,16 @@ export function LoginBrandingEditor({
   const [layout, setLayout] = useState<LoginLayout>(initial.layout);
   const [accent, setAccent] = useState<LoginAccent>(initial.accent);
   const meta = LOGIN_LAYOUT_META[layout];
+  const captionApplies = loginLayoutHasCaption(layout);
+  const captionPlaceholder = `${initial.headline}\n${initial.tagline}`;
 
   return (
     <div className="grid gap-6">
       {schemaMissing.length > 0 && (
         <p className="rounded-xl bg-movexum-pastell-gul px-4 py-3 text-xs text-movexum-morkgul">
-          Databasen saknar fälten {schemaMissing.join(', ')} — PocketBase-migrationen 1700000172 är
-          inte applicerad. Val som sparas här syns inte på inloggningssidan förrän den körts.
+          Databasen saknar fälten {schemaMissing.join(', ')} — PocketBase-migrationen 1700000172
+          (bildtexten: 1700000175) är inte applicerad. Val som sparas här syns inte på
+          inloggningssidan förrän den körts.
         </p>
       )}
       {isLoginTenant === false && (
@@ -122,6 +128,9 @@ export function LoginBrandingEditor({
         </fieldset>
 
         <div className="grid gap-4 sm:grid-cols-2">
+          <p className="text-xs text-foreground-subtle sm:col-span-2">
+            Rubrik och underrubrik står vid inloggningsformuläret i alla mallar.
+          </p>
           <label className="block">
             <span className="mb-1.5 block text-sm font-semibold text-foreground">Rubrik</span>
             <input
@@ -143,6 +152,22 @@ export function LoginBrandingEditor({
               placeholder="Logga in för att fortsätta till din arbetsyta."
               className="block w-full rounded-xl border border-default bg-canvas-subtle px-3 py-2 text-sm text-foreground outline-none transition focus:border-brand focus:bg-surface focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
             />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="mb-1.5 block text-sm font-semibold text-foreground">Bildtext</span>
+            <textarea
+              name="caption"
+              defaultValue={initial.caption}
+              maxLength={LOGIN_CAPTION_MAX}
+              rows={LOGIN_CAPTION_MAX_LINES}
+              placeholder={captionPlaceholder}
+              className="block w-full resize-y rounded-xl border border-default bg-canvas-subtle px-3 py-2 text-sm text-foreground outline-none transition focus:border-brand focus:bg-surface focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+            />
+            <span className="mt-1.5 block text-xs text-foreground-subtle">
+              {captionApplies
+                ? `Texten som ligger över bilden i mallen ${meta.label}, oberoende av rubriken. Radbrytningar behålls (max ${LOGIN_CAPTION_MAX_LINES} rader). Lämna tom så visas rubrik och underrubrik även över bilden.`
+                : `Mallen ${meta.label} har ingen text över bilden — bildtexten sparas men används bara av Bild till vänster/höger och Färgpanel.`}
+            </span>
           </label>
         </div>
 

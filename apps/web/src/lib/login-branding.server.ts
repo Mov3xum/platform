@@ -33,7 +33,7 @@ export interface TenantLoginBranding {
   tenantId: string;
   branding: LoginBranding;
   view: LoginBrandingView;
-  /** Fält som saknas i det deployade PB-schemat (migration 1700000172 inte körd). */
+  /** Fält som saknas i det deployade PB-schemat (migration 1700000172/1700000175 inte körd). */
   schemaMissing: LoginBrandingField[];
 }
 

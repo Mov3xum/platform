@@ -9,10 +9,12 @@ import {
   LOGIN_ACCENTS,
   LOGIN_ACCENT_LABELS,
   LOGIN_BRANDING_FIELDS,
+  LOGIN_CAPTION_MAX,
   LOGIN_HEADLINE_MAX,
   LOGIN_LAYOUTS,
   LOGIN_LAYOUT_META,
   LOGIN_TAGLINE_MAX,
+  cleanLoginCaption,
   cleanLoginText,
   loginAccentVar,
   loginLayoutFeaturesMedia,
@@ -63,6 +65,14 @@ test('cleanLoginText: trimmar, plattar radbrytningar och cappar', () => {
   assert.equal(cleanLoginText(7, 10), '');
 });
 
+test('cleanLoginCaption: behåller radbrytningar, tar bort tomma rader, cappar rader och längd', () => {
+  assert.equal(cleanLoginCaption('  Välkommen till \r\n\n  Movexum!  '), 'Välkommen till\nMovexum!');
+  assert.equal(cleanLoginCaption('a\nb\nc\nd'), 'a\nb\nc', 'max tre rader');
+  assert.equal(cleanLoginCaption('x'.repeat(LOGIN_CAPTION_MAX + 50)).length, LOGIN_CAPTION_MAX);
+  assert.equal(cleanLoginCaption('   '), '');
+  assert.equal(cleanLoginCaption(undefined), '');
+});
+
 test('normalizeLoginBranding: tom post ⇒ standard; fyllda fält tolkas', () => {
   assert.deepEqual(normalizeLoginBranding(null), DEFAULT_LOGIN_BRANDING);
   assert.deepEqual(normalizeLoginBranding({}), DEFAULT_LOGIN_BRANDING);
@@ -71,6 +81,7 @@ test('normalizeLoginBranding: tom post ⇒ standard; fyllda fält tolkas', () =>
     login_accent: 'morklila',
     login_headline: '  Hej!  ',
     login_tagline: '',
+    login_caption: 'Hej\nvärlden',
     login_image: 'omslag_ab12cd34ef.webp',
     login_video: ['film_0123456789.mp4']
   });
@@ -78,6 +89,8 @@ test('normalizeLoginBranding: tom post ⇒ standard; fyllda fält tolkas', () =>
   assert.equal(b.accent, 'morklila');
   assert.equal(b.headline, 'Hej!');
   assert.equal(b.tagline, DEFAULT_LOGIN_BRANDING.tagline, 'tom underrubrik ⇒ standardtext');
+  assert.equal(b.caption, 'Hej\nvärlden');
+  assert.equal(normalizeLoginBranding({ login_headline: 'Hej' }).caption, '', 'saknad bildtext ⇒ tom (faller tillbaka på rubriken)');
   assert.equal(b.imageFilename, 'omslag_ab12cd34ef.webp');
   assert.equal(b.videoFilename, 'film_0123456789.mp4');
 });
@@ -97,14 +110,23 @@ test('validateLoginBrandingInput: okänd mall/accent avvisas med giltiga namn; t
   if (!bad.ok) assert.match(bad.error, /split_left/);
   const badAccent = validateLoginBrandingInput({ layout: 'panel', accent: '#123456' });
   assert.equal(badAccent.ok, false);
-  const ok = validateLoginBrandingInput({ layout: '', accent: '', headline: ' Välkommen ', tagline: 'Logga in.' });
+  const ok = validateLoginBrandingInput({
+    layout: '',
+    accent: '',
+    headline: ' Välkommen ',
+    tagline: 'Logga in.',
+    caption: ' Bild \n text '
+  });
   assert.equal(ok.ok, true);
   if (ok.ok) {
     assert.equal(ok.value.login_layout, DEFAULT_LOGIN_LAYOUT);
     assert.equal(ok.value.login_accent, DEFAULT_LOGIN_ACCENT);
     assert.equal(ok.value.login_headline, 'Välkommen');
     assert.equal(ok.value.login_tagline, 'Logga in.');
+    assert.equal(ok.value.login_caption, 'Bild\ntext');
   }
+  const tooLongCaption = validateLoginBrandingInput({ caption: 'x'.repeat(LOGIN_CAPTION_MAX + 1) });
+  assert.equal(tooLongCaption.ok, false);
   const tooLong = validateLoginBrandingInput({ headline: 'x'.repeat(LOGIN_HEADLINE_MAX + 1) });
   assert.equal(tooLong.ok, false);
   const tooLongTag = validateLoginBrandingInput({ tagline: 'x'.repeat(LOGIN_TAGLINE_MAX + 1) });

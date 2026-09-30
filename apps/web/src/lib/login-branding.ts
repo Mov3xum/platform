@@ -28,6 +28,7 @@ export function toLoginBrandingView(tenantId: string, branding: LoginBranding): 
     accent: branding.accent,
     headline: branding.headline,
     tagline: branding.tagline,
+    caption: branding.caption,
     imageUrl: loginMediaUrl(tenantId, branding.imageFilename),
     videoUrl: loginMediaUrl(tenantId, branding.videoFilename)
   };

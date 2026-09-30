@@ -67,6 +67,11 @@ export function normalizeLoginLayout(raw: unknown): LoginLayout {
   return isLoginLayout(v) ? v : DEFAULT_LOGIN_LAYOUT;
 }
 
+/** Sann när mallen lägger text över bilden/panelen — där visas bildtexten (§ 48). */
+export function loginLayoutHasCaption(layout: LoginLayout): boolean {
+  return layout === 'split_left' || layout === 'split_right' || layout === 'panel';
+}
+
 /** Sann när mallen är byggd runt bild/video (visar accentpanel utan media). */
 export function loginLayoutFeaturesMedia(layout: LoginLayout): boolean {
   return LOGIN_LAYOUT_META[layout].media === 'featured';
@@ -116,6 +121,9 @@ export function loginAccentVar(accent: unknown): string {
 
 export const LOGIN_HEADLINE_MAX = 120;
 export const LOGIN_TAGLINE_MAX = 300;
+/** Bildtexten (texten över bilden i split-/panelmallarna): korta rader, max tre. */
+export const LOGIN_CAPTION_MAX = 200;
+export const LOGIN_CAPTION_MAX_LINES = 3;
 export const DEFAULT_LOGIN_HEADLINE = 'Välkommen tillbaka';
 export const DEFAULT_LOGIN_TAGLINE = 'Logga in för att fortsätta till din arbetsyta.';
 
@@ -126,12 +134,32 @@ export function cleanLoginText(raw: unknown, max: number): string {
   return flat.length > max ? flat.slice(0, max).trimEnd() : flat;
 }
 
-/** Fälten på `tenants` som bär inloggningssidans utseende (migration 1700000172). */
+/**
+ * Bildtexten får bära radbrytningar (rubrik i två–tre rader över bilden):
+ * trimmar varje rad, tar bort tomma rader, cappar antal rader och total
+ * längd. Tomt ⇒ '' (= bilden faller tillbaka på rubrik + underrubrik).
+ */
+export function cleanLoginCaption(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .filter((line) => line.length > 0)
+    .slice(0, LOGIN_CAPTION_MAX_LINES);
+  const joined = lines.join('\n');
+  return joined.length > LOGIN_CAPTION_MAX ? joined.slice(0, LOGIN_CAPTION_MAX).trimEnd() : joined;
+}
+
+/**
+ * Fälten på `tenants` som bär inloggningssidans utseende (migration
+ * 1700000172; `login_caption` i 1700000175).
+ */
 export const LOGIN_BRANDING_FIELDS = [
   'login_layout',
   'login_accent',
   'login_headline',
   'login_tagline',
+  'login_caption',
   'login_image',
   'login_video'
 ] as const;
@@ -143,6 +171,11 @@ export interface LoginBranding {
   /** Rubrik som visas; tom sträng i posten ⇒ standardtexten. */
   headline: string;
   tagline: string;
+  /**
+   * Texten över bilden (split-/panelmallarna), för sig. Tom sträng ⇒ bilden
+   * visar rubrik + underrubrik (så sidan såg ut före fältet).
+   */
+  caption: string;
   /** PB-filnamn (inte URL) — null när ingen fil laddats upp. */
   imageFilename: string | null;
   videoFilename: string | null;
@@ -153,6 +186,7 @@ export const DEFAULT_LOGIN_BRANDING: LoginBranding = {
   accent: DEFAULT_LOGIN_ACCENT,
   headline: DEFAULT_LOGIN_HEADLINE,
   tagline: DEFAULT_LOGIN_TAGLINE,
+  caption: '',
   imageFilename: null,
   videoFilename: null
 };
@@ -176,6 +210,7 @@ export function normalizeLoginBranding(raw: Record<string, unknown> | null | und
     accent: normalizeLoginAccent(raw.login_accent),
     headline: headline || DEFAULT_LOGIN_HEADLINE,
     tagline: tagline || DEFAULT_LOGIN_TAGLINE,
+    caption: cleanLoginCaption(raw.login_caption),
     imageFilename: fileName(raw.login_image),
     videoFilename: fileName(raw.login_video)
   };
@@ -196,10 +231,20 @@ export interface LoginBrandingInput {
   accent?: unknown;
   headline?: unknown;
   tagline?: unknown;
+  caption?: unknown;
 }
 
 export type LoginBrandingValidation =
-  | { ok: true; value: { login_layout: LoginLayout; login_accent: LoginAccent; login_headline: string; login_tagline: string } }
+  | {
+      ok: true;
+      value: {
+        login_layout: LoginLayout;
+        login_accent: LoginAccent;
+        login_headline: string;
+        login_tagline: string;
+        login_caption: string;
+      };
+    }
   | { ok: false; error: string };
 
 /**
@@ -224,13 +269,17 @@ export function validateLoginBrandingInput(input: LoginBrandingInput): LoginBran
   if (typeof input.tagline === 'string' && input.tagline.trim().length > LOGIN_TAGLINE_MAX) {
     return { ok: false, error: `Underrubriken får vara högst ${LOGIN_TAGLINE_MAX} tecken.` };
   }
+  if (typeof input.caption === 'string' && input.caption.trim().length > LOGIN_CAPTION_MAX) {
+    return { ok: false, error: `Bildtexten får vara högst ${LOGIN_CAPTION_MAX} tecken.` };
+  }
   return {
     ok: true,
     value: {
       login_layout: layout,
       login_accent: accent,
       login_headline: cleanLoginText(input.headline, LOGIN_HEADLINE_MAX),
-      login_tagline: cleanLoginText(input.tagline, LOGIN_TAGLINE_MAX)
+      login_tagline: cleanLoginText(input.tagline, LOGIN_TAGLINE_MAX),
+      login_caption: cleanLoginCaption(input.caption)
     }
   };
 }
