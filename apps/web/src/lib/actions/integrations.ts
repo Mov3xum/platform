@@ -114,6 +114,7 @@ export async function requestIntegrationPilotAction(
   }
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   return { success: true };
 }
 
@@ -217,6 +218,7 @@ export async function connectIntegrationAction(
   });
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   revalidatePath(`/integrationer/${providerSlug}`);
   return { success: true };
 }
@@ -257,6 +259,7 @@ export async function disconnectIntegrationAction(
   }
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   return { success: true };
 }
 
@@ -307,6 +310,7 @@ export async function syncIntegrationAction(
   });
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   if (providerSlug) {
     revalidatePath(`/integrationer/${providerSlug}`);
     revalidatePath(`/integrationer/${providerSlug}/poster`);

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { escFilter } from '@/lib/pb-filter';
 import { notFound, redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { canAccessModuleForUser } from '@/lib/rbac';
+import { canOpenIntegrations } from '@/lib/integrations/access';
 import { PageShell } from '@/components/PageShell';
 
 interface ProviderRow {
@@ -52,7 +52,7 @@ export default async function IntegrationRecordsPage({
   const { slug } = await params;
   const { type, page } = await searchParams;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'integrationer', user.enabledModules)) {
+  if (!canOpenIntegrations(user)) {
     redirect('/dashboard');
   }
 

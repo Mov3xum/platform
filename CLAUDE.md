@@ -1282,6 +1282,7 @@ och kan renderas av samma UI oavsett leverantör.
 | `apps/web/src/lib/integrations/sync.ts` | Orkestrator (`runSync`) |
 | `apps/web/src/lib/integrations/providers/<slug>/{client,handler,normalize}.ts` | En per provider |
 | `apps/web/src/lib/actions/integrations.ts` | Connect/disconnect/sync server actions |
+| `apps/web/src/app/installningar/integrationer/page.tsx` | Katalogen som flik under Inställningar (admin/incubator_lead, § 36.1) — delar `components/integrations/IntegrationsCatalog.tsx` med `/integrationer` |
 | `apps/web/src/app/integrationer/[slug]/page.tsx` | Detaljsida (anslut + synka) |
 | `apps/web/src/app/integrationer/[slug]/poster/page.tsx` | Records-lista |
 
@@ -5528,6 +5529,7 @@ brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
 | `/installningar/organisation` | Tenants, infra-status, dataresidens |
 | `/installningar/ai-analys` | **AI-analys** — tre undervyer via `?vy=`: **Kostnadstak** (default, § 9.6), **Användning** (f.d. `/insights`: körningar, tokens, kostnad, kvalitetsfeedback § 9.10, adoption) och **Miljöpåverkan** (f.d. `/admin/ai-miljo`, admin-only, § 28.2). `/insights`, `/admin/ai-miljo` och `/installningar/ai-kostnad` är legacy-routes som redirectar hit (perioden bevaras). Modulen `insights` heter "AI-analys", har ingen egen rail-post längre och pekar hit. |
 | `/installningar/ai-minne` | AI-minne (`agent_memory`, § 16.4) |
+| `/installningar/integrationer` | **Integrationer** (2026-09) — organisationens externa tjänster (bolagsregister § 11.8, Brevo/Howspace, Mistral-connectors § 13, personliga OAuth-kopplingar § 14). Katalogen är den delade `components/integrations/IntegrationsCatalog.tsx`; `/integrationer` redirectar admin/incubator_lead hit och visar oförändrat katalogen för coach/bolagsmedlem (personliga integrationer). Detaljsidorna `/integrationer/<slug>` är oförändrade; grinden är `canOpenIntegrations` (`lib/integrations/access.ts`: settings-roll ELLER modulen) och tillbaka-länken följer rollen (`integrationsCatalogHref`). Modulen `integrationer` har ingen egen rail-post längre (samma mönster som `insights`/`anvandare`). |
 | `/installningar/utseende` | Tenant-logotyp + **inloggningssidans utseende** (mall, accentfärg, rubrik/underrubrik, bild/video — § 48) |
 
 `/admin/users` är en legacy-route som redirectar till `/installningar/anvandare`;

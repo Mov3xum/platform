@@ -26,7 +26,8 @@ verifieras genom att köra förhandsgranskningen mot sandboxen.
    (Company Overview, Economy Overview / Financial, Group Structure,
    Beneficial Owner). Ett API som saknas svarar 403 — det stoppar inte de
    andra, men noteras.
-2. **Anslut i appen** (admin/incubator_lead): `/integrationer/roaring` →
+2. **Anslut i appen** (admin/incubator_lead): Inställningar → **Integrationer**
+   (`/installningar/integrationer`) → kortet Roaring → `/integrationer/roaring` →
    Client ID + Client secret. Lämna **Bas-URL tom** (sandboxen använder
    `https://api.roaring.io`). Hemligheten krypteras AES-256-GCM i
    `tenant_integrations.config` och visas aldrig igen.
