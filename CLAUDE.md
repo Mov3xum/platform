@@ -7365,7 +7365,14 @@ Varje kort har en **typ** (bugg / ny funktion / ändring / fråga), ett
 **område** (vilken sida i plattformen det gäller — dropdown, t.ex.
 "Rapportering") och en beskrivning. **Ledningen** (admin/incubator_lead)
 **svarar** på kortet och **klarmarkerar** när det är gjort; ett klart kort kan
-återöppnas. Filter på status/typ/sida/"bara mina" + fritextsök.
+återöppnas. Filter på status/typ/sida/"bara mina" + fritextsök. Korten visas
+som **lista** eller **kanban-tavla** (Öppen · Besvarad · Klar) — valet sparas
+per webbläsare (`localStorage` `movexum-feedback-view`, bekvämlighet).
+Ledningen drar kort mellan kolumnerna (HTML5-DnD, samma mönster som
+`TaskKanban` § 15.7; på mobil en "Flytta till"-select); kolumnen Besvarad
+kräver att ett svar redan finns (`setFeedbackStatusAction` avvisar flytten
+med tydligt fel — kolumnen är ingen fri hink). Flytten är optimistisk i
+klienten och rullas tillbaka vid fel.
 
 | Fil | Syfte |
 |-----|-------|
@@ -7388,6 +7395,16 @@ Varje kort har en **typ** (bugg / ny funktion / ändring / fråga), ett
   `done_by`/`done_at`, autodate explicit (§ 28.5). Speglad i
   `setup-via-api.mjs` (def + `FORCE_CREATE_RULES`) och asserterad i
   `verify-baseline.mjs` (must-exist + `MUST_BE_STAFF_OR_OBSERVER`).
+- **Bara egna aktiverade sidor.** Dropdownen över sidor visar enbart de
+  sidor som är aktiverade på den inloggades egen profil (§ 36.3): varje
+  modul-kopplat område bär `module` i `FEEDBACK_AREAS`, och
+  `allowedFeedbackAreas` (ren, enhetstestad) + `lib/feedback/areas.ts`
+  (`feedbackAreasForUser`, samma `canAccessModuleForUser` som sidmenyn)
+  filtrerar listan. Tvärgående områden utan modul (mobil, inloggning,
+  "annat") är alltid valbara. **Samma lista är gränsen server-side**
+  (`assertAreaAllowed` i actionerna) — klienten kan inte skicka ett annat
+  område. Vid redigering får kortets befintliga område alltid behållas
+  (ledningen kan redigera kort om sidor hen själv inte har i menyn).
 - **RBAC (ISO 27001 A.5.15–A.5.18):** lägga upp = Movexum-personal
   (`FEEDBACK_AUTHOR_ROLES`: admin/incubator_lead/coach/mentor; observer
   läser); redigera = författaren tills kortet är klart, eller ledningen;

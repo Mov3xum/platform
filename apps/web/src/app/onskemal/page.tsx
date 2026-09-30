@@ -3,6 +3,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
 import { listFeedbackItems } from '@/lib/feedback/data';
+import { feedbackAreasForUser } from '@/lib/feedback/areas';
 import { canCreateFeedback, canRespondToFeedback, countFeedbackByStatus } from '@platform/shared';
 import { FeedbackBoard } from './FeedbackBoard';
 
@@ -11,7 +12,8 @@ export const dynamic = 'force-dynamic';
 /**
  * Önskemål & buggar (CLAUDE.md § 49) — intern backlog. Läser med
  * användarens token (RLS § 21: staff/observer-only). Roll-flaggorna är
- * UI-kurering; gränsen ligger i server-actionerna.
+ * UI-kurering; gränsen ligger i server-actionerna. Dropdownen över sidor
+ * visar bara sidor som är aktiverade på den inloggades profil (§ 36.3).
  */
 export default async function OnskemalPage() {
   const user = await requireUser();
@@ -34,6 +36,7 @@ export default async function OnskemalPage() {
         meId={user.id}
         canCreate={canCreateFeedback(user.roles)}
         canRespond={canRespondToFeedback(user.roles)}
+        areaOptions={feedbackAreasForUser(user)}
         readError={result.error ?? null}
         truncated={result.truncated}
       />

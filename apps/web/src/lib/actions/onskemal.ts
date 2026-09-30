@@ -8,12 +8,14 @@ import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { describePbError, pbStatus } from '@/lib/pb-error';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import { FEEDBACK_ITEMS, getFeedbackItem, type FeedbackItem } from '@/lib/feedback/data';
+import { feedbackAreasForUser } from '@/lib/feedback/areas';
 import {
   canCreateFeedback,
   canDeleteFeedback,
   canEditFeedback,
   canRespondToFeedback,
   feedbackAreaLabel,
+  isFeedbackStatus,
   validateFeedbackAnswer,
   validateFeedbackInput
 } from '@platform/shared';
@@ -100,6 +102,18 @@ async function loadItem(pb: PocketBase, user: SessionUser, id: string): Promise<
   return getFeedbackItem(su, user.tenant, id);
 }
 
+/**
+ * Området måste vara en sida som är aktiverad på den inloggades profil
+ * (§ 36.3) — samma lista som dropdownen visar. Vid redigering får kortets
+ * befintliga område alltid stå kvar (ledningen kan redigera kort som rör
+ * sidor hen själv inte har i sidmenyn).
+ */
+function assertAreaAllowed(user: SessionUser, area: string, existingArea?: string): string | null {
+  if (existingArea && area === existingArea) return null;
+  const allowed = feedbackAreasForUser(user).some((a) => a.id === area);
+  return allowed ? null : 'Du kan bara lägga kort på sidor som är aktiverade i din egen sidmeny.';
+}
+
 function auditSummary(item: Pick<FeedbackItem, 'title' | 'kind' | 'area' | 'status'>): Record<string, unknown> {
   return {
     title: item.title,
@@ -122,6 +136,8 @@ export async function createFeedbackAction(input: Record<string, unknown>): Prom
 
   const v = validateFeedbackInput(input);
   if (!v.ok) return { error: v.error };
+  const areaError = assertAreaAllowed(user, v.value.area);
+  if (areaError) return { error: areaError };
 
   const payload = {
     tenant: user.tenant,
@@ -163,6 +179,8 @@ export async function updateFeedbackAction(id: string, input: Record<string, unk
 
   const v = validateFeedbackInput(input);
   if (!v.ok) return { error: v.error };
+  const areaError = assertAreaAllowed(user, v.value.area, existing.area);
+  if (areaError) return { error: areaError };
   const payload = {
     title: sanitizePersonnummer(v.value.title),
     description: sanitizePersonnummer(v.value.description),
@@ -256,20 +274,28 @@ export async function answerFeedbackAction(id: string, answer: unknown): Promise
   return { ok: true, id };
 }
 
-export async function setFeedbackDoneAction(id: string, done: boolean): Promise<FeedbackActionState> {
+/**
+ * Flytta ett kort till en kolumn på tavlan (ledningen). `done` sätter
+ * `done_by/at`; `answered` kräver att ett svar redan finns (kolumnen är
+ * "Besvarad", inte en fri hink); `open` återöppnar och nollar klar-fälten.
+ */
+export async function setFeedbackStatusAction(id: string, status: unknown): Promise<FeedbackActionState> {
   const ctx = await requireResponder();
   if ('error' in ctx) return { error: ctx.error };
   const { user, pb } = ctx;
+  if (!isFeedbackStatus(status)) return { error: 'Okänd status.' };
 
   const existing = await loadItem(pb, user, id);
   if (!existing) return { error: 'Kortet hittades inte.' };
+  if (status === existing.status) return { ok: true, id };
+  if (status === 'answered' && !existing.answer) {
+    return { error: 'Svara på kortet först — kolumnen Besvarad kräver ett svar.' };
+  }
 
-  const nextStatus: FeedbackItem['status'] = done ? 'done' : existing.answer ? 'answered' : 'open';
-  if (nextStatus === existing.status) return { ok: true, id };
-
-  const payload: Record<string, unknown> = done
-    ? { status: 'done', done_by: user.id, done_at: new Date().toISOString() }
-    : { status: nextStatus, done_by: '', done_at: '' };
+  const payload: Record<string, unknown> =
+    status === 'done'
+      ? { status: 'done', done_by: user.id, done_at: new Date().toISOString() }
+      : { status, done_by: '', done_at: '' };
   const res = await write(pb, (c) => c.collection(FEEDBACK_ITEMS).update(id, payload), 'Kunde inte ändra status.');
   if (isErr(res)) return res;
 
@@ -280,8 +306,18 @@ export async function setFeedbackDoneAction(id: string, done: boolean): Promise<
     record_id: id,
     field: 'status',
     before_value: { status: existing.status },
-    after_value: auditSummary({ ...existing, status: nextStatus })
+    after_value: auditSummary({ ...existing, status })
   });
   revalidate();
   return { ok: true, id };
+}
+
+/** Klarmarkera / återöppna (knapparna på kortet). Återöppning ⇒ `answered` om svar finns, annars `open`. */
+export async function setFeedbackDoneAction(id: string, done: boolean): Promise<FeedbackActionState> {
+  if (done) return setFeedbackStatusAction(id, 'done');
+  const ctx = await requireResponder();
+  if ('error' in ctx) return { error: ctx.error };
+  const existing = await loadItem(ctx.pb, ctx.user, id);
+  if (!existing) return { error: 'Kortet hittades inte.' };
+  return setFeedbackStatusAction(id, existing.answer ? 'answered' : 'open');
 }

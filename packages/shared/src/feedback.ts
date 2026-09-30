@@ -55,40 +55,57 @@ export interface FeedbackArea {
   label: string;
   /** Intern sökväg till sidan (visas som länk på kortet). */
   route?: string;
+  /**
+   * Modul-id i `coreModules` som området hör till. Bara områden vars modul
+   * är AKTIVERAD på personens profil (§ 36.3) får väljas — se
+   * `allowedFeedbackAreas`. Saknas modul är området alltid valbart
+   * (tvärgående: mobil, inloggning, "annat").
+   */
+  module?: string;
 }
 
 export const FEEDBACK_AREAS: readonly FeedbackArea[] = [
-  { id: 'hem', label: 'Översikt (startsidan)', route: '/hem' },
-  { id: 'idag', label: 'Chatt / AI-agent', route: '/chatt' },
-  { id: 'inkorg', label: 'Mina uppgifter', route: '/inkorg' },
-  { id: 'mal', label: 'Mål & verksamhetsplan', route: '/mal' },
-  { id: 'arshjul', label: 'Årshjul', route: '/arshjul' },
-  { id: 'filer', label: 'Filer', route: '/filer' },
-  { id: 'inflode', label: 'Marknadsverktyg / Startupkompassen', route: '/inflode' },
-  { id: 'uppdrag', label: 'Tvärfunktionella team', route: '/uppdrag' },
-  { id: 'startups', label: 'Bolag & bolagskort', route: '/startups' },
-  { id: 'kontakter', label: 'Kontaktbok', route: '/kontakter' },
-  { id: 'de_minimis', label: 'De minimis', route: '/de-minimis' },
-  { id: 'checkar', label: 'Stödcheckar', route: '/checkar' },
-  { id: 'projekt', label: 'Projekt (finansiering)', route: '/projekt' },
-  { id: 'upphandlingar', label: 'Upphandlingar', route: '/upphandlingar' },
-  { id: 'investerare', label: 'Investerarrelationer', route: '/investerare' },
-  { id: 'events', label: 'Events', route: '/events' },
-  { id: 'community', label: 'Community', route: '/community' },
-  { id: 'education', label: 'Utbildning & workshops', route: '/education' },
-  { id: 'rapporter', label: 'Rapportering', route: '/rapporter' },
-  { id: 'agenter', label: 'AI-agenter (verktygslådan)', route: '/toolbox' },
-  { id: 'kunskapsbas', label: 'Kunskapsbas', route: '/kunskapsbas' },
-  { id: 'integrationer', label: 'Integrationer', route: '/integrationer' },
-  { id: 'installningar', label: 'Inställningar & användare', route: '/installningar' },
-  { id: 'min_oversikt', label: 'Mitt bolag (bolagsmedlemmens vy)', route: '/min-oversikt' },
+  { id: 'hem', module: 'hem', label: 'Översikt (startsidan)', route: '/hem' },
+  { id: 'idag', module: 'idag', label: 'Chatt / AI-agent', route: '/chatt' },
+  { id: 'inkorg', module: 'inkorg', label: 'Mina uppgifter', route: '/inkorg' },
+  { id: 'mal', module: 'mal', label: 'Mål & verksamhetsplan', route: '/mal' },
+  { id: 'arshjul', module: 'arshjul', label: 'Årshjul', route: '/arshjul' },
+  { id: 'filer', module: 'filer', label: 'Filer', route: '/filer' },
+  { id: 'inflode', module: 'inflode', label: 'Marknadsverktyg / Startupkompassen', route: '/inflode' },
+  { id: 'uppdrag', module: 'uppdrag', label: 'Tvärfunktionella team', route: '/uppdrag' },
+  { id: 'startups', module: 'startups', label: 'Bolag & bolagskort', route: '/startups' },
+  { id: 'kontakter', module: 'kontakter', label: 'Kontaktbok', route: '/kontakter' },
+  { id: 'de_minimis', module: 'de_minimis', label: 'De minimis', route: '/de-minimis' },
+  { id: 'checkar', module: 'checkar', label: 'Stödcheckar', route: '/checkar' },
+  { id: 'projekt', module: 'projekt', label: 'Projekt (finansiering)', route: '/projekt' },
+  { id: 'upphandlingar', module: 'upphandlingar', label: 'Upphandlingar', route: '/upphandlingar' },
+  { id: 'investerare', module: 'investerare', label: 'Investerarrelationer', route: '/investerare' },
+  { id: 'events', module: 'events', label: 'Events', route: '/events' },
+  { id: 'community', module: 'community', label: 'Community', route: '/community' },
+  { id: 'education', module: 'education', label: 'Utbildning & workshops', route: '/education' },
+  { id: 'rapporter', module: 'rapporter', label: 'Rapportering', route: '/rapporter' },
+  { id: 'agenter', module: 'agenter', label: 'AI-agenter (verktygslådan)', route: '/toolbox' },
+  { id: 'kunskapsbas', module: 'kunskapsbas', label: 'Kunskapsbas', route: '/kunskapsbas' },
+  { id: 'integrationer', module: 'integrationer', label: 'Integrationer', route: '/integrationer' },
+  { id: 'installningar', module: 'installningar', label: 'Inställningar & användare', route: '/installningar' },
+  { id: 'min_oversikt', module: 'min_oversikt', label: 'Mitt bolag (bolagsmedlemmens vy)', route: '/min-oversikt' },
   { id: 'mobil', label: 'Mobil / app-läge' },
   { id: 'inloggning', label: 'Inloggning & konto', route: '/konto' },
-  { id: 'onskemal', label: 'Önskemål & buggar (den här sidan)', route: '/onskemal' },
+  { id: 'onskemal', module: 'onskemal', label: 'Önskemål & buggar (den här sidan)', route: '/onskemal' },
   { id: 'annat', label: 'Annat / hela plattformen' }
 ];
 
 export const FEEDBACK_AREA_IDS: readonly string[] = FEEDBACK_AREAS.map((a) => a.id);
+
+/**
+ * Områden en person får välja: de vars modul är aktiverad på hens profil
+ * (`isModuleEnabled` = `canAccessModuleForUser` i appen) plus de
+ * modul-lösa. Används av BÅDE formuläret och server-valideringen så
+ * dropdownen och gränsen aldrig divergerar.
+ */
+export function allowedFeedbackAreas(isModuleEnabled: (moduleId: string) => boolean): FeedbackArea[] {
+  return FEEDBACK_AREAS.filter((a) => !a.module || isModuleEnabled(a.module));
+}
 
 export function isFeedbackArea(value: unknown): value is string {
   return typeof value === 'string' && FEEDBACK_AREA_IDS.includes(value);
