@@ -1073,6 +1073,36 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
   webbläsaren tyst släpper cookien → omöjligt att logga in på http-staging.
   `MOVEXUM_ALLOW_INSECURE_COOKIES=true` tvingar av `Secure` helt
   (explicit escape-hatch).
+- **Sessionsvalidering & users-fältlås (A.5.15–A.5.18, 2026-09-30):**
+  auth-cookien `pb_auth` bär `{ token, model }` där `model` är en OSIGNERAD
+  kopia av användarposten — redigerbar av kontoinnehavaren (DevTools) och
+  därför aldrig en sanningskälla. `getCurrentUser` (`lib/auth.server.ts`)
+  tar identiteten ur TOKENENS payload (`lib/session-token.ts`, ren +
+  enhetstestad: `type: "auth"`, ej utgången, giltigt id), läser posten
+  färskt från PocketBase med samma token (PB verifierar signaturen) och
+  svarar `null` vid VARJE fel — 401/403/404 (återkallad token, raderad
+  användare), 5xx eller nätverk (fail-closed; aldrig fallback till cookien).
+  Resultatet cachas per request (`react.cache`) så layout, sida och skal
+  delar ett anrop. Tidigare kunde ett redigerat `model.id` + egen giltig
+  token ge en ANNAN användares roller (`users.viewRule` låter alla i
+  tenanten läsa varandra), och ett misslyckat PB-uppslag gav cookiens
+  påhittade roller till varje server action med superuser-fallback.
+  **`users.updateRule` är fältlåst (migration 1700000174):** `@request.auth.id
+  = id` gällde utan lås, så en användare kunde via PB-API:t (tokenen kan
+  läsas ur den egna cookien) PATCH:a sina egna `roles`/`tenant`/
+  `linked_startups`/`enabled_modules`/`verified` → admin i valfri tenant.
+  Nu låses de fälten (+ `email`/`emailVisibility`) med `@request.body.<fält>:
+  isset = false`; självservice (display_name, avatar, title, bio,
+  competences, lösenord med oldPassword) fungerar oförändrat och admin-
+  flödena skriver via superuser (`lib/actions/users.ts`). Speglat i
+  `setup-via-api.mjs`, asserterat i `verify-baseline.mjs`.
+  **Kvarhängande skal:** App Router behåller root-layouten över mjuka
+  navigeringar, så en sida som `redirect('/login')`:ar efter tappad session
+  renderade inloggningssidan INUTI det gamla skalet (sidmeny/namn från en
+  session som inte fanns). `SessionGuard` (`components/proto/SessionGuard.tsx`,
+  i `ProtoShell`) hårdladdar när sökvägen blir skal-lös (`/login`, `/offline`,
+  `/m/`, `/u/`). `/login?next=` saneras med `sanitizeAppPath` (öppen-
+  redirect-skydd även för redan inloggade).
 - **Brute-force-skydd (A.8.x):** `loginAction` rate-limitar misslyckade
   försök per IP+e-post (8/15 min) och per IP (40/15 min) via
   `lib/rate-limit.ts` (in-memory; lyft till Redis/PB vid horisontell
@@ -2960,7 +2990,18 @@ ligger i root-layouten UTANFÖR sidans `error.tsx`-gräns, så varje fel i
 action-rundturen (gammal flik mot ny deploy → "Failed to find Server Action",
 icke-RSC-svar från proxyn) slog ut hela sidan i den globala felvyn "Något gick
 fel" medan användaren förblev inloggad (staging 2026-09). Sökvägen är publik i
-middleware:n så utloggning fungerar även med utgången cookie. `Navbar`/
+middleware:n så utloggning fungerar även med utgången cookie.
+**Redirecten är RELATIV (`Location: /login`, `lib/relative-redirect.ts`,
+ren + enhetstestad) — aldrig byggd ur `req.nextUrl`/`request.url`
+(incident 2026-09-30):** i standalone-containern bygger Next den adressen ur
+bind-hosten (`HOSTNAME=0.0.0.0`, `PORT=3000`), inte ur proxyns Host-header,
+så `303 → http://0.0.0.0:3000/login` pekade utanför appen och blockerades av
+CSP `form-action 'self'` — klicket på "Logga ut" gjorde ingenting. Samma
+regel gäller ALLA route handlers som redirectar till en sida i appen
+(OAuth-callbackarna § 13.4/§ 14.1 använder samma helper; `redirect_uri`
+byggs av `lib/app-integrations/app-url.ts`, delad med authorize-steget, så
+token-växlingen aldrig får mismatch). Skriv aldrig
+`NextResponse.redirect(new URL(path, request.url))` i en route handler. `Navbar`/
 `LogoutButton` renderas bara för UTLOGGADE besökare, så railens meny är den
 enda utloggningsvägen för en inloggad användare.
 

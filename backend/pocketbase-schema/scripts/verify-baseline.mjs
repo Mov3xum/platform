@@ -609,6 +609,11 @@ function verifyRlsAndRbac(collections) {
   assertRuleContains(users, 'listRule', '@request.auth.tenant = tenant');
   assertRuleContains(users, 'viewRule', '@request.auth.tenant = tenant');
   assertRuleContains(users, 'updateRule', '@request.auth.id = id');
+  // Migration 1700000174: självservice-uppdateringen är FÄLTLÅST — en
+  // användartoken får aldrig sätta behörighets-/identitetsfält via API:t.
+  for (const field of ['roles', 'tenant', 'linked_startups', 'enabled_modules', 'verified', 'email']) {
+    assertRuleContains(users, 'updateRule', `@request.body.${field}:isset = false`);
+  }
 
   const startups = collections.get('startups');
   assertRuleContains(startups, 'listRule', '@request.auth.id != ""');

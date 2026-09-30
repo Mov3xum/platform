@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/auth.server';
 import { getPublicPbUrl } from '@/lib/pb-url';
 import { loadPublicLoginBranding, resolveLoginBrandingTenant } from '@/lib/login-branding.server';
 import { LoginLanding } from '@/components/login/LoginLanding';
+import { sanitizeAppPath } from '@/lib/relative-redirect';
 
 export const metadata = {
   title: 'Logga in — Movexum'
@@ -19,7 +20,9 @@ export default async function LoginPage({
 }) {
   const user = await getCurrentUser();
   const params = await searchParams;
-  const next = params.next || '/dashboard';
+  // Öppen-redirect-skydd: `next` kommer från URL:en och används både i
+  // `redirect()` nedan (inloggad) och som formulärets mål — bara app-sökvägar.
+  const next = sanitizeAppPath(params.next, '/dashboard');
   // Admin förhandsgranskar från Inställningar → Logotyp & varumärke: en
   // inloggad användare skulle annars redirectas bort från /login.
   const preview = Boolean(user) && params.forhandsgranska === '1';

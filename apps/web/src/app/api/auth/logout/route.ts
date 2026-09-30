@@ -1,5 +1,6 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 import { AUTH_COOKIE } from '@/lib/auth.server';
+import { relativeRedirectInit } from '@/lib/relative-redirect';
 
 /**
  * Utloggning — route handler, inte server action.
@@ -17,14 +18,17 @@ import { AUTH_COOKIE } from '@/lib/auth.server';
  * cookien. Fungerar utan JS, oberoende av deploy-versionen i fliken, och kan
  * inte hamna i en React-felgräns. Endast POST (ingen GET → ingen logout-CSRF
  * via <img>-taggar); CSP `form-action 'self'` täcker formuläret.
+ *
+ * `Location` är RELATIV (`/login`), aldrig byggd ur `req.nextUrl` — i
+ * standalone-containern är den adressen bind-hosten `http://0.0.0.0:3000`
+ * (Next bygger `nextUrl` ur HOSTNAME/PORT, inte ur proxyns Host-header), så
+ * redirecten pekade utanför appen och blockerades av `form-action 'self'`:
+ * klicket på "Logga ut" gjorde ingenting (incident 2026-09-30). Se
+ * `lib/relative-redirect.ts`.
  */
-export async function POST(req: NextRequest): Promise<NextResponse> {
-  const url = req.nextUrl.clone();
-  url.pathname = '/login';
-  url.search = '';
-
+export async function POST(): Promise<NextResponse> {
   // 303 = "See Other": browsern följer med GET oavsett att requesten var POST.
-  const res = NextResponse.redirect(url, 303);
+  const res = new NextResponse(null, relativeRedirectInit('/login', 303));
   // Samma path som vid inloggningen ('/'), annars matchar browsern inte cookien.
   res.cookies.set(AUTH_COOKIE, '', {
     httpOnly: true,
@@ -33,6 +37,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     maxAge: 0,
     expires: new Date(0)
   });
-  res.headers.set('Cache-Control', 'no-store');
   return res;
 }

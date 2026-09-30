@@ -4,6 +4,8 @@ import { getAppProvider } from '@/lib/app-integrations/registry';
 import { verifyAppOAuthState } from '@/lib/app-integrations/state';
 import { exchangeCodeForTokens } from '@/lib/app-integrations/oauth';
 import { persistTokens } from '@/lib/app-integrations/storage';
+import { appIntegrationCallbackUrl } from '@/lib/app-integrations/app-url';
+import { relativeRedirectInit } from '@/lib/relative-redirect';
 
 /**
  * Generisk OAuth-callback för alla per-user app-integrationer.
@@ -20,7 +22,17 @@ import { persistTokens } from '@/lib/app-integrations/storage';
  *  4. Hämta lättviktig profil (e-post) för UI-label.
  *  5. Spara AES-256-GCM-krypterad token i user_app_integrations.
  *  6. Redirecta till providerns detaljsida.
+ *
+ * Alla redirects är RELATIVA och `redirect_uri` byggs av samma helper som
+ * authorize-steget: `request.url` är i standalone-containern bind-adressen
+ * `http://0.0.0.0:3000` (se `lib/relative-redirect.ts`), så en URL byggd ur
+ * den pekade utanför appen och gav dessutom redirect_uri-mismatch vid
+ * token-växlingen.
  */
+
+function back(path: string): NextResponse {
+  return new NextResponse(null, relativeRedirectInit(path, 303));
+}
 
 export async function GET(
   request: NextRequest,
@@ -29,12 +41,7 @@ export async function GET(
   const { provider: providerSlug } = await params;
   const provider = getAppProvider(providerSlug);
   if (!provider) {
-    return NextResponse.redirect(
-      new URL(
-        '/integrationer?error=' + encodeURIComponent(`Okänd provider: ${providerSlug}`),
-        request.url
-      )
-    );
+    return back('/integrationer?error=' + encodeURIComponent(`Okänd provider: ${providerSlug}`));
   }
 
   const searchParams = request.nextUrl.searchParams;
@@ -45,33 +52,16 @@ export async function GET(
 
   if (errorParam) {
     const msg = errorDescription || errorParam;
-    return NextResponse.redirect(
-      new URL(
-        `/integrationer?error=${encodeURIComponent(`OAuth avbröts: ${msg}`)}`,
-        request.url
-      )
-    );
+    return back(`/integrationer?error=${encodeURIComponent(`OAuth avbröts: ${msg}`)}`);
   }
 
   if (!state || !code) {
-    return NextResponse.redirect(
-      new URL(
-        '/integrationer?error=' +
-          encodeURIComponent('Saknar state eller code i OAuth-callback.'),
-        request.url
-      )
-    );
+    return back('/integrationer?error=' + encodeURIComponent('Saknar state eller code i OAuth-callback.'));
   }
 
   const payload = verifyAppOAuthState(state);
   if (!payload || payload.prov !== providerSlug) {
-    return NextResponse.redirect(
-      new URL(
-        '/integrationer?error=' +
-          encodeURIComponent('OAuth-state är ogiltig eller har utgått.'),
-        request.url
-      )
-    );
+    return back('/integrationer?error=' + encodeURIComponent('OAuth-state är ogiltig eller har utgått.'));
   }
 
   const currentUser = await getCurrentUser();
@@ -80,10 +70,10 @@ export async function GET(
     currentUser.id !== payload.uid ||
     currentUser.tenant !== payload.tid
   ) {
-    return NextResponse.redirect(new URL('/login?next=/integrationer', request.url));
+    return back('/login?next=/integrationer');
   }
 
-  const redirectUri = `${new URL(request.url).origin}/api/app-integrations/${providerSlug}/callback`;
+  const redirectUri = appIntegrationCallbackUrl(providerSlug);
 
   let tokens;
   try {
@@ -93,12 +83,7 @@ export async function GET(
       provider: providerSlug,
       message: err instanceof Error ? err.message : 'unknown'
     });
-    return NextResponse.redirect(
-      new URL(
-        `/integrationer?error=${encodeURIComponent('Kunde inte växla code mot token.')}`,
-        request.url
-      )
-    );
+    return back(`/integrationer?error=${encodeURIComponent('Kunde inte växla code mot token.')}`);
   }
 
   const profile = await provider.fetchProfile(tokens);
@@ -118,13 +103,8 @@ export async function GET(
       provider: providerSlug,
       message: err instanceof Error ? err.message : 'unknown'
     });
-    return NextResponse.redirect(
-      new URL(
-        `/integrationer?error=${encodeURIComponent('Kunde inte spara OAuth-token.')}`,
-        request.url
-      )
-    );
+    return back(`/integrationer?error=${encodeURIComponent('Kunde inte spara OAuth-token.')}`);
   }
 
-  return NextResponse.redirect(new URL(provider.meta.detailPath, request.url));
+  return back(provider.meta.detailPath);
 }
