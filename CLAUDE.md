@@ -7162,7 +7162,9 @@ antal mottagare, schemalagd tid, utfört utskick och "Skicka igen".
 Admin/incubator_lead ändrar utseendet på sidan där alla loggar in under
 **Inställningar → Logotyp & varumärke → Inloggningssidan**
 (`/installningar/utseende`): en **mall**, en **accentfärg** (bara Movexums
-brand-tokens), **rubrik + underrubrik** och **bild och/eller video**. Valet
+brand-tokens), **rubrik + underrubrik** (vid formuläret), en **bildtext**
+(texten över bilden, för sig — migration **1700000175**) och **bild och/eller
+video**. Valet
 gäller för **alla användare i systemet** — `/login` är oinloggad och visar
 ett och samma utseende för alla. Knappen "Förhandsgranska inloggningssidan"
 öppnar `/login?forhandsgranska=1`, som för en inloggad admin renderar sidan
@@ -7172,6 +7174,7 @@ med en förhandsgranskningsbanner i stället för att redirecta.
 |-----|-------|
 | `packages/shared/src/login-branding.ts` (+ `.test.ts`) | Ren, enhetstestad domänlogik: mallar (`LOGIN_LAYOUTS` + meta), accenter (`LOGIN_ACCENTS` → `--movexum-*`), textcap, `normalizeLoginBranding`, `validateLoginBrandingInput`, `missingLoginBrandingFields` |
 | `backend/pocketbase-schema/migrations/1700000172_extend_tenants_login_branding.js` | `tenants.login_layout/login_accent/login_headline/login_tagline/login_image/login_video` |
+| `backend/pocketbase-schema/migrations/1700000175_extend_tenants_login_caption.js` | `tenants.login_caption` — bildtexten över bilden (≤ 200 tecken, max 3 rader) |
 | `apps/web/src/lib/login-branding.server.ts` | Enda läsvägen: `resolveLoginBrandingTenant` (vilken tenant /login visar), `loadPublicLoginBranding` (fail-soft), `loadTenantLoginBranding` (admin-vyn), `isLoginBrandingTenant` |
 | `apps/web/src/lib/login-branding.ts` | Klient-säkra hjälpare: media-URL via proxy, `LoginBrandingView` |
 | `apps/web/src/app/api/public/login-media/[id]/[filename]/route.ts` | Samma-origin-proxy för bild/video (§ 23.7-mönstret) |
@@ -7189,6 +7192,19 @@ med en förhandsgranskningsbanner i stället för att redirecta.
 | Bild till höger | `split_right` | Speglad split |
 | Heltäckande | `cover` | Media som helskärmsbakgrund med mörk ton, glaskort med formuläret |
 | Färgpanel | `panel` | Panel i accentfärgen med logotyp, rubrik och bilden som bricka; formuläret bredvid |
+
+**Bildtext för sig (2026-09).** Split- och panelmallarna visade rubrik +
+underrubrik BÅDE över bilden och vid formuläret — samma text två gånger,
+utan möjlighet att skriva något eget över bilden. `login_caption` är texten
+över bilden (`MediaCaption` i `LoginLanding.tsx`, `loginLayoutHasCaption`):
+radbrytningar behålls (`cleanLoginCaption`: trimmar rader, tar bort tomma,
+max `LOGIN_CAPTION_MAX_LINES` = 3 rader / `LOGIN_CAPTION_MAX` = 200 tecken).
+**Tom bildtext ⇒ bilden visar rubrik + underrubrik som förut**, så en
+instans utan migration 1700000175 ser likadan ut; rubrik/underrubrik är
+oförändrat egna fält vid formuläret i alla mallar. Fältet skickas alltid
+med "Spara" (även när vald mall saknar text över bilden) så ett mallbyte
+aldrig raderar en sparad bildtext. Centrerad/Heltäckande lägger ingen text
+över bilden och rörs inte.
 
 Saknat/okänt `login_layout` ⇒ `centered` (`normalizeLoginLayout`), så en
 instans utan migrationen ändrar aldrig utseendet. Media-mallar utan bild
@@ -7231,13 +7247,14 @@ väljas. Vit text på panel/omslag använder `text-movexum-vit` (§ 4 p. 1).
   (UI varnar). Ett dygns cache; PB:s slumpsuffix gör URL:en unik per
   innehåll. `/api/public/` är redan publikt i middleware:n.
 - **GDPR § 5:** inga personuppgifter i modellen (mall, token, marknadstext,
-  filer). Rubrik/underrubrik cappas (120/300 tecken) och plattas. Ingen
-  PII i loggar (tenant-/användar-id, status).
+  filer). Rubrik/underrubrik cappas (120/300 tecken) och plattas; bildtexten
+  cappas (200 tecken, 3 rader). Ingen PII i loggar (tenant-/användar-id,
+  status).
 - **AI:** ingen ny dataväg. `tenants` är fortsatt denylistad (§ 9.3) —
   chatten kan inte läsa eller sätta utseendet. Riskklass (EU AI Act): n/a
   — ren presentation/konfiguration, ingen inferens.
 - **Grafisk profil (§ 2–§ 4):** semantiska tokens överallt (dark mode
   följer), Sora för rubriken via `font-heading`, `<Logo />` för logotypen
   (tenantens egen logotyp visas när den finns).
-- **Migration** 1700000172 är ett nytt, oföränderligt filnummer.
+- **Migrationer** 1700000172 och 1700000175 är nya, oföränderliga filnummer.
 

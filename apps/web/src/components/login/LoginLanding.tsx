@@ -6,9 +6,10 @@ import type { LoginBrandingView } from '@/lib/login-branding';
 
 // Inloggningssidans mallar (CLAUDE.md § 48). Ren presentation av det
 // admin valt under Inställningar → Logotyp & varumärke: mall, accentfärg
-// (brand-token via CSS-variabel — aldrig hex i kod), rubrik/underrubrik och
-// bild/video. `centered` utan media är exakt hur sidan såg ut före
-// funktionen. Semantiska tokens överallt så dark mode följer med.
+// (brand-token via CSS-variabel — aldrig hex i kod), rubrik/underrubrik
+// (vid formuläret), bildtext (över bilden, för sig) och bild/video.
+// `centered` utan media är exakt hur sidan såg ut före funktionen.
+// Semantiska tokens överallt så dark mode följer med.
 
 export interface LoginLandingProps {
   view: LoginBrandingView;
@@ -124,6 +125,28 @@ function FormCard({
   );
 }
 
+/**
+ * Texten över bilden i split-/panelmallarna. Satt bildtext ⇒ bara den
+ * (radbrytningar bevaras); tom ⇒ rubrik + underrubrik som före fältet, så en
+ * instans utan migration 1700000175 ser likadan ut.
+ */
+function MediaCaption({ view, className = '' }: { view: LoginBrandingView; className?: string }) {
+  const heading = 'font-heading text-3xl font-bold tracking-tight text-movexum-vit sm:text-4xl';
+  if (view.caption) {
+    return (
+      <div className={`max-w-lg ${className}`}>
+        <p className={`${heading} whitespace-pre-line`}>{view.caption}</p>
+      </div>
+    );
+  }
+  return (
+    <div className={`max-w-lg ${className}`}>
+      <p className={heading}>{view.headline}</p>
+      <p className="mt-3 text-base text-movexum-vit/80">{view.tagline}</p>
+    </div>
+  );
+}
+
 function Footer({ light = false }: { light?: boolean }) {
   return (
     <p className={`mt-8 text-center text-xs ${light ? 'text-movexum-vit/70' : 'text-foreground-subtle'}`}>
@@ -181,12 +204,7 @@ function SplitLayout({
         />
         <div className="relative flex h-full min-h-[42svh] flex-col justify-between p-6 sm:p-10 lg:min-h-[100svh]">
           <Logo width={140} height={30} variant="dark" logoLightUrl={logoLightUrl} logoDarkUrl={logoDarkUrl} />
-          <div className="max-w-lg">
-            <h1 className="font-heading text-3xl font-bold tracking-tight text-movexum-vit sm:text-4xl">
-              {view.headline}
-            </h1>
-            <p className="mt-3 text-base text-movexum-vit/80">{view.tagline}</p>
-          </div>
+          <MediaCaption view={view} />
         </div>
       </aside>
       <section className="flex items-center justify-center px-6 py-16 sm:px-10">
@@ -237,10 +255,7 @@ function PanelLayout({ view, next, logoLightUrl, logoDarkUrl }: LoginLandingProp
         <div className="absolute -bottom-28 -left-20 h-72 w-72 rounded-full bg-movexum-svart/15" aria-hidden />
         <div className="relative">
           <Logo width={140} height={30} variant="dark" logoLightUrl={logoLightUrl} logoDarkUrl={logoDarkUrl} />
-          <h1 className="mt-10 max-w-md font-heading text-3xl font-bold tracking-tight text-movexum-vit sm:text-4xl">
-            {view.headline}
-          </h1>
-          <p className="mt-3 max-w-md text-base text-movexum-vit/80">{view.tagline}</p>
+          <MediaCaption view={view} className="mt-10" />
         </div>
         {media && (
           <div className="relative aspect-video w-full max-w-xl overflow-hidden rounded-3xl shadow-2xl shadow-movexum-svart/30">

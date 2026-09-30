@@ -4731,11 +4731,13 @@ await patchTenantsCollection([
 
 // Inloggningssidans utseende (CLAUDE.md § 48, migration 1700000172): mall,
 // accentfärg (brand-token), rubrik/underrubrik, bild + video för /login.
+// `login_caption` (bildtexten över bilden, för sig) = migration 1700000175.
 await patchTenantsCollection([
   { name: 'login_layout', type: 'select', required: false, maxSelect: 1, values: ['centered', 'split_left', 'split_right', 'cover', 'panel'] },
   { name: 'login_accent', type: 'select', required: false, maxSelect: 1, values: ['morkbla', 'djupbla', 'morklila', 'lila', 'morkgron', 'gron', 'morkorange', 'orange'] },
   { name: 'login_headline', type: 'text', required: false, max: 120 },
   { name: 'login_tagline', type: 'text', required: false, max: 300 },
+  { name: 'login_caption', type: 'text', required: false, max: 200 },
   {
     name: 'login_image',
     type: 'file',

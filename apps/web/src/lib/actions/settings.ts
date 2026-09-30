@@ -21,7 +21,7 @@ export type SaveAiBudgetState = {
 export type SaveLoginBrandingState = {
   error?: string;
   success?: boolean;
-  /** Fält som PB-schemat saknar (migration 1700000172 inte körd) — sparat men syns inte. */
+  /** Fält som PB-schemat saknar (migration 1700000172/1700000175 inte körd) — sparat men syns inte. */
   warning?: string;
 };
 
@@ -225,7 +225,7 @@ export async function deleteTenantLogoAction(
 }
 
 /**
- * Sparar inloggningssidans utseende (mall, accentfärg, rubrik, underrubrik)
+ * Sparar inloggningssidans utseende (mall, accentfärg, rubrik, underrubrik, bildtext)
  * för inloggad användares tenant — gäller /login för alla i systemet
  * (CLAUDE.md § 48). Bild/video laddas upp via route-handlern
  * /api/installningar/login-media. Kräver admin/incubator_lead.
@@ -243,7 +243,8 @@ export async function saveLoginBrandingAction(
     layout: formData.get('layout'),
     accent: formData.get('accent'),
     headline: formData.get('headline'),
-    tagline: formData.get('tagline')
+    tagline: formData.get('tagline'),
+    caption: formData.get('caption')
   });
   if (!validation.ok) return { error: validation.error };
   const payload = validation.value;
@@ -280,7 +281,9 @@ export async function saveLoginBrandingAction(
   if (missing.length > 0) {
     return {
       success: true,
-      warning: `Databasen saknar fälten ${missing.join(', ')} — PocketBase-migrationen 1700000172 är inte applicerad, så valet syns inte på inloggningssidan förrän den körts.`
+      warning: `Databasen saknar fälten ${missing.join(', ')} — PocketBase-migrationen ${
+        missing.every((f) => f === 'login_caption') ? '1700000175' : '1700000172'
+      } är inte applicerad, så valet syns inte på inloggningssidan förrän den körts.`
     };
   }
   return { success: true };
