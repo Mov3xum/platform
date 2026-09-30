@@ -5503,6 +5503,14 @@ roll**:
   schemat svarar `updateUserModulesAction` med ett tydligt fel (kör migration
   1700000144) och `createUserAction` flaggar det i bekräftelsen — aldrig en
   tyst lyckad no-op.
+- **Ny modul ⇒ backfill-migration (läxa 2026-09-30).** En sparad allow-lista
+  är exakt det som syns: läggs ett nytt modul-id till i
+  `DEFAULT_MODULES_BY_ROLE` får konton som redan har en lagrad lista det
+  ALDRIG automatiskt (bara `null`-listor följer rollen), så sidan finns men
+  saknas i sidmenyn. Skriv därför en idempotent datamigration som lägger till
+  id:t i befintliga listor för de roller vars standard innehåller det
+  (precedens: **1700000174** för `projekt`/`checkar` — union, tar aldrig bort,
+  rör inte `null`). Ingen spegling i `setup-via-api.mjs` (data, inte schema).
 - **Säkerhetsgräns oförändrad:** `canAccessModuleForUser(roles, id,
   enabledModules)` = `canAccessModule` (rollen, `rolesAllowed`) **och**
   `isModuleEnabled`. Listan saneras server-side mot vad MÅLANVÄNDARENS roller
@@ -6679,9 +6687,15 @@ ansökningsmallen "Aktivitetsplan & ansökan" till beslut, utbetalning och
 uppföljning. **Ansökan är ENDA SANNINGEN för ett ärende:** de minimis-post,
 kapitalrad, uppföljningsuppgifter, aktivitetsrad på bolagskortet och notiser
 skapas ur ansökan och länkar tillbaka till den — beloppen lagras aldrig som
-kopior. `/projekt` (modul `projekt`, staff/observer) är
-**finansieringsprojekten** (Vinnova Excellens, TVV, EoI, Bas …) med
-arbetspaket, budget och kassabok — kassan ett stöd tas ur (§ 46.3).
+kopior. `/projekt` (modul `projekt`, rail-post **"Projekt"** i
+"Portfölj", staff/observer) är **finansieringsprojekten** (Vinnova Excellens,
+TVV, EoI, Bas …) med arbetspaket, budget och kassabok — kassan ett stöd tas
+ur (§ 46.3). Där skapas projekt (`/projekt/ny`, ledning) och arbetspaket
+(`WorkPackagesPanel` på projektsidan) som checkarnas finansieringsblock sedan
+väljer bland. **Sidmenyn (2026-09-30):** modulen hette "Finansieringsprojekt"
+och saknades för konton vars `enabled_modules` sparats innan § 46 fanns —
+rail-titeln är nu "Projekt" och migration **1700000174** backfillar
+`projekt`/`checkar` i redan sparade allow-listor (§ 36.3).
 
 Modulen är en adapter ovanpå befintliga motorer, inte en ny: formuläret är
 typat (§ 46.2), signeringen följer avtalens AES-modell (§ 19), uppföljningen

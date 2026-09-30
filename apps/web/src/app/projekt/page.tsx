@@ -33,7 +33,7 @@ export default async function ProjektPage() {
 
   return (
     <PageShell
-      title="Finansieringsprojekt"
+      title="Projekt"
       meta={<span className="text-sm text-foreground-subtle">{projects.length} projekt</span>}
       actions={
         canManage ? (

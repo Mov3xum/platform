@@ -1545,7 +1545,7 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'projekt',
-    title: 'Finansieringsprojekt',
+    title: 'Projekt',
     description:
       'Projekt och arbetspaket som stöd tas ur (Vinnova Excellens, TVV, EoI …) med budget, upparbetning och kassabok över beviljade checkar.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
