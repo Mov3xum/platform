@@ -7353,3 +7353,73 @@ väljas. Vit text på panel/omslag använder `text-movexum-vit` (§ 4 p. 1).
   (tenantens egen logotyp visas när den finns).
 - **Migrationer** 1700000172 och 1700000175 är nya, oföränderliga filnummer.
 
+
+## 49. Önskemål & buggar (`/onskemal`) — intern backlog med svar
+
+### 49.1 Översikt
+
+`/onskemal` (modul `onskemal`, titel **Önskemål & buggar**, "System"-railen;
+staff/observer) är plattformens egen backlog: användarna i systemet lägger
+upp **kort** med det de saknar, det som krånglar eller det de undrar över.
+Varje kort har en **typ** (bugg / ny funktion / ändring / fråga), ett
+**område** (vilken sida i plattformen det gäller — dropdown, t.ex.
+"Rapportering") och en beskrivning. **Ledningen** (admin/incubator_lead)
+**svarar** på kortet och **klarmarkerar** när det är gjort; ett klart kort kan
+återöppnas. Filter på status/typ/sida/"bara mina" + fritextsök.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/feedback.ts` (+ `.test.ts`) | Ren, enhetstestad domänlogik: typer/statusar/områden (`FEEDBACK_AREAS`), roller, `validateFeedbackInput`/`validateFeedbackAnswer`, `canEditFeedback`/`canDeleteFeedback`, backlog-sortering |
+| `backend/pocketbase-schema/migrations/1700000176_create_feedback_items.js` | Collection `feedback_items` |
+| `backend/pocketbase-schema/migrations/1700000177_backfill_enabled_modules_onskemal.js` | Backfill av `users.enabled_modules` (§ 36.3-läxan — annars saknas sidan i sidmenyn för redan sparade listor) |
+| `apps/web/src/lib/feedback/data.ts` | Enda läsvägen (`listFeedbackItems`, fail-soft med `error`/`truncated`) |
+| `apps/web/src/lib/actions/onskemal.ts` | Server actions: skapa/redigera/radera kort, svara, klarmarkera/återöppna (RBAC + audit). **OBS:** `lib/actions/feedback.ts` är AI-svarens 👍/👎 (§ 9.10) — en annan sak |
+| `apps/web/src/app/onskemal/{page,FeedbackBoard}.tsx` | Sidan + tavlan (client) |
+
+### 49.2 Datamodell & regler
+
+- **`feedback_items`** (1700000176): `tenant` (cascade), `author` (→ users,
+  ingen cascade), `title` (≤ 160), `description` (≤ 5000), `kind` (select —
+  MÅSTE spegla `FEEDBACK_KINDS`: `bug | feature | change | question`),
+  `area` (**text**, ≤ 40 — nyckel ur `FEEDBACK_AREAS`; medvetet inte select så
+  en ny sida kan läggas till i listan utan migration; valideringen ligger i
+  koden), `status` (select — MÅSTE spegla `FEEDBACK_STATUSES`: `open |
+  answered | done`), `answer` (≤ 5000), `answered_by`/`answered_at`,
+  `done_by`/`done_at`, autodate explicit (§ 28.5). Speglad i
+  `setup-via-api.mjs` (def + `FORCE_CREATE_RULES`) och asserterad i
+  `verify-baseline.mjs` (must-exist + `MUST_BE_STAFF_OR_OBSERVER`).
+- **RBAC (ISO 27001 A.5.15–A.5.18):** lägga upp = Movexum-personal
+  (`FEEDBACK_AUTHOR_ROLES`: admin/incubator_lead/coach/mentor; observer
+  läser); redigera = författaren tills kortet är klart, eller ledningen;
+  radera = ledningen, eller författaren för ett eget ännu obesvarat kort;
+  svara/klarmarkera/återöppna = ledningen (`FEEDBACK_RESPONDER_ROLES`).
+  Enforce:as i server-actionen (PB:s createRule är roll-lös per § 21.3;
+  update/delete = `author` eller ledning med `:each ?=`). Tenant + author
+  stämplas server-side. Skrivning via användartoken med superuser-fallback
+  BARA vid PB v0.23.4:s tysta regel-nekande (400/403/404), efter verifierad
+  roll + tenant.
+- **Status följer svaret:** ett svar sätter `answered` (ett redan klart kort
+  förblir `done`); klarmarkering sätter `done` + `done_by/at`; återöppning
+  går tillbaka till `answered` om ett svar finns, annars `open`.
+- **Sortering** (`compareFeedbackItems`): öppna först (buggar och frågor före
+  ändringar/nya funktioner), sedan besvarade, sist klara — nyast först inom
+  varje grupp. Läsvägen paginerar upp till 2 000 och visar kapning som
+  banner (§ 33.4-principen); ett läsfel visas som banner, aldrig som "tom
+  backlog".
+- **Audit (ISO 27001 A.8.15):** varje mutation loggas i `agent_actions`
+  (PII-fritt: rubrik/typ/område/status; beskrivning och svar bara som
+  längd; radering som `update` + `deleted`, § 30.6) och mappas i
+  `feed/agent-log.ts` → syns i Bolagsnytt/`/aktivitet` med länk
+  `/onskemal#kort-<id>`.
+- **GDPR § 5:** kort och svar är verksamhetsfritext från personalen —
+  personnummer-saneras på skrivvägen (§ 15.6), UI:t uppmanar att inte skriva
+  personuppgifter. `author`/`answered_by`/`done_by` visas som visningsnamn,
+  aldrig e-post. Rättslig grund: berättigat intresse (förbättring av det
+  interna verktyget). `cascadeDelete` på tenant; användarrelationer nollas
+  vid radering (kortet lever vidare som "Borttagen användare").
+- **AI:** `feedback_items` är inte denylistad — chatten kan läsa backloggen
+  via `query_collection` (RLS staff/observer + fältmaskning § 9.3) men har
+  inget skrivverktyg. Riskklass (EU AI Act): n/a — ingen AI-inferens.
+- **§ 21-isolering:** list/view staff/observer-only; en ren `startup_member`
+  ser varken modulen (inte i `MEMBER_RAIL`) eller kollektionen.
+- **Migrationer** 1700000176–177 är nya, oföränderliga filnummer.

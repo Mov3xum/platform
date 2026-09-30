@@ -27,27 +27,27 @@ export const DEFAULT_MODULES_BY_ROLE: Record<Role, readonly string[]> = {
     'idag', 'inkorg', 'mal', 'arshjul', 'filer', 'uppdrag', 'inflode',
     'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
-    'integrationer', 'min_profil', 'mina_aktiviteter'
+    'integrationer', 'onskemal', 'min_profil', 'mina_aktiviteter'
   ],
   incubator_lead: [
     'idag', 'inkorg', 'mal', 'arshjul', 'filer', 'uppdrag', 'inflode',
     'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
-    'integrationer', 'min_profil', 'mina_aktiviteter'
+    'integrationer', 'onskemal', 'min_profil', 'mina_aktiviteter'
   ],
   coach: [
     'idag', 'inkorg', 'mina_aktiviteter', 'arshjul', 'filer',
     'mal', 'uppdrag', 'inflode', 'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'events', 'education',
-    'agenter', 'kunskapsbas', 'min_profil'
+    'agenter', 'kunskapsbas', 'onskemal', 'min_profil'
   ],
   mentor: [
     'idag', 'inkorg', 'mina_aktiviteter', 'filer', 'uppdrag',
-    'mal', 'startups', 'kontakter', 'de_minimis', 'checkar', 'education', 'agenter', 'kunskapsbas', 'min_profil'
+    'mal', 'startups', 'kontakter', 'de_minimis', 'checkar', 'education', 'agenter', 'kunskapsbas', 'onskemal', 'min_profil'
   ],
   partner: ['idag', 'inkorg', 'filer', 'uppdrag', 'investerare', 'community', 'min_profil'],
   observer: [
     'idag', 'inkorg', 'mina_aktiviteter', 'arshjul', 'filer',
-    'mal', 'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'events', 'community'
+    'mal', 'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'events', 'community', 'onskemal'
   ],
   startup_member: ['min_oversikt', 'mina_aktiviteter', 'filer', 'de_minimis', 'checkar', 'community']
 };

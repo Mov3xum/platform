@@ -4118,6 +4118,44 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
 
+// Migration 1700000176: feedback_items — Önskemål & buggar (§ 49). Intern
+// backlog med kort (bugg/ny funktion/ändring/fråga) per del av plattformen.
+// list/view staff/observer-only; createRule roll-lös (§ 21.3); update/delete:
+// författaren eller ledningen (fältgränsen svar/status ligger i koden).
+// `area` är TEXT (validerad mot FEEDBACK_AREAS i koden, ingen migration per
+// ny sida); `kind`/`status` MÅSTE spegla packages/shared/src/feedback.ts.
+await ensureCollection({
+  id: 'feedback_items_collection',
+  name: 'feedback_items',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'author', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 160 },
+    { name: 'description', type: 'text', required: true, min: 1, max: 5000 },
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['bug', 'feature', 'change', 'question'] },
+    { name: 'area', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['open', 'answered', 'done'] },
+    { name: 'answer', type: 'text', required: false, max: 5000 },
+    { name: 'answered_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'answered_at', type: 'date', required: false },
+    { name: 'done_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'done_at', type: 'date', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_feedback_items_tenant ON feedback_items (tenant)',
+    'CREATE INDEX idx_feedback_items_tenant_status ON feedback_items (tenant, status)',
+    'CREATE INDEX idx_feedback_items_author ON feedback_items (author)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`
+});
+
 // Migration 1700000158: notifications.kind += contact_request/contact_decision
 // (union — ensureCollection synkar inte fält på befintlig collection).
 // + migration 1700000169 (stödcheckar § 46): support_check_*-notiser.
@@ -4885,6 +4923,8 @@ const FORCE_CREATE_RULES = {
   surveys: `${ANY_AUTH} && @request.auth.tenant != ""`,
   // Kontaktboken (§ 45, migration 1700000157) — roll-enforcement i skrivlagret.
   contact_requests: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Önskemål & buggar (§ 49, migration 1700000176) — roll-enforcement i server-actionen.
+  feedback_items: `${ANY_AUTH} && @request.auth.tenant != ""`,
   // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167) —
   // roll-/medlemskontroll i skrivlagret och route-handlers.
   funding_projects: `${ANY_AUTH} && @request.auth.tenant != ""`,

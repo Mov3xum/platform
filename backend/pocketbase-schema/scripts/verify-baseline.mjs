@@ -152,6 +152,8 @@ async function verifyCollectionsExist() {
     'startup_contacts',
     // Kontaktboken (§ 45, migration 1700000157) — förfrågningar om kontaktanvändning.
     'contact_requests',
+    // Önskemål & buggar (§ 49, migration 1700000176) — intern backlog.
+    'feedback_items',
     'capital_rounds',
     'intellectual_property',
     'startup_kpis',
@@ -419,6 +421,9 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // + vem som frågar om vilken extern kontakt → staff/observer-only; bolagen
   // ser DELADE kontakter via den kurerade vyn på Mitt bolag, inte här.
   'contact_requests',
+  // Önskemål & buggar (§ 49, migration 1700000176). Intern backlog för
+  // Movexum-personal (kort + ledningens svar) → staff/observer-only.
+  'feedback_items',
   // Finansieringsprojekt/arbetspaket och stödcheck-regler (§ 46). Intern
   // projektekonomi och uppföljningsstyrning → staff/observer-only.
   'funding_projects',
