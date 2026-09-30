@@ -8,6 +8,7 @@ import { Icon } from '@/components/proto/Icon';
 import {
   deleteUserAction,
   resetUserPasswordAction,
+  updateUserDisplayNameAction,
   updateUserModulesAction,
   updateUserRolesAction,
   type UpdateUserState
@@ -278,6 +279,80 @@ function PasswordForm({ user }: { user: ManagedUser }) {
   );
 }
 
+/* ── Namn ───────────────────────────────────────────────────────────── */
+
+/**
+ * Visningsnamnet redigeras inline via en liten penna överst i den öppnade
+ * användaren. Sparas med `updateUserDisplayNameAction` (RBAC + tenant i
+ * server-actionen); listan läses om så rubrikraden följer med.
+ */
+function NameEditor({ user }: { user: ManagedUser }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(user.name);
+  const [state, formAction, pending] = useActionState(updateUserDisplayNameAction, initialUpdate);
+  const trimmed = name.replace(/\s+/g, ' ').trim();
+  const dirty = trimmed !== '' && trimmed !== user.name;
+
+  useEffect(() => {
+    if (state.status === 'ok') {
+      setEditing(false);
+      router.refresh();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.status, state.message]);
+
+  if (!editing) {
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="truncate font-heading text-[15px] font-semibold text-foreground">{user.name}</span>
+        <button
+          type="button"
+          onClick={() => {
+            setName(user.name);
+            setEditing(true);
+          }}
+          className="flex h-7 w-7 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground"
+          aria-label="Redigera namn"
+          title="Redigera namn"
+        >
+          <Icon name="pencil" size={12} />
+        </button>
+        {state.status === 'ok' && (
+          <span className="text-[11.5px] text-movexum-morkgron dark:text-movexum-gron">{state.message}</span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <form action={formAction} className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      <input type="hidden" name="user_id" value={user.id} />
+      <input
+        name="display_name"
+        type="text"
+        required
+        maxLength={200}
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setEditing(false);
+        }}
+        aria-label="Visningsnamn"
+        className={`${inputClass} max-w-xs`}
+      />
+      <button type="submit" className="mx-btn mx-primary mx-sm" disabled={pending || !dirty}>
+        {pending ? 'Sparar…' : 'Spara namn'}
+      </button>
+      <button type="button" className="mx-btn mx-sm" onClick={() => setEditing(false)} disabled={pending}>
+        Avbryt
+      </button>
+      <StatusLine state={state} />
+    </form>
+  );
+}
+
 /* ── Radera ─────────────────────────────────────────────────────────── */
 
 /**
@@ -287,7 +362,7 @@ function PasswordForm({ user }: { user: ManagedUser }) {
  * validering som förut, `validateDeleteConfirmation`). Lyckad radering
  * stänger raden och läser om listan.
  */
-function DeleteAction({
+function DetailHeader({
   user,
   canDelete,
   blockedReason,
@@ -316,11 +391,14 @@ function DeleteAction({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-[12px] text-foreground-subtle">
-          Konto skapat{' '}
-          {user.createdAt
-            ? new Date(user.createdAt).toLocaleDateString('sv-SE', { timeZone: 'Europe/Stockholm' })
-            : '—'}
+        <div className="min-w-0 flex-1">
+          <NameEditor user={user} />
+          <div className="mt-0.5 text-[11.5px] text-foreground-subtle">
+            Konto skapat{' '}
+            {user.createdAt
+              ? new Date(user.createdAt).toLocaleDateString('sv-SE', { timeZone: 'Europe/Stockholm' })
+              : '—'}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {!canDelete && blockedReason && (
@@ -478,7 +556,7 @@ function UserRow({
             </p>
           ) : (
             <>
-              <DeleteAction
+              <DetailHeader
                 user={user}
                 canDelete={canDelete}
                 blockedReason={deleteBlockedReason}

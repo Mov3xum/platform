@@ -5,6 +5,7 @@ import {
   assignableRolesFor,
   canManageUser,
   validateDeleteConfirmation,
+  validateDisplayName,
   validateNewPassword,
   validateNewUserInput,
   validateRolesUpdate
@@ -161,6 +162,14 @@ test('validateNewPassword: 8–72 tecken', () => {
   assert.equal(validateNewPassword('kort').ok, false);
   assert.equal(validateNewPassword('a'.repeat(73)).ok, false);
   assert.equal(validateNewPassword('hunter2hunter').ok, true);
+});
+
+test('validateDisplayName: trimmar, plattar och cappar till 200 tecken', () => {
+  assert.deepEqual(validateDisplayName('  Anna   Berg\n'), { ok: true, value: 'Anna Berg' });
+  assert.equal(validateDisplayName('   ').ok, false);
+  assert.equal(validateDisplayName(undefined).ok, false);
+  assert.equal(validateDisplayName('a'.repeat(201)).ok, false);
+  assert.equal(validateDisplayName('a'.repeat(200)).ok, true);
 });
 
 test('validateDeleteConfirmation: kräver exakt e-post (skiftlägesokänsligt)', () => {

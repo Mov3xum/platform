@@ -12,6 +12,7 @@ import {
   ROLE_LABELS,
   enabledModulesAfterRoleChange,
   validateDeleteConfirmation,
+  validateDisplayName,
   validateEnabledModules,
   validateNewPassword,
   validateNewUserInput,
@@ -469,6 +470,37 @@ export async function updateUserModulesAction(
     status: 'ok',
     message: `${n} modul${n === 1 ? '' : 'er'} visas i sidofältet. Ändringen syns vid nästa sidladdning.`
   };
+}
+
+/**
+ * Byter visningsnamn på ett konto i den egna tenanten (pennan i
+ * Inställningar → Användare). Samma RBAC/tenant-gate som övrig
+ * användaradministration (`loadManagedTarget`); det egna kontot får också
+ * döpas om här. Bara `display_name` skrivs — aldrig e-post eller roller.
+ */
+export async function updateUserDisplayNameAction(
+  _prev: UpdateUserState,
+  formData: FormData
+): Promise<UpdateUserState> {
+  const actor = await requireUser();
+  const userId = String(formData.get('user_id') ?? '').trim();
+  const loaded = await loadManagedTarget(actor, userId);
+  if (!loaded.ok) return { status: 'error', message: loaded.message };
+
+  const validated = validateDisplayName(formData.get('display_name'));
+  if (!validated.ok) return { status: 'error', message: validated.message };
+
+  try {
+    await loaded.pb.collection('users').update(userId, { display_name: validated.value });
+  } catch (err: unknown) {
+    const e = err as PbError;
+    console.error('[updateUserDisplayName] failed', { status: e.status });
+    return { status: 'error', message: 'Kunde inte spara namnet. Försök igen.' };
+  }
+
+  revalidatePath('/installningar/anvandare');
+  revalidatePath('/', 'layout');
+  return { status: 'ok', message: 'Namnet är sparat.' };
 }
 
 /** Sätter ett nytt initialt lösenord åt en annan användare. */
