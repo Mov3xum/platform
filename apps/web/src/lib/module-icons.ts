@@ -24,6 +24,7 @@ export const MODULE_ICONS: Record<string, string> = {
   agenter: 'bolt',
   insights: 'graph',
   integrationer: 'link',
+  onskemal: 'help',
   anvandare: 'user',
   installningar: 'gear'
 };

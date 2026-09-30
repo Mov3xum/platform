@@ -569,6 +569,45 @@ function mapRow(
         icon: value === 'approved' ? 'check' : 'send'
       };
     }
+    // Önskemål & buggar (§ 49) — intern backlog.
+    case 'feedback_items': {
+      const title = str(after.title) || 'utan rubrik';
+      const kindLabel =
+        str(after.kind) === 'bug'
+          ? 'Bugg'
+          : str(after.kind) === 'feature'
+            ? 'Önskemål'
+            : str(after.kind) === 'change'
+              ? 'Ändringsförslag'
+              : 'Fråga';
+      const areaLabel = str(after.area_label);
+      const href = row.record_id ? `/onskemal#kort-${row.record_id}` : '/onskemal';
+      if (after.deleted === true) {
+        return { title: `${kindLabel} borttaget: "${title}"`, href: '/onskemal', icon: 'trash' };
+      }
+      if (action === 'create') {
+        return {
+          title: `${kindLabel} upplagt: "${title}"`,
+          detail: areaLabel || undefined,
+          href,
+          icon: 'help'
+        };
+      }
+      const field = str(row.field);
+      if (field === 'answer') {
+        return { title: `Svar på "${title}"`, detail: areaLabel || undefined, href, icon: 'message' };
+      }
+      if (field === 'status') {
+        const status = str(after.status);
+        return {
+          title: status === 'done' ? `Klart: "${title}"` : `Återöppnat: "${title}"`,
+          detail: areaLabel || undefined,
+          href,
+          icon: status === 'done' ? 'check' : 'help'
+        };
+      }
+      return { title: `${kindLabel} ${changedVerb}: "${title}"`, detail: areaLabel || undefined, href, icon: 'pencil' };
+    }
     case 'goal_import': {
       const created = typeof after.created === 'number' ? after.created : 0;
       const indicators = typeof after.indicators === 'number' ? after.indicators : 0;

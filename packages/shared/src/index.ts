@@ -1398,7 +1398,7 @@ export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'kunskapsbas', 'integrationer', 'installningar', 'min_profil'] }
+  { label: 'System', modules: ['agenter', 'kunskapsbas', 'integrationer', 'onskemal', 'installningar', 'min_profil'] }
 ];
 
 /**
@@ -1579,6 +1579,14 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Alumni, mentorer och nätverk runt portföljen.',
     rolesAllowed: ALL_ROLES,
     route: '/community'
+  },
+  {
+    id: 'onskemal',
+    title: 'Önskemål & buggar',
+    description:
+      'Intern backlog: lägg upp kort med buggar, önskemål om nya funktioner, ändringar och frågor per del av plattformen. Ledningen svarar och klarmarkerar.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/onskemal'
   },
   {
     id: 'education',
@@ -1780,6 +1788,7 @@ export type {
 } from './compass-survey';
 export * from './procurement';
 export * from './contacts';
+export * from './feedback';
 export * from './agent-memory';
 export * from './funding';
 export * from './support-checks';
