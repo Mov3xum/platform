@@ -4,6 +4,8 @@ import { AUTH_COOKIE } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
 import { describeLoginInfraError, probePocketBase, probeSummary } from '@/lib/pb-health';
 import { checkRateLimit, clearFailures, recordFailure } from '@/lib/rate-limit';
+import { clientIpFromRequest } from '@/lib/client-ip';
+import { sanitizeAppPath } from '@/lib/relative-redirect';
 
 type PbError = {
   status?: number;
@@ -14,24 +16,20 @@ type PbError = {
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_PER_ACCOUNT = 8;
 const LOGIN_MAX_PER_IP = 40;
+const LOGIN_MAX_PER_EMAIL = 20;
 
 function shouldUseSecureCookie(req: NextRequest): boolean {
   if (process.env.MOVEXUM_ALLOW_INSECURE_COOKIES === 'true') return false;
-  const proto = req.headers.get('x-forwarded-proto') || req.nextUrl.protocol.replace(':', '');
-  return proto === 'https';
+  // Kedjade proxies ger "https, http" — första värdet är klientens protokoll
+  // (samma tolkning som middleware:n; utan split tappades Secure tyst).
+  const raw = req.headers.get('x-forwarded-proto') || req.nextUrl.protocol.replace(':', '');
+  return raw.split(',')[0]!.trim().toLowerCase() === 'https';
 }
 
-function getClientIp(req: NextRequest): string {
-  const xff = req.headers.get('x-forwarded-for');
-  if (xff) return xff.split(',')[0]!.trim();
-  return req.headers.get('x-real-ip') || 'unknown';
-}
-
+// Öppen-redirect-skydd: delad sanering (kontrolltecken/backslash/tab-bypass,
+// origin-kontroll) — inte bara en prefixkontroll.
 function sanitizeNextPath(nextPath: string): string {
-  if (nextPath.startsWith('/') && !nextPath.startsWith('//') && !nextPath.startsWith('/\\')) {
-    return nextPath;
-  }
-  return '/dashboard';
+  return sanitizeAppPath(nextPath, '/dashboard');
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -50,14 +48,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'E-post och lösenord krävs.' }, { status: 400 });
   }
 
-  const ip = getClientIp(req);
-  const accountKey = `login:acct:${ip}:${email.toLowerCase()}`;
+  const ip = clientIpFromRequest(req);
+  const emailKey = email.toLowerCase();
+  const accountKey = `login:acct:${ip}:${emailKey}`;
   const ipKey = `login:ip:${ip}`;
+  // Per e-post OAVSETT IP — annars nollställs kontospärren genom att rotera
+  // adressen (distribuerad brute force mot ett konto).
+  const emailOnlyKey = `login:email:${emailKey}`;
 
   const acctLimit = checkRateLimit(accountKey, LOGIN_MAX_PER_ACCOUNT);
   const ipLimit = checkRateLimit(ipKey, LOGIN_MAX_PER_IP);
-  if (acctLimit.blocked || ipLimit.blocked) {
-    const retryMin = Math.ceil(Math.max(acctLimit.retryAfterSec, ipLimit.retryAfterSec) / 60);
+  const emailLimit = checkRateLimit(emailOnlyKey, LOGIN_MAX_PER_EMAIL);
+  if (acctLimit.blocked || ipLimit.blocked || emailLimit.blocked) {
+    const retryMin = Math.ceil(
+      Math.max(acctLimit.retryAfterSec, ipLimit.retryAfterSec, emailLimit.retryAfterSec) / 60
+    );
     return NextResponse.json(
       { error: `För många inloggningsförsök. Försök igen om ca ${retryMin} min.` },
       { status: 429 }
@@ -80,6 +85,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (e.status === 400 || e.status === 403) {
       recordFailure(accountKey, LOGIN_WINDOW_MS);
       recordFailure(ipKey, LOGIN_WINDOW_MS);
+      recordFailure(emailOnlyKey, LOGIN_WINDOW_MS);
     }
 
     if (e.status === 400) {
@@ -108,6 +114,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   clearFailures(accountKey);
   clearFailures(ipKey);
+  clearFailures(emailOnlyKey);
 
   const model = pb.authStore.model as Record<string, unknown> | null;
   const expandTenant =

@@ -6,6 +6,7 @@ import { invalidateOutlookCache } from '@/lib/overview/aggregate';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { getAppProvider } from '@/lib/app-integrations/registry';
 import { buildAuthorizeUrl } from '@/lib/app-integrations/oauth';
+import { appIntegrationCallbackUrl } from '@/lib/app-integrations/app-url';
 import {
   findIntegrationRow,
   disconnectIntegration
@@ -15,18 +16,6 @@ import {
  * Server actions för per-user OAuth-integrationer. Provider-agnostiska
  * — den specifika providern slås upp via `getAppProvider(slug)`.
  */
-
-function publicAppUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.APP_URL ||
-    'http://localhost:3000'
-  ).replace(/\/$/, '');
-}
-
-function callbackUrl(slug: string): string {
-  return `${publicAppUrl()}/api/app-integrations/${slug}/callback`;
-}
 
 /**
  * Bygger authorize-URL:en och redirectar användaren till providerns
@@ -70,7 +59,7 @@ export async function connectAppIntegrationAction(input: {
     provider,
     userId: user.id,
     tenantId: user.tenant,
-    redirectUri: callbackUrl(input.provider)
+    redirectUri: appIntegrationCallbackUrl(input.provider)
   });
   return { redirectTo: url };
 }

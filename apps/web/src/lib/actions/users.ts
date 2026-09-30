@@ -254,11 +254,17 @@ export async function updateUserStartupLinkAction(
   try {
     const target = await pb
       .collection('users')
-      .getOne<{ id: string; tenant: string; email?: string }>(userId, {
-        fields: 'id,tenant,email'
+      .getOne<{ id: string; tenant: string; email?: string; roles?: unknown }>(userId, {
+        fields: 'id,tenant,email,roles'
       });
     if (String(target.tenant) !== actor.tenant) {
       return { status: 'error', message: 'Användaren tillhör inte din organisation.' };
+    }
+    const targetRoles = Array.isArray(target.roles)
+      ? target.roles.filter((r): r is string => typeof r === 'string')
+      : [];
+    if (!canManageUser(actor.roles, targetRoles)) {
+      return { status: 'error', message: 'Bara en administratör kan administrera ett admin-konto.' };
     }
     targetEmail = target.email ?? '';
   } catch {
@@ -318,6 +324,16 @@ export async function updateUserStartupLinkAction(
 // - Självskydd: egna administrationsroller kan inte tas bort, eget lösenord
 //   byts på /konto, eget konto kan inte raderas här.
 // - Loggar aldrig lösenord eller PII i klartext (bara status/id).
+
+/**
+ * Kontoövertagande (nytt lösenord, radering) av ett ANNAT ledningskonto
+ * (`incubator_lead`) kräver admin — en incubator_lead ska inte kunna ta över
+ * ett jämbördigt konto.
+ */
+function canTakeOverPeer(actorRoles: readonly string[] | undefined, targetRoles: readonly string[]): boolean {
+  if (actorRoles?.includes('admin')) return true;
+  return !targetRoles.includes('incubator_lead');
+}
 
 async function loadManagedTarget(
   actor: { id: string; tenant: string; roles?: Role[] },
@@ -467,6 +483,9 @@ export async function resetUserPasswordAction(
   }
   const loaded = await loadManagedTarget(actor, userId);
   if (!loaded.ok) return { status: 'error', message: loaded.message };
+  if (!canTakeOverPeer(actor.roles, loaded.target.roles)) {
+    return { status: 'error', message: 'Bara en administratör kan återställa lösenordet för ett annat ledningskonto.' };
+  }
 
   const validated = validateNewPassword(formData.get('password'));
   if (!validated.ok) return { status: 'error', message: validated.message };
@@ -505,6 +524,9 @@ export async function deleteUserAction(
   }
   const loaded = await loadManagedTarget(actor, userId);
   if (!loaded.ok) return { status: 'error', message: loaded.message };
+  if (!canTakeOverPeer(actor.roles, loaded.target.roles)) {
+    return { status: 'error', message: 'Bara en administratör kan radera ett annat ledningskonto.' };
+  }
 
   const confirmed = validateDeleteConfirmation(formData.get('confirm_email'), loaded.target.email);
   if (!confirmed.ok) return { status: 'error', message: confirmed.message };

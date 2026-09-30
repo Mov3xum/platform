@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { clientIpFromRequest } from '@/lib/client-ip';
 import { createConversation, createLead } from '@/lib/compass/store';
 import {
   resolvePublicModule,
@@ -34,9 +35,10 @@ interface SubmitBody {
   subject?: string;
 }
 
+// Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt och lät en
+// anropare nollställa per-IP-gränsen genom att rotera headern.
 function clientIp(req: Request): string {
-  const h = req.headers.get('x-forwarded-for') || '';
-  return h.split(',')[0]?.trim() || 'anon';
+  return clientIpFromRequest(req);
 }
 
 /** Tar emot svaren från ett publikt formulär (wizard) och skapar lead. */

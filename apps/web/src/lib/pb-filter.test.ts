@@ -9,11 +9,15 @@ test('escFilter escapar citationstecken', () => {
   assert.equal(escFilter('a"b'), 'a\\"b');
 });
 
-test('escFilter escapar backslash FÖRE citationstecken', () => {
-  // Värde som slutar på \ får inte kunna bryta ut: \" får inte bli en
-  // escapad ". Backslashen måste dubblas först.
-  assert.equal(escFilter('a\\'), 'a\\\\');
-  assert.equal(escFilter('a\\"b'), 'a\\\\\\"b');
+test('escFilter TAR BORT bakstreck (fexpr saknar bakstrecks-escape)', () => {
+  // Ett värde som slutar på \ fick tidigare `"a\\\\"` — fexpr ser det avslutande
+  // citattecknet som escapat och strängen fortsätter in i filtret. Bakstreck
+  // har ingen legitim roll i sökvärden → strippas.
+  assert.equal(escFilter('a\\'), 'a');
+  assert.equal(escFilter('a\\"b'), 'a\\"b');
+  assert.equal(escFilter('\\\\'), '');
+  // Inget bakstreck får någonsin stå omedelbart före ett avslutande "
+  assert.ok(!escFilter('x\\').endsWith('\\'));
 });
 
 test('escFilter neutraliserar ett injection-försök', () => {

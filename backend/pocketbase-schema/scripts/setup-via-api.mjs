@@ -463,6 +463,12 @@ async function ensureAppUser(tenantId) {
 // Common rule expressions
 // ----------------------------------------------------------------------------
 const ANY_AUTH = '@request.auth.id != ""';
+// users.updateRule — speglar migration 1700000174 (fältlåst självservice).
+const USERS_LOCKED_SELF_UPDATE_FIELDS = [
+  'roles', 'tenant', 'linked_startups', 'enabled_modules', 'disabled_modules', 'verified', 'email', 'emailVisibility'
+];
+const USERS_SELF_UPDATE_RULE =
+  '@request.auth.id = id && ' + USERS_LOCKED_SELF_UPDATE_FIELDS.map((f) => `@request.body.${f}:isset = false`).join(' && ');
 const TENANT_DIRECT = '@request.auth.tenant = tenant';
 const TENANT_VIA_STARTUP = '@request.auth.tenant = startup.tenant';
 const TENANTS_UPDATE_RULE =
@@ -589,7 +595,9 @@ await patchUsersCollection(
   {
     listRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
     viewRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
-    updateRule: '@request.auth.id = id',
+    // Fältlåst självservice (migration 1700000174): kontoinnehavaren får aldrig
+    // sätta roller/tenant/bolagskoppling/moduler/verified/e-post via API:t.
+    updateRule: USERS_SELF_UPDATE_RULE,
     createRule: null,
     deleteRule: null
   }

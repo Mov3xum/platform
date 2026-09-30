@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { clientIpFromRequest } from '@/lib/client-ip';
 import { isSurveyModule } from '@platform/shared';
 import { storeSurveyResponse } from '@/lib/compass/survey';
 import { createLead } from '@/lib/compass/store';
@@ -34,9 +35,10 @@ interface QuizBody {
   contact_preference?: string;
 }
 
+// Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt och lät en
+// anropare nollställa per-IP-gränsen genom att rotera headern.
 function clientIp(req: Request): string {
-  const h = req.headers.get('x-forwarded-for') || '';
-  return h.split(',')[0]?.trim() || 'anon';
+  return clientIpFromRequest(req);
 }
 
 function cleanContact(v: unknown, max: number): string | undefined {

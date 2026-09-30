@@ -4,6 +4,7 @@ import { ProtoTopBar } from './ProtoTopBar';
 import { MobileRailProvider, MobileRailBackdrop } from './MobileRail';
 import type { SwitchableStartup } from './StartupSwitcher';
 import { MobileBottomNav } from './MobileBottomNav';
+import { SessionGuard } from './SessionGuard';
 import { InstallPrompt } from '@/components/pwa/InstallPrompt';
 import { buildMobileNav } from '@/lib/mobile-nav';
 import { canAccessModuleForUser } from '@/lib/rbac';
@@ -21,6 +22,7 @@ export function ProtoShell({ user, children, counts, switchableStartups }: Props
 
   return (
     <MobileRailProvider>
+      <SessionGuard />
       <ProtoRail
         user={{
           id: user.id,

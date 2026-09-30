@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
+import { hasRole } from '@/lib/rbac';
+import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
+import { AiBudgetExceededError, assertWithinAiBudget } from '@/lib/ai/budget.server';
+import { logAiUsage } from '@/lib/ai/usage';
+import { isValidChatSessionToken } from '@/lib/compass/chat-lead';
 import { MistralError } from '@/lib/ai/mistral';
 import { intakeReply, type CompassChatMessage } from '@/lib/compass/chat';
 import { buildModuleChatSystemPrompt } from '@/lib/compass/public';
@@ -30,9 +35,15 @@ function isValidMessage(m: unknown): m is CompassChatMessage {
   );
 }
 
-// Rate limit borttagen 2026-05 efter explicit beslut — input-validering
-// (längd, antal meddelanden, isValidMessage) kvarstår som primär
-// abuse-kontroll. Avvikelse från CLAUDE.md §10.3 (A.8.x).
+// Staff-only + rate-limit + månadstak (2026-09-30). Routen var tidigare öppen
+// för VEM SOM HELST med en cookie som heter pb_auth (middleware:n kontrollerar
+// bara att cookien finns; `user` var valfri) och saknade rate-limit och
+// budget-spärr → en fri, obegränsad Mistral-proxy på plattformens nyckel.
+// Detta är den INTERNA test-chatten i Marknadsverktyg (§ 23.6) — samma krets
+// som får hantera moduler (MANAGE_ROLES i lib/actions/compass.ts).
+const CHAT_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
+const WINDOW_MS = 5 * 60 * 1000;
+const MAX_PER_WINDOW = 30;
 
 export async function POST(req: Request) {
   let body: ChatRequestBody;
@@ -50,20 +61,40 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Konversation för lång.' }, { status: 400 });
   }
 
-  const sessionToken =
-    typeof body.sessionToken === 'string' && body.sessionToken.length > 0
-      ? body.sessionToken.slice(0, 100)
-      : 'anon';
-
-  // Användare är optional — den publika chatten kan användas utan auth.
-  // När en användare ÄR inloggad får vi tenant-context och kan persistera.
   const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: 'Inloggning krävs.' }, { status: 401 });
+  }
+  if (!hasRole(user.roles, [...CHAT_ROLES])) {
+    return NextResponse.json({ error: 'Saknar behörighet.' }, { status: 403 });
+  }
+  const rlKey = `inflode-chat:${user.id}`;
+  if (checkRateLimit(rlKey, MAX_PER_WINDOW).blocked) {
+    return NextResponse.json({ error: 'För många förfrågningar. Försök igen om en stund.' }, { status: 429 });
+  }
+  recordFailure(rlKey, WINDOW_MS);
+
+  // Sessionsnyckeln nycklar konversationen + lead-upserten: aldrig en delad
+  // konstant ('anon' lät alla turer utan token skriva över SAMMA lead).
+  const sessionToken = isValidChatSessionToken(body.sessionToken)
+    ? body.sessionToken
+    : `staff:${user.id}`;
+
   const pb = await getServerPb();
+
+  try {
+    await assertWithinAiBudget(pb, user.tenant);
+  } catch (err) {
+    if (err instanceof AiBudgetExceededError) {
+      return NextResponse.json({ error: 'Månadens AI-kostnadstak är nått (§ 9.6).' }, { status: 429 });
+    }
+    // Fail-open för själva tak-läsningen (samma princip som budget.server.ts).
+  }
 
   let systemPrompt: string | undefined;
   let model: string | undefined;
   let mod: CompassModule | null = null;
-  if (user && body.moduleSlug) {
+  if (body.moduleSlug) {
     mod = await getModuleBySlug(pb, user.tenant, body.moduleSlug);
     if (mod) {
       const questions = await listQuestionsForModule(pb, mod.id);
@@ -99,12 +130,21 @@ export async function POST(req: Request) {
     );
   }
 
-  // GARANTERA en lead för samtalet — bara när det finns en inloggad användare
-  // med tenant. Samma upsert-kärna som den publika modul-chatten, så
-  // AI-intag-chatten faktiskt "dyker upp som lead" i Startupkompassen (det som
-  // sidans subtitle lovar). Idempotent per session via conversation.lead.
-  // Best-effort: chatten ska aldrig fela på persistens/extraktion.
-  if (user) {
+  await logAiUsage(pb, {
+    tenant: user.tenant,
+    userId: user.id,
+    surface: 'dashboard_chat',
+    model: reply.model,
+    tokensIn: reply.tokensIn,
+    tokensOut: reply.tokensOut
+  });
+
+  // GARANTERA en lead för samtalet. Samma upsert-kärna som den publika
+  // modul-chatten, så AI-intag-chatten faktiskt "dyker upp som lead" i
+  // Startupkompassen (det som sidans subtitle lovar). Idempotent per session
+  // via conversation.lead. Best-effort: chatten ska aldrig fela på
+  // persistens/extraktion.
+  {
     try {
       // Default AI-intag har ingen modul → stabil sessionsnyckel 'ai-intag'.
       const convKey = body.moduleSlug || 'ai-intag';

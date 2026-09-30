@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { clientIpFromRequest } from '@/lib/client-ip';
 import { resolvePublicSurvey } from '@/lib/surveys/public';
 import { validateSurveyAnswers } from '@platform/shared';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
@@ -10,8 +11,9 @@ const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 10;
 const CHANNEL_RE = /^[a-zA-Z0-9_.\-]{1,80}$/;
 
+// Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt.
 function clientIp(req: Request): string {
-  return (req.headers.get('x-forwarded-for') || '').split(',')[0]?.trim() || 'anon';
+  return clientIpFromRequest(req);
 }
 
 /**

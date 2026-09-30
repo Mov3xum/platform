@@ -3,6 +3,8 @@
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
+import { clientIpFromHeaders } from '@/lib/client-ip';
+import { sanitizeAppPath } from '@/lib/relative-redirect';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
@@ -14,11 +16,14 @@ import { checkRateLimit, recordFailure, clearFailures } from '@/lib/rate-limit';
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_PER_ACCOUNT = 8;
 const LOGIN_MAX_PER_IP = 40;
+const RESET_MAX_PER_IP = 10;
+const RESET_MAX_PER_EMAIL = 3;
 
 async function isHttpsRequest(): Promise<boolean> {
   const h = await headers();
-  const proto = h.get('x-forwarded-proto') || h.get('x-forwarded-protocol');
-  return proto === 'https';
+  const raw = h.get('x-forwarded-proto') || h.get('x-forwarded-protocol') || '';
+  // Kedjade proxies: "https, http" — första värdet är klientens protokoll.
+  return raw.split(',')[0]!.trim().toLowerCase() === 'https';
 }
 
 // Secure-flaggan följer det faktiska request-protokollet (x-forwarded-proto
@@ -34,9 +39,7 @@ async function shouldUseSecureCookie(): Promise<boolean> {
 
 async function getClientIp(): Promise<string> {
   const h = await headers();
-  const xff = h.get('x-forwarded-for');
-  if (xff) return xff.split(',')[0]!.trim();
-  return h.get('x-real-ip') || 'unknown';
+  return clientIpFromHeaders((n) => h.get(n));
 }
 
 type PbError = {
@@ -176,10 +179,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     // redirect() här lämnar kvar det utloggade skalet (toppnavbar med
     // "Logga in", ingen sidmeny) i Next.js client Router Cache fastän sidan
     // renderar inloggad. Sanera next → bara interna paths (öppen-redirect-skydd).
-    const redirectTo =
-      next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\')
-        ? next
-        : '/dashboard';
+    const redirectTo = sanitizeAppPath(next, '/dashboard');
     return { success: true, redirectTo };
   } catch (outerErr: unknown) {
     // Re-throw NEXT_REDIRECT so Next.js can process the redirect normally.
@@ -207,6 +207,18 @@ export async function requestPasswordResetAction(
   if (!email) {
     return { error: 'E-post krävs.' };
   }
+
+  // Rate-limit (A.8.x): utan spärr kunde actionen användas för e-postbombning
+  // av en adress. Per IP och per adress; vid spärr svarar vi ändå "success"
+  // (ingen enumeration) men skickar inget.
+  const ip = await getClientIp();
+  const resetIpKey = `reset:ip:${ip}`;
+  const resetEmailKey = `reset:email:${email.toLowerCase()}`;
+  if (checkRateLimit(resetIpKey, RESET_MAX_PER_IP).blocked || checkRateLimit(resetEmailKey, RESET_MAX_PER_EMAIL).blocked) {
+    return { success: true };
+  }
+  recordFailure(resetIpKey, LOGIN_WINDOW_MS);
+  recordFailure(resetEmailKey, LOGIN_WINDOW_MS);
 
   const pbUrl = getServerPbUrl();
   const pb = new PocketBase(pbUrl);

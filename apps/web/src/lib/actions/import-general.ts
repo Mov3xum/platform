@@ -224,10 +224,13 @@ async function resolveRelation(
   const key = `${target.name}::${value}`;
   if (cache.has(key)) return cache.get(key)!;
 
-  // PB-id-format → använd direkt.
+  // PB-id-format → använd direkt, MEN bara om posten hör till aktörens tenant
+  // (superuser-klienten kringgår RLS; ett råt id från arket kunde annars
+  // länka in — eller skriva över — en annan tenants poster).
   if (/^[a-z0-9]{15}$/.test(value)) {
-    cache.set(key, value);
-    return value;
+    const inTenant = await recordBelongsToTenant(pb, target.name, value, tenant);
+    cache.set(key, inTenant ? value : null);
+    return inTenant ? value : null;
   }
 
   const targetFieldNames = new Set(target.fields.map((f) => f.name));
@@ -246,6 +249,33 @@ async function resolveRelation(
   } catch {
     cache.set(key, null);
     return null;
+  }
+}
+
+/**
+ * Tenant-verifiering av en post läst med superuser: `tenant`-fältet, annars
+ * `startup.tenant` (barnkollektioner), annars NEJ. Fail-closed — okänd/oläsbar
+ * post räknas aldrig som "vår".
+ */
+async function recordBelongsToTenant(
+  pb: PocketBase,
+  collectionName: string,
+  id: string,
+  tenant: string
+): Promise<boolean> {
+  try {
+    const rec = await pb
+      .collection(collectionName)
+      .getOne<{ tenant?: unknown; startup?: unknown; expand?: { startup?: { tenant?: unknown } } }>(id, {
+        expand: 'startup',
+        fields: 'id,tenant,startup,expand.startup.tenant'
+      });
+    if (typeof rec.tenant === 'string' && rec.tenant) return rec.tenant === tenant;
+    const viaStartup = rec.expand?.startup?.tenant;
+    if (typeof viaStartup === 'string' && viaStartup) return viaStartup === tenant;
+    return false;
+  } catch {
+    return false;
   }
 }
 
@@ -423,6 +453,14 @@ async function runImport(buf: Buffer, config: ImportConfig, dryRun: boolean): Pr
             .collection(collection.name)
             .getFirstListItem<{ id: string }>(parts.join(' && '));
           existingId = found.id;
+          // Utan direkt tenant-fält saknar uppslaget tenant-filter — verifiera
+          // träffen via förälderrelationen innan den skrivs över (superuser).
+          if (!collection.hasTenant && !(await recordBelongsToTenant(pb, collection.name, found.id, tenant))) {
+            outcome.skipped++;
+            totals.skipped++;
+            addIssue(`Rad ${rowNum}: matchar en post utanför din organisation — hoppas över.`);
+            continue;
+          }
         } catch {
           existingId = null;
         }

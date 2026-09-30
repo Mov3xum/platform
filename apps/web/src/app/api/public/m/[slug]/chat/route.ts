@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server';
+import { clientIpFromRequest } from '@/lib/client-ip';
 import { isSurveyModule } from '@platform/shared';
 import { moduleWantsLead } from '@/lib/compass/lead-capture';
 import { MistralError } from '@/lib/ai/mistral';
 import { intakeReply, type CompassChatMessage } from '@/lib/compass/chat';
 import {
   getOrCreateChatConversation,
+  isValidChatSessionToken,
   persistChatTurnAndUpsertLead
 } from '@/lib/compass/chat-lead';
+import { AiBudgetExceededError, assertWithinAiBudget } from '@/lib/ai/budget.server';
 import {
   buildModuleChatSystemPrompt,
   getPublicModuleQuestions,
@@ -21,6 +24,10 @@ export const dynamic = 'force-dynamic';
 
 const WINDOW_MS = 5 * 60 * 1000;
 const MAX_PER_WINDOW = 30;
+// Tak per TENANT och timme oavsett avsändar-IP — kostnadsskydd för
+// plattformens Mistral-nyckel som inte kan kringgås genom att rotera IP.
+const TENANT_WINDOW_MS = 60 * 60 * 1000;
+const TENANT_MAX_PER_WINDOW = 400;
 
 interface ChatBody {
   messages: CompassChatMessage[];
@@ -40,9 +47,10 @@ function isValidMessage(m: unknown): m is CompassChatMessage {
   );
 }
 
+// Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt och lät en
+// anropare nollställa per-IP-gränsen genom att rotera headern.
 function clientIp(req: Request): string {
-  const h = req.headers.get('x-forwarded-for') || '';
-  return h.split(',')[0]?.trim() || 'anon';
+  return clientIpFromRequest(req);
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -103,10 +111,33 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     );
   }
 
-  const sessionToken =
-    typeof body.sessionToken === 'string' && body.sessionToken.length > 0
-      ? body.sessionToken.slice(0, 100)
-      : 'anon';
+  // Sessionsnyckeln nycklar konversationen + lead-upserten: aldrig en delad
+  // konstant ('anon' lät alla turer utan token skriva över SAMMA lead).
+  if (!isValidChatSessionToken(body.sessionToken)) {
+    return NextResponse.json({ error: 'Ogiltig session. Ladda om sidan.' }, { status: 400 });
+  }
+  const sessionToken = body.sessionToken;
+
+  const tenantKey = `compass-pub-chat-tenant:${tenant}`;
+  if (checkRateLimit(tenantKey, TENANT_MAX_PER_WINDOW).blocked) {
+    return NextResponse.json(
+      { error: 'Chatten har tillfälligt nått sin kapacitet. Försök igen om en stund.' },
+      { status: 429 }
+    );
+  }
+  recordFailure(tenantKey, TENANT_WINDOW_MS);
+
+  // Månadstaket (§ 9.6) gäller även publika chattar på tenantens nyckel.
+  try {
+    await assertWithinAiBudget(pb, tenant);
+  } catch (err) {
+    if (err instanceof AiBudgetExceededError) {
+      return NextResponse.json(
+        { error: 'Chatten är tillfälligt stängd. Lämna gärna dina uppgifter så hör vi av oss.' },
+        { status: 503 }
+      );
+    }
+  }
 
   // Systemprompt: persona + ev. egen prompt (annars default i intakeReply).
   const systemPrompt = buildModuleChatSystemPrompt(module, questions);

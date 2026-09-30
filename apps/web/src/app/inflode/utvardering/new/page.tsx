@@ -4,7 +4,8 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
 import { Card, Icon } from '@/components/proto';
-import { createSurveyAction, resolveSurveyLink } from '@/lib/actions/surveys';
+import { createSurveyAction } from '@/lib/actions/surveys';
+import { resolveSurveyLink } from '@/lib/surveys/link';
 import {
   SURVEY_KINDS,
   SURVEY_LINK_DEFAULT_KIND,
