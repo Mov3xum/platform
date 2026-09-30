@@ -7,11 +7,12 @@ import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { hasRole } from '@/lib/rbac';
+import { configuredAppUrl } from '@/lib/app-integrations/app-url';
 import { getSurvey, newPublicSlug } from '@/lib/surveys/store';
 import { dispatchSurveyInvites } from '@/lib/surveys/dispatch';
-import { getRecordInTenant } from '@/lib/core/write/helpers';
 import { describePbError, pbFieldCodes, pbStatus } from '@/lib/pb-error';
-import { SURVEY_LINK_SOURCE } from '@/lib/core/write/surveys';
+import { resolveSurveyLink, type ResolvedSurveyLink } from '@/lib/surveys/link';
+import { getRecordInTenant } from '@/lib/core/write/helpers';
 import type { Role } from '@platform/shared';
 import {
   SURVEY_LINK_DEFAULT_KIND,
@@ -20,7 +21,6 @@ import {
   isSurveyKind,
   normalizeSurveyQuestions,
   parseSurveyLinkRef,
-  type SurveyLinkRef,
   type SurveyQuestion
 } from '@platform/shared';
 
@@ -55,39 +55,6 @@ async function writeWithFallback<T>(
 
 function cap(v: FormDataEntryValue | null, max: number): string {
   return String(v ?? '').trim().slice(0, max);
-}
-
-// Källa → PB-kollektion + namnfält: `SURVEY_LINK_SOURCE` i skrivlagret (delas
-// med chatt-verktyget `create_survey`). Källan läses tenant-verifierat (§ 21)
-// så en enkät aldrig kan kopplas till en annan tenants post; etiketten
-// härleds server-side och tas ALDRIG från klienten.
-const LINK_SOURCE = SURVEY_LINK_SOURCE;
-
-export interface ResolvedSurveyLink extends SurveyLinkRef {
-  label: string;
-  /** Bara kompassmoduler — för länken tillbaka. */
-  slug?: string;
-}
-
-/** Slår upp källan för en `?for=<kind>:<id>`-referens i den inloggades tenant. */
-export async function resolveSurveyLink(
-  pb: PocketBase,
-  user: { id: string; tenant: string; roles: string[] },
-  raw: unknown
-): Promise<ResolvedSurveyLink | null> {
-  const ref = parseSurveyLinkRef(raw);
-  if (!ref) return null;
-  const src = LINK_SOURCE[ref.kind];
-  const row = await getRecordInTenant<{ id: string; tenant?: string; slug?: string } & Record<string, unknown>>(
-    pb,
-    { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
-    src.collection,
-    ref.id,
-    `id,tenant,slug,${src.nameField}`
-  );
-  if (!row) return null;
-  const label = String(row[src.nameField] ?? '').trim().slice(0, 200);
-  return { ...ref, label: label || `${ref.kind} ${ref.id}`, slug: typeof row.slug === 'string' ? row.slug : undefined };
 }
 
 /**
@@ -270,8 +237,12 @@ export async function deleteSurveyAction(formData: FormData) {
 
 /** Origin för enkätlänken — från staffs egen request (proxy-headers först). */
 async function requestOrigin(): Promise<string> {
+  // Konfigurerad app-URL vinner — `x-forwarded-host` kan i värsta fall vara
+  // klientstyrd (mejlade enkätlänkar får aldrig peka på en främmande host).
+  const configured = configuredAppUrl();
+  if (configured) return configured;
   const h = await headers();
-  const proto = h.get('x-forwarded-proto') || 'https';
+  const proto = (h.get('x-forwarded-proto') || 'https').split(',')[0]!.trim();
   const host = h.get('x-forwarded-host') || h.get('host') || '';
   return host ? `${proto}://${host}` : '';
 }

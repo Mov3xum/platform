@@ -1,3 +1,4 @@
+import { clientIpFromRequest } from '@/lib/client-ip';
 import { buildQuizResultPdf } from '@/lib/compass/result-pdf';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 
@@ -16,9 +17,10 @@ interface ResultPdfBody {
   accent?: unknown;
 }
 
+// Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt och lät en
+// anropare nollställa per-IP-gränsen genom att rotera headern.
 function clientIp(req: Request): string {
-  const h = req.headers.get('x-forwarded-for') || '';
-  return h.split(',')[0]?.trim() || 'anon';
+  return clientIpFromRequest(req);
 }
 
 function str(v: unknown, max: number): string | undefined {

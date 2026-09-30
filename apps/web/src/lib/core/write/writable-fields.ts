@@ -374,7 +374,8 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
       agent: { kind: 'deny', reason: 'Kontaktägare sätts av en människa i kontaktboken.' }
     },
     gender: {
-      user: { kind: 'roles', roles: STAFF_FULL },
+      // GDPR art. 9 — bara admin/incubator_lead/coach (§ 45.7), inte mentor.
+      user: { kind: 'roles', roles: ['admin', 'incubator_lead', 'coach'] },
       agent: { kind: 'deny', reason: 'Kön (GDPR art. 9) registreras aldrig av agenten.' }
     }
   },

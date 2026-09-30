@@ -19,6 +19,17 @@ import type { CompassModule, Conversation } from './types';
    eller AI-extraktionen lyckas. */
 
 /** Hämta/skapa en konversation per session (kontinuitet i intag-chatten). */
+/**
+ * Sessionstoken från klienten som nycklar konversationen (och lead-upserten)
+ * per tenant+modul. Klienten genererar `s_<uuid>` (CompassChat). Kravet:
+ * URL-säkra tecken, minst 16 tecken — ett saknat/kort värde avvisas i stället
+ * för att falla på en delad konstant (`'anon'` lät varje tur utan token
+ * skriva över samma lead, dvs. blanda/ersätta andra besökares uppgifter).
+ */
+export function isValidChatSessionToken(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{16,100}$/.test(value);
+}
+
 export async function getOrCreateChatConversation(
   pb: PocketBase,
   tenant: string,

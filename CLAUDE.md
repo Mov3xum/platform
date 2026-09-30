@@ -1103,6 +1103,60 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
   i `ProtoShell`) hårdladdar när sökvägen blir skal-lös (`/login`, `/offline`,
   `/m/`, `/u/`). `/login?next=` saneras med `sanitizeAppPath` (öppen-
   redirect-skydd även för redan inloggade).
+- **Säkerhetsgranskning 2026-09-30 — åtgärdade brister (bindande mönster):**
+  - *Route-handler-redirects:* alltid relativ `Location` via
+    `lib/relative-redirect.ts` (`assertAppPath` avvisar kontrolltecken,
+    backslash och tab-bypass `/\t/evil` som URL-parsern strippar till
+    `//evil`); `next`-parametrar saneras med `sanitizeAppPath` i login-route,
+    login-action och `/login`-sidan. Aldrig `new URL(path, request.url)`.
+  - *Klient-IP för rate-limit/audit:* `lib/client-ip.ts` tar det HÖGRA
+    (proxy-tillagda) `X-Forwarded-For`-värdet — det vänstra är klientstyrt
+    och nollställde varje per-IP-gräns. Inloggning har dessutom en gräns per
+    e-post oavsett IP, och lösenordsåterställning är rate-limitad.
+    `Secure`-cookien läser första värdet i kedjade `x-forwarded-proto`.
+  - *`/api/inflode/chat`* (intern intag-chatt) kräver staff (admin/
+    incubator_lead/coach), rate-limitas, prövar månadstaket och loggar
+    tokens — den var en oautentiserad Mistral-proxy (middleware:n
+    kontrollerar bara att cookien finns). Den publika modul-chatten prövar
+    månadstaket, har ett tak per tenant/timme oavsett IP och kräver en
+    riktig sessionstoken (`isValidChatSessionToken`; `'anon'`-fallbacken
+    lät alla turer utan token skriva över samma lead).
+  - *PocketBase-filter & bakstreck:* fexpr har INGEN bakstrecks-escape —
+    strängen avslutas bara vid ett citattecken som inte föregås av `\`, så
+    `\\"` bryter ut. `escFilter` TAR BORT bakstreck (dubblar dem inte), och
+    `lib/pb-filter-guard.ts` patchar SDK:ns `pb.filter` centralt (laddas av
+    båda PB-fabrikerna) så bundna parametrar aldrig bär bakstreck.
+  - *AI-verktygens filter:* `validateFilter` kräver balanserade parenteser
+    utanför strängliteraler, inga kommentarer/radbrytningar/bakstreck
+    (autonoma körningar kör superuser utan PB-regler bakom tenant-klausulen),
+    och `query_collection` släpper bara rader vars direkta tenantfält matchar.
+    `maskRecord` maskar rekursivt in i `expand` (namnbaserat) — expand var
+    en bakväg förbi fältmaskningen.
+  - *Publika filproxys* (`compass-media`, `login-media`) svarar med
+    sandbox-CSP (`default-src 'none'; sandbox`) så en uppladdad SVG aldrig
+    kör skript på appens origin. `next/image`-optimeraren är avstängd
+    (`images.unoptimized`) — `remotePatterns '**'` var en oautentiserad
+    bildproxy/blind SSRF utanför middleware:ns matcher.
+  - *Delade hemligheter* jämförs via `lib/secret-compare.ts` (SHA-256 +
+    `crypto.timingSafeEqual`, ingen längdläcka).
+  - *RBAC-efterskörd:* kompassfrågor uppdateras bara inom sin (tenant-
+    verifierade) modul och `module` skrivs aldrig om; migration
+    **1700000175** tenant-joinar update/delete på `compass_questions`/
+    `compass_messages`/`compass_responses`. Excel-importen accepterar bara
+    kollektioner med `tenant` eller `startup`-relation, verifierar råa
+    relations-id:n mot tenanten och skriver aldrig över en träff utanför
+    tenanten; `/api/admin/import-crm` har egen admin-gate. De minimis-
+    radering är staff-only. Workshop-artefakter: `coach_*`/`committed_at`/
+    `strategy_id`/`document_url` kan bara staff sätta, och en medlem kan inte
+    committa förbi ett coach-granskningssteg; `area` tenant-verifieras;
+    radering av workshops/områden/utbildningsdokument kräver admin/
+    incubator_lead. Bolagsparten i ett avtal signeras BARA av en länkad
+    `startup_member`. Kontaktägare byts bara av ledning eller befintlig
+    ägare; `gender` skrivs inte av mentor. En incubator_lead kan inte
+    återställa lösenord för, radera eller ändra bolagskoppling på admin-
+    eller andra ledningskonton. `resolveSurveyLink` ligger i
+    `lib/surveys/link.ts` (inte i en `'use server'`-modul) och enkätlänkens
+    origin tas från `NEXT_PUBLIC_APP_URL`/`APP_URL` när den är satt.
 - **Brute-force-skydd (A.8.x):** `loginAction` rate-limitar misslyckade
   försök per IP+e-post (8/15 min) och per IP (40/15 min) via
   `lib/rate-limit.ts` (in-memory; lyft till Redis/PB vid horisontell

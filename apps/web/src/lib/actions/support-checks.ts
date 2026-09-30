@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { headers } from 'next/headers';
+import { clientIpFromHeaders } from '@/lib/client-ip';
 import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
@@ -167,8 +168,7 @@ export async function updateApplicationDraftAction(applicationId: string, input:
 export async function submitApplicationAction(applicationId: string, input: { signerName: string; intentConfirmed: boolean }): Promise<SupportCheckActionState> {
   const { user, actor, access } = await ctx();
   const h = await headers();
-  const xff = h.get('x-forwarded-for');
-  const ip = (xff ? xff.split(',')[0]!.trim() : h.get('x-real-ip')) || 'unknown';
+  const ip = clientIpFromHeaders((n) => h.get(n));
   const pb = await getServerPb();
   const res = await submitSupportCheckApplication(
     pb,

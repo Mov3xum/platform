@@ -2525,11 +2525,57 @@ export interface ToolResult {
   warning?: string;
 }
 
+/**
+ * Modellskrivna filter komponeras som `(tenant) && (modelFilter)`. Autonoma
+ * körningar (schema/trigger) kör med SUPERUSER-klient utan PB-regler bakom, så
+ * ett filter som stänger parentesen i förtid (`) || 1=1 || (`), eller gömmer
+ * resten bakom en kommentar, kunde vidga frågan utanför tenanten. Krav:
+ * balanserade parenteser UTANFÖR strängliteraler, inga kommentarer, ingen
+ * radbrytning. `runQueryCollection` verifierar dessutom tenantfältet på varje
+ * returnerad rad (defense-in-depth).
+ */
 function validateFilter(filter: string): string | null {
   if (filter.length > MAX_FILTER_LENGTH) return 'Filter för långt.';
   if (/@request\b/i.test(filter)) return 'Filter får inte innehålla @request.';
   if (/@collection\b/i.test(filter)) return 'Filter får inte innehålla @collection.';
+  if (/[\r\n]/.test(filter)) return 'Filter får inte innehålla radbrytningar.';
+  if (filter.includes('//') || filter.includes('/*')) return 'Filter får inte innehålla kommentarer.';
+  if (filter.includes('\\')) return 'Filter får inte innehålla bakstreck.';
+  let depth = 0;
+  let quote: string | null = null;
+  for (const ch of filter) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth < 0) return 'Filter har obalanserade parenteser.';
+    }
+  }
+  if (quote) return 'Filter har en oavslutad sträng.';
+  if (depth !== 0) return 'Filter har obalanserade parenteser.';
   return null;
+}
+
+/**
+ * Tenant-verifiering av returnerade rader när tenantfältet ligger direkt på
+ * posten (`tenant`); relationsvägar (`startup.tenant`) kan inte verifieras
+ * utan expand och täcks av filtervalideringen ovan. Fail-closed per rad.
+ */
+function dropForeignTenantRows<T extends Record<string, unknown>>(
+  items: T[],
+  collection: { tenantField: string | null },
+  tenantId: string
+): T[] {
+  const field = collection.tenantField;
+  if (!field || field.includes('.')) return items;
+  return items.filter((item) => {
+    const v = item[field];
+    return v === tenantId || (Array.isArray(v) && v.includes(tenantId));
+  });
 }
 
 /**
@@ -2615,8 +2661,17 @@ async function runQueryCollection(
   const sort = typeof args.sort === 'string' ? args.sort.trim().slice(0, MAX_SORT_LENGTH) : undefined;
   const expand =
     typeof args.expand === 'string' ? args.expand.trim().slice(0, MAX_EXPAND_LENGTH) : undefined;
-  const fields =
+  let fields =
     typeof args.fields === 'string' ? args.fields.trim().slice(0, MAX_EXPAND_LENGTH) : undefined;
+  // Tenant-efterkontrollen (dropForeignTenantRows) behöver tenantfältet på
+  // varje rad — en `fields`-projektion utan det får inte tömma resultatet
+  // (och inte heller kringgå kontrollen).
+  const directTenantField =
+    collection.tenantField && !collection.tenantField.includes('.') ? collection.tenantField : null;
+  if (fields && directTenantField) {
+    const listed = fields.split(',').map((f) => f.trim());
+    if (!listed.includes(directTenantField) && !listed.includes('*')) fields = `${fields},${directTenantField}`;
+  }
 
   let limit = 20;
   if (typeof args.limit === 'number' && Number.isFinite(args.limit)) {
@@ -2633,7 +2688,8 @@ async function runQueryCollection(
       fields: fields || undefined
     });
 
-    const items = result.items.map((item: Record<string, unknown>) => {
+    const own = dropForeignTenantRows(result.items as Record<string, unknown>[], collection, ctx.tenantId);
+    const items = own.map((item: Record<string, unknown>) => {
       const masked = maskRecord(item, collection);
       return truncateValue(masked) as Record<string, unknown>;
     });

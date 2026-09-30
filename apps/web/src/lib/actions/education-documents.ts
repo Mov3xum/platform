@@ -19,6 +19,8 @@ import type {
 } from '@platform/shared';
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
+// Radering (dokument + alla bolags tilldelningar) är ett ledningsbeslut.
+const DELETE_ROLES: Role[] = ['admin', 'incubator_lead'];
 const PB_URL = getServerPbUrl();
 
 export interface DocumentActionState {
@@ -323,7 +325,7 @@ export async function deleteDocumentAssignmentAction(
 ): Promise<DocumentActionState> {
   const user = await getCurrentUser();
   if (!user) return { error: 'Ej inloggad.' };
-  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  if (!hasRole(user.roles, DELETE_ROLES)) return { error: 'Endast inkubatorledning kan ta bort.' };
 
   const pb = await getServerPb();
   let assignment: EducationDocumentAssignment;
@@ -428,7 +430,7 @@ export async function deleteEducationDocumentAction(
 ): Promise<DocumentActionState> {
   const user = await getCurrentUser();
   if (!user) return { error: 'Ej inloggad.' };
-  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  if (!hasRole(user.roles, DELETE_ROLES)) return { error: 'Endast inkubatorledning kan ta bort.' };
 
   const pb = await getServerPb();
   let doc: EducationDocument;

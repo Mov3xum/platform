@@ -1218,10 +1218,34 @@ export async function updateQuestionAction(formData: FormData) {
   const pb = await getServerPb();
   await getModuleInTenant(pb, moduleId, user.tenant);
 
+  // Frågan MÅSTE tillhöra den (tenant-verifierade) modulen. Tidigare
+  // kontrollerades bara modulen, och `module` skrevs om → en coach kunde
+  // flytta/skriva över en annan tenants fråga (id:n syns på publika /m/-sidor).
+  // Läses med samma fallback som modulen (PB v0.23.4 kan tyst neka view).
+  let existingQuestion: { id: string; module: string } | null = null;
+  try {
+    existingQuestion = await pb
+      .collection('compass_questions')
+      .getOne<{ id: string; module: string }>(id, { fields: 'id,module' });
+  } catch {
+    const su = await getSuperuserPb();
+    if (su.ok) {
+      try {
+        existingQuestion = await su.pb
+          .collection('compass_questions')
+          .getOne<{ id: string; module: string }>(id, { fields: 'id,module' });
+      } catch {
+        existingQuestion = null;
+      }
+    }
+  }
+  if (!existingQuestion || String(existingQuestion.module) !== moduleId) {
+    throw new Error('Frågan hör inte till den här modulen.');
+  }
+
   try {
     await writeWithFallback(pb, (c) =>
       c.collection('compass_questions').update(id, {
-        module: moduleId,
         key,
         prompt,
         help_text: helpText || undefined,

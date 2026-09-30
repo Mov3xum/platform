@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { headers } from 'next/headers';
+import { clientIpFromHeaders } from '@/lib/client-ip';
 import { revalidatePath } from 'next/cache';
 import PocketBase from 'pocketbase';
 import { getServerPb, requireUser } from '@/lib/auth.server';
@@ -124,7 +125,10 @@ export async function signAgreementAction(
   if (party === 'movexum' && !isStaff) {
     return { error: 'Endast Movexum-personal kan signera för Movexum.' };
   }
-  if (party === 'company' && !isLinkedMember && !isStaff) {
+  // Bolagsparten fylls BARA av en länkad bolagsmedlem — aldrig av Movexum-
+  // personal (ett coach-/mentorkonto i bolagets slot bryter bevismodellen,
+  // eIDAS art. 26: avtalet blev "signed" utan bolagets signatär).
+  if (party === 'company' && !(isLinkedMember && hasRole(user.roles, ['startup_member']))) {
     return { error: 'Endast bolagets medlemmar kan signera för bolaget.' };
   }
 
@@ -159,8 +163,7 @@ export async function signAgreementAction(
 
   // Audit-metadata (dataminimerad: ip lagras bara som SHA-256-hash).
   const h = await headers();
-  const xff = h.get('x-forwarded-for');
-  const ip = (xff ? xff.split(',')[0]!.trim() : h.get('x-real-ip')) || 'unknown';
+  const ip = clientIpFromHeaders((n) => h.get(n));
   const userAgent = (h.get('user-agent') || '').slice(0, 300);
   const now = new Date().toISOString();
 

@@ -29,8 +29,17 @@ export function assertAppPath(path: string): string {
   if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || path.startsWith('/\\')) {
     throw new Error(`Redirect-mål måste vara en sökväg inom appen, fick "${String(path)}".`);
   }
-  if (/[\r\n]/.test(path)) {
-    throw new Error('Redirect-mål får inte innehålla radbrytningar.');
+  // Kontrolltecken och backslash: WHATWG-URL-parsern STRIPPAR tab/radbrytning
+  // ("/\t/evil.example" → "//evil.example") och tolkar "\" som "/", så en
+  // prefixkontroll räcker inte (tab-bypass, 2026-09-30).
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f\\]/.test(path)) {
+    throw new Error('Redirect-mål får inte innehålla kontrolltecken eller backslash.');
+  }
+  // Sista ordet: parsa som webbläsaren gör och kräv att origin är oförändrad.
+  const parsed = new URL(path, 'http://app.invalid');
+  if (parsed.origin !== 'http://app.invalid' || !parsed.pathname.startsWith('/')) {
+    throw new Error('Redirect-mål lämnar appen.');
   }
   return path;
 }

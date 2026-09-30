@@ -1,3 +1,4 @@
+import '@/lib/pb-filter-guard';
 import 'server-only';
 import PocketBase from 'pocketbase';
 import { getServerPbUrl } from '@/lib/pb-url';

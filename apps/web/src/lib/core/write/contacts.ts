@@ -333,6 +333,14 @@ export async function updateContactFields(
     if (!r.ok) return fail('INVALID_VALUE', r.error);
     let value = r.value;
     if (field === 'owners') {
+      // Ägarskap byts av ledningen eller en befintlig ägare — annars kunde
+      // vilken staff som helst göra sig till ägare och självgodkänna
+      // användning (kringgår § 45:s syftesbegränsning).
+      const currentOwners = Array.isArray(contact.owners) ? (contact.owners as string[]) : [];
+      const isLead = actor.roles.includes('admin') || actor.roles.includes('incubator_lead');
+      if (!isLead && !currentOwners.includes(actor.id)) {
+        return fail('FORBIDDEN', 'Bara ledningen eller en befintlig ägare kan ändra kontaktens ägare.');
+      }
       const owners = await validOwnerIds(pb, actor, value as string[]);
       if (owners.length === 0) return fail('INVALID_VALUE', 'En kontakt måste ha minst en ägare som är Movexum-personal.');
       value = owners;

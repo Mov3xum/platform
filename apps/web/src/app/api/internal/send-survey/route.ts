@@ -1,3 +1,4 @@
+import { secretsEqual } from '@/lib/secret-compare';
 import { NextResponse } from 'next/server';
 import { dispatchSurveyInvites } from '@/lib/surveys/dispatch';
 
@@ -8,12 +9,6 @@ import { dispatchSurveyInvites } from '@/lib/surveys/dispatch';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
 
 export async function POST(req: Request) {
   const expected = process.env.MOVEXUM_SCHEDULE_SECRET;
@@ -21,7 +16,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'MOVEXUM_SCHEDULE_SECRET saknas.' }, { status: 503 });
   }
   const provided = req.headers.get('x-movexum-schedule-secret') || '';
-  if (!timingSafeEqual(provided, expected)) {
+  if (!secretsEqual(provided, expected)) {
     return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
   }
   let body: { surveyId?: unknown };

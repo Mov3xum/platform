@@ -144,11 +144,32 @@ export function maskRecord(
   record: Record<string, unknown>,
   collection: { maskedFields: readonly string[] }
 ): Record<string, unknown> {
-  if (collection.maskedFields.length === 0) return record;
+  const hasExpand = record.expand !== undefined && record.expand !== null;
+  if (collection.maskedFields.length === 0 && !hasExpand) return record;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(record)) {
     if (collection.maskedFields.includes(k)) continue;
-    out[k] = v;
+    // `expand` bär ANDRA kollektioners poster (t.ex. users → e-post). Deras
+    // maskning kan inte slås upp här, så PII-fält strippas namnbaserat och
+    // rekursivt — annars är expand en bakväg förbi fältmaskningen.
+    out[k] = k === 'expand' ? maskExpanded(v) : v;
+  }
+  return out;
+}
+
+function isPiiFieldName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return PII_FIELD_PATTERNS.some((p) => lower.includes(p));
+}
+
+/** Rekursiv, namnbaserad PII-strippning av expanderade relationer. */
+export function maskExpanded(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(maskExpanded);
+  if (!value || typeof value !== 'object') return value;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (isPiiFieldName(k)) continue;
+    out[k] = v && typeof v === 'object' ? maskExpanded(v) : v;
   }
   return out;
 }

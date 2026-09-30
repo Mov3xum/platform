@@ -95,5 +95,11 @@ export async function GET(
   if (!headers.has('content-type')) headers.set('content-type', 'application/octet-stream');
   headers.set('Cache-Control', 'public, max-age=86400');
   headers.set('X-Content-Type-Options', 'nosniff');
+  // Filerna (även SVG) serveras från APPENS origin: en SVG med <script> vore
+  // annars lagrad XSS på vår domän när den öppnas direkt. Sandbox-CSP:n gör
+  // svaret till ett rent dokument utan skript/anslutningar — <img>/<video>
+  // påverkas inte.
+  headers.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+  headers.set('Content-Disposition', 'inline');
   return new Response(upstream.body, { status: upstream.status, headers });
 }

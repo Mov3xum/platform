@@ -1,4 +1,5 @@
 import 'server-only';
+import '@/lib/pb-filter-guard';
 import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';

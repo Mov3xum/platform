@@ -16,6 +16,12 @@ export function publicAppUrl(): string {
   );
 }
 
+/** Konfigurerad publik origin, eller null när ingen env är satt (ingen localhost-gissning). */
+export function configuredAppUrl(): string | null {
+  const raw = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || '').trim().replace(/\/$/, '');
+  return /^https?:\/\/[^\s/]+$/.test(raw) ? raw : null;
+}
+
 export function appIntegrationCallbackUrl(slug: string): string {
   return `${publicAppUrl()}/api/app-integrations/${encodeURIComponent(slug)}/callback`;
 }

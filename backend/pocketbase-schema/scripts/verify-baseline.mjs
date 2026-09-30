@@ -447,6 +447,28 @@ const MUST_SCOPE_CROSS_TENANT = [
 // agent-versionshistorik (§ 16.6) får aldrig kunna skrivas om via API:t.
 const MUST_BE_IMMUTABLE = ['agreement_signatures', 'tool_versions', 'support_check_revisions'];
 
+// Migration 1700000175: update/delete på compass-barnkollektionerna måste bära
+// samma förälder-tenant-join som list/view (en coach kunde annars ändra en
+// annan tenants frågor/meddelanden/svar via direkt-API).
+const COMPASS_WRITE_SCOPE = [
+  { name: 'compass_questions', token: '@request.auth.tenant = module.tenant' },
+  { name: 'compass_messages', token: '@request.auth.tenant = conversation.tenant' },
+  { name: 'compass_responses', token: '@request.auth.tenant = conversation.tenant' }
+];
+
+function verifyCompassWriteRulesScoped(collections) {
+  for (const { name, token } of COMPASS_WRITE_SCOPE) {
+    const col = collections.get(name);
+    if (!col) {
+      fail(`Collection "${name}" saknas (compass är migration-only — kör migrationerna)`);
+      continue;
+    }
+    assertRuleContains(col, 'updateRule', token);
+    assertRuleContains(col, 'deleteRule', token);
+  }
+  ok('compass write rules are tenant-scoped (migration 1700000175)');
+}
+
 function verifyImmutableCollections(collections) {
   for (const name of MUST_BE_IMMUTABLE) {
     const col = collections.get(name);
@@ -688,6 +710,7 @@ function verifyRlsAndRbac(collections) {
 
   verifyStartupMemberIsolation(collections);
   verifyImmutableCollections(collections);
+  verifyCompassWriteRulesScoped(collections);
 
   ok('RLS/RBAC baseline checks passed (createRules är säkra)');
 }

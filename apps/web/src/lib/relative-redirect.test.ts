@@ -31,6 +31,13 @@ test('assertAppPath avvisar externa/protokollrelativa mål (open redirect)', () 
   assert.throws(() => assertAppPath('login'));
   assert.throws(() => assertAppPath(''));
   assert.throws(() => assertAppPath('/login\r\nSet-Cookie: x=y'));
+  // Tab-bypass: URL-parsern stripar \t → "//evil.example" (incident 2026-09-30).
+  assert.throws(() => assertAppPath('/\t/evil.example'));
+  assert.throws(() => assertAppPath('/\n/evil.example'));
+  assert.throws(() => assertAppPath('/\\evil.example'));
+  assert.throws(() => assertAppPath('/foo\\bar'));
+  assert.equal(assertAppPath('/hem?flik=anslagstavla#top'), '/hem?flik=anslagstavla#top');
+  assert.equal(sanitizeAppPath('/\t/evil.example', '/dashboard'), '/dashboard');
 });
 
 test('sanitizeAppPath faller tillbaka i stället för att kasta', () => {
