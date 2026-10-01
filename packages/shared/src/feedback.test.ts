@@ -5,6 +5,7 @@ import {
   FEEDBACK_AREAS,
   FEEDBACK_KINDS,
   FEEDBACK_STATUSES,
+  allowedFeedbackAreas,
   canDeleteFeedback,
   canEditFeedback,
   compareFeedbackItems,
@@ -27,6 +28,23 @@ test('områden: unika id:n, etikett och valfri route', () => {
   assert.equal(feedbackAreaRoute('rapporter'), '/rapporter');
   assert.equal(feedbackAreaRoute('mobil'), null);
   assert.equal(feedbackAreaLabel(null), 'Okänt område');
+});
+
+test('allowedFeedbackAreas: bara aktiverade moduler + modul-lösa områden', () => {
+  const enabled = new Set(['hem', 'rapporter']);
+  const ids = allowedFeedbackAreas((m) => enabled.has(m)).map((a) => a.id);
+  assert.ok(ids.includes('hem'));
+  assert.ok(ids.includes('rapporter'));
+  assert.equal(ids.includes('arshjul'), false);
+  // Tvärgående områden utan modul är alltid med.
+  assert.ok(ids.includes('mobil'));
+  assert.ok(ids.includes('inloggning'));
+  assert.ok(ids.includes('annat'));
+  // Ingen modul aktiverad ⇒ bara de modul-lösa.
+  const none = allowedFeedbackAreas(() => false).map((a) => a.id);
+  assert.deepEqual(none, FEEDBACK_AREAS.filter((a) => !a.module).map((a) => a.id));
+  // Varje modul-kopplat område pekar på sitt eget id.
+  for (const a of FEEDBACK_AREAS) if (a.module) assert.equal(a.module, a.id);
 });
 
 test('validering: rubrik, beskrivning, typ och område krävs', () => {
