@@ -193,6 +193,18 @@ export function validateNewPassword(raw: unknown): PasswordResult {
   return { ok: true, value: password };
 }
 
+/**
+ * Visningsnamn: obligatoriskt, trimmat, plattat till en rad, max 200 tecken
+ * (samma gräns som vid kontoskapande). Ren logik delad av server-action och
+ * enhetstest.
+ */
+export function validateDisplayName(raw: unknown): { ok: true; value: string } | { ok: false; message: string } {
+  const value = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  if (!value) return { ok: false, message: 'Namnet kan inte vara tomt.' };
+  if (value.length > 200) return { ok: false, message: 'Namnet är för långt (max 200 tecken).' };
+  return { ok: true, value };
+}
+
 /** Radering kräver att aktören skriver in målanvändarens e-post (skydd mot felklick). */
 export function validateDeleteConfirmation(
   rawConfirm: unknown,
