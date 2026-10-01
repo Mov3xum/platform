@@ -5,7 +5,14 @@ import { ExternalLink, Check } from 'lucide-react';
 import { getServerPb, type SessionUser } from '@/lib/auth.server';
 import { hasRole, canActivateConnector } from '@/lib/rbac';
 import { RailSection, RailStat } from '@/components/PageRail';
-import { hasHandler as hasIntegrationHandler } from '@/lib/integrations/registry';
+import {
+  getHandler,
+  hasHandler as hasIntegrationHandler,
+  listCompanyRegistrySlugs
+} from '@/lib/integrations/registry';
+import { ensureRegistryProviderRows } from '@/lib/integrations/company-registry/catalog-seed';
+import { RegistryConnectPanel } from '@/components/integrations/RegistryConnectPanel';
+import type { CredentialField } from '@/lib/integrations/types';
 import { IntegrationActivateButton } from '@/app/integrationer/IntegrationActivateButton';
 import { ConnectorCard } from '@/components/ConnectorCard';
 import { ConnectorLogo } from '@/components/ConnectorLogo';
@@ -15,13 +22,15 @@ import { listAppProviders } from '@/lib/app-integrations/registry';
 import { findIntegrationRow } from '@/lib/app-integrations/storage';
 
 type IntegrationCategory =
+  | 'company_registry'
   | 'microsoft365'
   | 'ai'
   | 'collaboration'
   | 'communication'
   | 'productivity'
   | 'marketing'
-  | 'learning';
+  | 'learning'
+  | 'other';
 
 type Availability = 'planned' | 'beta' | 'available';
 type TenantStatus = 'available' | 'pilot_requested' | 'connected' | 'disabled';
@@ -30,7 +39,8 @@ interface ProviderRecord {
   id: string;
   slug: string;
   name: string;
-  category: IntegrationCategory;
+  /** Rå select-värde från PB — okända värden hamnar i "Övrigt". */
+  category: string;
   placeholder: string;
   tagline: string;
   description: string;
@@ -57,27 +67,44 @@ interface ProviderView {
   features: string[];
   availability: Availability;
   tenantStatus: TenantStatus;
+  /** Inline-anslutning (bolagsregister § 11.8): fält från handlern. */
+  registryFields?: CredentialField[];
+  /** Katalograden saknas och kunde inte självläkas — PII-fri orsak. */
+  catalogMissingReason?: string;
 }
 
 const CATEGORY_LABEL: Record<IntegrationCategory, string> = {
+  company_registry: 'Bolagsregister',
   microsoft365: 'Microsoft 365',
   ai: 'AI & analys',
   collaboration: 'Samarbete',
   communication: 'Kommunikation',
   productivity: 'Produktivitet',
   marketing: 'Marknadsföring',
-  learning: 'Lärande & program'
+  learning: 'Lärande & program',
+  other: 'Övrigt'
 };
 
+// Bolagsregister först — det är organisationens primära datakälla (§ 11.8).
+// Okända kategorier (ny select-värde innan katalogen uppdaterats) hamnar i
+// "Övrigt" i stället för att tyst försvinna.
 const CATEGORY_ORDER: IntegrationCategory[] = [
+  'company_registry',
   'marketing',
   'learning',
   'microsoft365',
   'ai',
   'collaboration',
   'communication',
-  'productivity'
+  'productivity',
+  'other'
 ];
+
+function toCategory(raw: string): IntegrationCategory {
+  return (CATEGORY_ORDER as string[]).includes(raw) && raw !== 'other'
+    ? (raw as IntegrationCategory)
+    : 'other';
+}
 
 function toFeatures(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -105,6 +132,17 @@ export async function loadIntegrationsCatalog(
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead']);
   const isAdmin = hasRole(user.roles, ['admin']);
   const pb = await getServerPb();
+
+  // Bolagsregister-providrarna (Roaring, Bolagsverket) har handler i koden men
+  // sin katalograd i migration 1700000173, som bara körs när PB-imagen byggs
+  // om. Självläk saknade rader (superuser, idempotent) innan katalogen läses —
+  // annars syns inte kortet alls (§ 11.8). Bara staff (de enda som kan ansluta).
+  const registrySlugs = listCompanyRegistrySlugs();
+  const catalogMissing = new Map<string, string>();
+  if (isStaff) {
+    const ensured = await ensureRegistryProviderRows(pb, registrySlugs);
+    for (const m of ensured.missing) catalogMissing.set(m.slug, m.reason);
+  }
 
   let providers: ProviderRecord[] = [];
   try {
@@ -137,18 +175,47 @@ export async function loadIntegrationsCatalog(
     });
   }
 
-  const views: ProviderView[] = providers.map((p) => ({
-    id: p.id,
-    slug: p.slug,
-    name: p.name,
-    category: p.category,
-    placeholder: p.placeholder || p.slug.slice(0, 2).toUpperCase(),
-    tagline: p.tagline,
-    description: p.description,
-    features: toFeatures(p.features),
-    availability: p.availability,
-    tenantStatus: statusByProviderId.get(p.id) || 'available'
-  }));
+  const views: ProviderView[] = providers.map((p) => {
+    const handler = getHandler(p.slug);
+    const isRegistry = handler?.kind === 'company_registry';
+    return {
+      id: p.id,
+      slug: p.slug,
+      name: p.name,
+      category: toCategory(p.category),
+      placeholder: p.placeholder || p.slug.slice(0, 2).toUpperCase(),
+      tagline: p.tagline,
+      description: p.description,
+      features: toFeatures(p.features),
+      availability: p.availability,
+      tenantStatus: statusByProviderId.get(p.id) || 'available',
+      registryFields: isRegistry && isStaff && handler ? handler.credentialFields : undefined
+    };
+  });
+
+  // Handler utan katalograd (självläkningen misslyckades): visa kortet ändå
+  // från handlerns metadata med orsaken, så Roaring aldrig "bara saknas".
+  for (const slug of registrySlugs) {
+    if (views.some((v) => v.slug === slug)) continue;
+    const handler = getHandler(slug);
+    if (!handler || !isStaff) continue;
+    views.push({
+      id: `missing:${slug}`,
+      slug,
+      name: slug.charAt(0).toUpperCase() + slug.slice(1),
+      category: 'company_registry',
+      placeholder: slug.slice(0, 2).toUpperCase(),
+      tagline: 'Bolagsregister',
+      description: handler.complianceNote,
+      features: [],
+      availability: 'available',
+      tenantStatus: 'available',
+      registryFields: handler.credentialFields,
+      catalogMissingReason:
+        catalogMissing.get(slug) ??
+        'Katalograden saknas — kör migration 1700000173 eller "Sync PocketBase".'
+    });
+  }
 
   const byCategory = CATEGORY_ORDER.reduce<Record<IntegrationCategory, ProviderView[]>>(
     (acc, cat) => {
@@ -599,6 +666,15 @@ function IntegrationCard({
         )}
 
         <div className="mt-auto pt-2">
+          {integration.registryFields ? (
+            <RegistryConnectPanel
+              providerSlug={integration.slug}
+              providerName={integration.name}
+              fields={integration.registryFields}
+              connected={integration.tenantStatus === 'connected'}
+              catalogMissingReason={integration.catalogMissingReason}
+            />
+          ) : (
           <IntegrationActivateButton
             providerId={integration.id}
             providerSlug={integration.slug}
@@ -610,6 +686,7 @@ function IntegrationCard({
             hasHandler={hasIntegrationHandler(integration.slug)}
             accentClass="bg-canvas-muted"
           />
+          )}
         </div>
       </div>
     </article>

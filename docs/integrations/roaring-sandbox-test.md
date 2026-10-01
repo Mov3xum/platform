@@ -27,14 +27,20 @@ verifieras genom att köra förhandsgranskningen mot sandboxen.
    Beneficial Owner). Ett API som saknas svarar 403 — det stoppar inte de
    andra, men noteras.
 2. **Anslut i appen** (admin/incubator_lead): Inställningar → **Integrationer**
-   (`/installningar/integrationer`) → kortet Roaring → `/integrationer/roaring` →
-   Client ID + Client secret. Lämna **Bas-URL tom** (sandboxen använder
-   `https://api.roaring.io`). Hemligheten krypteras AES-256-GCM i
-   `tenant_integrations.config` och visas aldrig igen.
-3. **Testa anslutning** — gör bara ett token-anrop. "Klient-id/
-   klienthemlighet avvisades" = fel nyckelpar; "Kunde inte nå token-
-   endpointen" = nätverk/utgående policy på hosten.
-4. **Testa mot org-nr** på samma sida med ett av sandboxens testbolag
+   (`/installningar/integrationer`) → kategorin **Bolagsregister** → kortet
+   Roaring. Klistra in Client ID + Client secret **direkt på kortet**. Lämna
+   **Bas-URL tom** (sandboxen använder `https://api.roaring.io`). Hemligheten
+   krypteras AES-256-GCM i `tenant_integrations.config` och visas aldrig
+   igen. Saknas kortet helt: katalograden seedas av migration 1700000173 och
+   självläks via superusern när sidan laddas — visas i stället en orange
+   ruta på kortet står orsaken där (ingen superuser konfigurerad, eller
+   category-enumet saknar `company_registry` → kör "Sync PocketBase").
+3. **Anslut Roaring** på kortet gör bara ett token-anrop innan något sparas.
+   "Klient-id/klienthemlighet avvisades" = fel nyckelpar; "Kunde inte nå
+   token-endpointen" = nätverk/utgående policy på hosten. Efter lyckad
+   anslutning visar kortet "Nycklar sparade" + knappen **Synka & testa**
+   (→ `/integrationer/roaring`); "Byt nycklar" på kortet ersätter paret.
+4. **Testa mot org-nr** på detaljsidan med ett av sandboxens testbolag
    (listas i utvecklarportalen under sandbox/test objects; ett riktigt
    org-nr fungerar också mot sandboxen men svarar med testdata). Ingenting
    sparas. Läs noteringarna längst ned — de innehåller per API:

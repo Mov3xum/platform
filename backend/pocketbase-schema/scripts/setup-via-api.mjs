@@ -2052,7 +2052,9 @@ await ensureCollection({
 });
 
 // Migration 1700000041: integration_providers — global katalog över leverantörer.
-// Inkluderar utökade kategorier från 1700000053 (marketing, learning).
+// Inkluderar utökade kategorier från 1700000053 (marketing, learning) och
+// 1700000060/1700000173 (company_registry — bolagsregister, § 11.8).
+const INTEGRATION_PROVIDER_CATEGORIES = ['microsoft365', 'ai', 'collaboration', 'communication', 'productivity', 'marketing', 'learning', 'company_registry'];
 await ensureCollection({
   id: 'integration_providers_col',
   name: 'integration_providers',
@@ -2060,7 +2062,7 @@ await ensureCollection({
   fields: [
     { name: 'slug', type: 'text', required: true, min: 1, max: 60 },
     { name: 'name', type: 'text', required: true, min: 1, max: 100 },
-    { name: 'category', type: 'select', required: true, maxSelect: 1, values: ['microsoft365', 'ai', 'collaboration', 'communication', 'productivity', 'marketing', 'learning'] },
+    { name: 'category', type: 'select', required: true, maxSelect: 1, values: INTEGRATION_PROVIDER_CATEGORIES },
     { name: 'placeholder', type: 'text', required: false, max: 8 },
     { name: 'tagline', type: 'text', required: false, max: 200 },
     { name: 'description', type: 'text', required: false, max: 2000 },
@@ -2079,6 +2081,74 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`,
   deleteRule: `${ANY_AUTH} && @request.auth.roles:each ?= "admin"`
 });
+
+// Migration 1700000060/1700000173: category-enumet på BEFINTLIGA installs
+// (ensureCollection rör inte select-values) + katalograderna för
+// bolagsregister-providrarna. Speglar migration 1700000173 och
+// apps/web/src/lib/integrations/company-registry/catalog-seed.ts — ändra alla
+// tre samtidigt. Utan raden syns Roaring/Bolagsverket inte under Inställningar
+// → Integrationer och `connectIntegrationAction` svarar "finns inte i katalogen".
+await patchCollection('integration_providers', [], {
+  category: { values: INTEGRATION_PROVIDER_CATEGORIES, maxSelect: 1 }
+});
+for (const provider of [
+  {
+    slug: 'roaring',
+    name: 'Roaring',
+    category: 'company_registry',
+    placeholder: 'RO',
+    tagline: 'Bolagsdata, ägarbild & årsredovisningar (SE)',
+    description:
+      'Hämtar grunddata (bolagsform, säte, SNI, status, registreringsdatum), årsredovisningsposter (omsättning, anställda, balansomslutning, eget kapital), koncernstruktur och verklig huvudman för bolag med organisationsnummer. Skriver till bolagskortet, den finansiella historiken och ägarbilden — underlag för screening mot art. 22 GBER / de minimis och Vinnovas målgruppskriterier. Fysiska personer lagras utan namn och personnummer.',
+    features: [
+      'Grunddata + registreringsdatum till bolagskortet',
+      'Årsvis omsättning, anställda, balansomslutning och eget kapital',
+      'Ägarbild: bolagsägare med org-nr och andel, fysiska personer bara som andel',
+      'Idempotent — ägarbilden ersätts per synk, årsrader upsertas per (bolag, år)',
+      'Svensk leverantör, EU-hostat'
+    ],
+    availability: 'available',
+    sort_order: 11,
+    active: true
+  },
+  {
+    slug: 'bolagsverket',
+    name: 'Bolagsverket',
+    category: 'company_registry',
+    placeholder: 'BV',
+    tagline: 'Värdefulla datamängder — primärkälla (SE)',
+    description:
+      'Bolagsverkets kostnadsfria API för värdefulla datamängder: officiellt namn, bolagsform, registreringsdatum, SNI-kod, status och säte för alla registrerade företag. Primärkälla för grunddata på bolagskortet. Ägarbild och bokslutssiffror ingår inte (årsredovisningar levereras som dokument, inte som poster).',
+    features: [
+      'Officiell grunddata direkt från registret',
+      'Registreringsdatum för 5-årsregeln (art. 22 GBER)',
+      'SNI-kod och bolagsstatus',
+      'Kostnadsfritt, OAuth2 client credentials',
+      'Svensk myndighet — ingen tredjelandsöverföring'
+    ],
+    availability: 'available',
+    sort_order: 12,
+    active: true
+  }
+]) {
+  try {
+    let existing = null;
+    try {
+      existing = await pb.collection('integration_providers').getFirstListItem(`slug = "${provider.slug}"`);
+    } catch {
+      existing = null;
+    }
+    if (existing) {
+      await pb.collection('integration_providers').update(existing.id, provider);
+      ok(`integration_providers: ${provider.slug} uppdaterad`);
+    } else {
+      await pb.collection('integration_providers').create(provider);
+      ok(`integration_providers: ${provider.slug} skapad`);
+    }
+  } catch (err) {
+    warn(`integration_providers: kunde inte seeda ${provider.slug}: ${err?.message || err}`);
+  }
+}
 
 // Migration 1700000041: tenant_integrations — per-tenant kopplingsstatus.
 // Inkluderar utökade sync-fält från 1700000053.

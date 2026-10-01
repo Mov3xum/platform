@@ -7,6 +7,7 @@ import { canOpenIntegrations, integrationsCatalogHref } from '@/lib/integrations
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailStat } from '@/components/PageRail';
 import { getHandler } from '@/lib/integrations/registry';
+import { ensureRegistryProviderRows } from '@/lib/integrations/company-registry/catalog-seed';
 import { ConnectForm } from './ConnectForm';
 import { SyncButton } from './SyncButton';
 import { DisconnectForm } from './DisconnectForm';
@@ -92,13 +93,27 @@ export default async function IntegrationDetailPage({
   const handler = getHandler(slug);
   const pb = await getServerPb();
 
+  const providerFilter = `slug = "${escFilter(slug)}" && active = true`;
   let provider: ProviderRecord | null = null;
   try {
     provider = await pb
       .collection('integration_providers')
-      .getFirstListItem<ProviderRecord>(`slug = "${escFilter(slug)}" && active = true`);
+      .getFirstListItem<ProviderRecord>(providerFilter);
   } catch {
     provider = null;
+  }
+  if (!provider && isStaff && handler?.kind === 'company_registry') {
+    // Självläk saknad katalograd (migration 1700000173 ej körd, § 11.8).
+    const ensured = await ensureRegistryProviderRows(pb, [slug]);
+    if (ensured.created.includes(slug)) {
+      try {
+        provider = await pb
+          .collection('integration_providers')
+          .getFirstListItem<ProviderRecord>(providerFilter);
+      } catch {
+        provider = null;
+      }
+    }
   }
   if (!provider) notFound();
 
