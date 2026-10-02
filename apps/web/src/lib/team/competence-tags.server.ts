@@ -1,6 +1,9 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
+import { logAgentAction } from '@/lib/core/write/audit';
+import type { Actor } from '@/lib/core/write/types';
 import {
+  ACTIVE_MISSION_STATUSES,
   computeTeamLoads,
   mergeCompetenceTagVocabulary,
   sanitizeCompetences,
@@ -24,9 +27,11 @@ export const COMPETENCE_TAGS = 'competence_tags';
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 
 interface TagRow {
+  id?: string;
   slug?: unknown;
   label?: unknown;
   area?: unknown;
+  status?: unknown;
 }
 
 /** Seed + tenantens egna taggar (unik per slug). */
@@ -38,7 +43,7 @@ export async function loadCompetenceTagVocabulary(
   try {
     const res = await pb.collection(COMPETENCE_TAGS).getList<TagRow>(1, 500, {
       filter: pb.filter('tenant = {:tenant}', { tenant: tenantId }),
-      fields: 'slug,label,area',
+      fields: 'id,slug,label,area,status',
       sort: 'label'
     });
     rows = res.items;
@@ -50,44 +55,79 @@ export async function loadCompetenceTagVocabulary(
 
 /**
  * Registrerar taggar som ännu inte finns i tenantens vokabulär som
- * `suggested`, så de dyker upp i kollegornas autocomplete. Best-effort:
- * ett fel här blockerar aldrig profil-sparningen. Dubbletter (unikt index
- * tenant+slug) tolkas som "finns redan".
+ * `suggested`, så de dyker upp i kollegornas autocomplete. Anroparen har
+ * redan verifierat att aktören är Movexum-personal (§ 29.7) — createRule är
+ * dessutom body-låst (status suggested, eget created_by, egen tenant).
+ * Best-effort: ett fel här blockerar aldrig profil-sparningen; dubbletter
+ * (unikt index tenant+slug) tolkas som "finns redan". Varje ny post
+ * auditeras PII-fritt i `agent_actions` (slug + område).
  */
 export async function registerCompetenceTags(
   pb: PocketBase,
-  input: { tenantId: string; userId: string; tags: readonly UserCompetenceTag[]; vocabulary: readonly CompetenceTagDef[] }
+  input: { actor: Actor; tags: readonly UserCompetenceTag[]; vocabulary: readonly CompetenceTagDef[] }
 ): Promise<void> {
   const known = new Set(input.vocabulary.map((t) => t.slug));
   for (const t of input.tags) {
     if (known.has(t.tag)) continue;
     try {
-      await pb.collection(COMPETENCE_TAGS).create({
-        tenant: input.tenantId,
+      const rec = await pb.collection(COMPETENCE_TAGS).create<{ id: string }>({
+        tenant: input.actor.tenant,
         slug: t.tag,
         label: t.tag.replace(/-/g, ' '),
         area: t.area,
         status: 'suggested',
-        created_by: input.userId
+        created_by: input.actor.id
       });
       known.add(t.tag);
+      await logAgentAction(pb, {
+        actor: input.actor,
+        action_type: 'create',
+        collection: COMPETENCE_TAGS,
+        record_id: rec.id,
+        after_value: { slug: t.tag, area: t.area, status: 'suggested' }
+      });
     } catch {
       /* fail-soft (unik-konflikt eller omigrerat schema) */
     }
   }
 }
 
-/** Belastning per användar-id ur tenantens pågående uppdrag. */
-export async function loadTeamLoads(pb: PocketBase, tenantId: string): Promise<Map<string, TeamMemberLoad>> {
+export interface TeamLoads {
+  loads: Map<string, TeamMemberLoad>;
+  /** false när läsningen kapades eller felade — visa aldrig som exakt (§ 33.4). */
+  complete: boolean;
+}
+
+const LOAD_PAGE = 200;
+const LOAD_MAX_ROWS = 2000;
+
+/**
+ * Belastning per användar-id ur tenantens PÅGÅENDE uppdrag (statusfilter i
+ * frågan, paginerat upp till ett tak). Läses med anroparens token → RLS § 21:
+ * bara staff (som ser hela tenantens uppdrag) får en sann bild — anroparna
+ * visar därför belastning enbart för staff.
+ */
+export async function loadTeamLoads(pb: PocketBase, tenantId: string): Promise<TeamLoads> {
+  const statusFilter = ACTIVE_MISSION_STATUSES.map((s) => `status = "${s}"`).join(' || ');
+  const rows: MissionLoadRow[] = [];
   try {
-    const res = await pb.collection('missions').getList<MissionLoadRow>(1, 500, {
-      filter: pb.filter('tenant = {:tenant}', { tenant: tenantId }),
-      fields: 'status,issuer,mentor,recipients,participants_json',
-      sort: '-updated'
-    });
-    return computeTeamLoads(res.items);
+    let page = 1;
+    for (;;) {
+      const res = await pb.collection('missions').getList<MissionLoadRow>(page, LOAD_PAGE, {
+        filter: pb.filter(`tenant = {:tenant} && (${statusFilter})`, { tenant: tenantId }),
+        fields: 'status,issuer,mentor,recipients,participants_json',
+        sort: '-updated'
+      });
+      rows.push(...res.items);
+      if (res.items.length < LOAD_PAGE || rows.length >= res.totalItems) break;
+      if (rows.length >= LOAD_MAX_ROWS) {
+        return { loads: computeTeamLoads(rows), complete: false };
+      }
+      page += 1;
+    }
+    return { loads: computeTeamLoads(rows), complete: true };
   } catch {
-    return new Map();
+    return { loads: new Map(), complete: false };
   }
 }
 

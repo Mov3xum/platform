@@ -2,10 +2,12 @@
 
 import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
+import { hasRole } from '@/lib/rbac';
 import {
   deriveCompetenceAreas,
   sanitizeDevelopmentInterests,
-  sanitizeUserCompetenceTags
+  sanitizeUserCompetenceTags,
+  type Role
 } from '@platform/shared';
 import {
   loadCompetenceTagVocabulary,
@@ -22,6 +24,9 @@ import {
 // (status suggested) så kollegornas autocomplete lär sig språket. Ingen PII
 // utöver det användaren själv skriver; bio cappas. Fälten når aldrig
 // AI-kontexten — bara den isolerade teammatcharen läser dem.
+
+/** Bara Movexum-personal bidrar till den gemensamma vokabulären (§ 29.7). */
+const VOCABULARY_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 
 export type ProfileActionState = { error?: string; ok?: boolean; warning?: string };
 
@@ -67,7 +72,16 @@ export async function saveMyProfileAction(
     return { error: err instanceof Error ? err.message : 'Kunde inte spara profilen.' };
   }
 
-  await registerCompetenceTags(pb, { tenantId: user.tenant, userId: user.id, tags, vocabulary });
+  // Rollgränsen för vokabulären ligger här (createRule är roll-lös men
+  // body-låst): en bolagsmedlem/observer sparar sina taggar på sin egen
+  // profil men lägger inget i personalens gemensamma lista.
+  if (hasRole(user.roles, VOCABULARY_ROLES)) {
+    await registerCompetenceTags(pb, {
+      actor: { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles },
+      tags,
+      vocabulary
+    });
+  }
 
   // Schema-drift (§ 24.4-invarianten): PB släpper okända fält tyst. Läs
   // tillbaka och säg ifrån om taggarna inte fastnade.

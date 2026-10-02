@@ -320,6 +320,12 @@ export function NewMissionForm({
               <div className="mx-t-13">{suggestion.summary}</div>
             )}
 
+            {!suggestion.loadComplete && (
+              <div className="mx-t-12 mx-muted">
+                Belastningen kunde inte läsas komplett — se den som ungefärlig.
+              </div>
+            )}
+
             {suggestion.needsReview && (
               <div
                 className="mx-card"

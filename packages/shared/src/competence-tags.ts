@@ -186,9 +186,28 @@ export const COMPETENCE_TAG_SEED: readonly CompetenceTagDef[] = [
   { slug: 'gaming', label: 'Gaming', area: 'branschspecifik' }
 ] as const;
 
-/** Slår ihop seed + tenantens egna taggar till en vokabulär (unik per slug). */
+/**
+ * Sanerar en visningsetikett: bara bokstäver, siffror, mellanslag och
+ * `& / ( ) + . -`, max 60 tecken. Etiketter når Mistral-prompten (behovs-
+ * tolkningen), så fri text släpps aldrig igenom (prompt-injection, § 9.3).
+ */
+export function sanitizeCompetenceTagLabel(input: unknown): string {
+  if (typeof input !== 'string') return '';
+  return input
+    .replace(/[^\p{L}\p{N} &/()+.-]/gu, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, 60);
+}
+
+/**
+ * Slår ihop seed + tenantens egna taggar till en vokabulär (unik per slug).
+ * Bara GODKÄNDA taggar får bära sin egen etikett; en `suggested`-tagg visas
+ * med slug-härledd etikett tills ledningen godkänt den (en kollega ska inte
+ * kunna sätta fri text som alla ser och som når prompten).
+ */
 export function mergeCompetenceTagVocabulary(
-  extra: ReadonlyArray<{ slug?: unknown; label?: unknown; area?: unknown }>
+  extra: ReadonlyArray<{ slug?: unknown; label?: unknown; area?: unknown; status?: unknown }>
 ): CompetenceTagDef[] {
   const bySlug = new Map<string, CompetenceTagDef>();
   for (const t of COMPETENCE_TAG_SEED) bySlug.set(t.slug, t);
@@ -196,10 +215,9 @@ export function mergeCompetenceTagVocabulary(
     const slug = normalizeCompetenceTagSlug(raw.slug);
     if (!slug || bySlug.has(slug)) continue;
     const area = isCompetenceId(raw.area) ? raw.area : 'annat';
-    const label =
-      typeof raw.label === 'string' && raw.label.trim()
-        ? raw.label.trim().slice(0, 60)
-        : competenceTagLabelFromSlug(slug);
+    const approved = raw.status === 'approved';
+    const cleanLabel = approved ? sanitizeCompetenceTagLabel(raw.label) : '';
+    const label = cleanLabel || competenceTagLabelFromSlug(slug);
     bySlug.set(slug, { slug, label, area });
   }
   return Array.from(bySlug.values());

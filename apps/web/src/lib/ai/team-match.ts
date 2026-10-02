@@ -16,6 +16,7 @@ import {
   type TeamNeed
 } from '@platform/shared';
 import { callMistral, MistralError } from './mistral';
+import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AI-teammatchning för tvärfunktionella team (CLAUDE.md § 29 / § 29.7).
@@ -37,11 +38,13 @@ import { callMistral, MistralError } from './mistral';
 // Människa-i-loopen (EU AI Act art. 14): förslaget AUTO-tilldelar aldrig —
 // staff bekräftar i UI:t. Vid låg säkerhet flaggas needsReview.
 //
-// Säkerhet (§ 9.3): uppdragsbeskrivningen är DATA, inte instruktioner. Egen,
-// snäv system-prompt (inte agent-/chatt-ytan). Kandidatlistan skickas som
-// id + namn + taggar/nivå + belastning (ingen e-post/telefon/PII). Riskklass:
-// begränsad (rekommendation, ingen profilering av skyddade attribut, människa
-// beslutar).
+// Säkerhet (§ 9.3): uppdragsbeskrivningen är DATA, inte instruktioner och
+// personnummer-saneras innan den skickas. Egen, snäv system-prompt (inte
+// agent-/chatt-ytan). Kandidatlistan är PSEUDONYMISERAD: bara användar-id +
+// taggar/nivå + belastningsetikett — inga namn, titlar eller e-post lämnar
+// plattformen; servern slår upp namnen efteråt. Riskklass: begränsad
+// (förberedande rekommendation, människa beslutar; DPIA i
+// docs/privacy/dpia-team-matching.md).
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const TEAM_MATCH_MODEL = 'mistral-small-latest';
@@ -93,8 +96,12 @@ export interface ExtractNeedInput {
   vocabulary: readonly CompetenceTagDef[];
 }
 
+function cleanDescription(text: string): string {
+  return sanitizePersonnummer(text).slice(0, MAX_DESC_CHARS).trim();
+}
+
 function buildNeedPrompt(input: ExtractNeedInput): string {
-  const desc = input.description.slice(0, MAX_DESC_CHARS).trim();
+  const desc = cleanDescription(input.description);
   const areas = COMPETENCES.filter((c) => c.id !== 'annat')
     .map((c) => `- ${c.id}: ${c.label}. ${c.description}`)
     .join('\n');
@@ -189,7 +196,7 @@ export interface ComposeTeamResult {
 }
 
 function buildComposePrompt(input: ComposeTeamInput): string {
-  const desc = input.description.slice(0, MAX_DESC_CHARS).trim();
+  const desc = cleanDescription(input.description);
   const need = [
     input.need.tags.length > 0 ? `hashtags: ${input.need.tags.map((t) => `#${t}`).join(', ')}` : '',
     input.need.areas.length > 0 ? `områden: ${input.need.areas.map((a) => COMPETENCE_LABELS[a]).join(', ')}` : ''
@@ -203,7 +210,8 @@ function buildComposePrompt(input: ComposeTeamInput): string {
       const dev = c.developmentMatches.length > 0 ? `vill utvecklas: ${c.developmentMatches.map((s) => `#${s}`).join(', ')}` : '';
       const rel = c.relatedToStartup ? 'arbetar redan med bolaget' : '';
       const extra = [tags && `träffar ${tags}`, areas && `områden ${areas}`, dev, rel].filter(Boolean).join('; ');
-      return `${i + 1}. id=${c.id} ${c.name}${c.title ? ` (${c.title})` : ''} | poäng ${c.score} | belastning: ${LOAD_LEVEL_LABELS[c.loadLevel].toLowerCase()} (${describeLoad(c.load).toLowerCase()})${extra ? ` | ${extra}` : ''}`;
+      // Pseudonymiserat: id + kompetens + belastning, aldrig namn/titel.
+      return `${i + 1}. id=${c.id} | poäng ${c.score} | belastning: ${LOAD_LEVEL_LABELS[c.loadLevel].toLowerCase()} (${describeLoad(c.load).toLowerCase()})${extra ? ` | ${extra}` : ''}`;
     })
     .join('\n');
   const gaps = [
@@ -216,8 +224,9 @@ function buildComposePrompt(input: ComposeTeamInput): string {
     'UPPDRAG (beskrivning):',
     `"""\n${desc || '(ingen beskrivning angiven)'}\n"""`,
     '',
-    'RANKAD SHORTLIST (deterministiskt uträknad: hashtag-träff > områdes-träff, nivå väger, ' +
-      'hög belastning drar ned). Välj BARA id:n ur listan:',
+    'RANKAD SHORTLIST (pseudonymiserade kandidater; deterministiskt uträknad: hashtag-träff > ' +
+      'områdes-träff, nivå väger, hög belastning drar ned). Välj BARA id:n ur listan och referera ' +
+      'till personer som "kandidat N" i motiveringen:',
     list || '(tom)',
     '',
     gaps.length > 0 ? `SAKNAS HELT BLAND KANDIDATERNA: ${gaps.join(', ')}` : '',

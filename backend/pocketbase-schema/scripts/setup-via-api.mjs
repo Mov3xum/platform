@@ -4191,7 +4191,8 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
-  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Body-låst (§ 46.8-mönstret): bara `suggested`, eget created_by, egen tenant.
+  createRule: `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.created_by = @request.auth.id && @request.body.status = "suggested" && @request.body.tenant = @request.auth.tenant`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
@@ -4965,7 +4966,7 @@ const FORCE_CREATE_RULES = {
   contact_requests: `${ANY_AUTH} && @request.auth.tenant != ""`,
   // Önskemål & buggar (§ 49, migration 1700000176) — roll-enforcement i server-actionen.
   feedback_items: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  competence_tags: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  competence_tags: `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.created_by = @request.auth.id && @request.body.status = "suggested" && @request.body.tenant = @request.auth.tenant`,
   // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167) —
   // roll-/medlemskontroll i skrivlagret och route-handlers.
   funding_projects: `${ANY_AUTH} && @request.auth.tenant != ""`,

@@ -45,7 +45,7 @@ export default async function NewMissionPage() {
   // Kompetensprofiler (hashtags/nivå) + nuvarande belastning (§ 29.7) —
   // samma läsväg som teamförslaget, så pickern visar vad AI:n ser.
   const vocabulary = await loadCompetenceTagVocabulary(pb, user.tenant);
-  const [profiles, loads] = await Promise.all([
+  const [profiles, { loads }] = await Promise.all([
     loadStaffProfiles(pb, user.tenant, vocabulary),
     loadTeamLoads(pb, user.tenant)
   ]);

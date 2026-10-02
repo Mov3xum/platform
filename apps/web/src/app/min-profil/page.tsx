@@ -44,7 +44,7 @@ export default async function MinProfilPage() {
 
   // Egen belastning — samma räkning som teammatchningen använder, så man ser
   // vad kollegorna ser när de sätter ihop ett team.
-  const loads = await loadTeamLoads(pb, user.tenant);
+  const { loads } = await loadTeamLoads(pb, user.tenant);
   const myLoad = loads.get(user.id) ?? { active: 0, leading: 0 };
 
   return (

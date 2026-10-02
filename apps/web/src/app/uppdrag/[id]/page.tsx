@@ -105,7 +105,7 @@ export default async function MissionDetailPage({
   const userMeta = new Map<string, UserMeta>();
   {
     const vocabulary = await loadCompetenceTagVocabulary(pb, user.tenant);
-    const [profiles, loads] = await Promise.all([
+    const [profiles, { loads }] = await Promise.all([
       loadStaffProfiles(pb, user.tenant, vocabulary),
       loadTeamLoads(pb, user.tenant)
     ]);
@@ -239,7 +239,9 @@ export default async function MissionDetailPage({
       role: p.role,
       competences: meta?.competences ?? [],
       tags: meta?.tags ?? [],
-      load: meta?.load ?? { active: 0, leading: 0 }
+      // Belastning bara för staff: en bolagsmedlems token ser via RLS bara
+      // egna uppdrag, så siffran vore både fel och intern (§ 29.7).
+      load: isStaff ? (meta?.load ?? { active: 0, leading: 0 }) : undefined
     };
   });
 

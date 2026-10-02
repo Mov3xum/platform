@@ -3,6 +3,7 @@
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { logAiUsage } from '@/lib/ai/usage';
+import { assertWithinAiBudget, AiBudgetExceededError } from '@/lib/ai/budget.server';
 import { composeTeam, extractTeamNeed, TEAM_MATCH_MODEL } from '@/lib/ai/team-match';
 import {
   loadCompetenceTagVocabulary,
@@ -77,6 +78,8 @@ export type SuggestTeamResult =
       needsReview: boolean;
       /** Antal kollegor som kunde matchas (har kompetensprofil). */
       candidateCount: number;
+      /** false = belastningen kunde inte läsas komplett (visa som osäker). */
+      loadComplete: boolean;
     }
   | { ok: false; error: string };
 
@@ -95,9 +98,17 @@ export async function suggestTeamAction(input: {
 
   const pb = await getServerPb();
 
+  // Månadstaket (§ 9.6) prövas före de två Mistral-anropen.
+  try {
+    await assertWithinAiBudget(pb, user.tenant);
+  } catch (err) {
+    if (err instanceof AiBudgetExceededError) return { ok: false, error: err.message };
+    throw err;
+  }
+
   // ── Underlag (parallellt, alla fail-soft) ───────────────────────────────
   const vocabulary = await loadCompetenceTagVocabulary(pb, user.tenant);
-  const [profiles, loads] = await Promise.all([
+  const [profiles, { loads, complete: loadComplete }] = await Promise.all([
     loadStaffProfiles(pb, user.tenant, vocabulary),
     loadTeamLoads(pb, user.tenant)
   ]);
@@ -209,6 +220,7 @@ export async function suggestTeamAction(input: {
     externalNote: composed.result.externalNote,
     summary: composed.result.summary,
     needsReview: composed.result.needsReview || needRes.aiFailed,
-    candidateCount: candidates.length
+    candidateCount: candidates.length,
+    loadComplete
   };
 }

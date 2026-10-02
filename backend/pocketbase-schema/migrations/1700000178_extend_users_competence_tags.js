@@ -27,7 +27,8 @@
 // innehåller inga personuppgifter (slug/etikett/område).
 //
 // RLS (§ 21.3): list/view staff/observer (intern bemanningsdata), createRule
-// roll-lös (rollen enforce:as i server-actionen), update/delete ledning.
+// roll-lös men body-låst (bara `suggested`, eget `created_by`, egen tenant —
+// rollen enforce:as i server-actionen), update/delete ledning.
 // Autodate explicit (§ 28.5). Speglas i setup-via-api.mjs, asserteras i
 // verify-baseline.mjs. Seed-listan MÅSTE spegla COMPETENCE_TAG_SEED i
 // packages/shared/src/competence-tags.ts.
@@ -186,7 +187,12 @@ migrate(
         ],
         listRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${STAFF_OR_OBSERVER}`,
         viewRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${STAFF_OR_OBSERVER}`,
-        createRule: `${ANY_AUTH} && ${ANY_TENANT}`,
+        // Body-fält (inte poster) får prövas i createRule (§ 46.8-mönstret):
+        // bara `suggested`, i eget namn, i egen tenant. Rollen (staff) prövas i
+        // profil-actionen — en bolagsmedlem kan inte nå registreringen.
+        createRule:
+          `${ANY_AUTH} && ${ANY_TENANT} && @request.body.created_by = @request.auth.id && ` +
+          `@request.body.status = "suggested" && @request.body.tenant = @request.auth.tenant`,
         updateRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${STAFF_OR_LEAD}`,
         deleteRule: `${ANY_AUTH} && ${TENANT_MATCH} && ${STAFF_OR_LEAD}`
       });

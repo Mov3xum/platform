@@ -4232,9 +4232,12 @@ rubriker:** personalen sätter HASHTAGS med nivå under dem, och
 (temp 0, egen snäv system-prompt — INTE agent-/chatt-ytan) runt en
 deterministisk rankning (§ 29.7): `extractTeamNeed` (beskrivning + ev.
 bolagskontext → områden + hashtags, validerade mot taxonomi/vokabulär) och
-`composeTeam` (den rankade shortlistan med poäng/skäl/belastning, **ingen
-PII** → roller/motivering/confidence, ev. `external_note` för kompetensgap;
-modellen kan inte välja någon utanför shortlistan).
+`composeTeam` (den rankade shortlistan **pseudonymiserad**: användar-id +
+träffade hashtags/nivå + belastningsetikett — aldrig namn, titel eller
+e-post; servern slår upp namnen efteråt → roller/motivering/confidence, ev.
+`external_note` för kompetensgap; modellen kan inte välja någon utanför
+shortlistan). Uppdragsbeskrivningen personnummer-saneras före båda anropen
+och månadstaket (§ 9.6) prövas först.
 `suggestTeamAction` (staff-only) laddar kandidater = **riktiga användare i
 systemet** i tenanten med staff-roll (admin/incubator_lead/coach/mentor) som
 **själva angett minst en kompetenstagg** under Min profil — bolagsmedlemmar,
@@ -4356,13 +4359,15 @@ och valde personer — svårt att förklara och lätt att ifrågasätta.
    `#de-minimis`, `#pitchtraning`, `#medtech` …). Vokabulären är
    **tenant-gemensam och växer kontrollerat** (`competence_tags`, migration
    **1700000178**): en seedad lista (`COMPETENCE_TAG_SEED`, ~70 taggar ur
-   Movexums vardag, speglad i migrationen) + taggar kollegor lagt till i
-   profilen (status `suggested`, synliga i allas autocomplete så språket
-   konvergerar; ledningen kan godkänna/döpa om/ta bort via PB-regler
-   `STAFF_OR_LEAD`). Fritext normaliseras ALLTID till slug
+   Movexums vardag, speglad i migrationen) + taggar **Movexum-personal**
+   lagt till i profilen (status `suggested`, synliga i allas autocomplete
+   så språket konvergerar; ledningen kan godkänna/döpa om/ta bort via
+   PB-regler `STAFF_OR_LEAD`). Fritext normaliseras ALLTID till slug
    (`normalizeCompetenceTagSlug`: gemener, utan #, bindestreck, max 40 tecken;
-   personnummer-mönster avvisas). Lagras som `users.competence_tags` =
-   `[{ tag, area, level }]`.
+   personnummer-mönster avvisas). En `suggested`-tagg visas med slug-härledd
+   etikett tills den godkänts, och godkända etiketter saneras
+   (`sanitizeCompetenceTagLabel`) — etiketterna når behovsprompten. Lagras
+   som `users.competence_tags` = `[{ tag, area, level }]`.
 3. **Nivå och riktning:** `contribute` (kan bidra) / `strong` / `expert` per
    tagg (vikt 1/2/3), plus `users.development_interests` = taggar personen
    **vill utvecklas inom** (ett bra tvärfunktionellt team har en expert och en
@@ -4381,7 +4386,8 @@ och valde personer — svårt att förklara och lätt att ifrågasätta.
    ledig +0,5, hög −1,5, fullbelagd −3. Resultatet är en shortlist med läsbara,
    PII-fria skäl per person ("#vinnova-ansokan (expert) · 2 pågående team,
    ansvarig i 1"). `teamNeedGaps` listar vad ingen kandidat täcker → extern
-   kompetens.
+   kompetens. Rankningen är själva beslutsunderlaget: den visas för
+   människan (poäng + skäl, "fler rankade kollegor") och fungerar utan AI.
 3. **AI sätter ihop teamet** (`composeTeam`) ur shortlistan: roller,
    komplementaritet (täck olika delar med olika personer), max 8, EN lead =
    högst nivå på viktigaste taggen med rimlig belastning; en fullbelagd person
@@ -4390,32 +4396,50 @@ och valde personer — svårt att förklara och lätt att ifrågasätta.
    aldrig fullbelagd) med `needsReview=true`.
 
 **Belastning (`computeTeamLoads`).** Räknas ur `missions` med status
-`preparation`/`in_progress`/`review` (utkast och klara räknas inte): ett
+`preparation`/`in_progress`/`review` (statusfilter i frågan, paginerat upp
+till 2 000 rader; kapning ger `complete:false` som visas som "ungefärlig" —
+§ 33.4; utkast och klara räknas inte): ett
 uppdrag räknas en gång per person oavsett koppling (utfärdare, mottagare,
 deltagare, mentor); ansvarig = `lead` i `participants_json` (eller utfärdare
 utan deltagarlista). Viktad belastning = team + ansvar; `loadLevel`: 0 =
 ledig, ≤ 2 = normal, ≤ 4 = hög, > 4 = fullbelagd. Visas som chip i
 teamförslaget, i deltagar-pickern, i teampanelen på uppdragskortet (med
 varning "Hög belastning: …") och på den egna profilen ("Min belastning just
-nu") så alla ser samma siffra. Läses med användarens token → RLS § 21 (en
-staff-användare ser tenantens uppdrag).
+nu") så alla ser samma siffra. Läses med användarens token → RLS § 21, och
+visas därför **bara för staff** (en bolagsmedlems token ser bara egna
+uppdrag — siffran vore både fel och intern). Belastningen är ett
+arbetsbelastningsmått som skyddar den enskilde från överbokning, inte en
+prestationsbedömning — den lagras aldrig och får ingen historik.
 
-**Regelefterlevnad.**
+**Regelefterlevnad.** DPIA: `docs/privacy/dpia-team-matching.md` (kräver
+maintainer-godkännande i PR:en, § 10.1/§ 10.2).
 - **GDPR § 5:** hashtags och nivåer är yrkeskompetens (berättigat intresse:
-  bemanning), inte art. 9. Taggar får aldrig bära personuppgifter — slug-
-  normaliseringen avvisar personnummer-mönster, UI:t säger "kompetens, aldrig
-  personuppgifter", `competence_tags` innehåller slug/etikett/område/skapare.
-  Belastningen är ett härlett tal ur redan synliga uppdrag — inget nytt lagras.
-- **§ 9.3:** `users` förblir denylistad; taggar/belastning når modellen BARA i
-  den isolerade matcharen (id + visningsnamn + taggar/nivå + belastningsetikett,
-  aldrig e-post). Inga nya fält i `lib/ai/context.ts`.
-- **Riskklass (art. 11): oförändrat begränsad** — rekommendation, människa
-  beslutar; systemprompten förbjuder bedömning på skyddade attribut;
-  belastning är ett arbetsbelastningsmått, inte prestationsbedömning av
-  individer (ingen Annex III-praktik — intern teamformering, inte HR-beslut).
-- **RLS (§ 21.3):** `competence_tags` list/view staff/observer, createRule
-  roll-lös (profil-actionen är gränsen), update/delete ledning. Fältlåset på
-  `users` (1700000174) omfattar inte de nya självservice-fälten.
+  bemanning), självdeklarerade, inte art. 9. Taggar får aldrig bära
+  personuppgifter — slug-normaliseringen avvisar personnummer-mönster, UI:t
+  säger "kompetens, aldrig personuppgifter", `competence_tags` innehåller
+  slug/etikett/område/skapare och varje ny post auditeras PII-fritt i
+  `agent_actions` (slug + område). Belastningen är ett härlett tal ur redan
+  synliga uppdrag — inget nytt lagras.
+- **§ 9.3:** `users` förblir denylistad; till modellen går BARA den
+  isolerade matcharens pseudonymiserade shortlist (användar-id + taggar/
+  nivå + belastningsetikett — aldrig namn, titel eller e-post) och en
+  personnummer-sanerad beskrivning. Inga nya fält i `lib/ai/context.ts`.
+- **Riskklass (art. 11): begränsad** efter bedömning mot Annex III p. 4(b)
+  i DPIA:n — AI:n utför en förberedande uppgift (tolkar behov, formulerar
+  förslag ur en redan deterministiskt rankad lista utan namn), tilldelar
+  inget, och människan beslutar med full insyn i poäng/skäl. **Omprövas till
+  högrisk** (juridisk granskning före bygge) om förslaget någonsin tilldelar
+  automatiskt, om nivå/belastning sätts av någon annan än personen själv,
+  om prestationshistorik vägs in eller om underlaget används för lön/
+  befordran/anställning.
+- **RLS (§ 21.3):** `competence_tags` list/view staff/observer; createRule
+  roll-lös men **body-låst** (`status = "suggested"`, `created_by =
+  @request.auth.id`, `tenant = @request.auth.tenant` — § 46.8-mönstret,
+  passerar createRule-svepet), och profil-actionen registrerar bara taggar
+  för Movexum-personal; update/delete ledning. Fältlåset på `users`
+  (1700000174) omfattar inte de nya självservice-fälten. Känd avvikelse:
+  `users.viewRule` låter alla i tenanten läsa varandras profilfält (låg
+  känslighet, noterad i DPIA:n).
 - **Schema-drift (§ 24.4):** profil-actionen läser tillbaka posten och varnar
   om `competence_tags` saknas; `verify-baseline.mjs` asserterar fälten
   (`REQUIRED_APP_FIELDS`) + kollektionen (must-exist, `MUST_BE_STAFF_OR_OBSERVER`);
