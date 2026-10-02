@@ -1711,6 +1711,7 @@ export * from './compass-quiz';
 export * from './file-topics';
 // ─── Kompetenstaxonomi (tvärfunktionella team, ren logik, enhetstestad) ──────
 export * from './competences';
+export * from './competence-tags';
 export * from './survey';
 // ─── AI-miljöpåverkan (tokens → CO₂e/vatten, ren logik, enhetstestad) ────────
 export * from './ai-impact';

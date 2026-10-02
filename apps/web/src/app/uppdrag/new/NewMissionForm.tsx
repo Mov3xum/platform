@@ -10,10 +10,17 @@ import { useActionState, useMemo, useState } from 'react';
 import { Card, Icon } from '@/components/proto';
 import {
   COMPETENCE_LABELS,
+  COMPETENCE_LEVEL_LABELS,
+  LOAD_LEVEL_LABELS,
+  describeLoad,
+  loadLevel,
   type CompetenceId,
+  type LoadLevel,
   type MissionParticipantRole,
   type MissionType,
-  type MissionVisibility
+  type MissionVisibility,
+  type TeamMemberLoad,
+  type UserCompetenceTag
 } from '@platform/shared';
 import type { MissionActionState } from '@/lib/actions/missions';
 import { suggestTeamAction, type SuggestTeamResult } from '@/lib/actions/team';
@@ -21,8 +28,29 @@ import { suggestTeamAction, type SuggestTeamResult } from '@/lib/actions/team';
 interface UserOption {
   id: string;
   label: string;
-  /** Kompetenstaggar användaren angett under Min profil. */
+  /** Kompetensområden (härledda ur hashtags) användaren angett under Min profil. */
   competences?: CompetenceId[];
+  /** Kompetens-hashtags med nivå (§ 29.7). */
+  tags?: UserCompetenceTag[];
+  /** Nuvarande belastning: pågående team. */
+  load?: TeamMemberLoad;
+}
+
+const LOAD_CHIP_STYLE: Record<LoadLevel, { background: string; color: string }> = {
+  free: { background: 'var(--mx-st-ok-bg, #d9eddd)', color: '#1d3a1f' },
+  normal: { background: 'var(--mx-paper-3)', color: 'inherit' },
+  high: { background: 'var(--mx-st-warn-bg, #f8f1da)', color: '#4b2718' },
+  full: { background: 'var(--mx-st-danger-bg, #f1e5df)', color: '#4b2718' }
+};
+
+function LoadChip({ load }: { load: TeamMemberLoad }) {
+  const lvl = loadLevel(load);
+  return (
+    <span className="mx-chip mx-mono" style={LOAD_CHIP_STYLE[lvl]} title={describeLoad(load)}>
+      {LOAD_LEVEL_LABELS[lvl]}
+      {load.active > 0 ? ` · ${load.active}` : ''}
+    </span>
+  );
 }
 interface StartupOption {
   id: string;
@@ -139,7 +167,13 @@ export function NewMissionForm({
   }
 
   const suggestedMembers = suggestion?.members ?? [];
-  const taggedColleagues = otherUsers.filter((u) => (u.competences?.length ?? 0) > 0).length;
+  const taggedColleagues = otherUsers.filter(
+    (u) => (u.tags?.length ?? 0) > 0 || (u.competences?.length ?? 0) > 0
+  ).length;
+  const [showShortlist, setShowShortlist] = useState(false);
+  const otherShortlist = (suggestion?.shortlist ?? []).filter(
+    (c) => !suggestedMembers.some((m) => m.id === c.id)
+  );
 
   // Skicka full participants_json inkl. utfärdaren som lead
   const submittedParticipants: ParticipantDraft[] = [
@@ -247,16 +281,17 @@ export function NewMissionForm({
           <div className="mx-fw-6 mx-t-14">Föreslå team med AI</div>
         </div>
         <div className="mx-t-12 mx-muted mx-mb-3">
-          Utifrån beskrivningen ovan föreslår AI:n vilka kompetenser uppdraget
-          kräver och vilka Movexum-kollegor som kan kopplas på. Den matchar bara
-          mot riktiga användare i systemet som angett sina kompetenser som taggar
-          under <strong>Min profil</strong> — inga externa kontakter. Du bestämmer
-          — inget tilldelas automatiskt. AI-verktyg drivs av Mistral (Frankrike,
-          EU).
+          Utifrån beskrivningen ovan tolkas vilka kompetenser och hashtags
+          uppdraget kräver. Kollegorna rankas sedan på hashtag-träff och nivå,
+          relation till bolaget och <strong>hur många team de redan ingår i</strong>,
+          innan AI:n sätter ihop teamet ur den listan. Bara riktiga användare i
+          systemet som fyllt i <strong>Min profil</strong> kan matchas — inga
+          externa kontakter. Du bestämmer — inget tilldelas automatiskt.
+          AI-verktyg drivs av Mistral (Frankrike, EU).
         </div>
         <div className="mx-mono mx-t-xs mx-muted mx-mb-2">
           {taggedColleagues} {taggedColleagues === 1 ? 'kollega' : 'kollegor'} med
-          kompetenstaggar kan matchas.
+          kompetensprofil kan matchas.
         </div>
         <button
           type="button"
@@ -296,18 +331,37 @@ export function NewMissionForm({
               </div>
             )}
 
-            {suggestion.neededCompetences.length > 0 && (
+            {(suggestion.neededTags.length > 0 || suggestion.neededCompetences.length > 0) && (
               <div>
                 <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6 mx-mb-2">
-                  Kompetenser uppdraget kräver
+                  Uppdraget kräver
                 </div>
                 <div className="mx-flex mx-gap-2 mx-wrap">
+                  {suggestion.neededTags.map((t) => (
+                    <span
+                      key={`t-${t}`}
+                      className={`mx-chip mx-mono ${suggestion.gaps.tags.includes(t) ? '' : 'mx-active'}`}
+                      title={suggestion.gaps.tags.includes(t) ? 'Ingen kollega har denna hashtag' : 'Täcks av minst en kollega'}
+                    >
+                      #{t}
+                    </span>
+                  ))}
                   {suggestion.neededCompetences.map((c: CompetenceId) => (
-                    <span key={c} className="mx-chip mx-mono">
+                    <span key={`a-${c}`} className="mx-chip mx-mono" style={{ opacity: 0.8 }}>
                       {COMPETENCE_LABELS[c]}
                     </span>
                   ))}
                 </div>
+                {(suggestion.gaps.tags.length > 0 || suggestion.gaps.areas.length > 0) && (
+                  <div className="mx-t-12 mx-muted mx-mt-1">
+                    Saknas helt internt:{' '}
+                    {[
+                      ...suggestion.gaps.tags.map((t) => `#${t}`),
+                      ...suggestion.gaps.areas.map((a) => COMPETENCE_LABELS[a])
+                    ].join(', ')}
+                    .
+                  </div>
+                )}
               </div>
             )}
 
@@ -337,18 +391,23 @@ export function NewMissionForm({
                             <span className="mx-mono mx-t-xs mx-muted"> · {ROLE_LABELS[m.role]}</span>
                           </div>
                           {m.reason && <div className="mx-t-12 mx-muted">{m.reason}</div>}
-                          {m.competences.length > 0 && (
-                            <div className="mx-flex mx-gap-1 mx-wrap mx-mt-1">
-                              {m.competences.map((c) => (
+                          <div className="mx-flex mx-gap-1 mx-wrap mx-mt-1 mx-items-c">
+                            <LoadChip load={m.load} />
+                            {m.matchedTags.map((t) => (
+                              <span key={t.tag} className="mx-chip mx-mono mx-active" title={COMPETENCE_LEVEL_LABELS[t.level]}>
+                                #{t.tag} · {COMPETENCE_LEVEL_LABELS[t.level].toLowerCase()}
+                              </span>
+                            ))}
+                            {m.matchedTags.length === 0 &&
+                              m.competences.map((c) => (
                                 <span key={c} className="mx-mono mx-t-xs mx-muted">
                                   #{COMPETENCE_LABELS[c]}
                                 </span>
                               ))}
-                            </div>
-                          )}
+                          </div>
                         </div>
-                        <span className="mx-mono mx-t-xs mx-muted" title="AI:ns säkerhet">
-                          {Math.round(m.confidence * 100)}%
+                        <span className="mx-mono mx-t-xs mx-muted" title={`Rankningspoäng ${m.score} · AI:ns säkerhet ${Math.round(m.confidence * 100)}%`}>
+                          {m.score}p
                         </span>
                         {m.id === currentUserId ? (
                           <span className="mx-mono mx-t-xs mx-muted">Du</span>
@@ -369,6 +428,50 @@ export function NewMissionForm({
                     );
                   })}
                 </ul>
+              </div>
+            )}
+
+            {otherShortlist.length > 0 && (
+              <div>
+                <button
+                  type="button"
+                  className="mx-btn mx-sm mx-ghost"
+                  onClick={() => setShowShortlist((v) => !v)}
+                >
+                  <Icon name={showShortlist ? 'chevdown' : 'chevron'} size={11} />
+                  {showShortlist ? 'Dölj' : 'Visa'} fler rankade kollegor ({otherShortlist.length})
+                </button>
+                {showShortlist && (
+                  <ul className="mx-flex mx-col mx-gap-1 mx-mt-2">
+                    {otherShortlist.map((c) => {
+                      const added = participants.some((p) => p.user_id === c.id) || c.id === currentUserId;
+                      return (
+                        <li
+                          key={c.id}
+                          className="mx-flex mx-items-c mx-gap-2"
+                          style={{ padding: '6px 10px', background: 'var(--mx-paper-3)', borderRadius: 8 }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div className="mx-t-13 mx-fw-6">
+                              {c.name}
+                              {c.title ? <span className="mx-muted mx-fw-4"> · {c.title}</span> : null}
+                            </div>
+                            <div className="mx-t-12 mx-muted">{c.reasons.join(' · ')}</div>
+                          </div>
+                          <LoadChip load={c.load} />
+                          <span className="mx-mono mx-t-xs mx-muted">{c.score}p</span>
+                          {added ? (
+                            <span className="mx-mono mx-t-xs mx-muted">Tillagd</span>
+                          ) : (
+                            <button type="button" className="mx-btn mx-sm" onClick={() => addParticipant(c.id)}>
+                              <Icon name="plus" size={11} /> Lägg till
+                            </button>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
             )}
 
@@ -451,6 +554,7 @@ export function NewMissionForm({
                       <span className="mx-t-13 mx-fw-6" style={{ flex: 1, minWidth: 0 }}>
                         {u?.label || p.user_id}
                       </span>
+                      {u?.load ? <LoadChip load={u.load} /> : null}
                       <select
                         value={p.role}
                         onChange={(e) => setRole(p.user_id, e.target.value as MissionParticipantRole)}
@@ -493,15 +597,27 @@ export function NewMissionForm({
                     onClick={() => addParticipant(u.id)}
                     className="mx-chip mx-mono"
                     style={{ cursor: 'pointer' }}
-                    title={
-                      u.competences && u.competences.length > 0
-                        ? u.competences.map((c) => COMPETENCE_LABELS[c]).join(', ')
-                        : 'Inga kompetenstaggar angivna'
-                    }
+                    title={[
+                      u.tags && u.tags.length > 0
+                        ? u.tags.map((t) => `#${t.tag} (${COMPETENCE_LEVEL_LABELS[t.level].toLowerCase()})`).join(', ')
+                        : u.competences && u.competences.length > 0
+                          ? u.competences.map((c) => COMPETENCE_LABELS[c]).join(', ')
+                          : 'Inga kompetenstaggar angivna',
+                      u.load ? describeLoad(u.load) : ''
+                    ]
+                      .filter(Boolean)
+                      .join(' — ')}
                   >
                     <Icon name="plus" size={10} /> {u.label}
-                    {u.competences && u.competences.length > 0 ? (
+                    {u.tags && u.tags.length > 0 ? (
+                      <span className="mx-muted"> · {u.tags.length}#</span>
+                    ) : u.competences && u.competences.length > 0 ? (
                       <span className="mx-muted"> · {u.competences.length}</span>
+                    ) : null}
+                    {u.load && loadLevel(u.load) !== 'free' ? (
+                      <span className="mx-muted" title={describeLoad(u.load)}>
+                        {' '}· {LOAD_LEVEL_LABELS[loadLevel(u.load)].toLowerCase()}
+                      </span>
                     ) : null}
                   </button>
                 ))}

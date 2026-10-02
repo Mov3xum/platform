@@ -7,7 +7,12 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { ALL_ROLES, sanitizeCompetences, type CompetenceId, type Role } from '@platform/shared';
+import { ALL_ROLES, type CompetenceId, type Role, type TeamMemberLoad, type UserCompetenceTag } from '@platform/shared';
+import {
+  loadCompetenceTagVocabulary,
+  loadStaffProfiles,
+  loadTeamLoads
+} from '@/lib/team/competence-tags.server';
 import { PageHead, Icon } from '@/components/proto';
 import { NewMissionForm } from './NewMissionForm';
 import { createMissionAction } from '@/lib/actions/missions';
@@ -16,9 +21,10 @@ interface UserOption {
   id: string;
   label: string;
   competences?: CompetenceId[];
+  tags?: UserCompetenceTag[];
+  load?: TeamMemberLoad;
 }
 
-const TEAM_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 interface StartupOption {
   id: string;
   name: string;
@@ -36,35 +42,23 @@ export default async function NewMissionPage() {
   let users: UserOption[] = [];
   let startups: StartupOption[] = [];
 
-  try {
-    const res = await pb.collection('users').getList(1, 200, {
-      filter: pb.filter('tenant = {:tenant}', { tenant: user.tenant }),
-      sort: 'display_name',
-      fields: 'id,display_name,email,roles,competences'
-    });
-    users = res.items
-      .map((u) => {
-        const rec = u as unknown as {
-          id: string;
-          display_name?: string;
-          email?: string;
-          roles?: string[];
-          competences?: unknown;
-        };
-        const local = rec.email ? rec.email.split('@')[0] : rec.id;
-        return {
-          id: String(rec.id),
-          label: rec.display_name || local,
-          roles: Array.isArray(rec.roles) ? rec.roles : [],
-          competences: sanitizeCompetences(rec.competences)
-        };
-      })
-      // Bara Movexum-personal kan ingå i ett tvärfunktionellt team.
-      .filter((u) => u.roles.some((r) => TEAM_ROLES.includes(r as Role)))
-      .map(({ id, label, competences }) => ({ id, label, competences }));
-  } catch {
-    /* ignore */
-  }
+  // Kompetensprofiler (hashtags/nivå) + nuvarande belastning (§ 29.7) —
+  // samma läsväg som teamförslaget, så pickern visar vad AI:n ser.
+  const vocabulary = await loadCompetenceTagVocabulary(pb, user.tenant);
+  const [profiles, loads] = await Promise.all([
+    loadStaffProfiles(pb, user.tenant, vocabulary),
+    loadTeamLoads(pb, user.tenant)
+  ]);
+  // Bara Movexum-personal kan ingå i ett tvärfunktionellt team.
+  users = profiles
+    .filter((p) => p.isStaff)
+    .map((p) => ({
+      id: p.id,
+      label: p.name,
+      competences: p.competences,
+      tags: p.tags,
+      load: loads.get(p.id) ?? { active: 0, leading: 0 }
+    }));
 
   try {
     const res = await pb.collection('startups').getList(1, 100, {
