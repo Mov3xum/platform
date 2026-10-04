@@ -684,6 +684,14 @@ await patchUsersCollection([
   { name: 'bio', type: 'text', required: false, max: 1000 }
 ]);
 
+// 4c. users — kompetens-hashtags + utvecklingsintressen (migration 1700000178,
+// CLAUDE.md § 29.7). json: [{ tag, area, level }] respektive [slug]. Självservice
+// (fältlåset 1700000174 låser dem inte); `competences` härleds ur taggarna.
+await patchUsersCollection([
+  { name: 'competence_tags', type: 'json', required: false, maxSize: 8000 },
+  { name: 'development_interests', type: 'json', required: false, maxSize: 2000 }
+]);
+
 // 5. partners ---------------------------------------------------------------
 await ensureCollection({
   id: 'partners_collection',
@@ -4156,6 +4164,39 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`
 });
 
+// Migration 1700000178: competence_tags — tenant-gemensam hashtag-vokabulär
+// för kompetenser (§ 29.7). Seedade taggar (status approved) + taggar kollegor
+// lagt till i Min profil (status suggested). list/view staff/observer;
+// createRule roll-lös (§ 21.3); update/delete ledning. `area` är TEXT
+// (CompetenceId, valideras i koden). Seeden skrivs av migrationen (ingen seed
+// här — bootstrap:en skapar bara schemat; profilen fungerar ändå mot den
+// inbyggda seed-listan i @platform/shared).
+await ensureCollection({
+  id: 'competence_tags_collection',
+  name: 'competence_tags',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'slug', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'label', type: 'text', required: true, min: 1, max: 60 },
+    { name: 'area', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['suggested', 'approved'] },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_competence_tags_tenant_slug ON competence_tags (tenant, slug)',
+    'CREATE INDEX idx_competence_tags_tenant_area ON competence_tags (tenant, area)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  // Body-låst (§ 46.8-mönstret): bara `suggested`, eget created_by, egen tenant.
+  createRule: `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.created_by = @request.auth.id && @request.body.status = "suggested" && @request.body.tenant = @request.auth.tenant`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+
 // Migration 1700000158: notifications.kind += contact_request/contact_decision
 // (union — ensureCollection synkar inte fält på befintlig collection).
 // + migration 1700000169 (stödcheckar § 46): support_check_*-notiser.
@@ -4925,6 +4966,7 @@ const FORCE_CREATE_RULES = {
   contact_requests: `${ANY_AUTH} && @request.auth.tenant != ""`,
   // Önskemål & buggar (§ 49, migration 1700000176) — roll-enforcement i server-actionen.
   feedback_items: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  competence_tags: `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.created_by = @request.auth.id && @request.body.status = "suggested" && @request.body.tenant = @request.auth.tenant`,
   // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167) —
   // roll-/medlemskontroll i skrivlagret och route-handlers.
   funding_projects: `${ANY_AUTH} && @request.auth.tenant != ""`,

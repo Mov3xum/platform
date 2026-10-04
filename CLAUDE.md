@@ -4192,9 +4192,12 @@ beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 |-----|-------|
 | `packages/shared/src/competences.ts` (+ `.test.ts`) | Fast kompetenstaxonomi (`COMPETENCES`, `CompetenceId`) + helpers (`sanitizeCompetences`, `inferCompetencesFromText`) — ren, enhetstestad |
 | `backend/pocketbase-schema/migrations/1700000134_extend_users_competences.js` | `users.competences` (select), `users.title`, `users.bio` |
-| `apps/web/src/lib/actions/profile.ts` + `app/min-profil/**` | Självservice-profil (titel/bio/kompetenser) |
-| `apps/web/src/lib/ai/team-match.ts` | `matchTeam` — isolerad Mistral-körning: beskrivning → kompetenser + kandidater (samma mönster som `file-categorize.ts`) |
-| `apps/web/src/lib/actions/team.ts` | `suggestTeamAction` — laddar kandidater (BARA staff-users med kompetenstaggar), kör matcharen, loggar usage |
+| `packages/shared/src/competence-tags.ts` (+ `.test.ts`) | **§ 29.7:** hashtags (slug-normalisering, seed-vokabulär, nivåer), belastning (`computeTeamLoads`, `loadLevel`), behov (`inferTeamNeedFromText`, `sanitizeTeamNeed`) och deterministisk rankning (`rankTeamCandidates`, `teamNeedGaps`) — ren, enhetstestad |
+| `backend/pocketbase-schema/migrations/1700000178_extend_users_competence_tags.js` | `users.competence_tags` / `users.development_interests` (json) + collection `competence_tags` (tenant-vokabulär, seedad) |
+| `apps/web/src/lib/team/competence-tags.server.ts` | Enda läsvägen: vokabulär, kollegornas profiler, belastning ur `missions`; registrering av nya taggar |
+| `apps/web/src/lib/actions/profile.ts` + `app/min-profil/**` | Självservice-profil (titel/bio/hashtags med nivå/utvecklingsintressen; områden härleds) |
+| `apps/web/src/lib/ai/team-match.ts` | `extractTeamNeed` + `composeTeam` — två isolerade Mistral-körningar runt den deterministiska rankningen (samma mönster som `file-categorize.ts`) |
+| `apps/web/src/lib/actions/team.ts` | `suggestTeamAction` — behov → rankning (hashtag/nivå/relation/belastning) → AI sätter ihop teamet ur shortlistan; loggar usage |
 | `apps/web/src/app/uppdrag/new/NewMissionForm.tsx` | AI-teamförslag inbäddat i nytt-uppdrag-formuläret |
 | `backend/pocketbase-schema/migrations/1700000135_extend_tasks_mission_link.js` | `tasks.link_kind += 'mission'` + `tasks.mission` |
 | `apps/web/src/lib/assignments/collaboration.ts` | `createMissionMemberTasks` (personlig uppgift per teammedlem) |
@@ -4219,15 +4222,22 @@ Användaren sätter dem själv på `/min-profil` (updateRule `@request.auth.id =
 oförändrad). **Kompetenstaggarna är matchningens enda underlag** (2026-09):
 externa CRM-kontakter (`contacts.skills`) är INTE längre kandidater —
 `inferCompetencesFromText` finns kvar i `competences.ts` som ren helper men
-används inte av matcharen.
+används inte av matcharen. **Sedan 2026-10 (§ 29.7) är de 14 områdena
+rubriker:** personalen sätter HASHTAGS med nivå under dem, och
+`users.competences` HÄRLEDS ur taggarna av profil-actionen.
 
 ### 29.3 AI-teammatchning (Fas 1)
 
-`matchTeam` (`team-match.ts`) är en liten, billig, **isolerad** `mistral-small`-
-körning (temp 0) — egen snäv system-prompt (INTE agent-/chatt-ytan): beskrivning
-+ ev. bolagskontext + kandidatlista (id/namn/kompetens, **ingen PII**) →
-JSON: föreslagna kompetenser (validerade mot taxonomin), kandidater (validerade
-mot listan, roll/motivering/confidence) och ev. `external_note` (kompetensgap).
+`team-match.ts` kör två små, billiga, **isolerade** `mistral-small`-körningar
+(temp 0, egen snäv system-prompt — INTE agent-/chatt-ytan) runt en
+deterministisk rankning (§ 29.7): `extractTeamNeed` (beskrivning + ev.
+bolagskontext → områden + hashtags, validerade mot taxonomi/vokabulär) och
+`composeTeam` (den rankade shortlistan **pseudonymiserad**: användar-id +
+träffade hashtags/nivå + belastningsetikett — aldrig namn, titel eller
+e-post; servern slår upp namnen efteråt → roller/motivering/confidence, ev.
+`external_note` för kompetensgap; modellen kan inte välja någon utanför
+shortlistan). Uppdragsbeskrivningen personnummer-saneras före båda anropen
+och månadstaket (§ 9.6) prövas först.
 `suggestTeamAction` (staff-only) laddar kandidater = **riktiga användare i
 systemet** i tenanten med staff-roll (admin/incubator_lead/coach/mentor) som
 **själva angett minst en kompetenstagg** under Min profil — bolagsmedlemmar,
@@ -4333,6 +4343,111 @@ INGA personuppgifter.
   AI-inferens). `mission_documents` läses staff/observer-only; intern
   team-dokumentation, ingen ny AI-kontext-väg (whitelistas aldrig i
   `lib/ai/context.ts`).
+### 29.7 Kompetens-hashtags, nivåer & belastningsmedveten matchning (2026-10)
+
+**Varför.** Fjorton områden ("AI & teknik", "Branschspecifik kunskap") skiljer
+inte en medtech-coach från en SaaS-coach, en som "kan lite" såg likadan ut som
+en expert, och någon med fem pågående team föreslogs lika gärna som någon
+ledig. Matchningen gjordes dessutom i ETT AI-anrop som både tolkade behovet
+och valde personer — svårt att förklara och lätt att ifrågasätta.
+
+**Tre lager i profilen (`/min-profil`).**
+1. **Områden** (de 14 i `competences.ts`) är rubriker — härleds automatiskt ur
+   taggarna (`deriveCompetenceAreas`) och skrivs till `users.competences` så
+   alla äldre ytor fungerar oförändrat.
+2. **Hashtags** = specialiseringar under områdena (`#vinnova-ansokan`,
+   `#de-minimis`, `#pitchtraning`, `#medtech` …). Vokabulären är
+   **tenant-gemensam och växer kontrollerat** (`competence_tags`, migration
+   **1700000178**): en seedad lista (`COMPETENCE_TAG_SEED`, ~70 taggar ur
+   Movexums vardag, speglad i migrationen) + taggar **Movexum-personal**
+   lagt till i profilen (status `suggested`, synliga i allas autocomplete
+   så språket konvergerar; ledningen kan godkänna/döpa om/ta bort via
+   PB-regler `STAFF_OR_LEAD`). Fritext normaliseras ALLTID till slug
+   (`normalizeCompetenceTagSlug`: gemener, utan #, bindestreck, max 40 tecken;
+   personnummer-mönster avvisas). En `suggested`-tagg visas med slug-härledd
+   etikett tills den godkänts, och godkända etiketter saneras
+   (`sanitizeCompetenceTagLabel`) — etiketterna når behovsprompten. Lagras
+   som `users.competence_tags` = `[{ tag, area, level }]`.
+3. **Nivå och riktning:** `contribute` (kan bidra) / `strong` / `expert` per
+   tagg (vikt 1/2/3), plus `users.development_interests` = taggar personen
+   **vill utvecklas inom** (ett bra tvärfunktionellt team har en expert och en
+   som lär sig). Klick på en hashtag cyklar nivån; "Dina hashtags" visar
+   nivåväljare per tagg.
+
+**Matchningen räknar först, frågar AI:n sist** (`suggestTeamAction`):
+1. **Behov** — `extractTeamNeed` (AI, validerad mot taxonomi + vokabulär)
+   unionad med den rena nyckelordsheuristiken `inferTeamNeedFromText`, så ett
+   AI-bortfall aldrig ger ett tomt behov. Bolagets bransch/fas följer med som
+   kontext.
+2. **Deterministisk rankning** (`rankTeamCandidates`, enhetstestad):
+   hashtag-träff (×3) väger mer än områdes-träff (×1,5), nivån multiplicerar,
+   befintlig relation till bolaget (`startups.coaches`/`owner`) ger bonus,
+   utvecklingsintresse ger liten bonus, och **nuvarande belastning** justerar:
+   ledig +0,5, hög −1,5, fullbelagd −3. Resultatet är en shortlist med läsbara,
+   PII-fria skäl per person ("#vinnova-ansokan (expert) · 2 pågående team,
+   ansvarig i 1"). `teamNeedGaps` listar vad ingen kandidat täcker → extern
+   kompetens. Rankningen är själva beslutsunderlaget: den visas för
+   människan (poäng + skäl, "fler rankade kollegor") och fungerar utan AI.
+3. **AI sätter ihop teamet** (`composeTeam`) ur shortlistan: roller,
+   komplementaritet (täck olika delar med olika personer), max 8, EN lead =
+   högst nivå på viktigaste taggen med rimlig belastning; en fullbelagd person
+   tas bara med när ingen annan täcker behovet, och det sägs i motiveringen.
+   Svarar inte modellen används `fallbackCompose` (topp per täckning, ledaren
+   aldrig fullbelagd) med `needsReview=true`.
+
+**Belastning (`computeTeamLoads`).** Räknas ur `missions` med status
+`preparation`/`in_progress`/`review` (statusfilter i frågan, paginerat upp
+till 2 000 rader; kapning ger `complete:false` som visas som "ungefärlig" —
+§ 33.4; utkast och klara räknas inte): ett
+uppdrag räknas en gång per person oavsett koppling (utfärdare, mottagare,
+deltagare, mentor); ansvarig = `lead` i `participants_json` (eller utfärdare
+utan deltagarlista). Viktad belastning = team + ansvar; `loadLevel`: 0 =
+ledig, ≤ 2 = normal, ≤ 4 = hög, > 4 = fullbelagd. Visas som chip i
+teamförslaget, i deltagar-pickern, i teampanelen på uppdragskortet (med
+varning "Hög belastning: …") och på den egna profilen ("Min belastning just
+nu") så alla ser samma siffra. Läses med användarens token → RLS § 21, och
+visas därför **bara för staff** (en bolagsmedlems token ser bara egna
+uppdrag — siffran vore både fel och intern). Belastningen är ett
+arbetsbelastningsmått som skyddar den enskilde från överbokning, inte en
+prestationsbedömning — den lagras aldrig och får ingen historik.
+
+**Regelefterlevnad.** DPIA: `docs/privacy/dpia-team-matching.md` (kräver
+maintainer-godkännande i PR:en, § 10.1/§ 10.2).
+- **GDPR § 5:** hashtags och nivåer är yrkeskompetens (berättigat intresse:
+  bemanning), självdeklarerade, inte art. 9. Taggar får aldrig bära
+  personuppgifter — slug-normaliseringen avvisar personnummer-mönster, UI:t
+  säger "kompetens, aldrig personuppgifter", `competence_tags` innehåller
+  slug/etikett/område/skapare och varje ny post auditeras PII-fritt i
+  `agent_actions` (slug + område). Belastningen är ett härlett tal ur redan
+  synliga uppdrag — inget nytt lagras.
+- **§ 9.3:** `users` förblir denylistad; till modellen går BARA den
+  isolerade matcharens pseudonymiserade shortlist (användar-id + taggar/
+  nivå + belastningsetikett — aldrig namn, titel eller e-post) och en
+  personnummer-sanerad beskrivning. Inga nya fält i `lib/ai/context.ts`.
+- **Riskklass (art. 11): begränsad** efter bedömning mot Annex III p. 4(b)
+  i DPIA:n — AI:n utför en förberedande uppgift (tolkar behov, formulerar
+  förslag ur en redan deterministiskt rankad lista utan namn), tilldelar
+  inget, och människan beslutar med full insyn i poäng/skäl. **Omprövas till
+  högrisk** (juridisk granskning före bygge) om förslaget någonsin tilldelar
+  automatiskt, om nivå/belastning sätts av någon annan än personen själv,
+  om prestationshistorik vägs in eller om underlaget används för lön/
+  befordran/anställning.
+- **RLS (§ 21.3):** `competence_tags` list/view staff/observer; createRule
+  roll-lös men **body-låst** (`status = "suggested"`, `created_by =
+  @request.auth.id`, `tenant = @request.auth.tenant` — § 46.8-mönstret,
+  passerar createRule-svepet), och profil-actionen registrerar bara taggar
+  för Movexum-personal; update/delete ledning. Fältlåset på `users`
+  (1700000174) omfattar inte de nya självservice-fälten. Känd avvikelse:
+  `users.viewRule` låter alla i tenanten läsa varandras profilfält (låg
+  känslighet, noterad i DPIA:n).
+- **Schema-drift (§ 24.4):** profil-actionen läser tillbaka posten och varnar
+  om `competence_tags` saknas; `verify-baseline.mjs` asserterar fälten
+  (`REQUIRED_APP_FIELDS`) + kollektionen (must-exist, `MUST_BE_STAFF_OR_OBSERVER`);
+  speglat i `setup-via-api.mjs` (patch av `users`, `competence_tags`-def,
+  `FORCE_CREATE_RULES`). Seeden skrivs av migrationen; utan den faller appen
+  tillbaka på den inbyggda listan (fail-soft).
+- **Lägg aldrig till en seed-tagg utan att spegla den i migrationen** (och
+  tvärtom); nya taggar i drift går via profilen, inte via kod.
 
 ---
 
