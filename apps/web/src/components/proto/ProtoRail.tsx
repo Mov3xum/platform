@@ -113,6 +113,7 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
           email={user.email}
           role={user.roles[0]?.replace('_', ' ') || ''}
           initial={initial}
+          showProfile={canAccessModuleForUser(user.roles, 'min_profil', user.enabledModules)}
         />
       </div>
     </aside>

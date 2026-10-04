@@ -4449,6 +4449,20 @@ av maintainer 2026-10-04, § 10.1/§ 10.2 — omprövas vid ändringarna i dess 
   tillbaka på den inbyggda listan (fail-soft).
 - **Lägg aldrig till en seed-tagg utan att spegla den i migrationen** (och
   tvärtom); nya taggar i drift går via profilen, inte via kod.
+- **Var hashtags redigeras — "Min profil", inte "Mitt konto" (incident
+  2026-10-04).** Admin hittade inte hashtag-ytan efter mergen: kontomenyn i
+  railens fot (klick på det egna namnet) ledde bara till `/konto` (Mitt konto =
+  inloggningsuppgifter/lösenord), medan hashtags bor på `/min-profil` (modul
+  `min_profil`, System-railen). Dessutom hade modulen aldrig backfillats i
+  redan sparade `users.enabled_modules` (§ 36.3-läxan) — "Min profil" saknades
+  i sidmenyn för äldre konton. Nu: kontomenyn har posten **Min profil**
+  (`RailAccountMenu.showProfile`, samma `canAccessModuleForUser`-kurering som
+  sidmenyn), `/konto` har ett kort "Kompetenser & hashtags" som länkar dit,
+  `min_profil` har ikonen `user` i railen, och migration **1700000180**
+  backfillar `min_profil` i befintliga allow-listor (admin/incubator_lead/
+  coach/mentor/partner; `null` rörs inte). Produktion deployas dessutom
+  MANUELLT ("Deploy to Coolify Production", workflow_dispatch från `staging`,
+  § 10.3) — en merge till `staging` når aldrig app.movexum.se av sig själv.
 
 **Steg 2–3 (2026-10-04, migration 1700000179; DPIA godkänd av maintainer
 samma dag).**
@@ -5757,7 +5771,8 @@ roll**:
   ALDRIG automatiskt (bara `null`-listor följer rollen), så sidan finns men
   saknas i sidmenyn. Skriv därför en idempotent datamigration som lägger till
   id:t i befintliga listor för de roller vars standard innehåller det
-  (precedens: **1700000174** för `projekt`/`checkar` — union, tar aldrig bort,
+  (precedens: **1700000174** för `projekt`/`checkar`, **1700000177** för
+  `onskemal`, **1700000180** för `min_profil` — union, tar aldrig bort,
   rör inte `null`). Ingen spegling i `setup-via-api.mjs` (data, inte schema).
 - **Säkerhetsgräns oförändrad:** `canAccessModuleForUser(roles, id,
   enabledModules)` = `canAccessModule` (rollen, `rolesAllowed`) **och**

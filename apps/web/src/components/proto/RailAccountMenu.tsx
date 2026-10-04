@@ -29,9 +29,15 @@ interface Props {
   email: string;
   role?: string;
   initial: string;
+  /**
+   * Visa "Min profil" (kompetens-hashtags, § 29.7) i menyn. Sätts av railen
+   * via `canAccessModuleForUser(roles, 'min_profil', enabledModules)` — samma
+   * UI-kurering som sidmenyn; sidan själv är RBAC-gränsen.
+   */
+  showProfile?: boolean;
 }
 
-export function RailAccountMenu({ name, email, role, initial }: Props) {
+export function RailAccountMenu({ name, email, role, initial, showProfile = false }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
@@ -79,6 +85,12 @@ export function RailAccountMenu({ name, email, role, initial }: Props) {
 
       {open && (
         <div className="mx-rail-account-pop" role="menu">
+          {showProfile && (
+            <Link href="/min-profil" className="mx-rail-account-item" role="menuitem">
+              <Icon name="user" size={13} />
+              Min profil
+            </Link>
+          )}
           <Link href="/konto" className="mx-rail-account-item" role="menuitem">
             <Icon name="gear" size={13} />
             Mitt konto
