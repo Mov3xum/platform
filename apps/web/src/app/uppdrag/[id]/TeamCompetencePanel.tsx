@@ -1,14 +1,24 @@
-// CLAUDE.md § 29 — "Team & kompetenser" på uppdragskortet.
-// Visar teamets samlade kompetenstäckning + varje medlems kompetenser, så att
-// staff ser om det tvärfunktionella teamet täcker uppdragets behov. Ren,
-// presentationell server-komponent (ingen IO, ingen klient-interaktivitet).
+// CLAUDE.md § 29 / § 29.7 — "Team & kompetenser" på uppdragskortet.
+// Visar teamets samlade kompetenstäckning (områden + hashtags med högsta
+// nivå i teamet), varje medlems hashtags/nivå och NUVARANDE belastning
+// (pågående team), så att staff ser om det tvärfunktionella teamet täcker
+// uppdragets behov och vem som är tungt belastad. Ren, presentationell
+// server-komponent (ingen IO, ingen klient-interaktivitet).
 
 import { Card, Icon } from '@/components/proto';
 import {
   COMPETENCE_LABELS,
   COMPETENCE_IDS,
+  COMPETENCE_LEVEL_LABELS,
+  COMPETENCE_LEVEL_WEIGHT,
+  LOAD_LEVEL_LABELS,
+  describeLoad,
+  loadLevel,
   type CompetenceId,
-  type MissionParticipantRole
+  type CompetenceLevel,
+  type MissionParticipantRole,
+  type TeamMemberLoad,
+  type UserCompetenceTag
 } from '@platform/shared';
 
 const ROLE_LABELS: Record<MissionParticipantRole, string> = {
@@ -23,15 +33,27 @@ export interface TeamMemberView {
   title?: string;
   role: MissionParticipantRole;
   competences: CompetenceId[];
+  tags?: UserCompetenceTag[];
+  load?: TeamMemberLoad;
 }
 
 export function TeamCompetencePanel({ members }: { members: TeamMemberView[] }) {
   const coverage = new Set<CompetenceId>();
+  const tagCoverage = new Map<string, CompetenceLevel>();
   for (const m of members) {
     for (const c of m.competences) coverage.add(c);
+    for (const t of m.tags ?? []) {
+      coverage.add(t.area);
+      const cur = tagCoverage.get(t.tag);
+      if (!cur || COMPETENCE_LEVEL_WEIGHT[t.level] > COMPETENCE_LEVEL_WEIGHT[cur]) tagCoverage.set(t.tag, t.level);
+    }
   }
   const coverageList = COMPETENCE_IDS.filter((id) => coverage.has(id));
-  const anyTagged = members.some((m) => m.competences.length > 0);
+  const tagList = Array.from(tagCoverage.entries()).sort(
+    (a, b) => COMPETENCE_LEVEL_WEIGHT[b[1]] - COMPETENCE_LEVEL_WEIGHT[a[1]] || a[0].localeCompare(b[0], 'sv')
+  );
+  const anyTagged = members.some((m) => m.competences.length > 0 || (m.tags?.length ?? 0) > 0);
+  const heavy = members.filter((m) => m.load && ['high', 'full'].includes(loadLevel(m.load)));
 
   return (
     <Card style={{ padding: 16 }}>
@@ -52,6 +74,25 @@ export function TeamCompetencePanel({ members }: { members: TeamMemberView[] }) 
               </span>
             ))}
           </div>
+          {tagList.length > 0 && (
+            <div className="mx-flex mx-gap-1 mx-wrap mx-mt-2">
+              {tagList.map(([tag, level]) => (
+                <span key={tag} className="mx-mono mx-t-xs mx-muted" title={COMPETENCE_LEVEL_LABELS[level]}>
+                  #{tag} · {COMPETENCE_LEVEL_LABELS[level].toLowerCase()}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {heavy.length > 0 && (
+        <div
+          className="mx-t-12 mx-mb-3"
+          style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--mx-st-warn-bg, #f8f1da)', color: '#4b2718' }}
+        >
+          <strong>Hög belastning:</strong>{' '}
+          {heavy.map((m) => `${m.name} (${describeLoad(m.load!).toLowerCase()})`).join(', ')}.
         </div>
       )}
 
@@ -65,8 +106,24 @@ export function TeamCompetencePanel({ members }: { members: TeamMemberView[] }) 
               {m.name}
               {m.title ? <span className="mx-muted mx-fw-4"> · {m.title}</span> : null}
               <span className="mx-mono mx-t-xs mx-muted"> · {ROLE_LABELS[m.role]}</span>
+              {m.load ? (
+                <span className="mx-mono mx-t-xs mx-muted" title={describeLoad(m.load)}>
+                  {' '}· {LOAD_LEVEL_LABELS[loadLevel(m.load)].toLowerCase()}
+                  {m.load.active > 0 ? ` (${m.load.active} team)` : ''}
+                </span>
+              ) : null}
             </div>
-            {m.competences.length > 0 ? (
+            {(m.tags?.length ?? 0) > 0 ? (
+              <div className="mx-flex mx-gap-1 mx-wrap mx-mt-1">
+                {[...(m.tags ?? [])]
+                  .sort((a, b) => COMPETENCE_LEVEL_WEIGHT[b.level] - COMPETENCE_LEVEL_WEIGHT[a.level])
+                  .map((t) => (
+                    <span key={t.tag} className="mx-mono mx-t-xs mx-muted" title={`${COMPETENCE_LABELS[t.area]} · ${COMPETENCE_LEVEL_LABELS[t.level]}`}>
+                      #{t.tag} · {COMPETENCE_LEVEL_LABELS[t.level].toLowerCase()}
+                    </span>
+                  ))}
+              </div>
+            ) : m.competences.length > 0 ? (
               <div className="mx-flex mx-gap-1 mx-wrap mx-mt-1">
                 {m.competences.map((c) => (
                   <span key={c} className="mx-mono mx-t-xs mx-muted">

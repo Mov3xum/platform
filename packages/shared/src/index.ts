@@ -1581,6 +1581,14 @@ export const coreModules: ModuleDefinition[] = [
     route: '/community'
   },
   {
+    id: 'onskemal',
+    title: 'Önskemål & buggar',
+    description:
+      'Intern backlog: lägg upp kort med buggar, önskemål om nya funktioner, ändringar och frågor per del av plattformen. Ledningen svarar och klarmarkerar.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/onskemal'
+  },
+  {
     id: 'education',
     title: 'Utbildning',
     description: 'Spår per Sprint X-axel: finansiering, hållbarhet, internationalisering, team.',
@@ -1707,6 +1715,7 @@ export * from './compass-quiz';
 export * from './file-topics';
 // ─── Kompetenstaxonomi (tvärfunktionella team, ren logik, enhetstestad) ──────
 export * from './competences';
+export * from './competence-tags';
 export * from './survey';
 // ─── AI-miljöpåverkan (tokens → CO₂e/vatten, ren logik, enhetstestad) ────────
 export * from './ai-impact';
@@ -1784,6 +1793,7 @@ export type {
 } from './compass-survey';
 export * from './procurement';
 export * from './contacts';
+export * from './feedback';
 export * from './agent-memory';
 export * from './funding';
 export * from './support-checks';

@@ -25,8 +25,21 @@ import { TeamCompetencePanel, type TeamMemberView } from './TeamCompetencePanel'
 import { MissionTaskBoard } from './MissionTaskBoard';
 import { MissionDocuments, type MissionDocView } from './MissionDocuments';
 import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
-import { sanitizeCompetences } from '@platform/shared';
-import type { Mission, MissionComment, MissionParticipant, MissionDocument, CompetenceId, Role } from '@platform/shared';
+import {
+  loadCompetenceTagVocabulary,
+  loadStaffProfiles,
+  loadTeamLoads
+} from '@/lib/team/competence-tags.server';
+import type {
+  Mission,
+  MissionComment,
+  MissionParticipant,
+  MissionDocument,
+  CompetenceId,
+  Role,
+  TeamMemberLoad,
+  UserCompetenceTag
+} from '@platform/shared';
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 
@@ -55,6 +68,8 @@ interface UserOption {
 interface UserMeta {
   title?: string;
   competences: CompetenceId[];
+  tags: UserCompetenceTag[];
+  load: TeamMemberLoad;
 }
 
 export default async function MissionDetailPage({
@@ -83,37 +98,28 @@ export default async function MissionDetailPage({
   // Hämta tenant-användare (för @mention-autocomplete i kommentarer) inkl.
   // kompetenser/titel för "Team & kompetenser"-panelen (§ 29). Deltagar-pickern
   // får bara Movexum-personal — tvärfunktionella team bemannas av staff.
-  let users: UserOption[] = [];
-  let teamUsers: UserOption[] = [];
+  // Hashtags/nivå + nuvarande belastning (§ 29.7) via samma läsväg som
+  // teamförslaget — fail-soft (tomma listor mot ett omigrerat schema).
+  const users: UserOption[] = [];
+  const teamUsers: UserOption[] = [];
   const userMeta = new Map<string, UserMeta>();
-  try {
-    const res = await pb.collection('users').getList(1, 200, {
-      filter: pb.filter('tenant = {:tenant}', { tenant: user.tenant }),
-      sort: 'display_name',
-      fields: 'id,display_name,email,roles,title,competences'
-    });
-    for (const u of res.items) {
-      const rec = u as unknown as {
-        id: string;
-        display_name?: string;
-        email?: string;
-        roles?: string[];
-        title?: string;
-        competences?: unknown;
-      };
-      const local = rec.email ? rec.email.split('@')[0] : rec.id;
-      userMeta.set(rec.id, {
-        title: rec.title || undefined,
-        competences: sanitizeCompetences(rec.competences)
+  {
+    const vocabulary = await loadCompetenceTagVocabulary(pb, user.tenant);
+    const [profiles, { loads }] = await Promise.all([
+      loadStaffProfiles(pb, user.tenant, vocabulary),
+      loadTeamLoads(pb, user.tenant)
+    ]);
+    for (const p of profiles) {
+      userMeta.set(p.id, {
+        title: p.title,
+        competences: p.competences,
+        tags: p.tags,
+        load: loads.get(p.id) ?? { active: 0, leading: 0 }
       });
-      const opt = { id: rec.id, label: rec.display_name || local };
+      const opt = { id: p.id, label: p.name };
       users.push(opt);
-      if (Array.isArray(rec.roles) && rec.roles.some((r) => STAFF_ROLES.includes(r as Role))) {
-        teamUsers.push(opt);
-      }
+      if (p.isStaff) teamUsers.push(opt);
     }
-  } catch {
-    /* ignore */
   }
 
   // Hämta kommentarer
@@ -231,7 +237,11 @@ export default async function MissionDetailPage({
       name: usersByIdLabel.get(p.user_id) || p.user_id,
       title: meta?.title,
       role: p.role,
-      competences: meta?.competences ?? []
+      competences: meta?.competences ?? [],
+      tags: meta?.tags ?? [],
+      // Belastning bara för staff: en bolagsmedlems token ser via RLS bara
+      // egna uppdrag, så siffran vore både fel och intern (§ 29.7).
+      load: isStaff ? (meta?.load ?? { active: 0, leading: 0 }) : undefined
     };
   });
 

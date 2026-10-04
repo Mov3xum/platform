@@ -4,10 +4,11 @@ import { TimeAgo } from './TimeAgo';
 import type { DashboardActivity } from '@/components/DashboardChat';
 
 /**
- * Bolagsnytt på Översikt (CLAUDE.md § 37/§ 32) — den samlade aktivitets-
- * loggen som en vertikal tidslinje: en hårlinje med prickar, relativ tid i
- * gutter:n, AI-utförda åtgärder märkta med gnista (art. 13). Ren presentation
- * av redan RLS-filtrerad feed; ingen dataväg.
+ * Bolagsnytt på Översikt (CLAUDE.md § 37.1) — nyheter om bolagen som
+ * publicerats av någon i organisationen (`loadCompanyNews`), som en vertikal
+ * tidslinje: en hårlinje med prickar, relativ tid i gutter:n, bolag i
+ * eyebrow:n. Ren presentation av redan RLS-filtrerad feed; ingen dataväg.
+ * Systemhändelser och ändringsloggen visas på `/aktivitet`, inte här.
  */
 
 // Ikon per aktivitetstyp — samma mappning som chattens feed (DashboardChat).
@@ -46,7 +47,8 @@ export function CompanyNews({ feed }: { feed: DashboardActivity[] }) {
   if (feed.length === 0) {
     return (
       <p className="text-[13px] leading-relaxed text-foreground-subtle">
-        Inga händelser än — aktiviteter från bolagen och det som görs i systemet dyker upp här.
+        Inga bolagsnyheter än — det teamet publicerar om bolagen (t.ex. via chatten: &quot;lägg en
+        aktivitet på Fixkod: …&quot;) dyker upp här.
       </p>
     );
   }

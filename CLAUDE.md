@@ -4220,9 +4220,12 @@ beskrivning→kompetens→person, (3) team-arbetsyta med kompetenstäckning.
 |-----|-------|
 | `packages/shared/src/competences.ts` (+ `.test.ts`) | Fast kompetenstaxonomi (`COMPETENCES`, `CompetenceId`) + helpers (`sanitizeCompetences`, `inferCompetencesFromText`) — ren, enhetstestad |
 | `backend/pocketbase-schema/migrations/1700000134_extend_users_competences.js` | `users.competences` (select), `users.title`, `users.bio` |
-| `apps/web/src/lib/actions/profile.ts` + `app/min-profil/**` | Självservice-profil (titel/bio/kompetenser) |
-| `apps/web/src/lib/ai/team-match.ts` | `matchTeam` — isolerad Mistral-körning: beskrivning → kompetenser + kandidater (samma mönster som `file-categorize.ts`) |
-| `apps/web/src/lib/actions/team.ts` | `suggestTeamAction` — laddar kandidater (BARA staff-users med kompetenstaggar), kör matcharen, loggar usage |
+| `packages/shared/src/competence-tags.ts` (+ `.test.ts`) | **§ 29.7:** hashtags (slug-normalisering, seed-vokabulär, nivåer), belastning (`computeTeamLoads`, `loadLevel`), behov (`inferTeamNeedFromText`, `sanitizeTeamNeed`) och deterministisk rankning (`rankTeamCandidates`, `teamNeedGaps`) — ren, enhetstestad |
+| `backend/pocketbase-schema/migrations/1700000178_extend_users_competence_tags.js` | `users.competence_tags` / `users.development_interests` (json) + collection `competence_tags` (tenant-vokabulär, seedad) |
+| `apps/web/src/lib/team/competence-tags.server.ts` | Enda läsvägen: vokabulär, kollegornas profiler, belastning ur `missions`; registrering av nya taggar |
+| `apps/web/src/lib/actions/profile.ts` + `app/min-profil/**` | Självservice-profil (titel/bio/hashtags med nivå/utvecklingsintressen; områden härleds) |
+| `apps/web/src/lib/ai/team-match.ts` | `extractTeamNeed` + `composeTeam` — två isolerade Mistral-körningar runt den deterministiska rankningen (samma mönster som `file-categorize.ts`) |
+| `apps/web/src/lib/actions/team.ts` | `suggestTeamAction` — behov → rankning (hashtag/nivå/relation/belastning) → AI sätter ihop teamet ur shortlistan; loggar usage |
 | `apps/web/src/app/uppdrag/new/NewMissionForm.tsx` | AI-teamförslag inbäddat i nytt-uppdrag-formuläret |
 | `backend/pocketbase-schema/migrations/1700000135_extend_tasks_mission_link.js` | `tasks.link_kind += 'mission'` + `tasks.mission` |
 | `apps/web/src/lib/assignments/collaboration.ts` | `createMissionMemberTasks` (personlig uppgift per teammedlem) |
@@ -4247,15 +4250,22 @@ Användaren sätter dem själv på `/min-profil` (updateRule `@request.auth.id =
 oförändrad). **Kompetenstaggarna är matchningens enda underlag** (2026-09):
 externa CRM-kontakter (`contacts.skills`) är INTE längre kandidater —
 `inferCompetencesFromText` finns kvar i `competences.ts` som ren helper men
-används inte av matcharen.
+används inte av matcharen. **Sedan 2026-10 (§ 29.7) är de 14 områdena
+rubriker:** personalen sätter HASHTAGS med nivå under dem, och
+`users.competences` HÄRLEDS ur taggarna av profil-actionen.
 
 ### 29.3 AI-teammatchning (Fas 1)
 
-`matchTeam` (`team-match.ts`) är en liten, billig, **isolerad** `mistral-small`-
-körning (temp 0) — egen snäv system-prompt (INTE agent-/chatt-ytan): beskrivning
-+ ev. bolagskontext + kandidatlista (id/namn/kompetens, **ingen PII**) →
-JSON: föreslagna kompetenser (validerade mot taxonomin), kandidater (validerade
-mot listan, roll/motivering/confidence) och ev. `external_note` (kompetensgap).
+`team-match.ts` kör två små, billiga, **isolerade** `mistral-small`-körningar
+(temp 0, egen snäv system-prompt — INTE agent-/chatt-ytan) runt en
+deterministisk rankning (§ 29.7): `extractTeamNeed` (beskrivning + ev.
+bolagskontext → områden + hashtags, validerade mot taxonomi/vokabulär) och
+`composeTeam` (den rankade shortlistan **pseudonymiserad**: användar-id +
+träffade hashtags/nivå + belastningsetikett — aldrig namn, titel eller
+e-post; servern slår upp namnen efteråt → roller/motivering/confidence, ev.
+`external_note` för kompetensgap; modellen kan inte välja någon utanför
+shortlistan). Uppdragsbeskrivningen personnummer-saneras före båda anropen
+och månadstaket (§ 9.6) prövas först.
 `suggestTeamAction` (staff-only) laddar kandidater = **riktiga användare i
 systemet** i tenanten med staff-roll (admin/incubator_lead/coach/mentor) som
 **själva angett minst en kompetenstagg** under Min profil — bolagsmedlemmar,
@@ -4361,6 +4371,111 @@ INGA personuppgifter.
   AI-inferens). `mission_documents` läses staff/observer-only; intern
   team-dokumentation, ingen ny AI-kontext-väg (whitelistas aldrig i
   `lib/ai/context.ts`).
+### 29.7 Kompetens-hashtags, nivåer & belastningsmedveten matchning (2026-10)
+
+**Varför.** Fjorton områden ("AI & teknik", "Branschspecifik kunskap") skiljer
+inte en medtech-coach från en SaaS-coach, en som "kan lite" såg likadan ut som
+en expert, och någon med fem pågående team föreslogs lika gärna som någon
+ledig. Matchningen gjordes dessutom i ETT AI-anrop som både tolkade behovet
+och valde personer — svårt att förklara och lätt att ifrågasätta.
+
+**Tre lager i profilen (`/min-profil`).**
+1. **Områden** (de 14 i `competences.ts`) är rubriker — härleds automatiskt ur
+   taggarna (`deriveCompetenceAreas`) och skrivs till `users.competences` så
+   alla äldre ytor fungerar oförändrat.
+2. **Hashtags** = specialiseringar under områdena (`#vinnova-ansokan`,
+   `#de-minimis`, `#pitchtraning`, `#medtech` …). Vokabulären är
+   **tenant-gemensam och växer kontrollerat** (`competence_tags`, migration
+   **1700000178**): en seedad lista (`COMPETENCE_TAG_SEED`, ~70 taggar ur
+   Movexums vardag, speglad i migrationen) + taggar **Movexum-personal**
+   lagt till i profilen (status `suggested`, synliga i allas autocomplete
+   så språket konvergerar; ledningen kan godkänna/döpa om/ta bort via
+   PB-regler `STAFF_OR_LEAD`). Fritext normaliseras ALLTID till slug
+   (`normalizeCompetenceTagSlug`: gemener, utan #, bindestreck, max 40 tecken;
+   personnummer-mönster avvisas). En `suggested`-tagg visas med slug-härledd
+   etikett tills den godkänts, och godkända etiketter saneras
+   (`sanitizeCompetenceTagLabel`) — etiketterna når behovsprompten. Lagras
+   som `users.competence_tags` = `[{ tag, area, level }]`.
+3. **Nivå och riktning:** `contribute` (kan bidra) / `strong` / `expert` per
+   tagg (vikt 1/2/3), plus `users.development_interests` = taggar personen
+   **vill utvecklas inom** (ett bra tvärfunktionellt team har en expert och en
+   som lär sig). Klick på en hashtag cyklar nivån; "Dina hashtags" visar
+   nivåväljare per tagg.
+
+**Matchningen räknar först, frågar AI:n sist** (`suggestTeamAction`):
+1. **Behov** — `extractTeamNeed` (AI, validerad mot taxonomi + vokabulär)
+   unionad med den rena nyckelordsheuristiken `inferTeamNeedFromText`, så ett
+   AI-bortfall aldrig ger ett tomt behov. Bolagets bransch/fas följer med som
+   kontext.
+2. **Deterministisk rankning** (`rankTeamCandidates`, enhetstestad):
+   hashtag-träff (×3) väger mer än områdes-träff (×1,5), nivån multiplicerar,
+   befintlig relation till bolaget (`startups.coaches`/`owner`) ger bonus,
+   utvecklingsintresse ger liten bonus, och **nuvarande belastning** justerar:
+   ledig +0,5, hög −1,5, fullbelagd −3. Resultatet är en shortlist med läsbara,
+   PII-fria skäl per person ("#vinnova-ansokan (expert) · 2 pågående team,
+   ansvarig i 1"). `teamNeedGaps` listar vad ingen kandidat täcker → extern
+   kompetens. Rankningen är själva beslutsunderlaget: den visas för
+   människan (poäng + skäl, "fler rankade kollegor") och fungerar utan AI.
+3. **AI sätter ihop teamet** (`composeTeam`) ur shortlistan: roller,
+   komplementaritet (täck olika delar med olika personer), max 8, EN lead =
+   högst nivå på viktigaste taggen med rimlig belastning; en fullbelagd person
+   tas bara med när ingen annan täcker behovet, och det sägs i motiveringen.
+   Svarar inte modellen används `fallbackCompose` (topp per täckning, ledaren
+   aldrig fullbelagd) med `needsReview=true`.
+
+**Belastning (`computeTeamLoads`).** Räknas ur `missions` med status
+`preparation`/`in_progress`/`review` (statusfilter i frågan, paginerat upp
+till 2 000 rader; kapning ger `complete:false` som visas som "ungefärlig" —
+§ 33.4; utkast och klara räknas inte): ett
+uppdrag räknas en gång per person oavsett koppling (utfärdare, mottagare,
+deltagare, mentor); ansvarig = `lead` i `participants_json` (eller utfärdare
+utan deltagarlista). Viktad belastning = team + ansvar; `loadLevel`: 0 =
+ledig, ≤ 2 = normal, ≤ 4 = hög, > 4 = fullbelagd. Visas som chip i
+teamförslaget, i deltagar-pickern, i teampanelen på uppdragskortet (med
+varning "Hög belastning: …") och på den egna profilen ("Min belastning just
+nu") så alla ser samma siffra. Läses med användarens token → RLS § 21, och
+visas därför **bara för staff** (en bolagsmedlems token ser bara egna
+uppdrag — siffran vore både fel och intern). Belastningen är ett
+arbetsbelastningsmått som skyddar den enskilde från överbokning, inte en
+prestationsbedömning — den lagras aldrig och får ingen historik.
+
+**Regelefterlevnad.** DPIA: `docs/privacy/dpia-team-matching.md` (kräver
+maintainer-godkännande i PR:en, § 10.1/§ 10.2).
+- **GDPR § 5:** hashtags och nivåer är yrkeskompetens (berättigat intresse:
+  bemanning), självdeklarerade, inte art. 9. Taggar får aldrig bära
+  personuppgifter — slug-normaliseringen avvisar personnummer-mönster, UI:t
+  säger "kompetens, aldrig personuppgifter", `competence_tags` innehåller
+  slug/etikett/område/skapare och varje ny post auditeras PII-fritt i
+  `agent_actions` (slug + område). Belastningen är ett härlett tal ur redan
+  synliga uppdrag — inget nytt lagras.
+- **§ 9.3:** `users` förblir denylistad; till modellen går BARA den
+  isolerade matcharens pseudonymiserade shortlist (användar-id + taggar/
+  nivå + belastningsetikett — aldrig namn, titel eller e-post) och en
+  personnummer-sanerad beskrivning. Inga nya fält i `lib/ai/context.ts`.
+- **Riskklass (art. 11): begränsad** efter bedömning mot Annex III p. 4(b)
+  i DPIA:n — AI:n utför en förberedande uppgift (tolkar behov, formulerar
+  förslag ur en redan deterministiskt rankad lista utan namn), tilldelar
+  inget, och människan beslutar med full insyn i poäng/skäl. **Omprövas till
+  högrisk** (juridisk granskning före bygge) om förslaget någonsin tilldelar
+  automatiskt, om nivå/belastning sätts av någon annan än personen själv,
+  om prestationshistorik vägs in eller om underlaget används för lön/
+  befordran/anställning.
+- **RLS (§ 21.3):** `competence_tags` list/view staff/observer; createRule
+  roll-lös men **body-låst** (`status = "suggested"`, `created_by =
+  @request.auth.id`, `tenant = @request.auth.tenant` — § 46.8-mönstret,
+  passerar createRule-svepet), och profil-actionen registrerar bara taggar
+  för Movexum-personal; update/delete ledning. Fältlåset på `users`
+  (1700000174) omfattar inte de nya självservice-fälten. Känd avvikelse:
+  `users.viewRule` låter alla i tenanten läsa varandras profilfält (låg
+  känslighet, noterad i DPIA:n).
+- **Schema-drift (§ 24.4):** profil-actionen läser tillbaka posten och varnar
+  om `competence_tags` saknas; `verify-baseline.mjs` asserterar fälten
+  (`REQUIRED_APP_FIELDS`) + kollektionen (must-exist, `MUST_BE_STAFF_OR_OBSERVER`);
+  speglat i `setup-via-api.mjs` (patch av `users`, `competence_tags`-def,
+  `FORCE_CREATE_RULES`). Seeden skrivs av migrationen; utan den faller appen
+  tillbaka på den inbyggda listan (fail-soft).
+- **Lägg aldrig till en seed-tagg utan att spegla den i migrationen** (och
+  tvärtom); nya taggar i drift går via profilen, inte via kod.
 
 ---
 
@@ -5015,8 +5130,9 @@ teamet för uppdraget …", "Du laddade upp … till kunskapsbasen") är ren och
 `lib/personal-feed.ts`; en direkt rad hoppas över när samma post redan finns
 i skrivlagrets logg (dedupe på `collection:record_id`). Multi-relationer
 filtreras med `~` (LIKE på JSON-listan) för att inte träffa `?=`-buggen
-(§ 21.3). Portföljbred feed finns oförändrat på `/hem` (Bolagsnytt,
-`loadActivityFeed`) och `/aktivitet`. **Det personliga filarkivet
+(§ 21.3). Den fulla tenant-breda loggen finns oförändrat på `/aktivitet`;
+Bolagsnytt på `/hem` visar bara människopublicerade bolagsnyheter
+(`loadCompanyNews`, § 37.1). **Det personliga filarkivet
 (`user_files`, Filer) loggas medvetet INTE** — det är privat arbetsyta och
 ska inte kännas övervakad; det som visas är gemensamt material och det som
 rör andra. Ingen ny dataväg, inga nya fält: rader från staff-only-
@@ -5708,14 +5824,35 @@ all IO och skickar färdig data:
    framtida bruk.
 4. **Sidospalten** (4/12; på mobil under avdelningarna) — **två likadana,
    korta listor** så båda syns direkt: **Bolagsnytt** (`CompanyNews`, de
-   senaste **6** ur den samlade aktivitetsloggen § 32, "Hela loggen" →
-   `/aktivitet`) och under den **Omvärld** (`OmvarldFeed`, § 37.4, max 6) —
+   senaste **6**, "Hela loggen" → `/aktivitet`) och under den **Omvärld**
+   (`OmvarldFeed`, § 37.4, max 6) —
    båda som **vertikal
    tidslinje** med hårlinje, färgprickar (lila = AI-utfört/verktyg, grön =
    utbildning, gul = avtal/möte, brand = övrigt; Movexum-blå = extern källa),
    eyebrow med tid + bolag/källa och "AI"-märkning (art. 13). Omvärlden har
    källfilter som understrukna textlänkar med statusprick och en ärlig
    statusrad per källa.
+
+**Bolagsnytt = bara nyheter om bolagen som teamet publicerat (2026-09-30).**
+Listan visade tidigare den samlade aktivitetsloggen (§ 32) — alla
+bolagshändelser PLUS skrivlagrets ändringslogg — så "Verksamhetsår: status
+ändrades", "Anslagstavlan: … fästes" och "Ny modul i Startupkompassen" trängde
+ut det som faktiskt handlar om bolagen. Nu läser `loadCompanyNews`
+(`lib/feed/activity-feed.ts`) ENBART `activities`-rader som är knutna till ett
+bolag och skrivna av en människa: `kind` = `manual` (chattens
+`create_startup_activity`), `''` (legacy), `note` eller `meeting` (sparat
+mötesprotokoll § 34) — och aldrig rader med `tool`/`tool_run` satt (t.ex.
+"Begärde ändringar på <verktyg>", som är arbetsflöde). Systemhändelser
+(`tool_run`, `integration_sync`, `workshop_*`, `education_document`,
+`agreement`, `onboarding`, `mission`, `support_check` …) och hela
+`agent_actions`-loggen visas INTE här — de finns oförändrat på `/aktivitet`
+(och i Bolagsnytt-länken "Hela loggen"). Urvalet är rent + enhetstestat i
+`lib/company-news.ts` (`COMPANY_NEWS_FILTER` med bundna parametrar +
+`isCompanyNewsActivity` som JS-spegel/defense-in-depth). Läses med användarens
+token (RLS § 21), `owner` expanderas bara för visningsnamn (tooltip "Av …",
+aldrig e-post). Ingen ny dataväg, inga nya fält; riskklass n/a. Den tidigare
+tenant-breda `loadActivityFeed` är borttagen — `/aktivitet` har sin egen
+läsning och chatten använder `loadPersonalActivityFeed` (§ 32).
 
 Nyckeltalen läses fortfarande via `getList(1,1).totalItems` med användarens
 token. Ingen ny dataväg; enda nya fältet är `annual_wheel_categories.show_on_home`
@@ -5743,7 +5880,8 @@ blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdn
 | `backend/pocketbase-schema/migrations/1700000144_create_org_posts.js` | Collection `org_posts` |
 | `apps/web/src/lib/org-posts/data.ts` | Enda läsvägen (`listOrgPosts`, fail-soft) |
 | `apps/web/src/lib/actions/org-posts.ts` | Server actions: skapa/ändra/fäst/radera (RBAC, validering, superuser-fallback, audit) |
-| `apps/web/src/lib/feed/activity-feed.ts` | Delad feed-laddare (`activities` + `agent_actions`) för `/chatt` OCH `/hem` |
+| `apps/web/src/lib/feed/activity-feed.ts` | Feed-laddare: `loadCompanyNews` (Bolagsnytt på `/hem` — bara människopublicerade bolagsaktiviteter) + `loadPersonalActivityFeed` (`/chatt`, § 32) |
+| `apps/web/src/lib/company-news.ts` (+ `.test.ts`) | Ren, enhetstestad urvalsregel för Bolagsnytt (`COMPANY_NEWS_FILTER`, `isCompanyNewsActivity`) |
 | `apps/web/src/lib/ai/web.ts` | `fetchWebFeedItems` — strukturerade RSS-poster med in-process-cache (30 min) |
 | `apps/web/src/app/hem/page.tsx` | Sidan (server; alla källor parallellt via `Promise.allSettled`) |
 | `apps/web/src/components/home/HomeFrontPage.tsx` | Layouten (server): masthead + siffer-rad, tidslinje med fönsterval, spalter — ren presentation av data från `page.tsx` |
@@ -7382,3 +7520,90 @@ väljas. Vit text på panel/omslag använder `text-movexum-vit` (§ 4 p. 1).
   (tenantens egen logotyp visas när den finns).
 - **Migrationer** 1700000172 och 1700000175 är nya, oföränderliga filnummer.
 
+
+## 49. Önskemål & buggar (`/onskemal`) — intern backlog med svar
+
+### 49.1 Översikt
+
+`/onskemal` (modul `onskemal`, titel **Önskemål & buggar**, "System"-railen;
+staff/observer) är plattformens egen backlog: användarna i systemet lägger
+upp **kort** med det de saknar, det som krånglar eller det de undrar över.
+Varje kort har en **typ** (bugg / ny funktion / ändring / fråga), ett
+**område** (vilken sida i plattformen det gäller — dropdown, t.ex.
+"Rapportering") och en beskrivning. **Ledningen** (admin/incubator_lead)
+**svarar** på kortet och **klarmarkerar** när det är gjort; ett klart kort kan
+återöppnas. Filter på status/typ/sida/"bara mina" + fritextsök. Korten visas
+som **lista** eller **kanban-tavla** (Öppen · Besvarad · Klar) — valet sparas
+per webbläsare (`localStorage` `movexum-feedback-view`, bekvämlighet).
+Ledningen drar kort mellan kolumnerna (HTML5-DnD, samma mönster som
+`TaskKanban` § 15.7; på mobil en "Flytta till"-select); kolumnen Besvarad
+kräver att ett svar redan finns (`setFeedbackStatusAction` avvisar flytten
+med tydligt fel — kolumnen är ingen fri hink). Flytten är optimistisk i
+klienten och rullas tillbaka vid fel.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/feedback.ts` (+ `.test.ts`) | Ren, enhetstestad domänlogik: typer/statusar/områden (`FEEDBACK_AREAS`), roller, `validateFeedbackInput`/`validateFeedbackAnswer`, `canEditFeedback`/`canDeleteFeedback`, backlog-sortering |
+| `backend/pocketbase-schema/migrations/1700000176_create_feedback_items.js` | Collection `feedback_items` |
+| `backend/pocketbase-schema/migrations/1700000177_backfill_enabled_modules_onskemal.js` | Backfill av `users.enabled_modules` (§ 36.3-läxan — annars saknas sidan i sidmenyn för redan sparade listor) |
+| `apps/web/src/lib/feedback/data.ts` | Enda läsvägen (`listFeedbackItems`, fail-soft med `error`/`truncated`) |
+| `apps/web/src/lib/actions/onskemal.ts` | Server actions: skapa/redigera/radera kort, svara, klarmarkera/återöppna (RBAC + audit). **OBS:** `lib/actions/feedback.ts` är AI-svarens 👍/👎 (§ 9.10) — en annan sak |
+| `apps/web/src/app/onskemal/{page,FeedbackBoard}.tsx` | Sidan + tavlan (client) |
+
+### 49.2 Datamodell & regler
+
+- **`feedback_items`** (1700000176): `tenant` (cascade), `author` (→ users,
+  ingen cascade), `title` (≤ 160), `description` (≤ 5000), `kind` (select —
+  MÅSTE spegla `FEEDBACK_KINDS`: `bug | feature | change | question`),
+  `area` (**text**, ≤ 40 — nyckel ur `FEEDBACK_AREAS`; medvetet inte select så
+  en ny sida kan läggas till i listan utan migration; valideringen ligger i
+  koden), `status` (select — MÅSTE spegla `FEEDBACK_STATUSES`: `open |
+  answered | done`), `answer` (≤ 5000), `answered_by`/`answered_at`,
+  `done_by`/`done_at`, autodate explicit (§ 28.5). Speglad i
+  `setup-via-api.mjs` (def + `FORCE_CREATE_RULES`) och asserterad i
+  `verify-baseline.mjs` (must-exist + `MUST_BE_STAFF_OR_OBSERVER`).
+- **Bara egna aktiverade sidor.** Dropdownen över sidor visar enbart de
+  sidor som är aktiverade på den inloggades egen profil (§ 36.3): varje
+  modul-kopplat område bär `module` i `FEEDBACK_AREAS`, och
+  `allowedFeedbackAreas` (ren, enhetstestad) + `lib/feedback/areas.ts`
+  (`feedbackAreasForUser`, samma `canAccessModuleForUser` som sidmenyn)
+  filtrerar listan. Tvärgående områden utan modul (mobil, inloggning,
+  "annat") är alltid valbara. **Samma lista är gränsen server-side**
+  (`assertAreaAllowed` i actionerna) — klienten kan inte skicka ett annat
+  område. Vid redigering får kortets befintliga område alltid behållas
+  (ledningen kan redigera kort om sidor hen själv inte har i menyn).
+- **RBAC (ISO 27001 A.5.15–A.5.18):** lägga upp = Movexum-personal
+  (`FEEDBACK_AUTHOR_ROLES`: admin/incubator_lead/coach/mentor; observer
+  läser); redigera = författaren tills kortet är klart, eller ledningen;
+  radera = ledningen, eller författaren för ett eget ännu obesvarat kort;
+  svara/klarmarkera/återöppna = ledningen (`FEEDBACK_RESPONDER_ROLES`).
+  Enforce:as i server-actionen (PB:s createRule är roll-lös per § 21.3;
+  update/delete = `author` eller ledning med `:each ?=`). Tenant + author
+  stämplas server-side. Skrivning via användartoken med superuser-fallback
+  BARA vid PB v0.23.4:s tysta regel-nekande (400/403/404), efter verifierad
+  roll + tenant.
+- **Status följer svaret:** ett svar sätter `answered` (ett redan klart kort
+  förblir `done`); klarmarkering sätter `done` + `done_by/at`; återöppning
+  går tillbaka till `answered` om ett svar finns, annars `open`.
+- **Sortering** (`compareFeedbackItems`): öppna först (buggar och frågor före
+  ändringar/nya funktioner), sedan besvarade, sist klara — nyast först inom
+  varje grupp. Läsvägen paginerar upp till 2 000 och visar kapning som
+  banner (§ 33.4-principen); ett läsfel visas som banner, aldrig som "tom
+  backlog".
+- **Audit (ISO 27001 A.8.15):** varje mutation loggas i `agent_actions`
+  (PII-fritt: rubrik/typ/område/status; beskrivning och svar bara som
+  längd; radering som `update` + `deleted`, § 30.6) och mappas i
+  `feed/agent-log.ts` → syns i Bolagsnytt/`/aktivitet` med länk
+  `/onskemal#kort-<id>`.
+- **GDPR § 5:** kort och svar är verksamhetsfritext från personalen —
+  personnummer-saneras på skrivvägen (§ 15.6), UI:t uppmanar att inte skriva
+  personuppgifter. `author`/`answered_by`/`done_by` visas som visningsnamn,
+  aldrig e-post. Rättslig grund: berättigat intresse (förbättring av det
+  interna verktyget). `cascadeDelete` på tenant; användarrelationer nollas
+  vid radering (kortet lever vidare som "Borttagen användare").
+- **AI:** `feedback_items` är inte denylistad — chatten kan läsa backloggen
+  via `query_collection` (RLS staff/observer + fältmaskning § 9.3) men har
+  inget skrivverktyg. Riskklass (EU AI Act): n/a — ingen AI-inferens.
+- **§ 21-isolering:** list/view staff/observer-only; en ren `startup_member`
+  ser varken modulen (inte i `MEMBER_RAIL`) eller kollektionen.
+- **Migrationer** 1700000176–177 är nya, oföränderliga filnummer.

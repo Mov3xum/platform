@@ -152,6 +152,10 @@ async function verifyCollectionsExist() {
     'startup_contacts',
     // Kontaktboken (§ 45, migration 1700000157) — förfrågningar om kontaktanvändning.
     'contact_requests',
+    // Önskemål & buggar (§ 49, migration 1700000176) — intern backlog.
+    'feedback_items',
+    // Kompetens-hashtags (§ 29.7, migration 1700000178) — tenantens vokabulär.
+    'competence_tags',
     'capital_rounds',
     'intellectual_property',
     'startup_kpis',
@@ -419,6 +423,12 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // + vem som frågar om vilken extern kontakt → staff/observer-only; bolagen
   // ser DELADE kontakter via den kurerade vyn på Mitt bolag, inte här.
   'contact_requests',
+  // Önskemål & buggar (§ 49, migration 1700000176). Intern backlog för
+  // Movexum-personal (kort + ledningens svar) → staff/observer-only.
+  'feedback_items',
+  // Kompetens-hashtags (§ 29.7, migration 1700000178). Intern bemannings-
+  // vokabulär → staff/observer-only.
+  'competence_tags',
   // Finansieringsprojekt/arbetspaket och stödcheck-regler (§ 46). Intern
   // projektekonomi och uppföljningsstyrning → staff/observer-only.
   'funding_projects',
@@ -957,6 +967,9 @@ const REQUIRED_APP_FIELDS = [
   // Måltyp + ägare (migration 1700000161): utan fälten "sparas" ett personligt
   // mål tyst som övergripande utan ägare.
   { collection: 'goals', fields: ['kind', 'owner_user'] },
+  // Kompetens-hashtags (§ 29.7, migration 1700000178): utan fälten "sparas"
+  // taggar/nivåer tyst bort från Min profil och teammatchningen ser bara områden.
+  { collection: 'users', fields: ['competence_tags', 'development_interests'] },
   // Stödcheckar (§ 46, migrationer 1700000168/170): uppföljningskort länkas via
   // tasks.support_check_application; bokföringsspåren länkar tillbaka till ansökan.
   { collection: 'tasks', fields: ['support_check_application'] },

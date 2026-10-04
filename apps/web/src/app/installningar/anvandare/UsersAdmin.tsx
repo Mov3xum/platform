@@ -1,12 +1,14 @@
 'use client';
 
-import { useActionState, useMemo, useState, type ReactNode } from 'react';
+import { useActionState, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import { ALL_ROLES, defaultModulesForRoles, type Role } from '@platform/shared';
 import { Avatar, Chip } from '@/components/proto';
 import { Icon } from '@/components/proto/Icon';
 import {
   deleteUserAction,
   resetUserPasswordAction,
+  updateUserDisplayNameAction,
   updateUserModulesAction,
   updateUserRolesAction,
   type UpdateUserState
@@ -277,44 +279,180 @@ function PasswordForm({ user }: { user: ManagedUser }) {
   );
 }
 
+/* ── Namn ───────────────────────────────────────────────────────────── */
+
+/**
+ * Visningsnamnet redigeras inline via en liten penna överst i den öppnade
+ * användaren. Sparas med `updateUserDisplayNameAction` (RBAC + tenant i
+ * server-actionen); listan läses om så rubrikraden följer med.
+ */
+function NameEditor({ user }: { user: ManagedUser }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(user.name);
+  const [state, formAction, pending] = useActionState(updateUserDisplayNameAction, initialUpdate);
+  const trimmed = name.replace(/\s+/g, ' ').trim();
+  const dirty = trimmed !== '' && trimmed !== user.name;
+
+  useEffect(() => {
+    if (state.status === 'ok') {
+      setEditing(false);
+      router.refresh();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.status, state.message]);
+
+  if (!editing) {
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="truncate font-heading text-[15px] font-semibold text-foreground">{user.name}</span>
+        <button
+          type="button"
+          onClick={() => {
+            setName(user.name);
+            setEditing(true);
+          }}
+          className="flex h-7 w-7 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground"
+          aria-label="Redigera namn"
+          title="Redigera namn"
+        >
+          <Icon name="pencil" size={12} />
+        </button>
+        {state.status === 'ok' && (
+          <span className="text-[11.5px] text-movexum-morkgron dark:text-movexum-gron">{state.message}</span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <form action={formAction} className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      <input type="hidden" name="user_id" value={user.id} />
+      <input
+        name="display_name"
+        type="text"
+        required
+        maxLength={200}
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setEditing(false);
+        }}
+        aria-label="Visningsnamn"
+        className={`${inputClass} max-w-xs`}
+      />
+      <button type="submit" className="mx-btn mx-primary mx-sm" disabled={pending || !dirty}>
+        {pending ? 'Sparar…' : 'Spara namn'}
+      </button>
+      <button type="button" className="mx-btn mx-sm" onClick={() => setEditing(false)} disabled={pending}>
+        Avbryt
+      </button>
+      <StatusLine state={state} />
+    </form>
+  );
+}
+
 /* ── Radera ─────────────────────────────────────────────────────────── */
 
-function DeleteForm({ user }: { user: ManagedUser }) {
+/**
+ * Raderingen ligger som en tydlig åtgärd överst i den öppnade användaren —
+ * inte begravd under modul- och lösenordspanelerna. Knappen fäller ut den
+ * typade e-postbekräftelsen (skydd mot felklick, samma server-action och
+ * validering som förut, `validateDeleteConfirmation`). Lyckad radering
+ * stänger raden och läser om listan.
+ */
+function DetailHeader({
+  user,
+  canDelete,
+  blockedReason,
+  onDeleted
+}: {
+  user: ManagedUser;
+  canDelete: boolean;
+  blockedReason?: string;
+  onDeleted: () => void;
+}) {
+  const router = useRouter();
+  const [expanded, setExpanded] = useState(false);
   const [confirm, setConfirm] = useState('');
   const [state, formAction, pending] = useActionState(deleteUserAction, initialUpdate);
   const email = user.email || '';
   const matches = email !== '' && confirm.trim().toLowerCase() === email.toLowerCase();
 
+  useEffect(() => {
+    if (state.status === 'ok') {
+      onDeleted();
+      router.refresh();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.status]);
+
   return (
-    <Panel
-      title="Radera konto"
-      description="Tar bort kontot permanent (GDPR art. 17). Skriv användarens e-post för att bekräfta."
-      danger
-    >
-      <form action={formAction} className="space-y-3">
-        <input type="hidden" name="user_id" value={user.id} />
-        <input
-          name="confirm_email"
-          type="email"
-          autoComplete="off"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          placeholder={email || 'E-post saknas — kan inte raderas här'}
-          disabled={email === ''}
-          className={inputClass}
-        />
-        <div className="flex items-center justify-end gap-3">
-          <StatusLine state={state} />
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <NameEditor user={user} />
+          <div className="mt-0.5 text-[11.5px] text-foreground-subtle">
+            Konto skapat{' '}
+            {user.createdAt
+              ? new Date(user.createdAt).toLocaleDateString('sv-SE', { timeZone: 'Europe/Stockholm' })
+              : '—'}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {!canDelete && blockedReason && (
+            <span className="text-[11.5px] text-foreground-subtle">{blockedReason}</span>
+          )}
           <button
-            type="submit"
-            className="mx-btn mx-sm border-movexum-orange text-movexum-morkorange hover:bg-movexum-pastell-orange dark:text-movexum-orange"
-            disabled={pending || !matches}
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            disabled={!canDelete}
+            aria-expanded={expanded}
+            className="mx-btn mx-sm border-movexum-orange text-movexum-morkorange hover:bg-movexum-pastell-orange disabled:cursor-not-allowed disabled:opacity-50 dark:text-movexum-orange"
           >
-            {pending ? 'Raderar…' : 'Radera användaren'}
+            <Icon name="trash" size={12} />
+            {expanded ? 'Avbryt radering' : 'Radera användaren'}
           </button>
         </div>
-      </form>
-    </Panel>
+      </div>
+
+      {expanded && canDelete && (
+        <Panel
+          title="Radera konto"
+          description="Tar bort kontot permanent (GDPR art. 17). Skriv användarens e-post för att bekräfta."
+          danger
+        >
+          <form action={formAction} className="space-y-3">
+            <input type="hidden" name="user_id" value={user.id} />
+            <input
+              name="confirm_email"
+              type="email"
+              autoComplete="off"
+              autoFocus
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder={email || 'E-post saknas — kan inte raderas här'}
+              disabled={email === ''}
+              className={inputClass}
+            />
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <StatusLine state={state} />
+              <button type="button" className="mx-btn mx-sm" onClick={() => setExpanded(false)}>
+                Avbryt
+              </button>
+              <button
+                type="submit"
+                className="mx-btn mx-sm border-movexum-orange text-movexum-morkorange hover:bg-movexum-pastell-orange dark:text-movexum-orange"
+                disabled={pending || !matches}
+              >
+                {pending ? 'Raderar…' : 'Radera permanent'}
+              </button>
+            </div>
+          </form>
+        </Panel>
+      )}
+    </div>
   );
 }
 
@@ -324,6 +462,7 @@ function UserRow({
   user,
   open,
   onToggle,
+  onDeleted,
   startups,
   assignableRoles,
   actorId,
@@ -332,6 +471,7 @@ function UserRow({
   user: ManagedUser;
   open: boolean;
   onToggle: () => void;
+  onDeleted: () => void;
   startups: StartupOption[];
   assignableRoles: Role[];
   actorId: string;
@@ -341,6 +481,15 @@ function UserRow({
   const manageable = canManageUser(isAdmin ? ['admin'] : ['incubator_lead'], user.roles);
   const isMember = user.roles.includes('startup_member');
   const primary = primaryRole(user.roles);
+  // Speglar `canTakeOverPeer` i server-actionen: en incubator_lead raderar
+  // aldrig ett annat ledningskonto. Servern är fortfarande gränsen.
+  const peerBlocked = !isAdmin && user.roles.includes('incubator_lead');
+  const canDelete = manageable && !isSelf && !peerBlocked;
+  const deleteBlockedReason = isSelf
+    ? 'Du kan inte radera ditt eget konto.'
+    : peerBlocked
+      ? 'Bara en administratör kan radera ett ledningskonto.'
+      : undefined;
 
   return (
     <li className="border-b border-default last:border-b-0">
@@ -407,6 +556,13 @@ function UserRow({
             </p>
           ) : (
             <>
+              <DetailHeader
+                user={user}
+                canDelete={canDelete}
+                blockedReason={deleteBlockedReason}
+                onDeleted={onDeleted}
+              />
+
               <RolesForm user={user} assignableRoles={assignableRoles} isSelf={isSelf} />
 
               {isMember && (
@@ -424,12 +580,7 @@ function UserRow({
 
               <ModulesForm user={user} />
 
-              {!isSelf && (
-                <div className="grid gap-3 lg:grid-cols-2">
-                  <PasswordForm user={user} />
-                  <DeleteForm user={user} />
-                </div>
-              )}
+              {!isSelf && <PasswordForm user={user} />}
             </>
           )}
         </div>
@@ -560,6 +711,7 @@ export function UsersAdmin({
                 user={u}
                 open={openId === u.id}
                 onToggle={() => setOpenId((cur) => (cur === u.id ? null : u.id))}
+                onDeleted={() => setOpenId(null)}
                 startups={startups}
                 assignableRoles={assignableRoles}
                 actorId={actorId}

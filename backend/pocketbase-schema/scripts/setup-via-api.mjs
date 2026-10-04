@@ -684,6 +684,14 @@ await patchUsersCollection([
   { name: 'bio', type: 'text', required: false, max: 1000 }
 ]);
 
+// 4c. users — kompetens-hashtags + utvecklingsintressen (migration 1700000178,
+// CLAUDE.md § 29.7). json: [{ tag, area, level }] respektive [slug]. Självservice
+// (fältlåset 1700000174 låser dem inte); `competences` härleds ur taggarna.
+await patchUsersCollection([
+  { name: 'competence_tags', type: 'json', required: false, maxSize: 8000 },
+  { name: 'development_interests', type: 'json', required: false, maxSize: 2000 }
+]);
+
 // 5. partners ---------------------------------------------------------------
 await ensureCollection({
   id: 'partners_collection',
@@ -2545,8 +2553,8 @@ await ensureCollection({
   listRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
   viewRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
   createRule: ANY_AUTH,
-  updateRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`,
-  deleteRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`
+  updateRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`
 });
 
 await ensureCollection({
@@ -2657,8 +2665,8 @@ await ensureCollection({
   listRule: `${ANY_AUTH} && @request.auth.tenant = module.tenant`,
   viewRule: `${ANY_AUTH} && @request.auth.tenant = module.tenant`,
   createRule: ANY_AUTH,
-  updateRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`,
-  deleteRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`
+  updateRule: `${ANY_AUTH} && @request.auth.tenant = module.tenant && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && @request.auth.tenant = module.tenant && ${COMPASS_STAFF_EACH}`
 });
 
 await ensureCollection({
@@ -2678,8 +2686,8 @@ await ensureCollection({
   listRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
   viewRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
   createRule: ANY_AUTH,
-  updateRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`,
-  deleteRule: `${ANY_AUTH} && ${COMPASS_STAFF_EACH}`
+  updateRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && @request.auth.tenant = conversation.tenant && ${COMPASS_STAFF_EACH}`
 });
 
 await ensureCollection({
@@ -4188,6 +4196,77 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
 
+// Migration 1700000176: feedback_items — Önskemål & buggar (§ 49). Intern
+// backlog med kort (bugg/ny funktion/ändring/fråga) per del av plattformen.
+// list/view staff/observer-only; createRule roll-lös (§ 21.3); update/delete:
+// författaren eller ledningen (fältgränsen svar/status ligger i koden).
+// `area` är TEXT (validerad mot FEEDBACK_AREAS i koden, ingen migration per
+// ny sida); `kind`/`status` MÅSTE spegla packages/shared/src/feedback.ts.
+await ensureCollection({
+  id: 'feedback_items_collection',
+  name: 'feedback_items',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'author', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 160 },
+    { name: 'description', type: 'text', required: true, min: 1, max: 5000 },
+    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['bug', 'feature', 'change', 'question'] },
+    { name: 'area', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['open', 'answered', 'done'] },
+    { name: 'answer', type: 'text', required: false, max: 5000 },
+    { name: 'answered_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'answered_at', type: 'date', required: false },
+    { name: 'done_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'done_at', type: 'date', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_feedback_items_tenant ON feedback_items (tenant)',
+    'CREATE INDEX idx_feedback_items_tenant_status ON feedback_items (tenant, status)',
+    'CREATE INDEX idx_feedback_items_author ON feedback_items (author)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`
+});
+
+// Migration 1700000178: competence_tags — tenant-gemensam hashtag-vokabulär
+// för kompetenser (§ 29.7). Seedade taggar (status approved) + taggar kollegor
+// lagt till i Min profil (status suggested). list/view staff/observer;
+// createRule roll-lös (§ 21.3); update/delete ledning. `area` är TEXT
+// (CompetenceId, valideras i koden). Seeden skrivs av migrationen (ingen seed
+// här — bootstrap:en skapar bara schemat; profilen fungerar ändå mot den
+// inbyggda seed-listan i @platform/shared).
+await ensureCollection({
+  id: 'competence_tags_collection',
+  name: 'competence_tags',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'slug', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'label', type: 'text', required: true, min: 1, max: 60 },
+    { name: 'area', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['suggested', 'approved'] },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_competence_tags_tenant_slug ON competence_tags (tenant, slug)',
+    'CREATE INDEX idx_competence_tags_tenant_area ON competence_tags (tenant, area)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  // Body-låst (§ 46.8-mönstret): bara `suggested`, eget created_by, egen tenant.
+  createRule: `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.created_by = @request.auth.id && @request.body.status = "suggested" && @request.body.tenant = @request.auth.tenant`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+
 // Migration 1700000158: notifications.kind += contact_request/contact_decision
 // (union — ensureCollection synkar inte fält på befintlig collection).
 // + migration 1700000169 (stödcheckar § 46): support_check_*-notiser.
@@ -4955,6 +5034,9 @@ const FORCE_CREATE_RULES = {
   surveys: `${ANY_AUTH} && @request.auth.tenant != ""`,
   // Kontaktboken (§ 45, migration 1700000157) — roll-enforcement i skrivlagret.
   contact_requests: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Önskemål & buggar (§ 49, migration 1700000176) — roll-enforcement i server-actionen.
+  feedback_items: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  competence_tags: `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.created_by = @request.auth.id && @request.body.status = "suggested" && @request.body.tenant = @request.auth.tenant`,
   // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167) —
   // roll-/medlemskontroll i skrivlagret och route-handlers.
   funding_projects: `${ANY_AUTH} && @request.auth.tenant != ""`,
