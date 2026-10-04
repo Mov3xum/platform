@@ -5102,8 +5102,9 @@ teamet för uppdraget …", "Du laddade upp … till kunskapsbasen") är ren och
 `lib/personal-feed.ts`; en direkt rad hoppas över när samma post redan finns
 i skrivlagrets logg (dedupe på `collection:record_id`). Multi-relationer
 filtreras med `~` (LIKE på JSON-listan) för att inte träffa `?=`-buggen
-(§ 21.3). Portföljbred feed finns oförändrat på `/hem` (Bolagsnytt,
-`loadActivityFeed`) och `/aktivitet`. **Det personliga filarkivet
+(§ 21.3). Den fulla tenant-breda loggen finns oförändrat på `/aktivitet`;
+Bolagsnytt på `/hem` visar bara människopublicerade bolagsnyheter
+(`loadCompanyNews`, § 37.1). **Det personliga filarkivet
 (`user_files`, Filer) loggas medvetet INTE** — det är privat arbetsyta och
 ska inte kännas övervakad; det som visas är gemensamt material och det som
 rör andra. Ingen ny dataväg, inga nya fält: rader från staff-only-
@@ -5794,14 +5795,35 @@ all IO och skickar färdig data:
    framtida bruk.
 4. **Sidospalten** (4/12; på mobil under avdelningarna) — **två likadana,
    korta listor** så båda syns direkt: **Bolagsnytt** (`CompanyNews`, de
-   senaste **6** ur den samlade aktivitetsloggen § 32, "Hela loggen" →
-   `/aktivitet`) och under den **Omvärld** (`OmvarldFeed`, § 37.4, max 6) —
+   senaste **6**, "Hela loggen" → `/aktivitet`) och under den **Omvärld**
+   (`OmvarldFeed`, § 37.4, max 6) —
    båda som **vertikal
    tidslinje** med hårlinje, färgprickar (lila = AI-utfört/verktyg, grön =
    utbildning, gul = avtal/möte, brand = övrigt; Movexum-blå = extern källa),
    eyebrow med tid + bolag/källa och "AI"-märkning (art. 13). Omvärlden har
    källfilter som understrukna textlänkar med statusprick och en ärlig
    statusrad per källa.
+
+**Bolagsnytt = bara nyheter om bolagen som teamet publicerat (2026-09-30).**
+Listan visade tidigare den samlade aktivitetsloggen (§ 32) — alla
+bolagshändelser PLUS skrivlagrets ändringslogg — så "Verksamhetsår: status
+ändrades", "Anslagstavlan: … fästes" och "Ny modul i Startupkompassen" trängde
+ut det som faktiskt handlar om bolagen. Nu läser `loadCompanyNews`
+(`lib/feed/activity-feed.ts`) ENBART `activities`-rader som är knutna till ett
+bolag och skrivna av en människa: `kind` = `manual` (chattens
+`create_startup_activity`), `''` (legacy), `note` eller `meeting` (sparat
+mötesprotokoll § 34) — och aldrig rader med `tool`/`tool_run` satt (t.ex.
+"Begärde ändringar på <verktyg>", som är arbetsflöde). Systemhändelser
+(`tool_run`, `integration_sync`, `workshop_*`, `education_document`,
+`agreement`, `onboarding`, `mission`, `support_check` …) och hela
+`agent_actions`-loggen visas INTE här — de finns oförändrat på `/aktivitet`
+(och i Bolagsnytt-länken "Hela loggen"). Urvalet är rent + enhetstestat i
+`lib/company-news.ts` (`COMPANY_NEWS_FILTER` med bundna parametrar +
+`isCompanyNewsActivity` som JS-spegel/defense-in-depth). Läses med användarens
+token (RLS § 21), `owner` expanderas bara för visningsnamn (tooltip "Av …",
+aldrig e-post). Ingen ny dataväg, inga nya fält; riskklass n/a. Den tidigare
+tenant-breda `loadActivityFeed` är borttagen — `/aktivitet` har sin egen
+läsning och chatten använder `loadPersonalActivityFeed` (§ 32).
 
 Nyckeltalen läses fortfarande via `getList(1,1).totalItems` med användarens
 token. Ingen ny dataväg; enda nya fältet är `annual_wheel_categories.show_on_home`
@@ -5829,7 +5851,8 @@ blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdn
 | `backend/pocketbase-schema/migrations/1700000144_create_org_posts.js` | Collection `org_posts` |
 | `apps/web/src/lib/org-posts/data.ts` | Enda läsvägen (`listOrgPosts`, fail-soft) |
 | `apps/web/src/lib/actions/org-posts.ts` | Server actions: skapa/ändra/fäst/radera (RBAC, validering, superuser-fallback, audit) |
-| `apps/web/src/lib/feed/activity-feed.ts` | Delad feed-laddare (`activities` + `agent_actions`) för `/chatt` OCH `/hem` |
+| `apps/web/src/lib/feed/activity-feed.ts` | Feed-laddare: `loadCompanyNews` (Bolagsnytt på `/hem` — bara människopublicerade bolagsaktiviteter) + `loadPersonalActivityFeed` (`/chatt`, § 32) |
+| `apps/web/src/lib/company-news.ts` (+ `.test.ts`) | Ren, enhetstestad urvalsregel för Bolagsnytt (`COMPANY_NEWS_FILTER`, `isCompanyNewsActivity`) |
 | `apps/web/src/lib/ai/web.ts` | `fetchWebFeedItems` — strukturerade RSS-poster med in-process-cache (30 min) |
 | `apps/web/src/app/hem/page.tsx` | Sidan (server; alla källor parallellt via `Promise.allSettled`) |
 | `apps/web/src/components/home/HomeFrontPage.tsx` | Layouten (server): masthead + siffer-rad, tidslinje med fönsterval, spalter — ren presentation av data från `page.tsx` |

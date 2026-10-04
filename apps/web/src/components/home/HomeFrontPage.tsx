@@ -308,7 +308,7 @@ export function HomeFrontPage({
                 <SectionHead
                   eyebrow="Portföljen"
                   title="Bolagsnytt"
-                  description="Det senaste i portföljen och det som gjorts i systemet"
+                  description="Nyheter om bolagen, publicerade av teamet"
                   href="/aktivitet"
                   linkLabel="Hela loggen"
                 />
