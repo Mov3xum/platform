@@ -1282,6 +1282,7 @@ och kan renderas av samma UI oavsett leverantör.
 | `apps/web/src/lib/integrations/sync.ts` | Orkestrator (`runSync`) |
 | `apps/web/src/lib/integrations/providers/<slug>/{client,handler,normalize}.ts` | En per provider |
 | `apps/web/src/lib/actions/integrations.ts` | Connect/disconnect/sync server actions |
+| `apps/web/src/app/installningar/integrationer/page.tsx` | Katalogen som flik under Inställningar (admin/incubator_lead, § 36.1) — delar `components/integrations/IntegrationsCatalog.tsx` med `/integrationer` |
 | `apps/web/src/app/integrationer/[slug]/page.tsx` | Detaljsida (anslut + synka) |
 | `apps/web/src/app/integrationer/[slug]/poster/page.tsx` | Records-lista |
 
@@ -1405,8 +1406,20 @@ en kandidatlista och rapporterar PII-fritt i `notes` vad som saknades, och
 **Kör den på ett känt bolag (t.ex. med Combly-facit) innan portföljen synkas.**
 Roarings endpoint-versioner och beloppsenhet är env-överstyrbara
 (`ROARING_API_BASE_URL`, `ROARING_OVERVIEW_PATH`, `ROARING_FINANCIALS_PATH`,
-`ROARING_GROUP_STRUCTURE_PATH`, `ROARING_BENEFICIAL_OWNER_PATH`,
-`ROARING_AMOUNT_MULTIPLIER` default 1000 = TSEK→SEK); Bolagsverkets bas-URL
+`ROARING_GROUP_STRUCTURE_PATH`, `ROARING_BENEFICIAL_OWNER_PATH` — varje
+`*_PATH` är en **kommaseparerad kandidatlista** i prioritetsordning som provas
+vid 403/404, första svar med data vinner; `ROARING_AMOUNT_MULTIPLIER` default
+1000 = TSEK→SEK). **Verifierat mot Roarings publika dokumentation 2026-09-30
+(`docs/integrations/roaring-sandbox-test.md`):** token = `POST /token`,
+grunddata `/se/company/overview/2.0`, koncern `/se/company/group-structure/1.0`,
+verklig huvudman **`/se/beneficialowner/2.1`** (den tidigare defaulten
+`/se/company/beneficial-owner/1.0` var fel och ligger nu sist som reserv).
+Bokslut-API:ts sökväg (`/se/company/economy-overview/1.1`) är fortsatt
+obekräftad — se runbooken. **Sandbox = samma värd** (`api.roaring.io`): det
+är nyckelparet från utvecklarportalen som avgör om svaren är testdata, så
+`base_url` lämnas tom. Förhandsgranskningen noterar per API vilken sökväg som
+svarade och vilka **fältnycklar** (aldrig värden) svaret bar, så mappningen kan
+verifieras mot sandboxen utan rå JSON. Bolagsverkets bas-URL
 via credential-fältet eller `BOLAGSVERKET_API_BASE_URL` (testmiljö).
 Credentials (client id/secret) läggs in per tenant på `/integrationer/<slug>`
 och krypteras AES-256-GCM (§ 11.5) — aldrig i kod.
@@ -1417,6 +1430,21 @@ bolagsregister-provider (`RegistrySyncButton`, action
 company_registry-handlers), kolumnerna Balansomslutning/Eget kapital i
 Finansiell historik och sektionen **Ägarbild** (`#agarbild`). `/integrationer`:
 "Synka nu" (hela portföljen), "Testa mot org-nr", täckning per källa.
+**Inställningar → Integrationer (2026-10):** bolagsregister-providrarna ligger
+i en egen kategori **Bolagsregister** först i katalogen, och kortet bär ett
+**inline-formulär** (`RegistryConnectPanel` → den delade `ConnectForm`) så
+Client ID/secret klistras in direkt på kortet; "Synka & testa" leder vidare
+till detaljsidan. Katalogen bygger sektionerna ur `CATEGORY_ORDER`; ett okänt
+`category`-värde hamnar i "Övrigt" i stället för att tyst försvinna (incident
+2026-10: `company_registry` saknades i katalogens typ, så Roaring renderades
+aldrig). **Självläkande katalograd:** providerraden seedas av migration
+1700000173, som bara körs när PB-imagen byggs om — `ensureRegistryProviderRows`
+(`lib/integrations/company-registry/catalog-seed.ts`, SPEGEL av migrationen;
+ändra båda) upsertar saknade rader via den cachade superusern (idempotent på
+slug) när katalogen, detaljsidan eller `connectIntegrationAction` möter en
+handler utan rad; utan superuser visas kortet ändå med orsaken i stället för
+formuläret. Speglat i `setup-via-api.mjs` (category-enumet patchas +
+raderna seedas). Ingen ny dataväg, inga nya fält; riskklass oförändrad.
 
 **GDPR § 5 / § 9.3.** Fysiska personer i ägarbilden lagras UTAN namn,
 personnummer och födelsedatum — bara `owner_kind='person'` + andel/intervall
@@ -5632,6 +5660,7 @@ brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
 | `/installningar/organisation` | Tenants, infra-status, dataresidens |
 | `/installningar/ai-analys` | **AI-analys** — tre undervyer via `?vy=`: **Kostnadstak** (default, § 9.6), **Användning** (f.d. `/insights`: körningar, tokens, kostnad, kvalitetsfeedback § 9.10, adoption) och **Miljöpåverkan** (f.d. `/admin/ai-miljo`, admin-only, § 28.2). `/insights`, `/admin/ai-miljo` och `/installningar/ai-kostnad` är legacy-routes som redirectar hit (perioden bevaras). Modulen `insights` heter "AI-analys", har ingen egen rail-post längre och pekar hit. |
 | `/installningar/ai-minne` | AI-minne (`agent_memory`, § 16.4) |
+| `/installningar/integrationer` | **Integrationer** (2026-09) — organisationens externa tjänster (bolagsregister § 11.8, Brevo/Howspace, Mistral-connectors § 13, personliga OAuth-kopplingar § 14). Katalogen är den delade `components/integrations/IntegrationsCatalog.tsx`; `/integrationer` redirectar admin/incubator_lead hit och visar oförändrat katalogen för coach/bolagsmedlem (personliga integrationer). Detaljsidorna `/integrationer/<slug>` är oförändrade; grinden är `canOpenIntegrations` (`lib/integrations/access.ts`: settings-roll ELLER modulen) och tillbaka-länken följer rollen (`integrationsCatalogHref`). Modulen `integrationer` har ingen egen rail-post längre (samma mönster som `insights`/`anvandare`). |
 | `/installningar/utseende` | Tenant-logotyp + **inloggningssidans utseende** (mall, accentfärg, rubrik/underrubrik, bild/video — § 48) |
 
 `/admin/users` är en legacy-route som redirectar till `/installningar/anvandare`;

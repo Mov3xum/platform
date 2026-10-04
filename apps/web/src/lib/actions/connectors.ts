@@ -209,6 +209,7 @@ export async function activateConnectorAction(input: {
   }
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   return {};
 }
 
@@ -232,6 +233,7 @@ export async function deactivateConnectorAction(input: {
   });
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   return {};
 }
 
@@ -260,6 +262,7 @@ export async function confirmConnectorReadyAction(input: {
   });
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   revalidatePath('/chatt');
   return {};
 }
@@ -303,6 +306,7 @@ export async function toggleConnectorPinAction(input: {
   });
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   revalidatePath('/chatt');
   return {};
 }
@@ -356,6 +360,7 @@ export async function setTenantAllowedConnectorsAction(
   });
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   return {};
 }
 

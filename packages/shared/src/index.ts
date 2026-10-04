@@ -1398,7 +1398,7 @@ export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['kompassen', 'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'kunskapsbas', 'integrationer', 'onskemal', 'installningar', 'min_profil'] }
+  { label: 'System', modules: ['agenter', 'kunskapsbas', 'installningar', 'min_profil'] }
 ];
 
 /**
@@ -1628,11 +1628,15 @@ export const coreModules: ModuleDefinition[] = [
     route: '/installningar/ai-analys'
   },
   {
+    // Bor sedan 2026-09 under Inställningar → Integrationer (ingen egen
+    // rail-post; id:t finns kvar för sparade enabled_modules-listor och
+    // för coach/medlem, som når sina personliga integrationer på
+    // /integrationer — sidan redirectar admin/incubator_lead till fliken).
     id: 'integrationer',
     title: 'Integrationer',
     description: 'Anslut externa tjänster och bygg din organisations unika digitala miljö.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'startup_member'],
-    route: '/integrationer'
+    route: '/installningar/integrationer'
   },
   {
     // Användaradministrationen bor under Inställningar (sektion "Användare");

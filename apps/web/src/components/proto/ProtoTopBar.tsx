@@ -15,8 +15,12 @@ function buildCrumbs(pathname: string): { label: string; href: string; now: bool
   const crumbs: { label: string; href: string; now: boolean }[] = [
     { label: 'Översikt', href: '/hem', now: false }
   ];
-  // first segment = module
-  const mod = coreModules.find((m) => m.route === '/' + seg[0]);
+  // first segment = module. Moduler vars route flyttat in under Inställningar
+  // (t.ex. integrationer → /installningar/integrationer) matchas på id så
+  // detaljsidorna under den gamla adressen behåller sin riktiga titel.
+  const mod =
+    coreModules.find((m) => m.route === '/' + seg[0]) ??
+    coreModules.find((m) => m.id === seg[0]);
   if (mod) {
     crumbs.push({ label: mod.title, href: mod.route, now: seg.length === 1 });
   } else {
