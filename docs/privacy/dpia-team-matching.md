@@ -5,10 +5,10 @@ nivå, utvecklingsintressen) och härledd arbetsbelastning (antal pågående
 team) som underlag för ett AI-stött FÖRSLAG till bemanning av
 tvärfunktionella team (CLAUDE.md § 29, § 29.7).
 
-**Datum:** 2026-10-02 · **Status:** levande dokument. **Kräver
-maintainer-godkännande i PR:en innan funktionen släpps i produktion**
+**Datum:** 2026-10-02 · **Status:** levande dokument. **Godkänd av
+maintainer (Hampus Granström) 2026-10-04** i samband med PR #431
 (CLAUDE.md § 10.1: separat granskning av varje funktion som kan beröra
-Annex III).
+Annex III). Omprövas vid de ändringar som listas i § 3.
 
 ---
 
@@ -19,7 +19,7 @@ Annex III).
 | Personuppgifter | `users.competence_tags` (hashtag + kompetensområde + nivå *kan bidra / stark / expert*), `users.development_interests` (hashtags), `users.title`, `users.bio` (fritext, cappad). Härledd belastning: antal pågående uppdrag per person och i hur många hen är ansvarig — **lagras aldrig**, räknas vid varje visning ur `missions`. |
 | Registrerade | Movexum-personal (admin/incubator_lead/coach/mentor). Bolagsmedlemmar, observatörer och externa kontakter är aldrig kandidater. |
 | Vem sätter uppgifterna | Personen själv, under Min profil (självservice via `users.updateRule`, fältlås 1700000174 gäller behörighetsfälten). Ingen bedömning görs av chef eller system — nivån är självskattning. |
-| Flöde | (1) Behov: uppdragsbeskrivning (personnummer-sanerad) + bolagets bransch/fas → Mistral (EU) → områden/hashtags, validerade mot taxonomin. (2) **Deterministisk rankning i egen kod** (`rankTeamCandidates`, enhetstestad): hashtag-träff, nivå, relation till bolaget, belastning. (3) Teamsammansättning: Mistral får en **pseudonymiserad** shortlist (användar-id, träffade hashtags/nivå, belastningsetikett) — inga namn, titlar eller e-postadresser lämnar plattformen; servern slår upp namnen efteråt. |
+| Flöde | (1) Behov: uppdragsbeskrivning (personnummer-sanerad) + bolagets bransch/fas → Mistral (EU) → områden/hashtags, validerade mot taxonomin. (2) **Deterministisk rankning i egen kod** (`rankTeamCandidates`, enhetstestad): hashtag-träff, nivå, relation till bolaget, belastning och **meriter** = antal avslutade team personen ingått i, varav de vars `missions.needed_tags` överlappar behovet (lätt vikt, tak 3 + 5; ingen prestationsdom, bara deltagande). (3) Teamsammansättning: Mistral får en **pseudonymiserad** shortlist (användar-id, träffade hashtags/nivå, belastningsetikett) — inga namn, titlar eller e-postadresser lämnar plattformen; servern slår upp namnen efteråt. |
 | Lagring | Profilfälten i PocketBase (EU, egen drift). Tenant-vokabulären `competence_tags` (slug/etikett/område/skapare — inga personuppgifter). Förslaget persisteras inte; det som sparas är det team människan själv skapar (`missions.participants_json`). Token-förbrukning i `ai_usage_events` (PII-fri). |
 | Mottagare | Mistral AI (FR, personuppgiftsbiträde med DPA, § 10.2) — får pseudonymiserade kandidatrader och en sanerad uppdragsbeskrivning. Ingen annan tredjepart. |
 | Åtkomst | Profilfält: alla i tenanten kan läsa `users` via `viewRule` (befintligt, § 9.3) — bolagsmedlemmar når dock inte ytorna där de visas (Min profil är egen, teamförslag/panel är staff). `competence_tags`: staff/observer. Belastning visas bara för staff (en medlems token ser via RLS bara egna uppdrag). `users` är denylistad för chattens `query_collection`; taggar/belastning når modellen bara i den isolerade matcharen. |
@@ -88,6 +88,11 @@ Annex III-högrisk och kräver juridisk granskning före bygge (§ 10.1).
 
 ## 5. Beslut
 
-Behandlingen bedöms proportionerlig med åtgärderna ovan. Funktionen släpps
-först när maintainer godkänt denna bedömning i PR:en. Omprövning vid de
-ändringar som listas i § 3.
+Behandlingen bedöms proportionerlig med åtgärderna ovan. Godkänd av
+maintainer 2026-10-04 (PR #431). Omprövning vid de ändringar som listas i
+§ 3. **Tillägg 2026-10-04:** meriter ur avslutade team (`missions.needed_tags`
++ deltagande) och täckningsvyn i Inställningar → Kompetenser (aggregat per
+hashtag, inaktuella profiler listade med namn för ledningen — intern
+administration, samma krets som redan läser profilerna) ryms inom samma
+bedömning: deltagande i ett team är verksamhetsdata, inte utfall/prestation,
+och utlöser inte omprövningspunkt (c).

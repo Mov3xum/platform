@@ -689,7 +689,14 @@ await patchUsersCollection([
 // (fältlåset 1700000174 låser dem inte); `competences` härleds ur taggarna.
 await patchUsersCollection([
   { name: 'competence_tags', type: 'json', required: false, maxSize: 8000 },
-  { name: 'development_interests', type: 'json', required: false, maxSize: 2000 }
+  { name: 'development_interests', type: 'json', required: false, maxSize: 2000 },
+  // Migration 1700000179: när kompetensprofilen senast sparades (inaktuell-påminnelse).
+  { name: 'competence_updated_at', type: 'date', required: false }
+]);
+
+// Migration 1700000179 (§ 29.7): missions.needed_tags på befintliga installs.
+await patchCollection('missions', [
+  { name: 'needed_tags', type: 'json', required: false, maxSize: 2000 }
 ]);
 
 // 5. partners ---------------------------------------------------------------
@@ -1353,6 +1360,8 @@ await ensureCollection({
     { name: 'description', type: 'editor', required: false },
     { name: 'stages_json', type: 'json', required: false, maxSize: 200000 },
     { name: 'artifacts_json', type: 'json', required: false, maxSize: 200000 },
+    // Migration 1700000179 (§ 29.7): hashtags teamet sattes ihop för → meriter.
+    { name: 'needed_tags', type: 'json', required: false, maxSize: 2000 },
     { name: 'accent', type: 'text', required: false, max: 50 }
   ],
   indexes: [

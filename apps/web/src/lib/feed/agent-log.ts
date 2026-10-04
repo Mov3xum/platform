@@ -569,6 +569,29 @@ function mapRow(
         icon: value === 'approved' ? 'check' : 'send'
       };
     }
+    // Kompetens-hashtags (§ 29.7) — tenantens vokabulär.
+    case 'competence_tags': {
+      const slug = str(after.slug);
+      const tag = slug ? `#${slug}` : 'en hashtag';
+      const href = '/installningar/kompetenser';
+      if (after.deleted === true) return { title: `Hashtag borttagen: ${tag}`, href, icon: 'trash' };
+      if (action === 'create') {
+        return {
+          title: str(after.status) === 'approved' ? `Hashtag tillagd: ${tag}` : `Hashtag föreslagen: ${tag}`,
+          href,
+          icon: 'star'
+        };
+      }
+      const field = str(row.field);
+      if (field === 'status') {
+        return {
+          title: str(after.status) === 'approved' ? `Hashtag godkänd: ${tag}` : `Hashtag åter föreslagen: ${tag}`,
+          href,
+          icon: 'check'
+        };
+      }
+      return { title: `Hashtag ${tag} ${changedVerb}`, href, icon: 'edit3' };
+    }
     // Önskemål & buggar (§ 49) — intern backlog.
     case 'feedback_items': {
       const title = str(after.title) || 'utan rubrik';

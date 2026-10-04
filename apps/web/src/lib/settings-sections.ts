@@ -45,6 +45,17 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     roles: STAFF_ADMIN
   },
   {
+    id: 'kompetenser',
+    slug: 'kompetenser',
+    href: '/installningar/kompetenser',
+    title: 'Kompetenser',
+    description:
+      'Hashtag-vokabulären för tvärfunktionella team: godkänn förslag, se täckning per kompetens, gap och inaktuella profiler.',
+    icon: 'star',
+    group: 'access',
+    roles: STAFF_ADMIN
+  },
+  {
     id: 'organisation',
     slug: 'organisation',
     href: '/installningar/organisation',

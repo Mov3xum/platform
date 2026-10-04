@@ -4411,10 +4411,11 @@ uppdrag — siffran vore både fel och intern). Belastningen är ett
 arbetsbelastningsmått som skyddar den enskilde från överbokning, inte en
 prestationsbedömning — den lagras aldrig och får ingen historik.
 
-**Regelefterlevnad.** DPIA: `docs/privacy/dpia-team-matching.md` (kräver
-maintainer-godkännande i PR:en, § 10.1/§ 10.2).
+**Regelefterlevnad.** DPIA: `docs/privacy/dpia-team-matching.md` (godkänd
+av maintainer 2026-10-04, § 10.1/§ 10.2 — omprövas vid ändringarna i dess § 3).
 - **GDPR § 5:** hashtags och nivåer är yrkeskompetens (berättigat intresse:
-  bemanning), självdeklarerade, inte art. 9. Taggar får aldrig bära
+  bemanning), självdeklarerade, inte art. 9. DPIA godkänd av maintainer
+  2026-10-04 (PR #431). Taggar får aldrig bära
   personuppgifter — slug-normaliseringen avvisar personnummer-mönster, UI:t
   säger "kompetens, aldrig personuppgifter", `competence_tags` innehåller
   slug/etikett/område/skapare och varje ny post auditeras PII-fritt i
@@ -4448,6 +4449,42 @@ maintainer-godkännande i PR:en, § 10.1/§ 10.2).
   tillbaka på den inbyggda listan (fail-soft).
 - **Lägg aldrig till en seed-tagg utan att spegla den i migrationen** (och
   tvärtom); nya taggar i drift går via profilen, inte via kod.
+
+**Steg 2–3 (2026-10-04, migration 1700000179; DPIA godkänd av maintainer
+samma dag).**
+- **Meriter ur avslutade team.** `missions.needed_tags` (json) bär vilka
+  hashtags teamet sattes ihop för — `NewMissionForm` skickar AI-förslagets
+  `neededTags` som dolt fält, `createMissionAction` sanerar till slugs
+  (`sanitizeNeededTags`, tak 12). `computeTeamMerits` (ren, enhetstestad)
+  räknar per person antal AVSLUTADE uppdrag (`status = done`) hen ingått i
+  och hur många vars `needed_tags` överlappar det aktuella behovet;
+  `rankTeamCandidates` ger lätt bonus (relevanta ×0,75, tak 3; totalt ×0,15,
+  tak 5) och skälet "N avslutade team, M med liknande behov". Deltagande är
+  verksamhetsdata, inte prestation/utfall — ingen omprövning av riskklassen
+  (DPIA § 5). Läses live av `loadCompletedMissions` (statusfilter,
+  paginerat, `complete`-flagga), lagras aldrig per person.
+- **Inaktuella profiler.** `users.competence_updated_at` sätts av
+  profil-actionen vid varje sparning; `competenceProfileStatus` (ren):
+  `missing` (inga taggar) / `stale` (> `COMPETENCE_PROFILE_STALE_DAYS` = 180)
+  / `unknown` (taggar utan tidsstämpel, sparade före migrationen) / `fresh`.
+  Min profil visar en gul påminnelse vid `stale`/`missing`.
+- **Inställningar → Kompetenser** (`/installningar/kompetenser`,
+  admin/incubator_lead; sektionsregistret § 36.1): godkännandekö för
+  `suggested`-taggar (godkänn / justera etikett+område / ta bort), "lägg
+  till godkänd hashtag" (create → update i två steg eftersom createRule är
+  body-låst till `suggested`), täckning per hashtag
+  (`summarizeCompetenceCoverage`: personer, nivåfördelning, högsta nivå,
+  antal som vill utvecklas inom taggen), kompetensgap
+  (`competenceCoverageGaps` = vokabulärtaggar ingen har, per område;
+  `uncoveredNeededTags` = taggar uppdrag efterfrågat men ingen täcker) och
+  profilstatus per kollega. Server-actions i `lib/actions/competence-tags.ts`
+  (RBAC + tenant-verifiering per post + `writeWithFallback` bara vid PB
+  v0.23.4:s tysta regel-nekande + `agent_actions`-audit med slug/etikett/
+  område — mappat i `feed/agent-log.ts`). Sluggen är oföränderlig (ligger på
+  profilerna); borttagning ur vokabulären rör aldrig någons profil. Hubben
+  visar antal taggar + väntande förslag. Vyn visar kollegors namn +
+  profilstatus för ledningen — samma krets som redan läser profilerna
+  (DPIA § 1 Åtkomst); riskklass n/a (ingen AI-inferens).
 
 ---
 
@@ -5631,6 +5668,7 @@ brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
 | `/installningar/organisation` | Tenants, infra-status, dataresidens |
 | `/installningar/ai-analys` | **AI-analys** — tre undervyer via `?vy=`: **Kostnadstak** (default, § 9.6), **Användning** (f.d. `/insights`: körningar, tokens, kostnad, kvalitetsfeedback § 9.10, adoption) och **Miljöpåverkan** (f.d. `/admin/ai-miljo`, admin-only, § 28.2). `/insights`, `/admin/ai-miljo` och `/installningar/ai-kostnad` är legacy-routes som redirectar hit (perioden bevaras). Modulen `insights` heter "AI-analys", har ingen egen rail-post längre och pekar hit. |
 | `/installningar/ai-minne` | AI-minne (`agent_memory`, § 16.4) |
+| `/installningar/kompetenser` | **Kompetenser** (§ 29.7 steg 3) — hashtag-vokabulären för tvärfunktionella team: godkännandekö för föreslagna taggar, täckning per hashtag (personer/nivåer/lärande), kompetensgap (taggar ingen har + taggar uppdrag efterfrågat utan täckning) och profilstatus per kollega (aktuell/inaktuell > 180 dagar/saknar hashtags) |
 | `/installningar/utseende` | Tenant-logotyp + **inloggningssidans utseende** (mall, accentfärg, rubrik/underrubrik, bild/video — § 48) |
 
 `/admin/users` är en legacy-route som redirectar till `/installningar/anvandare`;

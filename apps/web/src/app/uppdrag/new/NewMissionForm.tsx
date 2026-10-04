@@ -638,6 +638,12 @@ export function NewMissionForm({
               name="participants_json"
               value={JSON.stringify(submittedParticipants)}
             />
+            {/* Behovet teamet sattes ihop för (§ 29.7) → meriter när uppdraget avslutas. */}
+            <input
+              type="hidden"
+              name="needed_tags_json"
+              value={JSON.stringify(suggestion?.neededTags ?? [])}
+            />
           </div>
         </div>
       </Card>

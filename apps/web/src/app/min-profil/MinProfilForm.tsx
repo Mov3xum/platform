@@ -15,9 +15,11 @@ import {
   COMPETENCE_LABELS,
   COMPETENCE_LEVELS,
   COMPETENCE_LEVEL_LABELS,
+  COMPETENCE_PROFILE_STALE_DAYS,
   DEVELOPMENT_INTERESTS_MAX,
   LOAD_LEVEL_LABELS,
   USER_COMPETENCE_TAGS_MAX,
+  competenceProfileStatus,
   competenceTagsByArea,
   describeLoad,
   deriveCompetenceAreas,
@@ -49,7 +51,8 @@ export function MinProfilForm({
   initialTags,
   initialDevelopmentInterests,
   vocabulary,
-  load
+  load,
+  competenceUpdatedAt
 }: {
   initialTitle: string;
   initialBio: string;
@@ -57,6 +60,7 @@ export function MinProfilForm({
   initialDevelopmentInterests: string[];
   vocabulary: CompetenceTagDef[];
   load: TeamMemberLoad;
+  competenceUpdatedAt: string | null;
 }) {
   const [state, formAction, pending] = useActionState(
     saveMyProfileAction,
@@ -141,9 +145,22 @@ export function MinProfilForm({
       a.tag.localeCompare(b.tag, 'sv')
   );
   const myLoadLevel = loadLevel(load);
+  const profileStatus = competenceProfileStatus(competenceUpdatedAt, initialTags.length > 0);
+  const updatedLabel = competenceUpdatedAt
+    ? new Date(competenceUpdatedAt).toLocaleDateString('sv-SE', { timeZone: 'Europe/Stockholm' })
+    : null;
 
   return (
     <form action={formAction} className="mx-mt-4" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {(profileStatus === 'stale' || profileStatus === 'missing') && (
+        <div className="mx-card" style={{ padding: 12, background: 'var(--mx-st-warn-bg, #f8f1da)', color: '#4b2718' }}>
+          <div className="mx-t-13 mx-fw-6">
+            {profileStatus === 'missing'
+              ? 'Du har inga hashtags ännu — utan dem kan du inte föreslås till tvärfunktionella team.'
+              : `Din kompetensprofil uppdaterades senast ${updatedLabel} (mer än ${COMPETENCE_PROFILE_STALE_DAYS} dagar sedan). Gå igenom hashtags och nivåer och spara igen så att teamförslagen bygger på aktuell information.`}
+          </div>
+        </div>
+      )}
       <Card style={{ padding: 18 }}>
         <div className="mx-flex mx-col mx-gap-4">
           <div className="mx-field">
@@ -413,7 +430,9 @@ export function MinProfilForm({
       )}
 
       <div className="mx-flex mx-gap-2 mx-justify-b mx-items-c">
-        <span className="mx-mono mx-t-xs mx-muted">Bara du kan ändra din profil.</span>
+        <span className="mx-mono mx-t-xs mx-muted">
+          Bara du kan ändra din profil.{updatedLabel ? ` Kompetenser sparade ${updatedLabel}.` : ''}
+        </span>
         <button type="submit" className="mx-btn mx-primary" disabled={pending}>
           <Icon name="check" size={13} />
           {pending ? 'Sparar…' : 'Spara profil'}

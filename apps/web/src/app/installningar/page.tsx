@@ -60,6 +60,21 @@ export default async function InstallningarPage() {
     /* ignore */
   }
 
+  // Kompetens-hashtags (§ 29.7): vokabulärens storlek + förslag som väntar.
+  let tagCount = 0;
+  let suggestedTagCount = 0;
+  try {
+    const all = await pb.collection('competence_tags').getList(1, 1, { filter: tenantFilter, fields: 'id' });
+    tagCount = all.totalItems;
+    const sugg = await pb.collection('competence_tags').getList(1, 1, {
+      filter: pb.filter('tenant = {:t} && status = "suggested"', { t: user.tenant }),
+      fields: 'id'
+    });
+    suggestedTagCount = sugg.totalItems;
+  } catch {
+    /* ignore (omigrerat schema) */
+  }
+
   let tenantCount = 1;
   let startupCount = 0;
   try {
@@ -128,6 +143,19 @@ export default async function InstallningarPage() {
     'ai-minne': {
       stat: `${memoryCount} ${memoryCount === 1 ? 'notering' : 'noteringar'}`,
       hint: 'Generella regler chatten tar med i framtida samtal'
+    },
+    kompetenser: {
+      stat: `${tagCount} hashtags i vokabulären`,
+      hint:
+        suggestedTagCount > 0
+          ? `${suggestedTagCount} ${suggestedTagCount === 1 ? 'förslag väntar' : 'förslag väntar'} på godkännande`
+          : 'Täckning, gap och inaktuella profiler',
+      status:
+        suggestedTagCount > 0 ? (
+          <Chip variant="yellow" mono>
+            {suggestedTagCount}
+          </Chip>
+        ) : undefined
     },
     utseende: {
       stat: hasLogo ? 'Logotyp uppladdad' : 'Ingen egen logotyp',
