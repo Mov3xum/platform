@@ -7607,3 +7607,13 @@ klienten och rullas tillbaka vid fel.
 - **§ 21-isolering:** list/view staff/observer-only; en ren `startup_member`
   ser varken modulen (inte i `MEMBER_RAIL`) eller kollektionen.
 - **Migrationer** 1700000176–177 är nya, oföränderliga filnummer.
+- **Sidmenyn är låst av test (2026-10).** Modulen försvann ur railen när
+  två grenar ändrade samma `System`-rad i `RAIL_GROUPS` och sammanslagningen
+  tog den andra versionen — sidan fanns kvar på `/onskemal` (och all data i
+  `feedback_items`) men var onåbar från menyn. `packages/shared/src/rail.test.ts`
+  asserterar nu att varje `coreModules`-post finns i `RAIL_GROUPS`/`MEMBER_RAIL`
+  eller står i den uttryckliga listan över rail-lösa moduler (`insights`,
+  `anvandare`, `integrationer`, alias och dolda legacy-id:n), att railen bara
+  pekar på moduler som finns och att `onskemal` ligger i System-gruppen. Lägg
+  aldrig till ett id i rail-lös-listan för att tysta testet när en meny-rad
+  råkat försvinna i en merge.
