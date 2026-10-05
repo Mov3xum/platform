@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import {
   MAX_COMPASS_CHOICES,
   planCompassQuestionInsert,
+  planCompassQuestionReorder,
+  moveCompassQuestion,
   sortCompassQuestions,
   compassInputTypeHasChoices,
   isCompassFlowType,
@@ -150,4 +152,57 @@ test('sortCompassQuestions: sort_order först, sedan created, sedan id', () => {
   assert.deepEqual(out, ['d', 'a', 'b', 'y', 'z', 'c']);
   // Muterar inte input.
   assert.equal(rows[0]!.id, 'c');
+});
+
+test('planCompassQuestionReorder numrerar om i ny ordning och skriver bara ändrade rader', () => {
+  const existing = [
+    { id: 'a', sort_order: 10 },
+    { id: 'b', sort_order: 20 },
+    { id: 'c', sort_order: 30 }
+  ];
+  // c flyttas först: c→10, a→20, b→30 — alla tre ändras.
+  assert.deepEqual(planCompassQuestionReorder(['c', 'a', 'b'], existing), {
+    ok: true,
+    writes: [
+      { id: 'c', sort_order: 10 },
+      { id: 'a', sort_order: 20 },
+      { id: 'b', sort_order: 30 }
+    ]
+  });
+  // Oförändrad ordning → inga skrivningar.
+  assert.deepEqual(planCompassQuestionReorder(['a', 'b', 'c'], existing), { ok: true, writes: [] });
+  // Lika/ojämna sort_order ("6, 1, 9") städas till jämna steg i angiven ordning.
+  const messy = [
+    { id: 'x', sort_order: 6 },
+    { id: 'y', sort_order: 6 },
+    { id: 'z' }
+  ];
+  assert.deepEqual(planCompassQuestionReorder(['z', 'x', 'y'], messy), {
+    ok: true,
+    writes: [
+      { id: 'z', sort_order: 10 },
+      { id: 'x', sort_order: 20 },
+      { id: 'y', sort_order: 30 }
+    ]
+  });
+});
+
+test('planCompassQuestionReorder avvisar listor som inte är en permutation', () => {
+  const existing = [{ id: 'a', sort_order: 10 }, { id: 'b', sort_order: 20 }];
+  assert.equal(planCompassQuestionReorder(['a'], existing).ok, false); // saknar b
+  assert.equal(planCompassQuestionReorder(['a', 'b', 'c'], existing).ok, false); // okänt c
+  assert.equal(planCompassQuestionReorder(['a', 'a'], existing).ok, false); // dubblett
+  assert.equal(planCompassQuestionReorder(['a', ''], existing).ok, false); // tomt id
+  assert.deepEqual(planCompassQuestionReorder([], []), { ok: true, writes: [] });
+});
+
+test('moveCompassQuestion flyttar ett element och lämnar ogiltiga index orörda', () => {
+  const list = ['a', 'b', 'c', 'd'];
+  assert.deepEqual(moveCompassQuestion(list, 0, 2), ['b', 'c', 'a', 'd']);
+  assert.deepEqual(moveCompassQuestion(list, 3, 0), ['d', 'a', 'b', 'c']);
+  assert.deepEqual(moveCompassQuestion(list, 1, 1), list);
+  assert.deepEqual(moveCompassQuestion(list, 1, 9), list);
+  assert.deepEqual(moveCompassQuestion(list, -1, 2), list);
+  // Muterar inte input.
+  assert.deepEqual(list, ['a', 'b', 'c', 'd']);
 });

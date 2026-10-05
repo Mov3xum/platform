@@ -3540,6 +3540,25 @@ Tre fel i samma yta, en gemensam grundorsak för de två första:
      instans utan migration 1700000126, därför JS.
   Kvittot (§ 33.4) visar `position`/`sort_order` per fråga.
   Riskklass/PII: n/a — inga nya fält, kollektioner eller datavägar.
+- **Byta plats på frågor — drag-and-drop i modul-admin (2026-10).** Varje
+  fråga i steg 3 har ett handtag (`grip`-ikonen) uppe till höger; dra det för
+  att flytta frågan (en brand-linje visar var den släpps), eller fokusera
+  handtaget och tryck pil upp/ned. Kortet är `draggable` BARA medan handtaget
+  hålls ned, annars skulle textmarkering i fälten starta en dragning.
+  Ordningen byter plats optimistiskt och sparas via `reorderQuestionsAction`
+  (`order_json` = hela id-listan) → `reorderCompassQuestions` i skrivlagret
+  (`lib/core/write/compass.ts`): kör under modul-låset, kräver att listan är
+  en exakt permutation av modulens frågor (`planCompassQuestionReorder` i
+  `@platform/shared`, ren + enhetstestad; `moveCompassQuestion` är UI:ts
+  rena flytt-hjälpare), numrerar om HELA modulen i jämna steg (10, 20, 30 …)
+  i den nya ordningen — så lika `sort_order` städas bort och gap finns för
+  `planCompassQuestionInsert` — och skriver bara rader vars nummer ändras;
+  ett fel mitt i rullar tillbaka de redan skrivna raderna och UI:t
+  återställer den gamla ordningen med felet synligt (aldrig en tyst halv-
+  sparad ordning). Auditeras PII-fritt i `agent_actions`
+  (`compass_modules`, fält `question_order`, antal frågor) → syns i
+  `/aktivitet` som "frågornas ordning ändrades". Riskklass/PII: n/a — inga
+  nya fält, kollektioner eller datavägar.
 
 ---
 
