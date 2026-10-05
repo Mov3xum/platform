@@ -154,7 +154,7 @@ export function QuestionsManager({
           <>
             {' '}
             Byt plats genom att dra i handtaget{' '}
-            <Icon name="grip" size={11} style={{ verticalAlign: '-1px' }} /> uppe till höger på en
+            <Icon name="grip" size={11} fill="currentColor" style={{ verticalAlign: '-1px' }} /> uppe till höger på en
             fråga (eller pil upp/ned när handtaget är i fokus).
           </>
         )}
@@ -625,13 +625,17 @@ function QuestionCard({
               }
             }}
             style={{
-              width: 28,
-              height: 28,
+              width: 30,
+              height: 30,
+              color: 'var(--mx-ink-soft, var(--color-foreground-muted))',
+              border: '1px solid var(--mx-line-soft)',
+              background: 'var(--mx-paper, var(--color-surface))',
+              opacity: canReorder ? 1 : 0.5,
               cursor: canReorder ? (dragArmed ? 'grabbing' : 'grab') : 'default',
               touchAction: 'none'
             }}
           >
-            <Icon name="grip" size={14} />
+            <Icon name="grip" size={16} fill="currentColor" />
           </span>
         )}
       </div>
