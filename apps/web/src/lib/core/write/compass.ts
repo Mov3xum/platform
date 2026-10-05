@@ -21,6 +21,7 @@ import {
   MAX_COMPASS_QUESTION_PROMPT,
   normalizeCompassLayout,
   planCompassQuestionInsert,
+  planCompassQuestionReorder,
   sortCompassQuestions,
   slugifyCompassKey,
   type CompassFlowType,
@@ -408,6 +409,62 @@ export async function nextCompassQuestionSortOrder(
   } catch {
     return Date.now() % 1_000_000;
   }
+}
+
+/**
+ * Skriver en NY ORDNING för modulens frågor (drag-and-drop i modul-admin,
+ * `reorderQuestionsAction`). Hela modulen numreras om i jämna steg i den
+ * angivna ordningen (`planCompassQuestionReorder`, ren + enhetstestad) och
+ * bara rader vars nummer ändras skrivs. Körs under modul-låset så en
+ * samtidig `add_compass_question` (läs högsta → skriv) inte flätas in mitt i
+ * omnumreringen. Anroparen har redan verifierat roll + att modulen tillhör
+ * tenanten; `writeWithFallback` är robusthet (§ 21.3), inte behörighet.
+ *
+ * Returnerar antalet skrivna rader. Misslyckas en skrivning mitt i rullas
+ * de redan skrivna raderna tillbaka (best-effort) så ordningen aldrig blir
+ * halvt omnumrerad.
+ */
+export async function reorderCompassQuestions(
+  pb: PocketBase,
+  moduleId: string,
+  orderedIds: readonly string[]
+): Promise<{ ok: true; written: number } | { ok: false; error: string }> {
+  return withModuleLock(moduleId, async () => {
+    let rows: QuestionOrderRow[];
+    try {
+      rows = await listQuestionOrder(pb, moduleId);
+    } catch {
+      return { ok: false, error: 'Kunde inte läsa modulens frågor.' };
+    }
+    const plan = planCompassQuestionReorder(orderedIds, rows);
+    if (!plan.ok) return plan;
+
+    const before = new Map(rows.map((r) => [r.id, r.sort_order]));
+    const done: string[] = [];
+    try {
+      for (const w of plan.writes) {
+        await writeWithFallback(pb, (client) =>
+          client.collection(QUESTIONS).update(w.id, { sort_order: w.sort_order })
+        );
+        done.push(w.id);
+      }
+    } catch (err) {
+      // Rulla tillbaka det som hann skrivas — annars kan två frågor stå med
+      // samma nummer och ordningen bli godtycklig igen.
+      for (const id of done) {
+        try {
+          await writeWithFallback(pb, (client) =>
+            client.collection(QUESTIONS).update(id, { sort_order: before.get(id) ?? 0 })
+          );
+        } catch {
+          // best-effort
+        }
+      }
+      const msg = err instanceof Error ? err.message : 'Okänt fel';
+      return { ok: false, error: `Kunde inte spara ordningen: ${msg}` };
+    }
+    return { ok: true, written: done.length };
+  });
 }
 
 /**

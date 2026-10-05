@@ -1,13 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition, type DragEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/proto';
 import {
   addQuestionAction,
   updateQuestionAction,
-  deleteQuestionAction
+  deleteQuestionAction,
+  reorderQuestionsAction
 } from '@/lib/actions/compass';
+import { moveCompassQuestion } from '@platform/shared';
 import type { CompassQuestion, FlowType, ResultBucket } from '@/lib/compass/types';
 
 /** Input-typer (speglar INPUT_TYPES i lib/actions/compass.ts). */
@@ -66,10 +68,75 @@ export function QuestionsManager({
   const [questions, setQuestions] = useState<CompassQuestion[]>(initialQuestions);
   const [error, setError] = useState<string | null>(null);
 
+  // Drag-and-drop-ordning (handtaget uppe till höger på varje fråga).
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ index: number; placement: 'before' | 'after' } | null>(
+    null
+  );
+  const [orderPending, startOrder] = useTransition();
+  const [orderSaved, setOrderSaved] = useState(false);
+
   // Re-synka när servern levererar nya props (efter router.refresh()).
   useEffect(() => {
     setQuestions(initialQuestions);
   }, [initialQuestions]);
+
+  useEffect(() => {
+    if (!orderSaved) return;
+    const t = window.setTimeout(() => setOrderSaved(false), 2500);
+    return () => window.clearTimeout(t);
+  }, [orderSaved]);
+
+  const canReorder = questions.length > 1 && !orderPending;
+
+  /**
+   * Optimistisk omordning: listan byter plats direkt, servern numrerar om
+   * (`reorderQuestionsAction`) och vid fel återställs den gamla ordningen med
+   * ett tydligt felmeddelande — aldrig en tyst halv-sparad ordning.
+   */
+  function applyOrder(next: CompassQuestion[]) {
+    const prev = questions;
+    if (next.every((q, i) => q.id === prev[i]?.id)) return;
+    setError(null);
+    setQuestions(next);
+    const fd = new FormData();
+    fd.set('module_id', moduleId);
+    fd.set('module_slug', moduleSlug);
+    fd.set('order_json', JSON.stringify(next.map((q) => q.id)));
+    startOrder(async () => {
+      try {
+        await reorderQuestionsAction(fd);
+        setOrderSaved(true);
+        router.refresh();
+      } catch (e) {
+        setQuestions(prev);
+        setError(e instanceof Error ? e.message : 'Kunde inte spara ordningen.');
+      }
+    });
+  }
+
+  function moveBy(id: string, delta: number) {
+    const from = questions.findIndex((q) => q.id === id);
+    if (from < 0) return;
+    const to = from + delta;
+    if (to < 0 || to >= questions.length) return;
+    applyOrder(moveCompassQuestion(questions, from, to));
+  }
+
+  function endDrag() {
+    setDragId(null);
+    setDropTarget(null);
+  }
+
+  function dropAt(index: number, placement: 'before' | 'after') {
+    if (!dragId) return endDrag();
+    const from = questions.findIndex((q) => q.id === dragId);
+    let to = placement === 'after' ? index + 1 : index;
+    if (from < to) to -= 1;
+    endDrag();
+    if (from < 0 || to < 0 || to >= questions.length) return;
+    applyOrder(moveCompassQuestion(questions, from, to));
+  }
 
   // Profilnycklarna som ger poängkolumner i quiz-läge.
   const profileKeys = useMemo(
@@ -83,9 +150,22 @@ export function QuestionsManager({
         {flowType === 'chat'
           ? 'Frågorna används som intervjuguide i samtalet.'
           : 'Frågorna visas för besökaren i den här ordningen. Varje fråga sparas direkt.'}
+        {questions.length > 1 && (
+          <>
+            {' '}
+            Byt plats genom att dra i handtaget{' '}
+            <Icon name="grip" size={11} style={{ verticalAlign: '-1px' }} /> uppe till höger på en
+            fråga (eller pil upp/ned när handtaget är i fokus).
+          </>
+        )}
       </div>
 
-      {error && <div className="mx-t-13" style={{ color: '#4b2718' }}>{error}</div>}
+      {error && <div className="mx-t-13" style={{ color: 'var(--movexum-morkorange)' }}>{error}</div>}
+      {(orderPending || orderSaved) && !error && (
+        <div className="mx-muted mx-t-12" role="status">
+          {orderPending ? 'Sparar ordningen…' : 'Ordningen är sparad.'}
+        </div>
+      )}
 
       {flowType === 'quiz' && profileKeys.length === 0 && (
         <div
@@ -110,6 +190,7 @@ export function QuestionsManager({
             <QuestionCard
               key={q.id}
               index={i}
+              count={questions.length}
               question={q}
               moduleId={moduleId}
               moduleSlug={moduleSlug}
@@ -117,6 +198,19 @@ export function QuestionsManager({
               profileKeys={profileKeys}
               onSaved={() => router.refresh()}
               onError={setError}
+              canReorder={canReorder}
+              dragging={dragId === q.id}
+              dropPlacement={dropTarget?.index === i ? dropTarget.placement : null}
+              onDragStart={() => setDragId(q.id)}
+              onDragEnd={endDrag}
+              onDragOver={(placement) => {
+                if (!dragId || dragId === q.id) return;
+                setDropTarget((cur) =>
+                  cur?.index === i && cur.placement === placement ? cur : { index: i, placement }
+                );
+              }}
+              onDrop={(placement) => dropAt(i, placement)}
+              onMove={(delta) => moveBy(q.id, delta)}
             />
           ))}
         </div>
@@ -301,15 +395,25 @@ function NewQuestionForm({
 
 function QuestionCard({
   index,
+  count,
   question,
   moduleId,
   moduleSlug,
   flowType,
   profileKeys,
   onSaved,
-  onError
+  onError,
+  canReorder,
+  dragging,
+  dropPlacement,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  onMove
 }: {
   index: number;
+  count: number;
   question: CompassQuestion;
   moduleId: string;
   moduleSlug: string;
@@ -317,7 +421,18 @@ function QuestionCard({
   profileKeys: string[];
   onSaved: () => void;
   onError: (msg: string | null) => void;
+  canReorder: boolean;
+  dragging: boolean;
+  dropPlacement: 'before' | 'after' | null;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDragOver: (placement: 'before' | 'after') => void;
+  onDrop: (placement: 'before' | 'after') => void;
+  onMove: (delta: number) => void;
 }) {
+  // Kortet är bara `draggable` medan handtaget hålls ned — annars skulle
+  // varje markering av text i fälten starta en dragning.
+  const [dragArmed, setDragArmed] = useState(false);
   const [key, setKey] = useState(question.key);
   const [prompt, setPrompt] = useState(question.prompt);
   const [helpText, setHelpText] = useState(question.help_text ?? '');
@@ -409,15 +524,56 @@ function QuestionCard({
 
   const showScoring = flowType === 'quiz';
 
+  function placementFromEvent(e: DragEvent<HTMLDivElement>): 'before' | 'after' {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+  }
+
+  const dropLine = '0 0 0 2px var(--color-brand)';
+  const dropShadow =
+    dropPlacement === 'before'
+      ? `inset 0 3px 0 var(--color-brand)`
+      : dropPlacement === 'after'
+        ? `inset 0 -3px 0 var(--color-brand)`
+        : undefined;
+
   return (
     <div
+      draggable={canReorder && dragArmed}
+      onDragStart={(e) => {
+        if (!canReorder || !dragArmed) {
+          e.preventDefault();
+          return;
+        }
+        e.dataTransfer.setData('text/plain', question.id);
+        e.dataTransfer.effectAllowed = 'move';
+        onDragStart();
+      }}
+      onDragEnd={() => {
+        setDragArmed(false);
+        onDragEnd();
+      }}
+      onDragOver={(e) => {
+        if (!canReorder) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        onDragOver(placementFromEvent(e));
+      }}
+      onDrop={(e) => {
+        if (!canReorder) return;
+        e.preventDefault();
+        onDrop(placementFromEvent(e));
+      }}
       style={{
         padding: 12,
         borderRadius: 10,
         background: 'var(--mx-paper-2)',
         border: '1px solid var(--mx-line-soft)',
         display: 'grid',
-        gap: 10
+        gap: 10,
+        opacity: dragging ? 0.4 : 1,
+        boxShadow: dragging ? dropLine : dropShadow,
+        transition: 'opacity .12s ease, box-shadow .12s ease'
       }}
     >
       <div className="mx-flex mx-items-c mx-gap-2 mx-wrap">
@@ -444,6 +600,40 @@ function QuestionCard({
         <button type="button" className="mx-btn mx-sm mx-primary" onClick={save} disabled={pending}>
           <Icon name="check" size={11} /> {pending ? 'Sparar…' : 'Spara fråga'}
         </button>
+        {count > 1 && (
+          // <span role="button"> i stället för <button>: Firefox startar inte
+          // alltid en HTML5-dragning från ett knapp-element inuti det
+          // draggable-kortet.
+          <span
+            role="button"
+            tabIndex={canReorder ? 0 : -1}
+            className="mx-icon-btn"
+            aria-label={`Byt plats på fråga ${index + 1} — dra, eller använd pil upp/ned`}
+            aria-disabled={!canReorder}
+            title="Dra för att byta plats (pil upp/ned med tangentbordet)"
+            onPointerDown={() => canReorder && setDragArmed(true)}
+            onPointerUp={() => setDragArmed(false)}
+            onPointerCancel={() => setDragArmed(false)}
+            onKeyDown={(e) => {
+              if (!canReorder) return;
+              if (e.key === 'ArrowUp' && index > 0) {
+                e.preventDefault();
+                onMove(-1);
+              } else if (e.key === 'ArrowDown' && index < count - 1) {
+                e.preventDefault();
+                onMove(1);
+              }
+            }}
+            style={{
+              width: 28,
+              height: 28,
+              cursor: canReorder ? (dragArmed ? 'grabbing' : 'grab') : 'default',
+              touchAction: 'none'
+            }}
+          >
+            <Icon name="grip" size={14} />
+          </span>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>

@@ -207,6 +207,70 @@ export function planCompassQuestionInsert(
   return { sortOrder, renumber };
 }
 
+export interface CompassQuestionReorderWrite {
+  id: string;
+  sort_order: number;
+}
+
+export type CompassQuestionReorderPlan =
+  | { ok: true; writes: CompassQuestionReorderWrite[] }
+  | { ok: false; error: string };
+
+/**
+ * Planerar en OMORDNING av modulens frågor (drag-and-drop i modul-admin).
+ *
+ * `orderedIds` är den nya visningsordningen (alla frågors id:n), `existing`
+ * frågorna som de ligger i databasen. Hela modulen numreras om med jämna steg
+ * (10, 20, 30 …) i den nya ordningen — det ger alltid gap för framtida
+ * inskjutningar (`planCompassQuestionInsert`) och gör ordningen entydig även
+ * när flera frågor råkat få samma `sort_order` ("6, 1, 9"-buggen). Bara rader
+ * vars nummer faktiskt ändras returneras, så en oförändrad ordning ger inga
+ * skrivningar.
+ *
+ * Avvisar en lista som inte är en exakt permutation av de befintliga id:na
+ * (dubbletter, okända eller saknade id:n) — klienten är aldrig
+ * säkerhetsgränsen, och en halv lista får aldrig tappa frågor.
+ */
+export function planCompassQuestionReorder(
+  orderedIds: readonly string[],
+  existing: readonly CompassQuestionOrderable[]
+): CompassQuestionReorderPlan {
+  const ids = orderedIds.map((id) => String(id ?? '').trim()).filter(Boolean);
+  if (ids.length !== orderedIds.length) {
+    return { ok: false, error: 'Ordningen innehåller ett tomt fråge-id.' };
+  }
+  if (new Set(ids).size !== ids.length) {
+    return { ok: false, error: 'Ordningen innehåller samma fråga flera gånger.' };
+  }
+  const known = new Map(existing.map((q) => [q.id, q]));
+  if (ids.length !== known.size || ids.some((id) => !known.has(id))) {
+    return {
+      ok: false,
+      error: 'Ordningen stämmer inte med modulens frågor — ladda om sidan och försök igen.'
+    };
+  }
+
+  const writes: CompassQuestionReorderWrite[] = [];
+  ids.forEach((id, index) => {
+    const target = (index + 1) * COMPASS_QUESTION_SORT_STEP;
+    const current = Number(known.get(id)!.sort_order ?? NaN);
+    if (current !== target) writes.push({ id, sort_order: target });
+  });
+  return { ok: true, writes };
+}
+
+/**
+ * Flyttar ett element i en lista (ren hjälpare för drag-and-drop i UI:t).
+ * Index utanför listan eller samma plats ger listan oförändrad (ny referens).
+ */
+export function moveCompassQuestion<T>(items: readonly T[], from: number, to: number): T[] {
+  const out = [...items];
+  if (from < 0 || from >= out.length || to < 0 || to >= out.length || from === to) return out;
+  const [moved] = out.splice(from, 1);
+  out.splice(to, 0, moved as T);
+  return out;
+}
+
 /** Minsta gemensamma form för att sortera frågor på läsvägen. */
 export interface CompassQuestionOrderable {
   id: string;

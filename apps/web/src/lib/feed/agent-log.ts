@@ -66,6 +66,7 @@ const MONTH_NAMES = [
 
 /** Svenska etiketter för de fält skrivlagret kan ändra. */
 const FIELD_LABELS: Record<string, string> = {
+  question_order: 'frågornas ordning',
   title: 'titeln',
   month: 'månaden',
   day: 'dagen',

@@ -1282,6 +1282,7 @@ och kan renderas av samma UI oavsett leverantör.
 | `apps/web/src/lib/integrations/sync.ts` | Orkestrator (`runSync`) |
 | `apps/web/src/lib/integrations/providers/<slug>/{client,handler,normalize}.ts` | En per provider |
 | `apps/web/src/lib/actions/integrations.ts` | Connect/disconnect/sync server actions |
+| `apps/web/src/app/installningar/integrationer/page.tsx` | Katalogen som flik under Inställningar (admin/incubator_lead, § 36.1) — delar `components/integrations/IntegrationsCatalog.tsx` med `/integrationer` |
 | `apps/web/src/app/integrationer/[slug]/page.tsx` | Detaljsida (anslut + synka) |
 | `apps/web/src/app/integrationer/[slug]/poster/page.tsx` | Records-lista |
 
@@ -1405,8 +1406,20 @@ en kandidatlista och rapporterar PII-fritt i `notes` vad som saknades, och
 **Kör den på ett känt bolag (t.ex. med Combly-facit) innan portföljen synkas.**
 Roarings endpoint-versioner och beloppsenhet är env-överstyrbara
 (`ROARING_API_BASE_URL`, `ROARING_OVERVIEW_PATH`, `ROARING_FINANCIALS_PATH`,
-`ROARING_GROUP_STRUCTURE_PATH`, `ROARING_BENEFICIAL_OWNER_PATH`,
-`ROARING_AMOUNT_MULTIPLIER` default 1000 = TSEK→SEK); Bolagsverkets bas-URL
+`ROARING_GROUP_STRUCTURE_PATH`, `ROARING_BENEFICIAL_OWNER_PATH` — varje
+`*_PATH` är en **kommaseparerad kandidatlista** i prioritetsordning som provas
+vid 403/404, första svar med data vinner; `ROARING_AMOUNT_MULTIPLIER` default
+1000 = TSEK→SEK). **Verifierat mot Roarings publika dokumentation 2026-09-30
+(`docs/integrations/roaring-sandbox-test.md`):** token = `POST /token`,
+grunddata `/se/company/overview/2.0`, koncern `/se/company/group-structure/1.0`,
+verklig huvudman **`/se/beneficialowner/2.1`** (den tidigare defaulten
+`/se/company/beneficial-owner/1.0` var fel och ligger nu sist som reserv).
+Bokslut-API:ts sökväg (`/se/company/economy-overview/1.1`) är fortsatt
+obekräftad — se runbooken. **Sandbox = samma värd** (`api.roaring.io`): det
+är nyckelparet från utvecklarportalen som avgör om svaren är testdata, så
+`base_url` lämnas tom. Förhandsgranskningen noterar per API vilken sökväg som
+svarade och vilka **fältnycklar** (aldrig värden) svaret bar, så mappningen kan
+verifieras mot sandboxen utan rå JSON. Bolagsverkets bas-URL
 via credential-fältet eller `BOLAGSVERKET_API_BASE_URL` (testmiljö).
 Credentials (client id/secret) läggs in per tenant på `/integrationer/<slug>`
 och krypteras AES-256-GCM (§ 11.5) — aldrig i kod.
@@ -1417,6 +1430,21 @@ bolagsregister-provider (`RegistrySyncButton`, action
 company_registry-handlers), kolumnerna Balansomslutning/Eget kapital i
 Finansiell historik och sektionen **Ägarbild** (`#agarbild`). `/integrationer`:
 "Synka nu" (hela portföljen), "Testa mot org-nr", täckning per källa.
+**Inställningar → Integrationer (2026-10):** bolagsregister-providrarna ligger
+i en egen kategori **Bolagsregister** först i katalogen, och kortet bär ett
+**inline-formulär** (`RegistryConnectPanel` → den delade `ConnectForm`) så
+Client ID/secret klistras in direkt på kortet; "Synka & testa" leder vidare
+till detaljsidan. Katalogen bygger sektionerna ur `CATEGORY_ORDER`; ett okänt
+`category`-värde hamnar i "Övrigt" i stället för att tyst försvinna (incident
+2026-10: `company_registry` saknades i katalogens typ, så Roaring renderades
+aldrig). **Självläkande katalograd:** providerraden seedas av migration
+1700000173, som bara körs när PB-imagen byggs om — `ensureRegistryProviderRows`
+(`lib/integrations/company-registry/catalog-seed.ts`, SPEGEL av migrationen;
+ändra båda) upsertar saknade rader via den cachade superusern (idempotent på
+slug) när katalogen, detaljsidan eller `connectIntegrationAction` möter en
+handler utan rad; utan superuser visas kortet ändå med orsaken i stället för
+formuläret. Speglat i `setup-via-api.mjs` (category-enumet patchas +
+raderna seedas). Ingen ny dataväg, inga nya fält; riskklass oförändrad.
 
 **GDPR § 5 / § 9.3.** Fysiska personer i ägarbilden lagras UTAN namn,
 personnummer och födelsedatum — bara `owner_kind='person'` + andel/intervall
@@ -3512,6 +3540,25 @@ Tre fel i samma yta, en gemensam grundorsak för de två första:
      instans utan migration 1700000126, därför JS.
   Kvittot (§ 33.4) visar `position`/`sort_order` per fråga.
   Riskklass/PII: n/a — inga nya fält, kollektioner eller datavägar.
+- **Byta plats på frågor — drag-and-drop i modul-admin (2026-10).** Varje
+  fråga i steg 3 har ett handtag (`grip`-ikonen) uppe till höger; dra det för
+  att flytta frågan (en brand-linje visar var den släpps), eller fokusera
+  handtaget och tryck pil upp/ned. Kortet är `draggable` BARA medan handtaget
+  hålls ned, annars skulle textmarkering i fälten starta en dragning.
+  Ordningen byter plats optimistiskt och sparas via `reorderQuestionsAction`
+  (`order_json` = hela id-listan) → `reorderCompassQuestions` i skrivlagret
+  (`lib/core/write/compass.ts`): kör under modul-låset, kräver att listan är
+  en exakt permutation av modulens frågor (`planCompassQuestionReorder` i
+  `@platform/shared`, ren + enhetstestad; `moveCompassQuestion` är UI:ts
+  rena flytt-hjälpare), numrerar om HELA modulen i jämna steg (10, 20, 30 …)
+  i den nya ordningen — så lika `sort_order` städas bort och gap finns för
+  `planCompassQuestionInsert` — och skriver bara rader vars nummer ändras;
+  ett fel mitt i rullar tillbaka de redan skrivna raderna och UI:t
+  återställer den gamla ordningen med felet synligt (aldrig en tyst halv-
+  sparad ordning). Auditeras PII-fritt i `agent_actions`
+  (`compass_modules`, fält `question_order`, antal frågor) → syns i
+  `/aktivitet` som "frågornas ordning ändrades". Riskklass/PII: n/a — inga
+  nya fält, kollektioner eller datavägar.
 
 ---
 
@@ -5153,8 +5200,9 @@ teamet för uppdraget …", "Du laddade upp … till kunskapsbasen") är ren och
 `lib/personal-feed.ts`; en direkt rad hoppas över när samma post redan finns
 i skrivlagrets logg (dedupe på `collection:record_id`). Multi-relationer
 filtreras med `~` (LIKE på JSON-listan) för att inte träffa `?=`-buggen
-(§ 21.3). Portföljbred feed finns oförändrat på `/hem` (Bolagsnytt,
-`loadActivityFeed`) och `/aktivitet`. **Det personliga filarkivet
+(§ 21.3). Den fulla tenant-breda loggen finns oförändrat på `/aktivitet`;
+Bolagsnytt på `/hem` visar bara människopublicerade bolagsnyheter
+(`loadCompanyNews`, § 37.1). **Det personliga filarkivet
 (`user_files`, Filer) loggas medvetet INTE** — det är privat arbetsyta och
 ska inte kännas övervakad; det som visas är gemensamt material och det som
 rör andra. Ingen ny dataväg, inga nya fält: rader från staff-only-
@@ -5683,6 +5731,7 @@ brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
 | `/installningar/ai-analys` | **AI-analys** — tre undervyer via `?vy=`: **Kostnadstak** (default, § 9.6), **Användning** (f.d. `/insights`: körningar, tokens, kostnad, kvalitetsfeedback § 9.10, adoption) och **Miljöpåverkan** (f.d. `/admin/ai-miljo`, admin-only, § 28.2). `/insights`, `/admin/ai-miljo` och `/installningar/ai-kostnad` är legacy-routes som redirectar hit (perioden bevaras). Modulen `insights` heter "AI-analys", har ingen egen rail-post längre och pekar hit. |
 | `/installningar/ai-minne` | AI-minne (`agent_memory`, § 16.4) |
 | `/installningar/kompetenser` | **Kompetenser** (§ 29.7 steg 3) — hashtag-vokabulären för tvärfunktionella team: godkännandekö för föreslagna taggar, täckning per hashtag (personer/nivåer/lärande), kompetensgap (taggar ingen har + taggar uppdrag efterfrågat utan täckning) och profilstatus per kollega (aktuell/inaktuell > 180 dagar/saknar hashtags) |
+| `/installningar/integrationer` | **Integrationer** (2026-09) — organisationens externa tjänster (bolagsregister § 11.8, Brevo/Howspace, Mistral-connectors § 13, personliga OAuth-kopplingar § 14). Katalogen är den delade `components/integrations/IntegrationsCatalog.tsx`; `/integrationer` redirectar admin/incubator_lead hit och visar oförändrat katalogen för coach/bolagsmedlem (personliga integrationer). Detaljsidorna `/integrationer/<slug>` är oförändrade; grinden är `canOpenIntegrations` (`lib/integrations/access.ts`: settings-roll ELLER modulen) och tillbaka-länken följer rollen (`integrationsCatalogHref`). Modulen `integrationer` har ingen egen rail-post längre (samma mönster som `insights`/`anvandare`). |
 | `/installningar/utseende` | Tenant-logotyp + **inloggningssidans utseende** (mall, accentfärg, rubrik/underrubrik, bild/video — § 48) |
 
 `/admin/users` är en legacy-route som redirectar till `/installningar/anvandare`;
@@ -5847,14 +5896,35 @@ all IO och skickar färdig data:
    framtida bruk.
 4. **Sidospalten** (4/12; på mobil under avdelningarna) — **två likadana,
    korta listor** så båda syns direkt: **Bolagsnytt** (`CompanyNews`, de
-   senaste **6** ur den samlade aktivitetsloggen § 32, "Hela loggen" →
-   `/aktivitet`) och under den **Omvärld** (`OmvarldFeed`, § 37.4, max 6) —
+   senaste **6**, "Hela loggen" → `/aktivitet`) och under den **Omvärld**
+   (`OmvarldFeed`, § 37.4, max 6) —
    båda som **vertikal
    tidslinje** med hårlinje, färgprickar (lila = AI-utfört/verktyg, grön =
    utbildning, gul = avtal/möte, brand = övrigt; Movexum-blå = extern källa),
    eyebrow med tid + bolag/källa och "AI"-märkning (art. 13). Omvärlden har
    källfilter som understrukna textlänkar med statusprick och en ärlig
    statusrad per källa.
+
+**Bolagsnytt = bara nyheter om bolagen som teamet publicerat (2026-09-30).**
+Listan visade tidigare den samlade aktivitetsloggen (§ 32) — alla
+bolagshändelser PLUS skrivlagrets ändringslogg — så "Verksamhetsår: status
+ändrades", "Anslagstavlan: … fästes" och "Ny modul i Startupkompassen" trängde
+ut det som faktiskt handlar om bolagen. Nu läser `loadCompanyNews`
+(`lib/feed/activity-feed.ts`) ENBART `activities`-rader som är knutna till ett
+bolag och skrivna av en människa: `kind` = `manual` (chattens
+`create_startup_activity`), `''` (legacy), `note` eller `meeting` (sparat
+mötesprotokoll § 34) — och aldrig rader med `tool`/`tool_run` satt (t.ex.
+"Begärde ändringar på <verktyg>", som är arbetsflöde). Systemhändelser
+(`tool_run`, `integration_sync`, `workshop_*`, `education_document`,
+`agreement`, `onboarding`, `mission`, `support_check` …) och hela
+`agent_actions`-loggen visas INTE här — de finns oförändrat på `/aktivitet`
+(och i Bolagsnytt-länken "Hela loggen"). Urvalet är rent + enhetstestat i
+`lib/company-news.ts` (`COMPANY_NEWS_FILTER` med bundna parametrar +
+`isCompanyNewsActivity` som JS-spegel/defense-in-depth). Läses med användarens
+token (RLS § 21), `owner` expanderas bara för visningsnamn (tooltip "Av …",
+aldrig e-post). Ingen ny dataväg, inga nya fält; riskklass n/a. Den tidigare
+tenant-breda `loadActivityFeed` är borttagen — `/aktivitet` har sin egen
+läsning och chatten använder `loadPersonalActivityFeed` (§ 32).
 
 Nyckeltalen läses fortfarande via `getList(1,1).totalItems` med användarens
 token. Ingen ny dataväg; enda nya fältet är `annual_wheel_categories.show_on_home`
@@ -5882,7 +5952,8 @@ blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdn
 | `backend/pocketbase-schema/migrations/1700000144_create_org_posts.js` | Collection `org_posts` |
 | `apps/web/src/lib/org-posts/data.ts` | Enda läsvägen (`listOrgPosts`, fail-soft) |
 | `apps/web/src/lib/actions/org-posts.ts` | Server actions: skapa/ändra/fäst/radera (RBAC, validering, superuser-fallback, audit) |
-| `apps/web/src/lib/feed/activity-feed.ts` | Delad feed-laddare (`activities` + `agent_actions`) för `/chatt` OCH `/hem` |
+| `apps/web/src/lib/feed/activity-feed.ts` | Feed-laddare: `loadCompanyNews` (Bolagsnytt på `/hem` — bara människopublicerade bolagsaktiviteter) + `loadPersonalActivityFeed` (`/chatt`, § 32) |
+| `apps/web/src/lib/company-news.ts` (+ `.test.ts`) | Ren, enhetstestad urvalsregel för Bolagsnytt (`COMPANY_NEWS_FILTER`, `isCompanyNewsActivity`) |
 | `apps/web/src/lib/ai/web.ts` | `fetchWebFeedItems` — strukturerade RSS-poster med in-process-cache (30 min) |
 | `apps/web/src/app/hem/page.tsx` | Sidan (server; alla källor parallellt via `Promise.allSettled`) |
 | `apps/web/src/components/home/HomeFrontPage.tsx` | Layouten (server): masthead + siffer-rad, tidslinje med fönsterval, spalter — ren presentation av data från `page.tsx` |
@@ -7608,3 +7679,13 @@ klienten och rullas tillbaka vid fel.
 - **§ 21-isolering:** list/view staff/observer-only; en ren `startup_member`
   ser varken modulen (inte i `MEMBER_RAIL`) eller kollektionen.
 - **Migrationer** 1700000176–177 är nya, oföränderliga filnummer.
+- **Sidmenyn är låst av test (2026-10).** Modulen försvann ur railen när
+  två grenar ändrade samma `System`-rad i `RAIL_GROUPS` och sammanslagningen
+  tog den andra versionen — sidan fanns kvar på `/onskemal` (och all data i
+  `feedback_items`) men var onåbar från menyn. `packages/shared/src/rail.test.ts`
+  asserterar nu att varje `coreModules`-post finns i `RAIL_GROUPS`/`MEMBER_RAIL`
+  eller står i den uttryckliga listan över rail-lösa moduler (`insights`,
+  `anvandare`, `integrationer`, alias och dolda legacy-id:n), att railen bara
+  pekar på moduler som finns och att `onskemal` ligger i System-gruppen. Lägg
+  aldrig till ett id i rail-lös-listan för att tysta testet när en meny-rad
+  råkat försvinna i en merge.

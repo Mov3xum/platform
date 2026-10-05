@@ -10,6 +10,7 @@ import {
   saveCredentials
 } from '@/lib/integrations/credentials';
 import { getHandler, listCompanyRegistrySlugs } from '@/lib/integrations/registry';
+import { ensureRegistryProviderRows } from '@/lib/integrations/company-registry/catalog-seed';
 import { runSync, runRegistrySyncForStartup } from '@/lib/integrations/sync';
 import { loadCredentials } from '@/lib/integrations/credentials';
 import type { RegistryCompany } from '@/lib/integrations/company-registry/types';
@@ -114,6 +115,7 @@ export async function requestIntegrationPilotAction(
   }
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   return { success: true };
 }
 
@@ -155,12 +157,30 @@ export async function connectIntegrationAction(
 
   const pb = await getServerPb();
 
-  let provider: ProviderRow;
+  const providerFilter = `slug = "${escFilter(providerSlug)}"`;
+  let provider: ProviderRow | null = null;
   try {
     provider = await pb
       .collection('integration_providers')
-      .getFirstListItem<ProviderRow>(`slug = "${escFilter(providerSlug)}"`);
+      .getFirstListItem<ProviderRow>(providerFilter);
   } catch {
+    provider = null;
+  }
+  if (!provider && handler.kind === 'company_registry') {
+    // Katalograden seedas av migration 1700000173; självläk om PB-imagen inte
+    // byggts om sedan dess (§ 11.8), annars ett tydligt fel med orsak.
+    const ensured = await ensureRegistryProviderRows(pb, [providerSlug]);
+    const miss = ensured.missing.find((m) => m.slug === providerSlug);
+    if (miss) return { error: `Leverantören finns inte i katalogen. ${miss.reason}` };
+    try {
+      provider = await pb
+        .collection('integration_providers')
+        .getFirstListItem<ProviderRow>(providerFilter);
+    } catch {
+      provider = null;
+    }
+  }
+  if (!provider) {
     return { error: 'Leverantören finns inte i katalogen.' };
   }
 
@@ -217,6 +237,7 @@ export async function connectIntegrationAction(
   });
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   revalidatePath(`/integrationer/${providerSlug}`);
   return { success: true };
 }
@@ -257,6 +278,7 @@ export async function disconnectIntegrationAction(
   }
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   return { success: true };
 }
 
@@ -307,6 +329,7 @@ export async function syncIntegrationAction(
   });
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   if (providerSlug) {
     revalidatePath(`/integrationer/${providerSlug}`);
     revalidatePath(`/integrationer/${providerSlug}/poster`);

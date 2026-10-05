@@ -1,6 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { integrationsCatalogHref } from '@/lib/integrations/access';
 import { revalidatePath } from 'next/cache';
 import { invalidateOutlookCache } from '@/lib/overview/aggregate';
 import { requireUser, getServerPb } from '@/lib/auth.server';
@@ -96,6 +97,7 @@ export async function disconnectAppIntegrationAction(input: {
   if (input.provider === 'outlook_calendar') invalidateOutlookCache(user.id);
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   revalidatePath(`/integrationer/${input.provider.replace(/_/g, '-')}`);
   revalidatePath('/chatt');
   return {};
@@ -106,8 +108,10 @@ export async function disconnectAppIntegrationFormAction(formData: FormData): Pr
   const provider = String(formData.get('provider') || '').trim();
   if (!provider) return;
   const result = await disconnectAppIntegrationAction({ provider });
+  const user = await requireUser();
+  const back = integrationsCatalogHref(user.roles);
   if (result.error) {
-    redirect('/integrationer?error=' + encodeURIComponent(result.error));
+    redirect(back + '?error=' + encodeURIComponent(result.error));
   }
-  redirect('/integrationer');
+  redirect(back);
 }

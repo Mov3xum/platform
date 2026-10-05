@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  describeRecordKeys,
   normalizeRoaringBeneficialOwners,
   normalizeRoaringCompany,
   normalizeRoaringFinancials,
   normalizeRoaringGroupStructure,
-  normalizeRoaringOverview
+  normalizeRoaringOverview,
+  parseRoaringPathList
 } from './normalize';
 
 // Fixturer i Roarings `{ records: [ … ] }`-form. Fältnamnen är de vi
@@ -238,4 +240,49 @@ test('verklig huvudman: kontrollgrund mappas till fast vokabulär, aldrig fritex
   assert.equal(rows[2].owner_kind, 'person');
   assert.equal(rows[2].name, undefined);
   assert.ok(!JSON.stringify(rows).includes('Testsson'));
+});
+
+test('parseRoaringPathList: env-kandidater i ordning, fallback vid tom/ogiltig', () => {
+  assert.deepEqual(parseRoaringPathList(undefined, ['/a/1.0']), ['/a/1.0']);
+  assert.deepEqual(parseRoaringPathList('  ', ['/a/1.0']), ['/a/1.0']);
+  assert.deepEqual(parseRoaringPathList('/se/beneficialowner/2.1/, /se/company/beneficial-owner/1.0', ['/x']), [
+    '/se/beneficialowner/2.1',
+    '/se/company/beneficial-owner/1.0'
+  ]);
+  // Relativa/absoluta URL:er släpps aldrig igenom — bara sökvägar mot bas-URL:en.
+  assert.deepEqual(parseRoaringPathList('https://evil.example/x, se/company', ['/a/1.0']), ['/a/1.0']);
+});
+
+test('describeRecordKeys: bara fältnycklar, aldrig värden', () => {
+  const keys = describeRecordKeys({
+    records: [
+      {
+        companyId: '5595728790',
+        companyName: 'Combly AB',
+        postalAddress: { town: 'GÄVLE', zipCode: '80320' },
+        beneficialOwners: [{ extentOfOwnership: '25-50', name: 'HEMLIG' }],
+        empty: []
+      }
+    ]
+  });
+  assert.deepEqual(keys, [
+    'companyId',
+    'companyName',
+    'postalAddress{town,zipCode}',
+    'beneficialOwners[extentOfOwnership,name]',
+    'empty[]'
+  ]);
+  assert.ok(!keys.join(' ').includes('HEMLIG'));
+  assert.ok(!keys.join(' ').includes('Combly'));
+  assert.deepEqual(describeRecordKeys({ records: [] }), []);
+});
+
+test('verklig huvudman: hasBeneficialOwners=false ger tydlig not', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringBeneficialOwners(
+    { records: [{ companyId: '5595728790', hasBeneficialOwners: false, beneficialOwners: [] }] },
+    notes
+  );
+  assert.equal(rows.length, 0);
+  assert.ok(notes.some((n) => n.includes('hasBeneficialOwners=false')));
 });

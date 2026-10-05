@@ -75,6 +75,20 @@ export default async function InstallningarPage() {
     /* ignore (omigrerat schema) */
   }
 
+  let connectedIntegrations = 0;
+  let pilotIntegrations = 0;
+  try {
+    const rows = await pb
+      .collection('tenant_integrations')
+      .getList<{ status?: string }>(1, 200, { filter: tenantFilter, fields: 'id,status' });
+    for (const r of rows.items) {
+      if (r.status === 'connected') connectedIntegrations += 1;
+      if (r.status === 'pilot_requested') pilotIntegrations += 1;
+    }
+  } catch {
+    /* ignore — kortet visar då 0 */
+  }
+
   let tenantCount = 1;
   let startupCount = 0;
   try {
@@ -126,6 +140,19 @@ export default async function InstallningarPage() {
             Drift
           </Chip>
         )
+    },
+    integrationer: {
+      stat: `${connectedIntegrations} ${connectedIntegrations === 1 ? 'ansluten tjänst' : 'anslutna tjänster'}`,
+      hint:
+        pilotIntegrations > 0
+          ? `${pilotIntegrations} pilot begärd${pilotIntegrations === 1 ? '' : 'a'} · bolagsregister, connectors, personliga kopplingar`
+          : 'Bolagsregister (Roaring, Bolagsverket), connectors, personliga kopplingar',
+      status:
+        connectedIntegrations > 0 ? (
+          <Chip variant="active" mono>
+            {connectedIntegrations}
+          </Chip>
+        ) : undefined
     },
     'ai-analys': {
       stat: `${usd(budgetStatus.spentUsd)} förbrukat denna månad`,

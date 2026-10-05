@@ -14,7 +14,7 @@ import {
 } from '@/lib/compass/store';
 import { marketScanLead, reviewLead, scoreLead } from '@/lib/compass/chat';
 import { logAgentAction } from '@/lib/core/write';
-import { nextCompassQuestionSortOrder } from '@/lib/core/write/compass';
+import { nextCompassQuestionSortOrder, reorderCompassQuestions } from '@/lib/core/write/compass';
 import { describePbError, pbFieldCodes, pbFieldErrors, pbStatus } from '@/lib/pb-error';
 import {
   LEAD_STATUS_ORDER,
@@ -1257,6 +1257,54 @@ export async function updateQuestionAction(formData: FormData) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
     throw new Error(`Kunde inte uppdatera fråga: ${msg}`);
+  }
+
+  revalidatePath(`/inflode/admin/modules/${moduleSlug}`);
+}
+
+/**
+ * Ny ordning för modulens frågor (drag-and-drop i modul-admin). Tar HELA
+ * ordningen som en JSON-lista av fråge-id:n i `order_json`; skrivlagret
+ * (`reorderCompassQuestions`) kräver att listan är en exakt permutation av
+ * modulens frågor och numrerar om i jämna steg under modul-låset. Auditeras
+ * PII-fritt i `agent_actions` (antal frågor, inga frågetexter).
+ */
+export async function reorderQuestionsAction(formData: FormData) {
+  const user = await requireUser();
+  if (!hasRole(user.roles, [...MANAGE_ROLES])) {
+    throw new Error('Forbidden');
+  }
+  const moduleId = String(formData.get('module_id') || '');
+  const moduleSlug = String(formData.get('module_slug') || '');
+  if (!moduleId) throw new Error('Invalid input');
+
+  let orderedIds: string[];
+  try {
+    const parsed: unknown = JSON.parse(String(formData.get('order_json') || '[]'));
+    if (!Array.isArray(parsed) || parsed.length > 500 || !parsed.every((v) => typeof v === 'string')) {
+      throw new Error('bad');
+    }
+    orderedIds = parsed;
+  } catch {
+    throw new Error('Ogiltig ordning.');
+  }
+
+  const pb = await getServerPb();
+  // Modulen MÅSTE tillhöra tenanten (superuser-fallback vid tyst nekad view).
+  await getModuleInTenant(pb, moduleId, user.tenant);
+
+  const result = await reorderCompassQuestions(pb, moduleId, orderedIds);
+  if (!result.ok) throw new Error(result.error);
+
+  if (result.written > 0) {
+    await logAgentAction(pb, {
+      actor: { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles },
+      action_type: 'update',
+      collection: 'compass_modules',
+      record_id: moduleId,
+      field: 'question_order',
+      after_value: { slug: moduleSlug, question_count: orderedIds.length, rewritten: result.written }
+    });
   }
 
   revalidatePath(`/inflode/admin/modules/${moduleSlug}`);

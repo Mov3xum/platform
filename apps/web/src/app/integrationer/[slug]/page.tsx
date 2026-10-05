@@ -2,10 +2,12 @@ import Link from 'next/link';
 import { escFilter } from '@/lib/pb-filter';
 import { notFound, redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
+import { hasRole } from '@/lib/rbac';
+import { canOpenIntegrations, integrationsCatalogHref } from '@/lib/integrations/access';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailStat } from '@/components/PageRail';
 import { getHandler } from '@/lib/integrations/registry';
+import { ensureRegistryProviderRows } from '@/lib/integrations/company-registry/catalog-seed';
 import { ConnectForm } from './ConnectForm';
 import { SyncButton } from './SyncButton';
 import { DisconnectForm } from './DisconnectForm';
@@ -82,7 +84,7 @@ export default async function IntegrationDetailPage({
 }) {
   const { slug } = await params;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'integrationer', user.enabledModules)) {
+  if (!canOpenIntegrations(user)) {
     redirect('/dashboard');
   }
 
@@ -91,13 +93,27 @@ export default async function IntegrationDetailPage({
   const handler = getHandler(slug);
   const pb = await getServerPb();
 
+  const providerFilter = `slug = "${escFilter(slug)}" && active = true`;
   let provider: ProviderRecord | null = null;
   try {
     provider = await pb
       .collection('integration_providers')
-      .getFirstListItem<ProviderRecord>(`slug = "${escFilter(slug)}" && active = true`);
+      .getFirstListItem<ProviderRecord>(providerFilter);
   } catch {
     provider = null;
+  }
+  if (!provider && isStaff && handler?.kind === 'company_registry') {
+    // Självläk saknad katalograd (migration 1700000173 ej körd, § 11.8).
+    const ensured = await ensureRegistryProviderRows(pb, [slug]);
+    if (ensured.created.includes(slug)) {
+      try {
+        provider = await pb
+          .collection('integration_providers')
+          .getFirstListItem<ProviderRecord>(providerFilter);
+      } catch {
+        provider = null;
+      }
+    }
   }
   if (!provider) notFound();
 
@@ -216,10 +232,10 @@ export default async function IntegrationDetailPage({
     >
       <div className="space-y-6 py-6">
         <Link
-          href="/integrationer"
+          href={integrationsCatalogHref(user.roles)}
           className="inline-block text-[12px] text-foreground-subtle hover:text-foreground"
         >
-          ← Tillbaka till katalogen
+          ← Tillbaka till integrationerna
         </Link>
 
         {handler && (

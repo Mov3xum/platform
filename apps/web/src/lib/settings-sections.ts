@@ -66,6 +66,17 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     roles: STAFF_ADMIN
   },
   {
+    id: 'integrationer',
+    slug: 'integrationer',
+    href: '/installningar/integrationer',
+    title: 'Integrationer',
+    description:
+      'Anslut externa tjänster för organisationen — bolagsregister (Roaring, Bolagsverket), marknadsföring, lärande och AI-connectors.',
+    icon: 'link',
+    group: 'access',
+    roles: STAFF_ADMIN
+  },
+  {
     id: 'ai-analys',
     slug: 'ai-analys',
     href: '/installningar/ai-analys',

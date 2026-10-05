@@ -8,7 +8,7 @@ import type { OmvarldSourceStatus } from '@/components/home/OmvarldFeed';
 import type { HomeTabDef } from '@/components/home/HomeBoardTabs';
 import { chatMarkdownToHtml } from '@/lib/safe-html';
 import { listOrgPosts } from '@/lib/org-posts/data';
-import { loadActivityFeed } from '@/lib/feed/activity-feed';
+import { loadCompanyNews } from '@/lib/feed/activity-feed';
 import { fetchWebFeedItems, listWebSources } from '@/lib/ai/web';
 import { listAnnualWheelCategories } from '@/lib/annual-wheel/categories';
 import { computeMetric, computeMetrics } from '@/lib/metrics/registry';
@@ -151,8 +151,9 @@ export default async function HemPage({
     leadsBefore
   ] = await Promise.all([
     listOrgPosts(pb, user.tenant).catch(() => [] as OrgPost[]),
-    // Översikt visar bara de senaste 6 — Omvärld ligger direkt under i samma spalt.
-    loadActivityFeed(pb, user.tenant, 6).catch(() => [] as DashboardActivity[]),
+    // Bolagsnytt: bara människopublicerade nyheter om bolagen (§ 37.1), de
+    // senaste 6 — Omvärld ligger direkt under i samma spalt.
+    loadCompanyNews(pb, user.tenant, 6).catch(() => [] as DashboardActivity[]),
     fetchWebFeedItems(OMVARLD_SOURCES).catch(() => []),
     listForTenant<WheelRow>('annual_wheel_items', {
       // Fönstret (max 30 dagar) kan korsa årsskiftet → ta med nästa år vid behov.
