@@ -1141,6 +1141,8 @@ export interface Mission {
   description?: string;
   stages_json: MissionStage[];
   artifacts_json: MissionArtifact[];
+  /** Hashtags teamet sattes ihop för (§ 29.7, migration 1700000179) — meriter ur avslutade team. */
+  needed_tags?: string[];
   accent?: string;
   created: string;
   updated: string;

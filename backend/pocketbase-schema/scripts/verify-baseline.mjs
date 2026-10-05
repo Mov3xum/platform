@@ -969,7 +969,10 @@ const REQUIRED_APP_FIELDS = [
   { collection: 'goals', fields: ['kind', 'owner_user'] },
   // Kompetens-hashtags (§ 29.7, migration 1700000178): utan fälten "sparas"
   // taggar/nivåer tyst bort från Min profil och teammatchningen ser bara områden.
-  { collection: 'users', fields: ['competence_tags', 'development_interests'] },
+  { collection: 'users', fields: ['competence_tags', 'development_interests', 'competence_updated_at'] },
+  // Meriter ur avslutade team (§ 29.7, migration 1700000179): utan fältet
+  // tappas behovet på nya team tyst och meriterna blir alltid 0.
+  { collection: 'missions', fields: ['needed_tags'] },
   // Stödcheckar (§ 46, migrationer 1700000168/170): uppföljningskort länkas via
   // tasks.support_check_application; bokföringsspåren länkar tillbaka till ansökan.
   { collection: 'tasks', fields: ['support_check_application'] },

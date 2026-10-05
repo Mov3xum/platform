@@ -66,7 +66,10 @@ export async function saveMyProfileAction(
       bio: bio || null,
       competences,
       competence_tags: tags,
-      development_interests: developmentInterests
+      development_interests: developmentInterests,
+      // Driver "inaktuell profil"-påminnelsen (§ 29.7). Okänt fält släpps
+      // tyst av PB på en instans utan 1700000179 — ofarligt här.
+      competence_updated_at: new Date().toISOString()
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte spara profilen.' };

@@ -4,6 +4,7 @@ import { logAgentAction } from '@/lib/core/write/audit';
 import type { Actor } from '@/lib/core/write/types';
 import {
   ACTIVE_MISSION_STATUSES,
+  COMPLETED_MISSION_STATUSES,
   computeTeamLoads,
   mergeCompetenceTagVocabulary,
   sanitizeCompetences,
@@ -12,6 +13,7 @@ import {
   type CompetenceId,
   type CompetenceTagDef,
   type MissionLoadRow,
+  type MissionMeritRow,
   type Role,
   type TeamMemberLoad,
   type UserCompetenceTag
@@ -32,6 +34,58 @@ interface TagRow {
   label?: unknown;
   area?: unknown;
   status?: unknown;
+  created_by?: string;
+  created?: string;
+}
+
+export interface CompetenceTagRecord {
+  id: string;
+  slug: string;
+  label: string;
+  area: string;
+  status: 'suggested' | 'approved';
+  createdBy?: string;
+  created?: string;
+}
+
+/**
+ * Tenantens egna rader i `competence_tags` (för adminvyn). Fail-soft: tom
+ * lista + `error` mot ett omigrerat schema — aldrig krasch.
+ */
+export async function loadCompetenceTagRecords(
+  pb: PocketBase,
+  tenantId: string
+): Promise<{ rows: CompetenceTagRecord[]; error: string | null }> {
+  try {
+    const res = await pb.collection(COMPETENCE_TAGS).getList<TagRow>(1, 500, {
+      filter: pb.filter('tenant = {:tenant}', { tenant: tenantId }),
+      fields: 'id,slug,label,area,status,created_by,created',
+      sort: 'label'
+    });
+    return {
+      rows: res.items
+        .filter((r) => typeof r.id === 'string' && typeof r.slug === 'string')
+        .map((r) => ({
+          id: String(r.id),
+          slug: String(r.slug),
+          label: typeof r.label === 'string' ? r.label : String(r.slug),
+          area: typeof r.area === 'string' ? r.area : 'annat',
+          status: r.status === 'approved' ? 'approved' : 'suggested',
+          createdBy: r.created_by || undefined,
+          created: r.created || undefined
+        })),
+      error: null
+    };
+  } catch (err) {
+    const status = (err as { status?: number })?.status;
+    return {
+      rows: [],
+      error:
+        status === 404
+          ? 'Kollektionen competence_tags saknas — kör migration 1700000178.'
+          : 'Kunde inte läsa vokabulären.'
+    };
+  }
 }
 
 /** Seed + tenantens egna taggar (unik per slug). */
@@ -39,17 +93,7 @@ export async function loadCompetenceTagVocabulary(
   pb: PocketBase,
   tenantId: string
 ): Promise<CompetenceTagDef[]> {
-  let rows: TagRow[] = [];
-  try {
-    const res = await pb.collection(COMPETENCE_TAGS).getList<TagRow>(1, 500, {
-      filter: pb.filter('tenant = {:tenant}', { tenant: tenantId }),
-      fields: 'id,slug,label,area,status',
-      sort: 'label'
-    });
-    rows = res.items;
-  } catch {
-    /* fail-soft: seed-listan räcker */
-  }
+  const { rows } = await loadCompetenceTagRecords(pb, tenantId);
   return mergeCompetenceTagVocabulary(rows);
 }
 
@@ -140,6 +184,8 @@ export interface StaffProfile {
   competences: CompetenceId[];
   tags: UserCompetenceTag[];
   developmentInterests: string[];
+  /** När kompetensprofilen senast sparades (migration 1700000179), ISO eller null. */
+  competenceUpdatedAt: string | null;
 }
 
 interface UserRow {
@@ -151,6 +197,7 @@ interface UserRow {
   competences?: unknown;
   competence_tags?: unknown;
   development_interests?: unknown;
+  competence_updated_at?: string;
 }
 
 /**
@@ -167,7 +214,8 @@ export async function loadStaffProfiles(
     const res = await pb.collection('users').getList<UserRow>(1, 200, {
       filter: pb.filter('tenant = {:tenant}', { tenant: tenantId }),
       sort: 'display_name',
-      fields: 'id,display_name,email,title,roles,competences,competence_tags,development_interests'
+      fields:
+        'id,display_name,email,title,roles,competences,competence_tags,development_interests,competence_updated_at'
     });
     return res.items.map((u) => {
       const roles = Array.isArray(u.roles) ? u.roles.map(String) : [];
@@ -180,10 +228,43 @@ export async function loadStaffProfiles(
         isStaff: roles.some((r) => STAFF_ROLES.includes(r as Role)),
         competences: sanitizeCompetences(u.competences),
         tags,
-        developmentInterests: sanitizeDevelopmentInterests(u.development_interests)
+        developmentInterests: sanitizeDevelopmentInterests(u.development_interests),
+        competenceUpdatedAt: u.competence_updated_at || null
       };
     });
   } catch {
     return [];
+  }
+}
+
+const MERIT_MAX_ROWS = 2000;
+
+/**
+ * AVSLUTADE uppdrag (för meriter och täckningsgap): status, deltagare och
+ * `needed_tags`. Samma paginering/tak som belastningen; `complete:false`
+ * vid kapning. Läses med anroparens token → RLS § 21 (staff ser tenantens).
+ */
+export async function loadCompletedMissions(
+  pb: PocketBase,
+  tenantId: string
+): Promise<{ missions: MissionMeritRow[]; complete: boolean }> {
+  const statusFilter = COMPLETED_MISSION_STATUSES.map((s) => `status = "${s}"`).join(' || ');
+  const rows: MissionMeritRow[] = [];
+  try {
+    let page = 1;
+    for (;;) {
+      const res = await pb.collection('missions').getList<MissionMeritRow>(page, LOAD_PAGE, {
+        filter: pb.filter(`tenant = {:tenant} && (${statusFilter})`, { tenant: tenantId }),
+        fields: 'status,issuer,mentor,recipients,participants_json,needed_tags',
+        sort: '-updated'
+      });
+      rows.push(...res.items);
+      if (res.items.length < LOAD_PAGE || rows.length >= res.totalItems) break;
+      if (rows.length >= MERIT_MAX_ROWS) return { missions: rows, complete: false };
+      page += 1;
+    }
+    return { missions: rows, complete: true };
+  } catch {
+    return { missions: [], complete: false };
   }
 }

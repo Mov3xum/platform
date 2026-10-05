@@ -456,6 +456,8 @@ export interface RankableCandidate {
   load: TeamMemberLoad;
   /** Har redan en relation till bolaget (coach/mentor för det). */
   relatedToStartup?: boolean;
+  /** Meriter ur avslutade team (`computeTeamMerits`). */
+  merit?: TeamMerit;
 }
 
 export interface RankedCandidate {
@@ -469,7 +471,8 @@ export interface RankedCandidate {
   load: TeamMemberLoad;
   loadLevel: LoadLevel;
   relatedToStartup: boolean;
-  /** Läsbara skäl, PII-fria (taggar, områden, belastning). */
+  merit: TeamMerit;
+  /** Läsbara skäl, PII-fria (taggar, områden, belastning, meriter). */
   reasons: string[];
 }
 
@@ -480,6 +483,11 @@ const TAG_WEIGHT = 3;
 const AREA_WEIGHT = 1.5;
 const STARTUP_RELATION_BONUS = 2;
 const DEVELOPMENT_BONUS = 0.75;
+/** Meriter väger lätt: relevanta avslutade team (tak 3) och avslutade team totalt (tak 5). */
+const MERIT_RELEVANT_BONUS = 0.75;
+const MERIT_RELEVANT_CAP = 3;
+const MERIT_COMPLETED_BONUS = 0.15;
+const MERIT_COMPLETED_CAP = 5;
 
 /**
  * Deterministisk rankning av kandidater mot ett behov. Resultatet är sorterat
@@ -517,6 +525,10 @@ export function rankTeamCandidates(
     score += DEVELOPMENT_BONUS * developmentMatches.length;
     const relatedToStartup = Boolean(c.relatedToStartup);
     if (relatedToStartup) score += STARTUP_RELATION_BONUS;
+    const merit = c.merit ?? EMPTY_MERIT;
+    score +=
+      MERIT_RELEVANT_BONUS * Math.min(MERIT_RELEVANT_CAP, merit.relevant) +
+      MERIT_COMPLETED_BONUS * Math.min(MERIT_COMPLETED_CAP, merit.completed);
 
     const lvl = loadLevel(c.load);
     const hasMatch = matchedTags.length > 0 || matchedAreas.length > 0 || relatedToStartup;
@@ -539,6 +551,8 @@ export function rankTeamCandidates(
       reasons.push(`vill utvecklas inom ${developmentMatches.map((s) => `#${s}`).join(', ')}`);
     }
     if (relatedToStartup) reasons.push('arbetar redan med bolaget');
+    const meritText = describeMerit(merit);
+    if (meritText) reasons.push(meritText);
     reasons.push(describeLoad(c.load));
 
     return {
@@ -552,6 +566,7 @@ export function rankTeamCandidates(
       load: c.load,
       loadLevel: lvl,
       relatedToStartup,
+      merit,
       reasons
     };
   });
@@ -588,3 +603,211 @@ export function teamNeedGaps(need: TeamNeed, candidates: readonly RankableCandid
     areas: need.areas.filter((a) => !haveAreas.has(a))
   };
 }
+
+// ── Meriter ur avslutade team (§ 29.7, steg 2) ──────────────────────────────
+//
+// Ett avslutat team är det enda beviset på att en kompetens faktiskt använts.
+// `missions.needed_tags` (migration 1700000179) bär vilka hashtags teamet
+// sattes ihop för; när ett nytt behov matchar dem får personen meritpoäng.
+// Räknas live ur uppdragen, lagras aldrig, och väger lätt — självdeklarerad
+// nivå och belastning är fortfarande huvudsignalerna. Ingen prestationsdom:
+// bara "har ingått i N avslutade team, varav M med liknande behov".
+
+export const COMPLETED_MISSION_STATUSES = ['done'] as const;
+export const NEEDED_TAGS_MAX = 12;
+
+export interface TeamMerit {
+  /** Antal avslutade team personen ingått i. */
+  completed: number;
+  /** …varav team vars `needed_tags` överlappar det aktuella behovet. */
+  relevant: number;
+}
+
+export const EMPTY_MERIT: TeamMerit = { completed: 0, relevant: 0 };
+
+export interface MissionMeritRow extends MissionLoadRow {
+  needed_tags?: unknown;
+}
+
+/** Sanerar en lista hashtag-slugs (behov på ett uppdrag), unika, cappad. */
+export function sanitizeNeededTags(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  const out: string[] = [];
+  for (const raw of values) {
+    const slug = normalizeCompetenceTagSlug(raw);
+    if (slug && !out.includes(slug)) out.push(slug);
+    if (out.length >= NEEDED_TAGS_MAX) break;
+  }
+  return out;
+}
+
+function missionMemberIds(m: MissionLoadRow): string[] {
+  const ids = new Set<string>();
+  for (const p of Array.isArray(m.participants_json) ? m.participants_json : []) {
+    if (p && typeof p.user_id === 'string' && p.user_id) ids.add(p.user_id);
+  }
+  if (m.issuer) ids.add(m.issuer);
+  if (m.mentor) ids.add(m.mentor);
+  for (const r of m.recipients ?? []) if (r) ids.add(r);
+  return Array.from(ids);
+}
+
+/**
+ * Meriter per person ur AVSLUTADE uppdrag: `completed` = antal, `relevant` =
+ * de vars `needed_tags` delar minst en hashtag med behovet.
+ */
+export function computeTeamMerits(
+  missions: readonly MissionMeritRow[],
+  needTags: readonly string[]
+): Map<string, TeamMerit> {
+  const need = new Set(needTags);
+  const out = new Map<string, TeamMerit>();
+  for (const m of missions) {
+    if (!(COMPLETED_MISSION_STATUSES as readonly string[]).includes(m.status)) continue;
+    const tags = sanitizeNeededTags(m.needed_tags);
+    const relevant = tags.some((t) => need.has(t));
+    for (const id of missionMemberIds(m)) {
+      const cur = out.get(id) ?? { completed: 0, relevant: 0 };
+      out.set(id, { completed: cur.completed + 1, relevant: cur.relevant + (relevant ? 1 : 0) });
+    }
+  }
+  return out;
+}
+
+export function describeMerit(merit: TeamMerit): string | null {
+  if (merit.completed === 0) return null;
+  const base = `${merit.completed} avslutade team`;
+  return merit.relevant > 0 ? `${base}, ${merit.relevant} med liknande behov` : base;
+}
+
+// ── Täckning & inaktuella profiler (§ 29.7, steg 3) ─────────────────────────
+
+export interface CoverageProfile {
+  id: string;
+  name: string;
+  tags: readonly UserCompetenceTag[];
+  developmentInterests?: readonly string[];
+}
+
+export interface CompetenceCoverageRow {
+  slug: string;
+  label: string;
+  area: CompetenceId;
+  /** Antal personer med taggen. */
+  people: number;
+  byLevel: Record<CompetenceLevel, number>;
+  maxLevel: CompetenceLevel | null;
+  /** Personer som VILL utvecklas inom taggen (utan att ha den). */
+  learners: number;
+}
+
+/** Täckning per hashtag i vokabulären (plus taggar som bara finns på personer). */
+export function summarizeCompetenceCoverage(
+  profiles: readonly CoverageProfile[],
+  vocabulary: readonly CompetenceTagDef[]
+): CompetenceCoverageRow[] {
+  const rows = new Map<string, CompetenceCoverageRow>();
+  const ensure = (slug: string, label: string, area: CompetenceId) => {
+    let row = rows.get(slug);
+    if (!row) {
+      row = {
+        slug,
+        label,
+        area,
+        people: 0,
+        byLevel: { contribute: 0, strong: 0, expert: 0 },
+        maxLevel: null,
+        learners: 0
+      };
+      rows.set(slug, row);
+    }
+    return row;
+  };
+  for (const t of vocabulary) ensure(t.slug, t.label, t.area);
+  for (const p of profiles) {
+    const seen = new Set<string>();
+    for (const t of p.tags) {
+      if (seen.has(t.tag)) continue;
+      seen.add(t.tag);
+      const row = ensure(t.tag, competenceTagLabelFromSlug(t.tag), t.area);
+      row.people += 1;
+      row.byLevel[t.level] += 1;
+      if (!row.maxLevel || COMPETENCE_LEVEL_WEIGHT[t.level] > COMPETENCE_LEVEL_WEIGHT[row.maxLevel]) {
+        row.maxLevel = t.level;
+      }
+    }
+    for (const slug of p.developmentInterests ?? []) {
+      if (seen.has(slug)) continue;
+      const row = rows.get(slug);
+      if (row) row.learners += 1;
+    }
+  }
+  return Array.from(rows.values()).sort(
+    (a, b) =>
+      COMPETENCE_IDS.indexOf(a.area) - COMPETENCE_IDS.indexOf(b.area) ||
+      b.people - a.people ||
+      a.label.localeCompare(b.label, 'sv')
+  );
+}
+
+/** Hashtags i vokabulären som ingen i organisationen har — grupperat per område. */
+export function competenceCoverageGaps(
+  coverage: readonly CompetenceCoverageRow[]
+): Array<{ area: CompetenceId; label: string; tags: CompetenceCoverageRow[] }> {
+  return COMPETENCE_IDS.map((area) => ({
+    area,
+    label: COMPETENCE_LABELS[area],
+    tags: coverage.filter((r) => r.area === area && r.people === 0)
+  })).filter((g) => g.tags.length > 0);
+}
+
+/**
+ * Hashtags som efterfrågats av uppdrag (`needed_tags`) men som ingen har —
+ * det tydligaste tecknet på ett kompetensgap att rekrytera/koppla externt för.
+ */
+export function uncoveredNeededTags(
+  missions: readonly MissionMeritRow[],
+  coverage: readonly CompetenceCoverageRow[]
+): Array<{ slug: string; missions: number }> {
+  const covered = new Set(coverage.filter((r) => r.people > 0).map((r) => r.slug));
+  const counts = new Map<string, number>();
+  for (const m of missions) {
+    for (const slug of sanitizeNeededTags(m.needed_tags)) {
+      if (covered.has(slug)) continue;
+      counts.set(slug, (counts.get(slug) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .map(([slug, n]) => ({ slug, missions: n }))
+    .sort((a, b) => b.missions - a.missions || a.slug.localeCompare(b.slug, 'sv'));
+}
+
+/** Efter så många dagar räknas en kompetensprofil som inaktuell. */
+export const COMPETENCE_PROFILE_STALE_DAYS = 180;
+
+export type CompetenceProfileStatus = 'missing' | 'stale' | 'fresh' | 'unknown';
+
+/**
+ * `missing` = inga taggar alls; `stale` = taggar men senast uppdaterad för
+ * mer än 180 dagar sedan; `unknown` = taggar utan tidsstämpel (sparade före
+ * migration 1700000179); annars `fresh`.
+ */
+export function competenceProfileStatus(
+  updatedAt: string | null | undefined,
+  hasTags: boolean,
+  now: Date = new Date()
+): CompetenceProfileStatus {
+  if (!hasTags) return 'missing';
+  if (!updatedAt) return 'unknown';
+  const t = Date.parse(updatedAt);
+  if (!Number.isFinite(t)) return 'unknown';
+  const ageDays = (now.getTime() - t) / 86_400_000;
+  return ageDays > COMPETENCE_PROFILE_STALE_DAYS ? 'stale' : 'fresh';
+}
+
+export const COMPETENCE_PROFILE_STATUS_LABELS: Record<CompetenceProfileStatus, string> = {
+  missing: 'Saknar hashtags',
+  stale: 'Inaktuell (> 6 mån)',
+  fresh: 'Aktuell',
+  unknown: 'Datum saknas'
+};

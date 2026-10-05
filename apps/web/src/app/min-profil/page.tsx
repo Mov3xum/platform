@@ -24,16 +24,19 @@ export default async function MinProfilPage() {
   let bio = '';
   let tags: UserCompetenceTag[] = [];
   let developmentInterests: string[] = [];
+  let competenceUpdatedAt: string | null = null;
   try {
     const rec = await pb.collection('users').getOne(user.id, {
-      fields: 'id,title,bio,competences,competence_tags,development_interests'
+      fields: 'id,title,bio,competences,competence_tags,development_interests,competence_updated_at'
     });
     const r = rec as unknown as {
       title?: string;
       bio?: string;
       competence_tags?: unknown;
       development_interests?: unknown;
+      competence_updated_at?: string;
     };
+    competenceUpdatedAt = r.competence_updated_at || null;
     title = r.title || '';
     bio = r.bio || '';
     tags = sanitizeUserCompetenceTags(r.competence_tags, vocabulary);
@@ -61,6 +64,7 @@ export default async function MinProfilPage() {
         initialDevelopmentInterests={developmentInterests}
         vocabulary={vocabulary}
         load={myLoad}
+        competenceUpdatedAt={competenceUpdatedAt}
       />
     </div>
   );

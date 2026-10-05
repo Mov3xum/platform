@@ -4458,10 +4458,11 @@ uppdrag — siffran vore både fel och intern). Belastningen är ett
 arbetsbelastningsmått som skyddar den enskilde från överbokning, inte en
 prestationsbedömning — den lagras aldrig och får ingen historik.
 
-**Regelefterlevnad.** DPIA: `docs/privacy/dpia-team-matching.md` (kräver
-maintainer-godkännande i PR:en, § 10.1/§ 10.2).
+**Regelefterlevnad.** DPIA: `docs/privacy/dpia-team-matching.md` (godkänd
+av maintainer 2026-10-04, § 10.1/§ 10.2 — omprövas vid ändringarna i dess § 3).
 - **GDPR § 5:** hashtags och nivåer är yrkeskompetens (berättigat intresse:
-  bemanning), självdeklarerade, inte art. 9. Taggar får aldrig bära
+  bemanning), självdeklarerade, inte art. 9. DPIA godkänd av maintainer
+  2026-10-04 (PR #431). Taggar får aldrig bära
   personuppgifter — slug-normaliseringen avvisar personnummer-mönster, UI:t
   säger "kompetens, aldrig personuppgifter", `competence_tags` innehåller
   slug/etikett/område/skapare och varje ny post auditeras PII-fritt i
@@ -4495,6 +4496,56 @@ maintainer-godkännande i PR:en, § 10.1/§ 10.2).
   tillbaka på den inbyggda listan (fail-soft).
 - **Lägg aldrig till en seed-tagg utan att spegla den i migrationen** (och
   tvärtom); nya taggar i drift går via profilen, inte via kod.
+- **Var hashtags redigeras — "Min profil", inte "Mitt konto" (incident
+  2026-10-04).** Admin hittade inte hashtag-ytan efter mergen: kontomenyn i
+  railens fot (klick på det egna namnet) ledde bara till `/konto` (Mitt konto =
+  inloggningsuppgifter/lösenord), medan hashtags bor på `/min-profil` (modul
+  `min_profil`, System-railen). Dessutom hade modulen aldrig backfillats i
+  redan sparade `users.enabled_modules` (§ 36.3-läxan) — "Min profil" saknades
+  i sidmenyn för äldre konton. Nu: kontomenyn har posten **Min profil**
+  (`RailAccountMenu.showProfile`, samma `canAccessModuleForUser`-kurering som
+  sidmenyn), `/konto` har ett kort "Kompetenser & hashtags" som länkar dit,
+  `min_profil` har ikonen `user` i railen, och migration **1700000180**
+  backfillar `min_profil` i befintliga allow-listor (admin/incubator_lead/
+  coach/mentor/partner; `null` rörs inte). Produktion deployas dessutom
+  MANUELLT ("Deploy to Coolify Production", workflow_dispatch från `staging`,
+  § 10.3) — en merge till `staging` når aldrig app.movexum.se av sig själv.
+
+**Steg 2–3 (2026-10-04, migration 1700000179; DPIA godkänd av maintainer
+samma dag).**
+- **Meriter ur avslutade team.** `missions.needed_tags` (json) bär vilka
+  hashtags teamet sattes ihop för — `NewMissionForm` skickar AI-förslagets
+  `neededTags` som dolt fält, `createMissionAction` sanerar till slugs
+  (`sanitizeNeededTags`, tak 12). `computeTeamMerits` (ren, enhetstestad)
+  räknar per person antal AVSLUTADE uppdrag (`status = done`) hen ingått i
+  och hur många vars `needed_tags` överlappar det aktuella behovet;
+  `rankTeamCandidates` ger lätt bonus (relevanta ×0,75, tak 3; totalt ×0,15,
+  tak 5) och skälet "N avslutade team, M med liknande behov". Deltagande är
+  verksamhetsdata, inte prestation/utfall — ingen omprövning av riskklassen
+  (DPIA § 5). Läses live av `loadCompletedMissions` (statusfilter,
+  paginerat, `complete`-flagga), lagras aldrig per person.
+- **Inaktuella profiler.** `users.competence_updated_at` sätts av
+  profil-actionen vid varje sparning; `competenceProfileStatus` (ren):
+  `missing` (inga taggar) / `stale` (> `COMPETENCE_PROFILE_STALE_DAYS` = 180)
+  / `unknown` (taggar utan tidsstämpel, sparade före migrationen) / `fresh`.
+  Min profil visar en gul påminnelse vid `stale`/`missing`.
+- **Inställningar → Kompetenser** (`/installningar/kompetenser`,
+  admin/incubator_lead; sektionsregistret § 36.1): godkännandekö för
+  `suggested`-taggar (godkänn / justera etikett+område / ta bort), "lägg
+  till godkänd hashtag" (create → update i två steg eftersom createRule är
+  body-låst till `suggested`), täckning per hashtag
+  (`summarizeCompetenceCoverage`: personer, nivåfördelning, högsta nivå,
+  antal som vill utvecklas inom taggen), kompetensgap
+  (`competenceCoverageGaps` = vokabulärtaggar ingen har, per område;
+  `uncoveredNeededTags` = taggar uppdrag efterfrågat men ingen täcker) och
+  profilstatus per kollega. Server-actions i `lib/actions/competence-tags.ts`
+  (RBAC + tenant-verifiering per post + `writeWithFallback` bara vid PB
+  v0.23.4:s tysta regel-nekande + `agent_actions`-audit med slug/etikett/
+  område — mappat i `feed/agent-log.ts`). Sluggen är oföränderlig (ligger på
+  profilerna); borttagning ur vokabulären rör aldrig någons profil. Hubben
+  visar antal taggar + väntande förslag. Vyn visar kollegors namn +
+  profilstatus för ledningen — samma krets som redan läser profilerna
+  (DPIA § 1 Åtkomst); riskklass n/a (ingen AI-inferens).
 
 ---
 
@@ -5679,6 +5730,7 @@ brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
 | `/installningar/organisation` | Tenants, infra-status, dataresidens |
 | `/installningar/ai-analys` | **AI-analys** — tre undervyer via `?vy=`: **Kostnadstak** (default, § 9.6), **Användning** (f.d. `/insights`: körningar, tokens, kostnad, kvalitetsfeedback § 9.10, adoption) och **Miljöpåverkan** (f.d. `/admin/ai-miljo`, admin-only, § 28.2). `/insights`, `/admin/ai-miljo` och `/installningar/ai-kostnad` är legacy-routes som redirectar hit (perioden bevaras). Modulen `insights` heter "AI-analys", har ingen egen rail-post längre och pekar hit. |
 | `/installningar/ai-minne` | AI-minne (`agent_memory`, § 16.4) |
+| `/installningar/kompetenser` | **Kompetenser** (§ 29.7 steg 3) — hashtag-vokabulären för tvärfunktionella team: godkännandekö för föreslagna taggar, täckning per hashtag (personer/nivåer/lärande), kompetensgap (taggar ingen har + taggar uppdrag efterfrågat utan täckning) och profilstatus per kollega (aktuell/inaktuell > 180 dagar/saknar hashtags) |
 | `/installningar/integrationer` | **Integrationer** (2026-09) — organisationens externa tjänster (bolagsregister § 11.8, Brevo/Howspace, Mistral-connectors § 13, personliga OAuth-kopplingar § 14). Katalogen är den delade `components/integrations/IntegrationsCatalog.tsx`; `/integrationer` redirectar admin/incubator_lead hit och visar oförändrat katalogen för coach/bolagsmedlem (personliga integrationer). Detaljsidorna `/integrationer/<slug>` är oförändrade; grinden är `canOpenIntegrations` (`lib/integrations/access.ts`: settings-roll ELLER modulen) och tillbaka-länken följer rollen (`integrationsCatalogHref`). Modulen `integrationer` har ingen egen rail-post längre (samma mönster som `insights`/`anvandare`). |
 | `/installningar/utseende` | Tenant-logotyp + **inloggningssidans utseende** (mall, accentfärg, rubrik/underrubrik, bild/video — § 48) |
 
@@ -5768,7 +5820,8 @@ roll**:
   ALDRIG automatiskt (bara `null`-listor följer rollen), så sidan finns men
   saknas i sidmenyn. Skriv därför en idempotent datamigration som lägger till
   id:t i befintliga listor för de roller vars standard innehåller det
-  (precedens: **1700000174** för `projekt`/`checkar` — union, tar aldrig bort,
+  (precedens: **1700000174** för `projekt`/`checkar`, **1700000177** för
+  `onskemal`, **1700000180** för `min_profil` — union, tar aldrig bort,
   rör inte `null`). Ingen spegling i `setup-via-api.mjs` (data, inte schema).
 - **Säkerhetsgräns oförändrad:** `canAccessModuleForUser(roles, id,
   enabledModules)` = `canAccessModule` (rollen, `rolesAllowed`) **och**

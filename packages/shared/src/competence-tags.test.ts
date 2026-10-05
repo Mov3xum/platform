@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 
 import {
   COMPETENCE_TAG_SEED,
+  competenceCoverageGaps,
+  competenceProfileStatus,
   computeTeamLoads,
+  computeTeamMerits,
+  describeMerit,
   deriveCompetenceAreas,
   inferTeamNeedFromText,
   loadLevel,
@@ -12,9 +16,12 @@ import {
   rankTeamCandidates,
   sanitizeCompetenceTagLabel,
   sanitizeDevelopmentInterests,
+  sanitizeNeededTags,
   sanitizeTeamNeed,
+  summarizeCompetenceCoverage,
   sanitizeUserCompetenceTags,
   teamNeedGaps,
+  uncoveredNeededTags,
   weightedLoad,
   type RankableCandidate
 } from './competence-tags.ts';
@@ -221,4 +228,84 @@ test('rankTeamCandidates: bolagsrelation ger bonus och syns som skäl', () => {
 test('teamNeedGaps: taggar/områden ingen kandidat täcker', () => {
   const gaps = teamNeedGaps({ areas: ['juridik', 'finansiering_kapital'], tags: ['gdpr', 'vinnova-ansokan'] }, cands);
   assert.deepEqual(gaps, { tags: ['gdpr'], areas: ['juridik'] });
+});
+
+test('computeTeamMerits: bara avslutade team, relevant vid tagg-överlapp, en gång per person', () => {
+  const merits = computeTeamMerits(
+    [
+      { status: 'done', issuer: 'anna', recipients: ['bo'], participants_json: [{ user_id: 'anna', role: 'lead' }], needed_tags: ['vinnova-ansokan', 'eic'] },
+      { status: 'done', issuer: 'bo', participants_json: [{ user_id: 'cia', role: 'contributor' }], needed_tags: ['linkedin'] },
+      { status: 'in_progress', issuer: 'anna', needed_tags: ['vinnova-ansokan'] },
+      { status: 'done', issuer: 'dan', needed_tags: 'inte-en-lista' }
+    ],
+    ['vinnova-ansokan']
+  );
+  assert.deepEqual(merits.get('anna'), { completed: 1, relevant: 1 });
+  assert.deepEqual(merits.get('bo'), { completed: 2, relevant: 1 });
+  assert.deepEqual(merits.get('cia'), { completed: 1, relevant: 0 });
+  assert.deepEqual(merits.get('dan'), { completed: 1, relevant: 0 });
+  assert.equal(describeMerit({ completed: 0, relevant: 0 }), null);
+  assert.equal(describeMerit({ completed: 2, relevant: 1 }), '2 avslutade team, 1 med liknande behov');
+});
+
+test('rankTeamCandidates: meriter höjer poängen lätt och syns som skäl', () => {
+  const base: RankableCandidate = {
+    id: 'a',
+    name: 'A',
+    tags: [{ tag: 'eic', area: 'finansiering_kapital', level: 'strong' }],
+    load: { active: 0, leading: 0 }
+  };
+  const [withMerit, without] = rankTeamCandidates({ areas: [], tags: ['eic'] }, [
+    { ...base, id: 'm', name: 'M', merit: { completed: 10, relevant: 10 } },
+    base
+  ]);
+  assert.equal(withMerit.id, 'm');
+  // Taket: 3 × 0,75 + 5 × 0,15 = 3 poäng mer, inte 10 × …
+  assert.equal(Math.round((withMerit.score - without.score) * 100) / 100, 3);
+  assert.ok(withMerit.reasons.includes('10 avslutade team, 10 med liknande behov'));
+});
+
+test('sanitizeNeededTags: slugs, unika, tak 12', () => {
+  assert.deepEqual(sanitizeNeededTags(['#EIC', 'eic', 'Term Sheet', 7]), ['eic', 'term-sheet']);
+  assert.equal(sanitizeNeededTags(Array.from({ length: 20 }, (_, i) => `x${i}`)).length, 12);
+});
+
+test('summarizeCompetenceCoverage: personer, nivåer, lärande och egna taggar utanför vokabulären', () => {
+  const coverage = summarizeCompetenceCoverage(
+    [
+      { id: '1', name: 'A', tags: [{ tag: 'eic', area: 'finansiering_kapital', level: 'expert' }] },
+      { id: '2', name: 'B', tags: [{ tag: 'eic', area: 'finansiering_kapital', level: 'contribute' }, { tag: 'egen-tagg', area: 'annat', level: 'strong' }], developmentInterests: ['medtech'] },
+      { id: '3', name: 'C', tags: [], developmentInterests: ['eic'] }
+    ],
+    COMPETENCE_TAG_SEED
+  );
+  const eic = coverage.find((r) => r.slug === 'eic')!;
+  assert.equal(eic.people, 2);
+  assert.deepEqual(eic.byLevel, { contribute: 1, strong: 0, expert: 1 });
+  assert.equal(eic.maxLevel, 'expert');
+  assert.equal(eic.learners, 1);
+  assert.equal(coverage.find((r) => r.slug === 'medtech')?.learners, 1);
+  const egen = coverage.find((r) => r.slug === 'egen-tagg')!;
+  assert.equal(egen.people, 1);
+  assert.equal(egen.area, 'annat');
+  const gaps = competenceCoverageGaps(coverage);
+  assert.ok(gaps.some((g) => g.area === 'juridik' && g.tags.some((t) => t.slug === 'gdpr')));
+  assert.ok(!gaps.some((g) => g.tags.some((t) => t.slug === 'eic')));
+  const needed = uncoveredNeededTags(
+    [
+      { status: 'done', needed_tags: ['gdpr', 'eic'] },
+      { status: 'in_progress', needed_tags: ['gdpr'] }
+    ],
+    coverage
+  );
+  assert.deepEqual(needed, [{ slug: 'gdpr', missions: 2 }]);
+});
+
+test('competenceProfileStatus: saknas / inaktuell / aktuell / okänt datum', () => {
+  const now = new Date('2026-10-04T00:00:00Z');
+  assert.equal(competenceProfileStatus(null, false, now), 'missing');
+  assert.equal(competenceProfileStatus(null, true, now), 'unknown');
+  assert.equal(competenceProfileStatus('skräp', true, now), 'unknown');
+  assert.equal(competenceProfileStatus('2026-09-01T00:00:00Z', true, now), 'fresh');
+  assert.equal(competenceProfileStatus('2026-03-01T00:00:00Z', true, now), 'stale');
 });

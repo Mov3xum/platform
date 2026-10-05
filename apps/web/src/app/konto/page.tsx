@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
-import { LogOut } from 'lucide-react';
+import Link from 'next/link';
+import { LogOut, Tags } from 'lucide-react';
 import { requireUser } from '@/lib/auth.server';
+import { canAccessModuleForUser } from '@/lib/rbac';
 import { LOGOUT_PATH } from '@/lib/auth-paths';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailItem, RailEmpty } from '@/components/PageRail';
@@ -22,6 +24,10 @@ const roleLabels: Record<string, string> = {
 
 export default async function KontoPage() {
   const user = await requireUser();
+  // Kompetens-hashtags (§ 29.7) bor på /min-profil — inte här. Mitt konto är
+  // inloggningsuppgifter; Min profil är yrkesprofilen som teammatchningen
+  // läser. Länken visas med samma UI-kurering som sidmenyn.
+  const showProfile = canAccessModuleForUser(user.roles, 'min_profil', user.enabledModules);
 
   const rail = (
     <>
@@ -59,6 +65,29 @@ export default async function KontoPage() {
     <PageShell title="Mitt konto" rightPanel={rail}>
       <div className="mx-auto w-full max-w-2xl space-y-6 py-6">
         <ProfileForm name={user.name} email={user.email} avatarUrl={user.avatarUrl} />
+
+        {showProfile && (
+          <section className="rounded-2xl border border-default bg-surface p-6">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-base font-semibold text-foreground">Kompetenser & hashtags</h2>
+                <p className="mt-1 text-sm text-foreground-muted">
+                  Din yrkestitel, dina kompetens-hashtags med nivå och vad du vill utvecklas inom
+                  ligger under <span className="font-medium text-foreground">Min profil</span>. Det
+                  är de som används när tvärfunktionella team sätts ihop.
+                </p>
+              </div>
+              <Link
+                href="/min-profil"
+                className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition hover:bg-brand-hover"
+              >
+                <Tags className="h-4 w-4" />
+                Öppna Min profil
+              </Link>
+            </div>
+          </section>
+        )}
+
         <PasswordForm />
 
         <section className="rounded-2xl border border-default bg-surface p-6">

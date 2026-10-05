@@ -7,11 +7,13 @@ import { assertWithinAiBudget, AiBudgetExceededError } from '@/lib/ai/budget.ser
 import { composeTeam, extractTeamNeed, TEAM_MATCH_MODEL } from '@/lib/ai/team-match';
 import {
   loadCompetenceTagVocabulary,
+  loadCompletedMissions,
   loadStaffProfiles,
   loadTeamLoads
 } from '@/lib/team/competence-tags.server';
 import {
   TEAM_SHORTLIST_SIZE,
+  computeTeamMerits,
   rankTeamCandidates,
   teamNeedGaps,
   type CompetenceId,
@@ -108,9 +110,10 @@ export async function suggestTeamAction(input: {
 
   // ── Underlag (parallellt, alla fail-soft) ───────────────────────────────
   const vocabulary = await loadCompetenceTagVocabulary(pb, user.tenant);
-  const [profiles, { loads, complete: loadComplete }] = await Promise.all([
+  const [profiles, { loads, complete: loadComplete }, { missions: completedMissions }] = await Promise.all([
     loadStaffProfiles(pb, user.tenant, vocabulary),
-    loadTeamLoads(pb, user.tenant)
+    loadTeamLoads(pb, user.tenant),
+    loadCompletedMissions(pb, user.tenant)
   ]);
 
   // ── Valfri bolagskontext (kort etikett, ingen PII) + relation ──────────
@@ -140,19 +143,8 @@ export async function suggestTeamAction(input: {
   }
 
   // ── Kandidater: interna kollegor med kompetensprofil ────────────────────
-  const candidates: RankableCandidate[] = profiles
-    .filter((p) => p.isStaff && (p.tags.length > 0 || p.competences.length > 0))
-    .map((p) => ({
-      id: p.id,
-      name: p.name,
-      title: p.title,
-      tags: p.tags,
-      areas: p.competences,
-      developmentInterests: p.developmentInterests,
-      load: loads.get(p.id) ?? { active: 0, leading: 0 },
-      relatedToStartup: relatedUserIds.has(p.id)
-    }));
-  if (candidates.length === 0) {
+  const eligible = profiles.filter((p) => p.isStaff && (p.tags.length > 0 || p.competences.length > 0));
+  if (eligible.length === 0) {
     return {
       ok: false,
       error:
@@ -164,6 +156,21 @@ export async function suggestTeamAction(input: {
 
   // ── Steg 1: behov ───────────────────────────────────────────────────────
   const needRes = await extractTeamNeed({ description, startupContext, vocabulary });
+
+  // Meriter ur avslutade team (lätt vikt, § 29.7): räknas mot det tolkade
+  // behovet, därför efter steg 1.
+  const merits = computeTeamMerits(completedMissions, needRes.need.tags);
+  const candidates: RankableCandidate[] = eligible.map((p) => ({
+    id: p.id,
+    name: p.name,
+    title: p.title,
+    tags: p.tags,
+    areas: p.competences,
+    developmentInterests: p.developmentInterests,
+    load: loads.get(p.id) ?? { active: 0, leading: 0 },
+    relatedToStartup: relatedUserIds.has(p.id),
+    merit: merits.get(p.id)
+  }));
 
   // ── Steg 2: deterministisk rankning (hashtag/nivå/relation/belastning) ──
   const ranked = rankTeamCandidates(needRes.need, candidates);

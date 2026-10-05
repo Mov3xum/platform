@@ -7,6 +7,7 @@ import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import {
   ALL_ROLES,
+  sanitizeNeededTags,
   type Mission,
   type MissionParticipant,
   type MissionParticipantRole,
@@ -151,6 +152,15 @@ export async function createMissionAction(
   const accent = String(formData.get('accent') || 'purple').trim() || 'purple';
   const visibilityRaw = String(formData.get('visibility') || 'tenant').trim() as MissionVisibility;
   const participantsRaw = String(formData.get('participants_json') || '').trim();
+  // Hashtags teamet sattes ihop för (AI-förslaget, § 29.7) — meriter när
+  // uppdraget avslutas. Saneras till slugs; okänt fält släpps tyst av PB på
+  // en instans utan migration 1700000179 (meriterna blir då bara 0).
+  let neededTags: string[] = [];
+  try {
+    neededTags = sanitizeNeededTags(JSON.parse(String(formData.get('needed_tags_json') || '[]')));
+  } catch {
+    neededTags = [];
+  }
 
   if (title.length < 2) return { error: 'Titel måste vara minst 2 tecken.' };
   if (title.length > 200) return { error: 'Titel får vara max 200 tecken.' };
@@ -203,6 +213,7 @@ export async function createMissionAction(
       description: description || '',
       stages_json: stages,
       artifacts_json: [],
+      needed_tags: neededTags,
       accent
     });
   } catch (err) {
