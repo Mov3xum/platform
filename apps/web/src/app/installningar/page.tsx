@@ -7,6 +7,7 @@ import { PageShell } from '@/components/PageShell';
 import { RailSection, RailItem, RailStat, RailNote } from '@/components/PageRail';
 import { getBudgetStatus } from '@/lib/ai/budget.server';
 import { getInfraHealth, healthStateLabel, type HealthState } from '@/lib/health';
+import { loadTeamCapSetting } from '@/lib/team/competence-tags.server';
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS, settingsSectionsFor } from '@/lib/settings-sections';
 import { requireSettingsUser, SettingsCard, settingsTabsFor } from './shared';
 
@@ -74,6 +75,7 @@ export default async function InstallningarPage() {
   } catch {
     /* ignore (omigrerat schema) */
   }
+  const teamCap = await loadTeamCapSetting(pb, user.tenant);
 
   let connectedIntegrations = 0;
   let pilotIntegrations = 0;
@@ -176,7 +178,7 @@ export default async function InstallningarPage() {
       hint:
         suggestedTagCount > 0
           ? `${suggestedTagCount} ${suggestedTagCount === 1 ? 'förslag väntar' : 'förslag väntar'} på godkännande`
-          : 'Täckning, gap och inaktuella profiler',
+          : `Max ${teamCap.cap} team per person${teamCap.configured ? '' : ' (standard)'} · täckning, gap och profiler`,
       status:
         suggestedTagCount > 0 ? (
           <Chip variant="yellow" mono>

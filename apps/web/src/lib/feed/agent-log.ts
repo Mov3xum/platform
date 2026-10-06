@@ -593,6 +593,15 @@ function mapRow(
       }
       return { title: `Hashtag ${tag} ${changedVerb}`, href, icon: 'edit3' };
     }
+    // Teamtak (§ 29.7) — ledningen ändrade max antal pågående team per person.
+    case 'team_cap': {
+      const cap = typeof after.max_active_teams_per_person === 'number' ? after.max_active_teams_per_person : null;
+      return {
+        title: cap ? `Teamtak ändrat till ${cap} pågående team per person` : 'Teamtak återställt till standard',
+        href: '/installningar/kompetenser',
+        icon: 'people'
+      };
+    }
     // Önskemål & buggar (§ 49) — intern backlog.
     case 'feedback_items': {
       const title = str(after.title) || 'utan rubrik';

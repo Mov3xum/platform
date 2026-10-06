@@ -28,8 +28,11 @@ import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
 import {
   loadCompetenceTagVocabulary,
   loadStaffProfiles,
+  loadTeamCap,
   loadTeamLoads
 } from '@/lib/team/competence-tags.server';
+import { isActiveMissionStatus } from '@/lib/team/team-cap.server';
+import { isAtTeamCap } from '@platform/shared';
 import type {
   Mission,
   MissionComment,
@@ -73,11 +76,14 @@ interface UserMeta {
 }
 
 export default async function MissionDetailPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ fel?: string }>;
 }) {
   const { id } = await params;
+  const { fel } = await searchParams;
   const user = await requireUser();
   const pb = await getServerPb();
 
@@ -103,12 +109,15 @@ export default async function MissionDetailPage({
   const users: UserOption[] = [];
   const teamUsers: UserOption[] = [];
   const userMeta = new Map<string, UserMeta>();
+  let teamCap = 3;
   {
     const vocabulary = await loadCompetenceTagVocabulary(pb, user.tenant);
-    const [profiles, { loads }] = await Promise.all([
+    const [profiles, { loads }, cap] = await Promise.all([
       loadStaffProfiles(pb, user.tenant, vocabulary),
-      loadTeamLoads(pb, user.tenant)
+      loadTeamLoads(pb, user.tenant),
+      loadTeamCap(pb, user.tenant)
     ]);
+    teamCap = cap;
     for (const p of profiles) {
       userMeta.set(p.id, {
         title: p.title,
@@ -245,6 +254,22 @@ export default async function MissionDetailPage({
     };
   });
 
+  // § 29.7 — teamtaket. Belastning visas bara för staff (RLS-skäl ovan).
+  const missionActive = isActiveMissionStatus(mission.status);
+  const pickerUsers = teamUsers.map((u) => {
+    const load = userMeta.get(u.id)?.load ?? { active: 0, leading: 0 };
+    return isStaff ? { ...u, load, atCap: isAtTeamCap(load, teamCap) } : u;
+  });
+  // Ett blockerat statusbyte/steg (formuläråtgärd) kommer tillbaka som
+  // ?fel=team_cap — sidan namnger själv vilka som nått taket (ingen fritext
+  // i URL:en).
+  const capBlockedNames =
+    fel === 'team_cap'
+      ? participantsForUi
+          .filter((p) => isAtTeamCap(userMeta.get(p.user_id)?.load ?? { active: 0, leading: 0 }, teamCap))
+          .map((p) => usersByIdLabel.get(p.user_id) || 'En kollega')
+      : [];
+
   return (
     <div
       className="mx-view-pad mx-wide"
@@ -282,6 +307,18 @@ export default async function MissionDetailPage({
           </>
         }
       />
+
+      {fel === 'team_cap' ? (
+        <div
+          role="alert"
+          className="rounded-xl border border-movexum-orange/40 bg-movexum-pastell-orange px-4 py-3 text-[13px] text-movexum-morkorange"
+        >
+          Teamet kunde inte bli pågående: någon i teamet ingår redan i {teamCap} pågående team, vilket är
+          taket.
+          {capBlockedNames.length > 0 ? ` (${capBlockedNames.join(', ')})` : ''} Avsluta ett annat team,
+          ta bort personen ur teamet, eller be ledningen höja taket under Inställningar → Kompetenser.
+        </div>
+      ) : null}
 
       {startupRefs.length > 0 && <MissionStartupsChips startups={startupRefs} />}
 
@@ -328,11 +365,13 @@ export default async function MissionDetailPage({
           <ParticipantsPanel
             missionId={mission.id}
             issuerId={mission.issuer}
-            users={teamUsers}
+            users={pickerUsers}
             initialParticipants={participantsForUi}
             canEdit={ctx.canEdit}
+            teamCap={teamCap}
+            missionActive={missionActive}
           />
-          <TeamCompetencePanel members={teamMembers} />
+          <TeamCompetencePanel members={teamMembers} teamCap={teamCap} />
           <MissionDocuments
             missionId={mission.id}
             documents={documents}

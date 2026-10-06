@@ -106,5 +106,6 @@ export async function saveMyProfileAction(
 
   revalidatePath('/min-profil');
   revalidatePath('/uppdrag/new');
+  revalidatePath('/konto');
   return warning ? { ok: true, warning } : { ok: true };
 }

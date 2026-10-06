@@ -4895,6 +4895,12 @@ await patchTenantsCollection([
   { name: 'monthly_ai_budget_usd', type: 'number', required: false, min: 0, max: 1000000 }
 ]);
 
+// Teamtak per tenant (CLAUDE.md § 29.7, migration 1700000181): max antal
+// pågående team per person. Tomt/0 ⇒ default 3.
+await patchTenantsCollection([
+  { name: 'max_active_teams_per_person', type: 'number', required: false, min: 0, max: 20, onlyInt: true }
+]);
+
 // Inloggningssidans utseende (CLAUDE.md § 48, migration 1700000172): mall,
 // accentfärg (brand-token), rubrik/underrubrik, bild + video för /login.
 // `login_caption` (bildtexten över bilden, för sig) = migration 1700000175.

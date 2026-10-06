@@ -16,15 +16,16 @@ import {
   COMPETENCE_LEVELS,
   COMPETENCE_LEVEL_LABELS,
   COMPETENCE_PROFILE_STALE_DAYS,
+  DEFAULT_MAX_ACTIVE_TEAMS,
   DEVELOPMENT_INTERESTS_MAX,
   LOAD_LEVEL_LABELS,
   USER_COMPETENCE_TAGS_MAX,
   competenceProfileStatus,
   competenceTagsByArea,
-  describeLoad,
   deriveCompetenceAreas,
   loadLevel,
   normalizeCompetenceTagSlug,
+  teamCapacityLeft,
   type CompetenceId,
   type CompetenceLevel,
   type CompetenceTagDef,
@@ -52,7 +53,9 @@ export function MinProfilForm({
   initialDevelopmentInterests,
   vocabulary,
   load,
-  competenceUpdatedAt
+  competenceUpdatedAt,
+  teamCap = DEFAULT_MAX_ACTIVE_TEAMS,
+  wide = false
 }: {
   initialTitle: string;
   initialBio: string;
@@ -61,6 +64,10 @@ export function MinProfilForm({
   vocabulary: CompetenceTagDef[];
   load: TeamMemberLoad;
   competenceUpdatedAt: string | null;
+  /** Max antal pågående team per person (§ 29.7). */
+  teamCap?: number;
+  /** Bred tvåkolumnslayout (Mitt konto på desktop). */
+  wide?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(
     saveMyProfileAction,
@@ -144,55 +151,48 @@ export function MinProfilForm({
       COMPETENCE_LEVELS.indexOf(b.level) - COMPETENCE_LEVELS.indexOf(a.level) ||
       a.tag.localeCompare(b.tag, 'sv')
   );
-  const myLoadLevel = loadLevel(load);
+  const myLoadLevel = loadLevel(load, teamCap);
+  const slotsLeft = teamCapacityLeft(load, teamCap);
   const profileStatus = competenceProfileStatus(competenceUpdatedAt, initialTags.length > 0);
   const updatedLabel = competenceUpdatedAt
     ? new Date(competenceUpdatedAt).toLocaleDateString('sv-SE', { timeZone: 'Europe/Stockholm' })
     : null;
 
-  return (
-    <form action={formAction} className="mx-mt-4" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {(profileStatus === 'stale' || profileStatus === 'missing') && (
-        <div className="mx-card" style={{ padding: 12, background: 'var(--mx-st-warn-bg, #f8f1da)', color: '#4b2718' }}>
-          <div className="mx-t-13 mx-fw-6">
-            {profileStatus === 'missing'
-              ? 'Du har inga hashtags ännu — utan dem kan du inte föreslås till tvärfunktionella team.'
-              : `Din kompetensprofil uppdaterades senast ${updatedLabel} (mer än ${COMPETENCE_PROFILE_STALE_DAYS} dagar sedan). Gå igenom hashtags och nivåer och spara igen så att teamförslagen bygger på aktuell information.`}
+  const profileCard = (
+    <Card style={{ padding: 18 }}>
+      <div className="mx-flex mx-col mx-gap-4">
+        <div className="mx-field">
+          <label className="mx-label" htmlFor="title">
+            Yrkestitel
+          </label>
+          <input
+            id="title"
+            name="title"
+            maxLength={120}
+            defaultValue={initialTitle}
+            placeholder="t.ex. Affärscoach, Projektledare, Kommunikatör"
+          />
+        </div>
+        <div className="mx-field">
+          <label className="mx-label" htmlFor="bio">
+            Kort om mig
+          </label>
+          <textarea
+            id="bio"
+            name="bio"
+            maxLength={1000}
+            defaultValue={initialBio}
+            placeholder="Bakgrund och specialitet — vad du kan kopplas på för i ett team."
+          />
+          <div className="mx-t-12 mx-muted mx-mt-1">
+            Skriv inga personuppgifter om andra. Texten är intern.
           </div>
         </div>
-      )}
-      <Card style={{ padding: 18 }}>
-        <div className="mx-flex mx-col mx-gap-4">
-          <div className="mx-field">
-            <label className="mx-label" htmlFor="title">
-              Yrkestitel
-            </label>
-            <input
-              id="title"
-              name="title"
-              maxLength={120}
-              defaultValue={initialTitle}
-              placeholder="t.ex. Affärscoach, Projektledare, Kommunikatör"
-            />
-          </div>
-          <div className="mx-field">
-            <label className="mx-label" htmlFor="bio">
-              Kort om mig
-            </label>
-            <textarea
-              id="bio"
-              name="bio"
-              maxLength={1000}
-              defaultValue={initialBio}
-              placeholder="Bakgrund och specialitet — vad du kan kopplas på för i ett team."
-            />
-            <div className="mx-t-12 mx-muted mx-mt-1">
-              Skriv inga personuppgifter om andra. Texten är intern.
-            </div>
-          </div>
-        </div>
-      </Card>
-
+      </div>
+    </Card>
+  );
+  const hashtagsCard = (
+    <>
       {/* ── Mina hashtags ─────────────────────────────────────────────── */}
       <Card style={{ padding: 18 }}>
         <div className="mx-flex mx-items-c mx-justify-b mx-mb-2 mx-gap-2 mx-wrap">
@@ -348,7 +348,10 @@ export function MinProfilForm({
 
         <input type="hidden" name="competence_tags_json" value={JSON.stringify(tags)} />
       </Card>
-
+    </>
+  );
+  const interestsCard = (
+    <>
       {/* ── Vill utvecklas inom ───────────────────────────────────────── */}
       <Card style={{ padding: 18 }}>
         <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6 mx-mb-2">
@@ -397,7 +400,10 @@ export function MinProfilForm({
         </div>
         <input type="hidden" name="development_interests_json" value={JSON.stringify(interests)} />
       </Card>
-
+    </>
+  );
+  const loadCard = (
+    <>
       {/* ── Min belastning ────────────────────────────────────────────── */}
       <Card style={{ padding: 18 }}>
         <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6 mx-mb-1">Min belastning just nu</div>
@@ -405,13 +411,70 @@ export function MinProfilForm({
           <span className={`mx-chip mx-mono ${myLoadLevel === 'free' ? 'mx-active' : ''}`}>
             {LOAD_LEVEL_LABELS[myLoadLevel]}
           </span>
-          <span className="mx-t-13">{describeLoad(load)}</span>
+          <span className="mx-t-13 mx-tnum">
+            {load.active} av {teamCap} team
+            {load.leading > 0 ? `, ansvarig i ${load.leading}` : ''}
+          </span>
         </div>
-        <div className="mx-t-12 mx-muted mx-mt-1">
-          Räknas ur de team (uppdrag) du ingår i som pågår. Teamförslaget väger in detta
-          så att ledig kompetens föreslås före en redan fullbelagd kollega.
+        <div
+          aria-hidden
+          className="mx-mt-2"
+          style={{ display: 'grid', gridTemplateColumns: `repeat(${teamCap}, minmax(0, 1fr))`, gap: 4 }}
+        >
+          {Array.from({ length: teamCap }, (_, i) => (
+            <span
+              key={i}
+              style={{
+                height: 6,
+                borderRadius: 3,
+                background: i < load.active ? 'var(--color-brand)' : 'var(--mx-line)'
+              }}
+            />
+          ))}
+        </div>
+        <div className="mx-t-12 mx-muted mx-mt-2">
+          {slotsLeft === 0
+            ? `Du har nått taket på ${teamCap} pågående team. Du föreslås inte till nya team förrän ett av dina team avslutats.`
+            : `${slotsLeft} ${slotsLeft === 1 ? 'ledig plats' : 'lediga platser'} kvar. Max ${teamCap} pågående team per person — teamförslaget väger in hur många team du redan ingår i.`}
         </div>
       </Card>
+    </>
+  );
+
+  return (
+    <form
+      action={formAction}
+      className={wide ? 'flex flex-col gap-4' : 'mx-mt-4'}
+      style={wide ? undefined : { display: 'flex', flexDirection: 'column', gap: 16 }}
+    >
+      {(profileStatus === 'stale' || profileStatus === 'missing') && (
+        <div className="mx-card" style={{ padding: 12, background: 'var(--mx-st-warn-bg, #f8f1da)', color: '#4b2718' }}>
+          <div className="mx-t-13 mx-fw-6">
+            {profileStatus === 'missing'
+              ? 'Du har inga hashtags ännu — utan dem kan du inte föreslås till tvärfunktionella team.'
+              : `Din kompetensprofil uppdaterades senast ${updatedLabel} (mer än ${COMPETENCE_PROFILE_STALE_DAYS} dagar sedan). Gå igenom hashtags och nivåer och spara igen så att teamförslagen bygger på aktuell information.`}
+          </div>
+        </div>
+      )}
+      {wide ? (
+        // Mitt konto (desktop): hashtags i bred huvudkolumn, titel/bio,
+        // utvecklingsintressen och belastning i en smalare sidokolumn.
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
+          <div className="flex min-w-0 flex-col gap-4">{hashtagsCard}</div>
+          <div className="flex min-w-0 flex-col gap-4">
+            {profileCard}
+            {interestsCard}
+            {loadCard}
+          </div>
+        </div>
+      ) : (
+        <>
+          {profileCard}
+          {hashtagsCard}
+          {interestsCard}
+          {loadCard}
+        </>
+      )}
 
       {state?.error && (
         <div className="mx-card" style={{ padding: 12, background: 'var(--mx-st-danger-bg, #f1e5df)', color: '#4b2718' }}>

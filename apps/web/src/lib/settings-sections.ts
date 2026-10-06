@@ -50,7 +50,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     href: '/installningar/kompetenser',
     title: 'Kompetenser',
     description:
-      'Hashtag-vokabulären för tvärfunktionella team: godkänn förslag, se täckning per kompetens, gap och inaktuella profiler.',
+      'Tvärfunktionella team: max antal team per person, hashtag-vokabulären (godkänn förslag), täckning per kompetens, gap och inaktuella profiler.',
     icon: 'star',
     group: 'access',
     roles: STAFF_ADMIN

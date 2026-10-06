@@ -9,8 +9,12 @@ import {
   computeTeamMerits,
   describeMerit,
   deriveCompetenceAreas,
+  describeLoad,
+  effectiveTeamCap,
   inferTeamNeedFromText,
+  isAtTeamCap,
   loadLevel,
+  membersOverTeamCap,
   mergeCompetenceTagVocabulary,
   normalizeCompetenceTagSlug,
   rankTeamCandidates,
@@ -20,8 +24,10 @@ import {
   sanitizeTeamNeed,
   summarizeCompetenceCoverage,
   sanitizeUserCompetenceTags,
+  teamCapacityLeft,
   teamNeedGaps,
   uncoveredNeededTags,
+  validateTeamCapInput,
   weightedLoad,
   type RankableCandidate
 } from './competence-tags.ts';
@@ -135,12 +141,54 @@ test('computeTeamLoads: räknar bara pågående, en gång per person, ansvarig v
   assert.deepEqual(loads.get('dan'), { active: 1, leading: 1 });
 });
 
-test('loadLevel: trösklar med ansvar som extra vikt', () => {
+test('loadLevel: relativt teamtaket (default 3)', () => {
   assert.equal(loadLevel({ active: 0, leading: 0 }), 'free');
-  assert.equal(loadLevel({ active: 2, leading: 0 }), 'normal');
-  assert.equal(loadLevel({ active: 2, leading: 1 }), 'high');
+  assert.equal(loadLevel({ active: 1, leading: 1 }), 'normal');
+  assert.equal(loadLevel({ active: 2, leading: 0 }), 'high', 'sista lediga platsen');
+  assert.equal(loadLevel({ active: 3, leading: 0 }), 'full');
   assert.equal(loadLevel({ active: 3, leading: 2 }), 'full');
   assert.equal(weightedLoad({ active: 3, leading: 2 }), 5);
+  // Högre tak: viktad belastning avgör "hög" tills sista platsen.
+  assert.equal(loadLevel({ active: 2, leading: 0 }, 6), 'normal');
+  assert.equal(loadLevel({ active: 3, leading: 2 }, 6), 'high');
+  assert.equal(loadLevel({ active: 5, leading: 0 }, 6), 'high');
+  assert.equal(loadLevel({ active: 6, leading: 0 }, 6), 'full');
+  // Tak 1: en plats.
+  assert.equal(loadLevel({ active: 0, leading: 0 }, 1), 'free');
+  assert.equal(loadLevel({ active: 1, leading: 1 }, 1), 'full');
+});
+
+test('teamtak: effektivt tak, validering, lediga platser', () => {
+  assert.equal(effectiveTeamCap(undefined), 3);
+  assert.equal(effectiveTeamCap(0), 3);
+  assert.equal(effectiveTeamCap(5), 5);
+  assert.equal(effectiveTeamCap('4'), 4);
+  assert.equal(effectiveTeamCap(2.5), 3);
+  assert.equal(effectiveTeamCap(99), 3);
+  assert.deepEqual(validateTeamCapInput(''), { ok: true, value: null });
+  assert.deepEqual(validateTeamCapInput('5'), { ok: true, value: 5 });
+  assert.equal(validateTeamCapInput('0').ok, false);
+  assert.equal(validateTeamCapInput('21').ok, false);
+  assert.equal(validateTeamCapInput('2.5').ok, false);
+  assert.equal(validateTeamCapInput('abc').ok, false);
+  assert.equal(teamCapacityLeft({ active: 1, leading: 0 }, 3), 2);
+  assert.equal(teamCapacityLeft({ active: 5, leading: 0 }, 3), 0);
+  assert.equal(isAtTeamCap({ active: 3, leading: 0 }, 3), true);
+  assert.equal(isAtTeamCap({ active: 2, leading: 2 }, 3), false, 'ansvar räknas inte mot taket');
+  assert.equal(describeLoad({ active: 2, leading: 1 }, 3), '2 av 3 pågående team, ansvarig i 1');
+  assert.equal(describeLoad({ active: 0, leading: 0 }, 3), '0 av 3 team');
+  assert.equal(describeLoad({ active: 0, leading: 0 }), 'Inga pågående team');
+});
+
+test('membersOverTeamCap: blockerar bara nya medlemmar som nått taket', () => {
+  const loads = new Map([
+    ['full', { active: 3, leading: 0 }],
+    ['ledig', { active: 1, leading: 0 }],
+    ['redan', { active: 3, leading: 1 }]
+  ]);
+  assert.deepEqual(membersOverTeamCap(['full', 'ledig', 'okand', 'full'], loads, 3), ['full']);
+  assert.deepEqual(membersOverTeamCap(['full', 'redan'], loads, 3, ['redan']), ['full']);
+  assert.deepEqual(membersOverTeamCap(['full'], loads, 4), []);
 });
 
 test('inferTeamNeedFromText: taggar via etikett/slug/#, områden via nyckelord', () => {
@@ -199,18 +247,32 @@ test('rankTeamCandidates: hashtag > område, belastning sänker, ledig expert f�
   const ranked = rankTeamCandidates({ areas: ['finansiering_kapital'], tags: ['vinnova-ansokan'] }, cands);
   assert.deepEqual(
     ranked.map((r) => r.id),
-    ['expert-ledig', 'expert-full', 'omrade', 'lararen', 'ingen']
+    ['expert-ledig', 'omrade', 'lararen', 'ingen', 'expert-full']
   );
   const top = ranked[0];
-  assert.ok(top.score > ranked[1].score, 'ledig expert slår fullbelagd expert');
-  assert.equal(ranked[1].loadLevel, 'full');
   assert.equal(top.matchedTags[0].tag, 'vinnova-ansokan');
   assert.ok(top.reasons[0].includes('#vinnova-ansokan (expert)'));
-  assert.ok(top.reasons.at(-1)?.includes('Inga pågående team'));
-  assert.deepEqual(ranked[3].developmentMatches, ['vinnova-ansokan']);
-  assert.equal(ranked[4].score, 0);
+  assert.ok(top.reasons.at(-1)?.includes('0 av 3 team'));
+  assert.deepEqual(ranked[2].developmentMatches, ['vinnova-ansokan']);
+  assert.equal(ranked[3].score, 0);
   // Ingen träff → belastningen justerar inte poängen under noll.
-  assert.deepEqual(ranked[4].matchedAreas, []);
+  assert.deepEqual(ranked[3].matchedAreas, []);
+  // Taket nått (4 av 3) → sist, poäng 0, aldrig förslag.
+  const full = ranked[4];
+  assert.equal(full.atCapacity, true);
+  assert.equal(full.loadLevel, 'full');
+  assert.equal(full.score, 0);
+  assert.ok(full.reasons.at(-1)?.includes('fullt: 4 av 3 team'));
+});
+
+test('rankTeamCandidates: höjt tak släpper in personen igen, hög belastning sänker', () => {
+  const ranked = rankTeamCandidates({ areas: ['finansiering_kapital'], tags: ['vinnova-ansokan'] }, cands, {
+    teamCap: 6
+  });
+  assert.deepEqual(ranked.slice(0, 2).map((r) => r.id), ['expert-ledig', 'expert-full']);
+  assert.equal(ranked[1].atCapacity, false);
+  assert.equal(ranked[1].loadLevel, 'high');
+  assert.ok(ranked[0].score > ranked[1].score, 'ledig expert slår högt belastad expert');
 });
 
 test('rankTeamCandidates: bolagsrelation ger bonus och syns som skäl', () => {

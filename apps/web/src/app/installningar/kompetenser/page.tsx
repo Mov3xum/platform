@@ -17,8 +17,11 @@ import {
   loadCompetenceTagRecords,
   loadCompetenceTagVocabulary,
   loadCompletedMissions,
-  loadStaffProfiles
+  loadStaffProfiles,
+  loadTeamCapSetting,
+  loadTeamLoadsForCap
 } from '@/lib/team/competence-tags.server';
+import { TeamCapCard, type TeamCapPerson } from './TeamCapCard';
 import { requireSettingsUser, SettingsSectionPage } from '../shared';
 import { CompetenceTagsManager, type StaffProfileRow } from './CompetenceTagsManager';
 
@@ -30,10 +33,13 @@ export default async function KompetenserPage() {
 
   const { rows: tagRecords, error: vocabularyError } = await loadCompetenceTagRecords(pb, user.tenant);
   const vocabulary = await loadCompetenceTagVocabulary(pb, user.tenant);
-  const [profiles, { missions: completedMissions, complete: missionsComplete }] = await Promise.all([
-    loadStaffProfiles(pb, user.tenant, vocabulary),
-    loadCompletedMissions(pb, user.tenant)
-  ]);
+  const [profiles, { missions: completedMissions, complete: missionsComplete }, capSetting, teamLoads] =
+    await Promise.all([
+      loadStaffProfiles(pb, user.tenant, vocabulary),
+      loadCompletedMissions(pb, user.tenant),
+      loadTeamCapSetting(pb, user.tenant),
+      loadTeamLoadsForCap(pb, user.tenant)
+    ]);
 
   const staff = profiles.filter((p) => p.isStaff);
   const coverage = summarizeCompetenceCoverage(
@@ -42,6 +48,10 @@ export default async function KompetenserPage() {
   );
   const gaps = competenceCoverageGaps(coverage);
   const neededGaps = uncoveredNeededTags(completedMissions, coverage);
+
+  const capPeople: TeamCapPerson[] = staff
+    .map((p) => ({ id: p.id, name: p.name, active: teamLoads.loads.get(p.id)?.active ?? 0 }))
+    .sort((a, b) => b.active - a.active || a.name.localeCompare(b.name, 'sv'));
 
   const now = new Date();
   const staffRows: StaffProfileRow[] = staff
@@ -62,11 +72,19 @@ export default async function KompetenserPage() {
       intro={
         <>
           Vokabulären av kompetens-hashtags som personalen väljer bland under Min profil,
-          och som teamförslagen rankar på. Här godkänner ledningen nya förslag, ser hur väl
-          organisationen täcker varje kompetens och vilka profiler som behöver uppdateras.
+          och som teamförslagen rankar på. Här sätter ledningen hur många team en person får
+          ingå i samtidigt, godkänner nya förslag, ser hur väl organisationen täcker varje
+          kompetens och vilka profiler som behöver uppdateras.
         </>
       }
     >
+      <TeamCapCard
+        cap={capSetting.cap}
+        configured={capSetting.configured}
+        schemaReady={capSetting.schemaReady}
+        people={capPeople}
+        loadComplete={teamLoads.complete}
+      />
       <CompetenceTagsManager
         tagRecords={tagRecords}
         vocabularyError={vocabularyError}

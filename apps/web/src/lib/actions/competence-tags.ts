@@ -12,6 +12,7 @@ import {
   isCompetenceId,
   normalizeCompetenceTagSlug,
   sanitizeCompetenceTagLabel,
+  validateTeamCapInput,
   type CompetenceId,
   type Role
 } from '@platform/shared';
@@ -238,4 +239,74 @@ export async function createCompetenceTagAction(input: {
   });
   revalidate();
   return { ok: true, id: created.id };
+}
+
+// ── Teamtak (§ 29.7) ────────────────────────────────────────────────────────
+
+export interface TeamCapActionState {
+  ok?: boolean;
+  error?: string;
+  /** Sparat tak (null = default). */
+  value?: number | null;
+}
+
+/**
+ * Ledningen sätter max antal pågående team per person för tenanten
+ * (`tenants.max_active_teams_per_person`, migration 1700000181). Tomt ⇒
+ * default (3). Rollen verifieras här; tenant är alltid den inloggades egen
+ * (aldrig från klienten). Posten läses tillbaka — PB släpper okända fält
+ * tyst, så ett schema utan migrationen ger ett tydligt fel i stället för en
+ * tyst no-op (§ 24.4). Auditeras PII-fritt (bara talet).
+ */
+export async function saveTeamCapAction(raw: string): Promise<TeamCapActionState> {
+  const session = await requireManager();
+  if ('error' in session) return { error: session.error.replace('ändra vokabulären', 'ändra teamtaket') };
+  const { user, pb } = session;
+  const parsed = validateTeamCapInput(raw);
+  if (!parsed.ok) return { error: parsed.error };
+  const value = parsed.value;
+
+  let before: number | null = null;
+  try {
+    const rec = await pb.collection('tenants').getOne<Record<string, unknown>>(user.tenant);
+    const n = Number(rec.max_active_teams_per_person);
+    before = Number.isInteger(n) && n > 0 ? n : null;
+  } catch {
+    /* fail-soft: before okänt */
+  }
+
+  let saved: Record<string, unknown>;
+  try {
+    saved = await writeWithFallback(
+      pb,
+      (c) =>
+        c
+          .collection('tenants')
+          .update<Record<string, unknown>>(user.tenant, { max_active_teams_per_person: value ?? 0 }),
+      { fallbackOn404: true }
+    );
+  } catch (err) {
+    return { error: describePbError(err, 'Kunde inte spara teamtaket.') };
+  }
+  if (!('max_active_teams_per_person' in saved)) {
+    return {
+      error:
+        'Fältet för teamtaket saknas i databasen — kör migration 1700000181 (eller "Sync PocketBase") och försök igen.'
+    };
+  }
+
+  await logAgentAction(pb, {
+    actor: actorOf(user),
+    action_type: 'update',
+    collection: 'team_cap',
+    record_id: user.tenant,
+    field: 'max_active_teams_per_person',
+    before_value: { max_active_teams_per_person: before },
+    after_value: { max_active_teams_per_person: value }
+  });
+  revalidatePath('/installningar/kompetenser');
+  revalidatePath('/installningar');
+  revalidatePath('/uppdrag/new');
+  revalidatePath('/konto');
+  return { ok: true, value };
 }

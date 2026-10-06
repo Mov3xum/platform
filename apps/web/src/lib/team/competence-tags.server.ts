@@ -2,10 +2,12 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { logAgentAction } from '@/lib/core/write/audit';
 import type { Actor } from '@/lib/core/write/types';
+import { getSuperuserPb } from '@/lib/integrations/credentials';
 import {
   ACTIVE_MISSION_STATUSES,
   COMPLETED_MISSION_STATUSES,
   computeTeamLoads,
+  effectiveTeamCap,
   mergeCompetenceTagVocabulary,
   sanitizeCompetences,
   sanitizeDevelopmentInterests,
@@ -173,6 +175,52 @@ export async function loadTeamLoads(pb: PocketBase, tenantId: string): Promise<T
   } catch {
     return { loads: new Map(), complete: false };
   }
+}
+
+export interface TeamCapSetting {
+  /** Effektivt tak (default 3 när inget satts). */
+  cap: number;
+  /** Värdet ledningen satt, null = default. */
+  configured: number | null;
+  /** false när fältet saknas i schemat (migration 1700000181 ej körd). */
+  schemaReady: boolean;
+}
+
+/**
+ * Tenantens teamtak (`tenants.max_active_teams_per_person`, § 29.7). Fail-soft:
+ * oläsbart ⇒ default 3. Läses med anroparens token (`tenants` list/view =
+ * egen tenant, § 21.7); `schemaReady` avgör om ledningens val kan sparas.
+ */
+export async function loadTeamCapSetting(pb: PocketBase, tenantId: string): Promise<TeamCapSetting> {
+  try {
+    const rec = await pb.collection('tenants').getOne<Record<string, unknown>>(tenantId);
+    const schemaReady = 'max_active_teams_per_person' in rec;
+    const raw = Number(rec.max_active_teams_per_person);
+    const configured = Number.isInteger(raw) && raw > 0 ? raw : null;
+    return { cap: effectiveTeamCap(configured ?? undefined), configured, schemaReady };
+  } catch {
+    return { cap: effectiveTeamCap(undefined), configured: null, schemaReady: true };
+  }
+}
+
+export async function loadTeamCap(pb: PocketBase, tenantId: string): Promise<number> {
+  return (await loadTeamCapSetting(pb, tenantId)).cap;
+}
+
+/**
+ * Belastning för SPÄRREN (teamtaket): räknas över HELA tenanten oavsett om
+ * anroparens token ser alla uppdrag (uppdrag med `visibility=participants`
+ * eller en bolagsmedlems token). Läses via superuser när den finns — bara
+ * räknare lämnar funktionen, aldrig uppdragsdata — annars med anroparens
+ * token (`complete:false` om läsningen kapades).
+ */
+export async function loadTeamLoadsForCap(pb: PocketBase, tenantId: string): Promise<TeamLoads> {
+  const su = await getSuperuserPb();
+  if (su.ok) {
+    const res = await loadTeamLoads(su.pb, tenantId);
+    if (res.complete) return res;
+  }
+  return loadTeamLoads(pb, tenantId);
 }
 
 export interface StaffProfile {
