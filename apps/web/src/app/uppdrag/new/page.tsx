@@ -11,7 +11,8 @@ import { ALL_ROLES, type CompetenceId, type Role, type TeamMemberLoad, type User
 import {
   loadCompetenceTagVocabulary,
   loadStaffProfiles,
-  loadTeamLoads
+  loadTeamCap,
+  loadTeamLoadsForCap
 } from '@/lib/team/competence-tags.server';
 import { PageHead, Icon } from '@/components/proto';
 import { NewMissionForm } from './NewMissionForm';
@@ -44,10 +45,14 @@ export default async function NewMissionPage() {
 
   // Kompetensprofiler (hashtags/nivå) + nuvarande belastning (§ 29.7) —
   // samma läsväg som teamförslaget, så pickern visar vad AI:n ser.
+  // Belastning + teamtak (§ 29.7): räknas över hela tenanten (bara räknare)
+  // och visas bara för staff — en bolagsmedlem ser inga kollegors belastning.
+  const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
   const vocabulary = await loadCompetenceTagVocabulary(pb, user.tenant);
-  const [profiles, { loads }] = await Promise.all([
+  const [profiles, { loads }, teamCap] = await Promise.all([
     loadStaffProfiles(pb, user.tenant, vocabulary),
-    loadTeamLoads(pb, user.tenant)
+    isStaff ? loadTeamLoadsForCap(pb, user.tenant) : Promise.resolve({ loads: new Map(), complete: false }),
+    loadTeamCap(pb, user.tenant)
   ]);
   // Bara Movexum-personal kan ingå i ett tvärfunktionellt team.
   users = profiles
@@ -57,7 +62,7 @@ export default async function NewMissionPage() {
       label: p.name,
       competences: p.competences,
       tags: p.tags,
-      load: loads.get(p.id) ?? { active: 0, leading: 0 }
+      load: isStaff ? (loads.get(p.id) ?? { active: 0, leading: 0 }) : undefined
     }));
 
   try {
@@ -91,6 +96,7 @@ export default async function NewMissionPage() {
         users={users}
         startups={startups}
         currentUserId={user.id}
+        teamCap={teamCap}
       />
     </div>
   );

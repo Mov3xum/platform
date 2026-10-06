@@ -1,13 +1,18 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/proto';
-import type { MissionParticipantRole } from '@platform/shared';
-import { updateMissionParticipantsFormAction } from '@/lib/actions/missions';
+import type { MissionParticipantRole, TeamMemberLoad } from '@platform/shared';
+import { updateMissionParticipants } from '@/lib/actions/missions';
 
 interface UserOption {
   id: string;
   label: string;
+  /** Nuvarande belastning (bara för staff, § 29.7). */
+  load?: TeamMemberLoad;
+  /** Taket nått — kan inte läggas till i ett pågående team. */
+  atCap?: boolean;
 }
 
 interface Participant {
@@ -35,16 +40,41 @@ export function ParticipantsPanel({
   issuerId,
   users,
   initialParticipants,
-  canEdit
+  canEdit,
+  teamCap,
+  missionActive = true
 }: {
   missionId: string;
   issuerId: string;
   users: UserOption[];
   initialParticipants: Participant[];
   canEdit: boolean;
+  /** Max antal pågående team per person (§ 29.7). */
+  teamCap?: number;
+  /** Uppdraget är pågående → taket gäller för nya medlemmar. */
+  missionActive?: boolean;
 }) {
+  const router = useRouter();
   const [participants, setParticipants] = useState<Participant[]>(initialParticipants);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const initialIds = useMemo(() => new Set(initialParticipants.map((p) => p.user_id)), [initialParticipants]);
+
+  function save() {
+    setError(null);
+    setSaved(false);
+    startTransition(async () => {
+      const res = await updateMissionParticipants(missionId, participants);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setSaved(true);
+      router.refresh();
+    });
+  }
 
   const userById = useMemo(() => {
     const map = new Map<string, UserOption>();
@@ -141,16 +171,34 @@ export function ParticipantsPanel({
                 <p className="text-[12px] text-foreground-subtle">Inga fler användare i din tenant.</p>
               ) : (
                 <div className="flex max-h-44 flex-wrap gap-2 overflow-auto">
-                  {remaining.map((u) => (
-                    <button
-                      key={u.id}
-                      type="button"
-                      onClick={() => addUser(u.id)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-default bg-canvas px-2 py-1 text-[11.5px] text-foreground transition hover:border-brand hover:bg-canvas-subtle"
-                    >
-                      <Icon name="plus" size={11} /> {u.label}
-                    </button>
-                  ))}
+                  {remaining.map((u) => {
+                    const blocked = Boolean(missionActive && u.atCap && !initialIds.has(u.id));
+                    return (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => addUser(u.id)}
+                        disabled={blocked}
+                        title={
+                          blocked
+                            ? `Ingår redan i ${teamCap ?? 3} pågående team — taket är nått`
+                            : undefined
+                        }
+                        className="inline-flex items-center gap-1 rounded-lg border border-default bg-canvas px-2 py-1 text-[11.5px] text-foreground transition hover:border-brand hover:bg-canvas-subtle disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-default"
+                      >
+                        <Icon name="plus" size={11} /> {u.label}
+                        {u.load && typeof teamCap === 'number' ? (
+                          <span
+                            className={`ml-1 font-mono text-[10px] tabular-nums ${
+                              u.atCap ? 'text-movexum-morkorange' : 'text-foreground-subtle'
+                            }`}
+                          >
+                            {u.load.active}/{teamCap}
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
               <button
@@ -171,20 +219,27 @@ export function ParticipantsPanel({
             </button>
           )}
 
-          <form action={updateMissionParticipantsFormAction} className="mt-3 flex items-center justify-end">
-            <input type="hidden" name="mission_id" value={missionId} />
-            <input
-              type="hidden"
-              name="participants_json"
-              value={JSON.stringify(participants)}
-            />
+          {missionActive && typeof teamCap === 'number' ? (
+            <p className="mt-2 text-[11px] text-foreground-subtle">
+              Max {teamCap} pågående team per person. Siffran visar hur många team kollegan redan ingår i.
+            </p>
+          ) : null}
+          {error ? (
+            <p role="alert" className="mt-2 rounded-lg bg-movexum-pastell-orange px-3 py-2 text-[12px] text-movexum-morkorange">
+              {error}
+            </p>
+          ) : null}
+          <div className="mt-3 flex items-center justify-end gap-2">
+            {saved && !pending ? <span className="text-[11.5px] text-foreground-subtle">Sparat</span> : null}
             <button
-              type="submit"
-              className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-3 py-1.5 text-[12px] font-semibold text-brand-foreground transition hover:bg-brand-hover"
+              type="button"
+              onClick={save}
+              disabled={pending}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-3 py-1.5 text-[12px] font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:opacity-60"
             >
-              <Icon name="check" size={12} /> Spara deltagare
+              <Icon name="check" size={12} /> {pending ? 'Sparar…' : 'Spara deltagare'}
             </button>
-          </form>
+          </div>
         </div>
       )}
     </section>

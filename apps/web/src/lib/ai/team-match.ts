@@ -185,6 +185,13 @@ export interface ComposeTeamInput {
   shortlist: readonly RankedCandidate[];
   /** Behov ingen kandidat täcker (redan uträknat) — för external_note. */
   gaps: { tags: string[]; areas: CompetenceId[] };
+  /** Max antal pågående team per person (§ 29.7). Kandidater som nått taket väljs aldrig. */
+  teamCap?: number;
+}
+
+/** Bara kandidater med ledig teamplats får föreslås (hård gräns, § 29.7). */
+function selectableShortlist(input: ComposeTeamInput): RankedCandidate[] {
+  return input.shortlist.filter((c) => !c.atCapacity);
 }
 
 export interface ComposeTeamResult {
@@ -203,7 +210,8 @@ function buildComposePrompt(input: ComposeTeamInput): string {
   ]
     .filter(Boolean)
     .join('; ');
-  const list = input.shortlist
+  const cap = input.teamCap;
+  const list = selectableShortlist(input)
     .map((c, i) => {
       const tags = c.matchedTags.map((m) => `#${m.tag} (${COMPETENCE_LEVEL_LABELS[m.level].toLowerCase()})`).join(', ');
       const areas = c.matchedAreas.map((a) => `${COMPETENCE_LABELS[a.area]} (${COMPETENCE_LEVEL_LABELS[a.level].toLowerCase()})`).join(', ');
@@ -211,7 +219,7 @@ function buildComposePrompt(input: ComposeTeamInput): string {
       const rel = c.relatedToStartup ? 'arbetar redan med bolaget' : '';
       const extra = [tags && `träffar ${tags}`, areas && `områden ${areas}`, dev, rel].filter(Boolean).join('; ');
       // Pseudonymiserat: id + kompetens + belastning, aldrig namn/titel.
-      return `${i + 1}. id=${c.id} | poäng ${c.score} | belastning: ${LOAD_LEVEL_LABELS[c.loadLevel].toLowerCase()} (${describeLoad(c.load).toLowerCase()})${extra ? ` | ${extra}` : ''}`;
+      return `${i + 1}. id=${c.id} | poäng ${c.score} | belastning: ${LOAD_LEVEL_LABELS[c.loadLevel].toLowerCase()} (${describeLoad(c.load, cap).toLowerCase()})${extra ? ` | ${extra}` : ''}`;
     })
     .join('\n');
   const gaps = [
@@ -234,8 +242,10 @@ function buildComposePrompt(input: ComposeTeamInput): string {
     `Sätt ihop ett litet, slagkraftigt och TVÄRFUNKTIONELLT team (max ${MAX_MEMBERS} personer): ` +
       'täck behovets olika delar med olika personer i stället för att stapla flera på samma. ' +
       'Sätt EN person som "lead" — den med högst nivå på den viktigaste hashtagen och rimlig belastning. ' +
-      'Föredra en ledig/normalbelastad kollega framför en fullbelagd med samma kompetens; ' +
-      'ta bara med en fullbelagd person om ingen annan täcker behovet, och säg det då i motiveringen. ' +
+      `Varje person får ingå i högst ${cap ?? 3} pågående team samtidigt; kollegor som nått taket är redan ` +
+      'bortsorterade. Hög belastning betyder att personen har sin sista lediga plats: föredra en ledig/' +
+      'normalbelastad kollega med samma kompetens, ta bara med en högt belastad person om ingen annan ' +
+      'täcker behovet, och säg det då i motiveringen. ' +
       'En som "vill utvecklas inom" en behövd hashtag passar som "contributor" bredvid en expert. ' +
       'Motiveringen ska nämna hashtag/nivå och belastning, kort.',
     'Saknas något helt: beskriv det i "external_note" (extern specialist eller annan inkubator), annars null.',
@@ -262,7 +272,8 @@ const VALID_ROLES: MissionParticipantRole[] = ['lead', 'contributor', 'observer'
 export function fallbackCompose(input: ComposeTeamInput): ComposeTeamResult {
   const covered = new Set<string>();
   const members: SuggestedMember[] = [];
-  for (const c of input.shortlist) {
+  const selectable = selectableShortlist(input);
+  for (const c of selectable) {
     if (members.length >= Math.min(MAX_MEMBERS, 5)) break;
     if (c.score <= 0) continue;
     const keys = [...c.matchedTags.map((m) => `t:${m.tag}`), ...c.matchedAreas.map((a) => `a:${a.area}`)];
@@ -276,7 +287,8 @@ export function fallbackCompose(input: ComposeTeamInput): ComposeTeamResult {
       confidence: 0.5
     });
   }
-  const leadIdx = members.findIndex((m) => input.shortlist.find((c) => c.id === m.id)?.loadLevel !== 'full');
+  const levelOf = (id: string) => selectable.find((c) => c.id === id)?.loadLevel;
+  const leadIdx = members.findIndex((m) => !['high', 'full'].includes(levelOf(m.id) ?? 'free'));
   if (members.length > 0) members[Math.max(0, leadIdx)].role = 'lead';
   const gaps = [...input.gaps.tags.map((t) => `#${t}`), ...input.gaps.areas.map((a) => COMPETENCE_LABELS[a])];
   return {
@@ -291,9 +303,9 @@ export function fallbackCompose(input: ComposeTeamInput): ComposeTeamResult {
 export async function composeTeam(
   input: ComposeTeamInput
 ): Promise<{ result: ComposeTeamResult; usage: TeamUsage }> {
-  const byId = new Map(input.shortlist.map((c) => [c.id, c]));
+  const byId = new Map(selectableShortlist(input).map((c) => [c.id, c]));
   let usage: TeamUsage = { tokensIn: 0, tokensOut: 0 };
-  if (input.shortlist.length === 0) {
+  if (byId.size === 0) {
     return { result: { ...fallbackCompose(input), summary: '' }, usage };
   }
   try {

@@ -11,6 +11,7 @@ import {
   COMPETENCE_IDS,
   COMPETENCE_LEVEL_LABELS,
   COMPETENCE_LEVEL_WEIGHT,
+  DEFAULT_MAX_ACTIVE_TEAMS,
   LOAD_LEVEL_LABELS,
   describeLoad,
   loadLevel,
@@ -37,7 +38,14 @@ export interface TeamMemberView {
   load?: TeamMemberLoad;
 }
 
-export function TeamCompetencePanel({ members }: { members: TeamMemberView[] }) {
+export function TeamCompetencePanel({
+  members,
+  teamCap = DEFAULT_MAX_ACTIVE_TEAMS
+}: {
+  members: TeamMemberView[];
+  /** Max antal pågående team per person (§ 29.7). */
+  teamCap?: number;
+}) {
   const coverage = new Set<CompetenceId>();
   const tagCoverage = new Map<string, CompetenceLevel>();
   for (const m of members) {
@@ -53,7 +61,7 @@ export function TeamCompetencePanel({ members }: { members: TeamMemberView[] }) 
     (a, b) => COMPETENCE_LEVEL_WEIGHT[b[1]] - COMPETENCE_LEVEL_WEIGHT[a[1]] || a[0].localeCompare(b[0], 'sv')
   );
   const anyTagged = members.some((m) => m.competences.length > 0 || (m.tags?.length ?? 0) > 0);
-  const heavy = members.filter((m) => m.load && ['high', 'full'].includes(loadLevel(m.load)));
+  const heavy = members.filter((m) => m.load && ['high', 'full'].includes(loadLevel(m.load, teamCap)));
 
   return (
     <Card style={{ padding: 16 }}>
@@ -92,7 +100,7 @@ export function TeamCompetencePanel({ members }: { members: TeamMemberView[] }) 
           style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--mx-st-warn-bg, #f8f1da)', color: '#4b2718' }}
         >
           <strong>Hög belastning:</strong>{' '}
-          {heavy.map((m) => `${m.name} (${describeLoad(m.load!).toLowerCase()})`).join(', ')}.
+          {heavy.map((m) => `${m.name} (${describeLoad(m.load!, teamCap).toLowerCase()})`).join(', ')}.
         </div>
       )}
 
@@ -107,9 +115,8 @@ export function TeamCompetencePanel({ members }: { members: TeamMemberView[] }) 
               {m.title ? <span className="mx-muted mx-fw-4"> · {m.title}</span> : null}
               <span className="mx-mono mx-t-xs mx-muted"> · {ROLE_LABELS[m.role]}</span>
               {m.load ? (
-                <span className="mx-mono mx-t-xs mx-muted" title={describeLoad(m.load)}>
-                  {' '}· {LOAD_LEVEL_LABELS[loadLevel(m.load)].toLowerCase()}
-                  {m.load.active > 0 ? ` (${m.load.active} team)` : ''}
+                <span className="mx-mono mx-t-xs mx-muted" title={describeLoad(m.load, teamCap)}>
+                  {' '}· {LOAD_LEVEL_LABELS[loadLevel(m.load, teamCap)].toLowerCase()} ({m.load.active}/{teamCap} team)
                 </span>
               ) : null}
             </div>

@@ -992,7 +992,10 @@ const REQUIRED_APP_FIELDS = [
       'login_image',
       'login_video'
     ]
-  }
+  },
+  // Teamtak (§ 29.7, migration 1700000181): utan fältet "sparas" ledningens
+  // tak tyst bort och alla får default 3.
+  { collection: 'tenants', fields: ['max_active_teams_per_person'] }
 ];
 
 /**

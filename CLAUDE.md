@@ -4448,8 +4448,10 @@ till 2 000 rader; kapning ger `complete:false` som visas som "ungefärlig" —
 § 33.4; utkast och klara räknas inte): ett
 uppdrag räknas en gång per person oavsett koppling (utfärdare, mottagare,
 deltagare, mentor); ansvarig = `lead` i `participants_json` (eller utfärdare
-utan deltagarlista). Viktad belastning = team + ansvar; `loadLevel`: 0 =
-ledig, ≤ 2 = normal, ≤ 4 = hög, > 4 = fullbelagd. Visas som chip i
+utan deltagarlista). Viktad belastning = team + ansvar; `loadLevel(load,
+cap)` är relativ **teamtaket** (nedan): 0 team = ledig, taket nått =
+`full` ("Fullt (taket nått)"), sista lediga platsen eller viktad belastning
+> 4 = hög, annars normal. Visas som chip i
 teamförslaget, i deltagar-pickern, i teampanelen på uppdragskortet (med
 varning "Hög belastning: …") och på den egna profilen ("Min belastning just
 nu") så alla ser samma siffra. Läses med användarens token → RLS § 21, och
@@ -4496,6 +4498,54 @@ av maintainer 2026-10-04, § 10.1/§ 10.2 — omprövas vid ändringarna i dess 
   tillbaka på den inbyggda listan (fail-soft).
 - **Lägg aldrig till en seed-tagg utan att spegla den i migrationen** (och
   tvärtom); nya taggar i drift går via profilen, inte via kod.
+**Teamtak — max antal pågående team per person (2026-10, migration
+1700000181).** Varje person får ingå i högst N pågående team samtidigt
+(`DEFAULT_MAX_ACTIVE_TEAMS` = 3). Ledningen (admin/incubator_lead) justerar
+N per tenant i **Inställningar → Kompetenser** (`TeamCapCard`, action
+`saveTeamCapAction` i `lib/actions/competence-tags.ts`; heltal 1–20, tomt =
+standard; läses tillbaka mot schema-drift § 24.4; auditeras PII-fritt som
+`collection = 'team_cap'` → Bolagsnytt). Lagras i
+`tenants.max_active_teams_per_person` (0/saknat = standard,
+`effectiveTeamCap`), speglat i `setup-via-api.mjs` och asserterat i
+`verify-baseline.mjs`. Kortet visar vem som ligger på taket/sista platsen
+med förhandsvisning innan man sparar. Taket är en **hård gräns**:
+- **AI-förslaget:** `rankTeamCandidates(need, candidates, { teamCap })`
+  markerar `atCapacity` (poäng 0, sorteras sist, skäl "fullt: N av N team");
+  `suggestTeamAction` utesluter dem ur shortlistan och ur gap-beräkningen
+  (en hashtag som bara fullbelagda har räknas som saknad internt),
+  `composeTeam`/`fallbackCompose` väljer aldrig någon som nått taket och
+  svaret listar dem separat ("Fullt — föreslås inte") så människan ser varför
+  en självklar kollega saknas. Hög belastning (sista platsen) drar ned
+  poängen och ledaren väljs helst bland ledigt/normalt belastade.
+- **Server-spärr** (`lib/team/team-cap.server.ts`, `teamCapViolation`):
+  prövas när ett uppdrag skapas (det skapas som pågående — även utfärdaren
+  måste ha en plats), när deltagare läggs till i ett pågående uppdrag (bara
+  NYA medlemmar prövas) och när ett utkast/avslutat uppdrag blir pågående
+  via status eller steg. Belastningen för spärren räknas över HELA tenanten
+  (`loadTeamLoadsForCap`: superuser när den finns — bara räknare, ingen
+  uppdragsdata lämnar funktionen) så ett uppdrag med `visibility =
+  participants` inte smiter förbi. Felet namnger personen (visningsnamn) och
+  pekar på ledningens inställning; formuläråtgärder kommer tillbaka som
+  `?fel=team_cap` och sidan namnger själv de berörda (ingen fritext i URL:en).
+  Chattens `create_mission` skapar utkast och berörs inte förrän utkastet
+  startas. Deltagarpanelen sparar nu via en klient-transition och visar
+  felet (tidigare svaldes alla fel tyst).
+- **Gränssnitt:** "N/tak" på kollegorna i deltagar-pickern (fullbelagda
+  låsta), i teamförslaget, i teampanelen och som mätare på den egna
+  kompetensprofilen ("2 av 3 team, 1 ledig plats").
+
+**Mitt konto med kompetensprofil (2026-10).** `/konto` använder hela
+innehållsbredden på desktop (tidigare `max-w-2xl` centrerat + högerpanel):
+kontouppgifter + kontoinfo (roller, organisation, kopplade bolag med namn)
+bredvid lösenord + utloggning, och därunder **Kompetensprofil** — samma
+`MinProfilForm` som `/min-profil` i bred tvåkolumnsvariant (`wide`:
+hashtags i huvudkolumnen; titel/bio, utvecklingsintressen och belastning mot
+taket i sidokolumnen). Visas med samma `canAccessModuleForUser(…,
+'min_profil')`-kurering som sidmenyn (bolagsmedlemmar ingår inte i team).
+Båda sidorna läser via den delade `loadMyCompetenceProfile`
+(`lib/team/my-competence-profile.server.ts`) — ingen divergerande kopia;
+sparandet går som förut via `saveMyProfileAction` (revaliderar båda).
+
 - **Var hashtags redigeras — "Min profil", inte "Mitt konto" (incident
   2026-10-04).** Admin hittade inte hashtag-ytan efter mergen: kontomenyn i
   railens fot (klick på det egna namnet) ledde bara till `/konto` (Mitt konto =
@@ -4504,7 +4554,8 @@ av maintainer 2026-10-04, § 10.1/§ 10.2 — omprövas vid ändringarna i dess 
   redan sparade `users.enabled_modules` (§ 36.3-läxan) — "Min profil" saknades
   i sidmenyn för äldre konton. Nu: kontomenyn har posten **Min profil**
   (`RailAccountMenu.showProfile`, samma `canAccessModuleForUser`-kurering som
-  sidmenyn), `/konto` har ett kort "Kompetenser & hashtags" som länkar dit,
+  sidmenyn), `/konto` har sedan 2026-10 hela kompetensprofilen inbäddad (se
+  "Mitt konto med kompetensprofil" ovan),
   `min_profil` har ikonen `user` i railen, och migration **1700000180**
   backfillar `min_profil` i befintliga allow-listor (admin/incubator_lead/
   coach/mentor/partner; `null` rörs inte). Produktion deployas dessutom
@@ -5730,7 +5781,7 @@ brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
 | `/installningar/organisation` | Tenants, infra-status, dataresidens |
 | `/installningar/ai-analys` | **AI-analys** — tre undervyer via `?vy=`: **Kostnadstak** (default, § 9.6), **Användning** (f.d. `/insights`: körningar, tokens, kostnad, kvalitetsfeedback § 9.10, adoption) och **Miljöpåverkan** (f.d. `/admin/ai-miljo`, admin-only, § 28.2). `/insights`, `/admin/ai-miljo` och `/installningar/ai-kostnad` är legacy-routes som redirectar hit (perioden bevaras). Modulen `insights` heter "AI-analys", har ingen egen rail-post längre och pekar hit. |
 | `/installningar/ai-minne` | AI-minne (`agent_memory`, § 16.4) |
-| `/installningar/kompetenser` | **Kompetenser** (§ 29.7 steg 3) — hashtag-vokabulären för tvärfunktionella team: godkännandekö för föreslagna taggar, täckning per hashtag (personer/nivåer/lärande), kompetensgap (taggar ingen har + taggar uppdrag efterfrågat utan täckning) och profilstatus per kollega (aktuell/inaktuell > 180 dagar/saknar hashtags) |
+| `/installningar/kompetenser` | **Kompetenser** (§ 29.7 steg 3) — **max antal pågående team per person** (teamtak, default 3) och hashtag-vokabulären för tvärfunktionella team: godkännandekö för föreslagna taggar, täckning per hashtag (personer/nivåer/lärande), kompetensgap (taggar ingen har + taggar uppdrag efterfrågat utan täckning) och profilstatus per kollega (aktuell/inaktuell > 180 dagar/saknar hashtags) |
 | `/installningar/integrationer` | **Integrationer** (2026-09) — organisationens externa tjänster (bolagsregister § 11.8, Brevo/Howspace, Mistral-connectors § 13, personliga OAuth-kopplingar § 14). Katalogen är den delade `components/integrations/IntegrationsCatalog.tsx`; `/integrationer` redirectar admin/incubator_lead hit och visar oförändrat katalogen för coach/bolagsmedlem (personliga integrationer). Detaljsidorna `/integrationer/<slug>` är oförändrade; grinden är `canOpenIntegrations` (`lib/integrations/access.ts`: settings-roll ELLER modulen) och tillbaka-länken följer rollen (`integrationsCatalogHref`). Modulen `integrationer` har ingen egen rail-post längre (samma mönster som `insights`/`anvandare`). |
 | `/installningar/utseende` | Tenant-logotyp + **inloggningssidans utseende** (mall, accentfärg, rubrik/underrubrik, bild/video — § 48) |
 

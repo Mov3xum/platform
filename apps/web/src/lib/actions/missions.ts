@@ -21,11 +21,14 @@ import { deriveRecipientsFromParticipants, getMissionContext, unionParticipantId
 import { createMissionMemberTasks } from '@/lib/assignments/collaboration';
 import { notify } from '@/lib/notifications-server';
 import { isMissionCompletionTransition, logMissionCompletion } from '@/lib/missions/completion';
+import { isActiveMissionStatus, teamCapViolation } from '@/lib/team/team-cap.server';
 
 const MEMBER_ROLES: Role[] = ALL_ROLES.filter((r) => r !== 'observer');
 
 export type MissionActionState = {
   error?: string;
+  /** Maskinläsbar orsak — `team_cap` = teamtaket nått (§ 29.7). */
+  code?: 'team_cap';
   missionId?: string;
 };
 
@@ -195,6 +198,15 @@ export async function createMissionAction(
   const stages = defaultStagesForType(type);
   const pb = await getServerPb();
 
+  // § 29.7 — teamtaket: ett nytt uppdrag skapas som pågående, så varje
+  // medlem (även utfärdaren som ansvarig) måste ha en ledig teamplats.
+  const capError = await teamCapViolation(pb, user.tenant, [
+    ...participants.map((p) => p.user_id),
+    ...derivedRecipients,
+    ...(mentor ? [mentor] : [])
+  ]);
+  if (capError) return { error: capError, code: 'team_cap' };
+
   let created: Mission;
   try {
     created = await pb.collection(PB_COLLECTIONS.missions).create<Mission>({
@@ -296,6 +308,13 @@ export async function updateMissionStatus(
 
   if (mission.status === status) return { missionId: id };
 
+  // § 29.7 — ett utkast/avslutat uppdrag som blir pågående tar en teamplats
+  // för varje medlem.
+  if (!isActiveMissionStatus(mission.status) && isActiveMissionStatus(status)) {
+    const capError = await teamCapViolation(pb, user.tenant, unionParticipantIds(mission));
+    if (capError) return { error: capError, code: 'team_cap' };
+  }
+
   try {
     await pb.collection(PB_COLLECTIONS.missions).update(id, { status });
 
@@ -366,6 +385,11 @@ export async function advanceStage(id: string, stageId: string, note?: string): 
     : someDone
       ? 'in_progress'
       : mission.status;
+
+  if (!isActiveMissionStatus(mission.status) && isActiveMissionStatus(nextStatus)) {
+    const capError = await teamCapViolation(pb, user.tenant, unionParticipantIds(mission));
+    if (capError) return { error: capError, code: 'team_cap' };
+  }
 
   try {
     await pb
@@ -445,6 +469,13 @@ export async function updateMissionParticipants(
   const derivedRecipients = deriveRecipientsFromParticipants(sanitized).filter(
     (uid) => uid !== mission.issuer
   );
+
+  // § 29.7 — nya medlemmar i ett pågående team måste ha en ledig plats.
+  // Befintliga medlemmar rörs inte (deras plats räknas redan).
+  if (isActiveMissionStatus(mission.status)) {
+    const capError = await teamCapViolation(pb, user.tenant, Array.from(seen), previous);
+    if (capError) return { error: capError, code: 'team_cap' };
+  }
 
   try {
     await pb.collection(PB_COLLECTIONS.missions).update(id, {
@@ -572,7 +603,8 @@ export async function advanceStageFormAction(formData: FormData): Promise<void> 
   const stageId = String(formData.get('stage_id') || '');
   const note = String(formData.get('note') || '').trim() || undefined;
   if (!id || !stageId) return;
-  await advanceStage(id, stageId, note);
+  const res = await advanceStage(id, stageId, note);
+  if (res.code === 'team_cap') redirect(`/uppdrag/${encodeURIComponent(id)}?fel=team_cap`);
 }
 
 export async function updateMissionStatusFormAction(formData: FormData): Promise<void> {
@@ -580,7 +612,8 @@ export async function updateMissionStatusFormAction(formData: FormData): Promise
   const id = String(formData.get('mission_id') || '');
   const status = String(formData.get('status') || '') as MissionStatus;
   if (!id || !status) return;
-  await updateMissionStatus(id, status);
+  const res = await updateMissionStatus(id, status);
+  if (res.code === 'team_cap') redirect(`/uppdrag/${encodeURIComponent(id)}?fel=team_cap`);
 }
 
 export async function updateMissionParticipantsFormAction(formData: FormData): Promise<void> {

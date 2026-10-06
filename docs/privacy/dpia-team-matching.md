@@ -96,3 +96,17 @@ hashtag, inaktuella profiler listade med namn för ledningen — intern
 administration, samma krets som redan läser profilerna) ryms inom samma
 bedömning: deltagande i ett team är verksamhetsdata, inte utfall/prestation,
 och utlöser inte omprövningspunkt (c).
+
+## Tillägg 2026-10 — teamtak (max antal pågående team per person)
+
+Ledningen sätter ett tak per tenant (default 3) för hur många pågående team
+en person får ingå i samtidigt. Taket är en **enhetlig administrativ regel**
+som gäller alla lika och som räknas ur samma härledda belastning som redan
+bedömts ovan (antal pågående uppdrag — lagras inte). Det innebär ingen ny
+personuppgift, ingen individuell bedömning och ingen ny AI-inferens: AI:n
+får bara färre kandidater (den som nått taket filtreras bort av
+deterministisk kod innan modellen anropas). Syftet är att skydda den
+enskilde från överbelastning. Ingen av omprövningsgrunderna (a)–(d) ovan
+träffas; riskklassen är oförändrad (begränsad). Inställningen auditeras
+(bara talet) och syns i aktivitetsloggen.
+

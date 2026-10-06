@@ -310,26 +310,99 @@ export const LOAD_LEVEL_LABELS: Record<LoadLevel, string> = {
   free: 'Ledig',
   normal: 'Normal belastning',
   high: 'Hög belastning',
-  full: 'Fullbelagd'
+  full: 'Fullt (taket nått)'
 };
 
-/** Trösklar (aktiva team) — ansvarig räknas som ett extra team. */
+/** Trösklar (viktad belastning) — ansvarig räknas som ett extra team. */
 export const LOAD_THRESHOLDS = { normalMax: 2, highMax: 4 } as const;
+
+// ── Teamtak (max antal pågående team per person) ────────────────────────────
+//
+// Varje person får ingå i högst N pågående team samtidigt (default 3).
+// Ledningen justerar N per tenant (`tenants.max_active_teams_per_person`,
+// migration 1700000181). Taket är en hård gräns: en person som redan är i
+// N pågående team föreslås inte av AI-matchningen och kan inte läggas till i
+// ett nytt team förrän något av dem avslutats eller ledningen höjt taket.
+
+export const DEFAULT_MAX_ACTIVE_TEAMS = 3;
+export const TEAM_CAP_MIN = 1;
+export const TEAM_CAP_MAX = 20;
+
+/** Tenantens tak; saknat/0/ogiltigt ⇒ default (3). */
+export function effectiveTeamCap(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() ? Number(raw) : NaN;
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < TEAM_CAP_MIN || n > TEAM_CAP_MAX) {
+    return DEFAULT_MAX_ACTIVE_TEAMS;
+  }
+  return n;
+}
+
+/**
+ * Validerar ledningens inmatning. Tomt ⇒ `value: null` (= använd default).
+ * Annars ett heltal TEAM_CAP_MIN–TEAM_CAP_MAX.
+ */
+export function validateTeamCapInput(
+  raw: unknown
+): { ok: true; value: number | null } | { ok: false; error: string } {
+  const text = raw === null || raw === undefined ? '' : String(raw).trim();
+  if (!text) return { ok: true, value: null };
+  const n = Number(text);
+  if (!Number.isInteger(n) || n < TEAM_CAP_MIN || n > TEAM_CAP_MAX) {
+    return { ok: false, error: `Ange ett heltal mellan ${TEAM_CAP_MIN} och ${TEAM_CAP_MAX}.` };
+  }
+  return { ok: true, value: n };
+}
+
+/** Lediga teamplatser kvar (aldrig negativt). */
+export function teamCapacityLeft(load: TeamMemberLoad, cap: number = DEFAULT_MAX_ACTIVE_TEAMS): number {
+  return Math.max(0, cap - Math.max(0, load.active));
+}
+
+/** Har personen nått taket (inga lediga platser)? */
+export function isAtTeamCap(load: TeamMemberLoad, cap: number = DEFAULT_MAX_ACTIVE_TEAMS): boolean {
+  return teamCapacityLeft(load, cap) === 0;
+}
+
+/**
+ * Vilka av `memberIds` som INTE får läggas till i ett pågående team: de som
+ * redan har `cap` pågående team. `alreadyInMission` = personer som redan
+ * räknas för just det här uppdraget (rör aldrig deras plats).
+ */
+export function membersOverTeamCap(
+  memberIds: readonly string[],
+  loads: ReadonlyMap<string, TeamMemberLoad>,
+  cap: number,
+  alreadyInMission: readonly string[] = []
+): string[] {
+  const keep = new Set(alreadyInMission);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const id of memberIds) {
+    if (!id || seen.has(id) || keep.has(id)) continue;
+    seen.add(id);
+    if (isAtTeamCap(loads.get(id) ?? EMPTY_LOAD, cap)) out.push(id);
+  }
+  return out;
+}
 
 /** Viktad belastning: varje team 1, varje ansvar +1. */
 export function weightedLoad(load: TeamMemberLoad): number {
   return Math.max(0, load.active) + Math.max(0, load.leading);
 }
 
-export function loadLevel(load: TeamMemberLoad): LoadLevel {
-  const w = weightedLoad(load);
-  if (w === 0) return 'free';
-  if (w <= LOAD_THRESHOLDS.normalMax) return 'normal';
-  if (w <= LOAD_THRESHOLDS.highMax) return 'high';
-  return 'full';
+/**
+ * Belastningsnivå relativt teamtaket: `full` = taket nått (kan inte ta fler
+ * team); `high` = sista lediga platsen eller tung viktad belastning; `free`
+ * = inga pågående team.
+ */
+export function loadLevel(load: TeamMemberLoad, cap: number = DEFAULT_MAX_ACTIVE_TEAMS): LoadLevel {
+  if (isAtTeamCap(load, cap)) return 'full';
+  if (load.active <= 0 && load.leading <= 0) return 'free';
+  if ((cap >= 2 && load.active >= cap - 1) || weightedLoad(load) > LOAD_THRESHOLDS.highMax) return 'high';
+  return 'normal';
 }
 
-/** Poängjustering i rankningen: ledig lyfts, hög/full belastning dras ned. */
+/** Poängjustering i rankningen: ledig lyfts, hög belastning dras ned (full = utesluten). */
 export const LOAD_SCORE_ADJUST: Record<LoadLevel, number> = {
   free: 0.5,
   normal: 0,
@@ -337,9 +410,11 @@ export const LOAD_SCORE_ADJUST: Record<LoadLevel, number> = {
   full: -3
 };
 
-export function describeLoad(load: TeamMemberLoad): string {
-  if (load.active === 0) return 'Inga pågående team';
-  const base = `${load.active} pågående team`;
+/** "2 av 3 pågående team, ansvarig i 1" (med tak) eller utan "av N". */
+export function describeLoad(load: TeamMemberLoad, cap?: number): string {
+  const ofCap = typeof cap === 'number' ? ` av ${cap}` : '';
+  if (load.active === 0) return typeof cap === 'number' ? `0 av ${cap} team` : 'Inga pågående team';
+  const base = `${load.active}${ofCap} pågående team`;
   return load.leading > 0 ? `${base}, ansvarig i ${load.leading}` : base;
 }
 
@@ -472,8 +547,15 @@ export interface RankedCandidate {
   loadLevel: LoadLevel;
   relatedToStartup: boolean;
   merit: TeamMerit;
+  /** Taket nått — får inte föreslås eller läggas till i ett nytt team. */
+  atCapacity: boolean;
   /** Läsbara skäl, PII-fria (taggar, områden, belastning, meriter). */
   reasons: string[];
+}
+
+export interface RankTeamOptions {
+  /** Max antal pågående team per person (`effectiveTeamCap`). Default 3. */
+  teamCap?: number;
 }
 
 export const TEAM_SHORTLIST_SIZE = 12;
@@ -493,12 +575,16 @@ const MERIT_COMPLETED_CAP = 5;
  * Deterministisk rankning av kandidater mot ett behov. Resultatet är sorterat
  * (högst poäng först, lika poäng → lägre belastning → namn). Kandidater utan
  * någon träff och utan bolagsrelation får 0 och hamnar sist men behålls, så
- * anroparen kan visa dem som "ingen träff" om listan är kort.
+ * anroparen kan visa dem som "ingen träff" om listan är kort. Kandidater som
+ * nått teamtaket (`atCapacity`) får poäng 0 och sorteras allra sist — de
+ * visas som "fullt" men ska aldrig föreslås.
  */
 export function rankTeamCandidates(
   need: TeamNeed,
-  candidates: readonly RankableCandidate[]
+  candidates: readonly RankableCandidate[],
+  options: RankTeamOptions = {}
 ): RankedCandidate[] {
+  const cap = effectiveTeamCap(options.teamCap);
   const needTags = new Set(need.tags);
   const needAreas = new Set(need.areas);
   const ranked = candidates.map<RankedCandidate>((c) => {
@@ -530,10 +616,11 @@ export function rankTeamCandidates(
       MERIT_RELEVANT_BONUS * Math.min(MERIT_RELEVANT_CAP, merit.relevant) +
       MERIT_COMPLETED_BONUS * Math.min(MERIT_COMPLETED_CAP, merit.completed);
 
-    const lvl = loadLevel(c.load);
+    const lvl = loadLevel(c.load, cap);
+    const atCapacity = isAtTeamCap(c.load, cap);
     const hasMatch = matchedTags.length > 0 || matchedAreas.length > 0 || relatedToStartup;
     if (hasMatch) score += LOAD_SCORE_ADJUST[lvl];
-    score = Math.max(0, Math.round(score * 100) / 100);
+    score = atCapacity ? 0 : Math.max(0, Math.round(score * 100) / 100);
 
     if (matchedTags.length > 0) {
       reasons.push(
@@ -553,7 +640,9 @@ export function rankTeamCandidates(
     if (relatedToStartup) reasons.push('arbetar redan med bolaget');
     const meritText = describeMerit(merit);
     if (meritText) reasons.push(meritText);
-    reasons.push(describeLoad(c.load));
+    reasons.push(
+      atCapacity ? `fullt: ${c.load.active} av ${cap} team — kan inte ta fler` : describeLoad(c.load, cap)
+    );
 
     return {
       id: c.id,
@@ -567,12 +656,14 @@ export function rankTeamCandidates(
       loadLevel: lvl,
       relatedToStartup,
       merit,
+      atCapacity,
       reasons
     };
   });
 
   ranked.sort(
     (a, b) =>
+      Number(a.atCapacity) - Number(b.atCapacity) ||
       b.score - a.score ||
       weightedLoad(a.load) - weightedLoad(b.load) ||
       a.name.localeCompare(b.name, 'sv')

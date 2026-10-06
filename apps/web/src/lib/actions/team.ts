@@ -9,7 +9,8 @@ import {
   loadCompetenceTagVocabulary,
   loadCompletedMissions,
   loadStaffProfiles,
-  loadTeamLoads
+  loadTeamCap,
+  loadTeamLoadsForCap
 } from '@/lib/team/competence-tags.server';
 import {
   TEAM_SHORTLIST_SIZE,
@@ -66,6 +67,14 @@ export interface ShortlistEntryView {
   loadLevel: LoadLevel;
 }
 
+export interface AtCapacityView {
+  id: string;
+  name: string;
+  load: TeamMemberLoad;
+  /** Träffade hashtags — varför personen annars hade passat. */
+  matchedTags: string[];
+}
+
 export type SuggestTeamResult =
   | {
       ok: true;
@@ -82,6 +91,10 @@ export type SuggestTeamResult =
       candidateCount: number;
       /** false = belastningen kunde inte läsas komplett (visa som osäker). */
       loadComplete: boolean;
+      /** Max antal pågående team per person (§ 29.7). */
+      teamCap: number;
+      /** Kollegor som matchar behovet men redan nått taket (föreslås aldrig). */
+      atCapacity: AtCapacityView[];
     }
   | { ok: false; error: string };
 
@@ -110,11 +123,15 @@ export async function suggestTeamAction(input: {
 
   // ── Underlag (parallellt, alla fail-soft) ───────────────────────────────
   const vocabulary = await loadCompetenceTagVocabulary(pb, user.tenant);
-  const [profiles, { loads, complete: loadComplete }, { missions: completedMissions }] = await Promise.all([
-    loadStaffProfiles(pb, user.tenant, vocabulary),
-    loadTeamLoads(pb, user.tenant),
-    loadCompletedMissions(pb, user.tenant)
-  ]);
+  // Belastningen räknas över HELA tenanten (även uppdrag anroparens token
+  // inte ser) eftersom den avgör teamtaket (§ 29.7) — bara räknare används.
+  const [profiles, { loads, complete: loadComplete }, { missions: completedMissions }, teamCap] =
+    await Promise.all([
+      loadStaffProfiles(pb, user.tenant, vocabulary),
+      loadTeamLoadsForCap(pb, user.tenant),
+      loadCompletedMissions(pb, user.tenant),
+      loadTeamCap(pb, user.tenant)
+    ]);
 
   // ── Valfri bolagskontext (kort etikett, ingen PII) + relation ──────────
   let startupContext: string | undefined;
@@ -173,12 +190,31 @@ export async function suggestTeamAction(input: {
   }));
 
   // ── Steg 2: deterministisk rankning (hashtag/nivå/relation/belastning) ──
-  const ranked = rankTeamCandidates(needRes.need, candidates);
-  const shortlist = ranked.filter((r) => r.score > 0).slice(0, TEAM_SHORTLIST_SIZE);
-  const gaps = teamNeedGaps(needRes.need, candidates);
+  // Teamtaket är en hård gräns: den som redan är i `teamCap` pågående team
+  // hamnar aldrig i shortlistan, men listas som "fullt" så människan ser
+  // varför en annars självklar kollega saknas.
+  const ranked = rankTeamCandidates(needRes.need, candidates, { teamCap });
+  const shortlist = ranked.filter((r) => r.score > 0 && !r.atCapacity).slice(0, TEAM_SHORTLIST_SIZE);
+  const atCapacity: AtCapacityView[] = ranked
+    .filter((r) => r.atCapacity && (r.matchedTags.length > 0 || r.matchedAreas.length > 0 || r.relatedToStartup))
+    .slice(0, TEAM_SHORTLIST_SIZE)
+    .map((r) => ({ id: r.id, name: r.name, load: r.load, matchedTags: r.matchedTags.map((m) => m.tag) }));
+  // Gap räknas bara mot kollegor med ledig plats: täcks en hashtag enbart av
+  // fullbelagda kollegor saknas den i praktiken (→ extern kompetens).
+  const gaps = teamNeedGaps(
+    needRes.need,
+    candidates.filter((c) => !ranked.find((r) => r.id === c.id)?.atCapacity)
+  );
 
   // ── Steg 3: AI sätter ihop teamet ur shortlistan ────────────────────────
-  const composed = await composeTeam({ description, startupContext, need: needRes.need, shortlist, gaps });
+  const composed = await composeTeam({
+    description,
+    startupContext,
+    need: needRes.need,
+    shortlist,
+    gaps,
+    teamCap
+  });
 
   void logAiUsage(pb, {
     tenant: user.tenant,
@@ -190,7 +226,8 @@ export async function suggestTeamAction(input: {
   });
 
   const rankedById = new Map(ranked.map((r) => [r.id, r]));
-  const members: SuggestedMemberView[] = composed.result.members.map((m) => {
+  // Defense-in-depth: ingen som nått taket når förslaget, oavsett modellen.
+  const members: SuggestedMemberView[] = composed.result.members.filter((m) => !rankedById.get(m.id)?.atCapacity).map((m) => {
     const r = rankedById.get(m.id);
     const p = profileById.get(m.id);
     return {
@@ -228,6 +265,8 @@ export async function suggestTeamAction(input: {
     summary: composed.result.summary,
     needsReview: composed.result.needsReview || needRes.aiFailed,
     candidateCount: candidates.length,
-    loadComplete
+    loadComplete,
+    teamCap,
+    atCapacity
   };
 }
