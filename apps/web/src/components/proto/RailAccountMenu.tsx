@@ -30,7 +30,7 @@ interface Props {
   role?: string;
   initial: string;
   /**
-   * Visa "Min profil" (kompetens-hashtags, § 29.7) i menyn. Sätts av railen
+   * Visa "Mina kompetenser" (kompetens-hashtags, § 29.7) i menyn. Sätts av railen
    * via `canAccessModuleForUser(roles, 'min_profil', enabledModules)` — samma
    * UI-kurering som sidmenyn; sidan själv är RBAC-gränsen.
    */
@@ -86,9 +86,9 @@ export function RailAccountMenu({ name, email, role, initial, showProfile = fals
       {open && (
         <div className="mx-rail-account-pop" role="menu">
           {showProfile && (
-            <Link href="/min-profil" className="mx-rail-account-item" role="menuitem">
+            <Link href="/konto#kompetensprofil" className="mx-rail-account-item" role="menuitem">
               <Icon name="user" size={13} />
-              Min profil
+              Mina kompetenser
             </Link>
           )}
           <Link href="/konto" className="mx-rail-account-item" role="menuitem">

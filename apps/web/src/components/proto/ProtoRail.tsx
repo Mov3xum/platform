@@ -5,7 +5,7 @@ import {
   isPureStartupMember,
   type Role
 } from '@platform/shared';
-import { canAccessModuleForUser } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { ModuleNavItem } from './ModuleNavItem';
 import { RailToggleButton } from './MobileRail';
 import { Logo } from '@/components/Logo';
@@ -113,7 +113,10 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
           email={user.email}
           role={user.roles[0]?.replace('_', ' ') || ''}
           initial={initial}
-          showProfile={canAccessModuleForUser(user.roles, 'min_profil', user.enabledModules)}
+          showProfile={
+            hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']) ||
+            canAccessModuleForUser(user.roles, 'min_profil', user.enabledModules)
+          }
         />
       </div>
     </aside>
