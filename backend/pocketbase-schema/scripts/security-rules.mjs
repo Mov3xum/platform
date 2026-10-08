@@ -3,8 +3,9 @@
 // KÄLLA AV SANNING för de regler som `setup-via-api.mjs` SIST av allt
 // tvingar fram (efter collection-defs och FORCE_CREATE_RULES) och som
 // `verify-baseline.mjs` asserterar mot den live-instansen. Migration
-// 1700000182 bär en ordagrann kopia (PB:s JSVM kan inte importera ES-moduler);
-// `security-rules.test.mjs` låser att kopian och den här filen är identiska.
+// 1700000182 bär grundreglerna (PB:s JSVM kan inte importera ES-moduler);
+// 1700000186 låser notifications.createRule till null. Testet låser paritet
+// med migrationernas samlade resultat.
 //
 // Bakgrund (säkerhetsgranskning 2026-10-08): setup-via-api.mjs:s inline-defs
 // skrev över migrationernas update/delete-regler med `auth && tenant` UTAN
@@ -162,7 +163,7 @@ export const SECURITY_RULES = {
 
   // ── createRules: tenant + skapare pinnade (ingen förfalskning) ──
   notifications: {
-    createRule: `${AUTH} && ${BODY_TENANT} && (actor = "" || @request.auth.id = actor)`
+    createRule: null
   },
   tool_schedules: { createRule: createPinned('created_by') },
   tool_triggers: { createRule: createPinned('created_by') },
