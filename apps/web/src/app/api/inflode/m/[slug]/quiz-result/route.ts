@@ -126,7 +126,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   // AI-sammanställning av svaren + resultatprofilen (best-effort).
   const entries = buildSubmissionEntries(questions, body.answers || {});
   const resultLine = bucket ? `${bucket.title} (${score.total} poäng)` : `${score.total} poäng`;
-  await attachAiSummary(pb, user.tenant, lead, entries, mod.name, resultLine);
+  await attachAiSummary(pb, user.tenant, lead, entries, mod.name, resultLine, { userId: user.id });
 
   return NextResponse.json({ bucket, score: score.total, leadId: lead.id });
 }

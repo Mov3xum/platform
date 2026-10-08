@@ -2284,7 +2284,8 @@ await ensureCollection({
   type: 'base',
   fields: [
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
-    { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    // Migration 1700000185: valfritt — anonyma publika flöden loggas via superuser.
+    { name: 'user', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'surface', type: 'select', required: true, maxSelect: 1, values: ['toolbox', 'tool_chat', 'dashboard_chat', 'startup_chat', 'intl', 'suggestions', 'workshop_run', 'connector_chat'] },
     { name: 'model', type: 'text', required: true, max: 100 },
     // Migration 1700000145: talfälten är VALFRIA — PB tolkar 0 som "tomt" för
@@ -2313,7 +2314,41 @@ await ensureCollection({
 await patchCollection('ai_usage_events', [], {
   tokens_in: { required: false },
   tokens_out: { required: false },
-  cost_estimate_usd: { required: false }
+  cost_estimate_usd: { required: false },
+  // Migration 1700000185: `user` valfritt — publika flöden (publik
+  // kompass-chatt, AI-sammanställning av formulär/quiz) saknar inloggad
+  // användare och loggas anonymt via superuser. createRule oförändrad.
+  user: { required: false, minSelect: 0 }
+});
+
+// Migration 1700000185: ai_usage_monthly — månadsrollup per tenant (§ 9.6).
+// Hålls aktuell atomiskt av hooks/ai_usage_rollup.pb.js; backfillen görs av
+// migrationen (här skapas bara kollektionen om den saknas). Bara superuser
+// skriver; staff/observer i samma tenant läser.
+await ensureCollection({
+  id: 'ai_usage_monthly_collection',
+  name: 'ai_usage_monthly',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'month', type: 'text', required: true, min: 7, max: 7, pattern: '^\\d{4}-\\d{2}$' },
+    // Talfälten VALFRIA — PB tolkar 0 som "tomt" för required (§ 9.6).
+    { name: 'cost_usd', type: 'number', required: false, min: 0 },
+    { name: 'tokens_in', type: 'number', required: false, min: 0 },
+    { name: 'tokens_out', type: 'number', required: false, min: 0 },
+    { name: 'events', type: 'number', required: false, min: 0 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_ai_usage_monthly_tenant_month ON ai_usage_monthly (tenant, month)',
+    'CREATE INDEX idx_ai_usage_monthly_month ON ai_usage_monthly (month)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_READ}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_READ}`,
+  createRule: null,
+  updateRule: null,
+  deleteRule: null
 });
 
 // Migration 1700000059: startup_financials — årsmetrics per bolag.

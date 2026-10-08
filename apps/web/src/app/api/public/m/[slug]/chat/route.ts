@@ -10,6 +10,7 @@ import {
   persistChatTurnAndUpsertLead
 } from '@/lib/compass/chat-lead';
 import { AiBudgetExceededError, assertWithinAiBudget } from '@/lib/ai/budget.server';
+import { logAiUsage } from '@/lib/ai/usage';
 import {
   buildModuleChatSystemPrompt,
   getPublicModuleQuestions,
@@ -154,6 +155,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     }
     return NextResponse.json({ error: 'Kunde inte hämta svar just nu — försök igen.' }, { status: 502 });
   }
+
+  // Token-loggen (§ 9.6): besökaren är anonym, så raden skrivs utan användare
+  // via superuser-klienten (`pb` från resolvePublicModule, migration
+  // 1700000185). Utan den syntes publika chattar varken i AI-analysen eller
+  // i månadstaket. Surface `startup_chat` = bolags-/intagschatt. Fail-soft.
+  await logAiUsage(pb, {
+    tenant,
+    surface: 'startup_chat',
+    model: reply.model,
+    tokensIn: reply.tokensIn,
+    tokensOut: reply.tokensOut
+  });
 
   // GARANTERA en lead för samtalet (idempotent upsert per tur). Best-effort:
   // chatten ska aldrig fela på persistens/extraktion.

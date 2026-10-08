@@ -4,6 +4,7 @@ import { isSurveyModule } from '@platform/shared';
 import { summarizeSubmission, type SubmissionEntry } from './chat';
 import { updateLead } from './store';
 import { assertWithinAiBudget } from '@/lib/ai/budget.server';
+import { logAiUsage } from '@/lib/ai/usage';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import type { CompassModule, CompassQuestion, ContactPreference, Lead } from './types';
 
@@ -63,6 +64,11 @@ export function buildSubmissionEntries(
  * misslyckad AI/skrivning blockerar aldrig leadet (det är redan skapat) och
  * sväljs tyst. Returnerar sammanställningen så att anroparen kan inkludera
  * den i inflödesnotisen.
+ *
+ * Token-utfallet loggas i `ai_usage_events` (surface `suggestions`, § 9.6) med
+ * `pb` — för de publika routarna är det superuser-klienten och raden blir
+ * anonym (`userId` utelämnas, migration 1700000185); de interna preview-
+ * routarna skickar den inloggades id (createRule kräver `user = auth.id`).
  */
 const SUMMARY_MAX_PER_TENANT_HOUR = 200;
 
@@ -72,7 +78,8 @@ export async function attachAiSummary(
   lead: Lead,
   entries: SubmissionEntry[],
   moduleName: string,
-  resultLine?: string
+  resultLine?: string,
+  actor: { userId?: string | null } = {}
 ): Promise<string | undefined> {
   // Kostnadsskydd: de publika routarna rate-limitas per IP, men en roterad
   // IP-pool skulle annars kunna driva obegränsade Mistral-anrop på tenantens
@@ -83,7 +90,17 @@ export async function attachAiSummary(
   await recordFailure(tenantKey, 60 * 60 * 1000);
   try {
     await assertWithinAiBudget(pb, tenant);
-    const summary = await summarizeSubmission(entries, moduleName, resultLine);
+    const { summary, usage } = await summarizeSubmission(entries, moduleName, resultLine);
+    if (usage) {
+      await logAiUsage(pb, {
+        tenant,
+        userId: actor.userId ?? null,
+        surface: 'suggestions',
+        model: usage.model,
+        tokensIn: usage.tokensIn,
+        tokensOut: usage.tokensOut
+      });
+    }
     if (!summary) return undefined;
     await updateLead(pb, tenant, lead.id, { ai_summary: summary });
     return summary;
