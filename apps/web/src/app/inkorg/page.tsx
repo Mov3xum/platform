@@ -5,7 +5,11 @@ import { PageShell } from '@/components/PageShell';
 import { Icon } from '@/components/proto/Icon';
 import { NotificationList } from '@/components/inkorg/NotificationList';
 import { MissionInboxList } from '@/components/inkorg/MissionInboxList';
-import { listNotificationsForUser } from '@/lib/notifications-server';
+import {
+  listNotificationsForUser,
+  pruneOldNotifications,
+  toNotificationView
+} from '@/lib/notifications-server';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import type { ToolRunStatus, Mission } from '@platform/shared';
 import { ASSIGN_STATUS, formatDeadline, formatRelativeDate, daysUntil } from '@/components/intric/constants';
@@ -119,6 +123,8 @@ export default async function InkorgPage() {
   const pb = await getServerPb();
   const isFounder = hasRole(user.roles, ['startup_member']);
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
+  // Lagringsminimering (§ 50): gamla notiser rensas (kapat, fail-soft) innan listan läses.
+  await pruneOldNotifications(pb, user.id);
 
   // ── Aggregerad lista/tavla + agenda, notiser, uppdrag, bolagsval — parallellt ──
   const [overview, notifications, myMissions, startupOptions] = await Promise.all([
@@ -163,7 +169,8 @@ export default async function InkorgPage() {
   const todo = runs.filter((r) => r.status === 'assigned');
   const pågående = runs.filter((r) => r.status === 'in_progress');
   const väntar = runs.filter((r) => r.status === 'ready_for_review');
-  const unreadCount = notifications.filter((n) => !n.read_at).length;
+  const notificationViews = notifications.map(toNotificationView);
+  const unreadCount = notificationViews.filter((n) => !n.read).length;
   const firstName = user.name?.split(' ')[0] || user.name;
   const now = new Date();
   const open = openCount(overview.items);
@@ -252,7 +259,7 @@ export default async function InkorgPage() {
                   </span>
                 )}
               </div>
-              <NotificationList notifications={notifications} />
+              <NotificationList notifications={notificationViews} />
             </section>
 
             {myMissions.length > 0 && (

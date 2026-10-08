@@ -142,6 +142,8 @@ async function verifyCollectionsExist() {
     'missions',
     'mission_comments',
     'notifications',
+    // Notisinställningar per användare (§ 50, migration 1700000186).
+    'notification_preferences',
     'strategies',
     'strategy_revisions',
     'sprint_x_checkins',
@@ -568,6 +570,52 @@ function verifyImmutableCollections(collections) {
   ok('Oföränderliga bevis-/historikkollektioner (A.8.32) verifierade');
 }
 
+// Notifikationssystemet (§ 50, migration 1700000186). Notiser skapas BARA av
+// servern (createRule = null) — den gamla regeln lät vem som helst skapa
+// notiser till vem som helst, i valfri tenant, med valfri länk. Notiser och
+// notisinställningar är STRIKT ägaren-bara: list/view måste vara
+// `@request.auth.id = user` och får aldrig öppnas för staff/tenant.
+const MUST_BE_SERVER_CREATE_ONLY = ['notifications'];
+const MUST_BE_OWNER_ONLY = ['notifications', 'notification_preferences'];
+
+function verifyNotificationRules(collections) {
+  for (const name of MUST_BE_SERVER_CREATE_ONLY) {
+    const col = collections.get(name);
+    if (!col) continue;
+    if (col.createRule !== null && col.createRule !== undefined) {
+      fail(
+        `${name}.createRule måste vara null (bara servern skapar notiser), är \`${String(col.createRule)}\`.\n` +
+          'Kör migration 1700000186 eller setup-via-api.mjs.'
+      );
+    }
+  }
+  for (const name of MUST_BE_OWNER_ONLY) {
+    const col = collections.get(name);
+    if (!col) continue;
+    for (const ruleName of ['listRule', 'viewRule', 'updateRule', 'deleteRule']) {
+      const rule = col[ruleName];
+      if (typeof rule !== 'string' || !rule.includes('@request.auth.id = user')) {
+        fail(`${name}.${ruleName} måste vara ägaren-bara (\`@request.auth.id = user\`), är \`${String(rule)}\`.`);
+      }
+      if (/@request\.auth\.roles|@request\.auth\.tenant = tenant/.test(rule)) {
+        fail(`${name}.${ruleName} får inte öppnas för roller/tenant — notiser är privata: \`${rule}\`.`);
+      }
+    }
+  }
+  const notif = collections.get('notifications');
+  if (notif) {
+    for (const token of ['@request.body.user:isset = false', '@request.body.tenant:isset = false', '@request.body.payload_json:isset = false', '@request.body.actor:isset = false']) {
+      if (typeof notif.updateRule !== 'string' || !notif.updateRule.includes(token)) {
+        fail(
+          `notifications.updateRule måste vara fältlåst (saknar \`${token}\`) — annars kan en egen notis ` +
+            'PATCH:as om till en annan användare/tenant. Kör migration 1700000186 eller setup-via-api.mjs.'
+        );
+      }
+    }
+  }
+  ok('Notiser: bara servern skapar, bara ägaren läser, update fältlåst (§ 50)');
+}
+
 function verifyStartupMemberIsolation(collections) {
   for (const name of MUST_SCOPE_TO_MEMBER) {
     const col = collections.get(name);
@@ -638,7 +686,7 @@ const AI_DENYLIST = new Set([
   'tenant_integrations', 'user_app_integrations', 'user_mistral_connectors',
   'chat_threads', 'user_files', 'user_file_chunks', 'deep_jobs',
   'org_knowledge', 'org_knowledge_chunks', 'agent_memory',
-  'rate_limits', 'app_locks'
+  'notifications', 'notification_preferences', 'rate_limits', 'app_locks'
 ]);
 
 // PII-stavningar som substring-maskern INTE redan fångar. Förankrade till `_`
@@ -796,6 +844,7 @@ function verifyRlsAndRbac(collections) {
 
   verifyStartupMemberIsolation(collections);
   verifyImmutableCollections(collections);
+  verifyNotificationRules(collections);
   verifySuperuserOnlyCollections(collections);
   verifyCompassWriteRulesScoped(collections);
 
@@ -1073,7 +1122,14 @@ const REQUIRED_APP_FIELDS = [
   },
   // Teamtak (§ 29.7, migration 1700000181): utan fältet "sparas" ledningens
   // tak tyst bort och alla får default 3.
-  { collection: 'tenants', fields: ['max_active_teams_per_person'] }
+  { collection: 'tenants', fields: ['max_active_teams_per_person'] },
+  // Notifikationssystemet (§ 50, migration 1700000186): utan fälten tappas
+  // gruppering, tystning och "sedd"-markering tyst.
+  {
+    collection: 'notifications',
+    fields: ['category', 'priority', 'entity_type', 'entity_id', 'group_key', 'count', 'seen_at', 'latest_at', 'dedupe_key']
+  },
+  { collection: 'notification_preferences', fields: ['user', 'tenant', 'settings'] }
 ];
 
 /**

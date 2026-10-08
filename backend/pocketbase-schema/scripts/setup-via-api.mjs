@@ -1460,28 +1460,68 @@ await ensureCollection({
 });
 
 // Migration 1700000052: notifications — in-app-aviseringar för samarbete.
+// + migration 1700000186 (§ 50): kind = TEXT (katalogen i
+// packages/shared/src/notifications.ts), nya fält för gruppering/tystning/
+// dedupe, tenant cascade och createRule = NULL (bara servern skapar notiser —
+// den gamla regeln lät vem som helst skapa notiser till vem som helst).
 await ensureCollection({
   id: 'notifications_collection',
   name: 'notifications',
   type: 'base',
   fields: [
-    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
-    { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['comment', 'mention', 'assigned', 'status_change', 'stage_advance', 'due_soon'] },
+    { name: 'kind', type: 'text', required: true, min: 1, max: 60 },
     { name: 'mission', type: 'relation', required: false, collectionId: 'missions_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
     { name: 'actor', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'comment', type: 'relation', required: false, collectionId: 'mission_comments_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
     { name: 'payload_json', type: 'json', required: false, maxSize: 8000 },
-    { name: 'read_at', type: 'date', required: false }
+    { name: 'read_at', type: 'date', required: false },
+    { name: 'category', type: 'text', required: false, max: 40 },
+    { name: 'priority', type: 'text', required: false, max: 20 },
+    { name: 'entity_type', type: 'text', required: false, max: 40 },
+    { name: 'entity_id', type: 'text', required: false, max: 64 },
+    { name: 'group_key', type: 'text', required: false, max: 160 },
+    { name: 'count', type: 'number', required: false, onlyInt: true, min: 0, max: 999 },
+    { name: 'seen_at', type: 'date', required: false },
+    { name: 'latest_at', type: 'date', required: false },
+    { name: 'dedupe_key', type: 'text', required: false, max: 160 }
   ],
   indexes: [
     'CREATE INDEX idx_notifications_user_read ON notifications (user, read_at)',
-    'CREATE INDEX idx_notifications_tenant_user ON notifications (tenant, user)'
+    'CREATE INDEX idx_notifications_tenant_user ON notifications (tenant, user)',
+    'CREATE INDEX idx_notifications_user_group ON notifications (user, group_key)',
+    "CREATE UNIQUE INDEX idx_notifications_user_dedupe ON notifications (user, dedupe_key) WHERE dedupe_key != ''"
   ],
   listRule: `${ANY_AUTH} && @request.auth.id = user`,
   viewRule: `${ANY_AUTH} && @request.auth.id = user`,
-  createRule: `${ANY_AUTH} && (actor = "" || @request.auth.id = actor)`,
-  updateRule: `${ANY_AUTH} && @request.auth.id = user`,
+  // createRule utelämnad = NULL (bara superuser) — migration 1700000186.
+  // updateRule fältlåst: mottagaren får bara skriva read_at/seen_at.
+  updateRule: `${ANY_AUTH} && @request.auth.id = user && @request.body.user:isset = false && @request.body.tenant:isset = false && @request.body.kind:isset = false && @request.body.actor:isset = false && @request.body.mission:isset = false && @request.body.comment:isset = false && @request.body.payload_json:isset = false && @request.body.category:isset = false && @request.body.priority:isset = false && @request.body.entity_type:isset = false && @request.body.entity_id:isset = false && @request.body.group_key:isset = false && @request.body.count:isset = false && @request.body.dedupe_key:isset = false && @request.body.latest_at:isset = false`,
+  deleteRule: `${ANY_AUTH} && @request.auth.id = user`
+});
+
+// Migration 1700000186: notification_preferences — valen under Mitt konto →
+// Notiser. STRIKT ägaren-bara (users.viewRule är tenant-bred, därför egen
+// collection). createRule refererar bara auth-fält + skalär ägarcheck (§ 21.3).
+await ensureCollection({
+  id: 'notification_preferences_collection',
+  name: 'notification_preferences',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'settings', type: 'json', required: false, maxSize: 30000 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_notification_preferences_user ON notification_preferences (user)'
+  ],
+  listRule: `${ANY_AUTH} && @request.auth.id = user`,
+  viewRule: `${ANY_AUTH} && @request.auth.id = user`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != "" && @request.auth.id = user && @request.body.tenant = @request.auth.tenant`,
+  updateRule: `${ANY_AUTH} && @request.auth.id = user && @request.body.user:isset = false && @request.body.tenant:isset = false`,
   deleteRule: `${ANY_AUTH} && @request.auth.id = user`
 });
 
@@ -3666,7 +3706,7 @@ async function convertSelectFieldToText(collectionName, fieldName, opts = {}) {
 
     warn(
       `${collectionName}.${fieldName}: PocketBase REST kan inte ändra fälttyp från select till text — ` +
-        'hoppar över; migration 1700000140 måste köras av PocketBase-containern'
+        `hoppar över; migration ${opts.migrationId ?? '1700000140'} måste köras av PocketBase-containern`
     );
     return;
   }
@@ -4314,6 +4354,34 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
 
+// Migration 1700000186 (§ 50): notifications.kind blir TEXT — ersätter de
+// tidigare select-unionerna (1700000158/1700000169). Kan REST inte byta typ
+// (validation_field_type_change) unionas select-värdena i stället, så nya
+// notistyper inte avvisas innan PB-migrationen körts; servern faller dessutom
+// tillbaka på `assigned` mot ett select-schema.
+await convertSelectFieldToText('notifications', 'kind', {
+  min: 1,
+  max: 60,
+  migrationId: '1700000186'
+});
+{
+  const NOTIFICATION_KINDS = [
+    'comment', 'mention', 'assigned', 'status_change', 'stage_advance', 'collaborator_invited',
+    'task_assigned', 'due_soon', 'workshop_assigned', 'document_assigned', 'event_invited',
+    'agreement_to_sign', 'agreement_signed', 'contact_request', 'contact_decision',
+    'support_check_submitted', 'support_check_changes', 'support_check_decision', 'support_check_comment',
+    'feedback_answered', 'feedback_done'
+  ];
+  const col = await pb.collections.getOne('notifications');
+  const kindField = (col.fields || []).find((f) => f.name === 'kind');
+  if (kindField && kindField.type === 'select') {
+    const current = Array.isArray(kindField.values) ? kindField.values : [];
+    await patchCollection('notifications', [], {
+      kind: { values: [...current, ...NOTIFICATION_KINDS.filter((k) => !current.includes(k))] }
+    });
+  }
+}
+
 // Migration 1700000184: delat processöverskridande tillstånd för horisontell
 // skalning (§ 21.8). `rate_limits` = rate-limiterns räknare (key = HMAC/
 // SHA-256 av den logiska nyckeln, aldrig e-post/IP i klartext); `app_locks` =
@@ -4362,17 +4430,22 @@ await ensureCollection({
   deleteRule: null
 });
 
-// Migration 1700000158: notifications.kind += contact_request/contact_decision
-// (union — ensureCollection synkar inte fält på befintlig collection).
-// + migration 1700000169 (stödcheckar § 46): support_check_*-notiser.
-await patchCollection('notifications', [], {
-  kind: {
-    values: [
-      'comment', 'mention', 'assigned', 'status_change', 'stage_advance', 'due_soon', 'contact_request', 'contact_decision',
-      'support_check_submitted', 'support_check_changes', 'support_check_decision', 'support_check_comment'
-    ]
+{
+  // ensureCollection synkar inte ändrade fältinställningar eller index på en
+  // befintlig collection — tenant-kaskad (art. 17) och dedupe-index explicit.
+  await patchCollection('notifications', [], { tenant: { cascadeDelete: true } });
+  const wantedIndexes = [
+    'CREATE INDEX idx_notifications_user_group ON notifications (user, group_key)',
+    "CREATE UNIQUE INDEX idx_notifications_user_dedupe ON notifications (user, dedupe_key) WHERE dedupe_key != ''"
+  ];
+  const fresh = await pb.collections.getOne('notifications');
+  const indexes = Array.isArray(fresh.indexes) ? [...fresh.indexes] : [];
+  const missingIdx = wantedIndexes.filter((sql) => !indexes.some((i) => i.includes(sql.split(' ON ')[0].split(' ').pop())));
+  if (missingIdx.length > 0) {
+    await pb.collections.update('notifications', { indexes: [...indexes, ...missingIdx] });
+    ok(`notifications: index tillagda (${missingIdx.length})`);
   }
-});
+}
 // Migrationer 1700000161–170: stödcheckar & finansieringsprojekt (§ 46).
 // funding_projects → funding_work_packages (kassa + redovisningsenhet),
 // support_check_types (konfiguration) → support_check_applications (ENDA
@@ -4727,8 +4800,7 @@ await patchCollection(
 );
 // Migration 1700000169: activities.kind += support_check; notifications.kind += support_check_*.
 await patchActivitiesKindValues(['support_check']);
-// notifications.kind-unionen (inkl. support_check_*) görs i det samlade
-// patchCollection('notifications')-anropet längre ned (patchCollection ERSÄTTER values).
+// notifications.kind är TEXT sedan migration 1700000186 — se notis-blocket ovan.
 // Migration 1700000170: bakåtlänk från kapitalrad/de minimis-post till ansökan.
 for (const name of ['capital_rounds', 'de_minimis_stod']) {
   await patchCollection(name, [

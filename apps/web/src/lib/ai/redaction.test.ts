@@ -32,6 +32,8 @@ test('denylist håller ute auth-, credential- och privat-innehåll-kollektioner'
     'user_files',
     'deep_jobs',
     'meeting_transcripts', // råa mötestranskript (§34)
+    'notifications', // privata notiser — superuser-körningar fick annars läsa alla i tenanten (§50)
+    'notification_preferences', // notisinställningar per användare (§50)
     'procurement_documents', // fritext ur uppladdade upphandlingsunderlag (§39.3)
     'support_check_applications', // insatsernas deltagarfält = personnamn; utlåtanden/beslut (§46)
     'support_check_revisions', // signeringsbevis (§46)
