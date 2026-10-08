@@ -342,6 +342,7 @@ export default async function IntegrationDetailPage({
                     <th className="px-3 py-2 font-medium">Status</th>
                     <th className="px-3 py-2 font-medium">Skapade</th>
                     <th className="px-3 py-2 font-medium">Uppdaterade</th>
+                    <th className="px-3 py-2 font-medium">Hoppade över</th>
                     <th className="px-3 py-2 font-medium">Tid</th>
                   </tr>
                 </thead>
@@ -360,6 +361,9 @@ export default async function IntegrationDetailPage({
                       </td>
                       <td className="px-3 py-2 text-foreground-muted">
                         {run.records_updated ?? 0}
+                      </td>
+                      <td className="px-3 py-2 text-foreground-muted">
+                        {run.records_skipped ?? 0}
                       </td>
                       <td className="px-3 py-2 text-foreground-subtle">
                         {run.duration_ms ? `${Math.round(run.duration_ms)} ms` : '–'}

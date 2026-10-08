@@ -1477,6 +1477,19 @@ handler utan rad; utan superuser visas kortet ändå med orsaken i stället för
 formuläret. Speglat i `setup-via-api.mjs` (category-enumet patchas +
 raderna seedas). Ingen ny dataväg, inga nya fält; riskklass oförändrad.
 
+**Uppslag på valfritt bolag + synkloggens orsaker (2026-10-08).** "Testa mot
+org-nr" (`previewRegistryLookupAction`) slår upp VILKET svenskt aktiebolag som
+helst — numret behöver inte finnas i plattformen och inget sparas. Fältet
+normaliseras med `normalizeOrgNr` (godtar mellanslag, `16`-sekelprefix och
+momsnummer `SE…01`); Roarings interna test-id:n (`B00000018`) är inte
+org-nummer och avvisas med en förklaring. "Synka nu" hämtar däremot bara
+portföljens bolag med org-nr. En portföljsynk sparar nu VARFÖR bolag hoppades
+över: `summarizeRegistrySkips` (`company-registry/sync-errors.ts`, ren +
+enhetstestad) grupperar orsakerna (PII-fria: endpoint + orsak, aldrig org-nr)
+till `integration_sync_runs.error_message`, och `registrySyncStatus` ger
+`failed` när alla bolag hoppades över och inget skrevs (tidigare stod det
+"partial" utan förklaring). Synk-tabellen visar kolumnen "Hoppade över".
+
 **Valbara datadelar (2026-10).** Personalen väljer FÖRE varje hämtning vad som
 ska hämtas — kryssrutor per del vid "Synka nu" (portföljen), "Testa mot
 org-nr" och "Synka från <leverantör>" på bolagskortet (där knappen först

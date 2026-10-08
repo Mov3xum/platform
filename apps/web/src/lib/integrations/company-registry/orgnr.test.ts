@@ -31,3 +31,11 @@ test('formatOrgNr ger visningsformen med bindestreck', () => {
   assert.equal(formatOrgNr('5595728790'), '559572-8790');
   assert.equal(formatOrgNr('x'), null);
 });
+
+test('normalizeOrgNr godtar mellanslag, sekelprefix och momsnummer', () => {
+  assert.equal(normalizeOrgNr('559572 8790'), '5595728790');
+  assert.equal(normalizeOrgNr('165595728790'), '5595728790');
+  assert.equal(normalizeOrgNr('SE559572879001'), '5595728790');
+  assert.equal(normalizeOrgNr('se 559572-8790 01'), '5595728790');
+  assert.equal(normalizeOrgNr('B00000018'), null);
+});

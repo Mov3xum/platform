@@ -67,8 +67,9 @@ export function RegistryLookupForm({ providerSlug, providerName, registryParts, 
       <h2 className="text-[14px] font-semibold text-foreground">Testa mot org-nr</h2>
       <p className="mt-1 text-[12px] text-foreground-muted">
         Hämtar ett bolag från {providerName} och visar exakt vad som skulle skrivas till
-        bolagskortet — utan att spara något. Kör detta på ett känt bolag innan du synkar
-        hela portföljen.
+        bolagskortet — utan att spara något. Fungerar för vilket svenskt aktiebolag som
+        helst, även bolag som inte finns i plattformen. Kör detta på ett känt bolag innan du
+        synkar hela portföljen.
       </p>
       <form action={formAction} className="mt-3 flex flex-col gap-3">
         <input type="hidden" name="provider_slug" value={providerSlug} />
@@ -91,7 +92,6 @@ export function RegistryLookupForm({ providerSlug, providerName, registryParts, 
             </span>
             <input
               name="org_nr"
-              inputMode="numeric"
               placeholder="559572-8790"
               className="mt-1 block w-48 rounded-xl border border-default bg-canvas px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
             />

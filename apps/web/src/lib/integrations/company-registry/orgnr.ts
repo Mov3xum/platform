@@ -12,10 +12,16 @@
  * nå AI-kontexten.
  */
 
-/** Tar bort bindestreck/mellanslag och ett ev. sekelprefix (16xxxxxxxxxx). */
+/**
+ * Tar bort bindestreck/mellanslag och ett ev. sekelprefix (16xxxxxxxxxx).
+ * Momsregistreringsnummer (`SE559572879001`) godtas också — landskoden och
+ * suffixet `01` skalas bort.
+ */
 export function normalizeOrgNr(raw: string | null | undefined): string | null {
   if (!raw) return null;
-  let digits = String(raw).replace(/[^0-9]/g, '');
+  const text = String(raw).trim();
+  let digits = text.replace(/[^0-9]/g, '');
+  if (/^se/i.test(text) && digits.length === 12 && digits.endsWith('01')) digits = digits.slice(0, 10);
   if (digits.length === 12 && digits.startsWith('16')) digits = digits.slice(2);
   if (digits.length !== 10) return null;
   return digits;
