@@ -23,7 +23,8 @@ import {
   type PhaseHistoryItem
 } from '@/components/StartupPhaseHistoryList';
 import { RegistrySyncButton } from './RegistrySyncButton';
-import { listCompanyRegistrySlugs } from '@/lib/integrations/registry';
+import { getHandler, listCompanyRegistrySlugs } from '@/lib/integrations/registry';
+import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import { LogMeetingButton } from './LogMeetingButton';
 import {
   findIntegrationRow,
@@ -171,6 +172,8 @@ interface OwnershipRow {
 interface ConnectedRegistryProvider {
   slug: string;
   name: string;
+  parts: RegistryPartId[];
+  partEndpoints?: Partial<Record<RegistryPartId, string>>;
 }
 
 interface NoteRecord {
@@ -461,7 +464,16 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       connectedRegistries = res.items
         .map((r) => r.expand?.provider)
         .filter((p): p is { slug: string; name: string } => !!p && registrySlugs.has(p.slug))
-        .map((p) => ({ slug: p.slug, name: p.name }));
+        .map((p) => {
+          const h = getHandler(p.slug);
+          const registry = h?.kind === 'company_registry' ? h : undefined;
+          return {
+            slug: p.slug,
+            name: p.name,
+            parts: registry?.parts ?? [],
+            partEndpoints: registry?.partEndpoints?.()
+          };
+        });
     } catch {
       connectedRegistries = [];
     }
@@ -1416,6 +1428,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                     startupId={id}
                     providerSlug={p.slug}
                     providerName={p.name}
+                    registryParts={p.parts}
+                    partEndpoints={p.partEndpoints}
                   />
                 ))}
               </div>

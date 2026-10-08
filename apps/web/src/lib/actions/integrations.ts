@@ -14,6 +14,11 @@ import { ensureRegistryProviderRows } from '@/lib/integrations/company-registry/
 import { runSync, runRegistrySyncForStartup } from '@/lib/integrations/sync';
 import { loadCredentialsResult } from '@/lib/integrations/credentials';
 import { describeCredentialFailure } from '@/lib/integrations/credential-errors';
+import {
+  describeRegistryParts,
+  parseRegistryParts,
+  type RegistryPartId
+} from '@/lib/integrations/company-registry/parts';
 import type { RegistryCompany } from '@/lib/integrations/company-registry/types';
 import { isPersonalOrgNr, isValidOrgNr } from '@/lib/integrations/company-registry/orgnr';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
@@ -301,6 +306,22 @@ export async function disconnectIntegrationAction(
   return { success: true };
 }
 
+/**
+ * Läser personalens val av datadelar ur formuläret (§ 11.8). Formulär utan
+ * kryssrutor (`parts_present` saknas) hämtar allt providern stödjer, som förr.
+ * Valet valideras mot handlerns deklarerade delar — klienten är aldrig
+ * säkerhetsgränsen.
+ */
+function readRequestedParts(
+  formData: FormData,
+  supported: RegistryPartId[]
+): { ok: true; parts: RegistryPartId[] | undefined } | { ok: false; error: string } {
+  if (!formData.has('parts_present')) return { ok: true, parts: undefined };
+  const parsed = parseRegistryParts(formData.getAll('parts'), supported);
+  if (!parsed.ok) return parsed;
+  return { ok: true, parts: parsed.parts };
+}
+
 // Triggers a sync. RBAC: admin + incubator_lead. Wraps runSync()
 // and surfaces the count summary back to the UI.
 export async function syncIntegrationAction(
@@ -331,13 +352,22 @@ export async function syncIntegrationAction(
     return { error: 'Integrationen hittades inte.' };
   }
 
-  const result = await runSync(tenantIntegrationId, user.id);
+  const syncHandler = providerSlug ? getHandler(providerSlug) : undefined;
+  let parts: RegistryPartId[] | undefined;
+  if (syncHandler?.kind === 'company_registry') {
+    const requested = readRequestedParts(formData, syncHandler.parts);
+    if (!requested.ok) return { error: requested.error };
+    parts = requested.parts;
+  }
+
+  const result = await runSync(tenantIntegrationId, user.id, { parts });
 
   const pb = await getServerPb();
+  const partsLabel = parts ? ` Hämtade: ${describeRegistryParts(parts)}.` : '';
   const summary =
     result.status === 'failed'
       ? `Synk misslyckades: ${result.errorMessage || 'okänt fel'}`
-      : `Synk klar — ${result.recordsCreated} nya, ${result.recordsUpdated} uppdaterade.`;
+      : `Synk klar — ${result.recordsCreated} nya, ${result.recordsUpdated} uppdaterade.${partsLabel}`;
 
   await recordActivity(pb, {
     tenant: user.tenant,
@@ -435,17 +465,23 @@ export async function syncStartupFromRegistryAction(
   if (!handler || handler.kind !== 'company_registry') {
     return { error: 'Leverantören stödjer inte per-bolag-synk.' };
   }
+  const requested = readRequestedParts(formData, handler.parts);
+  if (!requested.ok) return { error: requested.error };
 
   const result = await runRegistrySyncForStartup(
     tenantIntegration.id,
     startupId,
-    user.id
+    user.id,
+    { parts: requested.parts }
   );
 
+  const partsLabel = requested.parts ? ` Hämtade: ${describeRegistryParts(requested.parts)}.` : '';
   const summary =
     result.status === 'failed'
       ? `Synk misslyckades: ${result.errorMessage || 'okänt fel'}`
-      : `Synk klar — ${result.recordsUpdated ? 'bolagskortet uppdaterat, ' : ''}${result.recordsCreated} årsrader uppdaterade.`;
+      : `Synk klar — ${result.recordsUpdated ? 'bolagskortet uppdaterat, ' : ''}${result.recordsCreated} årsrader uppdaterade.${partsLabel}${
+          result.status === 'partial' && result.errorMessage ? ` Varning: ${result.errorMessage}` : ''
+        }`;
 
   await recordActivity(pb, {
     tenant: user.tenant,
@@ -479,6 +515,8 @@ export async function syncStartupFromRegistryAction(
 export type RegistryLookupState = {
   error?: string;
   company?: RegistryCompany;
+  /** Delarna som begärdes (även de som föll) — styr vilka sektioner som visas. */
+  requestedParts?: RegistryPartId[];
 };
 
 export async function previewRegistryLookupAction(
@@ -513,6 +551,8 @@ export async function previewRegistryLookupAction(
   if (!handler || handler.kind !== 'company_registry' || !handler.lookup) {
     return { error: 'Leverantören stödjer inte förhandsgranskning.' };
   }
+  const requested = readRequestedParts(formData, handler.parts);
+  if (!requested.ok) return { error: requested.error };
 
   const adminResult = await getSuperuserPb();
   if (!adminResult.ok) return { error: 'Serverkonfiguration ofullständig.' };
@@ -543,7 +583,7 @@ export async function previewRegistryLookupAction(
 
   let company: RegistryCompany;
   try {
-    company = await handler.lookup(orgNr, creds);
+    company = await handler.lookup(orgNr, creds, requested.parts);
   } catch (err) {
     return { error: err instanceof Error ? err.message.slice(0, 300) : 'Uppslaget misslyckades.' };
   }
@@ -555,10 +595,12 @@ export async function previewRegistryLookupAction(
       kind: 'integration_sync',
       actor: user.id,
       title: `${providerSlug}: förhandsgranskning av bolagsuppslag`,
-      meta: `${company.financials.length} årsrader, ${company.ownership.length} ägarrader (inget sparat)`
+      meta: `${company.financials.length} årsrader, ${company.ownership.length} ägarrader (inget sparat)${
+        company.fetchedParts ? ` · Valda delar: ${describeRegistryParts(company.fetchedParts)}` : ''
+      }`
     });
   } catch {
     /* audit får aldrig blockera */
   }
-  return { company };
+  return { company, requestedParts: requested.parts ?? handler.parts };
 }
