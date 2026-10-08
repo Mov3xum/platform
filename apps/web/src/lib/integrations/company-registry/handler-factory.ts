@@ -216,7 +216,14 @@ export function createCompanyRegistryHandler(spec: CompanyRegistrySpec): Company
         }
       }
 
-      return { startupsUpdated, financialsUpserted, ownershipWritten, skipped, perStartupErrors };
+      return {
+        startupsUpdated,
+        financialsUpserted,
+        ownershipWritten,
+        skipped,
+        perStartupErrors,
+        startupsTotal: startups.length
+      };
     },
 
     async syncSingleStartup(creds, ctx: SyncContext, startupId: string): Promise<RegistrySyncResult> {

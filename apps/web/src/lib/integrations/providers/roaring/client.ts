@@ -6,7 +6,7 @@ import {
   OAuthTokenError
 } from '../../company-registry/oauth';
 import { assertAllowedBaseUrl } from '../../company-registry/types';
-import { parseRoaringPathList } from './normalize';
+import { parseRoaringPathList, roaringReportsNoRecords } from './normalize';
 
 // Roaring (roaring.io, Stockholm) — REST/JSON, OAuth2 client credentials.
 //
@@ -28,11 +28,21 @@ import { parseRoaringPathList } from './normalize';
 // Ett 404/403 från ett enskilt API (t.ex. verklig huvudman inte i paketet)
 // stoppar inte de övriga — normaliseraren noterar bortfallet.
 //
-// Verifierat mot Roarings publika dokumentation (2026-09-30): token-endpoint
-// `/token`, overview 2.0, group-structure 1.0 och verklig huvudman på
-// `/se/beneficialowner/2.1` (INTE `/se/company/beneficial-owner/…`).
-// Bokslut-API:ts exakta sökväg/version kunde inte verifieras — bekräfta i
-// utvecklarportalen och sätt ROARING_FINANCIALS_PATH vid avvikelse.
+// Endpoints granskade mot Roarings API-katalog (2026-10-08; roaring.io nås
+// inte från byggmiljön, så underlaget är katalogens id/sökvägar och
+// publicerade exempel — bekräfta alltid med "Testa mot org-nr"):
+//   grunddata         se-company-overview-2.0         → /se/company/overview/2.0/{companyId}
+//   bokslut           se-company-economy-overview-2.1 → /se/company/economy-overview/2.1/{companyId}
+//                     (tidigare default 1.1 — 2.1 är den publicerade versionen)
+//   koncernstruktur   se-company-group-structure-1.0  → /se/company/group-structure/1.0/{companyId}
+//   verklig huvudman  se-beneficialowner-2.1 (2.0 avvecklad 2025-01-15). Uppslag
+//                     per bolag är dokumenterat som …/beneficialowner/1.0/company/
+//                     {companyId} (och …/person/{pnr} per person) — därför provas
+//                     /company-varianten först; den nakna 2.1-sökvägen och 1.0
+//                     ligger kvar som reserv. `/se/company/beneficial-owner/…`
+//                     finns inte i katalogen och är borttagen.
+// Kandidaterna provas vid 403/404, så fel version kostar ett extra anrop men
+// aldrig fel data — sökvägen som svarade visas i förhandsgranskningen.
 
 export const ROARING_DEFAULT_BASE_URL = 'https://api.roaring.io';
 
@@ -51,9 +61,13 @@ export function roaringBaseUrl(creds: Record<string, string>): string {
 
 export const ROARING_DEFAULT_PATHS = {
   overview: ['/se/company/overview/2.0', '/se/company/overview/1.1'],
-  financials: ['/se/company/economy-overview/1.1', '/se/company/financial-record/1.1'],
+  financials: ['/se/company/economy-overview/2.1', '/se/company/economy-overview/1.1'],
   groupStructure: ['/se/company/group-structure/1.0'],
-  beneficialOwners: ['/se/beneficialowner/2.1', '/se/company/beneficial-owner/1.0']
+  beneficialOwners: [
+    '/se/beneficialowner/2.1/company',
+    '/se/beneficialowner/2.1',
+    '/se/beneficialowner/1.0/company'
+  ]
 } as const;
 
 /** Kandidatlista per API (env vinner; kommaseparerad, prioritetsordning). */
@@ -124,6 +138,12 @@ export async function roaringGet(
         headers: { Authorization: `Bearer ${token}` },
         timeoutMs: 20_000
       });
+      // Roaring kan svara HTTP 200 med "records not found" i kuvertet i
+      // stället för 404 — behandla det som 404 så nästa kandidat provas och
+      // ett tomt svar aldrig räknas som en lyckad hämtning.
+      if (roaringReportsNoRecords(data)) {
+        return { ok: false, status: 404, reason: 'Inga uppgifter i detta API för bolaget.', path };
+      }
       return { ok: true, data, path };
     } catch (err) {
       if (err instanceof IntegrationFetchError) {

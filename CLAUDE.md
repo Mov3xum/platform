@@ -1424,13 +1424,29 @@ Roarings endpoint-versioner och beloppsenhet är env-överstyrbara
 `ROARING_GROUP_STRUCTURE_PATH`, `ROARING_BENEFICIAL_OWNER_PATH` — varje
 `*_PATH` är en **kommaseparerad kandidatlista** i prioritetsordning som provas
 vid 403/404, första svar med data vinner; `ROARING_AMOUNT_MULTIPLIER` default
-1000 = TSEK→SEK). **Verifierat mot Roarings publika dokumentation 2026-09-30
-(`docs/integrations/roaring-sandbox-test.md`):** token = `POST /token`,
-grunddata `/se/company/overview/2.0`, koncern `/se/company/group-structure/1.0`,
-verklig huvudman **`/se/beneficialowner/2.1`** (den tidigare defaulten
-`/se/company/beneficial-owner/1.0` var fel och ligger nu sist som reserv).
-Bokslut-API:ts sökväg (`/se/company/economy-overview/1.1`) är fortsatt
-obekräftad — se runbooken. **Sandbox = samma värd** (`api.roaring.io`): det
+1000 = TSEK→SEK). **Endpoints granskade mot Roarings API-katalog 2026-10-08
+(`docs/integrations/roaring-sandbox-test.md`; roaring.io nås inte från
+byggmiljön — underlaget är katalogens id/sökvägar och publicerade exempel):**
+token = `POST /token`; grunddata `se-company-overview-2.0`
+(`/se/company/overview/2.0`); bokslut **`se-company-economy-overview-2.1`**
+(`/se/company/economy-overview/2.1` — tidigare default 1.1, som ligger kvar som
+reserv); koncern `se-company-group-structure-1.0`; verklig huvudman
+`se-beneficialowner-2.1` (2.0 avvecklad 2025-01-15) där uppslag per bolag är
+dokumenterat med **`/company/{companyId}`** — kandidaterna är
+`/se/beneficialowner/2.1/company`, `/se/beneficialowner/2.1`,
+`/se/beneficialowner/1.0/company` (`/se/company/beneficial-owner/…` finns inte i
+katalogen och är borttagen). **Koncernstrukturen är en PLATT lista**
+(`groupCompanies[]` med `motherCompanyId`/`ownedPercentage`/`companyLevel`):
+normaliseraren följer moder-kedjan uppåt (direkt/indirekt ägare; moderns andel
+står på bolagets EGEN post) och tar bara bolag vars `motherCompanyId` är
+bolaget som innehav — moderbolag och syskon i listan klassas aldrig som
+innehav (tidigare tolkades listan som ett träd och allt blev innehav). Ett
+HTTP 200-svar vars kuvert säger "records not found" behandlas som 404
+(`roaringReportsNoRecords`) så det aldrig räknas som en lyckad hämtning.
+Verklig huvudmans intervall/kontrollgrund tolkas även som objekt
+(`{ from, to }`) respektive kodlista (`controlTypes[]`); fältnamnen inuti
+`beneficialOwners[]` och bokslutets fält är fortsatt obekräftade — se
+runbooken. **Sandbox = samma värd** (`api.roaring.io`): det
 är nyckelparet från utvecklarportalen som avgör om svaren är testdata, så
 `base_url` lämnas tom. Förhandsgranskningen noterar per API vilken sökväg som
 svarade och vilka **fältnycklar** (aldrig värden) svaret bar, så mappningen kan
@@ -1460,6 +1476,19 @@ slug) när katalogen, detaljsidan eller `connectIntegrationAction` möter en
 handler utan rad; utan superuser visas kortet ändå med orsaken i stället för
 formuläret. Speglat i `setup-via-api.mjs` (category-enumet patchas +
 raderna seedas). Ingen ny dataväg, inga nya fält; riskklass oförändrad.
+
+**Uppslag på valfritt bolag + synkloggens orsaker (2026-10-08).** "Testa mot
+org-nr" (`previewRegistryLookupAction`) slår upp VILKET svenskt aktiebolag som
+helst — numret behöver inte finnas i plattformen och inget sparas. Fältet
+normaliseras med `normalizeOrgNr` (godtar mellanslag, `16`-sekelprefix och
+momsnummer `SE…01`); Roarings interna test-id:n (`B00000018`) är inte
+org-nummer och avvisas med en förklaring. "Synka nu" hämtar däremot bara
+portföljens bolag med org-nr. En portföljsynk sparar nu VARFÖR bolag hoppades
+över: `summarizeRegistrySkips` (`company-registry/sync-errors.ts`, ren +
+enhetstestad) grupperar orsakerna (PII-fria: endpoint + orsak, aldrig org-nr)
+till `integration_sync_runs.error_message`, och `registrySyncStatus` ger
+`failed` när alla bolag hoppades över och inget skrevs (tidigare stod det
+"partial" utan förklaring). Synk-tabellen visar kolumnen "Hoppade över".
 
 **Valbara datadelar (2026-10).** Personalen väljer FÖRE varje hämtning vad som
 ska hämtas — kryssrutor per del vid "Synka nu" (portföljen), "Testa mot

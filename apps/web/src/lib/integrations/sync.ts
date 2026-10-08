@@ -5,6 +5,7 @@ import { getSuperuserPb, loadCredentialsResult } from './credentials';
 import { describeCredentialFailure } from './credential-errors';
 import { getHandler } from './registry';
 import { describeRegistryParts, type RegistryPartId } from './company-registry/parts';
+import { registrySyncStatus, summarizeRegistrySkips } from './company-registry/sync-errors';
 import type {
   CompanyRegistryHandler,
   IntegrationHandler,
@@ -191,15 +192,26 @@ async function runRegistrySync(
   ownershipWritten: number;
   skipped: number;
   fetchError: string | null;
+  skipSummary: string;
 }> {
   try {
     const result = await handler.syncRegistry(creds, ctx);
+    // Orsaken per bolag sparas i synk-loggen — annars syns bara "partial"/
+    // "failed" utan förklaring. Meddelandena är PII-fria (sökväg + orsak).
+    const skipSummary = summarizeRegistrySkips(result.perStartupErrors ?? [], result.startupsTotal);
+    if (skipSummary) {
+      console.warn('[integrations:sync] registry startups skipped', {
+        provider: handler.slug,
+        summary: skipSummary
+      });
+    }
     return {
       startupsUpdated: result.startupsUpdated,
       financialsUpserted: result.financialsUpserted,
       ownershipWritten: result.ownershipWritten ?? 0,
       skipped: result.skipped,
-      fetchError: null
+      fetchError: null,
+      skipSummary
     };
   } catch (err) {
     return {
@@ -207,7 +219,8 @@ async function runRegistrySync(
       financialsUpserted: 0,
       ownershipWritten: 0,
       skipped: 0,
-      fetchError: toError(err)
+      fetchError: toError(err),
+      skipSummary: ''
     };
   }
 }
@@ -529,6 +542,7 @@ export async function runSync(
   let skipped = 0;
   let ownershipWritten = 0;
   let fetchError: string | null = null;
+  let skipSummary = '';
 
   const kind = handler.kind ?? 'records';
   if (kind === 'company_registry') {
@@ -542,6 +556,7 @@ export async function runSync(
     updated = result.startupsUpdated;
     skipped = result.skipped;
     ownershipWritten = result.ownershipWritten;
+    skipSummary = result.skipSummary;
   } else {
     const result = await runRecordsSync(
       adminPb,
@@ -561,9 +576,16 @@ export async function runSync(
   const durationMs = finishedAt.getTime() - startedAt.getTime();
   const status: SyncResult['status'] = fetchError
     ? 'failed'
-    : skipped > 0
-      ? 'partial'
-      : 'success';
+    : kind === 'company_registry'
+      ? registrySyncStatus({
+          startupsUpdated: updated,
+          financialsUpserted: created,
+          ownershipWritten,
+          skipped
+        })
+      : skipped > 0
+        ? 'partial'
+        : 'success';
   const summary = fetchError
     ? `${providerSlug}: synk misslyckades`
     : kind === 'company_registry'
@@ -580,7 +602,7 @@ export async function runSync(
         records_created: created,
         records_updated: updated,
         records_skipped: skipped,
-        error_message: fetchError || ''
+        error_message: (fetchError || skipSummary || '').slice(0, 500)
       });
     } catch (err) {
       console.error('[integrations:sync] failed to close sync_run', {
@@ -609,7 +631,7 @@ export async function runSync(
     recordsCreated: created,
     recordsUpdated: updated,
     recordsSkipped: skipped,
-    errorMessage: fetchError || undefined,
+    errorMessage: fetchError || skipSummary || undefined,
     durationMs
   };
 }

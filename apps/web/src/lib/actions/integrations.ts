@@ -20,7 +20,7 @@ import {
   type RegistryPartId
 } from '@/lib/integrations/company-registry/parts';
 import type { RegistryCompany } from '@/lib/integrations/company-registry/types';
-import { isPersonalOrgNr, isValidOrgNr } from '@/lib/integrations/company-registry/orgnr';
+import { isPersonalOrgNr, isValidOrgNr, normalizeOrgNr } from '@/lib/integrations/company-registry/orgnr';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { recordActivity } from './record-activity';
 
@@ -367,7 +367,9 @@ export async function syncIntegrationAction(
   const summary =
     result.status === 'failed'
       ? `Synk misslyckades: ${result.errorMessage || 'okänt fel'}`
-      : `Synk klar — ${result.recordsCreated} nya, ${result.recordsUpdated} uppdaterade.${partsLabel}`;
+      : `Synk klar — ${result.recordsCreated} nya, ${result.recordsUpdated} uppdaterade.${partsLabel}${
+          result.status === 'partial' && result.errorMessage ? ` Varning: ${result.errorMessage}` : ''
+        }`;
 
   await recordActivity(pb, {
     tenant: user.tenant,
@@ -528,12 +530,21 @@ export async function previewRegistryLookupAction(
     return { error: 'Endast inkubatorledning kan testa uppslag.' };
   }
   const providerSlug = String(formData.get('provider_slug') || '').trim();
-  const orgNr = String(formData.get('org_nr') || '').trim();
+  // Valfritt bolag — uppslaget kräver INTE att bolaget finns i databasen.
+  // Godtar 559572-8790, 5595728790, 16559572…, mellanslag och momsnummer.
+  const orgNrRaw = String(formData.get('org_nr') || '').trim();
+  const orgNr = normalizeOrgNr(orgNrRaw);
   if (!listCompanyRegistrySlugs().includes(providerSlug)) {
     return { error: 'Okänd bolagsregister-leverantör.' };
   }
-  if (!/^\d{6}-?\d{4}$/.test(orgNr) || !isValidOrgNr(orgNr)) {
-    return { error: 'Ange ett giltigt organisationsnummer med 10 siffror (t.ex. 559572-8790).' };
+  if (!orgNr) {
+    return {
+      error:
+        'Ange ett svenskt organisationsnummer med 10 siffror (t.ex. 559572-8790). Roarings interna test-id:n (t.ex. B00000018) är inte org-nummer.'
+    };
+  }
+  if (!isValidOrgNr(orgNr)) {
+    return { error: 'Organisationsnumret har fel kontrollsiffra — kontrollera numret.' };
   }
   // Enskild firma: org-nr = personnummer → uppslag på en fysisk person görs
   // aldrig från förhandsgranskningen (GDPR § 5).

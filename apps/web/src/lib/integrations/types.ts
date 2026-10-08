@@ -51,6 +51,8 @@ export interface RegistrySyncResult {
   ownershipWritten?: number;
   skipped: number;
   perStartupErrors?: Array<{ startupId: string; error: string }>;
+  /** Antal bolag med org-nr som synken försökte hämta (portföljsynk). */
+  startupsTotal?: number;
 }
 
 // Discriminated union: 'records' providers produce NormalizedRecord[]
