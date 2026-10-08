@@ -8,6 +8,7 @@ import { callMistral, estimateCostUsd } from '@/lib/ai/mistral';
 import { logAiUsage } from '@/lib/ai/usage';
 import { buildStartupContext } from '@/lib/ai/context';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { reviewedContentHash, verifyCoachApproval } from '@/lib/workshop-review';
 import {
   DIAGNOSTIC_SYSTEM_PROMPT,
   buildDiagnosticUserPrompt
@@ -426,7 +427,8 @@ export async function submitForCoachReviewAction(
     artifacts_json: {
       ...artifacts,
       coach_review_submitted_at: now,
-      coach_decision: null
+      coach_decision: null,
+      coach_approved_hash: null
     },
     last_saved_at: now
   });
@@ -448,10 +450,14 @@ export async function coachReviewDecisionAction(
 
   const now = new Date().toISOString();
   const artifacts = (assignment.artifacts_json as Record<string, unknown>) || {};
+  const answers = (assignment.answers_json as Record<string, unknown>) || {};
   await pb.collection(PB_COLLECTIONS.workshopAssignments).update(assignmentId, {
     artifacts_json: {
       ...artifacts,
       coach_decision: decision,
+      // Stämplar exakt det innehåll coachen granskade (svar + AI-utdata);
+      // commit vägras om det ändrats därefter.
+      coach_approved_hash: decision === 'approved' ? reviewedContentHash(answers, artifacts) : null,
       coach_notes: String(coachNotes).slice(0, 2000),
       coach_reviewed_by: user.id,
       coach_reviewed_at: now
@@ -496,6 +502,10 @@ export async function commitIntlStrategyAction(
   }
 
   const answers = (assignment.answers_json as Record<string, unknown>) || {};
+  // Strategin stämplas `coach_approved_by` — innehållet måste vara exakt det
+  // coachen godkände (hash stämplad vid godkännandet).
+  const approval = verifyCoachApproval(answers, artifacts);
+  if (!approval.ok) return { error: approval.error };
   const chosenScenarioRaw = String(answers.da_chosen_scenario || '').toLowerCase();
   const band =
     chosenScenarioRaw.includes('vänta') || chosenScenarioRaw.includes('wait')

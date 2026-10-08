@@ -2,7 +2,7 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import type { SessionUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { escFilter } from '@/lib/pb-filter';
+import { chunk, mapWithConcurrency, mergeChunkedPages, type ChunkPage } from '@/lib/read-scaling';
 import { eventPhase, startOfStockholmDay, toPocketBaseDateTime } from '@platform/shared';
 import {
   findIntegrationRow,
@@ -34,6 +34,30 @@ import {
 
 export const DONE_WINDOW_DAYS = 7;
 const PAGE_SIZE = 200;
+
+/**
+ * Bolagsscope (skalbarhetsgranskning 2026-10-08). "Mina" uppgifter/aktiviteter
+ * = de jag äger + de som hör till bolag jag äger/coachar/är länkad till.
+ * Tidigare byggdes EN OR-kedja `startup = "…" || …` med upp till 200 termer —
+ * två gånger — vilket sprängde PocketBases filterlängd för en coach med många
+ * bolag (hela /inkorg föll då på 400). Nu:
+ *   - id:n delas i grupper om `STARTUP_CHUNK` (≤ 40 termer per filter) och
+ *     varje grupp blir en egen fråga, alla med bundna parametrar (§ 10.3);
+ *   - grupperna är DISJUNKTA (första gruppen bär `owner = jag`, övriga
+ *     `owner != jag`), så summan av PB:s totaler är exakt och kapningen
+ *     rapporteras ärligt (§ 33.4);
+ *   - frågorna körs med begränsad samtidighet.
+ * Id-listan räknas fram EN gång (bolagsfrågan nedan + sessionens
+ * `linked_startups`) i stället för en join `startup.coaches ?= …` i varje
+ * uppgiftsfråga: `?=` mot multi-relationer är § 21.3-buggklassen, och de
+ * länkade bolagen finns bara i sessionen, inte på bolaget.
+ */
+const STARTUP_CHUNK = 40;
+/** Max antal bolag i scopet (10 grupper) — fler rapporteras som kapning. */
+const STARTUP_SCOPE_MAX = 400;
+const STARTUP_SCOPE_PAGE = 200;
+const READ_CONCURRENCY = 4;
+const PB_ID = /^[a-zA-Z0-9_-]{1,64}$/;
 
 /**
  * Outlook-agendan cachas KORT i processminnet per användare så att sidans
@@ -147,26 +171,45 @@ export async function getOverviewData(
   const isActivityStaff = hasRole(user.roles, [...ACTIVITY_STAFF_ROLES]);
   const boardEditable = hasRole(user.roles, [...EDIT_ROLES]);
 
-  const tenant = escFilter(user.tenant);
-  const uid = escFilter(user.id);
+  const readNotices: string[] = [];
 
   // ── Startups jag äger eller coachar (utöver mina linkade bolag) ──────
-  const startupIds = new Set<string>(user.linkedStartups);
+  // Användarens token (RLS § 21). Paginerat upp till STARTUP_SCOPE_MAX.
+  const startupIds = new Set<string>(user.linkedStartups.filter((id) => PB_ID.test(id)));
+  let scopeTruncated = false;
   try {
-    const res = await pb.collection('startups').getList<{ id: string }>(1, 200, {
-      filter: pb.filter('tenant = {:t} && (owner = {:u} || coaches ?= {:u})', {
-        t: user.tenant,
-        u: user.id
-      }),
-      fields: 'id'
+    const ownedFilter = pb.filter('tenant = {:t} && (owner = {:u} || coaches ?= {:u})', {
+      t: user.tenant,
+      u: user.id
     });
-    for (const s of res.items) startupIds.add(s.id);
+    for (let page = 1; ; page++) {
+      const res = await pb.collection('startups').getList<{ id: string }>(page, STARTUP_SCOPE_PAGE, {
+        filter: ownedFilter,
+        fields: 'id',
+        sort: 'id'
+      });
+      for (const s of res.items) startupIds.add(s.id);
+      const read = (page - 1) * STARTUP_SCOPE_PAGE + res.items.length;
+      if (res.items.length === 0 || read >= res.totalItems) break;
+      if (startupIds.size >= STARTUP_SCOPE_MAX) {
+        scopeTruncated = true;
+        break;
+      }
+    }
   } catch {
-    /* fail-soft */
+    /* fail-soft: mina egna (owner = jag) visas ändå */
   }
-  const startupClause = [...startupIds]
-    .map((id) => `startup = "${escFilter(id)}"`)
-    .join(' || ');
+  let scopedIds = [...startupIds];
+  if (scopedIds.length > STARTUP_SCOPE_MAX) {
+    scopedIds = scopedIds.slice(0, STARTUP_SCOPE_MAX);
+    scopeTruncated = true;
+  }
+  if (scopeTruncated) {
+    readNotices.push(
+      `Du är kopplad till fler än ${STARTUP_SCOPE_MAX} bolag — uppgifter och aktiviteter visas för de första ${STARTUP_SCOPE_MAX} plus allt du själv äger.`
+    );
+  }
+  const groups = chunk(scopedIds, STARTUP_CHUNK);
 
   // ── Parallella, fail-soft källor ────────────────────────────────────
   // Klara poster bara inom fönstret (completed_at); saknat completed_at på en
@@ -174,65 +217,127 @@ export async function getOverviewData(
   const doneSince = toPocketBaseDateTime(
     new Date(Date.now() - DONE_WINDOW_DAYS * 24 * 60 * 60 * 1000)
   );
-  const doneClause = `(status != "done" || completed_at >= "${doneSince}")`;
 
-  const taskFilter =
-    `tenant = "${tenant}" && (owner = "${uid}"` +
-    (startupClause ? ` || ${startupClause}` : '') +
-    `) && status != "cancelled" && ${doneClause}`;
-
-  const activityFilter =
-    `startup.tenant = "${tenant}" && (owner = "${uid}"` +
-    (startupClause ? ` || ${startupClause}` : '') +
-    `) && status != "cancelled" && ${doneClause}`;
+  /**
+   * Ett filter per bolagsgrupp. Grupp 0 bär även `owner = jag`; övriga
+   * utesluter `owner = jag` så att ingen rad matchar två frågor. Utan bolag
+   * blir det en enda fråga på `owner = jag`. `tenantExpr` är `tenant` för
+   * tasks och `startup.tenant` för activities (activities saknar eget
+   * tenant-fält — se migration 1700000008; indexet i 1700000183 hoppas över).
+   */
+  const scopedFilters = (tenantExpr: string): string[] => {
+    const common = 'status != "cancelled" && (status != "done" || completed_at >= {:doneSince})';
+    const base = { t: user.tenant, u: user.id, doneSince };
+    if (groups.length === 0) {
+      return [pb.filter(`${tenantExpr} = {:t} && owner = {:u} && ${common}`, base)];
+    }
+    return groups.map((ids, gi) => {
+      const params: Record<string, unknown> = { ...base };
+      const terms = ids.map((id, i) => {
+        params[`s${i}`] = id;
+        return `startup = {:s${i}}`;
+      });
+      const startupExpr = `(${terms.join(' || ')})`;
+      const ownerExpr = gi === 0 ? `(owner = {:u} || ${startupExpr})` : `owner != {:u} && ${startupExpr}`;
+      return pb.filter(`${tenantExpr} = {:t} && ${ownerExpr} && ${common}`, params);
+    });
+  };
 
   // Dygnsgränsen är 00:00 SVENSK tid uttryckt som UTC-ögonblick i PB-format
   // (servern kör i UTC — ett rent "YYYY-MM-DD" hade tappat events mellan
   // 00:00 och 02:00 svensk tid, och efter 22:00 UTC vore "idag" morgondagen).
   const now = new Date();
   const todayStart = toPocketBaseDateTime(startOfStockholmDay(now));
-  const eventFilter = `tenant = "${tenant}" && starts_at >= "${todayStart}" && status != "cancelled"`;
+  const eventFilter = pb.filter('tenant = {:t} && starts_at >= {:today} && status != "cancelled"', {
+    t: user.tenant,
+    today: todayStart
+  });
 
-  const [tasksRes, activitiesRes, eventsRes] = await Promise.allSettled([
-    pb.collection('tasks').getList<TaskRow>(1, PAGE_SIZE, {
-      filter: taskFilter,
-      sort: 'due_at',
-      expand: 'owner,startup,contact'
-    }),
-    pb.collection('activities').getList<ActivityRow>(1, PAGE_SIZE, {
-      filter: activityFilter,
-      sort: 'due_date',
-      expand: 'owner,startup'
-    }),
-    pb.collection('incubator_events').getList<EventRow>(1, 50, {
-      filter: eventFilter,
-      sort: 'starts_at'
-    })
+  // Två källor, var och en med begränsad samtidighet (max 2 × READ_CONCURRENCY
+  // samtidiga frågor + events, oavsett antal bolagsgrupper).
+  const readGroups = async <T extends { id: string }>(
+    filters: string[],
+    read: (filter: string) => Promise<ChunkPage<T>>,
+    sortKey: (row: T) => string | undefined
+  ) => {
+    const results = await mapWithConcurrency(filters, READ_CONCURRENCY, async (filter) => {
+      try {
+        return await read(filter);
+      } catch {
+        return null;
+      }
+    });
+    const pages = results.filter((r): r is ChunkPage<T> => r !== null);
+    const failed = results.length - pages.length;
+    return {
+      allFailed: pages.length === 0 && failed > 0,
+      partlyFailed: failed > 0 && pages.length > 0,
+      merged: mergeChunkedPages(pages, sortKey, PAGE_SIZE)
+    };
+  };
+
+  const [tasksRes, activitiesRes, eventsRes] = await Promise.all([
+    readGroups<TaskRow>(
+      scopedFilters('tenant'),
+      (filter) =>
+        pb.collection('tasks').getList<TaskRow>(1, PAGE_SIZE, {
+          filter,
+          sort: 'due_at',
+          expand: 'owner,startup,contact'
+        }),
+      (t) => t.due_at
+    ),
+    readGroups<ActivityRow>(
+      scopedFilters('startup.tenant'),
+      (filter) =>
+        pb.collection('activities').getList<ActivityRow>(1, PAGE_SIZE, {
+          filter,
+          sort: 'due_date',
+          expand: 'owner,startup'
+        }),
+      (a) => a.due_date
+    ),
+    pb
+      .collection('incubator_events')
+      .getList<EventRow>(1, 50, { filter: eventFilter, sort: 'starts_at' })
+      .then(
+        (value) => ({ status: 'fulfilled' as const, value }),
+        () => ({ status: 'rejected' as const })
+      )
   ]);
 
   const items: WorkItem[] = [];
-  const readNotices: string[] = [];
 
-  if (tasksRes.status === 'rejected') {
+  if (tasksRes.allFailed) {
     readNotices.push('Uppgifterna kunde inte läsas just nu — listan kan vara ofullständig.');
-  } else if (tasksRes.value.totalItems > tasksRes.value.items.length) {
-    readNotices.push(
-      `Visar ${tasksRes.value.items.length} av ${tasksRes.value.totalItems} uppgifter — markera klart eller ta bort för att se resten.`
-    );
+  } else {
+    if (tasksRes.partlyFailed) {
+      readNotices.push('En del av uppgifterna kunde inte läsas just nu — listan kan vara ofullständig.');
+    }
+    if (tasksRes.merged.totalItems > tasksRes.merged.items.length) {
+      readNotices.push(
+        `Visar ${tasksRes.merged.items.length} av ${tasksRes.merged.totalItems} uppgifter — markera klart eller ta bort för att se resten.`
+      );
+    }
   }
-  if (activitiesRes.status === 'rejected') {
+  if (activitiesRes.allFailed) {
     readNotices.push('Aktiviteterna kunde inte läsas just nu — listan kan vara ofullständig.');
-  } else if (activitiesRes.value.totalItems > activitiesRes.value.items.length) {
-    readNotices.push(
-      `Visar ${activitiesRes.value.items.length} av ${activitiesRes.value.totalItems} aktiviteter.`
-    );
+  } else {
+    if (activitiesRes.partlyFailed) {
+      readNotices.push('En del av aktiviteterna kunde inte läsas just nu — listan kan vara ofullständig.');
+    }
+    if (activitiesRes.merged.totalItems > activitiesRes.merged.items.length) {
+      readNotices.push(
+        `Visar ${activitiesRes.merged.items.length} av ${activitiesRes.merged.totalItems} aktiviteter.`
+      );
+    }
   }
   if (eventsRes.status === 'rejected') {
     readNotices.push('Events kunde inte läsas just nu.');
   }
 
-  if (tasksRes.status === 'fulfilled') {
-    for (const t of tasksRes.value.items) {
+  {
+    for (const t of tasksRes.merged.items) {
       const status = toBoardStatus('task', t.status);
       if (!status) continue;
       items.push({
@@ -255,8 +360,8 @@ export async function getOverviewData(
     }
   }
 
-  if (activitiesRes.status === 'fulfilled') {
-    for (const a of activitiesRes.value.items) {
+  {
+    for (const a of activitiesRes.merged.items) {
       const status = toBoardStatus('activity', a.status);
       if (!status) continue;
       items.push({

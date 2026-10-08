@@ -25,7 +25,7 @@ import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 /**
  * Notifikationssystemet (CLAUDE.md § 50) — ENDA vägen att skapa notiser.
  *
- * `notifications.createRule` är NULL sedan migration 1700000182: notiser
+ * `notifications.createRule` är NULL sedan migration 1700000186: notiser
  * skapas bara här, med den cachade superusern, EFTER att anroparen verifierat
  * roll och tenant för själva handlingen. Funktionen verifierar dessutom att
  * varje mottagare tillhör tenanten, tillämpar mottagarens inställningar
@@ -79,7 +79,7 @@ function pbDate(iso: string): string {
 }
 
 // Loggar "collection missing" max en gång per process så vi inte spammar
-// Next-loggen om PB:n körs utan migration 1700000052/1700000182.
+// Next-loggen om PB:n körs utan migration 1700000052/1700000186.
 const warned = new Set<string>();
 function warnOnce(key: string, message: string): void {
   if (warned.has(key)) return;
@@ -92,7 +92,7 @@ async function writeClient(fallback?: PocketBase): Promise<PocketBase | null> {
   if (su.ok) return su.pb;
   warnOnce(
     'notify-superuser',
-    `[notifications] superuser saknas (${su.reason}) — notiser kan inte skapas när createRule är NULL (migration 1700000182).`
+    `[notifications] superuser saknas (${su.reason}) — notiser kan inte skapas när createRule är NULL (migration 1700000186).`
   );
   return fallback ?? null;
 }
@@ -138,7 +138,7 @@ async function preferencesFor(pb: PocketBase, ids: string[]): Promise<Map<string
       for (const row of res.items) map.set(row.user, normalizeNotificationPreferences(row.settings));
     } catch (err) {
       if (statusOf(err) === 404) {
-        warnOnce('prefs-missing', '[notifications] notification_preferences saknas — kör migration 1700000182.');
+        warnOnce('prefs-missing', '[notifications] notification_preferences saknas — kör migration 1700000186.');
       }
       break; // standardinställningar för resten
     }
@@ -265,7 +265,7 @@ export async function emitNotification(
         result.skipped += 1;
         continue;
       }
-      // Schema utan migration 1700000182: `kind` är fortfarande select och de
+      // Schema utan migration 1700000186: `kind` är fortfarande select och de
       // nya fälten saknas → skapa med de gamla fälten (och `assigned` för en
       // typ select-listan inte känner till) så notisen aldrig tappas tyst.
       if (status === 400) {
@@ -273,7 +273,7 @@ export async function emitNotification(
           const useKind = (LEGACY_NOTIFICATION_KINDS as readonly string[]).includes(kind) ? kind : 'assigned';
           await col.create(legacyRecord(userId, useKind));
           result.delivered += 1;
-          warnOnce('notify-legacy', '[notifications] äldre schema — kör migration 1700000182.');
+          warnOnce('notify-legacy', '[notifications] äldre schema — kör migration 1700000186.');
           continue;
         } catch {
           /* faller igenom till fel-loggen */
@@ -493,7 +493,7 @@ export async function pruneOldNotifications(pb: PocketBase, userId: string): Pro
       );
     } catch (err) {
       if (statusOf(err) !== 400) throw err;
-      // Schema utan latest_at (migration 1700000182 ej körd).
+      // Schema utan latest_at (migration 1700000186 ej körd).
       res = await list('user = {:userId} && ((read_at != null && created < {:readCut}) || created < {:unreadCut})');
     }
     for (const item of res.items) {

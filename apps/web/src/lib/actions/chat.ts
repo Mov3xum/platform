@@ -33,7 +33,7 @@ import { buildChatTools, buildMemoryRecallBlock } from '@/lib/ai/tools';
 import { makeToolResolver, scopeTools } from '@/lib/ai/tool-scope';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
 import { STYLE_REMINDER } from '@/lib/ai/staff-chat';
-import { hasRole } from '@/lib/rbac';
+import { canRunTool, hasRole } from '@/lib/rbac';
 import { logAiUsage } from '@/lib/ai/usage';
 import type { Actor } from '@/lib/core/write';
 import type { Role, WebSourceKey } from '@platform/shared';
@@ -73,6 +73,7 @@ interface AgentRecord {
   category: string;
   tenant: string;
   requires_startup?: boolean;
+  roles_allowed?: string[];
   web_sources?: unknown;
 }
 
@@ -371,7 +372,19 @@ export async function sendChatMessage(
   if (options.agentId) {
     try {
       const t = await pb.collection('tools').getOne<AgentRecord>(options.agentId);
-      if (t.tenant === user.tenant && t.active) {
+      // § 9.5: samma behörighet som i /toolbox — en observer eller en
+      // bolagsmedlem får inte låna en agents systemprompt/kunskapsbas genom
+      // att välja den i chatten.
+      const allowed = canRunTool(
+        user.roles,
+        {
+          active: t.active,
+          roles_allowed: (Array.isArray(t.roles_allowed) ? t.roles_allowed : []) as Role[],
+          requires_startup: Boolean(t.requires_startup)
+        },
+        { isLinkedStartup: false }
+      );
+      if (t.tenant === user.tenant && t.active && allowed) {
         const webKeys = normalizeWebKeys(t.web_sources);
         const ctx: Record<string, unknown> = {};
         if (webKeys.length > 0) {

@@ -28,7 +28,7 @@ function statusOf(err: unknown): number | undefined {
 
 export class NotificationPreferencesUnavailableError extends Error {
   constructor() {
-    super('Notisinställningarna kan inte sparas — kör migration 1700000182 (notification_preferences saknas).');
+    super('Notisinställningarna kan inte sparas — kör migration 1700000186 (notification_preferences saknas).');
   }
 }
 

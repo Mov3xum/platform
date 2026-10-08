@@ -15,8 +15,8 @@ interface DashboardMetrics {
 
 interface StartupItem {
   id: string;
-  tenant: string;
-  name: string;
+  tenant?: string;
+  name?: string;
   description?: string;
   phase: string;
   status: string;

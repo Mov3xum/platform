@@ -504,11 +504,11 @@ export async function previewRegistryLookupAction(
   }
   // Rate-limit per användare (20 uppslag / 10 min) — leverantörerna debiterar per anrop.
   const rateKey = `registry-lookup:${user.id}`;
-  const limited = checkRateLimit(rateKey, 20);
+  const limited = await checkRateLimit(rateKey, 20);
   if (limited.blocked) {
     return { error: `För många uppslag — försök igen om ${limited.retryAfterSec} s.` };
   }
-  recordFailure(rateKey, 10 * 60 * 1000);
+  await recordFailure(rateKey, 10 * 60 * 1000);
   const handler = getHandler(providerSlug);
   if (!handler || handler.kind !== 'company_registry' || !handler.lookup) {
     return { error: 'Leverantören stödjer inte förhandsgranskning.' };

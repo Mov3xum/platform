@@ -86,7 +86,7 @@ export function NotificationPreferencesForm({
       {!available && (
         <p className="rounded-xl border border-movexum-gul bg-movexum-pastell-gul px-4 py-3 text-[13px] text-movexum-morkgul dark:bg-movexum-morkgul/20 dark:text-movexum-gul">
           Notisinställningarna kan inte sparas än — databasen saknar inställningstabellen (migration
-          1700000182). Du får alla notiser som standard tills den är på plats.
+          1700000186). Du får alla notiser som standard tills den är på plats.
         </p>
       )}
       {error && (

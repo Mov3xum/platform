@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
+import { hasRole } from '@/lib/rbac';
+import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { createLead, getModuleBySlug, listQuestionsForModule } from '@/lib/compass/store';
 import { pickAttribution } from '@/lib/compass/public';
 import {
@@ -39,6 +41,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   if (!user) {
     return NextResponse.json({ error: 'Login krävs' }, { status: 401 });
   }
+  // Intern förhandsgranskning: samma krets som modul-admin (§ 23.1). Utan
+  // rollkontroll kunde varje inloggad (även bolagsmedlem/observer) skapa
+  // staff-only leads och driva AI-sammanställningar.
+  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
+    return NextResponse.json({ error: 'Saknar behörighet.' }, { status: 403 });
+  }
+  const rlKey = `inflode-quiz:${user.id}`;
+  if ((await checkRateLimit(rlKey, 30)).blocked) {
+    return NextResponse.json({ error: 'För många förfrågningar. Försök igen om en stund.' }, { status: 429 });
+  }
+  await recordFailure(rlKey, 5 * 60 * 1000);
 
   let body: QuizBody;
   try {
@@ -113,7 +126,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   // AI-sammanställning av svaren + resultatprofilen (best-effort).
   const entries = buildSubmissionEntries(questions, body.answers || {});
   const resultLine = bucket ? `${bucket.title} (${score.total} poäng)` : `${score.total} poäng`;
-  await attachAiSummary(pb, user.tenant, lead, entries, mod.name, resultLine);
+  await attachAiSummary(pb, user.tenant, lead, entries, mod.name, resultLine, { userId: user.id });
 
   return NextResponse.json({ bucket, score: score.total, leadId: lead.id });
 }

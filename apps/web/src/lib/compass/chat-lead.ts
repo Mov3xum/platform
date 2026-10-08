@@ -1,7 +1,8 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
-import { extractLead, scoreLead, type CompassChatMessage } from './chat';
+import { extractLead, scoreLead, type CompassAiUsage, type CompassChatMessage } from './chat';
+import { logAiUsage } from '@/lib/ai/usage';
 import { appendMessage, createConversation, createLead, updateLead } from './store';
 import { notifyNewInflow } from './notify';
 import type { CompassModule, Conversation } from './types';
@@ -120,6 +121,12 @@ export interface UpsertChatLeadOptions {
   /** När satt + leadet skapas första gången → notifiera inflödesmailen (en gång). */
   notifyModule?: CompassModule;
   /**
+   * Inloggad användare för token-loggen av extraktion/bedömning (§ 9.6).
+   * Utelämnas i den publika chatten — raderna loggas då anonymt via
+   * superuser-klienten (migration 1700000185).
+   */
+  usageUserId?: string | null;
+  /**
    * Steg 4-valet "Skapa lead" (migration 1700000125). Default true — bara ett
    * uttryckligt false hoppar över lead-upserten (meddelandena loggas ändå).
    */
@@ -156,7 +163,26 @@ export async function persistChatTurnAndUpsertLead(
 
   // Extrahera kontakt/idé ur samtalet (människa-i-loopen granskar sedan).
   const fullHistory: CompassChatMessage[] = [...history, { role: 'assistant', content: reply.text }];
-  const extracted = await extractLead(fullHistory);
+  // Extraktion + bedömning är egna Mistral-anrop per tur — de räknas mot
+  // månadstaket och syns i AI-analysen (surface `suggestions`, § 9.6).
+  const usages: CompassAiUsage[] = [];
+  const sink = (u: CompassAiUsage) => {
+    usages.push(u);
+  };
+  const flushUsage = async () => {
+    for (const u of usages.splice(0)) {
+      await logAiUsage(pb, {
+        tenant,
+        userId: opts.usageUserId ?? null,
+        surface: 'suggestions',
+        model: u.model,
+        tokensIn: u.tokensIn,
+        tokensOut: u.tokensOut
+      });
+    }
+  };
+  const extracted = await extractLead(fullHistory, sink);
+  await flushUsage();
   const fallback = summarizeChatLead(fullHistory, opts.moduleName);
   const leadFields = {
     name: extracted?.name || 'Anonym',
@@ -182,7 +208,8 @@ export async function persistChatTurnAndUpsertLead(
     idea_summary: leadFields.idea_summary,
     idea_category: leadFields.idea_category || null
   };
-  const { score, reasoning } = await scoreLead(scoringSource);
+  const { score, reasoning } = await scoreLead(scoringSource, sink);
+  await flushUsage();
   const lead = await createLead(pb, tenant, {
     ...leadFields,
     ...(opts.attribution || {}),

@@ -7,7 +7,7 @@
 // styr etikett, ikon, kategori, prioritet, mottagargrupp och standardkanaler
 // per notistyp — så att en ny typ dyker upp i inställningarna automatiskt och
 // aldrig kräver en schemaändring (`notifications.kind` är text sedan
-// migration 1700000182; giltigheten kontrolleras här).
+// migration 1700000186; giltigheten kontrolleras här).
 
 import type { Role } from './index';
 
@@ -342,7 +342,7 @@ export const NOTIFICATION_CATALOG: Record<NotificationKind, NotificationKindMeta
   }
 };
 
-/** Notistyper som fanns som select-värden före migration 1700000182. Mot ett
+/** Notistyper som fanns som select-värden före migration 1700000186. Mot ett
  *  schema där migrationen inte körts faller okända typer tillbaka på
  *  `assigned` så att notisen aldrig tappas tyst. */
 export const LEGACY_NOTIFICATION_KINDS: readonly NotificationKind[] = [

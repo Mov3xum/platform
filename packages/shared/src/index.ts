@@ -1204,7 +1204,7 @@ export interface Notification {
   id: string;
   tenant: string;
   user: string;
-  /** En `NotificationKind` — text sedan migration 1700000182 (äldre data kan
+  /** En `NotificationKind` — text sedan migration 1700000186 (äldre data kan
    *  bära okända värden; använd `notificationMeta`). */
   kind: NotificationKind | string;
   mission?: string;
@@ -1212,7 +1212,7 @@ export interface Notification {
   comment?: string;
   payload_json: NotificationPayload;
   read_at?: string;
-  // Migration 1700000182 (§ 50) — saknas på en instans utan migrationen.
+  // Migration 1700000186 (§ 50) — saknas på en instans utan migrationen.
   category?: string;
   priority?: string;
   entity_type?: string;

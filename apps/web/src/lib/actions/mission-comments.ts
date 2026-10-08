@@ -25,6 +25,37 @@ function extractMentions(body: string): string[] {
   return Array.from(ids);
 }
 
+const PB_ID_RE = /^[A-Za-z0-9]{1,30}$/;
+const MAX_MENTIONS = 25;
+
+/**
+ * Behåller bara omnämnda id:n som är användare i SAMMA tenant (bundna
+ * parametrar, § 10.3). Används av både skapa och redigera — en redigering får
+ * aldrig spara mentions mot användare i en annan tenant.
+ */
+async function filterTenantMentionIds(
+  pb: Awaited<ReturnType<typeof getServerPb>>,
+  tenant: string,
+  ids: string[]
+): Promise<string[]> {
+  const candidates = ids.filter((id) => PB_ID_RE.test(id)).slice(0, MAX_MENTIONS);
+  if (candidates.length === 0) return [];
+  const params: Record<string, string> = { tenant };
+  const clauses = candidates.map((id, i) => {
+    params[`m${i}`] = id;
+    return `id = {:m${i}}`;
+  });
+  try {
+    const res = await pb.collection('users').getList<{ id: string }>(1, MAX_MENTIONS, {
+      filter: pb.filter(`tenant = {:tenant} && (${clauses.join(' || ')})`, params),
+      fields: 'id'
+    });
+    return res.items.map((u) => u.id);
+  } catch {
+    return [];
+  }
+}
+
 function snippetFromBody(body: string, max = 180): string {
   const plain = body.replace(MENTION_REGEX, '@$1').trim();
   if (plain.length <= max) return plain;
@@ -55,21 +86,24 @@ export async function createMissionComment(
   const ctx = getMissionContext(mission, user.id, user.roles);
   if (!ctx.canComment) return { error: 'Du saknar behörighet att kommentera.' };
 
-  // Filtrera mentions till users i samma tenant
-  const mentionIds = extractMentions(trimmed);
-  let validMentionIds: string[] = [];
-  if (mentionIds.length > 0) {
+  // Svar i en tråd: föräldern måste vara en kommentar på SAMMA uppdrag i
+  // SAMMA tenant — annars kunde ett svar hängas på en annan tråd/tenant.
+  let parent: string | null = null;
+  if (parentId) {
+    if (!PB_ID_RE.test(parentId)) return { error: 'Ogiltig tråd att svara i.' };
     try {
-      const idsFilter = mentionIds.map((id) => `id = "${id.replace(/"/g, '')}"`).join(' || ');
-      const res = await pb.collection('users').getList<{ id: string }>(1, 25, {
-        filter: pb.filter(`tenant = {:tenant} && (${idsFilter})`, { tenant: user.tenant }),
-        fields: 'id'
-      });
-      validMentionIds = res.items.map((u) => u.id);
+      const p = await pb.collection(PB_COLLECTIONS.missionComments).getOne<MissionComment>(parentId);
+      if (p.mission !== missionId || p.tenant !== user.tenant) {
+        return { error: 'Ogiltig tråd att svara i.' };
+      }
+      parent = p.id;
     } catch {
-      validMentionIds = [];
+      return { error: 'Kommentaren du svarar på hittades inte.' };
     }
   }
+
+  // Filtrera mentions till users i samma tenant
+  const validMentionIds = await filterTenantMentionIds(pb, user.tenant, extractMentions(trimmed));
 
   let created: MissionComment;
   try {
@@ -79,7 +113,7 @@ export async function createMissionComment(
       author: user.id,
       body: trimmed,
       mentions: validMentionIds,
-      parent: parentId || null,
+      parent,
       deleted: false
     });
   } catch (err) {
@@ -151,7 +185,7 @@ export async function editMissionComment(
     return { error: 'Redigeringsfönstret (15 min) har passerat.' };
   }
 
-  const mentionIds = extractMentions(trimmed);
+  const mentionIds = await filterTenantMentionIds(pb, user.tenant, extractMentions(trimmed));
   try {
     await pb.collection(PB_COLLECTIONS.missionComments).update(id, {
       body: trimmed,

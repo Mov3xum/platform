@@ -17,10 +17,6 @@ interface Props {
   requirePhone?: boolean;
   requireOrganization?: boolean;
   successMessage?: string;
-  /** Modulens visningsnamn — används i det nedladdningsbara resultatet. */
-  moduleName?: string;
-  /** Tenantens namn — visas i det nedladdningsbara resultatet. */
-  brandName?: string;
   /** Kedjad nästa modul (migration 1700000124). */
   nextModule?: NextModuleLink | null;
   /** Enkätsubjekt ur `?om=<id>` (§ 43) — skickas med, valideras server-side. */
@@ -44,8 +40,6 @@ export function ModuleQuiz({
   requirePhone,
   requireOrganization,
   successMessage,
-  moduleName,
-  brandName,
   nextModule,
   subject
 }: Props) {
@@ -148,8 +142,7 @@ export function ModuleQuiz({
 
   // Laddar ner resultatprofilen som en brandad PDF (Sora/Nunito) i stället för
   // ett HTML-dokument som öppnas i webbläsaren. Rendringen sker server-side
-  // (pdf-lib, EU-suveränt) — vi skickar bara den profil besökaren redan ser,
-  // ingen ny dataväg.
+  // (pdf-lib, EU-suveränt) ur modulens lagrade profil — ingen ny dataväg.
   async function downloadResult() {
     if (!result || downloading) return;
     const b = result.bucket;
@@ -159,14 +152,9 @@ export function ModuleQuiz({
       const res = await fetch('/api/public/result-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: b?.title || 'Tack för dina svar!',
-          body: b?.body,
-          tips: b?.tips,
-          moduleName: moduleName,
-          brandName: brandName,
-          accent: '#002c40'
-        })
+        // Bara modul + resultatprofil — servern hämtar texterna ur modulens
+        // lagrade result_buckets (klientens text renderas aldrig i PDF:en).
+        body: JSON.stringify({ slug: moduleSlug, bucketKey: b?.key ?? '' })
       });
       if (!res.ok) throw new Error(`Servern svarade ${res.status}`);
       const blob = await res.blob();

@@ -56,9 +56,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // adressen (distribuerad brute force mot ett konto).
   const emailOnlyKey = `login:email:${emailKey}`;
 
-  const acctLimit = checkRateLimit(accountKey, LOGIN_MAX_PER_ACCOUNT);
-  const ipLimit = checkRateLimit(ipKey, LOGIN_MAX_PER_IP);
-  const emailLimit = checkRateLimit(emailOnlyKey, LOGIN_MAX_PER_EMAIL);
+  const [acctLimit, ipLimit, emailLimit] = await Promise.all([
+    checkRateLimit(accountKey, LOGIN_MAX_PER_ACCOUNT),
+    checkRateLimit(ipKey, LOGIN_MAX_PER_IP),
+    checkRateLimit(emailOnlyKey, LOGIN_MAX_PER_EMAIL)
+  ]);
   if (acctLimit.blocked || ipLimit.blocked || emailLimit.blocked) {
     const retryMin = Math.ceil(
       Math.max(acctLimit.retryAfterSec, ipLimit.retryAfterSec, emailLimit.retryAfterSec) / 60
@@ -83,9 +85,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
 
     if (e.status === 400 || e.status === 403) {
-      recordFailure(accountKey, LOGIN_WINDOW_MS);
-      recordFailure(ipKey, LOGIN_WINDOW_MS);
-      recordFailure(emailOnlyKey, LOGIN_WINDOW_MS);
+      await Promise.all([
+        recordFailure(accountKey, LOGIN_WINDOW_MS),
+        recordFailure(ipKey, LOGIN_WINDOW_MS),
+        recordFailure(emailOnlyKey, LOGIN_WINDOW_MS)
+      ]);
     }
 
     if (e.status === 400) {
@@ -112,9 +116,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  clearFailures(accountKey);
-  clearFailures(ipKey);
-  clearFailures(emailOnlyKey);
+  await Promise.all([clearFailures(accountKey), clearFailures(ipKey), clearFailures(emailOnlyKey)]);
 
   const model = pb.authStore.model as Record<string, unknown> | null;
   const expandTenant =
