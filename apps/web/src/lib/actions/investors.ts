@@ -14,7 +14,11 @@ import type {
   InvestorWarmth
 } from '@platform/shared';
 
-const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'partner'];
+// Skrivning = samma staff-krets som PB:s update-/deleteRule på investors/deals
+// (migration 1700000182). `partner` kan inte LÄSA investerare/affärer (list/view
+// = staff/observer, § 21.4) och får därför inte heller skriva; `observer` läser
+// men skriver aldrig (§ 10.3, minsta behörighet).
+const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 
 const VALID_WARMTH: InvestorWarmth[] = ['hot', 'active', 'tracking', 'later'];
 const VALID_INVESTOR_STAGES: InvestorStage[] = [

@@ -129,7 +129,6 @@ export function PublicModuleLayout({ module, questions, branding, nextModule, su
       <PublicModuleRunner
         module={module}
         questions={questions}
-        brandName={branding.name}
         nextModule={nextModule}
         subject={subject}
       />
