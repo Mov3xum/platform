@@ -60,11 +60,11 @@ export async function POST(request: Request): Promise<Response> {
   if (!user) return NextResponse.json({ error: 'Ej inloggad.' }, { status: 401 });
 
   const rateKey = `support-check-doc:${user.id}`;
-  const limited = checkRateLimit(rateKey, RATE_MAX_PER_USER);
+  const limited = await checkRateLimit(rateKey, RATE_MAX_PER_USER);
   if (limited.blocked) {
     return NextResponse.json({ error: 'För många uppladdningar just nu. Vänta en stund.' }, { status: 429, headers: { 'retry-after': String(limited.retryAfterSec) } });
   }
-  recordFailure(rateKey, RATE_WINDOW_MS);
+  await recordFailure(rateKey, RATE_WINDOW_MS);
 
   let form: FormData;
   try {

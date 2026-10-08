@@ -44,10 +44,10 @@ export async function POST(
     return NextResponse.json({ error: 'Saknar behörighet.' }, { status: 403 });
   }
   const rlKey = `inflode-submit:${user.id}`;
-  if (checkRateLimit(rlKey, 30).blocked) {
+  if ((await checkRateLimit(rlKey, 30)).blocked) {
     return NextResponse.json({ error: 'För många förfrågningar. Försök igen om en stund.' }, { status: 429 });
   }
-  recordFailure(rlKey, 5 * 60 * 1000);
+  await recordFailure(rlKey, 5 * 60 * 1000);
   let body: SubmitBody;
   try {
     body = (await req.json()) as SubmitBody;

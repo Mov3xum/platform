@@ -1,6 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
+import { withDistributedLock, LockTimeoutError } from '@/lib/distributed-lock';
 import { escFilter } from '@/lib/pb-filter';
 import { canCreateRecord, canWriteField } from './writable-fields';
 import { logAgentAction } from './audit';
@@ -429,61 +430,66 @@ export async function reorderCompassQuestions(
   moduleId: string,
   orderedIds: readonly string[]
 ): Promise<{ ok: true; written: number } | { ok: false; error: string }> {
-  return withModuleLock(moduleId, async () => {
-    let rows: QuestionOrderRow[];
-    try {
-      rows = await listQuestionOrder(pb, moduleId);
-    } catch {
-      return { ok: false, error: 'Kunde inte läsa modulens frågor.' };
-    }
-    const plan = planCompassQuestionReorder(orderedIds, rows);
-    if (!plan.ok) return plan;
+  try {
+    return await withModuleLock(moduleId, () => reorderUnderLock(pb, moduleId, orderedIds));
+  } catch (err) {
+    // Låset hölls av en annan container längre än väntetiden (§ 21.8).
+    if (err instanceof LockTimeoutError) return { ok: false, error: err.message };
+    throw err;
+  }
+}
 
-    const before = new Map(rows.map((r) => [r.id, r.sort_order]));
-    const done: string[] = [];
-    try {
-      for (const w of plan.writes) {
-        await writeWithFallback(pb, (client) =>
-          client.collection(QUESTIONS).update(w.id, { sort_order: w.sort_order })
-        );
-        done.push(w.id);
-      }
-    } catch (err) {
-      // Rulla tillbaka det som hann skrivas — annars kan två frågor stå med
-      // samma nummer och ordningen bli godtycklig igen.
-      for (const id of done) {
-        try {
-          await writeWithFallback(pb, (client) =>
-            client.collection(QUESTIONS).update(id, { sort_order: before.get(id) ?? 0 })
-          );
-        } catch {
-          // best-effort
-        }
-      }
-      const msg = err instanceof Error ? err.message : 'Okänt fel';
-      return { ok: false, error: `Kunde inte spara ordningen: ${msg}` };
+async function reorderUnderLock(
+  pb: PocketBase,
+  moduleId: string,
+  orderedIds: readonly string[]
+): Promise<{ ok: true; written: number } | { ok: false; error: string }> {
+  let rows: QuestionOrderRow[];
+  try {
+    rows = await listQuestionOrder(pb, moduleId);
+  } catch {
+    return { ok: false, error: 'Kunde inte läsa modulens frågor.' };
+  }
+  const plan = planCompassQuestionReorder(orderedIds, rows);
+  if (!plan.ok) return plan;
+
+  const before = new Map(rows.map((r) => [r.id, r.sort_order]));
+  const done: string[] = [];
+  try {
+    for (const w of plan.writes) {
+      await writeWithFallback(pb, (client) =>
+        client.collection(QUESTIONS).update(w.id, { sort_order: w.sort_order })
+      );
+      done.push(w.id);
     }
-    return { ok: true, written: done.length };
-  });
+  } catch (err) {
+    // Rulla tillbaka det som hann skrivas — annars kan två frågor stå med
+    // samma nummer och ordningen bli godtycklig igen.
+    for (const id of done) {
+      try {
+        await writeWithFallback(pb, (client) =>
+          client.collection(QUESTIONS).update(id, { sort_order: before.get(id) ?? 0 })
+        );
+      } catch {
+        // best-effort
+      }
+    }
+    const msg = err instanceof Error ? err.message : 'Okänt fel';
+    return { ok: false, error: `Kunde inte spara ordningen: ${msg}` };
+  }
+  return { ok: true, written: done.length };
 }
 
 /**
- * In-process-lås per modul: "läs högsta sort_order → skriv" måste vara
- * atomärt, annars får två samtidiga anrop samma nummer (grundorsaken till
- * "6, 1, 9"). Agentloopen kör redan skrivanrop sekventiellt (§ 16.2); låset
- * täcker övriga vägar (två flikar, två turer, modul-admin + chatt).
+ * Lås per modul: "läs högsta sort_order → skriv" måste vara atomärt, annars
+ * får två samtidiga anrop samma nummer (grundorsaken till "6, 1, 9").
+ * Agentloopen kör redan skrivanrop sekventiellt (§ 16.2); låset täcker övriga
+ * vägar (två flikar, två turer, modul-admin + chatt) — och sedan § 21.8 även
+ * anrop som landar i OLIKA web-containrar (`app_locks` via
+ * `withDistributedLock`, med in-process-mutex som reserv).
  */
-const moduleLocks = new Map<string, Promise<unknown>>();
-
 async function withModuleLock<T>(moduleId: string, fn: () => Promise<T>): Promise<T> {
-  const previous = moduleLocks.get(moduleId) ?? Promise.resolve();
-  const next = previous.catch(() => undefined).then(fn);
-  moduleLocks.set(moduleId, next);
-  try {
-    return await next;
-  } finally {
-    if (moduleLocks.get(moduleId) === next) moduleLocks.delete(moduleId);
-  }
+  return withDistributedLock(`compass_module:${moduleId}`, fn);
 }
 
 /**
@@ -612,6 +618,7 @@ export async function addCompassQuestion(
       return { record: created as { id: string }, sortOrder: order };
     }));
   } catch (err) {
+    if (err instanceof LockTimeoutError) return fail('DB_ERROR', err.message);
     console.error('[write:compass] kunde inte skapa fråga', {
       tenant: actor.tenant,
       moduleId,

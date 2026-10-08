@@ -215,6 +215,12 @@ async function verifyCollectionsExist() {
     // finnas i kartan för att asserteras, annars hoppas de tyst.
     'agreement_signatures',
     'tool_versions',
+    // Delat processöverskridande tillstånd för horisontell skalning (§ 21.8,
+    // migration 1700000184): rate-limiterns räknare + distribuerade lås.
+    // Saknas de faller appen tyst tillbaka på processminnet — då gäller
+    // gränserna per container i stället för globalt, så de är ett hårt invariant.
+    'rate_limits',
+    'app_locks',
     // Övrigt
     'web_cache'
   ];
@@ -517,6 +523,29 @@ function verifyCompassWriteRulesScoped(collections) {
   ok('compass write rules are tenant-scoped (migration 1700000175)');
 }
 
+// Kollektioner som BARA appens superuser-klient får röra (alla fem regler
+// null): rate-limiterns räknare (nycklarna är hashade e-post/IP) och de
+// distribuerade låsen (§ 21.8, migration 1700000184). En öppnad regel skulle
+// låta vem som helst nollställa en inloggningsspärr eller ta ett lås.
+const MUST_BE_SUPERUSER_ONLY = ['rate_limits', 'app_locks'];
+
+function verifySuperuserOnlyCollections(collections) {
+  for (const name of MUST_BE_SUPERUSER_ONLY) {
+    const col = collections.get(name);
+    if (!col) {
+      fail(`Collection "${name}" saknas (migration 1700000184 ej applicerad?)`);
+      continue;
+    }
+    for (const ruleName of ['listRule', 'viewRule', 'createRule', 'updateRule', 'deleteRule']) {
+      const rule = col[ruleName];
+      if (rule !== null && rule !== undefined) {
+        fail(`Superuser-only: ${name}.${ruleName} måste vara null, är \`${String(rule)}\`.`);
+      }
+    }
+  }
+  ok('Delat skalningstillstånd (rate_limits, app_locks) är superuser-only (§ 21.8)');
+}
+
 function verifyImmutableCollections(collections) {
   for (const name of MUST_BE_IMMUTABLE) {
     const col = collections.get(name);
@@ -600,7 +629,8 @@ const AI_DENYLIST = new Set([
   'users', 'tenants', 'verification_tokens', 'pending_signups',
   'tenant_integrations', 'user_app_integrations', 'user_mistral_connectors',
   'chat_threads', 'user_files', 'user_file_chunks', 'deep_jobs',
-  'org_knowledge', 'org_knowledge_chunks', 'agent_memory'
+  'org_knowledge', 'org_knowledge_chunks', 'agent_memory',
+  'rate_limits', 'app_locks'
 ]);
 
 // PII-stavningar som substring-maskern INTE redan fångar. Förankrade till `_`
@@ -758,6 +788,7 @@ function verifyRlsAndRbac(collections) {
 
   verifyStartupMemberIsolation(collections);
   verifyImmutableCollections(collections);
+  verifySuperuserOnlyCollections(collections);
   verifyCompassWriteRulesScoped(collections);
 
   ok('RLS/RBAC baseline checks passed (createRules är säkra)');

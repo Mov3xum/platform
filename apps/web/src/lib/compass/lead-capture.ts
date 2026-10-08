@@ -79,8 +79,8 @@ export async function attachAiSummary(
   // nyckel. Tak per tenant/timme + månadstaket (§ 9.6) innan modellanropet.
   // Leadet är redan skapat — en hoppad sammanställning tappar aldrig inflödet.
   const tenantKey = `lead-summary:${tenant}`;
-  if (checkRateLimit(tenantKey, SUMMARY_MAX_PER_TENANT_HOUR).blocked) return undefined;
-  recordFailure(tenantKey, 60 * 60 * 1000);
+  if ((await checkRateLimit(tenantKey, SUMMARY_MAX_PER_TENANT_HOUR)).blocked) return undefined;
+  await recordFailure(tenantKey, 60 * 60 * 1000);
   try {
     await assertWithinAiBudget(pb, tenant);
     const summary = await summarizeSubmission(entries, moduleName, resultLine);

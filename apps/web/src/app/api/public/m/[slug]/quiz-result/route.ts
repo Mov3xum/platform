@@ -54,10 +54,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   const ip = clientIp(req);
   const rlKey = `compass-pub-quiz:${ip}`;
-  if (checkRateLimit(rlKey, MAX_PER_WINDOW).blocked) {
+  if ((await checkRateLimit(rlKey, MAX_PER_WINDOW)).blocked) {
     return NextResponse.json({ error: 'För många förfrågningar. Försök igen om en stund.' }, { status: 429 });
   }
-  recordFailure(rlKey, WINDOW_MS);
+  await recordFailure(rlKey, WINDOW_MS);
 
   let body: QuizBody;
   try {
