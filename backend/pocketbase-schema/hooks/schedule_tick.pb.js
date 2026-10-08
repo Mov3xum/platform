@@ -23,9 +23,12 @@
 // resten.
 
 const TICK_INTERVAL = '* * * * *'; // varje minut
-const LOCK_AHEAD_MS = 60 * 60 * 1000; // 1 timme
 
 cronAdd('movexum-schedule-tick', TICK_INTERVAL, () => {
+  // PB:s JSVM kör hanteraren i en isolerad kontext — variabler deklarerade
+  // UTANFÖR handlern finns inte här (ReferenceError). Konstanten bor därför
+  // inne i handlern.
+  const LOCK_AHEAD_MS = 60 * 60 * 1000; // 1 timme
   const secret = $os.getenv('MOVEXUM_SCHEDULE_SECRET');
   if (!secret) {
     // Schemaläggning är inte aktiverad — tyst no-op.

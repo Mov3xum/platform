@@ -8,9 +8,12 @@
 // Fail-soft: en trasig rad blockerar aldrig resten.
 
 const TICK_INTERVAL = '* * * * *';
-const LOCK_AHEAD_MS = 60 * 60 * 1000;
 
 cronAdd('movexum-survey-dispatch-tick', TICK_INTERVAL, () => {
+  // PB:s JSVM kör hanteraren i en isolerad kontext — variabler deklarerade
+  // UTANFÖR handlern finns inte här (ReferenceError). Konstanten bor därför
+  // inne i handlern.
+  const LOCK_AHEAD_MS = 60 * 60 * 1000; // 1 timme
   const secret = $os.getenv('MOVEXUM_SCHEDULE_SECRET');
   if (!secret) return;
   const webBase = $os.getenv('MOVEXUM_WEB_URL') || 'http://moveum-web:3000';
