@@ -7,7 +7,8 @@ import {
   normalizeRoaringFinancials,
   normalizeRoaringGroupStructure,
   normalizeRoaringOverview,
-  parseRoaringPathList
+  parseRoaringPathList,
+  roaringReportsNoRecords
 } from './normalize';
 
 // Fixturer i Roarings `{ records: [ … ] }`-form. Fältnamnen är de vi
@@ -285,4 +286,98 @@ test('verklig huvudman: hasBeneficialOwners=false ger tydlig not', () => {
   );
   assert.equal(rows.length, 0);
   assert.ok(notes.some((n) => n.includes('hasBeneficialOwners=false')));
+});
+
+// Roarings svenska koncernstruktur är en PLATT lista (se-company-group-
+// structure-1.0): groupCompanies[] med motherCompanyId/ownedPercentage/
+// companyLevel, kuvertet är det frågade bolaget.
+
+test('koncernstruktur (platt): bolaget är moderbolag → bara innehav', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringGroupStructure(
+    {
+      companyId: '5595728790',
+      companyName: 'Combly AB',
+      countryCode: 'SE',
+      status: { code: 100, text: 'Aktivt' },
+      groupCompanies: [
+        { companyId: '5594429630', companyName: 'Dotter AB', countryCode: 'SE', companyLevel: 1, motherCompanyId: '5595728790', ownedPercentage: 100 },
+        { companyId: '5566778899', companyName: 'Halvägd AB', countryCode: 'SE', companyLevel: 1, motherCompanyId: '5595728790', ownedPercentage: 51 }
+      ]
+    },
+    '559572-8790',
+    notes
+  );
+  assert.equal(rows.filter((r) => r.direction === 'owner').length, 0);
+  const holdings = rows.filter((r) => r.direction === 'holding');
+  assert.deepEqual(
+    holdings.map((h) => [h.org_nr, h.capital_pct]).sort(),
+    [['5566778899', 51], ['5594429630', 100]]
+  );
+});
+
+test('koncernstruktur (platt): dotterbolag → ägarkedja uppåt, syskon räknas inte', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringGroupStructure(
+    {
+      companyId: '5595728790',
+      companyName: 'Combly AB',
+      groupCompanies: [
+        { companyId: '5567036271', companyName: 'Ewell AB', companyLevel: 0 },
+        { companyId: '5594427808', companyName: 'Wellgo Health AB', companyLevel: 1, motherCompanyId: '5567036271', ownedPercentage: 90 },
+        { companyId: '5595728790', companyName: 'Combly AB', companyLevel: 2, motherCompanyId: '5594427808', ownedPercentage: 100 },
+        { companyId: '5566778899', companyName: 'Syskon AB', companyLevel: 2, motherCompanyId: '5594427808', ownedPercentage: 100 },
+        { companyId: '5594429630', companyName: 'Dotter AB', companyLevel: 3, motherCompanyId: '5595728790', ownedPercentage: 51 }
+      ]
+    },
+    '5595728790',
+    notes
+  );
+  const owners = rows.filter((r) => r.direction === 'owner');
+  const holdings = rows.filter((r) => r.direction === 'holding');
+  const direct = owners.find((o) => o.org_nr === '5594427808');
+  assert.equal(direct?.capital_pct, 100, 'moderns andel står på bolagets egen post');
+  assert.equal(direct?.indirect, undefined);
+  const top = owners.find((o) => o.org_nr === '5567036271');
+  assert.equal(top?.indirect, true);
+  assert.equal(top?.capital_pct, undefined);
+  assert.equal(owners.length, 2);
+  assert.deepEqual(holdings.map((h) => [h.org_nr, h.capital_pct]), [['5594429630', 51]]);
+  assert.ok(!rows.some((r) => r.org_nr === '5566778899'), 'syskonbolaget är varken ägare eller innehav');
+});
+
+test('records not found i kuvertet tolkas som "inga uppgifter" — bolagets egen status gör det inte', () => {
+  assert.equal(roaringReportsNoRecords({ status: { code: 1, text: 'records not found' }, records: [] }), true);
+  assert.equal(roaringReportsNoRecords({ responseInfo: { statusText: 'No records found' } }), true);
+  assert.equal(roaringReportsNoRecords(overview), false);
+  assert.equal(
+    roaringReportsNoRecords({ companyId: '5595728790', status: { code: 100, text: 'Aktivt' }, groupCompanies: [] }),
+    false
+  );
+  assert.equal(roaringReportsNoRecords(null), false);
+});
+
+test('verklig huvudman: intervall som objekt och kontrollgrund som kodlista', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringBeneficialOwners(
+    {
+      companyId: '5595728790',
+      hasBeneficialOwners: true,
+      beneficialOwners: [
+        {
+          personalNumber: '198001011234',
+          firstName: 'Johan',
+          extentOfControl: { from: 25, to: 50 },
+          controlTypes: [{ code: 'X1', text: 'Äger aktier i bolaget' }]
+        }
+      ]
+    },
+    notes
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].pct_min, 25);
+  assert.equal(rows[0].pct_max, 50);
+  assert.equal(rows[0].control_basis, 'shares');
+  assert.ok(!JSON.stringify(rows[0]).includes('Johan'));
+  assert.ok(!JSON.stringify(rows[0]).includes('198001011234'));
 });

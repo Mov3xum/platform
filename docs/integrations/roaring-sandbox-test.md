@@ -4,15 +4,16 @@ Runbook för att verifiera bolagsregister-providern `roaring`
 (CLAUDE.md § 11.8) med ett sandbox-konto innan portföljen synkas i
 produktion. Ingenting skrivs till databasen förrän steg 5.
 
-## Vad som är verifierat (2026-09-30, Roarings publika dokumentation)
+## Vad som är verifierat (2026-10-08, Roarings API-katalog)
 
-| Del | Sökväg | Status |
+| Del | Katalog-id → sökväg | Status |
 | --- | --- | --- |
-| Token | `POST https://api.roaring.io/token`, Basic `client_id:client_secret`, `grant_type=client_credentials`, `expires_in` 3600 s | Bekräftad |
-| Grunddata | `/se/company/overview/2.0/{orgnr}` (reserv `1.1`) | Bekräftad (svarar `{ records: [ { companyName, legalGroupText, … } ] }`) |
-| Koncernstruktur | `/se/company/group-structure/1.0/{orgnr}` | Bekräftad |
-| Verklig huvudman | `/se/beneficialowner/2.1/{orgnr}` — fält `beneficialOwners[]`, `hasBeneficialOwners`, `changeDate`, `registrationDate`, `status` | Bekräftad sökväg; fältnamnen INUTI `beneficialOwners[]` (andel/intervall, kontrollgrund) obekräftade |
-| Bokslut | `/se/company/economy-overview/1.1/{orgnr}` (reserv `/se/company/financial-record/1.1`) | **Obekräftad** — kontrollera i utvecklarportalen |
+| Token | `POST https://api.roaring.io/token`, Basic `client_id:client_secret`, `grant_type=client_credentials` | Bekräftad |
+| Grunddata | `se-company-overview-2.0` → `/se/company/overview/2.0/{orgnr}` (reserv `1.1`) | Bekräftad. Svarar `{ records: [ … ] }`; posten har bl.a. `communeCode`, `numberEmployeesInterval` och ett `status`-objekt (bolagets status) |
+| Bokslut | `se-company-economy-overview-2.1` → `/se/company/economy-overview/2.1/{orgnr}` (reserv `1.1`) | Sökväg/version bekräftad i katalogen (publicerad). **Fältnamnen obekräftade** — läs fältnyckel-noten |
+| Koncernstruktur | `se-company-group-structure-1.0` → `/se/company/group-structure/1.0/{orgnr}` | Bekräftad. **Platt lista** `groupCompanies[]` med `companyId`, `companyName`, `countryCode`, `companyLevel`, `motherCompanyId`, `ownedPercentage` |
+| Verklig huvudman | `se-beneficialowner-2.1` (2.0 avvecklad 2025-01-15). Per bolag: `/se/beneficialowner/2.1/company/{orgnr}`, reserv `/se/beneficialowner/2.1/{orgnr}` och `/se/beneficialowner/1.0/company/{orgnr}` | Version bekräftad; `/company/`-formen är dokumenterad för 1.0 och antas för 2.1 — **vilken som svarar syns i noten**. Fältnamnen inuti `beneficialOwners[]` obekräftade |
+| "Inga poster" | Roaring kan svara HTTP 200 med `records not found` i kuvertet | Hanteras som 404 (nästa kandidat provas) |
 | Sandbox | Samma värd som produktion. Sandbox-applikationens nycklar ger testdata. | Bekräftad |
 
 Roarings egna domäner (`developer.roaring.io`, `docs.roaring.io`,
@@ -54,9 +55,10 @@ verifieras genom att köra förhandsgranskningen mot sandboxen.
    i nyckellistan: lägg till namnet i kandidatlistan i
    `apps/web/src/lib/integrations/providers/roaring/normalize.ts`
    (t.ex. `REVENUE_PATHS`, `ASSETS_PATHS`, `BO_CAPITAL_PATHS`) med ett
-   fixtur-test i `normalize.test.ts`. Svarar bokslut-API:t 404 på båda
-   kandidaterna: sätt `ROARING_FINANCIALS_PATH` i Coolify till den sökväg
-   portalen visar (kommaseparerad lista tillåts).
+   fixtur-test i `normalize.test.ts`. Svarar ett API 404 på alla
+   kandidater fast bolaget finns: sätt motsvarande `ROARING_*_PATH` i Coolify
+   till den sökväg portalen visar (kommaseparerad lista tillåts) — t.ex.
+   `ROARING_BENEFICIAL_OWNER_PATH=/se/beneficialowner/2.1/company`.
 6. **Kontrollera enheten** för bokslutsbelopp: `economy-overview` anges
    normalt i TSEK (`ROARING_AMOUNT_MULTIPLIER` default 1000). Jämför
    förhandsgranskningens `revenue_sek` med portalens exempel; svarar API:t i

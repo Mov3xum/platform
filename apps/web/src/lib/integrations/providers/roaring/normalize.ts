@@ -53,6 +53,26 @@ export function firstRecord(raw: unknown): Record<string, unknown> | undefined {
 }
 
 /**
+ * Sant när Roarings svarskuvert uttryckligen säger att inga poster finns
+ * ("records not found", HTTP 200). Bara kuvertets egna fält läses —
+ * `status` i en POST är bolagets status och tolkas aldrig här — och bara när
+ * svaret inte bär några poster. Text, inte kod: koderna skiljer sig mellan
+ * API:er, medan texten är densamma.
+ */
+export function roaringReportsNoRecords(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  const r = raw as Record<string, unknown>;
+  if (Array.isArray(r.records) && r.records.length > 0) return false;
+  for (const key of ['responseInfo', 'status']) {
+    const env = r[key];
+    if (!env || typeof env !== 'object') continue;
+    const text = asString(pickFirst(env, ['text', 'statusText', 'message', 'description']));
+    if (text && /records? not found|no records/i.test(text)) return true;
+  }
+  return false;
+}
+
+/**
  * Env-lista av endpoint-kandidater ("/a/1.0, /b/2.0"). Tom/whitespace →
  * fallback. Bara absoluta sökvägar (börjar med "/") behålls — en felskriven
  * env får aldrig bli en relativ URL mot en annan värd.
@@ -332,6 +352,80 @@ function companyEntry(
 }
 
 /**
+ * Roarings svenska koncernstruktur (se-company-group-structure-1.0) är en
+ * PLATT lista: `groupCompanies[]` där varje bolag bär `motherCompanyId`
+ * (vem som äger det), `ownedPercentage` (moderns andel av bolaget) och
+ * `companyLevel`. Listan kan innehålla moderbolag och syskon — de är varken
+ * ägare eller innehav och får aldrig klassas som bolagets innehav.
+ *
+ * Ägare = kedjan av `motherCompanyId` uppåt från bolaget (närmast = direkt,
+ * högre led = indirekt). Innehav = bolag vars `motherCompanyId` är bolaget.
+ * Returnerar undefined när svaret inte är i platt form (äldre/nästlade
+ * format hanteras av trädtolkningen nedan).
+ */
+function normalizeFlatGroupStructure(
+  root: Record<string, unknown>,
+  target: string,
+  notes: string[]
+): RegistryOwnershipEntry[] | undefined {
+  const raw = pickFirst(root, ['groupCompanies']);
+  if (!Array.isArray(raw)) return undefined;
+  const items = raw.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object');
+  const motherOf = (rec: Record<string, unknown>) =>
+    normalizeOrgNr(asString(pickFirst(rec, ['motherCompanyId', 'parentCompanyId']))) || undefined;
+  if (!items.some((x) => motherOf(x))) return undefined;
+
+  const asNode = (rec: Record<string, unknown>): GroupNode => ({
+    id: normalizeOrgNr(asString(pickFirst(rec, ['companyId', 'orgNr', 'organisationNumber']))) || undefined,
+    name: asString(pickFirst(rec, ['companyName', 'name', 'legalName'])),
+    pct: asPct(pickFirst(rec, PCT_PATHS)),
+    votes: asPct(pickFirst(rec, VOTES_PATHS)),
+    children: [],
+    parents: []
+  });
+  // Kuvertet (det frågade bolaget) först; listans post för samma bolag
+  // vinner, eftersom den bär moder + andel.
+  const byId = new Map<string, { node: GroupNode; mother?: string }>();
+  for (const rec of [root, ...items]) {
+    const node = asNode(rec);
+    if (!node.id) continue;
+    const prev = byId.get(node.id);
+    byId.set(node.id, { node, mother: motherOf(rec) ?? prev?.mother });
+  }
+
+  const out: RegistryOwnershipEntry[] = [];
+  const self = byId.get(target);
+  const seen = new Set<string>([target]);
+  let motherId = self?.mother;
+  let direct = true;
+  while (motherId && !seen.has(motherId)) {
+    seen.add(motherId);
+    const mother = byId.get(motherId)?.node ?? { id: motherId, children: [], parents: [] };
+    const entry = companyEntry({ ...mother, pct: undefined, votes: undefined }, 'owner', !direct);
+    if (entry) {
+      // Moderns andel av bolaget står på BOLAGETS egen post.
+      if (direct) {
+        entry.capital_pct = self?.node.pct;
+        entry.voting_pct = self?.node.votes;
+      }
+      out.push(entry);
+    }
+    motherId = byId.get(motherId)?.mother;
+    direct = false;
+  }
+  for (const rec of items) {
+    if (motherOf(rec) !== target) continue;
+    const entry = companyEntry(asNode(rec), 'holding', false);
+    if (entry) out.push(entry);
+  }
+  if (!self && !items.some((x) => motherOf(x) === target)) {
+    notes.push('Roaring koncernstruktur: bolaget hittades inte i koncernlistan.');
+  }
+  if (out.length === 0) notes.push('Roaring koncernstruktur: inga ägare eller innehav (fristående bolag, eller fält som inte kändes igen).');
+  return out;
+}
+
+/**
  * Koncernträdet → ägare (över startup-bolaget) och innehav (under). Hittas
  * bolaget i trädet är dess direkta förälder direkt ägare, högre led indirekta;
  * bolagets barn är innehav. Hittas det inte används rotens `owners`/`children`.
@@ -346,8 +440,12 @@ export function normalizeRoaringGroupStructure(
     notes.push('Roaring koncernstruktur: tomt svar.');
     return [];
   }
-  const out: RegistryOwnershipEntry[] = [];
   const target = normalizeOrgNr(startupOrgNr) || startupOrgNr;
+  const rootRec = firstRecord(raw);
+  const flat = rootRec ? normalizeFlatGroupStructure(rootRec, target, notes) : undefined;
+  if (flat) return flat;
+
+  const out: RegistryOwnershipEntry[] = [];
   const path = findPath(root, target, []);
 
   if (path) {
@@ -394,9 +492,45 @@ export function normalizeRoaringGroupStructure(
 }
 
 const BO_LIST_KEYS = ['beneficialOwners', 'owners', 'alternativeBeneficialOwners', 'persons'];
-const BO_CAPITAL_PATHS = ['ownershipPercentInterval', 'extentOfOwnership', 'ownershipInterval', 'ownership', 'extent', 'capital', 'shareOfCapital', 'capitalInterval', 'ownedPercentage'];
+const BO_CAPITAL_PATHS = ['ownershipPercentInterval', 'extentOfControl', 'extentOfOwnership', 'ownershipInterval', 'ownership', 'extent', 'capital', 'shareOfCapital', 'capitalInterval', 'ownedPercentage'];
 const BO_VOTES_PATHS = ['votesPercentInterval', 'extentOfVotes', 'votesInterval', 'votes', 'shareOfVotes', 'votingInterval'];
-const BO_CONTROL_PATHS = ['controlType', 'natureOfControl', 'typeOfControl', 'controlBasis', 'control', 'role'];
+const BO_CONTROL_PATHS = ['controlTypes', 'controlType', 'controlTypeCodes', 'natureOfControl', 'typeOfControl', 'controlBasis', 'control', 'role'];
+
+/**
+ * Intervall kan komma som text ("25-50", ">75") eller som objekt
+ * ({ from, to } / { min, max } / { lower, upper }, ev. med en text) —
+ * normaliseras till text som `parsePctInterval` förstår.
+ */
+function intervalText(v: unknown): unknown {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
+  const o = v as Record<string, unknown>;
+  const lo = asNumber(pickFirst(o, ['from', 'min', 'lower', 'fromPercent', 'minPercent']));
+  const hi = asNumber(pickFirst(o, ['to', 'max', 'upper', 'toPercent', 'maxPercent']));
+  if (lo !== undefined && hi !== undefined) return `${lo}-${hi}`;
+  if (lo !== undefined) return `>${lo}`;
+  if (hi !== undefined) return `<${hi}`;
+  return pickFirst(o, ['text', 'description', 'code']);
+}
+
+/**
+ * Kontrollgrund kan vara text, ett objekt eller en lista av koder/objekt
+ * (flera grunder). Första igenkännbara texten används — den mappas ändå till
+ * fast vokabulär av `controlBasisCategory`.
+ */
+function controlText(v: unknown): unknown {
+  const one = (x: unknown): unknown =>
+    x && typeof x === 'object' && !Array.isArray(x)
+      ? pickFirst(x, ['text', 'description', 'controlTypeText', 'code', 'controlTypeCode'])
+      : x;
+  if (Array.isArray(v)) {
+    for (const x of v) {
+      const t = one(x);
+      if (asString(t)) return t;
+    }
+    return undefined;
+  }
+  return one(v);
+}
 
 /**
  * Verklig huvudman → anonyma person-rader. Läser INTE namn, personnummer,
@@ -440,11 +574,11 @@ export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]):
     const legalOrgNr = isLegalEntityOrgNr(candidateOrgNr || undefined) ? candidateOrgNr : null;
     const capitalRaw = pickFirst(o, BO_CAPITAL_PATHS);
     const votesRaw = pickFirst(o, BO_VOTES_PATHS);
-    const capital = parsePctInterval(capitalRaw);
-    const votes = parsePctInterval(votesRaw);
+    const capital = parsePctInterval(intervalText(capitalRaw));
+    const votes = parsePctInterval(intervalText(votesRaw));
     // Kontrollgrund mappas till fast vokabulär — leverantörens fritext når
     // aldrig databasen (kan bära namn).
-    const control = controlBasisCategory(pickFirst(o, BO_CONTROL_PATHS));
+    const control = controlBasisCategory(controlText(pickFirst(o, BO_CONTROL_PATHS)));
     const entry: RegistryOwnershipEntry = {
       direction: 'owner',
       owner_kind: legalOrgNr ? 'company' : 'person',
