@@ -1,7 +1,8 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { escFilter } from '@/lib/pb-filter';
-import { getSuperuserPb, loadCredentials } from './credentials';
+import { getSuperuserPb, loadCredentialsResult } from './credentials';
+import { describeCredentialFailure } from './credential-errors';
 import { getHandler } from './registry';
 import type {
   CompanyRegistryHandler,
@@ -294,10 +295,9 @@ export async function runRegistrySyncForStartup(
     };
   }
 
-  const creds = await loadCredentials(tenantIntegrationId);
-  if (!creds) {
-    const errorMessage =
-      'Inloggningsuppgifter saknas eller kunde inte dekrypteras.';
+  const loaded = await loadCredentialsResult(tenantIntegrationId);
+  if (!loaded.ok) {
+    const errorMessage = describeCredentialFailure(loaded.reason);
     if (syncRunId) {
       try {
         await adminPb.collection('integration_sync_runs').update(syncRunId, {
@@ -325,7 +325,7 @@ export async function runRegistrySyncForStartup(
   let fetchError: string | null = null;
   try {
     result = await handler.syncSingleStartup(
-      creds,
+      loaded.value,
       { tenantId, tenantIntegrationId },
       startupId
     );
@@ -478,9 +478,9 @@ export async function runSync(
     };
   }
 
-  const creds = await loadCredentials(tenantIntegrationId);
-  if (!creds) {
-    const errorMessage = 'Inloggningsuppgifter saknas eller kunde inte dekrypteras.';
+  const loaded = await loadCredentialsResult(tenantIntegrationId);
+  if (!loaded.ok) {
+    const errorMessage = describeCredentialFailure(loaded.reason);
     if (syncRunId) {
       try {
         await adminPb.collection('integration_sync_runs').update(syncRunId, {
@@ -514,7 +514,7 @@ export async function runSync(
   if (kind === 'company_registry') {
     const result = await runRegistrySync(
       handler as CompanyRegistryHandler,
-      creds,
+      loaded.value,
       { tenantId, tenantIntegrationId }
     );
     fetchError = result.fetchError;
@@ -526,7 +526,7 @@ export async function runSync(
     const result = await runRecordsSync(
       adminPb,
       handler as Extract<IntegrationHandler, { kind?: 'records' }>,
-      creds,
+      loaded.value,
       tenantId,
       tenantIntegrationId,
       providerSlug

@@ -9,14 +9,22 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 const ALGO = 'aes-256-gcm';
 const IV_LENGTH = 12;
 
+/** Nyckeln saknas eller har fel format — skiljs från dekrypteringsfel. */
+export class IntegrationKeyError extends Error {
+  constructor(readonly code: 'missing' | 'invalid', message: string) {
+    super(message);
+    this.name = 'IntegrationKeyError';
+  }
+}
+
 function loadKey(): Buffer {
   const raw = process.env.MOVEXUM_INTEGRATION_KEY;
   if (!raw) {
-    throw new Error('MOVEXUM_INTEGRATION_KEY saknas i miljövariablerna.');
+    throw new IntegrationKeyError('missing', 'MOVEXUM_INTEGRATION_KEY saknas i miljövariablerna.');
   }
-  const key = Buffer.from(raw, 'base64');
+  const key = Buffer.from(raw.trim(), 'base64');
   if (key.length !== 32) {
-    throw new Error('MOVEXUM_INTEGRATION_KEY måste vara 32 bytes base64.');
+    throw new IntegrationKeyError('invalid', 'MOVEXUM_INTEGRATION_KEY måste vara 32 bytes base64.');
   }
   return key;
 }
