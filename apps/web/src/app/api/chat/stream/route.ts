@@ -8,6 +8,7 @@ import {
 } from '@/lib/ai/thread-turn';
 import type { ChatAttachment } from '@/lib/ai/chat-input';
 import { isAllowedModel } from '@/lib/ai/models';
+import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import type { ChatThread, Role } from '@platform/shared';
 
 // Streamande chatt-turn för /chatt. Kör samma delade turn-/persistenslogik
@@ -26,6 +27,12 @@ export const dynamic = 'force-dynamic';
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 
+// Robusthet + kostnadstak (EU AI Act art. 15 / ISO 27001 A.8.x): varje tur är
+// ett eller flera Mistral-anrop — en loopande klient eller ett skript ska inte
+// kunna bränna tenantens budget. Samma mönster som /api/chat/voice.
+const RATE_WINDOW_MS = 5 * 60 * 1000;
+const RATE_MAX_PER_USER = 60;
+
 function jsonError(error: string, status: number): Response {
   return new Response(JSON.stringify({ error }), {
     status,
@@ -37,6 +44,22 @@ export async function POST(req: Request): Promise<Response> {
   const user = await getCurrentUser();
   if (!user) return jsonError('Ej inloggad.', 401);
   if (!hasRole(user.roles, STAFF_ROLES)) return jsonError('Åtkomst nekad.', 403);
+
+  const rateKey = `chat-stream:${user.id}`;
+  const limited = checkRateLimit(rateKey, RATE_MAX_PER_USER);
+  if (limited.blocked) {
+    return new Response(
+      JSON.stringify({ error: 'För många meddelanden just nu. Vänta en stund och försök igen.' }),
+      {
+        status: 429,
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'retry-after': String(limited.retryAfterSec)
+        }
+      }
+    );
+  }
+  recordFailure(rateKey, RATE_WINDOW_MS);
 
   let body: {
     threadId?: unknown;

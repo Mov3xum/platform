@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { getServerPbUrl } from '@/lib/pb-url';
+import { isCompassStaffInTenant } from '@/lib/compass/staff-viewer';
 
 // Samma-origin proxy för Startupkompassens omslagsmedia (hero_image/hero_video).
 //
@@ -16,7 +17,10 @@ import { getServerPbUrl } from '@/lib/pb-url';
 // PII, CLAUDE.md § 23.7) och serveras tokenlöst av PB redan idag. Proxyn
 // vidgar inte det: den serverar ENBART filnamn som faktiskt är modulens
 // hero_image eller hero_video (verifieras mot posten) — aldrig godtyckliga
-// filer, aldrig andra kollektioner. Range-förfrågningar (video-scrubbing)
+// filer, aldrig andra kollektioner. Bara en AKTIV + PUBLIK modul (is_active &&
+// public_url_enabled) serveras anonymt; en opublicerad moduls media når bara
+// inloggad Startupkompass-personal i modulens tenant (editorns förhandsvisning)
+// och då med `Cache-Control: private` så det aldrig hamnar i en delad cache. Range-förfrågningar (video-scrubbing)
 // vidarebefordras oförändrat.
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -35,6 +39,9 @@ const PASSTHROUGH_HEADERS = [
 
 interface HeroRow {
   id: string;
+  tenant?: string;
+  is_active?: boolean;
+  public_url_enabled?: boolean;
   hero_image?: string;
   hero_video?: string;
 }
@@ -71,6 +78,11 @@ export async function GET(
   if (filename !== row.hero_image && filename !== row.hero_video) {
     return NextResponse.json({ error: 'Hittades inte.' }, { status: 404 });
   }
+  const isPublic = row.is_active === true && row.public_url_enabled === true;
+  if (!isPublic && !(await isCompassStaffInTenant(row.tenant))) {
+    // Samma svar som för en okänd modul — avslöjar inte att utkastet finns.
+    return NextResponse.json({ error: 'Hittades inte.' }, { status: 404 });
+  }
 
   const base = getServerPbUrl().replace(/\/$/, '');
   const upstreamUrl = `${base}/api/files/compass_modules/${id}/${encodeURIComponent(filename)}`;
@@ -103,7 +115,9 @@ export async function GET(
   if (!headers.has('content-type')) headers.set('content-type', 'application/octet-stream');
   // PB ger varje uppladdning ett unikt slumpsuffix i filnamnet → en URL pekar
   // alltid på samma innehåll. Ett dygn i webbläsar-/proxycache räcker gott.
-  headers.set('Cache-Control', 'public, max-age=86400');
+  // Opublicerad modul (bara personalens förhandsvisning): aldrig delad cache.
+  headers.set('Cache-Control', isPublic ? 'public, max-age=86400' : 'private, no-store');
+  if (!isPublic) headers.set('Vary', 'Cookie');
   headers.set('X-Content-Type-Options', 'nosniff');
   // Filerna (även SVG) serveras från APPENS origin: en SVG med <script> vore
   // annars lagrad XSS på vår domän när den öppnas direkt. Sandbox-CSP:n gör
