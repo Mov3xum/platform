@@ -7,7 +7,8 @@
 // detta är en segment-gräns, inte global-error.
 
 import { useEffect } from 'react';
-import { attemptChunkReload, isChunkLoadError } from '@/lib/chunk-reload';
+import { attemptChunkReload, isDeployMismatchError } from '@/lib/chunk-reload';
+import { isStaleDeploymentError, STALE_DEPLOYMENT_MESSAGE } from '@/lib/action-error';
 
 export default function RouteError({
   error,
@@ -20,7 +21,7 @@ export default function RouteError({
     // Chunk-fel uppstår när en gammal flik möter en ny deploy (hashade
     // chunk-filer har bytt namn). Ladda om en gång för att hämta ny HTML +
     // rätt chunks — då slipper användaren se någon felvy alls.
-    if (isChunkLoadError(error) && attemptChunkReload()) {
+    if (isDeployMismatchError(error) && attemptChunkReload()) {
       return;
     }
     // Logga till browser-konsolen så det faktiska felet går att felsöka
@@ -28,14 +29,18 @@ export default function RouteError({
     console.error('[route-error]', error);
   }, [error]);
 
+  const stale = isStaleDeploymentError(error);
+
   return (
     <main className="mx-auto flex min-h-[60vh] max-w-xl flex-col items-center justify-center px-6 py-16 text-center">
       <div className="w-full rounded-3xl border border-default bg-surface p-8 shadow-sm shadow-movexum-svart/5">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Något gick fel</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          {stale ? 'Sidan behöver laddas om' : 'Något gick fel'}
+        </h1>
         <p className="mt-3 text-sm text-foreground-muted">
-          Ett oväntat fel inträffade när sidan skulle visas. Du kan försöka igen
-          eller gå tillbaka. Om felet återkommer, dela gärna detaljerna nedan med
-          supporten.
+          {stale
+            ? STALE_DEPLOYMENT_MESSAGE
+            : 'Ett oväntat fel inträffade när sidan skulle visas. Du kan försöka igen eller gå tillbaka. Om felet återkommer, dela gärna detaljerna nedan med supporten.'}
         </p>
 
         {error?.digest ? (
@@ -47,10 +52,10 @@ export default function RouteError({
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
           <button
             type="button"
-            onClick={() => reset()}
+            onClick={() => (stale ? window.location.reload() : reset())}
             className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
           >
-            Försök igen
+            {stale ? 'Ladda om sidan' : 'Försök igen'}
           </button>
         </div>
       </div>
