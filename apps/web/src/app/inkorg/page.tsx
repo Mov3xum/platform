@@ -123,8 +123,8 @@ export default async function InkorgPage() {
   const pb = await getServerPb();
   const isFounder = hasRole(user.roles, ['startup_member']);
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
-  // Lagringsminimering (§ 50): gamla notiser rensas best-effort i bakgrunden.
-  void pruneOldNotifications(pb, user.id);
+  // Lagringsminimering (§ 50): gamla notiser rensas (kapat, fail-soft) innan listan läses.
+  await pruneOldNotifications(pb, user.id);
 
   // ── Aggregerad lista/tavla + agenda, notiser, uppdrag, bolagsval — parallellt ──
   const [overview, notifications, myMissions, startupOptions] = await Promise.all([

@@ -32,6 +32,15 @@
 
 const ANY_AUTH = '@request.auth.id != ""';
 const IS_OWNER = '@request.auth.id = user';
+// Mottagaren får BARA markera läst/sedd — alla andra fält är låsta. Utan
+// låset kunde en användare PATCH:a sin egen notis till en annan användare i
+// en annan tenant med valfri avsändare/text och därmed kringgå createRule.
+const LOCKED_FIELDS = [
+  'user', 'tenant', 'kind', 'actor', 'mission', 'comment', 'payload_json', 'category',
+  'priority', 'entity_type', 'entity_id', 'group_key', 'count', 'dedupe_key', 'latest_at'
+];
+const NOTIFICATION_UPDATE_RULE =
+  `${ANY_AUTH} && ${IS_OWNER} && ` + LOCKED_FIELDS.map((f) => `@request.body.${f}:isset = false`).join(' && ');
 
 function addField(collection, def) {
   if (collection.fields.getByName(def.name)) return false;
@@ -83,8 +92,9 @@ migrate(
     const tenantField = notifications.fields.getByName('tenant');
     if (tenantField) tenantField.cascadeDelete = true;
 
-    // ── 1. createRule = NULL (bara servern skapar notiser) ─────────────────
+    // ── 1. createRule = NULL (bara servern skapar notiser) + fältlåst update ─
     notifications.createRule = null;
+    notifications.updateRule = NOTIFICATION_UPDATE_RULE;
 
     addIndex(
       notifications,
@@ -185,7 +195,7 @@ migrate(
         listRule: `${ANY_AUTH} && ${IS_OWNER}`,
         viewRule: `${ANY_AUTH} && ${IS_OWNER}`,
         // Bara auth-fält + skalär ägarcheck (§ 21.3) — ingen roll, ingen tenant-join.
-        createRule: `${ANY_AUTH} && @request.auth.tenant != "" && ${IS_OWNER}`,
+        createRule: `${ANY_AUTH} && @request.auth.tenant != "" && ${IS_OWNER} && @request.body.tenant = @request.auth.tenant`,
         updateRule: `${ANY_AUTH} && ${IS_OWNER} && @request.body.user:isset = false && @request.body.tenant:isset = false`,
         deleteRule: `${ANY_AUTH} && ${IS_OWNER}`
       });
@@ -201,6 +211,7 @@ migrate(
     }
     const notifications = app.findCollectionByNameOrId('notifications');
     notifications.createRule = '@request.auth.id != "" && (actor = "" || @request.auth.id = actor)';
+    notifications.updateRule = '@request.auth.id != "" && @request.auth.id = user';
     for (const name of [
       'category',
       'priority',

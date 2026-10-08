@@ -7809,7 +7809,8 @@ det.
   tystning), `group_key` + `count` (sammanslagning), `seen_at` (klockans
   siffra), `latest_at` (sortering — en sammanslagen notis flyttas upp) och
   `dedupe_key` (unikt partiellt index `(user, dedupe_key)` → påminnelser
-  skapas aldrig två gånger). PB 0.23.4 vägrar byta typ på ett fält med samma
+  skapas aldrig två gånger; bara ett faktiskt `validation_not_unique` räknas
+  som dubblett). PB 0.23.4 vägrar byta typ på ett fält med samma
   id, så migrationen byter `kind` via snapshot → drop → nytt textfält →
   återställning (verifierat mot PB 0.23.4 lokalt).
 - **`notification_preferences`** (**1700000182**): en rad per användare
@@ -7861,10 +7862,22 @@ det.
   fäller deployen om createRule inte är NULL, om reglerna inte är ägaren-
   bara eller om fälten saknas. Speglat i `setup-via-api.mjs` (inkl.
   select→text och, när REST inte kan byta typ, en union av select-värdena).
+- **Mottagaren kan bara markera läst/sedd.** `notifications.updateRule` är
+  fältlåst (`@request.body.<fält>:isset = false` för user, tenant, kind,
+  actor, mission, comment, payload_json, category, priority, entity_*,
+  group_key, count, dedupe_key, latest_at). Utan låset kunde en användare
+  PATCH:a en egen notis till en annan användare/tenant med valfri avsändare
+  och text och därmed kringgå createRule. Sammanslagningen skriver via
+  superusern och berörs inte. Asserterat i `verify-baseline.mjs`.
+  `notification_preferences.createRule` body-låser tenanten
+  (`@request.body.tenant = @request.auth.tenant`).
 - **Lagringsminimering (GDPR art. 5.1 e):** lästa notiser rensas efter 90
-  dagar, olästa efter 180 (`pruneOldNotifications`, best-effort när
-  användaren öppnar `/inkorg`, med användarens egen token). En schemalagd
-  rensning kommer med påminnelse-ticken i nästa steg.
+  dagar, olästa efter 180, räknat från `latest_at` (senaste händelsen; faller
+  tillbaka på `created`). `pruneOldNotifications` körs (kapat 100, fail-soft)
+  när användaren öppnar `/inkorg`, med användarens egen token. **Känd
+  begränsning:** notiser till konton som aldrig öppnar listan rensas inte än —
+  en tenant-bred schemalagd rensning kommer med påminnelse-ticken i nästa
+  steg.
 
 ### 50.4 Producenter (vem får vad)
 

@@ -527,7 +527,18 @@ function verifyNotificationRules(collections) {
       }
     }
   }
-  ok('Notiser: bara servern skapar, bara ägaren läser (§ 50)');
+  const notif = collections.get('notifications');
+  if (notif) {
+    for (const token of ['@request.body.user:isset = false', '@request.body.tenant:isset = false', '@request.body.payload_json:isset = false', '@request.body.actor:isset = false']) {
+      if (typeof notif.updateRule !== 'string' || !notif.updateRule.includes(token)) {
+        fail(
+          `notifications.updateRule måste vara fältlåst (saknar \`${token}\`) — annars kan en egen notis ` +
+            'PATCH:as om till en annan användare/tenant. Kör migration 1700000182 eller setup-via-api.mjs.'
+        );
+      }
+    }
+  }
+  ok('Notiser: bara servern skapar, bara ägaren läser, update fältlåst (§ 50)');
 }
 
 function verifyStartupMemberIsolation(collections) {

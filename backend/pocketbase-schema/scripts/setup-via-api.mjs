@@ -1495,7 +1495,8 @@ await ensureCollection({
   listRule: `${ANY_AUTH} && @request.auth.id = user`,
   viewRule: `${ANY_AUTH} && @request.auth.id = user`,
   // createRule utelämnad = NULL (bara superuser) — migration 1700000182.
-  updateRule: `${ANY_AUTH} && @request.auth.id = user`,
+  // updateRule fältlåst: mottagaren får bara skriva read_at/seen_at.
+  updateRule: `${ANY_AUTH} && @request.auth.id = user && @request.body.user:isset = false && @request.body.tenant:isset = false && @request.body.kind:isset = false && @request.body.actor:isset = false && @request.body.mission:isset = false && @request.body.comment:isset = false && @request.body.payload_json:isset = false && @request.body.category:isset = false && @request.body.priority:isset = false && @request.body.entity_type:isset = false && @request.body.entity_id:isset = false && @request.body.group_key:isset = false && @request.body.count:isset = false && @request.body.dedupe_key:isset = false && @request.body.latest_at:isset = false`,
   deleteRule: `${ANY_AUTH} && @request.auth.id = user`
 });
 
@@ -1518,7 +1519,7 @@ await ensureCollection({
   ],
   listRule: `${ANY_AUTH} && @request.auth.id = user`,
   viewRule: `${ANY_AUTH} && @request.auth.id = user`,
-  createRule: `${ANY_AUTH} && @request.auth.tenant != "" && @request.auth.id = user`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != "" && @request.auth.id = user && @request.body.tenant = @request.auth.tenant`,
   updateRule: `${ANY_AUTH} && @request.auth.id = user && @request.body.user:isset = false && @request.body.tenant:isset = false`,
   deleteRule: `${ANY_AUTH} && @request.auth.id = user`
 });
@@ -4336,6 +4337,20 @@ await convertSelectFieldToText('notifications', 'kind', { min: 1, max: 60 });
     await patchCollection('notifications', [], {
       kind: { values: [...current, ...NOTIFICATION_KINDS.filter((k) => !current.includes(k))] }
     });
+  }
+  // ensureCollection synkar inte ändrade fältinställningar eller index på en
+  // befintlig collection — tenant-kaskad (art. 17) och dedupe-index explicit.
+  await patchCollection('notifications', [], { tenant: { cascadeDelete: true } });
+  const wantedIndexes = [
+    'CREATE INDEX idx_notifications_user_group ON notifications (user, group_key)',
+    "CREATE UNIQUE INDEX idx_notifications_user_dedupe ON notifications (user, dedupe_key) WHERE dedupe_key != ''"
+  ];
+  const fresh = await pb.collections.getOne('notifications');
+  const indexes = Array.isArray(fresh.indexes) ? [...fresh.indexes] : [];
+  const missingIdx = wantedIndexes.filter((sql) => !indexes.some((i) => i.includes(sql.split(' ON ')[0].split(' ').pop())));
+  if (missingIdx.length > 0) {
+    await pb.collections.update('notifications', { indexes: [...indexes, ...missingIdx] });
+    ok(`notifications: index tillagda (${missingIdx.length})`);
   }
 }
 // Migrationer 1700000161–170: stödcheckar & finansieringsprojekt (§ 46).

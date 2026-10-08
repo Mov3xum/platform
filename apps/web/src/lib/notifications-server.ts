@@ -68,6 +68,11 @@ function statusOf(err: unknown): number | undefined {
   return (err as { status?: number } | null)?.status;
 }
 
+function isUniqueViolation(err: unknown, field: string): boolean {
+  const data = (err as { response?: { data?: Record<string, { code?: string }> } } | null)?.response?.data;
+  return data?.[field]?.code === 'validation_not_unique';
+}
+
 /** PocketBase lagrar datum som "YYYY-MM-DD HH:MM:SS.sssZ" — jämför i samma format. */
 function pbDate(iso: string): string {
   return iso.replace('T', ' ');
@@ -253,8 +258,10 @@ export async function emitNotification(
       result.delivered += 1;
     } catch (err) {
       const status = statusOf(err);
-      // Unikt dedupe-index slog till i en kapplöpning → redan skapad.
-      if (status === 400 && dedupeKey) {
+      // Unikt dedupe-index slog till i en kapplöpning → redan skapad. Bara
+      // ett faktiskt unikhetsfel räknas — ett 400 för schemadrift ska vidare
+      // till reservvägen nedan, annars tappas notisen tyst.
+      if (status === 400 && dedupeKey && isUniqueViolation(err, 'dedupe_key')) {
         result.skipped += 1;
         continue;
       }
@@ -464,19 +471,31 @@ export async function markAllSeenForUser(pb: PocketBase, userId: string): Promis
 
 /**
  * Lagringsminimering (GDPR art. 5.1 e): lästa notiser rensas efter 90 dagar,
- * olästa efter 180. Körs best-effort när användaren öppnar sin notislista,
- * med användarens egen token (deleteRule = mottagaren). Kapat per anrop.
+ * olästa efter 180, räknat från SENASTE händelsen (`latest_at` — en
+ * sammanslagen notis som fick en ny kommentar i går lever vidare). Körs när
+ * användaren öppnar sin notislista, med användarens egen token (deleteRule =
+ * mottagaren), kapat per anrop. En tenant-bred schemalagd rensning (även för
+ * inaktiva konton) kommer med påminnelse-ticken (§ 50.3).
  */
 export async function pruneOldNotifications(pb: PocketBase, userId: string): Promise<void> {
   const { read, unread } = notificationRetentionCutoffs(new Date());
-  try {
-    const res = await pb.collection(PB_COLLECTIONS.notifications).getList<{ id: string }>(1, 100, {
-      filter: pb.filter(
-        'user = {:userId} && ((read_at != null && created < {:readCut}) || created < {:unreadCut})',
-        { userId, readCut: pbDate(read), unreadCut: pbDate(unread) }
-      ),
+  const params = { userId, readCut: pbDate(read), unreadCut: pbDate(unread) };
+  const list = (expr: string) =>
+    pb.collection(PB_COLLECTIONS.notifications).getList<{ id: string }>(1, 100, {
+      filter: pb.filter(expr, params),
       fields: 'id'
     });
+  try {
+    let res;
+    try {
+      res = await list(
+        'user = {:userId} && ((latest_at != null && ((read_at != null && latest_at < {:readCut}) || latest_at < {:unreadCut})) || (latest_at = null && ((read_at != null && created < {:readCut}) || created < {:unreadCut})))'
+      );
+    } catch (err) {
+      if (statusOf(err) !== 400) throw err;
+      // Schema utan latest_at (migration 1700000182 ej körd).
+      res = await list('user = {:userId} && ((read_at != null && created < {:readCut}) || created < {:unreadCut})');
+    }
     for (const item of res.items) {
       await pb
         .collection(PB_COLLECTIONS.notifications)
