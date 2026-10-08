@@ -1159,8 +1159,8 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
     origin tas från `NEXT_PUBLIC_APP_URL`/`APP_URL` när den är satt.
 - **Brute-force-skydd (A.8.x):** `loginAction` rate-limitar misslyckade
   försök per IP+e-post (8/15 min) och per IP (40/15 min) via
-  `lib/rate-limit.ts` (in-memory; lyft till Redis/PB vid horisontell
-  skalning).
+  `lib/rate-limit.ts` (delad mellan containrar via PB-kollektionen
+  `rate_limits`, processminne som reserv — § 21.8).
 - **Output-säkerhet (XSS):** allt användar-/AI-genererat innehåll som
   renderas via `dangerouslySetInnerHTML` MÅSTE gå genom
   `apps/web/src/lib/safe-html.ts` (`escapeHtml` / `inlineMarkdown` /
@@ -3090,15 +3090,90 @@ på tenant/aktör + `created`, `notifications(user, created)`,
 `tasks(tenant, owner, status)`); RAG-svepet (§ 26.3) hämtar bara
 `id,embedding` och hydrerar topp-80 med text.
 
-**Kvar att göra (dokumenterade avvikelser):** processlokal state (rate
-limits, `withModuleLock`, cacher) delas inte mellan containrar — lyft till
-PB/Redis före horisontell skalning; månadstaket (§ 9.6) summerar upp till
-10 000 rader per minut och tenant — ersätt med en rollup; `listLeads`/
-`countLeadsByStatus` läser alla leads; `/inkorg` bygger ett OR-filter per
-bolag (PB:s filtertak vid ~100+ bolag); ingen retention för
-`ai_usage_events`/`agent_actions`/`notifications`; workshop-svar kan ändras
-efter coach-godkännande; createRules på ~60 kollektioner pinnar inte
-`tenant` (läckan begränsas av att list/view är tenant-scopade).
+**Tenant-pin i createRules.** Varje createRule på en kollektion med
+`tenant`-fält kräver `@request.body.tenant = @request.auth.tenant`
+(befintliga ägar-/skaparvillkor behålls; ingen join/roll-check, § 21.3) —
+varje användartoken-create MÅSTE skicka `tenant: user.tenant`/`actor.tenant`.
+Kollektioner UTAN tenant-fält (`activities`, `notes`, `milestones`,
+`agreements`, `startup_team_members`, `partner_engagements`,
+`startup_contacts`, `compass_questions`/`_messages`/`_responses`) skyddas av
+PB-hooken **`hooks/tenant_guard.pb.js`** (`onRecordCreateRequest` +
+`onRecordUpdateRequest`): varje satt förälder (bolag, partner, kontakt, modul,
+konversation) slås upp och requesten nekas med 403 om förälderns tenant inte
+är den inloggades; superuser-requests släpps igenom. `compass_lead_sources`
+(plattformsbred) skrivs bara av superuser. **PB:s JSVM kör varje
+hook-hanterare i en isolerad kontext** — konstanter/hjälpfunktioner måste
+deklareras INNE i hanteraren (`schedule_tick`/`survey_dispatch_tick` läste en
+yttre konstant → ReferenceError; rättat). `security-rules.test.mjs` låser
+paritet med migration 1700000182, tenant-pinnen, att inga nycklar dubbleras
+(en dubblerad nyckel ersatte tyst härdade update/delete-regler) och att
+kärnkollektionernas update/delete-regler finns kvar.
+
+**Delat tillstånd för horisontell skalning (migration 1700000184).**
+Rate-limitern (`lib/rate-limit.ts`) och Startupkompassens modul-lås lever i
+`rate_limits` respektive `app_locks` (alla API-regler null — bara den cachade
+superusern). `checkRateLimit`/`recordFailure`/`clearFailures` är **async och
+måste awaitas**. Nyckeln lagras bara som HMAC/SHA-256
+(`MOVEXUM_RATE_LIMIT_SECRET`, annars `MOVEXUM_INTEGRATION_KEY`) — aldrig
+e-post/IP i klartext. Processminnet räknas alltid med och är ensam reserv när
+PB inte nås (brytare 30 s, loggas en gång PII-fritt); en request blockeras
+aldrig för att PB är nere. `withDistributedLock(key, fn, {ttlMs, waitMs})`
+(`lib/distributed-lock.ts`) tar låset via en rad med unik nyckel, städar
+utgångna lås och kastar `LockTimeoutError` efter `waitMs`; låsnycklar får inte
+bära personuppgifter. Speglat i `setup-via-api.mjs`, asserterat i
+`verify-baseline.mjs` (finns + superuser-only), denylistat för
+`query_collection`.
+
+**AI-kostnad: månadsrollup (migration 1700000185, § 9.6).** Månadstaket och
+AI-analysen läser `ai_usage_monthly` (en rad per tenant och UTC-månad), som
+hålls aktuell atomiskt av `hooks/ai_usage_rollup.pb.js` (SQL-upsert
+`ON CONFLICT(tenant, month)`, fail-soft) och backfillades ur befintliga events
+— gallring av rådata rör aldrig rollupen. `assertWithinAiBudget` läser raden
+via superuser (taket gäller nu alla roller; förut räknades coachers/mentorers
+förbrukning som 0) med event-summering som fail-open-reserv.
+`ai_usage_events.user` är valfritt: publika flöden (publik kompass-chatt =
+`startup_chat`, AI-sammanställning/lead-extraktion = `suggestions`) loggas
+anonymt och räknas mot taket. AI-analysen tar hela månader ur rollupen
+(verifierad mot PB:s exakta antal); kapat underlag visas alltid som nedre
+gräns.
+
+**Datagallring (GDPR art. 5.1 e).** `hooks/retention_tick.pb.js` körs dagligen
+03:17 UTC och raderar högst 2000 rader per kollektion och körning: lästa
+notiser > 90 d (alla > 365 d), `ai_usage_events` > 730 d, `agent_actions`
+> 1095 d (golv 365 — audit-bevis för SOC 2/ISO), `compass_security_events`
+> 365 d, `web_cache` > 2 d, utgångna `rate_limits`/`app_locks`. Styrs med
+`MOVEXUM_RETENTION_*` på PB-resursen i Coolify (`MOVEXUM_RETENTION_DISABLED=1`
+stänger av). Loggen innehåller bara antal.
+
+**Skalbara läsvägar.** Listor pagineras server-side med `fields`-projektion
+(leads 50/sida, bolag 100/sida, `?page=`); räkningar görs med
+`getList(1,1).totalItems`, aldrig genom att hämta rader. `lib/read-scaling.ts`
+(ren, testad): `mapWithConcurrency`, `chunk`, `mergeChunkedPages`. OR-kedjor
+över id-listor delas i disjunkta grupper om ≤ 40 (exakta totaler, under PB:s
+filtertak). Superuser-fallbacken vid tomt svar (PB v0.23.4:s tysta
+regel-nekande ger 200 med 0 rader) föregås av en billig existensprobe; vid fel
+faller den bara tillbaka på 400/403/404. Leads-exporten har ett tak på 10 000
+rader och kapningen syns i filen och i audit-raden.
+
+**Appnivå.** Coachens godkännande av en workshop stämplar
+`artifacts_json.coach_approved_hash` (SHA-256 av kanoniskt innehåll,
+`lib/workshop-review.ts`); ändrat innehåll nollställer beslutet och commit
+vägras vid mismatch eller saknad hash (äldre godkännanden kräver ett nytt
+klick av coachen). Progressionssparning skriver aldrig `coach_*`/commit-
+nycklar. `/api/public/result-pdf` tar bara `{slug, bucketKey}` — texten kommer
+ur modulens `result_buckets` (nätfiskeskydd). `/api/public/compass-media`
+serverar opublicerade moduler bara för kompass-personal i tenanten
+(`Cache-Control: private`). Uppdragskommentarer verifierar `parent` mot samma
+uppdrag och tenant-filtrerar mentions även vid redigering. Rapportsektioner
+vitlistas (`lib/report-section.ts`). Investerare/affärer skrivs bara av
+admin/incubator_lead/coach/mentor. `/api/chat/stream` har en gräns på 60
+turer per 5 min och användare.
+
+**Kända begränsningar (medvetna).** Processlokala cacher (superuser-token,
+Outlook-agenda, webbflöden, frågeembeddings) är bara effektivitet och får
+skilja sig mellan containrar. Bakgrundsarbete som startas från en request
+(`/api/internal/run-trigger`) överlever inte en omstart mitt i körningen.
+Låset förnyas inte — `fn` måste bli klar inom TTL (15 s).
 
 ---
 

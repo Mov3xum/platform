@@ -110,6 +110,7 @@ const RULES = {
     "createRule": "@request.auth.id != \"\" && @request.body.tenant = @request.auth.tenant"
   },
   "tool_runs": {
+    "deleteRule": "@request.auth.id != \"\" && @request.auth.tenant = tenant && (@request.auth.roles:each ?= \"admin\" || @request.auth.roles:each ?= \"incubator_lead\")",
     "createRule": "@request.auth.id != \"\" && @request.body.tenant = @request.auth.tenant && @request.auth.id = triggered_by"
   },
   "workshops": {
@@ -118,9 +119,12 @@ const RULES = {
     "createRule": "@request.auth.id != \"\" && @request.body.tenant = @request.auth.tenant"
   },
   "workshop_runs": {
+    "deleteRule": "@request.auth.id != \"\" && @request.auth.tenant = tenant && (@request.auth.roles:each ?= \"admin\" || @request.auth.roles:each ?= \"incubator_lead\" || @request.auth.roles:each ?= \"coach\" || @request.auth.roles:each ?= \"mentor\")",
     "createRule": "@request.auth.id != \"\" && @request.body.tenant = @request.auth.tenant && @request.auth.id = triggered_by"
   },
   "workshop_assignments": {
+    "updateRule": "@request.auth.id != \"\" && @request.auth.tenant = tenant && ((@request.auth.roles:each ?= \"admin\" || @request.auth.roles:each ?= \"incubator_lead\" || @request.auth.roles:each ?= \"coach\" || @request.auth.roles:each ?= \"mentor\") || (@request.auth.roles:each ?= \"startup_member\" && @request.auth.linked_startups:each ?= startup.id))",
+    "deleteRule": "@request.auth.id != \"\" && @request.auth.tenant = tenant && (@request.auth.roles:each ?= \"admin\" || @request.auth.roles:each ?= \"incubator_lead\" || @request.auth.roles:each ?= \"coach\" || @request.auth.roles:each ?= \"mentor\")",
     "createRule": "@request.auth.id != \"\" && @request.body.tenant = @request.auth.tenant && @request.auth.id = assigned_by"
   },
   "strategies": {
@@ -154,6 +158,11 @@ const RULES = {
   },
   "integration_providers": {
     "createRule": null
+  },
+  "compass_lead_sources": {
+    "createRule": null,
+    "updateRule": null,
+    "deleteRule": null
   },
   "web_cache": {
     "listRule": null,

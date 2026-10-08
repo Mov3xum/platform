@@ -129,10 +129,10 @@ export const SECURITY_RULES = {
   },
   // Agentkonfiguration (system_prompt/prompt_template) — bara ledningen (§ 9.11).
   tools: { updateRule: lead },
-  tool_runs: { deleteRule: lead },
+  tool_runs: { deleteRule: lead, createRule: createTenant('@request.auth.id = triggered_by') },
   workshops: { updateRule: staff4, deleteRule: lead },
-  workshop_runs: { deleteRule: staff4 },
-  workshop_assignments: { updateRule: linkedStartupWrite, deleteRule: staff4 },
+  workshop_runs: { deleteRule: staff4, createRule: createTenant('@request.auth.id = triggered_by') },
+  workshop_assignments: { updateRule: linkedStartupWrite, deleteRule: staff4, createRule: createTenant('@request.auth.id = assigned_by') },
   strategies: {
     listRule: `${AUTH} && ${T} && (${STAFF_OR_OBSERVER} || @request.auth.linked_startups:each ?= startup) && deleted_at = ""`,
     viewRule: memberScoped('startup'),
@@ -152,6 +152,9 @@ export const SECURITY_RULES = {
   // ── Globala kollektioner: skrivs bara av migrationer/superuser ──
   de_minimis_regelverk: { createRule: null },
   integration_providers: { createRule: null },
+  // Plattformsbred källkatalog (Startupkompassen) — ingen tenant; skrivs bara
+  // av migrationer/superuser, aldrig av en tenants personal.
+  compass_lead_sources: { createRule: null, updateRule: null, deleteRule: null },
   web_cache: { listRule: null, viewRule: null, createRule: null, updateRule: null, deleteRule: null },
 
   // ── Tenant: bara den egna (även för admin) ──
@@ -175,9 +178,6 @@ export const SECURITY_RULES = {
   },
 
   // ── createRules: tenant pinnad + befintliga ägar-/skaparvillkor behållna ──
-  tool_runs: { createRule: createTenant('@request.auth.id = triggered_by') },
-  workshop_runs: { createRule: createTenant('@request.auth.id = triggered_by') },
-  workshop_assignments: { createRule: createTenant('@request.auth.id = assigned_by') },
   mission_comments: { createRule: createTenant('@request.auth.id = author') },
   user_mistral_connectors: { createRule: createTenant('@request.auth.id = user') },
   user_app_integrations: { createRule: createPinned('user') },

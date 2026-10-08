@@ -105,3 +105,31 @@ test('tenant-pinnen ersätter aldrig redan härdade update/list-regler', () => {
   assert.equal(typeof SECURITY_RULES.de_minimis_stod.viewRule, 'string');
   assert.equal(typeof SECURITY_RULES.workshops.deleteRule, 'string');
 });
+
+test('SECURITY_RULES har inga dubblerade nycklar (en senare nyckel skulle tyst ersätta härdade regler)', () => {
+  const src = readFileSync(join(here, 'security-rules.mjs'), 'utf8');
+  const block = src.slice(src.indexOf('export const SECURITY_RULES = {'));
+  const body = block.slice(0, block.indexOf('\n};'));
+  const keys = [...body.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]);
+  const dups = keys.filter((k, i) => keys.indexOf(k) !== i);
+  assert.deepEqual(dups, []);
+});
+
+test('härdade update/delete-regler finns kvar på kärnkollektionerna', () => {
+  const expected = {
+    tool_runs: ['deleteRule'],
+    workshop_runs: ['deleteRule'],
+    workshop_assignments: ['updateRule', 'deleteRule'],
+    workshops: ['updateRule', 'deleteRule'],
+    startups: ['updateRule'],
+    tools: ['updateRule'],
+    missions: ['updateRule'],
+    deals: ['updateRule', 'deleteRule'],
+    incubator_events: ['updateRule', 'deleteRule'],
+    event_signups: ['updateRule', 'deleteRule'],
+    tenants: ['updateRule']
+  };
+  for (const [name, keys] of Object.entries(expected)) {
+    for (const key of keys) assert.equal(typeof SECURITY_RULES[name]?.[key], 'string', `${name}.${key}`);
+  }
+});
