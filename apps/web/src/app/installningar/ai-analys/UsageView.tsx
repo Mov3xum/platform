@@ -12,6 +12,8 @@ import {
   type ToolRunStatus
 } from '@/lib/labels';
 import { estimateCostUsd } from '@/lib/ai/mistral';
+import { collectPages } from '@/lib/ai/usage-rollup';
+import { loadPeriodUsageTotals, type PeriodUsageTotals } from '@/lib/ai/usage-totals.server';
 import {
   co2GramsForTokens,
   waterMlForTokens,
@@ -45,7 +47,7 @@ const SURFACE_LABELS: Record<AiUsageSurface, string> = {
   toolbox: 'Verktyg (Toolbox)',
   tool_chat: 'Verktygschatt',
   dashboard_chat: 'Dashboard-chatt',
-  startup_chat: 'Bolagschatt',
+  startup_chat: 'Intagschatt (publik)',
   intl: 'Översättning',
   suggestions: 'Förslag',
   workshop_run: 'Workshop',
@@ -127,55 +129,91 @@ function formatPbError(err: unknown): string {
 
 interface PeriodRows<T> {
   current: T[];
-  previous: T[];
+  /** PB:s exakta antal rader i innevarande period (även när läsningen kapats). */
+  currentTotal: number;
+  /** false = taket nåddes → fördelningar ur `current` är en nedre gräns. */
+  currentComplete: boolean;
+  /** Exakt antal rader i föregående period (bara räknat, inga rader lästa). */
+  previousCount: number;
   /** True när PB inte stödde datumfiltret (created-fält saknas) och perioden fönstrats i JS. */
   degraded: boolean;
 }
 
+/** Tak per kollektion och period — aldrig en tyst kapning (§ 33.4). */
+const PERIOD_MAX_ROWS = 10_000;
+
 /**
- * Laddar innevarande + föregående periods rader för en tenant-scopad
- * kollektion. Fail-soft: PB svarar HTTP 400 på `created`-filter/-sortering
- * när autodate-fälten saknas (PB v0.23-buggen, CLAUDE.md § 23.6; fixas av
- * migration 1700000128) — då hämtas raderna utan datumfilter och fönstras i
- * JS i stället. Rader utan tidsstämpel räknas till innevarande period
- * (hellre synliga än borttappade). PB:s datumsträngar jämför korrekt
- * lexikografiskt.
+ * Laddar innevarande periods rader (paginerat, bara `fields`, med tak) och
+ * föregående periods ANTAL för en tenant-scopad kollektion. Tidigare lästes
+ * en enda sida om 500 rader och resten tappades tyst. Fail-soft: PB svarar
+ * HTTP 400 på `created`-filter/-sortering när autodate-fälten saknas (PB
+ * v0.23-buggen, CLAUDE.md § 23.6; fixas av migration 1700000128) — då hämtas
+ * raderna utan datumfilter och fönstras i JS i stället. Rader utan
+ * tidsstämpel räknas till innevarande period (hellre synliga än
+ * borttappade). PB:s datumsträngar jämför korrekt lexikografiskt.
  */
 async function loadPeriodRows<T extends { created?: string }>(
   pb: Awaited<ReturnType<typeof getServerPb>>,
   collection: string,
   tenant: string,
   sincePb: string,
-  prevSincePb: string
+  prevSincePb: string,
+  fields: string
 ): Promise<PeriodRows<T>> {
   try {
-    const current = await pb.collection(collection).getList<T>(1, 500, {
-      filter: pb.filter('tenant = {:tenant} && created >= {:since}', {
-        tenant,
-        since: sincePb
-      }),
-      sort: '-created'
-    });
-    const previous = await pb.collection(collection).getList<T>(1, 500, {
+    const current = await collectPages<T>(
+      (page, perPage) =>
+        pb.collection(collection).getList<T>(page, perPage, {
+          filter: pb.filter('tenant = {:tenant} && created >= {:since}', {
+            tenant,
+            since: sincePb
+          }),
+          fields,
+          sort: '-created'
+        }),
+      { maxRows: PERIOD_MAX_ROWS }
+    );
+    const previous = await pb.collection(collection).getList(1, 1, {
       filter: pb.filter(
         'tenant = {:tenant} && created >= {:prevSince} && created < {:since}',
         { tenant, prevSince: prevSincePb, since: sincePb }
       ),
-      sort: '-created'
+      fields: 'id'
     });
-    return { current: current.items, previous: previous.items, degraded: false };
+    return {
+      current: current.items,
+      currentTotal: current.total,
+      currentComplete: current.complete,
+      previousCount: previous.totalItems,
+      degraded: false
+    };
   } catch {
-    const res = await pb.collection(collection).getList<T>(1, 500, {
-      filter: pb.filter('tenant = {:tenant}', { tenant })
-    });
-    const current = res.items.filter((r) => !r.created || r.created >= sincePb);
-    const previous = res.items.filter(
-      (r) => Boolean(r.created) && (r.created as string) >= prevSincePb && (r.created as string) < sincePb
+    const res = await collectPages<T>(
+      (page, perPage) =>
+        pb.collection(collection).getList<T>(page, perPage, {
+          filter: pb.filter('tenant = {:tenant}', { tenant }),
+          fields
+        }),
+      { maxRows: PERIOD_MAX_ROWS }
     );
+    const current = res.items.filter((r) => !r.created || r.created >= sincePb);
+    const previousCount = res.items.filter(
+      (r) => Boolean(r.created) && (r.created as string) >= prevSincePb && (r.created as string) < sincePb
+    ).length;
     current.sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));
-    return { current, previous, degraded: true };
+    return {
+      current,
+      currentTotal: current.length,
+      currentComplete: res.complete,
+      previousCount,
+      degraded: true
+    };
   }
 }
+
+const RUN_FIELDS =
+  'id,tool,status,tokens_in,tokens_out,cost_estimate_usd,model,triggered_by,created,started_at,completed_at';
+const EVENT_FIELDS = 'id,model,surface,tokens_in,tokens_out,cost_estimate_usd,created';
 
 function buildDailyBuckets(days: number): { key: string; label: string }[] {  const out: { key: string; label: string }[] = [];
   const today = new Date();
@@ -249,7 +287,9 @@ export async function loadUsageView({
 
   // ── Load tool runs (current + previous period) ──────────────────────
   let runs: ToolRun[] = [];
-  let previousPeriodRuns: ToolRun[] = [];
+  let runsTotal = 0;
+  let runsComplete = true;
+  let previousRunsCount = 0;
   let runsLoadFailed = false;
   let runsLoadError: string | undefined;
   let runsDegraded = false;
@@ -259,10 +299,13 @@ export async function loadUsageView({
       'tool_runs',
       user.tenant,
       pbDate(sinceIso),
-      pbDate(previousSinceIso)
+      pbDate(previousSinceIso),
+      RUN_FIELDS
     );
     runs = loaded.current;
-    previousPeriodRuns = loaded.previous;
+    runsTotal = loaded.currentTotal;
+    runsComplete = loaded.currentComplete;
+    previousRunsCount = loaded.previousCount;
     runsDegraded = loaded.degraded;
   } catch (error) {
     runsLoadFailed = true;
@@ -275,7 +318,9 @@ export async function loadUsageView({
 
   // ── Load ai_usage_events (källa av sanning för tokens + kostnad) ────
   let events: AiUsageEvent[] = [];
-  let previousPeriodEvents: AiUsageEvent[] = [];
+  let eventsTotal = 0;
+  let eventsComplete = true;
+  let previousEventsCount = 0;
   let eventsLoadError: string | undefined;
   let eventsDegraded = false;
   try {
@@ -284,10 +329,13 @@ export async function loadUsageView({
       'ai_usage_events',
       user.tenant,
       pbDate(sinceIso),
-      pbDate(previousSinceIso)
+      pbDate(previousSinceIso),
+      EVENT_FIELDS
     );
     events = loaded.current;
-    previousPeriodEvents = loaded.previous;
+    eventsTotal = loaded.currentTotal;
+    eventsComplete = loaded.currentComplete;
+    previousEventsCount = loaded.previousCount;
     eventsDegraded = loaded.degraded;
   } catch (error) {
     eventsLoadError = formatPbError(error);
@@ -313,30 +361,44 @@ export async function loadUsageView({
 
   // ── Load activities for module-adoption signal ──────────────────────
   let activities: ActivityRecord[] = [];
+  let activitiesComplete = true;
   try {
-    const list = await pb.collection('activities').getList<ActivityRecord>(1, 500, {
-      filter: pb.filter('created >= {:since}', { since: pbDate(sinceIso) }),
-      sort: '-created'
-    });
+    const list = await collectPages<ActivityRecord>(
+      (page, perPage) =>
+        pb.collection('activities').getList<ActivityRecord>(page, perPage, {
+          filter: pb.filter('tenant = {:tenant} && created >= {:since}', {
+            tenant: user.tenant,
+            since: pbDate(sinceIso)
+          }),
+          fields: 'id,startup,kind,created',
+          sort: '-created'
+        }),
+      { maxRows: PERIOD_MAX_ROWS }
+    );
     activities = list.items;
+    activitiesComplete = list.complete;
   } catch {
     /* ignore */
   }
 
   // ── Load explicit quality feedback (👍/👎) ─────────────────────────
   let feedback: ToolRunFeedback[] = [];
+  let feedbackComplete = true;
   let feedbackLoadError: string | undefined;
   try {
-    const list = await pb
-      .collection('tool_run_feedback')
-      .getList<ToolRunFeedback>(1, 500, {
-        filter: pb.filter('tenant = {:tenant} && created >= {:since}', {
-          tenant: user.tenant,
-          since: pbDate(sinceIso)
+    const list = await collectPages<ToolRunFeedback>(
+      (page, perPage) =>
+        pb.collection('tool_run_feedback').getList<ToolRunFeedback>(page, perPage, {
+          filter: pb.filter('tenant = {:tenant} && created >= {:since}', {
+            tenant: user.tenant,
+            since: pbDate(sinceIso)
+          }),
+          sort: '-created'
         }),
-        sort: '-created'
-      });
+      { maxRows: PERIOD_MAX_ROWS }
+    );
     feedback = list.items;
+    feedbackComplete = list.complete;
   } catch (error) {
     feedbackLoadError = formatPbError(error);
     // Fail-soft: collectionen kan saknas på äldre PB-instanser.
@@ -374,15 +436,38 @@ export async function loadUsageView({
   // Fallback till tool_runs om events-collectionen är tom/saknas på
   // äldre PB-instanser så vi aldrig visar nollor när det finns data.
   const eventsHaveData = events.length > 0;
-  const totalTokensIn = eventsHaveData
-    ? events.reduce((acc, e) => acc + (e.tokens_in || 0), 0)
-    : runs.reduce((acc, r) => acc + (r.tokens_in || 0), 0);
-  const totalTokensOut = eventsHaveData
-    ? events.reduce((acc, e) => acc + (e.tokens_out || 0), 0)
-    : runs.reduce((acc, r) => acc + (r.tokens_out || 0), 0);
+  // Kapad event-läsning → hämta totalerna ur månadsrollupen (exakt för hela
+  // månader, verifierad mot PB:s exakta antal) + delmånaden som events. Är
+  // även den kapad visas totalerna som nedre gräns (aldrig tyst partiellt).
+  let rollupTotals: PeriodUsageTotals | null = null;
+  if (eventsHaveData && !eventsComplete) {
+    try {
+      rollupTotals = await loadPeriodUsageTotals(pb, {
+        tenant: user.tenant,
+        sincePb: pbDate(sinceIso)
+      });
+    } catch {
+      rollupTotals = null;
+    }
+  }
+  const totalsComplete = eventsHaveData
+    ? eventsComplete || Boolean(rollupTotals?.complete)
+    : runsComplete;
+  const totalTokensIn = rollupTotals
+    ? rollupTotals.total.tokensIn
+    : eventsHaveData
+      ? events.reduce((acc, e) => acc + (e.tokens_in || 0), 0)
+      : runs.reduce((acc, r) => acc + (r.tokens_in || 0), 0);
+  const totalTokensOut = rollupTotals
+    ? rollupTotals.total.tokensOut
+    : eventsHaveData
+      ? events.reduce((acc, e) => acc + (e.tokens_out || 0), 0)
+      : runs.reduce((acc, r) => acc + (r.tokens_out || 0), 0);
   const totalTokens = totalTokensIn + totalTokensOut;
 
-  const totalCostUsd = eventsHaveData
+  const totalCostUsd = rollupTotals
+    ? rollupTotals.total.costUsd
+    : eventsHaveData
     ? events.reduce((acc, e) => acc + (e.cost_estimate_usd || 0), 0)
     : runs.reduce((acc, r) => {
         if (r.cost_estimate_usd && r.cost_estimate_usd > 0)
@@ -394,8 +479,9 @@ export async function loadUsageView({
       }, 0);
 
   // Aktivitet inkluderar både toolbox-runs och övriga chatt-anrop.
-  const totalAiCalls = events.length || runs.length;
-  const previousAiCalls = previousPeriodEvents.length || previousPeriodRuns.length;
+  // Antalen är EXAKTA (PB:s totalItems) även när raderna kapats.
+  const totalAiCalls = eventsTotal || runsTotal;
+  const previousAiCalls = previousEventsCount || previousRunsCount;
 
   // Föregående-period-delta utgår från total AI-aktivitet (alla ytor)
   // när vi har events; annars från toolbox-runs som fallback.
@@ -601,6 +687,25 @@ export async function loadUsageView({
   // Review-kö: senaste 👎 med orsak (människa-i-loopen → promptfix).
   const recentDowns = feedback.filter((f) => f.rating === 'down').slice(0, 10);
 
+  // ── Ärlighet om kapade läsningar (§ 33.4) ─────────────────────────
+  // Totaler (tokens/kostnad/CO₂) är exakta när events lästes kompletta eller
+  // månadsrollupen täckte dem; annars "≥". Fördelningar (per modell/yta/
+  // verktyg/dag) bygger på de lästa raderna och är då en nedre gräns.
+  const lowerBound = totalsComplete ? '' : '≥ ';
+  const truncatedSources: string[] = [];
+  if (!eventsComplete) {
+    truncatedSources.push(
+      `AI-anrop (${formatNumber(events.length)} av ${formatNumber(eventsTotal)} lästa)`
+    );
+  }
+  if (!runsComplete) {
+    truncatedSources.push(
+      `agentkörningar (${formatNumber(runs.length)} av ${formatNumber(runsTotal)} lästa)`
+    );
+  }
+  if (!activitiesComplete) truncatedSources.push('aktiviteter');
+  if (!feedbackComplete) truncatedSources.push('kvalitetsfeedback');
+
   // ── Right rail ──────────────────────────────────────────────────────
   const rail = (
     <>
@@ -622,22 +727,22 @@ export async function loadUsageView({
           />
           <RailStat
             label="Tokens"
-            value={formatNumber(totalTokens)}
-            hint={`${formatNumber(totalTokensIn)} in · ${formatNumber(totalTokensOut)} ut`}
+            value={`${lowerBound}${formatNumber(totalTokens)}`}
+            hint={`${formatNumber(totalTokensIn)} in · ${formatNumber(totalTokensOut)} ut${totalsComplete ? '' : ' · nedre gräns'}`}
           />
           <RailStat
             label="Kostnad"
-            value={formatCostUsd(totalCostUsd)}
-            hint="ungefärlig"
+            value={`${lowerBound}${formatCostUsd(totalCostUsd)}`}
+            hint={totalsComplete ? 'ungefärlig' : 'nedre gräns'}
           />
           <RailStat
             label="CO₂-utsläpp"
-            value={`≈ ${formatCo2Grams(co2GramsForTokens(totalTokens))}`}
+            value={`${lowerBound || '≈ '}${formatCo2Grams(co2GramsForTokens(totalTokens))}`}
             hint="1,14 g / 400 tokens (Mistral)"
           />
           <RailStat
             label="Vatten"
-            value={`≈ ${formatWaterMl(waterMlForTokens(totalTokens))}`}
+            value={`${lowerBound || '≈ '}${formatWaterMl(waterMlForTokens(totalTokens))}`}
             hint="45 ml / 400 tokens (Mistral)"
           />
         </div>
@@ -704,6 +809,21 @@ export async function loadUsageView({
 
   const content = (
       <div className="flex flex-col gap-4">
+        {truncatedSources.length > 0 && (
+          <div className="rounded-2xl border border-default bg-movexum-pastell-gul p-4 text-[13px] text-movexum-morkgul">
+            <div className="font-medium">
+              Underlaget är större än vad som läses per sidvisning — visas som nedre gräns.
+            </div>
+            <div className="mt-1">
+              Kapat: {truncatedSources.join(', ')}. Fördelningar per modell, yta,
+              verktyg och dag bygger på de lästa raderna och är därför en{' '}
+              <strong>nedre gräns</strong>.{' '}
+              {totalsComplete
+                ? 'Totalerna för tokens, kostnad och miljöpåverkan är ändå exakta (ur månadsrollupen ai_usage_monthly).'
+                : 'Även totalerna är en nedre gräns (markerade med ≥). Välj en kortare period för exakta värden.'}
+            </div>
+          </div>
+        )}
         {runsLoadFailed && (
           <div className="rounded-2xl border border-default bg-surface p-4 text-[13px] text-foreground-muted">
             <div className="font-medium text-foreground">

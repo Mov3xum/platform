@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { sanitizeReportSectionPatch } from '@/lib/report-section';
 import type {
   IncubatorReport,
   ReportRecipient,
@@ -123,10 +124,15 @@ export async function updateSectionAction(
   if ('error' in loaded) return { error: loaded.error };
   const { pb, report } = loaded;
 
+  // Bara vitlistade fält (name/state/content_md), typkontrollerade och
+  // längdbegränsade — aldrig godtyckliga klientnycklar i sections_json.
+  const checked = sanitizeReportSectionPatch(partial);
+  if (!checked.ok) return { error: checked.error };
+
   const sections = Array.isArray(report.sections_json) ? [...report.sections_json] : [];
   const idx = sections.findIndex((s) => s.id === sectionId);
   if (idx === -1) return { error: 'Sektionen hittades inte.' };
-  sections[idx] = { ...sections[idx], ...partial, id: sections[idx].id };
+  sections[idx] = { ...sections[idx], ...checked.patch, id: sections[idx].id };
 
   try {
     await pb.collection(PB_COLLECTIONS.reports).update(reportId, {

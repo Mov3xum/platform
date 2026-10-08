@@ -83,8 +83,10 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     const accountKey = `login:acct:${ip}:${email.toLowerCase()}`;
     const ipKey = `login:ip:${ip}`;
 
-    const acctLimit = checkRateLimit(accountKey, LOGIN_MAX_PER_ACCOUNT);
-    const ipLimit = checkRateLimit(ipKey, LOGIN_MAX_PER_IP);
+    const [acctLimit, ipLimit] = await Promise.all([
+      checkRateLimit(accountKey, LOGIN_MAX_PER_ACCOUNT),
+      checkRateLimit(ipKey, LOGIN_MAX_PER_IP)
+    ]);
     if (acctLimit.blocked || ipLimit.blocked) {
       const retryMin = Math.ceil(Math.max(acctLimit.retryAfterSec, ipLimit.retryAfterSec) / 60);
       return { error: `För många inloggningsförsök. Försök igen om ca ${retryMin} min.` };
@@ -102,8 +104,10 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
       // Räkna bara faktiska autentiseringsfel (fel uppgifter), inte
       // infrastrukturfel som att PB inte går att nå.
       if (e.status === 400 || e.status === 403) {
-        recordFailure(accountKey, LOGIN_WINDOW_MS);
-        recordFailure(ipKey, LOGIN_WINDOW_MS);
+        await Promise.all([
+          recordFailure(accountKey, LOGIN_WINDOW_MS),
+          recordFailure(ipKey, LOGIN_WINDOW_MS)
+        ]);
       }
 
       if (e.status === 400) {
@@ -123,8 +127,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     }
 
     // Lyckad inloggning — nollställ brute-force-räknarna.
-    clearFailures(accountKey);
-    clearFailures(ipKey);
+    await Promise.all([clearFailures(accountKey), clearFailures(ipKey)]);
 
     // Trim down the cookie payload to just what getCurrentUser needs.
     // The full PB user record with expanded tenant can easily exceed the 4KB
@@ -214,11 +217,17 @@ export async function requestPasswordResetAction(
   const ip = await getClientIp();
   const resetIpKey = `reset:ip:${ip}`;
   const resetEmailKey = `reset:email:${email.toLowerCase()}`;
-  if (checkRateLimit(resetIpKey, RESET_MAX_PER_IP).blocked || checkRateLimit(resetEmailKey, RESET_MAX_PER_EMAIL).blocked) {
+  const [resetIpLimit, resetEmailLimit] = await Promise.all([
+    checkRateLimit(resetIpKey, RESET_MAX_PER_IP),
+    checkRateLimit(resetEmailKey, RESET_MAX_PER_EMAIL)
+  ]);
+  if (resetIpLimit.blocked || resetEmailLimit.blocked) {
     return { success: true };
   }
-  recordFailure(resetIpKey, LOGIN_WINDOW_MS);
-  recordFailure(resetEmailKey, LOGIN_WINDOW_MS);
+  await Promise.all([
+    recordFailure(resetIpKey, LOGIN_WINDOW_MS),
+    recordFailure(resetEmailKey, LOGIN_WINDOW_MS)
+  ]);
 
   const pbUrl = getServerPbUrl();
   const pb = new PocketBase(pbUrl);

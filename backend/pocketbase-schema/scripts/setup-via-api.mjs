@@ -25,6 +25,7 @@
 
 import PocketBase from 'pocketbase';
 import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
+import { SECURITY_RULES, PROTECTED_FILE_FIELDS } from './security-rules.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -2283,7 +2284,8 @@ await ensureCollection({
   type: 'base',
   fields: [
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: false, minSelect: 1, maxSelect: 1 },
-    { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: false, minSelect: 1, maxSelect: 1 },
+    // Migration 1700000185: valfritt — anonyma publika flöden loggas via superuser.
+    { name: 'user', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'surface', type: 'select', required: true, maxSelect: 1, values: ['toolbox', 'tool_chat', 'dashboard_chat', 'startup_chat', 'intl', 'suggestions', 'workshop_run', 'connector_chat'] },
     { name: 'model', type: 'text', required: true, max: 100 },
     // Migration 1700000145: talfälten är VALFRIA — PB tolkar 0 som "tomt" för
@@ -2312,7 +2314,41 @@ await ensureCollection({
 await patchCollection('ai_usage_events', [], {
   tokens_in: { required: false },
   tokens_out: { required: false },
-  cost_estimate_usd: { required: false }
+  cost_estimate_usd: { required: false },
+  // Migration 1700000185: `user` valfritt — publika flöden (publik
+  // kompass-chatt, AI-sammanställning av formulär/quiz) saknar inloggad
+  // användare och loggas anonymt via superuser. createRule oförändrad.
+  user: { required: false, minSelect: 0 }
+});
+
+// Migration 1700000185: ai_usage_monthly — månadsrollup per tenant (§ 9.6).
+// Hålls aktuell atomiskt av hooks/ai_usage_rollup.pb.js; backfillen görs av
+// migrationen (här skapas bara kollektionen om den saknas). Bara superuser
+// skriver; staff/observer i samma tenant läser.
+await ensureCollection({
+  id: 'ai_usage_monthly_collection',
+  name: 'ai_usage_monthly',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'month', type: 'text', required: true, min: 7, max: 7, pattern: '^\\d{4}-\\d{2}$' },
+    // Talfälten VALFRIA — PB tolkar 0 som "tomt" för required (§ 9.6).
+    { name: 'cost_usd', type: 'number', required: false, min: 0 },
+    { name: 'tokens_in', type: 'number', required: false, min: 0 },
+    { name: 'tokens_out', type: 'number', required: false, min: 0 },
+    { name: 'events', type: 'number', required: false, min: 0 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_ai_usage_monthly_tenant_month ON ai_usage_monthly (tenant, month)',
+    'CREATE INDEX idx_ai_usage_monthly_month ON ai_usage_monthly (month)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_READ}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_READ}`,
+  createRule: null,
+  updateRule: null,
+  deleteRule: null
 });
 
 // Migration 1700000059: startup_financials — årsmetrics per bolag.
@@ -4276,6 +4312,54 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
 
+// Migration 1700000184: delat processöverskridande tillstånd för horisontell
+// skalning (§ 21.8). `rate_limits` = rate-limiterns räknare (key = HMAC/
+// SHA-256 av den logiska nyckeln, aldrig e-post/IP i klartext); `app_locks` =
+// distribuerade lås (unikt index på key avgör vem som håller låset).
+// ALLA regler null — bara superuser (appens cachade superuser-klient).
+await ensureCollection({
+  id: 'rate_limits_collection',
+  name: 'rate_limits',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'key', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'reset_at', type: 'date', required: true }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_rate_limits_key ON rate_limits (key)',
+    'CREATE INDEX idx_rate_limits_reset_at ON rate_limits (reset_at)'
+  ],
+  listRule: null,
+  viewRule: null,
+  createRule: null,
+  updateRule: null,
+  deleteRule: null
+});
+await ensureCollection({
+  id: 'app_locks_collection',
+  name: 'app_locks',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'key', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'owner', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'expires_at', type: 'date', required: true }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_app_locks_key ON app_locks (key)',
+    'CREATE INDEX idx_app_locks_expires_at ON app_locks (expires_at)'
+  ],
+  listRule: null,
+  viewRule: null,
+  createRule: null,
+  updateRule: null,
+  deleteRule: null
+});
+
 // Migration 1700000158: notifications.kind += contact_request/contact_decision
 // (union — ensureCollection synkar inte fält på befintlig collection).
 // + migration 1700000169 (stödcheckar § 46): support_check_*-notiser.
@@ -5064,6 +5148,14 @@ const FORCE_CREATE_RULES = {
   support_check_rules: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
+// § 21.8: de härdade createRules (skapare/tenant pinnade, globala = null) vinner
+// över de roll-lösa defaults ovan — annars skulle varje sync återinföra dem.
+for (const [collectionName, rules] of Object.entries(SECURITY_RULES)) {
+  if (Object.prototype.hasOwnProperty.call(rules, 'createRule')) {
+    FORCE_CREATE_RULES[collectionName] = rules.createRule;
+  }
+}
+
 async function enforceCreateRules(passLabel) {
   log(`Forcerar robusta createRules${passLabel ? ` (${passLabel})` : ''}...`);
   for (const [collectionName, desiredRule] of Object.entries(FORCE_CREATE_RULES)) {
@@ -5126,6 +5218,46 @@ log('Sveper list/view/update/delete-regler (?= → :each ?=)...');
 // alltid är sista sanningen i scriptet (self-healing-jobbet verifierar just
 // detta direkt efter setup-via-api-körningen).
 await enforceCreateRules('pass 2');
+
+// 24. säkerhetshärdning (§ 21.8) — SIST, så ingen tidigare collection-def
+// kan lämna en lösare list/view/update/delete-regel kvar. Speglar migration
+// 1700000182; verify-baseline.mjs asserterar exakt samma regler.
+log('Tvingar fram härdade API-regler (§ 21.8)...');
+for (const [collectionName, rules] of Object.entries(SECURITY_RULES)) {
+  let collection;
+  try {
+    collection = await pb.collections.getOne(collectionName);
+  } catch (err) {
+    if (err?.status === 404) {
+      warn(`säkerhetsregler: collection "${collectionName}" finns inte — hoppar`);
+      continue;
+    }
+    throw err;
+  }
+  const patch = {};
+  for (const [key, value] of Object.entries(rules)) {
+    if ((collection[key] ?? null) !== value) patch[key] = value;
+  }
+  const protectedNames = PROTECTED_FILE_FIELDS[collectionName] || [];
+  if (protectedNames.length > 0) {
+    let changed = false;
+    const fields = (collection.fields || []).map((f) => {
+      if (protectedNames.includes(f.name) && f.type === 'file' && !f.protected) {
+        changed = true;
+        return { ...f, protected: true };
+      }
+      return f;
+    });
+    if (changed) patch.fields = fields;
+  }
+  if (Object.keys(patch).length === 0) continue;
+  try {
+    await pb.collections.update(collectionName, patch);
+  } catch (err) {
+    throw new Error(`säkerhetsregler för "${collectionName}" kunde inte sättas: ${describeError(err)}`);
+  }
+  ok(`säkerhetsregler synkade: ${collectionName} (${Object.keys(patch).join(', ')})`);
+}
 
 console.log('\n✓ Klart. Logga in på <din-web-url>/login med:');
 console.log(`  E-post:   ${APP_USER_EMAIL}`);

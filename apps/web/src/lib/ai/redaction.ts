@@ -53,6 +53,11 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'tenant_integrations', // AES-256-GCM-krypterade credentials
   'user_app_integrations',
   'user_mistral_connectors',
+  // Delat skalningstillstånd (§ 21.8, migration 1700000184): rate-limiterns
+  // räknare (hashade e-post-/IP-nycklar) och distribuerade lås. Superuser-
+  // only systemdata utan värde för modellen — får aldrig nå query_collection.
+  'rate_limits',
+  'app_locks',
   // B. Strikt privat ägaren-bara-innehåll (att exponera bryter § 21-isoleringen).
   'chat_threads', // privat konversationsinnehåll (1700000083)
   'user_files', // personliga filer, strikt ägaren-bara (1700000085)

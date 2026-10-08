@@ -11,8 +11,6 @@ import { NextModuleCta } from './NextModuleCta';
 interface Props {
   module: PublicCompassModule;
   questions: CompassQuestion[];
-  /** Tenantens namn — visas i det nedladdningsbara resultatet. */
-  brandName?: string;
   /** Kedjad nästa modul (migration 1700000124) — visas efter slutfört flöde. */
   nextModule?: NextModuleLink | null;
   /** Enkätens subjekt ur `?om=<id>` (§ 43). */
@@ -31,7 +29,7 @@ const FLOW_LABEL: Record<string, string> = {
 // Publik (oinloggad) körning av en Startupkompass-modul. Visar en
 // samtyckesgrind före all datainsamling (GDPR art. 7) och dispatchar sedan
 // till rätt flöde. Skickar consent=true till de publika API-routarna.
-export function PublicModuleRunner({ module, questions, brandName, nextModule, subject }: Props) {
+export function PublicModuleRunner({ module, questions, nextModule, subject }: Props) {
   const hasConsentGate = Boolean(module.consent_note);
   const [consented, setConsented] = useState(!hasConsentGate);
 
@@ -91,8 +89,6 @@ export function PublicModuleRunner({ module, questions, brandName, nextModule, s
         requirePhone={module.require_phone}
         requireOrganization={module.require_organization}
         successMessage={module.success_message}
-        moduleName={module.welcome_title || module.name}
-        brandName={brandName}
         nextModule={nextModule}
         subject={subject}
       />

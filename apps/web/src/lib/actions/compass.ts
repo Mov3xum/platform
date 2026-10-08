@@ -12,7 +12,8 @@ import {
   logSecurity,
   updateLead
 } from '@/lib/compass/store';
-import { marketScanLead, reviewLead, scoreLead } from '@/lib/compass/chat';
+import { marketScanLead, reviewLead, scoreLead, type CompassAiUsage } from '@/lib/compass/chat';
+import { logAiUsage } from '@/lib/ai/usage';
 import { logAgentAction } from '@/lib/core/write';
 import { nextCompassQuestionSortOrder, reorderCompassQuestions } from '@/lib/core/write/compass';
 import { describePbError, pbFieldCodes, pbFieldErrors, pbStatus } from '@/lib/pb-error';
@@ -81,6 +82,28 @@ export async function updateLeadNotesAction(formData: FormData) {
   revalidatePath(`/inflode/leads/${id}`);
 }
 
+/**
+ * Loggar lead-granskningens Mistral-anrop i `ai_usage_events` (surface
+ * `suggestions`, § 9.6) så att de räknas mot månadstaket och syns i
+ * AI-analysen. Väntas in (ingen fire-and-forget); logAiUsage är fail-soft.
+ */
+async function logLeadUsages(
+  pb: PocketBase,
+  user: { tenant: string; id: string },
+  usages: CompassAiUsage[]
+): Promise<void> {
+  for (const u of usages) {
+    await logAiUsage(pb, {
+      tenant: user.tenant,
+      userId: user.id,
+      surface: 'suggestions',
+      model: u.model,
+      tokensIn: u.tokensIn,
+      tokensOut: u.tokensOut
+    });
+  }
+}
+
 export async function rescoreLeadAction(formData: FormData) {
   const user = await requireUser();
   if (!hasRole(user.roles, [...STAFF_ROLES])) {
@@ -93,14 +116,19 @@ export async function rescoreLeadAction(formData: FormData) {
   const lead = await getLead(pb, user.tenant, id);
   if (!lead) throw new Error('Not found');
 
-  const { score, reasoning } = await scoreLead({
-    name: lead.name ?? null,
-    email: lead.email ?? null,
-    phone: lead.phone ?? null,
-    organization: lead.organization ?? null,
-    idea_summary: lead.idea_summary ?? null,
-    idea_category: lead.idea_category ?? null
-  });
+  const usages: CompassAiUsage[] = [];
+  const { score, reasoning } = await scoreLead(
+    {
+      name: lead.name ?? null,
+      email: lead.email ?? null,
+      phone: lead.phone ?? null,
+      organization: lead.organization ?? null,
+      idea_summary: lead.idea_summary ?? null,
+      idea_category: lead.idea_category ?? null
+    },
+    (u) => usages.push(u)
+  );
+  await logLeadUsages(pb, user, usages);
   await updateLead(pb, user.tenant, id, { score, score_reasoning: reasoning });
 
   revalidatePath(`/inflode/leads/${id}`);
@@ -202,7 +230,9 @@ export async function runAiReviewAction(formData: FormData) {
   const lead = await getLead(pb, user.tenant, id);
   if (!lead) throw new Error('Not found');
 
-  const review = await reviewLead(leadToExtractedData(lead));
+  const usages: CompassAiUsage[] = [];
+  const review = await reviewLead(leadToExtractedData(lead), (u) => usages.push(u));
+  await logLeadUsages(pb, user, usages);
   await updateLead(pb, user.tenant, id, { ai_review: review });
   revalidatePath(`/inflode/leads/${id}`);
 }
@@ -218,7 +248,9 @@ export async function runMarketScanAction(formData: FormData) {
   const lead = await getLead(pb, user.tenant, id);
   if (!lead) throw new Error('Not found');
 
-  const scan = await marketScanLead(leadToExtractedData(lead));
+  const usages: CompassAiUsage[] = [];
+  const scan = await marketScanLead(leadToExtractedData(lead), (u) => usages.push(u));
+  await logLeadUsages(pb, user, usages);
   await updateLead(pb, user.tenant, id, { market_scan: scan });
   revalidatePath(`/inflode/leads/${id}`);
 }
