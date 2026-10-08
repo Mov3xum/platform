@@ -160,7 +160,8 @@ export async function POST(req: Request) {
           // pipelinen kan verifieras) men exkluderas från all statistik.
           sourceKey: PREVIEW_SOURCE_KEY,
           // Bara en riktig modul-slug attribueras i analytics (inte sentineln).
-          landingModule: body.moduleSlug
+          landingModule: body.moduleSlug,
+          usageUserId: user.id
         });
       }
     } catch {

@@ -3,6 +3,12 @@ import type { ReactNode } from 'react';
 import { aiAnalysHref } from './paths';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import {
+  loadPeriodUsageTotals,
+  USAGE_EVENTS_MAX_ROWS,
+  type PeriodUsageTotals
+} from '@/lib/ai/usage-totals.server';
+import type { UsageTotals } from '@/lib/ai/usage-rollup';
+import {
   AI_IMPACT_SOURCE_LABEL,
   AI_IMPACT_SOURCE_URL,
   co2GramsForTokens,
@@ -46,14 +52,6 @@ function rangeStart(range: RangeKey, now: Date): string {
     .replace('T', ' ');
 }
 
-interface UsageEventRow {
-  tenant?: string;
-  tokens_in?: number;
-  tokens_out?: number;
-  cost_estimate_usd?: number;
-  created?: string;
-}
-
 interface TenantUsage {
   tenantId: string;
   name: string;
@@ -62,12 +60,6 @@ interface TenantUsage {
   tokensOut: number;
   costUsd: number;
 }
-
-// Pagineringstak — samma best-effort-princip som budget.server.ts. Vid cap
-// visas en tydlig varning (vi presenterar aldrig ett partiellt värde som
-// komplett, jfr aggregate_collection § 9.3).
-const MAX_PAGES = 40;
-const PAGE_SIZE = 500;
 
 function formatCostUsd(n: number): string {
   if (n === 0) return '$0';
@@ -86,19 +78,21 @@ export interface MiljoViewResult {
  * per tenant över alla tenants via superuser (§ 28.2).
  */
 export async function loadMiljoView({ rangeParam }: { rangeParam?: string }): Promise<MiljoViewResult> {
-  const range: RangeKey = isRangeKey(rangeParam) ? rangeParam : '30d';
+  // Default = innevarande månad: läses exakt ur månadsrollupen
+  // (`ai_usage_monthly`, en rad per tenant) i stället för att paginera
+  // tusentals events vid varje sidvisning (§ 9.6 / § 28).
+  const range: RangeKey = isRangeKey(rangeParam) ? rangeParam : 'manad';
 
   const since = rangeStart(range, new Date());
 
   // Superuser krävs för läsning över tenant-gränser (RLS:en på
-  // ai_usage_events är tenant-scopad). Degradera tydligt, inte tyst.
+  // ai_usage_events/ai_usage_monthly är tenant-scopad). Degradera tydligt,
+  // inte tyst.
   const su = await getSuperuserPb();
 
   let tenantNames = new Map<string, string>();
-  let rows: UsageEventRow[] = [];
-  let truncated = false;
+  let usage: PeriodUsageTotals | null = null;
   let loadError: string | null = null;
-  let degraded = false;
 
   if (!su.ok) {
     loadError =
@@ -116,64 +110,30 @@ export async function loadMiljoView({ rangeParam }: { rangeParam?: string }): Pr
       tenantNames = new Map(
         tenants.map((t) => [t.id, t.name || t.slug || t.id])
       );
-
-      try {
-        for (let page = 1; page <= MAX_PAGES; page++) {
-          const res = await su.pb
-            .collection('ai_usage_events')
-            .getList<UsageEventRow>(page, PAGE_SIZE, {
-              filter: su.pb.filter('created >= {:since}', { since }),
-              fields: 'tenant,tokens_in,tokens_out,cost_estimate_usd',
-              sort: '-created'
-            });
-          rows.push(...res.items);
-          if (res.items.length < PAGE_SIZE || page * PAGE_SIZE >= res.totalItems) break;
-          if (page === MAX_PAGES) truncated = true;
-        }
-      } catch {
-        // PB 400:ar created-filter/-sortering när autodate-fälten saknas
-        // (PB v0.23-buggen, fixas av migration 1700000128). Fail-soft: hämta
-        // utan datumfilter och fönstra i JS — rader utan tidsstämpel
-        // inkluderas (hellre synliga än borttappade). Lexikografisk
-        // strängjämförelse fungerar för PB:s datumformat.
-        degraded = true;
-        rows = [];
-        for (let page = 1; page <= MAX_PAGES; page++) {
-          const res = await su.pb
-            .collection('ai_usage_events')
-            .getList<UsageEventRow>(page, PAGE_SIZE, {
-              fields: 'tenant,tokens_in,tokens_out,cost_estimate_usd,created'
-            });
-          rows.push(...res.items.filter((r) => !r.created || r.created >= since));
-          if (res.items.length < PAGE_SIZE || page * PAGE_SIZE >= res.totalItems) break;
-          if (page === MAX_PAGES) truncated = true;
-        }
-      }
+      // Hela kalendermånader ur rollupen (verifierad mot PB:s exakta antal),
+      // bara delmånaden som events. Kapad läsning → complete:false (nedre gräns).
+      usage = await loadPeriodUsageTotals(su.pb, { tenant: null, sincePb: since });
     } catch (err) {
       loadError = err instanceof Error ? err.message : 'Kunde inte läsa AI-användningen.';
-      rows = [];
+      usage = null;
     }
   }
+  const truncated = usage ? !usage.complete : false;
+  const degraded = usage ? usage.degraded : false;
 
   // ── Aggregat per tenant ───────────────────────────────────────────────
   const byTenant = new Map<string, TenantUsage>();
-  for (const row of rows) {
-    const id = row.tenant || '(okänd tenant)';
-    const entry =
-      byTenant.get(id) ||
-      ({
-        tenantId: id,
-        name: tenantNames.get(id) || id,
-        calls: 0,
-        tokensIn: 0,
-        tokensOut: 0,
-        costUsd: 0
-      } satisfies TenantUsage);
-    entry.calls += 1;
-    entry.tokensIn += Number(row.tokens_in) || 0;
-    entry.tokensOut += Number(row.tokens_out) || 0;
-    entry.costUsd += Number(row.cost_estimate_usd) || 0;
-    byTenant.set(id, entry);
+  for (const [tenantKey, t] of usage?.byTenant ?? new Map<string, UsageTotals>()) {
+    if (t.events === 0 && t.tokensIn === 0 && t.tokensOut === 0 && t.costUsd === 0) continue;
+    const id = tenantKey || '(okänd tenant)';
+    byTenant.set(id, {
+      tenantId: id,
+      name: tenantNames.get(id) || id,
+      calls: t.events,
+      tokensIn: t.tokensIn,
+      tokensOut: t.tokensOut,
+      costUsd: t.costUsd
+    });
   }
   const tenantRows = Array.from(byTenant.values()).sort(
     (a, b) => b.tokensIn + b.tokensOut - (a.tokensIn + a.tokensOut)
@@ -189,7 +149,12 @@ export async function loadMiljoView({ rangeParam }: { rangeParam?: string }): Pr
 
   const meta = (
     <span className="text-[12px] text-foreground-subtle">
-      {RANGE_LABELS[range]} · alla tenants · källa: ai_usage_events
+      {RANGE_LABELS[range]} · alla tenants · källa:{' '}
+      {usage?.source === 'rollup'
+        ? 'ai_usage_monthly'
+        : usage?.source === 'rollup+events'
+          ? 'ai_usage_monthly + ai_usage_events'
+          : 'ai_usage_events'}
     </span>
   );
 
@@ -231,9 +196,11 @@ export async function loadMiljoView({ rangeParam }: { rangeParam?: string }): Pr
 
         {truncated && (
           <div className="rounded-2xl border border-default bg-movexum-pastell-gul p-4 text-[13px] text-movexum-morkgul">
-            Perioden innehåller fler än {formatTokens(MAX_PAGES * PAGE_SIZE)} AI-anrop —
-            siffrorna nedan är en <strong>nedre gräns</strong>, inte en komplett summa.
-            Välj en kortare period för exakta värden.
+            Underlaget kunde inte läsas komplett (fler än{' '}
+            {formatTokens(USAGE_EVENTS_MAX_ROWS)} AI-anrop i den del av perioden som
+            inte täcks av månadsrollupen) — siffrorna nedan är en{' '}
+            <strong>nedre gräns</strong>, inte en komplett summa. Välj
+            &quot;Innevarande månad&quot; för exakta värden ur rollupen.
           </div>
         )}
 

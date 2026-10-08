@@ -174,6 +174,9 @@ async function verifyCollectionsExist() {
     'alumni',
     // AI + scheduling
     'ai_usage_events',
+    // Månadsrollup av AI-förbrukningen (§ 9.6, migration 1700000185) —
+    // månadstaket och AI-analysen läser den i stället för att summera events.
+    'ai_usage_monthly',
     'agent_actions',
     'tool_schedules',
     // Startupkompassen / inflöde (§ 23). Dessa skapas BARA av migrationerna
@@ -475,7 +478,10 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // Ägarbild från bolagsregister (§ 11.8, migration 1700000172). Intern
   // bedömningsdata (koncernstruktur, verklig huvudman som anonym andel) →
   // staff/observer-only; en ren startup_member ser sitt team på bolagskortet.
-  'startup_ownership'
+  'startup_ownership',
+  // AI-förbrukningens månadsrollup (§ 9.6, migration 1700000185). Tekniska
+  // aggregat per tenant — läsbar för staff/observer, aldrig för medlemmar.
+  'ai_usage_monthly'
 ];
 
 // Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa
@@ -493,7 +499,9 @@ const MUST_SCOPE_CROSS_TENANT = [
 // Oföränderliga bevis-/historikkollektioner (ISO 27001 A.8.32): update/delete
 // får BARA vara superuser (regel = null). Signeringsbevis (§ 19, § 46.4) och
 // agent-versionshistorik (§ 16.6) får aldrig kunna skrivas om via API:t.
-const MUST_BE_IMMUTABLE = ['agreement_signatures', 'tool_versions', 'support_check_revisions'];
+// `ai_usage_monthly` (§ 9.6) skrivs bara av PB-hooken/superuser — månadstaket
+// läser den, så aggregatet får aldrig gå att manipulera via API:t.
+const MUST_BE_IMMUTABLE = ['agreement_signatures', 'tool_versions', 'support_check_revisions', 'ai_usage_monthly'];
 
 // Migration 1700000175: update/delete på compass-barnkollektionerna måste bära
 // samma förälder-tenant-join som list/view (en coach kunde annars ändra en
@@ -1048,7 +1056,10 @@ const REQUIRED_SELECT_VALUES = [
 const MUST_NOT_BE_REQUIRED = [
   { collection: 'annual_wheel_items', fields: ['track'] },
   // Kontaktboken (§ 45): efternamn valfritt (chatten/Outlook-export ger ofta bara ett namnfält).
-  { collection: 'contacts', fields: ['last_name'] }
+  { collection: 'contacts', fields: ['last_name'] },
+  // AI-förbrukning (§ 9.6, migration 1700000185): anonyma publika flöden
+  // loggas utan användare — ett obligatoriskt `user` tappar dem tyst.
+  { collection: 'ai_usage_events', fields: ['user'], migration: '1700000185' }
 ];
 
 function verifyAppWritableFields(collections) {
@@ -1090,7 +1101,7 @@ function verifyAppWritableFields(collections) {
     ok(`select "${collection}.${field}" har appens värden (${values.join(', ')})`);
   }
 
-  for (const { collection, fields } of MUST_NOT_BE_REQUIRED) {
+  for (const { collection, fields, migration } of MUST_NOT_BE_REQUIRED) {
     const col = byName.get(collection);
     if (!col) continue;
     const colFields = col.fields || col.schema || [];
@@ -1099,7 +1110,7 @@ function verifyAppWritableFields(collections) {
       if (field && field.required) {
         fail(
           `Field "${collection}.${name}" är obligatoriskt men skrivs inte längre av appen ` +
-            '→ varje create avvisas med 400. Kör migration 1700000139 eller setup-via-api.mjs.'
+            `→ varje create avvisas med 400. Kör migration ${migration || '1700000139'} eller setup-via-api.mjs.`
         );
       }
     }

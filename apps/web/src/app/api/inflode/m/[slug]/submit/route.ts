@@ -110,7 +110,7 @@ export async function POST(
 
   // AI-sammanställning av det inskickade (best-effort — blockerar aldrig).
   const entries = buildSubmissionEntries(questions, answers);
-  await attachAiSummary(pb, user.tenant, lead, entries, mod.name);
+  await attachAiSummary(pb, user.tenant, lead, entries, mod.name, undefined, { userId: user.id });
 
   return NextResponse.json({ ok: true, leadId: lead.id });
 }
