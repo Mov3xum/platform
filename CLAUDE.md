@@ -4540,8 +4540,15 @@ kontouppgifter + kontoinfo (roller, organisation, kopplade bolag med namn)
 bredvid lösenord + utloggning, och därunder **Kompetensprofil** — samma
 `MinProfilForm` som `/min-profil` i bred tvåkolumnsvariant (`wide`:
 hashtags i huvudkolumnen; titel/bio, utvecklingsintressen och belastning mot
-taket i sidokolumnen). Visas med samma `canAccessModuleForUser(…,
-'min_profil')`-kurering som sidmenyn (bolagsmedlemmar ingår inte i team).
+taket i sidokolumnen). Visas **alltid för Movexum-personal**
+(admin/incubator_lead/coach/mentor), annars med `canAccessModuleForUser(…,
+'min_profil')` (bolagsmedlemmar ingår inte i team). Incident 2026-10-06:
+sektionen gatades först enbart på modulen, och ett admin-konto vars sparade
+`enabled_modules` saknade `min_profil` (backfill-migration 1700000180 körs
+först när PB-imagen byggs om) såg inga hashtags alls i Mitt konto. Sidhuvudet
+har knappen "Kompetenser & hashtags" (hopp till `#kompetensprofil`), och
+kontomenyn i railens fot heter "Mina kompetenser" och leder dit (samma
+personalvillkor).
 Båda sidorna läser via den delade `loadMyCompetenceProfile`
 (`lib/team/my-competence-profile.server.ts`) — ingen divergerande kopia;
 sparandet går som förut via `saveMyProfileAction` (revaliderar båda).

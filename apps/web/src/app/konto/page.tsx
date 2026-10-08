@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LogOut } from 'lucide-react';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { canAccessModuleForUser } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
+import type { Role } from '@platform/shared';
 import { LOGOUT_PATH } from '@/lib/auth-paths';
 import { PageShell } from '@/components/PageShell';
 import { loadMyCompetenceProfile } from '@/lib/team/my-competence-profile.server';
@@ -28,9 +29,17 @@ const roleLabels: Record<string, string> = {
 // hela innehållsbredden på desktop: kontouppgifter och lösenord sida vid sida,
 // kompetensprofilen i två kolumner under. Kompetensprofilen visas med samma
 // UI-kurering som "Min profil" i sidmenyn och delar formulär + läsväg med den.
+//
+// Movexum-personal (de som kan ingå i tvärfunktionella team) ser ALLTID
+// kompetensprofilen här, oavsett vilka moduler som är ibockade i sidmenyn:
+// ett konto vars sparade modullista saknar `min_profil` (migration 1700000180
+// körs först när PB-imagen byggs om) dolde annars sektionen helt (2026-10).
+const TEAM_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
+
 export default async function KontoPage() {
   const user = await requireUser();
-  const showCompetence = canAccessModuleForUser(user.roles, 'min_profil', user.enabledModules);
+  const showCompetence =
+    hasRole(user.roles, TEAM_ROLES) || canAccessModuleForUser(user.roles, 'min_profil', user.enabledModules);
   const pb = await getServerPb();
   const competence = showCompetence ? await loadMyCompetenceProfile(pb, user) : null;
 
@@ -50,7 +59,19 @@ export default async function KontoPage() {
   }
 
   return (
-    <PageShell title="Mitt konto">
+    <PageShell
+      title="Mitt konto"
+      actions={
+        showCompetence ? (
+          <a
+            href="#kompetensprofil"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-semibold text-brand-foreground transition hover:bg-brand-hover"
+          >
+            Kompetenser &amp; hashtags
+          </a>
+        ) : undefined
+      }
+    >
       <div className="w-full space-y-8 py-6">
         <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-6">
