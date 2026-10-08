@@ -91,6 +91,10 @@ export function RailAccountMenu({ name, email, role, initial, showProfile = fals
               Mina kompetenser
             </Link>
           )}
+          <Link href="/konto#notiser" className="mx-rail-account-item" role="menuitem">
+            <Icon name="bell" size={13} />
+            Notisinställningar
+          </Link>
           <Link href="/konto" className="mx-rail-account-item" role="menuitem">
             <Icon name="gear" size={13} />
             Mitt konto

@@ -6,6 +6,7 @@ import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { recordActivity } from '@/lib/actions/record-activity';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { notify, notifyStartupMembers } from '@/lib/notifications-server';
 import { validateAgreementFile, type AgreementKind } from '@platform/shared';
 import type { Role } from '@platform/shared';
 
@@ -185,6 +186,32 @@ export async function POST(request: Request): Promise<Response> {
     });
   } catch {
     /* fail-soft: audit får inte fälla uppladdningen */
+  }
+
+  // Notiser (§ 50, `agreement_to_sign`): bolagets medlemmar när bolaget ska
+  // signera, och den utpekade Movexum-signatären. Best-effort.
+  const agreementHref = `/startups/${startupId}#agreements`;
+  const agreementPayload = { title: title.slice(0, 200), snippet: startupName, href: agreementHref };
+  const agreementEntity = { type: 'agreements', id: agreementId };
+  if (requiresCompany) {
+    await notifyStartupMembers(pb, {
+      tenant: user.tenant,
+      startupId,
+      kind: 'agreement_to_sign',
+      actorId: user.id,
+      entity: agreementEntity,
+      payload: agreementPayload
+    }).catch(() => undefined);
+  }
+  if (requiresMovexum && validatedAssignedTo) {
+    await notify(pb, {
+      tenant: user.tenant,
+      recipients: [validatedAssignedTo],
+      kind: 'agreement_to_sign',
+      actorId: user.id,
+      entity: agreementEntity,
+      payload: agreementPayload
+    }).catch(() => undefined);
   }
 
   return NextResponse.json({ id: agreementId });

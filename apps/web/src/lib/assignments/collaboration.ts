@@ -2,7 +2,8 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { escFilter } from '@/lib/pb-filter';
 import type { AssignableResource } from '@/lib/assignments/types';
-import { parseDateTimeInput } from '@platform/shared';
+import { formatStockholmDateTime, parseDateTimeInput } from '@platform/shared';
+import { notify } from '@/lib/notifications-server';
 
 export type { AssignableResource, AssignmentCollabOptions } from '@/lib/assignments/types';
 
@@ -75,6 +76,8 @@ interface CollaboratorTaskInput {
   /** Kort, PII-fri beskrivning (t.ex. "Workshop: Internationalisering – Bolaget AB"). */
   description: string;
   dueDate?: string;
+  /** Den som bjuder in — får ingen notis om sin egen handling (§ 50). */
+  actorId?: string;
 }
 
 /**
@@ -106,6 +109,16 @@ export async function createCollaboratorTasks(
       /* fail-soft: en resurs som inte kan få en task blockerar inte tilldelningen */
     }
   }
+  // Notis till de inbjudna (§ 50, `collaborator_invited`). Best-effort.
+  await notify(pb, {
+    tenant: tenantId,
+    recipients: ids,
+    kind: 'collaborator_invited',
+    actorId: input.actorId,
+    entity: { type: 'startups', id: startupId },
+    groupKey: null,
+    payload: { title: desc, href: `/startups/${startupId}` }
+  }).catch(() => undefined);
   return ids;
 }
 
@@ -231,6 +244,21 @@ export async function createAssignmentMeeting(
       /* fail-soft per inbjuden */
     }
   }
+
+  // Notis till de inbjudna (§ 50, `event_invited`) — organisatören är aktör
+  // och får ingen notis om sin egen inbjudan.
+  await notify(pb, {
+    tenant: tenantId,
+    recipients: [...inviteeIds],
+    kind: 'event_invited',
+    actorId: organizerId,
+    entity: { type: 'incubator_events', id: eventId },
+    payload: {
+      title,
+      snippet: formatStockholmDateTime(startIso),
+      href: `/events/${eventId}`
+    }
+  }).catch(() => undefined);
 
   return eventId;
 }

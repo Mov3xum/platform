@@ -141,6 +141,8 @@ async function verifyCollectionsExist() {
     'missions',
     'mission_comments',
     'notifications',
+    // Notisinställningar per användare (§ 50, migration 1700000182).
+    'notification_preferences',
     'strategies',
     'strategy_revisions',
     'sprint_x_checkins',
@@ -493,6 +495,41 @@ function verifyImmutableCollections(collections) {
   ok('Oföränderliga bevis-/historikkollektioner (A.8.32) verifierade');
 }
 
+// Notifikationssystemet (§ 50, migration 1700000182). Notiser skapas BARA av
+// servern (createRule = null) — den gamla regeln lät vem som helst skapa
+// notiser till vem som helst, i valfri tenant, med valfri länk. Notiser och
+// notisinställningar är STRIKT ägaren-bara: list/view måste vara
+// `@request.auth.id = user` och får aldrig öppnas för staff/tenant.
+const MUST_BE_SERVER_CREATE_ONLY = ['notifications'];
+const MUST_BE_OWNER_ONLY = ['notifications', 'notification_preferences'];
+
+function verifyNotificationRules(collections) {
+  for (const name of MUST_BE_SERVER_CREATE_ONLY) {
+    const col = collections.get(name);
+    if (!col) continue;
+    if (col.createRule !== null && col.createRule !== undefined) {
+      fail(
+        `${name}.createRule måste vara null (bara servern skapar notiser), är \`${String(col.createRule)}\`.\n` +
+          'Kör migration 1700000182 eller setup-via-api.mjs.'
+      );
+    }
+  }
+  for (const name of MUST_BE_OWNER_ONLY) {
+    const col = collections.get(name);
+    if (!col) continue;
+    for (const ruleName of ['listRule', 'viewRule', 'updateRule', 'deleteRule']) {
+      const rule = col[ruleName];
+      if (typeof rule !== 'string' || !rule.includes('@request.auth.id = user')) {
+        fail(`${name}.${ruleName} måste vara ägaren-bara (\`@request.auth.id = user\`), är \`${String(rule)}\`.`);
+      }
+      if (/@request\.auth\.roles|@request\.auth\.tenant = tenant/.test(rule)) {
+        fail(`${name}.${ruleName} får inte öppnas för roller/tenant — notiser är privata: \`${rule}\`.`);
+      }
+    }
+  }
+  ok('Notiser: bara servern skapar, bara ägaren läser (§ 50)');
+}
+
 function verifyStartupMemberIsolation(collections) {
   for (const name of MUST_SCOPE_TO_MEMBER) {
     const col = collections.get(name);
@@ -562,7 +599,8 @@ const AI_DENYLIST = new Set([
   'users', 'tenants', 'verification_tokens', 'pending_signups',
   'tenant_integrations', 'user_app_integrations', 'user_mistral_connectors',
   'chat_threads', 'user_files', 'user_file_chunks', 'deep_jobs',
-  'org_knowledge', 'org_knowledge_chunks', 'agent_memory'
+  'org_knowledge', 'org_knowledge_chunks', 'agent_memory',
+  'notifications', 'notification_preferences'
 ]);
 
 // PII-stavningar som substring-maskern INTE redan fångar. Förankrade till `_`
@@ -720,6 +758,7 @@ function verifyRlsAndRbac(collections) {
 
   verifyStartupMemberIsolation(collections);
   verifyImmutableCollections(collections);
+  verifyNotificationRules(collections);
   verifyCompassWriteRulesScoped(collections);
 
   ok('RLS/RBAC baseline checks passed (createRules är säkra)');
@@ -995,7 +1034,14 @@ const REQUIRED_APP_FIELDS = [
   },
   // Teamtak (§ 29.7, migration 1700000181): utan fältet "sparas" ledningens
   // tak tyst bort och alla får default 3.
-  { collection: 'tenants', fields: ['max_active_teams_per_person'] }
+  { collection: 'tenants', fields: ['max_active_teams_per_person'] },
+  // Notifikationssystemet (§ 50, migration 1700000182): utan fälten tappas
+  // gruppering, tystning och "sedd"-markering tyst.
+  {
+    collection: 'notifications',
+    fields: ['category', 'priority', 'entity_type', 'entity_id', 'group_key', 'count', 'seen_at', 'latest_at', 'dedupe_key']
+  },
+  { collection: 'notification_preferences', fields: ['user', 'tenant', 'settings'] }
 ];
 
 /**

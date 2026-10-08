@@ -11,6 +11,7 @@ import { logAgentAction } from '@/lib/core/write';
 import { logAiUsage } from '@/lib/ai/usage';
 import { callMistral, estimateCostUsd } from '@/lib/ai/mistral';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { notifyStartupMembers } from '@/lib/notifications-server';
 import {
   createCollaboratorTasks,
   createAssignmentMeeting,
@@ -1336,7 +1337,8 @@ export async function assignWorkshopToStartupAction(
         startupId,
         collaboratorIds,
         description: `Workshop: ${workshop.title} – ${startupName}`,
-        dueDate
+        dueDate,
+        actorId: user.id
       });
       if (linked.length > 0) update.collaborators = linked;
     }
@@ -1356,6 +1358,20 @@ export async function assignWorkshopToStartupAction(
     if (Object.keys(update).length > 0) {
       await writePb.collection(PB_COLLECTIONS.workshopAssignments).update(String(assignment.id), update);
     }
+
+    // Notis till bolagets medlemmar (§ 50, `workshop_assigned`). Best-effort.
+    await notifyStartupMembers(pb, {
+      tenant: user.tenant,
+      startupId,
+      kind: 'workshop_assigned',
+      actorId: user.id,
+      entity: { type: 'workshop_assignments', id: String(assignment.id) },
+      payload: {
+        title: workshop.title || 'Workshop',
+        snippet: dueDate ? `Klar senast ${dueDate}` : undefined,
+        href: '/mina-aktiviteter'
+      }
+    }).catch(() => undefined);
 
     revalidatePath('/education');
     revalidatePath('/dashboard');

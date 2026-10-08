@@ -507,7 +507,9 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
     `support_check_applications`/`_revisions`/`_comments`/`_documents`
     (§ 46 — deltagarnamn, signeringsbevis och bilagor)
     samt `compass_responses` (råa enkät-/intagssvar per fråga, § 43 —
-    målstyrningen får bara det k-anonyma aggregatet).
+    målstyrningen får bara det k-anonyma aggregatet) och
+    `notifications`/`notification_preferences` (privata notiser och
+    notisinställningar, § 50).
 
   Allt annat — CRM (`contacts`), compass-inflöde (`compass_*`), de minimis
   (`de_minimis_*`), avtal/signeringsbevis (`agreement_signatures`),
@@ -6903,7 +6905,8 @@ Outlook-möten, notiser och uppdrag jag deltar i. Sidan hette tidigare "Min
   tidsindelningen direkt.
 - **Notiser i högerspalten** (≥ 1280 px; under huvudspalten på mindre
   skärm) med olästa-antal även vid sidtiteln (`#notiser`-ankare). Tom agenda
-  kollapsar till en rad i stället för en stor tom ruta.
+  kollapsar till en rad i stället för en stor tom ruta. Listan, klockan i
+  topplisten och inställningarna beskrivs i § 50.
 - **Pollning:** `useLiveWorkspace` på fokus + 60 s (tidigare 15 s), pausad
   under interaktion. **Outlook-agendan cachas 60 s i processminnet per
   användare** (`outlookCache` i `aggregate.ts`) — bara det härledda
@@ -7760,3 +7763,167 @@ klienten och rullas tillbaka vid fel.
   pekar på moduler som finns och att `onskemal` ligger i System-gruppen. Lägg
   aldrig till ett id i rail-lös-listan för att tysta testet när en meny-rad
   råkat försvinna i en merge.
+
+## 50. Notifikationssystemet — katalog, inställningar per person & klockan
+
+### 50.1 Översikt
+
+Notiser är plattformens sätt att säga "det här rör dig": en kommentar på ditt
+uppdrag, ett kort som tilldelats dig, ett avtal som väntar på din signatur, en
+workshop som tilldelats ditt bolag. De visas i **klockan uppe till höger**
+(alla roller, även bolagsmedlemmar) och i listan på **Mina uppgifter**
+(`/inkorg#notiser`). Varje person väljer **själv, dynamiskt** vad hen får
+notiser om under **Mitt konto → Notiser** (`/konto#notiser`, även via
+kontomenyn i railens fot).
+
+Fas 1 (2026-10, den här): grund och säkerhet, katalog, inställningar,
+sammanslagning, tystning, klockan och nya producenter. **Beslutat för nästa
+steg** (maintainer 2026-10-08): e-post via **Resend** (behålls), **webbpush**
+via PWA:n (§ 35; innehållslösa meddelanden via webbläsarnas pushtjänster är
+godkänt), en **dynamisk sammanställning** (frekvens och tid väljs per person —
+modellen bär redan `digest.frequency/time/weekday`) och **e-post även till
+bolagsmedlemmar**. Inställningsmodellen har därför redan kanalerna
+`in_app`/`email`/`push` per typ; bara `in_app` levereras i dag och UI:t säger
+det.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/notifications.ts` (+ `.test.ts`) | **Katalogen** (typ → etikett, beskrivning, ikon, kategori, prioritet, mottagargrupp, obligatorisk, sammanslagningsbar, standardkanaler), inställningsmodellen (`normalizeNotificationPreferences`, `effectiveNotificationChannels`, `shouldDeliverInApp`, `setNotificationKindChannel`, `toggleMutedNotificationEntity`), textvård (`cleanNotificationText`), länkskydd (`safeNotificationHref`), gruppnyckel och retention — ren, enhetstestad |
+| `backend/pocketbase-schema/migrations/1700000182_notifications_v2.js` | `kind` → text, nya fält, createRule = NULL, tenant cascade, collection `notification_preferences` |
+| `apps/web/src/lib/notifications-server.ts` | ENDA vägen att skapa notiser (`emitNotification`/`notify`/`notifyStartupMembers`), läsning, visningsmodell, "sedd", rensning |
+| `apps/web/src/lib/notifications/preferences.server.ts` | Läs/spara inställningar (ägaren-bara) |
+| `apps/web/src/lib/actions/notifications.ts` | Läst/oläst, ta bort, markera alla, sedd, kanalval, kategori-växling, tysta, återställ |
+| `apps/web/src/app/api/notifications/route.ts` | Klockans pollning (antal osedda + senaste) |
+| `apps/web/src/components/notifications/{NotificationBell,NotificationItem,NotificationPreferencesForm}.tsx` | Klockan, notisraden (delas av klockan och listan), inställningarna |
+| `apps/web/src/components/inkorg/NotificationList.tsx` | Listan på Mina uppgifter (filter: olästa, kategori) |
+
+### 50.2 Datamodell
+
+- **`notifications`** (1700000052 + **1700000182**): `tenant` (cascade),
+  `user` (cascade), `kind` (**text** — giltigheten ligger i katalogen, så en
+  ny typ kräver ingen migration), `actor`, `mission`/`comment` (äldre
+  relationer, kvar), `payload_json {title, snippet, href}`, `read_at`, samt
+  `category`, `priority`, `entity_type`/`entity_id` (vad notisen gäller —
+  tystning), `group_key` + `count` (sammanslagning), `seen_at` (klockans
+  siffra), `latest_at` (sortering — en sammanslagen notis flyttas upp) och
+  `dedupe_key` (unikt partiellt index `(user, dedupe_key)` → påminnelser
+  skapas aldrig två gånger). PB 0.23.4 vägrar byta typ på ett fält med samma
+  id, så migrationen byter `kind` via snapshot → drop → nytt textfält →
+  återställning (verifierat mot PB 0.23.4 lokalt).
+- **`notification_preferences`** (**1700000182**): en rad per användare
+  (unikt index på `user`), `settings` (json, `NotificationPreferences`:
+  `kinds` = bara avvikelser från katalogens standard, `muted`, `digest`).
+  **STRIKT ägaren-bara** på alla regler; updateRule låser `user`/`tenant`
+  (`@request.body.<fält>:isset = false`). Egen collection eftersom
+  `users.viewRule` är tenant-bred.
+
+### 50.3 Regler (bindande)
+
+- **Bara servern skapar notiser.** `notifications.createRule` är NULL.
+  Producenter anropar `notify(pb, …)`/`emitNotification(…)`/
+  `notifyStartupMembers(pb, …)` EFTER att handlingens roll och tenant
+  verifierats; funktionen skriver med den cachade superusern. Den gamla
+  regeln (`auth && (actor = "" || actor = auth.id)`) lät vem som helst skapa
+  notiser åt vem som helst — i valfri tenant och med valfri länk
+  (nätfiske). Verifierat: en användartoken som försöker skapa en notis får
+  403. Skriv aldrig till `notifications` direkt.
+- **Mottagare verifieras i koden:** varje id måste vara en användare i
+  `tenant` (annars hoppas den över), den som utförde handlingen får ingen
+  notis om sin egen handling, max 200 mottagare per anrop.
+  `notifyStartupMembers` kräver exakt `linked_startups ∋ bolaget` och rollen
+  `startup_member`.
+- **Innehåll:** rubrik och utdrag plattas, kapas (200/280 tecken) och
+  personnummer-tvättas (§ 15.6-regexen). Länken måste vara en relativ
+  sökväg inom appen (`safeNotificationHref` — aldrig `//host`, `/\host`,
+  kontrolltecken eller extern adress; annars `/inkorg`). Skriv aldrig
+  e-post, telefonnummer eller annan direkt-PII i en notis; ett utdrag får
+  innehålla verksamhetstext (kortrubrik, svar på ett önskemål).
+- **Inställningar styr leveransen:** `shouldDeliverInApp` — en avstängd typ
+  eller en tystad sak (`entity_type`/`entity_id`) skapar ingen notis.
+  **Obligatoriska typer** (`mandatory`: `agreement_to_sign`,
+  `contact_request`, `support_check_changes`, `support_check_decision` —
+  någon väntar på mottagaren) går alltid fram och kan inte stängas av
+  (`setNotificationKindChannel` vägrar, UI:t visar "Alltid på").
+- **Sammanslagning:** typer med `groupable` (comment, status_change,
+  stage_advance, support_check_comment) slås ihop per sak så länge den
+  tidigare notisen är oläst: `count` ökar, `latest_at`/`actor`/innehåll
+  uppdateras och `seen_at` nollas (klockans siffra tänds igen).
+- **Ny notistyp:** lägg den i `NOTIFICATION_KINDS` + `NOTIFICATION_CATALOG`
+  (etikett, beskrivning, kategori, mottagargrupp, standard) — den dyker upp
+  i inställningarna för rätt roller automatiskt. Ingen migration. Testet
+  låser att varje typ har komplett metadata.
+- **Schema-drift:** mot en instans utan 1700000182 faller skapandet tillbaka
+  på de gamla fälten och, för en typ select-listan inte känner, på
+  `assigned` — en notis tappas aldrig tyst. Saknas superuser loggas det en
+  gång och notiser kan inte skapas (createRule NULL); `verify-baseline.mjs`
+  fäller deployen om createRule inte är NULL, om reglerna inte är ägaren-
+  bara eller om fälten saknas. Speglat i `setup-via-api.mjs` (inkl.
+  select→text och, när REST inte kan byta typ, en union av select-värdena).
+- **Lagringsminimering (GDPR art. 5.1 e):** lästa notiser rensas efter 90
+  dagar, olästa efter 180 (`pruneOldNotifications`, best-effort när
+  användaren öppnar `/inkorg`, med användarens egen token). En schemalagd
+  rensning kommer med påminnelse-ticken i nästa steg.
+
+### 50.4 Producenter (vem får vad)
+
+| Typ | Utlöses av | Mottagare |
+|---|---|---|
+| `comment`/`mention`/`assigned`/`status_change`/`stage_advance` | Uppdrag och uppdragskommentarer (§ 29) | Deltagare / nämnda |
+| `task_assigned` | Kort skapat med tilldelade, eller ny tilldelning på bolags-/uppdragskanban (§ 15.7, § 29.4) | NYA tilldelade |
+| `collaborator_invited` | Workshop-/dokumenttilldelning med medarbetare (§ 18.4) | Inbjudna kollegor |
+| `event_invited` | Möte skapat vid tilldelning (§ 18.4) | Inbjudna (inte organisatören) |
+| `workshop_assigned` | Workshop tilldelad bolag — UI och chatten (§ 18, § 33) | Bolagets medlemmar |
+| `document_assigned` | NY tilldelning av utbildningsdokument — UI och chatten (§ 18.3) | Bolagets medlemmar |
+| `agreement_to_sign` | Avtal uppladdat (§ 19); bolaget signerade först | Bolagets medlemmar resp. utpekad Movexum-signatär (annars avsändaren) |
+| `agreement_signed` | Alla parter har signerat | Avsändare, utpekad signatär och (om bolaget signerade) medlemmarna |
+| `contact_request`/`contact_decision` | Kontaktboken (§ 45.3) | Ägare / frågare |
+| `support_check_*` | Stödcheckar (§ 46) | Coacher/ledning resp. bolaget |
+| `feedback_answered`/`feedback_done` | Ledningen svarar/klarmarkerar (§ 49) | Kortets författare |
+| `due_soon` | (reserverad — påminnelse-ticken, nästa steg) | Ägare/tilldelade |
+
+Alla anrop är best-effort (`.catch`) — en misslyckad notis fäller aldrig
+huvudmutationen.
+
+### 50.5 Gränssnitt
+
+- **Klockan** (`NotificationBell` i `ProtoTopBar`): siffran = olästa notiser
+  som inte setts; när panelen öppnas sätts `seen_at` (notiserna förblir
+  olästa tills de öppnas). Pollar `/api/notifications` på fokus, synlig flik,
+  navigering och var 60:e sekund — inloggningscookien är httpOnly, så
+  PocketBase-realtime kan inte användas från webbläsaren. I en installerad
+  PWA speglas siffran på hemskärmsikonen (`navigator.setAppBadge`). "Visa
+  alla" leder till `/inkorg#notiser` för den som har Mina uppgifter (inte en
+  ren bolagsmedlem, § 22); kugghjulet till inställningarna.
+- **Notisraden** (`NotificationItem`, delas av klockan och listan): klick
+  markerar läst och öppnar länken; menyn har läst/oläst, **"Tysta notiser om
+  detta"** (inte för obligatoriska typer) och "Ta bort".
+- **Mitt konto → Notiser** (`NotificationPreferencesForm`): typerna byggs ur
+  katalogen filtrerat på rollerna (`notificationKindsForRoles` —
+  bolagsmedlemmar ser inte personalens typer och tvärtom), grupperade per
+  kategori, med en växel per typ och "Slå på/Stäng av alla" per kategori;
+  varje val sparas direkt (optimistiskt, i tur och ordning). Listan över
+  tystade saker med "Slå på igen", och "Återställ till standard". Saknas
+  `notification_preferences` (migration ej körd) visas en gul banner och
+  växlarna är låsta — standard gäller.
+
+### 50.6 Regelefterlevnad
+
+- **Riskklass (EU AI Act):** n/a — deterministiska notiser, ingen
+  AI-inferens.
+- **GDPR § 5/§ 6:** notiser är verksamhetsinformation till en enskild
+  användare (berättigat intresse för personal, avtal för bolagsmedlemmar).
+  Payload minimerad (rubrik, kort utdrag, intern länk), tvättad.
+  `notifications`/`notification_preferences` är **denylistade för AI**
+  (`lib/ai/redaction.ts`, låst i `redaction.test.ts` och speglat i
+  `verify-baseline.mjs`) — tidigare kunde en autonom körning (superuser)
+  läsa alla användares notiser i tenanten via `query_collection`.
+- **GDPR art. 17:** cascade på `user` och `tenant` för båda kollektionerna.
+- **§ 21-isolering / ISO 27001 A.5.15–A.5.18:** ägaren-bara RLS; server
+  actions verifierar ägarskapet i koden innan läst/oläst/ta bort.
+  Inställningar skrivs alltid för den inloggade (user sätts server-side;
+  superuser bara som reserv vid PB v0.23.4:s tysta regel-nekande).
+- **Loggar:** status, typ och användar-id — aldrig innehåll eller länk.
+- **Migrationer:** 1700000182 är ett nytt, oföränderligt filnummer.
+

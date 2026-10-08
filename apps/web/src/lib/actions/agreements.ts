@@ -10,6 +10,7 @@ import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { recordActivity } from '@/lib/actions/record-activity';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { notify, notifyStartupMembers } from '@/lib/notifications-server';
 import {
   AGREEMENT_PARTY_LABELS,
   SIGNATURE_INTENT_TEXT,
@@ -257,6 +258,32 @@ export async function signAgreementAction(
     title: `${AGREEMENT_PARTY_LABELS[party]} signerade avtal: ${agreement.title}`,
     meta: fullySigned ? 'fullt signerat' : 'väntar på motpart'
   });
+
+  // Notiser (§ 50). Fullt signerat → avsändaren, utpekad signatär och bolaget.
+  // Bolaget signerade först → Movexum-sidan får "avtal att signera".
+  const agreementRow = agreement as unknown as { assigned_by?: string; assigned_to?: string };
+  const movexumSide = [agreementRow.assigned_to, agreementRow.assigned_by].filter(
+    (id): id is string => typeof id === 'string' && id.length > 0
+  );
+  const notifyBase = {
+    tenant: user.tenant,
+    actorId: user.id,
+    entity: { type: 'agreements', id: agreementId },
+    payload: { title: String(agreement.title || 'Avtal'), snippet: startupName, href: `/startups/${startupId}#agreements` }
+  };
+  if (fullySigned) {
+    await notify(pb, { ...notifyBase, recipients: movexumSide, kind: 'agreement_signed' }).catch(() => undefined);
+    if (needCompany) {
+      await notifyStartupMembers(pb, { ...notifyBase, startupId, kind: 'agreement_signed' }).catch(() => undefined);
+    }
+  } else if (party === 'company' && needMovexum && !movexumSigned) {
+    await notify(pb, {
+      ...notifyBase,
+      recipients: movexumSide.slice(0, 1),
+      kind: 'agreement_to_sign',
+      payload: { ...notifyBase.payload, snippet: `${startupName} har signerat — väntar på Movexum` }
+    }).catch(() => undefined);
+  }
 
   revalidatePath(`/startups/${startupId}`);
   revalidatePath('/aktivitet');
