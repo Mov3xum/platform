@@ -1,5 +1,5 @@
-// CLAUDE.md § 21.8 — låser att migration 1700000182 och security-rules.mjs är
-// identiska, och att de härdade reglerna följer § 21.3-invarianterna.
+// CLAUDE.md § 21.8 — låser paritet mellan migrationerna och security-rules.mjs,
+// och att de härdade reglerna följer § 21.3-invarianterna.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -10,6 +10,7 @@ import { SECURITY_RULES, PROTECTED_FILE_FIELDS } from './security-rules.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MIGRATION = join(here, '..', 'migrations', '1700000182_harden_api_rules.js');
+const NOTIFICATIONS_MIGRATION = join(here, '..', 'migrations', '1700000186_notifications_v2.js');
 
 /** Kör migrationens up() mot en fejkad PB-app och returnerar resultatet. */
 function runMigration() {
@@ -23,7 +24,10 @@ function runMigration() {
       const fields = (PROTECTED_FILE_FIELDS[name] || []).map((f) => ({ name: f, protected: false }));
       instances[name] = {
         name,
-        fields: { getByName: (n) => fields.find((f) => f.name === n) ?? null },
+        fields: {
+          getByName: (n) => fields.find((f) => f.name === n) ?? null,
+          add: (f) => fields.push(f)
+        },
         _fields: fields
       };
       return instances[name];
@@ -32,17 +36,24 @@ function runMigration() {
       saved[col.name] = col;
     }
   };
-  let up;
-  vm.runInNewContext(readFileSync(MIGRATION, 'utf8'), {
-    migrate: (u) => {
-      up = u;
-    }
-  });
-  up(app);
+  for (const migration of [MIGRATION, NOTIFICATIONS_MIGRATION]) {
+    let up;
+    vm.runInNewContext(readFileSync(migration, 'utf8'), {
+      migrate: (u) => {
+        up = u;
+      },
+      Field: class {
+        constructor(def) {
+          Object.assign(this, def);
+        }
+      }
+    });
+    up(app);
+  }
   return saved;
 }
 
-test('migration 1700000182 sätter exakt reglerna i security-rules.mjs', () => {
+test('migrationerna 1700000182 + 1700000186 sätter exakt reglerna i security-rules.mjs', () => {
   const saved = runMigration();
   for (const [name, rules] of Object.entries(SECURITY_RULES)) {
     for (const [key, value] of Object.entries(rules)) {
@@ -53,6 +64,48 @@ test('migration 1700000182 sätter exakt reglerna i security-rules.mjs', () => {
     for (const f of fields) {
       assert.equal(saved[name]._fields.find((x) => x.name === f).protected, true, `${name}.${f}`);
     }
+  }
+});
+
+test('API-sync behåller server-only notiser och reparerar äldre createRules idempotent', async () => {
+  const src = readFileSync(join(here, 'setup-via-api.mjs'), 'utf8');
+  const start = src.indexOf('for (const [collectionName, rules] of Object.entries(SECURITY_RULES))');
+  const end = src.indexOf("\nconsole.log('\\n✓ Klart.", start);
+  assert.ok(start >= 0 && end > start, 'syncens sista regelpass finns');
+  const sync = `(async () => { ${src.slice(start, end)} })()`;
+  for (const initialRule of [null, '@request.auth.id != "" && (actor = "" || @request.auth.id = actor)']) {
+    const collection = { name: 'notifications', createRule: initialRule };
+    let writes = 0;
+    const context = {
+      SECURITY_RULES,
+      PROTECTED_FILE_FIELDS,
+      FORCE_CREATE_RULES: { notifications: '@request.auth.id != ""' },
+      pb: {
+        collections: {
+          async getOne(name) {
+            if (name !== collection.name) throw { status: 404 };
+            return { ...collection };
+          },
+          async getFullList() {
+            return [{ ...collection }];
+          },
+          async update(name, patch) {
+            assert.equal(name, collection.name);
+            Object.assign(collection, patch);
+            writes++;
+          }
+        }
+      },
+      log() {},
+      warn() {},
+      ok() {},
+      describeError: String
+    };
+    await vm.runInNewContext(sync, context);
+    assert.equal(collection.createRule, null, 'alla sync-pass lämnar createRule null');
+    const firstWrites = writes;
+    await vm.runInNewContext(sync, context);
+    assert.equal(writes, firstWrites, 'en andra sync skriver inte om reglerna');
   }
 });
 

@@ -3129,8 +3129,10 @@ createRules utan pinnad skapare lät en användare förfalska `created_by`
 regler:
 - `setup-via-api.mjs` tillämpar den **sist** (efter collection-defs och
   `FORCE_CREATE_RULES`, vars createRules den också vinner över).
-- Migration **1700000182** bär en ordagrann kopia (JSVM kan inte importera);
-  `security-rules.test.mjs` låser att de är identiska och att reglerna följer
+- Migration **1700000182** bär grundreglerna (JSVM kan inte importera);
+  **1700000186** överstyr `notifications.createRule` till NULL (bara servern).
+  `security-rules.test.mjs` låser paritet med migrationernas samlade resultat
+  och att reglerna följer
   § 21.3 (`:each ?=`, inga roll-checks/joins i createRules, varje
   update/delete kräver roll/ägarskap + tenant).
 - `verify-baseline.mjs` (`verifySecurityRules`) fäller deployen om en regel
