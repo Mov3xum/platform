@@ -16,6 +16,36 @@ import type { AiReview, MarketScan } from './types';
 
 export type CompassChatMessage = { role: 'user' | 'assistant'; content: string };
 
+/**
+ * Token-utfallet av ett Mistral-anrop i intag-flödet. Anroparen loggar det i
+ * `ai_usage_events` (§ 9.6) — även för anonyma publika flöden, där användaren
+ * saknas (migration 1700000185). Funktionerna här gör ingen IO mot PB.
+ */
+export interface CompassAiUsage {
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+}
+export type CompassUsageSink = (usage: CompassAiUsage) => void;
+
+function usageOf(model: string, res: { usage?: { prompt_tokens?: number; completion_tokens?: number } }): CompassAiUsage {
+  return {
+    model,
+    tokensIn: Number(res.usage?.prompt_tokens) || 0,
+    tokensOut: Number(res.usage?.completion_tokens) || 0
+  };
+}
+
+/** Anropar sinken utan att ett fel i den kan fälla intag-flödet. */
+function report(sink: CompassUsageSink | undefined, usage: CompassAiUsage): void {
+  if (!sink) return;
+  try {
+    sink(usage);
+  } catch {
+    /* loggning är best-effort */
+  }
+}
+
 export interface ExtractedLeadData {
   name: string | null;
   email: string | null;
@@ -82,8 +112,8 @@ export async function summarizeSubmission(
   entries: SubmissionEntry[],
   moduleName: string,
   resultLine?: string
-): Promise<string | null> {
-  if (entries.length === 0 && !resultLine) return null;
+): Promise<{ summary: string | null; usage: CompassAiUsage | null }> {
+  if (entries.length === 0 && !resultLine) return { summary: null, usage: null };
   const transcript = [
     `Modul: ${moduleName}`,
     resultLine ? `Resultat: ${resultLine}` : '',
@@ -98,15 +128,17 @@ export async function summarizeSubmission(
       { role: 'user', content: redactPersonnummer(transcript).slice(0, 12000) }
     ]);
     const text = redactPersonnummer(res.text.trim());
-    return text ? text.slice(0, 6000) : null;
+    // Usage rapporteras även när texten blev tom — anropet kostade ändå.
+    return { summary: text ? text.slice(0, 6000) : null, usage: usageOf(SCORING_MODEL, res) };
   } catch {
-    return null;
+    return { summary: null, usage: null };
   }
 }
 
 /** Extraherar lead-data från en konversation. Returnerar null på fel. */
 export async function extractLead(
-  history: CompassChatMessage[]
+  history: CompassChatMessage[],
+  onUsage?: CompassUsageSink
 ): Promise<ExtractedLeadData | null> {
   const transcript = history
     .map((m) => `${m.role === 'user' ? 'Användare' : 'Assistent'}: ${m.content}`)
@@ -117,6 +149,7 @@ export async function extractLead(
       { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
       { role: 'user', content: transcript }
     ]);
+    report(onUsage, usageOf(SCORING_MODEL, res));
     const match = res.text.match(/\{[\s\S]*\}/);
     if (!match) return null;
     const parsed = JSON.parse(match[0]) as Partial<ExtractedLeadData>;
@@ -135,13 +168,15 @@ export async function extractLead(
 
 /** Bedömer ett extraherat lead. Default 50p vid fel — människan bestämmer alltid. */
 export async function scoreLead(
-  data: ExtractedLeadData
+  data: ExtractedLeadData,
+  onUsage?: CompassUsageSink
 ): Promise<{ score: number; reasoning: string }> {
   try {
     const res = await callMistral(SCORING_MODEL, [
       { role: 'system', content: SCORING_SYSTEM_PROMPT },
       { role: 'user', content: `Lead-data:\n${JSON.stringify(data, null, 2)}` }
     ]);
+    report(onUsage, usageOf(SCORING_MODEL, res));
     const match = res.text.match(/\{[\s\S]*\}/);
     if (!match) return { score: 50, reasoning: 'Kunde inte bedöma.' };
     const parsed = JSON.parse(match[0]) as { score?: number; reasoning?: string };
@@ -156,7 +191,8 @@ export async function scoreLead(
 
 /** Strukturerad AI-granskning av idén — beslutsunderlag för Movexum-teamet. */
 export async function reviewLead(
-  data: ExtractedLeadData
+  data: ExtractedLeadData,
+  onUsage?: CompassUsageSink
 ): Promise<AiReview> {
   const fallback: AiReview = {
     strengths: [],
@@ -172,6 +208,7 @@ export async function reviewLead(
       { role: 'system', content: AI_REVIEW_SYSTEM_PROMPT },
       { role: 'user', content: `Idé-data:\n${JSON.stringify(data, null, 2)}` }
     ]);
+    report(onUsage, usageOf(REVIEW_MODEL, res));
     const match = res.text.match(/\{[\s\S]*\}/);
     if (!match) return fallback;
     const parsed = JSON.parse(match[0]) as Partial<AiReview>;
@@ -191,7 +228,8 @@ export async function reviewLead(
 
 /** Omvärldsanalys — marknad, konkurrenter, trender, regulering. */
 export async function marketScanLead(
-  data: ExtractedLeadData
+  data: ExtractedLeadData,
+  onUsage?: CompassUsageSink
 ): Promise<MarketScan> {
   const fallback: MarketScan = {
     market_size: 'Marknadsdata kunde inte hämtas.',
@@ -208,6 +246,7 @@ export async function marketScanLead(
       { role: 'system', content: MARKET_SCAN_SYSTEM_PROMPT },
       { role: 'user', content: `Idé:\n${JSON.stringify(data, null, 2)}` }
     ]);
+    report(onUsage, usageOf(REVIEW_MODEL, res));
     const match = res.text.match(/\{[\s\S]*\}/);
     if (!match) return fallback;
     const parsed = JSON.parse(match[0]) as Partial<MarketScan>;

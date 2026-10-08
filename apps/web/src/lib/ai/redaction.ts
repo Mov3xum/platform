@@ -53,12 +53,22 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'tenant_integrations', // AES-256-GCM-krypterade credentials
   'user_app_integrations',
   'user_mistral_connectors',
+  // Delat skalningstillstånd (§ 21.8, migration 1700000184): rate-limiterns
+  // räknare (hashade e-post-/IP-nycklar) och distribuerade lås. Superuser-
+  // only systemdata utan värde för modellen — får aldrig nå query_collection.
+  'rate_limits',
+  'app_locks',
   // B. Strikt privat ägaren-bara-innehåll (att exponera bryter § 21-isoleringen).
   'chat_threads', // privat konversationsinnehåll (1700000083)
   'user_files', // personliga filer, strikt ägaren-bara (1700000085)
   'user_file_chunks', // RAG-index för personliga filer (1700000121, § 27) — owner-only, nås bara via search_my_files
   'deep_jobs', // intern orkestrering (1700000084)
   'meeting_transcripts', // råa mötestranskript, strikt ägaren-bara (1700000142, § 34)
+  // Notiser + notisinställningar (§ 50): strikt ägaren-bara. Autonoma körningar
+  // kör superuser och släpper rader på tenant — utan denylistningen kunde en
+  // schemalagd agent läsa ALLA användares notiser i tenanten.
+  'notifications',
+  'notification_preferences',
   // Tenant-bred kunskapsbas (1700000118–119, § 26). Innehållet (uppladdat
   // verksamhetsmaterial + dess embeddings) når AI ENBART via det kurerade
   // `search_knowledge`-verktyget — aldrig via det generiska query_collection.

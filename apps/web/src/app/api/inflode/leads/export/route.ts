@@ -1,6 +1,11 @@
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { listLeadsForExport, listLeadSources, logSecurity } from '@/lib/compass/store';
+import {
+  LEAD_EXPORT_MAX_ROWS,
+  listLeadsForExport,
+  listLeadSources,
+  logSecurity
+} from '@/lib/compass/store';
 import {
   LEAD_STATUS_LABEL,
   LEAD_STATUS_ORDER,
@@ -69,10 +74,11 @@ export async function GET(req: Request) {
   };
 
   const pb = await getServerPb();
-  const [leads, sources] = await Promise.all([
+  const [exported, sources] = await Promise.all([
     listLeadsForExport(pb, user.tenant, options),
     listLeadSources(pb)
   ]);
+  const leads = exported.items;
   const sourceLabel = new Map(sources.map((s) => [s.key, s.label]));
 
   const lines = [COLUMNS.map((c) => csvCell(c.header)).join(';')];
@@ -86,6 +92,14 @@ export async function GET(req: Request) {
       }).join(';')
     );
   }
+  // Kapad export säger det i själva filen (§ 33.4) — aldrig en tyst kapning.
+  if (exported.truncated) {
+    lines.push(
+      csvCell(
+        `OBS: exporten kapades vid ${LEAD_EXPORT_MAX_ROWS} rader av ${exported.total}. Smalna av filtret (status, källa, modul, sök) och exportera i flera omgångar.`
+      )
+    );
+  }
   // BOM → svensk Excel tolkar UTF-8 (å/ä/ö) korrekt.
   const csv = `﻿${lines.join('\r\n')}`;
 
@@ -96,6 +110,8 @@ export async function GET(req: Request) {
     kind: 'lead_export',
     meta: {
       count: leads.length,
+      total: exported.total,
+      truncated: exported.truncated || undefined,
       status: options.status,
       src: options.sourceKey,
       landing: options.landingModule,
@@ -109,7 +125,8 @@ export async function GET(req: Request) {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="startupkompassen-leads-${today}.csv"`,
-      'Cache-Control': 'no-store'
+      'Cache-Control': 'no-store',
+      ...(exported.truncated ? { 'X-Movexum-Export-Truncated': 'true' } : {})
     }
   });
 }

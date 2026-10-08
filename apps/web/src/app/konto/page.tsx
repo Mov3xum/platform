@@ -9,6 +9,9 @@ import { PageShell } from '@/components/PageShell';
 import { loadMyCompetenceProfile } from '@/lib/team/my-competence-profile.server';
 import { MinProfilForm } from '@/app/min-profil/MinProfilForm';
 import { ProfileForm, PasswordForm } from './AccountForms';
+import { groupNotificationKindsByCategory, notificationKindsForRoles } from '@platform/shared';
+import { loadNotificationPreferences } from '@/lib/notifications/preferences.server';
+import { NotificationPreferencesForm } from '@/components/notifications/NotificationPreferencesForm';
 
 export const metadata: Metadata = {
   title: 'Mitt konto · Movexum'
@@ -41,7 +44,12 @@ export default async function KontoPage() {
   const showCompetence =
     hasRole(user.roles, TEAM_ROLES) || canAccessModuleForUser(user.roles, 'min_profil', user.enabledModules);
   const pb = await getServerPb();
-  const competence = showCompetence ? await loadMyCompetenceProfile(pb, user) : null;
+  const [competence, notificationPrefs] = await Promise.all([
+    showCompetence ? loadMyCompetenceProfile(pb, user) : Promise.resolve(null),
+    loadNotificationPreferences(pb, user.id)
+  ]);
+  // Notisinställningar (§ 50): typerna byggs ur katalogen, filtrerat på rollerna.
+  const notificationGroups = groupNotificationKindsByCategory(notificationKindsForRoles(user.roles));
 
   // Kopplade bolag med namn (användarens token → RLS § 21; fail-soft).
   let linkedStartups: Array<{ id: string; name: string }> = [];
@@ -62,14 +70,22 @@ export default async function KontoPage() {
     <PageShell
       title="Mitt konto"
       actions={
-        showCompetence ? (
+        <div className="flex flex-wrap items-center gap-2">
           <a
-            href="#kompetensprofil"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-semibold text-brand-foreground transition hover:bg-brand-hover"
+            href="#notiser"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-default bg-surface px-3 py-1.5 text-[12.5px] font-semibold text-foreground transition hover:border-strong"
           >
-            Kompetenser &amp; hashtags
+            Notiser
           </a>
-        ) : undefined
+          {showCompetence && (
+            <a
+              href="#kompetensprofil"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-semibold text-brand-foreground transition hover:bg-brand-hover"
+            >
+              Kompetenser &amp; hashtags
+            </a>
+          )}
+        </div>
       }
     >
       <div className="w-full space-y-8 py-6">
@@ -139,6 +155,23 @@ export default async function KontoPage() {
             </section>
           </div>
         </div>
+
+        <section id="notiser" aria-labelledby="notiser-rubrik" className="scroll-mt-6">
+          <div className="mb-4 border-t border-default pt-6">
+            <h2 id="notiser-rubrik" className="font-heading text-xl font-semibold text-foreground">
+              Notiser
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm text-foreground-muted">
+              Välj vad du vill få notiser om. Listan visar de notiser som är relevanta för din roll och
+              varje val sparas direkt. Du kan också tysta enskilda uppdrag direkt från en notis.
+            </p>
+          </div>
+          <NotificationPreferencesForm
+            initial={notificationPrefs.prefs}
+            groups={notificationGroups}
+            available={notificationPrefs.available}
+          />
+        </section>
 
         {competence && (
           <section id="kompetensprofil" aria-labelledby="kompetensprofil-rubrik" className="scroll-mt-6">

@@ -6,6 +6,7 @@ import { useMemo } from 'react';
 import { coreModules } from '@platform/shared';
 import { SETTINGS_ROUTE_LABELS } from '@/lib/settings-sections';
 import { RailReopenButton } from './MobileRail';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 
 function buildCrumbs(pathname: string): { label: string; href: string; now: boolean }[] {
   if (pathname === '/' || pathname === '/hem') {
@@ -40,7 +41,13 @@ function buildCrumbs(pathname: string): { label: string; href: string; now: bool
   return crumbs;
 }
 
-export function ProtoTopBar() {
+export function ProtoTopBar({
+  unseenNotifications = 0,
+  notificationsHref = null
+}: {
+  unseenNotifications?: number;
+  notificationsHref?: string | null;
+} = {}) {
   const pathname = usePathname();
   const crumbs = useMemo(() => buildCrumbs(pathname), [pathname]);
 
@@ -59,6 +66,7 @@ export function ProtoTopBar() {
       </div>
 
       <div className="mx-topbar-spacer" />
+      <NotificationBell initialUnseen={unseenNotifications} allHref={notificationsHref} />
     </div>
   );
 }

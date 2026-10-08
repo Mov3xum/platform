@@ -6,6 +6,7 @@ import { getServerPb, getCurrentUser } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { notifyStartupMembers } from '@/lib/notifications-server';
 import { escFilter } from '@/lib/pb-filter';
 import {
   createCollaboratorTasks,
@@ -107,7 +108,8 @@ export async function assignDocumentToStartupAction(
       startupId,
       collaboratorIds,
       description: `Utbildningsdokument: ${doc.title} – ${startupName}`,
-      dueDate
+      dueDate,
+      actorId: user.id
     });
   }
   let meetingId: string | null = null;
@@ -134,6 +136,7 @@ export async function assignDocumentToStartupAction(
   if (linkedCollaborators.length > 0) payload.collaborators = linkedCollaborators;
   if (meetingId) payload.meeting = meetingId;
 
+  let createdNew = false;
   try {
     // Finns redan en tilldelning? Uppdatera den (idempotent).
     const existing = await pb
@@ -152,6 +155,7 @@ export async function assignDocumentToStartupAction(
         await client
           .collection(PB_COLLECTIONS.educationDocumentAssignments)
           .create({ ...payload, status: 'assigned' });
+        createdNew = true;
       }
     };
 
@@ -173,6 +177,22 @@ export async function assignDocumentToStartupAction(
       error: err instanceof Error ? err.message : err
     });
     return { error: 'Tilldelningen misslyckades.' };
+  }
+
+  // Notis till bolagets medlemmar vid ny tilldelning (§ 50). Best-effort.
+  if (createdNew) {
+    await notifyStartupMembers(pb, {
+      tenant: user.tenant,
+      startupId,
+      kind: 'document_assigned',
+      actorId: user.id,
+      entity: { type: 'education_documents', id: documentId },
+      payload: {
+        title: doc.title || 'Utbildningsdokument',
+        snippet: dueDate ? `Klar senast ${dueDate}` : undefined,
+        href: '/mina-aktiviteter'
+      }
+    }).catch(() => undefined);
   }
 
   revalidatePath('/education/documents');

@@ -6,6 +6,7 @@
 
 import PocketBase from 'pocketbase';
 import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
+import { SECURITY_RULES, PROTECTED_FILE_FIELDS } from './security-rules.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -141,6 +142,8 @@ async function verifyCollectionsExist() {
     'missions',
     'mission_comments',
     'notifications',
+    // Notisinställningar per användare (§ 50, migration 1700000186).
+    'notification_preferences',
     'strategies',
     'strategy_revisions',
     'sprint_x_checkins',
@@ -173,6 +176,9 @@ async function verifyCollectionsExist() {
     'alumni',
     // AI + scheduling
     'ai_usage_events',
+    // Månadsrollup av AI-förbrukningen (§ 9.6, migration 1700000185) —
+    // månadstaket och AI-analysen läser den i stället för att summera events.
+    'ai_usage_monthly',
     'agent_actions',
     'tool_schedules',
     // Startupkompassen / inflöde (§ 23). Dessa skapas BARA av migrationerna
@@ -214,6 +220,12 @@ async function verifyCollectionsExist() {
     // finnas i kartan för att asserteras, annars hoppas de tyst.
     'agreement_signatures',
     'tool_versions',
+    // Delat processöverskridande tillstånd för horisontell skalning (§ 21.8,
+    // migration 1700000184): rate-limiterns räknare + distribuerade lås.
+    // Saknas de faller appen tyst tillbaka på processminnet — då gäller
+    // gränserna per container i stället för globalt, så de är ett hårt invariant.
+    'rate_limits',
+    'app_locks',
     // Övrigt
     'web_cache'
   ];
@@ -258,6 +270,43 @@ function assertCreateRuleDoesNotJoinRecord(collection) {
 // ägar-check. Migration 1700000111 + setup-via-api FORCE_CREATE_RULES håller
 // detta. Den här svep-kontrollen fångar varje NY kollektion som återinför
 // mönstret INNAN den når staging/produktion.
+// CLAUDE.md § 21.8: de härdade reglerna i scripts/security-rules.mjs MÅSTE
+// gälla live — exakt. setup-via-api.mjs skrev tidigare tyst över dem med
+// roll-lösa `auth && tenant`-regler vid varje sync (säkerhetsgranskning
+// 2026-10-08); den här kontrollen fäller deployen om det händer igen.
+async function verifySecurityRules() {
+  let collections;
+  try {
+    const all = await pb.collections.getFullList({ $autoCancel: false });
+    collections = new Map(all.map((c) => [c.name, c]));
+  } catch (err) {
+    fail(`Kunde inte lista kollektioner för säkerhetsregel-svep:\n${describeError(err)}`);
+  }
+  const offenders = [];
+  for (const [name, rules] of Object.entries(SECURITY_RULES)) {
+    const col = collections.get(name);
+    if (!col) continue; // migration-only-familjer som inte finns på instansen
+    for (const [key, expected] of Object.entries(rules)) {
+      const actual = col[key] ?? null;
+      if (actual !== expected) {
+        offenders.push(`${name}.${key}: förväntat ${JSON.stringify(expected)}, fick ${JSON.stringify(actual)}`);
+      }
+    }
+    for (const fieldName of PROTECTED_FILE_FIELDS[name] || []) {
+      const field = (col.fields || []).find((f) => f.name === fieldName);
+      if (field && !field.protected) offenders.push(`${name}.${fieldName}: filfältet är inte protected`);
+    }
+  }
+  if (offenders.length) {
+    fail(
+      'Härdade API-regler (§ 21.8) gäller inte live:\n' +
+        offenders.map((o) => `  - ${o}`).join('\n') +
+        '\nKör migration 1700000182 / setup-via-api.mjs.'
+    );
+  }
+  ok(`säkerhetsregler (§ 21.8): ${Object.keys(SECURITY_RULES).length} kollektioner verifierade`);
+}
+
 async function verifyNoBrokenCreateRules() {
   let all;
   try {
@@ -437,7 +486,10 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // Ägarbild från bolagsregister (§ 11.8, migration 1700000172). Intern
   // bedömningsdata (koncernstruktur, verklig huvudman som anonym andel) →
   // staff/observer-only; en ren startup_member ser sitt team på bolagskortet.
-  'startup_ownership'
+  'startup_ownership',
+  // AI-förbrukningens månadsrollup (§ 9.6, migration 1700000185). Tekniska
+  // aggregat per tenant — läsbar för staff/observer, aldrig för medlemmar.
+  'ai_usage_monthly'
 ];
 
 // Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa
@@ -455,7 +507,9 @@ const MUST_SCOPE_CROSS_TENANT = [
 // Oföränderliga bevis-/historikkollektioner (ISO 27001 A.8.32): update/delete
 // får BARA vara superuser (regel = null). Signeringsbevis (§ 19, § 46.4) och
 // agent-versionshistorik (§ 16.6) får aldrig kunna skrivas om via API:t.
-const MUST_BE_IMMUTABLE = ['agreement_signatures', 'tool_versions', 'support_check_revisions'];
+// `ai_usage_monthly` (§ 9.6) skrivs bara av PB-hooken/superuser — månadstaket
+// läser den, så aggregatet får aldrig gå att manipulera via API:t.
+const MUST_BE_IMMUTABLE = ['agreement_signatures', 'tool_versions', 'support_check_revisions', 'ai_usage_monthly'];
 
 // Migration 1700000175: update/delete på compass-barnkollektionerna måste bära
 // samma förälder-tenant-join som list/view (en coach kunde annars ändra en
@@ -479,6 +533,29 @@ function verifyCompassWriteRulesScoped(collections) {
   ok('compass write rules are tenant-scoped (migration 1700000175)');
 }
 
+// Kollektioner som BARA appens superuser-klient får röra (alla fem regler
+// null): rate-limiterns räknare (nycklarna är hashade e-post/IP) och de
+// distribuerade låsen (§ 21.8, migration 1700000184). En öppnad regel skulle
+// låta vem som helst nollställa en inloggningsspärr eller ta ett lås.
+const MUST_BE_SUPERUSER_ONLY = ['rate_limits', 'app_locks'];
+
+function verifySuperuserOnlyCollections(collections) {
+  for (const name of MUST_BE_SUPERUSER_ONLY) {
+    const col = collections.get(name);
+    if (!col) {
+      fail(`Collection "${name}" saknas (migration 1700000184 ej applicerad?)`);
+      continue;
+    }
+    for (const ruleName of ['listRule', 'viewRule', 'createRule', 'updateRule', 'deleteRule']) {
+      const rule = col[ruleName];
+      if (rule !== null && rule !== undefined) {
+        fail(`Superuser-only: ${name}.${ruleName} måste vara null, är \`${String(rule)}\`.`);
+      }
+    }
+  }
+  ok('Delat skalningstillstånd (rate_limits, app_locks) är superuser-only (§ 21.8)');
+}
+
 function verifyImmutableCollections(collections) {
   for (const name of MUST_BE_IMMUTABLE) {
     const col = collections.get(name);
@@ -491,6 +568,52 @@ function verifyImmutableCollections(collections) {
     }
   }
   ok('Oföränderliga bevis-/historikkollektioner (A.8.32) verifierade');
+}
+
+// Notifikationssystemet (§ 50, migration 1700000186). Notiser skapas BARA av
+// servern (createRule = null) — den gamla regeln lät vem som helst skapa
+// notiser till vem som helst, i valfri tenant, med valfri länk. Notiser och
+// notisinställningar är STRIKT ägaren-bara: list/view måste vara
+// `@request.auth.id = user` och får aldrig öppnas för staff/tenant.
+const MUST_BE_SERVER_CREATE_ONLY = ['notifications'];
+const MUST_BE_OWNER_ONLY = ['notifications', 'notification_preferences'];
+
+function verifyNotificationRules(collections) {
+  for (const name of MUST_BE_SERVER_CREATE_ONLY) {
+    const col = collections.get(name);
+    if (!col) continue;
+    if (col.createRule !== null && col.createRule !== undefined) {
+      fail(
+        `${name}.createRule måste vara null (bara servern skapar notiser), är \`${String(col.createRule)}\`.\n` +
+          'Kör migration 1700000186 eller setup-via-api.mjs.'
+      );
+    }
+  }
+  for (const name of MUST_BE_OWNER_ONLY) {
+    const col = collections.get(name);
+    if (!col) continue;
+    for (const ruleName of ['listRule', 'viewRule', 'updateRule', 'deleteRule']) {
+      const rule = col[ruleName];
+      if (typeof rule !== 'string' || !rule.includes('@request.auth.id = user')) {
+        fail(`${name}.${ruleName} måste vara ägaren-bara (\`@request.auth.id = user\`), är \`${String(rule)}\`.`);
+      }
+      if (/@request\.auth\.roles|@request\.auth\.tenant = tenant/.test(rule)) {
+        fail(`${name}.${ruleName} får inte öppnas för roller/tenant — notiser är privata: \`${rule}\`.`);
+      }
+    }
+  }
+  const notif = collections.get('notifications');
+  if (notif) {
+    for (const token of ['@request.body.user:isset = false', '@request.body.tenant:isset = false', '@request.body.payload_json:isset = false', '@request.body.actor:isset = false']) {
+      if (typeof notif.updateRule !== 'string' || !notif.updateRule.includes(token)) {
+        fail(
+          `notifications.updateRule måste vara fältlåst (saknar \`${token}\`) — annars kan en egen notis ` +
+            'PATCH:as om till en annan användare/tenant. Kör migration 1700000186 eller setup-via-api.mjs.'
+        );
+      }
+    }
+  }
+  ok('Notiser: bara servern skapar, bara ägaren läser, update fältlåst (§ 50)');
 }
 
 function verifyStartupMemberIsolation(collections) {
@@ -562,7 +685,8 @@ const AI_DENYLIST = new Set([
   'users', 'tenants', 'verification_tokens', 'pending_signups',
   'tenant_integrations', 'user_app_integrations', 'user_mistral_connectors',
   'chat_threads', 'user_files', 'user_file_chunks', 'deep_jobs',
-  'org_knowledge', 'org_knowledge_chunks', 'agent_memory'
+  'org_knowledge', 'org_knowledge_chunks', 'agent_memory',
+  'notifications', 'notification_preferences', 'rate_limits', 'app_locks'
 ]);
 
 // PII-stavningar som substring-maskern INTE redan fångar. Förankrade till `_`
@@ -720,6 +844,8 @@ function verifyRlsAndRbac(collections) {
 
   verifyStartupMemberIsolation(collections);
   verifyImmutableCollections(collections);
+  verifyNotificationRules(collections);
+  verifySuperuserOnlyCollections(collections);
   verifyCompassWriteRulesScoped(collections);
 
   ok('RLS/RBAC baseline checks passed (createRules är säkra)');
@@ -960,6 +1086,7 @@ const REQUIRED_APP_FIELDS = [
   // Bolagsregister (§ 11.8, migration 1700000171): utan fälten "sparas"
   // balansomslutning/eget kapital tyst bort vid synk från Roaring.
   { collection: 'startup_financials', fields: ['balance_sheet_sek', 'equity_sek', 'net_result_sek'] },
+  { collection: 'startup_ownership', fields: ['source_part'] },
   // Målstyrning (§ 42, migration 1700000159) + enkätkälla (§ 43, migration
   // 1700000160): utan flaggorna sparas "okänt" som 0 och en enkätindikator tappar sin källa.
   { collection: 'goal_indicators', fields: ['has_target', 'survey_module'] },
@@ -995,7 +1122,14 @@ const REQUIRED_APP_FIELDS = [
   },
   // Teamtak (§ 29.7, migration 1700000181): utan fältet "sparas" ledningens
   // tak tyst bort och alla får default 3.
-  { collection: 'tenants', fields: ['max_active_teams_per_person'] }
+  { collection: 'tenants', fields: ['max_active_teams_per_person'] },
+  // Notifikationssystemet (§ 50, migration 1700000186): utan fälten tappas
+  // gruppering, tystning och "sedd"-markering tyst.
+  {
+    collection: 'notifications',
+    fields: ['category', 'priority', 'entity_type', 'entity_id', 'group_key', 'count', 'seen_at', 'latest_at', 'dedupe_key']
+  },
+  { collection: 'notification_preferences', fields: ['user', 'tenant', 'settings'] }
 ];
 
 /**
@@ -1010,7 +1144,10 @@ const REQUIRED_SELECT_VALUES = [
 const MUST_NOT_BE_REQUIRED = [
   { collection: 'annual_wheel_items', fields: ['track'] },
   // Kontaktboken (§ 45): efternamn valfritt (chatten/Outlook-export ger ofta bara ett namnfält).
-  { collection: 'contacts', fields: ['last_name'] }
+  { collection: 'contacts', fields: ['last_name'] },
+  // AI-förbrukning (§ 9.6, migration 1700000185): anonyma publika flöden
+  // loggas utan användare — ett obligatoriskt `user` tappar dem tyst.
+  { collection: 'ai_usage_events', fields: ['user'], migration: '1700000185' }
 ];
 
 function verifyAppWritableFields(collections) {
@@ -1052,7 +1189,7 @@ function verifyAppWritableFields(collections) {
     ok(`select "${collection}.${field}" har appens värden (${values.join(', ')})`);
   }
 
-  for (const { collection, fields } of MUST_NOT_BE_REQUIRED) {
+  for (const { collection, fields, migration } of MUST_NOT_BE_REQUIRED) {
     const col = byName.get(collection);
     if (!col) continue;
     const colFields = col.fields || col.schema || [];
@@ -1061,7 +1198,7 @@ function verifyAppWritableFields(collections) {
       if (field && field.required) {
         fail(
           `Field "${collection}.${name}" är obligatoriskt men skrivs inte längre av appen ` +
-            '→ varje create avvisas med 400. Kör migration 1700000139 eller setup-via-api.mjs.'
+            `→ varje create avvisas med 400. Kör migration ${migration || '1700000139'} eller setup-via-api.mjs.`
         );
       }
     }
@@ -1093,6 +1230,7 @@ async function main() {
   verifyRlsAndRbac(collections);
   verifyAppWritableFields(collections);
   await verifyNoBrokenCreateRules();
+  await verifySecurityRules();
   await verifyNoBareMultiValueOperators();
   await verifyAiPiiMasking();
   await verifyAppUser();

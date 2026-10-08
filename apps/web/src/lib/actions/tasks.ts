@@ -17,6 +17,7 @@ import {
 import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
 import { unionParticipantIds } from '@/lib/missions-server';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { notify } from '@/lib/notifications-server';
 import { parseDateTimeInput, type Mission } from '@platform/shared';
 
 /**
@@ -437,6 +438,29 @@ function revalidateStartupBoard(startupId: string) {
   revalidatePath('/inkorg');
 }
 
+/**
+ * Notis till kollegor som tilldelats ett kort (§ 50, `task_assigned`).
+ * Best-effort — ett notisfel får aldrig fälla själva tilldelningen.
+ */
+async function notifyTaskAssignees(
+  pb: PocketBase,
+  user: { id: string; tenant: string },
+  taskId: string,
+  assigneeIds: string[],
+  description: string,
+  href: string
+): Promise<void> {
+  if (assigneeIds.length === 0) return;
+  await notify(pb, {
+    tenant: user.tenant,
+    recipients: assigneeIds,
+    kind: 'task_assigned',
+    actorId: user.id,
+    entity: { type: 'tasks', id: taskId },
+    payload: { title: description, href }
+  }).catch(() => undefined);
+}
+
 /** Skapa en uppgift direkt i en kolumn på bolagskanbanen. Bara staff. */
 export async function createStartupBoardTaskAction(input: {
   startupId: string;
@@ -489,8 +513,10 @@ export async function createStartupBoardTaskAction(input: {
     payload.due_at = input.dueAt;
   }
 
+  let createdId: string;
   try {
-    await pb.collection('tasks').create(payload);
+    const created = await pb.collection('tasks').create<{ id: string }>(payload);
+    createdId = created.id;
   } catch (err) {
     return {
       ok: false,
@@ -498,6 +524,7 @@ export async function createStartupBoardTaskAction(input: {
     };
   }
 
+  await notifyTaskAssignees(pb, user, createdId, assignees, description, `/startups/${input.startupId}/aktiviteter`);
   revalidateStartupBoard(input.startupId);
   return { ok: true };
 }
@@ -560,11 +587,18 @@ export async function setTaskAssigneesAction(
 
   const pb = await getServerPb();
 
-  let row: { id: string; tenant?: string; startup?: string; mission?: string };
+  let row: {
+    id: string;
+    tenant?: string;
+    startup?: string;
+    mission?: string;
+    assignees?: string[];
+    description?: string;
+  };
   try {
     row = await pb
       .collection('tasks')
-      .getOne(taskId, { fields: 'id,tenant,startup,mission' });
+      .getOne(taskId, { fields: 'id,tenant,startup,mission,assignees,description' });
   } catch {
     return { ok: false, error: 'Uppgiften hittades inte.' };
   }
@@ -583,6 +617,16 @@ export async function setTaskAssigneesAction(
       error: err instanceof Error ? err.message : 'Kunde inte uppdatera tilldelningen.'
     };
   }
+
+  // Notis bara till NYA tilldelade (§ 50).
+  const before = new Set(Array.isArray(row.assignees) ? row.assignees : []);
+  const added = assignees.filter((id) => !before.has(id));
+  const href = row.mission
+    ? `/uppdrag/${row.mission}`
+    : row.startup
+      ? `/startups/${row.startup}/aktiviteter`
+      : '/inkorg';
+  await notifyTaskAssignees(pb, user, taskId, added, row.description || 'Uppgift', href);
 
   if (row.startup) revalidateStartupBoard(row.startup);
   if (row.mission) revalidatePath(`/uppdrag/${row.mission}`);
@@ -670,8 +714,10 @@ export async function createMissionBoardTaskAction(input: {
     payload.due_at = input.dueAt;
   }
 
+  let createdId: string;
   try {
-    await pb.collection('tasks').create(payload);
+    const created = await pb.collection('tasks').create<{ id: string }>(payload);
+    createdId = created.id;
   } catch (err) {
     return {
       ok: false,
@@ -679,6 +725,7 @@ export async function createMissionBoardTaskAction(input: {
     };
   }
 
+  await notifyTaskAssignees(pb, user, createdId, assignees, description, `/uppdrag/${input.missionId}`);
   revalidateMissionBoard(input.missionId);
   return { ok: true };
 }

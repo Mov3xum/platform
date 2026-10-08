@@ -507,7 +507,9 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
     `support_check_applications`/`_revisions`/`_comments`/`_documents`
     (§ 46 — deltagarnamn, signeringsbevis och bilagor)
     samt `compass_responses` (råa enkät-/intagssvar per fråga, § 43 —
-    målstyrningen får bara det k-anonyma aggregatet).
+    målstyrningen får bara det k-anonyma aggregatet) och
+    `notifications`/`notification_preferences` (privata notiser och
+    notisinställningar, § 50).
 
   Allt annat — CRM (`contacts`), compass-inflöde (`compass_*`), de minimis
   (`de_minimis_*`), avtal/signeringsbevis (`agreement_signatures`),
@@ -1159,8 +1161,8 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
     origin tas från `NEXT_PUBLIC_APP_URL`/`APP_URL` när den är satt.
 - **Brute-force-skydd (A.8.x):** `loginAction` rate-limitar misslyckade
   försök per IP+e-post (8/15 min) och per IP (40/15 min) via
-  `lib/rate-limit.ts` (in-memory; lyft till Redis/PB vid horisontell
-  skalning).
+  `lib/rate-limit.ts` (delad mellan containrar via PB-kollektionen
+  `rate_limits`, processminne som reserv — § 21.8).
 - **Output-säkerhet (XSS):** allt användar-/AI-genererat innehåll som
   renderas via `dangerouslySetInnerHTML` MÅSTE gå genom
   `apps/web/src/lib/safe-html.ts` (`escapeHtml` / `inlineMarkdown` /
@@ -1458,6 +1460,49 @@ slug) när katalogen, detaljsidan eller `connectIntegrationAction` möter en
 handler utan rad; utan superuser visas kortet ändå med orsaken i stället för
 formuläret. Speglat i `setup-via-api.mjs` (category-enumet patchas +
 raderna seedas). Ingen ny dataväg, inga nya fält; riskklass oförändrad.
+
+**Valbara datadelar (2026-10).** Personalen väljer FÖRE varje hämtning vad som
+ska hämtas — kryssrutor per del vid "Synka nu" (portföljen), "Testa mot
+org-nr" och "Synka från <leverantör>" på bolagskortet (där knappen först
+öppnar valet; inget anropas förrän det bekräftats). Delarna är
+`basic` (grunddata), `financials` (bokslut), `group_structure`
+(koncernstruktur) och `beneficial_owners` (verklig huvudman); varje del är ett
+eget API-anrop hos leverantören och endpointen visas vid kryssrutan
+(`partEndpoints`, env-medveten). Källa av sanning: den rena, enhetstestade
+`lib/integrations/company-registry/parts.ts`. Varje provider deklarerar
+`parts` (Roaring alla fyra, Allabolag-stubben grunddata + bokslut,
+Bolagsverket bara grunddata — en provider med EN del visar inga kryssrutor).
+Regler:
+- **Det som inte väljs anropas inte och skrivs inte.** Roaring anropar bara de
+  valda API:erna (varje anrop debiteras); `handler-factory.ts` klipper
+  dessutom bort allt utanför valet innan skrivningen (`restrictToParts`), så
+  en provider som ignorerar valet ändå aldrig skriver en ovald del.
+  Befintliga värden från tidigare hämtningar lämnas orörda.
+- **`fetchedParts`** = delar som begärdes OCH lyckades. Valda grunddata är
+  blockerande; övriga delar är fail-soft. Gav ingen vald del data skrivs
+  inget och synken felar med orsaken (en tom synk ser aldrig lyckad ut).
+  Bolagskortets synk visar nu bolagets fel: tidigare fångades det i
+  `perStartupErrors` och knappen svarade ändå "Synk klar"
+  (`runRegistrySyncForStartup`: ej hämtat ⇒ `failed` med orsak, delvis
+  skrivet ⇒ `partial` med varning).
+- **Ägarbilden ersätts per del** (migration **1700000182**:
+  `startup_ownership.source_part`, text, backfillad för befintliga
+  Roaring-rader — kontrollgrund/intervall ⇒ huvudman, annars koncern).
+  Hämtades alla ägardelar ersätts källans hela ägarbild (fungerar även mot ett
+  schema utan fältet); hämtades bara en ersätts enbart den delens rader, och
+  saknas fältet stoppas skrivningen med tydligt fel INNAN något raderats.
+  Tidigare raderade en synk där verklig huvudman föll (t.ex. 403, inte i
+  paketet) koncernstrukturens rader — nu ersätts bara de delar som lyckades.
+  Speglat i `setup-via-api.mjs`, asserterat i `verify-baseline.mjs`.
+- **Server-side validering:** valet skickas som `parts` + markören
+  `parts_present` och prövas mot handlerns deklarerade delar
+  (`parseRegistryParts` — okänd del eller tomt val avvisas; formulär utan
+  markören hämtar allt, som förut). Enskild firma hämtar aldrig ägardelarna.
+- **Audit:** valda delar står i synkens sammanfattning (`last_sync_summary`)
+  och i aktivitetsraden ("Hämtade: Grunddata, Bokslut") — PII-fritt.
+- Senaste val sparas per leverantör i `localStorage`
+  (`movexum-registry-parts-<slug>`, bekvämlighet — ingen datakälla).
+Ingen ny dataväg, ingen PII i det nya fältet; riskklass oförändrad.
 
 **GDPR § 5 / § 9.3.** Fysiska personer i ägarbilden lagras UTAN namn,
 personnummer och födelsedatum — bara `owner_kind='person'` + andel/intervall
@@ -3033,6 +3078,147 @@ hens egna bolag.
 - **Riskklass:** n/a (åtkomstkontroll, ingen AI-inferens).
 - **Migrationer:** ny oföränderlig migration (1700000096), fälten speglas i
   `scripts/setup-via-api.mjs` och `scripts/verify-baseline.mjs`.
+
+### 21.8 Härdade API-regler — en källa av sanning (säkerhetsgranskning 2026-10-08)
+
+**Incident.** `setup-via-api.mjs` (körs vid varje deploy/sync EFTER
+migrationerna) skrev med sina inline-defs över migrationernas
+update/delete-regler med `auth && tenant` UTAN rollkontroll. Live kunde
+därför varje inloggad — även `startup_member`/`observer`/`partner` — med sin
+egen token (läsbar i cookien) PATCH:a `tools.system_prompt` (prompt-injection
+i agenter som staff kör), bolagskort, uppdrag, events, workshops m.m. direkt
+mot PB-API:t; de minimis-kollektionerna tappade bolagsisoleringen (§ 21);
+globala kollektioner (`de_minimis_regelverk` → höjt tak för ALLA tenants,
+`integration_providers`, `web_cache` → förgiftad prompt-text) gick att skapa;
+createRules utan pinnad skapare lät en användare förfalska `created_by`
+(schema som körs med admins rättigheter), `author` och `signer`
+(eIDAS-bevis); en enkät kunde skapas med `send_base_url` mot en extern domän
+(phishing via plattformens avsändare); en admin kunde ändra ANDRA tenants.
+
+**Regel (bindande).** `backend/pocketbase-schema/scripts/security-rules.mjs`
+(`SECURITY_RULES`, `PROTECTED_FILE_FIELDS`) är källan av sanning för dessa
+regler:
+- `setup-via-api.mjs` tillämpar den **sist** (efter collection-defs och
+  `FORCE_CREATE_RULES`, vars createRules den också vinner över).
+- Migration **1700000182** bär en ordagrann kopia (JSVM kan inte importera);
+  `security-rules.test.mjs` låser att de är identiska och att reglerna följer
+  § 21.3 (`:each ?=`, inga roll-checks/joins i createRules, varje
+  update/delete kräver roll/ägarskap + tenant).
+- `verify-baseline.mjs` (`verifySecurityRules`) fäller deployen om en regel
+  live avviker.
+
+Lägger du en inline-def i `setup-via-api.mjs` med lösare regler än
+migrationen återställs den av steget — ändra i stället `security-rules.mjs`
++ en NY migration. Update/delete-regler på domändata kräver Movexum-personal
+(admin/incubator_lead/coach/mentor) eller ägarskap; finare roller enforce:as
+i server-actions, som faller tillbaka på superuser först EFTER sin egen
+kontroll (`writeWithFallback`). Uppdragens deltagare (json) skriver därför via
+`missions.ts` med fallback. `agreements.file` och `user_files.file` är
+`protected` (fil-token krävs; proxyerna använder redan `getToken`).
+`web_cache` läses/skrivs bara via superuser (`lib/ai/web.ts`).
+
+**Övriga åtgärder samma granskning:** `next` 15.5.27 (oautentiserad RCE i
+bildoptimeringen m.fl.) + resolutions för transitiva sårbarheter (`yarn
+audit`: 0); `scripts/check-secrets.mjs` i `yarn test` (hemlighetsvakt över
+alla spårade filer); interna förhandsgransknings-routarna
+`/api/inflode/m/[slug]/{submit,quiz-result}` kräver admin/incubator_lead/coach
++ rate-limit; lead-sammanställningen (§ 23.6) prövar månadstaket + ett tak
+per tenant/timme; utlogg avvisar cross-site-POST (`Sec-Fetch-Site`);
+enkätlänkens origin tas från `APP_URL`/`NEXT_PUBLIC_APP_URL` när den är satt;
+`createMissionAction`/`updateMissionParticipants` verifierar bolag (tenant +
+länkning för icke-staff) och deltagare (tenant); chattens agentval prövar
+`canRunTool` (§ 9.5); Vinnova-inmatningen verifierar bolagets tenant och
+typkontrollerar tal; rate-limitern har ett hårt nyckeltak (minnes-DoS).
+**Skalning:** migration **1700000183** lägger sammansatta index
+(`activities`/`ai_usage_events`/`tool_runs`/`compass_leads`/`agent_actions`
+på tenant/aktör + `created`, `notifications(user, created)`,
+`tasks(tenant, owner, status)`); RAG-svepet (§ 26.3) hämtar bara
+`id,embedding` och hydrerar topp-80 med text.
+
+**Tenant-pin i createRules.** Varje createRule på en kollektion med
+`tenant`-fält kräver `@request.body.tenant = @request.auth.tenant`
+(befintliga ägar-/skaparvillkor behålls; ingen join/roll-check, § 21.3) —
+varje användartoken-create MÅSTE skicka `tenant: user.tenant`/`actor.tenant`.
+Kollektioner UTAN tenant-fält (`activities`, `notes`, `milestones`,
+`agreements`, `startup_team_members`, `partner_engagements`,
+`startup_contacts`, `compass_questions`/`_messages`/`_responses`) skyddas av
+PB-hooken **`hooks/tenant_guard.pb.js`** (`onRecordCreateRequest` +
+`onRecordUpdateRequest`): varje satt förälder (bolag, partner, kontakt, modul,
+konversation) slås upp och requesten nekas med 403 om förälderns tenant inte
+är den inloggades; superuser-requests släpps igenom. `compass_lead_sources`
+(plattformsbred) skrivs bara av superuser. **PB:s JSVM kör varje
+hook-hanterare i en isolerad kontext** — konstanter/hjälpfunktioner måste
+deklareras INNE i hanteraren (`schedule_tick`/`survey_dispatch_tick` läste en
+yttre konstant → ReferenceError; rättat). `security-rules.test.mjs` låser
+paritet med migration 1700000182, tenant-pinnen, att inga nycklar dubbleras
+(en dubblerad nyckel ersatte tyst härdade update/delete-regler) och att
+kärnkollektionernas update/delete-regler finns kvar.
+
+**Delat tillstånd för horisontell skalning (migration 1700000184).**
+Rate-limitern (`lib/rate-limit.ts`) och Startupkompassens modul-lås lever i
+`rate_limits` respektive `app_locks` (alla API-regler null — bara den cachade
+superusern). `checkRateLimit`/`recordFailure`/`clearFailures` är **async och
+måste awaitas**. Nyckeln lagras bara som HMAC/SHA-256
+(`MOVEXUM_RATE_LIMIT_SECRET`, annars `MOVEXUM_INTEGRATION_KEY`) — aldrig
+e-post/IP i klartext. Processminnet räknas alltid med och är ensam reserv när
+PB inte nås (brytare 30 s, loggas en gång PII-fritt); en request blockeras
+aldrig för att PB är nere. `withDistributedLock(key, fn, {ttlMs, waitMs})`
+(`lib/distributed-lock.ts`) tar låset via en rad med unik nyckel, städar
+utgångna lås och kastar `LockTimeoutError` efter `waitMs`; låsnycklar får inte
+bära personuppgifter. Speglat i `setup-via-api.mjs`, asserterat i
+`verify-baseline.mjs` (finns + superuser-only), denylistat för
+`query_collection`.
+
+**AI-kostnad: månadsrollup (migration 1700000185, § 9.6).** Månadstaket och
+AI-analysen läser `ai_usage_monthly` (en rad per tenant och UTC-månad), som
+hålls aktuell atomiskt av `hooks/ai_usage_rollup.pb.js` (SQL-upsert
+`ON CONFLICT(tenant, month)`, fail-soft) och backfillades ur befintliga events
+— gallring av rådata rör aldrig rollupen. `assertWithinAiBudget` läser raden
+via superuser (taket gäller nu alla roller; förut räknades coachers/mentorers
+förbrukning som 0) med event-summering som fail-open-reserv.
+`ai_usage_events.user` är valfritt: publika flöden (publik kompass-chatt =
+`startup_chat`, AI-sammanställning/lead-extraktion = `suggestions`) loggas
+anonymt och räknas mot taket. AI-analysen tar hela månader ur rollupen
+(verifierad mot PB:s exakta antal); kapat underlag visas alltid som nedre
+gräns.
+
+**Datagallring (GDPR art. 5.1 e).** `hooks/retention_tick.pb.js` körs dagligen
+03:17 UTC och raderar högst 2000 rader per kollektion och körning: lästa
+notiser > 90 d (alla > 365 d), `ai_usage_events` > 730 d, `agent_actions`
+> 1095 d (golv 365 — audit-bevis för SOC 2/ISO), `compass_security_events`
+> 365 d, `web_cache` > 2 d, utgångna `rate_limits`/`app_locks`. Styrs med
+`MOVEXUM_RETENTION_*` på PB-resursen i Coolify (`MOVEXUM_RETENTION_DISABLED=1`
+stänger av). Loggen innehåller bara antal.
+
+**Skalbara läsvägar.** Listor pagineras server-side med `fields`-projektion
+(leads 50/sida, bolag 100/sida, `?page=`); räkningar görs med
+`getList(1,1).totalItems`, aldrig genom att hämta rader. `lib/read-scaling.ts`
+(ren, testad): `mapWithConcurrency`, `chunk`, `mergeChunkedPages`. OR-kedjor
+över id-listor delas i disjunkta grupper om ≤ 40 (exakta totaler, under PB:s
+filtertak). Superuser-fallbacken vid tomt svar (PB v0.23.4:s tysta
+regel-nekande ger 200 med 0 rader) föregås av en billig existensprobe; vid fel
+faller den bara tillbaka på 400/403/404. Leads-exporten har ett tak på 10 000
+rader och kapningen syns i filen och i audit-raden.
+
+**Appnivå.** Coachens godkännande av en workshop stämplar
+`artifacts_json.coach_approved_hash` (SHA-256 av kanoniskt innehåll,
+`lib/workshop-review.ts`); ändrat innehåll nollställer beslutet och commit
+vägras vid mismatch eller saknad hash (äldre godkännanden kräver ett nytt
+klick av coachen). Progressionssparning skriver aldrig `coach_*`/commit-
+nycklar. `/api/public/result-pdf` tar bara `{slug, bucketKey}` — texten kommer
+ur modulens `result_buckets` (nätfiskeskydd). `/api/public/compass-media`
+serverar opublicerade moduler bara för kompass-personal i tenanten
+(`Cache-Control: private`). Uppdragskommentarer verifierar `parent` mot samma
+uppdrag och tenant-filtrerar mentions även vid redigering. Rapportsektioner
+vitlistas (`lib/report-section.ts`). Investerare/affärer skrivs bara av
+admin/incubator_lead/coach/mentor. `/api/chat/stream` har en gräns på 60
+turer per 5 min och användare.
+
+**Kända begränsningar (medvetna).** Processlokala cacher (superuser-token,
+Outlook-agenda, webbflöden, frågeembeddings) är bara effektivitet och får
+skilja sig mellan containrar. Bakgrundsarbete som startas från en request
+(`/api/internal/run-trigger`) överlever inte en omstart mitt i körningen.
+Låset förnyas inte — `fn` måste bli klar inom TTL (15 s).
 
 ---
 
@@ -6917,7 +7103,8 @@ Outlook-möten, notiser och uppdrag jag deltar i. Sidan hette tidigare "Min
   tidsindelningen direkt.
 - **Notiser i högerspalten** (≥ 1280 px; under huvudspalten på mindre
   skärm) med olästa-antal även vid sidtiteln (`#notiser`-ankare). Tom agenda
-  kollapsar till en rad i stället för en stor tom ruta.
+  kollapsar till en rad i stället för en stor tom ruta. Listan, klockan i
+  topplisten och inställningarna beskrivs i § 50.
 - **Pollning:** `useLiveWorkspace` på fokus + 60 s (tidigare 15 s), pausad
   under interaktion. **Outlook-agendan cachas 60 s i processminnet per
   användare** (`outlookCache` i `aggregate.ts`) — bara det härledda
@@ -7774,3 +7961,179 @@ klienten och rullas tillbaka vid fel.
   pekar på moduler som finns och att `onskemal` ligger i System-gruppen. Lägg
   aldrig till ett id i rail-lös-listan för att tysta testet när en meny-rad
   råkat försvinna i en merge.
+
+## 50. Notifikationssystemet — katalog, inställningar per person & klockan
+
+### 50.1 Översikt
+
+Notiser är plattformens sätt att säga "det här rör dig": en kommentar på ditt
+uppdrag, ett kort som tilldelats dig, ett avtal som väntar på din signatur, en
+workshop som tilldelats ditt bolag. De visas i **klockan uppe till höger**
+(alla roller, även bolagsmedlemmar) och i listan på **Mina uppgifter**
+(`/inkorg#notiser`). Varje person väljer **själv, dynamiskt** vad hen får
+notiser om under **Mitt konto → Notiser** (`/konto#notiser`, även via
+kontomenyn i railens fot).
+
+Fas 1 (2026-10, den här): grund och säkerhet, katalog, inställningar,
+sammanslagning, tystning, klockan och nya producenter. **Beslutat för nästa
+steg** (maintainer 2026-10-08): e-post via **Resend** (behålls), **webbpush**
+via PWA:n (§ 35; innehållslösa meddelanden via webbläsarnas pushtjänster är
+godkänt), en **dynamisk sammanställning** (frekvens och tid väljs per person —
+modellen bär redan `digest.frequency/time/weekday`) och **e-post även till
+bolagsmedlemmar**. Inställningsmodellen har därför redan kanalerna
+`in_app`/`email`/`push` per typ; bara `in_app` levereras i dag och UI:t säger
+det.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/notifications.ts` (+ `.test.ts`) | **Katalogen** (typ → etikett, beskrivning, ikon, kategori, prioritet, mottagargrupp, obligatorisk, sammanslagningsbar, standardkanaler), inställningsmodellen (`normalizeNotificationPreferences`, `effectiveNotificationChannels`, `shouldDeliverInApp`, `setNotificationKindChannel`, `toggleMutedNotificationEntity`), textvård (`cleanNotificationText`), länkskydd (`safeNotificationHref`), gruppnyckel och retention — ren, enhetstestad |
+| `backend/pocketbase-schema/migrations/1700000186_notifications_v2.js` | `kind` → text, nya fält, createRule = NULL, tenant cascade, collection `notification_preferences` |
+| `apps/web/src/lib/notifications-server.ts` | ENDA vägen att skapa notiser (`emitNotification`/`notify`/`notifyStartupMembers`), läsning, visningsmodell, "sedd", rensning |
+| `apps/web/src/lib/notifications/preferences.server.ts` | Läs/spara inställningar (ägaren-bara) |
+| `apps/web/src/lib/actions/notifications.ts` | Läst/oläst, ta bort, markera alla, sedd, kanalval, kategori-växling, tysta, återställ |
+| `apps/web/src/app/api/notifications/route.ts` | Klockans pollning (antal osedda + senaste) |
+| `apps/web/src/components/notifications/{NotificationBell,NotificationItem,NotificationPreferencesForm}.tsx` | Klockan, notisraden (delas av klockan och listan), inställningarna |
+| `apps/web/src/components/inkorg/NotificationList.tsx` | Listan på Mina uppgifter (filter: olästa, kategori) |
+
+### 50.2 Datamodell
+
+- **`notifications`** (1700000052 + **1700000186**): `tenant` (cascade),
+  `user` (cascade), `kind` (**text** — giltigheten ligger i katalogen, så en
+  ny typ kräver ingen migration), `actor`, `mission`/`comment` (äldre
+  relationer, kvar), `payload_json {title, snippet, href}`, `read_at`, samt
+  `category`, `priority`, `entity_type`/`entity_id` (vad notisen gäller —
+  tystning), `group_key` + `count` (sammanslagning), `seen_at` (klockans
+  siffra), `latest_at` (sortering — en sammanslagen notis flyttas upp) och
+  `dedupe_key` (unikt partiellt index `(user, dedupe_key)` → påminnelser
+  skapas aldrig två gånger; bara ett faktiskt `validation_not_unique` räknas
+  som dubblett). PB 0.23.4 vägrar byta typ på ett fält med samma
+  id, så migrationen byter `kind` via snapshot → drop → nytt textfält →
+  återställning (verifierat mot PB 0.23.4 lokalt).
+- **`notification_preferences`** (**1700000186**): en rad per användare
+  (unikt index på `user`), `settings` (json, `NotificationPreferences`:
+  `kinds` = bara avvikelser från katalogens standard, `muted`, `digest`).
+  **STRIKT ägaren-bara** på alla regler; updateRule låser `user`/`tenant`
+  (`@request.body.<fält>:isset = false`). Egen collection eftersom
+  `users.viewRule` är tenant-bred.
+
+### 50.3 Regler (bindande)
+
+- **Bara servern skapar notiser.** `notifications.createRule` är NULL.
+  Producenter anropar `notify(pb, …)`/`emitNotification(…)`/
+  `notifyStartupMembers(pb, …)` EFTER att handlingens roll och tenant
+  verifierats; funktionen skriver med den cachade superusern. Den gamla
+  regeln (`auth && (actor = "" || actor = auth.id)`) lät vem som helst skapa
+  notiser åt vem som helst — i valfri tenant och med valfri länk
+  (nätfiske). Verifierat: en användartoken som försöker skapa en notis får
+  403. Skriv aldrig till `notifications` direkt.
+- **Mottagare verifieras i koden:** varje id måste vara en användare i
+  `tenant` (annars hoppas den över), den som utförde handlingen får ingen
+  notis om sin egen handling, max 200 mottagare per anrop.
+  `notifyStartupMembers` kräver exakt `linked_startups ∋ bolaget` och rollen
+  `startup_member`.
+- **Innehåll:** rubrik och utdrag plattas, kapas (200/280 tecken) och
+  personnummer-tvättas (§ 15.6-regexen). Länken måste vara en relativ
+  sökväg inom appen (`safeNotificationHref` — aldrig `//host`, `/\host`,
+  kontrolltecken eller extern adress; annars `/inkorg`). Skriv aldrig
+  e-post, telefonnummer eller annan direkt-PII i en notis; ett utdrag får
+  innehålla verksamhetstext (kortrubrik, svar på ett önskemål).
+- **Inställningar styr leveransen:** `shouldDeliverInApp` — en avstängd typ
+  eller en tystad sak (`entity_type`/`entity_id`) skapar ingen notis.
+  **Obligatoriska typer** (`mandatory`: `agreement_to_sign`,
+  `contact_request`, `support_check_changes`, `support_check_decision` —
+  någon väntar på mottagaren) går alltid fram och kan inte stängas av
+  (`setNotificationKindChannel` vägrar, UI:t visar "Alltid på").
+- **Sammanslagning:** typer med `groupable` (comment, status_change,
+  stage_advance, support_check_comment) slås ihop per sak så länge den
+  tidigare notisen är oläst: `count` ökar, `latest_at`/`actor`/innehåll
+  uppdateras och `seen_at` nollas (klockans siffra tänds igen).
+- **Ny notistyp:** lägg den i `NOTIFICATION_KINDS` + `NOTIFICATION_CATALOG`
+  (etikett, beskrivning, kategori, mottagargrupp, standard) — den dyker upp
+  i inställningarna för rätt roller automatiskt. Ingen migration. Testet
+  låser att varje typ har komplett metadata.
+- **Schema-drift:** mot en instans utan 1700000186 faller skapandet tillbaka
+  på de gamla fälten och, för en typ select-listan inte känner, på
+  `assigned` — en notis tappas aldrig tyst. Saknas superuser loggas det en
+  gång och notiser kan inte skapas (createRule NULL); `verify-baseline.mjs`
+  fäller deployen om createRule inte är NULL, om reglerna inte är ägaren-
+  bara eller om fälten saknas. Speglat i `setup-via-api.mjs` (inkl.
+  select→text och, när REST inte kan byta typ, en union av select-värdena).
+- **Mottagaren kan bara markera läst/sedd.** `notifications.updateRule` är
+  fältlåst (`@request.body.<fält>:isset = false` för user, tenant, kind,
+  actor, mission, comment, payload_json, category, priority, entity_*,
+  group_key, count, dedupe_key, latest_at). Utan låset kunde en användare
+  PATCH:a en egen notis till en annan användare/tenant med valfri avsändare
+  och text och därmed kringgå createRule. Sammanslagningen skriver via
+  superusern och berörs inte. Asserterat i `verify-baseline.mjs`.
+  `notification_preferences.createRule` body-låser tenanten
+  (`@request.body.tenant = @request.auth.tenant`).
+- **Lagringsminimering (GDPR art. 5.1 e):** lästa notiser rensas efter 90
+  dagar, olästa efter 180, räknat från `latest_at` (senaste händelsen; faller
+  tillbaka på `created`). `pruneOldNotifications` körs (kapat 100, fail-soft)
+  när användaren öppnar `/inkorg`, med användarens egen token. **Känd
+  begränsning:** notiser till konton som aldrig öppnar listan rensas inte än —
+  en tenant-bred schemalagd rensning kommer med påminnelse-ticken i nästa
+  steg.
+
+### 50.4 Producenter (vem får vad)
+
+| Typ | Utlöses av | Mottagare |
+|---|---|---|
+| `comment`/`mention`/`assigned`/`status_change`/`stage_advance` | Uppdrag och uppdragskommentarer (§ 29) | Deltagare / nämnda |
+| `task_assigned` | Kort skapat med tilldelade, eller ny tilldelning på bolags-/uppdragskanban (§ 15.7, § 29.4) | NYA tilldelade |
+| `collaborator_invited` | Workshop-/dokumenttilldelning med medarbetare (§ 18.4) | Inbjudna kollegor |
+| `event_invited` | Möte skapat vid tilldelning (§ 18.4) | Inbjudna (inte organisatören) |
+| `workshop_assigned` | Workshop tilldelad bolag — UI och chatten (§ 18, § 33) | Bolagets medlemmar |
+| `document_assigned` | NY tilldelning av utbildningsdokument — UI och chatten (§ 18.3) | Bolagets medlemmar |
+| `agreement_to_sign` | Avtal uppladdat (§ 19); bolaget signerade först | Bolagets medlemmar resp. utpekad Movexum-signatär (annars avsändaren) |
+| `agreement_signed` | Alla parter har signerat | Avsändare, utpekad signatär och (om bolaget signerade) medlemmarna |
+| `contact_request`/`contact_decision` | Kontaktboken (§ 45.3) | Ägare / frågare |
+| `support_check_*` | Stödcheckar (§ 46) | Coacher/ledning resp. bolaget |
+| `feedback_answered`/`feedback_done` | Ledningen svarar/klarmarkerar (§ 49) | Kortets författare |
+| `due_soon` | (reserverad — påminnelse-ticken, nästa steg) | Ägare/tilldelade |
+
+Alla anrop är best-effort (`.catch`) — en misslyckad notis fäller aldrig
+huvudmutationen.
+
+### 50.5 Gränssnitt
+
+- **Klockan** (`NotificationBell` i `ProtoTopBar`): siffran = olästa notiser
+  som inte setts; när panelen öppnas sätts `seen_at` (notiserna förblir
+  olästa tills de öppnas). Pollar `/api/notifications` på fokus, synlig flik,
+  navigering och var 60:e sekund — inloggningscookien är httpOnly, så
+  PocketBase-realtime kan inte användas från webbläsaren. I en installerad
+  PWA speglas siffran på hemskärmsikonen (`navigator.setAppBadge`). "Visa
+  alla" leder till `/inkorg#notiser` för den som har Mina uppgifter (inte en
+  ren bolagsmedlem, § 22); kugghjulet till inställningarna.
+- **Notisraden** (`NotificationItem`, delas av klockan och listan): klick
+  markerar läst och öppnar länken; menyn har läst/oläst, **"Tysta notiser om
+  detta"** (inte för obligatoriska typer) och "Ta bort".
+- **Mitt konto → Notiser** (`NotificationPreferencesForm`): typerna byggs ur
+  katalogen filtrerat på rollerna (`notificationKindsForRoles` —
+  bolagsmedlemmar ser inte personalens typer och tvärtom), grupperade per
+  kategori, med en växel per typ och "Slå på/Stäng av alla" per kategori;
+  varje val sparas direkt (optimistiskt, i tur och ordning). Listan över
+  tystade saker med "Slå på igen", och "Återställ till standard". Saknas
+  `notification_preferences` (migration ej körd) visas en gul banner och
+  växlarna är låsta — standard gäller.
+
+### 50.6 Regelefterlevnad
+
+- **Riskklass (EU AI Act):** n/a — deterministiska notiser, ingen
+  AI-inferens.
+- **GDPR § 5/§ 6:** notiser är verksamhetsinformation till en enskild
+  användare (berättigat intresse för personal, avtal för bolagsmedlemmar).
+  Payload minimerad (rubrik, kort utdrag, intern länk), tvättad.
+  `notifications`/`notification_preferences` är **denylistade för AI**
+  (`lib/ai/redaction.ts`, låst i `redaction.test.ts` och speglat i
+  `verify-baseline.mjs`) — tidigare kunde en autonom körning (superuser)
+  läsa alla användares notiser i tenanten via `query_collection`.
+- **GDPR art. 17:** cascade på `user` och `tenant` för båda kollektionerna.
+- **§ 21-isolering / ISO 27001 A.5.15–A.5.18:** ägaren-bara RLS; server
+  actions verifierar ägarskapet i koden innan läst/oläst/ta bort.
+  Inställningar skrivs alltid för den inloggade (user sätts server-side;
+  superuser bara som reserv vid PB v0.23.4:s tysta regel-nekande).
+- **Loggar:** status, typ och användar-id — aldrig innehåll eller länk.
+- **Migrationer:** 1700000186 är ett nytt, oföränderligt filnummer.

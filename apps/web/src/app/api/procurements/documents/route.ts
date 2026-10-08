@@ -64,14 +64,14 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const rateKey = `procurement-doc:${user.id}`;
-  const limited = checkRateLimit(rateKey, RATE_MAX_PER_USER);
+  const limited = await checkRateLimit(rateKey, RATE_MAX_PER_USER);
   if (limited.blocked) {
     return NextResponse.json(
       { error: 'För många uppladdningar just nu. Vänta en stund och försök igen.' },
       { status: 429, headers: { 'retry-after': String(limited.retryAfterSec) } }
     );
   }
-  recordFailure(rateKey, RATE_WINDOW_MS);
+  await recordFailure(rateKey, RATE_WINDOW_MS);
 
   let form: FormData;
   try {

@@ -8,6 +8,7 @@ import { SessionGuard } from './SessionGuard';
 import { InstallPrompt } from '@/components/pwa/InstallPrompt';
 import { buildMobileNav } from '@/lib/mobile-nav';
 import { canAccessModuleForUser } from '@/lib/rbac';
+import { isPureStartupMember } from '@platform/shared';
 
 interface Props {
   user: SessionUser;
@@ -19,6 +20,12 @@ interface Props {
 export function ProtoShell({ user, children, counts, switchableStartups }: Props) {
   // Bottom-menyn (§ 35) — samma RBAC-filter som railen, beräknad server-side.
   const mobileNav = buildMobileNav(user.roles, user.enabledModules, counts ?? {}, canAccessModuleForUser);
+  // Klockan (§ 50): "Visa alla" leder till Mina uppgifter när personen har den
+  // sidan; en ren bolagsmedlem har den inte i sin meny (§ 22).
+  const notificationsHref =
+    !isPureStartupMember(user.roles) && canAccessModuleForUser(user.roles, 'inkorg', user.enabledModules)
+      ? '/inkorg#notiser'
+      : null;
 
   return (
     <MobileRailProvider>
@@ -39,7 +46,7 @@ export function ProtoShell({ user, children, counts, switchableStartups }: Props
       />
       <MobileRailBackdrop />
       <div className="mx-main-col">
-        <ProtoTopBar />
+        <ProtoTopBar unseenNotifications={counts?.notiser ?? 0} notificationsHref={notificationsHref} />
         <main className="mx-view">{children}</main>
       </div>
       <InstallPrompt />

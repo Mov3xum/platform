@@ -4,7 +4,7 @@ import type { SessionUser } from '@/lib/auth.server';
 import { getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
-import { getUnreadCount } from '@/lib/notifications-server';
+import { getUnreadCount, getUnseenCount } from '@/lib/notifications-server';
 import { unstable_cache } from 'next/cache';
 import { ProtoShell } from './proto/ProtoShell';
 import type { SwitchableStartup } from './proto/StartupSwitcher';
@@ -94,9 +94,13 @@ export async function AppShell({ user, children }: AppShellProps) {
   const switchableStartups = await loadSwitchableStartups(user);
 
   let inkorgUnread = 0;
+  let notificationsUnseen = 0;
   try {
     const pb = await getServerPb();
-    inkorgUnread = await getUnreadCount(pb, user.id);
+    [inkorgUnread, notificationsUnseen] = await Promise.all([
+      getUnreadCount(pb, user.id),
+      getUnseenCount(pb, user.id)
+    ]);
   } catch {
     inkorgUnread = 0;
   }
@@ -107,7 +111,8 @@ export async function AppShell({ user, children }: AppShellProps) {
       counts={{
         education: assignedWorkshopCount,
         mina_aktiviteter: assignedWorkshopCount,
-        inkorg: inkorgUnread
+        inkorg: inkorgUnread,
+        notiser: notificationsUnseen
       }}
       switchableStartups={switchableStartups}
     >

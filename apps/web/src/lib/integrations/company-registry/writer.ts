@@ -2,6 +2,7 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { escFilter } from '../../pb-filter';
 import { isPersonalOrgNr, isValidOrgNr } from './orgnr';
+import { isRegistryPartId, ownershipReplaceMode, type RegistryPartId } from './parts';
 import type {
   RegistryCompany,
   RegistryFinancialsYear,
@@ -20,7 +21,9 @@ import type {
 //   startup_financials  — upsert per (startup, år) via unique-index
 //                         (migration 1700000059); race → read-after-write.
 //   startup_ownership   — ERSÄTTS per (startup, källa) vid varje synk: gamla
-//                         rader från samma källa raderas, nya skrivs. Manuella
+//                         rader från samma källa raderas, nya skrivs. Hämtades
+//                         bara vissa ägardelar (§ 11.8, valbara delar) ersätts
+//                         enbart de delarnas rader (`source_part`). Manuella
 //                         rader (source = manual) och andra källors rader rörs
 //                         aldrig. Fysiska personer skrivs utan namn/org-nr —
 //                         normaliseraren får inte ge dem, men writern strippar
@@ -144,6 +147,7 @@ function ownershipPayload(
     control_basis: entry.control_basis && /^[a-z_]{1,20}$/.test(entry.control_basis) ? entry.control_basis : undefined,
     indirect: entry.indirect === true ? true : undefined,
     relation: 'unknown',
+    source_part: entry.part && isRegistryPartId(entry.part) ? entry.part : undefined,
     source,
     synced_at: syncedAt
   });
@@ -162,9 +166,14 @@ async function replaceOwnership(
   startupId: string,
   entries: RegistryOwnershipEntry[],
   source: RegistrySource,
-  syncedAt: string
+  syncedAt: string,
+  part?: RegistryPartId
 ): Promise<number> {
-  const filter = `startup = "${escFilter(startupId)}" && source = "${escFilter(source)}" && synced_at != "${escFilter(syncedAt)}"`;
+  // Utan `part` ersätts källans hela ägarbild (alla ägardelar hämtades). Med
+  // `part` bara den delens rader — kräver fältet `source_part` (1700000182);
+  // saknas det svarar PB 400 på filtret INNAN något skrivits eller raderats.
+  const partFilter = part ? ` && source_part = "${escFilter(part)}"` : '';
+  const filter = `startup = "${escFilter(startupId)}" && source = "${escFilter(source)}" && synced_at != "${escFilter(syncedAt)}"${partFilter}`;
   const existing = await pb
     .collection('startup_ownership')
     .getFullList<OwnershipRow>({ filter, fields: 'id' });
@@ -207,7 +216,9 @@ export async function applyRegistryCompany(
   startupId: string,
   company: RegistryCompany,
   source: RegistrySource,
-  syncedAt: string
+  syncedAt: string,
+  /** Alla datadelar providern stödjer — avgör om ägarbilden ersätts helt eller per del. */
+  providerParts: RegistryPartId[]
 ): Promise<RegistryWriteResult> {
   const result: RegistryWriteResult = {
     startupUpdated: false,
@@ -242,28 +253,41 @@ export async function applyRegistryCompany(
     }
   }
 
-  // Ägarbilden ersätts bara när källan faktiskt levererar en (en källa utan
-  // ägardata — Bolagsverket — raderar inte Roarings rader).
-  if (company.ownership.length > 0) {
+  // Ägarbilden ersätts bara för ägardelar som hämtades med lyckat resultat
+  // OCH gav rader (en källa utan ägardata — Bolagsverket — eller en del som
+  // inte valdes raderar aldrig Roarings rader).
+  const replace = ownershipReplaceMode(company.fetchedParts ?? [], providerParts);
+  const batches: Array<{ part?: RegistryPartId; entries: RegistryOwnershipEntry[] }> =
+    replace.mode === 'all'
+      ? [{ entries: company.ownership }]
+      : replace.mode === 'partial'
+        ? replace.parts.map((p) => ({ part: p, entries: company.ownership.filter((e) => e.part === p) }))
+        : [];
+  for (const batch of batches) {
+    if (batch.entries.length === 0) continue;
     try {
-      result.ownershipWritten = await replaceOwnership(
+      result.ownershipWritten += await replaceOwnership(
         pb,
         tenantId,
         startupId,
-        company.ownership,
+        batch.entries,
         source,
-        syncedAt
+        syncedAt,
+        batch.part
       );
     } catch (err) {
       const status = statusOf(err);
       result.errors.push(
         status === 404
           ? 'startup_ownership saknas i schemat (kör migration 1700000172)'
-          : `startup_ownership: HTTP ${status || 'fel'}`
+          : status === 400 && batch.part
+            ? 'Ägarbilden kunde inte uppdateras för en enskild del: startup_ownership.source_part saknas (kör migration 1700000182)'
+            : `startup_ownership: HTTP ${status || 'fel'}`
       );
       console.error('[company-registry] ownership replace failed', {
         source,
         startupId,
+        part: batch.part ?? 'all',
         status
       });
     }

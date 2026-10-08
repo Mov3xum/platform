@@ -107,6 +107,20 @@ export async function exportEAidRegisterAction(input?: {
 
 const TIME_KINDS: ServiceActivityKind[] = ['incubation', 'verification', 'admin'];
 
+/** Raderna matar Vinnova-/eAir-underlaget — bolaget MÅSTE tillhöra tenanten. */
+async function startupInTenant(
+  pb: Awaited<ReturnType<typeof getServerPb>>,
+  tenant: string,
+  startupId: string
+): Promise<boolean> {
+  try {
+    const rec = await pb.collection('startups').getOne<{ tenant?: string }>(startupId, { fields: 'id,tenant' });
+    return rec.tenant === tenant;
+  } catch {
+    return false;
+  }
+}
+
 export async function logServiceTimeAction(input: {
   startup: string;
   activity_kind: ServiceActivityKind;
@@ -117,12 +131,17 @@ export async function logServiceTimeAction(input: {
 }): Promise<ReportingActionState> {
   const user = await requireUser();
   if (!hasRole(user.roles, STAFF_WRITE)) return { error: 'Åtkomst nekad.' };
-  if (!input.startup) return { error: 'Bolag krävs.' };
+  if (typeof input?.startup !== 'string' || !/^[a-zA-Z0-9]{1,30}$/.test(input.startup)) {
+    return { error: 'Bolag krävs.' };
+  }
   if (!TIME_KINDS.includes(input.activity_kind)) return { error: 'Ogiltig insatstyp.' };
-  if (!(input.hours > 0)) return { error: 'Antal timmar måste vara > 0.' };
+  if (typeof input.hours !== 'number' || !Number.isFinite(input.hours) || !(input.hours > 0)) return { error: 'Antal timmar måste vara > 0.' };
   if (!validDate(input.occurred_on)) return { error: 'Ogiltigt datum.' };
 
   const pb = await getServerPb();
+  if (!(await startupInTenant(pb, user.tenant, input.startup))) {
+    return { error: 'Bolaget finns inte i din organisation.' };
+  }
   try {
     await pb.collection('service_time_entries').create({
       tenant: user.tenant,
@@ -132,7 +151,7 @@ export async function logServiceTimeAction(input: {
       hours: input.hours,
       hourly_rate_sek: input.hourly_rate_sek && input.hourly_rate_sek > 0 ? input.hourly_rate_sek : null,
       occurred_on: input.occurred_on,
-      note: (input.note || '').slice(0, 500),
+      note: (typeof input.note === 'string' ? input.note : '').slice(0, 500),
       source: 'manual'
     });
     revalidatePath('/rapporter', 'layout');
@@ -155,12 +174,17 @@ export async function logServiceCostAction(input: {
 }): Promise<ReportingActionState> {
   const user = await requireUser();
   if (!hasRole(user.roles, STAFF_WRITE)) return { error: 'Åtkomst nekad.' };
-  if (!input.startup) return { error: 'Bolag krävs.' };
+  if (typeof input?.startup !== 'string' || !/^[a-zA-Z0-9]{1,30}$/.test(input.startup)) {
+    return { error: 'Bolag krävs.' };
+  }
   if (!COST_TYPES.includes(input.cost_type)) return { error: 'Ogiltig kostnadstyp.' };
-  if (!(input.amount_sek >= 0)) return { error: 'Belopp måste vara ≥ 0.' };
+  if (typeof input.amount_sek !== 'number' || !Number.isFinite(input.amount_sek) || !(input.amount_sek >= 0)) return { error: 'Belopp måste vara ≥ 0.' };
   if (!validDate(input.incurred_on)) return { error: 'Ogiltigt datum.' };
 
   const pb = await getServerPb();
+  if (!(await startupInTenant(pb, user.tenant, input.startup))) {
+    return { error: 'Bolaget finns inte i din organisation.' };
+  }
   try {
     await pb.collection('startup_service_costs').create({
       tenant: user.tenant,
@@ -196,13 +220,18 @@ export async function upsertReadinessAssessmentAction(input: {
 }): Promise<ReportingActionState> {
   const user = await requireUser();
   if (!hasRole(user.roles, [...STAFF_WRITE, 'mentor'])) return { error: 'Åtkomst nekad.' };
-  if (!input.startup) return { error: 'Bolag krävs.' };
+  if (typeof input?.startup !== 'string' || !/^[a-zA-Z0-9]{1,30}$/.test(input.startup)) {
+    return { error: 'Bolag krävs.' };
+  }
   if (!validDate(input.assessed_at)) return { error: 'Ogiltigt bedömningsdatum.' };
   for (const v of [input.crl, input.tmrl, input.brl, input.srl]) {
     if (!validRl(v)) return { error: 'Readiness-nivåer måste vara 1–9.' };
   }
 
   const pb = await getServerPb();
+  if (!(await startupInTenant(pb, user.tenant, input.startup))) {
+    return { error: 'Bolaget finns inte i din organisation.' };
+  }
   try {
     await pb.collection('startup_readiness_assessments').create({
       tenant: user.tenant,
@@ -214,7 +243,7 @@ export async function upsertReadinessAssessmentAction(input: {
       srl: input.srl ?? null,
       criteria_checked_at: validDate(input.criteria_checked_at) ? input.criteria_checked_at : null,
       assessed_by: user.id,
-      note: (input.note || '').slice(0, 1000)
+      note: (typeof input.note === 'string' ? input.note : '').slice(0, 1000)
     });
     revalidatePath('/rapporter', 'layout');
     return { ok: true };
@@ -235,7 +264,9 @@ export async function upsertStateAidPeriodAction(input: {
 }): Promise<ReportingActionState> {
   const user = await requireUser();
   if (!hasRole(user.roles, STAFF_WRITE)) return { error: 'Åtkomst nekad.' };
-  if (!input.startup) return { error: 'Bolag krävs.' };
+  if (typeof input?.startup !== 'string' || !/^[a-zA-Z0-9]{1,30}$/.test(input.startup)) {
+    return { error: 'Bolag krävs.' };
+  }
   if (!AID_BASES.includes(input.basis)) return { error: 'Ogiltig statsstödsgrund.' };
   if (!validDate(input.valid_from)) return { error: 'Ogiltigt från-datum.' };
   if (input.valid_to && !validDate(input.valid_to)) return { error: 'Ogiltigt till-datum.' };
@@ -243,6 +274,9 @@ export async function upsertStateAidPeriodAction(input: {
     return { error: 'SNI-kod krävs vid stöd av mindre betydelse.' };
 
   const pb = await getServerPb();
+  if (!(await startupInTenant(pb, user.tenant, input.startup))) {
+    return { error: 'Bolaget finns inte i din organisation.' };
+  }
   try {
     await pb.collection('startup_state_aid_periods').create({
       tenant: user.tenant,
@@ -251,7 +285,7 @@ export async function upsertStateAidPeriodAction(input: {
       sni_code: (input.sni_code || '').slice(0, 20),
       valid_from: input.valid_from,
       valid_to: validDate(input.valid_to) ? input.valid_to : null,
-      note: (input.note || '').slice(0, 500)
+      note: (typeof input.note === 'string' ? input.note : '').slice(0, 500)
     });
     revalidatePath('/rapporter', 'layout');
     return { ok: true };

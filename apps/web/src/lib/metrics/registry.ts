@@ -70,22 +70,54 @@ function requirePeriod(ctx: MetricContext, key: MetricKey): MetricPeriod {
 }
 
 /**
+ * Faserna registrets beräkningar läser ur fashistoriken (alumni_count,
+ * conv_bc_to_inc, conv_inc_to_acc_8m). Lägg till en fas här om en ny
+ * beräkning behöver den — andra faser hämtas aldrig.
+ */
+const PHASE_HISTORY_PHASES = ['boost_chamber', 'incubation', 'acceleration', 'alumni'] as const;
+
+/**
+ * Minnet per beräkningskontext: de tre fashistorik-måtten delar EN läsning
+ * per `computeMetrics`-anrop (samma ctx-objekt) i stället för tre.
+ */
+const phaseHistoryReads = new WeakMap<MetricContext, Promise<{ rows: PhaseHistoryRow[]; complete: boolean }>>();
+
+/**
  * Läser tenantens fashistorik paginerat (samma tak-princip som
  * `listAllForTenant`, § 33.4) — `complete=false` när taket nåddes.
+ *
+ * Skalbarhetsgranskning 2026-10-08: bara de tre fält beräkningarna använder
+ * (`startup`, `phase`, `entered_at` — `exited_at` behövs inte), bara de
+ * faser som räknas, och en läsning per kontext.
  */
-async function readPhaseHistory(ctx: MetricContext): Promise<{ rows: PhaseHistoryRow[]; complete: boolean }> {
-  const rows: PhaseHistoryRow[] = [];
-  for (let page = 1; ; page++) {
-    const res = await ctx.pb.collection(PB_COLLECTIONS.startupPhaseHistory).getList<PhaseHistoryRow>(page, PHASE_HISTORY_BATCH, {
-      filter: ctx.pb.filter('tenant = {:t}', { t: ctx.tenant }),
-      fields: 'startup,phase,entered_at,exited_at',
-      sort: 'entered_at'
-    });
-    rows.push(...res.items);
-    if (res.items.length === 0 || rows.length >= res.totalItems) break;
-    if (rows.length >= PHASE_HISTORY_MAX_ROWS) return { rows, complete: false };
-  }
-  return { rows, complete: true };
+function readPhaseHistory(ctx: MetricContext): Promise<{ rows: PhaseHistoryRow[]; complete: boolean }> {
+  const cached = phaseHistoryReads.get(ctx);
+  if (cached) return cached;
+  const read = (async () => {
+    const rows: PhaseHistoryRow[] = [];
+    const filter = ctx.pb.filter(
+      `tenant = {:t} && (${PHASE_HISTORY_PHASES.map((_, i) => `phase = {:p${i}}`).join(' || ')})`,
+      {
+        t: ctx.tenant,
+        ...Object.fromEntries(PHASE_HISTORY_PHASES.map((p, i) => [`p${i}`, p]))
+      }
+    );
+    for (let page = 1; ; page++) {
+      const res = await ctx.pb.collection(PB_COLLECTIONS.startupPhaseHistory).getList<PhaseHistoryRow>(page, PHASE_HISTORY_BATCH, {
+        filter,
+        fields: 'startup,phase,entered_at',
+        sort: 'entered_at'
+      });
+      rows.push(...res.items);
+      if (res.items.length === 0 || rows.length >= res.totalItems) break;
+      if (rows.length >= PHASE_HISTORY_MAX_ROWS) return { rows, complete: false };
+    }
+    return { rows, complete: true };
+  })();
+  phaseHistoryReads.set(ctx, read);
+  // Ett läsfel ska kunna provas om vid nästa beräkning med samma kontext.
+  read.catch(() => phaseHistoryReads.delete(ctx));
+  return read;
 }
 
 /** Aktiva bolag i programfaserna — bundna parametrar, ingen interpolering (§ 10.3). */

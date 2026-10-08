@@ -9,6 +9,7 @@ import { describePbError, pbStatus } from '@/lib/pb-error';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import { FEEDBACK_ITEMS, getFeedbackItem, type FeedbackItem } from '@/lib/feedback/data';
 import { feedbackAreasForUser } from '@/lib/feedback/areas';
+import { notify } from '@/lib/notifications-server';
 import {
   canCreateFeedback,
   canDeleteFeedback,
@@ -240,6 +241,26 @@ async function requireResponder(): Promise<{ user: SessionUser; pb: PocketBase }
   return ctx;
 }
 
+/** Notis till kortets författare (§ 50). Best-effort. */
+async function notifyFeedbackAuthor(
+  pb: PocketBase,
+  user: SessionUser,
+  item: FeedbackItem,
+  kind: 'feedback_answered' | 'feedback_done',
+  snippet?: string
+): Promise<void> {
+  const author = typeof item.author === 'string' ? item.author : '';
+  if (!author) return;
+  await notify(pb, {
+    tenant: user.tenant,
+    recipients: [author],
+    kind,
+    actorId: user.id,
+    entity: { type: 'feedback_items', id: item.id },
+    payload: { title: item.title || 'Ditt önskemål', snippet, href: `/onskemal#kort-${item.id}` }
+  }).catch(() => undefined);
+}
+
 export async function answerFeedbackAction(id: string, answer: unknown): Promise<FeedbackActionState> {
   const ctx = await requireResponder();
   if ('error' in ctx) return { error: ctx.error };
@@ -270,6 +291,7 @@ export async function answerFeedbackAction(id: string, answer: unknown): Promise
     before_value: { status: existing.status, had_answer: Boolean(existing.answer) },
     after_value: { ...auditSummary({ ...existing, status: String(payload.status) as FeedbackItem['status'] }), answer_length: v.value.length }
   });
+  await notifyFeedbackAuthor(pb, user, existing, 'feedback_answered', v.value);
   revalidate();
   return { ok: true, id };
 }
@@ -308,6 +330,7 @@ export async function setFeedbackStatusAction(id: string, status: unknown): Prom
     before_value: { status: existing.status },
     after_value: auditSummary({ ...existing, status })
   });
+  if (status === 'done') await notifyFeedbackAuthor(pb, user, existing, 'feedback_done');
   revalidate();
   return { ok: true, id };
 }

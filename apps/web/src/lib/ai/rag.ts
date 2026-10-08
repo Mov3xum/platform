@@ -47,6 +47,8 @@ const EMBED_BATCH = 32; // texter per embeddings-anrop (robusthet/latens)
 const MAX_CHUNKS_PER_FILE = 200; // robusthet (EU AI Act art. 15)
 const SCAN_PAGE = 500; // chunkar per sid-hämtning i det semantiska svepet
 const MAX_TOTAL_SCAN = 6000; // tak för hur många chunkar svepet rankar (robusthet)
+/** Hur många semantiska toppträffar som hämtas med full text efter svepet. */
+const SEMANTIC_HYDRATE = 80;
 const KEYWORD_FETCH = 50; // chunkar nyckelords-grenen drar in (server-side `~`)
 const DEFAULT_TOP_K = 6;
 const SIM_THRESHOLD = 0.2; // släpp irrelevanta semantiska träffar
@@ -467,20 +469,43 @@ async function searchSource(
   let semanticList: string[] = [];
   if (qvec.length > 0) {
     try {
+      // Svepet hämtar BARA id + embedding (ingen text, ingen expand) — annars
+      // drogs upp till MAX_TOTAL_SCAN × (8 KB text + källrelation) per anrop.
+      // De bäst rankade hydreras därefter med full text i små batchar.
+      const scores = new Map<string, number>();
       let scanned = 0;
       let page = 1;
       while (scanned < MAX_TOTAL_SCAN) {
         const res = await pb.collection(src.chunkCollection).getList<ChunkRow>(page, SCAN_PAGE, {
-          fields: CHUNK_FIELDS,
+          fields: 'id,embedding',
           filter: scope,
-          expand: 'source'
+          sort: 'id'
         });
-        for (const row of res.items) ingest(row);
+        for (const row of res.items) {
+          const emb = Array.isArray(row.embedding) ? (row.embedding as number[]) : null;
+          if (!emb || emb.length === 0) continue;
+          const sim = cosineSimilarity(qvec, emb);
+          if (sim >= SIM_THRESHOLD) scores.set(String(row.id), sim);
+        }
         scanned += res.items.length;
         if (res.items.length === 0 || page >= res.totalPages) break;
         page++;
       }
-      semanticList = [...byId.keys()]
+      const top = [...scores.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, SEMANTIC_HYDRATE)
+        .map(([id]) => id);
+      for (let i = 0; i < top.length; i += 40) {
+        const chunk = top.slice(i, i + 40);
+        const res = await pb.collection(src.chunkCollection).getList<ChunkRow>(1, chunk.length, {
+          fields: CHUNK_FIELDS,
+          filter: `${scope} && (${chunk.map((id) => `id = "${escFilter(id)}"`).join(' || ')})`,
+          expand: 'source'
+        });
+        for (const row of res.items) ingest(row);
+      }
+      semanticList = top
+        .filter((id) => byId.has(id))
         .filter((id) => (cosine.get(id) ?? -1) >= SIM_THRESHOLD)
         .sort((a, b) => (cosine.get(b) ?? 0) - (cosine.get(a) ?? 0));
     } catch {

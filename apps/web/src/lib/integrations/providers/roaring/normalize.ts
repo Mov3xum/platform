@@ -471,15 +471,28 @@ export function normalizeRoaringCompany(
   opts: { amountMultiplier?: number; isPersonal: boolean }
 ): RegistryCompany {
   const notes: string[] = [];
-  const { name, patch } = normalizeRoaringOverview(bundle.overview, notes);
+  // Grunddata normaliseras bara när den delen hämtades (valbara delar, § 11.8)
+  // — annars skulle "tomt svar" noteras för ett API som aldrig anropades.
+  const { name, patch } =
+    'overview' in bundle ? normalizeRoaringOverview(bundle.overview, notes) : { name: undefined, patch: {} };
   const financials = bundle.financials
     ? normalizeRoaringFinancials(bundle.financials, notes, opts.amountMultiplier ?? 1)
     : [];
   const ownership = opts.isPersonal
     ? []
     : dedupeOwnership([
-        ...(bundle.groupStructure ? normalizeRoaringGroupStructure(bundle.groupStructure, orgNr, notes) : []),
-        ...(bundle.beneficialOwners ? normalizeRoaringBeneficialOwners(bundle.beneficialOwners, notes) : [])
+        ...(bundle.groupStructure
+          ? normalizeRoaringGroupStructure(bundle.groupStructure, orgNr, notes).map((e) => ({
+              ...e,
+              part: 'group_structure' as const
+            }))
+          : []),
+        ...(bundle.beneficialOwners
+          ? normalizeRoaringBeneficialOwners(bundle.beneficialOwners, notes).map((e) => ({
+              ...e,
+              part: 'beneficial_owners' as const
+            }))
+          : [])
       ]);
   return {
     org_nr: orgNr,
