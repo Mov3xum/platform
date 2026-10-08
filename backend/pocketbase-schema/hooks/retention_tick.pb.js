@@ -14,7 +14,7 @@
 //   agent_actions            > 1095  (3 år audit-spår, SOC 2/ISO-bevis; golv 365)
 //   compass_security_events  > 365
 //   web_cache                > 2     (efter fetched_at)
-//   rate_limits / app_locks  utgångna (expires_at < nu) — om kollektionerna finns
+//   rate_limits (reset_at < nu) / app_locks (expires_at < nu) utgångna — om kollektionerna finns
 //
 // Miljövariabler (Coolify på PocketBase-resursen, aldrig i koden):
 //   MOVEXUM_RETENTION_DISABLED=1                 stänger av gallringen helt
@@ -97,8 +97,8 @@ cronAdd('movexum-retention-tick', '17 3 * * *', () => {
     },
     {
       collection: 'rate_limits',
-      fields: ['expires_at'],
-      filter: 'expires_at != "" && expires_at < {:now}',
+      fields: ['reset_at'],
+      filter: 'reset_at != "" && reset_at < {:now}',
       params: { now: pbDate(now) }
     },
     {

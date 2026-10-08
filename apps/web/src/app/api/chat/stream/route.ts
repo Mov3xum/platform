@@ -46,7 +46,7 @@ export async function POST(req: Request): Promise<Response> {
   if (!hasRole(user.roles, STAFF_ROLES)) return jsonError('Åtkomst nekad.', 403);
 
   const rateKey = `chat-stream:${user.id}`;
-  const limited = checkRateLimit(rateKey, RATE_MAX_PER_USER);
+  const limited = await checkRateLimit(rateKey, RATE_MAX_PER_USER);
   if (limited.blocked) {
     return new Response(
       JSON.stringify({ error: 'För många meddelanden just nu. Vänta en stund och försök igen.' }),
@@ -59,7 +59,7 @@ export async function POST(req: Request): Promise<Response> {
       }
     );
   }
-  recordFailure(rateKey, RATE_WINDOW_MS);
+  await recordFailure(rateKey, RATE_WINDOW_MS);
 
   let body: {
     threadId?: unknown;
