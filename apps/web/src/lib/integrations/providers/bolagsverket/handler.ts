@@ -46,6 +46,7 @@ export const bolagsverketHandler: CompanyRegistryHandler = createCompanyRegistry
   ],
   throttleMs: 200,
 
+  parts: ['basic'],
   async testConnection(creds) {
     let c;
     try {

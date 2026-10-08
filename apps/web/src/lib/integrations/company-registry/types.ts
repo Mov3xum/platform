@@ -12,6 +12,8 @@
  * fristående/partner/anknutet företag och grundarägande ≥ 75 %).
  */
 
+import type { RegistryPartId } from './parts';
+
 export type RegistrySource = 'roaring' | 'bolagsverket' | 'allabolag';
 
 /** Bolagsstatus som `startups.bolag_status`-enumet känner (migration 1700000058). */
@@ -72,6 +74,12 @@ export interface RegistryOwnershipEntry {
   control_basis?: string;
   /** Indirekt ägande via mellanliggande bolag (koncernträd). */
   indirect?: boolean;
+  /**
+   * Vilken datadel raden kom från (t.ex. `group_structure`,
+   * `beneficial_owners`). Gör att en hämtning av bara en ägardel ersätter
+   * enbart den delens rader (§ 11.8, `startup_ownership.source_part`).
+   */
+  part?: RegistryPartId;
 }
 
 export interface RegistryCompany {
@@ -84,6 +92,12 @@ export interface RegistryCompany {
   startup: RegistryStartupPatch;
   financials: RegistryFinancialsYear[];
   ownership: RegistryOwnershipEntry[];
+  /**
+   * Datadelar som hämtades MED LYCKAT RESULTAT. Bara dessa skrivs; en del som
+   * inte valdes, eller vars anrop föll, lämnar befintliga värden orörda.
+   * Sätts av handler-fabriken.
+   */
+  fetchedParts?: RegistryPartId[];
   /**
    * PII-fria diagnosnoteringar från normaliseraren ("balansomslutning saknas i
    * svaret", "ägarbild stöds inte av källan"). Visas i förhandsgranskningen så
@@ -256,7 +270,10 @@ export function dedupeOwnership(entries: RegistryOwnershipEntry[]): RegistryOwne
       e.capital_pct ?? '',
       e.voting_pct ?? '',
       e.pct_min ?? '',
-      e.pct_max ?? ''
+      e.pct_max ?? '',
+      // Per datadel: en rad från koncernstrukturen slås aldrig ihop med en
+      // huvudmansrad (de ersätts var för sig, § 11.8).
+      e.part || ''
     ].join('|');
     if (seen.has(key)) continue;
     seen.add(key);

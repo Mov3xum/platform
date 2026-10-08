@@ -129,6 +129,9 @@ export default async function IntegrationDetailPage({
   }
 
   const isRegistry = handler?.kind === 'company_registry';
+  const registryHandler = handler?.kind === 'company_registry' ? handler : undefined;
+  // Endpoint per datadel (env-medveten) — visas vid kryssrutorna (§ 11.8).
+  const registryPartEndpoints = registryHandler?.partEndpoints?.();
 
   let syncRuns: SyncRunRecord[] = [];
   let recentRecords: IntegrationRecordRow[] = [];
@@ -312,6 +315,9 @@ export default async function IntegrationDetailPage({
               <SyncButton
                 tenantIntegrationId={tenantIntegration!.id}
                 providerSlug={slug}
+                providerName={provider.name}
+                registryParts={registryHandler?.parts}
+                partEndpoints={registryPartEndpoints}
               />
               {isAdmin && (
                 <DisconnectForm
@@ -367,7 +373,12 @@ export default async function IntegrationDetailPage({
         )}
 
         {isConnected && isRegistry && isStaff && handler?.kind === 'company_registry' && handler.lookup && (
-          <RegistryLookupForm providerSlug={slug} providerName={provider.name} />
+          <RegistryLookupForm
+            providerSlug={slug}
+            providerName={provider.name}
+            registryParts={registryHandler?.parts ?? []}
+            partEndpoints={registryPartEndpoints}
+          />
         )}
 
         {isConnected && isRegistry && registryStats && (

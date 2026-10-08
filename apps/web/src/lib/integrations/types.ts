@@ -1,5 +1,6 @@
 import 'server-only';
 import type { RegistryCompany } from './company-registry/types';
+import type { RegistryPartId } from './company-registry/parts';
 
 // The shape every provider must produce. Keeping it minimal +
 // generic means the UI renders any provider without bespoke code,
@@ -32,6 +33,11 @@ export interface TestConnectionResult {
 export interface SyncContext {
   tenantId: string;
   tenantIntegrationId: string;
+  /**
+   * Bolagsregister: vilka datadelar personalen valt att hämta (§ 11.8).
+   * Utelämnat = allt providern stödjer. Records-providers ignorerar fältet.
+   */
+  parts?: RegistryPartId[];
 }
 
 // Result returned by company_registry-providers (Allabolag and similar).
@@ -70,6 +76,10 @@ export interface RecordsHandler extends BaseIntegrationHandler {
 
 export interface CompanyRegistryHandler extends BaseIntegrationHandler {
   kind: 'company_registry';
+  /** Datadelar providern kan hämta, i visningsordning (§ 11.8). */
+  parts: RegistryPartId[];
+  /** Leverantörens endpoint per del — visas vid kryssrutorna. */
+  partEndpoints?(): Partial<Record<RegistryPartId, string>>;
   syncRegistry(
     creds: Record<string, string>,
     ctx: SyncContext
@@ -88,7 +98,8 @@ export interface CompanyRegistryHandler extends BaseIntegrationHandler {
   // portföljen synkas (§ 11.8).
   lookup?(
     orgNr: string,
-    creds: Record<string, string>
+    creds: Record<string, string>,
+    parts?: RegistryPartId[]
   ): Promise<RegistryCompany>;
 }
 

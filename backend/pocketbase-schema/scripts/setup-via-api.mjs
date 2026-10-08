@@ -2379,6 +2379,8 @@ await ensureCollection({
     { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['manual', 'roaring', 'bolagsverket', 'allabolag'] },
     { name: 'synced_at', type: 'date', required: false },
     { name: 'note', type: 'text', required: false, max: 500 },
+    // Migration 1700000182: vilken datadel raden kom från (valbar hämtning).
+    { name: 'source_part', type: 'text', required: false, max: 40, pattern: '^[a-z_]*$' },
     { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
     { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
   ],

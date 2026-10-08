@@ -1459,6 +1459,49 @@ handler utan rad; utan superuser visas kortet ändå med orsaken i stället för
 formuläret. Speglat i `setup-via-api.mjs` (category-enumet patchas +
 raderna seedas). Ingen ny dataväg, inga nya fält; riskklass oförändrad.
 
+**Valbara datadelar (2026-10).** Personalen väljer FÖRE varje hämtning vad som
+ska hämtas — kryssrutor per del vid "Synka nu" (portföljen), "Testa mot
+org-nr" och "Synka från <leverantör>" på bolagskortet (där knappen först
+öppnar valet; inget anropas förrän det bekräftats). Delarna är
+`basic` (grunddata), `financials` (bokslut), `group_structure`
+(koncernstruktur) och `beneficial_owners` (verklig huvudman); varje del är ett
+eget API-anrop hos leverantören och endpointen visas vid kryssrutan
+(`partEndpoints`, env-medveten). Källa av sanning: den rena, enhetstestade
+`lib/integrations/company-registry/parts.ts`. Varje provider deklarerar
+`parts` (Roaring alla fyra, Allabolag-stubben grunddata + bokslut,
+Bolagsverket bara grunddata — en provider med EN del visar inga kryssrutor).
+Regler:
+- **Det som inte väljs anropas inte och skrivs inte.** Roaring anropar bara de
+  valda API:erna (varje anrop debiteras); `handler-factory.ts` klipper
+  dessutom bort allt utanför valet innan skrivningen (`restrictToParts`), så
+  en provider som ignorerar valet ändå aldrig skriver en ovald del.
+  Befintliga värden från tidigare hämtningar lämnas orörda.
+- **`fetchedParts`** = delar som begärdes OCH lyckades. Valda grunddata är
+  blockerande; övriga delar är fail-soft. Gav ingen vald del data skrivs
+  inget och synken felar med orsaken (en tom synk ser aldrig lyckad ut).
+  Bolagskortets synk visar nu bolagets fel: tidigare fångades det i
+  `perStartupErrors` och knappen svarade ändå "Synk klar"
+  (`runRegistrySyncForStartup`: ej hämtat ⇒ `failed` med orsak, delvis
+  skrivet ⇒ `partial` med varning).
+- **Ägarbilden ersätts per del** (migration **1700000182**:
+  `startup_ownership.source_part`, text, backfillad för befintliga
+  Roaring-rader — kontrollgrund/intervall ⇒ huvudman, annars koncern).
+  Hämtades alla ägardelar ersätts källans hela ägarbild (fungerar även mot ett
+  schema utan fältet); hämtades bara en ersätts enbart den delens rader, och
+  saknas fältet stoppas skrivningen med tydligt fel INNAN något raderats.
+  Tidigare raderade en synk där verklig huvudman föll (t.ex. 403, inte i
+  paketet) koncernstrukturens rader — nu ersätts bara de delar som lyckades.
+  Speglat i `setup-via-api.mjs`, asserterat i `verify-baseline.mjs`.
+- **Server-side validering:** valet skickas som `parts` + markören
+  `parts_present` och prövas mot handlerns deklarerade delar
+  (`parseRegistryParts` — okänd del eller tomt val avvisas; formulär utan
+  markören hämtar allt, som förut). Enskild firma hämtar aldrig ägardelarna.
+- **Audit:** valda delar står i synkens sammanfattning (`last_sync_summary`)
+  och i aktivitetsraden ("Hämtade: Grunddata, Bokslut") — PII-fritt.
+- Senaste val sparas per leverantör i `localStorage`
+  (`movexum-registry-parts-<slug>`, bekvämlighet — ingen datakälla).
+Ingen ny dataväg, ingen PII i det nya fältet; riskklass oförändrad.
+
 **GDPR § 5 / § 9.3.** Fysiska personer i ägarbilden lagras UTAN namn,
 personnummer och födelsedatum — bara `owner_kind='person'` + andel/intervall
 + kontrollgrund ur en **fast vokabulär** (`controlBasisCategory`: shares/

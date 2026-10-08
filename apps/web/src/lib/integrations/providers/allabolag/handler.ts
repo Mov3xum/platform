@@ -32,6 +32,7 @@ export const allabolagHandler: CompanyRegistryHandler = createCompanyRegistryHan
     }
   ],
 
+  parts: ['basic', 'financials'],
   async testConnection() {
     if (!isProviderConfigured()) {
       return {

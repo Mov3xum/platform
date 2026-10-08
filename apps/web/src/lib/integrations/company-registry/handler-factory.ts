@@ -10,6 +10,7 @@ import type {
   TestConnectionResult
 } from '../types';
 import { isPersonalOrgNr, normalizeOrgNr } from './orgnr';
+import { ownershipParts, type RegistryPartId } from './parts';
 import type { RegistryCompany, RegistrySource } from './types';
 import { applyRegistryCompany } from './writer';
 
@@ -22,6 +23,12 @@ import { applyRegistryCompany } from './writer';
 // Enskild firma: org-nr är ett personnummer-derivat (§ 9.3). Providern får
 // hämta grunddata (publik), men fabriken markerar `isPersonal` och skriver
 // ALDRIG ägarbild för sådana bolag (ägaren ÄR personen).
+//
+// Valbara datadelar (§ 11.8, `parts.ts`): personalen väljer före varje
+// hämtning vilka delar som hämtas. Fabriken skickar valet till providern (som
+// bara anropar de API:erna) och klipper dessutom bort allt utanför valet
+// innan skrivningen — en provider som ignorerar valet kan alltså aldrig
+// skriva en del som inte valdes.
 
 export interface CompanyRegistrySpec {
   slug: string;
@@ -30,10 +37,22 @@ export interface CompanyRegistrySpec {
   riskClass: 'minimal' | 'limited' | 'high';
   complianceNote: string;
   credentialFields: CredentialField[];
+  /** Datadelar providern kan hämta, i visningsordning. */
+  parts: RegistryPartId[];
+  /** Leverantörens endpoint per del (visas vid kryssrutorna). */
+  partEndpoints?(): Partial<Record<RegistryPartId, string>>;
   /** Verifierar inloggningsuppgifterna mot leverantören utan att skriva något. */
   testConnection(creds: Record<string, string>): Promise<TestConnectionResult>;
-  /** Hämtar + normaliserar ett bolag. `orgNr` är alltid 10 siffror. */
-  fetchCompany(orgNr: string, creds: Record<string, string>): Promise<RegistryCompany>;
+  /**
+   * Hämtar + normaliserar ett bolag. `orgNr` är alltid 10 siffror och `parts`
+   * en icke-tom delmängd av `parts`. Sätt `fetchedParts` när en del kan falla
+   * utan att hela bolaget gör det; annars antas alla begärda delar lyckade.
+   */
+  fetchCompany(
+    orgNr: string,
+    creds: Record<string, string>,
+    parts: RegistryPartId[]
+  ): Promise<RegistryCompany>;
   /** Paus mellan bolag vid portföljsynk (leverantörens rate-limit). */
   throttleMs?: number;
 }
@@ -77,23 +96,68 @@ function emptyResult(startupId: string, error: string): RegistrySyncResult {
   };
 }
 
+/** Begärda delar ∩ providerns delar, i providerns ordning. Tomt = fel. */
+function resolveParts(supported: RegistryPartId[], requested: RegistryPartId[] | undefined): RegistryPartId[] {
+  if (!requested) return [...supported];
+  const parts = supported.filter((p) => requested.includes(p));
+  if (parts.length === 0) throw new Error('Välj minst en datadel att hämta.');
+  return parts;
+}
+
+/**
+ * Klipper bort allt utanför de delar som både begärdes och lyckades, så att
+ * skrivningen aldrig rör en del personalen inte valde.
+ */
+function restrictToParts(company: RegistryCompany, requested: RegistryPartId[]): RegistryCompany {
+  const fetched = (company.fetchedParts ?? requested).filter((p) => requested.includes(p));
+  const own = ownershipParts(fetched);
+  return {
+    ...company,
+    startup: fetched.includes('basic') ? company.startup : {},
+    financials: fetched.includes('financials') ? company.financials : [],
+    ownership: company.ownership.filter((e) => (e.part ? own.includes(e.part) : own.length > 0)),
+    fetchedParts: fetched
+  };
+}
+
+/** Enskild firma: ägardelarna hämtas aldrig (ägaren ÄR en fysisk person). */
+function partsForOrgNr(orgNr: string, parts: RegistryPartId[]): RegistryPartId[] {
+  if (!isPersonalOrgNr(orgNr)) return parts;
+  const own = ownershipParts(parts);
+  const rest = parts.filter((p) => !own.includes(p));
+  if (rest.length === 0) {
+    throw new Error('Enskild firma: ägarbild hämtas inte (org-nr = personnummer). Välj grunddata eller bokslut.');
+  }
+  return rest;
+}
+
 export function createCompanyRegistryHandler(spec: CompanyRegistrySpec): CompanyRegistryHandler {
   async function syncOne(
     pb: PocketBase,
     tenantId: string,
     startup: StartupRow,
     creds: Record<string, string>,
-    syncedAt: string
+    syncedAt: string,
+    parts: RegistryPartId[]
   ) {
     const orgNr = normalizeOrgNr(startup.org_nr);
     if (!orgNr) throw new Error('Ogiltigt organisationsnummer på bolagskortet.');
-    const company = await spec.fetchCompany(orgNr, creds);
+    const requested = partsForOrgNr(orgNr, parts);
+    const company = restrictToParts(await spec.fetchCompany(orgNr, creds, requested), requested);
+    if ((company.fetchedParts ?? []).length === 0) {
+      // Inget av de valda API:erna gav data — skriv inget och säg varför
+      // (annars ser en tom synk ut som en lyckad).
+      throw new Error(
+        `Ingen av de valda delarna kunde hämtas. ${company.notes.join(' ').slice(0, 160)}`.trim()
+      );
+    }
     if (isPersonalOrgNr(orgNr) || company.isPersonal) {
       // Enskild firma: ingen ägarbild (ägaren är en fysisk person = PII).
       company.ownership = [];
       company.isPersonal = true;
+      company.fetchedParts = (company.fetchedParts ?? []).filter((p) => !ownershipParts([p]).length);
     }
-    return applyRegistryCompany(pb, tenantId, startup.id, company, spec.source, syncedAt);
+    return applyRegistryCompany(pb, tenantId, startup.id, company, spec.source, syncedAt, spec.parts);
   }
 
   return {
@@ -103,12 +167,15 @@ export function createCompanyRegistryHandler(spec: CompanyRegistrySpec): Company
     riskClass: spec.riskClass,
     complianceNote: spec.complianceNote,
     credentialFields: spec.credentialFields,
+    parts: [...spec.parts],
+    partEndpoints: spec.partEndpoints,
     testConnection: (creds) => spec.testConnection(creds),
 
-    async lookup(orgNrRaw, creds) {
+    async lookup(orgNrRaw, creds, requestedParts) {
       const orgNr = normalizeOrgNr(orgNrRaw);
       if (!orgNr) throw new Error('Ogiltigt organisationsnummer (10 siffror krävs).');
-      const company = await spec.fetchCompany(orgNr, creds);
+      const requested = partsForOrgNr(orgNr, resolveParts(spec.parts, requestedParts));
+      const company = restrictToParts(await spec.fetchCompany(orgNr, creds, requested), requested);
       if (isPersonalOrgNr(orgNr) || company.isPersonal) {
         company.isPersonal = true;
         company.ownership = [];
@@ -122,6 +189,7 @@ export function createCompanyRegistryHandler(spec: CompanyRegistrySpec): Company
       if (!adminResult.ok) throw new Error('Superuser-credentials saknas.');
       const pb = adminResult.pb;
 
+      const parts = resolveParts(spec.parts, ctx.parts);
       const startups = await listStartupsWithOrgNr(pb, ctx.tenantId);
       const syncedAt = new Date().toISOString();
       const perStartupErrors: Array<{ startupId: string; error: string }> = [];
@@ -132,7 +200,7 @@ export function createCompanyRegistryHandler(spec: CompanyRegistrySpec): Company
 
       for (const startup of startups) {
         try {
-          const r = await syncOne(pb, ctx.tenantId, startup, creds, syncedAt);
+          const r = await syncOne(pb, ctx.tenantId, startup, creds, syncedAt, parts);
           if (r.startupUpdated) startupsUpdated++;
           financialsUpserted += r.financialsUpserted;
           ownershipWritten += r.ownershipWritten;
@@ -170,7 +238,8 @@ export function createCompanyRegistryHandler(spec: CompanyRegistrySpec): Company
 
       const syncedAt = new Date().toISOString();
       try {
-        const r = await syncOne(pb, ctx.tenantId, startup, creds, syncedAt);
+        const parts = resolveParts(spec.parts, ctx.parts);
+        const r = await syncOne(pb, ctx.tenantId, startup, creds, syncedAt, parts);
         return {
           startupsUpdated: r.startupUpdated ? 1 : 0,
           financialsUpserted: r.financialsUpserted,
