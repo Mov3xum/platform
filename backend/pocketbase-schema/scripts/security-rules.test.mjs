@@ -14,14 +14,19 @@ const MIGRATION = join(here, '..', 'migrations', '1700000182_harden_api_rules.js
 /** Kör migrationens up() mot en fejkad PB-app och returnerar resultatet. */
 function runMigration() {
   const saved = {};
+  // En instans per kollektion (som PB) — samma kollektion kan sparas två
+  // gånger (regler + protected-filfält), t.ex. user_files.
+  const instances = {};
   const app = {
     findCollectionByNameOrId(name) {
+      if (instances[name]) return instances[name];
       const fields = (PROTECTED_FILE_FIELDS[name] || []).map((f) => ({ name: f, protected: false }));
-      return {
+      instances[name] = {
         name,
         fields: { getByName: (n) => fields.find((f) => f.name === n) ?? null },
         _fields: fields
       };
+      return instances[name];
     },
     save(col) {
       saved[col.name] = col;
@@ -79,4 +84,24 @@ test('varje update/delete-regel kräver roll, ägarskap eller länkat bolag', ()
       assert.match(rule, /@request\.auth\.tenant = /, `${name}.${key} saknar tenant-villkor`);
     }
   }
+});
+
+test('varje createRule (utom globala null) pinnar tenant till den inloggades', () => {
+  for (const [name, rules] of Object.entries(SECURITY_RULES)) {
+    if (typeof rules.createRule !== 'string') continue;
+    assert.ok(
+      rules.createRule.includes('@request.body.tenant = @request.auth.tenant'),
+      `${name}.createRule saknar tenant-pin`
+    );
+  }
+});
+
+test('tenant-pinnen ersätter aldrig redan härdade update/list-regler', () => {
+  for (const name of ['startups', 'missions', 'tools', 'workshops', 'de_minimis_stod', 'strategies']) {
+    assert.equal(typeof SECURITY_RULES[name].createRule, 'string', `${name}.createRule`);
+  }
+  assert.equal(typeof SECURITY_RULES.startups.updateRule, 'string');
+  assert.equal(typeof SECURITY_RULES.strategies.listRule, 'string');
+  assert.equal(typeof SECURITY_RULES.de_minimis_stod.viewRule, 'string');
+  assert.equal(typeof SECURITY_RULES.workshops.deleteRule, 'string');
 });

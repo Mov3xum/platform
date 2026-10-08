@@ -53,6 +53,50 @@ const linkedStartupWrite = `${AUTH} && ${T} && (${STAFF4} || (@request.auth.role
 const createPinned = (field) => `${AUTH} && ${BODY_TENANT} && @request.body.${field} = @request.auth.id`;
 
 /**
+ * Tenant-pinnad createRule (+ ev. befintliga ägar-/skapar-villkor). Tidigare
+ * var ~60 createRules `auth && @request.auth.tenant != ""` eller bara `auth`
+ * — en inloggad användare kunde då via PB-API:t skapa poster som bar en ANNAN
+ * tenants id (t.ex. falska audit-rader i `agent_actions`, uppgifter eller
+ * notiser i en annan organisation, `ai_usage_events` som åt upp en annan
+ * tenants månadstak). `@request.body.tenant = @request.auth.tenant` jämför
+ * bara body mot auth (ingen relations-join → PB v0.23.4-säkert, § 21.3).
+ * Varje användartoken-create i apps/web skickar `tenant: user.tenant`/
+ * `actor.tenant` (granskat 2026-10-08); superuser-vägar påverkas inte.
+ */
+const createTenant = (...extra) => [AUTH, BODY_TENANT, ...extra].join(' && ');
+
+// Stödcheckar (§ 46.8, spegel av migration 1700000163 / setup-via-api.mjs).
+const SC_LEAD_ONLY_FIELDS = [
+  'funding_project', 'funding_work_package', 'state_aid_basis', 'funding_note', 'funding_set_by',
+  'funding_set_at', 'approved_amount_sek', 'decision_note', 'decided_by', 'decided_at', 'paid_at',
+  'paid_amount_sek', 'paid_note', 'de_minimis_stod', 'capital_round'
+];
+const SC_REVIEW_FIELDS = [
+  'changes_request_note', 'changes_requested_by', 'coach_statement', 'coach_statement_by',
+  'coach_statement_at', 'controller_statement', 'controller_statement_by', 'controller_statement_at',
+  'assessment_scores', 'assessment_score', 'assessed_by', 'assessed_at', 'is_excellence_activity',
+  'report_due_at'
+];
+const scUnset = (fields) => `(${fields.map((f) => `@request.body.${f}:isset = false`).join(' && ')})`;
+
+/** Kollektioner med `tenant`-fält vars createRule bara behöver tenant-pinnen. */
+const TENANT_PINNED_CREATE = [
+  'startups', 'partners', 'investors', 'deals', 'alumni', 'missions', 'mission_documents',
+  'tools', 'tool_versions', 'tool_knowledge', 'workshops', 'workshop_areas', 'workshop_media',
+  'strategies', 'strategy_revisions', 'sprint_x_checkins', 'incubator_events', 'event_signups',
+  'incubator_reports', 'tenant_integrations', 'startup_financials', 'startup_ownership',
+  'startup_phase_history', 'startup_kpis', 'capital_rounds', 'intellectual_property', 'tasks',
+  'contacts', 'contact_requests', 'service_time_entries', 'startup_service_costs',
+  'startup_readiness_assessments', 'startup_state_aid_periods', 'education_documents',
+  'education_document_assignments', 'de_minimis_units', 'de_minimis_unit_orgnr', 'de_minimis_stod',
+  'onboarding_flows', 'onboarding_progress', 'compass_leads', 'compass_conversations',
+  'compass_modules', 'compass_brand', 'annual_wheel_items', 'annual_wheel_categories',
+  'org_post_media', 'procurements', 'procurement_calloffs', 'procurement_rules',
+  'procurement_documents', 'goal_periods', 'goals', 'goal_indicators', 'goal_status_entries',
+  'funding_projects', 'funding_work_packages', 'support_check_types', 'support_check_rules'
+];
+
+/**
  * collection → de regler som ska gälla. Bara angivna nycklar skrivs; övriga
  * regler på kollektionen lämnas orörda. `null` = endast superuser.
  */
@@ -128,8 +172,44 @@ export const SECURITY_RULES = {
   // Utskicksfälten sätts bara av staff via update (§ 47.5) — aldrig vid create.
   surveys: {
     createRule: `${createPinned('created_by')} && @request.body.send_at:isset = false && @request.body.send_base_url:isset = false && @request.body.is_active = false`
-  }
+  },
+
+  // ── createRules: tenant pinnad + befintliga ägar-/skaparvillkor behållna ──
+  tool_runs: { createRule: createTenant('@request.auth.id = triggered_by') },
+  workshop_runs: { createRule: createTenant('@request.auth.id = triggered_by') },
+  workshop_assignments: { createRule: createTenant('@request.auth.id = assigned_by') },
+  mission_comments: { createRule: createTenant('@request.auth.id = author') },
+  user_mistral_connectors: { createRule: createTenant('@request.auth.id = user') },
+  user_app_integrations: { createRule: createPinned('user') },
+  ai_usage_events: { createRule: createTenant('@request.auth.id = user') },
+  tool_run_feedback: { createRule: createTenant('@request.auth.id = user') },
+  agent_actions: { createRule: createTenant('@request.auth.id = actor') },
+  chat_threads: { createRule: createTenant('@request.auth.id = owner') },
+  deep_jobs: { createRule: createTenant('@request.auth.id = owner') },
+  user_files: { createRule: createTenant('@request.auth.id = owner') },
+  user_file_chunks: { createRule: createTenant('@request.auth.id = owner') },
+  meeting_transcripts: { createRule: createTenant('@request.auth.id = owner') },
+  support_check_applications: {
+    createRule: createTenant(
+      '@request.body.created_by = @request.auth.id',
+      '(@request.body.status:isset = false || @request.body.status = "draft")',
+      scUnset(SC_LEAD_ONLY_FIELDS),
+      scUnset(SC_REVIEW_FIELDS)
+    )
+  },
+  support_check_revisions: { createRule: createPinned('signer') },
+  support_check_comments: { createRule: createPinned('author') },
+  support_check_documents: { createRule: createPinned('uploaded_by') }
 };
+
+// Slå ihop tenant-pinnen med ev. redan angivna update/list-regler (aldrig
+// ersätta hela objektet — då skulle t.ex. startups.updateRule försvinna).
+for (const name of TENANT_PINNED_CREATE) {
+  if (SECURITY_RULES[name]?.createRule !== undefined) {
+    throw new Error(`security-rules: ${name}.createRule definierad två gånger`);
+  }
+  SECURITY_RULES[name] = { ...(SECURITY_RULES[name] || {}), createRule: createTenant() };
+}
 
 /** Filfält som bara får hämtas med kortlivad fil-token (proxy/getToken). */
 export const PROTECTED_FILE_FIELDS = {
