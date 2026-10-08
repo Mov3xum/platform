@@ -3,6 +3,8 @@ import type PocketBase from 'pocketbase';
 import { isSurveyModule } from '@platform/shared';
 import { summarizeSubmission, type SubmissionEntry } from './chat';
 import { updateLead } from './store';
+import { assertWithinAiBudget } from '@/lib/ai/budget.server';
+import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import type { CompassModule, CompassQuestion, ContactPreference, Lead } from './types';
 
 /* ────────────────────────────────────────────────────────────────────
@@ -62,6 +64,8 @@ export function buildSubmissionEntries(
  * sväljs tyst. Returnerar sammanställningen så att anroparen kan inkludera
  * den i inflödesnotisen.
  */
+const SUMMARY_MAX_PER_TENANT_HOUR = 200;
+
 export async function attachAiSummary(
   pb: PocketBase,
   tenant: string,
@@ -70,7 +74,15 @@ export async function attachAiSummary(
   moduleName: string,
   resultLine?: string
 ): Promise<string | undefined> {
+  // Kostnadsskydd: de publika routarna rate-limitas per IP, men en roterad
+  // IP-pool skulle annars kunna driva obegränsade Mistral-anrop på tenantens
+  // nyckel. Tak per tenant/timme + månadstaket (§ 9.6) innan modellanropet.
+  // Leadet är redan skapat — en hoppad sammanställning tappar aldrig inflödet.
+  const tenantKey = `lead-summary:${tenant}`;
+  if (checkRateLimit(tenantKey, SUMMARY_MAX_PER_TENANT_HOUR).blocked) return undefined;
+  recordFailure(tenantKey, 60 * 60 * 1000);
   try {
+    await assertWithinAiBudget(pb, tenant);
     const summary = await summarizeSubmission(entries, moduleName, resultLine);
     if (!summary) return undefined;
     await updateLead(pb, tenant, lead.id, { ai_summary: summary });

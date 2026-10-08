@@ -3034,6 +3034,72 @@ hens egna bolag.
 - **Migrationer:** ny oföränderlig migration (1700000096), fälten speglas i
   `scripts/setup-via-api.mjs` och `scripts/verify-baseline.mjs`.
 
+### 21.8 Härdade API-regler — en källa av sanning (säkerhetsgranskning 2026-10-08)
+
+**Incident.** `setup-via-api.mjs` (körs vid varje deploy/sync EFTER
+migrationerna) skrev med sina inline-defs över migrationernas
+update/delete-regler med `auth && tenant` UTAN rollkontroll. Live kunde
+därför varje inloggad — även `startup_member`/`observer`/`partner` — med sin
+egen token (läsbar i cookien) PATCH:a `tools.system_prompt` (prompt-injection
+i agenter som staff kör), bolagskort, uppdrag, events, workshops m.m. direkt
+mot PB-API:t; de minimis-kollektionerna tappade bolagsisoleringen (§ 21);
+globala kollektioner (`de_minimis_regelverk` → höjt tak för ALLA tenants,
+`integration_providers`, `web_cache` → förgiftad prompt-text) gick att skapa;
+createRules utan pinnad skapare lät en användare förfalska `created_by`
+(schema som körs med admins rättigheter), `author` och `signer`
+(eIDAS-bevis); en enkät kunde skapas med `send_base_url` mot en extern domän
+(phishing via plattformens avsändare); en admin kunde ändra ANDRA tenants.
+
+**Regel (bindande).** `backend/pocketbase-schema/scripts/security-rules.mjs`
+(`SECURITY_RULES`, `PROTECTED_FILE_FIELDS`) är källan av sanning för dessa
+regler:
+- `setup-via-api.mjs` tillämpar den **sist** (efter collection-defs och
+  `FORCE_CREATE_RULES`, vars createRules den också vinner över).
+- Migration **1700000182** bär en ordagrann kopia (JSVM kan inte importera);
+  `security-rules.test.mjs` låser att de är identiska och att reglerna följer
+  § 21.3 (`:each ?=`, inga roll-checks/joins i createRules, varje
+  update/delete kräver roll/ägarskap + tenant).
+- `verify-baseline.mjs` (`verifySecurityRules`) fäller deployen om en regel
+  live avviker.
+
+Lägger du en inline-def i `setup-via-api.mjs` med lösare regler än
+migrationen återställs den av steget — ändra i stället `security-rules.mjs`
++ en NY migration. Update/delete-regler på domändata kräver Movexum-personal
+(admin/incubator_lead/coach/mentor) eller ägarskap; finare roller enforce:as
+i server-actions, som faller tillbaka på superuser först EFTER sin egen
+kontroll (`writeWithFallback`). Uppdragens deltagare (json) skriver därför via
+`missions.ts` med fallback. `agreements.file` och `user_files.file` är
+`protected` (fil-token krävs; proxyerna använder redan `getToken`).
+`web_cache` läses/skrivs bara via superuser (`lib/ai/web.ts`).
+
+**Övriga åtgärder samma granskning:** `next` 15.5.27 (oautentiserad RCE i
+bildoptimeringen m.fl.) + resolutions för transitiva sårbarheter (`yarn
+audit`: 0); `scripts/check-secrets.mjs` i `yarn test` (hemlighetsvakt över
+alla spårade filer); interna förhandsgransknings-routarna
+`/api/inflode/m/[slug]/{submit,quiz-result}` kräver admin/incubator_lead/coach
++ rate-limit; lead-sammanställningen (§ 23.6) prövar månadstaket + ett tak
+per tenant/timme; utlogg avvisar cross-site-POST (`Sec-Fetch-Site`);
+enkätlänkens origin tas från `APP_URL`/`NEXT_PUBLIC_APP_URL` när den är satt;
+`createMissionAction`/`updateMissionParticipants` verifierar bolag (tenant +
+länkning för icke-staff) och deltagare (tenant); chattens agentval prövar
+`canRunTool` (§ 9.5); Vinnova-inmatningen verifierar bolagets tenant och
+typkontrollerar tal; rate-limitern har ett hårt nyckeltak (minnes-DoS).
+**Skalning:** migration **1700000183** lägger sammansatta index
+(`activities`/`ai_usage_events`/`tool_runs`/`compass_leads`/`agent_actions`
+på tenant/aktör + `created`, `notifications(user, created)`,
+`tasks(tenant, owner, status)`); RAG-svepet (§ 26.3) hämtar bara
+`id,embedding` och hydrerar topp-80 med text.
+
+**Kvar att göra (dokumenterade avvikelser):** processlokal state (rate
+limits, `withModuleLock`, cacher) delas inte mellan containrar — lyft till
+PB/Redis före horisontell skalning; månadstaket (§ 9.6) summerar upp till
+10 000 rader per minut och tenant — ersätt med en rollup; `listLeads`/
+`countLeadsByStatus` läser alla leads; `/inkorg` bygger ett OR-filter per
+bolag (PB:s filtertak vid ~100+ bolag); ingen retention för
+`ai_usage_events`/`agent_actions`/`notifications`; workshop-svar kan ändras
+efter coach-godkännande; createRules på ~60 kollektioner pinnar inte
+`tenant` (läckan begränsas av att list/view är tenant-scopade).
+
 ---
 
 ## 22. Bolagsmedlemmens dedikerade navigation

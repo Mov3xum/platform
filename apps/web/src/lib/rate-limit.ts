@@ -21,11 +21,25 @@ export interface RateLimitResult {
   retryAfterSec: number;
 }
 
+/** Hårt tak på antalet nycklar — skyddar processminnet mot en flod av unika
+ * IP-/e-post-nycklar (DoS). Vid taket evicteras de äldsta (Map behåller
+ * insättningsordning); hellre en förlorad räknare än en OOM-krasch. */
+const MAX_BUCKETS = 50_000;
+const SWEEP_EVERY = 500;
+let writesSinceSweep = 0;
+
 function sweep(now: number): void {
-  // Opportunistisk städning så att kartan inte växer obegränsat.
-  if (buckets.size < 5000) return;
-  for (const [key, b] of buckets) {
-    if (b.resetAt <= now) buckets.delete(key);
+  // Städa utgångna nycklar regelbundet (inte bara när kartan redan är stor).
+  if (++writesSinceSweep >= SWEEP_EVERY || buckets.size >= MAX_BUCKETS) {
+    writesSinceSweep = 0;
+    for (const [key, b] of buckets) {
+      if (b.resetAt <= now) buckets.delete(key);
+    }
+  }
+  while (buckets.size >= MAX_BUCKETS) {
+    const oldest = buckets.keys().next().value;
+    if (oldest === undefined) break;
+    buckets.delete(oldest);
   }
 }
 

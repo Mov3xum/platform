@@ -6,6 +6,7 @@
 
 import PocketBase from 'pocketbase';
 import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
+import { SECURITY_RULES, PROTECTED_FILE_FIELDS } from './security-rules.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -258,6 +259,43 @@ function assertCreateRuleDoesNotJoinRecord(collection) {
 // ägar-check. Migration 1700000111 + setup-via-api FORCE_CREATE_RULES håller
 // detta. Den här svep-kontrollen fångar varje NY kollektion som återinför
 // mönstret INNAN den når staging/produktion.
+// CLAUDE.md § 21.8: de härdade reglerna i scripts/security-rules.mjs MÅSTE
+// gälla live — exakt. setup-via-api.mjs skrev tidigare tyst över dem med
+// roll-lösa `auth && tenant`-regler vid varje sync (säkerhetsgranskning
+// 2026-10-08); den här kontrollen fäller deployen om det händer igen.
+async function verifySecurityRules() {
+  let collections;
+  try {
+    const all = await pb.collections.getFullList({ $autoCancel: false });
+    collections = new Map(all.map((c) => [c.name, c]));
+  } catch (err) {
+    fail(`Kunde inte lista kollektioner för säkerhetsregel-svep:\n${describeError(err)}`);
+  }
+  const offenders = [];
+  for (const [name, rules] of Object.entries(SECURITY_RULES)) {
+    const col = collections.get(name);
+    if (!col) continue; // migration-only-familjer som inte finns på instansen
+    for (const [key, expected] of Object.entries(rules)) {
+      const actual = col[key] ?? null;
+      if (actual !== expected) {
+        offenders.push(`${name}.${key}: förväntat ${JSON.stringify(expected)}, fick ${JSON.stringify(actual)}`);
+      }
+    }
+    for (const fieldName of PROTECTED_FILE_FIELDS[name] || []) {
+      const field = (col.fields || []).find((f) => f.name === fieldName);
+      if (field && !field.protected) offenders.push(`${name}.${fieldName}: filfältet är inte protected`);
+    }
+  }
+  if (offenders.length) {
+    fail(
+      'Härdade API-regler (§ 21.8) gäller inte live:\n' +
+        offenders.map((o) => `  - ${o}`).join('\n') +
+        '\nKör migration 1700000182 / setup-via-api.mjs.'
+    );
+  }
+  ok(`säkerhetsregler (§ 21.8): ${Object.keys(SECURITY_RULES).length} kollektioner verifierade`);
+}
+
 async function verifyNoBrokenCreateRules() {
   let all;
   try {
@@ -1093,6 +1131,7 @@ async function main() {
   verifyRlsAndRbac(collections);
   verifyAppWritableFields(collections);
   await verifyNoBrokenCreateRules();
+  await verifySecurityRules();
   await verifyNoBareMultiValueOperators();
   await verifyAiPiiMasking();
   await verifyAppUser();

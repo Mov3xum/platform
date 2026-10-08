@@ -25,6 +25,7 @@
 
 import PocketBase from 'pocketbase';
 import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
+import { SECURITY_RULES, PROTECTED_FILE_FIELDS } from './security-rules.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -5064,6 +5065,14 @@ const FORCE_CREATE_RULES = {
   support_check_rules: `${ANY_AUTH} && @request.auth.tenant != ""`
 };
 
+// § 21.8: de härdade createRules (skapare/tenant pinnade, globala = null) vinner
+// över de roll-lösa defaults ovan — annars skulle varje sync återinföra dem.
+for (const [collectionName, rules] of Object.entries(SECURITY_RULES)) {
+  if (Object.prototype.hasOwnProperty.call(rules, 'createRule')) {
+    FORCE_CREATE_RULES[collectionName] = rules.createRule;
+  }
+}
+
 async function enforceCreateRules(passLabel) {
   log(`Forcerar robusta createRules${passLabel ? ` (${passLabel})` : ''}...`);
   for (const [collectionName, desiredRule] of Object.entries(FORCE_CREATE_RULES)) {
@@ -5126,6 +5135,46 @@ log('Sveper list/view/update/delete-regler (?= → :each ?=)...');
 // alltid är sista sanningen i scriptet (self-healing-jobbet verifierar just
 // detta direkt efter setup-via-api-körningen).
 await enforceCreateRules('pass 2');
+
+// 24. säkerhetshärdning (§ 21.8) — SIST, så ingen tidigare collection-def
+// kan lämna en lösare list/view/update/delete-regel kvar. Speglar migration
+// 1700000182; verify-baseline.mjs asserterar exakt samma regler.
+log('Tvingar fram härdade API-regler (§ 21.8)...');
+for (const [collectionName, rules] of Object.entries(SECURITY_RULES)) {
+  let collection;
+  try {
+    collection = await pb.collections.getOne(collectionName);
+  } catch (err) {
+    if (err?.status === 404) {
+      warn(`säkerhetsregler: collection "${collectionName}" finns inte — hoppar`);
+      continue;
+    }
+    throw err;
+  }
+  const patch = {};
+  for (const [key, value] of Object.entries(rules)) {
+    if ((collection[key] ?? null) !== value) patch[key] = value;
+  }
+  const protectedNames = PROTECTED_FILE_FIELDS[collectionName] || [];
+  if (protectedNames.length > 0) {
+    let changed = false;
+    const fields = (collection.fields || []).map((f) => {
+      if (protectedNames.includes(f.name) && f.type === 'file' && !f.protected) {
+        changed = true;
+        return { ...f, protected: true };
+      }
+      return f;
+    });
+    if (changed) patch.fields = fields;
+  }
+  if (Object.keys(patch).length === 0) continue;
+  try {
+    await pb.collections.update(collectionName, patch);
+  } catch (err) {
+    throw new Error(`säkerhetsregler för "${collectionName}" kunde inte sättas: ${describeError(err)}`);
+  }
+  ok(`säkerhetsregler synkade: ${collectionName} (${Object.keys(patch).join(', ')})`);
+}
 
 console.log('\n✓ Klart. Logga in på <din-web-url>/login med:');
 console.log(`  E-post:   ${APP_USER_EMAIL}`);

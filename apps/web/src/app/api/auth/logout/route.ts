@@ -26,7 +26,13 @@ import { relativeRedirectInit } from '@/lib/relative-redirect';
  * klicket på "Logga ut" gjorde ingenting (incident 2026-09-30). Se
  * `lib/relative-redirect.ts`.
  */
-export async function POST(): Promise<NextResponse> {
+export async function POST(req: Request): Promise<NextResponse> {
+  // Logout-CSRF: en auto-postande form på en annan sajt kunde logga ut
+  // användaren (cookien behövs inte för att RENSA den, så SameSite skyddar
+  // inte). Webbläsare skickar Sec-Fetch-Site; avvisa uttryckligen cross-site.
+  if (req.headers.get('sec-fetch-site') === 'cross-site') {
+    return new NextResponse(null, { status: 403 });
+  }
   // 303 = "See Other": browsern följer med GET oavsett att requesten var POST.
   const res = new NextResponse(null, relativeRedirectInit('/login', 303));
   // Samma path som vid inloggningen ('/'), annars matchar browsern inte cookien.

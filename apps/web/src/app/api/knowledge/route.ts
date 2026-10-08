@@ -61,10 +61,12 @@ export async function POST(request: Request): Promise<Response> {
     if (err instanceof KnowledgeError) {
       return NextResponse.json({ error: err.message }, { status: 400 });
     }
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Kunde inte läsa filen.' },
-      { status: 400 }
-    );
+    // Bibliotekens felmeddelanden (pdfjs/zip) är interna detaljer — logga
+    // typen server-side, visa ett fast meddelande (ISO 27001 A.8.x).
+    console.error('[knowledge] extraction failed', {
+      name: err instanceof Error ? err.name : typeof err
+    });
+    return NextResponse.json({ error: 'Kunde inte läsa filen.' }, { status: 400 });
   }
 
   const pb = await getServerPb();

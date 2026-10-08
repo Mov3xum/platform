@@ -37,7 +37,12 @@ export async function dispatchSurveyInvites(
   if (survey.sent_at && !opts.force) {
     return { ok: false, error: 'Enkäten är redan utskickad.' };
   }
-  const baseUrl = (opts.baseUrl || survey.send_base_url || '').replace(/\/+$/, '');
+  // Länkens origin i mejlet: en konfigurerad app-URL vinner alltid — då kan
+  // ett manipulerat `send_base_url` aldrig skicka mottagarna till en annan
+  // domän (phishing via plattformens avsändare). Utan env används staffs egen
+  // request-origin, sparad när utskicket schemalades.
+  const configured = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '').trim();
+  const baseUrl = (configured || opts.baseUrl || survey.send_base_url || '').replace(/\/+$/, '');
   if (!/^https?:\/\/[^\s/]+$/.test(baseUrl)) {
     return { ok: false, error: 'Ingen giltig adress för enkätlänken (send_base_url saknas).' };
   }

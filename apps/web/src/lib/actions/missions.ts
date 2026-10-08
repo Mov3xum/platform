@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
+import { writeWithFallback } from '@/lib/core/write/helpers';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import {
   ALL_ROLES,
@@ -24,6 +25,72 @@ import { isMissionCompletionTransition, logMissionCompletion } from '@/lib/missi
 import { isActiveMissionStatus, teamCapViolation } from '@/lib/team/team-cap.server';
 
 const MEMBER_ROLES: Role[] = ALL_ROLES.filter((r) => r !== 'observer');
+
+const ID_RE = /^[a-zA-Z0-9]{1,30}$/;
+const STAFF_FOR_STARTUPS: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'];
+
+/**
+ * Behåller bara id:n för användare i den inloggades tenant. Klienten är aldrig
+ * säkerhetsgränsen: ett uppdrag får inte peka på (och notifiera) användare i en
+ * annan tenant. Läser med användarens token (users.viewRule = samma tenant).
+ */
+async function keepTenantUserIds(
+  pb: Awaited<ReturnType<typeof getServerPb>>,
+  tenant: string,
+  ids: string[]
+): Promise<Set<string>> {
+  const wanted = Array.from(new Set(ids.filter((id) => ID_RE.test(id))));
+  const ok = new Set<string>();
+  for (let i = 0; i < wanted.length; i += 40) {
+    const chunk = wanted.slice(i, i + 40);
+    const params: Record<string, string> = { t: tenant };
+    const ors = chunk.map((id, j) => {
+      params[`u${j}`] = id;
+      return `id = {:u${j}}`;
+    });
+    try {
+      const res = await pb.collection('users').getList(1, chunk.length, {
+        filter: pb.filter(`tenant = {:t} && (${ors.join(' || ')})`, params),
+        fields: 'id'
+      });
+      for (const r of res.items) ok.add(r.id);
+    } catch {
+      /* fail-closed: id:n som inte kunde verifieras släpps */
+    }
+  }
+  return ok;
+}
+
+/** Bolag i tenanten; icke-staff får bara koppla bolag hen är länkad till. */
+async function keepAllowedStartupIds(
+  pb: Awaited<ReturnType<typeof getServerPb>>,
+  user: { tenant: string; roles: Role[]; linkedStartups: string[] },
+  ids: string[]
+): Promise<string[]> {
+  const isStaff = hasRole(user.roles, STAFF_FOR_STARTUPS);
+  const wanted = Array.from(new Set(ids.filter((id) => ID_RE.test(id)))).filter(
+    (id) => isStaff || user.linkedStartups.includes(id)
+  );
+  const ok = new Set<string>();
+  for (let i = 0; i < wanted.length; i += 40) {
+    const chunk = wanted.slice(i, i + 40);
+    const params: Record<string, string> = { t: user.tenant };
+    const ors = chunk.map((id, j) => {
+      params[`s${j}`] = id;
+      return `id = {:s${j}}`;
+    });
+    try {
+      const res = await pb.collection('startups').getList(1, chunk.length, {
+        filter: pb.filter(`tenant = {:t} && (${ors.join(' || ')})`, params),
+        fields: 'id'
+      });
+      for (const r of res.items) ok.add(r.id);
+    } catch {
+      /* fail-closed */
+    }
+  }
+  return wanted.filter((id) => ok.has(id));
+}
 
 export type MissionActionState = {
   error?: string;
@@ -191,19 +258,35 @@ export async function createMissionAction(
     ];
   }
 
+  const pb = await getServerPb();
+
+  // Tenant-/medlemsverifiering av allt klienten pekar ut (bolag, deltagare,
+  // mentor) — annars kunde ett uppdrag kopplas till en annan tenants bolag
+  // och slutförandet skriva aktivitetsrader på dess bolagskort.
+  const requestedStartups = startups;
+  const allowedStartups = await keepAllowedStartupIds(pb, user, requestedStartups);
+  if (allowedStartups.length !== requestedStartups.length) {
+    return { error: 'Ett eller flera valda bolag finns inte eller är inte tillgängliga för dig.' };
+  }
+  const validUsers = await keepTenantUserIds(pb, user.tenant, [
+    ...participants.map((p) => p.user_id),
+    ...(mentor ? [mentor] : [])
+  ]);
+  participants = participants.filter((p) => p.user_id === user.id || validUsers.has(p.user_id));
+  const validMentor = mentor && validUsers.has(mentor) ? mentor : undefined;
+
   const derivedRecipients = deriveRecipientsFromParticipants(participants).filter(
     (id) => id !== user.id
   );
 
   const stages = defaultStagesForType(type);
-  const pb = await getServerPb();
 
   // § 29.7 — teamtaket: ett nytt uppdrag skapas som pågående, så varje
   // medlem (även utfärdaren som ansvarig) måste ha en ledig teamplats.
   const capError = await teamCapViolation(pb, user.tenant, [
     ...participants.map((p) => p.user_id),
     ...derivedRecipients,
-    ...(mentor ? [mentor] : [])
+    ...(validMentor ? [validMentor] : [])
   ]);
   if (capError) return { error: capError, code: 'team_cap' };
 
@@ -216,7 +299,7 @@ export async function createMissionAction(
       status: 'preparation' satisfies MissionStatus,
       issuer: user.id,
       recipients: derivedRecipients,
-      mentor: mentor || null,
+      mentor: validMentor || null,
       startup: startups[0] || null,
       startups,
       participants_json: participants,
@@ -316,7 +399,7 @@ export async function updateMissionStatus(
   }
 
   try {
-    await pb.collection(PB_COLLECTIONS.missions).update(id, { status });
+    await writeWithFallback(pb, (c) => c.collection(PB_COLLECTIONS.missions).update(id, { status }), { fallbackOn404: true });
 
     // § 29.4 — slutfört team sammanställs på kopplade bolagskort.
     if (isMissionCompletionTransition(mission.status, status)) {
@@ -392,9 +475,10 @@ export async function advanceStage(id: string, stageId: string, note?: string): 
   }
 
   try {
-    await pb
-      .collection(PB_COLLECTIONS.missions)
-      .update(id, { stages_json: stages, status: nextStatus });
+    await writeWithFallback(pb, (c) =>
+      c.collection(PB_COLLECTIONS.missions).update(id, { stages_json: stages, status: nextStatus }),
+      { fallbackOn404: true }
+    );
 
     // § 29.4 — sista steget klart ⇒ teamet slutfört ⇒ bolagskortet.
     if (isMissionCompletionTransition(mission.status, nextStatus)) {
@@ -454,8 +538,14 @@ export async function updateMissionParticipants(
   sanitized.push({ user_id: mission.issuer, role: 'lead', added_at: now, added_by: user.id });
   seen.add(mission.issuer);
 
+  const validUsers = await keepTenantUserIds(
+    pb,
+    user.tenant,
+    (Array.isArray(participants) ? participants : []).map((p) => String(p?.user_id ?? ''))
+  );
   for (const p of participants) {
     if (!p?.user_id || seen.has(p.user_id)) continue;
+    if (!validUsers.has(p.user_id)) continue;
     if (!VALID_PARTICIPANT_ROLES.includes(p.role)) continue;
     sanitized.push({
       user_id: p.user_id,
@@ -478,10 +568,10 @@ export async function updateMissionParticipants(
   }
 
   try {
-    await pb.collection(PB_COLLECTIONS.missions).update(id, {
+    await writeWithFallback(pb, (c) => c.collection(PB_COLLECTIONS.missions).update(id, {
       participants_json: sanitized,
       recipients: derivedRecipients
-    });
+    }), { fallbackOn404: true });
 
     const newOnes = Array.from(seen).filter((uid) => !previous.includes(uid) && uid !== user.id);
     if (newOnes.length > 0) {
@@ -542,14 +632,14 @@ export async function updateMissionAction(
   const accent = String(formData.get('accent') || mission.accent || 'purple').trim();
 
   try {
-    await pb.collection(PB_COLLECTIONS.missions).update(id, {
+    await writeWithFallback(pb, (c) => c.collection(PB_COLLECTIONS.missions).update(id, {
       title,
       type,
       visibility,
       due_date: dueDate || null,
       description,
       accent
-    });
+    }), { fallbackOn404: true });
     revalidatePath('/uppdrag');
     revalidatePath(`/uppdrag/${id}`);
     return { missionId: id };
