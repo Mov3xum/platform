@@ -4781,6 +4781,20 @@ Båda sidorna läser via den delade `loadMyCompetenceProfile`
 (`lib/team/my-competence-profile.server.ts`) — ingen divergerande kopia;
 sparandet går som förut via `saveMyProfileAction` (revaliderar båda).
 
+**Incident 2026-10-08 — "Spara profil" på /konto gav 500.** Grundorsaken var
+inte kompetenskoden: `lib/actions/account.ts` (en `'use server'`-fil)
+exporterade konstanten `MAX_AVATAR_BYTES`. Next validerar exporterna i ALLA
+action-moduler som sidan använder när en action anropas — inte vid bygget —
+så varje server action på /konto (kompetensprofil, profilbild, lösenord)
+kastade "A 'use server' file can only export async functions, found number"
+(maskat i produktion till "Server Components render" + digest). Konstanten
+ligger nu i `lib/account-limits.ts`, och **`yarn check:use-server`**
+(`scripts/check-use-server-exports.mjs`, körs i `yarn test`) failar CI om en
+`'use server'`-fil exporterar något annat än async-funktioner och typer.
+Exportera aldrig konstanter, synkrona hjälpare eller klasser ur en
+`'use server'`-modul — lägg dem i en vanlig modul (samma läxa som
+client-/server-gränsen i § 37.1).
+
 - **Var hashtags redigeras — "Min profil", inte "Mitt konto" (incident
   2026-10-04).** Admin hittade inte hashtag-ytan efter mergen: kontomenyn i
   railens fot (klick på det egna namnet) ledde bara till `/konto` (Mitt konto =
