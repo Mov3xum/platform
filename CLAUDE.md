@@ -1337,6 +1337,19 @@ denna princip.
   aldrig i kod (ISO 27001 A.8.24).
 - Algoritm: AES-256-GCM (12-byte IV + 16-byte auth tag).
 - Dekryptering sker endast i `sync.ts`-orkestratorn via PB superuser.
+- **Felorsaker är typade (incident 2026-10).** `saveCredentials`/
+  `loadCredentialsResult` (`credentials.ts`) returnerar en orsak
+  (`lib/integrations/credential-errors.ts`, ren + enhetstestad): saknad/
+  nekad superuser, saknad/felformaterad `MOVEXUM_INTEGRATION_KEY`, inga
+  sparade nycklar, dekrypteringsfel (nyckeln bytt) eller PB-läs-/skrivfel.
+  UI:t (anslut, synk, "Testa mot org-nr") visar orsaken och loggen får
+  `[integrations] credentials load|save failed { reason, status }` (aldrig
+  nyckel eller värden). Kan nycklarna inte sparas efter en lyckad
+  `testConnection` återställs `tenant_integrations.status` — tidigare blev
+  kopplingen kvar som `connected` utan nycklar, detaljsidan visade "Aktiv
+  koppling" utan formulär och varje synk föll på "saknas eller kunde inte
+  dekrypteras". Nyckeln måste vara satt på **web-appen** i Coolify; GitHub-
+  secrets med samma namn läses inte av någon workflow.
 
 ### 11.6 Sync-cadence
 

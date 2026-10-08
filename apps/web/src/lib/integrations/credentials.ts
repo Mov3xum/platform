@@ -5,8 +5,10 @@ import { getServerPbUrl } from '@/lib/pb-url';
 import {
   decryptCredentials,
   encryptCredentials,
+  IntegrationKeyError,
   isEncryptedBlob
 } from './crypto';
+import type { CredentialFailureReason, CredentialResult } from './credential-errors';
 
 // PocketBase admin client wrapper for integration credential I/O.
 // The defense-in-depth hook in
@@ -104,36 +106,84 @@ export function invalidateSuperuserPb(): void {
   superuserCache = null;
 }
 
-export async function loadCredentials(
+function superuserFailure(reason: 'missing_credentials' | 'auth_failed'): CredentialFailureReason {
+  return reason === 'missing_credentials' ? 'superuser_missing' : 'superuser_auth';
+}
+
+function keyFailure(err: unknown): CredentialFailureReason | null {
+  if (err instanceof IntegrationKeyError) {
+    return err.code === 'missing' ? 'key_missing' : 'key_invalid';
+  }
+  return null;
+}
+
+// PII-/secret-fri logg: bara orsak, id och PB-status — aldrig nyckel eller värden.
+function logFailure(op: 'load' | 'save', id: string, reason: CredentialFailureReason, err?: unknown): void {
+  console.error(`[integrations] credentials ${op} failed`, {
+    tenantIntegrationId: id,
+    reason,
+    status: statusOf(err)
+  });
+}
+
+/** Läser och dekrypterar nycklarna, med orsak när det inte går. */
+export async function loadCredentialsResult(
   tenantIntegrationId: string
-): Promise<Record<string, string> | null> {
+): Promise<CredentialResult<Record<string, string>>> {
+  const fail = (reason: CredentialFailureReason, err?: unknown) => {
+    logFailure('load', tenantIntegrationId, reason, err);
+    return { ok: false as const, reason };
+  };
   const result = await getSuperuserPb();
-  if (!result.ok) return null;
+  if (!result.ok) return fail(superuserFailure(result.reason));
+  let config: unknown;
   try {
     const record = await result.pb
       .collection('tenant_integrations')
       .getOne<{ id: string; config: unknown }>(tenantIntegrationId);
-    if (!isEncryptedBlob(record.config)) return null;
-    return decryptCredentials(record.config);
-  } catch {
-    return null;
+    config = record.config;
+  } catch (err) {
+    return fail('read_failed', err);
+  }
+  if (!isEncryptedBlob(config)) return fail('not_saved');
+  try {
+    return { ok: true, value: decryptCredentials(config) };
+  } catch (err) {
+    return fail(keyFailure(err) ?? 'decrypt_failed', err);
   }
 }
 
+export async function loadCredentials(
+  tenantIntegrationId: string
+): Promise<Record<string, string> | null> {
+  const result = await loadCredentialsResult(tenantIntegrationId);
+  return result.ok ? result.value : null;
+}
+
+/** Krypterar och sparar nycklarna, med orsak när det inte går. */
 export async function saveCredentials(
   tenantIntegrationId: string,
   plaintext: Record<string, string>
-): Promise<boolean> {
+): Promise<CredentialResult<true>> {
+  const fail = (reason: CredentialFailureReason, err?: unknown) => {
+    logFailure('save', tenantIntegrationId, reason, err);
+    return { ok: false as const, reason };
+  };
   const result = await getSuperuserPb();
-  if (!result.ok) return false;
+  if (!result.ok) return fail(superuserFailure(result.reason));
+  let blob;
   try {
-    const blob = encryptCredentials(plaintext);
+    blob = encryptCredentials(plaintext);
+  } catch (err) {
+    return fail(keyFailure(err) ?? 'key_invalid', err);
+  }
+  try {
     await result.pb.collection('tenant_integrations').update(tenantIntegrationId, {
       config: blob
     });
-    return true;
-  } catch {
-    return false;
+    return { ok: true, value: true };
+  } catch (err) {
+    return fail('write_failed', err);
   }
 }
 

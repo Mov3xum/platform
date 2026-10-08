@@ -12,7 +12,8 @@ import {
 import { getHandler, listCompanyRegistrySlugs } from '@/lib/integrations/registry';
 import { ensureRegistryProviderRows } from '@/lib/integrations/company-registry/catalog-seed';
 import { runSync, runRegistrySyncForStartup } from '@/lib/integrations/sync';
-import { loadCredentials } from '@/lib/integrations/credentials';
+import { loadCredentialsResult } from '@/lib/integrations/credentials';
+import { describeCredentialFailure } from '@/lib/integrations/credential-errors';
 import type { RegistryCompany } from '@/lib/integrations/company-registry/types';
 import { isPersonalOrgNr, isValidOrgNr } from '@/lib/integrations/company-registry/orgnr';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
@@ -221,10 +222,28 @@ export async function connectIntegrationAction(
   }
 
   const saved = await saveCredentials(tenantIntegrationId, creds);
-  if (!saved) {
+  if (!saved.ok) {
+    // Statusen sattes till 'connected' ovan. Utan sparade nycklar visade
+    // detaljsidan då "Aktiv koppling" utan anslutningsformulär, och varje
+    // synk föll på "saknas eller kunde inte dekrypteras" (incident 2026-10).
+    // Återställ statusen så att formuläret visas igen.
+    try {
+      await pb.collection('tenant_integrations').update(tenantIntegrationId, {
+        status: existing && existing.status !== 'connected' ? existing.status : 'available',
+        connected_at: null
+      });
+    } catch (error) {
+      console.error('[integrations] failed to roll back status after credential save', {
+        tenant: user.tenant,
+        providerSlug,
+        error
+      });
+    }
+    revalidatePath('/integrationer');
+    revalidatePath('/installningar/integrationer');
+    revalidatePath(`/integrationer/${providerSlug}`);
     return {
-      error:
-        'Krypterad lagring misslyckades — kontrollera MOVEXUM_INTEGRATION_KEY på servern.'
+      error: `Anslutningen mot leverantören fungerade, men nycklarna kunde inte sparas. ${describeCredentialFailure(saved.reason)}`
     };
   }
 
@@ -518,8 +537,9 @@ export async function previewRegistryLookupAction(
   if (tenantIntegration.status !== 'connected') {
     return { error: 'Leverantören är inte ansluten för denna tenant.' };
   }
-  const creds = await loadCredentials(tenantIntegration.id);
-  if (!creds) return { error: 'Inloggningsuppgifter saknas eller kunde inte dekrypteras.' };
+  const loaded = await loadCredentialsResult(tenantIntegration.id);
+  if (!loaded.ok) return { error: describeCredentialFailure(loaded.reason) };
+  const creds = loaded.value;
 
   let company: RegistryCompany;
   try {
