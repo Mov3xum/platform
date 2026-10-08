@@ -58,10 +58,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   const ip = clientIp(req);
   const rlKey = `compass-pub-chat:${ip}`;
-  if (checkRateLimit(rlKey, MAX_PER_WINDOW).blocked) {
+  if ((await checkRateLimit(rlKey, MAX_PER_WINDOW)).blocked) {
     return NextResponse.json({ error: 'För många förfrågningar. Försök igen om en stund.' }, { status: 429 });
   }
-  recordFailure(rlKey, WINDOW_MS);
+  await recordFailure(rlKey, WINDOW_MS);
 
   let body: ChatBody;
   try {
@@ -119,13 +119,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const sessionToken = body.sessionToken;
 
   const tenantKey = `compass-pub-chat-tenant:${tenant}`;
-  if (checkRateLimit(tenantKey, TENANT_MAX_PER_WINDOW).blocked) {
+  if ((await checkRateLimit(tenantKey, TENANT_MAX_PER_WINDOW)).blocked) {
     return NextResponse.json(
       { error: 'Chatten har tillfälligt nått sin kapacitet. Försök igen om en stund.' },
       { status: 429 }
     );
   }
-  recordFailure(tenantKey, TENANT_WINDOW_MS);
+  await recordFailure(tenantKey, TENANT_WINDOW_MS);
 
   // Månadstaket (§ 9.6) gäller även publika chattar på tenantens nyckel.
   try {

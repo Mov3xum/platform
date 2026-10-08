@@ -26,13 +26,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const { slug } = await params;
 
   const rlKey = `survey-pub-submit:${clientIp(req)}`;
-  if (checkRateLimit(rlKey, MAX_PER_WINDOW).blocked) {
+  if ((await checkRateLimit(rlKey, MAX_PER_WINDOW)).blocked) {
     return NextResponse.json(
       { error: 'För många förfrågningar. Försök igen om en stund.' },
       { status: 429 }
     );
   }
-  recordFailure(rlKey, WINDOW_MS);
+  await recordFailure(rlKey, WINDOW_MS);
 
   let body: { answers?: unknown; channel?: unknown };
   try {

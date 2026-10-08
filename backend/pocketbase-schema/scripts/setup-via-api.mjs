@@ -4277,6 +4277,54 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
 
+// Migration 1700000184: delat processöverskridande tillstånd för horisontell
+// skalning (§ 21.8). `rate_limits` = rate-limiterns räknare (key = HMAC/
+// SHA-256 av den logiska nyckeln, aldrig e-post/IP i klartext); `app_locks` =
+// distribuerade lås (unikt index på key avgör vem som håller låset).
+// ALLA regler null — bara superuser (appens cachade superuser-klient).
+await ensureCollection({
+  id: 'rate_limits_collection',
+  name: 'rate_limits',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'key', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'reset_at', type: 'date', required: true }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_rate_limits_key ON rate_limits (key)',
+    'CREATE INDEX idx_rate_limits_reset_at ON rate_limits (reset_at)'
+  ],
+  listRule: null,
+  viewRule: null,
+  createRule: null,
+  updateRule: null,
+  deleteRule: null
+});
+await ensureCollection({
+  id: 'app_locks_collection',
+  name: 'app_locks',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'key', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'owner', type: 'text', required: true, min: 1, max: 200 },
+    { name: 'expires_at', type: 'date', required: true }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_app_locks_key ON app_locks (key)',
+    'CREATE INDEX idx_app_locks_expires_at ON app_locks (expires_at)'
+  ],
+  listRule: null,
+  viewRule: null,
+  createRule: null,
+  updateRule: null,
+  deleteRule: null
+});
+
 // Migration 1700000158: notifications.kind += contact_request/contact_decision
 // (union — ensureCollection synkar inte fält på befintlig collection).
 // + migration 1700000169 (stödcheckar § 46): support_check_*-notiser.
