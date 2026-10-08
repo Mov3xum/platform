@@ -7,6 +7,7 @@ import {
   readRoaringCredentials,
   roaringAmountMultiplier,
   roaringGetFirst,
+  roaringHost,
   roaringToken,
   ROARING_PATHS,
   type RoaringFetchOutcome
@@ -61,7 +62,7 @@ export const roaringHandler: CompanyRegistryHandler = createCompanyRegistryHandl
       label: 'Bas-URL (valfri)',
       type: 'text',
       required: false,
-      help: 'Lämna tom för https://api.roaring.io. Roarings sandbox använder SAMMA adress — det är nyckelparet (sandbox- eller produktionsapplikation i utvecklarportalen) som avgör om svaren är testdata.'
+      help: 'Lämna tom för https://api.roaring.io. Sandbox-nycklar ger bara Roarings fiktiva testobjekt — får ni riktiga bolagsuppgifter för ett riktigt org-nr är nycklarna produktionsnycklar och anropen debiteras.'
     }
   ],
   throttleMs: 250,
@@ -138,7 +139,7 @@ export const roaringHandler: CompanyRegistryHandler = createCompanyRegistryHandl
       amountMultiplier: roaringAmountMultiplier(),
       isPersonal
     });
-    company.notes.push(...softNotes);
+    company.notes.push(`Anropen gick till ${roaringHost(c)}.`, ...softNotes);
     company.fetchedParts = fetchedParts;
     return company;
   }

@@ -15,10 +15,13 @@ import { parseRoaringPathList, roaringReportsNoRecords } from './normalize';
 //   Data:    GET  {base}/se/…/<version>/{companyId}
 //            Authorization: Bearer <token>
 //
-// Sandbox: Roaring har INGEN separat sandbox-värd — samma https://api.roaring.io
-// och samma /token; det är nyckelparet (sandbox- vs produktionsapplikation i
-// utvecklarportalen) som avgör om svaren är testdata. `base_url`-fältet finns
-// kvar som env-/tenant-överstyrning men behöver normalt inte sättas.
+// Sandbox: Roarings sandbox svarar med FIKTIVA testobjekt (listade per API i
+// developer.roaring.io). Vi har inte kunnat verifiera om sandboxen nås via en
+// egen värd eller via samma https://api.roaring.io med sandbox-nycklar —
+// roaring.io nås inte från byggmiljön. Kommer RIKTIGA bolagsuppgifter tillbaka
+// för ett riktigt org-nr har anropet gått mot produktion (debiteras av
+// Roaring). Värden loggas per anrop ([roaring] api call) och visas i
+// förhandsgranskningen. `base_url` är env-/tenant-överstyrning.
 //
 // Endpoint-versionerna är env-överstyrbara (ROARING_*_PATH, kommaseparerade
 // kandidater i prioritetsordning) eftersom Roaring versionerar per API och
@@ -119,6 +122,37 @@ export type RoaringFetchOutcome =
  * är blockerande. 401 → token ogiltigförklaras och ETT omförsök görs.
  */
 export async function roaringGet(
+  c: RoaringCredentials,
+  path: string,
+  companyId: string
+): Promise<RoaringFetchOutcome> {
+  const outcome = await roaringGetOnce(c, path, companyId);
+  // Spår i server-loggen (Coolify): värd, sökväg och utfall per anrop — så
+  // det i efterhand går att se vilken miljö som anropades och vad varje API
+  // svarade. Aldrig org-nr (enskild firma = personnummer), aldrig nycklar.
+  console.info('[roaring] api call', {
+    host: safeHost(c.baseUrl),
+    path,
+    status: outcome.ok ? 200 : outcome.status,
+    ok: outcome.ok
+  });
+  return outcome;
+}
+
+function safeHost(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return 'okänd';
+  }
+}
+
+/** Värden anropen går till — visas i förhandsgranskningen (ingen hemlighet). */
+export function roaringHost(c: RoaringCredentials): string {
+  return safeHost(c.baseUrl);
+}
+
+async function roaringGetOnce(
   c: RoaringCredentials,
   path: string,
   companyId: string

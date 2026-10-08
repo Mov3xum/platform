@@ -1446,9 +1446,14 @@ HTTP 200-svar vars kuvert säger "records not found" behandlas som 404
 Verklig huvudmans intervall/kontrollgrund tolkas även som objekt
 (`{ from, to }`) respektive kodlista (`controlTypes[]`); fältnamnen inuti
 `beneficialOwners[]` och bokslutets fält är fortsatt obekräftade — se
-runbooken. **Sandbox = samma värd** (`api.roaring.io`): det
-är nyckelparet från utvecklarportalen som avgör om svaren är testdata, så
-`base_url` lämnas tom. Förhandsgranskningen noterar per API vilken sökväg som
+runbooken. **Sandbox vs produktion:** Roarings sandbox svarar bara med
+FIKTIVA testobjekt (listade per API i developer.roaring.io); om den nås via
+egen värd eller via `api.roaring.io` med sandbox-nycklar är inte verifierat.
+Får "Testa mot org-nr" RIKTIGA uppgifter för ett riktigt bolag har anropet gått
+mot produktion och debiteras (incident 2026-10-08: "testnycklar" gav Boxmeal
+Gävle AB:s riktiga grunddata). Varje anrop loggas PII-fritt i serverloggen
+(`[roaring] api call { host, path, status, ok }` — aldrig org-nr eller
+nycklar) och förhandsgranskningen noterar vilken värd som anropades. Förhandsgranskningen noterar per API vilken sökväg som
 svarade och vilka **fältnycklar** (aldrig värden) svaret bar, så mappningen kan
 verifieras mot sandboxen utan rå JSON. Bolagsverkets bas-URL
 via credential-fältet eller `BOLAGSVERKET_API_BASE_URL` (testmiljö).
