@@ -69,6 +69,8 @@ interface ListOptions {
   filter?: string;
   sort?: string;
   expand?: string;
+  /** Fältprojektion (PB `fields`) — hämta bara det sidan renderar. */
+  fields?: string;
   page?: number;
   perPage?: number;
 }
@@ -104,6 +106,7 @@ export async function listForTenant<T = Record<string, unknown>>(
     filter,
     sort,
     expand,
+    fields,
     page = 1,
     perPage = 50,
     scopeToStartupField
@@ -120,7 +123,8 @@ export async function listForTenant<T = Record<string, unknown>>(
   return pb.collection(collection).getList<T>(page, perPage, {
     filter: withTenantFilter(user.tenant, mergedFilter, tenantField),
     sort,
-    expand
+    expand,
+    ...(fields ? { fields } : {})
   });
 }
 

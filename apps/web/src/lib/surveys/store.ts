@@ -2,6 +2,7 @@ import 'server-only';
 import { randomBytes } from 'node:crypto';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
+import { errorStatus, isRuleDenialStatus, mapWithConcurrency } from '@/lib/read-scaling';
 import {
   aggregateSurvey,
   normalizeSurveyQuestions,
@@ -120,39 +121,59 @@ async function withFallback<T>(
   throw new Error('survey read failed');
 }
 
+/** Max samtidiga svarsräkningar i enkätlistan (en räkning per enkät). */
+const RESPONSE_COUNT_CONCURRENCY = 5;
+
 export async function listSurveys(
   pb: PocketBase,
   tenant: string
 ): Promise<{ surveys: Survey[]; counts: Map<string, number> }> {
+  // Vilken klient läste enkätlistan? Behövde listan superuser-fallbacken
+  // (tyst regel-nekande, § 21.3) räknas svaren också som superuser — annars
+  // med användartoken. Aldrig en ny superuser-omläsning per enkät.
+  let listClient: PocketBase = pb;
   const rows = await withFallback(
     pb,
-    (c) =>
-      c.collection('surveys').getFullList<SurveyRecord>({
+    async (c) => {
+      const res = await c.collection('surveys').getFullList<SurveyRecord>({
         filter: c.filter('tenant = {:t}', { t: tenant }),
         sort: '-created'
-      }),
+      });
+      listClient = c;
+      return res;
+    },
     (r) => r.length === 0
   ).catch(() => [] as SurveyRecord[]);
 
+  // Begränsad samtidighet (skalbarhetsgranskning 2026-10-08): en tenant med
+  // hundra enkäter ger inte hundra samtidiga PB-anrop. En räkning som 0 är
+  // ett giltigt svar (enkät utan svar) och ger INGEN superuser-omläsning;
+  // bara ett fel på användartoken gör det (regel-nekande → 400/403/404).
   const counts = new Map<string, number>();
-  await Promise.all(
-    rows.map(async (r) => {
+  const countWith = (c: PocketBase, surveyId: string) =>
+    c
+      .collection('survey_responses')
+      .getList(1, 1, {
+        filter: c.filter('survey = {:s} && tenant = {:t}', { s: surveyId, t: tenant }),
+        fields: 'id'
+      })
+      .then((res) => res.totalItems);
+  await mapWithConcurrency(rows, RESPONSE_COUNT_CONCURRENCY, async (r) => {
+    try {
+      counts.set(r.id, await countWith(listClient, r.id));
+    } catch (err) {
+      if (listClient !== pb || !isRuleDenialStatus(errorStatus(err))) {
+        counts.set(r.id, 0);
+        return;
+      }
+      const su = await getSuperuserPb();
       try {
-        const res = await withFallback(
-          pb,
-          (c) =>
-            c.collection('survey_responses').getList(1, 1, {
-              filter: c.filter('survey = {:s} && tenant = {:t}', { s: r.id, t: tenant }),
-              fields: 'id'
-            }),
-          (x) => x.totalItems === 0
-        );
-        counts.set(r.id, res.totalItems);
+        counts.set(r.id, su.ok ? await countWith(su.pb, r.id) : 0);
       } catch {
         counts.set(r.id, 0);
       }
-    })
-  );
+    }
+  });
   return { surveys: rows.map(toSurvey), counts };
 }
 

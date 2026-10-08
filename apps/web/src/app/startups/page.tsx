@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { listForTenant, hasTenantWideRead } from '@/lib/pb.server';
+import { listAllForTenant, listForTenant, hasTenantWideRead } from '@/lib/pb.server';
+import { pagerState, parsePageParam } from '@/lib/read-scaling';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { canAccessModule, hasRole } from '@/lib/rbac';
 import { ALL_PHASES, type StartupPhase, type SprintXScore } from '@platform/shared';
@@ -15,22 +16,43 @@ import { buildStartupTabs } from './_tabs';
 
 export const dynamic = 'force-dynamic';
 
+/** En rad i bolagstabellen — bara fälten tabellen renderar. */
 interface StartupRecord {
   id: string;
-  tenant: string;
   name: string;
   description: string;
   phase: StartupPhase;
   status: StartupStatus;
   irl_level?: number;
   next_step?: string;
-  tags?: string;
+}
+
+/** Underlaget för portföljstatistiken — inga fritextfält. */
+interface StartupMetricRow {
+  id: string;
+  phase: StartupPhase;
+  status: StartupStatus;
+  irl_level?: number;
   sprint_x_json?: SprintXScore;
 }
 
+// Skalbarhetsgranskning 2026-10-08: listan läste 200 hela bolagsposter (alla
+// fält, ingen paginering) — fler än 200 bolag försvann tyst ur både tabell och
+// statistik. Nu: tabellen pagineras server-side (PAGE_SIZE per sida, ?page=)
+// med bara tabellens fält, och statistiken läses separat med minimala fält
+// över ALLA bolag upp till ett tak som rapporteras ärligt (§ 33.4).
+const PAGE_SIZE = 100;
+const TABLE_FIELDS = 'id,name,description,phase,status,irl_level,next_step';
+const METRIC_FIELDS = 'id,phase,status,irl_level,sprint_x_json';
+const METRIC_MAX_ROWS = 5_000;
+
 const IN_FUNNEL_STATUSES = ['new', 'contacted', 'meeting-booked', 'evaluating'] as const;
 
-export default async function StartupsOverviewPage() {
+export default async function StartupsOverviewPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ page?: string }>;
+}) {
   const user = await requireUser();
   if (!canAccessModule(user.roles, 'startups')) redirect('/dashboard');
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
@@ -44,28 +66,60 @@ export default async function StartupsOverviewPage() {
     if (user.linkedStartups.length === 0) redirect('/dashboard');
   }
 
+  const page = parsePageParam((await searchParams)?.page);
   const pb = await getServerPb();
   let items: StartupRecord[] = [];
+  let metricRows: StartupMetricRow[] = [];
   let totalItems = 0;
   let loadFailed = false;
-  try {
-    // `scopeToStartupField: 'id'` begränsar listan till medlemmens länkade
-    // bolag (tom no-op för staff/observer).
-    const result = await listForTenant<StartupRecord>('startups', {
+  let metricsNotice: string | null = null;
+  // `scopeToStartupField: 'id'` begränsar listan till medlemmens länkade
+  // bolag (tom no-op för staff/observer). Läsningar via användarens token (RLS § 21).
+  const [tableRes, metricsRes] = await Promise.allSettled([
+    listForTenant<StartupRecord>('startups', {
       sort: 'name',
-      perPage: 200,
+      page,
+      perPage: PAGE_SIZE,
+      fields: TABLE_FIELDS,
       scopeToStartupField: 'id'
-    });
-    items = result.items;
-    totalItems = result.totalItems;
-  } catch (error) {
+    }),
+    listAllForTenant<StartupMetricRow>('startups', {
+      sort: 'id',
+      fields: METRIC_FIELDS,
+      scopeToStartupField: 'id',
+      maxRows: METRIC_MAX_ROWS
+    })
+  ]);
+  if (tableRes.status === 'fulfilled') {
+    items = tableRes.value.items;
+    totalItems = tableRes.value.totalItems;
+  } else {
     loadFailed = true;
     console.error('[startups] overview load failed', {
       tenant: user.tenant,
       userId: user.id,
-      error
+      error: tableRes.reason
     });
   }
+  if (metricsRes.status === 'fulfilled') {
+    metricRows = metricsRes.value.items;
+    totalItems = Math.max(totalItems, metricsRes.value.total);
+    if (!metricsRes.value.complete) {
+      metricsNotice = `Statistiken bygger på de första ${metricRows.length} av ${metricsRes.value.total} bolag.`;
+    }
+  } else {
+    // Statistiken kunde inte läsas — räkna på tabellsidan och säg det.
+    metricRows = items;
+    if (!loadFailed) {
+      metricsNotice = 'Portföljstatistiken kunde inte läsas helt — siffrorna gäller bara bolagen på den här sidan.';
+    }
+    console.error('[startups] overview metrics failed', {
+      tenant: user.tenant,
+      userId: user.id,
+      error: metricsRes.reason
+    });
+  }
+  const pager = pagerState(page, PAGE_SIZE, totalItems);
 
   const [statusCounts, recentLeads] = await Promise.all([
     isStaff ? countLeadsByStatus(pb, user.tenant) : Promise.resolve(null),
@@ -81,27 +135,27 @@ export default async function StartupsOverviewPage() {
   const conversionRate =
     statusCounts && leadTotal > 0 ? Math.round((100 * (statusCounts.accepted || 0)) / leadTotal) : 0;
 
-  const irlSamples = items.filter((s) => s.irl_level);
+  const irlSamples = metricRows.filter((s) => s.irl_level);
   const avgIRL = irlSamples.length
     ? irlSamples.reduce((sum, s) => sum + (s.irl_level || 0), 0) / irlSamples.length
     : 0;
   const sxAvg = (key: keyof SprintXScore) => {
-    const list = items.filter((s) => s.sprint_x_json?.[key]);
+    const list = metricRows.filter((s) => s.sprint_x_json?.[key]);
     return list.length
       ? list.reduce((sum, s) => sum + (s.sprint_x_json?.[key] || 0), 0) / list.length
       : 0;
   };
   const metrics = {
     totalStartups: totalItems,
-    activeStartups: items.filter((s) => s.status === 'active').length,
-    byPhase: items.reduce(
+    activeStartups: metricRows.filter((s) => s.status === 'active').length,
+    byPhase: metricRows.reduce(
       (acc, s) => {
         acc[s.phase] = (acc[s.phase] || 0) + 1;
         return acc;
       },
       {} as Record<string, number>
     ),
-    byStatus: items.reduce(
+    byStatus: metricRows.reduce(
       (acc, s) => {
         acc[s.status] = (acc[s.status] || 0) + 1;
         return acc;
@@ -179,8 +233,24 @@ export default async function StartupsOverviewPage() {
           </div>
         )}
 
-        {items.length > 0 ? (
-          <StartupListDashboard startups={items} metrics={metrics} />
+        {metricsNotice && (
+          <div className="rounded-xl border border-default bg-movexum-pastell-orange p-4 text-[13px] text-movexum-morkorange">
+            {metricsNotice}
+          </div>
+        )}
+
+        {items.length === 0 && pager.outOfRange && (
+          <div className="rounded-xl border border-default bg-surface p-4 text-[13px] text-foreground-muted">
+            Sidan {page} finns inte — portföljen har {pager.totalPages}{' '}
+            {pager.totalPages === 1 ? 'sida' : 'sidor'}.{' '}
+            <Link href={pageHref(pager.totalPages)} className="text-link hover:underline">
+              Gå till sista sidan
+            </Link>
+          </div>
+        )}
+
+        {items.length > 0 || metricRows.length > 0 ? (
+          <StartupListDashboard startups={metricRows} metrics={metrics} />
         ) : (
           !loadFailed && (
             <div className="rounded-2xl border border-dashed border-default p-12 text-center">
@@ -205,6 +275,7 @@ export default async function StartupsOverviewPage() {
             <div className="flex items-center justify-between border-b border-default px-5 py-3">
               <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
                 Alla bolag · {totalItems}
+                {pager.totalPages > 1 && ` · visar ${pager.from}–${pager.to}`}
               </span>
               <Link
                 href="/startups/inkubator"
@@ -260,6 +331,34 @@ export default async function StartupsOverviewPage() {
                 </tbody>
               </table>
             </div>
+            {pager.totalPages > 1 && (
+              <nav
+                aria-label="Sidnavigering"
+                className="flex flex-wrap items-center justify-center gap-2 border-t border-default px-5 py-3 text-[12px]"
+              >
+                {pager.hasPrev && (
+                  <Link
+                    href={pageHref(page - 1)}
+                    rel="prev"
+                    className="rounded-lg border border-default px-3 py-1.5 text-foreground-muted hover:border-strong hover:text-foreground"
+                  >
+                    ← Föregående
+                  </Link>
+                )}
+                <span className="font-mono tabular-nums text-foreground-subtle">
+                  Sida {page} av {pager.totalPages}
+                </span>
+                {pager.hasNext && (
+                  <Link
+                    href={pageHref(page + 1)}
+                    rel="next"
+                    className="rounded-lg border border-default px-3 py-1.5 text-foreground-muted hover:border-strong hover:text-foreground"
+                  >
+                    Nästa →
+                  </Link>
+                )}
+              </nav>
+            )}
           </section>
         )}
 
@@ -322,4 +421,8 @@ export default async function StartupsOverviewPage() {
       </div>
     </PageShell>
   );
+}
+
+function pageHref(page: number): string {
+  return page <= 1 ? '/startups' : `/startups?page=${page}`;
 }
