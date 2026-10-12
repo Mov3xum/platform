@@ -6,7 +6,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { getAssignmentReadPb } from '@/lib/assignments/read';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { escFilter } from '@/lib/pb-filter';
-import { canAccessModule, hasRole } from '@/lib/rbac';
+import { canAccessModule, canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import {
   PhaseBadge,
   StatusBadge,
@@ -1236,6 +1236,14 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
             Ägare och innehav från bolagsregister (Roaring: koncernstruktur + verklig
             huvudman). Underlag för art. 22 GBER / de minimis och Vinnovas krav på
             grundarägande. Fysiska personer visas utan namn.
+            {canAccessModuleForUser(user.roles, 'bedomning_excellens', user.enabledModules) ? (
+              <>
+                {' '}
+                <Link href={`/bedomning-excellens?startup=${startup.id}`} className="font-semibold text-link hover:underline">
+                  Bedöm mot art. 22 GBER / Vinnova →
+                </Link>
+              </>
+            ) : null}
           </p>
           {ownershipRows.length === 0 ? (
             <Empty>
