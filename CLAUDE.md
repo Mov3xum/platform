@@ -8234,8 +8234,8 @@ minimis i stället för art. 22).
 
 Två lägen: **"Hämta från Roaring och bedöm"** (färska uppslag för startup-
 bolaget OCH varje anknutet/partnerbolag med de datadelar personalen kryssat
-i, § 11.8 — inget sparas; synka bolagskortet separat) eller **"Bedöm sparade
-data"** (det som redan finns på bolagskortet, inget leverantörsanrop).
+i, § 11.8 — det hämtade sparas på bolagskortet för bolag som finns i
+plattformen, § 51.4) eller **"Bedöm sparade data"** (det som redan finns på bolagskortet, inget leverantörsanrop).
 Valfritt org-nr fungerar (bolaget behöver inte finnas i plattformen); för ett
 portföljbolag tas grundarägande (`startup_team_members`), registrerat de
 minimis (§ 20), IRL/readiness (`startup_readiness_assessments`) och
@@ -8306,8 +8306,9 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
   § 11.8); grundarnamn + andel visas ur `startup_team_members` ENBART i
   denna staff-vy (samma data som bolagskortet) och når aldrig AI-kontexten
   (§ 9.3 oförändrad). Audit-raderna (`activities`, `integration_sync`) är
-  PII-fria (leverantör + antal, aldrig org-nr). Registerdata persisteras
-  inte på bolagskortet; själva bedömningen arkiveras som PDF (§ 51.3).
+  PII-fria (leverantör + antal, aldrig org-nr). Registerdata som hämtas
+  för ett portföljbolag skrivs till bolagskortet (§ 51.4); själva
+  bedömningen arkiveras som PDF (§ 51.3).
 - **RBAC/RLS:** modulgrind `canAccessModuleForUser` + roll i actionen;
   färska uppslag kräver admin/incubator_lead (coach bedömer sparade data);
   alla läsningar via användarens token. Ingen ny kollektion, inga nya fält,
@@ -8358,3 +8359,42 @@ dela eller bifoga. Nu arkiveras **varje körning** automatiskt:
   e-post). `user_files` är fortsatt denylistad för `query_collection`
   (§ 27); loggar bär status, aldrig filnamn (bolagsnamn). Ingen ny
   kollektion, inga nya fält, ingen migration; riskklass n/a (ingen AI).
+
+### 51.4 Registerdata sparas på bolagskortet — aldrig samma uppslag två gånger (2026-10-12)
+
+**Incident:** "Hämta från Roaring och bedöm" läste grunddata, bokslut,
+koncernstruktur och verklig huvudman (fyra debiterade anrop per bolag) men
+kastade allt efter bedömningen — bolagskortet var oförändrat och nästa
+bedömning, eller en kollega som ville se ägarbilden, fick slå igen. Nu:
+- `runRegistryLookup` (`company-registry/lookup.server.ts`) tar
+  `persistToStartupId`. Är det satt skrivs det hämtade bolaget via **exakt
+  samma writer som "Synka från <leverantör>"** (`applyRegistryCompany`,
+  § 11.8: whitelistade startup-fält, upsert per bokslutsår, ägarbilden
+  ersatt per hämtad del med `source_part`, fysiska personer utan namn) —
+  ingen ny skrivväg. Innan något skrivs verifieras att bolaget tillhör
+  användarens tenant OCH att kortets org-nr är det som slogs upp (superuser-
+  klienten används som i synken). Gav ingen vald del data skrivs inget.
+  Handlern exponerar nu `source` (`CompanyRegistryHandler.source`) så
+  writern märker raderna rätt. Svaret bär `saved` (delar, antal årsrader/
+  ägarrader, PII-fria skrivfel) och audit-raden i `activities` säger
+  "sparat på bolagskortet: Grunddata, Bokslut …" (knuten till bolaget via
+  `startup`) i stället för "(inget sparat)". "Testa mot org-nr" skickar
+  inget `persistToStartupId` och sparar oförändrat inget.
+- `assessExcellenceAction` (registerläget) sätter `persistToStartupId` för
+  **portföljbolaget** och för varje **koncernbolag som själv finns i
+  plattformen** (`findStartupByOrgNr`); bolag utanför plattformen har inget
+  kort och slås bara upp. Bedömningen bär `savedToCards` → vyn visar
+  "Sparat på bolagskortet för <bolag>: Grunddata, Bokslut (N årsrader, M
+  ägarrader)" med länk, eller felet per bolag (fail-soft — bedömningen och
+  PDF:en görs ändå), och PDF:en får samma rad i huvudet. Korten
+  revalideras (`revalidatePath('/startups/<id>')`) så Ägarbild/Finansiell
+  historik/grunddata är uppdaterade direkt. "Bedöm sparade data" ger därmed
+  samma underlag som registerläget nästa gång, utan kostnad.
+- **Kostnad/transparens:** antalet anrop är oförändrat (uppslaget gjordes
+  redan); skillnaden är att det bevaras. Kryssrutornas hint och sidans
+  ingress säger att det hämtade sparas på bolagskortet.
+- **GDPR § 5 / § 11.8:** samma data som "Synka från Roaring" skriver, med
+  samma anonymisering (verklig huvudman utan namn/personnummer), samma RLS
+  på läsvägen (§ 21) och samma DPIA-förutsättningar (§ 11.3). Enskild firma
+  får aldrig ägarbild (writern/fabriken strippar). Inga nya fält, ingen
+  migration; riskklass n/a (ingen AI).

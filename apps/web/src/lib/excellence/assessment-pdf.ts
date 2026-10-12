@@ -13,6 +13,7 @@ import {
   type ScreeningVerdict
 } from '@platform/shared';
 import { formatRegistryCost } from '@/lib/integrations/company-registry/pricing';
+import { describeRegistryParts } from '@/lib/integrations/company-registry/parts';
 import type { ExcellenceAssessment } from './types';
 
 /**
@@ -364,6 +365,15 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
         a.cost.parts.length === 1 ? 'del' : 'delar'
       } = ${formatRegistryCost(a.cost)} (uppskattning — leverantörens faktura är facit).`,
       { size: 8.5, color: INK_SOFT, gap: 6 }
+    );
+  }
+  for (const c of a.savedToCards ?? []) {
+    drawLines(
+      ctx,
+      `Registerdata sparad på bolagskortet för ${c.name || 'bolaget'}: ${describeRegistryParts(c.parts)}${
+        c.errors.length > 0 ? ` (med fel: ${c.errors.join('; ')})` : ''
+      }.`,
+      { size: 8.5, color: INK_SOFT, gap: 2 }
     );
   }
   for (const w of a.lookupWarnings) drawLines(ctx, `! ${w}`, { size: 8.5, color: rgb01(BRAND.warning), gap: 2 });

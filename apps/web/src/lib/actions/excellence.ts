@@ -1,5 +1,6 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import {
@@ -21,15 +22,16 @@ import {
   loadPlatformStartupFacts,
   platformPart
 } from '@/lib/excellence/data.server';
-import type { ExcellenceAssessment } from '@/lib/excellence/types';
+import type { ExcellenceAssessment, ExcellenceSavedToCard } from '@/lib/excellence/types';
 import { storeExcellenceAssessmentPdf } from '@/lib/excellence/assessment-store.server';
 
 // "Bedömning excellens" (CLAUDE.md § 51). Kör regelträdet (art. 22 GBER /
 // de minimis / Vinnovas målgrupp) på ett bolag OCH dess koncern — antingen på
-// FÄRSKA registeruppslag hos en ansluten leverantör (Roaring), utan att
-// registerdata sparas på bolagskortet, eller på det som redan är sparat för
-// ett portföljbolag (inget leverantörsanrop). Själva bedömningen arkiveras
-// som PDF i den inloggades Filer, i bolagets mapp (§ 51.3). Anknutna/partnerföretag ur startup-bolagets ägarbild
+// FÄRSKA registeruppslag hos en ansluten leverantör (Roaring) — som då
+// också skrivs till bolagskortet för portföljbolag (§ 51.4), så datan går att
+// komma åt där utan ett nytt betalt uppslag — eller på det som redan är
+// sparat för ett portföljbolag (inget leverantörsanrop). Själva bedömningen
+// arkiveras som PDF i den inloggades Filer, i bolagets mapp (§ 51.3). Anknutna/partnerföretag ur startup-bolagets ägarbild
 // slås upp automatiskt (tak MAX_RELATED_COMPANIES) så grundförutsättningarna
 // prövas för hela koncernen — det var där Combly föll (Ewell AB från 2006).
 // Bedömningen är deterministisk (ingen AI) och är ett underlag för
@@ -109,14 +111,19 @@ export async function assessExcellenceAction(
   // För ett portföljbolag gäller bolagskortets org-nr, aldrig ett fritt fält.
   const orgNrRaw = platform ? platform.orgNr : String(formData.get('org_nr') || '');
   if (platform && !platform.orgNr) return { error: 'Bolaget saknar organisationsnummer på bolagskortet.' };
+  // Det hämtade skrivs till bolagskortet (samma skrivväg som "Synka från
+  // <leverantör>") så det går att komma åt där utan ett nytt betalt uppslag.
   const lookup = await runRegistryLookup(user, {
     providerSlug,
     orgNrRaw,
     formData,
-    auditLabel: 'bolagsuppslag för bedömning excellens'
+    auditLabel: 'bolagsuppslag för bedömning excellens',
+    persistToStartupId: platform?.id
   });
   if (!lookup.ok) return { error: lookup.error };
   const c = lookup.company;
+  const savedToCards: ExcellenceSavedToCard[] = [];
+  if (lookup.saved) savedToCards.push({ ...lookup.saved, name: platform?.name ?? c.name });
   const subject = groupFactsFromRegistry(c, platform?.name);
   const financialsByOrg: Record<string, ScreeningFinancialsYear[]> = { [subject.orgNr]: c.financials };
   const notes: ExcellenceAssessment['notes'] = [{ orgNr: subject.orgNr, name: subject.name, notes: c.notes }];
@@ -146,17 +153,21 @@ export async function assessExcellenceAction(
       lookupWarnings.push(`${label}: enskild firma — slås inte upp (org-nr = personnummer).`);
       continue;
     }
+    // Ett koncernbolag som själv är portföljbolag får också sitt kort uppdaterat.
+    const relatedStartupId = await findStartupByOrgNr(pb, user.tenant, ref.org_nr);
     const r = await runRegistryLookup(user, {
       providerSlug,
       orgNrRaw: ref.org_nr,
       parts,
-      auditLabel: 'koncernbolag för bedömning excellens'
+      auditLabel: 'koncernbolag för bedömning excellens',
+      persistToStartupId: relatedStartupId ?? undefined
     });
     if (!r.ok) {
       lookupWarnings.push(`${label}: ${r.error}`);
       continue;
     }
     companiesLookedUp++;
+    if (r.saved) savedToCards.push({ ...r.saved, name: ref.name ?? r.company.name });
     const facts = groupFactsFromRegistry(r.company, ref.name);
     related.push(facts);
     financialsByOrg[facts.orgNr] = r.company.financials;
@@ -182,9 +193,13 @@ export async function assessExcellenceAction(
       notes,
       lookupWarnings,
       cost: estimateRegistryCost(lookup.pricing, lookup.requestedParts, companiesLookedUp),
+      savedToCards,
       assessedAt: now.toISOString(),
       assessedBy: displayName(user)
     };
+  // Bolagskorten som fick registerdata ska visa den direkt (Ägarbild,
+  // Finansiell historik, grunddata) — inte efter en omladdning.
+  for (const card of savedToCards) revalidatePath(`/startups/${card.startupId}`);
   return { assessment: await storeExcellenceAssessmentPdf(pb, user, assessment) };
 }
 

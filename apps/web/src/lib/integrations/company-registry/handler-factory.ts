@@ -163,6 +163,7 @@ export function createCompanyRegistryHandler(spec: CompanyRegistrySpec): Company
   return {
     slug: spec.slug,
     kind: 'company_registry',
+    source: spec.source,
     residency: spec.residency,
     riskClass: spec.riskClass,
     complianceNote: spec.complianceNote,

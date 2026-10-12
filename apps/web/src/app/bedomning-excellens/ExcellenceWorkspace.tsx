@@ -21,7 +21,7 @@ import {
   RegistryPartsPicker,
   useRegistryPartSelection
 } from '@/components/integrations/RegistryPartsPicker';
-import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
+import { describeRegistryParts, type RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import { formatRegistryCost, type RegistryPricing } from '@/lib/integrations/company-registry/pricing';
 
 interface StartupOption {
@@ -168,7 +168,7 @@ function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; ca
 }
 
 // "Bedömning excellens" (CLAUDE.md § 51): välj bolag → hämta färskt från
-// bolagsregistret för hela koncernen (inget sparas) eller bedöm det som redan
+// bolagsregistret för hela koncernen (det hämtade skrivs till bolagskortet) eller bedöm det som redan
 // är sparat → ett underlag i samma ordning som referensbedömningen
 // "Bedömning Vinnova Combly".
 export function ExcellenceWorkspace({ startups, registries, canLookup, initialStartupId }: Props) {
@@ -198,8 +198,10 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
       <section className="rounded-2xl border border-default bg-surface px-5 py-5">
         <h2 className="text-[15px] font-semibold text-foreground">Välj bolag</h2>
         <p className="mt-1 text-[12.5px] text-foreground-muted">
-          Hämta färskt från bolagsregistret (inget sparas) eller bedöm det som redan är sparat för ett
-          portföljbolag. Anknutna och partnerföretag i ägarbilden slås upp automatiskt så att
+          Hämta färskt från bolagsregistret eller bedöm det som redan är sparat för ett portföljbolag.
+          Det som hämtas för ett portföljbolag sparas på bolagskortet (grunddata, bokslut, ägarbild —
+          samma skrivväg som &quot;Synka från leverantören&quot;), så nästa bedömning kan göras på sparade
+          data utan nytt uppslag. Anknutna och partnerföretag i ägarbilden slås upp automatiskt så att
           grundförutsättningarna prövas för hela koncernen. Grundarägande, registrerat de minimis-stöd,
           IRL och excellensflaggan tas från plattformen när bolaget finns här.
         </p>
@@ -283,7 +285,7 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
                   onSetAll={selection.setAll}
                   endpoints={provider.partEndpoints}
                   providerName={provider.name}
-                  hint="Bara de valda API:erna anropas — för startup-bolaget OCH varje anknutet/partnerbolag — och varje anrop debiteras. Inget sparas. Koncernstruktur krävs för att hitta anknutna bolag; grunddata för deras ålder; bokslut för tröskelvärdet."
+                  hint="Bara de valda API:erna anropas — för startup-bolaget OCH varje anknutet/partnerbolag — och varje anrop debiteras. Det hämtade sparas på bolagskortet för bolag som finns i plattformen. Koncernstruktur krävs för att hitta anknutna bolag; grunddata för deras ålder; bokslut för tröskelvärdet."
                   disabled={pending}
                   pricing={provider.pricing}
                   companies={1}
@@ -411,7 +413,15 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
     <section className="space-y-6">
       <header className="border-b border-default pb-3">
         <p className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
-          {assessment.mode === 'register' ? `Färskt från ${assessment.providerName} · registerdata sparas inte på bolagskortet` : 'Sparade data i plattformen'}
+          {assessment.mode === 'register'
+            ? `Färskt från ${assessment.providerName}${
+                assessment.savedToCards && assessment.savedToCards.length > 0
+                  ? ' · sparat på bolagskortet'
+                  : assessment.subject.startupId
+                    ? ' · kunde inte sparas på bolagskortet'
+                    : ' · bolaget finns inte i plattformen (inget bolagskort att spara på)'
+              }`
+            : 'Sparade data i plattformen'}
           {' · '}
           {new Date(assessment.assessedAt).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' })}
         </p>
@@ -444,6 +454,30 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
         {/* Var bedömningen ligger (§ 51.3): PDF i den inloggades Filer, i
             bolagets mapp när det är ett portföljbolag. Fail-soft: ett
             lagringsfel visas, bedömningen visas ändå. */}
+        {/* Registerdata på bolagskortet (§ 51.4): vad som skrevs var —
+            samma skrivväg som "Synka från <leverantör>". Fel visas per bolag. */}
+        {assessment.savedToCards && assessment.savedToCards.length > 0 && (
+          <ul className="mt-2 space-y-0.5 text-[12.5px] text-foreground-muted">
+            {assessment.savedToCards.map((c) => (
+              <li key={c.startupId}>
+                {c.errors.length === 0 ? 'Sparat på bolagskortet för ' : 'Delvis sparat på bolagskortet för '}
+                <Link href={`/startups/${c.startupId}`} className="font-semibold text-link hover:underline">
+                  {c.name || 'bolaget'}
+                </Link>
+                {c.parts.length > 0 ? `: ${describeRegistryParts(c.parts)}` : ''}
+                {c.financialsUpserted > 0 || c.ownershipWritten > 0 ? (
+                  <span className="mx-tnum">
+                    {' '}
+                    ({c.financialsUpserted} årsrader, {c.ownershipWritten} ägarrader)
+                  </span>
+                ) : null}
+                {c.errors.length > 0 && (
+                  <span className={`ml-2 rounded-full px-2 py-0.5 text-[11px] font-semibold ${WARN_TONE}`}>{c.errors.join('; ')}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
         {assessment.file ? (
           <p className="mt-2 text-[12.5px] text-foreground-muted">
             Sparad som PDF i{' '}
