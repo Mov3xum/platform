@@ -14,7 +14,7 @@ import {
 } from '@platform/shared';
 import { runRegistryLookup } from '@/lib/integrations/company-registry/lookup.server';
 import { isPersonalOrgNr } from '@/lib/integrations/company-registry/orgnr';
-import { estimateRegistryCost } from '@/lib/integrations/company-registry/pricing';
+import { estimateRegistryCost, sumRegistryCosts } from '@/lib/integrations/company-registry/pricing';
 import {
   attachPlatformDeMinimis,
   findStartupByOrgNr,
@@ -133,6 +133,7 @@ async function finishAssessment(
     notes: ctx.notes,
     lookupWarnings: ctx.lookupWarnings,
     cost: ctx.cost,
+    savedToCards: ctx.savedToCards,
     assessedAt: context.assessedAt,
     assessedBy: displayName(user)
   };
@@ -215,7 +216,8 @@ export async function assessExcellenceAction(
     providerSlug,
     orgNrRaw,
     formData,
-    auditLabel: 'bolagsuppslag för bedömning excellens'
+    auditLabel: 'bolagsuppslag för bedömning excellens',
+    persistToStartupId: platform?.id
   });
   if (!lookup.ok) return { error: lookup.error };
   const c = lookup.company;
@@ -223,9 +225,9 @@ export async function assessExcellenceAction(
   const financialsByOrg: Record<string, ScreeningFinancialsYear[]> = { [subject.orgNr]: c.financials };
   const notes: AssessmentContext['notes'] = [{ orgNr: subject.orgNr, name: subject.name, notes: c.notes }];
   const lookupWarnings: string[] = [];
-  // Kostnad: varje uppslag (startup + varje koncernbolag) är egna debiterade
-  // anrop med samma valda delar — summeras till en rad i resultatet.
-  let companiesLookedUp = 1;
+  const costEstimates = [lookup.cost];
+  const savedToCards: NonNullable<AssessmentContext['savedToCards']> = [];
+  if (lookup.saved && platform) savedToCards.push({ ...lookup.saved, name: platform.name });
 
   // Koncernen: slå upp anknutna/partner-/oklara bolag med samma datadelar som
   // valdes för startup-bolaget (ägardelarna behövs för deras egen ägarbild,
@@ -247,17 +249,22 @@ export async function assessExcellenceAction(
       lookupWarnings.push(`${label}: enskild firma — slås inte upp (org-nr = personnummer).`);
       continue;
     }
+    const portfolioStartupId = await findStartupByOrgNr(pb, user.tenant, ref.org_nr);
     const r = await runRegistryLookup(user, {
       providerSlug,
       orgNrRaw: ref.org_nr,
       parts: lookup.requestedParts,
-      auditLabel: 'koncernbolag för bedömning excellens'
+      auditLabel: 'koncernbolag för bedömning excellens',
+      persistToStartupId: portfolioStartupId ?? undefined
     });
     if (!r.ok) {
       lookupWarnings.push(`${label}: ${r.error}`);
       continue;
     }
-    companiesLookedUp++;
+    costEstimates.push(r.cost);
+    if (r.saved) {
+      savedToCards.push({ ...r.saved, name: ref.name });
+    }
     // Ett anknutet bolag som själv är portföljbolag får sitt registrerade
     // de minimis-stöd ur plattformen (annars intyg via Manuella svar).
     const f = await attachPlatformDeMinimis(pb, user.tenant, groupFactsFromRegistry(r.company, ref.name));
@@ -291,7 +298,8 @@ export async function assessExcellenceAction(
     financialsByOrg,
     notes,
     lookupWarnings,
-    cost: estimateRegistryCost(lookup.pricing, lookup.requestedParts, companiesLookedUp),
+    cost: sumRegistryCosts(costEstimates),
+    savedToCards,
     assessedAt: now.toISOString()
   };
   return { assessment: await finishAssessment(pb, user, ctx, facts, { saveFacts: false }) };

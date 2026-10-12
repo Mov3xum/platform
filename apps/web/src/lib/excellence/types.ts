@@ -5,6 +5,7 @@ import type {
   ScreeningManualFacts
 } from '@platform/shared';
 import type { RegistryCostEstimate } from '@/lib/integrations/company-registry/pricing';
+import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
 
 // Resultatet av "Bedömning excellens" (CLAUDE.md § 51). Ren typmodul (ingen
 // 'use server') så PDF-byggaren, server-actionen och klientvyn delar samma
@@ -29,6 +30,15 @@ export interface ExcellenceAssessmentFile {
   href: string;
   /** Bolagsmappen i Filer (bara när bedömningen gällde ett portföljbolag). */
   startupId?: string;
+}
+
+export interface ExcellenceAssessmentSavedCard {
+  startupId: string;
+  name?: string;
+  parts: RegistryPartId[];
+  financialsUpserted: number;
+  ownershipWritten: number;
+  errors: string[];
 }
 
 export interface ExcellenceAssessment {
@@ -58,6 +68,8 @@ export interface ExcellenceAssessment {
   lookupWarnings: string[];
   /** Registerläget: uppskattad kostnad för ALLA uppslag i bedömningen (startup + koncernbolag), § 11.8. */
   cost?: RegistryCostEstimate;
+  /** Registerdata som skrevs till portföljbolagens kort under uppslagen (§ 51.4). */
+  savedToCards?: ExcellenceAssessmentSavedCard[];
   assessedAt: string;
   /** Vem som körde bedömningen (visningsnamn — skrivs i PDF:en). */
   assessedBy?: string;
