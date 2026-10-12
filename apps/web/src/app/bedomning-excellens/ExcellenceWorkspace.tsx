@@ -411,7 +411,7 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
     <section className="space-y-6">
       <header className="border-b border-default pb-3">
         <p className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
-          {assessment.mode === 'register' ? `Färskt från ${assessment.providerName} · inget sparat` : 'Sparade data i plattformen'}
+          {assessment.mode === 'register' ? `Färskt från ${assessment.providerName} · registerdata sparas inte på bolagskortet` : 'Sparade data i plattformen'}
           {' · '}
           {new Date(assessment.assessedAt).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' })}
         </p>
@@ -425,12 +425,40 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
               {subject.industri ? ` · ${subject.industri}` : ''}
             </p>
           </div>
-          {subject.startupId && (
-            <Link href={`/startups/${subject.startupId}`} className="text-[12.5px] font-semibold text-link hover:underline">
-              Öppna bolagskortet →
-            </Link>
-          )}
+          <div className="flex flex-wrap items-center gap-3">
+            {assessment.file && (
+              <a
+                href={assessment.file.href}
+                className="inline-flex items-center rounded-full bg-brand px-3.5 py-1.5 text-[12.5px] font-semibold text-brand-foreground hover:bg-brand-hover"
+              >
+                Ladda ned PDF
+              </a>
+            )}
+            {subject.startupId && (
+              <Link href={`/startups/${subject.startupId}`} className="text-[12.5px] font-semibold text-link hover:underline">
+                Öppna bolagskortet →
+              </Link>
+            )}
+          </div>
         </div>
+        {/* Var bedömningen ligger (§ 51.3): PDF i den inloggades Filer, i
+            bolagets mapp när det är ett portföljbolag. Fail-soft: ett
+            lagringsfel visas, bedömningen visas ändå. */}
+        {assessment.file ? (
+          <p className="mt-2 text-[12.5px] text-foreground-muted">
+            Sparad som PDF i{' '}
+            <Link
+              href={assessment.file.startupId ? `/filer?vy=bolag&bolag=${assessment.file.startupId}` : '/filer'}
+              className="font-semibold text-link hover:underline"
+            >
+              Filer{assessment.file.startupId ? ` → Bolag → ${subjectName}` : ' → Rapporter & uppföljning'}
+            </Link>{' '}
+            (<span className="mx-tnum">{assessment.file.filename}</span>)
+            {!assessment.file.startupId && ' — bolaget finns inte i plattformen, så filen ligger utan bolagsmapp.'}
+          </p>
+        ) : assessment.fileError ? (
+          <p className={`mt-2 inline-block rounded-xl px-3 py-1.5 text-[12.5px] ${WARN_TONE}`}>{assessment.fileError}</p>
+        ) : null}
       </header>
 
       {assessment.cost && (

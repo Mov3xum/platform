@@ -6,7 +6,6 @@ import {
   MAX_RELATED_COMPANIES,
   deriveRelatedCompanies,
   screenExcellence,
-  type ExcellenceScreeningResult,
   type GroupCompanyFacts,
   type ScreeningFinancialsYear,
   type ScreeningFounderRow
@@ -14,7 +13,7 @@ import {
 import { runRegistryLookup } from '@/lib/integrations/company-registry/lookup.server';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import { isPersonalOrgNr } from '@/lib/integrations/company-registry/orgnr';
-import { estimateRegistryCost, type RegistryCostEstimate } from '@/lib/integrations/company-registry/pricing';
+import { estimateRegistryCost } from '@/lib/integrations/company-registry/pricing';
 import {
   findStartupByOrgNr,
   groupFactsFromRegistry,
@@ -22,42 +21,21 @@ import {
   loadPlatformStartupFacts,
   platformPart
 } from '@/lib/excellence/data.server';
+import type { ExcellenceAssessment } from '@/lib/excellence/types';
+import { storeExcellenceAssessmentPdf } from '@/lib/excellence/assessment-store.server';
 
 // "Bedömning excellens" (CLAUDE.md § 51). Kör regelträdet (art. 22 GBER /
 // de minimis / Vinnovas målgrupp) på ett bolag OCH dess koncern — antingen på
-// FÄRSKA registeruppslag hos en ansluten leverantör (Roaring), utan att något
-// sparas, eller på det som redan är sparat för ett portföljbolag (inget
-// leverantörsanrop). Anknutna/partnerföretag ur startup-bolagets ägarbild
+// FÄRSKA registeruppslag hos en ansluten leverantör (Roaring), utan att
+// registerdata sparas på bolagskortet, eller på det som redan är sparat för
+// ett portföljbolag (inget leverantörsanrop). Själva bedömningen arkiveras
+// som PDF i den inloggades Filer, i bolagets mapp (§ 51.3). Anknutna/partnerföretag ur startup-bolagets ägarbild
 // slås upp automatiskt (tak MAX_RELATED_COMPANIES) så grundförutsättningarna
 // prövas för hela koncernen — det var där Combly föll (Ewell AB från 2006).
 // Bedömningen är deterministisk (ingen AI) och är ett underlag för
 // controllern — den skriver aldrig statsstödsgrund eller excellensflagga.
 
-export interface ExcellenceAssessment {
-  mode: 'register' | 'saved';
-  providerName?: string;
-  subject: {
-    name?: string;
-    orgNr: string;
-    startupId?: string;
-    bolagsform?: string;
-    registeredAt?: string;
-    kommun?: string;
-    industri?: string;
-    bolagStatus?: string;
-  };
-  result: ExcellenceScreeningResult;
-  /** Bokslut per bolag i koncernen (org-nr → årsrader). */
-  financialsByOrg: Record<string, ScreeningFinancialsYear[]>;
-  founders: ScreeningFounderRow[] | null;
-  /** PII-fria noteringar från tolkningen, per bolag. */
-  notes: Array<{ orgNr: string; name?: string; notes: string[] }>;
-  /** Uppslag som inte kunde göras (anknutna bolag) — PII-fritt. */
-  lookupWarnings: string[];
-  /** Registerläget: uppskattad kostnad för ALLA uppslag i bedömningen (startup + koncernbolag), § 11.8. */
-  cost?: RegistryCostEstimate;
-  assessedAt: string;
-}
+export type { ExcellenceAssessment, ExcellenceAssessmentFile } from '@/lib/excellence/types';
 
 export type ExcellenceAssessmentState = {
   error?: string;
@@ -99,8 +77,7 @@ export async function assessExcellenceAction(
         financialsByOrg[facts.orgNr] = facts.financials;
       }
     }
-    return {
-      assessment: {
+    const assessment: ExcellenceAssessment = {
         mode: 'saved',
         subject: {
           name: platform.name,
@@ -117,9 +94,10 @@ export async function assessExcellenceAction(
         founders: platform.founders,
         notes: [],
         lookupWarnings: [],
-        assessedAt: now.toISOString()
-      }
-    };
+        assessedAt: now.toISOString(),
+        assessedBy: displayName(user)
+      };
+    return { assessment: await storeExcellenceAssessmentPdf(pb, user, assessment) };
   }
 
   // Färska uppslag: leverantörerna debiterar per anrop — samma krets som
@@ -185,8 +163,7 @@ export async function assessExcellenceAction(
     if (r.company.notes.length > 0) notes.push({ orgNr: facts.orgNr, name: facts.name, notes: r.company.notes });
   }
 
-  return {
-    assessment: {
+  const assessment: ExcellenceAssessment = {
       mode: 'register',
       providerName: providerSlug.charAt(0).toUpperCase() + providerSlug.slice(1),
       subject: {
@@ -205,7 +182,14 @@ export async function assessExcellenceAction(
       notes,
       lookupWarnings,
       cost: estimateRegistryCost(lookup.pricing, lookup.requestedParts, companiesLookedUp),
-      assessedAt: now.toISOString()
-    }
-  };
+      assessedAt: now.toISOString(),
+      assessedBy: displayName(user)
+    };
+  return { assessment: await storeExcellenceAssessmentPdf(pb, user, assessment) };
+}
+
+/** Visningsnamn för PDF:en — aldrig e-post (SessionUser.name faller tillbaka på e-post). */
+function displayName(user: { name?: string }): string | undefined {
+  const n = (user.name || '').trim();
+  return n && !n.includes('@') ? n : undefined;
 }

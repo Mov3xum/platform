@@ -8249,7 +8249,11 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 | `apps/web/src/lib/integrations/company-registry/pricing.ts` (+ `.test.ts`) / `pricing.server.ts` | Kostnad per anrop (credits + kr/credit, § 11.8): ren uppskattning + formatering, IO-läsning av `tenant_integrations.pricing` + env |
 | `apps/web/src/lib/excellence/data.server.ts` | Läsvägar med användarens token (RLS § 21): portföljbolag, sparad ägarbild/bokslut/grundare/de minimis/IRL, anslutna providers, `findStartupByOrgNr` (anknutet bolag som själv är portföljbolag) |
 | `apps/web/src/lib/actions/excellence.ts` | `assessExcellenceAction` — modulgrind, färska uppslag bara admin/incubator_lead, koncernuppslag (tak `MAX_RELATED_COMPANIES` = 6), kör motorn |
-| `apps/web/src/app/bedomning-excellens/{page,ExcellenceWorkspace}.tsx` | Sidan + Combly-strukturerad vy |
+| `apps/web/src/app/bedomning-excellens/{page,ExcellenceWorkspace}.tsx` | Sidan + Combly-strukturerad vy; "Ladda ned PDF" + länk till bolagsmappen i Filer |
+| `apps/web/src/lib/excellence/types.ts` | `ExcellenceAssessment` (ren typmodul — delas av action, PDF och vy) |
+| `apps/web/src/lib/excellence/assessment-pdf.ts` | `buildExcellenceAssessmentPdf` — pdf-lib, samma avsnittsordning som vyn (§ 51.3) |
+| `apps/web/src/lib/excellence/assessment-file.ts` (+ `.test.ts`) | REN: filnamn (`Bedömning excellens – <bolag> – <svensk tid>.pdf`), ämne i Filer |
+| `apps/web/src/lib/excellence/assessment-store.server.ts` | `storeExcellenceAssessmentPdf` — sparar PDF:en i `user_files` (bolagets mapp) via `createUserFileRecord`, fail-soft |
 | `backend/pocketbase-schema/migrations/1700000187_backfill_enabled_modules_bedomning_excellens.js` | Backfill av `users.enabled_modules` (§ 36.3-läxan) |
 
 ### 51.2 Regler (bindande)
@@ -8302,7 +8306,8 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
   § 11.8); grundarnamn + andel visas ur `startup_team_members` ENBART i
   denna staff-vy (samma data som bolagskortet) och når aldrig AI-kontexten
   (§ 9.3 oförändrad). Audit-raderna (`activities`, `integration_sync`) är
-  PII-fria (leverantör + antal, aldrig org-nr). Inget persisteras.
+  PII-fria (leverantör + antal, aldrig org-nr). Registerdata persisteras
+  inte på bolagskortet; själva bedömningen arkiveras som PDF (§ 51.3).
 - **RBAC/RLS:** modulgrind `canAccessModuleForUser` + roll i actionen;
   färska uppslag kräver admin/incubator_lead (coach bedömer sparade data);
   alla läsningar via användarens token. Ingen ny kollektion, inga nya fält,
@@ -8311,3 +8316,45 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
   60/40 enligt PPT:n — Combly-dokumentet anger 50/30 resp. 80/40) skrivs
   ut i punkten "Grundardrivet" som text; den avgörs manuellt tills Vinnovas
   metodbeskrivning låsts (docs/ai/vinnova-statsstod-screening-agent.md § 2.1).
+
+### 51.3 Var en bedömning lagras — PDF i Filer, i bolagets mapp (2026-10-12)
+
+**Incident:** en bedömning (som kostar credits hos Roaring) fanns bara på
+skärmen — stängde controllern fliken var den borta, och det fanns inget att
+dela eller bifoga. Nu arkiveras **varje körning** automatiskt:
+- `assessExcellenceAction` renderar bedömningen som PDF
+  (`buildExcellenceAssessmentPdf`: pdf-lib + Sora/Nunito, Combly-ordningen:
+  review-rad → steg 1 med grundförutsättningar per bolag, ägarbild med
+  källa, fristående, tröskelvärden, de minimis, GBER-bedömning → steg 2 med
+  grundarteam, Vinnova-punkter, IRL → steg 3 → saknat underlag → bilaga
+  med bokslut och leverantörens noteringar; kostnaden för uppslagen och
+  vem som utförde bedömningen står i huvudet) och sparar den via den
+  delade `createUserFileRecord` (§ 24.4) i **den inloggades Filer**
+  (`user_files`): `doc_kind = pdf`, `source = upload` (deterministisk
+  rendering — ingen AI, därför ingen "genererad"-märkning och ingen
+  AI-klassning), `topic = rapporter_uppfoljning`, `topic_status =
+  confirmed` och **`startup` = bolaget** när bedömningen gällde ett
+  portföljbolag → filen ligger under **Filer → Bolag → <bolag>**
+  (`/filer?vy=bolag&bolag=<id>` är nu en djuplänk dit). Ett valfritt org-nr
+  som inte finns i plattformen sparas utan bolagsmapp (sägs i vyn).
+  Resultatvyn har **"Ladda ned PDF"** (`/api/files/<id>`, samma-origin-proxy
+  § 17) och raden "Sparad som PDF i Filer → Bolag → …" med filnamnet.
+- **Fail-soft:** kan PDF:en inte renderas eller sparas visas bedömningen
+  ändå med `fileError` (orange banner) — en betald körning försvinner
+  aldrig för att arkiveringen föll. Indexering för `search_my_files` (§ 27)
+  görs best-effort efter sparandet, så chatten kan svara på "vad kom vi
+  fram till om Comblys koncern?".
+- **Åtkomst (§ 17.2 / § 21):** `user_files` är **strikt ägaren-bara** —
+  PDF:en syns för den som körde bedömningen, inte för kollegor eller på
+  bolagskortet. Det är en medveten avgränsning: ett delat bolagsdokument
+  (synligt för all staff på bolagskortet) kräver en egen kollektion med
+  staff/observer-RLS och är inte byggt. Dela genom att ladda ned PDF:en.
+  `owner`/`tenant` sätts server-side från den inloggade; nedladdningsproxyn
+  verifierar ägare + tenant.
+- **GDPR § 5:** PDF:en innehåller exakt det vyn redan visar — fysiska
+  personer i ägarbilden utan namn, grundarnamn + andel ur
+  `startup_team_members` (samma staff-krets som bolagskortet), aldrig
+  e-post (`assessedBy` utelämnas när visningsnamnet faller tillbaka på
+  e-post). `user_files` är fortsatt denylistad för `query_collection`
+  (§ 27); loggar bär status, aldrig filnamn (bolagsnamn). Ingen ny
+  kollektion, inga nya fält, ingen migration; riskklass n/a (ingen AI).
