@@ -14,6 +14,7 @@ import {
 import { runRegistryLookup } from '@/lib/integrations/company-registry/lookup.server';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import { isPersonalOrgNr } from '@/lib/integrations/company-registry/orgnr';
+import { estimateRegistryCost, type RegistryCostEstimate } from '@/lib/integrations/company-registry/pricing';
 import {
   findStartupByOrgNr,
   groupFactsFromRegistry,
@@ -53,6 +54,8 @@ export interface ExcellenceAssessment {
   notes: Array<{ orgNr: string; name?: string; notes: string[] }>;
   /** Uppslag som inte kunde göras (anknutna bolag) — PII-fritt. */
   lookupWarnings: string[];
+  /** Registerläget: uppskattad kostnad för ALLA uppslag i bedömningen (startup + koncernbolag), § 11.8. */
+  cost?: RegistryCostEstimate;
   assessedAt: string;
 }
 
@@ -140,6 +143,9 @@ export async function assessExcellenceAction(
   const financialsByOrg: Record<string, ScreeningFinancialsYear[]> = { [subject.orgNr]: c.financials };
   const notes: ExcellenceAssessment['notes'] = [{ orgNr: subject.orgNr, name: subject.name, notes: c.notes }];
   const lookupWarnings: string[] = [];
+  // Kostnad: varje uppslag (startup + varje koncernbolag) är egna debiterade
+  // anrop med samma valda delar — summeras till en rad i resultatet.
+  let companiesLookedUp = 1;
 
   // Koncernen: slå upp anknutna/partner-/oklara bolag med samma datadelar som
   // valdes för startup-bolaget (ägardelarna behövs för deras egen ägarbild,
@@ -172,6 +178,7 @@ export async function assessExcellenceAction(
       lookupWarnings.push(`${label}: ${r.error}`);
       continue;
     }
+    companiesLookedUp++;
     const facts = groupFactsFromRegistry(r.company, ref.name);
     related.push(facts);
     financialsByOrg[facts.orgNr] = r.company.financials;
@@ -197,6 +204,7 @@ export async function assessExcellenceAction(
       founders: platform ? platform.founders : null,
       notes,
       lookupWarnings,
+      cost: estimateRegistryCost(lookup.pricing, lookup.requestedParts, companiesLookedUp),
       assessedAt: now.toISOString()
     }
   };

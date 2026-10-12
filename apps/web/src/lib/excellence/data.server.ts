@@ -17,6 +17,8 @@ import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { getHandler, listCompanyRegistrySlugs } from '@/lib/integrations/registry';
 import { isPersonalOrgNr, normalizeOrgNr } from '@/lib/integrations/company-registry/orgnr';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
+import { resolveRegistryPricing } from '@/lib/integrations/company-registry/pricing.server';
+import type { RegistryPricing } from '@/lib/integrations/company-registry/pricing';
 import type { RegistryCompany } from '@/lib/integrations/company-registry/types';
 
 // Läsvägar för "Bedömning excellens" (CLAUDE.md § 51). Allt läses med
@@ -35,6 +37,8 @@ export interface ConnectedRegistry {
   name: string;
   parts: RegistryPartId[];
   partEndpoints?: Partial<Record<RegistryPartId, string>>;
+  /** Prislista (§ 11.8) — kostnaden visas innan uppslagen görs. */
+  pricing: RegistryPricing;
 }
 
 export interface PlatformStartupFacts {
@@ -104,19 +108,25 @@ export async function listConnectedRegistries(pb: PocketBase, tenantId: string):
     const registrySlugs = new Set(listCompanyRegistrySlugs());
     const res = await pb
       .collection('tenant_integrations')
-      .getList<{ expand?: { provider?: { slug: string; name: string } } }>(1, 50, {
+      .getList<{ pricing?: unknown; expand?: { provider?: { slug: string; name: string } } }>(1, 50, {
         filter: pb.filter('tenant = {:tenant} && status = "connected"', { tenant: tenantId }),
         expand: 'provider',
-        fields: 'id,expand.provider.slug,expand.provider.name'
+        fields: 'id,pricing,expand.provider.slug,expand.provider.name'
       });
     return res.items
-      .map((r) => r.expand?.provider)
-      .filter((p): p is { slug: string; name: string } => !!p && registrySlugs.has(p.slug))
-      .map((p): ConnectedRegistry | null => {
+      .map((r) => ({ provider: r.expand?.provider, pricing: r.pricing }))
+      .filter((x): x is { provider: { slug: string; name: string }; pricing: unknown } => !!x.provider && registrySlugs.has(x.provider.slug))
+      .map(({ provider: p, pricing }): ConnectedRegistry | null => {
         const h = getHandler(p.slug);
         const registry = h?.kind === 'company_registry' && h.lookup ? h : undefined;
         return registry
-          ? { slug: p.slug, name: p.name, parts: registry.parts, partEndpoints: registry.partEndpoints?.() }
+          ? {
+              slug: p.slug,
+              name: p.name,
+              parts: registry.parts,
+              partEndpoints: registry.partEndpoints?.(),
+              pricing: resolveRegistryPricing(p.slug, pricing)
+            }
           : null;
       })
       .filter((p): p is ConnectedRegistry => p !== null)

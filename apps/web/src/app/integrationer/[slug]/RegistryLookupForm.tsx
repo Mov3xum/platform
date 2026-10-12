@@ -13,12 +13,16 @@ import {
   REGISTRY_PART_META,
   type RegistryPartId
 } from '@/lib/integrations/company-registry/parts';
+import { formatRegistryCost, type RegistryPricing } from '@/lib/integrations/company-registry/pricing';
 
 interface Props {
   providerSlug: string;
   providerName: string;
   registryParts: RegistryPartId[];
   partEndpoints?: Partial<Record<RegistryPartId, string>>;
+  /** Prislista (§ 11.8) — kostnaden visas innan uppslaget görs. */
+  pricing?: RegistryPricing;
+  pricingHref?: string;
 }
 
 const initialState: RegistryLookupState = {};
@@ -51,7 +55,7 @@ const CONTROL_LABEL: Record<string, string> = {
 // bolag UTAN att skriva något. Syftet är att verifiera fältmappningen mot en
 // riktig leverantörsrespons innan portföljen synkas — därför visas även
 // normaliserarens PII-fria noteringar om vad som saknades.
-export function RegistryLookupForm({ providerSlug, providerName, registryParts, partEndpoints }: Props) {
+export function RegistryLookupForm({ providerSlug, providerName, registryParts, partEndpoints, pricing, pricingHref }: Props) {
   const [state, formAction, pending] = useActionState(previewRegistryLookupAction, initialState);
   const c = state.company;
   const showPicker = registryParts.length > 1;
@@ -83,6 +87,10 @@ export function RegistryLookupForm({ providerSlug, providerName, registryParts, 
             providerName={providerName}
             hint="Bara de valda API:erna anropas. Inget sparas."
             disabled={pending}
+            pricing={pricing}
+            companies={1}
+            costContext="Ett bolag — det org-nr du anger."
+            pricingHref={pricingHref}
           />
         )}
         <div className="flex flex-wrap items-end gap-2">
@@ -109,6 +117,14 @@ export function RegistryLookupForm({ providerSlug, providerName, registryParts, 
       {state.error && (
         <p className="mt-3 rounded-xl bg-movexum-pastell-orange px-3 py-2 text-xs text-movexum-morkorange dark:bg-movexum-morkorange/30 dark:text-movexum-pastell-orange">
           {state.error}
+        </p>
+      )}
+
+      {c && state.cost && (
+        <p className="mt-3 rounded-xl border border-default bg-canvas-subtle px-3 py-2 text-[12px] text-foreground mx-tnum">
+          <span className="font-semibold">Detta uppslag kostade:</span> {state.cost.parts.length}{' '}
+          {state.cost.parts.length === 1 ? 'del' : 'delar'} = {formatRegistryCost(state.cost)} (uppskattning enligt angivna
+          priser — {providerName}s faktura är facit).
         </p>
       )}
 

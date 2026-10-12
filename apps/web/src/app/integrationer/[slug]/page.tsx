@@ -12,6 +12,8 @@ import { ConnectForm } from './ConnectForm';
 import { SyncButton } from './SyncButton';
 import { DisconnectForm } from './DisconnectForm';
 import { RegistryLookupForm } from './RegistryLookupForm';
+import { RegistryPricingForm } from '@/components/integrations/RegistryPricingForm';
+import { resolveRegistryPricing } from '@/lib/integrations/company-registry/pricing.server';
 
 interface ProviderRecord {
   id: string;
@@ -33,6 +35,8 @@ interface TenantIntegrationRecord {
   last_sync_status?: 'success' | 'failed' | 'partial';
   last_sync_summary?: string;
   connected_at?: string;
+  /** Kostnad per anrop (migration 1700000188, § 11.8). */
+  pricing?: unknown;
 }
 
 interface SyncRunRecord {
@@ -132,6 +136,9 @@ export default async function IntegrationDetailPage({
   const registryHandler = handler?.kind === 'company_registry' ? handler : undefined;
   // Endpoint per datadel (env-medveten) — visas vid kryssrutorna (§ 11.8).
   const registryPartEndpoints = registryHandler?.partEndpoints?.();
+  // Prislista: tenantens angivna värden ovanpå env-defaulten (§ 11.8).
+  const registryPricing = isRegistry ? resolveRegistryPricing(slug, tenantIntegration?.pricing) : null;
+  const pricingHref = `/integrationer/${slug}#kostnad`;
 
   let syncRuns: SyncRunRecord[] = [];
   let recentRecords: IntegrationRecordRow[] = [];
@@ -318,6 +325,9 @@ export default async function IntegrationDetailPage({
                 providerName={provider.name}
                 registryParts={registryHandler?.parts}
                 partEndpoints={registryPartEndpoints}
+                pricing={registryPricing ?? undefined}
+                companies={registryStats?.startupsWithOrgNr}
+                pricingHref={pricingHref}
               />
               {isAdmin && (
                 <DisconnectForm
@@ -376,12 +386,25 @@ export default async function IntegrationDetailPage({
           </section>
         )}
 
+        {isConnected && isRegistry && isStaff && registryHandler && registryPricing && (
+          <RegistryPricingForm
+            tenantIntegrationId={tenantIntegration!.id}
+            providerSlug={slug}
+            providerName={provider.name}
+            parts={registryHandler.parts}
+            pricing={registryPricing}
+            portfolioCompanies={registryStats?.startupsWithOrgNr}
+          />
+        )}
+
         {isConnected && isRegistry && isStaff && handler?.kind === 'company_registry' && handler.lookup && (
           <RegistryLookupForm
             providerSlug={slug}
             providerName={provider.name}
             registryParts={registryHandler?.parts ?? []}
             partEndpoints={registryPartEndpoints}
+            pricing={registryPricing ?? undefined}
+            pricingHref={pricingHref}
           />
         )}
 

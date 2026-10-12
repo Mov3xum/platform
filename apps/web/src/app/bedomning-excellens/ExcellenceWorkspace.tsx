@@ -9,7 +9,8 @@ import {
   type ScreeningCheck,
   type ScreeningOwnershipEntry,
   type ScreeningSource,
-  type ScreeningVerdict
+  type ScreeningVerdict,
+  MAX_RELATED_COMPANIES
 } from '@platform/shared';
 import {
   assessExcellenceAction,
@@ -21,6 +22,7 @@ import {
   useRegistryPartSelection
 } from '@/components/integrations/RegistryPartsPicker';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
+import { formatRegistryCost, type RegistryPricing } from '@/lib/integrations/company-registry/pricing';
 
 interface StartupOption {
   id: string;
@@ -33,6 +35,8 @@ interface RegistryOption {
   name: string;
   parts: RegistryPartId[];
   partEndpoints?: Partial<Record<RegistryPartId, string>>;
+  /** Prislista (§ 11.8) — kostnaden visas innan uppslagen görs. */
+  pricing: RegistryPricing;
 }
 
 interface Props {
@@ -281,6 +285,10 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
                   providerName={provider.name}
                   hint="Bara de valda API:erna anropas — för startup-bolaget OCH varje anknutet/partnerbolag — och varje anrop debiteras. Inget sparas. Koncernstruktur krävs för att hitta anknutna bolag; grunddata för deras ålder; bokslut för tröskelvärdet."
                   disabled={pending}
+                  pricing={provider.pricing}
+                  companies={1}
+                  costContext={`Per bolag. Varje anknutet/partnerbolag i ägarbilden slås upp med samma delar (högst ${MAX_RELATED_COMPANIES} till) — kostnaden kan bli upp till ${1 + MAX_RELATED_COMPANIES} × detta. Den faktiska summan visas i resultatet.`}
+                  pricingHref={`/integrationer/${provider.slug}#kostnad`}
                 />
               )}
             </>
@@ -424,6 +432,23 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
           )}
         </div>
       </header>
+
+      {assessment.cost && (
+        <p
+          className={`rounded-xl border px-3 py-2 text-[12.5px] mx-tnum ${
+            assessment.cost.complete
+              ? 'border-default bg-canvas-subtle text-foreground'
+              : 'border-movexum-morkgul/40 bg-movexum-pastell-gul text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul'
+          }`}
+        >
+          <span className="font-semibold">Denna bedömning kostade hos {assessment.providerName}:</span>{' '}
+          {assessment.cost.companies} {assessment.cost.companies === 1 ? 'bolag' : 'bolag'} × {assessment.cost.parts.length}{' '}
+          {assessment.cost.parts.length === 1 ? 'del' : 'delar'} = {formatRegistryCost(assessment.cost)}.{' '}
+          <span className="font-normal opacity-90">
+            Uppskattning enligt angivna priser (valda delar × uppslagna bolag) — {assessment.providerName}s faktura är facit.
+          </span>
+        </p>
+      )}
 
       {assessment.lookupWarnings.length > 0 && (
         <ul className={`rounded-xl px-3 py-2 text-[12.5px] ${WARN_TONE}`}>

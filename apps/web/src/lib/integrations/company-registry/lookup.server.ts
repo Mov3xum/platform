@@ -9,6 +9,8 @@ import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { describeRegistryParts, parseRegistryParts, type RegistryPartId } from './parts';
 import { isPersonalOrgNr, isValidOrgNr, normalizeOrgNr } from './orgnr';
 import type { RegistryCompany } from './types';
+import { estimateRegistryCost, formatRegistryCost, type RegistryCostEstimate, type RegistryPricing } from './pricing';
+import { resolveRegistryPricing } from './pricing.server';
 
 // Uppslag på ett valfritt bolag hos en ansluten bolagsregister-leverantör
 // UTAN att något sparas (CLAUDE.md § 11.8 "Testa mot org-nr" och § 51
@@ -18,7 +20,16 @@ import type { RegistryCompany } from './types';
 // verifierad användare och får inte bli en egen server action.
 
 export type RegistryLookupResult =
-  | { ok: true; company: RegistryCompany; requestedParts: RegistryPartId[]; orgNr: string }
+  | {
+      ok: true;
+      company: RegistryCompany;
+      requestedParts: RegistryPartId[];
+      orgNr: string;
+      /** Tenantens prislista för leverantören (§ 11.8). */
+      pricing: RegistryPricing;
+      /** Uppskattad kostnad för DETTA uppslag: valda delar × 1 bolag. */
+      cost: RegistryCostEstimate;
+    }
   | { ok: false; error: string };
 
 export interface RegistryLookupOptions {
@@ -98,13 +109,13 @@ export async function runRegistryLookup(
   } catch {
     return { ok: false, error: 'Leverantören saknas i katalogen.' };
   }
-  let tenantIntegration: { id: string; status: string };
+  let tenantIntegration: { id: string; status: string; pricing?: unknown };
   try {
     tenantIntegration = await adminResult.pb
       .collection('tenant_integrations')
-      .getFirstListItem<{ id: string; status: string }>(
+      .getFirstListItem<{ id: string; status: string; pricing?: unknown }>(
         `tenant = "${escFilter(user.tenant)}" && provider = "${escFilter(providerId)}"`,
-        { fields: 'id,status' }
+        { fields: 'id,status,pricing' }
       );
   } catch {
     return { ok: false, error: 'Anslut leverantören först (Inställningar → Integrationer).' };
@@ -115,13 +126,20 @@ export async function runRegistryLookup(
   const loaded = await loadCredentialsResult(tenantIntegration.id);
   if (!loaded.ok) return { ok: false, error: describeCredentialFailure(loaded.reason) };
 
+  // Kostnaden räknas på det som BEGÄRS (varje valt API anropas och
+  // debiteras oavsett om svaret blir tomt) — tenantens prislista + env.
+  const requestedParts = requested.parts ?? handler.parts;
+  const pricing = resolveRegistryPricing(providerSlug, tenantIntegration.pricing);
+  const cost = estimateRegistryCost(pricing, requestedParts, 1);
+
   let company: RegistryCompany;
   try {
     company = await handler.lookup(orgNr, loaded.value, requested.parts);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message.slice(0, 300) : 'Uppslaget misslyckades.' };
   }
-  // Audit (ISO 27001 A.8.15): PII-fri rad — leverantör + antal, aldrig org-nr.
+  // Audit (ISO 27001 A.8.15): PII-fri rad — leverantör, antal och uppskattad
+  // kostnad (credits/kr enligt angivna priser), aldrig org-nr.
   try {
     const pb = await getServerPb();
     await recordActivity(pb, {
@@ -131,10 +149,10 @@ export async function runRegistryLookup(
       title: `${providerSlug}: ${opts.auditLabel}`,
       meta: `${company.financials.length} årsrader, ${company.ownership.length} ägarrader (inget sparat)${
         company.fetchedParts ? ` · Valda delar: ${describeRegistryParts(company.fetchedParts)}` : ''
-      }`
+      } · Kostnad: ${formatRegistryCost(cost)}`
     });
   } catch {
     /* audit får aldrig blockera */
   }
-  return { ok: true, company, requestedParts: requested.parts ?? handler.parts, orgNr };
+  return { ok: true, company, requestedParts, orgNr, pricing, cost };
 }

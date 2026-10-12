@@ -2225,7 +2225,9 @@ await ensureCollection({
     { name: 'config', type: 'json', required: false, maxSize: 50000 },
     { name: 'last_sync_at', type: 'date', required: false },
     { name: 'last_sync_status', type: 'select', required: false, maxSelect: 1, values: ['success', 'failed', 'partial'] },
-    { name: 'last_sync_summary', type: 'text', required: false, max: 500 }
+    { name: 'last_sync_summary', type: 'text', required: false, max: 500 },
+    // Migration 1700000188: kostnad per API-anrop (credits + kr/credit), § 11.8.
+    { name: 'pricing', type: 'json', required: false, maxSize: 4000 }
   ],
   indexes: [
     'CREATE UNIQUE INDEX idx_tenant_integration_unique ON tenant_integrations (tenant, provider)',
@@ -2237,6 +2239,12 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && @request.auth.roles:each ?= "admin"`
 });
+
+// Migration 1700000188: `pricing` på befintliga installationer (ensureCollection
+// lägger bara till fält vid skapande av kollektionen).
+await patchCollection('tenant_integrations', [
+  { name: 'pricing', type: 'json', required: false, maxSize: 4000 }
+]);
 
 // Migration 1700000054: integration_records — normaliserad data från syncs.
 await ensureCollection({

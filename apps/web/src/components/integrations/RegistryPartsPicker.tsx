@@ -1,10 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   REGISTRY_PART_META,
   type RegistryPartId
 } from '@/lib/integrations/company-registry/parts';
+import {
+  estimateRegistryCost,
+  formatRegistryCost,
+  registryPartCostLabel,
+  type RegistryPricing
+} from '@/lib/integrations/company-registry/pricing';
 
 // Kryssrutor för vilka datadelar som hämtas från ett bolagsregister
 // (CLAUDE.md § 11.8). Varje del motsvarar ett API-anrop hos leverantören;
@@ -73,6 +80,14 @@ interface Props {
   /** Förklaring under rubriken (t.ex. att inget sparas i förhandsgranskningen). */
   hint?: string;
   disabled?: boolean;
+  /** Tenantens prislista (§ 11.8) — visar credits/kr per del och summan för valet. */
+  pricing?: RegistryPricing;
+  /** Antal bolag hämtningen gäller (portföljsynk = bolag med org-nr). Default 1. */
+  companies?: number;
+  /** Förklaring av antalet bolag ("för startup-bolaget; anknutna bolag tillkommer"). */
+  costContext?: string;
+  /** Sökväg till sidan där priserna anges (visas när pris saknas). */
+  pricingHref?: string;
 }
 
 export function RegistryPartsPicker({
@@ -83,9 +98,14 @@ export function RegistryPartsPicker({
   endpoints,
   providerName,
   hint,
-  disabled
+  disabled,
+  pricing,
+  companies = 1,
+  costContext,
+  pricingHref
 }: Props) {
   const allOn = selected.length === supported.length;
+  const estimate = pricing ? estimateRegistryCost(pricing, selected, companies) : null;
   return (
     <fieldset className="rounded-xl border border-default bg-canvas-subtle px-3 py-3" disabled={disabled}>
       <input type="hidden" name="parts_present" value="1" />
@@ -125,6 +145,17 @@ export function RegistryPartsPicker({
                       GET {endpoint}
                     </span>
                   )}
+                  {pricing && (
+                    <span
+                      className={`mx-tnum block text-[11.5px] font-semibold ${
+                        pricing.creditsPerPart[id] === undefined
+                          ? 'text-movexum-morkgul dark:text-movexum-pastell-gul'
+                          : 'text-foreground-muted'
+                      }`}
+                    >
+                      Kostnad per anrop: {registryPartCostLabel(pricing, id)}
+                    </span>
+                  )}
                 </span>
               </label>
             </li>
@@ -136,6 +167,69 @@ export function RegistryPartsPicker({
           Välj minst en del att hämta.
         </p>
       )}
+      {estimate && selected.length > 0 && (
+        <RegistryCostLine
+          estimate={estimate}
+          pricing={pricing!}
+          providerName={providerName}
+          context={costContext}
+          pricingHref={pricingHref}
+        />
+      )}
     </fieldset>
+  );
+}
+
+interface CostLineProps {
+  estimate: ReturnType<typeof estimateRegistryCost>;
+  pricing: RegistryPricing;
+  providerName: string;
+  /** "Vald hämtning" (default) eller t.ex. "Denna hämtning kostade". */
+  label?: string;
+  context?: string;
+  pricingHref?: string;
+}
+
+/**
+ * Kostnadsraden: "N bolag × M delar = K anrop · ≈ credits · ≈ kr". Säger
+ * "pris ej angivet" (med länk till inställningen) hellre än att gissa.
+ */
+export function RegistryCostLine({ estimate, pricing, providerName, label = 'Vald hämtning', context, pricingHref }: CostLineProps) {
+  const unpriced = estimate.credits === null || !estimate.complete;
+  return (
+    <div
+      className={`mt-3 rounded-lg border px-3 py-2 text-[12px] ${
+        unpriced
+          ? 'border-movexum-morkgul/40 bg-movexum-pastell-gul text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul'
+          : 'border-default bg-canvas text-foreground'
+      }`}
+    >
+      <span className="font-semibold">{label}:</span>{' '}
+      <span className="mx-tnum">
+        {estimate.companies} {estimate.companies === 1 ? 'bolag' : 'bolag'} × {estimate.parts.length}{' '}
+        {estimate.parts.length === 1 ? 'del' : 'delar'} = {formatRegistryCost(estimate)}
+      </span>
+      {context && <span className="block text-[11.5px] opacity-90">{context}</span>}
+      {unpriced && (
+        <span className="block text-[11.5px]">
+          {pricing.source === 'none'
+            ? `Priserna för ${providerName} är inte angivna.`
+            : `Alla delar har inte pris hos ${providerName}.`}{' '}
+          {pricingHref ? (
+            <Link href={pricingHref} className="font-semibold underline">
+              Ange credits per API och kr per credit enligt ert avtal
+            </Link>
+          ) : (
+            'Ange credits per API och kr per credit enligt ert avtal under Inställningar → Integrationer.'
+          )}
+          {pricingHref ? '.' : ''}
+        </span>
+      )}
+      {!unpriced && (
+        <span className="block text-[11px] text-foreground-subtle">
+          Uppskattning enligt angivna priser{pricing.note ? ` (${pricing.note})` : ''} — leverantörens faktura är facit.
+        </span>
+      )}
+    </div>
   );
 }

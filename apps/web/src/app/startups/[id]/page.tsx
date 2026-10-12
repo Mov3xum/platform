@@ -23,6 +23,8 @@ import {
   type PhaseHistoryItem
 } from '@/components/StartupPhaseHistoryList';
 import { RegistrySyncButton } from './RegistrySyncButton';
+import { resolveRegistryPricing } from '@/lib/integrations/company-registry/pricing.server';
+import type { RegistryPricing } from '@/lib/integrations/company-registry/pricing';
 import { getHandler, listCompanyRegistrySlugs } from '@/lib/integrations/registry';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import { LogMeetingButton } from './LogMeetingButton';
@@ -174,6 +176,8 @@ interface ConnectedRegistryProvider {
   name: string;
   parts: RegistryPartId[];
   partEndpoints?: Partial<Record<RegistryPartId, string>>;
+  /** Prislista (§ 11.8) — kostnaden visas i valet före hämtning. */
+  pricing: RegistryPricing;
 }
 
 interface NoteRecord {
@@ -456,22 +460,23 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
       const registrySlugs = new Set(listCompanyRegistrySlugs());
       const res = await pb
         .collection('tenant_integrations')
-        .getList<{ status: string; expand?: { provider?: { slug: string; name: string } } }>(1, 50, {
+        .getList<{ status: string; pricing?: unknown; expand?: { provider?: { slug: string; name: string } } }>(1, 50, {
           filter: `tenant = "${escFilter(user.tenant)}" && status = "connected"`,
           expand: 'provider',
-          fields: 'id,status,expand.provider.slug,expand.provider.name'
+          fields: 'id,status,pricing,expand.provider.slug,expand.provider.name'
         });
       connectedRegistries = res.items
-        .map((r) => r.expand?.provider)
-        .filter((p): p is { slug: string; name: string } => !!p && registrySlugs.has(p.slug))
-        .map((p) => {
+        .map((r) => ({ provider: r.expand?.provider, pricing: r.pricing }))
+        .filter((x): x is { provider: { slug: string; name: string }; pricing: unknown } => !!x.provider && registrySlugs.has(x.provider.slug))
+        .map(({ provider: p, pricing }) => {
           const h = getHandler(p.slug);
           const registry = h?.kind === 'company_registry' ? h : undefined;
           return {
             slug: p.slug,
             name: p.name,
             parts: registry?.parts ?? [],
-            partEndpoints: registry?.partEndpoints?.()
+            partEndpoints: registry?.partEndpoints?.(),
+            pricing: resolveRegistryPricing(p.slug, pricing)
           };
         });
     } catch {
@@ -1438,6 +1443,8 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                     providerName={p.name}
                     registryParts={p.parts}
                     partEndpoints={p.partEndpoints}
+                    pricing={p.pricing}
+                    pricingHref={`/integrationer/${p.slug}#kostnad`}
                   />
                 ))}
               </div>

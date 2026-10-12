@@ -1545,6 +1545,39 @@ Regler:
   (`movexum-registry-parts-<slug>`, bekvämlighet — ingen datakälla).
 Ingen ny dataväg, ingen PII i det nya fältet; riskklass oförändrad.
 
+**Kostnad per anrop — credits och kronor (2026-10-12, migration
+1700000188).** Leverantörerna debiterar per API-anrop i **credits**, och vad
+en credit kostar i kronor följer tenantens avtal/paket. Plattformen kan inte
+läsa prislistan (roaring.io nås inte från byggmiljön) och **gissar aldrig**:
+ledningen anger priserna under **Inställningar → Integrationer →
+<leverantör> → Kostnad per anrop** (`RegistryPricingForm`, action
+`saveRegistryPricingAction`; credits per datadel + kr/credit + PII-fri
+notering), lagrat i `tenant_integrations.pricing` (json, ingen hemlighet —
+stripas inte av `strip_integration_config.pb.js`). Env-default på web-appen:
+`<SLUG>_CREDITS_<DEL>` (`ROARING_CREDITS_BASIC`, `…_FINANCIALS`,
+`…_GROUP_STRUCTURE`, `…_BENEFICIAL_OWNERS`) + `<SLUG>_SEK_PER_CREDIT`;
+tenantens värde vinner per fält (`mergeRegistryPricing`). Källa av sanning:
+den rena, enhetstestade `company-registry/pricing.ts`
+(`estimateRegistryCost` = valda delar × bolag, `formatRegistryCost`,
+`registryPartCostLabel`, `validateRegistryPricingInput`); IO i
+`pricing.server.ts` (`loadRegistryPricing`/`resolveRegistryPricing`).
+Visas **före** varje hämtning i kryssrutorna (`RegistryPartsPicker`: pris per
+del + "Vald hämtning: N bolag × M delar = K anrop · ≈ credits · ≈ kr") på
+"Testa mot org-nr" (1 bolag), portföljsynk (alla bolag med org-nr),
+bolagskortet (1 bolag) och Bedömning excellens (per bolag + att varje
+koncernbolag kostar lika mycket till, högst 1 + `MAX_RELATED_COMPANIES`), och
+**efter** hämtningen i knappens svar, i synkloggen (`last_sync_summary`,
+"Kostnad: …"), i audit-raden (`activities`, PII-fri) och i bedömningens
+resultat ("Denna bedömning kostade … × uppslagna bolag"). Kostnaden räknas på
+det som BEGÄRS (varje valt API anropas och debiteras oavsett om svaret blir
+tomt) — en uppskattning; leverantörens faktura är facit. Saknas pris för en
+del sägs det ("pris ej angivet", summan märks "minst") med länk till
+inställningen — aldrig 0 kr. `SyncResult.companiesFetched` bär antalet bolag
+en synk anropade leverantören för. Speglat i `setup-via-api.mjs`
+(`patchCollection`), asserterat i `verify-baseline.mjs`
+(`REQUIRED_APP_FIELDS`); sparningen läser tillbaka raden och varnar vid
+schema-drift (§ 24.4). Ingen ny dataväg, ingen PII; riskklass oförändrad.
+
 **GDPR § 5 / § 9.3.** Fysiska personer i ägarbilden lagras UTAN namn,
 personnummer och födelsedatum — bara `owner_kind='person'` + andel/intervall
 + kontrollgrund ur en **fast vokabulär** (`controlBasisCategory`: shares/
@@ -8212,7 +8245,8 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 | Fil | Syfte |
 |-----|-------|
 | `packages/shared/src/excellence-screening.ts` (+ `.test.ts`) | REN regelmotor: `classifyOwnershipEntry` (bilaga I: > 50 % / styrelse / avtal = anknutet, 25–50 % = partner, undantagna investerare, intervall som korsar tröskel = oklart), `deriveRelatedCompanies`, `screenExcellence` (grundförutsättningar per bolag, fristående, viktade tröskelvärden 100 %/andel, de minimis, utfall, Vinnova-punkter, excellens, saknat underlag). Combly-fallet är enhetstestat. |
-| `apps/web/src/lib/integrations/company-registry/lookup.server.ts` | Delad uppslagskärna (validering, rate-limit 20/10 min, credentials, PII-fri audit) — används av BÅDE "Testa mot org-nr" (§ 11.8) och bedömningen; `parts` kan ges explicit för koncernbolagen |
+| `apps/web/src/lib/integrations/company-registry/lookup.server.ts` | Delad uppslagskärna (validering, rate-limit 20/10 min, credentials, PII-fri audit, kostnad per uppslag) — används av BÅDE "Testa mot org-nr" (§ 11.8) och bedömningen; `parts` kan ges explicit för koncernbolagen |
+| `apps/web/src/lib/integrations/company-registry/pricing.ts` (+ `.test.ts`) / `pricing.server.ts` | Kostnad per anrop (credits + kr/credit, § 11.8): ren uppskattning + formatering, IO-läsning av `tenant_integrations.pricing` + env |
 | `apps/web/src/lib/excellence/data.server.ts` | Läsvägar med användarens token (RLS § 21): portföljbolag, sparad ägarbild/bokslut/grundare/de minimis/IRL, anslutna providers, `findStartupByOrgNr` (anknutet bolag som själv är portföljbolag) |
 | `apps/web/src/lib/actions/excellence.ts` | `assessExcellenceAction` — modulgrind, färska uppslag bara admin/incubator_lead, koncernuppslag (tak `MAX_RELATED_COMPANIES` = 6), kör motorn |
 | `apps/web/src/app/bedomning-excellens/{page,ExcellenceWorkspace}.tsx` | Sidan + Combly-strukturerad vy |
@@ -8243,6 +8277,13 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 - **Kostnad:** varje koncernbolag är egna leverantörsanrop (de valda
   datadelarna × bolag) — kryssrutorna och taket på 6 bolag begränsar;
   samma rate-limit som "Testa mot org-nr". Enskild firma slås aldrig upp.
+  **Priset syns (2026-10-12):** kryssrutorna visar credits/kr per del och
+  "Vald hämtning" per bolag med noten att varje koncernbolag kostar lika
+  mycket till; resultatet visar "Denna bedömning kostade: N bolag × M delar
+  = …" summerat över startup + faktiskt uppslagna koncernbolag
+  (`ExcellenceAssessment.cost`, § 11.8 "Kostnad per anrop"). Priserna anges
+  av ledningen per leverantör — saknas de visas "pris ej angivet", aldrig en
+  gissad siffra.
 - **"Okänt" ska gå att förklara (2026-10-12).** I registerläget visas
   leverantörens svar per bolag SYNLIGT överst (inte hopfällt): vilken
   sökväg som svarade, 404 = inga uppgifter, 403 = inte i paketet, vilka

@@ -115,4 +115,6 @@ export interface SyncResult {
   recordsSkipped: number;
   errorMessage?: string;
   durationMs: number;
+  /** Bolagsregister: antal bolag leverantören anropades för (kostnadsunderlag, § 11.8). */
+  companiesFetched?: number;
 }
