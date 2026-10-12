@@ -12,7 +12,6 @@ import {
 import { getHandler, listCompanyRegistrySlugs } from '@/lib/integrations/registry';
 import { ensureRegistryProviderRows } from '@/lib/integrations/company-registry/catalog-seed';
 import { runSync, runRegistrySyncForStartup } from '@/lib/integrations/sync';
-import { loadCredentialsResult } from '@/lib/integrations/credentials';
 import { describeCredentialFailure } from '@/lib/integrations/credential-errors';
 import {
   describeRegistryParts,
@@ -20,9 +19,8 @@ import {
   type RegistryPartId
 } from '@/lib/integrations/company-registry/parts';
 import type { RegistryCompany } from '@/lib/integrations/company-registry/types';
-import { isPersonalOrgNr, isValidOrgNr, normalizeOrgNr } from '@/lib/integrations/company-registry/orgnr';
-import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { recordActivity } from './record-activity';
+import { runRegistryLookup } from '@/lib/integrations/company-registry/lookup.server';
 
 export type IntegrationPilotState = {
   error?: string;
@@ -529,89 +527,15 @@ export async function previewRegistryLookupAction(
   if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
     return { error: 'Endast inkubatorledning kan testa uppslag.' };
   }
-  const providerSlug = String(formData.get('provider_slug') || '').trim();
   // Valfritt bolag — uppslaget kräver INTE att bolaget finns i databasen.
-  // Godtar 559572-8790, 5595728790, 16559572…, mellanslag och momsnummer.
-  const orgNrRaw = String(formData.get('org_nr') || '').trim();
-  const orgNr = normalizeOrgNr(orgNrRaw);
-  if (!listCompanyRegistrySlugs().includes(providerSlug)) {
-    return { error: 'Okänd bolagsregister-leverantör.' };
-  }
-  if (!orgNr) {
-    return {
-      error:
-        'Ange ett svenskt organisationsnummer med 10 siffror (t.ex. 559572-8790). Roarings interna test-id:n (t.ex. B00000018) är inte org-nummer.'
-    };
-  }
-  if (!isValidOrgNr(orgNr)) {
-    return { error: 'Organisationsnumret har fel kontrollsiffra — kontrollera numret.' };
-  }
-  // Enskild firma: org-nr = personnummer → uppslag på en fysisk person görs
-  // aldrig från förhandsgranskningen (GDPR § 5).
-  if (isPersonalOrgNr(orgNr)) {
-    return { error: 'Förhandsgranskning stöds bara för juridiska personer (inte enskild firma).' };
-  }
-  // Rate-limit per användare (20 uppslag / 10 min) — leverantörerna debiterar per anrop.
-  const rateKey = `registry-lookup:${user.id}`;
-  const limited = await checkRateLimit(rateKey, 20);
-  if (limited.blocked) {
-    return { error: `För många uppslag — försök igen om ${limited.retryAfterSec} s.` };
-  }
-  await recordFailure(rateKey, 10 * 60 * 1000);
-  const handler = getHandler(providerSlug);
-  if (!handler || handler.kind !== 'company_registry' || !handler.lookup) {
-    return { error: 'Leverantören stödjer inte förhandsgranskning.' };
-  }
-  const requested = readRequestedParts(formData, handler.parts);
-  if (!requested.ok) return { error: requested.error };
-
-  const adminResult = await getSuperuserPb();
-  if (!adminResult.ok) return { error: 'Serverkonfiguration ofullständig.' };
-  let provider: ProviderRow;
-  try {
-    provider = await adminResult.pb
-      .collection('integration_providers')
-      .getFirstListItem<ProviderRow>(`slug = "${escFilter(providerSlug)}"`);
-  } catch {
-    return { error: 'Leverantören saknas i katalogen.' };
-  }
-  let tenantIntegration: { id: string; status: string };
-  try {
-    tenantIntegration = await adminResult.pb
-      .collection('tenant_integrations')
-      .getFirstListItem<{ id: string; status: string }>(
-        `tenant = "${escFilter(user.tenant)}" && provider = "${escFilter(provider.id)}"`
-      );
-  } catch {
-    return { error: 'Anslut leverantören först.' };
-  }
-  if (tenantIntegration.status !== 'connected') {
-    return { error: 'Leverantören är inte ansluten för denna tenant.' };
-  }
-  const loaded = await loadCredentialsResult(tenantIntegration.id);
-  if (!loaded.ok) return { error: describeCredentialFailure(loaded.reason) };
-  const creds = loaded.value;
-
-  let company: RegistryCompany;
-  try {
-    company = await handler.lookup(orgNr, creds, requested.parts);
-  } catch (err) {
-    return { error: err instanceof Error ? err.message.slice(0, 300) : 'Uppslaget misslyckades.' };
-  }
-  // Audit (ISO 27001 A.8.15): PII-fri rad — leverantör + antal, aldrig org-nr.
-  try {
-    const pb = await getServerPb();
-    await recordActivity(pb, {
-      tenant: user.tenant,
-      kind: 'integration_sync',
-      actor: user.id,
-      title: `${providerSlug}: förhandsgranskning av bolagsuppslag`,
-      meta: `${company.financials.length} årsrader, ${company.ownership.length} ägarrader (inget sparat)${
-        company.fetchedParts ? ` · Valda delar: ${describeRegistryParts(company.fetchedParts)}` : ''
-      }`
-    });
-  } catch {
-    /* audit får aldrig blockera */
-  }
-  return { company, requestedParts: requested.parts ?? handler.parts };
+  // Kärnan (validering, rate-limit, credentials, audit) delas med
+  // "Bedömning excellens" (§ 51) i lookup.server.ts.
+  const result = await runRegistryLookup(user, {
+    providerSlug: String(formData.get('provider_slug') || ''),
+    orgNrRaw: String(formData.get('org_nr') || ''),
+    formData,
+    auditLabel: 'förhandsgranskning av bolagsuppslag'
+  });
+  if (!result.ok) return { error: result.error };
+  return { company: result.company, requestedParts: result.requestedParts };
 }

@@ -25,19 +25,19 @@ import type { Role } from './index';
 export const DEFAULT_MODULES_BY_ROLE: Record<Role, readonly string[]> = {
   admin: [
     'idag', 'inkorg', 'mal', 'arshjul', 'filer', 'uppdrag', 'inflode',
-    'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community',
+    'startups', 'kontakter', 'de_minimis', 'bedomning_excellens', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
     'integrationer', 'onskemal', 'min_profil', 'mina_aktiviteter'
   ],
   incubator_lead: [
     'idag', 'inkorg', 'mal', 'arshjul', 'filer', 'uppdrag', 'inflode',
-    'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community',
+    'startups', 'kontakter', 'de_minimis', 'bedomning_excellens', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
     'integrationer', 'onskemal', 'min_profil', 'mina_aktiviteter'
   ],
   coach: [
     'idag', 'inkorg', 'mina_aktiviteter', 'arshjul', 'filer',
-    'mal', 'uppdrag', 'inflode', 'startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'events', 'education',
+    'mal', 'uppdrag', 'inflode', 'startups', 'kontakter', 'de_minimis', 'bedomning_excellens', 'checkar', 'projekt', 'upphandlingar', 'events', 'education',
     'agenter', 'kunskapsbas', 'onskemal', 'min_profil'
   ],
   mentor: [

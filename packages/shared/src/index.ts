@@ -1387,7 +1387,7 @@ export interface ModuleGroup {
 
 export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['startups', 'kontakter', 'de_minimis', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community'] },
+  { label: 'Portfölj', modules: ['startups', 'kontakter', 'de_minimis', 'bedomning_excellens', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'kunskapsbas', 'onskemal', 'installningar', 'min_profil'] }
 ];
@@ -1525,6 +1525,14 @@ export const coreModules: ModuleDefinition[] = [
       'Upphandlingar och excellens-insatser för bolagen — ladda upp underlaget, följ avrop, milstolpar och slutrapporter enligt uppföljningsregler, och utvärdera leverantören.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
     route: '/upphandlingar'
+  },
+  {
+    id: 'bedomning_excellens',
+    title: 'Bedömning excellens',
+    description:
+      'Förscreening av ett bolag mot art. 22 GBER / de minimis och Vinnovas målgrupp — hämtar grunddata, bokslut och ägarbild från Roaring (valfritt org-nr eller portföljbolag) och visar JA/NEJ/OKÄNT per kriterium med vad som saknas. Underlag för controllern, inget beslut.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach'],
+    route: '/bedomning-excellens'
   },
   {
     id: 'checkar',
@@ -1697,6 +1705,7 @@ export * from './onboarding';
 export * from './education-documents';
 // ─── De minimis-modul (ren beräkningslogik, enhetstestad) ────────────────────
 export * from './de-minimis';
+export * from './excellence-screening';
 // ─── Årshjul (ren domän-/geometrilogik, enhetstestad) ────────────────────────
 export * from './annual-wheel';
 export * from './agreements';

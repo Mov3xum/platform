@@ -8168,3 +8168,79 @@ huvudmutationen.
   superuser bara som reserv vid PB v0.23.4:s tysta regel-nekande).
 - **Loggar:** status, typ och användar-id — aldrig innehåll eller länk.
 - **Migrationer:** 1700000186 är ett nytt, oföränderligt filnummer.
+
+## 51. Bedömning excellens — koncernscreening mot art. 22 GBER / de minimis / Vinnova
+
+### 51.1 Översikt
+
+`/bedomning-excellens` (modul `bedomning_excellens`, "Portfölj"-railen;
+admin/incubator_lead/coach) är controllerns förscreening enligt Challes
+**"Ny tankemodell för SMF-stöd samt excellens"** (Bizmaker-kartan) med
+utdata i samma avsnittsordning som referensbedömningen **"Bedömning Vinnova
+Combly"**: review-rad (datum · GBER · Vinnova · kommentar) → steg 1
+(grundförutsättningar per bolag, fristående?, ägarbild per bolag, anknutna
+företag, tröskelvärden, de minimis-intyg, sammanfattande GBER-bedömning) →
+steg 2 (grundarteamet ≥ 75 %, grundardrivet, ej marknadsredo, innovativt,
+övriga villkor, IRL-tabell CRL/BRL/TMRL/SRL) → steg 3 (excellens) → saknat
+underlag. Bedömningen görs **på hela koncernen**: anknutna/partnerföretag i
+startup-bolagets ägarbild slås upp automatiskt och får egna
+grundförutsättningar — det var där Combly föll (Ewell AB från 2006 ⇒ de
+minimis i stället för art. 22).
+
+Två lägen: **"Hämta från Roaring och bedöm"** (färska uppslag för startup-
+bolaget OCH varje anknutet/partnerbolag med de datadelar personalen kryssat
+i, § 11.8 — inget sparas; synka bolagskortet separat) eller **"Bedöm sparade
+data"** (det som redan finns på bolagskortet, inget leverantörsanrop).
+Valfritt org-nr fungerar (bolaget behöver inte finnas i plattformen); för ett
+portföljbolag tas grundarägande (`startup_team_members`), registrerat de
+minimis (§ 20), IRL/readiness (`startup_readiness_assessments`) och
+excellensflaggan från plattformen — de finns inte hos leverantören.
+Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/excellence-screening.ts` (+ `.test.ts`) | REN regelmotor: `classifyOwnershipEntry` (bilaga I: > 50 % / styrelse / avtal = anknutet, 25–50 % = partner, undantagna investerare, intervall som korsar tröskel = oklart), `deriveRelatedCompanies`, `screenExcellence` (grundförutsättningar per bolag, fristående, viktade tröskelvärden 100 %/andel, de minimis, utfall, Vinnova-punkter, excellens, saknat underlag). Combly-fallet är enhetstestat. |
+| `apps/web/src/lib/integrations/company-registry/lookup.server.ts` | Delad uppslagskärna (validering, rate-limit 20/10 min, credentials, PII-fri audit) — används av BÅDE "Testa mot org-nr" (§ 11.8) och bedömningen; `parts` kan ges explicit för koncernbolagen |
+| `apps/web/src/lib/excellence/data.server.ts` | Läsvägar med användarens token (RLS § 21): portföljbolag, sparad ägarbild/bokslut/grundare/de minimis/IRL, anslutna providers, `findStartupByOrgNr` (anknutet bolag som själv är portföljbolag) |
+| `apps/web/src/lib/actions/excellence.ts` | `assessExcellenceAction` — modulgrind, färska uppslag bara admin/incubator_lead, koncernuppslag (tak `MAX_RELATED_COMPANIES` = 6), kör motorn |
+| `apps/web/src/app/bedomning-excellens/{page,ExcellenceWorkspace}.tsx` | Sidan + Combly-strukturerad vy |
+| `backend/pocketbase-schema/migrations/1700000187_backfill_enabled_modules_bedomning_excellens.js` | Backfill av `users.enabled_modules` (§ 36.3-läxan) |
+
+### 51.2 Regler (bindande)
+
+- **Deterministiskt, inget beslut.** Ingen AI-inferens; varje punkt får
+  JA / NEJ / OKÄNT med motivering och källa (bolagsregister / plattformen /
+  manuell kontroll). OKÄNT när underlaget saknas — motorn gissar aldrig
+  (börsnotering, vinstutdelning, företagskoncentration, övertagen
+  verksamhet, grundarengagemang, innovationshöjd är alltid manuella).
+  Sidan skriver ALDRIG `approved_state_aid_art22`/`approved_de_minimis`/
+  `meets_excellence_criteria` eller statsstödsperioder — controllern
+  registrerar beslutet som förut (bolagskortet, `/rapporter/vinnova`).
+- **Utfall art. 22:** NEJ om startup-bolaget eller något anknutet bolag är
+  > 5 år eller inaktivt, eller om koncernen (startup + 100 % anknutna +
+  partnerns andel) överskrider småföretagstaket (≥ 50 anställda, eller både
+  omsättning och balansomslutning > 10 M€) ⇒ de minimis (eller "inget
+  företagsstöd" när plattformens de minimis-utrymme är förbrukat). "Art. 22
+  möjlig" bara när ålder/status är JA, ägarbilden avgjord, alla anknutna
+  bolags ålder känd och tröskelvärdet komplett — annars oavgjort med listan
+  över vad som saknas. Partnerföretags ålder prövas inte (bara anknutnas).
+- **Fristående** bevisas bara när koncernregistret saknar moder/dotter OCH
+  verklig huvudman visar fysiska personer med direkt > 75 % (då ryms ingen
+  bolagsägare ≥ 25 %); annars OKÄNT med hänvisning till aktieboken —
+  koncernstrukturen visar bara majoritetsrelationer.
+- **Kostnad:** varje koncernbolag är egna leverantörsanrop (de valda
+  datadelarna × bolag) — kryssrutorna och taket på 6 bolag begränsar;
+  samma rate-limit som "Testa mot org-nr". Enskild firma slås aldrig upp.
+- **GDPR § 5:** fysiska personer i ägarbilden visas utan namn (som i
+  § 11.8); grundarnamn + andel visas ur `startup_team_members` ENBART i
+  denna staff-vy (samma data som bolagskortet) och når aldrig AI-kontexten
+  (§ 9.3 oförändrad). Audit-raderna (`activities`, `integration_sync`) är
+  PII-fria (leverantör + antal, aldrig org-nr). Inget persisteras.
+- **RBAC/RLS:** modulgrind `canAccessModuleForUser` + roll i actionen;
+  färska uppslag kräver admin/incubator_lead (coach bedömer sparade data);
+  alla läsningar via användarens token. Ingen ny kollektion, inga nya fält,
+  ingen ny dataväg; riskklass (EU AI Act) n/a.
+- **Trösklar som kartan lämnar öppna** (grundarengagemang 40/20 resp.
+  60/40 enligt PPT:n — Combly-dokumentet anger 50/30 resp. 80/40) skrivs
+  ut i punkten "Grundardrivet" som text; den avgörs manuellt tills Vinnovas
+  metodbeskrivning låsts (docs/ai/vinnova-statsstod-screening-agent.md § 2.1).
