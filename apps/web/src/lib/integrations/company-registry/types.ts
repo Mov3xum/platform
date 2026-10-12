@@ -44,7 +44,7 @@ export interface RegistryFinancialsYear {
   net_result_sek?: number;
   /**
    * Beslutad vinstutdelning för året enligt årsredovisningen (datadelen
-   * `annual_report`). 0 = årsredovisningen svarade "ingen utdelning".
+   * `financials`, economy-overview /extended). 0 = bokslutet svarade "ingen utdelning".
    * Art. 22 GBER kräver att bolaget INTE delat ut vinst (§ 51).
    */
   dividend_sek?: number;

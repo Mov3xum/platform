@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState, useEffect, useMemo, useRef, useState } from 'react';
+import { useActionState, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  MATURITY_PHASE_LABEL,
   STATE_AID_OUTCOME_LABEL,
   VINNOVA_OUTCOME_LABEL,
   type CompanyAssessment,
@@ -23,6 +24,7 @@ import {
 } from '@/components/integrations/RegistryPartsPicker';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import { formatRegistryCost, type RegistryPricing } from '@/lib/integrations/company-registry/pricing';
+import { ManualFactsPanel } from './ManualFactsPanel';
 
 interface StartupOption {
   id: string;
@@ -183,9 +185,15 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
   const provider = registries.find((r) => r.slug === providerSlug) ?? registries[0];
   const selection = useRegistryPartSelection(provider?.slug ?? 'none', provider?.parts ?? []);
   const resultRef = useRef<HTMLDivElement>(null);
+  // Senaste bedömningen — från en körning ELLER en omräkning med manuella svar.
+  const [current, setCurrent] = useState<ExcellenceAssessment | undefined>(undefined);
+  const onUpdated = useCallback((a: ExcellenceAssessment) => setCurrent(a), []);
 
   useEffect(() => {
-    if (state.assessment) resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (state.assessment) {
+      setCurrent(state.assessment);
+      resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }, [state.assessment]);
 
   const selectedStartup = startups.find((s) => s.id === startupId);
@@ -287,7 +295,7 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
                   disabled={pending}
                   pricing={provider.pricing}
                   companies={1}
-                  costContext={`Per bolag. Varje anknutet/partnerbolag i ägarbilden slås upp med samma delar utom årsredovisningen (utdelningsvillkoret prövas bara på startup-bolaget), högst ${MAX_RELATED_COMPANIES} till — kostnaden kan bli upp till ${1 + MAX_RELATED_COMPANIES} × detta. Den faktiska summan visas i resultatet.`}
+                  costContext={`Per bolag. Varje anknutet/partnerbolag i ägarbilden slås upp med samma delar, högst ${MAX_RELATED_COMPANIES} till — kostnaden kan bli upp till ${1 + MAX_RELATED_COMPANIES} × detta. Den faktiska summan visas i resultatet.`}
                   pricingHref={`/integrationer/${provider.slug}#kostnad`}
                 />
               )}
@@ -343,7 +351,10 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
         )}
       </section>
 
-      <div ref={resultRef}>{state.assessment && <AssessmentView assessment={state.assessment} />}</div>
+      <div ref={resultRef} className="space-y-6">
+        {current && <AssessmentView assessment={current} />}
+        {current && <ManualFactsPanel assessment={current} onUpdated={onUpdated} />}
+      </div>
     </div>
   );
 }
@@ -539,7 +550,10 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
                 <p className="mt-1 text-foreground-muted">{result.vinnova.text}</p>
               </td>
               <td className="px-3 py-2 text-foreground-muted">
-                Deterministiskt underlag — {counts.yes} ja, {counts.no} nej, {counts.unknown} okänt. Screening och beslut görs av controllern.
+                {result.comment ? <p className="whitespace-pre-line text-foreground">{result.comment}</p> : null}
+                <p className={result.comment ? 'mt-1 text-[11.5px]' : ''}>
+                  Deterministiskt underlag — {counts.yes} ja, {counts.no} nej, {counts.unknown} okänt. Screening och beslut görs av controllern.
+                </p>
               </td>
             </tr>
           </tbody>
@@ -626,19 +640,26 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
           <div className="overflow-x-auto rounded-xl border border-default">
             <table className="w-full text-[12.5px]">
               <caption className="bg-canvas-subtle px-3 py-2 text-left text-[12px] font-semibold text-foreground">
-                Grundarteamet (ur teamet på bolagskortet)
+                Grundarteamet ({assessment.foundersSource === 'manual' ? 'manuellt inmatat' : 'ur teamet på bolagskortet'})
+                {assessment.facts.maturity_phase ? ` · fas: ${MATURITY_PHASE_LABEL[assessment.facts.maturity_phase]}` : ''}
+                {assessment.facts.research_spinoff ? ' · forskningsavknoppning' : ''}
               </caption>
               <thead className="text-left text-[11px] uppercase tracking-wider text-foreground-subtle">
                 <tr className="border-t border-default">
                   <th className="px-3 py-1.5 font-medium">Namn</th>
                   <th className="px-3 py-1.5 font-medium">% kapital</th>
+                  <th className="px-3 py-1.5 font-medium">Engagemang (% av heltid)</th>
                 </tr>
               </thead>
               <tbody>
                 {assessment.founders.map((f, i) => (
                   <tr key={i} className="border-t border-default">
-                    <td className="px-3 py-1.5 text-foreground">{f.name}</td>
+                    <td className="px-3 py-1.5 text-foreground">
+                      {f.name}
+                      {f.researcher ? <span className="ml-1 text-[11px] text-foreground-subtle">(forskare)</span> : null}
+                    </td>
                     <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{pctText(f.equity_pct)}</td>
+                    <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{pctText(f.engagement_pct)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -652,6 +673,7 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
             <caption className="bg-canvas-subtle px-3 py-2 text-left text-[12px] font-semibold text-foreground">
               Bedömning IRL{irl?.assessedAt ? ` (senast ${irl.assessedAt})` : ''}
               {typeof irl?.level === 'number' ? ` · sammanvägd nivå ${irl.level}` : ''}
+              {irl?.manualLevels ? ' · nivåer manuellt angivna' : ''}
             </caption>
             <thead className="text-left text-[11px] uppercase tracking-wider text-foreground-subtle">
               <tr className="border-t border-default">
@@ -672,8 +694,9 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
                 <tr key={k} className="border-t border-default">
                   <td className="px-3 py-1.5 font-medium text-foreground">{k}</td>
                   <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{typeof v === 'number' ? v : '–'}</td>
-                  <td className="px-3 py-1.5 text-foreground-subtle">
-                    {hasIrlDims ? 'Motiveras av coachen' : 'Ingen readiness-bedömning i plattformen — fylls i av coachen'}
+                  <td className={`px-3 py-1.5 ${irl?.notes?.[k.toLowerCase() as 'crl' | 'brl' | 'tmrl' | 'srl'] ? 'text-foreground' : 'text-foreground-subtle'}`}>
+                    {irl?.notes?.[k.toLowerCase() as 'crl' | 'brl' | 'tmrl' | 'srl'] ??
+                      (hasIrlDims ? 'Motiveras av coachen (Manuella svar)' : 'Ingen readiness-bedömning i plattformen — nivå och motivering under Manuella svar')}
                   </td>
                 </tr>
               ))}

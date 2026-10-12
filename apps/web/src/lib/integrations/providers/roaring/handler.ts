@@ -6,7 +6,7 @@ import type { CompanyRegistryHandler } from '../../types';
 import {
   readRoaringCredentials,
   roaringAmountMultiplier,
-  roaringFinancialRecordMultiplier,
+  roaringFinancialYears,
   roaringGetFirst,
   roaringToken,
   ROARING_PATHS,
@@ -25,9 +25,9 @@ function responseNote(label: string, outcome: RoaringFetchOutcome): string {
   return `Roaring ${label} (${outcome.path}) svarade med fälten: ${keys.length > 0 ? keys.join(', ') : '(tomt)'}`;
 }
 
-// Roaring — bolagsregister-provider (CLAUDE.md § 11.8). Hämtar upp till fem
-// API:er per bolag (grunddata, bokslut, koncernstruktur, verklig huvudman,
-// årsredovisning med beslutad utdelning) —
+// Roaring — bolagsregister-provider (CLAUDE.md § 11.8). Hämtar upp till fyra
+// API:er per bolag (grunddata, bokslut med beslutad utdelning, koncernstruktur,
+// verklig huvudman) —
 // bara de personalen valt — och normaliserar till RegistryCompany. Valda
 // grunddata är blockerande — felar det felar bolaget; de övriga är fail-soft
 // med not i `notes` och räknas inte som hämtade (`fetchedParts`).
@@ -67,15 +67,14 @@ export const roaringHandler: CompanyRegistryHandler = createCompanyRegistryHandl
     }
   ],
   throttleMs: 250,
-  parts: ['basic', 'financials', 'group_structure', 'beneficial_owners', 'annual_report'],
+  parts: ['basic', 'financials', 'group_structure', 'beneficial_owners'],
   // Första kandidaten per API (env vinner) — visas vid kryssrutorna så
   // personalen ser exakt vilket Roaring-API varje val anropar.
   partEndpoints: () => ({
     basic: ROARING_PATHS.overview()[0],
     financials: ROARING_PATHS.financials()[0],
     group_structure: ROARING_PATHS.groupStructure()[0],
-    beneficial_owners: ROARING_PATHS.beneficialOwners()[0],
-    annual_report: ROARING_PATHS.financialRecord()[0]
+    beneficial_owners: ROARING_PATHS.beneficialOwners()[0]
   }),
 
   async testConnection(creds) {
@@ -103,16 +102,19 @@ export const roaringHandler: CompanyRegistryHandler = createCompanyRegistryHandl
     // Bara de valda API:erna anropas (valbara delar, § 11.8) — varje anrop
     // debiteras av Roaring. Grunddata är blockerande NÄR den valts; övriga
     // delar är fail-soft och noteras.
-    const [overview, financials, group, beneficial, annualReport] = await Promise.all([
+    const [overview, financials, group, beneficial] = await Promise.all([
       want('basic') ? roaringGetFirst(c, ROARING_PATHS.overview(), orgNr) : Promise.resolve(null),
-      want('financials') ? roaringGetFirst(c, ROARING_PATHS.financials(), orgNr) : Promise.resolve(null),
+      // economy-overview 2.1 /extended tar `years` (spec-default 5) — flera
+      // räkenskapsår med utdelning, personalkostnad och skatt i ETT anrop.
+      want('financials')
+        ? roaringGetFirst(c, ROARING_PATHS.financials(), orgNr, { years: String(roaringFinancialYears()) })
+        : Promise.resolve(null),
       want('group_structure') && !isPersonal
         ? roaringGetFirst(c, ROARING_PATHS.groupStructure(), orgNr)
         : Promise.resolve(null),
       want('beneficial_owners') && !isPersonal
         ? roaringGetFirst(c, ROARING_PATHS.beneficialOwners(), orgNr)
-        : Promise.resolve(null),
-      want('annual_report') ? roaringGetFirst(c, ROARING_PATHS.financialRecord(), orgNr) : Promise.resolve(null)
+        : Promise.resolve(null)
     ]);
     if (overview && !overview.ok) {
       throw new Error(`Roaring grunddata (${overview.path}): ${overview.reason}`);
@@ -143,11 +145,9 @@ export const roaringHandler: CompanyRegistryHandler = createCompanyRegistryHandl
     take('financials', 'bokslut', financials, (d) => (bundle.financials = d));
     take('group_structure', 'koncernstruktur', group, (d) => (bundle.groupStructure = d));
     take('beneficial_owners', 'verklig huvudman', beneficial, (d) => (bundle.beneficialOwners = d));
-    take('annual_report', 'årsredovisning', annualReport, (d) => (bundle.annualReport = d));
 
     const company = normalizeRoaringCompany(orgNr, bundle, {
       amountMultiplier: roaringAmountMultiplier(),
-      annualReportMultiplier: roaringFinancialRecordMultiplier(),
       isPersonal
     });
     company.notes.push(...softNotes);

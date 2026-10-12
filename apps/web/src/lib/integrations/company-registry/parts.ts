@@ -5,12 +5,10 @@
 //
 // Varje del motsvarar ett API-anrop hos leverantören och en skrivväg:
 //   basic             → grunddata till bolagskortet (startups)
-//   financials        → årsrader (startup_financials)
+//   financials        → årsrader inkl. beslutad utdelning, personalkostnad och
+//                       bolagsskatt (startup_financials)
 //   group_structure   → moder-/dotterbolag (startup_ownership)
 //   beneficial_owners → verklig huvudman, anonymt (startup_ownership)
-//   annual_report     → årsredovisningens beslutade utdelning (+ personal-
-//                       kostnad/bolagsskatt när de finns) per år
-//                       (startup_financials, samma rader som bokslut)
 // En provider deklarerar vilka delar den stödjer; personalen väljer en
 // delmängd före varje hämtning. Det som inte väljs anropas inte och skrivs
 // inte — befintliga värden från tidigare hämtningar lämnas orörda.
@@ -19,8 +17,7 @@ export const REGISTRY_PART_IDS = [
   'basic',
   'financials',
   'group_structure',
-  'beneficial_owners',
-  'annual_report'
+  'beneficial_owners'
 ] as const;
 
 export type RegistryPartId = (typeof REGISTRY_PART_IDS)[number];
@@ -40,7 +37,8 @@ export const REGISTRY_PART_META: Record<RegistryPartId, RegistryPartMeta> = {
   },
   financials: {
     label: 'Bokslut',
-    description: 'Omsättning, anställda, resultat, balansomslutning och eget kapital per år.',
+    description:
+      'Omsättning, anställda, resultat, balansomslutning, eget kapital och beslutad utdelning per år (Roaring: även personalkostnad och bolagsskatt). Utdelningen avgör art. 22-villkoret "har inte delat ut vinst".',
     writes: 'financials'
   },
   group_structure: {
@@ -52,12 +50,6 @@ export const REGISTRY_PART_META: Record<RegistryPartId, RegistryPartMeta> = {
     label: 'Verklig huvudman',
     description: 'Ägarandel och kontrollgrund per huvudman — utan namn eller personnummer.',
     writes: 'ownership'
-  },
-  annual_report: {
-    label: 'Årsredovisning (utdelning)',
-    description:
-      'Beslutad vinstutdelning per år ur årsredovisningen — avgör art. 22-villkoret "har inte delat ut vinst" (samt personalkostnad och bolagsskatt när de finns).',
-    writes: 'financials'
   }
 };
 

@@ -5007,6 +5007,8 @@ await patchToolRunsCollection(
 
 // Migration 1700000058 + 1700000061: startups bolagsregister-fält.
 await patchCollection('startups', [
+  // Från 1700000190 (§ 51.4): controllerns manuella svar i Bedömning excellens.
+  { name: 'screening_facts', type: 'json', required: false, maxSize: 60000 },
   // Från 1700000058
   { name: 'org_nr', type: 'text', required: false, max: 12 },
   { name: 'kommun', type: 'text', required: false, max: 100 },

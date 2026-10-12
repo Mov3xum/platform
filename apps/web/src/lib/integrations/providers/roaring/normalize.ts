@@ -39,8 +39,6 @@ export interface RoaringRawBundle {
   financials?: unknown;
   groupStructure?: unknown;
   beneficialOwners?: unknown;
-  /** Årsredovisningen (financial-record, "Årsredovisningar 1.0") — utdelning m.m. */
-  annualReport?: unknown;
 }
 
 /** Roaring svarar oftast `{ records: [ … ] }`; tolerera även ett naket objekt. */
@@ -65,6 +63,10 @@ export function roaringReportsNoRecords(raw: unknown): boolean {
   if (!raw || typeof raw !== 'object') return false;
   const r = raw as Record<string, unknown>;
   if (Array.isArray(r.records) && r.records.length > 0) return false;
+  // Kuvertet enligt Roarings OpenAPI-specar (2026-10-12): `status.code` 0 =
+  // found, 1 = not found — exakt, oavsett text.
+  const status = r.status;
+  if (status && typeof status === 'object' && (status as Record<string, unknown>).code === 1) return true;
   for (const key of ['responseInfo', 'status']) {
     const env = r[key];
     if (!env || typeof env !== 'object') continue;
@@ -206,8 +208,12 @@ const YEAR_PATHS = ['toDate', 'accountsClosingDate', 'periodEnd', 'period.toDate
 const REVENUE_PATHS = ['plSales', 'plNetOperatingIncome', 'netTurnover', 'netSales', 'turnover', 'revenue', 'plNetSales', 'pl.netOperatingIncome'];
 const OPERATING_INCOME_PATHS = ['plNetOperatingIncome', 'pl.netOperatingIncome'];
 const EMPLOYEES_PATHS = ['nbrOfEmployees', 'numberOfEmployees', 'employees', 'averageNumberOfEmployees'];
-const PERSONNEL_PATHS = ['plPersonnelCosts', 'personnelCosts', 'staffCosts', 'salariesAndRemuneration'];
-const TAX_PATHS = ['plTaxOnProfit', 'taxOnProfit', 'incomeTax', 'plTax'];
+// economy-overview 2.1 /extended (OpenAPI 2026-10-12): `plPersonalCosts` =
+// Personnel costs, `plTaxes` = Tax, `dividend` = Dividend (beslutad utdelning
+// för räkenskapsåret). De nakna /{companyId}-svaren saknar dem.
+const PERSONNEL_PATHS = ['plPersonalCosts', 'plPersonnelCosts', 'personnelCosts', 'staffCosts', 'salariesAndRemuneration'];
+const TAX_PATHS = ['plTaxes', 'plTaxOnProfit', 'taxOnProfit', 'incomeTax', 'plTax'];
+const DIVIDEND_PATHS = ['dividend'];
 // Balansomslutning = summa tillgångar = summa eget kapital och skulder.
 // economy-overview 2.1 bär bara skuldsidan (`bsTotalEquityAndLiabilities`),
 // som per definition är samma belopp (incident 2026-10-12: noten
@@ -268,6 +274,7 @@ export function normalizeRoaringFinancials(
     return n === undefined ? undefined : Math.round(n * amountMultiplier);
   };
   let missingAssets = 0;
+  let missingDividend = 0;
   let salesDiffers = 0;
   for (const row of rows) {
     const year = yearOf(row);
@@ -292,8 +299,21 @@ export function normalizeRoaringFinancials(
     if (equity !== undefined) entry.equity_sek = equity;
     const result = mul(pickFirst(row, RESULT_PATHS));
     if (result !== undefined) entry.net_result_sek = result;
+    // Beslutad utdelning: nyckeln finns bara i /extended-svaret. Ett tal (även
+    // 0) är ett svar ⇒ `dividend_reported`; saknad nyckel lämnar utdelningen
+    // OKÄND (§ 51 — aldrig tyst 0 kr).
+    const dividend = mul(pickFirst(row, DIVIDEND_PATHS));
+    if (dividend !== undefined) {
+      entry.dividend_sek = Math.abs(dividend);
+      entry.dividend_reported = true;
+    } else missingDividend++;
     // Senaste raden per år vinner (Roaring kan ge flera perioder).
     byYear.set(year, { ...(byYear.get(year) || { year }), ...entry });
+  }
+  if (missingDividend > 0) {
+    notes.push(
+      `Roaring bokslut: utdelningsposten (dividend) saknas för ${missingDividend} årsrad(er) — utdelningen lämnas OKÄND, aldrig 0 (bara /extended-svaret bär fältet).`
+    );
   }
   if (missingAssets > 0) {
     notes.push(`Roaring bokslut: balansomslutning saknas för ${missingAssets} årsrad(er) — kontrollera fältmappningen.`);
@@ -306,132 +326,6 @@ export function normalizeRoaringFinancials(
   if (amountMultiplier !== 1) {
     notes.push(`Roaring bokslut: belopp multiplicerade med ${amountMultiplier} (TSEK → SEK).`);
   }
-  return [...byYear.values()].sort((a, b) => a.year - b.year);
-}
-
-// ─── Årsredovisning (financial-record) — beslutad vinstutdelning ────────────
-//
-// Art. 22 GBER kräver att bolaget INTE "delat ut vinst" (§ 51). Resultat-
-// räkningen (economy-overview) säger inget om det — utdelningen står i
-// årsredovisningens förslag till vinstdisposition / beslutad utdelning.
-// Fältnamnen i Roarings financial-record är INTE bekräftade mot ett riktigt
-// svar (2026-10-12): kandidatlistan täcker XBRL-/Bolagsverkets-namn och
-// engelska varianter, och en årsrad UTAN någon utdelningsnyckel noteras med
-// sin FORM (nycklar, aldrig värden) så mappningen kan rättas efter första
-// uppslaget — "ingen nyckel" blir aldrig tyst "0 kr".
-const ANNUAL_REPORT_ROW_KEYS = ['financialRecords', 'annualReports', 'reports', 'companyAccounts', 'accounts', 'financialStatements', 'years', 'records'];
-const DIVIDEND_PATHS = [
-  'dividend',
-  'dividends',
-  'decidedDividend',
-  'dividendDecided',
-  'proposedDividend',
-  'dividendProposed',
-  'paidDividend',
-  'dividendPaid',
-  'plDividend',
-  'bsDividend',
-  'utdelning',
-  'beslutadUtdelning',
-  'foreslagenUtdelning',
-  'profitDistribution.dividend',
-  'appropriationOfProfit.dividend',
-  'dispositionOfProfit.dividend',
-  'dispositions.dividend',
-  'equity.dividend',
-  'resultatdisposition.utdelning'
-];
-/** Nycklar som bär "utdelning" i namnet men INTE är ett belopp per år (per aktie, procent, datum). */
-const DIVIDEND_NOT_AMOUNT = /pershare|peraktie|percent|procent|date|datum|yield/i;
-
-function findDividendKey(row: Record<string, unknown>): string | undefined {
-  for (const p of DIVIDEND_PATHS) if (pickFirst(row, [p]) !== undefined) return p;
-  // Reserv: en toppnyckel som innehåller "dividend"/"utdelning" och bär ett tal.
-  for (const [k, v] of Object.entries(row)) {
-    if (!/dividend|utdelning/i.test(k) || DIVIDEND_NOT_AMOUNT.test(k)) continue;
-    if (asNumber(v) !== undefined) return k;
-  }
-  return undefined;
-}
-
-/**
- * Årsredovisningens rader → bokslutsrader med `dividend_sek` +
- * `dividend_reported` (+ personalkostnad/bolagsskatt när de finns — de saknas
- * i economy-overview). Beloppen antas vara i SEK (`amountMultiplier` 1);
- * utdelningsvillkoret avgörs av 0 eller inte och påverkas inte av enheten.
- */
-export function normalizeRoaringAnnualReport(
-  raw: unknown,
-  notes: string[],
-  amountMultiplier = 1
-): RegistryFinancialsYear[] {
-  const rows: Record<string, unknown>[] = [];
-  for (const rec of allRecords(raw)) {
-    const nested = pickFirst(rec, ANNUAL_REPORT_ROW_KEYS);
-    if (Array.isArray(nested)) {
-      for (const n of nested) if (n && typeof n === 'object') rows.push(n as Record<string, unknown>);
-    } else {
-      rows.push(rec);
-    }
-  }
-  if (rows.length === 0) {
-    notes.push('Roaring årsredovisning: inga årsrader i svaret.');
-    return [];
-  }
-  const mul = (v: unknown) => {
-    const n = asNumber(v);
-    return n === undefined ? undefined : Math.round(n * amountMultiplier);
-  };
-  const byYear = new Map<number, RegistryFinancialsYear>();
-  const noDividendKey: Record<string, unknown>[] = [];
-  let noYear = 0;
-  for (const row of rows) {
-    const year = yearOf(row);
-    if (!year) {
-      noYear++;
-      continue;
-    }
-    const entry: RegistryFinancialsYear = { year };
-    const key = findDividendKey(row);
-    if (key) {
-      const amount = mul(pickFirst(row, [key]));
-      if (amount !== undefined) {
-        entry.dividend_sek = Math.abs(amount);
-        entry.dividend_reported = true;
-      }
-    }
-    if (entry.dividend_reported !== true) noDividendKey.push(row);
-    const personnel = mul(pickFirst(row, PERSONNEL_PATHS));
-    if (personnel !== undefined) entry.personnel_cost_sek = Math.abs(personnel);
-    const tax = mul(pickFirst(row, TAX_PATHS));
-    if (tax !== undefined) entry.corporate_tax_sek = Math.abs(tax);
-    byYear.set(year, { ...(byYear.get(year) || { year }), ...entry });
-  }
-  if (noYear > 0) notes.push(`Roaring årsredovisning: ${noYear} rad(er) utan räkenskapsår hoppades över.`);
-  if (noDividendKey.length > 0) {
-    const shape = describeRecordKeys({ records: [noDividendKey[0]] }).join(', ');
-    notes.push(
-      `Roaring årsredovisning: ingen utdelningspost hittades för ${noDividendKey.length} årsrad(er) — utdelningen lämnas OKÄND (aldrig 0). Radens fältnycklar: ${shape || '(tomt)'}.`
-    );
-  }
-  if (amountMultiplier !== 1) {
-    notes.push(`Roaring årsredovisning: belopp multiplicerade med ${amountMultiplier}.`);
-  }
-  return [...byYear.values()].sort((a, b) => a.year - b.year);
-}
-
-/**
- * Slår ihop bokslut (economy-overview) och årsredovisning (financial-record)
- * per år. Bokslutets bekräftade poster vinner vid överlapp; årsredovisningen
- * bidrar med utdelning, personalkostnad och bolagsskatt.
- */
-export function mergeFinancialYears(
-  economy: RegistryFinancialsYear[],
-  annual: RegistryFinancialsYear[]
-): RegistryFinancialsYear[] {
-  const byYear = new Map<number, RegistryFinancialsYear>();
-  for (const a of annual) byYear.set(a.year, { ...a });
-  for (const e of economy) byYear.set(e.year, { ...(byYear.get(e.year) || { year: e.year }), ...e });
   return [...byYear.values()].sort((a, b) => a.year - b.year);
 }
 
@@ -957,20 +851,16 @@ export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]):
 export function normalizeRoaringCompany(
   orgNr: string,
   bundle: RoaringRawBundle,
-  opts: { amountMultiplier?: number; annualReportMultiplier?: number; isPersonal: boolean }
+  opts: { amountMultiplier?: number; isPersonal: boolean }
 ): RegistryCompany {
   const notes: string[] = [];
   // Grunddata normaliseras bara när den delen hämtades (valbara delar, § 11.8)
   // — annars skulle "tomt svar" noteras för ett API som aldrig anropades.
   const { name, patch } =
     'overview' in bundle ? normalizeRoaringOverview(bundle.overview, notes) : { name: undefined, patch: {} };
-  const economy = bundle.financials
+  const financials = bundle.financials
     ? normalizeRoaringFinancials(bundle.financials, notes, opts.amountMultiplier ?? 1)
     : [];
-  const annual = bundle.annualReport
-    ? normalizeRoaringAnnualReport(bundle.annualReport, notes, opts.annualReportMultiplier ?? 1)
-    : [];
-  const financials = mergeFinancialYears(economy, annual);
   const ownership = opts.isPersonal
     ? []
     : dedupeOwnership([

@@ -1706,6 +1706,7 @@ export * from './education-documents';
 // ─── De minimis-modul (ren beräkningslogik, enhetstestad) ────────────────────
 export * from './de-minimis';
 export * from './excellence-screening';
+export * from './excellence-facts';
 // ─── Årshjul (ren domän-/geometrilogik, enhetstestad) ────────────────────────
 export * from './annual-wheel';
 export * from './agreements';

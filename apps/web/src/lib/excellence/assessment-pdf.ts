@@ -4,6 +4,7 @@ import fontkit from '@pdf-lib/fontkit';
 import { BRAND, rgb01, LOGO_RATIO } from '@/lib/documents/brand';
 import { loadLogoPng, loadPdfFonts } from '@/lib/documents/assets';
 import {
+  MATURITY_PHASE_LABEL,
   STATE_AID_OUTCOME_LABEL,
   VINNOVA_OUTCOME_LABEL,
   type CompanyAssessment,
@@ -378,7 +379,12 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
         a.assessedAt.slice(0, 10),
         `${STATE_AID_OUTCOME_LABEL[result.stateAid.outcome]} — ${result.stateAid.text}`,
         `${VINNOVA_OUTCOME_LABEL[result.vinnova.outcome]} — ${result.vinnova.text}`,
-        result.missing.length > 0 ? `${result.missing.length} punkter saknar underlag (se slutet).` : 'Underlag komplett för de automatiska punkterna.'
+        [
+          result.comment,
+          result.missing.length > 0 ? `${result.missing.length} punkter saknar underlag (se slutet).` : 'Underlag komplett för de automatiska punkterna.'
+        ]
+          .filter(Boolean)
+          .join('\n')
       ]
     ],
     [1.1, 3, 3, 2.4]
@@ -424,15 +430,27 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
   // ── Steg 2 ──────────────────────────────────────────────────────────────
   sectionTitle(ctx, `Steg 2 — Ingår ${subjectName} i målgruppen för Vinnova?`);
   if (a.founders && a.founders.length > 0) {
-    subTitle(ctx, 'Grundarteamet (ur teamet på bolagskortet)');
-    table(ctx, ['Namn', '% kapital'], a.founders.map((f) => [f.name, pct(f.equity_pct)]), [4, 1.2]);
+    subTitle(
+      ctx,
+      `Grundarteamet (${a.foundersSource === 'manual' ? 'manuellt inmatat' : 'ur teamet på bolagskortet'})${
+        a.facts.maturity_phase ? ` · fas: ${MATURITY_PHASE_LABEL[a.facts.maturity_phase]}` : ''
+      }${a.facts.research_spinoff ? ' · forskningsavknoppning' : ''}`
+    );
+    table(
+      ctx,
+      ['Namn', '% kapital', 'Engagemang (% av heltid)'],
+      a.founders.map((f) => [`${f.name}${f.researcher ? ' (forskare)' : ''}`, pct(f.equity_pct), pct(f.engagement_pct)]),
+      [3, 1.2, 1.8]
+    );
   }
   checks(ctx, result.vinnovaChecks);
   const irl = result.irl;
   const hasIrlDims = !!irl && [irl.crl, irl.brl, irl.tmrl, irl.srl].some((v) => typeof v === 'number');
   subTitle(
     ctx,
-    `Bedömning IRL${irl?.assessedAt ? ` (senast ${irl.assessedAt})` : ''}${typeof irl?.level === 'number' ? ` · sammanvägd nivå ${irl.level}` : ''}`
+    `Bedömning IRL${irl?.assessedAt ? ` (senast ${irl.assessedAt})` : ''}${typeof irl?.level === 'number' ? ` · sammanvägd nivå ${irl.level}` : ''}${
+      irl?.manualLevels ? ' · nivåer manuellt angivna' : ''
+    }`
   );
   table(
     ctx,
@@ -444,7 +462,12 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
         ['TMRL', irl?.tmrl],
         ['SRL', irl?.srl]
       ] as const
-    ).map(([k, v]) => [k, typeof v === 'number' ? String(v) : '–', hasIrlDims ? 'Motiveras av coachen' : 'Ingen readiness-bedömning i plattformen — fylls i av coachen']),
+    ).map(([k, v]) => [
+      k,
+      typeof v === 'number' ? String(v) : '–',
+      irl?.notes?.[k.toLowerCase() as 'crl' | 'brl' | 'tmrl' | 'srl'] ??
+        (hasIrlDims ? 'Motiveras av coachen' : 'Ingen readiness-bedömning i plattformen — fylls i av coachen')
+    ]),
     [1, 0.8, 4]
   );
   eyebrow(ctx, `Ingår ${subjectName} i målgruppen`);

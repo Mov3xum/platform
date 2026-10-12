@@ -71,6 +71,12 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     tags: {
       user: { kind: 'roles', roles: STAFF_AND_COACH },
       agent: { kind: 'deny', reason: 'Taggar ändras inte av agent i MVP.' }
+    },
+    // Bedömning excellens (§ 51.4): controllerns manuella svar — bär grundar-
+    // namn/engagemang och fri motiveringstext; bara människor i modulens krets.
+    screening_facts: {
+      user: { kind: 'roles', roles: STAFF_AND_COACH },
+      agent: { kind: 'deny', reason: 'Manuella bedömningssvar lämnas av controllern i Bedömning excellens, inte av agenten.' }
     }
   },
   activities: {

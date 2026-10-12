@@ -6,8 +6,6 @@ import {
   parseControlInterval,
   normalizeRoaringBeneficialOwners,
   normalizeRoaringCompany,
-  mergeFinancialYears,
-  normalizeRoaringAnnualReport,
   normalizeRoaringFinancials,
   normalizeRoaringGroupStructure,
   normalizeRoaringOverview,
@@ -636,22 +634,18 @@ test('verklig huvudman: kontrollgrund ur { code, description }, kodlista och obj
   assert.equal(run([{ code: 'Z' }]), 'other');
 });
 
-test('årsredovisning: beslutad utdelning per år, 0 kr är ett svar — personalkostnad/skatt följer med', () => {
+test('bokslut (/extended): dividend, plPersonalCosts och plTaxes läses exakt enligt specen — 0 kr utdelning är ett svar', () => {
   const notes: string[] = [];
-  const rows = normalizeRoaringAnnualReport(
+  const rows = normalizeRoaringFinancials(
     {
       records: [
-        {
-          companyId: '5595728790',
-          financialRecords: [
-            { toDate: '2023-12-31', dividend: 0, plPersonnelCosts: -820000, plTaxOnProfit: -12000 },
-            { toDate: '2024-12-31', profitDistribution: { dividend: 150000 } }
-          ]
-        }
-      ]
+        { companyId: '5595728790', fromDate: '2023-01-01', toDate: '2023-12-31', plSales: 100, plPersonalCosts: -820, plTaxes: -12, dividend: 0 },
+        { companyId: '5595728790', fromDate: '2024-01-01', toDate: '2024-12-31', plSales: 400, dividend: 150 }
+      ],
+      status: { code: 0, text: 'found' }
     },
     notes,
-    1
+    1000
   );
   assert.equal(rows.length, 2);
   assert.equal(rows[0].year, 2023);
@@ -661,56 +655,15 @@ test('årsredovisning: beslutad utdelning per år, 0 kr är ett svar — persona
   assert.equal(rows[0].corporate_tax_sek, 12_000);
   assert.equal(rows[1].dividend_sek, 150_000);
   assert.equal(rows[1].dividend_reported, true);
-  assert.ok(!notes.some((n) => n.includes('ingen utdelningspost')));
+  assert.ok(!notes.some((n) => n.includes('utdelningsposten')));
 });
 
-test('årsredovisning: saknad utdelningspost lämnar utdelningen OKÄND (aldrig 0) och noterar radens form', () => {
+test('bokslut utan dividend-nyckel (naken /{companyId}) lämnar utdelningen OKÄND och noterar det', () => {
   const notes: string[] = [];
-  const rows = normalizeRoaringAnnualReport({ records: [{ toDate: '2024-12-31', plNetProfitLoss: 50, dividendPerShare: 2 }] }, notes, 1);
+  const rows = normalizeRoaringFinancials({ records: [{ toDate: '2024-12-31', plSales: 50, plNetProfitLoss: 5 }] }, notes, 1000);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].dividend_reported, undefined);
   assert.equal(rows[0].dividend_sek, undefined);
-  const note = notes.find((n) => n.includes('ingen utdelningspost'));
-  assert.ok(note);
-  assert.ok(note!.includes('plNetProfitLoss'));
-  assert.ok(!note!.includes('50'), 'aldrig värden i noten');
+  assert.ok(notes.some((n) => n.includes('utdelningsposten')));
 });
 
-test('årsredovisning: en okänd toppnyckel med "dividend" och ett tal godtas som reserv', () => {
-  const notes: string[] = [];
-  const rows = normalizeRoaringAnnualReport({ records: [{ fiscalYear: 2024, decidedDividendAmount: 25000 }] }, notes, 1);
-  assert.equal(rows[0].dividend_sek, 25_000);
-  assert.equal(rows[0].dividend_reported, true);
-});
-
-test('mergeFinancialYears: bokslutets poster vinner, årsredovisningen bidrar med utdelning', () => {
-  const merged = mergeFinancialYears(
-    [{ year: 2024, revenue_sek: 100, personnel_cost_sek: 1 }],
-    [
-      { year: 2024, dividend_sek: 0, dividend_reported: true, personnel_cost_sek: 999 },
-      { year: 2023, dividend_sek: 10, dividend_reported: true }
-    ]
-  );
-  assert.deepEqual(merged.map((r) => r.year), [2023, 2024]);
-  assert.equal(merged[1].revenue_sek, 100);
-  assert.equal(merged[1].personnel_cost_sek, 1);
-  assert.equal(merged[1].dividend_sek, 0);
-  assert.equal(merged[1].dividend_reported, true);
-  assert.equal(merged[0].dividend_sek, 10);
-});
-
-test('normalizeRoaringCompany: årsredovisningen slås ihop med bokslutet per år', () => {
-  const c = normalizeRoaringCompany(
-    '5595728790',
-    {
-      financials: { records: [{ companyAccounts: [{ toDate: '2024-12-31', plSales: 200, bsTotalEquityAndLiabilities: 300 }] }] },
-      annualReport: { records: [{ financialRecords: [{ toDate: '2024-12-31', dividend: 0 }] }] }
-    },
-    { amountMultiplier: 1000, annualReportMultiplier: 1, isPersonal: false }
-  );
-  assert.equal(c.financials.length, 1);
-  assert.equal(c.financials[0].revenue_sek, 200_000);
-  assert.equal(c.financials[0].balance_sheet_sek, 300_000);
-  assert.equal(c.financials[0].dividend_sek, 0);
-  assert.equal(c.financials[0].dividend_reported, true);
-});

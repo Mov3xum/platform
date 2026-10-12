@@ -12,6 +12,13 @@ import {
 } from './validators';
 import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
+import { writeWithFallback } from './helpers';
+import {
+  isEmptyScreeningFacts,
+  normalizeScreeningFacts,
+  summarizeScreeningFacts,
+  type ScreeningManualFacts
+} from '@platform/shared';
 
 /**
  * Skrivbara fält på `startups` via det delade lagret. Källa av sanning
@@ -42,6 +49,7 @@ interface StartupRow extends Record<string, unknown> {
   name?: string | null;
   description?: string | null;
   tags?: string | null;
+  screening_facts?: unknown;
 }
 
 function normalizeValue(
@@ -159,4 +167,63 @@ export async function updateStartupField(
   });
 
   return ok({ startupId: params.startupId, field: params.field, before, after });
+}
+
+// ─── Bedömning excellens: manuella svar (§ 51.4) ─────────────────────────────
+
+export interface SaveScreeningFactsResult {
+  startupId: string;
+  /** Fältet saknas i schemat (migration 1700000190 inte körd) — inget sparades. */
+  schemaMissing: boolean;
+}
+
+/**
+ * Sparar controllerns manuella svar (`startups.screening_facts`, json) så
+ * nästa körning av Bedömning excellens återanvänder dem. Svaren är redan
+ * normaliserade/sanerade av `normalizeScreeningFacts` (ren modul); här
+ * enforce:as whitelist (människa i modulens krets, aldrig agent), tenant och
+ * audit. Auditen bär BARA antal besvarade punkter — aldrig namn, procent
+ * eller motiveringstext. Posten läses tillbaka efter skrivningen: PB släpper
+ * okända fält tyst (§ 24.4), så ett saknat fält rapporteras i stället för en
+ * tyst lyckad no-op.
+ */
+export async function saveStartupScreeningFacts(
+  pb: PocketBase,
+  actor: Actor,
+  params: { startupId: string; facts: ScreeningManualFacts }
+): Promise<WriteResult<SaveScreeningFactsResult>> {
+  const policy = canWriteField(actor, 'startups', 'screening_facts');
+  if (!policy.ok) return fail(actor.kind === 'agent' ? 'FIELD_NOT_WRITABLE' : 'FORBIDDEN', policy.reason ?? 'Skrivning nekad.');
+
+  let current: StartupRow;
+  try {
+    current = (await pb.collection('startups').getOne(params.startupId, { fields: 'id,tenant,screening_facts' })) as StartupRow;
+  } catch {
+    return fail('NOT_FOUND', 'Bolaget hittades inte.');
+  }
+  if (current.tenant !== actor.tenant) return fail('TENANT_MISMATCH', 'Åtkomst nekad — bolaget tillhör en annan tenant.');
+
+  const facts = normalizeScreeningFacts(params.facts);
+  const value = isEmptyScreeningFacts(facts) ? null : facts;
+  let after: Record<string, unknown>;
+  try {
+    after = await writeWithFallback(pb, (client) =>
+      client.collection('startups').update(params.startupId, { screening_facts: value }, { fields: 'id,screening_facts' })
+    );
+  } catch (err) {
+    return fail('DB_ERROR', err instanceof Error ? err.message : 'DB-uppdatering misslyckades.');
+  }
+  const schemaMissing = value !== null && (after.screening_facts === undefined || after.screening_facts === null);
+
+  await logAgentAction(pb, {
+    actor,
+    action_type: 'update',
+    collection: 'startups',
+    record_id: params.startupId,
+    field: 'screening_facts',
+    before_value: summarizeScreeningFacts(normalizeScreeningFacts(current.screening_facts)),
+    after_value: { ...summarizeScreeningFacts(facts), schema_missing: schemaMissing }
+  });
+
+  return ok({ startupId: params.startupId, schemaMissing });
 }

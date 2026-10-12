@@ -28,12 +28,26 @@ import { parseRoaringPathList, roaringReportsNoRecords } from './normalize';
 // Ett 404/403 från ett enskilt API (t.ex. verklig huvudman inte i paketet)
 // stoppar inte de övriga — normaliseraren noterar bortfallet.
 //
-// Endpoints granskade mot Roarings API-katalog (2026-10-08; roaring.io nås
-// inte från byggmiljön, så underlaget är katalogens id/sökvägar och
-// publicerade exempel — bekräfta alltid med "Testa mot org-nr"):
+// Endpoints enligt Roarings OpenAPI-specar (mottagna 2026-10-12: overview
+// 2.0, economy-overview 2.1, share-facts 1.1; koncernstrukturen enligt
+// katalogens platta `groupCompanies`-format; verklig huvudman enligt
+// katalogen — bekräfta alltid med "Testa mot org-nr"). Gemensamt kuvert:
+// `{ records: [...], status: { code: 0 found | 1 not found, text } }`;
+// 400 → `{ error, message, attributes[] }`, 404 "Requested resource could
+// not be found", 500 `{ error, message }`.
 //   grunddata         se-company-overview-2.0         → /se/company/overview/2.0/{companyId}
-//   bokslut           se-company-economy-overview-2.1 → /se/company/economy-overview/2.1/{companyId}
-//                     (tidigare default 1.1 — 2.1 är den publicerade versionen)
+//                     (companyName, companyRegistrationDate, legalGroupText/
+//                     legalGroupCode, statusTextHigh/statusTextDetailed/
+//                     statusCode, industryCode/industryText, commune —
+//                     email/phoneNumber/topDirectorName läses aldrig, PII)
+//   bokslut           se-company-economy-overview-2.1 ("Financial Information 2.1",
+//                     OpenAPI-spec 2026-10-12) → /extended/{companyId}?years=N:
+//                     flera räkenskapsår med `dividend` (beslutad utdelning),
+//                     `plPersonalCosts`, `plTaxes`, `numberOfEmployees`,
+//                     `plSales`, `bsTotalEquity`, `bsTotalEquityAndLiabilities`,
+//                     `plNetProfitLoss`, `fromDate`/`toDate`. Den nakna
+//                     /{companyId} ger BARA senaste året utan utdelning och
+//                     ligger kvar som reserv (403/404).
 //   koncernstruktur   se-company-group-structure-1.0  → /se/company/group-structure/1.0/{companyId}
 //   verklig huvudman  se-beneficialowner-2.1 (2.0 avvecklad 2025-01-15). Uppslag
 //                     per bolag är dokumenterat som …/beneficialowner/1.0/company/
@@ -41,13 +55,6 @@ import { parseRoaringPathList, roaringReportsNoRecords } from './normalize';
 //                     /company-varianten först; den nakna 2.1-sökvägen och 1.0
 //                     ligger kvar som reserv. `/se/company/beneficial-owner/…`
 //                     finns inte i katalogen och är borttagen.
-//   årsredovisning    se-company-financial-record-1.0 ("Årsredovisningar 1.0"
-//                     i priskalkylatorn, 375 credits) — hela bokslutet inkl.
-//                     förslag till/beslutad vinstutdelning, personalkostnad
-//                     och bolagsskatt. Sökvägen är INTE bekräftad mot ett
-//                     riktigt svar (2026-10-12): kandidaterna provas i ordning
-//                     och env `ROARING_FINANCIAL_RECORD_PATH` vinner —
-//                     verifiera med "Testa mot org-nr".
 // Kandidaterna provas vid 403/404, så fel version kostar ett extra anrop men
 // aldrig fel data — sökvägen som svarade visas i förhandsgranskningen.
 
@@ -68,13 +75,8 @@ export function roaringBaseUrl(creds: Record<string, string>): string {
 
 export const ROARING_DEFAULT_PATHS = {
   overview: ['/se/company/overview/2.0', '/se/company/overview/1.1'],
-  financials: ['/se/company/economy-overview/2.1', '/se/company/economy-overview/1.1'],
+  financials: ['/se/company/economy-overview/2.1/extended', '/se/company/economy-overview/2.1'],
   groupStructure: ['/se/company/group-structure/1.0'],
-  financialRecord: [
-    '/se/company/financial-record/1.0',
-    '/se/company/financial-records/1.0',
-    '/se/company/annual-report/1.0'
-  ],
   beneficialOwners: [
     '/se/beneficialowner/2.1/company',
     '/se/beneficialowner/2.1',
@@ -90,26 +92,23 @@ export const ROARING_PATHS = {
   groupStructure: () =>
     parseRoaringPathList(process.env.ROARING_GROUP_STRUCTURE_PATH, [...ROARING_DEFAULT_PATHS.groupStructure]),
   beneficialOwners: () =>
-    parseRoaringPathList(process.env.ROARING_BENEFICIAL_OWNER_PATH, [...ROARING_DEFAULT_PATHS.beneficialOwners]),
-  financialRecord: () =>
-    parseRoaringPathList(process.env.ROARING_FINANCIAL_RECORD_PATH, [...ROARING_DEFAULT_PATHS.financialRecord])
+    parseRoaringPathList(process.env.ROARING_BENEFICIAL_OWNER_PATH, [...ROARING_DEFAULT_PATHS.beneficialOwners])
 };
+
+/**
+ * Antal räkenskapsår bokslutsdelen begär (`?years=`, spec-default 5).
+ * Utdelningsvillkoret (§ 51) kräver VARJE år sedan registreringen — ett bolag
+ * äldre än fem år faller ändå på åldersvillkoret, så 5 räcker.
+ */
+export function roaringFinancialYears(): number {
+  const n = Number(env('ROARING_FINANCIALS_YEARS', '5'));
+  return Number.isInteger(n) && n > 0 && n <= 20 ? n : 5;
+}
 
 /** Roarings bokslutsbelopp anges i TSEK i economy-overview; env kan sätta 1 för SEK-API:er. */
 export function roaringAmountMultiplier(): number {
   const n = Number(env('ROARING_AMOUNT_MULTIPLIER', '1000'));
   return Number.isFinite(n) && n > 0 ? n : 1000;
-}
-
-/**
- * Årsredovisningens (financial-record) belopp antas vara i SEK (XBRL-posterna
- * i Bolagsverkets digitala årsredovisning är hela kronor); env kan sätta 1000
- * om API:t visar sig leverera TSEK. Utdelningsvillkoret (§ 51) avgörs av
- * 0 kr eller inte och påverkas inte av enheten.
- */
-export function roaringFinancialRecordMultiplier(): number {
-  const n = Number(env('ROARING_FINANCIAL_RECORD_AMOUNT_MULTIPLIER', '1'));
-  return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
 export interface RoaringCredentials {
@@ -146,7 +145,8 @@ export type RoaringFetchOutcome =
 export async function roaringGet(
   c: RoaringCredentials,
   path: string,
-  companyId: string
+  companyId: string,
+  query?: Record<string, string>
 ): Promise<RoaringFetchOutcome> {
   let token: string;
   try {
@@ -156,7 +156,8 @@ export async function roaringGet(
     return { ok: false, status, reason: err instanceof Error ? err.message : 'token-fel', path };
   }
   const request = createFetchClient(c.baseUrl, {});
-  const url = `${path.replace(/\/$/, '')}/${encodeURIComponent(companyId)}`;
+  const qs = query ? new URLSearchParams(query).toString() : '';
+  const url = `${path.replace(/\/$/, '')}/${encodeURIComponent(companyId)}${qs ? `?${qs}` : ''}`;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const data = await request<unknown>(url, {
@@ -208,11 +209,12 @@ export async function roaringGet(
 export async function roaringGetFirst(
   c: RoaringCredentials,
   paths: string[],
-  companyId: string
+  companyId: string,
+  query?: Record<string, string>
 ): Promise<RoaringFetchOutcome> {
   let last: RoaringFetchOutcome | undefined;
   for (const path of paths) {
-    const outcome = await roaringGet(c, path, companyId);
+    const outcome = await roaringGet(c, path, companyId, query);
     if (outcome.ok) return outcome;
     last = outcome;
     if (outcome.status !== 403 && outcome.status !== 404) break;

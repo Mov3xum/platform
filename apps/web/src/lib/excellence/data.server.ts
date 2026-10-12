@@ -3,8 +3,10 @@ import type PocketBase from 'pocketbase';
 import {
   DEFAULT_VAXELKURS_SEK_PER_EUR,
   SAMLAT_TAK_EUR,
+  normalizeScreeningFacts,
   samladSumma,
   type ExcellenceScreeningInput,
+  type ScreeningManualFacts,
   type GroupCompanyFacts,
   type ScreeningFinancialsYear,
   type ScreeningFounderRow,
@@ -59,6 +61,8 @@ export interface PlatformStartupFacts {
   ownership: ScreeningOwnershipEntry[];
   groupStructureSaved: boolean;
   beneficialOwnersSaved: boolean;
+  /** Controllerns sparade manuella svar (`startups.screening_facts`, § 51.4). */
+  facts: ScreeningManualFacts;
 }
 
 const OWNER_KINDS: ReadonlySet<string> = new Set(['company', 'person', 'public_body', 'investor', 'other']);
@@ -173,7 +177,7 @@ export async function loadPlatformStartupFacts(
   try {
     s = await pb.collection('startups').getOne(startupId, {
       fields:
-        'id,tenant,name,org_nr,bolagsform,bolag_status,company_registered_at,kommun,industri,irl_level,meets_excellence_criteria'
+        'id,tenant,name,org_nr,bolagsform,bolag_status,company_registered_at,kommun,industri,irl_level,meets_excellence_criteria,screening_facts'
     });
   } catch {
     return null;
@@ -279,8 +283,28 @@ export async function loadPlatformStartupFacts(
     financials,
     ownership,
     groupStructureSaved,
-    beneficialOwnersSaved
+    beneficialOwnersSaved,
+    facts: normalizeScreeningFacts(s.screening_facts)
   };
+}
+
+/**
+ * Anknutet bolag som själv är portföljbolag: dess registrerade de minimis-
+ * stöd läggs på koncernfakta (källa plattformen) så intyget inte behöver
+ * matas in manuellt. Läses med användarens token (RLS) — `undefined` när
+ * bolaget inte finns i plattformen.
+ */
+export async function attachPlatformDeMinimis(
+  pb: PocketBase,
+  tenantId: string,
+  facts: GroupCompanyFacts
+): Promise<GroupCompanyFacts> {
+  if (!facts.orgNr || facts.deMinimis) return facts;
+  const id = await findStartupByOrgNr(pb, tenantId, facts.orgNr);
+  if (!id) return facts;
+  const platform = await loadPlatformStartupFacts(pb, tenantId, id);
+  if (!platform?.deMinimis) return facts;
+  return { ...facts, name: facts.name ?? platform.name, deMinimis: { usedEur: platform.deMinimis.usedEur, source: 'platform' } };
 }
 
 /** Koncernbolag ur det som redan är sparat för ett portföljbolag. */
@@ -289,6 +313,7 @@ export function groupFactsFromSaved(f: PlatformStartupFacts): GroupCompanyFacts 
     orgNr: f.orgNr,
     name: f.name,
     dataFetched: true,
+    deMinimis: f.deMinimis ? { usedEur: f.deMinimis.usedEur, source: 'platform' } : undefined,
     basic: {
       registeredAt: f.registeredAt,
       bolagStatus: f.bolagStatus,
@@ -321,12 +346,7 @@ export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: 
     // "Inga uppgifter" (404 hos leverantören — nystartat bolag utan bokslut)
     // är ett SVAR, inte ett uteblivet uppslag: tom lista i stället för
     // undefined så tröskelraden säger "inget bokslut i registret".
-    financials:
-      fetched.includes('financials') || fetched.includes('annual_report')
-        ? company.financials
-        : noRecord.includes('financials')
-          ? []
-          : undefined,
+    financials: fetched.includes('financials') ? company.financials : noRecord.includes('financials') ? [] : undefined,
     ownership: company.ownership.map((o) => ({
       direction: o.direction,
       owner_kind: o.owner_kind,
@@ -348,16 +368,24 @@ export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: 
   };
 }
 
-/** Plattformens egna fakta (finns inte hos leverantören) — delas av båda lägena. */
-export function platformPart(platform: PlatformStartupFacts | null): Pick<
-  ExcellenceScreeningInput,
-  'founders' | 'deMinimis' | 'irl' | 'meetsExcellenceFlag' | 'sekPerEur'
-> {
+/**
+ * Plattformens egna fakta (finns inte hos leverantören) — delas av båda
+ * lägena. Manuella svar (`manual`) kan ge grundarteamet när det inte finns i
+ * teamet på bolagskortet (eller ska kompletteras med engagemang): då är
+ * källan "manuell", annars teamet.
+ */
+export function platformPart(
+  platform: Pick<PlatformStartupFacts, 'founders' | 'deMinimis' | 'irl' | 'meetsExcellence'> | null,
+  manual: ScreeningManualFacts | undefined
+): Pick<ExcellenceScreeningInput, 'founders' | 'foundersSource' | 'deMinimis' | 'irl' | 'meetsExcellenceFlag' | 'sekPerEur' | 'manual'> {
+  const manualFounders = manual?.founders && manual.founders.length > 0 ? manual.founders : undefined;
   return {
-    founders: platform ? platform.founders : undefined,
+    founders: manualFounders ?? (platform ? platform.founders : undefined),
+    foundersSource: manualFounders ? 'manual' : 'platform',
     deMinimis: platform ? platform.deMinimis : null,
     irl: platform?.irl ?? null,
     meetsExcellenceFlag: platform ? platform.meetsExcellence : undefined,
-    sekPerEur: DEFAULT_VAXELKURS_SEK_PER_EUR
+    sekPerEur: DEFAULT_VAXELKURS_SEK_PER_EUR,
+    manual
   };
 }

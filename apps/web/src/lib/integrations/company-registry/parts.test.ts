@@ -10,7 +10,7 @@ import {
   type RegistryPartId
 } from './parts';
 
-const ROARING: RegistryPartId[] = ['basic', 'financials', 'group_structure', 'beneficial_owners', 'annual_report'];
+const ROARING: RegistryPartId[] = ['basic', 'financials', 'group_structure', 'beneficial_owners'];
 const BOLAGSVERKET: RegistryPartId[] = ['basic'];
 
 test('utan val hämtas allt providern stödjer', () => {
@@ -38,8 +38,8 @@ test('ägardelarna identifieras', () => {
 });
 
 test('bokslutsdelarna: bokslut och årsredovisning skriver samma rader', () => {
-  assert.deepEqual(financialsParts(ROARING), ['financials', 'annual_report']);
-  assert.deepEqual(financialsParts(['annual_report']), ['annual_report']);
+  assert.deepEqual(financialsParts(ROARING), ['financials']);
+  assert.deepEqual(financialsParts(['basic', 'group_structure']), []);
   assert.deepEqual(financialsParts(BOLAGSVERKET), []);
 });
 
@@ -58,5 +58,5 @@ test('ersättningsläget för ägarbilden', () => {
 
 test('etiketterna finns för varje del', () => {
   assert.equal(describeRegistryParts(['basic', 'financials']), 'Grunddata, Bokslut');
-  assert.equal(describeRegistryParts([...REGISTRY_PART_IDS]).split(', ').length, 5);
+  assert.equal(describeRegistryParts([...REGISTRY_PART_IDS]).split(', ').length, 4);
 });
