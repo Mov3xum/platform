@@ -71,8 +71,18 @@ export function RegistryPricingForm({ tenantIntegrationId, providerSlug, provide
           ) : (
             'kr per credit publiceras inte i text'
           )}
-          {Object.keys(provider.creditsPerPart).length === 0 && (
+          {Object.keys(provider.creditsPerPart).length === 0 ? (
             <> · credits per API publiceras inte i text — {provider.consumptionHint}</>
+          ) : (
+            <>
+              {' · '}
+              {parts
+                .filter((p) => provider.creditsPerPart[p] !== undefined)
+                .map((p) => `${REGISTRY_PART_META[p].label} ${provider.creditsPerPart[p]} credits`)
+                .join(' · ')}
+              {' — stäm av mot er konsumering: '}
+              {provider.consumptionHint}
+            </>
           )}
           <span className="block text-[11px] text-foreground-subtle">
             Källa: {provider.sourceLabel}, läst {provider.publishedAt}. {provider.tierNote} Ett värde ni anger

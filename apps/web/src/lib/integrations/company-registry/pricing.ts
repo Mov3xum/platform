@@ -75,32 +75,45 @@ export interface RegistryProviderPricing {
 }
 
 /**
- * Roaring (help.roaring.io → Billing & Pricing → "How does your credits
- * system work?", läst 2026-10-12): utöver månadsavgiften debiteras
- * förbrukade credits; i artikelns exempel kostar en credit 0,20 kr
- * (4 400 credits = 880 kr) och priset per credit SJUNKER med volymen enligt
- * en trappa som bara visas som bild. Credits per API står inte i texten —
- * de hämtas i det inloggade kontot (app.roaring.io → Fakturering & Priser →
- * Konsumering) och anges per tenant eller via env.
+ * Roaring — publicerat listpris, läst 2026-10-12 ur två källor:
+ *  (1) help.roaring.io → Billing & Pricing → "How does your credits system
+ *      work?": utöver månadsavgiften debiteras förbrukade credits, och
+ *      priset per credit SJUNKER med volymen (trappa som bara visas som bild).
+ *  (2) Priskalkylatorn på roaring.io (skärmdump från kunden): credits per
+ *      anrop per dataset, och 620 credits = 124,00 kr ⇒ 0,20 kr/credit
+ *      (lägsta volymsteget, exkl. moms).
+ * Mappning kalkylator → datadel: Företagsinformation (2.0) = grunddata,
+ * Finansiell Information (2.1) = bokslut (economy-overview — INTE
+ * "Årsredovisningar (1.0)", 375 credits, som är financial-record-API:t vi
+ * inte anropar), Ägarstruktur (1.0) = koncernstruktur, Verklig Huvudman (2.1)
+ * = verklig huvudman (kalkylatorns rad heter "– Person"; bolagsuppslaget
+ * `/company/{orgnr}` antas ha samma pris — stäm av mot fakturan).
+ * Tenantens egna värden (avtalat paket/rabatt) vinner alltid.
  */
 export const REGISTRY_PROVIDER_PRICING: Readonly<Record<string, RegistryProviderPricing>> = {
   roaring: {
     providerName: 'Roaring',
     sekPerCredit: 0.2,
-    creditsPerPart: {},
-    productNames: {
-      basic: 'Company Information (se-company-overview)',
-      financials: 'Economy Overview (se-company-economy-overview)',
-      group_structure: 'Owner Structure / Group Structure (se-company-group-structure)',
-      beneficial_owners: 'Beneficial Owner (se-beneficialowner)'
+    creditsPerPart: {
+      basic: 10,
+      financials: 35,
+      group_structure: 150,
+      beneficial_owners: 50
     },
-    sourceLabel: 'Roarings helpcenter, "How does your credits system work?" (exempel: 4 400 credits = 880 kr)',
+    productNames: {
+      basic: 'Företagsinformation (2.0) / Company Information — se-company-overview',
+      financials: 'Finansiell Information (2.1) / Economy Overview — se-company-economy-overview (inte "Årsredovisningar 1.0", 375 credits)',
+      group_structure: 'Ägarstruktur (1.0) / Group Structure — se-company-group-structure',
+      beneficial_owners: 'Verklig Huvudman (2.1) / Beneficial Owner — se-beneficialowner (kalkylatorns rad "– Person"; bolagsuppslaget antas ha samma pris)'
+    },
+    sourceLabel:
+      'Roarings priskalkylator (credits per anrop; 620 credits = 124,00 kr exkl. moms) och helpcentret "How does your credits system work?"',
     sourceUrl: 'https://help.roaring.io/en/collections/167758-billing-pricing',
     publishedAt: '2026-10-12',
     tierNote:
-      'Listpris före volymrabatt — ju fler credits per månad, desto lägre pris per credit enligt Roarings trappa. Månadsavgiften för abonnemanget tillkommer och ingår inte här.',
+      'Listpris före volymrabatt (lägsta volymsteget) — ju fler credits per månad, desto lägre pris per credit enligt Roarings trappa. Månadsavgiften för abonnemanget och bevakning tillkommer och ingår inte här. Exkl. moms.',
     consumptionHint:
-      'Credits per API och den faktiska förbrukningen syns inloggad på app.roaring.io → bentomenyn → "Fakturering & Priser" → "Konsumering".'
+      'Den faktiska förbrukningen och ert avtalade pris syns inloggad på app.roaring.io → bentomenyn → "Fakturering & Priser" → "Konsumering".'
   }
 };
 

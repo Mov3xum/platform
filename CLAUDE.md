@@ -1586,12 +1586,18 @@ tenantens värde vinner per fält (`mergeRegistryPricing`). **Tre nivåer
 bära en siffra): Roaring 0,20 kr/credit enligt helpcentrets artikel "How does
 your credits system work?" (exempel 4 400 credits = 880 kr; priset per credit
 sjunker med volymen enligt en trappa som bara visas som bild, och
-månadsavgiften tillkommer). **Credits per API publicerar Roaring inte i
-text** (bara i det inloggade kontot: app.roaring.io → Fakturering & Priser →
-Konsumering) och lämnas därför tomma i listan — aldrig gissade; formuläret
-visar Roarings produktnamn per datadel (Company Information, Economy
-Overview, Owner/Group Structure, Beneficial Owner) så ledningen hittar rätt
-rad. `composeRegistryPricing` = listpris → env → tenant, per fält, och
+månadsavgiften tillkommer). **Credits per anrop** kommer ur Roarings
+priskalkylator (läst 2026-10-12, 620 credits = 124,00 kr exkl. moms ⇒ 0,20
+kr/credit): Företagsinformation 2.0 = **10** (`basic`), Finansiell
+Information 2.1 = **35** (`financials` — INTE "Årsredovisningar 1.0" à 375,
+som är det dyrare financial-record-API:t vi inte anropar), Ägarstruktur 1.0 =
+**150** (`group_structure`), Verklig Huvudman 2.1 = **50**
+(`beneficial_owners`; kalkylatorns rad heter "– Person", bolagsuppslaget
+antas kosta lika — stäm av mot Konsumering i kontot). En full hämtning = 245
+credits ≈ 49 kr per bolag. Siffrorna bär källa + datum i koden och får bara
+ändras mot en ny källa — aldrig gissas; formuläret visar Roarings
+produktnamn per datadel så ledningen hittar rätt rad i sitt konto
+(app.roaring.io → Fakturering & Priser → Konsumering). `composeRegistryPricing` = listpris → env → tenant, per fält, och
 `fieldSources` säger varifrån varje siffra kommer (visas i formuläret och
 kostnadsraden: "kr/credit är Roarings publicerade listpris före
 volymrabatt"). Listpriset ensamt gör aldrig en uppskattning komplett. Källa av sanning:

@@ -63,15 +63,18 @@ verifieras genom att köra förhandsgranskningen mot sandboxen.
    kandidater fast bolaget finns: sätt motsvarande `ROARING_*_PATH` i Coolify
    till den sökväg portalen visar (kommaseparerad lista tillåts) — t.ex.
    `ROARING_BENEFICIAL_OWNER_PATH=/se/beneficialowner/2.1/company`.
-6. **Ange credits per API** under Inställningar → Integrationer → Roaring →
-   Kostnad per anrop. Plattformen har Roarings publicerade listpris
-   (0,20 kr/credit, helpcentret 2026-10-12, före volymrabatt) som lägsta
-   nivå, men credits per API står bara i ert inloggade konto: app.roaring.io
-   → bentomenyn → "Fakturering & Priser" → "Konsumering" (produktnamnen
-   Company Information, Economy Overview, Owner/Group Structure, Beneficial
-   Owner). Utan dem visar bedömningssidan "pris ej angivet" — aldrig en
-   gissad summa. Er avtalade kr/credit (efter volymrabatt) anges i samma
-   formulär och vinner över listpriset.
+6. **Stäm av credits per API** under Inställningar → Integrationer → Roaring →
+   Kostnad per anrop. Plattformen har Roarings publicerade listpris som
+   lägsta nivå (läst 2026-10-12, före volymrabatt, exkl. moms): 0,20
+   kr/credit och per anrop Företagsinformation 2.0 = 10, Finansiell
+   Information 2.1 = 35, Ägarstruktur 1.0 = 150, Verklig Huvudman 2.1 = 50
+   (kalkylatorns rad "– Person"; bolagsuppslaget antas kosta lika) — en full
+   hämtning är 245 credits ≈ 49 kr per bolag. "Årsredovisningar 1.0" (375
+   credits) anropas inte. Jämför med ert inloggade konto: app.roaring.io →
+   bentomenyn → "Fakturering & Priser" → "Konsumering"; avviker ert paket
+   anges era värden i formuläret och vinner per fält över listpriset (er
+   avtalade kr/credit efter volymrabatt likaså). Bedömningssidan visar
+   kostnaden före varje hämtning och i resultatet.
 7. **Kontrollera enheten** för bokslutsbelopp: `economy-overview` anges
    normalt i TSEK (`ROARING_AMOUNT_MULTIPLIER` default 1000). Jämför
    förhandsgranskningens `revenue_sek` med portalens exempel; svarar API:t i
