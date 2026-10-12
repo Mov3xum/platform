@@ -261,3 +261,23 @@ test('grundare under 75 % ⇒ ingår inte i målgruppen', () => {
   assert.equal(res.vinnovaChecks[0].verdict, 'no');
   assert.equal(res.vinnova.outcome, 'not_in_target');
 });
+
+test('"inga uppgifter" hos leverantören (tom bokslutslista, hämtade ägardelar) är ett svar — inte ett uteblivet uppslag', () => {
+  // Nystartat bolag: Roaring svarar 404 på bokslut och koncern → delarna är
+  // hämtade med tomt resultat. Tröskelraden ska säga "inget bokslut i
+  // registret", inte "bokslut hämtades inte", och fristående-frågan ska inte
+  // fastna på "koncernstrukturen hämtades inte".
+  const r = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        financials: [],
+        ownership: [{ direction: 'owner', owner_kind: 'person', pct_min: 75, pct_max: 100, control_basis: 'shares' }],
+        groupStructureFetched: true,
+        beneficialOwnersFetched: true
+      })
+    })
+  );
+  assert.equal(r.thresholds.rows[0].note, 'Inget bokslut i registret (nystartat?)');
+  assert.notEqual(r.standalone.detail, 'Koncernstrukturen hämtades inte.');
+});

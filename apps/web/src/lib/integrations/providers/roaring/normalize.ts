@@ -267,6 +267,8 @@ const VOTES_PATHS = ['votesPercentage', 'votingPercentage', 'votingShare', 'shar
 
 interface GroupNode {
   id?: string;
+  /** Leverantörens id som det kom (för diagnos av okänt format — aldrig i noter). */
+  rawId?: string;
   name?: string;
   pct?: number;
   votes?: number;
@@ -277,8 +279,10 @@ interface GroupNode {
 function toNode(raw: unknown, depth = 0): GroupNode | undefined {
   if (!raw || typeof raw !== 'object' || depth > 8) return undefined;
   const rec = raw as Record<string, unknown>;
+  const rawId = asString(pickFirst(rec, ['companyId', 'orgNr', 'organisationNumber', 'registrationNumber', 'organizationNumber', 'id']));
   const node: GroupNode = {
-    id: normalizeOrgNr(asString(pickFirst(rec, ['companyId', 'orgNr', 'organisationNumber', 'registrationNumber']))) || undefined,
+    id: normalizeOrgNr(rawId) || undefined,
+    rawId,
     name: asString(pickFirst(rec, ['companyName', 'name', 'legalName'])),
     pct: asPct(pickFirst(rec, PCT_PATHS)),
     votes: asPct(pickFirst(rec, VOTES_PATHS)),
@@ -321,6 +325,28 @@ export function isLegalEntityOrgNr(id: string | undefined): id is string {
 }
 
 /**
+ * Sant när namnet bär en bolagsform (AB, HB, KB, Ltd, GmbH …). Används för
+ * att INTE anonymisera ett bolag vars id Roaring levererar i ett format vi
+ * inte känner igen — ett bolagsnamn är ingen personuppgift, men utan org-nr
+ * kan bolaget inte slås upp vidare (noteras). Ett personnummer-derivat
+ * (enskild firma) anonymiseras ALLTID, oavsett namn.
+ */
+export function looksLikeCompanyName(name: string | undefined): boolean {
+  if (!name) return false;
+  return /(^|[\s,(])(AB|HB|KB|AKTIEBOLAG|LTD|LIMITED|PLC|ASA|OYJ|OY|GMBH|AG|INC|LLC|BV|NV|SARL|APS|A\/S|EK\.? ?FÖR\.?|EKONOMISK FÖRENING)(\s|$|\)|,|\.)/i.test(
+    name.trim()
+  );
+}
+
+/** Beskriver ett id:s FORM (aldrig värdet) för diagnosnoten. */
+function describeIdShape(raw: string | undefined): string {
+  if (!raw) return 'saknas';
+  const digits = raw.replace(/[^0-9]/g, '').length;
+  const letters = /[A-Za-z]/.test(raw);
+  return `${raw.length} tecken, ${digits} siffror${letters ? ', bokstäver' : ''}`;
+}
+
+/**
  * En nod utan giltigt org-nr för juridisk person (saknat id, ogiltigt id,
  * eller ett personnummer-derivat = enskild firma/fysisk person) blir en
  * ANONYM person-rad: inget namn, inget org-nr — bara andel (GDPR § 5).
@@ -328,10 +354,29 @@ export function isLegalEntityOrgNr(id: string | undefined): id is string {
 function companyEntry(
   n: GroupNode,
   direction: 'owner' | 'holding',
-  indirect: boolean
+  indirect: boolean,
+  notes?: string[]
 ): RegistryOwnershipEntry | undefined {
   if (!n.id && !n.name) return undefined;
   if (!isLegalEntityOrgNr(n.id)) {
+    const personal = !!n.id && isPersonalOrgNr(n.id);
+    if (!personal && looksLikeCompanyName(n.name)) {
+      // Bolagsnamn men okänt id-format: behåll som bolag UTAN org-nr i
+      // stället för att tyst göra det till en anonym person (det gjorde att
+      // ett moderbolag försvann ur screeningen). Formen noteras så
+      // mappningen kan rättas (`companyId`-kandidaterna).
+      notes?.push(
+        `Roaring koncernstruktur: ${direction === 'owner' ? 'ägare' : 'innehav'} med bolagsnamn men id i okänt format (${describeIdShape(n.rawId)}) — behölls som bolag utan org-nr.`
+      );
+      return {
+        direction,
+        owner_kind: inferOwnerKindFromName(n.name, 'company'),
+        name: n.name,
+        capital_pct: n.pct,
+        voting_pct: n.votes,
+        indirect: indirect || undefined
+      };
+    }
     return {
       direction,
       owner_kind: 'person',
@@ -371,12 +416,24 @@ function normalizeFlatGroupStructure(
   const raw = pickFirst(root, ['groupCompanies']);
   if (!Array.isArray(raw)) return undefined;
   const items = raw.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object');
+  // Grafnyckel: org-nr när id:t går att tolka, annars leverantörens råa id
+  // (trimmat). Moder-kedjan följs på nyckeln, så ett bolag vars id Roaring
+  // levererar i ett format vi inte känner igen fortfarande hittas i listan —
+  // tidigare kastades hela den platta strukturen när motherCompanyId inte
+  // var ett org-nr, och modern blev "fysisk person" (incident 2026-10).
+  const graphKey = (raw: string | undefined) => {
+    const trimmed = raw?.trim();
+    if (!trimmed) return undefined;
+    return normalizeOrgNr(trimmed) || trimmed;
+  };
   const motherOf = (rec: Record<string, unknown>) =>
-    normalizeOrgNr(asString(pickFirst(rec, ['motherCompanyId', 'parentCompanyId']))) || undefined;
+    graphKey(asString(pickFirst(rec, ['motherCompanyId', 'parentCompanyId', 'motherId', 'parentId'])));
   if (!items.some((x) => motherOf(x))) return undefined;
 
+  const ID_KEYS = ['companyId', 'orgNr', 'organisationNumber', 'organizationNumber'];
   const asNode = (rec: Record<string, unknown>): GroupNode => ({
-    id: normalizeOrgNr(asString(pickFirst(rec, ['companyId', 'orgNr', 'organisationNumber']))) || undefined,
+    id: normalizeOrgNr(asString(pickFirst(rec, ID_KEYS))) || undefined,
+    rawId: asString(pickFirst(rec, ID_KEYS)),
     name: asString(pickFirst(rec, ['companyName', 'name', 'legalName'])),
     pct: asPct(pickFirst(rec, PCT_PATHS)),
     votes: asPct(pickFirst(rec, VOTES_PATHS)),
@@ -388,9 +445,10 @@ function normalizeFlatGroupStructure(
   const byId = new Map<string, { node: GroupNode; mother?: string }>();
   for (const rec of [root, ...items]) {
     const node = asNode(rec);
-    if (!node.id) continue;
-    const prev = byId.get(node.id);
-    byId.set(node.id, { node, mother: motherOf(rec) ?? prev?.mother });
+    const key = graphKey(node.rawId);
+    if (!key) continue;
+    const prev = byId.get(key);
+    byId.set(key, { node, mother: motherOf(rec) ?? prev?.mother });
   }
 
   const out: RegistryOwnershipEntry[] = [];
@@ -400,8 +458,13 @@ function normalizeFlatGroupStructure(
   let direct = true;
   while (motherId && !seen.has(motherId)) {
     seen.add(motherId);
-    const mother = byId.get(motherId)?.node ?? { id: motherId, children: [], parents: [] };
-    const entry = companyEntry({ ...mother, pct: undefined, votes: undefined }, 'owner', !direct);
+    const mother = byId.get(motherId)?.node ?? {
+      id: normalizeOrgNr(motherId) || undefined,
+      rawId: motherId,
+      children: [],
+      parents: []
+    };
+    const entry = companyEntry({ ...mother, pct: undefined, votes: undefined }, 'owner', !direct, notes);
     if (entry) {
       // Moderns andel av bolaget står på BOLAGETS egen post.
       if (direct) {
@@ -415,7 +478,7 @@ function normalizeFlatGroupStructure(
   }
   for (const rec of items) {
     if (motherOf(rec) !== target) continue;
-    const entry = companyEntry(asNode(rec), 'holding', false);
+    const entry = companyEntry(asNode(rec), 'holding', false, notes);
     if (entry) out.push(entry);
   }
   if (!self && !items.some((x) => motherOf(x) === target)) {
@@ -456,7 +519,7 @@ export function normalizeRoaringGroupStructure(
       // Andelen på ägaren = hur mycket ägaren äger av barnet (självt) — den
       // ligger på barnets nod i de flesta trädformat. Direkt ägare får därför
       // bolagets egen procent.
-      const entry = companyEntry(anc, 'owner', !isDirect);
+      const entry = companyEntry(anc, 'owner', !isDirect, notes);
       if (entry) {
         if (isDirect && self.pct !== undefined) entry.capital_pct = self.pct;
         if (isDirect && self.votes !== undefined) entry.voting_pct = self.votes;
@@ -464,26 +527,26 @@ export function normalizeRoaringGroupStructure(
       }
     });
     for (const p of self.parents) {
-      const e = companyEntry(p, 'owner', false);
+      const e = companyEntry(p, 'owner', false, notes);
       if (e) out.push(e);
     }
     for (const c of self.children) {
-      const e = companyEntry(c, 'holding', false);
+      const e = companyEntry(c, 'holding', false, notes);
       if (e) out.push(e);
     }
   } else {
     // Roten är sannolikt bolaget självt eller dess yttersta moder.
     if (root.id && root.id !== target) {
-      const e = companyEntry(root, 'owner', false);
+      const e = companyEntry(root, 'owner', false, notes);
       if (e) out.push(e);
       notes.push('Roaring koncernstruktur: bolaget hittades inte i trädet — roten tolkad som ägare.');
     }
     for (const p of root.parents) {
-      const e = companyEntry(p, 'owner', false);
+      const e = companyEntry(p, 'owner', false, notes);
       if (e) out.push(e);
     }
     for (const c of root.children) {
-      const e = companyEntry(c, root.id === target ? 'holding' : 'owner', false);
+      const e = companyEntry(c, root.id === target ? 'holding' : 'owner', false, notes);
       if (e) out.push(e);
     }
   }
@@ -570,8 +633,17 @@ export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]):
     const o = item as Record<string, unknown>;
     // Juridisk person som huvudman (ovanligt men förekommer) — behåll org-nr/
     // namn BARA när org-nr:et är giltigt och inte ett personnummer-derivat.
-    const candidateOrgNr = normalizeOrgNr(asString(pickFirst(o, ['companyId', 'organisationNumber', 'orgNr'])));
+    const rawId = asString(pickFirst(o, ['companyId', 'organisationNumber', 'orgNr', 'organizationNumber']));
+    const candidateOrgNr = normalizeOrgNr(rawId);
     const legalOrgNr = isLegalEntityOrgNr(candidateOrgNr || undefined) ? candidateOrgNr : null;
+    const companyName = asString(pickFirst(o, ['companyName', 'legalName']));
+    // Bolagsnamn men okänt id-format (inte personnummer): behåll som bolag
+    // utan org-nr — en huvudman som är juridisk person får inte försvinna.
+    const namedCompany =
+      !legalOrgNr && !!companyName && !(candidateOrgNr && isPersonalOrgNr(candidateOrgNr)) && looksLikeCompanyName(companyName);
+    if (namedCompany) {
+      notes.push(`Roaring verklig huvudman: juridisk person med id i okänt format (${describeIdShape(rawId)}) — behölls som bolag utan org-nr.`);
+    }
     const capitalRaw = pickFirst(o, BO_CAPITAL_PATHS);
     const votesRaw = pickFirst(o, BO_VOTES_PATHS);
     const capital = parsePctInterval(intervalText(capitalRaw));
@@ -581,12 +653,14 @@ export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]):
     const control = controlBasisCategory(controlText(pickFirst(o, BO_CONTROL_PATHS)));
     const entry: RegistryOwnershipEntry = {
       direction: 'owner',
-      owner_kind: legalOrgNr ? 'company' : 'person',
+      owner_kind: legalOrgNr || namedCompany ? inferOwnerKindFromName(companyName, 'company') : 'person',
       control_basis: control
     };
     if (legalOrgNr) {
       entry.org_nr = legalOrgNr;
-      entry.name = asString(pickFirst(o, ['companyName', 'legalName']));
+      entry.name = companyName;
+    } else if (namedCompany) {
+      entry.name = companyName;
     }
     if (capital) {
       if (capital.min === capital.max) entry.capital_pct = capital.min;

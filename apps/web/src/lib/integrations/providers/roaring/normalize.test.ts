@@ -381,3 +381,80 @@ test('verklig huvudman: intervall som objekt och kontrollgrund som kodlista', ()
   assert.ok(!JSON.stringify(rows[0]).includes('Johan'));
   assert.ok(!JSON.stringify(rows[0]).includes('198001011234'));
 });
+
+test('koncernstruktur (platt): moderbolag med bolagsnamn men id i okänt format behålls som bolag utan org-nr', () => {
+  // Incident 2026-10: Wellgo Health AB försvann ur screeningen som "Fysisk
+  // person 100 %" när moderns id inte kunde tolkas som org-nr.
+  const notes: string[] = [];
+  const rows = normalizeRoaringGroupStructure(
+    {
+      records: [
+        {
+          groupCompanies: [
+            { companyId: 'SE-WELLGO-001', companyName: 'Wellgo Health AB', companyLevel: 0 },
+            { companyId: '5595728790', companyName: 'Combly AB', motherCompanyId: 'SE-WELLGO-001', ownedPercentage: 100, companyLevel: 1 }
+          ]
+        }
+      ]
+    },
+    '5595728790',
+    notes
+  );
+  const owner = rows.find((r) => r.direction === 'owner');
+  assert.ok(owner, 'moderbolaget ska finnas som ägare');
+  assert.equal(owner.owner_kind, 'company');
+  assert.equal(owner.name, 'Wellgo Health AB');
+  assert.equal(owner.org_nr, undefined);
+  assert.equal(owner.capital_pct, 100);
+  const json = JSON.stringify(notes);
+  assert.ok(json.includes('okänt format'), 'formen ska noteras');
+  assert.ok(!json.includes('SE-WELLGO-001'), 'aldrig själva id-värdet i noten');
+});
+
+test('koncernstruktur: personnummer-derivat anonymiseras ÄVEN med bolagsliknande namn', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringGroupStructure(
+    {
+      records: [
+        {
+          companyId: '5595728790',
+          companyName: 'Combly AB',
+          owners: [{ companyId: '8501011234', companyName: 'Annas Firma AB', ownedPercentage: 30 }]
+        }
+      ]
+    },
+    '5595728790',
+    notes
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].owner_kind, 'person');
+  assert.equal(rows[0].name, undefined);
+  assert.ok(!JSON.stringify(rows).includes('Annas'));
+});
+
+test('verklig huvudman: juridisk person med id i okänt format behålls som bolag utan org-nr', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringBeneficialOwners(
+    {
+      records: [
+        {
+          companyId: '5595728790',
+          beneficialOwners: [
+            { companyId: 'X-123', companyName: 'Wellgo Health AB', ownershipPercentInterval: '>75', controlType: 'Äger aktier' },
+            { firstName: 'Johan', surName: 'Testsson', personalNumber: '198001011234', ownershipPercentInterval: '25-50' }
+          ]
+        }
+      ]
+    },
+    notes
+  );
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].owner_kind, 'company');
+  assert.equal(rows[0].name, 'Wellgo Health AB');
+  assert.equal(rows[0].org_nr, undefined);
+  assert.equal(rows[0].pct_min, 75);
+  assert.equal(rows[1].owner_kind, 'person');
+  assert.equal(rows[1].name, undefined);
+  assert.ok(!JSON.stringify(rows).includes('Testsson'));
+  assert.ok(!JSON.stringify(notes).includes('X-123'));
+});

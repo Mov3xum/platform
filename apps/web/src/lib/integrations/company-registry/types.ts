@@ -99,6 +99,14 @@ export interface RegistryCompany {
    */
   fetchedParts?: RegistryPartId[];
   /**
+   * Delar som begärdes och där leverantören uttryckligen svarade att det
+   * INTE finns några uppgifter (404 / "records not found") — t.ex. ett
+   * nystartat bolag utan bokslut eller ett bolag utanför varje koncern.
+   * Skrivs aldrig (ingår inte i `fetchedParts`), men bedömningen (§ 51) kan
+   * skilja "inget bokslut finns" från "bokslut hämtades inte".
+   */
+  noRecordParts?: RegistryPartId[];
+  /**
    * PII-fria diagnosnoteringar från normaliseraren ("balansomslutning saknas i
    * svaret", "ägarbild stöds inte av källan"). Visas i förhandsgranskningen så
    * att fältmappningen kan verifieras mot en riktig leverantörsrespons.

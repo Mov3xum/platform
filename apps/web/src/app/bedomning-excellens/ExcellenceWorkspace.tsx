@@ -59,6 +59,10 @@ const SOURCE_LABEL: Record<ScreeningSource, string> = {
   platform: 'Plattformen',
   manual: 'Manuell kontroll'
 };
+const PART_LABEL: Record<'group_structure' | 'beneficial_owners', string> = {
+  group_structure: 'Koncernstruktur',
+  beneficial_owners: 'Verklig huvudman'
+};
 const OWNER_KIND_LABEL: Record<string, string> = {
   company: 'Bolag',
   person: 'Fysisk person',
@@ -125,12 +129,13 @@ function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; ca
             <th className="px-3 py-1.5 font-medium">Typ</th>
             <th className="px-3 py-1.5 font-medium">% kapital</th>
             <th className="px-3 py-1.5 font-medium">% röster</th>
+            <th className="px-3 py-1.5 font-medium">Källa</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr className="border-t border-default">
-              <td colSpan={4} className="px-3 py-2 text-foreground-muted">Inga rader i underlaget.</td>
+              <td colSpan={5} className="px-3 py-2 text-foreground-muted">Inga rader i underlaget.</td>
             </tr>
           ) : (
             rows.map((o, i) => {
@@ -147,6 +152,7 @@ function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; ca
                   <td className="px-3 py-1.5 text-foreground-muted">{OWNER_KIND_LABEL[o.owner_kind] ?? o.owner_kind}</td>
                   <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{range ?? pctText(o.capital_pct)}</td>
                   <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{range ? '' : pctText(o.voting_pct)}</td>
+                  <td className="px-3 py-1.5 text-[11.5px] text-foreground-subtle">{o.part ? PART_LABEL[o.part] : '–'}</td>
                 </tr>
               );
             })
@@ -425,6 +431,32 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
             <li key={i}>{w}</li>
           ))}
         </ul>
+      )}
+
+      {/* Vad leverantören faktiskt svarade — synligt direkt, inte hopfällt:
+          det är här man ser varför en del blev "okänt" (404 = inga uppgifter,
+          403 = inte i paketet, fält som saknades i svaret). PII-fritt. */}
+      {assessment.mode === 'register' && assessment.notes.some((n) => n.notes.length > 0) && (
+        <div className="rounded-2xl border border-default bg-canvas-subtle px-4 py-3">
+          <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+            Svar från {assessment.providerName ?? 'bolagsregistret'} per bolag
+          </p>
+          <div className="mt-2 space-y-3">
+            {assessment.notes.map((n) => (
+              <div key={n.orgNr}>
+                <p className="text-[12px] font-semibold text-foreground">
+                  {n.name || formatOrgNr(n.orgNr)}
+                  <span className="ml-2 font-normal text-foreground-subtle mx-tnum">{formatOrgNr(n.orgNr)}</span>
+                </p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[12px] text-foreground-muted">
+                  {n.notes.map((t, i) => (
+                    <li key={i}>{t}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Review-raden — som i Combly-dokumentet: datum, GBER, Vinnova, kommentar. */}

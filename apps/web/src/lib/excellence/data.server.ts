@@ -145,6 +145,8 @@ function mapOwnershipRow(r: Record<string, unknown>): ScreeningOwnershipEntry {
   const basis = str(r.control_basis);
   if (basis && /^[a-z_]{1,20}$/.test(basis)) entry.control_basis = basis;
   if (r.indirect === true) entry.indirect = true;
+  const part = str(r.source_part);
+  if (part === 'group_structure' || part === 'beneficial_owners') entry.part = part;
   return entry;
 }
 
@@ -289,6 +291,7 @@ export function groupFactsFromSaved(f: PlatformStartupFacts): GroupCompanyFacts 
 /** Koncernbolag ur ett färskt registeruppslag. */
 export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: string): GroupCompanyFacts {
   const fetched = company.fetchedParts ?? [];
+  const noRecord = company.noRecordParts ?? [];
   return {
     orgNr: company.org_nr,
     name: company.name ?? fallbackName,
@@ -301,7 +304,10 @@ export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: 
           isPersonal: company.isPersonal
         }
       : undefined,
-    financials: fetched.includes('financials') ? company.financials : undefined,
+    // "Inga uppgifter" (404 hos leverantören — nystartat bolag utan bokslut)
+    // är ett SVAR, inte ett uteblivet uppslag: tom lista i stället för
+    // undefined så tröskelraden säger "inget bokslut i registret".
+    financials: fetched.includes('financials') ? company.financials : noRecord.includes('financials') ? [] : undefined,
     ownership: company.ownership.map((o) => ({
       direction: o.direction,
       owner_kind: o.owner_kind,
@@ -312,10 +318,14 @@ export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: 
       pct_min: o.pct_min,
       pct_max: o.pct_max,
       control_basis: o.control_basis,
-      indirect: o.indirect
+      indirect: o.indirect,
+      part: o.part === 'group_structure' || o.part === 'beneficial_owners' ? o.part : undefined
     })),
-    groupStructureFetched: fetched.includes('group_structure'),
-    beneficialOwnersFetched: fetched.includes('beneficial_owners')
+    // Ett bolag utanför varje koncern / utan registrerade huvudmän får 404 —
+    // delen ÄR hämtad (svaret är "inga rader"), annars ser varje fristående
+    // bolag ut som ett ohämtat.
+    groupStructureFetched: fetched.includes('group_structure') || noRecord.includes('group_structure'),
+    beneficialOwnersFetched: fetched.includes('beneficial_owners') || noRecord.includes('beneficial_owners')
   };
 }
 

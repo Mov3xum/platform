@@ -1442,7 +1442,19 @@ står på bolagets EGEN post) och tar bara bolag vars `motherCompanyId` är
 bolaget som innehav — moderbolag och syskon i listan klassas aldrig som
 innehav (tidigare tolkades listan som ett träd och allt blev innehav). Ett
 HTTP 200-svar vars kuvert säger "records not found" behandlas som 404
-(`roaringReportsNoRecords`) så det aldrig räknas som en lyckad hämtning.
+(`roaringReportsNoRecords`) så det aldrig räknas som en lyckad hämtning —
+men delen bokförs i **`RegistryCompany.noRecordParts`** ("inga uppgifter"
+är ett svar: nystartat bolag utan bokslut, bolag utanför varje koncern), som
+bedömningen (§ 51) skiljer från "hämtades inte". **Id i okänt format
+(2026-10-12):** moder-kedjan i den platta listan följs på en grafnyckel
+(org-nr när id:t går att tolka, annars leverantörens råa id) — tidigare
+kastades hela strukturen när `motherCompanyId` inte var ett org-nr. En nod
+med **bolagsnamn** (AB/HB/Ltd/GmbH …, `looksLikeCompanyName`) men id i
+okänt format behålls som bolag UTAN org-nr + en not om id:ts FORM (aldrig
+värdet) i stället för att tyst anonymiseras till "fysisk person" (så
+försvann Wellgo Health AB ur Combly-screeningen); ett personnummer-derivat
+anonymiseras alltid, oavsett namn. Samma regel för juridisk person i
+`beneficialOwners[]`.
 Verklig huvudmans intervall/kontrollgrund tolkas även som objekt
 (`{ from, to }`) respektive kodlista (`controlTypes[]`); fältnamnen inuti
 `beneficialOwners[]` och bokslutets fält är fortsatt obekräftade — se
@@ -8231,6 +8243,20 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 - **Kostnad:** varje koncernbolag är egna leverantörsanrop (de valda
   datadelarna × bolag) — kryssrutorna och taket på 6 bolag begränsar;
   samma rate-limit som "Testa mot org-nr". Enskild firma slås aldrig upp.
+- **"Okänt" ska gå att förklara (2026-10-12).** I registerläget visas
+  leverantörens svar per bolag SYNLIGT överst (inte hopfällt): vilken
+  sökväg som svarade, 404 = inga uppgifter, 403 = inte i paketet, vilka
+  fältnycklar svaret bar. `noRecordParts` (§ 11.8) gör att ett nystartat
+  bolag utan bokslut får "Inget bokslut i registret (nystartat?)" i
+  tröskelraden och att fristående-frågan inte fastnar på "koncernstrukturen
+  hämtades inte" när registret svarat "inga rader". Ägartabellen har
+  kolumnen **Källa** (Koncernstruktur / Verklig huvudman, `part`) så man ser
+  vilket API en rad kom ur. Ett moderbolag med bolagsnamn men okänt
+  id-format visas som bolag utan org-nr (kan då inte slås upp vidare —
+  varnas i "Uppslag som inte kunde göras") i stället för som "fysisk
+  person". Det som registret ändå inte svarar på (börsnotering, utdelning,
+  grundarengagemang, innovationshöjd …) är OKÄNT med anvisning om manuell
+  kontroll — det är avsett.
 - **GDPR § 5:** fysiska personer i ägarbilden visas utan namn (som i
   § 11.8); grundarnamn + andel visas ur `startup_team_members` ENBART i
   denna staff-vy (samma data som bolagskortet) och når aldrig AI-kontexten
