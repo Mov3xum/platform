@@ -204,7 +204,10 @@ function checks(ctx: Ctx, list: ScreeningCheck[]) {
   const textW = ctx.width - badgeW - 8 - srcW;
   for (const c of list) {
     const lines = wrap(clean(ctx, `${c.label} — ${c.detail}`), ctx.body, size, textW);
-    const extra = c.verdict === 'unknown' && c.needs ? wrap(clean(ctx, `Behövs: ${c.needs}`), ctx.body, 8, textW) : [];
+    const extra = [
+      ...(c.hint ? wrap(clean(ctx, `Förifyllt från systemet: ${c.hint}`), ctx.body, 8, textW) : []),
+      ...(c.verdict === 'unknown' && c.needs ? wrap(clean(ctx, `Behövs: ${c.needs}`), ctx.body, 8, textW) : [])
+    ];
     const h = (lines.length + extra.length) * size * 1.4 + 6;
     ensure(ctx, h);
     const tone: RGB = c.verdict === 'yes' ? rgb01(BRAND.success) : c.verdict === 'no' ? rgb01(BRAND.danger) : MUTED;
@@ -430,6 +433,12 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
 
   eyebrow(ctx, 'Sammanfattande bedömning av art. 22 GBER');
   drawLines(ctx, `${STATE_AID_OUTCOME_LABEL[result.stateAid.outcome]} — ${result.stateAid.text}`, { size: 10, font: 'bold', gap: 8 });
+  if (result.stateAid.platformNote) {
+    drawLines(ctx, `Förifyllt från systemet: ${result.stateAid.platformNote} Jämförelse — bedömningen ändrar aldrig registreringen.`, {
+      size: 8.5,
+      gap: 8
+    });
+  }
 
   // ── Steg 2 ──────────────────────────────────────────────────────────────
   sectionTitle(ctx, `Steg 2 — Ingår ${subjectName} i målgruppen för Vinnova?`);

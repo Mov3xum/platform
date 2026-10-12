@@ -120,9 +120,24 @@ function allRecords(raw: unknown): Record<string, unknown>[] {
   return [raw as Record<string, unknown>];
 }
 
+const LISTED_PATHS = ['stockExchangeListed', 'listedOnStockExchange', 'isListed', 'listed', 'publiclyListed', 'quotedOnStockExchange', 'stockExchange.listed'];
+
+/** Tolkar en bool-liknande uppgift ("true"/"ja"/"J"/1) — undefined när den inte går att tolka. */
+export function asBoolean(v: unknown): boolean | undefined {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number') return v === 1 ? true : v === 0 ? false : undefined;
+  const s = asString(v)?.toLowerCase();
+  if (!s) return undefined;
+  if (/^(true|yes|ja|j|y|1)$/.test(s)) return true;
+  if (/^(false|no|nej|n|0)$/.test(s)) return false;
+  return undefined;
+}
+
 export function normalizeRoaringOverview(raw: unknown, notes: string[]): {
   name?: string;
   patch: RegistryStartupPatch;
+  /** Börsnoterat enligt svaret; undefined när grunddatat inte bär uppgiften. */
+  listed?: boolean;
 } {
   const rec = firstRecord(raw);
   const patch: RegistryStartupPatch = {};
@@ -174,7 +189,12 @@ export function normalizeRoaringOverview(raw: unknown, notes: string[]): {
   if (registered) patch.company_registered_at = registered;
   else notes.push('Roaring overview: registreringsdatum saknas.');
 
-  return { name, patch };
+  // Börsnotering (grundförutsättning art. 22, § 51): uppgiften finns bara i
+  // vissa svar — saknas fältet säger vi det, så punkten bekräftas av bolaget.
+  const listed = asBoolean(pickFirst(rec, LISTED_PATHS));
+  if (listed === undefined) notes.push('Roaring overview: ingen uppgift om börsnotering i svaret — bekräftas av bolaget.');
+
+  return { name, patch, listed };
 }
 
 const YEAR_PATHS = ['toDate', 'accountsClosingDate', 'periodEnd', 'period.toDate', 'endDate', 'year', 'fiscalYear'];
@@ -185,6 +205,7 @@ const TAX_PATHS = ['plTaxOnProfit', 'taxOnProfit', 'incomeTax', 'plTax'];
 const ASSETS_PATHS = ['bsTotalAssets', 'totalAssets', 'balanceSheetTotal', 'bs.totalAssets', 'sumAssets'];
 const EQUITY_PATHS = ['bsTotalEquity', 'totalEquity', 'equity', 'bs.totalEquity', 'sumEquity'];
 const RESULT_PATHS = ['plNetProfitLoss', 'netProfit', 'netIncome', 'profitLossForTheYear', 'plNetIncome', 'plProfitLossForTheYear'];
+const DIVIDEND_PATHS = ['plDividend', 'dividend', 'dividends', 'proposedDividend', 'dividendPaid', 'dividendToShareholders', 'kaDividend', 'bsProposedDividend'];
 
 function yearOf(row: Record<string, unknown>): number | undefined {
   for (const p of YEAR_PATHS) {
@@ -229,6 +250,7 @@ export function normalizeRoaringFinancials(
     return n === undefined ? undefined : Math.round(n * amountMultiplier);
   };
   let missingAssets = 0;
+  let missingDividend = 0;
   for (const row of rows) {
     const year = yearOf(row);
     if (!year) continue;
@@ -248,11 +270,19 @@ export function normalizeRoaringFinancials(
     if (equity !== undefined) entry.equity_sek = equity;
     const result = mul(pickFirst(row, RESULT_PATHS));
     if (result !== undefined) entry.net_result_sek = result;
+    // Utdelning (grundförutsättning art. 22, § 51): bara när fältet finns —
+    // ett saknat fält får aldrig bli 0 kr.
+    const dividend = mul(pickFirst(row, DIVIDEND_PATHS));
+    if (dividend !== undefined) entry.dividend_sek = Math.abs(dividend);
+    else missingDividend++;
     // Senaste raden per år vinner (Roaring kan ge flera perioder).
     byYear.set(year, { ...(byYear.get(year) || { year }), ...entry });
   }
   if (missingAssets > 0) {
     notes.push(`Roaring bokslut: balansomslutning saknas för ${missingAssets} årsrad(er) — kontrollera fältmappningen.`);
+  }
+  if (missingDividend > 0) {
+    notes.push(`Roaring bokslut: ingen utdelningsuppgift för ${missingDividend} årsrad(er) — "har inte delat ut vinst" bekräftas av bolaget.`);
   }
   if (amountMultiplier !== 1) {
     notes.push(`Roaring bokslut: belopp multiplicerade med ${amountMultiplier} (TSEK → SEK).`);
@@ -681,8 +711,8 @@ export function normalizeRoaringCompany(
   const notes: string[] = [];
   // Grunddata normaliseras bara när den delen hämtades (valbara delar, § 11.8)
   // — annars skulle "tomt svar" noteras för ett API som aldrig anropades.
-  const { name, patch } =
-    'overview' in bundle ? normalizeRoaringOverview(bundle.overview, notes) : { name: undefined, patch: {} };
+  const { name, patch, listed } =
+    'overview' in bundle ? normalizeRoaringOverview(bundle.overview, notes) : { name: undefined, patch: {}, listed: undefined };
   const financials = bundle.financials
     ? normalizeRoaringFinancials(bundle.financials, notes, opts.amountMultiplier ?? 1)
     : [];
@@ -709,6 +739,7 @@ export function normalizeRoaringCompany(
     startup: patch,
     financials,
     ownership,
+    listed,
     notes
   };
 }

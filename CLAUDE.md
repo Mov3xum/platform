@@ -8255,6 +8255,8 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 | `apps/web/src/lib/excellence/assessment-file.ts` (+ `.test.ts`) | REN: filnamn (`Bedömning excellens – <bolag> – <svensk tid>.pdf`), ämne i Filer |
 | `apps/web/src/lib/excellence/assessment-store.server.ts` | `storeExcellenceAssessmentPdf` — sparar PDF:en i `user_files` (bolagets mapp) via `createUserFileRecord`, fail-soft |
 | `backend/pocketbase-schema/migrations/1700000187_backfill_enabled_modules_bedomning_excellens.js` | Backfill av `users.enabled_modules` (§ 36.3-läxan) |
+| `apps/web/src/app/bedomning-excellens/ManualReviewForm.tsx` | Manuell komplettering (§ 51.5): bara punkter systemet inte kan avgöra, förifyllda från plattformen, sparade per bolag |
+| `backend/pocketbase-schema/migrations/1700000189_extend_excellence_review_and_dividend.js` | `startups.excellence_review` (json, manuella uppgifter) + `startup_financials.dividend_sek` (utdelning ur bokslut) |
 
 ### 51.2 Regler (bindande)
 
@@ -8398,3 +8400,90 @@ bedömning, eller en kollega som ville se ägarbilden, fick slå igen. Nu:
   på läsvägen (§ 21) och samma DPIA-förutsättningar (§ 11.3). Enskild firma
   får aldrig ägarbild (writern/fabriken strippar). Inga nya fält, ingen
   migration; riskklass n/a (ingen AI).
+
+### 51.5 Varje punkt får ett svar: registret först, sedan plattformen, sist människan (2026-10-12)
+
+**Incident:** bedömningen visade "Okänt" även där svaret fanns att hämta,
+och det som bara en människa kan avgöra (börsnotering, utdelningsbeslut,
+företagskoncentration, grundarnas engagemang, innovationshöjd …) hade ingen
+plats att fyllas i — varje ny körning började om från noll. Nu gäller en fast
+ordning per punkt, och **systemet vinner alltid**:
+
+1. **Bolagsregistret** (Roaring) besvarar det det kan, i BÅDA lägena: status,
+   ålder, tröskelvärden, ägarbild/fristående, "inte marknadsredo" (eget
+   kapital mot kostnader) — och nu även **utdelning** och **börsnotering**
+   när svaret bär uppgiften. `normalizeRoaringFinancials` läser utdelning ur
+   kandidatfält (`plDividend`, `dividend`, `proposedDividend` …) till
+   `RegistryFinancialsYear.dividend_sek` (persisteras i
+   `startup_financials.dividend_sek`, migration **1700000189**, skrivs av
+   samma writer som övriga bokslutsposter); en utdelning i något bokslut
+   avgör "har inte delat ut vinst" = NEJ, nollrader blir stöd ("Förifyllt:
+   boksluten … visar 0 kr") men inget bevis (beslut kan ha tagits efter
+   senaste bokslutet). Börsnotering läses ur grunddata (`stockExchangeListed`,
+   `isListed` …) till den transienta `RegistryCompany.listed` (lagras inte —
+   sparade data får den via den manuella uppgiften). Saknas fältet i svaret
+   noteras det PII-fritt ("ingen uppgift om börsnotering i svaret") så
+   controllern ser VARFÖR punkten är öppen. Fältnamnen är obekräftade
+   (roaring.io nås inte från byggmiljön) — samma kandidat-/not-mönster som
+   § 11.8; ett saknat fält blir aldrig 0 kr eller "inte noterat".
+2. **Plattformen** förifyller det den vet, märkt **"Förifyllt från
+   systemet"** (`ScreeningCheck.hint`) — aldrig ett svar: grundarna ur
+   teamet (engagemanget), `is_deeptech` + TMRL (innovationshöjd), IRL-nivå
+   och SRL (övriga villkor/Agenda 2030), `approved_de_minimis`/
+   `approved_state_aid_art22` och den **pågående statsstödsgrunden** i
+   `startup_state_aid_periods` (visas under GBER-sammanfattningen som
+   jämförelse — `stateAid.platformNote` — bedömningen ändrar aldrig
+   registreringen), bolagsform/registreringsdatum (övertagen verksamhet),
+   eget kapital när kostnadsberäkningen saknar omsättning/resultat.
+   `ScreeningPlatformHints` fylls av `loadPlatformStartupFacts`.
+3. **Människan kompletterar resten** i formuläret **Manuell komplettering**
+   under resultatet (`ManualReviewForm`, bara portföljbolag). Det visar
+   ENBART punkter med `editable` (källa manuell eller utfall okänt) — Ja /
+   Nej / Okänt + en PII-fri not — grupperade per bolag (grundförutsättningar
+   för startup OCH varje anknutet bolag, nyckel `cond:<org-nr>:<id>`) och
+   steg. **Grundardrivet** fylls inte i som Ja/Nej utan som **mognadsfas +
+   engagemang i % av heltid per grundare** (förifyllt med teamets grundare);
+   `evaluateFounderEngagement` (ren, enhetstestad) prövar tröskeln
+   deterministiskt (formation: inget krav; PSF ≥ 40 % sammantaget och en
+   grundare ≥ 20 %; PMF ≥ 60 %/40 %; forskningsavknoppning: manuell Ja/Nej)
+   och skriver ut att referensbedömningen anger strängare nivåer (50/30,
+   80/40) tills Vinnovas metodbeskrivning låsts. Sparas som
+   `startups.excellence_review` (json, migration **1700000189**; form
+   `{ checks: { <nyckel>: { verdict, note, updated_at } }, engagement:
+   { phase, founders: [{ name, pct }] } }`, tolkad tolerant av
+   `normalizeExcellenceManualReview` i `@platform/shared` — okända nycklar/
+   utfall och överlånga texter släpps, tak 60 punkter/12 grundare/600 tecken)
+   via `saveExcellenceReviewAction`: modulgrind + roll (admin/incubator_lead/
+   coach), bolaget läses med användarens token och tenant-verifieras, noter
+   och namn personnummer-saneras, `updated_at` stämplas bara på ändrade
+   uppgifter, skrivning via `writeWithFallback` (§ 21.3), posten läses
+   tillbaka och ett schema utan fältet ger ett tydligt fel (§ 24.4 — aldrig
+   en tyst no-op; formuläret visar det redan vid sidladdning via
+   `manualEditable`). Auditeras PII-fritt i `agent_actions` (nycklar +
+   utfall, aldrig noter) → "manuella uppgifter i Bedömning excellens" i
+   Bolagsnytt/`/aktivitet`. Sparandet ger direkt en ny bedömning på sparade
+   data (inget leverantörsanrop) + ny PDF i Filer (§ 51.3) — formuläret
+   gäller bara portföljbolag, eftersom uppgifterna lagras på bolaget.
+4. **Regelträdet** (`applyManual` i `excellence-screening.ts`) tillämpar den
+   sparade uppgiften BARA på punkter som är manuella/okända; har registret
+   eller plattformen numera ett svar ignoreras uppgiften (den ligger kvar
+   men visas inte som svar). En manuell uppgift väger i sammanfattningarna
+   precis som ett registersvar (fristående/tröskel/de minimis kan ge "art. 22
+   möjlig"; grundarägande kan ge Vinnova-målgrupp) och märks i detalj-
+   texten "Manuellt ja (datum): not. Systemet: …" med källa *Manuell
+   kontroll* i vyn och PDF:n. "Saknat underlag" listar bara det som
+   fortfarande är öppet.
+
+**GDPR § 5:** noterna är controllerns arbetsanteckningar om BOLAGET (källa
++ datum); UI:t säger uttryckligen "inga personuppgifter" och allt
+personnummer-saneras på skrivvägen. Grundarnamn i engagemangsblocket är
+samma namn som redan finns i teamet på bolagskortet (staff-krets) och når
+aldrig AI-kontexten (`lib/ai/context.ts` whitelistar inte
+`excellence_review`; `startups` är läsbar för `query_collection` under RLS
++ fältmaskning som förut). Utdelning är publik årsredovisningsdata.
+Chatt-agenten kan inte skriva fältet (`update_startup_field`-whitelisten är
+oförändrad). Speglat i `setup-via-api.mjs` (patch av `startups` +
+`startup_financials`), asserterat i `verify-baseline.mjs`
+(`REQUIRED_APP_FIELDS`). Riskklass n/a (ingen AI — deterministiska regler
+och mänskliga uppgifter).
+

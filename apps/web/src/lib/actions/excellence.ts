@@ -1,16 +1,23 @@
 'use server';
 
+import type PocketBase from 'pocketbase';
 import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import {
   MAX_RELATED_COMPANIES,
   deriveRelatedCompanies,
+  normalizeExcellenceManualReview,
   screenExcellence,
+  type ExcellenceManualReview,
   type GroupCompanyFacts,
-  type ScreeningFinancialsYear,
-  type ScreeningFounderRow
+  type Role,
+  type ScreeningFinancialsYear
 } from '@platform/shared';
+import { sanitizePersonnummer } from '@/lib/import/crm-excel';
+import { logAgentAction } from '@/lib/core/write/audit';
+import { writeWithFallback } from '@/lib/core/write/helpers';
+import { pbStatus } from '@/lib/pb-error';
 import { runRegistryLookup } from '@/lib/integrations/company-registry/lookup.server';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import { isPersonalOrgNr } from '@/lib/integrations/company-registry/orgnr';
@@ -20,7 +27,8 @@ import {
   groupFactsFromRegistry,
   groupFactsFromSaved,
   loadPlatformStartupFacts,
-  platformPart
+  platformPart,
+  type PlatformStartupFacts
 } from '@/lib/excellence/data.server';
 import type { ExcellenceAssessment, ExcellenceSavedToCard } from '@/lib/excellence/types';
 import { storeExcellenceAssessmentPdf } from '@/lib/excellence/assessment-store.server';
@@ -42,9 +50,61 @@ export type { ExcellenceAssessment, ExcellenceAssessmentFile } from '@/lib/excel
 export type ExcellenceAssessmentState = {
   error?: string;
   assessment?: ExcellenceAssessment;
+  /** Schema-drift: manuella uppgifter kunde inte sparas (fältet saknas). */
+  warning?: string;
 };
 
 const LOOKUP_ROLES = ['admin', 'incubator_lead'] as const;
+/** Får spara manuella uppgifter — samma krets som modulen (§ 51.5). */
+const REVIEW_ROLES: Role[] = ['admin', 'incubator_lead', 'coach'];
+const REVIEW_JSON_MAX = 20_000;
+
+type SessionLike = { id: string; tenant: string; roles: Role[]; name?: string };
+
+/**
+ * "Bedöm sparade data": regelträdet på det som redan finns i plattformen
+ * (bolagskortets registerdata, grundare, de minimis, IRL, manuella
+ * uppgifter) — inget leverantörsanrop. Delas av den vanliga körningen och
+ * av sparandet av manuella uppgifter, som alltid ger en ny bedömning + PDF.
+ */
+async function assessSaved(pb: PocketBase, user: SessionLike, platform: PlatformStartupFacts, now: Date) {
+  const subject = groupFactsFromSaved(platform);
+  // Anknutna bolag som själva är portföljbolag får sina sparade fakta.
+  const related: GroupCompanyFacts[] = [];
+  const financialsByOrg: Record<string, ScreeningFinancialsYear[]> = { [platform.orgNr]: platform.financials };
+  for (const ref of deriveRelatedCompanies(subject.ownership).slice(0, MAX_RELATED_COMPANIES)) {
+    if (!ref.org_nr || ref.relation === 'exempt') continue;
+    const id = await findStartupByOrgNr(pb, user.tenant, ref.org_nr);
+    const facts = id ? await loadPlatformStartupFacts(pb, user.tenant, id) : null;
+    if (facts) {
+      related.push({ ...groupFactsFromSaved(facts), name: facts.name });
+      financialsByOrg[facts.orgNr] = facts.financials;
+    }
+  }
+  const assessment: ExcellenceAssessment = {
+    mode: 'saved',
+    subject: {
+      name: platform.name,
+      orgNr: platform.orgNr,
+      startupId: platform.id,
+      bolagsform: platform.bolagsform,
+      registeredAt: platform.registeredAt,
+      kommun: platform.kommun,
+      industri: platform.industri,
+      bolagStatus: platform.bolagStatus
+    },
+    result: screenExcellence({ refDate: now, subject, related, ...platformPart(platform) }),
+    financialsByOrg,
+    founders: platform.founders,
+    notes: [],
+    lookupWarnings: [],
+    assessedAt: now.toISOString(),
+    assessedBy: displayName(user),
+    manualEditable: platform.manualFieldPresent,
+    manual: platform.manual
+  };
+  return storeExcellenceAssessmentPdf(pb, user, assessment);
+}
 
 export async function assessExcellenceAction(
   _prev: ExcellenceAssessmentState,
@@ -66,40 +126,7 @@ export async function assessExcellenceAction(
 
   if (mode === 'saved') {
     if (!platform) return { error: 'Välj ett portföljbolag för att bedöma sparade data.' };
-    const subject = groupFactsFromSaved(platform);
-    // Anknutna bolag som själva är portföljbolag får sina sparade fakta.
-    const related: GroupCompanyFacts[] = [];
-    const financialsByOrg: Record<string, ScreeningFinancialsYear[]> = { [platform.orgNr]: platform.financials };
-    for (const ref of deriveRelatedCompanies(subject.ownership).slice(0, MAX_RELATED_COMPANIES)) {
-      if (!ref.org_nr || ref.relation === 'exempt') continue;
-      const id = await findStartupByOrgNr(pb, user.tenant, ref.org_nr);
-      const facts = id ? await loadPlatformStartupFacts(pb, user.tenant, id) : null;
-      if (facts) {
-        related.push({ ...groupFactsFromSaved(facts), name: facts.name });
-        financialsByOrg[facts.orgNr] = facts.financials;
-      }
-    }
-    const assessment: ExcellenceAssessment = {
-        mode: 'saved',
-        subject: {
-          name: platform.name,
-          orgNr: platform.orgNr,
-          startupId: platform.id,
-          bolagsform: platform.bolagsform,
-          registeredAt: platform.registeredAt,
-          kommun: platform.kommun,
-          industri: platform.industri,
-          bolagStatus: platform.bolagStatus
-        },
-        result: screenExcellence({ refDate: now, subject, related, ...platformPart(platform) }),
-        financialsByOrg,
-        founders: platform.founders,
-        notes: [],
-        lookupWarnings: [],
-        assessedAt: now.toISOString(),
-        assessedBy: displayName(user)
-      };
-    return { assessment: await storeExcellenceAssessmentPdf(pb, user, assessment) };
+    return { assessment: await assessSaved(pb, user, platform, now) };
   }
 
   // Färska uppslag: leverantörerna debiterar per anrop — samma krets som
@@ -195,12 +222,120 @@ export async function assessExcellenceAction(
       cost: estimateRegistryCost(lookup.pricing, lookup.requestedParts, companiesLookedUp),
       savedToCards,
       assessedAt: now.toISOString(),
-      assessedBy: displayName(user)
+      assessedBy: displayName(user),
+      manualEditable: platform ? platform.manualFieldPresent : false,
+      manual: platform?.manual
     };
   // Bolagskorten som fick registerdata ska visa den direkt (Ägarbild,
   // Finansiell historik, grunddata) — inte efter en omladdning.
   for (const card of savedToCards) revalidatePath(`/startups/${card.startupId}`);
   return { assessment: await storeExcellenceAssessmentPdf(pb, user, assessment) };
+}
+
+/**
+ * Sparar controllerns manuella komplettering (§ 51.5) för ett portföljbolag
+ * och ger direkt en ny bedömning på sparade data (+ ny PDF i Filer).
+ *
+ * Säkerhet: modulgrind + roll (admin/incubator_lead/coach); bolaget läses med
+ * användarens token och tenant-verifieras; indata normaliseras tolerant
+ * (`normalizeExcellenceManualReview`: bara kända nycklar/utfall, cappade
+ * texter) och alla fritexter personnummer-saneras. Systemet vinner alltid —
+ * en uppgift för en punkt registret besvarar ignoreras av regelträdet.
+ * Skrivningen går via användartoken med superuser-fallback bara vid PB
+ * v0.23.4:s tysta regel-nekande (§ 21.3); posten läses tillbaka så ett
+ * schema utan fältet aldrig blir en tyst no-op (§ 24.4). Auditeras PII-fritt
+ * (nycklar + utfall, aldrig noter).
+ */
+export async function saveExcellenceReviewAction(
+  _prev: ExcellenceAssessmentState,
+  formData: FormData
+): Promise<ExcellenceAssessmentState> {
+  const user = await requireUser();
+  if (!canAccessModuleForUser(user.roles, 'bedomning_excellens', user.enabledModules) || !hasRole(user.roles, REVIEW_ROLES)) {
+    return { error: 'Du har inte behörighet att spara manuella uppgifter.' };
+  }
+  const startupId = String(formData.get('startup_id') || '').trim();
+  if (!/^[a-z0-9]{1,30}$/i.test(startupId)) return { error: 'Ogiltigt bolag.' };
+  const raw = String(formData.get('review_json') || '');
+  if (raw.length > REVIEW_JSON_MAX) return { error: 'De manuella uppgifterna är för långa.' };
+  let parsed: unknown;
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch {
+    return { error: 'De manuella uppgifterna kunde inte tolkas.' };
+  }
+
+  const pb = await getServerPb();
+  const platform = await loadPlatformStartupFacts(pb, user.tenant, startupId);
+  if (!platform) return { error: 'Bolaget hittades inte.' };
+  if (!platform.manualFieldPresent) {
+    return {
+      error:
+        'Manuella uppgifter kan inte sparas: fältet excellence_review saknas i PocketBase-schemat (kör migration 1700000189).'
+    };
+  }
+
+  const now = new Date();
+  const incoming = normalizeExcellenceManualReview(parsed);
+  const review = stampReview(incoming, platform.manual, now.toISOString());
+
+  try {
+    const updated = await writeWithFallback(pb, (c) =>
+      c.collection('startups').update<{ excellence_review?: unknown }>(startupId, { excellence_review: review }, { fields: 'id,excellence_review' })
+    );
+    // Schema-drift (§ 24.4): PB släpper okända fält tyst.
+    if (!('excellence_review' in updated)) {
+      return { error: 'Uppgifterna sparades inte: fältet excellence_review saknas i schemat (kör migration 1700000189).' };
+    }
+  } catch (err) {
+    console.error('[excellence] save review failed', { status: pbStatus(err), startupId });
+    return { error: 'Kunde inte spara de manuella uppgifterna. Försök igen.' };
+  }
+
+  // Audit (ISO 27001 A.8.15): nycklar + utfall — aldrig noter (fritext).
+  logAgentAction(pb, {
+    actor: { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles },
+    action_type: 'update',
+    collection: 'startups',
+    record_id: startupId,
+    field: 'excellence_review',
+    after_value: {
+      checks: Object.fromEntries(Object.entries(review.checks).map(([k, v]) => [k, v.verdict])),
+      engagement_phase: review.engagement?.phase ?? null,
+      founders_with_engagement: (review.engagement?.founders ?? []).filter((f) => typeof f.pct === 'number').length
+    }
+  }).catch(() => undefined);
+  revalidatePath(`/startups/${startupId}`);
+
+  const fresh = await loadPlatformStartupFacts(pb, user.tenant, startupId);
+  if (!fresh) return { error: 'Bolaget kunde inte läsas om efter sparandet.' };
+  return { assessment: await assessSaved(pb, user, fresh, now) };
+}
+
+/**
+ * Personnummer-sanerar fritexter och stämplar `updated_at` på uppgifter som
+ * ändrats sedan den sparade posten (oförändrade behåller sin tid).
+ */
+function stampReview(incoming: ExcellenceManualReview, previous: ExcellenceManualReview, nowIso: string): ExcellenceManualReview {
+  const checks: ExcellenceManualReview['checks'] = {};
+  for (const [key, entry] of Object.entries(incoming.checks)) {
+    const note = entry.note ? sanitizePersonnummer(entry.note) : undefined;
+    const prev = previous.checks[key];
+    const unchanged = prev && prev.verdict === entry.verdict && (prev.note ?? '') === (note ?? '');
+    checks[key] = {
+      verdict: entry.verdict,
+      ...(note ? { note } : {}),
+      updated_at: unchanged && prev.updated_at ? prev.updated_at : nowIso
+    };
+  }
+  const out: ExcellenceManualReview = { checks };
+  if (incoming.engagement) {
+    out.engagement = {
+      phase: incoming.engagement.phase,
+      founders: incoming.engagement.founders.map((f) => ({ name: sanitizePersonnummer(f.name), pct: f.pct }))
+    };
+  }
+  return out;
 }
 
 /** Visningsnamn för PDF:en — aldrig e-post (SessionUser.name faller tillbaka på e-post). */

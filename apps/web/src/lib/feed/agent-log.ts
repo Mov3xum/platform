@@ -76,6 +76,7 @@ const FIELD_LABELS: Record<string, string> = {
   responsible: 'ansvarig',
   notes: 'anteckningarna',
   next_step: 'nästa steg',
+  excellence_review: 'manuella uppgifter i Bedömning excellens',
   irl_level: 'IRL-nivån',
   name: 'namnet',
   description: 'beskrivningen',

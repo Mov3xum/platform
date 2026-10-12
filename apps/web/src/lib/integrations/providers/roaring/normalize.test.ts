@@ -43,7 +43,8 @@ test('overview → bolagskortets registerfält', () => {
   assert.equal(patch.industri, 'Dataprogrammering');
   assert.equal(patch.bolag_status, 'aktiv');
   assert.equal(patch.company_registered_at, '2026-02-17');
-  assert.deepEqual(notes, []);
+  // Enda noten: grunddatat bär ingen uppgift om börsnotering (§ 51 — bekräftas av bolaget).
+  assert.deepEqual(notes, ['Roaring overview: ingen uppgift om börsnotering i svaret — bekräftas av bolaget.']);
 });
 
 test('overview: tomt svar ger notes, inget patch', () => {
@@ -457,4 +458,37 @@ test('verklig huvudman: juridisk person med id i okänt format behålls som bola
   assert.equal(rows[1].name, undefined);
   assert.ok(!JSON.stringify(rows).includes('Testsson'));
   assert.ok(!JSON.stringify(notes).includes('X-123'));
+});
+
+test('overview: börsnotering tolkas bara när fältet finns — annars en not', () => {
+  const notes: string[] = [];
+  const a = normalizeRoaringOverview({ records: [{ ...overview.records[0], stockExchangeListed: 'false' }] }, notes);
+  assert.equal(a.listed, false);
+  assert.ok(!notes.some((n) => n.includes('börsnotering')));
+  const notes2: string[] = [];
+  const b = normalizeRoaringOverview(overview, notes2);
+  assert.equal(b.listed, undefined);
+  assert.ok(notes2.some((n) => n.includes('börsnotering')));
+  assert.equal(normalizeRoaringCompany('5595728790', { overview }, { isPersonal: false }).listed, undefined);
+});
+
+test('bokslut: utdelning läses när fältet finns (TSEK → SEK), saknat blir aldrig 0', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringFinancials(
+    {
+      records: [
+        {
+          companyAccounts: [
+            { toDate: '2024-12-31', plNetOperatingIncome: 141, bsTotalAssets: 1100, plDividend: 50 },
+            { toDate: '2023-12-31', plNetOperatingIncome: 90, bsTotalAssets: 900 }
+          ]
+        }
+      ]
+    },
+    notes,
+    1000
+  );
+  assert.equal(rows.find((r) => r.year === 2024)?.dividend_sek, 50_000);
+  assert.equal(rows.find((r) => r.year === 2023)?.dividend_sek, undefined);
+  assert.ok(notes.some((n) => n.includes('utdelningsuppgift')));
 });

@@ -42,6 +42,12 @@ export interface RegistryFinancialsYear {
   equity_sek?: number;
   /** Årets resultat efter skatt. */
   net_result_sek?: number;
+  /**
+   * Beslutad/utbetald utdelning enligt bokslutet (0 = ingen), när källan ger
+   * den — grundförutsättningen "har inte delat ut vinst" i art. 22-screeningen
+   * (§ 51). Saknat fält = okänt, aldrig 0.
+   */
+  dividend_sek?: number;
 }
 
 /** Riktning: `owner` = ägaren äger startup-bolaget; `holding` = startup-bolaget äger. */
@@ -92,6 +98,11 @@ export interface RegistryCompany {
   startup: RegistryStartupPatch;
   financials: RegistryFinancialsYear[];
   ownership: RegistryOwnershipEntry[];
+  /**
+   * Börsnoterat enligt grunddata, när källan ger uppgiften (grundförutsättning
+   * i art. 22-screeningen, § 51). Lagras inte på bolagskortet — transient.
+   */
+  listed?: boolean;
   /**
    * Datadelar som hämtades MED LYCKAT RESULTAT. Bara dessa skrivs; en del som
    * inte valdes, eller vars anrop föll, lämnar befintliga värden orörda.

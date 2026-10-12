@@ -91,7 +91,8 @@ async function upsertFinancialsRow(
     corporate_tax_sek: row.corporate_tax_sek,
     balance_sheet_sek: row.balance_sheet_sek,
     equity_sek: row.equity_sek,
-    net_result_sek: row.net_result_sek
+    net_result_sek: row.net_result_sek,
+    dividend_sek: row.dividend_sek
   });
   payload.tenant = tenantId;
   payload.startup = startupId;

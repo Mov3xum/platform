@@ -1,4 +1,9 @@
-import type { ExcellenceScreeningResult, ScreeningFinancialsYear, ScreeningFounderRow } from '@platform/shared';
+import type {
+  ExcellenceManualReview,
+  ExcellenceScreeningResult,
+  ScreeningFinancialsYear,
+  ScreeningFounderRow
+} from '@platform/shared';
 import type { RegistryCostEstimate } from '@/lib/integrations/company-registry/pricing';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
 
@@ -58,6 +63,13 @@ export interface ExcellenceAssessment {
   assessedBy?: string;
   /** Registerläget: bolagskort som fick det hämtade (startup + koncernbolag som finns i plattformen), § 51.4. */
   savedToCards?: ExcellenceSavedToCard[];
+  /**
+   * Sant när de manuella punkterna kan sparas för bolaget (portföljbolag med
+   * `startups.excellence_review` i schemat, § 51.5).
+   */
+  manualEditable?: boolean;
+  /** Den sparade manuella kompletteringen (förifyller formuläret). */
+  manual?: ExcellenceManualReview;
   /** Sparad PDF (sätts av actionen efter lagring). */
   file?: ExcellenceAssessmentFile;
   /** Lagringen misslyckades — bedömningen visas ändå (fail-soft). */

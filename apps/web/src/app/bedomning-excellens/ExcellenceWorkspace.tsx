@@ -14,9 +14,11 @@ import {
 } from '@platform/shared';
 import {
   assessExcellenceAction,
+  saveExcellenceReviewAction,
   type ExcellenceAssessment,
   type ExcellenceAssessmentState
 } from '@/lib/actions/excellence';
+import { ManualReviewForm } from './ManualReviewForm';
 import {
   RegistryPartsPicker,
   useRegistryPartSelection
@@ -111,8 +113,16 @@ function CheckList({ checks }: { checks: ScreeningCheck[] }) {
           <div className="min-w-0 flex-1">
             <p className="text-[13px] font-medium text-foreground">{c.label}</p>
             <p className="mt-0.5 text-[12.5px] text-foreground-muted">{c.detail}</p>
+            {c.hint && (
+              <p className="mt-0.5 text-[12px] text-link">
+                <span className="font-semibold">Förifyllt från systemet:</span> {c.hint}
+              </p>
+            )}
             {c.verdict === 'unknown' && c.needs && (
-              <p className="mt-0.5 text-[12px] text-foreground-subtle">Behövs: {c.needs}</p>
+              <p className="mt-0.5 text-[12px] text-foreground-subtle">
+                Behövs: {c.needs}
+                {c.editable ? ' — fylls i under Manuell komplettering nedan.' : ''}
+              </p>
             )}
           </div>
           <span className="shrink-0 text-[11px] text-foreground-subtle">{SOURCE_LABEL[c.source]}</span>
@@ -173,6 +183,14 @@ function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; ca
 // "Bedömning Vinnova Combly".
 export function ExcellenceWorkspace({ startups, registries, canLookup, initialStartupId }: Props) {
   const [state, formAction, pending] = useActionState(assessExcellenceAction, initialState);
+  // Manuell komplettering (§ 51.5) ger en ny bedömning — den nyaste visas.
+  const [reviewState, reviewAction, reviewPending] = useActionState(saveExcellenceReviewAction, initialState);
+  const shown = useMemo(() => {
+    const a = state.assessment;
+    const b = reviewState.assessment;
+    if (a && b) return a.assessedAt >= b.assessedAt ? a : b;
+    return a ?? b;
+  }, [state.assessment, reviewState.assessment]);
   const canFetch = canLookup && registries.length > 0;
   const [target, setTarget] = useState<'portfolio' | 'orgnr'>(
     initialStartupId || !canFetch || startups.length > 0 ? 'portfolio' : 'orgnr'
@@ -345,7 +363,16 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
         )}
       </section>
 
-      <div ref={resultRef}>{state.assessment && <AssessmentView assessment={state.assessment} />}</div>
+      <div ref={resultRef}>
+        {shown && (
+          <AssessmentView
+            assessment={shown}
+            reviewAction={reviewAction}
+            reviewPending={reviewPending}
+            reviewError={reviewState.error}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -383,7 +410,17 @@ function CompanyBlock({ c, subjectName }: { c: CompanyAssessment; subjectName: s
   );
 }
 
-function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
+function AssessmentView({
+  assessment,
+  reviewAction,
+  reviewPending,
+  reviewError
+}: {
+  assessment: ExcellenceAssessment;
+  reviewAction: (formData: FormData) => void;
+  reviewPending: boolean;
+  reviewError?: string;
+}) {
   const { subject, result } = assessment;
   const subjectName = subject.name || 'Startup-bolaget';
   const counts = useMemo(() => {
@@ -650,6 +687,12 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
             </span>
             {result.stateAid.text}
           </p>
+          {result.stateAid.platformNote && (
+            <p className="mt-1 text-[12px] text-link">
+              <span className="font-semibold">Förifyllt från systemet:</span> {result.stateAid.platformNote} Jämför med utfallet ovan — bedömningen ändrar
+              aldrig registreringen.
+            </p>
+          )}
         </div>
       </div>
 
@@ -731,6 +774,16 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
         <h3 className="text-[14px] font-semibold text-foreground">Steg 3 — Excellent inkubation</h3>
         <CheckList checks={[result.excellence]} />
       </div>
+
+      {/* Manuell komplettering (§ 51.5): bara punkter systemet inte kan
+          avgöra, förifyllda från plattformen, sparade per bolag. */}
+      <ManualReviewForm
+        key={`${assessment.subject.startupId ?? assessment.subject.orgNr}:${assessment.assessedAt}`}
+        assessment={assessment}
+        action={reviewAction}
+        pending={reviewPending}
+        error={reviewError}
+      />
 
       {result.missing.length > 0 && (
         <div className="rounded-2xl border border-default bg-canvas-subtle px-4 py-3">

@@ -5,6 +5,7 @@ import {
   deriveRelatedCompanies,
   describeCompanyAge,
   ownershipShareRange,
+  normalizeExcellenceManualReview,
   screenExcellence,
   type ExcellenceScreeningInput,
   type GroupCompanyFacts
@@ -280,4 +281,182 @@ test('"inga uppgifter" hos leverantören (tom bokslutslista, hämtade ägardelar
   );
   assert.equal(r.thresholds.rows[0].note, 'Inget bokslut i registret (nystartat?)');
   assert.notEqual(r.standalone.detail, 'Koncernstrukturen hämtades inte.');
+});
+
+test('manuell komplettering: bara manuella/okända punkter kan kompletteras — systemet vinner alltid', () => {
+  const manual = {
+    checks: {
+      'cond:5595728790:listed': { verdict: 'yes', note: 'Bolagsordning granskad', updated_at: '2026-10-12T10:00:00Z' },
+      // Åldern är ett registersvar — en sparad manuell uppgift ska ignoreras.
+      'cond:5595728790:age': { verdict: 'no', note: 'fel' },
+      innovative: { verdict: 'yes', note: 'Patentsökt sensor' },
+      other_criteria: { verdict: 'unknown', note: 'Agenda 2030 oklar' }
+    }
+  } as const;
+  const res = screenExcellence(
+    input({
+      manual: { checks: { ...manual.checks } },
+      founders: [{ name: 'A', equity_pct: 100 }],
+      deMinimis: { usedEur: 0, capEur: 300_000 }
+    })
+  );
+  const subj = res.companies[0].conditions;
+  const listed = subj.find((c) => c.id === 'listed')!;
+  assert.equal(listed.key, 'cond:5595728790:listed');
+  assert.equal(listed.verdict, 'yes');
+  assert.equal(listed.source, 'manual');
+  assert.equal(listed.editable, true);
+  assert.match(listed.detail, /Manuellt ja \(2026-10-12\): Bolagsordning granskad/);
+  assert.equal(listed.needs, undefined);
+  const age = subj.find((c) => c.id === 'age')!;
+  assert.equal(age.verdict, 'yes');
+  assert.equal(age.source, 'register');
+  assert.equal(age.editable, false);
+  assert.equal(age.manual, undefined);
+  const innovative = res.vinnovaChecks.find((c) => c.id === 'innovative')!;
+  assert.equal(innovative.verdict, 'yes');
+  assert.equal(innovative.source, 'manual');
+  const other = res.vinnovaChecks.find((c) => c.id === 'other_criteria')!;
+  assert.equal(other.verdict, 'unknown');
+  assert.match(other.detail, /Not: Agenda 2030 oklar/);
+  assert.ok(!res.missing.includes('Coachens bedömning av innovationshöjd.'));
+  assert.ok(res.missing.includes('Coachens bedömning av Agenda 2030, skalbarhet och kunskapstillgångar.'));
+  // Punkterna är spårbara i den platta listan med samma nycklar
+  assert.ok(res.checks.some((c) => c.key === 'cond:5595728790:listed' && c.scope === 'Combly AB'));
+});
+
+test('manuell komplettering avgör tröskelvärde och de minimis när underlag saknas', () => {
+  const res = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        financials: [],
+        ownership: [{ direction: 'owner', owner_kind: 'person', pct_min: 75, pct_max: 100, control_basis: 'shares' }]
+      }),
+      manual: {
+        checks: {
+          standalone: { verdict: 'yes', note: 'Aktiebok granskad: två grundare' },
+          thresholds: { verdict: 'yes', note: 'Bolagets egna uppgifter: 2 anställda, ingen omsättning' },
+          de_minimis: { verdict: 'yes', note: 'Intyg 2026-10-01' }
+        }
+      }
+    })
+  );
+  assert.equal(res.thresholds.check.verdict, 'yes');
+  assert.equal(res.thresholds.check.source, 'manual');
+  assert.equal(res.standalone.verdict, 'yes');
+  assert.equal(res.standalone.source, 'manual');
+  assert.equal(res.deMinimis.verdict, 'yes');
+  assert.equal(res.stateAid.outcome, 'art22_possible');
+});
+
+test('grundardrivet: engagemang + mognadsfas prövas deterministiskt', () => {
+  const base = { founders: [{ name: 'Anna', equity_pct: 50 }, { name: 'Bo', equity_pct: 50 }] };
+  const noEng = screenExcellence(input(base));
+  const fd = noEng.vinnovaChecks.find((c) => c.id === 'founder_driven')!;
+  assert.equal(fd.verdict, 'unknown');
+  assert.match(fd.hint ?? '', /Anna, Bo/);
+
+  const psf = screenExcellence(
+    input({
+      ...base,
+      manual: { checks: {}, engagement: { phase: 'problem_solution_fit', founders: [{ name: 'Anna', pct: 30 }, { name: 'Bo', pct: 15 }] } }
+    })
+  ).vinnovaChecks.find((c) => c.id === 'founder_driven')!;
+  assert.equal(psf.verdict, 'yes');
+  assert.match(psf.detail, /sammantaget 45 %, högst 30 %/);
+
+  const pmf = screenExcellence(
+    input({
+      ...base,
+      manual: { checks: {}, engagement: { phase: 'product_market_fit', founders: [{ name: 'Anna', pct: 30 }, { name: 'Bo', pct: 15 }] } }
+    })
+  ).vinnovaChecks.find((c) => c.id === 'founder_driven')!;
+  assert.equal(pmf.verdict, 'no');
+
+  const formation = screenExcellence(input({ ...base, manual: { checks: {}, engagement: { phase: 'formation', founders: [] } } }));
+  assert.equal(formation.vinnovaChecks.find((c) => c.id === 'founder_driven')!.verdict, 'yes');
+
+  // En manuell uppgift på punkten vinner över engagemangsberäkningen (research spinoff → manuellt ja)
+  const spin = screenExcellence(
+    input({
+      ...base,
+      manual: {
+        checks: { founder_driven: { verdict: 'yes', note: 'Forskarnas engagemang kompletteras av VD' } },
+        engagement: { phase: 'research_spinoff', founders: [{ name: 'Anna', pct: 10 }] }
+      }
+    })
+  ).vinnovaChecks.find((c) => c.id === 'founder_driven')!;
+  assert.equal(spin.verdict, 'yes');
+  assert.match(spin.detail, /Manuellt ja: Forskarnas/);
+});
+
+test('börsnotering och utdelning avgörs av registret när uppgiften finns', () => {
+  const res = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        basic: { registeredAt: '2025-01-01', bolagStatus: 'aktiv', listed: false },
+        financials: [
+          { year: 2024, employees: 1, revenue_sek: 100, balance_sheet_sek: 100, dividend_sek: 0 },
+          { year: 2025, employees: 1, revenue_sek: 100, balance_sheet_sek: 100, dividend_sek: 50_000 }
+        ]
+      })
+    })
+  );
+  const cond = res.companies[0].conditions;
+  assert.equal(cond.find((c) => c.id === 'listed')!.verdict, 'yes');
+  assert.equal(cond.find((c) => c.id === 'listed')!.source, 'register');
+  const div = cond.find((c) => c.id === 'dividend')!;
+  assert.equal(div.verdict, 'no');
+  assert.equal(div.source, 'register');
+  assert.match(div.detail, /2025 50\s000 kr/);
+
+  const zero = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        financials: [{ year: 2025, employees: 1, revenue_sek: 100, balance_sheet_sek: 100, dividend_sek: 0 }]
+      })
+    })
+  ).companies[0].conditions.find((c) => c.id === 'dividend')!;
+  assert.equal(zero.verdict, 'unknown');
+  assert.equal(zero.source, 'manual');
+  assert.match(zero.hint ?? '', /0 kr i utdelning/);
+});
+
+test('plattformens statsstödsgrund och flaggor visas som förifyllning, inte som svar', () => {
+  const res = screenExcellence(
+    input({
+      founders: [],
+      irl: { level: 4, srl: 3, tmrl: 5 },
+      platformHints: { isDeeptech: true, approvedDeMinimis: true, stateAidBasis: { basis: 'art22', validFrom: '2025-01-01' } }
+    })
+  );
+  assert.match(res.stateAid.platformNote ?? '', /art\. 22 GBER sedan 2025-01-01/);
+  assert.match(res.deMinimis.hint ?? '', /godkänd de minimis/);
+  assert.equal(res.deMinimis.verdict, 'unknown');
+  assert.match(res.vinnovaChecks.find((c) => c.id === 'innovative')!.hint ?? '', /deeptech.*TMRL 5/);
+  assert.match(res.vinnovaChecks.find((c) => c.id === 'other_criteria')!.hint ?? '', /IRL-nivå 4, SRL 3/);
+});
+
+test('normalizeExcellenceManualReview: tolerant, cappad och PII-säker form', () => {
+  const r = normalizeExcellenceManualReview({
+    checks: {
+      innovative: { verdict: 'yes', note: '  bra   idé  ', updated_at: '2026-10-12T10:00:00Z' },
+      'bad key!': { verdict: 'yes' },
+      empty: { verdict: 'unknown' },
+      note_only: { verdict: 'nope', note: 'kolla' },
+      long: { verdict: 'no', note: 'x'.repeat(2000) }
+    },
+    engagement: { phase: 'product_market_fit', founders: [{ name: 'Anna', pct: '35,5' }, { name: '', pct: 10 }, { name: 'Bo', pct: 150 }] }
+  });
+  assert.deepEqual(r.checks.innovative, { verdict: 'yes', note: 'bra idé', updated_at: '2026-10-12T10:00:00Z' });
+  assert.equal(r.checks['bad key!'], undefined);
+  assert.equal(r.checks.empty, undefined);
+  assert.deepEqual(r.checks.note_only, { verdict: 'unknown', note: 'kolla' });
+  assert.equal(r.checks.long?.note?.length, 600);
+  assert.deepEqual(r.engagement, { phase: 'product_market_fit', founders: [{ name: 'Anna', pct: 35.5 }, { name: 'Bo', pct: undefined }] });
+  assert.deepEqual(normalizeExcellenceManualReview(null), { checks: {} });
+  assert.deepEqual(normalizeExcellenceManualReview({ engagement: { phase: 'x', founders: [] } }), { checks: {} });
 });

@@ -3,8 +3,11 @@ import type PocketBase from 'pocketbase';
 import {
   DEFAULT_VAXELKURS_SEK_PER_EUR,
   SAMLAT_TAK_EUR,
+  normalizeExcellenceManualReview,
   samladSumma,
+  type ExcellenceManualReview,
   type ExcellenceScreeningInput,
+  type ScreeningPlatformHints,
   type GroupCompanyFacts,
   type ScreeningFinancialsYear,
   type ScreeningFounderRow,
@@ -52,6 +55,12 @@ export interface PlatformStartupFacts {
   industri?: string;
   irl: ScreeningIrl | null;
   meetsExcellence: boolean;
+  /** Controllerns manuella komplettering (`startups.excellence_review`, § 51.5). */
+  manual: ExcellenceManualReview;
+  /** Sant när fältet `excellence_review` finns i schemat (annars kan inget sparas). */
+  manualFieldPresent: boolean;
+  /** Plattformsflaggor/statsstödsgrund som förifyller de manuella punkterna. */
+  hints: ScreeningPlatformHints;
   /** Grundare i teamet (visningsnamn + andel) — staff-UI, aldrig AI-kontext. */
   founders: ScreeningFounderRow[];
   deMinimis: { usedEur: number; capEur: number } | null;
@@ -173,7 +182,7 @@ export async function loadPlatformStartupFacts(
   try {
     s = await pb.collection('startups').getOne(startupId, {
       fields:
-        'id,tenant,name,org_nr,bolagsform,bolag_status,company_registered_at,kommun,industri,irl_level,meets_excellence_criteria'
+        'id,tenant,name,org_nr,bolagsform,bolag_status,company_registered_at,kommun,industri,irl_level,meets_excellence_criteria,is_deeptech,approved_de_minimis,approved_state_aid_art22,excellence_review'
     });
   } catch {
     return null;
@@ -182,11 +191,12 @@ export async function loadPlatformStartupFacts(
   const orgNr = normalizeOrgNr(str(s.org_nr)) ?? '';
 
   const byStartup = pb.filter('startup = {:id}', { id: startupId });
-  const [finRes, ownRes, teamRes, stodRes, irlRes] = await Promise.allSettled([
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const [finRes, ownRes, teamRes, stodRes, irlRes, aidRes] = await Promise.allSettled([
     pb.collection('startup_financials').getList(1, 50, {
       filter: byStartup,
       sort: '-year',
-      fields: 'year,employees,revenue_sek,balance_sheet_sek,equity_sek,net_result_sek'
+      fields: 'year,employees,revenue_sek,balance_sheet_sek,equity_sek,net_result_sek,dividend_sek'
     }),
     pb.collection('startup_ownership').getList(1, 100, {
       filter: pb.filter('startup = {:id} && tenant = {:tenant}', { id: startupId, tenant: tenantId })
@@ -203,6 +213,12 @@ export async function loadPlatformStartupFacts(
       filter: byStartup,
       sort: '-assessed_at',
       fields: 'assessed_at,crl,brl,tmrl,srl'
+    }),
+    // Gällande statsstödsgrund (pågående period) — jämförelse i resultatet.
+    pb.collection('startup_state_aid_periods').getList(1, 1, {
+      filter: pb.filter('startup = {:s} && (valid_to = "" || valid_to >= {:d})', { s: startupId, d: todayKey }),
+      sort: '-valid_from',
+      fields: 'basis,valid_from'
     })
   ]);
 
@@ -216,7 +232,8 @@ export async function loadPlatformStartupFacts(
             revenue_sek: num(r.revenue_sek),
             balance_sheet_sek: num(r.balance_sheet_sek),
             equity_sek: num(r.equity_sek),
-            net_result_sek: num(r.net_result_sek)
+            net_result_sek: num(r.net_result_sek),
+            dividend_sek: num(r.dividend_sek)
           }))
       : [];
 
@@ -259,6 +276,18 @@ export async function loadPlatformStartupFacts(
     };
   }
 
+  const hints: ScreeningPlatformHints = {
+    isDeeptech: s.is_deeptech === true || undefined,
+    approvedDeMinimis: s.approved_de_minimis === true || undefined,
+    approvedArt22: s.approved_state_aid_art22 === true || undefined
+  };
+  if (aidRes.status === 'fulfilled' && aidRes.value.items[0]) {
+    const r = aidRes.value.items[0] as Record<string, unknown>;
+    if (r.basis === 'art22' || r.basis === 'de_minimis') {
+      hints.stateAidBasis = { basis: r.basis, validFrom: str(r.valid_from)?.slice(0, 10) };
+    }
+  }
+
   return {
     id: String(s.id),
     name: str(s.name) ?? 'Namnlöst bolag',
@@ -270,6 +299,9 @@ export async function loadPlatformStartupFacts(
     industri: str(s.industri),
     irl,
     meetsExcellence: s.meets_excellence_criteria === true,
+    manual: normalizeExcellenceManualReview(s.excellence_review),
+    manualFieldPresent: 'excellence_review' in s,
+    hints,
     founders,
     deMinimis,
     financials,
@@ -311,7 +343,8 @@ export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: 
           registeredAt: company.startup.company_registered_at,
           bolagStatus: company.startup.bolag_status,
           bolagsform: company.startup.bolagsform,
-          isPersonal: company.isPersonal
+          isPersonal: company.isPersonal,
+          listed: company.listed
         }
       : undefined,
     // "Inga uppgifter" (404 hos leverantören — nystartat bolag utan bokslut)
@@ -342,13 +375,15 @@ export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: 
 /** Plattformens egna fakta (finns inte hos leverantören) — delas av båda lägena. */
 export function platformPart(platform: PlatformStartupFacts | null): Pick<
   ExcellenceScreeningInput,
-  'founders' | 'deMinimis' | 'irl' | 'meetsExcellenceFlag' | 'sekPerEur'
+  'founders' | 'deMinimis' | 'irl' | 'meetsExcellenceFlag' | 'sekPerEur' | 'manual' | 'platformHints'
 > {
   return {
     founders: platform ? platform.founders : undefined,
     deMinimis: platform ? platform.deMinimis : null,
     irl: platform?.irl ?? null,
     meetsExcellenceFlag: platform ? platform.meetsExcellence : undefined,
-    sekPerEur: DEFAULT_VAXELKURS_SEK_PER_EUR
+    sekPerEur: DEFAULT_VAXELKURS_SEK_PER_EUR,
+    manual: platform?.manual,
+    platformHints: platform?.hints
   };
 }

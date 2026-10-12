@@ -1087,6 +1087,10 @@ const REQUIRED_APP_FIELDS = [
   // balansomslutning/eget kapital tyst bort vid synk från Roaring.
   { collection: 'startup_financials', fields: ['balance_sheet_sek', 'equity_sek', 'net_result_sek'] },
   { collection: 'startup_ownership', fields: ['source_part'] },
+  // Bedömning excellens (§ 51.5, migration 1700000189): utan fälten "sparas"
+  // controllerns manuella uppgifter tyst bort och utdelningen blir alltid okänd.
+  { collection: 'startups', fields: ['excellence_review'] },
+  { collection: 'startup_financials', fields: ['dividend_sek'] },
   // Målstyrning (§ 42, migration 1700000159) + enkätkälla (§ 43, migration
   // 1700000160): utan flaggorna sparas "okänt" som 0 och en enkätindikator tappar sin källa.
   { collection: 'goal_indicators', fields: ['has_target', 'survey_module'] },
