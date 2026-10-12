@@ -36,7 +36,7 @@ export const REGISTRY_PROVIDER_SEED: readonly RegistryProviderSeed[] = [
     placeholder: 'RO',
     tagline: 'Bolagsdata, ägarbild & årsredovisningar (SE)',
     description:
-      'Hämtar grunddata (bolagsform, säte, SNI, status, registreringsdatum), årsredovisningsposter (omsättning, anställda, balansomslutning, eget kapital), koncernstruktur och verklig huvudman för bolag med organisationsnummer. Skriver till bolagskortet, den finansiella historiken och ägarbilden — underlag för screening mot art. 22 GBER / de minimis och Vinnovas målgruppskriterier. Fysiska personer lagras utan namn och personnummer.',
+      'Hämtar grunddata (bolagsform, säte, SNI, status, registreringsdatum), årsredovisningsposter (omsättning, anställda, balansomslutning, eget kapital, beslutad utdelning), koncernstruktur och verklig huvudman för bolag med organisationsnummer. Skriver till bolagskortet, den finansiella historiken och ägarbilden — underlag för screening mot art. 22 GBER / de minimis och Vinnovas målgruppskriterier. Fysiska personer lagras utan namn och personnummer.',
     features: [
       'Grunddata + registreringsdatum till bolagskortet',
       'Årsvis omsättning, anställda, balansomslutning och eget kapital',

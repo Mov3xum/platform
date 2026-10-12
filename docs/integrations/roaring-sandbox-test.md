@@ -68,9 +68,10 @@ verifieras genom att köra förhandsgranskningen mot sandboxen.
    lägsta nivå (läst 2026-10-12, före volymrabatt, exkl. moms): 0,20
    kr/credit och per anrop Företagsinformation 2.0 = 10, Finansiell
    Information 2.1 = 35, Ägarstruktur 1.0 = 150, Verklig Huvudman 2.1 = 50
-   (kalkylatorns rad "– Person"; bolagsuppslaget antas kosta lika) — en full
-   hämtning är 245 credits ≈ 49 kr per bolag. "Årsredovisningar 1.0" (375
-   credits) anropas inte. Jämför med ert inloggade konto: app.roaring.io →
+   (kalkylatorns rad "– Person"; bolagsuppslaget antas kosta lika) och
+   Årsredovisningar 1.0 = 375 (datadelen "Årsredovisning (utdelning)") — en
+   full hämtning är 620 credits = 124,00 kr per bolag, utan årsredovisningen
+   245 credits ≈ 49 kr. Jämför med ert inloggade konto: app.roaring.io →
    bentomenyn → "Fakturering & Priser" → "Konsumering"; avviker ert paket
    anges era värden i formuläret och vinner per fält över listpriset (er
    avtalade kr/credit efter volymrabatt likaså). Bedömningssidan visar
@@ -79,6 +80,21 @@ verifieras genom att köra förhandsgranskningen mot sandboxen.
    normalt i TSEK (`ROARING_AMOUNT_MULTIPLIER` default 1000). Jämför
    förhandsgranskningens `revenue_sek` med portalens exempel; svarar API:t i
    SEK sätts multiplikatorn till `1`.
+7b. **Verifiera årsredovisningen (utdelning).** Datadelen "Årsredovisning
+   (utdelning)" anropar financial-record ("Årsredovisningar 1.0") — varken
+   sökvägen (kandidater `/se/company/financial-record/1.0`,
+   `/se/company/financial-records/1.0`, `/se/company/annual-report/1.0`;
+   env `ROARING_FINANCIAL_RECORD_PATH`) eller utdelningsfältets namn är
+   bekräftade mot ett riktigt svar. Kör "Testa mot org-nr" på ett bolag som
+   ni VET har beslutat utdelning (och ett som inte har det): kolumnen
+   Utdelning ska visa beloppet respektive "0 kr". Visas "–" och noten
+   "ingen utdelningspost hittades … fältnycklar: …" står de faktiska
+   nycklarna i noten — lägg rätt namn i `DIVIDEND_PATHS`
+   (`providers/roaring/normalize.ts`) med ett fixtur-test. Svarar API:t 403
+   ingår inte Årsredovisningar i paketet. Beloppen antas vara i SEK
+   (`ROARING_FINANCIAL_RECORD_AMOUNT_MULTIPLIER` default 1; sätt 1000 vid
+   TSEK) — utdelningsvillkoret i bedömningen avgörs av 0 eller inte och
+   påverkas inte av enheten.
 8. **Synka ett bolag** från bolagskortet ("Synka från Roaring") och
    kontrollera Finansiell historik + Ägarbild. Först därefter "Synka nu"
    för hela portföljen.

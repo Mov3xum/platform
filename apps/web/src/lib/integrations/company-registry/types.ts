@@ -42,6 +42,18 @@ export interface RegistryFinancialsYear {
   equity_sek?: number;
   /** Årets resultat efter skatt. */
   net_result_sek?: number;
+  /**
+   * Beslutad vinstutdelning för året enligt årsredovisningen (datadelen
+   * `annual_report`). 0 = årsredovisningen svarade "ingen utdelning".
+   * Art. 22 GBER kräver att bolaget INTE delat ut vinst (§ 51).
+   */
+  dividend_sek?: number;
+  /**
+   * Sant när årsredovisningen faktiskt svarade på utdelningsfrågan (även
+   * 0 kr). Saknas flaggan är utdelningen OKÄND — PB lagrar 0 för tomt tal,
+   * så siffran ensam kan inte skilja "ingen utdelning" från "inte hämtad".
+   */
+  dividend_reported?: boolean;
 }
 
 /** Riktning: `owner` = ägaren äger startup-bolaget; `holding` = startup-bolaget äger. */

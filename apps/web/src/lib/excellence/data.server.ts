@@ -186,7 +186,7 @@ export async function loadPlatformStartupFacts(
     pb.collection('startup_financials').getList(1, 50, {
       filter: byStartup,
       sort: '-year',
-      fields: 'year,employees,revenue_sek,balance_sheet_sek,equity_sek,net_result_sek'
+      fields: 'year,employees,revenue_sek,balance_sheet_sek,equity_sek,net_result_sek,dividend_sek,dividend_reported'
     }),
     pb.collection('startup_ownership').getList(1, 100, {
       filter: pb.filter('startup = {:id} && tenant = {:tenant}', { id: startupId, tenant: tenantId })
@@ -216,7 +216,11 @@ export async function loadPlatformStartupFacts(
             revenue_sek: num(r.revenue_sek),
             balance_sheet_sek: num(r.balance_sheet_sek),
             equity_sek: num(r.equity_sek),
-            net_result_sek: num(r.net_result_sek)
+            net_result_sek: num(r.net_result_sek),
+            // Utdelning räknas bara när årsredovisningen faktiskt svarade (PB
+            // lagrar 0 för ett tomt tal — § 51 / migration 1700000189).
+            dividend_sek: r.dividend_reported === true ? num(r.dividend_sek) : undefined,
+            dividend_reported: r.dividend_reported === true ? true : undefined
           }))
       : [];
 
@@ -317,7 +321,12 @@ export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: 
     // "Inga uppgifter" (404 hos leverantören — nystartat bolag utan bokslut)
     // är ett SVAR, inte ett uteblivet uppslag: tom lista i stället för
     // undefined så tröskelraden säger "inget bokslut i registret".
-    financials: fetched.includes('financials') ? company.financials : noRecord.includes('financials') ? [] : undefined,
+    financials:
+      fetched.includes('financials') || fetched.includes('annual_report')
+        ? company.financials
+        : noRecord.includes('financials')
+          ? []
+          : undefined,
     ownership: company.ownership.map((o) => ({
       direction: o.direction,
       owner_kind: o.owner_kind,

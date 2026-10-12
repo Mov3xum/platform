@@ -43,6 +43,10 @@ export interface ScreeningFinancialsYear {
   balance_sheet_sek?: number;
   equity_sek?: number;
   net_result_sek?: number;
+  /** Beslutad vinstutdelning enligt årsredovisningen (0 = ingen). Bara meningsfull med `dividend_reported`. */
+  dividend_sek?: number;
+  /** Sant när årsredovisningen svarade på utdelningsfrågan (datadelen `annual_report`, § 11.8). */
+  dividend_reported?: boolean;
 }
 
 export interface ScreeningBasic {
@@ -411,9 +415,16 @@ function conditionsFor(c: GroupCompanyFacts, ref: Date): ScreeningCheck[] {
     });
   }
 
+  checks.push({
+    id: 'listed',
+    label: 'Inte börsnoterat',
+    verdict: 'unknown',
+    detail: 'Finns inte i bolagsregistret — bekräftas av bolaget.',
+    source: 'manual',
+    needs: 'Bolagsordning/ägarförteckning.'
+  });
+  checks.push(dividendCheck(c.financials ?? [], registered, ref, noData));
   for (const [id, label, needs] of [
-    ['listed', 'Inte börsnoterat', 'Bolagsordning/ägarförteckning.'],
-    ['dividend', 'Har inte beslutat om eller delat ut vinst', 'Årsredovisning och bolagets intyg.'],
     ['concentration', 'Inte bildat genom företagskoncentration', 'Bolagets intyg (undantag kan finnas).'],
     ['takeover', 'Har inte övertagit annat företags verksamhet (ombildad enskild firma undantas)', 'Bolagets intyg.']
   ] as const) {
@@ -427,6 +438,88 @@ function conditionsFor(c: GroupCompanyFacts, ref: Date): ScreeningCheck[] {
     });
   }
   return checks;
+}
+
+const DIVIDEND_LABEL = 'Har inte beslutat om eller delat ut vinst';
+const DIVIDEND_NEEDS = 'Årsredovisning (datadelen "Årsredovisning (utdelning)" hos Roaring) och bolagets intyg.';
+
+/**
+ * Art. 22 GBER: bolaget får inte ha delat ut vinst. Avgörs ur årsredovisningens
+ * beslutade utdelning (`dividend_reported`/`dividend_sek`, § 11.8) — INTE ur
+ * resultatet (en vinst som behålls i bolaget är tillåten):
+ *   någon rapporterad utdelning > 0        ⇒ NEJ (registret)
+ *   0 kr i VARJE räkenskapsår sedan start  ⇒ JA  (registret)
+ *   0 kr men år saknas, eller inget svar   ⇒ OKÄNT med vad som saknas;
+ *                                            resultatet ges som ledtråd
+ *                                            (förlustår ⇒ utdelning osannolik).
+ * Täckning = varje kalenderår från året efter registreringen t.o.m. senaste
+ * rapporterade år; registreringsåret räknas inte (första räkenskapsåret
+ * slutar oftast året efter) och ett ännu inte inlämnat innevarande år
+ * noteras utan att fälla punkten.
+ */
+export function dividendCheck(
+  rows: ScreeningFinancialsYear[],
+  registered: Date | null,
+  ref: Date,
+  noData: boolean
+): ScreeningCheck {
+  const reported = rows.filter((r) => r.dividend_reported === true && typeof r.dividend_sek === 'number');
+  const paid = reported.filter((r) => (r.dividend_sek ?? 0) > 0).sort((a, b) => a.year - b.year);
+  if (paid.length > 0) {
+    const total = paid.reduce((sum, r) => sum + (r.dividend_sek ?? 0), 0);
+    return {
+      id: 'dividend',
+      label: DIVIDEND_LABEL,
+      verdict: 'no',
+      detail: `Årsredovisningen visar beslutad utdelning ${paid.map((r) => `${r.year}: ${fmtInt(r.dividend_sek ?? 0)} kr`).join(', ')} (totalt ${fmtInt(total)} kr).`,
+      source: 'register'
+    };
+  }
+  if (reported.length > 0) {
+    const years = reported.map((r) => r.year).sort((a, b) => a - b);
+    const latest = years[years.length - 1];
+    const missing: number[] = [];
+    if (registered) {
+      for (let y = registered.getUTCFullYear() + 1; y <= latest; y++) if (!years.includes(y)) missing.push(y);
+    }
+    const notYetFiled = latest < ref.getUTCFullYear() - 1 ? ` Senaste årsredovisning avser ${latest}; senare år är inte inlämnade/hämtade.` : '';
+    if (registered && missing.length === 0) {
+      return {
+        id: 'dividend',
+        label: DIVIDEND_LABEL,
+        verdict: 'yes',
+        detail: `Ingen utdelning i årsredovisningarna för ${years.join(', ')} — täcker varje räkenskapsår sedan registreringen ${isoDay(registered)}.${notYetFiled}`,
+        source: 'register'
+      };
+    }
+    return {
+      id: 'dividend',
+      label: DIVIDEND_LABEL,
+      verdict: 'unknown',
+      detail: `Ingen utdelning i årsredovisningarna för ${years.join(', ')}, men ${
+        registered ? `år ${missing.join(', ')} saknas` : 'registreringsdatum saknas så täckningen kan inte bekräftas'
+      }.${notYetFiled}`,
+      source: 'register',
+      needs: registered ? `Årsredovisning för ${missing.join(', ')} (eller bolagets intyg).` : DIVIDEND_NEEDS
+    };
+  }
+  const withResult = rows.filter((r) => typeof r.net_result_sek === 'number').sort((a, b) => a.year - b.year);
+  const profitYears = withResult.filter((r) => (r.net_result_sek ?? 0) > 0).map((r) => r.year);
+  let hint = '';
+  if (withResult.length > 0) {
+    hint =
+      profitYears.length === 0
+        ? ` Bokslutet visar bara förlustår (${withResult.map((r) => r.year).join(', ')}) — utdelning är osannolik men inte utesluten.`
+        : ` Bokslutet visar vinst ${profitYears.join(', ')} — kontrollera vinstdispositionen i årsredovisningen.`;
+  }
+  return {
+    id: 'dividend',
+    label: DIVIDEND_LABEL,
+    verdict: 'unknown',
+    detail: `${noData ? 'Inget uppslag gjort för bolaget.' : 'Årsredovisningen (utdelning) hämtades inte.'}${hint}`,
+    source: 'manual',
+    needs: DIVIDEND_NEEDS
+  };
 }
 
 // ─── Regelträdet ─────────────────────────────────────────────────────────────
@@ -714,6 +807,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
   const reasonsNo: string[] = [];
   if (v(subjectConditions, 'age') === 'no') reasonsNo.push(`${subject.name || 'startup-bolaget'} är äldre än 5 år`);
   if (v(subjectConditions, 'economic') === 'no') reasonsNo.push(`${subject.name || 'startup-bolaget'} är inte aktivt`);
+  if (v(subjectConditions, 'dividend') === 'no') reasonsNo.push(`${subject.name || 'startup-bolaget'} har delat ut vinst`);
   for (const c of companies) {
     if (c.role !== 'linked') continue;
     if (v(c.conditions, 'age') === 'no') reasonsNo.push(`anknutna ${c.name || c.orgNr} är äldre än 5 år`);
@@ -742,9 +836,15 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
     !linkedUnknownAge &&
     thresholdCheck.verdict === 'yes'
   ) {
+    const manual = ['börsnotering'];
+    if (v(subjectConditions, 'dividend') !== 'yes') manual.push('vinstutdelning');
+    manual.push('företagskoncentration', 'övertagen verksamhet');
+    if (standalone.verdict !== 'yes') manual.push('partnerföretagens andel');
     stateAid = {
       outcome: 'art22_possible',
-      text: `${subjectName} kan uppfylla kraven för art. 22 GBER — förutsatt de manuella kontrollerna (börsnotering, vinstutdelning, företagskoncentration, övertagen verksamhet${standalone.verdict === 'yes' ? '' : ' och partnerföretagens andel'}).`
+      text: `${subjectName} kan uppfylla kraven för art. 22 GBER${
+        v(subjectConditions, 'dividend') === 'yes' ? ' (ingen vinstutdelning enligt årsredovisningarna)' : ''
+      } — förutsatt de manuella kontrollerna (${manual.join(', ')}).`
     };
   } else {
     const open: string[] = [];

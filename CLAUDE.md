@@ -1468,7 +1468,8 @@ tillgångar), och `ASSETS_PATHS` saknade det namnet, så noten
 värdet i § 51 får nu sitt belopp). Omsättning läses ur `plSales` först;
 avviker `plNetOperatingIncome` noteras det så valet kan stämmas av mot ett
 facit. Personalkostnad och bolagsskatt finns INTE i economy-overview (bara
-i det dyrare financial-record-API:t) och lämnas tomma. Verklig huvudman
+i det dyrare financial-record-API:t — datadelen `annual_report`, nedan) och
+lämnas tomma av bokslutsdelen. Verklig huvudman
 2.1 svarar `beneficialOwners[person,extentOfControl,controlTypes]` —
 `person` läses aldrig; `extentOfControl` tolkas av `parseControlInterval`
 ur VILKEN rimlig form som helst — text eller kod (Bolagsverkets ordalydelser
@@ -1531,11 +1532,12 @@ ska hämtas — kryssrutor per del vid "Synka nu" (portföljen), "Testa mot
 org-nr" och "Synka från <leverantör>" på bolagskortet (där knappen först
 öppnar valet; inget anropas förrän det bekräftats). Delarna är
 `basic` (grunddata), `financials` (bokslut), `group_structure`
-(koncernstruktur) och `beneficial_owners` (verklig huvudman); varje del är ett
+(koncernstruktur), `beneficial_owners` (verklig huvudman) och
+`annual_report` (årsredovisning — beslutad utdelning, nedan); varje del är ett
 eget API-anrop hos leverantören och endpointen visas vid kryssrutan
 (`partEndpoints`, env-medveten). Källa av sanning: den rena, enhetstestade
 `lib/integrations/company-registry/parts.ts`. Varje provider deklarerar
-`parts` (Roaring alla fyra, Allabolag-stubben grunddata + bokslut,
+`parts` (Roaring alla fem, Allabolag-stubben grunddata + bokslut,
 Bolagsverket bara grunddata — en provider med EN del visar inga kryssrutor).
 Regler:
 - **Det som inte väljs anropas inte och skrivs inte.** Roaring anropar bara de
@@ -1563,6 +1565,31 @@ Regler:
   `parts_present` och prövas mot handlerns deklarerade delar
   (`parseRegistryParts` — okänd del eller tomt val avvisas; formulär utan
   markören hämtar allt, som förut). Enskild firma hämtar aldrig ägardelarna.
+- **Årsredovisning = beslutad utdelning (`annual_report`, 2026-10-12,
+  migration 1700000189).** Art. 22 GBER kräver att bolaget INTE "delat ut
+  vinst" — det avgörs inte av resultatet (en vinst som behålls är tillåten)
+  utan av årsredovisningens vinstdisposition, som economy-overview inte bär.
+  Delen anropar Roarings financial-record ("Årsredovisningar 1.0", den
+  dyraste delen: 375 credits; kandidater `/se/company/financial-record/1.0`
+  m.fl., env `ROARING_FINANCIAL_RECORD_PATH`, belopp i SEK med
+  `ROARING_FINANCIAL_RECORD_AMOUNT_MULTIPLIER` default 1) och skriver
+  `startup_financials.dividend_sek` + **`dividend_reported`** (sant bara när
+  årsredovisningen faktiskt svarade — PB lagrar 0 för ett tomt tal, så
+  siffran ensam kan inte skilja "ingen utdelning" från "inte hämtad", § 42.2-
+  mönstret) samt personalkostnad/bolagsskatt när de finns. Raderna slås ihop
+  per år med bokslutet (`mergeFinancialYears`: bokslutets poster vinner).
+  **Varken sökväg eller fältnamn är bekräftade mot ett riktigt svar** —
+  normaliseraren läser utdelningen ur en kandidatlista (`dividend`,
+  `decidedDividend`, `profitDistribution.dividend` … och som reserv varje
+  toppnyckel med "dividend"/"utdelning" som bär ett tal men inte är per
+  aktie/procent/datum), och en årsrad utan utdelningspost lämnar utdelningen
+  OKÄND med radens fältnycklar i noten — aldrig tyst 0 kr. Kör "Testa mot
+  org-nr" på ett bolag med känd utdelning innan portföljen synkas. Utdelningen
+  visas som kolumn i Finansiell historik, i förhandsgranskningen, i
+  bedömningen och i PDF:n, och whitelistas som `dividend_sek` i
+  `buildFinancialsContext` (publik årsredovisningsdata, ingen PII).
+  Bedömning excellens (§ 51) hämtar delen BARA för startup-bolaget —
+  villkoret prövas på stödmottagaren, inte på anknutna bolag.
 - **Audit:** valda delar står i synkens sammanfattning (`last_sync_summary`)
   och i aktivitetsraden ("Hämtade: Grunddata, Bokslut") — PII-fritt.
 - Senaste val sparas per leverantör i `localStorage`
@@ -1593,8 +1620,10 @@ Information 2.1 = **35** (`financials` — INTE "Årsredovisningar 1.0" à 375,
 som är det dyrare financial-record-API:t vi inte anropar), Ägarstruktur 1.0 =
 **150** (`group_structure`), Verklig Huvudman 2.1 = **50**
 (`beneficial_owners`; kalkylatorns rad heter "– Person", bolagsuppslaget
-antas kosta lika — stäm av mot Konsumering i kontot). En full hämtning = 245
-credits ≈ 49 kr per bolag. Siffrorna bär källa + datum i koden och får bara
+antas kosta lika — stäm av mot Konsumering i kontot), Årsredovisningar 1.0
+= **375** (`annual_report`, financial-record — utdelningen). En full
+hämtning = 620 credits = 124,00 kr per bolag (exakt kalkylatorns summa);
+utan årsredovisningen 245 credits ≈ 49 kr. Siffrorna bär källa + datum i koden och får bara
 ändras mot en ny källa — aldrig gissas; formuläret visar Roarings
 produktnamn per datadel så ledningen hittar rätt rad i sitt konto
 (app.roaring.io → Fakturering & Priser → Konsumering). `composeRegistryPricing` = listpris → env → tenant, per fält, och
@@ -8305,8 +8334,20 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 - **Deterministiskt, inget beslut.** Ingen AI-inferens; varje punkt får
   JA / NEJ / OKÄNT med motivering och källa (bolagsregister / plattformen /
   manuell kontroll). OKÄNT när underlaget saknas — motorn gissar aldrig
-  (börsnotering, vinstutdelning, företagskoncentration, övertagen
-  verksamhet, grundarengagemang, innovationshöjd är alltid manuella).
+  (börsnotering, företagskoncentration, övertagen verksamhet,
+  grundarengagemang, innovationshöjd är alltid manuella).
+- **Vinstutdelning avgörs ur årsredovisningen (2026-10-12).** Punkten "har
+  inte beslutat om eller delat ut vinst" läser `dividend_reported`/
+  `dividend_sek` (datadelen `annual_report`, § 11.8) — INTE resultatet:
+  någon beslutad utdelning > 0 ⇒ NEJ (fäller art. 22 ⇒ de minimis); 0 kr i
+  VARJE räkenskapsår från året efter registreringen t.o.m. senaste
+  rapporterade år ⇒ JA (och "vinstutdelning" lämnar listan över manuella
+  kontroller); 0 kr men ett år saknas, eller registreringsdatum saknas ⇒
+  OKÄNT med vilka år som fattas — aldrig ett tyst JA; ingen årsredovisning
+  hämtad ⇒ OKÄNT (manuell) med resultatet som ledtråd ("bara förlustår —
+  utdelning osannolik" / "vinst 2024 — kontrollera vinstdispositionen").
+  `dividendCheck` i `excellence-screening.ts` är ren och enhetstestad.
+  Delen hämtas bara för startup-bolaget (kostnad), inte för koncernbolagen.
   Sidan skriver ALDRIG `approved_state_aid_art22`/`approved_de_minimis`/
   `meets_excellence_criteria` eller statsstödsperioder — controllern
   registrerar beslutet som förut (bolagskortet, `/rapporter/vinnova`).

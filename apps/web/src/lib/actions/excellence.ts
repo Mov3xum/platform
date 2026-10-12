@@ -135,7 +135,10 @@ export async function assessExcellenceAction(
       `Koncernen har ${refs.length} anknutna/partnerbolag — bara de ${MAX_RELATED_COMPANIES} första slogs upp.`
     );
   }
-  const parts: RegistryPartId[] = lookup.requestedParts;
+  // Årsredovisningen (utdelning, den dyraste delen) hämtas BARA för
+  // startup-bolaget: art. 22-villkoret "har inte delat ut vinst" prövas på
+  // stödmottagaren, inte på dess anknutna bolag.
+  const parts: RegistryPartId[] = lookup.requestedParts.filter((p) => p !== 'annual_report');
   for (const ref of refs.slice(0, MAX_RELATED_COMPANIES)) {
     const label = ref.name || ref.org_nr || 'okänt bolag';
     if (!ref.org_nr) {

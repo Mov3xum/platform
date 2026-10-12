@@ -470,9 +470,17 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
     }
     table(
       ctx,
-      ['År', 'Anställda', 'Omsättning', 'Resultat', 'Balansomslutning', 'Eget kapital'],
-      rows.map((f) => [String(f.year), f.employees !== undefined ? String(f.employees) : '–', sek(f.revenue_sek), sek(f.net_result_sek), sek(f.balance_sheet_sek), sek(f.equity_sek)]),
-      [0.8, 1.1, 1.6, 1.6, 1.8, 1.6]
+      ['År', 'Anställda', 'Omsättning', 'Resultat', 'Balansomslutning', 'Eget kapital', 'Utdelning'],
+      rows.map((f) => [
+        String(f.year),
+        f.employees !== undefined ? String(f.employees) : '–',
+        sek(f.revenue_sek),
+        sek(f.net_result_sek),
+        sek(f.balance_sheet_sek),
+        sek(f.equity_sek),
+        f.dividend_reported ? sek(f.dividend_sek ?? 0) : '–'
+      ]),
+      [0.7, 1.0, 1.5, 1.5, 1.7, 1.5, 1.4]
     );
   }
   for (const n of a.notes) {

@@ -171,6 +171,7 @@ export function RegistryLookupForm({ providerSlug, providerName, registryParts, 
                         <th className="px-3 py-2 font-medium">Anställda</th>
                         <th className="px-3 py-2 font-medium">Balansomslutning</th>
                         <th className="px-3 py-2 font-medium">Eget kapital</th>
+                        <th className="px-3 py-2 font-medium">Utdelning</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -181,6 +182,9 @@ export function RegistryLookupForm({ providerSlug, providerName, registryParts, 
                           <td className="px-3 py-2 text-foreground-muted">{f.employees ?? '–'}</td>
                           <td className="px-3 py-2 text-foreground-muted">{sek(f.balance_sheet_sek)}</td>
                           <td className="px-3 py-2 text-foreground-muted">{sek(f.equity_sek)}</td>
+                          <td className="px-3 py-2 text-foreground-muted">
+                            {f.dividend_reported ? sek(f.dividend_sek ?? 0) : '–'}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

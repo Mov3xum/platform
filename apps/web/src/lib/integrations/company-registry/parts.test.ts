@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   describeRegistryParts,
+  financialsParts,
   ownershipParts,
   ownershipReplaceMode,
   parseRegistryParts,
@@ -9,7 +10,7 @@ import {
   type RegistryPartId
 } from './parts';
 
-const ROARING: RegistryPartId[] = ['basic', 'financials', 'group_structure', 'beneficial_owners'];
+const ROARING: RegistryPartId[] = ['basic', 'financials', 'group_structure', 'beneficial_owners', 'annual_report'];
 const BOLAGSVERKET: RegistryPartId[] = ['basic'];
 
 test('utan val hämtas allt providern stödjer', () => {
@@ -36,6 +37,12 @@ test('ägardelarna identifieras', () => {
   assert.deepEqual(ownershipParts(BOLAGSVERKET), []);
 });
 
+test('bokslutsdelarna: bokslut och årsredovisning skriver samma rader', () => {
+  assert.deepEqual(financialsParts(ROARING), ['financials', 'annual_report']);
+  assert.deepEqual(financialsParts(['annual_report']), ['annual_report']);
+  assert.deepEqual(financialsParts(BOLAGSVERKET), []);
+});
+
 test('ersättningsläget för ägarbilden', () => {
   assert.deepEqual(ownershipReplaceMode(['basic'], ROARING), { mode: 'none', parts: [] });
   assert.deepEqual(ownershipReplaceMode(ROARING, ROARING), {
@@ -51,5 +58,5 @@ test('ersättningsläget för ägarbilden', () => {
 
 test('etiketterna finns för varje del', () => {
   assert.equal(describeRegistryParts(['basic', 'financials']), 'Grunddata, Bokslut');
-  assert.equal(describeRegistryParts([...REGISTRY_PART_IDS]).split(', ').length, 4);
+  assert.equal(describeRegistryParts([...REGISTRY_PART_IDS]).split(', ').length, 5);
 });

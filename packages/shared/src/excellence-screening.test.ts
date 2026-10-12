@@ -4,6 +4,7 @@ import {
   classifyOwnershipEntry,
   deriveRelatedCompanies,
   describeCompanyAge,
+  dividendCheck,
   ownershipShareRange,
   screenExcellence,
   type ExcellenceScreeningInput,
@@ -280,4 +281,114 @@ test('"inga uppgifter" hos leverantören (tom bokslutslista, hämtade ägardelar
   );
   assert.equal(r.thresholds.rows[0].note, 'Inget bokslut i registret (nystartat?)');
   assert.notEqual(r.standalone.detail, 'Koncernstrukturen hämtades inte.');
+});
+
+// ─── Vinstutdelning (art. 22: "har inte delat ut vinst") ur årsredovisningen ──
+
+const REG = new Date('2022-03-10T00:00:00Z');
+
+test('utdelning > 0 i något år ⇒ NEJ ur registret och fäller art. 22', () => {
+  const c = dividendCheck(
+    [
+      { year: 2023, dividend_reported: true, dividend_sek: 0 },
+      { year: 2024, dividend_reported: true, dividend_sek: 150_000 }
+    ],
+    REG,
+    REF,
+    false
+  );
+  assert.equal(c.verdict, 'no');
+  assert.equal(c.source, 'register');
+  assert.match(c.detail, /2024: 150.000 kr/);
+
+  const res = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        basic: { registeredAt: '2022-03-10', bolagStatus: 'aktiv', bolagsform: 'AB' },
+        financials: [{ year: 2024, dividend_reported: true, dividend_sek: 150_000, employees: 2, revenue_sek: 1_000_000, balance_sheet_sek: 500_000 }],
+        ownership: [
+          { direction: 'owner', owner_kind: 'person', pct_min: 75, pct_max: 100 },
+          { direction: 'owner', owner_kind: 'person', pct_min: 10, pct_max: 25 }
+        ]
+      }),
+      deMinimis: { usedEur: 0, capEur: 300_000 }
+    })
+  );
+  assert.equal(res.stateAid.outcome, 'de_minimis');
+  assert.match(res.stateAid.text, /har delat ut vinst/);
+});
+
+test('0 kr i varje räkenskapsår sedan registreringen ⇒ JA ur registret, och vinstutdelning lämnar de manuella kontrollerna', () => {
+  const c = dividendCheck(
+    [
+      { year: 2023, dividend_reported: true, dividend_sek: 0 },
+      { year: 2024, dividend_reported: true, dividend_sek: 0 },
+      { year: 2025, dividend_reported: true, dividend_sek: 0 }
+    ],
+    REG,
+    REF,
+    false
+  );
+  assert.equal(c.verdict, 'yes');
+  assert.equal(c.source, 'register');
+  assert.match(c.detail, /2023, 2024, 2025/);
+
+  const res = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        basic: { registeredAt: '2022-03-10', bolagStatus: 'aktiv', bolagsform: 'AB' },
+        financials: [
+          { year: 2023, dividend_reported: true, dividend_sek: 0, employees: 1, revenue_sek: 10_000, balance_sheet_sek: 50_000 },
+          { year: 2024, dividend_reported: true, dividend_sek: 0, employees: 2, revenue_sek: 100_000, balance_sheet_sek: 500_000 },
+          { year: 2025, dividend_reported: true, dividend_sek: 0, employees: 2, revenue_sek: 200_000, balance_sheet_sek: 600_000 }
+        ],
+        ownership: [
+          { direction: 'owner', owner_kind: 'person', pct_min: 75, pct_max: 100 },
+          { direction: 'owner', owner_kind: 'person', pct_min: 10, pct_max: 25 }
+        ]
+      }),
+      deMinimis: { usedEur: 0, capEur: 300_000 }
+    })
+  );
+  assert.equal(res.stateAid.outcome, 'art22_possible');
+  assert.doesNotMatch(res.stateAid.text, /manuella kontrollerna \([^)]*vinstutdelning/);
+  assert.match(res.stateAid.text, /ingen vinstutdelning enligt årsredovisningarna/);
+});
+
+test('0 kr men ett år saknas ⇒ OKÄNT med vilket år som saknas — aldrig ett tyst JA', () => {
+  const c = dividendCheck(
+    [
+      { year: 2023, dividend_reported: true, dividend_sek: 0 },
+      { year: 2025, dividend_reported: true, dividend_sek: 0 }
+    ],
+    REG,
+    REF,
+    false
+  );
+  assert.equal(c.verdict, 'unknown');
+  assert.match(c.detail, /år 2024 saknas/);
+  assert.match(c.needs ?? '', /2024/);
+});
+
+test('utan registreringsdatum kan täckningen inte bekräftas ⇒ OKÄNT', () => {
+  const c = dividendCheck([{ year: 2024, dividend_reported: true, dividend_sek: 0 }], null, REF, false);
+  assert.equal(c.verdict, 'unknown');
+  assert.match(c.detail, /registreringsdatum saknas/);
+});
+
+test('ingen årsredovisning hämtad ⇒ OKÄNT (manuell) med resultatet som ledtråd — 0 utan flagga räknas aldrig', () => {
+  const loss = dividendCheck([{ year: 2024, net_result_sek: -40_000, dividend_sek: 0 }], REG, REF, false);
+  assert.equal(loss.verdict, 'unknown');
+  assert.equal(loss.source, 'manual');
+  assert.match(loss.detail, /bara förlustår/);
+
+  const profit = dividendCheck([{ year: 2023, net_result_sek: -1 }, { year: 2024, net_result_sek: 90_000 }], REG, REF, false);
+  assert.equal(profit.verdict, 'unknown');
+  assert.match(profit.detail, /vinst 2024/);
+
+  const none = dividendCheck([], REG, REF, true);
+  assert.equal(none.verdict, 'unknown');
+  assert.match(none.detail, /Inget uppslag/);
 });

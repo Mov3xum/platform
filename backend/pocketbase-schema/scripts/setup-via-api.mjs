@@ -2427,14 +2427,17 @@ await ensureCollection({
 });
 
 // Migration 1700000171 (§ 11.8): balansomslutning/eget kapital/resultat +
-// källvärdena roaring/bolagsverket på startup_financials. patchCollection
-// ERSÄTTER values → hela listan anges.
+// källvärdena roaring/bolagsverket på startup_financials. Migration
+// 1700000189 (§ 51): beslutad utdelning per år (dividend_sek +
+// dividend_reported). patchCollection ERSÄTTER values → hela listan anges.
 await patchCollection(
   'startup_financials',
   [
     { name: 'balance_sheet_sek', type: 'number', required: false },
     { name: 'equity_sek', type: 'number', required: false },
-    { name: 'net_result_sek', type: 'number', required: false }
+    { name: 'net_result_sek', type: 'number', required: false },
+    { name: 'dividend_sek', type: 'number', required: false, min: 0 },
+    { name: 'dividend_reported', type: 'bool', required: false }
   ],
   { source: { values: ['manual', 'import_excel', 'allabolag', 'other', 'roaring', 'bolagsverket'] } }
 );

@@ -287,7 +287,7 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
                   disabled={pending}
                   pricing={provider.pricing}
                   companies={1}
-                  costContext={`Per bolag. Varje anknutet/partnerbolag i ägarbilden slås upp med samma delar (högst ${MAX_RELATED_COMPANIES} till) — kostnaden kan bli upp till ${1 + MAX_RELATED_COMPANIES} × detta. Den faktiska summan visas i resultatet.`}
+                  costContext={`Per bolag. Varje anknutet/partnerbolag i ägarbilden slås upp med samma delar utom årsredovisningen (utdelningsvillkoret prövas bara på startup-bolaget), högst ${MAX_RELATED_COMPANIES} till — kostnaden kan bli upp till ${1 + MAX_RELATED_COMPANIES} × detta. Den faktiska summan visas i resultatet.`}
                   pricingHref={`/integrationer/${provider.slug}#kostnad`}
                 />
               )}
@@ -730,6 +730,7 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
                         <th className="px-3 py-1.5 font-medium">Resultat</th>
                         <th className="px-3 py-1.5 font-medium">Balansomslutning</th>
                         <th className="px-3 py-1.5 font-medium">Eget kapital</th>
+                        <th className="px-3 py-1.5 font-medium">Utdelning</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -741,6 +742,9 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
                           <td className="px-3 py-1.5 text-foreground-muted">{sek(f.net_result_sek)}</td>
                           <td className="px-3 py-1.5 text-foreground-muted">{sek(f.balance_sheet_sek)}</td>
                           <td className="px-3 py-1.5 text-foreground-muted">{sek(f.equity_sek)}</td>
+                          <td className="px-3 py-1.5 text-foreground-muted">
+                            {f.dividend_reported ? sek(f.dividend_sek ?? 0) : '–'}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

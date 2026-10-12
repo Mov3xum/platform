@@ -83,11 +83,13 @@ export interface RegistryProviderPricing {
  *      anrop per dataset, och 620 credits = 124,00 kr ⇒ 0,20 kr/credit
  *      (lägsta volymsteget, exkl. moms).
  * Mappning kalkylator → datadel: Företagsinformation (2.0) = grunddata,
- * Finansiell Information (2.1) = bokslut (economy-overview — INTE
- * "Årsredovisningar (1.0)", 375 credits, som är financial-record-API:t vi
- * inte anropar), Ägarstruktur (1.0) = koncernstruktur, Verklig Huvudman (2.1)
- * = verklig huvudman (kalkylatorns rad heter "– Person"; bolagsuppslaget
- * `/company/{orgnr}` antas ha samma pris — stäm av mot fakturan).
+ * Finansiell Information (2.1) = bokslut (economy-overview), Ägarstruktur
+ * (1.0) = koncernstruktur, Verklig Huvudman (2.1) = verklig huvudman
+ * (kalkylatorns rad heter "– Person"; bolagsuppslaget `/company/{orgnr}`
+ * antas ha samma pris — stäm av mot fakturan), Årsredovisningar (1.0) =
+ * årsredovisning/utdelning (financial-record, den dyraste delen — hämtas
+ * bara för startup-bolaget i bedömningen, § 51). Kalkylatorns fem rader
+ * summerar till 620 credits = 124,00 kr = en full hämtning av ett bolag.
  * Tenantens egna värden (avtalat paket/rabatt) vinner alltid.
  */
 export const REGISTRY_PROVIDER_PRICING: Readonly<Record<string, RegistryProviderPricing>> = {
@@ -98,13 +100,15 @@ export const REGISTRY_PROVIDER_PRICING: Readonly<Record<string, RegistryProvider
       basic: 10,
       financials: 35,
       group_structure: 150,
-      beneficial_owners: 50
+      beneficial_owners: 50,
+      annual_report: 375
     },
     productNames: {
       basic: 'Företagsinformation (2.0) / Company Information — se-company-overview',
-      financials: 'Finansiell Information (2.1) / Economy Overview — se-company-economy-overview (inte "Årsredovisningar 1.0", 375 credits)',
+      financials: 'Finansiell Information (2.1) / Economy Overview — se-company-economy-overview',
       group_structure: 'Ägarstruktur (1.0) / Group Structure — se-company-group-structure',
-      beneficial_owners: 'Verklig Huvudman (2.1) / Beneficial Owner — se-beneficialowner (kalkylatorns rad "– Person"; bolagsuppslaget antas ha samma pris)'
+      beneficial_owners: 'Verklig Huvudman (2.1) / Beneficial Owner — se-beneficialowner (kalkylatorns rad "– Person"; bolagsuppslaget antas ha samma pris)',
+      annual_report: 'Årsredovisningar (1.0) / Financial Record — se-company-financial-record (beslutad utdelning; dyraste delen)'
     },
     sourceLabel:
       'Roarings priskalkylator (credits per anrop; 620 credits = 124,00 kr exkl. moms) och helpcentret "How does your credits system work?"',

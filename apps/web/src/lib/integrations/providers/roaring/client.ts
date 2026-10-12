@@ -41,6 +41,13 @@ import { parseRoaringPathList, roaringReportsNoRecords } from './normalize';
 //                     /company-varianten först; den nakna 2.1-sökvägen och 1.0
 //                     ligger kvar som reserv. `/se/company/beneficial-owner/…`
 //                     finns inte i katalogen och är borttagen.
+//   årsredovisning    se-company-financial-record-1.0 ("Årsredovisningar 1.0"
+//                     i priskalkylatorn, 375 credits) — hela bokslutet inkl.
+//                     förslag till/beslutad vinstutdelning, personalkostnad
+//                     och bolagsskatt. Sökvägen är INTE bekräftad mot ett
+//                     riktigt svar (2026-10-12): kandidaterna provas i ordning
+//                     och env `ROARING_FINANCIAL_RECORD_PATH` vinner —
+//                     verifiera med "Testa mot org-nr".
 // Kandidaterna provas vid 403/404, så fel version kostar ett extra anrop men
 // aldrig fel data — sökvägen som svarade visas i förhandsgranskningen.
 
@@ -63,6 +70,11 @@ export const ROARING_DEFAULT_PATHS = {
   overview: ['/se/company/overview/2.0', '/se/company/overview/1.1'],
   financials: ['/se/company/economy-overview/2.1', '/se/company/economy-overview/1.1'],
   groupStructure: ['/se/company/group-structure/1.0'],
+  financialRecord: [
+    '/se/company/financial-record/1.0',
+    '/se/company/financial-records/1.0',
+    '/se/company/annual-report/1.0'
+  ],
   beneficialOwners: [
     '/se/beneficialowner/2.1/company',
     '/se/beneficialowner/2.1',
@@ -78,13 +90,26 @@ export const ROARING_PATHS = {
   groupStructure: () =>
     parseRoaringPathList(process.env.ROARING_GROUP_STRUCTURE_PATH, [...ROARING_DEFAULT_PATHS.groupStructure]),
   beneficialOwners: () =>
-    parseRoaringPathList(process.env.ROARING_BENEFICIAL_OWNER_PATH, [...ROARING_DEFAULT_PATHS.beneficialOwners])
+    parseRoaringPathList(process.env.ROARING_BENEFICIAL_OWNER_PATH, [...ROARING_DEFAULT_PATHS.beneficialOwners]),
+  financialRecord: () =>
+    parseRoaringPathList(process.env.ROARING_FINANCIAL_RECORD_PATH, [...ROARING_DEFAULT_PATHS.financialRecord])
 };
 
 /** Roarings bokslutsbelopp anges i TSEK i economy-overview; env kan sätta 1 för SEK-API:er. */
 export function roaringAmountMultiplier(): number {
   const n = Number(env('ROARING_AMOUNT_MULTIPLIER', '1000'));
   return Number.isFinite(n) && n > 0 ? n : 1000;
+}
+
+/**
+ * Årsredovisningens (financial-record) belopp antas vara i SEK (XBRL-posterna
+ * i Bolagsverkets digitala årsredovisning är hela kronor); env kan sätta 1000
+ * om API:t visar sig leverera TSEK. Utdelningsvillkoret (§ 51) avgörs av
+ * 0 kr eller inte och påverkas inte av enheten.
+ */
+export function roaringFinancialRecordMultiplier(): number {
+  const n = Number(env('ROARING_FINANCIAL_RECORD_AMOUNT_MULTIPLIER', '1'));
+  return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
 export interface RoaringCredentials {

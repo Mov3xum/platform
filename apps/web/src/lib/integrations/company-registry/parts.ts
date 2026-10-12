@@ -8,6 +8,9 @@
 //   financials        → årsrader (startup_financials)
 //   group_structure   → moder-/dotterbolag (startup_ownership)
 //   beneficial_owners → verklig huvudman, anonymt (startup_ownership)
+//   annual_report     → årsredovisningens beslutade utdelning (+ personal-
+//                       kostnad/bolagsskatt när de finns) per år
+//                       (startup_financials, samma rader som bokslut)
 // En provider deklarerar vilka delar den stödjer; personalen väljer en
 // delmängd före varje hämtning. Det som inte väljs anropas inte och skrivs
 // inte — befintliga värden från tidigare hämtningar lämnas orörda.
@@ -16,7 +19,8 @@ export const REGISTRY_PART_IDS = [
   'basic',
   'financials',
   'group_structure',
-  'beneficial_owners'
+  'beneficial_owners',
+  'annual_report'
 ] as const;
 
 export type RegistryPartId = (typeof REGISTRY_PART_IDS)[number];
@@ -48,8 +52,19 @@ export const REGISTRY_PART_META: Record<RegistryPartId, RegistryPartMeta> = {
     label: 'Verklig huvudman',
     description: 'Ägarandel och kontrollgrund per huvudman — utan namn eller personnummer.',
     writes: 'ownership'
+  },
+  annual_report: {
+    label: 'Årsredovisning (utdelning)',
+    description:
+      'Beslutad vinstutdelning per år ur årsredovisningen — avgör art. 22-villkoret "har inte delat ut vinst" (samt personalkostnad och bolagsskatt när de finns).',
+    writes: 'financials'
   }
 };
+
+/** Delar som skriver bokslutsrader (`startup_financials`), i deklarerad ordning. */
+export function financialsParts(parts: readonly RegistryPartId[]): RegistryPartId[] {
+  return parts.filter((p) => REGISTRY_PART_META[p].writes === 'financials');
+}
 
 export function isRegistryPartId(v: unknown): v is RegistryPartId {
   return typeof v === 'string' && (REGISTRY_PART_IDS as readonly string[]).includes(v);

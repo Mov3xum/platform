@@ -108,8 +108,14 @@ test('leverantörens publicerade listpris: Roaring 0,20 kr/credit + credits per 
   const roaring = REGISTRY_PROVIDER_PRICING.roaring;
   assert.equal(roaring.sekPerCredit, 0.2);
   // Kalkylatorn 2026-10-12: Företagsinformation 10, Finansiell Information 35,
-  // Ägarstruktur 150, Verklig Huvudman 50. Årsredovisningar (375) anropas inte.
-  assert.deepEqual(roaring.creditsPerPart, { basic: 10, financials: 35, group_structure: 150, beneficial_owners: 50 });
+  // Ägarstruktur 150, Verklig Huvudman 50, Årsredovisningar 375.
+  assert.deepEqual(roaring.creditsPerPart, {
+    basic: 10,
+    financials: 35,
+    group_structure: 150,
+    beneficial_owners: 50,
+    annual_report: 375
+  });
   assert.ok(roaring.sourceUrl.startsWith('https://help.roaring.io/'));
   assert.match(roaring.publishedAt, /^\d{4}-\d{2}-\d{2}$/);
   assert.ok(roaring.productNames.beneficial_owners?.includes('Beneficial Owner'));
@@ -121,11 +127,15 @@ test('leverantörens publicerade listpris: Roaring 0,20 kr/credit + credits per 
   assert.equal(p.fieldSources?.credits?.financials, 'provider');
   assert.equal(registryPricingFromProvider('bolagsverket').source, 'none');
 
-  // Kalkylatorns kontrollsumma: alla fyra delar vi anropar = 245 credits = 49,00 kr per bolag.
-  const all = estimateRegistryCost(p, ['basic', 'financials', 'group_structure', 'beneficial_owners'], 1);
-  assert.equal(all.credits, 245);
-  assert.equal(all.sek, 49);
+  // Kalkylatorns kontrollsumma: alla fem delar = 620 credits = 124,00 kr per bolag
+  // (exakt kalkylatorns "124,00 SEK"); utan årsredovisningen 245 credits = 49 kr.
+  const all = estimateRegistryCost(p, ['basic', 'financials', 'group_structure', 'beneficial_owners', 'annual_report'], 1);
+  assert.equal(all.credits, 620);
+  assert.equal(all.sek, 124);
   assert.equal(all.complete, true);
+  const noReport = estimateRegistryCost(p, ['basic', 'financials', 'group_structure', 'beneficial_owners'], 1);
+  assert.equal(noReport.credits, 245);
+  assert.equal(noReport.sek, 49);
 });
 
 test('composeRegistryPricing: listpris → env → tenant, högre nivå vinner per fält och källan följer med', () => {
