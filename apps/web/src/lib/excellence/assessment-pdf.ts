@@ -283,6 +283,16 @@ function companyBlock(ctx: Ctx, c: CompanyAssessment, subjectName: string) {
       }`,
       { size: 9, color: INK_SOFT, gap: 4 }
     );
+    if (c.ownersMatchSubject) {
+      const m = c.ownersMatchSubject;
+      drawLines(
+        ctx,
+        `${m.same === true ? `Samma ägare som ${subjectName}` : m.same === false ? `Andra ägare än ${subjectName}` : 'Ägarbilden kunde inte jämföras'}: ${m.reason}${
+          m.same === false ? ' Bolaget grävs inte vidare (inga fler uppslag).' : ''
+        }`,
+        { size: 9, color: m.same === false ? rgb01(BRAND.warning) : INK_SOFT, gap: 4 }
+      );
+    }
     if (!c.dataFetched) {
       drawLines(ctx, 'Inget uppslag gjort för bolaget — grundförutsättningarna kan inte prövas.', { size: 9, font: 'bold', color: rgb01(BRAND.warning), gap: 4 });
     }
@@ -375,9 +385,9 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
   if (a.cost) {
     drawLines(
       ctx,
-      `Kostnad för uppslagen hos ${a.providerName ?? 'leverantören'}: ${a.cost.companies} bolag × ${a.cost.parts.length} ${
-        a.cost.parts.length === 1 ? 'del' : 'delar'
-      } = ${formatRegistryCost(a.cost)} (uppskattning — leverantörens faktura är facit).`,
+      `Kostnad för uppslagen hos ${a.providerName ?? 'leverantören'}: ${a.cost.companies} bolag, ${a.cost.calls} anrop = ${formatRegistryCost(
+        a.cost
+      )} (uppskattning — leverantörens faktura är facit).`,
       { size: 8.5, color: INK_SOFT, gap: 6 }
     );
   }

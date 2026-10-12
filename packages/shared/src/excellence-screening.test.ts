@@ -7,6 +7,7 @@ import {
   describeCompanyAge,
   ownershipShareRange,
   normalizeExcellenceManualReview,
+  sameOwnershipPicture,
   screenExcellence,
   type ExcellenceScreeningInput,
   type GroupCompanyFacts
@@ -591,4 +592,52 @@ test('"Vem äger holdingbolaget": okänt tills ägarbilden hämtats och täcker 
   assert.match(topped.standalone.detail, /Topp AB \(äger 80 % av Holding AB, genom Holding AB\)/);
   // Topp AB (2006) fäller art. 22 för hela koncernen — det var Combly-fallet, nu en nivå ned.
   assert.equal(topped.stateAid.outcome, 'de_minimis');
+});
+
+test('sameOwnershipPicture: grundarholding = samma personer och andelar; investerare eller andra personer = olika', () => {
+  const subject = company({
+    orgNr: '5595728790',
+    name: 'Workify AB',
+    ownership: [
+      { direction: 'owner', owner_kind: 'company', org_nr: '5592581416', name: 'Holding AB', capital_pct: 100, part: 'group_structure' },
+      { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50, indirect: true, part: 'beneficial_owners' },
+      { direction: 'owner', owner_kind: 'person', pct_min: 50, pct_max: 75, indirect: true, part: 'beneficial_owners' }
+    ]
+  });
+  const sameHolding = company({
+    orgNr: '5592581416',
+    name: 'Holding AB',
+    ownership: [
+      { direction: 'holding', owner_kind: 'company', org_nr: '5595728790', name: 'Workify AB', capital_pct: 100 },
+      { direction: 'owner', owner_kind: 'person', pct_min: 50, pct_max: 75 },
+      { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50 }
+    ]
+  });
+  assert.equal(sameOwnershipPicture(subject, sameHolding).same, true);
+  const investorHolding = company({
+    orgNr: '5592581416',
+    name: 'Holding AB',
+    ownership: [
+      { direction: 'owner', owner_kind: 'investor', name: 'VC Fond', capital_pct: 30 },
+      { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50 },
+      { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50 }
+    ]
+  });
+  const inv = sameOwnershipPicture(subject, investorHolding);
+  assert.equal(inv.same, false);
+  assert.match(inv.reason, /VC Fond/);
+  const otherPersons = company({
+    orgNr: '5592581416',
+    name: 'Holding AB',
+    ownership: [{ direction: 'owner', owner_kind: 'person', capital_pct: 100 }]
+  });
+  assert.equal(sameOwnershipPicture(subject, otherPersons).same, false);
+  // Inte hämtad verklig huvudman ⇒ kan inte jämföras.
+  assert.equal(sameOwnershipPicture(subject, company({ orgNr: '5592581416', beneficialOwnersFetched: false })).same, null);
+  // Syns i bedömningen på ägarbolaget.
+  const res = screenExcellence(input({ subject, related: [investorHolding] }));
+  assert.equal(res.companies[1].ownersMatchSubject?.same, false);
+  // Nivå 2-referenser bär viaOrgNr så servern kan stoppa expansion genom bolaget.
+  const refs = deriveGroupCompanies(subject, [investorHolding]);
+  assert.equal(refs.find((r) => r.name === 'VC Fond')?.viaOrgNr, '5592581416');
 });

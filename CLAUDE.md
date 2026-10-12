@@ -8547,3 +8547,41 @@ registret inte visade någon. Nu:
   delar) / registret visar inga ägare — kontrollera aktieboken.
 - Ingen ny dataväg, inga nya fält eller kollektioner (samma uppslag, samma
   writer, samma RLS); riskklass n/a (ingen AI).
+
+### 51.7 Ekonomiska uppslag — Vinnova-grind och ägarbilden först (2026-10-12)
+
+Varje koncernbolag kostar egna anrop hos Roaring (§ 11.8 "Kostnad per
+anrop"), så `assessExcellenceAction` (registerläget) gräver bara så långt
+bedömningen behöver. Två regler, prövade i koden — inte i UI:t:
+
+1. **Vinnova-grinden.** Efter startup-bolagets uppslag (och efter varje
+   koncernbolag) körs regelträdet på det som finns. Är
+   `vinnova.outcome === 'not_in_target'` (grundarteamet < 75 %, eller
+   förbrukat de minimis-utrymme ⇒ inget företagsstöd) slås inga (fler)
+   koncernbolag upp; varningen "Bolaget faller ur Vinnovas målgrupp … slogs
+   inte upp (sparar anrop)" visas i resultatet. Kompletteras grunden
+   manuellt (§ 51.5) körs bedömningen om och grinden öppnas.
+2. **Ägarbilden först.** Ett koncernbolag slås upp i **två steg**: först
+   ENBART de valda ägardelarna (koncernstruktur + verklig huvudman), sedan
+   `sameOwnershipPicture(subject, bolaget)` (ren, enhetstestad): samma
+   FYSISKA personer med samma andelsintervall i verklig huvudman (namn
+   jämförs aldrig — de lagras inte, § 11.8), och inget bolag/ingen
+   investerare med ≥ 25 % av ägarbolaget ⇒ **samma** (ett rent
+   grundarholdingbolag) ⇒ steg 2 hämtar grunddata/bokslut (dess ålder och
+   tal räknas i koncernen). **Andra ägare** (investerare, andra personer)
+   eller **ej jämförbart** (verklig huvudman inte vald/hämtad) ⇒ inga fler
+   anrop för bolaget, och ägarkedjan följs inte vidare genom det
+   (`RelatedCompanyRef.viaOrgNr` + `stopped`-mängden i arbetslistan);
+   varningen säger varför. Utan valda ägardelar görs ett uppslag med de
+   valda delarna som förut (ingen jämförelse möjlig). Partnerbolag som är
+   innehav (`direction = holding`) jämförs inte — de hämtas med resten
+   direkt.
+- **Visas** per ägarbolag som chip "Samma ägare som <startup>" / "Andra
+  ägare än <startup> — bolaget grävs inte vidare" / "Ägarbilden kunde inte
+  jämföras" med skälet (`CompanyAssessment.ownersMatchSubject`, UI + PDF).
+- **Kostnaden summeras per faktiskt anrop** (`sumRegistryCosts`, ren +
+  enhetstestad): "N bolag, K anrop = …" i resultat, PDF och audit — inte
+  längre bolag × valda delar, eftersom koncernbolag kan ha hämtats med färre
+  delar. Kryssrutornas kostnadstext beskriver sparläget.
+- **Sparat-läget** (inga anrop) följer kedjan som förut men visar samma
+  ägarjämförelse. Ingen ny dataväg, inga nya fält; riskklass n/a.

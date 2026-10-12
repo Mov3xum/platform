@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   EMPTY_REGISTRY_PRICING,
   estimateRegistryCost,
+  sumRegistryCosts,
   formatRegistryCost,
   isRegistryPricingComplete,
   mergeRegistryPricing,
@@ -99,4 +100,22 @@ test('validateRegistryPricingInput: tomt = ej angivet, decimalkomma, fel avvisas
   assert.equal(validateRegistryPricingInput({ sekPerCredit: 'x', credits: {}, note: '' }).ok, false);
   assert.equal(validateRegistryPricingInput({ sekPerCredit: '', credits: { basic: '-1' }, note: '' }).ok, false);
   assert.equal(validateRegistryPricingInput({ sekPerCredit: '', credits: {}, note: 'ref 19800101-1234' }).ok, false);
+});
+
+test('sumRegistryCosts: olika delar per bolag summeras som faktiska anrop (§ 51.7)', () => {
+  const pricing = { creditsPerPart: { basic: 1, financials: 2, group_structure: 3, beneficial_owners: 4 }, sekPerCredit: 2 } as unknown as Parameters<typeof estimateRegistryCost>[0];
+  const sum = sumRegistryCosts([
+    estimateRegistryCost(pricing, ['basic', 'financials', 'group_structure', 'beneficial_owners'], 1),
+    estimateRegistryCost(pricing, ['group_structure', 'beneficial_owners'], 1),
+    estimateRegistryCost(pricing, ['basic', 'financials'], 1)
+  ]);
+  assert.equal(sum.companies, 3);
+  assert.equal(sum.calls, 8);
+  assert.equal(sum.credits, 20);
+  assert.equal(sum.sek, 40);
+  assert.equal(sum.complete, true);
+  assert.deepEqual(sum.parts, ['basic', 'financials', 'group_structure', 'beneficial_owners']);
+  const partial = sumRegistryCosts([estimateRegistryCost({ ...pricing, creditsPerPart: { basic: 1 } } as typeof pricing, ['basic', 'financials'], 1)]);
+  assert.equal(partial.complete, false);
+  assert.deepEqual(partial.unpricedParts, ['financials']);
 });

@@ -7,6 +7,7 @@ import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import {
   MAX_RELATED_COMPANIES,
   deriveGroupCompanies,
+  sameOwnershipPicture,
   normalizeExcellenceManualReview,
   screenExcellence,
   type ExcellenceManualReview,
@@ -21,7 +22,7 @@ import { pbStatus } from '@/lib/pb-error';
 import { runRegistryLookup } from '@/lib/integrations/company-registry/lookup.server';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import { isPersonalOrgNr } from '@/lib/integrations/company-registry/orgnr';
-import { estimateRegistryCost } from '@/lib/integrations/company-registry/pricing';
+import { estimateRegistryCost, sumRegistryCosts, type RegistryCostEstimate } from '@/lib/integrations/company-registry/pricing';
 import {
   findStartupByOrgNr,
   groupFactsFromRegistry,
@@ -163,9 +164,15 @@ export async function assessExcellenceAction(
   const financialsByOrg: Record<string, ScreeningFinancialsYear[]> = { [subject.orgNr]: c.financials };
   const notes: ExcellenceAssessment['notes'] = [{ orgNr: subject.orgNr, name: subject.name, notes: c.notes }];
   const lookupWarnings: string[] = [];
-  // Kostnad: varje uppslag (startup + varje koncernbolag) är egna debiterade
-  // anrop med samma valda delar — summeras till en rad i resultatet.
-  let companiesLookedUp = 1;
+  // Kostnad: varje uppslag är egna debiterade anrop — summeras till en rad
+  // i resultatet (koncernbolag kan ha hämtats med FÄRRE delar, § 51.7).
+  const costs: RegistryCostEstimate[] = [estimateRegistryCost(lookup.pricing, lookup.requestedParts, 1)];
+  const platformBits = platformPart(platform);
+  // Ekonomisk grind (§ 51.7): faller bolaget redan ur Vinnovas målgrupp på
+  // det vi har (grundarägande < 75 %, förbrukat de minimis-utrymme) gräver
+  // vi inte vidare i koncernen — varje koncernbolag kostar anrop.
+  const outOfTarget = (rel: GroupCompanyFacts[]) =>
+    screenExcellence({ refDate: now, subject, related: rel, ...platformBits }).vinnova.outcome === 'not_in_target';
 
   // Koncernen: slå upp anknutna/partner-/oklara bolag med samma datadelar som
   // valdes för startup-bolaget (ägardelarna behövs för deras egen ägarbild,
@@ -175,16 +182,31 @@ export async function assessExcellenceAction(
   // på investerare eller bolag som i sin tur slås upp (bilaga I art. 3.3/6.3).
   const related: GroupCompanyFacts[] = [];
   const parts: RegistryPartId[] = lookup.requestedParts;
+  // Ägarbilden först (§ 51.7): koncernbolag slås upp i två steg — ägardelarna,
+  // och först när ägarbilden är densamma som startup-bolagets även grunddata/
+  // bokslut. Bolag med andra ägare stoppar kedjan (`stopped`).
+  const ownershipParts = parts.filter((p) => p === 'group_structure' || p === 'beneficial_owners');
+  const restParts = parts.filter((p) => p !== 'group_structure' && p !== 'beneficial_owners');
   const looked = new Set<string>([subject.orgNr]);
   const skipped = new Set<string>();
+  const stopped = new Set<string>();
   const nextRef = () =>
     subject.basic?.isPersonal
       ? undefined
       : deriveGroupCompanies(subject, related).find(
-          (r) => r.relation !== 'exempt' && !looked.has(r.org_nr ?? '') && !skipped.has(r.org_nr || r.name || '')
+          (r) =>
+            r.relation !== 'exempt' &&
+            !looked.has(r.org_nr ?? '') &&
+            !skipped.has(r.org_nr || r.name || '') &&
+            !(r.viaOrgNr && stopped.has(r.viaOrgNr))
         );
   let lookedUp = 0;
-  for (let ref = nextRef(); ref; ref = nextRef()) {
+  if (outOfTarget(related) && nextRef()) {
+    lookupWarnings.push(
+      'Bolaget faller ur Vinnovas målgrupp redan på startup-bolagets uppgifter — koncernbolagen slogs inte upp (sparar anrop). Komplettera manuellt och kör igen om grunden ändras.'
+    );
+  }
+  for (let ref = outOfTarget(related) ? undefined : nextRef(); ref; ref = outOfTarget(related) ? undefined : nextRef()) {
     const label = ref.name || ref.org_nr || 'okänt bolag';
     if (!ref.org_nr) {
       skipped.add(ref.name || '');
@@ -211,23 +233,60 @@ export async function assessExcellenceAction(
     lookedUp++;
     // Ett koncernbolag som själv är portföljbolag får också sitt kort uppdaterat.
     const relatedStartupId = await findStartupByOrgNr(pb, user.tenant, ref.org_nr);
-    const r = await runRegistryLookup(user, {
-      providerSlug,
-      orgNrRaw: ref.org_nr,
-      parts,
-      auditLabel: 'koncernbolag för bedömning excellens',
-      persistToStartupId: relatedStartupId ?? undefined
-    });
-    if (!r.ok) {
-      lookupWarnings.push(`${label}: ${r.error}`);
+    const lookupRelated = (p: RegistryPartId[]) =>
+      runRegistryLookup(user, {
+        providerSlug,
+        orgNrRaw: ref.org_nr ?? '',
+        parts: p,
+        auditLabel: 'koncernbolag för bedömning excellens',
+        persistToStartupId: relatedStartupId ?? undefined
+      });
+    // Steg 1: ägarbilden (eller, utan valda ägardelar, de valda delarna som förut).
+    const first = await lookupRelated(ownershipParts.length > 0 ? ownershipParts : parts);
+    if (!first.ok) {
+      lookupWarnings.push(`${label}: ${first.error}`);
       continue;
     }
-    companiesLookedUp++;
-    if (r.saved) savedToCards.push({ ...r.saved, name: ref.name ?? r.company.name });
-    const facts = groupFactsFromRegistry(r.company, ref.name);
+    costs.push(estimateRegistryCost(first.pricing, first.requestedParts, 1));
+    if (first.saved) savedToCards.push({ ...first.saved, name: ref.name ?? first.company.name });
+    let facts = groupFactsFromRegistry(first.company, ref.name);
+    let companyNotes = [...first.company.notes];
+    let financials = first.company.financials;
+    if (ownershipParts.length > 0 && restParts.length > 0) {
+      const match = ref.direction === 'owner' ? sameOwnershipPicture(subject, facts) : { same: true as const, reason: '' };
+      if (match.same === true) {
+        // Steg 2: samma ägare bakom bolaget ⇒ dess ålder/bokslut räknas — hämta resten.
+        const second = await lookupRelated(restParts);
+        if (second.ok) {
+          costs.push(estimateRegistryCost(second.pricing, second.requestedParts, 1));
+          if (second.saved) savedToCards.push({ ...second.saved, name: ref.name ?? second.company.name });
+          const more = groupFactsFromRegistry(second.company, ref.name);
+          facts = {
+            ...facts,
+            name: more.name ?? facts.name,
+            basic: more.basic ?? facts.basic,
+            financials: more.financials ?? facts.financials
+          };
+          financials = second.company.financials;
+          companyNotes = [...companyNotes, ...second.company.notes];
+        } else {
+          lookupWarnings.push(`${label}: grunddata/bokslut kunde inte hämtas — ${second.error}`);
+        }
+      } else {
+        stopped.add(ref.org_nr);
+        lookupWarnings.push(
+          `${label}: ${match.same === false ? 'ägarbilden är inte densamma som startup-bolagets' : 'ägarbilden kunde inte jämföras med startup-bolagets'} (${match.reason}) — grunddata/bokslut hämtades inte och kedjan följs inte vidare genom bolaget (sparar anrop).`
+        );
+      }
+    }
     related.push(facts);
-    financialsByOrg[facts.orgNr] = r.company.financials;
-    if (r.company.notes.length > 0) notes.push({ orgNr: facts.orgNr, name: facts.name, notes: r.company.notes });
+    financialsByOrg[facts.orgNr] = financials;
+    if (companyNotes.length > 0) notes.push({ orgNr: facts.orgNr, name: facts.name, notes: companyNotes });
+    if (outOfTarget(related) && nextRef()) {
+      lookupWarnings.push(
+        'Bolaget faller ur Vinnovas målgrupp på det som nu hämtats — återstående koncernbolag slogs inte upp (sparar anrop).'
+      );
+    }
   }
 
   const assessment: ExcellenceAssessment = {
@@ -243,12 +302,12 @@ export async function assessExcellenceAction(
         industri: c.startup.industri,
         bolagStatus: c.startup.bolag_status
       },
-      result: screenExcellence({ refDate: now, subject, related, ...platformPart(platform) }),
+      result: screenExcellence({ refDate: now, subject, related, ...platformBits }),
       financialsByOrg,
       founders: platform ? platform.founders : null,
       notes,
       lookupWarnings,
-      cost: estimateRegistryCost(lookup.pricing, lookup.requestedParts, companiesLookedUp),
+      cost: sumRegistryCosts(costs),
       savedToCards,
       assessedAt: now.toISOString(),
       assessedBy: displayName(user),

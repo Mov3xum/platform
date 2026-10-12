@@ -307,7 +307,7 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
                   disabled={pending}
                   pricing={provider.pricing}
                   companies={1}
-                  costContext={`Per bolag. Ägarkedjan följs: varje anknutet/partnerbolag — och de bolag som i sin tur äger dem (t.ex. investerare bakom ett holdingbolag) — slås upp med samma delar (högst ${MAX_RELATED_COMPANIES} till) — kostnaden kan bli upp till ${1 + MAX_RELATED_COMPANIES} × detta. Den faktiska summan visas i resultatet.`}
+                  costContext={`Per bolag. Koncernbolag slås upp sparsamt (högst ${MAX_RELATED_COMPANIES} till): först bara ägarbilden; grunddata/bokslut hämtas bara när ägarbolaget har samma ägare som startup-bolaget, och inga koncernbolag alls när bolaget redan faller ur Vinnovas målgrupp. Den faktiska summan visas i resultatet.`}
                   pricingHref={`/integrationer/${provider.slug}#kostnad`}
                 />
               )}
@@ -404,6 +404,23 @@ function CompanyBlock({ c, subjectName }: { c: CompanyAssessment; subjectName: s
             {c.shareLabel} {c.indirect ? '(indirekt) ' : ''}
             {c.via ? <span className="text-foreground-subtle">genom {c.via} </span> : null}— {c.reason}
             {c.relation === 'linked' && !c.via ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.` : ''}
+          </p>
+        )}
+        {c.ownersMatchSubject && (
+          <p className="mt-1 text-[12px] text-foreground-muted">
+            <span
+              className={`mr-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                c.ownersMatchSubject.same === true ? VERDICT_TONE.yes : c.ownersMatchSubject.same === false ? WARN_TONE : VERDICT_TONE.unknown
+              }`}
+            >
+              {c.ownersMatchSubject.same === true
+                ? `Samma ägare som ${subjectName}`
+                : c.ownersMatchSubject.same === false
+                  ? `Andra ägare än ${subjectName}`
+                  : 'Ägarbilden kunde inte jämföras'}
+            </span>
+            {c.ownersMatchSubject.reason}
+            {c.ownersMatchSubject.same === false ? ' Bolaget grävs inte vidare (inga fler uppslag).' : ''}
           </p>
         )}
         {!c.dataFetched && c.role !== 'subject' && (
@@ -557,8 +574,8 @@ function AssessmentView({
           }`}
         >
           <span className="font-semibold">Denna bedömning kostade hos {assessment.providerName}:</span>{' '}
-          {assessment.cost.companies} {assessment.cost.companies === 1 ? 'bolag' : 'bolag'} × {assessment.cost.parts.length}{' '}
-          {assessment.cost.parts.length === 1 ? 'del' : 'delar'} = {formatRegistryCost(assessment.cost)}.{' '}
+          {assessment.cost.companies} bolag, {assessment.cost.calls} {assessment.cost.calls === 1 ? 'anrop' : 'anrop'} ={' '}
+          {formatRegistryCost(assessment.cost)}.{' '}
           <span className="font-normal opacity-90">
             Uppskattning enligt angivna priser (valda delar × uppslagna bolag) — {assessment.providerName}s faktura är facit.
           </span>

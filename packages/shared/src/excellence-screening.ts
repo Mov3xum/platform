@@ -194,6 +194,8 @@ export interface RelatedCompanyRef {
   indirect?: boolean;
   /** Bolaget relationen går genom (tomt = direkt i startup-bolagets ägarbild). */
   via?: string;
+  /** Org-nr för bolaget relationen går genom (servern stoppar expansion genom bolag med annan ägarbild). */
+  viaOrgNr?: string;
   /** 1 = direkt i startup-bolagets ägarbild, 2 = i ett koncernbolags ägarbild osv. */
   level: number;
 }
@@ -308,6 +310,12 @@ export interface CompanyAssessment {
    * är vem som äger holdingbolaget som avgör kontrollen).
    */
   ownerChain?: ScreeningCheck;
+  /**
+   * Har ägarbolaget samma ägare (fysiska personer, samma andelar) som
+   * startup-bolaget? `null` = kan inte jämföras. Styr hur djupt servern
+   * gräver (§ 51.7): andra ägare ⇒ inga fler uppslag i det bolaget.
+   */
+  ownersMatchSubject?: OwnershipMatch;
   /** Ägarbilden för bolaget (bara `owner`-rader). */
   owners: ScreeningOwnershipEntry[];
   holdings: ScreeningOwnershipEntry[];
@@ -582,6 +590,7 @@ export function deriveGroupCompanies(subject: GroupCompanyFacts, related: GroupC
         shareLabel: shareLabelText,
         reason,
         via: viaName,
+        viaOrgNr: cur.relation === 'subject' ? undefined : cur.facts.orgNr || undefined,
         level: cur.level + 1
       };
       const prev = out.get(key);
@@ -596,6 +605,63 @@ export function deriveGroupCompanies(subject: GroupCompanyFacts, related: GroupC
     }
   }
   return [...out.values()];
+}
+
+export interface OwnershipMatch {
+  /** true = samma fysiska personer med samma andelar; false = andra ägare; null = går inte att jämföra. */
+  same: boolean | null;
+  reason: string;
+}
+
+/**
+ * Är ett ägarbolags ägarbild densamma som startup-bolagets? Jämför de
+ * FYSISKA personerna i verklig huvudman (antal + andelsintervall — namn
+ * lagras aldrig, § 11.8); ett bolag/en investerare med ≥ 25 % av
+ * ägarbolaget gör bilden olik. Ett rent grundarholdingbolag ger `true`
+ * (samma personer bakom båda) — då är dess bokslut värt att hämta.
+ * Andra ägare ⇒ servern gräver inte vidare i det bolaget (§ 51.7).
+ */
+export function sameOwnershipPicture(subject: GroupCompanyFacts, other: GroupCompanyFacts): OwnershipMatch {
+  if (!subject.beneficialOwnersFetched || !other.beneficialOwnersFetched) {
+    return { same: null, reason: 'Verklig huvudman hämtades inte för båda bolagen — ägarbilderna kan inte jämföras.' };
+  }
+  const personKeys = (f: GroupCompanyFacts) =>
+    f.ownership
+      .filter((o) => o.direction === 'owner' && o.owner_kind === 'person')
+      .map((o) => {
+        const r = ownershipShareRange(o);
+        return r ? `${r.min}-${r.max}` : '?';
+      })
+      .sort();
+  const otherName = other.name || other.orgNr || 'ägarbolaget';
+  const companyOwners = other.ownership.filter(
+    (o) =>
+      o.direction === 'owner' &&
+      o.owner_kind !== 'person' &&
+      (o.org_nr === undefined || o.org_nr !== subject.orgNr) &&
+      classifyOwnershipEntry(o).relation !== 'none'
+  );
+  if (companyOwners.length > 0) {
+    return {
+      same: false,
+      reason: `${otherName} ägs (även) av bolag/investerare: ${companyOwners
+        .map((o) => `${o.name || o.org_nr || 'okänt bolag'} (${shareLabel(ownershipShareRange(o))})`)
+        .join(', ')}.`
+    };
+  }
+  const a = personKeys(subject);
+  const b = personKeys(other);
+  if (a.length === 0 && b.length === 0) {
+    return { same: null, reason: 'Inga fysiska personer i någon av ägarbilderna — kan inte jämföras.' };
+  }
+  const label = (keys: string[]) => keys.map((k) => (k === '?' ? 'andel okänd' : `${k.replace('-', '–')} %`)).join(', ');
+  if (a.length === b.length && a.every((k, i) => k === b[i])) {
+    return { same: true, reason: `Samma fysiska personer med samma andelar (${a.length} st: ${label(a)}).` };
+  }
+  return {
+    same: false,
+    reason: `Andra personer/andelar: startup-bolaget ${a.length} st (${label(a) || '–'}), ${otherName} ${b.length} st (${label(b) || '–'}).`
+  };
 }
 
 /**
@@ -958,10 +1024,12 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       r.relation === 'linked' || (r.relation === 'partner' && r.direction === 'owner')
         ? push(ownerChainFor({ ...base, name: scopeName }), scopeName)
         : undefined;
+    const ownersMatchSubject = r.direction === 'owner' && base.dataFetched ? sameOwnershipPicture(subject, base) : undefined;
     companies.push({
       orgNr: base.orgNr,
       name: facts?.name ?? r.name,
       role: r.relation === 'linked' ? 'linked' : 'partner',
+      ownersMatchSubject,
       relation: r.relation,
       relationLabel: RELATION_LABEL[r.relation],
       shareLabel: r.shareLabel,
