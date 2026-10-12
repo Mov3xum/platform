@@ -66,7 +66,7 @@ test('klientdata byggs om fält för fält: okända nycklar, personnamn på fysi
   const parsed = parseAssessmentContext(JSON.stringify(raw));
   assert.ok(parsed);
   assert.equal(parsed!.subject.startupId, undefined);
-  assert.equal((parsed!.subject as Record<string, unknown>).evil, undefined);
+  assert.equal((parsed!.subject as unknown as Record<string, unknown>).evil, undefined);
   const person = parsed!.input.subject.ownership[1];
   assert.equal(person.name, undefined);
   assert.equal(person.org_nr, undefined);
