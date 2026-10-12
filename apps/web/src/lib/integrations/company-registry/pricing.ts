@@ -18,7 +18,14 @@
 
 import { REGISTRY_PART_IDS, REGISTRY_PART_META, type RegistryPartId } from './parts';
 
-export type RegistryPricingSource = 'tenant' | 'env' | 'mixed' | 'none';
+/**
+ * Varifrån ett pris kommer, i stigande prioritet: `provider` = leverantörens
+ * PUBLICERADE listpris (kod, daterat, med källa), `env` = web-appens
+ * miljövariabler, `tenant` = ledningens egna värden. `mixed` = fälten kommer
+ * från olika nivåer (se `fieldSources`).
+ */
+export type RegistryPricingSource = 'tenant' | 'env' | 'provider' | 'mixed' | 'none';
+export type RegistryPricingLayer = 'provider' | 'env' | 'tenant';
 
 export interface RegistryPricing {
   /** Credits per anrop och datadel. Saknad del = pris ej angivet. */
@@ -28,6 +35,13 @@ export interface RegistryPricing {
   /** Fri PII-fri notering, t.ex. "Paket 500 credits/mån, avtal 2026". */
   note?: string;
   source: RegistryPricingSource;
+  /** Per fält: vilken nivå värdet kom från (bara satta fält). */
+  fieldSources?: {
+    sekPerCredit?: RegistryPricingLayer;
+    credits?: Partial<Record<RegistryPartId, RegistryPricingLayer>>;
+  };
+  /** Leverantörens publicerade prislista (källa + datum), när en finns i koden. */
+  provider?: RegistryProviderPricing;
 }
 
 export const EMPTY_REGISTRY_PRICING: RegistryPricing = {
@@ -35,6 +49,83 @@ export const EMPTY_REGISTRY_PRICING: RegistryPricing = {
   sekPerCredit: null,
   source: 'none'
 };
+
+/**
+ * Leverantörens PUBLICERADE prislista — det enda i koden som får bära en
+ * siffra, och bara med källa + datum. Fält som leverantören inte publicerar
+ * i text (t.ex. credits per API, som Roaring bara visar i en bild och i det
+ * inloggade kontot) lämnas tomma: hellre "pris ej angivet" än en gissning.
+ */
+export interface RegistryProviderPricing {
+  providerName: string;
+  /** Publicerat kr/credit (listpris, FÖRE volymrabatt). null = ej publicerat i text. */
+  sekPerCredit: number | null;
+  /** Publicerade credits per datadel. Tom = leverantören publicerar dem inte i text. */
+  creditsPerPart: Partial<Record<RegistryPartId, number>>;
+  /** Leverantörens egna produktnamn per datadel — så ledningen hittar rätt rad i sin prislista. */
+  productNames: Partial<Record<RegistryPartId, string>>;
+  /** Var siffran står (helpcenter/prislista) och när den lästes. */
+  sourceLabel: string;
+  sourceUrl: string;
+  publishedAt: string;
+  /** Hur rabatt/paket påverkar: visas så ingen tror att listpriset är fakturan. */
+  tierNote: string;
+  /** Var i leverantörens eget konto den faktiska förbrukningen och prisraderna finns. */
+  consumptionHint: string;
+}
+
+/**
+ * Roaring (help.roaring.io → Billing & Pricing → "How does your credits
+ * system work?", läst 2026-10-12): utöver månadsavgiften debiteras
+ * förbrukade credits; i artikelns exempel kostar en credit 0,20 kr
+ * (4 400 credits = 880 kr) och priset per credit SJUNKER med volymen enligt
+ * en trappa som bara visas som bild. Credits per API står inte i texten —
+ * de hämtas i det inloggade kontot (app.roaring.io → Fakturering & Priser →
+ * Konsumering) och anges per tenant eller via env.
+ */
+export const REGISTRY_PROVIDER_PRICING: Readonly<Record<string, RegistryProviderPricing>> = {
+  roaring: {
+    providerName: 'Roaring',
+    sekPerCredit: 0.2,
+    creditsPerPart: {},
+    productNames: {
+      basic: 'Company Information (se-company-overview)',
+      financials: 'Economy Overview (se-company-economy-overview)',
+      group_structure: 'Owner Structure / Group Structure (se-company-group-structure)',
+      beneficial_owners: 'Beneficial Owner (se-beneficialowner)'
+    },
+    sourceLabel: 'Roarings helpcenter, "How does your credits system work?" (exempel: 4 400 credits = 880 kr)',
+    sourceUrl: 'https://help.roaring.io/en/collections/167758-billing-pricing',
+    publishedAt: '2026-10-12',
+    tierNote:
+      'Listpris före volymrabatt — ju fler credits per månad, desto lägre pris per credit enligt Roarings trappa. Månadsavgiften för abonnemanget tillkommer och ingår inte här.',
+    consumptionHint:
+      'Credits per API och den faktiska förbrukningen syns inloggad på app.roaring.io → bentomenyn → "Fakturering & Priser" → "Konsumering".'
+  }
+};
+
+/** Leverantörens publicerade listpris som lägsta prisnivå (tom för okänd leverantör). */
+export function registryPricingFromProvider(slug: string): RegistryPricing {
+  const provider = REGISTRY_PROVIDER_PRICING[slug];
+  if (!provider) return { ...EMPTY_REGISTRY_PRICING };
+  const creditsPerPart: Partial<Record<RegistryPartId, number>> = {};
+  const credits: Partial<Record<RegistryPartId, RegistryPricingLayer>> = {};
+  for (const part of REGISTRY_PART_IDS) {
+    const n = provider.creditsPerPart[part];
+    if (n !== undefined && Number.isFinite(n) && n >= 0) {
+      creditsPerPart[part] = n;
+      credits[part] = 'provider';
+    }
+  }
+  const any = Object.keys(creditsPerPart).length > 0 || provider.sekPerCredit !== null;
+  return {
+    creditsPerPart,
+    sekPerCredit: provider.sekPerCredit,
+    source: any ? 'provider' : 'none',
+    fieldSources: { sekPerCredit: provider.sekPerCredit !== null ? 'provider' : undefined, credits },
+    provider
+  };
+}
 
 /** Lagringsformat i `tenant_integrations.pricing` (json). */
 export interface RegistryPricingJson {
@@ -67,13 +158,25 @@ export function parseRegistryPricingJson(raw: unknown): RegistryPricing {
   }
   const sek = finiteNonNegative(rec.sek_per_credit);
   const note = typeof rec.note === 'string' ? rec.note.trim().slice(0, REGISTRY_PRICING_NOTE_MAX) : '';
-  const any = Object.keys(creditsPerPart).length > 0 || sek !== null;
+  const sekOut = sek !== null && sek <= MAX_SEK_PER_CREDIT ? sek : null;
+  const any = Object.keys(creditsPerPart).length > 0 || sekOut !== null;
   return {
     creditsPerPart,
-    sekPerCredit: sek !== null && sek <= MAX_SEK_PER_CREDIT ? sek : null,
+    sekPerCredit: sekOut,
     note: note || undefined,
-    source: any ? 'tenant' : 'none'
+    source: any ? 'tenant' : 'none',
+    fieldSources: layerSources('tenant', creditsPerPart, sekOut)
   };
+}
+
+function layerSources(
+  layer: RegistryPricingLayer,
+  creditsPerPart: Partial<Record<RegistryPartId, number>>,
+  sek: number | null
+): RegistryPricing['fieldSources'] {
+  const credits: Partial<Record<RegistryPartId, RegistryPricingLayer>> = {};
+  for (const part of REGISTRY_PART_IDS) if (creditsPerPart[part] !== undefined) credits[part] = layer;
+  return { sekPerCredit: sek !== null ? layer : undefined, credits };
 }
 
 /** Env-nyckel per leverantör: `ROARING_CREDITS_BASIC`, `ROARING_SEK_PER_CREDIT` … */
@@ -93,38 +196,74 @@ export function registryPricingFromEnv(slug: string, env: Record<string, string 
     if (n !== null && n <= MAX_CREDITS) creditsPerPart[part] = n;
   }
   const sek = finiteNonNegative(env[keys.sekPerCredit]);
-  const any = Object.keys(creditsPerPart).length > 0 || sek !== null;
+  const sekOut = sek !== null && sek <= MAX_SEK_PER_CREDIT ? sek : null;
+  const any = Object.keys(creditsPerPart).length > 0 || sekOut !== null;
   return {
     creditsPerPart,
-    sekPerCredit: sek !== null && sek <= MAX_SEK_PER_CREDIT ? sek : null,
-    source: any ? 'env' : 'none'
+    sekPerCredit: sekOut,
+    source: any ? 'env' : 'none',
+    fieldSources: layerSources('env', creditsPerPart, sekOut)
   };
 }
 
-/** Tenantens värde vinner per fält över env-defaulten. */
-export function mergeRegistryPricing(envPricing: RegistryPricing, tenantPricing: RegistryPricing): RegistryPricing {
-  const creditsPerPart: Partial<Record<RegistryPartId, number>> = { ...envPricing.creditsPerPart };
-  let usedTenant = false;
-  let usedEnv = false;
+/**
+ * Slår ihop prisnivåer: `override` vinner per fält över `base`. Används som
+ * provider → env → tenant (`composeRegistryPricing`). `fieldSources` följer
+ * med så gränssnittet kan säga varifrån varje siffra kommer; `provider`
+ * (källa/datum) behålls från vilken nivå som bär den.
+ */
+export function mergeRegistryPricing(base: RegistryPricing, override: RegistryPricing): RegistryPricing {
+  const creditsPerPart: Partial<Record<RegistryPartId, number>> = { ...base.creditsPerPart };
+  const credits: Partial<Record<RegistryPartId, RegistryPricingLayer>> = { ...(base.fieldSources?.credits ?? {}) };
   for (const part of REGISTRY_PART_IDS) {
-    if (tenantPricing.creditsPerPart[part] !== undefined) {
-      creditsPerPart[part] = tenantPricing.creditsPerPart[part];
-      usedTenant = true;
-    } else if (envPricing.creditsPerPart[part] !== undefined) {
-      usedEnv = true;
+    const v = override.creditsPerPart[part];
+    if (v !== undefined) {
+      creditsPerPart[part] = v;
+      const layer = override.fieldSources?.credits?.[part] ?? layerOf(override.source);
+      if (layer) credits[part] = layer;
     }
   }
-  let sekPerCredit: number | null = null;
-  if (tenantPricing.sekPerCredit !== null) {
-    sekPerCredit = tenantPricing.sekPerCredit;
-    usedTenant = true;
-  } else if (envPricing.sekPerCredit !== null) {
-    sekPerCredit = envPricing.sekPerCredit;
-    usedEnv = true;
+  let sekPerCredit = base.sekPerCredit;
+  let sekSource = base.fieldSources?.sekPerCredit;
+  if (override.sekPerCredit !== null) {
+    sekPerCredit = override.sekPerCredit;
+    sekSource = override.fieldSources?.sekPerCredit ?? layerOf(override.source) ?? sekSource;
   }
-  const source: RegistryPricingSource = usedTenant && usedEnv ? 'mixed' : usedTenant ? 'tenant' : usedEnv ? 'env' : 'none';
-  return { creditsPerPart, sekPerCredit, note: tenantPricing.note, source };
+  const used = new Set<RegistryPricingLayer>();
+  for (const part of REGISTRY_PART_IDS) {
+    const l = credits[part];
+    if (l && creditsPerPart[part] !== undefined) used.add(l);
+  }
+  if (sekPerCredit !== null && sekSource) used.add(sekSource);
+  const source: RegistryPricingSource = used.size === 0 ? 'none' : used.size === 1 ? [...used][0] : 'mixed';
+  return {
+    creditsPerPart,
+    sekPerCredit,
+    note: override.note ?? base.note,
+    source,
+    fieldSources: { sekPerCredit: sekPerCredit !== null ? sekSource : undefined, credits },
+    provider: override.provider ?? base.provider
+  };
 }
+
+function layerOf(source: RegistryPricingSource): RegistryPricingLayer | undefined {
+  return source === 'tenant' || source === 'env' || source === 'provider' ? source : undefined;
+}
+
+/** Hela prisstacken för en leverantör: publicerat listpris → env → tenantens egna värden. */
+export function composeRegistryPricing(
+  slug: string,
+  env: Record<string, string | undefined>,
+  tenantPricing: RegistryPricing
+): RegistryPricing {
+  return mergeRegistryPricing(mergeRegistryPricing(registryPricingFromProvider(slug), registryPricingFromEnv(slug, env)), tenantPricing);
+}
+
+export const REGISTRY_PRICING_LAYER_LABEL: Record<RegistryPricingLayer, string> = {
+  provider: 'leverantörens publicerade listpris',
+  env: 'web-appens miljövariabler',
+  tenant: 'angivet av er'
+};
 
 export function isRegistryPricingComplete(pricing: RegistryPricing, parts: readonly RegistryPartId[]): boolean {
   return pricing.sekPerCredit !== null && parts.every((p) => pricing.creditsPerPart[p] !== undefined);

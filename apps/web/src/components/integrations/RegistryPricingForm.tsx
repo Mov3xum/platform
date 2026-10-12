@@ -9,6 +9,8 @@ import {
 import {
   estimateRegistryCost,
   formatRegistryCost,
+  formatSek,
+  REGISTRY_PRICING_LAYER_LABEL,
   registryPricingEnvKeys,
   type RegistryPricing
 } from '@/lib/integrations/company-registry/pricing';
@@ -37,7 +39,8 @@ const inputCls =
 const SOURCE_LABEL: Record<RegistryPricing['source'], string> = {
   tenant: 'angivna här',
   env: 'från web-appens miljövariabler (standard)',
-  mixed: 'delvis angivna här, delvis från miljövariabler',
+  provider: 'leverantörens publicerade listpris',
+  mixed: 'från olika nivåer (se per fält nedan)',
   none: 'inte angivna'
 };
 
@@ -47,6 +50,9 @@ export function RegistryPricingForm({ tenantIntegrationId, providerSlug, provide
   const envKeys = registryPricingEnvKeys(providerSlug);
   const perCompany = estimateRegistryCost(current, parts, 1);
   const portfolio = portfolioCompanies ? estimateRegistryCost(current, parts, portfolioCompanies) : null;
+  const provider = current.provider;
+  const layerOf = (part: RegistryPartId) => current.fieldSources?.credits?.[part];
+  const sekLayer = current.fieldSources?.sekPerCredit;
 
   return (
     <section id="kostnad" className="rounded-2xl border border-default bg-surface px-5 py-5">
@@ -57,6 +63,23 @@ export function RegistryPricingForm({ tenantIntegrationId, providerSlug, provide
         efteråt i synkloggen. Priserna är just nu <strong>{SOURCE_LABEL[current.source]}</strong>.
         Tomt fält = pris ej angivet (visas som okänt, aldrig som 0 kr).
       </p>
+      {provider && (
+        <div className="mt-3 rounded-xl border border-default bg-canvas-subtle px-3 py-2 text-[12px] text-foreground-muted">
+          <span className="font-semibold text-foreground">Publicerat listpris ({provider.providerName}):</span>{' '}
+          {provider.sekPerCredit !== null ? (
+            <span className="mx-tnum">{formatSek(provider.sekPerCredit)} per credit</span>
+          ) : (
+            'kr per credit publiceras inte i text'
+          )}
+          {Object.keys(provider.creditsPerPart).length === 0 && (
+            <> · credits per API publiceras inte i text — {provider.consumptionHint}</>
+          )}
+          <span className="block text-[11px] text-foreground-subtle">
+            Källa: {provider.sourceLabel}, läst {provider.publishedAt}. {provider.tierNote} Ett värde ni anger
+            här vinner alltid över listpriset.
+          </span>
+        </div>
+      )}
       <form action={formAction} className="mt-3 flex flex-col gap-3">
         <input type="hidden" name="tenant_integration_id" value={tenantIntegrationId} />
         <input type="hidden" name="provider_slug" value={providerSlug} />
@@ -75,6 +98,14 @@ export function RegistryPricingForm({ tenantIntegrationId, providerSlug, provide
                 disabled={pending}
               />
               <span className="mt-0.5 block text-[11px] text-foreground-subtle">
+                {provider?.productNames[part] && (
+                  <>
+                    Hos {provider.providerName}: {provider.productNames[part]}.{' '}
+                  </>
+                )}
+                {layerOf(part) && current.creditsPerPart[part] !== undefined && (
+                  <>Nuvarande värde: {REGISTRY_PRICING_LAYER_LABEL[layerOf(part)!]}. </>
+                )}
                 Miljövariabel: <span className="mx-tnum">{envKeys.credits[part]}</span>
               </span>
             </label>
@@ -85,11 +116,12 @@ export function RegistryPricingForm({ tenantIntegrationId, providerSlug, provide
               name="sek_per_credit"
               inputMode="decimal"
               defaultValue={current.sekPerCredit ?? ''}
-              placeholder="t.ex. 2,50"
+              placeholder={provider?.sekPerCredit !== null && provider?.sekPerCredit !== undefined ? `listpris ${provider.sekPerCredit}` : 't.ex. 0,20'}
               className={inputCls}
               disabled={pending}
             />
             <span className="mt-0.5 block text-[11px] text-foreground-subtle">
+              {sekLayer && current.sekPerCredit !== null && <>Nuvarande värde: {REGISTRY_PRICING_LAYER_LABEL[sekLayer]}. </>}
               Miljövariabel: <span className="mx-tnum">{envKeys.sekPerCredit}</span>
             </span>
           </label>

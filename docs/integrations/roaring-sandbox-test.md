@@ -63,11 +63,20 @@ verifieras genom att köra förhandsgranskningen mot sandboxen.
    kandidater fast bolaget finns: sätt motsvarande `ROARING_*_PATH` i Coolify
    till den sökväg portalen visar (kommaseparerad lista tillåts) — t.ex.
    `ROARING_BENEFICIAL_OWNER_PATH=/se/beneficialowner/2.1/company`.
-6. **Kontrollera enheten** för bokslutsbelopp: `economy-overview` anges
+6. **Ange credits per API** under Inställningar → Integrationer → Roaring →
+   Kostnad per anrop. Plattformen har Roarings publicerade listpris
+   (0,20 kr/credit, helpcentret 2026-10-12, före volymrabatt) som lägsta
+   nivå, men credits per API står bara i ert inloggade konto: app.roaring.io
+   → bentomenyn → "Fakturering & Priser" → "Konsumering" (produktnamnen
+   Company Information, Economy Overview, Owner/Group Structure, Beneficial
+   Owner). Utan dem visar bedömningssidan "pris ej angivet" — aldrig en
+   gissad summa. Er avtalade kr/credit (efter volymrabatt) anges i samma
+   formulär och vinner över listpriset.
+7. **Kontrollera enheten** för bokslutsbelopp: `economy-overview` anges
    normalt i TSEK (`ROARING_AMOUNT_MULTIPLIER` default 1000). Jämför
    förhandsgranskningens `revenue_sek` med portalens exempel; svarar API:t i
    SEK sätts multiplikatorn till `1`.
-7. **Synka ett bolag** från bolagskortet ("Synka från Roaring") och
+8. **Synka ett bolag** från bolagskortet ("Synka från Roaring") och
    kontrollera Finansiell historik + Ägarbild. Först därefter "Synka nu"
    för hela portföljen.
 

@@ -1580,7 +1580,21 @@ notering), lagrat i `tenant_integrations.pricing` (json, ingen hemlighet —
 stripas inte av `strip_integration_config.pb.js`). Env-default på web-appen:
 `<SLUG>_CREDITS_<DEL>` (`ROARING_CREDITS_BASIC`, `…_FINANCIALS`,
 `…_GROUP_STRUCTURE`, `…_BENEFICIAL_OWNERS`) + `<SLUG>_SEK_PER_CREDIT`;
-tenantens värde vinner per fält (`mergeRegistryPricing`). Källa av sanning:
+tenantens värde vinner per fält (`mergeRegistryPricing`). **Tre nivåer
+(2026-10-12):** under env ligger leverantörens PUBLICERADE listpris i koden
+(`REGISTRY_PROVIDER_PRICING`, daterat med källa — det enda i koden som får
+bära en siffra): Roaring 0,20 kr/credit enligt helpcentrets artikel "How does
+your credits system work?" (exempel 4 400 credits = 880 kr; priset per credit
+sjunker med volymen enligt en trappa som bara visas som bild, och
+månadsavgiften tillkommer). **Credits per API publicerar Roaring inte i
+text** (bara i det inloggade kontot: app.roaring.io → Fakturering & Priser →
+Konsumering) och lämnas därför tomma i listan — aldrig gissade; formuläret
+visar Roarings produktnamn per datadel (Company Information, Economy
+Overview, Owner/Group Structure, Beneficial Owner) så ledningen hittar rätt
+rad. `composeRegistryPricing` = listpris → env → tenant, per fält, och
+`fieldSources` säger varifrån varje siffra kommer (visas i formuläret och
+kostnadsraden: "kr/credit är Roarings publicerade listpris före
+volymrabatt"). Listpriset ensamt gör aldrig en uppskattning komplett. Källa av sanning:
 den rena, enhetstestade `company-registry/pricing.ts`
 (`estimateRegistryCost` = valda delar × bolag, `formatRegistryCost`,
 `registryPartCostLabel`, `validateRegistryPricingInput`); IO i
