@@ -43,8 +43,9 @@ export interface RegistryFinancialsYear {
   /** Årets resultat efter skatt. */
   net_result_sek?: number;
   /**
-   * Beslutad vinstutdelning för året enligt årsredovisningen (datadelen
-   * `financials`, economy-overview /extended). 0 = bokslutet svarade "ingen utdelning".
+   * Beslutad vinstutdelning enligt årsredovisningen, när källan faktiskt ger
+   * uppgift om den. 0 = bokslutet svarade "ingen utdelning"; saknat fält är
+   * okänt, aldrig 0.
    * Art. 22 GBER kräver att bolaget INTE delat ut vinst (§ 51).
    */
   dividend_sek?: number;
@@ -104,6 +105,11 @@ export interface RegistryCompany {
   startup: RegistryStartupPatch;
   financials: RegistryFinancialsYear[];
   ownership: RegistryOwnershipEntry[];
+  /**
+   * Börsnoterat enligt grunddata, när källan ger uppgiften (grundförutsättning
+   * i art. 22-screeningen, § 51). Lagras inte på bolagskortet — transient.
+   */
+  listed?: boolean;
   /**
    * Datadelar som hämtades MED LYCKAT RESULTAT. Bara dessa skrivs; en del som
    * inte valdes, eller vars anrop föll, lämnar befintliga värden orörda.

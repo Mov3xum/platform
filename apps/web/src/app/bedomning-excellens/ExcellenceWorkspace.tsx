@@ -22,7 +22,7 @@ import {
   RegistryPartsPicker,
   useRegistryPartSelection
 } from '@/components/integrations/RegistryPartsPicker';
-import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
+import { describeRegistryParts, type RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import { formatRegistryCost, type RegistryPricing } from '@/lib/integrations/company-registry/pricing';
 import { ManualFactsPanel } from './ManualFactsPanel';
 
@@ -124,7 +124,7 @@ function CheckList({ checks }: { checks: ScreeningCheck[] }) {
   );
 }
 
-function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; caption: string }) {
+function OwnershipTable({ rows, caption, emptyText }: { rows: ScreeningOwnershipEntry[]; caption: string; emptyText?: string }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-default">
       <table className="w-full text-[12.5px]">
@@ -141,7 +141,7 @@ function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; ca
         <tbody>
           {rows.length === 0 ? (
             <tr className="border-t border-default">
-              <td colSpan={5} className="px-3 py-2 text-foreground-muted">Inga rader i underlaget.</td>
+              <td colSpan={5} className="px-3 py-2 text-foreground-muted">{emptyText ?? 'Inga rader i underlaget.'}</td>
             </tr>
           ) : (
             rows.map((o, i) => {
@@ -170,7 +170,7 @@ function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; ca
 }
 
 // "Bedömning excellens" (CLAUDE.md § 51): välj bolag → hämta färskt från
-// bolagsregistret för hela koncernen (inget sparas) eller bedöm det som redan
+// bolagsregistret för hela koncernen (det hämtade skrivs till bolagskortet) eller bedöm det som redan
 // är sparat → ett underlag i samma ordning som referensbedömningen
 // "Bedömning Vinnova Combly".
 export function ExcellenceWorkspace({ startups, registries, canLookup, initialStartupId }: Props) {
@@ -206,8 +206,10 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
       <section className="rounded-2xl border border-default bg-surface px-5 py-5">
         <h2 className="text-[15px] font-semibold text-foreground">Välj bolag</h2>
         <p className="mt-1 text-[12.5px] text-foreground-muted">
-          Hämta färskt från bolagsregistret (inget sparas) eller bedöm det som redan är sparat för ett
-          portföljbolag. Anknutna och partnerföretag i ägarbilden slås upp automatiskt så att
+          Hämta färskt från bolagsregistret eller bedöm det som redan är sparat för ett portföljbolag.
+          Det som hämtas för ett portföljbolag sparas på bolagskortet (grunddata, bokslut, ägarbild —
+          samma skrivväg som &quot;Synka från leverantören&quot;), så nästa bedömning kan göras på sparade
+          data utan nytt uppslag. Anknutna och partnerföretag i ägarbilden slås upp automatiskt så att
           grundförutsättningarna prövas för hela koncernen. Grundarägande, registrerat de minimis-stöd,
           IRL och excellensflaggan tas från plattformen när bolaget finns här.
         </p>
@@ -291,11 +293,11 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
                   onSetAll={selection.setAll}
                   endpoints={provider.partEndpoints}
                   providerName={provider.name}
-                  hint="Bara de valda API:erna anropas — för startup-bolaget OCH varje anknutet/partnerbolag — och varje anrop debiteras. Inget sparas. Koncernstruktur krävs för att hitta anknutna bolag; grunddata för deras ålder; bokslut för tröskelvärdet."
+                  hint="Bara de valda API:erna anropas — för startup-bolaget OCH varje anknutet/partnerbolag — och varje anrop debiteras. Det hämtade sparas på bolagskortet för bolag som finns i plattformen. Koncernstruktur krävs för att hitta anknutna bolag; grunddata för deras ålder; bokslut för tröskelvärdet."
                   disabled={pending}
                   pricing={provider.pricing}
                   companies={1}
-                  costContext={`Per bolag. Varje anknutet/partnerbolag i ägarbilden slås upp med samma delar, högst ${MAX_RELATED_COMPANIES} till — kostnaden kan bli upp till ${1 + MAX_RELATED_COMPANIES} × detta. Den faktiska summan visas i resultatet.`}
+                  costContext={`Per bolag. Koncernbolag slås upp sparsamt (högst ${MAX_RELATED_COMPANIES} till): först bara ägarbilden; grunddata/bokslut hämtas bara när ägarbolaget har samma ägare som startup-bolaget, och inga koncernbolag alls när bolaget redan faller ur Vinnovas målgrupp. Den faktiska summan visas i resultatet.`}
                   pricingHref={`/integrationer/${provider.slug}#kostnad`}
                 />
               )}
@@ -359,7 +361,17 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
   );
 }
 
-function CompanyBlock({ c, subjectName }: { c: CompanyAssessment; subjectName: string }) {
+/** Tom ägartabell: skilj "hämtades inte" från "registret visar inga ägare". */
+function ownershipEmptyText(c: CompanyAssessment): string {
+  const missing = [!c.groupStructureFetched ? 'Koncernstruktur' : null, !c.beneficialOwnersFetched ? 'Verklig huvudman' : null].filter(
+    (v): v is string => v !== null
+  );
+  if (!c.dataFetched) return 'Inget uppslag gjort för bolaget.';
+  if (missing.length > 0) return `Ägarbilden hämtades inte — välj ${missing.join(' + ')} vid hämtningen.`;
+  return 'Registret visar inga ägare (bara majoritetsrelationer och fysiska personer med ≥ 25 % syns) — kontrollera aktieboken.';
+}
+
+function CompanyBlock({ c }: { c: CompanyAssessment }) {
   const title = c.name || formatOrgNr(c.orgNr) || 'Okänt bolag';
   return (
     <div className="space-y-3">
@@ -374,7 +386,6 @@ function CompanyBlock({ c, subjectName }: { c: CompanyAssessment; subjectName: s
               {c.relationLabel}
             </span>
             {c.shareLabel} {c.indirect ? '(indirekt) ' : ''}— {c.reason}
-            {c.relation === 'linked' ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.` : ''}
           </p>
         )}
         {!c.dataFetched && c.role !== 'subject' && (
@@ -385,14 +396,22 @@ function CompanyBlock({ c, subjectName }: { c: CompanyAssessment; subjectName: s
       </div>
       {c.conditions.length > 0 && <CheckList checks={c.conditions} />}
       {(c.dataFetched || c.owners.length > 0) && (
-        <OwnershipTable rows={c.owners} caption={c.role === 'subject' ? `Ägarbild: ${title}` : `Ägande: ${title}`} />
+        <OwnershipTable
+          rows={c.owners}
+          caption={c.role === 'subject' ? `Ägarbild: ${title}` : `Vem äger ${title}`}
+          emptyText={ownershipEmptyText(c)}
+        />
       )}
       {c.holdings.length > 0 && <OwnershipTable rows={c.holdings} caption={`${title} äger`} />}
     </div>
   );
 }
 
-function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
+function AssessmentView({
+  assessment
+}: {
+  assessment: ExcellenceAssessment;
+}) {
   const { subject, result } = assessment;
   const subjectName = subject.name || 'Startup-bolaget';
   const counts = useMemo(() => {
@@ -422,7 +441,15 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
     <section className="space-y-6">
       <header className="border-b border-default pb-3">
         <p className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
-          {assessment.mode === 'register' ? `Färskt från ${assessment.providerName} · registerdata sparas inte på bolagskortet` : 'Sparade data i plattformen'}
+          {assessment.mode === 'register'
+            ? `Färskt från ${assessment.providerName}${
+                assessment.savedToCards && assessment.savedToCards.length > 0
+                  ? ' · sparat på bolagskortet'
+                  : assessment.subject.startupId
+                    ? ' · kunde inte sparas på bolagskortet'
+                    : ' · bolaget finns inte i plattformen (inget bolagskort att spara på)'
+              }`
+            : 'Sparade data i plattformen'}
           {' · '}
           {new Date(assessment.assessedAt).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' })}
         </p>
@@ -455,6 +482,30 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
         {/* Var bedömningen ligger (§ 51.3): PDF i den inloggades Filer, i
             bolagets mapp när det är ett portföljbolag. Fail-soft: ett
             lagringsfel visas, bedömningen visas ändå. */}
+        {/* Registerdata på bolagskortet (§ 51.4): vad som skrevs var —
+            samma skrivväg som "Synka från <leverantör>". Fel visas per bolag. */}
+        {assessment.savedToCards && assessment.savedToCards.length > 0 && (
+          <ul className="mt-2 space-y-0.5 text-[12.5px] text-foreground-muted">
+            {assessment.savedToCards.map((c) => (
+              <li key={c.startupId}>
+                {c.errors.length === 0 ? 'Sparat på bolagskortet för ' : 'Delvis sparat på bolagskortet för '}
+                <Link href={`/startups/${c.startupId}`} className="font-semibold text-link hover:underline">
+                  {c.name || 'bolaget'}
+                </Link>
+                {c.parts.length > 0 ? `: ${describeRegistryParts(c.parts)}` : ''}
+                {c.financialsUpserted > 0 || c.ownershipWritten > 0 ? (
+                  <span className="mx-tnum">
+                    {' '}
+                    ({c.financialsUpserted} årsrader, {c.ownershipWritten} ägarrader)
+                  </span>
+                ) : null}
+                {c.errors.length > 0 && (
+                  <span className={`ml-2 rounded-full px-2 py-0.5 text-[11px] font-semibold ${WARN_TONE}`}>{c.errors.join('; ')}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
         {assessment.file ? (
           <p className="mt-2 text-[12.5px] text-foreground-muted">
             Sparad som PDF i{' '}
@@ -481,8 +532,8 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
           }`}
         >
           <span className="font-semibold">Denna bedömning kostade hos {assessment.providerName}:</span>{' '}
-          {assessment.cost.companies} {assessment.cost.companies === 1 ? 'bolag' : 'bolag'} × {assessment.cost.parts.length}{' '}
-          {assessment.cost.parts.length === 1 ? 'del' : 'delar'} = {formatRegistryCost(assessment.cost)}.{' '}
+          {assessment.cost.companies} bolag, {assessment.cost.calls} {assessment.cost.calls === 1 ? 'anrop' : 'anrop'} ={' '}
+          {formatRegistryCost(assessment.cost)}.{' '}
           <span className="font-normal opacity-90">
             Uppskattning enligt angivna priser (valda delar × uppslagna bolag) — {assessment.providerName}s faktura är facit.
           </span>
@@ -563,7 +614,7 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
       {/* Steg 1 */}
       <div className="space-y-5">
         <h3 className="text-[14px] font-semibold text-foreground">Steg 1 — Företagsstöd enligt art. 22 GBER eller de minimis</h3>
-        <CompanyBlock c={result.companies[0]} subjectName={subjectName} />
+        <CompanyBlock c={result.companies[0]} />
 
         <div>
           <h4 className="text-[13.5px] font-semibold text-foreground">Fristående företag?</h4>
@@ -573,7 +624,7 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
         </div>
 
         {result.companies.slice(1).map((c) => (
-          <CompanyBlock key={c.orgNr || c.name} c={c} subjectName={subjectName} />
+          <CompanyBlock key={c.orgNr || c.name} c={c} />
         ))}
 
         <div>

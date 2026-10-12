@@ -1,5 +1,5 @@
 import 'server-only';
-import type { RegistryCompany } from './company-registry/types';
+import type { RegistryCompany, RegistrySource } from './company-registry/types';
 import type { RegistryPartId } from './company-registry/parts';
 
 // The shape every provider must produce. Keeping it minimal +
@@ -78,6 +78,8 @@ export interface RecordsHandler extends BaseIntegrationHandler {
 
 export interface CompanyRegistryHandler extends BaseIntegrationHandler {
   kind: 'company_registry';
+  /** Källmärkning på skrivna rader (`startup_financials.source`, `startup_ownership.source`). */
+  source: RegistrySource;
   /** Datadelar providern kan hämta, i visningsordning (§ 11.8). */
   parts: RegistryPartId[];
   /** Leverantörens endpoint per del — visas vid kryssrutorna. */

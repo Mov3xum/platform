@@ -176,6 +176,8 @@ export interface CompanyAssessment {
   reason?: string;
   indirect?: boolean;
   dataFetched: boolean;
+  groupStructureFetched: boolean;
+  beneficialOwnersFetched: boolean;
   basic?: ScreeningBasic;
   /** Grundförutsättningarna i Comblys ordning: ekonomisk verksamhet, < 5 år, börsnoterat, utdelning, koncentration, övertagit verksamhet. */
   conditions: ScreeningCheck[];
@@ -599,6 +601,8 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       name: subject.name,
       role: 'subject',
       dataFetched: subject.dataFetched,
+      groupStructureFetched: subject.groupStructureFetched,
+      beneficialOwnersFetched: subject.beneficialOwnersFetched,
       basic: subject.basic,
       conditions: subjectConditions,
       owners: subject.ownership.filter((o) => o.direction === 'owner'),
@@ -635,6 +639,8 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       reason: r.reason,
       indirect: r.indirect,
       dataFetched: base.dataFetched,
+      groupStructureFetched: base.groupStructureFetched,
+      beneficialOwnersFetched: base.beneficialOwnersFetched,
       basic: base.basic,
       conditions,
       owners: base.ownership.filter((o) => o.direction === 'owner'),

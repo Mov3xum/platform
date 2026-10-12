@@ -1,4 +1,5 @@
 import 'server-only';
+import type PocketBase from 'pocketbase';
 import { getServerPb, type SessionUser } from '@/lib/auth.server';
 import { escFilter } from '@/lib/pb-filter';
 import { getSuperuserPb, loadCredentialsResult } from '@/lib/integrations/credentials';
@@ -8,15 +9,18 @@ import { recordActivity } from '@/lib/actions/record-activity';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { describeRegistryParts, parseRegistryParts, type RegistryPartId } from './parts';
 import { isPersonalOrgNr, isValidOrgNr, normalizeOrgNr } from './orgnr';
-import type { RegistryCompany } from './types';
+import type { RegistryCompany, RegistrySource as RegistryWriteSource } from './types';
+import { applyRegistryCompany, type RegistryWriteResult } from './writer';
 import { estimateRegistryCost, formatRegistryCost, type RegistryCostEstimate, type RegistryPricing } from './pricing';
 import { resolveRegistryPricing } from './pricing.server';
 
 // Uppslag på ett valfritt bolag hos en ansluten bolagsregister-leverantör
-// UTAN att något sparas (CLAUDE.md § 11.8 "Testa mot org-nr" och § 51
-// "Bedömning excellens"). En kärna för båda ytorna — validering, rate-limit
-// (leverantörerna debiterar per anrop), credentials och PII-fri audit får
-// aldrig divergera. Inte en 'use server'-modul: funktionen tar en redan
+// (CLAUDE.md § 11.8 "Testa mot org-nr" och § 51 "Bedömning excellens"). En
+// kärna för båda ytorna — validering, rate-limit (leverantörerna debiterar
+// per anrop), credentials och PII-fri audit får aldrig divergera. Som default
+// sparas inget; med `persistToStartupId` skrivs det hämtade till bolagskortet
+// via EXAKT samma skrivväg som "Synka från <leverantör>" (`applyRegistryCompany`,
+// § 11.8) — ett betalt uppslag ska inte behöva göras om för att se datan. Inte en 'use server'-modul: funktionen tar en redan
 // verifierad användare och får inte bli en egen server action.
 
 export type RegistryLookupResult =
@@ -29,8 +33,21 @@ export type RegistryLookupResult =
       pricing: RegistryPricing;
       /** Uppskattad kostnad för DETTA uppslag: valda delar × 1 bolag. */
       cost: RegistryCostEstimate;
+      /** Satt när `persistToStartupId` gavs: vad som skrevs till bolagskortet. */
+      saved?: RegistrySaveSummary;
     }
   | { ok: false; error: string };
+
+export interface RegistrySaveSummary {
+  startupId: string;
+  /** Delar som hämtades OCH skrevs (PII-fritt, för audit/UI). */
+  parts: RegistryPartId[];
+  startupUpdated: boolean;
+  financialsUpserted: number;
+  ownershipWritten: number;
+  /** PII-fria skrivfel per del — tomt = allt skrevs. */
+  errors: string[];
+}
 
 export interface RegistryLookupOptions {
   providerSlug: string;
@@ -41,6 +58,12 @@ export interface RegistryLookupOptions {
   parts?: RegistryPartId[];
   /** Titel på audit-raden (utan leverantör). */
   auditLabel: string;
+  /**
+   * Portföljbolag (id) vars kort ska få det hämtade — samma skrivväg som
+   * "Synka från <leverantör>". Bolaget tenant-verifieras mot användaren innan
+   * något skrivs; org-nr på kortet måste matcha uppslaget.
+   */
+  persistToStartupId?: string;
 }
 
 function readRequestedParts(
@@ -138,21 +161,85 @@ export async function runRegistryLookup(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message.slice(0, 300) : 'Uppslaget misslyckades.' };
   }
+  // Valfritt: skriv det hämtade till bolagskortet (§ 11.8 writer — samma
+  // whitelist, idempotens och per-del-ersättning av ägarbilden som synken).
+  let saved: RegistrySaveSummary | undefined;
+  if (opts.persistToStartupId) {
+    saved = await persistLookup(adminResult.pb, user.tenant, opts.persistToStartupId, orgNr, company, handler);
+  }
   // Audit (ISO 27001 A.8.15): PII-fri rad — leverantör, antal och uppskattad
   // kostnad (credits/kr enligt angivna priser), aldrig org-nr.
   try {
     const pb = await getServerPb();
+    const savedLabel = saved
+      ? saved.errors.length > 0
+        ? `sparat på bolagskortet med fel: ${saved.errors.join('; ').slice(0, 160)}`
+        : `sparat på bolagskortet: ${describeRegistryParts(saved.parts)}`
+      : 'inget sparat';
     await recordActivity(pb, {
       tenant: user.tenant,
       kind: 'integration_sync',
       actor: user.id,
+      startup: saved?.startupId,
       title: `${providerSlug}: ${opts.auditLabel}`,
-      meta: `${company.financials.length} årsrader, ${company.ownership.length} ägarrader (inget sparat)${
+      meta: `${company.financials.length} årsrader, ${company.ownership.length} ägarrader (${savedLabel})${
         company.fetchedParts ? ` · Valda delar: ${describeRegistryParts(company.fetchedParts)}` : ''
       } · Kostnad: ${formatRegistryCost(cost)}`
     });
   } catch {
     /* audit får aldrig blockera */
   }
-  return { ok: true, company, requestedParts, orgNr, pricing, cost };
+  return { ok: true, company, requestedParts, orgNr, pricing, cost, saved };
+}
+
+/**
+ * Skriver ett redan hämtat bolag till ett portföljbolags kort. Superuser-
+ * klienten används som i synken, därför verifieras bolagets tenant OCH att
+ * kortets org-nr är det som slogs upp — aldrig skrivning av ett annat bolags
+ * data på kortet. Fail-soft: skrivfel rapporteras, uppslaget är redan gjort.
+ */
+async function persistLookup(
+  pb: PocketBase,
+  tenantId: string,
+  startupId: string,
+  orgNr: string,
+  company: RegistryCompany,
+  handler: { source: RegistryWriteSource; parts: RegistryPartId[] }
+): Promise<RegistrySaveSummary> {
+  const base: RegistrySaveSummary = {
+    startupId,
+    parts: [],
+    startupUpdated: false,
+    financialsUpserted: 0,
+    ownershipWritten: 0,
+    errors: []
+  };
+  let row: { id: string; tenant: string; org_nr?: string };
+  try {
+    row = await pb.collection('startups').getOne<{ id: string; tenant: string; org_nr?: string }>(startupId, {
+      fields: 'id,tenant,org_nr'
+    });
+  } catch {
+    return { ...base, errors: ['Bolaget hittades inte — inget skrevs till bolagskortet.'] };
+  }
+  if (row.tenant !== tenantId) return { ...base, errors: ['Bolaget tillhör en annan tenant — inget skrevs.'] };
+  if (normalizeOrgNr(row.org_nr) !== orgNr) {
+    return { ...base, errors: ['Bolagskortets org-nr matchar inte uppslaget — inget skrevs.'] };
+  }
+  const parts = company.fetchedParts ?? [];
+  if (parts.length === 0) return { ...base, errors: ['Ingen vald del gav data — inget skrevs till bolagskortet.'] };
+  let r: RegistryWriteResult;
+  try {
+    r = await applyRegistryCompany(pb, tenantId, startupId, company, handler.source, new Date().toISOString(), handler.parts);
+  } catch (err) {
+    return { ...base, parts, errors: [err instanceof Error ? err.message.slice(0, 200) : 'Skrivningen misslyckades.'] };
+  }
+  return {
+    startupId,
+    parts,
+    startupUpdated: r.startupUpdated,
+    financialsUpserted: r.financialsUpserted,
+    ownershipWritten: r.ownershipWritten,
+    errors: r.errors
+  };
 }

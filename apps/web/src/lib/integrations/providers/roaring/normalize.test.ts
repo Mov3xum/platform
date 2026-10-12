@@ -666,4 +666,3 @@ test('bokslut utan dividend-nyckel (naken /{companyId}) lämnar utdelningen OKÄ
   assert.equal(rows[0].dividend_sek, undefined);
   assert.ok(notes.some((n) => n.includes('utdelningsposten')));
 });
-

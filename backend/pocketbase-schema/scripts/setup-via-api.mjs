@@ -2442,6 +2442,12 @@ await patchCollection(
   { source: { values: ['manual', 'import_excel', 'allabolag', 'other', 'roaring', 'bolagsverket'] } }
 );
 
+// Migration 1700000189 (§ 51.5): utdelning enligt bokslut (Roaring) — avgör
+// "har inte delat ut vinst" i art. 22-screeningen. Saknat = okänt, aldrig 0.
+await patchCollection('startup_financials', [
+  { name: 'dividend_sek', type: 'number', required: false }
+]);
+
 // Migration 1700000172 (§ 11.8): startup_ownership — ägarbild från
 // bolagsregister (Roaring) eller manuell. Fysiska personer utan namn/org-nr.
 // Tenant-bred STAFF/OBSERVER-data (§ 21.3); createRule bara auth-fält.
@@ -5053,6 +5059,12 @@ await patchCollection('startups', [
   { name: 'vinnova_focus', type: 'select', required: false, maxSelect: 1, values: ['agro', 'industriell_teknik', 'life_science', 'miljo_energi', 'mjukvara_ict', 'upplevelseindustri', 'ovrigt'] },
   { name: 'state_aid_start_at', type: 'date', required: false },
   { name: 'vinnova_funding_end_at', type: 'date', required: false }
+]);
+
+// Migration 1700000189 (§ 51.5): controllerns manuella komplettering av
+// Bedömning excellens (json, tolkas av normalizeExcellenceManualReview).
+await patchCollection('startups', [
+  { name: 'excellence_review', type: 'json', required: false, maxSize: 20000 }
 ]);
 
 // Migration 1700000101: tenants default-timpris (Vinnova-rapportering).

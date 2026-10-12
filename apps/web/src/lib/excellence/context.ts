@@ -12,7 +12,7 @@ import {
 // Relativa importer: modulen är ren och körs i Node-testrunnern (ingen `@/`-alias där).
 import { REGISTRY_PART_IDS, type RegistryPartId } from '../integrations/company-registry/parts';
 import type { RegistryCostEstimate } from '../integrations/company-registry/pricing';
-import type { ExcellenceAssessmentSubject } from './types';
+import type { ExcellenceAssessmentSavedCard, ExcellenceAssessmentSubject } from './types';
 
 // Bedömningens UNDERLAG som rundtur (§ 51.4). Ett registeruppslag kostar
 // credits, så när controllern fyller i manuella svar efter en körning får
@@ -38,6 +38,7 @@ export interface AssessmentContext {
   notes: Array<{ orgNr: string; name?: string; notes: string[] }>;
   lookupWarnings: string[];
   cost?: RegistryCostEstimate;
+  savedToCards?: ExcellenceAssessmentSavedCard[];
   /** Tidpunkten för den ursprungliga körningen (= referensdag). */
   assessedAt: string;
 }
@@ -290,6 +291,32 @@ export function parseAssessmentContext(json: string): AssessmentContext | null {
   const lookupWarnings = Array.isArray(o.lookupWarnings)
     ? o.lookupWarnings.map((t) => str(t, 400)).filter((t): t is string => !!t).slice(0, 30)
     : [];
+  let savedToCards: ExcellenceAssessmentSavedCard[] | undefined;
+  if (Array.isArray(o.savedToCards)) {
+    savedToCards = [];
+    for (const rawCard of o.savedToCards.slice(0, MAX_RELATED_COMPANIES + 1)) {
+      const card = obj(rawCard);
+      const startupId = str(card?.startupId, 30);
+      if (!card || !startupId || !/^[a-z0-9]{1,30}$/i.test(startupId)) continue;
+      const parts = Array.isArray(card.parts)
+        ? (card.parts.filter((p) => typeof p === 'string' && PART_IDS.has(p)) as RegistryPartId[])
+        : [];
+      const count = (v: unknown) => {
+        const n = num(v);
+        return n === undefined ? 0 : Math.max(0, Math.floor(n));
+      };
+      savedToCards.push({
+        startupId,
+        name: str(card.name, 200),
+        parts,
+        financialsUpserted: count(card.financialsUpserted),
+        ownershipWritten: count(card.ownershipWritten),
+        errors: Array.isArray(card.errors)
+          ? card.errors.map((error) => str(error, 200)).filter((error): error is string => !!error).slice(0, 10)
+          : []
+      });
+    }
+  }
 
   const subject: ExcellenceAssessmentSubject = { orgNr: subjectOrg };
   const sName = str(subjectRaw.name, 200);
@@ -320,6 +347,7 @@ export function parseAssessmentContext(json: string): AssessmentContext | null {
     notes,
     lookupWarnings,
     cost: cost(o.cost),
+    ...(savedToCards ? { savedToCards } : {}),
     assessedAt
   };
 }

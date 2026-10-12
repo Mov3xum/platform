@@ -14,6 +14,7 @@ import {
   type ScreeningVerdict
 } from '@platform/shared';
 import { formatRegistryCost } from '@/lib/integrations/company-registry/pricing';
+import { describeRegistryParts } from '@/lib/integrations/company-registry/parts';
 import type { ExcellenceAssessment } from './types';
 
 /**
@@ -204,7 +205,9 @@ function checks(ctx: Ctx, list: ScreeningCheck[]) {
   const textW = ctx.width - badgeW - 8 - srcW;
   for (const c of list) {
     const lines = wrap(clean(ctx, `${c.label} — ${c.detail}`), ctx.body, size, textW);
-    const extra = c.verdict === 'unknown' && c.needs ? wrap(clean(ctx, `Behövs: ${c.needs}`), ctx.body, 8, textW) : [];
+    const extra = [
+      ...(c.verdict === 'unknown' && c.needs ? wrap(clean(ctx, `Behövs: ${c.needs}`), ctx.body, 8, textW) : [])
+    ];
     const h = (lines.length + extra.length) * size * 1.4 + 6;
     ensure(ctx, h);
     const tone: RGB = c.verdict === 'yes' ? rgb01(BRAND.success) : c.verdict === 'no' ? rgb01(BRAND.danger) : MUTED;
@@ -248,10 +251,10 @@ function shareCells(o: ScreeningOwnershipEntry): [string, string] {
   return ['–', '–'];
 }
 
-function ownershipTable(ctx: Ctx, caption: string, rows: ScreeningOwnershipEntry[]) {
+function ownershipTable(ctx: Ctx, caption: string, rows: ScreeningOwnershipEntry[], emptyText = 'Inga rader i underlaget.') {
   subTitle(ctx, caption);
   if (rows.length === 0) {
-    drawLines(ctx, 'Inga rader i underlaget.', { size: 9, color: INK_SOFT, gap: 6 });
+    drawLines(ctx, emptyText, { size: 9, color: INK_SOFT, gap: 6 });
     return;
   }
   table(
@@ -269,15 +272,13 @@ function ownershipTable(ctx: Ctx, caption: string, rows: ScreeningOwnershipEntry
   );
 }
 
-function companyBlock(ctx: Ctx, c: CompanyAssessment, subjectName: string) {
+function companyBlock(ctx: Ctx, c: CompanyAssessment) {
   const title = c.name || formatOrgNr(c.orgNr) || 'Okänt bolag';
   subTitle(ctx, c.role === 'subject' ? `Kan ${title} ta emot företagsstöd?` : `${title}${c.orgNr ? ` · ${formatOrgNr(c.orgNr)}` : ''}`);
   if (c.role !== 'subject') {
     drawLines(
       ctx,
-      `${c.relationLabel ?? ''} · ${c.shareLabel ?? ''}${c.indirect ? ' (indirekt)' : ''} — ${c.reason ?? ''}${
-        c.relation === 'linked' ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.` : ''
-      }`,
+      `${c.relationLabel ?? ''} · ${c.shareLabel ?? ''}${c.indirect ? ' (indirekt)' : ''} — ${c.reason ?? ''}`,
       { size: 9, color: INK_SOFT, gap: 4 }
     );
     if (!c.dataFetched) {
@@ -285,7 +286,17 @@ function companyBlock(ctx: Ctx, c: CompanyAssessment, subjectName: string) {
     }
   }
   if (c.conditions.length > 0) checks(ctx, c.conditions);
-  if (c.dataFetched || c.owners.length > 0) ownershipTable(ctx, c.role === 'subject' ? `Ägarbild: ${title}` : `Ägande: ${title}`, c.owners);
+  if (c.dataFetched || c.owners.length > 0) {
+    const missing = [!c.groupStructureFetched ? 'Koncernstruktur' : null, !c.beneficialOwnersFetched ? 'Verklig huvudman' : null].filter(
+      (v): v is string => v !== null
+    );
+    const emptyText = !c.dataFetched
+      ? 'Inget uppslag gjort för bolaget.'
+      : missing.length > 0
+        ? `Ägarbilden hämtades inte — välj ${missing.join(' + ')} vid hämtningen.`
+        : 'Registret visar inga ägare (bara majoritetsrelationer och fysiska personer med ≥ 25 % syns) — kontrollera aktieboken.';
+    ownershipTable(ctx, c.role === 'subject' ? `Ägarbild: ${title}` : `Vem äger ${title}`, c.owners, emptyText);
+  }
   if (c.holdings.length > 0) ownershipTable(ctx, `${title} äger`, c.holdings);
 }
 
@@ -361,10 +372,19 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
   if (a.cost) {
     drawLines(
       ctx,
-      `Kostnad för uppslagen hos ${a.providerName ?? 'leverantören'}: ${a.cost.companies} bolag × ${a.cost.parts.length} ${
-        a.cost.parts.length === 1 ? 'del' : 'delar'
-      } = ${formatRegistryCost(a.cost)} (uppskattning — leverantörens faktura är facit).`,
+      `Kostnad för uppslagen hos ${a.providerName ?? 'leverantören'}: ${a.cost.companies} bolag, ${a.cost.calls} anrop = ${formatRegistryCost(
+        a.cost
+      )} (uppskattning — leverantörens faktura är facit).`,
       { size: 8.5, color: INK_SOFT, gap: 6 }
+    );
+  }
+  for (const c of a.savedToCards ?? []) {
+    drawLines(
+      ctx,
+      `Registerdata sparad på bolagskortet för ${c.name || 'bolaget'}: ${describeRegistryParts(c.parts)}${
+        c.errors.length > 0 ? ` (med fel: ${c.errors.join('; ')})` : ''
+      }.`,
+      { size: 8.5, color: INK_SOFT, gap: 2 }
     );
   }
   for (const w of a.lookupWarnings) drawLines(ctx, `! ${w}`, { size: 8.5, color: rgb01(BRAND.warning), gap: 2 });
@@ -392,10 +412,10 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
 
   // ── Steg 1 ──────────────────────────────────────────────────────────────
   sectionTitle(ctx, 'Steg 1 — Företagsstöd enligt art. 22 GBER eller de minimis');
-  companyBlock(ctx, result.companies[0], subjectName);
+  companyBlock(ctx, result.companies[0]);
   subTitle(ctx, 'Fristående företag?');
   checks(ctx, [result.standalone]);
-  for (const c of result.companies.slice(1)) companyBlock(ctx, c, subjectName);
+  for (const c of result.companies.slice(1)) companyBlock(ctx, c);
 
   subTitle(ctx, 'Tröskelvärden');
   table(
