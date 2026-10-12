@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   describeRecordKeys,
+  describeShape,
   normalizeRoaringBeneficialOwners,
   normalizeRoaringCompany,
   normalizeRoaringFinancials,
@@ -457,4 +458,128 @@ test('verklig huvudman: juridisk person med id i okänt format behålls som bola
   assert.equal(rows[1].name, undefined);
   assert.ok(!JSON.stringify(rows).includes('Testsson'));
   assert.ok(!JSON.stringify(notes).includes('X-123'));
+});
+
+test('bokslut (economy-overview 2.1): balansomslutning läses ur bsTotalEquityAndLiabilities, omsättning ur plSales', () => {
+  // Fältnycklar bekräftade mot ett riktigt svar 2026-10-12 (Workify Sverige AB).
+  const notes: string[] = [];
+  const rows = normalizeRoaringFinancials(
+    {
+      records: [
+        {
+          companyId: '5591234567',
+          fromDate: '2024-01-01',
+          toDate: '2024-12-31',
+          currency: 'SEK',
+          numberOfEmployees: 3,
+          plNetOperatingIncome: 1250,
+          plSales: 1200,
+          plEbit: -40,
+          plNetProfitLoss: -55,
+          bsTotalEquity: 310,
+          bsTotalLongTermDebts: 0,
+          bsTotalCurrentLiabilities: 190,
+          bsTotalEquityAndLiabilities: 500
+        }
+      ]
+    },
+    notes,
+    1000
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].balance_sheet_sek, 500_000);
+  assert.equal(rows[0].revenue_sek, 1_200_000);
+  assert.equal(rows[0].equity_sek, 310_000);
+  assert.equal(rows[0].net_result_sek, -55_000);
+  assert.equal(rows[0].employees, 3);
+  assert.ok(!notes.some((n) => n.includes('balansomslutning saknas')), 'får inte längre noteras som saknad');
+  assert.ok(notes.some((n) => n.includes('plNetOperatingIncome') && n.includes('avvek')), 'avvikelsen ska noteras');
+});
+
+test('bokslut: ingen avvikelse-not när plSales och plNetOperatingIncome är lika', () => {
+  const notes: string[] = [];
+  normalizeRoaringFinancials(
+    { records: [{ toDate: '2024-12-31', plSales: 100, plNetOperatingIncome: 100, bsTotalEquityAndLiabilities: 50 }] },
+    notes,
+    1
+  );
+  assert.ok(!notes.some((n) => n.includes('avvek')));
+});
+
+test('verklig huvudman (2.1): extentOfControl i ord och controlTypes som kodlista — person-objektet läses aldrig', () => {
+  // Formen bekräftad 2026-10-12: beneficialOwners[person,extentOfControl,controlTypes].
+  const notes: string[] = [];
+  const rows = normalizeRoaringBeneficialOwners(
+    {
+      records: [
+        {
+          caseId: 'C-1',
+          legalEntity: { type: 'COMPANY', companyId: '5591234567', companyName: 'Workify Sverige AB' },
+          beneficialOwners: [
+            {
+              person: { firstName: 'Anna', lastName: 'Testsson', personalNumber: '198001011234', birthDate: '1980-01-01' },
+              extentOfControl: { code: 'MORE_THAN_75', text: 'Mer än 75 procent' },
+              controlTypes: [{ code: 'OWNS_SHARES', text: 'Äger aktier i bolaget' }]
+            },
+            {
+              person: { firstName: 'Bo', lastName: 'Testsson' },
+              extentOfControl: 'More than 25% but not more than 50%',
+              controlTypes: ['BOARD']
+            }
+          ],
+          status: { code: 'OK', description: 'ok' }
+        }
+      ]
+    },
+    notes
+  );
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].owner_kind, 'person');
+  assert.equal(rows[0].pct_min, 75);
+  assert.equal(rows[0].pct_max, 100);
+  assert.equal(rows[0].control_basis, 'shares');
+  assert.equal(rows[1].pct_min, 25);
+  assert.equal(rows[1].pct_max, 50);
+  assert.equal(rows[1].control_basis, 'board');
+  const json = JSON.stringify({ rows, notes });
+  for (const pii of ['Anna', 'Testsson', '198001011234', '1980-01-01']) assert.ok(!json.includes(pii), pii);
+  assert.ok(!notes.some((n) => n.includes('kunde inte tolkas')));
+});
+
+test('verklig huvudman: otolkbart intervall noteras med FORM, aldrig värde', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringBeneficialOwners(
+    {
+      records: [
+        {
+          beneficialOwners: [{ person: { firstName: 'Anna' }, extentOfControl: { level: 'HEMLIG-KOD-99' }, controlTypes: [] }]
+        }
+      ]
+    },
+    notes
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].pct_min, undefined);
+  const note = notes.find((n) => n.includes('kontrollintervall kunde inte tolkas'));
+  assert.ok(note, 'ska noteras');
+  assert.ok(note.includes('extentOfControl{level}'));
+  assert.ok(!JSON.stringify(notes).includes('HEMLIG'));
+  assert.ok(!JSON.stringify(notes).includes('Anna'));
+});
+
+test('describeRecordKeys visar formen två nivåer ned i listor', () => {
+  const keys = describeRecordKeys({
+    records: [
+      {
+        beneficialOwners: [
+          { person: { firstName: 'Anna' }, extentOfControl: { code: 'X', text: 'Y' }, controlTypes: [{ code: 'A' }] }
+        ],
+        status: { code: 'OK' }
+      }
+    ]
+  });
+  assert.deepEqual(keys, ['beneficialOwners[person{firstName},extentOfControl{code,text},controlTypes[code]]', 'status{code}']);
+  assert.ok(!JSON.stringify(keys).includes('Anna'));
+  assert.equal(describeShape('x', [{ a: { b: { c: 1 } } }], 2), 'x[a{b{…}}]');
+  assert.equal(describeShape('x', 'str', 2), 'x');
 });

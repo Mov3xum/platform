@@ -10,9 +10,9 @@ produktion. Ingenting skrivs till databasen förrän steg 5.
 | --- | --- | --- |
 | Token | `POST https://api.roaring.io/token`, Basic `client_id:client_secret`, `grant_type=client_credentials` | Bekräftad |
 | Grunddata | `se-company-overview-2.0` → `/se/company/overview/2.0/{orgnr}` (reserv `1.1`) | Bekräftad. Svarar `{ records: [ … ] }`; posten har bl.a. `communeCode`, `numberEmployeesInterval` och ett `status`-objekt (bolagets status) |
-| Bokslut | `se-company-economy-overview-2.1` → `/se/company/economy-overview/2.1/{orgnr}` (reserv `1.1`) | Sökväg/version bekräftad i katalogen (publicerad). **Fältnamnen obekräftade** — läs fältnyckel-noten |
+| Bokslut | `se-company-economy-overview-2.1` → `/se/company/economy-overview/2.1/{orgnr}` (reserv `1.1`) | **Bekräftad mot riktigt svar 2026-10-12.** En post per räkenskapsår: `fromDate`, `toDate`, `currency`, `numberOfEmployees`, `plSales` (nettoomsättning → `revenue_sek`), `plNetOperatingIncome` (rörelsens intäkter — noteras om den avviker från `plSales`), `plEbit`, `plProfitLossAfterFinItems`, `plNetProfitLoss` (→ `net_result_sek`), `bsShareCapital`, `bsTotalEquity` (→ `equity_sek`), `bsTotalLongTermDebts`, `bsTotalCurrentLiabilities`, **`bsTotalEquityAndLiabilities` (→ `balance_sheet_sek`; balansomslutningen finns bara på skuldsidan)**, KPI-fält (`kpi*Percent`). Personalkostnad/bolagsskatt saknas i API:t. Belopp i TSEK (multiplikator 1000) |
 | Koncernstruktur | `se-company-group-structure-1.0` → `/se/company/group-structure/1.0/{orgnr}` | Bekräftad. **Platt lista** `groupCompanies[]` med `companyId`, `companyName`, `countryCode`, `companyLevel`, `motherCompanyId`, `ownedPercentage` |
-| Verklig huvudman | `se-beneficialowner-2.1` (2.0 avvecklad 2025-01-15). Per bolag: `/se/beneficialowner/2.1/company/{orgnr}`, reserv `/se/beneficialowner/2.1/{orgnr}` och `/se/beneficialowner/1.0/company/{orgnr}` | Version bekräftad; `/company/`-formen är dokumenterad för 1.0 och antas för 2.1 — **vilken som svarar syns i noten**. Fältnamnen inuti `beneficialOwners[]` obekräftade |
+| Verklig huvudman | `se-beneficialowner-2.1` (2.0 avvecklad 2025-01-15). Per bolag: `/se/beneficialowner/2.1/company/{orgnr}`, reserv `/se/beneficialowner/2.1/{orgnr}` och `/se/beneficialowner/1.0/company/{orgnr}` | **`/2.1/company/` bekräftad 2026-10-12.** Svarar `caseId`, `changeDate`, `legalEntity{type,companyId,companyName}`, `beneficialOwners[person,extentOfControl,controlTypes]`, `status{description,code}`, `registrationDateTime`. `person` läses aldrig; `extentOfControl` tolkas som text/objekt/kod inkl. Bolagsverkets ordalydelser ("Mer än 25 men inte mer än 50 procent", `MORE_THAN_75`); `controlTypes[]` mappas till fast vokabulär. Formen INUTI `extentOfControl`/`controlTypes` visas i fältnyckel-noten (två nivåer) — kan intervallet inte tolkas säger en egen not det |
 | "Inga poster" | Roaring kan svara HTTP 200 med `records not found` i kuvertet | Hanteras som 404 (nästa kandidat provas) |
 | Sandbox | Samma värd som produktion. Sandbox-applikationens nycklar ger testdata. | Bekräftad |
 
@@ -50,7 +50,11 @@ verifieras genom att köra förhandsgranskningen mot sandboxen.
      hasBeneficialOwners, beneficialOwners[…]`, och
    - vad normaliseraren INTE kunde tolka ("registreringsdatum saknas",
      "balansomslutning saknas för N årsrad(er)").
-   Fältnycklarna är schemainformation, aldrig värden (§ 11.4).
+   Fältnycklarna är schemainformation, aldrig värden (§ 11.4). Noten visar
+   formen två nivåer ned (`beneficialOwners[person{…},extentOfControl{code,text},
+   controlTypes[code,text]]`) så att även nästlade fält kan stämmas av.
+   Grunddata (`overview/2.0`) bär bl.a. `email`, `phoneNumber` och
+   `topDirectorName` — de läses medvetet INTE (PII, § 11.4).
 5. **Rätta mappningen** om en not säger att något saknas fast fältet finns
    i nyckellistan: lägg till namnet i kandidatlistan i
    `apps/web/src/lib/integrations/providers/roaring/normalize.ts`

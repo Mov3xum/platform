@@ -1456,9 +1456,27 @@ försvann Wellgo Health AB ur Combly-screeningen); ett personnummer-derivat
 anonymiseras alltid, oavsett namn. Samma regel för juridisk person i
 `beneficialOwners[]`.
 Verklig huvudmans intervall/kontrollgrund tolkas även som objekt
-(`{ from, to }`) respektive kodlista (`controlTypes[]`); fältnamnen inuti
-`beneficialOwners[]` och bokslutets fält är fortsatt obekräftade — se
-runbooken. **Sandbox = samma värd** (`api.roaring.io`): det
+(`{ from, to }`) respektive kodlista (`controlTypes[]`). **Fältnamn
+bekräftade mot riktiga svar 2026-10-12** (Workify Sverige AB / WFYAPP
+HOLDING AB): economy-overview 2.1 ger en post per räkenskapsår med
+`fromDate`/`toDate`, `numberOfEmployees`, `plSales` (nettoomsättning),
+`plNetOperatingIncome` (rörelsens intäkter), `plEbit`, `plNetProfitLoss`,
+`bsTotalEquity` och **`bsTotalEquityAndLiabilities`** — balansomslutningen
+levereras bara från skuldsidan (summa eget kapital och skulder = summa
+tillgångar), och `ASSETS_PATHS` saknade det namnet, så noten
+"balansomslutning saknas" kom trots att fältet fanns (åtgärdat; tröskel-
+värdet i § 51 får nu sitt belopp). Omsättning läses ur `plSales` först;
+avviker `plNetOperatingIncome` noteras det så valet kan stämmas av mot ett
+facit. Personalkostnad och bolagsskatt finns INTE i economy-overview (bara
+i det dyrare financial-record-API:t) och lämnas tomma. Verklig huvudman
+2.1 svarar `beneficialOwners[person,extentOfControl,controlTypes]` —
+`person` läses aldrig; `extentOfControl` tolkas som text, objekt eller kod,
+även i Bolagsverkets ordalydelser ("Mer än 25 men inte mer än 50 procent",
+`MORE_THAN_75`) via `parsePctInterval`, och ett intervall som ändå inte
+kan tolkas noteras med sin FORM (nycklar, aldrig värden). Fältnyckel-noten
+visar numera formen två nivåer ned (`extentOfControl{code,text}`), så
+nästa avvikelse syns i förhandsgranskningen utan rå JSON. Runbooken har
+detaljerna. **Sandbox = samma värd** (`api.roaring.io`): det
 är nyckelparet från utvecklarportalen som avgör om svaren är testdata, så
 `base_url` lämnas tom. Förhandsgranskningen noterar per API vilken sökväg som
 svarade och vilka **fältnycklar** (aldrig värden) svaret bar, så mappningen kan

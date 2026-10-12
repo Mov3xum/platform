@@ -192,8 +192,32 @@ export function parsePctInterval(v: unknown): { min: number; max: number } | und
   if (gt) return { min: Number(gt[1]), max: 100 };
   const lt = s.match(/^[<≤]\s*(\d{1,3})/);
   if (lt) return { min: 0, max: Number(lt[1]) };
-  const single = asPct(s);
-  if (single !== undefined) return { min: single, max: single };
+  // Ett ensamt tal ("100", "45 %") är ett exakt värde — men bara när strängen
+  // inte bär ord: "Mer än 75 procent" är ett spann, inte 75 %.
+  if (/^\s*\d{1,3}(?:[.,]\d+)?\s*%?\s*$/.test(s)) {
+    const single = asPct(s);
+    if (single !== undefined) return { min: single, max: single };
+  }
+  return parseProseInterval(s);
+}
+
+/**
+ * Bolagsverkets register över verkliga huvudmän uttrycker omfattningen i
+ * ord, och leverantörer återger dem som text eller kod: "Mer än 25 men inte
+ * mer än 50 procent", "More than 75 %", "MORE_THAN_25_LESS_THAN_50",
+ * "över 75 %". Två tal ⇒ spann; ett tal med "mer än/more than/över/minst"
+ * ⇒ [tal, 100], med "mindre än/less than/under/högst" ⇒ [0, tal].
+ */
+function parseProseInterval(raw: string): { min: number; max: number } | undefined {
+  const s = raw.toLowerCase().replace(/[_\-–]/g, ' ');
+  const nums = (s.match(/\d{1,3}(?:[.,]\d+)?/g) || [])
+    .map((n) => Number(n.replace(',', '.')))
+    .filter((n) => Number.isFinite(n) && n >= 0 && n <= 100);
+  if (nums.length >= 2) return { min: Math.min(nums[0], nums[1]), max: Math.max(nums[0], nums[1]) };
+  if (nums.length !== 1) return undefined;
+  const n = nums[0];
+  if (/mer än|more than|över|over|minst|at least|greater|exceed/.test(s)) return { min: n, max: 100 };
+  if (/mindre än|less than|under|högst|at most|below|up to/.test(s)) return { min: 0, max: n };
   return undefined;
 }
 

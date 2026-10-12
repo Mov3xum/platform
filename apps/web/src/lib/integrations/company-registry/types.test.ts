@@ -52,6 +52,17 @@ test('parsePctInterval tolkar spann och gränser', () => {
   assert.equal(parsePctInterval('okänt'), undefined);
 });
 
+test('parsePctInterval tolkar Bolagsverkets ordalydelser och leverantörskoder', () => {
+  assert.deepEqual(parsePctInterval('Mer än 25 men inte mer än 50 procent'), { min: 25, max: 50 });
+  assert.deepEqual(parsePctInterval('Mer än 75 procent'), { min: 75, max: 100 });
+  assert.deepEqual(parsePctInterval('More than 50% but not more than 75%'), { min: 50, max: 75 });
+  assert.deepEqual(parsePctInterval('MORE_THAN_75'), { min: 75, max: 100 });
+  assert.deepEqual(parsePctInterval('MORE_THAN_25_LESS_THAN_50'), { min: 25, max: 50 });
+  assert.deepEqual(parsePctInterval('över 75 %'), { min: 75, max: 100 });
+  assert.deepEqual(parsePctInterval('mindre än 25 procent'), { min: 0, max: 25 });
+  assert.equal(parsePctInterval('Äger aktier'), undefined);
+});
+
 test('mapBolagStatus mappar leverantörsord till enumet', () => {
   assert.equal(mapBolagStatus('Bolaget är aktivt'), 'aktiv');
   assert.equal(mapBolagStatus('Konkurs avslutad'), 'konkurs');
