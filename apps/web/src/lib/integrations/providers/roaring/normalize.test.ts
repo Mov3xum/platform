@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   describeRecordKeys,
+  describeShape,
+  parseControlInterval,
   normalizeRoaringBeneficialOwners,
   normalizeRoaringCompany,
   normalizeRoaringFinancials,
@@ -460,6 +462,7 @@ test('verklig huvudman: juridisk person med id i okänt format behålls som bola
   assert.ok(!JSON.stringify(notes).includes('X-123'));
 });
 
+<<<<<<< HEAD
 test('overview: börsnotering tolkas bara när fältet finns — annars en not', () => {
   const notes: string[] = [];
   const a = normalizeRoaringOverview({ records: [{ ...overview.records[0], stockExchangeListed: 'false' }] }, notes);
@@ -473,11 +476,16 @@ test('overview: börsnotering tolkas bara när fältet finns — annars en not',
 });
 
 test('bokslut: utdelning läses när fältet finns (TSEK → SEK), saknat blir aldrig 0', () => {
+=======
+test('bokslut (economy-overview 2.1): balansomslutning läses ur bsTotalEquityAndLiabilities, omsättning ur plSales', () => {
+  // Fältnycklar bekräftade mot ett riktigt svar 2026-10-12 (Workify Sverige AB).
+>>>>>>> origin/staging
   const notes: string[] = [];
   const rows = normalizeRoaringFinancials(
     {
       records: [
         {
+<<<<<<< HEAD
           companyAccounts: [
             { toDate: '2024-12-31', plNetOperatingIncome: 141, bsTotalAssets: 1100, plDividend: 50 },
             { toDate: '2023-12-31', plNetOperatingIncome: 90, bsTotalAssets: 900 }
@@ -511,6 +519,21 @@ test('economy-overview 2.1: bsTotalEquityAndLiabilities = balansomslutning (veri
           plNetProfitLoss: -300,
           bsTotalEquity: 900,
           bsTotalEquityAndLiabilities: 2100
+=======
+          companyId: '5591234567',
+          fromDate: '2024-01-01',
+          toDate: '2024-12-31',
+          currency: 'SEK',
+          numberOfEmployees: 3,
+          plNetOperatingIncome: 1250,
+          plSales: 1200,
+          plEbit: -40,
+          plNetProfitLoss: -55,
+          bsTotalEquity: 310,
+          bsTotalLongTermDebts: 0,
+          bsTotalCurrentLiabilities: 190,
+          bsTotalEquityAndLiabilities: 500
+>>>>>>> origin/staging
         }
       ]
     },
@@ -518,9 +541,191 @@ test('economy-overview 2.1: bsTotalEquityAndLiabilities = balansomslutning (veri
     1000
   );
   assert.equal(rows.length, 1);
+<<<<<<< HEAD
   assert.equal(rows[0].balance_sheet_sek, 2_100_000);
   assert.equal(rows[0].revenue_sek, 1_200_000);
   assert.equal(rows[0].equity_sek, 900_000);
   assert.equal(rows[0].employees, 3);
   assert.ok(!notes.some((n) => /balansomslutning saknas/.test(n)), notes.join(' | '));
 });
+=======
+  assert.equal(rows[0].balance_sheet_sek, 500_000);
+  assert.equal(rows[0].revenue_sek, 1_200_000);
+  assert.equal(rows[0].equity_sek, 310_000);
+  assert.equal(rows[0].net_result_sek, -55_000);
+  assert.equal(rows[0].employees, 3);
+  assert.ok(!notes.some((n) => n.includes('balansomslutning saknas')), 'får inte längre noteras som saknad');
+  assert.ok(notes.some((n) => n.includes('plNetOperatingIncome') && n.includes('avvek')), 'avvikelsen ska noteras');
+});
+
+test('bokslut: ingen avvikelse-not när plSales och plNetOperatingIncome är lika', () => {
+  const notes: string[] = [];
+  normalizeRoaringFinancials(
+    { records: [{ toDate: '2024-12-31', plSales: 100, plNetOperatingIncome: 100, bsTotalEquityAndLiabilities: 50 }] },
+    notes,
+    1
+  );
+  assert.ok(!notes.some((n) => n.includes('avvek')));
+});
+
+test('verklig huvudman (2.1): extentOfControl i ord och controlTypes som kodlista — person-objektet läses aldrig', () => {
+  // Formen bekräftad 2026-10-12: beneficialOwners[person,extentOfControl,controlTypes].
+  const notes: string[] = [];
+  const rows = normalizeRoaringBeneficialOwners(
+    {
+      records: [
+        {
+          caseId: 'C-1',
+          legalEntity: { type: 'COMPANY', companyId: '5591234567', companyName: 'Workify Sverige AB' },
+          beneficialOwners: [
+            {
+              person: { firstName: 'Anna', lastName: 'Testsson', personalNumber: '198001011234', birthDate: '1980-01-01' },
+              extentOfControl: { code: 'MORE_THAN_75', text: 'Mer än 75 procent' },
+              controlTypes: [{ code: 'OWNS_SHARES', text: 'Äger aktier i bolaget' }]
+            },
+            {
+              person: { firstName: 'Bo', lastName: 'Testsson' },
+              extentOfControl: 'More than 25% but not more than 50%',
+              controlTypes: ['BOARD']
+            }
+          ],
+          status: { code: 'OK', description: 'ok' }
+        }
+      ]
+    },
+    notes
+  );
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].owner_kind, 'person');
+  assert.equal(rows[0].pct_min, 75);
+  assert.equal(rows[0].pct_max, 100);
+  assert.equal(rows[0].control_basis, 'shares');
+  assert.equal(rows[1].pct_min, 25);
+  assert.equal(rows[1].pct_max, 50);
+  assert.equal(rows[1].control_basis, 'board');
+  const json = JSON.stringify({ rows, notes });
+  for (const pii of ['Anna', 'Testsson', '198001011234', '1980-01-01']) assert.ok(!json.includes(pii), pii);
+  assert.ok(!notes.some((n) => n.includes('kunde inte tolkas')));
+});
+
+test('verklig huvudman: otolkbart intervall noteras med FORM, aldrig värde', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringBeneficialOwners(
+    {
+      records: [
+        {
+          beneficialOwners: [{ person: { firstName: 'Anna' }, extentOfControl: { level: 'HEMLIG-KOD-99' }, controlTypes: [] }]
+        }
+      ]
+    },
+    notes
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].pct_min, undefined);
+  const note = notes.find((n) => n.includes('kontrollintervall kunde inte tolkas'));
+  assert.ok(note, 'ska noteras');
+  assert.ok(note.includes('extentOfControl{level}'));
+  assert.ok(!JSON.stringify(notes).includes('HEMLIG'));
+  assert.ok(!JSON.stringify(notes).includes('Anna'));
+});
+
+test('describeRecordKeys visar formen två nivåer ned i listor', () => {
+  const keys = describeRecordKeys({
+    records: [
+      {
+        beneficialOwners: [
+          { person: { firstName: 'Anna' }, extentOfControl: { code: 'X', text: 'Y' }, controlTypes: [{ code: 'A' }] }
+        ],
+        status: { code: 'OK' }
+      }
+    ]
+  });
+  assert.deepEqual(keys, ['beneficialOwners[person{firstName},extentOfControl{code,text},controlTypes[code]]', 'status{code}']);
+  assert.ok(!JSON.stringify(keys).includes('Anna'));
+  assert.equal(describeShape('x', [{ a: { b: { c: 1 } } }], 2), 'x[a{b{…}}]');
+  assert.equal(describeShape('x', 'str', 2), 'x');
+});
+
+test('parseControlInterval garderar mot alla rimliga former av extentOfControl', () => {
+  const cases: [unknown, { min: number; max: number } | undefined][] = [
+    ['Mer än 25 men inte mer än 50 procent', { min: 25, max: 50 }],
+    ['MER_AN_75', { min: 75, max: 100 }],
+    ['MER_AN_25_MEN_INTE_MER_AN_50', { min: 25, max: 50 }],
+    ['OVER_75', { min: 75, max: 100 }],
+    ['GT75', { min: 75, max: 100 }],
+    ['LT25', { min: 0, max: 25 }],
+    ['GTE_25_LTE_50', { min: 25, max: 50 }],
+    ['MORE_THAN_50_LESS_THAN_75', { min: 50, max: 75 }],
+    [75, { min: 75, max: 75 }],
+    [{ code: 'MORE_THAN_75' }, { min: 75, max: 100 }],
+    [{ code: 'X9', description: 'Mer än 50 % men inte mer än 75 %' }, { min: 50, max: 75 }],
+    [{ code: '3', text: 'Over 75 percent' }, { min: 75, max: 100 }],
+    [{ percentFrom: 25, percentTo: 50 }, { min: 25, max: 50 }],
+    [{ low: 50, high: 75 }, { min: 50, max: 75 }],
+    [{ minimum: 75 }, { min: 75, max: 100 }],
+    [{ interval: { from: 25, to: 50 } }, { min: 25, max: 50 }],
+    [{ ownership: { code: 'MORE_THAN_25_LESS_THAN_50' } }, { min: 25, max: 50 }],
+    [{ extentOfControlCode: 'MER_AN_75', changeDate: '2024-01-15' }, { min: 75, max: 100 }],
+    [[{ code: 'MORE_THAN_75' }], { min: 75, max: 100 }],
+    [{ changeDate: '2024-01-15', caseId: '20240115001' }, undefined],
+    ['Okänd omfattning', undefined],
+    [null, undefined]
+  ];
+  for (const [input, expected] of cases) {
+    assert.deepEqual(parseControlInterval(input), expected, JSON.stringify(input));
+  }
+});
+
+test('verklig huvudman: kontrollgrund ur { code, description }, kodlista och objekt som bär listan', () => {
+  const run = (controlTypes: unknown) => {
+    const notes: string[] = [];
+    const rows = normalizeRoaringBeneficialOwners(
+      { records: [{ beneficialOwners: [{ person: { firstName: 'Anna' }, extentOfControl: 'MORE_THAN_75', controlTypes }] }] },
+      notes
+    );
+    return rows[0]?.control_basis;
+  };
+  assert.equal(run([{ code: '1', description: 'Äger aktier i bolaget' }]), 'shares');
+  assert.equal(run([{ code: 'VOTES' }]), 'votes');
+  assert.equal(run(['BOARD_APPOINTMENT']), 'board');
+  assert.equal(run('Kontroll genom avtal'), 'agreement');
+  assert.equal(run({ types: [{ code: 'OWNS_SHARES' }] }), 'shares');
+  // Flera grunder: en okänd först får inte skugga en känd.
+  assert.equal(run([{ code: 'Z' }, { code: 'OWNS_SHARES' }]), 'shares');
+  assert.equal(run([{ code: 'Z' }]), 'other');
+});
+
+test('bokslut (/extended): dividend, plPersonalCosts och plTaxes läses exakt enligt specen — 0 kr utdelning är ett svar', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringFinancials(
+    {
+      records: [
+        { companyId: '5595728790', fromDate: '2023-01-01', toDate: '2023-12-31', plSales: 100, plPersonalCosts: -820, plTaxes: -12, dividend: 0 },
+        { companyId: '5595728790', fromDate: '2024-01-01', toDate: '2024-12-31', plSales: 400, dividend: 150 }
+      ],
+      status: { code: 0, text: 'found' }
+    },
+    notes,
+    1000
+  );
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].year, 2023);
+  assert.equal(rows[0].dividend_sek, 0);
+  assert.equal(rows[0].dividend_reported, true);
+  assert.equal(rows[0].personnel_cost_sek, 820_000);
+  assert.equal(rows[0].corporate_tax_sek, 12_000);
+  assert.equal(rows[1].dividend_sek, 150_000);
+  assert.equal(rows[1].dividend_reported, true);
+  assert.ok(!notes.some((n) => n.includes('utdelningsposten')));
+});
+
+test('bokslut utan dividend-nyckel (naken /{companyId}) lämnar utdelningen OKÄND och noterar det', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringFinancials({ records: [{ toDate: '2024-12-31', plSales: 50, plNetProfitLoss: 5 }] }, notes, 1000);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].dividend_reported, undefined);
+  assert.equal(rows[0].dividend_sek, undefined);
+  assert.ok(notes.some((n) => n.includes('utdelningsposten')));
+});
+
+>>>>>>> origin/staging

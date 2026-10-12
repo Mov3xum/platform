@@ -63,6 +63,10 @@ export function roaringReportsNoRecords(raw: unknown): boolean {
   if (!raw || typeof raw !== 'object') return false;
   const r = raw as Record<string, unknown>;
   if (Array.isArray(r.records) && r.records.length > 0) return false;
+  // Kuvertet enligt Roarings OpenAPI-specar (2026-10-12): `status.code` 0 =
+  // found, 1 = not found — exakt, oavsett text.
+  const status = r.status;
+  if (status && typeof status === 'object' && (status as Record<string, unknown>).code === 1) return true;
   for (const key of ['responseInfo', 'status']) {
     const env = r[key];
     if (!env || typeof env !== 'object') continue;
@@ -98,17 +102,36 @@ export function describeRecordKeys(raw: unknown, max = 40): string[] {
   const out: string[] = [];
   for (const key of Object.keys(rec)) {
     if (out.length >= max) break;
-    const v = rec[key];
-    if (Array.isArray(v)) {
-      const first = v.find((x) => x && typeof x === 'object') as Record<string, unknown> | undefined;
-      out.push(first ? `${key}[${Object.keys(first).slice(0, 12).join(',')}]` : `${key}[]`);
-    } else if (v && typeof v === 'object') {
-      out.push(`${key}{${Object.keys(v as object).slice(0, 12).join(',')}}`);
-    } else {
-      out.push(key);
-    }
+    out.push(describeShape(key, rec[key], 2));
   }
   return out;
+}
+
+/**
+ * `key`, `key{a,b}`, `key[a,b{c,d}]` — nycklar ner till `depth` nivåer, så
+ * förhandsgranskningen visar FORMEN på t.ex. `extentOfControl` inuti
+ * `beneficialOwners[]` (sträng, objekt eller lista) utan att något värde
+ * lämnar servern. Primitiver skrivs bara som sitt namn.
+ */
+export function describeShape(key: string, v: unknown, depth: number): string {
+  if (Array.isArray(v)) {
+    const first = v.find((x) => x && typeof x === 'object');
+    if (!first) return `${key}[]`;
+    if (depth <= 0) return `${key}[…]`;
+    return `${key}[${describeKeys(first as Record<string, unknown>, depth - 1)}]`;
+  }
+  if (v && typeof v === 'object') {
+    if (depth <= 0) return `${key}{…}`;
+    return `${key}{${describeKeys(v as Record<string, unknown>, depth - 1)}}`;
+  }
+  return key;
+}
+
+function describeKeys(obj: Record<string, unknown>, depth: number): string {
+  return Object.keys(obj)
+    .slice(0, 12)
+    .map((k) => describeShape(k, obj[k], depth))
+    .join(',');
 }
 
 function allRecords(raw: unknown): Record<string, unknown>[] {
@@ -198,6 +221,7 @@ export function normalizeRoaringOverview(raw: unknown, notes: string[]): {
 }
 
 const YEAR_PATHS = ['toDate', 'accountsClosingDate', 'periodEnd', 'period.toDate', 'endDate', 'year', 'fiscalYear'];
+<<<<<<< HEAD
 const REVENUE_PATHS = ['plNetOperatingIncome', 'netTurnover', 'netSales', 'turnover', 'revenue', 'plNetSales', 'pl.netOperatingIncome', 'plSales'];
 const EMPLOYEES_PATHS = ['nbrOfEmployees', 'numberOfEmployees', 'employees', 'averageNumberOfEmployees'];
 const PERSONNEL_PATHS = ['plPersonnelCosts', 'personnelCosts', 'staffCosts', 'salariesAndRemuneration'];
@@ -206,6 +230,35 @@ const TAX_PATHS = ['plTaxOnProfit', 'taxOnProfit', 'incomeTax', 'plTax'];
 // economy-overview 2.1 bär bara skuldsidan (`bsTotalEquityAndLiabilities`,
 // verifierat mot ett riktigt svar 2026-10-12) — identiskt belopp.
 const ASSETS_PATHS = ['bsTotalAssets', 'bsTotalEquityAndLiabilities', 'totalAssets', 'balanceSheetTotal', 'bs.totalAssets', 'sumAssets', 'totalEquityAndLiabilities'];
+=======
+// Omsättning: `plSales` = nettoomsättning (det SMF-definitionen/art. 22
+// GBER räknar på); `plNetOperatingIncome` = rörelsens intäkter inkl. övriga
+// rörelseintäkter (economy-overview 2.1 bär båda, med `plEbit` separat).
+// Avviker de noteras det så värdet kan jämföras mot ett facit (Allabolag).
+const REVENUE_PATHS = ['plSales', 'plNetOperatingIncome', 'netTurnover', 'netSales', 'turnover', 'revenue', 'plNetSales', 'pl.netOperatingIncome'];
+const OPERATING_INCOME_PATHS = ['plNetOperatingIncome', 'pl.netOperatingIncome'];
+const EMPLOYEES_PATHS = ['nbrOfEmployees', 'numberOfEmployees', 'employees', 'averageNumberOfEmployees'];
+// economy-overview 2.1 /extended (OpenAPI 2026-10-12): `plPersonalCosts` =
+// Personnel costs, `plTaxes` = Tax, `dividend` = Dividend (beslutad utdelning
+// för räkenskapsåret). De nakna /{companyId}-svaren saknar dem.
+const PERSONNEL_PATHS = ['plPersonalCosts', 'plPersonnelCosts', 'personnelCosts', 'staffCosts', 'salariesAndRemuneration'];
+const TAX_PATHS = ['plTaxes', 'plTaxOnProfit', 'taxOnProfit', 'incomeTax', 'plTax'];
+const DIVIDEND_PATHS = ['dividend'];
+// Balansomslutning = summa tillgångar = summa eget kapital och skulder.
+// economy-overview 2.1 bär bara skuldsidan (`bsTotalEquityAndLiabilities`),
+// som per definition är samma belopp (incident 2026-10-12: noten
+// "balansomslutning saknas" trots att fältet fanns i svaret).
+const ASSETS_PATHS = [
+  'bsTotalAssets',
+  'bsTotalEquityAndLiabilities',
+  'totalAssets',
+  'balanceSheetTotal',
+  'bs.totalAssets',
+  'bs.totalEquityAndLiabilities',
+  'sumAssets',
+  'sumEquityAndLiabilities'
+];
+>>>>>>> origin/staging
 const EQUITY_PATHS = ['bsTotalEquity', 'totalEquity', 'equity', 'bs.totalEquity', 'sumEquity'];
 const RESULT_PATHS = ['plNetProfitLoss', 'netProfit', 'netIncome', 'profitLossForTheYear', 'plNetIncome', 'plProfitLossForTheYear'];
 const DIVIDEND_PATHS = ['plDividend', 'dividend', 'dividends', 'proposedDividend', 'dividendPaid', 'dividendToShareholders', 'kaDividend', 'bsProposedDividend'];
@@ -254,6 +307,10 @@ export function normalizeRoaringFinancials(
   };
   let missingAssets = 0;
   let missingDividend = 0;
+<<<<<<< HEAD
+=======
+  let salesDiffers = 0;
+>>>>>>> origin/staging
   for (const row of rows) {
     const year = yearOf(row);
     if (!year) continue;
@@ -262,6 +319,10 @@ export function normalizeRoaringFinancials(
     if (employees !== undefined && employees >= 0) entry.employees = Math.round(employees);
     const revenue = mul(pickFirst(row, REVENUE_PATHS));
     if (revenue !== undefined) entry.revenue_sek = revenue;
+    if (pickFirst(row, ['plSales']) !== undefined) {
+      const operating = mul(pickFirst(row, OPERATING_INCOME_PATHS));
+      if (operating !== undefined && revenue !== undefined && operating !== revenue) salesDiffers++;
+    }
     const personnel = mul(pickFirst(row, PERSONNEL_PATHS));
     if (personnel !== undefined) entry.personnel_cost_sek = Math.abs(personnel);
     const tax = mul(pickFirst(row, TAX_PATHS));
@@ -273,19 +334,42 @@ export function normalizeRoaringFinancials(
     if (equity !== undefined) entry.equity_sek = equity;
     const result = mul(pickFirst(row, RESULT_PATHS));
     if (result !== undefined) entry.net_result_sek = result;
+<<<<<<< HEAD
     // Utdelning (grundförutsättning art. 22, § 51): bara när fältet finns —
     // ett saknat fält får aldrig bli 0 kr.
     const dividend = mul(pickFirst(row, DIVIDEND_PATHS));
     if (dividend !== undefined) entry.dividend_sek = Math.abs(dividend);
     else missingDividend++;
+=======
+    // Beslutad utdelning: nyckeln finns bara i /extended-svaret. Ett tal (även
+    // 0) är ett svar ⇒ `dividend_reported`; saknad nyckel lämnar utdelningen
+    // OKÄND (§ 51 — aldrig tyst 0 kr).
+    const dividend = mul(pickFirst(row, DIVIDEND_PATHS));
+    if (dividend !== undefined) {
+      entry.dividend_sek = Math.abs(dividend);
+      entry.dividend_reported = true;
+    } else missingDividend++;
+>>>>>>> origin/staging
     // Senaste raden per år vinner (Roaring kan ge flera perioder).
     byYear.set(year, { ...(byYear.get(year) || { year }), ...entry });
+  }
+  if (missingDividend > 0) {
+    notes.push(
+      `Roaring bokslut: utdelningsposten (dividend) saknas för ${missingDividend} årsrad(er) — utdelningen lämnas OKÄND, aldrig 0 (bara /extended-svaret bär fältet).`
+    );
   }
   if (missingAssets > 0) {
     notes.push(`Roaring bokslut: balansomslutning saknas för ${missingAssets} årsrad(er) — kontrollera fältmappningen.`);
   }
+<<<<<<< HEAD
   if (missingDividend > 0) {
     notes.push(`Roaring bokslut: ingen utdelningsuppgift för ${missingDividend} årsrad(er) — "har inte delat ut vinst" bekräftas av bolaget.`);
+=======
+  if (salesDiffers > 0) {
+    notes.push(
+      `Roaring bokslut: omsättning läses ur plSales (nettoomsättning); plNetOperatingIncome (rörelsens intäkter) avvek för ${salesDiffers} årsrad(er) — jämför mot ett facit om fel post valts.`
+    );
+>>>>>>> origin/staging
   }
   if (amountMultiplier !== 1) {
     notes.push(`Roaring bokslut: belopp multiplicerade med ${amountMultiplier} (TSEK → SEK).`);
@@ -587,45 +671,127 @@ export function normalizeRoaringGroupStructure(
   return out;
 }
 
-const BO_LIST_KEYS = ['beneficialOwners', 'owners', 'alternativeBeneficialOwners', 'persons'];
-const BO_CAPITAL_PATHS = ['ownershipPercentInterval', 'extentOfControl', 'extentOfOwnership', 'ownershipInterval', 'ownership', 'extent', 'capital', 'shareOfCapital', 'capitalInterval', 'ownedPercentage'];
-const BO_VOTES_PATHS = ['votesPercentInterval', 'extentOfVotes', 'votesInterval', 'votes', 'shareOfVotes', 'votingInterval'];
-const BO_CONTROL_PATHS = ['controlTypes', 'controlType', 'controlTypeCodes', 'natureOfControl', 'typeOfControl', 'controlBasis', 'control', 'role'];
+const BO_LIST_KEYS = ['beneficialOwners', 'owners', 'alternativeBeneficialOwners', 'persons', 'beneficialOwnerList'];
+const BO_CAPITAL_PATHS = [
+  'ownershipPercentInterval',
+  'extentOfControl',
+  'extentOfOwnership',
+  'scopeOfControl',
+  'controlExtent',
+  'ownershipInterval',
+  'ownershipShare',
+  'ownership',
+  'extent',
+  'capital',
+  'shareOfCapital',
+  'capitalInterval',
+  'ownedPercentage',
+  'percentage',
+  'share'
+];
+const BO_VOTES_PATHS = [
+  'votesPercentInterval',
+  'extentOfVotes',
+  'extentOfVotingRights',
+  'votingRights',
+  'votesInterval',
+  'votes',
+  'shareOfVotes',
+  'votingInterval'
+];
+const BO_CONTROL_PATHS = [
+  'controlTypes',
+  'controlType',
+  'controlTypeCodes',
+  'typesOfControl',
+  'natureOfControl',
+  'typeOfControl',
+  'controlBasis',
+  'control',
+  'role'
+];
+
+const INTERVAL_LO_KEYS = ['from', 'min', 'lower', 'low', 'start', 'minimum', 'lowerLimit', 'fromPercent', 'minPercent', 'percentFrom', 'gte', 'gt'];
+const INTERVAL_HI_KEYS = ['to', 'max', 'upper', 'high', 'end', 'maximum', 'upperLimit', 'toPercent', 'maxPercent', 'percentTo', 'lte', 'lt'];
+const INTERVAL_TEXT_KEYS = ['text', 'description', 'desc', 'label', 'name', 'value', 'code', 'key', 'id', 'extent', 'interval', 'range', 'percent', 'percentage', 'share', 'ownership', 'control', 'type'];
 
 /**
- * Intervall kan komma som text ("25-50", ">75") eller som objekt
- * ({ from, to } / { min, max } / { lower, upper }, ev. med en text) —
- * normaliseras till text som `parsePctInterval` förstår.
+ * Tolkar ett kontrollintervall ur VILKEN rimlig form som helst: text ("25-50",
+ * ">75", "Mer än 25 men inte mer än 50 procent"), kod ("MORE_THAN_75",
+ * "MER_AN_25_MEN_INTE_MER_AN_50"), tal, objekt med gränser ({ from, to },
+ * { percentFrom, percentTo }, { low, high } …), objekt med text/kod
+ * ({ code, description }) eller ett nästlat objekt ({ interval: { … } }).
+ * Kända nycklar provas först, därefter varje primitivt värde i objektet
+ * (datum/id:n avvisas av parsern). Första tolkbara värdet vinner. Värden
+ * lämnar aldrig funktionen — bara det tolkade intervallet.
  */
-function intervalText(v: unknown): unknown {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
-  const o = v as Record<string, unknown>;
-  const lo = asNumber(pickFirst(o, ['from', 'min', 'lower', 'fromPercent', 'minPercent']));
-  const hi = asNumber(pickFirst(o, ['to', 'max', 'upper', 'toPercent', 'maxPercent']));
-  if (lo !== undefined && hi !== undefined) return `${lo}-${hi}`;
-  if (lo !== undefined) return `>${lo}`;
-  if (hi !== undefined) return `<${hi}`;
-  return pickFirst(o, ['text', 'description', 'code']);
-}
-
-/**
- * Kontrollgrund kan vara text, ett objekt eller en lista av koder/objekt
- * (flera grunder). Första igenkännbara texten används — den mappas ändå till
- * fast vokabulär av `controlBasisCategory`.
- */
-function controlText(v: unknown): unknown {
-  const one = (x: unknown): unknown =>
-    x && typeof x === 'object' && !Array.isArray(x)
-      ? pickFirst(x, ['text', 'description', 'controlTypeText', 'code', 'controlTypeCode'])
-      : x;
+export function parseControlInterval(v: unknown, depth = 0): { min: number; max: number } | undefined {
+  if (v === undefined || v === null || depth > 3) return undefined;
   if (Array.isArray(v)) {
     for (const x of v) {
-      const t = one(x);
-      if (asString(t)) return t;
+      const r = parseControlInterval(x, depth + 1);
+      if (r) return r;
     }
     return undefined;
   }
-  return one(v);
+  if (typeof v !== 'object') return parsePctInterval(v);
+  const o = v as Record<string, unknown>;
+  const lo = asNumber(pickFirst(o, INTERVAL_LO_KEYS));
+  const hi = asNumber(pickFirst(o, INTERVAL_HI_KEYS));
+  if (lo !== undefined && hi !== undefined) return parsePctInterval(`${lo}-${hi}`);
+  if (lo !== undefined) return parsePctInterval(`>${lo}`);
+  if (hi !== undefined) return parsePctInterval(`<${hi}`);
+  for (const key of INTERVAL_TEXT_KEYS) {
+    const r = parseControlInterval(o[key], depth + 1);
+    if (r) return r;
+  }
+  for (const key of Object.keys(o)) {
+    if (INTERVAL_TEXT_KEYS.includes(key)) continue;
+    const r = parseControlInterval(o[key], depth + 1);
+    if (r) return r;
+  }
+  return undefined;
+}
+
+/**
+ * Kontrollgrund kan vara text, kod, ett objekt ({ code, description }), en
+ * lista av koder/objekt (flera grunder) eller ett objekt som bär listan
+ * ({ types: [ … ] }). Första texten som ger en känd kategori vinner, annars
+ * första text alls — den mappas ändå till fast vokabulär av
+ * `controlBasisCategory` (leverantörens fritext når aldrig databasen).
+ */
+function controlText(v: unknown, depth = 0): unknown {
+  if (v === undefined || v === null || depth > 3) return undefined;
+  if (Array.isArray(v)) {
+    let fallback: unknown;
+    for (const x of v) {
+      const t = controlText(x, depth + 1);
+      if (!asString(t)) continue;
+      if (controlBasisCategory(t) !== 'other') return t;
+      fallback ??= t;
+    }
+    return fallback;
+  }
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    let fallback: unknown;
+    for (const key of ['text', 'description', 'desc', 'label', 'name', 'controlTypeText', 'code', 'controlTypeCode', 'type', 'value', 'key']) {
+      const t = controlText(o[key], depth + 1);
+      if (!asString(t)) continue;
+      if (controlBasisCategory(t) !== 'other') return t;
+      fallback ??= t;
+    }
+    // Objekt som bär listan under en okänd nyckel ({ types: [ … ] }).
+    for (const key of Object.keys(o)) {
+      if (Array.isArray(o[key]) || (o[key] && typeof o[key] === 'object')) {
+        const t = controlText(o[key], depth + 1);
+        if (asString(t) && controlBasisCategory(t) !== 'other') return t;
+        fallback ??= t;
+      }
+    }
+    return fallback;
+  }
+  return v;
 }
 
 /**
@@ -661,6 +827,9 @@ export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]):
     return [];
   }
   const out: RegistryOwnershipEntry[] = [];
+  let unparsedIntervals = 0;
+  let unparsedControl = 0;
+  const shapes = new Set<string>();
   for (const item of list) {
     if (!item || typeof item !== 'object') continue;
     const o = item as Record<string, unknown>;
@@ -679,11 +848,20 @@ export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]):
     }
     const capitalRaw = pickFirst(o, BO_CAPITAL_PATHS);
     const votesRaw = pickFirst(o, BO_VOTES_PATHS);
-    const capital = parsePctInterval(intervalText(capitalRaw));
-    const votes = parsePctInterval(intervalText(votesRaw));
+    const capital = parseControlInterval(capitalRaw);
+    const votes = parseControlInterval(votesRaw);
     // Kontrollgrund mappas till fast vokabulär — leverantörens fritext når
     // aldrig databasen (kan bära namn).
-    const control = controlBasisCategory(controlText(pickFirst(o, BO_CONTROL_PATHS)));
+    const controlRaw = pickFirst(o, BO_CONTROL_PATHS);
+    const control = controlBasisCategory(controlText(controlRaw));
+    if (capitalRaw !== undefined && !capital) {
+      unparsedIntervals++;
+      shapes.add(describeShape('extentOfControl', capitalRaw, 2));
+    }
+    if (controlRaw !== undefined && !control) {
+      unparsedControl++;
+      shapes.add(describeShape('controlTypes', controlRaw, 2));
+    }
     const entry: RegistryOwnershipEntry = {
       direction: 'owner',
       owner_kind: legalOrgNr || namedCompany ? inferOwnerKindFromName(companyName, 'company') : 'person',
@@ -702,6 +880,18 @@ export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]):
     }
     if (votes && votes.min === votes.max) entry.voting_pct = votes.min;
     out.push(entry);
+  }
+  // Fältet fanns men kunde inte tolkas: säg det, med FORMEN (nycklar, aldrig
+  // värden) så kandidatlistan kan rättas — annars står huvudmannen tyst
+  // utan intervall och screeningen (§ 51) tror att andelen är okänd.
+  if (unparsedIntervals > 0) {
+    notes.push(
+      `Roaring verklig huvudman: kontrollintervall kunde inte tolkas för ${unparsedIntervals} huvudman/-män (form: ${[...shapes].join(', ')}) — kontrollera fältmappningen.`
+    );
+  } else if (unparsedControl > 0) {
+    notes.push(
+      `Roaring verklig huvudman: kontrollgrund kunde inte tolkas för ${unparsedControl} huvudman/-män (form: ${[...shapes].join(', ')}).`
+    );
   }
   return out;
 }

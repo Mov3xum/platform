@@ -92,7 +92,14 @@ async function upsertFinancialsRow(
     balance_sheet_sek: row.balance_sheet_sek,
     equity_sek: row.equity_sek,
     net_result_sek: row.net_result_sek,
+<<<<<<< HEAD
     dividend_sek: row.dividend_sek
+=======
+    // Utdelning skrivs bara när årsredovisningen faktiskt svarade (flaggan),
+    // så en synk utan den delen aldrig nollar en tidigare hämtad utdelning.
+    dividend_sek: row.dividend_reported === true ? row.dividend_sek : undefined,
+    dividend_reported: row.dividend_reported === true ? true : undefined
+>>>>>>> origin/staging
   });
   payload.tenant = tenantId;
   payload.startup = startupId;

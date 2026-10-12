@@ -43,11 +43,25 @@ export interface RegistryFinancialsYear {
   /** Årets resultat efter skatt. */
   net_result_sek?: number;
   /**
+<<<<<<< HEAD
    * Beslutad/utbetald utdelning enligt bokslutet (0 = ingen), när källan ger
    * den — grundförutsättningen "har inte delat ut vinst" i art. 22-screeningen
    * (§ 51). Saknat fält = okänt, aldrig 0.
    */
   dividend_sek?: number;
+=======
+   * Beslutad vinstutdelning för året enligt årsredovisningen (datadelen
+   * `financials`, economy-overview /extended). 0 = bokslutet svarade "ingen utdelning".
+   * Art. 22 GBER kräver att bolaget INTE delat ut vinst (§ 51).
+   */
+  dividend_sek?: number;
+  /**
+   * Sant när årsredovisningen faktiskt svarade på utdelningsfrågan (även
+   * 0 kr). Saknas flaggan är utdelningen OKÄND — PB lagrar 0 för tomt tal,
+   * så siffran ensam kan inte skilja "ingen utdelning" från "inte hämtad".
+   */
+  dividend_reported?: boolean;
+>>>>>>> origin/staging
 }
 
 /** Riktning: `owner` = ägaren äger startup-bolaget; `holding` = startup-bolaget äger. */
@@ -193,6 +207,9 @@ export function asPct(v: unknown): number | undefined {
 export function parsePctInterval(v: unknown): { min: number; max: number } | undefined {
   const s = asString(v);
   if (!s) return undefined;
+  // Datum/tidsstämplar/id:n bär också siffror ("2024-01-15" ser ut som
+  // spannet 1–24) — de är aldrig ett intervall.
+  if (/\d{4}-\d{2}-\d{2}|\d{6,}/.test(s)) return undefined;
   const range = s.match(/(\d{1,3})\s*[-–]\s*(\d{1,3})/);
   if (range) {
     const a = Number(range[1]);
@@ -203,8 +220,41 @@ export function parsePctInterval(v: unknown): { min: number; max: number } | und
   if (gt) return { min: Number(gt[1]), max: 100 };
   const lt = s.match(/^[<≤]\s*(\d{1,3})/);
   if (lt) return { min: 0, max: Number(lt[1]) };
-  const single = asPct(s);
-  if (single !== undefined) return { min: single, max: single };
+  // Ett ensamt tal ("100", "45 %") är ett exakt värde — men bara när strängen
+  // inte bär ord: "Mer än 75 procent" är ett spann, inte 75 %.
+  if (/^\s*\d{1,3}(?:[.,]\d+)?\s*%?\s*$/.test(s)) {
+    const single = asPct(s);
+    if (single !== undefined) return { min: single, max: single };
+  }
+  return parseProseInterval(s);
+}
+
+/**
+ * Bolagsverkets register över verkliga huvudmän uttrycker omfattningen i
+ * ord, och leverantörer återger dem som text eller kod: "Mer än 25 men inte
+ * mer än 50 procent", "More than 75 %", "MORE_THAN_25_LESS_THAN_50",
+ * "över 75 %". Två tal ⇒ spann; ett tal med "mer än/more than/över/minst"
+ * ⇒ [tal, 100], med "mindre än/less than/under/högst" ⇒ [0, tal].
+ */
+function parseProseInterval(raw: string): { min: number; max: number } | undefined {
+  const s = raw
+    .toLowerCase()
+    .replace(/[_\-–]/g, ' ')
+    // Koder utan diakriter ("MER_AN_75", "OVER_75") ska läsas som orden.
+    .replace(/\bmer an\b/g, 'mer än')
+    .replace(/\bover\b/g, 'över')
+    .replace(/\bhogst\b/g, 'högst')
+    // "GT75"/"LT25"/"GTE_25_LTE_50" (kodade jämförelser).
+    .replace(/\bgte?\s*(?=\d)/g, 'mer än ')
+    .replace(/\blte?\s*(?=\d)/g, 'mindre än ');
+  const nums = (s.match(/\d{1,3}(?:[.,]\d+)?/g) || [])
+    .map((n) => Number(n.replace(',', '.')))
+    .filter((n) => Number.isFinite(n) && n >= 0 && n <= 100);
+  if (nums.length >= 2) return { min: Math.min(nums[0], nums[1]), max: Math.max(nums[0], nums[1]) };
+  if (nums.length !== 1) return undefined;
+  const n = nums[0];
+  if (/mer än|more than|över|minst|at least|greater|exceed|above/.test(s)) return { min: n, max: 100 };
+  if (/mindre än|less than|under|högst|at most|below|up to|max/.test(s)) return { min: 0, max: n };
   return undefined;
 }
 

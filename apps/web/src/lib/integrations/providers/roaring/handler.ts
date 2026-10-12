@@ -6,6 +6,7 @@ import type { CompanyRegistryHandler } from '../../types';
 import {
   readRoaringCredentials,
   roaringAmountMultiplier,
+  roaringFinancialYears,
   roaringGetFirst,
   roaringToken,
   ROARING_PATHS,
@@ -25,7 +26,8 @@ function responseNote(label: string, outcome: RoaringFetchOutcome): string {
 }
 
 // Roaring — bolagsregister-provider (CLAUDE.md § 11.8). Hämtar upp till fyra
-// API:er per bolag (grunddata, bokslut, koncernstruktur, verklig huvudman) —
+// API:er per bolag (grunddata, bokslut med beslutad utdelning, koncernstruktur,
+// verklig huvudman) —
 // bara de personalen valt — och normaliserar till RegistryCompany. Valda
 // grunddata är blockerande — felar det felar bolaget; de övriga är fail-soft
 // med not i `notes` och räknas inte som hämtade (`fetchedParts`).
@@ -102,7 +104,11 @@ export const roaringHandler: CompanyRegistryHandler = createCompanyRegistryHandl
     // delar är fail-soft och noteras.
     const [overview, financials, group, beneficial] = await Promise.all([
       want('basic') ? roaringGetFirst(c, ROARING_PATHS.overview(), orgNr) : Promise.resolve(null),
-      want('financials') ? roaringGetFirst(c, ROARING_PATHS.financials(), orgNr) : Promise.resolve(null),
+      // economy-overview 2.1 /extended tar `years` (spec-default 5) — flera
+      // räkenskapsår med utdelning, personalkostnad och skatt i ETT anrop.
+      want('financials')
+        ? roaringGetFirst(c, ROARING_PATHS.financials(), orgNr, { years: String(roaringFinancialYears()) })
+        : Promise.resolve(null),
       want('group_structure') && !isPersonal
         ? roaringGetFirst(c, ROARING_PATHS.groupStructure(), orgNr)
         : Promise.resolve(null),

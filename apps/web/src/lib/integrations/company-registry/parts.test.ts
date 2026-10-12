@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   describeRegistryParts,
+  financialsParts,
   ownershipParts,
   ownershipReplaceMode,
   parseRegistryParts,
@@ -34,6 +35,12 @@ test('okända delar och delar providern saknar avvisas', () => {
 test('ägardelarna identifieras', () => {
   assert.deepEqual(ownershipParts(ROARING), ['group_structure', 'beneficial_owners']);
   assert.deepEqual(ownershipParts(BOLAGSVERKET), []);
+});
+
+test('bokslutsdelarna: bokslut och årsredovisning skriver samma rader', () => {
+  assert.deepEqual(financialsParts(ROARING), ['financials']);
+  assert.deepEqual(financialsParts(['basic', 'group_structure']), []);
+  assert.deepEqual(financialsParts(BOLAGSVERKET), []);
 });
 
 test('ersättningsläget för ägarbilden', () => {

@@ -1,8 +1,15 @@
 import type {
+<<<<<<< HEAD
   ExcellenceManualReview,
   ExcellenceScreeningResult,
   ScreeningFinancialsYear,
   ScreeningFounderRow
+=======
+  ExcellenceScreeningResult,
+  ScreeningFinancialsYear,
+  ScreeningFounderRow,
+  ScreeningManualFacts
+>>>>>>> origin/staging
 } from '@platform/shared';
 import type { RegistryCostEstimate } from '@/lib/integrations/company-registry/pricing';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
@@ -51,7 +58,20 @@ export interface ExcellenceAssessment {
   result: ExcellenceScreeningResult;
   /** Bokslut per bolag i koncernen (org-nr → årsrader). */
   financialsByOrg: Record<string, ScreeningFinancialsYear[]>;
+  /** Grundarna bedömningen räknade på (teamet på bolagskortet eller manuellt inmatade). */
   founders: ScreeningFounderRow[] | null;
+  foundersSource: 'platform' | 'manual';
+  /** De manuella svar som vägdes in (§ 51.4) — förifyller panelen "Manuella svar". */
+  facts: ScreeningManualFacts;
+  /** Sant när svaren kunde sparas på bolagskortet (portföljbolag). */
+  factsSaved?: boolean;
+  /** Fältet `screening_facts` saknas i schemat — svaren vägdes in men sparades inte. */
+  factsSchemaMissing?: boolean;
+  /**
+   * Underlaget serialiserat för omräkning med nya manuella svar UTAN nya
+   * leverantörsanrop (`lib/excellence/context.ts`).
+   */
+  context: string;
   /** PII-fria noteringar från tolkningen, per bolag. */
   notes: Array<{ orgNr: string; name?: string; notes: string[] }>;
   /** Uppslag som inte kunde göras (anknutna bolag) — PII-fritt. */

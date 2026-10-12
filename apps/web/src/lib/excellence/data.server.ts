@@ -3,11 +3,19 @@ import type PocketBase from 'pocketbase';
 import {
   DEFAULT_VAXELKURS_SEK_PER_EUR,
   SAMLAT_TAK_EUR,
+<<<<<<< HEAD
   normalizeExcellenceManualReview,
+=======
+  normalizeScreeningFacts,
+>>>>>>> origin/staging
   samladSumma,
   type ExcellenceManualReview,
   type ExcellenceScreeningInput,
+<<<<<<< HEAD
   type ScreeningPlatformHints,
+=======
+  type ScreeningManualFacts,
+>>>>>>> origin/staging
   type GroupCompanyFacts,
   type ScreeningFinancialsYear,
   type ScreeningFounderRow,
@@ -68,6 +76,8 @@ export interface PlatformStartupFacts {
   ownership: ScreeningOwnershipEntry[];
   groupStructureSaved: boolean;
   beneficialOwnersSaved: boolean;
+  /** Controllerns sparade manuella svar (`startups.screening_facts`, § 51.4). */
+  facts: ScreeningManualFacts;
 }
 
 const OWNER_KINDS: ReadonlySet<string> = new Set(['company', 'person', 'public_body', 'investor', 'other']);
@@ -182,7 +192,11 @@ export async function loadPlatformStartupFacts(
   try {
     s = await pb.collection('startups').getOne(startupId, {
       fields:
+<<<<<<< HEAD
         'id,tenant,name,org_nr,bolagsform,bolag_status,company_registered_at,kommun,industri,irl_level,meets_excellence_criteria,is_deeptech,approved_de_minimis,approved_state_aid_art22,excellence_review'
+=======
+        'id,tenant,name,org_nr,bolagsform,bolag_status,company_registered_at,kommun,industri,irl_level,meets_excellence_criteria,screening_facts'
+>>>>>>> origin/staging
     });
   } catch {
     return null;
@@ -196,7 +210,11 @@ export async function loadPlatformStartupFacts(
     pb.collection('startup_financials').getList(1, 50, {
       filter: byStartup,
       sort: '-year',
+<<<<<<< HEAD
       fields: 'year,employees,revenue_sek,balance_sheet_sek,equity_sek,net_result_sek,dividend_sek'
+=======
+      fields: 'year,employees,revenue_sek,balance_sheet_sek,equity_sek,net_result_sek,dividend_sek,dividend_reported'
+>>>>>>> origin/staging
     }),
     pb.collection('startup_ownership').getList(1, 100, {
       filter: pb.filter('startup = {:id} && tenant = {:tenant}', { id: startupId, tenant: tenantId })
@@ -233,7 +251,14 @@ export async function loadPlatformStartupFacts(
             balance_sheet_sek: num(r.balance_sheet_sek),
             equity_sek: num(r.equity_sek),
             net_result_sek: num(r.net_result_sek),
+<<<<<<< HEAD
             dividend_sek: num(r.dividend_sek)
+=======
+            // Utdelning räknas bara när årsredovisningen faktiskt svarade (PB
+            // lagrar 0 för ett tomt tal — § 51 / migration 1700000189).
+            dividend_sek: r.dividend_reported === true ? num(r.dividend_sek) : undefined,
+            dividend_reported: r.dividend_reported === true ? true : undefined
+>>>>>>> origin/staging
           }))
       : [];
 
@@ -307,8 +332,28 @@ export async function loadPlatformStartupFacts(
     financials,
     ownership,
     groupStructureSaved,
-    beneficialOwnersSaved
+    beneficialOwnersSaved,
+    facts: normalizeScreeningFacts(s.screening_facts)
   };
+}
+
+/**
+ * Anknutet bolag som själv är portföljbolag: dess registrerade de minimis-
+ * stöd läggs på koncernfakta (källa plattformen) så intyget inte behöver
+ * matas in manuellt. Läses med användarens token (RLS) — `undefined` när
+ * bolaget inte finns i plattformen.
+ */
+export async function attachPlatformDeMinimis(
+  pb: PocketBase,
+  tenantId: string,
+  facts: GroupCompanyFacts
+): Promise<GroupCompanyFacts> {
+  if (!facts.orgNr || facts.deMinimis) return facts;
+  const id = await findStartupByOrgNr(pb, tenantId, facts.orgNr);
+  if (!id) return facts;
+  const platform = await loadPlatformStartupFacts(pb, tenantId, id);
+  if (!platform?.deMinimis) return facts;
+  return { ...facts, name: facts.name ?? platform.name, deMinimis: { usedEur: platform.deMinimis.usedEur, source: 'platform' } };
 }
 
 /** Koncernbolag ur det som redan är sparat för ett portföljbolag. */
@@ -317,6 +362,7 @@ export function groupFactsFromSaved(f: PlatformStartupFacts): GroupCompanyFacts 
     orgNr: f.orgNr,
     name: f.name,
     dataFetched: true,
+    deMinimis: f.deMinimis ? { usedEur: f.deMinimis.usedEur, source: 'platform' } : undefined,
     basic: {
       registeredAt: f.registeredAt,
       bolagStatus: f.bolagStatus,
@@ -372,18 +418,37 @@ export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: 
   };
 }
 
+<<<<<<< HEAD
 /** Plattformens egna fakta (finns inte hos leverantören) — delas av båda lägena. */
 export function platformPart(platform: PlatformStartupFacts | null): Pick<
   ExcellenceScreeningInput,
   'founders' | 'deMinimis' | 'irl' | 'meetsExcellenceFlag' | 'sekPerEur' | 'manual' | 'platformHints'
 > {
+=======
+/**
+ * Plattformens egna fakta (finns inte hos leverantören) — delas av båda
+ * lägena. Manuella svar (`manual`) kan ge grundarteamet när det inte finns i
+ * teamet på bolagskortet (eller ska kompletteras med engagemang): då är
+ * källan "manuell", annars teamet.
+ */
+export function platformPart(
+  platform: Pick<PlatformStartupFacts, 'founders' | 'deMinimis' | 'irl' | 'meetsExcellence'> | null,
+  manual: ScreeningManualFacts | undefined
+): Pick<ExcellenceScreeningInput, 'founders' | 'foundersSource' | 'deMinimis' | 'irl' | 'meetsExcellenceFlag' | 'sekPerEur' | 'manual'> {
+  const manualFounders = manual?.founders && manual.founders.length > 0 ? manual.founders : undefined;
+>>>>>>> origin/staging
   return {
-    founders: platform ? platform.founders : undefined,
+    founders: manualFounders ?? (platform ? platform.founders : undefined),
+    foundersSource: manualFounders ? 'manual' : 'platform',
     deMinimis: platform ? platform.deMinimis : null,
     irl: platform?.irl ?? null,
     meetsExcellenceFlag: platform ? platform.meetsExcellence : undefined,
     sekPerEur: DEFAULT_VAXELKURS_SEK_PER_EUR,
+<<<<<<< HEAD
     manual: platform?.manual,
     platformHints: platform?.hints
+=======
+    manual
+>>>>>>> origin/staging
   };
 }

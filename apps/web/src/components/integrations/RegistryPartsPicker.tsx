@@ -227,7 +227,11 @@ export function RegistryCostLine({ estimate, pricing, providerName, label = 'Val
       )}
       {!unpriced && (
         <span className="block text-[11px] text-foreground-subtle">
-          Uppskattning enligt angivna priser{pricing.note ? ` (${pricing.note})` : ''} — leverantörens faktura är facit.
+          Uppskattning enligt angivna priser{pricing.note ? ` (${pricing.note})` : ''}
+          {pricing.fieldSources?.sekPerCredit === 'provider' && pricing.provider
+            ? ` — kr/credit är ${pricing.provider.providerName}s publicerade listpris före volymrabatt`
+            : ''}{' '}
+          — leverantörens faktura är facit.
         </span>
       )}
     </div>
