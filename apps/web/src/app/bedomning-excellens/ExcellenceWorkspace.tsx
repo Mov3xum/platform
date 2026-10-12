@@ -132,7 +132,7 @@ function CheckList({ checks }: { checks: ScreeningCheck[] }) {
   );
 }
 
-function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; caption: string }) {
+function OwnershipTable({ rows, caption, emptyText }: { rows: ScreeningOwnershipEntry[]; caption: string; emptyText?: string }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-default">
       <table className="w-full text-[12.5px]">
@@ -149,7 +149,7 @@ function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; ca
         <tbody>
           {rows.length === 0 ? (
             <tr className="border-t border-default">
-              <td colSpan={5} className="px-3 py-2 text-foreground-muted">Inga rader i underlaget.</td>
+              <td colSpan={5} className="px-3 py-2 text-foreground-muted">{emptyText ?? 'Inga rader i underlaget.'}</td>
             </tr>
           ) : (
             rows.map((o, i) => {
@@ -307,7 +307,7 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
                   disabled={pending}
                   pricing={provider.pricing}
                   companies={1}
-                  costContext={`Per bolag. Varje anknutet/partnerbolag i ägarbilden slås upp med samma delar (högst ${MAX_RELATED_COMPANIES} till) — kostnaden kan bli upp till ${1 + MAX_RELATED_COMPANIES} × detta. Den faktiska summan visas i resultatet.`}
+                  costContext={`Per bolag. Ägarkedjan följs: varje anknutet/partnerbolag — och de bolag som i sin tur äger dem (t.ex. investerare bakom ett holdingbolag) — slås upp med samma delar (högst ${MAX_RELATED_COMPANIES} till) — kostnaden kan bli upp till ${1 + MAX_RELATED_COMPANIES} × detta. Den faktiska summan visas i resultatet.`}
                   pricingHref={`/integrationer/${provider.slug}#kostnad`}
                 />
               )}
@@ -377,6 +377,16 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
   );
 }
 
+/** Tom ägartabell: skilj "hämtades inte" från "registret visar inga ägare". */
+function ownershipEmptyText(c: CompanyAssessment): string {
+  const missing = [!c.groupStructureFetched ? 'Koncernstruktur' : null, !c.beneficialOwnersFetched ? 'Verklig huvudman' : null].filter(
+    (v): v is string => v !== null
+  );
+  if (!c.dataFetched) return 'Inget uppslag gjort för bolaget.';
+  if (missing.length > 0) return `Ägarbilden hämtades inte — välj ${missing.join(' + ')} vid hämtningen.`;
+  return 'Registret visar inga ägare (bara majoritetsrelationer och fysiska personer med ≥ 25 % syns) — kontrollera aktieboken.';
+}
+
 function CompanyBlock({ c, subjectName }: { c: CompanyAssessment; subjectName: string }) {
   const title = c.name || formatOrgNr(c.orgNr) || 'Okänt bolag';
   return (
@@ -391,8 +401,9 @@ function CompanyBlock({ c, subjectName }: { c: CompanyAssessment; subjectName: s
             <span className={`mr-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${c.relation === 'linked' ? VERDICT_TONE.no : WARN_TONE}`}>
               {c.relationLabel}
             </span>
-            {c.shareLabel} {c.indirect ? '(indirekt) ' : ''}— {c.reason}
-            {c.relation === 'linked' ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.` : ''}
+            {c.shareLabel} {c.indirect ? '(indirekt) ' : ''}
+            {c.via ? <span className="text-foreground-subtle">genom {c.via} </span> : null}— {c.reason}
+            {c.relation === 'linked' && !c.via ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.` : ''}
           </p>
         )}
         {!c.dataFetched && c.role !== 'subject' && (
@@ -402,8 +413,13 @@ function CompanyBlock({ c, subjectName }: { c: CompanyAssessment; subjectName: s
         )}
       </div>
       {c.conditions.length > 0 && <CheckList checks={c.conditions} />}
+      {c.ownerChain && <CheckList checks={[c.ownerChain]} />}
       {(c.dataFetched || c.owners.length > 0) && (
-        <OwnershipTable rows={c.owners} caption={c.role === 'subject' ? `Ägarbild: ${title}` : `Ägande: ${title}`} />
+        <OwnershipTable
+          rows={c.owners}
+          caption={c.role === 'subject' ? `Ägarbild: ${title}` : `Vem äger ${title}`}
+          emptyText={ownershipEmptyText(c)}
+        />
       )}
       {c.holdings.length > 0 && <OwnershipTable rows={c.holdings} caption={`${title} äger`} />}
     </div>

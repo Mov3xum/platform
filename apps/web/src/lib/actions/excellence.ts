@@ -6,7 +6,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import {
   MAX_RELATED_COMPANIES,
-  deriveRelatedCompanies,
+  deriveGroupCompanies,
   normalizeExcellenceManualReview,
   screenExcellence,
   type ExcellenceManualReview,
@@ -72,9 +72,17 @@ async function assessSaved(pb: PocketBase, user: SessionLike, platform: Platform
   // Anknutna bolag som själva är portföljbolag får sina sparade fakta.
   const related: GroupCompanyFacts[] = [];
   const financialsByOrg: Record<string, ScreeningFinancialsYear[]> = { [platform.orgNr]: platform.financials };
-  for (const ref of deriveRelatedCompanies(subject.ownership).slice(0, MAX_RELATED_COMPANIES)) {
-    if (!ref.org_nr || ref.relation === 'exempt') continue;
-    const id = await findStartupByOrgNr(pb, user.tenant, ref.org_nr);
+  // Ägarkedjan följs genom koncernen: varje bolag som själv finns i
+  // plattformen ger sin sparade ägarbild, som kan peka vidare (holdingbolag
+  // → investerare/bolag som äger holdingbolaget).
+  const looked = new Set<string>([platform.orgNr]);
+  for (let i = 0; i < MAX_RELATED_COMPANIES; i++) {
+    const next = deriveGroupCompanies(subject, related).find(
+      (r) => !!r.org_nr && r.relation !== 'exempt' && !looked.has(r.org_nr)
+    );
+    if (!next?.org_nr) break;
+    looked.add(next.org_nr);
+    const id = await findStartupByOrgNr(pb, user.tenant, next.org_nr);
     const facts = id ? await loadPlatformStartupFacts(pb, user.tenant, id) : null;
     if (facts) {
       related.push({ ...groupFactsFromSaved(facts), name: facts.name });
@@ -162,24 +170,45 @@ export async function assessExcellenceAction(
   // Koncernen: slå upp anknutna/partner-/oklara bolag med samma datadelar som
   // valdes för startup-bolaget (ägardelarna behövs för deras egen ägarbild,
   // grunddata för åldern, bokslut för tröskelvärdet).
+  // Arbetslista: ägarkedjan följs nivå för nivå — ett holdingbolag som äger
+  // 100 % är inte slutet på kedjan; dess egen ägarbild (hämtad här) kan peka
+  // på investerare eller bolag som i sin tur slås upp (bilaga I art. 3.3/6.3).
   const related: GroupCompanyFacts[] = [];
-  const refs = subject.basic?.isPersonal ? [] : deriveRelatedCompanies(subject.ownership).filter((r) => r.relation !== 'exempt');
-  if (refs.length > MAX_RELATED_COMPANIES) {
-    lookupWarnings.push(
-      `Koncernen har ${refs.length} anknutna/partnerbolag — bara de ${MAX_RELATED_COMPANIES} första slogs upp.`
-    );
-  }
   const parts: RegistryPartId[] = lookup.requestedParts;
-  for (const ref of refs.slice(0, MAX_RELATED_COMPANIES)) {
+  const looked = new Set<string>([subject.orgNr]);
+  const skipped = new Set<string>();
+  const nextRef = () =>
+    subject.basic?.isPersonal
+      ? undefined
+      : deriveGroupCompanies(subject, related).find(
+          (r) => r.relation !== 'exempt' && !looked.has(r.org_nr ?? '') && !skipped.has(r.org_nr || r.name || '')
+        );
+  let lookedUp = 0;
+  for (let ref = nextRef(); ref; ref = nextRef()) {
     const label = ref.name || ref.org_nr || 'okänt bolag';
     if (!ref.org_nr) {
+      skipped.add(ref.name || '');
       lookupWarnings.push(`${label}: saknar org-nr i registret — kunde inte slås upp.`);
       continue;
     }
     if (isPersonalOrgNr(ref.org_nr)) {
+      skipped.add(ref.org_nr);
       lookupWarnings.push(`${label}: enskild firma — slås inte upp (org-nr = personnummer).`);
       continue;
     }
+    if (lookedUp >= MAX_RELATED_COMPANIES) {
+      const rest = deriveGroupCompanies(subject, related).filter(
+        (r) => r.relation !== 'exempt' && !!r.org_nr && !looked.has(r.org_nr) && !skipped.has(r.org_nr)
+      );
+      lookupWarnings.push(
+        `Koncernen har fler bolag i ägarkedjan än taket (${MAX_RELATED_COMPANIES}) — inte uppslagna: ${rest
+          .map((r) => r.name || r.org_nr)
+          .join(', ')}.`
+      );
+      break;
+    }
+    looked.add(ref.org_nr);
+    lookedUp++;
     // Ett koncernbolag som själv är portföljbolag får också sitt kort uppdaterat.
     const relatedStartupId = await findStartupByOrgNr(pb, user.tenant, ref.org_nr);
     const r = await runRegistryLookup(user, {

@@ -492,3 +492,35 @@ test('bokslut: utdelning läses när fältet finns (TSEK → SEK), saknat blir a
   assert.equal(rows.find((r) => r.year === 2023)?.dividend_sek, undefined);
   assert.ok(notes.some((n) => n.includes('utdelningsuppgift')));
 });
+
+test('economy-overview 2.1: bsTotalEquityAndLiabilities = balansomslutning (verifierat svar 2026-10-12)', () => {
+  const notes: string[] = [];
+  const rows = normalizeRoaringFinancials(
+    {
+      records: [
+        {
+          companyId: '5595728790',
+          fromDate: '2025-01-01',
+          toDate: '2025-12-31',
+          currency: 'SEK',
+          bsShareCapital: 25,
+          numberOfShares: 500,
+          numberOfEmployees: 3,
+          plNetOperatingIncome: 1200,
+          plSales: 1250,
+          plNetProfitLoss: -300,
+          bsTotalEquity: 900,
+          bsTotalEquityAndLiabilities: 2100
+        }
+      ]
+    },
+    notes,
+    1000
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].balance_sheet_sek, 2_100_000);
+  assert.equal(rows[0].revenue_sek, 1_200_000);
+  assert.equal(rows[0].equity_sek, 900_000);
+  assert.equal(rows[0].employees, 3);
+  assert.ok(!notes.some((n) => /balansomslutning saknas/.test(n)), notes.join(' | '));
+});

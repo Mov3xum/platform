@@ -1456,9 +1456,23 @@ försvann Wellgo Health AB ur Combly-screeningen); ett personnummer-derivat
 anonymiseras alltid, oavsett namn. Samma regel för juridisk person i
 `beneficialOwners[]`.
 Verklig huvudmans intervall/kontrollgrund tolkas även som objekt
-(`{ from, to }`) respektive kodlista (`controlTypes[]`); fältnamnen inuti
-`beneficialOwners[]` och bokslutets fält är fortsatt obekräftade — se
-runbooken. **Sandbox = samma värd** (`api.roaring.io`): det
+(`{ from, to }`) respektive kodlista (`controlTypes[]`). **Fältnycklar
+verifierade mot riktiga svar 2026-10-12** (ur förhandsgranskningens
+PII-fria notering): grunddata `companyRegistrationDate`/`statusTextHigh`/
+`legalGroupText`/`commune`/`industryCode` — ingen uppgift om börsnotering;
+bokslut (economy-overview 2.1) `toDate`/`numberOfEmployees`/
+`plNetOperatingIncome`/`bsTotalEquity`/`plNetProfitLoss` och
+**`bsTotalEquityAndLiabilities` = balansomslutning** (skuldsidan — identiskt
+belopp; `bsTotalAssets` finns inte i svaret, så noten "balansomslutning
+saknas" kom av att nyckeln inte låg i kandidatlistan — rättat, enhetstestat)
+— ingen utdelningsuppgift (`dividend_sek` stannar manuell); koncernstruktur
+`groupCompanies[companyId, companyLevel, companyName, motherCompanyId,
+ownedPercentage]`; verklig huvudman `beneficialOwners[person,
+extentOfControl, controlTypes]` — **bara fysiska personer** (`legalEntity`
+är det uppslagna bolaget självt). Konsekvens för § 51: ett bolag/en
+investerare med 25–50 % av ett holdingbolag syns i INGEN av delarna
+(koncernstruktur = majoritet, verklig huvudman = personer) — aktieboken
+krävs, vilket bedömningen säger rakt ut. **Sandbox = samma värd** (`api.roaring.io`): det
 är nyckelparet från utvecklarportalen som avgör om svaren är testdata, så
 `base_url` lämnas tom. Förhandsgranskningen noterar per API vilken sökväg som
 svarade och vilka **fältnycklar** (aldrig värden) svaret bar, så mappningen kan
@@ -8244,7 +8258,7 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 
 | Fil | Syfte |
 |-----|-------|
-| `packages/shared/src/excellence-screening.ts` (+ `.test.ts`) | REN regelmotor: `classifyOwnershipEntry` (bilaga I: > 50 % / styrelse / avtal = anknutet, 25–50 % = partner, undantagna investerare, intervall som korsar tröskel = oklart), `deriveRelatedCompanies`, `screenExcellence` (grundförutsättningar per bolag, fristående, viktade tröskelvärden 100 %/andel, de minimis, utfall, Vinnova-punkter, excellens, saknat underlag). Combly-fallet är enhetstestat. |
+| `packages/shared/src/excellence-screening.ts` (+ `.test.ts`) | REN regelmotor: `classifyOwnershipEntry` (bilaga I: > 50 % / styrelse / avtal = anknutet, 25–50 % = partner, undantagna investerare, intervall som korsar tröskel = oklart), `deriveRelatedCompanies`, `deriveGroupCompanies` (hela ägarkedjan genom holding-/koncernbolag, § 51.6), `screenExcellence` (grundförutsättningar per bolag, "vem äger" per koncernbolag, fristående, viktade tröskelvärden 100 %/andel, de minimis, utfall, Vinnova-punkter, excellens, saknat underlag). Combly-fallet är enhetstestat. |
 | `apps/web/src/lib/integrations/company-registry/lookup.server.ts` | Delad uppslagskärna (validering, rate-limit 20/10 min, credentials, PII-fri audit, kostnad per uppslag) — används av BÅDE "Testa mot org-nr" (§ 11.8) och bedömningen; `parts` kan ges explicit för koncernbolagen |
 | `apps/web/src/lib/integrations/company-registry/pricing.ts` (+ `.test.ts`) / `pricing.server.ts` | Kostnad per anrop (credits + kr/credit, § 11.8): ren uppskattning + formatering, IO-läsning av `tenant_integrations.pricing` + env |
 | `apps/web/src/lib/excellence/data.server.ts` | Läsvägar med användarens token (RLS § 21): portföljbolag, sparad ägarbild/bokslut/grundare/de minimis/IRL, anslutna providers, `findStartupByOrgNr` (anknutet bolag som själv är portföljbolag) |
@@ -8487,3 +8501,49 @@ oförändrad). Speglat i `setup-via-api.mjs` (patch av `startups` +
 (`REQUIRED_APP_FIELDS`). Riskklass n/a (ingen AI — deterministiska regler
 och mänskliga uppgifter).
 
+### 51.6 Ägarkedjan följs genom holdingbolag — "vem äger holdingbolaget" (2026-10-12)
+
+**Incident:** Workify ägs till 100 % av WFYAPP HOLDING AB och bedömningen
+stannade där ("Fristående: Nej — finns anknutet företag") fast bolaget tagit
+in investerare: holdingbolagets EGNA ägare följdes aldrig, och en tom
+ägartabell såg likadan ut oavsett om ägarbilden inte hämtats eller om
+registret inte visade någon. Nu:
+
+- **Regelmotorn följer kedjan (`deriveGroupCompanies`, ren + enhetstestad).**
+  BFS från startup-bolaget genom varje anknutet bolag vars ägarbild finns i
+  underlaget (och genom partnerbolagens majoritetsrelationer): bilaga I
+  art. 3.3 — anknutet till ett anknutet bolag är anknutet till koncernen;
+  art. 6.3 — partner till ett anknutet bolag räknas proportionellt, bolag
+  anknutna till en partner räknas med partnerns andel. Fysiska personer
+  stoppar kedjan; undantagna investerare (25–50 %) visas men räknas inte;
+  startup-bolaget självt och redan expanderade bolag hoppas över (inga
+  cykler). Varje `RelatedCompanyRef`/`CompanyAssessment` bär `via` ("genom
+  Holding AB") och `level`, så ett moderbolag bakom holdingbolaget prövas som
+  eget koncernbolag med grundförutsättningar + tröskelrad (Combly-fallet en
+  nivå ned är enhetstestat: Topp AB från 2006 bakom holdingbolaget ⇒ de
+  minimis).
+- **Punkten "Vem äger <bolag>"** (`ownerChain`, nyckel
+  `cond:<org-nr>:owner_chain`) per anknutet bolag och per ägande
+  partnerbolag: OKÄNT "inget uppslag" / "ägarbilden hämtades inte (välj
+  koncernstruktur + verklig huvudman)" / "registret visar inga ägare —
+  aktiebok"; **JA först när de kända direkta ägarnas andelar tillsammans
+  överstiger 75 %** (då ryms ingen bolagsägare ≥ 25 %); annars OKÄNT med
+  källa *Manuell kontroll* (fylls i under Manuell komplettering) och
+  förklaringen att registret bara visar majoritetsrelationer och fysiska
+  personer med ≥ 25 % — investerare/bolag med 25–50 % av holdingbolaget syns
+  inte (§ 11.8). "Fristående företag: Nej" säger nu att vem som äger det
+  anknutna bolaget avgör kontrollen och listar bolag vars kedja ännu inte är
+  följd; "Saknat underlag" tar upp dem.
+- **Servern slår upp nivå för nivå** (`assessExcellenceAction`, registerläget):
+  arbetslista på `deriveGroupCompanies(subject, related)` som räknas om efter
+  varje uppslag — holdingbolagets hämtade ägarbild kan peka på nästa bolag,
+  som slås upp med samma datadelar (och sparas på bolagskortet när det är ett
+  portföljbolag, § 51.4) tills `MAX_RELATED_COMPANIES` nås; de som inte hann
+  slås upp namnges i varningen. Sparat-läget gör samma sak med
+  `findStartupByOrgNr` per nivå. Kostnadstexten vid kryssrutorna säger att
+  kedjan följs.
+- **Ägartabellen heter "Vem äger <bolag>"** för koncernbolag (UI + PDF) och
+  skiljer tre tomma lägen: inget uppslag / ägarbilden hämtades inte (vilka
+  delar) / registret visar inga ägare — kontrollera aktieboken.
+- Ingen ny dataväg, inga nya fält eller kollektioner (samma uppslag, samma
+  writer, samma RLS); riskklass n/a (ingen AI).

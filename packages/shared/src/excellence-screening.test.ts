@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classifyOwnershipEntry,
+  deriveGroupCompanies,
   deriveRelatedCompanies,
   describeCompanyAge,
   ownershipShareRange,
@@ -459,4 +460,135 @@ test('normalizeExcellenceManualReview: tolerant, cappad och PII-säker form', ()
   assert.deepEqual(r.engagement, { phase: 'product_market_fit', founders: [{ name: 'Anna', pct: 35.5 }, { name: 'Bo', pct: undefined }] });
   assert.deepEqual(normalizeExcellenceManualReview(null), { checks: {} });
   assert.deepEqual(normalizeExcellenceManualReview({ engagement: { phase: 'x', founders: [] } }), { checks: {} });
+});
+
+test('deriveGroupCompanies: ägarkedjan följs genom holdingbolaget — vem som äger holdingbolaget avgör', () => {
+  const subject = company({
+    orgNr: '5595728790',
+    name: 'Workify AB',
+    ownership: [{ direction: 'owner', owner_kind: 'company', org_nr: '5592581416', name: 'Holding AB', capital_pct: 100 }]
+  });
+  const holding = company({
+    orgNr: '5592581416',
+    name: 'Holding AB',
+    ownership: [
+      // Holdingbolagets egen ägarbild: startup-bolaget som innehav (hoppas över),
+      // ett bolag med majoritet (anknutet till hela koncernen), en VC med 30 %
+      // (undantagen — visas, räknas inte) och grundare som fysiska personer.
+      { direction: 'holding', owner_kind: 'company', org_nr: '5595728790', name: 'Workify AB', capital_pct: 100 },
+      { direction: 'owner', owner_kind: 'company', org_nr: '5560000002', name: 'Topp AB', capital_pct: 55 },
+      { direction: 'owner', owner_kind: 'investor', name: 'VC Fond', capital_pct: 30 },
+      { direction: 'owner', owner_kind: 'person', pct_min: 0, pct_max: 25 }
+    ]
+  });
+  const refs = deriveGroupCompanies(subject, [holding]);
+  assert.deepEqual(
+    refs.map((r) => [r.org_nr ?? r.name, r.relation, r.level, r.via]),
+    [
+      ['5592581416', 'linked', 1, undefined],
+      ['5560000002', 'linked', 2, 'Holding AB'],
+      ['VC Fond', 'exempt', 2, 'Holding AB']
+    ]
+  );
+  // Partner: bara företag ANKNUTNA till partnern räknas — med partnerns andel.
+  const subject2 = company({
+    orgNr: '5595728790',
+    ownership: [{ direction: 'owner', owner_kind: 'company', org_nr: '5560000010', name: 'Partner AB', capital_pct: 40 }]
+  });
+  const partner = company({
+    orgNr: '5560000010',
+    name: 'Partner AB',
+    ownership: [
+      { direction: 'owner', owner_kind: 'company', org_nr: '5560000011', name: 'Partnermor AB', capital_pct: 90 },
+      { direction: 'owner', owner_kind: 'company', org_nr: '5560000012', name: 'Minoritet AB', capital_pct: 30 }
+    ]
+  });
+  const refs2 = deriveGroupCompanies(subject2, [partner]);
+  assert.deepEqual(
+    refs2.map((r) => [r.org_nr, r.relation, r.sharePct, r.level]),
+    [
+      ['5560000010', 'partner', 40, 1],
+      ['5560000011', 'partner', 40, 2]
+    ]
+  );
+  // Utan hämtad ägarbild för holdingbolaget stannar kedjan vid nivå 1.
+  assert.equal(deriveGroupCompanies(subject, []).length, 1);
+});
+
+test('"Vem äger holdingbolaget": okänt tills ägarbilden hämtats och täcker > 75 % — investerare med 25–50 % syns inte i registret', () => {
+  const ownerRow = { direction: 'owner' as const, owner_kind: 'company' as const, org_nr: '5592581416', name: 'Holding AB', capital_pct: 100 };
+  // 1. Holdingbolaget slogs upp utan ägardelarna.
+  const noParts = screenExcellence(
+    input({
+      subject: company({ orgNr: '5595728790', name: 'Workify AB', ownership: [ownerRow] }),
+      related: [company({ orgNr: '5592581416', name: 'Holding AB', groupStructureFetched: false, beneficialOwnersFetched: false })]
+    })
+  );
+  const holding = noParts.companies[1];
+  assert.equal(holding.ownerChain?.verdict, 'unknown');
+  assert.match(holding.ownerChain?.needs ?? '', /koncernstruktur \+ verklig huvudman för Holding AB/);
+  assert.match(noParts.standalone.detail, /Ägarkedjan är ännu inte följd för: Holding AB/);
+  assert.ok(noParts.missing.some((m) => /Holding AB/.test(m)));
+  // 2. Hämtad ägarbild med två grundare om 25–50 % var: täcker bara 50 % ⇒
+  //    investerare kan äga resten — manuell kontroll mot aktieboken.
+  const persons = screenExcellence(
+    input({
+      subject: company({ orgNr: '5595728790', name: 'Workify AB', ownership: [ownerRow] }),
+      related: [
+        company({
+          orgNr: '5592581416',
+          name: 'Holding AB',
+          ownership: [
+            { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50 },
+            { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50 }
+          ]
+        })
+      ]
+    })
+  );
+  const chain = persons.companies[1].ownerChain;
+  assert.equal(chain?.verdict, 'unknown');
+  assert.equal(chain?.source, 'manual');
+  assert.match(chain?.detail ?? '', /investerare\/bolag med 25–50 % av Holding AB syns inte/);
+  assert.equal(chain?.editable, true);
+  // 3. Kända ägare täcker > 75 % ⇒ kedjan är avgjord.
+  const covered = screenExcellence(
+    input({
+      subject: company({ orgNr: '5595728790', name: 'Workify AB', ownership: [ownerRow] }),
+      related: [
+        company({
+          orgNr: '5592581416',
+          name: 'Holding AB',
+          ownership: [
+            { direction: 'owner', owner_kind: 'person', capital_pct: 40 },
+            { direction: 'owner', owner_kind: 'person', capital_pct: 40 }
+          ]
+        })
+      ]
+    })
+  );
+  assert.equal(covered.companies[1].ownerChain?.verdict, 'yes');
+  assert.match(covered.standalone.detail, /Vem som äger det anknutna bolaget avgör/);
+  assert.doesNotMatch(covered.standalone.detail, /ännu inte följd/);
+  // 4. Ett bolag som äger holdingbolaget med majoritet blir ett eget koncernbolag (nivå 2, genom Holding AB).
+  const topped = screenExcellence(
+    input({
+      subject: company({ orgNr: '5595728790', name: 'Workify AB', ownership: [ownerRow] }),
+      related: [
+        company({
+          orgNr: '5592581416',
+          name: 'Holding AB',
+          ownership: [{ direction: 'owner', owner_kind: 'company', org_nr: '5560000002', name: 'Topp AB', capital_pct: 80 }]
+        }),
+        company({ orgNr: '5560000002', name: 'Topp AB', basic: { registeredAt: '2006-05-10', bolagStatus: 'aktiv', bolagsform: 'AB' } })
+      ]
+    })
+  );
+  const topp = topped.companies.find((c) => c.orgNr === '5560000002');
+  assert.equal(topp?.role, 'linked');
+  assert.equal(topp?.via, 'Holding AB');
+  assert.equal(topp?.level, 2);
+  assert.match(topped.standalone.detail, /Topp AB \(äger 80 % av Holding AB, genom Holding AB\)/);
+  // Topp AB (2006) fäller art. 22 för hela koncernen — det var Combly-fallet, nu en nivå ned.
+  assert.equal(topped.stateAid.outcome, 'de_minimis');
 });

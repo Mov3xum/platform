@@ -198,11 +198,14 @@ export function normalizeRoaringOverview(raw: unknown, notes: string[]): {
 }
 
 const YEAR_PATHS = ['toDate', 'accountsClosingDate', 'periodEnd', 'period.toDate', 'endDate', 'year', 'fiscalYear'];
-const REVENUE_PATHS = ['plNetOperatingIncome', 'netTurnover', 'netSales', 'turnover', 'revenue', 'plNetSales', 'pl.netOperatingIncome'];
+const REVENUE_PATHS = ['plNetOperatingIncome', 'netTurnover', 'netSales', 'turnover', 'revenue', 'plNetSales', 'pl.netOperatingIncome', 'plSales'];
 const EMPLOYEES_PATHS = ['nbrOfEmployees', 'numberOfEmployees', 'employees', 'averageNumberOfEmployees'];
 const PERSONNEL_PATHS = ['plPersonnelCosts', 'personnelCosts', 'staffCosts', 'salariesAndRemuneration'];
 const TAX_PATHS = ['plTaxOnProfit', 'taxOnProfit', 'incomeTax', 'plTax'];
-const ASSETS_PATHS = ['bsTotalAssets', 'totalAssets', 'balanceSheetTotal', 'bs.totalAssets', 'sumAssets'];
+// Balansomslutning = summa tillgångar = summa eget kapital och skulder.
+// economy-overview 2.1 bär bara skuldsidan (`bsTotalEquityAndLiabilities`,
+// verifierat mot ett riktigt svar 2026-10-12) — identiskt belopp.
+const ASSETS_PATHS = ['bsTotalAssets', 'bsTotalEquityAndLiabilities', 'totalAssets', 'balanceSheetTotal', 'bs.totalAssets', 'sumAssets', 'totalEquityAndLiabilities'];
 const EQUITY_PATHS = ['bsTotalEquity', 'totalEquity', 'equity', 'bs.totalEquity', 'sumEquity'];
 const RESULT_PATHS = ['plNetProfitLoss', 'netProfit', 'netIncome', 'profitLossForTheYear', 'plNetIncome', 'plProfitLossForTheYear'];
 const DIVIDEND_PATHS = ['plDividend', 'dividend', 'dividends', 'proposedDividend', 'dividendPaid', 'dividendToShareholders', 'kaDividend', 'bsProposedDividend'];

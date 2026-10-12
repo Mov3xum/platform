@@ -251,10 +251,10 @@ function shareCells(o: ScreeningOwnershipEntry): [string, string] {
   return ['–', '–'];
 }
 
-function ownershipTable(ctx: Ctx, caption: string, rows: ScreeningOwnershipEntry[]) {
+function ownershipTable(ctx: Ctx, caption: string, rows: ScreeningOwnershipEntry[], emptyText = 'Inga rader i underlaget.') {
   subTitle(ctx, caption);
   if (rows.length === 0) {
-    drawLines(ctx, 'Inga rader i underlaget.', { size: 9, color: INK_SOFT, gap: 6 });
+    drawLines(ctx, emptyText, { size: 9, color: INK_SOFT, gap: 6 });
     return;
   }
   table(
@@ -278,8 +278,8 @@ function companyBlock(ctx: Ctx, c: CompanyAssessment, subjectName: string) {
   if (c.role !== 'subject') {
     drawLines(
       ctx,
-      `${c.relationLabel ?? ''} · ${c.shareLabel ?? ''}${c.indirect ? ' (indirekt)' : ''} — ${c.reason ?? ''}${
-        c.relation === 'linked' ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.` : ''
+      `${c.relationLabel ?? ''} · ${c.shareLabel ?? ''}${c.indirect ? ' (indirekt)' : ''}${c.via ? ` · genom ${c.via}` : ''} — ${c.reason ?? ''}${
+        c.relation === 'linked' && !c.via ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.` : ''
       }`,
       { size: 9, color: INK_SOFT, gap: 4 }
     );
@@ -288,7 +288,18 @@ function companyBlock(ctx: Ctx, c: CompanyAssessment, subjectName: string) {
     }
   }
   if (c.conditions.length > 0) checks(ctx, c.conditions);
-  if (c.dataFetched || c.owners.length > 0) ownershipTable(ctx, c.role === 'subject' ? `Ägarbild: ${title}` : `Ägande: ${title}`, c.owners);
+  if (c.ownerChain) checks(ctx, [c.ownerChain]);
+  if (c.dataFetched || c.owners.length > 0) {
+    const missing = [!c.groupStructureFetched ? 'Koncernstruktur' : null, !c.beneficialOwnersFetched ? 'Verklig huvudman' : null].filter(
+      (v): v is string => v !== null
+    );
+    const emptyText = !c.dataFetched
+      ? 'Inget uppslag gjort för bolaget.'
+      : missing.length > 0
+        ? `Ägarbilden hämtades inte — välj ${missing.join(' + ')} vid hämtningen.`
+        : 'Registret visar inga ägare (bara majoritetsrelationer och fysiska personer med ≥ 25 % syns) — kontrollera aktieboken.';
+    ownershipTable(ctx, c.role === 'subject' ? `Ägarbild: ${title}` : `Vem äger ${title}`, c.owners, emptyText);
+  }
   if (c.holdings.length > 0) ownershipTable(ctx, `${title} äger`, c.holdings);
 }
 

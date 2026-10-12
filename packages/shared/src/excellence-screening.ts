@@ -192,6 +192,10 @@ export interface RelatedCompanyRef {
   shareLabel: string;
   reason: string;
   indirect?: boolean;
+  /** Bolaget relationen går genom (tomt = direkt i startup-bolagets ägarbild). */
+  via?: string;
+  /** 1 = direkt i startup-bolagets ägarbild, 2 = i ett koncernbolags ägarbild osv. */
+  level: number;
 }
 
 /** Ett bolag i koncernen med den data som hämtats för det. */
@@ -289,10 +293,21 @@ export interface CompanyAssessment {
   shareLabel?: string;
   reason?: string;
   indirect?: boolean;
+  /** Bolaget relationen går genom (t.ex. ett holdingbolag), för nivå ≥ 2. */
+  via?: string;
+  level?: number;
   dataFetched: boolean;
   basic?: ScreeningBasic;
+  groupStructureFetched: boolean;
+  beneficialOwnersFetched: boolean;
   /** Grundförutsättningarna i Comblys ordning: ekonomisk verksamhet, < 5 år, börsnoterat, utdelning, koncentration, övertagit verksamhet. */
   conditions: ScreeningCheck[];
+  /**
+   * "Vem äger bolaget" — för anknutna/partnerbolag: ägarkedjan följs genom
+   * bolaget (ett holdingbolag som äger 100 % är inte slutet på kedjan; det
+   * är vem som äger holdingbolaget som avgör kontrollen).
+   */
+  ownerChain?: ScreeningCheck;
   /** Ägarbilden för bolaget (bara `owner`-rader). */
   owners: ScreeningOwnershipEntry[];
   holdings: ScreeningOwnershipEntry[];
@@ -496,13 +511,179 @@ export function deriveRelatedCompanies(ownership: ScreeningOwnershipEntry[]): Re
       sharePct: range ? range.max : undefined,
       shareLabel: shareLabel(range),
       reason: c.reason,
-      indirect: e.indirect === true
+      indirect: e.indirect === true,
+      level: 1
     };
     const key = e.org_nr || e.name || `anon-${anon++}`;
     const prev = out.get(key);
     if (!prev || rank[ref.relation] > rank[prev.relation]) out.set(key, ref);
   }
   return [...out.values()];
+}
+
+/**
+ * HELA koncernen: ägarkedjan följs genom varje anknutet bolag — och genom
+ * partnerbolagens majoritetsrelationer — så länge ägarbild hämtats för det.
+ * Ett holdingbolag som äger 100 % är inte slutet på kedjan: det är VEM som
+ * äger holdingbolaget (investerare, fysiska personer, andra bolag) som avgör
+ * kontrollen över koncernen. Bilaga I art. 3.3: anknutet till ett anknutet
+ * bolag är anknutet; art. 6.3: partners till anknutna räknas proportionellt
+ * och företag anknutna till en partner räknas med partnerns andel. Fysiska
+ * personer stoppar kedjan (de visas i bolagets ägarbild men blir inga
+ * koncernbolag); undantagna investerare (25–50 %) visas men räknas inte.
+ * En rad per org-nr (den starkaste relationen vinner); startup-bolaget
+ * självt och redan expanderade bolag hoppas över (inga cykler). Servern
+ * använder listan som arbetslista för uppslag: varje nytt bolag med
+ * hämtad ägarbild kan ge nästa nivå.
+ */
+export function deriveGroupCompanies(subject: GroupCompanyFacts, related: GroupCompanyFacts[]): RelatedCompanyRef[] {
+  const rank: Record<ScreeningRelation, number> = { linked: 3, partner: 2, uncertain: 1, exempt: 0 };
+  const factsByOrg = new Map(related.map((r) => [r.orgNr, r]));
+  const out = new Map<string, RelatedCompanyRef>();
+  const subjectKey = subject.orgNr || subject.name || '';
+  type Node = { facts: GroupCompanyFacts; relation: 'subject' | 'linked' | 'partner'; sharePct?: number; level: number };
+  const queue: Node[] = [{ facts: subject, relation: 'subject', level: 0 }];
+  const expanded = new Set<string>([subjectKey]);
+  let anon = 0;
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    const viaName = cur.relation === 'subject' ? undefined : cur.facts.name || cur.facts.orgNr;
+    for (const r of deriveRelatedCompanies(cur.facts.ownership)) {
+      const key = r.org_nr || r.name || `anon-${anon++}`;
+      if (key === subjectKey || (r.org_nr !== undefined && r.org_nr === subject.orgNr)) continue;
+      let relation: ScreeningRelation = r.relation;
+      let sharePct = r.sharePct;
+      let shareLabelText = r.shareLabel;
+      let reason = r.reason;
+      if (cur.relation === 'partner') {
+        // Bilaga I art. 6.3: bara företag ANKNUTNA till partnern räknas — med partnerns andel.
+        if (r.relation !== 'linked') continue;
+        relation = 'partner';
+        sharePct = cur.sharePct;
+        shareLabelText = `${r.shareLabel} av ${viaName}`;
+        reason = `Anknutet till partnerföretaget ${viaName} (${r.reason}) — räknas med partnerns andel (${
+          typeof cur.sharePct === 'number' ? formatPct(cur.sharePct) : 'andel okänd'
+        }).`;
+      } else if (cur.relation === 'linked') {
+        shareLabelText = `${r.shareLabel} av ${viaName}`;
+        reason =
+          relation === 'linked'
+            ? `${r.reason} Anknutet till det anknutna bolaget ${viaName} ⇒ anknutet till hela koncernen.`
+            : relation === 'partner'
+              ? `${r.reason} Partner till det anknutna bolaget ${viaName} — räknas proportionellt.`
+              : relation === 'exempt'
+                ? `${r.reason} Äger det anknutna bolaget ${viaName}.`
+                : `${r.reason} Gäller ${viaName}.`;
+      }
+      const ref: RelatedCompanyRef = {
+        ...r,
+        relation,
+        sharePct,
+        shareLabel: shareLabelText,
+        reason,
+        via: viaName,
+        level: cur.level + 1
+      };
+      const prev = out.get(key);
+      if (!prev || rank[ref.relation] > rank[prev.relation]) out.set(key, ref);
+      if ((relation === 'linked' || relation === 'partner') && r.org_nr && !expanded.has(r.org_nr)) {
+        const facts = factsByOrg.get(r.org_nr);
+        if (facts) {
+          expanded.add(r.org_nr);
+          queue.push({ facts, relation, sharePct, level: cur.level + 1 });
+        }
+      }
+    }
+  }
+  return [...out.values()];
+}
+
+/**
+ * "Vem äger bolaget" för ett anknutet/partnerbolag. Ägarbilden måste hämtas
+ * för bolaget (koncernstruktur + verklig huvudman) — annars är kedjan
+ * obruten och punkten OKÄNT med vad som behövs.
+ */
+function ownerChainFor(c: GroupCompanyFacts): ScreeningCheck {
+  const name = c.name || c.orgNr || 'bolaget';
+  const key = `cond:${c.orgNr || 'okant'}:owner_chain`;
+  const label = `Vem äger ${name}`;
+  const base = { id: 'owner_chain', key, label, source: 'register' as const };
+  if (!c.dataFetched) {
+    return {
+      ...base,
+      verdict: 'unknown',
+      detail: `Inget uppslag gjort för ${name} — ägarkedjan kan inte följas. Vem som äger bolaget avgör kontrollen över hela koncernen.`,
+      needs: `Hämta koncernstruktur + verklig huvudman för ${name}.`
+    };
+  }
+  const missingParts = [
+    !c.groupStructureFetched ? 'koncernstruktur' : null,
+    !c.beneficialOwnersFetched ? 'verklig huvudman' : null
+  ].filter((v): v is string => v !== null);
+  const owners = c.ownership.filter((o) => o.direction === 'owner');
+  if (owners.length === 0) {
+    if (missingParts.length > 0) {
+      return {
+        ...base,
+        verdict: 'unknown',
+        detail: `Ägarbilden för ${name} hämtades inte (${missingParts.join(' + ')} valdes inte). Vem som äger bolaget avgör kontrollen över hela koncernen — t.ex. om investerare äger holdingbolaget.`,
+        needs: `Hämta ${missingParts.join(' + ')} för ${name}.`
+      };
+    }
+    return {
+      ...base,
+      verdict: 'unknown',
+      detail: `Registret visar inga ägare för ${name}. Minoritetsägare (25–50 %) och ägare utan registrerad huvudmannaskap syns inte i koncernregistret.`,
+      source: 'manual',
+      needs: `Aktiebok för ${name} (vem äger bolaget, med andelar).`
+    };
+  }
+  const described = owners.map((o) => {
+    const share = shareLabel(ownershipShareRange(o));
+    if (o.owner_kind === 'person') return `fysisk person (${share})`;
+    const cls = classifyOwnershipEntry(o);
+    const tag =
+      cls.relation === 'linked'
+        ? 'anknutet — prövas som eget koncernbolag'
+        : cls.relation === 'partner'
+          ? 'partner — räknas proportionellt'
+          : cls.relation === 'exempt'
+            ? 'undantagen investerare — räknas inte'
+            : cls.relation === 'uncertain'
+              ? 'andel oklar'
+              : 'under 25 %';
+    return `${o.name || o.org_nr || 'okänt bolag'} (${share}, ${tag})`;
+  });
+  const summary = `${name} ägs av: ${described.join('; ')}.`;
+  if (missingParts.length > 0) {
+    return {
+      ...base,
+      verdict: 'unknown',
+      detail: `${summary} Bara en ägardel hämtades — ${missingParts.join(' + ')} saknas, så bilden kan vara ofullständig.`,
+      needs: `Hämta ${missingParts.join(' + ')} för ${name}.`
+    };
+  }
+  // Registret visar bara majoritetsrelationer (koncernstruktur) och fysiska
+  // personer med ≥ 25 % (verklig huvudman). Bolag/investerare med 25–50 %
+  // av holdingbolaget syns INTE där — kedjan är avgjord först när de kända
+  // direkta ägarnas andelar tillsammans inte lämnar plats för en sådan.
+  const knownDirectMin = owners
+    .filter((o) => o.indirect !== true && (o.control_basis === undefined || o.control_basis === 'shares'))
+    .reduce((sum, o) => sum + (ownershipShareRange(o)?.min ?? 0), 0);
+  if (knownDirectMin > 100 - PARTNER_THRESHOLD_PCT) {
+    return {
+      ...base,
+      verdict: 'yes',
+      detail: `${summary} De kända ägarna har tillsammans minst ${formatPct(knownDirectMin)} — det ryms ingen ytterligare bolagsägare med 25 % eller mer. Fysiska personer gör inte koncernen större; bolag och investerare med 25 % eller mer prövas som egna koncernbolag.`
+    };
+  }
+  return {
+    ...base,
+    verdict: 'unknown',
+    detail: `${summary} De kända ägarna täcker bara ${formatPct(knownDirectMin)} — registret visar bara majoritetsrelationer och fysiska personer med 25 % eller mer, så investerare/bolag med 25–50 % av ${name} syns inte här. Bekräfta ägarbilden mot aktieboken (har bolaget tagit in investerare?).`,
+    source: 'manual',
+    needs: `Aktiebok för ${name}: alla ägare med 25 % eller mer (investerare, bolag) och deras andelar.`
+  };
 }
 
 function latestFinancials(rows: ScreeningFinancialsYear[]): ScreeningFinancialsYear | null {
@@ -742,14 +923,17 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       role: 'subject',
       dataFetched: subject.dataFetched,
       basic: subject.basic,
+      groupStructureFetched: subject.groupStructureFetched,
+      beneficialOwnersFetched: subject.beneficialOwnersFetched,
       conditions: subjectConditions,
       owners: subject.ownership.filter((o) => o.direction === 'owner'),
       holdings: subject.ownership.filter((o) => o.direction === 'holding')
     }
   ];
 
-  // Anknutna / partner / oklara ur ägarbilden
-  const refs = subject.basic?.isPersonal ? [] : deriveRelatedCompanies(subject.ownership);
+  // Anknutna / partner / oklara ur ägarbilden — hela kedjan, genom
+  // holdingbolag och andra anknutna bolag vars ägarbild hämtats.
+  const refs = subject.basic?.isPersonal ? [] : deriveGroupCompanies(subject, input.related);
   const factsByOrg = new Map(input.related.map((r) => [r.orgNr, r]));
   const linkedRefs = refs.filter((r) => r.relation === 'linked');
   const partnerRefs = refs.filter((r) => r.relation === 'partner');
@@ -766,8 +950,14 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       groupStructureFetched: false,
       beneficialOwnersFetched: false
     };
-    const conditions =
-      r.relation === 'linked' ? conditionsFor(base, ref).map((c) => push(c, facts?.name ?? r.name ?? base.orgNr)) : [];
+    const scopeName = facts?.name ?? r.name ?? base.orgNr;
+    const conditions = r.relation === 'linked' ? conditionsFor(base, ref).map((c) => push(c, scopeName)) : [];
+    // Ägarkedjan följs genom varje anknutet bolag och varje ägande
+    // partnerbolag — vem som äger holdingbolaget avgör kontrollen.
+    const ownerChain =
+      r.relation === 'linked' || (r.relation === 'partner' && r.direction === 'owner')
+        ? push(ownerChainFor({ ...base, name: scopeName }), scopeName)
+        : undefined;
     companies.push({
       orgNr: base.orgNr,
       name: facts?.name ?? r.name,
@@ -777,9 +967,14 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       shareLabel: r.shareLabel,
       reason: r.reason,
       indirect: r.indirect,
+      via: r.via,
+      level: r.level,
       dataFetched: base.dataFetched,
       basic: base.basic,
+      groupStructureFetched: base.groupStructureFetched,
+      beneficialOwnersFetched: base.beneficialOwnersFetched,
       conditions,
+      ownerChain,
       owners: base.ownership.filter((o) => o.direction === 'owner'),
       holdings: base.ownership.filter((o) => o.direction === 'holding')
     });
@@ -787,8 +982,18 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
 
   const describe = (list: RelatedCompanyRef[]) =>
     list
-      .map((r) => `${r.name || r.org_nr || 'okänt bolag'} (${r.direction === 'owner' ? 'äger' : 'ägs'} ${r.shareLabel})`)
+      .map(
+        (r) =>
+          `${r.name || r.org_nr || 'okänt bolag'} (${r.direction === 'owner' ? 'äger' : 'ägs'} ${r.shareLabel}${
+            r.via ? `, genom ${r.via}` : ''
+          })`
+      )
       .join(', ');
+  // Vilka anknutna ägarbolags ägarkedja som ännu inte är följd (holdingbolag
+  // utan hämtad ägarbild) — sägs rakt ut i "Fristående företag".
+  const unresolvedOwnerChains = companies
+    .filter((c) => c.role !== 'subject' && c.ownerChain && c.ownerChain.verdict !== 'yes')
+    .map((c) => c.name || c.orgNr);
 
   // Fristående företag?
   let standalone: ScreeningCheck;
@@ -808,7 +1013,11 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       key: 'standalone',
       label: 'Fristående företag',
       verdict: 'no',
-      detail: `Finns anknutet företag: ${describe(linkedRefs)}. 100 % av det anknutna bolagets uppgifter läggs till och grundförutsättningarna prövas även för det.`,
+      detail: `Finns anknutet företag: ${describe(linkedRefs)}. 100 % av det anknutna bolagets uppgifter läggs till och grundförutsättningarna prövas även för det. Vem som äger det anknutna bolaget avgör kontrollen över koncernen — se "Vem äger …" under respektive bolag.${
+        unresolvedOwnerChains.length > 0
+          ? ` Ägarkedjan är ännu inte följd för: ${unresolvedOwnerChains.join(', ')}.`
+          : ''
+      }`,
       source: 'register'
     };
   } else if (partnerRefs.length > 0) {
