@@ -72,6 +72,8 @@ interface FinancialsEntry {
   /** Eget kapital (Vinnovas "ej marknadsredo"-kriterium). */
   equity_sek?: number;
   net_result_sek?: number;
+  /** Beslutad vinstutdelning enligt årsredovisningen (§ 51, art. 22-villkoret) — bara när rapporterad. */
+  dividend_sek?: number;
 }
 
 /**
@@ -427,6 +429,8 @@ export async function buildFinancialsContext(
       if (typeof r.balance_sheet_sek === 'number') entry.balance_sheet_sek = r.balance_sheet_sek;
       if (typeof r.equity_sek === 'number') entry.equity_sek = r.equity_sek;
       if (typeof r.net_result_sek === 'number') entry.net_result_sek = r.net_result_sek;
+      // Utdelning bara när årsredovisningen svarade (PB lagrar 0 för tomt tal).
+      if (r.dividend_reported === true && typeof r.dividend_sek === 'number') entry.dividend_sek = r.dividend_sek;
       return entry;
     })
     .sort((a, b) => a.year - b.year);

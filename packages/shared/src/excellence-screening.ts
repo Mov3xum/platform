@@ -13,6 +13,14 @@
 // vi gissar aldrig. Resultatet är ett UNDERLAG som controllern granskar;
 // beslutet (statsstödsgrund, excellens) fattas alltid av en människa.
 
+import {
+  FOUNDER_ENGAGEMENT_THRESHOLDS,
+  MATURITY_PHASE_LABEL,
+  type CompanyManualAnswers,
+  type ManualAnswer,
+  type ScreeningManualFacts
+} from './excellence-facts';
+
 export type ScreeningVerdict = 'yes' | 'no' | 'unknown';
 
 /** Var faktumet kommer ifrån: bolagsregistret, plattformens egna data eller manuell kontroll. */
@@ -43,6 +51,10 @@ export interface ScreeningFinancialsYear {
   balance_sheet_sek?: number;
   equity_sek?: number;
   net_result_sek?: number;
+  /** Beslutad vinstutdelning enligt årsredovisningen (0 = ingen). Bara meningsfull med `dividend_reported`. */
+  dividend_sek?: number;
+  /** Sant när bokslutet svarade på utdelningsfrågan (`dividend` i economy-overview /extended, § 11.8). */
+  dividend_reported?: boolean;
 }
 
 export interface ScreeningBasic {
@@ -80,11 +92,21 @@ export interface GroupCompanyFacts {
   ownership: ScreeningOwnershipEntry[];
   groupStructureFetched: boolean;
   beneficialOwnersFetched: boolean;
+  /**
+   * Anknutet bolags de minimis-stöd (EUR, innevarande + två år bakåt) — ur
+   * plattformen när bolaget är ett portföljbolag, annars ur bolagets intyg
+   * (manuellt svar). `undefined` ⇒ okänt.
+   */
+  deMinimis?: { usedEur: number; source: 'platform' | 'certificate'; note?: string };
 }
 
 export interface ScreeningFounderRow {
   name: string;
   equity_pct?: number;
+  /** Engagemang i procent av heltid (manuellt svar). */
+  engagement_pct?: number;
+  /** Forskare i en forskningsavknoppning. */
+  researcher?: boolean;
 }
 
 export interface ScreeningIrl {
@@ -94,6 +116,10 @@ export interface ScreeningIrl {
   tmrl?: number | null;
   srl?: number | null;
   assessedAt?: string;
+  /** Motivering (metrics) per axel — manuellt svar. */
+  notes?: Partial<Record<'crl' | 'brl' | 'tmrl' | 'srl', string>>;
+  /** Sant när nivåerna sattes manuellt i bedömningen (ingen readiness-rad i plattformen). */
+  manualLevels?: boolean;
 }
 
 export interface ExcellenceScreeningInput {
@@ -104,6 +130,10 @@ export interface ExcellenceScreeningInput {
   related: GroupCompanyFacts[];
   /** Grundare ur bolagets team (bara portföljbolag). `undefined` = bolaget finns inte i plattformen. */
   founders?: ScreeningFounderRow[];
+  /** Var grundarraderna kommer ifrån (teamet på bolagskortet eller manuellt inmatade). */
+  foundersSource?: 'platform' | 'manual';
+  /** Controllerns manuella svar (§ 51.4) — fyller det registret inte kan svara på. */
+  manual?: ScreeningManualFacts;
   /** Registrerat de minimis-stöd (bara portföljbolag). */
   deMinimis?: { usedEur: number; capEur: number } | null;
   irl?: ScreeningIrl | null;
@@ -174,6 +204,8 @@ export interface ExcellenceScreeningResult {
   vinnova: { outcome: VinnovaOutcome; text: string };
   irl: ScreeningIrl | null;
   excellence: ScreeningCheck;
+  /** Controllerns kommentar (review-raden). */
+  comment?: string;
   /** Underlag som saknas — en rad per OKÄNT-punkt (dedupe). */
   missing: string[];
   /** Alla punkter platt (för räkning). */
@@ -370,10 +402,39 @@ function latestFinancials(rows: ScreeningFinancialsYear[]): ScreeningFinancialsY
 
 // ─── Grundförutsättningar per bolag ─────────────────────────────────────────
 
-function conditionsFor(c: GroupCompanyFacts, ref: Date): ScreeningCheck[] {
+/**
+ * Lägger ett manuellt svar på en punkt. Konservativt: ett manuellt NEJ vinner
+ * alltid (controllern vet något registret inte visar), ett manuellt JA fyller
+ * bara en OKÄNT-punkt — ett register-NEJ (t.ex. beslutad utdelning i
+ * årsredovisningen) kan inte skrivas över med ett intyg. Källan blir
+ * "manuell kontroll" så PDF:n visar varifrån svaret kom.
+ */
+export function applyManualAnswer(check: ScreeningCheck, answer: ManualAnswer | undefined): ScreeningCheck {
+  if (!answer) return check;
+  const note = answer.note ? ` (${answer.note})` : '';
+  if (answer.verdict === 'no') {
+    return {
+      ...check,
+      verdict: 'no',
+      detail: `Manuellt svar: Nej${note}.${check.source === 'register' && check.verdict !== 'unknown' ? ` Registret: ${check.detail}` : ''}`,
+      source: 'manual',
+      needs: undefined
+    };
+  }
+  if (check.verdict === 'unknown') {
+    return { ...check, verdict: 'yes', detail: `Manuellt svar: Ja${note}.`, source: 'manual', needs: undefined };
+  }
+  if (check.verdict === 'no') {
+    return { ...check, detail: `${check.detail} Manuellt svar Ja${note} avviker från registret — registret gäller.` };
+  }
+  return check;
+}
+
+function conditionsFor(c: GroupCompanyFacts, ref: Date, manual?: CompanyManualAnswers): ScreeningCheck[] {
   const checks: ScreeningCheck[] = [];
   const b = c.basic;
   const noData = !c.dataFetched;
+  const push = (check: ScreeningCheck) => checks.push(applyManualAnswer(check, manual?.[check.id as keyof CompanyManualAnswers]));
   checks.push({
     id: 'economic',
     label: 'Ekonomisk verksamhet',
@@ -411,13 +472,20 @@ function conditionsFor(c: GroupCompanyFacts, ref: Date): ScreeningCheck[] {
     });
   }
 
+  push({
+    id: 'listed',
+    label: 'Inte börsnoterat',
+    verdict: 'unknown',
+    detail: 'Finns inte i bolagsregistret — bekräftas av bolaget.',
+    source: 'manual',
+    needs: 'Bolagsordning/ägarförteckning.'
+  });
+  push(dividendCheck(c.financials ?? [], registered, ref, noData));
   for (const [id, label, needs] of [
-    ['listed', 'Inte börsnoterat', 'Bolagsordning/ägarförteckning.'],
-    ['dividend', 'Har inte beslutat om eller delat ut vinst', 'Årsredovisning och bolagets intyg.'],
     ['concentration', 'Inte bildat genom företagskoncentration', 'Bolagets intyg (undantag kan finnas).'],
     ['takeover', 'Har inte övertagit annat företags verksamhet (ombildad enskild firma undantas)', 'Bolagets intyg.']
   ] as const) {
-    checks.push({
+    push({
       id,
       label,
       verdict: 'unknown',
@@ -429,11 +497,94 @@ function conditionsFor(c: GroupCompanyFacts, ref: Date): ScreeningCheck[] {
   return checks;
 }
 
+const DIVIDEND_LABEL = 'Har inte beslutat om eller delat ut vinst';
+const DIVIDEND_NEEDS = 'Bokslut med utdelningspost (datadelen Bokslut hos Roaring, /extended) eller bolagets intyg (Manuella svar).';
+
+/**
+ * Art. 22 GBER: bolaget får inte ha delat ut vinst. Avgörs ur årsredovisningens
+ * beslutade utdelning (`dividend_reported`/`dividend_sek`, § 11.8) — INTE ur
+ * resultatet (en vinst som behålls i bolaget är tillåten):
+ *   någon rapporterad utdelning > 0        ⇒ NEJ (registret)
+ *   0 kr i VARJE räkenskapsår sedan start  ⇒ JA  (registret)
+ *   0 kr men år saknas, eller inget svar   ⇒ OKÄNT med vad som saknas;
+ *                                            resultatet ges som ledtråd
+ *                                            (förlustår ⇒ utdelning osannolik).
+ * Täckning = varje kalenderår från året efter registreringen t.o.m. senaste
+ * rapporterade år; registreringsåret räknas inte (första räkenskapsåret
+ * slutar oftast året efter) och ett ännu inte inlämnat innevarande år
+ * noteras utan att fälla punkten.
+ */
+export function dividendCheck(
+  rows: ScreeningFinancialsYear[],
+  registered: Date | null,
+  ref: Date,
+  noData: boolean
+): ScreeningCheck {
+  const reported = rows.filter((r) => r.dividend_reported === true && typeof r.dividend_sek === 'number');
+  const paid = reported.filter((r) => (r.dividend_sek ?? 0) > 0).sort((a, b) => a.year - b.year);
+  if (paid.length > 0) {
+    const total = paid.reduce((sum, r) => sum + (r.dividend_sek ?? 0), 0);
+    return {
+      id: 'dividend',
+      label: DIVIDEND_LABEL,
+      verdict: 'no',
+      detail: `Årsredovisningen visar beslutad utdelning ${paid.map((r) => `${r.year}: ${fmtInt(r.dividend_sek ?? 0)} kr`).join(', ')} (totalt ${fmtInt(total)} kr).`,
+      source: 'register'
+    };
+  }
+  if (reported.length > 0) {
+    const years = reported.map((r) => r.year).sort((a, b) => a - b);
+    const latest = years[years.length - 1];
+    const missing: number[] = [];
+    if (registered) {
+      for (let y = registered.getUTCFullYear() + 1; y <= latest; y++) if (!years.includes(y)) missing.push(y);
+    }
+    const notYetFiled = latest < ref.getUTCFullYear() - 1 ? ` Senaste årsredovisning avser ${latest}; senare år är inte inlämnade/hämtade.` : '';
+    if (registered && missing.length === 0) {
+      return {
+        id: 'dividend',
+        label: DIVIDEND_LABEL,
+        verdict: 'yes',
+        detail: `Ingen utdelning i årsredovisningarna för ${years.join(', ')} — täcker varje räkenskapsår sedan registreringen ${isoDay(registered)}.${notYetFiled}`,
+        source: 'register'
+      };
+    }
+    return {
+      id: 'dividend',
+      label: DIVIDEND_LABEL,
+      verdict: 'unknown',
+      detail: `Ingen utdelning i årsredovisningarna för ${years.join(', ')}, men ${
+        registered ? `år ${missing.join(', ')} saknas` : 'registreringsdatum saknas så täckningen kan inte bekräftas'
+      }.${notYetFiled}`,
+      source: 'register',
+      needs: registered ? `Årsredovisning för ${missing.join(', ')} (eller bolagets intyg).` : DIVIDEND_NEEDS
+    };
+  }
+  const withResult = rows.filter((r) => typeof r.net_result_sek === 'number').sort((a, b) => a.year - b.year);
+  const profitYears = withResult.filter((r) => (r.net_result_sek ?? 0) > 0).map((r) => r.year);
+  let hint = '';
+  if (withResult.length > 0) {
+    hint =
+      profitYears.length === 0
+        ? ` Bokslutet visar bara förlustår (${withResult.map((r) => r.year).join(', ')}) — utdelning är osannolik men inte utesluten.`
+        : ` Bokslutet visar vinst ${profitYears.join(', ')} — kontrollera vinstdispositionen i årsredovisningen.`;
+  }
+  return {
+    id: 'dividend',
+    label: DIVIDEND_LABEL,
+    verdict: 'unknown',
+    detail: `${noData ? 'Inget uppslag gjort för bolaget.' : 'Bokslut med utdelningspost hämtades inte.'}${hint}`,
+    source: 'manual',
+    needs: DIVIDEND_NEEDS
+  };
+}
+
 // ─── Regelträdet ─────────────────────────────────────────────────────────────
 
 export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScreeningResult {
   const ref = input.refDate;
   const subject = input.subject;
+  const manual = input.manual;
   const all: ScreeningCheck[] = [];
   const push = (c: ScreeningCheck) => {
     all.push(c);
@@ -441,7 +592,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
   };
 
   // Startup-bolaget
-  const subjectConditions = conditionsFor(subject, ref).map(push);
+  const subjectConditions = conditionsFor(subject, ref, manual?.companies[subject.orgNr]).map(push);
   const companies: CompanyAssessment[] = [
     {
       orgNr: subject.orgNr,
@@ -473,7 +624,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       groupStructureFetched: false,
       beneficialOwnersFetched: false
     };
-    const conditions = r.relation === 'linked' ? conditionsFor(base, ref).map(push) : [];
+    const conditions = r.relation === 'linked' ? conditionsFor(base, ref, manual?.companies[base.orgNr]).map(push) : [];
     companies.push({
       orgNr: base.orgNr,
       name: facts?.name ?? r.name,
@@ -685,24 +836,50 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
   }
   push(thresholdCheck);
 
-  // De minimis-intyg
+  // De minimis-intyg — "ett enda företag": startup-bolaget + anknutna
+  // (partners räknas inte). Plattformens egna de minimis-register för
+  // portföljbolag, annars bolagets intyg (manuellt svar) per anknutet bolag.
+  const DE_MINIMIS_LABEL = 'Intyg: mindre än 300 000 € de minimis innevarande år + två år bakåt (inkl. anknutna företag)';
+  const linkedForDeMinimis = companies.filter((c) => c.role === 'linked');
+  const linkedKnown: string[] = [];
+  const linkedUnknown: string[] = [];
+  let linkedUsedEur = 0;
+  for (const c of linkedForDeMinimis) {
+    const facts = factsByOrg.get(c.orgNr);
+    const dm = facts?.deMinimis ?? (manual?.de_minimis_related[c.orgNr]
+      ? { usedEur: manual.de_minimis_related[c.orgNr].used_eur, source: 'certificate' as const, note: manual.de_minimis_related[c.orgNr].note }
+      : undefined);
+    const label = c.name || c.orgNr;
+    if (dm) {
+      linkedUsedEur += dm.usedEur;
+      linkedKnown.push(`${label} ${fmtInt(dm.usedEur)} € (${dm.source === 'platform' ? 'plattformen' : 'intyg'}${dm.note ? `: ${dm.note}` : ''})`);
+    } else linkedUnknown.push(label);
+  }
   let deMinimis: ScreeningCheck;
   if (input.deMinimis) {
-    const remaining = input.deMinimis.capEur - input.deMinimis.usedEur;
+    const cap = input.deMinimis.capEur;
+    const total = input.deMinimis.usedEur + linkedUsedEur;
+    const remaining = cap - total;
+    const linkedText =
+      linkedForDeMinimis.length === 0
+        ? ''
+        : ` Anknutna: ${[...linkedKnown, ...linkedUnknown.map((n) => `${n} okänt`)].join('; ')}.`;
     deMinimis = {
       id: 'de_minimis',
-      label: 'Intyg: mindre än 300 000 € de minimis innevarande år + två år bakåt (inkl. anknutna företag)',
-      verdict: remaining > 0 ? 'yes' : 'no',
-      detail: `Registrerat i plattformen: ${fmtInt(input.deMinimis.usedEur)} € — kvar ${fmtInt(Math.max(0, remaining))} €. Anknutna företags stöd ingår inte; intyg från bolaget krävs.`,
-      source: 'platform',
-      needs: linkedRefs.length > 0 ? 'Intyg om de minimis-stöd till de anknutna bolagen.' : undefined
+      label: DE_MINIMIS_LABEL,
+      verdict: remaining <= 0 ? 'no' : linkedUnknown.length > 0 ? 'unknown' : 'yes',
+      detail: `${subject.name || 'Startup-bolaget'}: ${fmtInt(input.deMinimis.usedEur)} € registrerat i plattformen.${linkedText} Sammanlagt ${fmtInt(total)} € — kvar ${fmtInt(Math.max(0, remaining))} € av ${fmtInt(cap)} €.`,
+      source: linkedKnown.length > 0 && linkedKnown.some((t) => t.includes('intyg')) ? 'manual' : 'platform',
+      needs: remaining > 0 && linkedUnknown.length > 0 ? `Intyg om de minimis-stöd till ${linkedUnknown.join(', ')}.` : undefined
     };
   } else {
     deMinimis = {
       id: 'de_minimis',
-      label: 'Intyg: mindre än 300 000 € de minimis innevarande år + två år bakåt (inkl. anknutna företag)',
+      label: DE_MINIMIS_LABEL,
       verdict: 'unknown',
-      detail: 'Inget registrerat stöd i plattformen för bolaget.',
+      detail: `Inget registrerat stöd i plattformen för bolaget (bolaget finns inte i plattformen).${
+        linkedKnown.length > 0 ? ` Anknutna: ${linkedKnown.join('; ')}.` : ''
+      }`,
       source: 'manual',
       needs: 'Intyg om mottaget de minimis-stöd (innevarande + två år bakåt, inkl. anknutna företag).'
     };
@@ -712,12 +889,22 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
   // Sammanfattande bedömning art. 22 GBER
   const v = (list: ScreeningCheck[], id: string) => list.find((c) => c.id === id)?.verdict ?? 'unknown';
   const reasonsNo: string[] = [];
-  if (v(subjectConditions, 'age') === 'no') reasonsNo.push(`${subject.name || 'startup-bolaget'} är äldre än 5 år`);
-  if (v(subjectConditions, 'economic') === 'no') reasonsNo.push(`${subject.name || 'startup-bolaget'} är inte aktivt`);
+  const CONDITION_NO_TEXT: Record<string, string> = {
+    age: 'är äldre än 5 år',
+    economic: 'är inte aktivt',
+    listed: 'är börsnoterat',
+    dividend: 'har delat ut vinst',
+    concentration: 'är bildat genom företagskoncentration',
+    takeover: 'har övertagit annat företags verksamhet'
+  };
+  for (const [id, text] of Object.entries(CONDITION_NO_TEXT)) {
+    if (v(subjectConditions, id) === 'no') reasonsNo.push(`${subject.name || 'startup-bolaget'} ${text}`);
+  }
   for (const c of companies) {
     if (c.role !== 'linked') continue;
-    if (v(c.conditions, 'age') === 'no') reasonsNo.push(`anknutna ${c.name || c.orgNr} är äldre än 5 år`);
-    if (v(c.conditions, 'economic') === 'no') reasonsNo.push(`anknutna ${c.name || c.orgNr} är inte aktivt`);
+    for (const [id, text] of Object.entries(CONDITION_NO_TEXT)) {
+      if (v(c.conditions, id) === 'no') reasonsNo.push(`anknutna ${c.name || c.orgNr} ${text}`);
+    }
   }
   if (thresholdCheck.verdict === 'no') reasonsNo.push('koncernen överskrider tröskelvärdet för småföretag');
 
@@ -742,10 +929,32 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
     !linkedUnknownAge &&
     thresholdCheck.verdict === 'yes'
   ) {
-    stateAid = {
-      outcome: 'art22_possible',
-      text: `${subjectName} kan uppfylla kraven för art. 22 GBER — förutsatt de manuella kontrollerna (börsnotering, vinstutdelning, företagskoncentration, övertagen verksamhet${standalone.verdict === 'yes' ? '' : ' och partnerföretagens andel'}).`
+    // Bara de punkter som fortfarande är obesvarade listas som manuella.
+    const manualOpen: string[] = [];
+    const openLabel: Record<string, string> = {
+      listed: 'börsnotering',
+      dividend: 'vinstutdelning',
+      concentration: 'företagskoncentration',
+      takeover: 'övertagen verksamhet'
     };
+    for (const [id, label] of Object.entries(openLabel)) {
+      if (v(subjectConditions, id) !== 'yes') manualOpen.push(label);
+      else if (companies.some((c) => c.role === 'linked' && v(c.conditions, id) !== 'yes')) manualOpen.push(`${label} (anknutna bolag)`);
+    }
+    if (standalone.verdict !== 'yes') manualOpen.push('partnerföretagens andel');
+    const dividendNote = v(subjectConditions, 'dividend') === 'yes' && subjectConditions.find((c) => c.id === 'dividend')?.source === 'register'
+      ? ' (ingen vinstutdelning enligt årsredovisningarna)'
+      : '';
+    stateAid =
+      manualOpen.length === 0
+        ? {
+            outcome: 'art22_possible',
+            text: `${subjectName} uppfyller kraven för art. 22 GBER enligt underlaget${dividendNote} — alla grundförutsättningar är besvarade (register + manuella svar).`
+          }
+        : {
+            outcome: 'art22_possible',
+            text: `${subjectName} kan uppfylla kraven för art. 22 GBER${dividendNote} — förutsatt de manuella kontrollerna (${manualOpen.join(', ')}).`
+          };
   } else {
     const open: string[] = [];
     if (v(subjectConditions, 'age') === 'unknown') open.push('ålder');
@@ -759,12 +968,13 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
   // Steg 2 — Vinnovas målgrupp
   const vinnovaChecks: ScreeningCheck[] = [];
   const founders = input.founders;
+  const founderSource: ScreeningSource = input.foundersSource === 'manual' ? 'manual' : 'platform';
   if (founders === undefined) {
     vinnovaChecks.push({
       id: 'founders_75',
       label: 'Grundarteamet äger minst 75 % av startup-bolaget',
       verdict: 'unknown',
-      detail: 'Bolaget finns inte i plattformen — grundarnas ägande finns inte i registret (verklig huvudman visas utan namn).',
+      detail: 'Bolaget finns inte i plattformen — grundarnas ägande finns inte i registret (verklig huvudman visas utan namn). Lägg in grundarna under Manuella svar.',
       source: 'manual',
       needs: 'Grundare och ägarandelar (aktiebok).'
     });
@@ -773,7 +983,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       id: 'founders_75',
       label: 'Grundarteamet äger minst 75 % av startup-bolaget',
       verdict: 'unknown',
-      detail: 'Inga grundare med ägarandel i teamet på bolagskortet.',
+      detail: 'Inga grundare med ägarandel i teamet på bolagskortet. Lägg in grundarna under Manuella svar eller i teamet.',
       source: 'platform',
       needs: 'Grundare och ägarandelar läggs in i teamet på bolagskortet.'
     });
@@ -784,24 +994,17 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       id: 'founders_75',
       label: 'Grundarteamet äger minst 75 % av startup-bolaget',
       verdict: sum >= FOUNDER_OWNERSHIP_MIN_PCT ? 'yes' : withPct === 0 ? 'unknown' : 'no',
-      detail: `${founders.length} grundare i teamet, sammanlagt ${formatPct(Math.round(sum * 100) / 100)}${
+      detail: `${founders.length} grundare${founderSource === 'manual' ? ' (manuellt inmatade)' : ' i teamet'}, sammanlagt ${formatPct(Math.round(sum * 100) / 100)}${
         withPct < founders.length ? ` (${founders.length - withPct} utan angiven andel)` : ''
       }.${sum < FOUNDER_OWNERSHIP_MIN_PCT && withPct > 0 ? ' Undantag: kapitalintensiv bransch med giltigt skäl för emission.' : ''}`,
-      source: 'platform',
+      source: founderSource,
       needs: withPct === 0 ? 'Ägarandel per grundare.' : undefined
     });
   }
-  vinnovaChecks.push({
-    id: 'founder_driven',
-    label: 'Grundardrivet (engagemang i % av heltid)',
-    verdict: 'unknown',
-    detail:
-      'Formation: inget krav. Problem/solution-fit: sammantaget minst 40 % och en grundare minst 20 %. Product/market-fit: sammantaget minst 60 % och en grundare minst 40 %. Forskningsavknoppning: forskarnas engagemang kompletteras av teamet.',
-    source: 'manual',
-    needs: 'Grundarnas engagemang i % av heltid och bolagets mognadsfas.'
-  });
+  vinnovaChecks.push(founderDrivenCheck(founders, manual?.maturity_phase, manual?.research_spinoff === true, founderSource));
 
   const subjFin = subject.financials ? latestFinancials(subject.financials) : null;
+  let marketReady: ScreeningCheck;
   if (
     subjFin &&
     typeof subjFin.equity_sek === 'number' &&
@@ -810,7 +1013,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
   ) {
     const annualCosts = Math.max(0, subjFin.revenue_sek - subjFin.net_result_sek);
     const ok = subjFin.equity_sek < 2 * annualCosts;
-    vinnovaChecks.push({
+    marketReady = {
       id: 'not_market_ready',
       label: 'Inte marknadsredo (eget kapital under omkostnaderna kommande 24 mån, validerar fortfarande affären)',
       verdict: ok ? 'yes' : 'unknown',
@@ -819,36 +1022,50 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       } Att affärsmodellen fortfarande valideras bedöms av coachen.`,
       source: 'register',
       needs: ok ? undefined : 'Budget kommande 24 månader och coachens bedömning.'
-    });
+    };
   } else {
-    vinnovaChecks.push({
+    marketReady = {
       id: 'not_market_ready',
       label: 'Inte marknadsredo (eget kapital under omkostnaderna kommande 24 mån, validerar fortfarande affären)',
       verdict: 'unknown',
       detail: 'Bokslut med eget kapital, omsättning och resultat saknas — nystartade bolag har sällan något.',
       source: 'manual',
       needs: 'Budget kommande 24 månader och coachens bedömning av affärsmodellen.'
-    });
+    };
   }
-  vinnovaChecks.push({
-    id: 'innovative',
-    label: 'Innovativt — unika egenskaper som ger uthålliga konkurrensfördelar',
-    verdict: 'unknown',
-    detail: 'Bedöms av coach/controller.',
-    source: 'manual',
-    needs: 'Coachens bedömning av innovationshöjd.'
-  });
-  vinnovaChecks.push({
-    id: 'other_criteria',
-    label: 'Övriga villkor: Agenda 2030 i SRL-dimensionen, skalbarhet (tydlig från mognadsnivå 2), unika kunskapstillgångar',
-    verdict: 'unknown',
-    detail: 'Bedöms av coach/controller.',
-    source: 'manual',
-    needs: 'Coachens bedömning av Agenda 2030, skalbarhet och kunskapstillgångar.'
-  });
+  vinnovaChecks.push(applyManualAnswer(marketReady, manual?.not_market_ready));
+  vinnovaChecks.push(
+    applyManualAnswer(
+      {
+        id: 'innovative',
+        label: 'Innovativt — unika egenskaper som ger uthålliga konkurrensfördelar',
+        verdict: 'unknown',
+        detail: 'Bedöms av coach/controller.',
+        source: 'manual',
+        needs: 'Coachens bedömning av innovationshöjd.'
+      },
+      manual?.innovative
+    )
+  );
+  vinnovaChecks.push(
+    applyManualAnswer(
+      {
+        id: 'other_criteria',
+        label: 'Övriga villkor: Agenda 2030 i SRL-dimensionen, skalbarhet (tydlig från mognadsnivå 2), unika kunskapstillgångar',
+        verdict: 'unknown',
+        detail: 'Bedöms av coach/controller.',
+        source: 'manual',
+        needs: 'Coachens bedömning av Agenda 2030, skalbarhet och kunskapstillgångar.'
+      },
+      manual?.other_criteria
+    )
+  );
   vinnovaChecks.forEach(push);
 
   const f75 = vinnovaChecks[0].verdict;
+  const restChecks = vinnovaChecks.slice(1);
+  const restNo = restChecks.filter((c) => c.verdict === 'no');
+  const restOpen = restChecks.filter((c) => c.verdict !== 'yes');
   const vinnova: ExcellenceScreeningResult['vinnova'] =
     stateAid.outcome === 'not_eligible'
       ? { outcome: 'not_in_target', text: 'Bolaget kan inte ta emot företagsstöd — Vinnovas bidragsmedel får inte användas.' }
@@ -857,17 +1074,49 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
             outcome: 'not_in_target',
             text: 'Grundarteamet äger mindre än 75 % — ingår inte i målgruppen om inte undantaget för kapitalintensiv bransch med giltigt skäl för emission gäller.'
           }
-        : f75 === 'yes' && stateAid.outcome !== 'undetermined'
+        : restNo.length > 0
           ? {
-              outcome: 'in_target_possible',
-              text: 'Grundarägandet är uppfyllt och bolaget kan ta emot företagsstöd eller de minimis. Återstår: grundarengagemang, marknadsredo, innovationshöjd och övriga villkor bedöms av coach/controller.'
+              outcome: 'not_in_target',
+              text: `Uppfyller inte: ${restNo.map((c) => c.label.split(' — ')[0].split(' (')[0].split(':')[0]).join(', ')}.`
             }
-          : {
-              outcome: 'undetermined',
-              text: 'Kräver grundarägande, statsstödsgrund och manuell bedömning av engagemang, innovationshöjd och mognadsnivå.'
-            };
+          : f75 === 'yes' && stateAid.outcome !== 'undetermined' && restOpen.length === 0
+            ? {
+                outcome: 'in_target_possible',
+                text: 'Grundarägande, grundardrivet, inte marknadsredo, innovationshöjd och övriga villkor är uppfyllda enligt underlaget, och bolaget kan ta emot företagsstöd eller de minimis.'
+              }
+            : f75 === 'yes' && stateAid.outcome !== 'undetermined'
+              ? {
+                  outcome: 'in_target_possible',
+                  text: `Grundarägandet är uppfyllt och bolaget kan ta emot företagsstöd eller de minimis. Återstår: ${restOpen
+                    .map((c) => c.label.split(' — ')[0].split(' (')[0].split(':')[0].toLowerCase())
+                    .join(', ')}.`
+                }
+              : {
+                  outcome: 'undetermined',
+                  text: 'Kräver grundarägande, statsstödsgrund och bedömning av engagemang, innovationshöjd och mognadsnivå.'
+                };
 
-  const excellence = push({
+  // IRL — plattformens readiness-rad, annars manuellt satta nivåer; motivering per axel ur manuella svar.
+  let irl: ScreeningIrl | null = input.irl ? { ...input.irl } : null;
+  const irlFacts = manual?.irl;
+  if (irlFacts?.levels) {
+    const hasPlatformDims = !!irl && [irl.crl, irl.brl, irl.tmrl, irl.srl].some((x) => typeof x === 'number');
+    if (!hasPlatformDims) {
+      irl = {
+        level: irl?.level ?? null,
+        crl: irlFacts.levels.crl ?? null,
+        brl: irlFacts.levels.brl ?? null,
+        tmrl: irlFacts.levels.tmrl ?? null,
+        srl: irlFacts.levels.srl ?? null,
+        manualLevels: true
+      };
+    }
+  }
+  if (irlFacts?.notes && Object.keys(irlFacts.notes).length > 0) {
+    irl = { ...(irl ?? { level: null }), notes: irlFacts.notes };
+  }
+
+  const excellenceBase: ScreeningCheck = {
     id: 'excellence',
     label: 'Uppfyller villkoren för excellent inkubation',
     verdict: input.meetsExcellenceFlag === true ? 'yes' : 'unknown',
@@ -879,7 +1128,8 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
           : 'Bolaget finns inte i plattformen.',
     source: input.meetsExcellenceFlag === undefined ? 'manual' : 'platform',
     needs: input.meetsExcellenceFlag === true ? undefined : 'Stäm av excellensvillkoren och markera på bolagskortet.'
-  });
+  };
+  const excellence = push(applyManualAnswer(excellenceBase, manual?.excellence));
 
   const missing = all
     .filter((c) => c.verdict === 'unknown' && c.needs)
@@ -898,9 +1148,66 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
     stateAid,
     vinnovaChecks,
     vinnova,
-    irl: input.irl ?? null,
+    irl,
     excellence,
+    comment: manual?.comment,
     missing,
     checks: all
+  };
+}
+
+/**
+ * Grundardrivet: engagemang i % av heltid mot fasens trösklar
+ * (`FOUNDER_ENGAGEMENT_THRESHOLDS`, Challes karta). Formation har inget krav.
+ * Forskningsavknoppning: forskarnas engagemang räknas men noteras — teamet
+ * ska komplettera. OKÄNT när fas eller engagemang saknas.
+ */
+export function founderDrivenCheck(
+  founders: ScreeningFounderRow[] | undefined,
+  phase: ScreeningManualFacts['maturity_phase'],
+  researchSpinoff: boolean,
+  source: ScreeningSource
+): ScreeningCheck {
+  const label = 'Grundardrivet (engagemang i % av heltid)';
+  const rule =
+    'Trösklar enligt kartan: formation inget krav; problem/solution-fit sammantaget ≥ 40 % och en grundare ≥ 20 %; product/market-fit sammantaget ≥ 60 % och en grundare ≥ 40 %.';
+  const needs = 'Grundarnas engagemang i % av heltid och bolagets mognadsfas (Manuella svar).';
+  if (!phase) {
+    return { id: 'founder_driven', label, verdict: 'unknown', detail: `Mognadsfas inte angiven. ${rule}`, source: 'manual', needs };
+  }
+  const t = FOUNDER_ENGAGEMENT_THRESHOLDS[phase];
+  const phaseLabel = MATURITY_PHASE_LABEL[phase];
+  if (phase === 'formation') {
+    return {
+      id: 'founder_driven',
+      label,
+      verdict: 'yes',
+      detail: `Fas ${phaseLabel}: inget krav på engagemang i denna fas.${researchSpinoff ? ' Forskningsavknoppning — forskarnas engagemang ska kompletteras av teamet.' : ''}`,
+      source: 'manual'
+    };
+  }
+  const withEng = (founders ?? []).filter((f) => typeof f.engagement_pct === 'number');
+  if (withEng.length === 0) {
+    return {
+      id: 'founder_driven',
+      label,
+      verdict: 'unknown',
+      detail: `Fas ${phaseLabel} (krav: sammantaget ≥ ${t.total} %, en grundare ≥ ${t.single} %), men inget engagemang är angivet per grundare.`,
+      source: 'manual',
+      needs: 'Engagemang i % av heltid per grundare (Manuella svar).'
+    };
+  }
+  const total = withEng.reduce((a, f) => a + (f.engagement_pct ?? 0), 0);
+  const max = Math.max(...withEng.map((f) => f.engagement_pct ?? 0));
+  const ok = total >= t.total && max >= t.single;
+  const list = withEng.map((f) => `${f.name} ${formatPct(f.engagement_pct ?? 0)}${f.researcher ? ' (forskare)' : ''}`).join(', ');
+  return {
+    id: 'founder_driven',
+    label,
+    verdict: ok ? 'yes' : 'no',
+    detail: `Fas ${phaseLabel}: sammantaget ${formatPct(Math.round(total * 100) / 100)} (krav ≥ ${t.total} %), högst ${formatPct(max)} (krav ≥ ${t.single} %) — ${list}.${
+      researchSpinoff ? ' Forskningsavknoppning — forskarnas engagemang kompletteras av teamet.' : ''
+    } Trösklarna följer kartan; Vinnovas metodbeskrivning kan ange andra värden (se dokumentationen).`,
+    source
   };
 }

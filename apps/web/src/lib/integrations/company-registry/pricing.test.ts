@@ -1,8 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  composeRegistryPricing,
   EMPTY_REGISTRY_PRICING,
   estimateRegistryCost,
+  REGISTRY_PROVIDER_PRICING,
+  registryPricingFromProvider,
   formatRegistryCost,
   isRegistryPricingComplete,
   mergeRegistryPricing,
@@ -99,4 +102,72 @@ test('validateRegistryPricingInput: tomt = ej angivet, decimalkomma, fel avvisas
   assert.equal(validateRegistryPricingInput({ sekPerCredit: 'x', credits: {}, note: '' }).ok, false);
   assert.equal(validateRegistryPricingInput({ sekPerCredit: '', credits: { basic: '-1' }, note: '' }).ok, false);
   assert.equal(validateRegistryPricingInput({ sekPerCredit: '', credits: {}, note: 'ref 19800101-1234' }).ok, false);
+});
+
+test('leverantörens publicerade listpris: Roaring 0,20 kr/credit + credits per anrop ur priskalkylatorn', () => {
+  const roaring = REGISTRY_PROVIDER_PRICING.roaring;
+  assert.equal(roaring.sekPerCredit, 0.2);
+  // Kalkylatorn 2026-10-12: Företagsinformation 10, Finansiell Information 35,
+  // Ägarstruktur 150, Verklig Huvudman 50.
+  assert.deepEqual(roaring.creditsPerPart, {
+    basic: 10,
+    financials: 35,
+    group_structure: 150,
+    beneficial_owners: 50
+  });
+  assert.ok(roaring.sourceUrl.startsWith('https://help.roaring.io/'));
+  assert.match(roaring.publishedAt, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(roaring.productNames.beneficial_owners?.includes('Beneficial Owner'));
+
+  const p = registryPricingFromProvider('roaring');
+  assert.equal(p.source, 'provider');
+  assert.equal(p.sekPerCredit, 0.2);
+  assert.equal(p.fieldSources?.sekPerCredit, 'provider');
+  assert.equal(p.fieldSources?.credits?.financials, 'provider');
+  assert.equal(registryPricingFromProvider('bolagsverket').source, 'none');
+
+  // Kalkylatorns kontrollsumma: alla fyra delar = 245 credits = 49,00 kr per bolag.
+  const all = estimateRegistryCost(p, ['basic', 'financials', 'group_structure', 'beneficial_owners'], 1);
+  assert.equal(all.credits, 245);
+  assert.equal(all.sek, 49);
+  assert.equal(all.complete, true);
+});
+
+test('composeRegistryPricing: listpris → env → tenant, högre nivå vinner per fält och källan följer med', () => {
+  const noTenant = composeRegistryPricing('roaring', {}, EMPTY_REGISTRY_PRICING);
+  assert.equal(noTenant.sekPerCredit, 0.2);
+  assert.equal(noTenant.source, 'provider');
+  assert.equal(noTenant.provider?.providerName, 'Roaring');
+  // Listpriset ger en komplett uppskattning för Roaring (alla fyra delar publicerade).
+  const listOnly = estimateRegistryCost(noTenant, ['basic'], 1);
+  assert.equal(listOnly.complete, true);
+  assert.equal(formatRegistryCost(listOnly), '1 anrop · ≈ 10 credits · ≈ 2,00 kr');
+  // En leverantör utan publicerat listpris är fortfarande "pris ej angivet".
+  const unknown = composeRegistryPricing('bolagsverket', {}, EMPTY_REGISTRY_PRICING);
+  assert.ok(formatRegistryCost(estimateRegistryCost(unknown, ['basic'], 1)).includes('pris ej angivet'));
+
+  const withEnv = composeRegistryPricing('roaring', { ROARING_CREDITS_BASIC: '20' }, EMPTY_REGISTRY_PRICING);
+  assert.equal(withEnv.source, 'mixed');
+  assert.equal(withEnv.fieldSources?.credits?.basic, 'env', 'env vinner över listpriset');
+  assert.equal(withEnv.fieldSources?.credits?.financials, 'provider');
+  assert.equal(withEnv.fieldSources?.sekPerCredit, 'provider');
+  const est = estimateRegistryCost(withEnv, ['basic'], 5);
+  assert.equal(est.credits, 100);
+  assert.equal(est.sek, 20);
+  assert.equal(est.complete, true);
+
+  const tenant = parseRegistryPricingJson({ credits: { basic: 25 }, sek_per_credit: 0.15, note: 'avtal 2026' });
+  const all = composeRegistryPricing('roaring', { ROARING_CREDITS_BASIC: '20' }, tenant);
+  assert.equal(all.creditsPerPart.basic, 25);
+  assert.equal(all.sekPerCredit, 0.15);
+  assert.equal(all.source, 'mixed', 'tenanten skrev över basic + kr/credit, resten kommer ur listpriset');
+  assert.equal(all.fieldSources?.credits?.basic, 'tenant');
+  assert.equal(all.fieldSources?.credits?.financials, 'provider');
+  assert.equal(all.fieldSources?.sekPerCredit, 'tenant');
+  assert.equal(all.note, 'avtal 2026');
+  assert.equal(all.provider?.providerName, 'Roaring', 'källan behålls även när tenanten skrivit över');
+
+  // Artikelns exempel: 4 400 credits × 0,20 kr = 880 kr.
+  const example = composeRegistryPricing('roaring', { ROARING_CREDITS_BASIC: '4400' }, EMPTY_REGISTRY_PRICING);
+  assert.equal(estimateRegistryCost(example, ['basic'], 1).sek, 880);
 });

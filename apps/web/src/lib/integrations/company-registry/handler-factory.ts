@@ -10,7 +10,7 @@ import type {
   TestConnectionResult
 } from '../types';
 import { isPersonalOrgNr, normalizeOrgNr } from './orgnr';
-import { ownershipParts, type RegistryPartId } from './parts';
+import { financialsParts, ownershipParts, type RegistryPartId } from './parts';
 import type { RegistryCompany, RegistrySource } from './types';
 import { applyRegistryCompany } from './writer';
 
@@ -114,7 +114,7 @@ function restrictToParts(company: RegistryCompany, requested: RegistryPartId[]):
   return {
     ...company,
     startup: fetched.includes('basic') ? company.startup : {},
-    financials: fetched.includes('financials') ? company.financials : [],
+    financials: financialsParts(fetched).length > 0 ? company.financials : [],
     ownership: company.ownership.filter((e) => (e.part ? own.includes(e.part) : own.length > 0)),
     fetchedParts: fetched
   };

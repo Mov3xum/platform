@@ -126,7 +126,10 @@ export const PII_FIELD_PATTERNS: readonly string[] = [
   // Utskrivet org-nr (de_minimis_unit_orgnr.organisationsnummer) — fångas inte
   // av `org_nr`-substringen. För enskild firma motsvarar det personnummer.
   'organisationsnummer',
-  'ip_hash'
+  'ip_hash',
+  // Bedömning excellens (§ 51.4): manuella svar med grundarnas namn/andel/
+  // engagemang och fri motiveringstext — når aldrig modellen.
+  'screening_facts'
 ];
 
 /** Är kollektionen helt utestängd från agentens query-verktyg? */

@@ -5,7 +5,8 @@
 //
 // Varje del motsvarar ett API-anrop hos leverantören och en skrivväg:
 //   basic             → grunddata till bolagskortet (startups)
-//   financials        → årsrader (startup_financials)
+//   financials        → årsrader inkl. beslutad utdelning, personalkostnad och
+//                       bolagsskatt (startup_financials)
 //   group_structure   → moder-/dotterbolag (startup_ownership)
 //   beneficial_owners → verklig huvudman, anonymt (startup_ownership)
 // En provider deklarerar vilka delar den stödjer; personalen väljer en
@@ -36,7 +37,8 @@ export const REGISTRY_PART_META: Record<RegistryPartId, RegistryPartMeta> = {
   },
   financials: {
     label: 'Bokslut',
-    description: 'Omsättning, anställda, resultat, balansomslutning och eget kapital per år.',
+    description:
+      'Omsättning, anställda, resultat, balansomslutning, eget kapital och beslutad utdelning per år (Roaring: även personalkostnad och bolagsskatt). Utdelningen avgör art. 22-villkoret "har inte delat ut vinst".',
     writes: 'financials'
   },
   group_structure: {
@@ -50,6 +52,11 @@ export const REGISTRY_PART_META: Record<RegistryPartId, RegistryPartMeta> = {
     writes: 'ownership'
   }
 };
+
+/** Delar som skriver bokslutsrader (`startup_financials`), i deklarerad ordning. */
+export function financialsParts(parts: readonly RegistryPartId[]): RegistryPartId[] {
+  return parts.filter((p) => REGISTRY_PART_META[p].writes === 'financials');
+}
 
 export function isRegistryPartId(v: unknown): v is RegistryPartId {
   return typeof v === 'string' && (REGISTRY_PART_IDS as readonly string[]).includes(v);

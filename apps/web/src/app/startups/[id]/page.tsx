@@ -150,6 +150,9 @@ interface FinancialsRow {
   corporate_tax_sek?: number;
   balance_sheet_sek?: number;
   equity_sek?: number;
+  /** Beslutad utdelning (§ 51) — bara meningsfull när `dividend_reported` är sant. */
+  dividend_sek?: number;
+  dividend_reported?: boolean;
   source: FinancialsSource;
   synced_at?: string;
 }
@@ -1471,6 +1474,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                     <th className="px-3 py-2 font-medium">Anställda</th>
                     <th className="px-3 py-2 font-medium">Balansomslutning</th>
                     <th className="px-3 py-2 font-medium">Eget kapital</th>
+                    <th className="px-3 py-2 font-medium">Utdelning</th>
                     <th className="px-3 py-2 font-medium">Personalkostnad</th>
                     <th className="px-3 py-2 font-medium">Bolagsskatt</th>
                     <th className="px-3 py-2 font-medium">Källa</th>
@@ -1491,6 +1495,9 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
                       </td>
                       <td className="px-3 py-2 text-foreground-muted">
                         {formatSek(row.equity_sek)}
+                      </td>
+                      <td className="px-3 py-2 text-foreground-muted">
+                        {row.dividend_reported ? formatSek(row.dividend_sek ?? 0) : '–'}
                       </td>
                       <td className="px-3 py-2 text-foreground-muted">
                         {formatSek(row.personnel_cost_sek)}

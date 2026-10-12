@@ -1456,9 +1456,39 @@ försvann Wellgo Health AB ur Combly-screeningen); ett personnummer-derivat
 anonymiseras alltid, oavsett namn. Samma regel för juridisk person i
 `beneficialOwners[]`.
 Verklig huvudmans intervall/kontrollgrund tolkas även som objekt
-(`{ from, to }`) respektive kodlista (`controlTypes[]`); fältnamnen inuti
-`beneficialOwners[]` och bokslutets fält är fortsatt obekräftade — se
-runbooken. **Sandbox = samma värd** (`api.roaring.io`): det
+(`{ from, to }`) respektive kodlista (`controlTypes[]`). **Fältnamn
+bekräftade mot riktiga svar 2026-10-12** (Workify Sverige AB / WFYAPP
+HOLDING AB): economy-overview 2.1 ger en post per räkenskapsår med
+`fromDate`/`toDate`, `numberOfEmployees`, `plSales` (nettoomsättning),
+`plNetOperatingIncome` (rörelsens intäkter), `plEbit`, `plNetProfitLoss`,
+`bsTotalEquity` och **`bsTotalEquityAndLiabilities`** — balansomslutningen
+levereras bara från skuldsidan (summa eget kapital och skulder = summa
+tillgångar), och `ASSETS_PATHS` saknade det namnet, så noten
+"balansomslutning saknas" kom trots att fältet fanns (åtgärdat; tröskel-
+värdet i § 51 får nu sitt belopp). Omsättning läses ur `plSales` först;
+avviker `plNetOperatingIncome` noteras det så valet kan stämmas av mot ett
+facit. **OpenAPI-specarna mottagna 2026-10-12** (overview 2.0,
+economy-overview 2.1, share-facts 1.1) bekräftar kuvertet `{ records,
+status: { code 0/1, text } }` (`roaringReportsNoRecords` läser `code === 1`
+exakt) och att bokslutsdelen ska anropa **`/extended/{companyId}?years=N`**
+(env `ROARING_FINANCIALS_YEARS`, spec-default 5): flera räkenskapsår med
+`dividend` (beslutad utdelning), `plPersonalCosts` (personalkostnad) och
+`plTaxes` (bolagsskatt) utöver posterna ovan — den nakna `/{companyId}`
+ger bara senaste året utan dem och ligger kvar som reserv. Verklig huvudman
+2.1 svarar `beneficialOwners[person,extentOfControl,controlTypes]` —
+`person` läses aldrig; `extentOfControl` tolkas av `parseControlInterval`
+ur VILKEN rimlig form som helst — text eller kod (Bolagsverkets ordalydelser
+"Mer än 25 men inte mer än 50 procent", `MORE_THAN_75`, `MER_AN_75`,
+`GT75`), tal, objekt med gränser (`{ from, to }`, `{ percentFrom,
+percentTo }`, `{ low, high }` …), objekt med text/kod (`{ code,
+description }`) eller nästlat objekt; kända nycklar först, därefter varje
+primitivt värde (datum/id:n avvisas). `controlTypes` tolkas som text, kod,
+`{ code, description }`, lista eller objekt som bär listan, och en känd
+grund skuggas aldrig av en okänd. Ett intervall som ändå inte kan tolkas
+noteras med sin FORM (nycklar, aldrig värden). Fältnyckel-noten
+visar numera formen två nivåer ned (`extentOfControl{code,text}`), så
+nästa avvikelse syns i förhandsgranskningen utan rå JSON. Runbooken har
+detaljerna. **Sandbox = samma värd** (`api.roaring.io`): det
 är nyckelparet från utvecklarportalen som avgör om svaren är testdata, så
 `base_url` lämnas tom. Förhandsgranskningen noterar per API vilken sökväg som
 svarade och vilka **fältnycklar** (aldrig värden) svaret bar, så mappningen kan
@@ -1506,8 +1536,9 @@ till `integration_sync_runs.error_message`, och `registrySyncStatus` ger
 ska hämtas — kryssrutor per del vid "Synka nu" (portföljen), "Testa mot
 org-nr" och "Synka från <leverantör>" på bolagskortet (där knappen först
 öppnar valet; inget anropas förrän det bekräftats). Delarna är
-`basic` (grunddata), `financials` (bokslut), `group_structure`
-(koncernstruktur) och `beneficial_owners` (verklig huvudman); varje del är ett
+`basic` (grunddata), `financials` (bokslut inkl. beslutad utdelning, nedan),
+`group_structure` (koncernstruktur) och `beneficial_owners` (verklig
+huvudman); varje del är ett
 eget API-anrop hos leverantören och endpointen visas vid kryssrutan
 (`partEndpoints`, env-medveten). Källa av sanning: den rena, enhetstestade
 `lib/integrations/company-registry/parts.ts`. Varje provider deklarerar
@@ -1539,6 +1570,25 @@ Regler:
   `parts_present` och prövas mot handlerns deklarerade delar
   (`parseRegistryParts` — okänd del eller tomt val avvisas; formulär utan
   markören hämtar allt, som förut). Enskild firma hämtar aldrig ägardelarna.
+- **Beslutad utdelning ur bokslutet (2026-10-12, migration 1700000189).**
+  Art. 22 GBER kräver att bolaget INTE "delat ut vinst" — det avgörs inte av
+  resultatet (en vinst som behålls är tillåten) utan av den beslutade
+  utdelningen. Roarings economy-overview 2.1 bär den som fältet `dividend`
+  **bara i `/extended`-svaret** (OpenAPI-specen), så bokslutsdelen anropar
+  `/extended/{companyId}?years=5` och skriver `startup_financials.dividend_sek`
+  + **`dividend_reported`** (sant bara när raden faktiskt bar fältet — PB
+  lagrar 0 för ett tomt tal, så siffran ensam kan inte skilja "ingen
+  utdelning" från "inte hämtad", § 42.2-mönstret) samt `personnel_cost_sek`
+  (`plPersonalCosts`) och `corporate_tax_sek` (`plTaxes`). En årsrad utan
+  `dividend` lämnar utdelningen OKÄND med en not — aldrig tyst 0 kr. Den
+  tidigare gissade femte delen "Årsredovisning (utdelning)" mot ett
+  financial-record-API (375 credits) är borttagen: specen visar att
+  uppgiften finns i Finansiell Information 2.1. Utdelningen visas som kolumn
+  i Finansiell historik, i förhandsgranskningen, i bedömningen och i PDF:n,
+  och whitelistas som `dividend_sek` i `buildFinancialsContext` (publik
+  bokslutsdata, ingen PII). **Oklart:** om `/extended` prissätts som
+  kalkylatorns rad "Finansiell Information 2.1" (35 credits) — stäm av
+  Konsumering efter första uppslaget.
 - **Audit:** valda delar står i synkens sammanfattning (`last_sync_summary`)
   och i aktivitetsraden ("Hämtade: Grunddata, Bokslut") — PII-fritt.
 - Senaste val sparas per leverantör i `localStorage`
@@ -1556,7 +1606,28 @@ notering), lagrat i `tenant_integrations.pricing` (json, ingen hemlighet —
 stripas inte av `strip_integration_config.pb.js`). Env-default på web-appen:
 `<SLUG>_CREDITS_<DEL>` (`ROARING_CREDITS_BASIC`, `…_FINANCIALS`,
 `…_GROUP_STRUCTURE`, `…_BENEFICIAL_OWNERS`) + `<SLUG>_SEK_PER_CREDIT`;
-tenantens värde vinner per fält (`mergeRegistryPricing`). Källa av sanning:
+tenantens värde vinner per fält (`mergeRegistryPricing`). **Tre nivåer
+(2026-10-12):** under env ligger leverantörens PUBLICERADE listpris i koden
+(`REGISTRY_PROVIDER_PRICING`, daterat med källa — det enda i koden som får
+bära en siffra): Roaring 0,20 kr/credit enligt helpcentrets artikel "How does
+your credits system work?" (exempel 4 400 credits = 880 kr; priset per credit
+sjunker med volymen enligt en trappa som bara visas som bild, och
+månadsavgiften tillkommer). **Credits per anrop** kommer ur Roarings
+priskalkylator (läst 2026-10-12, 620 credits = 124,00 kr exkl. moms ⇒ 0,20
+kr/credit): Företagsinformation 2.0 = **10** (`basic`), Finansiell
+Information 2.1 = **35** (`financials` — vi anropar dess `/extended`;
+om den raden täcker /extended är obekräftat, se ovan), Ägarstruktur 1.0 =
+**150** (`group_structure`), Verklig Huvudman 2.1 = **50**
+(`beneficial_owners`; kalkylatorns rad heter "– Person", bolagsuppslaget
+antas kosta lika — stäm av mot Konsumering i kontot). En full hämtning =
+245 credits = 49,00 kr per bolag. "Årsredovisningar 1.0" (375) anropas
+inte. Siffrorna bär källa + datum i koden och får bara
+ändras mot en ny källa — aldrig gissas; formuläret visar Roarings
+produktnamn per datadel så ledningen hittar rätt rad i sitt konto
+(app.roaring.io → Fakturering & Priser → Konsumering). `composeRegistryPricing` = listpris → env → tenant, per fält, och
+`fieldSources` säger varifrån varje siffra kommer (visas i formuläret och
+kostnadsraden: "kr/credit är Roarings publicerade listpris före
+volymrabatt"). Listpriset ensamt gör aldrig en uppskattning komplett. Källa av sanning:
 den rena, enhetstestade `company-registry/pricing.ts`
 (`estimateRegistryCost` = valda delar × bolag, `formatRegistryCost`,
 `registryPartCostLabel`, `validateRegistryPricingInput`); IO i
@@ -8261,8 +8332,22 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 - **Deterministiskt, inget beslut.** Ingen AI-inferens; varje punkt får
   JA / NEJ / OKÄNT med motivering och källa (bolagsregister / plattformen /
   manuell kontroll). OKÄNT när underlaget saknas — motorn gissar aldrig
-  (börsnotering, vinstutdelning, företagskoncentration, övertagen
-  verksamhet, grundarengagemang, innovationshöjd är alltid manuella).
+  (börsnotering, företagskoncentration, övertagen verksamhet,
+  grundarengagemang, innovationshöjd är alltid manuella).
+- **Vinstutdelning avgörs ur bokslutet (2026-10-12).** Punkten "har
+  inte beslutat om eller delat ut vinst" läser `dividend_reported`/
+  `dividend_sek` (fältet `dividend` i Roarings economy-overview 2.1
+  `/extended`, datadelen Bokslut, § 11.8) — INTE resultatet:
+  någon beslutad utdelning > 0 ⇒ NEJ (fäller art. 22 ⇒ de minimis); 0 kr i
+  VARJE räkenskapsår från året efter registreringen t.o.m. senaste
+  rapporterade år ⇒ JA (och "vinstutdelning" lämnar listan över manuella
+  kontroller); 0 kr men ett år saknas, eller registreringsdatum saknas ⇒
+  OKÄNT med vilka år som fattas — aldrig ett tyst JA; ingen årsredovisning
+  hämtad ⇒ OKÄNT (manuell) med resultatet som ledtråd ("bara förlustår —
+  utdelning osannolik" / "vinst 2024 — kontrollera vinstdispositionen").
+  `dividendCheck` i `excellence-screening.ts` är ren och enhetstestad.
+  Ett intyg från bolaget kan fylla en OKÄNT-punkt via Manuella svar
+  (§ 51.4) men aldrig skriva över ett register-NEJ.
   Sidan skriver ALDRIG `approved_state_aid_art22`/`approved_de_minimis`/
   `meets_excellence_criteria` eller statsstödsperioder — controllern
   registrerar beslutet som förut (bolagskortet, `/rapporter/vinnova`).
@@ -8316,6 +8401,74 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
   60/40 enligt PPT:n — Combly-dokumentet anger 50/30 resp. 80/40) skrivs
   ut i punkten "Grundardrivet" som text; den avgörs manuellt tills Vinnovas
   metodbeskrivning låsts (docs/ai/vinnova-statsstod-screening-agent.md § 2.1).
+
+### 51.4 Manuella svar — det registret inte kan svara på (2026-10-12)
+
+**Incident.** Combly-referensbedömningen innehöll svar på punkter som inget
+bolagsregister bär (börsnotering, företagskoncentration, övertagen
+verksamhet, grundarnas engagemang, innovationshöjd, de minimis-intyg för
+anknutna bolag, IRL-motivering, controllerns kommentar) — en körning gav
+därför fler OKÄNT än dokumentet och det fanns inget ställe att fylla i
+svaren. Nu finns panelen **Manuella svar** under varje bedömning:
+
+- **Datamodell:** `startups.screening_facts` (json, migration **1700000190**;
+  speglad i `setup-via-api.mjs`, asserterad i `verify-baseline.mjs`
+  `REQUIRED_APP_FIELDS`). Format = `ScreeningManualFacts` i den rena,
+  enhetstestade `packages/shared/src/excellence-facts.ts`
+  (`normalizeScreeningFacts`: okända nycklar/värden släpps, procent 0–100,
+  IRL-nivåer 1–9, org-nr-nycklar normaliseras, fritext personnummer-saneras
+  och cappas — aldrig ett undantag). Innehåll: svar JA/NEJ + motivering per
+  bolag i koncernen för `listed`/`dividend`/`concentration`/`takeover`;
+  grundarteam (namn, ägarandel, **engagemang i % av heltid**, forskare) +
+  `maturity_phase` + `research_spinoff`; `not_market_ready`/`innovative`/
+  `other_criteria`/`excellence`; de minimis-intyg per anknutet bolag
+  (`de_minimis_related[orgNr].used_eur`); IRL-nivåer (bara när plattformen
+  saknar readiness-rad) + motivering per axel; `comment` (review-raden).
+- **Regelmotorn** (`excellence-screening.ts`, `input.manual`): ett manuellt
+  **NEJ vinner alltid**, ett manuellt **JA fyller bara en OKÄNT-punkt** — ett
+  register-NEJ (t.ex. beslutad utdelning i bokslutet) kan inte skrivas över,
+  avvikelsen noteras i detaljen (`applyManualAnswer`, enhetstestad). Källan
+  blir "Manuell kontroll". `founderDrivenCheck` räknar engagemanget mot
+  fasens trösklar (`FOUNDER_ENGAGEMENT_THRESHOLDS`: kartans 40/20 resp.
+  60/40; formation inget krav) och skriver ut vilka trösklar som gällde —
+  Combly-dokumentets 50/30 resp. 80/40 är INTE låsta förrän Vinnovas
+  metodbeskrivning finns (docs/ai/vinnova-statsstod-screening-agent.md
+  § 2.1). De minimis räknas nu för "ett enda företag": startup + anknutna
+  bolag, ur plattformen när det anknutna bolaget är ett portföljbolag
+  (`attachPlatformDeMinimis`/`GroupCompanyFacts.deMinimis`), annars intyget;
+  saknas ett anknutet bolags stöd är punkten OKÄNT med namnet i "Behövs".
+  Art. 22-texten listar bara de manuella punkter som fortfarande är öppna
+  och blir villkorslös när alla är besvarade; Vinnova-utfallet blir "ingår
+  inte" vid ett manuellt NEJ och "ingår sannolikt" utan förbehåll när alla
+  punkter är JA.
+- **Rundtur utan nya anrop:** ett registeruppslag kostar credits, så
+  "Spara svar och uppdatera bedömningen" (`applyExcellenceFactsAction`)
+  räknar om på SAMMA underlag. Underlaget går med i resultatet som
+  `ExcellenceAssessment.context` (JSON) och tillbaka i formuläret; eftersom
+  det då är klientdata byggs det om fält för fält av den rena, enhetstestade
+  `lib/excellence/context.ts` (`parseAssessmentContext`: typer, enum,
+  intervall, längd, antal, tak 800 KB; fysiska personer tappar namn/org-nr
+  igen) — ogiltigt underlag ⇒ "kör bedömningen igen", aldrig en omräkning
+  på något som inte kunde verifieras. Innehållet är det vyn redan visade och
+  PDF:en hamnar i den inloggades egna Filer — ingen ny dataväg.
+- **Skrivväg:** `saveStartupScreeningFacts` i `lib/core/write/startups.ts`
+  (whitelist `screening_facts`: admin/incubator_lead/coach, **agent deny**;
+  tenant-verifiering; `writeWithFallback` bara vid PB v0.23.4:s tysta regel-
+  nekande; återläsning mot schema-drift § 24.4 → "fältet saknas, kör
+  migration 1700000190" i panelen i stället för en tyst no-op). Auditen i
+  `agent_actions` bär BARA antal besvarade punkter (`summarizeScreeningFacts`)
+  — aldrig namn, procent eller text; syns i `/aktivitet` som "de manuella
+  svaren i Bedömning excellens ändrades". Bolag utanför plattformen får
+  svaren bara i PDF:n. Varje omräkning arkiverar en ny PDF (§ 51.3) där
+  kommentaren står i review-raden, grundartabellen har kolumnen Engagemang +
+  fas, och IRL-tabellen visar motiveringen per axel.
+- **GDPR § 5:** fältet bär grundarnas namn/andel/engagemang (yrkesuppgifter,
+  samma krets som teamet på bolagskortet; berättigat intresse:
+  statsstödskontroll) och fri motiveringstext — därför **fältmaskat** i
+  `lib/ai/redaction.ts` (`screening_facts` når aldrig `query_collection`)
+  och inte whitelistat i `lib/ai/context.ts`. Panelen uppmanar att inte
+  skriva personuppgifter; personnummer saneras på skrivvägen. Riskklass n/a
+  (ingen AI). Ingen ny kollektion.
 
 ### 51.3 Var en bedömning lagras — PDF i Filer, i bolagets mapp (2026-10-12)
 

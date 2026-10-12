@@ -4,6 +4,7 @@ import {
   classifyOwnershipEntry,
   deriveRelatedCompanies,
   describeCompanyAge,
+  dividendCheck,
   ownershipShareRange,
   screenExcellence,
   type ExcellenceScreeningInput,
@@ -280,4 +281,294 @@ test('"inga uppgifter" hos leverantören (tom bokslutslista, hämtade ägardelar
   );
   assert.equal(r.thresholds.rows[0].note, 'Inget bokslut i registret (nystartat?)');
   assert.notEqual(r.standalone.detail, 'Koncernstrukturen hämtades inte.');
+});
+
+// ─── Vinstutdelning (art. 22: "har inte delat ut vinst") ur årsredovisningen ──
+
+const REG = new Date('2022-03-10T00:00:00Z');
+
+test('utdelning > 0 i något år ⇒ NEJ ur registret och fäller art. 22', () => {
+  const c = dividendCheck(
+    [
+      { year: 2023, dividend_reported: true, dividend_sek: 0 },
+      { year: 2024, dividend_reported: true, dividend_sek: 150_000 }
+    ],
+    REG,
+    REF,
+    false
+  );
+  assert.equal(c.verdict, 'no');
+  assert.equal(c.source, 'register');
+  assert.match(c.detail, /2024: 150.000 kr/);
+
+  const res = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        basic: { registeredAt: '2022-03-10', bolagStatus: 'aktiv', bolagsform: 'AB' },
+        financials: [{ year: 2024, dividend_reported: true, dividend_sek: 150_000, employees: 2, revenue_sek: 1_000_000, balance_sheet_sek: 500_000 }],
+        ownership: [
+          { direction: 'owner', owner_kind: 'person', pct_min: 75, pct_max: 100 },
+          { direction: 'owner', owner_kind: 'person', pct_min: 10, pct_max: 25 }
+        ]
+      }),
+      deMinimis: { usedEur: 0, capEur: 300_000 }
+    })
+  );
+  assert.equal(res.stateAid.outcome, 'de_minimis');
+  assert.match(res.stateAid.text, /har delat ut vinst/);
+});
+
+test('0 kr i varje räkenskapsår sedan registreringen ⇒ JA ur registret, och vinstutdelning lämnar de manuella kontrollerna', () => {
+  const c = dividendCheck(
+    [
+      { year: 2023, dividend_reported: true, dividend_sek: 0 },
+      { year: 2024, dividend_reported: true, dividend_sek: 0 },
+      { year: 2025, dividend_reported: true, dividend_sek: 0 }
+    ],
+    REG,
+    REF,
+    false
+  );
+  assert.equal(c.verdict, 'yes');
+  assert.equal(c.source, 'register');
+  assert.match(c.detail, /2023, 2024, 2025/);
+
+  const res = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        basic: { registeredAt: '2022-03-10', bolagStatus: 'aktiv', bolagsform: 'AB' },
+        financials: [
+          { year: 2023, dividend_reported: true, dividend_sek: 0, employees: 1, revenue_sek: 10_000, balance_sheet_sek: 50_000 },
+          { year: 2024, dividend_reported: true, dividend_sek: 0, employees: 2, revenue_sek: 100_000, balance_sheet_sek: 500_000 },
+          { year: 2025, dividend_reported: true, dividend_sek: 0, employees: 2, revenue_sek: 200_000, balance_sheet_sek: 600_000 }
+        ],
+        ownership: [
+          { direction: 'owner', owner_kind: 'person', pct_min: 75, pct_max: 100 },
+          { direction: 'owner', owner_kind: 'person', pct_min: 10, pct_max: 25 }
+        ]
+      }),
+      deMinimis: { usedEur: 0, capEur: 300_000 }
+    })
+  );
+  assert.equal(res.stateAid.outcome, 'art22_possible');
+  assert.doesNotMatch(res.stateAid.text, /manuella kontrollerna \([^)]*vinstutdelning/);
+  assert.match(res.stateAid.text, /ingen vinstutdelning enligt årsredovisningarna/);
+});
+
+test('0 kr men ett år saknas ⇒ OKÄNT med vilket år som saknas — aldrig ett tyst JA', () => {
+  const c = dividendCheck(
+    [
+      { year: 2023, dividend_reported: true, dividend_sek: 0 },
+      { year: 2025, dividend_reported: true, dividend_sek: 0 }
+    ],
+    REG,
+    REF,
+    false
+  );
+  assert.equal(c.verdict, 'unknown');
+  assert.match(c.detail, /år 2024 saknas/);
+  assert.match(c.needs ?? '', /2024/);
+});
+
+test('utan registreringsdatum kan täckningen inte bekräftas ⇒ OKÄNT', () => {
+  const c = dividendCheck([{ year: 2024, dividend_reported: true, dividend_sek: 0 }], null, REF, false);
+  assert.equal(c.verdict, 'unknown');
+  assert.match(c.detail, /registreringsdatum saknas/);
+});
+
+test('ingen årsredovisning hämtad ⇒ OKÄNT (manuell) med resultatet som ledtråd — 0 utan flagga räknas aldrig', () => {
+  const loss = dividendCheck([{ year: 2024, net_result_sek: -40_000, dividend_sek: 0 }], REG, REF, false);
+  assert.equal(loss.verdict, 'unknown');
+  assert.equal(loss.source, 'manual');
+  assert.match(loss.detail, /bara förlustår/);
+
+  const profit = dividendCheck([{ year: 2023, net_result_sek: -1 }, { year: 2024, net_result_sek: 90_000 }], REG, REF, false);
+  assert.equal(profit.verdict, 'unknown');
+  assert.match(profit.detail, /vinst 2024/);
+
+  const none = dividendCheck([], REG, REF, true);
+  assert.equal(none.verdict, 'unknown');
+  assert.match(none.detail, /Inget uppslag/);
+});
+
+// ─── Manuella svar (§ 51.4) ───────────────────────────────────────────────────
+
+const STANDALONE_OWNERS = [
+  { direction: 'owner', owner_kind: 'person', pct_min: 75, pct_max: 100 },
+  { direction: 'owner', owner_kind: 'person', pct_min: 10, pct_max: 25 }
+] as const;
+
+test('manuella JA fyller okända grundförutsättningar och gör art. 22-texten villkorslös', () => {
+  const res = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        name: 'Combly AB',
+        basic: { registeredAt: '2022-03-10', bolagStatus: 'aktiv' },
+        financials: [
+          { year: 2023, employees: 2, revenue_sek: 100_000, balance_sheet_sek: 500_000, dividend_sek: 0, dividend_reported: true },
+          { year: 2024, employees: 3, revenue_sek: 400_000, balance_sheet_sek: 900_000, dividend_sek: 0, dividend_reported: true }
+        ],
+        ownership: [...STANDALONE_OWNERS]
+      }),
+      manual: {
+        companies: {
+          '5595728790': {
+            listed: { verdict: 'yes', note: 'bolagsordning' },
+            concentration: { verdict: 'yes' },
+            takeover: { verdict: 'yes' }
+          }
+        },
+        de_minimis_related: {},
+        comment: 'Granskad av controller.'
+      }
+    })
+  );
+  const subj = res.companies[0];
+  const listed = subj.conditions.find((c) => c.id === 'listed');
+  assert.equal(listed?.verdict, 'yes');
+  assert.equal(listed?.source, 'manual');
+  assert.match(listed?.detail ?? '', /bolagsordning/);
+  assert.equal(res.stateAid.outcome, 'art22_possible');
+  assert.match(res.stateAid.text, /alla grundförutsättningar är besvarade/);
+  assert.doesNotMatch(res.stateAid.text, /förutsatt/);
+  assert.equal(res.comment, 'Granskad av controller.');
+});
+
+test('manuellt NEJ vinner alltid; manuellt JA kan inte skriva över ett register-NEJ', () => {
+  const res = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        name: 'Combly AB',
+        basic: { registeredAt: '2022-03-10', bolagStatus: 'aktiv' },
+        financials: [{ year: 2024, employees: 3, revenue_sek: 400_000, balance_sheet_sek: 900_000, dividend_sek: 50_000, dividend_reported: true }],
+        ownership: [...STANDALONE_OWNERS]
+      }),
+      manual: {
+        companies: { '5595728790': { dividend: { verdict: 'yes', note: 'intyg' }, takeover: { verdict: 'no', note: 'köpte inkråm 2023' } } },
+        de_minimis_related: {}
+      }
+    })
+  );
+  const subj = res.companies[0];
+  const dividend = subj.conditions.find((c) => c.id === 'dividend');
+  assert.equal(dividend?.verdict, 'no');
+  assert.match(dividend?.detail ?? '', /avviker från registret/);
+  const takeover = subj.conditions.find((c) => c.id === 'takeover');
+  assert.equal(takeover?.verdict, 'no');
+  assert.equal(takeover?.source, 'manual');
+  assert.equal(res.stateAid.outcome, 'de_minimis');
+  assert.match(res.stateAid.text, /har övertagit annat företags verksamhet/);
+  assert.match(res.stateAid.text, /har delat ut vinst/);
+});
+
+test('grundardrivet räknas mot fasens trösklar; formation har inget krav', () => {
+  const founders = [
+    { name: 'A', equity_pct: 50, engagement_pct: 30 },
+    { name: 'B', equity_pct: 30, engagement_pct: 15 }
+  ];
+  const base = { subject: company({ orgNr: '5595728790', name: 'Combly AB', ownership: [...STANDALONE_OWNERS] }), founders, foundersSource: 'manual' as const };
+  const psf = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, maturity_phase: 'problem_solution_fit' } }));
+  const fd = psf.vinnovaChecks.find((c) => c.id === 'founder_driven');
+  assert.equal(fd?.verdict, 'yes');
+  assert.match(fd?.detail ?? '', /sammantaget 45 %/);
+  const pmf = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, maturity_phase: 'product_market_fit' } }));
+  assert.equal(pmf.vinnovaChecks.find((c) => c.id === 'founder_driven')?.verdict, 'no');
+  assert.equal(pmf.vinnova.outcome, 'not_in_target');
+  const form = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, maturity_phase: 'formation' } }));
+  assert.equal(form.vinnovaChecks.find((c) => c.id === 'founder_driven')?.verdict, 'yes');
+  const none = screenExcellence(input({ ...base }));
+  assert.equal(none.vinnovaChecks.find((c) => c.id === 'founder_driven')?.verdict, 'unknown');
+  // Grundarna är manuellt inmatade ⇒ källan på 75 %-punkten är manuell.
+  assert.equal(none.vinnovaChecks[0].source, 'manual');
+  assert.equal(none.vinnovaChecks[0].verdict, 'yes');
+});
+
+test('de minimis räknar anknutna bolag: plattformen eller intyg, annars OKÄNT med vilka som saknas', () => {
+  const subject = company({
+    orgNr: '5595728790',
+    name: 'Combly AB',
+    basic: { registeredAt: '2024-03-10', bolagStatus: 'aktiv' },
+    ownership: [
+      { direction: 'owner', owner_kind: 'company', org_nr: '5594427808', name: 'Wellgo Health AB', capital_pct: 100 },
+      { direction: 'owner', owner_kind: 'company', org_nr: '5567036271', name: 'Ewell AB', capital_pct: 90, indirect: true }
+    ]
+  });
+  const related = [
+    company({ orgNr: '5594427808', name: 'Wellgo Health AB', basic: { registeredAt: '2024-01-01', bolagStatus: 'aktiv' }, deMinimis: { usedEur: 20_000, source: 'platform' } }),
+    company({ orgNr: '5567036271', name: 'Ewell AB', basic: { registeredAt: '2006-05-10', bolagStatus: 'aktiv' } })
+  ];
+  const open = screenExcellence(input({ subject, related, deMinimis: { usedEur: 10_000, capEur: 300_000 } }));
+  assert.equal(open.deMinimis.verdict, 'unknown');
+  assert.match(open.deMinimis.needs ?? '', /Ewell AB/);
+  assert.match(open.deMinimis.detail, /Sammanlagt 30.000 €/);
+  const certified = screenExcellence(
+    input({
+      subject,
+      related,
+      deMinimis: { usedEur: 10_000, capEur: 300_000 },
+      manual: { companies: {}, de_minimis_related: { '5567036271': { used_eur: 100_000, note: 'intyg 2026-10-01' } } }
+    })
+  );
+  assert.equal(certified.deMinimis.verdict, 'yes');
+  assert.equal(certified.deMinimis.source, 'manual');
+  assert.match(certified.deMinimis.detail, /Sammanlagt 130.000 €/);
+  const exceeded = screenExcellence(
+    input({
+      subject,
+      related,
+      deMinimis: { usedEur: 10_000, capEur: 300_000 },
+      manual: { companies: {}, de_minimis_related: { '5567036271': { used_eur: 295_000 } } }
+    })
+  );
+  assert.equal(exceeded.deMinimis.verdict, 'no');
+  assert.equal(exceeded.stateAid.outcome, 'not_eligible');
+});
+
+test('IRL: manuella nivåer används bara utan readiness-rad; motivering följer alltid med', () => {
+  const base = { subject: company({ orgNr: '5595728790', name: 'Combly AB' }) };
+  const manualIrl = screenExcellence(
+    input({ ...base, irl: { level: 4 }, manual: { companies: {}, de_minimis_related: {}, irl: { levels: { crl: 3, brl: 2 }, notes: { crl: 'LOI med två kunder' } } } })
+  );
+  assert.equal(manualIrl.irl?.crl, 3);
+  assert.equal(manualIrl.irl?.manualLevels, true);
+  assert.equal(manualIrl.irl?.notes?.crl, 'LOI med två kunder');
+  const platformIrl = screenExcellence(
+    input({ ...base, irl: { level: 4, crl: 5, brl: 4, tmrl: 3, srl: 2 }, manual: { companies: {}, de_minimis_related: {}, irl: { levels: { crl: 9 }, notes: { srl: 'Agenda 2030 mål 3' } } } })
+  );
+  assert.equal(platformIrl.irl?.crl, 5);
+  assert.notEqual(platformIrl.irl?.manualLevels, true);
+  assert.equal(platformIrl.irl?.notes?.srl, 'Agenda 2030 mål 3');
+});
+
+test('Vinnova-utfallet blir "ingår sannolikt" utan förbehåll när alla punkter är JA', () => {
+  const res = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        name: 'Combly AB',
+        basic: { registeredAt: '2024-03-10', bolagStatus: 'aktiv' },
+        financials: [{ year: 2025, employees: 2, revenue_sek: 100_000, balance_sheet_sek: 400_000, equity_sek: 50_000, net_result_sek: -300_000 }],
+        ownership: [...STANDALONE_OWNERS]
+      }),
+      founders: [{ name: 'A', equity_pct: 80, engagement_pct: 60 }],
+      deMinimis: { usedEur: 0, capEur: 300_000 },
+      meetsExcellenceFlag: false,
+      manual: {
+        companies: {},
+        de_minimis_related: {},
+        maturity_phase: 'problem_solution_fit',
+        innovative: { verdict: 'yes', note: 'patentsökt sensor' },
+        other_criteria: { verdict: 'yes' },
+        excellence: { verdict: 'yes', note: 'beslut 2026-10-12' }
+      }
+    })
+  );
+  assert.equal(res.vinnova.outcome, 'in_target_possible');
+  assert.match(res.vinnova.text, /uppfyllda enligt underlaget/);
+  assert.equal(res.excellence.verdict, 'yes');
+  assert.equal(res.excellence.source, 'manual');
 });

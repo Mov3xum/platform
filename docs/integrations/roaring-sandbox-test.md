@@ -10,9 +10,9 @@ produktion. Ingenting skrivs till databasen förrän steg 5.
 | --- | --- | --- |
 | Token | `POST https://api.roaring.io/token`, Basic `client_id:client_secret`, `grant_type=client_credentials` | Bekräftad |
 | Grunddata | `se-company-overview-2.0` → `/se/company/overview/2.0/{orgnr}` (reserv `1.1`) | Bekräftad. Svarar `{ records: [ … ] }`; posten har bl.a. `communeCode`, `numberEmployeesInterval` och ett `status`-objekt (bolagets status) |
-| Bokslut | `se-company-economy-overview-2.1` → `/se/company/economy-overview/2.1/{orgnr}` (reserv `1.1`) | Sökväg/version bekräftad i katalogen (publicerad). **Fältnamnen obekräftade** — läs fältnyckel-noten |
+| Bokslut | `se-company-economy-overview-2.1` → `/se/company/economy-overview/2.1/{orgnr}` (reserv `1.1`) | **Bekräftad mot riktigt svar 2026-10-12.** En post per räkenskapsår: `fromDate`, `toDate`, `currency`, `numberOfEmployees`, `plSales` (nettoomsättning → `revenue_sek`), `plNetOperatingIncome` (rörelsens intäkter — noteras om den avviker från `plSales`), `plEbit`, `plProfitLossAfterFinItems`, `plNetProfitLoss` (→ `net_result_sek`), `bsShareCapital`, `bsTotalEquity` (→ `equity_sek`), `bsTotalLongTermDebts`, `bsTotalCurrentLiabilities`, **`bsTotalEquityAndLiabilities` (→ `balance_sheet_sek`; balansomslutningen finns bara på skuldsidan)**, KPI-fält (`kpi*Percent`). Personalkostnad/bolagsskatt saknas i API:t. Belopp i TSEK (multiplikator 1000) |
 | Koncernstruktur | `se-company-group-structure-1.0` → `/se/company/group-structure/1.0/{orgnr}` | Bekräftad. **Platt lista** `groupCompanies[]` med `companyId`, `companyName`, `countryCode`, `companyLevel`, `motherCompanyId`, `ownedPercentage` |
-| Verklig huvudman | `se-beneficialowner-2.1` (2.0 avvecklad 2025-01-15). Per bolag: `/se/beneficialowner/2.1/company/{orgnr}`, reserv `/se/beneficialowner/2.1/{orgnr}` och `/se/beneficialowner/1.0/company/{orgnr}` | Version bekräftad; `/company/`-formen är dokumenterad för 1.0 och antas för 2.1 — **vilken som svarar syns i noten**. Fältnamnen inuti `beneficialOwners[]` obekräftade |
+| Verklig huvudman | `se-beneficialowner-2.1` (2.0 avvecklad 2025-01-15). Per bolag: `/se/beneficialowner/2.1/company/{orgnr}`, reserv `/se/beneficialowner/2.1/{orgnr}` och `/se/beneficialowner/1.0/company/{orgnr}` | **`/2.1/company/` bekräftad 2026-10-12.** Svarar `caseId`, `changeDate`, `legalEntity{type,companyId,companyName}`, `beneficialOwners[person,extentOfControl,controlTypes]`, `status{description,code}`, `registrationDateTime`. `person` läses aldrig; `extentOfControl` tolkas som text/objekt/kod inkl. Bolagsverkets ordalydelser ("Mer än 25 men inte mer än 50 procent", `MORE_THAN_75`); `controlTypes[]` mappas till fast vokabulär. Formen INUTI `extentOfControl`/`controlTypes` visas i fältnyckel-noten (två nivåer) — kan intervallet inte tolkas säger en egen not det |
 | "Inga poster" | Roaring kan svara HTTP 200 med `records not found` i kuvertet | Hanteras som 404 (nästa kandidat provas) |
 | Sandbox | Samma värd som produktion. Sandbox-applikationens nycklar ger testdata. | Bekräftad |
 
@@ -50,7 +50,11 @@ verifieras genom att köra förhandsgranskningen mot sandboxen.
      hasBeneficialOwners, beneficialOwners[…]`, och
    - vad normaliseraren INTE kunde tolka ("registreringsdatum saknas",
      "balansomslutning saknas för N årsrad(er)").
-   Fältnycklarna är schemainformation, aldrig värden (§ 11.4).
+   Fältnycklarna är schemainformation, aldrig värden (§ 11.4). Noten visar
+   formen två nivåer ned (`beneficialOwners[person{…},extentOfControl{code,text},
+   controlTypes[code,text]]`) så att även nästlade fält kan stämmas av.
+   Grunddata (`overview/2.0`) bär bl.a. `email`, `phoneNumber` och
+   `topDirectorName` — de läses medvetet INTE (PII, § 11.4).
 5. **Rätta mappningen** om en not säger att något saknas fast fältet finns
    i nyckellistan: lägg till namnet i kandidatlistan i
    `apps/web/src/lib/integrations/providers/roaring/normalize.ts`
@@ -59,11 +63,35 @@ verifieras genom att köra förhandsgranskningen mot sandboxen.
    kandidater fast bolaget finns: sätt motsvarande `ROARING_*_PATH` i Coolify
    till den sökväg portalen visar (kommaseparerad lista tillåts) — t.ex.
    `ROARING_BENEFICIAL_OWNER_PATH=/se/beneficialowner/2.1/company`.
-6. **Kontrollera enheten** för bokslutsbelopp: `economy-overview` anges
+6. **Stäm av credits per API** under Inställningar → Integrationer → Roaring →
+   Kostnad per anrop. Plattformen har Roarings publicerade listpris som
+   lägsta nivå (läst 2026-10-12, före volymrabatt, exkl. moms): 0,20
+   kr/credit och per anrop Företagsinformation 2.0 = 10, Finansiell
+   Information 2.1 = 35, Ägarstruktur 1.0 = 150, Verklig Huvudman 2.1 = 50
+   (kalkylatorns rad "– Person"; bolagsuppslaget antas kosta lika) — en
+   full hämtning är 245 credits = 49,00 kr per bolag. Bokslutsdelen anropar
+   `/extended` (flera år + utdelning): kontrollera att den debiteras som
+   raden Finansiell Information 2.1. Jämför med ert inloggade konto: app.roaring.io →
+   bentomenyn → "Fakturering & Priser" → "Konsumering"; avviker ert paket
+   anges era värden i formuläret och vinner per fält över listpriset (er
+   avtalade kr/credit efter volymrabatt likaså). Bedömningssidan visar
+   kostnaden före varje hämtning och i resultatet.
+7. **Kontrollera enheten** för bokslutsbelopp: `economy-overview` anges
    normalt i TSEK (`ROARING_AMOUNT_MULTIPLIER` default 1000). Jämför
    förhandsgranskningens `revenue_sek` med portalens exempel; svarar API:t i
    SEK sätts multiplikatorn till `1`.
-7. **Synka ett bolag** från bolagskortet ("Synka från Roaring") och
+7b. **Verifiera utdelningen.** Bokslutsdelen anropar
+   `/se/company/economy-overview/2.1/extended/{orgnr}?years=5` (OpenAPI-spec
+   2026-10-12) där varje årsrad bär `dividend`, `plPersonalCosts` och
+   `plTaxes`. Kör "Testa mot org-nr" på ett bolag som ni VET har beslutat
+   utdelning (och ett som inte har det): kolumnen Utdelning ska visa beloppet
+   respektive "0 kr". Visas "–" med noten "utdelningsposten (dividend)
+   saknas" svarade den nakna reservsökvägen (bara senaste året, utan
+   utdelning) — kontrollera att `/extended` ingår i ert paket (403 ⇒ inte i
+   paketet). Beloppen antas vara i TSEK som övriga bokslutsposter
+   (`ROARING_AMOUNT_MULTIPLIER`); utdelningsvillkoret i bedömningen avgörs
+   av 0 eller inte och påverkas inte av enheten.
+8. **Synka ett bolag** från bolagskortet ("Synka från Roaring") och
    kontrollera Finansiell historik + Ägarbild. Först därefter "Synka nu"
    för hela portföljen.
 

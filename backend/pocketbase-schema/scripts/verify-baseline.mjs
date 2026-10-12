@@ -1085,8 +1085,11 @@ const REQUIRED_APP_FIELDS = [
   { collection: 'agent_memory', fields: ['category'] },
   // Bolagsregister (§ 11.8, migration 1700000171): utan fälten "sparas"
   // balansomslutning/eget kapital tyst bort vid synk från Roaring.
-  { collection: 'startup_financials', fields: ['balance_sheet_sek', 'equity_sek', 'net_result_sek'] },
+  { collection: 'startup_financials', fields: ['balance_sheet_sek', 'equity_sek', 'net_result_sek', 'dividend_sek', 'dividend_reported'] },
   { collection: 'startup_ownership', fields: ['source_part'] },
+  // Bedömning excellens (§ 51.4, migration 1700000190): utan fältet "sparas"
+  // controllerns manuella svar tyst bort och varje körning börjar om.
+  { collection: 'startups', fields: ['screening_facts'] },
   // Målstyrning (§ 42, migration 1700000159) + enkätkälla (§ 43, migration
   // 1700000160): utan flaggorna sparas "okänt" som 0 och en enkätindikator tappar sin källa.
   { collection: 'goal_indicators', fields: ['has_target', 'survey_module'] },
