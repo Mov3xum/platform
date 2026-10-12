@@ -291,8 +291,9 @@ export function parseAssessmentContext(json: string): AssessmentContext | null {
   const lookupWarnings = Array.isArray(o.lookupWarnings)
     ? o.lookupWarnings.map((t) => str(t, 400)).filter((t): t is string => !!t).slice(0, 30)
     : [];
-  const savedToCards: ExcellenceAssessmentSavedCard[] = [];
+  let savedToCards: ExcellenceAssessmentSavedCard[] | undefined;
   if (Array.isArray(o.savedToCards)) {
+    savedToCards = [];
     for (const rawCard of o.savedToCards.slice(0, MAX_RELATED_COMPANIES + 1)) {
       const card = obj(rawCard);
       const startupId = str(card?.startupId, 30);
@@ -346,7 +347,7 @@ export function parseAssessmentContext(json: string): AssessmentContext | null {
     notes,
     lookupWarnings,
     cost: cost(o.cost),
-    savedToCards,
+    ...(savedToCards ? { savedToCards } : {}),
     assessedAt
   };
 }

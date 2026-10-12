@@ -51,6 +51,39 @@ test('underlaget överlever rundturen oförändrat', () => {
   assert.deepEqual(parsed, ctx);
 });
 
+test('sparade bolagskort överlever rundturen och klientens sammanfattning saneras', () => {
+  const withSavedCards: AssessmentContext = {
+    ...ctx,
+    savedToCards: [{
+      startupId: 'abc123',
+      name: 'Wellgo Health AB',
+      parts: ['basic', 'financials'],
+      financialsUpserted: 2,
+      ownershipWritten: 1,
+      errors: []
+    }]
+  };
+  assert.deepEqual(parseAssessmentContext(serializeAssessmentContext(withSavedCards)), withSavedCards);
+
+  const raw = JSON.parse(serializeAssessmentContext(withSavedCards));
+  raw.savedToCards[0].parts = ['basic', 'unknown'];
+  raw.savedToCards[0].financialsUpserted = -1;
+  raw.savedToCards[0].ownershipWritten = 'many';
+  raw.savedToCards[0].errors = ['x'.repeat(500), 42];
+  const parsed = parseAssessmentContext(JSON.stringify(raw));
+  assert.deepEqual(parsed?.savedToCards, [{
+    startupId: 'abc123',
+    name: 'Wellgo Health AB',
+    parts: ['basic'],
+    financialsUpserted: 0,
+    ownershipWritten: 0,
+    errors: ['x'.repeat(200)]
+  }]);
+
+  raw.savedToCards[0].startupId = '../x';
+  assert.deepEqual(parseAssessmentContext(JSON.stringify(raw))?.savedToCards, []);
+});
+
 test('klientdata byggs om fält för fält: okända nycklar, personnamn på fysiska personer och ogiltiga värden släpps', () => {
   const raw = JSON.parse(serializeAssessmentContext(ctx));
   raw.subject.startupId = '../x';
