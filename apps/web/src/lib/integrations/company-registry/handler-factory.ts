@@ -114,12 +114,8 @@ function restrictToParts(company: RegistryCompany, requested: RegistryPartId[]):
   return {
     ...company,
     startup: fetched.includes('basic') ? company.startup : {},
-<<<<<<< HEAD
     listed: fetched.includes('basic') ? company.listed : undefined,
-    financials: fetched.includes('financials') ? company.financials : [],
-=======
     financials: financialsParts(fetched).length > 0 ? company.financials : [],
->>>>>>> origin/staging
     ownership: company.ownership.filter((e) => (e.part ? own.includes(e.part) : own.length > 0)),
     fetchedParts: fetched
   };

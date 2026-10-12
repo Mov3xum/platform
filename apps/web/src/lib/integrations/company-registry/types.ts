@@ -43,15 +43,9 @@ export interface RegistryFinancialsYear {
   /** Årets resultat efter skatt. */
   net_result_sek?: number;
   /**
-<<<<<<< HEAD
-   * Beslutad/utbetald utdelning enligt bokslutet (0 = ingen), när källan ger
-   * den — grundförutsättningen "har inte delat ut vinst" i art. 22-screeningen
-   * (§ 51). Saknat fält = okänt, aldrig 0.
-   */
-  dividend_sek?: number;
-=======
-   * Beslutad vinstutdelning för året enligt årsredovisningen (datadelen
-   * `financials`, economy-overview /extended). 0 = bokslutet svarade "ingen utdelning".
+   * Beslutad vinstutdelning enligt årsredovisningen, när källan faktiskt ger
+   * uppgift om den. 0 = bokslutet svarade "ingen utdelning"; saknat fält är
+   * okänt, aldrig 0.
    * Art. 22 GBER kräver att bolaget INTE delat ut vinst (§ 51).
    */
   dividend_sek?: number;
@@ -61,7 +55,6 @@ export interface RegistryFinancialsYear {
    * så siffran ensam kan inte skilja "ingen utdelning" från "inte hämtad".
    */
   dividend_reported?: boolean;
->>>>>>> origin/staging
 }
 
 /** Riktning: `owner` = ägaren äger startup-bolaget; `holding` = startup-bolaget äger. */
