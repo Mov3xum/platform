@@ -236,6 +236,8 @@ test('inte hämtad koncernstruktur ⇒ fristående okänt; enskild firma ⇒ man
   const a = screenExcellence(input({ subject: company({ orgNr: '5595728790', groupStructureFetched: false, beneficialOwnersFetched: false }) }));
   assert.equal(a.standalone.verdict, 'unknown');
   assert.equal(a.standalone.source, 'register');
+  assert.equal(a.companies[0].groupStructureFetched, false);
+  assert.equal(a.companies[0].beneficialOwnersFetched, false);
   const b = screenExcellence(
     input({ subject: company({ orgNr: '1901010001', basic: { isPersonal: true, registeredAt: '2025-01-01', bolagStatus: 'aktiv' } }) })
   );

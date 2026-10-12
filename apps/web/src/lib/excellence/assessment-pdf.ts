@@ -206,7 +206,6 @@ function checks(ctx: Ctx, list: ScreeningCheck[]) {
   for (const c of list) {
     const lines = wrap(clean(ctx, `${c.label} — ${c.detail}`), ctx.body, size, textW);
     const extra = [
-      ...(c.hint ? wrap(clean(ctx, `Förifyllt från systemet: ${c.hint}`), ctx.body, 8, textW) : []),
       ...(c.verdict === 'unknown' && c.needs ? wrap(clean(ctx, `Behövs: ${c.needs}`), ctx.body, 8, textW) : [])
     ];
     const h = (lines.length + extra.length) * size * 1.4 + 6;
@@ -273,33 +272,20 @@ function ownershipTable(ctx: Ctx, caption: string, rows: ScreeningOwnershipEntry
   );
 }
 
-function companyBlock(ctx: Ctx, c: CompanyAssessment, subjectName: string) {
+function companyBlock(ctx: Ctx, c: CompanyAssessment) {
   const title = c.name || formatOrgNr(c.orgNr) || 'Okänt bolag';
   subTitle(ctx, c.role === 'subject' ? `Kan ${title} ta emot företagsstöd?` : `${title}${c.orgNr ? ` · ${formatOrgNr(c.orgNr)}` : ''}`);
   if (c.role !== 'subject') {
     drawLines(
       ctx,
-      `${c.relationLabel ?? ''} · ${c.shareLabel ?? ''}${c.indirect ? ' (indirekt)' : ''}${c.via ? ` · genom ${c.via}` : ''} — ${c.reason ?? ''}${
-        c.relation === 'linked' && !c.via ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.` : ''
-      }`,
+      `${c.relationLabel ?? ''} · ${c.shareLabel ?? ''}${c.indirect ? ' (indirekt)' : ''} — ${c.reason ?? ''}`,
       { size: 9, color: INK_SOFT, gap: 4 }
     );
-    if (c.ownersMatchSubject) {
-      const m = c.ownersMatchSubject;
-      drawLines(
-        ctx,
-        `${m.same === true ? `Samma ägare som ${subjectName}` : m.same === false ? `Andra ägare än ${subjectName}` : 'Ägarbilden kunde inte jämföras'}: ${m.reason}${
-          m.same === false ? ' Bolaget grävs inte vidare (inga fler uppslag).' : ''
-        }`,
-        { size: 9, color: m.same === false ? rgb01(BRAND.warning) : INK_SOFT, gap: 4 }
-      );
-    }
     if (!c.dataFetched) {
       drawLines(ctx, 'Inget uppslag gjort för bolaget — grundförutsättningarna kan inte prövas.', { size: 9, font: 'bold', color: rgb01(BRAND.warning), gap: 4 });
     }
   }
   if (c.conditions.length > 0) checks(ctx, c.conditions);
-  if (c.ownerChain) checks(ctx, [c.ownerChain]);
   if (c.dataFetched || c.owners.length > 0) {
     const missing = [!c.groupStructureFetched ? 'Koncernstruktur' : null, !c.beneficialOwnersFetched ? 'Verklig huvudman' : null].filter(
       (v): v is string => v !== null
@@ -426,10 +412,10 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
 
   // ── Steg 1 ──────────────────────────────────────────────────────────────
   sectionTitle(ctx, 'Steg 1 — Företagsstöd enligt art. 22 GBER eller de minimis');
-  companyBlock(ctx, result.companies[0], subjectName);
+  companyBlock(ctx, result.companies[0]);
   subTitle(ctx, 'Fristående företag?');
   checks(ctx, [result.standalone]);
-  for (const c of result.companies.slice(1)) companyBlock(ctx, c, subjectName);
+  for (const c of result.companies.slice(1)) companyBlock(ctx, c);
 
   subTitle(ctx, 'Tröskelvärden');
   table(
@@ -460,12 +446,6 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
 
   eyebrow(ctx, 'Sammanfattande bedömning av art. 22 GBER');
   drawLines(ctx, `${STATE_AID_OUTCOME_LABEL[result.stateAid.outcome]} — ${result.stateAid.text}`, { size: 10, font: 'bold', gap: 8 });
-  if (result.stateAid.platformNote) {
-    drawLines(ctx, `Förifyllt från systemet: ${result.stateAid.platformNote} Jämförelse — bedömningen ändrar aldrig registreringen.`, {
-      size: 8.5,
-      gap: 8
-    });
-  }
 
   // ── Steg 2 ──────────────────────────────────────────────────────────────
   sectionTitle(ctx, `Steg 2 — Ingår ${subjectName} i målgruppen för Vinnova?`);

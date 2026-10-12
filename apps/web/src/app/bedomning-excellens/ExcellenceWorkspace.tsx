@@ -113,16 +113,8 @@ function CheckList({ checks }: { checks: ScreeningCheck[] }) {
           <div className="min-w-0 flex-1">
             <p className="text-[13px] font-medium text-foreground">{c.label}</p>
             <p className="mt-0.5 text-[12.5px] text-foreground-muted">{c.detail}</p>
-            {c.hint && (
-              <p className="mt-0.5 text-[12px] text-link">
-                <span className="font-semibold">Förifyllt från systemet:</span> {c.hint}
-              </p>
-            )}
             {c.verdict === 'unknown' && c.needs && (
-              <p className="mt-0.5 text-[12px] text-foreground-subtle">
-                Behövs: {c.needs}
-                {c.editable ? ' — fylls i under Manuell komplettering nedan.' : ''}
-              </p>
+              <p className="mt-0.5 text-[12px] text-foreground-subtle">Behövs: {c.needs}</p>
             )}
           </div>
           <span className="shrink-0 text-[11px] text-foreground-subtle">{SOURCE_LABEL[c.source]}</span>
@@ -379,7 +371,7 @@ function ownershipEmptyText(c: CompanyAssessment): string {
   return 'Registret visar inga ägare (bara majoritetsrelationer och fysiska personer med ≥ 25 % syns) — kontrollera aktieboken.';
 }
 
-function CompanyBlock({ c, subjectName }: { c: CompanyAssessment; subjectName: string }) {
+function CompanyBlock({ c }: { c: CompanyAssessment }) {
   const title = c.name || formatOrgNr(c.orgNr) || 'Okänt bolag';
   return (
     <div className="space-y-3">
@@ -393,26 +385,7 @@ function CompanyBlock({ c, subjectName }: { c: CompanyAssessment; subjectName: s
             <span className={`mr-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${c.relation === 'linked' ? VERDICT_TONE.no : WARN_TONE}`}>
               {c.relationLabel}
             </span>
-            {c.shareLabel} {c.indirect ? '(indirekt) ' : ''}
-            {c.via ? <span className="text-foreground-subtle">genom {c.via} </span> : null}— {c.reason}
-            {c.relation === 'linked' && !c.via ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.` : ''}
-          </p>
-        )}
-        {c.ownersMatchSubject && (
-          <p className="mt-1 text-[12px] text-foreground-muted">
-            <span
-              className={`mr-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                c.ownersMatchSubject.same === true ? VERDICT_TONE.yes : c.ownersMatchSubject.same === false ? WARN_TONE : VERDICT_TONE.unknown
-              }`}
-            >
-              {c.ownersMatchSubject.same === true
-                ? `Samma ägare som ${subjectName}`
-                : c.ownersMatchSubject.same === false
-                  ? `Andra ägare än ${subjectName}`
-                  : 'Ägarbilden kunde inte jämföras'}
-            </span>
-            {c.ownersMatchSubject.reason}
-            {c.ownersMatchSubject.same === false ? ' Bolaget grävs inte vidare (inga fler uppslag).' : ''}
+            {c.shareLabel} {c.indirect ? '(indirekt) ' : ''}— {c.reason}
           </p>
         )}
         {!c.dataFetched && c.role !== 'subject' && (
@@ -422,7 +395,6 @@ function CompanyBlock({ c, subjectName }: { c: CompanyAssessment; subjectName: s
         )}
       </div>
       {c.conditions.length > 0 && <CheckList checks={c.conditions} />}
-      {c.ownerChain && <CheckList checks={[c.ownerChain]} />}
       {(c.dataFetched || c.owners.length > 0) && (
         <OwnershipTable
           rows={c.owners}
@@ -642,7 +614,7 @@ function AssessmentView({
       {/* Steg 1 */}
       <div className="space-y-5">
         <h3 className="text-[14px] font-semibold text-foreground">Steg 1 — Företagsstöd enligt art. 22 GBER eller de minimis</h3>
-        <CompanyBlock c={result.companies[0]} subjectName={subjectName} />
+        <CompanyBlock c={result.companies[0]} />
 
         <div>
           <h4 className="text-[13.5px] font-semibold text-foreground">Fristående företag?</h4>
@@ -652,7 +624,7 @@ function AssessmentView({
         </div>
 
         {result.companies.slice(1).map((c) => (
-          <CompanyBlock key={c.orgNr || c.name} c={c} subjectName={subjectName} />
+          <CompanyBlock key={c.orgNr || c.name} c={c} />
         ))}
 
         <div>
@@ -709,12 +681,6 @@ function AssessmentView({
             </span>
             {result.stateAid.text}
           </p>
-          {result.stateAid.platformNote && (
-            <p className="mt-1 text-[12px] text-link">
-              <span className="font-semibold">Förifyllt från systemet:</span> {result.stateAid.platformNote} Jämför med utfallet ovan — bedömningen ändrar
-              aldrig registreringen.
-            </p>
-          )}
         </div>
       </div>
 
